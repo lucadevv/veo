@@ -502,7 +502,11 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   offers: {
     Body: BiddingPhaseBody,
     Header: null,
-    expanded: false,
+    // ADR-020 Lote 3: al llegar ≥1 oferta (fase searching→offers) el sheet CRECE solo a full para que el
+    // pasajero VEA la lista y pueda elegir (antes quedaba en peek 50% → 1-2 cards sobre el fold, sin
+    // affordance de arrastrar → "no veo las ofertas / cómo elijo"). searching sigue en peek (solo el
+    // countdown); el salto expanded false→true al aparecer la 1ra oferta dispara el snapToIndex(FULL).
+    expanded: true,
     showNearby: false,
     activeTrip: false,
     needsTripDetail: false,

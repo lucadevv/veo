@@ -177,12 +177,21 @@ export function OffersBody({
     <View style={{gap: theme.spacing.md}}>
       <View style={styles.header}>
         <View style={{flex: 1}}>
-          <Text variant="title3">
-            {t('offers.title', {count: offers.length})}
-          </Text>
-          <Text variant="footnote" color="inkMuted">
-            {t('offers.chooseHint')}
-          </Text>
+          {/* ADR-020 Lote 3: el título "N conductores respondieron" + el hint de comparación SOLO cuando
+              YA hay ofertas. Buscando (0 ofertas) mostraba "0 conductores respondieron" sobre el
+              "Buscando conductores…" del body → redundante y confuso; ahí el pill "En vivo" alcanza. */}
+          {offers.length > 0 ? (
+            <>
+              <Text variant="title3">
+                {t('offers.title', {count: offers.length})}
+              </Text>
+              <Text variant="footnote" color="inkMuted">
+                {t('offers.chooseHint')}
+              </Text>
+            </>
+          ) : (
+            <Text variant="title3">{t('offers.searchingTitle')}</Text>
+          )}
         </View>
         <StatusPill
           label={connected ? t('offers.live') : t('offers.reconnecting')}

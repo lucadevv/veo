@@ -532,7 +532,10 @@ export const common = {
   /** PUJA · board de ofertas en vivo (ADR 010). */
   offers: {
     title: '{{count}} conductores respondieron',
-    chooseHint: 'Elige por precio, rating o llegada.',
+    searchingTitle: 'Buscando conductores',
+    // Honesto (ADR-020 Lote 3): las ofertas vienen ORDENADAS (mejor precio primero); el rating y la
+    // llegada se ven en cada card para COMPARAR — no es un sort que el pasajero elige (no prometemos eso).
+    chooseHint: 'Ordenadas por precio · compará rating y llegada.',
     live: 'En vivo',
     driver: 'Conductor',
     acceptsPrice: 'Acepta tu precio',
