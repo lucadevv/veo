@@ -51,6 +51,7 @@ function makeHandlers(overrides: Partial<DriverRealtimeHandlers> = {}): DriverRe
   return {
     onOffer: jest.fn(),
     onMatch: jest.fn(),
+    onBidClosed: jest.fn(),
     onTripUpdate: jest.fn(),
     onChatMessage: jest.fn(),
     onTipAdded: jest.fn(),

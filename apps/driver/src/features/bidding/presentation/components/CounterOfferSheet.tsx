@@ -9,6 +9,7 @@ import { BID_MAX_CENTS, type OpenBid } from '../../domain';
 import { useAcceptBid, useCounterBid } from '../hooks/useBids';
 import { isBidGoneError } from '../bid-errors';
 import { useCountdownMs } from '../hooks/useCountdownMs';
+import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 
 interface Props {
   bid: OpenBid | null;
@@ -37,6 +38,12 @@ export const CounterOfferSheet = ({ bid, gone = false, onClose }: Props): React.
   const theme = useTheme();
   const accept = useAcceptBid();
   const counter = useCounterBid();
+  // ADR-020 Lote 2 (2b) — pendiente "esperando al pasajero". El estado vive en el store (sesión en vivo):
+  // así sobrevive a cerrar/reabrir el sheet, y el realtime lo limpia al GANAR (onMatch) o PERDER (bid:closed).
+  const addPendingBid = useDispatchStore((s) => s.addPendingBid);
+  const pending = useDispatchStore(
+    (s) => bid !== null && s.pendingBidTripIds.includes(bid.tripId),
+  );
 
   const [mode, setMode] = useState<'view' | 'counter'>('view');
   const [counterText, setCounterText] = useState('');
@@ -73,23 +80,43 @@ export const CounterOfferSheet = ({ bid, gone = false, onClose }: Props): React.
   const goneByError = isBidGoneError(accept.error) || isBidGoneError(counter.error);
   const unavailable = gone || goneByError;
 
+  // 2b — tras enviar la oferta NO cerramos el sheet: entramos a "esperando al pasajero…" (honesto: la
+  // oferta está ENVIADA, no ganada). El desenlace llega por el socket: gana → onMatch navega a TripActive;
+  // pierde → bid:closed limpia el pendiente y remueve la card. Marcamos el pendiente en el store.
   const onAccept = () => {
     if (!bid) {
       return;
     }
-    accept.mutate(bid, { onSuccess: onClose });
+    accept.mutate(bid, { onSuccess: () => addPendingBid(bid.tripId) });
   };
 
   const onSendCounter = () => {
     if (!bid || !counterValid) {
       return;
     }
-    counter.mutate({ bid, priceCents: counterCents }, { onSuccess: onClose });
+    counter.mutate(
+      { bid, priceCents: counterCents },
+      { onSuccess: () => addPendingBid(bid.tripId) },
+    );
   };
 
   return (
     <BottomSheet visible={bid !== null} onClose={onClose} title={t('trips.bid.title')} showHandle>
       {bid ? (
+        // 2b — puja pendiente (oferta enviada): estado HONESTO "esperando al pasajero…", sin ring ni
+        // acciones de aceptar/contraofertar (ya ofertó). Si la puja además murió (unavailable) gana ese
+        // aviso: el bloque de abajo ya lo maneja. Solo salida: cerrar (la card queda en la lista con su pill).
+        pending && !unavailable ? (
+          <View style={styles.body}>
+            <StatusPill label={t('trips.bid.pendingPill')} tone="accent" live dot />
+            <Banner
+              tone="info"
+              title={t('trips.bid.waiting')}
+              description={t('trips.bid.waitingHint')}
+            />
+            <Button label={t('common.close')} variant="accent" fullWidth onPress={onClose} />
+          </View>
+        ) : (
         <View style={styles.body}>
           <View style={styles.ringWrap}>
             <CountdownRing seconds={secondsLeft} progress={progress} expired={expired} />
@@ -204,6 +231,7 @@ export const CounterOfferSheet = ({ bid, gone = false, onClose }: Props): React.
             />
           )}
         </View>
+        )
       ) : null}
     </BottomSheet>
   );

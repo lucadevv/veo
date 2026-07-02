@@ -29,7 +29,7 @@ import {
   BID_MAX_CENTS,
   type LatLon,
 } from '@veo/utils';
-import { createEnvelope } from '@veo/events';
+import { createEnvelope, OFFER_WITHDRAWN_REASON } from '@veo/events';
 // Finding #4 (§5-bis DRY / §4-ter cero literales sueltos): la detección de violación de UNIQUE vive UNA
 // sola vez en @veo/database (helper tipado + constante PRISMA_UNIQUE_VIOLATION), compartida con
 // payment-service. Reusamos ESE helper en vez de duplicar inline el literal 'P2002' y el `instanceof`
@@ -523,7 +523,7 @@ export class OfferBoardService {
       await this.emit(
         'dispatch.offer_withdrawn',
         tripId,
-        { tripId, driverId, reason: 'stale' },
+        { tripId, driverId, reason: OFFER_WITHDRAWN_REASON.STALE },
         dedupOfferWithdrawn(tripId, driverId),
       ).catch((err: unknown) =>
         this.logger.warn(
@@ -663,6 +663,15 @@ export class OfferBoardService {
         this.logger.warn(`no se pudo marcar matchEmitted trip=${tripId}: ${String(err)}`),
       );
 
+    // ADR-020 Lote 2 (2a) — captura los PERDEDORES (ofertas PENDING de OTROS conductores) ANTES del flip
+    // cosmético a LAPSED, para notificarles reactivamente. `lapseAndAccept` flipea las N-1 ofertas a LAPSED
+    // en Redis SIN emitir evento: sin esto, el conductor perdedor conservaba su card de puja hasta que
+    // caducara localmente y, al tapearla, chocaba con un board ya cerrado → 409. La lista se lee del HASH
+    // (aún PENDING en este punto): el winner se excluye por driverId.
+    const losers = (await this.store.listOffers(tripId)).filter(
+      (o) => o.driverId !== driverId && o.status === OfferStatus.PENDING,
+    );
+
     // Recién AHORA flipeamos el estado efímero de las ofertas (elegida ACCEPTED, resto LAPSED): el match
     // ya es durable, así que estas escrituras son cosméticas (alimentan la vista del pasajero) y un fallo
     // parcial acá NO corrompe el outcome del match. A5 — UN solo round-trip (Lua sobre el HASH) en vez
@@ -672,6 +681,27 @@ export class OfferBoardService {
       .catch((err) =>
         this.logger.warn(`lapseAndAccept trip=${tripId} falló (cosmético): ${String(err)}`),
       );
+
+    // ADR-020 Lote 2 (2a) — UN `dispatch.offer_withdrawn` (reason=not_selected) POR perdedor, por OUTBOX
+    // (idempotente por (trip,driver) vía dedupOfferWithdrawn). El driver-bff lo consume y empuja `bid:closed`
+    // al conductor → su card muere al instante, sin esperar el poll de 12s y sin tapear un board cerrado.
+    // Sin PII: SOLO tripId + driverId. Best-effort/cosmético (post-durable): un fallo del emit NO afecta el
+    // match ya materializado; el poll de 12s del conductor es el backstop. Un perdedor que ya recibió un
+    // offer_withdrawn (p.ej. reason=stale en un accept previo fallido) dedupea acá por la MISMA clave.
+    await Promise.all(
+      losers.map((loser) =>
+        this.emit(
+          'dispatch.offer_withdrawn',
+          tripId,
+          { tripId, driverId: loser.driverId, reason: OFFER_WITHDRAWN_REASON.NOT_SELECTED },
+          dedupOfferWithdrawn(tripId, loser.driverId),
+        ).catch((err: unknown) =>
+          this.logger.warn(
+            `offer_withdrawn (not_selected) trip=${tripId} driver=${loser.driverId}: ${String(err)}`,
+          ),
+        ),
+      ),
+    );
 
     // markBusy se mantiene acá (Lote separado): el claim atómico ya garantiza que solo este camino
     // llega hasta acá, así que no hay carrera de doble-markBusy para este board.

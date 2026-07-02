@@ -3,6 +3,7 @@ import {
   HANDSHAKE_SESSION_REVOKED,
   type ChatMessage,
   type DispatchMatchPayload,
+  type DispatchOfferWithdrawnPayload,
   type DispatchOfferedPayload,
   type DriverEventEnvelope,
   type TipAddedPayload,
@@ -22,6 +23,12 @@ export interface DriverRealtimeHandlers {
   onOffer(payload: DispatchOfferedPayload, scheduled: boolean): void;
   /** Match confirmado: hay un viaje activo asignado. */
   onMatch(payload: DispatchMatchPayload): void;
+  /**
+   * ADR-020 Lote 2 (2a) · una puja del conductor se CERRÓ (el pasajero eligió a otro / quedó inelegible):
+   * la app remueve la card de esa puja al instante y limpia el estado "esperando al pasajero" (2b), sin
+   * depender del poll de 12s ni dejar que el conductor tapee una card muerta (409).
+   */
+  onBidClosed(payload: DispatchOfferWithdrawnPayload): void;
   /** Cambio de estado del viaje reenviado desde Kafka. */
   onTripUpdate(envelope: DriverEventEnvelope<unknown>): void;
   /**
@@ -132,6 +139,12 @@ export function useDriverRealtime(
       }
       handlersRef.current.onMatch(msg.payload);
     });
+    const onBidClosed = safe((msg: DriverEventEnvelope<DispatchOfferWithdrawnPayload>) => {
+      if (!msg?.payload?.tripId) {
+        return;
+      }
+      handlersRef.current.onBidClosed(msg.payload);
+    });
     const onTripUpdate = safe((msg: DriverEventEnvelope<unknown>) =>
       handlersRef.current.onTripUpdate(msg),
     );
@@ -206,6 +219,7 @@ export function useDriverRealtime(
 
     s.on('dispatch:offer', onOffer);
     s.on('dispatch:match', onMatch);
+    s.on('bid:closed', onBidClosed);
     s.on('trip:update', onTripUpdate);
     s.on('chat:message', onChatMessage);
     s.on('payment:tip', onTipAdded);
@@ -220,6 +234,7 @@ export function useDriverRealtime(
     return () => {
       s.off('dispatch:offer', onOffer);
       s.off('dispatch:match', onMatch);
+      s.off('bid:closed', onBidClosed);
       s.off('trip:update', onTripUpdate);
       s.off('chat:message', onChatMessage);
       s.off('payment:tip', onTipAdded);

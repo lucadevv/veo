@@ -79,6 +79,12 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     const record: Record<string, EventHandler> = {
       'dispatch.offered': (env) => this.handleEvent(env, 'dispatch:offer'),
       'dispatch.match_found': (env) => this.handleEvent(env, 'dispatch:match'),
+      // ADR-020 Lote 2 (2a) · una oferta del conductor dejó de valer con el board cerrando: el pasajero
+      // eligió a OTRO (`not_selected`) o el conductor quedó inelegible (`stale`). Antes NINGÚN handler lo
+      // consumía → el perdedor conservaba su card de puja hasta caducar localmente y, al tapearla, chocaba
+      // con un board cerrado (409). Reusa el relay genérico (resuelve el conductor por `driverId` del
+      // payload) y lo empuja como `bid:closed` → la app remueve la card al instante. Topic `dispatch` ya suscrito.
+      'dispatch.offer_withdrawn': (env) => this.handleEvent(env, 'bid:closed'),
     };
     for (const type of TRIP_EVENTS) {
       record[type] = (env) => this.handleEvent(env, 'trip:update');

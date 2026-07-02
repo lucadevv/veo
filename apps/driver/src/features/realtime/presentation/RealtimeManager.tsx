@@ -13,6 +13,7 @@ import { isOnShift } from '../../shift/domain';
 import { isTripTerminal, parseTripStatus } from '../../trips/domain';
 import { TRIP_QUERY_PREFIX, useActiveTrip, useTrip } from '../../trips/presentation/hooks/useTrips';
 import { BIDS_QUERY_KEY } from '../../bidding/presentation';
+import type { OpenBid } from '../../bidding/domain';
 import { useChatStore } from '../../chat/presentation';
 import {
   EARNINGS_BREAKDOWN_QUERY_KEY,
@@ -33,6 +34,8 @@ export const RealtimeManager = (): null => {
   const queryClient = useQueryClient();
   const { foregroundService } = useDi();
   const setIncomingOffer = useDispatchStore((s) => s.setIncomingOffer);
+  const clearOffer = useDispatchStore((s) => s.clearOffer);
+  const clearPendingBid = useDispatchStore((s) => s.clearPendingBid);
   const setActiveTripId = useDispatchStore((s) => s.setActiveTripId);
   const setConnected = useDispatchStore((s) => s.setConnected);
   const activeTripId = useDispatchStore((s) => s.activeTripId);
@@ -99,6 +102,12 @@ export const RealtimeManager = (): null => {
       // aceptar/rechazar, es una puja abierta a la que el conductor contraoferta. Refrescamos el board y,
       // si no está en un viaje, lo llevamos a las pujas. NO usamos el flujo FIXED (TripIncoming/incomingOffer).
       if (payload.bidCents != null) {
+        // ADR-020 Lote 2: el MISMO viaje pudo llegar antes como oferta FIXED (TripIncoming) y ahora
+        // re-abre como PUJA (schedule flip / rebid FIXED→PUJA). Sin este clearOffer quedaba un "Viaje
+        // entrante" FANTASMA en el store + en el back-stack: el conductor volvía a esa pantalla, tapeaba
+        // Aceptar sobre un match ya superado → 404 "la oferta venció / viaje no encontrado". Limpiamos la
+        // oferta FIXED colgada al pasar el viaje a modo puja.
+        clearOffer();
         queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
         if (!activeTripId) {
           navigateToBids();
@@ -115,12 +124,29 @@ export const RealtimeManager = (): null => {
       navigateToIncoming({ matchId: payload.matchId, tripId: payload.tripId });
     },
     onMatch: (payload) => {
+      // Match confirmado: cualquier oferta FIXED entrante colgada en el store ya no aplica (o ganamos por
+      // puja, sin pasar por TripIncoming). La limpiamos para no dejar un "Viaje entrante" fantasma tras el match.
+      clearOffer();
+      // ADR-020 Lote 2 (2b) — GANAMOS esta puja: el "esperando al pasajero…" ya cumplió su función; lo
+      // limpiamos (navegamos a TripActive abajo). Idempotente si el tripId no estaba pendiente (flujo FIXED).
+      clearPendingBid(payload.tripId);
       setActiveTripId(payload.tripId);
       queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
       // Match confirmado → llevamos al conductor a su viaje. Clave en PUJA (ganó la puja, no pasó por
       // TripIncoming) y si el match llega estando en otra pantalla. En FIXED ya está en TripActive (el
       // accept navega): navegar a la misma ruta+params es no-op, así que es seguro en ambos flujos.
       navigateToTripActive(payload.tripId);
+    },
+    // ADR-020 Lote 2 (2a) — la puja se cerró para este conductor (el pasajero eligió a otro, o quedó
+    // inelegible): removemos la card de la cache al INSTANTE (sin esperar el poll de 12s) y limpiamos el
+    // "esperando al pasajero" (2b). El invalidate confirma la lista contra el servidor. Así el conductor
+    // nunca tapea una card muerta (que daría 409); la puja simplemente desaparece.
+    onBidClosed: (payload) => {
+      clearPendingBid(payload.tripId);
+      queryClient.setQueryData<OpenBid[]>(BIDS_QUERY_KEY, (old) =>
+        old ? old.filter((b) => b.tripId !== payload.tripId) : old,
+      );
+      queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
     },
     onTripUpdate: () => {
       queryClient.invalidateQueries({ queryKey: TRIP_QUERY_PREFIX });

@@ -495,12 +495,33 @@ export const dispatchBidCancelled = z.object({
 /// ABIERTO: el conductor dejó de ser elegible (`stale`, BE-3) entre que ofertó y el pasajero la eligió.
 /// El BFF lo reenvía como `offer:withdrawn` para que la app QUITE esa card al instante (sin esperar el
 /// refetch). NO se emite al cerrar el board (eso ya lo cubren no_offers/match). Idempotente por (trip,driver).
+/// Motivos por los que UNA oferta del board se RETIRA (evento `dispatch.offer_withdrawn`). Fuente ÚNICA
+/// del valor (const + tipo derivado homónimo; cero literales sueltos): el productor (dispatch) importa esta
+/// const para no hardcodear el string en el emit, y el `z.enum` de abajo se deriva de acá.
+export const OFFER_WITHDRAWN_REASON = {
+  /// El conductor quedó INELEGIBLE tras ofertar, con el board aún ABIERTO (BE-3).
+  STALE: 'stale',
+  /// Otro conductor ganó la EMERGENCIA en el broadcast simultáneo de la ambulancia (B5-vert): la oferta
+  /// hermana ya no vale.
+  TAKEN: 'taken',
+  /// ADR-020 Lote 2 — el pasajero ELIGIÓ a OTRO conductor: la oferta de este perdedor ya no vale y su
+  /// card debe morir reactiva (sin esperar el poll de 12s). Se emite UNA por perdedor al cerrar el board.
+  NOT_SELECTED: 'not_selected',
+} as const;
+export type OfferWithdrawnReason =
+  (typeof OFFER_WITHDRAWN_REASON)[keyof typeof OFFER_WITHDRAWN_REASON];
+
 export const dispatchOfferWithdrawn = z.object({
   tripId: z.string(),
   driverId: z.string(),
   /// `stale` = el conductor quedó inelegible tras ofertar (board PUJA). `taken` = otro conductor ganó la
-  /// EMERGENCIA en el broadcast simultáneo de la ambulancia (B5-vert) — esta oferta hermana ya no vale.
-  reason: z.enum(['stale', 'taken']),
+  /// EMERGENCIA del broadcast simultáneo de la ambulancia (B5-vert). `not_selected` (ADR-020 Lote 2) = el
+  /// pasajero eligió a otro y esta oferta perdió — el driver-bff la reenvía al CONDUCTOR (card muere reactiva).
+  reason: z.enum([
+    OFFER_WITHDRAWN_REASON.STALE,
+    OFFER_WITHDRAWN_REASON.TAKEN,
+    OFFER_WITHDRAWN_REASON.NOT_SELECTED,
+  ]),
 });
 /// trip → dispatch. El conductor canceló DESPUÉS de aceptar (pre-recojo): trip pasa a REASSIGNING y
 /// re-abre el board (cierra el catastrófico #4 — no más pasajero abandonado). `bidCents` = bid con el que

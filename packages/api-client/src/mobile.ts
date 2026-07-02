@@ -3067,6 +3067,18 @@ export interface DispatchMatchPayload {
 }
 
 /**
+ * ADR-020 Lote 2 (2a) · una oferta del board dejó de valer con el board cerrando (dispatch.offer_withdrawn
+ * → `bid:closed`). El driver-bff lo empuja al conductor destino para que su card de puja muera al instante
+ * (sin esperar el poll). `reason`: `not_selected` (el pasajero eligió a otro), `stale` (quedó inelegible),
+ * `taken` (ganó la emergencia hermana). Sin PII: solo `tripId`/`driverId`.
+ */
+export interface DispatchOfferWithdrawnPayload {
+  tripId: string;
+  driverId: string;
+  reason: 'stale' | 'taken' | 'not_selected';
+}
+
+/**
  * Propina añadida a un viaje ya cobrado (payment.tip_added). El 100% es del conductor. El driver-bff
  * la reenvía en vivo para celebrarla en la app; el monto en céntimos (entero positivo).
  */
@@ -3080,6 +3092,12 @@ export interface TipAddedPayload {
 export interface DriverServerToClient {
   'dispatch:offer': (msg: DriverEventEnvelope<DispatchOfferedPayload>) => void;
   'dispatch:match': (msg: DriverEventEnvelope<DispatchMatchPayload>) => void;
+  /**
+   * ADR-020 Lote 2 (2a) · una puja del conductor se CERRÓ (el pasajero eligió a otro / quedó inelegible):
+   * el driver-bff lo empuja al consumir `dispatch.offer_withdrawn` para que la app remueva la card al
+   * instante (backstop: el poll de 12s). Sin PII (solo tripId/driverId/reason).
+   */
+  'bid:closed': (msg: DriverEventEnvelope<DispatchOfferWithdrawnPayload>) => void;
   'trip:update': (msg: DriverEventEnvelope<unknown>) => void;
   /**
    * Mensaje de chat entrante del pasajero (Ola 2A). El driver-bff lo emite a la sala del viaje

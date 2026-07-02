@@ -6,6 +6,7 @@ import { formatPEN } from '../../../../shared/presentation/format';
 import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import type { OpenBid } from '../../domain';
 import { useCountdownMs } from '../hooks/useCountdownMs';
+import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 
 interface Props {
   bid: OpenBid;
@@ -21,6 +22,9 @@ export const BidCard = ({ bid, onPress }: Props): React.JSX.Element => {
   const theme = useTheme();
   const secondsLeft = useCountdownMs(bid.expiresAt);
   const expired = secondsLeft <= 0;
+  // ADR-020 Lote 2 (2b) — el conductor YA ofertó en esta puja y espera al pasajero: la card lo refleja
+  // (pill "Enviada" + CTA honesto) en vez de invitar a "Ofertar" otra vez. El estado vive en el store.
+  const pending = useDispatchStore((s) => s.pendingBidTripIds.includes(bid.tripId));
 
   return (
     <Card
@@ -38,14 +42,18 @@ export const BidCard = ({ bid, onPress }: Props): React.JSX.Element => {
             {formatPEN(bid.bidCents)}
           </Text>
         </View>
-        <StatusPill
-          label={
-            expired ? t('trips.bid.expired') : t('trips.bid.expiresIn', { seconds: secondsLeft })
-          }
-          tone={expired ? 'danger' : 'warn'}
-          live={!expired}
-          dot
-        />
+        {pending ? (
+          <StatusPill label={t('trips.bid.pendingPill')} tone="accent" live dot />
+        ) : (
+          <StatusPill
+            label={
+              expired ? t('trips.bid.expired') : t('trips.bid.expiresIn', { seconds: secondsLeft })
+            }
+            tone={expired ? 'danger' : 'warn'}
+            live={!expired}
+            dot
+          />
+        )}
       </View>
 
       <View style={styles.metaRow}>
@@ -59,8 +67,12 @@ export const BidCard = ({ bid, onPress }: Props): React.JSX.Element => {
         ))}
       </View>
 
-      <Text variant="footnote" color="accent" style={[styles.cta, { color: theme.colors.accent }]}>
-        {t('trips.bid.open')} →
+      <Text
+        variant="footnote"
+        color={pending ? 'inkMuted' : 'accent'}
+        style={[styles.cta, pending ? null : { color: theme.colors.accent }]}
+      >
+        {pending ? t('trips.bid.waiting') : `${t('trips.bid.open')} →`}
       </Text>
     </Card>
   );
