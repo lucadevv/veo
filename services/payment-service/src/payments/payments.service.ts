@@ -42,6 +42,7 @@ import {
   bpsToRate,
   ChargeMode,
   computeChargeAmounts,
+  computePspSettlement,
   DEFAULT_DIGITAL_TIP_METHOD,
   deriveAdminRefundDedupKey,
   deriveBookingCancellationRefundDedupKey,
@@ -504,6 +505,11 @@ export class PaymentsService {
     attempts: number,
   ): Promise<Payment> {
     assertPaymentTransition(payment.status, 'CAPTURED');
+    // P-B · el PSP (ProntoPaga) descuenta su fee ANTES de depositar → el bruto (amountCents) NO es lo que la
+    // plataforma recibe. Modelamos el fee al capturar (por método, editable por admin; 0 si no seteado o sin
+    // CommissionService) para persistir el NETO REAL que llega al banco. Se computa fuera de la tx (lectura cacheada).
+    const feeBps = (await this.commission?.resolvePspFeeBps?.(payment.method)) ?? 0;
+    const { pspFeeCents, netSettledCents } = computePspSettlement(payment.amountCents, feeBps);
     return this.prisma.write.$transaction(async (tx) => {
       // CAS atómico: el estado va en el WHERE. Dos entregas del webhook procesadas EN PARALELO leen
       // ambas PENDING (TOCTOU en applyWebhookResult: read en 688 + check en 696); solo la que matchea
@@ -517,6 +523,8 @@ export class PaymentsService {
           retries: attempts,
           capturedAt: new Date(),
           failureReason: null,
+          pspFeeCents,
+          netSettledCents,
         },
       });
       const updated = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
@@ -1179,7 +1187,14 @@ export class PaymentsService {
       // confirmCash es TOCTOU contra el read stale; este CAS cierra la ventana.
       const { count } = await tx.payment.updateMany({
         where: { id: payment.id, status: 'PENDING' },
-        data: { status: 'CAPTURED', capturedAt: new Date(), externalRef: `cash:${payment.tripId}` },
+        data: {
+          status: 'CAPTURED',
+          capturedAt: new Date(),
+          externalRef: `cash:${payment.tripId}`,
+          // P-B · el efectivo NO pasa por el PSP → fee 0, el neto = el bruto (la plata la recauda el conductor en mano).
+          pspFeeCents: 0,
+          netSettledCents: payment.amountCents,
+        },
       });
       if (count === 0) return; // otra captura concurrente ya ganó: no re-emitir
       // A2 · el conductor cobró la comisión de este viaje EN EFECTIVO → la DEBE a la plataforma (la plata la

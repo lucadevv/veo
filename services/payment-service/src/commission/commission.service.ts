@@ -19,7 +19,13 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { ConflictError } from '@veo/utils';
-import { BPS_DENOMINATOR, ChargeMode, resolveCommissionBps } from '../payments/payment.policy';
+import {
+  BPS_DENOMINATOR,
+  ChargeMode,
+  resolveCommissionBps,
+  resolvePspFeeBps as policyResolvePspFeeBps,
+} from '../payments/payment.policy';
+import type { PaymentMethod } from '@veo/shared-types';
 import type { Env } from '../config/env.schema';
 import {
   COMMISSION_REPO,
@@ -100,6 +106,21 @@ export class CommissionService {
    */
   async resolveRateBps(mode: ChargeMode): Promise<number> {
     return resolveCommissionBps(mode, await this.getConfig());
+  }
+
+  /**
+   * P-B (ADR-022) · Resuelve el fee del PSP (bps Int) para un método de pago, desde la config vigente (editable por
+   * admin, degradación honesta a 0 si no está seteado o la config no está disponible). CASH → 0 (no pasa por el PSP).
+   * Lo consume la captura para computar el neto REAL que llega al banco (`Payment.netSettledCents`).
+   */
+  async resolvePspFeeBps(method: PaymentMethod): Promise<number> {
+    const c = await this.getConfig();
+    return policyResolvePspFeeBps(method, {
+      yapeFeeBps: c.yapeFeeBps ?? 0,
+      plinFeeBps: c.plinFeeBps ?? 0,
+      cardFeeBps: c.cardFeeBps ?? 0,
+      pagoefectivoFeeBps: c.pagoefectivoFeeBps ?? 0,
+    });
   }
 
   /**

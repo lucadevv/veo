@@ -75,6 +75,57 @@ export function resolveCommissionBps(mode: ChargeMode, rates: CommissionRatesBps
   return mode === ChargeMode.CARPOOLING ? rates.carpoolingFeeBps : rates.onDemandRateBps;
 }
 
+/**
+ * P-B (ADR-022) · Fee del PSP (ProntoPaga) por MÉTODO digital, en bps Int (0..10000). CASH no lleva fee (el
+ * efectivo no pasa por el PSP). EDITABLE por admin (vive en `CommissionConfig`). El fee varía por método (los SLAs
+ * de ProntoPaga son por método/país).
+ */
+export interface PspFeeRatesBps {
+  yapeFeeBps: number;
+  plinFeeBps: number;
+  cardFeeBps: number;
+  pagoefectivoFeeBps: number;
+}
+
+/**
+ * P-B · Resuelve el fee del PSP (bps Int) para un método de pago. Switch EXHAUSTIVO sobre el union `PaymentMethod`
+ * (el compilador exige cada caso — cero strings mágicos). CASH → 0 (no pasa por el PSP).
+ */
+export function resolvePspFeeBps(method: PaymentMethod, rates: PspFeeRatesBps): number {
+  switch (method) {
+    case 'YAPE':
+      return rates.yapeFeeBps;
+    case 'PLIN':
+      return rates.plinFeeBps;
+    case 'CARD':
+      return rates.cardFeeBps;
+    case 'PAGOEFECTIVO':
+      return rates.pagoefectivoFeeBps;
+    case 'CASH':
+      return 0;
+    default:
+      return assertNeverMethod(method);
+  }
+}
+
+/** Exhaustividad en compile-time del switch de método: un `PaymentMethod` nuevo sin caso frena el build. */
+function assertNeverMethod(m: never): never {
+  throw new InvalidStateError(`Método de pago no contemplado para fee PSP: ${String(m)}`);
+}
+
+/**
+ * P-B · Modela el descuento del PSP sobre el bruto cobrado (`amountCents`) y devuelve el NETO real que llega al
+ * banco. `pspFeeCents = round(amount × bps/10000)` (mismo integer-safe que `commission()`); `netSettledCents =
+ * amount − fee`. Fee 0 (sin tarifa configurada) → net = amount (degradación honesta). Enteros de céntimos, nunca float.
+ */
+export function computePspSettlement(
+  amountCents: number,
+  feeBps: number,
+): { pspFeeCents: number; netSettledCents: number } {
+  const pspFeeCents = commission(money(amountCents), bpsToRate(feeBps)).cents;
+  return { pspFeeCents, netSettledCents: amountCents - pspFeeCents };
+}
+
 export interface ChargeAmounts {
   /**
    * Bruto COBRADO al pasajero (base del recibo), incluye surge, EXCLUYE propina. ⚠️ La semántica DIFIERE por modo:

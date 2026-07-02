@@ -23,6 +23,12 @@ export interface PersistedCommission {
   onDemandRateBps: number;
   /** Service fee CARPOOLING en basis points Int (0..10000) — sumado al pasajero (cost-sharing). Jamás float. */
   carpoolingFeeBps: number;
+  /** P-B (ADR-022) · Fee del PSP (ProntoPaga) por método digital en bps Int (0..10000), editable por admin.
+   * OPCIONAL: la degradación honesta (envFallback / config vieja) los deja ausentes → el resolve cae a 0 (sin fee). */
+  yapeFeeBps?: number;
+  plinFeeBps?: number;
+  cardFeeBps?: number;
+  pagoefectivoFeeBps?: number;
   version: number;
   updatedAt: string;
 }
@@ -71,6 +77,10 @@ export class PrismaCommissionRepository implements CommissionRepository {
     return {
       onDemandRateBps: row.onDemandRateBps,
       carpoolingFeeBps: row.carpoolingFeeBps,
+      yapeFeeBps: row.yapeFeeBps,
+      plinFeeBps: row.plinFeeBps,
+      cardFeeBps: row.cardFeeBps,
+      pagoefectivoFeeBps: row.pagoefectivoFeeBps,
       version: row.version,
       updatedAt: row.updatedAt.toISOString(),
     };

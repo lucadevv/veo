@@ -60,17 +60,21 @@ export class AnalyticsService {
     return { revenueTodayCents, revenuePerHour };
   }
 
-  /** Suma de amountCents de los cobros capturados desde la medianoche de Lima. Una sola query agregada. */
+  /**
+   * P-B (ADR-022) · "Money-in REAL" del día: suma del NETO que llega al banco (`netSettledCents` = bruto − fee del
+   * PSP), NO el bruto — el bruto inflaba el KPI por el fee de ProntoPaga que la plataforma nunca recibe. Cobros
+   * legacy pre-P-B tienen `netSettledCents` NULL → SUM los ignora (undercount transitorio; envejecen fuera de "hoy").
+   */
   private async revenueToday(now: Date): Promise<number> {
     const since = limaMidnightUtc(now);
     const agg = await this.prisma.read.payment.aggregate({
-      _sum: { amountCents: true },
+      _sum: { netSettledCents: true },
       where: {
         status: PaymentStatus.CAPTURED,
         capturedAt: { gte: since },
       },
     });
-    return agg._sum.amountCents ?? 0;
+    return agg._sum.netSettledCents ?? 0;
   }
 
   /**

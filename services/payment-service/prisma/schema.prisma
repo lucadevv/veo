@@ -169,6 +169,13 @@ model Payment {
   tipCents        Int           @default(0) @map("tip_cents")
   commissionCents Int           @map("commission_cents")
   feeCents        Int           @map("fee_cents")
+  /// P-B (ADR-022) · Fee del PSP (ProntoPaga) que se DESCUENTA antes de que la plata llegue al banco de la
+  /// plataforma. Se MODELA en la captura desde `CommissionConfig.<método>FeeBps` (editable por admin). CASH = 0
+  /// (el efectivo no pasa por el PSP). NULL = cobro legacy pre-P-B (fee no modelado → degradación honesta).
+  pspFeeCents     Int?          @map("psp_fee_cents")
+  /// P-B · Neto REAL que la plataforma recibe en el banco = amountCents − pspFeeCents. Es el "money-in real"
+  /// (los KPIs/conciliación usan ESTO, no el bruto). NULL = legacy (cae a amountCents en la degradación honesta).
+  netSettledCents Int?          @map("net_settled_cents")
   /// Acumulado reembolsado (céntimos) sobre amountCents (BR-P06). 0 = sin reembolso. Permite refunds
   /// PARCIALES: status=PARTIALLY_REFUNDED mientras refundedCents < amountCents, REFUNDED al completarse.
   refundedCents   Int           @default(0) @map("refunded_cents")
@@ -244,6 +251,14 @@ model CommissionConfig {
   /// Service fee CARPOOLING en basis points (0..10000). Arranca en 0; el admin lo sube. Se SUMA al pasajero
   /// (no se descuenta al conductor). Mismo tratamiento Int/redondeo que la comisión on-demand.
   carpoolingFeeBps Int      @default(0) @map("carpooling_fee_bps")
+  /// P-B (ADR-022) · Fee del PSP (ProntoPaga) por MÉTODO digital, en basis points Int (0..10000). EDITABLE por
+  /// admin (arranca en 0 = degradación honesta hasta que el dueño cargue las tarifas del convenio). El fee varía
+  /// por método (los SLAs de ProntoPaga son por método/país). CASH no tiene fee (no pasa por el PSP). Se descuenta
+  /// del bruto en la captura para computar el neto REAL que llega al banco (`Payment.netSettledCents`).
+  yapeFeeBps         Int    @default(0) @map("yape_fee_bps")
+  plinFeeBps         Int    @default(0) @map("plin_fee_bps")
+  cardFeeBps         Int    @default(0) @map("card_fee_bps")
+  pagoefectivoFeeBps Int    @default(0) @map("pagoefectivo_fee_bps")
   version          Int      @default(0)
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
