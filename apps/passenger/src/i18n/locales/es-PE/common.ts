@@ -294,6 +294,8 @@ export const common = {
   },
 
   home: {
+    /** Kicker de la pill de ubicación (design/veo.pen TopRow). */
+    locationKicker: 'Ubicación actual',
     title: '¿A dónde vamos?',
     greeting: 'Hola',
     whereTo: '¿A dónde vamos?',
