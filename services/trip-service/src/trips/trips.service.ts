@@ -1581,6 +1581,13 @@ export class TripsService {
         data: {
           status: TripStatus.REQUESTED,
           fareCents: bidCents,
+          // ADR-019 Lote B: re-pujar ES una acción de PUJA por definición (el endpoint recibe `bidCents`:
+          // el pasajero ofrece SU precio → subasta). Persistimos dispatchMode=PUJA para que el valor
+          // CONGELADO deje de mentir: antes un viaje FIXED que expiraba, al re-pujar, abría un OfferBoard
+          // (PUJA) pero conservaba dispatchMode=FIXED → un driver-cancel posterior tomaba el path FIXED
+          // (secuencial 12s) mientras su re-bid fue subasta (60s), violando ADR-011 resolve-once-persist.
+          // Ahora el modo persistido coincide con el mecanismo real (emitBidPosted abajo).
+          dispatchMode: PrismaPricingMode.PUJA,
           // El conductor que pudo haber quedado colgado (REASSIGNING) se desvincula: board fresco, re-match limpio.
           driverId: null,
           // H12: re-puja explícita = NUEVA decisión de dinero. Reseteamos el guard once-ever de
@@ -1605,6 +1612,8 @@ export class TripsService {
         ...trip,
         status: TripStatus.REQUESTED,
         fareCents: bidCents,
+        // Espeja el flip persistido (ADR-019 Lote B): el modo del viaje reactivado ES PUJA.
+        dispatchMode: PrismaPricingMode.PUJA,
         driverId: null,
         reassignCount: 0,
         // H13 — espeja el incremento del updateMany para que emitBidPosted estampe el seq del nuevo ciclo.
