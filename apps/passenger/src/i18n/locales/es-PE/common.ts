@@ -298,6 +298,11 @@ export const common = {
     locationKicker: 'Ubicación actual',
     title: '¿A dónde vamos?',
     greeting: 'Hola',
+    /** Sub del saludo del Home (design/veo.pen SearchSheet). */
+    greetingSub: '¿A dónde vas seguro hoy?',
+    /** Toggle modo del pedido (design/veo.pen ModeToggle). */
+    modeNow: 'Ahora',
+    modeScheduled: 'Programado',
     whereTo: '¿A dónde vamos?',
     /** Título héroe editorial del Home idle (ancla visual grande, arriba con aire). */
     heroTitle: '¿A dónde vamos?',

@@ -3,19 +3,30 @@ import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, View} from 'react-native';
 
+export interface HomeHeroProps {
+  /** Primer nombre del pasajero para el saludo. `null` → saludo sin nombre. */
+  name: string | null;
+}
+
 /**
- * Título HÉROE del Home idle: el ancla visual de la pantalla (fiel a la referencia "Where do you want
- * to go?"). Usa el variant tipográfico más grande del sistema — `displayEditorial` (Fraunces serif
- * 48pt) — para dar un tono editorial y aire arriba, antes de la tarjeta de ruta y los atajos.
+ * Saludo HÉROE del Home idle (fiel a `design/veo.pen` SearchSheet): "Hola, {nombre}" + subtítulo
+ * cálido de seguridad. Reemplaza el título editorial "¿A dónde vamos?" por el saludo personal del
+ * .pen (el "¿a dónde?" ahora vive en el buscador). Ancla visual + aire arriba, antes del toggle.
  */
-export function HomeHero(): React.JSX.Element {
+export function HomeHero({name}: HomeHeroProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
+  const greeting = name
+    ? `${t('home.greeting')}, ${name}`
+    : t('home.greeting');
 
   return (
-    <View style={[styles.root, {paddingBottom: theme.spacing.xs}]}>
-      <Text variant="displayEditorial" color="ink">
-        {t('home.heroTitle')}
+    <View style={[styles.root, {gap: theme.spacing.xxs}]}>
+      <Text variant="title1" color="ink">
+        {greeting}
+      </Text>
+      <Text variant="body" color="inkMuted">
+        {t('home.greetingSub')}
       </Text>
     </View>
   );

@@ -16,6 +16,7 @@ import {CompletionBody} from '../components/CompletionBody';
 import {DebtStrip} from '../components/DebtStrip';
 import {HomeHero} from '../components/HomeHero';
 import {HomeShortcutChips} from '../components/HomeShortcutChips';
+import {ModeToggle, TripTimeMode} from '../components/ModeToggle';
 import {IconArrowLeft, IconClose} from '../components/icons';
 import {IdleBody} from '../components/IdleBody';
 import {LastDriverCard} from '../components/LastDriverCard';
@@ -77,6 +78,8 @@ export interface RequestFlowContext {
   onOpenDebtFromHome: () => void;
   onOpenPendingFromHome: () => void;
   savedPlaces: SavedPlace[];
+  /** Primer nombre del pasajero para el saludo del Home (design/veo.pen SearchSheet). */
+  greetingName: string | null;
   onSelectDestination: (place: RoutePlace) => void;
   onSeeAllSaved: () => void;
   onSeeAllRecents: () => void;
@@ -309,7 +312,17 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
   return (
     <View style={{gap: theme.spacing.lg}}>
       <EnterView index={0}>
-        <HomeHero />
+        <HomeHero name={ctx.greetingName} />
+      </EnterView>
+      <EnterView index={1}>
+        <ModeToggle
+          value={TripTimeMode.Now}
+          onChange={mode => {
+            if (mode === TripTimeMode.Scheduled) {
+              ctx.onScheduled();
+            }
+          }}
+        />
       </EnterView>
       {ctx.lastDriver ? (
         <EnterView index={1}>

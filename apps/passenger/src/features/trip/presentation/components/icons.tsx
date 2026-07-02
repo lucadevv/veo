@@ -468,3 +468,18 @@ export function IconCheck({color, size = 16}: GlyphProps): React.JSX.Element {
     </Svg>
   );
 }
+
+/** Rayo (modo "Ahora" del toggle del Home). Espejo del `zap` del design/veo.pen: relleno sólido. */
+export function IconBolt({color, size = 16}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"
+        fill={color}
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}

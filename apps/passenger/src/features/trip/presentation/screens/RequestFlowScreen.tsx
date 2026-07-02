@@ -527,6 +527,7 @@ export function RequestFlowScreen(): React.JSX.Element {
     onOpenDebtFromHome: debtGate.openDebtFromHome,
     onOpenPendingFromHome: debtGate.openPendingFromHome,
     savedPlaces,
+    greetingName: profileQuery.data?.name?.trim().split(/\s+/)[0] ?? null,
     onSelectDestination: selectDestination,
     onSeeAllSaved: goSavedPlaces,
     onSeeAllRecents: goTripHistory,
