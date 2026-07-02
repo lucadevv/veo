@@ -1697,8 +1697,8 @@ export class TripsService {
     // Re-cotiza con la MISMA política de la oferta del viaje (multiplier + mínima) y, bajo el flip + FIXED,
     // la energía autoritativa — espejo del create (F2.1b). Sin esto, `calculateFare` base reseteaba la tarifa
     // sin multiplier ni energía: un FIXED Premium/XL podía cambiar de destino (aun al mismo punto) y cobrar
-    // de menos. SIN piso contra `trip.fareCents`: un destino MÁS CERCA sí debe abaratar (a diferencia de la
-    // parada, que solo agrega ruta). El piso de la mínima de la oferta ya está dentro de las fórmulas.
+    // de menos. En FIXED SIN piso contra `trip.fareCents` (un destino MÁS CERCA debe abaratar); en PUJA SÍ hay
+    // piso al bid acordado (ver A3, más abajo). El piso de la mínima de la oferta ya está dentro de las fórmulas.
     const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
     // El recargo de combustible (B3) se pliega en la rama flip-OFF — espejo COMPLETO del create FIXED, que
     // resuelve y aplica el fuel (fixed-dispatch.strategy). En la rama flip-ON la energía pass-through lo
@@ -1722,6 +1722,14 @@ export class TripsService {
             await resolveAuthoritativeEnergy(this.energyCatalog, offering),
           )
         : applyOfferingPricing(calculateFare(fareInput), offering.pricing);
+    // ADR-022 P-A (A3) · en PUJA el `trip.fareCents` es un BID NEGOCIADO que el conductor ACEPTÓ. Cambiar el
+    // destino NO puede cobrar por DEBAJO de lo acordado (regalarle plata al pasajero reseteando la
+    // negociación hacia abajo) — espejo del piso de waypoint-proposal.service. En FIXED sí abarata (la tarifa
+    // es fórmula de la ruta: un destino más cerca cuesta menos, sin negociación que respetar).
+    const fareCents =
+      trip.dispatchMode === PricingMode.FIXED
+        ? fare.cents
+        : Math.max(fare.cents, trip.fareCents);
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
       // CAS: el gate de estado (DESTINATION_EDITABLE) se RE-VALIDA dentro de la tx (viaja en el WHERE). El
@@ -1737,7 +1745,7 @@ export class TripsService {
           distanceMeters: route.distanceMeters,
           durationSeconds: route.durationSeconds,
           routePolyline: route.polyline || null,
-          fareCents: fare.cents,
+          fareCents,
         },
       });
       if (claim.count === 0) {

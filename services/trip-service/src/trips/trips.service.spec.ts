@@ -1158,6 +1158,18 @@ describe('TripsService.changeDestination · BR-T01 tarifa inmutable salvo cambio
     expect(view.fareCents).toBe(2800);
   });
 
+  it('ADR-022 A3 · PUJA: cambiar destino NO cobra por DEBAJO del bid acordado (piso al fareCents)', async () => {
+    // PUJA con bid acordado 2600. Ruta 10 km/Económico ×1.0 → fórmula = 600 + 120·10 + 30·20 = 2400 (< bid).
+    // SIN el piso, changeDestination bajaba el cobro a 2400 (el pasajero pagaba menos que lo NEGOCIADO); con el
+    // piso A3 se mantiene 2600 (el conductor aceptó ese precio, no se regala plata reseteando hacia abajo).
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+    );
+    const svc = new TripsService(prisma as never, longRoute10k as never);
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(2600);
+  });
+
   it('F2.1b · FIXED + flip ON + catálogo VACÍO → InvalidStateError (nunca cobra de menos)', async () => {
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', category: 'veo_confort', fareCents: 3000 }),
