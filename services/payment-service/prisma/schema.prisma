@@ -260,6 +260,10 @@ model Payout {
   grossCents      Int          @map("gross_cents")
   commissionCents Int          @map("commission_cents")
   amountCents     Int          @map("amount_cents")
+  /// A2 (ADR-022) · Deuda CASH del conductor NETEADA en este payout (comisión de viajes en efectivo que él
+  /// cobró en mano). `amountCents = ganancia digital − debtAppliedCents`. 0 si el conductor no tenía deuda.
+  /// Auditoría del flujo inverso: cuánto le descontamos por la comisión que recaudó en efectivo.
+  debtAppliedCents Int         @default(0) @map("debt_applied_cents")
   currency        String       @default("PEN")
   status          PayoutStatus @default(PENDING)
   processedAt     DateTime?    @map("processed_at") @db.Timestamptz
@@ -280,6 +284,50 @@ model Payout {
   @@unique([driverId, periodStart, periodEnd])
   @@index([status])
   @@map("payouts")
+  @@schema("payment")
+}
+
+/// A2 (ADR-022) · Motivo de una deuda del conductor con la plataforma. Union TIPADA (cero strings mágicos).
+enum DriverDebtReason {
+  /// El conductor cobró la comisión EN EFECTIVO (viaje CASH) → la debe a la plataforma.
+  CASH_COMMISSION
+
+  @@schema("payment")
+}
+
+/// A2 · Estado de una deuda del conductor. PENDING = por netear del payout digital; SETTLED = ya descontada de un
+/// payout; REVERSED = anulada porque el viaje CASH se reembolsó/canceló (el conductor ya no debe esa comisión).
+enum DriverDebtStatus {
+  PENDING
+  SETTLED
+  REVERSED
+
+  @@schema("payment")
+}
+
+/// A2 (ADR-022 §P-A) · Ledger de DEUDAS del conductor con la plataforma (el flujo INVERSO del dinero: la plata va
+/// del conductor a la plataforma). Nace cuando el conductor cobra la comisión EN MANO (viaje CASH): la plataforma
+/// no la recaudó → el conductor la DEBE. Se NETEA contra su payout DIGITAL (liquidación semanal); si la deuda
+/// supera el digital, el resto queda PENDING (carry-forward al próximo período). Modelado explícito, no un signo.
+model DriverDebt {
+  id          String           @id @db.Uuid
+  driverId    String           @map("driver_id") @db.Uuid
+  tripId      String           @map("trip_id") @db.Uuid
+  /// El cobro CASH que originó la deuda. UNIQUE → idempotencia: una deuda por cobro (la captura no la duplica).
+  paymentId   String           @unique @map("payment_id") @db.Uuid
+  /// Monto adeudado = la comisión del viaje (lo que el conductor cobró en mano y le corresponde a la plataforma).
+  amountCents Int              @map("amount_cents")
+  currency    String           @default("PEN")
+  reason      DriverDebtReason @default(CASH_COMMISSION)
+  status      DriverDebtStatus @default(PENDING)
+  /// El Payout donde esta deuda se NETEÓ (SETTLED). Null mientras PENDING. Para conciliación/auditoría.
+  settledInPayoutId String?    @map("settled_in_payout_id") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  settledAt   DateTime?        @map("settled_at") @db.Timestamptz
+
+  /// Netting: enumerar la deuda PENDIENTE de un conductor en el run de payouts (O(log n)).
+  @@index([driverId, status])
+  @@map("driver_debts")
   @@schema("payment")
 }
 

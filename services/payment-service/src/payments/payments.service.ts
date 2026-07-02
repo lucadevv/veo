@@ -1182,6 +1182,25 @@ export class PaymentsService {
         data: { status: 'CAPTURED', capturedAt: new Date(), externalRef: `cash:${payment.tripId}` },
       });
       if (count === 0) return; // otra captura concurrente ya ganó: no re-emitir
+      // A2 · el conductor cobró la comisión de este viaje EN EFECTIVO → la DEBE a la plataforma (la plata la
+      // recaudó él en mano). Se acumula en el ledger DriverDebt DENTRO de la MISMA tx de captura (atomicidad:
+      // captura ⇔ deuda), para netearla luego contra su payout digital. El CAS count>0 garantiza una sola captura
+      // → una sola deuda (idempotente; el UNIQUE(paymentId) es el backstop). Solo si hay comisión (carpooling
+      // 100% → comisión 0 → no acumula) y conductor.
+      if (payment.driverId && payment.commissionCents > 0) {
+        await tx.driverDebt.create({
+          data: {
+            id: uuidv7(),
+            driverId: payment.driverId,
+            tripId: payment.tripId,
+            paymentId: payment.id,
+            amountCents: payment.commissionCents,
+            currency: payment.currency,
+            reason: 'CASH_COMMISSION',
+            status: 'PENDING',
+          },
+        });
+      }
       const envelope = createEnvelope({
         eventType: 'payment.captured',
         producer: 'payment-service',
@@ -1464,7 +1483,11 @@ export class PaymentsService {
     let tips: Payment[];
     try {
       tips = await this.prisma.read.payment.findMany({
-        where: { tripId, kind: 'TIP', status: { in: ['PENDING', 'CAPTURED', 'PARTIALLY_REFUNDED'] } },
+        where: {
+          tripId,
+          kind: 'TIP',
+          status: { in: ['PENDING', 'CAPTURED', 'PARTIALLY_REFUNDED'] },
+        },
       });
     } catch (err) {
       // ERROR (no warn): sin el listado, NINGUNA propina del viaje revertido se reembolsa → posible sobre-cobro.
@@ -1526,6 +1549,31 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * A2 · Al reembolsar un cobro CASH, REVIERTE la deuda de comisión acumulada: el viaje se revirtió → el conductor
+   * NO debe la comisión de un viaje que no ocurrió. Reduce la deuda PENDING por el monto reembolsado (la plataforma
+   * absorbe el refund de su comisión, mismo modelo que el parcial digital); si llega a 0 la marca REVERSED. Va en la
+   * MISMA tx del refund (atomicidad). Si la deuda YA se neteó en un payout (SETTLED), NO se toca acá — sería un
+   * credit-back al conductor (edge, follow-up); PENDING es el caso común (refund antes de la liquidación semanal).
+   */
+  private async reverseCashDebtInTx(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+    refundAmountCents: number,
+  ): Promise<void> {
+    const debt = await tx.driverDebt.findUnique({ where: { paymentId } });
+    if (!debt || debt.status !== 'PENDING') return;
+    const remaining = Math.max(0, debt.amountCents - refundAmountCents);
+    if (remaining === 0) {
+      await tx.driverDebt.update({
+        where: { id: debt.id },
+        data: { status: 'REVERSED', amountCents: 0, settledAt: new Date() },
+      });
+    } else {
+      await tx.driverDebt.update({ where: { id: debt.id }, data: { amountCents: remaining } });
+    }
+  }
+
   /** Devolución LOCAL de un cobro CASH (la plata nunca pasó por el riel): COMPLETED + evento en una tx. */
   private async refundCashLocally(
     payment: Payment,
@@ -1533,6 +1581,8 @@ export class PaymentsService {
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     return this.prisma.write.$transaction(async (tx) => {
       await this.claimRefundReservationInTx(tx, payment, claim);
+      // A2 · revertir la deuda de comisión CASH del conductor por lo reembolsado (viaje revertido → no la debe).
+      await this.reverseCashDebtInTx(tx, payment.id, claim.amountCents);
       // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto.
       const refund = await tx.refund.create({
         data: {

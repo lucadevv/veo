@@ -105,6 +105,8 @@ function makePrisma(payment: FakePayment | null) {
         },
       ),
     },
+    // A2 · reverseCashDebtInTx consulta la deuda del cobro CASH al reembolsar; sin deuda en estos escenarios → null.
+    driverDebt: { findUnique: vi.fn(async () => null) },
     refund: {
       create: vi.fn(async ({ data }: { data: FakeRefund }) => {
         if (data.dedupKey) {

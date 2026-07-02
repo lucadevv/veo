@@ -176,6 +176,50 @@ export class PayoutsService {
     );
   }
 
+  /**
+   * A2 (ADR-022 §P-A) · Netea la ganancia DIGITAL disponible del conductor contra sus deudas CASH PENDIENTES
+   * (comisión de viajes en efectivo que cobró en mano), DENTRO de la tx del payout. FIFO (más viejas primero):
+   * cubre deudas ENTERAS mientras alcance; la del BORDE se REDUCE (queda PENDING con el resto → carry-forward al
+   * próximo período), sin partir en una fila nueva (respeta el UNIQUE(paymentId)). Devuelve el total aplicado
+   * (a descontar del payout). El detalle del monto neteado queda en `Payout.debtAppliedCents` para auditoría.
+   */
+  private async applyDebtNetting(
+    tx: Prisma.TransactionClient,
+    driverId: string,
+    availableCents: number,
+    payoutId: string,
+  ): Promise<number> {
+    const debts = await tx.driverDebt.findMany({
+      where: { driverId, status: 'PENDING' },
+      orderBy: { createdAt: 'asc' },
+    });
+    let toApply = availableCents;
+    let applied = 0;
+    for (const debt of debts) {
+      if (toApply <= 0) break;
+      if (toApply >= debt.amountCents) {
+        // La ganancia cubre la deuda ENTERA → SETTLED, ligada a este payout (auditoría/conciliación).
+        await tx.driverDebt.update({
+          where: { id: debt.id },
+          data: { status: 'SETTLED', settledInPayoutId: payoutId, settledAt: new Date() },
+        });
+        toApply -= debt.amountCents;
+        applied += debt.amountCents;
+      } else {
+        // Cubre PARCIAL → reduce el monto de la deuda del borde (queda PENDING con el resto); lo aplicado va al
+        // payout. El neteo parcial se refleja en Payout.debtAppliedCents (no se parte la fila → sin colisión de
+        // UNIQUE(paymentId)).
+        await tx.driverDebt.update({
+          where: { id: debt.id },
+          data: { amountCents: debt.amountCents - toApply },
+        });
+        applied += toApply;
+        toApply = 0;
+      }
+    }
+    return applied;
+  }
+
   private async executePayoutRun(
     start: Date,
     end: Date,
@@ -215,45 +259,70 @@ export class PayoutsService {
     for (const agg of aggregated) {
       if (alreadyPaidDriverIds.has(agg.driverId)) continue; // idempotencia: ya liquidado este período.
 
-      const flagged = (await this.redis.sismember(FLAGGED_DRIVERS_KEY, agg.driverId)) === 1;
-      // Bonos pendientes que ESTE driver aporta a este Payout. ADR-015 §3/§D5: el cron solo AGREGA — el
-      // Payout nace PENDING (o HELD), la plata NO se ha movido. El bono se LIGA al Payout (paidInPayoutId)
-      // para saber qué incentivos marcar cuando el riel confirme, pero `paidAt` queda NULL hasta el
-      // PROCESSED confirmado (cierra el hueco 5 "bono marcado pagado sin pagar"). El CAS `paidAt:null` en el
-      // handler de confirmación garantiza no-doble-marca.
-      const pendingIncentiveIds = pendingIncentiveIdsByDriver.get(agg.driverId) ?? [];
-      await this.prisma.write.$transaction(async (tx) => {
-        const payout = await tx.payout.create({
-          data: {
-            id: uuidv7(),
-            driverId: agg.driverId,
-            periodStart: start,
-            periodEnd: end,
-            grossCents: agg.grossCents,
-            commissionCents: agg.commissionCents,
-            amountCents: agg.amountCents,
-            // ADR-015 §3: el cron ya NO nace PROCESSED. PENDING (a la espera del disparo del operador) o
-            // HELD (review en curso). PROCESSED se alcanza SOLO cuando el riel confirma la salida del dinero.
-            status: flagged ? 'HELD' : 'PENDING',
-            heldReason: flagged ? 'driver_in_review' : null,
-            processedAt: null,
-          },
-        });
-        // Ligamos los bonos al Payout (paidInPayoutId) SIN marcar paidAt: el marcado del bono se mueve al
-        // handler de confirmación (PROCESSED), no al create. CAS `paidAt:null` para no re-ligar en un re-run.
-        if (pendingIncentiveIds.length > 0) {
-          await tx.incentiveProgress.updateMany({
-            where: { id: { in: pendingIncentiveIds }, paidAt: null },
-            data: { paidInPayoutId: payout.id },
+      // A2 · aislar el fallo POR-CONDUCTOR: un error de UN driver (netting/tx/redis) NO debe abortar el run entero
+      // — los demás conductores tienen que cobrar. El fallido NO queda marcado pagado (no se creó su Payout) → el
+      // próximo run lo reintenta (self-healing). Antes, un throw acá dejaba a TODOS los siguientes sin liquidar.
+      try {
+        const flagged = (await this.redis.sismember(FLAGGED_DRIVERS_KEY, agg.driverId)) === 1;
+        // Bonos pendientes que ESTE driver aporta a este Payout. ADR-015 §3/§D5: el cron solo AGREGA — el
+        // Payout nace PENDING (o HELD), la plata NO se ha movido. El bono se LIGA al Payout (paidInPayoutId)
+        // para saber qué incentivos marcar cuando el riel confirme, pero `paidAt` queda NULL hasta el
+        // PROCESSED confirmado (cierra el hueco 5 "bono marcado pagado sin pagar"). El CAS `paidAt:null` en el
+        // handler de confirmación garantiza no-doble-marca.
+        const pendingIncentiveIds = pendingIncentiveIdsByDriver.get(agg.driverId) ?? [];
+        const payoutId = uuidv7();
+        const netAmountCents = await this.prisma.write.$transaction(async (tx) => {
+          // A2 (ADR-022 §P-A) · NETEO de la deuda CASH: el conductor cobró la comisión de sus viajes en efectivo EN
+          // MANO → la debe a la plataforma. Se descuenta de su ganancia DIGITAL, DENTRO de la MISMA tx del payout
+          // (atomicidad: settle-deuda ⇔ payout). El payout paga el NETO; si la deuda supera el digital, el resto
+          // queda PENDING (carry-forward al próximo período). Es el flujo inverso del dinero, explícito.
+          const debtAppliedCents = await this.applyDebtNetting(
+            tx,
+            agg.driverId,
+            agg.amountCents,
+            payoutId,
+          );
+          const netAmount = agg.amountCents - debtAppliedCents;
+          await tx.payout.create({
+            data: {
+              id: payoutId,
+              driverId: agg.driverId,
+              periodStart: start,
+              periodEnd: end,
+              grossCents: agg.grossCents,
+              commissionCents: agg.commissionCents,
+              amountCents: netAmount,
+              debtAppliedCents,
+              // ADR-015 §3: el cron ya NO nace PROCESSED. PENDING (a la espera del disparo del operador) o
+              // HELD (review en curso). PROCESSED se alcanza SOLO cuando el riel confirma la salida del dinero.
+              status: flagged ? 'HELD' : 'PENDING',
+              heldReason: flagged ? 'driver_in_review' : null,
+              processedAt: null,
+            },
           });
-        }
-      });
+          // Ligamos los bonos al Payout (paidInPayoutId) SIN marcar paidAt: el marcado del bono se mueve al
+          // handler de confirmación (PROCESSED), no al create. CAS `paidAt:null` para no re-ligar en un re-run.
+          if (pendingIncentiveIds.length > 0) {
+            await tx.incentiveProgress.updateMany({
+              where: { id: { in: pendingIncentiveIds }, paidAt: null },
+              data: { paidInPayoutId: payoutId },
+            });
+          }
+          return netAmount;
+        });
 
-      if (flagged) {
-        held += 1;
-      } else {
-        pending += 1;
-        totalAmountCents += agg.amountCents;
+        if (flagged) {
+          held += 1;
+        } else {
+          pending += 1;
+          totalAmountCents += netAmountCents;
+        }
+      } catch (err) {
+        this.logger.error(
+          `Payout del conductor ${agg.driverId} falló en el run — se continúa con el resto: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
     }
 
@@ -307,7 +376,10 @@ export class PayoutsService {
    * la validamos explícita acá con un error de dominio tipado (409). PENDING/HELD tienen su propio disparo
    * (run/release), no se "reintentan"; PROCESSING ya está en curso; PROCESSED ya cobró: ninguno se reintenta.
    */
-  async retryPayout(payoutId: string, operator?: AuthenticatedUser): Promise<PayoutDisburseSummary> {
+  async retryPayout(
+    payoutId: string,
+    operator?: AuthenticatedUser,
+  ): Promise<PayoutDisburseSummary> {
     const payout = await this.prisma.read.payout.findUnique({ where: { id: payoutId } });
     if (!payout) throw new NotFoundError(`Payout ${payoutId} no encontrado`);
     if (payout.status !== PayoutStatus.FAILED) {
@@ -669,6 +741,11 @@ export class PayoutsService {
   ): Promise<{ rows: DriverEarningRow[]; pendingIncentiveIdsByDriver: Map<string, string[]> }> {
     const payments = await this.prisma.read.payment.findMany({
       where: {
+        // A2 (ADR-022 §P-A) · EXCLUIR el efectivo del payout POSITIVO: en un viaje CASH el conductor ya cobró su
+        // neto EN MANO (la plata nunca pasó por la plataforma). Pagárselo otra vez por banco = doble-pago (el bug
+        // A2). Su comisión adeudada se acumula en `DriverDebt` (en la captura) y se NETEA aparte en el run. Los
+        // tip-Payments DIGITALES de un viaje cash (method != CASH, Model B) SÍ entran: son propina real por banco.
+        method: { not: 'CASH' },
         // Incluye PARTIALLY_REFUNDED (F4): un reembolso PARCIAL al pasajero lo absorbe la plataforma
         // (sale de su comisión); el conductor prestó el servicio → mantiene su neto. Un cobro REFUNDED
         // (total) sí queda fuera (viaje revertido → el conductor no cobra).
