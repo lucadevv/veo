@@ -131,6 +131,12 @@ export const common = {
     comingSoonWhatsapp:
       'El envío del código por WhatsApp estará disponible pronto.',
     back: 'Volver',
+    /** Consentimientos Ley N.° 29733 capturados en el ingreso (fuente: design/veo.pen P/Auth). */
+    consentData: 'Acepto el tratamiento de mis datos personales',
+    consentCamera: 'Permito el acceso a la cámara durante mis viajes',
+    consentLocation: 'Permito compartir mi ubicación en tiempo real',
+    orContinueWith: 'o continúa con',
+    emailLink: 'Ingresa con correo',
     phoneTitle: 'Ingresa tu número',
     phoneSubtitle: 'Te enviamos un código por SMS.',
     phoneLabel: 'Número de teléfono',

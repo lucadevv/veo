@@ -19,6 +19,8 @@ export interface OtpFieldProps {
   hasError: boolean;
   /** Cambia su valor para disparar el "shake" (p. ej. contador de errores de verificación). */
   errorNonce?: number;
+  /** Editable/enfocable. Por defecto true. En false no roba foco ni abre teclado (dim). */
+  editable?: boolean;
   accessibilityLabel: string;
 }
 
@@ -98,6 +100,7 @@ export function OtpField({
   length = 6,
   hasError,
   errorNonce = 0,
+  editable = true,
   accessibilityLabel,
 }: OtpFieldProps): React.JSX.Element {
   const {t} = useTranslation();
@@ -126,8 +129,8 @@ export function OtpField({
   }));
 
   return (
-    <Pressable onPress={() => inputRef.current?.focus()}>
-      <Animated.View style={[styles.row, {gap: theme.spacing.sm}, rowStyle]}>
+    <Pressable onPress={() => editable && inputRef.current?.focus()}>
+      <Animated.View style={[styles.row, {gap: theme.spacing.sm, opacity: editable ? 1 : 0.55}, rowStyle]}>
         {Array.from({length}).map((_, index) => {
           const char = value[index] ?? '';
           const active =
