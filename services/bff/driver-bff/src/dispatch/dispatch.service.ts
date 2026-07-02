@@ -8,14 +8,25 @@ import { NotFoundError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
-import type { DriverReply, MatchReply, SurgeReply } from '../common/grpc-replies';
+import { PassengerVerificationService } from '../common/passenger-verification.service';
+import type { DriverReply, MatchReply, SurgeReply, TripReply } from '../common/grpc-replies';
 import type { OfferView, OpenBidView, SubmittedOfferView, SurgeView } from './dto/dispatch.dto';
 
 function emptyToNull(value: string): string | null {
   return value ? value : null;
 }
 
-export function toOfferView(match: MatchReply): OfferView {
+/**
+ * Serializa la oferta ENRIQUECIDA: el match (id/score/…) + el resumen de DECISIÓN del viaje (tarifa,
+ * distancia, duración, modo niño, origen/destino) + el badge de confianza. El viaje llega UNSCOPED
+ * (la oferta ES la autorización). `originLng`/`destinationLng` del contrato gRPC se exponen como
+ * `originLon`/`destLon` (convención de la app). Sin PII de identidad (regla #5): ni nombre ni childCode.
+ */
+export function toOfferView(
+  match: MatchReply,
+  trip: TripReply,
+  passengerVerified: boolean,
+): OfferView {
   return {
     id: match.id,
     tripId: match.tripId,
@@ -26,6 +37,16 @@ export function toOfferView(match: MatchReply): OfferView {
     outcome: match.outcome,
     offeredAt: emptyToNull(match.offeredAt),
     respondedAt: emptyToNull(match.respondedAt),
+    originLat: trip.originLat,
+    originLon: trip.originLng,
+    destLat: trip.destinationLat,
+    destLon: trip.destinationLng,
+    fareCents: trip.fareCents,
+    distanceMeters: trip.distanceMeters,
+    durationSeconds: trip.durationSeconds,
+    childMode: trip.childMode,
+    specialRequests: trip.specialRequests,
+    passengerVerified,
   };
 }
 
@@ -42,6 +63,7 @@ export class DispatchService {
   constructor(
     private readonly grpc: GrpcGateway,
     private readonly rest: RestGateway,
+    private readonly passengerVerification: PassengerVerificationService,
   ) {}
 
   async getOffer(matchId: string, identity: AuthenticatedUser): Promise<OfferView> {
@@ -50,7 +72,18 @@ export class DispatchService {
     const { identity: signed } = await this.resolveDriver(identity);
     const match = await this.grpc.call<MatchReply>('dispatch', 'GetMatch', { matchId }, signed);
     if (!match.found) throw new NotFoundError('Oferta no encontrada');
-    return toOfferView(match);
+    // ENRIQUECIMIENTO · la oferta debe cargar el resumen de DECISIÓN del viaje para que la pantalla de
+    // oferta entrante lo pinte SIN pegarle a `GET /trips/:id` (gateado por conductor asignado → el
+    // ofertado aún no lo es → 404 "Viaje no encontrado", que rompía el match). Se lee el viaje UNSCOPED
+    // (SIN el gate anti-IDOR de conductor-asignado): dispatch YA validó que ESTA oferta es de ESTE
+    // conductor (GetMatch con el driverId derivado+firmado), así que la oferta ES la autorización para
+    // ver el resumen. NO se debilita `GET /trips/:id`: solo la lectura de la oferta usa este camino.
+    const trip = await this.grpc.call<TripReply>('trip', 'GetTrip', { id: match.tripId }, signed);
+    if (!trip.found) throw new NotFoundError('Viaje de la oferta no encontrado');
+    // ADR-018 §1(3) · badge de confianza (booleano PURO, cero PII). Resolución compartida (misma que
+    // Lote 4): lazy al servir la oferta. Degrada a false si identity no responde (nunca rompe la oferta).
+    const passengerVerified = await this.passengerVerification.resolve(trip.passengerId, signed);
+    return toOfferView(match, trip, passengerVerified);
   }
 
   async accept(matchId: string, identity: AuthenticatedUser): Promise<unknown> {

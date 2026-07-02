@@ -56,7 +56,9 @@ export const envSchema = z
     // Default = BID_MAX_CENTS canónico de @veo/utils (S/ 9,999); ajustable por entorno. Es el chequeo
     // de dominio AUTORITATIVO en createTrip/applyAgreedFare (los DTOs son la primera barrera).
     BID_MAX_CENTS: z.coerce.number().int().positive().default(BID_MAX_CENTS),
-    // Ventana de la puja en segundos (decisión #9.1: 60s; ajustable por config/zona a futuro).
+    // Ventana de la puja en segundos (decisión #9.1: 60s). ADVISORY desde ADR-019 Lote A: dispatch es la
+    // AUTORIDAD de la ventana (config editable por el admin en dispatch_radius_config). trip-service la
+    // sigue enviando en bid_posted.windowSec por compat, pero openBoard/reopenBoard mandan el valor vigente.
     BID_WINDOW_SEC: z.coerce.number().int().positive().default(60),
     // PUJA robustez #4: tope de re-asignaciones tras cancelación del conductor post-accept. Superado el
     // tope, el viaje NO se re-puja más (anti bucle infinito): cae a FAILED y se notifica al pasajero.

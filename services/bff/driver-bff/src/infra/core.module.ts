@@ -25,6 +25,7 @@ import type { Redis } from '@veo/redis';
 import { redisProvider, RedisLifecycle, REDIS } from './redis';
 import { GrpcGateway } from './grpc.gateway';
 import { RestGateway } from './rest.gateway';
+import { PassengerVerificationService } from '../common/passenger-verification.service';
 import { MAPS, buildMapsClient } from './maps.client';
 import type { Env } from '../config/env.schema';
 
@@ -124,6 +125,7 @@ const mapsProvider: Provider = {
     SessionRevocationGuard,
     GrpcGateway,
     RestGateway,
+    PassengerVerificationService,
   ],
   exports: [
     REDIS,
@@ -137,6 +139,7 @@ const mapsProvider: Provider = {
     SessionRevocationGuard,
     GrpcGateway,
     RestGateway,
+    PassengerVerificationService,
   ],
 })
 export class CoreModule {}

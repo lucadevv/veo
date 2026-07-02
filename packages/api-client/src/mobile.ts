@@ -2280,7 +2280,15 @@ export const driverSurgeView = z.object({
 });
 export type DriverSurgeView = z.infer<typeof driverSurgeView>;
 
-/** GET /dispatch/offers/:matchId → oferta/match (se acepta/rechaza por REST y llega por WS). */
+/**
+ * GET /dispatch/offers/:matchId → oferta/match (se acepta/rechaza por REST y llega por WS). El WS solo
+ * trae matchId/tripId/expiresAt; ESTE endpoint ENRIQUECE con el resumen de DECISIÓN del viaje (tarifa,
+ * distancia, duración, modo niño, origen/destino para el mapa) + el badge de confianza, para que la
+ * pantalla de oferta entrante lo pinte SIN pegarle a `GET /trips/:id` (que exige conductor asignado —
+ * el ofertado aún no lo es). La oferta ES la autorización: el driver-bff lee el viaje UNSCOPED al servir.
+ * Regla #5 (CLAUDE.md driver): cero PII de identidad del pasajero (sin nombre, sin childCode) — solo
+ * datos operativos del viaje + un booleano de verificación.
+ */
 export const driverOfferView = z.object({
   id: z.string(),
   tripId: z.string(),
@@ -2291,6 +2299,26 @@ export const driverOfferView = z.object({
   outcome: z.string(),
   offeredAt: z.string().nullable(),
   respondedAt: z.string().nullable(),
+  // ── Resumen de DECISIÓN del viaje (enriquecido por el driver-bff desde trip-service) ──
+  /** Origen/recojo para el mapa de la oferta. */
+  originLat: z.number(),
+  originLon: z.number(),
+  /** Destino para el mapa de la oferta. */
+  destLat: z.number(),
+  destLon: z.number(),
+  /** Tarifa estimada (céntimos PEN) — el foco de la decisión. */
+  fareCents: z.number().int(),
+  distanceMeters: z.number(),
+  durationSeconds: z.number(),
+  /** Modo niño (booleano PURO; el código NUNCA viaja pre-aceptación). */
+  childMode: z.boolean(),
+  /** BE-2 · solicitudes especiales del pasajero (PET|LUGGAGE|CHILD_SEAT); [] si ninguna. */
+  specialRequests: z.array(z.string()),
+  /**
+   * ADR-018 §1(3) · badge de confianza: `true` sii el pasajero está KYC-VERIFIED. Booleano PURO — cero
+   * PII. Degradación honesta: si identity no responde, `false` (la oferta se sirve igual).
+   */
+  passengerVerified: z.boolean(),
 });
 export type DriverOfferView = z.infer<typeof driverOfferView>;
 
@@ -2354,14 +2382,6 @@ export const driverTripView = z.object({
   paymentMethod: z.string(),
   childMode: z.boolean(),
   penaltyCents: z.number().int(),
-  /**
-   * ADR-018 §1(3) · badge de confianza: el conductor VE si el pasajero está VERIFICADO al recibir la
-   * oferta (`GET /trips/:id` lo enriquece). Booleano puro — cero PII del pasajero. `.optional()` porque
-   * las respuestas passthrough de las transiciones (accept/arriving/…) vienen crudas del trip-service y
-   * NO traen el flag: ahí llega `undefined` y la UI lo trata como "no verificado" (ausencia = estado
-   * neutro, sin etiqueta de "no verificado", estilo BlaBlaCar). El badge solo aparece cuando es `true`.
-   */
-  passengerVerified: z.boolean().optional(),
 });
 export type DriverTripView = z.infer<typeof driverTripView>;
 

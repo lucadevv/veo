@@ -131,6 +131,10 @@ message TripReply {
   // VACÍA si el viaje es directo (proto3 → repeated nunca es null). El BFF las pasa al tripActiveView para
   // que el pasajero pinte las MISMAS paradas que ve el conductor (fuente única: el trip del servidor).
   repeated GeoPoint waypoints = 23;
+  // BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla), persistidas en
+  // Trip.special_requests. [] si ninguna (proto3 → repeated nunca es null). El conductor las VE en la
+  // oferta entrante para decidir antes de aceptar (ADR-018); valores del enum SpecialRequest como string.
+  repeated string special_requests = 24;
 }
 
 // Punto geográfico del viaje (lat/lon). Reusado por las paradas intermedias del TripReply.

@@ -15,7 +15,13 @@ export class SurgeQueryDto {
   lon!: number;
 }
 
-/** Vista de una oferta/match de dispatch para el conductor. */
+/**
+ * Vista de una oferta/match de dispatch para el conductor, ENRIQUECIDA con el resumen de DECISIÓN del
+ * viaje (tarifa/distancia/duración/modo niño + origen/destino para el mapa) y el badge de confianza.
+ * El driver-bff lee el viaje de trip-service UNSCOPED (la oferta ES la autorización; el conductor
+ * ofertado aún no está asignado, así que `GET /trips/:id` — gateado por conductor asignado — daría 404).
+ * Sin PII de identidad del pasajero (regla #5): ni nombre ni childCode, solo datos operativos + booleano.
+ */
 export interface OfferView {
   id: string;
   tripId: string;
@@ -26,6 +32,19 @@ export interface OfferView {
   outcome: string;
   offeredAt: string | null;
   respondedAt: string | null;
+  // ── Resumen de DECISIÓN del viaje ──
+  originLat: number;
+  originLon: number;
+  destLat: number;
+  destLon: number;
+  fareCents: number;
+  distanceMeters: number;
+  durationSeconds: number;
+  childMode: boolean;
+  /** BE-2 · solicitudes especiales del pasajero (PET|LUGGAGE|CHILD_SEAT); [] si ninguna. */
+  specialRequests: string[];
+  /** ADR-018 §1(3) · `true` sii el pasajero está KYC-VERIFIED (booleano PURO, cero PII). */
+  passengerVerified: boolean;
 }
 
 /** Vista del surge para un origen. */

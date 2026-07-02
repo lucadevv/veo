@@ -74,6 +74,9 @@ interface TripReply {
   /// Paradas intermedias ordenadas (Ola 2B); [] si el viaje es directo. El BFF las pasa al tripActiveView
   /// para que el pasajero pinte las MISMAS paradas que ve el conductor (fuente única: el trip del servidor).
   waypoints: { lat: number; lon: number }[];
+  /// BE-2 · solicitudes especiales del pasajero (enum SpecialRequest como string); [] si ninguna.
+  /// El conductor las VE en la oferta entrante (ADR-018) para decidir antes de aceptar.
+  specialRequests: string[];
   found: boolean;
 }
 
@@ -139,6 +142,7 @@ const EMPTY_TRIP: TripReply = {
   destinationLng: 0,
   routePolyline: '',
   waypoints: [],
+  specialRequests: [],
   found: false,
 };
 
@@ -281,6 +285,9 @@ export class TripGrpcController {
       routePolyline: t.routePolyline ?? '',
       // Paradas intermedias (Ola 2B) persistidas como JSON en Trip.waypoints; [] si el viaje es directo.
       waypoints: readWaypoints(t),
+      // BE-2 · solicitudes especiales del pasajero (enum SpecialRequest[]); [] si ninguna. El conductor
+      // las ve en la oferta entrante (ADR-018). proto3 repeated nunca es null.
+      specialRequests: t.specialRequests,
       found: true,
     };
   }
@@ -320,6 +327,8 @@ export class TripGrpcController {
       routePolyline: v.routePolyline ?? '',
       // El TripView ya trae las paradas como {lat,lon} ([] si directo); pasthrough directo al contrato gRPC.
       waypoints: v.waypoints,
+      // BE-2 · solicitudes especiales (el TripView ya las trae como SpecialRequest[]); [] si ninguna.
+      specialRequests: v.specialRequests,
       found: true,
     };
   }

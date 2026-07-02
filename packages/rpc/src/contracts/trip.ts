@@ -39,6 +39,12 @@ export interface TripReply {
   routePolyline: string;
   /** Paradas intermedias ordenadas (Ola 2B); [] si el viaje es directo (repeated nunca es null). */
   waypoints: GeoPoint[];
+  /**
+   * BE-2 · solicitudes especiales del pasajero (valores del enum SpecialRequest como string:
+   * PET|LUGGAGE|CHILD_SEAT); [] si ninguna (proto3 repeated nunca es null). El conductor las VE en la
+   * oferta entrante (ADR-018) para decidir antes de aceptar.
+   */
+  specialRequests: string[];
 }
 
 /** trip.GetTripState / mensaje TripStateReply. */

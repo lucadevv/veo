@@ -22,7 +22,7 @@ import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
-import { useAcceptOffer, useRejectOffer, useTrip } from '../hooks/useTrips';
+import { useAcceptOffer, useOffer, useRejectOffer } from '../hooks/useTrips';
 import { CountdownRing } from '../components/CountdownRing';
 import { Appear, Pulse } from '../components/motion';
 
@@ -69,7 +69,10 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
   const clearOffer = useDispatchStore((s) => s.clearOffer);
   const setActiveTripId = useDispatchStore((s) => s.setActiveTripId);
 
-  const trip = useTrip(tripId);
+  // Fuente del resumen: la OFERTA (no `GET /trips/:id`). El conductor ofertado aún NO está asignado al
+  // viaje, así que el detalle gateado por conductor-asignado daría 404 y rompía el match: la oferta ES la
+  // autorización y ya trae el resumen de DECISIÓN (tarifa/distancia/duración/modo niño/origen/destino).
+  const offer = useOffer(matchId);
   const acceptOffer = useAcceptOffer();
   const rejectOffer = useRejectOffer();
 
@@ -117,7 +120,9 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
 
   return (
     <SafeScreen padded={false}>
-      {/* Mapa de fondo atenuado: sin coordenadas reales pre-aceptación, centramos en Lima sin pin. */}
+      {/* Mapa de fondo atenuado: sin coordenadas reales pre-aceptación, centramos en Lima SIN pin.
+          Regla #5 del conductor: pre-aceptación solo distancia + tarifa; el recojo/destino exactos son
+          "datos completos" que se revelan POST-aceptación (en TripActive). No mostramos pins acá. */}
       <View style={styles.mapArea}>
         <MapShell>
           <AppMap center={LIMA_CENTER} interactive={false} />
@@ -180,7 +185,7 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
           {scheduled ? <StatusPill label={t('trips.scheduledBadge')} tone="brand" dot /> : null}
           {/* ADR-018 §1(3) · badge de confianza: se muestra SOLO si el pasajero está verificado. Su
               ausencia es el estado neutro (no hay etiqueta de "no verificado"), estilo BlaBlaCar. */}
-          {trip.data?.passengerVerified ? (
+          {offer.data?.passengerVerified ? (
             <StatusPill label={t('trips.passengerVerified')} tone="success" dot />
           ) : null}
         </View>
@@ -190,13 +195,13 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {trip.isLoading ? (
+          {offer.isLoading ? (
             <Skeleton height={140} />
-          ) : trip.isError || !trip.data ? (
+          ) : offer.isError || !offer.data ? (
             <StateView
               title={t('errors.generic')}
-              description={toErrorMessage(trip.error, t)}
-              action={{ label: t('common.retry'), onPress: () => trip.refetch() }}
+              description={toErrorMessage(offer.error, t)}
+              action={{ label: t('common.retry'), onPress: () => offer.refetch() }}
             />
           ) : (
             <>
@@ -206,7 +211,7 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
                   {t('trips.estimatedFare')}
                 </Text>
                 <Text variant="display" align="center" tabular>
-                  {formatPEN(trip.data.fareCents)}
+                  {formatPEN(offer.data.fareCents)}
                 </Text>
               </Appear>
 
@@ -230,7 +235,7 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
                       {t('trips.distance')}
                     </Text>
                     <Text variant="bodyStrong" tabular>
-                      {t('trips.kilometers', { value: metersToKm(trip.data.distanceMeters) })}
+                      {t('trips.kilometers', { value: metersToKm(offer.data.distanceMeters) })}
                     </Text>
                   </View>
                   <View style={styles.metricRow}>
@@ -238,13 +243,27 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
                       {t('trips.duration')}
                     </Text>
                     <Text variant="bodyStrong" tabular>
-                      {t('trips.minutes', { value: secondsToMinutes(trip.data.durationSeconds) })}
+                      {t('trips.minutes', { value: secondsToMinutes(offer.data.durationSeconds) })}
                     </Text>
                   </View>
                 </View>
               </Appear>
 
-              {trip.data.childMode ? (
+              {/* BE-2 · solicitudes especiales (mascota/equipaje/silla): el conductor las ve para decidir.
+                  Reusa las etiquetas i18n del marketplace de pujas (trips.bid.special.*). */}
+              {offer.data.specialRequests.length > 0 ? (
+                <Appear delay={160} style={styles.specials}>
+                  {offer.data.specialRequests.map((req) => (
+                    <StatusPill
+                      key={req}
+                      label={t(`trips.bid.special.${req}`, { defaultValue: req })}
+                      tone="neutral"
+                    />
+                  ))}
+                </Appear>
+              ) : null}
+
+              {offer.data.childMode ? (
                 <Banner
                   tone="info"
                   title={t('trips.childMode')}
@@ -326,6 +345,7 @@ const styles = StyleSheet.create({
   scroll: { marginTop: 16 },
   scrollContent: { gap: 16, paddingBottom: 8 },
   fareBlock: { gap: 2 },
+  specials: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   routeCard: { flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16 },
   rail: { alignItems: 'center', alignSelf: 'stretch', paddingVertical: 4 },
   dot: { width: 12, height: 12, borderRadius: 999 },

@@ -108,12 +108,6 @@ export interface TripView {
   paymentMethod: string;
   childMode: boolean;
   penaltyCents: number;
-  /**
-   * ADR-018 §1(3) · badge de confianza al conductor: `true` si el pasajero está KYC-VERIFIED. Se resuelve
-   * lazy al leer la oferta (identity GetUser → kycStatus). Booleano PURO — NO expone PII del pasajero.
-   * Degradación honesta: si identity no responde, `false` (nunca rompe la carga de la oferta).
-   */
-  passengerVerified: boolean;
 }
 
 /** Vista del estado del viaje (para tracking ligero). */

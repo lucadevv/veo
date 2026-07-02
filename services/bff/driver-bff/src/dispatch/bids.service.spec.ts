@@ -35,7 +35,9 @@ function makeService(opts: {
         })),
   );
   const rest = { client: vi.fn(() => ({ get, post })) };
-  const service = new DispatchService(grpc as never, rest as never);
+  // El badge de confianza (ADR-018) no interviene en las pujas; mock inerte para el 3er dep del ctor.
+  const passengerVerification = { resolve: vi.fn(() => Promise.resolve(false)) };
+  const service = new DispatchService(grpc as never, rest as never, passengerVerification as never);
   return { service, grpc, get, post };
 }
 
