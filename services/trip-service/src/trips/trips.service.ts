@@ -1245,6 +1245,35 @@ export class TripsService {
   }
 
   /**
+   * Fase B (ADR-021 · finding B1 · B-react) — el conductor pasó a OFFLINE (`driver.went_offline`: fin de
+   * turno o caída de socket sin reconexión). Si tenía un viaje PRE-RECOJO ya ACEPTADO (ACCEPTED/ARRIVING/
+   * ARRIVED) lo REASIGNAMOS: el pasajero consigue otro conductor en vez de esperar los ~15min del watchdog
+   * pre-recojo (que solo EXPIRA, sin re-match). REUSAMOS la máquina existente `reassignAfterDriverCancel`
+   * (la MISMA del cancel EXPLÍCITO del conductor): respeta el modo CONGELADO del viaje + el tope de
+   * re-asignaciones + emite `trip.reassigning` (dispatch re-abre el board y libera al conductor). NO se
+   * duplica lógica de reasignación: solo se enruta el viaje del conductor offline hacia ella.
+   *
+   * ALCANCE (in-scope de Fase B): SOLO POST_ACCEPT_STATES. Un viaje en ASSIGNED (el pasajero eligió pero el
+   * conductor aún no tocó "aceptar") NO se reasigna por esta vía — ASSIGNED→REASSIGNING NO es transición
+   * legal de la máquina (igual que el cancel desde ASSIGNED, terminal); abrir ese camino es Fase G.
+   *
+   * IDEMPOTENTE: sin viaje pre-recojo del conductor (ya reasignado/terminado, o nunca aceptó) es no-op. Los
+   * eventos de UN conductor caen en la MISMA partición del topic 'driver' → se procesan SERIAL, así una
+   * segunda entrega ve el viaje ya en REASSIGNING (fuera de POST_ACCEPT) → no re-reasigna.
+   */
+  async reassignForDriverOffline(driverId: string): Promise<void> {
+    const trip = await this.prisma.read.trip.findFirst({
+      where: { driverId, status: { in: [...POST_ACCEPT_STATES] } },
+      orderBy: { assignedAt: 'desc' },
+    });
+    if (!trip) return;
+    this.logger.log(
+      `Conductor ${driverId} offline con viaje ${trip.id} (${trip.status}) pre-recojo → reasignando`,
+    );
+    await this.reassignAfterDriverCancel(trip, 'driver_offline');
+  }
+
+  /**
    * ROBUSTEZ #4 · tope de re-asignaciones superado: el viaje NO puede seguir re-pujando (sería un bucle
    * infinito de cancelaciones). Lo llevamos al terminal FAILED (único terminal alcanzable desde los
    * estados post-accept en la máquina de estados) y emitimos trip.failed para que el pasajero reciba la

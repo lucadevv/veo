@@ -5,7 +5,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
-import { createEnvelope } from '@veo/events';
+import { createEnvelope, DRIVER_OFFLINE_REASON } from '@veo/events';
 import { RedisRefreshTokenStore } from '@veo/auth';
 import {
   ConflictError,
@@ -84,6 +84,27 @@ function driverStatusSources(to: DriverStatus): DriverStatus[] {
     driverStatusMachine.canTransition(from, to),
   );
 }
+
+/**
+ * Fase A (ADR-021) — estados del eje en los que el conductor tiene un VIAJE ACTIVO (asignado o en curso).
+ * El RELEASE al pool (→AVAILABLE disparado por el fin del viaje) parte SOLO de aquí: es la intersección de
+ * las fuentes legales de AVAILABLE con los estados de viaje activo. NUNCA resucita un OFFLINE/ON_BREAK a
+ * AVAILABLE (esos vuelven EXCLUSIVAMENTE por el gate biométrico de startShift, ver domain/driver-status.ts)
+ * ni toca un SUSPENDED (que ni siquiera es fuente legal de AVAILABLE). Sin este recorte, `driverStatusSources
+ * (AVAILABLE)` incluiría OFFLINE/ON_BREAK y un release por Kafka saltaría el gate biométrico. Enum tipado.
+ */
+const TRIP_ACTIVE_STATES: readonly DriverStatus[] = [
+  DriverStatus.ASSIGNED,
+  DriverStatus.ON_TRIP,
+];
+
+/**
+ * Desenlace de una transición del eje disparada por el ciclo de vida del VIAJE (Fase A · ADR-021):
+ *  - `'moved'`   — el CAS matcheó y movió el estado (o fue una re-aplicación idempotente from===to).
+ *  - `'noop'`    — la transición era ILEGAL desde el estado actual (redelivery, SUSPENDED/OFFLINE, o el
+ *                  estado fuente no estaba en el conjunto legal): NO-OP silencioso, jamás un throw/crash.
+ */
+export type TripStatusMoveOutcome = 'moved' | 'noop';
 
 /**
  * Estados DESDE los que `to` es alcanzable en el eje BackgroundCheckStatus (inversa de la tabla de la máquina).
@@ -1884,6 +1905,39 @@ export class DriversService {
     return { status: 'AVAILABLE', score: session.score };
   }
 
+  /**
+   * Fase A (ADR-021 · el fix RAÍZ del "un viaje por conductor") — mueve `Driver.currentStatus` por el
+   * CICLO DE VIDA DEL VIAJE (lo dispara el TripLifecycleConsumer al ingerir trip.assigned/accepted/started/
+   * completed/cancelled/expired/failed/reassigning). Hasta hoy NADIE movía este eje: el conductor quedaba
+   * AVAILABLE TODO el viaje → el `eligibility.gate` (AVAILABLE-only) lo dejaba ganar boards concurrentes.
+   *
+   * TRANSICIÓN POR CAS ATÓMICO derivado de la máquina (cero strings mágicos, misma técnica que el CAS de
+   * startShift): `updateMany` con `currentStatus IN driverStatusSources(to)` en el WHERE → mueve el estado en
+   * el MISMO statement que valida que era una transición LEGAL, sin check-then-act. Es:
+   *  - IDEMPOTENTE — la máquina permite from===to (una redelivery Kafka del mismo evento re-aplica sin efecto).
+   *  - CONCURRENCY-SAFE — dos writers compiten por el UPDATE; el CAS es la sección crítica.
+   *  - FAIL-SAFE — una transición ILEGAL desde el estado actual (redelivery vieja, conductor SUSPENDED/OFFLINE,
+   *    orden inesperado) matchea count=0 → devuelve 'noop'. JAMÁS lanza: el consumer NO debe crashear/reintentar
+   *    por un no-op legítimo (eso bloquearía la partición). Solo un error transitorio de DB burbujea (lo relanza
+   *    el caller para que Kafka reintente).
+   *
+   * RELEASE SEGURO (→AVAILABLE): las fuentes se RECORTAN a `TRIP_ACTIVE_STATES` (ASSIGNED/ON_TRIP). Así un
+   * conductor que colgó (OFFLINE), pausó (ON_BREAK) o fue SUSPENDIDO durante el viaje NO es forzado de vuelta a
+   * AVAILABLE por el fin del viaje — su vuelta al pool pasa por el gate biométrico de startShift, no por Kafka.
+   * Para ASSIGNED/ON_TRIP las fuentes de la máquina ya son las correctas (AVAILABLE→ASSIGNED→ON_TRIP).
+   */
+  async moveStatusForTrip(driverId: string, to: DriverStatus): Promise<TripStatusMoveOutcome> {
+    const sources =
+      to === DriverStatus.AVAILABLE
+        ? driverStatusSources(to).filter((from) => TRIP_ACTIVE_STATES.includes(from))
+        : driverStatusSources(to);
+    const claim = await this.prisma.write.driver.updateMany({
+      where: { id: driverId, currentStatus: { in: sources } },
+      data: { currentStatus: to },
+    });
+    return claim.count > 0 ? 'moved' : 'noop';
+  }
+
   /** Lee+borra (un solo uso) el sessionRef y valida que pertenece al conductor y al kind SHIFT_START. */
   private async consumeSession(sessionRef: string, userId: string): Promise<BiometricSession> {
     const key = bioSessionKey(sessionRef);
@@ -1955,9 +2009,36 @@ export class DriversService {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });
     if (!d) throw new NotFoundError('Conductor no encontrado');
     driverStatusMachine.assertTransition(d.currentStatus, status);
-    const updated = await this.prisma.write.driver.update({
-      where: { id: d.id },
-      data: { currentStatus: status },
+    // Fase B (ADR-021 · finding B1) — el fin de turno hacia OFFLINE emite `driver.went_offline`
+    // (reason=shift_end) por OUTBOX en la MISMA tx que el CAS de currentStatus (FOUNDATION §6: nunca
+    // OFFLINE sin evento ni evento sin OFFLINE). Downstream: dispatch retira sus ofertas + lo evicta del
+    // pool; trip-service reasigna su viaje pre-recojo si lo tenía. ON_BREAK NO emite (es una pausa EN
+    // turno, el conductor sigue online). `driverId` = id de PERFIL Driver (d.id), SIN PII.
+    const emitOffline = status === DriverStatus.OFFLINE;
+    const updated = await this.prisma.write.$transaction(async (tx) => {
+      const row = await tx.driver.update({
+        where: { id: d.id },
+        data: { currentStatus: status },
+      });
+      if (emitOffline) {
+        const envelope = createEnvelope({
+          eventType: 'driver.went_offline',
+          producer: 'identity-service',
+          payload: {
+            driverId: d.id,
+            at: new Date().toISOString(),
+            reason: DRIVER_OFFLINE_REASON.SHIFT_END,
+          },
+        });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: d.id,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+      return row;
     });
     return { status: updated.currentStatus };
   }

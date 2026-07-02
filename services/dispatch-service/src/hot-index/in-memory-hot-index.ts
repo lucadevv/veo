@@ -15,6 +15,9 @@ import type {
 export class InMemoryHotIndex implements HotIndex {
   private readonly locations = new Map<string, DriverLocation>();
   private readonly busy = new Set<string>();
+  /// A2 (ADR-021 Fase A) — claim síncrono per-conductor: driverId → tripId que lo posee. Espeja la key
+  /// `driver:claim:{id}` de RedisHotIndex (sin TTL: los tests siembran y sueltan explícitamente).
+  private readonly claims = new Map<string, string>();
 
   async upsertLocation(
     driverId: string,
@@ -80,6 +83,7 @@ export class InMemoryHotIndex implements HotIndex {
   async clear(): Promise<void> {
     this.locations.clear();
     this.busy.clear();
+    this.claims.clear();
   }
 
   async markBusy(driverId: string): Promise<void> {
@@ -90,9 +94,23 @@ export class InMemoryHotIndex implements HotIndex {
     this.busy.delete(driverId);
   }
 
+  async tryClaimDriver(driverId: string, tripId: string, _ttlSeconds: number): Promise<boolean> {
+    // Paridad con CLAIM_SCRIPT de RedisHotIndex: claim nuevo O del MISMO tripId (idempotente) → true;
+    // reclamado por OTRO viaje → false. El TTL no aplica en memoria (los tests sueltan explícitamente).
+    const existing = this.claims.get(driverId);
+    if (existing !== undefined && existing !== tripId) return false;
+    this.claims.set(driverId, tripId);
+    return true;
+  }
+
+  async releaseClaim(driverId: string): Promise<void> {
+    this.claims.delete(driverId);
+  }
+
   async remove(driverId: string): Promise<void> {
     this.locations.delete(driverId);
     this.busy.delete(driverId);
+    this.claims.delete(driverId);
   }
 
   async getLocation(driverId: string): Promise<DriverLocation | null> {

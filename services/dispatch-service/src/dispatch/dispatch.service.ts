@@ -248,9 +248,26 @@ export class DispatchService {
     return match.driverId;
   }
 
-  /** Tras completar el viaje, el conductor vuelve al pool disponible. */
+  /**
+   * Tras un TERMINAL del viaje (completado/cancelado/expirado/fallido) el conductor vuelve al pool
+   * disponible. A2/B2 (ADR-021 Fase A): además de `markAvailable` (busy-flag) suelta el CLAIM SÍNCRONO
+   * per-conductor (`releaseClaim`) — son GEMELOS del accept (`markBusy` + `tryClaimDriver`) y se sueltan
+   * JUNTOS. Idempotente + fail-safe: soltar un conductor no-ocupado/no-reclamado es no-op, nunca crashea.
+   */
   async releaseDriver(driverId: string): Promise<void> {
     await this.hotIndex.markAvailable(driverId);
+    await this.hotIndex.releaseClaim(driverId);
+  }
+
+  /**
+   * Fase B (ADR-021 · B-react) — el conductor pasó a OFFLINE (`driver.went_offline`): lo EVICTAMOS del pool.
+   * `hotIndex.remove` es la semántica correcta para offline (NO `releaseDriver`/`markAvailable`, que lo
+   * RE-INSERTARÍA en el set disponible mientras su loc TTL no venza → seguiría siendo candidato de matching
+   * estando offline). `remove` borra loc + set de celda + busy-flag + claim per-conductor + índice de
+   * presencia en UNA pasada. Idempotente + fail-safe: evictar a un conductor ausente es no-op.
+   */
+  async evictDriver(driverId: string): Promise<void> {
+    await this.hotIndex.remove(driverId);
   }
 
   /** Resuelve el conductor asignado a un viaje (para proyección en trip.completed/cancelled). */

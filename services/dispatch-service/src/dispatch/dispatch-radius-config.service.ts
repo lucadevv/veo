@@ -33,7 +33,7 @@ export const DISPATCH_RADIUS_CONFIG_UPDATED = 'dispatch.radius_config_updated' a
 export const DEFAULT_RADIUS_CONFIG = {
   nearbyKRing: 3,
   matchKRing: 4,
-  offerTimeoutMs: 12_000,
+  offerTimeoutMs: 20_000, // ADR-021 Fase F (F2) — 12s→20s (default; admin-configurable)
   bidWindowSec: 60,
 } as const;
 

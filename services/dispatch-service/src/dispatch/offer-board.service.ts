@@ -166,6 +166,14 @@ export class OfferBoardService {
   private readonly bidMaxCents: number;
   /** Margen (s) sobre la ventana para el TTL de Redis, así el barrido alcanza a marcar EXPIRED. */
   private static readonly TTL_MARGIN_SECONDS = 30;
+  /**
+   * A2 (ADR-021 Fase A) — TTL (s) de la RED DE SEGURIDAD del claim síncrono per-conductor. GEMELO del
+   * BUSY_TTL del hot-index (2h): el claim y el busy-flag se ponen JUNTOS en el accept (`tryClaimDriver` +
+   * `markBusy`) y se sueltan JUNTOS en el terminal (`releaseDriver` → `releaseClaim` + `markAvailable`).
+   * El release explícito es el camino normal; el TTL solo cubre el crash entre el accept y el terminal, y
+   * es largo para no expirar a MITAD de un viaje vivo (dejaría al conductor reclamable durante su viaje).
+   */
+  private static readonly DRIVER_CLAIM_TTL_SECONDS = 7_200;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -559,7 +567,42 @@ export class OfferBoardService {
       throw new ConflictError('La puja ya no está abierta', { status: claim.status });
     }
 
-    // A partir de acá ganamos el claim atómico: somos los únicos que materializan el match.
+    // A partir de acá ganamos el claim atómico del BOARD: somos los únicos que materializan ESTE match.
+    //
+    // A2 (ADR-021 Fase A) — CINTURÓN SÍNCRONO per-conductor. El CAS del board garantiza un único ganador
+    // POR board, pero NO cubre la carrera de dos accepts de boards DISTINTOS que eligen al MISMO conductor
+    // a la vez: A1 flipea `currentStatus`→ON_TRIP de forma ASÍNCRONA (Kafka), así que en la ventana de ~ms
+    // ambos accepts pasan el `eligibility.gate` (leen AVAILABLE) y ambos ganarían su board → doble-win.
+    // Reclamamos al conductor de forma ATÓMICA (Redis SET NX) DESPUÉS de ganar el board y ANTES de la tx
+    // durable: si el claim falla (el conductor YA ganó en OTRO board) revertimos NUESTRO board (→ OPEN, el
+    // pasajero elige otro) y rechazamos con 409 — así una claim perdida NO deja un match a medio hacer.
+    // Idempotente: si la claim ya es de ESTE mismo tripId (redelivery/retry del mismo accept), es éxito.
+    const driverClaimed = await this.hotIndex.tryClaimDriver(
+      driverId,
+      tripId,
+      OfferBoardService.DRIVER_CLAIM_TTL_SECONDS,
+    );
+    if (!driverClaimed) {
+      // El conductor ya fue reclamado por OTRO viaje → compensamos el board claim (CLOSED_MATCHED → OPEN,
+      // MISMA compensación que la tx-fail) para que el pasajero pueda elegir otro conductor, y rechazamos
+      // con 409 distinguible (`driver_claimed`) para que public-bff lo surface → la UI del pasajero refetch.
+      await this.store.revertClaim(tripId).catch((revertErr) =>
+        this.logger.error(
+          `A2 trip=${tripId} driver=${driverId}: conductor ya reclamado y el revert del board falló ` +
+            `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
+        ),
+      );
+      this.logger.log(
+        `accept rechazado trip=${tripId} driver=${driverId}: conductor ya reclamado por otro viaje (A2)`,
+      );
+      throw new ConflictError('El conductor ya fue asignado a otro viaje', {
+        tripId,
+        driverId,
+        reason: 'driver_claimed',
+      });
+    }
+
+    // Ganado el board Y el conductor: somos los únicos que materializan este match.
     //
     // N5 — orden DURABLE-PRIMERO: la commit del outbox (la verdad durable del match) ocurre ANTES de
     // tocar el estado EFÍMERO de las ofertas en Redis. Así, si la tx de Postgres FALLA, NINGUNA oferta
@@ -657,6 +700,16 @@ export class OfferBoardService {
               `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
           );
         }
+        // A2 — soltamos también el claim per-conductor: la tx durable falló y el match NO existe, así que el
+        // conductor debe volver a ser reclamable de inmediato (si no, quedaría bloqueado hasta el TTL de 2h).
+        // Best-effort: un fallo del release no debe tapar el txErr que el pasajero necesita ver (el TTL es el backstop).
+        await this.hotIndex
+          .releaseClaim(driverId)
+          .catch((relErr) =>
+            this.logger.warn(
+              `A2 releaseClaim (tx-fail) trip=${tripId} driver=${driverId}: ${String(relErr)}`,
+            ),
+          );
         throw txErr;
       }
     }
@@ -760,6 +813,38 @@ export class OfferBoardService {
         ? (await this.store.listOffers(tripId)).filter((o) => o.status === OfferStatus.PENDING)
         : [];
     return { board: { status: board.status, expiresAt: board.expiresAt }, offers };
+  }
+
+  /**
+   * Fase B (ADR-021 · B-react) — el conductor pasó a OFFLINE (`driver.went_offline`): RETIRA todas sus
+   * ofertas OPEN vivas de los boards para que su card desaparezca REACTIVA del board del pasajero, sin
+   * esperar el gate de accept (cierre #6) ni el TTL. Recorre los boards OPEN (los únicos que colectan
+   * ofertas) y, por cada uno con una oferta PENDING del conductor, la marca STALE + emite
+   * `dispatch.offer_withdrawn` (reason=stale) — el MISMO camino que la oferta-rancia del accept, reusado.
+   * Idempotente por (trip, driver, ciclo) vía `dedupOfferWithdrawn`; best-effort: un conductor sin ofertas
+   * abiertas es no-op y un fallo de un emit se loguea sin abortar el resto. Devuelve el #ofertas retiradas.
+   */
+  async withdrawDriverOffers(driverId: string): Promise<number> {
+    const boards = await this.store.listOpenBoards(Date.now());
+    let withdrawn = 0;
+    for (const board of boards) {
+      const offer = await this.store.getOffer(board.tripId, driverId);
+      if (!offer || offer.status !== OfferStatus.PENDING) continue;
+      await this.store.setOfferStatus(board.tripId, driverId, OfferStatus.STALE);
+      await this.emit(
+        'dispatch.offer_withdrawn',
+        board.tripId,
+        { tripId: board.tripId, driverId, reason: OFFER_WITHDRAWN_REASON.STALE },
+        dedupOfferWithdrawn(board.tripId, driverId, board.negotiationSeq),
+      ).catch((err: unknown) =>
+        this.logger.warn(
+          `offer_withdrawn (offline) trip=${board.tripId} driver=${driverId}: ${String(err)}`,
+        ),
+      );
+      withdrawn++;
+      this.logger.log(`conductor offline: oferta trip=${board.tripId} driver=${driverId} → STALE`);
+    }
+    return withdrawn;
   }
 
   /**

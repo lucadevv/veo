@@ -15,6 +15,8 @@ import type { DriverLocation, DriverVehicleAttrs, HotIndex } from './hot-index.p
 const LOC_PREFIX = 'driver:loc:';
 const BUSY_PREFIX = 'driver:busy:';
 const AVAIL_PREFIX = 'h3:available:';
+/// A2 (ADR-021 Fase A) — clave del CLAIM SÍNCRONO per-conductor: `driver:claim:{id}` → tripId que lo posee.
+const CLAIM_PREFIX = 'driver:claim:';
 /// Margen amplio para el flag de ocupado; se limpia explícitamente al completar/cancelar el viaje.
 const BUSY_TTL_SECONDS = 7_200;
 /**
@@ -48,6 +50,22 @@ redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[3])
 return 1
 `;
 
+/**
+ * A2 (ADR-021 Fase A) — CLAIM ATÓMICO per-conductor. KEYS[1]=claim key, ARGV[1]=tripId, ARGV[2]=ttl(s).
+ * SET NX: si la key NO existe, la crea (claim nuevo) → 1. Si existe y es del MISMO tripId (redelivery/
+ * retry del MISMO accept), refresca el TTL y devuelve 1 (idempotente). Si existe de OTRO viaje → 0
+ * (el conductor ya ganó en otro board). Atómico: cierra el TOCTOU entre el SET NX y la lectura del dueño.
+ */
+const CLAIM_SCRIPT = `
+local ok = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2])
+if ok then return 1 end
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0
+`;
+
 export class RedisHotIndex implements HotIndex {
   constructor(
     private readonly redis: Redis,
@@ -62,6 +80,9 @@ export class RedisHotIndex implements HotIndex {
   }
   private availKey(cell: string): string {
     return `${AVAIL_PREFIX}${cell}`;
+  }
+  private claimKey(id: string): string {
+    return `${CLAIM_PREFIX}${id}`;
   }
 
   async upsertLocation(
@@ -163,12 +184,32 @@ export class RedisHotIndex implements HotIndex {
     await pipeline.exec();
   }
 
+  async tryClaimDriver(driverId: string, tripId: string, ttlSeconds: number): Promise<boolean> {
+    // SET NX atómico (con idempotencia del mismo tripId) vía LUA — ver CLAIM_SCRIPT. 1 keys → la claim key.
+    const res = await this.redis.eval(
+      CLAIM_SCRIPT,
+      1,
+      this.claimKey(driverId),
+      tripId,
+      String(ttlSeconds),
+    );
+    return res === 1;
+  }
+
+  async releaseClaim(driverId: string): Promise<void> {
+    // Idempotente/fail-safe: DEL de una key ausente es no-op (0). Gemelo de markAvailable en el terminal.
+    await this.redis.del(this.claimKey(driverId));
+  }
+
   async remove(driverId: string): Promise<void> {
     const loc = await this.getLocation(driverId);
     const pipeline = this.redis.multi();
     if (loc) pipeline.srem(this.availKey(loc.h3), driverId);
     pipeline.del(this.locKey(driverId));
     pipeline.del(this.busyKey(driverId));
+    // A2 — suelta también el claim per-conductor al salir del índice (fin de turno / offline): sin esto un
+    // claim quedaría colgado hasta el TTL y bloquearía un accept futuro tras reconectar. Fail-safe (no-op si ausente).
+    pipeline.del(this.claimKey(driverId));
     // Sale del ÍNDICE DE PRESENCIA (fin de turno / offline): sin esto seguiría contando como "en línea"
     // hasta que su score caiga fuera de la ventana TTL. Espeja el `locations.delete()` de InMemoryHotIndex.
     pipeline.zrem(ONLINE_ZSET_KEY, driverId);

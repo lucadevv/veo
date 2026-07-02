@@ -71,7 +71,9 @@ export const envSchema = z
     /// SEED del default de la DB de la ventana de la oferta directa FIXED (ms). Autoridad VIVA = la fila
     /// dispatch_radius_config (editable por el admin, cacheada); este env solo SIEMBRA el default cuando no
     /// hay fila (DISPATCH_WINDOW_DEFAULTS). Ya NO se lee por-llamada en matching.service (ADR-019 Lote A).
-    DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(12_000),
+    // ADR-021 Fase F (F2) — default subido 12s→20s: 12s no alcanzaba una vez descontados relay Kafka→
+    // socket→app→navegación + el 2do GET del fare. Sigue siendo admin-configurable (ADR-019).
+    DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(20_000),
     /// SEED del default de la DB de la ventana del board de PUJA (s). dispatch es la AUTORIDAD de la
     /// ventana; el BID_WINDOW_SEC del trip-service (productor de bid_posted) es ADVISORY. Autoridad viva =
     /// la fila dispatch_radius_config; este env solo SIEMBRA el default sin fila (ADR-019 Lote A / D1).

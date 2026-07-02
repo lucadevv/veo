@@ -309,7 +309,7 @@ export class MatchingService {
     origin: LatLon;
   }): Promise<void> {
     const matchId = uuidv7();
-    await this.prisma.write.dispatchMatch.create({
+    const created = await this.prisma.write.dispatchMatch.create({
       data: {
         id: matchId,
         tripId: args.tripId,
@@ -320,15 +320,19 @@ export class MatchingService {
         outcome: DispatchOutcome.OFFERED,
       },
     });
+    // ADR-021 Fase F (F1) — el `expiresAt` que ve el conductor se ANCLA al `offeredAt` REAL de la DB (el
+    // mismo instante que usa `sweepExpiredOffers` para caducar la oferta: offeredAt + offerTimeoutMs). Antes
+    // se calculaba `Date.now() + offerTimeoutMs` DESPUÉS del `await maps.eta()` → divergía del offeredAt por
+    // la latencia (variable, segundos) del ETA → el anillo del conductor mostraba MÁS tiempo del que el
+    // server permitía → aceptar en los últimos segundos daba 409. Ahora ambos comparten la MISMA base.
+    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
+    const expiresAt = new Date(created.offeredAt.getTime() + offerTimeoutMs).toISOString();
     let etaSeconds = 0;
     try {
       etaSeconds = await this.maps.eta(args.candidate.location, args.origin);
     } catch (err) {
       this.logger.warn(`ETA no disponible para match ${matchId}: ${String(err)}`);
     }
-    // Deadline de respuesta de la oferta = ahora + ventana VIGENTE (config del admin, cacheada).
-    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
-    const expiresAt = new Date(Date.now() + offerTimeoutMs).toISOString();
     try {
       await this.offerDelivery.deliver({
         matchId,

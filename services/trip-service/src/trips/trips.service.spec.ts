@@ -2262,3 +2262,54 @@ describe('CONTRATO producer↔schema · parametrizado POR CLASE (gap 3 de la pru
     },
   );
 });
+
+describe('TripsService.reassignForDriverOffline · Fase B (ADR-021 B1)', () => {
+  /** Prisma mínimo que expone read.trip.findFirst (capturando el where) + los stubs que toca la reasignación. */
+  function makeOfflinePrisma(found: Trip | null) {
+    const calls: { where?: unknown }[] = [];
+    const outbox: { eventType: string }[] = [];
+    const tx = {
+      trip: {
+        update: async ({ data }: { data: Record<string, unknown> }) => ({ ...(found as Trip), ...data }),
+        findUniqueOrThrow: async () => found,
+      },
+      tripEvent: { create: async () => ({}) },
+      outboxEvent: {
+        create: async ({ data }: { data: { eventType: string } }) => {
+          outbox.push({ eventType: data.eventType });
+          return {};
+        },
+      },
+    };
+    const prisma = {
+      read: {
+        trip: {
+          findFirst: async (args: { where?: unknown }) => {
+            calls.push({ where: args?.where });
+            return found;
+          },
+        },
+      },
+      write: {
+        $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
+      },
+      _calls: calls,
+      _outbox: outbox,
+    };
+    return prisma;
+  }
+
+  it('sin viaje pre-recojo del conductor (findFirst null) → NO-OP, no emite trip.reassigning', async () => {
+    const prisma = makeOfflinePrisma(null);
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.reassignForDriverOffline('drv-9')).resolves.toBeUndefined();
+    // Consulta por driverId + estados POST-accept (ACCEPTED/ARRIVING/ARRIVED).
+    const where = prisma._calls[0]?.where as { driverId?: string; status?: { in?: string[] } };
+    expect(where.driverId).toBe('drv-9');
+    expect(where.status?.in).toEqual(
+      expect.arrayContaining([TripStatus.ACCEPTED, TripStatus.ARRIVING, TripStatus.ARRIVED]),
+    );
+    expect(where.status?.in).not.toContain(TripStatus.ASSIGNED); // ASSIGNED es Fase G, fuera de scope
+    expect(prisma._outbox).toHaveLength(0);
+  });
+});

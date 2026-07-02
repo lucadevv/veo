@@ -116,6 +116,32 @@ export const driverReactivated = z.object({
   driverId: z.string(),
   reactivatedAt: z.string(),
 });
+/// Señal REACTIVA de que un conductor pasó a OFFLINE (Fase B · ADR-021 · finding B1). La emiten DOS
+/// productores por el MISMO contrato, distinguidos por `reason`:
+///  - `shift_end`  — identity-service: el conductor cerró turno / se puso offline por autoservicio
+///    (`setStatus`→OFFLINE), emitido por OUTBOX en la MISMA tx que el CAS de `Driver.currentStatus`.
+///  - `disconnect` — driver-bff: el socket del conductor CAYÓ y NO reconectó dentro de la ventana de gracia
+///    (chequeo de presencia CROSS-NODO vía el redis-adapter). Best-effort (el watchdog pre-recojo de trip es
+///    el backstop si el evento se pierde: es un BFF sin outbox, igual que el firehose `driver.location_updated`).
+/// Downstream (Fase B-react): dispatch RETIRA las ofertas OPEN del conductor de los boards
+/// (`dispatch.offer_withdrawn` reason=stale) y lo EVICTA del pool (hot-index remove); trip-service, si el
+/// conductor tenía un viaje PRE-RECOJO ya aceptado (ACCEPTED/ARRIVING/ARRIVED), lo REASIGNA reusando la
+/// máquina existente (`reassignAfterDriverCancel` → `trip.reassigning` → re-abre el board) en vez de dejar al
+/// pasajero esperando los ~15min del watchdog. `driverId` = id de PERFIL Driver (= `Trip.driverId`, el mismo
+/// espacio de la cadena de suspensión). SIN PII: solo ids + la marca temporal. `at` ISO-8601.
+export const DRIVER_OFFLINE_REASON = {
+  /// Fin de turno / autoservicio (OFFLINE deliberado). Lo emite identity-service.
+  SHIFT_END: 'shift_end',
+  /// Caída del socket sin reconexión dentro de la ventana de gracia. Lo emite driver-bff.
+  DISCONNECT: 'disconnect',
+} as const;
+export type DriverOfflineReason =
+  (typeof DRIVER_OFFLINE_REASON)[keyof typeof DRIVER_OFFLINE_REASON];
+export const driverWentOffline = z.object({
+  driverId: z.string(),
+  at: z.string(),
+  reason: z.enum([DRIVER_OFFLINE_REASON.SHIFT_END, DRIVER_OFFLINE_REASON.DISCONNECT]),
+});
 export const userKycVerified = z.object({
   userId: z.string(),
   kycStatus: z.string(),
@@ -1368,6 +1394,7 @@ export const EVENT_SCHEMAS = {
   'driver.suspended': driverSuspended,
   'driver.resubmitted': driverResubmitted,
   'driver.reactivated': driverReactivated,
+  'driver.went_offline': driverWentOffline,
   'driver.excessive_cancellations': driverExcessiveCancellations,
   'biometric.failed': biometricFailed,
   'biometric.enrolled': biometricEnrolled,

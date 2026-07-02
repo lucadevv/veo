@@ -47,10 +47,14 @@ interface WindowCall {
 function build() {
   const windowCalls: WindowCall[] = [];
   // driverForTrip devuelve null a propósito: PRE-accept NO hay match ACCEPTED. Si el handler lo usara para
-  // contar (el bug), la cancelación pre-accept se perdería. El fix NO debe llamarlo para el conteo.
+  // CONTAR (el bug), la cancelación pre-accept se perdería (el conteo usa p.driverId del payload). B2
+  // (ADR-021 Fase A): driverForTrip AHORA sí se llama en onTripCancelled para el RELEASE del conductor
+  // (markAvailable + releaseClaim) — devuelve null en PRE-accept ⇒ releaseDriver no se invoca (no-op).
   const driverForTrip = vi.fn(async () => null);
+  const releaseDriver = vi.fn(async () => undefined);
   const dispatch = {
     driverForTrip,
+    releaseDriver,
   } as unknown as DispatchService;
   const projection = {
     registerCancellationInWindow: async (driverId: string, tripId: string) => {
@@ -99,10 +103,12 @@ describe('KafkaConsumersService · trip.cancelled count (FIX 4 · driverId del p
       cancelledEnvelope({ by: 'DRIVER', driverId: PAYLOAD_DRIVER_ID }),
     );
 
-    // Contó la cancelación pre-accept con el driverId del PAYLOAD enriquecido (perfil).
+    // Contó la cancelación pre-accept con el driverId del PAYLOAD enriquecido (perfil): que driverForTrip
+    // devuelva null y AUN ASÍ se cuente con PAYLOAD_DRIVER_ID prueba que el CONTEO no usa la réplica ACCEPTED.
     expect(windowCalls).toEqual([{ driverId: PAYLOAD_DRIVER_ID, tripId: VALID_TRIP_ID }]);
-    // NO resolvió el driver vía la réplica ACCEPTED (que en pre-accept daría null → perdería el conteo).
-    expect(driverForTrip).not.toHaveBeenCalled();
+    // B2 — driverForTrip SÍ se llama ahora para el RELEASE del conductor (no para el conteo); en pre-accept
+    // devuelve null ⇒ releaseDriver no se invoca.
+    expect(driverForTrip).toHaveBeenCalledWith(VALID_TRIP_ID);
 
     await svc.onModuleDestroy();
   });
@@ -127,7 +133,9 @@ describe('KafkaConsumersService · trip.cancelled count (FIX 4 · driverId del p
       cancelledEnvelope({ by: 'PASSENGER', driverId: PAYLOAD_DRIVER_ID }),
     );
     expect(windowCalls).toHaveLength(0);
-    expect(driverForTrip).not.toHaveBeenCalled();
+    // B2 — el RELEASE del conductor corre para CUALQUIER `by` (va antes del guard by!==DRIVER): driverForTrip
+    // se consulta también en by=PASSENGER (para liberar al conductor asignado de un cancel POST-accept).
+    expect(driverForTrip).toHaveBeenCalledWith(VALID_TRIP_ID);
 
     await svc.onModuleDestroy();
   });

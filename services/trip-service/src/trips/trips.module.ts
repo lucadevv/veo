@@ -12,6 +12,7 @@ import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { TripsController } from './trips.controller';
 import { DispatchConsumer } from './dispatch.consumer';
 import { PujaConsumer } from './puja.consumer';
+import { DriverOfflineConsumer } from './driver-offline.consumer';
 import { UserDeletedConsumer } from './user-deleted.consumer';
 import { ScheduledTripsScheduler } from './scheduled-trips.scheduler';
 import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
@@ -26,6 +27,7 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
     DispatchModeRegistry,
     DispatchConsumer,
     PujaConsumer,
+    DriverOfflineConsumer,
     UserDeletedConsumer,
     ScheduledTripsScheduler,
     TripWatchdogScheduler,

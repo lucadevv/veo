@@ -83,6 +83,23 @@ export interface HotIndex {
   markBusy(driverId: string): Promise<void>;
   /** Reincorpora al conductor al pool disponible en su última celda conocida. */
   markAvailable(driverId: string): Promise<void>;
+  /**
+   * A2 (ADR-021 Fase A) — CLAIM SÍNCRONO per-conductor: cinturón atómico contra la carrera de DOS accepts
+   * SIMULTÁNEOS del MISMO conductor en boards DISTINTOS. A1 flipea el `currentStatus` del conductor a
+   * ON_TRIP de forma ASÍNCRONA (vía Kafka) → queda una ventana de ~ms donde ambos accepts leen todavía
+   * AVAILABLE en el `eligibility.gate` y ambos ganarían. Este claim cierra esa ventana de forma SÍNCRONA:
+   * reclama al conductor atómicamente (Redis SET NX). Devuelve `true` si el claim quedó para ESTE `tripId`
+   * (nuevo, O idempotente: la claim YA era de este mismo trip → redelivery/retry del mismo accept), `false`
+   * si YA está reclamado por OTRO viaje (el conductor ganó en otro board primero). Se suelta explícitamente
+   * al terminar el viaje (`releaseClaim`, gemelo de `markAvailable`); `ttlSeconds` es solo la red de seguridad.
+   */
+  tryClaimDriver(driverId: string, tripId: string, ttlSeconds: number): Promise<boolean>;
+  /**
+   * A2 — suelta el claim per-conductor (al completar/cancelar/expirar/fallar el viaje). Idempotente y
+   * fail-safe: soltar un conductor no-reclamado es no-op, nunca crashea. Gemelo de `markAvailable`: ambos
+   * se ponen juntos en el accept (`tryClaimDriver` + `markBusy`) y se sueltan juntos en el terminal.
+   */
+  releaseClaim(driverId: string): Promise<void>;
   /** Elimina por completo al conductor del índice (fin de turno / offline). */
   remove(driverId: string): Promise<void>;
   getLocation(driverId: string): Promise<DriverLocation | null>;

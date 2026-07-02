@@ -82,6 +82,16 @@ const DRIVER_SUPERSEDE_EVENT = 'driver:supersede';
  *  cola de salida, así garantizamos que el paquete de aviso SALGA antes de cortar el socket del device viejo. */
 const SUPERSEDE_FLUSH_MS = 200;
 
+/**
+ * Fase B (ADR-021 · finding B1) — VENTANA DE GRACIA (ms) tras la caída del socket antes de declarar al
+ * conductor OFFLINE. Un blip de red / cambio de celda reconecta en pocos segundos; sólo si NO reconecta en
+ * NINGUNA réplica dentro de esta ventana emitimos `driver.went_offline`. Valor DEFAULT elegido (~20s): por
+ * encima del intervalo de ping GPS (~15s) para tolerar una reconexión normal, y MUY por debajo del watchdog
+ * pre-recojo (~15min) para que el pasajero se reasigne rápido. FLAG: default fijo (no admin-config aún);
+ * subir/ajustar es un follow-up si se observan falsos offline por reconexiones lentas.
+ */
+const OFFLINE_GRACE_MS = 20_000;
+
 @Injectable()
 @WebSocketGateway({ namespace: '/driver', cors: { origin: true, credentials: true } })
 export class DriverGateway
@@ -102,6 +112,14 @@ export class DriverGateway
    * Lote 1: el device viejo se desloguea al vencer su access token / fallar el refresh.)
    */
   private readonly activeByDriver = new Map<string, { socket: Socket; sid: string }>();
+
+  /**
+   * Fase B (ADR-021) — timers de GRACIA de offline por conductor (`driverId → timeout`). Al caer el socket
+   * ACTIVO se arma uno; si el conductor reconecta (a ESTA réplica) se cancela; al vencer, un chequeo de
+   * presencia CROSS-NODO decide si emitir `driver.went_offline`. Local por-réplica (fast-path); la
+   * corrección multi-réplica la da el `fetchSockets()` del vencimiento, no este Map.
+   */
+  private readonly offlineGraceTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     @Inject(JWT_SERVICE) private readonly jwt: JwtService,
@@ -201,6 +219,9 @@ export class DriverGateway
       data.driverId = driverId;
       data.identity = identity;
       this.activeByDriver.set(driverId, { socket: client, sid });
+      // Fase B (ADR-021) — el conductor reconectó (blip de red / reapertura de app): CANCELA cualquier
+      // gracia de offline pendiente en ESTA réplica para no emitir un `driver.went_offline` espurio.
+      this.clearOfflineGrace(driverId);
       // CROSS-NODO: avisamos a los OTROS pods que esta sesión (`sid`) ganó, para que echen cualquier socket
       // más viejo del mismo conductor conectado allá. El supersede LOCAL (arriba) ya cubrió este pod, y
       // `serverSideEmit` no hace loopback al emisor → sin auto-echo. No-op inerte en 1-réplica.
@@ -218,7 +239,59 @@ export class DriverGateway
     const { driverId } = client.data as DriverSocketData;
     if (driverId && this.activeByDriver.get(driverId)?.socket.id === client.id) {
       this.activeByDriver.delete(driverId);
+      // Fase B (ADR-021 · finding B1) — el socket ACTIVO cayó. NO declaramos offline al instante (podría ser
+      // un blip de red): armamos la ventana de gracia. Si reconecta (acá o en otra réplica) no se emite; si
+      // vence sin presencia en NINGÚN pod, emitimos `driver.went_offline` (reason=disconnect). Un socket ya
+      // SUPERADO no entra acá (la comparación de socket.id de arriba ya es del NUEVO dueño → no arma gracia).
+      this.scheduleOfflineGrace(driverId);
     }
+  }
+
+  /**
+   * Fase B (ADR-021) — arma (o re-arma) la ventana de gracia de offline para un conductor. Al vencer, hace un
+   * chequeo de presencia CROSS-NODO (`fetchSockets()` vía el redis-adapter): si el conductor NO tiene socket
+   * en NINGUNA réplica, emite `driver.went_offline` best-effort. Guardas de seguridad:
+   *  - Si `fetchSockets()` falla (adapter degradado) NO emitimos — un falso offline REASIGNARÍA el viaje de un
+   *    conductor realmente online (peor que esperar el watchdog). Fail hacia no-emitir (el watchdog backstop).
+   *  - El timer es `unref()` para no bloquear el cierre del proceso.
+   */
+  private scheduleOfflineGrace(driverId: string): void {
+    this.clearOfflineGrace(driverId);
+    const timer = setTimeout(() => {
+      this.offlineGraceTimers.delete(driverId);
+      void this.emitOfflineIfAbsent(driverId);
+    }, OFFLINE_GRACE_MS);
+    timer.unref?.();
+    this.offlineGraceTimers.set(driverId, timer);
+  }
+
+  /** Cancela la gracia de offline pendiente de un conductor (reconexión / cierre limpio). Idempotente. */
+  private clearOfflineGrace(driverId: string): void {
+    const timer = this.offlineGraceTimers.get(driverId);
+    if (timer) {
+      clearTimeout(timer);
+      this.offlineGraceTimers.delete(driverId);
+    }
+  }
+
+  /**
+   * Vencida la gracia: emite `driver.went_offline` SOLO si el conductor no tiene NINGÚN socket vivo en el
+   * cluster (chequeo cross-nodo). Fail-safe: cualquier error del adapter/publisher NO propaga (best-effort).
+   */
+  private async emitOfflineIfAbsent(driverId: string): Promise<void> {
+    if (!this.server) return;
+    try {
+      // Presencia CROSS-NODO: un reconnect pudo aterrizar en OTRA réplica (el Map local no lo vería).
+      const sockets = await this.server.in(roomForDriver(driverId)).fetchSockets();
+      if (sockets.length > 0) return; // reconectó en algún pod → sigue online, no emitir.
+    } catch (err) {
+      // Adapter degradado: no podemos confirmar la ausencia → NO emitir (un falso offline reasignaría un
+      // viaje vivo). El watchdog pre-recojo de trip-service es el backstop.
+      this.logger.warn({ err, driverId }, 'ws offline-grace: fetchSockets falló → no se declara offline');
+      return;
+    }
+    const emitted = await this.locationPublisher.publishDriverWentOffline(driverId);
+    if (emitted) this.logger.info({ driverId }, 'ws conductor offline (gracia vencida sin reconexión)');
   }
 
   /**

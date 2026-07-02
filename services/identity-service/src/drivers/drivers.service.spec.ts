@@ -1738,8 +1738,26 @@ describe('DriversService.setStatus · transición de turno validada por la máqu
   /** Prisma doble que refleja el currentStatus escrito (para verificar qué se persistió). */
   function makeStatusPrisma(driver: unknown) {
     const writes: Record<string, unknown>[] = [];
+    const outbox: Record<string, unknown>[] = [];
+    // Fase B (ADR-021) — setStatus ahora es TRANSACCIONAL (update + outbox del `driver.went_offline` al
+    // pasar a OFFLINE). El doble expone `$transaction(fn)` que corre el callback con un tx que refleja el
+    // update y captura el outbox, espejando el prisma real.
+    const tx = {
+      driver: {
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          writes.push(data);
+          return { currentStatus: data.currentStatus };
+        },
+      },
+      outboxEvent: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          outbox.push(data);
+        },
+      },
+    };
     return {
       writes,
+      outbox,
       prisma: {
         read: { driver: { findUnique: async () => driver } },
         write: {
@@ -1749,6 +1767,7 @@ describe('DriversService.setStatus · transición de turno validada por la máqu
               return { currentStatus: data.currentStatus };
             },
           },
+          $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
         },
       },
     };
@@ -1758,6 +1777,24 @@ describe('DriversService.setStatus · transición de turno validada por la máqu
     const { prisma } = makeStatusPrisma({ ...okDriver, currentStatus: 'AVAILABLE' });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await expect(svc.setStatus('u1', 'OFFLINE')).resolves.toEqual({ status: 'OFFLINE' });
+  });
+
+  it('Fase B · el fin de turno OFFLINE emite driver.went_offline (reason=shift_end) por outbox', async () => {
+    const { prisma, outbox } = makeStatusPrisma({ ...okDriver, id: 'drv-1', currentStatus: 'AVAILABLE' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    await svc.setStatus('u1', 'OFFLINE');
+    expect(outbox).toHaveLength(1);
+    const entry = outbox[0]!;
+    expect(entry).toMatchObject({ aggregateId: 'drv-1', eventType: 'driver.went_offline' });
+    const env = entry.envelope as { payload: { driverId: string; reason: string } };
+    expect(env.payload).toMatchObject({ driverId: 'drv-1', reason: 'shift_end' });
+  });
+
+  it('Fase B · la pausa ON_BREAK NO emite driver.went_offline (sigue en turno, online)', async () => {
+    const { prisma, outbox } = makeStatusPrisma({ ...okDriver, currentStatus: 'AVAILABLE' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    await expect(svc.setStatus('u1', 'ON_BREAK')).resolves.toEqual({ status: 'ON_BREAK' });
+    expect(outbox).toHaveLength(0);
   });
 
   it('un SUSPENDED NO puede auto-ponerse AVAILABLE ni saltándose el tipo (409, no escribe)', async () => {

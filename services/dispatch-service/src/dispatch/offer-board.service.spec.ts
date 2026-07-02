@@ -621,6 +621,28 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect(c.outbox.byType('dispatch.offer_made')).toHaveLength(1);
   });
 
+  it('Fase B · withdrawDriverOffers marca STALE la oferta OPEN del conductor + emite offer_withdrawn', async () => {
+    const c = await ctx();
+    const cell = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    await c.hotIndex.seed('d1', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR);
+    const tripId = await openBoard(c, 60, 700);
+    await c.svc.submitOffer({ driverId: 'd1', tripId, kind: 'ACCEPT_PRICE', priceCents: 700 });
+
+    const withdrawn = await c.svc.withdrawDriverOffers('d1');
+    expect(withdrawn).toBe(1);
+    expect((await c.store.getOffer(tripId, 'd1'))?.status).toBe('STALE');
+    const events = c.outbox.byType('dispatch.offer_withdrawn');
+    expect(events).toHaveLength(1);
+    expect(events[0]!.payload).toMatchObject({ tripId, driverId: 'd1', reason: 'stale' });
+  });
+
+  it('Fase B · withdrawDriverOffers de un conductor sin ofertas abiertas es no-op (0)', async () => {
+    const c = await ctx();
+    await openBoard(c, 60, 700);
+    expect(await c.svc.withdrawDriverOffers('d-sin-ofertas')).toBe(0);
+    expect(c.outbox.byType('dispatch.offer_withdrawn')).toHaveLength(0);
+  });
+
   it('submitOffer COUNTER debe superar el bid (<=bid → ValidationError)', async () => {
     const c = await ctx();
     const tripId = await openBoard(c, 60, 700);
@@ -812,6 +834,70 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     // No se emitió ningún match.
     expect(c.outbox.byType('dispatch.match_found')).toHaveLength(0);
     expect(c.outbox.byType('dispatch.offer_accepted')).toHaveLength(0);
+  });
+
+  it('A2 (ADR-021): 2 boards distintos, MISMO conductor → el 2º accept se rechaza (driver_claimed) y su board vuelve a OPEN', async () => {
+    const c = await ctx();
+    // Board A (trip-1, vía openBoard) + Board B (trip-2, a mano) con el MISMO conductor ofertando en AMBOS.
+    const tripA = await openBoard(c, 60, 700);
+    const tripB = 'trip-2';
+    c.windows.bidWindowSec = 60;
+    await c.svc.openBoard({
+      tripId: tripB,
+      passengerId: 'pax-2',
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 60,
+      negotiationSeq: 1,
+    });
+    await c.svc.submitOffer({ driverId: 'd1', tripId: tripA, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    await c.svc.submitOffer({ driverId: 'd1', tripId: tripB, kind: 'ACCEPT_PRICE', priceCents: 700 });
+
+    // 1er accept: gana el board Y reclama a d1 de forma síncrona (tryClaimDriver).
+    await c.svc.acceptOffer(tripA, 'd1', PASSENGER);
+    expect((await c.store.getBoard(tripA))?.status).toBe('CLOSED_MATCHED');
+
+    // 2º accept del MISMO conductor en OTRO board (otro pasajero): el claim per-driver FALLA → 409.
+    let caught: unknown;
+    try {
+      await c.svc.acceptOffer(tripB, 'd1', 'pax-2');
+    } catch (e) {
+      caught = e;
+    }
+    expect(isDomainError(caught) && caught.httpStatus === 409).toBe(true);
+    expect((caught as { details?: { reason?: string } }).details?.reason).toBe('driver_claimed');
+    // Board B se REVIERTE a OPEN (compensación existente) para que su pasajero elija otro conductor.
+    expect((await c.store.getBoard(tripB))?.status).toBe('OPEN');
+    // UN solo match materializado (el de tripA): tripB no emitió match_found (claim perdido antes de la tx).
+    expect(c.outbox.byType('dispatch.match_found')).toHaveLength(1);
+  });
+
+  it('A2 (ADR-021): tras liberar al conductor (releaseClaim), su oferta en OTRO board YA se puede aceptar', async () => {
+    const c = await ctx();
+    const tripA = await openBoard(c, 60, 700);
+    const tripB = 'trip-2';
+    c.windows.bidWindowSec = 60;
+    await c.svc.openBoard({
+      tripId: tripB,
+      passengerId: 'pax-2',
+      bidCents: 700,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      windowSec: 60,
+      negotiationSeq: 1,
+    });
+    await c.svc.submitOffer({ driverId: 'd1', tripId: tripA, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    await c.svc.submitOffer({ driverId: 'd1', tripId: tripB, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    await c.svc.acceptOffer(tripA, 'd1', PASSENGER);
+
+    // El viaje A terminó → releaseClaim suelta el claim per-conductor (lo que hace dispatch.releaseDriver).
+    await c.hotIndex.releaseClaim('d1');
+
+    // Ahora d1 vuelve a ser reclamable: el accept del board B tiene éxito.
+    await c.svc.acceptOffer(tripB, 'd1', 'pax-2');
+    expect((await c.store.getBoard(tripB))?.status).toBe('CLOSED_MATCHED');
+    expect(c.outbox.byType('dispatch.match_found')).toHaveLength(2);
   });
 
   it('acceptOffer con conductor aún elegible → sigue funcionando (un solo match)', async () => {

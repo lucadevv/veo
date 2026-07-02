@@ -5,8 +5,11 @@
  *  - panic.triggered         → excluye al conductor del viaje en pánico (prioridad de pánico).
  *  - rating.created          → proyección de rating del conductor.
  *  - driver.flagged          → proyección de rating (valor impuesto).
- *  - trip.completed          → proyección (último viaje) + reincorpora al conductor al pool.
- *  - trip.cancelled          → proyección de cancelación (solo si la cancela el conductor PRE-accept).
+ *  - trip.completed          → proyección (último viaje) + reincorpora al conductor al pool + suelta claim (A2).
+ *  - trip.cancelled          → mata el board + libera al conductor asignado del pool (B2) + cuenta la
+ *                              cancelación si la hizo el conductor PRE-accept.
+ *  - trip.expired            → (B2) libera al conductor asignado del pool (watchdog PRE-recojo).
+ *  - trip.failed             → (B2) libera al conductor asignado del pool (watchdog EN-curso abandonado).
  *  - trip.reassigning        → re-abre el board + libera al conductor + CUENTA la cancelación POST-accept
  *                              (la abusiva: aceptó y abandonó) en la MISMA ventana de auto-suspensión.
  *
@@ -82,6 +85,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       // frena fail-closed; esto cierra la MEMBRESÍA (no ofertarle a un suspendido que sigue pingeando GPS).
       'driver.suspended': (env) => this.onDriverSuspended(env),
       'driver.reactivated': (env) => this.onDriverReactivated(env),
+      // Fase B (ADR-021 · B-react) — el conductor pasó a OFFLINE (fin de turno o caída de socket): retira sus
+      // ofertas OPEN de los boards (card muere reactiva en el board del pasajero) + lo EVICTA del pool. La
+      // REASIGNACIÓN de su viaje pre-recojo la hace trip-service (consume el MISMO evento → trip.reassigning →
+      // este group re-abre el board por onReassigning). Mismo topic 'driver' que suspended/reactivated.
+      'driver.went_offline': (env) => this.onDriverWentOffline(env),
       // SUSPENSIÓN por el eje FLEET (doc/ITV vencido): MISMA exclusión del pool que el eje disciplinario.
       // El sujeto llega por clave DUAL (driverId de perfil XOR userId=User.id de la vía ITV) → el service
       // resuelve a Driver.id. Cierra la under-exclusion del eje doc/ITV (Lote 2b). Suscribe el topic `fleet`.
@@ -91,6 +99,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       'driver.flagged': (env) => this.onDriverFlagged(env),
       'trip.completed': (env) => this.onTripCompleted(env),
       'trip.cancelled': (env) => this.onTripCancelled(env),
+      // B2 (ADR-021 Fase A) — terminales del watchdog: liberan al conductor asignado del pool. Ambos caen en
+      // el topic 'trip' (topicForEvent) que este group YA suscribe por trip.completed/cancelled → registrar
+      // el handler basta; no hace falta declarar un topic nuevo (el bootstrap dedup-a el topic al suscribir).
+      'trip.expired': (env) => this.onTripExpired(env),
+      'trip.failed': (env) => this.onTripFailed(env),
     };
   }
 
@@ -340,6 +353,21 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     );
   }
 
+  /**
+   * Fase B (ADR-021 · B-react) — `driver.went_offline`: (1) RETIRA las ofertas OPEN del conductor de los
+   * boards (STALE + offer_withdrawn → la card muere reactiva en el board del pasajero) y (2) lo EVICTA del
+   * pool (hot-index remove: fuera del matching estando offline). La REASIGNACIÓN del viaje pre-recojo NO se
+   * hace acá: trip-service consume el mismo evento y emite `trip.reassigning`, que ESTE group ya reabre por
+   * `onReassigning` (release + reopen). Todo sobre Redis/outbox (keys string, `driverId` no toca @db.Uuid) →
+   * SIN poison de tipo; idempotente + fail-safe (offline de un conductor sin ofertas/loc es no-op). Un error
+   * transitorio de Redis relanza (kafkajs reintenta; ambas ops son idempotentes).
+   */
+  private async onDriverWentOffline(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['driver.went_offline'].parse(env.payload);
+    await this.offerBoard.withdrawDriverOffers(p.driverId);
+    await this.dispatch.evictDriver(p.driverId);
+  }
+
   private async onRating(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['rating.created'].parse(env.payload);
     await this.projection.onRatingCreated(p.driverId, p.stars);
@@ -394,6 +422,13 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // FIXED: el viaje murió ⇒ cerrar la sesión de matching secuencial (CANCELLED) para que el advance/
     // reconciler no sigan ofertando a un viaje cancelado. Idempotente (CAS); no-op si no había sesión (PUJA).
     await this.matching.cancelSession(p.tripId);
+    // B2 (ADR-021 Fase A) — LIBERA al conductor asignado del pool. Hasta hoy onTripCancelled NO llamaba a
+    // releaseDriver → un conductor con match ACCEPTED (cancel POST-accept del pasajero/sistema) quedaba
+    // markBusy + reclamado hasta el TTL (2h), fuera del pool. Se resuelve por driverForTrip (match ACCEPTED,
+    // igual que onTripCompleted) y se suelta (markAvailable + releaseClaim, vía releaseDriver). Fail-safe: un
+    // cancel PRE-accept (by=DRIVER, ASSIGNED sin ACCEPTED) → driverForTrip null → no-op. Va ANTES del conteo
+    // (seguridad primero: liberar el pool no debe quedar gateado por la analítica de la cancelación).
+    await this.releaseAssignedDriver('trip.cancelled', env.eventId, p.tripId);
     if (p.by !== 'DRIVER') {
       return;
     }
@@ -416,6 +451,53 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       isPermanentDataError,
       () => this.projection.registerCancellationInWindow(driverId, p.tripId, new Date(env.occurredAt)),
       `driver=${driverId}, trip=${p.tripId}`,
+    );
+  }
+
+  /**
+   * B2 (ADR-021 Fase A) — un viaje PRE-RECOJO se estancó y el watchdog lo llevó a EXPIRED. Hasta hoy
+   * trip.expired NO estaba en este consumer: un conductor que había aceptado (match ACCEPTED) y luego el
+   * viaje expiró quedaba markBusy + reclamado hasta el TTL (2h), fuera del pool. Lo liberamos.
+   */
+  private async onTripExpired(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['trip.expired'].parse(env.payload);
+    if (this.isPoisonNonUuid('trip.expired', env.eventId, p.tripId)) return;
+    await this.releaseAssignedDriver('trip.expired', env.eventId, p.tripId);
+  }
+
+  /**
+   * B2 (ADR-021 Fase A) — un viaje EN CURSO quedó abandonado y el watchdog lo llevó a FAILED. Mismo release
+   * del conductor asignado (markAvailable + releaseClaim) para que no quede fuera del pool hasta el TTL.
+   */
+  private async onTripFailed(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['trip.failed'].parse(env.payload);
+    if (this.isPoisonNonUuid('trip.failed', env.eventId, p.tripId)) return;
+    await this.releaseAssignedDriver('trip.failed', env.eventId, p.tripId);
+  }
+
+  /**
+   * B2 (ADR-021 Fase A) — helper compartido de los TERMINALES (cancelled/expired/failed): resuelve el
+   * conductor ACCEPTED del viaje y lo libera del pool (markAvailable + releaseClaim per-driver, vía
+   * dispatch.releaseDriver). Envuelto en poison-guard porque driverForTrip toca una columna `@db.Uuid`: un
+   * error PERMANENTE de datos se descarta (no crash-loop de la partición), uno TRANSITORIO se relanza
+   * (kafkajs reintenta; el release es idempotente). Fail-safe: viaje SIN match ACCEPTED → driverForTrip
+   * null → no-op (un cancel/expire PRE-accept no tiene conductor markBusy que liberar). El caller DEBE
+   * haber validado ya que `tripId` es UUID (isPoisonNonUuid) antes de invocar.
+   */
+  private async releaseAssignedDriver(
+    eventType: string,
+    eventId: string,
+    tripId: string,
+  ): Promise<void> {
+    await this.withPoisonGuard(
+      eventType,
+      eventId,
+      isPermanentDataError,
+      async () => {
+        const driverId = await this.dispatch.driverForTrip(tripId);
+        if (driverId) await this.dispatch.releaseDriver(driverId);
+      },
+      `trip=${tripId} (release)`,
     );
   }
 }

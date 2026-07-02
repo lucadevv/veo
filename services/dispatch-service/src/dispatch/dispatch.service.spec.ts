@@ -58,6 +58,9 @@ function makeService(
   const hotIndex = {
     markBusy: vi.fn(async () => undefined),
     markAvailable: vi.fn(async () => undefined),
+    // A2 (ADR-021 Fase A) — releaseDriver ahora suelta también el claim per-conductor (gemelo de markBusy).
+    tryClaimDriver: vi.fn(async () => true),
+    releaseClaim: vi.fn(async () => undefined),
   };
   const exclusion = { exclude: vi.fn(async () => undefined) };
   // Fail-soft: si fleet/identity fallan, resolveVehicleId devuelve null y NO bloquea.
