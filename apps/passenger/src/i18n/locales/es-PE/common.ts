@@ -81,34 +81,26 @@ export const common = {
    * (Ley N.° 29733). Los 3 consentimientos siguen bloqueando "Aceptar y continuar".
    */
   onboarding: {
-    skip: 'Saltar',
-    next: 'Siguiente',
-    /** Indicador "n / total" (esquina del slide de precio). */
+    skip: 'Omitir',
+    continue: 'Continuar',
     step: '{{current}} / {{total}}',
 
-    safety: {
-      eyebrow: 'Seguridad',
-      title: 'Nunca viajas solo',
-      body: 'Conductor verificado y pánico 24/7, en cada viaje.',
-      imageAlt: 'Pasajera viajando tranquila de noche',
+    slide1: {
+      title: 'Vas siempre acompañado',
+      body: 'Botón de pánico, cámara en vivo y tu familia siguiendo tu viaje en tiempo real.',
+      imageAlt: 'App VEO mostrando un viaje activo con las herramientas de seguridad',
     },
 
-    price: {
-      title: 'Tu auto, en minutos',
-      body: 'Autos cómodos y verificados, cuando los necesitas.',
-      car: 'VEO Auto',
-      carTagline: 'Cómodo, seguro y siempre verificado',
+    slide2: {
+      title: 'Vos elegís cómo viajar',
+      body: 'Precio fijo, poné tu precio, o reservá un asiento compartido. Siempre a tu manera.',
+      imageAlt: 'App VEO mostrando los modos de viaje y sus precios',
     },
 
-    consent: {
-      title: 'Tus datos, protegidos',
-      subtitle: 'Solo lo necesario para cuidarte.',
-      sectionLabel: 'Consentimientos',
-      data: 'Tratamiento de mis datos personales',
-      camera: 'Uso de la cámara para verificación',
-      location: 'Acceso a mi ubicación durante el viaje',
-      legal: 'Ley N.° 29733 · Política de privacidad',
-      accept: 'Aceptar y continuar',
+    slide3: {
+      title: 'Conductores verificados',
+      body: 'Cada conductor pasa por KYC, biometría y documentos. Vos viajás tranquilo.',
+      imageAlt: 'App VEO mostrando la lista de conductores verificados',
     },
   },
 
