@@ -5,7 +5,7 @@ import type {
   TripResource,
 } from '@veo/api-client';
 import {tripStatus} from '@veo/api-client';
-import {IconButton, Skeleton, Text, TextField, useTheme} from '@veo/ui-kit';
+import {IconButton, SearchField, Skeleton, Text, TextField, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, View} from 'react-native';
@@ -17,14 +17,13 @@ import {DebtStrip} from '../components/DebtStrip';
 import {HomeHero} from '../components/HomeHero';
 import {HomeShortcutChips} from '../components/HomeShortcutChips';
 import {ModeToggle, TripTimeMode} from '../components/ModeToggle';
-import {IconArrowLeft, IconClose} from '../components/icons';
+import {IconArrowLeft, IconClose, IconSearch} from '../components/icons';
 import {IdleBody} from '../components/IdleBody';
 import {LastDriverCard} from '../components/LastDriverCard';
 import {EnterView} from '../components/motion';
 import {NoOffersBody} from '../components/NoOffersBody';
 import {OfferingsTeaser} from '../components/OfferingsTeaser';
 import {OffersBody} from '../components/OffersBody';
-import {OriginDestinationCard} from '../components/OriginDestinationCard';
 import {QuotingBody} from '../components/QuotingBody';
 import {placeToRoute, suggestionToRoute} from '../components/routePlace';
 import {SearchingBody} from '../components/SearchingBody';
@@ -306,6 +305,7 @@ export function QuotingSheetHeader({ctx}: SlotProps): React.JSX.Element {
  */
 export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
+  const {t} = useTranslation();
   // ENTRADA ESCALONADA del Home idle: cada bloque entra con fade + leve subida, en cascada por `index`
   // (~40ms entre bloques, ease-out, <300ms, reduce-motion safe via EnterView). Da "vida" al Home sin
   // pelear con el scroll (solo opacity/transform). Los índices continúan en el body (debt/secciones).
@@ -330,13 +330,11 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
         </EnterView>
       ) : null}
       <EnterView index={2}>
-        <OriginDestinationCard
-          originTitle={ctx.currentLocationTitle}
-          originSubtitle={ctx.currentLocationSubtitle}
-          destinationValue={ctx.destinationValue}
-          onEditOrigin={ctx.onEditOrigin}
-          onSwapRoute={ctx.onSwapRoute}
-          onEnterSearch={ctx.onEnterSearch}
+        <SearchField
+          leftIcon={<IconSearch color={theme.colors.accent} size={20} />}
+          placeholder={t('home.whereTo')}
+          value={ctx.destinationValue}
+          onPress={ctx.onEnterSearch}
         />
       </EnterView>
       <EnterView index={3}>
