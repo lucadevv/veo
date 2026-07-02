@@ -104,6 +104,19 @@ export const common = {
     },
   },
 
+  /** Etiquetas del bottom nav (design/veo.pen C/TabBar). */
+  tabs: {
+    inicio: 'Inicio',
+    viajes: 'Viajes',
+    seguridad: 'Seguridad',
+    cuenta: 'Cuenta',
+  },
+
+  security: {
+    hubComingSoon:
+      'El centro de seguridad llega pronto: pánico, contactos de confianza y modo niño en un solo lugar.',
+  },
+
   auth: {
     /** Paso inicial: elegir método de ingreso. */
     startTitle: 'Bienvenido a VEO',

@@ -16,6 +16,10 @@ export type RootStackParamList = {
   Auth: undefined;
   CompleteProfile: undefined;
   BiometricLock: undefined;
+  /** Bottom nav autenticado (Inicio·Viajes·Seguridad·Cuenta) — design/veo.pen C/TabBar. */
+  Main: undefined;
+  /** Tab Seguridad (hub). Renderiza dentro de `Main`; acá para tipar navigate('Seguridad'). */
+  Seguridad: undefined;
   /** Sesión expirada por inactividad: re-verificar identidad (el trigger es follow-up). */
   SessionExpired: undefined;
   /** Pantalla RAÍZ autenticada (antes el tab Home): `RequestFlowScreen` con el mapa + sheet del flujo. */
@@ -73,6 +77,15 @@ export type RootStackParamList = {
   Referrals: undefined;
   Chat: {tripId: string};
   Help: undefined;
+};
+
+/** ParamList de las tabs del bottom nav (`MainTabs`). Home/TripHistory/Profile también quedan en
+ * `RootStackParamList` para que `navigate('Home')` etc. sigan tipando (resuelven a la tab anidada). */
+export type MainTabsParamList = {
+  Home: undefined;
+  TripHistory: undefined;
+  Seguridad: undefined;
+  Profile: undefined;
 };
 
 /** Habilita el tipado global de `useNavigation()` sin pasar genéricos en cada uso. */

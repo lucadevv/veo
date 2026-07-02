@@ -109,3 +109,46 @@ export function IconTabUser({
     </Svg>
   );
 }
+
+/** Escudo (pestaña Seguridad) — espejo del shield del .pen; se rellena al activarse. */
+export function IconTabSecurity({
+  active = false,
+  color,
+  size = 24,
+}: TabIconProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"
+        fill={active ? color : 'none'}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Auto de frente (pestaña Viajes) — espejo del car-front del .pen; se rellena al activarse. */
+export function IconTabRides({
+  active = false,
+  color,
+  size = 24,
+}: TabIconProps): React.JSX.Element {
+  const theme = useTheme();
+  const innerColor = active ? theme.colors.surface : color;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 11l1.5-4A2 2 0 0 1 8.4 6h7.2a2 2 0 0 1 1.9 1.4L19 11v6a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"
+        fill={active ? color : 'none'}
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path d="M5 11h14" stroke={innerColor} strokeWidth={STROKE} strokeLinecap="round" />
+      <Circle cx={8} cy={14.5} r={0.9} fill={innerColor} />
+      <Circle cx={16} cy={14.5} r={0.9} fill={innerColor} />
+    </Svg>
+  );
+}

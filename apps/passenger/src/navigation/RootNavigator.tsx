@@ -23,7 +23,6 @@ import {
   PaymentScreen,
 } from '../features/payments/presentation';
 import {SavedPlacesScreen} from '../features/places/presentation';
-import {ProfileScreen} from '../features/profile/presentation';
 import {RatingScreen} from '../features/ratings/presentation';
 import {ReferralsScreen} from '../features/referrals/presentation';
 import {ChatScreen} from '../features/chat/presentation';
@@ -36,11 +35,9 @@ import {
   NoOffersScreen,
   OffersBoardScreen,
   ReassignScreen,
-  RequestFlowScreen,
   ScheduledTripsScreen,
   ScheduleNewScreen,
   TripActiveScreen,
-  TripHistoryScreen,
 } from '../features/trip/presentation';
 import {
   MapPickScreen,
@@ -64,6 +61,8 @@ import type {RootStackParamList} from './types';
  * (desmontar el Home al cambiar de tab) ahora lo replica un guard de foco (`useIsFocused`) en
  * `RequestFlowScreen`, que desmonta el `AppMap` cuando el Home pierde foco (ver allí).
  */
+
+import {MainTabs} from './MainTabs';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -188,25 +187,12 @@ export function RootNavigator(): React.JSX.Element {
         headerShadowVisible: false,
         contentStyle: {backgroundColor: theme.colors.bg},
       }}>
-      {/* HOME = pantalla RAÍZ autenticada (antes el tab Home). Va PRIMERA (initialRoute de facto), sin
-          header del SO (su chrome propio: pill de ubicación + campana + avatar flotan sobre el mapa). */}
+      {/* MAIN = bottom nav (Inicio·Viajes·Seguridad·Cuenta), reintroducido del design/veo.pen. Va
+          PRIMERA (initialRoute de facto). Las pantallas modales/de viaje van ENCIMA en el Stack. */}
       <Stack.Screen
-        name="Home"
-        component={RequestFlowScreen}
+        name="Main"
+        component={MainTabs}
         options={{headerShown: false}}
-      />
-      {/* "Mis viajes" y Perfil dejaron de ser tabs: ahora son pantallas del stack con el header nativo
-          oscuro estándar (la convención del resto del stack autenticado). Profile se abre desde el
-          avatar del Home; TripHistory desde la entrada "Mis viajes" del Perfil. */}
-      <Stack.Screen
-        name="TripHistory"
-        component={TripHistoryScreen}
-        options={{title: t('screens.tripHistory')}}
-      />
-      <Stack.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{title: t('screens.profile')}}
       />
       <Stack.Screen
         name="Search"
