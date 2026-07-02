@@ -12,6 +12,7 @@ import { PaymentMethod } from '@veo/shared-types';
 import { TripsService } from './trips.service';
 import { DebtPendingError } from '../payments/dto/payments.dto';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
+import type { DispatchService } from '../dispatch/dispatch.service';
 import type { CreateTripDto } from './dto/trip.dto';
 import type { LiveKitConfig } from '../share/livekit-token';
 import type Redis from 'ioredis';
@@ -83,6 +84,8 @@ function makeService(
     set: vi.fn().mockResolvedValue('OK'),
     del: vi.fn().mockResolvedValue(1),
   };
+  // Fase C: getSurge autoritativo (mock 1.5x) — createTrip lo re-cotiza en vez de confiar el DTO del cliente.
+  const getSurge = vi.fn().mockResolvedValue({ multiplier: 1.5, zoneId: 'z1', active: true });
   const svc = new TripsService(
     grpcStub, // tripGrpc
     identityGrpc, // identityGrpc
@@ -98,8 +101,10 @@ function makeService(
     InternalAudience.PUBLIC_RAIL,
     redis as unknown as Redis, // REDIS (cache KYC + deuda)
     {} as unknown as DriverEnrichmentService,
+    // ADR-021 Fase C — dispatch.getSurge re-cotiza el surge AUTORITATIVO server-side (default mock 1.5x).
+    { getSurge } as unknown as DispatchService,
   );
-  return { svc, post, debtGet, redis, identityGrpcCall };
+  return { svc, post, debtGet, redis, identityGrpcCall, getSurge };
 }
 
 describe('TripsService.createTrip — ADR-018: sin gate de KYC (verificación OPCIONAL)', () => {
@@ -266,5 +271,32 @@ describe('TripsService.createTrip — entrada de la PUJA (GAP #4)', () => {
     expect(body.bidCents).toBeUndefined();
     expect(body.passengerId).toBe('usr-1');
     expect(body.paymentMethod).toBe(PaymentMethod.CASH);
+  });
+});
+
+describe('TripsService.createTrip — ADR-021 Fase C: surge AUTORITATIVO server-side', () => {
+  it('FIXED → re-cotiza surge del server (1.5x) e IGNORA el surgeMultiplier tampereado del cliente', async () => {
+    const { svc, post, getSurge } = makeService();
+    // El cliente MIENTE: manda 1.0 para esquivar el surge. Debe ganar el valor server-side (1.5).
+    await svc.createTrip(user, baseDto({ surgeMultiplier: 1.0 }), 'idem-surge');
+    expect(getSurge).toHaveBeenCalledWith(user, ORIGIN.lat, ORIGIN.lon);
+    const body = post.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    expect(body.surgeMultiplier).toBe(1.5);
+  });
+
+  it('PUJA (con bidCents) → NO consulta surge (el bid es el precio) y lo reenvía undefined', async () => {
+    const { svc, post, getSurge } = makeService();
+    await svc.createTrip(user, baseDto({ bidCents: 900, surgeMultiplier: 1.0 }), 'idem-surge-puja');
+    expect(getSurge).not.toHaveBeenCalled();
+    const body = post.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    expect(body.surgeMultiplier).toBeUndefined();
+  });
+
+  it('dispatch caído → degrada a 1.0 (nunca confía el valor del cliente ni sobre-cobra)', async () => {
+    const { svc, post, getSurge } = makeService();
+    getSurge.mockRejectedValueOnce(new Error('dispatch down'));
+    await svc.createTrip(user, baseDto({ surgeMultiplier: 1.8 }), 'idem-surge-fail');
+    const body = post.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    expect(body.surgeMultiplier).toBe(1.0);
   });
 });

@@ -8,6 +8,7 @@ import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { TripsService } from './trips.service';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
+import type { DispatchService } from '../dispatch/dispatch.service';
 import type { LiveKitConfig } from '../share/livekit-token';
 import type { TripHistoryItemReply, PassengerTripsReply } from '../infra/grpc-types';
 
@@ -66,6 +67,7 @@ function makeService(reply: PassengerTripsReply) {
     InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never,
     {} as unknown as DriverEnrichmentService,
+    {} as unknown as DispatchService,
   );
   return { svc, call };
 }

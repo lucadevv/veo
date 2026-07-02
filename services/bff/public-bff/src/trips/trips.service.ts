@@ -3,9 +3,10 @@
  * comandos vía REST interno firmado. El passengerId/actor se derivan SIEMPRE de la identidad
  * autenticada, nunca del cliente.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { DriverEnrichmentService } from './driver-enrichment.service';
+import { DispatchService } from '../dispatch/dispatch.service';
 import {
   grpcIdentityMetadata,
   INTERNAL_IDENTITY_SECRET,
@@ -89,7 +90,10 @@ export class TripsService {
     @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly enrichment: DriverEnrichmentService,
+    private readonly dispatch: DispatchService,
   ) {}
+
+  private readonly logger = new Logger(TripsService.name);
 
   /** Crea un viaje. Idempotente: usa la Idempotency-Key del cliente o genera una UUIDv7. */
   async createTrip(
@@ -103,6 +107,26 @@ export class TripsService {
     // de producto: la deuda bloquea TODO pedido). Server-side. 403 DEBT_PENDING con el detalle para el
     // banner. Cacheado SOLO el resultado sin deuda (positivo).
     await this.assertNoDebt(user);
+    // ADR-021 Fase C (C1) — el surge es AUTORITATIVO server-side, NUNCA se confía del cliente. Un cliente
+    // modificado podía mandar `surgeMultiplier=1.0` para esquivar el surge (sub-cobro) o un valor arbitrario.
+    // Lo RE-COTIZAMOS acá (trust boundary del BFF) contra dispatch con el ORIGIN del viaje y forwardeamos ESE
+    // valor; `dto.surgeMultiplier` queda display-only (lo que el pasajero vio en la cotización, no autoritativo).
+    // Solo aplica a la TARIFA FIJA: en PUJA (`bidCents` presente) el bid ES el precio → surge irrelevante, se
+    // omite. Fail-safe: si dispatch no responde, degradamos a 1.0 (sin surge) — jamás confiamos el valor del
+    // cliente ni sobre-cobramos. (Follow-up ADR-021: un viaje PROGRAMADO debería re-cotizar surge en la
+    // activación, no en la creación — acá igual queda autoritativo, no tampereable.)
+    const surgeMultiplier =
+      dto.bidCents == null
+        ? await this.dispatch
+            .getSurge(user, dto.origin.lat, dto.origin.lon)
+            .then((s) => s.multiplier)
+            .catch((err: unknown) => {
+              this.logger.warn(
+                `surge no disponible al crear viaje (degradado a 1.0): ${String(err)}`,
+              );
+              return 1.0;
+            })
+        : undefined;
     return this.tripRest.post<TripResource>('/trips', {
       identity: user,
       idempotencyKey: idempotencyKey ?? uuidv7(),
@@ -119,7 +143,8 @@ export class TripsService {
         bidCents: dto.bidCents,
         paymentMethod: dto.paymentMethod,
         category: dto.category,
-        surgeMultiplier: dto.surgeMultiplier,
+        // Autoritativo (Fase C): el surge re-cotizado server-side, NO el `dto.surgeMultiplier` del cliente.
+        surgeMultiplier,
         childMode: dto.childMode,
         childCode: dto.childCode,
         // Ola 2A: el código de promo viaja a trip-service, se persiste y se propaga al cobro.

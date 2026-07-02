@@ -7,6 +7,7 @@ import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { TripsService } from './trips.service';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
+import type { DispatchService } from '../dispatch/dispatch.service';
 import type { LiveKitConfig } from '../share/livekit-token';
 
 const SECRET = 'dev-internal-secret-change-me';
@@ -53,6 +54,7 @@ function makeService(trip: { found: boolean; passengerId: string }, dispatchResu
     InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never, // REDIS (cache KYC, no usado acá)
     enrichment,
+    {} as unknown as DispatchService,
   );
   return { svc, get, post, tripPost, enrich };
 }
