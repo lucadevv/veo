@@ -7,14 +7,16 @@ import type {
 import {useIsFocused, useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
-import {RoutePin, TOUCH_TARGET, useTheme} from '@veo/ui-kit';
+import {RoutePin, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {ScrollView, StyleSheet, View} from 'react-native';
+import {Image, ScrollView, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import Svg, {Defs, LinearGradient as SvgLinearGradient, Rect, Stop} from 'react-native-svg';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
+import homeMapBackdrop from '../../../../shared/assets/brand/home-map.jpg';
 import {
   DraggableSheet,
   type DraggableSheetHandle,
@@ -71,6 +73,8 @@ const SNAP_POINTS = ['content', 0.92] as const;
 const PEEK_MAX_FRACTION = 0.5;
 const PEEK_INDEX = 0;
 const FULL_INDEX = SNAP_POINTS.length - 1;
+/** Alto de la TabBar flotante (pill + margen) para que el sheet del Home idle NO quede debajo. */
+const HOME_TABBAR_CLEARANCE = 88;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -629,36 +633,53 @@ export function RequestFlowScreen(): React.JSX.Element {
           route/trip; solo cambia el CONTENEDOR. Va ANTES del HomeTopBar para que ese overlay absoluto quede
           ENCIMA y siga siendo tappable (campana/avatar/pill); el contenido arranca debajo vía paddingTop. */}
       {mapMode === 'idle' ? (
-        <View
-          style={[
-            styles.idleScreen,
-            {
-              // El HomeTopBar es un overlay absoluto anclado en `insets.top + spacing.sm`, alto ≈ TOUCH_TARGET
-              // (pill/avatar). El contenido idle arranca debajo de él, con un respiro (spacing.md), y deja el
-              // home indicator abajo (bottomInset).
-              paddingTop:
-                insets.top + theme.spacing.sm + TOUCH_TARGET + theme.spacing.md,
-              paddingBottom: bottomInset,
-            },
-          ]}>
-          {SheetHeader ? (
-            <View style={{paddingHorizontal: theme.spacing.xl}}>
-              <SheetHeader ctx={ctx} />
+        <View style={styles.idleScreen}>
+          {/* Fondo del Home fiel a design/veo.pen P/Home: imagen 3D de ciudad (el .pen usa una IMAGEN,
+              no un mapa vivo) + scrim vertical para legibilidad del pill arriba y del sheet abajo. El
+              mapa vivo (Mapbox 3D/2D) entra en las fases de viaje (route/trip), no en el Home idle. */}
+          <Image
+            source={homeMapBackdrop}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+          <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Defs>
+              <SvgLinearGradient id="homeScrim" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0.5} />
+                <Stop offset="0.34" stopColor={theme.colors.bg} stopOpacity={0.08} />
+                <Stop offset="0.6" stopColor={theme.colors.bg} stopOpacity={0.74} />
+                <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={0.98} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#homeScrim)" />
+          </Svg>
+          <View
+            style={[
+              styles.idleContent,
+              {paddingBottom: bottomInset + HOME_TABBAR_CLEARANCE},
+            ]}>
+            <View style={styles.idleSheet}>
+              {SheetHeader ? (
+                <View style={{paddingHorizontal: theme.spacing.xl}}>
+                  <SheetHeader ctx={ctx} />
+                </View>
+              ) : null}
+              <ScrollView
+                style={styles.idleSheetScroll}
+                contentContainerStyle={[
+                  styles.sheetContent,
+                  {
+                    paddingHorizontal: theme.spacing.xl,
+                    paddingTop: theme.spacing.md,
+                    paddingBottom: theme.spacing.xl,
+                    gap: theme.spacing.md,
+                  },
+                ]}
+                showsVerticalScrollIndicator={false}>
+                <SheetBody ctx={ctx} />
+              </ScrollView>
             </View>
-          ) : null}
-          <ScrollView
-            style={styles.sheetScroll}
-            contentContainerStyle={[
-              styles.sheetContent,
-              {
-                paddingHorizontal: theme.spacing.xl,
-                paddingBottom: theme.spacing.xl,
-                gap: theme.spacing.md,
-              },
-            ]}
-            showsVerticalScrollIndicator={false}>
-            <SheetBody ctx={ctx} />
-          </ScrollView>
+          </View>
         </View>
       ) : null}
 
@@ -767,6 +788,9 @@ const styles = StyleSheet.create({
   // (favoritos/recientes) scrollea debajo. flex:1 (no absoluteFill) para no interceptar los toques del
   // HomeTopBar absoluto que flota encima.
   idleScreen: {flex: 1},
+  idleContent: {flex: 1, justifyContent: 'flex-end'},
+  idleSheet: {maxHeight: '72%'},
+  idleSheetScroll: {flexShrink: 1},
   sheetScroll: {flex: 1},
   sheetContent: {paddingTop: 4},
 });
