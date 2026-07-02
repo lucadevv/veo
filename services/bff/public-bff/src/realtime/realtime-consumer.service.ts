@@ -22,6 +22,7 @@ import {
   tripArrived,
   tripArriving,
   tripAssigned,
+  tripBidPosted,
   tripCancelled,
   tripCompleted,
   tripExpired,
@@ -88,6 +89,10 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return {
       'trip.requested': (env) => this.onTripStatus(env, tripRequested, 'REQUESTED'),
+      // ADR-020 Lote 1 · la puja (re)abrió (PUJA inicial o re-bid). Antes ORPHAN (ningún BFF lo consumía)
+      // → el pasajero no recibía push al re-pujar y el timer/fase dependían 100% del poll de 5s. El topic
+      // 'trip' YA está suscrito (registrar el handler basta; kafka.ts añade el topic vía topicForEvent).
+      'trip.bid_posted': (env) => this.onBidPosted(env),
       'trip.assigned': (env) => this.onTripAssigned(env),
       'trip.accepted': (env) => this.onTripAccepted(env),
       'trip.arriving': (env) => this.onTripArriving(env),
@@ -128,6 +133,19 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   ): Promise<void> {
     const parsed = schema.safeParse(env.payload);
     if (parsed.success) this.pushTripUpdate(parsed.data.tripId, status, null);
+    return Promise.resolve();
+  }
+
+  /**
+   * ADR-020 Lote 1 · `trip.bid_posted`: trip-service abrió la puja (createTrip inicial) o la RE-abrió
+   * (re-bid). Empujamos `REQUESTED` al pasajero para que su máquina de fases vuelva a "buscando/ofertas"
+   * al instante, SIN esperar el poll de 5s. Combinado con la invalidación del cliente en el re-bid, la app
+   * refetchea el board fresco. NO usamos el `windowSec` del payload para el `expiresAt`: dispatch es la
+   * autoridad del board (recalcula el `expiresAt` en openBoard) y el cliente lo obtiene por REST.
+   */
+  private onBidPosted(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = tripBidPosted.safeParse(env.payload);
+    if (parsed.success) this.pushTripUpdate(parsed.data.tripId, 'REQUESTED', null);
     return Promise.resolve();
   }
 
@@ -237,6 +255,10 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   private onOfferMade(env: EventEnvelope<unknown>): Promise<void> {
     const parsed = dispatchOfferMade.safeParse(env.payload);
     if (parsed.success) {
+      // ADR-020 Lote 1 · una oferta entrando implica board ABIERTO: fijamos el status a REQUESTED para que
+      // la reconexión (emitSnapshot) NO re-empuje un EXPIRED stale de un ciclo previo sin ofertas sobre un
+      // board sano. No emitimos trip:update aquí (la oferta ya viaja por `offer:made`); solo memorizamos.
+      this.state.setStatus(parsed.data.tripId, 'REQUESTED');
       this.passenger.emitOfferMade(parsed.data.tripId, {
         tripId: parsed.data.tripId,
         driverId: parsed.data.driverId,

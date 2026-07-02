@@ -85,6 +85,7 @@ const trip: TripReply = {
     { lat: -12.048, lon: -77.043 },
     { lat: -12.049, lon: -77.046 },
   ],
+  specialRequests: [],
   found: true,
 };
 

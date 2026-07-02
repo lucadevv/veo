@@ -191,7 +191,17 @@ export class PassengerGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!ACTIVE_STATUSES.has(trip.status)) throw new Error('el viaje no está activo');
   }
 
-  /** Emite el último estado y ubicación conocidos al pasajero que (re)conecta. */
+  /**
+   * Emite el último estado y ubicación conocidos al pasajero que (re)conecta.
+   *
+   * ADR-020 Lote 1 · reconexión en la PUJA: la LISTA DE OFERTAS no se replica por socket. Se recupera del
+   * lado del cliente vía su query REST `['trip', id, 'offers']` (React Query: cache persistente + poll de 5s
+   * + refetch al reconectar), que fusiona con las ofertas vivas de `offer:made`. Aquí solo re-empujamos el
+   * `trip:update` con el status vigente: eso basta para que la app re-derive la fase (REQUESTED→buscando/
+   * ofertas) y re-pinte el board. Deliberadamente NO mantenemos las ofertas en RealtimeStateService —
+   * duplicaría el board efímero AUTORITATIVO de dispatch (Redis+TTL) y arrastraría PII. El status empujado
+   * ya no es un EXPIRED stale porque `onBidPosted`/`onOfferMade` lo fijan a REQUESTED con el board abierto.
+   */
   private emitSnapshot(tripId: string): void {
     const status = this.state.getStatus(tripId);
     const loc = this.state.getLocation(tripId);
