@@ -22,7 +22,6 @@ import {IdleBody} from '../components/IdleBody';
 import {LastDriverCard} from '../components/LastDriverCard';
 import {EnterView} from '../components/motion';
 import {NoOffersBody} from '../components/NoOffersBody';
-import {OfferingsTeaser} from '../components/OfferingsTeaser';
 import {OffersBody} from '../components/OffersBody';
 import {QuotingBody} from '../components/QuotingBody';
 import {placeToRoute, suggestionToRoute} from '../components/routePlace';
@@ -343,10 +342,6 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
           onSelect={ctx.onSelectDestination}
           onAdd={ctx.onSeeAllSaved}
         />
-      </EnterView>
-      {/* Teaser del catálogo (informativo, sin precio): llena la mitad inferior antes vacía del Home. */}
-      <EnterView index={4}>
-        <OfferingsTeaser />
       </EnterView>
     </View>
   );
