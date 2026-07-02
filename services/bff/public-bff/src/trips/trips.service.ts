@@ -325,7 +325,7 @@ export class TripsService {
           .call<DriverReply>('GetDriver', { id: trip.driverId }, meta)
           .catch(() => null)
       : null;
-    const [vehicle, aggregate, myRating] = await Promise.all([
+    const [vehicle, aggregate, myRating, tipCents] = await Promise.all([
       this.resolveTripVehicle(trip, driver?.found ? driver.userId : undefined, meta),
       trip.driverId
         ? this.ratingGrpc
@@ -335,6 +335,9 @@ export class TripsService {
       // MI rating de este viaje (REST firmado, filtrado por el rater = identidad). 404 (sin rating) → null;
       // cualquier otro fallo también → null (degradación grácil: la app cae al GET /ratings?tripId on-demand).
       this.fetchMyRatingStars(user, trip.id),
+      // A1 · propina TOTAL cobrada del viaje (recibo de payment; agrega los tip-Payments digitales de Model B).
+      // Así el detalle/app sabe que ya se dio propina y no habilita re-propinar al re-montar. Best-effort → 0.
+      this.fetchTripTipCents(trip.id, meta),
     ]);
 
     return buildTripDetail(
@@ -342,9 +345,22 @@ export class TripsService {
       driver?.found ? driver : null,
       aggregate?.found ? aggregate : null,
       vehicle,
-      0,
+      tipCents,
       myRating,
     );
+  }
+
+  /** Propina TOTAL cobrada del viaje (recibo de payment, best-effort). 0 si no hay pago o payment-service cae. */
+  private async fetchTripTipCents(
+    tripId: string,
+    meta: ReturnType<typeof grpcIdentityMetadata>,
+  ): Promise<number> {
+    try {
+      const p = await this.paymentGrpc.call<PaymentReply>('GetPaymentByTrip', { tripId }, meta);
+      return p.found ? p.tipCents : 0;
+    } catch {
+      return 0;
+    }
   }
 
   /**

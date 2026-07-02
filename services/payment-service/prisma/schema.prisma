@@ -65,6 +65,19 @@ enum PaymentMode {
   @@schema("payment")
 }
 
+/// A1 (ADR-022) · CLASE del cobro. Discriminador TIPADO (jamás inferir por gross=0): distingue el cobro de
+/// TARIFA del cobro dedicado de PROPINA digital, para que los lookups by-trip de la tarifa (refund, recibo)
+/// NO confundan el uno con el otro.
+///  - FARE: cobro de la tarifa del viaje (default → todas las filas legacy quedan FARE, cero cambio al desplegar).
+///  - TIP:  cobro dedicado de una propina DIGITAL (gross 0, comisión 0, 100% al conductor). Solo la propina
+///          digital es un Payment; la propina en EFECTIVO se registra como TipAddition "en mano" (sin cobro).
+enum PaymentKind {
+  FARE
+  TIP
+
+  @@schema("payment")
+}
+
 enum PayoutStatus {
   PENDING
   PROCESSING
@@ -175,6 +188,9 @@ model Payment {
   failureReason   String?       @map("failure_reason")
   /// Referencia del pagador en el riel (teléfono/token Yape-Plin). PII mínima.
   payerRef        String?       @map("payer_ref")
+  /// A1 (ADR-022) · Clase del cobro (FARE tarifa | TIP propina digital dedicada). Ver `enum PaymentKind`.
+  /// Los lookups by-trip de la TARIFA (refund, recibo) filtran `kind = FARE` para no agarrar un cobro de propina.
+  kind            PaymentKind   @default(FARE)
   /// F2.3 · Si este Payment SALDA una penalidad de cancelación, su id (sino null). Un Payment de
   /// liquidación lleva `driverId=NULL` (no es ganancia de viaje → no entra al payout por aquí; la
   /// compensación del conductor entra vía `collectEarnings` sumando la penalidad COLLECTED). Al

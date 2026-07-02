@@ -1410,6 +1410,16 @@ export const common = {
     sentTitle: '¡Propina enviada!',
     sentBody: 'Tu conductor recibió {{amount}}. ¡Gracias por tu generosidad!',
     error: 'No pudimos enviar la propina. Inténtalo de nuevo.',
+    /** La propina se cobra fuera de banda (viaje en efectivo / sin Yape vinculado): falta completar el checkout. */
+    checkoutTitle: 'Completá tu propina',
+    checkoutBody:
+      'Falta un paso: aprobá los {{amount}} en Yape o escaneá el QR. Tu conductor la recibe apenas se confirme.',
+    /** On-file: cobrándose server-initiated, esperando la confirmación del webhook. */
+    processingTitle: 'Propina en proceso',
+    processingBody: 'Estamos cobrando tu propina. Se confirma en unos segundos.',
+    /** El cobro de la propina falló terminal (declive). Honesto, con reintento. */
+    failedTitle: 'No se pudo cobrar la propina',
+    failedBody: 'No pudimos cobrar tu propina. Podés intentarlo de nuevo.',
   },
 
   /** Recibo del viaje (desglose + compartir nativo). */

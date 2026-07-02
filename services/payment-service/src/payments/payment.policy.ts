@@ -4,7 +4,24 @@
  * reintentos (BR-P02) y la derivación determinista de la dedupKey del cobro por viaje.
  */
 import { addMoney, commission, money, subtractMoney, InvalidStateError } from '@veo/utils';
-import type { PaymentStatus } from '@veo/shared-types';
+import type { PaymentMethod, PaymentStatus } from '@veo/shared-types';
+
+/**
+ * A1 (ADR-022) · El ÚNICO método que se salda EN EFECTIVO (mano a mano, sin gateway). Predicado de dominio en
+ * UN solo punto (cero comparaciones `=== 'CASH'` regadas): el resto de métodos son DIGITALES (pasan por el riel).
+ */
+export function isCashMethod(method: PaymentMethod): boolean {
+  return method === 'CASH';
+}
+
+/**
+ * A1 (ADR-022 · Model B) · Método DIGITAL por defecto de una propina cuando el viaje se pagó en EFECTIVO. La
+ * propina iniciada en el app SIEMPRE se cobra digital (el conductor la cobra vía payout, no "en mano"); como el
+ * gateway NO cobra CASH, la propina de un viaje-efectivo NO puede heredar el método → cae a YAPE (el método
+ * digital por defecto de Perú): on-file si el pasajero tiene afiliación activa, si no un checkout QR. Const
+ * TIPADO, jamás un string suelto.
+ */
+export const DEFAULT_DIGITAL_TIP_METHOD: PaymentMethod = 'YAPE';
 
 /**
  * MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). Union TIPADA — jamás un string suelto. Determina QUÉ
@@ -245,6 +262,34 @@ export function deriveTripChargeDedupKey(tripId: string): string {
  */
 export function deriveRefundIdempotencyKey(refundId: string): string {
   return `refund-${refundId}`;
+}
+
+/**
+ * A1 (ADR-022) · PREFIJO TIPADO de la dedupKey del cobro dedicado de una PROPINA digital (cero strings mágicos).
+ * Namespacea la dedupKey del tip-Payment para que NUNCA colisione con la del cobro de tarifa (`trip-completed:`)
+ * ni con la de un refund, aunque el UUID coincidiera.
+ */
+export const TIP_CHARGE_DEDUP_PREFIX = 'tip-charge:' as const;
+
+/**
+ * A1 (ADR-022) · Clave de idempotencia del cobro de PROPINA digital. Deriva de la `dedupKey` que el cliente manda
+ * al añadir la propina (el mismo doble-submit → misma key → choca contra el UNIQUE de `Payment.dedupKey` → un solo
+ * cobro de propina). Distinta del namespace del cobro de tarifa para no colisionar.
+ */
+export function deriveTipChargeDedupKey(clientDedupKey: string): string {
+  return `${TIP_CHARGE_DEDUP_PREFIX}${clientDedupKey}`;
+}
+
+/**
+ * A1 (ADR-022) · PREFIJO TIPADO de la dedupKey del REEMBOLSO de una propina cuando el viaje se revierte (refund
+ * TOTAL). Namespacea el `Refund.dedupKey` para que sea idempotente por tip-Payment (re-procesar el refund del
+ * viaje no re-reembolsa la propina) y NO colisione con el refund de la tarifa.
+ */
+export const TIP_REFUND_DEDUP_PREFIX = 'tip-refund:' as const;
+
+/** A1 · Clave de idempotencia del reembolso de UNA propina (por el id del tip-Payment). Mismo tip → misma key. */
+export function deriveTipRefundDedupKey(tipPaymentId: string): string {
+  return `${TIP_REFUND_DEDUP_PREFIX}${tipPaymentId}`;
 }
 
 /**

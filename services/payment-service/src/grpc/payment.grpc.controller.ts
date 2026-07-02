@@ -173,7 +173,21 @@ export class PaymentGrpcController {
       where: { dedupKey: deriveTripChargeDedupKey(tripId) },
     });
     if (!p) return EMPTY;
-    return this.toReply(p);
+    // A1 · propina TOTAL del viaje para el recibo = la de la TARIFA (legacy) + Σ de las propinas DIGITALES
+    // capturadas (tip-Payments kind=TIP, cobros separados en Model B). Así el recibo/app sabe que ya se dio
+    // propina (persiste "propina enviada" al re-montar, no habilita re-propinar). Best-effort: si la agregación
+    // falla, degradamos al tip de la propia tarifa (no rompemos el recibo por un cálculo secundario).
+    let tipCents = p.tipCents;
+    try {
+      const tipAgg = await this.prisma.read.payment.aggregate({
+        where: { tripId, kind: 'TIP', status: 'CAPTURED' },
+        _sum: { tipCents: true },
+      });
+      tipCents = p.tipCents + (tipAgg._sum.tipCents ?? 0);
+    } catch {
+      /* degradación honesta: sin la suma de tip-Payments, el recibo reporta el tip de la tarifa. */
+    }
+    return this.toReply(p, tipCents);
   }
 
   /**
@@ -192,7 +206,7 @@ export class PaymentGrpcController {
   }
 
   /** Mapea la fila Payment al contrato gRPC PaymentReply (found=true). */
-  private toReply(p: Payment): PaymentReply {
+  private toReply(p: Payment, tipCentsOverride?: number): PaymentReply {
     return {
       id: p.id,
       tripId: p.tripId,
@@ -202,7 +216,10 @@ export class PaymentGrpcController {
       grossCents: p.grossCents,
       commissionCents: p.commissionCents,
       feeCents: p.feeCents,
-      tipCents: p.tipCents,
+      // A1 · en el recibo by-trip, `tipCentsOverride` = la propina TOTAL del viaje (tarifa legacy + Σ tip-Payments
+      // digitales capturados), porque en Model B las propinas viven en cobros SEPARADOS (no en `Payment.tipCents`
+      // de la tarifa, que queda 0). Sin override (GetPayment por id) = el `tipCents` literal del propio Payment.
+      tipCents: tipCentsOverride ?? p.tipCents,
       externalRef: p.externalRef ?? '',
       found: true,
       // Checkout asíncrono: proto3 no distingue null de "" → emitimos "" cuando la columna es null.

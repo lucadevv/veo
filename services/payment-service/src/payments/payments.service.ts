@@ -42,9 +42,13 @@ import {
   bpsToRate,
   ChargeMode,
   computeChargeAmounts,
+  DEFAULT_DIGITAL_TIP_METHOD,
   deriveAdminRefundDedupKey,
   deriveBookingCancellationRefundDedupKey,
   deriveRefundIdempotencyKey,
+  deriveTipChargeDedupKey,
+  deriveTipRefundDedupKey,
+  isCashMethod,
   retryDelayMs,
 } from './payment.policy';
 import { CommissionService } from '../commission/commission.service';
@@ -517,19 +521,33 @@ export class PaymentsService {
       });
       const updated = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
       if (count === 0) return updated; // otra entrega ya capturó: no re-emitir ni re-colectar
-      const envelope = createEnvelope({
-        eventType: 'payment.captured',
-        producer: 'payment-service',
-        payload: {
-          paymentId: updated.id,
-          tripId: updated.tripId,
-          method: updated.method,
-          grossCents: updated.grossCents,
-          commissionCents: updated.commissionCents,
-          // ENRIQUECIDO: push "pago confirmado · S/X.XX" al pasajero (notification-service).
-          passengerId: updated.passengerId ?? undefined,
-        },
-      });
+      // A1 · un tip-Payment (kind=TIP) que captura NO es un "pago del viaje": emite `payment.tip_added` (el
+      // conductor cobra la propina SOLO cuando se cobró de verdad + entra al payout), no `payment.captured`.
+      const envelope =
+        updated.kind === 'TIP'
+          ? createEnvelope({
+              eventType: 'payment.tip_added',
+              producer: 'payment-service',
+              payload: {
+                paymentId: updated.id,
+                tripId: updated.tripId,
+                driverId: updated.driverId ?? undefined,
+                tipCents: updated.tipCents,
+              },
+            })
+          : createEnvelope({
+              eventType: 'payment.captured',
+              producer: 'payment-service',
+              payload: {
+                paymentId: updated.id,
+                tripId: updated.tripId,
+                method: updated.method,
+                grossCents: updated.grossCents,
+                commissionCents: updated.commissionCents,
+                // ENRIQUECIDO: push "pago confirmado · S/X.XX" al pasajero (notification-service).
+                passengerId: updated.passengerId ?? undefined,
+              },
+            });
       await enqueueOutbox(tx, envelope, updated.id);
       // F2.3 · si este Payment SALDA una penalidad de cancelación, flippearla → COLLECTED en la MISMA
       // transacción de captura (vale tanto para el camino sync como para el webhook: ambos pasan por acá).
@@ -577,6 +595,17 @@ export class PaymentsService {
   }
 
   private async markDebt(payment: Payment, reason: string): Promise<Payment> {
+    // A1 · una PROPINA (kind=TIP) que declina NO es deuda del viaje ni una falla de cobro que deba escalar:
+    // se marca FAILED (terminal) SIN emitir `payment.failed` — ese evento dispara alerta a la central de
+    // seguridad + push "pago falló" + bloqueo de nuevos viajes, todo INDEBIDO para una propina OPCIONAL. El
+    // pasajero reintenta la propina desde su UI (nueva dedupKey → nuevo tip-Payment).
+    if (payment.kind === 'TIP') {
+      assertPaymentTransition(payment.status, 'FAILED');
+      return this.prisma.write.payment.update({
+        where: { id: payment.id },
+        data: { status: 'FAILED', retries: this.maxRetries, failureReason: reason },
+      });
+    }
     assertPaymentTransition(payment.status, 'DEBT');
     return this.prisma.write.$transaction(async (tx) => {
       const updated = await tx.payment.update({
@@ -622,8 +651,11 @@ export class PaymentsService {
    * cliente (anti-IDOR). `hasDebt`/`totalCents` resumen lo BLOQUEANTE (DEBT + CANCELLATION_PENALTY).
    */
   async getDebtForPassenger(passengerId: string): Promise<DebtSummary> {
+    // A1 · `kind: 'FARE'`: el gate de deuda del pasajero es sobre obligaciones de VIAJE. Una propina (kind=TIP)
+    // es OPCIONAL: si su cobro declina NO es deuda bloqueante ni un "pago por completar" del gate — no puede
+    // impedirle pedir viajes. Su reintento vive en la UI de propina, no acá.
     const debtRows = await this.prisma.read.payment.findMany({
-      where: { passengerId, status: 'DEBT' },
+      where: { passengerId, kind: 'FARE', status: 'DEBT' },
       select: { id: true, tripId: true, amountCents: true, failureReason: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -640,7 +672,9 @@ export class PaymentsService {
     // medios de checkout es un cobro en curso (efectivo esperando confirmación bilateral, on-file
     // server-initiated sin checkout): NO accionable por el usuario → fuera.
     const pendingRows = await this.prisma.read.payment.findMany({
-      where: { passengerId, status: 'PENDING' },
+      // A1 · `kind: 'FARE'`: idem — un cobro de propina PENDING con checkout NO es un "pago del viaje por
+      // completar" del gate. La propina se completa desde su propia UI, no desde la franja de deuda del viaje.
+      where: { passengerId, kind: 'FARE', status: 'PENDING' },
       select: {
         id: true,
         tripId: true,
@@ -915,6 +949,17 @@ export class PaymentsService {
 
   /** Marca un pago como FAILED (cobro externo expirado/cancelado). Emite payment.failed willRetry=false. */
   private async markFailed(payment: Payment, reason: string): Promise<Payment> {
+    // A1 · una PROPINA (kind=TIP) que EXPIRA (checkout abandonado — el caso más común) o se cancela NO es una
+    // falla del cobro del viaje: se marca FAILED (terminal) SIN emitir `payment.failed` — ese evento dispara la
+    // alerta a la central de seguridad + push "pago falló" al pasajero, INDEBIDO por una propina OPCIONAL no
+    // completada. Espeja el atajo kind=TIP de `markDebt` (rama DECLINED); acá cubre la rama EXPIRED del webhook.
+    if (payment.kind === 'TIP') {
+      assertPaymentTransition(payment.status, 'FAILED');
+      return this.prisma.write.payment.update({
+        where: { id: payment.id },
+        data: { status: 'FAILED', failureReason: reason },
+      });
+    }
     assertPaymentTransition(payment.status, 'FAILED');
     return this.prisma.write.$transaction(async (tx) => {
       const updated = await tx.payment.update({
@@ -932,79 +977,99 @@ export class PaymentsService {
   }
 
   /**
-   * Añade una propina a un viaje YA cobrado (BR-P04): el 100% va al conductor, fuera de comisión.
-   * Idempotente por `dedupKey` (UNIQUE en TipAddition): reenviar la misma propina no la duplica.
-   * Suma el monto a `payment.tipCents` y a `payment.amountCents` en la MISMA transacción que el
-   * registro del incremento. Solo si existe el pago del viaje y está vivo (PENDING/CAPTURED).
-   *
-   * Efectivo vs digital: el modelo es uniforme — la propina se registra contra el pago del viaje en
-   * ambos casos. La liquidación al conductor (payouts) ya agrega `tipCents` de los pagos CAPTURED,
-   * así que un tip sobre un pago capturado entra en la liquidación de su período sin pasos extra.
+   * Añade una propina a un viaje YA cobrado (BR-P04 · A1 ADR-022 · Model B): el 100% va al conductor, fuera de
+   * comisión. TODA propina iniciada en el app se COBRA DIGITAL (no existe "propina en mano" iniciada por el app):
+   * crea un cobro dedicado (tip-Payment `kind=TIP`, gross 0, comisión 0) que pasa por el gateway. El conductor la
+   * cobra SOLO cuando el cobro CAPTURA (captureSuccess emite `payment.tip_added` + entra al payout por su
+   * `tipCents`). Antes NO se cobraba nada al pasajero y el conductor la recibía igual → la plataforma la subsidiaba.
+   * Idempotente por `Payment.dedupKey` (namespaced `tip-charge:`): reenviar la misma propina no la duplica.
    */
   async addTip(input: { tripId: string; tipCents: number; dedupKey: string }): Promise<Payment> {
     if (!Number.isInteger(input.tipCents) || input.tipCents <= 0) {
       throw new InvalidStateError('tipCents debe ser un entero de céntimos positivo');
     }
 
-    // Idempotencia: si ya aplicamos esta propina, devolvemos el pago como está (sin re-sumar).
-    const existingTip = await this.prisma.read.tipAddition.findUnique({
-      where: { dedupKey: input.dedupKey },
+    // Idempotencia: si ya iniciamos el cobro de esta propina (tip-Payment), lo devolvemos sin re-cobrar.
+    const existingTipCharge = await this.prisma.read.payment.findUnique({
+      where: { dedupKey: deriveTipChargeDedupKey(input.dedupKey) },
     });
-    if (existingTip) return this.getPayment(existingTip.paymentId);
+    if (existingTipCharge) return existingTipCharge;
 
-    const payment = await this.prisma.read.payment.findFirst({
-      where: { tripId: input.tripId, status: { in: ['PENDING', 'CAPTURED'] } },
+    // El cobro de la TARIFA del viaje (kind=FARE): de él tomamos conductor/pasajero/payerRef y el método (si fue
+    // digital). El filtro `kind=FARE` evita agarrar un tip-Payment previo del mismo viaje (matchearía por tripId).
+    const fare = await this.prisma.read.payment.findFirst({
+      where: { tripId: input.tripId, kind: 'FARE', status: { in: ['PENDING', 'CAPTURED'] } },
       orderBy: { createdAt: 'desc' },
     });
-    if (!payment)
+    if (!fare)
       throw new NotFoundError('No hay un cobro vivo para este viaje al que añadir propina');
-    assertCanAddTip(payment.status);
+    assertCanAddTip(fare.status);
 
+    return this.chargeTipDigital(fare, input.tipCents, input.dedupKey);
+  }
+
+  /**
+   * A1 (Model B) · Propina DIGITAL: cobro dedicado (tip-Payment `kind=TIP`, gross 0, comisión 0, 100% al conductor)
+   * que pasa por el MISMO despacho digital que la tarifa. El MÉTODO de la propina = el de la tarifa si fue digital;
+   * si el viaje se pagó en EFECTIVO cae a YAPE por defecto (on-file resolviendo el walletUid server-side por `userId`,
+   * o un checkout QR). Queda PENDING hasta que el webhook lo CAPTURA; recién ahí `captureSuccess` emite
+   * `payment.tip_added` y el `tipCents` entra al payout (collectEarnings). Idempotente por `Payment.dedupKey`.
+   */
+  private async chargeTipDigital(
+    fare: Payment,
+    tipCents: number,
+    clientDedupKey: string,
+  ): Promise<Payment> {
+    const dedupKey = deriveTipChargeDedupKey(clientDedupKey);
+    // Model B: la propina SIEMPRE se cobra digital. Si el viaje fue en EFECTIVO no puede heredar CASH (el gateway
+    // no cobra efectivo) → cae al método digital por defecto (YAPE); si fue digital, cobra con el MISMO método.
+    const method = (
+      isCashMethod(fare.method) ? DEFAULT_DIGITAL_TIP_METHOD : fare.method
+    ) as Extract<PaymentMethod, 'YAPE' | 'PLIN' | 'CARD' | 'PAGOEFECTIVO'>;
+    let tip: Payment;
     try {
-      return await this.prisma.write.$transaction(async (tx) => {
-        await tx.tipAddition.create({
-          data: {
-            id: uuidv7(),
-            paymentId: payment.id,
-            tripId: payment.tripId,
-            dedupKey: input.dedupKey,
-            tipCents: input.tipCents,
-          },
-        });
-        const updated = await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            tipCents: { increment: input.tipCents },
-            amountCents: { increment: input.tipCents },
-          },
-        });
-        // Outbox (regla CLAUDE.md §3): la propina se publica en la MISMA transacción que su registro,
-        // así el conductor se entera en vivo (driver-bff → push) sin que pueda quedar suma sin evento ni
-        // evento sin suma. `driverId` ENRIQUECIDO para rutear sin join cross-servicio (puede ser null).
-        const envelope = createEnvelope({
-          eventType: 'payment.tip_added',
-          producer: 'payment-service',
-          payload: {
-            paymentId: updated.id,
-            tripId: updated.tripId,
-            driverId: updated.driverId ?? undefined,
-            tipCents: input.tipCents,
-          },
-        });
-        await enqueueOutbox(tx, envelope, updated.id);
-        return updated;
+      tip = await this.prisma.write.payment.create({
+        data: {
+          id: uuidv7(),
+          tripId: fare.tripId,
+          driverId: fare.driverId,
+          passengerId: fare.passengerId,
+          dedupKey,
+          kind: 'TIP',
+          amountCents: tipCents,
+          grossCents: 0,
+          discountCents: 0,
+          creditCents: 0,
+          tipCents,
+          commissionCents: 0,
+          feeCents: 0,
+          method,
+          mode: 'ON_DEMAND',
+          payerRef: fare.payerRef,
+          status: 'PENDING',
+        },
       });
     } catch (err) {
-      // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola suma.
       if (isUniqueViolation(err, 'dedupKey')) {
-        const dup = await this.prisma.read.tipAddition.findUnique({
-          where: { dedupKey: input.dedupKey },
-        });
-        if (dup) return this.getPayment(dup.paymentId);
-        throw new ConflictError('Propina duplicada para la misma dedupKey');
+        const dup = await this.prisma.read.payment.findUnique({ where: { dedupKey } });
+        if (dup) return dup;
+        throw new ConflictError('Cobro de propina duplicado para la misma dedupKey');
       }
       throw err;
     }
+    // Mismo despacho digital que la tarifa. NO reusamos charge() a propósito: una propina NO canjea promo ni
+    // gasta crédito del pasajero (esos reducen la tarifa, no la propina del conductor).
+    return this.dispatchDigitalCharge(tip, {
+      tripId: fare.tripId,
+      grossCents: 0,
+      tipCents,
+      method,
+      dedupKey,
+      driverId: fare.driverId ?? undefined,
+      userId: fare.passengerId ?? undefined,
+      payerRef: fare.payerRef ?? undefined,
+      mode: ChargeMode.ON_DEMAND,
+    });
   }
 
   /**
@@ -1019,22 +1084,26 @@ export class PaymentsService {
   ): Promise<DriverEarningsBreakdown> {
     const rows = await this.prisma.read.payment.findMany({
       where: { driverId, status: 'CAPTURED', capturedAt: { gte: from, lt: to } },
-      select: { grossCents: true, commissionCents: true, tipCents: true },
+      select: { grossCents: true, commissionCents: true, tipCents: true, kind: true },
     });
     let grossCents = 0;
     let commissionCents = 0;
     let tipCents = 0;
+    let tripCount = 0;
     for (const r of rows) {
+      // Bruto/comisión/propina se suman de TODOS los cobros (un tip-Payment aporta 0 bruto/comisión + su
+      // propina); pero el CONTEO de viajes es solo de las TARIFAS (kind=FARE): una propina NO es un viaje.
       grossCents += r.grossCents;
       commissionCents += r.commissionCents;
       tipCents += r.tipCents;
+      if (r.kind === 'FARE') tripCount += 1;
     }
     return {
       grossCents,
       commissionCents,
       tipCents,
       netCents: grossCents - commissionCents + tipCents,
-      tripCount: rows.length,
+      tripCount,
     };
   }
 
@@ -1174,7 +1243,8 @@ export class PaymentsService {
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
     const payment = await this.prisma.read.payment.findFirst({
-      where: { tripId, status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
+      // A1 · `kind=FARE`: un refund reembolsa la TARIFA, nunca un cobro de propina (tip-Payment) del mismo viaje.
+      where: { tripId, kind: 'FARE', status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
       orderBy: { capturedAt: 'desc' },
     });
     if (!payment) throw new NotFoundError('No hay un cobro reembolsable para este viaje');
@@ -1234,7 +1304,10 @@ export class PaymentsService {
     };
 
     try {
-      return await this.executeRefundClaim(payment, claim);
+      const result = await this.executeRefundClaim(payment, claim);
+      // A1 · refund TOTAL del viaje → también se devuelven sus propinas digitales ya cobradas (viaje revertido).
+      if (claim.isFullyRefunded) await this.refundTripTipsFully(payment.tripId, claim.reason);
+      return result;
     } catch (err) {
       // BACKSTOP DE VENTANA: ya hay un refund reciente del MISMO dinero (paymentId, céntimos) creado dentro de la
       // ventana → la operación es la MISMA (un reintento que llegó con otro key, o sin key) → devolvemos el
@@ -1310,7 +1383,8 @@ export class PaymentsService {
     // tripId = bookingId (UUID opaco · §5.5). Mismo lookup que refund(): un cobro CAPTURED o ya parcialmente
     // reembolsado. Si no hay → el cobro no capturó / ya se reembolsó / el evento se adelantó a la captura.
     const payment = await this.prisma.read.payment.findFirst({
-      where: { tripId, status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
+      // A1 · `kind=FARE`: un refund reembolsa la TARIFA, nunca un cobro de propina (tip-Payment) del mismo viaje.
+      where: { tripId, kind: 'FARE', status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
       orderBy: { capturedAt: 'desc' },
     });
     if (!payment) {
@@ -1344,7 +1418,10 @@ export class PaymentsService {
     };
 
     try {
-      return await this.executeRefundClaim(payment, claim);
+      const result = await this.executeRefundClaim(payment, claim);
+      // A1 · el viaje se revirtió (cancelación) → devolver también sus propinas digitales ya cobradas.
+      await this.refundTripTipsFully(tripId, reason);
+      return result;
     } catch (err) {
       // IDEMPOTENCIA: el dedupKey ya existe (otra entrega del MISMO `booking.cancelled` ya creó el Refund) →
       // P2002 → la plata YA volvió, no-op graceful. Cualquier otro error se relanza (transitorio → reintento).
@@ -1371,6 +1448,82 @@ export class PaymentsService {
       return this.refundCashLocally(payment, claim);
     }
     return this.refundViaGateway(payment, claim);
+  }
+
+  /**
+   * A1 · Cuando un viaje se reembolsa TOTAL (revertido), sus propinas DIGITALES ya cobradas también se devuelven:
+   * el pasajero no viajó → no paga la propina. Reembolsa cada tip-Payment CAPTURED del viaje por el reverso real
+   * del proveedor (executeRefundClaim), idempotente por `tip-refund:<tipId>`. Best-effort per-tip: un fallo al
+   * reembolsar UNA propina NO aborta el refund de la tarifa (queda su marcador durable + log para soporte). Un
+   * tip-Payment PENDING (checkout sin completar) no se cobró → no entra (el filtro es CAPTURED/PARTIALLY_REFUNDED).
+   */
+  private async refundTripTipsFully(tripId: string, reason: string): Promise<void> {
+    // El refund de la TARIFA ya se cristalizó ANTES de llamar acá: reembolsar la propina es una operación
+    // SECUNDARIA que NUNCA debe abortar/revertir el refund de la tarifa. Si listar las propinas falla → log
+    // y salimos (soporte reconcilia); no relanzamos (best-effort, degradación honesta).
+    let tips: Payment[];
+    try {
+      tips = await this.prisma.read.payment.findMany({
+        where: { tripId, kind: 'TIP', status: { in: ['PENDING', 'CAPTURED', 'PARTIALLY_REFUNDED'] } },
+      });
+    } catch (err) {
+      // ERROR (no warn): sin el listado, NINGUNA propina del viaje revertido se reembolsa → posible sobre-cobro.
+      // Visible para alerta hasta que el backstop de reconciliación (follow-up A1) lo barra.
+      this.logger.error(
+        `No se pudieron listar las propinas del viaje ${tripId} para reembolso: ${
+          err instanceof Error ? err.message : String(err)
+        } (reconciliar)`,
+      );
+      return;
+    }
+    for (const tip of tips) {
+      // Propina PENDING (checkout abierto/en curso) al revertirse el viaje: se CANCELA (CAS PENDING→FAILED) para
+      // que un webhook/poll TARDÍO no la capture sobre un viaje ya reembolsado (el conductor cobraría propina de
+      // un viaje que no fue). CAS: si capturó concurrentemente, el update no matchea (queda CAPTURED, caso de
+      // borde a reconciliar); no emite `payment.failed` (es una propina opcional, no una falla del viaje).
+      if (tip.status === 'PENDING') {
+        try {
+          await this.prisma.write.payment.updateMany({
+            where: { id: tip.id, status: 'PENDING' },
+            data: { status: 'FAILED', failureReason: `tip-of-refunded-trip: ${reason}` },
+          });
+        } catch (err) {
+          this.logger.warn(
+            `No se pudo cancelar la propina PENDING ${tip.id} del viaje ${tripId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+        continue;
+      }
+      const remainingCents = tip.amountCents - tip.refundedCents;
+      if (remainingCents <= 0) continue;
+      const claim: RefundClaim = {
+        amountCents: remainingCents,
+        reason: `tip-of-refunded-trip: ${reason}`,
+        requestedBy: SYSTEM_OPERATOR,
+        approvedBy: SYSTEM_OPERATOR,
+        dedupKey: deriveTipRefundDedupKey(tip.id),
+        newStatus: 'REFUNDED',
+        newRefundedCents: tip.amountCents,
+        isFullyRefunded: true,
+      };
+      try {
+        await this.executeRefundClaim(tip, claim);
+        this.logger.log(`Propina ${tip.id} del viaje ${tripId} reembolsada (viaje revertido)`);
+      } catch (err) {
+        // Idempotente: ya reembolsada (dedupKey P2002) → no-op. Otro error → log y seguir: NO abortar el
+        // refund de la TARIFA por un fallo al devolver una propina (queda para reintento/soporte).
+        if (isUniqueViolation(err, 'dedupKey')) continue;
+        // ERROR (no warn): una propina que quedó SIN reembolsar sobre un viaje revertido = pasajero sobre-cobrado.
+        // Debe ser VISIBLE para alerta/soporte hasta que el backstop de reconciliación (follow-up A1) lo barra.
+        this.logger.error(
+          `PROPINA SIN REEMBOLSAR sobre viaje revertido — tip=${tip.id} viaje=${tripId}: ${
+            err instanceof Error ? err.message : String(err)
+          } (reconciliar: pasajero sobre-cobrado)`,
+        );
+      }
+    }
   }
 
   /** Devolución LOCAL de un cobro CASH (la plata nunca pasó por el riel): COMPLETED + evento en una tx. */
