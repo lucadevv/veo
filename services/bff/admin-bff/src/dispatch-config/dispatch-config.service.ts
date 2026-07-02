@@ -12,10 +12,14 @@ import { REST_DISPATCH } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { ReplaceRadiusConfigDto } from './dto/dispatch-radius-config.dto';
 
-/** Vista de la config de radios devuelta por dispatch-service (config vigente o el DEFAULT). */
+/** Vista de la config de radios + ventanas devuelta por dispatch-service (config vigente o el DEFAULT). */
 export interface RadiusConfigView {
   nearbyKRing: number;
   matchKRing: number;
+  /** Ventana (ms) de la oferta directa FIXED. */
+  offerTimeoutMs: number;
+  /** Ventana (s) del board de PUJA. */
+  bidWindowSec: number;
   version: number;
   updatedAt: string;
 }
@@ -45,13 +49,24 @@ export class DispatchConfigService {
   ): Promise<RadiusConfigView> {
     const res = await this.rest.put<RadiusConfigView>(BASE, {
       identity,
-      body: { nearbyKRing: dto.nearbyKRing, matchKRing: dto.matchKRing },
+      body: {
+        nearbyKRing: dto.nearbyKRing,
+        matchKRing: dto.matchKRing,
+        offerTimeoutMs: dto.offerTimeoutMs,
+        bidWindowSec: dto.bidWindowSec,
+      },
     });
     await this.audit.record(identity, {
       action: AUDIT_ACTION,
       resourceType: AUDIT_RESOURCE_TYPE,
       resourceId: String(res.version),
-      payload: { nearbyKRing: res.nearbyKRing, matchKRing: res.matchKRing, version: res.version },
+      payload: {
+        nearbyKRing: res.nearbyKRing,
+        matchKRing: res.matchKRing,
+        offerTimeoutMs: res.offerTimeoutMs,
+        bidWindowSec: res.bidWindowSec,
+        version: res.version,
+      },
     });
     return res;
   }

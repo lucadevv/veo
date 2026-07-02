@@ -68,8 +68,14 @@ export const envSchema = z
     DRIVER_LOC_TTL_SECONDS: z.coerce.number().default(DRIVER_LOC_TTL_SECONDS_DEFAULT),
 
     // ── Algoritmo de matching (BR-T06) ──
-    /// Milisegundos de espera de respuesta del conductor por oferta antes de marcarla TIMEOUT y avanzar.
+    /// SEED del default de la DB de la ventana de la oferta directa FIXED (ms). Autoridad VIVA = la fila
+    /// dispatch_radius_config (editable por el admin, cacheada); este env solo SIEMBRA el default cuando no
+    /// hay fila (DISPATCH_WINDOW_DEFAULTS). Ya NO se lee por-llamada en matching.service (ADR-019 Lote A).
     DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(12_000),
+    /// SEED del default de la DB de la ventana del board de PUJA (s). dispatch es la AUTORIDAD de la
+    /// ventana; el BID_WINDOW_SEC del trip-service (productor de bid_posted) es ADVISORY. Autoridad viva =
+    /// la fila dispatch_radius_config; este env solo SIEMBRA el default sin fila (ADR-019 Lote A / D1).
+    BID_WINDOW_SEC: z.coerce.number().int().positive().default(60),
     /// Radio máximo del k-ring al expandir la búsqueda. El advance agota cada anillo antes de expandir.
     DISPATCH_MAX_K_RING: z.coerce.number().default(2),
     /// PRESUPUESTO de avance por tick del sweep durable (sweepExpiredOffers). El barrido es SECUENCIAL

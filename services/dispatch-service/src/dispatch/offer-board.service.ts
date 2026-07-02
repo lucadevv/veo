@@ -78,6 +78,10 @@ export interface BidPosted {
   /// eligibilidad por TIER en PUJA igual que FIXED. Opcional por compat N-2 (bid_posted previos sin él).
   category?: string;
   origin: LatLon;
+  /// ADVISORY (ADR-019 Lote A). La ventana la decide dispatch (config editable por el admin,
+  /// `getWindows().bidWindowSec`): TANTO openBoard (bid inicial) COMO reopenBoard (re-match) usan ese valor
+  /// de runtime. Este campo lo sigue enviando el productor (trip-service) por compat N-2 del contrato, pero
+  /// dispatch lo IGNORA para la ventana; ripearlo del productor es follow-up.
   windowSec: number;
   /// H13 — ciclo de negociación del viaje (lo guardamos en el board y lo estampamos en offer_accepted).
   negotiationSeq: number;
@@ -176,7 +180,11 @@ export class OfferBoardService {
 
   /** Abre un board OPEN para el viaje y hace broadcast del bid a los conductores elegibles cercanos. */
   async openBoard(bid: BidPosted): Promise<void> {
-    const expiresAt = Date.now() + bid.windowSec * 1000;
+    // ADR-019 Lote A — la ventana de la puja es AUTORIDAD de dispatch (config editable por el admin,
+    // cacheada), NO la del productor: `bid.windowSec` (trip-service) es ADVISORY. openBoard y reopenBoard
+    // usan el MISMO valor de runtime, así el board inicial y el re-match honran lo que el dueño fija.
+    const { bidWindowSec } = await this.radiusConfig.getWindows();
+    const expiresAt = Date.now() + bidWindowSec * 1000;
     const board: OfferBoard = {
       tripId: bid.tripId,
       passengerId: bid.passengerId,
@@ -202,9 +210,10 @@ export class OfferBoardService {
     // sobreviven en el HASH y el pasajero podría aceptar una oferta rancia barata. Tras el clear, el
     // `bidCents` recién abierto es la ÚNICA referencia de precio.
     await this.store.clearOffers(bid.tripId);
-    await this.store.saveBoard(board, bid.windowSec + OfferBoardService.TTL_MARGIN_SECONDS);
+    await this.store.saveBoard(board, bidWindowSec + OfferBoardService.TTL_MARGIN_SECONDS);
     this.logger.log(
-      `board abierto trip=${bid.tripId} bid=${bid.bidCents} window=${bid.windowSec}s`,
+      `board abierto trip=${bid.tripId} bid=${bid.bidCents} ` +
+        `window=${bidWindowSec}s (autoridad admin; bid.windowSec=${bid.windowSec}s advisory)`,
     );
     await this.broadcast(board);
   }
@@ -220,6 +229,9 @@ export class OfferBoardService {
    * Si existe un board previo, lo sobreescribimos igual (idempotente). SIEMPRE abrimos y difundimos.
    */
   async reopenBoard(reassign: Reassigning): Promise<void> {
+    // D1 (ADR-019) — ventana del re-match leída EN RUNTIME (config editable por el admin, cacheada), NO
+    // hardcodeada a 60s. Así reopenBoard honra el valor que el dueño fija en el panel, sin restart.
+    const { bidWindowSec } = await this.radiusConfig.getWindows();
     // Reconstrucción autosuficiente: si quedaba metadato del board previo lo reusamos, pero el caso
     // canónico (board ya expirado por TTL) se rearma SOLO con el payload del evento.
     const existing = await this.store.getBoard(reassign.tripId);
@@ -237,8 +249,8 @@ export class OfferBoardService {
       originCell: existing?.originCell ?? toH3(origin, DISPATCH_H3_RESOLUTION),
       bidCents: reassign.bidCents,
       status: BoardStatus.OPEN,
-      // Ventana fresca de 60s (default ratificado §9) al MISMO bid (la subida va por rebid → bid_posted).
-      expiresAt: Date.now() + 60_000,
+      // Ventana fresca (config del admin, `bidWindowSec`) al MISMO bid (la subida va por rebid → bid_posted).
+      expiresAt: Date.now() + bidWindowSec * 1000,
       // H13 — el seq SIEMPRE viene del EVENTO (el nuevo ciclo de la reasignación), NUNCA del board previo:
       // re-abrir = ciclo fresco, así el offer_accepted del re-match lleva un seq MAYOR y el offer_accepted
       // STALE del ciclo anterior queda bloqueado en applyAgreedFare (seq menor → where no matchea).
@@ -252,7 +264,7 @@ export class OfferBoardService {
     // pasajero podría aceptar un precio rancio de la ventana cerrada. Tras el clear, el bidCents re-abierto
     // es la ÚNICA referencia de precio y no hay ofertas de la ventana previa que mal-aceptar.
     await this.store.clearOffers(reassign.tripId);
-    await this.store.saveBoard(reopened, 60 + OfferBoardService.TTL_MARGIN_SECONDS);
+    await this.store.saveBoard(reopened, bidWindowSec + OfferBoardService.TTL_MARGIN_SECONDS);
     this.logger.log(
       `board ${existing ? 're-abierto' : 'reconstruido'} trip=${reassign.tripId} bid=${reassign.bidCents}`,
     );

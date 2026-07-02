@@ -1,10 +1,23 @@
 'use client';
 
 import { useState } from 'react';
-import { Map, Radar } from 'lucide-react';
+import { Map, Radar, Timer, Gavel } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { DispatchRadiusConfigView } from '@/lib/api/schemas';
-import { K_RING_MAX, K_RING_MIN, isValidKRing, kRingLabel } from '@/lib/dispatch';
+import {
+  K_RING_MAX,
+  K_RING_MIN,
+  isValidKRing,
+  kRingLabel,
+  OFFER_TIMEOUT_SEC_MIN,
+  OFFER_TIMEOUT_SEC_MAX,
+  BID_WINDOW_SEC_MIN,
+  BID_WINDOW_SEC_MAX,
+  isValidOfferTimeoutSec,
+  isValidBidWindowSec,
+  msToSec,
+  secToMs,
+} from '@/lib/dispatch';
 import { dateTime } from '@/lib/formatters';
 import { useUpdateDispatchRadiusConfig } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
@@ -38,10 +51,11 @@ const RINGS: readonly {
 ];
 
 /**
- * Panel de la config de RADIOS (k-rings) de dispatch. El operador edita dos enteros (1..8); al lado de
- * cada uno mostramos el radio aproximado en metros para que razone en distancia, no en anillos H3. El
- * guardado se CONFIRMA (es global y bumpea version aguas abajo). La UI sólo refleja `dispatch:manage`;
- * el admin-bff + dispatch-service re-autorizan server-side.
+ * Panel de la config de RADIOS (k-rings) + VENTANAS de dispatch. El operador edita los dos radios (1..8)
+ * y las dos ventanas de tiempo: la oferta directa (FIXED) y la puja. Ambas ventanas se muestran/editan en
+ * SEGUNDOS por legibilidad; la oferta directa se persiste en milisegundos (el contrato guarda ms). El
+ * guardado se CONFIRMA (es global y bumpea version aguas abajo) y reemplaza los cuatro valores de una. La
+ * UI sólo refleja `dispatch:manage`; el admin-bff + dispatch-service re-autorizan server-side.
  */
 export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView }) {
   const user = useSession();
@@ -52,8 +66,16 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
   // Estado del formulario sembrado con la config vigente. Strings para tolerar el input intermedio.
   const [nearby, setNearby] = useState(String(config.nearbyKRing));
   const [match, setMatch] = useState(String(config.matchKRing));
+  // Ventanas en SEGUNDOS: la oferta directa llega en ms → se muestra en s (se re-multiplica al guardar).
+  const [offerSec, setOfferSec] = useState(String(msToSec(config.offerTimeoutMs)));
+  const [bidSec, setBidSec] = useState(String(config.bidWindowSec));
 
-  const values = { nearbyKRing: Number(nearby), matchKRing: Number(match) };
+  const values = {
+    nearbyKRing: Number(nearby),
+    matchKRing: Number(match),
+    offerTimeoutSec: Number(offerSec),
+    bidWindowSec: Number(bidSec),
+  };
   const errors = {
     nearbyKRing: isValidKRing(values.nearbyKRing)
       ? undefined
@@ -61,17 +83,32 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
     matchKRing: isValidKRing(values.matchKRing)
       ? undefined
       : `Debe ser un entero entre ${K_RING_MIN} y ${K_RING_MAX}.`,
+    offerTimeoutSec: isValidOfferTimeoutSec(values.offerTimeoutSec)
+      ? undefined
+      : `Debe ser un entero entre ${OFFER_TIMEOUT_SEC_MIN} y ${OFFER_TIMEOUT_SEC_MAX} segundos.`,
+    bidWindowSec: isValidBidWindowSec(values.bidWindowSec)
+      ? undefined
+      : `Debe ser un entero entre ${BID_WINDOW_SEC_MIN} y ${BID_WINDOW_SEC_MAX} segundos.`,
   };
-  const valid = !errors.nearbyKRing && !errors.matchKRing;
+  const valid =
+    !errors.nearbyKRing && !errors.matchKRing && !errors.offerTimeoutSec && !errors.bidWindowSec;
   const dirty =
-    values.nearbyKRing !== config.nearbyKRing || values.matchKRing !== config.matchKRing;
+    values.nearbyKRing !== config.nearbyKRing ||
+    values.matchKRing !== config.matchKRing ||
+    secToMs(values.offerTimeoutSec) !== config.offerTimeoutMs ||
+    values.bidWindowSec !== config.bidWindowSec;
 
   const fieldFor = (key: 'nearbyKRing' | 'matchKRing') =>
     key === 'nearbyKRing' ? ([nearby, setNearby] as const) : ([match, setMatch] as const);
 
   async function save() {
-    await update.mutateAsync({ nearbyKRing: values.nearbyKRing, matchKRing: values.matchKRing });
-    toast({ tone: 'success', title: 'Radios de dispatch actualizados' });
+    await update.mutateAsync({
+      nearbyKRing: values.nearbyKRing,
+      matchKRing: values.matchKRing,
+      offerTimeoutMs: secToMs(values.offerTimeoutSec),
+      bidWindowSec: values.bidWindowSec,
+    });
+    toast({ tone: 'success', title: 'Configuración de dispatch actualizada' });
   }
 
   return (
@@ -120,6 +157,71 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Ventanas de dispatch</CardTitle>
+            <CardDescription>
+              Cuánto tiempo espera cada mecánica de match. Una ventana corta cierra antes (más reintentos);
+              una larga da más margen al conductor. El cambio aplica en vivo, sin reiniciar el servicio.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-5 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Field
+              label="Ventana de oferta directa (s)"
+              hint="Segundos que tiene el conductor para responder una oferta directa (FIXED) antes de pasar al siguiente."
+              error={canManage ? errors.offerTimeoutSec : undefined}
+              required={canManage}
+            >
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={OFFER_TIMEOUT_SEC_MIN}
+                max={OFFER_TIMEOUT_SEC_MAX}
+                step={1}
+                value={offerSec}
+                disabled={!canManage || update.isPending}
+                onChange={(e) => setOfferSec(e.target.value)}
+                aria-label="Ventana de oferta directa (segundos)"
+              />
+            </Field>
+            <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+              <Timer className="size-3.5" aria-hidden />
+              {isValidOfferTimeoutSec(values.offerTimeoutSec)
+                ? `${values.offerTimeoutSec} s por oferta`
+                : '—'}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Field
+              label="Ventana de puja (s)"
+              hint="Segundos que un tablero de puja queda abierto para que los conductores oferten."
+              error={canManage ? errors.bidWindowSec : undefined}
+              required={canManage}
+            >
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={BID_WINDOW_SEC_MIN}
+                max={BID_WINDOW_SEC_MAX}
+                step={1}
+                value={bidSec}
+                disabled={!canManage || update.isPending}
+                onChange={(e) => setBidSec(e.target.value)}
+                aria-label="Ventana de puja (segundos)"
+              />
+            </Field>
+            <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+              <Gavel className="size-3.5" aria-hidden />
+              {isValidBidWindowSec(values.bidWindowSec) ? `${values.bidWindowSec} s por tablero` : '—'}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       <section>
         <h2 className="text-sm font-medium text-ink-muted">Referencia de cobertura (H3 res-9)</h2>
         <ul className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-border px-4 py-3 text-sm sm:grid-cols-4">
@@ -138,23 +240,23 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
         {canManage ? (
           !valid || !dirty || update.isPending ? (
             <Button type="button" disabled loading={update.isPending}>
-              Guardar radios
+              Guardar configuración
             </Button>
           ) : (
             <StepUpDialog
-              trigger={<Button type="button">Guardar radios</Button>}
-              title="Actualizar radios de dispatch"
+              trigger={<Button type="button">Guardar configuración</Button>}
+              title="Actualizar configuración de dispatch"
               description={`El feed de mapa pasará a k=${values.nearbyKRing} (${kRingLabel(
                 values.nearbyKRing,
               )}) y las pujas a k=${values.matchKRing} (${kRingLabel(
                 values.matchKRing,
-              )}). Esta acción cambia el despacho global y queda auditada.`}
+              )}). Las ventanas serán ${values.offerTimeoutSec}s (oferta directa) y ${values.bidWindowSec}s (puja). Esta acción cambia el despacho global y queda auditada.`}
               onVerified={save}
             />
           )
         ) : (
           <p className="text-xs text-ink-subtle">
-            Solo lectura: necesitas el rol DISPATCHER, ADMIN o SUPERADMIN para cambiar los radios.
+            Solo lectura: necesitas el rol DISPATCHER, ADMIN o SUPERADMIN para cambiar la configuración.
           </p>
         )}
       </div>

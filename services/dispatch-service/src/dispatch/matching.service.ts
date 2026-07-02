@@ -42,6 +42,7 @@ import { DispatchScorer, type ScoreInput } from './scoring';
 import { DriverProjectionService } from './driver-projection.service';
 import { SurgeService } from './surge.service';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
+import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
 import type { Env } from '../config/env.schema';
 
 export interface TripRequest {
@@ -64,7 +65,6 @@ export interface TripRequest {
 @Injectable()
 export class MatchingService {
   private readonly logger = new Logger(MatchingService.name);
-  private readonly offerTimeoutMs: number;
   private readonly maxKRing: number;
   /** Presupuesto de avance por tick del sweep (cuántas ofertas vencidas reclamar+avanzar). */
   private readonly sweepAdvanceBudget: number;
@@ -80,9 +80,11 @@ export class MatchingService {
     private readonly surge: SurgeService,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Inject(OFFER_DELIVERY) private readonly offerDelivery: OfferDelivery,
+    // Ventana de la oferta directa FIXED leída EN RUNTIME (config editable por el admin, cacheada), no en
+    // el constructor: un cambio del admin surte efecto sin reiniciar el servicio (ADR-019 Lote A).
+    private readonly radiusConfig: DispatchRadiusConfigService,
     config: ConfigService<Env, true>,
   ) {
-    this.offerTimeoutMs = config.getOrThrow<number>('DISPATCH_OFFER_TIMEOUT_MS');
     this.maxKRing = config.getOrThrow<number>('DISPATCH_MAX_K_RING');
     this.sweepAdvanceBudget = config.getOrThrow<number>('DISPATCH_SWEEP_ADVANCE_BUDGET');
     this.sweepDeadlineMs = config.getOrThrow<number>('DISPATCH_SWEEP_DEADLINE_MS');
@@ -268,7 +270,9 @@ export class MatchingService {
    * siguen OFFERED). El "N+1" de K escrituras CAS es trivial: K=25 << 100 y sin los 100 matchings encadenados.
    */
   async sweepExpiredOffers(limit = this.sweepAdvanceBudget): Promise<number> {
-    const cutoff = new Date(Date.now() - this.offerTimeoutMs);
+    // Ventana leída EN RUNTIME (cacheada): el cutoff usa el valor vigente de la config del admin.
+    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
+    const cutoff = new Date(Date.now() - offerTimeoutMs);
     const expired = await this.prisma.read.dispatchMatch.findMany({
       where: { outcome: DispatchOutcome.OFFERED, offeredAt: { lt: cutoff } },
       select: { id: true, tripId: true },
@@ -322,7 +326,9 @@ export class MatchingService {
     } catch (err) {
       this.logger.warn(`ETA no disponible para match ${matchId}: ${String(err)}`);
     }
-    const expiresAt = new Date(Date.now() + this.offerTimeoutMs).toISOString();
+    // Deadline de respuesta de la oferta = ahora + ventana VIGENTE (config del admin, cacheada).
+    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
+    const expiresAt = new Date(Date.now() + offerTimeoutMs).toISOString();
     try {
       await this.offerDelivery.deliver({
         matchId,

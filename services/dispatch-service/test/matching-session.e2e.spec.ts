@@ -97,6 +97,8 @@ beforeAll(async () => {
     surge as never,
     maps as never,
     offerDelivery,
+    // Config de ventanas fake: getWindows() devuelve la misma ventana que el env de este test (12s).
+    { getWindows: async () => ({ offerTimeoutMs: 12_000, bidWindowSec: 60 }) } as never,
     config,
   );
   // DispatchService (accept/reject del conductor) comparte el mismo matching + hot-index reales.
@@ -508,6 +510,7 @@ describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin hu
       { quote: async () => ({ multiplier: 1, zoneId: null, zoneName: null, active: false, demand: 0, supply: 0, ratio: 0 }) } as never,
       { eta: async () => 60 } as never,
       { deliver: (): void => {} },
+      { getWindows: async () => ({ offerTimeoutMs: 12_000, bidWindowSec: 60 }) } as never,
       tightConfig,
     );
 

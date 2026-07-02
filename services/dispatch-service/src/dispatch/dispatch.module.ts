@@ -27,6 +27,7 @@ import { DispatchRadiusConfigController } from './dispatch-radius-config.control
 import {
   DispatchRadiusConfigService,
   DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS,
+  DISPATCH_WINDOW_DEFAULTS,
 } from './dispatch-radius-config.service';
 import { AdminIdentityGuard } from './admin-identity.guard';
 import {
@@ -81,6 +82,18 @@ const radiusConfigCacheTtlProvider: Provider = {
     config.getOrThrow<number>('DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS'),
 };
 
+// SEED (env → default de la DB) de las VENTANAS de dispatch: sin fila en dispatch_radius_config el service
+// degrada a ESTOS valores del env (DISPATCH_OFFER_TIMEOUT_MS / BID_WINDOW_SEC). Es el rol "env = seed del
+// default": la autoridad viva es la fila de la DB (editable por el admin), el env solo la SIEMBRA.
+const dispatchWindowDefaultsProvider: Provider = {
+  provide: DISPATCH_WINDOW_DEFAULTS,
+  inject: [ConfigService],
+  useFactory: (config: ConfigService<Env, true>) => ({
+    offerTimeoutMs: config.getOrThrow<number>('DISPATCH_OFFER_TIMEOUT_MS'),
+    bidWindowSec: config.getOrThrow<number>('BID_WINDOW_SEC'),
+  }),
+};
+
 @Module({
   controllers: [DispatchController, OfferBoardController, DispatchRadiusConfigController],
   providers: [
@@ -107,6 +120,7 @@ const radiusConfigCacheTtlProvider: Provider = {
     DispatchRadiusConfigService,
     AdminIdentityGuard,
     radiusConfigCacheTtlProvider,
+    dispatchWindowDefaultsProvider,
     // Puerto → adaptador Prisma (clean arch: el servicio depende de la interfaz, no de la clase).
     { provide: DISPATCH_RADIUS_CONFIG_REPO, useClass: PrismaDispatchRadiusConfigRepository },
   ],

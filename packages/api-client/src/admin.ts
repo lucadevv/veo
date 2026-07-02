@@ -710,21 +710,28 @@ export const replaceCatalogRequest = z.object({
 });
 export type ReplaceCatalogRequest = z.infer<typeof replaceCatalogRequest>;
 
-/* ── Dispatch: config de RADIOS (k-rings) singleton global ── */
+/* ── Dispatch: config de RADIOS (k-rings) + VENTANAS singleton global ── */
 
-/** Config de radios vigente (GET /admin/dispatch/radius-config): k-rings + versión + sello. */
+/**
+ * Config de dispatch vigente (GET /admin/dispatch/radius-config): k-rings + ventanas + versión + sello.
+ * `offerTimeoutMs` = ventana de la oferta directa FIXED (ms); `bidWindowSec` = ventana del board de PUJA (s).
+ */
 export const dispatchRadiusConfigView = z.object({
   nearbyKRing: z.number().int().min(1).max(8),
   matchKRing: z.number().int().min(1).max(8),
+  offerTimeoutMs: z.number().int().min(5_000).max(120_000),
+  bidWindowSec: z.number().int().min(15).max(300),
   version: z.number().int(),
   updatedAt: z.string(),
 });
 export type DispatchRadiusConfigView = z.infer<typeof dispatchRadiusConfigView>;
 
-/** Body del PUT /admin/dispatch/radius-config: REEMPLAZA los k-rings (bump version aguas abajo). */
+/** Body del PUT /admin/dispatch/radius-config: REEMPLAZA k-rings + ventanas (bump version aguas abajo). */
 export const replaceRadiusConfigRequest = z.object({
   nearbyKRing: z.number().int().min(1).max(8),
   matchKRing: z.number().int().min(1).max(8),
+  offerTimeoutMs: z.number().int().min(5_000).max(120_000),
+  bidWindowSec: z.number().int().min(15).max(300),
 });
 export type ReplaceRadiusConfigRequest = z.infer<typeof replaceRadiusConfigRequest>;
 

@@ -38,6 +38,8 @@ export class DispatchRadiusConfigController {
     return this.radiusConfig.replaceConfig({
       nearbyKRing: dto.nearbyKRing,
       matchKRing: dto.matchKRing,
+      offerTimeoutMs: dto.offerTimeoutMs,
+      bidWindowSec: dto.bidWindowSec,
     });
   }
 }

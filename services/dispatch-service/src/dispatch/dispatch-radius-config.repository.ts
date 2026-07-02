@@ -16,6 +16,10 @@ export const SINGLETON_ID = 'GLOBAL';
 export interface PersistedRadiusConfig {
   nearbyKRing: number;
   matchKRing: number;
+  /** Ventana (ms) de la oferta directa FIXED (matching secuencial). */
+  offerTimeoutMs: number;
+  /** Ventana (s) del board de PUJA (openBoard/reopenBoard). */
+  bidWindowSec: number;
   version: number;
   updatedAt: string;
 }
@@ -56,6 +60,8 @@ export class PrismaDispatchRadiusConfigRepository implements DispatchRadiusConfi
     return {
       nearbyKRing: row.nearbyKRing,
       matchKRing: row.matchKRing,
+      offerTimeoutMs: row.offerTimeoutMs,
+      bidWindowSec: row.bidWindowSec,
       version: row.version,
       updatedAt: row.updatedAt.toISOString(),
     };

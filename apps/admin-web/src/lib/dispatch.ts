@@ -43,3 +43,34 @@ export function kRingLabel(k: number): string {
 export function isValidKRing(k: number): boolean {
   return Number.isInteger(k) && k >= K_RING_MIN && k <= K_RING_MAX;
 }
+
+/* ── Ventanas de dispatch (config editable por el admin) ──────────────────────────────────────────
+ * La oferta directa se persiste en MILISEGUNDOS (offerTimeoutMs, contrato 5000..120000) pero al operador
+ * se le muestra/edita en SEGUNDOS (más legible). El board de puja ya está en segundos (bidWindowSec,
+ * contrato 15..300). Las cotas de segundos derivan 1:1 de las del contrato para una sola fuente de verdad.
+ */
+
+/** Cotas de la ventana de la oferta directa, en SEGUNDOS (5000..120000 ms → 5..120 s). */
+export const OFFER_TIMEOUT_SEC_MIN = 5;
+export const OFFER_TIMEOUT_SEC_MAX = 120;
+/** Cotas de la ventana del board de puja, en segundos (contrato). */
+export const BID_WINDOW_SEC_MIN = 15;
+export const BID_WINDOW_SEC_MAX = 300;
+
+/** ms ⇄ s (la UI edita segundos; el contrato guarda ms para la oferta directa). */
+export function msToSec(ms: number): number {
+  return Math.round(ms / 1000);
+}
+export function secToMs(s: number): number {
+  return Math.round(s * 1000);
+}
+
+/** ¿La ventana de oferta directa (en segundos) es un entero dentro del rango válido? */
+export function isValidOfferTimeoutSec(s: number): boolean {
+  return Number.isInteger(s) && s >= OFFER_TIMEOUT_SEC_MIN && s <= OFFER_TIMEOUT_SEC_MAX;
+}
+
+/** ¿La ventana de puja (en segundos) es un entero dentro del rango válido? */
+export function isValidBidWindowSec(s: number): boolean {
+  return Number.isInteger(s) && s >= BID_WINDOW_SEC_MIN && s <= BID_WINDOW_SEC_MAX;
+}

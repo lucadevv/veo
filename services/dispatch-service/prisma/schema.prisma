@@ -173,19 +173,25 @@ model DriverCancellationEvent {
   @@schema("dispatch")
 }
 
-/// Config SINGLETON de RADIOS de dispatch (k-rings) editable en runtime por el admin (espejo del
+/// Config SINGLETON de RADIOS + VENTANAS de dispatch editable en runtime por el admin (espejo del
 /// pricing_mode_schedule del trip-service). UNA sola fila (id='GLOBAL', Tier 1): `nearbyKRing` = radio
-/// del feed de mapa de "autos cerca"; `matchKRing` = radio de broadcast de pujas/matching. El `version`
-/// se bumpea en cada PUT (auditable + dedupe del evento dispatch.radius_config_updated). Sin fila → el
-/// service degrada al DEFAULT_RADIUS_CONFIG explícito (version 0), no crash.
+/// del feed de mapa de "autos cerca"; `matchKRing` = radio de broadcast de pujas/matching;
+/// `offerTimeoutMs` = ventana de la oferta directa (FIXED secuencial); `bidWindowSec` = ventana del board
+/// de PUJA. El `version` se bumpea en cada PUT (auditable + dedupe del evento
+/// dispatch.radius_config_updated). Sin fila → el service degrada al DEFAULT_RADIUS_CONFIG explícito
+/// (version 0), no crash.
 model DispatchRadiusConfig {
-  id          String   @id
+  id             String   @id
   /// k-ring del feed de mapa (NearbyDriversService): cuántos anillos H3 alrededor del origen se muestrean.
-  nearbyKRing Int      @map("nearby_k_ring")
+  nearbyKRing    Int      @map("nearby_k_ring")
   /// k-ring del broadcast de pujas / matching (OfferBoardService): radio de candidatos elegibles.
-  matchKRing  Int      @map("match_k_ring")
-  version     Int      @default(0)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  matchKRing     Int      @map("match_k_ring")
+  /// Ventana (ms) de espera de respuesta del conductor por oferta directa FIXED antes de TIMEOUT + avanzar.
+  offerTimeoutMs Int      @map("offer_timeout_ms")
+  /// Ventana (s) del board de PUJA (openBoard/reopenBoard): cuánto vive un board OPEN antes de EXPIRED.
+  bidWindowSec   Int      @map("bid_window_sec")
+  version        Int      @default(0)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("dispatch_radius_config")
   @@schema("dispatch")

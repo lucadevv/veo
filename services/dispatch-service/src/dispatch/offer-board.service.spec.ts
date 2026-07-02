@@ -467,14 +467,19 @@ function makeService(opts: {
   delivery: CollectingDelivery;
   gate: FakeGate;
   maps?: FakeMaps;
+  // Holder MUTABLE de las ventanas: dispatch es la AUTORIDAD de la ventana (openBoard + reopenBoard leen
+  // getWindows() en runtime, ya no bid.windowSec). Los tests conducen la ventana cambiando este objeto
+  // (p.ej. bidWindowSec=1 para "vencido", 600 para "vivo") en vez del param advisory de openBoard.
+  windows: { offerTimeoutMs: number; bidWindowSec: number };
 }): OfferBoardService {
   const config = new ConfigService<Env, true>({ DISPATCH_MAX_K_RING: 2 } as Partial<Env> as Env);
   const gate = opts.gate as unknown as EligibilityGate;
   const driverPool = new DriverPool(opts.hotIndex, opts.exclusion, new InMemoryExclusionRegistry());
-  // Fake de la config de radios: el broadcast/listOpenBidsNear leen `matchKRing` en runtime. Devuelve 2
-  // para preservar el k-ring que estos tests asertan (neighbors(cell, 2)). `nearbyKRing` no aplica acá.
+  // Fake de la config de radios/ventanas: el broadcast/listOpenBidsNear leen `matchKRing` (2 preserva el
+  // k-ring que estos tests asertan). getWindows() lee el holder mutable → los tests controlan la ventana.
   const radiusConfig = {
     getKRings: async () => ({ nearbyKRing: 1, matchKRing: 2 }),
+    getWindows: async () => ({ ...opts.windows }),
   } as unknown as DispatchRadiusConfigService;
   return new OfferBoardService(
     opts.outbox.prisma as never,
@@ -497,6 +502,8 @@ interface Ctx {
   delivery: CollectingDelivery;
   gate: FakeGate;
   maps: FakeMaps;
+  /** Ventanas de runtime (autoridad de dispatch): mutable para que un test fije la ventana vigente. */
+  windows: { offerTimeoutMs: number; bidWindowSec: number };
 }
 
 async function ctx(eligible = true): Promise<Ctx> {
@@ -507,11 +514,13 @@ async function ctx(eligible = true): Promise<Ctx> {
   const delivery = new CollectingDelivery();
   const gate = new FakeGate(eligible);
   const maps = new FakeMaps();
+  // Default 60s (como el default histórico de la ventana de puja); cada test lo ajusta si lo necesita.
+  const windows = { offerTimeoutMs: 12_000, bidWindowSec: 60 };
   // Wire del sink de matches persistidos: __crashedMatch siembra la fila ACCEPTED en la OutboxSpy (el
   // crash real deja la fila committeada en Postgres) para que el reconciliador recupere el precio (Finding #11).
   store.persistMatch = (tripId, driverId, price) => outbox.seedMatch(tripId, driverId, price);
-  const svc = makeService({ store, hotIndex, exclusion, outbox, delivery, gate, maps });
-  return { svc, store, hotIndex, outbox, delivery, gate, maps };
+  const svc = makeService({ store, hotIndex, exclusion, outbox, delivery, gate, maps, windows });
+  return { svc, store, hotIndex, outbox, delivery, gate, maps, windows };
 }
 
 async function openBoard(
@@ -521,6 +530,9 @@ async function openBoard(
   negotiationSeq = 1,
 ): Promise<string> {
   const tripId = 'trip-1';
+  // La ventana es autoridad de dispatch: conducimos la del board por el holder de runtime (no por el
+  // param advisory). Así los tests que pasaban windowSec=1/600 siguen fijando esa ventana efectiva.
+  c.windows.bidWindowSec = windowSec;
   await c.svc.openBoard({
     tripId,
     passengerId: PASSENGER,
@@ -996,8 +1008,10 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
   // ── H8: barrido due-only sobre sorted-set ─────────────────────────────────────────────────────
   it('H8: sweepExpired SOLO procesa boards DUE — un board no vencido NO se toca ni se GET-ea', async () => {
     const c = await ctx();
-    // Un board que YA venció (windowSec=1) y otro que sigue vigente (windowSec=600).
+    // Un board que YA venció (ventana 1s) y otro que sigue vigente (600s). La ventana efectiva la fija el
+    // holder de runtime (autoridad de dispatch) antes de cada open; windowSec del payload es advisory.
     const dueTrip = 'trip-1';
+    c.windows.bidWindowSec = 1;
     await c.svc.openBoard({
       tripId: dueTrip,
       passengerId: PASSENGER,
@@ -1008,6 +1022,7 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       negotiationSeq: 1,
     });
     const liveTrip = 'trip-live';
+    c.windows.bidWindowSec = 600;
     await c.svc.openBoard({
       tripId: liveTrip,
       passengerId: PASSENGER,
@@ -1055,7 +1070,8 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
 
   it('H8: con N boards NO-due, el barrido NO emite GETs por board (descubre nada-vence con un range-read)', async () => {
     const c = await ctx();
-    // 50 boards vigentes (no vencidos) + ninguno due.
+    // 50 boards vigentes (no vencidos) + ninguno due. Ventana 600s vía el holder de runtime.
+    c.windows.bidWindowSec = 600;
     for (let i = 0; i < 50; i++) {
       await c.svc.openBoard({
         tripId: `live-${i}`,
@@ -1112,7 +1128,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     const firstExpiry = (await c.store.getBoard(tripId))?.expiresAt;
     await c.svc.sweepExpired(Date.now() + 5_000); // primer no_offers
 
-    // Reabrir (reassign/reopen) abre una ventana fresca → otro expiresAt → otra dedupKey.
+    // Reabrir (reassign/reopen) abre una ventana fresca → otro expiresAt → otra dedupKey. Fijamos 60s en el
+    // holder de runtime (reopen lee getWindows()): distinta de la de 1s del open Y vencible en el +120s de abajo.
+    c.windows.bidWindowSec = 60;
     await c.svc.reopenBoard({
       tripId,
       driverId: 'drv-cancel',
@@ -1578,8 +1596,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     await c.svc.acceptOffer(claimTrip, 'd1', PASSENGER);
     expect((await c.store.boardsInCells(kRing)).map((b) => b.tripId)).not.toContain(claimTrip);
 
-    // 2) EXPIRACIÓN (sweep OPEN→EXPIRED) saca el board del índice de celda.
+    // 2) EXPIRACIÓN (sweep OPEN→EXPIRED) saca el board del índice de celda. Ventana 1s vía runtime.
     const expTrip = 'trip-exp';
+    c.windows.bidWindowSec = 1;
     await c.svc.openBoard({
       tripId: expTrip,
       passengerId: PASSENGER,
@@ -1593,8 +1612,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     await c.svc.sweepExpired(Date.now() + 5_000);
     expect((await c.store.boardsInCells(kRing)).map((b) => b.tripId)).not.toContain(expTrip);
 
-    // 3) CANCELACIÓN (setBoardStatus OPEN→CANCELLED) saca el board del índice de celda.
+    // 3) CANCELACIÓN (setBoardStatus OPEN→CANCELLED) saca el board del índice de celda. Ventana 60s.
     const cancelTrip = 'trip-cancel';
+    c.windows.bidWindowSec = 60;
     await c.svc.openBoard({
       tripId: cancelTrip,
       passengerId: PASSENGER,
