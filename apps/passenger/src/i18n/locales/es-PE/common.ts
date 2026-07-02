@@ -92,14 +92,14 @@ export const common = {
     },
 
     slide2: {
-      title: 'Vos elegís cómo viajar',
-      body: 'Precio fijo, poné tu precio, o reservá un asiento compartido. Siempre a tu manera.',
+      title: 'Tú eliges cómo viajar',
+      body: 'Precio fijo, pon tu precio o reserva un asiento compartido. Siempre a tu manera.',
       imageAlt: 'App VEO mostrando los modos de viaje y sus precios',
     },
 
     slide3: {
       title: 'Conductores verificados',
-      body: 'Cada conductor pasa por KYC, biometría y documentos. Vos viajás tranquilo.',
+      body: 'Cada conductor pasa por KYC, biometría y documentos. Viajas tranquilo.',
       imageAlt: 'App VEO mostrando la lista de conductores verificados',
     },
   },
