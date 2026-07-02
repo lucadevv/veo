@@ -29,6 +29,12 @@ const TRIP_STATUS_BY_EVENT: Record<string, TripStatus> = {
   'trip.started': 'IN_PROGRESS',
   'trip.completed': 'COMPLETED',
   'trip.cancelled': 'CANCELLED',
+  // ADR-019 Lote C: el /ops se congelaba en el último estado porque el read-model NO ingería los CIERRES
+  // del ciclo (public-bff y driver-bff SÍ). Sin esto, un viaje EXPIRED/FAILED quedaba como viaje fantasma
+  // "En curso" para siempre, y REASSIGNING (pasajero abandonado, ops DEBE intervenir) nunca se veía.
+  'trip.expired': 'EXPIRED',
+  'trip.failed': 'FAILED',
+  'trip.reassigning': 'REASSIGNING',
 };
 
 /** clientId kafkajs de este BFF. */
@@ -104,6 +110,10 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap implements OnAp
       'trip.started',
       'trip.completed',
       'trip.cancelled',
+      // ADR-019 Lote C: cierres del ciclo que antes NO se ingerían (espejo de public-bff/driver-bff).
+      'trip.expired',
+      'trip.failed',
+      'trip.reassigning',
     ] as const) {
       record[type] = async (e) => {
         const status = TRIP_STATUS_BY_EVENT[type];
