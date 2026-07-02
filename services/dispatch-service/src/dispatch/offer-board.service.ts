@@ -139,8 +139,16 @@ const dedupOfferMade = (
 ): string => `${DEDUP_PREFIX.OFFER_MADE}:${tripId}:${driverId}:${kind}:${priceCents}`;
 const dedupNoOffers = (tripId: string, windowEpoch: string): string =>
   `${DEDUP_PREFIX.NO_OFFERS}:${tripId}:${windowEpoch}`;
-const dedupOfferWithdrawn = (tripId: string, driverId: string): string =>
-  `${DEDUP_PREFIX.OFFER_WITHDRAWN}:${tripId}:${driverId}`;
+// Cycle-aware (ADR-020 Lote 2 follow-up): incluye el `negotiationSeq` (H13, monotónico por ciclo, no
+// resetea en re-bid) para que un offer_withdrawn de un CICLO no deduplique el del ciclo SIGUIENTE del
+// MISMO (trip, driver). Sin el seq, un conductor que oferta y ve expirar el board en re-bids sucesivos
+// del mismo viaje solo recibiría el PRIMER bid:closed → su "esperando" quedaría stale del 2º en adelante.
+const dedupOfferWithdrawn = (
+  tripId: string,
+  driverId: string,
+  cycle: string | number,
+): string =>
+  `${DEDUP_PREFIX.OFFER_WITHDRAWN}:${tripId}:${driverId}:${cycle}`;
 const dedupBidCancelled = (tripId: string): string => `${DEDUP_PREFIX.BID_CANCELLED}:${tripId}`;
 
 /**
@@ -524,7 +532,7 @@ export class OfferBoardService {
         'dispatch.offer_withdrawn',
         tripId,
         { tripId, driverId, reason: OFFER_WITHDRAWN_REASON.STALE },
-        dedupOfferWithdrawn(tripId, driverId),
+        dedupOfferWithdrawn(tripId, driverId, board.negotiationSeq),
       ).catch((err: unknown) =>
         this.logger.warn(
           `offer_withdrawn no emitido trip=${tripId} driver=${driverId}: ${String(err)}`,
@@ -694,7 +702,7 @@ export class OfferBoardService {
           'dispatch.offer_withdrawn',
           tripId,
           { tripId, driverId: loser.driverId, reason: OFFER_WITHDRAWN_REASON.NOT_SELECTED },
-          dedupOfferWithdrawn(tripId, loser.driverId),
+          dedupOfferWithdrawn(tripId, loser.driverId, board.negotiationSeq),
         ).catch((err: unknown) =>
           this.logger.warn(
             `offer_withdrawn (not_selected) trip=${tripId} driver=${loser.driverId}: ${String(err)}`,
@@ -942,6 +950,16 @@ export class OfferBoardService {
       }
       // Ganamos el CAS: nosotros marcamos EXPIRED → solo nosotros emitimos no_offers.
       const reason = res.offerCount > 0 ? 'all_lapsed' : 'window_expired';
+      // ADR-020 Lote 2 (2a, follow-up del boot-real) — captura las ofertas PENDING ANTES del lapse para
+      // NOTIFICAR a esos conductores que su puja se cerró. Sin esto, un conductor que ofertó y quedó en
+      // "Esperando al pasajero…" NO se enteraba al vencer el board (el offer_withdrawn solo se emitía al
+      // ACEPTAR, no al expirar) → su estado pendiente quedaba STALE y bloqueaba re-ofertar el mismo viaje.
+      const pending =
+        res.offerCount > 0
+          ? (await this.store.listOffers(tripId)).filter(
+              (o) => o.status === OfferStatus.PENDING,
+            )
+          : [];
       // A5 — caduca TODAS las PENDING en UN solo round-trip (winner=null, sin ganador en el barrido),
       // en vez de N×setOfferStatus. Best-effort/cosmético (H7): no toca el board ni el outbox.
       await this.store
@@ -949,6 +967,27 @@ export class OfferBoardService {
         .catch((err) =>
           this.logger.warn(`lapseAndAccept (sweep) trip=${tripId} falló: ${String(err)}`),
         );
+      // UN `dispatch.offer_withdrawn` (reason=stale: la ventana cerró sin selección) POR conductor con
+      // oferta pendiente → driver-bff lo empuja como `bid:closed` → la app limpia el "esperando" y la card.
+      // Idempotente por (trip,driver); sin PII (solo tripId+driverId); best-effort (el poll de 12s respalda).
+      await Promise.all(
+        pending.map((offer) =>
+          this.emit(
+            'dispatch.offer_withdrawn',
+            tripId,
+            { tripId, driverId: offer.driverId, reason: OFFER_WITHDRAWN_REASON.STALE },
+            dedupOfferWithdrawn(
+              tripId,
+              offer.driverId,
+              res.windowEpoch !== null ? String(res.windowEpoch) : 'gone',
+            ),
+          ).catch((err: unknown) =>
+            this.logger.warn(
+              `offer_withdrawn (stale/sweep) trip=${tripId} driver=${offer.driverId}: ${String(err)}`,
+            ),
+          ),
+        ),
+      );
       // La dedupKey se ata a la ventana del board (windowEpoch = expiresAt, devuelto por el Lua). Un
       // reopen abre otra ventana → otro epoch → un no_offers legítimo posterior no queda deduplicado.
       await this.expire(
