@@ -944,7 +944,10 @@ export function useUpdateDispatchRadiusConfig() {
     // `@Roles(ADMIN, SUPERADMIN, DISPATCHER)` y dispatch-service re-firma server-side: la UI solo refleja.
     mutationFn: (input: ReplaceRadiusConfigRequest) =>
       apiClient().put('/dispatch/radius-config', { body: input, schema: dispatchRadiusConfigView }),
-    onSuccess: () => {
+    // ADR-021 Fase H (H2) — onSettled (NO onSuccess): re-sincroniza el read-model tras éxito O CONFLICTO
+    // (409 CAS por optimistic-lock de version), igual que los 8 paneles de pricing/catalog. Con onSuccess un
+    // 409 dejaba la version stale como expectedVersion → todo re-save 409eaba en loop sin recuperación.
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.dispatchRadiusConfig });
     },
   });
