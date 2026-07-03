@@ -2919,6 +2919,122 @@ export type BookingRequestView = z.infer<typeof bookingRequestView>;
 export const bookingRequestList = z.array(bookingRequestView);
 export type BookingRequestList = z.infer<typeof bookingRequestList>;
 
+/* ═══════════════════════ CARPOOLING · PASAJERO (public-bff → booking-service) ═══════════════════════ */
+
+/**
+ * Lado PASAJERO del marketplace (ADR-014 · design/veo.pen sección 5): busca viajes publicados, ve el detalle
+ * enriquecido, solicita la reserva de asiento(s) y sigue el estado de SU solicitud (aprobación del conductor).
+ * Todo pasa por el public-bff (`/api/v1/carpool/*`), que propaga la identidad firmada public-rail y proxya a
+ * booking-service. El `passengerId` NUNCA viaja en el body (server-truth, anti-IDOR).
+ */
+
+/**
+ * VISTA PÚBLICA de un viaje publicado tal como la ve el pasajero (allow-list de booking-service ·
+ * `PublishedTripPublicView`). SIN driverId/vehicleId internos, SIN celdas H3, SIN dedupKey: el conductor y
+ * el vehículo llegan por sus vistas públicas aparte (enriquecimiento del detalle/búsqueda).
+ */
+export const carpoolTripPublicView = z.object({
+  id: z.string().uuid(),
+  origenLat: z.number(),
+  origenLon: z.number(),
+  destinoLat: z.number(),
+  destinoLon: z.number(),
+  /** Paradas intermedias (meeting points públicos). */
+  stopovers: z.array(carpoolStopover),
+  /** ISO-8601 (salida programada). */
+  fechaHoraSalida: z.string(),
+  asientosTotales: z.number().int(),
+  asientosDisponibles: z.number().int(),
+  pricingMode: carpoolPricingMode,
+  /** Precio del asiento full-route en céntimos PEN (Int). */
+  precioBase: z.number().int(),
+  precioPorTramo: z.array(carpoolTramoPrecio),
+  modoReserva: carpoolModoReserva,
+  /** Reglas del viaje (texto libre del conductor); null si no puso ninguna. */
+  reglas: z.string().nullable(),
+  pais: z.string(),
+  moneda: z.string(),
+  estado: publishedTripState,
+});
+export type CarpoolTripPublicView = z.infer<typeof carpoolTripPublicView>;
+
+/** Conductor PÚBLICO (display-only: nombre + rating). Nullable en los envelopes: degradación honesta. */
+export const carpoolDriverDisplay = z.object({
+  id: z.string(),
+  name: z.string(),
+  averageRating: z.number(),
+});
+export type CarpoolDriverDisplay = z.infer<typeof carpoolDriverDisplay>;
+
+/** Vehículo PÚBLICO del detalle (modelo/placa/color; lo que el pasajero necesita para reconocer el auto). */
+export const carpoolVehicleDisplay = z.object({
+  id: z.string(),
+  make: z.string(),
+  model: z.string(),
+  color: z.string(),
+  plate: z.string(),
+  vehicleType: z.string(),
+});
+export type CarpoolVehicleDisplay = z.infer<typeof carpoolVehicleDisplay>;
+
+/** Item de la búsqueda: el viaje público + su conductor público (null si identity no respondió). */
+export const carpoolSearchItem = z.object({
+  trip: carpoolTripPublicView,
+  driver: carpoolDriverDisplay.nullable(),
+});
+export type CarpoolSearchItem = z.infer<typeof carpoolSearchItem>;
+
+/**
+ * GET /carpool/trips/search → página keyset de la búsqueda por ruta (origen→destino) + fecha + asientos.
+ * `nextCursor` OPACO (null = no hay más). La búsqueda es pública (no exige sesión en el downstream).
+ */
+export const carpoolSearchPage = z.object({
+  items: z.array(carpoolSearchItem),
+  nextCursor: z.string().nullable(),
+});
+export type CarpoolSearchPage = z.infer<typeof carpoolSearchPage>;
+
+/**
+ * GET /carpool/trips/:id → detalle ENRIQUECIDO: viaje público + conductor público + vehículo público.
+ * `driver`/`vehicle` nullable: si identity/fleet no respondieron el detalle igual llega (degradación honesta).
+ */
+export const carpoolTripDetail = z.object({
+  trip: carpoolTripPublicView,
+  driver: carpoolDriverDisplay.nullable(),
+  vehicle: carpoolVehicleDisplay.nullable(),
+});
+export type CarpoolTripDetail = z.infer<typeof carpoolTripDetail>;
+
+/**
+ * POST /carpool/bookings → body (solicitar la reserva · `CreateBookingDto` de booking-service). El
+ * `passengerId` NO va: lo deriva el BFF de la sesión (server-truth). `Idempotency-Key` (header, UUID por
+ * intento de submit) deduplica el reintento del MISMO submit sin bloquear una reserva nueva.
+ */
+export const carpoolBookingCreateRequest = z.object({
+  publishedTripId: z.string().uuid(),
+  /** Asientos a reservar (1..8; el server revalida contra los disponibles). */
+  asientos: z.number().int().min(1).max(8),
+  /** Método de pago elegido al reservar (el CHARGE al aprobar lo usa). */
+  paymentMethod: mobilePaymentMethod,
+  pickupLat: z.number().min(-90).max(90),
+  pickupLon: z.number().min(-180).max(180),
+  dropoffLat: z.number().min(-90).max(90),
+  dropoffLon: z.number().min(-180).max(180),
+  /** Mensaje de presentación al conductor (modo REVISION), ≤500 chars. */
+  mensajeIntro: z.string().max(500).optional(),
+  /** Top-up en céntimos sobre la base por solicitud especial (equipaje grande, etc.). */
+  specialRequest: z.number().int().min(0).max(100_000_00).optional(),
+});
+export type CarpoolBookingCreateRequest = z.infer<typeof carpoolBookingCreateRequest>;
+
+/**
+ * MI reserva tal como la devuelven POST /carpool/bookings (creada) y GET /carpool/bookings/:id (seguimiento
+ * del estado: PENDIENTE_APROBACION → APROBADO/RECHAZADO/EXPIRADO → …). Mismo Booking serializado que ve el
+ * conductor (`bookingRequestView`): acá el dueño es el propio pasajero (scoped server-truth, ajeno → 404).
+ */
+export const carpoolBookingView = bookingRequestView;
+export type CarpoolBookingView = BookingRequestView;
+
 /* ═══════════════════════ SOCKET.IO MÓVIL ═══════════════════════ */
 
 /** ETA del conductor hacia el siguiente hito (recojo o destino), en segundos. */
