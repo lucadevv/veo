@@ -27,6 +27,11 @@ import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
 import type {KycChallenge, KycStatus} from '../../domain/entities';
+import {
+  ChallengeStepper,
+  type ChallengeStep,
+} from '../components/ChallengeStepper';
+import {IconUser} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -38,8 +43,10 @@ const MOVE_YAW = 20;
 const MOVE_PITCH = 16;
 const BLINK_CLOSED = 0.25;
 
-/** Fases locales del flujo de captura con detección en vivo. */
+/** Fases locales del flujo de captura con detección en vivo. `intro` es el gate previo (pen jPGX1):
+ *  óvalo guía estático + stepper; la cámara viva recién se monta al tocar "Comenzar verificación". */
 type Phase =
+  | 'intro'
   | 'requesting'
   | 'detecting'
   | 'ready'
@@ -99,8 +106,8 @@ export function KycCameraScreen(): React.JSX.Element {
   // detección facial (más abajo) se combina con éste en el array `outputs` del <Camera>.
   const photoOutput = usePhotoOutput({});
 
-  const [phase, setPhaseState] = useState<Phase>('requesting');
-  const phaseRef = useRef<Phase>('requesting');
+  const [phase, setPhaseState] = useState<Phase>('intro');
+  const phaseRef = useRef<Phase>('intro');
   const setPhase = useCallback((next: Phase) => {
     phaseRef.current = next;
     setPhaseState(next);
@@ -162,20 +169,17 @@ export function KycCameraScreen(): React.JSX.Element {
     },
   });
 
-  // Pide permiso al montar y, si hay, arranca el reto.
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      const granted = hasPermission || (await requestPermission());
-      if (active && granted) {
-        challengeMutation.mutate();
-      }
-    })();
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Arranque EXPLÍCITO desde el intro (pen jPGX1): el permiso y el reto se piden recién al tocar
+  // "Comenzar verificación" — la cámara no se monta a espaldas del usuario.
+  const begin = useCallback(async () => {
+    setPhase('requesting');
+    const granted = hasPermission || (await requestPermission());
+    if (mountedRef.current && granted) {
+      challengeMutation.mutate();
+    }
+    // Sin permiso: la fase queda en `requesting` y el panel muestra el Banner de permiso bloqueado
+    // con el atajo a Ajustes (mismo estado degradado que ya existía).
+  }, [challengeMutation, hasPermission, requestPermission, setPhase]);
 
   // Captura un frame y lo envía (autocaptura tras detectar el movimiento del reto).
   // v5 nitro: `capturePhotoToFile` escribe la foto a un archivo temporal y devuelve su `path`.
@@ -275,6 +279,22 @@ export function KycCameraScreen(): React.JSX.Element {
     isFocused &&
     (phase === 'detecting' || phase === 'ready' || phase === 'capturing');
 
+  // ── Stepper del reto (pen jPGX1): mapa fase → paso. Rostro mientras se encuadra; el gesto del
+  // reto cuando el server ya lo pidió (`ready`); Listo desde la captura/envío. ──
+  const step: ChallengeStep =
+    phase === 'ready'
+      ? 1
+      : phase === 'capturing' || phase === 'submitting'
+        ? 2
+        : 0;
+  // Etiqueta VERAZ del paso del gesto: el pen dice "Parpadeo", pero si el reto real pide girar la
+  // cabeza (TURN/HEAD/NOD…) el chip dice "Movimiento" (mismo criterio de matching que `onFaces`).
+  const challengeAction = (challenge?.action ?? '').toUpperCase();
+  const wantsOnlyTurn =
+    /TURN|HEAD|LEFT|RIGHT|NOD/.test(challengeAction) &&
+    !/BLINK|EYE/.test(challengeAction);
+  const gestureLabel = wantsOnlyTurn ? t('kyc.stepMove') : t('kyc.stepBlink');
+
   // ── Resultado ────────────────────────────────────────────────────────────
   if (phase === 'resolved' && result) {
     const titleKey =
@@ -345,6 +365,40 @@ export function KycCameraScreen(): React.JSX.Element {
               description={rejectionReason}
             />
           ) : null}
+        </View>
+      </SafeScreen>
+    );
+  }
+
+  // ── Intro / gate (pen jPGX1): óvalo guía estático + instrucciones + stepper. La cámara viva
+  // recién se monta al tocar el CTA (ver `begin`). ─────────────────────────
+  if (phase === 'intro') {
+    return (
+      <SafeScreen
+        footer={
+          <Button
+            label={t('kyc.start')}
+            fullWidth
+            size="lg"
+            onPress={() => void begin()}
+          />
+        }>
+        <View style={[styles.introBody, {gap: theme.spacing.xl}]}>
+          {/* Óvalo guía ESTÁTICO (silueta, sin cámara): anticipa el encuadre real de la captura. */}
+          <View
+            style={[styles.introOval, {borderColor: theme.colors.accent}]}
+            accessibilityElementsHidden>
+            <IconUser color={theme.colors.borderStrong} size={80} />
+          </View>
+          <View style={{gap: theme.spacing.sm, alignSelf: 'stretch'}}>
+            <Text variant="title3" align="center">
+              {t('kyc.introTitle')}
+            </Text>
+            <Text variant="callout" color="inkMuted" align="center">
+              {t('kyc.introSub')}
+            </Text>
+          </View>
+          <ChallengeStepper active={0} gestureLabel={gestureLabel} />
         </View>
       </SafeScreen>
     );
@@ -472,6 +526,9 @@ export function KycCameraScreen(): React.JSX.Element {
             {t('kyc.subtitle')}
           </Text>
 
+          {/* El stepper AVANZA con el reto real (fase → paso): rostro → gesto → listo. */}
+          <ChallengeStepper active={step} gestureLabel={gestureLabel} />
+
           {challengeMutation.isError ? (
             <Banner
               tone="danger"
@@ -562,4 +619,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   loadingRow: {alignItems: 'center', paddingVertical: 8},
+  // Intro/gate (pen jPGX1): óvalo guía estático centrado con la silueta adentro.
+  introBody: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  introOval: {
+    width: 240,
+    height: 300,
+    borderWidth: 3,
+    borderRadius: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
