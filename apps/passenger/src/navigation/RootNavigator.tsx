@@ -16,7 +16,10 @@ import {useProfileCompletion} from '../features/profile/presentation';
 import {TrustedContactsScreen} from '../features/contacts/presentation';
 import {ChildModeScreen} from '../features/childMode/presentation';
 import {KycCameraScreen} from '../features/kyc/presentation';
-import {NotificationsScreen} from '../features/notifications/presentation';
+import {
+  NotificationPrefsScreen,
+  NotificationsScreen,
+} from '../features/notifications/presentation';
 import {PanicScreen} from '../features/panic/presentation';
 import {
   PaymentMethodsScreen,
@@ -31,6 +34,7 @@ import {
   CameraControlScreen,
   CameraLiveScreen,
   CounterScreen,
+  FamilyShareScreen,
   LostItemScreen,
   NoOffersScreen,
   OffersBoardScreen,
@@ -39,6 +43,13 @@ import {
   ScheduleNewScreen,
   TripActiveScreen,
 } from '../features/trip/presentation';
+import {
+  CarpoolBookingReviewScreen,
+  CarpoolBookingStatusScreen,
+  CarpoolResultsScreen,
+  CarpoolSearchScreen,
+  CarpoolTripDetailScreen,
+} from '../features/carpool/presentation';
 import {
   MapPickScreen,
   RouteQuoteScreen,
@@ -229,6 +240,12 @@ export function RootNavigator(): React.JSX.Element {
         component={TripActiveScreen}
         options={{title: t('screens.tripActive')}}
       />
+      {/* "Comparte tu viaje" (design/veo.pen zKyic): entra desde la acción Compartir del viaje activo. */}
+      <Stack.Screen
+        name="FamilyShare"
+        component={FamilyShareScreen}
+        options={{title: t('screens.familyShare')}}
+      />
       {/* Control de cámara: header oscuro estándar, igual que el diseño CameraControl. */}
       <Stack.Screen
         name="CameraControl"
@@ -245,10 +262,47 @@ export function RootNavigator(): React.JSX.Element {
         component={ScheduleNewScreen}
         options={{title: t('screens.scheduleNew')}}
       />
+      {/* Carpooling (ADR-014 · pen sección 5): buscador → resultados → detalle → reserva → estado. */}
+      <Stack.Screen
+        name="CarpoolSearch"
+        component={CarpoolSearchScreen}
+        options={{title: t('screens.carpoolSearch')}}
+      />
+      <Stack.Screen
+        name="CarpoolResults"
+        component={CarpoolResultsScreen}
+        options={{title: t('screens.carpoolResults')}}
+      />
+      <Stack.Screen
+        name="CarpoolTripDetail"
+        component={CarpoolTripDetailScreen}
+        options={{title: t('screens.carpoolTripDetail')}}
+      />
+      <Stack.Screen
+        name="CarpoolBookingReview"
+        component={CarpoolBookingReviewScreen}
+        options={{title: t('screens.carpoolBookingReview')}}
+      />
+      <Stack.Screen
+        name="CarpoolBookingStatus"
+        component={CarpoolBookingStatusScreen}
+        // Sin gesto de retroceso: se entra por replace tras el POST; volver es por los CTAs
+        // explícitos ("Volver al inicio" / "Buscar otros viajes"), no por swipe accidental.
+        options={{
+          title: t('screens.carpoolBookingStatus'),
+          gestureEnabled: false,
+        }}
+      />
       <Stack.Screen
         name="Notifications"
         component={NotificationsScreen}
         options={{title: t('screens.notifications')}}
+      />
+      {/* Preferencias de notificaciones (pen P/NotifPrefs): pantalla propia, distinta del feed. */}
+      <Stack.Screen
+        name="NotificationPrefs"
+        component={NotificationPrefsScreen}
+        options={{title: t('screens.notificationPrefs')}}
       />
       <Stack.Screen
         name="LostItem"

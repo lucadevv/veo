@@ -17,10 +17,16 @@ export interface ActiveTripState {
   activeShareId: string | null;
   /** Caducidad ISO-8601 del enlace activo (para el countdown "Expira en …"). `null` sin enlace. */
   shareExpiresAt: string | null;
+  /**
+   * URL pública del enlace activo de la sesión. Se RETIENE porque el backend no tiene GET del share
+   * activo y el POST no dedupea sin dedupKey: sin esto, re-entrar a "Comparte tu viaje" crearía un
+   * enlace nuevo cada vez. `null` si el enlace se creó por un camino que no la retuvo (legacy).
+   */
+  shareUrl: string | null;
   /** Adopta un viaje activo (creación local o rehidratación desde el server). */
   setActiveTripId: (tripId: string) => void;
-  /** Retiene el enlace recién creado (shareId + caducidad) para poder revocarlo y mostrar el countdown. */
-  setActiveShare: (shareId: string, expiresAt: string) => void;
+  /** Retiene el enlace recién creado (shareId + caducidad + URL) para revocar/reusar/countdown. */
+  setActiveShare: (shareId: string, expiresAt: string, url?: string) => void;
   /** Olvida el enlace activo (tras revocar o al terminar el viaje). NO toca el viaje en sí. */
   clearShare: () => void;
   /** Limpia el viaje (terminal/cancelado → vuelve al home idle). Limpia también el enlace compartido. */
@@ -37,12 +43,19 @@ export const useActiveTripStore = create<ActiveTripState>(set => ({
   activeTripId: null,
   activeShareId: null,
   shareExpiresAt: null,
+  shareUrl: null,
   setActiveTripId: activeTripId => set({activeTripId}),
-  setActiveShare: (activeShareId, shareExpiresAt) =>
-    set({activeShareId, shareExpiresAt}),
-  clearShare: () => set({activeShareId: null, shareExpiresAt: null}),
+  setActiveShare: (activeShareId, shareExpiresAt, url) =>
+    set({activeShareId, shareExpiresAt, shareUrl: url ?? null}),
+  clearShare: () =>
+    set({activeShareId: null, shareExpiresAt: null, shareUrl: null}),
   // El `clear` del viaje DEBE arrastrar el enlace: si no, un share viejo quedaría colgado al
   // arrancar un viaje nuevo (regresión del lifecycle → botón de revoke apuntando a un link ajeno).
   clear: () =>
-    set({activeTripId: null, activeShareId: null, shareExpiresAt: null}),
+    set({
+      activeTripId: null,
+      activeShareId: null,
+      shareExpiresAt: null,
+      shareUrl: null,
+    }),
 }));

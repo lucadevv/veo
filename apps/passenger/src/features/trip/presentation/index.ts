@@ -9,6 +9,7 @@ export {CameraLiveScreen} from './screens/CameraLiveScreen';
 export {CameraControlScreen} from './screens/CameraControlScreen';
 export {TripHistoryScreen} from './screens/TripHistoryScreen';
 export {ScheduledTripsScreen} from './screens/ScheduledTripsScreen';
+export {FamilyShareScreen} from './screens/FamilyShareScreen';
 export {ScheduleNewScreen} from './screens/ScheduleNewScreen';
 export {ReassignScreen} from './screens/ReassignScreen';
 export {LostItemScreen} from './screens/LostItemScreen';

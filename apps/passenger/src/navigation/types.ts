@@ -9,6 +9,24 @@
  * `Main`/`MainTabParamList` se eliminaron (ya no hay tabs ni navegación anidada que tipar).
  */
 
+/**
+ * BÚSQUEDA de carpooling (P/ProgSearch → P/ProgResults): viaja por params entre las pantallas del
+ * flujo (results → detail → review) para que cada una sea rehidratable por sí sola. Los labels son
+ * los textos que el pasajero eligió en el autocompletado (se muestran tal cual, sin re-geocodificar).
+ */
+export interface CarpoolSearchQuery {
+  originLat: number;
+  originLon: number;
+  originLabel: string;
+  destLat: number;
+  destLon: number;
+  destLabel: string;
+  /** Día calendario buscado (YYYY-MM-DD, local). */
+  fecha: string;
+  /** Asientos que el pasajero necesita (1..8). */
+  asientos: number;
+}
+
 /** Stack raíz que envuelve onboarding, auth, el Home autenticado y las pantallas modales/de viaje. */
 export type RootStackParamList = {
   Splash: undefined;
@@ -46,6 +64,8 @@ export type RootStackParamList = {
   /** PUJA · puja sin ofertas (EXPIRED): re-pujar más alto para reabrir el board. */
   NoOffers: {tripId: string};
   TripActive: {tripId: string};
+  /** "Comparte tu viaje" (design/veo.pen zKyic): enlace de seguimiento + canales + contactos. */
+  FamilyShare: {tripId: string};
   /** Cámara del viaje a pantalla completa (Ola 2A · seguridad). */
   CameraLive: {tripId: string};
   /** Control de privacidad: quién puede ver la cámara del viaje (Ola 2A). */
@@ -55,8 +75,20 @@ export type RootStackParamList = {
   ScheduledTrips: undefined;
   /** Programar un viaje nuevo (entrada al flujo real de programación desde "+"). */
   ScheduleNew: undefined;
-  /** Centro de avisos del pasajero (campana del Home). */
+  /** Carpooling (ADR-014 · pen sección 5): buscador de asientos publicados entre ciudades. */
+  CarpoolSearch: undefined;
+  /** Carpooling: resultados keyset de la búsqueda (la query viaja completa en params). */
+  CarpoolResults: {search: CarpoolSearchQuery};
+  /** Carpooling: detalle enriquecido de un viaje publicado (driver/vehicle pueden venir null). */
+  CarpoolTripDetail: {tripId: string; search: CarpoolSearchQuery};
+  /** Carpooling: revisión de la reserva (asientos, mensaje, método de pago) antes del POST. */
+  CarpoolBookingReview: {tripId: string; search: CarpoolSearchQuery};
+  /** Carpooling: estado REAL de MI solicitud (poll hasta que el conductor decida). */
+  CarpoolBookingStatus: {bookingId: string};
+  /** Centro de avisos del pasajero (campana del Home). Título "Avisos" (el FEED). */
   Notifications: undefined;
+  /** Preferencias de notificaciones (pen P/NotifPrefs): toggles por categoría, persistencia local. */
+  NotificationPrefs: undefined;
   /** Reasignación: el conductor canceló (estado REASSIGNING) → reabre el board de ofertas. */
   Reassign: {tripId: string};
   /** Reportar un objeto olvidado de un viaje (vía ticket de soporte). */

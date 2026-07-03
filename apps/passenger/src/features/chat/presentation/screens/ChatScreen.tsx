@@ -29,6 +29,7 @@ import {
 import type {RootStackParamList} from '../../../../navigation/types';
 import {usePassengerTripSocket} from '../../../trip/presentation/hooks/usePassengerTripSocket';
 import {isChatActive, mergeMessages} from '../../domain/entities';
+import {withDayDividers, type ChatListItem} from '../dayDividers';
 import {MessageBubble} from '../components/MessageBubble';
 
 type Params = RouteProp<RootStackParamList, 'Chat'>;
@@ -63,7 +64,7 @@ export function ChatScreen(): React.JSX.Element {
   // Mensajes confirmados localmente tras enviar (eco optimista del POST hasta que llegue por socket).
   const [sentMessages, setSentMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
-  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const listRef = useRef<FlatList<ChatListItem>>(null);
 
   const sendMutation = useMutation({
     mutationFn: (body: string) => sendMessage.execute(tripId, body),
@@ -85,6 +86,17 @@ export function ChatScreen(): React.JSX.Element {
         ...live.incomingMessages,
       ]),
     [historyQuery.data, sentMessages, live.incomingMessages],
+  );
+
+  // Ítems de la lista CON divisores de día sintéticos (pen hPrJt DayDivider: "Hoy"/"Ayer"/"Lun 30
+  // jun"), derivados de los timestamps reales. Las etiquetas se inyectan (la derivación es pura).
+  const listItems = useMemo(
+    () =>
+      withDayDividers(messages, {
+        today: t('chat.dayToday'),
+        yesterday: t('chat.dayYesterday'),
+      }),
+    [messages, t],
   );
 
   // Drena los entrantes ya integrados para no reprocesarlos y mantener limpio el badge de no leídos.
@@ -117,8 +129,18 @@ export function ChatScreen(): React.JSX.Element {
     [sendMutation, active],
   );
 
+  // Divisor de día centrado y sutil (pen: texto 11/600 ink-subtle) o burbuja según el ítem.
   const renderItem = useCallback(
-    ({item}: {item: ChatMessage}) => <MessageBubble message={item} />,
+    ({item}: {item: ChatListItem}) =>
+      item.kind === 'divider' ? (
+        <View style={styles.dayDivider}>
+          <Text variant="caption" color="inkSubtle" align="center">
+            {item.label}
+          </Text>
+        </View>
+      ) : (
+        <MessageBubble message={item.message} />
+      ),
     [],
   );
 
@@ -146,8 +168,10 @@ export function ChatScreen(): React.JSX.Element {
         keyboardVerticalOffset={insets.top + theme.spacing.xl}>
         <FlatList
           ref={listRef}
-          data={messages}
-          keyExtractor={item => item.id}
+          data={listItems}
+          keyExtractor={item =>
+            item.kind === 'divider' ? item.id : item.message.id
+          }
           renderItem={renderItem}
           contentContainerStyle={{
             padding: theme.spacing.xl,
@@ -254,6 +278,8 @@ export function ChatScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   flex: {flex: 1},
   empty: {flex: 1, justifyContent: 'center', alignItems: 'center'},
+  // Separador de fecha entre días distintos (pen hPrJt DayDivider): centrado, con un respiro extra.
+  dayDivider: {alignItems: 'center', paddingVertical: 2},
   composer: {borderTopWidth: StyleSheet.hairlineWidth},
   quickRow: {flexDirection: 'row', flexWrap: 'wrap'},
   chip: {borderWidth: StyleSheet.hairlineWidth},
