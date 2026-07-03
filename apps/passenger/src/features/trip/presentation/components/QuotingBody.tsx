@@ -28,7 +28,7 @@ import {
 import {CHILD_MODE_FEE_CENTS, isFixedMode, isPujaMode} from '@veo/shared-types';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
@@ -56,6 +56,7 @@ import {
   offeringDisplayName,
   offeringGlyph,
 } from '../../../../shared/presentation/components/offeringGlyphs';
+import {IconArrowRight, IconBolt} from './icons';
 import {RoutePointsList} from '../../../maps/presentation/components/RoutePointsList';
 import {SpecialRequestChips} from '../../../maps/presentation/components/SpecialRequestChips';
 import {VehicleIcon} from '../../../maps/presentation/components/VehicleIcon';
@@ -473,27 +474,35 @@ export function QuotingBody({
         // oferta resuelve PUJA → proponés tu precio (piso/sugerido PROPIOS de la oferta); si es FIJO → el
         // precio firme ya está en la fila y el desglose va más abajo. Nada de un modo global que decide todo.
         <View style={{gap: theme.spacing.sm}}>
-          {options.map((option, index) => (
-            <SelectionBump
-              key={option.id}
-              index={index}
-              selected={option.id === selectedId}>
-              <RideOptionRow
-                name={offeringDisplayName(option)}
-                price={formatPEN(option.priceCents)}
-                eta={formatEta(option)}
-                description={optionDescription(option, index === 0)}
-                icon={
-                  <VehicleIcon
-                    icon={option.icon}
-                    vehicleType={option.vehicleType}
+          {options.map((option, index) => {
+            const optionIsPuja = isPujaMode(option.mode ?? quote?.mode);
+            const isSelected = option.id === selectedId;
+            return (
+              <SelectionBump key={option.id} index={index} selected={isSelected}>
+                {optionIsPuja && !isSelected ? (
+                  // Per pen qAT2P: la oferta PUJA sin seleccionar se presenta como la card
+                  // affordance "Pon tu precio" (no una fila con precio firme que no existe).
+                  // Tocarla la selecciona → el BidPanel se abre debajo (misma máquina de selección).
+                  <PujaOptionCard onPress={() => selectChanged(option.id)} />
+                ) : (
+                  <RideOptionRow
+                    name={offeringDisplayName(option)}
+                    price={formatPEN(option.priceCents)}
+                    eta={formatEta(option)}
+                    description={optionDescription(option, index === 0)}
+                    icon={
+                      <VehicleIcon
+                        icon={option.icon}
+                        vehicleType={option.vehicleType}
+                      />
+                    }
+                    selected={isSelected}
+                    onPress={() => selectChanged(option.id)}
                   />
-                }
-                selected={option.id === selectedId}
-                onPress={() => selectChanged(option.id)}
-              />
-            </SelectionBump>
-          ))}
+                )}
+              </SelectionBump>
+            );
+          })}
 
           {selectedIsPuja && selectedOption && bidCents !== null ? (
             <View style={{gap: theme.spacing.lg, marginTop: theme.spacing.xs}}>
@@ -670,12 +679,79 @@ export function QuotingBody({
   );
 }
 
+interface PujaOptionCardProps {
+  onPress: () => void;
+}
+
+/**
+ * Card affordance de la PUJA sin seleccionar (design/veo.pen qAT2P "Poné tu precio"): la oferta en modo
+ * puja no tiene precio firme que mostrar en una fila, así que se presenta como invitación a negociar
+ * (rayo + "Pon tu precio" + acción "Ofrecer"). Tocarla la selecciona y el BidPanel se abre debajo —
+ * misma máquina de selección que las filas fijas, solo cambia la piel.
+ */
+function PujaOptionCard({onPress}: PujaOptionCardProps): React.JSX.Element {
+  const theme = useTheme();
+  const {t} = useTranslation();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${t('puja.affordanceTitle')}. ${t('puja.affordanceSub')}`}
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.pujaCard,
+        {
+          backgroundColor: pressed
+            ? theme.colors.surfaceElevated
+            : theme.colors.surface,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radii.lg,
+          paddingHorizontal: theme.spacing.lg,
+          paddingVertical: theme.spacing.md,
+          gap: theme.spacing.lg,
+        },
+      ]}>
+      <View
+        style={[
+          styles.pujaGlyph,
+          {backgroundColor: `${theme.colors.brand}26`},
+        ]}>
+        <IconBolt color={theme.colors.brand} size={20} />
+      </View>
+      <View style={styles.pujaBody}>
+        <Text variant="bodyStrong" numberOfLines={1}>
+          {t('puja.affordanceTitle')}
+        </Text>
+        <Text variant="footnote" color="inkMuted" numberOfLines={1}>
+          {t('puja.affordanceSub')}
+        </Text>
+      </View>
+      <View style={styles.pujaAction}>
+        <Text variant="subhead" color="brand">
+          {t('puja.affordanceAction')}
+        </Text>
+        <IconArrowRight color={theme.colors.brand} size={16} />
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  pujaCard: {flexDirection: 'row', alignItems: 'center', borderWidth: 1},
+  pujaGlyph: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pujaBody: {flex: 1, gap: 2},
+  pujaAction: {flexDirection: 'row', alignItems: 'center', gap: 4},
   scheduleRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -2,11 +2,13 @@ import type {PaymentView} from '@veo/api-client';
 import {useMutation, useQuery} from '@tanstack/react-query';
 import {
   Banner,
+  BottomSheet,
   Button,
   Card,
   Skeleton,
   StatusPill,
   Text,
+  TextField,
   useTheme,
 } from '@veo/ui-kit';
 import React from 'react';
@@ -23,8 +25,10 @@ import {
 import {CheckoutInstructions} from './CheckoutInstructions';
 import {Animated, EnterView, SuccessCheck, usePressScale} from './motion';
 
-/** Propinas rápidas post-viaje sugeridas (céntimos PEN), alineadas al handoff: [Sin, S/2, S/3, S/5]. */
-const QUICK_TIPS_CENTS = [0, 200, 300, 500] as const;
+/** Propinas rápidas post-viaje (céntimos PEN), per design/veo.pen I7ahU: [Sin, S/2, S/5] + "Otro". */
+const QUICK_TIPS_CENTS = [0, 200, 500] as const;
+/** Tope de cordura del monto libre de propina (céntimos): evita typos de un cero de más. */
+const MAX_CUSTOM_TIP_CENTS = 50_000;
 
 /** Cadencia del poll del recibo mientras el cobro "procesa" (consumer Kafka puede demorar). */
 const POLL_INTERVAL_MS = 2500;
@@ -160,6 +164,22 @@ export function SettlementBody({
       void paymentQuery.refetch();
     },
   });
+
+  // Chip "Otro" (design/veo.pen I7ahU): monto libre de propina en un sheet chico. El texto vive acá
+  // (no en el sheet) para poder validar/parsear antes de mutar; se resetea al cerrar.
+  const [customTipOpen, setCustomTipOpen] = React.useState(false);
+  const [customTipText, setCustomTipText] = React.useState('');
+  // Soles con decimales opcionales ("5" / "5.50") → céntimos. NaN/fuera de rango → null (botón gris).
+  const customTipCents = React.useMemo(() => {
+    const parsed = Number(customTipText.replace(',', '.'));
+    if (!Number.isFinite(parsed)) return null;
+    const cents = Math.round(parsed * 100);
+    return cents > 0 && cents <= MAX_CUSTOM_TIP_CENTS ? cents : null;
+  }, [customTipText]);
+  const closeCustomTip = (): void => {
+    setCustomTipOpen(false);
+    setCustomTipText('');
+  };
 
   // Fuente de verdad: la confirmación de efectivo recién hecha pisa al fetch (trae el estado bilateral).
   const payment = confirmMutation.data ?? paymentQuery.data ?? null;
@@ -433,12 +453,54 @@ export function SettlementBody({
                   }
                 />
               ))}
+              {/* "Otro" (pen I7ahU): monto libre en un sheet chico, misma mutación anti-doble. */}
+              <TipChip
+                label={t('settlement.tipOther')}
+                disabled={tipMutation.isPending || tipMutation.isSuccess}
+                onPress={() => setCustomTipOpen(true)}
+              />
             </View>
           </View>
         </EnterView>
       ) : null}
 
       {resolvedActions}
+
+      {/* Sheet del monto libre de propina (pen I7ahU "Otro"): soles con decimales, tope de cordura,
+          misma mutación (y el mismo candado anti doble-propina) que los chips rápidos. */}
+      <BottomSheet
+        visible={customTipOpen}
+        onClose={closeCustomTip}
+        title={t('settlement.tipCustomTitle')}
+        footer={
+          <Button
+            label={
+              customTipCents != null
+                ? t('settlement.tipCustomConfirm', {
+                    amount: formatPEN(customTipCents),
+                  })
+                : t('settlement.tipCustomConfirmEmpty')
+            }
+            variant="primary"
+            fullWidth
+            disabled={customTipCents == null || tipMutation.isPending}
+            loading={tipMutation.isPending}
+            onPress={() => {
+              if (customTipCents != null) {
+                tipMutation.mutate(customTipCents);
+                closeCustomTip();
+              }
+            }}
+          />
+        }>
+        <TextField
+          label={t('settlement.tipCustomLabel')}
+          value={customTipText}
+          onChangeText={setCustomTipText}
+          keyboardType="decimal-pad"
+          autoFocus
+        />
+      </BottomSheet>
     </View>
   );
 }
@@ -455,14 +517,38 @@ function ReceiptCard({
   const {t} = useTranslation();
   return (
     <Card variant="outlined" padding="lg">
-      <View style={styles.row}>
-        <Text variant="callout" color="inkMuted">
-          {t('payments.breakdownFare')}
-        </Text>
-        <Text variant="callout" tabular>
-          {formatPEN(payment.grossCents)}
-        </Text>
-      </View>
+      {/* Desglose per design/veo.pen I7ahU: cuando el cobro trae comisión VISIBLE al usuario
+          (`feeCents`, semántica del payment-service), se abre en "Tarifa base + Cargo por servicio
+          VEO" (base = gross − fee; la suma cierra con el Total). Sin fee → una sola línea, como antes. */}
+      {payment.feeCents > 0 ? (
+        <>
+          <View style={styles.row}>
+            <Text variant="callout" color="inkMuted">
+              {t('payments.breakdownBaseFare')}
+            </Text>
+            <Text variant="callout" tabular>
+              {formatPEN(payment.grossCents - payment.feeCents)}
+            </Text>
+          </View>
+          <View style={styles.row}>
+            <Text variant="callout" color="inkMuted">
+              {t('payments.breakdownServiceFee')}
+            </Text>
+            <Text variant="callout" tabular>
+              {formatPEN(payment.feeCents)}
+            </Text>
+          </View>
+        </>
+      ) : (
+        <View style={styles.row}>
+          <Text variant="callout" color="inkMuted">
+            {t('payments.breakdownFare')}
+          </Text>
+          <Text variant="callout" tabular>
+            {formatPEN(payment.grossCents)}
+          </Text>
+        </View>
+      )}
       {payment.tipCents > 0 ? (
         <View style={styles.row}>
           <Text variant="callout" color="inkMuted">

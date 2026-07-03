@@ -287,6 +287,12 @@ export function RequestFlowScreen(): React.JSX.Element {
     navigation.navigate('Chat', {tripId: activeTripId as string});
   }, [live, navigation, activeTripId]);
 
+  // Compartir con la familia: pantalla dedicada (pen zKyic) — mismo patrón que openChat. La acción
+  // "Compartir" del sheet ya no dispara el Share nativo directo.
+  const openFamilyShare = useCallback(() => {
+    navigation.navigate('FamilyShare', {tripId: activeTripId as string});
+  }, [navigation, activeTripId]);
+
   const myPoint = useMemo<MapPoint | null>(
     () => (myLocation ? {lat: myLocation.lat, lng: myLocation.lon} : null),
     [myLocation],
@@ -524,6 +530,9 @@ export function RequestFlowScreen(): React.JSX.Element {
     destinationTitle: destination?.title ?? null,
     onChooseOffer,
     onOpenCamera,
+    onOpenChat: openChat,
+    onOpenFamilyShare: openFamilyShare,
+    unreadChatCount: unreadCount,
     clearTrip,
     hasDebt: debtGate.hasDebt,
     debtTotalCents: debtGate.debtTotalCents,
@@ -706,8 +715,9 @@ export function RequestFlowScreen(): React.JSX.Element {
         />
       ) : (
         <TripTopBar
-          unreadCount={unreadCount}
-          onOpenChat={openChat}
+          // Minimizar (pen fLKdk MinBtn): colapsa el sheet al peek para despejar el mapa. El chat vive
+          // ahora como acción "Mensaje" DENTRO del sheet (va por ctx a ActiveTripBody).
+          onMinimize={() => sheetRef.current?.snapToIndex(PEEK_INDEX)}
           onSos={() =>
             navigation.navigate('Panic', {tripId: activeTripId as string})
           }

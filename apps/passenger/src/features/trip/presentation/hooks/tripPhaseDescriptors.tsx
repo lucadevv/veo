@@ -67,6 +67,12 @@ export interface RequestFlowContext {
   onChooseOffer: (offer: OfferView) => void;
   // ── Viaje activo / cierre ──
   onOpenCamera: () => void;
+  /** Abre el chat con el conductor (acción "Mensaje" del sheet — design/veo.pen fLKdk Actions). */
+  onOpenChat: () => void;
+  /** Abre la pantalla "Comparte tu viaje" (design/veo.pen zKyic) — acción "Compartir" del sheet. */
+  onOpenFamilyShare: () => void;
+  /** Mensajes del conductor sin leer (badge de la acción "Mensaje"). */
+  unreadChatCount: number;
   /** Vuelve al home LIMPIO (cierre canónico del ciclo). */
   clearTrip: () => void;
   // ── Home idle (franja de deuda + atajos) ──
@@ -140,6 +146,7 @@ export function BiddingPhaseBody({ctx}: SlotProps): React.JSX.Element {
   const {board} = ctx;
   return (
     <OffersBody
+      tripId={ctx.activeTripId as string}
       offers={board.offers}
       connected={board.connected}
       expired={board.status === tripStatus.enum.EXPIRED}
@@ -169,6 +176,9 @@ export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
       status={ctx.board.status ?? ctx.tripDetail.status}
       etaSeconds={ctx.live.etaSeconds}
       onOpenCamera={ctx.onOpenCamera}
+      onOpenChat={ctx.onOpenChat}
+      onOpenFamilyShare={ctx.onOpenFamilyShare}
+      unreadCount={ctx.unreadChatCount}
       onCancelled={ctx.clearTrip}
       addStop={ctx.addStop}
     />

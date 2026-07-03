@@ -26,7 +26,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
-import {IconStarFilled} from '../components/icons';
+import {IconArrowRight, IconStarFilled} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -165,12 +165,28 @@ export function CounterScreen(): React.JSX.Element {
     );
   }
 
+  // Nombre de pila para el header personalizado (pen u1306: "José te contraofertó").
+  const firstName = offer.driverName?.trim().split(/\s+/)[0] ?? null;
+
   return (
     <SafeScreen>
       <View style={{gap: theme.spacing.md, flex: 1}}>
+        {/* Header per design/veo.pen u1306: quién contraofertó + invitación a cerrar. */}
+        <View style={{gap: theme.spacing.xxs}}>
+          <Text variant="title2">
+            {firstName
+              ? t('counter.title', {name: firstName})
+              : t('counter.titleNoName')}
+          </Text>
+          <Text variant="callout" color="inkMuted">
+            {t('counter.subtitle')}
+          </Text>
+        </View>
+
         <Card variant="outlined" padding="md">
           <View style={styles.row}>
-            <Avatar size="md" />
+            {/* Iniciales reales del conductor (pen DriverCard JR), no un avatar genérico. */}
+            <Avatar size="md" name={offer.driverName ?? undefined} />
             <View style={{flex: 1, gap: 2}}>
               <View style={styles.nameRow}>
                 <Text variant="bodyStrong">
@@ -197,28 +213,51 @@ export function CounterScreen(): React.JSX.Element {
           </View>
         </Card>
 
-        <Card variant="filled" padding="md">
-          {originalBidCents !== undefined ? (
-            <View style={styles.compareRow}>
-              <Text variant="callout" color="inkMuted">
-                {t('counter.yourOffer')}
-              </Text>
-              <Text
-                variant="callout"
-                color="inkSubtle"
-                tabular
-                style={styles.strike}>
-                {formatPEN(originalBidCents)}
-              </Text>
-            </View>
-          ) : null}
-          <View style={styles.compareRow}>
-            <Text variant="bodyStrong">{t('counter.driverCounter')}</Text>
-            <Text variant="title2" color="accent" tabular>
+        {/* Comparación HORIZONTAL per pen u1306: tile "Tu oferta" (tachada) → flecha → tile "Su
+            precio" en warn (propone otro). El mismo dato de antes, en la disposición del diseño. */}
+        <View style={[styles.compareTiles, {gap: theme.spacing.sm}]}>
+          <View
+            style={[
+              styles.compareTile,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.lg,
+                padding: theme.spacing.lg,
+              },
+            ]}>
+            <Text variant="caption" color="inkSubtle">
+              {t('counter.yourOffer')}
+            </Text>
+            <Text
+              variant="title3"
+              color="inkSubtle"
+              tabular
+              style={styles.strike}>
+              {originalBidCents !== undefined
+                ? formatPEN(originalBidCents)
+                : '—'}
+            </Text>
+          </View>
+          <IconArrowRight color={theme.colors.inkSubtle} size={18} />
+          <View
+            style={[
+              styles.compareTile,
+              {
+                backgroundColor: `${theme.colors.warn}26`,
+                borderColor: theme.colors.warn,
+                borderRadius: theme.radii.lg,
+                padding: theme.spacing.lg,
+              },
+            ]}>
+            <Text variant="caption" color="warn">
+              {t('counter.theirPrice')}
+            </Text>
+            <Text variant="title3" color="warn" tabular>
               {formatPEN(offer.priceCents)}
             </Text>
           </View>
-        </Card>
+        </View>
 
         <View style={{flex: 1}} />
 
@@ -248,11 +287,7 @@ const styles = StyleSheet.create({
   row: {flexDirection: 'row', alignItems: 'center', gap: 12},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
-  compareRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
+  compareTiles: {flexDirection: 'row', alignItems: 'center'},
+  compareTile: {flex: 1, gap: 4, borderWidth: 1},
   strike: {textDecorationLine: 'line-through'},
 });

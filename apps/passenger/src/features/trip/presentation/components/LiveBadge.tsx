@@ -2,6 +2,7 @@ import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
 import React, {useEffect} from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, View} from 'react-native';
+import {IconCamera} from './icons';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -80,17 +81,22 @@ export function LiveBadge(): React.JSX.Element {
         <Animated.View
           style={[
             styles.halo,
-            {backgroundColor: theme.colors.success, borderRadius: 999},
+            {backgroundColor: theme.colors.danger, borderRadius: 999},
             haloStyle,
           ]}
         />
         <Animated.View
           style={[
             styles.dot,
-            {backgroundColor: theme.colors.success, borderRadius: 999},
+            {backgroundColor: theme.colors.danger, borderRadius: 999},
             dotStyle,
           ]}
         />
+      </View>
+      {/* Glifo de cámara (design/veo.pen fLKdk RecPill): la pill dice QUÉ está en vivo — el video del
+          habitáculo. El punto pasa a `danger` (semántica REC), no `success`. Decorativo (el label habla). */}
+      <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        <IconCamera color={theme.colors.ink} size={12} />
       </View>
       <Text variant="label" color="ink">
         {t('trip.live')}

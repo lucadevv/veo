@@ -63,11 +63,11 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
     }
   });
 
-  it('snap a FULL solo en cotización y cierre (forms largos); el resto abraza el contenido (peek)', () => {
+  it('snap a FULL en cotización, cierre y OFERTAS (ADR-020 Lote 3: con ≥1 oferta el sheet crece para ver la lista); el resto abraza el contenido (peek)', () => {
     const fullPhases = (
       Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]
     ).filter(phase => TRIP_PHASE_DESCRIPTORS[phase].expanded);
-    expect(fullPhases.sort()).toEqual(['completed', 'quoting']);
+    expect(fullPhases.sort()).toEqual(['completed', 'offers', 'quoting']);
   });
 
   it('AMBIENTE (autitos cercanos) solo en idle, searching y completed', () => {

@@ -66,7 +66,17 @@ export const common = {
     tripHistory: 'Mis viajes',
     scheduledTrips: 'Mis viajes programados',
     scheduleNew: 'Programar viaje',
-    notifications: 'Notificaciones',
+    // Pantalla dedicada de compartir con la familia (design/veo.pen zKyic, tuteo del "Compartí").
+    familyShare: 'Comparte tu viaje',
+    carpoolSearch: 'Busca tu viaje',
+    carpoolResults: 'Viajes disponibles',
+    carpoolTripDetail: 'Detalle del viaje',
+    carpoolBookingReview: 'Revisa tu reserva',
+    carpoolBookingStatus: 'Tu reserva',
+    // El FEED de avisos se titula "Avisos" (pen board Sistema y estados); las PREFERENCIAS
+    // (pen P/NotifPrefs) se titulan "Notificaciones". Dos pantallas, dos títulos.
+    notifications: 'Avisos',
+    notificationPrefs: 'Notificaciones',
     lostItem: 'Olvidé algo',
     profile: 'Perfil',
     savedPlaces: 'Lugares guardados',
@@ -88,7 +98,8 @@ export const common = {
     slide1: {
       title: 'Vas siempre acompañado',
       body: 'Botón de pánico, cámara en vivo y tu familia siguiendo tu viaje en tiempo real.',
-      imageAlt: 'App VEO mostrando un viaje activo con las herramientas de seguridad',
+      imageAlt:
+        'App VEO mostrando un viaje activo con las herramientas de seguridad',
     },
 
     slide2: {
@@ -112,9 +123,29 @@ export const common = {
     cuenta: 'Cuenta',
   },
 
+  /** Hub de Seguridad (tab del bottom nav) — design/veo.pen P/Seguridad. Copy en TUTEO (el pen vosea). */
   security: {
-    hubComingSoon:
-      'El centro de seguridad llega pronto: pánico, contactos de confianza y modo niño en un solo lugar.',
+    heroTitle: 'Vas protegido',
+    heroSubtitle:
+      'Pánico, cámara en vivo y tu familia siguiéndote, activo en cada viaje',
+    toolsLabel: 'Herramientas',
+    contactsTitle: 'Contactos de confianza',
+    /** Subtítulo con el conteo REAL de contactos verificados (del bff /contacts). */
+    contactsVerifiedOne: '1 verificado',
+    contactsVerifiedMany: '{{count}} verificados',
+    contactsNone: 'Aún sin contactos',
+    childModeTitle: 'Modo niño',
+    childModeOn: 'Activado',
+    childModeOff: 'Desactivado',
+    kycTitle: 'Verificación de identidad',
+    kycVerified: 'Verificado',
+    kycPending: 'En revisión',
+    kycUnverified: 'Sin verificar',
+    shareTitle: 'Compartir viaje con familia',
+    /** Con viaje activo: el enlace firmado vive en la pantalla del viaje (tab Inicio). */
+    shareActive: 'Enlace en vivo firmado',
+    /** Sin viaje activo la fila se deshabilita: honesto, no hay nada que compartir. */
+    shareUnavailable: 'Disponible durante un viaje',
   },
 
   auth: {
@@ -158,6 +189,9 @@ export const common = {
     countryCode: '+51',
     invalidPhone: 'Ingresa un número peruano válido (9 dígitos).',
     requestOtp: 'Enviar código',
+    sendingCode: 'Enviando el código…',
+    consentsHint:
+      'Marca los 3 permisos para que te enviemos el código de verificación.',
     otpTitle: 'Verifica tu número',
     otpSubtitle: 'Ingresa el código que enviamos al {{phone}}',
     otpLabel: 'Código de verificación',
@@ -383,6 +417,44 @@ export const common = {
     emptySubtitle: 'Cuando tengas novedades de tus viajes, las verás aquí.',
     end: 'No hay más notificaciones.',
     loadError: 'No pudimos cargar tus avisos. Inténtalo de nuevo.',
+
+    /**
+     * Preferencias de notificaciones (design/veo.pen P/NotifPrefs): 3 grupos de toggles.
+     * Sin backend de preferencias todavía → persisten LOCAL (MMKV); se dice honesto abajo.
+     * Los toggles de SEGURIDAD no se pueden apagar (seguridad no negociable del producto):
+     * se muestran encendidos y deshabilitados con "Siempre activo".
+     */
+    prefs: {
+      /** A11y del engranaje del feed ("Avisos") que abre estas preferencias. */
+      openSettings: 'Preferencias de notificaciones',
+      groupTrips: 'Viajes',
+      groupSafety: 'Seguridad',
+      groupPromos: 'Promociones',
+      tripStatus: 'Estado del viaje',
+      tripStatusSub: 'Cuando tu conductor confirma o cancela',
+      driverEnRoute: 'Conductor en camino',
+      driverEnRouteSub: 'Avisos de llegada y demoras',
+      scheduledReminders: 'Recordatorios de viajes programados',
+      scheduledRemindersSub: 'Te avisamos antes de cada salida',
+      panicAlerts: 'Alertas de pánico',
+      biometricAlerts: 'Verificación biométrica',
+      /** Subtítulo honesto de los toggles de seguridad: encendidos por diseño, no apagables. */
+      alwaysOn: 'Siempre activo',
+      offers: 'Ofertas y cupones',
+      offersSub: 'Descuentos y beneficios para ti',
+      news: 'Novedades',
+      newsSub: 'Nuevas funciones de VEO',
+      /** Honesto: sin backend de preferencias, se guardan solo en este teléfono. */
+      localNote: 'Estas preferencias se guardan en este teléfono.',
+      /** Permiso de push del SO apagado/bloqueado: sin él, ningún aviso llega. */
+      pushOffTitle: 'Las notificaciones están apagadas',
+      pushOffBody:
+        'Actívalas para recibir estos avisos aunque tengas la app cerrada.',
+      pushOffCta: 'Activar notificaciones',
+      pushDeniedBody:
+        'Están bloqueadas en el sistema. Actívalas desde Ajustes.',
+      pushDeniedCta: 'Abrir Ajustes',
+    },
   },
 
   /**
@@ -455,6 +527,10 @@ export const common = {
   /** Búsqueda inteligente de direcciones (origen/destino). */
   maps: {
     searchTitle: '¿A dónde vamos?',
+    /** Título de la pantalla dedicada de búsqueda (design/veo.pen P/Search); el placeholder del home sigue en `searchTitle`. */
+    searchScreenTitle: 'Buscar destino',
+    /** Sección de destinos recientes de la pantalla de búsqueda (design/veo.pen P/Search "Recientes"). */
+    recents: 'Recientes',
     originPlaceholder: 'Punto de recogida',
     destinationPlaceholder: '¿A dónde vamos?',
     inputPlaceholder: 'Busca una dirección o lugar',
@@ -530,13 +606,24 @@ export const common = {
   puja: {
     title: 'Tu viaje',
     offerYourFare: 'OFRECE TU TARIFA',
+    /** Header propio del panel de puja (design/veo.pen P/PujaPrice: título + sub). El pen vosea; acá tuteo. */
+    panelTitle: 'Pon tu precio',
+    panelSubtitle: 'Ofrece lo que quieres pagar por este viaje',
+    /** Pill de sugerido con check (pen RangeHint): rango REAL del server (min–sugerido). */
+    suggestedRange: 'Sugerido {{min}} – {{suggested}}',
+    /** Nota con rayo (pen Note): una oferta más alta acelera el match. */
+    betterOfferNote: 'Una mejor oferta encuentra conductor más rápido',
+    /** Card affordance "Poné tu precio" del selector (pen qAT2P): invita a la oferta PUJA no seleccionada. */
+    affordanceTitle: 'Pon tu precio',
+    affordanceSub: 'Ofrece lo que quieras y negocia',
+    affordanceAction: 'Ofrecer',
     decrease: 'Bajar la oferta',
     increase: 'Subir la oferta',
     suggestedAndMin: 'Sugerido {{suggested}} · mínimo {{min}}',
     minOnly: 'Mínimo {{min}}',
     atFloor: 'Es la tarifa mínima para esta zona.',
     tollsApart: 'Peajes y tasas de aeropuerto se pagan aparte.',
-    searchDriver: 'Buscar conductor · {{price}}',
+    searchDriver: 'Buscar por {{price}}',
     specialRequests: 'Solicitudes para el conductor',
     request: {
       PET: 'Mascota',
@@ -559,6 +646,13 @@ export const common = {
     etaMin: 'llega en {{minutes}} min',
     choose: 'Elegir',
     view: 'Ver',
+    /** Chip echo de la puja del pasajero en el header del board (design/veo.pen L7OMER "TU OFERTA S/ X"). */
+    yourOffer: 'TU OFERTA',
+    /** Subtítulo del board con ofertas (pen: "N ofertas cerca tuyo" → tuteo peruano). */
+    nearYou: '{{count}} ofertas cerca de ti',
+    /** Labels de acción por tipo de oferta (pen C/BidCard): aceptar el precio vs responder la contraoferta. */
+    accept: 'Aceptar',
+    respond: 'Responder',
     waitingTitle: 'Buscando conductores…',
     /** Countdown visual honesto de la ventana de puja (UI, no decide la fase: la fase la manda el backend). */
     waitingCountdown: 'Buscando conductores… {{time}}',
@@ -577,6 +671,12 @@ export const common = {
 
   /** PUJA · detalle de contraoferta (ADR 010). */
   counter: {
+    /** Header per design/veo.pen u1306: nombre del conductor + invitación a cerrar (el pen vosea; acá tuteo). */
+    title: '{{name}} te contraofertó',
+    titleNoName: 'Te contraofertaron',
+    subtitle: 'Responde para cerrar el viaje',
+    /** Tile derecho de la comparación horizontal (pen Compare): el precio del conductor, en tono warn. */
+    theirPrice: 'Su precio',
     proposedOther: 'Propone otro precio',
     yourOffer: 'Tu oferta',
     driverCounter: 'Contraoferta del conductor',
@@ -662,6 +762,117 @@ export const common = {
     empty: 'No tienes viajes programados',
     emptySubtitle: 'Programa un viaje desde la cotización y aparecerá aquí.',
     loadError: 'No pudimos cargar tus viajes programados.',
+    // Nota al pie del listado (design/veo.pen ZVdlh Note). El pen promete "hasta 2 h antes sin
+    // costo", pero la regla REAL (trip-service scheduled-trip.service) es: cancelar es gratis
+    // MIENTRAS el viaje siga programado (el scheduler lo activa ~10 min antes); no existe ventana
+    // de 2 h. Copy honesto sin promesa temporal falsa.
+    footNote: 'Puedes cancelar sin costo mientras el viaje siga programado',
+  },
+
+  /**
+   * Carpooling programado (ADR-014, lado pasajero · design/veo.pen sección 5). Copy en TUTEO
+   * peruano (el pen vosea; el pen manda en diseño, no en dialecto). Montos SIEMPRE formateados con
+   * `formatPEN` desde céntimos; acá solo viven los textos.
+   */
+  carpool: {
+    /** Punto de entrada (ScheduleNew / Mis viajes programados). */
+    entryTitle: 'Viajes compartidos entre ciudades',
+    entryBody:
+      'Busca asientos publicados por conductores verificados y reserva el tuyo.',
+    entryCta: 'Buscar asientos',
+    /** Re-entrada al seguimiento de una solicitud viva (bookingId activo en el store). */
+    activeBookingEntry: 'Tienes una solicitud de asiento en curso',
+    viewBooking: 'Ver estado',
+
+    /** Buscador (P/ProgSearch). */
+    searchSubtitle:
+      'Viajes entre ciudades, asientos compartidos con conductores verificados',
+    fromLabel: 'Desde',
+    toLabel: 'Hasta',
+    fromPlaceholder: 'Elige tu punto de partida',
+    toPlaceholder: '¿A qué ciudad vas?',
+    dateLabel: 'Fecha',
+    seatsLabel: 'Asientos',
+    seatsOne: '1 asiento',
+    seatsMany: '{{count}} asientos',
+    searchCta: 'Buscar viajes',
+    pickerTitleOrigin: '¿Desde dónde sales?',
+    pickerTitleDestination: '¿A dónde vas?',
+    pickerPlaceholder: 'Busca una ciudad o dirección',
+    pickerEmpty: 'Sin resultados para tu búsqueda',
+    pickerError: 'No pudimos buscar direcciones. Inténtalo de nuevo.',
+
+    /** Resultados (P/ProgResults · C/TripCard). */
+    route: '{{origin}} → {{destination}}',
+    resultsCountOne: '1 viaje disponible',
+    resultsCountMany: '{{count}} viajes disponibles',
+    resultsEmpty: 'No hay viajes para esa ruta y fecha',
+    resultsEmptySubtitle: 'Prueba con otra fecha o cambia tu búsqueda.',
+    changeSearch: 'Cambiar búsqueda',
+    resultsLoadError: 'No pudimos cargar los viajes.',
+    loadMore: 'Cargar más viajes',
+    perSeatUnit: 'asiento',
+    /** El envelope de búsqueda puede traer driver null (degradación honesta): card sin conductor. */
+    driverPending: 'Conductor por confirmar',
+
+    /** Detalle (P/TripDetail). */
+    itinerary: 'Itinerario',
+    departureAt: 'Salida {{time}}',
+    departurePoint: 'Punto de salida',
+    stopoverPoint: 'Parada intermedia',
+    arrivalPoint: 'Punto de llegada',
+    perSeatLong: 'por asiento',
+    yourDriver: 'Tu conductor',
+    /** identity puede no responder: el detalle igual llega, sin inventar datos del conductor. */
+    driverUnavailable:
+      'Los datos del conductor no están disponibles por ahora.',
+    plate: 'Placa · {{plate}}',
+    rulesLabel: 'Reglas del viaje',
+    seatsOfTotal: '{{available}} de {{total}}',
+    seatsAvailableLabel: 'asientos disponibles',
+    noSeats: 'Sin asientos disponibles',
+    reserveCta: 'Reservar asiento',
+    detailLoadError: 'No pudimos cargar el detalle del viaje.',
+
+    /** Revisión de la reserva (P/BookingReview). */
+    reviewSeatsLabel: 'Asientos',
+    reviewMaxSeats: 'Máx. {{count}} disponibles',
+    messageLabel: 'Mensaje al conductor',
+    chipLightLuggage: 'Hola, viajo con poco equipaje',
+    chipBackpack: 'Llevo una mochila',
+    messagePlaceholder: 'Escribe un mensaje',
+    breakdownSeat: 'Asiento × {{count}}',
+    total: 'Total',
+    /** Verdad del ADR-014: el CHARGE se dispara recién cuando el conductor aprueba. */
+    chargeNote: 'Se te cobra solo si el conductor aprueba tu reserva',
+    submitCta: 'Solicitar reserva',
+    submitError: 'No pudimos enviar tu solicitud. Inténtalo de nuevo.',
+
+    /** Estado de la solicitud (P/WaitingApproval · P/BookingApproved · P/BookingRejected). */
+    waitingTitle: 'Esperando aprobación',
+    waitingBodyNamed:
+      '{{name}} debe confirmar tu asiento. Te avisamos apenas responda.',
+    waitingBody:
+      'El conductor debe confirmar tu asiento. Te avisamos apenas responda.',
+    waitingPill: 'Pendiente',
+    waitingReassure:
+      'No se te cobró nada todavía. El cargo se hace solo al aprobar.',
+    approvedTitle: '¡Reserva aprobada!',
+    approvedBodyNamed: '{{name}} confirmó tu asiento para este viaje.',
+    approvedBody: 'El conductor confirmó tu asiento para este viaje.',
+    chargeProcessing:
+      'Estamos procesando el cobro de {{amount}} a tu método de pago',
+    chargeDone: 'Se cobró {{amount}} a tu método de pago',
+    rejectedTitle: 'Reserva no confirmada',
+    rejectedBody:
+      'El conductor no pudo tomar tu solicitud esta vez. No se te cobró nada.',
+    noChargeNote: 'No se realizó ningún cobro',
+    fieldRoute: 'Ruta',
+    fieldDate: 'Fecha',
+    fieldSeats: 'Asientos',
+    statusLoadError: 'No pudimos cargar tu reserva.',
+    backHome: 'Volver al inicio',
+    searchOthers: 'Buscar otros viajes',
   },
 
   trip: {
@@ -690,6 +901,24 @@ export const common = {
       'Si cancelas podría aplicarse una penalidad según el estado del viaje.',
     cancelReasonLabel: 'Motivo (opcional)',
     keepTrip: 'Mantener viaje',
+    // Sheet de cancelación per design/veo.pen AULzA (tuteo del "Contános por qué"): 5 motivos en
+    // radio + detalle opcional. NO hay enum de motivos en el contrato (cancelTripRequest.reason es
+    // string libre): el motivo elegido viaja como texto "{motivo} — {detalle}".
+    cancelSubtitle: 'Cuéntanos por qué',
+    cancelReasons: {
+      driverNotMoving: 'El conductor no avanza',
+      tooSlow: 'Me demora mucho',
+      changedPlans: 'Cambié de planes',
+      byMistake: 'Pedí por error',
+      other: 'Otro motivo',
+    },
+    cancelDetailLabel: 'Cuéntanos más (opcional)',
+    // El pen pone "cargo de S/ 3": el monto real (300 céntimos, trip-service BR-T03) es condicional
+    // (solo tras asignación, fuera de la gracia de 2 min y sin retraso del conductor) y NO viaja en
+    // el contrato antes de cancelar → sin cifra, sin prometer de más ni de menos.
+    cancelWarnNote: 'Cancelar ahora puede tener un cargo por cancelación',
+    cancelConfirm: 'Sí, cancelar viaje',
+    keepInTrip: 'No, seguir en el viaje',
     changeDestination: 'Cambiar destino',
     changeDestinationTitle: 'Nuevo destino',
     changeDestinationBody: 'Toca el mapa para elegir el nuevo destino.',
@@ -700,6 +929,13 @@ export const common = {
     cabinVideoNative: 'El visor en vivo se habilita en la app instalada.',
     reconnecting: 'Reconectando…',
     live: 'EN VIVO',
+    /** Chrome del viaje activo (design/veo.pen fLKdk): minimizar el sheet + fila de 3 acciones con icono. */
+    minimize: 'Minimizar',
+    actionMessage: 'Mensaje',
+    actionShare: 'Compartir',
+    actionCancel: 'Cancelar',
+    /** A11y del badge-check junto al nombre (pen DriverCard): el conductor pasó la verificación. */
+    verifiedDriver: 'Conductor verificado',
     waitingDriver: 'Buscando un conductor para ti…',
     arrived: 'Tu conductor llegó',
     completedTitle: 'Viaje completado',
@@ -764,6 +1000,11 @@ export const common = {
     arrived: 'Tu conductor llegó',
     /** Viaje en curso (inProgress). Vehículo deslizándose →. */
     inProgress: 'En viaje',
+    /** Variantes PERSONALIZADAS con el nombre del conductor (design/veo.pen fLKdk "Carlos está en camino").
+        Solo cuando el backend trae el nombre; sin nombre caen a las genéricas de arriba. */
+    enRouteNamed: '{{name}} está en camino',
+    arrivedNamed: '{{name}} llegó',
+    inProgressNamed: 'En viaje con {{name}}',
   },
 
   /** Cámara del viaje a pantalla completa (Ola 2A · seguridad). */
@@ -820,6 +1061,15 @@ export const common = {
   },
 
   history: {
+    /** Cabecera de "Tus viajes" (design/veo.pen UcekU): título display in-body + segmented de 2 tabs. */
+    screenTitle: 'Tus viajes',
+    tabUpcoming: 'Próximos',
+    tabHistory: 'Historial',
+    /** Tab Próximos vacío: honesto e invita a programar (no se auto-cambia de tab con magia). */
+    upcomingEmptyTitle: 'No tienes viajes próximos',
+    upcomingEmptyBody:
+      'Programa un viaje con fecha y hora, y aparecerá aquí listo para ese día.',
+    upcomingCta: 'Programar un viaje',
     /** Vacío CON ALMA: el dueño detesta los vacíos genéricos. Copy cálido en tuteo + CTA a pedir viaje. */
     emptyTitle: 'Aún no tienes viajes',
     emptyBody:
@@ -862,7 +1112,16 @@ export const common = {
     trigger: 'Enviar alerta',
     sending: 'Enviando alerta…',
     sentTitle: 'Alerta enviada',
-    sentBody: 'Estamos contigo. Mantén la calma.',
+    // Copy del estado enviado per pen EZSxZ (tuteado). Refleja el fan-out documentado del
+    // panic-service (BR-S05): SMS+link a los contactos y push a la central VEO.
+    sentBody:
+      'Estamos compartiendo tu ubicación en tiempo real con tus contactos de confianza y la central VEO.',
+    /** Confirmaciones del fan-out estándar (panic-service BR-S05, vía outbox → notification-service). */
+    statusLocation: 'Ubicación compartida',
+    statusContacts: 'Contactos notificados',
+    statusCentral: 'Central VEO en línea',
+    /** CTA de emergencia: llamada directa a la Policía Nacional del Perú. */
+    call105: 'Llamar al 105 (PNP)',
     alertId: 'ID de alerta',
     deduplicated: 'Ya teníamos esta alerta registrada.',
     close: 'Cerrar',
@@ -914,16 +1173,30 @@ export const common = {
   },
 
   childMode: {
+    // Subtítulo per pen RSNDK, AJUSTADO a la regla real del backend (BR-T07): el código se valida al
+    // INICIAR el viaje (recojo), no al cambiar el destino — el pen decía "para cambiar el destino".
     subtitle:
-      'Activa un código que el conductor deberá confirmar al iniciar el viaje del menor.',
+      'Protege a un menor: se exige un código para iniciar el viaje, nunca visible para el conductor.',
     enable: 'Activar modo niño',
-    codeLabel: 'Código de modo niño',
+    /** Hint bajo el label del toggle cuando está ON (pen RSNDK). */
+    hintActive: 'Protección activada para este viaje',
+    codeLabel: 'Código de acceso',
     codeHelper: 'De 4 a 6 dígitos. No lo compartas con el conductor.',
     invalidCode: 'El código debe tener entre 4 y 6 dígitos.',
     active: 'Modo niño activado',
     inactive: 'Modo niño desactivado',
-    explanation:
-      'El código nunca se muestra al conductor; el sistema valida un hash en el servidor.',
+    /**
+     * Checklist "Reglas" per pen RSNDK, verificado contra trip-service:
+     *  - rule1: `DESTINATION_EDITABLE` excluye IN_PROGRESS (el destino no se reescribe en viaje).
+     *  - rule2: solo se guarda el hash bcrypt (`childCodeHash`); las vistas del conductor exponen
+     *    únicamente el boolean `childMode`.
+     *  - rule3: BR-T07 valida el código en `start` (recojo). El pen decía "para cambiar el destino";
+     *    se ajusta a la verdad del backend.
+     */
+    rule1: 'El destino queda bloqueado durante el viaje',
+    rule2: 'El conductor nunca ve el código',
+    rule3: 'Se pide el código para iniciar el viaje',
+    save: 'Guardar cambios',
     /** Línea del desglose de tarifa (precio FIJO): "Recargo modo niño". El monto va aparte. */
     feeLine: 'Recargo modo niño',
     /** Aviso del recargo al activar el toggle (solo informa; el recargo aplica en viajes de precio fijo). */
@@ -939,7 +1212,16 @@ export const common = {
     /** Texto del intro idle, sobre el ícono, antes de abrir la cámara. */
     introHint:
       'Vamos a confirmar que eres una persona real con un movimiento guiado.',
-    start: 'Iniciar verificación',
+    /** Fase INTRO (gate antes de montar la cámara) — pen jPGX1, tuteado. */
+    introTitle: 'Coloca tu rostro dentro del óvalo',
+    introSub: 'Mira al frente y parpadea cuando se te indique',
+    /** Chips del stepper del reto (pen jPGX1): Rostro · Parpadeo/Movimiento · Listo. */
+    stepFace: 'Rostro',
+    stepBlink: 'Parpadeo',
+    /** Cuando el reto real del server pide girar la cabeza (no parpadear), el chip dice la verdad. */
+    stepMove: 'Movimiento',
+    stepDone: 'Listo',
+    start: 'Comenzar verificación',
     capture: 'Verificar',
     retry: 'Reintentar',
     capturing: 'Verificando',
@@ -987,8 +1269,10 @@ export const common = {
   },
 
   payments: {
-    /** Subtítulo de la pantalla: cuenta el modelo (un solo cobro, al terminar el viaje). */
-    subtitle: 'Elige cómo pagas; el cobro es al terminar el viaje.',
+    /** Subtítulo de la pantalla (design/veo.pen Ofbr6, voseo del pen traducido a tuteo). */
+    subtitle: 'Elige cómo pagas tus viajes.',
+    /** Nota al pie que conserva la aclaración del modelo de cobro (antes vivía en el subtítulo). */
+    chargeNote: 'El cobro se hace al terminar el viaje.',
     /**
      * Error de RED al leer la afiliación Yape (no es "sin Yape": la consulta FALLÓ). Degradación honesta:
      * nunca mostramos "Vincular" cuando en realidad no pudimos saber tu estado. Reintentable.
@@ -1080,6 +1364,9 @@ export const common = {
     status: 'Estado',
     /** Desglose del pago confirmado (pantalla de éxito). */
     breakdownFare: 'Tarifa acordada',
+    /** Desglose abierto per design/veo.pen I7ahU, solo cuando el cobro trae `feeCents` > 0. */
+    breakdownBaseFare: 'Tarifa base',
+    breakdownServiceFee: 'Cargo por servicio VEO',
     breakdownTip: 'Propina',
     breakdownTotal: 'Total',
     rateTrip: 'Calificar viaje',
@@ -1249,6 +1536,12 @@ export const common = {
     tipPromptCash:
       'Propina (opcional · 100% al conductor). Por aquí la dejas con Yape o tarjeta; en efectivo, dásela en mano.',
     tipNone: 'Sin propina',
+    /** Chip "Otro" de propina (design/veo.pen I7ahU): abre el input de monto libre. */
+    tipOther: 'Otro',
+    tipCustomTitle: '¿Cuánto quieres dejar?',
+    tipCustomLabel: 'Monto en soles (S/)',
+    tipCustomConfirm: 'Dejar {{amount}}',
+    tipCustomConfirmEmpty: 'Dejar propina',
     tipSending: 'Enviando…',
     /** Acciones de cierre. */
     rateTrip: 'Calificar viaje',
@@ -1427,15 +1720,16 @@ export const common = {
     sentBody: 'Tu conductor recibió {{amount}}. ¡Gracias por tu generosidad!',
     error: 'No pudimos enviar la propina. Inténtalo de nuevo.',
     /** La propina se cobra fuera de banda (viaje en efectivo / sin Yape vinculado): falta completar el checkout. */
-    checkoutTitle: 'Completá tu propina',
+    checkoutTitle: 'Completa tu propina',
     checkoutBody:
-      'Falta un paso: aprobá los {{amount}} en Yape o escaneá el QR. Tu conductor la recibe apenas se confirme.',
+      'Falta un paso: aprueba los {{amount}} en Yape o escanea el QR. Tu conductor la recibe apenas se confirme.',
     /** On-file: cobrándose server-initiated, esperando la confirmación del webhook. */
     processingTitle: 'Propina en proceso',
-    processingBody: 'Estamos cobrando tu propina. Se confirma en unos segundos.',
+    processingBody:
+      'Estamos cobrando tu propina. Se confirma en unos segundos.',
     /** El cobro de la propina falló terminal (declive). Honesto, con reintento. */
     failedTitle: 'No se pudo cobrar la propina',
-    failedBody: 'No pudimos cobrar tu propina. Podés intentarlo de nuevo.',
+    failedBody: 'No pudimos cobrar tu propina. Puedes intentarlo de nuevo.',
   },
 
   /** Recibo del viaje (desglose + compartir nativo). */
@@ -1500,8 +1794,11 @@ export const common = {
       BAD_ROUTE: 'Ruta no óptima',
       OVERCHARGED: 'Cobró de más',
       GREAT_TREATMENT: 'Excelente trato',
-      PUNCTUAL: 'Muy puntual',
-      SAFE_DRIVING: 'Conducción segura',
+      // Elogios 5★ alineados al copy de design/veo.pen fTtR5: Puntual · Amable · Auto limpio · Manejo seguro.
+      PUNCTUAL: 'Puntual',
+      FRIENDLY: 'Amable',
+      CLEAN_VEHICLE: 'Auto limpio',
+      SAFE_DRIVING: 'Manejo seguro',
     },
   },
 
@@ -1517,6 +1814,10 @@ export const common = {
     setHome: 'Agregar Casa',
     setWork: 'Agregar Trabajo',
     addFavorite: 'Agregar favorito',
+    /** Fila "Agregar lugar" al pie de favoritos (design/veo.pen b7muEo): plus en círculo + label. */
+    addPlace: 'Agregar lugar',
+    /** Entrada de borrado dentro del editor (las filas ya no llevan la X: la fila es pen-fiel). */
+    deletePlace: 'Eliminar este lugar',
     addTitle: 'Nuevo lugar',
     editTitle: 'Editar lugar',
     labelLabel: 'Nombre del lugar',
@@ -1551,8 +1852,10 @@ export const common = {
     /** Botón de edición EXPLÍCITO en la cabecera (ghost, visible — la affordance manda). */
     editProfile: 'Editar perfil',
     editTitle: 'Editar tu perfil',
-    /** Microcopy fino junto al nombre cuando la identidad está confirmada (no una pill gritona). */
+    /** A11y del estado verificado de la cabecera (la pill visible dice "Verificado con KYC"). */
     identityConfirmed: 'Identidad confirmada',
+    /** Pill del header per design/veo.pen c4cChO: badge-check + texto success sobre fondo success tenue. */
+    verifiedKycPill: 'Verificado con KYC',
 
     /** CALIFICACIÓN RECIBIDA · protagonista de la cabecera (estrella + score). Estado vacío HONESTO:
         sin calificaciones todavía NO se inventa un rating falso ni estrellas en 0. */
@@ -1633,12 +1936,15 @@ export const common = {
     paymentMethods: 'Métodos de pago',
     savedPlaces: 'Lugares guardados',
     referrals: 'Invita y gana',
-    // Toggle de notificaciones push (estado real del SO). Tuteo peruano.
+    // Fila de notificaciones (per pen Profile · bell = PREFERENCIAS): navega a NotificationPrefs.
+    // El subtítulo sigue reflejando el estado REAL del permiso del SO (honesto).
     notifications: 'Notificaciones',
     notificationsOn: 'Activadas — te avisamos de tu viaje',
     notificationsOff: 'Actívalas para enterarte de tu viaje',
     notificationsDenied: 'Bloqueadas — actívalas en Ajustes',
     notificationsPill: 'Activadas',
+    /** Fila del FEED de avisos (para no perder el acceso al mover la campana a preferencias). */
+    notificationsFeed: 'Avisos',
     sectionPreferences: 'Preferencias',
     scheduledTrips: 'Viajes programados',
     // Promociones (opt-in marketing)
@@ -1646,8 +1952,12 @@ export const common = {
     promotions: 'Promociones y novedades',
     promotionsSub:
       'Ofertas y avisos de VEO. Puedes desactivarlo cuando quieras.',
-    // Cuenta
-    accessibility: 'Accesibilidad e idioma',
+    // Preferencias · Idioma y región (design/veo.pen c4cChO). Sin backend de idiomas: sheet honesto.
+    languageRegion: 'Idioma y región',
+    // Cuenta. "Idioma" ya no vive acá: tiene su propia fila en Preferencias (per pen).
+    accessibility: 'Accesibilidad',
+    // Términos y privacidad (design/veo.pen c4cChO). Sin URL legal en la config: sheet honesto.
+    termsPrivacy: 'Términos y privacidad',
     help: 'Ayuda',
     logout: 'Cerrar sesión',
     logoutTitle: '¿Cierras sesión?',
@@ -1666,7 +1976,13 @@ export const common = {
     comingSoonShareTrip:
       'Compartir tu viaje con la familia desde aquí llega en una próxima versión. Durante el viaje ya puedes compartirlo.',
     comingSoonAccessibility:
-      'Las opciones de accesibilidad e idioma llegan en una próxima versión.',
+      'Las opciones de accesibilidad llegan en una próxima versión.',
+    /** Honesto: hoy la app existe SOLO en español de Perú; no fingimos un selector de idiomas. */
+    comingSoonLanguage:
+      'Por ahora la app está en español (Perú). Más idiomas y regiones llegan en una próxima versión.',
+    /** Honesto: no hay URL pública de términos/privacidad todavía (gap reportado al dueño). */
+    comingSoonTerms:
+      'Los términos de servicio y la política de privacidad estarán disponibles aquí en una próxima versión.',
   },
 
   /** Cupones/promociones aplicados a la cotización (POST /promos/validate). */
@@ -1688,21 +2004,31 @@ export const common = {
 
   /** "Invita y gana" — programa de referidos (GET /referrals/me, POST /referrals/redeem). */
   referrals: {
-    title: 'Invita y gana',
-    subtitle:
-      'Comparte tu código. Cuando tu amigo viaje, ambos ganan crédito en VEO.',
-    yourCode: 'Tu código',
+    /**
+     * HERO per design/veo.pen AqN7Q — SIN cifra a propósito: el monto real vive en el backend
+     * (identity-service `REFERRAL_REWARD_CENTS`, configurable por env, default S/ 5) y NO se expone
+     * en `GET /referrals/me`. El "S/ 10" del pen no es sustentable desde el cliente: no prometemos
+     * montos que el servidor puede cambiar. El subtítulo sí es real: la recompensa se otorga al
+     * completarse el 1er viaje del referido (y es para el referidor; el backend hoy NO acredita nada
+     * al amigo — gap reportado).
+     */
+    heroTitle: 'Gana crédito por cada amigo',
+    heroSubtitle: 'Tu crédito llega cuando tu amigo completa su primer viaje.',
     copy: 'Copiar',
     copied: '¡Copiado!',
-    share: 'Compartir',
+    /** CTA primario full-width per pen ("Compartir mi código"). */
+    shareCta: 'Compartir mi código',
     shareMessage:
       'Únete a VEO, la app de viajes más segura del Perú. Usa mi código {{code}} y ambos ganamos crédito. 🚗💚',
-    referredCount: 'Amigos referidos',
-    rewardsEarned: 'Crédito ganado',
+    /** Métricas de la card partida en 2 (pen: "Invitados" / "Ganado"). */
+    invited: 'Invitados',
+    earned: 'Ganado',
     /** Saldo de crédito GASTABLE (Ola 2A · Lote C). Distinto de `rewardsEarned` (ganado de por vida). */
     availableCredit: 'Crédito disponible',
     creditAutoApply: 'Se aplica solo en tu próximo viaje',
     redeemSection: '¿Te invitó un amigo?',
+    /** Fila navegable per pen que abre el sheet de canje. */
+    redeemEntry: 'Canjear un código',
     redeemLabel: 'Código de tu amigo',
     redeemPlaceholder: 'Ingresa su código',
     redeem: 'Canjear código',
@@ -1739,11 +2065,53 @@ export const common = {
       onMyWay: 'Voy en camino',
       waiting: 'Te espero aquí',
     },
+    /** Separador de día entre mensajes (design/veo.pen hPrJt DayDivider). */
+    dayToday: 'Hoy',
+    dayYesterday: 'Ayer',
+  },
+
+  /**
+   * Compartir viaje con la familia — pantalla dedicada (design/veo.pen zKyic, tuteo del
+   * "Compartí tu viaje"). El enlace es REAL (POST /share/:tripId, TTL 2 h) y share-service lo
+   * revoca solo al terminar el viaje (trip.completed/cancelled/failed) → el copy de caducidad
+   * es verdad literal. No existe notificación server-side al contacto al compartir (solo en
+   * pánico): por eso cada contacto lleva "Enviar SMS" (compositor del teléfono), no un switch.
+   */
+  familyShare: {
+    intro:
+      'Tu familia sigue tu viaje en vivo con un enlace seguro que caduca al llegar',
+    linkLabel: 'Enlace del viaje',
+    copy: 'Copiar',
+    copied: '¡Copiado!',
+    creating: 'Generando tu enlace seguro…',
+    channelWhatsApp: 'WhatsApp',
+    channelSms: 'Mensajes',
+    channelMore: 'Más',
+    contactSms: 'Enviar SMS',
+    expiryNote: 'El enlace caduca automáticamente al terminar tu viaje',
+    shareCta: 'Compartir enlace',
+    regenerate: 'Generar nuevo enlace',
   },
 
   /** Centro de Ayuda / Soporte (FAQ estática + tickets: POST/GET /support/tickets). */
   support: {
-    faqTitle: 'Preguntas frecuentes',
+    /** Header in-body per design/veo.pen P/Help (título display + subtítulo cálido). */
+    title: 'Centro de ayuda',
+    subtitle: 'Estamos para ayudarte',
+    /** Buscador de ayuda (pen: icono search + placeholder). Filtra la FAQ en vivo. */
+    searchPlaceholder: 'Busca tu problema',
+    searchResultsTitle: 'Resultados',
+    searchNoResults: 'No encontramos nada para "{{query}}".',
+    searchNoResultsHint:
+      'Prueba con otras palabras o repórtanos el problema con el botón de abajo.',
+    /** FAQ agrupada en 4 temas navegables (pen "Temas frecuentes"). */
+    topicsTitle: 'Temas frecuentes',
+    topics: {
+      trip: 'Problemas con un viaje',
+      payments: 'Pagos y reembolsos',
+      safety: 'Seguridad y pánico',
+      account: 'Mi cuenta',
+    },
     faq: {
       requestRide: {
         q: '¿Cómo solicito un viaje?',

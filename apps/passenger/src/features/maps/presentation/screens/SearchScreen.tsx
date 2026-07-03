@@ -1,4 +1,9 @@
-import type {MapPoint, PlaceSuggestion} from '@veo/api-client';
+import type {
+  GeoPoint,
+  MapPoint,
+  PlaceSuggestion,
+  TripResource,
+} from '@veo/api-client';
 import {
   type RouteProp,
   useNavigation,
@@ -23,6 +28,8 @@ import {FlatList, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
+import {distanceMeters} from '../../../../shared/utils/geo';
+import {formatDistance} from '../../../../shared/utils/format';
 import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
 import {SavedPlacesShortcuts} from '../../../places/presentation';
 import type {SavedPlace} from '../../../places/domain/entities';
@@ -30,13 +37,16 @@ import type {RoutePlace} from '../../domain/entities';
 import {useAutocomplete} from '../hooks/useAutocomplete';
 import {EnterView} from '../components/motion';
 import {
-  IconClose,
+  IconArrowLeft,
   IconPin,
   IconTarget,
 } from '../../../trip/presentation/components/icons';
 import {useRideDraftStore} from '../stores/rideDraftStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+/** Máximo de destinos recientes mostrados en la sección "Recientes" (design/veo.pen P/Search). */
+const MAX_RECENTS = 3;
 
 /** Convierte una sugerencia del bff en un lugar de ruta (punto + etiqueta). */
 function toRoutePlace(suggestion: PlaceSuggestion): RoutePlace {
@@ -45,6 +55,39 @@ function toRoutePlace(suggestion: PlaceSuggestion): RoutePlace {
     title: suggestion.title,
     subtitle: suggestion.subtitle,
   };
+}
+
+/**
+ * Destinos recientes ÚNICOS del historial local (recursos reales del bff), mismo helper que el
+ * legacy HomeScreen: dedup por coordenada redondeada (~1m) y tope en MAX_RECENTS.
+ */
+function recentDestinations(
+  trips: TripResource[],
+): TripResource['destination'][] {
+  const seen = new Set<string>();
+  const result: TripResource['destination'][] = [];
+  for (const trip of trips) {
+    const key = `${trip.destination.lat.toFixed(5)},${trip.destination.lon.toFixed(5)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(trip.destination);
+    }
+    if (result.length >= MAX_RECENTS) {
+      break;
+    }
+  }
+  return result;
+}
+
+/**
+ * Distancia legible desde la ubicación actual hasta un punto ("3.1 km", pen P/Search), o `null`
+ * sin fix de GPS — degradación honesta: la fila simplemente no muestra distancia, no inventa una.
+ */
+function distanceLabel(
+  from: GeoPoint | null,
+  to: GeoPoint,
+): string | null {
+  return from ? formatDistance(distanceMeters(from, to)) : null;
 }
 
 /**
@@ -66,7 +109,11 @@ export function SearchScreen(): React.JSX.Element {
     useRoute<RouteProp<RootStackParamList, 'Search'>>().params?.flow ?? 'quote';
 
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
+  const history = useDependency(TOKENS.tripHistoryRepository);
   const {point: myLocation} = useCurrentLocation();
+
+  // Destinos recientes únicos (hasta 3) del historial local, para la sección "Recientes" (pen P/Search).
+  const recents = useMemo(() => recentDestinations(history.list()), [history]);
 
   const origin = useRideDraftStore(s => s.origin);
   const destination = useRideDraftStore(s => s.destination);
@@ -201,14 +248,16 @@ export function SearchScreen(): React.JSX.Element {
           styles.header,
           {paddingHorizontal: theme.spacing.xl, gap: theme.spacing.md},
         ]}>
+        {/* Header per pen P/Search: botón VOLVER (flecha) a la IZQUIERDA + título "Buscar destino".
+            El placeholder "¿A dónde vamos?" del home no se toca (vive en maps.searchTitle). */}
         <View style={styles.titleRow}>
-          <Text variant="title2">{t('maps.searchTitle')}</Text>
           <IconButton
-            accessibilityLabel={t('actions.close')}
+            accessibilityLabel={t('actions.back')}
             onPress={() => navigation.goBack()}
             variant="surface"
-            icon={<IconClose color={theme.colors.inkMuted} size={20} />}
+            icon={<IconArrowLeft color={theme.colors.ink} size={20} />}
           />
+          <Text variant="title2">{t('maps.searchScreenTitle')}</Text>
         </View>
 
         <OriginDestinationField
@@ -268,6 +317,24 @@ export function SearchScreen(): React.JSX.Element {
             {!active ? (
               <SavedPlacesShortcuts onSelect={applySavedPlace} />
             ) : null}
+            {/* Recientes (pen P/Search): hasta 3 destinos únicos del historial, SOLO sin búsqueda
+                activa (al tipear, las sugerencias mandan). Cada fila se etiqueta con geocoding
+                inverso real (mismo patrón que el RecentChip del legacy) + distancia desde acá. */}
+            {!active && recents.length > 0 ? (
+              <View style={{gap: theme.spacing.sm}}>
+                <Text variant="subhead" color="inkMuted">
+                  {t('maps.recents')}
+                </Text>
+                {recents.map((point, index) => (
+                  <RecentRow
+                    key={`${point.lat}-${point.lon}-${index}`}
+                    point={point}
+                    myLocation={myLocation}
+                    onSelect={applyPlace}
+                  />
+                ))}
+              </View>
+            ) : null}
           </View>
         }
         renderItem={({item, index}) => (
@@ -277,6 +344,14 @@ export function SearchScreen(): React.JSX.Element {
               subtitle={item.subtitle}
               onPress={() => applyPlace(toRoutePlace(item))}
               leading={<IconPin color={theme.colors.inkSubtle} size={18} />}
+              // Distancia real desde la ubicación actual (pen "3.1 km"); sin fix de GPS no se inventa.
+              trailing={
+                distanceLabel(myLocation, {lat: item.lat, lon: item.lng}) ? (
+                  <Text variant="footnote" color="inkSubtle" tabular>
+                    {distanceLabel(myLocation, {lat: item.lat, lon: item.lng})}
+                  </Text>
+                ) : undefined
+              }
             />
           </EnterView>
         )}
@@ -302,11 +377,73 @@ export function SearchScreen(): React.JSX.Element {
   );
 }
 
+interface RecentRowProps {
+  /** Destino del historial ({lat, lon} del recurso real del bff). */
+  point: TripResource['destination'];
+  /** Ubicación actual para la distancia de la fila; `null` sin fix (la distancia se omite). */
+  myLocation: GeoPoint | null;
+  onSelect: (place: RoutePlace) => void;
+}
+
+/**
+ * Fila de destino RECIENTE (pen P/Search · Recientes): etiqueta el punto con geocoding inverso real
+ * (mismo patrón que el `RecentChip` del legacy HomeScreen) y muestra la distancia desde la ubicación
+ * actual. Mientras el geocoding no resuelve, la fila no se renderiza (sin placeholders inventados).
+ */
+function RecentRow({
+  point,
+  myLocation,
+  onSelect,
+}: RecentRowProps): React.JSX.Element | null {
+  const theme = useTheme();
+  const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
+  const mapPoint = useMemo<MapPoint>(
+    () => ({lat: point.lat, lng: point.lon}),
+    [point],
+  );
+
+  const labelQuery = useQuery({
+    queryKey: ['maps', 'reverse', mapPoint.lat, mapPoint.lng],
+    queryFn: () => reverseGeocode.execute(mapPoint),
+    staleTime: 5 * 60_000,
+  });
+
+  const resolved = labelQuery.data;
+  if (!resolved) {
+    return null;
+  }
+
+  const distance = distanceLabel(myLocation, point);
+
+  return (
+    <ListItem
+      title={resolved.title}
+      subtitle={resolved.subtitle}
+      leading={<IconPin color={theme.colors.accent} size={18} />}
+      trailing={
+        distance ? (
+          <Text variant="footnote" color="inkSubtle" tabular>
+            {distance}
+          </Text>
+        ) : undefined
+      }
+      onPress={() =>
+        onSelect({
+          point: {lat: resolved.lat, lng: resolved.lng},
+          title: resolved.title,
+          subtitle: resolved.subtitle,
+        })
+      }
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   header: {paddingTop: 8},
+  // Header pen P/Search: volver a la izquierda + título al lado (ya no título/cerrar en extremos).
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 12,
   },
 });

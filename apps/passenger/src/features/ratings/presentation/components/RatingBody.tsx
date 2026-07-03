@@ -1,9 +1,9 @@
 import {ApiError, type RatingView} from '@veo/api-client';
 import {useMutation} from '@tanstack/react-query';
-import {Banner, Button, Text, TextField, useTheme} from '@veo/ui-kit';
+import {Avatar, Banner, Button, Text, TextField, useTheme} from '@veo/ui-kit';
 import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {View} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {
@@ -17,6 +17,13 @@ import {SuccessCheck} from './motion';
 export interface RatingBodyProps {
   tripId: string;
   driverId: string;
+  /**
+   * Identidad del conductor para el bloque del héroe (design/veo.pen fTtR5: avatar + nombre +
+   * vehículo + placa). `null`/ausente → no se pinta el bloque; nunca se inventa un conductor.
+   */
+  driverName?: string | null;
+  vehicleLabel?: string | null;
+  plate?: string | null;
   /** Calificación enviada o salteada → el cierre termina (vuelve al home). */
   onDone: () => void;
 }
@@ -29,6 +36,9 @@ export interface RatingBodyProps {
 export function RatingBody({
   tripId,
   driverId,
+  driverName = null,
+  vehicleLabel = null,
+  plate = null,
   onDone,
 }: RatingBodyProps): React.JSX.Element {
   const theme = useTheme();
@@ -102,8 +112,24 @@ export function RatingBody({
   return (
     <View style={{gap: theme.spacing.md}}>
       <Text variant="body" color="inkMuted" align="center">
-        {t('ratings.subtitle', {driver: t('trip.driver')})}
+        {t('ratings.subtitle', {driver: driverName ?? t('trip.driver')})}
       </Text>
+
+      {/* Bloque de identidad (design/veo.pen fTtR5): a QUIÉN calificas — avatar con iniciales +
+          nombre + vehículo/placa. Solo con datos reales del viaje; cada campo degrada por separado. */}
+      {driverName ? (
+        <View style={[styles.identity, {gap: theme.spacing.xs}]}>
+          <Avatar name={driverName} size="lg" />
+          <Text variant="headline" align="center" numberOfLines={1}>
+            {driverName}
+          </Text>
+          {vehicleLabel || plate ? (
+            <Text variant="footnote" color="inkMuted" align="center" numberOfLines={1}>
+              {[vehicleLabel, plate].filter(Boolean).join(' · ')}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <StarRating value={stars} onChange={handleStars} />
 
@@ -147,3 +173,7 @@ export function RatingBody({
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  identity: {alignItems: 'center'},
+});

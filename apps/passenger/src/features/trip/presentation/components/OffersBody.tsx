@@ -1,4 +1,5 @@
 import type {OfferView} from '@veo/api-client';
+import {useQuery} from '@tanstack/react-query';
 import {
   Avatar,
   Banner,
@@ -11,6 +12,8 @@ import {
 import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ActivityIndicator, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 import {
   formatDurationMinutes,
   formatPEN,
@@ -73,6 +76,8 @@ function useSearchCountdown(
 }
 
 export interface OffersBodyProps {
+  /** Viaje de la puja: para el chip echo "TU OFERTA S/ X" (best-effort, cache compartida del flujo). */
+  tripId: string;
   offers: OfferView[];
   connected: boolean;
   /** La puja expiró (cambia el copy del estado vacío "nadie aceptó" vs "buscando"). */
@@ -98,6 +103,7 @@ export interface OffersBodyProps {
  * (los aporta la pantalla unificada; las acciones suben por callbacks). Misma UI/diseño que el board.
  */
 export function OffersBody({
+  tripId,
   offers,
   connected,
   expired,
@@ -113,6 +119,17 @@ export function OffersBody({
 }: OffersBodyProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
+  const tripRepository = useDependency(TOKENS.tripRepository);
+
+  // Chip echo "TU OFERTA S/ X" (design/veo.pen L7OMER): el monto REAL de la puja del pasajero
+  // (fareCents del trip = su bid). Best-effort sobre la MISMA cache del flujo (['trip', id, 'active']):
+  // si aún no llegó, el chip no se pinta — nunca un monto inventado.
+  const tripQuery = useQuery({
+    queryKey: ['trip', tripId, 'active'],
+    queryFn: () => tripRepository.getActiveTrip(tripId),
+    staleTime: 30_000,
+  });
+  const yourOfferCents = tripQuery.data?.fareCents ?? null;
 
   // F1 · countdown VISUAL de la búsqueda, activo solo mientras buscamos de verdad (sin ofertas, no
   // expirado, sin error/carga). No decide la fase: cuando el backend confirma EXPIRED, el screen pasa
@@ -188,8 +205,10 @@ export function OffersBody({
               <Text variant="title3">
                 {t('offers.title', {count: offers.length})}
               </Text>
+              {/* Subtítulo per design/veo.pen L7OMER: cuántas ofertas hay cerca (reemplaza al hint
+                  de ordenamiento; el orden por precio sigue siendo el del server). */}
               <Text variant="footnote" color="inkMuted">
-                {t('offers.chooseHint')}
+                {t('offers.nearYou', {count: offers.length})}
               </Text>
             </>
           ) : (
@@ -203,6 +222,29 @@ export function OffersBody({
           live={connected && !expired}
         />
       </View>
+
+      {/* Chip echo de TU puja (pen L7OMER "TU OFERTA S/ 12"): el pasajero compara cada oferta contra
+          SU monto sin memorizarlo. Solo con el monto real del trip (best-effort). */}
+      {yourOfferCents != null ? (
+        <View
+          style={[
+            styles.yourOffer,
+            {
+              backgroundColor: `${theme.colors.brand}26`,
+              borderRadius: theme.radii.pill,
+              paddingHorizontal: theme.spacing.md,
+              paddingVertical: theme.spacing.xs,
+              gap: theme.spacing.xs,
+            },
+          ]}>
+          <Text variant="caption" color="brand">
+            {t('offers.yourOffer')}
+          </Text>
+          <Text variant="footnote" color="brand" tabular>
+            {formatPEN(yourOfferCents)}
+          </Text>
+        </View>
+      ) : null}
 
       {body}
 
@@ -242,7 +284,8 @@ function OfferCard({
       padding="md"
       style={acceptsPrice ? {borderColor: theme.colors.accent} : undefined}>
       <View style={styles.row}>
-        <Avatar size="md" />
+        {/* Iniciales del conductor (pen C/BidCard: JR/MT/LF), derivadas del nombre real. */}
+        <Avatar size="md" name={offer.driverName ?? undefined} />
         <View style={{flex: 1, gap: theme.spacing.xxs}}>
           <View style={styles.nameRow}>
             <Text variant="bodyStrong">
@@ -273,14 +316,15 @@ function OfferCard({
           </Text>
         </View>
         <View style={{alignItems: 'flex-end', gap: theme.spacing.xs}}>
+          {/* Tono del precio per pen C/BidCard: verde si acepta TU precio, warn si propone otro. */}
           <Text
             variant="title3"
-            color={acceptsPrice ? 'accent' : 'ink'}
+            color={acceptsPrice ? 'safe' : 'warn'}
             tabular>
             {formatPEN(offer.priceCents)}
           </Text>
           <Button
-            label={acceptsPrice ? t('offers.choose') : t('offers.view')}
+            label={acceptsPrice ? t('offers.accept') : t('offers.respond')}
             variant="primary"
             size="sm"
             loading={choosing && acceptsPrice}
@@ -295,6 +339,7 @@ function OfferCard({
 
 const styles = StyleSheet.create({
   header: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
+  yourOffer: {flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start'},
   takingLong: {alignItems: 'center', gap: 8},
   row: {flexDirection: 'row', alignItems: 'center', gap: 12},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
