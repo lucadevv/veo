@@ -1,17 +1,20 @@
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery} from '@tanstack/react-query';
-import {Card, SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import {Card, IconButton, SafeScreen, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
+import type {RootStackParamList} from '../../../../navigation/types';
 import {
   EmptyState,
   ScreenStateFallback,
 } from '../../../../shared/presentation/components/ScreenStates';
 import {formatShortDate} from '../../../../shared/utils/format';
 import type {AppNotification, NotificationKind} from '../../domain/entities';
-import {iconForKind} from '../icons';
+import {IconSettings, iconForKind} from '../icons';
 
 /** Tono (color del ícono) por categoría de aviso. */
 function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
@@ -36,7 +39,27 @@ function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
 export function NotificationsScreen(): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const listNotifications = useDependency(TOKENS.listNotificationsUseCase);
+
+  // Engranaje en el header nativo → preferencias de notificaciones (pen: el feed "Avisos" y las
+  // preferencias "Notificaciones" son DOS pantallas). Se setea acá (no en RootNavigator) para que
+  // la feature sea dueña de su header y la navegación solo declare la ruta.
+  const inkColor = theme.colors.ink;
+  React.useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <IconButton
+          accessibilityLabel={t('notifications.prefs.openSettings')}
+          variant="plain"
+          size="sm"
+          icon={<IconSettings color={inkColor} size={20} />}
+          onPress={() => navigation.navigate('NotificationPrefs')}
+        />
+      ),
+    });
+  }, [navigation, t, inkColor]);
 
   const query = useQuery({
     queryKey: ['notifications', 'list'],

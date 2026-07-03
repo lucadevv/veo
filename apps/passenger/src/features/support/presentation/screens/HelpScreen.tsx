@@ -18,7 +18,14 @@ import {
 } from '@veo/ui-kit';
 import React, {useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {
+  LayoutAnimation,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {
@@ -34,8 +41,16 @@ import {
   type TicketField,
 } from '../../domain/usecases';
 import {FaqItem} from '../components/FaqItem';
+import type {GlyphProps} from '../components/icons';
+import {
+  IconCarFront,
+  IconSearch,
+  IconShield,
+  IconUser,
+  IconWallet,
+} from '../components/icons';
 
-/** Claves de la FAQ estática del pasajero (texto en i18n). El orden es el de visualización. */
+/** Claves de la FAQ estática del pasajero (texto en i18n). */
 const FAQ_KEYS = [
   'requestRide',
   'payment',
@@ -44,10 +59,38 @@ const FAQ_KEYS = [
   'cancellation',
 ] as const;
 
+type FaqKey = (typeof FAQ_KEYS)[number];
+
 /**
- * Centro de Ayuda del pasajero. Tres bloques: FAQ estática (acordeón), "Reportar un problema"
- * (POST /support/tickets) y "Mis solicitudes" (GET /support/tickets). El BFF fija userId/role
- * desde la identidad; la app solo manda categoría, asunto, cuerpo y, opcional, el tripId reciente.
+ * TEMAS del pen P/Help ("Temas frecuentes"): 4 filas navegables con icono + chevron que expanden
+ * el grupo (accordion). Las preguntas EXISTENTES se mapean al tema que les corresponde:
+ * viaje → pedir/cancelar; pagos → métodos de pago; seguridad → botón de emergencia;
+ * cuenta → datos personales (Ley 29733).
+ */
+const TOPICS = [
+  {key: 'trip', Icon: IconCarFront, faqKeys: ['requestRide', 'cancellation']},
+  {key: 'payments', Icon: IconWallet, faqKeys: ['payment']},
+  {key: 'safety', Icon: IconShield, faqKeys: ['safety']},
+  {key: 'account', Icon: IconUser, faqKeys: ['privacy']},
+] as const;
+
+type TopicKey = (typeof TOPICS)[number]['key'];
+
+/** Normaliza para buscar: minúsculas y sin acentos (así "pánico" matchea "panico"). */
+function normalizeForSearch(value: string): string {
+  // NFD separa la letra base de su diacrítico; el rango U+0300–U+036F son los diacríticos sueltos.
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * Centro de Ayuda del pasajero (design/veo.pen P/Help). Bloques: header in-body (título +
+ * subtítulo), BUSCADOR que filtra la FAQ en vivo, "Temas frecuentes" (4 temas accordion),
+ * "Mis solicitudes" (GET /support/tickets) y el CTA "Reportar un problema" (POST /support/tickets).
+ * El BFF fija userId/role desde la identidad; la app solo manda categoría, asunto, cuerpo y,
+ * opcional, el tripId reciente.
  */
 export function HelpScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -69,7 +112,32 @@ export function HelpScreen(): React.JSX.Element {
     [history],
   );
 
+  const [query, setQuery] = useState('');
+  const [expandedTopic, setExpandedTopic] = useState<TopicKey | null>(null);
   const [expandedFaq, setExpandedFaq] = useState<string | null>(null);
+
+  // BÚSQUEDA en vivo sobre pregunta + respuesta, case/acentos-insensitive. Con query activa se
+  // muestran las preguntas que matchean DIRECTAMENTE (sin pasar por los temas), per instrucción.
+  const normalizedQuery = normalizeForSearch(query.trim());
+  const matchingFaqKeys: FaqKey[] =
+    normalizedQuery.length === 0
+      ? []
+      : FAQ_KEYS.filter(key => {
+          const haystack = normalizeForSearch(
+            `${t(`support.faq.${key}.q` as const)} ${t(`support.faq.${key}.a` as const)}`,
+          );
+          return haystack.includes(normalizedQuery);
+        });
+  const searching = normalizedQuery.length > 0;
+
+  const toggleTopic = (key: TopicKey): void => {
+    LayoutAnimation.configureNext(
+      LayoutAnimation.create(160, 'easeInEaseOut', 'opacity'),
+    );
+    setExpandedTopic(current => (current === key ? null : key));
+    // Al cerrar/cambiar de tema, la pregunta abierta deja de tener contexto: se colapsa.
+    setExpandedFaq(null);
+  };
 
   const [reportOpen, setReportOpen] = useState(false);
   const [category, setCategory] = useState<SupportCategory>('TRIP');
@@ -112,6 +180,18 @@ export function HelpScreen(): React.JSX.Element {
 
   const tickets = ticketsQuery.data ?? [];
 
+  const renderFaqItem = (key: FaqKey): React.JSX.Element => (
+    <FaqItem
+      key={key}
+      question={t(`support.faq.${key}.q` as const)}
+      answer={t(`support.faq.${key}.a` as const)}
+      expanded={expandedFaq === key}
+      onToggle={() =>
+        setExpandedFaq(current => (current === key ? null : key))
+      }
+    />
+  );
+
   return (
     <SafeScreen
       padded={false}
@@ -131,29 +211,119 @@ export function HelpScreen(): React.JSX.Element {
           padding: theme.spacing.xl,
           gap: theme.spacing.xl,
         }}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
-        {/* FAQ estática */}
-        <View>
-          <Text
-            variant="subhead"
-            color="inkMuted"
-            style={{marginBottom: theme.spacing.sm}}>
-            {t('support.faqTitle')}
+        {/* Header in-body per pen: título display + subtítulo cálido. */}
+        <View style={{gap: theme.spacing.xs}}>
+          <Text variant="title1">{t('support.title')}</Text>
+          <Text variant="callout" color="inkMuted">
+            {t('support.subtitle')}
           </Text>
-          <Card variant="outlined" padding="md">
-            {FAQ_KEYS.map(key => (
-              <FaqItem
-                key={key}
-                question={t(`support.faq.${key}.q` as const)}
-                answer={t(`support.faq.${key}.a` as const)}
-                expanded={expandedFaq === key}
-                onToggle={() =>
-                  setExpandedFaq(current => (current === key ? null : key))
-                }
-              />
-            ))}
-          </Card>
         </View>
+
+        {/* Buscador per pen (icono search en color de marca + placeholder). El ui-kit no tiene un
+            input de búsqueda editable (TextField exige label visible y SearchField es presentacional),
+            así que la fila se compone acá con tokens del tema — nada hardcodeado. */}
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radii.lg,
+              borderColor: theme.colors.border,
+              paddingHorizontal: theme.spacing.lg,
+              gap: theme.spacing.md,
+            },
+          ]}>
+          <IconSearch color={theme.colors.accent} size={20} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t('support.searchPlaceholder')}
+            placeholderTextColor={theme.colors.inkSubtle}
+            accessibilityLabel={t('support.searchPlaceholder')}
+            autoCorrect={false}
+            returnKeyType="search"
+            style={[
+              styles.searchInput,
+              {
+                // Rol `body` del tema (el pen usa 15px; el token más cercano de la escala es 16).
+                fontFamily: theme.typography.text.body.fontFamily,
+                fontSize: theme.typography.text.body.fontSize,
+                color: theme.colors.ink,
+              },
+            ]}
+          />
+        </View>
+
+        {searching ? (
+          /* Búsqueda activa: preguntas que matchean, directas (sin agrupar por tema). */
+          <View>
+            <Text
+              variant="subhead"
+              color="inkMuted"
+              style={{marginBottom: theme.spacing.sm}}>
+              {t('support.searchResultsTitle')}
+            </Text>
+            {matchingFaqKeys.length > 0 ? (
+              <Card variant="outlined" padding="md">
+                {matchingFaqKeys.map(renderFaqItem)}
+              </Card>
+            ) : (
+              /* Sin resultados: texto honesto, con el camino real (reportar el problema). */
+              <Card variant="outlined" padding="md">
+                <EmptyState
+                  title={t('support.searchNoResults', {query: query.trim()})}
+                  subtitle={t('support.searchNoResultsHint')}
+                />
+              </Card>
+            )}
+          </View>
+        ) : (
+          /* Temas frecuentes per pen: 4 filas con icono + chevron que expanden su grupo. */
+          <View>
+            <Text
+              variant="subhead"
+              color="inkMuted"
+              style={{marginBottom: theme.spacing.sm}}>
+              {t('support.topicsTitle')}
+            </Text>
+            <Card variant="outlined" padding="none">
+              {TOPICS.map((topic, index) => {
+                const expanded = expandedTopic === topic.key;
+                return (
+                  <View key={topic.key}>
+                    {index > 0 ? (
+                      <View style={styles.dividerWrap}>
+                        <View
+                          style={[
+                            styles.divider,
+                            {backgroundColor: theme.colors.border},
+                          ]}
+                        />
+                      </View>
+                    ) : null}
+                    <TopicRow
+                      Icon={topic.Icon}
+                      title={t(`support.topics.${topic.key}` as const)}
+                      expanded={expanded}
+                      onToggle={() => toggleTopic(topic.key)}
+                    />
+                    {expanded ? (
+                      <View
+                        style={{
+                          paddingHorizontal: theme.spacing.lg,
+                          paddingBottom: theme.spacing.sm,
+                        }}>
+                        {topic.faqKeys.map(renderFaqItem)}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </Card>
+          </View>
+        )}
 
         {/* Mis solicitudes */}
         <View>
@@ -335,7 +505,63 @@ export function HelpScreen(): React.JSX.Element {
   );
 }
 
+interface TopicRowProps {
+  Icon: (props: GlyphProps) => React.JSX.Element;
+  title: string;
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+/**
+ * Fila de tema per pen (icono 20 inkMuted + título + chevron, padding 16). El chevron rota a
+ * "abierto" al expandir — mismo lenguaje del FaqItem: el color nunca es el único indicador.
+ */
+function TopicRow({
+  Icon,
+  title,
+  expanded,
+  onToggle,
+}: TopicRowProps): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="button"
+      accessibilityState={{expanded}}
+      accessibilityLabel={title}
+      style={({pressed}) => [
+        styles.topicRow,
+        {gap: theme.spacing.md},
+        pressed ? {backgroundColor: theme.colors.surfaceElevated} : null,
+      ]}>
+      <Icon color={theme.colors.inkMuted} size={20} />
+      <View style={styles.topicTitle}>
+        <Text variant="bodyStrong">{title}</Text>
+      </View>
+      <Text
+        variant="callout"
+        color={expanded ? 'accent' : 'inkSubtle'}
+        style={expanded ? styles.chevronOpen : styles.chevronClosed}>
+        ›
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  // Altura cómoda de campo táctil (≥44pt) sin depender del padding vertical del contenido.
+  searchInput: {flex: 1, paddingVertical: 14},
+  topicRow: {flexDirection: 'row', alignItems: 'center', padding: 16},
+  topicTitle: {flex: 1},
+  chevronClosed: {transform: [{rotate: '0deg'}]},
+  chevronOpen: {transform: [{rotate: '90deg'}]},
+  dividerWrap: {paddingLeft: 52},
+  divider: {height: StyleSheet.hairlineWidth},
   categoryRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   chip: {
     paddingHorizontal: 14,
