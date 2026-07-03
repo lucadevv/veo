@@ -1,0 +1,17 @@
+{
+  "$comment": "MCPs del proyecto VEO — Claude Code los detecta AL ABRIR el repo (aprobás una vez por máquina). pencil: lee design/veo.pen (cifrado, SOLO legible por este MCP; requiere la app Pencil abierta — bootstrap.sh la instala). mjolnir: grafo de data-flow del monorepo con evidencia file:line (bootstrap.sh instala el binario). Al sumar un MCP nuevo (ej. engram), agregalo acá para que entre solo al clonar.",
+  "mcpServers": {
+    "pencil": {
+      "type": "stdio",
+      "command": "/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64",
+      "args": ["--app", "desktop", "--agent", "claudeCodeCLI"],
+      "env": {}
+    },
+    "mjolnir": {
+      "type": "stdio",
+      "command": "mjolnir",
+      "args": ["mcp"],
+      "env": {}
+    }
+  }
+}

@@ -140,3 +140,6 @@ apps/**/env/*.env
 # El README de cada carpeta documenta qué archivo poner.
 apps/admin-web/public/*.mp4
 apps/admin-web/public/*.webm
+
+# mjolnir: índice derivado del grafo de data-flow (se regenera con `mjolnir index .`)
+.mjolnir/
