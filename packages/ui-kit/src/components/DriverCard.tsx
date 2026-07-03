@@ -1,12 +1,20 @@
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { Avatar } from './Avatar';
+import { BadgeCheckGlyph } from './internal/BadgeCheckGlyph';
 import { StarGlyph } from './internal/StarGlyph';
 import { Text } from './Text';
 
 export interface DriverCardProps {
   /** Nombre del conductor. */
   name: string;
+  /**
+   * Sello de VERIFICADO junto al nombre (design/veo.pen fLKdk · badge-check en `success`): el
+   * conductor pasó el background check. El consumidor lo deriva del contrato (no se asume).
+   */
+  verified?: boolean;
+  /** Etiqueta accesible del sello (p. ej. "Conductor verificado"); el glyph es decorativo. */
+  verifiedLabel?: string;
   /** Calificación (0–5), se muestra con estrella y un decimal. */
   rating?: number;
   /** Vehículo (p. ej. "Toyota Yaris · Blanco"). */
@@ -27,6 +35,8 @@ export interface DriverCardProps {
  */
 export function DriverCard({
   name,
+  verified = false,
+  verifiedLabel,
   rating,
   vehicle,
   plate,
@@ -41,9 +51,20 @@ export function DriverCard({
     <>
       <Avatar uri={avatarUri} name={name} size="lg" />
       <View style={styles.body}>
-        <Text variant="title3" numberOfLines={1}>
-          {name}
-        </Text>
+        <View style={styles.nameRow}>
+          <Text variant="title3" numberOfLines={1} style={styles.name}>
+            {name}
+          </Text>
+          {verified ? (
+            <View accessibilityLabel={verifiedLabel} accessible={Boolean(verifiedLabel)}>
+              <BadgeCheckGlyph
+                color={theme.colors.success}
+                checkColor={theme.colors.surface}
+                size={16}
+              />
+            </View>
+          ) : null}
+        </View>
         {typeof rating === 'number' ? (
           <View style={styles.ratingRow}>
             <StarGlyph color={theme.colors.brand} size={13} />
@@ -116,6 +137,9 @@ export function DriverCard({
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
   body: { flex: 1, gap: 2 },
+  // Nombre + sello de verificado en la misma línea (el nombre cede espacio, el sello no se aplasta).
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  name: { flexShrink: 1 },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   plate: {
     alignSelf: 'flex-start',
