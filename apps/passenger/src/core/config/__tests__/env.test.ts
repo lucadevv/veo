@@ -167,11 +167,12 @@ describe('env · precedencia de resolución (dev)', () => {
     );
   });
 
-  it('Config (.env) GANA al metro-derived: staging/prod no se ven afectados', () => {
+  it('Config (.env) + DEV_FORCE_ENV_URLS=true GANA al metro-derived (apuntar a staging a propósito)', () => {
     const {env} = loadEnv({
-      // Aunque haya host de Metro, el override explícito del .env tiene prioridad.
+      // Con Metro vivo el override sólo se honra con el escape hatch explícito.
       scriptURL: 'http://192.168.18.227:8081/index.bundle?platform=ios',
       config: {
+        DEV_FORCE_ENV_URLS: 'true',
         PUBLIC_BFF_URL: 'https://api.veo.pe/passenger/api/v1',
         PUBLIC_BFF_WS_URL: 'https://api.veo.pe',
         PUBLIC_MAP_STYLE_URL: 'https://tiles.veo.pe/styles/veo-dark/style.json',
@@ -226,12 +227,19 @@ describe('env · auto-sanado de IP LAN stale (dev)', () => {
     expect(env.publicBffUrl).toBe('http://192.168.18.227:9999/custom/api');
   });
 
-  it('override NO-LAN (dominio staging) GANA aunque haya host de Metro: nunca se auto-sana', () => {
+  it('override con DOMINIO bakeado (túnel muerto) → con Metro vivo también se auto-sana', () => {
+    // Regresión del bug del driver (2026-07-03): react-native-config bakea el .env en el build
+    // nativo; un dominio de túnel muerto horneado dejaba la app "sin conexión" en dev.
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     const {env} = loadEnv({
       scriptURL: 'http://192.168.18.238:8081/index.bundle?platform=ios',
-      config: {PUBLIC_BFF_URL: 'https://api.veo.pe/passenger/api/v1'},
+      config: {PUBLIC_BFF_URL: 'https://passenger-dev.yoveoapp.com/api/v1'},
     });
-    expect(env.publicBffUrl).toBe('https://api.veo.pe/passenger/api/v1');
+    expect(env.publicBffUrl).toBe('http://192.168.18.238:4001/api/v1');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('REGRESIÓN new-arch (el bug real): scriptURL=null + getDevServer localhost + .env IP stale → localhost', () => {

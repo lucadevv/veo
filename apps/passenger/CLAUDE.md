@@ -24,12 +24,13 @@ App pasajero React Native (iOS + Android). Parte de un sistema multi-repo:
   → **Dejá `PUBLIC_BFF_URL`/`PUBLIC_BFF_WS_URL` VACÍOS en tu `.env` de dev**: la app sigue tu IP sola (un
   Reload de Metro), sin recompilar. Ojo: `localhost` solo sirve en el simulador iOS — en un **device físico**
   localhost es el device, no la Mac (por eso la auto-derivación, que cubre los 3 casos).
-  - **Auto-sanado anti-IP-stale (red de seguridad, solo `__DEV__`):** si igual quedó una **IP LAN baked**
-    (`192.168.x.y` / `10.x` / `172.16–31.x`) en tu `.env` y el DHCP te rotó la IP, la app **ignora el `.env`
-    stale y usa el host VIVO de Metro** — un Reload reconecta, **sin rebuild nativo** (`env.ts` es JS, lo bundlea
-    Metro; solo los VALORES del `.env` se bakean, y se leen en runtime). Avisa por `console.warn` para que no sea
-    magia silenciosa. URLs con **dominio** (staging/prod) y los **release** (`!__DEV__`) NO se tocan: el `.env`
-    manda siempre ahí. Esto mata el "sin conexión" por IP vieja sin que dependas de acordarte de vaciar el `.env`.
+  - **Auto-sanado anti-stale (red de seguridad, solo `__DEV__` con Metro vivo):** si igual quedó un override
+    **baked** en tu `.env` cuyo host NO es el host vivo de Metro — IP LAN rotada por DHCP, **dominio de un túnel
+    muerto** (el bug del driver 2026-07-03), o `localhost` en device físico — la app **lo ignora y usa el host
+    VIVO de Metro** — un Reload reconecta, **sin rebuild nativo** (`env.ts` es JS, lo bundlea Metro; solo los
+    VALORES del `.env` se bakean, y se leen en runtime). Avisa por `console.warn` para que no sea magia
+    silenciosa. Para apuntar un build dev a staging/túnel/IP fija A PROPÓSITO: `DEV_FORCE_ENV_URLS=true` en el
+    `.env` (los `preview.env` ya lo traen). Los **release** (`!__DEV__`) NO se tocan: el `.env` manda siempre ahí.
 - **WebRTC** se conecta directo a LiveKit (no via BFF) usando token emitido por `media-service`.
 
 ## Reglas no negociables
@@ -74,7 +75,7 @@ La **fuente de verdad visual** es `design/veo.pen` (repo del plano). Al migrar/c
 
 ## Stack mobile
 
-- React Native 0.75 con New Architecture
+- React Native 0.85 con New Architecture
 - React Navigation 6
 - React Query (server state) + Zustand (client state) + Redux Toolkit (donde aplique para slices grandes)
 - Reanimated 3 (gestures, transitions)
