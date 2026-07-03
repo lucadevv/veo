@@ -22274,56 +22274,6 @@
                   "height": 844
                 },
                 {
-                  "type": "path",
-                  "id": "c2GZl",
-                  "layoutPosition": "absolute",
-                  "x": 0,
-                  "y": 560,
-                  "name": "RouteLine",
-                  "opacity": 0.38,
-                  "geometry": "M-10 140c120-50 180 10 260-30 70-34 100 10 150-40",
-                  "viewBox": [
-                    0,
-                    0,
-                    390,
-                    200
-                  ],
-                  "fill": "#00000000",
-                  "width": 390,
-                  "height": 200,
-                  "stroke": "$brand",
-                  "strokeWidth": 1.5,
-                  "strokeLinecap": "round"
-                },
-                {
-                  "type": "path",
-                  "id": "fd7ix",
-                  "x": 0,
-                  "y": 0,
-                  "name": "Route",
-                  "opacity": 0.55,
-                  "geometry": "M24 792c126-48 276-128 308-272 22-104-12-262 34-370",
-                  "viewBox": [
-                    0,
-                    0,
-                    390,
-                    844
-                  ],
-                  "fill": "#00000000",
-                  "width": 390,
-                  "height": 844,
-                  "stroke": "$brand",
-                  "strokeWidth": 2.5,
-                  "strokeLinejoin": "round",
-                  "strokeLinecap": "round",
-                  "effect": {
-                    "type": "shadow",
-                    "shadowType": "outer",
-                    "color": "$route-glow",
-                    "blur": 16
-                  }
-                },
-                {
                   "type": "ellipse",
                   "id": "OzN2J",
                   "x": 19,
