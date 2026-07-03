@@ -63,16 +63,6 @@ PODS:
   - GoogleDataTransport (10.1.0):
     - nanopb (~> 3.30910.0)
     - PromisesObjC (~> 2.4)
-  - GoogleMLKit/FaceDetection (8.0.0):
-    - GoogleMLKit/MLKitCore
-    - MLKitFaceDetection (~> 7.0.0)
-  - GoogleMLKit/MLKitCore (8.0.0):
-    - MLKitCommon (~> 13.0.0)
-  - GoogleToolboxForMac/Defines (4.2.1)
-  - GoogleToolboxForMac/Logger (4.2.1):
-    - GoogleToolboxForMac/Defines (= 4.2.1)
-  - "GoogleToolboxForMac/NSData+zlib (4.2.1)":
-    - GoogleToolboxForMac/Defines (= 4.2.1)
   - GoogleUtilities/AppDelegateSwizzler (8.1.0):
     - GoogleUtilities/Environment
     - GoogleUtilities/Logger
@@ -97,7 +87,6 @@ PODS:
   - GoogleUtilities/UserDefaults (8.1.0):
     - GoogleUtilities/Logger
     - GoogleUtilities/Privacy
-  - GTMSessionFetcher/Core (3.5.0)
   - hermes-engine (250829098.0.10):
     - hermes-engine/Pre-built (= 250829098.0.10)
   - hermes-engine/Pre-built (250829098.0.10)
@@ -110,23 +99,6 @@ PODS:
     - MapboxCommon (= 24.20.3)
     - MapboxCoreMaps (= 11.20.3)
     - Turf (= 4.0.0)
-  - MLImage (1.0.0-beta7)
-  - MLKitCommon (13.0.0):
-    - GoogleDataTransport (~> 10.0)
-    - GoogleToolboxForMac/Logger (< 5.0, >= 4.2.1)
-    - "GoogleToolboxForMac/NSData+zlib (< 5.0, >= 4.2.1)"
-    - GoogleUtilities/Logger (~> 8.0)
-    - GoogleUtilities/UserDefaults (~> 8.0)
-    - GTMSessionFetcher/Core (< 4.0, >= 3.3.2)
-  - MLKitFaceDetection (7.0.0):
-    - MLKitCommon (~> 13.0)
-    - MLKitVision (~> 9.0)
-  - MLKitVision (9.0.0):
-    - GoogleToolboxForMac/Logger (< 5.0, >= 4.2.1)
-    - "GoogleToolboxForMac/NSData+zlib (< 5.0, >= 4.2.1)"
-    - GTMSessionFetcher/Core (< 4.0, >= 3.3.2)
-    - MLImage (= 1.0.0-beta7)
-    - MLKitCommon (~> 13.0)
   - MMKVCore (2.4.0)
   - nanopb (3.30910.0):
     - nanopb/decode (= 3.30910.0)
@@ -3422,7 +3394,6 @@ PODS:
     - fast_float
     - fmt
     - glog
-    - GoogleMLKit/FaceDetection (= 8.0.0)
     - hermes-engine
     - NitroModules
     - RCT-Folly
@@ -3564,18 +3535,11 @@ SPEC REPOS:
     - FirebaseInstallations
     - FirebaseMessaging
     - GoogleDataTransport
-    - GoogleMLKit
-    - GoogleToolboxForMac
     - GoogleUtilities
-    - GTMSessionFetcher
     - JitsiWebRTC
     - MapboxCommon
     - MapboxCoreMaps
     - MapboxMaps
-    - MLImage
-    - MLKitCommon
-    - MLKitFaceDetection
-    - MLKitVision
     - MMKVCore
     - nanopb
     - PromisesObjC
@@ -3804,19 +3768,12 @@ SPEC CHECKSUMS:
   fmt: 530618a01105dae0fa3a2f27c81ae11fa8f67eac
   glog: e56ede4028c4b7418e6b1195a36b1656bb35e225
   GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7
-  GoogleMLKit: ddd51d7dff36ff28defa69afedd9cdce684fd857
-  GoogleToolboxForMac: d1a2cbf009c453f4d6ded37c105e2f67a32206d8
   GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
-  GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
-  hermes-engine: 43abd1c6b803c9ecd4a8146613a67a57eb2e3aef
+  hermes-engine: 178fc34eec24de45d6d52032f749570f83c04a55
   JitsiWebRTC: b47805ab5668be38e7ee60e2258f49badfe8e1d0
   MapboxCommon: bd1554a0c6e66ac04c9ecd3611f3b7d772eeac7e
   MapboxCoreMaps: 821019cdd87447ecd895872f4095232723961627
   MapboxMaps: 6191d857abe0da0f3bdfb5a71349c532d55d7d9d
-  MLImage: 2ab9c968e75f57911c16f4c9d9e8a8e9604a86a1
-  MLKitCommon: 26b779f072a182c1603d4c88a101c350cac837b1
-  MLKitFaceDetection: d50aff1a44aa9a4e95f7e208298a3ce40b68f9f8
-  MLKitVision: fa8dea9012ac59497c79ddbe9ebf32051047ac4c
   MMKVCore: 3d16ce9f7d411e135020915fde98a056859a1efa
   nanopb: fad817b59e0457d11a5dfbde799381cd727c1275
   NitroImage: aaf23abdf2f5446f392b43867c27860508b52965
@@ -3915,9 +3872,9 @@ SPEC CHECKSUMS:
   TSLocationManager: d8c3074f2dfc8f93eff7c64b69b61ff30a7f50e4
   Turf: c9eb11a65d96af58cac523460fd40fec5061b081
   VisionCamera: 69e01f24a2c2571b0917368d0f8aa4f70423559e
-  VisionCameraFaceDetector: c1c5edfe9f30b944d7231d4144ce499c1abaeffc
+  VisionCameraFaceDetector: 5cfb992cb11014bafb62e2bb99c830597d52ef3c
   Yoga: 9d8e8094a2bed6a175d9e6001a0546d5dae663ee
 
-PODFILE CHECKSUM: 2b9ca7436f05f977ea7329c0d0c0b320269d6e87
+PODFILE CHECKSUM: 422b9f43add064e9439ad48475116e2feceab5da
 
 COCOAPODS: 1.16.2

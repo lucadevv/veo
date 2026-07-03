@@ -70,7 +70,8 @@
   },
   "pnpm": {
     "patchedDependencies": {
-      "@react-native/gradle-plugin@0.85.3": "patches/@react-native__gradle-plugin@0.85.3.patch"
+      "@react-native/gradle-plugin@0.85.3": "patches/@react-native__gradle-plugin@0.85.3.patch",
+      "react-native-vision-camera-face-detector@2.0.1": "patches/react-native-vision-camera-face-detector@2.0.1.patch"
     },
     "overrides": {
       "multer": "^2.1.0",

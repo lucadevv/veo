@@ -5,9 +5,13 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-# iOS 15.5: mínimo que exige GoogleMLKit/FaceDetection 8.0.0 (react-native-vision-camera-face-detector,
+# iOS 15.5: mínimo que exige VisionCameraFaceDetector (react-native-vision-camera-face-detector,
 # liveness FaceID F1). Supera el min de RN 0.85 (15.1) y el de Mapbox (14+). Sin esto, pod install falla
 # con "VisionCameraFaceDetector required a higher minimum deployment target".
+# OJO: en iOS el face-detector está PARCHEADO (patches/react-native-vision-camera-face-detector@2.0.1.patch)
+# para usar Apple Vision framework, SIN GoogleMLKit: MLKit no tiene slice arm64-simulator y su podspec
+# inyectaba EXCLUDED_ARCHS[sdk=iphonesimulator*]=arm64 → la app quedaba sin destinos de simulador
+# (runtimes iOS 26 = arm64-only). Android sigue con MLKit. No agregar GoogleMLKit a iOS.
 platform :ios, '15.5'
 prepare_react_native_project!
 
@@ -78,7 +82,7 @@ target 'VEODriver' do
 
     # Igual que el passenger: (1) MapboxMaps 11.x exige iOS 14+ y `react_native_post_install` resetea
     # el deployment target de los pods al mínimo de RN — elevamos cualquier target por debajo de 15.5
-    # (GoogleMLKit/FaceDetection del liveness exige 15.5; supera el 15.1 de RN 0.85). (2) use_frameworks! +
+    # (VisionCameraFaceDetector exige 15.5; supera el 15.1 de RN 0.85). (2) use_frameworks! +
     # RNFirebase + -Werror: los headers de RNFB hacen `#import <React/...>` no-modular dentro de un framework
     # module → relajamos ese check.
     installer.pods_project.targets.each do |target|

@@ -34,12 +34,11 @@ $RNMapboxMapsVersion = '~> 11.20.1'
 target 'VEO' do
   config = use_native_modules!
 
-  # react-native-vision-camera-face-detector@2.0.1 (bump RN 0.85) depende de
-  # `GoogleMLKit/FaceDetection (= 8.0.0)` de forma EXPLÍCITA — antes (1.x) no pineaba versión y
-  # CocoaPods backtrackeaba a un MLKit ancestral (GoogleUtilities ~>7) que choca con Firebase 11.x.
-  # Alineamos el pin a 8.0.0 (MLKit 8.x sigue usando GoogleUtilities ~>8 + GTMSessionFetcher ~>3,
-  # coherente con el stack de Firebase). Debe coincidir con el `=` que exige face-detector o el resolver falla.
-  pod 'GoogleMLKit/FaceDetection', '8.0.0'
+  # SIN GoogleMLKit en iOS: face-detector@2.0.1 está PARCHEADO (patches/react-native-vision-camera-
+  # face-detector@2.0.1.patch) para usar Apple Vision framework. MLKit no publica slice
+  # arm64-simulator y su podspec inyectaba EXCLUDED_ARCHS[sdk=iphonesimulator*]=arm64 al target,
+  # dejando a la app sin NINGÚN destino de simulador (los runtimes de iOS 26 son arm64-only).
+  # Android sigue con MLKit (allí no hay problema de arquitecturas). No re-agregar este pod.
 
   # Con `use_frameworks! :linkage => :static` los pods se construyen como frameworks estáticos
   # (ya proveen module maps), así que NO hacen falta los `:modular_headers` explícitos de Firebase

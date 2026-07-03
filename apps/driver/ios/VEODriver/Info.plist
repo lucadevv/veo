@@ -31,10 +31,16 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>VEO usa la cámara para la verificación facial al iniciar turno, para la grabación de seguridad durante el viaje y para fotografiar tus documentos del registro.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>VEO usa Face ID para verificar tu identidad de forma segura al iniciar el turno.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>VEO usa la red local para conectarse al servidor de desarrollo (Metro) durante el hot reload. En producción la app no accede a la red local.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>VEO necesita tu ubicación en segundo plano para mantener el seguimiento del viaje activo aunque la app no esté en pantalla.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
@@ -47,12 +53,6 @@
 	<string>VEO usa los sensores de movimiento para mejorar la precisión del seguimiento GPS y optimizar la batería durante tus viajes.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>VEO accede a tus fotos para que puedas adjuntar imágenes de tus documentos del registro.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>VEO usa la red local para conectarse al servidor de desarrollo (Metro) durante el hot reload. En producción la app no accede a la red local.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_http._tcp</string>
-	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIAppFonts</key>
@@ -77,10 +77,6 @@
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
-	<key>UIRequiredDeviceCapabilities</key>
-	<array>
-		<string>arm64</string>
-	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

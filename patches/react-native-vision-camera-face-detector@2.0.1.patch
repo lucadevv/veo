@@ -1,0 +1,821 @@
+diff --git a/VisionCameraFaceDetector.podspec b/VisionCameraFaceDetector.podspec
+index e08dfb3e701d849a1aeeebe804b3ba7c8b38076a..62da837190e0c4a88874b15e658fee5f6530e5c9 100644
+--- a/VisionCameraFaceDetector.podspec
++++ b/VisionCameraFaceDetector.podspec
+@@ -10,7 +10,10 @@ Pod::Spec.new do |s|
+   s.license      = package["license"]
+   s.authors      = package["author"]
+ 
+-  s.platforms    = { :ios => "15.5" } # 15.5 is the minimum version for GoogleMLKit/FaceDetection (7/8).0.0
++  # [PATCH VEO] iOS usa Apple Vision framework (no MLKit): MLKit no tiene slice arm64-simulator
++  # y su podspec inyectaba EXCLUDED_ARCHS[sdk=iphonesimulator*]=arm64 al target de la app, lo
++  # que dejaba a la app SIN destinos de simulador (los runtimes de iOS 26 son arm64-only).
++  s.platforms    = { :ios => "15.5" }
+   s.source       = { :git => package["repository"]["url"], :tag => "#{s.version}" }
+ 
+   s.source_files = [
+@@ -21,14 +24,13 @@ Pod::Spec.new do |s|
+     # Implementation (C++ objects)
+     "cpp/**/*.{hpp,cpp}",
+   ]
+-  s.frameworks = ["AVFoundation"]
++  s.frameworks = ["AVFoundation", "Vision"]
+ 
+   load 'nitrogen/generated/ios/VisionCameraFaceDetector+autolinking.rb'
+   add_nitrogen_files(s)
+ 
+   s.dependency 'React-jsi'
+   s.dependency 'React-callinvoker'
+-  s.dependency "GoogleMLKit/FaceDetection" , "8.0.0"
+   s.dependency "VisionCamera"
+   install_modules_dependencies(s)
+ end
+diff --git a/ios/Extensions/ML+FaceDetectorOptions.swift b/ios/Extensions/ML+FaceDetectorOptions.swift
+deleted file mode 100644
+index 518612abea003ba889e362cb0b39b056c0057ff4..0000000000000000000000000000000000000000
+diff --git a/ios/Extensions/ML+HybridFrameSpec.swift b/ios/Extensions/ML+HybridFrameSpec.swift
+deleted file mode 100644
+index 1672358b6325daa7ae095ad2bd58ef920e38b0f2..0000000000000000000000000000000000000000
+diff --git a/ios/HybridFace.swift b/ios/HybridFace.swift
+index f971bf224ba8b693688f97aadf02b6bb9c28885b..ec2ccb6d981ac3f588236db063e3a15b7fa47d58 100644
+--- a/ios/HybridFace.swift
++++ b/ios/HybridFace.swift
+@@ -1,54 +1,24 @@
+-import MLKitFaceDetection
+-import NitroModules
++//
++//  HybridFace.swift
++//  [PATCH VEO] Implementación del spec `Face` sobre VNFaceObservation (Apple Vision) en vez de
++//  MLKit. Mantiene el contrato JS: ángulos en GRADOS (Vision los da en radianes), bounds en px
++//  con origen arriba-izquierda (Vision los da normalizados con origen abajo-izquierda) y
++//  probabilidades de ojo abierto 0..1 (Vision no las trae: se aproximan por EAR — relación
++//  alto/ancho del ojo desde sus landmarks; suficiente para guía/autocaptura, el veredicto real
++//  es del servidor).
++//
++
+ import Foundation
++import NitroModules
+ import UIKit
+-
+-struct FaceProcessConfig {
+-  let width: Double
+-  let height: Double
+-  let scaleX: Double
+-  let scaleY: Double
+-  let runLandmarks: Bool
+-  let runContours: Bool
+-  let runClassifications: Bool
+-  let trackingEnabled: Bool
+-  let autoMode: Bool?
+-  let cameraFacing: CameraPosition?
+-  let orientation: UIInterfaceOrientation?
+-
+-  init(
+-    width: Double,
+-    height: Double,
+-    scaleX: Double,
+-    scaleY: Double,
+-    runLandmarks: Bool,
+-    runContours: Bool,
+-    runClassifications: Bool,
+-    trackingEnabled: Bool,
+-    autoMode: Bool? = nil,
+-    cameraFacing: CameraPosition? = nil,
+-    orientation: UIInterfaceOrientation? = nil
+-  ) {
+-    self.width = width
+-    self.height = height
+-    self.scaleX = scaleX
+-    self.scaleY = scaleY
+-    self.runLandmarks = runLandmarks
+-    self.runContours = runContours
+-    self.runClassifications = runClassifications
+-    self.trackingEnabled = trackingEnabled
+-    self.autoMode = autoMode
+-    self.cameraFacing = cameraFacing
+-    self.orientation = orientation
+-  }
+-}
++import Vision
+ 
+ final class HybridFace: HybridFaceSpec {
+-  private let face: Face
++  private let face: VisionDetectedFace
+   private let config: FaceProcessConfig
+ 
+   init(
+-    face: Face,
++    face: VisionDetectedFace,
+     config: FaceProcessConfig
+   ) {
+     self.face = face
+@@ -56,147 +26,143 @@ final class HybridFace: HybridFaceSpec {
+     super.init()
+   }
+ 
+-  private func processBoundingBox(
+-    _ boundingBox: CGRect
+-  ) -> Bounds {
+-    let scaleX = config.scaleX
+-    let scaleY = config.scaleY
+-    var width: Double
+-    var height: Double
+-    switch config.orientation {
+-      case .landscapeLeft, .landscapeRight:
+-        width = boundingBox.height * scaleY
+-        height = boundingBox.width * scaleX
+-      default:
+-        width = boundingBox.width * scaleX
+-        height = boundingBox.height * scaleY
+-    }
++  // ── Helpers de coordenadas ──────────────────────────────────────────────────
++  /// Radianes (NSNumber? de Vision) → grados. Sin dato → 0 (mismo default que un rostro frontal).
++  private static func degrees(_ radians: NSNumber?) -> Double {
++    guard let radians else { return 0 }
++    return radians.doubleValue * 180.0 / .pi
++  }
+ 
+-    return Bounds(
+-      width: width,
+-      height: height,
+-      x: boundingBox.minY * scaleX,
+-      y: boundingBox.minX * scaleY
++  /// Punto de landmark en coords de imagen (origen abajo-izquierda) → contrato JS
++  /// (px, origen arriba-izquierda, escalado por autoMode).
++  private func toJsPoint(_ imagePoint: CGPoint) -> Point {
++    return Point(
++      x: Double(imagePoint.x) * config.scaleX,
++      y: (config.height - Double(imagePoint.y)) * config.scaleY
+     )
+   }
+ 
+-  private func processLandmarks(
+-      _ face: Face
+-  ) -> Landmarks {
+-    let scaleX = config.scaleX
+-    let scaleY = config.scaleY
+-
+-    func getPoint(
+-      _ type: FaceLandmarkType
+-    ) -> Point? {
+-      guard let landmark = face.landmark(ofType: type) else {
+-        return nil
+-      }
+-
+-      let position = landmark.position
+-      return Point(
+-        x: Double(position.y) * scaleX,
+-        y: Double(position.x) * scaleY
+-      )
+-    }
++  private var imageSize: CGSize {
++    CGSize(width: config.width, height: config.height)
++  }
+ 
+-    return Landmarks(
+-      LEFT_CHEEK: getPoint(.leftCheek),
+-      LEFT_EAR: getPoint(.leftEar),
+-      LEFT_EYE: getPoint(.leftEye),
+-      MOUTH_BOTTOM: getPoint(.mouthBottom),
+-      MOUTH_LEFT: getPoint(.mouthLeft),
+-      MOUTH_RIGHT: getPoint(.mouthRight),
+-      NOSE_BASE: getPoint(.noseBase),
+-      RIGHT_CHEEK: getPoint(.rightCheek),
+-      RIGHT_EAR: getPoint(.rightEar),
+-      RIGHT_EYE: getPoint(.rightEye)
+-    )
++  /// Centroide de una región de landmarks, en el contrato JS.
++  private func centroid(_ region: VNFaceLandmarkRegion2D?) -> Point? {
++    guard let region, region.pointCount > 0 else { return nil }
++    let points = region.pointsInImage(imageSize: imageSize)
++    let sum = points.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.x, y: $0.y + $1.y) }
++    let n = CGFloat(points.count)
++    return toJsPoint(CGPoint(x: sum.x / n, y: sum.y / n))
+   }
+ 
+-  private func processFaceContours(
+-    _ face: Face
+-  ) -> Contours {
+-    let scaleX = config.scaleX
+-    let scaleY = config.scaleY
+-
+-    func getContour(
+-        _ type: FaceContourType
+-    ) -> [Point]? {
+-      guard let contour = face.contour(ofType: type) else {
+-        return nil
+-      }
+-
+-      return contour.points.map { point in
+-        return Point(
+-          x: Double(point.y) * scaleX, 
+-          y: Double(point.x) * scaleY
+-        )
+-      }
+-    }
++  private func contourPoints(_ region: VNFaceLandmarkRegion2D?) -> [Point]? {
++    guard let region, region.pointCount > 0 else { return nil }
++    return region.pointsInImage(imageSize: imageSize).map { toJsPoint($0) }
++  }
+ 
+-    return Contours(
+-      FACE: getContour(.face),
+-      LEFT_EYEBROW_TOP: getContour(.leftEyebrowTop),
+-      LEFT_EYEBROW_BOTTOM: getContour(.leftEyebrowBottom),
+-      RIGHT_EYEBROW_TOP: getContour(.rightEyebrowTop),
+-      RIGHT_EYEBROW_BOTTOM: getContour(.rightEyebrowBottom),
+-      LEFT_EYE: getContour(.leftEye),
+-      RIGHT_EYE: getContour(.rightEye),
+-      UPPER_LIP_TOP: getContour(.upperLipTop),
+-      UPPER_LIP_BOTTOM: getContour(.upperLipBottom),
+-      LOWER_LIP_TOP: getContour(.lowerLipTop),
+-      LOWER_LIP_BOTTOM: getContour(.lowerLipBottom),
+-      NOSE_BRIDGE: getContour(.noseBridge),
+-      NOSE_BOTTOM: getContour(.noseBottom),
+-      LEFT_CHEEK: getContour(.leftCheek),
+-      RIGHT_CHEEK: getContour(.rightCheek)
+-    )
++  /// Probabilidad de ojo abierto aproximada por EAR (eye aspect ratio, alto/ancho en px del
++  /// polígono del ojo). Cerrado ≈ ≤0.10 → 0 · abierto ≈ ≥0.28 → 1, lineal entre medio.
++  private func eyeOpenProbability(_ region: VNFaceLandmarkRegion2D?) -> Double? {
++    guard let region, region.pointCount >= 4 else { return nil }
++    let points = region.pointsInImage(imageSize: imageSize)
++    let xs = points.map { Double($0.x) }
++    let ys = points.map { Double($0.y) }
++    guard let minX = xs.min(), let maxX = xs.max(),
++          let minY = ys.min(), let maxY = ys.max(), maxX > minX
++    else { return nil }
++    let ratio = (maxY - minY) / (maxX - minX)
++    return min(1.0, max(0.0, (ratio - 0.10) / 0.18))
+   }
+ 
++  // ── Spec `Face` ─────────────────────────────────────────────────────────────
+   var bounds: Bounds {
+-    processBoundingBox(face.frame)
++    // Vision: boundingBox normalizado 0..1 con origen ABAJO-izquierda, en la imagen orientada.
++    let bb = face.base.boundingBox
++    return Bounds(
++      width: Double(bb.width) * config.width * config.scaleX,
++      height: Double(bb.height) * config.height * config.scaleY,
++      x: Double(bb.minX) * config.width * config.scaleX,
++      y: (1.0 - Double(bb.maxY)) * config.height * config.scaleY
++    )
+   }
+ 
+   var landmarks: Landmarks? {
+-    config.runLandmarks ?
+-    processLandmarks(face): nil
++    guard config.runLandmarks, let lm = face.landmarks else { return nil }
++    // Mapeo por centroides de regiones Vision. Mejillas/orejas: Vision no las expone → nil
++    // (el spec las declara opcionales).
++    let mouth = contourPoints(lm.outerLips)
++    return Landmarks(
++      LEFT_CHEEK: nil,
++      LEFT_EAR: nil,
++      LEFT_EYE: centroid(lm.leftEye),
++      MOUTH_BOTTOM: centroid(lm.innerLips),
++      MOUTH_LEFT: mouth?.min(by: { $0.x < $1.x }),
++      MOUTH_RIGHT: mouth?.max(by: { $0.x < $1.x }),
++      NOSE_BASE: centroid(lm.nose),
++      RIGHT_CHEEK: nil,
++      RIGHT_EAR: nil,
++      RIGHT_EYE: centroid(lm.rightEye)
++    )
+   }
+ 
+   var contours: Contours? {
+-    config.runContours ?
+-    processFaceContours(face) : nil
++    guard config.runContours, let lm = face.landmarks else { return nil }
++    // Vision no separa top/bottom de cejas y labios como MLKit: se mapea lo directo y el resto
++    // queda nil (opcional en el spec).
++    return Contours(
++      FACE: contourPoints(lm.faceContour),
++      LEFT_EYEBROW_TOP: contourPoints(lm.leftEyebrow),
++      LEFT_EYEBROW_BOTTOM: nil,
++      RIGHT_EYEBROW_TOP: contourPoints(lm.rightEyebrow),
++      RIGHT_EYEBROW_BOTTOM: nil,
++      LEFT_EYE: contourPoints(lm.leftEye),
++      RIGHT_EYE: contourPoints(lm.rightEye),
++      UPPER_LIP_TOP: contourPoints(lm.outerLips),
++      UPPER_LIP_BOTTOM: contourPoints(lm.innerLips),
++      LOWER_LIP_TOP: nil,
++      LOWER_LIP_BOTTOM: nil,
++      NOSE_BRIDGE: contourPoints(lm.noseCrest),
++      NOSE_BOTTOM: nil,
++      LEFT_CHEEK: nil,
++      RIGHT_CHEEK: nil
++    )
+   }
+ 
+   var leftEyeOpenProbability: Double? {
+-    config.runClassifications ?
+-    face.leftEyeOpenProbability : nil
++    guard config.runClassifications else { return nil }
++    return eyeOpenProbability(face.landmarks?.leftEye)
+   }
+ 
+   var rightEyeOpenProbability: Double? {
+-    config.runClassifications ?
+-    face.rightEyeOpenProbability : nil
++    guard config.runClassifications else { return nil }
++    return eyeOpenProbability(face.landmarks?.rightEye)
+   }
+ 
+   var smilingProbability: Double? {
+-    config.runClassifications ?
+-    face.smilingProbability : nil
++    // Vision no clasifica sonrisa. Opcional en el spec → nil (los consumers ya toleran su
++    // ausencia, igual que con MLKit sin runClassifications).
++    return nil
+   }
+ 
+   var trackingId: Double? {
+-    config.trackingEnabled ?
+-    Double(face.trackingID) : nil
++    // Sin tracking entre frames en esta implementación (VNTrackObjectRequest fuera de alcance).
++    // Opcional en el spec → nil.
++    return nil
+   }
+ 
+   var pitchAngle: Double {
+-    return face.headEulerAngleX
++    // MLKit headEulerAngleX ≈ Vision pitch (iOS 15+). Grados.
++    if #available(iOS 15.0, *) {
++      return Self.degrees(face.base.pitch)
++    }
++    return 0
+   }
+ 
+   var rollAngle: Double {
+-    return face.headEulerAngleZ
++    return Self.degrees(face.base.roll)
+   }
+ 
+-   var yawAngle: Double {
+-    return face.headEulerAngleY
++  var yawAngle: Double {
++    return Self.degrees(face.base.yaw)
+   }
+ }
+diff --git a/ios/HybridFaceDetector.swift b/ios/HybridFaceDetector.swift
+index afa7c9b2c36a2d4cff19dd272b7b9c816e92d6ae..a120ddc5d37a49c1933eec24657d4a5b93bd5cfe 100644
+--- a/ios/HybridFaceDetector.swift
++++ b/ios/HybridFaceDetector.swift
+@@ -1,6 +1,11 @@
+-import MLKitFaceDetection
+-import MLKitVision
++//
++//  HybridFaceDetector.swift
++//  [PATCH VEO] Path de frame-processor (detección por frame desde un worklet) sobre Apple
++//  Vision en vez de MLKit. Misma extracción de CMSampleBuffer del Frame de VisionCamera.
++//
++
+ import NitroModules
++import Vision
+ import VisionCamera
+ 
+ class HybridFaceDetector: HybridFaceDetectorSpec {
+@@ -13,7 +18,7 @@ class HybridFaceDetector: HybridFaceDetectorSpec {
+   private let cameraFacing: CameraPosition
+   private let windowWidth: Double
+   private let windowHeight: Double
+-  private let faceDetector: FaceDetector
++  private let core: VisionFaceDetectorCore
+ 
+   init(options: FaceDetectorOptions) {
+     self.runLandmarks = options.runLandmarks ?? false
+@@ -24,8 +29,11 @@ class HybridFaceDetector: HybridFaceDetectorSpec {
+     self.cameraFacing = options.cameraFacing ?? .front
+     self.windowWidth = options.windowWidth ?? 1.0
+     self.windowHeight = options.windowHeight ?? 1.0
+-    self.faceDetector = FaceDetector.faceDetector(
+-      options: options.toMLFaceDetectorOptions()
++    self.core = VisionFaceDetectorCore(
++      runLandmarks: options.runLandmarks,
++      runContours: options.runContours,
++      runClassifications: options.runClassifications,
++      minFaceSize: options.minFaceSize
+     )
+ 
+     super.init()
+@@ -34,16 +42,25 @@ class HybridFaceDetector: HybridFaceDetectorSpec {
+   func detectFaces(
+     frame: any HybridFrameSpec
+   ) throws -> [any HybridFaceSpec] {
+-    let image = try frame.toMLImage(
++    guard let nativeFrame = frame as? any NativeFrame else {
++      throw RuntimeError.error(withMessage: "Frame is not of type `NativeFrame`!")
++    }
++    guard let sampleBuffer = nativeFrame.sampleBuffer,
++          let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
++    else {
++      throw RuntimeError.error(withMessage: "Frame doesn't have a CMSampleBuffer - it's invalid!")
++    }
++
++    let cgOrientation = frame.orientation.toUIImageOrientation(
+       orientation: orientationManager.orientation,
+       cameraFacing: cameraFacing
+-    )
+-    var width = CGFloat(frame.width)
+-    var height = CGFloat(frame.height)
+-    if(width > height) {
+-      width = CGFloat(frame.height)
+-      height = CGFloat(frame.width)
+-    }
++    ).cgImagePropertyOrientation
++
++    let bufferWidth = Double(CVPixelBufferGetWidth(pixelBuffer))
++    let bufferHeight = Double(CVPixelBufferGetHeight(pixelBuffer))
++    let width = cgOrientation.swapsDimensions ? bufferHeight : bufferWidth
++    let height = cgOrientation.swapsDimensions ? bufferWidth : bufferHeight
++
+     let config = FaceProcessConfig(
+       width: width,
+       height: height,
+@@ -52,13 +69,15 @@ class HybridFaceDetector: HybridFaceDetectorSpec {
+       runLandmarks: runLandmarks,
+       runContours: runContours,
+       runClassifications: runClassifications,
+-      trackingEnabled: trackingEnabled,
+-      autoMode: autoMode,
+-      cameraFacing: cameraFacing,
+-      orientation: orientationManager.orientation
++      trackingEnabled: trackingEnabled
+     )
+ 
+-    let faces = try faceDetector.results(in: image)
++    let handler = VNImageRequestHandler(
++      cvPixelBuffer: pixelBuffer,
++      orientation: cgOrientation,
++      options: [:]
++    )
++    let faces = try core.detect(with: handler)
+     return faces.map {
+       HybridFace(
+         face: $0,
+diff --git a/ios/HybridFaceDetectorOutput.swift b/ios/HybridFaceDetectorOutput.swift
+index c40c32b1c766e7c078c231e5d7112d0057ac6137..cfd338b62b6fefe04031cc4d2d85eeb27b0c454b 100644
+--- a/ios/HybridFaceDetectorOutput.swift
++++ b/ios/HybridFaceDetectorOutput.swift
+@@ -1,11 +1,19 @@
++//
++//  HybridFaceDetectorOutput.swift
++//  [PATCH VEO] Output de VisionCamera con detección facial sobre APPLE VISION (antes MLKit).
++//  La plomería (NativeCameraOutput, AVCaptureVideoDataOutput + delegate, orientación) es la
++//  original de la librería; solo cambia el motor de detección. Vision `perform` es síncrono →
++//  corre en la cola del delegate (el guard `isBusy` + alwaysDiscardsLateVideoFrames evitan
++//  backlog de frames).
++//
++
+ import AVFoundation
+-import MLKitFaceDetection
+-import MLKitVision
+ import NitroModules
++import Vision
+ import VisionCamera
+ 
+-class HybridFaceDetectorOutput: 
+-HybridCameraOutputSpec, 
++class HybridFaceDetectorOutput:
++HybridCameraOutputSpec,
+ NativeCameraOutput {
+   private let queue: DispatchQueue
+   private let onFacesDetected: (_ faces: [any HybridFaceSpec]) -> Void
+@@ -36,7 +44,7 @@ NativeCameraOutput {
+     )
+   }
+   private let orientationManager = FaceDetectorOrientation()
+-  private let faceDetector: FaceDetector
++  private let core: VisionFaceDetectorCore
+ 
+   init(options: FaceDetectorOutputOptions) {
+     self.queue = DispatchQueue(label: "FaceDetectorQueue")
+@@ -45,16 +53,19 @@ NativeCameraOutput {
+     self.onError = options.onError
+     self.autoMode = options.autoMode ?? false
+     self.windowWidth = options.windowWidth ?? 1.0
+-    self.windowHeight = options.windowHeight ?? 1.0 
++    self.windowHeight = options.windowHeight ?? 1.0
+     self.runLandmarks = options.runLandmarks ?? false
+     self.runContours = options.runContours ?? false
+     self.runClassifications = options.runClassifications ?? false
+     self.trackingEnabled = options.trackingEnabled ?? false
+     self.cameraFacing = options.cameraFacing ?? .front
+-    self.faceDetector = FaceDetector.faceDetector(
+-      options: options.toMLFaceDetectorOptions()
++    self.core = VisionFaceDetectorCore(
++      runLandmarks: options.runLandmarks,
++      runContours: options.runContours,
++      runClassifications: options.runClassifications,
++      minFaceSize: options.minFaceSize
+     )
+-    
++
+     super.init()
+ 
+     self.delegate = FaceDetectorDelegate(onSampleBuffer: { [weak self] buffer in
+@@ -70,21 +81,29 @@ NativeCameraOutput {
+ 
+   private func detectFaces(_ buffer: CMSampleBuffer) {
+     if isBusy { return }
+-
+     isBusy = true
+-    guard let image = MLImage(sampleBuffer: buffer) else {
+-      isBusy = false
++    defer { isBusy = false }
++
++    guard let pixelBuffer = CMSampleBufferGetImageBuffer(buffer) else {
+       onError(RuntimeError.error(
+-        withMessage: "Failed to convert CMSampleBuffer to MLImage!"
++        withMessage: "Failed to get CVPixelBuffer from CMSampleBuffer!"
+       ))
+       return
+     }
+-    image.orientation = outputOrientation.toUIImageOrientation(
++
++    // Misma resolución de orientación que la versión MLKit (acelerómetro + facing), traducida
++    // a EXIF/CG que es lo que consume Vision.
++    let cgOrientation = outputOrientation.toUIImageOrientation(
+       orientation: orientationManager.orientation,
+       cameraFacing: cameraFacing
+-    )
+-    let width = image.height
+-    let height = image.width
++    ).cgImagePropertyOrientation
++
++    // Dimensiones de la imagen ORIENTADA (rotaciones de 90° intercambian ancho/alto).
++    let bufferWidth = Double(CVPixelBufferGetWidth(pixelBuffer))
++    let bufferHeight = Double(CVPixelBufferGetHeight(pixelBuffer))
++    let width = cgOrientation.swapsDimensions ? bufferHeight : bufferWidth
++    let height = cgOrientation.swapsDimensions ? bufferWidth : bufferHeight
++
+     let config = FaceProcessConfig(
+       width: width,
+       height: height,
+@@ -93,27 +112,25 @@ NativeCameraOutput {
+       runLandmarks: runLandmarks,
+       runContours: runContours,
+       runClassifications: runClassifications,
+-      trackingEnabled: trackingEnabled,
+-      autoMode: autoMode,
+-      cameraFacing: cameraFacing,
+-      orientation: orientationManager.orientation
++      trackingEnabled: trackingEnabled
+     )
+ 
+-    self.faceDetector.process(image) { [weak self] faces, error in
+-      guard let self else { return }
+-      self.isBusy = false
+-      if let faces {
+-        let hybridFaces: [any HybridFaceSpec] = faces.map { 
+-          HybridFace(
+-            face: $0,
+-            config: config
+-          ) 
+-        }
+-        self.onFacesDetected(hybridFaces)
+-      }
+-      if let error {
+-        self.onError(error)
++    let handler = VNImageRequestHandler(
++      cvPixelBuffer: pixelBuffer,
++      orientation: cgOrientation,
++      options: [:]
++    )
++    do {
++      let faces = try core.detect(with: handler)
++      let hybridFaces: [any HybridFaceSpec] = faces.map {
++        HybridFace(
++          face: $0,
++          config: config
++        )
+       }
++      onFacesDetected(hybridFaces)
++    } catch {
++      onError(error)
+     }
+   }
+ 
+diff --git a/ios/HybridImageFaceDetector.swift b/ios/HybridImageFaceDetector.swift
+index 608050c169926a1a6ea0790eef8f1c4967b5121a..2d7cf3b0367155dd0e4eca40dabdfe24ec8abfed 100644
+--- a/ios/HybridImageFaceDetector.swift
++++ b/ios/HybridImageFaceDetector.swift
+@@ -1,21 +1,30 @@
++//
++//  HybridImageFaceDetector.swift
++//  [PATCH VEO] Detección facial sobre imágenes estáticas (archivo/URL) con Apple Vision en vez
++//  de MLKit. La resolución/carga de la imagen es la original de la librería.
++//
++
+ import Foundation
+-import MLKitFaceDetection
+-import MLKitVision
++import UIKit
++import Vision
+ 
+ class HybridImageFaceDetector: HybridImageFaceDetectorSpec {
+   private let runLandmarks: Bool
+   private let runContours: Bool
+   private let runClassifications: Bool
+   private let trackingEnabled: Bool
+-  private let faceDetector: FaceDetector
++  private let core: VisionFaceDetectorCore
+ 
+   init(options: ImageFaceDetectorOptions) {
+     self.runLandmarks = options.runLandmarks ?? false
+     self.runContours = options.runContours ?? false
+     self.runClassifications = options.runClassifications ?? false
+     self.trackingEnabled = options.trackingEnabled ?? false
+-    self.faceDetector = FaceDetector.faceDetector(
+-      options: options.toMLFaceDetectorOptions()
++    self.core = VisionFaceDetectorCore(
++      runLandmarks: options.runLandmarks,
++      runContours: options.runContours,
++      runClassifications: options.runClassifications,
++      minFaceSize: options.minFaceSize
+     )
+ 
+     super.init()
+@@ -27,9 +36,22 @@ class HybridImageFaceDetector: HybridImageFaceDetectorSpec {
+     let uiImage = try createInputImage(
+       uri: try resolveInputImage(image)
+     )
+-    let mlImage = VisionImage(image: uiImage)
+-    let width = Double(uiImage.size.height)
+-    let height = Double(uiImage.size.width)
++    guard let cgImage = uiImage.cgImage else {
++      throw NSError(
++        domain: "HybridImageFaceDetector",
++        code: -5,
++        userInfo: [
++          NSLocalizedDescriptionKey:
++          "Failed to get CGImage from UIImage"
++        ]
++      )
++    }
++
++    let cgOrientation = uiImage.imageOrientation.cgImagePropertyOrientation
++    let pixelWidth = Double(cgImage.width)
++    let pixelHeight = Double(cgImage.height)
++    let width = cgOrientation.swapsDimensions ? pixelHeight : pixelWidth
++    let height = cgOrientation.swapsDimensions ? pixelWidth : pixelHeight
+ 
+     let config = FaceProcessConfig(
+       width: width,
+@@ -42,7 +64,12 @@ class HybridImageFaceDetector: HybridImageFaceDetectorSpec {
+       trackingEnabled: trackingEnabled
+     )
+ 
+-    let faces = try faceDetector.results(in: mlImage)
++    let handler = VNImageRequestHandler(
++      cgImage: cgImage,
++      orientation: cgOrientation,
++      options: [:]
++    )
++    let faces = try core.detect(with: handler)
+     return faces.map {
+       HybridFace(
+         face: $0,
+diff --git a/ios/VisionFaceDetectorCore.swift b/ios/VisionFaceDetectorCore.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..aba1096bfef5ee4b09d138dcb16d3bf1f8cec235
+--- /dev/null
++++ b/ios/VisionFaceDetectorCore.swift
+@@ -0,0 +1,136 @@
++//
++//  VisionFaceDetectorCore.swift
++//  [PATCH VEO] Reemplazo de Google MLKit por Apple Vision framework.
++//
++//  Por qué: MLKit no publica slice arm64-simulator (su podspec inyecta
++//  EXCLUDED_ARCHS[sdk=iphonesimulator*]=arm64 al target de la app) y los runtimes de iOS 26
++//  son arm64-only → con MLKit linkeado la app no puede correr en NINGÚN simulador moderno.
++//  Además la regla de soberanía del proyecto exige el on-device sin SDK de terceros.
++//
++//  Contrato: misma forma JS (specs nitro generados intactos). El veredicto de liveness lo da
++//  SIEMPRE el servidor (biometric-service); esto es solo guía + autocaptura, así que las
++//  aproximaciones (p.ej. probabilidad de ojo abierto por EAR) son aceptables.
++//
++
++import Foundation
++import UIKit
++import Vision
++
++/// Config compartida del procesamiento por detección (dimensiones de la imagen ORIENTADA en px
++/// + escalas de autoMode). Misma semántica que la versión MLKit para no romper `bounds`.
++struct FaceProcessConfig {
++  let width: Double
++  let height: Double
++  let scaleX: Double
++  let scaleY: Double
++  let runLandmarks: Bool
++  let runContours: Bool
++  let runClassifications: Bool
++  let trackingEnabled: Bool
++
++  init(
++    width: Double,
++    height: Double,
++    scaleX: Double,
++    scaleY: Double,
++    runLandmarks: Bool,
++    runContours: Bool,
++    runClassifications: Bool,
++    trackingEnabled: Bool
++  ) {
++    self.width = width
++    self.height = height
++    self.scaleX = scaleX
++    self.scaleY = scaleY
++    self.runLandmarks = runLandmarks
++    self.runContours = runContours
++    self.runClassifications = runClassifications
++    self.trackingEnabled = trackingEnabled
++  }
++}
++
++/// Par (observación base con ángulos, observación enriquecida con landmarks). Vision reporta
++/// yaw/pitch/roll en el request de RECTÁNGULOS; los landmarks salen de un segundo request
++/// encadenado. Se conservan ambos para no perder ninguno de los dos conjuntos de datos.
++struct VisionDetectedFace {
++  let base: VNFaceObservation
++  let enriched: VNFaceObservation?
++
++  var landmarks: VNFaceLandmarks2D? { enriched?.landmarks ?? base.landmarks }
++}
++
++/// Motor de detección facial sobre Apple Vision. Sincrónico (Vision `perform` es sync); el
++/// caller decide la cola. Thread-safe por no tener estado mutable.
++final class VisionFaceDetectorCore {
++  private let needsLandmarks: Bool
++  private let minFaceSize: Double
++
++  /// `runClassifications` (probabilidad de ojo abierto) también exige landmarks: el EAR se
++  /// calcula desde los puntos del ojo.
++  init(
++    runLandmarks: Bool?,
++    runContours: Bool?,
++    runClassifications: Bool?,
++    minFaceSize: Double?
++  ) {
++    self.needsLandmarks =
++      (runLandmarks ?? false) || (runContours ?? false) || (runClassifications ?? false)
++    self.minFaceSize = minFaceSize ?? 0.15
++  }
++
++  /// Detecta rostros en el handler dado. Dos fases: rectángulos (bounds + yaw/pitch/roll) y,
++  /// si hacen falta, landmarks encadenados vía `inputFaceObservations` (matcheados por UUID).
++  func detect(with handler: VNImageRequestHandler) throws -> [VisionDetectedFace] {
++    let rectanglesRequest = VNDetectFaceRectanglesRequest()
++    try handler.perform([rectanglesRequest])
++    guard let observations = rectanglesRequest.results, !observations.isEmpty else {
++      return []
++    }
++
++    // minFaceSize (semántica MLKit): ancho mínimo del rostro como fracción del ancho de imagen.
++    // El boundingBox de Vision ya viene normalizado 0..1 → comparación directa.
++    let bigEnough = observations.filter { Double($0.boundingBox.width) >= minFaceSize }
++    guard !bigEnough.isEmpty else { return [] }
++
++    guard needsLandmarks else {
++      return bigEnough.map { VisionDetectedFace(base: $0, enriched: nil) }
++    }
++
++    let landmarksRequest = VNDetectFaceLandmarksRequest()
++    landmarksRequest.inputFaceObservations = bigEnough
++    try handler.perform([landmarksRequest])
++    let enrichedByUuid = Dictionary(
++      uniqueKeysWithValues: (landmarksRequest.results ?? []).map { ($0.uuid, $0) }
++    )
++    return bigEnough.map {
++      VisionDetectedFace(base: $0, enriched: enrichedByUuid[$0.uuid])
++    }
++  }
++}
++
++extension UIImage.Orientation {
++  /// UIImage.Orientation → CGImagePropertyOrientation (Vision consume EXIF/CG, no UIKit).
++  var cgImagePropertyOrientation: CGImagePropertyOrientation {
++    switch self {
++    case .up: return .up
++    case .down: return .down
++    case .left: return .left
++    case .right: return .right
++    case .upMirrored: return .upMirrored
++    case .downMirrored: return .downMirrored
++    case .leftMirrored: return .leftMirrored
++    case .rightMirrored: return .rightMirrored
++    @unknown default: return .up
++    }
++  }
++}
++
++extension CGImagePropertyOrientation {
++  /// true si la orientación rota 90°/270° (el ancho y alto de la imagen orientada se intercambian).
++  var swapsDimensions: Bool {
++    switch self {
++    case .left, .right, .leftMirrored, .rightMirrored: return true
++    default: return false
++    }
++  }
++}
