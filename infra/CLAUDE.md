@@ -1,7 +1,7 @@
 # CLAUDE.md · VEO Infrastructure
 
-> 🟢 **Estado global y handoff:** lee `../../docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
-> `../../docs/FOUNDATION.md` (contrato + decisiones, §0.7 soberanía). **Regla maestra:** soberanía tecnológica
+> 🟢 **Estado global y handoff:** lee `../docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
+> `../docs/FOUNDATION.md` (contrato + decisiones, §0.7 soberanía). **Regla maestra:** soberanía tecnológica
 > = todo lo self-hosteable se self-hostea. ¿Se puede self-hostear? → se self-hostea (Postgres NO RDS · Kafka
 > NO MSK · MinIO NO S3 · Redis NO ElastiCache · cifrado app-level/SOPS NO KMS · `.env`/docker-secrets NO
 > Secrets Manager · Docker Compose NO EKS). ¿Es físicamente imposible (push Apple/Google, red de pagos, SMS
@@ -73,4 +73,4 @@ Cualquier PR que toque estos puntos debe etiquetarse `security-review` y bloquea
 ## Documentos
 
 - Blueprint: `../VEO_Blueprint.pdf` (Cap. 10 infra)
-- ADRs: `../../docs/adr/` (compartidos)
+- ADRs: `../docs/adr/` (compartidos)

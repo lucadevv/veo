@@ -35,10 +35,10 @@ veo/
 
 El backend (`services/*`, `packages/*`, `apps/{admin-web,family-web,web-hub}`, `e2e`) es un workspace **pnpm + Turborepo**. Las apps móviles (`apps/passenger`, `apps/driver`) quedan **fuera** del workspace pnpm por ahora: tienen su propio toolchain (Metro/CocoaPods/Gradle) y `pnpm-lock.yaml`.
 
-> ⚠️ **Estado de consolidación:** este repo centraliza el **código fuente** de los 4 repos originales (`veo-platform`, `veo-passenger-app`, `veo-driver-app`, `veo-infra`). La unificación del build (resolver las deps `file:` de las RN apps hacia `packages/` dentro del monorepo, un único `pnpm install` que buildee todo) es un paso posterior pendiente. Ver `../docs/STATUS.md`.
+> ⚠️ **Estado de consolidación:** este repo centraliza el **código fuente** de los 4 repos originales (`veo-platform`, `veo-passenger-app`, `veo-driver-app`, `veo-infra`). La unificación del build (resolver las deps `file:` de las RN apps hacia `packages/` dentro del monorepo, un único `pnpm install` que buildee todo) es un paso posterior pendiente. Ver `docs/STATUS.md`.
 
 ## Por dónde empezar
 
-1. `../docs/STATUS.md` — qué se hizo, dónde quedamos, qué falta.
-2. `../docs/FOUNDATION.md` — contrato técnico canónico (convenciones, soberanía, decisiones).
+1. `docs/STATUS.md` — qué se hizo, dónde quedamos, qué falta.
+2. `docs/FOUNDATION.md` — contrato técnico canónico (convenciones, soberanía, decisiones).
 3. `CLAUDE.md` — reglas no negociables.

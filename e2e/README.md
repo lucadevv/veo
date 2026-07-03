@@ -31,7 +31,7 @@ el dev-stack y corre el viaje completo.
 - Dependencias instaladas: `pnpm install` (en la raíz del monorepo).
 - Infra del dev-stack arriba (el script la levanta si falta): **Postgres 5433, Redis 6379, Kafka 9094**.
   - Los schemas Postgres por servicio ya existen (`dev-stack/init-postgres.sql`).
-  - Las migraciones Prisma ya están aplicadas al dev-stack (ver `../../docs/STATUS.md`). Si reseteaste el
+  - Las migraciones Prisma ya están aplicadas al dev-stack (ver `../docs/STATUS.md`). Si reseteaste el
     volumen de Postgres, vuelve a aplicarlas antes de correr.
 
 > Modos **sandbox** forzados por el harness: SMS (OTP solo en log → lo inyectamos en Redis),
@@ -101,7 +101,7 @@ e2e/
   dev-stack para infra y arrancamos cada servicio/BFF **compilado** (`start:prod` = `node dist/main`).
   Es determinista (a diferencia de `nest start --watch`, que con `deleteOutDir` deja `dist` a medias
   si se interrumpe).
-- **Fix de build a `dist`** (gap conocido en `../../docs/STATUS.md`): el `tsconfig.tsbuildinfo` viejo +
+- **Fix de build a `dist`** (gap conocido en `../docs/STATUS.md`): el `tsconfig.tsbuildinfo` viejo +
   `incremental` hacía que `nest build` no emitiera; el orquestador lo borra antes de compilar. Y como
   `tsc` no copia el **cliente Prisma generado** (`src/generated`), el orquestador lo copia a
   `dist/generated` tras el build (si no, `require('../generated/prisma')` falla en runtime).

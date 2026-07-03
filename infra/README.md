@@ -70,5 +70,5 @@ bash infra/deploy/migrate-preview.sh
 ## Documentación
 
 - [CLAUDE.md](./CLAUDE.md) — contexto para futuras sesiones AI (el detalle operativo canónico vive ahí)
-- [docs/runbooks/](../../docs/runbooks/) — runbooks operativos (TODO)
+- [docs/runbooks/](../docs/runbooks/) — runbooks operativos (TODO)
 - Blueprint maestro: `../VEO_Blueprint.pdf` (Cap. 10 infra + observabilidad)

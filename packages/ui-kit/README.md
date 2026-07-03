@@ -4,7 +4,7 @@ Sistema de diseño **móvil** de VEO: tokens + dos temas + componentes **React N
 compartidos por `veo-passenger-app` y `veo-driver-app`.
 
 > Documentación completa del sistema (principios, tokens, ambos temas, inventario de componentes con
-> su API, motion/a11y, anti-patrones y referencias visuales): **[`docs/DESIGN-MOBILE.md`](../../../docs/DESIGN-MOBILE.md)**.
+> su API, motion/a11y, anti-patrones y referencias visuales): **[`docs/DESIGN-MOBILE.md`](../../docs/DESIGN-MOBILE.md)**.
 
 ## Uso
 

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es-PE">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VEO · Familia (clicable)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{font-family:'Inter',sans-serif;background:#cfd4dc;display:flex;align-items:center;justify-content:center;min-height:100vh;overflow:hidden;}
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 80% at 50% -10%,#e9ecf1 0%,#cdd3dc 60%,#bcc3ce 100%);}
+  .phone{position:relative;width:390px;height:844px;border-radius:50px;background:#fff;box-shadow:0 0 0 11px #11141a,0 0 0 12px #2a2f3a,0 40px 120px -20px rgba(20,30,50,.45);overflow:hidden;flex:none;}
+  .punch{position:absolute;top:14px;left:50%;transform:translateX(-50%);width:11px;height:11px;border-radius:50%;background:#11141a;z-index:61;}
+  #root{position:absolute;inset:0;border-radius:50px;overflow:hidden;}
+  .fam{height:100%;}
+  .fscreen{animation:fin .3s ease;}
+  @keyframes fin{from{transform:translateY(7px);}to{transform:none;}}
+  .ftoast{position:absolute;left:50%;bottom:40px;transform:translateX(-50%);background:#1c2230;color:#fff;font-size:13px;font-weight:500;padding:11px 18px;border-radius:12px;z-index:50;box-shadow:0 12px 30px rgba(0,0,0,.3);white-space:nowrap;}
+</style>
+</head>
+<body>
+  <div id="stage"><div class="phone"><div class="punch"></div><div id="root"></div></div></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script type="text/babel" src="familia-screens.jsx" data-presets="react"></script>
+  <script type="text/babel" data-presets="react">
+function FApp(){
+ const [stack,setStack]=React.useState(['landing']);
+ const [toast,setToast]=React.useState(null);
+ const go=(s,rep)=>setStack(p=>rep?[...p.slice(0,-1),s]:[...p,s]);
+ const back=()=>setStack(p=>p.length>1?p.slice(0,-1):p);
+ const notify=(m)=>{setToast(m);clearTimeout(window.__ft);window.__ft=setTimeout(()=>setToast(null),1700);};
+ const [push,setPush]=React.useState(null);
+ const pushNotify=(t,b)=>{setPush({t,b});clearTimeout(window.__fp);window.__fp=setTimeout(()=>setPush(null),3600);};
+ React.useEffect(()=>{const k=e=>{if(e.key==='p'||e.key==='P')pushNotify('Alerta de seguridad','María Fernanda activó el botón de ayuda · toca para ver');};window.addEventListener('keydown',k);return()=>window.removeEventListener('keydown',k);},[]);
+ React.useEffect(()=>{const k=e=>{if(e.key==='r'||e.key==='R')setStack(['landing']);if(e.key==='Backspace'&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName)){e.preventDefault();back();}};window.addEventListener('keydown',k);return()=>window.removeEventListener('keydown',k);},[]);
+ const screen=stack[stack.length-1];
+ const S=window.FAM.SCR[screen]||window.FAM.SCR.landing;
+ return <div className="fam">{React.createElement(S,{go,back,notify,push:pushNotify,key:screen})}{toast&&<div className="ftoast">{toast}</div>}{push&&<div onClick={()=>{setPush(null);go('safety');}} style={{position:'absolute',top:12,left:10,right:10,zIndex:80,background:'#fff',border:'1px solid #e7e9ee',borderRadius:16,padding:'12px 14px',display:'flex',gap:12,alignItems:'center',boxShadow:'0 16px 40px rgba(20,30,50,.2)',cursor:'pointer'}}><div style={{width:34,height:34,borderRadius:9,background:'#27304a',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',flex:'none',fontWeight:700,fontSize:11}}>VEO</div><div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:13.5,color:'#1c2230'}}>{push.t}</div><div style={{fontSize:12,color:'#5a6478',marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{push.b}</div></div><span style={{fontSize:10,color:'#8b94a3',flex:'none'}}>ahora</span></div>}</div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<FApp/>);
+  </script>
+</body>
+</html>
