@@ -81,6 +81,25 @@ export function ScheduleNewScreen(): React.JSX.Element {
             {t('scheduleNew.note')}
           </Text>
         </Card>
+
+        {/* Carpooling (ADR-014): entrada SECUNDARIA al marketplace de asientos publicados entre
+            ciudades. No toca el flujo de programación on-demand de arriba: es otro producto. */}
+        <Card variant="outlined" padding="lg">
+          <View style={{gap: theme.spacing.md}}>
+            <View style={{gap: theme.spacing.xs}}>
+              <Text variant="bodyStrong">{t('carpool.entryTitle')}</Text>
+              <Text variant="footnote" color="inkMuted">
+                {t('carpool.entryBody')}
+              </Text>
+            </View>
+            <Button
+              label={t('carpool.entryCta')}
+              variant="secondary"
+              size="sm"
+              onPress={() => navigation.navigate('CarpoolSearch')}
+            />
+          </View>
+        </Card>
       </ScrollView>
     </SafeScreen>
   );

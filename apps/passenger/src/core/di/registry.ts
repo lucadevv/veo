@@ -30,6 +30,13 @@ import {
   RequestKycChallengeUseCase,
   SubmitKycUseCase,
 } from '../../features/kyc/domain/usecases';
+import {HttpCarpoolRepository} from '../../features/carpool/data/httpCarpoolRepository';
+import {
+  GetCarpoolBookingUseCase,
+  GetCarpoolTripDetailUseCase,
+  ReserveCarpoolSeatUseCase,
+  SearchCarpoolTripsUseCase,
+} from '../../features/carpool/domain/usecases';
 import {HttpMapsRepository} from '../../features/maps/data/httpMapsRepository';
 import {
   AutocompletePlacesUseCase,
@@ -229,6 +236,11 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.dispatchRepository,
     c => new HttpDispatchRepository(c.resolve(TOKENS.httpClient)),
+  );
+  // Marketplace de carpooling (ADR-014, lado pasajero): public-bff `/carpool/*`.
+  container.register(
+    TOKENS.carpoolRepository,
+    c => new HttpCarpoolRepository(c.resolve(TOKENS.httpClient)),
   );
 
   // Snapshot local de viajes en MMKV (prefs). YA NO es la fuente del HISTORIAL — eso ahora lo manda el
@@ -460,6 +472,24 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.rebidUseCase,
     c => new RebidUseCase(c.resolve(TOKENS.tripRepository)),
+  );
+
+  // Casos de uso · Carpooling (marketplace programado · ADR-014)
+  container.register(
+    TOKENS.searchCarpoolTripsUseCase,
+    c => new SearchCarpoolTripsUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.getCarpoolTripDetailUseCase,
+    c => new GetCarpoolTripDetailUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.reserveCarpoolSeatUseCase,
+    c => new ReserveCarpoolSeatUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.getCarpoolBookingUseCase,
+    c => new GetCarpoolBookingUseCase(c.resolve(TOKENS.carpoolRepository)),
   );
 
   // Casos de uso · Maps

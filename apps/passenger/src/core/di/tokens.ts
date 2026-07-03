@@ -126,6 +126,13 @@ import type {
   RevokeShareUseCase,
   ShareTripUseCase,
 } from '../../features/trip/domain/usecases';
+import type {CarpoolRepository} from '../../features/carpool/domain/carpoolRepository';
+import type {
+  GetCarpoolBookingUseCase,
+  GetCarpoolTripDetailUseCase,
+  ReserveCarpoolSeatUseCase,
+  SearchCarpoolTripsUseCase,
+} from '../../features/carpool/domain/usecases';
 import type {MapsRepository} from '../../features/maps/domain/mapsRepository';
 import type {
   AutocompletePlacesUseCase,
@@ -161,6 +168,8 @@ export const TOKENS = {
     'CameraSharePreferenceRepository',
   ),
   mapsRepository: createToken<MapsRepository>('MapsRepository'),
+  // Marketplace de carpooling (ADR-014, lado pasajero): búsqueda/detalle/reserva vía public-bff.
+  carpoolRepository: createToken<CarpoolRepository>('CarpoolRepository'),
   // Dispatch: vehículos cercanos anónimos (ambiente del mapa en idle/searching).
   dispatchRepository: createToken<DispatchRepository>('DispatchRepository'),
   panicRepository: createToken<PanicRepository>('PanicRepository'),
@@ -272,6 +281,20 @@ export const TOKENS = {
   acceptOfferUseCase: createToken<AcceptOfferUseCase>('AcceptOfferUseCase'),
   cancelBidUseCase: createToken<CancelBidUseCase>('CancelBidUseCase'),
   rebidUseCase: createToken<RebidUseCase>('RebidUseCase'),
+
+  // Casos de uso · Carpooling (marketplace programado · ADR-014)
+  searchCarpoolTripsUseCase: createToken<SearchCarpoolTripsUseCase>(
+    'SearchCarpoolTripsUseCase',
+  ),
+  getCarpoolTripDetailUseCase: createToken<GetCarpoolTripDetailUseCase>(
+    'GetCarpoolTripDetailUseCase',
+  ),
+  reserveCarpoolSeatUseCase: createToken<ReserveCarpoolSeatUseCase>(
+    'ReserveCarpoolSeatUseCase',
+  ),
+  getCarpoolBookingUseCase: createToken<GetCarpoolBookingUseCase>(
+    'GetCarpoolBookingUseCase',
+  ),
 
   // Casos de uso · Maps
   autocompletePlacesUseCase: createToken<AutocompletePlacesUseCase>(
