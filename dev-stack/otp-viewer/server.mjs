@@ -13,9 +13,11 @@
  */
 import { createServer } from 'node:http';
 import { createHmac } from 'node:crypto';
+import { execFile } from 'node:child_process';
 
 const PORT = Number(process.env.OTP_VIEWER_PORT ?? process.env.PORT ?? 5190);
 const MAX_ENTRIES = 100; // anillo acotado: solo los últimos N (es un visor de dev, no un historial)
+const PG_CONT = process.env.DEV_PG_CONTAINER ?? 'veo-postgres'; // mismo contenedor que usa veo.sh
 
 // ─── Admin panel (solo dev) ──────────────────────────────────────────────────────────────────
 // Credenciales del SUPERADMIN de dev (seed: services/identity-service/scripts/seed.ts) + secreto TOTP
@@ -88,6 +90,47 @@ function addEntry(payload) {
   });
   if (entries.length > MAX_ENTRIES) entries.length = MAX_ENTRIES;
 }
+
+// ─── Backfill desde la DB (lo mismo que `veo.sh otp`) ────────────────────────────────────────
+// El ingest en vivo es fire-and-forget a memoria: cualquier OTP emitido con el visor caído se pierde.
+// Pero TODO OTP de driver/pasajero (SMS sandbox o email) queda en notification.notifications
+// (payload->>'code'), que es exactamente lo que lee `veo.sh otp`. Este poller trae esas filas cada
+// POLL_MS vía `docker exec psql` (cero deps npm) y las mergea con dedup, así el visor muestra el
+// historial completo aunque se reinicie. Si docker/psql no está, falla silencioso: el ingest sigue.
+const POLL_MS = 3000;
+const seenDbKeys = new Set(); // "epoch|destino|código" de filas ya mergeadas
+
+const DB_QUERY = `SELECT extract(epoch from created_at)::bigint, channel,
+       COALESCE(payload->>'to', payload->>'email', payload->>'recipient', '?'),
+       payload->>'code', status
+  FROM notification.notifications WHERE payload ? 'code'
+  ORDER BY created_at DESC LIMIT 30;`;
+
+function pollDb() {
+  execFile(
+    'docker',
+    ['exec', PG_CONT, 'psql', '-U', 'veo', '-d', 'veo', '-t', '-A', '-F', '\t', '-c', DB_QUERY],
+    { timeout: 5000 },
+    (err, stdout) => {
+      if (err) return; // infra abajo o docker ausente — el visor sigue con el ingest en vivo
+      for (const line of stdout.split('\n')) {
+        const [epoch, channel, to, code, status] = line.split('\t');
+        if (!epoch || !code) continue;
+        const key = `${epoch}|${to}|${code}`;
+        if (seenDbKeys.has(key)) continue;
+        seenDbKeys.add(key);
+        const at = Number(epoch) * 1000;
+        // El sender ya lo pudo haber ingestado en vivo: mismo código+destino cerca en el tiempo → skip.
+        if (entries.some((e) => e.code === code && e.to === to && Math.abs(e.at - at) < 90_000)) continue;
+        addEntry({ service: 'driver/pasajero (db)', channel, to, message: `estado: ${status}`, code, at });
+      }
+      entries.sort((a, b) => b.at - a.at);
+      if (seenDbKeys.size > 500) seenDbKeys.clear(); // acotado; el dedup contra `entries` sigue cubriendo
+    },
+  );
+}
+pollDb();
+setInterval(pollDb, POLL_MS).unref();
 
 function send(res, status, body, contentType = 'application/json') {
   res.writeHead(status, {

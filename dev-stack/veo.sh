@@ -106,6 +106,9 @@ SERVICES=(
   # Puerto 5001 (el 5000 lo ocupa ControlCenter de macOS). health = "/" → la home redirige al login
   # (307), que el probe/tablero tratan como VIVO (igual criterio que el 401 auth-gated del admin-bff).
   "admin-web|5001|apps/admin-web|web|/"
+  # otp-viewer — visor web de OTPs de dev (http://localhost:5190). Node http NATIVO, cero deps,
+  # NO nest: kind=mjs (sin build, sin prisma, sin dist). health = "/" (el HTML del visor da 200).
+  "otp-viewer|5190|dev-stack/otp-viewer|mjs|/"
 )
 
 # Infra docker: "<label>|<container>|<port>".
@@ -342,6 +345,7 @@ boot_all() {
   boot_biometric
   boot_tracking
   boot_admin_web   # web (Next.js): dev→next dev (HMR) · up→next start (buildeado). Distingue por VEO_WATCH.
+  boot_otp_viewer  # visor de OTPs de dev (:5190) — los sandbox senders le POSTean; sin él los OTP no se ven.
 }
 
 # tracking: Go, NO nest. Corre 'go run ./cmd/server' (puerto :3004 vía
@@ -436,6 +440,52 @@ boot_biometric() {
   if ! kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null && ! port_in_use "$port"; then
     red "  · biometric: el proceso terminó al arrancar — motivo (de $logf):"
     rg -N 'SettingsError|Error|Traceback|ValidationError' "$logf" 2>/dev/null | tail -3 | sed 's/^/      /' || tail -3 "$logf" | sed 's/^/      /'
+  fi
+}
+
+# otp-viewer: visor web de OTPs de dev (:5190). Node http NATIVO (cero deps, ni build ni install),
+# NO nest. Misma PLOMERÍA que biometric/tracking (pid → .pids, log → logs, idempotente por puerto,
+# reporte-no-mudo si muere al boot). dev (VEO_WATCH=1) → `node --watch` (reinicia si tocás server.mjs);
+# up → node plano. El puerto sale del MAPA (SERVICES) vía OTP_VIEWER_PORT — única fuente, no el default
+# hardcodeado del server.mjs.
+boot_otp_viewer() {
+  local line; line="$(svc_line otp-viewer)" || return 0
+  local svc port dir kind health
+  IFS='|' read -r svc port dir kind health <<<"$line"
+  local svc_dir="$ROOT_DIR/$dir" logf="$LOGS_DIR/$svc.log" pidf="$PIDS_DIR/$svc.pid"
+
+  if port_in_use "$port"; then
+    blue "  · otp-viewer ya corre en :$port (pid $(pid_on_port "$port")) — idempotente, no duplico"
+    [[ -f "$pidf" ]] || pid_on_port "$port" > "$pidf"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    yel "  · otp-viewer: falta node en PATH — no se levanta (los OTP de dev no se verán en el visor)"
+    return 0
+  fi
+
+  if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+    blue "  ▶ otp-viewer (node --watch server.mjs :$port) → log: $logf"
+  else
+    blue "  ▶ otp-viewer (node server.mjs :$port) → log: $logf"
+  fi
+  (
+    cd "$svc_dir" || exit 1
+    export OTP_VIEWER_PORT="$port"
+    if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+      exec node --watch server.mjs
+    else
+      exec node server.mjs
+    fi
+  ) >"$logf" 2>&1 &
+  echo $! > "$pidf"
+  log "pid $(cat "$pidf")"
+  # Reporte NO-mudo (espejo de biometric/tracking): si murió al arrancar (típico: :5190 tomado
+  # por algo ajeno — la regla de puertos manda REPORTAR, no saltar de puerto), mostramos el motivo.
+  sleep 1
+  if ! kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null && ! port_in_use "$port"; then
+    red "  · otp-viewer: el proceso terminó al arrancar — motivo (de $logf):"
+    tail -3 "$logf" | sed 's/^/      /'
   fi
 }
 
@@ -616,6 +666,9 @@ cmd_down() {
   # flota (ej. take_photo:3137) — pisar otro proyecto en silencio es justo lo que la regla de puertos prohíbe.
   pkill -f "next dev -p 5001" 2>/dev/null && log "  pkill 'next dev -p 5001' (admin-web)" || true
   pkill -f "next start -p 5001" 2>/dev/null && log "  pkill 'next start -p 5001' (admin-web)" || true
+  # otp-viewer: patrón por PATH del script (único en la máquina) — cubre el `node --watch` padre
+  # cuyo worker ya cayó por puerto en (b).
+  pkill -f "otp-viewer/server.mjs" 2>/dev/null && log "  pkill 'otp-viewer/server.mjs' (otp-viewer)" || true
 
   # Infra: SOLO con --infra.
   if (( kill_infra )); then
@@ -1111,6 +1164,7 @@ cmd_restart() {
     python) boot_biometric ;;
     go) boot_tracking ;;
     web) boot_admin_web ;;   # admin-web: el (re)build de Next vive DENTRO de boot_admin_web (no en el paso 2, que es solo node).
+    mjs) boot_otp_viewer ;;  # otp-viewer: cero build — arranca directo.
   esac
   reconcile_pids
   echo
@@ -1155,7 +1209,7 @@ cmd_dev() {
   printf '\n%s%s✓ WATCH activo:%s editá el SRC de cualquier servicio → recompila y reinicia solo.\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
   yel " Cambiaste una LIB @veo/* o tracking (Go) → 'veo.sh restart <svc>' (o 'veo.sh dev' de nuevo)."
   yel " admin-web: gestionada por veo.sh (next dev/HMR). Apps RN: las compilás vos aparte."
-  blue " 📲 OTP en vivo (driver/pasajero · SMS sandbox + email): corré  'veo.sh otp -f'  en otra terminal."
+  blue " 📲 OTP en vivo (driver/pasajero · SMS sandbox + email): visor web → http://localhost:5190/  (o 'veo.sh otp -f' en terminal)."
 }
 
 # ── SUBCOMANDO: otp (escáner de OTP de dev) ───────────────────────────────────
