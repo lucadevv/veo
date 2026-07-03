@@ -35,7 +35,7 @@ Lee `/Users/jaxximize/Desktop/ecritrorio/00_Proyectos/VEO/VEO_Blueprint.pdf` o `
 ## Stack
 
 - Node 20 + pnpm 9 + Turborepo
-- NestJS 10 (backend), Next.js 14 (web), React Native 0.75 (mobile)
+- NestJS 10 (backend), Next.js 14 (web), React Native 0.85 (mobile)
 - Postgres 16 + PostGIS, Redis 7, Kafka self-hosted, ClickHouse, MinIO self-hosted
 - LiveKit (WebRTC)
 - Docker Compose en VPS único + GitHub Actions (deploy SSH)
@@ -101,14 +101,19 @@ docker compose -f infra/docker/dev/docker-compose.yml logs -f <svc>
 
 ### Metro / React Native — puertos de dev server
 
-`apps/passenger` y `apps/driver` corren `react-native start` SIN `--port`, así que **ambos defaultean a 8081** (el default universal de Metro). Si corrés una sola app por vez, perfecto. Si necesitás **passenger y driver a la vez**, levantá el driver en otro puerto:
+**Cada app tiene SU puerto fijo** para poder correr ambas (con sus dos Metros) a la vez:
+
+| App                | Puerto Metro | Dónde está configurado                                                                     |
+| ------------------ | ------------ | ------------------------------------------------------------------------------------------ |
+| `apps/passenger`   | **8081**     | default de Metro (scripts sin `--port`)                                                     |
+| `apps/driver`      | **8084**     | `--port 8084` en TODOS los scripts de su package.json (`start`/`dev`/`ios`/`android`) + `RCT_METRO_PORT=8084` en los de iOS + `react_native_dev_server_port=8084` en `android/gradle.properties` (bakea el puerto en el build debug: emulador y device físico) |
 
 ```bash
-# passenger queda en 8081 (default). Para driver en paralelo:
-RCT_METRO_PORT=8084 pnpm --filter @veo/driver dev
+pnpm --filter veo-passenger-app dev   # Metro passenger :8081
+pnpm --filter veo-driver-app dev      # Metro driver    :8084 (ya viene con --port en el script)
 ```
 
-`8084` está libre y fuera de los rangos que veo usa (8082 = tileserver, 8088 = ui-stack — NO usar). En iOS `RCT_METRO_PORT` ya redirige la app; en Android, si conectás un device real al driver, ajustá `react_native_dev_server_port` a 8084. El cruce con `go-frontend` (otro producto RN, también en 8081) es cosmético: son productos distintos que no co-corren.
+`8084` está libre y fuera de los rangos que veo usa (8082 = tileserver, 8088 = ui-stack — NO usar). Si cambiás el puerto del driver, cambialo en los TRES lugares (scripts, RCT_METRO_PORT y gradle.properties) o el app buildeado apuntará a un Metro que no existe. El cruce con `go-frontend` (otro producto RN, también en 8081) es cosmético: son productos distintos que no co-corren.
 
 ## Documentos de referencia
 
