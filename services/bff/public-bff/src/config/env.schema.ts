@@ -97,6 +97,9 @@ export const envSchema = z
     CHAT_URL: requiredInProd('http://localhost:3014/api/v1'),
     // media-service — presign de subida del avatar (PUT directo a MinIO/S3).
     MEDIA_URL: requiredInProd('http://localhost:3007/api/v1'),
+    // booking-service (ADR-014 · carpooling, lado PASAJERO): búsqueda pública de viajes publicados +
+    // detalle enriquecido + reservar asiento + seguir MI reserva (espeja BOOKING_SERVICE_URL del driver-bff).
+    BOOKING_URL: requiredInProd('http://localhost:3016/api/v1'),
     REST_TIMEOUT_MS: z.coerce.number().default(8000),
 
     // ── Rate limiting (Redis). POST /panic JAMÁS se limita (BR / FOUNDATION §14). ──

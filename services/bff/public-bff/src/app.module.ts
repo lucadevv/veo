@@ -30,6 +30,7 @@ import { PromosModule } from './promos/promos.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { ChatModule } from './chat/chat.module';
 import { SupportModule } from './support/support.module';
+import { CarpoolModule } from './carpool/carpool.module';
 import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
@@ -57,6 +58,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     ReferralsModule,
     ChatModule,
     SupportModule,
+    CarpoolModule,
   ],
   providers: [
     // public-bff SOLO acepta tokens de tipo 'passenger' (el JwtAuthGuard rechaza conductor/admin

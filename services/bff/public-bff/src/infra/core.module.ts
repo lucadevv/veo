@@ -39,6 +39,7 @@ import {
   REST_NOTIFICATION,
   REST_CHAT,
   REST_MEDIA,
+  REST_BOOKING,
   REST_PANIC,
   REST_PAYMENT,
   REST_RATING,
@@ -182,6 +183,7 @@ const restProviders: Provider[] = [
   restProvider(REST_NOTIFICATION, 'NOTIFICATION_URL'),
   restProvider(REST_CHAT, 'CHAT_URL'),
   restProvider(REST_MEDIA, 'MEDIA_URL'),
+  restProvider(REST_BOOKING, 'BOOKING_URL'),
 ];
 
 const tokens = [
@@ -212,6 +214,7 @@ const tokens = [
   REST_NOTIFICATION,
   REST_CHAT,
   REST_MEDIA,
+  REST_BOOKING,
 ];
 
 @Global()
