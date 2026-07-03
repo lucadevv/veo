@@ -1,7 +1,7 @@
 # CLAUDE.md · VEO Passenger App
 
-> 🟢 **Estado global y handoff:** lee `../../../docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
-> `../../../docs/FOUNDATION.md` (contrato + decisiones, §0.7 soberanía). **Regla maestra:** soberanía tecnológica = todo lo self-hosteable se self-hostea, sin SaaS de terceros para el DATO ni el CÓMPUTO sensibles (biometría, video, pánico, audit, PII → propios/self-hosted). SOLO sobreviven los rieles de transporte físicamente imposibles de self-hostear (push FCM/APNs, red de pagos Yape/Plin, SMS de operador), tras un puerto propio intercambiable y sin PII en el payload. Soberanía es seguridad del dato, no “cero proveedores”.
+> 🟢 **Estado global y handoff:** lee `../../docs/STATUS.md` (qué se hizo, dónde quedamos, qué falta) y
+> `../../docs/FOUNDATION.md` (contrato + decisiones, §0.7 soberanía). **Regla maestra:** soberanía tecnológica = todo lo self-hosteable se self-hostea, sin SaaS de terceros para el DATO ni el CÓMPUTO sensibles (biometría, video, pánico, audit, PII → propios/self-hosted). SOLO sobreviven los rieles de transporte físicamente imposibles de self-hostear (push FCM/APNs, red de pagos Yape/Plin, SMS de operador), tras un puerto propio intercambiable y sin PII en el payload. Soberanía es seguridad del dato, no “cero proveedores”.
 > Esta app (Ola 4) aún no empieza; el backend `identity-service` ya está listo como referencia.
 
 ## Repo
@@ -46,11 +46,16 @@ App pasajero React Native (iOS + Android). Parte de un sistema multi-repo:
 
 La **fuente de verdad visual** es `design/veo.pen` (repo del plano). Al migrar/construir CUALQUIER pantalla de UI, este ciclo NO es opcional:
 
-1. **Leé el frame del `.pen` FRESCO con el MCP `pencil`** (`get_screenshot` + `batch_get`) — el `.pen` es multiplayer y cambia; NUNCA de memoria. Buscá TODAS las frames del flujo por nombre (`batch_get` con `patterns`): un flujo puede tener `P/X`, `P/X-2`, `P/X-3` (ej. onboarding = 3 frames).
-2. **Construí CONFORMANDO al `.pen`** (layout, orden, componentes, tokens). Los `.pen` están cifrados: solo se leen por el MCP `pencil`, jamás con Read/grep.
-3. **Verificá en el simulador con `mobile-mcp`/`metro-mcp` y COMPARÁ LADO A LADO**: screenshot del sim vs `get_screenshot` del `.pen`. **"Se ve fiel" NO alcanza** — enumerá las diferencias REALES (posición, orden, visible/oculto, apilado-vs-lado-a-lado, botón/label) y corregí en loop hasta que calce. (Este paso me lo salté una vez y entregué Auth con Google/Apple apilados en vez de lado a lado + OTP oculto — no repetir.)
-4. **Copy en TUTEO peruano** aunque el `.pen` esté en voseo (`src/i18n/locales/es-PE/voseoGuard.test.ts` rompe el build ante voseo). El `.pen` manda en DISEÑO, no en dialecto.
-5. **Assets del `.pen`**: copialos OPTIMIZADOS (resize a resolución de device + JPG, ~100-200KB), no los PNG crudos. Si tienen barra de estado/menú del celular, recortá el chrome (solo contenido) con ImageMagick.
+1. **Leé el frame del `.pen` FRESCO con el MCP `pencil`** (`get_screenshot` + `batch_get`) — el `.pen` es multiplayer y cambia; NUNCA de memoria. Confirmá primero con `get_editor_state` que el archivo activo es el `veo.pen` correcto. Buscá TODAS las frames del flujo por nombre (`batch_get` con `patterns`): un flujo puede tener `P/X`, `P/X-2`, `P/X-3` (ej. onboarding = 3 frames).
+2. **Extraé los NÚMEROS del diseño, no los adivines del screenshot** (la causa raíz de las infidelidades pasadas era construir "a ojo" desde la imagen):
+   - `get_variables` → los **tokens exactos** (colores, spacing, fonts). Mapealos a los tokens de `@veo/ui-kit` (`themes.ts`); si un valor del `.pen` no existe como token, PARAR y resolver el token primero — jamás hardcodear el hex "que se ve".
+   - `snapshot_layout` → la **estructura numérica del layout** (posiciones, tamaños, orden, apilado-vs-lado-a-lado, solapados). Esto es lo que define fila-vs-columna, no tu lectura del screenshot.
+3. **Construí CONFORMANDO al `.pen`** (layout, orden, componentes, tokens). Los `.pen` están cifrados: solo se leen por el MCP `pencil`, jamás con Read/grep.
+4. **Verificá en DOS pasadas**:
+   a. **Numérica**: volvé a correr `snapshot_layout` del frame y compará contra lo que construiste (orden de hijos, dirección fila/columna, visible/oculto, spacing). Los números no opinan.
+   b. **Visual**: en el simulador con `mobile-mcp`/`metro-mcp`, **COMPARÁ LADO A LADO** screenshot del sim vs `get_screenshot` del `.pen`. **"Se ve fiel" NO alcanza** — enumerá las diferencias REALES (posición, orden, visible/oculto, apilado-vs-lado-a-lado, botón/label) y corregí en loop hasta que calce. (Este paso se salteó una vez y se entregó Auth con Google/Apple apilados en vez de lado a lado + OTP oculto — no repetir.)
+5. **Copy en TUTEO peruano** aunque el `.pen` esté en voseo (`src/i18n/locales/es-PE/voseoGuard.test.ts` rompe el build ante voseo). El `.pen` manda en DISEÑO, no en dialecto.
+6. **Assets del `.pen`**: copialos OPTIMIZADOS (resize a resolución de device + JPG, ~100-200KB), no los PNG crudos. Si tienen barra de estado/menú del celular, recortá el chrome (solo contenido) con ImageMagick.
 
 ## Pantallas críticas (priorizadas)
 
