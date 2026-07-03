@@ -7,8 +7,12 @@ import { z } from 'zod';
  *
  * Resolución de cada URL del backend (de mayor a menor prioridad), igual que la passenger app:
  *  1. `Config.*` (.env vía react-native-config): override EXPLÍCITO del dueño (staging/prod).
- *     EXCEPCIÓN en `__DEV__`: si apunta a una IP LAN privada DISTINTA del host vivo de Metro,
- *     está STALE (el DHCP rotó la IP) → se usa el host de Metro y se avisa por consola.
+ *     EXCEPCIÓN en `__DEV__` con packager vivo: TODO override cuyo host NO sea el host de Metro se
+ *     trata como stale y se ignora (con aviso por consola) — cubre la IP LAN rotada por DHCP, el
+ *     dominio de un túnel muerto BAKEADO en el build nativo (react-native-config hornea los valores:
+ *     editar el .env no afecta al build instalado hasta el próximo `pnpm ios`/`pnpm android`) y
+ *     `localhost` en un device físico. Para apuntar un build dev a staging o a un host fijo a
+ *     propósito: `DEV_FORCE_ENV_URLS=true` en el .env (y rebuild).
  *  2. metro-derived (sólo `__DEV__`): el host del packager Metro (la IP ACTUAL de la Mac), así un
  *     device físico llega al `driver-bff` (:4002) sin tocar el .env ni recompilar (un Reload).
  *  3. fallback por plataforma: Android emulador → `10.0.2.2`; iOS/sim → `localhost`.
@@ -44,14 +48,6 @@ export function metroDevHost(): string | null {
   return null;
 }
 
-/** IP privada RFC 1918 (candidata a quedar STALE cuando el DHCP rota la IP de la Mac). */
-function isPrivateLanHost(host: string): boolean {
-  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-  const match = /^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
-  return match ? Number(match[1]) >= 16 && Number(match[1]) <= 31 : false;
-}
-
 /** Host (IP/hostname) de una URL http(s); `null` si no parsea. */
 function hostOf(url: string): string | null {
   return /^https?:\/\/([^/:?#]+)/i.exec(url)?.[1] ?? null;
@@ -59,6 +55,12 @@ function hostOf(url: string): string | null {
 
 /** Host VIVO del packager Metro en dev (la IP ACTUAL de la Mac); `null` fuera de dev o sin packager. */
 const metroHost = __DEV__ ? metroDevHost() : null;
+
+/**
+ * Escape hatch del auto-sanado (sólo relevante en `__DEV__`): con `DEV_FORCE_ENV_URLS=true` en el
+ * .env, los overrides se honran tal cual aunque su host no sea el de Metro (staging, túnel, IP fija).
+ */
+const forceEnvUrls = Config.DEV_FORCE_ENV_URLS === 'true';
 
 /**
  * Defaults de dev: con host de Metro derivamos del mismo (el driver-bff vive en `:4002`, el
@@ -83,19 +85,21 @@ const devDefaults = metroHost
       };
 
 /**
- * Resuelve una URL de backend con AUTO-SANADO de IP stale en dev. Sin override → el `derived`.
- * Con override → gana, SALVO en `__DEV__` que apunte a una IP LAN privada distinta del host vivo de
- * Metro (stale) → se usa el host de Metro. `metroHost` ya es `null` fuera de `__DEV__`, así que
- * staging/prod (dominio) y release jamás entran al if.
+ * Resuelve una URL de backend con AUTO-SANADO de overrides stale en dev. Sin override → el
+ * `derived`. Con override → gana, SALVO en `__DEV__` con packager vivo: si su host NO es el host
+ * de Metro (IP LAN rotada, dominio de túnel muerto bakeado en el build, localhost en device físico)
+ * se usa el host de Metro. `DEV_FORCE_ENV_URLS=true` lo desactiva. `metroHost` ya es `null` fuera
+ * de `__DEV__`, así que staging/prod y release jamás entran al if.
  */
 function resolveBackendUrl(explicit: string | undefined, derived: string): string {
   if (!explicit) return derived;
-  if (metroHost) {
+  if (metroHost && !forceEnvUrls) {
     const host = hostOf(explicit);
-    if (host !== null && host !== metroHost && isPrivateLanHost(host)) {
+    if (host !== null && host !== metroHost) {
       console.warn(
-        `[env] el .env apunta a ${host} pero Metro corre en ${metroHost}: IP LAN stale → uso ` +
-          `${metroHost}. Vaciá DRIVER_BFF_URL/DRIVER_BFF_WS_URL en tu .env de dev para no depender de esto.`,
+        `[env] el .env (bakeado en el build nativo) apunta a ${host} pero Metro corre en ` +
+          `${metroHost}: override stale → uso ${metroHost}. Para forzarlo en dev seteá ` +
+          `DEV_FORCE_ENV_URLS=true en el .env (y rebuild).`,
       );
       return derived;
     }
