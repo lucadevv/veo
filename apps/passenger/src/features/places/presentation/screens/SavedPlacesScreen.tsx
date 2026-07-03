@@ -4,7 +4,7 @@ import {
   BottomSheet,
   Button,
   Card,
-  IconButton,
+  hexAlpha,
   ListItem,
   SafeScreen,
   Skeleton,
@@ -14,15 +14,16 @@ import {
 } from '@veo/ui-kit';
 import React, {useCallback, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {ScrollView, View} from 'react-native';
+import {ScrollView, StyleSheet, View} from 'react-native';
 import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
 import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
 import {
-  IconClose,
   IconHome,
+  IconPlus,
   IconStar,
   IconWork,
 } from '../../../trip/presentation/components/icons';
+import {IconPencil} from '../../../auth/presentation/components/icons';
 import type {
   SavedPlace,
   SavedPlaceInput,
@@ -40,9 +41,13 @@ interface EditorState {
 }
 
 /**
- * Gestión de Lugares guardados (local, MMKV). Lista Casa/Trabajo/Favoritos, permite agregar, editar
- * y eliminar. El editor busca una dirección (autocompletado real del bff) y guarda solo en el
- * dispositivo. Accesible desde Perfil.
+ * Gestión de Lugares guardados. La persistencia REAL es `HttpSavedPlacesRepository` (BFF `/places` +
+ * caché MMKV offline-first): los lugares SE SINCRONIZAN con la cuenta — la nota del pen ("solo en este
+ * dispositivo") era falsa y NO se copia; el copy `places.localNote` dice la verdad. Layout per
+ * design/veo.pen b7muEo: Casa y Trabajo como DOS cards prominentes (icono en círculo + label +
+ * dirección + pencil), favoritos en card-lista con divider, fila "Agregar lugar" al pie. El borrado
+ * vive en el editor (las filas ya no llevan la X: la fila es pen-fiel; el sheet de confirmación se
+ * conserva).
  */
 export function SavedPlacesScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -112,6 +117,19 @@ export function SavedPlacesScreen(): React.JSX.Element {
     setEditor(null);
   }, [editor, save, update]);
 
+  // Borrado desde el EDITOR: per pen las filas ya no llevan la X, así que la única puerta al borrado
+  // es editar el lugar. Cierra el editor y abre el sheet de confirmación EXISTENTE (se conserva).
+  const requestRemoveFromEditor = useCallback(() => {
+    if (!editor?.id) {
+      return;
+    }
+    const place = places.find(p => p.id === editor.id);
+    setEditor(null);
+    if (place) {
+      setConfirmRemove(place);
+    }
+  }, [editor, places]);
+
   return (
     <SafeScreen padded={false}>
       <ScrollView
@@ -123,77 +141,40 @@ export function SavedPlacesScreen(): React.JSX.Element {
           {t('places.subtitle')}
         </Text>
 
-        {/* Casa y Trabajo (únicos): si no existen, fila para agregarlos. */}
-        <Card variant="outlined" padding="sm">
-          {home ? (
-            <ListItem
-              title={home.label}
-              subtitle={home.subtitle}
-              leading={<IconHome color={theme.colors.accent} size={20} />}
-              trailing={
-                <IconButton
-                  accessibilityLabel={t('places.removeTitle')}
-                  variant="plain"
-                  onPress={() => setConfirmRemove(home)}
-                  icon={<IconClose color={theme.colors.danger} size={18} />}
-                />
-              }
-              onPress={() =>
-                openEditor({
-                  kind: 'HOME',
-                  id: home.id,
-                  label: home.label,
-                  subtitle: home.subtitle,
-                  point: home.point,
-                })
-              }
-            />
-          ) : (
-            <ListItem
-              title={t('places.home')}
-              subtitle={t('places.addHomeHint')}
-              leading={<IconHome color={theme.colors.accent} size={20} />}
-              chevron
-              onPress={() =>
-                openEditor({kind: 'HOME', label: t('places.home')})
-              }
-            />
-          )}
-          {work ? (
-            <ListItem
-              title={work.label}
-              subtitle={work.subtitle}
-              leading={<IconWork color={theme.colors.accent} size={20} />}
-              trailing={
-                <IconButton
-                  accessibilityLabel={t('places.removeTitle')}
-                  variant="plain"
-                  onPress={() => setConfirmRemove(work)}
-                  icon={<IconClose color={theme.colors.danger} size={18} />}
-                />
-              }
-              onPress={() =>
-                openEditor({
-                  kind: 'WORK',
-                  id: work.id,
-                  label: work.label,
-                  subtitle: work.subtitle,
-                  point: work.point,
-                })
-              }
-            />
-          ) : (
-            <ListItem
-              title={t('places.work')}
-              subtitle={t('places.addWorkHint')}
-              leading={<IconWork color={theme.colors.accent} size={20} />}
-              chevron
-              onPress={() =>
-                openEditor({kind: 'WORK', label: t('places.work')})
-              }
-            />
-          )}
-        </Card>
+        {/* Casa y Trabajo per pen b7muEo: DOS cards separadas y prominentes (icono en círculo +
+            label + dirección + pencil). Vacías, la MISMA card invita a agregar (affordance plus). */}
+        <View style={{gap: theme.spacing.md}}>
+          <PrimaryPlaceCard
+            kind="HOME"
+            place={home}
+            onPress={() =>
+              home
+                ? openEditor({
+                    kind: 'HOME',
+                    id: home.id,
+                    label: home.label,
+                    subtitle: home.subtitle,
+                    point: home.point,
+                  })
+                : openEditor({kind: 'HOME', label: t('places.home')})
+            }
+          />
+          <PrimaryPlaceCard
+            kind="WORK"
+            place={work}
+            onPress={() =>
+              work
+                ? openEditor({
+                    kind: 'WORK',
+                    id: work.id,
+                    label: work.label,
+                    subtitle: work.subtitle,
+                    point: work.point,
+                  })
+                : openEditor({kind: 'WORK', label: t('places.work')})
+            }
+          />
+        </View>
 
         {/* Favoritos */}
         <View>
@@ -205,20 +186,16 @@ export function SavedPlacesScreen(): React.JSX.Element {
           </Text>
           {favorites.length > 0 ? (
             <Card variant="outlined" padding="sm">
+              {/* El pen dibuja íconos por favorito (dumbbell/heart), pero el modelo `SavedPlace` NO
+                  tiene campo de ícono → IconStar homogéneo (gap de modelo reportado). El chevron
+                  abre el editor (el borrado vive dentro del editor, per pen sin X en la fila). */}
               {favorites.map(place => (
                 <ListItem
                   key={place.id}
                   title={place.label}
                   subtitle={place.subtitle}
                   leading={<IconStar color={theme.colors.accent} size={20} />}
-                  trailing={
-                    <IconButton
-                      accessibilityLabel={t('places.removeTitle')}
-                      variant="plain"
-                      onPress={() => setConfirmRemove(place)}
-                      icon={<IconClose color={theme.colors.danger} size={18} />}
-                    />
-                  }
+                  chevron
                   onPress={() =>
                     openEditor({
                       kind: 'FAVORITE',
@@ -247,13 +224,28 @@ export function SavedPlacesScreen(): React.JSX.Element {
           )}
         </View>
 
-        <Button
-          label={t('places.addFavorite')}
-          variant="secondary"
-          fullWidth
+        {/* Fila "Agregar lugar" per pen b7muEo (plus en círculo brand tenue + label), en vez del
+            botón suelto. Agrega un favorito (Casa/Trabajo se agregan desde sus propias cards). */}
+        <ListItem
+          title={t('places.addPlace')}
+          leading={
+            <View
+              style={[
+                styles.addIconWrap,
+                {
+                  backgroundColor: hexAlpha(
+                    theme.colors.accent,
+                    theme.scheme === 'dark' ? 0.16 : 0.12,
+                  ),
+                },
+              ]}>
+              <IconPlus color={theme.colors.accent} size={20} />
+            </View>
+          }
           onPress={() => openEditor({kind: 'FAVORITE', label: ''})}
         />
 
+        {/* Nota al pie: dice la VERDAD del repo (HTTP /places + caché offline), no lo del pen. */}
         <Text variant="footnote" color="inkSubtle" align="center">
           {t('places.localNote')}
         </Text>
@@ -265,12 +257,23 @@ export function SavedPlacesScreen(): React.JSX.Element {
         onClose={() => setEditor(null)}
         title={editor?.id ? t('places.editTitle') : t('places.addTitle')}
         footer={
-          <Button
-            label={t('actions.save')}
-            fullWidth
-            disabled={!canSave}
-            onPress={submit}
-          />
+          <View style={{gap: theme.spacing.sm}}>
+            <Button
+              label={t('actions.save')}
+              fullWidth
+              disabled={!canSave}
+              onPress={submit}
+            />
+            {/* Editando un lugar existente, el borrado vive acá (la fila ya no lleva X per pen). */}
+            {editor?.id ? (
+              <Button
+                label={t('places.deletePlace')}
+                variant="ghost"
+                fullWidth
+                onPress={requestRemoveFromEditor}
+              />
+            ) : null}
+          </View>
         }>
         {editor ? (
           <View style={{gap: theme.spacing.md}}>
@@ -381,3 +384,85 @@ export function SavedPlacesScreen(): React.JSX.Element {
     </SafeScreen>
   );
 }
+
+interface PrimaryPlaceCardProps {
+  kind: 'HOME' | 'WORK';
+  /** El lugar guardado; undefined = vacío (la card invita a agregar con la misma affordance). */
+  place?: SavedPlace;
+  onPress: () => void;
+}
+
+/**
+ * Card prominente de Casa/Trabajo (design/veo.pen b7muEo): icono en círculo (Casa = brand sobre brand
+ * tenue; Trabajo = inkMuted sobre superficie elevada, como distingue el pen) + label + dirección +
+ * pencil de editar a la derecha. Vacía muestra el hint de agregar y un plus (mismo affordance).
+ */
+function PrimaryPlaceCard({
+  kind,
+  place,
+  onPress,
+}: PrimaryPlaceCardProps): React.JSX.Element {
+  const theme = useTheme();
+  const {t} = useTranslation();
+  const isHome = kind === 'HOME';
+  const iconColor = isHome ? theme.colors.accent : theme.colors.inkMuted;
+  const wrapBg = isHome
+    ? hexAlpha(theme.colors.accent, theme.scheme === 'dark' ? 0.16 : 0.12)
+    : theme.colors.surfaceElevated;
+  const title = place?.label ?? t(isHome ? 'places.home' : 'places.work');
+  const subtitle =
+    place?.subtitle ??
+    t(isHome ? 'places.addHomeHint' : 'places.addWorkHint');
+
+  return (
+    <Card
+      variant="outlined"
+      padding="lg"
+      onPress={onPress}
+      accessibilityLabel={`${title}. ${subtitle}`}>
+      <View style={styles.primaryRow}>
+        <View style={[styles.iconWrap, {backgroundColor: wrapBg}]}>
+          {isHome ? (
+            <IconHome color={iconColor} size={20} />
+          ) : (
+            <IconWork color={iconColor} size={20} />
+          )}
+        </View>
+        <View style={styles.primaryTexts}>
+          <Text variant="bodyStrong" numberOfLines={1}>
+            {title}
+          </Text>
+          <Text variant="footnote" color="inkSubtle" numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </View>
+        {/* Lleno = pencil de editar (per pen); vacío = plus de agregar (mismo affordance). */}
+        {place ? (
+          <IconPencil color={theme.colors.inkSubtle} size={18} />
+        ) : (
+          <IconPlus color={theme.colors.inkSubtle} size={18} />
+        )}
+      </View>
+    </Card>
+  );
+}
+
+const styles = StyleSheet.create({
+  primaryRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  primaryTexts: {flex: 1, gap: 2},
+  // Círculo de 44 del icono (pen: IconWrap 44 con r-pill).
+  iconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

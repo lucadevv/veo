@@ -8,6 +8,7 @@ import {
   BottomSheet,
   Button,
   Card,
+  hexAlpha,
   ListItem,
   SafeScreen,
   StatusPill,
@@ -18,7 +19,7 @@ import {
 } from '@veo/ui-kit';
 import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Linking, Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {uuidv7} from '../../../../shared/utils/uuid';
@@ -43,13 +44,16 @@ import {PhoneVerificationSheet} from '../components/PhoneVerificationSheet';
 import {usePushPermission} from '../../../notifications/presentation/hooks/usePushPermission';
 import {
   IconAccessibility,
+  IconBadgeCheck,
   IconBell,
   IconCamera,
   IconCard,
   IconChild,
   IconClock,
   IconFaceScan,
+  IconFileText,
   IconGift,
+  IconGlobe,
   IconHelp,
   IconPin,
   IconPower,
@@ -59,10 +63,7 @@ import {
   IconTrash,
   IconUsers,
 } from '../components/icons';
-import {
-  IconCheck,
-  IconPencil,
-} from '../../../auth/presentation/components/icons';
+import {IconPencil} from '../../../auth/presentation/components/icons';
 import {IconStarFilled} from '../../../trip/presentation/components/icons';
 import {useMyAggregateRating} from '../../../ratings/presentation/useMyAggregateRating';
 
@@ -70,12 +71,21 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Items del diseño cuyo destino aún no tiene pantalla con backend: degradación honesta. */
-type ComingSoon = 'cameraControl' | 'shareTrip' | 'accessibility';
+type ComingSoon =
+  | 'cameraControl'
+  | 'shareTrip'
+  | 'accessibility'
+  | 'language'
+  | 'terms';
 
 const COMING_SOON_COPY: Record<ComingSoon, string> = {
   cameraControl: 'profile.comingSoonCameraControl',
   shareTrip: 'profile.comingSoonShareTrip',
   accessibility: 'profile.comingSoonAccessibility',
+  // Idioma y región (pen c4cChO): la app hoy SOLO existe en es-PE — no fingimos un selector.
+  language: 'profile.comingSoonLanguage',
+  // Términos y privacidad (pen c4cChO): no hay URL legal en config/env (gap) — sheet honesto.
+  terms: 'profile.comingSoonTerms',
 };
 
 /** Un paso faltante de la franja de completitud (chip tappeable que abre el campo correspondiente). */
@@ -356,14 +366,6 @@ export function ProfileScreen(): React.JSX.Element {
             {hasName ? (
               <View style={styles.nameRow}>
                 <Text variant="title2">{displayName}</Text>
-                {/* Identidad confirmada = detalle fino junto al nombre (check sutil), no una pill. */}
-                {verified ? (
-                  <View
-                    style={[styles.verifiedTick, {backgroundColor: success}]}
-                    accessibilityLabel={t('profile.identityConfirmed')}>
-                    <IconCheck color={theme.colors.onSuccess} size={11} />
-                  </View>
-                ) : null}
               </View>
             ) : (
               // El dato faltante ES la invitación: CTA explícito, no un misterio.
@@ -378,6 +380,30 @@ export function ProfileScreen(): React.JSX.Element {
               </Pressable>
             )}
 
+            {/* Estado VERIFICADO per design/veo.pen c4cChO: pill "Verificado con KYC" (badge-check +
+                texto success sobre fondo success tenue) bajo el nombre — reemplaza al check fino.
+                Los demás estados (pendiente / sin verificar) conservan su card de invitación. */}
+            {verified ? (
+              <View
+                accessibilityLabel={t('profile.identityConfirmed')}
+                style={[
+                  styles.verifiedPill,
+                  {
+                    backgroundColor: hexAlpha(
+                      success,
+                      theme.scheme === 'dark' ? 0.16 : 0.12,
+                    ),
+                  },
+                ]}>
+                <IconBadgeCheck color={success} size={13} />
+                <Text
+                  variant="footnote"
+                  style={{color: success, fontWeight: '500'}}>
+                  {t('profile.verifiedKycPill')}
+                </Text>
+              </View>
+            ) : null}
+
             {contact ? (
               <Text variant="subhead" color="inkMuted" tabular>
                 {contact}
@@ -387,11 +413,6 @@ export function ProfileScreen(): React.JSX.Element {
               <Text variant="footnote" color="inkSubtle" tabular>
                 {t(`profile.docType.${profile.documentType ?? 'DN'}`)}{' '}
                 {maskedDocument}
-              </Text>
-            ) : null}
-            {verified && hasName ? (
-              <Text variant="footnote" color="inkSubtle">
-                {t('profile.identityConfirmed')}
               </Text>
             ) : null}
 
@@ -602,9 +623,9 @@ export function ProfileScreen(): React.JSX.Element {
                 chevron
                 onPress={() => navigation.navigate('Referrals')}
               />
-              {/* Notificaciones push: refleja el estado REAL del SO y lo gestiona. 'undetermined' →
-                  dispara el permiso (diálogo del SO); 'granted'/'denied' → abre Ajustes del SO (el SO
-                  no deja revocar/activar desde la app una vez decidido). Responde "¿dónde lo activo?". */}
+              {/* Notificaciones (per pen Profile · bell = PREFERENCIAS): navega a NotificationPrefs.
+                  El subtítulo sigue reflejando el estado REAL del permiso del SO (honesto); la acción
+                  de activar/ir a Ajustes ahora vive DENTRO de la pantalla de preferencias (banner). */}
               <ListItem
                 title={t('profile.notifications')}
                 subtitle={
@@ -617,25 +638,29 @@ export function ProfileScreen(): React.JSX.Element {
                         : t('profile.notificationsOff')
                 }
                 leading={<IconBell color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('NotificationPrefs')}
+              />
+              {/* Avisos: el FEED (pantalla 'Notifications') no pierde su acceso al mover la campana
+                  del pen a preferencias. */}
+              <ListItem
+                title={t('profile.notificationsFeed')}
+                leading={<IconBell color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('Notifications')}
+              />
+              {/* Idioma y región (pen c4cChO, icono globe). Sin selector real todavía: sheet honesto
+                  que dice la verdad ("la app está en español (Perú)"), patrón cameraControl. */}
+              <ListItem
+                title={t('profile.languageRegion')}
+                leading={<IconGlobe color={accent} size={glyph} />}
                 trailing={
-                  push.status === 'granted' ? (
-                    <StatusPill
-                      label={t('profile.notificationsPill')}
-                      tone="success"
-                      dot
-                    />
-                  ) : undefined
+                  <StatusPill
+                    label={t('profile.comingSoonTitle')}
+                    tone="neutral"
+                  />
                 }
-                chevron={
-                  push.status === 'undetermined' || push.status === 'denied'
-                }
-                onPress={() => {
-                  if (push.status === 'undetermined') {
-                    void push.enable();
-                  } else if (push.status !== 'loading') {
-                    void Linking.openSettings();
-                  }
-                }}
+                onPress={() => setComingSoon('language')}
               />
             </Card>
           </View>
@@ -686,6 +711,20 @@ export function ProfileScreen(): React.JSX.Element {
                 leading={<IconHelp color={accent} size={glyph} />}
                 chevron
                 onPress={() => navigation.navigate('Help')}
+              />
+              {/* Términos y privacidad (pen c4cChO, icono file-text), ANTES de eliminar cuenta.
+                  No existe URL de términos/política en config/env (gap reportado): mientras no la
+                  haya, sheet coming-soon honesto en vez de un Linking.openURL a la nada. */}
+              <ListItem
+                title={t('profile.termsPrivacy')}
+                leading={<IconFileText color={accent} size={glyph} />}
+                trailing={
+                  <StatusPill
+                    label={t('profile.comingSoonTitle')}
+                    tone="neutral"
+                  />
+                }
+                onPress={() => setComingSoon('terms')}
               />
               <ListItem
                 title={t('profile.deletion')}
@@ -865,12 +904,14 @@ export function ProfileScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
   ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
-  verifiedTick: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+  // Pill "Verificado con KYC" (pen c4cChO): badge + texto en success sobre fondo success tenue.
+  verifiedPill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
   addNameCta: {paddingVertical: 2},
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
