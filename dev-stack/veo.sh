@@ -1226,7 +1226,9 @@ otp_rows() {  # imprime newest-first:  epoch \t HH:MM:SS \t canal \t destino \t 
      ORDER BY created_at DESC LIMIT ${1:-12};" 2>/dev/null
 }
 cmd_otp() {
-  if ! docker ps --format '{{.Names}}' 2>/dev/null | rg -q "^${PG_CONT}\$"; then
+  # grep POSIX, NO rg: rg vive en homebrew y no está en el PATH del bash del shebang (mismo motivo
+  # que migrate_drift) — acá 'rg' fallaba silencioso y el comando mentía "postgres no está arriba".
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${PG_CONT}\$"; then
     red "  postgres ($PG_CONT) no está arriba — levantá la infra (veo.sh up / dev)"; return 1
   fi
   local follow=0
