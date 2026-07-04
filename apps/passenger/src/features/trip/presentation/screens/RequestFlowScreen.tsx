@@ -94,11 +94,11 @@ const HOME_SHEET_TOP_FRACTION = 190 / 844;
  */
 const HOME_SHEET_COLLAPSED_FRACTION = 0.45;
 /**
- * Cuánto se desplaza hacia ARRIBA el backdrop del Home (fracción de la pantalla): el render del
- * pen (P/Home · Map) no muestra el cielo del tope de la imagen en la franja — muestra la banda del
- * horizonte + ruta azul + ciudad. Este corrimiento reproduce ESE encuadre en el app.
+ * Dimensiones REALES del arte del backdrop (home-city-route.jpg). El pen (P/Home · rect Map de
+ * 390×844, mismo aspect) mapea la imagen COMPLETA al frame; acá replicamos esa matemática EXACTA:
+ * alto = pantalla, ancho = alto × aspect, centrado horizontal — sin cover ni zoom del layout.
  */
-const HOME_BACKDROP_TOP_SHIFT = 0.22;
+const HOME_BACKDROP_ASPECT = 1080 / 2337;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -124,7 +124,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   // `isFocused`, de modo que al perder foco el mapa se desmonta (libera el contexto) y al volver remonta.
   // Sin esto: tras N navegaciones/reloads se acumulan contextos GL huérfanos → mapa negro.
   const isFocused = useIsFocused();
-  const {height: windowHeight} = useWindowDimensions();
+  const {height: windowHeight, width: windowWidth} = useWindowDimensions();
   // Vista TIPADA del MISMO navigator más cercano (el tab navigator de MainTabs) para setear
   // opciones de la TabBar; `navigation` (Nav) queda para los push del stack padre.
   const tabNavigation =
@@ -714,17 +714,23 @@ export function RequestFlowScreen(): React.JSX.Element {
           rompía ambas cosas. Va ANTES del HomeTopBar para que ese overlay absoluto siga tappable. */}
       {mapMode === 'idle' ? (
         <View style={styles.idleScreen}>
-          {/* Fondo del Home fiel a design/veo.pen P/Home (rect "Map"): imagen 3D de ciudad + scrim
-              vertical. ENCUADRE del pen: la franja visible sobre la hoja muestra el HORIZONTE + la
-              ruta azul + la ciudad (la banda ~12%→ de la imagen), no el cielo del tope — la imagen
-              se desplaza hacia arriba ese 12% para calzar con el render del frame. */}
+          {/* Fondo del Home fiel a design/veo.pen P/Home (rect "Map"): la imagen COMPLETA mapeada a
+              la altura de la pantalla — la MISMA matemática del pen (rect 390×844 con el arte de
+              aspect idéntico). Tamaño EXPLÍCITO por aspect real del arte + "stretch" (no deforma:
+              las medidas ya respetan la proporción): elimina cualquier zoom/crop del cover. */}
           <Image
             source={homeMapBackdrop}
             style={[
               styles.idleBackdrop,
-              {top: -Math.round(windowHeight * HOME_BACKDROP_TOP_SHIFT)},
+              {
+                height: windowHeight,
+                width: Math.round(windowHeight * HOME_BACKDROP_ASPECT),
+                left: Math.round(
+                  (windowWidth - windowHeight * HOME_BACKDROP_ASPECT) / 2,
+                ),
+              },
             ]}
-            resizeMode="cover"
+            resizeMode="stretch"
           />
           <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
             <Defs>
@@ -856,9 +862,9 @@ const styles = StyleSheet.create({
   // (favoritos/recientes) scrollea debajo. flex:1 (no absoluteFill) para no interceptar los toques del
   // HomeTopBar absoluto que flota encima.
   idleScreen: {flex: 1},
-  // Backdrop del Home: absoluto con `top` NEGATIVO (se inyecta por HOME_BACKDROP_TOP_SHIFT) para
-  // el encuadre del pen — el contenedor crece hacia arriba y el cover muestra la banda correcta.
-  idleBackdrop: {position: 'absolute', left: 0, right: 0, bottom: 0},
+  // Backdrop del Home: absoluto anclado al top; alto/ancho/left EXPLÍCITOS (se inyectan por el
+  // aspect real del arte) para replicar el mapeo imagen→frame del pen sin cover.
+  idleBackdrop: {position: 'absolute', top: 0},
   sheetScroll: {flex: 1},
   sheetContent: {paddingTop: 4},
 });
