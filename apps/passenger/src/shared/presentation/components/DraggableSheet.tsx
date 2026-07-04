@@ -137,8 +137,8 @@ const DEFAULT_MAX_CONTENT_FRACTION = 0.62;
 /** Anclaje mínimo absoluto para `'content'` mientras aún no se midió el contenido (evita 0). */
 const MIN_CONTENT_FRACTION = 0.16;
 
-/** Altura física de la fila del grabber (paddingTop 8 + grabber 5 + paddingBottom 6), no medible. */
-const GRABBER_CHROME = 8 + 5 + 6;
+/** Altura física de la fila del grabber (paddingTop 8 + grabber 4 + paddingBottom 6), no medible. */
+const GRABBER_CHROME = 8 + 4 + 6;
 
 /**
  * Bottom sheet ARRASTRABLE de verdad (estilo Flutter DraggableScrollableSheet / Uber) con altura
@@ -538,11 +538,10 @@ export const DraggableSheet = forwardRef<
           </View>
         ) : null}
         <View style={styles.grabberRow} pointerEvents="box-none">
+          {/* Handle PRIMARIO 36×4: el canónico del sistema (pen C/DraggableSheet · XFjV8) — igual
+              que el BottomSheet modal del ui-kit. Antes iba gris (borderStrong) y divergía. */}
           <View
-            style={[
-              styles.grabber,
-              {backgroundColor: theme.colors.borderStrong},
-            ]}
+            style={[styles.grabber, {backgroundColor: theme.colors.accent}]}
           />
         </View>
         {renderHeader ? (
@@ -586,5 +585,5 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   grabberRow: {alignItems: 'center', paddingTop: 8, paddingBottom: 6},
-  grabber: {width: 40, height: 5, borderRadius: 999},
+  grabber: {width: 36, height: 4, borderRadius: 999},
 });
