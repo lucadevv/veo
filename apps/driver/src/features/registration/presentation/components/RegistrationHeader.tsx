@@ -28,7 +28,6 @@ interface RegistrationHeaderProps {
 export function RegistrationHeader({
   onBack,
   showLogo = true,
-  peru = false,
   peruRight = false,
   onExit,
 }: RegistrationHeaderProps): React.JSX.Element {
@@ -48,7 +47,10 @@ export function RegistrationHeader({
         ) : null}
       </View>
       <View style={styles.center}>
-        {showLogo ? <VeoWordmark size="sm" peru={peru} /> : null}
+        {/* Header del wizard: solo "VEO" en blanco, como el frame del pen (no el lockup completo
+            "VEO CONDUCTORES" + Perú). `peru` se mantiene en la firma por compatibilidad pero el
+            sublabel se apaga acá. */}
+        {showLogo ? <VeoWordmark size="sm" veoColor="ink" sublabel={false} /> : null}
       </View>
       <View style={[styles.side, styles.right]}>
         {onExit ? (

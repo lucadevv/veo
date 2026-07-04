@@ -48,6 +48,11 @@ export interface VeoWordmarkProps {
    * lo pide `inkSubtle` (gris sutil), como el frame del pen. Solo aplica al stacked.
    */
   subColor?: 'brand' | 'inkSubtle';
+  /**
+   * Muestra el sublabel "CONDUCTORES" (y "PERÚ" si `peru`). Default `true`. El header del wizard lo pide
+   * `false` → solo "VEO", como el frame del pen. Solo aplica al stacked.
+   */
+  sublabel?: boolean;
 }
 
 /** Escala tipográfica de "VEO" por tamaño. `xl` = splash, calibrado al frame del pen (60). */
@@ -80,6 +85,7 @@ export function VeoWordmark({
   peru = false,
   veoColor = 'accent',
   subColor = 'brand',
+  sublabel = true,
 }: VeoWordmarkProps): React.JSX.Element {
   const veoSize = VEO_SIZE[size];
   const subSize = SUB_SIZE[size];
@@ -112,10 +118,12 @@ export function VeoWordmark({
       >
         VEO
       </Text>
-      <Text variant="label" color={subColor} style={[styles.sub, { fontSize: subSize }]}>
-        CONDUCTORES
-      </Text>
-      {peru ? <PeruRow /> : null}
+      {sublabel ? (
+        <Text variant="label" color={subColor} style={[styles.sub, { fontSize: subSize }]}>
+          CONDUCTORES
+        </Text>
+      ) : null}
+      {sublabel && peru ? <PeruRow /> : null}
     </View>
   );
 }
