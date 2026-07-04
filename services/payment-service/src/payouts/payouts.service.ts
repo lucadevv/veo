@@ -301,10 +301,13 @@ export class PayoutsService {
             },
           });
           // Ligamos los bonos al Payout (paidInPayoutId) SIN marcar paidAt: el marcado del bono se mueve al
-          // handler de confirmación (PROCESSED), no al create. CAS `paidAt:null` para no re-ligar en un re-run.
+          // handler de confirmación (PROCESSED), no al create. RC15 · el CAS filtra `paidInPayoutId:null`
+          // (además de `paidAt:null`), consistente con el sweep de collectEarnings: un bono ya ligado a otro
+          // payout NO se re-liga acá (defensa en profundidad — el sweep ya no lo trae, pero el guard cierra
+          // cualquier otra vía de re-link).
           if (pendingIncentiveIds.length > 0) {
             await tx.incentiveProgress.updateMany({
-              where: { id: { in: pendingIncentiveIds }, paidAt: null },
+              where: { id: { in: pendingIncentiveIds }, paidAt: null, paidInPayoutId: null },
               data: { paidInPayoutId: payoutId },
             });
           }
@@ -798,15 +801,22 @@ export class PayoutsService {
         compensationCents: p.driverCompensationCents,
       }));
 
-    // Bonos de incentivo CONCEDIDOS pero aún NO pagados (paidAt:null). El `incentive.completed` era un
+    // Bonos de incentivo CONCEDIDOS pero aún NO ligados a un Payout. El `incentive.completed` era un
     // evento huérfano: el bono se concedía en IncentiveProgress pero jamás entraba a un Payout. Acá lo
     // barremos. BACK-PAY POR ARRASTRE (decisión intencional): el filtro NO acota por `completedAt ∈
-    // [start,end)` sino por `completedAt < end` con `paidAt:null`. Así el primer run post-deploy paga
-    // TODOS los bonos históricos completados-no-pagados, y se auto-limpia (una vez marcados, paidAt deja
-    // de ser null y no vuelven a aparecer). La idempotencia NO se rompe: el guard sigue siendo paidAt:null
-    // —tanto acá (lectura) como en el updateMany (CAS de marcado)—, así que un re-run no los re-paga.
+    // [start,end)` sino por `completedAt < end`. Así el primer run post-deploy paga TODOS los bonos
+    // históricos completados-no-pagados.
+    //
+    // RC15 (ADR-022) · el guard DEBE ser `paidInPayoutId:null`, NO solo `paidAt:null`. `paidAt` se marca
+    // recién en la CONFIRMACIÓN async del desembolso (applyPayoutDisbursementResult), no al ligar el bono.
+    // Entre "bono ligado a Payout_A (PENDING/PROCESSING/HELD)" y "A confirmado", `paidAt` sigue null → con
+    // el guard viejo, el run del PERÍODO SIGUIENTE re-barría el MISMO bono y lo metía en un Payout_B → el
+    // conductor lo cobraba DOS veces (los guards duros del run son per-período: no ven el arrastre). El link
+    // `paidInPayoutId` es el compromiso contable del bono a SU payout (persiste a través de retryPayout, que
+    // re-desembolsa el MISMO payout): mientras esté ligado, NO es re-elegible. Un bono ligado a un payout
+    // abandonado queda pendiente (sub-pago recuperable con retry), NUNCA re-pagado — el sentido correcto.
     const pendingIncentives = await this.prisma.read.incentiveProgress.findMany({
-      where: { paidAt: null, completedAt: { not: null, lt: end } },
+      where: { paidAt: null, paidInPayoutId: null, completedAt: { not: null, lt: end } },
       select: { id: true, driverId: true, rewardGrantedCents: true },
     });
     const pendingIncentiveIdsByDriver = new Map<string, string[]>();
