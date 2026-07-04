@@ -14,6 +14,26 @@ import type { DocumentUploadContentType } from '@veo/api-client';
 import type { DocumentSide, FleetDocumentType } from '@veo/shared-types';
 import type { PickedImage } from './image-picker-service';
 
+/**
+ * Fase de ENVÍO de UNA CARA del documento (la señal que pintan el sheet y las cards del alta:
+ * "Subiendo… / Enviado ✓ / Error"). Vive en el DOMINIO (no en la capa de presentación) para que el
+ * puerto de subida pueda reportarla por cara SIN crear una dependencia inversa domain→presentation:
+ * el store del wizard la RE-EXPORTA para el resto de la app. Union TIPADA, sin strings mágicos sueltos.
+ *  - `idle`: la cara aún no empezó a subir (o no aplica: p. ej. el reverso de un doc de 1 cara).
+ *  - `sending`: el PUT del binario de esa cara está en vuelo.
+ *  - `sent`: el binario de esa cara ya está en el almacén soberano (PUT OK).
+ *  - `error`: el PUT de esa cara falló.
+ */
+export type DocumentSendPhase = 'idle' | 'sending' | 'sent' | 'error';
+
+/**
+ * Callback OPCIONAL para reportar la fase de envío de CADA cara mientras la subida progresa (presign→
+ * PUT por cara). El orquestador (hook) lo usa para reflejar el avance por-cara en el store/UI en vivo:
+ * `sending` antes del PUT de la cara, `sent` tras el PUT OK, `error` si el PUT de esa cara falló. Sin el
+ * callback, el comportamiento de la subida es IDÉNTICO (backward-compatible).
+ */
+export type DocumentSidePhaseCallback = (side: DocumentSide, phase: DocumentSendPhase) => void;
+
 /** Motivo accionable por el que la subida del binario del documento falló (feedback claro). */
 export type DocumentUploadFailure =
   /** El formato/MIME del archivo no está en la allowlist del contrato (jpeg/png/pdf). */
@@ -89,6 +109,12 @@ export interface DocumentUploader {
    *   `@IsEnum(FleetDocumentType)`, así que un valor fuera del enum es error de compilación, no un 400.
    * @param sides Las caras a subir, cada una con su archivo local. 1 imagen → `[{ side: 'SINGLE', file }]`;
    *   DNI → `[{ side: 'FRONT', file }, { side: 'BACK', file }]`. NO vacío.
+   * @param onSidePhase Callback OPCIONAL de fase POR CARA (`sending`→`sent`/`error`) para reflejar el
+   *   avance en vivo. Sin él, la subida se comporta EXACTAMENTE igual (backward-compatible).
    */
-  upload(type: FleetDocumentType, sides: DocumentSideFile[]): Promise<UploadedDocumentBinary>;
+  upload(
+    type: FleetDocumentType,
+    sides: DocumentSideFile[],
+    onSidePhase?: DocumentSidePhaseCallback,
+  ): Promise<UploadedDocumentBinary>;
 }

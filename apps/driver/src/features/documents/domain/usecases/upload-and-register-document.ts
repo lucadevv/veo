@@ -3,6 +3,7 @@ import type { ExtractedDocumentData, OcrEngineValue } from '@veo/api-client';
 import type { DriverDocument, RegisterDocumentInput } from '../entities';
 import type {
   DocumentSideFile,
+  DocumentSidePhaseCallback,
   DocumentUploader,
   UploadedDocumentBinary,
 } from '../ports/document-uploader';
@@ -49,6 +50,12 @@ export interface UploadAndRegisterDocumentInput {
   sides: DocumentSideFile[];
   /** Metadatos del formulario (número + vencimiento). */
   metadata: DocumentMetadata;
+  /**
+   * Callback OPCIONAL de fase POR CARA (`sending`→`sent`/`error`): la presentación lo usa para reflejar
+   * el avance de la subida en vivo (chips por cara del alta). Se pasa tal cual al puerto de subida. Sin
+   * él, el caso de uso se comporta EXACTAMENTE igual (backward-compatible).
+   */
+  onSidePhase?: DocumentSidePhaseCallback;
 }
 
 /**
@@ -68,7 +75,12 @@ export class UploadAndRegisterDocumentUseCase {
 
   async execute(input: UploadAndRegisterDocumentInput): Promise<DriverDocument> {
     // 1) Sube los binarios al almacén soberano (presign + PUT crudo por cara). Propaga `DocumentUploadError`.
-    const uploaded: UploadedDocumentBinary = await this.uploader.upload(input.type, input.sides);
+    //    El callback de fase por-cara (si vino) viaja al puerto para reportar `sending`/`sent`/`error`.
+    const uploaded: UploadedDocumentBinary = await this.uploader.upload(
+      input.type,
+      input.sides,
+      input.onSidePhase,
+    );
 
     // 2) Registra el documento CON las keys reales de los binarios subidos (1..N caras). Solo se llega
     //    aquí si TODOS los PUT fueron OK: jamás registramos un documento cuyo binario no se subió

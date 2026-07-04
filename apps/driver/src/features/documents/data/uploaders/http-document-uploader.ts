@@ -7,6 +7,7 @@ import {
 import type { FleetDocumentType } from '@veo/shared-types';
 import {
   type DocumentSideFile,
+  type DocumentSidePhaseCallback,
   DocumentUploadError,
   type DocumentUploader,
   type UploadedDocumentBinary,
@@ -55,6 +56,7 @@ export class HttpDocumentUploader implements DocumentUploader {
   async upload(
     type: FleetDocumentType,
     sides: DocumentSideFile[],
+    onSidePhase?: DocumentSidePhaseCallback,
   ): Promise<UploadedDocumentBinary> {
     // 0) Sin caras no hay nada que subir: el caso de uso siempre pasa ≥1 (defensa de borde igualmente).
     const [firstSide] = sides;
@@ -94,7 +96,18 @@ export class HttpDocumentUploader implements DocumentUploader {
           `El presign no devolvió un ticket para la cara ${side}`,
         );
       }
-      const s3Key = await this.putSide(sideTicket, file);
+      // Fase POR CARA (pen: "Subiendo… / Enviado ✓ / Error"): `sending` antes del PUT, `sent` tras el PUT
+      // OK, `error` si el PUT de ESTA cara falla (antes de re-lanzar, para que la UI marque la cara exacta
+      // que rompió). El callback es opcional: sin él, el flujo es idéntico.
+      onSidePhase?.(side, 'sending');
+      let s3Key: string;
+      try {
+        s3Key = await this.putSide(sideTicket, file);
+      } catch (error) {
+        onSidePhase?.(side, 'error');
+        throw error;
+      }
+      onSidePhase?.(side, 'sent');
       images.push({ s3Key, side });
     }
 

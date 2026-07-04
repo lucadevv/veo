@@ -3,7 +3,7 @@ import type { DocumentSideFile } from '../../../documents/domain';
 import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
 import { PersonalDataValidationError, type PersonalData, type PersonalDataErrors } from '../../domain';
 import { isConflictError } from '../../../../shared/presentation/errors';
-import { useRegistrationStore } from '../state/registrationStore';
+import { deriveDocumentPhase, useRegistrationStore } from '../state/registrationStore';
 import { useUpdatePersonalData } from './useRegistrationWizard';
 import { useOnboardLicense, useUploadAndRegisterDocument } from './useRegistrationDocuments';
 
@@ -94,10 +94,23 @@ export function usePersonalDataContinue(): PersonalDataContinue {
    * o si no había nada que subir; `false` si la subida falló (conserva `pendingDni`).
    */
   const uploadPendingDni = async (documentNumber: string): Promise<boolean> => {
+    // Lote 1: el DNI ahora sube EAGER en su propio sheet (`useDniSubmit`). Si ya quedó `sent` (ambas caras
+    // subidas), este continue NO lo re-sube: es un BACKSTOP idempotente. Si por algún camino el DNI aún no
+    // se subió (`idle`/`error`), este bloque lo sube igual (retry seguro; un 409 se trata como éxito).
+    if (deriveDocumentPhase(useRegistrationStore.getState().sendPhases.dni) === 'sent') {
+      return true;
+    }
     const pendingDni = useRegistrationStore.getState().pendingDni;
     if (!pendingDni) {
       return true;
     }
+    // Fase POR CARA: el uploader llama este callback (sending→sent/error) por cada cara mientras sube.
+    const onSidePhase = (
+      side: DocumentSide,
+      phase: 'idle' | 'sending' | 'sent' | 'error',
+    ): void => {
+      setSendPhase('dni', side === DocumentSide.BACK ? 'back' : 'front', phase);
+    };
     // Número (si lo hay) + data OCR/trazabilidad (solo si el escaneo extrajo algo: el DNI tipeado a mano se
     // sube sin OCR) — comunes a ambas formas de subida.
     const extraFields = {
@@ -111,10 +124,9 @@ export function usePersonalDataContinue(): PersonalDataContinue {
         : {}),
     };
     try {
-      setSendPhase('dni', 'sending');
       // MISMA regla de caras que la licencia (fleet `normalizeDocumentImages`): un FRONT solo se RECHAZA
       // ("Caras incoherentes"). CON reverso → par FRONT+BACK; SIN reverso → una sola cara SINGLE (`{file}`).
-      // FIX del bug latente: antes mandaba `sides:[FRONT]` sin reverso → el backend lo habría rechazado.
+      // La fase POR CARA la escribe el `onSidePhase` del uploader (sending→sent/error), no este bloque.
       await uploadDni.mutateAsync(
         pendingDni.back
           ? {
@@ -123,31 +135,33 @@ export function usePersonalDataContinue(): PersonalDataContinue {
                 { side: DocumentSide.FRONT, file: pendingDni.front },
                 { side: DocumentSide.BACK, file: pendingDni.back },
               ] satisfies DocumentSideFile[],
+              onSidePhase,
               ...extraFields,
             }
           : {
               type: FleetDocumentType.DNI,
               file: pendingDni.front,
+              onSidePhase,
               ...extraFields,
             },
       );
       clearPendingDni();
-      setSendPhase('dni', 'sent');
       return true;
     } catch (e) {
       // Retry legítimo del "escaneá y listo": el DNI YA fue registrado en un intento previo y el backend
       // responde 409 ConflictError ("Ya existe un documento activo de ese tipo"). El DNI YA está → es
       // ÉXITO, no error: limpiamos `pendingDni` (igual que el éxito normal) y avanzamos al paso siguiente.
+      // Los PUT de las caras fueron OK antes del registro, así que el callback ya las dejó en `sent`.
       // Detectado por status 409 tipado (`isConflictError`/`ApiError`), no por el texto del mensaje.
-      // Coherente con el FIX C de `DocumentsScreen` (Licencia/SOAT).
       if (isConflictError(e)) {
         clearPendingDni();
-        setSendPhase('dni', 'sent');
         return true;
       }
-      // Cualquier otro fallo (red/5xx): el driver YA existe (lo creó el PATCH) pero el binario no subió.
-      // NO perdemos las caras → se conserva `pendingDni` para reintentar.
-      setSendPhase('dni', 'error');
+      // Cualquier otro fallo (red/5xx): el driver YA existe (lo creó el PATCH) pero el binario/registro no
+      // subió. NO perdemos las caras → se conserva `pendingDni`. Si rompió el PUT, el callback ya marcó la
+      // cara en `error`; si rompió el REGISTRO (post-PUT), forzamos `error` en el anverso para que la fase
+      // derivada del DNI sea honesta (`error`), no un `sent` que mentiría.
+      setSendPhase('dni', 'front', 'error');
       return false;
     }
   };
@@ -172,11 +186,17 @@ export function usePersonalDataContinue(): PersonalDataContinue {
           ocrAt: ocrTimestampNow(),
         }
       : {};
+    // Fase POR CARA de la licencia: el uploader llama este callback (sending→sent/error) por cada cara.
+    const onSidePhase = (
+      side: DocumentSide,
+      phase: 'idle' | 'sending' | 'sent' | 'error',
+    ): void => {
+      setSendPhase('license', side === DocumentSide.BACK ? 'back' : 'front', phase);
+    };
     try {
-      setSendPhase('license', 'sending');
       // El backend exige el PAR EXACTO {FRONT, BACK} si se manda ALGUNA cara (fleet `normalizeDocumentImages`):
       // un FRONT solo se rechaza ("Caras incoherentes"). Reverso SOFT: CON reverso → par FRONT+BACK; SIN reverso
-      // → una sola imagen SINGLE (shape `{file}`, como hoy). Así el soft no viola la regla de caras del backend.
+      // → una sola imagen SINGLE (shape `{file}`, como hoy). La fase por cara la escribe `onSidePhase`.
       await uploadLicense.mutateAsync(
         pendingLicense.back
           ? {
@@ -185,6 +205,7 @@ export function usePersonalDataContinue(): PersonalDataContinue {
                 { side: DocumentSide.FRONT, file: pendingLicense.file },
                 { side: DocumentSide.BACK, file: pendingLicense.back },
               ] satisfies DocumentSideFile[],
+              onSidePhase,
               documentNumber: pendingLicense.documentNumber,
               expiresAt: pendingLicense.expiresAt,
               ...ocrFields,
@@ -192,6 +213,7 @@ export function usePersonalDataContinue(): PersonalDataContinue {
           : {
               type: FleetDocumentType.LICENSE_A1,
               file: pendingLicense.file,
+              onSidePhase,
               documentNumber: pendingLicense.documentNumber,
               expiresAt: pendingLicense.expiresAt,
               ...ocrFields,
@@ -204,19 +226,18 @@ export function usePersonalDataContinue(): PersonalDataContinue {
         licenseExpiresAt: pendingLicense.expiresAt,
       });
       clearPendingLicense();
-      setSendPhase('license', 'sent');
       return true;
     } catch (e) {
       // 409 = la licencia (o su onboarding) YA se registró en un intento previo → ÉXITO, no error. Mismo
       // criterio 409-como-éxito tipado (`isConflictError`) que el DNI: limpiamos y avanzamos.
       if (isConflictError(e)) {
         clearPendingLicense();
-        setSendPhase('license', 'sent');
         return true;
       }
-      // Otro fallo (red/5xx): el driver YA existe pero la licencia no subió. NO perdemos la captura →
-      // se conserva `pendingLicense` para reintentar (PATCH idempotente + re-subida en el próximo Continuar).
-      setSendPhase('license', 'error');
+      // Otro fallo (red/5xx): el driver YA existe pero la licencia/onboarding no subió. NO perdemos la
+      // captura → se conserva `pendingLicense`. Si rompió el PUT, el callback ya marcó la cara en `error`;
+      // si rompió el REGISTRO/ONBOARD (post-PUT), forzamos `error` en el anverso para una fase honesta.
+      setSendPhase('license', 'front', 'error');
       return false;
     }
   };
@@ -240,10 +261,10 @@ export function usePersonalDataContinue(): PersonalDataContinue {
         // las capturas pendientes pasan a `error` (la card ofrece Reintentar, que repite el PATCH idempotente).
         const pending = useRegistrationStore.getState();
         if (pending.pendingDni) {
-          setSendPhase('dni', 'error');
+          setSendPhase('dni', 'front', 'error');
         }
         if (pending.pendingLicense) {
-          setSendPhase('license', 'error');
+          setSendPhase('license', 'front', 'error');
         }
         if (e instanceof PersonalDataValidationError) {
           return { status: 'field-errors', errors: e.errors };

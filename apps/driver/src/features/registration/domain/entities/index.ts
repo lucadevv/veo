@@ -8,6 +8,8 @@ import type {
   AddDocumentRequest,
   DriverBiometricEnrollRequest,
   DriverBiometricEnrollResult,
+  DriverCheckDniRequest,
+  DriverCheckDniResult,
   DriverLivenessChallengeResponse,
   DriverDocument,
   DriverDocumentSimpleStatus,
@@ -46,6 +48,14 @@ export type BiometricEnrollResult = DriverBiometricEnrollResult;
 export type LivenessChallenge = DriverLivenessChallengeResponse;
 export type PersonalDataInput = DriverPersonalDataRequest;
 export type PersonalDataView = DriverPersonalData;
+/**
+ * Chequeo de unicidad del DNI (= driverCheckDniRequest / driverCheckDniResult · `POST /drivers/me/check-dni`).
+ * `CheckDniInput` lleva el `{ dni }` a chequear; `CheckDniResult` responde `{ exists }` = `true` si el DNI
+ * YA pertenece a OTRA cuenta de conductor (blind index `dni_hash`). El alta lo consulta ANTES de crear el
+ * driver + subir el DNI (Lote 1 · subida eager): si `exists`, corta con "DNI ya registrado" sin subir nada.
+ */
+export type CheckDniInput = DriverCheckDniRequest;
+export type CheckDniResult = DriverCheckDniResult;
 export type VehicleRegisterInput = RegisterVehicleRequest;
 export type VehicleView = DriverVehicleView;
 /** Modelo del catálogo curado que el conductor elige en el alta (= driverVehicleModelView · B5-2). */

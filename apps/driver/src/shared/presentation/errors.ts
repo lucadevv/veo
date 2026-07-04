@@ -35,3 +35,20 @@ export function isNetworkError(error: unknown): boolean {
 export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409;
 }
+
+/**
+ * Código del backend (identity, vía driver-bff) cuando el DNI que el conductor intenta registrar YA
+ * pertenece a OTRA cuenta. Es el contrato TIPADO (code, no el texto del mensaje) que el `PATCH
+ * /drivers/me/personal` emite como backstop de carrera del pre-check `POST /drivers/me/check-dni`.
+ * No hardcodear el string fuera de acá.
+ */
+export const DNI_ALREADY_REGISTERED_CODE = 'DNI_ALREADY_REGISTERED';
+
+/**
+ * true si el error es "el DNI ya está registrado en otra cuenta" (`DNI_ALREADY_REGISTERED`), detectado
+ * por el `code` TIPADO del `ApiError` (no por el status ni el mensaje). El alta lo trata igual que un
+ * pre-check `{ exists: true }`: corta con "DNI ya registrado" sin subir nada.
+ */
+export function isDniAlreadyRegisteredError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === DNI_ALREADY_REGISTERED_CODE;
+}

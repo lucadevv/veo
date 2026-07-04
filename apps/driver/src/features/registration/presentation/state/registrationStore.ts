@@ -4,7 +4,7 @@ import type {
   ExtractedDocumentData,
   ExtractedPropertyCardData,
 } from '@veo/api-client';
-import type { PickedImage } from '../../../documents/domain';
+import type { DocumentSendPhase, PickedImage } from '../../../documents/domain';
 import { prefsStore } from '../../../../core/storage/mmkv';
 import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
 import { RegistrationStep } from '../../domain';
@@ -94,17 +94,59 @@ export interface PendingLicenseCapture {
 }
 
 /**
- * Fase de ENVÍO de un documento del paso 1 (DNI/licencia) — la señal que pintan el sheet y la card
- * ("Subiendo… / Enviado ✓ / Error · Reintentar"). Union TIPADA, sin strings mágicos en comparaciones
- * sueltas: el mapa de chips es exhaustivo por switch. VIVE SOLO EN MEMORIA (es el estado de la subida
- * de ESTA sesión; el estado durable es el del servidor vía `GET /drivers/me/documents`).
+ * Fase de ENVÍO de UNA CARA de un documento del paso 1 (DNI/licencia) — la señal que pintan el sheet y la
+ * card ("Subiendo… / Enviado ✓ / Error · Reintentar"). Union TIPADA, sin strings mágicos en comparaciones
+ * sueltas: el mapa de chips es exhaustivo por switch. VIVE SOLO EN MEMORIA (es el estado de la subida de
+ * ESTA sesión; el estado durable es el del servidor vía `GET /drivers/me/documents`).
+ *
+ * RE-EXPORT del tipo canónico del DOMINIO de documentos (`DocumentUploader`): el puerto de subida reporta
+ * la fase POR CARA vía su callback, así que el tipo vive ahí (sin dependencia domain→presentation) y el
+ * store lo re-exporta para que el resto de la app lo siga importando desde acá (compat).
  */
-export type DocumentSendPhase = 'idle' | 'sending' | 'sent' | 'error';
+export type { DocumentSendPhase } from '../../../documents/domain';
 
-/** Documentos del paso 1 cuyo envío se trackea con fase visible. */
+/**
+ * Fases de envío de las DOS caras de un documento (anverso/reverso). Un documento de UNA sola cara deja el
+ * reverso en `idle` (no aplica) — `deriveDocumentPhase` lo trata como "no cuenta", así que un doc de 1 cara
+ * puede llegar a `sent` con `front='sent'` y `back='idle'`.
+ */
+export interface DocumentFacePhases {
+  front: DocumentSendPhase;
+  back: DocumentSendPhase;
+}
+
+/** Documentos del paso 1 cuyo envío se trackea con fase visible POR CARA. */
 export interface Step1SendPhases {
-  dni: DocumentSendPhase;
-  license: DocumentSendPhase;
+  dni: DocumentFacePhases;
+  license: DocumentFacePhases;
+}
+
+/** Fase POR CARA inicial (ambas `idle`): documento aún sin empezar a subir. */
+const idleFacePhases = (): DocumentFacePhases => ({ front: 'idle', back: 'idle' });
+
+/**
+ * DERIVA la fase de un DOCUMENTO a partir de las fases de sus caras (helper PURO, testeable fuera del
+ * store). Regla (exhaustiva, sin strings mágicos sueltos):
+ *  1. `error` si ALGUNA cara está en `error` (una cara rota ⇒ el documento falló).
+ *  2. si no, `sending` si ALGUNA cara está en `sending` (aún subiendo).
+ *  3. si no, `sent` si TODAS las caras NO-`idle` están en `sent` Y hay AL MENOS UNA `sent`. Así un doc de
+ *     UNA sola cara (front=`sent`, back=`idle`) llega a `sent` (el `idle` "no aplica"), y uno de dos caras
+ *     necesita AMBAS en `sent`.
+ *  4. si no, `idle` (nada empezó, o todas las caras siguen `idle`).
+ */
+export function deriveDocumentPhase(faces: DocumentFacePhases): DocumentSendPhase {
+  const values: DocumentSendPhase[] = [faces.front, faces.back];
+  if (values.some((phase) => phase === 'error')) {
+    return 'error';
+  }
+  if (values.some((phase) => phase === 'sending')) {
+    return 'sending';
+  }
+  const nonIdle = values.filter((phase) => phase !== 'idle');
+  if (nonIdle.length > 0 && nonIdle.every((phase) => phase === 'sent')) {
+    return 'sent';
+  }
+  return 'idle';
 }
 
 /**
@@ -227,8 +269,12 @@ export interface RegistrationState {
    */
   sendPhases: Step1SendPhases;
 
-  /** Fija la fase de envío de un documento del paso 1 (dni/license). Solo en memoria. */
-  setSendPhase(document: keyof Step1SendPhases, phase: DocumentSendPhase): void;
+  /** Fija la fase de envío de UNA CARA de un documento del paso 1 (dni/license · front/back). Solo en memoria. */
+  setSendPhase(
+    document: keyof Step1SendPhases,
+    face: keyof DocumentFacePhases,
+    phase: DocumentSendPhase,
+  ): void;
   setPersonal(data: Partial<PersonalData>): void;
   /** Fija el tipo del vehículo (derivado de la tarjeta o elegido a mano). `null` lo deja sin definir. */
   setVehicleType(type: VehicleType | null): void;
@@ -371,12 +417,17 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     // U4: señal de sesión (NO se rehidrata de MMKV): arranca en false en cada arranque de la app, así
     // un conductor rechazado debe tocar "Corregir mis datos" antes de poder reenviar a revisión.
     hasCorrectedAfterRejection: false,
-    // En memoria: la fase de envío arranca idle; la verdad durable es el server (serverState).
-    sendPhases: { dni: 'idle', license: 'idle' },
+    // En memoria: la fase de envío arranca idle (ambas caras); la verdad durable es el server (serverState).
+    sendPhases: { dni: idleFacePhases(), license: idleFacePhases() },
 
-    setSendPhase: (document, phase) => {
-      // Solo en memoria: NO persist() (fase efímera de la sesión de subida).
-      set((state) => ({ sendPhases: { ...state.sendPhases, [document]: phase } }));
+    setSendPhase: (document, face, phase) => {
+      // Solo en memoria: NO persist() (fase efímera de la sesión de subida). Actualiza SOLO la cara dada.
+      set((state) => ({
+        sendPhases: {
+          ...state.sendPhases,
+          [document]: { ...state.sendPhases[document], [face]: phase },
+        },
+      }));
     },
 
     setPersonal: (data) => {
@@ -507,7 +558,7 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
         pendingPropertyCard: null,
         pendingLicense: null,
         hasCorrectedAfterRejection: false,
-        sendPhases: { dni: 'idle', license: 'idle' },
+        sendPhases: { dni: idleFacePhases(), license: idleFacePhases() },
       });
       prefsStore.remove(REGISTRATION_PREF_KEY);
     },

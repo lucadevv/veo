@@ -49,8 +49,8 @@ describe('UploadAndRegisterDocumentUseCase', () => {
       metadata: { documentNumber: 'Q12345', expiresAt: '2027-01-01T00:00:00.000Z' },
     });
 
-    // El binario se sube con el tipo y las caras elegidas.
-    expect(upload).toHaveBeenCalledWith('LICENSE_A1', SINGLE);
+    // El binario se sube con el tipo y las caras elegidas (3er arg `onSidePhase` ausente ⇒ undefined).
+    expect(upload).toHaveBeenCalledWith('LICENSE_A1', SINGLE, undefined);
     // El registro recibe las keys REALES de los binarios subidos (images) + los metadatos del formulario.
     expect(register).toHaveBeenCalledWith({
       type: 'LICENSE_A1',
@@ -82,8 +82,8 @@ describe('UploadAndRegisterDocumentUseCase', () => {
       metadata: { documentNumber: '70123456' },
     });
 
-    // El uploader recibe AMBAS caras (FRONT + BACK).
-    expect(upload).toHaveBeenCalledWith('DNI', dniSides);
+    // El uploader recibe AMBAS caras (FRONT + BACK) (3er arg `onSidePhase` ausente ⇒ undefined).
+    expect(upload).toHaveBeenCalledWith('DNI', dniSides, undefined);
     // El registro lleva las dos imágenes con su cara correcta.
     expect(register).toHaveBeenCalledWith({
       type: 'DNI',

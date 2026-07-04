@@ -242,4 +242,70 @@ describe('HttpDocumentUploader', () => {
       ),
     ).rejects.toMatchObject({ name: 'DocumentUploadError', reason: 'network' });
   });
+
+  it('reporta la fase POR CARA (sending→sent por cada cara) vía onSidePhase en el happy path del DNI', async () => {
+    const front: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,FRONT', fileName: 'front.jpg' };
+    const back: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,BACK', fileName: 'back.jpg' };
+    const dniSides: DocumentSideFile[] = [
+      { side: DocumentSide.FRONT, file: front },
+      { side: DocumentSide.BACK, file: back },
+    ];
+    const post = jest.fn(async () => ({
+      tickets: [
+        {
+          side: DocumentSide.FRONT,
+          uploadUrl: 'https://storage.veo.local/dni-front?sig=f',
+          fileS3Key: 'drivers/d-1/dni-front.jpg',
+          requiredHeaders: { 'Content-Type': 'image/jpeg' },
+        },
+        {
+          side: DocumentSide.BACK,
+          uploadUrl: 'https://storage.veo.local/dni-back?sig=b',
+          fileS3Key: 'drivers/d-1/dni-back.jpg',
+          requiredHeaders: { 'Content-Type': 'image/jpeg' },
+        },
+      ],
+      expiresAt: '2026-06-18T12:00:00.000Z',
+    }));
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(localReadOk())
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+      .mockResolvedValueOnce(localReadOk())
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response);
+
+    const phases: Array<[string, string]> = [];
+    await new HttpDocumentUploader(httpStub(post), fetchImpl as unknown as typeof fetch).upload(
+      'DNI',
+      dniSides,
+      (side, phase) => phases.push([side, phase]),
+    );
+
+    // Cada cara pasa por `sending` (antes del PUT) y `sent` (tras el PUT OK), en el orden de las caras.
+    expect(phases).toEqual([
+      [DocumentSide.FRONT, 'sending'],
+      [DocumentSide.FRONT, 'sent'],
+      [DocumentSide.BACK, 'sending'],
+      [DocumentSide.BACK, 'sent'],
+    ]);
+  });
+
+  it('reporta `error` en la CARA que falla el PUT (y re-lanza) vía onSidePhase', async () => {
+    const post = jest.fn(async () => SINGLE_RESPONSE);
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(localReadOk())
+      .mockResolvedValueOnce({ ok: false, status: 403 } as Response);
+
+    const phases: Array<[string, string]> = [];
+    await new HttpDocumentUploader(httpStub(post), fetchImpl as unknown as typeof fetch)
+      .upload('LICENSE_A1', SINGLE, (side, phase) => phases.push([side, phase]))
+      .catch(() => undefined);
+
+    // La cara SINGLE se marca `sending` y, al rechazar el almacén el PUT, `error` (antes de re-lanzar).
+    expect(phases).toEqual([
+      [DocumentSide.SINGLE, 'sending'],
+      [DocumentSide.SINGLE, 'error'],
+    ]);
+  });
 });

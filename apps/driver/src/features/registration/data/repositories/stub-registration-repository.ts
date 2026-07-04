@@ -3,6 +3,8 @@ import {
   VehicleType,
   type BiometricEnrollInput,
   type BiometricEnrollResult,
+  type CheckDniInput,
+  type CheckDniResult,
   type LivenessChallenge,
   type LicenseOnboardInput,
   type PersonalDataInput,
@@ -40,6 +42,12 @@ export class StubRegistrationRepository implements RegistrationRepository {
   async updatePersonalData(input: PersonalDataInput): Promise<PersonalDataView> {
     await delay(400);
     return { legalName: input.legalName, dni: input.dni, birthDate: input.birthDate };
+  }
+
+  async checkDni(_input: CheckDniInput): Promise<CheckDniResult> {
+    await delay(200);
+    // Sin backend, el stub asume que el DNI NO está tomado (deja el flujo de UI demostrable de punta a punta).
+    return { exists: false };
   }
 
   async registerVehicle(input: VehicleRegisterInput): Promise<VehicleView> {

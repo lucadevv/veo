@@ -15,11 +15,16 @@ import {
   type RegistrationDocumentServerStatus,
   type RegistrationDocumentType,
 } from '../../domain';
-import { useRegistrationStore } from '../state/registrationStore';
+import {
+  deriveDocumentPhase,
+  useRegistrationStore,
+  type DocumentSendPhase,
+} from '../state/registrationStore';
 import {
   usePersonalDataContinue,
   type DeferredDocument,
 } from '../hooks/usePersonalDataContinue';
+import { useDniSubmit } from '../hooks/useDniSubmit';
 import { DriverExistence, useDriverExists } from '../hooks/useDriverExists';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
@@ -106,6 +111,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // Orquesta el continue: PATCH /personal (crea el driver) → subida DIFERIDA del DNI escaneado (con su
   // `extractedData`). La subida NO puede pasar antes del PATCH (el presign exige que el driver exista).
   const personalContinue = usePersonalDataContinue();
+  // Lote 1: subida EAGER del DNI en su propio sheet (checkDni → PATCH → subir DNI con fase por cara). Se
+  // dispara al CONFIRMAR el DNI (`onDniConfirmed`), no al Continuar; el continue ya no re-sube el DNI.
+  const dniSubmit = useDniSubmit();
 
   // Salida de emergencia del onboarding: paso 1 es una pantalla RAÍZ (sin back de navegación).
   const exit = useRegistrationExit();
@@ -123,6 +131,10 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // Fase de ENVÍO visible de cada documento (pen: "Subiendo… / Enviado / Error al enviar"). La escribe
   // `usePersonalDataContinue` alrededor de cada subida; acá alimenta los chips y el sheet del DNI.
   const sendPhases = useRegistrationStore((s) => s.sendPhases);
+  // Fase DERIVADA por documento (a partir de las fases POR CARA): 'sent' solo si todas las caras no-idle
+  // están enviadas. Es la señal escalar que consumen los chips, subtítulos y el gating (sin strings sueltos).
+  const dniPhase = deriveDocumentPhase(sendPhases.dni);
+  const licensePhase = deriveDocumentPhase(sendPhases.license);
   const serverDocs = useRegistrationDocuments();
   // ¿El SERVIDOR ya tiene al conductor? Señal TIPADA derivada de `GET /drivers/me` (comparte el cache del
   // gate). Unifica la fuente de verdad del continue: en RESUME (driver existe) NO se re-PATCHea (los datos
@@ -161,7 +173,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // (fase `sent` — inmune a la latencia del refetch de `serverDocs`), O el servidor YA lo tiene.
   // `hasReadDni` (número leído, puede venir de `personal.dni` persistido) NO alcanza: tras un reload el número
   // sobrevive pero la IMAGEN no → diría "listo" sin nada que subir (DNI fantasma). El número se exige aparte.
-  const dniDocReady = pendingDni != null || serverHasDni || sendPhases.dni === 'sent';
+  const dniDocReady = pendingDni != null || serverHasDni || dniPhase === 'sent';
 
   const dniBackendType = registrationDocTypeToBackend('DNI');
   // Estado de SERVIDOR del DNI para el chip "ya enviado" (mismo patrón que la licencia): al reanudar SIN
@@ -187,7 +199,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
    * del servidor (que puede venir con lag de refetch). Exhaustivo por switch — sin strings mágicos sueltos.
    */
   const phaseChip = (
-    phase: (typeof sendPhases)['dni'],
+    phase: DocumentSendPhase,
   ): { label: string; tone: DocumentCardTone } | undefined => {
     switch (phase) {
       case 'sending':
@@ -206,7 +218,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
    * (verde) cuando ya está. Sin subtítulo en pendiente/listo — el chip lo comunica.
    */
   const cardSubtitle = (
-    phase: (typeof sendPhases)['dni'],
+    phase: DocumentSendPhase,
     isSent: boolean,
   ): { subtitle?: string; subtitleTone: 'accent' | 'success' } => {
     if (isSent) {
@@ -232,7 +244,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // (el array `documents` se persiste, la captura no) → mentía "subida" sin que el server la tuviera. Un fallo
   // de subida conserva `pendingLicense` (sigue "lista para enviar/reintentar") y el banner de fallo lo dice.
   const licenseUploaded =
-    pendingLicense != null || serverHasLicense || sendPhases.license === 'sent';
+    pendingLicense != null || serverHasLicense || licensePhase === 'sent';
 
   // Estado de SERVIDOR de la licencia para el chip (si existe en `GET /drivers/me/documents`).
   const licenseServerState = (() => {
@@ -306,7 +318,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
           driverExists: driverExistence === DriverExistence.Exists,
         })
         .then((result) => {
-          if (useRegistrationStore.getState().sendPhases.license === 'sent') {
+          if (
+            deriveDocumentPhase(useRegistrationStore.getState().sendPhases.license) === 'sent'
+          ) {
             markLicenseCaptured();
             return;
           }
@@ -411,8 +425,16 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
    */
   const onDniConfirmed = (): void => {
     const fresh = useRegistrationStore.getState();
+    // Sella la combinación de capturas para que el efecto eager de abajo NO re-dispare el mismo lote al cerrar.
     eagerSyncKey.current = `${fresh.pendingDni?.front.uri ?? '-'}|${fresh.pendingLicense?.file.uri ?? '-'}`;
-    void runEagerSync();
+    // Lote 1: la subida EAGER del DNI corre AHÍ MISMO (checkDni → PATCH → subir DNI con fase POR CARA); el
+    // sheet queda abierto pintando la fase por cara y el resultado (dni-taken / ok / error). `submit` nunca
+    // lanza (mapea todo a un resultado discriminado); la UI lee la fase del store + `pendingDni`, así que
+    // el resultado se ignora acá a propósito. El continue ya NO re-sube el DNI (lo saltea si está `sent`).
+    void dniSubmit.submit({
+      personal: fresh.personal,
+      driverExists: driverExistence === DriverExistence.Exists,
+    });
   };
 
   useEffect(() => {
@@ -497,11 +519,11 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               status={dniDocReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
-              serverState={phaseChip(sendPhases.dni) ?? dniServerState}
-              sending={sendPhases.dni === 'sending'}
-              sent={sendPhases.dni === 'sent' || serverHasDni}
+              serverState={phaseChip(dniPhase) ?? dniServerState}
+              sending={dniPhase === 'sending'}
+              sent={dniPhase === 'sent' || serverHasDni}
               thumbUri={pendingDni?.front.uri ?? dniServerImageUri ?? undefined}
-              {...cardSubtitle(sendPhases.dni, sendPhases.dni === 'sent' || serverHasDni)}
+              {...cardSubtitle(dniPhase, dniPhase === 'sent' || serverHasDni)}
               accessibilityLabel={
                 hasCapture || hasReadDni
                   ? t('registration.actions.rescan')
@@ -600,11 +622,11 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               status={licenseUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
-              serverState={phaseChip(sendPhases.license) ?? licenseServerState}
-              sending={sendPhases.license === 'sending'}
-              sent={sendPhases.license === 'sent' || serverHasLicense}
+              serverState={phaseChip(licensePhase) ?? licenseServerState}
+              sending={licensePhase === 'sending'}
+              sent={licensePhase === 'sent' || serverHasLicense}
               thumbUri={pendingLicense?.file?.uri ?? licenseServerImageUri ?? undefined}
-              {...cardSubtitle(sendPhases.license, sendPhases.license === 'sent' || serverHasLicense)}
+              {...cardSubtitle(licensePhase, licensePhase === 'sent' || serverHasLicense)}
               busy={personalContinue.isPending}
               accessibilityLabel={t('registration.documents.uploadAccessibility', {
                 document: t('registration.documents.license'),
@@ -663,7 +685,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     <ScanDniSheet
       visible={scanOpen}
       onClose={() => setScanOpen(false)}
-      sendPhase={sendPhases.dni}
+      sendPhase={dniPhase}
       onConfirm={onDniConfirmed}
     />
   );

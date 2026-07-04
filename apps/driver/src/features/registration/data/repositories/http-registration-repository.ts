@@ -4,6 +4,8 @@ import {
   addDocumentRequest,
   driverBiometricEnrollRequest,
   driverBiometricEnrollResult,
+  driverCheckDniRequest,
+  driverCheckDniResult,
   driverLivenessChallengeResponse,
   driverDocument,
   driverOnboardRequest,
@@ -24,6 +26,8 @@ import { mapProfileToRegistrationStatus } from '../../domain';
 import type {
   BiometricEnrollInput,
   BiometricEnrollResult,
+  CheckDniInput,
+  CheckDniResult,
   LivenessChallenge,
   LicenseOnboardInput,
   PersonalDataInput,
@@ -67,6 +71,12 @@ export class HttpRegistrationRepository implements RegistrationRepository {
   updatePersonalData(input: PersonalDataInput): Promise<PersonalDataView> {
     const body = driverPersonalDataRequest.parse(input);
     return this.http.patch('/drivers/me/personal', { body, schema: driverPersonalData });
+  }
+
+  checkDni(input: CheckDniInput): Promise<CheckDniResult> {
+    // Valida el body con el contrato (DNI 8 dígitos) antes de enviarlo; parsea la respuesta `{ exists }`.
+    const body = driverCheckDniRequest.parse(input);
+    return this.http.post('/drivers/me/check-dni', { body, schema: driverCheckDniResult });
   }
 
   registerVehicle(input: VehicleRegisterInput): Promise<VehicleView> {

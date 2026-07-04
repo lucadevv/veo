@@ -7,12 +7,15 @@ import {
   UploadAndRegisterDocumentUseCase,
   type DocumentRegistrar,
   type DocumentSideFile,
+  type DocumentSidePhaseCallback,
   type DriverDocument,
   type PickedImage,
   type RegisterDocumentInput,
 } from '../../../documents/domain';
 import type {
   BiometricEnrollInput,
+  CheckDniInput,
+  CheckDniResult,
   LicenseOnboardInput,
   RegistrationDocumentRequest,
 } from '../../domain';
@@ -53,6 +56,19 @@ export function useSubmitRegistrationDocument() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY });
     },
+  });
+}
+
+/**
+ * Mutación: chequea si el DNI escaneado YA está registrado en OTRA cuenta de conductor
+ * (`POST /drivers/me/check-dni`, blind index `dni_hash`). Se dispara ANTES de crear el driver y subir
+ * el DNI (Lote 1 · subida eager): si `{ exists: true }` el alta corta con "DNI ya registrado" sin
+ * subir nada. Reusa la abstracción del repositorio (SOLID-D), no HTTP directo.
+ */
+export function useCheckDni() {
+  const { registration } = useRepositories();
+  return useMutation({
+    mutationFn: (input: CheckDniInput): Promise<CheckDniResult> => registration.checkDni(input),
   });
 }
 
@@ -104,6 +120,12 @@ export interface UploadDocumentVars {
   ocrEngine?: OcrEngineValue;
   /** Instante de la extracción OCR (ISO-8601). Solo si hay `extractedData`. */
   ocrAt?: string;
+  /**
+   * Callback OPCIONAL de fase POR CARA (`sending`→`sent`/`error`): la presentación (p. ej. `useDniSubmit`)
+   * lo pasa para reflejar el avance de la subida por cara en el store/UI en vivo. Se reenvía tal cual al
+   * caso de uso y al puerto. Sin él, la subida se comporta idéntico (backward-compatible).
+   */
+  onSidePhase?: DocumentSidePhaseCallback;
 }
 
 /**
@@ -145,6 +167,7 @@ export function useUploadAndRegisterDocument() {
       new UploadAndRegisterDocumentUseCase(uploader, registrar).execute({
         type: vars.type,
         sides: resolveSides(vars),
+        ...(vars.onSidePhase ? { onSidePhase: vars.onSidePhase } : {}),
         metadata: {
           ...(vars.documentNumber ? { documentNumber: vars.documentNumber } : {}),
           ...(vars.expiresAt ? { expiresAt: vars.expiresAt } : {}),
