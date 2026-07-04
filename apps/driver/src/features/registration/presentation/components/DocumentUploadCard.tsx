@@ -252,24 +252,30 @@ export function DocumentUploadCard({
       style={({ pressed }) => [
         styles.card,
         {
-          // Card aplanada: un pelo elevada del fondo (`surface`), SIN borde. Más aire vertical. La
-          // jerarquía la dan el aire + la escala, no cajas anidadas.
+          // Card como el frame C/PersonalData del pen: `surface` + borde 1px `border`, radio 16
+          // (`radii.md` = $r-lg del pen), padding 14 uniforme, gap 12.
           backgroundColor: theme.colors.surface,
-          borderRadius: theme.radii.lg,
-          paddingHorizontal: theme.spacing.lg,
-          paddingVertical: theme.spacing.xl,
+          borderRadius: theme.radii.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          padding: 14,
           gap: theme.spacing.md,
           opacity: pressed || busy ? 0.9 : 1,
         },
       ]}
     >
-      {stepNumber !== undefined ? <StepBadge value={stepNumber} /> : null}
-      {/* Ícono PLANO inline: sin caja ni fondo tintado. Sobrio, deja respirar la fila. */}
-      <View style={styles.icon}>{icon}</View>
-      {/* Columna label + (subiendo → barra). Hasta 2 líneas: labels largos ("Documento de identidad
-          (DNI)") ENVUELVEN en vez de truncar con "…". */}
+      {/* Un SOLO glifo a la izquierda, como el pen: el badge numérico (cuando hay `stepNumber`) O el
+          ícono (look clásico sin número). NUNCA los dos — el pen muestra solo el número en las cards
+          numeradas. */}
+      {stepNumber !== undefined ? (
+        <StepBadge value={stepNumber} />
+      ) : (
+        <View style={styles.icon}>{icon}</View>
+      )}
+      {/* Columna label + (subiendo → barra). Label 15pt medium (Outfit-Medium), como el pen. Hasta 2
+          líneas: labels largos ("Documento de identidad (DNI)") ENVUELVEN en vez de truncar con "…". */}
       <View style={styles.labelCol}>
-        <Text variant="bodyStrong" numberOfLines={2}>
+        <Text variant="body" style={styles.label} numberOfLines={2}>
           {label}
         </Text>
         {sending ? <SendingBar /> : null}
@@ -291,16 +297,18 @@ export function DocumentUploadCard({
 const styles = StyleSheet.create({
   // Sin `borderWidth`: la card es plana, separada del fondo solo por su `surface`.
   card: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
-  // Sin `borderWidth`: círculo lleno sutil.
+  // Círculo lleno sutil 28×28 (como el badge del pen).
   stepBadge: {
-    width: 24,
-    height: 24,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   // Ícono inline (sin caja 44×44): solo centra el glifo en un ancho fijo para alinear las filas.
   icon: { width: 28, alignItems: 'center', justifyContent: 'center' },
   labelCol: { flex: 1, gap: 6 },
+  // Label 15pt Outfit-Medium (cara registrada) — el pen usa `font-text` peso 500 a 15pt.
+  label: { fontFamily: 'Outfit-Medium', fontSize: 15, lineHeight: 20 },
   chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5 },
   // Barra de progreso indeterminada bajo el label mientras sube (4pt, píldora, clip del sweep).
   barTrack: { height: 4, borderRadius: 999, overflow: 'hidden', width: '100%' },
