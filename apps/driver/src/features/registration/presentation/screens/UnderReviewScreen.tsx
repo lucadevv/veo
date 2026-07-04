@@ -98,7 +98,7 @@ export const UnderReviewScreen = (): React.JSX.Element => {
 
           {/* Bloque editorial alineado a la izquierda (como onboarding/login): el título manda. */}
           <Reveal delay={80} style={styles.intro}>
-            <Text variant="display">{t('registration.review.title')}</Text>
+            <Text variant="title1">{t('registration.review.title')}</Text>
             <Text variant="callout" color="inkMuted">
               {t('registration.review.subtitle')}
             </Text>

@@ -459,7 +459,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
           {/* Bloque héroe alineado a la IZQUIERDA con aire generoso (estándar Tesla: Onboarding/Login):
               título `display` que domina + subtítulo `callout` muted. Sin "Paso N de M" encima. */}
           <Reveal delay={80} style={styles.intro}>
-            <Text variant="display">{t('registration.personal.title')}</Text>
+            <Text variant="title1">{t('registration.personal.title')}</Text>
             <Text variant="callout" color="inkMuted">
               {t('registration.personal.scanSubtitle')}
             </Text>

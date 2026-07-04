@@ -228,7 +228,7 @@ export const IdentityVerificationScreen = (_props: Props = {}): React.JSX.Elemen
           círculo de la cámara va centrado aparte (es el foco visual), pero el encabezado manda desde la
           izquierda como en Onboarding/Login. */}
       <Reveal delay={40} style={styles.intro}>
-        <Text variant="display">{t('registration.kyc.title')}</Text>
+        <Text variant="title1">{t('registration.kyc.title')}</Text>
         <Text variant="callout" color="inkMuted">
           {subtitle}
         </Text>

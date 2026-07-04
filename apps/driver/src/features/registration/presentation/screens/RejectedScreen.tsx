@@ -137,7 +137,7 @@ export const RejectedScreen = (): React.JSX.Element => {
             izquierda (gutter 2xl, como Onboarding) — jerarquía por escala + aire; el foco real es la
             reason card de abajo. */}
         <Reveal delay={120} style={styles.intro}>
-          <Text variant="display">{t('registration.rejected.title')}</Text>
+          <Text variant="title1">{t('registration.rejected.title')}</Text>
           <Text variant="callout" color="inkMuted">
             {t('registration.rejected.subtitle')}
           </Text>

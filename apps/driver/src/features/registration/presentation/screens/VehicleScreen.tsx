@@ -530,7 +530,7 @@ export const VehicleScreen = ({ navigation }: Props = {}): React.JSX.Element => 
 
           {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. */}
           <Reveal delay={40} style={styles.intro}>
-            <Text variant="display">{t('registration.vehicle.title')}</Text>
+            <Text variant="title1">{t('registration.vehicle.title')}</Text>
             <Text variant="callout" color="inkMuted">
               {existingVehicle
                 ? t('registration.vehicle.registeredSubtitle')
