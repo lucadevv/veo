@@ -20,7 +20,9 @@ import type {
   RootStackParamList,
 } from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
-import homeMapBackdrop from '../../../../shared/assets/brand/home-map.jpg';
+// Renombrado de home-map.jpg: Metro cacheaba el asset VIEJO por hash (el sim mostraba solo nubes,
+// sin la ruta azul de la imagen real) — nombre nuevo = URL nueva = caché bypasseada.
+import homeMapBackdrop from '../../../../shared/assets/brand/home-city-route.jpg';
 import {
   DraggableSheet,
   type DraggableSheetHandle,
@@ -91,6 +93,12 @@ const HOME_SHEET_TOP_FRACTION = 190 / 844;
  * inferior más abajo" — antes ambos anclajes vivían arriba (0.88/0.92) y colapsar no existía.
  */
 const HOME_SHEET_COLLAPSED_FRACTION = 0.45;
+/**
+ * Cuánto se desplaza hacia ARRIBA el backdrop del Home (fracción de la pantalla): el render del
+ * pen (P/Home · Map) no muestra el cielo del tope de la imagen en la franja — muestra la banda del
+ * horizonte + ruta azul + ciudad. Este corrimiento reproduce ESE encuadre en el app.
+ */
+const HOME_BACKDROP_TOP_SHIFT = 0.22;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -706,12 +714,16 @@ export function RequestFlowScreen(): React.JSX.Element {
           rompía ambas cosas. Va ANTES del HomeTopBar para que ese overlay absoluto siga tappable. */}
       {mapMode === 'idle' ? (
         <View style={styles.idleScreen}>
-          {/* Fondo del Home fiel a design/veo.pen P/Home: imagen 3D de ciudad (el .pen usa una IMAGEN,
-              no un mapa vivo) + scrim vertical para legibilidad del pill arriba y del sheet abajo. El
-              mapa vivo (Mapbox 3D/2D) entra en las fases de viaje (route/trip), no en el Home idle. */}
+          {/* Fondo del Home fiel a design/veo.pen P/Home (rect "Map"): imagen 3D de ciudad + scrim
+              vertical. ENCUADRE del pen: la franja visible sobre la hoja muestra el HORIZONTE + la
+              ruta azul + la ciudad (la banda ~12%→ de la imagen), no el cielo del tope — la imagen
+              se desplaza hacia arriba ese 12% para calzar con el render del frame. */}
           <Image
             source={homeMapBackdrop}
-            style={StyleSheet.absoluteFill}
+            style={[
+              styles.idleBackdrop,
+              {top: -Math.round(windowHeight * HOME_BACKDROP_TOP_SHIFT)},
+            ]}
             resizeMode="cover"
           />
           <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -844,6 +856,9 @@ const styles = StyleSheet.create({
   // (favoritos/recientes) scrollea debajo. flex:1 (no absoluteFill) para no interceptar los toques del
   // HomeTopBar absoluto que flota encima.
   idleScreen: {flex: 1},
+  // Backdrop del Home: absoluto con `top` NEGATIVO (se inyecta por HOME_BACKDROP_TOP_SHIFT) para
+  // el encuadre del pen — el contenedor crece hacia arriba y el cover muestra la banda correcta.
+  idleBackdrop: {position: 'absolute', left: 0, right: 0, bottom: 0},
   sheetScroll: {flex: 1},
   sheetContent: {paddingTop: 4},
 });
