@@ -158,8 +158,14 @@ export const OnboardingScreen = (): React.JSX.Element => {
       >
         {slides.map((slide) => (
           <View key={slide.key} style={{ width, height: slideH }}>
-            {/* Foto a SANGRE COMPLETA: ocupa todo el slide, una sola imagen continua. */}
-            <Image source={slide.photo} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            {/* Foto a SANGRE COMPLETA: ABSOLUTA (detrás del copy, fuera del flujo) pero con width/height
+                EXPLÍCITOS — así `cover` calza contra el tamaño real del slide y muestra la foto centrada.
+                Con `StyleSheet.absoluteFill` (right/bottom:0) el alto no se resolvía y cover zoomeaba mal. */}
+            <Image
+              source={slide.photo}
+              style={{ position: 'absolute', top: 0, left: 0, width, height: slideH }}
+              resizeMode="cover"
+            />
 
             {/* Scrim: oscurece SOLO el tercio inferior (más un velo leve arriba para la status bar)
                 para que el copy y el footer floten legibles sobre la foto. Decorativo. */}
