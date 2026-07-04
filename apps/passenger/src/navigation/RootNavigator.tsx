@@ -196,6 +196,9 @@ export function RootNavigator(): React.JSX.Element {
         headerTintColor: theme.colors.ink,
         headerTitleStyle: {color: theme.colors.ink},
         headerShadowVisible: false,
+        // Sin label junto al chevron de volver: iOS mostraba el NOMBRE DE RUTA interno ("Main")
+        // al lado de la flecha — jerga de código filtrada al usuario (visto en el barrido pen↔sim).
+        headerBackTitleVisible: false,
         contentStyle: {backgroundColor: theme.colors.bg},
       }}>
       {/* MAIN = bottom nav (Inicio·Viajes·Seguridad·Cuenta), reintroducido del design/veo.pen. Va
