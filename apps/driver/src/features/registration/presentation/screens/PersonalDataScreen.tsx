@@ -33,7 +33,6 @@ import { useRegistrationDocuments } from '../hooks/useRegistrationDocuments';
 import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
 import { useRegistrationWizardPageOptional } from './RegistrationWizardContext';
 import {
-  DocumentPreviewCard,
   DocumentUploadCard,
   firstMissingRequirement,
   RegistrationExitSheet,
@@ -543,28 +542,6 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
             </Reveal>
           ) : null}
 
-          {/* TARJETA "DNI capturado ✓" MINIMALISTA: tilde de éxito + miniatura del anverso, SIN mostrar los
-              valores (nombre/dni/nacimiento). Se muestra cuando hay captura Y el campo CRÍTICO (número) se
-              leyó: una captura que parece OK SOLO cuando de verdad lo está. */}
-          {hasCapture && hasReadDni && pendingDni ? (
-            <Reveal delay={120} from="scale">
-              <DocumentPreviewCard
-                imageUri={pendingDni.front.uri}
-                title={t('registration.documents.dni')}
-                caption={t('registration.documents.state.ready')}
-              />
-            </Reveal>
-          ) : dniServerImageUri ? (
-            // RESUME (Opción A): sin captura local pero el DNI YA está en el servidor → preview desde la URL
-            // prefirmada (cero PII en el device, imagen on-demand). El caption refleja el estado REAL del server.
-            <Reveal delay={120} from="scale">
-              <DocumentPreviewCard
-                imageUri={dniServerImageUri}
-                title={t('registration.documents.dni')}
-                caption={dniServerState?.label ?? t('registration.documents.state.ready')}
-              />
-            </Reveal>
-          ) : null}
 
           {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto del DNI pero el OCR NO leyó el número →
               reescaneo (NO un formulario, NO una tarjeta vacía que finge éxito). Se gatilla por la IMAGEN
@@ -617,27 +594,6 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
             />
           </Reveal>
 
-          {/* PREVIEW de la LICENCIA capturada (espejo del DNI · MISMO componente canónico). Solo cuando hay
-              imagen LOCAL en `pendingLicense`; en resume server-side sin captura local NO se inventa preview
-              (degradación honesta: el chip ya refleja el estado real del servidor). */}
-          {pendingLicense?.file?.uri ? (
-            <Reveal delay={180} from="scale">
-              <DocumentPreviewCard
-                imageUri={pendingLicense.file.uri}
-                title={t('registration.documents.license')}
-                caption={t('registration.documents.state.ready')}
-              />
-            </Reveal>
-          ) : licenseServerImageUri ? (
-            // RESUME (Opción A): la licencia ya está en el servidor → preview desde la URL prefirmada.
-            <Reveal delay={180} from="scale">
-              <DocumentPreviewCard
-                imageUri={licenseServerImageUri}
-                title={t('registration.documents.license')}
-                caption={licenseServerState?.label ?? t('registration.documents.state.ready')}
-              />
-            </Reveal>
-          ) : null}
         </View>
   );
 

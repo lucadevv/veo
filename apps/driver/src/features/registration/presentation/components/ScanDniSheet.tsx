@@ -58,9 +58,11 @@ export function ScanDniSheet({
   const theme = useTheme();
   const dni = useScanDni();
 
-  // Limpia el flujo cada vez que el sheet se abre (captura fresca, sin arrastrar un escaneo previo).
+  // Al reabrir el sheet CONSERVA la captura ya leída (estado `captured` = el bloque "Esto leímos de tu DNI"):
+  // así el conductor re-abre la card y REVISA lo que capturó (con "Usar este DNI" / "Volver a escanear"). Solo
+  // limpia el flujo cuando NO hay una captura útil que mostrar (idle / error / escaneando / ya enviado).
   useEffect(() => {
-    if (visible) {
+    if (visible && dni.state !== 'captured') {
       dni.reset();
     }
     // `dni.reset` es estable por render del hook; solo reaccionamos a la apertura.

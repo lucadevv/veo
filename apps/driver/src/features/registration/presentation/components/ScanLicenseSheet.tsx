@@ -48,8 +48,10 @@ export function ScanLicenseSheet({
   const theme = useTheme();
   const license = useScanLicense();
 
+  // Al reabrir CONSERVA la captura ya leída (estado `captured` = el bloque "Esto leímos de tu licencia") para
+  // que el conductor la revise; solo limpia cuando no hay captura útil (idle / error / escaneando / enviado).
   useEffect(() => {
-    if (visible) {
+    if (visible && license.state !== 'captured') {
       license.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
