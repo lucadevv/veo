@@ -21,3 +21,11 @@ export type DriverDocumentList = DriverDocument[];
  * eso `fileS3Key` no se expone en la UI.
  */
 export type RegisterDocumentInput = AddDocumentRequest;
+
+/**
+ * Proporción de un documento físico tipo tarjeta (ISO/IEC 7810 ID-1: 85.60 × 53.98 mm ≈ 1.586) —
+ * DNI, licencia, tarjeta de propiedad. Los previews de documentos adoptan ESTA proporción en su
+ * contenedor (+ `resizeMode="contain"` como red de seguridad): el documento se ve ENTERO, sin el
+ * "zoom" que producía meter un rectángulo 1.586:1 en contenedores de otra proporción con `cover`.
+ */
+export const DOCUMENT_CARD_ASPECT_RATIO = 85.6 / 53.98;

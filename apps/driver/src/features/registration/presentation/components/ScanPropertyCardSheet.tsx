@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import { VehicleType } from '@veo/shared-types';
 import { IconCheck } from '../../../../shared/presentation/icons';
-import { scanMessageI18nKey } from '../../../documents/domain';
+import { DOCUMENT_CARD_ASPECT_RATIO, scanMessageI18nKey } from '../../../documents/domain';
 import { hexAlpha } from './color';
 import { useScanPropertyCard, type PropertyCardScanOutcome } from '../hooks/useScanPropertyCard';
 
@@ -241,7 +241,7 @@ function CardPreview({
         ]}
       >
         {uri ? (
-          <Image source={{ uri }} style={styles.previewImage} resizeMode="cover" />
+          <Image source={{ uri }} style={styles.previewImage} resizeMode="contain" />
         ) : (
           <View style={styles.previewEmpty}>
             {scanning ? (
@@ -262,7 +262,13 @@ const styles = StyleSheet.create({
   body: { paddingBottom: 8 },
   footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
   previewCol: { gap: 6 },
-  preview: { height: 180, borderWidth: 1, overflow: 'hidden', justifyContent: 'center' },
+  // Proporción de tarjeta ID-1: la tarjeta de propiedad se ve ENTERA, sin el zoom del cover.
+  preview: {
+    aspectRatio: DOCUMENT_CARD_ASPECT_RATIO,
+    borderWidth: 1,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
   previewImage: { width: '100%', height: '100%' },
   previewEmpty: { alignItems: 'center', justifyContent: 'center', flex: 1 },
   capturedCard: { borderWidth: 1 },

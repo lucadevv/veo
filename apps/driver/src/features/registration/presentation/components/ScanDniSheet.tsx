@@ -3,7 +3,7 @@ import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import { IconCheck } from '../../../../shared/presentation/icons';
-import { scanMessageI18nKey } from '../../../documents/domain';
+import { DOCUMENT_CARD_ASPECT_RATIO, scanMessageI18nKey } from '../../../documents/domain';
 import type { DocumentSendPhase } from '../state/registrationStore';
 import { hexAlpha } from './color';
 import { useScanDni } from '../hooks/useScanDni';
@@ -285,7 +285,7 @@ function FacePreview({
         ]}
       >
         {uri ? (
-          <Image source={{ uri }} style={styles.faceImage} resizeMode="cover" />
+          <Image source={{ uri }} style={styles.faceImage} resizeMode="contain" />
         ) : (
           <View style={styles.faceEmpty}>
             {scanning ? (
@@ -310,7 +310,13 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
   facesRow: { flexDirection: 'row' },
   faceCol: { flex: 1, gap: 6 },
-  facePreview: { height: 120, borderWidth: 1, overflow: 'hidden', justifyContent: 'center' },
+  // Proporción de tarjeta ID-1: el DNI escaneado llena el contenedor SIN recorte (adiós zoom).
+  facePreview: {
+    aspectRatio: DOCUMENT_CARD_ASPECT_RATIO,
+    borderWidth: 1,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
   faceImage: { width: '100%', height: '100%' },
   faceEmpty: { alignItems: 'center', justifyContent: 'center', flex: 1 },
   statusRow: { flexDirection: 'row', alignItems: 'center' },

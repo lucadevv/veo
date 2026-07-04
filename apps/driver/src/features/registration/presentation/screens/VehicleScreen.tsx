@@ -25,6 +25,7 @@ import {
 } from '../hooks/useRegistrationDocuments';
 import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
 import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
+import { DOCUMENT_CARD_ASPECT_RATIO } from '../../../documents/domain';
 import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
 import { useRegistrationWizardPageOptional } from './RegistrationWizardContext';
 import {
@@ -610,7 +611,7 @@ export const VehicleScreen = ({ navigation }: Props = {}): React.JSX.Element => 
                     <Image
                       source={{ uri: pendingPropertyCard.front.uri }}
                       style={[styles.capturedThumb, { borderRadius: theme.radii.md }]}
-                      resizeMode="cover"
+                      resizeMode="contain"
                       accessibilityIgnoresInvertColors
                     />
                     <View style={[styles.capturedBody, { gap: theme.spacing.sm }]}>
@@ -1011,7 +1012,8 @@ const styles = StyleSheet.create({
   form: {},
   manualLink: { alignSelf: 'center', paddingVertical: 8 },
   capturedCard: { borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
-  capturedThumb: { width: 96, height: 96 },
+  // Thumb apaisado en proporción de tarjeta ID-1 (era 96×96 cuadrado → recortaba ~37% de los lados).
+  capturedThumb: { width: 96, aspectRatio: DOCUMENT_CARD_ASPECT_RATIO },
   capturedBody: { flex: 1 },
   capturedHeader: { flexDirection: 'row', alignItems: 'center' },
   readRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

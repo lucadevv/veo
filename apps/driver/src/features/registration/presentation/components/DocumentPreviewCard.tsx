@@ -2,6 +2,7 @@ import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { Text, useTheme } from '@veo/ui-kit';
 import { IconCheck } from '../../../../shared/presentation/icons';
+import { DOCUMENT_CARD_ASPECT_RATIO } from '../../../documents/domain';
 import { hexAlpha } from './color';
 
 /**
@@ -45,7 +46,7 @@ export function DocumentPreviewCard({
       <Image
         source={{ uri: imageUri }}
         style={styles.image}
-        resizeMode="cover"
+        resizeMode="contain"
         accessibilityIgnoresInvertColors
       />
       <View
@@ -80,7 +81,8 @@ export function DocumentPreviewCard({
 const styles = StyleSheet.create({
   // `overflow: hidden` recorta la imagen a sangre contra el radio de la card (esquinas superiores limpias).
   card: { borderWidth: 1, overflow: 'hidden' },
-  image: { width: '100%', height: 190 },
+  // Proporción de tarjeta ID-1 (DNI/licencia): el documento se ve ENTERO, sin el zoom del cover.
+  image: { width: '100%', aspectRatio: DOCUMENT_CARD_ASPECT_RATIO },
   // Hairline que separa la imagen-héroe de la línea de estado, sin un divisor pesado.
   statusBar: { flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
   badge: { width: 28, height: 28, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },

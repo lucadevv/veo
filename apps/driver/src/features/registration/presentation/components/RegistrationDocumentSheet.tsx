@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { ExtractedDocumentData, OcrEngineValue } from '@veo/api-client';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import {
+  DOCUMENT_CARD_ASPECT_RATIO,
   ImagePickError,
   isDocumentScannerError,
   isParsableDocumentType,
@@ -350,6 +351,7 @@ export function RegistrationDocumentSheet({
         <View
           style={[
             styles.preview,
+            isPhoto ? styles.previewPhoto : styles.previewDocument,
             {
               backgroundColor: theme.colors.surfaceElevated,
               borderColor: file ? hexAlpha(theme.colors.accent, 0.5) : theme.colors.border,
@@ -358,7 +360,12 @@ export function RegistrationDocumentSheet({
           ]}
         >
           {file ? (
-            <Image source={{ uri: file.uri }} style={styles.previewImage} resizeMode="cover" />
+            // Documento (tarjeta ID-1) → `contain`: se ve ENTERO, sin zoom. Foto ambiente → `cover`.
+            <Image
+              source={{ uri: file.uri }}
+              style={styles.previewImage}
+              resizeMode={isPhoto ? 'cover' : 'contain'}
+            />
           ) : (
             <View style={[styles.previewEmpty, { gap: theme.spacing.sm }]}>
               {isPhoto ? (
@@ -416,7 +423,7 @@ export function RegistrationDocumentSheet({
               ]}
             >
               {back ? (
-                <Image source={{ uri: back.uri }} style={styles.previewImage} resizeMode="cover" />
+                <Image source={{ uri: back.uri }} style={styles.previewImage} resizeMode="contain" />
               ) : (
                 <IconScan size={22} color={theme.colors.inkSubtle} strokeWidth={1.8} />
               )}
@@ -685,7 +692,11 @@ function CaptureButton({
 const styles = StyleSheet.create({
   body: { paddingBottom: 8 },
   footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
-  preview: { height: 180, borderWidth: 1, overflow: 'hidden', justifyContent: 'center' },
+  preview: { borderWidth: 1, overflow: 'hidden', justifyContent: 'center' },
+  // Documento (tarjeta ID-1): el contenedor adopta la proporción del documento → entero, sin zoom.
+  previewDocument: { aspectRatio: DOCUMENT_CARD_ASPECT_RATIO },
+  // Foto ambiente (vehículo): banda fija con `cover` (el encuadre fotográfico sí quiere sangrar).
+  previewPhoto: { height: 180 },
   backRow: { flexDirection: 'row', alignItems: 'center' },
   backThumb: {
     width: 120,
