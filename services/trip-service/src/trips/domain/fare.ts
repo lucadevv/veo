@@ -12,6 +12,8 @@
 import { money, scaleMoney, addMoney, type Money, ValidationError, InvalidStateError } from '@veo/utils';
 import {
   CHILD_MODE_FEE_CENTS,
+  MIN_SURGE,
+  MAX_SURGE,
   deriveCostPerKmCents,
   type OfferingPricingPolicy,
   type OfferingSpec,
@@ -30,8 +32,12 @@ export const PER_MIN_CENTS = 30;
  */
 export { CHILD_MODE_FEE_CENTS };
 
-export const MIN_SURGE = 1.0;
-export const MAX_SURGE = 2.0;
+/**
+ * Límites del surge [1.0, 2.0]. FUENTE ÚNICA en `@veo/shared-types` (junto al catálogo) — re-exportados acá
+ * para los consumidores que ya los importan de `./fare`. El QUOTE del BFF consume los MISMOS límites: el
+ * rango del surge no puede divergir entre el cobro firme y el preview.
+ */
+export { MIN_SURGE, MAX_SURGE };
 
 /**
  * B4 · deriva el recargo de combustible POR KM (céntimos PEN) del precio del combustible y el rendimiento:

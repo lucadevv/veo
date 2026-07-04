@@ -4,9 +4,12 @@
  * Reutiliza la fórmula base de trip-service (BR-T05):
  *   tarifa = BASE + (km · POR_KM) + (min · POR_MIN)
  * y le aplica la política de pricing POR OFERTA del catálogo ADR 013 (`offering.pricing`:
- * multiplier + minFareCents). Sin surge ni recargo de modo niño: esos los fija trip-service al
- * CREAR el viaje. Este cálculo es solo para mostrar opciones antes de confirmar; el precio firme
- * sale de POST /trips.
+ * multiplier + minFareCents) + el surge AUTORITATIVO (ADR-021 Fase C · BR-T06). El surge se resuelve
+ * server-side (dispatch.getSurge sobre el ORIGEN, el MISMO que usa createTrip) y se pasa acá para que el
+ * preview FIXED muestre lo que el create va a cobrar — cierra el sobrecobro silencioso quote↔create. Solo
+ * FIXED: en PUJA el bid ES el precio (surge irrelevante), el caller pasa surge=1.0. El recargo de modo niño
+ * NO se aplica acá (la app lo muestra en el desglose ANTES de confirmar). Este cálculo es solo para mostrar
+ * opciones antes de confirmar; el precio firme sale de POST /trips.
  *
  * NADA aleatorio: km y min provienen de la ruta real de OSRM (distanceMeters/durationSeconds).
  * Todo en céntimos PEN (enteros).
@@ -18,7 +21,7 @@
  * Las constantes de la fórmula base (banderazo/km/min/redondeo) sí siguen espejando
  * `trip-service/domain/fare.ts` (BR-T05): son la matemática, no la política por oferta.
  */
-import { OFFERINGS, OfferingId, VehicleClass } from '@veo/shared-types';
+import { OFFERINGS, OfferingId, VehicleClass, MIN_SURGE, MAX_SURGE } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 
 /** Banderazo base: S/ 6.00 (igual que trip-service). */
@@ -91,6 +94,9 @@ export function categoryFareCents(
   fuelPerKmCents = 0,
   /** F2.4 · banderazo/km/min vigentes (config admin). Default = constantes de código. */
   fareBase: FareBase = DEFAULT_FARE_BASE,
+  /** ADR-021 Fase C · surge autoritativo [1.0, 2.0] resuelto server-side (dispatch). Default 1.0 (sin recargo).
+   *  Solo FIXED; en PUJA el caller pasa 1.0 (el bid ES el precio). Espeja el `× surge` de trip-service. */
+  surgeMultiplier: number = MIN_SURGE,
 ): number {
   if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
     throw new ValidationError('distanceMeters inválida', { distanceMeters });
@@ -104,13 +110,19 @@ export function categoryFareCents(
   if (!Number.isFinite(fuelPerKmCents) || fuelPerKmCents < 0) {
     throw new ValidationError('fuelPerKmCents inválido (≥ 0)', { fuelPerKmCents });
   }
+  if (!Number.isFinite(surgeMultiplier) || surgeMultiplier < MIN_SURGE || surgeMultiplier > MAX_SURGE) {
+    throw new ValidationError('surgeMultiplier fuera de rango [1.0, 2.0]', { surgeMultiplier });
+  }
 
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
   // B3 · el recargo de combustible se pliega al per-km (es costo por distancia), igual que en trip-service.
   const subtotal =
     fareBase.baseFareCents + (fareBase.perKmCents + fuelPerKmCents) * km + fareBase.perMinCents * min;
-  const scaled = subtotal * multiplier;
+  // ADR-021 Fase C · el surge escala la tarifa igual que en el cobro firme (trip-service `calculateFare`:
+  // `subtotal × surge`), aplicado junto al multiplier de la oferta. El redondeo a S/0.10 del preview es
+  // pre-existente (el cobro firme redondea al céntimo; la diferencia ≤ S/0.10 es otro eje — P-C C1/RC2).
+  const scaled = subtotal * multiplier * surgeMultiplier;
   const rounded = Math.round(scaled / FARE_ROUNDING_CENTS) * FARE_ROUNDING_CENTS;
   return Math.max(minFareCents, rounded);
 }
@@ -133,6 +145,9 @@ export function categoryFareCentsV2(
   energyPerKmCents = 0,
   /** F2.4 · banderazo/km/min vigentes (config admin). Default = constantes de código. */
   fareBase: FareBase = DEFAULT_FARE_BASE,
+  /** ADR-021 Fase C · surge autoritativo [1.0, 2.0]. Default 1.0. Espeja el `× surge` de `calculateOfferingFare`
+   *  (trip-service): escala el total (servicio + energía) ANTES de redondear. Solo FIXED (PUJA → 1.0). */
+  surgeMultiplier: number = MIN_SURGE,
 ): number {
   if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
     throw new ValidationError('distanceMeters inválida', { distanceMeters });
@@ -146,13 +161,18 @@ export function categoryFareCentsV2(
   if (!Number.isFinite(energyPerKmCents) || energyPerKmCents < 0) {
     throw new ValidationError('energyPerKmCents inválido (≥ 0)', { energyPerKmCents });
   }
+  if (!Number.isFinite(surgeMultiplier) || surgeMultiplier < MIN_SURGE || surgeMultiplier > MAX_SURGE) {
+    throw new ValidationError('surgeMultiplier fuera de rango [1.0, 2.0]', { surgeMultiplier });
+  }
 
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
   const service =
     (fareBase.baseFareCents + fareBase.perKmCents * km + fareBase.perMinCents * min) * multiplier; // posicionamiento
   const total = service + energyPerKmCents * km; // energía pass-through (no ×multiplier)
-  const rounded = Math.round(total / FARE_ROUNDING_CENTS) * FARE_ROUNDING_CENTS;
+  // ADR-021 Fase C · el surge escala el total ANTES del redondeo, igual que `calculateOfferingFare` de
+  // trip-service (`round((posicionado + energía) × surge)`).
+  const rounded = Math.round((total * surgeMultiplier) / FARE_ROUNDING_CENTS) * FARE_ROUNDING_CENTS;
   return Math.max(minFareCents, rounded);
 }
 

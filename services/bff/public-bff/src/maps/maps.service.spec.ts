@@ -13,8 +13,9 @@ import {
   type OfferingSpec,
 } from '@veo/shared-types';
 import { MapsService } from './maps.service';
+import { DispatchService } from '../dispatch/dispatch.service';
 import { catalogDegradedTotal } from './maps-metrics';
-import { categoryFareCents, DEFAULT_BID_FLOOR_CENTS } from './fare';
+import { categoryFareCents, DEFAULT_BID_FLOOR_CENTS, MIN_FARE_CENTS, DEFAULT_FARE_BASE } from './fare';
 import type { Env } from '../config/env.schema';
 
 /** Identidad de prueba del pasajero (la quote la firma para la lectura interna del modo). */
@@ -694,5 +695,64 @@ describe('MapsService.quote · catálogo de offerings (ADR 013)', () => {
     expect(out.options.find((o) => o.id === OfferingId.VEO_CONFORT)?.mode).toBe('FIXED');
     // La oferta que sí permite el modo del schedule lo refleja tal cual.
     expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.mode).toBe('PUJA');
+  });
+});
+
+// ADR-021 Fase C — el surge del quote es AUTORITATIVO server-side (mismo dispatch.getSurge que el create).
+// Antes el quote NO aplicaba surge y el create SÍ → sobrecobro silencioso. Estos tests fijan el cierre:
+// FIXED aplica el surge de dispatch; PUJA NO (el bid ES el precio); y todo degrada honesto a 1.0.
+describe('MapsService.quote · surge autoritativo (ADR-021 Fase C)', () => {
+  const surgeStub = (multiplier: number): DispatchService =>
+    ({
+      getSurge: async () => ({ multiplier, zoneId: 'z1', active: multiplier > 1 }),
+    }) as unknown as DispatchService;
+
+  const withSurge = (
+    dispatch: DispatchService,
+    tripRest: FakeTripRest = new FakeTripRest({ mode: 'FIXED' }),
+  ): MapsService =>
+    new MapsService(
+      new FakeMapsClient({ route: ROUTE }),
+      tripRest as unknown as InternalRestClient,
+      fakeConfig(),
+      undefined,
+      undefined,
+      undefined,
+      dispatch,
+    );
+
+  it('FIXED · aplica el surge de dispatch al preview (mismo cobro que el create): 1500 × 1.5 = 2250', async () => {
+    const out = await withSurge(surgeStub(1.5)).quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+    const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(eco?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 1.5));
+    expect(eco?.priceCents).toBe(2250);
+  });
+
+  it('PUJA · NO aplica surge (el bid ES el precio; la sugerida no infla con demanda)', async () => {
+    const out = await withSurge(surgeStub(1.5), new FakeTripRest({ mode: 'PUJA' })).quote(
+      { origin: ORIGIN, destination: DESTINATION },
+      USER,
+    );
+    const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(eco?.suggestedCents).toBe(1500);
+    expect(eco?.priceCents).toBe(1500);
+  });
+
+  it('fail-safe · dispatch caído → surge 1.0 (sin recargo, jamás sobre-cotiza)', async () => {
+    const broken = {
+      getSurge: async () => {
+        throw new Error('dispatch down');
+      },
+    } as unknown as DispatchService;
+    const out = await withSurge(broken).quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+    expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.priceCents).toBe(1500);
+  });
+
+  it('sin dispatch inyectado (specs con 3 args) → surge 1.0 (degradación honesta)', async () => {
+    const out = await buildService(
+      new FakeMapsClient({ route: ROUTE }),
+      new FakeTripRest({ mode: 'FIXED' }),
+    ).quote({ origin: ORIGIN, destination: DESTINATION }, USER);
+    expect(out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO)?.priceCents).toBe(1500);
   });
 });

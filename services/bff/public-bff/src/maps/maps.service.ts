@@ -28,6 +28,8 @@ import {
   resolveBidFloorCents,
   DEFAULT_BID_FLOOR_CONFIG,
   GLOBAL_ZONE,
+  MIN_SURGE,
+  MAX_SURGE,
   type BidFloorConfig,
   type OfferingSpec,
   type OfferingPricingPolicy,
@@ -44,6 +46,7 @@ import {
   DEFAULT_FARE_BASE,
   type FareBase,
 } from './fare';
+import { DispatchService } from '../dispatch/dispatch.service';
 import { OFFERING_DISPLAY_NAMES } from './offering-names';
 import { bumpCatalogDegraded } from './maps-metrics';
 import {
@@ -127,6 +130,9 @@ export class MapsService {
     @Optional() @Inject(GRPC_PAYMENT) private readonly paymentGrpc?: GrpcServiceClient,
     @Optional() @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret?: string,
     @Optional() @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience?: InternalAudience,
+    // ADR-021 Fase C · surge autoritativo para el preview (mismo getSurge que usa createTrip). @Optional
+    // trailing: los specs que construyen el servicio con menos args no lo pasan → el quote degrada a 1.0.
+    @Optional() private readonly dispatch?: DispatchService,
   ) {
     this.energyModelEnabled = config.getOrThrow<boolean>('PRICING_ENERGY_MODEL_ENABLED');
   }
@@ -185,6 +191,7 @@ export class MapsService {
       energyPrices,
       bidFloorConfig,
       fareBase,
+      surgeMultiplier,
     ] = await Promise.all([
       this.maps.route(origin, destination, waypoints),
       // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
@@ -207,6 +214,10 @@ export class MapsService {
       // F2.4 · banderazo/km/min vigentes (admin). Degradación honesta: trip-service caído → constantes de
       // código (= el seed) → el preview no diverge del cobro en el caso común.
       this.fetchBaseFare(identity),
+      // ADR-021 Fase C · surge AUTORITATIVO server-side para el preview FIXED (mismo dispatch.getSurge que
+      // createTrip, sobre el ORIGEN). Cierra el sobrecobro silencioso quote↔create. Degradación honesta:
+      // dispatch caído/anónimo → 1.0 (sin surge, jamás sobre-cotiza).
+      this.fetchSurge(identity, origin),
     ]);
 
     // ADR 013 §1.3 · el `mode` top-level = el modo de la oferta ANCLA (VEO Económico). B2: respeta su pin
@@ -230,6 +241,12 @@ export class MapsService {
       .map((offering) => {
         const ov = effective?.get(offering.id);
         const pricing = ov?.pricing ?? offering.pricing; // efectivo (admin) o de código (degradación)
+        // B2 · modo POR oferta = pin del admin (si ∈ allowedModes) > schedule ∩ oferta. Mismo motor que create.
+        const offeringMode = resolveOfferingModeWithPin(offering, ov?.modePin, scheduledMode).mode;
+        // ADR-021 Fase C · el surge autoritativo aplica SOLO a la tarifa FIJA: en PUJA el bid ES el precio
+        // (surge irrelevante) — espeja createTrip, que resuelve surge solo cuando `bidCents == null`. Así el
+        // preview FIXED muestra lo que el create va a cobrar y la sugerida de PUJA no infla con surge.
+        const offeringSurge = isPujaMode(offeringMode) ? MIN_SURGE : surgeMultiplier;
         // B5-1.d · FLIP: con el modelo de energía activo, precio por oferta con energía pass-through
         // (energyPerKm por fuente); con el flag OFF, la fórmula vieja (fuel global). Mismo motor que el create.
         const priceCents = this.offeringPriceCents(
@@ -239,9 +256,8 @@ export class MapsService {
           fuelPerKmCents,
           energyPrices,
           fareBase,
+          offeringSurge,
         );
-        // B2 · modo POR oferta = pin del admin (si ∈ allowedModes) > schedule ∩ oferta. Mismo motor que create.
-        const offeringMode = resolveOfferingModeWithPin(offering, ov?.modePin, scheduledMode).mode;
         return {
           id: offering.id,
           // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
@@ -360,6 +376,30 @@ export class MapsService {
         `recargo de combustible no disponible (${(err as Error).message}); preview sin recargo (B3 · degradación honesta)`,
       );
       return 0;
+    }
+  }
+
+  /**
+   * ADR-021 Fase C · resuelve el surge AUTORITATIVO para el preview FIXED, con el MISMO `dispatch.getSurge`
+   * que usa createTrip (sobre el ORIGEN). Cierra el sobrecobro silencioso: antes el quote NO aplicaba surge
+   * y el create SÍ, así que bajo demanda alta el pasajero veía un precio y se le cobraba otro mayor.
+   * DEGRADACIÓN HONESTA (nunca rompe el quote ni sobre-cotiza): sin cliente dispatch (specs) / identidad
+   * anónima / dispatch caído → 1.0 (sin recargo). El valor se clampa a [MIN_SURGE, MAX_SURGE] por defensa.
+   */
+  private async fetchSurge(
+    identity: AuthenticatedUser,
+    origin: { lat: number; lon: number },
+  ): Promise<number> {
+    if (!this.dispatch || identity === ANONYMOUS_IDENTITY) return MIN_SURGE;
+    try {
+      const { multiplier } = await this.dispatch.getSurge(identity, origin.lat, origin.lon);
+      if (!Number.isFinite(multiplier)) return MIN_SURGE;
+      return Math.min(Math.max(multiplier, MIN_SURGE), MAX_SURGE);
+    } catch (err) {
+      this.logger.warn(
+        `surge no disponible en el quote (${(err as Error).message}); preview sin surge (degradación honesta)`,
+      );
+      return MIN_SURGE;
     }
   }
 
@@ -494,6 +534,8 @@ export class MapsService {
     fuelPerKmCents: number,
     energyPrices: Map<string, number> | null,
     fareBase: FareBase,
+    /** ADR-021 Fase C · surge autoritativo [1.0, 2.0]. Default 1.0 (PUJA / degradación). Solo FIXED lo recibe >1. */
+    surgeMultiplier: number = MIN_SURGE,
   ): number {
     if (this.energyModelEnabled) {
       const energyPerKm = deriveEnergyPerKmCents(
@@ -507,6 +549,7 @@ export class MapsService {
         pricing.minFareCents,
         energyPerKm,
         fareBase,
+        surgeMultiplier,
       );
     }
     return categoryFareCents(
@@ -516,6 +559,7 @@ export class MapsService {
       pricing.minFareCents,
       fuelPerKmCents,
       fareBase,
+      surgeMultiplier,
     );
   }
 

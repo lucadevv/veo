@@ -11,6 +11,7 @@ import {
   PER_MIN_CENTS,
   MIN_FARE_CENTS,
   MOTO_MIN_FARE_CENTS,
+  DEFAULT_FARE_BASE,
 } from './fare';
 
 describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
@@ -89,6 +90,47 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
     expect(() => categoryFareCents(-1, 60, 1.0)).toThrow(ValidationError);
     expect(() => categoryFareCents(1000, -1, 1.0)).toThrow(ValidationError);
     expect(() => categoryFareCents(Number.NaN, 60, 1.0)).toThrow(ValidationError);
+  });
+});
+
+describe('ADR-021 Fase C · surge autoritativo en el QUOTE (cierra el sobrecobro silencioso quote↔create)', () => {
+  it('surge escala la tarifa igual que el cobro firme (1500 × 1.5 = 2250)', () => {
+    // base 1500 (5km,10min,×1.0), sin fuel, surge 1.5 → 2250 (múltiplo de 10).
+    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 1.5)).toBe(2250);
+  });
+
+  it('el surge compone con el multiplier de la oferta (1500 × 1.25 × 1.2 = 2250)', () => {
+    // 1500 × 1.25 = 1875; × 1.2 = 2250 (múltiplo de 10).
+    expect(categoryFareCents(5000, 600, 1.25, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 1.2)).toBe(2250);
+  });
+
+  it('surge default = 1.0 → sin recargo (back-compat: las llamadas sin el arg no cambian)', () => {
+    expect(categoryFareCents(5000, 600, 1.0)).toBe(1500);
+    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 1.0)).toBe(1500);
+  });
+
+  it('rechaza surge fuera de [1.0, 2.0] (defensa: dispatch ya clampa, pero la fórmula no confía)', () => {
+    expect(() => categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 0.5)).toThrow(
+      ValidationError,
+    );
+    expect(() => categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 2.5)).toThrow(
+      ValidationError,
+    );
+    expect(() =>
+      categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, Number.NaN),
+    ).toThrow(ValidationError);
+  });
+
+  it('V2 (flip-ON) · el surge escala el total antes del redondeo (1500 × 1.5 = 2250)', () => {
+    expect(categoryFareCentsV2(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 1.5)).toBe(2250);
+    // energía pass-through + surge: (1500 + 200) × 1.5 = 2550.
+    expect(categoryFareCentsV2(5000, 600, 1.0, MIN_FARE_CENTS, 40, DEFAULT_FARE_BASE, 1.5)).toBe(2550);
+  });
+
+  it('V2 · rechaza surge fuera de rango', () => {
+    expect(() =>
+      categoryFareCentsV2(5000, 600, 1.0, MIN_FARE_CENTS, 0, DEFAULT_FARE_BASE, 2.5),
+    ).toThrow(ValidationError);
   });
 });
 
