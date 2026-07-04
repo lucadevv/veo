@@ -30,11 +30,26 @@ const TABS: Record<string, {icon: IconCmp; label: string}> = {
  */
 export function AppTabBar({
   state,
+  descriptors,
   navigation,
-}: BottomTabBarProps): React.JSX.Element {
+}: BottomTabBarProps): React.JSX.Element | null {
   const theme = useTheme();
   const {t} = useTranslation();
   const insets = useSafeAreaInsets();
+
+  // Ocultamiento POR PANTALLA (patrón estándar de tab bar custom): la ruta enfocada puede pedir
+  // `tabBarStyle: {display: 'none'}`. Lo usa el Home fuera de idle (cotización/puja/viaje): el pen
+  // no dibuja la TabBar en esas fases y la píldora tapaba el CTA del sheet ("Confirmar VEO").
+  const focusedOptions = descriptors[state.routes[state.index]!.key]?.options;
+  const tabBarStyle = focusedOptions?.tabBarStyle;
+  if (
+    tabBarStyle != null &&
+    typeof tabBarStyle === 'object' &&
+    'display' in tabBarStyle &&
+    tabBarStyle.display === 'none'
+  ) {
+    return null;
+  }
 
   return (
     <View

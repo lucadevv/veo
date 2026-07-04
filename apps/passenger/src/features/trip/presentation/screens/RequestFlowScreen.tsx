@@ -5,6 +5,7 @@ import type {
   TripResource,
 } from '@veo/api-client';
 import {useIsFocused, useNavigation} from '@react-navigation/native';
+import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {RoutePin, useTheme} from '@veo/ui-kit';
@@ -14,7 +15,10 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Svg, {Defs, LinearGradient as SvgLinearGradient, Rect, Stop} from 'react-native-svg';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
-import type {RootStackParamList} from '../../../../navigation/types';
+import type {
+  MainTabsParamList,
+  RootStackParamList,
+} from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import homeMapBackdrop from '../../../../shared/assets/brand/home-map.jpg';
 import {
@@ -107,6 +111,10 @@ export function RequestFlowScreen(): React.JSX.Element {
   // Sin esto: tras N navegaciones/reloads se acumulan contextos GL huérfanos → mapa negro.
   const isFocused = useIsFocused();
   const {height: windowHeight} = useWindowDimensions();
+  // Vista TIPADA del MISMO navigator más cercano (el tab navigator de MainTabs) para setear
+  // opciones de la TabBar; `navigation` (Nav) queda para los push del stack padre.
+  const tabNavigation =
+    useNavigation<BottomTabNavigationProp<MainTabsParamList>>();
   // Sin tab bar, el sheet ancla contra el inset inferior del safe-area (home indicator), no contra el
   // alto del tab bar (que ya no existe). Mantiene la matemática de fracciones del sheet correcta.
   const bottomInset = insets.bottom;
@@ -341,6 +349,15 @@ export function RequestFlowScreen(): React.JSX.Element {
   // route/trip → mapa persistente de fondo. Se computa una vez y gobierna tanto el render del mapa como
   // el del contenido idle full-screen vs el bottom-sheet.
   const mapMode = mapModeForPhase(phase);
+
+  // TABBAR por fase: fuera de idle (cotización/puja/viaje) la píldora flotante se ESCONDE — el pen
+  // no la dibuja en esas fases (estás en un flujo, no navegando tabs) y tapaba el CTA del sheet
+  // ("Confirmar VEO" bajo la TabBar). AppTabBar honra `tabBarStyle {display:'none'}` del descriptor.
+  useEffect(() => {
+    tabNavigation.setOptions({
+      tabBarStyle: mapMode === 'idle' ? undefined : {display: 'none'},
+    });
+  }, [tabNavigation, mapMode]);
 
   // MODELO CABIFY · recojo con PIN: el descriptor declara la elegibilidad por fase+flow (`resolvePickupMode`),
   // PERO el pin solo tiene sentido CON un mapa interactivo de fondo (arrastrás el mapa y el origen sigue al
