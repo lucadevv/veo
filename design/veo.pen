@@ -12212,7 +12212,7 @@
         {
           "type": "frame",
           "id": "EZSxZ",
-          "x": 50,
+          "x": 2210,
           "y": 8390,
           "name": "P/Panic",
           "clip": true,
@@ -13815,7 +13815,7 @@
               "id": "oZjBM",
               "name": "T",
               "fill": "$brand",
-              "content": "6 · Seguridad",
+              "content": "6 · TAB SEGURIDAD",
               "fontFamily": "$font-display",
               "fontSize": 26,
               "fontWeight": "700"
@@ -13825,7 +13825,7 @@
               "id": "fnw3M",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Hub = tab Seguridad (contactos, modo niño, KYC opcional). Pánico: SOS del viaje o escalamiento silencioso automático. Cámara en vivo y compartir con familia: desde el viaje activo",
+              "content": "Hub de la tab: Contactos de confianza, Modo niño y Verificación de identidad (KYC opcional, ADR-018). Pánico y Cámara en vivo NO salen de acá: nacen del viaje activo (SOS / REC) — y el pánico también escala solo si el envío silencioso falla",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -14366,8 +14366,8 @@
         {
           "type": "frame",
           "id": "rUe5b",
-          "x": 2210,
-          "y": 9940,
+          "x": 50,
+          "y": 8390,
           "name": "P/Seguridad",
           "clip": true,
           "width": 390,
@@ -16625,7 +16625,7 @@
               "id": "E20mk6",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Próximos (programados) | Historial (del server: Hoy / Esta semana). Tocar un viaje terminal abre el detalle en SHEET sobre la lista → de ahí sale 'Olvidé algo'. Un viaje VIVO no navega: rehidrata el sheet del Home. Vacío de Próximos → Programar un viaje (fila 5). Derecha: Seguridad y Cuenta (lotes pendientes)",
+              "content": "Próximos (programados) | Historial (del server: Hoy / Esta semana). Tocar un viaje terminal abre el detalle en SHEET sobre la lista → de ahí sale 'Olvidé algo'. Un viaje VIVO no navega: rehidrata el sheet del Home. Vacío de Próximos → Programar un viaje (fila 5). Derecha: Cuenta (lote pendiente)",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -23616,7 +23616,7 @@
         {
           "type": "frame",
           "id": "PhpLa",
-          "x": 2210,
+          "x": 2750,
           "y": 8390,
           "name": "P/CameraLive",
           "clip": true,
@@ -23959,7 +23959,7 @@
         {
           "type": "frame",
           "id": "Rduyq",
-          "x": 2750,
+          "x": 3290,
           "y": 8390,
           "name": "P/CameraControl",
           "clip": true,
@@ -25286,7 +25286,7 @@
           "type": "ref",
           "ref": "y27M5",
           "name": "Arrow CameraLive→Control",
-          "x": 2604,
+          "x": 3144,
           "y": 8800
         },
         {
@@ -27796,6 +27796,14 @@
               }
             }
           ]
+        },
+        {
+          "id": "C0F0G5",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Hub→Contactos",
+          "x": 444,
+          "y": 8800
         }
       ]
     },
