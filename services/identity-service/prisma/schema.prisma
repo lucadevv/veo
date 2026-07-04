@@ -219,6 +219,10 @@ model Driver {
   /// gRPC con `open()` antes de mandarlo al admin-bff (ya gateado Compliance+). El `User.dniHash` es OTRO
   /// caso (matching interno irreversible) — no se mezcla con este. Nullable hasta que el conductor lo registra.
   documentIdEnc         String?               @map("document_id_enc")
+  /// Blind index del DNI (hashPii determinista con DNI_HASH_SALT): permite CHEQUEAR unicidad sin exponer
+  /// la PII (Ley 29733), ya que `documentIdEnc` es cifrado con IV aleatorio (no indexable). @unique = un DNI
+  /// registra UN solo conductor; nullable hasta que el conductor registra su DNI (NULL no colisiona en Postgres).
+  dniHash               String?               @unique @map("dni_hash")
   birthDate             DateTime?             @map("birth_date") @db.Date
   currentStatus         DriverStatus          @default(OFFLINE) @map("current_status")
   averageRating         Decimal               @default(5.0) @map("average_rating") @db.Decimal(3, 2)

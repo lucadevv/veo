@@ -31,6 +31,7 @@ const futureLicense = new Date(Date.now() + 1_000_000_000);
 const config = new ConfigService<Env, true>({
   BIOMETRIC_MIN_SCORE: 90,
   DRIVER_DNI_ENC_KEY: 'k'.repeat(32),
+  DNI_HASH_SALT: 'test-dni-salt',
   EXCESSIVE_CANCELLATION_COOLDOWN_HOURS: 24,
 });
 

@@ -348,6 +348,23 @@ export interface DriverPersonalData {
 }
 
 /**
+ * POST /drivers/me/check-dni → body. Chequea si el DNI escaneado ya está registrado en OTRA cuenta de
+ * conductor (blind index `dni_hash`) ANTES de completar el alta. Se proxya por REST interno firmado a
+ * identity-service (PII no viaja por gRPC), mismo patrón que `UpdateDriverPersonalDto`.
+ */
+export class CheckDniDto {
+  @ApiProperty({ description: 'DNI peruano (8 dígitos)', example: '12345678' })
+  @IsString()
+  @Matches(DNI_PATTERN, { message: 'El DNI debe tener exactamente 8 dígitos' })
+  dni!: string;
+}
+
+/** POST /drivers/me/check-dni → respuesta: `exists` = true si el DNI YA pertenece a OTRA cuenta. */
+export interface DriverDniCheckResult {
+  exists: boolean;
+}
+
+/**
  * POST /drivers/vehicles → body. Alta self-service del vehículo del conductor (onboarding). Se proxya
  * a fleet POST /api/v1/drivers/vehicles; el driverId lo resuelve fleet desde la identidad propagada.
  */

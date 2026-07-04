@@ -137,6 +137,12 @@ export class PayoutPermanentlyRejectedError extends DomainError {
   readonly httpStatus = 422;
 }
 
+/** El DNI escaneado ya está registrado en OTRA cuenta de conductor (blind index `dni_hash` único). */
+export class DniAlreadyRegisteredError extends DomainError {
+  readonly code = 'DNI_ALREADY_REGISTERED';
+  readonly httpStatus = 409;
+}
+
 export function isDomainError(err: unknown): err is DomainError {
   return err instanceof DomainError;
 }

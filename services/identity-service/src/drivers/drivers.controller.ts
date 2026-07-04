@@ -173,6 +173,16 @@ class UpdatePersonalInfoDto {
   birthDate!: string;
 }
 
+/**
+ * POST /drivers/check-dni → body. Chequeo de unicidad del DNI (blind index `dni_hash`) ANTES de completar
+ * el alta (F0: escaneo del DNI). Misma validación que `UpdatePersonalInfoDto.dni`.
+ */
+class CheckDniDto {
+  @IsString()
+  @Matches(/^\d{8}$/, { message: 'El DNI debe tener exactamente 8 dígitos' })
+  dni!: string;
+}
+
 @ApiTags('drivers')
 @ApiBearerAuth()
 // Riel MIXTO: este controller mezcla operaciones de conductor (driver-rail) y de operador (admin-rail),
@@ -256,6 +266,17 @@ export class DriversController {
   @ApiOperation({ summary: 'Registrar/actualizar datos personales del conductor (BR-I04)' })
   updatePersonalInfo(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdatePersonalInfoDto) {
     return this.drivers.updatePersonalInfo(user.userId, dto);
+  }
+
+  @Audiences(InternalAudience.DRIVER_RAIL)
+  @Post('check-dni')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
+  })
+  async checkDni(@CurrentUser() user: AuthenticatedUser, @Body() dto: CheckDniDto) {
+    const exists = await this.drivers.dniExists(user.userId, dto.dni);
+    return { exists };
   }
 
   // ── Operador (RBAC) ──

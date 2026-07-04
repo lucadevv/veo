@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import {
   ConflictError,
+  DniAlreadyRegisteredError,
   ForbiddenError,
+  hashPii,
   NotFoundError,
   UnauthorizedError,
   UnprocessableEntityError,
@@ -13,9 +15,11 @@ import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
 const DRIVER_DNI_ENC_KEY = 'k'.repeat(32);
+const DNI_HASH_SALT = 'test-dni-salt';
 const config = new ConfigService<Env, true>({
   BIOMETRIC_MIN_SCORE: 90,
   DRIVER_DNI_ENC_KEY,
+  DNI_HASH_SALT,
   EXCESSIVE_CANCELLATION_COOLDOWN_HOURS: 24,
 });
 /**
@@ -1466,7 +1470,14 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
    * y refleja en el resultado el merge de la fila previa con los datos enviados (mapeo dni→document_id),
    * para verificar tanto la vista devuelta como la materialización del cascarón.
    */
-  function makePersonalPrisma(existing: Record<string, unknown> | null) {
+  function makePersonalPrisma(
+    existing: Record<string, unknown> | null,
+    /**
+     * Filas de OTROS conductores ya persistidas (userId + dniHash), para simular el choque del blind
+     * index. Vacío por default: los tests que no ejercitan la unicidad del DNI no ven ningún clash.
+     */
+    others: { userId: string; dniHash: string }[] = [],
+  ) {
     const upsertCalls: {
       create: Record<string, unknown>;
       update?: Record<string, unknown>;
@@ -1476,7 +1487,23 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       upsertCalls,
       outboxEvents,
       prisma: {
-        read: { driver: { findUnique: async () => existing } },
+        read: {
+          driver: {
+            findUnique: async () => existing,
+            // Espeja el pre-check (y el backstop de carrera) de `updatePersonalInfo`/`dniExists`:
+            // matchea la primera fila de OTRO userId con el MISMO dniHash.
+            findFirst: async ({
+              where,
+            }: {
+              where: { dniHash: string; NOT: { userId: string } };
+            }) => {
+              const match = others.find(
+                (o) => o.dniHash === where.dniHash && o.userId !== where.NOT.userId,
+              );
+              return match ? { id: `clash-${match.userId}` } : null;
+            },
+          },
+        },
         // Materialización por `materializeDriverShell`: createMany({skipDuplicates}) → si la fila ya existía
         // (existing) el count es 0 (no crea, no emite) y se actualiza el slice; si no existía, count 1 (crea +
         // emite driver.registered). El doble captura ambos brazos en `upsertCalls` (create del createMany,
@@ -1601,6 +1628,68 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       birthDate: '1992-01-10',
     });
     expect(second.outboxEvents).toHaveLength(0);
+  });
+
+  describe('blind index del DNI (dni_hash) · unicidad sin exponer la PII', () => {
+    it('DNI nuevo (sin choque): crea OK y escribe el dniHash determinista en la fila', async () => {
+      const { prisma, upsertCalls } = makePersonalPrisma(null);
+      const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+      const dni = '11112222';
+      await svc.updatePersonalInfo('u1', { legalName: 'Ana', dni, birthDate: '1992-01-10' });
+      expect(upsertCalls[0]?.create.dniHash).toBe(hashPii(dni, DNI_HASH_SALT));
+    });
+
+    it('DNI de OTRO conductor (choque de blind index): lanza DniAlreadyRegisteredError (409) y NO persiste', async () => {
+      const dni = '99998888';
+      const otherDniHash = hashPii(dni, DNI_HASH_SALT);
+      const { prisma, upsertCalls } = makePersonalPrisma(null, [
+        { userId: 'u-other', dniHash: otherDniHash },
+      ]);
+      const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+      await expect(
+        svc.updatePersonalInfo('u1', { legalName: 'Ana', dni, birthDate: '1992-01-10' }),
+      ).rejects.toThrow(DniAlreadyRegisteredError);
+      // El pre-check corta ANTES de la materialización: no se llega a escribir nada.
+      expect(upsertCalls).toHaveLength(0);
+    });
+
+    it('MISMO userId re-envía SU PROPIO DNI (resume del wizard): el pre-check lo EXCLUYE, NO lanza', async () => {
+      const dni = '12345678';
+      const ownDniHash = hashPii(dni, DNI_HASH_SALT);
+      // La única fila con ese dniHash es la del PROPIO u1 (no aparece en `others`, que solo modela
+      // choques de OTROS userId): el `NOT: { userId }` del pre-check la excluye del match.
+      const { prisma } = makePersonalPrisma({ ...okDriver, userId: 'u1', dniHash: ownDniHash }, []);
+      const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+      await expect(
+        svc.updatePersonalInfo('u1', { legalName: 'Ana María', dni, birthDate: '1992-01-10' }),
+      ).resolves.not.toThrow();
+    });
+  });
+
+  describe('DriversService.dniExists · check-dni previo al alta (F0: escaneo del DNI)', () => {
+    it('true cuando el DNI YA pertenece a OTRA cuenta de conductor', async () => {
+      const dni = '55556666';
+      const { prisma } = makePersonalPrisma(null, [
+        { userId: 'u-other', dniHash: hashPii(dni, DNI_HASH_SALT) },
+      ]);
+      const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+      expect(await svc.dniExists('u1', dni)).toBe(true);
+    });
+
+    it('false cuando NINGÚN otro conductor tiene ese DNI', async () => {
+      const { prisma } = makePersonalPrisma(null, []);
+      const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+      expect(await svc.dniExists('u1', '77778888')).toBe(false);
+    });
+
+    it('false cuando el ÚNICO dueño del hash es el PROPIO userId (excluido por NOT)', async () => {
+      const dni = '12345678';
+      const { prisma } = makePersonalPrisma(null, [
+        { userId: 'u1', dniHash: hashPii(dni, DNI_HASH_SALT) },
+      ]);
+      const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+      expect(await svc.dniExists('u1', dni)).toBe(false);
+    });
   });
 });
 

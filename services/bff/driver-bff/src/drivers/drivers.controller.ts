@@ -18,6 +18,7 @@ import { DriverApi } from '../common/driver-api.decorator';
 import { DriversService } from './drivers.service';
 import {
   AddDocumentDto,
+  CheckDniDto,
   DocumentUploadTicketDto,
   EnrollFaceDto,
   ListVehicleModelsQuery,
@@ -29,6 +30,7 @@ import {
   UpdateDriverPersonalDto,
   VerifyBiometricDto,
   type DocumentUploadTicketView,
+  type DriverDniCheckResult,
   type DriverModelRequestView,
   type DriverPersonalData,
   type DriverProfileView,
@@ -106,6 +108,18 @@ export class DriversController {
     @Body() dto: UpdateDriverPersonalDto,
   ): Promise<DriverPersonalData> {
     return this.drivers.updatePersonal(user, dto);
+  }
+
+  @Post('me/check-dni')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
+  })
+  checkDni(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CheckDniDto,
+  ): Promise<DriverDniCheckResult> {
+    return this.drivers.checkDni(user, dto);
   }
 
   @Post('vehicles')

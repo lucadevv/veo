@@ -9,7 +9,9 @@ import { createEnvelope, DRIVER_OFFLINE_REASON } from '@veo/events';
 import { RedisRefreshTokenStore } from '@veo/auth';
 import {
   ConflictError,
+  DniAlreadyRegisteredError,
   ForbiddenError,
+  hashPii,
   NotFoundError,
   UnauthorizedError,
   UnprocessableEntityError,
@@ -184,6 +186,8 @@ export class DriversService {
   private readonly minScore: number;
   /** Clave de cifrado del DNI del conductor en reposo (AES-256-GCM · secret-box). KMS en prod. */
   private readonly dniEncKey: string;
+  /** Salt del blind index del DNI (`hashPii`): determinista, permite CHEQUEAR unicidad sin exponer la PII. */
+  private readonly dniHashSalt: string;
   /** Cooldown (ms) del hold TEMPORAL EXCESSIVE_CANCELLATIONS (auto-suspensión por exceso de cancelaciones). */
   private readonly cancellationCooldownMs: number;
 
@@ -201,6 +205,7 @@ export class DriversService {
   ) {
     this.minScore = config.getOrThrow<number>('BIOMETRIC_MIN_SCORE');
     this.dniEncKey = config.getOrThrow<string>('DRIVER_DNI_ENC_KEY');
+    this.dniHashSalt = config.getOrThrow<string>('DNI_HASH_SALT');
     this.cancellationCooldownMs =
       config.getOrThrow<number>('EXCESSIVE_CANCELLATION_COOLDOWN_HOURS') * 60 * 60 * 1000;
   }
@@ -1973,22 +1978,57 @@ export class DriversService {
     // cifrado REVERSIBLE (no hash) porque compliance debe MOSTRARLO al operador para verificación manual:
     // identity descifra en el borde gRPC (toDriverReply) antes de mandarlo al admin-bff (gateado Compliance+).
     const documentIdEnc = seal(input.dni, this.dniEncKey);
-    await this.materializeDriverShell(
-      userId,
-      {
+    // Blind index del DNI: hash DETERMINISTA (mismo DNI ⇒ mismo hash) que sí se puede indexar/comparar,
+    // a diferencia de `documentIdEnc` (AES-GCM con IV aleatorio, ciphertext distinto cada vez). Permite
+    // CHEQUEAR unicidad sin descifrar ni exponer la PII.
+    const dniHash = hashPii(input.dni, this.dniHashSalt);
+    // PRE-CHECK (UX, no atómico): excluye al propio userId para que el RESUME del wizard (el conductor
+    // re-envía SU MISMO DNI) no se auto-rechace. Da el 409 amigable en el caso común; la garantía DURA la
+    // pone el `@unique` de Postgres + el backstop del catch de abajo (cierra el TOCTOU de esta carrera).
+    const clash = await this.prisma.read.driver.findFirst({
+      where: { dniHash, NOT: { userId } },
+      select: { id: true },
+    });
+    if (clash) {
+      throw new DniAlreadyRegisteredError('Este DNI ya está registrado en otra cuenta');
+    }
+    try {
+      await this.materializeDriverShell(
         userId,
-        currentStatus: DriverStatus.OFFLINE,
-        backgroundCheckStatus: BackgroundCheckStatus.PENDING,
-        legalName: input.legalName,
-        documentIdEnc,
-        birthDate,
-      },
-      {
-        legalName: input.legalName,
-        documentIdEnc,
-        birthDate,
-      },
-    );
+        {
+          userId,
+          currentStatus: DriverStatus.OFFLINE,
+          backgroundCheckStatus: BackgroundCheckStatus.PENDING,
+          legalName: input.legalName,
+          documentIdEnc,
+          dniHash,
+          birthDate,
+        },
+        {
+          legalName: input.legalName,
+          documentIdEnc,
+          dniHash,
+          birthDate,
+        },
+      );
+    } catch (e) {
+      // BACKSTOP de carrera (cierra el TOCTOU del pre-check): dos altas concurrentes con el MISMO DNI
+      // pueden pasar AMBAS el pre-check (ninguna ve todavía la fila de la otra) y solo una gana el
+      // `@unique(dni_hash)` de Postgres. El `createMany({ skipDuplicates: true })` de `materializeDriverShell`
+      // NO lanza en conflicto (ON CONFLICT DO NOTHING absorbe el choque de `userId`, pero el choque de
+      // `dni_hash` en una fila AJENA hace que el INSERT completo se descarte sin crear la propia) y el
+      // `tx.driver.update({ where: { userId } })` del brazo update SÍ puede reventar con P2025/P2002 si
+      // el choque es contra la propia fila en el mismo instante. Re-chequeamos: si el clash AHORA aparece,
+      // es la carrera de DNI duplicado (409 tipado); si no aparece, el error es OTRA cosa y se re-lanza tal cual.
+      const clashAfterRace = await this.prisma.read.driver.findFirst({
+        where: { dniHash, NOT: { userId } },
+        select: { id: true },
+      });
+      if (clashAfterRace) {
+        throw new DniAlreadyRegisteredError('Este DNI ya está registrado en otra cuenta');
+      }
+      throw e;
+    }
     // La vista vuelve al PROPIO conductor (que ya tipeó el DNI): se devuelve ENMASCARADO (últimos 4 dígitos),
     // nunca el crudo ni el ciphertext. Se arma desde el input plano (no se re-descifra de la fila escrita).
     return {
@@ -1996,6 +2036,21 @@ export class DriversService {
       dni: maskDniForOwner(input.dni),
       birthDate: input.birthDate,
     };
+  }
+
+  /**
+   * Chequea si el DNI escaneado ya está registrado en OTRA cuenta de conductor (blind index `dni_hash`),
+   * ANTES de que el conductor complete el alta (F0: escaneo del DNI). Excluye al propio `userId` para que
+   * re-escanear SU PROPIO DNI en el resume del wizard no se reporte como duplicado. Solo lectura (no
+   * persiste nada): la escritura real y la garantía dura ocurren en `updatePersonalInfo`.
+   */
+  async dniExists(userId: string, dni: string): Promise<boolean> {
+    const dniHash = hashPii(dni, this.dniHashSalt);
+    const found = await this.prisma.read.driver.findFirst({
+      where: { dniHash, NOT: { userId } },
+      select: { id: true },
+    });
+    return found != null;
   }
 
   /**

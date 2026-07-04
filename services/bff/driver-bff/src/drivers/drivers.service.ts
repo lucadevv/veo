@@ -49,11 +49,13 @@ import {
 } from './drivers.mapper';
 import {
   DOCUMENT_EXTENSION_BY_CONTENT_TYPE,
+  type CheckDniDto,
   type DocumentUploadContentType,
   type DocumentUploadSideTicket,
   type DocumentUploadTicketView,
 } from './dto/drivers.dto';
 import type {
+  DriverDniCheckResult,
   DriverDocumentDetail,
   DriverModelRequestView,
   DriverPersonalData,
@@ -131,6 +133,18 @@ export class DriversService {
     dto: UpdateDriverPersonalDto,
   ): Promise<DriverPersonalData> {
     return this.identity().patch<DriverPersonalData>('/drivers/me/personal', {
+      identity,
+      body: dto,
+    });
+  }
+
+  /**
+   * Chequea si el DNI escaneado ya está registrado en OTRA cuenta de conductor (blind index `dni_hash`)
+   * → identity-service por REST interno firmado. Se corre ANTES de completar el alta (F0: escaneo del
+   * DNI), así el conductor recibe el aviso apenas escanea, sin esperar a enviar el formulario completo.
+   */
+  checkDni(identity: AuthenticatedUser, dto: CheckDniDto): Promise<DriverDniCheckResult> {
+    return this.identity().post<DriverDniCheckResult>('/drivers/check-dni', {
       identity,
       body: dto,
     });

@@ -2154,6 +2154,24 @@ export const driverPersonalData = z.object({
 });
 export type DriverPersonalData = z.infer<typeof driverPersonalData>;
 
+/* ── Chequeo de unicidad del DNI (blind index · POST /drivers/me/check-dni) ── */
+
+/**
+ * POST /drivers/me/check-dni → body. Chequea si el DNI escaneado ya está registrado en OTRA cuenta de
+ * conductor (blind index `dni_hash`: `documentIdEnc` es cifrado con IV aleatorio, no indexable) ANTES
+ * de completar el alta. El driver-bff lo proxya a identity-service por REST interno firmado.
+ */
+export const driverCheckDniRequest = z.object({
+  dni: z.string().regex(dniPattern, 'El DNI debe tener exactamente 8 dígitos'),
+});
+export type DriverCheckDniRequest = z.infer<typeof driverCheckDniRequest>;
+
+/** POST /drivers/me/check-dni → respuesta: `exists` = true si el DNI YA pertenece a OTRA cuenta. */
+export const driverCheckDniResult = z.object({
+  exists: z.boolean(),
+});
+export type DriverCheckDniResult = z.infer<typeof driverCheckDniResult>;
+
 /* ── Vehículo del conductor (onboarding self-service · /drivers/vehicles) ── */
 
 /**
