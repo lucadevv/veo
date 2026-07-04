@@ -143,6 +143,36 @@ export async function emitBidPosted(
   );
 }
 
+/**
+ * RC5 (ADR-022) · el pasajero REESCRIBIÓ el destino de un viaje PRE-start (changeDestination). trip_event
+ * interno (historial auditable) + outbox `trip.destination_changed` en la MISMA tx que persiste el destino/
+ * tarifa nuevos. ANTES changeDestination solo grababa el trip_event y NO publicaba → era el ÚNICO mutador
+ * significativo invisible para el outbox: share-service (vista pública "compartir sin app") nunca se enteraba
+ * y el destino de un menor podía cambiarse en silencio. Ahora share-service actualiza el read-model y
+ * notification-service alerta al pasajero/guardián (`childMode` prioriza esa alerta · seguridad del menor).
+ */
+export async function emitDestinationChanged(
+  tx: TxClient,
+  trip: Pick<Trip, 'id' | 'passengerId' | 'driverId' | 'childMode'>,
+  data: { destination: LatLon; previousFareCents: number; fareCents: number },
+): Promise<void> {
+  const payload = {
+    tripId: trip.id,
+    passengerId: trip.passengerId,
+    driverId: trip.driverId ?? undefined,
+    destination: data.destination,
+    previousFareCents: data.previousFareCents,
+    fareCents: data.fareCents,
+    childMode: trip.childMode,
+  };
+  await recordTripEvent(tx, trip.id, 'trip.destination_changed', payload);
+  await enqueueOutbox(
+    tx,
+    createEnvelope({ eventType: 'trip.destination_changed', producer: PRODUCER, payload }),
+    trip.id,
+  );
+}
+
 // ───────────────────────── Lote C1 · Parada mid-trip negociada ─────────────────────────
 
 /** Snapshot mínimo de una propuesta de parada para los emisores de eventos (sin acoplar al row Prisma). */

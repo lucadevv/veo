@@ -13,6 +13,7 @@ export const TEMPLATE_KEYS = {
   TRIP_ASSIGNED: 'trip.assigned',
   TRIP_ACCEPTED: 'trip.accepted',
   TRIP_STARTED: 'trip.started',
+  TRIP_DESTINATION_CHANGED: 'trip.destination_changed',
   TRIP_ARRIVING: 'trip.arriving',
   TRIP_ARRIVED: 'trip.arrived',
   TRIP_ARRIVED_WAIT: 'trip.arrived_wait',
@@ -134,6 +135,15 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Tu viaje empezo',
     body: 'Tu viaje empezo. Comparte tu trayecto en vivo con tu familia desde la app.',
+  },
+  {
+    // RC5 · alerta de seguridad del menor: el destino de un viaje en modo nino cambio. Va al guardian (dueno
+    // de la cuenta) para que confirme o reaccione ante una posible redireccion del nino.
+    key: TEMPLATE_KEYS.TRIP_DESTINATION_CHANGED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Cambio de destino del viaje',
+    body: 'El destino del viaje en modo nino cambio. Si no fuiste tu, abre la app y revisa el viaje ahora.',
   },
   {
     key: TEMPLATE_KEYS.TRIP_ARRIVING,

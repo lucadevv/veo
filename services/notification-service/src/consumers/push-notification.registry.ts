@@ -211,6 +211,24 @@ export const PUSH_NOTIFICATION_SPECS = {
     data: (p) => ({ tripId: p.tripId, screen: PUSH_SCREEN.TripActive }),
   }),
 
+  /**
+   * RC5 (ADR-022) · trip.destination_changed → push CRÍTICO al PASAJERO dueño de la cuenta (padre/madre) SOLO en
+   * modo niño: alguien reescribió el destino del viaje del menor y hasta ahora era invisible (changeDestination no
+   * publicaba al outbox). `when: childMode` evita spamear los viajes normales (un pasajero que cambia SU propio
+   * destino ya sabe que lo hizo). Priority Critical: seguridad infantil, drena antes que los transaccionales (misma
+   * política que child_code_failed). dedup por `eventId`: cada cambio de destino (evento distinto) vuelve a alertar,
+   * pero una redelivery del MISMO cambio dedup. Sin passengerId enriquecido no hay destinatario (gate de producto).
+   */
+  'trip.destination_changed': defineSpec('trip.destination_changed', {
+    when: (p) => p.childMode === true,
+    recipient: (p) => p.passengerId,
+    recipientFallback: (p) => p.tripId,
+    template: TEMPLATE_KEYS.TRIP_DESTINATION_CHANGED,
+    priority: NotificationPriority.Critical,
+    dedup: (p, envelope) => `trip:${p.tripId}:destination_changed:${envelope.eventId}`,
+    data: (p) => ({ tripId: p.tripId, screen: PUSH_SCREEN.TripActive }),
+  }),
+
   /** trip.arriving → push al pasajero: "tu conductor está llegando" (el más importante del ride-hailing). */
   'trip.arriving': defineSpec('trip.arriving', {
     enrichment: driverNameEnrichment,

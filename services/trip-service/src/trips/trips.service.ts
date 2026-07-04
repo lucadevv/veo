@@ -76,7 +76,7 @@ import {
   type ResolveEffectiveOfferingOpts,
 } from './effective-offering';
 import { toTripView, readWaypoints } from './trip-view.mapper';
-import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
+import { PRODUCER, recordTripEvent, emitBidPosted, emitDestinationChanged } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
@@ -1799,7 +1799,10 @@ export class TripsService {
       // ADR-022 P-C · el audit graba el `fareCents` REALMENTE persistido/cobrado (flooreado), no el recompute
       // crudo `fare.cents`: en PUJA con el piso activo divergían y el log append-only (Ley 29733) registraba un
       // monto nunca cobrado. `previousFareCents` = el bid fresco que el CAS confirmó vigente.
-      await recordTripEvent(tx, id, 'trip.destination_changed', {
+      // RC5 (ADR-022) · además del trip_event interno, PUBLICA `trip.destination_changed` al outbox (misma tx):
+      // share-service refleja el destino nuevo en la vista de la familia y notification-service alerta. Cierra el
+      // "cambio de destino silencioso" (crítico en modo niño). `next` trae passengerId/driverId/childMode frescos.
+      await emitDestinationChanged(tx, next, {
         destination,
         previousFareCents: current.fareCents,
         fareCents,

@@ -1230,6 +1230,30 @@ describe('TripsService.changeDestination · BR-T01 tarifa inmutable salvo cambio
     expect(event?.payload).toMatchObject({ fareCents: 2600, previousFareCents: 2600 });
   });
 
+  it('RC5 · changeDestination PUBLICA trip.destination_changed al OUTBOX (antes solo grababa audit interno)', async () => {
+    // El bug: era el ÚNICO mutador significativo que NO emitía al outbox → la familia (share-service) nunca se
+    // enteraba y el destino de un menor se cambiaba en silencio. Ahora publica: notification alerta al guardián.
+    const prisma = makePrisma(
+      buildTrip({
+        status: TripStatus.ACCEPTED,
+        dispatchMode: 'FIXED',
+        fareCents: 2400,
+        childMode: true,
+        passengerId: 'guardian-1',
+      }),
+    );
+    const svc = new TripsService(prisma as never, longRoute10k as never);
+    await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+
+    const emitted = prisma._outbox.find((e) => e.eventType === 'trip.destination_changed');
+    expect(emitted).toBeTruthy(); // se publicó al outbox (no solo el trip_event interno)
+    expect(emitted!.envelope.payload).toMatchObject({
+      tripId: 'trip-1',
+      passengerId: 'guardian-1',
+      childMode: true, // viaja para que notification priorice la alerta al guardián (seguridad del menor)
+    });
+  });
+
   it('ADR-022 flag (i) · re-cotiza con el pricing EFECTIVO del admin (overlay), no el catálogo de código', async () => {
     // Económico base ×1.0 → 2400 (ruta 10km/20min). El admin subió el multiplier a ×1.5 por overlay →
     // 2400 × 1.5 = 3600. SIN el fix, changeDestination usaba offering.pricing de código (×1.0) → 2400,

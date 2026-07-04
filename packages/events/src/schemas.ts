@@ -279,6 +279,21 @@ export const tripStarted = z.object({
   startedAt: z.string(),
   passengerId: z.string().optional(),
 });
+/// RC5 (ADR-022) · el pasajero (dueño) REESCRIBIÓ el destino de un viaje PRE-start (changeDestination),
+/// emitido en la MISMA tx que persiste el nuevo destino/tarifa. Antes changeDestination solo grababa el
+/// trip_event interno y NO publicaba → la familia (share-service) NUNCA se enteraba y el destino de un
+/// menor podía cambiarse en silencio. share-service actualiza el read-model público (destino NUEVO, no el
+/// congelado del quote) y notification-service alerta al pasajero/guardián — `childMode` prioriza esa
+/// alerta (seguridad del menor: ningún cambio de destino de un niño debe ser invisible para la familia).
+export const tripDestinationChanged = z.object({
+  tripId: z.string(),
+  passengerId: z.string().optional(),
+  driverId: z.string().optional(),
+  destination: geo,
+  previousFareCents: z.number().int(),
+  fareCents: z.number().int(),
+  childMode: z.boolean(),
+});
 export const tripCompleted = z.object({
   tripId: z.string(),
   fareCents: z.number().int(),
@@ -1407,6 +1422,7 @@ export const EVENT_SCHEMAS = {
   'trip.arriving': tripArriving,
   'trip.arrived': tripArrived,
   'trip.started': tripStarted,
+  'trip.destination_changed': tripDestinationChanged,
   'trip.completed': tripCompleted,
   'trip.cancelled': tripCancelled,
   'trip.child_code_failed': tripChildCodeFailed,
