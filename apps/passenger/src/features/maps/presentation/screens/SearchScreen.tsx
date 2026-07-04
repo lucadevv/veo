@@ -58,8 +58,8 @@ function toRoutePlace(suggestion: PlaceSuggestion): RoutePlace {
 }
 
 /**
- * Destinos recientes ÚNICOS del historial local (recursos reales del bff), mismo helper que el
- * legacy HomeScreen: dedup por coordenada redondeada (~1m) y tope en MAX_RECENTS.
+ * Destinos recientes ÚNICOS del historial local (recursos reales del bff):
+ * dedup por coordenada redondeada (~1m) y tope en MAX_RECENTS.
  */
 function recentDestinations(
   trips: TripResource[],
@@ -387,8 +387,8 @@ interface RecentRowProps {
 
 /**
  * Fila de destino RECIENTE (pen P/Search · Recientes): etiqueta el punto con geocoding inverso real
- * (mismo patrón que el `RecentChip` del legacy HomeScreen) y muestra la distancia desde la ubicación
- * actual. Mientras el geocoding no resuelve, la fila no se renderiza (sin placeholders inventados).
+ * y muestra la distancia desde la ubicación actual. Mientras el geocoding no resuelve, la fila no
+ * se renderiza (sin placeholders inventados).
  */
 function RecentRow({
   point,

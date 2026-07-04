@@ -229,67 +229,6 @@ export const common = {
     biometricReason: 'Verifica tu identidad para continuar tu sesión',
     biometricError: 'No pudimos verificar tu identidad. Inténtalo de nuevo.',
     biometricLogout: 'Usar otra cuenta',
-
-    /* ── Ingreso por correo + contraseña (ADR-012) ── */
-    email: {
-      /** Cabecera del flujo de correo. */
-      title: 'Entra con tu correo',
-      subtitle: 'Usa tu correo y contraseña para acceder a VEO.',
-      /** Toggle iniciar sesión / crear cuenta. */
-      tabLogin: 'Iniciar sesión',
-      tabRegister: 'Crear cuenta',
-      tabsLabel: 'Elige iniciar sesión o crear una cuenta',
-      /** Campos. */
-      emailLabel: 'Correo',
-      emailPlaceholder: 'tucorreo@ejemplo.com',
-      passwordLabel: 'Contraseña',
-      passwordPlaceholder: 'Tu contraseña',
-      newPasswordPlaceholder: 'Nueva contraseña',
-      nameLabel: 'Nombre (opcional)',
-      namePlaceholder: 'Ej.: María Fernanda',
-      showPassword: 'Mostrar contraseña',
-      hidePassword: 'Ocultar contraseña',
-      /** Ayudas / validación de campos. */
-      invalidEmail: 'Ingresa un correo válido.',
-      passwordHint: 'Mínimo 12 caracteres.',
-      invalidPassword: 'La contraseña debe tener al menos 12 caracteres.',
-      /** CTAs. */
-      loginCta: 'Iniciar sesión',
-      registerCta: 'Crear cuenta',
-      forgotCta: '¿Olvidaste tu contraseña?',
-      /** Verificación del correo (reusa OtpField/OtpKeypad). */
-      verifyTitle: 'Verifica tu correo',
-      verifySubtitle: 'Ingresa el código de 6 dígitos que enviamos a {{email}}',
-      verifyCta: 'Verificar',
-      /** Olvidé mi contraseña → enviar código. */
-      forgotTitle: '¿Olvidaste tu contraseña?',
-      forgotSubtitle:
-        'Ingresa tu correo y te enviaremos un código para restablecerla.',
-      forgotSendCta: 'Enviar código',
-      forgotSent:
-        'Si ese correo está registrado, te enviamos un código. Revisa tu bandeja y el spam.',
-      /** Restablecer contraseña → código + nueva contraseña. */
-      resetTitle: 'Crea una nueva contraseña',
-      resetSubtitle:
-        'Ingresa el código que enviamos a {{email}} y tu nueva contraseña.',
-      resetCodeLabel: 'Código de verificación',
-      resetCta: 'Guardar contraseña',
-      resetDone: 'Tu contraseña se actualizó. Inicia sesión con la nueva.',
-      /** Reenvío del código de verificación. */
-      resend: 'Reenviar código',
-      resendIn: 'Reenviar en {{time}}',
-      codeExpiry: 'El código expirará pronto. Si no llega, reenvíalo.',
-      /** Errores (Banner danger) por caso (caminos infelices). */
-      errorInvalidCredentials: 'Correo o contraseña incorrectos.',
-      errorNotVerified:
-        'Verifica tu correo para continuar. Te reenviamos el código.',
-      errorAlreadyExists: 'Ese correo ya está registrado. Inicia sesión.',
-      errorWeakPassword:
-        'Esa contraseña no es válida. Usa al menos 12 caracteres y algo no obvio.',
-      errorInvalidCode: 'Código incorrecto o vencido. Inténtalo de nuevo.',
-      errorNetwork: 'Sin conexión. Revisa tu internet e inténtalo de nuevo.',
-      errorUnknown: 'Algo salió mal. Inténtalo de nuevo.',
-    },
   },
 
   /** Completar perfil tras verificar el OTP (usuario nuevo / sin perfil). */
@@ -381,10 +320,6 @@ export const common = {
     locationActionRetry: 'Reintentar',
     /** Botón flotante del mapa para volver la cámara a mi ubicación tras panear libremente. */
     recenter: 'Centrar en mi ubicación',
-    /** Campana de avisos de la Home (centro de notificaciones sin backend todavía). */
-    notifications: 'Avisos',
-    notificationsComingSoon:
-      'El centro de avisos llega en una próxima versión. Te avisaremos por notificación cuando tu conductor esté en camino.',
     quote: 'Cotizar viaje',
     quoting: 'Cotizando…',
     fare: 'Tarifa',

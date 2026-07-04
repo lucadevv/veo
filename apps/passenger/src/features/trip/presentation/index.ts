@@ -1,5 +1,4 @@
 // Capa de presentación de Trip: Home (cotizar/crear), viaje activo, historial y detalle.
-export {HomeScreen} from './screens/HomeScreen';
 export {RequestFlowScreen} from './screens/RequestFlowScreen';
 export {OffersBoardScreen} from './screens/OffersBoardScreen';
 export {CounterScreen} from './screens/CounterScreen';
