@@ -46,9 +46,9 @@ const OTP_LENGTH = 6;
  * `require`. Va a sangre en la banda superior del paso teléfono. La ruta sube 5 niveles desde
  * `…/auth/presentation/screens/` hasta la raíz de `apps/driver/` y baja a `assets/images/auth/`.
  */
-const LOGIN_HERO = require('../../../../../assets/images/auth/login-hero-wide.jpg');
-/** Aspecto (ancho/alto) de la foto hero landscape (1080×886) — la banda usa ESTE alto para calzarla exacta. */
-const LOGIN_HERO_ASPECT = 1080 / 886;
+const LOGIN_HERO = require('../../../../../assets/images/auth/login-hero.jpg');
+/** Alto de la banda hero como FRACCIÓN de la pantalla — el frame C/Login del pen usa 320 de 844 = 0.379. */
+const LOGIN_HERO_HEIGHT_RATIO = 320 / 844;
 
 /**
  * Enmascara el teléfono para el subtítulo del paso de código (transformación puramente visual,
@@ -197,7 +197,7 @@ export const LoginScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { height } = useWindowDimensions();
   const expired = useSessionStore((s) => s.expired);
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
@@ -225,9 +225,9 @@ export const LoginScreen = (): React.JSX.Element => {
 
   // Gutter lateral del contenido (mismo que hoy). Centraliza el padding horizontal del paso teléfono.
   const sideGutter = theme.spacing['2xl'];
-  // Alto EXPLÍCITO de la banda hero = ancho / aspecto de la foto → la foto landscape (tablero) calza
-  // EXACTA (cover sin recorte ni zoom). Número explícito porque aspectRatio no constriñe dentro del ScrollView.
-  const heroH = Math.round(width / LOGIN_HERO_ASPECT);
+  // Alto de la banda hero = misma FRACCIÓN de pantalla que el frame C/Login del pen (320/844 = 38%).
+  // Con `cover` centrado en esta banda, la foto vertical muestra su MEDIO (tablero/celular), como el pen.
+  const heroH = Math.round(height * LOGIN_HERO_HEIGHT_RATIO);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
@@ -241,14 +241,22 @@ export const LoginScreen = (): React.JSX.Element => {
               alto no se constriñe (los hijos absolutos no lo dimensionan) y la foto salía con zoom/mal
               recorte. La foto va detrás; el contenido scrollea por encima. */}
           <View style={[styles.heroBg, { height: heroH }]} pointerEvents="none">
-            <Image source={LOGIN_HERO} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            {/* Alto EXPLÍCITO en la Image (no absoluteFill): así `cover` centra contra los `heroH` reales
+                de la banda y muestra el MEDIO de la foto (tablero). Con absoluteFill la Image se estiraba
+                a más alto y cover mostraba el TOP (techo), y la banda lo recortaba. */}
+            <Image
+              source={LOGIN_HERO}
+              style={{ width: '100%', height: heroH }}
+              resizeMode="cover"
+            />
             {/* Scrim: transparente casi toda la banda (foto entera), fundiendo SOLO el borde inferior al `bg`. */}
             <Svg style={StyleSheet.absoluteFill}>
               <Defs>
+                {/* Stops EXACTOS del scrim del pen (eraaq): funde el borde inferior al `bg`. */}
                 <LinearGradient id="loginHeroScrim" x1="0" y1="0" x2="0" y2="1">
                   <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0} />
-                  <Stop offset="0.78" stopColor={theme.colors.bg} stopOpacity={0} />
-                  <Stop offset="0.94" stopColor={theme.colors.bg} stopOpacity={0.55} />
+                  <Stop offset="0.35" stopColor={theme.colors.bg} stopOpacity={0.12} />
+                  <Stop offset="0.72" stopColor={theme.colors.bg} stopOpacity={0.72} />
                   <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={1} />
                 </LinearGradient>
               </Defs>
