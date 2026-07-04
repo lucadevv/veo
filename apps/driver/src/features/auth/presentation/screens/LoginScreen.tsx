@@ -6,6 +6,7 @@ import {
   StatusBar,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,7 +46,9 @@ const OTP_LENGTH = 6;
  * `require`. Va a sangre en la banda superior del paso teléfono. La ruta sube 5 niveles desde
  * `…/auth/presentation/screens/` hasta la raíz de `apps/driver/` y baja a `assets/images/auth/`.
  */
-const LOGIN_HERO = require('../../../../../assets/images/auth/login-hero.jpg');
+const LOGIN_HERO = require('../../../../../assets/images/auth/login-hero-wide.jpg');
+/** Aspecto (ancho/alto) de la foto hero landscape (1080×886) — la banda usa ESTE alto para calzarla exacta. */
+const LOGIN_HERO_ASPECT = 1080 / 886;
 
 /**
  * Enmascara el teléfono para el subtítulo del paso de código (transformación puramente visual,
@@ -194,6 +197,7 @@ export const LoginScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const expired = useSessionStore((s) => s.expired);
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
@@ -221,6 +225,9 @@ export const LoginScreen = (): React.JSX.Element => {
 
   // Gutter lateral del contenido (mismo que hoy). Centraliza el padding horizontal del paso teléfono.
   const sideGutter = theme.spacing['2xl'];
+  // Alto EXPLÍCITO de la banda hero = ancho / aspecto de la foto → la foto landscape (tablero) calza
+  // EXACTA (cover sin recorte ni zoom). Número explícito porque aspectRatio no constriñe dentro del ScrollView.
+  const heroH = Math.round(width / LOGIN_HERO_ASPECT);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
@@ -228,30 +235,20 @@ export const LoginScreen = (): React.JSX.Element => {
 
       {step === 'phone' ? (
         /* ── Paso TELÉFONO (dirección Tesla "banda foto arriba") ─────────── */
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-          automaticallyAdjustKeyboardInsets
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: insets.bottom + theme.spacing['2xl'] }}
-        >
-          {/* Banda foto a SANGRE: primer hijo del scroll, SIN padding top → toca el borde superior.
-              La foto llena la banda (cover) y un scrim SVG la funde al `bg` en su borde inferior. */}
-          <View style={styles.hero}>
-            <Image
-              source={LOGIN_HERO}
-              style={StyleSheet.absoluteFill}
-              resizeMode="cover"
-            />
-
-            {/* Scrim: transparente arriba → SÓLIDO `bg` abajo, para que la foto se DERRITA al fondo
-                justo donde empieza el contenido. Decorativo: no captura toques. */}
-            <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+        <>
+          {/* Foto hero como FONDO ABSOLUTO de la pantalla (FUERA del scroll): banda superior con marco
+              FIJO y alto explícito → `cover` calza la foto en un frame real. Dentro del ScrollView el
+              alto no se constriñe (los hijos absolutos no lo dimensionan) y la foto salía con zoom/mal
+              recorte. La foto va detrás; el contenido scrollea por encima. */}
+          <View style={[styles.heroBg, { height: heroH }]} pointerEvents="none">
+            <Image source={LOGIN_HERO} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            {/* Scrim: transparente casi toda la banda (foto entera), fundiendo SOLO el borde inferior al `bg`. */}
+            <Svg style={StyleSheet.absoluteFill}>
               <Defs>
                 <LinearGradient id="loginHeroScrim" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0.1} />
-                  <Stop offset="0.45" stopColor={theme.colors.bg} stopOpacity={0} />
-                  <Stop offset="0.8" stopColor={theme.colors.bg} stopOpacity={0.7} />
+                  <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0} />
+                  <Stop offset="0.78" stopColor={theme.colors.bg} stopOpacity={0} />
+                  <Stop offset="0.94" stopColor={theme.colors.bg} stopOpacity={0.55} />
                   <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={1} />
                 </LinearGradient>
               </Defs>
@@ -259,8 +256,24 @@ export const LoginScreen = (): React.JSX.Element => {
             </Svg>
           </View>
 
-          {/* Contenido sobre `bg` sólido, alineado a la izquierda con el gutter. */}
-          <View style={[styles.body, { paddingHorizontal: sideGutter, gap: theme.spacing['2xl'] }]}>
+          <ScrollView
+            style={styles.scrollFill}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            automaticallyAdjustKeyboardInsets
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: insets.bottom + theme.spacing['2xl'] }}
+          >
+            {/* Spacer transparente: deja ver la banda hero (fija, detrás) y arranca el contenido bajo ella. */}
+            <View style={{ height: heroH - theme.spacing['2xl'] }} pointerEvents="none" />
+
+            {/* Contenido sobre `bg` sólido (tapa la foto al scrollear), alineado a la izquierda con el gutter. */}
+            <View
+              style={[
+                styles.body,
+                { backgroundColor: theme.colors.bg, paddingHorizontal: sideGutter, gap: theme.spacing['2xl'] },
+              ]}
+            >
             {/* Título directo bajo la banda hero: la foto ya lleva la marca, así que NO repetimos el
                 wordmark "VEO CONDUCTORES" (el `loginTitle` ya dice "Ingresa a VEO Conductores") — espeja
                 el frame C/Login del pen, que quitó ese lockup redundante. */}
@@ -363,7 +376,8 @@ export const LoginScreen = (): React.JSX.Element => {
               />
             </Reveal>
           </View>
-        </ScrollView>
+          </ScrollView>
+        </>
       ) : (
         /* ── Paso CÓDIGO (limpio, SIN banda; respeta la status bar con padding top manual) ── */
         <ScrollView
@@ -442,13 +456,13 @@ export const LoginScreen = (): React.JSX.Element => {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  // Banda foto a sangre: ancla la imagen + scrim absolutos; el `overflow` recorta el cover.
-  // Banda hero con el ASPECTO EXACTO del frame C/Login del pen (390×320): así `cover` produce el MISMO
-  // crop del pen en cualquier dispositivo (antes `height*fracción + inset` daba un aspecto más cuadrado
-  // → cover recortaba distinto → "zoom"). El status bar se superpone sobre la foto (como el pen).
-  hero: { width: '100%', aspectRatio: 390 / 320, overflow: 'hidden' },
-  // Contenido bajo la banda: el padding top lo aporta el flujo (la banda ya ocupa el tope).
-  body: { paddingTop: 24 },
+  // Banda hero como FONDO ABSOLUTO fijo (top de la pantalla): marco definido → `cover` calza la foto
+  // sin el zoom/recorte raro que daba estar dentro del ScrollView. El alto va inline (aspecto de la foto).
+  heroBg: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden' },
+  // ScrollView transparente por encima del fondo hero (deja ver la banda en el tope vía el spacer).
+  scrollFill: { flex: 1, backgroundColor: 'transparent' },
+  // Contenido: el spacer del tope ya lo baja bajo la banda; sin paddingTop propio.
+  body: {},
   biometricHead: { flexDirection: 'row', alignItems: 'center' },
   biometricCopy: { flex: 1, gap: 2 },
   shieldCircle: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
