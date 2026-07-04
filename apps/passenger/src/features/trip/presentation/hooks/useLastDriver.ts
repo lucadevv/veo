@@ -13,7 +13,7 @@ export interface LastDriver {
   tripId: string;
   /** Nombre visible del conductor (puede faltar si el detalle aún no lo resolvió). */
   name: string | null;
-  /** Etiqueta del vehículo "Marca Modelo" si el detalle la trae. */
+  /** Etiqueta del vehículo "Marca Modelo · Placa" si el detalle la trae. */
   vehicleLabel: string | null;
   /** Rating 0..5 del conductor, o `null` si no se conoce. */
   rating: number | null;
@@ -60,8 +60,12 @@ export function useLastDriver(): UseLastDriverResult {
   }
 
   const detail = detailQuery.data;
+  // "Toyota Yaris · ABC-123" (pen P/Home · LastDriverCard): la PLACA identifica al vehículo — es
+  // parte del rasgo de confianza de la tarjeta. Sin placa cae a "Marca Modelo" (sin separador).
   const vehicleLabel = detail?.vehicle
-    ? `${detail.vehicle.make} ${detail.vehicle.model}`
+    ? [`${detail.vehicle.make} ${detail.vehicle.model}`, detail.vehicle.plate]
+        .filter(Boolean)
+        .join(' · ')
     : null;
 
   return {

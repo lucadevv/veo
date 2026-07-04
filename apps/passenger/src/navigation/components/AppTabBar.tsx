@@ -1,5 +1,5 @@
 import type {BottomTabBarProps} from '@react-navigation/bottom-tabs';
-import {Text, useTheme} from '@veo/ui-kit';
+import {hexAlpha, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {Pressable, StyleSheet, View} from 'react-native';
@@ -59,7 +59,9 @@ export function AppTabBar({
         style={[
           styles.pill,
           {
-            backgroundColor: theme.colors.surfaceElevated,
+            // Pill TRANSLÚCIDA como el pen (C/TabBar: #1E212ACC): el mapa/fondo respira detrás.
+            // El background_blur del pen no tiene lib en el proyecto; el alpha 0.8 lo aproxima.
+            backgroundColor: hexAlpha(theme.colors.surfaceElevated, 0.8),
             borderColor: theme.colors.borderStrong,
             borderRadius: theme.radii.pill,
           },
@@ -100,7 +102,10 @@ export function AppTabBar({
                 },
               ]}>
               <Icon active={focused} color={tint} size={22} />
-              <Text variant="caption" style={{color: tint, marginTop: 3}}>
+              {/* Label 10/500 con gap 4 (pen C/TabItem) — caption (12) quedaba grande. */}
+              <Text
+                variant="caption"
+                style={{color: tint, marginTop: 4, fontSize: 10}}>
                 {t(cfg.label)}
               </Text>
             </Pressable>

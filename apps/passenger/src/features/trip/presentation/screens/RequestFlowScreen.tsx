@@ -386,6 +386,14 @@ export function RequestFlowScreen(): React.JSX.Element {
     sheetRef.current?.snapToIndex(FULL_INDEX);
   }, [setEditing]);
 
+  // Elegir el DESTINO arrastrando el mapa (pen P/Home: ícono mapa del buscador): marca el destino
+  // en edición y abre MapPick — el pin fijo al centro fija el punto (mismo mecanismo que usa la
+  // búsqueda por texto con su fila "Elegir en el mapa").
+  const pickOnMap = useCallback(() => {
+    setEditing({kind: 'destination'});
+    navigation.navigate('MapPick');
+  }, [setEditing, navigation]);
+
   // Editar el ORIGEN desde el Home idle: marca el origen en edición y abre la búsqueda DEDICADA
   // (`Search`, flow 'sheet' → al fijar vuelve acá con el borrador actualizado). Es el MISMO gesto que
   // usa la cotización (`QuotingBody.editOrigin`): el origen deja de ser un display de solo lectura.
@@ -583,6 +591,7 @@ export function RequestFlowScreen(): React.JSX.Element {
     onSeeAllSaved: goSavedPlaces,
     onSeeAllRecents: goTripHistory,
     onEnterSearch: enterSearch,
+    onPickOnMap: pickOnMap,
     onEditOrigin: editOrigin,
     onSwapRoute: swapRoute,
     currentLocationTitle: origin?.title ?? reverseQuery.data?.title,

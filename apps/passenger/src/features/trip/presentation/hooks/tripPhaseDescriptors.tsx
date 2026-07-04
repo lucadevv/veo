@@ -8,7 +8,7 @@ import {tripStatus} from '@veo/api-client';
 import {IconButton, SearchField, Skeleton, Text, TextField, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
-import {StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
 import type {RoutePlace} from '../../../maps/domain/entities';
 import type {SavedPlace} from '../../../places/domain/entities';
 import {ActiveTripBody} from '../components/ActiveTripBody';
@@ -17,7 +17,7 @@ import {DebtStrip} from '../components/DebtStrip';
 import {HomeHero} from '../components/HomeHero';
 import {HomeShortcutChips} from '../components/HomeShortcutChips';
 import {ModeToggle, TripTimeMode} from '../components/ModeToggle';
-import {IconArrowLeft, IconClose, IconSearch} from '../components/icons';
+import {IconArrowLeft, IconClose, IconMap, IconSearch} from '../components/icons';
 import {IdleBody} from '../components/IdleBody';
 import {LastDriverCard} from '../components/LastDriverCard';
 import {EnterView} from '../components/motion';
@@ -88,6 +88,8 @@ export interface RequestFlowContext {
   onSeeAllSaved: () => void;
   onSeeAllRecents: () => void;
   onEnterSearch: () => void;
+  /** Elegir el DESTINO arrastrando el mapa (pen P/Home: ícono mapa a la derecha del buscador). */
+  onPickOnMap: () => void;
   /** Editar el ORIGEN desde el Home idle: búsqueda con `editing = origin` (igual que la cotización). */
   onEditOrigin: () => void;
   /** Permuta origen ↔ destino del borrador (`rideDraftStore.swap`). */
@@ -345,6 +347,18 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
           placeholder={t('home.whereTo')}
           value={ctx.destinationValue}
           onPress={ctx.onEnterSearch}
+          // Atajo del pen (P/Home · SearchField): mapa a la derecha → elegir el destino ARRASTRANDO
+          // el mapa (MapPick), la vía natural cuando el texto no alcanza. Pressable anidado: captura
+          // su tap sin robarle el resto del campo a la búsqueda.
+          trailing={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('maps.pickOnMap')}
+              hitSlop={8}
+              onPress={ctx.onPickOnMap}>
+              <IconMap color={theme.colors.inkSubtle} size={20} />
+            </Pressable>
+          }
         />
       </EnterView>
       <EnterView index={3}>

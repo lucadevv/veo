@@ -74,6 +74,21 @@ export function IconPin({color, size = 18}: GlyphProps): React.JSX.Element {
   );
 }
 
+/** Mapa plegado (atajo "Elegir en el mapa" del buscador del Home — pen P/Home · SearchField). */
+export function IconMap({color, size = 20}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 4 3.5 6.2a1 1 0 0 0-.5.9v11.4a1 1 0 0 0 1.4.9L9 17.5l6 2.5 5.5-2.2a1 1 0 0 0 .5-.9V5.5a1 1 0 0 0-1.4-.9L15 6.5 9 4Z"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path d="M9 4v13.5M15 6.5V20" stroke={color} strokeWidth={STROKE} />
+    </Svg>
+  );
+}
+
 /** Casa (atajo "Casa" / lugar guardado HOME). Espejo de `I.home`. */
 export function IconHome({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
