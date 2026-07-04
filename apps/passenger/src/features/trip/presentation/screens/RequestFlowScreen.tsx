@@ -11,6 +11,12 @@ import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {RoutePin, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Image, StyleSheet, useWindowDimensions, View} from 'react-native';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Svg, {Defs, LinearGradient as SvgLinearGradient, Rect, Stop} from 'react-native-svg';
 import {TOKENS} from '../../../../core/di/tokens';
@@ -373,6 +379,32 @@ export function RequestFlowScreen(): React.JSX.Element {
     });
   }, [tabNavigation, mapMode]);
 
+  // FONDO del Home por flow (pedido del dueño): en idle manda la IMAGEN 3D; al entrar a BÚSQUEDA
+  // el fondo CRUZA SUAVE al mapa REAL de Mapbox centrado en mi ubicación, y al salir vuelve a la
+  // imagen. Mecánica: el mapa se monta DEBAJO y la imagen (encima) anima su opacidad 1→0 — el
+  // crossfade es un solo valor. El mapa se desmonta recién al TERMINAR el fade de vuelta (libera
+  // el contexto GL sin flash).
+  const searchBg = useSharedValue(0);
+  const [searchMapMounted, setSearchMapMounted] = useState(false);
+  useEffect(() => {
+    if (mapMode !== 'idle') {
+      return;
+    }
+    if (flow === 'searching') {
+      setSearchMapMounted(true);
+      searchBg.value = withTiming(1, {duration: 450});
+    } else {
+      searchBg.value = withTiming(0, {duration: 450}, finished => {
+        if (finished) {
+          runOnJS(setSearchMapMounted)(false);
+        }
+      });
+    }
+  }, [flow, mapMode, searchBg]);
+  const idleImageStyle = useAnimatedStyle(() => ({
+    opacity: 1 - searchBg.value,
+  }));
+
   // MODELO CABIFY · recojo con PIN: el descriptor declara la elegibilidad por fase+flow (`resolvePickupMode`),
   // PERO el pin solo tiene sentido CON un mapa interactivo de fondo (arrastrás el mapa y el origen sigue al
   // centro). En el home CONTENT-FIRST ya NO hay mapa idle (única fase elegible), así que el pin nunca aplica:
@@ -714,24 +746,43 @@ export function RequestFlowScreen(): React.JSX.Element {
           rompía ambas cosas. Va ANTES del HomeTopBar para que ese overlay absoluto siga tappable. */}
       {mapMode === 'idle' ? (
         <View style={styles.idleScreen}>
+          {/* MAPA REAL debajo de la imagen, montado solo durante la BÚSQUEDA (+ su fade de salida):
+              Mapbox centrado en mi ubicación con los autitos de ambiente. La imagen encima se
+              desvanece y lo revela (crossfade del dueño: buscar = mapa vivo; volver = imagen). */}
+          {searchMapMounted && isFocused ? (
+            <View style={StyleSheet.absoluteFill}>
+              <AppMap
+                userPoint={myLocation}
+                showUserPoint
+                nearbyVehicles={
+                  descriptor.showNearby ? nearbyVehicles : undefined
+                }
+                interactive={false}
+              />
+            </View>
+          ) : null}
           {/* Fondo del Home fiel a design/veo.pen P/Home (rect "Map"): la imagen COMPLETA mapeada a
               la altura de la pantalla — la MISMA matemática del pen (rect 390×844 con el arte de
               aspect idéntico). Tamaño EXPLÍCITO por aspect real del arte + "stretch" (no deforma:
               las medidas ya respetan la proporción): elimina cualquier zoom/crop del cover. */}
-          <Image
-            source={homeMapBackdrop}
-            style={[
-              styles.idleBackdrop,
-              {
-                height: windowHeight,
-                width: Math.round(windowHeight * HOME_BACKDROP_ASPECT),
-                left: Math.round(
-                  (windowWidth - windowHeight * HOME_BACKDROP_ASPECT) / 2,
-                ),
-              },
-            ]}
-            resizeMode="stretch"
-          />
+          <Animated.View
+            style={[StyleSheet.absoluteFill, idleImageStyle]}
+            pointerEvents="none">
+            <Image
+              source={homeMapBackdrop}
+              style={[
+                styles.idleBackdrop,
+                {
+                  height: windowHeight,
+                  width: Math.round(windowHeight * HOME_BACKDROP_ASPECT),
+                  left: Math.round(
+                    (windowWidth - windowHeight * HOME_BACKDROP_ASPECT) / 2,
+                  ),
+                },
+              ]}
+              resizeMode="stretch"
+            />
+          </Animated.View>
           <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
             <Defs>
               <SvgLinearGradient id="homeScrim" x1="0" y1="0" x2="0" y2="1">
