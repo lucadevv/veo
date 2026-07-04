@@ -3396,7 +3396,7 @@
                 }
               ],
               "layout": "vertical",
-              "gap": 8,
+              "gap": "$s-lg",
               "padding": [
                 0,
                 20,
