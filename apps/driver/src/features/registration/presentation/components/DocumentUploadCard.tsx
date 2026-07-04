@@ -210,7 +210,9 @@ export function DocumentUploadCard({
       {stepNumber !== undefined ? <StepBadge value={stepNumber} /> : null}
       {/* Ícono PLANO inline: sin caja ni fondo tintado. Sobrio, deja respirar la fila. */}
       <View style={styles.icon}>{icon}</View>
-      <Text variant="bodyStrong" style={styles.label} numberOfLines={1}>
+      {/* Hasta 2 líneas: labels largos ("Documento de identidad (DNI)") ENVUELVEN en vez de truncar
+          con "…" (antes `numberOfLines={1}` cortaba el nombre del DNI junto al chip). */}
+      <Text variant="bodyStrong" style={styles.label} numberOfLines={2}>
         {label}
       </Text>
       {busy ? (
