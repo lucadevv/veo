@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import { IconCheck } from '../../../../shared/presentation/icons';
 import { scanMessageI18nKey } from '../../../documents/domain';
+import type { DocumentSendPhase } from '../state/registrationStore';
 import { hexAlpha } from './color';
 import { useScanDni } from '../hooks/useScanDni';
 
@@ -20,9 +21,25 @@ import { useScanDni } from '../hooks/useScanDni';
 export interface ScanDniSheetProps {
   visible: boolean;
   onClose: () => void;
+  /**
+   * Fase de ENVÍO del DNI (pen: el envío ocurre AHÍ MISMO en el sheet). La provee la pantalla desde el
+   * store (`sendPhases.dni`); el sheet la pinta: `sending` → spinner + "Continuar en segundo plano";
+   * `sent` → éxito y cerrar; `error` → banner + reintentar.
+   */
+  sendPhase: DocumentSendPhase;
+  /**
+   * Dispara la SUBIDA INMEDIATA tras confirmar la captura (PATCH /personal si hace falta + upload del DNI).
+   * La orquesta la pantalla (reusa el continue); el sheet solo confirma la captura y avisa.
+   */
+  onConfirm: () => void;
 }
 
-export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX.Element {
+export function ScanDniSheet({
+  visible,
+  onClose,
+  sendPhase,
+  onConfirm,
+}: ScanDniSheetProps): React.JSX.Element {
   const { t } = useTranslation();
   const theme = useTheme();
   const dni = useScanDni();
@@ -37,12 +54,17 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
   }, [visible]);
 
   const isScanning = dni.state === 'scanning';
-  // `ready` = caras guardadas para subir DESPUÉS del PATCH /personal (el escaneo NO sube en el momento:
-  // el presign del DNI exige que el driver ya exista, y eso ocurre recién en el continue del paso 1).
+  // `ready` = caras confirmadas: la SUBIDA arranca al confirmar (pen: "carga ahí mismo, sale el proceso
+  // de que se envía"). El sheet pinta la fase de envío en vivo (`sendPhase`).
   const isReady = dni.state === 'ready';
   const isCaptured = dni.state === 'captured';
   const isError = dni.state === 'error';
   const busy = isScanning;
+  // Fase de envío SOLO relevante tras confirmar (`ready`): antes de eso cualquier fase es residuo de una
+  // corrida previa (p. ej. reintento desde la card con el sheet cerrado).
+  const isSending = isReady && sendPhase === 'sending';
+  const isSent = isReady && sendPhase === 'sent';
+  const sendFailed = isReady && sendPhase === 'error';
 
   // Campo CRÍTICO del DNI: el número. Si el OCR no lo leyó (binario nativo sin OCR, foto borrosa, etc.) NO
   // mostramos un "capturado ✓" que finge éxito: caemos al fallback honesto de reescaneo. La señal es el
@@ -54,14 +76,16 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
     await dni.scan();
   };
 
-  // CTA principal: escanear si aún no hay captura; CONFIRMAR (guardar las caras para subir tras el PATCH)
-  // si ya se capturó CON el número leído; REESCANEAR si la captura no leyó el número (gating crítico) o si
-  // el escaneo falló sin caras. NUNCA sube aquí (eso pasa en el continue del paso 1).
+  // CTA principal: escanear si aún no hay captura; CONFIRMAR + ENVIAR si ya se capturó CON el número leído
+  // (pen: la subida arranca en el sheet, con su proceso visible); REESCANEAR si la captura no leyó el número
+  // (gating crítico) o si el escaneo falló sin caras.
   const canConfirm = isCaptured && dni.front != null && hasReadDniNumber;
   const onPrimary = (): void => {
     if (canConfirm) {
-      // Hay caras Y el número crítico se leyó: el primario las CONFIRMA (guarda en el store).
+      // Hay caras Y el número crítico se leyó: el primario CONFIRMA (guarda en el store) y dispara la
+      // subida inmediata — el sheet queda mostrando el proceso de envío (sending→sent/error).
       dni.submit();
+      onConfirm();
       return;
     }
     // Sin captura, captura sin número crítico, o error de escaneo → (re)escanear. NUNCA confirmamos un DNI
@@ -81,10 +105,27 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
       onClose={onClose}
       title={t('registration.personal.scanDni.title')}
       footer={
-        isReady ? (
-          // Estado `ready`: el DNI quedó listo para subir; la ÚNICA acción posible es cerrar. Antes el footer
-          // mostraba DOS botones idénticos "Cerrar" (primario + secundario, ambos → onClose): el "doble cerrar".
-          // Ahora, en `ready`, es UN solo botón.
+        isSending ? (
+          // ENVIANDO: el proceso vive en el sheet, pero no te toma de rehén — "Continuar en segundo plano"
+          // cierra el sheet y la card del paso sigue mostrando el progreso (pen: sheet de subida).
+          <Button
+            label={t('registration.documents.sheetBackground')}
+            variant="secondary"
+            fullWidth
+            onPress={onClose}
+          />
+        ) : sendFailed ? (
+          // El envío falló: la captura NO se perdió — reintentar repite el PATCH idempotente + la subida.
+          <View style={styles.footer}>
+            <Button label={t('common.close')} variant="secondary" onPress={onClose} />
+            <Button
+              label={t('registration.actions.retryUpload')}
+              variant="primary"
+              onPress={onConfirm}
+            />
+          </View>
+        ) : isReady ? (
+          // Enviado (o confirmado sin envío en curso): la ÚNICA acción posible es cerrar.
           <Button label={t('common.close')} variant="primary" fullWidth onPress={onClose} />
         ) : (
           <View style={styles.footer}>
@@ -124,9 +165,38 @@ export function ScanDniSheet({ visible, onClose }: ScanDniSheetProps): React.JSX
           />
         </View>
 
-        {/* Listo: las caras quedaron guardadas; se subirán al confirmar los datos personales (tras el PATCH
-            que crea el driver). NO decimos "subido" porque aún no se subió — honestidad de estado. */}
-        {isReady ? (
+        {/* Proceso de ENVÍO en vivo (pen: "sale el proceso de que se envía"). sending → spinner + nota de
+            segundo plano; sent → éxito real; error → banner con la captura conservada. `ready` sin fase
+            (residuo) degrada al mensaje honesto de "listo para enviar". */}
+        {isSending ? (
+          <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
+            <ActivityIndicator color={theme.colors.accent} />
+            <View style={styles.statusCol}>
+              <Text variant="footnote" color="accent">
+                {t('registration.personal.scanDni.sending')}
+              </Text>
+              <Text variant="caption" color="inkSubtle">
+                {t('registration.documents.sendingNote')}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+        {isSent ? (
+          <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
+            <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
+            <Text variant="footnote" color="success">
+              {t('registration.personal.scanDni.sent')}
+            </Text>
+          </View>
+        ) : null}
+        {sendFailed ? (
+          <Banner
+            tone="danger"
+            title={t('registration.personal.scanDni.uploadFailed')}
+            description={t('registration.personal.scanDni.sendErrorHint')}
+          />
+        ) : null}
+        {isReady && !isSending && !isSent && !sendFailed ? (
           <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
             <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
             <Text variant="footnote" color="success">
@@ -244,4 +314,5 @@ const styles = StyleSheet.create({
   faceImage: { width: '100%', height: '100%' },
   faceEmpty: { alignItems: 'center', justifyContent: 'center', flex: 1 },
   statusRow: { flexDirection: 'row', alignItems: 'center' },
+  statusCol: { flex: 1, gap: 2 },
 });

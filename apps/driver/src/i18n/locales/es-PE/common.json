@@ -158,7 +158,8 @@
       "retry": "Reintentar",
       "useDni": "Usar este DNI",
       "usePhoto": "Usar esta foto",
-      "useCard": "Usar esta tarjeta"
+      "useCard": "Usar esta tarjeta",
+      "retryUpload": "Reintentar envío"
     },
     "support": {
       "contact": "Contactar a soporte"
@@ -176,7 +177,9 @@
       "missing": {
         "label": "Te falta: {{detail}}",
         "dni": "escanear tu DNI",
-        "license": "tu licencia de conducir"
+        "license": "tu licencia de conducir",
+        "dniSending": "terminar de enviar tu DNI",
+        "licenseSending": "terminar de enviar tu licencia"
       },
       "scanDni": {
         "title": "Escanea tu DNI",
@@ -196,7 +199,10 @@
         "backMissingHint": "Solo capturamos el anverso. Vuelve a escanear para incluir el reverso.",
         "manualFallback": "Vuelve a escanear tu DNI para leer tus datos.",
         "uploadFailed": "No se pudo subir tu DNI. Inténtalo de nuevo.",
-        "uploadRetryHint": "Tus datos se guardaron y la foto de tu DNI no se perdió. Toca Continuar para reintentar la subida."
+        "uploadRetryHint": "Tus datos se guardaron y la foto de tu DNI no se perdió. Toca Continuar para reintentar la subida.",
+        "sending": "Enviando tu DNI…",
+        "sent": "DNI enviado. Ya quedó en tu registro.",
+        "sendErrorHint": "No se pudo enviar. Tu captura no se perdió: reintenta desde la tarjeta del DNI."
       },
       "errors": {
         "name_required": "Ingresa tu nombre completo",
@@ -309,7 +315,10 @@
         "verified": "Verificado",
         "expiring": "Por vencer",
         "expired": "Vencido",
-        "rejected": "Rechazado"
+        "rejected": "Rechazado",
+        "sending": "Subiendo…",
+        "sent": "Enviado",
+        "sendError": "Error al enviar"
       },
       "pending": "Pendiente",
       "uploadAccessibility": "Subir {{document}}",
@@ -367,7 +376,9 @@
         "noFile": "Toma una foto o elígela de tu galería",
         "uploadSuccess": "Foto subida",
         "reviewNote": "La foto se sube de forma segura y queda en revisión."
-      }
+      },
+      "sheetBackground": "Continuar en segundo plano",
+      "sendingNote": "Puedes seguir con tu registro mientras terminan de subir."
     },
     "kyc": {
       "title": "Verifica tu identidad",

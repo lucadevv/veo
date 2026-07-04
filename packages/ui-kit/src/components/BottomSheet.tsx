@@ -211,7 +211,7 @@ export function BottomSheet({
         >
           {showHandle ? (
             <View {...panResponder.panHandlers} style={styles.handleArea}>
-              <View style={[styles.handle, { backgroundColor: theme.colors.borderStrong }]} />
+              <View style={[styles.handle, { backgroundColor: theme.colors.accent }]} />
             </View>
           ) : null}
 
