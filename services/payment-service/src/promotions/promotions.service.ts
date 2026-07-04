@@ -140,15 +140,26 @@ export class PromotionsService {
       };
     }
 
-    const usage = await this.usageFor(promo.id, input.userId);
-    const evaluation = evaluatePromo(promo, input.fareCents, usage);
-    if (!evaluation.valid) {
-      throw this.invalidError(evaluation.reason, code);
-    }
-    const discountCents = evaluation.discountCents;
-
     try {
       return await this.prisma.write.$transaction(async (tx) => {
+        // TOCTOU del TOPE AGREGADO (RC22): `usageFor` + `evaluatePromo` corrían FUERA de la tx, así que dos
+        // canjes concurrentes de la MISMA promo (viajes/usuarios DISTINTOS) leían el mismo count < cap y
+        // ambos insertaban — los UNIQUE (dedupKey, tripleta promo/user/trip) sólo blindan el doble-canje del
+        // MISMO viaje, NO el tope `maxTotalUses`/`maxUsesPerUser`. Serializamos los canjes de esta promo con un
+        // advisory lock TRANSACCIONAL (mismo patrón que `assertNoDuplicateAdminRefundInWindowTx`) y RE-CONTAMOS
+        // dentro de la tx: el segundo canje bloquea hasta el commit del primero y ve el count ya actualizado →
+        // el cap se respeta. `$executeRaw` (no `$queryRaw`): pg_advisory_xact_lock devuelve void. Se libera al
+        // cerrar la tx. La previsualización pública sigue en `validatePromo` (sin lock, no muta).
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${promo.id})::bigint)`;
+        const [totalUses, userUses] = await Promise.all([
+          tx.promoRedemption.count({ where: { promotionId: promo.id } }),
+          tx.promoRedemption.count({ where: { promotionId: promo.id, userId: input.userId } }),
+        ]);
+        const evaluation = evaluatePromo(promo, input.fareCents, { totalUses, userUses });
+        if (!evaluation.valid) {
+          throw this.invalidError(evaluation.reason, code); // rollback limpio; el catch la re-lanza (no es UNIQUE)
+        }
+        const discountCents = evaluation.discountCents;
         const redemption = await tx.promoRedemption.create({
           data: {
             id: uuidv7(),

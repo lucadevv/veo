@@ -19,7 +19,7 @@ import {
 } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
-import { OfferingUnavailableError } from './trips.errors';
+import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { emitTripRequested, emitBidPosted } from './trip-events';
 import { offeringModeOverriddenTotal, catalogDegradedTotal } from './trip-metrics';
 import type { TripOfferingResolution } from './domain/offering';
@@ -139,13 +139,22 @@ function makePrisma(
   // `fareCents` en el WHERE), muta el store con estos valores y devuelve count 0 — como si otro escritor
   // hubiese ganado entre el re-read in-tx y el write. Cubre la atribución de causa (status vs fare_changed).
   raceOnDestinationCas?: { status?: TripStatus; fareCents?: number },
+  // RC23 · simula que, tras tomar el advisory lock in-tx, el re-check `tx.trip.findFirst` encuentra un viaje
+  // vivo (otra tx concurrente lo creó y committeó primero) → createTrip debe lanzar ActiveTripExistsError.
+  liveInTx: { id: string } | null = null,
 ) {
   let store = initial;
   const outbox: PublishedEvent[] = [];
   const tripEvents: { eventType: string; payload: unknown }[] = [];
 
   const tx = {
+    // RC23 · re-check in-tx del invariante "un solo viaje vivo" bajo advisory lock. En estos dobles no hay
+    // concurrencia real ni viaje vivo previo → el lock es no-op y findFirst devuelve null (no bloquea el create).
+    $executeRaw: async () => 0,
     trip: {
+      // RC23 · guard in-tx (post-lock): sin viaje vivo previo en el doble → null. El test dedicado del 409
+      // in-tx sobreescribe esta rama para simular que otra tx creó un viaje vivo entre el check y el create.
+      findFirst: async () => liveInTx,
       create: async ({ data }: { data: Partial<Trip> }) => {
         store = buildTrip(data);
         return store;
@@ -337,6 +346,28 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     expect(view.fareCents).toBe(999);
     // No se encoló ningún evento nuevo (devolvió el existente).
     expect(prisma._outbox).toHaveLength(0);
+  });
+
+  it('RC23 · un viaje vivo que aparece ENTRE el fast-fail y el create (carrera) → 409 in-tx, NO doble viaje', async () => {
+    // El gate de arriba (fuera de la tx) devuelve null (no había viaje vivo al chequear), pero para cuando la tx
+    // toma el advisory lock otra tx concurrente YA creó y committeó un viaje vivo del mismo pasajero. El re-check
+    // in-tx (post-lock) lo encuentra → ActiveTripExistsError con el activeTripId. Sin este re-check nacerían DOS.
+    const prisma = makePrisma(null, undefined, { id: 'trip-vivo-concurrente' });
+    const svc = new TripsService(prisma as never, maps);
+    await expect(svc.createTrip({ ...baseCreateDto })).rejects.toBeInstanceOf(ActiveTripExistsError);
+    // No se creó ni encoló nada: la tx abortó antes del create (el store sigue vacío).
+    expect(prisma._store).toBeNull();
+    expect(prisma._outbox).toHaveLength(0);
+  });
+
+  it('RC23 · una RESERVA (scheduledFor) NO toma el lock ni el re-check in-tx (varias reservas conviven)', async () => {
+    // SCHEDULED no es "vivo" → el invariante de un-solo-viaje-vivo no aplica; aunque el fake tenga un liveInTx,
+    // la rama scheduled NO entra al guard (if !scheduledFor) → la reserva se crea igual.
+    const prisma = makePrisma(null, undefined, { id: 'otro-vivo' });
+    const svc = new TripsService(prisma as never, maps);
+    const scheduledFor = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // +1h
+    const view = await svc.createTrip({ ...baseCreateDto, scheduledFor });
+    expect(view.status).toBe(TripStatus.SCHEDULED);
   });
 
   it('modo niño sin código → ValidationError', async () => {

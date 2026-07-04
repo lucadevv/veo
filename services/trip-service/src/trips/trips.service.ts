@@ -606,6 +606,23 @@ export class TripsService {
 
     const id = uuidv7();
     const trip = await this.prisma.write.$transaction(async (tx) => {
+      // Invariante "una sola experiencia de viaje" — cierre de la carrera (RC23): el gate de arriba (fuera de
+      // la tx, ~L485) es un fast-fail; entre ese check y este create hay un gap async grande (maps.route + 4
+      // lecturas de config en paralelo), así que dos pedidos INMEDIATOS concurrentes del MISMO pasajero lo pasan
+      // ambos y crearían DOS viajes vivos. Serializamos por pasajero con un advisory lock TRANSACCIONAL (mismo
+      // patrón que assertNoDuplicateAdminRefundInWindowTx) y RE-verificamos el invariante DENTRO de la tx: el
+      // segundo request bloquea hasta el commit del primero, entonces ve su viaje vivo → 409 ActiveTripExists.
+      // Sólo INMEDIATOS (SCHEDULED no es vivo → varias reservas conviven). LIVE_STATES sigue siendo la ÚNICA
+      // fuente del set (no lo duplicamos en un índice parcial de la migración). `$executeRaw`: el lock devuelve void.
+      if (!scheduledFor) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.passengerId})::bigint)`;
+        const live = await tx.trip.findFirst({
+          where: { passengerId: dto.passengerId, status: { in: [...LIVE_STATES] } },
+          select: { id: true },
+          orderBy: { requestedAt: 'desc' },
+        });
+        if (live) throw new ActiveTripExistsError(live.id);
+      }
       const created = await tx.trip.create({
         data: {
           id,
