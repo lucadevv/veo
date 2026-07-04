@@ -69,8 +69,8 @@ export const SplashScreen = (): React.JSX.Element => {
 
       <View style={styles.center}>
         <Animated.View style={[styles.wordmark, wordmarkStyle]}>
-          {/* "VEO" en blanco (ink) sobre el fondo oscuro, como el frame del pen del splash. */}
-          <VeoWordmark size="xl" veoColor="ink" />
+          {/* Wordmark del splash como el pen: "VEO" blanco (ink), "CONDUCTORES" gris sutil (inkSubtle). */}
+          <VeoWordmark size="xl" veoColor="ink" subColor="inkSubtle" />
           {/* Acento de marca bajo el lockup: mismo lenguaje visual que la barra de progreso. */}
           <View
             style={[styles.brandAccent, { backgroundColor: theme.colors.accent }]}
@@ -100,7 +100,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   center: { alignItems: 'center' },
   wordmark: { alignItems: 'center' },
-  brandAccent: { width: 28, height: 4, borderRadius: 2, marginTop: 20 },
+  brandAccent: { width: 28, height: 4, borderRadius: 2, marginTop: 12 },
   taglineWrap: { position: 'absolute', bottom: 120, left: 0, right: 0, alignItems: 'center' },
   progressWrap: { position: 'absolute', bottom: 56, alignItems: 'center', width: '100%' },
   progressTrack: { width: 72, height: 4, borderRadius: 2, overflow: 'hidden' },

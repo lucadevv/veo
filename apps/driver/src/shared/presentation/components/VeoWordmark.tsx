@@ -43,12 +43,17 @@ export interface VeoWordmarkProps {
    * El splash lo pide `ink` (blanco) sobre el fondo oscuro, como el frame del pen. Solo aplica al stacked.
    */
   veoColor?: 'accent' | 'ink';
+  /**
+   * Color de "CONDUCTORES" (sublabel) en el stacked. Default `brand` (azul) — headers/estados. El splash
+   * lo pide `inkSubtle` (gris sutil), como el frame del pen. Solo aplica al stacked.
+   */
+  subColor?: 'brand' | 'inkSubtle';
 }
 
-/** Escala tipográfica de "VEO" por tamaño. */
-const VEO_SIZE: Record<VeoWordmarkSize, number> = { sm: 22, md: 30, lg: 56, xl: 84 };
-/** Escala del sublabel "Conductores" por tamaño. */
-const SUB_SIZE: Record<VeoWordmarkSize, number> = { sm: 11, md: 13, lg: 18, xl: 22 };
+/** Escala tipográfica de "VEO" por tamaño. `xl` = splash, calibrado al frame del pen (60). */
+const VEO_SIZE: Record<VeoWordmarkSize, number> = { sm: 22, md: 30, lg: 56, xl: 60 };
+/** Escala del sublabel "Conductores" por tamaño. `xl` = splash, al frame del pen (13). */
+const SUB_SIZE: Record<VeoWordmarkSize, number> = { sm: 11, md: 13, lg: 18, xl: 13 };
 
 /** Sub-bloque reutilizable: "PERÚ" + bandera. */
 function PeruRow(): React.JSX.Element {
@@ -74,6 +79,7 @@ export function VeoWordmark({
   variant = 'stacked',
   peru = false,
   veoColor = 'accent',
+  subColor = 'brand',
 }: VeoWordmarkProps): React.JSX.Element {
   const veoSize = VEO_SIZE[size];
   const subSize = SUB_SIZE[size];
@@ -106,7 +112,7 @@ export function VeoWordmark({
       >
         VEO
       </Text>
-      <Text variant="label" color="brand" style={[styles.sub, { fontSize: subSize }]}>
+      <Text variant="label" color={subColor} style={[styles.sub, { fontSize: subSize }]}>
         CONDUCTORES
       </Text>
       {peru ? <PeruRow /> : null}
