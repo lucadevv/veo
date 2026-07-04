@@ -201,6 +201,23 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     }
   };
 
+  /**
+   * Subtítulo de ESTADO de la card (frame Cards del pen): "Subiendo…" (azul) mientras sube, "Enviado"
+   * (verde) cuando ya está. Sin subtítulo en pendiente/listo — el chip lo comunica.
+   */
+  const cardSubtitle = (
+    phase: (typeof sendPhases)['dni'],
+    isSent: boolean,
+  ): { subtitle?: string; subtitleTone: 'accent' | 'success' } => {
+    if (isSent) {
+      return { subtitle: t('registration.documents.state.sent'), subtitleTone: 'success' };
+    }
+    if (phase === 'sending') {
+      return { subtitle: t('registration.documents.state.sending'), subtitleTone: 'accent' };
+    }
+    return { subtitleTone: 'accent' };
+  };
+
   const licenseBackendType = registrationDocTypeToBackend(LICENSE_DOC_TYPE);
 
   /** ¿El servidor YA tiene la licencia en un estado aceptable? (conductor que vuelve/reinstala). */
@@ -482,6 +499,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               pendingLabel={t('registration.documents.pending')}
               serverState={phaseChip(sendPhases.dni) ?? dniServerState}
               sending={sendPhases.dni === 'sending'}
+              sent={sendPhases.dni === 'sent' || serverHasDni}
+              thumbUri={pendingDni?.front.uri ?? dniServerImageUri ?? undefined}
+              {...cardSubtitle(sendPhases.dni, sendPhases.dni === 'sent' || serverHasDni)}
               accessibilityLabel={
                 hasCapture || hasReadDni
                   ? t('registration.actions.rescan')
@@ -582,6 +602,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               pendingLabel={t('registration.documents.pending')}
               serverState={phaseChip(sendPhases.license) ?? licenseServerState}
               sending={sendPhases.license === 'sending'}
+              sent={sendPhases.license === 'sent' || serverHasLicense}
+              thumbUri={pendingLicense?.file?.uri ?? licenseServerImageUri ?? undefined}
+              {...cardSubtitle(sendPhases.license, sendPhases.license === 'sent' || serverHasLicense)}
               busy={personalContinue.isPending}
               accessibilityLabel={t('registration.documents.uploadAccessibility', {
                 document: t('registration.documents.license'),
