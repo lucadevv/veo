@@ -54,7 +54,7 @@ import {
   LIVE_STATES,
   transitionSources,
 } from './domain/trip-state-machine';
-import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
+import { ActiveTripExistsError } from './trips.errors';
 import { CatalogService } from '../catalog/catalog.service';
 import {
   calculateFare,
@@ -69,11 +69,12 @@ import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { resolveTripOffering, type TripOfferingResolution } from './domain/offering';
+import { bumpOfferingModeOverridden } from './trip-metrics';
 import {
-  bumpOfferingModeOverridden,
-  bumpCatalogDegraded,
-  type CatalogDegradedSite,
-} from './trip-metrics';
+  resolveEffectiveOffering as resolveEffectiveOfferingShared,
+  type EffectiveOffering,
+  type ResolveEffectiveOfferingOpts,
+} from './effective-offering';
 import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
@@ -257,40 +258,16 @@ export class TripsService {
    * el pricing de CÓDIGO sin pin y PERMITE el viaje — no se bloquea un pedido por una lectura de config
    * (mismo criterio que el quote degradando a todas). Oferta deshabilitada → OfferingUnavailableError (409).
    */
-  private async resolveEffectiveOffering(
+  /**
+   * Adaptador de instancia sobre la fn COMPARTIDA `resolveEffectiveOffering` (./effective-offering, ÚNICA fuente
+   * de verdad reusada por waypoint-proposal · RC4-waypoint): liga el `catalog` y el `logger` de este servicio. La
+   * lógica (overlay del admin + degradación honesta + gate de enabled) vive en la fn; acá NO se duplica.
+   */
+  private resolveEffectiveOffering(
     base: OfferingSpec,
-    // `enforceEnabled` (default true): en el CREATE, una oferta deshabilitada por el admin → 409 (no se
-    // crea). En una re-cotización MID-VIAJE (changeDestination/waypoint) el viaje YA existe con esa oferta:
-    // el admin deshabilitándola no puede romper un cambio de destino en curso → false trae solo el pricing
-    // efectivo (overlay) SIN el gate de enabled. El pricing del overlay se aplica igual; enabled es del create.
-    // `site` (default 'create'): etiqueta del counter de degradación — la fn es COMPARTIDA (create/changeDest),
-    // así la métrica no miente el origen de un catálogo caído.
-    {
-      enforceEnabled = true,
-      site = 'create',
-    }: { enforceEnabled?: boolean; site?: CatalogDegradedSite } = {},
-  ): Promise<{ pricing: OfferingPricingPolicy; modePin?: PricingMode }> {
-    if (!this.catalog) return { pricing: base.pricing };
-    let resolved;
-    try {
-      resolved = await this.catalog.resolveOffering(base.id);
-    } catch (err) {
-      // B5-4: las verticales ocultas (defaultEnabled:false) NUNCA se crean, ni en degradación — sin
-      // confirmar que el admin las habilitó, permitir una ambulancia/grúa por catálogo caído sería el
-      // leak inverso al de la UI. Las visibles por default SÍ se permiten (degradación honesta previa).
-      // Solo en el create (enforceEnabled): mid-viaje el viaje ya existe, no se re-gatea por catálogo caído.
-      if (enforceEnabled && !base.defaultEnabled) throw new OfferingUnavailableError(base.id);
-      this.logger.warn(
-        `catálogo no disponible al resolver '${base.id}' (${(err as Error).message}); ` +
-          `uso el pricing de código y permito el viaje (degradación honesta · ADR 013)`,
-      );
-      bumpCatalogDegraded(site);
-      return { pricing: base.pricing };
-    }
-    if (enforceEnabled && resolved && !resolved.enabled) throw new OfferingUnavailableError(base.id);
-    // Sin entrada en el overlay (no debería pasar: el id sale del catálogo de código) → pricing de código.
-    if (!resolved) return { pricing: base.pricing };
-    return { pricing: resolved.pricing, modePin: resolved.modePin };
+    opts: ResolveEffectiveOfferingOpts = {},
+  ): Promise<EffectiveOffering> {
+    return resolveEffectiveOfferingShared(this.catalog, base, opts, this.logger);
   }
 
   /**

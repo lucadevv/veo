@@ -34,6 +34,8 @@ import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prism
 import type { Env } from '../config/env.schema';
 import { applyOfferingPricing, calculateFare, calculateOfferingFare } from './domain/fare';
 import { resolveTripOffering } from './domain/offering';
+import { resolveEffectiveOffering } from './effective-offering';
+import { CatalogService } from '../catalog/catalog.service';
 import { EnergyCatalogService } from '../pricing/energy-catalog.service';
 import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
 import { BaseFareService } from '../pricing/base-fare.service';
@@ -93,6 +95,9 @@ export class WaypointProposalService {
     @Optional() private readonly fuel?: FuelSurchargeService,
     // F2.4 · tarifa base configurable (banderazo/km/min). @Optional: sin él → constantes de código.
     @Optional() private readonly baseFare?: BaseFareService,
+    // RC4-waypoint · catálogo de ofertas para el pricing EFECTIVO (overlay admin), MISMA fuente que create/
+    // changeDestination. @Optional: sin él (tests legacy / no inyectado) → pricing de código (degradación honesta).
+    @Optional() private readonly catalog?: CatalogService,
   ) {
     this.ttlSeconds = config?.get('WAYPOINT_PROPOSAL_TTL_SEC') ?? DEFAULT_WAYPOINT_PROPOSAL_TTL_SEC;
     this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
@@ -189,6 +194,17 @@ export class WaypointProposalService {
     // multiplier: una tarifa negociada lejos del valor de fórmula hace saltar el delta (la semántica
     // "reemplazar" vs "delta marginal aditivo sobre lo negociado" requiere su propio ADR).
     const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
+    // RC4-waypoint (ADR-022) · el re-quote de la parada usa el pricing EFECTIVO (overlay del admin), la MISMA
+    // fuente que create y changeDestination — no el `offering.pricing` de código crudo. Sin esto, si el admin
+    // editó el multiplier/minFare de la oferta, la parada se cobraba a otra tasa que el viaje original
+    // (incoherencia). `enforceEnabled:false`: mid-viaje el viaje YA existe con esa oferta (el gate de enabled es
+    // del create). Degradación honesta: sin catálogo inyectado → pricing de código (comportamiento previo intacto).
+    const { pricing: effectivePricing } = await resolveEffectiveOffering(
+      this.catalog,
+      offering,
+      { enforceEnabled: false, site: 'waypoint' },
+      this.logger,
+    );
     const surge = Number(trip.surgeMultiplier.toString());
     // El combustible (B3) se pliega en la rama flip-OFF (espejo del create); en flip-ON la energía
     // pass-through lo reemplaza (calculateOfferingFare ignora fuelPerKmCents).
@@ -208,10 +224,10 @@ export class WaypointProposalService {
       this.energyModelEnabled && trip.dispatchMode === PricingMode.FIXED
         ? calculateOfferingFare(
             fareInput,
-            offering.pricing,
+            effectivePricing,
             await resolveAuthoritativeEnergy(this.energyCatalog, offering),
           )
-        : applyOfferingPricing(calculateFare(fareInput), offering.pricing);
+        : applyOfferingPricing(calculateFare(fareInput), effectivePricing);
     // Invariante de dominio: agregar una parada NUNCA abarata el viaje (delta ≥ 0). Piso en la tarifa
     // VIGENTE: cubre la puja con bid generoso (no se regala plata reseteando la negociación hacia
     // abajo) y rutas raras del motor. En FIXED es no-op (la fórmula es monótona con la ruta).

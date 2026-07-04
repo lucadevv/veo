@@ -12,6 +12,7 @@ import { TripStatus } from '@veo/shared-types';
 import { ConflictError, InvalidStateError } from '@veo/utils';
 import type { MapsClient } from '@veo/maps';
 import type { EnergyCatalogService } from '../pricing/energy-catalog.service';
+import type { CatalogService } from '../catalog/catalog.service';
 import { WaypointProposalService } from './waypoint-proposal.service';
 import { WaypointProposalStatus } from './domain/waypoint-proposal';
 import type { PrismaService } from '../infra/prisma.service';
@@ -293,6 +294,45 @@ describe('proposeWaypoint · re-quote con la política de la OFERTA (ADR 013 §1
     expect(proposal?.newFareCents).toBe(1988);
     expect(proposal?.deltaFareCents).toBe(113);
     expect(proposal?.status).toBe(WaypointProposalStatus.PROPOSED);
+  });
+});
+
+// ── RC4-waypoint · el re-quote usa el pricing EFECTIVO (overlay admin), no el catálogo de código ──
+
+/** CatalogService falso: devuelve un overlay del admin con el pricing que se le pida (enabled). */
+function fakeCatalog(pricing: { multiplier: number; minFareCents: number }): CatalogService {
+  return {
+    resolveOffering: async () => ({ enabled: true, pricing, modePin: undefined }),
+  } as unknown as CatalogService;
+}
+
+describe('proposeWaypoint · RC4-waypoint · pricing efectivo del overlay del admin', () => {
+  it('con overlay (minFare admin ALTO) el re-quote cotiza contra el pricing EFECTIVO, no el de código', async () => {
+    const trip = buildTrip({ category: 'veo_confort', fareCents: 1875 });
+    const prisma = makePrisma(trip);
+    // Overlay del admin: minFare 90000 (muy por encima de la tarifa por ruta y del piso monótono 1875).
+    // Sin el fix, waypoint usaba offering.pricing de código (minFare bajo) → newFare ~1988. Con el fix,
+    // aplica el minFare del overlay → 90000. La diferencia PRUEBA que se usó el pricing efectivo.
+    const service = new WaypointProposalService(
+      prisma as unknown as PrismaService,
+      makeMaps(5500, 660),
+      undefined, // config (flip OFF → rama applyOfferingPricing)
+      undefined, // energyCatalog
+      undefined, // fuel
+      undefined, // baseFare
+      fakeCatalog({ multiplier: 1.25, minFareCents: 90000 }),
+    );
+
+    const res = await service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' });
+    expect(res.newFareCents).toBe(90000); // piso del overlay del admin, no el minFare de código
+    expect(res.deltaFareCents).toBe(90000 - 1875);
+  });
+
+  it('SIN catálogo inyectado → degradación honesta: cotiza con el pricing de código (comportamiento previo intacto)', async () => {
+    const trip = buildTrip({ category: 'veo_confort', fareCents: 1875 });
+    const { service } = makeService(trip, { distanceMeters: 5500, durationSeconds: 660 });
+    const res = await service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' });
+    expect(res.newFareCents).toBe(1988); // igual que antes del refactor (pricing de código)
   });
 });
 
