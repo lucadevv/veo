@@ -7,9 +7,15 @@ import {
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Platform, StyleSheet, TextInput, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import {
   FadeInView,
   PressableScale,
@@ -30,6 +36,8 @@ const GOOGLE_BLUE = '#4285F4';
 const OTP_LENGTH = 6;
 const RESEND_SECONDS = 30;
 const PHONE_DIGITS = 9;
+/** Quietud tras el último dígito antes del auto-envío del OTP (no disparar mientras tipea). */
+const AUTO_SEND_DEBOUNCE_MS = 700;
 
 /** Mapea el error del login social a la key i18n del Banner (cancelado/null → sin Banner). */
 function oauthErrorCopy(kind: OAuthErrorKind): string | null {
@@ -45,6 +53,14 @@ function oauthErrorCopy(kind: OAuthErrorKind): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * Muestra el número en grupos de 3 (987 654 321), como el placeholder del diseño.
+ * SOLO presentación: el estado guarda los 9 dígitos crudos (onChangeText re-strippea los espacios).
+ */
+function formatPhoneDisplay(digits: string): string {
+  return digits.replace(/(\d{3})(?=\d)/g, '$1 ');
 }
 
 /** Formatea segundos a m:ss para la cuenta regresiva de reenvío. */
@@ -172,6 +188,22 @@ export function AuthScreen(): React.JSX.Element {
     }
   }, [phoneValid, allConsents, captureConsent, flow, phone]);
 
+  // AUTO-ENVÍO con debounce: número peruano completo + los 3 consentimientos → se pide el OTP
+  // solo, sin esperar el botón (el sufijo del input muestra el progreso). `autoSentForRef`
+  // recuerda el último número ya intentado: si el request FALLA no se reintenta en loop — el
+  // usuario reintenta editando el número o con el botón Continuar (que sigue funcionando igual).
+  const autoSentForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (codeSent || flow.requesting) return;
+    if (!phoneValid || !allConsents) return;
+    if (autoSentForRef.current === phone) return;
+    const timer = setTimeout(() => {
+      autoSentForRef.current = phone;
+      void sendCode();
+    }, AUTO_SEND_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [phone, phoneValid, allConsents, codeSent, flow.requesting, sendCode]);
+
   const verify = useCallback(async () => {
     if (code.length !== OTP_LENGTH) {
       setTouched(true);
@@ -278,10 +310,12 @@ export function AuthScreen(): React.JSX.Element {
           />
           <TextInput
             accessibilityLabel={t('auth.phoneLabel')}
-            value={phone}
+            value={formatPhoneDisplay(phone)}
             onChangeText={v =>
               setPhone(v.replace(/\D/g, '').slice(0, PHONE_DIGITS))
             }
+            // 9 dígitos + 2 espacios de la máscara "987 654 321".
+            maxLength={PHONE_DIGITS + 2}
             onFocus={() => setPhoneFocused(true)}
             onBlur={() => setPhoneFocused(false)}
             placeholder={t('auth.phonePlaceholder')}
@@ -298,6 +332,19 @@ export function AuthScreen(): React.JSX.Element {
               },
             ]}
           />
+          {/* Sufijo de estado del auto-envío: spinner mientras se pide el OTP → check al enviado. */}
+          {flow.requesting ? (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.accent}
+              style={styles.suffix}
+              accessibilityLabel={t('auth.sendingCode')}
+            />
+          ) : codeSent ? (
+            <View style={styles.suffix}>
+              <IconCheck color={theme.colors.success} size={18} />
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -371,6 +418,13 @@ export function AuthScreen(): React.JSX.Element {
           label={t('auth.consentLocation')}
           onToggle={() => setLoc(v => !v)}
         />
+        {/* El número ya está completo pero faltan permisos: decí POR QUÉ no se envía el código
+            (sin este hint la pantalla queda muda y parece un bug del envío). */}
+        {phoneValid && !allConsents && !codeSent ? (
+          <Text variant="footnote" color="warn" style={styles.consentsHint}>
+            {t('auth.consentsHint')}
+          </Text>
+        ) : null}
       </View>
 
       {/* Divisor "o continúa con" */}
@@ -455,6 +509,8 @@ const styles = StyleSheet.create({
   prefix: {fontSize: 16},
   divider: {width: 1, height: 24, marginHorizontal: 12},
   numberInput: {flex: 1, fontSize: 16, letterSpacing: 1, paddingVertical: 14},
+  suffix: {marginLeft: 8},
+  consentsHint: {marginTop: spacing.sm},
   banner: {marginBottom: spacing.lg},
   otpBanner: {marginTop: spacing.md, marginBottom: 0},
   resendHit: {
