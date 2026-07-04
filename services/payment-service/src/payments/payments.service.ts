@@ -516,12 +516,13 @@ export class PaymentsService {
       // PENDING→CAPTURED emite payment.captured y colecta la penalidad. La perdedora ve count=0 →
       // devuelve el pago ya capturado SIN duplicar el evento (espeja el guard de collectPenaltyInTx).
       const { count } = await tx.payment.updateMany({
-        // CAS incluye DEBT además de PENDING: un cobro que cayó a DEBT (declive/reintentos agotados) y LUEGO el PSP
-        // confirma (webhook CONFIRMED tardío) DEBE capturar — antes el CAS solo matcheaba PENDING → count=0, el pago
-        // quedaba en DEBT PESE a que el PSP cobró (dinero capturado, VEO en DEBT), y el caller retornaba "CAPTURED"
-        // en falso. DEBT→CAPTURED es transición válida (payment.policy). El guard idempotente (status===CAPTURED) ya
-        // corta antes en el caller; acá el CAS serializa PENDING|DEBT → CAPTURED (una sola captura gana).
-        where: { id: payment.id, status: { in: ['PENDING', 'DEBT'] } },
+        // CAS incluye DEBT y FAILED además de PENDING: un cobro que cayó a DEBT (declive) o FAILED (checkout
+        // EXPIRADO/cancelado) y LUEGO el PSP confirma (webhook CONFIRMED tardío — típico de CIP/PagoEfectivo,
+        // que el cliente paga al final) DEBE capturar. Antes el CAS matcheaba solo PENDING|DEBT → un pago en
+        // FAILED daba count=0 y el caller retornaba "CAPTURED" en falso: plata cobrada en el PSP, VEO en FAILED
+        // (fuga). PENDING|DEBT|FAILED → CAPTURED son todas transiciones válidas (payment.policy). El guard
+        // idempotente (status===CAPTURED) corta antes en el caller; acá el CAS serializa (una sola captura gana).
+        where: { id: payment.id, status: { in: ['PENDING', 'DEBT', 'FAILED'] } },
         data: {
           status: 'CAPTURED',
           externalRef,
@@ -614,17 +615,26 @@ export class PaymentsService {
     // pasajero reintenta la propina desde su UI (nueva dedupKey → nuevo tip-Payment).
     if (payment.kind === 'TIP') {
       assertPaymentTransition(payment.status, 'FAILED');
-      return this.prisma.write.payment.update({
-        where: { id: payment.id },
+      // RC19 (ADR-022) · CAS de status: el chequeo del caller es sobre una lectura FUERA de la tx (TOCTOU).
+      // Si un webhook CONFIRMED concurrente ya capturó el pago (CAPTURED), el `status` ya no está en
+      // [PENDING,DEBT] → count 0 → NO lo pisamos; devolvemos el estado real (la captura gana).
+      await this.prisma.write.payment.updateMany({
+        where: { id: payment.id, status: { in: ['PENDING', 'DEBT'] } },
         data: { status: 'FAILED', retries: this.maxRetries, failureReason: reason },
       });
+      return this.prisma.write.payment.findUniqueOrThrow({ where: { id: payment.id } });
     }
     assertPaymentTransition(payment.status, 'DEBT');
     return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
+      // RC19 · CAS: DEBT solo desde PENDING. Si un CONFIRMED concurrente ya capturó (CAPTURED) en la ventana
+      // TOCTOU, count 0 → NO pisamos la captura NI emitimos `payment.failed` (sería una "falla" FALSA sobre
+      // plata ya cobrada, que alertaría a seguridad + bloquearía viajes indebidamente). Espeja el CAS de captureSuccess.
+      const { count } = await tx.payment.updateMany({
+        where: { id: payment.id, status: 'PENDING' },
         data: { status: 'DEBT', retries: this.maxRetries, failureReason: reason },
       });
+      const updated = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
+      if (count === 0) return updated; // otra transición ganó la carrera: no re-emitir sobre un estado ajeno
       const envelope = createEnvelope({
         eventType: 'payment.failed',
         producer: 'payment-service',
@@ -951,43 +961,21 @@ export class PaymentsService {
       case 'EXPIRED': {
         if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED')
           return { applied: false, status: payment.status };
-        if (payment.status === 'FAILED') return { applied: false, status: 'FAILED' };
-        await this.markFailed(payment, 'expired');
-        return { applied: true, status: 'FAILED' };
+        if (payment.status === 'DEBT' || payment.status === 'FAILED')
+          return { applied: false, status: payment.status };
+        // RC17 (ADR-022) · un checkout que EXPIRA sin pago es, para el cobro del VIAJE, lo MISMO que un
+        // DECLINED: el pasajero NO pagó → DEBE la tarifa. Va por `markDebt` (kind-aware): FARE→DEBT (bloquea
+        // nuevos viajes + recuperable desde la UI de deuda), TIP→FAILED silencioso (propina opcional). Antes
+        // iba a FAILED terminal para el FARE → condonación silenciosa: la tarifa de un viaje completado quedaba
+        // incobrable y el gate de deuda se liberaba (el pasajero viajaba gratis). Espeja la rama DECLINED.
+        const outcome = await this.markDebt(payment, 'expired');
+        return { applied: true, status: outcome.status };
       }
       default:
         return { applied: false, status: payment.status }; // PENDING → sin transición
     }
   }
 
-  /** Marca un pago como FAILED (cobro externo expirado/cancelado). Emite payment.failed willRetry=false. */
-  private async markFailed(payment: Payment, reason: string): Promise<Payment> {
-    // A1 · una PROPINA (kind=TIP) que EXPIRA (checkout abandonado — el caso más común) o se cancela NO es una
-    // falla del cobro del viaje: se marca FAILED (terminal) SIN emitir `payment.failed` — ese evento dispara la
-    // alerta a la central de seguridad + push "pago falló" al pasajero, INDEBIDO por una propina OPCIONAL no
-    // completada. Espeja el atajo kind=TIP de `markDebt` (rama DECLINED); acá cubre la rama EXPIRED del webhook.
-    if (payment.kind === 'TIP') {
-      assertPaymentTransition(payment.status, 'FAILED');
-      return this.prisma.write.payment.update({
-        where: { id: payment.id },
-        data: { status: 'FAILED', failureReason: reason },
-      });
-    }
-    assertPaymentTransition(payment.status, 'FAILED');
-    return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'FAILED', failureReason: reason },
-      });
-      const envelope = createEnvelope({
-        eventType: 'payment.failed',
-        producer: 'payment-service',
-        payload: { paymentId: updated.id, tripId: updated.tripId, reason, willRetry: false },
-      });
-      await enqueueOutbox(tx, envelope, updated.id);
-      return updated;
-    });
-  }
 
   /**
    * Añade una propina a un viaje YA cobrado (BR-P04 · A1 ADR-022 · Model B): el 100% va al conductor, fuera de

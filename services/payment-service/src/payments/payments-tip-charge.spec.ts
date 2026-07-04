@@ -35,6 +35,13 @@ function buildService(
           updated.push(u);
           return u;
         }),
+        // RC19 · markDebt (rama TIP) ahora usa un CAS updateMany + re-read para no pisar una captura concurrente.
+        updateMany: vi.fn(async ({ data }: { data: Row }) => {
+          const u = { ...(updated[updated.length - 1] ?? created[0] ?? fare), ...data };
+          updated.push(u);
+          return { count: 1 };
+        }),
+        findUniqueOrThrow: vi.fn(async () => updated[updated.length - 1] ?? created[0] ?? fare),
       },
       $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
         cb({
@@ -168,7 +175,7 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(paymentFindMany).toHaveBeenCalledTimes(2);
   });
 
-  it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markFailed kind-aware)', async () => {
+  it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markDebt kind-aware)', async () => {
     const tip: Row = {
       id: 'tip-x', tripId: 'trip-1', kind: 'TIP', status: 'PENDING', method: 'YAPE',
       amountCents: 500, tipCents: 500, driverId: 'drv-1',
@@ -179,10 +186,12 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
       read: { payment: { findUnique: vi.fn(async () => tip) } },
       write: {
         payment: {
-          update: vi.fn(async ({ data }: { data: Row }) => {
+          // RC19 · la rama TIP de markDebt usa un CAS updateMany + re-read (no pisa una captura concurrente).
+          updateMany: vi.fn(async ({ data }: { data: Row }) => {
             updates.push(data);
-            return { ...tip, ...data };
+            return { count: 1 };
           }),
+          findUniqueOrThrow: vi.fn(async () => ({ ...tip, ...(updates[updates.length - 1] ?? {}) })),
         },
         $transaction: txSpy,
       },

@@ -156,7 +156,10 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
     expect((await findPayment(p.id)).status).toBe('PENDING');
   });
 
-  it('webhook expired → FAILED reason expired', async () => {
+  it('RC17 · webhook expired de una TARIFA → DEBT (impaga, recuperable) — NO FAILED (condonación)', async () => {
+    // Un checkout que EXPIRA sin pago es lo mismo que un rejected para el cobro del VIAJE: el pasajero NO
+    // pagó → DEBE la tarifa. Antes iba a FAILED terminal → condonación silenciosa (viajaba gratis). Ahora
+    // → DEBT (bloquea nuevos viajes + recuperable), consistente con la rama rejected.
     const p = await chargeYape();
     const { body } = gateway.buildSignedWebhook({
       uid: p.externalUid as string,
@@ -165,8 +168,26 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
     });
     await webhook.process(body, {});
     const stored = await findPayment(p.id);
-    expect(stored.status).toBe('FAILED');
+    expect(stored.status).toBe('DEBT');
     expect(stored.failureReason).toBe('expired');
+  });
+
+  it('RC17+RC16 · tarifa que EXPIRÓ (DEBT) y LUEGO el cliente paga (webhook success tardío) → CAPTURED', async () => {
+    // El caso real de CIP/PagoEfectivo: el checkout "expira" en el reloj de VEO pero el cliente paga al final.
+    // El pago está en DEBT (no condonado) y el CONFIRMED tardío DEBE capturarlo (el CAS de captureSuccess
+    // acepta DEBT→CAPTURED). La tarifa se cobra de verdad, el conductor cobra — nada se pierde.
+    const p = await chargeYape();
+    await webhook.process(
+      gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'expired' }).body,
+      {},
+    );
+    expect((await findPayment(p.id)).status).toBe('DEBT');
+    await webhook.process(
+      gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'success' }).body,
+      {},
+    );
+    expect((await findPayment(p.id)).status).toBe('CAPTURED');
+    expect(await capturedEvents()).toHaveLength(1);
   });
 
   it('webhook rejected → DEBT', async () => {
