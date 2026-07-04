@@ -1391,7 +1391,7 @@
       "x": 150,
       "y": 7660,
       "name": "■ PASAJERO",
-      "width": 3360,
+      "width": 4860,
       "height": 14040,
       "fill": "#0B0D12",
       "cornerRadius": 28,
@@ -1425,7 +1425,7 @@
               "id": "mcsR2",
               "name": "S",
               "fill": "$ink-subtle",
-              "content": "Flujo completo de la app, del splash al viaje. Seguí las flechas.",
+              "content": "Flujo real de la app (espejo del código). Flecha = navegación; sin flecha = fase o estado de la MISMA pantalla.",
               "fontFamily": "$font-text",
               "fontSize": 18,
               "fontWeight": "normal"
@@ -3146,7 +3146,7 @@
               "id": "jnqPL",
               "name": "T",
               "fill": "$brand",
-              "content": "1 · Entrada",
+              "content": "1 · Entrada y candados",
               "fontFamily": "$font-display",
               "fontSize": 26,
               "fontWeight": "700"
@@ -3156,7 +3156,7 @@
               "id": "zUwQw",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Splash a perfil, solo la primera vez",
+              "content": "Splash → onboarding → auth (OTP + consentimientos) → completar perfil. BiometricLock y Sesión expirada son candados por ESTADO de sesión: el stack conmuta solo, sin flechas",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -4703,7 +4703,7 @@
               "id": "wKfgF",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Home content-first (RequestFlowScreen): saludo + Ahora/Programado + último conductor + buscador. La búsqueda vive en el MISMO sheet",
+              "content": "Home (RequestFlowScreen): la búsqueda vive EN el sheet. Editar el origen abre P/Search (pantalla completa); el ícono de mapa o 'Elegir en el mapa' abren P/MapPick. Al elegir destino el sheet pasa a COTIZAR (fila 3) — sin navegar",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -4713,8 +4713,8 @@
         {
           "type": "frame",
           "id": "D0k1g",
-          "x": 50,
-          "y": 3740,
+          "x": 1130,
+          "y": 2190,
           "name": "P/Search",
           "clip": true,
           "width": 390,
@@ -5186,7 +5186,7 @@
         {
           "type": "frame",
           "id": "qAT2P",
-          "x": 590,
+          "x": 50,
           "y": 3740,
           "name": "P/RouteQuote",
           "clip": true,
@@ -5996,7 +5996,7 @@
         {
           "type": "frame",
           "id": "fLKdk",
-          "x": 1130,
+          "x": 590,
           "y": 3740,
           "name": "P/TripActive",
           "clip": true,
@@ -6750,7 +6750,7 @@
         {
           "type": "frame",
           "id": "I7ahU",
-          "x": 1670,
+          "x": 1130,
           "y": 3740,
           "name": "P/Payment",
           "clip": true,
@@ -7630,7 +7630,7 @@
         {
           "type": "frame",
           "id": "fTtR5",
-          "x": 2210,
+          "x": 1670,
           "y": 3740,
           "name": "P/Rating",
           "clip": true,
@@ -8175,7 +8175,7 @@
               "id": "isPYB",
               "name": "T",
               "fill": "$brand",
-              "content": "3 · Ahora · Precio fijo",
+              "content": "3 · Cotizar y viajar (en el sheet)",
               "fontFamily": "$font-display",
               "fontSize": 26,
               "fontWeight": "700"
@@ -8185,7 +8185,7 @@
               "id": "CI0C3",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Uber-like. Entra desde Modo",
+              "content": "En 'Ahora' TODO pasa dentro del sheet del Home: cotización → viaje → pago → calificación son FASES, no pantallas. Como pantallas sueltas solo se llega por Programado (vía RouteQuote) o deep-links de push (camino legacy)",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -9832,7 +9832,7 @@
               "id": "ZFru6",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "inDrive. Desde RouteQuote › Poné tu precio. Contraofertás (re-puja) y al aceptar va a Viaje activo",
+              "content": "El servidor decide puja o fijo POR OFERTA. Ponés tu precio al cotizar; las contraofertas llegan al MISMO sheet. Contraofertar abre P/PujaCounter (única navegación). Infelices: expiró sin ofertas → re-pujá; el conductor canceló → Reasignación",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -9842,7 +9842,7 @@
         {
           "type": "frame",
           "id": "TzRO3",
-          "x": 50,
+          "x": 1130,
           "y": 6840,
           "name": "P/ProgSearch",
           "clip": true,
@@ -10393,7 +10393,7 @@
         {
           "type": "frame",
           "id": "ajq0g",
-          "x": 590,
+          "x": 1670,
           "y": 6840,
           "name": "P/ProgResults",
           "clip": true,
@@ -10865,983 +10865,8 @@
         },
         {
           "type": "frame",
-          "id": "VEt1O",
-          "x": 1130,
-          "y": 6840,
-          "name": "P/TripDetail",
-          "clip": true,
-          "width": 390,
-          "fill": "$bg",
-          "layout": "vertical",
-          "children": [
-            {
-              "id": "RatCC",
-              "type": "ref",
-              "ref": "L3Xt6",
-              "name": "StatusBar"
-            },
-            {
-              "type": "frame",
-              "id": "zXLXv",
-              "name": "Header",
-              "width": "fill_container",
-              "padding": [
-                8,
-                16
-              ],
-              "justifyContent": "space_between",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "kvTKR",
-                  "name": "Back",
-                  "width": 40,
-                  "height": 40,
-                  "fill": "$surface",
-                  "cornerRadius": "$r-pill",
-                  "justifyContent": "center",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "icon",
-                      "id": "wMa5U",
-                      "name": "Icon",
-                      "width": 20,
-                      "height": 20,
-                      "icon": "arrow-left",
-                      "library": "lucide",
-                      "fill": "$ink"
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "pn1B5",
-                  "name": "Share",
-                  "width": 40,
-                  "height": 40,
-                  "fill": "$surface",
-                  "cornerRadius": "$r-pill",
-                  "justifyContent": "center",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "icon",
-                      "id": "D0FDV",
-                      "name": "Icon",
-                      "width": 20,
-                      "height": 20,
-                      "icon": "share-2",
-                      "library": "lucide",
-                      "fill": "$ink"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "eC9bh",
-              "name": "Content",
-              "width": "fill_container",
-              "layout": "vertical",
-              "gap": 24,
-              "padding": [
-                8,
-                20,
-                24,
-                20
-              ],
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "e7Avq",
-                  "name": "ItinHeader",
-                  "width": "fill_container",
-                  "justifyContent": "space_between",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "pSaTD",
-                      "name": "Title",
-                      "fill": "$ink",
-                      "content": "Itinerario",
-                      "fontFamily": "$font-display",
-                      "fontSize": 16,
-                      "fontWeight": "600"
-                    },
-                    {
-                      "type": "frame",
-                      "id": "T3KN7E",
-                      "name": "DurChip",
-                      "fill": "$surface-elevated",
-                      "cornerRadius": "$r-pill",
-                      "gap": 6,
-                      "padding": [
-                        6,
-                        10
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "I9eEH",
-                          "name": "Icon",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "timer",
-                          "library": "lucide",
-                          "fill": "$ink-muted"
-                        },
-                        {
-                          "type": "text",
-                          "id": "LptHX",
-                          "name": "Dur",
-                          "fill": "$ink-muted",
-                          "content": "3h 45min",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 13,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "TWZZh",
-                  "name": "Timeline",
-                  "width": "fill_container",
-                  "layout": "vertical",
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "fiDga",
-                      "name": "Stop",
-                      "width": "fill_container",
-                      "height": 88,
-                      "gap": 12,
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "fWHW8",
-                          "name": "Rail",
-                          "width": 20,
-                          "height": "fill_container",
-                          "layout": "vertical",
-                          "padding": [
-                            2,
-                            0,
-                            0,
-                            0
-                          ],
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "ellipse",
-                              "id": "hKhtC",
-                              "name": "Dot",
-                              "fill": "$brand",
-                              "width": 14,
-                              "height": 14
-                            },
-                            {
-                              "type": "rectangle",
-                              "id": "o5Ige",
-                              "name": "Line",
-                              "fill": "$border-strong",
-                              "width": 2,
-                              "height": "fill_container"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "kKcwk",
-                          "name": "Content",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 2,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "Sh2uQ",
-                              "name": "Time",
-                              "fill": "$ink-muted",
-                              "content": "08:30",
-                              "fontFamily": "$font-mono",
-                              "fontSize": 13,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "k1WvM",
-                              "name": "Title",
-                              "fill": "$ink",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Lima, Terminal Plaza Norte",
-                              "fontFamily": "$font-text",
-                              "fontSize": 16,
-                              "fontWeight": "600"
-                            },
-                            {
-                              "type": "text",
-                              "id": "GTIW3",
-                              "name": "Sub",
-                              "fill": "$ink-subtle",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Punto de salida",
-                              "fontFamily": "$font-text",
-                              "fontSize": 13,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "zVydf",
-                      "name": "Stop",
-                      "width": "fill_container",
-                      "height": 88,
-                      "gap": 12,
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "ViCWK",
-                          "name": "Rail",
-                          "width": 20,
-                          "height": "fill_container",
-                          "layout": "vertical",
-                          "padding": [
-                            2,
-                            0,
-                            0,
-                            0
-                          ],
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "ellipse",
-                              "id": "e8F8n",
-                              "name": "Ring",
-                              "fill": "$surface",
-                              "width": 12,
-                              "height": 12,
-                              "stroke": "$ink-subtle",
-                              "strokeWidth": 2
-                            },
-                            {
-                              "type": "rectangle",
-                              "id": "s8cqk",
-                              "name": "Line",
-                              "fill": "$border-strong",
-                              "width": 2,
-                              "height": "fill_container"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "Q9Ycq",
-                          "name": "Content",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 2,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "Rgs0I",
-                              "name": "Time",
-                              "fill": "$ink-muted",
-                              "content": "10:15",
-                              "fontFamily": "$font-mono",
-                              "fontSize": 13,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "w5HfD",
-                              "name": "Title",
-                              "fill": "$ink",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Pativilca",
-                              "fontFamily": "$font-text",
-                              "fontSize": 16,
-                              "fontWeight": "600"
-                            },
-                            {
-                              "type": "text",
-                              "id": "o7L7xl",
-                              "name": "Sub",
-                              "fill": "$ink-subtle",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Parada · 15 min",
-                              "fontFamily": "$font-text",
-                              "fontSize": 13,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "S91I8p",
-                      "name": "Stop",
-                      "width": "fill_container",
-                      "gap": 12,
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "m8KINd",
-                          "name": "Rail",
-                          "width": 20,
-                          "layout": "vertical",
-                          "padding": [
-                            2,
-                            0,
-                            0,
-                            0
-                          ],
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "ZGQ81",
-                              "name": "Pin",
-                              "width": 18,
-                              "height": 18,
-                              "icon": "map-pin",
-                              "library": "lucide",
-                              "fill": "$ink"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "Grpf0",
-                          "name": "Content",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 2,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "fbYpU",
-                              "name": "Time",
-                              "fill": "$ink-muted",
-                              "content": "12:15",
-                              "fontFamily": "$font-mono",
-                              "fontSize": 13,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "u9s1pL",
-                              "name": "Title",
-                              "fill": "$ink",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Huaraz, Centro",
-                              "fontFamily": "$font-text",
-                              "fontSize": 16,
-                              "fontWeight": "600"
-                            },
-                            {
-                              "type": "text",
-                              "id": "oShMD",
-                              "name": "Sub",
-                              "fill": "$ink-subtle",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Punto de llegada",
-                              "fontFamily": "$font-text",
-                              "fontSize": 13,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "rectangle",
-                  "id": "HaD4X",
-                  "name": "Divider",
-                  "fill": "$border",
-                  "width": "fill_container",
-                  "height": 1
-                },
-                {
-                  "type": "frame",
-                  "id": "ITHnz",
-                  "name": "PriceBlock",
-                  "width": "fill_container",
-                  "gap": 8,
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "YgbDT",
-                      "name": "Price",
-                      "fill": "$ink",
-                      "content": "S/ 35",
-                      "fontFamily": "$font-mono",
-                      "fontSize": 34,
-                      "fontWeight": "700"
-                    },
-                    {
-                      "type": "text",
-                      "id": "fOMu8",
-                      "name": "PerNote",
-                      "fill": "$ink-subtle",
-                      "content": "por asiento",
-                      "fontFamily": "$font-text",
-                      "fontSize": 14,
-                      "fontWeight": "normal"
-                    }
-                  ]
-                },
-                {
-                  "type": "rectangle",
-                  "id": "ZxTuY",
-                  "name": "Divider",
-                  "fill": "$border",
-                  "width": "fill_container",
-                  "height": 1
-                },
-                {
-                  "type": "text",
-                  "id": "H2BO5N",
-                  "name": "DriverLabel",
-                  "fill": "$ink",
-                  "content": "Tu conductor",
-                  "fontFamily": "$font-display",
-                  "fontSize": 16,
-                  "fontWeight": "600"
-                },
-                {
-                  "type": "frame",
-                  "id": "KzhVN",
-                  "name": "DriverCard",
-                  "width": "fill_container",
-                  "fill": {
-                    "type": "gradient",
-                    "gradientType": "linear",
-                    "enabled": true,
-                    "rotation": 180,
-                    "size": {
-                      "height": 1
-                    },
-                    "colors": [
-                      {
-                        "color": "#20262FF2",
-                        "position": 0
-                      },
-                      {
-                        "color": "#14171E",
-                        "position": 1
-                      }
-                    ]
-                  },
-                  "cornerRadius": "$r-lg",
-                  "stroke": "#3D4557",
-                  "strokeWidth": 1,
-                  "strokeAlignment": "inner",
-                  "effect": [
-                    {
-                      "type": "shadow",
-                      "shadowType": "outer",
-                      "color": "#FFFFFF24",
-                      "offset": {
-                        "x": 0,
-                        "y": 1
-                      },
-                      "blur": 0.5
-                    },
-                    {
-                      "type": "shadow",
-                      "shadowType": "outer",
-                      "color": "#00000059",
-                      "offset": {
-                        "x": 0,
-                        "y": 6
-                      },
-                      "blur": 18,
-                      "spread": -4
-                    }
-                  ],
-                  "layout": "vertical",
-                  "gap": 14,
-                  "padding": 16,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "Y0qDT",
-                      "name": "DriverTop",
-                      "width": "fill_container",
-                      "gap": 12,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "bpiJs",
-                          "name": "Avatar",
-                          "metadata": {
-                            "type": "unsplash",
-                            "username": "silverkblack",
-                            "link": "https://unsplash.com/@silverkblack",
-                            "author": "Vitaly Gariev"
-                          },
-                          "clip": true,
-                          "width": 48,
-                          "height": 48,
-                          "fill": {
-                            "type": "image",
-                            "enabled": true,
-                            "url": "https://images.unsplash.com/photo-1758598497232-e89e4cb1f5d4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODMwMDI4MTJ8&ixlib=rb-4.1.0&q=80&w=1080",
-                            "mode": "fill"
-                          },
-                          "cornerRadius": "$r-pill"
-                        },
-                        {
-                          "type": "frame",
-                          "id": "T7EB1A",
-                          "name": "DriverTexts",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 3,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "SPydc",
-                              "name": "Name",
-                              "fill": "$ink",
-                              "content": "Carlos M.",
-                              "fontFamily": "$font-text",
-                              "fontSize": 16,
-                              "fontWeight": "600"
-                            },
-                            {
-                              "type": "frame",
-                              "id": "oyy64",
-                              "name": "Rating",
-                              "gap": 6,
-                              "alignItems": "center",
-                              "children": [
-                                {
-                                  "type": "icon",
-                                  "id": "gpGyC",
-                                  "name": "Star",
-                                  "width": 14,
-                                  "height": 14,
-                                  "icon": "star",
-                                  "library": "lucide",
-                                  "fill": "$warn"
-                                },
-                                {
-                                  "type": "text",
-                                  "id": "cmkwY",
-                                  "name": "Score",
-                                  "fill": "$ink-muted",
-                                  "content": "4.9",
-                                  "fontFamily": "$font-mono",
-                                  "fontSize": 13,
-                                  "fontWeight": "normal"
-                                },
-                                {
-                                  "type": "text",
-                                  "id": "jgRAD",
-                                  "name": "Trips",
-                                  "fill": "$ink-subtle",
-                                  "content": "· 128 viajes",
-                                  "fontFamily": "$font-text",
-                                  "fontSize": 13,
-                                  "fontWeight": "normal"
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "v6cmYq",
-                      "name": "Badges",
-                      "gap": 8,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "id": "njAu5",
-                          "type": "ref",
-                          "ref": "MKWt6",
-                          "name": "Verified",
-                          "descendants": {
-                            "HfJeD": {
-                              "fill": "$success"
-                            },
-                            "nhqf0": {
-                              "content": "Perfil verificado",
-                              "fill": "$success"
-                            }
-                          }
-                        },
-                        {
-                          "id": "iEGwh",
-                          "type": "ref",
-                          "ref": "MKWt6",
-                          "name": "NeverCancels",
-                          "fill": "$surface-elevated",
-                          "descendants": {
-                            "HfJeD": {
-                              "fill": "$ink-muted"
-                            },
-                            "nhqf0": {
-                              "content": "Nunca cancela",
-                              "fill": "$ink-muted"
-                            }
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "E5F9G",
-                  "name": "Vehicle",
-                  "width": "fill_container",
-                  "gap": 12,
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "RaNkX",
-                      "name": "IconWrap",
-                      "width": 40,
-                      "height": 40,
-                      "fill": "$surface-elevated",
-                      "cornerRadius": "$r-pill",
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "xDAR0",
-                          "name": "Icon",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "car-front",
-                          "library": "lucide",
-                          "fill": "$ink-muted"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "KGa4I",
-                      "name": "VehTexts",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 2,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "z3l58s",
-                          "name": "VehName",
-                          "fill": "$ink",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Toyota Corolla · Gris",
-                          "fontFamily": "$font-text",
-                          "fontSize": 15,
-                          "fontWeight": "500"
-                        },
-                        {
-                          "type": "text",
-                          "id": "XlNpo",
-                          "name": "Plate",
-                          "fill": "$ink-subtle",
-                          "content": "Placa · ABC-123",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "rectangle",
-                  "id": "mc9yt",
-                  "name": "Divider",
-                  "fill": "$border",
-                  "width": "fill_container",
-                  "height": 1
-                },
-                {
-                  "type": "text",
-                  "id": "tbj8W",
-                  "name": "RulesLabel",
-                  "fill": "$ink",
-                  "content": "Reglas del viaje",
-                  "fontFamily": "$font-display",
-                  "fontSize": 16,
-                  "fontWeight": "600"
-                },
-                {
-                  "type": "frame",
-                  "id": "m6cKGO",
-                  "name": "Rules",
-                  "width": "fill_container",
-                  "layout": "vertical",
-                  "gap": 12,
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "p3RBur",
-                      "name": "Rule",
-                      "width": "fill_container",
-                      "gap": 10,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "QciPQ",
-                          "name": "Icon",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "users",
-                          "library": "lucide",
-                          "fill": "$ink-muted"
-                        },
-                        {
-                          "type": "text",
-                          "id": "RpfCg",
-                          "name": "Text",
-                          "fill": "$ink-muted",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Máximo 2 personas atrás",
-                          "fontFamily": "$font-text",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "b0kCI6",
-                      "name": "Rule",
-                      "width": "fill_container",
-                      "gap": 10,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "I4OtuE",
-                          "name": "Icon",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "cigarette-off",
-                          "library": "lucide",
-                          "fill": "$ink-muted"
-                        },
-                        {
-                          "type": "text",
-                          "id": "hpz1t",
-                          "name": "Text",
-                          "fill": "$ink-muted",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "No fumar",
-                          "fontFamily": "$font-text",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "wnSxQ",
-                      "name": "Rule",
-                      "width": "fill_container",
-                      "gap": 10,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "DHJcM",
-                          "name": "Icon",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "paw-print",
-                          "library": "lucide",
-                          "fill": "$ink-muted"
-                        },
-                        {
-                          "type": "text",
-                          "id": "V6gXY",
-                          "name": "Text",
-                          "fill": "$ink-muted",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Mascotas pequeñas ok",
-                          "fontFamily": "$font-text",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "rectangle",
-                  "id": "TM6f6",
-                  "name": "Divider",
-                  "fill": "$border",
-                  "width": "fill_container",
-                  "height": 1
-                },
-                {
-                  "type": "frame",
-                  "id": "Y5LUdJ",
-                  "name": "Seats",
-                  "width": "fill_container",
-                  "gap": 10,
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "icon",
-                      "id": "l07uW",
-                      "name": "Icon",
-                      "width": 18,
-                      "height": 18,
-                      "icon": "armchair",
-                      "library": "lucide",
-                      "fill": "$success"
-                    },
-                    {
-                      "type": "frame",
-                      "id": "gv7K4",
-                      "name": "SeatsText",
-                      "gap": 6,
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "kFZ6b",
-                          "name": "Count",
-                          "fill": "$ink",
-                          "content": "3 de 4",
-                          "fontFamily": "$font-mono",
-                          "fontSize": 14,
-                          "fontWeight": "700"
-                        },
-                        {
-                          "type": "text",
-                          "id": "kx5nj",
-                          "name": "Label",
-                          "fill": "$ink-muted",
-                          "content": "asientos disponibles",
-                          "fontFamily": "$font-text",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "I1FUBp",
-              "name": "BottomBar",
-              "width": "fill_container",
-              "fill": "#14161CD9",
-              "stroke": "#3A4152",
-              "strokeWidth": 1,
-              "effect": [
-                {
-                  "type": "background_blur",
-                  "radius": 30
-                },
-                {
-                  "type": "shadow",
-                  "shadowType": "outer",
-                  "color": "#00000080",
-                  "offset": {
-                    "x": 0,
-                    "y": -8
-                  },
-                  "blur": 40
-                }
-              ],
-              "padding": [
-                16,
-                20
-              ],
-              "justifyContent": "space_between",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "pDbjO",
-                  "name": "BarPrice",
-                  "layout": "vertical",
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "O1k3st",
-                      "name": "Amount",
-                      "fill": "$ink",
-                      "content": "S/ 35",
-                      "fontFamily": "$font-mono",
-                      "fontSize": 20,
-                      "fontWeight": "700"
-                    },
-                    {
-                      "type": "text",
-                      "id": "H4yn5u",
-                      "name": "Per",
-                      "fill": "$ink-subtle",
-                      "content": "por asiento",
-                      "fontFamily": "$font-text",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
-                    }
-                  ]
-                },
-                {
-                  "id": "E9RI6",
-                  "type": "ref",
-                  "ref": "D5bW5Y",
-                  "name": "ReserveBtn",
-                  "descendants": {
-                    "AkPlM": {
-                      "content": "Reservar asiento"
-                    }
-                  }
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "frame",
           "id": "mhQC3",
-          "x": 1670,
+          "x": 2750,
           "y": 6840,
           "name": "P/BookingReview",
           "clip": true,
@@ -12828,7 +11853,7 @@
         {
           "type": "frame",
           "id": "Pqorm",
-          "x": 2210,
+          "x": 3290,
           "y": 6840,
           "name": "P/WaitingApproval",
           "clip": true,
@@ -13177,7 +12202,7 @@
               "id": "ClyKh",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "BlaBlaCar-like. Al aprobar el conductor va a Viaje activo",
+              "content": "Hub: Mis viajes programados (toggle Programado del Home, o Perfil). '+' programa TU viaje → cotización (fila 3, vía RouteQuote). 'Buscar asientos' = carpool: buscar → resultados → detalle → reserva → estado. Esperando/Aprobada/Rechazada = ESTADOS de la misma pantalla (poll), no navegación",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -14840,7 +13865,7 @@
               "id": "fnw3M",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Herramientas del moat, accesibles desde la tab Seguridad",
+              "content": "Hub = tab Seguridad (contactos, modo niño, KYC opcional). Pánico: SOS del viaje o escalamiento silencioso automático. Cámara en vivo y compartir con familia: desde el viaje activo",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -15729,7 +14754,7 @@
         {
           "type": "frame",
           "id": "rUe5b",
-          "x": 590,
+          "x": 1130,
           "y": 9940,
           "name": "P/Seguridad",
           "clip": true,
@@ -16017,7 +15042,7 @@
         {
           "type": "frame",
           "id": "c4cChO",
-          "x": 1130,
+          "x": 1670,
           "y": 9940,
           "name": "P/Profile",
           "clip": true,
@@ -17146,7 +16171,7 @@
         {
           "type": "frame",
           "id": "b7muEo",
-          "x": 1670,
+          "x": 2210,
           "y": 9940,
           "name": "P/SavedPlaces",
           "clip": true,
@@ -17565,7 +16590,7 @@
         {
           "type": "frame",
           "id": "Ofbr6",
-          "x": 2210,
+          "x": 2750,
           "y": 9940,
           "name": "P/PaymentMethods",
           "clip": true,
@@ -17988,7 +17013,7 @@
               "id": "E20mk6",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Destinos de la barra inferior",
+              "content": "Tabs: Inicio · Mis viajes · Seguridad · Perfil. El detalle del viaje es un SHEET sobre Mis viajes (de ahí sale 'Olvidé algo'). Perfil es el índice de todos los satélites",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -18911,7 +17936,7 @@
         {
           "type": "frame",
           "id": "o73nx",
-          "x": 1130,
+          "x": 1670,
           "y": 11490,
           "name": "P/NotifPrefs",
           "clip": true,
@@ -19765,7 +18790,7 @@
               "id": "hz3m1",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Ayuda, referidos y notificaciones",
+              "content": "Desde Perfil: ayuda, referidos, preferencias. La campana del Home abre Avisos → Preferencias. 'Olvidé algo' sale del detalle del viaje (fila 7)",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -20390,8 +19415,8 @@
         {
           "type": "frame",
           "id": "ZVdlh",
-          "x": 590,
-          "y": 13040,
+          "x": 50,
+          "y": 6840,
           "name": "P/ScheduledTrips",
           "clip": true,
           "width": 390,
@@ -20955,8 +19980,8 @@
         {
           "type": "frame",
           "id": "htFHZ",
-          "x": 1130,
-          "y": 13040,
+          "x": 3830,
+          "y": 6840,
           "name": "P/BookingApproved",
           "clip": true,
           "width": 390,
@@ -21387,7 +20412,7 @@
         {
           "type": "frame",
           "id": "zKyic",
-          "x": 1670,
+          "x": 590,
           "y": 13040,
           "name": "P/FamilyShare",
           "clip": true,
@@ -22006,7 +21031,7 @@
         {
           "type": "frame",
           "id": "AULzA",
-          "x": 2210,
+          "x": 1130,
           "y": 13040,
           "name": "P/CancelTrip",
           "clip": true,
@@ -22466,8 +21491,8 @@
         {
           "type": "frame",
           "id": "q6Z6Xa",
-          "x": 2750,
-          "y": 13040,
+          "x": 4370,
+          "y": 6840,
           "name": "P/BookingRejected",
           "clip": true,
           "width": 390,
@@ -22779,7 +21804,7 @@
               "id": "fJmbs",
               "name": "T",
               "fill": "$brand",
-              "content": "9 · Sub-flujos y estados",
+              "content": "9 · Acciones del viaje",
               "fontFamily": "$font-display",
               "fontSize": 26,
               "fontWeight": "700"
@@ -22789,7 +21814,7 @@
               "id": "Xe6Tm",
               "name": "S",
               "fill": "$ink-muted",
-              "content": "Destinos de botones: chat del viaje, programados, reserva aprobada",
+              "content": "Salen del viaje activo: chat con el conductor, compartir con familia (WhatsApp / link sin app) y cancelar viaje",
               "fontFamily": "$font-text",
               "fontSize": 15,
               "fontWeight": "normal"
@@ -22800,7 +21825,7 @@
           "id": "p4B48H",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Splash→Onb",
           "x": 444,
           "y": 1050
         },
@@ -22808,7 +21833,7 @@
           "id": "NsO8D",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Onb→Onb2",
           "x": 984,
           "y": 1050
         },
@@ -22816,7 +21841,7 @@
           "id": "NuFMZ",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Onb2→Onb3",
           "x": 1524,
           "y": 1050
         },
@@ -22824,7 +21849,7 @@
           "id": "HKozG",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Home→HomeSearch",
           "x": 444,
           "y": 2600
         },
@@ -22832,7 +21857,7 @@
           "id": "E3cOK5",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Quote→TripActive",
           "x": 444,
           "y": 4150
         },
@@ -22840,7 +21865,7 @@
           "id": "FghWU",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow TripActive→Payment",
           "x": 984,
           "y": 4150
         },
@@ -22848,23 +21873,15 @@
           "id": "oTaZB",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Payment→Rating",
           "x": 1524,
-          "y": 4150
-        },
-        {
-          "id": "PwAKL",
-          "type": "ref",
-          "ref": "y27M5",
-          "name": "Arrow",
-          "x": 2064,
           "y": 4150
         },
         {
           "id": "JflYF",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow PujaPrice→Searching",
           "x": 444,
           "y": 5700
         },
@@ -22872,7 +21889,7 @@
           "id": "WbRBp",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Hub→ScheduleNew",
           "x": 444,
           "y": 7250
         },
@@ -22880,7 +21897,7 @@
           "id": "L3Zr0n",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow ScheduleNew→CarpoolSearch",
           "x": 984,
           "y": 7250
         },
@@ -22888,7 +21905,7 @@
           "id": "W9vBY",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow CarpoolSearch→Results",
           "x": 1524,
           "y": 7250
         },
@@ -22896,7 +21913,7 @@
           "id": "u55r4f",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Results→Detail",
           "x": 2064,
           "y": 7250
         },
@@ -22904,14 +21921,14 @@
           "id": "FQybG",
           "type": "ref",
           "ref": "y27M5",
-          "name": "Arrow",
+          "name": "Arrow Searching→Counter",
           "x": 984,
           "y": 5700
         },
         {
           "type": "frame",
           "id": "b45FIK",
-          "x": 1670,
+          "x": 1130,
           "y": 11490,
           "name": "P/Notifications",
           "clip": true,
@@ -23730,7 +22747,7 @@
         {
           "type": "frame",
           "id": "gDGyf",
-          "x": 2750,
+          "x": 590,
           "y": 6840,
           "name": "P/ScheduleNew",
           "clip": true,
@@ -24687,7 +23704,7 @@
         {
           "type": "frame",
           "id": "sASpQ",
-          "x": 1130,
+          "x": 1670,
           "y": 2190,
           "name": "P/MapPick",
           "clip": true,
@@ -25880,13 +24897,2079 @@
               ]
             }
           ]
+        },
+        {
+          "type": "frame",
+          "id": "VEt1O",
+          "x": 590,
+          "y": 9940,
+          "name": "P/TripDetail",
+          "clip": true,
+          "width": 390,
+          "fill": "$bg",
+          "layout": "vertical",
+          "children": [
+            {
+              "id": "RatCC",
+              "type": "ref",
+              "ref": "L3Xt6",
+              "name": "StatusBar"
+            },
+            {
+              "type": "frame",
+              "id": "zXLXv",
+              "name": "Header",
+              "width": "fill_container",
+              "padding": [
+                8,
+                16
+              ],
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "kvTKR",
+                  "name": "Back",
+                  "width": 40,
+                  "height": 40,
+                  "fill": "$surface",
+                  "cornerRadius": "$r-pill",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "wMa5U",
+                      "name": "Icon",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "arrow-left",
+                      "library": "lucide",
+                      "fill": "$ink"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pn1B5",
+                  "name": "Share",
+                  "width": 40,
+                  "height": 40,
+                  "fill": "$surface",
+                  "cornerRadius": "$r-pill",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "D0FDV",
+                      "name": "Icon",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "share-2",
+                      "library": "lucide",
+                      "fill": "$ink"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "eC9bh",
+              "name": "Content",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 24,
+              "padding": [
+                8,
+                20,
+                24,
+                20
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "e7Avq",
+                  "name": "ItinHeader",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pSaTD",
+                      "name": "Title",
+                      "fill": "$ink",
+                      "content": "Itinerario",
+                      "fontFamily": "$font-display",
+                      "fontSize": 16,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "T3KN7E",
+                      "name": "DurChip",
+                      "fill": "$surface-elevated",
+                      "cornerRadius": "$r-pill",
+                      "gap": 6,
+                      "padding": [
+                        6,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "I9eEH",
+                          "name": "Icon",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "timer",
+                          "library": "lucide",
+                          "fill": "$ink-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "LptHX",
+                          "name": "Dur",
+                          "fill": "$ink-muted",
+                          "content": "3h 45min",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "TWZZh",
+                  "name": "Timeline",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "fiDga",
+                      "name": "Stop",
+                      "width": "fill_container",
+                      "height": 88,
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "fWHW8",
+                          "name": "Rail",
+                          "width": 20,
+                          "height": "fill_container",
+                          "layout": "vertical",
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "hKhtC",
+                              "name": "Dot",
+                              "fill": "$brand",
+                              "width": 14,
+                              "height": 14
+                            },
+                            {
+                              "type": "rectangle",
+                              "id": "o5Ige",
+                              "name": "Line",
+                              "fill": "$border-strong",
+                              "width": 2,
+                              "height": "fill_container"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "kKcwk",
+                          "name": "Content",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Sh2uQ",
+                              "name": "Time",
+                              "fill": "$ink-muted",
+                              "content": "08:30",
+                              "fontFamily": "$font-mono",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "k1WvM",
+                              "name": "Title",
+                              "fill": "$ink",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Lima, Terminal Plaza Norte",
+                              "fontFamily": "$font-text",
+                              "fontSize": 16,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "text",
+                              "id": "GTIW3",
+                              "name": "Sub",
+                              "fill": "$ink-subtle",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Punto de salida",
+                              "fontFamily": "$font-text",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "zVydf",
+                      "name": "Stop",
+                      "width": "fill_container",
+                      "height": 88,
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ViCWK",
+                          "name": "Rail",
+                          "width": 20,
+                          "height": "fill_container",
+                          "layout": "vertical",
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "e8F8n",
+                              "name": "Ring",
+                              "fill": "$surface",
+                              "width": 12,
+                              "height": 12,
+                              "stroke": "$ink-subtle",
+                              "strokeWidth": 2
+                            },
+                            {
+                              "type": "rectangle",
+                              "id": "s8cqk",
+                              "name": "Line",
+                              "fill": "$border-strong",
+                              "width": 2,
+                              "height": "fill_container"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Q9Ycq",
+                          "name": "Content",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Rgs0I",
+                              "name": "Time",
+                              "fill": "$ink-muted",
+                              "content": "10:15",
+                              "fontFamily": "$font-mono",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "w5HfD",
+                              "name": "Title",
+                              "fill": "$ink",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Pativilca",
+                              "fontFamily": "$font-text",
+                              "fontSize": 16,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "text",
+                              "id": "o7L7xl",
+                              "name": "Sub",
+                              "fill": "$ink-subtle",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Parada · 15 min",
+                              "fontFamily": "$font-text",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "S91I8p",
+                      "name": "Stop",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "m8KINd",
+                          "name": "Rail",
+                          "width": 20,
+                          "layout": "vertical",
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "ZGQ81",
+                              "name": "Pin",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "map-pin",
+                              "library": "lucide",
+                              "fill": "$ink"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Grpf0",
+                          "name": "Content",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "fbYpU",
+                              "name": "Time",
+                              "fill": "$ink-muted",
+                              "content": "12:15",
+                              "fontFamily": "$font-mono",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "u9s1pL",
+                              "name": "Title",
+                              "fill": "$ink",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Huaraz, Centro",
+                              "fontFamily": "$font-text",
+                              "fontSize": 16,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "text",
+                              "id": "oShMD",
+                              "name": "Sub",
+                              "fill": "$ink-subtle",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Punto de llegada",
+                              "fontFamily": "$font-text",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "HaD4X",
+                  "name": "Divider",
+                  "fill": "$border",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "ITHnz",
+                  "name": "PriceBlock",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "YgbDT",
+                      "name": "Price",
+                      "fill": "$ink",
+                      "content": "S/ 35",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 34,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "fOMu8",
+                      "name": "PerNote",
+                      "fill": "$ink-subtle",
+                      "content": "por asiento",
+                      "fontFamily": "$font-text",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "ZxTuY",
+                  "name": "Divider",
+                  "fill": "$border",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "H2BO5N",
+                  "name": "DriverLabel",
+                  "fill": "$ink",
+                  "content": "Tu conductor",
+                  "fontFamily": "$font-display",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "KzhVN",
+                  "name": "DriverCard",
+                  "width": "fill_container",
+                  "fill": {
+                    "type": "gradient",
+                    "gradientType": "linear",
+                    "enabled": true,
+                    "rotation": 180,
+                    "size": {
+                      "height": 1
+                    },
+                    "colors": [
+                      {
+                        "color": "#20262FF2",
+                        "position": 0
+                      },
+                      {
+                        "color": "#14171E",
+                        "position": 1
+                      }
+                    ]
+                  },
+                  "cornerRadius": "$r-lg",
+                  "stroke": "#3D4557",
+                  "strokeWidth": 1,
+                  "strokeAlignment": "inner",
+                  "effect": [
+                    {
+                      "type": "shadow",
+                      "shadowType": "outer",
+                      "color": "#FFFFFF24",
+                      "offset": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "blur": 0.5
+                    },
+                    {
+                      "type": "shadow",
+                      "shadowType": "outer",
+                      "color": "#00000059",
+                      "offset": {
+                        "x": 0,
+                        "y": 6
+                      },
+                      "blur": 18,
+                      "spread": -4
+                    }
+                  ],
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Y0qDT",
+                      "name": "DriverTop",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "bpiJs",
+                          "name": "Avatar",
+                          "metadata": {
+                            "type": "unsplash",
+                            "username": "silverkblack",
+                            "link": "https://unsplash.com/@silverkblack",
+                            "author": "Vitaly Gariev"
+                          },
+                          "clip": true,
+                          "width": 48,
+                          "height": 48,
+                          "fill": {
+                            "type": "image",
+                            "enabled": true,
+                            "url": "https://images.unsplash.com/photo-1758598497232-e89e4cb1f5d4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODMwMDI4MTJ8&ixlib=rb-4.1.0&q=80&w=1080",
+                            "mode": "fill"
+                          },
+                          "cornerRadius": "$r-pill"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "T7EB1A",
+                          "name": "DriverTexts",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "SPydc",
+                              "name": "Name",
+                              "fill": "$ink",
+                              "content": "Carlos M.",
+                              "fontFamily": "$font-text",
+                              "fontSize": 16,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "oyy64",
+                              "name": "Rating",
+                              "gap": 6,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "gpGyC",
+                                  "name": "Star",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "star",
+                                  "library": "lucide",
+                                  "fill": "$warn"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "cmkwY",
+                                  "name": "Score",
+                                  "fill": "$ink-muted",
+                                  "content": "4.9",
+                                  "fontFamily": "$font-mono",
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "jgRAD",
+                                  "name": "Trips",
+                                  "fill": "$ink-subtle",
+                                  "content": "· 128 viajes",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "v6cmYq",
+                      "name": "Badges",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "id": "njAu5",
+                          "type": "ref",
+                          "ref": "MKWt6",
+                          "name": "Verified",
+                          "descendants": {
+                            "HfJeD": {
+                              "fill": "$success"
+                            },
+                            "nhqf0": {
+                              "content": "Perfil verificado",
+                              "fill": "$success"
+                            }
+                          }
+                        },
+                        {
+                          "id": "iEGwh",
+                          "type": "ref",
+                          "ref": "MKWt6",
+                          "name": "NeverCancels",
+                          "fill": "$surface-elevated",
+                          "descendants": {
+                            "HfJeD": {
+                              "fill": "$ink-muted"
+                            },
+                            "nhqf0": {
+                              "content": "Nunca cancela",
+                              "fill": "$ink-muted"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "E5F9G",
+                  "name": "Vehicle",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "RaNkX",
+                      "name": "IconWrap",
+                      "width": 40,
+                      "height": 40,
+                      "fill": "$surface-elevated",
+                      "cornerRadius": "$r-pill",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "xDAR0",
+                          "name": "Icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "car-front",
+                          "library": "lucide",
+                          "fill": "$ink-muted"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "KGa4I",
+                      "name": "VehTexts",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "z3l58s",
+                          "name": "VehName",
+                          "fill": "$ink",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Toyota Corolla · Gris",
+                          "fontFamily": "$font-text",
+                          "fontSize": 15,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "XlNpo",
+                          "name": "Plate",
+                          "fill": "$ink-subtle",
+                          "content": "Placa · ABC-123",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "mc9yt",
+                  "name": "Divider",
+                  "fill": "$border",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "tbj8W",
+                  "name": "RulesLabel",
+                  "fill": "$ink",
+                  "content": "Reglas del viaje",
+                  "fontFamily": "$font-display",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "m6cKGO",
+                  "name": "Rules",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "p3RBur",
+                      "name": "Rule",
+                      "width": "fill_container",
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "QciPQ",
+                          "name": "Icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "users",
+                          "library": "lucide",
+                          "fill": "$ink-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "RpfCg",
+                          "name": "Text",
+                          "fill": "$ink-muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Máximo 2 personas atrás",
+                          "fontFamily": "$font-text",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "b0kCI6",
+                      "name": "Rule",
+                      "width": "fill_container",
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "I4OtuE",
+                          "name": "Icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "cigarette-off",
+                          "library": "lucide",
+                          "fill": "$ink-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "hpz1t",
+                          "name": "Text",
+                          "fill": "$ink-muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "No fumar",
+                          "fontFamily": "$font-text",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "wnSxQ",
+                      "name": "Rule",
+                      "width": "fill_container",
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "DHJcM",
+                          "name": "Icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "paw-print",
+                          "library": "lucide",
+                          "fill": "$ink-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "V6gXY",
+                          "name": "Text",
+                          "fill": "$ink-muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Mascotas pequeñas ok",
+                          "fontFamily": "$font-text",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "TM6f6",
+                  "name": "Divider",
+                  "fill": "$border",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "Y5LUdJ",
+                  "name": "Seats",
+                  "width": "fill_container",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "l07uW",
+                      "name": "Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "armchair",
+                      "library": "lucide",
+                      "fill": "$success"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "gv7K4",
+                      "name": "SeatsText",
+                      "gap": 6,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kFZ6b",
+                          "name": "Count",
+                          "fill": "$ink",
+                          "content": "3 de 4",
+                          "fontFamily": "$font-mono",
+                          "fontSize": 14,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "kx5nj",
+                          "name": "Label",
+                          "fill": "$ink-muted",
+                          "content": "asientos disponibles",
+                          "fontFamily": "$font-text",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "I1FUBp",
+              "name": "BottomBar",
+              "width": "fill_container",
+              "fill": "#14161CD9",
+              "stroke": "#3A4152",
+              "strokeWidth": 1,
+              "effect": [
+                {
+                  "type": "background_blur",
+                  "radius": 30
+                },
+                {
+                  "type": "shadow",
+                  "shadowType": "outer",
+                  "color": "#00000080",
+                  "offset": {
+                    "x": 0,
+                    "y": -8
+                  },
+                  "blur": 40
+                }
+              ],
+              "padding": [
+                16,
+                20
+              ],
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "pDbjO",
+                  "name": "BarPrice",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "O1k3st",
+                      "name": "Amount",
+                      "fill": "$ink",
+                      "content": "S/ 35",
+                      "fontFamily": "$font-mono",
+                      "fontSize": 20,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "H4yn5u",
+                      "name": "Per",
+                      "fill": "$ink-subtle",
+                      "content": "por asiento",
+                      "fontFamily": "$font-text",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "id": "E9RI6",
+                  "type": "ref",
+                  "ref": "D5bW5Y",
+                  "name": "ReserveBtn",
+                  "descendants": {
+                    "AkPlM": {
+                      "content": "Reservar asiento"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "itvC3",
+          "x": 2210,
+          "y": 6840,
+          "name": "P/CarpoolTripDetail",
+          "clip": true,
+          "width": 390,
+          "height": 844,
+          "fill": "$bg",
+          "layout": "vertical",
+          "children": [
+            {
+              "id": "U84zE",
+              "type": "ref",
+              "ref": "L3Xt6",
+              "name": "StatusBar",
+              "width": 390
+            },
+            {
+              "type": "frame",
+              "id": "SrD7r",
+              "name": "HeaderWrap",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": "$s-sm",
+              "padding": [
+                8,
+                20,
+                16,
+                20
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "oESSU",
+                  "name": "TopRow",
+                  "width": "fill_container",
+                  "gap": "$s-md",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "erOYk",
+                      "name": "BackBtn",
+                      "width": 40,
+                      "height": 40,
+                      "fill": "$surface",
+                      "cornerRadius": 999,
+                      "stroke": "$border",
+                      "strokeWidth": 1,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "o7YhD2",
+                          "name": "BackIcon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "arrow-left",
+                          "library": "lucide",
+                          "fill": "$ink"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "yqFSw",
+                      "name": "Titles",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ShqKH",
+                          "name": "Title",
+                          "fill": "$ink",
+                          "content": "Lima → Huaraz",
+                          "fontFamily": "$font-display",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "o1x8f",
+                          "name": "Sub",
+                          "fill": "$ink-subtle",
+                          "content": "Vie 4 jul · salida 08:30",
+                          "fontFamily": "$font-text",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SgfOP",
+              "name": "Content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 24,
+              "padding": [
+                0,
+                20,
+                24,
+                20
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "cXyoR",
+                  "name": "Itinerary",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "H68Pc",
+                      "name": "ItinTitle",
+                      "fill": "$ink",
+                      "content": "Itinerario",
+                      "fontFamily": "$font-display",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "L4nZO",
+                      "name": "ItineraryCard",
+                      "width": "fill_container",
+                      "fill": {
+                        "type": "gradient",
+                        "gradientType": "linear",
+                        "enabled": true,
+                        "rotation": 180,
+                        "size": {
+                          "height": 1
+                        },
+                        "colors": [
+                          {
+                            "color": "#20262FF2",
+                            "position": 0
+                          },
+                          {
+                            "color": "#14171E",
+                            "position": 1
+                          }
+                        ]
+                      },
+                      "cornerRadius": "$r-lg",
+                      "stroke": "#3D4557",
+                      "strokeWidth": 1,
+                      "strokeAlignment": "inner",
+                      "layout": "vertical",
+                      "gap": 14,
+                      "padding": 14,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "BE6tE",
+                          "name": "Stop Lima",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "WbcD0",
+                              "name": "Time",
+                              "fill": "$ink",
+                              "textGrowth": "fixed-width",
+                              "width": 48,
+                              "content": "08:30",
+                              "fontFamily": "$font-text",
+                              "fontSize": 14,
+                              "fontWeight": "700"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "qpL2i",
+                              "name": "Dot",
+                              "width": 10,
+                              "height": 10,
+                              "fill": "$brand",
+                              "cornerRadius": 999
+                            },
+                            {
+                              "type": "frame",
+                              "id": "NpgGE",
+                              "name": "Texts",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 1,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "JXxny",
+                                  "name": "City",
+                                  "fill": "$ink",
+                                  "content": "Lima",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 14,
+                                  "fontWeight": "600"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "aVS91",
+                                  "name": "Sub",
+                                  "fill": "$ink-subtle",
+                                  "content": "Terminal Plaza Norte · Punto de salida",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "mpjTB",
+                          "name": "Stop Barranca",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "wFD6M",
+                              "name": "Time",
+                              "fill": "$ink-subtle",
+                              "textGrowth": "fixed-width",
+                              "width": 48,
+                              "content": "10:20",
+                              "fontFamily": "$font-text",
+                              "fontSize": 14,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "qbF3S",
+                              "name": "Dot",
+                              "width": 8,
+                              "height": 8,
+                              "fill": "$ink-subtle",
+                              "cornerRadius": 999
+                            },
+                            {
+                              "type": "frame",
+                              "id": "c7Ws57",
+                              "name": "Texts",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 1,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "SUYwd",
+                                  "name": "City",
+                                  "fill": "$ink",
+                                  "content": "Barranca",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 14,
+                                  "fontWeight": "600"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "y2zgO6",
+                                  "name": "Sub",
+                                  "fill": "$ink-subtle",
+                                  "content": "Parada intermedia · 10 min",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "HrmaA",
+                          "name": "Stop Huaraz",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "T0uxF",
+                              "name": "Time",
+                              "fill": "$ink",
+                              "textGrowth": "fixed-width",
+                              "width": 48,
+                              "content": "12:15",
+                              "fontFamily": "$font-text",
+                              "fontSize": 14,
+                              "fontWeight": "700"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "ct7n5",
+                              "name": "Dot",
+                              "width": 10,
+                              "height": 10,
+                              "fill": "$success",
+                              "cornerRadius": 999
+                            },
+                            {
+                              "type": "frame",
+                              "id": "y38hoV",
+                              "name": "Texts",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 1,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "p5RYnu",
+                                  "name": "City",
+                                  "fill": "$ink",
+                                  "content": "Huaraz",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 14,
+                                  "fontWeight": "600"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "n199k3",
+                                  "name": "Sub",
+                                  "fill": "$ink-subtle",
+                                  "content": "Terminal Quillcay · Punto de llegada",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ywRNS",
+                  "name": "Driver",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "gTs6P",
+                      "name": "DrvTitle",
+                      "fill": "$ink",
+                      "content": "Tu conductor",
+                      "fontFamily": "$font-display",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "f86ZgZ",
+                      "name": "DriverCard",
+                      "width": "fill_container",
+                      "fill": {
+                        "type": "gradient",
+                        "gradientType": "linear",
+                        "enabled": true,
+                        "rotation": 180,
+                        "size": {
+                          "height": 1
+                        },
+                        "colors": [
+                          {
+                            "color": "#20262FF2",
+                            "position": 0
+                          },
+                          {
+                            "color": "#14171E",
+                            "position": 1
+                          }
+                        ]
+                      },
+                      "cornerRadius": "$r-lg",
+                      "stroke": "#3D4557",
+                      "strokeWidth": 1,
+                      "strokeAlignment": "inner",
+                      "gap": 12,
+                      "padding": 14,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "h9HGuw",
+                          "name": "Ava",
+                          "width": 48,
+                          "height": 48,
+                          "fill": "$brand-dim",
+                          "cornerRadius": 999,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "b5PPs",
+                              "name": "Initials",
+                              "fill": "$brand",
+                              "content": "CM",
+                              "fontFamily": "$font-text",
+                              "fontSize": 16,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Lhopl",
+                          "name": "DTexts",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "OPWjG",
+                              "name": "NameRow",
+                              "gap": 8,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "gQb9y",
+                                  "name": "Name",
+                                  "fill": "$ink",
+                                  "content": "Carlos M.",
+                                  "fontFamily": "$font-text",
+                                  "fontSize": 15,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "AGiD8",
+                                  "name": "VerifPill",
+                                  "fill": "#22C55E1F",
+                                  "cornerRadius": 999,
+                                  "gap": 4,
+                                  "padding": [
+                                    3,
+                                    8
+                                  ],
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "W9RZT",
+                                      "name": "VIcon",
+                                      "width": 12,
+                                      "height": 12,
+                                      "icon": "shield-check",
+                                      "library": "lucide",
+                                      "fill": "$success"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "vhXc2",
+                                      "name": "VLabel",
+                                      "fill": "$success",
+                                      "content": "Verificado",
+                                      "fontFamily": "$font-text",
+                                      "fontSize": 11,
+                                      "fontWeight": "600"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "rclQy",
+                              "name": "Vehicle",
+                              "fill": "$ink-subtle",
+                              "content": "Toyota Corolla gris · ABC-123",
+                              "fontFamily": "$font-text",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "r9aRhZ",
+                          "name": "Rating",
+                          "gap": 4,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "q9mEmN",
+                              "name": "StarIcon",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "star",
+                              "library": "lucide",
+                              "fill": "#F59E0B"
+                            },
+                            {
+                              "type": "text",
+                              "id": "IaW6i",
+                              "name": "RVal",
+                              "fill": "$ink",
+                              "content": "4.9",
+                              "fontFamily": "$font-text",
+                              "fontSize": 14,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "u9RWpU",
+                  "name": "Rules",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Z93Dp",
+                      "name": "RulesTitle",
+                      "fill": "$ink",
+                      "content": "Reglas del viaje",
+                      "fontFamily": "$font-display",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "vdOZx",
+                      "name": "RuleChips",
+                      "width": "fill_container",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "gonlQ",
+                          "name": "Rule No fumar",
+                          "fill": "$surface",
+                          "cornerRadius": 999,
+                          "stroke": "$border",
+                          "strokeWidth": 1,
+                          "gap": 6,
+                          "padding": [
+                            8,
+                            12
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "oPIhU",
+                              "name": "Icon",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "cigarette-off",
+                              "library": "lucide",
+                              "fill": "$ink-subtle"
+                            },
+                            {
+                              "type": "text",
+                              "id": "K0aaq",
+                              "name": "Label",
+                              "fill": "$ink",
+                              "content": "No fumar",
+                              "fontFamily": "$font-text",
+                              "fontSize": 12,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "viKUB",
+                          "name": "Rule Equipaje ligero",
+                          "fill": "$surface",
+                          "cornerRadius": 999,
+                          "stroke": "$border",
+                          "strokeWidth": 1,
+                          "gap": 6,
+                          "padding": [
+                            8,
+                            12
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "aTGck",
+                              "name": "Icon",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "briefcase",
+                              "library": "lucide",
+                              "fill": "$ink-subtle"
+                            },
+                            {
+                              "type": "text",
+                              "id": "qvyWM",
+                              "name": "Label",
+                              "fill": "$ink",
+                              "content": "Equipaje ligero",
+                              "fontFamily": "$font-text",
+                              "fontSize": 12,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "UbXqE",
+                          "name": "Rule Música baja",
+                          "fill": "$surface",
+                          "cornerRadius": 999,
+                          "stroke": "$border",
+                          "strokeWidth": 1,
+                          "gap": 6,
+                          "padding": [
+                            8,
+                            12
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "U42zxa",
+                              "name": "Icon",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "music",
+                              "library": "lucide",
+                              "fill": "$ink-subtle"
+                            },
+                            {
+                              "type": "text",
+                              "id": "v3Amk",
+                              "name": "Label",
+                              "fill": "$ink",
+                              "content": "Música baja",
+                              "fontFamily": "$font-text",
+                              "fontSize": 12,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kaWAD",
+                  "name": "Seats",
+                  "width": "fill_container",
+                  "fill": "$surface",
+                  "cornerRadius": "$r-lg",
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "padding": 14,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "m9dJi2",
+                      "name": "SeatTexts",
+                      "layout": "vertical",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "X06zQu",
+                          "name": "SeatsLine",
+                          "fill": "$ink",
+                          "content": "3 de 4 asientos disponibles",
+                          "fontFamily": "$font-text",
+                          "fontSize": 14,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "CPuBr",
+                          "name": "PriceLabel",
+                          "fill": "$ink-subtle",
+                          "content": "Precio por asiento",
+                          "fontFamily": "$font-text",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "VbKwR",
+                      "name": "Price",
+                      "fill": "$ink",
+                      "content": "S/ 35",
+                      "fontFamily": "$font-display",
+                      "fontSize": 22,
+                      "fontWeight": "700"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "JsnGy",
+              "name": "BarDivider",
+              "fill": "$border",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "A25pLL",
+              "name": "BottomBar",
+              "width": "fill_container",
+              "fill": "$bg",
+              "padding": [
+                16,
+                20
+              ],
+              "children": [
+                {
+                  "id": "uEz9m",
+                  "type": "ref",
+                  "ref": "D5bW5Y",
+                  "name": "ReserveBtn",
+                  "width": "fill_container",
+                  "descendants": {
+                    "AkPlM": {
+                      "content": "Reservar asiento"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Umd0Q",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Detail→Review",
+          "x": 2604,
+          "y": 7250
+        },
+        {
+          "id": "pvRKS",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow CameraLive→Control",
+          "x": 2604,
+          "y": 8800
+        },
+        {
+          "id": "x1CoV",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Notifications→Prefs",
+          "x": 1524,
+          "y": 11900
+        },
+        {
+          "type": "frame",
+          "id": "im7p2",
+          "x": 3362,
+          "y": 652,
+          "name": "P/BiometricLock",
+          "clip": true,
+          "width": 390,
+          "height": 844,
+          "fill": "$bg",
+          "layout": "vertical",
+          "children": [
+            {
+              "id": "WTKEt",
+              "type": "ref",
+              "ref": "L3Xt6",
+              "name": "StatusBar",
+              "width": 390
+            },
+            {
+              "type": "frame",
+              "id": "IVhvT",
+              "name": "Center",
+              "width": "fill_container",
+              "height": 573,
+              "layout": "vertical",
+              "gap": 16,
+              "padding": [
+                0,
+                32
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "KcQ72",
+                  "name": "Emblem",
+                  "width": 96,
+                  "height": 96,
+                  "fill": "$brand-dim",
+                  "cornerRadius": 999,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "bFd12",
+                      "name": "FaceIcon",
+                      "width": 44,
+                      "height": 44,
+                      "icon": "scan-face",
+                      "library": "lucide",
+                      "fill": "$brand"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "UL7Rt",
+                  "name": "Title",
+                  "fill": "$brand",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Desbloqueá VEO",
+                  "textAlign": "center",
+                  "fontFamily": "$font-display",
+                  "fontSize": 30,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "JhyJ2",
+                  "name": "Sub",
+                  "fill": "$ink-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Usá tu rostro o huella para continuar tu sesión de forma segura.",
+                  "textAlign": "center",
+                  "fontFamily": "$font-text",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "DanJ5",
+              "name": "Footer",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 10,
+              "padding": [
+                16,
+                20,
+                32,
+                20
+              ],
+              "children": [
+                {
+                  "id": "P5lKK",
+                  "type": "ref",
+                  "ref": "D5bW5Y",
+                  "name": "UnlockBtn",
+                  "width": "fill_container",
+                  "descendants": {
+                    "AkPlM": {
+                      "content": "Desbloquear"
+                    }
+                  }
+                },
+                {
+                  "type": "frame",
+                  "id": "X12SFP",
+                  "name": "GhostBtn",
+                  "width": "fill_container",
+                  "cornerRadius": "$r-md",
+                  "padding": [
+                    14,
+                    0
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "poMc6",
+                      "name": "GhostLabel",
+                      "fill": "$ink-muted",
+                      "content": "Usar otra cuenta",
+                      "fontFamily": "$font-text",
+                      "fontSize": 15,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "tpJZC",
+          "x": 3902,
+          "y": 652,
+          "name": "P/SessionExpired",
+          "clip": true,
+          "width": 390,
+          "height": 844,
+          "fill": "$bg",
+          "layout": "vertical",
+          "children": [
+            {
+              "id": "gPdHT",
+              "type": "ref",
+              "ref": "L3Xt6",
+              "name": "StatusBar",
+              "width": 390
+            },
+            {
+              "type": "frame",
+              "id": "ORC2m",
+              "name": "Center",
+              "width": "fill_container",
+              "height": 632,
+              "layout": "vertical",
+              "gap": 16,
+              "padding": [
+                0,
+                32
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Zthf6",
+                  "name": "Emblem",
+                  "width": 96,
+                  "height": 96,
+                  "fill": "$surface",
+                  "cornerRadius": 999,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "unlyD",
+                      "name": "LockIcon",
+                      "width": 40,
+                      "height": 40,
+                      "icon": "lock-keyhole",
+                      "library": "lucide",
+                      "fill": "$ink-muted"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "mW1ut",
+                  "name": "Title",
+                  "fill": "$ink",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Tu sesión expiró",
+                  "textAlign": "center",
+                  "fontFamily": "$font-display",
+                  "fontSize": 30,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "lqqXC",
+                  "name": "Sub",
+                  "fill": "$ink-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Por tu seguridad cerramos la sesión. Volvé a iniciar sesión para verificar tu identidad y continuar.",
+                  "textAlign": "center",
+                  "fontFamily": "$font-text",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "h8MDwt",
+              "name": "Footer",
+              "width": "fill_container",
+              "layout": "vertical",
+              "padding": [
+                16,
+                20,
+                32,
+                20
+              ],
+              "children": [
+                {
+                  "id": "WhOtS",
+                  "type": "ref",
+                  "ref": "D5bW5Y",
+                  "name": "LoginBtn",
+                  "width": "fill_container",
+                  "descendants": {
+                    "AkPlM": {
+                      "content": "Volver a iniciar sesión"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "lpUeX",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Onb3→Auth",
+          "x": 2093,
+          "y": 1056
+        },
+        {
+          "id": "LG8RY",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Auth→CompleteProfile",
+          "x": 2667,
+          "y": 1062
+        },
+        {
+          "id": "kFe1P",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Search→MapPick",
+          "x": 1524,
+          "y": 2600
+        },
+        {
+          "id": "Nmj8X",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Review→Waiting",
+          "x": 3144,
+          "y": 7250
+        },
+        {
+          "id": "e465i",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Waiting→Estados",
+          "x": 3684,
+          "y": 7250
+        },
+        {
+          "id": "IfyTg",
+          "type": "ref",
+          "ref": "y27M5",
+          "name": "Arrow Viajes→DetalleSheet",
+          "x": 444,
+          "y": 10350
         }
       ]
     },
     {
       "type": "frame",
       "id": "Bqk6u",
-      "x": 3710,
+      "x": 4413,
       "y": 7660,
       "name": "■ CONDUCTOR",
       "width": 3920,
@@ -26789,6 +27872,7 @@
                   "x": 0,
                   "y": 150,
                   "name": "Body",
+                  "reusable": true,
                   "width": 390,
                   "layout": "vertical",
                   "gap": "$s-xl",
@@ -28087,7 +29171,7 @@
                           "id": "yrr3f",
                           "name": "T",
                           "fill": "$success",
-                          "content": "DNI listo: lo subiremos al confirmar tus datos.",
+                          "content": "DNI leído. Al confirmar, lo subimos y verificamos al instante.",
                           "fontFamily": "$font-text",
                           "fontSize": 13,
                           "fontWeight": "normal"
