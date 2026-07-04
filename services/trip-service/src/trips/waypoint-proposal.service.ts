@@ -350,6 +350,14 @@ export class WaypointProposalService {
     const route = await this.maps.route(origin, destination, newWaypoints);
     const waypointsJson = newWaypoints.map((w) => ({ lat: w.lat, lon: w.lon }));
 
+    // RC7-waypoint (ADR-022) · la tarifa que la propuesta se comprometió a aplicar (`newFareCents`) se coti-
+    // zó contra la tarifa VIGENTE al proponer. Esa base se deriva sin columna nueva: newFareCents − delta =
+    // trip.fareCents-de-entonces (delta = newFareCents − baseFare, con newFareCents ≥ baseFare por el piso
+    // monótono). El CAS del viaje la guarda: si entre propose y accept (ventana ancha, hasta el TTL) una PUJA
+    // concurrente movió trip.fareCents, aplicar proposal.newFareCents PISARÍA el re-bid → la tarifa BAJARÍA
+    // (viola "agregar parada nunca abarata") = fuga. Con el guard, la propuesta rancia no aplica → 409.
+    const proposalBaseFareCents = proposal.newFareCents - proposal.deltaFareCents;
+
     const applied = await this.prisma.write.$transaction(async (tx) => {
       // Guard CAS de la propuesta: solo si SIGUE PROPOSED (no doble accept ni pisar un expire/reject).
       const moved = await tx.tripWaypointProposal.updateMany({
@@ -358,13 +366,17 @@ export class WaypointProposalService {
       });
       if (moved.count === 0) return false; // otro actor ganó la carrera (doble-accept/expire/reject)
 
-      // CAS de ESTADO DEL VIAJE: solo pisa la tarifa si el viaje SIGUE en curso. El gate de estado (319) se
-      // chequeó sobre una lectura previa al `maps.route` (cientos de ms); una carrera que terminó el viaje
-      // (cancel del pasajero, watchdog, redelivery/multi-device) en esa ventana → count 0 → throw DENTRO de la
-      // tx, que REVIERTE el CAS de la propuesta (atómico). Evita la mutación financiera post-completion (mismo
-      // invariante que el CAS de changeDestination).
+      // CAS de ESTADO + TARIFA del viaje: solo pisa la tarifa si el viaje SIGUE en curso Y su tarifa NO cambió
+      // desde el quote de la propuesta. El gate de estado (319) se chequeó sobre una lectura previa al
+      // `maps.route` (cientos de ms) y la propuesta pudo quedarse en cola hasta el TTL; una carrera en esa
+      // ventana (viaje terminado, O re-bid PUJA que movió la tarifa) → count 0 → throw DENTRO de la tx, que
+      // REVIERTE el CAS de la propuesta (atómico). Mismo invariante que el CAS de changeDestination (RC7).
       const tripMoved = await tx.trip.updateMany({
-        where: { id: tripId, status: { in: [...WAYPOINT_PROPOSABLE] } },
+        where: {
+          id: tripId,
+          status: { in: [...WAYPOINT_PROPOSABLE] },
+          fareCents: proposalBaseFareCents,
+        },
         data: {
           waypoints: waypointsJson,
           fareCents: proposal.newFareCents,
@@ -374,9 +386,22 @@ export class WaypointProposalService {
         },
       });
       if (tripMoved.count === 0) {
-        throw new ConflictError('El viaje ya no está en curso; no se puede aplicar la parada', {
-          tripId,
+        // Atribución de causa (misma disciplina que changeDestination): distinguimos "ya no en curso" de
+        // "la tarifa cambió" (re-bid concurrente) para un 409 honesto y accionable por el cliente.
+        const current = await tx.trip.findUnique({
+          where: { id: tripId },
+          select: { status: true, fareCents: true },
         });
+        if (!current || !WAYPOINT_PROPOSABLE.has(current.status)) {
+          throw new ConflictError('El viaje ya no está en curso; no se puede aplicar la parada', {
+            tripId,
+            status: current?.status,
+          });
+        }
+        throw new ConflictError(
+          'La tarifa del viaje cambió (puja concurrente); la propuesta quedó desactualizada, re-proponé la parada',
+          { tripId, currentFareCents: current.fareCents },
+        );
       }
       await emitWaypointAccepted(tx, eventData);
       return true;

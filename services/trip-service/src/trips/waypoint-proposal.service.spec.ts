@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import { TripStatus } from '@veo/shared-types';
-import { InvalidStateError } from '@veo/utils';
+import { ConflictError, InvalidStateError } from '@veo/utils';
 import type { MapsClient } from '@veo/maps';
 import type { EnergyCatalogService } from '../pricing/energy-catalog.service';
 import { WaypointProposalService } from './waypoint-proposal.service';
@@ -293,5 +293,96 @@ describe('proposeWaypoint · re-quote con la política de la OFERTA (ADR 013 §1
     expect(proposal?.newFareCents).toBe(1988);
     expect(proposal?.deltaFareCents).toBe(113);
     expect(proposal?.status).toBe(WaypointProposalStatus.PROPOSED);
+  });
+});
+
+// ── RC7-waypoint · el accept guarda la tarifa contra un re-bid concurrente (CAS por fareCents) ──
+
+/** Propuesta PROPOSED viva, cotizada contra `baseFare` (newFareCents − deltaFareCents = baseFare). */
+function buildProposal(over: Partial<TripWaypointProposal> = {}): TripWaypointProposal {
+  return {
+    id: 'wp-1',
+    tripId: 'trip-1',
+    lat: -12.05,
+    lon: -77.04,
+    deltaFareCents: 300,
+    newFareCents: 1800, // base = 1800 − 300 = 1500
+    status: WaypointProposalStatus.PROPOSED,
+    proposedAt: new Date('2026-06-10T12:00:00.000Z'),
+    expiresAt: new Date('2999-12-31T00:00:00.000Z'), // no vencida
+    respondedAt: null,
+    ...over,
+  } as TripWaypointProposal;
+}
+
+/**
+ * Fake para el ACCEPT: el `tx.trip.updateMany` HONRA el CAS (status ∈ proposable ∧ fareCents === where.fareCents).
+ * `liveTrip` es lo que ve el tx (con el re-bid ya aplicado, si lo hay) → reproduce la carrera propose↔re-bid.
+ */
+function makeAcceptService(trip: Trip, proposal: TripWaypointProposal, live: Partial<Trip> = {}) {
+  const liveTrip = { ...trip, ...live };
+  const tx = {
+    tripWaypointProposal: { updateMany: async () => ({ count: 1 }) }, // la propuesta sigue PROPOSED
+    trip: {
+      updateMany: async ({
+        where,
+      }: {
+        where: { status: { in: TripStatus[] }; fareCents?: number };
+      }) => {
+        const statusOk = where.status.in.includes(liveTrip.status);
+        const fareOk = where.fareCents === undefined || where.fareCents === liveTrip.fareCents;
+        return { count: statusOk && fareOk ? 1 : 0 };
+      },
+      findUnique: async () => ({ status: liveTrip.status, fareCents: liveTrip.fareCents }),
+    },
+    outboxEvent: { create: async () => ({}) },
+    tripEvent: { create: async () => ({}) },
+  };
+  const prisma = {
+    read: {
+      tripWaypointProposal: { findUnique: async () => proposal, findFirst: async () => null },
+    },
+    write: {
+      trip: { findUnique: async () => trip },
+      $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
+    },
+  };
+  const service = new WaypointProposalService(
+    prisma as unknown as PrismaService,
+    makeMaps(5500, 660),
+  );
+  return { service };
+}
+
+describe('respondWaypoint · accept · RC7 · CAS de tarifa contra re-bid concurrente', () => {
+  it('sin re-bid (fareCents intacto) → aceptada, aplica proposal.newFareCents', async () => {
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 }); // base 1500
+    const { service } = makeAcceptService(trip, proposal);
+
+    const res = await service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true });
+    expect(res.status).toBe(WaypointProposalStatus.ACCEPTED);
+    expect(res.fareCents).toBe(1800);
+  });
+
+  it('re-bid concurrente movió la tarifa (1500→2000) entre propose y accept → 409, NO pisa el re-bid', async () => {
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 }); // base 1500
+    // El tx ve la tarifa YA re-pujada (2000): el CAS `fareCents:1500` no matchea → count 0 → 409 tarifa cambió.
+    const { service } = makeAcceptService(trip, proposal, { fareCents: 2000 });
+
+    await expect(
+      service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('el viaje se completó entre propose y accept → 409 (ya no está en curso), no muta la tarifa', async () => {
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 });
+    const { service } = makeAcceptService(trip, proposal, { status: TripStatus.COMPLETED });
+
+    await expect(
+      service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true }),
+    ).rejects.toBeInstanceOf(ConflictError);
   });
 });
