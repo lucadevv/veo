@@ -10,7 +10,13 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {RoutePin, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Image, StyleSheet, useWindowDimensions, View} from 'react-native';
+import {
+  Image,
+  Keyboard,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -448,26 +454,28 @@ export function RequestFlowScreen(): React.JSX.Element {
     navigation.navigate('Search', {flow: 'sheet'});
   }, [setEditing, navigation]);
 
-  // Sale de búsqueda y vuelve a la HOJA del pen (índice 1, el reposo del Home) — el índice 0 del
-  // idle es el anclaje COLAPSADO, no el estado natural.
+  // Sale de búsqueda (solo la X): limpia el flow/texto. El snap al reposo NO va acá — al cambiar
+  // el flow cambian los ANCLAJES (búsqueda=1, idle=2) y snapear antes del re-render usaría el
+  // array viejo (clamp al índice equivocado → caía al colapsado); lo maneja el efecto de abajo.
   const exitSearch = useCallback(() => {
     setFlow('idle');
     setQuery('');
-    sheetRef.current?.snapToIndex(FULL_INDEX);
   }, []);
 
-  // El DRAG no entra a búsqueda (eso es solo por tap). ÚNICA transición por drag: buscando en un
-  // sheet de DOS anclajes (route/trip), arrastrar hasta el peek sale de búsqueda. Con UN anclaje
-  // (Home idle/searching) el settle SIEMPRE emite índice 0 — p.ej. al ENTRAR a búsqueda cuando el
-  // sheet re-ancla a 0.92 — y sin este guard esa emisión cerraba la búsqueda recién abierta.
-  const snapCountRef = useRef(1);
-  const handleSnap = useCallback((index: number) => {
-    if (snapCountRef.current < 2) {
-      return;
+  // Reposo tras cerrar la búsqueda: con los anclajes YA re-renderizados (idle = [colapsado, hoja]),
+  // asienta la hoja en su posición del pen (índice 1).
+  useEffect(() => {
+    if (mapMode === 'idle' && flow === 'idle') {
+      sheetRef.current?.snapToIndex(FULL_INDEX);
     }
+  }, [mapMode, flow]);
+
+  // El DRAG no entra NI sale de la búsqueda (entrar = tap en el buscador; salir = la X). Colapsar
+  // el sheet BUSCANDO solo despeja la vista (cierra el teclado para ver el mapa con la ubicación);
+  // la búsqueda sigue viva y el input queda arriba del sheet colapsado.
+  const handleSnap = useCallback((index: number) => {
     if (flowRef.current === 'searching' && index <= PEEK_INDEX) {
-      setFlow('idle');
-      setQuery('');
+      Keyboard.dismiss();
     }
   }, []);
 
@@ -597,10 +605,11 @@ export function RequestFlowScreen(): React.JSX.Element {
     [insets.top, peekHeight],
   );
 
-  // Anclajes del sheet POR MODO. En idle: [COLAPSADO, HOJA-DEL-PEN] — la hoja ABRE en su posición
-  // del pen (22.5% desde arriba, índice 1 = reposo) y se puede COLAPSAR arrastrándola hacia abajo
-  // (queda hero+buscador y respira la imagen). Drag e scroll son INDEPENDIENTES: la hoja se
-  // arrastra del handle/header; la lista scrollea en el body. En route/trip, content-hug + full.
+  // Anclajes del sheet POR MODO. En idle Y en búsqueda: [COLAPSADO, HOJA-DEL-PEN] — la hoja se
+  // arrastra en ambos flows (pedido del dueño). En BÚSQUEDA, colapsarla NO cierra la búsqueda
+  // (eso se sentía como tocar la X sin querer): solo baja el sheet para ver el mapa con la
+  // ubicación (y cierra el teclado — ver handleSnap); el único cierre es la X. En route/trip,
+  // content-hug + full.
   const sheetSnapPoints = useMemo<ReadonlyArray<number | 'content'>>(() => {
     if (mapMode !== 'idle') {
       return SNAP_POINTS;
@@ -609,8 +618,6 @@ export function RequestFlowScreen(): React.JSX.Element {
     const visible = windowHeight * (1 - HOME_SHEET_TOP_FRACTION);
     return [HOME_SHEET_COLLAPSED_FRACTION, Math.min(visible / available, 0.92)];
   }, [mapMode, windowHeight, insets.top, bottomInset]);
-  // Espejo para handleSnap (declarado arriba, antes del memo): cuántos anclajes tiene el sheet HOY.
-  snapCountRef.current = sheetSnapPoints.length;
 
 
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
