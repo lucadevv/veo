@@ -208,15 +208,15 @@ describe('useScanDni', () => {
     expect(personal).toEqual({ fullName: '', dni: '', birthdate: '' });
   });
 
-  it('prellenado NO destructivo: un campo que el conductor ya tipeó NO lo pisa el OCR', async () => {
+  it('el escaneo es AUTORITATIVO: un re-escaneo PISA el valor previo (corrige, ej. 2do apellido)', async () => {
     const scanner: ScannerDouble = { scan: jest.fn(async () => dniScan()) };
     const uploader: UploaderDouble = { upload: jest.fn() };
     const submit: SubmitDouble = { submitDocument: jest.fn() };
     const handle = renderHookWith(fakeContainer(scanner, uploader, submit));
 
-    // El conductor ya escribió su DNI a mano (un valor DISTINTO del que trae el OCR).
+    // Un escaneo PREVIO dejó valores incompletos (ej. un nombre sin el 2do apellido, o un número parcial).
     act(() => {
-      useRegistrationStore.getState().setPersonal({ dni: '99887766' });
+      useRegistrationStore.getState().setPersonal({ dni: '99887766', fullName: 'QUISPE CARLOS' });
     });
 
     await act(async () => {
@@ -224,13 +224,15 @@ describe('useScanDni', () => {
     });
 
     const personal = useRegistrationStore.getState().personal;
-    // El DNI tipeado a mano GANA: el OCR no lo pisa.
-    expect(personal.dni).toBe('99887766');
-    // Los campos que SÍ estaban vacíos sí se prellenan.
+    // El escaneo es la FUENTE (el sheet no tiene input manual que proteger): PISA con lo leído, para que un
+    // re-escaneo refleje la corrección (el bug real: el nombre completo `QUISPE MAMANI CARLOS` no aparecía
+    // porque un valor previo bloqueaba la escritura).
+    expect(personal.dni).toBe('70123456');
     expect(personal.fullName).toBe('QUISPE MAMANI CARLOS');
     expect(personal.birthdate).toBe('1990-03-15');
-    // Y el hook NO marca `dni` como auto-extraído (no lo escribió).
-    expect(handle.current?.autofilled.dni).toBe(false);
+    // El hook marca los 3 como auto-extraídos (los escribió el OCR).
+    expect(handle.current?.autofilled.dni).toBe(true);
     expect(handle.current?.autofilled.fullName).toBe(true);
+    expect(handle.current?.autofilled.birthdate).toBe(true);
   });
 });

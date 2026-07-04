@@ -103,31 +103,28 @@ export function useScanDni() {
   const [extractedData, setExtractedData] = useState<ExtractedDniData | null>(null);
 
   /**
-   * PRELLENADO NO DESTRUCTIVO de los datos personales desde un `ParsedDni` ya resuelto. Solo escribe un
-   * campo si:
-   *  (1) el parser lo extrajo con confianza, Y
-   *  (2) el campo del store está VACÍO (el conductor no lo tipeó/corrigió todavía).
-   * Así, un dato que el conductor ya editó NUNCA lo pisa el OCR (su edición gana). El `parsed` lo computa
-   * `scan` UNA sola vez (con `parseDni`, que prioriza el MRZ TD1 del reverso del DNIe y cae a las etiquetas
-   * del frente). Mapea los nombres del parser a los del store: `documentNumber→dni`, `fullName→fullName`,
-   * `birthDate→birthdate` (ISO `AAAA-MM-DD`, compatible con el `DateField`). Devuelve qué campos se escribieron.
+   * PRELLENA los datos personales desde un `ParsedDni` ya resuelto. El escaneo es la FUENTE AUTORITATIVA:
+   * cada campo que el parser extrajo con confianza SE ESCRIBE (pisando el valor previo). No hay prellenado
+   * "no destructivo" porque este sheet NO tiene input manual que proteger — su única fuente es el escaneo,
+   * así que un RE-ESCANEO (documento nuevo, o una lectura corregida como el 2do apellido) DEBE actualizar el
+   * store; el `isEmpty` de antes dejaba pegado el valor de un escaneo previo y no reflejaba la corrección.
+   * Los campos que el parser NO leyó se DEJAN intactos (una lectura parcial no borra lo ya capturado). El
+   * `parsed` lo computa `scan` UNA sola vez. Mapea los nombres del parser a los del store:
+   * `documentNumber→dni`, `fullName→fullName`, `birthDate→birthdate` (ISO `AAAA-MM-DD`). Devuelve qué escribió.
    */
   const applyAutofill = (parsed: ParsedDni): DniAutofillResult => {
-    const current = useRegistrationStore.getState().personal;
-    const isEmpty = (field: keyof PersonalData): boolean => current[field].trim().length === 0;
-
     const patch: Partial<PersonalData> = {};
     const result: DniAutofillResult = { ...NO_AUTOFILL };
 
-    if (parsed.documentNumber && isEmpty('dni')) {
+    if (parsed.documentNumber) {
       patch.dni = parsed.documentNumber;
       result.dni = true;
     }
-    if (parsed.fullName && isEmpty('fullName')) {
+    if (parsed.fullName) {
       patch.fullName = parsed.fullName;
       result.fullName = true;
     }
-    if (parsed.birthDate && isEmpty('birthdate')) {
+    if (parsed.birthDate) {
       patch.birthdate = parsed.birthDate;
       result.birthdate = true;
     }
