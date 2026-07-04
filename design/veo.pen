@@ -3422,7 +3422,7 @@
                       "cornerRadius": 999,
                       "id": "udjL2",
                       "name": "Handle",
-                      "fill": "#8A929E4D",
+                      "fill": "$brand",
                       "width": 36,
                       "height": 4
                     }
@@ -4262,7 +4262,7 @@
                       "cornerRadius": 999,
                       "id": "ZJebp",
                       "name": "Handle",
-                      "fill": "#8A929E4D",
+                      "fill": "$brand",
                       "width": 36,
                       "height": 4
                     }
@@ -5359,12 +5359,12 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "cornerRadius": "$r-pill",
+                      "cornerRadius": 999,
                       "id": "nqIU2",
                       "name": "Grabber",
-                      "fill": "$border-strong",
-                      "width": 40,
-                      "height": 5
+                      "fill": "$brand",
+                      "width": 36,
+                      "height": 4
                     }
                   ]
                 },
@@ -6014,7 +6014,7 @@
               "fill": {
                 "type": "image",
                 "enabled": true,
-                "url": "images/generated-1783000977415.png",
+                "url": "images/home-map.jpg",
                 "mode": "fill"
               },
               "width": 390,
@@ -6275,12 +6275,12 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "cornerRadius": "$r-pill",
+                      "cornerRadius": 999,
                       "id": "nKYmZ",
                       "name": "Grabber",
-                      "fill": "$border-strong",
-                      "width": 40,
-                      "height": 5
+                      "fill": "$brand",
+                      "width": 36,
+                      "height": 4
                     }
                   ]
                 },
@@ -8213,7 +8213,7 @@
               "fill": {
                 "type": "image",
                 "enabled": true,
-                "url": "images/generated-1783001428579.png",
+                "url": "images/home-map.jpg",
                 "mode": "fill"
               },
               "width": 390,
@@ -8369,12 +8369,12 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "cornerRadius": "$r-pill",
+                      "cornerRadius": 999,
                       "id": "o6yyh",
                       "name": "Grabber",
-                      "fill": "$border-strong",
-                      "width": 40,
-                      "height": 5
+                      "fill": "$brand",
+                      "width": 36,
+                      "height": 4
                     }
                   ]
                 },
@@ -8727,7 +8727,7 @@
               "fill": {
                 "type": "image",
                 "enabled": true,
-                "url": "images/generated-1783001531053.png",
+                "url": "images/home-map.jpg",
                 "mode": "fill"
               },
               "width": 390,
@@ -8931,12 +8931,12 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "cornerRadius": "$r-pill",
+                      "cornerRadius": 999,
                       "id": "O9C1j",
                       "name": "Grabber",
-                      "fill": "$border-strong",
-                      "width": 40,
-                      "height": 5
+                      "fill": "$brand",
+                      "width": 36,
+                      "height": 4
                     }
                   ]
                 },
@@ -9177,7 +9177,7 @@
               "fill": {
                 "type": "image",
                 "enabled": true,
-                "url": "images/generated-1783005489003.png",
+                "url": "images/home-map.jpg",
                 "mode": "fill"
               },
               "width": 390,
@@ -9332,12 +9332,12 @@
                   "children": [
                     {
                       "type": "rectangle",
-                      "cornerRadius": "$r-pill",
+                      "cornerRadius": 999,
                       "id": "kHaQV",
                       "name": "Grabber",
-                      "fill": "$border-strong",
-                      "width": 40,
-                      "height": 5
+                      "fill": "$brand",
+                      "width": 36,
+                      "height": 4
                     }
                   ]
                 },
@@ -24164,32 +24164,18 @@
           "children": [
             {
               "type": "rectangle",
-              "id": "baiv4",
-              "x": -40,
-              "y": -120,
-              "name": "Glow",
+              "id": "P9TZUA",
+              "x": 0,
+              "y": 0,
+              "name": "Map",
               "fill": {
-                "type": "gradient",
-                "gradientType": "radial",
+                "type": "image",
                 "enabled": true,
-                "rotation": 0,
-                "size": {
-                  "width": 1,
-                  "height": 1
-                },
-                "colors": [
-                  {
-                    "color": "#2B2F3A66",
-                    "position": 0
-                  },
-                  {
-                    "color": "#2B2F3A00",
-                    "position": 1
-                  }
-                ]
+                "url": "images/home-map.jpg",
+                "mode": "fill"
               },
-              "width": 470,
-              "height": 520
+              "width": 390,
+              "height": 844
             },
             {
               "id": "dLv91",
@@ -24201,204 +24187,169 @@
             },
             {
               "type": "frame",
-              "id": "NxzeB",
+              "id": "KMb4R",
               "x": 0,
-              "y": 0,
-              "name": "Content",
+              "y": 404,
+              "name": "RebidSheet",
               "width": 390,
-              "height": 844,
-              "fill": "#00000000",
-              "layout": "vertical",
-              "padding": [
-                110,
-                24,
-                44,
-                24
+              "height": 440,
+              "fill": {
+                "type": "gradient",
+                "gradientType": "linear",
+                "enabled": true,
+                "rotation": 180,
+                "size": {
+                  "height": 1
+                },
+                "colors": [
+                  {
+                    "color": "#272C38F5",
+                    "position": 0
+                  },
+                  {
+                    "color": "#14161CFA",
+                    "position": 1
+                  }
+                ]
+              },
+              "cornerRadius": [
+                "$r-2xl",
+                "$r-2xl",
+                0,
+                0
               ],
-              "justifyContent": "space_between",
-              "alignItems": "center",
+              "stroke": "#4C5468",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "effect": [
+                {
+                  "type": "background_blur",
+                  "radius": 34
+                },
+                {
+                  "type": "shadow",
+                  "shadowType": "outer",
+                  "color": "#00000099",
+                  "offset": {
+                    "x": 0,
+                    "y": -10
+                  },
+                  "blur": 44
+                }
+              ],
+              "layout": "vertical",
+              "gap": "$s-md",
+              "padding": [
+                20,
+                20,
+                24,
+                20
+              ],
               "children": [
                 {
-                  "type": "frame",
-                  "id": "huAMU",
-                  "name": "Top",
+                  "type": "text",
+                  "id": "yvcV0",
+                  "name": "Title",
+                  "fill": "$ink",
+                  "content": "No hubo ofertas esta vez",
+                  "fontFamily": "$font-display",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "JmfI1",
+                  "name": "Body",
+                  "fill": "$ink-muted",
+                  "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "layout": "vertical",
-                  "gap": "$s-2xl",
+                  "content": "Nadie aceptó tu oferta de S/ 38.76. Ofrece un poco más para conseguir conductor.",
+                  "lineHeight": 1.35,
+                  "fontFamily": "$font-text",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "WHsVb",
+                  "name": "PonTuPrecio",
+                  "fill": "$ink",
+                  "content": "Pon tu precio",
+                  "fontFamily": "$font-display",
+                  "fontSize": 19,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "vmnw8",
+                  "name": "Sub",
+                  "fill": "$ink-muted",
+                  "content": "Ofrece lo que quieres pagar por este viaje",
+                  "fontFamily": "$font-text",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "KYwnv",
+                  "name": "Stepper",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "frame",
-                      "id": "JLUED",
-                      "name": "Emblem",
-                      "width": 112,
-                      "height": 112,
-                      "fill": "$surface-elevated",
+                      "id": "dnIUg",
+                      "name": "Minus",
+                      "width": 48,
+                      "height": 48,
+                      "fill": "#1E212A99",
                       "cornerRadius": "$r-pill",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "icon",
-                          "id": "P2Udwi",
-                          "name": "Glyph",
-                          "width": 44,
-                          "height": 44,
-                          "icon": "megaphone-off",
+                          "id": "cO068",
+                          "name": "I",
+                          "width": 20,
+                          "height": 20,
+                          "icon": "minus",
                           "library": "lucide",
                           "fill": "$ink-muted"
                         }
                       ]
                     },
                     {
-                      "type": "frame",
-                      "id": "W9qkZH",
-                      "name": "Head",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": "$s-md",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "CKq4m",
-                          "name": "Title",
-                          "fill": "$ink",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "No hubo ofertas esta vez",
-                          "textAlign": "center",
-                          "fontFamily": "$font-display",
-                          "fontSize": 24,
-                          "fontWeight": "700"
-                        },
-                        {
-                          "type": "text",
-                          "id": "kERSz",
-                          "name": "Body",
-                          "fill": "$ink-muted",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Nadie aceptó tu oferta de S/ 12.00. Ofrece un poco más para conseguir conductor.",
-                          "lineHeight": 1.4,
-                          "textAlign": "center",
-                          "fontFamily": "$font-text",
-                          "fontSize": 15,
-                          "fontWeight": "normal"
-                        }
-                      ]
+                      "type": "text",
+                      "id": "ywnfp",
+                      "name": "Amount",
+                      "fill": "$ink",
+                      "content": "S/ 39.76",
+                      "fontFamily": "$font-display",
+                      "fontSize": 40,
+                      "fontWeight": "700"
                     },
                     {
                       "type": "frame",
-                      "id": "V60Bbk",
-                      "name": "BidPanel",
-                      "width": "fill_container",
-                      "fill": "$surface",
-                      "cornerRadius": "$r-xl",
-                      "stroke": "$border",
-                      "strokeWidth": 1,
-                      "layout": "vertical",
-                      "gap": "$s-md",
-                      "padding": 16,
+                      "id": "pt5Ez",
+                      "name": "Plus",
+                      "width": 48,
+                      "height": 48,
+                      "fill": "#1E212A99",
+                      "cornerRadius": "$r-pill",
+                      "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "frame",
-                          "id": "kMvie",
-                          "name": "Stepper",
-                          "width": "fill_container",
-                          "justifyContent": "space_between",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "frame",
-                              "id": "b3GXvR",
-                              "name": "Minus",
-                              "width": 44,
-                              "height": 44,
-                              "fill": "$surface-elevated",
-                              "cornerRadius": "$r-pill",
-                              "stroke": "$border-strong",
-                              "strokeWidth": 1,
-                              "justifyContent": "center",
-                              "alignItems": "center",
-                              "children": [
-                                {
-                                  "type": "icon",
-                                  "id": "N5pYz",
-                                  "name": "I",
-                                  "width": 18,
-                                  "height": 18,
-                                  "icon": "minus",
-                                  "library": "lucide",
-                                  "fill": "$ink-muted"
-                                }
-                              ]
-                            },
-                            {
-                              "type": "frame",
-                              "id": "whMEp",
-                              "name": "Amount",
-                              "layout": "vertical",
-                              "gap": 2,
-                              "alignItems": "center",
-                              "children": [
-                                {
-                                  "type": "text",
-                                  "id": "o1kKCK",
-                                  "name": "L",
-                                  "fill": "$ink-subtle",
-                                  "content": "Tu nueva oferta",
-                                  "fontFamily": "$font-text",
-                                  "fontSize": 12,
-                                  "fontWeight": "normal"
-                                },
-                                {
-                                  "type": "text",
-                                  "id": "rRDEa",
-                                  "name": "V",
-                                  "fill": "$ink",
-                                  "content": "S/ 13.00",
-                                  "fontFamily": "$font-display",
-                                  "fontSize": 32,
-                                  "fontWeight": "700"
-                                }
-                              ]
-                            },
-                            {
-                              "type": "frame",
-                              "id": "D9YRvZ",
-                              "name": "Plus",
-                              "width": 44,
-                              "height": 44,
-                              "fill": "$brand",
-                              "cornerRadius": "$r-pill",
-                              "justifyContent": "center",
-                              "alignItems": "center",
-                              "children": [
-                                {
-                                  "type": "icon",
-                                  "id": "zCzJ2",
-                                  "name": "I",
-                                  "width": 18,
-                                  "height": 18,
-                                  "icon": "plus",
-                                  "library": "lucide",
-                                  "fill": "$on-brand"
-                                }
-                              ]
-                            }
-                          ]
-                        },
-                        {
-                          "type": "text",
-                          "id": "V9b4qe",
-                          "name": "Floor",
-                          "fill": "$ink-subtle",
-                          "content": "Mínimo S/ 12.00 (tu oferta anterior)",
-                          "fontFamily": "$font-text",
-                          "fontSize": 13,
-                          "fontWeight": "normal"
+                          "type": "icon",
+                          "id": "XcltJ",
+                          "name": "I",
+                          "width": 20,
+                          "height": 20,
+                          "icon": "plus",
+                          "library": "lucide",
+                          "fill": "$brand"
                         }
                       ]
                     }
@@ -24406,50 +24357,85 @@
                 },
                 {
                   "type": "frame",
-                  "id": "YKVjC",
-                  "name": "Bottom",
+                  "id": "HVKIS",
+                  "name": "MinWrap",
                   "width": "fill_container",
-                  "layout": "vertical",
-                  "gap": "$s-md",
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "MyWxH",
+                      "name": "Min",
+                      "fill": "$ink-muted",
+                      "content": "Mínimo S/ 38.76",
+                      "fontFamily": "$font-text",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "U9dfQw",
+                  "name": "HintRow",
+                  "width": "fill_container",
+                  "gap": "$s-sm",
                   "alignItems": "center",
                   "children": [
                     {
-                      "id": "jtf8g",
-                      "type": "ref",
-                      "ref": "D5bW5Y",
-                      "name": "RebidBtn",
-                      "width": "fill_container",
-                      "descendants": {
-                        "AkPlM": {
-                          "content": "Re-pujar · S/ 13.00"
-                        }
-                      }
+                      "type": "icon",
+                      "id": "O1wE8T",
+                      "name": "I",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "zap",
+                      "library": "lucide",
+                      "fill": "$brand"
                     },
                     {
-                      "type": "frame",
-                      "id": "f0xmh",
-                      "name": "GhostBtn",
+                      "type": "text",
+                      "id": "J78NyS",
+                      "name": "T",
+                      "fill": "$ink-muted",
+                      "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "padding": [
-                        14,
-                        20
-                      ],
-                      "justifyContent": "center",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "gb976",
-                          "name": "L",
-                          "fill": "$ink-muted",
-                          "content": "Cancelar el viaje",
-                          "fontFamily": "$font-text",
-                          "fontSize": 15,
-                          "fontWeight": "600"
-                        }
-                      ]
+                      "content": "Una mejor oferta encuentra conductor más rápido",
+                      "fontFamily": "$font-text",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "NnouH",
+                  "name": "TollsWrap",
+                  "width": "fill_container",
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Wur0h",
+                      "name": "Tolls",
+                      "fill": "$ink-subtle",
+                      "content": "Peajes y tasas de aeropuerto se pagan aparte.",
+                      "fontFamily": "$font-text",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "id": "WBjPZ",
+                  "type": "ref",
+                  "ref": "D5bW5Y",
+                  "name": "RebidBtn",
+                  "width": "fill_container",
+                  "descendants": {
+                    "AkPlM": {
+                      "content": "Re-pujar · S/ 39.76"
+                    }
+                  }
                 }
               ]
             }
