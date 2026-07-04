@@ -481,6 +481,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
               serverState={phaseChip(sendPhases.dni) ?? dniServerState}
+              sending={sendPhases.dni === 'sending'}
               accessibilityLabel={
                 hasCapture || hasReadDni
                   ? t('registration.actions.rescan')
@@ -580,6 +581,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
               serverState={phaseChip(sendPhases.license) ?? licenseServerState}
+              sending={sendPhases.license === 'sending'}
               busy={personalContinue.isPending}
               accessibilityLabel={t('registration.documents.uploadAccessibility', {
                 document: t('registration.documents.license'),

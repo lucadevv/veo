@@ -1,6 +1,13 @@
-import React, { type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { Text, useTheme } from '@veo/ui-kit';
+import React, { type ReactNode, useEffect, useState } from 'react';
+import { ActivityIndicator, type LayoutChangeEvent, Pressable, StyleSheet, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
 import { hexAlpha } from './color';
 import { IconAlert, IconCamera, IconCheck } from '../../../../shared/presentation/icons';
 import type { DocumentUploadStatus } from '../../domain';
@@ -121,6 +128,49 @@ function StatusGlyph({
   return <IconCamera size={14} color={color} strokeWidth={2} />;
 }
 
+/**
+ * Barra de progreso INDETERMINADA (sweep): un segmento `accent` que barre el track de izquierda a
+ * derecha en loop mientras el documento se sube. Indeterminada — no fingimos un % (aún no trackeamos
+ * bytes de la subida); comunica "está pasando algo" como el frame C/PersonalData del pen (barra bajo el
+ * label en la card que sube). Respeta reduce-motion: barra parcial estática, sin loop.
+ */
+function SendingBar(): React.JSX.Element {
+  const theme = useTheme();
+  const reduced = useReducedMotion();
+  const [trackW, setTrackW] = useState(0);
+  const progress = useSharedValue(0);
+  const fillW = Math.max(48, trackW * 0.4);
+
+  useEffect(() => {
+    if (trackW === 0 || reduced) return;
+    progress.value = 0;
+    progress.value = withRepeat(
+      withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      false,
+    );
+  }, [trackW, reduced, progress]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: -fillW + progress.value * (trackW + fillW) }],
+  }));
+
+  return (
+    <View
+      onLayout={(e: LayoutChangeEvent) => setTrackW(e.nativeEvent.layout.width)}
+      style={[styles.barTrack, { backgroundColor: theme.colors.surfaceElevated }]}
+    >
+      {reduced ? (
+        <View style={[styles.barFill, { width: fillW, backgroundColor: theme.colors.accent }]} />
+      ) : (
+        <Animated.View
+          style={[styles.barFill, { width: fillW, backgroundColor: theme.colors.accent }, fillStyle]}
+        />
+      )}
+    </View>
+  );
+}
+
 interface DocumentUploadCardProps {
   icon: ReactNode;
   label: string;
@@ -140,6 +190,11 @@ interface DocumentUploadCardProps {
    * sabe la secuencia. Sin número (`undefined`) la card mantiene su look clásico (solo ícono).
    */
   stepNumber?: number;
+  /**
+   * Documento subiéndose AHORA: pinta una barra de progreso indeterminada bajo el label (como el frame
+   * C/PersonalData del pen). El chip sigue mostrando "Subiendo…" — la barra es el refuerzo visual.
+   */
+  sending?: boolean;
 }
 
 /**
@@ -183,6 +238,7 @@ export function DocumentUploadCard({
   serverState,
   busy = false,
   stepNumber,
+  sending = false,
 }: DocumentUploadCardProps): React.JSX.Element {
   const theme = useTheme();
 
@@ -210,11 +266,14 @@ export function DocumentUploadCard({
       {stepNumber !== undefined ? <StepBadge value={stepNumber} /> : null}
       {/* Ícono PLANO inline: sin caja ni fondo tintado. Sobrio, deja respirar la fila. */}
       <View style={styles.icon}>{icon}</View>
-      {/* Hasta 2 líneas: labels largos ("Documento de identidad (DNI)") ENVUELVEN en vez de truncar
-          con "…" (antes `numberOfLines={1}` cortaba el nombre del DNI junto al chip). */}
-      <Text variant="bodyStrong" style={styles.label} numberOfLines={2}>
-        {label}
-      </Text>
+      {/* Columna label + (subiendo → barra). Hasta 2 líneas: labels largos ("Documento de identidad
+          (DNI)") ENVUELVEN en vez de truncar con "…". */}
+      <View style={styles.labelCol}>
+        <Text variant="bodyStrong" numberOfLines={2}>
+          {label}
+        </Text>
+        {sending ? <SendingBar /> : null}
+      </View>
       {busy ? (
         <ActivityIndicator color={theme.colors.accent} />
       ) : (
@@ -241,6 +300,9 @@ const styles = StyleSheet.create({
   },
   // Ícono inline (sin caja 44×44): solo centra el glifo en un ancho fijo para alinear las filas.
   icon: { width: 28, alignItems: 'center', justifyContent: 'center' },
-  label: { flex: 1 },
+  labelCol: { flex: 1, gap: 6 },
   chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5 },
+  // Barra de progreso indeterminada bajo el label mientras sube (4pt, píldora, clip del sweep).
+  barTrack: { height: 4, borderRadius: 999, overflow: 'hidden', width: '100%' },
+  barFill: { height: 4, borderRadius: 999 },
 });
