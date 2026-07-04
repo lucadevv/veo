@@ -6,7 +6,6 @@ import {
   StatusBar,
   StyleSheet,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -195,7 +194,6 @@ export const LoginScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
   const expired = useSessionStore((s) => s.expired);
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
@@ -223,9 +221,6 @@ export const LoginScreen = (): React.JSX.Element => {
 
   // Gutter lateral del contenido (mismo que hoy). Centraliza el padding horizontal del paso teléfono.
   const sideGutter = theme.spacing['2xl'];
-  // Alto de la banda héroe: ~32% de la ventana + el inset superior, para que sangre BAJO la status bar
-  // y derrita la foto al `bg` justo donde arranca el contenido.
-  const heroH = Math.round(height * 0.38) + insets.top;
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
@@ -242,7 +237,7 @@ export const LoginScreen = (): React.JSX.Element => {
         >
           {/* Banda foto a SANGRE: primer hijo del scroll, SIN padding top → toca el borde superior.
               La foto llena la banda (cover) y un scrim SVG la funde al `bg` en su borde inferior. */}
-          <View style={[styles.hero, { height: heroH }]}>
+          <View style={styles.hero}>
             <Image
               source={LOGIN_HERO}
               style={StyleSheet.absoluteFill}
@@ -448,7 +443,10 @@ export const LoginScreen = (): React.JSX.Element => {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   // Banda foto a sangre: ancla la imagen + scrim absolutos; el `overflow` recorta el cover.
-  hero: { width: '100%', overflow: 'hidden' },
+  // Banda hero con el ASPECTO EXACTO del frame C/Login del pen (390×320): así `cover` produce el MISMO
+  // crop del pen en cualquier dispositivo (antes `height*fracción + inset` daba un aspecto más cuadrado
+  // → cover recortaba distinto → "zoom"). El status bar se superpone sobre la foto (como el pen).
+  hero: { width: '100%', aspectRatio: 390 / 320, overflow: 'hidden' },
   // Contenido bajo la banda: el padding top lo aporta el flujo (la banda ya ocupa el tope).
   body: { paddingTop: 24 },
   biometricHead: { flexDirection: 'row', alignItems: 'center' },
