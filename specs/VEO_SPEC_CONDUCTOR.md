@@ -79,7 +79,7 @@ Toda pantalla que trae datos del backend implementa los 4 estados — diseñalos
 
 # FLUJOS
 
-Mapa de navegación (brief §5.1): `Splash → Onboarding → Login → [Registro 4 pasos | UnderReview | MAIN TABS]`. Tabs: **Inicio · Ganancias · Viajes · Cuenta**. Full-screen sobre tabs: `ShiftStart · BiometricEnroll · TripIncoming · TripActive · Chat · Documents · Incentives · Support`.
+Mapa de navegación (brief §5.1): `Splash → Onboarding → Login → [Registro 3 pasos | UnderReview | MAIN TABS]`. Tabs: **Inicio · Ganancias · Viajes · Cuenta**. Full-screen sobre tabs: `ShiftStart · BiometricEnroll · TripIncoming · TripActive · Chat · Documents · Incentives · Support`.
 
 ---
 
@@ -129,50 +129,44 @@ Mapa de navegación (brief §5.1): `Splash → Onboarding → Login → [Registr
 
 ---
 
-## FLUJO 2 · Registro — Wizard 4 pasos (`RegistrationNavigator.tsx`)
+## FLUJO 2 · Registro — Wizard 3 pasos (`RegistrationNavigator.tsx`)
+
+> **DECISIÓN DEL DUEÑO (LOTE B) — de 4 pasos a 3:** se ELIMINÓ el paso dedicado "Documentos": los documentos se reagrupan **por dueño del dato** (Licencia → paso 1 junto al DNI del conductor; SOAT + Tarjeta de propiedad → paso 2 junto al vehículo). `ORDERED_STEPS = [PERSONAL_DATA, VEHICLE, IDENTITY_VERIFICATION]`. El gating de los 3 documentos se preserva, distribuido en sus pasos. La Licencia y el DNI se capturan por **ESCANEO con OCR + subida EAGER** (Opción A dinámica), no por formulario.
 
 Wizard **reanudable**: abre en el paso donde quedó (`currentStep` persistido). Transición horizontal `slide_from_right`; el back retrocede al paso anterior. Estados de alta: `not_started → in_progress → in_review → approved/rejected`. **Patrón compartido de todos los pasos:**
 - Header `RegistrationHeader` (logo + "alas" + guiño bandera Perú según paso) con back.
-- `RegistrationProgress` (barra de 4 segmentos, el actual en `accent`).
-- Línea "Paso X de 4" (`caption inkMuted`).
+- `RegistrationProgress` (barra de **3 segmentos**, el actual en `accent`). El "Paso X de 3" vive como `accessibilityLabel` (`registration.progressLabel`), **sin** línea de texto visible.
 - `title1` + `callout` de intro.
 - `Banner danger` de error de servidor arriba del formulario.
 - Footer fijo: CTA accent full-width (deshabilitado hasta completar los campos requeridos del paso).
 - Campos `RegistrationField` con ícono `accent` a la derecha; **errores inline por campo** (se limpian al editar).
 
-### Paso 1 — Datos personales (`PersonalDataScreen.tsx`)
-- **Propósito:** capturar datos tal como figuran en el DNI. `PATCH /drivers/me/personal`.
-- **🔒 Seguridad / PII del DNI (Ley 29733) — decisión del dueño:** el DNI del **Driver** se persiste **CIFRADO en reposo** (secret-box AES-256-GCM, reversible), **NO hash**. Razón: compliance debe **MOSTRARLO** al operador para verificación manual contra el documento antes de aprobar, y un hash (una sola vía) rompería esa verificación. identity-service es dueño del dato y del secret: descifra en el borde gRPC antes de mandar el DNI al admin-bff (gateado Compliance+); el secret no se reparte a otros servicios. El `PATCH /drivers/me/personal` **NO** devuelve el DNI crudo al conductor — lo devuelve **enmascarado** (últimos 4 dígitos). Nota: el "DNI = solo hash" de FOUNDATION §5 aplica al **`User`** (matching interno irreversible, nunca se muestra), **no** al **`Driver`** (compliance lo muestra). Decidido por el dueño.
-- **Entrada / Salida:** entrada del wizard (paso 1). Éxito → `setCurrentStep(2)` → Vehículo.
-- **Layout & jerarquía visual:** 3 campos en columna: **Nombre completo** (ícono cuenta), **DNI** (number-pad, máx 11, ícono documento), **Fecha de nacimiento** (number-pad, máx 14, ícono calendario).
-- **Componentes clave:** `RegistrationField` ×3, `Reveal from="scale"` escalonado.
-- **Estados:** *Loading:* spinner en "Continuar". *Error de campo:* mensaje bajo el campo (`registration.personal.errors.*`). *Error servidor:* banner. *Éxito:* avanza. *Edge:* CTA bloqueado hasta que los 3 campos tengan contenido.
-- **Contenido & copy:** título "Tus datos" + subtítulo "como aparecen en tu DNI". Placeholders concretos (nombre, "12345678", "DD/MM/AAAA").
-- **Color & énfasis:** íconos de campo `accent`; barra de progreso paso 1 activa.
+### Paso 1 — Datos + DNI + Licencia (`PersonalDataScreen.tsx`)
+- **Propósito:** capturar el **DNI** y la **Licencia** del conductor por ESCANEO con OCR (sin formulario). El DNI alimenta `PATCH /drivers/me/personal` (crea el driver) + sube su binario; la Licencia sube su binario + alimenta el onboarding (`driverOnboardRequest`). Flujo **EAGER**: cada doc se sube al confirmarlo, no al final.
+- **🔒 Seguridad / PII del DNI (Ley 29733) — decisión del dueño:** el DNI del **Driver** se persiste **CIFRADO en reposo** (secret-box AES-256-GCM, reversible), **NO hash**. Razón: compliance debe **MOSTRARLO** al operador para verificación manual contra el documento antes de aprobar, y un hash (una sola vía) rompería esa verificación. identity-service es dueño del dato y del secret: descifra en el borde gRPC antes de mandar el DNI al admin-bff (gateado Compliance+); el secret no se reparte a otros servicios. El `PATCH /drivers/me/personal` **NO** devuelve el DNI crudo al conductor — lo devuelve **enmascarado** (últimos 4 dígitos). Nota: el "DNI = solo hash" de FOUNDATION §5 aplica al **`User`** (matching interno irreversible), **no** al **`Driver`** (compliance lo muestra). **Blind index de unicidad:** en paralelo al cifrado, el `Driver` guarda un `dni_hash = hashPii(dni, DNI_HASH_SALT)` (`@unique`) — NO reversible, solo para el chequeo de unicidad `check-dni` (el `documentIdEnc` cifrado no es indexable). Decidido por el dueño.
+- **Entrada / Salida:** entrada del wizard (paso 1). Éxito (**ambos docs en check `sent`**) → `setCurrentStep(2)` → Vehículo.
+- **Layout & jerarquía visual:** DOS `DocumentUploadCard` — **Documento de identidad (DNI)** + **Licencia de conducir** — con thumbnail + chip de estado. El tap abre el sheet dedicado (`ScanDniSheet` / `ScanLicenseSheet`, a imagen de los frames `C/ScanDni`/`C/ScanLicencia`): escanea anverso + reverso, corre OCR (DNI: nombre + número + nacimiento; licencia: número + vencimiento), muestra el bloque **"Esto leímos de tu {doc}"** y, al confirmar, dispara la subida EAGER con **estados POR CARA** (subiendo `accent` → enviado `success` / error `danger`) + "Continuar en segundo plano".
+- **Flujo EAGER (Opción A dinámica):** confirmar DNI → `POST /drivers/me/check-dni` (unicidad por blind index) → si el DNI ya está en OTRA cuenta, estado ROJO "Este DNI ya está registrado" + "Escanear otro DNI"; si pasa → `PATCH /personal` (crea el driver) → sube el DNI por cara. La Licencia se registra DESPUÉS (necesita el driver que crea el DNI); intentarla antes → aviso "primero escaneá tu DNI".
+- **Componentes clave:** `DocumentUploadCard` ×2, `ScanDniSheet`, `ScanLicenseSheet`, `scanSheetParts` (piezas canónicas compartidas), hooks `useScanDni`/`useScanLicense` (escaneo+OCR) + `useDniSubmit`/`useLicenseSubmit` (subida eager).
+- **Estados:** *Verificando:* spinner durante checkDni+PATCH. *Subiendo:* barra indeterminada + fase por cara. *Enviado:* check verde. *DNI duplicado:* rojo. *OCR sin campo crítico:* reescaneo honesto (no finge captura). *Escáner no disponible:* aviso (necesita cámara). *Fallo de verificación/red:* banner + reintento. *Re-abrir card con captura:* muestra lo leído para revisar. *Edge — gating:* Continuar bloqueado hasta que las **dos** cards estén en check.
+- **Contenido & copy:** título "Tus datos de conductor" + "Escanea tu DNI y leemos tus datos por ti. No necesitas escribir nada."
+- **Color & énfasis:** íconos `accent`; estados por semántica (accent/success/danger); barra de progreso paso 1 activa.
 
-### Paso 2 — Vehículo (`VehicleScreen.tsx`)
-- **Propósito:** registrar el vehículo de trabajo. `POST/GET /drivers/vehicles`.
-- **Entrada / Salida:** desde paso 1. Éxito → paso 3 (Documentos).
-- **Layout & jerarquía visual:** **selector tipo de vehículo Auto / Moto** (`VehicleTypeSelector`, segmentado grande), luego campos: **Placa** (mayúsculas, máx 8), fila **Marca + Año** (year number-pad máx 4), **Modelo** (mayúsculas). Si ya hay un vehículo registrado → en vez del formulario, **`VehicleStatusCard`** con su estado y el CTA pasa a "Continuar" (no se re-registra).
+### Paso 2 — Vehículo + SOAT + Tarjeta de propiedad (`VehicleScreen.tsx`)
+- **Propósito:** registrar el vehículo de trabajo (`POST/GET /drivers/vehicles`) **+ los documentos del VEHÍCULO** (SOAT + Tarjeta de propiedad) que se reagruparon acá al eliminar el paso Documentos (LOTE B). El SOAT y la tarjeta se capturan con `RegistrationDocumentSheet` (el componente canónico de documentos, compartido) — escaneo/foto + parse.
+- **Entrada / Salida:** desde paso 1. Éxito (vehículo + docs del vehículo listos) → **paso 3 (verificación facial / KYC)**.
+- **Layout & jerarquía visual:** **selector tipo de vehículo Auto / Moto** (`VehicleTypeSelector`, segmentado grande), luego campos: **Placa** (mayúsculas, máx 8), fila **Marca + Año** (year number-pad máx 4), **Modelo** (mayúsculas). Si ya hay un vehículo registrado → en vez del formulario, **`VehicleStatusCard`** con su estado y el CTA pasa a "Continuar" (no se re-registra). Debajo, las cards de **SOAT** y **Tarjeta de propiedad** (`DocumentUploadCard` + `RegistrationDocumentSheet`), con su chip de estado de servidor.
 - **Componentes clave:** `VehicleTypeSelector`, `RegistrationField`, `VehicleStatusCard`.
 - **Estados:** *Loading:* "Registrar vehículo" con spinner. *Error de campo:* inline (placa/marca/año/modelo). *Servidor:* banner. *Vehículo existente:* card de estado + subtítulo distinto ("Ya registraste tu vehículo"). *Edge:* con vehículo existente el CTA siempre habilita (solo avanza).
 - **Contenido & copy:** "Tu vehículo" · subtítulo según exista o no. CTA "Registrar vehículo" / "Continuar".
 - **Color & énfasis:** tipo seleccionado en `accent`; resto `surface`.
 - **Seguridad / nota especial:** moto-taxi es categoría local de primera clase (Auto/Moto explícito); el tipo define qué viajes ofrece el dispatch más adelante.
 
-### Paso 3 — Documentos (`DocumentsScreen.tsx` — registration)
-- **Propósito:** subir Licencia, SOAT y Tarjeta de propiedad. Gating: **no se avanza sin los 3**.
-- **Entrada / Salida:** desde paso 2. Éxito (3 subidos) → paso 4 (KYC).
-- **Layout & jerarquía visual:** lista de 3 **`DocumentUploadCard`** (Licencia/ícono doc · SOAT/ícono escudo · Tarjeta de propiedad/ícono auto), cada una con su estado (pendiente / subido) y un **chip de estado de servidor** (`vigente`→success, `por_vencer`→warn, `vencido/rechazado`→danger, `en_revision`→neutral). Tap abre un **sheet de captura** (`RegistrationDocumentSheet`): número de documento y, para Licencia, **fecha de vencimiento obligatoria**. Nota al pie con ícono (i) sobre formatos aceptados.
-- **Componentes clave:** `DocumentUploadCard` ×3, `RegistrationDocumentSheet`, `InfoGlyph`.
-- **Estados:** *Loading de chips:* mientras rehidrata `GET /drivers/me/documents`. *Subiendo:* card `busy`. *Error de subida:* mensaje dentro del sheet. *Error de carga de servidor:* `Banner warn`. *Éxito:* chip "subido". *Edge:* CTA "Continuar" bloqueado + guarda defensiva (jamás avanza con documentos faltantes).
-- **Contenido & copy:** "Tus documentos" + subtítulo. Labels: "Licencia de conducir", "SOAT", "Tarjeta de propiedad". "Subido" / "Pendiente". Nota de formatos.
-- **Color & énfasis:** íconos `accent`; chips por semántica (success/warn/danger).
-- **Seguridad / nota especial:** la Licencia, además de registrarse, **alimenta el onboarding del conductor** (driverOnboardRequest) — por eso exige vencimiento.
+> **Paso "Documentos" ELIMINADO (LOTE B):** ya no existe una `DocumentsScreen` de registro dedicada. Los 3 documentos se reparten por dueño: **Licencia → Paso 1** (junto al DNI), **SOAT + Tarjeta de propiedad → Paso 2** (junto al vehículo). El gating de cada uno vive en su paso. La `DocumentsScreen` que SÍ queda es la **operativa** de la sección Cuenta (FLUJO 7), no la del alta.
 
-### Paso 4 — Verificación de identidad / KYC facial (`IdentityVerificationScreen.tsx`)
+### Paso 3 — Verificación de identidad / KYC facial (`IdentityVerificationScreen.tsx`)
 - **Propósito:** captura de **una selfie** que cierra el alta. Captura nativa con cámara frontal. El backend corre **liveness PASIVO (anti-spoofing single-frame · PAD)** sobre esa única foto — **sin frames extra, sin reto, sin lag** (a diferencia del liveness ACTIVO por challenge del gate de turno). Si la captura es un ataque de presentación (foto/pantalla) el enrol se **rechaza** (no se guarda biometría).
-- **Entrada / Salida:** desde paso 3. Al confirmar la foto → envío → el backend pasa el alta a `in_review` → `UnderReview`.
+- **Entrada / Salida:** desde paso 2. Al confirmar la foto → envío → el backend pasa el alta a `in_review` → `UnderReview`.
 - **Layout & jerarquía visual:** intro centrada. **Anillo guía facial** (`FaceGuideRing`, ~260) con dos **chips de guía** flanqueando: "Buena luz" (sol) y "Mira al frente" (rostro), ambos con borde `accent` translúcido. Botón de captura circular grande (anillo `accent`). Al capturar → **preview circular** de la foto (borde `accent` + badge de check verde) y footer cambia a **"Repetir" (secondary) + "Confirmar" (accent)**. Aviso de privacidad con ícono escudo `success`.
 - **Componentes clave:** `FaceGuideRing`, `HintChip` ×2, `CapturePreview`, botón de captura, `Banner`.
 - **Estados:** *Capturando:* spinner en el botón + label "Capturando…". *Preview:* foto + acciones repetir/confirmar. *Enviando:* spinner en "Confirmar". *Spoof (anti-spoofing pasivo rechaza):* `Banner danger` "Necesitamos verte en persona" → "Parece una foto o una pantalla. Apuntá la cámara a tu rostro real e intentá de nuevo." (kind `spoof`, distinto de `face`). *Rostro no procesable (0/2+ rostros o sin rostro):* `Banner warn` "No detectamos bien tu rostro" (kind `face`). *Cámara no disponible:* `Banner warn` (título+cuerpo de "no disponible"). *Error genérico:* `Banner danger`. *Edge:* sin cámara/permiso el flujo degrada con aviso, no rompe.
@@ -182,11 +176,12 @@ Wizard **reanudable**: abre en el paso donde quedó (`currentStep` persistido). 
 
 ### UnderReview (`UnderReviewScreen.tsx`)
 - **Propósito:** confirmar que el alta se envió y está en revisión. El conductor NO opera todavía.
-- **Entrada / Salida:** estado `in_review`. Permanece acá hasta que **el backend** decida `approved/rejected` (nunca se aprueba localmente). "Entendido" es solo acuse, no cambia estado.
-- **Layout & jerarquía visual:** wordmark `sm` con guiño Perú, **ilustración line-art** de portapapeles con checks + reloj, `title1` "Estamos revisando tus datos" + subtítulo. **Checklist tipo timeline**: Datos personales ✓ · Vehículo ✓ · Documentos ✓ · Verificación facial → "En revisión" (spinner). Footer: "Entendido" (secondary) + "Contactar soporte" (ghost, ícono salvavidas → abre mail de soporte).
-- **Componentes clave:** `ReviewClipboard`, `ChecklistRow` (marker verde con check / marker azul con spinner), `VeoWordmark peru`.
-- **Estados:** estática (no consume datos en vivo; el gate la mantiene). Los pasos completados en `success`, el pendiente con spinner `accent`. *Edge — rechazado:* el navigator NO muestra esta pantalla; manda al wizard al paso con datos a corregir.
-- **Contenido & copy:** "Estamos revisando tus datos" + "Te avisaremos cuando esté aprobado". "Entendido" / "Contactar soporte".
+- **Entrada / Salida:** estado `in_review`. Permanece acá hasta que **el backend** decida `approved/rejected` (nunca se aprueba localmente). El CTA **"Actualizar estado"** re-consulta `GET /drivers/me` (`useRegistrationGate.refresh`) — NO aprueba ni fuerza el ingreso.
+- **DECISIÓN DEL DUEÑO (dirección "Tesla") — ETA sobre timeline:** se reemplazó el checklist tipo timeline (Datos ✓ · Vehículo ✓ · … + spinner, que "se sentía hecho por AI") por una **tarjeta de ETA espartana**. La pantalla ya NO es 100% estática: consume el estado del backend **on-demand** al tocar "Actualizar estado" (el invariante de seguridad se respeta: ningún CTA aprueba).
+- **Layout & jerarquía visual:** wordmark `sm` con guiño Perú, `title1` "Estamos revisando tus datos" + subtítulo, y una **tarjeta con el ETA** (tiempo estimado de revisión, tono sobrio). Footer: **"Actualizar estado"** (re-consulta al backend) + "Contactar soporte" (ghost, ícono salvavidas → abre mail de soporte).
+- **Componentes clave:** tarjeta de ETA, `VeoWordmark peru`, `useRegistrationGate` (refresh on-demand).
+- **Estados:** *Refrescando:* spinner al re-consultar el estado. *Edge — rechazado:* el navigator NO muestra esta pantalla; manda al wizard al paso con datos a corregir. *Edge — aprobado:* el refresh detecta el cambio → el gate navega a Tabs.
+- **Contenido & copy:** "Estamos revisando tus datos" + el ETA + "Te avisaremos cuando esté aprobado". "Actualizar estado" / "Contactar soporte".
 - **Color & énfasis:** checks `success`, pendiente `accent`, fondo sobrio.
 - **Seguridad / nota especial:** la aprobación es **decisión exclusiva del backend**; no diseñar ningún CTA que "apruebe" o "fuerce" el ingreso.
 
