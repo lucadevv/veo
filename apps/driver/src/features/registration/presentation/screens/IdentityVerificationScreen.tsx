@@ -82,7 +82,8 @@ function LiveFacePreview({
       <View
         style={[
           styles.circle,
-          { borderColor: hexAlpha(theme.colors.accent, 0.6), backgroundColor: theme.colors.bg },
+          // Anillo azul BRILLANTE + grueso (fidelidad al frame `C/IdentityVerif`, donde el ring es prominente).
+          { borderColor: theme.colors.accent, backgroundColor: theme.colors.bg },
         ]}
       >
         <BiometricCameraPreview
@@ -224,12 +225,14 @@ export const IdentityVerificationScreen = (_props: Props = {}): React.JSX.Elemen
         </Reveal>
       )}
 
-      {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. El
-          círculo de la cámara va centrado aparte (es el foco visual), pero el encabezado manda desde la
-          izquierda como en Onboarding/Login. */}
+      {/* Bloque héroe CENTRADO (fidelidad al frame `C/IdentityVerif`: `alignItems: center`, distinto del
+          left-align de Onboarding/Login — este paso es simétrico alrededor del círculo de la cámara).
+          Título `display` 28/700 + subtítulo muted, ambos centrados. */}
       <Reveal delay={40} style={styles.intro}>
-        <Text variant="title1">{t('registration.kyc.title')}</Text>
-        <Text variant="callout" color="inkMuted">
+        <Text variant="title1" align="center">
+          {t('registration.kyc.title')}
+        </Text>
+        <Text variant="callout" color="inkMuted" align="center">
           {subtitle}
         </Text>
       </Reveal>
@@ -538,8 +541,8 @@ const styles = StyleSheet.create({
   // Embebido: el host del wizard es `padded={false}`; la página aporta su padding horizontal y llena el alto.
   embeddedBody: { flex: 1, paddingHorizontal: 20 },
   body: { flex: 1, paddingTop: 20 },
-  // Aire Tesla bajo la barra: el bloque héroe respira; título+subtítulo juntos por su gap.
-  intro: { gap: 10, marginTop: 12 },
+  // Bloque héroe CENTRADO (fidelidad al frame): título + subtítulo centrados alrededor del círculo.
+  intro: { gap: 10, marginTop: 12, alignItems: 'center' },
   ringArea: {
     height: PREVIEW + 20,
     alignItems: 'center',
@@ -554,7 +557,7 @@ const styles = StyleSheet.create({
     width: PREVIEW,
     height: PREVIEW,
     borderRadius: PREVIEW / 2,
-    borderWidth: 1,
+    borderWidth: 3,
     overflow: 'hidden',
   },
   disc: {
