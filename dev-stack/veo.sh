@@ -186,6 +186,14 @@ infra_up_and_wait() {
     return 1
   fi
 
+  # Aprovisiona los buckets de MinIO (avatars/video/documents) vía el sidecar one-shot `minio-provision`
+  # (idempotente, espera minio healthy por su depends_on). NO va en INFRA_SERVICES_COMPOSE porque es one-shot
+  # sin healthcheck (rompería el wait). SIN esto los buckets no existen y el upload de docs (DNI/licencia) da
+  # 404 NoSuchBucket. Se corre en cada boot; --ignore-existing lo hace idempotente.
+  blue "  [minio] aprovisionando buckets (avatars/video/documents)…"
+  docker compose -f "$COMPOSE_FILE" up -d minio-provision >/dev/null 2>&1 || \
+    red "  [minio] minio-provision FALLÓ al disparar — los buckets podrían no existir (upload de docs daría 404)"
+
   # Esperar healthy. postgres/redis/minio tienen healthcheck en el compose; kafka
   # NO (la imagen apache/kafka no trae uno), así que para kafka hacemos un ping
   # TCP al puerto 9094. Para los demás leemos docker inspect .State.Health.

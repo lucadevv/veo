@@ -41,6 +41,7 @@
       "env": ["DATABASE_URL"]
     },
     "codegen": {
+      "cache": false,
       "outputs": ["src/generated/**"]
     },
     "clean": {
