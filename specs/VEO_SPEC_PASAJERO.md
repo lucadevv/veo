@@ -165,7 +165,9 @@ Mapa: `Splash → Onboarding → Auth (phone→OTP) → CompleteProfile → Main
 
 Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador de viaje en `rideDraftStore`.
 
-### Home (`HomeScreen.tsx`)
+### Home (`RequestFlowScreen.tsx`)
+
+> Nota de reconciliación (2026-07-03): el Home real es `RequestFlowScreen.tsx` (flujo unificado en un DraggableSheet por fase); `HomeScreen.tsx` quedó legacy sin registrar.
 - **Propósito:** punto de partida — mapa oscuro a pantalla completa con tu ubicación y el acceso "¿A dónde vamos?".
 - **Entrada / Salida:** tab principal → toca el SearchField → Search; toca un destino reciente → RouteQuote; toca avatar → Profile.
 - **Layout & jerarquía visual:** **mapa domina toda la pantalla** (`MapShell` + `AppMap` oscuro con punto de usuario). **Overlay superior:** pill de "Tu ubicación" (etiqueta real por geocoding inverso) a la izquierda + **avatar** de perfil a la derecha. **Overlay inferior:** fila horizontal de **chips de destinos recientes** (máx 3) + **SearchField** "¿A dónde vamos?".
@@ -431,7 +433,9 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Color & énfasis:** neutro; estado por texto (no solo color).
 - **Seguridad / nota especial:** historial local del dispositivo.
 
-### TripDetail (`TripDetailScreen.tsx`)
+### TripDetail (`TripDetailSheet.tsx`)
+
+> Nota de reconciliación (2026-07-03): el detalle de un viaje terminal ya NO es pantalla — es un sheet sobre "Tus viajes" (`navigation/types.ts` documenta la decisión).
 - **Propósito:** detalle de solo-lectura de un viaje pasado: mapa de la ruta, recibo, propina, y pagar/calificar si está completado.
 - **Entrada / Salida:** desde TripHistory (viaje terminado) → puede ir a Payment / Rating.
 - **Layout & jerarquía visual:** **mapa arriba** (ruta estática, no interactivo) + **sheet** abajo: fila estado + fecha; card tarifa + método; si completado: **recibo** (`TripReceiptCard`, con compartir), **propina** (`TipCard`), botones Pagar/Calificar.
@@ -453,7 +457,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 | 3 | Onboarding & Auth | Auth (phone+OTP) | `AuthScreen.tsx` |
 | 4 | Onboarding & Auth | CompleteProfile | `CompleteProfileScreen.tsx` |
 | 5 | Onboarding & Auth | BiometricLock | `BiometricLockScreen.tsx` |
-| 6 | Pedir viaje | Home | `HomeScreen.tsx` |
+| 6 | Pedir viaje | Home | `RequestFlowScreen.tsx` |
 | 7 | Pedir viaje | Search | `SearchScreen.tsx` |
 | 8 | Pedir viaje | RouteQuote | `RouteQuoteScreen.tsx` |
 | 9 | Viaje activo | TripActive | `TripActiveScreen.tsx` |
@@ -470,6 +474,6 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 | 20 | Perfil/Prefs | Profile | `ProfileScreen.tsx` |
 | 21 | Perfil/Prefs | SavedPlaces | `SavedPlacesScreen.tsx` |
 | 22 | Perfil/Prefs | PaymentMethods | `PaymentMethodsScreen.tsx` |
-| 23 | Perfil/Prefs | TripHistory + TripDetail | `TripHistoryScreen.tsx` · `TripDetailScreen.tsx` |
+| 23 | Perfil/Prefs | TripHistory + TripDetail | `TripHistoryScreen.tsx` · `TripDetailSheet.tsx` (sheet, no pantalla) |
 
 > Total: **24 pantallas** documentadas (TripHistory y TripDetail comparten fila por pertenecer al mismo flujo de historial). Todas verificadas contra el código real en `veo-passenger-app/src/features/*/presentation/screens/`.
