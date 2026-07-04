@@ -282,9 +282,14 @@ export function parseDni(
   if (mrz && (mrz.documentNumber || mrz.fullName)) {
     return {
       ...front,
+      // NÚMERO y NACIMIENTO: el MRZ gana (dígitos estructurados, más estables que el OCR de las etiquetas).
       ...(mrz.documentNumber ? { documentNumber: mrz.documentNumber } : {}),
-      ...(mrz.fullName ? { fullName: mrz.fullName } : {}),
       ...(mrz.birthDate ? { birthDate: mrz.birthDate } : {}),
+      // NOMBRE: gana el FRENTE (rótulos explícitos "Primer Apellido"/"Segundo Apellido"/"Prenombres"). El
+      // MRZ NO es confiable para el nombre: el OCR mutila los separadores `<` de la L3 y se COME apellidos
+      // (visto en campo: `CARRANZA<<LUIS<IVAN` en vez de `CARRANZA<SALDANA<<LUIS<IVAN` → dropea "SALDAÑA").
+      // Solo caemos al nombre del MRZ si el frente NO leyó ninguno (DNI viejo/etiqueta ilegible).
+      ...(!front.fullName && mrz.fullName ? { fullName: mrz.fullName } : {}),
     };
   }
 

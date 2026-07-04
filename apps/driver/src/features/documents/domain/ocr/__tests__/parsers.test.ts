@@ -248,6 +248,31 @@ describe('parseDni · MRZ-first (reverso del DNIe) con fallback al frente', () =
       fullName: 'PEREZ ANA',
     });
   });
+
+  it('el NOMBRE prefiere el FRENTE sobre un MRZ mutilado que se comió el 2do apellido (caso real de campo)', () => {
+    // GROUND TRUTH (bug reportado, DNIe CARRANZA SALDAÑA): el OCR mutila los `<` de la L3 del MRZ y DROPEA
+    // el segundo apellido — leyó `CARRANZA<<LUIS<IVAN` en vez de `CARRANZA<SALDANA<<LUIS<IVAN`. El MRZ SÍ
+    // parsea (número + nacimiento válidos), pero su nombre está INCOMPLETO. El frente tiene los rótulos
+    // explícitos con AMBOS apellidos → el nombre del frente debe GANAR (número y nacimiento del MRZ).
+    const back = [
+      'I<PER73694046<5<<<<<<<<<<<<<<<',
+      '9812079M3301236PER<<<<<<<<<<<<',
+      'CARRANZA<<LUIS<IVAN<<<<<<<<<<<', // MRZ mutilado por el OCR: falta SALDAÑA
+    ];
+    const front = [
+      'Primer Apellido',
+      'CARRANZA',
+      'Segundo Apellido',
+      'SALDAÑA',
+      'Prenombres',
+      'LUIS IVAN',
+    ];
+    const parsed = parseDni(front, back);
+    // El nombre COMPLETO del frente (con SALDAÑA), NO el del MRZ incompleto.
+    expect(parsed.fullName).toBe('CARRANZA SALDAÑA LUIS IVAN');
+    // El número sí sale del MRZ (dígitos estructurados, más estables).
+    expect(parsed.documentNumber).toBe('73694046');
+  });
 });
 
 describe('parseMrzTd1 · MRZ TD1 del DNIe (función pura)', () => {
