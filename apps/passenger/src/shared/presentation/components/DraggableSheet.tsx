@@ -427,7 +427,9 @@ export const DraggableSheet = forwardRef<
             return;
           }
           dragging.value = true;
-          // El SHEET toma el gesto: congela la lista arriba para que no se desplace a la vez.
+          // INDEPENDENCIA drag/scroll (decisión del dueño): el DRAG mueve el SHEET y nada más — la
+          // lista se congela arriba mientras tanto (sin traspaso del excedente al scroll). El scroll
+          // de la lista es SU propio gesto, sobre el body.
           scrollTo(scrollRef, 0, 0, false);
           // Arrastre relativo, acotado al rango [minOffset(full), maxOffset(peek)].
           translateY.value = clamp(

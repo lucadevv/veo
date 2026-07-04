@@ -85,6 +85,12 @@ const HOME_TABBAR_CLEARANCE = 88;
  * derrama y el backdrop se siente gigante/zoomeado (la queja que motivó este layout).
  */
 const HOME_SHEET_TOP_FRACTION = 190 / 844;
+/**
+ * Anclaje COLAPSADO del Home (fracción del área útil visible): arrastrando la hoja hacia abajo
+ * queda lo esencial (hero + buscador) y respira la imagen de fondo. Pedido del dueño: "el tope
+ * inferior más abajo" — antes ambos anclajes vivían arriba (0.88/0.92) y colapsar no existía.
+ */
+const HOME_SHEET_COLLAPSED_FRACTION = 0.45;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -402,11 +408,12 @@ export function RequestFlowScreen(): React.JSX.Element {
     navigation.navigate('Search', {flow: 'sheet'});
   }, [setEditing, navigation]);
 
-  // Sale de búsqueda y vuelve al peek (X o arrastrar hasta abajo).
+  // Sale de búsqueda y vuelve a la HOJA del pen (índice 1, el reposo del Home) — el índice 0 del
+  // idle es el anclaje COLAPSADO, no el estado natural.
   const exitSearch = useCallback(() => {
     setFlow('idle');
     setQuery('');
-    sheetRef.current?.snapToIndex(PEEK_INDEX);
+    sheetRef.current?.snapToIndex(FULL_INDEX);
   }, []);
 
   // El DRAG no entra a búsqueda (eso es solo por tap). ÚNICA transición por drag: buscando en un
@@ -487,12 +494,14 @@ export function RequestFlowScreen(): React.JSX.Element {
   // (pedido bloqueado 403 / franja) + re-intento del pedido tras saldar. Consulta SOLO en el home idle.
   const debtGate = useDebtGate(descriptor.pollsDebts);
 
-  // Snap por fase: lo declara el descriptor (`expanded`: cotización y cierre a full; el resto, peek
-  // content-hug — el sheet ABRAZA su contenido y el mapa SIEMPRE queda visible arriba).
+  // Snap por fase: lo declara el descriptor (`expanded`: cotización y cierre a full; el resto, su
+  // REPOSO). El reposo del Home idle es la HOJA del pen (índice 1) — el índice 0 es el anclaje
+  // colapsado, al que solo se llega arrastrando. En route/trip el reposo es el peek content-hug (0).
   const expandedPhase = descriptor.expanded;
+  const restingIndex = mapMode === 'idle' ? FULL_INDEX : PEEK_INDEX;
   useEffect(() => {
-    sheetRef.current?.snapToIndex(expandedPhase ? FULL_INDEX : PEEK_INDEX);
-  }, [expandedPhase]);
+    sheetRef.current?.snapToIndex(expandedPhase ? FULL_INDEX : restingIndex);
+  }, [expandedPhase, restingIndex]);
 
   // PUENTE INTERINO (Lote 4 pendiente): SOLO la reasignación AÚN navega a su pantalla y resetea el
   // screen a idle; CANCELLED/FAILED (ended) limpian y vuelven al home. Las demás fases viven en el sheet
@@ -548,22 +557,18 @@ export function RequestFlowScreen(): React.JSX.Element {
     [insets.top, peekHeight],
   );
 
-  // Anclajes del sheet POR MODO/FLOW. En idle la hoja del pen es FIJA (un SOLO anclaje a
-  // HOME_SHEET_TOP_FRACTION): con un anclaje el pan no pelea el gesto y la lista scrollea DIRECTO
-  // (antes peek 0.87 y full 0.92 estaban tan cerca que el drag "moría" y el scroll pedía un segundo
-  // gesto — feedback del dueño). En BÚSQUEDA el sheet sube solo a 0.92 (teclado + sugerencias). En
-  // route/trip, content-hug + full como siempre.
+  // Anclajes del sheet POR MODO. En idle: [COLAPSADO, HOJA-DEL-PEN] — la hoja ABRE en su posición
+  // del pen (22.5% desde arriba, índice 1 = reposo) y se puede COLAPSAR arrastrándola hacia abajo
+  // (queda hero+buscador y respira la imagen). Drag e scroll son INDEPENDIENTES: la hoja se
+  // arrastra del handle/header; la lista scrollea en el body. En route/trip, content-hug + full.
   const sheetSnapPoints = useMemo<ReadonlyArray<number | 'content'>>(() => {
     if (mapMode !== 'idle') {
       return SNAP_POINTS;
     }
-    if (flow === 'searching') {
-      return [0.92];
-    }
     const available = Math.max(windowHeight - insets.top - bottomInset, 1);
     const visible = windowHeight * (1 - HOME_SHEET_TOP_FRACTION);
-    return [Math.min(visible / available, 0.92)];
-  }, [mapMode, flow, windowHeight, insets.top, bottomInset]);
+    return [HOME_SHEET_COLLAPSED_FRACTION, Math.min(visible / available, 0.92)];
+  }, [mapMode, windowHeight, insets.top, bottomInset]);
   // Espejo para handleSnap (declarado arriba, antes del memo): cuántos anclajes tiene el sheet HOY.
   snapCountRef.current = sheetSnapPoints.length;
 
@@ -765,6 +770,8 @@ export function RequestFlowScreen(): React.JSX.Element {
         ref={sheetRef}
         snapPoints={sheetSnapPoints}
         maxContentFraction={PEEK_MAX_FRACTION}
+        // El Home MONTA en su reposo (la hoja del pen, índice 1); el colapsado (0) es solo por drag.
+        initialIndex={restingIndex}
         onSnap={handleSnap}
         onPeekHeightChange={setPeekHeight}
         bottomOffset={bottomInset}
