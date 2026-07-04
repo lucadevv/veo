@@ -222,13 +222,14 @@ interface DocumentUploadCardProps {
  */
 function Thumb({ uri, fallback }: { uri?: string; fallback: ReactNode }): React.JSX.Element {
   const theme = useTheme();
+  // Ícono de respaldo (cuando aún no hay foto) en GRIS `ink-subtle`, como el thumb del pen — no el
+  // azul de acento de la card. En el flujo real, con captura, el thumb muestra la FOTO, no el ícono.
+  const grayFallback = React.isValidElement<{ color?: string }>(fallback)
+    ? React.cloneElement(fallback, { color: theme.colors.inkSubtle })
+    : fallback;
   return (
     <View style={[styles.thumb, { backgroundColor: theme.colors.surfaceElevated }]}>
-      {uri ? (
-        <Image source={{ uri }} style={styles.thumbImg} resizeMode="cover" />
-      ) : (
-        fallback
-      )}
+      {uri ? <Image source={{ uri }} style={styles.thumbImg} resizeMode="cover" /> : grayFallback}
     </View>
   );
 }
