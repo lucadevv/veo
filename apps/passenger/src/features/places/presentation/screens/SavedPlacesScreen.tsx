@@ -15,6 +15,7 @@ import {
 import React, {useCallback, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View} from 'react-native';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
 import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
 import {
@@ -137,9 +138,11 @@ export function SavedPlacesScreen(): React.JSX.Element {
           padding: theme.spacing.xl,
           gap: theme.spacing.lg,
         }}>
-        <Text variant="footnote" color="inkMuted">
-          {t('places.subtitle')}
-        </Text>
+        {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
+        <ScreenHeader
+          title={t('screens.savedPlaces')}
+          subtitle={t('places.subtitle')}
+        />
 
         {/* Casa y Trabajo per pen b7muEo: DOS cards separadas y prominentes (icono en círculo +
             label + dirección + pencil). Vacías, la MISMA card invita a agregar (affordance plus). */}

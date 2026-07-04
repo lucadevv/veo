@@ -12,7 +12,11 @@ import {useTranslation} from 'react-i18next';
 import {Pressable, ScrollView, StyleSheet, TextInput, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
-import {ScreenStateFallback} from '../../../../shared/presentation/components/ScreenStates';
+import {
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {formatPEN} from '../../../../shared/utils/format';
 import {uuidv4} from '../../../../shared/utils/uuid';
 import type {RootStackParamList} from '../../../../navigation/types';
@@ -100,15 +104,23 @@ export function CarpoolBookingReviewScreen(): React.JSX.Element {
   });
 
   if (detailQuery.isLoading) {
-    return <ScreenStateFallback loading />;
+    return (
+      <SafeScreen>
+        <ScreenHeader title={t('screens.carpoolBookingReview')} />
+        <LoadingState />
+      </SafeScreen>
+    );
   }
 
   if (detailQuery.isError || !detailQuery.data) {
     return (
-      <ScreenStateFallback
-        errorMessage={t('carpool.detailLoadError')}
-        onRetry={() => detailQuery.refetch()}
-      />
+      <SafeScreen>
+        <ScreenHeader title={t('screens.carpoolBookingReview')} />
+        <ErrorState
+          message={t('carpool.detailLoadError')}
+          onRetry={() => detailQuery.refetch()}
+        />
+      </SafeScreen>
     );
   }
 
@@ -141,6 +153,8 @@ export function CarpoolBookingReviewScreen(): React.JSX.Element {
         }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
+        {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+        <ScreenHeader title={t('screens.carpoolBookingReview')} />
         {/* Resumen del viaje (ruta buscada + salida real del viaje publicado). */}
         <Card variant="outlined" padding="lg">
           <View style={{gap: theme.spacing.xs}}>

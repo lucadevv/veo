@@ -6,6 +6,7 @@ import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View} from 'react-native';
 import {useRideDraftStore} from '../../../maps/presentation';
 import type {RootStackParamList} from '../../../../navigation/types';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {IconClock, IconPin, IconSearch} from '../components/icons';
 import type {GlyphProps} from '../components/icons';
 
@@ -52,9 +53,11 @@ export function ScheduleNewScreen(): React.JSX.Element {
           gap: theme.spacing.lg,
         }}
         showsVerticalScrollIndicator={false}>
-        <Text variant="callout" color="inkMuted">
-          {t('scheduleNew.intro')}
-        </Text>
+        {/* Header in-body (patrón ScreenHeader del pen): back pill + título display + intro. */}
+        <ScreenHeader
+          title={t('screens.scheduleNew')}
+          subtitle={t('scheduleNew.intro')}
+        />
 
         <Card variant="outlined" padding="lg">
           <View style={{gap: theme.spacing.lg}}>

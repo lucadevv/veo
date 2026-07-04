@@ -22,6 +22,7 @@ import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {TicketValidationError} from '../../../support/domain/usecases';
 import type {RootStackParamList} from '../../../../navigation/types';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {IconLock, IconShield} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -94,6 +95,8 @@ export function LostItemScreen(): React.JSX.Element {
           gap: theme.spacing.lg,
         }}
         showsVerticalScrollIndicator={false}>
+        {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+        <ScreenHeader title={t('screens.lostItem')} />
         {sent ? (
           <Banner
             tone="success"

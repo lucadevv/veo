@@ -247,44 +247,51 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="FamilyShare"
         component={FamilyShareScreen}
-        options={{title: t('screens.familyShare')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
-      {/* Control de cámara: header oscuro estándar, igual que el diseño CameraControl. */}
       <Stack.Screen
         name="CameraControl"
         component={CameraControlScreen}
-        options={{title: t('screens.cameraControl')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="ScheduledTrips"
         component={ScheduledTripsScreen}
-        options={{title: t('screens.scheduledTrips')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="ScheduleNew"
         component={ScheduleNewScreen}
-        options={{title: t('screens.scheduleNew')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       {/* Carpooling (ADR-014 · pen sección 5): buscador → resultados → detalle → reserva → estado. */}
       <Stack.Screen
         name="CarpoolSearch"
         component={CarpoolSearchScreen}
-        options={{title: t('screens.carpoolSearch')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="CarpoolResults"
         component={CarpoolResultsScreen}
-        options={{title: t('screens.carpoolResults')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="CarpoolTripDetail"
         component={CarpoolTripDetailScreen}
-        options={{title: t('screens.carpoolTripDetail')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="CarpoolBookingReview"
         component={CarpoolBookingReviewScreen}
-        options={{title: t('screens.carpoolBookingReview')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="CarpoolBookingStatus"
@@ -299,7 +306,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="Notifications"
         component={NotificationsScreen}
-        options={{title: t('screens.notifications')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       {/* Preferencias de notificaciones (pen P/NotifPrefs): pantalla propia, distinta del feed. */}
       <Stack.Screen
@@ -311,7 +319,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="LostItem"
         component={LostItemScreen}
-        options={{title: t('screens.lostItem')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       {/* Reasignación (REASSIGNING): inmersiva, sin header del SO, sin gesto de retroceso —
           el flujo continúa al board de ofertas o cancela explícitamente. */}
@@ -323,12 +332,14 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="TrustedContacts"
         component={TrustedContactsScreen}
-        options={{title: t('screens.trustedContacts')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="ChildMode"
         component={ChildModeScreen}
-        options={{title: t('screens.childMode')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="KycCamera"
@@ -342,7 +353,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="PaymentMethods"
         component={PaymentMethodsScreen}
-        options={{title: t('screens.paymentMethods')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="Payment"
@@ -357,7 +369,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="SavedPlaces"
         component={SavedPlacesScreen}
-        options={{title: t('screens.savedPlaces')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="Referrals"

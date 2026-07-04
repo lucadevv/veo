@@ -21,6 +21,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {ContactValidationError} from '../../domain/usecases';
 import {MAX_TRUSTED_CONTACTS, type TrustedContact} from '../../domain/entities';
 import {ContactLeadCircle} from '../components/ContactLeadCircle';
@@ -125,12 +126,13 @@ export function TrustedContactsScreen(): React.JSX.Element {
           }}
         />
       }>
-      <Text
-        variant="callout"
-        color="inkMuted"
-        style={{marginBottom: theme.spacing.lg}}>
-        {t('contacts.subtitle')}
-      </Text>
+      {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
+      <View style={{marginBottom: theme.spacing.lg}}>
+        <ScreenHeader
+          title={t('screens.trustedContacts')}
+          subtitle={t('contacts.subtitle')}
+        />
+      </View>
 
       {atMax ? (
         <Banner

@@ -19,8 +19,10 @@ import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {
   EmptyState,
-  ScreenStateFallback,
+  ErrorState,
+  LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {useCarpoolBookingStore} from '../../../carpool/presentation/stores/carpoolBookingStore';
 import {formatDateTime, formatPEN} from '../../../../shared/utils/format';
 import type {RootStackParamList} from '../../../../navigation/types';
@@ -119,15 +121,23 @@ export function ScheduledTripsScreen(): React.JSX.Element {
   });
 
   if (scheduledQuery.isLoading) {
-    return <ScreenStateFallback loading />;
+    return (
+      <SafeScreen>
+        <ScreenHeader title={t('screens.scheduledTrips')} />
+        <LoadingState />
+      </SafeScreen>
+    );
   }
 
   if (scheduledQuery.isError) {
     return (
-      <ScreenStateFallback
-        errorMessage={t('scheduled.loadError')}
-        onRetry={() => scheduledQuery.refetch()}
-      />
+      <SafeScreen>
+        <ScreenHeader title={t('screens.scheduledTrips')} />
+        <ErrorState
+          message={t('scheduled.loadError')}
+          onRetry={() => scheduledQuery.refetch()}
+        />
+      </SafeScreen>
     );
   }
 
@@ -157,6 +167,7 @@ export function ScheduledTripsScreen(): React.JSX.Element {
   if (trips.length === 0) {
     return (
       <SafeScreen footer={scheduleButton}>
+        <ScreenHeader title={t('screens.scheduledTrips')} />
         <View style={{paddingTop: theme.spacing.xl}}>{carpoolEntry}</View>
         <EmptyState
           title={t('scheduled.empty')}
@@ -175,7 +186,13 @@ export function ScheduledTripsScreen(): React.JSX.Element {
           padding: theme.spacing.xl,
           gap: theme.spacing.md,
         }}
-        ListHeaderComponent={carpoolEntry}
+        ListHeaderComponent={
+          <View style={{gap: theme.spacing.md}}>
+            {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+            <ScreenHeader title={t('screens.scheduledTrips')} />
+            {carpoolEntry}
+          </View>
+        }
         ListFooterComponent={footNote}
         renderItem={({item, index}) => (
           <EnterView index={index}>

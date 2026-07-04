@@ -4,7 +4,11 @@ import {Button, SafeScreen, StatusPill, Text, useTheme} from '@veo/ui-kit';
 import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ActivityIndicator, View} from 'react-native';
-import {ScreenStateFallback} from '../../../../shared/presentation/components/ScreenStates';
+import {
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {EnterView} from '../components/motion';
 import {PaymentInstrumentRow} from '../components/PaymentInstrumentRow';
 import {YapeLinkSheet} from '../components/YapeLinkSheet';
@@ -53,15 +57,23 @@ export function PaymentMethodsScreen(): React.JSX.Element {
   // reintento. JAMÁS interpretamos un error de red como "no afiliado" (eso mostraría "Vincular" como si
   // el usuario hubiera perdido su Yape). El `status:'NONE'` legítimo solo llega en el caso SUCCESS.
   if (affiliationQuery.isLoading) {
-    return <ScreenStateFallback loading loadingLines={5} />;
+    return (
+      <SafeScreen>
+        <ScreenHeader title={t('screens.paymentMethods')} />
+        <LoadingState lines={5} />
+      </SafeScreen>
+    );
   }
 
   if (affiliationQuery.isError || !affiliationQuery.data) {
     return (
-      <ScreenStateFallback
-        errorMessage={t('payments.loadError')}
-        onRetry={() => affiliationQuery.refetch()}
-      />
+      <SafeScreen>
+        <ScreenHeader title={t('screens.paymentMethods')} />
+        <ErrorState
+          message={t('payments.loadError')}
+          onRetry={() => affiliationQuery.refetch()}
+        />
+      </SafeScreen>
     );
   }
 
@@ -83,12 +95,13 @@ export function PaymentMethodsScreen(): React.JSX.Element {
 
   return (
     <SafeScreen scroll>
-      <Text
-        variant="callout"
-        color="inkMuted"
-        style={{marginBottom: theme.spacing.lg}}>
-        {t('payments.subtitle')}
-      </Text>
+      {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
+      <View style={{marginBottom: theme.spacing.lg}}>
+        <ScreenHeader
+          title={t('screens.paymentMethods')}
+          subtitle={t('payments.subtitle')}
+        />
+      </View>
 
       {/* Cards por método en el ORDEN del pen (Efectivo, Yape, Plin, …). Yape conserva su flujo. */}
       <View style={{gap: theme.spacing.md}}>

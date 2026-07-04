@@ -24,6 +24,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import type {TrustedContact} from '../../../contacts/domain/entities';
 import {IconCamera, IconChild, IconLock, IconUsers} from '../components/icons';
 import {Toggle} from '../components/Toggle';
@@ -92,6 +93,7 @@ export function CameraControlScreen(): React.JSX.Element {
   if (contactsQuery.isLoading || preferenceQuery.isLoading) {
     return (
       <SafeScreen>
+        <ScreenHeader title={t('screens.cameraControl')} />
         <LoadingState />
       </SafeScreen>
     );
@@ -99,6 +101,7 @@ export function CameraControlScreen(): React.JSX.Element {
   if (contactsQuery.isError) {
     return (
       <SafeScreen>
+        <ScreenHeader title={t('screens.cameraControl')} />
         <ErrorState onRetry={() => contactsQuery.refetch()} />
       </SafeScreen>
     );
@@ -139,9 +142,11 @@ export function CameraControlScreen(): React.JSX.Element {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{gap: theme.spacing.md}}>
-        <Text variant="callout" color="inkMuted">
-          {t('cameraControl.intro')}
-        </Text>
+        {/* Header in-body (patrón ScreenHeader del pen): back pill + título display + intro. */}
+        <ScreenHeader
+          title={t('screens.cameraControl')}
+          subtitle={t('cameraControl.intro')}
+        />
 
         {/* HUECO DE BACKEND · aviso honesto: la preferencia se guarda localmente por ahora. */}
         <Banner tone="info" title={t('cameraControl.backendNotice')} />

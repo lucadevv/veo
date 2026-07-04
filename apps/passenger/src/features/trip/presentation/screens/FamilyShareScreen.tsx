@@ -24,6 +24,7 @@ import {
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import type {TrustedContact} from '../../../contacts/domain/entities';
 import {
   IconChat,
@@ -186,6 +187,8 @@ export function FamilyShareScreen(): React.JSX.Element {
           onPress={onNativeShare}
         />
       }>
+      {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+      <ScreenHeader title={t('screens.familyShare')} />
       {/* Intro per pen: icono users en círculo brand-dim + promesa VERDADERA (share-service revoca
           los enlaces al terminar el viaje; TTL 2 h). */}
       <View style={[styles.intro, {gap: theme.spacing.lg}]}>

@@ -14,6 +14,7 @@ import React, {useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, TextInput, View} from 'react-native';
 import {formatPEN} from '../../../../shared/utils/format';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {IconCheck} from '../../../auth/presentation/components/icons';
 import {isValidChildCode} from '../../domain/entities';
 import {useChildModeStore} from '../stores/childModeStore';
@@ -83,12 +84,13 @@ export function ChildModeScreen(): React.JSX.Element {
           onPress={save}
         />
       }>
-      <Text
-        variant="callout"
-        color="inkMuted"
-        style={{marginBottom: theme.spacing.lg}}>
-        {t('childMode.subtitle')}
-      </Text>
+      {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
+      <View style={{marginBottom: theme.spacing.lg}}>
+        <ScreenHeader
+          title={t('screens.childMode')}
+          subtitle={t('childMode.subtitle')}
+        />
+      </View>
 
       {/* Toggle con hint de estado (pen): label + "Protección activada para este viaje" cuando ON. */}
       <Card variant="outlined" padding="md">

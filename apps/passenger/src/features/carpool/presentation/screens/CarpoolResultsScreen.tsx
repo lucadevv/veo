@@ -14,8 +14,10 @@ import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {
   EmptyState,
-  ScreenStateFallback,
+  ErrorState,
+  LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {EnterView} from '../../../trip/presentation/components/motion';
 import {formatIsoDayShort} from '../formatDay';
@@ -65,37 +67,49 @@ export function CarpoolResultsScreen(): React.JSX.Element {
   );
 
   if (resultsQuery.isLoading) {
-    return <ScreenStateFallback loading />;
+    return (
+      <SafeScreen>
+        <ScreenHeader title={t('screens.carpoolResults')} />
+        <LoadingState />
+      </SafeScreen>
+    );
   }
 
   if (resultsQuery.isError) {
     return (
-      <ScreenStateFallback
-        errorMessage={t('carpool.resultsLoadError')}
-        onRetry={() => resultsQuery.refetch()}
-      />
+      <SafeScreen>
+        <ScreenHeader title={t('screens.carpoolResults')} />
+        <ErrorState
+          message={t('carpool.resultsLoadError')}
+          onRetry={() => resultsQuery.refetch()}
+        />
+      </SafeScreen>
     );
   }
 
   const header = (
-    <View style={{gap: theme.spacing.xs, paddingBottom: theme.spacing.md}}>
-      <Text variant="headline">
-        {t('carpool.route', {
-          origin: search.originLabel,
-          destination: search.destLabel,
-        })}
-      </Text>
-      <Text variant="footnote" color="inkSubtle">
-        {formatIsoDayShort(search.fecha)} ·{' '}
-        {search.asientos === 1
-          ? t('carpool.seatsOne')
-          : t('carpool.seatsMany', {count: search.asientos})}
-      </Text>
-      <Text variant="footnote" color="inkSubtle">
-        {items.length === 1
-          ? t('carpool.resultsCountOne')
-          : t('carpool.resultsCountMany', {count: items.length})}
-      </Text>
+    <View style={{gap: theme.spacing.lg}}>
+      {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+      <ScreenHeader title={t('screens.carpoolResults')} />
+      <View style={{gap: theme.spacing.xs, paddingBottom: theme.spacing.md}}>
+        <Text variant="headline">
+          {t('carpool.route', {
+            origin: search.originLabel,
+            destination: search.destLabel,
+          })}
+        </Text>
+        <Text variant="footnote" color="inkSubtle">
+          {formatIsoDayShort(search.fecha)} ·{' '}
+          {search.asientos === 1
+            ? t('carpool.seatsOne')
+            : t('carpool.seatsMany', {count: search.asientos})}
+        </Text>
+        <Text variant="footnote" color="inkSubtle">
+          {items.length === 1
+            ? t('carpool.resultsCountOne')
+            : t('carpool.resultsCountMany', {count: items.length})}
+        </Text>
+      </View>
     </View>
   );
 
@@ -109,6 +123,7 @@ export function CarpoolResultsScreen(): React.JSX.Element {
             onPress={() => navigation.goBack()}
           />
         }>
+        <ScreenHeader title={t('screens.carpoolResults')} />
         <EmptyState
           title={t('carpool.resultsEmpty')}
           subtitle={t('carpool.resultsEmptySubtitle')}

@@ -10,8 +10,10 @@ import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {
   EmptyState,
-  ScreenStateFallback,
+  ErrorState,
+  LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {formatShortDate} from '../../../../shared/utils/format';
 import type {AppNotification, NotificationKind} from '../../domain/entities';
 import {IconSettings, iconForKind} from '../icons';
@@ -43,23 +45,22 @@ export function NotificationsScreen(): React.JSX.Element {
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const listNotifications = useDependency(TOKENS.listNotificationsUseCase);
 
-  // Engranaje en el header nativo → preferencias de notificaciones (pen: el feed "Avisos" y las
-  // preferencias "Notificaciones" son DOS pantallas). Se setea acá (no en RootNavigator) para que
-  // la feature sea dueña de su header y la navegación solo declare la ruta.
-  const inkColor = theme.colors.ink;
-  React.useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <IconButton
-          accessibilityLabel={t('notifications.prefs.openSettings')}
-          variant="plain"
-          size="sm"
-          icon={<IconSettings color={inkColor} size={20} />}
-          onPress={() => navigation.navigate('NotificationPrefs')}
-        />
-      ),
-    });
-  }, [navigation, t, inkColor]);
+  // Engranaje → preferencias de notificaciones (pen: el feed "Avisos" y las preferencias
+  // "Notificaciones" son DOS pantallas). Antes era headerRight del header nativo; con el header
+  // IN-BODY vive en el slot `trailing` del ScreenHeader, en TODAS las branches (loading/error/
+  // vacío/lista) para no perder la entrada a los ajustes.
+  const trailing = (
+    <IconButton
+      accessibilityLabel={t('notifications.prefs.openSettings')}
+      variant="plain"
+      size="sm"
+      icon={<IconSettings color={theme.colors.ink} size={20} />}
+      onPress={() => navigation.navigate('NotificationPrefs')}
+    />
+  );
+  const header = (
+    <ScreenHeader title={t('screens.notifications')} trailing={trailing} />
+  );
 
   const query = useQuery({
     queryKey: ['notifications', 'list'],
@@ -67,15 +68,23 @@ export function NotificationsScreen(): React.JSX.Element {
   });
 
   if (query.isLoading) {
-    return <ScreenStateFallback loading />;
+    return (
+      <SafeScreen>
+        {header}
+        <LoadingState />
+      </SafeScreen>
+    );
   }
 
   if (query.isError) {
     return (
-      <ScreenStateFallback
-        errorMessage={t('notifications.loadError')}
-        onRetry={() => query.refetch()}
-      />
+      <SafeScreen>
+        {header}
+        <ErrorState
+          message={t('notifications.loadError')}
+          onRetry={() => query.refetch()}
+        />
+      </SafeScreen>
     );
   }
 
@@ -85,6 +94,7 @@ export function NotificationsScreen(): React.JSX.Element {
     // Vacío HONESTO: el feed está conectado al backend; lista vacía = aún no hay avisos (no "próximamente").
     return (
       <SafeScreen>
+        {header}
         <EmptyState
           title={t('notifications.empty')}
           subtitle={t('notifications.emptySubtitle')}
@@ -101,6 +111,8 @@ export function NotificationsScreen(): React.JSX.Element {
           gap: theme.spacing.md,
         }}
         showsVerticalScrollIndicator={false}>
+        {/* Header in-body (patrón ScreenHeader del pen): back pill + título + engranaje. */}
+        {header}
         {notifications.map(item => (
           <NotificationCard key={item.id} notification={item} />
         ))}

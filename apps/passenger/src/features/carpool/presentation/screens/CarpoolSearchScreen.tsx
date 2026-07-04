@@ -8,6 +8,7 @@ import type {
   CarpoolSearchQuery,
   RootStackParamList,
 } from '../../../../navigation/types';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {
   CARPOOL_MAX_SEATS,
   CARPOOL_MIN_SEATS,
@@ -106,9 +107,11 @@ export function CarpoolSearchScreen(): React.JSX.Element {
           gap: theme.spacing.xl,
         }}
         showsVerticalScrollIndicator={false}>
-        <Text variant="callout" color="inkMuted">
-          {t('carpool.searchSubtitle')}
-        </Text>
+        {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
+        <ScreenHeader
+          title={t('screens.carpoolSearch')}
+          subtitle={t('carpool.searchSubtitle')}
+        />
 
         {/* Card de ruta: Desde / Hasta (pen SearchCard). Cada fila abre el picker con autocompletado. */}
         <Card variant="outlined" padding="md">

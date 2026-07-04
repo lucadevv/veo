@@ -12,7 +12,11 @@ import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
-import {ScreenStateFallback} from '../../../../shared/presentation/components/ScreenStates';
+import {
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {formatPEN, formatTimeOfDay} from '../../../../shared/utils/format';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {
@@ -52,15 +56,23 @@ export function CarpoolTripDetailScreen(): React.JSX.Element {
   });
 
   if (detailQuery.isLoading) {
-    return <ScreenStateFallback loading />;
+    return (
+      <SafeScreen>
+        <ScreenHeader title={t('screens.carpoolTripDetail')} />
+        <LoadingState />
+      </SafeScreen>
+    );
   }
 
   if (detailQuery.isError || !detailQuery.data) {
     return (
-      <ScreenStateFallback
-        errorMessage={t('carpool.detailLoadError')}
-        onRetry={() => detailQuery.refetch()}
-      />
+      <SafeScreen>
+        <ScreenHeader title={t('screens.carpoolTripDetail')} />
+        <ErrorState
+          message={t('carpool.detailLoadError')}
+          onRetry={() => detailQuery.refetch()}
+        />
+      </SafeScreen>
     );
   }
 
@@ -100,6 +112,8 @@ export function CarpoolTripDetailScreen(): React.JSX.Element {
           gap: theme.spacing.xl,
         }}
         showsVerticalScrollIndicator={false}>
+        {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+        <ScreenHeader title={t('screens.carpoolTripDetail')} />
         {/* Itinerario: timeline con reverse geocode real; hora solo en la salida (ver docblock). */}
         <View style={{gap: theme.spacing.md}}>
           <View style={styles.itinHeader}>
