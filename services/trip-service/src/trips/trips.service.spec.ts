@@ -133,7 +133,13 @@ interface PublishedEvent {
 }
 
 /** Prisma falso con un único viaje en memoria. Captura los eventos encolados en el outbox. */
-function makePrisma(initial: Trip | null) {
+function makePrisma(
+  initial: Trip | null,
+  // Simula una carrera concurrente: en el PRÓXIMO updateMany del CAS de changeDestination (el que lleva
+  // `fareCents` en el WHERE), muta el store con estos valores y devuelve count 0 — como si otro escritor
+  // hubiese ganado entre el re-read in-tx y el write. Cubre la atribución de causa (status vs fare_changed).
+  raceOnDestinationCas?: { status?: TripStatus; fareCents?: number },
+) {
   let store = initial;
   const outbox: PublishedEvent[] = [];
   const tripEvents: { eventType: string; payload: unknown }[] = [];
@@ -156,9 +162,19 @@ function makePrisma(initial: Trip | null) {
           status?: TripStatus | { in: readonly TripStatus[] };
           agreedFareCents?: number | null;
           negotiationSeq?: number;
+          fareCents?: number;
         };
         data: Partial<Trip>;
       }) => {
+        // CAS de changeDestination (ADR-022 A3): el WHERE lleva `fareCents`. Modo carrera: mutamos el store
+        // (otro escritor ganó) y devolvemos count 0. Si no, honramos el CAS optimista (fareCents debe coincidir).
+        if (where?.fareCents !== undefined) {
+          if (raceOnDestinationCas) {
+            store = buildTrip({ ...(store ?? {}), ...raceOnDestinationCas });
+            return { count: 0 };
+          }
+          if (store?.fareCents !== where.fareCents) return { count: 0 };
+        }
         // Guard de carrera (activateScheduledTrip, expireFromNoOffers, rebid): si el where exige un
         // status concreto y el store YA no está en él (otro tap ganó), no toca fila → count 0 (idempotente).
         // N9: applyAgreedFare usa `status: { in: [...] }` (no-terminal) — soportamos ambas formas.
@@ -1168,6 +1184,89 @@ describe('TripsService.changeDestination · BR-T01 tarifa inmutable salvo cambio
     const svc = new TripsService(prisma as never, longRoute10k as never);
     const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
     expect(view.fareCents).toBe(2600);
+  });
+
+  it('ADR-022 P-C · el audit trip.destination_changed graba el fareCents FLOOREADO (lo cobrado), no el recompute crudo', async () => {
+    // PUJA bid 2600, recompute 2400 (< bid) → se persiste/cobra 2600 (piso A3). El log append-only (Ley 29733)
+    // DEBE registrar 2600 y previousFareCents 2600 — antes grababa fare.cents crudo (2400) → el audit mentía
+    // ±S/2.00 en el caso que el piso protege.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+    );
+    const svc = new TripsService(prisma as never, longRoute10k as never);
+    await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    const event = prisma._tripEvents.find((e) => e.eventType === 'trip.destination_changed');
+    expect(event?.payload).toMatchObject({ fareCents: 2600, previousFareCents: 2600 });
+  });
+
+  it('ADR-022 flag (i) · re-cotiza con el pricing EFECTIVO del admin (overlay), no el catálogo de código', async () => {
+    // Económico base ×1.0 → 2400 (ruta 10km/20min). El admin subió el multiplier a ×1.5 por overlay →
+    // 2400 × 1.5 = 3600. SIN el fix, changeDestination usaba offering.pricing de código (×1.0) → 2400,
+    // incoherente con el create (que sí usa el overlay). El fix lo alinea vía resolveEffectiveOffering.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', fareCents: 2400 }),
+    );
+    const catalog = {
+      resolveOffering: async () => ({ enabled: true, pricing: { multiplier: 1.5, minFareCents: 500 } }),
+    } as never;
+    const svc = new TripsService(
+      prisma as never,
+      longRoute10k as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      catalog, // CatalogService (posición 7)
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(3600);
+  });
+
+  it('ADR-022 flag (i) · una oferta DESHABILITADA por el admin NO rompe el cambio de destino (mid-viaje, enforceEnabled:false)', async () => {
+    // El create tira 409 si el admin deshabilitó la oferta; mid-viaje el viaje YA existe → el cambio de destino
+    // debe seguir andando con el pricing del overlay, sin gate de enabled.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', fareCents: 2400 }),
+    );
+    const catalog = {
+      resolveOffering: async () => ({ enabled: false, pricing: { multiplier: 1.0, minFareCents: 500 } }),
+    } as never;
+    const svc = new TripsService(
+      prisma as never,
+      longRoute10k as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      catalog,
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(2400); // no lanza; usa el pricing del overlay (×1.0 acá)
+  });
+
+  it('ADR-022 A3 · CAS: carrera que sacó el viaje de un estado editable → ConflictError reason=status_not_editable', async () => {
+    // El viaje era editable al leerse, pero entre el re-read in-tx y el write un start/cancel lo movió.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+      { status: TripStatus.IN_PROGRESS },
+    );
+    const svc = new TripsService(prisma as never, longRoute10k as never);
+    await expect(
+      svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
+    ).rejects.toMatchObject({ details: { reason: 'status_not_editable' } });
+  });
+
+  it('ADR-022 A3 · CAS: carrera de re-puja (fareCents cambió) → ConflictError reason=fare_changed (retryable), NO "estado actual"', async () => {
+    // El bid subió (re-puja aceptada) entre el re-read y el write: el CAS sobre fareCents falla. El caller debe
+    // poder distinguir esto (reintentar con el bid nuevo) de un estado no-editable (rendirse).
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+      { fareCents: 3000 }, // otro escritor subió el bid; el estado sigue editable
+    );
+    const svc = new TripsService(prisma as never, longRoute10k as never);
+    await expect(
+      svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
+    ).rejects.toMatchObject({ details: { reason: 'fare_changed', currentFareCents: 3000 } });
   });
 
   it('F2.1b · FIXED + flip ON + catálogo VACÍO → InvalidStateError (nunca cobra de menos)', async () => {

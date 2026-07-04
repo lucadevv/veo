@@ -69,7 +69,11 @@ import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { resolveTripOffering, type TripOfferingResolution } from './domain/offering';
-import { bumpOfferingModeOverridden, bumpCatalogDegraded } from './trip-metrics';
+import {
+  bumpOfferingModeOverridden,
+  bumpCatalogDegraded,
+  type CatalogDegradedSite,
+} from './trip-metrics';
 import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
@@ -255,6 +259,16 @@ export class TripsService {
    */
   private async resolveEffectiveOffering(
     base: OfferingSpec,
+    // `enforceEnabled` (default true): en el CREATE, una oferta deshabilitada por el admin → 409 (no se
+    // crea). En una re-cotización MID-VIAJE (changeDestination/waypoint) el viaje YA existe con esa oferta:
+    // el admin deshabilitándola no puede romper un cambio de destino en curso → false trae solo el pricing
+    // efectivo (overlay) SIN el gate de enabled. El pricing del overlay se aplica igual; enabled es del create.
+    // `site` (default 'create'): etiqueta del counter de degradación — la fn es COMPARTIDA (create/changeDest),
+    // así la métrica no miente el origen de un catálogo caído.
+    {
+      enforceEnabled = true,
+      site = 'create',
+    }: { enforceEnabled?: boolean; site?: CatalogDegradedSite } = {},
   ): Promise<{ pricing: OfferingPricingPolicy; modePin?: PricingMode }> {
     if (!this.catalog) return { pricing: base.pricing };
     let resolved;
@@ -264,15 +278,16 @@ export class TripsService {
       // B5-4: las verticales ocultas (defaultEnabled:false) NUNCA se crean, ni en degradación — sin
       // confirmar que el admin las habilitó, permitir una ambulancia/grúa por catálogo caído sería el
       // leak inverso al de la UI. Las visibles por default SÍ se permiten (degradación honesta previa).
-      if (!base.defaultEnabled) throw new OfferingUnavailableError(base.id);
+      // Solo en el create (enforceEnabled): mid-viaje el viaje ya existe, no se re-gatea por catálogo caído.
+      if (enforceEnabled && !base.defaultEnabled) throw new OfferingUnavailableError(base.id);
       this.logger.warn(
         `catálogo no disponible al resolver '${base.id}' (${(err as Error).message}); ` +
           `uso el pricing de código y permito el viaje (degradación honesta · ADR 013)`,
       );
-      bumpCatalogDegraded('create');
+      bumpCatalogDegraded(site);
       return { pricing: base.pricing };
     }
-    if (resolved && !resolved.enabled) throw new OfferingUnavailableError(base.id);
+    if (enforceEnabled && resolved && !resolved.enabled) throw new OfferingUnavailableError(base.id);
     // Sin entrada en el overlay (no debería pasar: el id sale del catálogo de código) → pricing de código.
     if (!resolved) return { pricing: base.pricing };
     return { pricing: resolved.pricing, modePin: resolved.modePin };
@@ -1700,6 +1715,15 @@ export class TripsService {
     // de menos. En FIXED SIN piso contra `trip.fareCents` (un destino MÁS CERCA debe abaratar); en PUJA SÍ hay
     // piso al bid acordado (ver A3, más abajo). El piso de la mínima de la oferta ya está dentro de las fórmulas.
     const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
+    // ADR-022 P-C flag (i) · re-cotiza con el pricing EFECTIVO del admin (overlay), NO el catálogo de código
+    // suelto — espejo del create (create usa resolveEffectiveOffering; changeDest usaba offering.pricing crudo
+    // → un multiplier/minFare editado por el admin no aplicaba al cambiar destino: incoherencia create↔changeDest).
+    // `enforceEnabled:false`: mid-viaje el viaje YA existe con esa oferta; que el admin la deshabilite no puede
+    // romper un cambio de destino en curso (el gate de enabled es del create).
+    const { pricing: effectivePricing } = await this.resolveEffectiveOffering(offering, {
+      enforceEnabled: false,
+      site: 'change_destination',
+    });
     // El recargo de combustible (B3) se pliega en la rama flip-OFF — espejo COMPLETO del create FIXED, que
     // resuelve y aplica el fuel (fixed-dispatch.strategy). En la rama flip-ON la energía pass-through lo
     // reemplaza (calculateOfferingFare IGNORA fuelPerKmCents). Sin esto, cambiar de destino con fuel admin>0
@@ -1718,27 +1742,34 @@ export class TripsService {
       this.energyModelEnabled && trip.dispatchMode === PricingMode.FIXED
         ? calculateOfferingFare(
             fareInput,
-            offering.pricing,
+            effectivePricing,
             await resolveAuthoritativeEnergy(this.energyCatalog, offering),
           )
-        : applyOfferingPricing(calculateFare(fareInput), offering.pricing);
-    // ADR-022 P-A (A3) · en PUJA el `trip.fareCents` es un BID NEGOCIADO que el conductor ACEPTÓ. Cambiar el
-    // destino NO puede cobrar por DEBAJO de lo acordado (regalarle plata al pasajero reseteando la
-    // negociación hacia abajo) — espejo del piso de waypoint-proposal.service. En FIXED sí abarata (la tarifa
-    // es fórmula de la ruta: un destino más cerca cuesta menos, sin negociación que respetar).
-    const fareCents =
-      trip.dispatchMode === PricingMode.FIXED
-        ? fare.cents
-        : Math.max(fare.cents, trip.fareCents);
+        : applyOfferingPricing(calculateFare(fareInput), effectivePricing);
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      // CAS: el gate de estado (DESTINATION_EDITABLE) se RE-VALIDA dentro de la tx (viaja en el WHERE). El
-      // chequeo de arriba se hizo sobre una lectura previa al `maps.route` (cientos de ms); una carrera que
-      // sacó el viaje de un estado editable (start/complete/cancel) en esa ventana → count 0 → ConflictError.
-      // Sin esto, el update por-id pisaría destino+fareCents en un viaje ya no editable (mutación financiera
-      // post-completion). Patrón espejo del CAS de accept()/waypoint.
+      // ADR-022 P-A (A3) · el piso de la PUJA se computa DENTRO de la tx contra el `fareCents` FRESCO. El
+      // `trip` de arriba se leyó ANTES de `maps.route` (cientos de ms); en esa ventana un `offer_accepted` /
+      // re-puja concurrente pudo SUBIR el bid acordado. Floorear contra el `trip.fareCents` viejo persistiría
+      // una tarifa POR DEBAJO del bid vigente (fuga). Re-leemos el bid actual y flooreamos contra ÉSE.
+      const current = await tx.trip.findUniqueOrThrow({
+        where: { id },
+        select: { status: true, fareCents: true, dispatchMode: true },
+      });
+      // En PUJA el `fareCents` es un BID NEGOCIADO que el conductor ACEPTÓ: cambiar el destino no puede cobrar
+      // por DEBAJO de lo acordado (espejo del piso de waypoint-proposal). En FIXED sí abarata (la tarifa es
+      // fórmula de la ruta: un destino más cerca cuesta menos, sin negociación que respetar).
+      const fareCents =
+        current.dispatchMode === PricingMode.FIXED
+          ? fare.cents
+          : Math.max(fare.cents, current.fareCents);
+
+      // CAS: el estado (DESTINATION_EDITABLE) Y el `fareCents` viajan en el WHERE. El estado cierra la carrera
+      // start/complete/cancel (mutación financiera post-completion). El `fareCents` cierra la carrera con la
+      // re-puja: si el bid cambió entre el re-read y el write, count 0 → ConflictError (el caller reintenta con
+      // el bid nuevo). Patrón optimista espejo del CAS de accept()/waypoint.
       const claim = await tx.trip.updateMany({
-        where: { id, status: { in: [...DESTINATION_EDITABLE] } },
+        where: { id, status: { in: [...DESTINATION_EDITABLE] }, fareCents: current.fareCents },
         data: {
           destLat: destination.lat,
           destLon: destination.lon,
@@ -1749,13 +1780,35 @@ export class TripsService {
         },
       });
       if (claim.count === 0) {
-        throw new ConflictError('No se puede cambiar el destino en el estado actual', { id });
+        // El CAS falló por UNO de sus dos predicados. Distinguimos la causa para que el caller sepa si
+        // REINTENTAR (re-puja: el bid cambió, re-cotizar contra el nuevo) o RENDIRSE (estado no-editable:
+        // el viaje arrancó/canceló). Un solo mensaje genérico ocultaba la carrera de precio como si fuera
+        // un cambio de estado. Re-leemos para atribuir la causa real.
+        const after = await tx.trip.findUnique({
+          where: { id },
+          select: { status: true, fareCents: true },
+        });
+        if (after && !DESTINATION_EDITABLE.has(after.status)) {
+          throw new ConflictError('No se puede cambiar el destino en el estado actual', {
+            id,
+            reason: 'status_not_editable',
+            status: after.status,
+          });
+        }
+        throw new ConflictError('El precio del viaje cambió (re-puja concurrente); reintentá', {
+          id,
+          reason: 'fare_changed',
+          currentFareCents: after?.fareCents,
+        });
       }
       const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      // ADR-022 P-C · el audit graba el `fareCents` REALMENTE persistido/cobrado (flooreado), no el recompute
+      // crudo `fare.cents`: en PUJA con el piso activo divergían y el log append-only (Ley 29733) registraba un
+      // monto nunca cobrado. `previousFareCents` = el bid fresco que el CAS confirmó vigente.
       await recordTripEvent(tx, id, 'trip.destination_changed', {
         destination,
-        previousFareCents: trip.fareCents,
-        fareCents: fare.cents,
+        previousFareCents: current.fareCents,
+        fareCents,
       });
       return next;
     });
