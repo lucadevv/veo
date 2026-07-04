@@ -15,6 +15,7 @@ export { RegistrationDocumentSheet } from './RegistrationDocumentSheet';
 export { DocumentPreviewCard, type DocumentPreviewCardProps } from './DocumentPreviewCard';
 export { firstMissingRequirement, type StepRequirement } from './missingRequirement';
 export { ScanDniSheet, type ScanDniSheetProps } from './ScanDniSheet';
+export { ScanLicenseSheet, type ScanLicenseSheetProps } from './ScanLicenseSheet';
 export {
   ScanPropertyCardSheet,
   type ScanPropertyCardSheetProps,

@@ -174,6 +174,13 @@ export function usePersonalDataContinue(): PersonalDataContinue {
    * `false` si la subida/onboarding falló (conserva `pendingLicense` para reintentar en el próximo Continuar).
    */
   const uploadPendingLicense = async (): Promise<boolean> => {
+    // Lote 3: la licencia ahora sube EAGER en su propio sheet (`useLicenseSubmit`), igual que el DNI. Si ya
+    // quedó `sent` (subida + onboard hechos), este continue NO la re-sube: es un BACKSTOP idempotente. Si por
+    // algún camino la licencia aún no se subió (`idle`/`error`), este bloque la sube igual (retry seguro; un
+    // 409 se trata como éxito). Espeja EXACTO el guard del DNI de `uploadPendingDni`.
+    if (deriveDocumentPhase(useRegistrationStore.getState().sendPhases.license) === 'sent') {
+      return true;
+    }
     const pendingLicense = useRegistrationStore.getState().pendingLicense;
     if (!pendingLicense) {
       return true;

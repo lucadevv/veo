@@ -385,7 +385,24 @@
         "reviewNote": "La foto se sube de forma segura y queda en revisión."
       },
       "sheetBackground": "Continuar en segundo plano",
-      "sendingNote": "Puedes seguir con tu registro mientras terminan de subir."
+      "sendingNote": "Puedes seguir con tu registro mientras terminan de subir.",
+      "scanLicense": {
+        "title": "Licencia de conducir",
+        "hint": "Escanea el anverso y el reverso. Leemos tu número y vencimiento por ti.",
+        "extracted": "Esto leímos de tu licencia:",
+        "fieldNumber": "Número",
+        "fieldExpiry": "Vencimiento",
+        "readyEager": "Licencia leída. Al confirmar, la subimos al instante.",
+        "useLicense": "Usar esta licencia",
+        "sent": "Licencia enviada. Ya quedó en tu registro.",
+        "needsDniTitle": "Primero escaneá tu DNI",
+        "needsDniBody": "Registramos tu licencia después de tu DNI. Volvé y escaneá tu DNI primero; después subimos la licencia.",
+        "front": "Anverso",
+        "back": "Reverso"
+      },
+      "criticalMissingTitle": "No pudimos leer tu licencia",
+      "criticalMissingBody": "La foto quedó borrosa o incompleta. Vuelve a escanear tu licencia con buena luz para leer el número y el vencimiento.",
+      "galleryFallback": "Vuelve a escanear tu licencia para leer sus datos."
     },
     "kyc": {
       "title": "Verifica tu identidad",

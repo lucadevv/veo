@@ -25,29 +25,25 @@ import {
   type DeferredDocument,
 } from '../hooks/usePersonalDataContinue';
 import { useDniSubmit } from '../hooks/useDniSubmit';
+import { useLicenseSubmit } from '../hooks/useLicenseSubmit';
 import { DriverExistence, useDriverExists } from '../hooks/useDriverExists';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
 import { useRegistrationDocuments } from '../hooks/useRegistrationDocuments';
-import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
 import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
 import { useRegistrationWizardPageOptional } from './RegistrationWizardContext';
 import {
   DocumentPreviewCard,
   DocumentUploadCard,
   firstMissingRequirement,
-  RegistrationDocumentSheet,
   RegistrationExitSheet,
   RegistrationHeader,
   RegistrationProgress,
   ScanDniSheet,
+  ScanLicenseSheet,
   type DocumentCardTone,
   type StepRequirement,
 } from '../components';
-import type {
-  DocumentUploadState,
-  RegistrationDocumentInput,
-} from '../components/RegistrationDocumentSheet';
 
 // `Partial`: en modo EMBEBIDO (wizard) la pantalla se renderiza SIN `navigation`/`route` (no es una ruta). En
 // modo STANDALONE (tests, o si volviera a rutearse) llegan normales. La navegación solo se usa standalone.
@@ -114,6 +110,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // Lote 1: subida EAGER del DNI en su propio sheet (checkDni → PATCH → subir DNI con fase por cara). Se
   // dispara al CONFIRMAR el DNI (`onDniConfirmed`), no al Continuar; el continue ya no re-sube el DNI.
   const dniSubmit = useDniSubmit();
+  // Lote 3: subida EAGER de la licencia en su propio sheet (subir por cara + onboard). Se dispara al
+  // CONFIRMAR la licencia; requiere que el driver EXISTA (lo crea el DNI) — si no, devuelve `needs-dni`.
+  const licenseSubmit = useLicenseSubmit();
 
   // Salida de emergencia del onboarding: paso 1 es una pantalla RAÍZ (sin back de navegación).
   const exit = useRegistrationExit();
@@ -141,8 +140,6 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // personales ya están server-side y el `personal` local vacío rompía la validación); en alta FRESCA el
   // PATCH crea el driver. Es la pieza que mata el dead-end "los datos leídos no son válidos".
   const driverExistence = useDriverExists();
-  const imagePicker = useImagePicker();
-  const documentScanner = useDocumentScanner();
 
   const [serverError, setServerError] = useState<unknown>(null);
   // El PATCH /personal creó el driver, pero una subida DIFERIDA (DNI o licencia) falló. NO perdemos la
@@ -153,12 +150,12 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // Bloqueo por DNI duplicado (resultado `dni-taken` de `useDniSubmit`, del pre-check `check-dni`): el sheet
   // del DNI lo pinta en rojo. Se limpia al reabrir el sheet y al reescanear otro documento.
   const [dniTaken, setDniTaken] = useState(false);
+  // Lote 3: la licencia se intentó ANTES que el DNI (driver aún no creado) → el sheet avisa "primero el DNI".
+  const [licenseNeedsDni, setLicenseNeedsDni] = useState(false);
 
-  // Estado de la captura LOCAL de la LICENCIA (sheet canónico). La captura NO sube: guarda en `pendingLicense`
-  // y muestra el check de éxito (misma UX). La subida real ocurre en el continue.
+  // Apertura del sheet EAGER de la licencia (`ScanLicenseSheet`): escanea → sube por cara → onboard. El
+  // estado de envío vive en las fases por-cara del store (`sendPhases.license`); acá solo su visibilidad.
   const [licenseSheetOpen, setLicenseSheetOpen] = useState(false);
-  const [licenseUploadState, setLicenseUploadState] = useState<DocumentUploadState>('idle');
-  const [licenseError, setLicenseError] = useState<unknown>(null);
 
   /** ¿El servidor YA tiene el DNI en un estado aceptable? (conductor que vuelve/reinstala). */
   const serverHasDni = serverHasAcceptableDoc(serverDocs.data, 'DNI');
@@ -278,76 +275,6 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   ];
   const missingKey = firstMissingRequirement(personalRequirements);
 
-  /**
-   * GUARDA la licencia escaneada para subirla DIFERIDA en el "Continuar" (espejo del DNI). NO sube ni hace
-   * onboard acá: para un conductor nuevo el driver no existe hasta el PATCH /personal, así que la subida en
-   * el escaneo daba 404. La licencia exige número Y vencimiento (ambos críticos en `isCriticalFieldMissing`),
-   * así que si el sheet llamó a `onSubmit`, los dos están presentes; el guard explícito narrowa para el
-   * contrato y degrada honestamente (si faltara alguno, error en vez de fingir captura).
-   */
-  const onSubmitLicense = (input: RegistrationDocumentInput): void => {
-    setLicenseError(null);
-    if (!input.documentNumber || !input.expiresAtIso) {
-      // No debería ocurrir (gating crítico del sheet), pero NUNCA guardamos una licencia sin los datos que
-      // el onboarding necesita: pedimos reescaneo en vez de capturar algo inservible.
-      setLicenseError(new Error(t('registration.documents.licenseUploadFailed')));
-      setLicenseUploadState('error');
-      return;
-    }
-    setPendingLicense({
-      file: input.file,
-      // Reverso SOFT (documento de 2 caras): si el escáner trajo la 2ª página, la guardamos; si no, `null`
-      // y la subida degrada honesto a una sola cara SINGLE (el reverso no bloquea el avance).
-      back: input.backFile ?? null,
-      documentNumber: input.documentNumber,
-      expiresAt: input.expiresAtIso,
-      extractedData: input.extractedData ?? null,
-    });
-    // Pen (proceso de envío EN el sheet): si el driver ya existe o los datos del PATCH están completos,
-    // la subida arranca AHÍ MISMO y el sheet muestra el proceso real (uploading→success/error). Si la
-    // licencia se escaneó ANTES que el DNI (driver aún no creable), queda capturada "lista para enviar"
-    // y sube con el eager sync de siempre al confirmar el DNI — sin fingir un envío que no ocurrió.
-    const fresh = useRegistrationStore.getState();
-    const personalComplete =
-      fresh.personal.fullName.trim().length > 0 &&
-      fresh.personal.dni.trim().length > 0 &&
-      fresh.personal.birthdate.trim().length > 0;
-    if (driverExistence === DriverExistence.Exists || personalComplete) {
-      setLicenseUploadState('uploading');
-      eagerSyncKey.current = `${fresh.pendingDni?.front.uri ?? '-'}|${input.file.uri}`;
-      void personalContinue
-        .submit({
-          personal: fresh.personal,
-          driverExists: driverExistence === DriverExistence.Exists,
-        })
-        .then((result) => {
-          if (
-            deriveDocumentPhase(useRegistrationStore.getState().sendPhases.license) === 'sent'
-          ) {
-            markLicenseCaptured();
-            return;
-          }
-          setLicenseUploadState('error');
-          setLicenseError(
-            result.status === 'server-error'
-              ? result.error
-              : new Error(t('registration.documents.licenseUploadFailed')),
-          );
-        });
-      return;
-    }
-    markLicenseCaptured();
-  };
-
-  /** Marca la licencia como capturada localmente y cierra el sheet tras mostrar el check de éxito. */
-  function markLicenseCaptured(): void {
-    setDocumentStatus(LICENSE_DOC_TYPE, DocumentUploadStatus.UPLOADED);
-    setLicenseUploadState('success');
-    setTimeout(() => {
-      setLicenseSheetOpen(false);
-      setLicenseUploadState('idle');
-    }, 900);
-  }
 
   const onContinue = async (): Promise<void> => {
     if (personalContinue.isPending) {
@@ -447,6 +374,21 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
           setDniTaken(true);
         }
       });
+  };
+
+  /**
+   * Confirma la LICENCIA capturada y dispara su subida EAGER (subir por cara + onboard). La licencia se
+   * registra DESPUÉS del DNI (que crea el driver), así que `driverExists` es true si el server ya lo tiene
+   * o el DNI ya se envió en esta sesión; si no, `useLicenseSubmit` devuelve `needs-dni` y el sheet avisa.
+   */
+  const onLicenseConfirmed = (): void => {
+    setLicenseNeedsDni(false);
+    const driverReady = driverExistence === DriverExistence.Exists || dniPhase === 'sent';
+    void licenseSubmit.submit({ driverExists: driverReady }).then((result) => {
+      if (result.status === 'needs-dni') {
+        setLicenseNeedsDni(true);
+      }
+    });
   };
 
   useEffect(() => {
@@ -647,8 +589,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
                 document: t('registration.documents.license'),
               })}
               onPress={() => {
-                setLicenseError(null);
-                setLicenseUploadState('idle');
+                setLicenseNeedsDni(false);
                 setLicenseSheetOpen(true);
               }}
             />
@@ -679,21 +620,13 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   );
 
   const licenseSheet = licenseSheetOpen ? (
-    <RegistrationDocumentSheet
+    <ScanLicenseSheet
       visible
-      onClose={() => {
-        if (licenseUploadState !== 'uploading') {
-          setLicenseSheetOpen(false);
-        }
-      }}
-      documentLabel={t('registration.documents.license')}
-      documentType={licenseBackendType}
-      uploadState={licenseUploadState}
-      errorMessage={licenseError ? toErrorMessage(licenseError, t) : undefined}
-      onPick={(source) => imagePicker.pick(source)}
-      // Licencia = documento de 2 caras: pedimos 2 páginas (anverso + reverso) en una sesión del escáner.
-      onScan={() => documentScanner.scan({ maxPages: 2 })}
-      onSubmit={onSubmitLicense}
+      onClose={() => setLicenseSheetOpen(false)}
+      facePhases={sendPhases.license}
+      needsDni={licenseNeedsDni}
+      onConfirm={onLicenseConfirmed}
+      onRescan={() => setLicenseNeedsDni(false)}
     />
   ) : null;
   const scanSheet = (
