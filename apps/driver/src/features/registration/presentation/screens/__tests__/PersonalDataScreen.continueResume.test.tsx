@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import TestRenderer, { act } from 'react-test-renderer';
 import '../../../../../i18n';
 import { PersonalDataScreen } from '../PersonalDataScreen';
-import { DocumentUploadStatus } from '../../../domain';
 import { useRegistrationStore } from '../../state/registrationStore';
 import { DriverExistence } from '../../hooks/useDriverExists';
 import type {
@@ -19,8 +18,9 @@ import type {
  *      válidos" (mata el dead-end). Se verifica que el `driverExists` que recibe el continue es `true`.
  *  (b) FRESCO (driver no existe, `personal` poblado por escaneo): pasa `driverExists=false` al continue
  *      (el PATCH crea el driver). Espejo del alta nueva.
- *  (c) #F (chip que miente): un `document-upload-failed` de la LICENCIA REVIERTE su flag local UPLOADED
- *      (marcado optimista en el escaneo) a PENDING, para que el chip refleje la verdad del servidor.
+ *
+ * Gating (Lote 4): Continuar se habilita SOLO con ambas cards en CHECK (`sent` de esta sesión o el server
+ * ya tiene el doc), no con la captura — por eso el setup marca las caras `sent`.
  *
  * Estrategia: aislamos la PANTALLA. Mockeamos `usePersonalDataContinue` (capturamos el `submit` y
  * controlamos su resultado), `useDriverExists` (la señal server) y `useRegistrationDocuments` (listado del
@@ -139,6 +139,15 @@ function pressContinue(renderer: TestRenderer.ReactTestRenderer): void {
   });
 }
 
+/** Devuelve el nodo del botón "Continuar" del footer (para inspeccionar `disabled`). */
+function continueButton(
+  renderer: TestRenderer.ReactTestRenderer,
+): TestRenderer.ReactTestInstance | undefined {
+  return renderer.root
+    .findAll((node) => typeof node.props?.label === 'string' && node.props.label === 'Continuar')
+    .find((node) => typeof node.props.onPress === 'function');
+}
+
 describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExists)', () => {
   let queryClient: QueryClient;
 
@@ -180,6 +189,10 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
         expiresAt: '2030-12-31',
         extractedData: null,
       });
+      // Lote 4 · el gating exige el CHECK (`sent`), no la captura: el envío EAGER de esta sesión dejó ambas
+      // caras enviadas → las dos cards en check habilitan Continuar.
+      useRegistrationStore.getState().setSendPhase('dni', 'front', 'sent');
+      useRegistrationStore.getState().setSendPhase('license', 'front', 'sent');
     });
 
     let renderer!: TestRenderer.ReactTestRenderer;
@@ -258,16 +271,12 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
     });
   });
 
-  it('(c) #F: document-upload-failed de la LICENCIA revierte su flag local UPLOADED a PENDING (el chip no miente)', async () => {
+  it('(d) Lote 4: docs CAPTURADOS pero sin check (`sent`) → Continuar deshabilitado', () => {
     mockDriverExistence = DriverExistence.NotFound;
-    // El escaneo marcó la licencia UPLOADED optimistamente (markLicenseCaptured) y dejó la captura pendiente.
+    // Captura viva de ambos docs, pero la subida NO llegó a `sent` (recién capturado / subiendo / error):
+    // las cards no están en check → Continuar bloqueado. Antes la sola captura habilitaba el avance (bug).
     act(() => {
-      useRegistrationStore.getState().setPersonal({
-        fullName: 'QUISPE MAMANI CARLOS',
-        dni: '70123456',
-        birthdate: '1990-03-15',
-      });
-      useRegistrationStore.getState().setDocumentStatus('LICENSE', DocumentUploadStatus.UPLOADED);
+      useRegistrationStore.getState().setPersonal({ dni: '70123456' });
       useRegistrationStore.getState().setPendingDni(DNI_CAPTURE);
       useRegistrationStore.getState().setPendingLicense({
         file: {
@@ -284,8 +293,6 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
         extractedData: null,
       });
     });
-    // La subida diferida de la licencia falla tras el PATCH.
-    mockSubmitResult = { status: 'document-upload-failed', document: 'license' };
 
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
@@ -297,15 +304,7 @@ describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExi
       );
     });
 
-    await act(async () => {
-      pressContinue(renderer);
-    });
-
-    // El flag local de la LICENCIA se revirtió a PENDING: el chip ya no dice "Subido" cuando el server no lo tiene.
-    const licenseDoc = useRegistrationStore
-      .getState()
-      .documents.find((d) => d.type === 'LICENSE');
-    expect(licenseDoc?.status).toBe(DocumentUploadStatus.PENDING);
+    expect(continueButton(renderer)?.props.disabled).toBe(true);
 
     act(() => {
       renderer.unmount();

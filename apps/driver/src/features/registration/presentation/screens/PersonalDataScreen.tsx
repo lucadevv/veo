@@ -174,6 +174,11 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // `hasReadDni` (número leído, puede venir de `personal.dni` persistido) NO alcanza: tras un reload el número
   // sobrevive pero la IMAGEN no → diría "listo" sin nada que subir (DNI fantasma). El número se exige aparte.
   const dniDocReady = pendingDni != null || serverHasDni || dniPhase === 'sent';
+  // Lote 4 · gating por CHECK: la card del DNI está "en check" SOLO cuando el envío de ESTA sesión la dejó
+  // `sent` (o el server ya la tiene, en resume). Captura/subiendo/error (`pending`) NO cuentan — Continuar se
+  // activa recién con el check verde, no con la captura, y una subida FALLIDA (pending vivo) no habilita el
+  // avance. Es la MISMA condición que pinta el check de la card (`sent` prop), no una regla paralela.
+  const dniSent = dniPhase === 'sent' || serverHasDni;
 
   const dniBackendType = registrationDocTypeToBackend('DNI');
   // Estado de SERVIDOR del DNI para el chip "ya enviado" (mismo patrón que la licencia): al reanudar SIN
@@ -245,6 +250,8 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // de subida conserva `pendingLicense` (sigue "lista para enviar/reintentar") y el banner de fallo lo dice.
   const licenseUploaded =
     pendingLicense != null || serverHasLicense || licensePhase === 'sent';
+  // Lote 4 · el check de la licencia (espejo del DNI): `sent` de esta sesión o el server ya la tiene.
+  const licenseSent = licensePhase === 'sent' || serverHasLicense;
 
   // Estado de SERVIDOR de la licencia para el chip (si existe en `GET /drivers/me/documents`).
   const licenseServerState = (() => {
@@ -262,16 +269,17 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   const licenseServerImageUri =
     serverDocs.data?.find((doc) => doc.type === licenseBackendType)?.images[0]?.url ?? null;
 
-  // Gating del paso CONDUCTOR (LOTE B): avanza SOLO con el número del DNI leído (para el PATCH) + la IMAGEN del
-  // DNI disponible (captura viva o ya en el server) + la licencia lista. Exigir `dniDocReady` (no solo
-  // `hasReadDni`) cierra el DNI fantasma: número persistido sin imagen tras un reload ya no deja avanzar.
-  const canContinue = hasReadDni && dniDocReady && licenseUploaded;
+  // Gating del paso CONDUCTOR (Lote 4 · "ambas cards en check → Continuar"): avanza SOLO cuando el DNI y la
+  // licencia están EN CHECK (`sent` de esta sesión o ya en el server), con el número del DNI leído para el
+  // PATCH. La captura o una subida en curso/fallida (`pending`) NO habilitan — el avance espera el check
+  // verde de las dos, espejando lo que ve el conductor: recién con los dos ✓ se prende Continuar.
+  const canContinue = hasReadDni && dniSent && licenseSent;
 
   // U3 · CTA que dice QUÉ falta: derivado del MISMO gating (no se duplica la lógica). El orden refleja la
   // SECUENCIA de pasos (1 · DNI, 2 · Licencia): se muestra el PRIMER requisito incumplido, pegado al CTA.
   const personalRequirements: readonly StepRequirement[] = [
-    { satisfied: hasReadDni && dniDocReady, missingKey: 'registration.personal.missing.dni' },
-    { satisfied: licenseUploaded, missingKey: 'registration.personal.missing.license' },
+    { satisfied: hasReadDni && dniSent, missingKey: 'registration.personal.missing.dni' },
+    { satisfied: licenseSent, missingKey: 'registration.personal.missing.license' },
   ];
   const missingKey = firstMissingRequirement(personalRequirements);
 
@@ -475,9 +483,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               pendingLabel={t('registration.documents.pending')}
               serverState={phaseChip(dniPhase) ?? dniServerState}
               sending={dniPhase === 'sending'}
-              sent={dniPhase === 'sent' || serverHasDni}
+              sent={dniSent}
               thumbUri={pendingDni?.front.uri ?? dniServerImageUri ?? undefined}
-              {...cardSubtitle(dniPhase, dniPhase === 'sent' || serverHasDni)}
+              {...cardSubtitle(dniPhase, dniSent)}
               accessibilityLabel={
                 hasCapture || hasReadDni
                   ? t('registration.actions.rescan')
@@ -581,9 +589,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               pendingLabel={t('registration.documents.pending')}
               serverState={phaseChip(licensePhase) ?? licenseServerState}
               sending={licensePhase === 'sending'}
-              sent={licensePhase === 'sent' || serverHasLicense}
+              sent={licenseSent}
               thumbUri={pendingLicense?.file?.uri ?? licenseServerImageUri ?? undefined}
-              {...cardSubtitle(licensePhase, licensePhase === 'sent' || serverHasLicense)}
+              {...cardSubtitle(licensePhase, licenseSent)}
               busy={personalContinue.isPending}
               accessibilityLabel={t('registration.documents.uploadAccessibility', {
                 document: t('registration.documents.license'),
