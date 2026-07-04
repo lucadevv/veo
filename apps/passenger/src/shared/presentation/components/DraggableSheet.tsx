@@ -28,7 +28,9 @@ import Svg, {
 import Animated, {
   clamp,
   runOnJS,
+  scrollTo,
   useAnimatedReaction,
+  useAnimatedRef,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -139,6 +141,9 @@ const MIN_CONTENT_FRACTION = 0.16;
 
 /** Altura física de la fila del grabber (paddingTop 8 + grabber 4 + paddingBottom 6), no medible. */
 const GRABBER_CHROME = 8 + 4 + 6;
+
+/** ScrollView de GH animable por reanimated (para `scrollTo` desde worklets del pan). */
+const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 
 /**
  * Bottom sheet ARRASTRABLE de verdad (estilo Flutter DraggableScrollableSheet / Uber) con altura
@@ -381,9 +386,21 @@ export const DraggableSheet = forwardRef<
     [anchorCount, settleTo],
   );
 
+  // Ref ANIMADA al scroll interno: permite congelarlo (`scrollTo`) desde el worklet del pan
+  // mientras el SHEET es lo que se mueve (sin doble desplazamiento sheet+lista).
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
+
+  // Gesto NATIVO del scroll interno, con su PROPIO detector alrededor del ScrollView (ver render).
+  // CLAVE del fix: antes `Gesture.Native()` vivía suelto en el detector del contenedor — no
+  // referenciaba al scrollable real, así que cuando el pan se activaba CANCELABA el scroll del hijo
+  // y la lista no scrolleaba nunca dentro del sheet. Atado + `simultaneousWithExternalGesture`,
+  // ambos corren de verdad y el gating de abajo decide quién mueve qué.
+  const nativeScroll = useMemo(() => Gesture.Native(), []);
+
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
+        .simultaneousWithExternalGesture(nativeScroll)
         .onStart(() => {
           startY.value = translateY.value;
           dragging.value = false;
@@ -410,6 +427,8 @@ export const DraggableSheet = forwardRef<
             return;
           }
           dragging.value = true;
+          // El SHEET toma el gesto: congela la lista arriba para que no se desplace a la vez.
+          scrollTo(scrollRef, 0, 0, false);
           // Arrastre relativo, acotado al rango [minOffset(full), maxOffset(peek)].
           translateY.value = clamp(
             startY.value + event.translationY,
@@ -428,6 +447,8 @@ export const DraggableSheet = forwardRef<
           interacting.value = false;
         }),
     [
+      nativeScroll,
+      scrollRef,
       startY,
       translateY,
       dragging,
@@ -437,14 +458,6 @@ export const DraggableSheet = forwardRef<
       resolveSnapIndex,
       settleTo,
     ],
-  );
-
-  // Scroll nativo del contenido. Corre SIMULTÁNEO al pan: cuando el sheet está expandido y el
-  // contenido no está arriba, el scroll gana; el pan se inhibe a sí mismo (ver `onUpdate`).
-  const nativeScroll = useMemo(() => Gesture.Native(), []);
-  const composedGesture = useMemo(
-    () => Gesture.Simultaneous(panGesture, nativeScroll),
-    [panGesture, nativeScroll],
   );
 
   const onScroll = useCallback(
@@ -471,35 +484,40 @@ export const DraggableSheet = forwardRef<
     [measuredHeader],
   );
 
-  // `ScrollView` cableado: reporta su offset al worklet. Cuando el contenido entra en la altura
-  // actual NO scrollea (hug); cuando la supera, scrollea adentro sin pelear el drag.
+  // `ScrollView` cableado: reporta su offset al worklet y lleva la ref ANIMADA (scrollTo del pan).
+  // Va DENTRO de su propio GestureDetector con `nativeScroll` (ver render): así el pan de afuera
+  // y el scroll de adentro corren simultáneos DE VERDAD y el gating decide. Cuando el contenido
+  // entra en la altura actual NO scrollea (hug); cuando la supera, scrollea adentro.
   const ScrollComponent = useMemo(() => {
     function WiredScroll(
       props: React.ComponentProps<typeof GHScrollView>,
     ): React.JSX.Element {
       const {contentContainerStyle, ...rest} = props;
       return (
-        <GHScrollView
-          {...rest}
-          onScroll={onScroll}
-          scrollEventThrottle={16}
-          keyboardShouldPersistTaps="handled">
-          {/* Wrapper medido: reporta la altura intrínseca del contenido (sin restricción de alto). */}
-          <View onLayout={onContentLayout} style={contentContainerStyle}>
-            {props.children}
-          </View>
-        </GHScrollView>
+        <GestureDetector gesture={nativeScroll}>
+          <AnimatedGHScrollView
+            {...rest}
+            ref={scrollRef}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            keyboardShouldPersistTaps="handled">
+            {/* Wrapper medido: reporta la altura intrínseca del contenido (sin restricción de alto). */}
+            <View onLayout={onContentLayout} style={contentContainerStyle}>
+              {props.children}
+            </View>
+          </AnimatedGHScrollView>
+        </GestureDetector>
       );
     }
     return WiredScroll as unknown as typeof GHScrollView;
-  }, [onScroll, onContentLayout]);
+  }, [nativeScroll, scrollRef, onScroll, onContentLayout]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{translateY: translateY.value}],
   }));
 
   return (
-    <GestureDetector gesture={composedGesture}>
+    <GestureDetector gesture={panGesture}>
       <Animated.View
         style={[
           styles.sheet,

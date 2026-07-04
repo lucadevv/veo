@@ -409,9 +409,15 @@ export function RequestFlowScreen(): React.JSX.Element {
     sheetRef.current?.snapToIndex(PEEK_INDEX);
   }, []);
 
-  // El DRAG no entra a búsqueda (eso es solo por tap): arrastrar mueve la lista idle entre peek y
-  // expandido. ÚNICA transición por drag: si estás buscando y arrastrás hasta el peek, sale de búsqueda.
+  // El DRAG no entra a búsqueda (eso es solo por tap). ÚNICA transición por drag: buscando en un
+  // sheet de DOS anclajes (route/trip), arrastrar hasta el peek sale de búsqueda. Con UN anclaje
+  // (Home idle/searching) el settle SIEMPRE emite índice 0 — p.ej. al ENTRAR a búsqueda cuando el
+  // sheet re-ancla a 0.92 — y sin este guard esa emisión cerraba la búsqueda recién abierta.
+  const snapCountRef = useRef(1);
   const handleSnap = useCallback((index: number) => {
+    if (snapCountRef.current < 2) {
+      return;
+    }
     if (flowRef.current === 'searching' && index <= PEEK_INDEX) {
       setFlow('idle');
       setQuery('');
@@ -542,18 +548,24 @@ export function RequestFlowScreen(): React.JSX.Element {
     [insets.top, peekHeight],
   );
 
-  // Anclajes del sheet POR MODO. En idle el peek NO es content-hug: es la hoja del pen (arranca a
-  // HOME_SHEET_TOP_FRACTION desde arriba), convertida a fracción del área útil del DraggableSheet
-  // (que descuenta inset superior y bottomOffset). Capado bajo el full (0.92) para que el drag
-  // idle⇄expandido siga teniendo recorrido en devices chicos.
+  // Anclajes del sheet POR MODO/FLOW. En idle la hoja del pen es FIJA (un SOLO anclaje a
+  // HOME_SHEET_TOP_FRACTION): con un anclaje el pan no pelea el gesto y la lista scrollea DIRECTO
+  // (antes peek 0.87 y full 0.92 estaban tan cerca que el drag "moría" y el scroll pedía un segundo
+  // gesto — feedback del dueño). En BÚSQUEDA el sheet sube solo a 0.92 (teclado + sugerencias). En
+  // route/trip, content-hug + full como siempre.
   const sheetSnapPoints = useMemo<ReadonlyArray<number | 'content'>>(() => {
     if (mapMode !== 'idle') {
       return SNAP_POINTS;
     }
+    if (flow === 'searching') {
+      return [0.92];
+    }
     const available = Math.max(windowHeight - insets.top - bottomInset, 1);
     const visible = windowHeight * (1 - HOME_SHEET_TOP_FRACTION);
-    return [Math.min(visible / available, 0.88), 0.92];
-  }, [mapMode, windowHeight, insets.top, bottomInset]);
+    return [Math.min(visible / available, 0.92)];
+  }, [mapMode, flow, windowHeight, insets.top, bottomInset]);
+  // Espejo para handleSnap (declarado arriba, antes del memo): cuántos anclajes tiene el sheet HOY.
+  snapCountRef.current = sheetSnapPoints.length;
 
 
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
