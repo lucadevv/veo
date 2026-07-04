@@ -16,6 +16,12 @@ export interface HttpClientOptions {
   credentials?: RequestCredentials;
   /** Reintentos para GET. Default 2. */
   retries?: number;
+  /**
+   * Timeout por intento (ms). Default 15000. `0` = sin timeout.
+   * Sin esto, un backend inalcanzable (IP LAN equivocada, túnel caído) deja el fetch colgado
+   * al timeout TCP del SO (60s+) y la UI muestra un loading eterno sin feedback.
+   */
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -26,6 +32,8 @@ export interface RequestOptions<T> {
   /** Schema Zod para validar (y tipar) la respuesta. */
   schema?: ZodType<T>;
   signal?: AbortSignal;
+  /** Override del timeout por intento (ms) para ESTA request. `0` = sin timeout. */
+  timeoutMs?: number;
   /** Cabecera Idempotency-Key para POST que lo requieran. */
   idempotencyKey?: string;
 }
@@ -37,6 +45,7 @@ export class HttpClient {
   private readonly defaultHeaders: Record<string, string>;
   private readonly credentials: RequestCredentials;
   private readonly retries: number;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: HttpClientOptions) {
@@ -44,6 +53,7 @@ export class HttpClient {
     this.defaultHeaders = { Accept: 'application/json', ...opts.headers };
     this.credentials = opts.credentials ?? 'include';
     this.retries = opts.retries ?? 2;
+    this.timeoutMs = opts.timeoutMs ?? 15_000;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -92,14 +102,31 @@ export class HttpClient {
     const maxAttempts = method === 'GET' ? this.retries + 1 : 1;
     let lastErr: ApiError | undefined;
 
+    const timeoutMs = opts.timeoutMs ?? this.timeoutMs;
+
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Timeout por intento vía AbortController, enlazado al signal del caller (si lo hay).
+      // Sin esto, un host inalcanzable cuelga el fetch al timeout TCP del SO (60s+) y la UI
+      // queda en loading eterno sin feedback.
+      const controller = new AbortController();
+      const onCallerAbort = () => controller.abort();
+      opts.signal?.addEventListener('abort', onCallerAbort);
+      if (opts.signal?.aborted) controller.abort();
+      let timedOut = false;
+      const timer =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              timedOut = true;
+              controller.abort();
+            }, timeoutMs)
+          : undefined;
       try {
         const res = await this.fetchImpl(url, {
           method,
           headers,
           body: bodyInit,
           credentials: this.credentials,
-          signal: opts.signal,
+          signal: controller.signal,
         });
         if (!res.ok) {
           const errBody = await this.safeJson<ApiErrorBody>(res);
@@ -123,14 +150,24 @@ export class HttpClient {
           }
           throw e;
         }
-        // Error de red / abort
-        const netErr = new ApiError(0, 'NETWORK_ERROR', (e as Error).message);
+        // Error de red / abort. El abort por timeout se reporta con mensaje propio (el del
+        // runtime es un críptico "Aborted").
+        const netErr = new ApiError(
+          0,
+          'NETWORK_ERROR',
+          timedOut
+            ? `timeout tras ${timeoutMs}ms sin respuesta de ${url} — ¿backend inalcanzable?`
+            : (e as Error).message,
+        );
         if (attempt < maxAttempts) {
           lastErr = netErr;
           await sleep(150 * attempt);
           continue;
         }
         throw netErr;
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        opts.signal?.removeEventListener('abort', onCallerAbort);
       }
     }
     throw lastErr ?? new ApiError(0, 'NETWORK_ERROR', 'request failed');
