@@ -321,8 +321,9 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
   // (~40ms entre bloques, ease-out, <300ms, reduce-motion safe via EnterView). Da "vida" al Home sin
   // pelear con el scroll (solo opacity/transform). Los índices continúan en el body (debt/secciones).
   return (
-    // Ritmo vertical del pen (P/Home · HomeContent gap 8): bloques pegados, densos — no lg.
-    <View style={{gap: theme.spacing.sm}}>
+    // Ritmo vertical del pen (P/Home · HomeContent gap $s-lg): aire entre bloques — el gap 8
+    // anterior quedaba apretado (feedback del dueño) y el pen se actualizó a 16.
+    <View style={{gap: theme.spacing.lg}}>
       <EnterView index={0}>
         <HomeHero name={ctx.greetingName} />
       </EnterView>

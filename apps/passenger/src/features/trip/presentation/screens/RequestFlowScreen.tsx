@@ -771,9 +771,10 @@ export function RequestFlowScreen(): React.JSX.Element {
                   mapMode === 'idle'
                     ? bottomInset + HOME_TABBAR_CLEARANCE
                     : theme.spacing.xl,
-                // Ritmo vertical del pen en el Home (HomeContent gap 8); el resto conserva md.
+                // Ritmo vertical del pen en el Home (HomeContent gap $s-lg = 16, con aire); el
+                // resto de fases conserva md.
                 gap:
-                  mapMode === 'idle' ? theme.spacing.sm : theme.spacing.md,
+                  mapMode === 'idle' ? theme.spacing.lg : theme.spacing.md,
               },
             ]}
             showsVerticalScrollIndicator={false}>
