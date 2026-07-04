@@ -38,6 +38,11 @@ export interface VeoWordmarkProps {
   variant?: VeoWordmarkVariant;
   /** Añade "PERÚ" + bandera bajo el lockup (pantallas de país). */
   peru?: boolean;
+  /**
+   * Color de "VEO" en el lockup stacked. Default `accent` (cian) — la identidad en headers/estados.
+   * El splash lo pide `ink` (blanco) sobre el fondo oscuro, como el frame del pen. Solo aplica al stacked.
+   */
+  veoColor?: 'accent' | 'ink';
 }
 
 /** Escala tipográfica de "VEO" por tamaño. */
@@ -68,6 +73,7 @@ export function VeoWordmark({
   size = 'md',
   variant = 'stacked',
   peru = false,
+  veoColor = 'accent',
 }: VeoWordmarkProps): React.JSX.Element {
   const veoSize = VEO_SIZE[size];
   const subSize = SUB_SIZE[size];
@@ -95,7 +101,7 @@ export function VeoWordmark({
     <View style={styles.wrap}>
       <Text
         variant="title1"
-        color="accent"
+        color={veoColor}
         style={[styles.veo, styles.veoStacked, { fontSize: veoSize, lineHeight: veoSize * 1.05 }]}
       >
         VEO

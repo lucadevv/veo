@@ -69,7 +69,8 @@ export const SplashScreen = (): React.JSX.Element => {
 
       <View style={styles.center}>
         <Animated.View style={[styles.wordmark, wordmarkStyle]}>
-          <VeoWordmark size="xl" />
+          {/* "VEO" en blanco (ink) sobre el fondo oscuro, como el frame del pen del splash. */}
+          <VeoWordmark size="xl" veoColor="ink" />
           {/* Acento de marca bajo el lockup: mismo lenguaje visual que la barra de progreso. */}
           <View
             style={[styles.brandAccent, { backgroundColor: theme.colors.accent }]}

@@ -32,7 +32,6 @@ import { useSessionStore } from '../../../../core/session/sessionStore';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { IconChevronLeft } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
 import { isValidPeruPhone } from '../../domain';
 import { useLogin, useRequestOtp } from '../hooks/useAuth';
 import { useBiometricRelogin } from '../hooks/useBiometricRelogin';
@@ -226,7 +225,7 @@ export const LoginScreen = (): React.JSX.Element => {
   const sideGutter = theme.spacing['2xl'];
   // Alto de la banda héroe: ~32% de la ventana + el inset superior, para que sangre BAJO la status bar
   // y derrita la foto al `bg` justo donde arranca el contenido.
-  const heroH = Math.round(height * 0.32) + insets.top;
+  const heroH = Math.round(height * 0.38) + insets.top;
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
@@ -267,18 +266,15 @@ export const LoginScreen = (): React.JSX.Element => {
 
           {/* Contenido sobre `bg` sólido, alineado a la izquierda con el gutter. */}
           <View style={[styles.body, { paddingHorizontal: sideGutter, gap: theme.spacing['2xl'] }]}>
-            {/* Bloque de marca + título, debajo de la banda (mantiene los Reveal con sus delays). */}
-            <View style={{ gap: theme.spacing.lg }}>
-              <Reveal from="scale" style={styles.brandRow}>
-                <VeoWordmark variant="inline" size="sm" />
-              </Reveal>
-              <Reveal delay={60} style={{ gap: theme.spacing.xs }}>
-                <Text variant="title1">{t('auth.loginTitle')}</Text>
-                <Text variant="callout" color="inkMuted">
-                  {t('auth.loginSubtitle')}
-                </Text>
-              </Reveal>
-            </View>
+            {/* Título directo bajo la banda hero: la foto ya lleva la marca, así que NO repetimos el
+                wordmark "VEO CONDUCTORES" (el `loginTitle` ya dice "Ingresa a VEO Conductores") — espeja
+                el frame C/Login del pen, que quitó ese lockup redundante. */}
+            <Reveal style={{ gap: theme.spacing.xs }}>
+              <Text variant="title1">{t('auth.loginTitle')}</Text>
+              <Text variant="callout" color="inkMuted">
+                {t('auth.loginSubtitle')}
+              </Text>
+            </Reveal>
 
             {expired ? <Banner tone="warn" title={t('auth.sessionExpired')} /> : null}
 
@@ -370,9 +366,6 @@ export const LoginScreen = (): React.JSX.Element => {
                 loading={requestOtp.isPending}
                 onPress={onRequest}
               />
-              <Text variant="footnote" color="inkSubtle" align="center">
-                {t('auth.newDriverHint')}
-              </Text>
             </Reveal>
           </View>
         </ScrollView>
@@ -458,7 +451,6 @@ const styles = StyleSheet.create({
   hero: { width: '100%', overflow: 'hidden' },
   // Contenido bajo la banda: el padding top lo aporta el flujo (la banda ya ocupa el tope).
   body: { paddingTop: 24 },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   biometricHead: { flexDirection: 'row', alignItems: 'center' },
   biometricCopy: { flex: 1, gap: 2 },
   shieldCircle: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },

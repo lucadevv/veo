@@ -89,7 +89,7 @@
   "auth": {
     "title": "Inicia sesión",
     "subtitle": "Ingresa con tu número de conductor registrado.",
-    "phoneLabel": "Número de teléfono",
+    "phoneLabel": "Número de celular",
     "phoneHelper": "Formato Perú, ej. +51987654321",
     "requestOtp": "Enviar código",
     "codeLabel": "Código de verificación",
@@ -111,7 +111,7 @@
     "useCodeInstead": "Usar código en su lugar",
     "phoneDivider": "O ingresa tu número de celular",
     "phonePlaceholder": "987 654 321",
-    "loginHelper": "Te enviaremos un código. Si eres nuevo, con tu número creas tu cuenta de conductor."
+    "loginHelper": "Te enviaremos un código por SMS. Si eres nuevo, con tu número creas tu cuenta de conductor."
   },
   "onboarding": {
     "skip": "Saltar",
