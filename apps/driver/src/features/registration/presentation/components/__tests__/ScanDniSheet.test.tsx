@@ -85,7 +85,14 @@ function renderSheet(scanner: ScannerDouble): {
       <QueryClientProvider client={queryClient}>
         <DiProvider container={fakeContainer(scanner)}>
           <ThemeProvider theme={driverTheme}>
-            <ScanDniSheet visible onClose={jest.fn()} sendPhase="idle" onConfirm={jest.fn()} />
+            <ScanDniSheet
+              visible
+              onClose={jest.fn()}
+              facePhases={{ front: 'idle', back: 'idle' }}
+              dniTaken={false}
+              onConfirm={jest.fn()}
+              onRescan={jest.fn()}
+            />
           </ThemeProvider>
         </DiProvider>
       </QueryClientProvider>
@@ -142,19 +149,18 @@ beforeEach(() => {
   });
 });
 
-describe('ScanDniSheet · OCR vacío → fallback honesto; OCR ok → "DNI capturado ✓"', () => {
-  it('OCR OK: muestra "DNI capturado" minimalista (sin listar valores) y permite confirmar', async () => {
+describe('ScanDniSheet · OCR vacío → fallback honesto; OCR ok → bloque "Esto leímos de tu DNI"', () => {
+  it('OCR OK: muestra el bloque "Esto leímos" con el número leído y permite confirmar', async () => {
     const scanner: ScannerDouble = { scan: jest.fn(async () => dniScanReadable()) };
     const { renderer } = renderSheet(scanner);
 
     await pressScan(renderer);
 
-    // Tarjeta minimalista "DNI capturado": el título de éxito está presente.
-    expect(hasText(renderer, tr('registration.personal.scanDni.capturedTitle'))).toBe(true);
-    // NO se listan los valores leídos (nombre/dni/nacimiento) ni el viejo "Esto leímos de tu DNI:".
-    expect(hasText(renderer, tr('registration.personal.scanDni.extracted'))).toBe(false);
-    expect(hasText(renderer, '70123456')).toBe(false);
-    expect(hasText(renderer, 'QUISPE MAMANI CARLOS')).toBe(false);
+    // Bloque de extracción (frame C/ScanDni): el título "Esto leímos de tu DNI:" y el NÚMERO leído se muestran.
+    expect(hasText(renderer, tr('registration.personal.scanDni.extracted'))).toBe(true);
+    expect(hasText(renderer, '70123456')).toBe(true);
+    // Estado eager: al confirmar se sube + verifica al instante.
+    expect(hasText(renderer, tr('registration.personal.scanDni.readyEager'))).toBe(true);
     // NO aparece el fallback de campo crítico (el número SÍ se leyó).
     expect(hasText(renderer, tr('registration.personal.scanDni.criticalMissingTitle'))).toBe(false);
 
@@ -162,17 +168,46 @@ describe('ScanDniSheet · OCR vacío → fallback honesto; OCR ok → "DNI captu
     expect(useRegistrationStore.getState().personal.dni).toBe('70123456');
   });
 
-  it('OCR VACÍO (imagen OK, sin texto): NO muestra card vacía; muestra el fallback "reescaneá"', async () => {
+  it('OCR VACÍO (imagen OK, sin texto): NO muestra el extract; muestra el fallback "reescaneá"', async () => {
     const scanner: ScannerDouble = { scan: jest.fn(async () => dniScanNoText()) };
     const { renderer } = renderSheet(scanner);
 
     await pressScan(renderer);
 
-    // Fallback HONESTO del campo crítico: se pide reescanear (no una tarjeta que finge éxito).
+    // Fallback HONESTO del campo crítico: se pide reescanear (no un bloque que finge éxito).
     expect(hasText(renderer, tr('registration.personal.scanDni.criticalMissingTitle'))).toBe(true);
-    // NO se muestra la tarjeta "DNI capturado ✓" (no hubo lectura del número).
-    expect(hasText(renderer, tr('registration.personal.scanDni.capturedTitle'))).toBe(false);
+    // NO se muestra el bloque de extracción (no hubo lectura del número).
+    expect(hasText(renderer, tr('registration.personal.scanDni.extracted'))).toBe(false);
     // El número crítico NO quedó en el store (OCR vacío → degradación honesta).
     expect(useRegistrationStore.getState().personal.dni).toBe('');
+  });
+
+  it('dniTaken: muestra el estado ROJO de DNI ya registrado y "Escanear otro DNI"', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
+          <QueryClientProvider client={queryClient}>
+            <DiProvider container={fakeContainer({ scan: jest.fn() })}>
+              <ThemeProvider theme={driverTheme}>
+                <ScanDniSheet
+                  visible
+                  onClose={jest.fn()}
+                  facePhases={{ front: 'idle', back: 'idle' }}
+                  dniTaken
+                  onConfirm={jest.fn()}
+                  onRescan={jest.fn()}
+                />
+              </ThemeProvider>
+            </DiProvider>
+          </QueryClientProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    expect(hasText(renderer, tr('registration.personal.scanDni.dniTakenTitle'))).toBe(true);
+    expect(hasText(renderer, tr('registration.personal.scanDni.scanAnother'))).toBe(true);
   });
 });

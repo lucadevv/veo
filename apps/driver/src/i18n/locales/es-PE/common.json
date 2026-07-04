@@ -202,7 +202,14 @@
         "uploadRetryHint": "Tus datos se guardaron y la foto de tu DNI no se perdió. Toca Continuar para reintentar la subida.",
         "sending": "Enviando tu DNI…",
         "sent": "DNI enviado. Ya quedó en tu registro.",
-        "sendErrorHint": "No se pudo enviar. Tu captura no se perdió: reintenta desde la tarjeta del DNI."
+        "sendErrorHint": "No se pudo enviar. Tu captura no se perdió: reintenta desde la tarjeta del DNI.",
+        "readyEager": "DNI leído. Al confirmar, lo subimos y verificamos al instante.",
+        "fieldName": "Nombre completo",
+        "fieldDni": "DNI",
+        "fieldBirthdate": "Nacimiento",
+        "dniTakenTitle": "Este DNI ya está registrado",
+        "dniTakenBody": "Ese documento pertenece a otra cuenta de conductor. Si es tuya, inicia sesión con ese número; si no, revisa que el DNI sea correcto.",
+        "scanAnother": "Escanear otro DNI"
       },
       "errors": {
         "name_required": "Ingresa tu nombre completo",

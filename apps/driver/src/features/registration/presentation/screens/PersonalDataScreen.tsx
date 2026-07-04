@@ -150,6 +150,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // idempotente). `null` = sin fallo; si no, el documento que falló (para pintar el aviso correcto).
   const [uploadFailedDoc, setUploadFailedDoc] = useState<DeferredDocument | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
+  // Bloqueo por DNI duplicado (resultado `dni-taken` de `useDniSubmit`, del pre-check `check-dni`): el sheet
+  // del DNI lo pinta en rojo. Se limpia al reabrir el sheet y al reescanear otro documento.
+  const [dniTaken, setDniTaken] = useState(false);
 
   // Estado de la captura LOCAL de la LICENCIA (sheet canónico). La captura NO sube: guarda en `pendingLicense`
   // y muestra el check de éxito (misma UX). La subida real ocurre en el continue.
@@ -431,10 +434,19 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     // sheet queda abierto pintando la fase por cara y el resultado (dni-taken / ok / error). `submit` nunca
     // lanza (mapea todo a un resultado discriminado); la UI lee la fase del store + `pendingDni`, así que
     // el resultado se ignora acá a propósito. El continue ya NO re-sube el DNI (lo saltea si está `sent`).
-    void dniSubmit.submit({
-      personal: fresh.personal,
-      driverExists: driverExistence === DriverExistence.Exists,
-    });
+    // Nuevo intento: limpia el bloqueo previo; el resultado `dni-taken` lo vuelve a encender (el resto de
+    // los estados los lee la UI de la fase POR CARA del store + `pendingDni`).
+    setDniTaken(false);
+    void dniSubmit
+      .submit({
+        personal: fresh.personal,
+        driverExists: driverExistence === DriverExistence.Exists,
+      })
+      .then((result) => {
+        if (result.status === 'dni-taken') {
+          setDniTaken(true);
+        }
+      });
   };
 
   useEffect(() => {
@@ -529,7 +541,10 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
                   ? t('registration.actions.rescan')
                   : t('registration.personal.scanDni.cta')
               }
-              onPress={() => setScanOpen(true)}
+              onPress={() => {
+                setDniTaken(false);
+                setScanOpen(true);
+              }}
             />
             <Text variant="footnote" color="inkSubtle" align="center" style={styles.scanHint}>
               {t('registration.personal.scanDni.hint')}
@@ -685,8 +700,10 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     <ScanDniSheet
       visible={scanOpen}
       onClose={() => setScanOpen(false)}
-      sendPhase={dniPhase}
+      facePhases={sendPhases.dni}
+      dniTaken={dniTaken}
       onConfirm={onDniConfirmed}
+      onRescan={() => setDniTaken(false)}
     />
   );
 
