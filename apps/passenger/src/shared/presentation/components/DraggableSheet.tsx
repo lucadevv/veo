@@ -19,6 +19,12 @@ import {
   GestureDetector,
   ScrollView as GHScrollView,
 } from 'react-native-gesture-handler';
+import Svg, {
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 import Animated, {
   clamp,
   runOnJS,
@@ -86,6 +92,12 @@ export interface DraggableSheetProps {
   renderHeader?: () => React.ReactNode;
   /** Notifica (en JS) la altura VISIBLE del peek en px, para compensar la cámara del mapa (paddingBottom). */
   onPeekHeightChange?: (px: number) => void;
+  /**
+   * Capa de FONDO decorativa (p. ej. el gradiente de vidrio del Home, pen P/Home · HomeContent),
+   * renderizada absoluteFill DEBAJO del grabber/header/contenido y recortada por las esquinas
+   * redondeadas del sheet. No intercepta gestos.
+   */
+  renderBackground?: () => React.ReactNode;
   /**
    * Alto del chrome inferior (típicamente el tab bar) que YA recorta la pantalla del tab. Se descuenta
    * del área útil para que las FRACCIONES de los anclajes midan contra el alto real visible — pero el
@@ -165,6 +177,7 @@ export const DraggableSheet = forwardRef<
     renderScroll,
     renderHeader,
     onPeekHeightChange,
+    renderBackground,
     bottomOffset = 0,
     style,
   },
@@ -494,11 +507,9 @@ export const DraggableSheet = forwardRef<
             // bottom: 0 (de styles.sheet) — anclado al borde inferior, NO se levanta con bottomOffset
             // (eso solo achica el área útil de las fracciones; ver el doc del prop).
             height: sheetHeight,
-            backgroundColor: theme.colors.surface,
             borderTopLeftRadius: theme.radii['2xl'],
             borderTopRightRadius: theme.radii['2xl'],
-            borderTopColor: theme.colors.border,
-            // Sombra hacia ARRIBA (`.bsheet`: box-shadow 0 -24px 60px). iOS via shadowOffset
+            // Sombra hacia ARRIBA (pen C/DraggableSheet: 0 -10 blur 44). iOS via shadowOffset
             // negativo; Android via elevation (no direccional, pero da profundidad equivalente).
             shadowColor: '#000000',
             shadowOffset: {width: 0, height: -12},
@@ -509,6 +520,23 @@ export const DraggableSheet = forwardRef<
           animatedStyle,
           style,
         ]}>
+        {/* PIEL DE VIDRIO canónica (pen C/DraggableSheet · XFjV8): gradiente #272C38→#14161C sobre la
+            base casi opaca de styles.sheet. Los hex van crudos también en el pen (no son variables);
+            el background_blur 34 del pen no tiene lib en el proyecto — la opacidad ~95% lo aproxima. */}
+        <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Defs>
+            <SvgLinearGradient id="sheetGlass" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#272C38" stopOpacity={0.82} />
+              <Stop offset="1" stopColor="#272C38" stopOpacity={0} />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#sheetGlass)" />
+        </Svg>
+        {renderBackground ? (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {renderBackground()}
+          </View>
+        ) : null}
         <View style={styles.grabberRow} pointerEvents="box-none">
           <View
             style={[
@@ -544,12 +572,17 @@ function clampIndex(index: number, length: number): number {
 }
 
 const styles = StyleSheet.create({
+  // Base del VIDRIO del pen (C/DraggableSheet): fondo casi opaco (el color inferior del gradiente)
+  // + borde 1px #4C5468 en top y laterales. El gradiente lo pinta el SVG de adentro.
   sheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    backgroundColor: '#14161CF2',
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: '#4C5468',
     overflow: 'hidden',
   },
   grabberRow: {alignItems: 'center', paddingTop: 8, paddingBottom: 6},

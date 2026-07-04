@@ -9,7 +9,7 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {RoutePin, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Image, ScrollView, StyleSheet, View} from 'react-native';
+import {Image, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Svg, {Defs, LinearGradient as SvgLinearGradient, Rect, Stop} from 'react-native-svg';
 import {TOKENS} from '../../../../core/di/tokens';
@@ -75,6 +75,12 @@ const PEEK_INDEX = 0;
 const FULL_INDEX = SNAP_POINTS.length - 1;
 /** Alto de la TabBar flotante (pill + margen) para que el sheet del Home idle NO quede debajo. */
 const HOME_TABBAR_CLEARANCE = 88;
+/**
+ * Dónde ARRANCA la hoja del Home idle, como fracción de la pantalla (pen P/Home: HomeContent en
+ * y=190 de 844). Fija la "ventana" de imagen visible arriba en ~22.5%: más abajo la imagen se
+ * derrama y el backdrop se siente gigante/zoomeado (la queja que motivó este layout).
+ */
+const HOME_SHEET_TOP_FRACTION = 190 / 844;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -100,6 +106,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   // `isFocused`, de modo que al perder foco el mapa se desmonta (libera el contexto) y al volver remonta.
   // Sin esto: tras N navegaciones/reloads se acumulan contextos GL huérfanos → mapa negro.
   const isFocused = useIsFocused();
+  const {height: windowHeight} = useWindowDimensions();
   // Sin tab bar, el sheet ancla contra el inset inferior del safe-area (home indicator), no contra el
   // alto del tab bar (que ya no existe). Mantiene la matemática de fracciones del sheet correcta.
   const bottomInset = insets.bottom;
@@ -510,6 +517,20 @@ export function RequestFlowScreen(): React.JSX.Element {
     [insets.top, peekHeight],
   );
 
+  // Anclajes del sheet POR MODO. En idle el peek NO es content-hug: es la hoja del pen (arranca a
+  // HOME_SHEET_TOP_FRACTION desde arriba), convertida a fracción del área útil del DraggableSheet
+  // (que descuenta inset superior y bottomOffset). Capado bajo el full (0.92) para que el drag
+  // idle⇄expandido siga teniendo recorrido en devices chicos.
+  const sheetSnapPoints = useMemo<ReadonlyArray<number | 'content'>>(() => {
+    if (mapMode !== 'idle') {
+      return SNAP_POINTS;
+    }
+    const available = Math.max(windowHeight - insets.top - bottomInset, 1);
+    const visible = windowHeight * (1 - HOME_SHEET_TOP_FRACTION);
+    return [Math.min(visible / available, 0.88), 0.92];
+  }, [mapMode, windowHeight, insets.top, bottomInset]);
+
+
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
   // solo lugar. Cada fase toma de acá exactamente lo que su body/header necesita.
   const ctx: RequestFlowContext = {
@@ -636,11 +657,10 @@ export function RequestFlowScreen(): React.JSX.Element {
         null}
       </View>
 
-      {/* CONTENIDO IDLE · CONTENT-FIRST (sin mapa): ocupa la PANTALLA COMPLETA bajo el HomeTopBar, NO un
-          bottom-sheet peek (que flotaría sobre el fondo sólido). Header FIJO (buscador "¿A dónde vamos?" +
-          chips) + Body scrollable (favoritos/recientes) — los MISMOS slots del descriptor que usa el sheet en
-          route/trip; solo cambia el CONTENEDOR. Va ANTES del HomeTopBar para que ese overlay absoluto quede
-          ENCIMA y siga siendo tappable (campana/avatar/pill); el contenido arranca debajo vía paddingTop. */}
+      {/* FONDO IDLE (sin mapa): imagen 3D de ciudad + scrim (pen P/Home). El CONTENIDO idle ya no vive
+          acá: va en el MISMO DraggableSheet de abajo (con la piel de vidrio del pen y peek fijo a ~22.5%),
+          para que el Home sea arrastrable y su lista scrollee cableada al gesto — un contenedor estático
+          rompía ambas cosas. Va ANTES del HomeTopBar para que ese overlay absoluto siga tappable. */}
       {mapMode === 'idle' ? (
         <View style={styles.idleScreen}>
           {/* Fondo del Home fiel a design/veo.pen P/Home: imagen 3D de ciudad (el .pen usa una IMAGEN,
@@ -662,33 +682,6 @@ export function RequestFlowScreen(): React.JSX.Element {
             </Defs>
             <Rect x="0" y="0" width="100%" height="100%" fill="url(#homeScrim)" />
           </Svg>
-          <View
-            style={[
-              styles.idleContent,
-              {paddingBottom: bottomInset + HOME_TABBAR_CLEARANCE},
-            ]}>
-            <View style={styles.idleSheet}>
-              {SheetHeader ? (
-                <View style={{paddingHorizontal: theme.spacing.xl}}>
-                  <SheetHeader ctx={ctx} />
-                </View>
-              ) : null}
-              <ScrollView
-                style={styles.idleSheetScroll}
-                contentContainerStyle={[
-                  styles.sheetContent,
-                  {
-                    paddingHorizontal: theme.spacing.xl,
-                    paddingTop: theme.spacing.md,
-                    paddingBottom: theme.spacing.xl,
-                    gap: theme.spacing.md,
-                  },
-                ]}
-                showsVerticalScrollIndicator={false}>
-                <SheetBody ctx={ctx} />
-              </ScrollView>
-            </View>
-          </View>
         </View>
       ) : null}
 
@@ -724,37 +717,44 @@ export function RequestFlowScreen(): React.JSX.Element {
         />
       )}
 
-      {/* CONTENIDO route/trip: BOTTOMSHEET ARRASTRABLE anclado abajo (sobre el mapa). El contenido idle NO
-          vive acá (es content-first full-screen, se renderiza ANTES del HomeTopBar; ver arriba). HEADER FIJO
-          y BODY SCROLLABLE: ambos los declara el descriptor (Header null = cuerpo autocontenido). */}
-      {mapMode !== 'idle' ? (
-        <DraggableSheet
-          ref={sheetRef}
-          snapPoints={SNAP_POINTS}
-          maxContentFraction={PEEK_MAX_FRACTION}
-          onSnap={handleSnap}
-          onPeekHeightChange={setPeekHeight}
-          bottomOffset={bottomInset}
-          renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
-          renderScroll={ScrollComponent => (
-            <ScrollComponent
-              style={styles.sheetScroll}
-              contentContainerStyle={[
-                styles.sheetContent,
-                {
-                  paddingHorizontal: theme.spacing.xl,
-                  // Respiro al final del scroll (el sheet ancla en bottom:0 y el área útil ya descuenta el
-                  // tab bar vía bottomOffset, así que no hace falta sumar su alto acá).
-                  paddingBottom: theme.spacing.xl,
-                  gap: theme.spacing.md,
-                },
-              ]}
-              showsVerticalScrollIndicator={false}>
-              <SheetBody ctx={ctx} />
-            </ScrollComponent>
-          )}
-        />
-      ) : null}
+      {/* CONTENIDO del flujo: UN solo BOTTOMSHEET ARRASTRABLE anclado abajo, para TODAS las fases.
+          - idle: peek FIJO a la altura del pen (P/Home: HomeContent en y=190/844 ≈ 22.5% desde arriba) con
+            la piel de vidrio del pen (gradiente + borde #4C5468); arrastrable a full y con la lista
+            (favoritos/recientes) scrolleando cableada al gesto.
+          - route/trip: peek content-hug sobre el mapa (igual que siempre).
+          HEADER FIJO y BODY SCROLLABLE: ambos los declara el descriptor (Header null = autocontenido). */}
+      <DraggableSheet
+        ref={sheetRef}
+        snapPoints={sheetSnapPoints}
+        maxContentFraction={PEEK_MAX_FRACTION}
+        onSnap={handleSnap}
+        onPeekHeightChange={setPeekHeight}
+        bottomOffset={bottomInset}
+        renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
+        renderScroll={ScrollComponent => (
+          <ScrollComponent
+            style={styles.sheetScroll}
+            contentContainerStyle={[
+              styles.sheetContent,
+              {
+                paddingHorizontal: theme.spacing.xl,
+                // idle: el sheet llega al borde inferior y la TabBar flota ENCIMA → el final del scroll
+                // la esquiva (inset + clearance). route/trip: respiro simple (el área útil ya descuenta
+                // el chrome inferior vía bottomOffset).
+                paddingBottom:
+                  mapMode === 'idle'
+                    ? bottomInset + HOME_TABBAR_CLEARANCE
+                    : theme.spacing.xl,
+                // Ritmo vertical del pen en el Home (HomeContent gap 8); el resto conserva md.
+                gap:
+                  mapMode === 'idle' ? theme.spacing.sm : theme.spacing.md,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}>
+            <SheetBody ctx={ctx} />
+          </ScrollComponent>
+        )}
+      />
 
       {/* DEUDA (BR-P02): un único sheet para los dos orígenes (pedido bloqueado 403 / franja del home).
           Saldar → CAPTURED reabre el camino: si vino de un pedido, re-intentamos solo (requestAgainToken). */}
@@ -798,9 +798,6 @@ const styles = StyleSheet.create({
   // (favoritos/recientes) scrollea debajo. flex:1 (no absoluteFill) para no interceptar los toques del
   // HomeTopBar absoluto que flota encima.
   idleScreen: {flex: 1},
-  idleContent: {flex: 1, justifyContent: 'flex-end'},
-  idleSheet: {maxHeight: '72%'},
-  idleSheetScroll: {flexShrink: 1},
   sheetScroll: {flex: 1},
   sheetContent: {paddingTop: 4},
 });
