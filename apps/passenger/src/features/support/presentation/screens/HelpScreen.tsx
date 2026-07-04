@@ -33,6 +33,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {formatShortDate} from '../../../../shared/utils/format';
 import {SUPPORT_CATEGORIES} from '../../domain/entities';
 import {
@@ -213,13 +214,11 @@ export function HelpScreen(): React.JSX.Element {
         }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
-        {/* Header in-body per pen: título display + subtítulo cálido. */}
-        <View style={{gap: theme.spacing.xs}}>
-          <Text variant="title1">{t('support.title')}</Text>
-          <Text variant="callout" color="inkMuted">
-            {t('support.subtitle')}
-          </Text>
-        </View>
+        {/* Header in-body per pen (back pill + título display + subtítulo cálido). */}
+        <ScreenHeader
+          title={t('support.title')}
+          subtitle={t('support.subtitle')}
+        />
 
         {/* Buscador per pen (icono search en color de marca + placeholder). El ui-kit no tiene un
             input de búsqueda editable (TextField exige label visible y SearchField es presentacional),

@@ -12,6 +12,7 @@ import {
   IconUser,
 } from '../icons';
 import {usePushPermission} from '../hooks/usePushPermission';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import type {NotificationPrefs} from '../stores/notificationPrefsStore';
 import {useNotificationPrefsStore} from '../stores/notificationPrefsStore';
 
@@ -53,6 +54,8 @@ export function NotificationPrefsScreen(): React.JSX.Element {
           gap: theme.spacing['2xl'],
         }}
         showsVerticalScrollIndicator={false}>
+        {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+        <ScreenHeader title={t('screens.notificationPrefs')} />
         {/* Permiso de push del SO: sin él nada de esto llega. Acción honesta según el estado. */}
         {push.status === 'undetermined' ? (
           <Banner

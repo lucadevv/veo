@@ -21,6 +21,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {formatPEN} from '../../../../shared/utils/format';
 import {ReferralCodeError} from '../../domain/usecases';
 import type {ReferralCodeReason} from '../../domain/usecases';
@@ -75,6 +76,7 @@ export function ReferralsScreen(): React.JSX.Element {
   if (summaryQuery.isLoading) {
     return (
       <SafeScreen>
+        <ScreenHeader title={t('screens.referrals')} />
         <LoadingState />
       </SafeScreen>
     );
@@ -83,6 +85,7 @@ export function ReferralsScreen(): React.JSX.Element {
   if (summaryQuery.isError || !summaryQuery.data) {
     return (
       <SafeScreen>
+        <ScreenHeader title={t('screens.referrals')} />
         <ErrorState onRetry={() => summaryQuery.refetch()} />
       </SafeScreen>
     );
@@ -133,6 +136,8 @@ export function ReferralsScreen(): React.JSX.Element {
         padding: theme.spacing.xl,
         gap: theme.spacing['2xl'],
       }}>
+      {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
+      <ScreenHeader title={t('screens.referrals')} />
       {/* HERO per pen: círculo brand-dim con gift + título + subtítulo sustentable (sin cifra). */}
       <View style={[styles.hero, {gap: theme.spacing.lg}]}>
         <View style={[styles.giftCircle, {backgroundColor: brandDim}]}>

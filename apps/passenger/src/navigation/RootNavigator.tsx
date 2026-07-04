@@ -305,7 +305,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="NotificationPrefs"
         component={NotificationPrefsScreen}
-        options={{title: t('screens.notificationPrefs')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="LostItem"
@@ -361,7 +362,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="Referrals"
         component={ReferralsScreen}
-        options={{title: t('screens.referrals')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="Chat"
@@ -371,7 +373,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="Help"
         component={HelpScreen}
-        options={{title: t('screens.help')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Group
         screenOptions={{presentation: 'fullScreenModal', headerShown: false}}>
