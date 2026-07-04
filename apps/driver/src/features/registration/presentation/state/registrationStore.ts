@@ -94,6 +94,20 @@ export interface PendingLicenseCapture {
 }
 
 /**
+ * Fase de ENVÍO de un documento del paso 1 (DNI/licencia) — la señal que pintan el sheet y la card
+ * ("Subiendo… / Enviado ✓ / Error · Reintentar"). Union TIPADA, sin strings mágicos en comparaciones
+ * sueltas: el mapa de chips es exhaustivo por switch. VIVE SOLO EN MEMORIA (es el estado de la subida
+ * de ESTA sesión; el estado durable es el del servidor vía `GET /drivers/me/documents`).
+ */
+export type DocumentSendPhase = 'idle' | 'sending' | 'sent' | 'error';
+
+/** Documentos del paso 1 cuyo envío se trackea con fase visible. */
+export interface Step1SendPhases {
+  dni: DocumentSendPhase;
+  license: DocumentSendPhase;
+}
+
+/**
  * Total de pasos del wizard (LOTE B: Conductor · Vehículo · KYC). DERIVADO de `ORDERED_STEPS` (la fuente
  * única tipada de la pila) — NUNCA un número mágico: si se agrega/quita un paso, este total lo sigue solo.
  */
@@ -206,7 +220,15 @@ export interface RegistrationState {
    * estado, o un timestamp de última edición del perfil) en vez de un flag de sesión local.
    */
   hasCorrectedAfterRejection: boolean;
+  /**
+   * Fase de envío VISIBLE de los documentos del paso 1 (pen: "Subiendo… / Enviado / Error·Reintentar").
+   * La escribe `usePersonalDataContinue` alrededor de cada subida; la leen el sheet y las cards. SOLO en
+   * memoria: al reabrir la app, la verdad del envío es el servidor (chips `serverState`), no esta fase.
+   */
+  sendPhases: Step1SendPhases;
 
+  /** Fija la fase de envío de un documento del paso 1 (dni/license). Solo en memoria. */
+  setSendPhase(document: keyof Step1SendPhases, phase: DocumentSendPhase): void;
   setPersonal(data: Partial<PersonalData>): void;
   /** Fija el tipo del vehículo (derivado de la tarjeta o elegido a mano). `null` lo deja sin definir. */
   setVehicleType(type: VehicleType | null): void;
@@ -349,6 +371,13 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     // U4: señal de sesión (NO se rehidrata de MMKV): arranca en false en cada arranque de la app, así
     // un conductor rechazado debe tocar "Corregir mis datos" antes de poder reenviar a revisión.
     hasCorrectedAfterRejection: false,
+    // En memoria: la fase de envío arranca idle; la verdad durable es el server (serverState).
+    sendPhases: { dni: 'idle', license: 'idle' },
+
+    setSendPhase: (document, phase) => {
+      // Solo en memoria: NO persist() (fase efímera de la sesión de subida).
+      set((state) => ({ sendPhases: { ...state.sendPhases, [document]: phase } }));
+    },
 
     setPersonal: (data) => {
       set((state) => ({ personal: { ...state.personal, ...data } }));
@@ -478,6 +507,7 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
         pendingPropertyCard: null,
         pendingLicense: null,
         hasCorrectedAfterRejection: false,
+        sendPhases: { dni: 'idle', license: 'idle' },
       });
       prefsStore.remove(REGISTRATION_PREF_KEY);
     },

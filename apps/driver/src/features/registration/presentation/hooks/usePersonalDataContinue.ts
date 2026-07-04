@@ -72,10 +72,14 @@ export interface PersonalDataContinue {
 }
 
 export function usePersonalDataContinue(): PersonalDataContinue {
-  const pendingDni = useRegistrationStore((s) => s.pendingDni);
+  // Las capturas pendientes se leen FRESCAS del store al momento de cada corrida (`getState()`), no por
+  // suscripción: el confirm del sheet guarda la captura y dispara la subida EN EL MISMO TICK — una
+  // suscripción de hook todavía vería el valor viejo (null) y no subiría nada.
   const clearPendingDni = useRegistrationStore((s) => s.clearPendingDni);
-  const pendingLicense = useRegistrationStore((s) => s.pendingLicense);
   const clearPendingLicense = useRegistrationStore((s) => s.clearPendingLicense);
+  // Fase de envío VISIBLE (pen: "Subiendo… / Enviado / Error·Reintentar"): el sheet y las cards del paso 1
+  // la pintan en vivo mientras este hook sube. Se setea alrededor de CADA subida (sending→sent/error).
+  const setSendPhase = useRegistrationStore((s) => s.setSendPhase);
   const updatePersonalData = useUpdatePersonalData();
   // Reusa el MISMO uploader/use-case del paso de Documentos (no se duplica el pipeline presign→PUT→registro).
   const uploadDni = useUploadAndRegisterDocument();
@@ -90,6 +94,7 @@ export function usePersonalDataContinue(): PersonalDataContinue {
    * o si no había nada que subir; `false` si la subida falló (conserva `pendingDni`).
    */
   const uploadPendingDni = async (documentNumber: string): Promise<boolean> => {
+    const pendingDni = useRegistrationStore.getState().pendingDni;
     if (!pendingDni) {
       return true;
     }
@@ -106,6 +111,7 @@ export function usePersonalDataContinue(): PersonalDataContinue {
         : {}),
     };
     try {
+      setSendPhase('dni', 'sending');
       // MISMA regla de caras que la licencia (fleet `normalizeDocumentImages`): un FRONT solo se RECHAZA
       // ("Caras incoherentes"). CON reverso → par FRONT+BACK; SIN reverso → una sola cara SINGLE (`{file}`).
       // FIX del bug latente: antes mandaba `sides:[FRONT]` sin reverso → el backend lo habría rechazado.
@@ -126,6 +132,7 @@ export function usePersonalDataContinue(): PersonalDataContinue {
             },
       );
       clearPendingDni();
+      setSendPhase('dni', 'sent');
       return true;
     } catch (e) {
       // Retry legítimo del "escaneá y listo": el DNI YA fue registrado en un intento previo y el backend
@@ -135,10 +142,12 @@ export function usePersonalDataContinue(): PersonalDataContinue {
       // Coherente con el FIX C de `DocumentsScreen` (Licencia/SOAT).
       if (isConflictError(e)) {
         clearPendingDni();
+        setSendPhase('dni', 'sent');
         return true;
       }
       // Cualquier otro fallo (red/5xx): el driver YA existe (lo creó el PATCH) pero el binario no subió.
       // NO perdemos las caras → se conserva `pendingDni` para reintentar.
+      setSendPhase('dni', 'error');
       return false;
     }
   };
@@ -151,6 +160,7 @@ export function usePersonalDataContinue(): PersonalDataContinue {
    * `false` si la subida/onboarding falló (conserva `pendingLicense` para reintentar en el próximo Continuar).
    */
   const uploadPendingLicense = async (): Promise<boolean> => {
+    const pendingLicense = useRegistrationStore.getState().pendingLicense;
     if (!pendingLicense) {
       return true;
     }
@@ -163,6 +173,7 @@ export function usePersonalDataContinue(): PersonalDataContinue {
         }
       : {};
     try {
+      setSendPhase('license', 'sending');
       // El backend exige el PAR EXACTO {FRONT, BACK} si se manda ALGUNA cara (fleet `normalizeDocumentImages`):
       // un FRONT solo se rechaza ("Caras incoherentes"). Reverso SOFT: CON reverso → par FRONT+BACK; SIN reverso
       // → una sola imagen SINGLE (shape `{file}`, como hoy). Así el soft no viola la regla de caras del backend.
@@ -193,16 +204,19 @@ export function usePersonalDataContinue(): PersonalDataContinue {
         licenseExpiresAt: pendingLicense.expiresAt,
       });
       clearPendingLicense();
+      setSendPhase('license', 'sent');
       return true;
     } catch (e) {
       // 409 = la licencia (o su onboarding) YA se registró en un intento previo → ÉXITO, no error. Mismo
       // criterio 409-como-éxito tipado (`isConflictError`) que el DNI: limpiamos y avanzamos.
       if (isConflictError(e)) {
         clearPendingLicense();
+        setSendPhase('license', 'sent');
         return true;
       }
       // Otro fallo (red/5xx): el driver YA existe pero la licencia no subió. NO perdemos la captura →
       // se conserva `pendingLicense` para reintentar (PATCH idempotente + re-subida en el próximo Continuar).
+      setSendPhase('license', 'error');
       return false;
     }
   };
@@ -222,6 +236,15 @@ export function usePersonalDataContinue(): PersonalDataContinue {
       try {
         await updatePersonalData.mutateAsync(personal);
       } catch (e) {
+        // El envío visible no puede quedar colgado en "sending": si el PATCH que crea el driver falla,
+        // las capturas pendientes pasan a `error` (la card ofrece Reintentar, que repite el PATCH idempotente).
+        const pending = useRegistrationStore.getState();
+        if (pending.pendingDni) {
+          setSendPhase('dni', 'error');
+        }
+        if (pending.pendingLicense) {
+          setSendPhase('license', 'error');
+        }
         if (e instanceof PersonalDataValidationError) {
           return { status: 'field-errors', errors: e.errors };
         }

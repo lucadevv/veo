@@ -120,6 +120,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   const setDocumentStatus = useRegistrationStore((s) => s.setDocumentStatus);
   const pendingLicense = useRegistrationStore((s) => s.pendingLicense);
   const setPendingLicense = useRegistrationStore((s) => s.setPendingLicense);
+  // Fase de ENVÍO visible de cada documento (pen: "Subiendo… / Enviado / Error al enviar"). La escribe
+  // `usePersonalDataContinue` alrededor de cada subida; acá alimenta los chips y el sheet del DNI.
+  const sendPhases = useRegistrationStore((s) => s.sendPhases);
   const serverDocs = useRegistrationDocuments();
   // ¿El SERVIDOR ya tiene al conductor? Señal TIPADA derivada de `GET /drivers/me` (comparte el cache del
   // gate). Unifica la fuente de verdad del continue: en RESUME (driver existe) NO se re-PATCHea (los datos
@@ -154,10 +157,11 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // muestra una tarjeta "vacía" que parece OK ni se oculta el fallback honesto cuando el OCR no leyó nada.
   const hasCapture = pendingDni != null;
   // Honestidad de estado (espejo de la licencia): el DOCUMENTO del DNI está "listo" SOLO si hay una captura
-  // LOCAL viva (`pendingDni`, la imagen que se va a subir) O el servidor YA lo tiene (`serverHasDni`).
+  // LOCAL viva (`pendingDni`, la imagen que se va a subir), el envío de ESTA sesión ya lo dejó en el server
+  // (fase `sent` — inmune a la latencia del refetch de `serverDocs`), O el servidor YA lo tiene.
   // `hasReadDni` (número leído, puede venir de `personal.dni` persistido) NO alcanza: tras un reload el número
   // sobrevive pero la IMAGEN no → diría "listo" sin nada que subir (DNI fantasma). El número se exige aparte.
-  const dniDocReady = pendingDni != null || serverHasDni;
+  const dniDocReady = pendingDni != null || serverHasDni || sendPhases.dni === 'sent';
 
   const dniBackendType = registrationDocTypeToBackend('DNI');
   // Estado de SERVIDOR del DNI para el chip "ya enviado" (mismo patrón que la licencia): al reanudar SIN
@@ -178,6 +182,25 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   const dniServerImageUri =
     serverDocs.data?.find((doc) => doc.type === dniBackendType)?.images[0]?.url ?? null;
 
+  /**
+   * Chip de FASE de envío (pen): mientras hay un envío vivo en esta sesión, la fase manda sobre el estado
+   * del servidor (que puede venir con lag de refetch). Exhaustivo por switch — sin strings mágicos sueltos.
+   */
+  const phaseChip = (
+    phase: (typeof sendPhases)['dni'],
+  ): { label: string; tone: DocumentCardTone } | undefined => {
+    switch (phase) {
+      case 'sending':
+        return { label: t('registration.documents.state.sending'), tone: 'accent' };
+      case 'sent':
+        return { label: t('registration.documents.state.sent'), tone: 'success' };
+      case 'error':
+        return { label: t('registration.documents.state.sendError'), tone: 'danger' };
+      case 'idle':
+        return undefined;
+    }
+  };
+
   const licenseBackendType = registrationDocTypeToBackend(LICENSE_DOC_TYPE);
 
   /** ¿El servidor YA tiene la licencia en un estado aceptable? (conductor que vuelve/reinstala). */
@@ -191,7 +214,8 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // flag local `documents.UPLOADED`: se seteaba OPTIMISTA en el escaneo y SOBREVIVÍA al reload sin su captura
   // (el array `documents` se persiste, la captura no) → mentía "subida" sin que el server la tuviera. Un fallo
   // de subida conserva `pendingLicense` (sigue "lista para enviar/reintentar") y el banner de fallo lo dice.
-  const licenseUploaded = pendingLicense != null || serverHasLicense;
+  const licenseUploaded =
+    pendingLicense != null || serverHasLicense || sendPhases.license === 'sent';
 
   // Estado de SERVIDOR de la licencia para el chip (si existe en `GET /drivers/me/documents`).
   const licenseServerState = (() => {
@@ -247,6 +271,37 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
       expiresAt: input.expiresAtIso,
       extractedData: input.extractedData ?? null,
     });
+    // Pen (proceso de envío EN el sheet): si el driver ya existe o los datos del PATCH están completos,
+    // la subida arranca AHÍ MISMO y el sheet muestra el proceso real (uploading→success/error). Si la
+    // licencia se escaneó ANTES que el DNI (driver aún no creable), queda capturada "lista para enviar"
+    // y sube con el eager sync de siempre al confirmar el DNI — sin fingir un envío que no ocurrió.
+    const fresh = useRegistrationStore.getState();
+    const personalComplete =
+      fresh.personal.fullName.trim().length > 0 &&
+      fresh.personal.dni.trim().length > 0 &&
+      fresh.personal.birthdate.trim().length > 0;
+    if (driverExistence === DriverExistence.Exists || personalComplete) {
+      setLicenseUploadState('uploading');
+      eagerSyncKey.current = `${fresh.pendingDni?.front.uri ?? '-'}|${input.file.uri}`;
+      void personalContinue
+        .submit({
+          personal: fresh.personal,
+          driverExists: driverExistence === DriverExistence.Exists,
+        })
+        .then((result) => {
+          if (useRegistrationStore.getState().sendPhases.license === 'sent') {
+            markLicenseCaptured();
+            return;
+          }
+          setLicenseUploadState('error');
+          setLicenseError(
+            result.status === 'server-error'
+              ? result.error
+              : new Error(t('registration.documents.licenseUploadFailed')),
+          );
+        });
+      return;
+    }
     markLicenseCaptured();
   };
 
@@ -331,6 +386,18 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     });
   };
 
+  /**
+   * Confirmación del DNI EN el sheet (pen: "carga ahí mismo, sale el proceso de que se envía"): dispara la
+   * subida INMEDIATA sin esperar a cerrar el sheet — el sheet queda abierto pintando la fase (sending→
+   * sent/error) y ofrece "Continuar en segundo plano". Sella `eagerSyncKey` para que el efecto de abajo no
+   * re-dispare el mismo lote al cerrar.
+   */
+  const onDniConfirmed = (): void => {
+    const fresh = useRegistrationStore.getState();
+    eagerSyncKey.current = `${fresh.pendingDni?.front.uri ?? '-'}|${fresh.pendingLicense?.file.uri ?? '-'}`;
+    void runEagerSync();
+  };
+
   useEffect(() => {
     // Espera a que los sheets de captura estén CERRADOS (el usuario confirmó): un re-escaneo DENTRO del sheet
     // no debe disparar una subida prematura que un 409 no podría reemplazar después.
@@ -413,7 +480,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               status={dniDocReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
-              serverState={dniServerState}
+              serverState={phaseChip(sendPhases.dni) ?? dniServerState}
               accessibilityLabel={
                 hasCapture || hasReadDni
                   ? t('registration.actions.rescan')
@@ -512,7 +579,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               status={licenseUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
               uploadedLabel={t('registration.documents.state.ready')}
               pendingLabel={t('registration.documents.pending')}
-              serverState={licenseServerState}
+              serverState={phaseChip(sendPhases.license) ?? licenseServerState}
               busy={personalContinue.isPending}
               accessibilityLabel={t('registration.documents.uploadAccessibility', {
                 document: t('registration.documents.license'),
@@ -567,7 +634,14 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
       onSubmit={onSubmitLicense}
     />
   ) : null;
-  const scanSheet = <ScanDniSheet visible={scanOpen} onClose={() => setScanOpen(false)} />;
+  const scanSheet = (
+    <ScanDniSheet
+      visible={scanOpen}
+      onClose={() => setScanOpen(false)}
+      sendPhase={sendPhases.dni}
+      onConfirm={onDniConfirmed}
+    />
+  );
 
   // Modo EMBEBIDO (wizard): solo el cuerpo en un scroll propio + los sheets. El host pone el chrome
   // (header/footer/progress/exit) y pinta el CTA unificado (publicado vía `registerFooter`).

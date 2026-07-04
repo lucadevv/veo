@@ -85,7 +85,7 @@ function renderSheet(scanner: ScannerDouble): {
       <QueryClientProvider client={queryClient}>
         <DiProvider container={fakeContainer(scanner)}>
           <ThemeProvider theme={driverTheme}>
-            <ScanDniSheet visible onClose={jest.fn()} />
+            <ScanDniSheet visible onClose={jest.fn()} sendPhase="idle" onConfirm={jest.fn()} />
           </ThemeProvider>
         </DiProvider>
       </QueryClientProvider>
