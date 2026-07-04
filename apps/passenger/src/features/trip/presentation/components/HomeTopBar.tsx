@@ -125,10 +125,13 @@ export function HomeTopBar({
         accessibilityRole="button"
         accessibilityLabel={t('screens.profile')}
         onPress={onOpenProfile}>
+        {/* Tono NEUTRAL del pen (P/Home · TopRow): superficie elevada + borde + iniciales ink —
+            el tinte de marca queda para las cards de conductor, no para el chrome del Home. */}
         <Avatar
           uri={profilePhotoUrl ?? undefined}
           name={profileName ?? t('appName')}
           size="md"
+          tone="neutral"
         />
       </Pressable>
     </View>

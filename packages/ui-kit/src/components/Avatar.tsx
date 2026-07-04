@@ -14,6 +14,12 @@ export interface AvatarProps {
   size?: AvatarSize;
   /** Anillo de estado (p.ej. conductor en línea). */
   online?: boolean;
+  /**
+   * Tono del fallback de iniciales. `brand` (default) = tinte de marca (cards de conductor).
+   * `neutral` = superficie elevada + borde + iniciales ink — el avatar del TopRow del Home en el
+   * pen (P/Home · TopRow · Avatar: surface-elevated, stroke border-strong, iniciales $ink).
+   */
+  tone?: 'brand' | 'neutral';
   style?: ViewStyle;
 }
 
@@ -26,7 +32,14 @@ function initials(name?: string): string {
 }
 
 /** Avatar circular con fallback a iniciales y anillo de estado opcional. */
-export function Avatar({ uri, name, size = 'md', online = false, style }: AvatarProps) {
+export function Avatar({
+  uri,
+  name,
+  size = 'md',
+  online = false,
+  tone = 'brand',
+  style,
+}: AvatarProps) {
   const theme = useTheme();
   const [failed, setFailed] = useState(false);
   const dimension = sizeMap[size];
@@ -58,11 +71,19 @@ export function Avatar({ uri, name, size = 'md', online = false, style }: Avatar
               width: dimension,
               height: dimension,
               borderRadius: dimension / 2,
-              backgroundColor: hexAlpha(theme.colors.brand, theme.scheme === 'dark' ? 0.3 : 0.12),
+              backgroundColor:
+                tone === 'neutral'
+                  ? theme.colors.surfaceElevated
+                  : hexAlpha(theme.colors.brand, theme.scheme === 'dark' ? 0.3 : 0.12),
+              borderWidth: tone === 'neutral' ? 1 : 0,
+              borderColor: theme.colors.borderStrong,
             },
           ]}
         >
-          <Text variant={size === 'sm' ? 'caption' : 'headline'} color="brand">
+          <Text
+            variant={size === 'sm' ? 'caption' : 'headline'}
+            color={tone === 'neutral' ? 'ink' : 'brand'}
+          >
             {initials(name)}
           </Text>
         </View>

@@ -1,7 +1,7 @@
-import {Text, useTheme} from '@veo/ui-kit';
+import {hexAlpha, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {Pressable, StyleSheet} from 'react-native';
-import {IconPlus, type GlyphProps} from './icons';
+import {type GlyphProps} from './icons';
 
 export interface ShortcutChipProps {
   label: string;
@@ -26,17 +26,22 @@ export function ShortcutChip({
       style={[
         styles.chip,
         {
-          backgroundColor: theme.colors.bg,
-          borderColor: theme.colors.border,
+          // Piel del pen (P/Home · ShortcutChips): surface al 60% + borde del vidrio al 40%.
+          backgroundColor: hexAlpha(theme.colors.surface, 0.6),
+          borderColor: '#4C546866',
           borderRadius: theme.radii.pill,
         },
       ]}>
-      {present ? (
-        <Icon color={theme.colors.accent} size={18} />
-      ) : (
-        <IconPlus color={theme.colors.inkMuted} size={18} />
-      )}
-      <Text variant="subhead" numberOfLines={1}>
+      {/* SIEMPRE el glifo del lugar (pen: house/briefcase) — el "+" pelado escondía QUÉ atajo era.
+          Presente → accent (1 toque pide el viaje); ausente → apagado (el tap invita a agregarlo). */}
+      <Icon
+        color={present ? theme.colors.accent : theme.colors.inkSubtle}
+        size={18}
+      />
+      <Text
+        variant="subhead"
+        color={present ? 'ink' : 'inkMuted'}
+        numberOfLines={1}>
         {label}
       </Text>
     </Pressable>

@@ -74,6 +74,22 @@ export function IconPin({color, size = 18}: GlyphProps): React.JSX.Element {
   );
 }
 
+/** Historial (filas de "Tus últimos viajes" del Home — pen P/Home · RecentTripsSection). */
+export function IconHistory({color, size = 18}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3 12a9 9 0 1 0 2.64-6.36L3 8"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
+      <Path d="M3 3v5h5" stroke={color} strokeWidth={STROKE} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M12 7v5l4 2" stroke={color} strokeWidth={STROKE} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 /** Mapa plegado (atajo "Elegir en el mapa" del buscador del Home — pen P/Home · SearchField). */
 export function IconMap({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
