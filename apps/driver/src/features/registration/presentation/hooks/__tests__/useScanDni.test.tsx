@@ -140,7 +140,7 @@ describe('useScanDni', () => {
     expect(handle.current?.back?.uri).toBe('data:image/jpeg;base64,/9j/back-base64');
   });
 
-  it('NO sube en el momento del escaneo: deja las caras (FRONT+BACK) en `pendingDni` para subir tras el PATCH', async () => {
+  it('NO sube ni PERSISTE en el escaneo: la captura queda SOLO local hasta confirmar (cancelar no deja un doc rechazado)', async () => {
     const scanner: ScannerDouble = { scan: jest.fn(async () => dniScan()) };
     // El uploader NO debe tocarse durante el escaneo (la subida está DIFERIDA al continue del paso 1).
     const upload = jest.fn();
@@ -157,11 +157,11 @@ describe('useScanDni', () => {
     expect(upload).not.toHaveBeenCalled();
     expect(submitDocument).not.toHaveBeenCalled();
 
-    // Las caras quedan GUARDADAS en el store, listas para que el `onContinue` las suba tras el PATCH.
-    const pending = useRegistrationStore.getState().pendingDni;
-    expect(pending).not.toBeNull();
-    expect(pending?.front.uri).toBe('data:image/jpeg;base64,/9j/front-base64');
-    expect(pending?.back?.uri).toBe('data:image/jpeg;base64,/9j/back-base64');
+    // FIX cancelación: `scan()` NO persiste `pendingDni`. Si el conductor CANCELA el sheet sin confirmar,
+    // el efecto eager no debe subir un DNI que no confirmó → la captura vive SOLO en el estado local del hook.
+    expect(useRegistrationStore.getState().pendingDni).toBeNull();
+    expect(handle.current?.front?.uri).toBe('data:image/jpeg;base64,/9j/front-base64');
+    expect(handle.current?.back?.uri).toBe('data:image/jpeg;base64,/9j/back-base64');
   });
 
   it('confirmar (`submit`) deja el estado `ready` con las caras guardadas — sigue SIN subir', async () => {

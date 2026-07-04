@@ -91,7 +91,7 @@ beforeEach(() => {
 });
 
 describe('useScanLicense', () => {
-  it('OCR OK: lee número + vencimiento, guarda pendingLicense (FRONT+BACK) y NO marca criticalMissing', async () => {
+  it('OCR OK: lee número + vencimiento (captura local), y solo `submit` persiste pendingLicense (FRONT+BACK)', async () => {
     const scanner: ScannerDouble = { scan: jest.fn(async () => licenseScan(LICENSE_FRONT_LINES)) };
     const handle = renderHookWith(fakeContainer(scanner));
 
@@ -115,7 +115,18 @@ describe('useScanLicense', () => {
     expect(handle.current?.hasBack).toBe(true);
     expect(handle.current?.back?.uri).toBe('data:image/jpeg;base64,/9j/license-back');
 
-    // Captura GUARDADA en el store, lista para subir tras el PATCH /personal (con número + vencimiento críticos).
+    // FIX cancelación: `scan()` deja la captura SOLO local. Si el conductor CANCELA sin confirmar, no debe
+    // subirse una licencia que no confirmó → `pendingLicense` sigue vacío hasta el `submit`.
+    expect(useRegistrationStore.getState().pendingLicense).toBeNull();
+
+    // Confirmar (`submit`) es lo ÚNICO que persiste la captura, con número + vencimiento críticos.
+    let confirmed: boolean | undefined;
+    act(() => {
+      confirmed = handle.current?.submit();
+    });
+    expect(confirmed).toBe(true);
+    expect(handle.current?.state).toBe('ready');
+
     const pending = useRegistrationStore.getState().pendingLicense;
     expect(pending).not.toBeNull();
     expect(pending?.file.uri).toBe('data:image/jpeg;base64,/9j/license-front');

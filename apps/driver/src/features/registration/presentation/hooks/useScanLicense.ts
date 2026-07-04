@@ -93,6 +93,7 @@ function readLicense(lines: readonly string[]): CapturedReadout | null {
 export function useScanLicense() {
   const scanner = useDocumentScanner();
   const setPendingLicense = useRegistrationStore((s) => s.setPendingLicense);
+  const setSendPhase = useRegistrationStore((s) => s.setSendPhase);
 
   const [state, setState] = useState<ScanLicenseState>('idle');
   /** El escáner no está disponible en este device → fallback honesto a la carga manual + galería. */
@@ -142,6 +143,12 @@ export function useScanLicense() {
       const backBase64 = images[1];
       const back = backBase64 ? scannedImageToPickedImage(backBase64, 'license-back.jpg') : null;
 
+      // Captura NUEVA ⇒ resetea la fase de envío de la licencia (ambas caras) a `idle`: una captura recién
+      // escaneada NUNCA hereda el `sent` verde de un envío previo (sino se vería "enviada" sin subir). Solo
+      // aquí (captura nueva), NO en `reset()`/apertura, para no borrar el `sent` legítimo al reabrir el sheet.
+      setSendPhase('license', 'front', 'idle');
+      setSendPhase('license', 'back', 'idle');
+
       // OCR de la licencia: `textLines[0]` = ANVERSO (número/categoría/vencimiento). El reverso NO se parsea
       // (imagen para la verificación del operador). Se parsea UNA vez: alimenta el gating Y el guardado.
       const data = readLicense(textLines[0] ?? []);
@@ -151,17 +158,9 @@ export function useScanLicense() {
       setSides({ front, back });
       setReadout(data);
       setCriticalMissing(critical);
-      // Solo se guarda la captura si el OCR leyó AMBOS críticos (número + vencimiento): así `pendingLicense`
-      // siempre lleva los dos como string no nulo (contrato). Si falta alguno → NO se guarda (reescaneo honesto).
-      if (!critical && data?.number && data.expiry) {
-        setPendingLicense({
-          file: front,
-          back,
-          documentNumber: data.number,
-          expiresAt: data.expiry,
-          extractedData: data.extractedData,
-        });
-      }
+      // El escaneo deja la captura SOLO en el estado LOCAL del hook (para la preview + el extract del sheet).
+      // NO persiste `pendingLicense`: si el conductor CANCELA el sheet sin confirmar, no debe subirse un
+      // documento que no confirmó. Solo `submit()` persiste (única fuente del efecto eager de subida).
       setState('captured');
       return { front, back, criticalMissing: critical };
     } catch (e) {

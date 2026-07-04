@@ -197,7 +197,7 @@
         "invalidData": "Los datos leídos no son válidos. Vuelve a escanear tu DNI.",
         "backMissing": "Falta el reverso",
         "backMissingHint": "Solo capturamos el anverso. Vuelve a escanear para incluir el reverso.",
-        "manualFallback": "Vuelve a escanear tu DNI para leer tus datos.",
+        "manualFallback": "Necesitas un dispositivo con cámara para escanear tu DNI. Revisa los permisos de cámara e inténtalo de nuevo.",
         "uploadFailed": "No se pudo subir tu DNI. Inténtalo de nuevo.",
         "uploadRetryHint": "Tus datos se guardaron y la foto de tu DNI no se perdió. Toca Continuar para reintentar la subida.",
         "sending": "Enviando tu DNI…",
@@ -209,7 +209,10 @@
         "fieldBirthdate": "Nacimiento",
         "dniTakenTitle": "Este DNI ya está registrado",
         "dniTakenBody": "Ese documento pertenece a otra cuenta de conductor. Si es tuya, inicia sesión con ese número; si no, revisa que el DNI sea correcto.",
-        "scanAnother": "Escanear otro DNI"
+        "scanAnother": "Escanear otro DNI",
+        "checking": "Verificando tu DNI…",
+        "verifyFailedTitle": "No pudimos verificar tu DNI",
+        "verifyFailedBody": "Hubo un problema de conexión al verificar tu documento. Revisa tu internet e inténtalo de nuevo."
       },
       "errors": {
         "name_required": "Ingresa tu nombre completo",

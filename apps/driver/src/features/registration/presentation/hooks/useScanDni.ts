@@ -84,6 +84,7 @@ export function useScanDni() {
   const personal = useRegistrationStore((s) => s.personal);
   const setPersonal = useRegistrationStore((s) => s.setPersonal);
   const setPendingDni = useRegistrationStore((s) => s.setPendingDni);
+  const setSendPhase = useRegistrationStore((s) => s.setSendPhase);
 
   const [state, setState] = useState<ScanDniState>('idle');
   /** El escáner no está disponible en este device → fallback honesto a tipeo manual + galería. */
@@ -164,6 +165,12 @@ export function useScanDni() {
       const backBase64 = images[1];
       const back = backBase64 ? scannedImageToPickedImage(backBase64, 'dni-back.jpg') : null;
 
+      // Captura NUEVA ⇒ resetea la fase de envío del DNI (ambas caras) a `idle`: una captura recién
+      // escaneada NUNCA hereda el `sent` verde de un envío previo (sino se vería "enviada" sin subir).
+      // Solo aquí (captura nueva), NO en `reset()`/apertura, para no borrar el `sent` legítimo al reabrir.
+      setSendPhase('dni', 'front', 'idle');
+      setSendPhase('dni', 'back', 'idle');
+
       // OCR del DNI: `textLines[0]` = ANVERSO (etiquetas), `textLines[1]` = REVERSO (MRZ TD1 del DNIe).
       // `parseDni` prioriza el MRZ del reverso (plan A) y cae a las etiquetas del frente (DNI viejo).
       // Se parsea UNA vez: el resultado alimenta el prellenado NO destructivo Y la data OCR del contrato.
@@ -176,9 +183,9 @@ export function useScanDni() {
       setSides({ front, back });
       setAutofilled(result);
       setExtractedData(extracted);
-      // Guarda las caras + la data OCR como DNI pendiente apenas se capturan: el `onContinue` del paso 1 las
-      // sube DESPUÉS del PATCH /personal (que crea el driver). Idempotente: re-escanear reemplaza, no duplica.
-      setPendingDni({ front, back, extractedData: extracted });
+      // El escaneo deja la captura SOLO en el estado LOCAL del hook (para la preview + el extract del sheet).
+      // NO persiste `pendingDni`: si el conductor CANCELA el sheet sin confirmar, no debe subirse un documento
+      // que no confirmó. Solo `submit()` persiste `pendingDni` (única fuente del efecto eager de subida).
       setState('captured');
       return { front, back, autofilled: result };
     } catch (e) {

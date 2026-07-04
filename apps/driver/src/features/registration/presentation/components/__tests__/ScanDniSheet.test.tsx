@@ -90,6 +90,8 @@ function renderSheet(scanner: ScannerDouble): {
               onClose={jest.fn()}
               facePhases={{ front: 'idle', back: 'idle' }}
               dniTaken={false}
+              submitting={false}
+              submitError={false}
               onConfirm={jest.fn()}
               onRescan={jest.fn()}
             />
@@ -198,6 +200,8 @@ describe('ScanDniSheet · OCR vacío → fallback honesto; OCR ok → bloque "Es
                   onClose={jest.fn()}
                   facePhases={{ front: 'idle', back: 'idle' }}
                   dniTaken
+                  submitting={false}
+                  submitError={false}
                   onConfirm={jest.fn()}
                   onRescan={jest.fn()}
                 />
@@ -209,5 +213,36 @@ describe('ScanDniSheet · OCR vacío → fallback honesto; OCR ok → bloque "Es
     });
     expect(hasText(renderer, tr('registration.personal.scanDni.dniTakenTitle'))).toBe(true);
     expect(hasText(renderer, tr('registration.personal.scanDni.scanAnother'))).toBe(true);
+  });
+
+  it('submitError: muestra el error de verificación + reintento (no queda mudo tras un fallo)', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
+          <QueryClientProvider client={queryClient}>
+            <DiProvider container={fakeContainer({ scan: jest.fn() })}>
+              <ThemeProvider theme={driverTheme}>
+                <ScanDniSheet
+                  visible
+                  onClose={jest.fn()}
+                  facePhases={{ front: 'idle', back: 'idle' }}
+                  dniTaken={false}
+                  submitting={false}
+                  submitError
+                  onConfirm={jest.fn()}
+                  onRescan={jest.fn()}
+                />
+              </ThemeProvider>
+            </DiProvider>
+          </QueryClientProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    expect(hasText(renderer, tr('registration.personal.scanDni.verifyFailedTitle'))).toBe(true);
+    expect(hasText(renderer, tr('registration.actions.retryUpload'))).toBe(true);
   });
 });

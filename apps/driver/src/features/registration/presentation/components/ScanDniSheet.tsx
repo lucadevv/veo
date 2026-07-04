@@ -1,16 +1,20 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
-import { IconAlert, IconCheck } from '../../../../shared/presentation/icons';
-import { DOCUMENT_CARD_ASPECT_RATIO, scanMessageI18nKey } from '../../../documents/domain';
-import {
-  deriveDocumentPhase,
-  type DocumentFacePhases,
-  type DocumentSendPhase,
-} from '../state/registrationStore';
+import { IconAlert } from '../../../../shared/presentation/icons';
+import { scanMessageI18nKey } from '../../../documents/domain';
+import { deriveDocumentPhase, type DocumentFacePhases } from '../state/registrationStore';
 import { hexAlpha } from './color';
 import { useScanDni } from '../hooks/useScanDni';
+import {
+  ScanExtractRow,
+  ScanFacePreview,
+  ScanSendingBar,
+  ScanStatusLine,
+  formatDocumentDate,
+  scanSheetStyles as s,
+} from './scanSheetParts';
 
 /**
  * Sheet de captura del DNI por ESCANEO (paso 1 · flujo EAGER a imagen del frame `C/ScanDni` del pen):
@@ -20,7 +24,8 @@ import { useScanDni } from '../hooks/useScanDni';
  *
  * Estados HONESTOS (vía `useScanDni` + las fases por-cara del store): nunca se marca un éxito que no
  * ocurrió. Degradación honesta: escáner no disponible → tipeo manual; reverso ausente se avisa; el OCR
- * sin número crítico cae a reescaneo. Reusa por DI el escáner + el parser + el pipeline de subida.
+ * sin número crítico cae a reescaneo. Reusa por DI el escáner + el parser + el pipeline de subida, y las
+ * piezas visuales canónicas de `scanSheetParts` (mismo lenguaje que el sheet de la licencia).
  */
 export interface ScanDniSheetProps {
   visible: boolean;
@@ -29,6 +34,10 @@ export interface ScanDniSheetProps {
   facePhases: DocumentFacePhases;
   /** El DNI escaneado YA pertenece a otra cuenta (pre-check `check-dni`). Pinta el estado rojo de bloqueo. */
   dniTaken: boolean;
+  /** Operación EAGER en curso (checkDni → PATCH → subir). Antes de que haya fase por cara, muestra "Verificando…". */
+  submitting: boolean;
+  /** El checkDni o el PATCH FALLARON (red/servidor, no duplicado): muestra el error + reintento (honestidad). */
+  submitError: boolean;
   /** Confirma la captura y dispara la subida EAGER (checkDni → PATCH → subir DNI por cara). La orquesta la pantalla. */
   onConfirm: () => void;
   /** Limpia el estado de bloqueo (`dniTaken`) al reescanear otro documento. */
@@ -40,6 +49,8 @@ export function ScanDniSheet({
   onClose,
   facePhases,
   dniTaken,
+  submitting,
+  submitError,
   onConfirm,
   onRescan,
 }: ScanDniSheetProps): React.JSX.Element {
@@ -68,14 +79,12 @@ export function ScanDniSheet({
   const isSending = isReady && documentPhase === 'sending';
   const isSent = isReady && documentPhase === 'sent';
   const sendFailed = isReady && documentPhase === 'error';
+  // Ventana checkDni + PATCH: confirmado (`ready`) y `submitting`, pero la subida por cara todavía NO arrancó
+  // (fase `idle`). Sin esto el sheet quedaba MUDO fingiendo "listo" mientras corría la verificación/creación.
+  const isChecking = submitting && isReady && documentPhase === 'idle' && !submitError;
 
   // Campo CRÍTICO del DNI: el número. Sin él (OCR borroso/ausente) NO fingimos "capturado": reescaneo.
   const hasReadDniNumber = dni.personal.dni.trim().length > 0;
-  // ¿Ya se leyeron los 3 campos del bloque "Esto leímos"? (nombre + número + nacimiento).
-  const hasFullExtract =
-    dni.personal.fullName.trim().length > 0 &&
-    hasReadDniNumber &&
-    dni.personal.birthdate.trim().length > 0;
 
   const canConfirm = isCaptured && dni.front != null && hasReadDniNumber;
   const onPrimary = (): void => {
@@ -106,27 +115,23 @@ export function ScanDniSheet({
       fullWidth
       onPress={rescan}
     />
-  ) : isSending ? (
-    // Subiendo: no te toma de rehén — "Continuar en segundo plano" cierra; la card sigue el progreso.
+  ) : isSending || isChecking ? (
+    // Verificando/subiendo: no te toma de rehén — "Continuar en segundo plano" cierra; la card sigue el progreso.
     <Button
       label={t('registration.documents.sheetBackground')}
       variant="secondary"
       fullWidth
       onPress={onClose}
     />
-  ) : sendFailed ? (
-    <View style={styles.footer}>
+  ) : sendFailed || submitError ? (
+    <View style={s.footer}>
       <Button label={t('common.close')} variant="secondary" onPress={onClose} />
-      <Button
-        label={t('registration.actions.retryUpload')}
-        variant="primary"
-        onPress={onConfirm}
-      />
+      <Button label={t('registration.actions.retryUpload')} variant="primary" onPress={onConfirm} />
     </View>
   ) : isReady ? (
     <Button label={t('common.close')} variant="primary" fullWidth onPress={onClose} />
   ) : (
-    <View style={styles.footer}>
+    <View style={s.footer}>
       <Button label={t('common.cancel')} variant="secondary" onPress={onClose} disabled={busy} />
       <Button
         label={primaryLabel}
@@ -145,24 +150,23 @@ export function ScanDniSheet({
       title={t('registration.personal.scanDni.title')}
       footer={footer}
     >
-      <View style={[styles.body, { gap: theme.spacing.lg }]}>
+      <View style={[s.body, { gap: theme.spacing.lg }]}>
         {dniTaken ? null : (
           <Text variant="footnote" color="inkSubtle">
             {t('registration.personal.scanDni.hint')}
           </Text>
         )}
 
-        {/* Preview de las 2 caras. Borde por estado de ENVÍO (azul=subiendo, verde=enviado, rojo=error);
-            antes de enviar, acento si hay captura. En duplicado se atenúan (la captura ya no aplica). */}
-        <View style={[styles.facesRow, { gap: theme.spacing.md }]}>
-          <FacePreview
+        {/* Preview de las 2 caras. Borde por estado de ENVÍO; en duplicado se atenúan (la captura ya no aplica). */}
+        <View style={[s.facesRow, { gap: theme.spacing.md }]}>
+          <ScanFacePreview
             label={t('registration.personal.scanDni.front')}
             uri={dni.front?.uri ?? null}
             scanning={isScanning}
             phase={isReady ? facePhases.front : 'idle'}
             dimmed={dniTaken}
           />
-          <FacePreview
+          <ScanFacePreview
             label={t('registration.personal.scanDni.back')}
             uri={dni.back?.uri ?? null}
             scanning={isScanning}
@@ -175,7 +179,7 @@ export function ScanDniSheet({
         {dniTaken ? (
           <View
             style={[
-              styles.redAlert,
+              s.alert,
               {
                 backgroundColor: hexAlpha(theme.colors.danger, 0.12),
                 borderColor: hexAlpha(theme.colors.danger, 0.4),
@@ -184,7 +188,7 @@ export function ScanDniSheet({
               },
             ]}
           >
-            <View style={styles.redHead}>
+            <View style={s.alertHead}>
               <IconAlert size={18} color={theme.colors.danger} strokeWidth={2.2} />
               <Text variant="bodyStrong" style={{ color: theme.colors.danger }}>
                 {t('registration.personal.scanDni.dniTakenTitle')}
@@ -196,28 +200,61 @@ export function ScanDniSheet({
           </View>
         ) : null}
 
-        {/* Bloque "Esto leímos de tu DNI" (frame C/ScanDni): nombre / DNI / nacimiento leídos por OCR.
-            Solo antes de enviar, cuando la captura leyó el número crítico. */}
+        {/* Bloque "Esto leímos de tu DNI" (frame C/ScanDni): nombre / DNI / nacimiento leídos por OCR. */}
         {!dniTaken && isCaptured && hasReadDniNumber ? (
-          <ExtractBlock
-            fullName={dni.personal.fullName}
-            dniNumber={dni.personal.dni}
-            birthdate={dni.personal.birthdate}
-          />
+          <View
+            style={[
+              s.extract,
+              {
+                backgroundColor: theme.colors.surfaceElevated,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.md,
+                gap: theme.spacing.sm,
+              },
+            ]}
+          >
+            <Text variant="footnote" color="ink" style={s.extractTitle}>
+              {t('registration.personal.scanDni.extracted')}
+            </Text>
+            <ScanExtractRow
+              label={t('registration.personal.scanDni.fieldName')}
+              value={dni.personal.fullName}
+            />
+            <ScanExtractRow
+              label={t('registration.personal.scanDni.fieldDni')}
+              value={dni.personal.dni}
+              mono
+            />
+            <ScanExtractRow
+              label={t('registration.personal.scanDni.fieldBirthdate')}
+              value={formatDocumentDate(dni.personal.birthdate)}
+              mono
+            />
+          </View>
         ) : null}
 
         {/* Estado listo (eager): al confirmar se sube + verifica al instante. */}
         {!dniTaken && isCaptured && hasReadDniNumber ? (
-          <StatusLine tone="success" text={t('registration.personal.scanDni.readyEager')} />
+          <ScanStatusLine tone="success" text={t('registration.personal.scanDni.readyEager')} />
+        ) : null}
+
+        {/* Verificando (checkDni + PATCH, ANTES de la subida por cara): spinner honesto, no un "listo" mudo. */}
+        {isChecking ? (
+          <View style={[s.statusRow, { gap: theme.spacing.sm }]}>
+            <ActivityIndicator color={theme.colors.accent} />
+            <Text variant="footnote" color="accent">
+              {t('registration.personal.scanDni.checking')}
+            </Text>
+          </View>
         ) : null}
 
         {/* Subiendo: barra indeterminada + nota de segundo plano (la card sigue el progreso al cerrar). */}
         {isSending ? (
           <View style={{ gap: theme.spacing.sm }}>
-            <SendingBar />
-            <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
+            <ScanSendingBar />
+            <View style={[s.statusRow, { gap: theme.spacing.sm }]}>
               <ActivityIndicator color={theme.colors.accent} />
-              <View style={styles.statusCol}>
+              <View style={s.statusCol}>
                 <Text variant="footnote" color="accent">
                   {t('registration.personal.scanDni.sending')}
                 </Text>
@@ -230,7 +267,7 @@ export function ScanDniSheet({
         ) : null}
 
         {isSent ? (
-          <StatusLine tone="success" text={t('registration.personal.scanDni.sent')} />
+          <ScanStatusLine tone="success" text={t('registration.personal.scanDni.sent')} />
         ) : null}
 
         {sendFailed ? (
@@ -238,6 +275,16 @@ export function ScanDniSheet({
             tone="danger"
             title={t('registration.personal.scanDni.uploadFailed')}
             description={t('registration.personal.scanDni.sendErrorHint')}
+          />
+        ) : null}
+
+        {/* Fallo del pre-check / PATCH (red o servidor, NO duplicado): honestidad — el conductor ve el error
+            y reintenta, en vez de un sheet mudo que no pasó nada. */}
+        {submitError ? (
+          <Banner
+            tone="danger"
+            title={t('registration.personal.scanDni.verifyFailedTitle')}
+            description={t('registration.personal.scanDni.verifyFailedBody')}
           />
         ) : null}
 
@@ -280,203 +327,3 @@ export function ScanDniSheet({
     </BottomSheet>
   );
 }
-
-/** Línea de estado (tilde + texto) del tono dado. */
-function StatusLine({ tone, text }: { tone: 'success'; text: string }): React.JSX.Element {
-  const theme = useTheme();
-  const color = theme.colors[tone];
-  return (
-    <View style={[styles.statusRow, { gap: theme.spacing.sm }]}>
-      <IconCheck size={20} color={color} strokeWidth={2.6} />
-      <Text variant="footnote" style={{ color }}>
-        {text}
-      </Text>
-    </View>
-  );
-}
-
-/** Formatea una fecha ISO `AAAA-MM-DD` a `DD/MM/AAAA` (como el frame). Devuelve el crudo si no parsea. */
-function formatBirthdate(iso: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
-  if (!match) {
-    return iso;
-  }
-  const [, year, month, day] = match;
-  return `${day}/${month}/${year}`;
-}
-
-/** Bloque "Esto leímos de tu DNI": lo que el OCR extrajo, read-only (nombre / DNI / nacimiento). */
-function ExtractBlock({
-  fullName,
-  dniNumber,
-  birthdate,
-}: {
-  fullName: string;
-  dniNumber: string;
-  birthdate: string;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const theme = useTheme();
-  return (
-    <View
-      style={[
-        styles.extract,
-        {
-          backgroundColor: theme.colors.surfaceElevated,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radii.md,
-          gap: theme.spacing.sm,
-        },
-      ]}
-    >
-      <Text variant="footnote" color="ink" style={styles.extractTitle}>
-        {t('registration.personal.scanDni.extracted')}
-      </Text>
-      <ExtractRow label={t('registration.personal.scanDni.fieldName')} value={fullName} />
-      <ExtractRow label={t('registration.personal.scanDni.fieldDni')} value={dniNumber} mono />
-      <ExtractRow
-        label={t('registration.personal.scanDni.fieldBirthdate')}
-        value={formatBirthdate(birthdate)}
-        mono
-      />
-    </View>
-  );
-}
-
-/** Fila etiqueta ↔ valor del bloque de extracción (valor mono para DNI/nacimiento, como el frame). */
-function ExtractRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}): React.JSX.Element {
-  return (
-    <View style={styles.extractRow}>
-      <Text variant="footnote" color="inkSubtle">
-        {label}
-      </Text>
-      <Text variant="callout" color="ink" style={mono ? styles.monoValue : undefined}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-/** Barra de progreso indeterminada (sweep) para el estado "subiendo" (como el frame C/ScanLicencia). */
-function SendingBar(): React.JSX.Element {
-  const theme = useTheme();
-  return (
-    <View style={[styles.barTrack, { backgroundColor: theme.colors.surfaceElevated }]}>
-      <View style={[styles.barFill, { backgroundColor: theme.colors.accent }]} />
-    </View>
-  );
-}
-
-/**
- * Preview de una cara del DNI: imagen capturada o placeholder. El borde comunica el estado de ENVÍO por
- * cara (azul=subiendo, verde=enviado, rojo=error); antes de enviar, acento si hay captura. La etiqueta
- * inferior suma el estado ("Anverso · Enviado") cuando la subida está en curso.
- */
-function FacePreview({
-  label,
-  uri,
-  scanning,
-  phase,
-  dimmed,
-}: {
-  label: string;
-  uri: string | null;
-  scanning: boolean;
-  phase: DocumentSendPhase;
-  dimmed: boolean;
-}): React.JSX.Element {
-  const theme = useTheme();
-  const { t } = useTranslation();
-
-  const phaseColor =
-    phase === 'sent'
-      ? theme.colors.success
-      : phase === 'sending'
-        ? theme.colors.accent
-        : phase === 'error'
-          ? theme.colors.danger
-          : null;
-  const borderColor = phaseColor
-    ? hexAlpha(phaseColor, 0.5)
-    : uri
-      ? hexAlpha(theme.colors.accent, 0.5)
-      : theme.colors.border;
-  const stateLabel =
-    phase === 'sent'
-      ? t('registration.documents.state.sent')
-      : phase === 'sending'
-        ? t('registration.documents.state.sending')
-        : phase === 'error'
-          ? t('registration.documents.state.sendError')
-          : null;
-
-  return (
-    <View style={[styles.faceCol, dimmed ? styles.dimmed : undefined]}>
-      <View
-        style={[
-          styles.facePreview,
-          {
-            backgroundColor: theme.colors.surfaceElevated,
-            borderColor,
-            borderRadius: theme.radii.md,
-          },
-        ]}
-      >
-        {uri ? (
-          <Image source={{ uri }} style={styles.faceImage} resizeMode="contain" />
-        ) : (
-          <View style={styles.faceEmpty}>
-            {scanning ? (
-              <ActivityIndicator color={theme.colors.accent} />
-            ) : (
-              <Text variant="caption" color="inkSubtle">
-                {label}
-              </Text>
-            )}
-          </View>
-        )}
-      </View>
-      <Text variant="caption" color={stateLabel ? undefined : 'inkSubtle'} align="center">
-        {stateLabel ? `${label} · ${stateLabel}` : label}
-      </Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  body: { paddingBottom: 8 },
-  footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
-  facesRow: { flexDirection: 'row' },
-  faceCol: { flex: 1, gap: 6 },
-  dimmed: { opacity: 0.5 },
-  // Proporción de tarjeta ID-1: el DNI escaneado llena el contenedor SIN recorte (adiós zoom).
-  facePreview: {
-    aspectRatio: DOCUMENT_CARD_ASPECT_RATIO,
-    borderWidth: 1,
-    overflow: 'hidden',
-    justifyContent: 'center',
-  },
-  faceImage: { width: '100%', height: '100%' },
-  faceEmpty: { alignItems: 'center', justifyContent: 'center', flex: 1 },
-  statusRow: { flexDirection: 'row', alignItems: 'center' },
-  statusCol: { flex: 1, gap: 2 },
-  // Bloque de extracción OCR (nombre/DNI/nacimiento).
-  extract: { borderWidth: 1, padding: 14 },
-  extractTitle: { fontWeight: '600' },
-  extractRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  monoValue: { fontFamily: 'Menlo', letterSpacing: 0.5 },
-  // Alerta roja del DNI duplicado.
-  redAlert: { borderWidth: 1, padding: 14 },
-  redHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  // Barra de progreso indeterminada del "subiendo".
-  barTrack: { height: 4, borderRadius: 999, overflow: 'hidden', width: '100%' },
-  barFill: { height: 4, width: '45%', borderRadius: 999 },
-});

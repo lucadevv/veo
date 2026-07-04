@@ -1,7 +1,7 @@
 import { DocumentSide, FleetDocumentType } from '@veo/shared-types';
 import type { DocumentSideFile } from '../../../documents/domain';
 import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
-import { PersonalDataValidationError, type PersonalData } from '../../domain';
+import type { PersonalData } from '../../domain';
 import {
   isConflictError,
   isDniAlreadyRegisteredError,
@@ -163,9 +163,6 @@ export function useDniSubmit(): DniSubmit {
           return { status: 'dni-taken' };
         }
         // Validación de cliente (DNI/fecha/nombre) o red/servidor → error. Se conserva la captura.
-        if (e instanceof PersonalDataValidationError) {
-          return { status: 'error', error: e };
-        }
         return { status: 'error', error: e };
       }
     }

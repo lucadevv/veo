@@ -150,6 +150,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // Bloqueo por DNI duplicado (resultado `dni-taken` de `useDniSubmit`, del pre-check `check-dni`): el sheet
   // del DNI lo pinta en rojo. Se limpia al reabrir el sheet y al reescanear otro documento.
   const [dniTaken, setDniTaken] = useState(false);
+  // Fallo del pre-check/PATCH en la subida EAGER del DNI (red/servidor, NO duplicado): el sheet lo muestra +
+  // ofrece reintento (honestidad — sin esto el sheet quedaba mudo tras un fallo de verificación).
+  const [dniSubmitError, setDniSubmitError] = useState(false);
   // Lote 3: la licencia se intentó ANTES que el DNI (driver aún no creado) → el sheet avisa "primero el DNI".
   const [licenseNeedsDni, setLicenseNeedsDni] = useState(false);
 
@@ -372,6 +375,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     // Nuevo intento: limpia el bloqueo previo; el resultado `dni-taken` lo vuelve a encender (el resto de
     // los estados los lee la UI de la fase POR CARA del store + `pendingDni`).
     setDniTaken(false);
+    setDniSubmitError(false);
     void dniSubmit
       .submit({
         personal: fresh.personal,
@@ -380,6 +384,10 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
       .then((result) => {
         if (result.status === 'dni-taken') {
           setDniTaken(true);
+        } else if (result.status === 'error') {
+          // El checkDni o el PATCH fallaron (red/servidor): lo surface el sheet (banner + reintento). La
+          // captura se conserva (`pendingDni`); el fallo de la SUBIDA por cara ya lo pinta la fase por cara.
+          setDniSubmitError(true);
         }
       });
   };
@@ -391,6 +399,11 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
    */
   const onLicenseConfirmed = (): void => {
     setLicenseNeedsDni(false);
+    const fresh = useRegistrationStore.getState();
+    // Sella la combinación de capturas ANTES de la subida eager para que el efecto de abajo NO re-dispare el
+    // mismo lote al cerrar el sheet (simetría con `onDniConfirmed`): sin este sello, el `key` del efecto
+    // (`dni|licencia`) no coincidía con el sello viejo (`dni|-`) → segunda subida CONCURRENTE de la licencia.
+    eagerSyncKey.current = `${fresh.pendingDni?.front.uri ?? '-'}|${fresh.pendingLicense?.file.uri ?? '-'}`;
     const driverReady = driverExistence === DriverExistence.Exists || dniPhase === 'sent';
     void licenseSubmit.submit({ driverExists: driverReady }).then((result) => {
       if (result.status === 'needs-dni') {
@@ -493,6 +506,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
               }
               onPress={() => {
                 setDniTaken(false);
+                setDniSubmitError(false);
                 setScanOpen(true);
               }}
             />
@@ -643,8 +657,13 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
       onClose={() => setScanOpen(false)}
       facePhases={sendPhases.dni}
       dniTaken={dniTaken}
+      submitting={dniSubmit.isPending}
+      submitError={dniSubmitError}
       onConfirm={onDniConfirmed}
-      onRescan={() => setDniTaken(false)}
+      onRescan={() => {
+        setDniTaken(false);
+        setDniSubmitError(false);
+      }}
     />
   );
 
