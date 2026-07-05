@@ -51,7 +51,11 @@ const okDriver = {
 };
 
 /** Fuentes válidas del eje DriverStatus hacia AVAILABLE (espeja driverStatusSources del servicio). */
-const AVAILABLE_SOURCES = new Set(['OFFLINE', 'AVAILABLE', 'ASSIGNED', 'ON_TRIP', 'ON_BREAK']);
+// Fuentes VÁLIDAS del CAS de startShift (espeja `SHIFT_ENTRY_STATES` del servicio): SOLO OFFLINE (arranque) y
+// ON_BREAK (resume de pausa por el gate biométrico). NO incluye ASSIGNED/ON_TRIP/AVAILABLE — un conductor EN
+// VIAJE o ya en turno NO re-entra al pool por startShift (cierre del double-dispatch). El mock debe reflejar el
+// CAS REAL: si acá quedara el set viejo amplio, enmascararía justo esa regresión.
+const SHIFT_ENTRY_SOURCES = new Set(['OFFLINE', 'ON_BREAK']);
 
 /**
  * Prisma doble: `txDriver` simula el estado FRESCO que ve la tx (otro proceso pudo moverlo/suspenderlo
@@ -80,7 +84,7 @@ function makePrisma(driver: unknown, txDriver: unknown = driver) {
   // (`faceEmbedding: { isEmpty: false }`) — todo sobre el dato FRESCO de la tx.
   const txHasEmbedding = Array.isArray(tx?.faceEmbedding) && tx.faceEmbedding.length > 0;
   const casMatches =
-    !tx?.suspendedAt && AVAILABLE_SOURCES.has(tx?.currentStatus ?? '') && txHasEmbedding;
+    !tx?.suspendedAt && SHIFT_ENTRY_SOURCES.has(tx?.currentStatus ?? '') && txHasEmbedding;
   return {
     bioChecks,
     read: { driver: { findUnique: async () => driver } },
@@ -489,6 +493,38 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
       status: 'AVAILABLE',
       score: 96,
     });
+  });
+
+  it('RESUME de pausa: un conductor ON_BREAK vuelve al pool por el gate biométrico (ON_BREAK→AVAILABLE)', async () => {
+    // El resume de pausa NO tiene endpoint propio: ES un startShift desde ON_BREAK (la vuelta al pool pasa por el
+    // gate biométrico, no por Kafka). SHIFT_ENTRY_STATES incluye ON_BREAK justamente para no atrapar al pausado.
+    const onBreak = { ...okDriver, currentStatus: 'ON_BREAK' };
+    const svc = new DriversService(
+      makePrisma(onBreak, onBreak) as never,
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      sessions,
+      config,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).resolves.toEqual({
+      status: 'AVAILABLE',
+      score: 96,
+    });
+  });
+
+  it('DOUBLE-DISPATCH cerrado: un conductor EN VIAJE (ON_TRIP) NO re-entra al pool por startShift → ConflictError', async () => {
+    // ON_TRIP→AVAILABLE es una transición LEGAL de la máquina (release por fin de viaje), pero ESE camino es
+    // moveStatusForTrip, NO startShift. El CAS OFFLINE/ON_BREAK no matchea → la discriminación devuelve "ya tienes
+    // un turno activo" (no lo reinyecta al pool ni re-emite driver.verified). Cierra el double-dispatch de F1-C.
+    const onTrip = { ...okDriver, currentStatus: 'ON_TRIP' };
+    const svc = new DriversService(
+      makePrisma(onTrip, onTrip) as never,
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      sessions,
+      config,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ConflictError);
   });
 
   it('guard DEFENSIVO: una sesión biométrica corrupta (no-pasó) → UnauthorizedError SIN auditar NI contar (verify es el único dueño del lockout)', async () => {

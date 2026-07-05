@@ -104,6 +104,18 @@ const TRIP_ACTIVE_STATES: readonly DriverStatus[] = [
 ];
 
 /**
+ * Estados desde los que el GATE BIOMÉTRICO de `startShift` legítimamente (re)admite el conductor a AVAILABLE:
+ *  - `OFFLINE`  → arranque de turno (colgó y vuelve).
+ *  - `ON_BREAK` → RESUME de pausa: la vuelta al pool tras pausar pasa por el gate biométrico de startShift, NO
+ *    por Kafka (moveStatusForTrip recorta su release a `TRIP_ACTIVE_STATES`, ver su doc). No hay endpoint
+ *    `shift/resume` — el resume ES un startShift desde ON_BREAK.
+ * EXCLUYE ASSIGNED/ON_TRIP a PROPÓSITO: esos → AVAILABLE son el RELEASE por fin de viaje (moveStatusForTrip),
+ * no un arranque de turno. Incluirlos (como hacía `driverStatusSources(AVAILABLE)` crudo) dejaba a un conductor
+ * EN VIAJE re-entrar al pool por startShift (double-dispatch) + re-emitir driver.verified. Enum tipado, cero strings mágicos.
+ */
+const SHIFT_ENTRY_STATES: readonly DriverStatus[] = [DriverStatus.OFFLINE, DriverStatus.ON_BREAK];
+
+/**
  * Desenlace de una transición del eje disparada por el ciclo de vida del VIAJE (Fase A · ADR-021):
  *  - `'moved'`   — el CAS matcheó y movió el estado (o fue una re-aplicación idempotente from===to).
  *  - `'noop'`    — la transición era ILEGAL desde el estado actual (redelivery, SUSPENDED/OFFLINE, o el
@@ -1979,12 +1991,12 @@ export class DriversService {
           id: d.id,
           suspendedAt: null,
           faceEmbedding: { isEmpty: false },
-          // El turno SOLO arranca desde OFFLINE (máquina domain/driver-status.ts: "el turno SOLO arranca desde
-          // OFFLINE"). NO se usa driverStatusSources(AVAILABLE): ese set incluye ASSIGNED/ON_TRIP/ON_BREAK/
-          // AVAILABLE (estados desde los que AVAILABLE es alcanzable por el ciclo de VIAJE) → un conductor EN
-          // VIAJE matcheaba el CAS y se reinyectaba al pool (double-dispatch) + re-emitía driver.verified sobre
-          // un no-op. Acotarlo a OFFLINE hace de startShift el ÚNICO camino OFFLINE→AVAILABLE, gateado por biometría.
-          currentStatus: DriverStatus.OFFLINE,
+          // Fuentes = SHIFT_ENTRY_STATES (OFFLINE + ON_BREAK): el gate biométrico admite a AVAILABLE desde el
+          // arranque de turno (OFFLINE) Y el RESUME de pausa (ON_BREAK, que vuelve al pool por acá, no por Kafka).
+          // EXCLUYE ASSIGNED/ON_TRIP (release por fin de viaje, vía moveStatusForTrip) → cierra el double-dispatch
+          // de un conductor EN VIAJE re-entrando al pool + el re-emit de driver.verified sobre un no-op. NO se usa
+          // `driverStatusSources(AVAILABLE)` crudo, que incluía esos estados de viaje.
+          currentStatus: { in: [...SHIFT_ENTRY_STATES] },
         },
         data: { currentStatus: DriverStatus.AVAILABLE, lastVerifiedAt: new Date() },
       });
@@ -1998,16 +2010,16 @@ export class DriversService {
         if (current.suspendedAt) throw new ForbiddenError('Conductor suspendido');
         // Biometría borrada bajo nuestros pies (sweeper concurrente): error tipado claro, no un falso "carrera".
         if (!hasFaceEmbedding(current)) throw new ConflictError('Biometría facial no enrolada');
-        // Estaba OFFLINE, sin suspensión y con biometría, pero el CAS no matcheó → otro startShift concurrente
-        // ganó la transición OFFLINE→AVAILABLE (double-shift evitado).
-        if (current.currentStatus === DriverStatus.OFFLINE) {
+        // Estaba en un estado de ENTRADA válido (OFFLINE/ON_BREAK), sin suspensión y con biometría, pero el CAS
+        // no matcheó → otro startShift concurrente ganó la transición (double-shift evitado).
+        if (SHIFT_ENTRY_STATES.includes(current.currentStatus)) {
           throw new ConflictError('Otro inicio de turno concurrente ganó la transición');
         }
-        // No estaba OFFLINE. Discriminamos: si la máquina NO permite ESE estado → AVAILABLE, es una transición
-        // ILEGAL (p. ej. SUSPENDED, que solo sale a OFFLINE) → InvalidStatusTransition (409). Si la máquina SÍ la
-        // permite (ASSIGNED/ON_TRIP/ON_BREAK/AVAILABLE, alcanzables por el ciclo de VIAJE), no es ilegal pero
-        // tampoco es un arranque de turno: el conductor YA tiene un turno activo → no se re-inicia (esto, junto
-        // con la fuente OFFLINE-only del CAS, es lo que cierra el double-dispatch de un conductor EN VIAJE).
+        // No es un estado de ENTRADA (queda AVAILABLE/ASSIGNED/ON_TRIP o SUSPENDED). Discriminamos: si la máquina
+        // NO permite ESE estado → AVAILABLE, es una transición ILEGAL (p. ej. SUSPENDED, que solo sale a OFFLINE)
+        // → InvalidStatusTransition (409). Si la máquina SÍ la permite (AVAILABLE/ASSIGNED/ON_TRIP), no es ilegal
+        // pero tampoco es un (re)arranque de turno: el conductor YA tiene un turno activo → no se re-inicia (esto,
+        // junto con la fuente SHIFT_ENTRY_STATES del CAS, es lo que cierra el double-dispatch de un conductor EN VIAJE).
         driverStatusMachine.assertTransition(current.currentStatus, DriverStatus.AVAILABLE);
         throw new ConflictError('Ya tienes un turno activo');
       }
