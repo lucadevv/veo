@@ -5,6 +5,7 @@ import {
   DniAlreadyRegisteredError,
   ForbiddenError,
   hashPii,
+  InvalidStateError,
   NotFoundError,
   UnauthorizedError,
   UnprocessableEntityError,
@@ -100,14 +101,26 @@ function makePrisma(driver: unknown, txDriver: unknown = driver) {
   };
 }
 
-/** Redis doble: simula el contador de lockout + el almacén del sessionRef de un solo uso. */
+/**
+ * Redis doble: simula el contador de lockout + el almacén del sessionRef de un solo uso.
+ *
+ * `eval` modela FIELMENTE el script Lua `FIXED_WINDOW_INCR_EXPIRE` que `consumeFixedWindow` (@veo/utils)
+ * ejecuta: INCR de la key + PEXPIRE en el PRIMER hit (o si la key quedó sin TTL, ttl===-1), devolviendo
+ * `[count, ttl]`. Así el INCREMENTO ATÓMICO del lockout en el fallo de `verifyBiometric` (A1/M6) se cuenta de
+ * verdad (no un valor fijo): tras el eval, `get(bioLockKey)` refleja el contador real y `consumed.count` es el
+ * que ve el servicio. El TTL se rastrea en `ttls` para respetar la semántica de ventana FIJA (no se re-arma en
+ * cada hit sano). La key `veo:bio:fails:*` comparte el mismo contador `fails` que `get`/`incr`/`del`, así el
+ * eval y las lecturas del lockout son coherentes entre sí.
+ */
 function makeRedis(opts: { fails?: number; sessions?: Record<string, string> } = {}) {
   const store = new Map<string, string>(Object.entries(opts.sessions ?? {}));
+  const ttls = new Map<string, number>();
   let fails = opts.fails ?? 0;
+  const isFailsKey = (key: string) => key.startsWith('veo:bio:fails:');
   return {
     store,
     async get(key: string): Promise<string | null> {
-      if (key.startsWith('veo:bio:fails:')) return fails > 0 ? String(fails) : null;
+      if (isFailsKey(key)) return fails > 0 ? String(fails) : null;
       return store.get(key) ?? null;
     },
     async set(key: string, value: string): Promise<'OK'> {
@@ -115,6 +128,12 @@ function makeRedis(opts: { fails?: number; sessions?: Record<string, string> } =
       return 'OK';
     },
     async del(key: string): Promise<number> {
+      if (isFailsKey(key)) {
+        const had = fails > 0;
+        fails = 0;
+        ttls.delete(key);
+        return had ? 1 : 0;
+      }
       return store.delete(key) ? 1 : 0;
     },
     async incr(): Promise<number> {
@@ -123,6 +142,26 @@ function makeRedis(opts: { fails?: number; sessions?: Record<string, string> } =
     },
     async expire(): Promise<number> {
       return 1;
+    },
+    // Espeja FIXED_WINDOW_INCR_EXPIRE (ver packages/utils/src/rate-limit.ts): INCR + PEXPIRE-en-el-primer-hit
+    // (o saneo si ttl===-1), retorno `[count, ttl]`. numKeys=1, args=[key, windowMs].
+    async eval(_script: string, _numKeys: number, ...args: Array<string | number>): Promise<[number, number]> {
+      const key = String(args[0]);
+      const windowMs = Number(args[1]);
+      let count: number;
+      if (isFailsKey(key)) {
+        fails += 1;
+        count = fails;
+      } else {
+        count = Number(store.get(key) ?? 0) + 1;
+        store.set(key, String(count));
+      }
+      let ttl = ttls.get(key) ?? -1;
+      if (count === 1 || ttl === -1) {
+        ttls.set(key, windowMs);
+        ttl = windowMs;
+      }
+      return [count, ttl];
     },
   };
 }
@@ -237,12 +276,37 @@ describe('DriversService.verifyBiometric · minteo de sessionRef (BR-I02)', () =
     ).rejects.toBeInstanceOf(ConflictError);
   });
 
-  it('mintea sessionRef incluso cuando la verificación no pasa (para el lockout en startShift)', async () => {
+  it('cuando la verificación NO pasa: NO mintea sessionRef, AUDITA el intento, cuenta el lockout y lanza UnauthorizedError (A1)', async () => {
+    // CONTRATO NUEVO (A1): el lockout anti-bruteforce se movió AL motor de match (verify), el choke point real.
+    // Un fallo YA NO mintea un sessionRef "para que startShift cuente" — verify TIRA UnauthorizedError, deja la
+    // traza forense (biometric.failed en su propia tx) e incrementa el contador atómico (consumeFixedWindow).
+    const prisma = makePrisma(okDriver);
     const redis = makeRedis();
-    const svc = new DriversService(makePrisma(okDriver) as never, redis as never, bioFail, sessions, config);
-    const out = await svc.verifyBiometric('u1', { challengeId: 'c1', frames: ['f1'] });
-    expect(out.livenessPassed).toBe(false);
-    expect(redis.store.get(`veo:bio:session:${out.sessionRef}`)).toBeTruthy();
+    const svc = new DriversService(prisma as never, redis as never, bioFail, sessions, config);
+    await expect(
+      svc.verifyBiometric('u1', { challengeId: 'c1', frames: ['f1'] }),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+    // NO se minteó NINGUNA sesión (verify ya no mintea en fallo → startShift no tiene qué consumir).
+    const sessionKeys = [...redis.store.keys()].filter((k) => k.startsWith('veo:bio:session:'));
+    expect(sessionKeys).toHaveLength(0);
+    // El intento fallido dejó traza (evidencia Ley 29733) y contó el lockout (INCR atómico → 1 fallo).
+    expect(prisma.bioChecks).toHaveLength(1);
+    expect(await redis.get('veo:bio:fails:d1')).toBe('1');
+  });
+
+  it('bloquea tras 3 intentos fallidos (lockout 1h): con 3 fallos previos verify → ForbiddenError SIN correr el match (A1)', async () => {
+    // El invariante "3 fallos → bloqueo 1h" (BR-I02) vive AHORA en verify (antes en startShift). Con el contador
+    // en el techo, verify corta de entrada: ni siquiera invoca el motor de match (usa `bio`, que pasaría).
+    const svc = new DriversService(
+      makePrisma(okDriver) as never,
+      makeRedis({ fails: 3 }) as never,
+      bio,
+      sessions,
+      config,
+    );
+    await expect(
+      svc.verifyBiometric('u1', { challengeId: 'c1', frames: ['f1'] }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 
@@ -427,22 +491,22 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
     });
   });
 
-  it('rechaza y cuenta el intento cuando el sessionRef refleja una verificación fallida', async () => {
+  it('guard DEFENSIVO: una sesión biométrica corrupta (no-pasó) → UnauthorizedError SIN auditar NI contar (verify es el único dueño del lockout)', async () => {
+    // CONTRATO NUEVO: verify SOLO mintea sesión cuando PASÓ, así una sesión "no-pasó" no debería existir. Si por
+    // corrupción llegara una, startShift la corta con un guard defensivo ANTES de la escritura de auditoría y SIN
+    // tocar el lockout (el conteo del fallo ya lo hizo —o lo hará— verify; startShift no re-cuenta ni re-audita).
     const prisma = makePrisma(okDriver);
-    const svc = new DriversService(
-      prisma as never,
-      makeRedis({
-        sessions: session('bad', { score: 40, livenessPassed: false, matchPassed: false }),
-      }) as never,
-      bio,
-      sessions,
-      config,
-    );
+    const redis = makeRedis({
+      sessions: session('bad', { score: 40, livenessPassed: false, matchPassed: false }),
+    });
+    const svc = new DriversService(prisma as never, redis as never, bio, sessions, config);
     await expect(svc.startShift('u1', { sessionRef: 'bad' })).rejects.toBeInstanceOf(
       UnauthorizedError,
     );
-    // El intento fallido SÍ queda auditado (el assert de transición no aplica al camino fallido).
-    expect(prisma.bioChecks).toHaveLength(1);
+    // El guard corta ANTES del biometricCheck.create → NO hay auditoría del "intento" en startShift…
+    expect(prisma.bioChecks).toHaveLength(0);
+    // …y NO incrementa el lockout (verify es el dueño exclusivo del contador).
+    expect(await redis.get('veo:bio:fails:d1')).toBeNull();
   });
 
   it('si una suspensión FRESCA cayó entre la réplica y la tx, el CAS rechaza pero la auditoría PERSISTE (#13)', async () => {
@@ -543,7 +607,10 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
     await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it('bloquea tras 3 intentos fallidos (lockout 1h)', async () => {
+  it('el lockout ya NO vive en startShift: con 3 fallos previos pero sessionRef VÁLIDO, HABILITA el turno (el gate se movió a verify)', async () => {
+    // El bloqueo por 3 fallos se movió a verifyBiometric (A1/M6): startShift ya NO lee ni cuenta el lockout.
+    // Un contador en 3 (fallos previos) con una sesión que PASÓ debe habilitar el turno — la prueba de que el
+    // gate se movió al método correcto. (El bloqueo real de "3 fallos" lo cubre el test gemelo en verifyBiometric.)
     const svc = new DriversService(
       makePrisma(okDriver) as never,
       makeRedis({ fails: 3, sessions: session('ok') }) as never,
@@ -551,7 +618,10 @@ describe('DriversService.startShift · gate biométrico (BR-I02)', () => {
       sessions,
       config,
     );
-    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).resolves.toEqual({
+      status: 'AVAILABLE',
+      score: 96,
+    });
   });
 
   it('rechaza conductor suspendido', async () => {
@@ -1509,6 +1579,13 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
         // emite driver.registered). El doble captura ambos brazos en `upsertCalls` (create del createMany,
         // update del driver.update) + los eventos de outbox para fijar el invariante exactly-once.
         write: {
+          // Gate A10: `updatePersonalInfo` lee el backgroundCheckStatus de la PRIMARIA (no la réplica) ANTES de
+          // materializar, para bloquear el cambio de PII con el alta ya aprobada (CLEARED). El doble sirve la
+          // MISMA fila `existing` (null si el conductor aún no existe → gate pasa): fiel a que el gate mira el
+          // estado REAL de la fila, no un valor fijo.
+          driver: {
+            findUnique: async () => existing,
+          },
           $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
             const call: { create: Record<string, unknown>; update?: Record<string, unknown> } = {
               create: {},
@@ -1554,7 +1631,8 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
   }
 
   it('NO devuelve el DNI crudo al conductor: lo enmascara (últimos 4) en la vista (PII Ley 29733)', async () => {
-    const { prisma } = makePersonalPrisma(okDriver);
+    // El conductor edita su PII durante el alta → backgroundCheckStatus PENDING (el gate A10 solo bloquea CLEARED).
+    const { prisma } = makePersonalPrisma({ ...okDriver, backgroundCheckStatus: 'PENDING' });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     const out = await svc.updatePersonalInfo('u1', {
       legalName: 'Juan Pérez',
@@ -1604,7 +1682,11 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
   });
 
   it('re-submit idempotente: llamar dos veces no rompe ni duplica (upsert por userId)', async () => {
-    const { prisma, upsertCalls } = makePersonalPrisma({ ...okDriver, legalName: 'Ana' });
+    const { prisma, upsertCalls } = makePersonalPrisma({
+      ...okDriver,
+      legalName: 'Ana',
+      backgroundCheckStatus: 'PENDING',
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     const input = { legalName: 'Ana María', dni: '87654321', birthDate: '1992-01-10' };
     await svc.updatePersonalInfo('u1', input);
@@ -1620,7 +1702,7 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
     await svcA.updatePersonalInfo('u1', { legalName: 'Ana', dni: '87654321', birthDate: '1992-01-10' });
     expect(first.outboxEvents.map((e) => e.eventType)).toEqual(['driver.registered']);
     // La fila ya existía (el OTRO paso del wizard la creó y ya emitió) → este no re-emite (count 0).
-    const second = makePersonalPrisma({ ...okDriver, legalName: 'Ana' });
+    const second = makePersonalPrisma({ ...okDriver, legalName: 'Ana', backgroundCheckStatus: 'PENDING' });
     const svcB = new DriversService(second.prisma as never, makeRedis() as never, bio, sessions, config);
     await svcB.updatePersonalInfo('u1', {
       legalName: 'Ana María',
@@ -1628,6 +1710,41 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       birthDate: '1992-01-10',
     });
     expect(second.outboxEvents).toHaveLength(0);
+  });
+
+  it('GATE A10: un conductor CLEARED (alta aprobada) NO puede reescribir su PII → InvalidStateError, CERO escrituras', async () => {
+    // Invariante KYC "identidad operada == identidad revisada" (Ley 29733): con el alta aprobada (CLEARED) el
+    // conductor NO cambia su identidad por autoservicio (operaría bajo una identidad distinta a la revisada). La
+    // máquina prohíbe CLEARED→PENDING, así que el gate corta ANTES de materializar (no hay auto-re-review).
+    const { prisma, upsertCalls } = makePersonalPrisma({ ...okDriver, backgroundCheckStatus: 'CLEARED' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    await expect(
+      svc.updatePersonalInfo('u1', { legalName: 'Otro Nombre', dni: '87654321', birthDate: '1990-05-20' }),
+    ).rejects.toBeInstanceOf(InvalidStateError);
+    // Fail-closed: el gate corta ANTES de la materialización → no se escribió nada.
+    expect(upsertCalls).toHaveLength(0);
+  });
+
+  it('A10 · RESET DEL BINDING: cambiar la PII (PENDING) nulifica el cotejo face-match del ciclo en curso (updateData)', async () => {
+    // Cambiar la identidad invalida cualquier binding face-match que apuntaba al DNI VIEJO. El updateData que va
+    // a materializeDriverShell (brazo update, la fila ya existía) DEBE limpiar los 6 campos del binding para
+    // OBLIGAR a re-cotejar; sin esto, approve() (gate `dniFaceMatchedAt != null`) pasaría con un cotejo STALE.
+    const { prisma, upsertCalls } = makePersonalPrisma({
+      ...okDriver,
+      backgroundCheckStatus: 'PENDING',
+      dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    await svc.updatePersonalInfo('u1', { legalName: 'Ana', dni: '87654321', birthDate: '1992-01-10' });
+    // La fila ya existía → brazo update; el updateData resetea el binding (los 6 campos juntos, coherencia atómica).
+    expect(upsertCalls[0]?.update).toMatchObject({
+      dniFaceMatched: null,
+      dniFaceMatchScore: null,
+      dniFaceMatchedAt: null,
+      licenseFaceMatched: null,
+      licenseFaceMatchScore: null,
+      licenseFaceMatchedAt: null,
+    });
   });
 
   describe('blind index del DNI (dni_hash) · unicidad sin exponer la PII', () => {
@@ -1658,7 +1775,10 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       const ownDniHash = hashPii(dni, DNI_HASH_SALT);
       // La única fila con ese dniHash es la del PROPIO u1 (no aparece en `others`, que solo modela
       // choques de OTROS userId): el `NOT: { userId }` del pre-check la excluye del match.
-      const { prisma } = makePersonalPrisma({ ...okDriver, userId: 'u1', dniHash: ownDniHash }, []);
+      const { prisma } = makePersonalPrisma(
+        { ...okDriver, userId: 'u1', dniHash: ownDniHash, backgroundCheckStatus: 'PENDING' },
+        [],
+      );
       const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
       await expect(
         svc.updatePersonalInfo('u1', { legalName: 'Ana María', dni, birthDate: '1992-01-10' }),
@@ -1828,15 +1948,27 @@ describe('DriversService.setStatus · transición de turno validada por la máqu
   function makeStatusPrisma(driver: unknown) {
     const writes: Record<string, unknown>[] = [];
     const outbox: Record<string, unknown>[] = [];
-    // Fase B (ADR-021) — setStatus ahora es TRANSACCIONAL (update + outbox del `driver.went_offline` al
-    // pasar a OFFLINE). El doble expone `$transaction(fn)` que corre el callback con un tx que refleja el
-    // update y captura el outbox, espejando el prisma real.
+    // Fase B (ADR-021) + A8 — setStatus ahora transiciona por CAS ATÓMICO (`updateMany` con
+    // `currentStatus in driverStatusSources(status)` en el WHERE) + outbox del `driver.went_offline` al pasar a
+    // OFFLINE. El doble evalúa el WHERE de VERDAD contra el `currentStatus` de la fila simulada: matchea (count 1)
+    // SOLO si el estado actual es una fuente legal del destino; si no (carrera que movió la fila), count 0 y el
+    // servicio relee vía `findUnique`. Así el CAS del test es real, no un `count:1` a ciegas.
     const tx = {
       driver: {
-        update: async ({ data }: { data: Record<string, unknown> }) => {
-          writes.push(data);
-          return { currentStatus: data.currentStatus };
+        updateMany: async ({
+          where,
+          data,
+        }: {
+          where: { currentStatus?: { in: string[] } };
+          data: Record<string, unknown>;
+        }) => {
+          const current = (driver as { currentStatus?: string })?.currentStatus;
+          const sources = where.currentStatus?.in ?? [];
+          const matches = current != null && sources.includes(current);
+          if (matches) writes.push(data);
+          return { count: matches ? 1 : 0 };
         },
+        findUnique: async () => driver,
       },
       outboxEvent: {
         create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -1931,11 +2063,13 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     const driverWrites: Record<string, unknown>[] = [];
     const userWrites: Record<string, unknown>[] = [];
     const outbox: { eventType: string }[] = [];
-    // approve() transiciona por CAS atómico: `updateMany({ where: { backgroundCheckStatus in {PENDING,REJECTED} } })`.
-    // El doble espeja ese WHERE sobre el estado FRESCO de la tx: matchea (count 1) solo si el estado fuente AÚN
-    // no es CLEARED (un PENDING/REJECTED legítimo); si ya está CLEARED (otra tx ganó la carrera) → count 0,
-    // no-op idempotente sin re-emitir. reject() sigue por update normal (no CAS): se mantiene intacto.
-    const CLAIM_SOURCES = new Set(['PENDING', 'REJECTED']);
+    // approve() Y reject() transicionan AMBOS por CAS atómico (A6): `updateMany({ where: { backgroundCheckStatus
+    // in <sources> } })` — approve con sources={PENDING,REJECTED}, reject con sources={PENDING,CLEARED} (derivadas
+    // de la máquina, cada una excluye su propio destino). El doble evalúa el WHERE de VERDAD contra el estado
+    // FRESCO de la tx: matchea (count 1) SOLO si el estado fuente actual está en el `in` del WHERE — así el CAS
+    // discrimina al perdedor de la carrera (un CLEARED fuera del `in` de approve, un REJECTED fuera del `in` de
+    // reject) sin `count:1` a ciegas. approve además pliega el binding face-match (`dniFaceMatchedAt/
+    // licenseFaceMatchedAt: { not: null }`): si una tx concurrente lo nulificó, la fila fresca ya no matchea.
     const tx = {
       driver: {
         findUnique: async () => txDriver,
@@ -1950,28 +2084,29 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
           where: {
             backgroundCheckStatus?: { in: string[] };
             dniFaceMatchedAt?: { not: null };
+            licenseFaceMatchedAt?: { not: null };
           };
           data: Record<string, unknown>;
         }) => {
           const fresh = txDriver as {
             backgroundCheckStatus?: string;
             dniFaceMatchedAt?: Date | null;
+            licenseFaceMatchedAt?: Date | null;
           };
           const current = fresh?.backgroundCheckStatus;
-          // FIX 2: el CAS de approve() matchea solo si (1) el estado fresco está en el `in` del WHERE
-          // (PENDING/REJECTED) Y (2) el binding sigue fresco (`dniFaceMatchedAt != null`). Espeja la cláusula
-          // `dniFaceMatchedAt: { not: null }` plegada en el WHERE: si una tx concurrente nulificó el binding
-          // entre el pre-read y el CAS, la fila fresca tiene dniFaceMatchedAt=null → NO matchea (count 0).
-          // `casDniFaceMatchedAt` permite que el CAS vea un binding DISTINTO al del pre-read (la nulificación
-          // aterriza estrictamente entre ambos); sin override, el CAS ve el mismo binding que la tx.
+          // (1) El estado fuente fresco DEBE estar en el `in` del WHERE (la fuente única de verdad del CAS: no
+          // hardcodeamos qué estados — leemos el `where.in` que armó el servicio desde la máquina).
+          const sourceMatches =
+            current != null && (where.backgroundCheckStatus?.in.includes(current) ?? false);
+          // (2) approve pliega el binding en el WHERE. `casDniFaceMatchedAt` permite que el CAS vea un binding
+          // DISTINTO al del pre-read (la nulificación aterriza estrictamente entre ambos); sin override, ve el
+          // mismo binding que la tx. reject NO manda estas cláusulas (undefined) → no gatean.
           const casMatchedAt =
             'casDniFaceMatchedAt' in overrides ? overrides.casDniFaceMatchedAt : fresh?.dniFaceMatchedAt;
           const bindingFresh = where.dniFaceMatchedAt === undefined || casMatchedAt != null;
-          const matches =
-            current != null &&
-            CLAIM_SOURCES.has(current) &&
-            (where.backgroundCheckStatus?.in.includes(current) ?? false) &&
-            bindingFresh;
+          const licenseFresh =
+            where.licenseFaceMatchedAt === undefined || fresh?.licenseFaceMatchedAt != null;
+          const matches = sourceMatches && bindingFresh && licenseFresh;
           if (matches) driverWrites.push(data);
           return { count: matches ? 1 : 0 };
         },
@@ -2255,8 +2390,13 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     expect(userWrites).toHaveLength(0);
   });
 
-  it('reject concurrente que ya dejó REJECTED: re-aplicación idempotente (no-op válido por diseño)', async () => {
-    const { prisma, driverWrites } = makeApprovalPrisma(
+  it('reject concurrente que ya dejó REJECTED: no-op idempotente por CAS (A6) — NO reescribe NI re-emite', async () => {
+    // CONTRATO NUEVO (A6): reject transiciona por CAS. `rejectSources`={PENDING,CLEARED} EXCLUYE el destino
+    // REJECTED, así que si la fila FRESCA ya está REJECTED (otra decisión concurrente ganó) el WHERE no matchea
+    // (count 0). El servicio relee, ve REJECTED y devuelve idempotente SIN reescribir la fila, SIN re-tocar el
+    // KYC del usuario y SIN re-emitir driver.rejected (cero double-emit). Antes (update plano) re-escribía a
+    // ciegas; ahora el CAS discrimina al perdedor de la carrera.
+    const { prisma, driverWrites, userWrites, outbox } = makeApprovalPrisma(
       { ...okDriver, backgroundCheckStatus: 'PENDING' },
       { id: 'u1', kycStatus: 'PENDING' },
       {
@@ -2266,11 +2406,10 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     );
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await expect(svc.reject('d1', 'motivo')).resolves.toBeUndefined();
-    expect(driverWrites).toHaveLength(1);
-    expect(driverWrites[0]).toMatchObject({
-      backgroundCheckStatus: 'REJECTED',
-      rejectionReason: 'motivo',
-    });
+    // No-op honesto: el CAS no matcheó (ya estaba REJECTED) → cero escrituras y cero eventos.
+    expect(driverWrites).toHaveLength(0);
+    expect(userWrites).toHaveLength(0);
+    expect(outbox).toHaveLength(0);
   });
 
   it('reject: 404 si el conductor no existe (la lectura vive dentro de la tx)', async () => {

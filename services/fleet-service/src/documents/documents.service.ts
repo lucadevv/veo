@@ -4,7 +4,14 @@
  */
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { uuidv7, NotFoundError, ValidationError, ForbiddenError, ConflictError } from '@veo/utils';
+import {
+  uuidv7,
+  NotFoundError,
+  ValidationError,
+  ForbiddenError,
+  ConflictError,
+  ConcurrencyConflictError,
+} from '@veo/utils';
 import { assertDriverOwnsResource, type AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import {
@@ -331,22 +338,28 @@ export class DocumentsService {
     reason?: string,
     now = new Date(),
   ): Promise<FleetDocument> {
-    const doc = await this.prisma.read.fleetDocument.findUnique({ where: { id } });
-    if (!doc) throw new NotFoundError('Documento no encontrado', { id });
-    if (doc.status !== FleetDocumentStatus.PENDING_REVIEW) {
-      throw new ValidationError('El documento no está pendiente de revisión', {
-        status: doc.status,
-      });
-    }
-
-    const finalStatus =
-      decision === ReviewDecision.REJECTED
-        ? FleetDocumentStatus.REJECTED
-        : deriveExpiryStatus(doc.expiresAt, now, this.warningDays);
-
     return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.fleetDocument.update({
-        where: { id },
+      // Lectura DENTRO de la write-tx (NO de la réplica): sin lag ni TOCTOU con un review() concurrente.
+      const doc = await tx.fleetDocument.findUnique({ where: { id } });
+      if (!doc) throw new NotFoundError('Documento no encontrado', { id });
+      if (doc.status !== FleetDocumentStatus.PENDING_REVIEW) {
+        throw new ValidationError('El documento no está pendiente de revisión', {
+          status: doc.status,
+        });
+      }
+
+      const finalStatus =
+        decision === ReviewDecision.REJECTED
+          ? FleetDocumentStatus.REJECTED
+          : deriveExpiryStatus(doc.expiresAt, now, this.warningDays);
+
+      // CAS atómico: el estado origen PENDING_REVIEW viaja en el WHERE del updateMany. Dos operadores (o un
+      // doble-submit) revisando el MISMO doc: solo UNO matchea — el segundo re-evalúa el WHERE contra el valor
+      // ya commiteado y ve count 0. Sin esto (update-por-id plano sobre lectura de réplica) ambos escribían
+      // last-write-wins y AMBOS emitían por outbox → divergencia estado/evento (p. ej. REJECTED en DB pero
+      // DRIVER_REACTIVATED ya emitido → identity reactiva a un conductor con doc crítico rechazado).
+      const claim = await tx.fleetDocument.updateMany({
+        where: { id, status: FleetDocumentStatus.PENDING_REVIEW },
         data: {
           status: finalStatus,
           verifiedAt: now,
@@ -356,6 +369,10 @@ export class DocumentsService {
             decision === ReviewDecision.REJECTED ? reason?.trim() || null : null,
         },
       });
+      if (claim.count === 0) {
+        throw new ConcurrencyConflictError('El documento ya fue revisado por otra operación');
+      }
+      const updated = await tx.fleetDocument.findUniqueOrThrow({ where: { id } });
 
       if (finalStatus === FleetDocumentStatus.EXPIRED) {
         const critical = isCriticalDocument(updated.type);

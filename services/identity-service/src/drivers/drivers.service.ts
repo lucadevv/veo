@@ -8,10 +8,13 @@ import type Redis from 'ioredis';
 import { createEnvelope, DRIVER_OFFLINE_REASON } from '@veo/events';
 import { RedisRefreshTokenStore } from '@veo/auth';
 import {
+  ConcurrencyConflictError,
   ConflictError,
+  consumeFixedWindow,
   DniAlreadyRegisteredError,
   ForbiddenError,
   hashPii,
+  InvalidStateError,
   NotFoundError,
   UnauthorizedError,
   UnprocessableEntityError,
@@ -228,12 +231,30 @@ export class DriversService {
     userId: string,
     createData: Prisma.DriverCreateManyInput,
     updateData: Prisma.DriverUpdateInput,
+    // Guard ATÓMICO opcional para la rama UPDATE (default: sin guard → update por PK plano, como antes).
+    // Cuando se pasa, el update se hace por CAS (`updateMany` con el guard en el WHERE): si matchea 0 filas
+    // (el estado cambió bajo una carrera concurrente) lanza InvalidStateError en vez de escribir sobre el
+    // dato fresco. Lo usa updatePersonalInfo para cerrar el TOCTOU con un approve() concurrente (A10).
+    updateGuard?: Prisma.DriverWhereInput,
   ): Promise<Driver> {
     return this.prisma.write.$transaction(async (tx) => {
       const inserted = await tx.driver.createMany({ data: createData, skipDuplicates: true });
       const created = inserted.count === 1;
       if (!created) {
-        await tx.driver.update({ where: { userId }, data: updateData });
+        if (updateGuard) {
+          const applied = await tx.driver.updateMany({
+            where: { userId, ...updateGuard },
+            data: updateData as Prisma.DriverUpdateManyMutationInput,
+          });
+          if (applied.count === 0) {
+            throw new InvalidStateError(
+              'El estado del conductor cambió durante la operación; no se aplicó el cambio.',
+              { userId },
+            );
+          }
+        } else {
+          await tx.driver.update({ where: { userId }, data: updateData });
+        }
       }
       const driver = await tx.driver.findUniqueOrThrow({ where: { userId } });
       if (created) {
@@ -483,14 +504,33 @@ export class DriversService {
       );
       kycStatusMachine.assertTransition(user.kycStatus, KycStatus.REJECTED);
       const rejectedAt = new Date();
-      await tx.driver.update({
-        where: { id: driverId },
+      // CAS atómico (espeja approve()): el estado origen viaja en el WHERE del updateMany, así el rechazo
+      // se decide en el MISMO statement que valida la transición. Sin esto (update-por-id plano) dos
+      // reject() concurrentes ganaban AMBOS → doble emisión de driver.rejected; y una carrera approve+reject
+      // podía re-clearar a un conductor recién rechazado. `rejectSources` deriva de la máquina (cero strings
+      // mágicos) y EXCLUYE el destino para que el CAS discrimine al perdedor de la carrera.
+      const rejectSources = backgroundCheckSources(BackgroundCheckStatus.REJECTED).filter(
+        (from) => from !== BackgroundCheckStatus.REJECTED,
+      );
+      const claim = await tx.driver.updateMany({
+        where: { id: driverId, backgroundCheckStatus: { in: rejectSources } },
         data: {
           backgroundCheckStatus: BackgroundCheckStatus.REJECTED,
           rejectionReason: reason,
           rejectedAt,
         },
       });
+      if (claim.count === 0) {
+        // Otra decisión concurrente ganó la transición. Releemos para discriminar: si YA está REJECTED es
+        // idempotente (no re-emitimos el evento); si no, la carrera lo llevó a otro estado → conflicto transitorio.
+        const current = await tx.driver.findUnique({
+          where: { id: driverId },
+          select: { backgroundCheckStatus: true },
+        });
+        if (current?.backgroundCheckStatus === BackgroundCheckStatus.REJECTED) return;
+        throw new ConcurrencyConflictError('Otra decisión concurrente ganó la transición del conductor');
+      }
+      // Rama GANADORA (count === 1): sincronizamos el KYC del usuario y emitimos el evento UNA sola vez.
       await tx.user.update({
         where: { id: driver.userId },
         data: { kycStatus: KycStatus.REJECTED },
@@ -1736,18 +1776,85 @@ export class DriversService {
       throw new ConflictError('Conductor no enrolado biométricamente');
     }
 
+    // A1 + M6 — LOCKOUT ANTI-BRUTEFORCE ATÓMICO EN EL MOTOR DE MATCH (BR-I02: 3 intentos → bloqueo 1h).
+    // CAUSA RAÍZ del bug previo: un `redis.get` de SOLO LECTURA como gate + incremento en otra rama es
+    // check-then-act NO atómico → N /verify concurrentes leen todos fails<MAX, pasan el gate y cosechan el
+    // oráculo de score ANTES de que aterrice ningún INCR. El oráculo se consume DURANTE el match (antes de
+    // saber pass/fail), así que la ÚNICA forma de acotarlo es CONSUMIR (INCR+PEXPIRE+decisión en UN solo eval
+    // Lua) ANTES de correr el match: `consumeFixedWindow` cuenta el INTENTO y decide `allowed` atómicamente —
+    // N requests concurrentes reciben cada uno un `count` distinto, solo los primeros MAX pasan. Cuenta
+    // INTENTOS (no solo fallos) a propósito: es lo que cierra el oráculo. En éxito se resetea la racha (del).
+    const lockKey = bioLockKey(d.id);
+    const gate = await consumeFixedWindow(
+      this.redis,
+      lockKey,
+      MAX_BIO_FAILS,
+      BIO_LOCK_TTL_SECONDS * 1000,
+    );
+    if (!gate.allowed) {
+      this.logger.warn(
+        `Gate biométrico bloqueado: ${gate.count} intentos biométricos en 1h (driverId=${d.id})`,
+      );
+      throw new ForbiddenError('Verificación bloqueada por 1 hora tras 3 intentos fallidos');
+    }
+
     const result = await this.biometric.verify({
       driverId: d.id,
       challengeId: input.challengeId,
       frames: input.frames,
       referenceEmbedding: d.faceEmbedding,
     });
+    const score = Math.round(result.score);
+    // El VEREDICTO COMPLETO se decide acá (liveness ∧ match ∧ score ≥ mínimo), no en startShift: así el
+    // lockout cubre TODOS los modos de fallo (incl. score bajo), no solo el score-gate que el cliente reenvía.
+    const passed = result.livenessPassed && result.matchPassed && score >= this.minScore;
 
+    if (!passed) {
+      // Auditoría del intento fallido (evidencia forense Ley 29733) + evento de dominio, JUNTOS en su propia tx
+      // (o se persisten ambos o ninguno), independiente de cualquier transición posterior. El intento ya quedó
+      // contado por el `consumeFixedWindow` del gate → NO se re-incrementa (sería doble-conteo).
+      const envelope = createEnvelope({
+        eventType: 'biometric.failed',
+        producer: 'identity-service',
+        payload: {
+          driverId: d.id,
+          score,
+          attempt: gate.count,
+          at: new Date().toISOString(),
+        },
+      });
+      await this.prisma.write.$transaction(async (tx) => {
+        await tx.biometricCheck.create({
+          data: {
+            userId,
+            type: 'SHIFT_START',
+            score,
+            passed: false,
+          } satisfies Prisma.BiometricCheckUncheckedCreateInput,
+        });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: d.id,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+      });
+      // El error NO filtra el `score` crudo (era un oráculo para iterar spoofs): solo intentos restantes.
+      throw new UnauthorizedError(
+        `Verificación facial fallida. Intentos restantes: ${Math.max(0, MAX_BIO_FAILS - gate.count)}`,
+      );
+    }
+
+    // PASÓ: reseteamos la racha de intentos (una verificación exitosa limpia el lockout, igual que el `del`
+    // de startShift) y minteamos el sessionRef de un solo uso (TTL 120s) — PRUEBA DE VERIFICACIÓN que
+    // startShift consume. Solo se mintea en éxito: startShift ya no re-evalúa el veredicto ni el lockout.
+    await this.redis.del(lockKey);
     const sessionRef = uuidv7();
     const session: BiometricSession = {
       userId,
       kind: 'SHIFT_START',
-      score: Math.round(result.score),
+      score,
       livenessPassed: result.livenessPassed,
       matchPassed: result.matchPassed,
     };
@@ -1801,58 +1908,25 @@ export class DriversService {
     if (!hasFaceEmbedding(d)) throw new ConflictError('Biometría facial no enrolada');
 
     const lockKey = bioLockKey(d.id);
-    const fails = Number((await this.redis.get(lockKey)) ?? 0);
-    if (fails >= MAX_BIO_FAILS) {
-      this.logger.warn(
-        `Gate de turno bloqueado: ${fails} fallos biométricos en 1h (driverId=${d.id})`,
-      );
-      throw new ForbiddenError('Verificación bloqueada por 1 hora tras 3 intentos fallidos');
-    }
-
+    // Consume el sessionRef de un solo uso. `verifyBiometric` SOLO mintea sesión cuando la verificación PASÓ
+    // (liveness ∧ match ∧ score) y aplica AHÍ el lockout anti-bruteforce (A1) → acá la sesión ya es prueba de
+    // "pasó". No re-evaluamos el veredicto ni el lockout (eso reabriría el oráculo y duplicaría el conteo).
     const session = await this.consumeSession(input.sessionRef, userId);
+    // Guard DEFENSIVO (no debería disparar: verify no mintea sesión que no pasó). Si por corrupción llegara una
+    // sesión no-válida, cortamos SIN incrementar el lockout (verify es el único dueño del contador).
     const passed = session.livenessPassed && session.matchPassed && session.score >= this.minScore;
+    if (!passed) {
+      throw new UnauthorizedError('Sesión biométrica inválida; volvé a verificar tu rostro');
+    }
 
     const biometricCheckData = {
       userId,
       type: 'SHIFT_START',
       score: session.score,
-      passed,
+      passed: true,
       geoLat: input.geoLat,
       geoLon: input.geoLon,
     } satisfies Prisma.BiometricCheckUncheckedCreateInput;
-
-    if (!passed) {
-      // #13 + atomicidad — TX DE EVIDENCIA PROPIA Y SEPARADA: el rechazo biométrico escribe DOS hechos
-      // (la auditoría del intento Y el evento de dominio biometric.failed) que pertenecen JUNTOS — o se
-      // persiste la evidencia con su evento, o ninguno. Van en UNA tx propia, INDEPENDIENTE de la tx del CAS
-      // de transición (#2/#10): el camino fallido ni siquiera llega al CAS, así que esta evidencia nunca queda
-      // a merced de un rollback de transición. Antes (post-#13) eran DOS escrituras sueltas sin tx entre sí.
-      const envelope = createEnvelope({
-        eventType: 'biometric.failed',
-        producer: 'identity-service',
-        payload: {
-          driverId: d.id,
-          score: session.score,
-          attempt: fails + 1,
-          at: new Date().toISOString(),
-        },
-      });
-      await this.prisma.write.$transaction(async (tx) => {
-        await tx.biometricCheck.create({ data: biometricCheckData });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: d.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
-      });
-      const newFails = await this.redis.incr(lockKey);
-      if (newFails === 1) await this.redis.expire(lockKey, BIO_LOCK_TTL_SECONDS);
-      throw new UnauthorizedError(
-        `Verificación facial fallida (score ${session.score}). Intentos restantes: ${Math.max(0, MAX_BIO_FAILS - newFails)}`,
-      );
-    }
 
     // #13 — AUDITORÍA EN SU PROPIA ESCRITURA, ANTES DEL CAS: el registro del intento exitoso PERSISTE sí o sí
     // (evidencia de auditoría), independiente de si la transición de estado posterior pasa o falla. Antes vivía
@@ -1992,6 +2066,44 @@ export class DriversService {
     if (clash) {
       throw new DniAlreadyRegisteredError('Este DNI ya está registrado en otra cuenta');
     }
+    // Gate de estado (A10 · invariante KYC "identidad operada == identidad revisada", Ley 29733): un conductor
+    // con el alta YA APROBADA (backgroundCheckStatus CLEARED) NO puede reescribir su PII de identidad por
+    // autoservicio — operaría bajo una identidad distinta a la que compliance revisó. La máquina PROHÍBE
+    // CLEARED→PENDING (una aprobación no se des-decide sola), así que el cambio se BLOQUEA acá, no hay
+    // auto-re-review. Lectura de la PRIMARIA (no réplica) para que el gate no dependa del lag. Los estados
+    // PENDING (en revisión) y REJECTED (corrigiendo tras un rechazo) SÍ pueden editar: es parte del alta.
+    const existing = await this.prisma.write.driver.findUnique({
+      where: { userId },
+      select: { backgroundCheckStatus: true, dniHash: true, legalName: true, birthDate: true },
+    });
+    if (existing?.backgroundCheckStatus === BackgroundCheckStatus.CLEARED) {
+      throw new InvalidStateError(
+        'No puedes cambiar tus datos de identidad con el alta aprobada. Contacta a soporte.',
+        { backgroundCheckStatus: existing.backgroundCheckStatus },
+      );
+    }
+    // A10 (reset CONDICIONAL del binding): solo si la identidad REALMENTE cambió respecto a lo ya guardado.
+    // Un re-submit IDÉNTICO (resume del wizard, mismo DNI/nombre/fecha) NO debe descartar el cotejo face-match
+    // que el operador ya ejecutó (approve() gatea `dniFaceMatchedAt != null`). Comparamos por `dniHash`
+    // (determinista; el `documentIdEnc` es AES-GCM con IV aleatorio, no comparable) + legalName + birthDate.
+    // Sin fila previa (`!existing`) el binding ya es null → no hay nada que resetear.
+    const identityChanged =
+      !existing ||
+      existing.dniHash !== dniHash ||
+      existing.legalName !== input.legalName ||
+      existing.birthDate?.getTime() !== birthDate.getTime();
+    const bindingReset: Prisma.DriverUpdateInput = identityChanged
+      ? {
+          // El cotejo viejo apuntaba al material OBSOLETO. Se limpia el binding (los 6 campos juntos,
+          // coherencia atómica) para OBLIGAR a re-cotejar contra el material corregido en la re-aprobación.
+          dniFaceMatched: null,
+          dniFaceMatchScore: null,
+          dniFaceMatchedAt: null,
+          licenseFaceMatched: null,
+          licenseFaceMatchScore: null,
+          licenseFaceMatchedAt: null,
+        }
+      : {};
     try {
       await this.materializeDriverShell(
         userId,
@@ -2009,7 +2121,13 @@ export class DriversService {
           documentIdEnc,
           dniHash,
           birthDate,
+          ...bindingReset,
         },
+        // A10 (gate ATÓMICO): el UPDATE se hace por CAS con `backgroundCheckStatus != CLEARED` en el WHERE, así
+        // un approve() concurrente (PENDING→CLEARED) que gane la carrera hace que este write matchee 0 filas →
+        // InvalidStateError, en vez de reescribir la identidad sobre un conductor recién aprobado. Cierra el
+        // TOCTOU que el gate de solo-lectura de arriba (fail-fast del caso común) no puede cerrar solo.
+        { backgroundCheckStatus: { not: BackgroundCheckStatus.CLEARED } },
       );
     } catch (e) {
       // BACKSTOP de carrera (cierra el TOCTOU del pre-check): dos altas concurrentes con el MISMO DNI
@@ -2071,10 +2189,28 @@ export class DriversService {
     // turno, el conductor sigue online). `driverId` = id de PERFIL Driver (d.id), SIN PII.
     const emitOffline = status === DriverStatus.OFFLINE;
     const updated = await this.prisma.write.$transaction(async (tx) => {
-      const row = await tx.driver.update({
-        where: { id: d.id },
+      // CAS atómico (espeja approve/reject): el estado origen viaja en el WHERE. Sin esto (update-por-id plano
+      // sobre lectura de réplica) un pause autoservicio podía PISAR una asignación de viaje concurrente
+      // (AVAILABLE→ASSIGNED) o des-suspender a un conductor (SUSPENDED→ON_BREAK), derrotando un estado de
+      // seguridad. Las fuentes EXCLUYEN el destino (`from !== status`): así una re-aplicación al MISMO estado
+      // (double-tap "fin de turno" OFFLINE→OFFLINE) cae en count===0 → rama idempotente SIN re-emitir el
+      // evento (la máquina permite from===to, por eso hay que sacarlo o `went_offline` se duplicaría).
+      const statusSources = driverStatusSources(status).filter((from) => from !== status);
+      const claim = await tx.driver.updateMany({
+        where: { id: d.id, currentStatus: { in: statusSources } },
         data: { currentStatus: status },
       });
+      if (claim.count === 0) {
+        // La carrera cambió el estado bajo nuestros pies. Releemos: si ya es el destino, idempotente; si no,
+        // la transición desde el estado REAL no era legal (p. ej. quedó ASSIGNED/SUSPENDED) → conflicto transitorio.
+        const current = await tx.driver.findUnique({
+          where: { id: d.id },
+          select: { currentStatus: true },
+        });
+        if (current?.currentStatus === status) return current.currentStatus;
+        throw new ConcurrencyConflictError('El estado del conductor cambió; reintentá la operación');
+      }
+      // Rama GANADORA (count === 1): el fin de turno emite went_offline UNA sola vez, en la MISMA tx que el CAS.
       if (emitOffline) {
         const envelope = createEnvelope({
           eventType: 'driver.went_offline',
@@ -2093,8 +2229,8 @@ export class DriversService {
           },
         });
       }
-      return row;
+      return status;
     });
-    return { status: updated.currentStatus };
+    return { status: updated };
   }
 }
