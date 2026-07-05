@@ -82,6 +82,14 @@ const BIO_SESSION_TTL_SECONDS = 120;
 const PRISMA_UNIQUE_VIOLATION = 'P2002';
 
 /**
+ * Techo de la cola de aprobación (#24): `listPendingApproval` acota el resultado a esta cantidad (servido por el
+ * índice compuesto `(background_check_status, created_at)`). Bounded para que la cola no traiga N filas sin techo.
+ * DEUDA: si la cola supera este techo con regularidad, sumar paginación por cursor (createdAt) — hoy el operador
+ * ve las N más antiguas (orden FIFO de la cola). techo: PENDING_APPROVAL_PAGE_SIZE filas. gatillo: cola > techo sostenida.
+ */
+const PENDING_APPROVAL_PAGE_SIZE = 200;
+
+/**
  * Estados DESDE los que `to` es alcanzable en el eje DriverStatus (inversa de la tabla de la máquina).
  * Espeja `transitionSources` de trip-service: pensado para el guard CAS atómico
  * (`updateMany({ where: { currentStatus: { in: driverStatusSources(to) } } })`), que mueve el estado en el
@@ -340,6 +348,8 @@ export class DriversService {
       where: { backgroundCheckStatus: BackgroundCheckStatus.PENDING },
       select: { id: true, userId: true, licenseNumber: true, legalName: true },
       orderBy: { createdAt: 'asc' },
+      // #24 — cap bounded (servido por el índice compuesto): la cola no trae filas sin techo. FIFO (más antiguas).
+      take: PENDING_APPROVAL_PAGE_SIZE,
     });
   }
 

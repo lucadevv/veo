@@ -283,6 +283,10 @@ model Driver {
   updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz
 
   @@index([currentStatus])
+  // #24 — cubre la cola de aprobación: `listPendingApproval` filtra por backgroundCheckStatus=PENDING y ordena
+  // por createdAt asc. Sin este índice era un seq scan + sort sobre `drivers` (crece sin techo). El índice
+  // compuesto (filtro + orden) sirve el WHERE y el ORDER BY de una.
+  @@index([backgroundCheckStatus, createdAt])
   @@map("drivers")
   @@schema("identity")
 }
