@@ -609,6 +609,41 @@ export class OpsService {
    * OPERADO. fleet indexa los vehículos por Vehicle.driverId = User.id → la ITV se consulta por `userId`, NO
    * el driverId de perfil (mismo patrón que driverDetail/approveDriver).
    */
+  /**
+   * Documentos REQUERIDOS que faltan (no presentes en estado VALID). FUENTE ÚNICA del check documental —
+   * consumida por `computeApprovalGates` (gate de approve) y por el gate de INICIO de verificación en
+   * `runDniFaceMatch`/`runLicenseFaceMatch`. Puro sobre los `docs` YA traídos (no hace I/O).
+   */
+  private missingRequiredDocs(docs: DriverDocumentsReply): FleetDocumentType[] {
+    return REQUIRED_DRIVER_DOC_TYPES.filter(
+      (req) =>
+        !docs.documents.some((d) => d.type === req && d.status === FleetDocumentStatus.VALID),
+    );
+  }
+
+  /**
+   * GATE DE INICIO DE VERIFICACIÓN (#2): el conductor debe tener SUBIDOS todos los documentos requeridos antes
+   * de que el operador pueda verificar su identidad (face-match). Es un BLOQUEO, NO un rechazo — si falta subir
+   * algún documento, el operador no puede empezar y el conductor queda esperando en su onboarding (nunca se lo
+   * auto-rechaza: REJECTED es decisión humana real, no "no terminó de subir").
+   *
+   * Chequea PRESENCIA (documento subido, cualquier estado), NO VALID: la VALIDACIÓN de cada doc + el face-match
+   * son parte de la MISMA revisión del operador (exigir LICENSE_A1=VALID antes de su propio face-match sería
+   * circular). El gate DURO de VALID lo aplica approve() al final (computeApprovalGates). Progresión: subir todo
+   * → operador revisa+verifica → operador aprueba (exige VALID).
+   */
+  private assertDocumentsComplete(driverId: string, docs: DriverDocumentsReply): void {
+    const notUploaded = REQUIRED_DRIVER_DOC_TYPES.filter(
+      (req) => !docs.documents.some((d) => d.type === req),
+    );
+    if (notUploaded.length > 0) {
+      throw new ConflictError(
+        `No se puede iniciar la verificación: el conductor debe SUBIR todos sus documentos primero. Faltan: ${notUploaded.join(', ')}`,
+        { driverId, missing: notUploaded },
+      );
+    }
+  }
+
   private async computeApprovalGates(
     identity: AuthUser,
     userId: string,
@@ -620,10 +655,7 @@ export class OpsService {
       { id: userId },
       meta,
     );
-    const missingDocuments = REQUIRED_DRIVER_DOC_TYPES.filter(
-      (req) =>
-        !docs.documents.some((d) => d.type === req && d.status === FleetDocumentStatus.VALID),
-    );
+    const missingDocuments = this.missingRequiredDocs(docs);
     return {
       documentsValid: missingDocuments.length === 0,
       missingDocuments: [...missingDocuments],
@@ -662,6 +694,9 @@ export class OpsService {
       { id: driverId },
       meta,
     );
+    // #2 — docs completos ANTES de verificar (BLOQUEO, no rechazo): el operador no arranca el face-match si
+    // falta algún documento requerido. El conductor completa todo primero; recién ahí el humano verifica.
+    this.assertDocumentsComplete(driverId, docs);
     // Ubica el DNI y su imagen FRONT (sub-lote 3A). Sin DNI / sin FRONT → 409 honesto: no hay foto que cotear.
     const dni = docs.documents.find((d) => d.type === FleetDocumentType.DNI);
     const frontKey =
@@ -715,6 +750,8 @@ export class OpsService {
       { id: driverId },
       meta,
     );
+    // #2 — docs completos ANTES de verificar (BLOQUEO, no rechazo; gemelo del gate en runDniFaceMatch).
+    this.assertDocumentsComplete(driverId, docs);
     // Ubica el brevete (LICENSE_A1) y su imagen FRONT (la cara con la foto del titular). Sin licencia / sin
     // FRONT → 409 honesto: no hay foto que cotear.
     const license = docs.documents.find((d) => d.type === FleetDocumentType.LICENSE_A1);

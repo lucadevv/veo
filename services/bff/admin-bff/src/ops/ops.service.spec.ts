@@ -803,8 +803,9 @@ describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lo
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 }),
     );
+    // Set requerido SUBIDO (el gate de inicio de verificación #2 exige presencia) + el DNI con su FRONT.
     const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [dniWithFront] } : {},
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [...allValidDocs, dniWithFront] } : {},
     );
     const presignPost = vi.fn().mockResolvedValue({ url: 'https://signed/dni-front' });
     const media = { post: presignPost } as unknown as InternalRestClient;
@@ -848,8 +849,42 @@ describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lo
   });
 
   it('sin foto FRONT del DNI → 409 (ConflictError) sin llamar a identity', async () => {
+    // Docs requeridos SUBIDOS (pasa el gate #2) pero SIN el DNI → falla en el lookup del FRONT del DNI, no en
+    // el gate. Así el test sigue ejercitando el path del FRONT faltante (no lo enmascara el gate de presencia).
     const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [] } : {},
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [...allValidDocs] } : {},
+    );
+    const identityPost = vi.fn();
+    const identityRest = { post: identityPost } as unknown as InternalRestClient;
+    const svc = new OpsService(
+      grpc(() => ({})),
+      grpc(() => ({})),
+      fleetGrpc,
+      identityRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+    await expect(svc.runDniFaceMatch(identity, 'd1')).rejects.toBeInstanceOf(ConflictError);
+    expect(identityPost).not.toHaveBeenCalled();
+  });
+
+  it('#2 GATE — docs requeridos SIN subir → BLOQUEA la verificación (ConflictError) sin llamar a identity', async () => {
+    // Falta el SOAT (no subido). El operador NO puede empezar el face-match: es un BLOQUEO, no un rechazo.
+    const incompleto = [
+      // DNI con FRONT presente (lo que el face-match usaría), pero faltan requeridos → el gate corta ANTES.
+      dniWithFront,
+      fleetDoc(FleetDocumentType.LICENSE_A1, FleetDocumentStatus.VALID),
+      fleetDoc(FleetDocumentType.PROPERTY_CARD, FleetDocumentStatus.VALID),
+      fleetDoc(FleetDocumentType.VEHICLE_PHOTO, FleetDocumentStatus.VALID),
+    ];
+    const fleetGrpc = grpc((m) =>
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: incompleto } : {},
     );
     const identityPost = vi.fn();
     const identityRest = { post: identityPost } as unknown as InternalRestClient;
@@ -895,8 +930,20 @@ describe('OpsService.runLicenseFaceMatch · orquesta el BINDING licencia↔selfi
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(new Uint8Array([5, 6, 7, 8]), { status: 200 }),
     );
+    // El brevete (LICENSE_A1) con su FRONT + los otros 3 requeridos SUBIDOS (gate de inicio de verificación #2).
+    // No se usa allValidDocs para no duplicar el LICENSE_A1 (el find del face-match debe dar el que TIENE FRONT).
     const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [licenseWithFront] } : {},
+      m === 'GetDriverDocuments'
+        ? {
+            driverId: 'd1',
+            documents: [
+              licenseWithFront,
+              fleetDoc(FleetDocumentType.SOAT, FleetDocumentStatus.VALID),
+              fleetDoc(FleetDocumentType.PROPERTY_CARD, FleetDocumentStatus.VALID),
+              fleetDoc(FleetDocumentType.VEHICLE_PHOTO, FleetDocumentStatus.VALID),
+            ],
+          }
+        : {},
     );
     const presignPost = vi.fn().mockResolvedValue({ url: 'https://signed/license-front' });
     const media = { post: presignPost } as unknown as InternalRestClient;
@@ -935,8 +982,10 @@ describe('OpsService.runLicenseFaceMatch · orquesta el BINDING licencia↔selfi
   });
 
   it('sin foto del brevete → 409 (ConflictError) sin llamar a identity', async () => {
+    // Requeridos SUBIDOS (pasa el gate #2), pero el LICENSE_A1 no tiene imagen FRONT → falla en el lookup del
+    // FRONT del brevete, no en el gate de presencia (así el test sigue ejercitando ese path específico).
     const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [] } : {},
+      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [...allValidDocs] } : {},
     );
     const identityPost = vi.fn();
     const identityRest = { post: identityPost } as unknown as InternalRestClient;
