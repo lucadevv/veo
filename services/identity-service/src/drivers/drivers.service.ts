@@ -1838,23 +1838,34 @@ export class DriversService {
           at: new Date().toISOString(),
         },
       });
-      await this.prisma.write.$transaction(async (tx) => {
-        await tx.biometricCheck.create({
-          data: {
-            userId,
-            type: 'SHIFT_START',
-            score,
-            passed: false,
-          } satisfies Prisma.BiometricCheckUncheckedCreateInput,
+      // El rechazo ES un veredicto REAL (passed=false) → el intento cuenta (no se reintegra). Pero si la tx de
+      // auditoría/outbox falla (DB caída), NO debemos 500-ear al conductor ni perder su feedback: el fallo
+      // biométrico ocurrió igual. Logueamos el gap de auditoría a nivel ERROR (reconciliable, NO silencioso —
+      // Ley 29733) y devolvemos igual el 401 con los intentos restantes. El intento ya quedó contado (correcto:
+      // fue un rechazo real), a diferencia de un error del PROVEEDOR (arriba) que sí se reintegra.
+      try {
+        await this.prisma.write.$transaction(async (tx) => {
+          await tx.biometricCheck.create({
+            data: {
+              userId,
+              type: 'SHIFT_START',
+              score,
+              passed: false,
+            } satisfies Prisma.BiometricCheckUncheckedCreateInput,
+          });
+          await tx.outboxEvent.create({
+            data: {
+              aggregateId: d.id,
+              eventType: envelope.eventType,
+              envelope: envelope as unknown as Prisma.InputJsonValue,
+            },
+          });
         });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: d.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
-      });
+      } catch (auditError) {
+        this.logger.error(
+          `No se pudo auditar el rechazo biométrico (driverId=${d.id}, score=${score}, intento=${gate.count}): ${String(auditError)}`,
+        );
+      }
       // El error NO filtra el `score` crudo (era un oráculo para iterar spoofs): solo intentos restantes.
       throw new UnauthorizedError(
         `Verificación facial fallida. Intentos restantes: ${Math.max(0, MAX_BIO_FAILS - gate.count)}`,
