@@ -125,7 +125,7 @@ Mapa de navegación (brief §5.1): `Splash → Onboarding → Login → [Registr
 - **Interacciones & transiciones:** `Reveal` escalonado de los bloques. Cambio phone↔code sin pantalla nueva (mismo screen, branch de estado). Autofill de OTP por SMS (`oneTimeCode`).
 - **Contenido & copy:** "Ingresa a VEO Conductores" · "Tu cuenta de socio conductor" · "Enviar código" · "Verificar" · "Cambiar número" · "Usar código en su lugar".
 - **Color & énfasis:** `accent` en motivo, escudo, casilla activa y CTAs. Errores `danger`, avisos `warn`.
-- **Seguridad / nota especial:** OTP propio, timeout 10 min, reenvío con cooldown 30 s (ver pasajero §4.2). **Canal de entrega (ADR-012 §1.2/§6):** **WhatsApp PRINCIPAL** (Meta Cloud API tras puerto `WhatsAppSender`, excepción §0.7 acotada) con **fallback automático a SMS soberano** (SMPP). _⏳ Estado: WhatsApp es el objetivo (ADR-012); hoy el código entrega por SMS — el puerto `WhatsAppSender` está pendiente de construir._ El re-login biométrico es del **dispositivo** (no es el gate de turno, que es facial server-side).
+- **Seguridad / nota especial:** OTP propio, timeout 5 min (`OTP_TTL_SECONDS=300`, BR-I06), reenvío con cooldown 30 s (ver pasajero §4.2). **Canal de entrega (ADR-012 §1.2/§6):** **WhatsApp PRINCIPAL** (Meta Cloud API tras puerto `WhatsAppSender`, excepción §0.7 acotada) con **fallback automático a SMS soberano** (SMPP). _⏳ Estado: WhatsApp es el objetivo (ADR-012); hoy el código entrega por SMS — el puerto `WhatsAppSender` está pendiente de construir._ El re-login biométrico es del **dispositivo** (no es el gate de turno, que es facial server-side).
 
 ---
 
@@ -192,7 +192,7 @@ Wizard **reanudable**: abre en el paso donde quedó (`currentStep` persistido). 
 > Regla 1. El conductor pasa por acá **cada vez que se conecta**. Es la barrera de seguridad de la app. Layout premium compartido por `BiometricGate`.
 
 ### ShiftStart (`ShiftStartScreen.tsx`)
-- **Propósito:** verificar liveness + match facial contra un challenge del backend (BLINK / SMILE / NOD / TURN_LEFT / TURN_RIGHT) antes de habilitar el turno. **Obligatorio, sin bypass.**
+- **Propósito:** verificar liveness + match facial contra un challenge del backend (SMILE / NOD / TURN_LEFT / TURN_RIGHT — el enum `LivenessAction` real; ver ESTADO-AUTH §Gate biométrico de TURNO) antes de habilitar el turno. **Obligatorio, sin bypass.**
 - **Entrada / Salida:** desde el Dashboard al tocar "Conéctate". Éxito → turno `AVAILABLE` → vuelve al Dashboard. Si el conductor no está enrolado → redirige a BiometricEnroll.
 - **Layout & jerarquía visual (`BiometricGate`):** top bar con back + título "Iniciar turno". Centro: **escudo `accent` en círculo `surfaceElevated`** con **halo azul que respira** (`Pulse`); durante la captura el halo **se acelera e intensifica** y el escudo late. `title2` "Verificación de identidad" + `callout` explicativo. Banner de resultado bajo el copy. Footer: CTA primaria `lg` full-width (captura).
 - **Componentes clave:** `BiometricGate`, `Pulse` (halo + escudo), `IconShield`, `Banner` de resultado.

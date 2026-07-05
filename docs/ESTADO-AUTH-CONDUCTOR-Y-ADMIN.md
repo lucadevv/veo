@@ -34,7 +34,7 @@
 | **Apple OAuth** | ✅ | identityToken verificado contra Apple JWKS (Guideline 4.8). |
 | **Email + password** | ✅ | Argon2id + verificación por código (anti-enumeración) + reset con revocación de sesiones. |
 | **WhatsApp OTP** | ⏳ planeado | El spec lo pide como PRINCIPAL; hoy SMS soberano (espera `WhatsAppSender`, ADR-012 Lote 3). **Gap intencional.** |
-| **Re-login biométrico de dispositivo** (Face ID/Android) | ⏳ planeado | Distinto del gate de turno. |
+| **Re-login biométrico de dispositivo** (Face ID/Android) | ✅ | Distinto del gate de turno. Keychain/Keystore con `BIOMETRY_CURRENT_SET` + `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY`; `KeychainLocalAuthService` cableado (`useBiometricRelogin` + DI), distingue cancelación de fallo real (banner), y sincroniza/limpia el token en rotación/revocación. |
 
 ### Onboarding / registro — máquina de estados ✅
 `NOT_STARTED → IN_PROGRESS → IN_REVIEW → APPROVED | REJECTED` (wizard reanudable por `currentStep`):
@@ -46,7 +46,7 @@
 ### Gate biométrico de TURNO ✅
 Liveness **ACTIVO** (challenge: `TURN_LEFT|TURN_RIGHT|NOD|SMILE`, one-shot, `expiresAt`) obligatorio cada turno, **sin bypass ni override de UI**. 3 fallos = bloqueo 1h (solo central destraba). *(Distinto del KYC: turno=ACTIVO, KYC=PASIVO.)*
 
-### Estado conductor: **~95% operativo.** Faltan: WhatsApp OTP (planeado), re-login biométrico (planeado). Deudas menores: calibración PAD, share-service SMS adapter prod.
+### Estado conductor: **~97% operativo.** Falta: WhatsApp OTP (planeado — hoy SMS soberano). Deudas menores: calibración PAD, share-service SMS adapter prod.
 
 ---
 

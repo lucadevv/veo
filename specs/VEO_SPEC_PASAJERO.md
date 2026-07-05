@@ -125,7 +125,7 @@ Mapa: `Splash → Onboarding → Auth (phone→OTP) → CompleteProfile → Main
 - **Estados:**
   - **Teléfono:** CTA **disabled** hasta 9 dígitos válidos; borde `focus` al enfocar, borde `danger` + helper rojo si tocó y es inválido; `loading` mientras solicita; `Banner danger` si falla el request.
   - **OTP:** **shake** de las casillas en cada nuevo error de verificación (`errorNonce`); `Banner danger` si verificación falla; **reenvío bloqueado 30s** con cuenta regresiva `m:ss` (tabular) — fila atenuada (opacity ~0.55) mientras corre; "Cambiar número" vuelve al paso teléfono y limpia el código.
-  - OTP expira (timeout 10 min); el copy de expiración lo anticipa.
+  - OTP expira (timeout 5 min, `OTP_TTL_SECONDS=300`); el copy de expiración lo anticipa.
 - **Interacciones & transiciones:** entrada con fade/offset; foco que avanza casilla a casilla; shake en error; chevron back entre pasos.
 - **Contenido & copy (sugerido):**
   - Teléfono: título "Tu número" · subtítulo "Te enviamos un código por WhatsApp." · placeholder "987 654 321" · helper "Ingresa tu número de 9 dígitos." · error "Número inválido." · prefijo "+51" · CTA "Enviar código".
