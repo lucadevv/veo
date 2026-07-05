@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
   IsBase64,
@@ -66,6 +67,12 @@ class StartShiftDto {
  */
 const FRAME_BASE64_MAX = 1_500_000;
 /**
+ * Techo de CANTIDAD de frames del verify de turno (liveness): un challenge real usa unos pocos frames. Acota
+ * el payload junto con el tope por-frame (M4): sin esto un cliente mandaba un array de miles de strings gigantes
+ * → presión de memoria/CPU antes de llegar al motor ONNX. Enum/constante tipada, no literal suelto.
+ */
+const MAX_VERIFY_FRAMES = 10;
+/**
  * Piso de longitud del base64 de la selfie: 2000 descarta trivialidades (`"x"`, `"AAAA"`) sin rozar el
  * happy path de una foto real.
  */
@@ -101,9 +108,14 @@ class VerifyBiometricDto {
   @IsString()
   challengeId!: string;
 
+  // M4 — techo de cantidad (@ArrayMaxSize) + validación POR-frame (base64 válido, tamaño acotado), simétrico
+  // con EnrollFaceDto/DniFaceMatchDto. Sin esto el array no tenía ni tope de cardinalidad ni de tamaño.
   @IsArray()
   @ArrayNotEmpty()
-  @IsString({ each: true })
+  @ArrayMaxSize(MAX_VERIFY_FRAMES)
+  @IsBase64(undefined, { each: true })
+  @MinLength(FRAME_BASE64_MIN, { each: true })
+  @MaxLength(FRAME_BASE64_MAX, { each: true })
   frames!: string[];
 }
 

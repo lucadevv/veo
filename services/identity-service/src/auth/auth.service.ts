@@ -4,7 +4,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtService, RedisRefreshTokenStore, RefreshError, type SubjectType } from '@veo/auth';
-import { parseOrThrow, peruPhoneSchema, UnauthorizedError } from '@veo/utils';
+import { ForbiddenError, parseOrThrow, peruPhoneSchema, UnauthorizedError } from '@veo/utils';
 import { type AdminRole } from '@veo/shared-types';
 import { PrismaService } from '../infra/prisma.service';
 import { OtpService } from './otp.service';
@@ -57,6 +57,18 @@ export class AuthService {
         authMethod: { type: 'PHONE_OTP', verified: true },
       });
     });
+
+    // M7 — GATE DE TIPO DE CUENTA (fail-closed): el `type` pedido (que el BFF fuerza: 'DRIVER' desde driver-bff)
+    // se ignoraba para un user EXISTENTE → un teléfono registrado como PASAJERO que entraba por driver-bff recibía
+    // un token typ=passenger y la app de conductor quedaba rota (DriverTypeGuard 403 en todo). Un User tiene UN
+    // solo tipo; si el existente NO coincide con el pedido, se RECHAZA con error tipado (403) — no se emite un
+    // token del tipo equivocado. La conversión de cuenta (pasajero↔conductor) es un flujo aparte, no un login.
+    // Para un alta nueva `user.type === type` (recién creado), así que este gate solo muerde el mismatch real.
+    if (user.type !== type) {
+      throw new ForbiddenError(
+        'Este teléfono está registrado con otro tipo de cuenta. Ingresá desde la app correspondiente.',
+      );
+    }
 
     const subject = this.subjectType(user.type);
     // SINGLE ACTIVE SESSION para el CONDUCTOR (el último login gana): revocamos las sesiones previas ANTES de

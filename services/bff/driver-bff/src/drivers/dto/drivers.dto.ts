@@ -85,16 +85,25 @@ export class EnrollFaceDto {
   photo!: string;
 }
 
+/** M4 — topes del payload del verify en el BORDE del BFF (defense-in-depth; identity re-valida estricto). */
+const MAX_VERIFY_FRAMES = 10;
+const FRAME_BASE64_MIN = 2_000;
+const FRAME_BASE64_MAX = 1_500_000;
+
 /** POST /drivers/shift/biometric/verify → body. Reto + frames del liveness (BR-I02). */
 export class VerifyBiometricDto {
   @ApiProperty({ description: 'Id del reto de liveness emitido en /challenge' })
   @IsString()
   challengeId!: string;
 
+  // M4 — acota cantidad (@ArrayMaxSize) y tamaño por-frame (@Length) ANTES de reenviar a identity: un cliente
+  // no puede empujar un array de miles de strings gigantes por el borde del BFF. identity re-valida base64+tamaño.
   @ApiProperty({ description: 'Frames del reto en base64 (orden temporal)', type: [String] })
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_VERIFY_FRAMES)
   @IsString({ each: true })
+  @Length(FRAME_BASE64_MIN, FRAME_BASE64_MAX, { each: true })
   frames!: string[];
 }
 
