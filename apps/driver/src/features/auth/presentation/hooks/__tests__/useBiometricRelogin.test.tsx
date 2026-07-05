@@ -28,9 +28,10 @@ const TOKENS = { accessToken: 'acc-new', refreshToken: 'ref-new' };
 interface Overrides {
   getMe?: jest.Mock;
   saveRefreshToken?: jest.Mock;
+  unlockRefreshToken?: jest.Mock;
 }
 
-function makeContainer({ getMe, saveRefreshToken }: Overrides): AppContainer {
+function makeContainer({ getMe, saveRefreshToken, unlockRefreshToken }: Overrides): AppContainer {
   return {
     repositories: {
       auth: { verifyOtp: jest.fn() },
@@ -39,7 +40,9 @@ function makeContainer({ getMe, saveRefreshToken }: Overrides): AppContainer {
     localAuth: {
       isAvailable: jest.fn(() => Promise.resolve(true)),
       hasStoredToken: jest.fn(() => Promise.resolve(true)),
-      unlockRefreshToken: jest.fn(() => Promise.resolve('ref-old')),
+      // Discriminado (DRIFT-1): ok con token por default; los tests overridean para cancelled/failed.
+      unlockRefreshToken:
+        unlockRefreshToken ?? jest.fn(() => Promise.resolve({ status: 'ok', token: 'ref-old' })),
       saveRefreshToken: saveRefreshToken ?? jest.fn(() => Promise.resolve()),
     },
   } as unknown as AppContainer;
@@ -111,5 +114,39 @@ describe('useBiometricRelogin · orden de persistencia del Keychain (A3)', () =>
     const session = useSessionStore.getState();
     expect(session.accessToken).toBe(TOKENS.accessToken);
     expect(session.refreshToken).toBe(TOKENS.refreshToken);
+  });
+
+  it('DRIFT-1: un FALLO biométrico real (status failed) → setError (banner), NO fetch', async () => {
+    const unlockRefreshToken = jest.fn(() => Promise.resolve({ status: 'failed', error: new Error('no match') }));
+    const container = makeContainer({ unlockRefreshToken });
+    let latest!: ReturnType<typeof useBiometricRelogin>;
+
+    await act(async () => {
+      TestRenderer.create(withProviders(<Probe onState={(s) => (latest = s)} />, container));
+    });
+    await act(async () => {
+      await latest.relogin();
+    });
+
+    // Fallo REAL → banner (error poblado) y NO se llega a llamar el /auth/refresh.
+    expect(latest.error).toBeInstanceOf(Error);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('DRIFT-1: una CANCELACIÓN del usuario (status cancelled) → silencioso (sin banner, sin fetch)', async () => {
+    const unlockRefreshToken = jest.fn(() => Promise.resolve({ status: 'cancelled' }));
+    const container = makeContainer({ unlockRefreshToken });
+    let latest!: ReturnType<typeof useBiometricRelogin>;
+
+    await act(async () => {
+      TestRenderer.create(withProviders(<Probe onState={(s) => (latest = s)} />, container));
+    });
+    await act(async () => {
+      await latest.relogin();
+    });
+
+    // Cancelación → cae a OTP en silencio: sin error (banner) y sin pegarle al backend.
+    expect(latest.error).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

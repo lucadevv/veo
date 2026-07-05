@@ -32,7 +32,18 @@ import { useWaypointProposalStore } from './state/waypointProposalStore';
  */
 export const RealtimeManager = (): null => {
   const queryClient = useQueryClient();
-  const { foregroundService } = useDi();
+  const { foregroundService, localAuth } = useDi();
+  // DRIFT-2 — expiración por REVOCACIÓN REMOTA (definitiva): limpia el refresh token biométrico del Keychain
+  // ANTES de expirar el estado local. Una sesión superseded/revocada ya está muerta server-side (identity), así
+  // que el material sensible NO debe sobrevivir localmente. Best-effort + observable (no bloquea el expire; si el
+  // clear falla, el relogin igual fallaría contra el server). NO se usa en la expiración TRANSITORIA del
+  // HTTP-refresh (que puede ser un blip de red): ahí conservar el Keychain permite un relogin cuando la red vuelve.
+  const expireOnRemoteRevocation = () => {
+    localAuth.clear().catch((err) => {
+      console.warn('[realtime] no se pudo limpiar el Keychain biométrico tras revocación remota:', err);
+    });
+    useSessionStore.getState().expireSession();
+  };
   const setIncomingOffer = useDispatchStore((s) => s.setIncomingOffer);
   const clearOffer = useDispatchStore((s) => s.clearOffer);
   const clearPendingBid = useDispatchStore((s) => s.clearPendingBid);
@@ -203,13 +214,13 @@ export const RealtimeManager = (): null => {
     // limpiamos el estado local y volvemos al login. No re-suscribimos el socket (el server rechaza este
     // `sid` viejo, así que no hay guerra de reconexión).
     onSessionSuperseded: () => {
-      useSessionStore.getState().expireSession();
+      expireOnRemoteRevocation();
     },
     // ENFORCEMENT DE REVOCACIÓN: el gateway rechazó el handshake porque la sesión está revocada (logout
     // remoto, suspensión, o superada). Mismo destino que `superseded`: `expireSession` limpia el estado
     // local y vuelve al login. La revocación server-side ya la aplicó identity (el refresh también fallará).
     onSessionRevoked: () => {
-      useSessionStore.getState().expireSession();
+      expireOnRemoteRevocation();
     },
   });
 

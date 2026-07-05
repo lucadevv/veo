@@ -49,10 +49,16 @@ export function useBiometricRelogin(): BiometricReloginState {
     setError(null);
     setPending(true);
     try {
-      const refreshToken = await localAuth.unlockRefreshToken();
-      if (!refreshToken) {
-        return; // Biometría cancelada/sin token: el conductor usa el OTP.
+      const unlock = await localAuth.unlockRefreshToken();
+      // DRIFT-1: cancelación o sin-token → silencioso (el conductor cae al OTP, sin banner). Fallo biométrico
+      // REAL → error visible (banner): antes se colapsaba todo a null y un fallo genuino no avisaba.
+      if (unlock.status === 'cancelled' || unlock.status === 'empty') {
+        return;
       }
+      if (unlock.status === 'failed') {
+        throw new Error('No pudimos verificar tu identidad. Intentá de nuevo o ingresá con tu número.');
+      }
+      const refreshToken = unlock.token;
 
       // Timeout portable (AbortController + setTimeout, mismo patrón que el HttpClient): sin esto, con el BFF
       // inalcanzable el relogin colgaba ~60s (timeout del SO) con el spinner eterno. Falla rápido → cae a OTP.
