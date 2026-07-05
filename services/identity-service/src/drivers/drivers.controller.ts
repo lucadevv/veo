@@ -213,17 +213,6 @@ export class DriversController {
     return this.drivers.onboard(user.userId, dto);
   }
 
-  // DEUDA: reto de liveness del ALTA sin consumidor desde Lote 1 (KYC pasó a selfie-only sin prueba de vida;
-  // POST /biometric/enroll ya no usa challengeId). El TURNO usa OTRO endpoint (POST /shift/biometric/challenge
-  // → createBiometricChallenge), así que este NO se comparte. · techo: cuando el driver app (Lote 2) deje de
-  // pedir el reto en el alta. · gatillo: confirmar 0 callers en apps/driver y borrar endpoint + createEnrollChallenge.
-  @Audiences(InternalAudience.DRIVER_RAIL)
-  @Get('me/biometric/liveness/challenge')
-  @ApiOperation({ summary: 'Emitir reto de liveness para enrolar el rostro (BR-I02) · DEUDA: sin consumidor del alta (selfie-only)' })
-  enrollChallenge(@CurrentUser() user: AuthenticatedUser) {
-    return this.drivers.createEnrollChallenge(user.userId);
-  }
-
   @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('biometric/enroll')
   @HttpCode(200)

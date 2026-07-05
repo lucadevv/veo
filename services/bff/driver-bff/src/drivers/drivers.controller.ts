@@ -195,12 +195,6 @@ export class DriversController {
     return this.drivers.getShiftState(user);
   }
 
-  @Get('me/biometric/liveness/challenge')
-  @ApiOperation({ summary: 'Emitir reto de liveness para enrolar el rostro (BR-I02)' })
-  enrollChallenge(@CurrentUser() user: AuthenticatedUser): Promise<DriverBiometricChallenge> {
-    return this.drivers.enrollChallenge(user);
-  }
-
   @Post('biometric/enroll')
   @HttpCode(200)
   @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor con liveness (BR-I02)' })

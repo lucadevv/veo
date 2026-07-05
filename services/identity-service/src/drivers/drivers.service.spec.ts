@@ -320,34 +320,6 @@ describe('DriversService.verifyBiometric · minteo de sessionRef (BR-I02)', () =
   });
 });
 
-describe('DriversService.createEnrollChallenge · reto de liveness del enrolamiento (BR-I02)', () => {
-  it('devuelve el shape del reto (challengeId, action tipado, instructions, expiresAt)', async () => {
-    const svc = new DriversService(
-      makePrisma(okDriver) as never,
-      makeRedis() as never,
-      bio,
-      sessions,
-      config,
-    );
-    const out = await svc.createEnrollChallenge('u1');
-    expect(out.challengeId).toBe('c1');
-    expect(out.action).toBe('TURN_LEFT');
-    expect(out.instructions).toBeTruthy();
-    expect(out.expiresAt).toBeTruthy();
-  });
-
-  it('404 si el conductor no existe', async () => {
-    const svc = new DriversService(
-      makePrisma(null) as never,
-      makeRedis() as never,
-      bio,
-      sessions,
-      config,
-    );
-    await expect(svc.createEnrollChallenge('u1')).rejects.toBeInstanceOf(NotFoundError);
-  });
-});
-
 describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD anti-spoofing)', () => {
   /**
    * Prisma que captura el `data` del driver.update (embedding) Y los eventos de outbox (auditoría F1). El

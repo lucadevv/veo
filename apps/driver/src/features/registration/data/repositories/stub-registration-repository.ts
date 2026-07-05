@@ -1,11 +1,9 @@
-import { LivenessAction } from '@veo/shared-types';
 import {
   VehicleType,
   type BiometricEnrollInput,
   type BiometricEnrollResult,
   type CheckDniInput,
   type CheckDniResult,
-  type LivenessChallenge,
   type LicenseOnboardInput,
   type PersonalDataInput,
   type PersonalDataView,
@@ -160,18 +158,6 @@ export class StubRegistrationRepository implements RegistrationRepository {
 
   async onboardLicense(_input: LicenseOnboardInput): Promise<void> {
     await delay(400);
-  }
-
-  async getLivenessChallenge(): Promise<LivenessChallenge> {
-    await delay(300);
-    // Reto FALSO de desarrollo: gira a la izquierda. `instructions` simula el prompt humano del servidor;
-    // `expiresAt` a futuro para que el flujo de UI quede demostrable sin backend ni cámara real.
-    return {
-      challengeId: `dev-liveness-${Date.now()}`,
-      action: LivenessAction.TURN_LEFT,
-      instructions: 'Gira lentamente la cabeza hacia la izquierda',
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    };
   }
 
   async enrollBiometric(_input: BiometricEnrollInput): Promise<BiometricEnrollResult> {

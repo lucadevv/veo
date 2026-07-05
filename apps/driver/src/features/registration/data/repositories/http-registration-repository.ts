@@ -6,7 +6,6 @@ import {
   driverBiometricEnrollResult,
   driverCheckDniRequest,
   driverCheckDniResult,
-  driverLivenessChallengeResponse,
   driverDocument,
   driverOnboardRequest,
   driverOnboardResult,
@@ -28,7 +27,6 @@ import type {
   BiometricEnrollResult,
   CheckDniInput,
   CheckDniResult,
-  LivenessChallenge,
   LicenseOnboardInput,
   PersonalDataInput,
   PersonalDataView,
@@ -144,16 +142,6 @@ export class HttpRegistrationRepository implements RegistrationRepository {
     // perfil agregado de `GET /drivers/me`. Validamos con el schema que matchea esa forma real; el
     // valor no se usa aquí (la app deriva el estado del gate con `GET /drivers/me`).
     await this.http.post('/drivers/onboard', { body, schema: driverOnboardResult });
-  }
-
-  // DEUDA(liveness-removido): el KYC del alta pasó a UNA SELFIE simple (Lote 2). Este método quedó SIN
-  // CONSUMIDORES en la app (el enroll ya no usa reto/frames). Se conserva porque el endpoint del backend
-  // aún existe. Gatillo: borrar este método (+ `LivenessChallenge` / `driverLivenessChallengeResponse`)
-  // cuando el backend confirme que retira `GET /drivers/me/biometric/liveness/challenge`.
-  getLivenessChallenge(): Promise<LivenessChallenge> {
-    return this.http.get('/drivers/me/biometric/liveness/challenge', {
-      schema: driverLivenessChallengeResponse,
-    });
   }
 
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {

@@ -250,14 +250,6 @@ export class DriversService {
     return buildDriverVehicleFromRest(updated);
   }
 
-  /** Emite el reto de liveness para ENROLAR el rostro (BR-I02) → identity-service (GET). */
-  enrollChallenge(identity: AuthenticatedUser): Promise<DriverBiometricChallenge> {
-    return this.identity().get<DriverBiometricChallenge>(
-      '/drivers/me/biometric/liveness/challenge',
-      { identity },
-    );
-  }
-
   /**
    * Enrolamiento facial de referencia con UNA selfie (liveness PASIVO en identity/biometric) → identity-service.
    * F5: ANTES de enrolar, sube la selfie a MinIO (best-effort) para la AYUDA VISUAL del operador en casos

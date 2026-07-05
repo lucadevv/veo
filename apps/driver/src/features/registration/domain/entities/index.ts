@@ -10,7 +10,6 @@ import type {
   DriverBiometricEnrollResult,
   DriverCheckDniRequest,
   DriverCheckDniResult,
-  DriverLivenessChallengeResponse,
   DriverDocument,
   DriverDocumentSimpleStatus,
   DriverOnboardRequest,
@@ -40,12 +39,6 @@ export type RegistrationDocumentServerStatus = DriverDocumentSimpleStatus;
 export type LicenseOnboardInput = DriverOnboardRequest;
 export type BiometricEnrollInput = DriverBiometricEnrollRequest;
 export type BiometricEnrollResult = DriverBiometricEnrollResult;
-/**
- * Reto de liveness ACTIVO del enrolamiento del alta (= driverLivenessChallengeResponse): `challengeId`
- * de un solo uso + `action` (gesto tipado) + `instructions` (prompt humano que emite el servidor) +
- * `expiresAt`. La pantalla guía al conductor a ejecutar `action` y captura frames mientras lo hace.
- */
-export type LivenessChallenge = DriverLivenessChallengeResponse;
 export type PersonalDataInput = DriverPersonalDataRequest;
 export type PersonalDataView = DriverPersonalData;
 /**

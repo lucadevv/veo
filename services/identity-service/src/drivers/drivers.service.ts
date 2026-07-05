@@ -1805,17 +1805,6 @@ export class DriversService {
     });
   }
 
-  /**
-   * Emite un reto de liveness activo para el ENROLAMIENTO del conductor (BR-I02). Mismo contrato que el
-   * reto de turno (createBiometricChallenge): reusa el puerto `createChallenge()`. Se separa por endpoint
-   * (GET /drivers/me/biometric/liveness/challenge) porque es un paso del onboarding, no del turno.
-   */
-  async createEnrollChallenge(userId: string): Promise<BiometricChallenge> {
-    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
-    if (!d) throw new NotFoundError('Conductor no encontrado');
-    return this.biometric.createChallenge();
-  }
-
   /** Emite un reto de liveness activo para el inicio de turno (BR-I02). */
   async createBiometricChallenge(userId: string): Promise<BiometricChallenge> {
     const d = await this.prisma.read.driver.findUnique({ where: { userId } });

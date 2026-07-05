@@ -3,7 +3,6 @@ import type {
   BiometricEnrollResult,
   CheckDniInput,
   CheckDniResult,
-  LivenessChallenge,
   LicenseOnboardInput,
   PersonalDataInput,
   PersonalDataView,
@@ -80,16 +79,6 @@ export interface RegistrationRepository {
 
   /** POST /drivers/onboard — alta de licencia del conductor (`driverOnboardRequest`). */
   onboardLicense(input: LicenseOnboardInput): Promise<void>;
-
-  /**
-   * GET /drivers/me/biometric/liveness/challenge — pide un reto de liveness ACTIVO de UN SOLO USO.
-   *
-   * DEUDA(liveness-removido): el KYC del alta pasó a UNA SELFIE simple (Lote 2): el enroll ya NO usa
-   * reto/frames, así que este método quedó SIN CONSUMIDORES en la app. Se conserva el contrato porque el
-   * endpoint del backend aún existe. Techo: queda muerto en la app. Gatillo: borrar este método (+ el tipo
-   * `LivenessChallenge` y su uso en la impl HTTP/stub) cuando el backend confirme que retira el endpoint.
-   */
-  getLivenessChallenge(): Promise<LivenessChallenge>;
 
   /**
    * POST /drivers/biometric/enroll — enrola el rostro de referencia con UNA SELFIE: `{ photo }` (JPEG
