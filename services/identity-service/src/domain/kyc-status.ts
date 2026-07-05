@@ -1,10 +1,11 @@
 /**
  * Eje User.kycStatus — verificación de IDENTIDAD del usuario, DESACOPLADA de la aprobación operativa:
  *  - pasajero: liveness OK → VERIFIED (kyc.service).
- *  - conductor: identidad biométrica COMPLETA y POSITIVA → VERIFIED SOLO (autoVerifyKycIfComplete en
- *    drivers.service): liveness PASÓ + rostro↔DNI COINCIDE + rostro↔licencia COINCIDE. La APROBACIÓN del
- *    operador es el eje SEPARADO `backgroundCheckStatus` (CLEARED en approve()); la elegibilidad operativa
- *    exige AMBOS. NO_MATCH no auto-verifica → el operador decide al aprobar (approve setea VERIFIED idempotente).
+ *  - conductor: la verificación de identidad la CONFIRMA el OPERADOR humano al aprobar (approve() setea
+ *    kycStatus→VERIFIED + kycVerifiedAt, en el MISMO acto que el CLEARED). Los face-match (rostro↔DNI/licencia)
+ *    y el liveness PASIVO solo PERSISTEN su binding — NO auto-verifican el KYC (decisión del dueño: la
+ *    verificación de identidad es un acto humano, no automático). La aprobación es el eje SEPARADO
+ *    `backgroundCheckStatus` (CLEARED en approve()); la elegibilidad operativa exige AMBOS.
  *
  *  - UNVERIFIED → VERIFIED | REJECTED: ESTADO INICIAL (ADR-018) — un usuario recién onboardeado no
  *    arrancó ningún KYC. El pasajero pasa el liveness OPCIONAL → VERIFIED (badge de confianza, NO muro

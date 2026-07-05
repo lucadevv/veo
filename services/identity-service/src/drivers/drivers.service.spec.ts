@@ -2199,7 +2199,7 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.approve('d1');
     expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
-    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+    expect(userWrites).toMatchObject([{ kycStatus: 'VERIFIED' }]);
   });
 
   it('GATE BIOMÉTRICO: rechaza la aprobación con 409 si el conductor NO enroló biometría (faceEmbedding vacío)', async () => {
@@ -2289,7 +2289,7 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.approve('d1');
     expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
-    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+    expect(userWrites).toMatchObject([{ kycStatus: 'VERIFIED' }]);
   });
 
   it('GATE FACE-MATCH (c): aprueba normal con veredicto MATCHED (dniFaceMatched=true, dniFaceMatchedAt set)', async () => {
@@ -2305,7 +2305,7 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.approve('d1');
     expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
-    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+    expect(userWrites).toMatchObject([{ kycStatus: 'VERIFIED' }]);
   });
 
   it('CAS gana-una-sola-vez: el approve() ganador transiciona PENDING→CLEARED y EMITE driver.verified UNA vez', async () => {
@@ -2317,7 +2317,7 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.approve('d1');
     expect(driverWrites).toEqual([{ backgroundCheckStatus: 'CLEARED' }]);
-    expect(userWrites).toEqual([{ kycStatus: 'VERIFIED' }]);
+    expect(userWrites).toMatchObject([{ kycStatus: 'VERIFIED' }]);
     expect(outbox).toEqual([{ eventType: 'driver.verified' }]); // EXACTAMENTE un evento
   });
 
@@ -2666,35 +2666,11 @@ describe('DriversService.matchLicenseFace · BINDING licencia↔selfie (Lote C)'
     expect(prisma.updates[0]?.licenseFaceMatchScore).toBe(28);
   });
 
-  // ── AUTO-VERIFICACIÓN del KYC (desacople de la aprobación) ──
-  it('AUTO-VERIFICA el KYC (PENDING → VERIFIED + outbox user.kyc_verified) cuando liveness PASÓ + ambos matches COINCIDEN', async () => {
-    // okDriver tiene livenessChecked=true + dniFaceMatched=true; este match de licencia COINCIDE → set completo.
+  // ── El match NO auto-verifica el KYC: la verificación de identidad la confirma el OPERADOR en approve() ──
+  it('NO auto-verifica el KYC aunque liveness PASÓ + ambos matches COINCIDAN (lo confirma el operador en approve)', async () => {
+    // okDriver tiene el set biométrico COMPLETO y POSITIVO. Antes esto auto-flippeaba KYC→VERIFIED; ahora NO:
+    // el match solo persiste su binding, el flip a VERIFIED es acto humano en approve() (decisión del dueño).
     const prisma = makeMatchPrisma(okDriver, 'PENDING');
-    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
-    await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
-    expect(prisma.userUpdates).toHaveLength(1);
-    expect(prisma.userUpdates[0]?.kycStatus).toBe('VERIFIED');
-    expect(prisma.userUpdates[0]?.kycVerifiedAt).toBeInstanceOf(Date);
-    expect(prisma.events).toContain('user.kyc_verified');
-  });
-
-  it('NO auto-verifica el KYC si el match del brevete NO coincide (identidad dudosa → queda PENDING, lo decide el operador)', async () => {
-    // Estado post-match con la licencia en NO_MATCH (el findUnique del autoVerify lo refleja).
-    const prisma = makeMatchPrisma({ ...okDriver, licenseFaceMatched: false }, 'PENDING');
-    const bioNoMatch = {
-      ...bio,
-      async matchDniFace() {
-        return { matched: false, score: 28, reason: 'no coincide' };
-      },
-    };
-    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoMatch, sessions, config);
-    await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
-    expect(prisma.userUpdates).toHaveLength(0);
-    expect(prisma.events).toHaveLength(0);
-  });
-
-  it('IDEMPOTENTE: si el KYC ya está VERIFIED no re-transiciona ni re-emite', async () => {
-    const prisma = makeMatchPrisma(okDriver, 'VERIFIED');
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
     expect(prisma.userUpdates).toHaveLength(0);

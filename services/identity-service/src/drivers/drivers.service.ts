@@ -487,9 +487,11 @@ export class DriversService {
           backgroundCheckStatus: current?.backgroundCheckStatus ?? driver.backgroundCheckStatus,
         };
       }
+      // El operador humano CONFIRMA la verificación de identidad: kycStatus→VERIFIED + timestamp en el MISMO
+      // acto que el CLEARED (antes el kycVerifiedAt lo ponía la auto-verificación, ya retirada — ahora es humano).
       await tx.user.update({
         where: { id: driver.userId },
-        data: { kycStatus: KycStatus.VERIFIED },
+        data: { kycStatus: KycStatus.VERIFIED, kycVerifiedAt: new Date() },
       });
       const envelope = createEnvelope({
         eventType: 'driver.verified',
@@ -1690,7 +1692,8 @@ export class DriversService {
           dniFaceMatchedAt: new Date(),
         },
       });
-      await this.autoVerifyKycIfComplete(tx, driverId);
+      // El KYC NO se auto-verifica: la verificación de identidad la CONFIRMA el operador humano al aprobar
+      // (approve() flipea kycStatus→VERIFIED). El match solo persiste su binding; el flip es acto humano.
     });
 
     return result;
@@ -1739,70 +1742,10 @@ export class DriversService {
           licenseFaceMatchedAt: new Date(),
         },
       });
-      await this.autoVerifyKycIfComplete(tx, driverId);
+      // El KYC NO se auto-verifica (ver matchDniFace): el flip kycStatus→VERIFIED lo hace el operador en approve().
     });
 
     return result;
-  }
-
-  /**
-   * AUTO-VERIFICACIÓN del KYC del conductor (DESACOPLADA de la aprobación). El `kycStatus` es la
-   * verificación de IDENTIDAD (biométrica); la aprobación del operador es el eje SEPARADO
-   * `backgroundCheckStatus`. Cuando la identidad biométrica está COMPLETA y POSITIVA — liveness PASÓ
-   * (PAD ok) + rostro↔DNI COINCIDE + rostro↔licencia COINCIDE — el KYC pasa SOLO a VERIFIED, sin esperar
-   * la aprobación. Decisión del dueño: "cuando todo el check biométrico coincide, el KYC ya está validado;
-   * la aprobación es el acto final cuando TODO está verde".
-   *
-   * SEGURO: la ELEGIBILIDAD operativa (booking-service driver-eligibility) exige `kycStatus===VERIFIED ∧
-   * backgroundCheckStatus===CLEARED` — desacoplar el KYC NO vuelve operativo al conductor: sigue faltando
-   * el CLEARED, que solo da approve(). NO_MATCH (similitud baja) NO auto-verifica: el KYC queda PENDING y lo
-   * decide el operador al aprobar (override). Idempotente: si ya está VERIFIED, no-op (no re-emite el evento).
-   * Espeja el patrón del KYC del pasajero (kyc.service): transición tipada + outbox `user.kyc_verified` en la
-   * MISMA tx. Se llama tras CADA match (el que complete el set positivo dispara el flip).
-   */
-  private async autoVerifyKycIfComplete(
-    tx: Prisma.TransactionClient,
-    driverId: string,
-  ): Promise<void> {
-    const driver = await tx.driver.findUnique({
-      where: { id: driverId },
-      select: { userId: true, livenessChecked: true, dniFaceMatched: true, licenseFaceMatched: true },
-    });
-    if (!driver) return;
-    // Identidad biométrica COMPLETA y POSITIVA: las 3 condiciones tipadas (booleanos del dominio, no strings).
-    const biometricIdentityVerified =
-      driver.livenessChecked === true &&
-      driver.dniFaceMatched === true &&
-      driver.licenseFaceMatched === true;
-    if (!biometricIdentityVerified) return;
-    const user = await tx.user.findUnique({
-      where: { id: driver.userId },
-      select: { kycStatus: true },
-    });
-    // Ya VERIFIED → no-op idempotente (no re-transiciona ni re-emite). PENDING/REJECTED → VERIFIED.
-    if (!user || user.kycStatus === KycStatus.VERIFIED) return;
-    kycStatusMachine.assertTransition(user.kycStatus, KycStatus.VERIFIED);
-    const verifiedAt = new Date();
-    await tx.user.update({
-      where: { id: driver.userId },
-      data: { kycStatus: KycStatus.VERIFIED, kycVerifiedAt: verifiedAt },
-    });
-    const envelope = createEnvelope({
-      eventType: 'user.kyc_verified',
-      producer: 'identity-service',
-      payload: {
-        userId: driver.userId,
-        kycStatus: KycStatus.VERIFIED,
-        verifiedAt: verifiedAt.toISOString(),
-      },
-    });
-    await tx.outboxEvent.create({
-      data: {
-        aggregateId: driver.userId,
-        eventType: envelope.eventType,
-        envelope: envelope as unknown as Prisma.InputJsonValue,
-      },
-    });
   }
 
   /** Emite un reto de liveness activo para el inicio de turno (BR-I02). */
