@@ -1742,9 +1742,11 @@ export const livenessAction = z.enum(['TURN_LEFT', 'TURN_RIGHT', 'NOD', 'SMILE']
 export type LivenessAction = z.infer<typeof livenessAction>;
 
 /**
- * Reto de liveness activo (mismo shape para el enroll y el turno). Lo emite:
- *  - GET /drivers/me/biometric/liveness/challenge (enrolamiento del conductor)
+ * Reto de liveness ACTIVO del gate de inicio de turno. Lo emite:
  *  - POST /drivers/shift/biometric/challenge (gate de inicio de turno)
+ *
+ * (El enrolamiento del alta ya NO usa reto: pasó a UNA selfie PASIVA vía POST /drivers/biometric/enroll.
+ * El GET /drivers/me/biometric/liveness/challenge se retiró — 0 callers. Este schema se conserva para el turno.)
  */
 export const driverLivenessChallengeResponse = z.object({
   challengeId: z.string(),
