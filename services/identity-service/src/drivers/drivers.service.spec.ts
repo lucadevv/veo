@@ -2688,6 +2688,13 @@ describe('DriversService · techo de abuso del enrol + destrabe de central (F3)'
       async expire(): Promise<number> {
         return 1;
       },
+      // Simula el script Lua FIXED_WINDOW_INCR_EXPIRE de `consumeFixedWindow`: INCR de la key + PEXPIRE en el
+      // primer hit; devuelve [count, ttl]. Comparte el mismo `counts` que get/incr/del (coherencia del contador).
+      async eval(_script: string, _numKeys: number, key: string, windowMs: number): Promise<[number, number]> {
+        const v = (counts.get(key) ?? 0) + 1;
+        counts.set(key, v);
+        return [v, windowMs];
+      },
       async del(key: string): Promise<number> {
         return counts.delete(key) ? 1 : 0;
       },

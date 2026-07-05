@@ -1474,10 +1474,18 @@ export class DriversService {
           envelope: rejected as unknown as Prisma.InputJsonValue,
         },
       });
-      // Suma al techo de abuso (anti-hammering): N spoofs seguidos → cooldown. `expire` en el primero fija la
-      // ventana; cada spoof posterior solo incrementa (no resetea el TTL → la ventana no se extiende sola).
-      const spoofCount = await this.redis.incr(spoofLockKey);
-      if (spoofCount === 1) await this.redis.expire(spoofLockKey, ENROLL_SPOOF_LOCK_TTL_SECONDS);
+      // Suma al techo de abuso (anti-hammering): N spoofs seguidos → cooldown. INCREMENTO ATÓMICO (mismo fix
+      // que M6 para el lockout de turno): `consumeFixedWindow` hace INCR+PEXPIRE en un solo eval Lua y re-arma
+      // el TTL si se perdió → cierra el bug del `incr`+`expire`-condicional (un crash entre ambas llamadas
+      // dejaba la key SIN TTL → cooldown de spoof PERMANENTE). Solo incrementa en un spoof REAL (esta rama), la
+      // ventana no se extiende sola (fixed-window), y se limpia con el `del` al enrolar OK.
+      const spoofGate = await consumeFixedWindow(
+        this.redis,
+        spoofLockKey,
+        MAX_ENROLL_SPOOFS,
+        ENROLL_SPOOF_LOCK_TTL_SECONDS * 1000,
+      );
+      const spoofCount = spoofGate.count;
       this.logger.warn(
         `Enrol KYC rechazado por anti-spoofing pasivo (driverId=${d.id}, score=${enroll.score}, intento=${spoofCount})`,
       );
@@ -1971,7 +1979,12 @@ export class DriversService {
           id: d.id,
           suspendedAt: null,
           faceEmbedding: { isEmpty: false },
-          currentStatus: { in: driverStatusSources(DriverStatus.AVAILABLE) },
+          // El turno SOLO arranca desde OFFLINE (máquina domain/driver-status.ts: "el turno SOLO arranca desde
+          // OFFLINE"). NO se usa driverStatusSources(AVAILABLE): ese set incluye ASSIGNED/ON_TRIP/ON_BREAK/
+          // AVAILABLE (estados desde los que AVAILABLE es alcanzable por el ciclo de VIAJE) → un conductor EN
+          // VIAJE matcheaba el CAS y se reinyectaba al pool (double-dispatch) + re-emitía driver.verified sobre
+          // un no-op. Acotarlo a OFFLINE hace de startShift el ÚNICO camino OFFLINE→AVAILABLE, gateado por biometría.
+          currentStatus: DriverStatus.OFFLINE,
         },
         data: { currentStatus: DriverStatus.AVAILABLE, lastVerifiedAt: new Date() },
       });
@@ -1985,12 +1998,18 @@ export class DriversService {
         if (current.suspendedAt) throw new ForbiddenError('Conductor suspendido');
         // Biometría borrada bajo nuestros pies (sweeper concurrente): error tipado claro, no un falso "carrera".
         if (!hasFaceEmbedding(current)) throw new ConflictError('Biometría facial no enrolada');
-        // No estaba suspendido pero el estado fuente no matcheó: o la máquina rechaza la transición, o
-        // otro startShift concurrente ya lo movió (double-shift evitado). assertTransition discrimina:
-        // si el estado actual no permite → AVAILABLE lanza InvalidStatusTransition (409); si SÍ permitía
-        // pero igual no matcheó, fue una carrera → ConflictError (409).
+        // Estaba OFFLINE, sin suspensión y con biometría, pero el CAS no matcheó → otro startShift concurrente
+        // ganó la transición OFFLINE→AVAILABLE (double-shift evitado).
+        if (current.currentStatus === DriverStatus.OFFLINE) {
+          throw new ConflictError('Otro inicio de turno concurrente ganó la transición');
+        }
+        // No estaba OFFLINE. Discriminamos: si la máquina NO permite ESE estado → AVAILABLE, es una transición
+        // ILEGAL (p. ej. SUSPENDED, que solo sale a OFFLINE) → InvalidStatusTransition (409). Si la máquina SÍ la
+        // permite (ASSIGNED/ON_TRIP/ON_BREAK/AVAILABLE, alcanzables por el ciclo de VIAJE), no es ilegal pero
+        // tampoco es un arranque de turno: el conductor YA tiene un turno activo → no se re-inicia (esto, junto
+        // con la fuente OFFLINE-only del CAS, es lo que cierra el double-dispatch de un conductor EN VIAJE).
         driverStatusMachine.assertTransition(current.currentStatus, DriverStatus.AVAILABLE);
-        throw new ConflictError('Otro inicio de turno concurrente ganó la transición');
+        throw new ConflictError('Ya tienes un turno activo');
       }
       const envelope = createEnvelope({
         eventType: 'driver.verified',
