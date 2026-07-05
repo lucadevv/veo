@@ -1600,6 +1600,24 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
                   call.update = data;
                   return {};
                 },
+                // CAS del gate A10 (rama update de materializeDriverShell con guard): aplica SOLO si la fila
+                // existe y el guard `backgroundCheckStatus.not` NO iguala el estado real (fiel al WHERE del
+                // updateMany). Simula la carrera: un approve() que dejó CLEARED → count 0 → InvalidStateError.
+                updateMany: async ({
+                  where,
+                  data,
+                }: {
+                  where: { userId: string; backgroundCheckStatus?: { not?: string } };
+                  data: Record<string, unknown>;
+                }) => {
+                  const notStatus = where.backgroundCheckStatus?.not;
+                  const rowStatus = existing?.backgroundCheckStatus as string | undefined;
+                  if (existing != null && (notStatus === undefined || rowStatus !== notStatus)) {
+                    call.update = data;
+                    return { count: 1 };
+                  }
+                  return { count: 0 };
+                },
                 findUniqueOrThrow: async () => {
                   const data = existing ? { ...existing, ...(call.update ?? {}) } : call.create;
                   return {
