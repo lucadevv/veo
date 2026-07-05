@@ -130,7 +130,10 @@ export class OpsController {
   @Post('drivers/:id/reject')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Rechaza un conductor con motivo opcional (compliance/admin)' })
+  // Par de approve (BR-S07 / FOUNDATION §7): rechazar un conductor es el otro veredicto de compliance — mismo
+  // riesgo de sabotaje (una sesión comprometida rechazando conductores legítimos) → exige TOTP fresco, no solo RBAC.
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Rechaza un conductor con motivo opcional (compliance/admin · exige step-up MFA)' })
   rejectDriver(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
