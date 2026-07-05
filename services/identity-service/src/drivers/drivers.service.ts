@@ -1798,12 +1798,27 @@ export class DriversService {
       throw new ForbiddenError('Verificación bloqueada por 1 hora tras 3 intentos fallidos');
     }
 
-    const result = await this.biometric.verify({
-      driverId: d.id,
-      challengeId: input.challengeId,
-      frames: input.frames,
-      referenceEmbedding: d.faceEmbedding,
-    });
+    // El intento ya se contó atómicamente (consume-before, para cerrar el oráculo). PERO un error de INFRA del
+    // proveedor (outage/timeout del ONNX self-hosted, red flaky) NO es un rechazo biométrico: no debe QUEMAR un
+    // intento del lockout, o una degradación transitoria bloquearía 1h a un conductor legítimo. Si `verify`
+    // LANZA, REINTEGRAMOS el intento (decr; la key existe y tiene TTL porque el INCR de arriba la creó recién) y
+    // propagamos el error del proveedor. Solo un veredicto REAL (rechazo o éxito) mantiene/limpia el contador.
+    let result: Awaited<ReturnType<typeof this.biometric.verify>>;
+    try {
+      result = await this.biometric.verify({
+        driverId: d.id,
+        challengeId: input.challengeId,
+        frames: input.frames,
+        referenceEmbedding: d.faceEmbedding,
+      });
+    } catch (providerError) {
+      await this.redis.decr(lockKey).catch((refundError: unknown) => {
+        this.logger.warn(
+          `No se pudo reintegrar el intento biométrico tras un error del proveedor (driverId=${d.id}): ${String(refundError)}`,
+        );
+      });
+      throw providerError;
+    }
     const score = Math.round(result.score);
     // El VEREDICTO COMPLETO se decide acá (liveness ∧ match ∧ score ≥ mínimo), no en startShift: así el
     // lockout cubre TODOS los modos de fallo (incl. score bajo), no solo el score-gate que el cliente reenvía.
