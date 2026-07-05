@@ -798,9 +798,11 @@
       "rechazado": "Rechazado"
     },
     "type": {
+      "DNI": "DNI",
       "LICENSE_A1": "Licencia A1",
       "SOAT": "SOAT",
       "PROPERTY_CARD": "Tarjeta de propiedad",
+      "VEHICLE_PHOTO": "Foto del vehículo",
       "ITV": "Revisión técnica (ITV)",
       "BACKGROUND_CHECK": "Antecedentes"
     },
