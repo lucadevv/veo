@@ -87,7 +87,22 @@ export interface AppContainer {
 const sessionTokenPort: SessionTokenPort = {
   getAccessToken: () => useSessionStore.getState().accessToken,
   getRefreshToken: () => useSessionStore.getState().refreshToken,
-  setTokens: (tokens) => useSessionStore.getState().setTokens(tokens),
+  setTokens: async (tokens) => {
+    // 1) MMKV + estado (fuente de la sesión de la app).
+    useSessionStore.getState().setTokens(tokens);
+    // 2) Keychain biométrico: SOLO si el relogin ya está habilitado (hay token guardado) — así una rotación
+    // background por 401 lo mantiene en sync (sin este paso el Keychain conservaba el jti VIEJO → el próximo
+    // relogin biométrico presentaba un jti ya rotado → reuse-detection mataba la familia). NO se crea una
+    // entrada para usuarios que no usan biometría. Best-effort + observable: un fallo deja el Keychain stale
+    // (el relogin cae a OTP), lo logueamos para diagnóstico, no rompe la rotación.
+    try {
+      if (await keychainLocalAuthService.hasStoredToken()) {
+        await keychainLocalAuthService.saveRefreshToken(tokens.refreshToken);
+      }
+    } catch (err) {
+      console.warn('[session] no se pudo sincronizar el refresh token biométrico tras la rotación:', err);
+    }
+  },
   // El cliente HTTP llama a `clearSession` cuando el refresh falla: lo tratamos como EXPIRACIÓN
   // (no logout) para que la capa de presentación muestre la pantalla de re-login.
   clearSession: () => useSessionStore.getState().expireSession(),

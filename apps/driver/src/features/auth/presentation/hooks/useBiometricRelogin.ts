@@ -5,6 +5,9 @@ import { useDi, useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
 
+/** Timeout del fetch a `/auth/refresh` del relogin biométrico (ms). Evita el spinner eterno si el BFF no responde. */
+const RELOGIN_REFRESH_TIMEOUT_MS = 15_000;
+
 interface BiometricReloginState {
   /** true si hay biometría disponible y un refresh token guardado (se puede ofrecer re-login). */
   available: boolean;
@@ -51,11 +54,21 @@ export function useBiometricRelogin(): BiometricReloginState {
         return; // Biometría cancelada/sin token: el conductor usa el OTP.
       }
 
-      const response = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ refreshToken }),
-      });
+      // Timeout portable (AbortController + setTimeout, mismo patrón que el HttpClient): sin esto, con el BFF
+      // inalcanzable el relogin colgaba ~60s (timeout del SO) con el spinner eterno. Falla rápido → cae a OTP.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), RELOGIN_REFRESH_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (!response.ok) {
         throw new Error('No se pudo refrescar la sesión');
       }
@@ -66,10 +79,18 @@ export function useBiometricRelogin(): BiometricReloginState {
 
       const tokens = parsed.data;
       useSessionStore.getState().setTokens(tokens);
+      // PERSISTIR EL KEYCHAIN PRIMERO (A3), ANTES del fetch FALIBLE del perfil: el server YA rotó el jti al
+      // responder OK, así que el Keychain debe quedar con el jti NUEVO independientemente de si el perfil carga.
+      // Si esto fuera después del perfil (como antes) y el perfil throweara, el Keychain conservaría el jti VIEJO
+      // ya rotado → el próximo relogin lo presenta → reuse-detection mata la familia (relogin brickeado).
+      try {
+        await localAuth.saveRefreshToken(tokens.refreshToken);
+      } catch (persistError) {
+        // Best-effort + observable (no silencioso): si el Keychain no guarda, el próximo relogin cae a OTP.
+        console.warn('[relogin] no se pudo persistir el refresh token en el Keychain:', persistError);
+      }
       const driverProfile = await new GetProfileUseCase(profile).execute();
       useSessionStore.getState().setSession({ tokens, user: profileToSessionUser(driverProfile) });
-      // Rota el token guardado al nuevo refresh token.
-      await localAuth.saveRefreshToken(tokens.refreshToken).catch(() => undefined);
     } catch (e) {
       setError(e);
     } finally {

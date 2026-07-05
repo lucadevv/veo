@@ -9,12 +9,24 @@ import { env } from '../config/env';
 export interface SessionTokenPort {
   getAccessToken(): string | null;
   getRefreshToken(): string | null;
-  setTokens(tokens: { accessToken: string; refreshToken: string }): void;
+  /**
+   * Persiste los tokens rotados. Puede ser ASÍNCRONO: el adaptador sincroniza además el Keychain biométrico
+   * (si el relogin está habilitado), así una rotación background por 401 no deja el Keychain con el jti VIEJO
+   * → el próximo relogin no dispara reuse-detection. `refreshAccessToken` lo AWAITEA antes de reintentar.
+   */
+  setTokens(tokens: { accessToken: string; refreshToken: string }): void | Promise<void>;
   clearSession(): void;
 }
 
 // Single-flight: si varias peticiones reciben 401 a la vez, solo un refresh viaja a la red.
 let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Timeout del fetch INTERNO a `/auth/refresh` (ms). Sin esto, un 401 con el backend inalcanzable (túnel
+ * muerto, red half-open) colgaba `authFetch` hasta el timeout TCP del SO (~60s+) y CONGELABA la app. Con el
+ * AbortController el refresh falla rápido → el flujo degrada (clearSession → pantalla de re-login).
+ */
+const REFRESH_TIMEOUT_MS = 15_000;
 
 async function refreshAccessToken(port: SessionTokenPort): Promise<string | null> {
   const refreshToken = port.getRefreshToken();
@@ -24,11 +36,16 @@ async function refreshAccessToken(port: SessionTokenPort): Promise<string | null
 
   if (!refreshInFlight) {
     refreshInFlight = (async (): Promise<string | null> => {
+      // Timeout portable (AbortController + setTimeout, mismo patrón que el HttpClient de @veo/api-client;
+      // el runtime RN 0.85/Hermes no garantiza `AbortSignal.timeout`, por eso el controller manual).
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
       try {
         const res = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ refreshToken }),
+          signal: controller.signal,
         });
         if (!res.ok) {
           return null;
@@ -37,10 +54,14 @@ async function refreshAccessToken(port: SessionTokenPort): Promise<string | null
         if (!parsed.success) {
           return null;
         }
-        port.setTokens(parsed.data);
+        // AWAIT: el adaptador persiste MMKV + Keychain biométrico antes de devolver el access nuevo, así el
+        // Keychain queda en sync con la rotación (cierra el desync que disparaba reuse-detection en el relogin).
+        await port.setTokens(parsed.data);
         return parsed.data.accessToken;
       } catch {
         return null;
+      } finally {
+        clearTimeout(timer);
       }
     })();
   }
