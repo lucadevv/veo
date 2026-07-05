@@ -585,7 +585,12 @@ export class DriversService {
     }
 
     // Backward-compat: sin `sides` → una sola cara SINGLE (el comportamiento histórico de 1 ticket).
-    const sides = input.sides && input.sides.length > 0 ? input.sides : [DocumentSide.SINGLE];
+    // DEDUP (Set): `sides` viene del cliente. Sin dedup, un `[FRONT, FRONT, …×N]` dispararía N presign-put
+    // paralelos por la MISMA cara (amplificación de fan-out contra media-service). El Set colapsa duplicados
+    // y acota el fan-out a la CARDINALIDAD del enum DocumentSide (SINGLE/FRONT/BACK) — sin tope numérico mágico.
+    const requestedSides =
+      input.sides && input.sides.length > 0 ? input.sides : [DocumentSide.SINGLE];
+    const sides = [...new Set(requestedSides)];
 
     // Un ticket POR CARA: una key DRIVER-SCOPED distinta por cara (el uuid de buildDocumentKey las separa)
     // y un presign-put de media por key. En paralelo (cada cara es independiente). La frontera de seguridad

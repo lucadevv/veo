@@ -89,6 +89,21 @@ describe('DriversService.presignDocumentUpload (driver-bff) — key driver-scope
     expect(post).toHaveBeenCalledTimes(2);
   });
 
+  it('DEDUP: caras repetidas [FRONT, FRONT, BACK] → tickets ÚNICOS (2), no amplifica el fan-out', async () => {
+    const { service, post } = makeService();
+
+    const view = await service.presignDocumentUpload(identity, {
+      type: FleetDocumentType.LICENSE_A1,
+      contentType: 'image/jpeg',
+      sides: [DocumentSide.FRONT, DocumentSide.FRONT, DocumentSide.BACK],
+    });
+
+    // El Set colapsa el FRONT duplicado → solo 2 caras distintas → 2 tickets → 2 presign-put (no 3).
+    expect(view.tickets).toHaveLength(2);
+    expect(view.tickets.map((t) => t.side)).toEqual([DocumentSide.FRONT, DocumentSide.BACK]);
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
   it('propaga al media-service el bucket de documentos, la key, el contentType y el ttl', async () => {
     const { service, post } = makeService();
 
