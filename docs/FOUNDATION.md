@@ -366,6 +366,17 @@ services/<svc>/
 - **Repositories** son el único lugar con Prisma. Devuelven entidades de dominio, no modelos Prisma crudos en la API pública.
 - gRPC entre servicios: protos en `protos/` (ya existe la carpeta). mTLS en prod (CLAUDE regla compliance).
 
+> **DEUDA CONOCIDA — capa `repository.ts` no extraída (aceptada, no bug).** Hoy los services de `identity-service`
+> (y varios otros) acceden a Prisma DIRECTO (`this.prisma.read/write`, ~40 sitios solo en `drivers.service.ts`),
+> sin la capa `<feature>.repository.ts` que esta anatomía prescribe. **Funciona correctamente** — la lógica de
+> dominio, las reglas BR-*, las state machines y los tests corren igual; el repository es una convención de
+> arquitectura (testeabilidad: mockear el repo en vez de Prisma · desacople del ORM · un solo lugar que toca la
+> DB), NO un requisito funcional. **Techo:** mientras los services queden testeables (hoy lo son, con mocks de
+> Prisma) y no haya intención de cambiar de ORM. **Gatillo para pagarla:** cuando (a) los mocks de Prisma en los
+> `.spec.ts` se vuelvan frágiles/duplicados, (b) se quiera un segundo adaptador de persistencia, o (c) se aborde
+> como su propio lote de refactor con diseño propio (extraer `repository.ts` por feature, devolver entidades de
+> dominio, no modelos Prisma crudos). Se documenta acá para que el drift sea VISIBLE en el contrato, no silencioso.
+
 ---
 
 ## 11. Testing
