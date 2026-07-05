@@ -6,9 +6,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
 import { ConflictError, NotFoundError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, type DocumentType } from '../generated/prisma';
+import { type DocumentType } from '../generated/prisma';
 import { maskDocument } from '../common/document';
 import type { PaymentMethod } from '@veo/shared-types';
 import type { Env } from '../config/env.schema';
@@ -101,18 +102,15 @@ export class UsersService {
       if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
       if (user.deletionRequestedAt) throw new ConflictError('Ya existe una solicitud de borrado');
       await tx.user.update({ where: { id: userId }, data: { deletionRequestedAt: now } });
-      const envelope = createEnvelope({
-        eventType: 'user.deletion_requested',
-        producer: 'identity-service',
-        payload: { userId, requestedAt: now.toISOString(), graceUntil: graceUntil.toISOString() },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: userId,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'user.deletion_requested',
+          producer: 'identity-service',
+          payload: { userId, requestedAt: now.toISOString(), graceUntil: graceUntil.toISOString() },
+        }),
+        userId,
+      );
     });
 
     return { graceUntil: graceUntil.toISOString() };

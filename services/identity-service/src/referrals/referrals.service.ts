@@ -13,10 +13,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
-import { isUniqueViolation } from '@veo/database';
+import { enqueueOutbox, isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import { generateReferralCode, normalizeReferralCode } from './referral-code';
 
@@ -140,23 +139,20 @@ export class ReferralsService {
             status: 'PENDING',
           },
         });
-        const envelope = createEnvelope({
-          eventType: 'user.referred',
-          producer: 'identity-service',
-          payload: {
-            referrerUserId: referrer.id,
-            referredUserId: newUserId,
-            code,
-            at: new Date().toISOString(),
-          },
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: referrer.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
+        await enqueueOutbox(
+          tx,
+          createEnvelope({
+            eventType: 'user.referred',
+            producer: 'identity-service',
+            payload: {
+              referrerUserId: referrer.id,
+              referredUserId: newUserId,
+              code,
+              at: new Date().toISOString(),
+            },
+          }),
+          referrer.id,
+        );
       });
     } catch (err) {
       if (isUniqueViolation(err, 'referredUserId')) {
@@ -193,24 +189,21 @@ export class ReferralsService {
         data: { referralRewardCents: { increment: this.rewardCents } },
       });
 
-      const envelope = createEnvelope({
-        eventType: 'referral.rewarded',
-        producer: 'identity-service',
-        payload: {
-          referrerUserId: referral.referrerUserId,
-          referredUserId,
-          rewardCents: this.rewardCents,
-          tripId,
-          at: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: referral.referrerUserId,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'referral.rewarded',
+          producer: 'identity-service',
+          payload: {
+            referrerUserId: referral.referrerUserId,
+            referredUserId,
+            rewardCents: this.rewardCents,
+            tripId,
+            at: new Date().toISOString(),
+          },
+        }),
+        referral.referrerUserId,
+      );
     });
     this.logger.log(
       `Recompensa de referido otorgada a ${referral.referrerUserId} por viaje ${tripId}`,

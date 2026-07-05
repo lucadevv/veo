@@ -6,6 +6,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
 import { ConflictError, ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import {
@@ -13,7 +14,7 @@ import {
   type BiometricChallenge,
   type BiometricProvider,
 } from '../ports/biometric/biometric.port';
-import { KycStatus, Prisma } from '../generated/prisma';
+import { KycStatus } from '../generated/prisma';
 import { kycStatusMachine } from '../domain/kyc-status';
 import type { Env } from '../config/env.schema';
 
@@ -104,22 +105,19 @@ export class KycService {
             kycVerifiedAt: verifiedAt,
           },
         });
-        const envelope = createEnvelope({
-          eventType: 'user.kyc_verified',
-          producer: 'identity-service',
-          payload: {
-            userId: passenger.id,
-            kycStatus: KycStatus.VERIFIED,
-            verifiedAt: verifiedAt.toISOString(),
-          },
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: passenger.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
+        await enqueueOutbox(
+          tx,
+          createEnvelope({
+            eventType: 'user.kyc_verified',
+            producer: 'identity-service',
+            payload: {
+              userId: passenger.id,
+              kycStatus: KycStatus.VERIFIED,
+              verifiedAt: verifiedAt.toISOString(),
+            },
+          }),
+          passenger.id,
+        );
       });
       return { status: KycStatus.VERIFIED, verificationId };
     }

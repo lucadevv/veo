@@ -8,6 +8,7 @@
  * User + credencial + evento, o nada (atomicidad outbox, FOUNDATION §6 — OutboxRelay lo drena).
  */
 import { createEnvelope, type EventPayload, type EventType } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
 import { type Prisma, type User } from '../generated/prisma';
 
 /** Tipado contra el registro de @veo/events: si el evento se renombra allá, esto no compila. */
@@ -36,13 +37,10 @@ export async function registerUser(
     phone: created.phone ?? '',
     kycStatus: created.kycStatus,
   };
-  const envelope = createEnvelope({ eventType: USER_REGISTERED, producer: PRODUCER, payload });
-  await tx.outboxEvent.create({
-    data: {
-      aggregateId: created.id,
-      eventType: envelope.eventType,
-      envelope: envelope as unknown as Prisma.InputJsonValue,
-    },
-  });
+  await enqueueOutbox(
+    tx,
+    createEnvelope({ eventType: USER_REGISTERED, producer: PRODUCER, payload }),
+    created.id,
+  );
   return created;
 }

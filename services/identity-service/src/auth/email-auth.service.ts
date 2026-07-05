@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { RedisRefreshTokenStore, type SubjectType } from '@veo/auth';
 import { createEnvelope } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
 import {
   ConflictError,
   ForbiddenError,
@@ -27,7 +28,7 @@ import { TokenIssuerService } from './token-issuer.service';
 import { resolveUserForVerifiedEmail } from './account-linking';
 import { registerUser } from './user-registration';
 import { EMAIL_SENDER, type EmailSender } from '../ports/email/email.port';
-import { Prisma, type UserType } from '../generated/prisma';
+import { type UserType } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import type { AuthTokens } from './dto/auth.dto';
 
@@ -180,22 +181,19 @@ export class EmailAuthService {
         where: { id: method.id },
         data: { emailVerified: true, verified: true },
       });
-      const envelope = createEnvelope({
-        eventType: 'user.email_verified',
-        producer: 'identity-service',
-        payload: {
-          userId: method.user.id,
-          email,
-          verifiedAt: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: method.user.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'user.email_verified',
+          producer: 'identity-service',
+          payload: {
+            userId: method.user.id,
+            email,
+            verifiedAt: new Date().toISOString(),
+          },
+        }),
+        method.user.id,
+      );
     });
 
     return this.tokenIssuer.issue(method.user.id, this.subjectType(method.user.type), {

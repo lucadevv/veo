@@ -6,6 +6,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { createEnvelope, DRIVER_OFFLINE_REASON } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
 import { RedisRefreshTokenStore } from '@veo/auth';
 import {
   ConcurrencyConflictError,
@@ -284,18 +285,15 @@ export class DriversService {
       }
       const driver = await tx.driver.findUniqueOrThrow({ where: { userId } });
       if (created) {
-        const envelope = createEnvelope({
-          eventType: 'driver.registered',
-          producer: 'identity-service',
-          payload: { driverId: driver.id, userId, registeredAt: new Date().toISOString() },
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: driver.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
+        await enqueueOutbox(
+          tx,
+          createEnvelope({
+            eventType: 'driver.registered',
+            producer: 'identity-service',
+            payload: { driverId: driver.id, userId, registeredAt: new Date().toISOString() },
+          }),
+          driver.id,
+        );
       }
       return driver;
     });
@@ -493,22 +491,19 @@ export class DriversService {
         where: { id: driver.userId },
         data: { kycStatus: KycStatus.VERIFIED, kycVerifiedAt: new Date() },
       });
-      const envelope = createEnvelope({
-        eventType: 'driver.verified',
-        producer: 'identity-service',
-        payload: {
-          driverId: driver.id,
-          userId: driver.userId,
-          verifiedAt: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: driver.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.verified',
+          producer: 'identity-service',
+          payload: {
+            driverId: driver.id,
+            userId: driver.userId,
+            verifiedAt: new Date().toISOString(),
+          },
+        }),
+        driver.id,
+      );
       return { id: driver.id, backgroundCheckStatus: BackgroundCheckStatus.CLEARED };
     });
   }
@@ -565,23 +560,20 @@ export class DriversService {
         where: { id: driver.userId },
         data: { kycStatus: KycStatus.REJECTED },
       });
-      const envelope = createEnvelope({
-        eventType: 'driver.rejected',
-        producer: 'identity-service',
-        payload: {
-          driverId: driver.id,
-          userId: driver.userId,
-          reason,
-          rejectedAt: rejectedAt.toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: driver.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.rejected',
+          producer: 'identity-service',
+          payload: {
+            driverId: driver.id,
+            userId: driver.userId,
+            reason,
+            rejectedAt: rejectedAt.toISOString(),
+          },
+        }),
+        driver.id,
+      );
     });
   }
 
@@ -823,25 +815,22 @@ export class DriversService {
       );
       // Idempotente: el hold DISCIPLINARY ya existía → no es una suspensión nueva, no se re-emite el evento.
       if (!created) return { created, userId: driver.userId };
-      const envelope = createEnvelope({
-        eventType: 'driver.suspended',
-        producer: 'identity-service',
-        payload: {
-          driverId: driver.id,
-          reason,
-          suspendedAt: suspendedAt.toISOString(),
-          // `userId` para el BACKSTOP durable del revoke (crash-window): el consumer de este propio evento
-          // resella `revoked:before:{userId}` si el post-commit best-effort de abajo no llegó a correr.
-          userId: driver.userId,
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: driver.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.suspended',
+          producer: 'identity-service',
+          payload: {
+            driverId: driver.id,
+            reason,
+            suspendedAt: suspendedAt.toISOString(),
+            // `userId` para el BACKSTOP durable del revoke (crash-window): el consumer de este propio evento
+            // resella `revoked:before:{userId}` si el post-commit best-effort de abajo no llegó a correr.
+            userId: driver.userId,
+          },
+        }),
+        driver.id,
+      );
       return { created, userId: driver.userId };
     });
     // POST-COMMIT (Lote 1b): solo en una TRANSICIÓN NUEVA a suspendido (created) matamos la sesión/socket vivos.
@@ -911,21 +900,18 @@ export class DriversService {
       //    status de SUSPENDED de vuelta a ACTIVE; audit deja la traza inmutable de la decisión. (El evento se
       //    emite porque se levantó EL hold disciplinario, aunque el conductor siga suspendido por otra causa:
       //    el hecho de dominio "se revirtió la disciplinaria" ocurrió; admin-bff reconcilia el status real.)
-      const envelope = createEnvelope({
-        eventType: 'driver.reactivated',
-        producer: 'identity-service',
-        payload: {
-          driverId: driver.id,
-          reactivatedAt: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: driver.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.reactivated',
+          producer: 'identity-service',
+          payload: {
+            driverId: driver.id,
+            reactivatedAt: new Date().toISOString(),
+          },
+        }),
+        driver.id,
+      );
     });
   }
 
@@ -994,21 +980,18 @@ export class DriversService {
         // Existían en el pre-count pero ya no: una carrera (otra reactivación/regularización) los quitó.
         throw new ConflictError('El conductor ya fue reactivado');
       }
-      const envelope = createEnvelope({
-        eventType: 'driver.reactivated',
-        producer: 'identity-service',
-        payload: {
-          driverId: driver.id,
-          reactivatedAt: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: driver.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.reactivated',
+          producer: 'identity-service',
+          payload: {
+            driverId: driver.id,
+            reactivatedAt: new Date().toISOString(),
+          },
+        }),
+        driver.id,
+      );
     });
   }
 
@@ -1069,21 +1052,18 @@ export class DriversService {
       // Solo emitimos driver.reactivated si el conductor quedó LIBRE (0 holds → suspendedAt null). Si quedan otras
       // causas (DISCIPLINARY, etc.) SIGUE suspendido: el cooldown venció pero la otra causa lo mantiene (separación).
       if (suspendedAt !== null) return false;
-      const envelope = createEnvelope({
-        eventType: 'driver.reactivated',
-        producer: 'identity-service',
-        payload: {
-          driverId,
-          reactivatedAt: now.toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: driverId,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.reactivated',
+          producer: 'identity-service',
+          payload: {
+            driverId,
+            reactivatedAt: now.toISOString(),
+          },
+        }),
+        driverId,
+      );
       return true;
     });
   }
@@ -1158,22 +1138,19 @@ export class DriversService {
       });
       // El admin-bff proyecta status=PENDING en el read-model → el conductor reaparece como PENDIENTE (no
       // stale en REJECTED). Cierra el double-source entre la lista (read-model) y el detalle (identity en vivo).
-      const envelope = createEnvelope({
-        eventType: 'driver.resubmitted',
-        producer: 'identity-service',
-        payload: {
-          driverId: driver.id,
-          userId: driver.userId,
-          resubmittedAt: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: driver.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.resubmitted',
+          producer: 'identity-service',
+          payload: {
+            driverId: driver.id,
+            userId: driver.userId,
+            resubmittedAt: new Date().toISOString(),
+          },
+        }),
+        driver.id,
+      );
       return { id: driver.id, backgroundCheckStatus: BackgroundCheckStatus.PENDING };
     });
   }
@@ -1524,13 +1501,7 @@ export class DriversService {
           at: new Date().toISOString(),
         },
       });
-      await this.prisma.write.outboxEvent.create({
-        data: {
-          aggregateId: d.id,
-          eventType: rejected.eventType,
-          envelope: rejected as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(this.prisma.write, rejected, d.id);
       // Suma al techo de abuso (anti-hammering): N spoofs seguidos → cooldown. INCREMENTO ATÓMICO (mismo fix
       // que M6 para el lockout de turno): `consumeFixedWindow` hace INCR+PEXPIRE en un solo eval Lua y re-arma
       // el TTL si se perdió → cierra el bug del `incr`+`expire`-condicional (un crash entre ambas llamadas
@@ -1605,13 +1576,7 @@ export class DriversService {
           licenseFaceMatchedAt: null,
         },
       });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: d.id,
-          eventType: enrolled.eventType,
-          envelope: enrolled as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(tx, enrolled, d.id);
     });
     // Enrol OK: el conductor demostró ser una persona real → limpia el contador de abuso (no arrastra spoofs
     // viejos a la próxima captura). Idempotente si no había contador.
@@ -1848,13 +1813,7 @@ export class DriversService {
               passed: false,
             } satisfies Prisma.BiometricCheckUncheckedCreateInput,
           });
-          await tx.outboxEvent.create({
-            data: {
-              aggregateId: d.id,
-              eventType: envelope.eventType,
-              envelope: envelope as unknown as Prisma.InputJsonValue,
-            },
-          });
+          await enqueueOutbox(tx, envelope, d.id);
         });
       } catch (auditError) {
         this.logger.error(
@@ -1998,18 +1957,15 @@ export class DriversService {
         driverStatusMachine.assertTransition(current.currentStatus, DriverStatus.AVAILABLE);
         throw new ConflictError('Ya tienes un turno activo');
       }
-      const envelope = createEnvelope({
-        eventType: 'driver.verified',
-        producer: 'identity-service',
-        payload: { driverId: d.id, userId, verifiedAt: new Date().toISOString() },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: d.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.verified',
+          producer: 'identity-service',
+          payload: { driverId: d.id, userId, verifiedAt: new Date().toISOString() },
+        }),
+        d.id,
+      );
     });
 
     await this.redis.del(lockKey);
@@ -2249,22 +2205,19 @@ export class DriversService {
       }
       // Rama GANADORA (count === 1): el fin de turno emite went_offline UNA sola vez, en la MISMA tx que el CAS.
       if (emitOffline) {
-        const envelope = createEnvelope({
-          eventType: 'driver.went_offline',
-          producer: 'identity-service',
-          payload: {
-            driverId: d.id,
-            at: new Date().toISOString(),
-            reason: DRIVER_OFFLINE_REASON.SHIFT_END,
-          },
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: d.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
+        await enqueueOutbox(
+          tx,
+          createEnvelope({
+            eventType: 'driver.went_offline',
+            producer: 'identity-service',
+            payload: {
+              driverId: d.id,
+              at: new Date().toISOString(),
+              reason: DRIVER_OFFLINE_REASON.SHIFT_END,
+            },
+          }),
+          d.id,
+        );
       }
       return status;
     });
