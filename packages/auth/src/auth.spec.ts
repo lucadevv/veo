@@ -234,10 +234,42 @@ function fakeRedis() {
     async exists(k: string) {
       return kv.has(k) || sets.has(k) ? 1 : 0;
     },
-    // EVAL emula la ÚNICA operación con script del store: el sello MONOTÓNICO de `revoked:before`
-    // (`sealRevokedBefore`). Replica la semántica del Lua (set solo si el nuevo ts es mayor que el actual);
-    // la atomicidad real la garantiza Redis en prod. `keys[0]` es la key; argv=[atSeconds, ttl].
-    async eval(_script: string, _numKeys: number, key: string, atStr: string, _ttl: string) {
+    // EVAL emula los DOS scripts con Lua del package (la atomicidad real la garantiza Redis en prod):
+    //  · ROTATE_CAS_LUA (rotate) — se detecta por `cjson` en el script. argv=[presentedJti, newJti, ttl, nowMs,
+    //    graceMs]. Replica el CAS: GET record → si currentJti==presented rota (return [1,newJti]); si es el
+    //    previousJti dentro de la gracia return [2,currentJti]; si no existe return [-1]; si no matchea return [0].
+    //  · SEAL_REVOKED_BEFORE_LUA (sealRevokedBefore) — sello MONOTÓNICO. argv=[atSeconds, ttl].
+    async eval(script: string, _numKeys: number, key: string, ...argv: string[]) {
+      if (script.includes('cjson')) {
+        const presented = argv[0] ?? '';
+        const newJti = argv[1] ?? '';
+        const nowMs = Number(argv[3]);
+        const graceMs = Number(argv[4]);
+        const raw = kv.get(key);
+        if (raw == null) return [-1];
+        const rec = JSON.parse(raw) as {
+          currentJti: string;
+          previousJti?: string;
+          rotatedAt?: number;
+        };
+        if (rec.currentJti === presented) {
+          rec.previousJti = rec.currentJti;
+          rec.currentJti = newJti;
+          rec.rotatedAt = nowMs;
+          kv.set(key, JSON.stringify(rec));
+          return [1, newJti];
+        }
+        if (
+          graceMs > 0 &&
+          rec.previousJti === presented &&
+          rec.rotatedAt != null &&
+          nowMs - rec.rotatedAt <= graceMs
+        ) {
+          return [2, rec.currentJti];
+        }
+        return [0];
+      }
+      const atStr = argv[0] ?? '';
       const at = Number(atStr);
       const cur = kv.get(key);
       if (cur != null && Number(cur) >= at) return 0;
@@ -283,6 +315,41 @@ describe('RedisRefreshTokenStore (rotación + reuse detection)', () => {
     // Reusar el jti viejo (robado) → mata la sesión.
     await expect(store.rotate(sessionId, newJti)).rejects.toBeInstanceOf(RefreshError);
     expect(await store.isValid(sessionId)).toBe(false);
+  });
+
+  it('CAS atómico: dos rotate concurrentes con el MISMO jti → exactamente UNO gana, el otro es reuse', async () => {
+    // El bug del RMW no atómico: ambos leían el mismo record, pasaban el gate y escribían. Con el CAS en un
+    // solo eval, el segundo ve currentJti ya rotado → reuse. Sin ventana de gracia (default 0) = estricto.
+    const store = new RedisRefreshTokenStore(fakeRedis() as any, 2_592_000);
+    const { sessionId, newJti } = await store.createSession('u1');
+    const results = await Promise.allSettled([
+      store.rotate(sessionId, newJti),
+      store.rotate(sessionId, newJti),
+    ]);
+    const ok = results.filter((r) => r.status === 'fulfilled');
+    const failed = results.filter((r) => r.status === 'rejected');
+    expect(ok).toHaveLength(1);
+    expect(failed).toHaveLength(1);
+    expect((failed[0] as PromiseRejectedResult).reason).toBeInstanceOf(RefreshError);
+  });
+
+  it('ventana de gracia: presentar el jti INMEDIATAMENTE anterior dentro de la ventana → idempotente (NO mata)', async () => {
+    // Con graceWindowMs > 0, un reintento legítimo que presenta el previousJti dentro de la ventana recibe el
+    // jti VIGENTE (no rota, no mata la familia). Es el trade-off opt-in para tolerar refresh concurrentes.
+    const store = new RedisRefreshTokenStore(
+      fakeRedis() as any,
+      2_592_000,
+      undefined,
+      undefined,
+      undefined,
+      10_000, // graceWindowMs
+    );
+    const { sessionId, newJti } = await store.createSession('u1');
+    const rotated = await store.rotate(sessionId, newJti); // newJti → currentJti; newJti pasa a previousJti
+    // Reintento con el jti anterior DENTRO de la ventana → devuelve el vigente, sin matar la sesión.
+    const retry = await store.rotate(sessionId, newJti);
+    expect(retry.newJti).toBe(rotated.newJti); // el jti vigente, idempotente
+    expect(await store.isValid(sessionId)).toBe(true); // familia intacta
   });
 
   it('revoca una sesión al instante', async () => {

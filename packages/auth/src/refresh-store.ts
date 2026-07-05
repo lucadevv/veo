@@ -13,6 +13,10 @@ export interface SessionRecord {
   userId: string;
   /** jti del refresh token actualmente válido para esta sesión */
   currentJti: string;
+  /** jti INMEDIATAMENTE anterior (el que `currentJti` reemplazó). Habilita la ventana de gracia opcional. */
+  previousJti?: string;
+  /** epoch ms de la última rotación (para medir la ventana de gracia). */
+  rotatedAt?: number;
   createdAt: number;
 }
 
@@ -20,6 +24,51 @@ export interface RotationResult {
   sessionId: string;
   newJti: string;
 }
+
+/**
+ * Códigos TIPADOS del resultado del CAS atómico de `rotate` (Lua) — cero strings/números mágicos sueltos:
+ *  - MISSING (-1): la sesión no existe (revocada/expirada).
+ *  - REUSE (0):    el jti presentado no es el vigente ni cae en la ventana de gracia → robo → matar familia.
+ *  - OK (1):       rotación normal, se emitió `newJti`.
+ *  - GRACE (2):    refresh concurrente/reintento LEGÍTIMO dentro de la ventana de gracia → idempotente, se
+ *                  devuelve el jti VIGENTE sin rotar ni matar (solo si graceWindowMs > 0).
+ */
+const ROTATE_MISSING = -1;
+const ROTATE_REUSE = 0;
+const ROTATE_OK = 1;
+const ROTATE_GRACE = 2;
+
+/**
+ * CAS ATÓMICO de rotación en un solo eval (espeja `SEAL_REVOKED_BEFORE_LUA` de session-revocation): GET del
+ * record + comparación del jti + SET del nuevo jti, TODO indivisible. Cierra la carrera del RMW no atómico
+ * (dos `/auth/refresh` concurrentes con el mismo jti válido leían ambos el mismo record, pasaban ambos el gate
+ * y ambos escribían → el perdedor quedaba con un jti stale → reuse-detection espurio). `cjson` (incluido en el
+ * Redis embebido de Lua) parsea/serializa el record dentro del eval. Backward-compatible con records viejos
+ * sin previousJti/rotatedAt (cjson.decode los deja nil). Ventana de gracia: si graceMs>0 y el jti presentado
+ * es el previousJti dentro de la ventana → idempotente (devuelve el vigente, NO mata) — tolera el reintento
+ * legítimo. graceMs=0 (default) = detección de reuse ESTRICTA (todo jti no-vigente mata la familia).
+ */
+const ROTATE_CAS_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return {${ROTATE_MISSING}} end
+local rec = cjson.decode(raw)
+local presented = ARGV[1]
+local newJti = ARGV[2]
+local ttl = tonumber(ARGV[3])
+local nowMs = tonumber(ARGV[4])
+local graceMs = tonumber(ARGV[5])
+if rec.currentJti == presented then
+  rec.previousJti = rec.currentJti
+  rec.currentJti = newJti
+  rec.rotatedAt = nowMs
+  redis.call('SET', KEYS[1], cjson.encode(rec), 'EX', ttl)
+  return {${ROTATE_OK}, newJti}
+end
+if graceMs > 0 and rec.previousJti == presented and rec.rotatedAt ~= nil and (nowMs - rec.rotatedAt) <= graceMs then
+  return {${ROTATE_GRACE}, rec.currentJti}
+end
+return {${ROTATE_REUSE}}
+`;
 
 export class RedisRefreshTokenStore {
   constructor(
@@ -41,6 +90,15 @@ export class RedisRefreshTokenStore {
      * prefix tipado que `prefix`: cero strings mágicos, override-able por DI/tests.
      */
     private readonly userIndexPrefix = 'veo:user-sessions:',
+    /**
+     * Ventana de gracia (ms) para el jti INMEDIATAMENTE anterior: un `/auth/refresh` que presenta el
+     * previousJti dentro de esta ventana se trata como reintento LEGÍTIMO (idempotente, devuelve el jti
+     * vigente) en vez de reuse. Default 0 = detección de reuse ESTRICTA (comportamiento histórico: todo jti
+     * no-vigente mata la familia). Se sube por DI si se quiere tolerar reintentos concurrentes (trade-off
+     * conocido de la rotación de refresh: relaja la estrictez del reuse en una ventana corta). NO reduce la
+     * seguridad del sello epoch de revocación (ese sigue matando por `iat`).
+     */
+    private readonly graceWindowMs = 0,
   ) {}
 
   private key(sessionId: string): string {
@@ -88,17 +146,28 @@ export class RedisRefreshTokenStore {
    * - sesión inexistente → revocada/expirada → lanza.
    */
   async rotate(sessionId: string, presentedJti: string): Promise<RotationResult> {
-    const raw = await this.redis.get(this.key(sessionId));
-    if (!raw) throw new RefreshError('SESSION_REVOKED');
-    const record = JSON.parse(raw) as SessionRecord;
-    if (record.currentJti !== presentedJti) {
+    const newJti = uuidv7();
+    // CAS ATÓMICO (un solo eval): GET + comparación de jti + SET son indivisibles → dos rotate concurrentes con
+    // el mismo jti NO pueden ambos ganar (el RMW no atómico anterior sí lo permitía → jti stale → reuse espurio).
+    const res = (await this.redis.eval(
+      ROTATE_CAS_LUA,
+      1,
+      this.key(sessionId),
+      presentedJti,
+      newJti,
+      String(this.ttlSeconds),
+      String(Date.now()),
+      String(this.graceWindowMs),
+    )) as [number, string?];
+    const status = Number(res[0]);
+    if (status === ROTATE_MISSING) throw new RefreshError('SESSION_REVOKED');
+    if (status === ROTATE_REUSE) {
       await this.revoke(sessionId); // reuse detection → mata familia completa
       throw new RefreshError('TOKEN_REUSE_DETECTED');
     }
-    const newJti = uuidv7();
-    record.currentJti = newJti;
-    await this.redis.set(this.key(sessionId), JSON.stringify(record), 'EX', this.ttlSeconds);
-    return { sessionId, newJti };
+    // ROTATE_OK → res[1] es el newJti recién emitido; ROTATE_GRACE → res[1] es el jti VIGENTE (reintento
+    // legítimo dentro de la ventana): en ambos casos el cliente recibe un jti válido y NO se mata la familia.
+    return { sessionId, newJti: res[1] as string };
   }
 
   /** Revoca una sesión (logout, suspensión). Idempotente. Sella el denylist por-sid (enforcement stateless). */
