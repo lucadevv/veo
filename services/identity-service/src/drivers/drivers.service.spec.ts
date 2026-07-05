@@ -140,6 +140,12 @@ function makeRedis(opts: { fails?: number; sessions?: Record<string, string> } =
       }
       return store.delete(key) ? 1 : 0;
     },
+    // GETDEL atómico (Redis 6.2+): devuelve el valor y borra la key en una op. Lo usa consumeSession (#23).
+    async getdel(key: string): Promise<string | null> {
+      const value = store.get(key) ?? null;
+      store.delete(key);
+      return value;
+    },
     async incr(): Promise<number> {
       fails += 1;
       return fails;
@@ -718,9 +724,18 @@ describe('DriversService.resubmit · reenvío a revisión (BR-I01 · M3)', () =>
                 userId: 'u1',
                 backgroundCheckStatus: 'REJECTED',
               }),
-              update: async (args: { data: Record<string, unknown> }) => {
-                driverUpdates.push(args.data);
-                return { id: 'd1', backgroundCheckStatus: 'PENDING' };
+              updateMany: async (args: {
+                where: { backgroundCheckStatus?: { in?: string[] } };
+                data: Record<string, unknown>;
+              }) => {
+                // CAS del resubmit (#25): la fila está en REJECTED; matchea (count 1) si REJECTED ∈ el `in`
+                // del WHERE (resubmitSources). Así el test ejercita el CAS real, no un update plano.
+                const sources = args.where.backgroundCheckStatus?.in ?? [];
+                if (sources.includes('REJECTED')) {
+                  driverUpdates.push(args.data);
+                  return { count: 1 };
+                }
+                return { count: 0 };
               },
             },
             user: {
@@ -766,9 +781,18 @@ describe('DriversService.resubmit · reenvío a revisión (BR-I01 · M3)', () =>
                 dniFaceMatchScore: 96,
                 dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
               }),
-              update: async (args: { data: Record<string, unknown> }) => {
-                driverUpdates.push(args.data);
-                return { id: 'd1', backgroundCheckStatus: 'PENDING' };
+              updateMany: async (args: {
+                where: { backgroundCheckStatus?: { in?: string[] } };
+                data: Record<string, unknown>;
+              }) => {
+                // CAS del resubmit (#25): la fila está en REJECTED; matchea (count 1) si REJECTED ∈ el `in`
+                // del WHERE (resubmitSources). Así el test ejercita el CAS real, no un update plano.
+                const sources = args.where.backgroundCheckStatus?.in ?? [];
+                if (sources.includes('REJECTED')) {
+                  driverUpdates.push(args.data);
+                  return { count: 1 };
+                }
+                return { count: 0 };
               },
             },
             user: {

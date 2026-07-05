@@ -76,6 +76,12 @@ const ENROLL_SPOOF_LOCK_TTL_SECONDS = 900; // 15 min
 const BIO_SESSION_TTL_SECONDS = 120;
 
 /**
+ * Código de Prisma para violación de constraint UNIQUE (protocolo del engine, no un string de dominio — como
+ * un status HTTP): lo usamos para mapear el choque de `@unique(dni_hash)` al 409 tipado. Constante, no literal suelto.
+ */
+const PRISMA_UNIQUE_VIOLATION = 'P2002';
+
+/**
  * Estados DESDE los que `to` es alcanzable en el eje DriverStatus (inversa de la tabla de la máquina).
  * Espeja `transitionSources` de trip-service: pensado para el guard CAS atómico
  * (`updateMany({ where: { currentStatus: { in: driverStatusSources(to) } } })`), que mueve el estado en el
@@ -1090,8 +1096,16 @@ export class DriversService {
         BackgroundCheckStatus.PENDING,
       );
       kycStatusMachine.assertTransition(user.kycStatus, KycStatus.PENDING);
-      const updated = await tx.driver.update({
-        where: { id: driver.id },
+      // CAS atómico (espeja approve/reject): el estado origen viaja en el WHERE del updateMany. Sin esto
+      // (update-por-id plano) dos resubmit concurrentes se serializaban por el lock de fila pero AMBOS emitían
+      // driver.resubmitted → doble evento al read-model del admin-bff. `resubmitSources` deriva de la máquina
+      // (cero strings mágicos) y EXCLUYE el destino (PENDING) para que un resubmit sobre un driver ya PENDING
+      // caiga en la rama idempotente sin re-emitir.
+      const resubmitSources = backgroundCheckSources(BackgroundCheckStatus.PENDING).filter(
+        (from) => from !== BackgroundCheckStatus.PENDING,
+      );
+      const claim = await tx.driver.updateMany({
+        where: { id: driver.id, backgroundCheckStatus: { in: resubmitSources } },
         data: {
           backgroundCheckStatus: BackgroundCheckStatus.PENDING,
           rejectionReason: null,
@@ -1114,13 +1128,24 @@ export class DriversService {
           licenseFaceMatchedAt: null,
         },
       });
+      if (claim.count === 0) {
+        // Otra decisión concurrente ganó. Si YA está PENDING es idempotente (no re-emitir); si no, conflicto.
+        const current = await tx.driver.findUnique({
+          where: { id: driver.id },
+          select: { backgroundCheckStatus: true },
+        });
+        if (current?.backgroundCheckStatus === BackgroundCheckStatus.PENDING) {
+          return { id: driver.id, backgroundCheckStatus: BackgroundCheckStatus.PENDING };
+        }
+        throw new ConcurrencyConflictError('Otra operación concurrente cambió el estado del conductor');
+      }
+      // Rama GANADORA (count === 1): sincronizamos el KYC y emitimos driver.resubmitted UNA sola vez.
       await tx.user.update({
         where: { id: driver.userId },
         data: { kycStatus: KycStatus.PENDING },
       });
-      // Emite driver.resubmitted por OUTBOX en la MISMA tx (igual que approve/reject): el admin-bff
-      // proyecta status=PENDING en el read-model → el conductor reaparece como PENDIENTE (no stale en
-      // REJECTED). Cierra el double-source entre la lista (read-model) y el detalle (identity en vivo).
+      // El admin-bff proyecta status=PENDING en el read-model → el conductor reaparece como PENDIENTE (no
+      // stale en REJECTED). Cierra el double-source entre la lista (read-model) y el detalle (identity en vivo).
       const envelope = createEnvelope({
         eventType: 'driver.resubmitted',
         producer: 'identity-service',
@@ -1137,7 +1162,7 @@ export class DriversService {
           envelope: envelope as unknown as Prisma.InputJsonValue,
         },
       });
-      return { id: updated.id, backgroundCheckStatus: updated.backgroundCheckStatus };
+      return { id: driver.id, backgroundCheckStatus: BackgroundCheckStatus.PENDING };
     });
   }
 
@@ -1446,6 +1471,14 @@ export class DriversService {
     // TECHO DE ABUSO DEL ENROL (anti-hammering del PAD, fail-fast ANTES de gastar inferencia): tras
     // MAX_ENROLL_SPOOFS rechazos por spoof seguidos, cooldown temporal CORTO (no atrapa 1h a un conductor
     // legítimo). Se limpia al enrolar OK; la central destraba antes con el unlock admin.
+    // DEUDA(check-then-act acotado): este gate de entrada es un `redis.get` de solo lectura, NO atómico con el
+    // incremento (que sí lo es, vía consumeFixedWindow en la rama de spoof). techo: una ráfaga concurrente de N
+    // enrolls puede leer todos spoofs<MAX antes de que aterrice cualquier incremento → sobre-gasta N inferencias
+    // PAD por encima del techo UNA vez (no es bypass del lockout: el contador atómico igual capea la ventana, y
+    // el rechazo por spoof NO filtra el score → sin oráculo). NO se usa consume-before (como verifyBiometric)
+    // A PROPÓSITO: el enrol solo debe contar SPOOFS reales, no cada intento — consumir por-intento bloquearía a
+    // un conductor legítimo que reintenta enrolar. gatillo: si el PAD se vuelve caro o aparece abuso real de la
+    // ráfaga, mover el check adentro de un eval Lua (GET+compare atómico) que no incremente en el intento sano.
     const spoofLockKey = enrollSpoofLockKey(d.id);
     const spoofs = Number((await this.redis.get(spoofLockKey)) ?? 0);
     if (spoofs >= MAX_ENROLL_SPOOFS) {
@@ -2077,11 +2110,14 @@ export class DriversService {
   /** Lee+borra (un solo uso) el sessionRef y valida que pertenece al conductor y al kind SHIFT_START. */
   private async consumeSession(sessionRef: string, userId: string): Promise<BiometricSession> {
     const key = bioSessionKey(sessionRef);
-    const raw = await this.redis.get(key);
+    // GETDEL ATÓMICO (Redis 6.2+): lee y borra en UNA operación → el sessionRef es de un solo uso DE VERDAD.
+    // Con GET+DEL separados, dos startShift concurrentes con el mismo ref podían leer AMBOS antes del DEL y
+    // pasar los dos por acá (el double-shift lo frenaba después el CAS de la transición, pero el ref no era
+    // realmente de-un-solo-uso). GETDEL cierra la ventana en el propio consumo.
+    const raw = await this.redis.getdel(key);
     if (!raw) {
       throw new UnauthorizedError('Sesión biométrica inválida o expirada');
     }
-    await this.redis.del(key);
     const session = JSON.parse(raw) as BiometricSession;
     if (session.userId !== userId || session.kind !== 'SHIFT_START') {
       throw new UnauthorizedError('La sesión biométrica no corresponde a este conductor');
@@ -2187,14 +2223,16 @@ export class DriversService {
         { backgroundCheckStatus: { not: BackgroundCheckStatus.CLEARED } },
       );
     } catch (e) {
-      // BACKSTOP de carrera (cierra el TOCTOU del pre-check): dos altas concurrentes con el MISMO DNI
-      // pueden pasar AMBAS el pre-check (ninguna ve todavía la fila de la otra) y solo una gana el
-      // `@unique(dni_hash)` de Postgres. El `createMany({ skipDuplicates: true })` de `materializeDriverShell`
-      // NO lanza en conflicto (ON CONFLICT DO NOTHING absorbe el choque de `userId`, pero el choque de
-      // `dni_hash` en una fila AJENA hace que el INSERT completo se descarte sin crear la propia) y el
-      // `tx.driver.update({ where: { userId } })` del brazo update SÍ puede reventar con P2025/P2002 si
-      // el choque es contra la propia fila en el mismo instante. Re-chequeamos: si el clash AHORA aparece,
-      // es la carrera de DNI duplicado (409 tipado); si no aparece, el error es OTRA cosa y se re-lanza tal cual.
+      // BACKSTOP de carrera del `@unique(dni_hash)`: el brazo UPDATE de `materializeDriverShell` escribe el
+      // `dniHash`; si otra fila AJENA ya lo tiene, Postgres rechaza con P2002. Ese código es DEFINITIVO — es
+      // un DNI ya registrado en otra cuenta → 409 tipado DIRECTO, sin depender de re-leer la RÉPLICA (que bajo
+      // lag podía no ver la fila ajena todavía → dejaba escapar el error CRUDO de Prisma como 500 sin mapear,
+      // porque el filtro global de excepciones no conoce P2002). El createMany({skipDuplicates}) no lanza
+      // (ON CONFLICT DO NOTHING), así que el P2002 sale del update, no del insert.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === PRISMA_UNIQUE_VIOLATION) {
+        throw new DniAlreadyRegisteredError('Este DNI ya está registrado en otra cuenta');
+      }
+      // Fallback para CUALQUIER otro error (no-P2002): re-chequeo de la réplica por si el clash ya se ve.
       const clashAfterRace = await this.prisma.read.driver.findFirst({
         where: { dniHash, NOT: { userId } },
         select: { id: true },
