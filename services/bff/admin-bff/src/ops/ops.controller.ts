@@ -87,7 +87,11 @@ export class OpsController {
   @Post('drivers/:id/approve')
   @HttpCode(200)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Aprueba un conductor (compliance/admin)' })
+  // BR-S07 / FOUNDATION §7: aprobar un conductor es la acción sensible por excelencia (lo habilita a operar,
+  // con implicancias de seguridad Ley 29733) → exige TOTP FRESCO, no solo RBAC. Los hermanos menos críticos
+  // (reactivate-compliance, DELETE driver, grant/reject operator) ya lo tenían; approve quedó sin él (drift).
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Aprueba un conductor (compliance/admin · exige step-up MFA)' })
   approveDriver(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
