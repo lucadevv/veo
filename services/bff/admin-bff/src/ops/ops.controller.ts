@@ -9,6 +9,7 @@ import { AdminRole } from '@veo/shared-types';
 import type {
   TripSummary,
   DriverApproval,
+  DriverCounts,
   TripDetail,
   DriverDetail,
   DniFaceMatchResult,
@@ -70,6 +71,13 @@ export class OpsController {
   @ApiOperation({ summary: 'Conductores pendientes de aprobación' })
   pendingDrivers(@CurrentUser() user: AuthenticatedUser): Promise<PendingDriver[]> {
     return this.ops.listPendingDrivers(user);
+  }
+
+  // ANTES de drivers/:id: Nest matchea por orden y ':id' capturaría "summary". Conteo por estado (stat cards).
+  @Get('drivers/summary')
+  @ApiOperation({ summary: 'Conteo de conductores por estado de antecedentes (stat cards)' })
+  driversSummary(@CurrentUser() user: AuthenticatedUser): Promise<DriverCounts> {
+    return this.ops.driversSummary(user);
   }
 
   @Get('drivers/:id')

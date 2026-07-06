@@ -11,6 +11,9 @@ service IdentityService {
   // Lectura BATCH para enriquecer listados del admin (nombre/teléfono por página, sin N+1). El admin-bff
   // la llama UNA vez por página con los driverId visibles; devuelve los DriverReply hallados (orden libre).
   rpc GetDriversByIds (DriverIdsRequest) returns (DriversByIdsReply);
+  // Conteo de conductores por estado de antecedentes (backgroundCheckStatus), para los stat cards del panel
+  // admin (embudo de aprobación). Agregado con groupBy en la réplica de lectura; sin PII, solo enteros.
+  rpc GetDriverCounts (DriverCountsRequest) returns (DriverCountsReply);
 }
 
 message GetByIdRequest {
@@ -23,6 +26,16 @@ message DriverIdsRequest {
 
 message DriversByIdsReply {
   repeated DriverReply drivers = 1;
+}
+
+// Request vacío del conteo global de conductores (sin filtros; el scoping lo da el riel ADMIN del gRPC).
+message DriverCountsRequest {}
+
+// Conteo de conductores por backgroundCheckStatus. proto3 default 0 cuando no hay filas de ese estado.
+message DriverCountsReply {
+  int32 pending = 1;
+  int32 cleared = 2;
+  int32 rejected = 3;
 }
 
 message UserReply {

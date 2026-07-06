@@ -9,12 +9,19 @@ import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, InternalAudience, type InternalIdentity } from '@veo/auth';
 import { DniFaceMatchStatus, PassiveLivenessStatus } from '@veo/shared-types';
+import { BackgroundCheckStatus } from '../generated/prisma';
 import { PrismaService } from '../infra/prisma.service';
 import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
+}
+/** identity.GetDriverCounts — conteos de conductores por backgroundCheckStatus (stat cards del admin). */
+interface DriverCountsReply {
+  pending: number;
+  cleared: number;
+  rejected: number;
 }
 interface UserReply {
   id: string;
@@ -156,6 +163,9 @@ const GRPC_METHOD_AUDIENCES = {
   //    era admin-bff; al cablearse booking (service-rail) la búsqueda caía fail-closed → resultados vacíos.
   // Mínimo privilegio: NO se abre a public-rail ni driver-rail (no son callers legítimos del batch).
   GetDriversByIds: [InternalAudience.ADMIN_RAIL, InternalAudience.SERVICE_RAIL],
+  // Conteo agregado de conductores por estado (stat cards del panel). SOLO admin-bff (ADMIN_RAIL): es un
+  // dato de gestión del operador, no lo consume ningún servicio interno. Sin PII (solo enteros).
+  GetDriverCounts: [InternalAudience.ADMIN_RAIL],
 } as const satisfies Record<string, readonly InternalAudience[]>;
 
 type GrpcMethodName = keyof typeof GRPC_METHOD_AUDIENCES;
@@ -291,6 +301,27 @@ export class IdentityGrpcController {
     // —peor— una fila con ciphertext corrupto/de-otra-clave tumbaría la página ENTERA de conductores. El DNI
     // se descifra únicamente en el GetDriver single (detalle Compliance+).
     return { drivers: drivers.map((d) => this.toDriverReply(d)) };
+  }
+
+  /**
+   * Conteo de conductores por backgroundCheckStatus (embudo de aprobación · stat cards del panel admin).
+   * groupBy AGREGADO en la réplica de lectura (no trae filas); un estado sin conductores no aparece → default 0.
+   * Sin PII: solo enteros. Riel ADMIN (admin-bff) — ver GRPC_METHOD_AUDIENCES.
+   */
+  @GrpcMethod('IdentityService', 'GetDriverCounts')
+  async getDriverCounts(_request: unknown, metadata: Metadata): Promise<DriverCountsReply> {
+    this.requireIdentity('GetDriverCounts', metadata);
+    const groups = await this.prisma.read.driver.groupBy({
+      by: ['backgroundCheckStatus'],
+      _count: { _all: true },
+    });
+    const countOf = (backgroundCheckStatus: BackgroundCheckStatus): number =>
+      groups.find((g) => g.backgroundCheckStatus === backgroundCheckStatus)?._count._all ?? 0;
+    return {
+      pending: countOf(BackgroundCheckStatus.PENDING),
+      cleared: countOf(BackgroundCheckStatus.CLEARED),
+      rejected: countOf(BackgroundCheckStatus.REJECTED),
+    };
   }
 
   /**

@@ -180,6 +180,14 @@ export const pendingDriver = z.object({
 });
 export type PendingDriver = z.infer<typeof pendingDriver>;
 
+/** Conteo de conductores por estado de antecedentes (embudo de aprobación · stat cards del panel). */
+export const driverCounts = z.object({
+  pending: z.number().int(),
+  cleared: z.number().int(),
+  rejected: z.number().int(),
+});
+export type DriverCounts = z.infer<typeof driverCounts>;
+
 /* ── Sub-lote 3C · BINDING face-match DNI↔selfie ── */
 
 /**

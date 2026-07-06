@@ -44,6 +44,7 @@ import {
   reinviteOperatorResult,
   paginated,
   pendingDriver,
+  driverCounts,
   panicDetail,
   type ReplaceCatalogRequest,
   type ReplaceScheduleRequest,
@@ -68,6 +69,7 @@ export const qk = {
   drivers: (status: string) => ['drivers', status] as const,
   driver: (id: string) => ['driver', id] as const,
   driversPending: ['drivers-pending'] as const,
+  driversSummary: ['drivers-summary'] as const,
   operators: ['operators'] as const,
   panics: (status: string) => ['panics', status] as const,
   panic: (id: string) => ['panic', id] as const,
@@ -339,6 +341,15 @@ export function useDriversPending() {
     queryKey: qk.driversPending,
     queryFn: ({ signal }) =>
       apiClient().get('/ops/drivers/pending', { schema: z.array(pendingDriver), signal }),
+  });
+}
+
+/** Conteo de conductores por estado de antecedentes (pending/cleared/rejected) para los stat cards del panel. */
+export function useDriversSummary() {
+  return useQuery({
+    queryKey: qk.driversSummary,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/drivers/summary', { schema: driverCounts, signal }),
   });
 }
 

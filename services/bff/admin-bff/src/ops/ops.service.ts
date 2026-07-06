@@ -11,6 +11,7 @@ import {
   type UserReply,
   type DriverReply,
   type DriversByIdsReply,
+  type DriverCountsReply,
   type DriverVehiclesReply,
   type VehicleReply,
   type DriverDocumentsReply,
@@ -36,6 +37,7 @@ import {
 import type {
   TripSummary,
   DriverApproval,
+  DriverCounts,
   TripDetail,
   DriverDetail,
   DriverVehicle,
@@ -841,6 +843,16 @@ export class OpsService {
     // licenseNumber (DNI/licencia) = IDENTIDAD personal → Compliance+. Sub-Compliance: null honesto.
     if (canSeeIdentity(identity.roles)) return list;
     return list.map((d) => ({ ...d, licenseNumber: null }));
+  }
+
+  /**
+   * Conteo de conductores por estado de antecedentes (embudo de aprobación · stat cards del panel). UN gRPC a
+   * identity (GetDriverCounts · groupBy agregado, sin traer filas); sin PII (solo enteros). Riel ADMIN. El
+   * reply gRPC (DriverCountsReply) es estructuralmente el contrato DriverCounts que expone el BFF.
+   */
+  async driversSummary(identity: AuthUser): Promise<DriverCounts> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    return this.identityGrpc.call<DriverCountsReply>('GetDriverCounts', {}, meta);
   }
 
   async approveDriver(
