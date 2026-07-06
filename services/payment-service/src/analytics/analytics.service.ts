@@ -19,6 +19,18 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, PaymentMethod, PaymentStatus } from '../generated/prisma';
 
+/**
+ * Métodos DIGITALES = todos MENOS CASH (el efectivo lo cobra el conductor en mano, nunca llega al banco de VEO).
+ * Lista POSITIVA a propósito: `method IN (…)` puede hacer seek en el índice `[method, status, capturedAt]`; la
+ * negación `method != CASH` NO (la anula → full-scan). Si se agrega un método digital al enum, sumarlo acá.
+ */
+const NON_CASH_METHODS = [
+  PaymentMethod.YAPE,
+  PaymentMethod.PLIN,
+  PaymentMethod.CARD,
+  PaymentMethod.PAGOEFECTIVO,
+] as const;
+
 /** Punto de la serie horaria de revenue. `bucket` = hora truncada en ISO UTC (toStartOfHour). */
 export interface RevenueHourBucket {
   bucket: string;
@@ -74,8 +86,9 @@ export class AnalyticsService {
     const agg = await this.prisma.read.payment.aggregate({
       _sum: { commissionCents: true, pspFeeCents: true, discountCents: true, creditCents: true },
       where: {
+        // Misma reformulación positiva que revenueToday: `in [digitales]` usa el índice; `!= CASH` lo anula.
+        method: { in: [...NON_CASH_METHODS] },
         status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        method: { not: PaymentMethod.CASH },
         capturedAt: { gte: since },
       },
     });
@@ -99,8 +112,10 @@ export class AnalyticsService {
     const agg = await this.prisma.read.payment.aggregate({
       _sum: { netSettledCents: true, refundedCents: true },
       where: {
+        // Lista POSITIVA de métodos digitales (no `method != CASH`): la NEGACIÓN no puede seek en el índice
+        // [method, status, capturedAt] → lo anulaba (full-scan). Un `in` sí lo usa (seek por método + rango).
+        method: { in: [...NON_CASH_METHODS] },
         status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        method: { not: PaymentMethod.CASH },
         capturedAt: { gte: since },
       },
     });

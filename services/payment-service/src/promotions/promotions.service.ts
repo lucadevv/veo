@@ -51,13 +51,25 @@ export class PromotionsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Cuenta usos totales y del usuario para una promo (excluye nada; cada redención es un uso). */
+  /**
+   * Usos de una promo, ACOTADOS (evita el count-scan sin techo de una promo popular en CADA validate/charge):
+   *  - `userUses`: count por-usuario — índice `[promotionId, userId]`, acotado por las redenciones de UN usuario.
+   *  - `totalUses`: el gate solo lo compara `>= maxTotalUses` (cuando maxTotalUses>0). Si es ilimitado (0), NO hay
+   *    tope → no contamos (0). Si >0, acotamos el scan a `maxTotalUses` filas con `findMany take`: basta saber si
+   *    el tope se alcanzó — no escanear el historial COMPLETO. `totalUses` queda capado a maxTotalUses, y el gate
+   *    `totalUses >= maxTotalUses` sigue correcto (true sii el count real llegó al tope).
+   */
   private async usageFor(
     promotionId: string,
     userId: string,
+    maxTotalUses: number,
   ): Promise<{ totalUses: number; userUses: number }> {
     const [totalUses, userUses] = await Promise.all([
-      this.prisma.read.promoRedemption.count({ where: { promotionId } }),
+      maxTotalUses > 0
+        ? this.prisma.read.promoRedemption
+            .findMany({ where: { promotionId }, take: maxTotalUses, select: { id: true } })
+            .then((rows) => rows.length)
+        : Promise.resolve(0),
       this.prisma.read.promoRedemption.count({ where: { promotionId, userId } }),
     ]);
     return { totalUses, userUses };
@@ -83,7 +95,7 @@ export class PromotionsService {
         reason: reasonMessage('NOT_FOUND'),
       };
     }
-    const usage = await this.usageFor(promo.id, userId);
+    const usage = await this.usageFor(promo.id, userId, promo.maxTotalUses);
     const result = evaluatePromo(promo, fareCents, usage);
     if (!result.valid) {
       return {
@@ -140,7 +152,7 @@ export class PromotionsService {
       };
     }
 
-    const usage = await this.usageFor(promo.id, input.userId);
+    const usage = await this.usageFor(promo.id, input.userId, promo.maxTotalUses);
     const evaluation = evaluatePromo(promo, input.fareCents, usage);
     if (!evaluation.valid) {
       throw this.invalidError(evaluation.reason, code);
