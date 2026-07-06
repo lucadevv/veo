@@ -109,7 +109,7 @@ export default function VehicleDetailPage(props: { params: Promise<{ id: string 
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-5 overflow-auto px-8 py-6">
+    <div className="flex min-h-full flex-col gap-5 px-8 py-6">
       <div className="flex items-center gap-2 text-sm">
         <Link href="/fleet" className="text-ink-subtle hover:text-ink">
           Flota

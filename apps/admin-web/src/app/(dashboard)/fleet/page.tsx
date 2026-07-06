@@ -168,7 +168,7 @@ export default function VehiclesPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-[22px] overflow-auto px-8 py-7">
+    <div className="flex min-h-full flex-col gap-[22px] px-8 py-7">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
