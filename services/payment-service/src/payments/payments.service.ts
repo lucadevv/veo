@@ -1519,26 +1519,31 @@ export class PaymentsService {
       );
       return;
     }
-    for (const tip of tips) {
-      // Propina PENDING (checkout abierto/en curso) al revertirse el viaje: se CANCELA (CAS PENDING→FAILED) para
-      // que un webhook/poll TARDÍO no la capture sobre un viaje ya reembolsado (el conductor cobraría propina de
-      // un viaje que no fue). CAS: si capturó concurrentemente, el update no matchea (queda CAPTURED, caso de
-      // borde a reconciliar); no emite `payment.failed` (es una propina opcional, no una falla del viaje).
-      if (tip.status === 'PENDING') {
-        try {
-          await this.prisma.write.payment.updateMany({
-            where: { id: tip.id, status: 'PENDING' },
-            data: { status: 'FAILED', failureReason: `tip-of-refunded-trip: ${reason}` },
-          });
-        } catch (err) {
-          this.logger.warn(
-            `No se pudo cancelar la propina PENDING ${tip.id} del viaje ${tripId}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
-        continue;
+    // Propinas PENDING (checkout abierto/en curso) al revertirse el viaje: se CANCELAN para que un webhook/poll
+    // TARDÍO no las capture sobre un viaje ya reembolsado (el conductor cobraría propina de un viaje que no fue).
+    // UN solo updateMany por todas (no N updates uno-por-uno): el `failureReason` es el mismo y el CAS por-fila
+    // `status: 'PENDING'` en el WHERE preserva la semántica — una propina que capturó concurrentemente NO matchea
+    // (queda CAPTURED, borde a reconciliar). No emite `payment.failed` (propina opcional, no una falla del viaje).
+    // Best-effort: un fallo del batch NO aborta el refund de la TARIFA (ya cristalizado antes de entrar acá).
+    const pendingTipIds = tips.filter((t) => t.status === 'PENDING').map((t) => t.id);
+    if (pendingTipIds.length > 0) {
+      try {
+        await this.prisma.write.payment.updateMany({
+          where: { id: { in: pendingTipIds }, status: 'PENDING' },
+          data: { status: 'FAILED', failureReason: `tip-of-refunded-trip: ${reason}` },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `No se pudieron cancelar ${pendingTipIds.length} propina(s) PENDING del viaje ${tripId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
+    }
+    // Propinas ya COBRADAS (CAPTURED/PARTIALLY_REFUNDED) → reembolso per-tip: `executeRefundClaim` llama al
+    // proveedor y es idempotente por dedupKey, así que es inherentemente por-item (no se batchea). Best-effort.
+    for (const tip of tips) {
+      if (tip.status === 'PENDING') continue; // ya canceladas en el batch de arriba
       const remainingCents = tip.amountCents - tip.refundedCents;
       if (remainingCents <= 0) continue;
       const claim: RefundClaim = {
