@@ -22,7 +22,6 @@ import { StatusPill } from '@/components/ui/status-pill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { useToast } from '@/components/ui/toast';
 import { DocumentViewer } from '@/components/drivers/document-viewer';
@@ -47,7 +46,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
         <PageHeader
           title="Conductor"
           breadcrumbs={[
-            { label: 'Operación' },
+            { label: 'Flota' },
             { label: 'Conductores', href: '/ops/drivers' },
             { label: id.slice(0, 8) },
           ]}
@@ -613,21 +612,46 @@ function ApprovalBar({
               }
             />
           ) : null}
-          <ConfirmDialog
-            trigger={
-              <Button variant="primary" disabled={!canApprove}>
-                <Check className="size-4" aria-hidden />
-                Aprobar conductor
-              </Button>
-            }
-            title="Aprobar conductor"
-            description="Habilitás al conductor para operar. El servidor revalida los documentos obligatorios; si falta alguno, verás el detalle aquí."
-            confirmLabel="Aprobar"
-            onConfirm={async () => {
-              await decision.mutateAsync({ id: driver.id, decision: 'approve' });
-              toast({ tone: 'success', title: 'Conductor aprobado' });
-            }}
-          />
+          <div className="flex items-center gap-2">
+            {/* Rechazar: MOTIVO (el conductor lo VE en su app) + MFA (BR-S07). Disponible aunque falten gates
+                (el operador puede rechazar un alta incompleta/dudosa en cualquier momento). */}
+            <StepUpDialog
+              trigger={
+                <Button variant="danger">
+                  <X className="size-4" aria-hidden />
+                  Rechazar
+                </Button>
+              }
+              title="Rechazar conductor"
+              description="El conductor verá el motivo para corregir y reenviar. Acción sensible: requiere tu MFA. Queda auditada."
+              confirmLabel="Rechazar alta"
+              confirmVariant="danger"
+              withReason
+              reasonLabel="Motivo del rechazo (visible para el conductor)"
+              reasonPlaceholder="Ej. La foto de la licencia no es legible. Vuelve a capturarla con buena luz."
+              onVerified={async (reason) => {
+                await decision.mutateAsync({ id: driver.id, decision: 'reject', reason });
+                toast({ tone: 'success', title: 'Conductor rechazado' });
+              }}
+            />
+            {/* Aprobar exige step-up MFA (BR-S07 · @RequireStepUpMfa en el bff). Gated por canApprove (refleja
+                los gates server-side); el TOTP se pide en prod, se salta en dev (espeja el StepUpMfaGuard). */}
+            <StepUpDialog
+              trigger={
+                <Button variant="primary" disabled={!canApprove}>
+                  <Check className="size-4" aria-hidden />
+                  Aprobar conductor
+                </Button>
+              }
+              title="Aprobar conductor"
+              description="Habilitás al conductor para operar. Acción sensible: requiere tu MFA. El servidor revalida documentos + ITV."
+              confirmLabel="Aprobar"
+              onVerified={async () => {
+                await decision.mutateAsync({ id: driver.id, decision: 'approve' });
+                toast({ tone: 'success', title: 'Conductor aprobado' });
+              }}
+            />
+          </div>
           {!canApprove ? <span className="text-xs text-ink-muted">{blockReason}</span> : null}
         </div>
       ) : null}

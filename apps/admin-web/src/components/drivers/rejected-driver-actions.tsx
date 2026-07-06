@@ -7,7 +7,7 @@ import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 /**
  * Re-aprobar un conductor RECHAZADO (apelación/corrección revisada por el operador). Cierra el otro
@@ -25,7 +25,7 @@ export function RejectedDriverActions({ driver }: { driver: DriverApproval }) {
   }
 
   return (
-    <ConfirmDialog
+    <StepUpDialog
       trigger={
         <Button size="sm" variant="primary">
           <Check className="size-4" aria-hidden />
@@ -33,9 +33,9 @@ export function RejectedDriverActions({ driver }: { driver: DriverApproval }) {
         </Button>
       }
       title="Re-aprobar conductor"
-      description={`Se reactivará al conductor ${driver.id.slice(0, 8)} (antecedentes CLEARED). La acción queda auditada.`}
+      description={`Se reactivará al conductor ${driver.id.slice(0, 8)} (antecedentes CLEARED). Acción sensible: requiere tu MFA. Queda auditada.`}
       confirmLabel="Re-aprobar"
-      onConfirm={async () => {
+      onVerified={async () => {
         await decision.mutateAsync({ id: driver.id, decision: 'approve' });
         toast({ tone: 'success', title: 'Conductor re-aprobado' });
       }}
