@@ -491,6 +491,15 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: p.ownerType === 'VEHICLE' ? 'vehicle' : 'driver',
         resourceId: p.ownerId,
       })),
+      // Documento del conductor RECHAZADO por el operador (compliance, Ley 29733): traza inmutable de la decisión.
+      // Solo se emite para docs DRIVER-scoped → recurso=driver, id=ownerId (Driver.id de perfil). El operador que
+      // decidió se traza por el comando admin (audit.record en admin-bff); acá actor=recurso=ownerId (el sujeto de
+      // la decisión proyectada por el evento de dominio, igual que driver.rejected). El reason NO viaja (data-min §0.7).
+      'fleet.document_rejected': this.audited('fleet.document_rejected', (p) => ({
+        actorId: p.ownerId,
+        resourceType: 'driver',
+        resourceId: p.ownerId,
+      })),
       // Vehículo REGISTRADO en la flota (alta del agregado Vehicle): el conductor lo registró → actor=driverId,
       // recurso=vehicle/vehicleId.
       'fleet.vehicle_registered': this.audited('fleet.vehicle_registered', (p) => ({

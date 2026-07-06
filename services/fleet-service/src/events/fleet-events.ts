@@ -14,6 +14,7 @@ export const FLEET_PRODUCER = 'fleet-service';
 export const FleetEventType = {
   DOCUMENT_EXPIRING: 'fleet.document_expiring',
   DOCUMENT_EXPIRED: 'fleet.document_expired',
+  DOCUMENT_REJECTED: 'fleet.document_rejected',
   DRIVER_SUSPENDED: 'fleet.driver_suspended',
   DRIVER_REACTIVATED: 'fleet.driver_reactivated',
   VEHICLE_SUSPENDED: 'fleet.vehicle_suspended',
@@ -40,6 +41,21 @@ export interface DocumentExpiredPayload {
   documentType: string;
   expiresAt: string;
   critical: boolean;
+}
+
+/**
+ * El operador RECHAZÓ un documento del conductor (reviewDocument, decision=REJECTED). Downstream: notification
+ * (push al conductor para que corrija y reenvíe) + audit (traza inmutable de la decisión). Cierra la asimetría
+ * con el rechazo del ALTA (driver.rejected), que sí avisaba. `ownerId` = Driver.id de PERFIL (doc DRIVER-scoped,
+ * como en la suspensión por documento). El `reason` (texto libre) NO viaja: data-minimization §0.7 (ningún
+ * consumer lo usa — la app lo lee de la fila FleetDocument vía GET /drivers/me/documents; el audit excluye free-text).
+ */
+export interface DocumentRejectedPayload {
+  documentId: string;
+  ownerType: 'DRIVER' | 'VEHICLE';
+  ownerId: string;
+  documentType: string;
+  rejectedAt: string;
 }
 
 /**
@@ -122,6 +138,7 @@ export interface VehicleModelReviewedPayload {
 type FleetPayload =
   | DocumentExpiringPayload
   | DocumentExpiredPayload
+  | DocumentRejectedPayload
   | DriverSuspendedPayload
   | DriverReactivatedPayload
   | VehicleSuspendedPayload

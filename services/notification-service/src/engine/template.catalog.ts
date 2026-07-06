@@ -42,6 +42,7 @@ export const TEMPLATE_KEYS = {
   VEHICLE_MODEL_REJECTED: 'fleet.vehicle_model_rejected',
   DRIVER_APPROVED: 'driver.approved',
   DRIVER_REJECTED: 'driver.rejected',
+  DOCUMENT_REJECTED: 'fleet.document_rejected',
 } as const;
 
 /** Key TIPADA del catálogo: referenciar un template inexistente no compila. */
@@ -351,5 +352,15 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Revisá tu solicitud',
     body: 'Tu solicitud de conductor necesita correcciones. Abre VEO para ver el motivo y reenviar.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador RECHAZA UNO de sus documentos (reviewDocument). Copy GENÉRICO: no
+    // nombra el documento (evita leak/complejidad de i18n del enum); la app resuelve CUÁL doc + su motivo vía
+    // GET /drivers/me/documents. Cierra la asimetría con DRIVER_REJECTED (rechazo del alta), que sí avisaba.
+    key: TEMPLATE_KEYS.DOCUMENT_REJECTED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Revisá tu documento',
+    body: 'Uno de tus documentos necesita correcciones. Abre VEO para ver cuál y volver a enviarlo.',
   },
 ];

@@ -519,6 +519,25 @@ export const PUSH_NOTIFICATION_SPECS = {
     dedup: (p) => `driver:${p.driverId}:rejected`,
     data: (p) => ({ driverId: p.driverId }),
   }),
+
+  /**
+   * fleet.document_rejected → push al CONDUCTOR: el operador rechazó UNO de sus documentos, debe corregirlo y
+   * reenviarlo. Cierra la ASIMETRÍA: antes solo el rechazo del ALTA (driver.rejected) avisaba; el rechazo
+   * POR-DOCUMENTO era silencioso. Gate `when: ownerType==='DRIVER'` (un doc VEHICLE-scoped tiene vehicleId como
+   * owner, no un conductor). `ownerId` es el Driver.id de PERFIL → `recipientKind:'driverId'` lo resuelve a
+   * userId por gRPC a identity ANTES del lookup de device-token (igual que payout.processed). El MOTIVO NO viaja
+   * en el push (PII §0.7): la app lo resuelve en la pantalla de rechazo vía GET /drivers/me/documents; el push
+   * solo lleva documentType (categoría, no PII) para que la app resalte el doc. dedup por (documentId, rejectedAt):
+   * una re-revisión posterior (re-subida → nuevo rechazo) SÍ vuelve a avisar; las redeliveries del mismo evento no.
+   */
+  'fleet.document_rejected': defineSpec('fleet.document_rejected', {
+    when: (p) => p.ownerType === 'DRIVER',
+    recipient: (p) => p.ownerId,
+    recipientKind: 'driverId',
+    template: TEMPLATE_KEYS.DOCUMENT_REJECTED,
+    dedup: (p) => `document:${p.documentId}:rejected:${p.rejectedAt}`,
+    data: (p) => ({ documentType: p.documentType }),
+  }),
 } satisfies { readonly [K in EventType]?: PushNotificationSpec<K> };
 
 export type RegistryEventType = keyof typeof PUSH_NOTIFICATION_SPECS;

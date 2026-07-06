@@ -424,6 +424,28 @@ export class DocumentsService {
             reactivatedAt: now.toISOString(),
           }),
         );
+      } else if (
+        decision === ReviewDecision.REJECTED &&
+        updated.ownerType === FleetOwnerType.DRIVER
+      ) {
+        // El operador RECHAZÓ un documento del conductor → notificar (push) + auditar la decisión (compliance).
+        // Emitido por OUTBOX en la MISMA tx que persiste REJECTED + rejectionReason (escritura+evento atómicos,
+        // FOUNDATION §6). Cierra la ASIMETRÍA de aviso: antes SOLO el rechazo del ALTA (driver.rejected) avisaba;
+        // el rechazo POR-DOCUMENTO era silencioso (el conductor solo lo veía si abría la app). `ownerId` es el
+        // Driver.id de PERFIL (doc DRIVER-scoped, igual que la suspensión por documento). El `reason` (texto libre)
+        // NO viaja en el evento (data-minimization §0.7): sigue persistido en FleetDocument.rejectionReason (fuente
+        // de verdad) y la app lo muestra vía GET /drivers/me/documents; el push no lo lleva y el audit excluye free-text.
+        await this.enqueue(
+          tx,
+          updated.ownerId,
+          buildFleetEvent(FleetEventType.DOCUMENT_REJECTED, {
+            documentId: updated.id,
+            ownerType: updated.ownerType,
+            ownerId: updated.ownerId,
+            documentType: updated.type,
+            rejectedAt: now.toISOString(),
+          }),
+        );
       }
       return updated;
     });

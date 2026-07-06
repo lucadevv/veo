@@ -32,9 +32,18 @@ function doc(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 function makeService(docRow: Record<string, unknown> | null) {
   const outbox: Record<string, unknown>[] = [];
+  // review() actual (CAS): findUnique (lectura en-tx) → updateMany (claim atómico) → findUniqueOrThrow (re-lee
+  // la fila ya escrita). El mock refleja ESE flujo y acumula el `data` del updateMany para devolver la fila
+  // actualizada en findUniqueOrThrow (updateMany en Prisma no devuelve la fila).
+  let applied: Record<string, unknown> = { ...(docRow ?? {}) };
   const tx = {
     fleetDocument: {
-      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...docRow, ...data })),
+      findUnique: vi.fn(async () => docRow),
+      updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        applied = { ...applied, ...data };
+        return { count: docRow ? 1 : 0 };
+      }),
+      findUniqueOrThrow: vi.fn(async () => applied),
     },
     outboxEvent: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -59,6 +68,15 @@ function reactivatedPayload(outbox: Record<string, unknown>[]): Record<string, u
   return (e.envelope as { payload: Record<string, unknown> }).payload;
 }
 
+/** Encuentra el evento de rechazo de documento en el outbox (o null). */
+function documentRejectedPayload(
+  outbox: Record<string, unknown>[],
+): Record<string, unknown> | null {
+  const e = outbox.find((o) => o.eventType === FleetEventType.DOCUMENT_REJECTED);
+  if (!e) return null;
+  return (e.envelope as { payload: Record<string, unknown> }).payload;
+}
+
 describe('DocumentsService.review · auto-reactivación por documento crítico regularizado', () => {
   it('VALIDA un doc crítico (SOAT) DRIVER → VALID → emite fleet.driver_reactivated keyeado por driverId', async () => {
     const { service, outbox } = makeService(doc());
@@ -76,6 +94,29 @@ describe('DocumentsService.review · auto-reactivación por documento crítico r
     const { service, outbox } = makeService(doc());
     await service.review('doc-1', ReviewDecision.REJECTED, REVIEWER, 'foto ilegible', NOW);
     expect(reactivatedPayload(outbox)).toBeNull();
+  });
+
+  it('RECHAZA un doc DRIVER → emite fleet.document_rejected (para el push al conductor), keyeado por ownerId (Driver.id)', async () => {
+    // Cierra la asimetría de aviso: el rechazo por-documento notifica al conductor. El `reason` viaja en el
+    // evento (audit) pero NO al push (PII). ownerId = Driver.id de perfil; el push lo resuelve a userId.
+    const { service, outbox } = makeService(doc());
+    await service.review('doc-1', ReviewDecision.REJECTED, REVIEWER, 'foto ilegible', NOW);
+    const payload = documentRejectedPayload(outbox);
+    expect(payload).not.toBeNull();
+    expect(payload?.ownerType).toBe(FleetOwnerType.DRIVER);
+    expect(payload?.ownerId).toBe('driver-profile-1');
+    expect(payload?.documentType).toBe(FleetDocumentType.SOAT);
+    expect(payload?.rejectedAt).toBe(NOW.toISOString());
+    // El reason (texto libre) NO viaja en el evento (data-minimization §0.7): vive en FleetDocument.rejectionReason.
+    expect(payload?.reason).toBeUndefined();
+  });
+
+  it('RECHAZA un doc de VEHICLE → NO emite fleet.document_rejected (no hay conductor a quien avisar)', async () => {
+    const { service, outbox } = makeService(
+      doc({ ownerType: FleetOwnerType.VEHICLE, ownerId: 'vehicle-1' }),
+    );
+    await service.review('doc-1', ReviewDecision.REJECTED, REVIEWER, 'ilegible', NOW);
+    expect(documentRejectedPayload(outbox)).toBeNull();
   });
 
   it('doc NO crítico (DNI) validado → NO emite reactivación (su vencimiento no suspende)', async () => {

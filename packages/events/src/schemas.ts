@@ -1127,6 +1127,21 @@ export const fleetDocumentExpired = z.object({
   expiresAt: z.string(),
   critical: z.boolean(),
 });
+/// El operador RECHAZÓ un documento del conductor en la revisión manual (`reviewDocument`, decision=REJECTED).
+/// fleet-service lo emite por OUTBOX en la MISMA tx que persiste `FleetDocument.status=REJECTED` + rejectionReason.
+/// Downstream: notification-service (push al conductor: "corregí tu documento") + audit (traza inmutable de la
+/// decisión de compliance, Ley 29733). Cierra la ASIMETRÍA de aviso — antes SOLO el rechazo del ALTA
+/// (driver.rejected) notificaba; el rechazo POR-DOCUMENTO era silencioso. `ownerId` = Driver.id de PERFIL (doc
+/// DRIVER-scoped); el push lo resuelve a userId por gRPC. El `reason` (texto libre del operador) NO viaja en el
+/// evento (data-minimization §0.7: ningún consumer lo necesita — la app lo muestra vía GET /drivers/me/documents,
+/// que lo lee de la fila `FleetDocument`; el audit inmutable excluye free-text por política). `rejectedAt` ISO-8601.
+export const fleetDocumentRejected = z.object({
+  documentId: z.string(),
+  ownerType: z.enum(['DRIVER', 'VEHICLE']),
+  ownerId: z.string(),
+  documentType: z.string(),
+  rejectedAt: z.string(),
+});
 export const fleetDriverSuspended = z
   .object({
     // SUJETO de la suspensión: el conductor llega por UNA de dos claves, según el ORIGEN:
@@ -1469,6 +1484,7 @@ export const EVENT_SCHEMAS = {
   'audit.recorded': auditRecorded,
   'fleet.document_expiring': fleetDocumentExpiring,
   'fleet.document_expired': fleetDocumentExpired,
+  'fleet.document_rejected': fleetDocumentRejected,
   'fleet.driver_suspended': fleetDriverSuspended,
   'fleet.driver_reactivated': fleetDriverReactivated,
   'fleet.vehicle_suspended': fleetVehicleSuspended,

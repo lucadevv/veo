@@ -271,6 +271,7 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'chat.message_sent': ['messageId', 'tripId', 'senderId', 'senderRole', 'createdAt'],
   // ── fleet ── (`ownerType`/`verdict` z.enum → SEGURO; `reason`/`documentType`/`make`/`model`/`plate` z.string LIBRE → FUERA)
   'fleet.document_expired': ['documentId', 'ownerType', 'ownerId', 'expiresAt', 'critical'], // documentType z.string LIBRE → FUERA
+  'fleet.document_rejected': ['documentId', 'ownerType', 'ownerId', 'rejectedAt'], // documentType z.string LIBRE → FUERA; reason no viaja en el evento
   'fleet.driver_suspended': ['driverId', 'userId', 'documentId', 'vehicleId', 'inspectionId', 'suspendedAt'], // reason+documentType LIBRES → FUERA
   'fleet.driver_reactivated': ['driverId', 'userId', 'vehicleId', 'inspectionId', 'documentId', 'reactivatedAt'], // reason+documentType LIBRES → FUERA
   'fleet.vehicle_suspended': ['vehicleId', 'suspendedAt'], // reason z.string LIBRE → FUERA
