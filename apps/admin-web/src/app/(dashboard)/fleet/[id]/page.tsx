@@ -77,10 +77,12 @@ function resultPill(result: string | null): { tone: PillTone; label: string } {
   return { tone: 'warn', label: 'Observada' };
 }
 
+// Mismo criterio que la lista de Vehículos: Suspendido solo por vigencia REAL (doc/ITV vencida); `!operable`
+// (sin ficha/docs) es "En revisión", no suspensión — un vehículo nuevo sin docs está en revisión de aptitud.
 function headerStatus(v: VehicleView): { tone: PillTone; label: string } {
-  if (!v.operable || v.status === DocStatus.EXPIRED || (v.itvHasInspection && !v.itvCurrent))
+  if (v.status === DocStatus.EXPIRED || (v.itvHasInspection && !v.itvCurrent))
     return { tone: 'danger', label: 'Suspendido' };
-  if (!v.itvHasInspection || v.status === DocStatus.EXPIRING_SOON)
+  if (!v.operable || !v.itvHasInspection || v.status === DocStatus.EXPIRING_SOON)
     return { tone: 'warn', label: 'En revisión' };
   return { tone: 'success', label: 'Activo' };
 }

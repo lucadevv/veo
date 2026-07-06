@@ -45,7 +45,6 @@ import {
   paginated,
   pendingDriver,
   driverCounts,
-  vehicleCounts,
   reviewQueueSummary,
   panicDetail,
   type ReplaceCatalogRequest,
@@ -72,7 +71,6 @@ export const qk = {
   driver: (id: string) => ['driver', id] as const,
   driversPending: ['drivers-pending'] as const,
   driversSummary: ['drivers-summary'] as const,
-  vehiclesSummary: ['vehicles-summary'] as const,
   reviewsSummary: ['reviews-summary'] as const,
   operators: ['operators'] as const,
   panics: (status: string) => ['panics', status] as const,
@@ -354,15 +352,6 @@ export function useDriversSummary() {
     queryKey: qk.driversSummary,
     queryFn: ({ signal }) =>
       apiClient().get('/ops/drivers/summary', { schema: driverCounts, signal }),
-  });
-}
-
-/** Conteo de vehículos por estado documental (valid/expiringSoon/expired) para los stat cards de la flota. */
-export function useVehiclesSummary() {
-  return useQuery({
-    queryKey: qk.vehiclesSummary,
-    queryFn: ({ signal }) =>
-      apiClient().get('/ops/vehicles/summary', { schema: vehicleCounts, signal }),
   });
 }
 

@@ -13,7 +13,7 @@ import {
   Lock,
   Search,
 } from 'lucide-react';
-import { useVehicles, useVehiclesSummary } from '@/lib/api/queries';
+import { useVehicles } from '@/lib/api/queries';
 import type { VehicleView } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -32,13 +32,26 @@ function daysUntil(iso: string | null): number | null {
 
 const DocStatus = { VALID: 'VALID', EXPIRING_SOON: 'EXPIRING_SOON', EXPIRED: 'EXPIRED' } as const;
 
-/** Estado DERIVADO del vehículo (suspensión = función de docs+ITV, no un flag stored). */
+/**
+ * Estado DERIVADO del vehículo (suspensión = función de docs+ITV, no un flag stored):
+ *  - Suspendido: hay un problema REAL de vigencia — documento vencido (docStatus EXPIRED) o ITV corrida y vencida.
+ *  - En revisión: le falta completar para operar (no operable = sin ficha/docs, sin ITV aún, o docs por vencer).
+ *    OJO: `!operable` NO es suspensión — un vehículo nuevo sin docs cargados está EN REVISIÓN, no suspendido.
+ *  - Activo: operable, docs vigentes e ITV vigente.
+ * Alinea la columna Estado con lo que la cola de Revisiones llama "revisión de aptitud" (no "suspendido").
+ */
 function estado(v: VehicleView): { key: 'activo' | 'enRevision' | 'suspendido'; label: string; tone: PillTone } {
-  if (!v.operable || v.status === DocStatus.EXPIRED || (v.itvHasInspection && !v.itvCurrent))
+  if (v.status === DocStatus.EXPIRED || (v.itvHasInspection && !v.itvCurrent))
     return { key: 'suspendido', label: 'Suspendido', tone: 'danger' };
-  if (!v.itvHasInspection || v.status === DocStatus.EXPIRING_SOON)
+  if (!v.operable || !v.itvHasInspection || v.status === DocStatus.EXPIRING_SOON)
     return { key: 'enRevision', label: 'En revisión', tone: 'warn' };
   return { key: 'activo', label: 'Activo', tone: 'success' };
+}
+
+/** ¿La ITV vigente vence dentro de la ventana (30 días)? Para la card + tab "ITV por vencer". */
+function itvExpiringSoon(v: VehicleView): boolean {
+  const d = daysUntil(v.itvNextDueAt);
+  return v.itvCurrent && d !== null && d >= 0 && d <= 30;
 }
 
 /** Pill de DOCUMENTOS (docStatus del vehículo). */
@@ -81,21 +94,29 @@ export default function VehiclesPage() {
   const [tab, setTab] = useState<Tab>('todos');
   const [search, setSearch] = useState('');
 
-  const summary = useVehiclesSummary();
   const vehicles = useVehicles();
 
+  // Todos los vehículos cargados. Cards + tab-counts + filas derivan de ESTE set con el MISMO estado() → la
+  // columna Estado, las cards y los badges de tab SIEMPRE coinciden (antes las cards usaban docStatus del BFF y
+  // la fila usaba `operable` → se contradecían: "Activos 2" con las 2 filas en "Suspendido").
+  const all = useMemo<VehicleView[]>(
+    () => vehicles.data?.pages.flatMap((p) => p.items) ?? [],
+    [vehicles.data],
+  );
+
+  const matchesTab = (v: VehicleView, t: Tab): boolean => {
+    if (t === 'todos') return true;
+    if (t === 'itvPorVencer') return itvExpiringSoon(v);
+    const st = estado(v).key;
+    return (
+      (t === 'activos' && st === 'activo') ||
+      (t === 'enRevision' && st === 'enRevision') ||
+      (t === 'suspendidos' && st === 'suspendido')
+    );
+  };
+
   const rows = useMemo<VehicleView[]>(() => {
-    const all = vehicles.data?.pages.flatMap((p) => p.items) ?? [];
-    const byTab = all.filter((v) => {
-      if (tab === 'todos') return true;
-      const st = estado(v).key;
-      if (tab === 'activos') return st === 'activo';
-      if (tab === 'enRevision') return st === 'enRevision';
-      if (tab === 'suspendidos') return st === 'suspendido';
-      // itvPorVencer: ITV vigente que vence en ≤30 días.
-      const d = daysUntil(v.itvNextDueAt);
-      return v.itvCurrent && d !== null && d <= 30;
-    });
+    const byTab = all.filter((v) => matchesTab(v, tab));
     const q = search.trim().toLowerCase();
     return q
       ? byTab.filter(
@@ -105,10 +126,19 @@ export default function VehiclesPage() {
             `${v.brand} ${v.model}`.toLowerCase().includes(q),
         )
       : byTab;
-  }, [vehicles.data, tab, search]);
+  }, [all, tab, search]);
 
-  const c = summary.data;
-  const total = c ? c.valid + c.expiringSoon + c.expired : undefined;
+  const cards = useMemo(
+    () => ({
+      total: all.length,
+      activos: all.filter((v) => estado(v).key === 'activo').length,
+      itvPorVencer: all.filter(itvExpiringSoon).length,
+      suspendidos: all.filter((v) => estado(v).key === 'suspendido').length,
+    }),
+    [all],
+  );
+
+  const tabCount = (t: Tab): number => all.filter((v) => matchesTab(v, t)).length;
 
   if (!can(user, 'fleet:view')) {
     return (
@@ -138,12 +168,12 @@ export default function VehiclesPage() {
         </button>
       </div>
 
-      {/* Stat cards (suspensión derivada: Activos≈docs vigentes, Suspendidos≈docs vencidos) */}
+      {/* Stat cards — derivados del MISMO estado() que las filas (suspensión = función de docs+ITV). */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard icon={Car} label="Total en flota" value={String(total ?? 0)} hint="Vehículos registrados" loading={summary.isLoading} />
-        <StatCard icon={CircleCheck} label="Activos" value={String(c?.valid ?? 0)} hint="Papeles vigentes" hintTone="success" loading={summary.isLoading} />
-        <StatCard icon={CalendarClock} label="ITV por vencer" value={String(c?.expiringSoon ?? 0)} hint="Próximos 30 días" hintTone="warn" loading={summary.isLoading} />
-        <StatCard icon={Ban} label="Suspendidos" value={String(c?.expired ?? 0)} hint="Doc / ITV vencida" hintTone="danger" loading={summary.isLoading} />
+        <StatCard icon={Car} label="Total en flota" value={String(cards.total)} hint="Vehículos registrados" loading={vehicles.isLoading} />
+        <StatCard icon={CircleCheck} label="Activos" value={String(cards.activos)} hint="Operables · vigentes" hintTone="success" loading={vehicles.isLoading} />
+        <StatCard icon={CalendarClock} label="ITV por vencer" value={String(cards.itvPorVencer)} hint="Próximos 30 días" hintTone="warn" loading={vehicles.isLoading} />
+        <StatCard icon={Ban} label="Suspendidos" value={String(cards.suspendidos)} hint="Doc / ITV vencida" hintTone="danger" loading={vehicles.isLoading} />
       </div>
 
       {/* Toolbar */}
@@ -151,16 +181,24 @@ export default function VehiclesPage() {
         <div className="inline-flex gap-[3px] rounded-md border border-border bg-surface p-1">
           {TABS.map(({ key, label }) => {
             const active = tab === key;
+            const n = tabCount(key);
             return (
               <button
                 key={key}
                 type="button"
                 onClick={() => setTab(key)}
-                className={`inline-flex items-center rounded-sm px-3 py-[7px] text-[13px] font-semibold transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-sm px-3 py-[7px] text-[13px] font-semibold transition-colors ${
                   active ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:text-ink'
                 }`}
               >
                 {label}
+                <span
+                  className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1.5 font-mono text-[11px] font-bold ${
+                    active ? 'bg-accent text-white' : 'bg-surface-2 text-ink-subtle'
+                  }`}
+                >
+                  {n}
+                </span>
               </button>
             );
           })}
