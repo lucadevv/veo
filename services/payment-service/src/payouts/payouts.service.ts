@@ -38,6 +38,8 @@ import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
+/** Motivo de retención de un payout por conductor en review (driver.flagged). Único valor, sin string mágico. */
+const HELD_REASON_REVIEW = 'driver_in_review';
 const CRON_LOCK_KEY = 'veo:payment:lock:weekly-payouts';
 const CRON_LOCK_TTL_SECONDS = 600;
 const STEPUP_MAX_AGE_SECONDS = 300;
@@ -296,7 +298,7 @@ export class PayoutsService {
               // ADR-015 §3: el cron ya NO nace PROCESSED. PENDING (a la espera del disparo del operador) o
               // HELD (review en curso). PROCESSED se alcanza SOLO cuando el riel confirma la salida del dinero.
               status: flagged ? 'HELD' : 'PENDING',
-              heldReason: flagged ? 'driver_in_review' : null,
+              heldReason: flagged ? HELD_REASON_REVIEW : null,
               processedAt: null,
             },
           });
@@ -354,13 +356,30 @@ export class PayoutsService {
       where: { periodStart: start, periodEnd: end, status: PayoutStatus.PENDING },
       orderBy: { id: 'asc' },
     });
-    const projectedTotal = pendingPayouts.reduce((sum, p) => sum + p.amountCents, 0);
+    // BACKSTOP DEL GATE DE REVIEW (fix crítico · último punto antes del money-out): re-consulta el set FLAGGED en
+    // el MOMENTO del desembolso. Aunque holdDriver ya retro-flippea, esto cierra la ventana entre ese flip y el
+    // disparo manual del operador (días): un `driver.flagged` que llegó en el ínterin RETIENE el PENDING (→HELD,
+    // transición válida) en vez de pagarlo. UN solo smembers + un updateMany batch (no N sismember por payout).
+    const flaggedIds = new Set(await this.redis.smembers(FLAGGED_DRIVERS_KEY));
+    const toHold = pendingPayouts.filter((p) => flaggedIds.has(p.driverId));
+    const toDisburse = pendingPayouts.filter((p) => !flaggedIds.has(p.driverId));
+    if (toHold.length > 0) {
+      await this.prisma.write.payout.updateMany({
+        where: { id: { in: toHold.map((p) => p.id) }, status: PayoutStatus.PENDING },
+        data: { status: PayoutStatus.HELD, heldReason: HELD_REASON_REVIEW },
+      });
+      this.logger.warn(
+        `Retenidos ${toHold.length} payout(s) por review tardío (driver.flagged post-agregación) en ${periodLabel(start, end)} — NO desembolsados`,
+      );
+    }
+    // El step-up MFA se evalúa sobre el total REAL a desembolsar (ya sin los retenidos), no sobre el bruto.
+    const projectedTotal = toDisburse.reduce((sum, p) => sum + p.amountCents, 0);
     if (operator && projectedTotal > this.stepUpCents && !this.hasFreshMfa(operator)) {
       throw new ForbiddenError(
         `Desembolsar ${projectedTotal} céntimos supera S/5000: requiere verificación MFA fresca (step-up)`,
       );
     }
-    return this.disburseEach(pendingPayouts);
+    return this.disburseEach(toDisburse);
   }
 
   /**
@@ -660,6 +679,16 @@ export class PayoutsService {
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */
   async holdDriver(driverId: string): Promise<void> {
     await this.redis.sadd(FLAGGED_DRIVERS_KEY, driverId);
+    // RETRO-HOLD (fix crítico): flippea a HELD los Payout PENDING YA existentes del conductor. Un `driver.flagged`
+    // que llega DESPUÉS de la agregación del cron encuentra el Payout ya nacido PENDING; sin este paso, el `sadd`
+    // solo evita que los FUTUROS payouts nazcan HELD, pero el PENDING vigente se desembolsaría igual al conductor
+    // en review. CAS por-fila `status: PENDING` (transición PENDING→HELD válida · idempotente: no toca PROCESSING/
+    // PROCESSED). Se liberan por el camino de vuelta (release) cuando el review se resuelve. El desembolso además
+    // re-chequea el set (doble defensa: cierra la ventana entre este flip y el disparo manual del operador).
+    await this.prisma.write.payout.updateMany({
+      where: { driverId, status: PayoutStatus.PENDING },
+      data: { status: PayoutStatus.HELD, heldReason: HELD_REASON_REVIEW },
+    });
   }
 
   /**
