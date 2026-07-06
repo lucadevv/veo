@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, X } from 'lucide-react';
+import { AlertTriangle, Check, ShieldCheck, X } from 'lucide-react';
 import { useDriverDecision } from '@/lib/api/queries';
 import type { PendingDriver } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
@@ -34,9 +34,10 @@ export function PendingDriverActions({ driver }: { driver: PendingDriver }) {
             Aprobar
           </Button>
         }
-        title="Aprobar conductor"
-        description={`Habilitás al conductor ${driver.id.slice(0, 8)} para operar. Acción sensible: requiere tu MFA.`}
-        confirmLabel="Aprobar"
+        title="Confirmá tu identidad"
+        icon={ShieldCheck}
+        description={`Aprobar conductor ${driver.id.slice(0, 8)} · acción sensible. Ingresá el código de tu app (TOTP); la aprobación exige verificación fresca (BR-S07).`}
+        confirmLabel="Confirmar aprobación"
         onVerified={async () => {
           await decision.mutateAsync({ id: driver.id, decision: 'approve' });
           toast({ tone: 'success', title: 'Conductor aprobado' });
@@ -51,8 +52,9 @@ export function PendingDriverActions({ driver }: { driver: PendingDriver }) {
             Rechazar
           </Button>
         }
-        title="Rechazar conductor"
-        description={`Se rechazará al conductor ${driver.id.slice(0, 8)}. El motivo se le mostrará para corregir y reenviar. Requiere tu MFA. Queda auditado.`}
+        title="Rechazar alta"
+        icon={AlertTriangle}
+        description={`El conductor ${driver.id.slice(0, 8)} recibirá el motivo, podrá corregir y reenviar a revisión. Requiere tu MFA. Queda auditado.`}
         confirmLabel="Rechazar alta"
         confirmVariant="danger"
         withReason

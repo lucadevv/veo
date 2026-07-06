@@ -2,7 +2,18 @@
 
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Car, Check, Circle, Lock, ScanFace, Trash2, Unlock, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Car,
+  Check,
+  Circle,
+  Lock,
+  ScanFace,
+  ShieldCheck,
+  Trash2,
+  Unlock,
+  X,
+} from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import type { DriverDetail } from '@veo/api-client';
 import {
@@ -66,7 +77,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
       <PageHeader
         title={driver?.fullName ?? `Conductor ${id.slice(0, 8)}`}
         breadcrumbs={[
-          { label: 'Operación' },
+          { label: 'Flota' },
           { label: 'Conductores', href: '/ops/drivers' },
           { label: id.slice(0, 8) },
         ]}
@@ -622,8 +633,9 @@ function ApprovalBar({
                   Rechazar
                 </Button>
               }
-              title="Rechazar conductor"
-              description="El conductor verá el motivo para corregir y reenviar. Acción sensible: requiere tu MFA. Queda auditada."
+              title="Rechazar alta"
+              icon={AlertTriangle}
+              description="El conductor recibirá el motivo, podrá corregir y reenviar a revisión. Requiere tu MFA (BR-S07)."
               confirmLabel="Rechazar alta"
               confirmVariant="danger"
               withReason
@@ -643,9 +655,10 @@ function ApprovalBar({
                   Aprobar conductor
                 </Button>
               }
-              title="Aprobar conductor"
-              description="Habilitás al conductor para operar. Acción sensible: requiere tu MFA. El servidor revalida documentos + ITV."
-              confirmLabel="Aprobar"
+              title="Confirmá tu identidad"
+              icon={ShieldCheck}
+              description="Aprobar conductor · acción sensible. Ingresá el código de tu app (TOTP); la aprobación exige verificación fresca (BR-S07). El servidor revalida documentos + ITV."
+              confirmLabel="Confirmar aprobación"
               onVerified={async () => {
                 await decision.mutateAsync({ id: driver.id, decision: 'approve' });
                 toast({ tone: 'success', title: 'Conductor aprobado' });

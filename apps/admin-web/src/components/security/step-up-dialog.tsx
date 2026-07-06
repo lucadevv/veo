@@ -1,11 +1,11 @@
 'use client';
 
 import { cloneElement, isValidElement, useState, type MouseEventHandler } from 'react';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, type LucideIcon } from 'lucide-react';
 import { stepUp } from '@/lib/api/auth';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
+import { OtpInput } from '@/components/ui/otp-input';
 import {
   Dialog,
   DialogClose,
@@ -21,6 +21,8 @@ interface StepUpDialogProps {
   trigger: React.ReactNode;
   title?: string;
   description?: string;
+  /** Ícono del encabezado (default KeyRound). Los frames usan shield-check (aprobar) / triangle-alert (rechazar). */
+  icon?: LucideIcon;
   /** Botón de confirmar (default "Verificar"). El de un rechazo/borrado conviene nombrarlo con el verbo. */
   confirmLabel?: string;
   /** Variante del botón de confirmar (danger para rechazos/borrados). */
@@ -44,6 +46,7 @@ export function StepUpDialog({
   trigger,
   title = 'Verificación adicional requerida',
   description = 'Esta acción accede a datos sensibles. Ingresa tu código TOTP para continuar.',
+  icon: Icon = KeyRound,
   confirmLabel = 'Verificar',
   confirmVariant = 'primary',
   withReason = false,
@@ -98,7 +101,7 @@ export function StepUpDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="size-5 text-accent" aria-hidden />
+            <Icon className="size-5 text-accent" aria-hidden />
             {title}
           </DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -115,16 +118,8 @@ export function StepUpDialog({
           </Field>
         ) : null}
         {isProd ? (
-          <Field label="Código TOTP" error={error ?? undefined}>
-            <Input
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={8}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-              className="text-center font-mono text-lg tracking-[0.4em]"
-              placeholder="••••••"
-            />
+          <Field label="Código de 6 dígitos" error={error ?? undefined}>
+            <OtpInput value={code} onChange={setCode} length={6} autoFocus={!withReason} />
           </Field>
         ) : error ? (
           <p className="text-sm text-danger">{error}</p>

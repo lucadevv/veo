@@ -1,6 +1,6 @@
 'use client';
 
-import { Check } from 'lucide-react';
+import { Check, ShieldCheck } from 'lucide-react';
 import type { DriverApproval } from '@/lib/api/schemas';
 import { useDriverDecision } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
@@ -32,9 +32,10 @@ export function RejectedDriverActions({ driver }: { driver: DriverApproval }) {
           Re-aprobar
         </Button>
       }
-      title="Re-aprobar conductor"
-      description={`Se reactivará al conductor ${driver.id.slice(0, 8)} (antecedentes CLEARED). Acción sensible: requiere tu MFA. Queda auditada.`}
-      confirmLabel="Re-aprobar"
+      title="Confirmá tu identidad"
+      icon={ShieldCheck}
+      description={`Re-aprobar al conductor ${driver.id.slice(0, 8)} (antecedentes CLEARED) · acción sensible. Ingresá tu código TOTP (BR-S07). Queda auditada.`}
+      confirmLabel="Confirmar aprobación"
       onVerified={async () => {
         await decision.mutateAsync({ id: driver.id, decision: 'approve' });
         toast({ tone: 'success', title: 'Conductor re-aprobado' });
