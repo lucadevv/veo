@@ -4,6 +4,8 @@
  *
  * Cobertura actual (eventos definidos en @veo/events · EVENT_SCHEMAS):
  *  - Identidad/KYC: user.registered, user.email_verified, user.kyc_verified, driver.verified, biometric.failed
+ *  - Sesión de turno: driver.went_online (apertura) + driver.went_offline·shift_end (cierre deliberado); la
+ *                   rama disconnect NO se audita (caída de socket best-effort, ruido de red — ver auditedWhen)
  *  - Derecho al olvido (BR-S06): user.deletion_requested, user.deleted, trip.pii_erased
  *  - Pánico:        panic.triggered, panic.acknowledged, panic.resolved
  *  - Pagos:         payment.captured, payment.failed, payment.refunded (plata que vuelve al pasajero),
@@ -26,6 +28,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   topicForEvent,
   EVENT_SCHEMAS,
+  DRIVER_OFFLINE_REASON,
   type EventType,
   type EventPayload,
   type EventHandler,
@@ -110,6 +113,21 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'driver',
         resourceId: p.driverId,
       })),
+      // APERTURA de la sesión de turno (OFFLINE→AVAILABLE, ya pasado el gate biométrico): mutación deliberada
+      // → WORM. Par de apertura del ciclo de sesión. actor=recurso=driverId (el sujeto que abrió su turno).
+      'driver.went_online': this.audited('driver.went_online', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'driver',
+        resourceId: p.driverId,
+      })),
+      // CIERRE de la sesión: audita SOLO la rama shift_end (fin de turno DELIBERADO · Ley 29733 "toda mutación").
+      // La rama disconnect (caída de socket, best-effort, se dispara por reconexiones) NO es una mutación de
+      // negocio deliberada → se ignora (no-op) para no ensuciar la cadena de custodia con ruido de red.
+      'driver.went_offline': this.auditedWhen(
+        'driver.went_offline',
+        (p) => p.reason === DRIVER_OFFLINE_REASON.SHIFT_END,
+        (p) => ({ actorId: p.driverId, resourceType: 'driver', resourceId: p.driverId }),
+      ),
       'biometric.failed': this.audited('biometric.failed', (p) => ({
         actorId: p.driverId,
         resourceType: 'driver',
@@ -759,14 +777,12 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       //     millones de eslabones de hash sin valor forense, degradando el append serializado (advisory lock global).
       //   · driver.entered_zone      — geofence de alta frecuencia por conductor; señal de tracking de dispatch,
       //     no un cambio de estado de negocio. Mismo problema de volumen/ruido que el ping de ubicación.
-      //   · driver.went_offline      — DEUDA: excluido TEMPORALMENTE, NO definitivo. VEO_SPEC_ADMIN exige "auditar
-      //     TODA mutación" y la rama `shift_end` (el conductor cierra turno a propósito) ES una mutación deliberada
-      //     que DEBE ir al WORM. Hoy el evento mezcla `shift_end` (identity, outbox) con `disconnect` (driver-bff,
-      //     best-effort SIN outbox, firehose-adjacent que se dispara seguido por reconexiones) en un solo tipo, y no
-      //     tiene par `went_online` → auditar la mitad OFFLINE mezclada no da cadena de custodia limpia.
-      //     DEUDA: auditar la rama shift_end del offline del conductor (traza WORM de fin de turno). · techo: mientras
-      //     el evento mezcle shift_end+disconnect en un solo tipo sin par went_online. · gatillo: separar las ramas
-      //     (o agregar went_online) → auditar shift_end con actor=driverId, resource=driver, projection [driverId,reason,at].
+      //   · driver.went_offline      — DEUDA CERRADA: ahora SÍ se audita, pero SOLO la rama `shift_end` (fin de
+      //     turno deliberado · mutación de negocio) vía `auditedWhen`. La rama `disconnect` (caída de socket,
+      //     best-effort, se dispara por reconexiones) sigue SIN auditarse — no es una mutación de negocio, es
+      //     ruido de red — pero se descarta como no-op explícito en el handler, no por exclusión del map. Se
+      //     agregó el par de apertura `driver.went_online` (identity, outbox en la tx del CAS→AVAILABLE) que
+      //     completa el ciclo de sesión en el WORM. Ver los handlers driver.went_online/went_offline arriba.
       //
       //  NO ES UNA MUTACIÓN DE NEGOCIO AUDITABLE:
       //   · audit.recorded — lo EMITE este propio servicio (señal de que se grabó un eslabón); auditarlo sería un
@@ -782,9 +798,24 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
     type: T,
     map: (payload: EventPayload<T>) => EventAuditMapping,
   ): EventHandler {
+    return this.auditedWhen(type, () => true, map);
+  }
+
+  /**
+   * Como `audited`, pero SOLO graba cuando `when(payload)` es true; si no, es un no-op (ack limpio, sin escribir
+   * al WORM). Para eventos que MEZCLAN una rama deliberada-auditable con otra de ruido best-effort en un mismo
+   * tipo: p. ej. `driver.went_offline` audita `reason=shift_end` (fin de turno deliberado · Ley 29733) e ignora
+   * `reason=disconnect` (caída de socket, no una mutación de negocio). Evita ensuciar la cadena de custodia.
+   */
+  private auditedWhen<T extends EventType>(
+    type: T,
+    when: (payload: EventPayload<T>) => boolean,
+    map: (payload: EventPayload<T>) => EventAuditMapping,
+  ): EventHandler {
     const schema = EVENT_SCHEMAS[type];
     return async (envelope) => {
       const payload = schema.parse(envelope.payload) as EventPayload<T>;
+      if (!when(payload)) return;
       try {
         await this.audit.recordFromEvent(envelope, topicForEvent(type), map(payload));
       } catch (err) {

@@ -4,7 +4,6 @@ import { Providers } from '@/components/providers';
 import { SessionProvider } from '@/lib/session-context';
 import { OpsRealtimeProvider } from '@/lib/realtime/ops-provider';
 import { Sidebar } from '@/components/layout/sidebar';
-import { Topbar } from '@/components/layout/topbar';
 import { PanicBanner } from '@/components/security/panic-banner';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +24,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <div className="flex h-screen overflow-hidden bg-bg">
             <Sidebar />
             <div className="flex min-w-0 flex-1 flex-col">
-              <Topbar />
               <PanicBanner />
               <main className="flex-1 overflow-y-auto">{children}</main>
             </div>

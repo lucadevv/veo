@@ -59,6 +59,11 @@ export interface DriverListEnrichment {
   phone: string | null;
   suspendedAt: string | null;
   suspensionCauses: SuspensionCause[];
+  /** Completitud documental (docs REQUERIDOS en VALID / total · fleet batch). No es PII → para todos los roles. */
+  docsComplete: number;
+  docsTotal: number;
+  /** Estado combinado de verificación biométrica (VERIFICADO/REVISAR/PENDIENTE); null si sub-Compliance (redactado). */
+  verificationStatus: string | null;
 }
 
 /**
@@ -98,6 +103,11 @@ export function driverRecordToApproval(
     // CAUSAS de suspensión (autoridad: identity · modelo de HOLDS) para la UI cause-aware de reactivación.
     // Sin enriquecimiento (página vacía no debería darse) → [] honesto, nunca se inventa.
     suspensionCauses: enrichment?.suspensionCauses ?? [],
+    // Completitud documental (fleet batch) + verificación (identity batch). Sin enriquecimiento → 0/0 y null
+    // (degradación honesta, nunca se inventa). verificationStatus ya viene redactado a null para sub-Compliance.
+    docsComplete: enrichment?.docsComplete ?? 0,
+    docsTotal: enrichment?.docsTotal ?? 0,
+    verificationStatus: enrichment?.verificationStatus ?? null,
   };
 }
 

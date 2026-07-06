@@ -168,7 +168,7 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(paymentFindMany).toHaveBeenCalledTimes(2);
   });
 
-  it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markFailed kind-aware)', async () => {
+  it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markDebt kind-aware)', async () => {
     const tip: Row = {
       id: 'tip-x', tripId: 'trip-1', kind: 'TIP', status: 'PENDING', method: 'YAPE',
       amountCents: 500, tipCents: 500, driverId: 'drv-1',
@@ -198,6 +198,47 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(txSpy).not.toHaveBeenCalled(); // el tip NO pasa por la tx que emite payment.failed → no alerta seguridad
   });
 
+  it('FARE que EXPIRA (checkout de un viaje COMPLETADO) → DEBT, NO FAILED terminal: gatea + reintentable (no viaje gratis)', async () => {
+    const fare: Row = {
+      id: 'fare-x', tripId: 'trip-1', kind: 'FARE', status: 'PENDING', method: 'YAPE',
+      amountCents: 5000, driverId: 'drv-1',
+    };
+    const updates: Row[] = [];
+    const outbox: { eventType: string }[] = [];
+    const prisma = {
+      read: { payment: { findUnique: vi.fn(async () => fare) } },
+      write: {
+        payment: { update: vi.fn() },
+        // markDebt (no-TIP) usa $transaction: update a DEBT + enqueueOutbox(payment.failed).
+        $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({
+            payment: {
+              update: vi.fn(async ({ data }: { data: Row }) => {
+                updates.push(data);
+                return { ...fare, ...data };
+              }),
+            },
+            outboxEvent: {
+              create: vi.fn(async ({ data }: { data: { eventType: string } }) => {
+                outbox.push(data);
+                return data;
+              }),
+            },
+          }),
+        ),
+      },
+    };
+    const svc = new PaymentsService(
+      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+    );
+    const out = await svc.applyWebhookResult({
+      paymentId: 'fare-x', externalUid: 'uid-x', status: 'EXPIRED',
+    });
+    expect(out.status).toBe('DEBT'); // NO 'FAILED' terminal → el viaje NO queda gratis
+    expect(updates[0]!.status).toBe('DEBT'); // el pago queda en DEBT: gatea al pasajero + reintentable
+    expect(outbox.map((o) => o.eventType)).toContain('payment.failed'); // willRetry=false → bloquea nuevos viajes
+  });
+
   it('earningsForDriver: la propina suma en tipCents pero NO cuenta como viaje (tripCount solo FARE)', async () => {
     const rows = [
       { grossCents: 2000, commissionCents: 400, tipCents: 0, kind: 'FARE' },
@@ -212,4 +253,32 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(out.netCents).toBe(2000 - 400 + 300);
     expect(out.tripCount).toBe(1); // pero NO como un viaje extra
   });
+});
+
+describe('applyWebhookResult · idempotente sobre pagos YA LIQUIDADOS (no loop de re-entrega no-2xx)', () => {
+  const svcFor = (status: string) => {
+    const payment: Row = {
+      id: 'p-x', tripId: 'trip-1', kind: 'FARE', status, method: 'YAPE', amountCents: 5000,
+    };
+    const write = { payment: { update: vi.fn() }, $transaction: vi.fn() };
+    const prisma = { read: { payment: { findUnique: vi.fn(async () => payment) } }, write };
+    const svc = new PaymentsService(
+      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+    );
+    return { svc, write };
+  };
+
+  for (const settled of ['REFUNDED', 'PARTIALLY_REFUNDED'] as const) {
+    for (const hook of ['CONFIRMED', 'DECLINED', 'EXPIRED'] as const) {
+      it(`${hook} sobre un pago ${settled} → no-op idempotente (NO InvalidStateError, sin escrituras)`, async () => {
+        const { svc, write } = svcFor(settled);
+        const out = await svc.applyWebhookResult({ paymentId: 'p-x', externalUid: 'uid', status: hook });
+        // Antes PARTIALLY_REFUNDED (y REFUNDED en CONFIRMED) caía a captureSuccess/markDebt → assertTransition
+        // lanzaba InvalidStateError (loop del proveedor). Ahora es un no-op limpio, sin tocar la DB.
+        expect(out).toEqual({ applied: false, status: settled });
+        expect(write.payment.update).not.toHaveBeenCalled();
+        expect(write.$transaction).not.toHaveBeenCalled();
+      });
+    }
+  }
 });

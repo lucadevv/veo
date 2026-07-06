@@ -39,6 +39,8 @@ export interface DriverPaymentsPurgeView {
   userId: string;
   byDriverId: {
     cancellationPenalties: number;
+    driverCredits: number;
+    driverDebts: number;
     incentiveProgress: number;
     incentiveTripCredits: number;
     payments: number;
@@ -84,6 +86,12 @@ export class DriverPaymentsService {
           ? await tx.tipAddition.deleteMany({ where: { paymentId: { in: paymentIds } } })
           : { count: 0 };
 
+      // DriverDebt y su gemela DriverCredit referencian un payment por soft-ref (paymentId / sourcePaymentId) →
+      // se borran ANTES de los payments. Ambas se purgan para no dejar filas huérfanas (invariante "sin
+      // huérfanos" del borrado de prueba DEV). DriverCredit se agregó con el credit-back (A2) — sin esto quedaba
+      // el MISMO hueco que DriverDebt tenía antes.
+      const driverDebts = await tx.driverDebt.deleteMany({ where: { driverId } });
+      const driverCredits = await tx.driverCredit.deleteMany({ where: { driverId } });
       const payments = await tx.payment.deleteMany({ where: { driverId } });
       const payouts = await tx.payout.deleteMany({ where: { driverId } });
       const cancellationPenalties = await tx.cancellationPenalty.deleteMany({
@@ -104,6 +112,8 @@ export class DriverPaymentsService {
         userId,
         byDriverId: {
           cancellationPenalties: cancellationPenalties.count,
+          driverCredits: driverCredits.count,
+          driverDebts: driverDebts.count,
           incentiveProgress: incentiveProgress.count,
           incentiveTripCredits: incentiveTripCredits.count,
           payments: payments.count,

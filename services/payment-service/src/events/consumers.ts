@@ -150,7 +150,20 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
       try {
         await this.incentives.creditTrip(driverId, tripId);
       } catch (err) {
-        this.logger.error({ err }, `Falló acreditar incentivos del viaje ${tripId}`);
+        // Mismo trato que el cobro de arriba: un error PERMANENTE de datos (ids malformados) nunca va a procesar
+        // → log + seguir (no reintegrar el pago ya capturado). Uno TRANSITORIO (DB caída/deadlock/timeout) se
+        // RE-LANZA para que Kafka reintente el evento — sin esto el crédito de incentivo del viaje se PERDÍA en
+        // silencio (el evento se ACKeaba igual). creditTrip es idempotente por viaje → reintentar no duplica (ni
+        // re-cobra: la captura de arriba también es idempotente).
+        if (isPermanentDataError(err)) {
+          this.logger.error(
+            { err },
+            `POISON incentivos: error permanente al acreditar el viaje ${tripId}; se salta`,
+          );
+        } else {
+          this.logger.error({ err }, `Falló acreditar incentivos del viaje ${tripId}; se reintenta`);
+          throw err;
+        }
       }
     }
   }

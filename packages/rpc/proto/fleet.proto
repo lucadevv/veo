@@ -20,10 +20,76 @@ service FleetService {
   // Vigencia de la inspección técnica (ITV) del vehículo OPERADO del conductor. `id` = User.id (NO el
   // driverId de perfil): los vehículos se indexan por Vehicle.driver_id = User.id. Gate de aprobación.
   rpc GetDriverInspectionStatus (GetByIdRequest) returns (DriverInspectionStatusReply);
+  // Conteo de vehículos por estado documental (docStatus), para los stat cards del panel admin (embudo de
+  // vigencia documental de la flota). Agregado con groupBy en la réplica de lectura; sin PII, solo enteros.
+  rpc GetVehicleCounts (GetVehicleCountsRequest) returns (VehicleCountsReply);
+  // Conteo de las COLAS DE REVISIÓN de flota (docs por revisar, docs por vencer, modelos por curar), para la
+  // cola unificada de Revisiones del panel admin. Cuentas agregadas en la réplica de lectura; sin PII.
+  rpc GetReviewQueueCounts (GetReviewQueueCountsRequest) returns (ReviewQueueCountsReply);
+  // Completitud documental de VARIOS conductores en UNA llamada (anti-N+1), para la columna "Documentos X/Y"
+  // + el embudo (sin docs / listos) del panel. `ids` = Driver.id (los docs DRIVER-scoped se indexan por
+  // ownerId=Driver.id). Devuelve, por cada id, cuántos REQUERIDOS están en estado VALID sobre el total. Sin PII.
+  rpc GetDriverDocsCompleteness (GetByIdsRequest) returns (DriverDocsCompletenessReply);
+  // Estado de ITV de VARIOS vehículos en UNA llamada (anti-N+1), para la columna "ITV" de la lista de vehículos.
+  // `ids` = Vehicle.id. Devuelve, por vehículo, la ÚLTIMA inspección: vigente (passed && no vencida), nextDueAt
+  // y el motivo de invalidez. Sin PII (fechas + booleanos).
+  rpc GetVehiclesInspectionStatus (GetByIdsRequest) returns (VehiclesInspectionStatusReply);
+  // Documentos de UN vehículo (ownerType=VEHICLE), con imágenes firmadas, para el detalle del vehículo. `id` =
+  // Vehicle.id. Espejo de GetDriverDocuments pero owner=VEHICLE.
+  rpc GetVehicleDocuments (GetByIdRequest) returns (DriverDocumentsReply);
 }
 
 message GetByIdRequest {
   string id = 1;
+}
+
+// Request vacío del conteo global de vehículos (sin filtros; el scoping lo da el gate de identidad interna).
+message GetVehicleCountsRequest {}
+
+// Conteo de vehículos por docStatus (VALID/EXPIRING_SOON/EXPIRED). proto3 default 0 si no hay filas del estado.
+message VehicleCountsReply {
+  int32 valid = 1;
+  int32 expiring_soon = 2;
+  int32 expired = 3;
+}
+
+// Completitud documental de un conductor: cuántos docs REQUERIDOS están en estado VALID sobre el total.
+message DriverDocsCompleteness {
+  string driver_id = 1;
+  int32 valid_required = 2;
+  int32 required_total = 3;
+}
+
+// Reply batch de GetDriverDocsCompleteness. Un item por cada id pedido (orden libre; el consumidor mapea por id).
+message DriverDocsCompletenessReply {
+  repeated DriverDocsCompleteness items = 1;
+}
+
+// Estado de ITV de UN vehículo (última inspección). `current` = passed && no vencida. next_due_at "" si no hay
+// inspección. invalid_reason: NONE | NOT_PASSED | OVERDUE | "" (cuando current=true o sin inspección).
+message VehicleInspectionStatus {
+  string vehicle_id = 1;
+  bool has_inspection = 2;
+  bool current = 3;
+  bool passed = 4;
+  string next_due_at = 5;
+  string invalid_reason = 6;
+}
+
+// Reply batch de GetVehiclesInspectionStatus. Un item por vehículo pedido (orden libre; se mapea por vehicle_id).
+message VehiclesInspectionStatusReply {
+  repeated VehicleInspectionStatus items = 1;
+}
+
+// Request vacío del conteo de las colas de revisión de flota.
+message GetReviewQueueCountsRequest {}
+
+// Conteo de las colas de revisión de flota: documentos por revisar (PENDING_REVIEW), documentos por vencer
+// (EXPIRING_SOON) y modelos de vehículo por curar (PENDING_REVIEW). proto3 default 0 si la cola está vacía.
+message ReviewQueueCountsReply {
+  int32 docs_pending_review = 1;
+  int32 docs_expiring_soon = 2;
+  int32 models_pending_review = 3;
 }
 
 message GetByIdsRequest {

@@ -9,12 +9,23 @@ import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, InternalAudience, type InternalIdentity } from '@veo/auth';
 import { DniFaceMatchStatus, PassiveLivenessStatus } from '@veo/shared-types';
+import { BackgroundCheckStatus } from '../generated/prisma';
 import { PrismaService } from '../infra/prisma.service';
 import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
+}
+/** identity.GetDriverCounts — conteos de conductores por backgroundCheckStatus (stat cards del admin). */
+interface DriverCountsReply {
+  pending: number;
+  cleared: number;
+  rejected: number;
+}
+/** identity.GetUsersByIds — batch de users por User.id (nombre del conductor en la lista de vehículos). */
+interface UsersByIdsReply {
+  users: UserReply[];
 }
 interface UserReply {
   id: string;
@@ -156,6 +167,12 @@ const GRPC_METHOD_AUDIENCES = {
   //    era admin-bff; al cablearse booking (service-rail) la búsqueda caía fail-closed → resultados vacíos.
   // Mínimo privilegio: NO se abre a public-rail ni driver-rail (no son callers legítimos del batch).
   GetDriversByIds: [InternalAudience.ADMIN_RAIL, InternalAudience.SERVICE_RAIL],
+  // BATCH de USERS por User.id (resolver nombre del conductor en la lista de vehículos, donde solo hay User.id).
+  // SOLO admin-bff (ADMIN_RAIL). El reply NO trae PII sensible (name/phone del user, no descifra DNI).
+  GetUsersByIds: [InternalAudience.ADMIN_RAIL],
+  // Conteo agregado de conductores por estado (stat cards del panel). SOLO admin-bff (ADMIN_RAIL): es un
+  // dato de gestión del operador, no lo consume ningún servicio interno. Sin PII (solo enteros).
+  GetDriverCounts: [InternalAudience.ADMIN_RAIL],
 } as const satisfies Record<string, readonly InternalAudience[]>;
 
 type GrpcMethodName = keyof typeof GRPC_METHOD_AUDIENCES;
@@ -290,7 +307,57 @@ export class IdentityGrpcController {
     // SOLO name/phone de este reply (jamás documentId), así que descifrar acá sería over-decryption de PII y
     // —peor— una fila con ciphertext corrupto/de-otra-clave tumbaría la página ENTERA de conductores. El DNI
     // se descifra únicamente en el GetDriver single (detalle Compliance+).
-    return { drivers: drivers.map((d) => this.toDriverReply(d)) };
+    // includeSensitivePii=false (NO se descifra el DNI en el batch — protección de la superficie de crash),
+    // includeVerificationStatus=true (la lista del admin muestra la columna "Verificación": estados derivados
+    // de booleanos, sin descifrado).
+    return { drivers: drivers.map((d) => this.toDriverReply(d, false, true)) };
+  }
+
+  /**
+   * BATCH de users por User.id (nombre del conductor en la lista de vehículos, donde Vehicle.driver_id = User.id).
+   * Espejo de GetDriversByIds: UNA query IN(...) sobre la réplica de lectura (anti-N+1). Devuelve un UserReply por
+   * user hallado (found=true); los ids inexistentes se omiten (el consumidor mapea por id). Riel ADMIN.
+   */
+  @GrpcMethod('IdentityService', 'GetUsersByIds')
+  async getUsersByIds(
+    { ids }: { ids: string[] },
+    metadata: Metadata,
+  ): Promise<UsersByIdsReply> {
+    this.requireIdentity('GetUsersByIds', metadata);
+    if (!ids || ids.length === 0) return { users: [] };
+    const users = await this.prisma.read.user.findMany({ where: { id: { in: ids } } });
+    return {
+      users: users.map((u) => ({
+        id: u.id,
+        phone: u.phone ?? '',
+        type: u.type,
+        kycStatus: u.kycStatus,
+        deleted: u.deletedAt !== null,
+        found: true,
+        name: u.name ?? '',
+      })),
+    };
+  }
+
+  /**
+   * Conteo de conductores por backgroundCheckStatus (embudo de aprobación · stat cards del panel admin).
+   * groupBy AGREGADO en la réplica de lectura (no trae filas); un estado sin conductores no aparece → default 0.
+   * Sin PII: solo enteros. Riel ADMIN (admin-bff) — ver GRPC_METHOD_AUDIENCES.
+   */
+  @GrpcMethod('IdentityService', 'GetDriverCounts')
+  async getDriverCounts(_request: unknown, metadata: Metadata): Promise<DriverCountsReply> {
+    this.requireIdentity('GetDriverCounts', metadata);
+    const groups = await this.prisma.read.driver.groupBy({
+      by: ['backgroundCheckStatus'],
+      _count: { _all: true },
+    });
+    const countOf = (backgroundCheckStatus: BackgroundCheckStatus): number =>
+      groups.find((g) => g.backgroundCheckStatus === backgroundCheckStatus)?._count._all ?? 0;
+    return {
+      pending: countOf(BackgroundCheckStatus.PENDING),
+      cleared: countOf(BackgroundCheckStatus.CLEARED),
+      rejected: countOf(BackgroundCheckStatus.REJECTED),
+    };
   }
 
   /**
@@ -365,7 +432,15 @@ export class IdentityGrpcController {
     suspensionHolds?: { cause: string }[];
     },
     includeSensitivePii = false,
+    // Eje SEPARADO de `includeSensitivePii`: expone SOLO el ESTADO de face-match/liveness (derivado de los
+    // booleanos persistidos, SIN descifrar DNI/scores), para la columna "Verificación" de la LISTA del admin.
+    // El batch (GetDriversByIds) lo pasa true con includeSensitivePii=false → estados sí, descifrado NO (evita
+    // la over-decryption y la superficie de crash que el batch protege a propósito).
+    includeVerificationStatus = false,
   ): DriverReply {
+    // El estado de verificación se muestra si el caller es Compliance+ (detalle) O pidió el eje de verificación
+    // (lista). El DNI/scores/timestamps siguen SOLO bajo includeSensitivePii.
+    const showVerification = includeSensitivePii || includeVerificationStatus;
     return {
       id: d.id,
       userId: d.userId,
@@ -411,7 +486,7 @@ export class IdentityGrpcController {
       // estado tipado explícito, sin la ambigüedad del bool. Para rieles no-admin → NOT_RUN/0/"" (proto3
       // default honesto: el pasajero/dispatch no ven el binding biométrico del conductor).
       dniFaceMatchStatus:
-        !includeSensitivePii || d.dniFaceMatched === null || d.dniFaceMatched === undefined
+        !showVerification || d.dniFaceMatched === null || d.dniFaceMatched === undefined
           ? DniFaceMatchStatus.NOT_RUN
           : d.dniFaceMatched
             ? DniFaceMatchStatus.MATCHED
@@ -422,7 +497,7 @@ export class IdentityGrpcController {
       // Lote C · binding licencia↔selfie GUARDADO. Mismo gateo ADMIN-ONLY + derivación que el DNI (null →
       // NOT_RUN; true → MATCHED; false → NO_MATCH). Para rieles no-admin → NOT_RUN/0/"" (proto3 default honesto).
       licenseFaceMatchStatus:
-        !includeSensitivePii || d.licenseFaceMatched === null || d.licenseFaceMatched === undefined
+        !showVerification || d.licenseFaceMatched === null || d.licenseFaceMatched === undefined
           ? DniFaceMatchStatus.NOT_RUN
           : d.licenseFaceMatched
             ? DniFaceMatchStatus.MATCHED
@@ -437,7 +512,7 @@ export class IdentityGrpcController {
       // persistido (null = aún no enroló → NOT_RUN; true → PASSED, el PAD corrió y dio viva; false → DEGRADED,
       // enroló sin PAD): estado tipado explícito, sin la ambigüedad del bool. Para rieles no-admin → NOT_RUN/0.
       livenessStatus:
-        !includeSensitivePii || d.livenessChecked === null || d.livenessChecked === undefined
+        !showVerification || d.livenessChecked === null || d.livenessChecked === undefined
           ? PassiveLivenessStatus.NOT_RUN
           : d.livenessChecked
             ? PassiveLivenessStatus.PASSED

@@ -1,13 +1,13 @@
 'use client';
 
-import { Check, X } from 'lucide-react';
+import { AlertTriangle, Check, ShieldCheck, X } from 'lucide-react';
 import { useDriverDecision } from '@/lib/api/queries';
 import type { PendingDriver } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 /**
  * Aprobar/rechazar un conductor de la COLA REAL de pendientes (identity pending-approval). El conductor ya
@@ -25,37 +25,42 @@ export function PendingDriverActions({ driver }: { driver: PendingDriver }) {
 
   return (
     <div className="flex items-center gap-2">
-      <ConfirmDialog
+      {/* Aprobar exige step-up MFA (BR-S07 · @RequireStepUpMfa en el bff): en prod pide el TOTP, en dev lo salta
+          (espeja el StepUpMfaGuard). Con ConfirmDialog el approve fallaba 403 en prod (MFA no fresca). */}
+      <StepUpDialog
         trigger={
           <Button size="sm" variant="primary">
             <Check className="size-4" aria-hidden />
             Aprobar
           </Button>
         }
-        title="Aprobar conductor"
-        description={`Confirmas que el conductor ${driver.id.slice(0, 8)} cumple los requisitos (antecedentes) para operar.`}
-        confirmLabel="Aprobar"
-        onConfirm={async () => {
+        title="Confirmá tu identidad"
+        icon={ShieldCheck}
+        description={`Aprobar conductor ${driver.id.slice(0, 8)} · acción sensible. Ingresá el código de tu app (TOTP); la aprobación exige verificación fresca (BR-S07).`}
+        confirmLabel="Confirmar aprobación"
+        onVerified={async () => {
           await decision.mutateAsync({ id: driver.id, decision: 'approve' });
           toast({ tone: 'success', title: 'Conductor aprobado' });
         }}
       />
-      {/* El rechazo lleva MOTIVO: identity-service lo persiste, emite driver.rejected y el conductor lo VE
-          en su app (pantalla de rechazo) para corregir-y-reenviar. El motivo es obligatorio en la UI. */}
-      <ConfirmDialog
+      {/* Rechazar: MOTIVO (el conductor lo VE en su app para corregir y reenviar) + MFA (BR-S07). El motivo
+          viaja en driver.rejected; identity lo persiste. El StepUpDialog captura ambos en un solo modal. */}
+      <StepUpDialog
         trigger={
           <Button size="sm" variant="secondary">
             <X className="size-4" aria-hidden />
             Rechazar
           </Button>
         }
-        title="Rechazar conductor"
-        description={`Se rechazará al conductor ${driver.id.slice(0, 8)}. El motivo se le mostrará para que corrija y reenvíe. La acción queda auditada.`}
-        confirmLabel="Rechazar"
-        variant="danger"
+        title="Rechazar alta"
+        icon={AlertTriangle}
+        description={`El conductor ${driver.id.slice(0, 8)} recibirá el motivo, podrá corregir y reenviar a revisión. Requiere tu MFA. Queda auditado.`}
+        confirmLabel="Rechazar alta"
+        confirmVariant="danger"
         withReason
         reasonLabel="Motivo del rechazo (visible para el conductor)"
-        onConfirm={async (reason) => {
+        reasonPlaceholder="Ej. La foto de la licencia no es legible. Vuelve a capturarla con buena luz."
+        onVerified={async (reason) => {
           await decision.mutateAsync({ id: driver.id, decision: 'reject', reason });
           toast({ tone: 'success', title: 'Conductor rechazado' });
         }}

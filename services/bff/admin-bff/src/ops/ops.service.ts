@@ -11,6 +11,10 @@ import {
   type UserReply,
   type DriverReply,
   type DriversByIdsReply,
+  type DriverCountsReply,
+  type VehicleCountsReply,
+  type ReviewQueueCountsReply,
+  type DriverDocsCompletenessReply,
   type DriverVehiclesReply,
   type VehicleReply,
   type DriverDocumentsReply,
@@ -36,6 +40,9 @@ import {
 import type {
   TripSummary,
   DriverApproval,
+  DriverCounts,
+  VehicleCounts,
+  ReviewQueueSummary,
   TripDetail,
   DriverDetail,
   DriverVehicle,
@@ -106,6 +113,21 @@ const REQUIRED_DRIVER_DOC_TYPES = [
   // ver el auto. Sube en el alta (paso Vehículo) como doc DRIVER-scoped y llega acá vía GetDriverDocuments.
   FleetDocumentType.VEHICLE_PHOTO,
 ] as const;
+
+/** Estados de la columna "Verificación" de la lista (combina los dos face-match). Tipados, sin magic strings. */
+type VerificationStatus = 'VERIFICADO' | 'REVISAR' | 'PENDIENTE';
+
+/**
+ * Estado combinado de verificación biométrica para la LISTA, derivado de los dos face-match del batch de identity
+ * (DNI + licencia): REVISAR si alguno dio NO_MATCH (el operador debe mirar), VERIFICADO si AMBOS coinciden,
+ * PENDIENTE si aún no corrieron (NOT_RUN). Solo lee el ESTADO (no scores/DNI) — el batch no descifra nada.
+ */
+function deriveVerificationStatus(d: DriverReply): VerificationStatus {
+  const both = [d.dniFaceMatchStatus, d.licenseFaceMatchStatus];
+  if (both.includes(DniFaceMatchStatus.NO_MATCH)) return 'REVISAR';
+  if (both.every((s) => s === DniFaceMatchStatus.MATCHED)) return 'VERIFICADO';
+  return 'PENDIENTE';
+}
 
 /** proto3 entrega "" para strings ausentes; el contrato del panel los quiere `null` honesto. */
 function emptyToNull(s: string): string | null {
@@ -181,6 +203,13 @@ export interface PendingDriver {
   licenseNumber: string | null;
   /** Nombre legal del onboarding (lo que el conductor cargó en la app); null si no lo cargó aún. */
   fullName: string | null;
+  /** Completitud documental (docs REQUERIDOS en VALID / total) para el embudo Sin docs / Listos. No PII. */
+  docsComplete: number;
+  docsTotal: number;
+  /** Verificación biométrica combinada (VERIFICADO/REVISAR/PENDIENTE); null para sub-Compliance (redactado). */
+  verificationStatus: string | null;
+  /** ISO-8601 de encolado (alta del conductor) para el SLA/orden de la cola de Revisiones; null si sin dato. */
+  enqueuedAt: string | null;
 }
 export interface OperatorSummary {
   id: string;
@@ -360,25 +389,38 @@ export class OpsService {
     const identityVisible = canSeeIdentity(roles);
     let enrichmentById = new Map<string, DriverListEnrichment>();
     if (page.items.length > 0) {
-      const reply = await this.identityGrpc.call<DriversByIdsReply>(
-        'GetDriversByIds',
-        { ids: page.items.map((r) => r.id) },
-        meta,
-      );
+      const ids = page.items.map((r) => r.id);
+      // DOS batches EN PARALELO por página (anti-N+1): identity (nombre/badge/verificación) + fleet (docs X/Y).
+      // El MISMO `ids` (Driver.id) sirve para ambos: identity keyea por Driver.id, y los docs DRIVER-scoped de
+      // fleet por ownerId=Driver.id. El batch de identity ahora trae el ESTADO de verificación (sin descifrar DNI).
+      const [reply, docsReply] = await Promise.all([
+        this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids }, meta),
+        this.fleetGrpc.call<DriverDocsCompletenessReply>('GetDriverDocsCompleteness', { ids }, meta),
+      ]);
+      const docsById = new Map(docsReply.items.map((it) => [it.driverId, it]));
       enrichmentById = new Map(
-        reply.drivers.map((d) => [
-          d.id,
-          {
-            // PII: solo si el rol la puede ver; si no, null honesto (el reply igual se usa para el badge).
-            fullName: identityVisible ? emptyToNull(d.name) : null,
-            phone: identityVisible ? emptyToNull(d.phone) : null,
-            // Estado AUTORITATIVO de suspensión (derivado de los holds): "" ⇒ libre; ISO ⇒ suspendido.
-            suspendedAt: emptyToNull(d.suspendedAt),
-            // CAUSAS distintas de los holds (cause-aware UI de reactivación · NO PII): el batch ahora las trae
-            // por driver (mismo dato que el detalle). Narrowing defensivo: descarta valores fuera del enum.
-            suspensionCauses: toSuspensionCauses(d.suspensionCauses),
-          },
-        ]),
+        reply.drivers.map((d) => {
+          const docs = docsById.get(d.id);
+          return [
+            d.id,
+            {
+              // PII: solo si el rol la puede ver; si no, null honesto (el reply igual se usa para el badge).
+              fullName: identityVisible ? emptyToNull(d.name) : null,
+              phone: identityVisible ? emptyToNull(d.phone) : null,
+              // Estado AUTORITATIVO de suspensión (derivado de los holds): "" ⇒ libre; ISO ⇒ suspendido.
+              suspendedAt: emptyToNull(d.suspendedAt),
+              // CAUSAS distintas de los holds (cause-aware UI de reactivación · NO PII): el batch ahora las trae
+              // por driver (mismo dato que el detalle). Narrowing defensivo: descarta valores fuera del enum.
+              suspensionCauses: toSuspensionCauses(d.suspensionCauses),
+              // Completitud documental (fleet · no PII): visible para todos los roles que ven la lista.
+              docsComplete: docs?.validRequired ?? 0,
+              docsTotal: docs?.requiredTotal ?? REQUIRED_DRIVER_DOC_TYPES.length,
+              // Verificación biométrica combinada. Señal del proceso KYC (ADMIN/Compliance+) → null para
+              // sub-Compliance (mismo criterio de redacción que nombre/teléfono).
+              verificationStatus: identityVisible ? deriveVerificationStatus(d) : null,
+            },
+          ];
+        }),
       );
     }
 
@@ -832,15 +874,120 @@ export class OpsService {
     const raw = await this.identityRest.get<
       { id: string; userId: string; licenseNumber: string | null; legalName: string | null }[]
     >('/drivers/pending-approval', { identity });
-    const list: PendingDriver[] = raw.map((d) => ({
-      id: d.id,
-      userId: d.userId,
-      licenseNumber: d.licenseNumber,
-      fullName: emptyToNull(d.legalName ?? ''),
-    }));
-    // licenseNumber (DNI/licencia) = IDENTIDAD personal → Compliance+. Sub-Compliance: null honesto.
-    if (canSeeIdentity(identity.roles)) return list;
-    return list.map((d) => ({ ...d, licenseNumber: null }));
+    const identityVisible = canSeeIdentity(identity.roles);
+    // Enriquecimiento del EMBUDO (docs X/Y + verificación) para que la cola de pendientes se filtre y muestre
+    // como el frame (tabs Sin docs / Listos / En revisión). DOS batches en paralelo, keyeados por Driver.id.
+    let docsById = new Map<string, { validRequired: number; requiredTotal: number }>();
+    let verifById = new Map<string, VerificationStatus>();
+    let createdAtById = new Map<string, string | null>();
+    const ids = raw.map((d) => d.id);
+    if (ids.length > 0) {
+      const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+      const [docsReply, driversReply] = await Promise.all([
+        this.fleetGrpc.call<DriverDocsCompletenessReply>(
+          'GetDriverDocsCompleteness',
+          { ids },
+          meta,
+        ),
+        this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids }, meta),
+      ]);
+      docsById = new Map(docsReply.items.map((it) => [it.driverId, it]));
+      verifById = new Map(driversReply.drivers.map((d) => [d.id, deriveVerificationStatus(d)]));
+      // Aging para la cola de Revisiones: alta del conductor (createdAt) = momento de encolado. "" ⇒ null honesto.
+      createdAtById = new Map(driversReply.drivers.map((d) => [d.id, emptyToNull(d.createdAt)]));
+    }
+    return raw.map((d) => {
+      const docs = docsById.get(d.id);
+      return {
+        id: d.id,
+        userId: d.userId,
+        // licenseNumber (DNI/licencia) = IDENTIDAD personal → Compliance+. Sub-Compliance: null honesto.
+        licenseNumber: identityVisible ? d.licenseNumber : null,
+        fullName: emptyToNull(d.legalName ?? ''),
+        docsComplete: docs?.validRequired ?? 0,
+        docsTotal: docs?.requiredTotal ?? REQUIRED_DRIVER_DOC_TYPES.length,
+        // Verificación (señal KYC · Compliance+): null para sub-Compliance (redacción como el DNI/nombre).
+        verificationStatus: identityVisible ? (verifById.get(d.id) ?? 'PENDIENTE') : null,
+        // Momento de encolado (alta) para el SLA/orden de la cola de Revisiones. null si identity no lo trae.
+        enqueuedAt: createdAtById.get(d.id) ?? null,
+      };
+    });
+  }
+
+  /**
+   * Conteo de conductores por estado de antecedentes (embudo de aprobación · stat cards del panel). UN gRPC a
+   * identity (GetDriverCounts · groupBy agregado, sin traer filas); sin PII (solo enteros). Riel ADMIN. El
+   * reply gRPC (DriverCountsReply) es estructuralmente el contrato DriverCounts que expone el BFF.
+   */
+  async driversSummary(identity: AuthUser): Promise<DriverCounts> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    // cleared/rejected (agregado de identity) + los ids de PENDIENTES (cola acotada de identity) EN PARALELO.
+    const [counts, pendingRaw] = await Promise.all([
+      this.identityGrpc.call<DriverCountsReply>('GetDriverCounts', {}, meta),
+      this.identityRest.get<{ id: string }[]>('/drivers/pending-approval', { identity }),
+    ]);
+    // El tramo PENDING se parte en TRES por el embudo de onboarding (frame AdminConductores):
+    //  · sinDocs   = le falta ≥1 documento REQUERIDO en VALID.
+    //  · listos    = docs completos pero el face-match AÚN NO corrió (PENDIENTE) → listo para que el operador revise.
+    //  · enRevision= docs completos y el face-match YA corrió (VERIFICADO/cotejado) → revisión en curso.
+    // Dos batches EN PARALELO sobre los ids de la cola de pendientes: fleet (docs) + identity (verificación).
+    let sinDocs = 0;
+    let listos = 0;
+    let enRevision = 0;
+    const pendingIds = pendingRaw.map((d) => d.id);
+    if (pendingIds.length > 0) {
+      const [docsReply, driversReply] = await Promise.all([
+        this.fleetGrpc.call<DriverDocsCompletenessReply>(
+          'GetDriverDocsCompleteness',
+          { ids: pendingIds },
+          meta,
+        ),
+        this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids: pendingIds }, meta),
+      ]);
+      const docsById = new Map(docsReply.items.map((it) => [it.driverId, it]));
+      const verifById = new Map(driversReply.drivers.map((d) => [d.id, deriveVerificationStatus(d)]));
+      for (const id of pendingIds) {
+        const dc = docsById.get(id);
+        const complete = dc ? dc.validRequired >= dc.requiredTotal : false;
+        if (!complete) {
+          sinDocs += 1;
+        } else if (verifById.get(id) === 'PENDIENTE') {
+          listos += 1;
+        } else {
+          enRevision += 1;
+        }
+      }
+    }
+    return { sinDocs, listos, enRevision, cleared: counts.cleared, rejected: counts.rejected };
+  }
+
+  /**
+   * Conteo de vehículos por estado documental (embudo de vigencia · stat cards del panel). UN gRPC a fleet
+   * (GetVehicleCounts · groupBy agregado por docStatus, sin traer filas); sin PII (solo enteros). El reply gRPC
+   * (VehicleCountsReply) es estructuralmente el contrato VehicleCounts que expone el BFF.
+   */
+  async vehiclesSummary(identity: AuthUser): Promise<VehicleCounts> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    return this.fleetGrpc.call<VehicleCountsReply>('GetVehicleCounts', {}, meta);
+  }
+
+  /**
+   * Conteo de las COLAS DE REVISIÓN (cola unificada de Revisiones): conductores pendientes de aprobación
+   * (identity) + documentos por revisar/por vencer + modelos por curar (fleet). DOS gRPC EN PARALELO (identity
+   * GetDriverCounts + fleet GetReviewQueueCounts); el BFF los fusiona en un solo contrato. Sin PII (enteros).
+   */
+  async reviewsSummary(identity: AuthUser): Promise<ReviewQueueSummary> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const [drivers, fleet] = await Promise.all([
+      this.identityGrpc.call<DriverCountsReply>('GetDriverCounts', {}, meta),
+      this.fleetGrpc.call<ReviewQueueCountsReply>('GetReviewQueueCounts', {}, meta),
+    ]);
+    return {
+      driversPending: drivers.pending,
+      docsPendingReview: fleet.docsPendingReview,
+      docsExpiringSoon: fleet.docsExpiringSoon,
+      modelsPendingReview: fleet.modelsPendingReview,
+    };
   }
 
   async approveDriver(

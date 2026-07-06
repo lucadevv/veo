@@ -81,3 +81,40 @@ export interface DriverInspectionStatusReply {
   /** NONE | NOT_PASSED | OVERDUE | NO_VEHICLE | "" (cuando current=true). */
   invalidReason: string;
 }
+
+/** fleet.GetVehicleCounts / VehicleCountsReply. Conteo de vehículos por docStatus (stat cards del admin). */
+export interface VehicleCountsReply {
+  valid: number;
+  expiringSoon: number;
+  expired: number;
+}
+
+/** fleet.GetReviewQueueCounts / ReviewQueueCountsReply. Conteo de las colas de revisión de flota. */
+export interface ReviewQueueCountsReply {
+  docsPendingReview: number;
+  docsExpiringSoon: number;
+  modelsPendingReview: number;
+}
+
+/** fleet.GetDriverDocsCompleteness — completitud documental de un conductor (REQUERIDOS en VALID / total). */
+export interface DriverDocsCompleteness {
+  driverId: string;
+  validRequired: number;
+  requiredTotal: number;
+}
+export interface DriverDocsCompletenessReply {
+  items: DriverDocsCompleteness[];
+}
+
+/** fleet.GetVehiclesInspectionStatus — estado de ITV (última inspección) de un vehículo. */
+export interface VehicleInspectionStatus {
+  vehicleId: string;
+  hasInspection: boolean;
+  current: boolean;
+  passed: boolean;
+  nextDueAt: string;
+  invalidReason: string;
+}
+export interface VehiclesInspectionStatusReply {
+  items: VehicleInspectionStatus[];
+}

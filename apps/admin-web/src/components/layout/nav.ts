@@ -3,6 +3,7 @@ import {
   Banknote,
   Car,
   Cctv,
+  ClipboardCheck,
   Coins,
   MapPinned,
   Radar,
@@ -39,13 +40,27 @@ export const NAV: NavGroup[] = [
       { href: '/ops', label: 'En vivo', icon: MapPinned, permission: 'ops:view', exact: true },
       { href: '/ops/metrics', label: 'Métricas', icon: TrendingUp, permission: 'ops:view' },
       { href: '/ops/trips', label: 'Viajes', icon: Car, permission: 'trips:view' },
-      { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
       { href: '/ops/operators', label: 'Operadores', icon: UserCog, permission: 'operators:view' },
       {
         href: '/ops/dispatch-radius',
         label: 'Radios de dispatch',
         icon: Radar,
         permission: 'dispatch:view',
+      },
+    ],
+  },
+  {
+    // FLOTA reagrupada (rediseño de IA): Conductores + Vehículos + la cola unificada de Revisiones.
+    // Conductores se mueve acá desde Operación (el alta/aprobación es gestión de flota, no operación en vivo).
+    title: 'Flota',
+    items: [
+      { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
+      { href: '/fleet', label: 'Vehículos', icon: Truck, permission: 'fleet:view', exact: true },
+      {
+        href: '/fleet/reviews',
+        label: 'Revisiones',
+        icon: ClipboardCheck,
+        permission: 'fleet:review',
       },
     ],
   },
@@ -61,10 +76,6 @@ export const NAV: NavGroup[] = [
       },
       { href: '/media', label: 'Video', icon: Video, permission: 'media:view' },
     ],
-  },
-  {
-    title: 'Flota',
-    items: [{ href: '/fleet', label: 'Vehículos y docs', icon: Truck, permission: 'fleet:view' }],
   },
   {
     title: 'Finanzas',

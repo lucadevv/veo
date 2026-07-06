@@ -198,6 +198,8 @@ export const fleetDocumentView = z.object({
   type: z.string(),
   status: fleetDocumentStatus,
   expiresAt: z.string().nullable(),
+  /** ISO-8601 de creación del documento (encolado para el SLA de la cola de Revisiones); null si sin dato. */
+  createdAt: z.string().nullable(),
 });
 export type FleetDocumentView = z.infer<typeof fleetDocumentView>;
 

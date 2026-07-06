@@ -18,6 +18,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, PaymentMethod, PaymentStatus } from '../generated/prisma';
+// Fuente ÚNICA de "métodos digitales" (lista positiva que sí usa el índice) — compartida con collectEarnings.
+import { NON_CASH_METHODS } from '../payments/payment.policy';
 
 /** Punto de la serie horaria de revenue. `bucket` = hora truncada en ISO UTC (toStartOfHour). */
 export interface RevenueHourBucket {
@@ -74,8 +76,9 @@ export class AnalyticsService {
     const agg = await this.prisma.read.payment.aggregate({
       _sum: { commissionCents: true, pspFeeCents: true, discountCents: true, creditCents: true },
       where: {
+        // Misma reformulación positiva que revenueToday: `in [digitales]` usa el índice; `!= CASH` lo anula.
+        method: { in: [...NON_CASH_METHODS] },
         status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        method: { not: PaymentMethod.CASH },
         capturedAt: { gte: since },
       },
     });
@@ -99,8 +102,10 @@ export class AnalyticsService {
     const agg = await this.prisma.read.payment.aggregate({
       _sum: { netSettledCents: true, refundedCents: true },
       where: {
+        // Lista POSITIVA de métodos digitales (no `method != CASH`): la NEGACIÓN no puede seek en el índice
+        // [method, status, capturedAt] → lo anulaba (full-scan). Un `in` sí lo usa (seek por método + rango).
+        method: { in: [...NON_CASH_METHODS] },
         status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        method: { not: PaymentMethod.CASH },
         capturedAt: { gte: since },
       },
     });
@@ -109,19 +114,25 @@ export class AnalyticsService {
 
   /**
    * Revenue por hora de las últimas 24h. Bucket = date_trunc('hour', capturedAt) en UTC.
-   * Agregación en una sola query (sin N+1 · sin sumar en loop). Sólo CAPTURED con capturedAt en ventana.
+   * Agregación en una sola query (sin N+1 · sin sumar en loop). CAPTURED + PARTIALLY_REFUNDED, neto de refunds,
+   * EXCLUYE CASH — misma definición que revenueToday (la serie 24h reconcilia con el total del día).
    */
   private async revenuePerHour(now: Date): Promise<RevenueHourBucket[]> {
     const since = new Date(now.getTime() - HOURS_24_MS);
     const rows = await this.prisma.read.$queryRaw<{ bucket: Date; revenue_cents: bigint }[]>(
-      // P-B · net-aware + EXCLUYE CASH, coherente con revenueToday (antes sumaba el BRUTO amount_cents → dos
-      // definiciones de "revenue" en el MISMO dashboard). Suma el NETO que llega al banco (net_settled_cents) de
-      // los cobros DIGITALES capturados por hora. Legacy (net_settled NULL) → SUM lo ignora.
+      // P-B · net-aware + EXCLUYE CASH, coherente EXACTA con revenueToday (misma definición de "money-in" en el
+      // MISMO dashboard, para que la suma de los buckets cuadre con el total del día): incluye PARTIALLY_REFUNDED
+      // y RESTA refunded_cents (antes filtraba solo CAPTURED y NO restaba → la serie 24h no reconciliaba con
+      // revenueToday). Suma el NETO al banco (net_settled_cents − refunded_cents) de los cobros DIGITALES por
+      // hora, atribuyendo el reembolso a la hora de la captura original. Legacy (net_settled NULL) → SUM lo ignora.
       Prisma.sql`
-        SELECT date_trunc('hour', "captured_at" AT TIME ZONE 'UTC')  AS bucket,
-               COALESCE(SUM("net_settled_cents"), 0)::bigint         AS revenue_cents
+        SELECT date_trunc('hour', "captured_at" AT TIME ZONE 'UTC')                    AS bucket,
+               COALESCE(SUM("net_settled_cents" - COALESCE("refunded_cents", 0)), 0)::bigint AS revenue_cents
         FROM "payment"."payments"
-        WHERE "status" = ${PaymentStatus.CAPTURED}::"payment"."PaymentStatus"
+        WHERE "status" IN (
+                ${PaymentStatus.CAPTURED}::"payment"."PaymentStatus",
+                ${PaymentStatus.PARTIALLY_REFUNDED}::"payment"."PaymentStatus"
+              )
           AND "method" <> ${PaymentMethod.CASH}::"payment"."PaymentMethod"
           AND "captured_at" >= ${since}
         GROUP BY bucket

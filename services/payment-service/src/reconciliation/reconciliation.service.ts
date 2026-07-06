@@ -14,7 +14,7 @@ import { uuidv7, withDistributedLock } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/gateway/payment-gateway.port';
-import { PaymentMethod, PaymentStatus, RefundStatus } from '../generated/prisma';
+import { Prisma, PaymentMethod, PaymentStatus, RefundStatus } from '../generated/prisma';
 import { discrepancyPct } from '../payouts/payout.policy';
 import type { Env } from '../config/env.schema';
 
@@ -223,19 +223,27 @@ export class ReconciliationService {
   }
 
   async reconcile(start: Date, end: Date): Promise<ReconciliationResult> {
-    // Solo rieles externos (Yape/Plin); el efectivo no aparece en extractos del gateway.
-    const captured = await this.prisma.read.payment.findMany({
-      where: {
-        status: 'CAPTURED',
-        method: { in: ['YAPE', 'PLIN'] },
-        capturedAt: { gte: start, lt: end },
-      },
-      select: { amountCents: true, netSettledCents: true },
-    });
-    // P-B (ADR-022) · el lado DB de la conciliación es el NETO que la plataforma espera en el banco
-    // (`netSettledCents` = bruto − fee del PSP), NO el bruto — el banco recibe el neto, no lo cobrado. Antes se
-    // comparaba el bruto contra el extracto → divergía por el fee acumulado. Legacy (netSettled NULL) cae al bruto.
-    const dbTotalCents = captured.reduce((sum, p) => sum + (p.netSettledCents ?? p.amountCents), 0);
+    // Solo rieles externos (Yape/Plin); el efectivo no aparece en extractos del gateway. Se SUMA en la DB (no
+    // materializar todos los cobros del día en memoria para reducir en JS — coherente con AnalyticsService que ya
+    // agrega). Raw SQL por el COALESCE POR-FILA (`net_settled_cents ?? amount_cents`) que un aggregate de Prisma
+    // no expresa. P-B (ADR-022): el lado DB es el NETO esperado en el banco (net_settled = bruto − fee PSP), NO el
+    // bruto (antes divergía por el fee acumulado); legacy (net_settled NULL) cae al bruto por fila. Usa el índice
+    // [method, status, capturedAt].
+    const [row] = await this.prisma.read.$queryRaw<{ db_total: bigint; db_count: bigint }[]>(
+      Prisma.sql`
+        SELECT COALESCE(SUM(COALESCE("net_settled_cents", "amount_cents")), 0)::bigint AS db_total,
+               COUNT(*)::bigint                                                        AS db_count
+        FROM "payment"."payments"
+        WHERE "status" = ${PaymentStatus.CAPTURED}::"payment"."PaymentStatus"
+          AND "method" IN (
+                ${PaymentMethod.YAPE}::"payment"."PaymentMethod",
+                ${PaymentMethod.PLIN}::"payment"."PaymentMethod"
+              )
+          AND "captured_at" >= ${start} AND "captured_at" < ${end}
+      `,
+    );
+    const dbTotalCents = Number(row?.db_total ?? 0);
+    const dbCount = Number(row?.db_count ?? 0);
 
     const statement = await this.gateway.getStatement(start, end);
     const statementTotalCents = statement.reduce((sum, e) => sum + e.amountCents, 0);
@@ -253,7 +261,7 @@ export class ReconciliationService {
           periodEnd: end.toISOString(),
           dbTotalCents,
           statementTotalCents,
-          dbCount: captured.length,
+          dbCount,
           statementCount: statement.length,
         },
       },

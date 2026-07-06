@@ -14,7 +14,7 @@ import { createEnvelope } from '@veo/events';
 import { enqueueOutbox, isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, ValidationError, uuidv7 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
-import type { Promotion } from '../generated/prisma';
+import { Prisma, type Promotion } from '../generated/prisma';
 import {
   evaluatePromo,
   normalizeCode,
@@ -51,14 +51,29 @@ export class PromotionsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Cuenta usos totales y del usuario para una promo (excluye nada; cada redención es un uso). */
+  /**
+   * Usos de una promo, ACOTADOS (evita el count-scan sin techo de una promo popular en CADA validate/charge):
+   *  - `userUses`: count por-usuario — índice `[promotionId, userId]`, acotado por las redenciones de UN usuario.
+   *  - `totalUses`: el gate solo lo compara `>= maxTotalUses` (cuando maxTotalUses>0). Si es ilimitado (0), NO hay
+   *    tope → no contamos (0). Si >0, acotamos el scan a `maxTotalUses` filas con `findMany take`: basta saber si
+   *    el tope se alcanzó — no escanear el historial COMPLETO. `totalUses` queda capado a maxTotalUses, y el gate
+   *    `totalUses >= maxTotalUses` sigue correcto (true sii el count real llegó al tope).
+   */
   private async usageFor(
+    client: Prisma.TransactionClient,
     promotionId: string,
     userId: string,
+    maxTotalUses: number,
   ): Promise<{ totalUses: number; userUses: number }> {
+    // `client` = la réplica (validatePromo, preview) o la tx del canje (redeemPromo, bajo advisory lock): en el
+    // canje el count DEBE correr sobre la tx serializada para ver la inserción del canje concurrente anterior.
     const [totalUses, userUses] = await Promise.all([
-      this.prisma.read.promoRedemption.count({ where: { promotionId } }),
-      this.prisma.read.promoRedemption.count({ where: { promotionId, userId } }),
+      maxTotalUses > 0
+        ? client.promoRedemption
+            .findMany({ where: { promotionId }, take: maxTotalUses, select: { id: true } })
+            .then((rows) => rows.length)
+        : Promise.resolve(0),
+      client.promoRedemption.count({ where: { promotionId, userId } }),
     ]);
     return { totalUses, userUses };
   }
@@ -83,7 +98,7 @@ export class PromotionsService {
         reason: reasonMessage('NOT_FOUND'),
       };
     }
-    const usage = await this.usageFor(promo.id, userId);
+    const usage = await this.usageFor(this.prisma.read, promo.id, userId, promo.maxTotalUses);
     const result = evaluatePromo(promo, fareCents, usage);
     if (!result.valid) {
       return {
@@ -140,15 +155,20 @@ export class PromotionsService {
       };
     }
 
-    const usage = await this.usageFor(promo.id, input.userId);
-    const evaluation = evaluatePromo(promo, input.fareCents, usage);
-    if (!evaluation.valid) {
-      throw this.invalidError(evaluation.reason, code);
-    }
-    const discountCents = evaluation.discountCents;
-
     try {
       return await this.prisma.write.$transaction(async (tx) => {
+        // Advisory lock TRANSACCIONAL por promo (mismo patrón que el refund admin, payments.service): SERIALIZA
+        // los canjes CONCURRENTES del MISMO cupón. Sin él, dos requests (viajes/usuarios distintos) leen ambos
+        // totalUses<maxTotalUses / userUses<maxUsesPerUser FUERA de la tx y ambos insertan (el unique por tripleta
+        // NO cubre el AGREGADO de la promo) → se excede maxTotalUses/maxUsesPerUser. Con el lock el 2º espera el
+        // commit del 1º y su count —AHORA sobre la tx, no la réplica— YA ve la inserción previa → se rechaza.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`promo:${promo.id}`})::bigint)`;
+        const usage = await this.usageFor(tx, promo.id, input.userId, promo.maxTotalUses);
+        const evaluation = evaluatePromo(promo, input.fareCents, usage);
+        if (!evaluation.valid) {
+          throw this.invalidError(evaluation.reason, code);
+        }
+        const discountCents = evaluation.discountCents;
         const redemption = await tx.promoRedemption.create({
           data: {
             id: uuidv7(),

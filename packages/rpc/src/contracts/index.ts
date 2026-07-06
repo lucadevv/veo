@@ -2,7 +2,14 @@
  * Contratos wire gRPC compartidos — UN tipo por mensaje de los .proto canónicos (packages/rpc/proto).
  * Los consumidores (BFFs, dispatch) importan de acá; PROHIBIDO re-declarar estos shapes a mano.
  */
-export type { UserReply, DriverReply, DriverIdsRequest, DriversByIdsReply } from './identity.js';
+export type {
+  UserReply,
+  DriverReply,
+  DriverIdsRequest,
+  DriversByIdsReply,
+  DriverCountsReply,
+  UsersByIdsReply,
+} from './identity.js';
 export type {
   GeoPoint,
   TripReply,
@@ -25,5 +32,11 @@ export type {
   FleetDocumentReply,
   DriverDocumentsReply,
   DriverInspectionStatusReply,
+  VehicleCountsReply,
+  ReviewQueueCountsReply,
+  DriverDocsCompleteness,
+  DriverDocsCompletenessReply,
+  VehicleInspectionStatus,
+  VehiclesInspectionStatusReply,
 } from './fleet.js';
 export type { SavedPlace, PlacesReply, PlaceReply, RemoveReply } from './places.js';

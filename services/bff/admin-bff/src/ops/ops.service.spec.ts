@@ -34,7 +34,8 @@ const noopMedia = {} as unknown as InternalRestClient;
 const noopTripRest = {} as unknown as InternalRestClient;
 const noopFleetRest = {} as unknown as InternalRestClient;
 const noopPaymentRest = {} as unknown as InternalRestClient;
-const noopFleet = grpc(() => ({})); // fleet sin vehículos → vehiclePlate null
+// fleet sin vehículos → vehiclePlate null; el batch de completitud devuelve el shape vacío honesto (items: []).
+const noopFleet = grpc((m) => (m === 'GetDriverDocsCompleteness' ? { items: [] } : {}));
 
 describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)', () => {
   it('aplana al contrato: createdAt←requestedAt, origin/destination de coords, nombres de identity', async () => {
@@ -86,11 +87,12 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       return {};
     });
 
-    const fleetGrpc = grpc((m) =>
-      m === 'GetDriverVehicles'
-        ? { driverId: 'd1', vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }] }
-        : {},
-    );
+    const fleetGrpc = grpc((m) => {
+      if (m === 'GetDriverVehicles')
+        return { driverId: 'd1', vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }] };
+      if (m === 'GetDriverDocsCompleteness') return { items: [] };
+      return {};
+    });
     const svc = new OpsService(
       tripGrpc,
       identityGrpc,
@@ -152,11 +154,12 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
           ? { name: 'Khalid Ríos', found: true }
           : {},
     );
-    const fleetGrpc = grpc((m) =>
-      m === 'GetDriverVehicles'
-        ? { vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }] }
-        : {},
-    );
+    const fleetGrpc = grpc((m) => {
+      if (m === 'GetDriverVehicles')
+        return { vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }] };
+      if (m === 'GetDriverDocsCompleteness') return { items: [] };
+      return {};
+    });
     const svc = new OpsService(
       tripGrpc,
       identityGrpc,

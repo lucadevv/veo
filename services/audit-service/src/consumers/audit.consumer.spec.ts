@@ -7,7 +7,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { createEnvelope, KafkaEventConsumer, topicForEvent, type EventEnvelope } from '@veo/events';
+import {
+  createEnvelope,
+  DRIVER_OFFLINE_REASON,
+  KafkaEventConsumer,
+  topicForEvent,
+  type EventEnvelope,
+} from '@veo/events';
 import { AuditConsumer } from './audit.consumer';
 import { type AuditService, type EventAuditMapping } from '../audit/audit.service';
 import { validateEnv, type Env } from '../config/env.schema';
@@ -918,5 +924,65 @@ describe('AuditConsumer · render del burn-in (cadena de custodia · Lote 3 · B
     const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
     expect(topic).toBe(topicForEvent('media.render_failed'));
     expect(mapping).toEqual({ actorId: 'system', resourceType: 'media', resourceId: 't-42' });
+  });
+});
+
+describe('AuditConsumer · sesión de turno del conductor (went_online/went_offline · deuda cerrada)', () => {
+  const handlers = new Map<string, Handler>();
+  let recordFromEvent: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    handlers.clear();
+    vi.spyOn(KafkaEventConsumer.prototype, 'on').mockImplementation(function (
+      this: KafkaEventConsumer,
+      type: string,
+      handler: Handler,
+    ) {
+      handlers.set(type, handler);
+      return this;
+    });
+    vi.spyOn(KafkaEventConsumer.prototype, 'start').mockResolvedValue(undefined);
+    recordFromEvent = vi.fn(async () => ({ created: true }));
+    await new AuditConsumer(
+      { recordFromEvent } as unknown as AuditService,
+      makeConfig(),
+    ).onModuleInit();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('audita driver.went_online (apertura de turno) con actor=recurso=driverId, resource=driver', async () => {
+    const envelope = createEnvelope({
+      eventType: 'driver.went_online',
+      producer: 'identity-service',
+      payload: { driverId: 'drv-1', at: '2026-07-06T10:00:00.000Z' },
+    });
+    await handlers.get('driver.went_online')!(envelope);
+    expect(recordFromEvent).toHaveBeenCalledTimes(1);
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(topic).toBe(topicForEvent('driver.went_online'));
+    expect(mapping).toEqual({ actorId: 'drv-1', resourceType: 'driver', resourceId: 'drv-1' });
+  });
+
+  it('audita driver.went_offline reason=shift_end (fin de turno DELIBERADO → WORM)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'driver.went_offline',
+      producer: 'identity-service',
+      payload: { driverId: 'drv-1', at: '2026-07-06T18:00:00.000Z', reason: DRIVER_OFFLINE_REASON.SHIFT_END },
+    });
+    await handlers.get('driver.went_offline')!(envelope);
+    expect(recordFromEvent).toHaveBeenCalledTimes(1);
+    const [, , mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    expect(mapping).toEqual({ actorId: 'drv-1', resourceType: 'driver', resourceId: 'drv-1' });
+  });
+
+  it('NO audita driver.went_offline reason=disconnect (caída de socket best-effort, no-op limpio)', async () => {
+    const envelope = createEnvelope({
+      eventType: 'driver.went_offline',
+      producer: 'driver-bff',
+      payload: { driverId: 'drv-1', at: '2026-07-06T18:00:00.000Z', reason: DRIVER_OFFLINE_REASON.DISCONNECT },
+    });
+    await handlers.get('driver.went_offline')!(envelope);
+    expect(recordFromEvent).not.toHaveBeenCalled();
   });
 });

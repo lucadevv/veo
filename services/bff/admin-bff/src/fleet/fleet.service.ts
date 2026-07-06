@@ -3,9 +3,23 @@
  * Lecturas/comandos vía REST interno firmado a fleet-service. Documentos se mapean a fleetDocumentView.
  */
 import { Injectable, Inject } from '@nestjs/common';
-import { InternalRestClient } from '@veo/rpc';
-import type { AuthenticatedUser } from '@veo/auth';
+import { ConfigService } from '@nestjs/config';
+import {
+  InternalRestClient,
+  type GrpcServiceClient,
+  type UsersByIdsReply,
+  type VehiclesInspectionStatusReply,
+} from '@veo/rpc';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { VehicleOperabilityReason } from '@veo/shared-types';
+import { canSeeIdentity } from '../redaction/redaction.policy';
+import { GRPC_IDENTITY, GRPC_FLEET } from '../infra/tokens';
+import type { Env } from '../config/env.schema';
 import type {
   ExpiringDocumentView,
   FleetDocumentView,
@@ -60,6 +74,8 @@ interface Vehicle {
   energySource?: string | null;
   efficiency?: number | null;
   seats?: number | null;
+  /** ISO-8601 de alta (fleet-service la envía en el spread de Vehicle); encolado para el SLA de Revisiones. */
+  createdAt?: string | null;
 }
 /** Shape interno que sirve fleet-service (REST /documents). `status` ES el enum Prisma
  *  `FleetDocumentStatus` serializado tal cual (sin transformación intermedia); el contrato
@@ -71,6 +87,8 @@ interface FleetDocument {
   type: string;
   status: FleetDocumentView['status'];
   expiresAt: string | null;
+  /** ISO-8601 de creación (fleet-service devuelve la fila completa); encolado para el SLA de Revisiones. */
+  createdAt?: string | null;
 }
 interface Inspection {
   id: string;
@@ -82,10 +100,53 @@ interface Inspection {
 
 @Injectable()
 export class FleetService {
+  private readonly secret: string;
   constructor(
     @Inject(REST_FLEET) private readonly rest: InternalRestClient,
+    @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
+    @Inject(GRPC_FLEET) private readonly fleetGrpc: GrpcServiceClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
+    config: ConfigService<Env, true>,
     private readonly audit: AuditRecorder,
-  ) {}
+  ) {
+    this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
+
+  /**
+   * Enriquece los vehículos (lista o detalle) con NOMBRE del conductor (User.id → name · Compliance+) e ITV
+   * (última inspección por vehículo). DOS batches gRPC EN PARALELO (anti-N+1): identity GetUsersByIds + fleet
+   * GetVehiclesInspectionStatus. El nombre se redacta a null para sub-Compliance (misma política que drivers).
+   */
+  private async enrichVehicles(
+    identity: AuthenticatedUser,
+    vehicles: Vehicle[],
+  ): Promise<VehicleView[]> {
+    if (vehicles.length === 0) return [];
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const driverIds = [
+      ...new Set(vehicles.map((v) => v.driverId).filter((x): x is string => !!x)),
+    ];
+    const vehicleIds = vehicles.map((v) => v.id);
+    const [usersReply, itvReply] = await Promise.all([
+      driverIds.length > 0
+        ? this.identityGrpc.call<UsersByIdsReply>('GetUsersByIds', { ids: driverIds }, meta)
+        : Promise.resolve<UsersByIdsReply>({ users: [] }),
+      this.fleetGrpc.call<VehiclesInspectionStatusReply>(
+        'GetVehiclesInspectionStatus',
+        { ids: vehicleIds },
+        meta,
+      ),
+    ]);
+    const identityVisible = canSeeIdentity(identity.roles);
+    const nameById = new Map(usersReply.users.map((u) => [u.id, u.name]));
+    const itvById = new Map(itvReply.items.map((it) => [it.vehicleId, it]));
+    return vehicles.map((v) =>
+      toVehicleView(v, {
+        driverName: identityVisible && v.driverId ? nameById.get(v.driverId) || null : null,
+        itv: itvById.get(v.id) ?? null,
+      }),
+    );
+  }
 
   async createVehicle(identity: AuthenticatedUser, dto: CreateVehicleDto): Promise<Vehicle> {
     const v = await this.rest.post<Vehicle>('/vehicles', { identity, body: dto });
@@ -102,10 +163,12 @@ export class FleetService {
    * que devuelve la lista (antes devolvía el Vehicle crudo, así el detalle era ciego a la ficha del match). */
   async getVehicle(identity: AuthenticatedUser, id: string): Promise<VehicleView> {
     const v = await this.rest.get<Vehicle>(`/vehicles/${id}`, { identity });
-    return toVehicleView(v);
+    const [view] = await this.enrichVehicles(identity, [v]);
+    // enrichVehicles mapea 1:1 → [v] siempre da un item; el fallback (sin enriquecer) es defensa TS, no ocurre.
+    return view ?? toVehicleView(v);
   }
 
-  /** Lista paginada de la flota (admin). Proxy a fleet-service + proyección a vehicleView del contrato. */
+  /** Lista paginada de la flota (admin). Proxy a fleet-service + enriquecimiento (nombre + ITV) + proyección. */
   async listVehicles(
     identity: AuthenticatedUser,
     query: ListVehiclesQueryDto,
@@ -114,7 +177,7 @@ export class FleetService {
       identity,
       query: { docStatus: query.status, cursor: query.cursor, limit: query.limit },
     });
-    return { items: page.items.map(toVehicleView), nextCursor: page.nextCursor };
+    return { items: await this.enrichVehicles(identity, page.items), nextCursor: page.nextCursor };
   }
 
   /** Lista paginada de documentos (admin), filtrable por estado. Proyección a fleetDocumentView. */
@@ -310,10 +373,17 @@ function toFleetDocumentView(d: FleetDocument): FleetDocumentView {
     type: d.type,
     status: d.status,
     expiresAt: d.expiresAt ?? null,
+    createdAt: d.createdAt ?? null,
   };
 }
 
-function toVehicleView(v: Vehicle): VehicleView {
+function toVehicleView(
+  v: Vehicle,
+  enrich?: {
+    driverName: string | null;
+    itv: { hasInspection: boolean; current: boolean; nextDueAt: string } | null;
+  },
+): VehicleView {
   return {
     id: v.id,
     plate: v.plate,
@@ -322,6 +392,13 @@ function toVehicleView(v: Vehicle): VehicleView {
     year: v.year,
     color: v.color,
     status: v.docStatus,
+    // Nombre del conductor dueño (User.id → name · Compliance+; null redactado o sin dato). Reemplaza el id
+    // truncado del panel viejo. El estado de ITV (última inspección) alimenta la columna "ITV" del frame.
+    driverName: enrich?.driverName ?? null,
+    itvHasInspection: enrich?.itv?.hasInspection ?? false,
+    itvCurrent: enrich?.itv?.current ?? false,
+    itvNextDueAt: enrich?.itv?.nextDueAt || null,
+    createdAt: v.createdAt ?? null,
     // Veredicto de operabilidad + motivo (Lote 4): el panel los MUESTRA para coincidir con el backend del match.
     // Un fleet-service viejo que no los envía → no-operable + motivo DOCS (degradación segura, no sobre-reporta).
     operable: v.operable ?? false,

@@ -71,6 +71,11 @@ function heldPayout(id: string, driverId: string, amountCents: number): FakePayo
   };
 }
 
+/** Payout PENDING (nacido del cron, a la espera del disparo del operador) — el estado que el fix debe retener. */
+function pendingPayout(id: string, driverId: string, amountCents: number): FakePayout {
+  return { ...heldPayout(id, driverId, amountCents), status: 'PENDING', heldReason: null };
+}
+
 function makePrisma(rows: FakePayout[]) {
   const payouts = new Map(rows.map((p) => [p.id, p]));
   const outbox: { aggregateId: string; eventType: string; envelope: unknown }[] = [];
@@ -104,13 +109,20 @@ function makePrisma(rows: FakePayout[]) {
       ),
     },
   };
+  // Filtro genérico: soporta la query por-driverId (release) Y la query por-período (disbursePendingForPeriod).
+  const matches = (
+    p: FakePayout,
+    where: { driverId?: string; status?: string; periodStart?: Date; periodEnd?: Date },
+  ): boolean =>
+    (where.driverId === undefined || p.driverId === where.driverId) &&
+    (where.status === undefined || p.status === where.status) &&
+    (where.periodStart === undefined || +p.periodStart === +where.periodStart) &&
+    (where.periodEnd === undefined || +p.periodEnd === +where.periodEnd);
   const prisma = {
     read: {
       payout: {
-        findMany: vi.fn(async ({ where }: { where: { driverId: string; status: string } }) =>
-          [...payouts.values()].filter(
-            (p) => p.driverId === where.driverId && p.status === where.status,
-          ),
+        findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+          [...payouts.values()].filter((p) => matches(p, where)),
         ),
       },
     },
@@ -123,6 +135,28 @@ function makePrisma(rows: FakePayout[]) {
             const p = payouts.get(where.id);
             if (p) Object.assign(p, data);
             return p;
+          },
+        ),
+        // holdDriver (retro-hold por driverId) + disbursePendingForPeriod (backstop por id:{in}). CAS por status.
+        updateMany: vi.fn(
+          async ({
+            where,
+            data,
+          }: {
+            where: { driverId?: string; id?: { in: string[] }; status?: string };
+            data: Partial<FakePayout>;
+          }) => {
+            let count = 0;
+            for (const p of payouts.values()) {
+              const idOk = where.id === undefined || where.id.in.includes(p.id);
+              const drvOk = where.driverId === undefined || p.driverId === where.driverId;
+              const stOk = where.status === undefined || p.status === where.status;
+              if (idOk && drvOk && stOk) {
+                Object.assign(p, data);
+                count++;
+              }
+            }
+            return { count };
           },
         ),
       },
@@ -139,6 +173,7 @@ function makeRedis() {
       sadd: vi.fn(async (_k: string, m: string) => flagged.add(m) && 1),
       srem: vi.fn(async (_k: string, m: string) => (flagged.delete(m) ? 1 : 0)),
       sismember: vi.fn(async (_k: string, m: string) => (flagged.has(m) ? 1 : 0)),
+      smembers: vi.fn(async () => [...flagged]),
     },
   };
 }
@@ -229,5 +264,44 @@ describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.fl
     expect(res).toEqual({ driverId: 'drv-1', released: 0, totalAmountCents: 0 });
     expect(outbox).toHaveLength(0);
     expect(flagged.has('drv-1')).toBe(false);
+  });
+});
+
+describe('PayoutsService · gate de review en el DESEMBOLSO (fix crítico · driver.flagged post-cron)', () => {
+  it('holdDriver retro-flippea a HELD los Payout PENDING existentes del conductor (+ sadd)', async () => {
+    // drv-2 tiene un PENDING (nacido del cron) y NO estaba flaggeado; llega driver.flagged.
+    const { prisma, payouts } = makePrisma([pendingPayout('po-1', 'drv-2', 4000)]);
+    const { redis, flagged } = makeRedis(); // flagged = {drv-1}
+    const svc = new PayoutsService(prisma, redis as never, makeGateway(), config);
+
+    await svc.holdDriver('drv-2');
+
+    expect(flagged.has('drv-2')).toBe(true); // sadd: los futuros nacen HELD
+    expect(payouts.get('po-1')!.status).toBe('HELD'); // retro-hold: el PENDING vigente NO se desembolsa
+    expect(payouts.get('po-1')!.heldReason).toBe('driver_in_review');
+  });
+
+  it('disbursePendingForPeriod RETIENE (→HELD) el PENDING de un driver flaggeado y desembolsa SOLO los limpios', async () => {
+    const start = new Date('2026-05-18T00:00:00Z');
+    const end = new Date('2026-05-25T00:00:00Z');
+    // po-flagged: driver EN REVIEW (drv-1 ∈ flagged). po-clean: driver limpio (drv-2). Simula el flag llegado
+    // DESPUÉS de la agregación (ambos ya PENDING) y ANTES del disparo del operador.
+    const { prisma, payouts } = makePrisma([
+      pendingPayout('po-flagged', 'drv-1', 4000),
+      pendingPayout('po-clean', 'drv-2', 6000),
+    ]);
+    const { redis } = makeRedis(); // flagged = {drv-1}
+    const gateway = makeGateway();
+    const svc = new PayoutsService(prisma, redis as never, gateway, config);
+
+    await svc.disbursePendingForPeriod(start, end);
+
+    // El conductor EN REVIEW NO cobra: su payout queda HELD (se liberará al resolver el review).
+    expect(payouts.get('po-flagged')!.status).toBe('HELD');
+    expect(payouts.get('po-flagged')!.heldReason).toBe('driver_in_review');
+    // El limpio SÍ va al riel money-OUT (PROCESSING).
+    expect(payouts.get('po-clean')!.status).toBe('PROCESSING');
+    // ASSERT CLAVE: el riel se invocó SOLO para el limpio, NUNCA para el conductor en review.
+    expect(gateway.calls.map((c) => c.payoutId)).toEqual(['po-clean']);
   });
 });

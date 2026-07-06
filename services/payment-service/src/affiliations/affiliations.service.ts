@@ -40,6 +40,8 @@ export interface CreateAffiliationInput {
 
 /** Ventana mínima entre re-consultas al proveedor por usuario (throttle del refresh defensivo). */
 const REFRESH_THROTTLE_MS = 10_000;
+/** Cota del Map de throttle in-memory: al superarla se podan las entradas más viejas que la ventana (ver uso). */
+const REFRESH_THROTTLE_MAX_ENTRIES = 10_000;
 
 /** Vista pública SIN walletUid ni PII completa. Es lo ÚNICO que sale al BFF/cliente. */
 export interface AffiliationView {
@@ -202,6 +204,14 @@ export class AffiliationsService {
     const last = this.lastRefreshAt.get(userId) ?? 0;
     if (now - last < REFRESH_THROTTLE_MS) return null; // throttle: no martillamos al proveedor
     this.lastRefreshAt.set(userId, now);
+    // Poda del Map (evita el memory-leak por-pod): las entradas más viejas que la ventana ya no sirven (el
+    // throttle solo mira los últimos REFRESH_THROTTLE_MS). Se barre SOLO al superar el cap (amortizado O(n)
+    // ocasional, no en cada refresh) → el Map queda acotado a los usuarios activos en la ventana.
+    if (this.lastRefreshAt.size > REFRESH_THROTTLE_MAX_ENTRIES) {
+      for (const [uid, ts] of this.lastRefreshAt) {
+        if (now - ts >= REFRESH_THROTTLE_MS) this.lastRefreshAt.delete(uid);
+      }
+    }
 
     let detail: { status?: string; phoneNumber?: string | null };
     try {
@@ -246,14 +256,20 @@ export class AffiliationsService {
     if (aff.status === AffiliationStatus.ACTIVE || aff.status === AffiliationStatus.REVOKED)
       return aff; // idempotente / no pisar
     return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.walletAffiliation.update({
-        where: { id: aff.id },
+      // CAS por status (no `update where {id}`): el guard de arriba es un READ-then-check (TOCTOU) — dos caminos
+      // concurrentes (webhook + refresh /show) que leyeron PROCESS ambos lo pasan y emitirían
+      // payment.affiliation_activated DOS veces. Con el CAS `where {id, status: <lo leído>}` solo UNO gana
+      // (count=1) y emite; el perdedor ve count=0 → no-op (devuelve la fila ya ACTIVE sin re-emitir).
+      const { count } = await tx.walletAffiliation.updateMany({
+        where: { id: aff.id, status: aff.status },
         data: {
           status: 'ACTIVE',
           phoneMasked: opts.phoneMasked,
           walletUid: opts.walletUid ?? aff.walletUid,
         },
       });
+      const updated = await tx.walletAffiliation.findUniqueOrThrow({ where: { id: aff.id } });
+      if (count === 0) return updated; // otra corrida concurrente ya activó: NO re-emitir
       const envelope = createEnvelope({
         eventType: 'payment.affiliation_activated',
         producer: 'payment-service',
@@ -308,11 +324,15 @@ export class AffiliationsService {
       aff.status === AffiliationStatus.REVOKED
     )
       return;
-    await this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.walletAffiliation.update({
-        where: { id: aff.id },
+    const emitted = await this.prisma.write.$transaction(async (tx) => {
+      // CAS por status (mismo motivo que activateAndEmit): dos webhooks EXPIRED/DECLINED concurrentes que leyeron
+      // el mismo estado fuente NO deben emitir payment.affiliation_expired dos veces. Solo el que matchea emite.
+      const { count } = await tx.walletAffiliation.updateMany({
+        where: { id: aff.id, status: aff.status },
         data: { status: AffiliationStatus.EXPIRED, walletUid: input.walletUid ?? aff.walletUid },
       });
+      if (count === 0) return false; // otra corrida ya transicionó: NO re-emitir
+      const updated = await tx.walletAffiliation.findUniqueOrThrow({ where: { id: aff.id } });
       const envelope = createEnvelope({
         eventType: 'payment.affiliation_expired',
         producer: 'payment-service',
@@ -324,8 +344,9 @@ export class AffiliationsService {
         },
       });
       await enqueueOutbox(tx, envelope, updated.id);
+      return true;
     });
-    this.logger.log(`Afiliación ${aff.id} → EXPIRED (por webhook)`);
+    if (emitted) this.logger.log(`Afiliación ${aff.id} → EXPIRED (por webhook)`);
   }
 
   /**

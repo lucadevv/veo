@@ -136,6 +136,10 @@ export class PayoutPollService implements OnModuleInit, OnModuleDestroy {
   async pollOnce(): Promise<{ scanned: number; applied: number }> {
     if (!supportsPayoutStatusQuery(this.gateway)) return { scanned: 0, applied: 0 };
 
+    // `since` = umbral de GRACIA de submit (maxAgeMin). Ya NO filtra el barrido (antes `updatedAt >= since`
+    // dejaba HUÉRFANO todo PROCESSING más viejo que la ventana — sin red · fix #7). Ahora escaneamos TODO
+    // PROCESSING (oldest-first, capado a `batch`: los viejos se trabajan primero, tick a tick) y usamos `since`
+    // solo para decidir la recuperación por CRASH de abajo (#8).
     const since = new Date(Date.now() - this.maxAgeMin * 60_000);
     const processing = await this.prisma.read.payout.findMany({
       where: {
@@ -143,9 +147,8 @@ export class PayoutPollService implements OnModuleInit, OnModuleDestroy {
         // Ancla de reconciliación: el claim marker `dedupKey`, NO el `externalRef` (que puede faltar por
         // orfandad). Todo PROCESSING legítimo fue reclamado con su dedupKey en la misma tx del claim.
         dedupKey: { not: null },
-        updatedAt: { gte: since },
       },
-      select: { id: true, dedupKey: true, externalRef: true },
+      select: { id: true, dedupKey: true, externalRef: true, updatedAt: true },
       orderBy: { updatedAt: 'asc' },
       take: this.batch,
     });
@@ -161,7 +164,27 @@ export class PayoutPollService implements OnModuleInit, OnModuleDestroy {
           dedupKey,
           externalRef: p.externalRef,
         });
-        if (!detail.found || detail.status === 'PENDING') continue; // sigue en curso / aún no reconocido
+        if (detail.found && detail.status === 'PENDING') continue; // el riel lo tiene: sigue en curso
+        if (!detail.found) {
+          // El riel NO tiene registro del desembolso. RECIENTE (updatedAt >= since) → puede ser lag de registro,
+          // seguimos esperando. VIEJO (< since, > maxAgeMin) → el disburse NUNCA llegó al riel: crash entre el
+          // claim a PROCESSING (con dedupKey) y `gateway.disburse` (#8) → la plata NO se movió → reset
+          // PROCESSING→FAILED para re-desembolsar (retryPayout · dedupKey-safe: si por lag el riel SÍ lo tenía,
+          // la re-disburse con el MISMO dedupKey no duplica). Sin esto quedaba PROCESSING para siempre.
+          if (p.updatedAt < since) {
+            const res = await this.payouts.applyPayoutDisbursementResult({
+              payoutId: p.id,
+              resolution: 'REJECTED',
+            });
+            if (res.applied) {
+              applied += 1;
+              this.logger.warn(
+                `Poll desembolso: payout=${p.id} PROCESSING sin registro en el riel tras ${this.maxAgeMin}min (crash pre-disburse) → FAILED para reintento`,
+              );
+            }
+          }
+          continue;
+        }
         const res = await this.payouts.applyPayoutDisbursementResult({
           payoutId: p.id,
           resolution: detail.status,

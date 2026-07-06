@@ -5,7 +5,12 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
-import type { PayoutView } from '@veo/api-client';
+import type {
+  PayoutView,
+  CommissionView,
+  CostPerKmConfigView,
+  CostPerKmListView,
+} from '@veo/api-client';
 import { REST_PAYMENT, REST_BOOKING } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type {
@@ -15,28 +20,11 @@ import type {
   ReplaceCostPerKmDto,
 } from './dto/finance.dto';
 
-/** Vista de la comisión por modo (F2.7 · ADR-017 §1.6): tasa ON-DEMAND + service fee CARPOOLING (ambas bps, editables) + version. */
-export interface CommissionView {
-  /** Comisión ON-DEMAND en basis points Int (0..10000; 2000 = 20%) — descontada al conductor. */
-  onDemandRateBps: number;
-  /** Service fee CARPOOLING en basis points Int (0..10000) — sumado al pasajero (cost-sharing). */
-  carpoolingFeeBps: number;
-  version: number;
-  updatedAt: string;
-}
-
-/** Costo/km de un país (F2.5): el costo de operación que alimenta el tope de cost-sharing + version (CAS). */
-export interface CostPerKmConfigView {
-  pais: string;
-  costPerKmCents: number;
-  version: number;
-  updatedAt: string;
-}
-
-/** GET del costo/km: una fila por país (PE/EC). */
-export interface CostPerKmListView {
-  configs: CostPerKmConfigView[];
-}
+// Contratos de comisión + costo/km: FUENTE ÚNICA en @veo/api-client (el MISMO zod schema que valida el
+// admin-web). Antes re-declarados acá como interfaces (double-source con el contrato — el `pais` local era
+// `string`, el canónico es `'PE'|'EC'`) → ahora importados de api-client (arriba) y re-exportados para que
+// el finance.controller los siga tomando de este módulo, sin duplicar la forma.
+export type { CommissionView, CostPerKmConfigView, CostPerKmListView };
 
 const COMMISSION_BASE = '/internal/finance/commission';
 const COST_PER_KM_BASE = '/internal/finance/cost-per-km';

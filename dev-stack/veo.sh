@@ -218,6 +218,48 @@ infra_up_and_wait() {
     fi
   done
   green "  infra OK (postgres redis kafka minio clickhouse mosquitto)"
+  ensure_web_assets
+}
+
+# ── 1b. WEB ASSETS (login-hero.mp4) ───────────────────────────────────────────
+# El video de fondo del login es un BINARIO pesado (~123MB) → gitignored (regla del proyecto: binarios NO en
+# git, van a MinIO self-hosted referenciados). Vive en el bucket PÚBLICO veo-web-assets-dev (branding decorativo,
+# sin PII → sin cifrar). Sync BIDIRECCIONAL idempotente para que `veo.sh dev` SIEMPRE lo levante, hasta en un
+# worktree fresco (que no trae gitignored):
+#   · local presente + MinIO vacío → lo SUBE (el 1er checkout que tenga el asset siembra MinIO para todos).
+#   · local ausente (worktree)      → lo BAJA de MinIO (bucket público → curl sin firma) a public/.
+#   · en ningún lado                → avisa cómo proveerlo; el login cae al fondo negro (degradación honesta, no rompe).
+ensure_web_assets() {
+  local dest="$ROOT_DIR/apps/admin-web/public/login-hero.mp4"
+  local url="http://localhost:9002/veo-web-assets-dev/login-hero.mp4"
+  local obj="local/veo-web-assets-dev/login-hero.mp4"
+  if [[ -f "$dest" ]]; then
+    # Sembrar MinIO SOLO si el objeto aún no existe (idempotente; no re-sube en cada boot).
+    if ! curl -sfI "$url" >/dev/null 2>&1; then
+      blue "  [web-assets] sembrando login-hero.mp4 en MinIO (primer checkout con el asset)…"
+      docker exec veo-minio mc alias set local http://localhost:9000 veo_dev veo_dev_secret >/dev/null 2>&1
+      if docker cp "$dest" veo-minio:/tmp/login-hero.mp4 >/dev/null 2>&1 \
+        && docker exec veo-minio mc cp /tmp/login-hero.mp4 "$obj" >/dev/null 2>&1; then
+        docker exec veo-minio rm -f /tmp/login-hero.mp4 >/dev/null 2>&1
+        green "  [web-assets] login-hero.mp4 sembrado en MinIO"
+      else
+        yel "  [web-assets] no pude sembrar el video en MinIO (sigo; el asset local igual sirve el login)"
+      fi
+    fi
+  else
+    # Worktree/checkout sin el asset: bajarlo de MinIO (bucket público).
+    if curl -sfI "$url" >/dev/null 2>&1; then
+      blue "  [web-assets] bajando login-hero.mp4 de MinIO → public/…"
+      if curl -sf "$url" -o "$dest" 2>/dev/null; then
+        green "  [web-assets] login-hero.mp4 provisto ($(du -h "$dest" 2>/dev/null | cut -f1))"
+      else
+        rm -f "$dest" 2>/dev/null
+        yel "  [web-assets] falló la descarga del video (sigo; el login usa fondo negro)"
+      fi
+    else
+      yel "  [web-assets] login-hero.mp4 no está en public/ ni en MinIO → el login usa fondo negro. Para tenerlo: dejá el .mp4 en apps/admin-web/public/ y re-corré 'veo.sh dev' (se siembra en MinIO solo)."
+    fi
+  fi
 }
 
 # ── 2. SECRETS ────────────────────────────────────────────────────────────────

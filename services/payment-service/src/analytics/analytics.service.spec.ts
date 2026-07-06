@@ -32,7 +32,8 @@ describe('P-B · analytics money-in al banco (excluye CASH, net-aware)', () => {
     expect(out.revenueTodayCents).toBe(9650 - 150); // neto − reembolsado
     const revenueCall = calls[0]!;
     expect(revenueCall._sum).toMatchObject({ netSettledCents: true, refundedCents: true });
-    expect(revenueCall.where.method).toEqual({ not: 'CASH' }); // el efectivo NO llega al banco
+    // Lista POSITIVA de digitales (no `method != CASH`): usa el índice [method, status, capturedAt]; la negación lo anula.
+    expect(revenueCall.where.method).toEqual({ in: ['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO'] });
     expect(revenueCall.where.status).toEqual({ in: ['CAPTURED', 'PARTIALLY_REFUNDED'] });
   });
 
@@ -46,6 +47,6 @@ describe('P-B · analytics money-in al banco (excluye CASH, net-aware)', () => {
     const out = await svc.revenue(new Date('2026-07-02T18:00:00Z'));
     expect(out.platformMarginTodayCents).toBe(2000 - 350 - 100 - 50);
     const marginCall = calls[1]!; // 2da query agregada
-    expect(marginCall.where.method).toEqual({ not: 'CASH' });
+    expect(marginCall.where.method).toEqual({ in: ['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO'] });
   });
 });

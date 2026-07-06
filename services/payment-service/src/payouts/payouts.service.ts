@@ -22,6 +22,7 @@ import {
 import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
+import { NON_CASH_METHODS } from '../payments/payment.policy';
 import { REDIS } from '../infra/redis';
 import {
   aggregatePayouts,
@@ -38,6 +39,8 @@ import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
+/** Motivo de retención de un payout por conductor en review (driver.flagged). Único valor, sin string mágico. */
+const HELD_REASON_REVIEW = 'driver_in_review';
 const CRON_LOCK_KEY = 'veo:payment:lock:weekly-payouts';
 const CRON_LOCK_TTL_SECONDS = 600;
 const STEPUP_MAX_AGE_SECONDS = 300;
@@ -189,30 +192,53 @@ export class PayoutsService {
     availableCents: number,
     payoutId: string,
   ): Promise<number> {
+    // Créditos PENDING (comisión CASH revertida · gate MEDIA #4): la plataforma se los DEBE al conductor → se
+    // SUMAN al neto (bajan `applied`, que luego se resta del bruto). Se aplican SIEMPRE — no dependen de la
+    // ganancia — y agregan margen para netear deudas en la MISMA corrida. Se marcan APPLIED ligados a este payout
+    // (auditoría/conciliación). Idempotencia del run: el unique (driverId, período) + el lock distribuido evitan
+    // el doble-pago; acá solo se aplican los créditos PENDIENTES una vez (pasan a APPLIED).
+    const credits = await tx.driverCredit.findMany({
+      where: { driverId, status: 'PENDING' },
+      orderBy: { createdAt: 'asc' },
+    });
+    let applied = 0;
+    for (const credit of credits) {
+      await tx.driverCredit.update({
+        where: { id: credit.id },
+        data: { status: 'APPLIED', appliedInPayoutId: payoutId, appliedAt: new Date() },
+      });
+      applied -= credit.amountCents; // crédito (>0) baja `applied` → sube el neto (netAmount = bruto − applied)
+    }
+
     const debts = await tx.driverDebt.findMany({
       where: { driverId, status: 'PENDING' },
       orderBy: { createdAt: 'asc' },
     });
-    let toApply = availableCents;
-    let applied = 0;
+    // Los créditos ya bajaron `applied` (a <=0) → suman margen a la ganancia para netear deudas este período.
+    let toApply = availableCents - applied;
     for (const debt of debts) {
       if (toApply <= 0) break;
       if (toApply >= debt.amountCents) {
-        // La ganancia cubre la deuda ENTERA → SETTLED, ligada a este payout (auditoría/conciliación).
-        await tx.driverDebt.update({
-          where: { id: debt.id },
+        // La ganancia cubre la deuda ENTERA → SETTLED, ligada a este payout (auditoría/conciliación). CAS por
+        // status+monto (updateMany, no update-by-id): un refund CONCURRENTE (reverseCashDebtInTx) pudo revertir/
+        // reducir esta deuda entre el findMany de arriba y este update → si count=0 la SALTAMOS (no la neteamos
+        // ni la contamos), evitando el lost-update (netear una deuda ya revertida = doble-beneficio al conductor).
+        const settled = await tx.driverDebt.updateMany({
+          where: { id: debt.id, status: 'PENDING', amountCents: debt.amountCents },
           data: { status: 'SETTLED', settledInPayoutId: payoutId, settledAt: new Date() },
         });
+        if (settled.count === 0) continue;
         toApply -= debt.amountCents;
         applied += debt.amountCents;
       } else {
         // Cubre PARCIAL → reduce el monto de la deuda del borde (queda PENDING con el resto); lo aplicado va al
         // payout. El neteo parcial se refleja en Payout.debtAppliedCents (no se parte la fila → sin colisión de
-        // UNIQUE(paymentId)).
-        await tx.driverDebt.update({
-          where: { id: debt.id },
+        // UNIQUE(paymentId)). Mismo CAS por status+monto: si un refund concurrente la tocó, count=0 → la saltamos.
+        const reduced = await tx.driverDebt.updateMany({
+          where: { id: debt.id, status: 'PENDING', amountCents: debt.amountCents },
           data: { amountCents: debt.amountCents - toApply },
         });
+        if (reduced.count === 0) continue;
         applied += toApply;
         toApply = 0;
       }
@@ -296,7 +322,7 @@ export class PayoutsService {
               // ADR-015 §3: el cron ya NO nace PROCESSED. PENDING (a la espera del disparo del operador) o
               // HELD (review en curso). PROCESSED se alcanza SOLO cuando el riel confirma la salida del dinero.
               status: flagged ? 'HELD' : 'PENDING',
-              heldReason: flagged ? 'driver_in_review' : null,
+              heldReason: flagged ? HELD_REASON_REVIEW : null,
               processedAt: null,
             },
           });
@@ -354,13 +380,30 @@ export class PayoutsService {
       where: { periodStart: start, periodEnd: end, status: PayoutStatus.PENDING },
       orderBy: { id: 'asc' },
     });
-    const projectedTotal = pendingPayouts.reduce((sum, p) => sum + p.amountCents, 0);
+    // BACKSTOP DEL GATE DE REVIEW (fix crítico · último punto antes del money-out): re-consulta el set FLAGGED en
+    // el MOMENTO del desembolso. Aunque holdDriver ya retro-flippea, esto cierra la ventana entre ese flip y el
+    // disparo manual del operador (días): un `driver.flagged` que llegó en el ínterin RETIENE el PENDING (→HELD,
+    // transición válida) en vez de pagarlo. UN solo smembers + un updateMany batch (no N sismember por payout).
+    const flaggedIds = new Set(await this.redis.smembers(FLAGGED_DRIVERS_KEY));
+    const toHold = pendingPayouts.filter((p) => flaggedIds.has(p.driverId));
+    const toDisburse = pendingPayouts.filter((p) => !flaggedIds.has(p.driverId));
+    if (toHold.length > 0) {
+      await this.prisma.write.payout.updateMany({
+        where: { id: { in: toHold.map((p) => p.id) }, status: PayoutStatus.PENDING },
+        data: { status: PayoutStatus.HELD, heldReason: HELD_REASON_REVIEW },
+      });
+      this.logger.warn(
+        `Retenidos ${toHold.length} payout(s) por review tardío (driver.flagged post-agregación) en ${periodLabel(start, end)} — NO desembolsados`,
+      );
+    }
+    // El step-up MFA se evalúa sobre el total REAL a desembolsar (ya sin los retenidos), no sobre el bruto.
+    const projectedTotal = toDisburse.reduce((sum, p) => sum + p.amountCents, 0);
     if (operator && projectedTotal > this.stepUpCents && !this.hasFreshMfa(operator)) {
       throw new ForbiddenError(
         `Desembolsar ${projectedTotal} céntimos supera S/5000: requiere verificación MFA fresca (step-up)`,
       );
     }
-    return this.disburseEach(pendingPayouts);
+    return this.disburseEach(toDisburse);
   }
 
   /**
@@ -660,6 +703,16 @@ export class PayoutsService {
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */
   async holdDriver(driverId: string): Promise<void> {
     await this.redis.sadd(FLAGGED_DRIVERS_KEY, driverId);
+    // RETRO-HOLD (fix crítico): flippea a HELD los Payout PENDING YA existentes del conductor. Un `driver.flagged`
+    // que llega DESPUÉS de la agregación del cron encuentra el Payout ya nacido PENDING; sin este paso, el `sadd`
+    // solo evita que los FUTUROS payouts nazcan HELD, pero el PENDING vigente se desembolsaría igual al conductor
+    // en review. CAS por-fila `status: PENDING` (transición PENDING→HELD válida · idempotente: no toca PROCESSING/
+    // PROCESSED). Se liberan por el camino de vuelta (release) cuando el review se resuelve. El desembolso además
+    // re-chequea el set (doble defensa: cierra la ventana entre este flip y el disparo manual del operador).
+    await this.prisma.write.payout.updateMany({
+      where: { driverId, status: PayoutStatus.PENDING },
+      data: { status: PayoutStatus.HELD, heldReason: HELD_REASON_REVIEW },
+    });
   }
 
   /**
@@ -744,8 +797,9 @@ export class PayoutsService {
         // A2 (ADR-022 §P-A) · EXCLUIR el efectivo del payout POSITIVO: en un viaje CASH el conductor ya cobró su
         // neto EN MANO (la plata nunca pasó por la plataforma). Pagárselo otra vez por banco = doble-pago (el bug
         // A2). Su comisión adeudada se acumula en `DriverDebt` (en la captura) y se NETEA aparte en el run. Los
-        // tip-Payments DIGITALES de un viaje cash (method != CASH, Model B) SÍ entran: son propina real por banco.
-        method: { not: 'CASH' },
+        // tip-Payments DIGITALES de un viaje cash (Model B) SÍ entran: son propina real por banco. Lista POSITIVA
+        // (no `method != CASH`): la negación anula el índice [method, status, capturedAt]; el `in` sí lo usa.
+        method: { in: [...NON_CASH_METHODS] },
         // Incluye PARTIALLY_REFUNDED (F4): un reembolso PARCIAL al pasajero lo absorbe la plataforma
         // (sale de su comisión); el conductor prestó el servicio → mantiene su neto. Un cobro REFUNDED
         // (total) sí queda fuera (viaje revertido → el conductor no cobra).
@@ -805,8 +859,16 @@ export class PayoutsService {
     // TODOS los bonos históricos completados-no-pagados, y se auto-limpia (una vez marcados, paidAt deja
     // de ser null y no vuelven a aparecer). La idempotencia NO se rompe: el guard sigue siendo paidAt:null
     // —tanto acá (lectura) como en el updateMany (CAS de marcado)—, así que un re-run no los re-paga.
+    //
+    // FIX DOBLE-PAGO (guard por paidInPayoutId): `paidAt` se marca SOLO al confirmar el Payout (PROCESSED),
+    // así que entre el create del Payout y su confirmación el bono queda `paidAt:null` PERO ya LIGADO
+    // (`paidInPayoutId` seteado) y su monto YA está congelado en ESE Payout. Sin este guard, un 2º run del
+    // período re-seleccionaba ese bono (seguía paidAt:null), lo re-ligaba y lo bancaba en un SEGUNDO Payout →
+    // doble-pago. `paidInPayoutId:null` excluye los ya-ligados (in-flight o retenidos por un FAILED): un FAILED
+    // se paga RETENTÁNDOLO (retryPayout re-desembolsa el monto congelado y marca paidAt con el link intacto),
+    // igual que su gross/comisión — el bono no se pierde, viaja con su Payout.
     const pendingIncentives = await this.prisma.read.incentiveProgress.findMany({
-      where: { paidAt: null, completedAt: { not: null, lt: end } },
+      where: { paidAt: null, paidInPayoutId: null, completedAt: { not: null, lt: end } },
       select: { id: true, driverId: true, rewardGrantedCents: true },
     });
     const pendingIncentiveIdsByDriver = new Map<string, string[]>();

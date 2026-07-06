@@ -1966,6 +1966,18 @@ export class DriversService {
         }),
         d.id,
       );
+      // Par de APERTURA del ciclo de sesión del conductor (espejo de went_offline·shift_end): la única transición
+      // OFFLINE/ON_BREAK→AVAILABLE, ya pasado el gate biométrico. Es una MUTACIÓN deliberada → al WORM. Va en la
+      // MISMA tx que el CAS (outbox-in-tx · FOUNDATION §6): o queda AVAILABLE y el evento se publica, o ninguno.
+      await enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'driver.went_online',
+          producer: 'identity-service',
+          payload: { driverId: d.id, at: new Date().toISOString() },
+        }),
+        d.id,
+      );
     });
 
     await this.redis.del(lockKey);

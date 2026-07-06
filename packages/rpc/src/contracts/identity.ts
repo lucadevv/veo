@@ -26,6 +26,18 @@ export interface DriversByIdsReply {
   drivers: DriverReply[];
 }
 
+/** identity.GetDriverCounts / conteos de conductores por backgroundCheckStatus (stat cards del admin). */
+export interface DriverCountsReply {
+  pending: number;
+  cleared: number;
+  rejected: number;
+}
+
+/** identity.GetUsersByIds / mensaje UsersByIdsReply. Orden libre; el consumidor mapea por id (User.id → name). */
+export interface UsersByIdsReply {
+  users: UserReply[];
+}
+
 /** identity.GetDriver / GetDriverByUser / mensaje DriverReply. */
 export interface DriverReply {
   id: string;

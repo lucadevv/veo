@@ -73,6 +73,7 @@ function makeRedis(): { redis: unknown; flagged: Set<string> } {
     },
     del: async (key: string) => (locks.delete(key) ? 1 : 0),
     sismember: async (_k: string, m: string) => (flagged.has(m) ? 1 : 0),
+    smembers: async (_k: string) => [...flagged], // backstop de disbursePendingForPeriod (fix CRÍTICA retención)
     sadd: async (_k: string, m: string) => (flagged.add(m) ? 1 : 0),
     srem: async (_k: string, m: string) => (flagged.delete(m) ? 1 : 0),
   };

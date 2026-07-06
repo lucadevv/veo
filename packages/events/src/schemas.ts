@@ -142,6 +142,16 @@ export const driverWentOffline = z.object({
   at: z.string(),
   reason: z.enum([DRIVER_OFFLINE_REASON.SHIFT_END, DRIVER_OFFLINE_REASON.DISCONNECT]),
 });
+/// Señal de que un conductor ABRIÓ turno (espejo de `went_offline` rama shift_end). La emite identity-service
+/// en `startShift` — la ÚNICA transición OFFLINE→AVAILABLE, que SIEMPRE pasa por el gate biométrico — por OUTBOX
+/// en la MISMA tx que el CAS de `Driver.currentStatus`→AVAILABLE. A diferencia de `went_offline` NO lleva
+/// `reason`: hay una sola causa (apertura deliberada de turno; no existe un "online" best-effort). Es una
+/// MUTACIÓN de negocio deliberada → se audita al WORM (par de apertura del ciclo de sesión del conductor).
+/// `driverId` = id de PERFIL Driver (mismo espacio que `went_offline`). SIN PII: solo id + marca temporal.
+export const driverWentOnline = z.object({
+  driverId: z.string(),
+  at: z.string(),
+});
 export const userKycVerified = z.object({
   userId: z.string(),
   kycStatus: z.string(),
@@ -1410,6 +1420,7 @@ export const EVENT_SCHEMAS = {
   'driver.resubmitted': driverResubmitted,
   'driver.reactivated': driverReactivated,
   'driver.went_offline': driverWentOffline,
+  'driver.went_online': driverWentOnline,
   'driver.excessive_cancellations': driverExcessiveCancellations,
   'biometric.failed': biometricFailed,
   'biometric.enrolled': biometricEnrolled,

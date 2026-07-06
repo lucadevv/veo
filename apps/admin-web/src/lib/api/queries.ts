@@ -44,6 +44,8 @@ import {
   reinviteOperatorResult,
   paginated,
   pendingDriver,
+  driverCounts,
+  reviewQueueSummary,
   panicDetail,
   type ReplaceCatalogRequest,
   type ReplaceScheduleRequest,
@@ -68,6 +70,8 @@ export const qk = {
   drivers: (status: string) => ['drivers', status] as const,
   driver: (id: string) => ['driver', id] as const,
   driversPending: ['drivers-pending'] as const,
+  driversSummary: ['drivers-summary'] as const,
+  reviewsSummary: ['reviews-summary'] as const,
   operators: ['operators'] as const,
   panics: (status: string) => ['panics', status] as const,
   panic: (id: string) => ['panic', id] as const,
@@ -342,6 +346,24 @@ export function useDriversPending() {
   });
 }
 
+/** Conteo de conductores por estado de antecedentes (pending/cleared/rejected) para los stat cards del panel. */
+export function useDriversSummary() {
+  return useQuery({
+    queryKey: qk.driversSummary,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/drivers/summary', { schema: driverCounts, signal }),
+  });
+}
+
+/** Conteo de las colas de revisión (conductores + docs + modelos) para los stat cards de la cola unificada. */
+export function useReviewsSummary() {
+  return useQuery({
+    queryKey: qk.reviewsSummary,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/reviews/summary', { schema: reviewQueueSummary, signal }),
+  });
+}
+
 /* ── Operadores del panel (alta por invitación · solo ADMIN/SUPERADMIN) ── */
 const operatorList = z.array(operator);
 
@@ -481,6 +503,34 @@ export function useVehicle(id: string) {
     enabled: id.length > 0,
     queryFn: ({ signal }) =>
       apiClient().get(`/fleet/vehicles/${id}`, { schema: vehicleView, signal }),
+  });
+}
+
+/** Documentos de UN vehículo (owner=VEHICLE) para el detalle: SOAT, tarjeta de propiedad, foto. */
+export function useVehicleDocuments(vehicleId: string) {
+  return useQuery({
+    queryKey: ['vehicle-documents', vehicleId] as const,
+    enabled: vehicleId.length > 0,
+    queryFn: ({ signal }) =>
+      apiClient().get('/fleet/documents', {
+        schema: documentPage,
+        signal,
+        query: cleanQuery({ ownerId: vehicleId, limit: 50 }),
+      }),
+  });
+}
+
+/** Inspecciones (ITV) de UN vehículo — última + historial, para la card de ITV del detalle. */
+export function useVehicleInspections(vehicleId: string) {
+  return useQuery({
+    queryKey: ['vehicle-inspections', vehicleId] as const,
+    enabled: vehicleId.length > 0,
+    queryFn: ({ signal }) =>
+      apiClient().get('/fleet/inspections', {
+        schema: inspectionPage,
+        signal,
+        query: cleanQuery({ vehicleId, limit: 50 }),
+      }),
   });
 }
 

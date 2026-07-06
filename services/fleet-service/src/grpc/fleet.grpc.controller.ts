@@ -20,12 +20,58 @@ import {
   isInspectionCurrent,
   InspectionInvalidReason,
 } from '../inspections/inspection-rules';
-import { FleetOwnerType, type Vehicle } from '../generated/prisma';
+import {
+  FleetDocumentStatus,
+  FleetDocumentType,
+  FleetOwnerType,
+  VehicleDocStatus,
+  VehicleModelStatus,
+  type Vehicle,
+} from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
 }
+
+/** fleet.GetVehicleCounts — conteo de vehículos por docStatus (stat cards del admin). */
+interface VehicleCountsReply {
+  valid: number;
+  expiringSoon: number;
+  expired: number;
+}
+
+/** fleet.GetReviewQueueCounts — conteo de las colas de revisión de flota (cola unificada del admin). */
+interface ReviewQueueCountsReply {
+  docsPendingReview: number;
+  docsExpiringSoon: number;
+  modelsPendingReview: number;
+}
+
+/** fleet.GetDriverDocsCompleteness — completitud documental por conductor (REQUERIDOS en VALID / total). */
+interface DriverDocsCompletenessReply {
+  items: { driverId: string; validRequired: number; requiredTotal: number }[];
+}
+
+/** fleet.GetVehiclesInspectionStatus — estado de ITV (última inspección) por vehículo. */
+interface VehiclesInspectionStatusReply {
+  items: {
+    vehicleId: string;
+    hasInspection: boolean;
+    current: boolean;
+    passed: boolean;
+    nextDueAt: string;
+    invalidReason: string;
+  }[];
+}
+
+/** Documentos DRIVER-scoped OBLIGATORIOS para operar (espeja REQUIRED_DRIVER_DOC_TYPES del admin-bff). */
+const REQUIRED_DRIVER_DOC_TYPES = [
+  FleetDocumentType.LICENSE_A1,
+  FleetDocumentType.SOAT,
+  FleetDocumentType.PROPERTY_CARD,
+  FleetDocumentType.VEHICLE_PHOTO,
+] as const;
 
 interface GetByIdsRequest {
   ids: string[];
@@ -208,6 +254,177 @@ export class FleetGrpcController {
     if (!v) return EMPTY_VEHICLE;
     const operableById = await this.vehicleDocsOperableMap(this.prisma.write, [v.id]);
     return toVehicleReply(v, operableById.get(v.id) ?? false);
+  }
+
+  /**
+   * Conteo de vehículos por estado documental (docStatus · stat cards del panel admin). groupBy AGREGADO en la
+   * réplica de lectura (no trae filas), servido por el índice sobre doc_status; un estado sin filas no aparece →
+   * default 0. Sin PII: solo enteros. El gate de identidad interna (requireIdentity) acota a los rieles permitidos.
+   */
+  @GrpcMethod('FleetService', 'GetVehicleCounts')
+  async getVehicleCounts(_request: unknown, metadata: Metadata): Promise<VehicleCountsReply> {
+    this.requireIdentity(metadata);
+    const groups = await this.prisma.read.vehicle.groupBy({
+      by: ['docStatus'],
+      _count: { _all: true },
+    });
+    const countOf = (docStatus: VehicleDocStatus): number =>
+      groups.find((g) => g.docStatus === docStatus)?._count._all ?? 0;
+    return {
+      valid: countOf(VehicleDocStatus.VALID),
+      expiringSoon: countOf(VehicleDocStatus.EXPIRING_SOON),
+      expired: countOf(VehicleDocStatus.EXPIRED),
+    };
+  }
+
+  /**
+   * Conteo de las COLAS DE REVISIÓN de flota para la cola unificada del panel: documentos por revisar
+   * (PENDING_REVIEW), documentos por vencer (EXPIRING_SOON) y modelos de vehículo por curar (PENDING_REVIEW).
+   * Tres counts en PARALELO sobre la réplica de lectura (servidos por los índices de status); sin PII, solo
+   * enteros. El gate de identidad interna (requireIdentity) acota a los rieles permitidos.
+   */
+  @GrpcMethod('FleetService', 'GetReviewQueueCounts')
+  async getReviewQueueCounts(
+    _request: unknown,
+    metadata: Metadata,
+  ): Promise<ReviewQueueCountsReply> {
+    this.requireIdentity(metadata);
+    const [docsPendingReview, docsExpiringSoon, modelsPendingReview] = await Promise.all([
+      this.prisma.read.fleetDocument.count({
+        where: { status: FleetDocumentStatus.PENDING_REVIEW },
+      }),
+      this.prisma.read.fleetDocument.count({
+        where: { status: FleetDocumentStatus.EXPIRING_SOON },
+      }),
+      this.prisma.read.vehicleModelSpec.count({
+        where: { status: VehicleModelStatus.PENDING_REVIEW },
+      }),
+    ]);
+    return { docsPendingReview, docsExpiringSoon, modelsPendingReview };
+  }
+
+  /**
+   * Completitud documental de VARIOS conductores en UNA query (anti-N+1), para la columna "Documentos X/Y" +
+   * el embudo (sin docs / listos) del panel. `ids` = Driver.id (los docs DRIVER-scoped se indexan por
+   * ownerId=Driver.id, servido por @@index([ownerType, ownerId])). Cuenta los REQUERIDOS DISTINTOS en estado
+   * VALID por conductor. Sin PII: solo enteros. Un id sin docs devuelve validRequired=0 (no se omite).
+   */
+  @GrpcMethod('FleetService', 'GetDriverDocsCompleteness')
+  async getDriverDocsCompleteness(
+    { ids }: GetByIdsRequest,
+    metadata: Metadata,
+  ): Promise<DriverDocsCompletenessReply> {
+    this.requireIdentity(metadata);
+    if (!ids || ids.length === 0) return { items: [] };
+    const required = REQUIRED_DRIVER_DOC_TYPES;
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: {
+        ownerType: FleetOwnerType.DRIVER,
+        ownerId: { in: ids },
+        type: { in: [...required] },
+        status: FleetDocumentStatus.VALID,
+      },
+      select: { ownerId: true, type: true },
+    });
+    // Conjunto de REQUERIDOS-en-VALID por conductor (dedup por tipo → cuenta distinct, no filas repetidas).
+    const byOwner = new Map<string, Set<FleetDocumentType>>();
+    for (const d of docs) {
+      let set = byOwner.get(d.ownerId);
+      if (!set) {
+        set = new Set();
+        byOwner.set(d.ownerId, set);
+      }
+      set.add(d.type);
+    }
+    return {
+      items: ids.map((id) => ({
+        driverId: id,
+        validRequired: byOwner.get(id)?.size ?? 0,
+        requiredTotal: required.length,
+      })),
+    };
+  }
+
+  /**
+   * Estado de ITV de VARIOS vehículos en UNA query (anti-N+1), para la columna "ITV" de la lista. `ids` =
+   * Vehicle.id. Trae TODAS las inspecciones de esos vehículos ordenadas y se queda con la ÚLTIMA por vehículo
+   * (dedup en JS; Prisma no tiene DISTINCT ON — el orderBy [vehicleId, inspectedAt desc] lo sirve el índice
+   * único [vehicleId, inspectedAt, inspectorId]). Reusa las reglas puras isInspectionCurrent/invalidReason.
+   */
+  @GrpcMethod('FleetService', 'GetVehiclesInspectionStatus')
+  async getVehiclesInspectionStatus(
+    { ids }: GetByIdsRequest,
+    metadata: Metadata,
+  ): Promise<VehiclesInspectionStatusReply> {
+    this.requireIdentity(metadata);
+    if (!ids || ids.length === 0) return { items: [] };
+    const now = new Date();
+    const inspections = await this.prisma.read.inspection.findMany({
+      where: { vehicleId: { in: ids } },
+      orderBy: [{ vehicleId: 'asc' }, { inspectedAt: 'desc' }],
+      select: { vehicleId: true, passed: true, nextDueAt: true },
+    });
+    const latestByVehicle = new Map<string, { passed: boolean; nextDueAt: Date }>();
+    for (const insp of inspections) {
+      if (!latestByVehicle.has(insp.vehicleId)) latestByVehicle.set(insp.vehicleId, insp);
+    }
+    return {
+      items: ids.map((id) => {
+        const latest = latestByVehicle.get(id);
+        if (!latest) {
+          return {
+            vehicleId: id,
+            hasInspection: false,
+            current: false,
+            passed: false,
+            nextDueAt: '',
+            invalidReason: '',
+          };
+        }
+        const current = isInspectionCurrent(latest, now);
+        return {
+          vehicleId: id,
+          hasInspection: true,
+          current,
+          passed: latest.passed,
+          nextDueAt: latest.nextDueAt.toISOString(),
+          invalidReason: current ? '' : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE),
+        };
+      }),
+    };
+  }
+
+  /**
+   * Documentos de UN vehículo (ownerType=VEHICLE) con imágenes, para el detalle. `id` = Vehicle.id. Espejo EXACTO
+   * de GetDriverDocuments pero con owner=VEHICLE (SOAT, tarjeta de propiedad, foto). El `driverId` del reply
+   * lleva el vehicleId (reuso del contrato DriverDocumentsReply). Riel ADMIN (el detalle es Compliance+).
+   */
+  @GrpcMethod('FleetService', 'GetVehicleDocuments')
+  async getVehicleDocuments(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverDocumentsReply> {
+    this.requireIdentity(metadata);
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: id },
+      orderBy: { createdAt: 'desc' },
+      include: { images: { orderBy: { order: 'asc' } } },
+    });
+    return {
+      driverId: id,
+      documents: docs.map((d) => ({
+        id: d.id,
+        ownerType: d.ownerType,
+        ownerId: d.ownerId,
+        type: d.type,
+        documentNumber: d.documentNumber,
+        status: d.status,
+        expiresAt: d.expiresAt ? d.expiresAt.toISOString() : '',
+        fileS3Key: d.fileS3Key ?? '',
+        rejectionReason: d.rejectionReason ?? '',
+        images: d.images.map((img) => ({ s3Key: img.s3Key, side: img.side, order: img.order })),
+      })),
+    };
   }
 
   /**

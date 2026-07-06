@@ -142,9 +142,11 @@ services:
       mc anonymous set download local/veo-avatars-dev/avatars &&
       mc mb --ignore-existing local/veo-video-dev &&
       mc mb --ignore-existing local/veo-documents-dev &&
+      mc mb --ignore-existing local/veo-web-assets-dev &&
+      mc anonymous set download local/veo-web-assets-dev &&
       mc encrypt set sse-s3 local/veo-video-dev &&
       mc encrypt set sse-s3 local/veo-documents-dev &&
-      echo 'minio-provision: buckets listos · SSE-S3 at-rest en video+documents (PII) · avatars publico sin cifrar'
+      echo 'minio-provision: buckets listos · SSE-S3 at-rest en video+documents (PII) · avatars+web-assets publico sin cifrar'
       "
     restart: "no"
 
