@@ -254,3 +254,31 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(out.tripCount).toBe(1); // pero NO como un viaje extra
   });
 });
+
+describe('applyWebhookResult · idempotente sobre pagos YA LIQUIDADOS (no loop de re-entrega no-2xx)', () => {
+  const svcFor = (status: string) => {
+    const payment: Row = {
+      id: 'p-x', tripId: 'trip-1', kind: 'FARE', status, method: 'YAPE', amountCents: 5000,
+    };
+    const write = { payment: { update: vi.fn() }, $transaction: vi.fn() };
+    const prisma = { read: { payment: { findUnique: vi.fn(async () => payment) } }, write };
+    const svc = new PaymentsService(
+      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+    );
+    return { svc, write };
+  };
+
+  for (const settled of ['REFUNDED', 'PARTIALLY_REFUNDED'] as const) {
+    for (const hook of ['CONFIRMED', 'DECLINED', 'EXPIRED'] as const) {
+      it(`${hook} sobre un pago ${settled} → no-op idempotente (NO InvalidStateError, sin escrituras)`, async () => {
+        const { svc, write } = svcFor(settled);
+        const out = await svc.applyWebhookResult({ paymentId: 'p-x', externalUid: 'uid', status: hook });
+        // Antes PARTIALLY_REFUNDED (y REFUNDED en CONFIRMED) caía a captureSuccess/markDebt → assertTransition
+        // lanzaba InvalidStateError (loop del proveedor). Ahora es un no-op limpio, sin tocar la DB.
+        expect(out).toEqual({ applied: false, status: settled });
+        expect(write.payment.update).not.toHaveBeenCalled();
+        expect(write.$transaction).not.toHaveBeenCalled();
+      });
+    }
+  }
+});

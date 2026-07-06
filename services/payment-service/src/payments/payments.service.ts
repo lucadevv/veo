@@ -72,6 +72,16 @@ function methodUnavailableReason(method: PaymentMethod): string {
 }
 
 /**
+ * Estados TERMINALES-liquidados de un Payment: la plata YA se capturó (y quizá se reembolsó total/parcial). Un
+ * webhook (CONFIRMED/DECLINED/EXPIRED) que llega sobre uno de estos es TARDÍO/stale → no-op idempotente en
+ * applyWebhookResult, NO un error: desde CAPTURED/REFUNDED/PARTIALLY_REFUNDED no hay transición a CAPTURED/DEBT/
+ * FAILED (payment.policy), así que caer a captureSuccess/markDebt lanzaría InvalidStateError → loop de re-entrega.
+ */
+function isSettledPayment(status: string): boolean {
+  return status === 'CAPTURED' || status === 'REFUNDED' || status === 'PARTIALLY_REFUNDED';
+}
+
+/**
  * Prefijo de la razón ESTRUCTURADA del MARCADOR DURABLE de un refund system-initiated IRRECUPERABLE:
  * el refund automático abortó ANTES de mover plata (gateway sin reembolsos / cobro sin railRef) → NO hay
  * Refund row. Persistimos un Refund REJECTED de marca (cero strings mágicos: `unrecoverable:<causa>`) para
@@ -932,15 +942,21 @@ export class PaymentsService {
       return { applied: false, status: 'NO_MATCH' };
     }
 
+    // Guard idempotente COMÚN a las 3 ramas: un webhook (CONFIRMED/DECLINED/EXPIRED) que llega sobre un pago YA
+    // LIQUIDADO (CAPTURED/REFUNDED/PARTIALLY_REFUNDED) es TARDÍO/stale — la plata ya se capturó (y quizá se
+    // reembolsó). NO-OP idempotente, NO un error. Antes PARTIALLY_REFUNDED (en las 3) y REFUNDED (en CONFIRMED)
+    // caían a captureSuccess/markDebt y assertPaymentTransition lanzaba InvalidStateError → el proveedor re-
+    // entregaba en loop (no-2xx). PARTIALLY_REFUNDED→X y REFUNDED→X no son transiciones válidas (payment.policy).
+    if (isSettledPayment(payment.status)) {
+      return { applied: false, status: payment.status };
+    }
+
     switch (input.status) {
       case 'CONFIRMED': {
-        if (payment.status === 'CAPTURED') return { applied: false, status: 'CAPTURED' }; // idempotente
         await this.captureSuccess(payment, input.externalUid, payment.retries || 1);
         return { applied: true, status: 'CAPTURED' };
       }
       case 'DECLINED': {
-        if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED')
-          return { applied: false, status: payment.status };
         if (payment.status === 'DEBT') return { applied: false, status: 'DEBT' };
         // YPTRX002 = saldo insuficiente (cobro Yape On File): razón honesta para el recibo del pasajero.
         const reason =
@@ -951,8 +967,6 @@ export class PaymentsService {
         return { applied: true, status: 'DEBT' };
       }
       case 'EXPIRED': {
-        if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED')
-          return { applied: false, status: payment.status };
         if (payment.status === 'FAILED') return { applied: false, status: 'FAILED' };
         if (payment.status === 'DEBT') return { applied: false, status: 'DEBT' }; // idempotente (espejo DECLINED)
         // Un checkout que EXPIRA para el cobro de un viaje COMPLETADO NO es "no pasó nada": la tarifa se DEBE
