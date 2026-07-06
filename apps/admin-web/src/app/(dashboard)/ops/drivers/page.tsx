@@ -3,13 +3,15 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
-import { useDrivers, useDriversPending } from '@/lib/api/queries';
+import { useDrivers, useDriversPending, useDriversSummary } from '@/lib/api/queries';
 import type { DriverApproval, PendingDriver } from '@/lib/api/schemas';
 import { dateTime } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
-import { Eye, Lock } from 'lucide-react';
+import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
+import { Avatar } from '@/components/ui/avatar';
+import { BadgeCheck, ClipboardList, Eye, Lock, Users, XCircle } from 'lucide-react';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { useSession } from '@/lib/session-context';
@@ -38,9 +40,12 @@ const columns: ColumnDef<DriverApproval, unknown>[] = [
     accessorKey: 'fullName',
     header: 'Conductor',
     cell: ({ row }) => (
-      <div className="flex flex-col">
-        <span className="text-ink">{row.original.fullName ?? '—'}</span>
-        <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
+      <div className="flex items-center gap-3">
+        <Avatar name={row.original.fullName} size="sm" />
+        <div className="flex flex-col">
+          <span className="text-ink">{row.original.fullName ?? '—'}</span>
+          <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
+        </div>
       </div>
     ),
   },
@@ -92,9 +97,12 @@ const pendingColumns: ColumnDef<PendingDriver, unknown>[] = [
     accessorKey: 'fullName',
     header: 'Conductor',
     cell: ({ row }) => (
-      <div className="flex flex-col">
-        <span className="text-ink">{row.original.fullName ?? 'Sin nombre'}</span>
-        <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
+      <div className="flex items-center gap-3">
+        <Avatar name={row.original.fullName} size="sm" />
+        <div className="flex flex-col">
+          <span className="text-ink">{row.original.fullName ?? 'Sin nombre'}</span>
+          <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
+        </div>
       </div>
     ),
   },
@@ -124,9 +132,12 @@ const rejectedColumns: ColumnDef<DriverApproval, unknown>[] = [
     accessorKey: 'fullName',
     header: 'Conductor',
     cell: ({ row }) => (
-      <div className="flex flex-col">
-        <span className="text-ink">{row.original.fullName ?? '—'}</span>
-        <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
+      <div className="flex items-center gap-3">
+        <Avatar name={row.original.fullName} size="sm" />
+        <div className="flex flex-col">
+          <span className="text-ink">{row.original.fullName ?? '—'}</span>
+          <span className="font-mono text-xs text-ink-muted">{row.original.id.slice(0, 8)}</span>
+        </div>
       </div>
     ),
   },
@@ -164,6 +175,8 @@ export default function DriversPage() {
   const [tab, setTab] = useState('ALL');
   // La cola de pendientes viene de identity (pending-approval), NO del read-model (que solo tiene ACTIVE/SUSPENDED).
   const pending = useDriversPending();
+  // Conteo REAL por estado de antecedentes (embudo · stat cards). Sin PII, solo enteros.
+  const summary = useDriversSummary();
   // El read-model sirve la flota verificada (ACTIVE) y el listado completo (ALL), paginado por cursor.
   const fleet = useDrivers(tab === 'PENDING' ? 'ACTIVE' : tab);
   const fleetRows = fleet.data?.pages.flatMap((p) => p.items) ?? [];
@@ -173,7 +186,7 @@ export default function DriversPage() {
       <div className="flex h-full flex-col">
         <PageHeader
           title="Conductores"
-          breadcrumbs={[{ label: 'Operación' }, { label: 'Conductores' }]}
+          breadcrumbs={[{ label: 'Flota' }, { label: 'Conductores' }]}
         />
         <EmptyState
           className="flex-1"
@@ -185,15 +198,53 @@ export default function DriversPage() {
     );
   }
 
+  const counts = summary.data;
+  const total = counts ? counts.pending + counts.cleared + counts.rejected : 0;
+
   return (
     <div className="flex h-full flex-col">
       <PageHeader
         title="Conductores"
         description="Aprobación de altas y estado de la flota de conductores."
-        breadcrumbs={[{ label: 'Operación' }, { label: 'Conductores' }]}
+        breadcrumbs={[{ label: 'Flota' }, { label: 'Conductores' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        <Tabs value={tab} onValueChange={setTab} className="pt-4">
+        <div className="pt-4">
+          <StatCardGrid>
+            <StatCard
+              icon={Users}
+              label="Total en flota"
+              value={String(total)}
+              hint="Altas registradas"
+              loading={summary.isLoading}
+            />
+            <StatCard
+              icon={ClipboardList}
+              label="En revisión"
+              value={String(counts?.pending ?? 0)}
+              hint="Pendientes de aprobación"
+              hintTone="warn"
+              loading={summary.isLoading}
+            />
+            <StatCard
+              icon={BadgeCheck}
+              label="Aprobados"
+              value={String(counts?.cleared ?? 0)}
+              hint="Antecedentes limpios"
+              hintTone="success"
+              loading={summary.isLoading}
+            />
+            <StatCard
+              icon={XCircle}
+              label="Rechazados"
+              value={String(counts?.rejected ?? 0)}
+              hint="Requieren corrección"
+              hintTone="danger"
+              loading={summary.isLoading}
+            />
+          </StatCardGrid>
+        </div>
+        <Tabs value={tab} onValueChange={setTab} className="pt-5">
           <TabsList>
             <TabsTrigger value="ALL">Todos</TabsTrigger>
             <TabsTrigger value="ACTIVE">Activos</TabsTrigger>
