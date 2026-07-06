@@ -208,6 +208,9 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   // ── pricing (config snapshot; rules es array de objetos → se descarta, queda version) ──
   'pricing.mode_schedule_updated': ['defaultMode', 'version', 'updatedAt'],
   'pricing.bid_floor_updated': ['defaultFloorCents', 'version', 'updatedAt'],
+  // base_fare/commission: montos en céntimos y tasas bps son SEGUROS (Int; la denylist tokeniza y no matchea).
+  'pricing.base_fare_updated': ['baseFareCents', 'perKmCents', 'perMinCents', 'version', 'updatedAt'],
+  'payment.commission_updated': ['onDemandRateBps', 'carpoolingFeeBps', 'version', 'updatedAt'],
   // ── media — segmentId/tripId/operatorId sí; watermark NO (lleva identidad); operatorEmail NO ──
   'media.recording_started': ['tripId', 'startedAt'],
   'media.archived': ['tripId', 's3Key', 'bytes', 'retentionDays'],

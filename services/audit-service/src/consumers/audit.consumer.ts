@@ -568,6 +568,22 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'pricing',
         resourceId: 'bid_floor',
       })),
+      // Pricing · el ADMIN reemplazó la tarifa BASE (base/km/min · F2.4). Es DINERO al WORM (regla no negociable #1);
+      // mismo patrón de config-admin que mode_schedule/bid_floor: el operador se traza por el comando admin-bff, el
+      // payload es un snapshot SIN actor ni id de entidad → actor='system' (config aplicada), recurso=pricing, id='base_fare'.
+      'pricing.base_fare_updated': this.audited('pricing.base_fare_updated', () => ({
+        actorId: 'system',
+        resourceType: 'pricing',
+        resourceId: 'base_fare',
+      })),
+      // Payment · el ADMIN reemplazó las tasas de COMISIÓN (on-demand/carpooling bps · F2.7, con step-up MFA). Define
+      // el split de plata plataforma↔conductor → DINERO al WORM. Config-admin: actor='system', recurso=pricing
+      // (agrupa toda la config tarifaria), id='commission'. El operador que la cambió se traza por el comando admin-bff.
+      'payment.commission_updated': this.audited('payment.commission_updated', () => ({
+        actorId: 'system',
+        resourceType: 'pricing',
+        resourceId: 'commission',
+      })),
       // Rating CREADO (BR-D01): una reseña entró al sistema. El payload no porta al autor (solo ratingId/tripId/driverId/stars)
       // → actor='system' (riel de rating; el autor es anónimo por diseño de la reseña), recurso=rating/ratingId.
       'rating.created': this.audited('rating.created', (p) => ({
@@ -743,6 +759,10 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       //     millones de eslabones de hash sin valor forense, degradando el append serializado (advisory lock global).
       //   · driver.entered_zone      — geofence de alta frecuencia por conductor; señal de tracking de dispatch,
       //     no un cambio de estado de negocio. Mismo problema de volumen/ruido que el ping de ubicación.
+      //   · driver.went_offline      — señal reactiva de presencia (shift_end/disconnect). La rama `disconnect` es
+      //     best-effort SIN outbox (driver-bff, como el firehose de ubicación) y se dispara seguido por reconexiones;
+      //     no tiene par `went_online`, así que auditar solo la mitad OFFLINE no da cadena de custodia. La traza de
+      //     cuándo estuvo online se reconstruye de las transiciones del viaje (mismo criterio que location_updated).
       //
       //  NO ES UNA MUTACIÓN DE NEGOCIO AUDITABLE:
       //   · audit.recorded — lo EMITE este propio servicio (señal de que se grabó un eslabón); auditarlo sería un
