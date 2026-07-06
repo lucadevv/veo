@@ -12,6 +12,7 @@ import {
   type DriverReply,
   type DriversByIdsReply,
   type DriverCountsReply,
+  type VehicleCountsReply,
   type DriverVehiclesReply,
   type VehicleReply,
   type DriverDocumentsReply,
@@ -38,6 +39,7 @@ import type {
   TripSummary,
   DriverApproval,
   DriverCounts,
+  VehicleCounts,
   TripDetail,
   DriverDetail,
   DriverVehicle,
@@ -853,6 +855,16 @@ export class OpsService {
   async driversSummary(identity: AuthUser): Promise<DriverCounts> {
     const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     return this.identityGrpc.call<DriverCountsReply>('GetDriverCounts', {}, meta);
+  }
+
+  /**
+   * Conteo de vehículos por estado documental (embudo de vigencia · stat cards del panel). UN gRPC a fleet
+   * (GetVehicleCounts · groupBy agregado por docStatus, sin traer filas); sin PII (solo enteros). El reply gRPC
+   * (VehicleCountsReply) es estructuralmente el contrato VehicleCounts que expone el BFF.
+   */
+  async vehiclesSummary(identity: AuthUser): Promise<VehicleCounts> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    return this.fleetGrpc.call<VehicleCountsReply>('GetVehicleCounts', {}, meta);
   }
 
   async approveDriver(

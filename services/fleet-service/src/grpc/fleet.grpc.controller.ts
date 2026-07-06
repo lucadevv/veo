@@ -20,11 +20,18 @@ import {
   isInspectionCurrent,
   InspectionInvalidReason,
 } from '../inspections/inspection-rules';
-import { FleetOwnerType, type Vehicle } from '../generated/prisma';
+import { FleetOwnerType, VehicleDocStatus, type Vehicle } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
+}
+
+/** fleet.GetVehicleCounts — conteo de vehículos por docStatus (stat cards del admin). */
+interface VehicleCountsReply {
+  valid: number;
+  expiringSoon: number;
+  expired: number;
 }
 
 interface GetByIdsRequest {
@@ -208,6 +215,27 @@ export class FleetGrpcController {
     if (!v) return EMPTY_VEHICLE;
     const operableById = await this.vehicleDocsOperableMap(this.prisma.write, [v.id]);
     return toVehicleReply(v, operableById.get(v.id) ?? false);
+  }
+
+  /**
+   * Conteo de vehículos por estado documental (docStatus · stat cards del panel admin). groupBy AGREGADO en la
+   * réplica de lectura (no trae filas), servido por el índice sobre doc_status; un estado sin filas no aparece →
+   * default 0. Sin PII: solo enteros. El gate de identidad interna (requireIdentity) acota a los rieles permitidos.
+   */
+  @GrpcMethod('FleetService', 'GetVehicleCounts')
+  async getVehicleCounts(_request: unknown, metadata: Metadata): Promise<VehicleCountsReply> {
+    this.requireIdentity(metadata);
+    const groups = await this.prisma.read.vehicle.groupBy({
+      by: ['docStatus'],
+      _count: { _all: true },
+    });
+    const countOf = (docStatus: VehicleDocStatus): number =>
+      groups.find((g) => g.docStatus === docStatus)?._count._all ?? 0;
+    return {
+      valid: countOf(VehicleDocStatus.VALID),
+      expiringSoon: countOf(VehicleDocStatus.EXPIRING_SOON),
+      expired: countOf(VehicleDocStatus.EXPIRED),
+    };
   }
 
   /**

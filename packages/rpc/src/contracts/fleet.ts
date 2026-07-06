@@ -81,3 +81,10 @@ export interface DriverInspectionStatusReply {
   /** NONE | NOT_PASSED | OVERDUE | NO_VEHICLE | "" (cuando current=true). */
   invalidReason: string;
 }
+
+/** fleet.GetVehicleCounts / VehicleCountsReply. Conteo de vehículos por docStatus (stat cards del admin). */
+export interface VehicleCountsReply {
+  valid: number;
+  expiringSoon: number;
+  expired: number;
+}

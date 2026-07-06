@@ -10,6 +10,7 @@ import type {
   TripSummary,
   DriverApproval,
   DriverCounts,
+  VehicleCounts,
   TripDetail,
   DriverDetail,
   DniFaceMatchResult,
@@ -78,6 +79,12 @@ export class OpsController {
   @ApiOperation({ summary: 'Conteo de conductores por estado de antecedentes (stat cards)' })
   driversSummary(@CurrentUser() user: AuthenticatedUser): Promise<DriverCounts> {
     return this.ops.driversSummary(user);
+  }
+
+  @Get('vehicles/summary')
+  @ApiOperation({ summary: 'Conteo de vehículos por estado documental (stat cards)' })
+  vehiclesSummary(@CurrentUser() user: AuthenticatedUser): Promise<VehicleCounts> {
+    return this.ops.vehiclesSummary(user);
   }
 
   @Get('drivers/:id')

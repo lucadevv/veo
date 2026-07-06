@@ -796,6 +796,14 @@ export const vehicleView = z.object({
 });
 export type VehicleView = z.infer<typeof vehicleView>;
 
+/** Conteo de vehículos por estado documental (embudo de vigencia · stat cards del panel). */
+export const vehicleCounts = z.object({
+  valid: z.number().int(),
+  expiringSoon: z.number().int(),
+  expired: z.number().int(),
+});
+export type VehicleCounts = z.infer<typeof vehicleCounts>;
+
 export const inspectionView = z.object({
   id: z.string(),
   vehicleId: z.string(),

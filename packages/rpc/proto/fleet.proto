@@ -20,10 +20,23 @@ service FleetService {
   // Vigencia de la inspección técnica (ITV) del vehículo OPERADO del conductor. `id` = User.id (NO el
   // driverId de perfil): los vehículos se indexan por Vehicle.driver_id = User.id. Gate de aprobación.
   rpc GetDriverInspectionStatus (GetByIdRequest) returns (DriverInspectionStatusReply);
+  // Conteo de vehículos por estado documental (docStatus), para los stat cards del panel admin (embudo de
+  // vigencia documental de la flota). Agregado con groupBy en la réplica de lectura; sin PII, solo enteros.
+  rpc GetVehicleCounts (GetVehicleCountsRequest) returns (VehicleCountsReply);
 }
 
 message GetByIdRequest {
   string id = 1;
+}
+
+// Request vacío del conteo global de vehículos (sin filtros; el scoping lo da el gate de identidad interna).
+message GetVehicleCountsRequest {}
+
+// Conteo de vehículos por docStatus (VALID/EXPIRING_SOON/EXPIRED). proto3 default 0 si no hay filas del estado.
+message VehicleCountsReply {
+  int32 valid = 1;
+  int32 expiring_soon = 2;
+  int32 expired = 3;
 }
 
 message GetByIdsRequest {
