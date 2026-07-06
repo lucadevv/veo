@@ -95,3 +95,13 @@ export interface ReviewQueueCountsReply {
   docsExpiringSoon: number;
   modelsPendingReview: number;
 }
+
+/** fleet.GetDriverDocsCompleteness — completitud documental de un conductor (REQUERIDOS en VALID / total). */
+export interface DriverDocsCompleteness {
+  driverId: string;
+  validRequired: number;
+  requiredTotal: number;
+}
+export interface DriverDocsCompletenessReply {
+  items: DriverDocsCompleteness[];
+}

@@ -33,9 +33,9 @@ export function StatCard({ icon: Icon, label, value, hint, hintTone = 'neutral',
         <p className="text-xs font-medium text-ink-muted">{label}</p>
       </div>
       {loading ? (
-        <div className="mt-2 h-8 w-14 animate-pulse rounded bg-surface-2" />
+        <div className="mt-2 h-9 w-16 animate-pulse rounded bg-surface-2" />
       ) : (
-        <p className="mt-2 text-2xl font-semibold tabular text-ink">{value}</p>
+        <p className="mt-2 text-3xl font-semibold tabular text-ink">{value}</p>
       )}
       {hint && !loading ? (
         <p className={cn('mt-1 text-xs font-medium', HINT_TONE[hintTone])}>{hint}</p>

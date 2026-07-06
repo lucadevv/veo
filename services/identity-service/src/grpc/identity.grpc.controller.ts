@@ -300,7 +300,10 @@ export class IdentityGrpcController {
     // SOLO name/phone de este reply (jamás documentId), así que descifrar acá sería over-decryption de PII y
     // —peor— una fila con ciphertext corrupto/de-otra-clave tumbaría la página ENTERA de conductores. El DNI
     // se descifra únicamente en el GetDriver single (detalle Compliance+).
-    return { drivers: drivers.map((d) => this.toDriverReply(d)) };
+    // includeSensitivePii=false (NO se descifra el DNI en el batch — protección de la superficie de crash),
+    // includeVerificationStatus=true (la lista del admin muestra la columna "Verificación": estados derivados
+    // de booleanos, sin descifrado).
+    return { drivers: drivers.map((d) => this.toDriverReply(d, false, true)) };
   }
 
   /**
@@ -396,7 +399,15 @@ export class IdentityGrpcController {
     suspensionHolds?: { cause: string }[];
     },
     includeSensitivePii = false,
+    // Eje SEPARADO de `includeSensitivePii`: expone SOLO el ESTADO de face-match/liveness (derivado de los
+    // booleanos persistidos, SIN descifrar DNI/scores), para la columna "Verificación" de la LISTA del admin.
+    // El batch (GetDriversByIds) lo pasa true con includeSensitivePii=false → estados sí, descifrado NO (evita
+    // la over-decryption y la superficie de crash que el batch protege a propósito).
+    includeVerificationStatus = false,
   ): DriverReply {
+    // El estado de verificación se muestra si el caller es Compliance+ (detalle) O pidió el eje de verificación
+    // (lista). El DNI/scores/timestamps siguen SOLO bajo includeSensitivePii.
+    const showVerification = includeSensitivePii || includeVerificationStatus;
     return {
       id: d.id,
       userId: d.userId,
@@ -442,7 +453,7 @@ export class IdentityGrpcController {
       // estado tipado explícito, sin la ambigüedad del bool. Para rieles no-admin → NOT_RUN/0/"" (proto3
       // default honesto: el pasajero/dispatch no ven el binding biométrico del conductor).
       dniFaceMatchStatus:
-        !includeSensitivePii || d.dniFaceMatched === null || d.dniFaceMatched === undefined
+        !showVerification || d.dniFaceMatched === null || d.dniFaceMatched === undefined
           ? DniFaceMatchStatus.NOT_RUN
           : d.dniFaceMatched
             ? DniFaceMatchStatus.MATCHED
@@ -453,7 +464,7 @@ export class IdentityGrpcController {
       // Lote C · binding licencia↔selfie GUARDADO. Mismo gateo ADMIN-ONLY + derivación que el DNI (null →
       // NOT_RUN; true → MATCHED; false → NO_MATCH). Para rieles no-admin → NOT_RUN/0/"" (proto3 default honesto).
       licenseFaceMatchStatus:
-        !includeSensitivePii || d.licenseFaceMatched === null || d.licenseFaceMatched === undefined
+        !showVerification || d.licenseFaceMatched === null || d.licenseFaceMatched === undefined
           ? DniFaceMatchStatus.NOT_RUN
           : d.licenseFaceMatched
             ? DniFaceMatchStatus.MATCHED
@@ -468,7 +479,7 @@ export class IdentityGrpcController {
       // persistido (null = aún no enroló → NOT_RUN; true → PASSED, el PAD corrió y dio viva; false → DEGRADED,
       // enroló sin PAD): estado tipado explícito, sin la ambigüedad del bool. Para rieles no-admin → NOT_RUN/0.
       livenessStatus:
-        !includeSensitivePii || d.livenessChecked === null || d.livenessChecked === undefined
+        !showVerification || d.livenessChecked === null || d.livenessChecked === undefined
           ? PassiveLivenessStatus.NOT_RUN
           : d.livenessChecked
             ? PassiveLivenessStatus.PASSED

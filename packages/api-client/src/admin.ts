@@ -140,6 +140,14 @@ export const driverApproval = driverSummary.extend({
    * el detalle (`driverDetail.suspensionCauses`). `[]` si no está suspendido.
    */
   suspensionCauses: z.array(z.string()),
+  /** Completitud documental: cuántos docs REQUERIDOS están en VALID sobre el total (columna "Documentos X/Y").
+   *  No es PII (solo enteros) → visible para todos los roles que ven la lista. */
+  docsComplete: z.number().int(),
+  docsTotal: z.number().int(),
+  /** Estado combinado de verificación biométrica para la columna "Verificación": VERIFICADO (ambos face-match
+   *  coinciden) · REVISAR (algún NO_MATCH) · PENDIENTE (aún no corrió). `null` para roles sub-Compliance
+   *  (redactado como el nombre/teléfono — es señal del proceso KYC, ADMIN/Compliance+). */
+  verificationStatus: z.string().nullable(),
 });
 export type DriverApproval = z.infer<typeof driverApproval>;
 
@@ -177,12 +185,22 @@ export const pendingDriver = z.object({
   licenseNumber: z.string().nullable(),
   /** Nombre legal del onboarding (lo que el conductor cargó en la app); null si no lo cargó. */
   fullName: z.string().nullable(),
+  /** Completitud documental (docs REQUERIDOS en VALID / total) para el embudo Sin docs / Listos. */
+  docsComplete: z.number().int(),
+  docsTotal: z.number().int(),
+  /** Verificación biométrica combinada (VERIFICADO/REVISAR/PENDIENTE); null para roles sub-Compliance. */
+  verificationStatus: z.string().nullable(),
 });
 export type PendingDriver = z.infer<typeof pendingDriver>;
 
-/** Conteo de conductores por estado de antecedentes (embudo de aprobación · stat cards del panel). */
+/** Conteo del EMBUDO de onboarding de conductores (stat cards del panel · frame AdminConductores). El tramo
+ *  PENDING se parte por completitud documental: `sinDocs` (faltan requeridos) vs `listos` (todos en VALID,
+ *  listos para que el operador revise). `cleared`/`rejected` son las decisiones finales de antecedentes. */
 export const driverCounts = z.object({
-  pending: z.number().int(),
+  sinDocs: z.number().int(),
+  listos: z.number().int(),
+  /** PENDING con docs completos y face-match ya corrido (revisión en curso). */
+  enRevision: z.number().int(),
   cleared: z.number().int(),
   rejected: z.number().int(),
 });

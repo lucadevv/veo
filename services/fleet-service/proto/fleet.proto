@@ -26,6 +26,10 @@ service FleetService {
   // Conteo de las COLAS DE REVISIÓN de flota (docs por revisar, docs por vencer, modelos por curar), para la
   // cola unificada de Revisiones del panel admin. Cuentas agregadas en la réplica de lectura; sin PII.
   rpc GetReviewQueueCounts (GetReviewQueueCountsRequest) returns (ReviewQueueCountsReply);
+  // Completitud documental de VARIOS conductores en UNA llamada (anti-N+1), para la columna "Documentos X/Y"
+  // + el embudo (sin docs / listos) del panel. `ids` = Driver.id (los docs DRIVER-scoped se indexan por
+  // ownerId=Driver.id). Devuelve, por cada id, cuántos REQUERIDOS están en estado VALID sobre el total. Sin PII.
+  rpc GetDriverDocsCompleteness (GetByIdsRequest) returns (DriverDocsCompletenessReply);
 }
 
 message GetByIdRequest {
@@ -40,6 +44,18 @@ message VehicleCountsReply {
   int32 valid = 1;
   int32 expiring_soon = 2;
   int32 expired = 3;
+}
+
+// Completitud documental de un conductor: cuántos docs REQUERIDOS están en estado VALID sobre el total.
+message DriverDocsCompleteness {
+  string driver_id = 1;
+  int32 valid_required = 2;
+  int32 required_total = 3;
+}
+
+// Reply batch de GetDriverDocsCompleteness. Un item por cada id pedido (orden libre; el consumidor mapea por id).
+message DriverDocsCompletenessReply {
+  repeated DriverDocsCompleteness items = 1;
 }
 
 // Request vacío del conteo de las colas de revisión de flota.

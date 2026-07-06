@@ -49,12 +49,18 @@ describe('mappers OPS', () => {
       phone: '+51987654321',
       suspendedAt: null,
       suspensionCauses: [],
+      docsComplete: 4,
+      docsTotal: 4,
+      verificationStatus: 'VERIFICADO',
     };
     const redacted = {
       fullName: null,
       phone: null,
       suspendedAt: null,
       suspensionCauses: [],
+      docsComplete: 4,
+      docsTotal: 4,
+      verificationStatus: null,
     };
     // SIN enriquecimiento (página vacía / sin reply) → null honesto.
     expect(driverRecordToApproval(rec, COMPLIANCE).fullName).toBeNull();
@@ -81,6 +87,9 @@ describe('mappers OPS', () => {
       phone: null,
       suspendedAt,
       suspensionCauses: [],
+      docsComplete: 0,
+      docsTotal: 4,
+      verificationStatus: null,
     });
 
     it('read-model SUSPENDED pero identity LIBRE (auto-reactivación) → badge ACTIVE', () => {
@@ -131,6 +140,9 @@ describe('mappers OPS', () => {
         phone: null,
         suspendedAt: '2026-06-02T08:00:00.000Z',
         suspensionCauses: [SuspensionCause.DOCUMENT_EXPIRED, SuspensionCause.DISCIPLINARY],
+        docsComplete: 2,
+        docsTotal: 4,
+        verificationStatus: 'PENDIENTE',
       };
       expect(driverRecordToApproval(base, COMPLIANCE, enrichment).suspensionCauses).toEqual([
         SuspensionCause.DOCUMENT_EXPIRED,

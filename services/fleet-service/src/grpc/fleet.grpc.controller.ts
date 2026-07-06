@@ -22,6 +22,7 @@ import {
 } from '../inspections/inspection-rules';
 import {
   FleetDocumentStatus,
+  FleetDocumentType,
   FleetOwnerType,
   VehicleDocStatus,
   VehicleModelStatus,
@@ -46,6 +47,19 @@ interface ReviewQueueCountsReply {
   docsExpiringSoon: number;
   modelsPendingReview: number;
 }
+
+/** fleet.GetDriverDocsCompleteness — completitud documental por conductor (REQUERIDOS en VALID / total). */
+interface DriverDocsCompletenessReply {
+  items: { driverId: string; validRequired: number; requiredTotal: number }[];
+}
+
+/** Documentos DRIVER-scoped OBLIGATORIOS para operar (espeja REQUIRED_DRIVER_DOC_TYPES del admin-bff). */
+const REQUIRED_DRIVER_DOC_TYPES = [
+  FleetDocumentType.LICENSE_A1,
+  FleetDocumentType.SOAT,
+  FleetDocumentType.PROPERTY_CARD,
+  FleetDocumentType.VEHICLE_PHOTO,
+] as const;
 
 interface GetByIdsRequest {
   ids: string[];
@@ -275,6 +289,48 @@ export class FleetGrpcController {
       }),
     ]);
     return { docsPendingReview, docsExpiringSoon, modelsPendingReview };
+  }
+
+  /**
+   * Completitud documental de VARIOS conductores en UNA query (anti-N+1), para la columna "Documentos X/Y" +
+   * el embudo (sin docs / listos) del panel. `ids` = Driver.id (los docs DRIVER-scoped se indexan por
+   * ownerId=Driver.id, servido por @@index([ownerType, ownerId])). Cuenta los REQUERIDOS DISTINTOS en estado
+   * VALID por conductor. Sin PII: solo enteros. Un id sin docs devuelve validRequired=0 (no se omite).
+   */
+  @GrpcMethod('FleetService', 'GetDriverDocsCompleteness')
+  async getDriverDocsCompleteness(
+    { ids }: GetByIdsRequest,
+    metadata: Metadata,
+  ): Promise<DriverDocsCompletenessReply> {
+    this.requireIdentity(metadata);
+    if (!ids || ids.length === 0) return { items: [] };
+    const required = REQUIRED_DRIVER_DOC_TYPES;
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: {
+        ownerType: FleetOwnerType.DRIVER,
+        ownerId: { in: ids },
+        type: { in: [...required] },
+        status: FleetDocumentStatus.VALID,
+      },
+      select: { ownerId: true, type: true },
+    });
+    // Conjunto de REQUERIDOS-en-VALID por conductor (dedup por tipo → cuenta distinct, no filas repetidas).
+    const byOwner = new Map<string, Set<FleetDocumentType>>();
+    for (const d of docs) {
+      let set = byOwner.get(d.ownerId);
+      if (!set) {
+        set = new Set();
+        byOwner.set(d.ownerId, set);
+      }
+      set.add(d.type);
+    }
+    return {
+      items: ids.map((id) => ({
+        driverId: id,
+        validRequired: byOwner.get(id)?.size ?? 0,
+        requiredTotal: required.length,
+      })),
+    };
   }
 
   /**
