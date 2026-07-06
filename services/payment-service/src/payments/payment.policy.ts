@@ -15,6 +15,15 @@ export function isCashMethod(method: PaymentMethod): boolean {
 }
 
 /**
+ * Métodos DIGITALES = todos MENOS CASH (el efectivo lo cobra el conductor en mano, nunca entra al riel/banco de
+ * VEO). Lista POSITIVA a propósito: un `method IN (…)` puede hacer seek en los índices con `method` de lider
+ * (ej. [method, status, capturedAt]); la negación `method != CASH` los ANULA (full-scan). Const TIPADA (readonly
+ * PaymentMethod[]): si se agrega un método digital al enum, el switch exhaustivo de resolvePspFeeBps frena el
+ * build y recuerda sumarlo acá. Fuente ÚNICA (analytics money-in + collectEarnings del payout).
+ */
+export const NON_CASH_METHODS: readonly PaymentMethod[] = ['YAPE', 'PLIN', 'CARD', 'PAGOEFECTIVO'];
+
+/**
  * A1 (ADR-022 · Model B) · Método DIGITAL por defecto de una propina cuando el viaje se pagó en EFECTIVO. La
  * propina iniciada en el app SIEMPRE se cobra digital (el conductor la cobra vía payout, no "en mano"); como el
  * gateway NO cobra CASH, la propina de un viaje-efectivo NO puede heredar el método → cae a YAPE (el método

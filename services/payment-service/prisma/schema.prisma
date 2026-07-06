@@ -128,6 +128,8 @@ model CancellationPenalty {
   collectedAt             DateTime?                 @map("collected_at") @db.Timestamptz
 
   @@index([passengerId, status])
+  // Cron semanal de payouts: collectEarnings filtra status=COLLECTED + rango collectedAt para el split del conductor.
+  @@index([status, collectedAt])
   @@map("cancellation_penalties")
   @@schema("payment")
 }
@@ -227,8 +229,14 @@ model Payment {
 
   @@index([status])
   @@index([tripId])
-  @@index([driverId, status])
+  // [driverId, status, capturedAt]: earningsForDriver filtra driverId+status y RANGO capturedAt (el antiguo
+  // [driverId, status] no empujaba el rango). El 3-col subsume al 2-col (mismo prefijo) → reemplaza, no duplica.
+  @@index([driverId, status, capturedAt])
   @@index([method, status, capturedAt])
+  // Polls por antigüedad: payment-poll (status=PENDING + createdAt range/order) y los sweeps de reconciliación.
+  @@index([status, createdAt])
+  // Fallback del webhook de cobro sin paymentId: correlaciona por externalUid (findFirst).
+  @@index([externalUid])
   /// F2.3 · resolver el Payment de liquidación de una penalidad (idempotencia/conciliación).
   @@index([cancellationPenaltyId])
   /// DEBT gate: lista la deuda PENDIENTE de un pasajero (status=DEBT) en O(log n) sin escanear.
@@ -298,6 +306,8 @@ model Payout {
   /// Un payout por conductor y período (idempotencia del cron semanal).
   @@unique([driverId, periodStart, periodEnd])
   @@index([status])
+  // payout-poll: status=PROCESSING ordenado por updatedAt (el crash-recovery/reconciliación de desembolsos).
+  @@index([status, updatedAt])
   @@map("payouts")
   @@schema("payment")
 }
@@ -417,6 +427,8 @@ model Refund {
 
   @@index([paymentId])
   @@index([status])
+  // Barrido horario de refunds PENDING viejos (sweepStalePendingRefunds): status=PENDING + createdAt range/order.
+  @@index([status, createdAt])
   /// Correlación del callback de reembolso del proveedor (uid → Refund).
   @@index([externalRefundId])
   /// El UNIQUE de `dedupKey` es PARCIAL (status <> REJECTED) y vive SOLO en SQL (ver comentario del campo); acá
@@ -628,6 +640,10 @@ model IncentiveProgress {
   @@index([driverId])
   /// "bonos pendientes de un conductor" (paidAt IS NULL) sin escanear: collectEarnings y back-pay.
   @@index([driverId, paidAt])
+  // Confirmación de desembolso: updateMany where {paidInPayoutId, paidAt:null} marca los bonos de ESE payout.
+  @@index([paidInPayoutId])
+  // Back-pay por arrastre: escanea bonos PENDIENTES (paidAt:null + completedAt en ventana) SIN driverId.
+  @@index([paidAt, completedAt])
   @@map("incentive_progress")
   @@schema("payment")
 }

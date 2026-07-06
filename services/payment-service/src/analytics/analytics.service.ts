@@ -18,18 +18,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, PaymentMethod, PaymentStatus } from '../generated/prisma';
-
-/**
- * Métodos DIGITALES = todos MENOS CASH (el efectivo lo cobra el conductor en mano, nunca llega al banco de VEO).
- * Lista POSITIVA a propósito: `method IN (…)` puede hacer seek en el índice `[method, status, capturedAt]`; la
- * negación `method != CASH` NO (la anula → full-scan). Si se agrega un método digital al enum, sumarlo acá.
- */
-const NON_CASH_METHODS = [
-  PaymentMethod.YAPE,
-  PaymentMethod.PLIN,
-  PaymentMethod.CARD,
-  PaymentMethod.PAGOEFECTIVO,
-] as const;
+// Fuente ÚNICA de "métodos digitales" (lista positiva que sí usa el índice) — compartida con collectEarnings.
+import { NON_CASH_METHODS } from '../payments/payment.policy';
 
 /** Punto de la serie horaria de revenue. `bucket` = hora truncada en ISO UTC (toStartOfHour). */
 export interface RevenueHourBucket {

@@ -22,6 +22,7 @@ import {
 import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
+import { NON_CASH_METHODS } from '../payments/payment.policy';
 import { REDIS } from '../infra/redis';
 import {
   aggregatePayouts,
@@ -791,8 +792,9 @@ export class PayoutsService {
         // A2 (ADR-022 §P-A) · EXCLUIR el efectivo del payout POSITIVO: en un viaje CASH el conductor ya cobró su
         // neto EN MANO (la plata nunca pasó por la plataforma). Pagárselo otra vez por banco = doble-pago (el bug
         // A2). Su comisión adeudada se acumula en `DriverDebt` (en la captura) y se NETEA aparte en el run. Los
-        // tip-Payments DIGITALES de un viaje cash (method != CASH, Model B) SÍ entran: son propina real por banco.
-        method: { not: 'CASH' },
+        // tip-Payments DIGITALES de un viaje cash (Model B) SÍ entran: son propina real por banco. Lista POSITIVA
+        // (no `method != CASH`): la negación anula el índice [method, status, capturedAt]; el `in` sí lo usa.
+        method: { in: [...NON_CASH_METHODS] },
         // Incluye PARTIALLY_REFUNDED (F4): un reembolso PARCIAL al pasajero lo absorbe la plataforma
         // (sale de su comisión); el conductor prestó el servicio → mantiene su neto. Un cobro REFUNDED
         // (total) sí queda fuera (viaje revertido → el conductor no cobra).
