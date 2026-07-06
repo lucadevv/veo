@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useVehicles } from '@/lib/api/queries';
 import type { VehicleView } from '@/lib/api/schemas';
+import { downloadCsv } from '@/lib/csv';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { StatCard } from '@/components/ui/stat-card';
@@ -140,6 +141,23 @@ export default function VehiclesPage() {
 
   const tabCount = (t: Tab): number => all.filter((v) => matchesTab(v, t)).length;
 
+  const exportCsv = () =>
+    downloadCsv(
+      'veo-vehiculos.csv',
+      ['Placa', 'Marca', 'Modelo', 'Año', 'Tipo', 'Conductor', 'Documentos', 'ITV', 'Estado'],
+      rows.map((v) => [
+        v.plate,
+        v.brand,
+        v.model,
+        v.year,
+        v.vehicleType === 'MOTO' ? 'Moto' : 'Auto',
+        v.driverName ?? '',
+        docsPill(v.status).label,
+        itvPill(v).label,
+        estado(v).label,
+      ]),
+    );
+
   if (!can(user, 'fleet:view')) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
@@ -161,7 +179,9 @@ export default function VehiclesPage() {
         </div>
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2"
+          onClick={exportCsv}
+          disabled={rows.length === 0}
+          className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2 disabled:opacity-40"
         >
           <Download className="size-4" aria-hidden />
           Exportar

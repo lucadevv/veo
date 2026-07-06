@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { useDrivers, useDriversPending, useDriversSummary } from '@/lib/api/queries';
 import type { DriverApproval, PendingDriver } from '@/lib/api/schemas';
+import { date } from '@/lib/formatters';
+import { downloadCsv } from '@/lib/csv';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { StatCard } from '@/components/ui/stat-card';
@@ -42,22 +44,36 @@ interface Row {
   updatedAt: string | null;
 }
 
+// Labels de las columnas (fuente ÚNICA: los pills Y el export CSV los consumen — sin duplicar strings).
+const docsLabel = (complete: number, total: number): string =>
+  total > 0 && complete >= total
+    ? `${complete}/${total} completos`
+    : `Faltan ${Math.max(total - complete, 0)}`;
+
+const VERIF_MAP: Record<string, { tone: PillTone; label: string }> = {
+  VERIFICADO: { tone: 'success', label: 'Verificado' },
+  REVISAR: { tone: 'warn', label: 'Cotejado' },
+  PENDIENTE: { tone: 'neutral', label: 'Sin enrolar' },
+};
+const verifLabel = (status: string | null): string =>
+  status === null ? '' : (VERIF_MAP[status]?.label ?? 'Sin enrolar');
+
+const estadoLabel = (row: Row): string => {
+  if (row.backgroundStatus === 'CLEARED') return 'Aprobado';
+  if (row.backgroundStatus === 'REJECTED') return 'Rechazado';
+  return row.docsTotal > 0 && row.docsComplete >= row.docsTotal ? 'En revisión' : 'Pendiente';
+};
+
 /** Pill de Documentos: "X/Y completos" en brand si están todos; "Faltan N" neutro si falta alguno. */
 function DocsPill({ complete, total }: { complete: number; total: number }) {
-  if (total > 0 && complete >= total)
-    return <DotPill tone="brand">{`${complete}/${total} completos`}</DotPill>;
-  return <DotPill tone="neutral">{`Faltan ${Math.max(total - complete, 0)}`}</DotPill>;
+  const done = total > 0 && complete >= total;
+  return <DotPill tone={done ? 'brand' : 'neutral'}>{docsLabel(complete, total)}</DotPill>;
 }
 
 /** Pill de Verificación: VERIFICADO→Verificado (success) · REVISAR→Cotejado (warn) · PENDIENTE→Sin enrolar (neutro). */
 function VerifPill({ status }: { status: string | null }) {
   if (status === null) return <span className="text-ink-subtle">—</span>;
-  const map: Record<string, { tone: PillTone; label: string }> = {
-    VERIFICADO: { tone: 'success', label: 'Verificado' },
-    REVISAR: { tone: 'warn', label: 'Cotejado' },
-    PENDIENTE: { tone: 'neutral', label: 'Sin enrolar' },
-  };
-  const m = map[status] ?? { tone: 'neutral' as PillTone, label: 'Sin enrolar' };
+  const m = VERIF_MAP[status] ?? { tone: 'neutral' as PillTone, label: 'Sin enrolar' };
   return <DotPill tone={m.tone}>{m.label}</DotPill>;
 }
 
@@ -157,6 +173,20 @@ export default function DriversPage() {
   const isLoading = usePendingSource ? pending.isLoading : fleet.isLoading;
   const isError = usePendingSource ? pending.isError : fleet.isError;
 
+  const exportCsv = () =>
+    downloadCsv(
+      'veo-conductores.csv',
+      ['Conductor', 'ID', 'Documentos', 'Verificación', 'Estado', 'Actualizado'],
+      rows.map((r) => [
+        r.fullName ?? '',
+        `drv_${r.id.slice(0, 8)}`,
+        docsLabel(r.docsComplete, r.docsTotal),
+        verifLabel(r.verificationStatus),
+        estadoLabel(r),
+        r.updatedAt ? date(r.updatedAt) : '',
+      ]),
+    );
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-[22px] overflow-auto px-8 py-7">
       {/* Header */}
@@ -167,7 +197,9 @@ export default function DriversPage() {
         </div>
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2"
+          onClick={exportCsv}
+          disabled={rows.length === 0}
+          className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2 disabled:opacity-40"
         >
           <Download className="size-4" aria-hidden />
           Exportar

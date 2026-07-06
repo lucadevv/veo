@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlarmClock,
@@ -22,6 +22,7 @@ import { useDriversPending, useFleetDocuments, useVehicles } from '@/lib/api/que
 import type { PendingDriver, VehicleView } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+import { downloadCsv } from '@/lib/csv';
 import { StatCard } from '@/components/ui/stat-card';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 
@@ -204,6 +205,28 @@ export default function ReviewsPage() {
   const loading = drivers.isLoading || documents.isLoading || vehicles.isLoading;
   const errored = drivers.isError || documents.isError || vehicles.isError;
 
+  // Paginación client-side sobre la cola ya merged/ordenada/filtrada (8/página como el frame). Real: prev/next
+  // recorren el set. Vuelve a página 1 al cambiar de tab o búsqueda (si no, quedaría en una página inexistente).
+  const PAGE_SIZE = 8;
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [tab, search]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const pageRows = filtered.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
+
+  const exportCsv = () =>
+    downloadCsv(
+      'veo-revisiones.csv',
+      ['Tipo', 'Ítem', 'Detalle', 'Pendiente', 'Esperando'],
+      filtered.map((r) => [
+        TYPE_META[r.type].label,
+        r.itemA,
+        r.itemB,
+        r.pendiente,
+        waitParts(r.enqueuedAt).label,
+      ]),
+    );
+
   if (!can(user, 'fleet:review')) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
@@ -236,7 +259,9 @@ export default function ReviewsPage() {
         </div>
         <button
           type="button"
-          className="inline-flex items-center rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2"
+          onClick={exportCsv}
+          disabled={filtered.length === 0}
+          className="inline-flex items-center rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2 disabled:opacity-40"
         >
           Exportar cola
         </button>
@@ -315,7 +340,7 @@ export default function ReviewsPage() {
         ) : filtered.length === 0 ? (
           <EmptyState className="py-12" title="Cola vacía" description="No hay nada esperando revisión en esta vista." />
         ) : (
-          filtered.map((r) => {
+          pageRows.map((r) => {
             const tm = TYPE_META[r.type];
             const w = waitParts(r.enqueuedAt);
             return (
@@ -350,14 +375,26 @@ export default function ReviewsPage() {
 
         <div className="flex items-center justify-between border-t border-border bg-surface-2 px-5 py-3">
           <span className="text-[13px] text-ink-subtle">
-            {`Mostrando ${filtered.length} en la cola`}
+            {`Mostrando ${pageRows.length} de ${filtered.length} en la cola`}
           </span>
           <div className="flex items-center gap-3">
-            <button type="button" disabled className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted opacity-40">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={clampedPage === 0}
+              aria-label="Página anterior"
+              className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-surface"
+            >
               <ChevronLeft className="size-4" aria-hidden />
             </button>
-            <span className="text-[13px] text-ink-muted">Página 1</span>
-            <button type="button" disabled className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted opacity-40">
+            <span className="text-[13px] text-ink-muted">{`Página ${clampedPage + 1} de ${totalPages}`}</span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={clampedPage >= totalPages - 1}
+              aria-label="Página siguiente"
+              className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-surface"
+            >
               <ChevronRight className="size-4" aria-hidden />
             </button>
           </div>
