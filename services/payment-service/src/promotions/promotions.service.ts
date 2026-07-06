@@ -14,7 +14,7 @@ import { createEnvelope } from '@veo/events';
 import { enqueueOutbox, isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, ValidationError, uuidv7 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
-import type { Promotion } from '../generated/prisma';
+import { Prisma, type Promotion } from '../generated/prisma';
 import {
   evaluatePromo,
   normalizeCode,
@@ -60,17 +60,20 @@ export class PromotionsService {
    *    `totalUses >= maxTotalUses` sigue correcto (true sii el count real llegó al tope).
    */
   private async usageFor(
+    client: Prisma.TransactionClient,
     promotionId: string,
     userId: string,
     maxTotalUses: number,
   ): Promise<{ totalUses: number; userUses: number }> {
+    // `client` = la réplica (validatePromo, preview) o la tx del canje (redeemPromo, bajo advisory lock): en el
+    // canje el count DEBE correr sobre la tx serializada para ver la inserción del canje concurrente anterior.
     const [totalUses, userUses] = await Promise.all([
       maxTotalUses > 0
-        ? this.prisma.read.promoRedemption
+        ? client.promoRedemption
             .findMany({ where: { promotionId }, take: maxTotalUses, select: { id: true } })
             .then((rows) => rows.length)
         : Promise.resolve(0),
-      this.prisma.read.promoRedemption.count({ where: { promotionId, userId } }),
+      client.promoRedemption.count({ where: { promotionId, userId } }),
     ]);
     return { totalUses, userUses };
   }
@@ -95,7 +98,7 @@ export class PromotionsService {
         reason: reasonMessage('NOT_FOUND'),
       };
     }
-    const usage = await this.usageFor(promo.id, userId, promo.maxTotalUses);
+    const usage = await this.usageFor(this.prisma.read, promo.id, userId, promo.maxTotalUses);
     const result = evaluatePromo(promo, fareCents, usage);
     if (!result.valid) {
       return {
@@ -152,15 +155,20 @@ export class PromotionsService {
       };
     }
 
-    const usage = await this.usageFor(promo.id, input.userId, promo.maxTotalUses);
-    const evaluation = evaluatePromo(promo, input.fareCents, usage);
-    if (!evaluation.valid) {
-      throw this.invalidError(evaluation.reason, code);
-    }
-    const discountCents = evaluation.discountCents;
-
     try {
       return await this.prisma.write.$transaction(async (tx) => {
+        // Advisory lock TRANSACCIONAL por promo (mismo patrón que el refund admin, payments.service): SERIALIZA
+        // los canjes CONCURRENTES del MISMO cupón. Sin él, dos requests (viajes/usuarios distintos) leen ambos
+        // totalUses<maxTotalUses / userUses<maxUsesPerUser FUERA de la tx y ambos insertan (el unique por tripleta
+        // NO cubre el AGREGADO de la promo) → se excede maxTotalUses/maxUsesPerUser. Con el lock el 2º espera el
+        // commit del 1º y su count —AHORA sobre la tx, no la réplica— YA ve la inserción previa → se rechaza.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`promo:${promo.id}`})::bigint)`;
+        const usage = await this.usageFor(tx, promo.id, input.userId, promo.maxTotalUses);
+        const evaluation = evaluatePromo(promo, input.fareCents, usage);
+        if (!evaluation.valid) {
+          throw this.invalidError(evaluation.reason, code);
+        }
+        const discountCents = evaluation.discountCents;
         const redemption = await tx.promoRedemption.create({
           data: {
             id: uuidv7(),
