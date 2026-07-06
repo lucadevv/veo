@@ -1345,7 +1345,12 @@ export class PaymentsService {
     try {
       const result = await this.executeRefundClaim(payment, claim);
       // A1 · refund TOTAL del viaje → también se devuelven sus propinas digitales ya cobradas (viaje revertido).
-      if (claim.isFullyRefunded) await this.refundTripTipsFully(payment.tripId, claim.reason);
+      // SOLO si el reverso de la TARIFA ya CONFIRMÓ (status COMPLETED: cash + direct-sync). Si es ASYNC (PENDING,
+      // ProntoPaga), NO se devuelven acá — se hace en el callback CONFIRMED (applyRefundWebhookResult): un reverso
+      // async que se RECHAZA después NO debe dejar las propinas reembolsadas sobre una tarifa que no se revirtió.
+      if (claim.isFullyRefunded && result.status === RefundStatus.COMPLETED) {
+        await this.refundTripTipsFully(payment.tripId, claim.reason);
+      }
       return result;
     } catch (err) {
       // BACKSTOP DE VENTANA: ya hay un refund reciente del MISMO dinero (paymentId, céntimos) creado dentro de la
@@ -1458,8 +1463,11 @@ export class PaymentsService {
 
     try {
       const result = await this.executeRefundClaim(payment, claim);
-      // A1 · el viaje se revirtió (cancelación) → devolver también sus propinas digitales ya cobradas.
-      await this.refundTripTipsFully(tripId, reason);
+      // A1 · el viaje se revirtió (cancelación) → devolver también sus propinas digitales ya cobradas. SOLO si el
+      // reverso de la tarifa CONFIRMÓ (COMPLETED); si es ASYNC (PENDING) lo hace el callback CONFIRMED (ver arriba).
+      if (result.status === RefundStatus.COMPLETED) {
+        await this.refundTripTipsFully(tripId, reason);
+      }
       return result;
     } catch (err) {
       // IDEMPOTENCIA: el dedupKey ya existe (otra entrega del MISMO `booking.cancelled` ya creó el Refund) →
@@ -2009,6 +2017,16 @@ export class PaymentsService {
     switch (input.status) {
       case 'CONFIRMED': {
         const applied = await this.completeRefund(refund.id, input.externalRefundId);
+        // A1 · el reverso ASYNC de la TARIFA recién CONFIRMÓ acá (no en la reserva) → AHORA se devuelven sus
+        // propinas digitales, si fue un refund TOTAL de una FARE. Cierra el bug: antes se devolvían en la reserva
+        // y un reverso que se RECHAZABA después las dejaba reembolsadas sobre una tarifa no revertida. `applied`
+        // (completeRefund idempotente) → solo el PRIMER callback dispara; refundTripTipsFully ya es idempotente.
+        if (applied) {
+          const p = await this.prisma.read.payment.findUnique({ where: { id: refund.paymentId } });
+          if (p && p.kind === 'FARE' && p.status === 'REFUNDED') {
+            await this.refundTripTipsFully(p.tripId, refund.reason);
+          }
+        }
         return { applied, status: RefundStatus.COMPLETED };
       }
       case 'DECLINED':
