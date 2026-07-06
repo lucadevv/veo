@@ -180,6 +180,41 @@ export class PayoutsService {
   }
 
   /**
+   * #25 · Conductores con CRÉDITO pendiente (credit-back de comisión CASH revertida) que NO ganaron este período
+   * → se les paga un payout STANDALONE del crédito. Devuelve solo los que su NETO (crédito − deuda PENDIENTE)
+   * alcanza el mínimo liquidable; debajo del mínimo se omiten (carry-forward: el crédito PENDING espera a acumular
+   * o a que el conductor vuelva a ganar). `excludeDriverIds` = los que ya entran al run por ganancia (su crédito
+   * lo aplica el netting normal ahí, no acá). Agrega en la DB (groupBy), sin materializar filas.
+   */
+  private async collectCreditOnlyDrivers(
+    excludeDriverIds: Set<string>,
+  ): Promise<{ driverId: string; netCents: number }[]> {
+    const creditsByDriver = await this.prisma.read.driverCredit.groupBy({
+      by: ['driverId'],
+      where: { status: 'PENDING' },
+      _sum: { amountCents: true },
+    });
+    const candidates = creditsByDriver.filter((c) => !excludeDriverIds.has(c.driverId));
+    if (candidates.length === 0) return [];
+
+    // La deuda CASH PENDIENTE se netea contra el crédito (mismo criterio que applyDebtNetting) antes del umbral.
+    const debtsByDriver = await this.prisma.read.driverDebt.groupBy({
+      by: ['driverId'],
+      where: { status: 'PENDING', driverId: { in: candidates.map((c) => c.driverId) } },
+      _sum: { amountCents: true },
+    });
+    const debtByDriver = new Map(debtsByDriver.map((d) => [d.driverId, d._sum.amountCents ?? 0]));
+
+    return candidates
+      .map((c) => ({
+        driverId: c.driverId,
+        netCents: (c._sum.amountCents ?? 0) - (debtByDriver.get(c.driverId) ?? 0),
+      }))
+      .filter((c) => c.netCents >= this.minCents) // debajo del mínimo → carry-forward (el crédito sigue PENDING)
+      .sort((a, b) => a.driverId.localeCompare(b.driverId));
+  }
+
+  /**
    * A2 (ADR-022 §P-A) · Netea la ganancia DIGITAL disponible del conductor contra sus deudas CASH PENDIENTES
    * (comisión de viajes en efectivo que cobró en mano), DENTRO de la tx del payout. FIFO (más viejas primero):
    * cubre deudas ENTERAS mientras alcance; la del BORDE se REDUCE (queda PENDING con el resto → carry-forward al
@@ -252,8 +287,26 @@ export class PayoutsService {
     operator?: AuthenticatedUser,
   ): Promise<PayoutRunSummary> {
     const { rows, pendingIncentiveIdsByDriver } = await this.collectEarnings(start, end);
-    const aggregated = aggregatePayouts(rows, this.minCents);
-    const projectedTotal = aggregated.reduce((sum, p) => sum + p.amountCents, 0);
+    const earners = aggregatePayouts(rows, this.minCents);
+
+    // #25 · credit-only: conductores a los que la plataforma DEBE un DriverCredit (comisión CASH revertida) pero
+    // que NO entran al run por ganancia digital. Se les crea un payout STANDALONE del crédito neto, SOLO si
+    // alcanza el mínimo liquidable (debajo → carry-forward, el crédito PENDING espera). Sin esto un conductor que
+    // dejó de ganar nunca cobraría lo que se le debe. amountCents=0 en el aggregate: el neto lo aporta
+    // applyDebtNetting (crédito − deuda) dentro del loop; su `netCents` sí entra al projectedTotal (step-up MFA).
+    const creditOnly = await this.collectCreditOnlyDrivers(new Set(earners.map((a) => a.driverId)));
+    const aggregated = [
+      ...earners,
+      ...creditOnly.map((c) => ({
+        driverId: c.driverId,
+        grossCents: 0,
+        commissionCents: 0,
+        amountCents: 0,
+      })),
+    ];
+    const projectedTotal =
+      earners.reduce((sum, p) => sum + p.amountCents, 0) +
+      creditOnly.reduce((sum, c) => sum + c.netCents, 0);
 
     if (operator && projectedTotal > this.stepUpCents && !this.hasFreshMfa(operator)) {
       throw new ForbiddenError(

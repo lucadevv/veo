@@ -385,3 +385,59 @@ describe('PayoutsService.runPayouts · credit-back de comisión CASH revertida (
     expect(credit.status).toBe('APPLIED'); // aplicado UNA sola vez (no se re-suma en el 2do run)
   });
 });
+
+describe('PayoutsService.runPayouts · credit-only (#25): pagar al conductor sin ganancia lo que se le debe', () => {
+  it('crédito ≥ mínimo y SIN ganancia digital → payout STANDALONE del crédito, credit APPLIED', async () => {
+    const driverId = uuidv7();
+    const creditId = await seedPendingCredit(driverId, 6000); // ≥ MIN_CENTS (5000); NO se siembra ganancia
+    const { redis } = makeRedis();
+
+    const summary = await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
+
+    expect(summary.totalAmountCents).toBe(6000);
+    const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
+    expect(payout.amountCents).toBe(6000); // el crédito entero
+    expect(payout.grossCents).toBe(0); // no hubo viaje/ganancia
+    expect(payout.commissionCents).toBe(0);
+    const credit = await prisma.driverCredit.findUniqueOrThrow({ where: { id: creditId } });
+    expect(credit.status).toBe('APPLIED');
+    expect(credit.appliedInPayoutId).toBe(payout.id);
+  });
+
+  it('crédito BAJO el mínimo y sin ganancia → NO paga (carry-forward), el crédito sigue PENDING', async () => {
+    const driverId = uuidv7();
+    const creditId = await seedPendingCredit(driverId, 3000); // < MIN_CENTS (5000)
+    const { redis } = makeRedis();
+
+    const summary = await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
+
+    expect(summary.totalAmountCents).toBe(0);
+    const payouts = await prisma.payout.findMany({ where: { driverId } });
+    expect(payouts).toHaveLength(0); // no se crea payout de polvo
+    const credit = await prisma.driverCredit.findUniqueOrThrow({ where: { id: creditId } });
+    expect(credit.status).toBe('PENDING'); // espera a acumular o a que el conductor vuelva a ganar
+  });
+
+  it('crédito neteado contra deuda PENDING: solo paga si el NETO alcanza el mínimo', async () => {
+    const driverId = uuidv7();
+    await seedPendingCredit(driverId, 8000); // crédito 8000
+    await prisma.driverDebt.create({
+      data: {
+        id: uuidv7(),
+        driverId,
+        tripId: uuidv7(),
+        paymentId: uuidv7(),
+        amountCents: 1000, // deuda 1000 → neto 7000 ≥ mínimo → paga el neto
+        status: 'PENDING',
+      },
+    });
+    const { redis } = makeRedis();
+
+    await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
+
+    const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
+    expect(payout.amountCents).toBe(7000); // 8000 crédito − 1000 deuda
+    const debts = await prisma.driverDebt.findMany({ where: { driverId, status: 'PENDING' } });
+    expect(debts).toHaveLength(0); // la deuda se saldó contra el crédito (SETTLED)
+  });
+});
