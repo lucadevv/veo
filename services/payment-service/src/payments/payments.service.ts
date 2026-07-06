@@ -1088,7 +1088,15 @@ export class PaymentsService {
     to: Date,
   ): Promise<DriverEarningsBreakdown> {
     const rows = await this.prisma.read.payment.findMany({
-      where: { driverId, status: 'CAPTURED', capturedAt: { gte: from, lt: to } },
+      // Espeja EXACTO el filtro de collectEarnings (payouts.service:781): incluye PARTIALLY_REFUNDED — un
+      // reembolso PARCIAL al pasajero lo absorbe la plataforma, el conductor cobra la tarifa ENTERA (gross/
+      // comisión completos, sin restar refundedCents). Antes la pantalla filtraba solo CAPTURED → sub-reportaba
+      // lo que el conductor efectivamente cobra por banco (divergía del payout real).
+      where: {
+        driverId,
+        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
+        capturedAt: { gte: from, lt: to },
+      },
       select: { grossCents: true, commissionCents: true, tipCents: true, kind: true },
     });
     let grossCents = 0;

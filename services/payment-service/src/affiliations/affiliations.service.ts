@@ -246,14 +246,20 @@ export class AffiliationsService {
     if (aff.status === AffiliationStatus.ACTIVE || aff.status === AffiliationStatus.REVOKED)
       return aff; // idempotente / no pisar
     return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.walletAffiliation.update({
-        where: { id: aff.id },
+      // CAS por status (no `update where {id}`): el guard de arriba es un READ-then-check (TOCTOU) — dos caminos
+      // concurrentes (webhook + refresh /show) que leyeron PROCESS ambos lo pasan y emitirían
+      // payment.affiliation_activated DOS veces. Con el CAS `where {id, status: <lo leído>}` solo UNO gana
+      // (count=1) y emite; el perdedor ve count=0 → no-op (devuelve la fila ya ACTIVE sin re-emitir).
+      const { count } = await tx.walletAffiliation.updateMany({
+        where: { id: aff.id, status: aff.status },
         data: {
           status: 'ACTIVE',
           phoneMasked: opts.phoneMasked,
           walletUid: opts.walletUid ?? aff.walletUid,
         },
       });
+      const updated = await tx.walletAffiliation.findUniqueOrThrow({ where: { id: aff.id } });
+      if (count === 0) return updated; // otra corrida concurrente ya activó: NO re-emitir
       const envelope = createEnvelope({
         eventType: 'payment.affiliation_activated',
         producer: 'payment-service',
@@ -308,11 +314,15 @@ export class AffiliationsService {
       aff.status === AffiliationStatus.REVOKED
     )
       return;
-    await this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.walletAffiliation.update({
-        where: { id: aff.id },
+    const emitted = await this.prisma.write.$transaction(async (tx) => {
+      // CAS por status (mismo motivo que activateAndEmit): dos webhooks EXPIRED/DECLINED concurrentes que leyeron
+      // el mismo estado fuente NO deben emitir payment.affiliation_expired dos veces. Solo el que matchea emite.
+      const { count } = await tx.walletAffiliation.updateMany({
+        where: { id: aff.id, status: aff.status },
         data: { status: AffiliationStatus.EXPIRED, walletUid: input.walletUid ?? aff.walletUid },
       });
+      if (count === 0) return false; // otra corrida ya transicionó: NO re-emitir
+      const updated = await tx.walletAffiliation.findUniqueOrThrow({ where: { id: aff.id } });
       const envelope = createEnvelope({
         eventType: 'payment.affiliation_expired',
         producer: 'payment-service',
@@ -324,8 +334,9 @@ export class AffiliationsService {
         },
       });
       await enqueueOutbox(tx, envelope, updated.id);
+      return true;
     });
-    this.logger.log(`Afiliación ${aff.id} → EXPIRED (por webhook)`);
+    if (emitted) this.logger.log(`Afiliación ${aff.id} → EXPIRED (por webhook)`);
   }
 
   /**

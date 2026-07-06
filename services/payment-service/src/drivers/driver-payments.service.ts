@@ -84,6 +84,9 @@ export class DriverPaymentsService {
           ? await tx.tipAddition.deleteMany({ where: { paymentId: { in: paymentIds } } })
           : { count: 0 };
 
+      // DriverDebt referencia paymentId (soft ref) → se borra ANTES de los payments. FALTABA en el purge:
+      // dejaba filas de deuda huérfanas (viola el invariante "sin huérfanos" del borrado de prueba DEV).
+      const driverDebts = await tx.driverDebt.deleteMany({ where: { driverId } });
       const payments = await tx.payment.deleteMany({ where: { driverId } });
       const payouts = await tx.payout.deleteMany({ where: { driverId } });
       const cancellationPenalties = await tx.cancellationPenalty.deleteMany({
@@ -104,6 +107,7 @@ export class DriverPaymentsService {
         userId,
         byDriverId: {
           cancellationPenalties: cancellationPenalties.count,
+          driverDebts: driverDebts.count,
           incentiveProgress: incentiveProgress.count,
           incentiveTripCredits: incentiveTripCredits.count,
           payments: payments.count,
