@@ -280,4 +280,32 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     });
     expect(progress.paidInPayoutId).toBe(payout.id); // ligado al Payout (se libera al resolver el review)
   });
+
+  it('FIX doble-pago: un bono YA ligado a un Payout PENDING no-confirmado NO se re-recolecta en el run del período siguiente', async () => {
+    const driverId = uuidv7();
+    const incentiveId = await seedIncentive(6000);
+    // Bono histórico (abril): entra por back-pay-por-arrastre en cualquier run cuyo `end` sea posterior.
+    const progressId = await seedCompletedProgress(incentiveId, driverId, 6000, HISTORIC);
+    const { redis } = makeRedis();
+    const svc = makeService(redis);
+
+    // Run del período 1 [11–18 may): crea el Payout PENDING con el bono ligado (paidAt AÚN null, cron no confirma).
+    const p1Start = new Date('2026-05-11T00:00:00.000Z');
+    const p1End = new Date('2026-05-18T00:00:00.000Z');
+    const s1 = await svc.runPayouts(p1Start, p1End);
+    expect(s1.pending).toBe(1);
+    const p1 = await prisma.payout.findFirstOrThrow({ where: { driverId } });
+
+    // Run del período 2 [18–25 may): el bono sigue paidAt:null (p1 no confirmado) PERO ya está ligado a p1 y su
+    // monto ya está congelado ahí. Sin el guard `paidInPayoutId:null`, el back-pay lo re-recolectaría y lo
+    // bancaría en un SEGUNDO Payout → doble-pago. Con el guard: no se re-recolecta (el driver no tiene otras
+    // ganancias en p2 → no nace un 2º payout).
+    const s2 = await svc.runPayouts(PERIOD_START, PERIOD_END);
+    expect(s2.pending).toBe(0); // NO se crea un 2º Payout con el bono re-recolectado
+
+    const payouts = await prisma.payout.findMany({ where: { driverId } });
+    expect(payouts).toHaveLength(1); // el bono vive en UN solo Payout, no en dos
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    expect(progress.paidInPayoutId).toBe(p1.id); // sigue ligado al ORIGINAL, no re-ligado al del período 2
+  });
 });

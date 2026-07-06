@@ -834,8 +834,16 @@ export class PayoutsService {
     // TODOS los bonos históricos completados-no-pagados, y se auto-limpia (una vez marcados, paidAt deja
     // de ser null y no vuelven a aparecer). La idempotencia NO se rompe: el guard sigue siendo paidAt:null
     // —tanto acá (lectura) como en el updateMany (CAS de marcado)—, así que un re-run no los re-paga.
+    //
+    // FIX DOBLE-PAGO (guard por paidInPayoutId): `paidAt` se marca SOLO al confirmar el Payout (PROCESSED),
+    // así que entre el create del Payout y su confirmación el bono queda `paidAt:null` PERO ya LIGADO
+    // (`paidInPayoutId` seteado) y su monto YA está congelado en ESE Payout. Sin este guard, un 2º run del
+    // período re-seleccionaba ese bono (seguía paidAt:null), lo re-ligaba y lo bancaba en un SEGUNDO Payout →
+    // doble-pago. `paidInPayoutId:null` excluye los ya-ligados (in-flight o retenidos por un FAILED): un FAILED
+    // se paga RETENTÁNDOLO (retryPayout re-desembolsa el monto congelado y marca paidAt con el link intacto),
+    // igual que su gross/comisión — el bono no se pierde, viaja con su Payout.
     const pendingIncentives = await this.prisma.read.incentiveProgress.findMany({
-      where: { paidAt: null, completedAt: { not: null, lt: end } },
+      where: { paidAt: null, paidInPayoutId: null, completedAt: { not: null, lt: end } },
       select: { id: true, driverId: true, rewardGrantedCents: true },
     });
     const pendingIncentiveIdsByDriver = new Map<string, string[]>();
