@@ -952,41 +952,17 @@ export class PaymentsService {
         if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED')
           return { applied: false, status: payment.status };
         if (payment.status === 'FAILED') return { applied: false, status: 'FAILED' };
-        await this.markFailed(payment, 'expired');
-        return { applied: true, status: 'FAILED' };
+        if (payment.status === 'DEBT') return { applied: false, status: 'DEBT' }; // idempotente (espejo DECLINED)
+        // Un checkout que EXPIRA para el cobro de un viaje COMPLETADO NO es "no pasó nada": la tarifa se DEBE
+        // igual (el viaje ocurrió). Va a DEBT (gatea al pasajero + reintentable), IGUAL que DECLINED — NO a
+        // FAILED terminal, que dejaba el viaje GRATIS (sin cobro, sin gate, sin reintento → fuga de ingresos).
+        // markDebt rutea por kind: una PROPINA (kind=TIP) que expira SÍ es FAILED terminal (opcional, no se debe).
+        await this.markDebt(payment, 'checkout_expired');
+        return { applied: true, status: payment.kind === 'TIP' ? 'FAILED' : 'DEBT' };
       }
       default:
         return { applied: false, status: payment.status }; // PENDING → sin transición
     }
-  }
-
-  /** Marca un pago como FAILED (cobro externo expirado/cancelado). Emite payment.failed willRetry=false. */
-  private async markFailed(payment: Payment, reason: string): Promise<Payment> {
-    // A1 · una PROPINA (kind=TIP) que EXPIRA (checkout abandonado — el caso más común) o se cancela NO es una
-    // falla del cobro del viaje: se marca FAILED (terminal) SIN emitir `payment.failed` — ese evento dispara la
-    // alerta a la central de seguridad + push "pago falló" al pasajero, INDEBIDO por una propina OPCIONAL no
-    // completada. Espeja el atajo kind=TIP de `markDebt` (rama DECLINED); acá cubre la rama EXPIRED del webhook.
-    if (payment.kind === 'TIP') {
-      assertPaymentTransition(payment.status, 'FAILED');
-      return this.prisma.write.payment.update({
-        where: { id: payment.id },
-        data: { status: 'FAILED', failureReason: reason },
-      });
-    }
-    assertPaymentTransition(payment.status, 'FAILED');
-    return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'FAILED', failureReason: reason },
-      });
-      const envelope = createEnvelope({
-        eventType: 'payment.failed',
-        producer: 'payment-service',
-        payload: { paymentId: updated.id, tripId: updated.tripId, reason, willRetry: false },
-      });
-      await enqueueOutbox(tx, envelope, updated.id);
-      return updated;
-    });
   }
 
   /**

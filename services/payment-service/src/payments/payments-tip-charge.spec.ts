@@ -168,7 +168,7 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(paymentFindMany).toHaveBeenCalledTimes(2);
   });
 
-  it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markFailed kind-aware)', async () => {
+  it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markDebt kind-aware)', async () => {
     const tip: Row = {
       id: 'tip-x', tripId: 'trip-1', kind: 'TIP', status: 'PENDING', method: 'YAPE',
       amountCents: 500, tipCents: 500, driverId: 'drv-1',
@@ -196,6 +196,47 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(out.status).toBe('FAILED');
     expect(updates[0]!.status).toBe('FAILED');
     expect(txSpy).not.toHaveBeenCalled(); // el tip NO pasa por la tx que emite payment.failed → no alerta seguridad
+  });
+
+  it('FARE que EXPIRA (checkout de un viaje COMPLETADO) → DEBT, NO FAILED terminal: gatea + reintentable (no viaje gratis)', async () => {
+    const fare: Row = {
+      id: 'fare-x', tripId: 'trip-1', kind: 'FARE', status: 'PENDING', method: 'YAPE',
+      amountCents: 5000, driverId: 'drv-1',
+    };
+    const updates: Row[] = [];
+    const outbox: { eventType: string }[] = [];
+    const prisma = {
+      read: { payment: { findUnique: vi.fn(async () => fare) } },
+      write: {
+        payment: { update: vi.fn() },
+        // markDebt (no-TIP) usa $transaction: update a DEBT + enqueueOutbox(payment.failed).
+        $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({
+            payment: {
+              update: vi.fn(async ({ data }: { data: Row }) => {
+                updates.push(data);
+                return { ...fare, ...data };
+              }),
+            },
+            outboxEvent: {
+              create: vi.fn(async ({ data }: { data: { eventType: string } }) => {
+                outbox.push(data);
+                return data;
+              }),
+            },
+          }),
+        ),
+      },
+    };
+    const svc = new PaymentsService(
+      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+    );
+    const out = await svc.applyWebhookResult({
+      paymentId: 'fare-x', externalUid: 'uid-x', status: 'EXPIRED',
+    });
+    expect(out.status).toBe('DEBT'); // NO 'FAILED' terminal → el viaje NO queda gratis
+    expect(updates[0]!.status).toBe('DEBT'); // el pago queda en DEBT: gatea al pasajero + reintentable
+    expect(outbox.map((o) => o.eventType)).toContain('payment.failed'); // willRetry=false → bloquea nuevos viajes
   });
 
   it('earningsForDriver: la propina suma en tipCents pero NO cuenta como viaje (tripCount solo FARE)', async () => {
