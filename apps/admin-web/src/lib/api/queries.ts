@@ -517,6 +517,34 @@ export function useVehicle(id: string) {
   });
 }
 
+/** Documentos de UN vehículo (owner=VEHICLE) para el detalle: SOAT, tarjeta de propiedad, foto. */
+export function useVehicleDocuments(vehicleId: string) {
+  return useQuery({
+    queryKey: ['vehicle-documents', vehicleId] as const,
+    enabled: vehicleId.length > 0,
+    queryFn: ({ signal }) =>
+      apiClient().get('/fleet/documents', {
+        schema: documentPage,
+        signal,
+        query: cleanQuery({ ownerId: vehicleId, limit: 50 }),
+      }),
+  });
+}
+
+/** Inspecciones (ITV) de UN vehículo — última + historial, para la card de ITV del detalle. */
+export function useVehicleInspections(vehicleId: string) {
+  return useQuery({
+    queryKey: ['vehicle-inspections', vehicleId] as const,
+    enabled: vehicleId.length > 0,
+    queryFn: ({ signal }) =>
+      apiClient().get('/fleet/inspections', {
+        schema: inspectionPage,
+        signal,
+        query: cleanQuery({ vehicleId, limit: 50 }),
+      }),
+  });
+}
+
 export function useInspections() {
   return useInfiniteQuery({
     queryKey: qk.inspections,

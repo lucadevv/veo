@@ -1,553 +1,259 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle, BadgeCheck, CalendarClock, FileWarning, Truck } from 'lucide-react';
 import {
-  useExpiringDocuments,
-  useFleetDocuments,
-  useInspections,
-  useModelReview,
-  useVehicles,
-  useVehiclesSummary,
-} from '@/lib/api/queries';
-import type {
-  ExpiringDocumentView,
-  FleetDocumentView,
-  InspectionView,
-  VehicleModelReviewView,
-  VehicleView,
-} from '@/lib/api/schemas';
-import { date, dateTime } from '@/lib/formatters';
-import { segmentLabel, energyLabel, operabilityReasonLabel } from '@/lib/fleet-labels';
-import { cn } from '@/lib/cn';
+  Ban,
+  Bike,
+  Car,
+  ChevronRight,
+  CircleCheck,
+  CalendarClock,
+  Download,
+  Lock,
+  Search,
+} from 'lucide-react';
+import { useVehicles, useVehiclesSummary } from '@/lib/api/queries';
+import type { VehicleView } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
-import { PageHeader } from '@/components/layout/page-header';
-import { Button } from '@/components/ui/button';
-import { DataTable } from '@/components/ui/table';
-import { StatusPill } from '@/components/ui/status-pill';
-import { Badge } from '@/components/ui/badge';
-import { ErrorState } from '@/components/ui/states';
+import { StatCard } from '@/components/ui/stat-card';
+import { DotPill, type PillTone } from '@/components/ui/dot-pill';
+import { EmptyState, ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
-import { DocumentActions } from '@/components/fleet/document-actions';
-import { ModelReviewActions } from '@/components/fleet/model-review-actions';
-import {
-  CreateDocumentDialog,
-  CreateInspectionDialog,
-  CreateVehicleDialog,
-} from '@/components/fleet/fleet-forms';
 
-const OWNER_LABEL: Record<'DRIVER' | 'VEHICLE', string> = {
-  DRIVER: 'Conductor',
-  VEHICLE: 'Vehículo',
-};
+/** Días entre hoy y una fecha ISO (para "Vence N días"). null si no hay fecha. */
+function daysUntil(iso: string | null): number | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.round((d.getTime() - Date.now()) / 86_400_000);
+}
 
+const DocStatus = { VALID: 'VALID', EXPIRING_SOON: 'EXPIRING_SOON', EXPIRED: 'EXPIRED' } as const;
 
-const documentColumns: ColumnDef<FleetDocumentView, unknown>[] = [
-  {
-    accessorKey: 'type',
-    header: 'Tipo',
-    cell: ({ row }) => <span className="text-ink">{row.original.type}</span>,
-  },
-  {
-    accessorKey: 'ownerType',
-    header: 'Titular',
-    cell: ({ row }) => (
-      <span className="text-ink-muted">
-        {OWNER_LABEL[row.original.ownerType]} · {row.original.ownerId.slice(0, 8)}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'status',
-    header: 'Estado',
-    cell: ({ row }) => <StatusPill status={row.original.status} />,
-  },
-  {
-    accessorKey: 'expiresAt',
-    header: 'Vence',
-    cell: ({ row }) => <span className="text-ink-muted">{date(row.original.expiresAt)}</span>,
-  },
-  {
-    id: 'actions',
-    header: 'Acciones',
-    enableSorting: false,
-    cell: ({ row }) => <DocumentActions doc={row.original} />,
-  },
+/** Estado DERIVADO del vehículo (suspensión = función de docs+ITV, no un flag stored). */
+function estado(v: VehicleView): { key: 'activo' | 'enRevision' | 'suspendido'; label: string; tone: PillTone } {
+  if (!v.operable || v.status === DocStatus.EXPIRED || (v.itvHasInspection && !v.itvCurrent))
+    return { key: 'suspendido', label: 'Suspendido', tone: 'danger' };
+  if (!v.itvHasInspection || v.status === DocStatus.EXPIRING_SOON)
+    return { key: 'enRevision', label: 'En revisión', tone: 'warn' };
+  return { key: 'activo', label: 'Activo', tone: 'success' };
+}
+
+/** Pill de DOCUMENTOS (docStatus del vehículo). */
+function docsPill(status: string): { tone: PillTone; label: string } {
+  switch (status) {
+    case DocStatus.VALID:
+      return { tone: 'success', label: 'Completos' };
+    case DocStatus.EXPIRING_SOON:
+      return { tone: 'warn', label: 'Por vencer' };
+    case DocStatus.EXPIRED:
+      return { tone: 'danger', label: 'Vencidos' };
+    default:
+      return { tone: 'neutral', label: status };
+  }
+}
+
+/** Pill de ITV (última inspección). */
+function itvPill(v: VehicleView): { tone: PillTone; label: string } {
+  if (!v.itvHasInspection) return { tone: 'neutral', label: 'Sin ITV' };
+  if (!v.itvCurrent) return { tone: 'danger', label: 'Vencida' };
+  const d = daysUntil(v.itvNextDueAt);
+  if (d !== null && d <= 30) return { tone: 'warn', label: `Vence ${d} día${d === 1 ? '' : 's'}` };
+  return { tone: 'success', label: 'Vigente' };
+}
+
+type Tab = 'todos' | 'enRevision' | 'activos' | 'itvPorVencer' | 'suspendidos';
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'todos', label: 'Todos' },
+  { key: 'enRevision', label: 'En revisión' },
+  { key: 'activos', label: 'Activos' },
+  { key: 'itvPorVencer', label: 'ITV por vencer' },
+  { key: 'suspendidos', label: 'Suspendidos' },
 ];
 
-// Labels de la ficha técnica — ESPEJO EXACTO del formulario de aprobación de modelos
-// (components/fleet/model-review-actions.tsx) para que el admin vea la MISMA terminología que eligió al
-// aprobar. Son labels de presentación: el valor de dominio (el enum) viaja crudo y se mapea acá para mostrar.
+const GRID = 'grid grid-cols-[1fr_90px_170px_130px_130px_120px_24px] items-center gap-4';
 
-const vehicleColumns: ColumnDef<VehicleView, unknown>[] = [
-  {
-    accessorKey: 'plate',
-    header: 'Placa',
-    cell: ({ row }) => <span className="font-mono tabular">{row.original.plate}</span>,
-  },
-  {
-    accessorKey: 'model',
-    header: 'Vehículo',
-    cell: ({ row }) => (
-      <span className="text-ink">
-        {[row.original.brand, row.original.model].filter(Boolean).join(' ') || '—'}
-        {row.original.year ? ` (${row.original.year})` : ''}
-      </span>
-    ),
-  },
-  {
-    // VEREDICTO DE OPERABILIDAD (Lote 4) — la pregunta que el operador realmente hace: "¿este vehículo PUEDE
-    // recibir viajes?". Lo decide el SERVIDOR (`operable`, el MISMO veredicto que gatea el match: docs SOAT/ITV
-    // operables Y ficha linkeada Y docStatus !== EXPIRED) — la UI solo lo REFLEJA. El "por qué" también viene del
-    // servidor (`operabilityReason`, computado en la MISMA función que el veredicto) y la UI solo lo ROTULA →
-    // cero divergencia, cero magic string (la UI NO re-deriva la regla desde docStatus/segment).
-    // Reemplaza el flag `active` stored (DEPRECADO: se seteaba al alta y nada lo mantenía → el panel mentía).
-    id: 'operability',
-    header: 'Operabilidad',
-    cell: ({ row }) => {
-      if (row.original.operable) return <Badge tone="success">Operable</Badge>;
-      // El MOTIVO viene tipado del servidor (mismo cómputo que el veredicto) → cero divergencia, cero magic string.
-      // Rótulo compartido con el DETALLE (fleet-labels) → la lista y /fleet/[id] dicen lo mismo.
-      const motivo = operabilityReasonLabel(row.original.operabilityReason) || null;
-      return (
-        <div className="flex flex-col gap-0.5">
-          <Badge tone="danger">No operable</Badge>
-          {motivo && <span className="text-xs text-ink-muted">{motivo}</span>}
-        </div>
-      );
-    },
-  },
-  {
-    // F1 · LA FICHA DEL MATCH. El dispatch decide la eligibilidad de oferta (Confort/XL/Premium) con
-    // segmento + asientos + el AÑO del vehículo — exactamente lo que driver-pool exige para NO caer en
-    // fail-open (`seats || segment || vehicleYear`). La energía NO entra al match ni al pricing del vehículo:
-    // el precio de energía sale de la CLASE de la oferta (ADR-017 dec.2 · referenceEnergySource/Efficiency),
-    // no del `energySource` real (ese delta es margen privado del conductor). Si falta CUALQUIERA de esos 3
-    // el dispatch deja pasar igual (fail-open) → marcamos "Ficha incompleta" con el detalle de qué falta, para
-    // que el admin VEA el eslabón que no cierra. `energySource` se MUESTRA como info, pero NO gatilla la alerta.
-    id: 'spec',
-    header: 'Ficha técnica',
-    cell: ({ row }) => {
-      const { segment, energySource, seats, year, mtcCategory } = row.original;
-      const faltan = [
-        !segment ? 'segmento' : null,
-        !seats ? 'asientos' : null,
-        !year ? 'año' : null,
-      ].filter((x): x is string => x !== null);
-      if (faltan.length > 0) {
-        return (
-          <span
-            className="inline-flex items-center gap-1 text-xs text-warn"
-            title={`El dispatch hace fail-open: falta ${faltan.join(', ')}`}
-          >
-            <AlertTriangle className="size-3.5" aria-hidden />
-            Ficha incompleta
-          </span>
-        );
-      }
-      const top = [
-        segment ? segmentLabel(segment) : null,
-        energySource ? energyLabel(energySource) : null,
-      ]
-        .filter(Boolean)
-        .join(' · ');
-      const bottom = [mtcCategory, seats ? `${seats} plazas` : null].filter(Boolean).join(' · ');
-      return (
-        <div className="flex flex-col gap-0.5 text-xs">
-          <span className="text-ink">{top || '—'}</span>
-          <span className="text-ink-muted">{bottom || '—'}</span>
-        </div>
-      );
-    },
-  },
-  {
-    accessorKey: 'color',
-    header: 'Color',
-    cell: ({ row }) => <span className="text-ink-muted">{row.original.color ?? '—'}</span>,
-  },
-  {
-    // `status` ES `v.docStatus` (admin-bff fleet.service.ts:324): la VIGENCIA de los papeles del vehículo
-    // (SOAT/ITV) — VALID="Vigente" · EXPIRING="Por vencer" · EXPIRED="Vencido". NO es el veredicto de
-    // operabilidad (esa es la columna de al lado). Es un INSUMO del veredicto + el aviso temprano: un vehículo
-    // `Operable` con docs "Por vencer" hay que renovarlo antes de que flipee. Header "Estado" (genérico) lo hacía
-    // ver como duplicado de Operabilidad → "Documentos" deja claro que es la vigencia de papeles.
-    accessorKey: 'status',
-    header: 'Documentos',
-    cell: ({ row }) => <StatusPill status={row.original.status} />,
-  },
-  {
-    accessorKey: 'driverId',
-    header: 'Conductor',
-    cell: ({ row }) => (
-      <span className="font-mono text-xs text-ink-muted">
-        {row.original.driverId ? row.original.driverId.slice(0, 8) : '—'}
-      </span>
-    ),
-  },
-];
-
-const inspectionColumns: ColumnDef<InspectionView, unknown>[] = [
-  {
-    accessorKey: 'vehicleId',
-    header: 'Vehículo',
-    cell: ({ row }) => (
-      <span className="font-mono text-xs">{row.original.vehicleId.slice(0, 8)}</span>
-    ),
-  },
-  // OJO: fleet-service solo registra inspecciones YA realizadas (no agenda) → `status` siempre COMPLETED y
-  // `scheduledAt` siempre null (toInspectionView en admin-bff). Las columnas "Estado"/"Programada" eran
-  // sintéticas (muertas) y sugerían un sub-estado que el dominio no tiene → se omiten. La fila ES una
-  // inspección hecha; lo que importa es CUÁNDO (Realizada), QUIÉN (Inspector) y el RESULTADO.
-  {
-    accessorKey: 'inspectedAt',
-    header: 'Realizada',
-    cell: ({ row }) => <span className="text-ink-muted">{dateTime(row.original.inspectedAt)}</span>,
-  },
-  {
-    accessorKey: 'inspector',
-    header: 'Inspector',
-    cell: ({ row }) =>
-      row.original.inspector ? (
-        <span className="font-mono text-xs">{row.original.inspector.slice(0, 8)}</span>
-      ) : (
-        <span className="text-ink-subtle">—</span>
-      ),
-  },
-  {
-    accessorKey: 'result',
-    header: 'Resultado',
-    cell: ({ row }) =>
-      row.original.result ? (
-        <StatusPill status={row.original.result} />
-      ) : (
-        <span className="text-ink-subtle">—</span>
-      ),
-  },
-];
-
-const expiringColumns: ColumnDef<ExpiringDocumentView, unknown>[] = [
-  {
-    accessorKey: 'type',
-    header: 'Tipo',
-    cell: ({ row }) => <span className="text-ink">{row.original.type}</span>,
-  },
-  {
-    accessorKey: 'ownerType',
-    header: 'Titular',
-    cell: ({ row }) => (
-      <span className="text-ink-muted">
-        {OWNER_LABEL[row.original.ownerType]} · {row.original.ownerId.slice(0, 8)}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'expiresAt',
-    header: 'Vence',
-    cell: ({ row }) => <span className="text-ink-muted">{date(row.original.expiresAt)}</span>,
-  },
-  {
-    accessorKey: 'daysUntilExpiry',
-    header: 'Días restantes',
-    cell: ({ row }) => {
-      const days = row.original.daysUntilExpiry;
-      const urgent = days <= 7;
-      return (
-        <span
-          className={cn(
-            'inline-flex items-center gap-1.5 tabular font-medium',
-            urgent ? 'text-danger' : days <= 30 ? 'text-warn' : 'text-ink',
-          )}
-        >
-          {urgent ? <AlertTriangle className="size-3.5" aria-hidden /> : null}
-          {days} d
-        </span>
-      );
-    },
-  },
-];
-
-const VEHICLE_TYPE_LABEL: Record<string, string> = { CAR: 'Auto', MOTO: 'Moto' };
-
-const modelColumns: ColumnDef<VehicleModelReviewView, unknown>[] = [
-  {
-    accessorKey: 'make',
-    header: 'Modelo',
-    cell: ({ row }) => (
-      <span className="text-ink">
-        {row.original.make} {row.original.model}
-      </span>
-    ),
-  },
-  {
-    id: 'years',
-    header: 'Años',
-    cell: ({ row }) => (
-      <span className="text-ink-muted tabular">
-        {row.original.yearFrom}–{row.original.yearTo}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'vehicleType',
-    header: 'Tipo',
-    cell: ({ row }) => (
-      <span className="text-ink-muted">
-        {VEHICLE_TYPE_LABEL[row.original.vehicleType] ?? row.original.vehicleType} ·{' '}
-        {row.original.seats} as.
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'requestedBy',
-    header: 'Solicitó',
-    cell: ({ row }) => (
-      <span className="text-ink-muted font-mono">
-        {row.original.requestedBy?.slice(0, 8) ?? '—'}
-      </span>
-    ),
-  },
-  {
-    accessorKey: 'status',
-    header: 'Estado',
-    cell: ({ row }) => <StatusPill status={row.original.status} />,
-  },
-  {
-    id: 'actions',
-    header: 'Acciones',
-    enableSorting: false,
-    cell: ({ row }) => <ModelReviewActions model={row.original} />,
-  },
-];
-
-export default function FleetPage() {
+export default function VehiclesPage() {
   const router = useRouter();
   const user = useSession();
-  const canManage = can(user, 'fleet:manage');
-  // El estado de "por revisar" en el dominio de flota es PENDING_REVIEW (no 'PENDING', que es de
-  // otros dominios). Con 'PENDING' el filtro no matcheaba ningún enum y el tab quedaba vacío/erroreaba.
-  const documents = useFleetDocuments('PENDING_REVIEW');
-  const vehicles = useVehicles();
-  const inspections = useInspections();
-  const expiring = useExpiringDocuments();
-  // Cola de modelos por conductores (B5-2.c). El operador alterna entre los PENDING_REVIEW (a curar) y los
-  // APPROVED (para REABRIR y corregir una ficha mal cargada · F2). El status es server-side (filtro de la cola).
-  const [modelStatus, setModelStatus] = useState<'PENDING_REVIEW' | 'APPROVED'>('PENDING_REVIEW');
-  const models = useModelReview(modelStatus);
-  // Conteo REAL de vehículos por vigencia documental (docStatus · sin PII). El eje es docStatus, NO el flag
-  // `active` deprecado (que nada mantiene → mentía). total = valid + expiringSoon + expired.
+  const [tab, setTab] = useState<Tab>('todos');
+  const [search, setSearch] = useState('');
+
   const summary = useVehiclesSummary();
-  const counts = summary.data;
-  const totalVehicles = counts ? counts.valid + counts.expiringSoon + counts.expired : 0;
+  const vehicles = useVehicles();
+
+  const rows = useMemo<VehicleView[]>(() => {
+    const all = vehicles.data?.pages.flatMap((p) => p.items) ?? [];
+    const byTab = all.filter((v) => {
+      if (tab === 'todos') return true;
+      const st = estado(v).key;
+      if (tab === 'activos') return st === 'activo';
+      if (tab === 'enRevision') return st === 'enRevision';
+      if (tab === 'suspendidos') return st === 'suspendido';
+      // itvPorVencer: ITV vigente que vence en ≤30 días.
+      const d = daysUntil(v.itvNextDueAt);
+      return v.itvCurrent && d !== null && d <= 30;
+    });
+    const q = search.trim().toLowerCase();
+    return q
+      ? byTab.filter(
+          (v) =>
+            v.plate.toLowerCase().includes(q) ||
+            (v.driverName ?? '').toLowerCase().includes(q) ||
+            `${v.brand} ${v.model}`.toLowerCase().includes(q),
+        )
+      : byTab;
+  }, [vehicles.data, tab, search]);
+
+  const c = summary.data;
+  const total = c ? c.valid + c.expiringSoon + c.expired : undefined;
+
+  if (!can(user, 'fleet:view')) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+        <Lock className="size-6 text-ink-subtle" aria-hidden />
+        <p className="text-sm text-ink-muted">Necesitás el rol correspondiente para ver la flota.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-full flex-col">
-      <PageHeader
-        title="Flota"
-        description="Documentos, vehículos, inspecciones y vencimientos próximos."
-        breadcrumbs={[{ label: 'Flota' }]}
-      />
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        <div className="pt-4">
-          <StatCardGrid>
-            <StatCard
-              icon={Truck}
-              label="Total en flota"
-              value={String(totalVehicles)}
-              hint="Vehículos registrados"
-              loading={summary.isLoading}
-            />
-            <StatCard
-              icon={BadgeCheck}
-              label="Papeles vigentes"
-              value={String(counts?.valid ?? 0)}
-              hint="SOAT / ITV al día"
-              hintTone="success"
-              loading={summary.isLoading}
-            />
-            <StatCard
-              icon={CalendarClock}
-              label="Por vencer"
-              value={String(counts?.expiringSoon ?? 0)}
-              hint="Renovar pronto"
-              hintTone="warn"
-              loading={summary.isLoading}
-            />
-            <StatCard
-              icon={FileWarning}
-              label="Vencidos"
-              value={String(counts?.expired ?? 0)}
-              hint="No operables"
-              hintTone="danger"
-              loading={summary.isLoading}
-            />
-          </StatCardGrid>
+    <div className="flex h-full min-h-0 flex-col gap-[22px] overflow-auto px-8 py-7">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">Vehículos</h1>
+          <p className="text-[13px] text-ink-subtle">
+            Flota registrada · verificación, documentos e inspección técnica (ITV)
+          </p>
         </div>
-        <Tabs defaultValue="documents" className="pt-5">
-          <TabsList>
-            <TabsTrigger value="documents">Documentos</TabsTrigger>
-            <TabsTrigger value="vehicles">Vehículos</TabsTrigger>
-            <TabsTrigger value="models">Modelos</TabsTrigger>
-            <TabsTrigger value="inspections">Inspecciones</TabsTrigger>
-            <TabsTrigger value="expiring">Vencimientos</TabsTrigger>
-          </TabsList>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2"
+        >
+          <Download className="size-4" aria-hidden />
+          Exportar
+        </button>
+      </div>
 
-          <TabsContent value="documents">
-            {canManage ? (
-              <div className="flex justify-end pb-3">
-                <CreateDocumentDialog />
-              </div>
-            ) : null}
-            {documents.isError ? (
-              <ErrorState onRetry={() => void documents.refetch()} />
-            ) : (
-              <>
-                <DataTable
-                  caption="Documentos por revisar"
-                  columns={documentColumns}
-                  data={documents.data?.pages.flatMap((p) => p.items) ?? []}
-                  loading={documents.isLoading}
-                  emptyTitle="Sin documentos pendientes"
-                  emptyDescription="No hay documentos pendientes de revisión."
-                />
-                <LoadMore
-                  hasNextPage={!!documents.hasNextPage}
-                  isFetching={documents.isFetchingNextPage}
-                  onLoadMore={() => void documents.fetchNextPage()}
-                />
-              </>
-            )}
-          </TabsContent>
+      {/* Stat cards (suspensión derivada: Activos≈docs vigentes, Suspendidos≈docs vencidos) */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard icon={Car} label="Total en flota" value={String(total ?? 0)} hint="Vehículos registrados" loading={summary.isLoading} />
+        <StatCard icon={CircleCheck} label="Activos" value={String(c?.valid ?? 0)} hint="Papeles vigentes" hintTone="success" loading={summary.isLoading} />
+        <StatCard icon={CalendarClock} label="ITV por vencer" value={String(c?.expiringSoon ?? 0)} hint="Próximos 30 días" hintTone="warn" loading={summary.isLoading} />
+        <StatCard icon={Ban} label="Suspendidos" value={String(c?.expired ?? 0)} hint="Doc / ITV vencida" hintTone="danger" loading={summary.isLoading} />
+      </div>
 
-          <TabsContent value="vehicles">
-            {canManage ? (
-              <div className="flex justify-end pb-3">
-                <CreateVehicleDialog />
-              </div>
-            ) : null}
-            {vehicles.isError ? (
-              <ErrorState onRetry={() => void vehicles.refetch()} />
-            ) : (
-              <>
-                <DataTable
-                  caption="Vehículos de la flota"
-                  columns={vehicleColumns}
-                  data={vehicles.data?.pages.flatMap((p) => p.items) ?? []}
-                  loading={vehicles.isLoading}
-                  emptyTitle="Sin vehículos"
-                  emptyDescription="No hay vehículos registrados en la flota todavía."
-                  onRowClick={(v) => router.push(`/fleet/${v.id}`)}
-                />
-                <LoadMore
-                  hasNextPage={!!vehicles.hasNextPage}
-                  isFetching={vehicles.isFetchingNextPage}
-                  onLoadMore={() => void vehicles.fetchNextPage()}
-                />
-              </>
-            )}
-          </TabsContent>
-
-          <TabsContent value="models">
-            <div className="flex gap-1 pb-3">
-              <Button
-                size="sm"
-                variant={modelStatus === 'PENDING_REVIEW' ? 'primary' : 'ghost'}
-                onClick={() => setModelStatus('PENDING_REVIEW')}
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="inline-flex gap-[3px] rounded-md border border-border bg-surface p-1">
+          {TABS.map(({ key, label }) => {
+            const active = tab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`inline-flex items-center rounded-sm px-3 py-[7px] text-[13px] font-semibold transition-colors ${
+                  active ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:text-ink'
+                }`}
               >
-                Por revisar
-              </Button>
-              <Button
-                size="sm"
-                variant={modelStatus === 'APPROVED' ? 'primary' : 'ghost'}
-                onClick={() => setModelStatus('APPROVED')}
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="inline-flex w-[280px] items-center gap-2 rounded-sm border border-border bg-bg px-3 py-[9px]">
+          <Search className="size-4 shrink-0 text-ink-subtle" aria-hidden />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar placa, conductor o modelo…"
+            className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-subtle"
+          />
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <div className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}>
+          <span>Vehículo</span>
+          <span>Tipo</span>
+          <span>Conductor</span>
+          <span>Documentos</span>
+          <span>ITV</span>
+          <span>Estado</span>
+          <span />
+        </div>
+
+        {vehicles.isError ? (
+          <ErrorState className="py-10" onRetry={() => void vehicles.refetch()} />
+        ) : vehicles.isLoading ? (
+          <div>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-14 animate-pulse border-b border-border bg-surface-2/40" />
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          <EmptyState className="py-12" title="Sin vehículos" description="No hay vehículos en esta vista." />
+        ) : (
+          rows.map((v) => {
+            const isMoto = v.vehicleType === 'MOTO';
+            const Icon = isMoto ? Bike : Car;
+            const dp = docsPill(v.status);
+            const ip = itvPill(v);
+            const st = estado(v);
+            return (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => router.push(`/fleet/${v.id}`)}
+                className={`${GRID} w-full border-b border-border px-5 py-[11px] text-left transition-colors last:border-b-0 hover:bg-surface-2/50`}
               >
-                Aprobados
-              </Button>
-            </div>
-            {models.isError ? (
-              <ErrorState onRetry={() => void models.refetch()} />
-            ) : (
-              <>
-                <DataTable
-                  caption={
-                    modelStatus === 'PENDING_REVIEW'
-                      ? 'Modelos solicitados por revisar'
-                      : 'Modelos aprobados (reabrí para corregir la ficha)'
-                  }
-                  columns={modelColumns}
-                  data={models.data?.pages.flatMap((p) => p.items) ?? []}
-                  loading={models.isLoading}
-                  emptyTitle={
-                    modelStatus === 'PENDING_REVIEW' ? 'Sin modelos pendientes' : 'Sin modelos aprobados'
-                  }
-                  emptyDescription={
-                    modelStatus === 'PENDING_REVIEW'
-                      ? 'Cuando un conductor solicite un modelo que no está en el catálogo, aparecerá acá.'
-                      : 'Los modelos aprobados aparecen acá; podés reabrirlos para corregir su ficha técnica.'
-                  }
-                />
-                <LoadMore
-                  hasNextPage={!!models.hasNextPage}
-                  isFetching={models.isFetchingNextPage}
-                  onLoadMore={() => void models.fetchNextPage()}
-                />
-              </>
-            )}
-          </TabsContent>
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid size-[34px] shrink-0 place-items-center rounded-sm border border-border bg-surface-2 text-ink-muted">
+                    <Icon className="size-[17px]" aria-hidden />
+                  </span>
+                  <div className="flex min-w-0 flex-col gap-px">
+                    <span className="truncate font-mono text-sm font-semibold text-ink">{v.plate}</span>
+                    <span className="truncate text-[11px] text-ink-subtle">
+                      {[v.brand, v.model].filter(Boolean).join(' ')}
+                      {v.year ? ` · ${v.year}` : ''}
+                    </span>
+                  </div>
+                </div>
+                <span className="inline-flex w-fit items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-2.5 py-1 text-xs font-medium text-ink-muted">
+                  <Icon className="size-3" aria-hidden />
+                  {isMoto ? 'Moto' : 'Auto'}
+                </span>
+                <span className="truncate text-[13px] text-ink-muted">{v.driverName ?? '—'}</span>
+                <span>
+                  <DotPill tone={dp.tone}>{dp.label}</DotPill>
+                </span>
+                <span>
+                  <DotPill tone={ip.tone}>{ip.label}</DotPill>
+                </span>
+                <span>
+                  <DotPill tone={st.tone}>{st.label}</DotPill>
+                </span>
+                <ChevronRight className="size-4 justify-self-end text-ink-subtle" aria-hidden />
+              </button>
+            );
+          })
+        )}
 
-          <TabsContent value="inspections">
-            {canManage ? (
-              <div className="flex justify-end pb-3">
-                <CreateInspectionDialog />
-              </div>
-            ) : null}
-            {inspections.isError ? (
-              <ErrorState onRetry={() => void inspections.refetch()} />
-            ) : (
-              <>
-                <DataTable
-                  caption="Inspecciones"
-                  columns={inspectionColumns}
-                  data={inspections.data?.pages.flatMap((p) => p.items) ?? []}
-                  loading={inspections.isLoading}
-                  emptyTitle="Sin inspecciones"
-                  emptyDescription="No hay inspecciones registradas."
-                />
-                <LoadMore
-                  hasNextPage={!!inspections.hasNextPage}
-                  isFetching={inspections.isFetchingNextPage}
-                  onLoadMore={() => void inspections.fetchNextPage()}
-                />
-              </>
-            )}
-          </TabsContent>
-
-          <TabsContent value="expiring">
-            {expiring.isError ? (
-              <ErrorState onRetry={() => void expiring.refetch()} />
-            ) : (
-              <>
-                <DataTable
-                  caption="Documentos por vencer"
-                  columns={expiringColumns}
-                  data={expiring.data?.pages.flatMap((p) => p.items) ?? []}
-                  loading={expiring.isLoading}
-                  emptyTitle="Sin vencimientos próximos"
-                  emptyDescription="Ningún documento vence pronto."
-                />
-                <LoadMore
-                  hasNextPage={!!expiring.hasNextPage}
-                  isFetching={expiring.isFetchingNextPage}
-                  onLoadMore={() => void expiring.fetchNextPage()}
-                />
-              </>
-            )}
-          </TabsContent>
-        </Tabs>
+        <div className="flex items-center justify-between border-t border-border bg-surface-2 px-5 py-3">
+          <span className="text-[13px] text-ink-subtle">
+            {`Mostrando ${rows.length} vehículo${rows.length === 1 ? '' : 's'}`}
+          </span>
+          <LoadMore
+            hasNextPage={!!vehicles.hasNextPage}
+            isFetching={vehicles.isFetchingNextPage}
+            onLoadMore={() => void vehicles.fetchNextPage()}
+          />
+        </div>
       </div>
     </div>
   );
