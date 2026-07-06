@@ -13,6 +13,7 @@ import {
   type DriversByIdsReply,
   type DriverCountsReply,
   type VehicleCountsReply,
+  type ReviewQueueCountsReply,
   type DriverVehiclesReply,
   type VehicleReply,
   type DriverDocumentsReply,
@@ -40,6 +41,7 @@ import type {
   DriverApproval,
   DriverCounts,
   VehicleCounts,
+  ReviewQueueSummary,
   TripDetail,
   DriverDetail,
   DriverVehicle,
@@ -865,6 +867,25 @@ export class OpsService {
   async vehiclesSummary(identity: AuthUser): Promise<VehicleCounts> {
     const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     return this.fleetGrpc.call<VehicleCountsReply>('GetVehicleCounts', {}, meta);
+  }
+
+  /**
+   * Conteo de las COLAS DE REVISIÓN (cola unificada de Revisiones): conductores pendientes de aprobación
+   * (identity) + documentos por revisar/por vencer + modelos por curar (fleet). DOS gRPC EN PARALELO (identity
+   * GetDriverCounts + fleet GetReviewQueueCounts); el BFF los fusiona en un solo contrato. Sin PII (enteros).
+   */
+  async reviewsSummary(identity: AuthUser): Promise<ReviewQueueSummary> {
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const [drivers, fleet] = await Promise.all([
+      this.identityGrpc.call<DriverCountsReply>('GetDriverCounts', {}, meta),
+      this.fleetGrpc.call<ReviewQueueCountsReply>('GetReviewQueueCounts', {}, meta),
+    ]);
+    return {
+      driversPending: drivers.pending,
+      docsPendingReview: fleet.docsPendingReview,
+      docsExpiringSoon: fleet.docsExpiringSoon,
+      modelsPendingReview: fleet.modelsPendingReview,
+    };
   }
 
   async approveDriver(

@@ -23,6 +23,9 @@ service FleetService {
   // Conteo de vehículos por estado documental (docStatus), para los stat cards del panel admin (embudo de
   // vigencia documental de la flota). Agregado con groupBy en la réplica de lectura; sin PII, solo enteros.
   rpc GetVehicleCounts (GetVehicleCountsRequest) returns (VehicleCountsReply);
+  // Conteo de las COLAS DE REVISIÓN de flota (docs por revisar, docs por vencer, modelos por curar), para la
+  // cola unificada de Revisiones del panel admin. Cuentas agregadas en la réplica de lectura; sin PII.
+  rpc GetReviewQueueCounts (GetReviewQueueCountsRequest) returns (ReviewQueueCountsReply);
 }
 
 message GetByIdRequest {
@@ -37,6 +40,17 @@ message VehicleCountsReply {
   int32 valid = 1;
   int32 expiring_soon = 2;
   int32 expired = 3;
+}
+
+// Request vacío del conteo de las colas de revisión de flota.
+message GetReviewQueueCountsRequest {}
+
+// Conteo de las colas de revisión de flota: documentos por revisar (PENDING_REVIEW), documentos por vencer
+// (EXPIRING_SOON) y modelos de vehículo por curar (PENDING_REVIEW). proto3 default 0 si la cola está vacía.
+message ReviewQueueCountsReply {
+  int32 docs_pending_review = 1;
+  int32 docs_expiring_soon = 2;
+  int32 models_pending_review = 3;
 }
 
 message GetByIdsRequest {

@@ -88,3 +88,10 @@ export interface VehicleCountsReply {
   expiringSoon: number;
   expired: number;
 }
+
+/** fleet.GetReviewQueueCounts / ReviewQueueCountsReply. Conteo de las colas de revisión de flota. */
+export interface ReviewQueueCountsReply {
+  docsPendingReview: number;
+  docsExpiringSoon: number;
+  modelsPendingReview: number;
+}

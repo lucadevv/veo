@@ -20,7 +20,13 @@ import {
   isInspectionCurrent,
   InspectionInvalidReason,
 } from '../inspections/inspection-rules';
-import { FleetOwnerType, VehicleDocStatus, type Vehicle } from '../generated/prisma';
+import {
+  FleetDocumentStatus,
+  FleetOwnerType,
+  VehicleDocStatus,
+  VehicleModelStatus,
+  type Vehicle,
+} from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
@@ -32,6 +38,13 @@ interface VehicleCountsReply {
   valid: number;
   expiringSoon: number;
   expired: number;
+}
+
+/** fleet.GetReviewQueueCounts — conteo de las colas de revisión de flota (cola unificada del admin). */
+interface ReviewQueueCountsReply {
+  docsPendingReview: number;
+  docsExpiringSoon: number;
+  modelsPendingReview: number;
 }
 
 interface GetByIdsRequest {
@@ -236,6 +249,32 @@ export class FleetGrpcController {
       expiringSoon: countOf(VehicleDocStatus.EXPIRING_SOON),
       expired: countOf(VehicleDocStatus.EXPIRED),
     };
+  }
+
+  /**
+   * Conteo de las COLAS DE REVISIÓN de flota para la cola unificada del panel: documentos por revisar
+   * (PENDING_REVIEW), documentos por vencer (EXPIRING_SOON) y modelos de vehículo por curar (PENDING_REVIEW).
+   * Tres counts en PARALELO sobre la réplica de lectura (servidos por los índices de status); sin PII, solo
+   * enteros. El gate de identidad interna (requireIdentity) acota a los rieles permitidos.
+   */
+  @GrpcMethod('FleetService', 'GetReviewQueueCounts')
+  async getReviewQueueCounts(
+    _request: unknown,
+    metadata: Metadata,
+  ): Promise<ReviewQueueCountsReply> {
+    this.requireIdentity(metadata);
+    const [docsPendingReview, docsExpiringSoon, modelsPendingReview] = await Promise.all([
+      this.prisma.read.fleetDocument.count({
+        where: { status: FleetDocumentStatus.PENDING_REVIEW },
+      }),
+      this.prisma.read.fleetDocument.count({
+        where: { status: FleetDocumentStatus.EXPIRING_SOON },
+      }),
+      this.prisma.read.vehicleModelSpec.count({
+        where: { status: VehicleModelStatus.PENDING_REVIEW },
+      }),
+    ]);
+    return { docsPendingReview, docsExpiringSoon, modelsPendingReview };
   }
 
   /**

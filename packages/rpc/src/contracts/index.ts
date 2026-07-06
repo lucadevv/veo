@@ -32,5 +32,6 @@ export type {
   DriverDocumentsReply,
   DriverInspectionStatusReply,
   VehicleCountsReply,
+  ReviewQueueCountsReply,
 } from './fleet.js';
 export type { SavedPlace, PlacesReply, PlaceReply, RemoveReply } from './places.js';

@@ -46,6 +46,7 @@ import {
   pendingDriver,
   driverCounts,
   vehicleCounts,
+  reviewQueueSummary,
   panicDetail,
   type ReplaceCatalogRequest,
   type ReplaceScheduleRequest,
@@ -72,6 +73,7 @@ export const qk = {
   driversPending: ['drivers-pending'] as const,
   driversSummary: ['drivers-summary'] as const,
   vehiclesSummary: ['vehicles-summary'] as const,
+  reviewsSummary: ['reviews-summary'] as const,
   operators: ['operators'] as const,
   panics: (status: string) => ['panics', status] as const,
   panic: (id: string) => ['panic', id] as const,
@@ -361,6 +363,15 @@ export function useVehiclesSummary() {
     queryKey: qk.vehiclesSummary,
     queryFn: ({ signal }) =>
       apiClient().get('/ops/vehicles/summary', { schema: vehicleCounts, signal }),
+  });
+}
+
+/** Conteo de las colas de revisión (conductores + docs + modelos) para los stat cards de la cola unificada. */
+export function useReviewsSummary() {
+  return useQuery({
+    queryKey: qk.reviewsSummary,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/reviews/summary', { schema: reviewQueueSummary, signal }),
   });
 }
 

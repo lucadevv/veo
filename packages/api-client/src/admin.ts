@@ -804,6 +804,16 @@ export const vehicleCounts = z.object({
 });
 export type VehicleCounts = z.infer<typeof vehicleCounts>;
 
+/** Conteo de las colas de revisión (cola unificada de Revisiones): conductores pendientes de aprobación +
+ *  documentos por revisar/por vencer + modelos por curar. Agregado de identity + fleet. Sin PII. */
+export const reviewQueueSummary = z.object({
+  driversPending: z.number().int(),
+  docsPendingReview: z.number().int(),
+  docsExpiringSoon: z.number().int(),
+  modelsPendingReview: z.number().int(),
+});
+export type ReviewQueueSummary = z.infer<typeof reviewQueueSummary>;
+
 export const inspectionView = z.object({
   id: z.string(),
   vehicleId: z.string(),
