@@ -30,6 +30,13 @@ service FleetService {
   // + el embudo (sin docs / listos) del panel. `ids` = Driver.id (los docs DRIVER-scoped se indexan por
   // ownerId=Driver.id). Devuelve, por cada id, cuántos REQUERIDOS están en estado VALID sobre el total. Sin PII.
   rpc GetDriverDocsCompleteness (GetByIdsRequest) returns (DriverDocsCompletenessReply);
+  // Estado de ITV de VARIOS vehículos en UNA llamada (anti-N+1), para la columna "ITV" de la lista de vehículos.
+  // `ids` = Vehicle.id. Devuelve, por vehículo, la ÚLTIMA inspección: vigente (passed && no vencida), nextDueAt
+  // y el motivo de invalidez. Sin PII (fechas + booleanos).
+  rpc GetVehiclesInspectionStatus (GetByIdsRequest) returns (VehiclesInspectionStatusReply);
+  // Documentos de UN vehículo (ownerType=VEHICLE), con imágenes firmadas, para el detalle del vehículo. `id` =
+  // Vehicle.id. Espejo de GetDriverDocuments pero owner=VEHICLE.
+  rpc GetVehicleDocuments (GetByIdRequest) returns (DriverDocumentsReply);
 }
 
 message GetByIdRequest {
@@ -56,6 +63,22 @@ message DriverDocsCompleteness {
 // Reply batch de GetDriverDocsCompleteness. Un item por cada id pedido (orden libre; el consumidor mapea por id).
 message DriverDocsCompletenessReply {
   repeated DriverDocsCompleteness items = 1;
+}
+
+// Estado de ITV de UN vehículo (última inspección). `current` = passed && no vencida. next_due_at "" si no hay
+// inspección. invalid_reason: NONE | NOT_PASSED | OVERDUE | "" (cuando current=true o sin inspección).
+message VehicleInspectionStatus {
+  string vehicle_id = 1;
+  bool has_inspection = 2;
+  bool current = 3;
+  bool passed = 4;
+  string next_due_at = 5;
+  string invalid_reason = 6;
+}
+
+// Reply batch de GetVehiclesInspectionStatus. Un item por vehículo pedido (orden libre; se mapea por vehicle_id).
+message VehiclesInspectionStatusReply {
+  repeated VehicleInspectionStatus items = 1;
 }
 
 // Request vacío del conteo de las colas de revisión de flota.

@@ -53,6 +53,18 @@ interface DriverDocsCompletenessReply {
   items: { driverId: string; validRequired: number; requiredTotal: number }[];
 }
 
+/** fleet.GetVehiclesInspectionStatus — estado de ITV (última inspección) por vehículo. */
+interface VehiclesInspectionStatusReply {
+  items: {
+    vehicleId: string;
+    hasInspection: boolean;
+    current: boolean;
+    passed: boolean;
+    nextDueAt: string;
+    invalidReason: string;
+  }[];
+}
+
 /** Documentos DRIVER-scoped OBLIGATORIOS para operar (espeja REQUIRED_DRIVER_DOC_TYPES del admin-bff). */
 const REQUIRED_DRIVER_DOC_TYPES = [
   FleetDocumentType.LICENSE_A1,
@@ -329,6 +341,88 @@ export class FleetGrpcController {
         driverId: id,
         validRequired: byOwner.get(id)?.size ?? 0,
         requiredTotal: required.length,
+      })),
+    };
+  }
+
+  /**
+   * Estado de ITV de VARIOS vehículos en UNA query (anti-N+1), para la columna "ITV" de la lista. `ids` =
+   * Vehicle.id. Trae TODAS las inspecciones de esos vehículos ordenadas y se queda con la ÚLTIMA por vehículo
+   * (dedup en JS; Prisma no tiene DISTINCT ON — el orderBy [vehicleId, inspectedAt desc] lo sirve el índice
+   * único [vehicleId, inspectedAt, inspectorId]). Reusa las reglas puras isInspectionCurrent/invalidReason.
+   */
+  @GrpcMethod('FleetService', 'GetVehiclesInspectionStatus')
+  async getVehiclesInspectionStatus(
+    { ids }: GetByIdsRequest,
+    metadata: Metadata,
+  ): Promise<VehiclesInspectionStatusReply> {
+    this.requireIdentity(metadata);
+    if (!ids || ids.length === 0) return { items: [] };
+    const now = new Date();
+    const inspections = await this.prisma.read.inspection.findMany({
+      where: { vehicleId: { in: ids } },
+      orderBy: [{ vehicleId: 'asc' }, { inspectedAt: 'desc' }],
+      select: { vehicleId: true, passed: true, nextDueAt: true },
+    });
+    const latestByVehicle = new Map<string, { passed: boolean; nextDueAt: Date }>();
+    for (const insp of inspections) {
+      if (!latestByVehicle.has(insp.vehicleId)) latestByVehicle.set(insp.vehicleId, insp);
+    }
+    return {
+      items: ids.map((id) => {
+        const latest = latestByVehicle.get(id);
+        if (!latest) {
+          return {
+            vehicleId: id,
+            hasInspection: false,
+            current: false,
+            passed: false,
+            nextDueAt: '',
+            invalidReason: '',
+          };
+        }
+        const current = isInspectionCurrent(latest, now);
+        return {
+          vehicleId: id,
+          hasInspection: true,
+          current,
+          passed: latest.passed,
+          nextDueAt: latest.nextDueAt.toISOString(),
+          invalidReason: current ? '' : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE),
+        };
+      }),
+    };
+  }
+
+  /**
+   * Documentos de UN vehículo (ownerType=VEHICLE) con imágenes, para el detalle. `id` = Vehicle.id. Espejo EXACTO
+   * de GetDriverDocuments pero con owner=VEHICLE (SOAT, tarjeta de propiedad, foto). El `driverId` del reply
+   * lleva el vehicleId (reuso del contrato DriverDocumentsReply). Riel ADMIN (el detalle es Compliance+).
+   */
+  @GrpcMethod('FleetService', 'GetVehicleDocuments')
+  async getVehicleDocuments(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverDocumentsReply> {
+    this.requireIdentity(metadata);
+    const docs = await this.prisma.read.fleetDocument.findMany({
+      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: id },
+      orderBy: { createdAt: 'desc' },
+      include: { images: { orderBy: { order: 'asc' } } },
+    });
+    return {
+      driverId: id,
+      documents: docs.map((d) => ({
+        id: d.id,
+        ownerType: d.ownerType,
+        ownerId: d.ownerId,
+        type: d.type,
+        documentNumber: d.documentNumber,
+        status: d.status,
+        expiresAt: d.expiresAt ? d.expiresAt.toISOString() : '',
+        fileS3Key: d.fileS3Key ?? '',
+        rejectionReason: d.rejectionReason ?? '',
+        images: d.images.map((img) => ({ s3Key: img.s3Key, side: img.side, order: img.order })),
       })),
     };
   }

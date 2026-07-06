@@ -23,6 +23,10 @@ interface DriverCountsReply {
   cleared: number;
   rejected: number;
 }
+/** identity.GetUsersByIds — batch de users por User.id (nombre del conductor en la lista de vehículos). */
+interface UsersByIdsReply {
+  users: UserReply[];
+}
 interface UserReply {
   id: string;
   phone: string;
@@ -163,6 +167,9 @@ const GRPC_METHOD_AUDIENCES = {
   //    era admin-bff; al cablearse booking (service-rail) la búsqueda caía fail-closed → resultados vacíos.
   // Mínimo privilegio: NO se abre a public-rail ni driver-rail (no son callers legítimos del batch).
   GetDriversByIds: [InternalAudience.ADMIN_RAIL, InternalAudience.SERVICE_RAIL],
+  // BATCH de USERS por User.id (resolver nombre del conductor en la lista de vehículos, donde solo hay User.id).
+  // SOLO admin-bff (ADMIN_RAIL). El reply NO trae PII sensible (name/phone del user, no descifra DNI).
+  GetUsersByIds: [InternalAudience.ADMIN_RAIL],
   // Conteo agregado de conductores por estado (stat cards del panel). SOLO admin-bff (ADMIN_RAIL): es un
   // dato de gestión del operador, no lo consume ningún servicio interno. Sin PII (solo enteros).
   GetDriverCounts: [InternalAudience.ADMIN_RAIL],
@@ -304,6 +311,32 @@ export class IdentityGrpcController {
     // includeVerificationStatus=true (la lista del admin muestra la columna "Verificación": estados derivados
     // de booleanos, sin descifrado).
     return { drivers: drivers.map((d) => this.toDriverReply(d, false, true)) };
+  }
+
+  /**
+   * BATCH de users por User.id (nombre del conductor en la lista de vehículos, donde Vehicle.driver_id = User.id).
+   * Espejo de GetDriversByIds: UNA query IN(...) sobre la réplica de lectura (anti-N+1). Devuelve un UserReply por
+   * user hallado (found=true); los ids inexistentes se omiten (el consumidor mapea por id). Riel ADMIN.
+   */
+  @GrpcMethod('IdentityService', 'GetUsersByIds')
+  async getUsersByIds(
+    { ids }: { ids: string[] },
+    metadata: Metadata,
+  ): Promise<UsersByIdsReply> {
+    this.requireIdentity('GetUsersByIds', metadata);
+    if (!ids || ids.length === 0) return { users: [] };
+    const users = await this.prisma.read.user.findMany({ where: { id: { in: ids } } });
+    return {
+      users: users.map((u) => ({
+        id: u.id,
+        phone: u.phone ?? '',
+        type: u.type,
+        kycStatus: u.kycStatus,
+        deleted: u.deletedAt !== null,
+        found: true,
+        name: u.name ?? '',
+      })),
+    };
   }
 
   /**

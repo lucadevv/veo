@@ -6,6 +6,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { FleetService } from './fleet.service';
 
+// gRPC de enriquecimiento (nombre/ITV) + config del secret: no-op para los tests de catálogo de modelos (no
+// tocan listVehicles). GetUsersByIds → {users:[]}, GetVehiclesInspectionStatus → {items:[]} (ambos vacíos).
+const grpcNoop = { call: vi.fn().mockResolvedValue({ users: [], items: [] }) };
+const configNoop = { get: vi.fn().mockReturnValue('dev-secret') };
+
 function makeService(restOver: Record<string, unknown> = {}) {
   const rest = {
     get: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
@@ -16,7 +21,7 @@ function makeService(restOver: Record<string, unknown> = {}) {
     ...restOver,
   };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FleetService(rest as never, audit as never);
+  const svc = new FleetService(rest as never, grpcNoop as never, grpcNoop as never, "admin-rail" as never, configNoop as never, audit as never);
   return { svc, rest, audit };
 }
 
@@ -99,7 +104,7 @@ describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
       post: vi.fn(),
     };
     const audit = { record: vi.fn() };
-    const svc = new FleetService(rest as never, audit as never);
+    const svc = new FleetService(rest as never, grpcNoop as never, grpcNoop as never, "admin-rail" as never, configNoop as never, audit as never);
 
     const page = await svc.expirations(operator, {
       days: 30,
@@ -142,7 +147,7 @@ describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
       post: vi.fn(),
     };
     const audit = { record: vi.fn() };
-    const svc = new FleetService(rest as never, audit as never);
+    const svc = new FleetService(rest as never, grpcNoop as never, grpcNoop as never, "admin-rail" as never, configNoop as never, audit as never);
 
     const page = await svc.expirations(operator, {} as never);
     // d1 (sin expiresAt) se descarta → página de 1, pero el cursor de avance NO se rompe.

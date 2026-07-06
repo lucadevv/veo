@@ -11,6 +11,9 @@ service IdentityService {
   // Lectura BATCH para enriquecer listados del admin (nombre/teléfono por página, sin N+1). El admin-bff
   // la llama UNA vez por página con los driverId visibles; devuelve los DriverReply hallados (orden libre).
   rpc GetDriversByIds (DriverIdsRequest) returns (DriversByIdsReply);
+  // Lectura BATCH de USERS por User.id, para resolver el NOMBRE del conductor en listados del admin donde solo
+  // se tiene el User.id (ej. la lista de vehículos: Vehicle.driver_id = User.id). Espejo de GetDriversByIds.
+  rpc GetUsersByIds (UserIdsRequest) returns (UsersByIdsReply);
   // Conteo de conductores por estado de antecedentes (backgroundCheckStatus), para los stat cards del panel
   // admin (embudo de aprobación). Agregado con groupBy en la réplica de lectura; sin PII, solo enteros.
   rpc GetDriverCounts (DriverCountsRequest) returns (DriverCountsReply);
@@ -26,6 +29,14 @@ message DriverIdsRequest {
 
 message DriversByIdsReply {
   repeated DriverReply drivers = 1;
+}
+
+message UserIdsRequest {
+  repeated string ids = 1;
+}
+
+message UsersByIdsReply {
+  repeated UserReply users = 1;
 }
 
 // Request vacío del conteo global de conductores (sin filtros; el scoping lo da el riel ADMIN del gRPC).

@@ -105,3 +105,16 @@ export interface DriverDocsCompleteness {
 export interface DriverDocsCompletenessReply {
   items: DriverDocsCompleteness[];
 }
+
+/** fleet.GetVehiclesInspectionStatus — estado de ITV (última inspección) de un vehículo. */
+export interface VehicleInspectionStatus {
+  vehicleId: string;
+  hasInspection: boolean;
+  current: boolean;
+  passed: boolean;
+  nextDueAt: string;
+  invalidReason: string;
+}
+export interface VehiclesInspectionStatusReply {
+  items: VehicleInspectionStatus[];
+}

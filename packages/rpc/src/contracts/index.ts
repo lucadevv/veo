@@ -8,6 +8,7 @@ export type {
   DriverIdsRequest,
   DriversByIdsReply,
   DriverCountsReply,
+  UsersByIdsReply,
 } from './identity.js';
 export type {
   GeoPoint,
@@ -35,5 +36,7 @@ export type {
   ReviewQueueCountsReply,
   DriverDocsCompleteness,
   DriverDocsCompletenessReply,
+  VehicleInspectionStatus,
+  VehiclesInspectionStatusReply,
 } from './fleet.js';
 export type { SavedPlace, PlacesReply, PlaceReply, RemoveReply } from './places.js';

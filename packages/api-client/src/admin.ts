@@ -811,6 +811,13 @@ export const vehicleView = z.object({
   energySource: z.string().nullable(),
   efficiency: z.number().int().nullable(),
   seats: z.number().int().nullable(),
+  /** Nombre del conductor dueño (User.id → name · Compliance+); null redactado para sub-Compliance o sin dato. */
+  driverName: z.string().nullable(),
+  /** Estado de ITV (última inspección del vehículo) para la columna "ITV": `itvCurrent` = vigente (aprobada y no
+   *  vencida); `itvNextDueAt` = próximo vencimiento (para "Vence N días"); `itvHasInspection` = si tiene alguna. */
+  itvHasInspection: z.boolean(),
+  itvCurrent: z.boolean(),
+  itvNextDueAt: z.string().nullable(),
 });
 export type VehicleView = z.infer<typeof vehicleView>;
 
