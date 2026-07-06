@@ -21,10 +21,14 @@ function mockTx(debts: DebtRow[], credits: CreditRow[] = []) {
   const tx = {
     driverDebt: {
       findMany: vi.fn(async () => debts),
-      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-        updates.push({ id: where.id, data });
-        return { ...where, ...data };
-      }),
+      // applyDebtNetting usa updateMany con CAS (where status:PENDING + amountCents). Sin concurrencia el CAS
+      // siempre matchea → count:1. Capturamos la data para las aserciones (mismo shape que antes).
+      updateMany: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          updates.push({ id: where.id, data });
+          return { count: 1 };
+        },
+      ),
     },
     driverCredit: {
       findMany: vi.fn(async () => credits),

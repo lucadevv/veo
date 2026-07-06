@@ -219,21 +219,26 @@ export class PayoutsService {
     for (const debt of debts) {
       if (toApply <= 0) break;
       if (toApply >= debt.amountCents) {
-        // La ganancia cubre la deuda ENTERA → SETTLED, ligada a este payout (auditoría/conciliación).
-        await tx.driverDebt.update({
-          where: { id: debt.id },
+        // La ganancia cubre la deuda ENTERA → SETTLED, ligada a este payout (auditoría/conciliación). CAS por
+        // status+monto (updateMany, no update-by-id): un refund CONCURRENTE (reverseCashDebtInTx) pudo revertir/
+        // reducir esta deuda entre el findMany de arriba y este update → si count=0 la SALTAMOS (no la neteamos
+        // ni la contamos), evitando el lost-update (netear una deuda ya revertida = doble-beneficio al conductor).
+        const settled = await tx.driverDebt.updateMany({
+          where: { id: debt.id, status: 'PENDING', amountCents: debt.amountCents },
           data: { status: 'SETTLED', settledInPayoutId: payoutId, settledAt: new Date() },
         });
+        if (settled.count === 0) continue;
         toApply -= debt.amountCents;
         applied += debt.amountCents;
       } else {
         // Cubre PARCIAL → reduce el monto de la deuda del borde (queda PENDING con el resto); lo aplicado va al
         // payout. El neteo parcial se refleja en Payout.debtAppliedCents (no se parte la fila → sin colisión de
-        // UNIQUE(paymentId)).
-        await tx.driverDebt.update({
-          where: { id: debt.id },
+        // UNIQUE(paymentId)). Mismo CAS por status+monto: si un refund concurrente la tocó, count=0 → la saltamos.
+        const reduced = await tx.driverDebt.updateMany({
+          where: { id: debt.id, status: 'PENDING', amountCents: debt.amountCents },
           data: { amountCents: debt.amountCents - toApply },
         });
+        if (reduced.count === 0) continue;
         applied += toApply;
         toApply = 0;
       }

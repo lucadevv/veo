@@ -1584,15 +1584,26 @@ export class PaymentsService {
     tx: Prisma.TransactionClient,
     paymentId: string,
     refundAmountCents: number,
+    grossCents: number,
   ): Promise<void> {
     const debt = await tx.driverDebt.findUnique({ where: { paymentId } });
     if (!debt) return;
 
+    // Comisión a REVERTIR = PROPORCIONAL a la fracción de tarifa reembolsada (la comisión CASH es un % del bruto).
+    // Antes se comparaba `deuda − refundAmount` (comisión vs tarifa, unidades DISTINTAS): un refund PARCIAL
+    // reversaba la comisión ENTERA → la plataforma se auto-perdonaba comisión que el conductor SÍ debía sobre la
+    // parte del viaje que se mantuvo. grossCents>0 siempre (un cobro con deuda tuvo bruto); cap a la deuda.
+    const reversedCents =
+      grossCents > 0
+        ? Math.min(debt.amountCents, Math.round((debt.amountCents * refundAmountCents) / grossCents))
+        : debt.amountCents;
+    if (reversedCents <= 0) return;
+
     // PENDING (caso común: el refund ocurre ANTES del run de netting): la deuda aún no se cobró → se reduce/anula
     // en el acto, sin mover plata (nunca entró al payout).
     if (debt.status === 'PENDING') {
-      const remaining = Math.max(0, debt.amountCents - refundAmountCents);
-      if (remaining === 0) {
+      const remaining = debt.amountCents - reversedCents;
+      if (remaining <= 0) {
         await tx.driverDebt.update({
           where: { id: debt.id },
           data: { status: 'REVERSED', amountCents: 0, settledAt: new Date() },
@@ -1604,12 +1615,10 @@ export class PaymentsService {
     }
 
     // SETTLED (edge · gate MEDIA #4): la deuda YA se neteó en un payout PASADO → el conductor ya pagó esa
-    // comisión. Revertir el viaje significa que no la debía → se le ACREDITA lo reversado con un DriverCredit que
-    // el próximo payout SUMA al neto (applyDebtNetting). Idempotente por source_payment_id @unique. La deuda pasa
-    // a REVERSED (traza; el crédito lleva el monto). Antes esto era un no-op → conductor sobre-cobrado.
+    // comisión. Revertir el viaje significa que no la debía → se le ACREDITA lo reversado (PROPORCIONAL) con un
+    // DriverCredit que el próximo payout SUMA al neto (applyDebtNetting). Idempotente por source_payment_id
+    // @unique. La deuda pasa a REVERSED (traza; el crédito lleva el monto). Antes esto era un no-op → sobre-cobro.
     if (debt.status === 'SETTLED') {
-      const reversedCents = Math.min(debt.amountCents, refundAmountCents);
-      if (reversedCents <= 0) return;
       await tx.driverCredit.create({
         data: {
           id: uuidv7(),
@@ -1636,8 +1645,9 @@ export class PaymentsService {
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     return this.prisma.write.$transaction(async (tx) => {
       await this.claimRefundReservationInTx(tx, payment, claim);
-      // A2 · revertir la deuda de comisión CASH del conductor por lo reembolsado (viaje revertido → no la debe).
-      await this.reverseCashDebtInTx(tx, payment.id, claim.amountCents);
+      // A2 · revertir la deuda de comisión CASH del conductor, PROPORCIONAL a lo reembolsado (grossCents da la
+      // fracción; un refund parcial revierte solo la comisión de la parte devuelta, no la entera).
+      await this.reverseCashDebtInTx(tx, payment.id, claim.amountCents, payment.grossCents);
       // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto.
       const refund = await tx.refund.create({
         data: {
