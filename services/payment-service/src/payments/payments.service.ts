@@ -50,6 +50,7 @@ import {
   deriveTipChargeDedupKey,
   deriveTipRefundDedupKey,
   isCashMethod,
+  isSettledPayment,
   retryDelayMs,
 } from './payment.policy';
 import { CommissionService } from '../commission/commission.service';
@@ -69,16 +70,6 @@ export const METHOD_UNAVAILABLE_PREFIX = 'method_unavailable';
 /** Construye la razón estructurada `method_unavailable:<METHOD>` para un cobro a DEBT por capability. */
 function methodUnavailableReason(method: PaymentMethod): string {
   return `${METHOD_UNAVAILABLE_PREFIX}:${method}`;
-}
-
-/**
- * Estados TERMINALES-liquidados de un Payment: la plata YA se capturó (y quizá se reembolsó total/parcial). Un
- * webhook (CONFIRMED/DECLINED/EXPIRED) que llega sobre uno de estos es TARDÍO/stale → no-op idempotente en
- * applyWebhookResult, NO un error: desde CAPTURED/REFUNDED/PARTIALLY_REFUNDED no hay transición a CAPTURED/DEBT/
- * FAILED (payment.policy), así que caer a captureSuccess/markDebt lanzaría InvalidStateError → loop de re-entrega.
- */
-function isSettledPayment(status: string): boolean {
-  return status === 'CAPTURED' || status === 'REFUNDED' || status === 'PARTIALLY_REFUNDED';
 }
 
 /**

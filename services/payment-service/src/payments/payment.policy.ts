@@ -284,6 +284,18 @@ export function canAddTip(status: PaymentStatus): boolean {
   return TIPPABLE_STATUSES.includes(status);
 }
 
+/**
+ * Estados LIQUIDADOS de un cobro: el dinero ya se resolvió (capturado, o reembolsado total/parcial). Un webhook
+ * que llega sobre uno de estos NO transiciona (no hay arista a CAPTURED/DEBT/FAILED en PAYMENT_TRANSITIONS) →
+ * applyWebhookResult lo trata como no-op idempotente en vez de caer a captureSuccess/markDebt (InvalidStateError
+ * → loop de re-entrega). Constante TIPADA (readonly PaymentStatus[]): un rename del enum lo caza el compilador.
+ */
+const SETTLED_STATUSES: readonly PaymentStatus[] = ['CAPTURED', 'REFUNDED', 'PARTIALLY_REFUNDED'];
+
+export function isSettledPayment(status: PaymentStatus): boolean {
+  return SETTLED_STATUSES.includes(status);
+}
+
 export function assertCanAddTip(status: PaymentStatus): void {
   if (!canAddTip(status)) {
     throw new InvalidStateError(`No se puede añadir propina a un pago en estado ${status}`);
