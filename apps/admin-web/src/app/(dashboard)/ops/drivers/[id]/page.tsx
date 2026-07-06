@@ -1,49 +1,99 @@
 'use client';
 
-import { use, useState } from 'react';
+import { use } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
+  ArrowLeftRight,
   Car,
   Check,
-  Circle,
+  ClipboardCheck,
+  CreditCard,
+  FileText,
+  IdCard,
+  Info,
   Lock,
   ScanFace,
   ShieldCheck,
   Trash2,
   Unlock,
+  User,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
-import type { DriverDetail } from '@veo/api-client';
+import type { AdminDriverDocument, DriverDetail } from '@veo/api-client';
 import {
   useDriverDetail,
   useDriverDecision,
   useDeleteDriver,
   useDniFaceMatch,
   useLicenseFaceMatch,
+  useDocumentReview,
   useUnlockBiometric,
 } from '@/lib/api/queries';
-import { date, dateTime } from '@/lib/formatters';
+import { date } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
-import { PageHeader } from '@/components/layout/page-header';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { StatusPill } from '@/components/ui/status-pill';
+import { Avatar } from '@/components/ui/avatar';
+import { DotPill, type PillTone } from '@/components/ui/dot-pill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/states';
-import { Button } from '@/components/ui/button';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { useToast } from '@/components/ui/toast';
-import { DocumentViewer } from '@/components/drivers/document-viewer';
 import { CreateInspectionDialog } from '@/components/fleet/fleet-forms';
 
-/**
- * Detalle de revisión de un conductor (GET /ops/drivers/:id): datos core + biométrico + VISOR de
- * documentos para aprobar/rechazar el onboarding. Vive DENTRO del grupo (dashboard) → hereda el layout
- * autenticado por JWT (ruta protegida). Espeja trips/[id]: `use(params)` + hook con cliente autenticado.
- * El bff además gatea esta ruta a Compliance+ (la UI refleja el permiso `drivers:view`).
- */
+/* ── Enums locales tipados (sin magic strings) ── */
+const FaceMatchStatus = { NOT_RUN: 'NOT_RUN', MATCHED: 'MATCHED', NO_MATCH: 'NO_MATCH' } as const;
+const Liveness = { NOT_RUN: 'NOT_RUN', PASSED: 'PASSED', DEGRADED: 'DEGRADED' } as const;
+const DocStatus = {
+  VALID: 'VALID',
+  PENDING_REVIEW: 'PENDING_REVIEW',
+  EXPIRING_SOON: 'EXPIRING_SOON',
+  EXPIRED: 'EXPIRED',
+  REJECTED: 'REJECTED',
+} as const;
+
+/** Ícono + label por tipo de documento (frame AdminConductorDetalle · card Documentos). */
+const DOC_META: Record<string, { icon: LucideIcon; label: string }> = {
+  DNI: { icon: CreditCard, label: 'DNI (frente y reverso)' },
+  LICENSE_A1: { icon: IdCard, label: 'Licencia de conducir A-I' },
+  SOAT: { icon: ShieldCheck, label: 'SOAT vigente' },
+  PROPERTY_CARD: { icon: FileText, label: 'Tarjeta de propiedad' },
+  VEHICLE_PHOTO: { icon: Car, label: 'Foto del vehículo' },
+  ITV: { icon: ClipboardCheck, label: 'Inspección técnica (ITV)' },
+};
+
+/** Pill de estado documental (mismos labels/tonos del frame). */
+function docPill(status: string): { tone: PillTone; label: string } {
+  switch (status) {
+    case DocStatus.VALID:
+      return { tone: 'success', label: 'Válido' };
+    case DocStatus.PENDING_REVIEW:
+      return { tone: 'warn', label: 'Por revisar' };
+    case DocStatus.EXPIRING_SOON:
+      return { tone: 'warn', label: 'Por vencer' };
+    case DocStatus.EXPIRED:
+      return { tone: 'danger', label: 'Vencido' };
+    case DocStatus.REJECTED:
+      return { tone: 'danger', label: 'Rechazado' };
+    default:
+      return { tone: 'neutral', label: status };
+  }
+}
+
+/** Estado de cabecera del conductor (pill junto al nombre). */
+function headerStatus(d: DriverDetail): { tone: PillTone; label: string } {
+  if (d.backgroundCheckStatus === 'CLEARED') return { tone: 'success', label: 'Aprobado' };
+  if (d.backgroundCheckStatus === 'REJECTED') return { tone: 'danger', label: 'Rechazado' };
+  return { tone: 'warn', label: 'En revisión' };
+}
+
+const CARD = 'overflow-hidden rounded-lg border border-border bg-surface';
+const CARD_HEADER =
+  'flex items-center justify-between gap-3 border-b border-border px-[18px] py-[14px]';
+
 export default function DriverDetailPage(props: { params: Promise<{ id: string }> }) {
   const params = use(props.params);
   const { id } = params;
@@ -53,585 +103,134 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
 
   if (!can(user, 'drivers:view')) {
     return (
-      <div className="flex h-full flex-col">
-        <PageHeader
-          title="Conductor"
-          breadcrumbs={[
-            { label: 'Flota' },
-            { label: 'Conductores', href: '/ops/drivers' },
-            { label: id.slice(0, 8) },
-          ]}
-        />
-        <EmptyState
-          className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol correspondiente para revisar a este conductor."
-        />
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
+        <Lock className="size-6 text-ink-subtle" aria-hidden />
+        <p className="text-sm text-ink-muted">
+          Necesitás el rol correspondiente para revisar a este conductor.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <PageHeader
-        title={driver?.fullName ?? `Conductor ${id.slice(0, 8)}`}
-        breadcrumbs={[
-          { label: 'Flota' },
-          { label: 'Conductores', href: '/ops/drivers' },
-          { label: id.slice(0, 8) },
-        ]}
-        actions={
-          driver ? (
-            <div className="flex items-center gap-3">
-              <StatusPill status={driver.currentStatus} />
-              <DeleteDriverAction driverId={driver.id} driverName={driver.fullName} />
-            </div>
-          ) : null
-        }
-      />
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-auto px-8 py-6">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm">
+        <Link href="/ops/drivers" className="text-ink-subtle hover:text-ink">
+          Conductores
+        </Link>
+        <span className="text-ink-subtle">/</span>
+        <span className="font-semibold text-ink">{driver?.fullName ?? id.slice(0, 8)}</span>
+      </div>
 
       {query.isLoading ? (
-        <div className="grid gap-4 p-4 lg:grid-cols-2 lg:p-6">
-          <Skeleton className="h-64" />
-          <Skeleton className="h-64" />
+        <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+          <Skeleton className="h-96" />
+          <Skeleton className="h-96" />
         </div>
       ) : query.isError ? (
-        <ErrorState onRetry={() => void query.refetch()} className="m-6" />
+        <ErrorState onRetry={() => void query.refetch()} className="mt-10" />
       ) : driver ? (
-        <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4 lg:p-6">
-          {/* Barra de aprobación: la acción PRIMARIA de la pantalla, al frente y gateada (refleja TODOS los
-              gates server-side: face-match + liveness + documentos + ITV). El operador ve el readiness de un
-              vistazo y registra la ITV inline si es lo que falta. */}
-          <ApprovalBar driver={driver} onItvRegistered={() => void query.refetch()} />
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Datos del conductor</CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <Detail label="Nombre" value={driver.fullName ?? '—'} />
-                <Detail label="Teléfono" value={driver.phone ?? '—'} mono />
-                <Detail label="DNI" value={driver.dni ?? '—'} mono />
-                <Detail label="Fecha de nacimiento" value={driver.birthDate ? date(driver.birthDate) : '—'} />
-                <Detail label="Licencia" value={driver.licenseNumber ?? '—'} mono />
-                <Detail label="Alta" value={dateTime(driver.createdAt)} />
-                <div>
-                  <dt className="text-xs text-ink-muted">Antecedentes</dt>
-                  <dd className="mt-1">
-                    <StatusPill status={driver.backgroundCheckStatus} />
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-ink-muted">KYC</dt>
-                  <dd className="mt-1">
-                    <StatusPill status={driver.kycStatus} />
-                  </dd>
-                </div>
-                {driver.rejectionReason ? (
-                  <div className="col-span-2">
-                    <dt className="text-xs text-ink-muted">Motivo del rechazo</dt>
-                    <dd className="text-danger">{driver.rejectionReason}</dd>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Verificación biométrica</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <EnrolSelfiePreview url={driver.biometric.faceSelfieUrl} />
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                  <Detail
-                    label="Rostro enrolado"
-                    value={dateTime(driver.biometric.faceEnrolledAt)}
-                  />
-                  <Detail
-                    label="Anti-spoofing (liveness)"
-                    value={livenessLabel(
-                      driver.biometric.livenessStatus,
-                      driver.biometric.livenessScore,
-                    )}
-                  />
-                  <Detail
-                    label="Última verificación"
-                    value={dateTime(driver.biometric.lastVerifiedAt)}
-                  />
-                </div>
-                <FaceMatchBindings driver={driver} />
-                <BiometricUnlockAction driverId={driver.id} />
-              </CardContent>
-            </Card>
+        <>
+          <Header driver={driver} onItvRegistered={() => void query.refetch()} />
+          <div className="grid min-h-0 gap-5 lg:grid-cols-[1fr_320px]">
+            <div className="flex flex-col gap-[18px]">
+              <DocsCard driver={driver} onReviewed={() => void query.refetch()} />
+              <BioCard driver={driver} />
+            </div>
+            <div className="flex flex-col gap-4">
+              <DatosCard driver={driver} />
+              <VehiculoCard driver={driver} />
+              <Callout />
+            </div>
           </div>
-
-          {/* Ficha del vehículo (F2 · C1): el operador ve QUÉ auto opera antes de aprobar. */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Vehículo</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {driver.vehicle ? (
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
-                  <Detail label="Placa" value={driver.vehicle.plate} mono />
-                  <Detail label="Marca" value={driver.vehicle.make || '—'} />
-                  <Detail label="Modelo" value={driver.vehicle.model || '—'} />
-                  <Detail label="Año" value={String(driver.vehicle.year)} />
-                  <Detail label="Color" value={driver.vehicle.color || '—'} />
-                  <Detail label="Tipo" value={driver.vehicle.vehicleType} />
-                  <div>
-                    <dt className="text-xs text-ink-muted">Documentación</dt>
-                    <dd className="mt-1">
-                      <StatusPill status={driver.vehicle.docStatus} />
-                    </dd>
-                  </div>
-                </div>
-              ) : (
-                <EmptyState
-                  icon={<Car className="size-6" aria-hidden />}
-                  title="Sin vehículo registrado"
-                  description="El conductor todavía no registró un vehículo."
-                />
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Documentos</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <DocumentViewer
-                documents={driver.documents}
-                isLoading={false}
-                isError={false}
-                onReload={() => void query.refetch()}
-                isReloading={query.isFetching}
-                driverId={driver.id}
-              />
-            </CardContent>
-          </Card>
-        </div>
+        </>
       ) : null}
     </div>
   );
 }
 
-function Detail({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div>
-      <dt className="text-xs text-ink-muted">{label}</dt>
-      <dd className={mono ? 'font-mono text-ink tabular' : 'text-ink'}>{value}</dd>
-    </div>
-  );
-}
+/* ────────────────────────────── HEADER ────────────────────────────── */
 
-/**
- * El `dniFaceMatchScore` GUARDADO está en escala 0..100 (= similitud coseno ArcFace × 100). Mostrarlo como
- * "{score}%" ENGAÑA: un 0.40 de coseno legítimo (DNI viejo/baja-res, misma persona) se LEE como "40% de
- * confianza" → el operador cree que hay 60% de que NO sea la persona, cuando en realidad 0.40 es un coseno
- * sano para doc-vs-selfie (el umbral del doc-match es 0.30, más laxo que el de turno 0.40). Devolvemos el
- * coseno REAL (no un porcentaje de confianza inventado) + una banda cualitativa honesta.
- */
-function formatFaceMatchScore(score0to100: number): { cosine: string; band: string } {
-  const cosine = score0to100 / 100;
-  // Bandas cualitativas sobre el coseno ArcFace (doc-vs-selfie). NO son probabilidades: orientan al
-  // operador sin fingir precisión que no tenemos (sin calibración FMR a población real).
-  const band =
-    cosine >= 0.5 ? 'similitud alta' : cosine >= 0.3 ? 'similitud media' : 'similitud baja';
-  return { cosine: cosine.toFixed(2), band };
-}
-
-/**
- * Estados tipados del binding documento↔selfie (= enum `DniFaceMatchStatus` del contrato). Const local para
- * conmutar el panel SIN strings mágicos (`status === FaceMatchStatus.MATCHED` en vez de `=== 'MATCHED'`).
- */
-const FaceMatchStatus = {
-  NOT_RUN: 'NOT_RUN',
-  MATCHED: 'MATCHED',
-  NO_MATCH: 'NO_MATCH',
-} as const;
-
-/**
- * Estados tipados del liveness PASIVO (= enum `passiveLivenessStatus` del contrato). Const local para conmutar
- * el chip + el gate SIN strings mágicos. PASSED = el PAD corrió y dio viva; DEGRADED = enroló sin anti-spoofing
- * (modelo ausente); NOT_RUN = aún no enroló. Un spoof NUNCA llega acá (se rechaza en el enrol).
- */
-const PassiveLivenessStatus = {
-  NOT_RUN: 'NOT_RUN',
-  PASSED: 'PASSED',
-  DEGRADED: 'DEGRADED',
-} as const;
-
-/**
- * Descriptor de un binding documento↔selfie para el panel CANÓNICO. Centraliza las labels/copys y el SELECTOR
- * tipado de los 3 campos del binding (sin indexar por string) → un panel, dos documentos (DNI y licencia ·
- * Lote C · binding MÁS FUERTE). Acá muere el copy-paste entre el panel del DNI y el del brevete.
- */
-interface FaceMatchDoc {
-  /** Etiqueta corta del binding ("Rostro vs DNI" / "Rostro vs licencia"). */
-  label: string;
-  /** Verbo del CTA cuando aún no se corrió. */
-  verifyLabel: string;
-  /** Hint cuando no se corrió. */
-  emptyHint: string;
-  /** Títulos del toast al coincidir / no coincidir. */
-  matchTitle: string;
-  noMatchTitle: string;
-  /** Qué revisar si el match falla (toast de error). */
-  errorHint: string;
-  /** Extrae los 3 campos del binding del bloque biométrico (tipado, sin strings de keys). */
-  select: (bio: DriverDetail['biometric']) => {
-    status: DriverDetail['biometric']['dniFaceMatchStatus'];
-    score: number | null;
-    at: string | null;
-  };
-}
-
-const FACE_MATCH_DNI: FaceMatchDoc = {
-  label: 'Rostro vs DNI',
-  verifyLabel: 'Verificar rostro vs DNI',
-  emptyHint: 'Aún no se verificó el rostro del DNI contra la biometría enrolada.',
-  matchTitle: 'Rostro coincide con el DNI',
-  noMatchTitle: 'El rostro NO coincide con el DNI',
-  errorHint: 'Revisá que el conductor tenga biometría enrolada y la foto FRONT del DNI cargada.',
-  select: (b) => ({
-    status: b.dniFaceMatchStatus,
-    score: b.dniFaceMatchScore,
-    at: b.dniFaceMatchedAt,
-  }),
-};
-
-const FACE_MATCH_LICENSE: FaceMatchDoc = {
-  label: 'Rostro vs licencia',
-  verifyLabel: 'Verificar rostro vs licencia',
-  emptyHint: 'Aún no se verificó el rostro del brevete contra la biometría enrolada.',
-  matchTitle: 'Rostro coincide con la licencia',
-  noMatchTitle: 'El rostro NO coincide con la licencia',
-  errorHint: 'Revisá que el conductor tenga biometría enrolada y la foto del brevete cargada.',
-  select: (b) => ({
-    status: b.licenseFaceMatchStatus,
-    score: b.licenseFaceMatchScore,
-    at: b.licenseFaceMatchedAt,
-  }),
-};
-
-/**
- * Panel CANÓNICO del binding documento↔selfie (DNI o licencia). Muestra el resultado GUARDADO (Coincide ✓ /
- * No coincide ✗ + similitud coseno honesta) y un CTA que dispara el match en el admin-bff. Parametrizado por
- * `doc` (descriptor) + la `mutation` del documento — un solo componente, cero copy-paste. El operador VE el
- * binding antes de aprobar; el gate REAL (ambos bindings ejecutados) es server-side, esto solo refleja.
- */
-function FaceMatchPanel({
-  driver,
-  doc,
-  mutation,
-}: {
-  driver: DriverDetail;
-  doc: FaceMatchDoc;
-  mutation: ReturnType<typeof useDniFaceMatch>;
-}) {
-  const { toast } = useToast();
-  const { status, score, at } = doc.select(driver.biometric);
-
-  const runMatch = async () => {
-    try {
-      const res = await mutation.mutateAsync({ id: driver.id });
-      toast({
-        tone: res.matched ? 'success' : 'danger',
-        title: res.matched ? doc.matchTitle : doc.noMatchTitle,
-        description: res.reason ?? undefined,
-      });
-    } catch (error) {
-      toast({
-        tone: 'danger',
-        title: 'No se pudo verificar el rostro',
-        description: error instanceof ApiError ? error.message : doc.errorHint,
-      });
-    }
-  };
-
-  return (
-    <div className="border-t border-border pt-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <dt className="text-xs text-ink-muted">{doc.label}</dt>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => void runMatch()}
-          disabled={mutation.isPending}
-        >
-          <ScanFace className="size-4" aria-hidden />
-          {status === FaceMatchStatus.NOT_RUN ? doc.verifyLabel : 'Volver a verificar'}
-        </Button>
-      </div>
-      {status === FaceMatchStatus.NOT_RUN ? (
-        <p className="text-xs text-ink-muted">{doc.emptyHint}</p>
-      ) : status === FaceMatchStatus.MATCHED ? (
-        <div className="flex items-center gap-2 rounded-md bg-success/10 px-3 py-2 text-success">
-          <Check className="size-4" aria-hidden />
-          <span className="font-medium">Coincide</span>
-          {score !== null ? (
-            <span className="tabular text-xs text-success/80">
-              {`similitud ${formatFaceMatchScore(score).cosine} · ${formatFaceMatchScore(score).band}`}
-            </span>
-          ) : null}
-          <span className="ml-auto text-xs text-ink-muted">{dateTime(at)}</span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 rounded-md bg-danger/10 px-3 py-2 text-danger">
-          <X className="size-4" aria-hidden />
-          <span className="font-medium">No coincide</span>
-          {score !== null ? (
-            <span className="tabular text-xs text-danger/80">
-              {`similitud ${formatFaceMatchScore(score).cosine} · ${formatFaceMatchScore(score).band}`}
-            </span>
-          ) : null}
-          <span className="ml-auto text-xs text-ink-muted">{dateTime(at)}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Los DOS bindings documento↔selfie (DNI + licencia · Lote C · binding MÁS FUERTE) que el operador VE antes de
- * aprobar. Llama ambas mutations acá (reglas de hooks) y renderiza un panel canónico por documento.
- */
-/**
- * F5 · selfie del enrol del conductor, como AYUDA VISUAL para el operador (casos dudosos: dirimir un NO_MATCH
- * del brevete low-res a ojo). NO es la verificación — esa la hace el match contra DNI/licencia. Thumbnail
- * clickeable (abre full); fail-soft (URL vencida/firma fallida → placeholder); `null` → "sin selfie" honesto.
- */
-function EnrolSelfiePreview({ url }: { url: string | null }) {
-  const [broken, setBroken] = useState(false);
-  const showImage = url !== null && !broken;
-  return (
-    <div className="flex items-center gap-3 border-b border-border pb-4">
-      {showImage ? (
-        <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0">
-          <img
-            src={url}
-            alt="Selfie del registro del conductor"
-            className="size-24 rounded-xl border border-border object-cover ring-1 ring-inset ring-white/5"
-            onError={() => setBroken(true)}
-          />
-        </a>
-      ) : (
-        <div className="grid size-24 shrink-0 place-items-center rounded-xl border border-border bg-surface text-ink-muted">
-          <ScanFace className="size-8" aria-hidden />
-        </div>
-      )}
-      <div>
-        <dt className="text-xs font-medium text-ink-muted">Selfie del registro</dt>
-        <p className="mt-0.5 text-xs text-ink-muted">
-          {showImage
-            ? 'Compará a ojo contra el DNI y la licencia.'
-            : url === null
-              ? 'Sin selfie guardada.'
-              : 'No se pudo mostrar (enlace vencido o archivo dañado).'}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function FaceMatchBindings({ driver }: { driver: DriverDetail }) {
-  const dniMatch = useDniFaceMatch();
-  const licenseMatch = useLicenseFaceMatch();
-  return (
-    <div className="space-y-3">
-      <FaceMatchPanel driver={driver} doc={FACE_MATCH_DNI} mutation={dniMatch} />
-      <FaceMatchPanel driver={driver} doc={FACE_MATCH_LICENSE} mutation={licenseMatch} />
-    </div>
-  );
-}
-
-/**
- * F3 · destrabe biométrico por la CENTRAL (regla #1 driver: "solo central destraba"). Botón de remediación
- * idempotente: limpia el lockout del gate de turno (3 fallos/1h) y el cooldown de abuso del enrol. NO es
- * destructivo (habilita, no borra) → sin confirm pesado, toast de éxito. El gate REAL es server-side.
- */
-function BiometricUnlockAction({ driverId }: { driverId: string }) {
-  const { toast } = useToast();
-  const unlock = useUnlockBiometric();
-  const run = async () => {
-    try {
-      await unlock.mutateAsync({ id: driverId });
-      toast({ tone: 'success', title: 'Verificación biométrica destrabada' });
-    } catch (error) {
-      toast({
-        tone: 'danger',
-        title: 'No se pudo destrabar la verificación',
-        description: error instanceof ApiError ? error.message : undefined,
-      });
-    }
-  };
-  return (
-    <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-      <div>
-        <dt className="text-xs text-ink-muted">Bloqueo por intentos fallidos</dt>
-        <p className="mt-0.5 text-xs text-ink-muted">
-          Destrabá si el conductor reporta su verificación bloqueada (turno o registro).
-        </p>
-      </div>
-      <Button
-        size="sm"
-        variant="secondary"
-        onClick={() => void run()}
-        disabled={unlock.isPending}
-      >
-        <Unlock className="size-4" aria-hidden />
-        Destrabar
-      </Button>
-    </div>
-  );
-}
-
-type ReadyState = 'ok' | 'pending' | 'warn';
-
-/** Mapea el FaceMatchStatus tipado a un estado de readiness (sin strings mágicos: usa el enum local). */
-function faceReadiness(status: DriverDetail['biometric']['dniFaceMatchStatus']): ReadyState {
-  return status === FaceMatchStatus.MATCHED
-    ? 'ok'
-    : status === FaceMatchStatus.NO_MATCH
-      ? 'warn'
-      : 'pending';
-}
-
-/**
- * Readiness del liveness PASIVO: PASSED → ok (el anti-spoofing corrió y dio viva); DEGRADED → warn (enroló SIN
- * anti-spoofing — el operador debe saberlo); NOT_RUN → pending (aún no enroló biometría).
- */
-function livenessReadiness(status: DriverDetail['biometric']['livenessStatus']): ReadyState {
-  return status === PassiveLivenessStatus.PASSED
-    ? 'ok'
-    : status === PassiveLivenessStatus.DEGRADED
-      ? 'warn'
-      : 'pending';
-}
-
-/** Texto legible del liveness para la ficha (status + score 0..1 de la clase viva). */
-function livenessLabel(
-  status: DriverDetail['biometric']['livenessStatus'],
-  score: number | null,
-): string {
-  if (status === PassiveLivenessStatus.PASSED) {
-    return score != null ? `Vivo · ${score.toFixed(2)}` : 'Vivo';
-  }
-  if (status === PassiveLivenessStatus.DEGRADED) return 'Degradado · sin anti-spoofing';
-  return 'No enrolado';
-}
-
-/**
- * Hint corto del gate de ITV por motivo de invalidez (presentación, NO lógica: el gate usa el booleano
- * `inspection.current`). Espeja los motivos que clasifica fleet (NONE/NOT_PASSED/OVERDUE/NO_VEHICLE).
- */
-const ITV_HINT: Record<string, string> = {
-  NONE: 'El vehículo no tiene ITV registrada.',
-  NOT_PASSED: 'La ITV del vehículo está reprobada.',
-  OVERDUE: 'La ITV del vehículo está vencida.',
-  NO_VEHICLE: 'El conductor no tiene un vehículo operable.',
-};
-
-/** Chip de readiness para la barra de aprobación: verde ok / ámbar-danger warn / neutro pendiente. */
-function ReadyChip({ label, state }: { label: string; state: ReadyState }) {
-  const cfg = {
-    ok: { Icon: Check, cls: 'bg-success/10 text-success' },
-    warn: { Icon: AlertTriangle, cls: 'bg-danger/10 text-danger' },
-    pending: { Icon: Circle, cls: 'bg-surface-2 text-ink-subtle' },
-  } as const;
-  const { Icon, cls } = cfg[state];
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${cls}`}
-    >
-      <Icon className="size-3.5 shrink-0" aria-hidden />
-      {label}
-    </span>
-  );
-}
-
-/**
- * Barra de aprobación: la acción PRIMARIA de la pantalla, al frente. Muestra el READINESS de los gates
- * que el operador necesita (ambos face-match ejecutados = el gate dual server-side de `approve()`) y la
- * CTA "Aprobar conductor" GATEADA: deshabilitada con el motivo hasta correr ambos bindings. La UI REFLEJA
- * el gate (no autoriza); el bff revalida @Roles + el gate dual + los documentos obligatorios.
- */
-function ApprovalBar({
-  driver,
-  onItvRegistered,
-}: {
-  driver: DriverDetail;
-  onItvRegistered: () => void;
-}) {
+function Header({ driver, onItvRegistered }: { driver: DriverDetail; onItvRegistered: () => void }) {
   const user = useSession();
   const { toast } = useToast();
   const decision = useDriverDecision();
   const bio = driver.biometric;
   const readiness = driver.approvalReadiness;
   const itv = readiness.inspection;
-  // TODOS los gates server-side de `approve()` REFLEJADOS (la UI no autoriza, refleja): face-match dual +
-  // liveness PASSED + documentos obligatorios VALID + ITV vigente. canApprove exige los cuatro → el botón
-  // ya NO se habilita a ciegas. El bff revalida igual @Roles + los mismos gates (computeApprovalGates).
-  const livenessPassed = bio.livenessStatus === PassiveLivenessStatus.PASSED;
+  const livenessPassed = bio.livenessStatus === Liveness.PASSED;
   const facesRun = bio.dniFaceMatchedAt != null && bio.licenseFaceMatchedAt != null;
   const canApprove = facesRun && livenessPassed && readiness.documentsValid && itv.current;
-  // Motivo HONESTO del bloqueo, en el ORDEN en que el operador lo resuelve: anti-spoofing (re-enrol) →
-  // face-match (cotejo, en esta pantalla) → documentos (validar en la ficha) → ITV (registrar acá mismo).
   const blockReason = !livenessPassed
-    ? 'El anti-spoofing del enrol no corrió (enrol degradado); el conductor debe re-enrolar su biometría.'
+    ? 'El anti-spoofing del enrol no corrió; el conductor debe re-enrolar su biometría.'
     : !facesRun
       ? 'Corré ambos face-match para habilitar.'
       : !readiness.documentsValid
-        ? `Faltan documentos válidos: ${readiness.missingDocuments.join(', ')}. Validalos abajo en Documentos.`
+        ? `Faltan documentos válidos: ${readiness.missingDocuments.join(', ')}.`
         : !itv.current
           ? (ITV_HINT[itv.invalidReason ?? ''] ?? 'Falta la inspección técnica (ITV) del vehículo.')
           : '';
+  const st = headerStatus(driver);
+  const canApproveRole = can(user, 'drivers:approve');
+
+  const chips = [
+    `drv_${driver.id.slice(0, 8)}`,
+    driver.dni ? `DNI ${driver.dni}` : null,
+    driver.phone,
+    `Alta ${date(driver.createdAt)}`,
+  ].filter(Boolean) as string[];
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between lg:px-5">
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-ink">Revisión de alta</p>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <ReadyChip label="Biometría enrolada" state={bio.faceEnrolledAt ? 'ok' : 'pending'} />
-          <ReadyChip label="Anti-spoofing" state={livenessReadiness(bio.livenessStatus)} />
-          <ReadyChip label="Rostro vs DNI" state={faceReadiness(bio.dniFaceMatchStatus)} />
-          <ReadyChip label="Rostro vs licencia" state={faceReadiness(bio.licenseFaceMatchStatus)} />
-          <ReadyChip label="Documentos" state={readiness.documentsValid ? 'ok' : 'warn'} />
-          <ReadyChip label="ITV" state={itv.current ? 'ok' : 'warn'} />
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      {/* Identity */}
+      <div className="flex items-center gap-3.5">
+        <Avatar name={driver.fullName} />
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-[22px] font-semibold tracking-tight text-ink">
+              {driver.fullName ?? `Conductor ${driver.id.slice(0, 8)}`}
+            </h1>
+            <DotPill tone={st.tone}>{st.label}</DotPill>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-ink-subtle">
+            {chips.map((c) => (
+              <span key={c}>{c}</span>
+            ))}
+          </div>
         </div>
       </div>
 
-      {can(user, 'drivers:approve') ? (
-        <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
-          {/* Puente a la ITV: si es lo que bloquea y hay vehículo operable, el operador la registra ACÁ MISMO
-              (vehículo precargado, sin pegar uuids ni salir de la pantalla). Al registrarla, refresca el detalle
-              → el chip ITV pasa a verde y "Aprobar" se habilita. Sin vehículo no se ofrece (no hay qué inspeccionar). */}
-          {!itv.current && (itv.vehicleId || driver.vehicle) ? (
-            <CreateInspectionDialog
-              vehicleId={itv.vehicleId ?? driver.vehicle?.id}
-              vehicleLabel={driver.vehicle?.plate ?? undefined}
-              onCreated={onItvRegistered}
-              trigger={
-                <Button variant="secondary">
-                  <Car className="size-4" aria-hidden />
-                  Registrar ITV
-                </Button>
-              }
-            />
-          ) : null}
-          <div className="flex items-center gap-2">
-            {/* Rechazar: MOTIVO (el conductor lo VE en su app) + MFA (BR-S07). Disponible aunque falten gates
-                (el operador puede rechazar un alta incompleta/dudosa en cualquier momento). */}
+      {/* Actions */}
+      {canApproveRole ? (
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2.5">
+            {!itv.current && (itv.vehicleId || driver.vehicle) ? (
+              <CreateInspectionDialog
+                vehicleId={itv.vehicleId ?? driver.vehicle?.id}
+                vehicleLabel={driver.vehicle?.plate ?? undefined}
+                onCreated={onItvRegistered}
+                trigger={
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface px-[18px] py-[11px] text-sm font-semibold text-ink transition-colors hover:bg-surface-2"
+                  >
+                    <Car className="size-4" aria-hidden />
+                    Registrar ITV
+                  </button>
+                }
+              />
+            ) : null}
+
             <StepUpDialog
               trigger={
-                <Button variant="danger">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-full border border-danger bg-danger/15 px-[18px] py-[11px] text-sm font-semibold text-danger transition-colors hover:bg-danger/20"
+                >
                   <X className="size-4" aria-hidden />
                   Rechazar
-                </Button>
+                </button>
               }
               title="Rechazar alta"
               icon={AlertTriangle}
@@ -646,14 +245,17 @@ function ApprovalBar({
                 toast({ tone: 'success', title: 'Conductor rechazado' });
               }}
             />
-            {/* Aprobar exige step-up MFA (BR-S07 · @RequireStepUpMfa en el bff). Gated por canApprove (refleja
-                los gates server-side); el TOTP se pide en prod, se salta en dev (espeja el StepUpMfaGuard). */}
+
             <StepUpDialog
               trigger={
-                <Button variant="primary" disabled={!canApprove}>
+                <button
+                  type="button"
+                  disabled={!canApprove}
+                  className="inline-flex items-center gap-2 rounded-full bg-accent px-[18px] py-[11px] text-sm font-semibold text-accent-on shadow-[0_8px_24px_-6px_rgba(45,127,249,0.45)] transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                >
                   <Check className="size-4" aria-hidden />
                   Aprobar conductor
-                </Button>
+                </button>
               }
               title="Confirmá tu identidad"
               icon={ShieldCheck}
@@ -664,80 +266,424 @@ function ApprovalBar({
                 toast({ tone: 'success', title: 'Conductor aprobado' });
               }}
             />
+
+            <DeleteDriverAction driverId={driver.id} driverName={driver.fullName} />
           </div>
-          {!canApprove ? <span className="text-xs text-ink-muted">{blockReason}</span> : null}
+          {!canApprove ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/15 px-3 py-1.5 text-[11px] font-semibold text-warn">
+              <Lock className="size-3" aria-hidden />
+              {blockReason}
+            </span>
+          ) : null}
         </div>
-      ) : null}
+      ) : (
+        <DotPill tone={st.tone}>{st.label}</DotPill>
+      )}
     </div>
   );
 }
 
-/**
- * Traduce el ApiError del borrado a un mensaje AMIGABLE para mostrar dentro del ConfirmDialog (irreversible).
- * - 409 (ConflictError, BR-S06): el conductor tiene historial operativo → el backend ya manda un texto
- *   amigable en español sobre el flujo de "derecho al olvido"; lo reusamos tal cual (no lo crudeamos).
- * - 403: rol insuficiente (no SUPERADMIN) o MFA no fresca → mensaje claro propio (el server no detalla por seguridad).
- * - Resto/red: fallback genérico.
- */
+/* ────────────────────────────── DOCUMENTOS ────────────────────────────── */
+
+function StepBadge({ n }: { n: number }) {
+  return (
+    <span className="grid size-[22px] place-items-center rounded-full bg-accent/15 font-mono text-xs font-bold text-accent">
+      {n}
+    </span>
+  );
+}
+
+function DocsCard({ driver, onReviewed }: { driver: DriverDetail; onReviewed: () => void }) {
+  const valid = driver.documents.filter((d) => d.status === DocStatus.VALID).length;
+  const pending = driver.documents.filter((d) => d.status === DocStatus.PENDING_REVIEW).length;
+  return (
+    <div className={CARD}>
+      <div className={CARD_HEADER}>
+        <div className="flex items-center gap-2.5">
+          <StepBadge n={1} />
+          <span className="text-[15px] font-bold text-ink">Documentos</span>
+          <DotPill tone={pending > 0 ? 'warn' : 'success'}>
+            {`${valid} válidos${pending > 0 ? ` · ${pending} por revisar` : ''}`}
+          </DotPill>
+        </div>
+        <span className="hidden text-xs text-ink-subtle sm:block">
+          Requisito para iniciar la verificación
+        </span>
+      </div>
+      <div className="flex flex-col gap-2.5 p-3.5">
+        {driver.documents.length === 0 ? (
+          <EmptyState className="py-6" title="Sin documentos" description="El conductor no subió documentos." />
+        ) : (
+          driver.documents.map((doc) => (
+            <DocRow key={doc.id} doc={doc} driverId={driver.id} onReviewed={onReviewed} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DocRow({
+  doc,
+  driverId,
+  onReviewed,
+}: {
+  doc: AdminDriverDocument;
+  driverId: string;
+  onReviewed: () => void;
+}) {
+  const { toast } = useToast();
+  const review = useDocumentReview();
+  const meta = DOC_META[doc.type] ?? { icon: FileText, label: doc.type };
+  const Icon = meta.icon;
+  const pill = docPill(doc.status);
+  const firstImage = doc.images.find((i) => i.url)?.url ?? doc.url;
+  const isPending = doc.status === DocStatus.PENDING_REVIEW;
+
+  const act = async (d: 'approve' | 'reject', reason?: string) => {
+    try {
+      await review.mutateAsync({ id: doc.id, decision: d, driverId, reason });
+      toast({ tone: 'success', title: d === 'approve' ? 'Documento aprobado' : 'Documento rechazado' });
+      onReviewed();
+    } catch (e) {
+      toast({
+        tone: 'danger',
+        title: 'No se pudo revisar el documento',
+        description: e instanceof ApiError ? e.message : undefined,
+      });
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3.5 rounded-md border border-border bg-surface-2 p-3">
+      <span className="grid size-11 shrink-0 place-items-center rounded-sm border border-border bg-bg text-ink-muted">
+        <Icon className="size-5" aria-hidden />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm font-semibold text-ink">{meta.label}</span>
+        <span className="truncate font-mono text-[11px] text-ink-subtle">
+          {doc.expiresAt ? `Vence ${date(doc.expiresAt)}` : `${doc.images.length} archivo(s)`}
+        </span>
+      </div>
+      <DotPill tone={pill.tone}>{pill.label}</DotPill>
+      <div className="flex items-center gap-1.5">
+        {firstImage ? (
+          <a
+            href={firstImage}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
+          >
+            Ver
+          </a>
+        ) : null}
+        {isPending ? (
+          <>
+            <StepUpDialog
+              trigger={
+                <button
+                  type="button"
+                  aria-label="Rechazar documento"
+                  className="grid size-[30px] place-items-center rounded-full border border-danger bg-danger/15 text-danger transition-colors hover:bg-danger/20"
+                >
+                  <X className="size-3.5" aria-hidden />
+                </button>
+              }
+              title="Rechazar documento"
+              icon={AlertTriangle}
+              description={`Rechazás ${meta.label}. El conductor verá el motivo para corregirlo. Requiere tu MFA.`}
+              confirmLabel="Rechazar documento"
+              confirmVariant="danger"
+              withReason
+              reasonLabel="Motivo (visible para el conductor)"
+              onVerified={(reason) => act('reject', reason)}
+            />
+            <button
+              type="button"
+              onClick={() => void act('approve')}
+              disabled={review.isPending}
+              className="inline-flex items-center gap-1.5 rounded-full border border-success bg-success/15 px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:bg-success/20 disabled:opacity-50"
+            >
+              <Check className="size-3.5" aria-hidden />
+              Aprobar
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────── BIOMÉTRICO ────────────────────────────── */
+
+function BioCard({ driver }: { driver: DriverDetail }) {
+  const dniMatch = useDniFaceMatch();
+  const licenseMatch = useLicenseFaceMatch();
+  const bio = driver.biometric;
+  const livePassed = bio.livenessStatus === Liveness.PASSED;
+  return (
+    <div className={CARD}>
+      <div className={CARD_HEADER}>
+        <div className="flex items-center gap-2.5">
+          <StepBadge n={2} />
+          <span className="text-[15px] font-bold text-ink">Verificación biométrica</span>
+        </div>
+        <DotPill tone={livePassed ? 'success' : bio.livenessStatus === Liveness.DEGRADED ? 'warn' : 'neutral'}>
+          {livePassed ? 'Prueba de vida ✓' : bio.livenessStatus === Liveness.DEGRADED ? 'Sin anti-spoofing' : 'Sin enrolar'}
+        </DotPill>
+      </div>
+      <div className="flex flex-col gap-3.5 p-4">
+        <MatchCard
+          driver={driver}
+          title="Rostro ↔ DNI"
+          status={bio.dniFaceMatchStatus}
+          score={bio.dniFaceMatchScore}
+          mutation={dniMatch}
+          docIcon={CreditCard}
+        />
+        <MatchCard
+          driver={driver}
+          title="Rostro ↔ Licencia"
+          status={bio.licenseFaceMatchStatus}
+          score={bio.licenseFaceMatchScore}
+          mutation={licenseMatch}
+          docIcon={IdCard}
+        />
+        <BiometricUnlockAction driverId={driver.id} />
+      </div>
+    </div>
+  );
+}
+
+function MatchCard({
+  driver,
+  title,
+  status,
+  score,
+  mutation,
+  docIcon: DocIcon,
+}: {
+  driver: DriverDetail;
+  title: string;
+  status: string;
+  score: number | null;
+  mutation: ReturnType<typeof useDniFaceMatch>;
+  docIcon: LucideIcon;
+}) {
+  const { toast } = useToast();
+  const matched = status === FaceMatchStatus.MATCHED;
+  const noMatch = status === FaceMatchStatus.NO_MATCH;
+  const run = async () => {
+    try {
+      const res = await mutation.mutateAsync({ id: driver.id });
+      toast({
+        tone: res.matched ? 'success' : 'danger',
+        title: res.matched ? `${title}: coincide` : `${title}: NO coincide`,
+        description: res.reason ?? undefined,
+      });
+    } catch (e) {
+      toast({
+        tone: 'danger',
+        title: 'No se pudo verificar el rostro',
+        description: e instanceof ApiError ? e.message : undefined,
+      });
+    }
+  };
+  // El score guardado es coseno×100; mostrar "%" engaña (ver histórico) → banda cualitativa honesta, no %.
+  const band =
+    score != null ? (score / 100 >= 0.5 ? 'alta' : score / 100 >= 0.3 ? 'media' : 'baja') : null;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border bg-bg p-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-semibold text-ink">{title}</span>
+        {matched ? (
+          <DotPill tone="success">{band ? `Coincide · similitud ${band}` : 'Coincide'}</DotPill>
+        ) : noMatch ? (
+          <DotPill tone="danger">{band ? `No coincide · similitud ${band}` : 'No coincide'}</DotPill>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void run()}
+            disabled={mutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3 py-1 text-xs font-semibold text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+          >
+            <ScanFace className="size-3.5" aria-hidden />
+            Verificar
+          </button>
+        )}
+      </div>
+      <div className="flex items-center justify-center gap-2.5">
+        <Thumb icon={ScanFace} label="Selfie" />
+        <span className="grid size-[26px] shrink-0 place-items-center rounded-full bg-success/15 text-success">
+          <ArrowLeftRight className="size-3.5" aria-hidden />
+        </span>
+        <Thumb icon={DocIcon} label="Documento" />
+      </div>
+    </div>
+  );
+}
+
+function Thumb({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <div className="flex h-24 flex-1 flex-col items-center justify-center gap-1.5 rounded-sm border border-border bg-surface-2 text-ink-subtle">
+      <Icon className="size-6" aria-hidden />
+      <span className="text-[11px]">{label}</span>
+    </div>
+  );
+}
+
+function BiometricUnlockAction({ driverId }: { driverId: string }) {
+  const { toast } = useToast();
+  const unlock = useUnlockBiometric();
+  const run = async () => {
+    try {
+      await unlock.mutateAsync({ id: driverId });
+      toast({ tone: 'success', title: 'Verificación biométrica destrabada' });
+    } catch (e) {
+      toast({
+        tone: 'danger',
+        title: 'No se pudo destrabar',
+        description: e instanceof ApiError ? e.message : undefined,
+      });
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void run()}
+      disabled={unlock.isPending}
+      className="inline-flex items-center gap-2 self-start text-xs font-medium text-ink-subtle transition-colors hover:text-ink disabled:opacity-50"
+    >
+      <Unlock className="size-3.5" aria-hidden />
+      Destrabar por intentos fallidos
+    </button>
+  );
+}
+
+/* ────────────────────────────── SIDEBAR ────────────────────────────── */
+
+function InfoCard({
+  icon: Icon,
+  title,
+  rows,
+}: {
+  icon: LucideIcon;
+  title: string;
+  rows: [string, string][];
+}) {
+  return (
+    <div className={CARD}>
+      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+        <Icon className="size-4 text-ink-subtle" aria-hidden />
+        <span className="text-[13px] font-bold text-ink">{title}</span>
+      </div>
+      <dl className="flex flex-col gap-2.5 p-4">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-center justify-between gap-3">
+            <dt className="text-[13px] text-ink-subtle">{k}</dt>
+            <dd className="truncate font-mono text-[13px] text-ink">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function DatosCard({ driver }: { driver: DriverDetail }) {
+  return (
+    <InfoCard
+      icon={User}
+      title="Datos personales"
+      rows={[
+        ['DNI', driver.dni ?? '—'],
+        ['Nombre', driver.fullName ?? '—'],
+        ['Nacimiento', driver.birthDate ? date(driver.birthDate) : '—'],
+        ['Teléfono', driver.phone ?? '—'],
+        ['Licencia', driver.licenseNumber ?? '—'],
+      ]}
+    />
+  );
+}
+
+function VehiculoCard({ driver }: { driver: DriverDetail }) {
+  if (!driver.vehicle) {
+    return (
+      <div className={CARD}>
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+          <Car className="size-4 text-ink-subtle" aria-hidden />
+          <span className="text-[13px] font-bold text-ink">Vehículo</span>
+        </div>
+        <p className="p-4 text-[13px] text-ink-subtle">El conductor aún no registró un vehículo.</p>
+      </div>
+    );
+  }
+  const v = driver.vehicle;
+  return (
+    <InfoCard
+      icon={Car}
+      title="Vehículo"
+      rows={[
+        ['Placa', v.plate],
+        ['Marca', v.make || '—'],
+        ['Modelo', v.model || '—'],
+        ['Año', String(v.year)],
+        ['Color', v.color || '—'],
+      ]}
+    />
+  );
+}
+
+function Callout() {
+  return (
+    <div className="flex gap-3 rounded-sm border-l-[3px] border-accent bg-accent/10 p-4">
+      <Info className="size-[18px] shrink-0 text-accent" aria-hidden />
+      <p className="text-[13px] leading-relaxed text-ink-muted">
+        Aprobar o rechazar exige tu MFA. La decisión la aplica el backend; la UI solo la refleja.
+      </p>
+    </div>
+  );
+}
+
+/* ────────────────────────────── DELETE ────────────────────────────── */
+
 function friendlyDeleteError(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 409) {
+    if (error.status === 409)
       return (
         error.message ||
         'Este conductor tiene historial operativo y no puede borrarse. Usá el flujo de derecho al olvido (BR-S06).'
       );
-    }
-    if (error.status === 403) {
-      return 'No tenés permiso para borrar conductores, o tu verificación MFA no está fresca. Reautenticate e intentá de nuevo.';
-    }
+    if (error.status === 403)
+      return 'No tenés permiso para borrar conductores, o tu MFA no está fresca. Reautenticate e intentá de nuevo.';
     return error.message || 'No se pudo eliminar al conductor.';
   }
   return 'No se pudo eliminar al conductor.';
 }
 
-/**
- * Eliminar al CONDUCTOR en cascada (DELETE /ops/drivers/:id vía useDeleteDriver). Acción IRREVERSIBLE,
- * visible SOLO a SUPERADMIN (gateada por `drivers:delete`; el bff revalida @Roles(SUPERADMIN) + step-up MFA).
- * El ConfirmDialog exige escribir el nombre del conductor (o "ELIMINAR" si no hay nombre) para habilitar el
- * botón de confirmar. On success: toast + redirect a /ops/drivers (la cache de drivers se invalida en el hook).
- * On error captura el throw del mutateAsync y lo muestra como mensaje amigable (409 BR-S06 / 403) en el diálogo.
- */
-function DeleteDriverAction({
-  driverId,
-  driverName,
-}: {
-  driverId: string;
-  driverName: string | null;
-}) {
+function DeleteDriverAction({ driverId, driverName }: { driverId: string; driverName: string | null }) {
   const user = useSession();
   const router = useRouter();
   const { toast } = useToast();
   const remove = useDeleteDriver();
-
-  if (!can(user, 'drivers:delete')) {
-    return null;
-  }
-
+  if (!can(user, 'drivers:delete')) return null;
   const who = driverName?.trim() ? driverName.trim() : 'este conductor';
-
-  // Eliminar es acción sensible → exige step-up MFA (el bff tiene @RequireStepUpMfa). El StepUpDialog
-  // pide el TOTP, llama /auth/step-up (eleva la MFA) y SOLO entonces ejecuta el borrado. El TOTP es la
-  // confirmación fuerte e irreversible (mismo patrón que video/live). El diálogo se cierra antes de
-  // onVerified, así que el resultado del borrado se reporta por toast (no inline).
   return (
     <StepUpDialog
       trigger={
-        <Button
-          size="sm"
-          variant="ghost"
-          className="size-9 px-0 text-ink-subtle hover:bg-danger/10 hover:text-danger"
+        <button
+          type="button"
           aria-label="Eliminar conductor"
+          className="grid size-10 place-items-center rounded-full text-ink-subtle transition-colors hover:bg-danger/10 hover:text-danger"
         >
           <Trash2 className="size-4" aria-hidden />
-        </Button>
+        </button>
       }
       title="Eliminar conductor"
+      icon={Trash2}
       description={`Vas a borrar a ${who}: su usuario, documentos y archivos en cascada. Es IRREVERSIBLE. Ingresá tu código TOTP para confirmar.`}
+      confirmLabel="Eliminar"
+      confirmVariant="danger"
       onVerified={async () => {
         try {
           await remove.mutateAsync({ id: driverId });
@@ -750,3 +696,11 @@ function DeleteDriverAction({
     />
   );
 }
+
+/* ── ITV hint (motivo de invalidez) ── */
+const ITV_HINT: Record<string, string> = {
+  NONE: 'El vehículo no tiene ITV registrada.',
+  NOT_PASSED: 'La ITV del vehículo está reprobada.',
+  OVERDUE: 'La ITV del vehículo está vencida.',
+  NO_VEHICLE: 'El conductor no tiene un vehículo operable.',
+};
