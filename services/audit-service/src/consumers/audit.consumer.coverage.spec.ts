@@ -35,8 +35,13 @@ const AUDIT_EXCLUSIONS: Readonly<Partial<Record<EventType, string>>> = {
   // Firehose (el volumen explota la hash-chain inmutable + la vuelve un tracker; valor forense nulo).
   'driver.location_updated': 'firehose GPS (1 ping/~15s por conductor online)',
   'driver.entered_zone': 'geofence de alta frecuencia (tracking de dispatch, no una mutación de negocio)',
+  // DEUDA (no exclusión definitiva): VEO_SPEC_ADMIN exige "auditar TODA mutación". La rama `shift_end` (el
+  // conductor cierra turno deliberadamente) ES una mutación auditable → DEBE auditarse. Excluido TEMPORALMENTE
+  // para no romper el golden-rule mientras se separa de la rama `disconnect` (best-effort sin outbox, firehose-
+  // adjacent). techo: mientras el evento mezcle shift_end+disconnect en un solo tipo. gatillo: separar los dos
+  // (o agregar `went_online` para cadena de custodia) → auditar shift_end (actor=driverId, resource=driver).
   'driver.went_offline':
-    'señal reactiva de presencia (shift_end/disconnect best-effort sin outbox, se dispara seguido por reconexiones); no es una mutación de negocio auditable y no tiene par went_online, la traza online se reconstruye de las transiciones del viaje',
+    'DEUDA — excluido TEMPORALMENTE (ver audit.consumer): shift_end debe auditarse (VEO_SPEC_ADMIN "todo todo"); disconnect es best-effort sin outbox. Pendiente: separar ramas o agregar went_online',
   // No es una mutación de negocio auditable.
   'audit.recorded': 'lo emite este propio servicio (auditar su auditoría sería un bucle)',
   'fleet.document_expiring': 'pre-aviso de vencimiento (no un cambio de estado; el vencimiento es document_expired)',

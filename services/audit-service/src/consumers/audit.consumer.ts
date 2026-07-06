@@ -759,10 +759,14 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       //     millones de eslabones de hash sin valor forense, degradando el append serializado (advisory lock global).
       //   · driver.entered_zone      — geofence de alta frecuencia por conductor; señal de tracking de dispatch,
       //     no un cambio de estado de negocio. Mismo problema de volumen/ruido que el ping de ubicación.
-      //   · driver.went_offline      — señal reactiva de presencia (shift_end/disconnect). La rama `disconnect` es
-      //     best-effort SIN outbox (driver-bff, como el firehose de ubicación) y se dispara seguido por reconexiones;
-      //     no tiene par `went_online`, así que auditar solo la mitad OFFLINE no da cadena de custodia. La traza de
-      //     cuándo estuvo online se reconstruye de las transiciones del viaje (mismo criterio que location_updated).
+      //   · driver.went_offline      — DEUDA: excluido TEMPORALMENTE, NO definitivo. VEO_SPEC_ADMIN exige "auditar
+      //     TODA mutación" y la rama `shift_end` (el conductor cierra turno a propósito) ES una mutación deliberada
+      //     que DEBE ir al WORM. Hoy el evento mezcla `shift_end` (identity, outbox) con `disconnect` (driver-bff,
+      //     best-effort SIN outbox, firehose-adjacent que se dispara seguido por reconexiones) en un solo tipo, y no
+      //     tiene par `went_online` → auditar la mitad OFFLINE mezclada no da cadena de custodia limpia.
+      //     DEUDA: auditar la rama shift_end del offline del conductor (traza WORM de fin de turno). · techo: mientras
+      //     el evento mezcle shift_end+disconnect en un solo tipo sin par went_online. · gatillo: separar las ramas
+      //     (o agregar went_online) → auditar shift_end con actor=driverId, resource=driver, projection [driverId,reason,at].
       //
       //  NO ES UNA MUTACIÓN DE NEGOCIO AUDITABLE:
       //   · audit.recorded — lo EMITE este propio servicio (señal de que se grabó un eslabón); auditarlo sería un
