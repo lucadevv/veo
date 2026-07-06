@@ -241,6 +241,14 @@ export class PaymentsService {
    * carpooling cae a 0 (sin fee) — NUNCA rompe el cobro por falta de la config. La tasa SIEMPRE nace como bps Int;
    * el float solo aparece acá, al APLICARLA (redondeo a céntimo Int en `commission()`).
    */
+  // DEUDA: MEMBRESÍAS (ADR-022 §P-E conductor + §P-F pasajero). Diferidas a propósito — primero que TODO el flujo
+  //   actual funcione end-to-end; las membresías son features de negocio NUEVOS, se construyen sobre base sólida.
+  //   Cuando se retomen, ESTE es el único seam a tocar (lo dice el ADR): threadear `driverId` acá →
+  //   `resolveRateBps(mode, driverId)` → `resolveCommissionBps(mode, config, driverOverrideBps?)`. Diseño cerrado:
+  //   P-E = DriverCommissionPlan { driverId, planTier(FREE|PRO|PRO_PLUS), onDemandDiscountBps, activeUntil },
+  //   tiers % reducido (Free 12% → Pro 8% → Pro+ 6%, relativo a la base ADR-017, piso 0%), GATED a ON_DEMAND,
+  //   billing Yape On-File recurrente. Sin plan activo → cae al CommissionConfig global (cero cambio = FREE).
+  //   P-F (pasajero) = cashback/prioridad/descuento vía CreditService/discountCents; depende de P-H (carpool UI).
   private async resolveChargeRate(mode: ChargeMode): Promise<number> {
     if (!this.commission) {
       // DI ausente (tests/degradación): on-demand → la tasa del env; carpooling → 0 (sin service fee).
