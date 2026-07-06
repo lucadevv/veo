@@ -3,13 +3,14 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, CalendarClock, FileWarning, Truck } from 'lucide-react';
 import {
   useExpiringDocuments,
   useFleetDocuments,
   useInspections,
   useModelReview,
   useVehicles,
+  useVehiclesSummary,
 } from '@/lib/api/queries';
 import type {
   ExpiringDocumentView,
@@ -31,6 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { ErrorState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
 import { DocumentActions } from '@/components/fleet/document-actions';
 import { ModelReviewActions } from '@/components/fleet/model-review-actions';
 import {
@@ -336,6 +338,11 @@ export default function FleetPage() {
   // APPROVED (para REABRIR y corregir una ficha mal cargada · F2). El status es server-side (filtro de la cola).
   const [modelStatus, setModelStatus] = useState<'PENDING_REVIEW' | 'APPROVED'>('PENDING_REVIEW');
   const models = useModelReview(modelStatus);
+  // Conteo REAL de vehículos por vigencia documental (docStatus · sin PII). El eje es docStatus, NO el flag
+  // `active` deprecado (que nada mantiene → mentía). total = valid + expiringSoon + expired.
+  const summary = useVehiclesSummary();
+  const counts = summary.data;
+  const totalVehicles = counts ? counts.valid + counts.expiringSoon + counts.expired : 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -345,7 +352,42 @@ export default function FleetPage() {
         breadcrumbs={[{ label: 'Flota' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        <Tabs defaultValue="documents" className="pt-4">
+        <div className="pt-4">
+          <StatCardGrid>
+            <StatCard
+              icon={Truck}
+              label="Total en flota"
+              value={String(totalVehicles)}
+              hint="Vehículos registrados"
+              loading={summary.isLoading}
+            />
+            <StatCard
+              icon={BadgeCheck}
+              label="Papeles vigentes"
+              value={String(counts?.valid ?? 0)}
+              hint="SOAT / ITV al día"
+              hintTone="success"
+              loading={summary.isLoading}
+            />
+            <StatCard
+              icon={CalendarClock}
+              label="Por vencer"
+              value={String(counts?.expiringSoon ?? 0)}
+              hint="Renovar pronto"
+              hintTone="warn"
+              loading={summary.isLoading}
+            />
+            <StatCard
+              icon={FileWarning}
+              label="Vencidos"
+              value={String(counts?.expired ?? 0)}
+              hint="No operables"
+              hintTone="danger"
+              loading={summary.isLoading}
+            />
+          </StatCardGrid>
+        </div>
+        <Tabs defaultValue="documents" className="pt-5">
           <TabsList>
             <TabsTrigger value="documents">Documentos</TabsTrigger>
             <TabsTrigger value="vehicles">Vehículos</TabsTrigger>
