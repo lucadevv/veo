@@ -208,6 +208,8 @@ export interface PendingDriver {
   docsTotal: number;
   /** Verificación biométrica combinada (VERIFICADO/REVISAR/PENDIENTE); null para sub-Compliance (redactado). */
   verificationStatus: string | null;
+  /** ISO-8601 de encolado (alta del conductor) para el SLA/orden de la cola de Revisiones; null si sin dato. */
+  enqueuedAt: string | null;
 }
 export interface OperatorSummary {
   id: string;
@@ -877,6 +879,7 @@ export class OpsService {
     // como el frame (tabs Sin docs / Listos / En revisión). DOS batches en paralelo, keyeados por Driver.id.
     let docsById = new Map<string, { validRequired: number; requiredTotal: number }>();
     let verifById = new Map<string, VerificationStatus>();
+    let createdAtById = new Map<string, string | null>();
     const ids = raw.map((d) => d.id);
     if (ids.length > 0) {
       const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
@@ -890,6 +893,8 @@ export class OpsService {
       ]);
       docsById = new Map(docsReply.items.map((it) => [it.driverId, it]));
       verifById = new Map(driversReply.drivers.map((d) => [d.id, deriveVerificationStatus(d)]));
+      // Aging para la cola de Revisiones: alta del conductor (createdAt) = momento de encolado. "" ⇒ null honesto.
+      createdAtById = new Map(driversReply.drivers.map((d) => [d.id, emptyToNull(d.createdAt)]));
     }
     return raw.map((d) => {
       const docs = docsById.get(d.id);
@@ -903,6 +908,8 @@ export class OpsService {
         docsTotal: docs?.requiredTotal ?? REQUIRED_DRIVER_DOC_TYPES.length,
         // Verificación (señal KYC · Compliance+): null para sub-Compliance (redacción como el DNI/nombre).
         verificationStatus: identityVisible ? (verifById.get(d.id) ?? 'PENDIENTE') : null,
+        // Momento de encolado (alta) para el SLA/orden de la cola de Revisiones. null si identity no lo trae.
+        enqueuedAt: createdAtById.get(d.id) ?? null,
       };
     });
   }

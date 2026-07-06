@@ -74,6 +74,8 @@ interface Vehicle {
   energySource?: string | null;
   efficiency?: number | null;
   seats?: number | null;
+  /** ISO-8601 de alta (fleet-service la envía en el spread de Vehicle); encolado para el SLA de Revisiones. */
+  createdAt?: string | null;
 }
 /** Shape interno que sirve fleet-service (REST /documents). `status` ES el enum Prisma
  *  `FleetDocumentStatus` serializado tal cual (sin transformación intermedia); el contrato
@@ -85,6 +87,8 @@ interface FleetDocument {
   type: string;
   status: FleetDocumentView['status'];
   expiresAt: string | null;
+  /** ISO-8601 de creación (fleet-service devuelve la fila completa); encolado para el SLA de Revisiones. */
+  createdAt?: string | null;
 }
 interface Inspection {
   id: string;
@@ -369,6 +373,7 @@ function toFleetDocumentView(d: FleetDocument): FleetDocumentView {
     type: d.type,
     status: d.status,
     expiresAt: d.expiresAt ?? null,
+    createdAt: d.createdAt ?? null,
   };
 }
 
@@ -393,6 +398,7 @@ function toVehicleView(
     itvHasInspection: enrich?.itv?.hasInspection ?? false,
     itvCurrent: enrich?.itv?.current ?? false,
     itvNextDueAt: enrich?.itv?.nextDueAt || null,
+    createdAt: v.createdAt ?? null,
     // Veredicto de operabilidad + motivo (Lote 4): el panel los MUESTRA para coincidir con el backend del match.
     // Un fleet-service viejo que no los envía → no-operable + motivo DOCS (degradación segura, no sobre-reporta).
     operable: v.operable ?? false,

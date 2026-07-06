@@ -190,6 +190,8 @@ export const pendingDriver = z.object({
   docsTotal: z.number().int(),
   /** Verificación biométrica combinada (VERIFICADO/REVISAR/PENDIENTE); null para roles sub-Compliance. */
   verificationStatus: z.string().nullable(),
+  /** ISO-8601 de encolado (alta del conductor) para el SLA/orden de la cola de Revisiones; null si sin dato. */
+  enqueuedAt: z.string().nullable(),
 });
 export type PendingDriver = z.infer<typeof pendingDriver>;
 
@@ -818,6 +820,8 @@ export const vehicleView = z.object({
   itvHasInspection: z.boolean(),
   itvCurrent: z.boolean(),
   itvNextDueAt: z.string().nullable(),
+  /** ISO-8601 de alta del vehículo (encolado para el SLA de la cola de Revisiones); null si sin dato. */
+  createdAt: z.string().nullable(),
 });
 export type VehicleView = z.infer<typeof vehicleView>;
 
