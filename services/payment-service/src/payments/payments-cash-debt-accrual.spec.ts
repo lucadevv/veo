@@ -76,6 +76,7 @@ function svcOnly(): PaymentsService {
 }
 function debtTx(debt: Row | null) {
   const updates: Row[] = [];
+  const credits: Row[] = [];
   const tx = {
     driverDebt: {
       findUnique: vi.fn(async () => debt),
@@ -84,8 +85,14 @@ function debtTx(debt: Row | null) {
         return { ...(debt ?? {}), ...data };
       }),
     },
+    driverCredit: {
+      create: vi.fn(async ({ data }: { data: Row }) => {
+        credits.push(data);
+        return data;
+      }),
+    },
   };
-  return { tx, updates };
+  return { tx, updates, credits };
 }
 const reverse = (svc: PaymentsService, tx: unknown, pid: string, amt: number) =>
   (svc as unknown as {
@@ -107,9 +114,32 @@ describe('A2 · refund CASH revierte la deuda de comisión', () => {
     expect(updates[0]!.status).toBeUndefined(); // sigue PENDING
   });
 
-  it('deuda ya SETTLED (neteada en un payout) → NO se toca (credit-back = follow-up)', async () => {
-    const { tx, updates } = debtTx({ id: 'dd1', amountCents: 400, status: 'SETTLED' });
+  it('deuda ya SETTLED (neteada en un payout) → ACREDITA al conductor (credit-back) + deuda REVERSED', async () => {
+    const { tx, updates, credits } = debtTx({
+      id: 'dd1',
+      driverId: 'drv-1',
+      tripId: 'trip-1',
+      amountCents: 400,
+      status: 'SETTLED',
+    });
+    await reverse(svcOnly(), tx, 'pay-cash', 2000); // refund del bruto > comisión → acredita los 400 completos
+    expect(credits).toHaveLength(1);
+    expect(credits[0]!.amountCents).toBe(400); // min(400, 2000) = la comisión que ya pagó
+    expect(credits[0]!.sourcePaymentId).toBe('pay-cash'); // idempotencia por cobro
+    expect(credits[0]!.status).toBe('PENDING');
+    expect(updates[0]!.status).toBe('REVERSED'); // la deuda queda REVERSED (traza; el monto lo lleva el crédito)
+  });
+
+  it('deuda ya REVERSED (refund re-entregado / 2do refund) → no-op idempotente (ni crédito ni update)', async () => {
+    const { tx, updates, credits } = debtTx({
+      id: 'dd1',
+      driverId: 'drv-1',
+      tripId: 'trip-1',
+      amountCents: 400,
+      status: 'REVERSED',
+    });
     await reverse(svcOnly(), tx, 'pay-cash', 2000);
+    expect(credits).toHaveLength(0);
     expect(updates).toHaveLength(0);
   });
 

@@ -1595,16 +1595,47 @@ export class PaymentsService {
     refundAmountCents: number,
   ): Promise<void> {
     const debt = await tx.driverDebt.findUnique({ where: { paymentId } });
-    if (!debt || debt.status !== 'PENDING') return;
-    const remaining = Math.max(0, debt.amountCents - refundAmountCents);
-    if (remaining === 0) {
+    if (!debt) return;
+
+    // PENDING (caso común: el refund ocurre ANTES del run de netting): la deuda aún no se cobró → se reduce/anula
+    // en el acto, sin mover plata (nunca entró al payout).
+    if (debt.status === 'PENDING') {
+      const remaining = Math.max(0, debt.amountCents - refundAmountCents);
+      if (remaining === 0) {
+        await tx.driverDebt.update({
+          where: { id: debt.id },
+          data: { status: 'REVERSED', amountCents: 0, settledAt: new Date() },
+        });
+      } else {
+        await tx.driverDebt.update({ where: { id: debt.id }, data: { amountCents: remaining } });
+      }
+      return;
+    }
+
+    // SETTLED (edge · gate MEDIA #4): la deuda YA se neteó en un payout PASADO → el conductor ya pagó esa
+    // comisión. Revertir el viaje significa que no la debía → se le ACREDITA lo reversado con un DriverCredit que
+    // el próximo payout SUMA al neto (applyDebtNetting). Idempotente por source_payment_id @unique. La deuda pasa
+    // a REVERSED (traza; el crédito lleva el monto). Antes esto era un no-op → conductor sobre-cobrado.
+    if (debt.status === 'SETTLED') {
+      const reversedCents = Math.min(debt.amountCents, refundAmountCents);
+      if (reversedCents <= 0) return;
+      await tx.driverCredit.create({
+        data: {
+          id: uuidv7(),
+          driverId: debt.driverId,
+          tripId: debt.tripId,
+          amountCents: reversedCents,
+          sourcePaymentId: paymentId,
+          status: 'PENDING',
+        },
+      });
       await tx.driverDebt.update({
         where: { id: debt.id },
-        data: { status: 'REVERSED', amountCents: 0, settledAt: new Date() },
+        data: { status: 'REVERSED', settledAt: new Date() },
       });
-    } else {
-      await tx.driverDebt.update({ where: { id: debt.id }, data: { amountCents: remaining } });
+      return;
     }
+    // REVERSED → ya revertida (refund re-entregado o 2do refund sobre el mismo cobro) → no-op idempotente.
   }
 
   /** Devolución LOCAL de un cobro CASH (la plata nunca pasó por el riel): COMPLETED + evento en una tx. */

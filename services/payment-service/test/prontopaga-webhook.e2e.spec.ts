@@ -156,8 +156,8 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
     expect((await findPayment(p.id)).status).toBe('PENDING');
   });
 
-  it('webhook expired → FAILED reason expired', async () => {
-    const p = await chargeYape();
+  it('webhook expired (FARE) → DEBT reason checkout_expired (la tarifa se debe, NO free-ride)', async () => {
+    const p = await chargeYape(); // cobro de tarifa (kind=FARE por defecto)
     const { body } = gateway.buildSignedWebhook({
       uid: p.externalUid as string,
       order: p.id,
@@ -165,8 +165,10 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
     });
     await webhook.process(body, {});
     const stored = await findPayment(p.id);
-    expect(stored.status).toBe('FAILED');
-    expect(stored.failureReason).toBe('expired');
+    // FARE que expira = el viaje ocurrió → la tarifa SE DEBE: DEBT (gatea al pasajero + reintentable), NO FAILED
+    // terminal que dejaba el viaje gratis (fuga de ingresos). markDebt rutea por kind (una PROPINA sí iría a FAILED).
+    expect(stored.status).toBe('DEBT');
+    expect(stored.failureReason).toBe('checkout_expired');
   });
 
   it('webhook rejected → DEBT', async () => {

@@ -136,6 +136,8 @@ beforeEach(async () => {
   await prisma.incentiveProgress.deleteMany({});
   await prisma.incentiveTripCredit.deleteMany({});
   await prisma.incentive.deleteMany({});
+  await prisma.driverCredit.deleteMany({});
+  await prisma.driverDebt.deleteMany({});
 });
 
 describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix payout-link)', () => {
@@ -307,5 +309,79 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     expect(payouts).toHaveLength(1); // el bono vive en UN solo Payout, no en dos
     const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
     expect(progress.paidInPayoutId).toBe(p1.id); // sigue ligado al ORIGINAL, no re-ligado al del período 2
+  });
+});
+
+/** Inserta un DriverCredit PENDIENTE (comisión CASH revertida cuya deuda ya se neteó) para el conductor. */
+async function seedPendingCredit(driverId: string, amountCents: number): Promise<string> {
+  const id = uuidv7();
+  await prisma.driverCredit.create({
+    data: { id, driverId, tripId: uuidv7(), amountCents, sourcePaymentId: uuidv7(), status: 'PENDING' },
+  });
+  return id;
+}
+
+describe('PayoutsService.runPayouts · credit-back de comisión CASH revertida (gate MEDIA #4)', () => {
+  it('crédito PENDIENTE → se SUMA al neto del Payout y queda APPLIED ligado al payout', async () => {
+    const driverId = uuidv7();
+    const incentiveId = await seedIncentive(6000);
+    // El bono es la ganancia que mete al conductor en el run; el crédito se suma encima (la plataforma se lo debe).
+    await seedCompletedProgress(incentiveId, driverId, 6000, IN_WINDOW);
+    const creditId = await seedPendingCredit(driverId, 400);
+    const { redis } = makeRedis();
+
+    const summary = await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
+
+    expect(summary.totalAmountCents).toBe(6400); // bono 6000 + crédito 400
+    const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
+    expect(payout.amountCents).toBe(6400);
+    expect(payout.debtAppliedCents).toBe(-400); // neto NEGATIVO = crédito a favor del conductor
+
+    const credit = await prisma.driverCredit.findUniqueOrThrow({ where: { id: creditId } });
+    expect(credit.status).toBe('APPLIED');
+    expect(credit.appliedInPayoutId).toBe(payout.id); // ligado al payout (conciliación)
+  });
+
+  it('el crédito da MARGEN para netear una deuda entera este período (ganancia + crédito − deuda)', async () => {
+    const driverId = uuidv7();
+    // Ganancia (bono) 6000 > MIN_CENTS (5000) para que el conductor entre al run; el neto queda chico igual.
+    const incentiveId = await seedIncentive(6000);
+    await seedCompletedProgress(incentiveId, driverId, 6000, IN_WINDOW); // ganancia 6000
+    await seedPendingCredit(driverId, 400); // crédito 400
+    await prisma.driverDebt.create({
+      data: {
+        id: uuidv7(),
+        driverId,
+        tripId: uuidv7(),
+        paymentId: uuidv7(),
+        amountCents: 6300, // sin el crédito el borde quedaría PENDING (carry-forward); con él se salda entera
+        status: 'PENDING',
+      },
+    });
+    const { redis } = makeRedis();
+
+    await makeService(redis).runPayouts(PERIOD_START, PERIOD_END);
+
+    const payout = await prisma.payout.findFirstOrThrow({ where: { driverId } });
+    expect(payout.amountCents).toBe(100); // 6000 − 6300 + 400
+    const debts = await prisma.driverDebt.findMany({ where: { driverId, status: 'PENDING' } });
+    expect(debts).toHaveLength(0); // la deuda se saldó ENTERA (el crédito dio margen), sin carry-forward
+  });
+
+  it('re-correr runPayouts NO re-aplica el crédito (ya APPLIED) ni duplica el payout', async () => {
+    const driverId = uuidv7();
+    const incentiveId = await seedIncentive(6000);
+    await seedCompletedProgress(incentiveId, driverId, 6000, IN_WINDOW);
+    const creditId = await seedPendingCredit(driverId, 400);
+    const { redis } = makeRedis();
+    const svc = makeService(redis);
+
+    await svc.runPayouts(PERIOD_START, PERIOD_END);
+    await svc.runPayouts(PERIOD_START, PERIOD_END); // 2do run: el driver ya está liquidado → skip
+
+    const payouts = await prisma.payout.findMany({ where: { driverId } });
+    expect(payouts).toHaveLength(1); // sin payout duplicado
+    const credit = await prisma.driverCredit.findUniqueOrThrow({ where: { id: creditId } });
+    expect(credit.status).toBe('APPLIED'); // aplicado UNA sola vez (no se re-suma en el 2do run)
   });
 });

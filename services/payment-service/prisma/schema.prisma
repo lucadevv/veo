@@ -346,6 +346,40 @@ model DriverDebt {
   @@schema("payment")
 }
 
+/// Crédito A FAVOR del conductor: la plataforma se lo debe (el inverso de DriverDebt). Hoy solo lo origina el
+/// reverso de una comisión CASH cuya deuda YA se neteó en un payout (SETTLED): al revertir el viaje, el conductor
+/// pagó una comisión que ya no debía → se le acredita y se SUMA al neto del próximo payout (applyDebtNetting).
+/// Modelo separado a propósito (no un DriverDebt con monto negativo): preserva el contrato `DriverDebt.paymentId
+/// @unique` y mantiene una responsabilidad por tabla (deuda vs crédito).
+model DriverCredit {
+  id          String             @id @db.Uuid
+  driverId    String             @map("driver_id") @db.Uuid
+  tripId      String             @map("trip_id") @db.Uuid
+  /// A favor del conductor, en céntimos (>0).
+  amountCents Int                @map("amount_cents")
+  currency    String             @default("PEN")
+  /// El cobro CASH cuyo reverso originó el crédito. UNIQUE → idempotencia: un crédito por reverso de cobro (un
+  /// refund re-entregado NO duplica el crédito).
+  sourcePaymentId String         @unique @map("source_payment_id") @db.Uuid
+  status      DriverCreditStatus @default(PENDING)
+  /// El Payout donde el crédito se APLICÓ (sumado al neto). Null mientras PENDING. Para conciliación/auditoría.
+  appliedInPayoutId String?      @map("applied_in_payout_id") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  appliedAt   DateTime?          @map("applied_at") @db.Timestamptz
+
+  /// Netting: enumerar el crédito PENDIENTE de un conductor en el run de payouts (O(log n)).
+  @@index([driverId, status])
+  @@map("driver_credits")
+  @@schema("payment")
+}
+
+enum DriverCreditStatus {
+  PENDING
+  APPLIED
+
+  @@schema("payment")
+}
+
 /// Solicitud de reembolso (BR-P06): ventana 7 días, aprobación manual L1/L2 (>S/30 requiere L2).
 /// S5 · Reembolso REAL contra el proveedor: el Refund digital nace PENDING (intent persistido ANTES de
 /// llamar al riel, §4 idempotencia) y SOLO pasa a COMPLETED cuando el proveedor confirma el reverso

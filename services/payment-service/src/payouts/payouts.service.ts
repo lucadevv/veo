@@ -191,12 +191,30 @@ export class PayoutsService {
     availableCents: number,
     payoutId: string,
   ): Promise<number> {
+    // Créditos PENDING (comisión CASH revertida · gate MEDIA #4): la plataforma se los DEBE al conductor → se
+    // SUMAN al neto (bajan `applied`, que luego se resta del bruto). Se aplican SIEMPRE — no dependen de la
+    // ganancia — y agregan margen para netear deudas en la MISMA corrida. Se marcan APPLIED ligados a este payout
+    // (auditoría/conciliación). Idempotencia del run: el unique (driverId, período) + el lock distribuido evitan
+    // el doble-pago; acá solo se aplican los créditos PENDIENTES una vez (pasan a APPLIED).
+    const credits = await tx.driverCredit.findMany({
+      where: { driverId, status: 'PENDING' },
+      orderBy: { createdAt: 'asc' },
+    });
+    let applied = 0;
+    for (const credit of credits) {
+      await tx.driverCredit.update({
+        where: { id: credit.id },
+        data: { status: 'APPLIED', appliedInPayoutId: payoutId, appliedAt: new Date() },
+      });
+      applied -= credit.amountCents; // crédito (>0) baja `applied` → sube el neto (netAmount = bruto − applied)
+    }
+
     const debts = await tx.driverDebt.findMany({
       where: { driverId, status: 'PENDING' },
       orderBy: { createdAt: 'asc' },
     });
-    let toApply = availableCents;
-    let applied = 0;
+    // Los créditos ya bajaron `applied` (a <=0) → suman margen a la ganancia para netear deudas este período.
+    let toApply = availableCents - applied;
     for (const debt of debts) {
       if (toApply <= 0) break;
       if (toApply >= debt.amountCents) {

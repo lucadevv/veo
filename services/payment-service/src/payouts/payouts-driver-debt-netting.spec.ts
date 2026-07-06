@@ -8,14 +8,16 @@ import { describe, it, expect, vi } from 'vitest';
 import { PayoutsService } from './payouts.service';
 
 type DebtRow = { id: string; amountCents: number };
+type CreditRow = { id: string; amountCents: number };
 
 function buildService(): PayoutsService {
   const config = { getOrThrow: (k: string) => (k === 'PAYOUT_MIN_CENTS' ? 0 : 500_000) };
   return new PayoutsService({} as never, {} as never, {} as never, config as never);
 }
 
-function mockTx(debts: DebtRow[]) {
+function mockTx(debts: DebtRow[], credits: CreditRow[] = []) {
   const updates: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const creditUpdates: Array<{ id: string; data: Record<string, unknown> }> = [];
   const tx = {
     driverDebt: {
       findMany: vi.fn(async () => debts),
@@ -24,8 +26,15 @@ function mockTx(debts: DebtRow[]) {
         return { ...where, ...data };
       }),
     },
+    driverCredit: {
+      findMany: vi.fn(async () => credits),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        creditUpdates.push({ id: where.id, data });
+        return { ...where, ...data };
+      }),
+    },
   };
-  return { tx, updates };
+  return { tx, updates, creditUpdates };
 }
 
 // Acceso al método privado (misma técnica que otros specs del servicio): probamos la lógica REAL de netteo.
@@ -77,5 +86,26 @@ describe('A2 · applyDebtNetting (netteo deuda CASH ⇄ ganancia digital)', () =
     const applied = await netting(svc, tx, 'drv-1', 1000, 'pay-1');
     expect(applied).toBe(0);
     expect(updates).toHaveLength(0);
+  });
+
+  // MEDIA #4 · credit-back: comisión CASH revertida cuya deuda ya se neteó (SETTLED) → DriverCredit que el payout SUMA.
+  it('crédito PENDIENTE → se SUMA al neto (applied negativo) y se marca APPLIED ligado al payout', async () => {
+    const svc = buildService();
+    const { tx, creditUpdates, updates } = mockTx([], [{ id: 'c1', amountCents: 400 }]);
+    const applied = await netting(svc, tx, 'drv-1', 1000, 'pay-1');
+    expect(applied).toBe(-400); // crédito baja applied → netAmount = 1000 − (−400) = 1400
+    expect(updates).toHaveLength(0); // sin deudas
+    expect(creditUpdates).toHaveLength(1);
+    expect(creditUpdates[0]!.data.status).toBe('APPLIED');
+    expect(creditUpdates[0]!.data.appliedInPayoutId).toBe('pay-1');
+  });
+
+  it('crédito + deuda: el crédito da MARGEN para netear la deuda entera este período', async () => {
+    const svc = buildService();
+    const { tx, updates } = mockTx([{ id: 'd1', amountCents: 1300 }], [{ id: 'c1', amountCents: 400 }]);
+    const applied = await netting(svc, tx, 'drv-1', 1000, 'pay-1');
+    // crédito −400 + deuda 1300 = 900 → netAmount = 1000 − 900 = 100 (= ganancia 1000 − deuda 1300 + crédito 400).
+    expect(applied).toBe(900);
+    expect(updates[0]!.data.status).toBe('SETTLED'); // el margen del crédito alcanzó para saldarla entera
   });
 });
