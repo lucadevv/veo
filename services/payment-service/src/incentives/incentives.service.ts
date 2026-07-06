@@ -15,7 +15,7 @@ import { createEnvelope } from '@veo/events';
 import { enqueueOutbox, isUniqueViolation } from '@veo/database';
 import { uuidv7 } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
-import type { Incentive, IncentiveProgress } from '../generated/prisma';
+import { IncentiveType, type Incentive, type IncentiveProgress } from '../generated/prisma';
 import { computeCompleted, isActiveAt, isMetaCompleted } from './incentives.policy';
 
 export interface DriverIncentiveView {
@@ -113,7 +113,11 @@ export class IncentivesService {
   async listForDriver(driverId: string): Promise<DriverIncentiveView[]> {
     const now = new Date();
     const incentives = await this.prisma.read.incentive.findMany({ where: { active: true } });
-    const active = incentives.filter((i) => isActiveAt(i, now));
+    // HORA_PICO se OCULTA del conductor por ahora: su único valor es `multiplierBps` (el +X%), y NINGÚN camino
+    // de plata lo paga todavía (collectEarnings no aplica el multiplicador). Mostrarlo sería prometer una
+    // ganancia que no llega ("promesa sin pago"). Se DES-OCULTA cuando el payout implemente el multiplicador de
+    // hora-pico. La config (multiplierBps + peakStart/EndMinute) queda en el modelo para ese momento.
+    const active = incentives.filter((i) => isActiveAt(i, now) && i.type !== IncentiveType.HORA_PICO);
     const progresses = await this.prisma.read.incentiveProgress.findMany({
       where: { driverId, incentiveId: { in: active.map((i) => i.id) } },
     });
