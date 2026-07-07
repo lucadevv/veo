@@ -212,7 +212,9 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
     const { driverId, reason } = parsed.data;
     // Solo 'suspension' suspende. 'review' (y cualquier otra razón futura) es flag de panel → no-op de suspensión.
     if (reason !== FLAG_REASON.SUSPENSION) {
-      this.logger.debug(`${DRIVER_FLAGGED} reason='${reason}' (no es suspensión); ignorado para suspender`);
+      this.logger.debug(
+        `${DRIVER_FLAGGED} reason='${reason}' (no es suspensión); ignorado para suspender`,
+      );
       return;
     }
     try {

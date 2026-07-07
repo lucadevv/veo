@@ -1,11 +1,6 @@
 import type { HttpClient } from '@veo/api-client';
 import { driverOnboardResult, driverProfileView } from '@veo/api-client';
-import type {
-  DriverProfile,
-  OnboardInput,
-  OnboardResult,
-  ProfileRepository,
-} from '../../domain';
+import type { DriverProfile, OnboardInput, OnboardResult, ProfileRepository } from '../../domain';
 
 /** Implementación HTTP del `ProfileRepository` contra el driver-bff. */
 export class HttpProfileRepository implements ProfileRepository {

@@ -31,9 +31,7 @@ function makeService(opts: { driverFound?: boolean } = {}) {
   );
   const rest = { client: vi.fn(() => ({ post, get: vi.fn(), patch: vi.fn() })) };
   const config = {
-    getOrThrow: vi.fn((key: string) =>
-      key === 'S3_BUCKET_DOCUMENTS' ? 'veo-documents-dev' : 300,
-    ),
+    getOrThrow: vi.fn((key: string) => (key === 'S3_BUCKET_DOCUMENTS' ? 'veo-documents-dev' : 300)),
   };
   const activeVehicleType = { invalidate: vi.fn(), resolve: vi.fn() };
   const service = new DriversService(
@@ -55,7 +53,12 @@ describe('DriversService.presignDocumentUpload (driver-bff) — key driver-scope
     });
 
     // El driverId se derivó vía GetDriverByUser con el userId autenticado.
-    expect(grpc.call).toHaveBeenCalledWith('identity', 'GetDriverByUser', { id: 'usr-1' }, identity);
+    expect(grpc.call).toHaveBeenCalledWith(
+      'identity',
+      'GetDriverByUser',
+      { id: 'usr-1' },
+      identity,
+    );
     // Backward-compat: sin `sides` → un solo ticket SINGLE.
     expect(view.tickets).toHaveLength(1);
     const ticket = view.tickets[0]!;

@@ -52,10 +52,16 @@ function makeRepo(
   );
   const confirmAndLockSeats = vi.fn(
     async (_booking: unknown, _paymentId: string): Promise<ConfirmSeatOutcome> =>
-      over.confirmOutcome ?? { kind: 'CONFIRMED', booking: makeBooking({ estado: BookingState.CONFIRMADO }) as never, tripQuedoLleno: false },
+      over.confirmOutcome ?? {
+        kind: 'CONFIRMED',
+        booking: makeBooking({ estado: BookingState.CONFIRMADO }) as never,
+        tripQuedoLleno: false,
+      },
   );
   const cancelForPaymentFailed = vi.fn(async (_bookingId: string) =>
-    over.cancelFailed === undefined ? makeBooking({ estado: BookingState.CANCELADO }) : over.cancelFailed,
+    over.cancelFailed === undefined
+      ? makeBooking({ estado: BookingState.CANCELADO })
+      : over.cancelFailed,
   );
   const repo = {
     findByIdForCaptureHandler,
@@ -77,7 +83,11 @@ function makeService(repo: BookingsRepository): BookingsService {
 describe('BookingsService.confirmCapture · seat-lock orquestación (§6)', () => {
   it('happy: booking en COBRO_PENDIENTE → corre confirmAndLockSeats (CONFIRMADO + decremento)', async () => {
     const { repo, confirmAndLockSeats } = makeRepo({
-      confirmOutcome: { kind: 'CONFIRMED', booking: makeBooking({ estado: BookingState.CONFIRMADO }) as never, tripQuedoLleno: true },
+      confirmOutcome: {
+        kind: 'CONFIRMED',
+        booking: makeBooking({ estado: BookingState.CONFIRMADO }) as never,
+        tripQuedoLleno: true,
+      },
     });
     await makeService(repo).confirmCapture(BOOKING_ID, PAYMENT_ID);
     // El seat-lock SE INVOCA con el booking leído y el paymentId capturado (la txn atómica vive en el repo/DB real).
@@ -89,7 +99,10 @@ describe('BookingsService.confirmCapture · seat-lock orquestación (§6)', () =
 
   it('asiento-lleno: outcome SEAT_FULL → no lanza (booking.cancelled ASIENTO_LLENO ya lo emitió el repo)', async () => {
     const { repo, confirmAndLockSeats } = makeRepo({
-      confirmOutcome: { kind: 'SEAT_FULL', booking: makeBooking({ estado: BookingState.CANCELADO }) as never },
+      confirmOutcome: {
+        kind: 'SEAT_FULL',
+        booking: makeBooking({ estado: BookingState.CANCELADO }) as never,
+      },
     });
     await expect(makeService(repo).confirmCapture(BOOKING_ID, PAYMENT_ID)).resolves.toBeUndefined();
     expect(confirmAndLockSeats).toHaveBeenCalledOnce();
@@ -150,7 +163,9 @@ function makeRedis() {
   };
 }
 
-function capturedEnvelope(over: Partial<{ tripId: string; paymentId: string }> = {}): EventEnvelope<unknown> {
+function capturedEnvelope(
+  over: Partial<{ tripId: string; paymentId: string }> = {},
+): EventEnvelope<unknown> {
   return createEnvelope({
     eventType: 'payment.captured',
     producer: 'payment-service',
@@ -183,9 +198,11 @@ function makeConsumer() {
   const config = { getOrThrow: () => 'localhost:9094' } as never;
   const consumer = new BookingPaymentConsumer(bookings, redis as never, config);
   // Acceso a los handlers privados vía el record que registra handlers() (el único punto de registro).
-  const handlers = (consumer as unknown as {
-    handlers(): Record<string, (e: EventEnvelope<unknown>) => Promise<void>>;
-  }).handlers();
+  const handlers = (
+    consumer as unknown as {
+      handlers(): Record<string, (e: EventEnvelope<unknown>) => Promise<void>>;
+    }
+  ).handlers();
   return { consumer, bookings, redis, handlers };
 }
 
@@ -198,7 +215,10 @@ describe('BookingPaymentConsumer · dedup + validación + correlación (§7.1.bi
   it('payment.captured válido → confirmCapture(tripId=bookingId, paymentId) UNA vez', async () => {
     await ctx.handlers['payment.captured']?.(capturedEnvelope());
     expect(ctx.bookings.confirmCapture).toHaveBeenCalledOnce();
-    expect((ctx.bookings.confirmCapture as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([BOOKING_ID, PAYMENT_ID]);
+    expect((ctx.bookings.confirmCapture as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      BOOKING_ID,
+      PAYMENT_ID,
+    ]);
   });
 
   it('payment.captured DUPLICADO (mismo eventId) → dedup: el handler corre UNA sola vez', async () => {
@@ -215,7 +235,9 @@ describe('BookingPaymentConsumer · dedup + validación + correlación (§7.1.bi
   });
 
   it('si el handler del service LANZA → se relanza (kafkajs reintenta) y el dedup NO se marca', async () => {
-    (ctx.bookings.confirmCapture as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db down'));
+    (ctx.bookings.confirmCapture as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('db down'),
+    );
     const env = capturedEnvelope();
     await expect(ctx.handlers['payment.captured']?.(env)).rejects.toThrow('db down');
     // El dedup NO se marcó (set no se llamó tras el fallo) → el reintento de kafkajs re-procesará.

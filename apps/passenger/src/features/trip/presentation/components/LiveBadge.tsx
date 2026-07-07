@@ -95,7 +95,9 @@ export function LiveBadge(): React.JSX.Element {
       </View>
       {/* Glifo de cámara (design/veo.pen fLKdk RecPill): la pill dice QUÉ está en vivo — el video del
           habitáculo. El punto pasa a `danger` (semántica REC), no `success`. Decorativo (el label habla). */}
-      <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+      <View
+        importantForAccessibility="no-hide-descendants"
+        accessibilityElementsHidden>
         <IconCamera color={theme.colors.ink} size={12} />
       </View>
       <Text variant="label" color="ink">

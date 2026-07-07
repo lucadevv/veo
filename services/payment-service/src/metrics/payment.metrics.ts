@@ -27,7 +27,11 @@ type CounterCtor = new (cfg: {
 // Clase Counter tomada de la instancia existente (misma copia de prom-client).
 const CounterClass = (domainEventsTotal as unknown as { constructor: CounterCtor }).constructor;
 
-function getOrCreateCounter(name: string, help: string, labelNames: readonly string[]): CounterLike {
+function getOrCreateCounter(
+  name: string,
+  help: string,
+  labelNames: readonly string[],
+): CounterLike {
   const existing = metricsRegistry.getSingleMetric(name) as CounterLike | undefined;
   if (existing) return existing;
   return new CounterClass({ name, help, labelNames, registers: [metricsRegistry] });

@@ -180,6 +180,7 @@ if (mode === 'PUJA') {
    > porque su alcance es el SCHEDULE de modo (y eso SIGUE siendo `pricing:manage`). Al crecer la superficie
    > de config de pricing del admin (comisión, catálogo de ofertas, costo/km del carpooling — reorg por
    > carril económico), el admin-bff se partió en TRES controllers, cada uno con su permiso:
+   >
    > - **`pricing:manage`** → modo/schedule, tarifa base, energía, recargo de combustible, piso de la puja.
    > - **`finance:manage`** → comisión on-demand, service fee del carpooling, costo/km del carpooling.
    > - **`catalog:manage`** → habilitar/deshabilitar y precio (multiplicador/mínima) por oferta.

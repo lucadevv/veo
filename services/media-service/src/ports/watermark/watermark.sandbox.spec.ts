@@ -37,7 +37,10 @@ describe('SandboxWatermarkAdapter · burn passthrough determinista', () => {
     const parts = [Buffer.from('parte-A '), Buffer.from('parte-B '), Buffer.from('parte-C')];
     const expected = Buffer.concat(parts);
 
-    const result = await adapter.burn({ source: Readable.from(parts), text: 'VEO · op@veo.pe · r1 · t' });
+    const result = await adapter.burn({
+      source: Readable.from(parts),
+      text: 'VEO · op@veo.pe · r1 · t',
+    });
 
     const out = await drain(result.output);
     expect(out.equals(expected)).toBe(true);

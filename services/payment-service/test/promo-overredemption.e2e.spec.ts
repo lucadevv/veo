@@ -75,8 +75,20 @@ describe('redeemPromo · over-redemption bajo concurrencia (advisory lock)', () 
     const promoId = await seedPromo({ code: 'TOTAL1', maxTotalUses: 1, maxUsesPerUser: 5 });
 
     const results = await Promise.allSettled([
-      promotions.redeemPromo({ code: 'TOTAL1', userId: uuidv7(), tripId: uuidv7(), fareCents: 5000, dedupKey: 'd-1' }),
-      promotions.redeemPromo({ code: 'TOTAL1', userId: uuidv7(), tripId: uuidv7(), fareCents: 5000, dedupKey: 'd-2' }),
+      promotions.redeemPromo({
+        code: 'TOTAL1',
+        userId: uuidv7(),
+        tripId: uuidv7(),
+        fareCents: 5000,
+        dedupKey: 'd-1',
+      }),
+      promotions.redeemPromo({
+        code: 'TOTAL1',
+        userId: uuidv7(),
+        tripId: uuidv7(),
+        fareCents: 5000,
+        dedupKey: 'd-2',
+      }),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1); // el único uso lo toma UNO
@@ -90,8 +102,20 @@ describe('redeemPromo · over-redemption bajo concurrencia (advisory lock)', () 
     const userId = uuidv7();
 
     const results = await Promise.allSettled([
-      promotions.redeemPromo({ code: 'PERUSER1', userId, tripId: uuidv7(), fareCents: 5000, dedupKey: 'u-1' }),
-      promotions.redeemPromo({ code: 'PERUSER1', userId, tripId: uuidv7(), fareCents: 5000, dedupKey: 'u-2' }),
+      promotions.redeemPromo({
+        code: 'PERUSER1',
+        userId,
+        tripId: uuidv7(),
+        fareCents: 5000,
+        dedupKey: 'u-1',
+      }),
+      promotions.redeemPromo({
+        code: 'PERUSER1',
+        userId,
+        tripId: uuidv7(),
+        fareCents: 5000,
+        dedupKey: 'u-2',
+      }),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -102,8 +126,20 @@ describe('redeemPromo · over-redemption bajo concurrencia (advisory lock)', () 
   it('secuencial dentro del cap → ambos canjes de usuarios distintos ganan (no rechaza de más)', async () => {
     const promoId = await seedPromo({ code: 'ROOM2', maxTotalUses: 2, maxUsesPerUser: 1 });
 
-    await promotions.redeemPromo({ code: 'ROOM2', userId: uuidv7(), tripId: uuidv7(), fareCents: 5000, dedupKey: 's-1' });
-    await promotions.redeemPromo({ code: 'ROOM2', userId: uuidv7(), tripId: uuidv7(), fareCents: 5000, dedupKey: 's-2' });
+    await promotions.redeemPromo({
+      code: 'ROOM2',
+      userId: uuidv7(),
+      tripId: uuidv7(),
+      fareCents: 5000,
+      dedupKey: 's-1',
+    });
+    await promotions.redeemPromo({
+      code: 'ROOM2',
+      userId: uuidv7(),
+      tripId: uuidv7(),
+      fareCents: 5000,
+      dedupKey: 's-2',
+    });
 
     const count = await prisma.promoRedemption.count({ where: { promotionId: promoId } });
     expect(count).toBe(2); // el lock serializa pero NO bloquea canjes legítimos dentro del presupuesto

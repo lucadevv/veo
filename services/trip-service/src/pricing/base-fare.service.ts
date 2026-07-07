@@ -97,8 +97,7 @@ export class BaseFareService {
         const persisted = await tx.baseFareConfig.findUnique({
           where: { id: BASE_FARE_SINGLETON_ID },
         });
-        if (!persisted)
-          throw new ConflictError('la tarifa base desapareció durante el reemplazo');
+        if (!persisted) throw new ConflictError('la tarifa base desapareció durante el reemplazo');
         row = persisted;
       } else if (expectedVersion === 0) {
         // Primer write: no debería haber fila. Si OTRO la creó en la carrera → es conflicto, no lost update.
@@ -111,7 +110,13 @@ export class BaseFareService {
           );
         }
         row = await tx.baseFareConfig.create({
-          data: { id: BASE_FARE_SINGLETON_ID, baseFareCents, perKmCents, perMinCents, version: nextVersion },
+          data: {
+            id: BASE_FARE_SINGLETON_ID,
+            baseFareCents,
+            perKmCents,
+            perMinCents,
+            version: nextVersion,
+          },
         });
       } else {
         throw new ConflictError(

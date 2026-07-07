@@ -44,10 +44,7 @@ const paymentGatewayProvider: Provider = {
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): PaymentGateway => {
     const secret = config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET');
-    const rest = new RestPaymentGateway(
-      config.getOrThrow<string>('PAYMENT_INTERNAL_URL'),
-      secret,
-    );
+    const rest = new RestPaymentGateway(config.getOrThrow<string>('PAYMENT_INTERNAL_URL'), secret);
     const grpc = new GrpcPaymentReader(config.getOrThrow<string>('PAYMENT_GRPC_URL'), secret);
     return new CompositePaymentGateway(rest, grpc);
   },

@@ -30,7 +30,9 @@ export const MAX_DOCUMENT_IMAGES = 10;
  * el presign driver/vehicle-scoped); `side` es la cara (FRONT|BACK|SINGLE) tipada — sin string suelto.
  */
 export class DocumentImageInputDto {
-  @ApiProperty({ description: 'Clave del binario en S3 (subido vía presign driver/vehicle-scoped)' })
+  @ApiProperty({
+    description: 'Clave del binario en S3 (subido vía presign driver/vehicle-scoped)',
+  })
   @IsString()
   @Length(1, 1024)
   s3Key!: string;
@@ -54,7 +56,10 @@ export class CreateDocumentDto {
   type!: FleetDocumentType;
 
   // Requerido POR TIPO: la foto del vehículo (VEHICLE_PHOTO) no tiene número; el resto (licencia/SOAT/…) sí.
-  @ApiPropertyOptional({ example: 'Q-12345678', description: 'Número (requerido salvo VEHICLE_PHOTO)' })
+  @ApiPropertyOptional({
+    example: 'Q-12345678',
+    description: 'Número (requerido salvo VEHICLE_PHOTO)',
+  })
   @ValidateIf((o: CreateDocumentDto) => o.type !== FleetDocumentType.VEHICLE_PHOTO)
   @IsString()
   @Length(1, 60)
@@ -74,7 +79,9 @@ export class CreateDocumentDto {
    * DEPRECADO (sub-lote 3A): llave singular del archivo. El camino nuevo es `images` (1..N). Se mantiene
    * por backward-compat: si llega `fileS3Key` y NO `images`, el service lo normaliza a una imagen SINGLE.
    */
-  @ApiPropertyOptional({ description: 'DEPRECADO: usar `images`. Llave singular del archivo en S3' })
+  @ApiPropertyOptional({
+    description: 'DEPRECADO: usar `images`. Llave singular del archivo en S3',
+  })
   @IsOptional()
   @IsString()
   fileS3Key?: string;
@@ -84,7 +91,10 @@ export class CreateDocumentDto {
    * vehículo → N SINGLE; el resto → [SINGLE]. Opcional para no romper a quien aún manda `fileS3Key`
    * (o nada, si el archivo se sube por otra vía). El service valida la coherencia de `side` por tipo.
    */
-  @ApiPropertyOptional({ type: [DocumentImageInputDto], description: 'Imágenes del documento (1..N caras)' })
+  @ApiPropertyOptional({
+    type: [DocumentImageInputDto],
+    description: 'Imágenes del documento (1..N caras)',
+  })
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
@@ -101,20 +111,28 @@ export class CreateDocumentDto {
    * acota campos/tamaño y rechaza claves arbitrarias antes de tocar el JSONB. Opcional → backward-compatible
    * (registrar SIN OCR sigue OK). Sin `any`: el tipo declarado es exacto.
    */
-  @ApiPropertyOptional({ description: 'Data extraída por OCR on-device (ExtractedDocumentData, opcional)' })
+  @ApiPropertyOptional({
+    description: 'Data extraída por OCR on-device (ExtractedDocumentData, opcional)',
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => Object, EXTRACTED_DATA_TYPE_OPTIONS)
   extractedData?: ExtractedDocumentData;
 
   /** Motor de OCR que produjo `extractedData`. ENUM CERRADO (anti-spoof de texto libre). Trazabilidad. */
-  @ApiPropertyOptional({ enum: OcrEngine, description: 'Motor de OCR que extrajo la data (enum cerrado)' })
+  @ApiPropertyOptional({
+    enum: OcrEngine,
+    description: 'Motor de OCR que extrajo la data (enum cerrado)',
+  })
   @IsOptional()
   @IsIn(OCR_ENGINES)
   ocrEngine?: OcrEngine;
 
   /** Momento en que el cliente extrajo la data por OCR (ISO-8601). */
-  @ApiPropertyOptional({ example: '2026-06-20T10:00:00.000Z', description: 'Instante de la extracción OCR' })
+  @ApiPropertyOptional({
+    example: '2026-06-20T10:00:00.000Z',
+    description: 'Instante de la extracción OCR',
+  })
   @IsOptional()
   @IsISO8601()
   ocrAt?: string;
@@ -135,7 +153,9 @@ export class ReviewDocumentDto {
 
   // M5: motivo OBLIGATORIO cuando se RECHAZA — el conductor lo necesita para saber qué corregir; un rechazo
   // sin motivo derrota el propósito. @ValidateIf lo exige SOLO en REJECTED (en VALID se omite y se ignora).
-  @ApiPropertyOptional({ description: 'Motivo del rechazo (OBLIGATORIO si REJECTED); visible para el conductor' })
+  @ApiPropertyOptional({
+    description: 'Motivo del rechazo (OBLIGATORIO si REJECTED); visible para el conductor',
+  })
   @ValidateIf((o: ReviewDocumentDto) => o.decision === ReviewDecision.REJECTED)
   @IsString()
   @Length(1, 500)

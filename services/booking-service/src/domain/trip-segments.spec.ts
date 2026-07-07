@@ -41,7 +41,9 @@ describe('assertStopoverOrdersValid (invariante de hitos · FIX 1 anti-lucro)', 
   });
 
   it('stopovers {1..n} contiguos y únicos → válido', () => {
-    expect(() => assertStopoverOrdersValid([{ orden: 1 }, { orden: 2 }, { orden: 3 }])).not.toThrow();
+    expect(() =>
+      assertStopoverOrdersValid([{ orden: 1 }, { orden: 2 }, { orden: 3 }]),
+    ).not.toThrow();
   });
 
   it('stopovers en cualquier ENTRADA (desordenados) pero {1..n} únicos → válido', () => {
@@ -72,7 +74,9 @@ describe('assertStopoverOrdersValid (invariante de hitos · FIX 1 anti-lucro)', 
 
 describe('assertTramosReferToValidStopovers', () => {
   it('tramo full-route 0→1 sin stopovers → válido', () => {
-    expect(() => assertTramosReferToValidStopovers([], [{ desdeOrden: 0, hastaOrden: 1 }])).not.toThrow();
+    expect(() =>
+      assertTramosReferToValidStopovers([], [{ desdeOrden: 0, hastaOrden: 1 }]),
+    ).not.toThrow();
   });
 
   it('tramos encadenados sobre hitos existentes → válido', () => {

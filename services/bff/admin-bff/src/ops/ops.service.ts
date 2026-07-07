@@ -143,10 +143,10 @@ const INSPECTION_BLOCK_MESSAGE: Record<string, string> = {
   NONE: 'No se puede aprobar: el vehículo del conductor no tiene inspección técnica (ITV) registrada',
   NOT_PASSED: 'No se puede aprobar: la inspección técnica (ITV) del vehículo está reprobada',
   OVERDUE: 'No se puede aprobar: la inspección técnica (ITV) del vehículo está vencida',
-  NO_VEHICLE: 'No se puede aprobar: el conductor no tiene un vehículo operable con inspección técnica (ITV)',
+  NO_VEHICLE:
+    'No se puede aprobar: el conductor no tiene un vehículo operable con inspección técnica (ITV)',
 };
-const INSPECTION_BLOCK_DEFAULT =
-  'No se puede aprobar: inspección técnica (ITV) vencida o ausente';
+const INSPECTION_BLOCK_DEFAULT = 'No se puede aprobar: inspección técnica (ITV) vencida o ausente';
 
 /** Valores válidos de DniFaceMatchStatus (sub-lote 3C) para narrowear el string del wire gRPC. */
 const DNI_FACE_MATCH_STATUS_VALUES = new Set<string>(Object.values(DniFaceMatchStatus));
@@ -395,7 +395,11 @@ export class OpsService {
       // fleet por ownerId=Driver.id. El batch de identity ahora trae el ESTADO de verificación (sin descifrar DNI).
       const [reply, docsReply] = await Promise.all([
         this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids }, meta),
-        this.fleetGrpc.call<DriverDocsCompletenessReply>('GetDriverDocsCompleteness', { ids }, meta),
+        this.fleetGrpc.call<DriverDocsCompletenessReply>(
+          'GetDriverDocsCompleteness',
+          { ids },
+          meta,
+        ),
       ]);
       const docsById = new Map(docsReply.items.map((it) => [it.driverId, it]));
       enrichmentById = new Map(
@@ -726,10 +730,7 @@ export class OpsService {
    * GUARDADO del conductor (lo resuelve identity, el caller no lo manda). El admin-bff solo transporta los
    * bytes del DNI; nunca elige la biometría contra la que se cotea.
    */
-  async runDniFaceMatch(
-    identity: AuthUser,
-    driverId: string,
-  ): Promise<DniFaceMatchResult> {
+  async runDniFaceMatch(identity: AuthUser, driverId: string): Promise<DniFaceMatchResult> {
     const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const docs = await this.fleetGrpc.call<DriverDocumentsReply>(
       'GetDriverDocuments',
@@ -782,10 +783,7 @@ export class OpsService {
    * MISMA GARANTÍA que el DNI: la imagen sale del brevete REAL (S3, no arbitraria) y el embedding de
    * referencia es el GUARDADO del conductor (lo resuelve identity). El admin-bff solo transporta los bytes.
    */
-  async runLicenseFaceMatch(
-    identity: AuthUser,
-    driverId: string,
-  ): Promise<DniFaceMatchResult> {
+  async runLicenseFaceMatch(identity: AuthUser, driverId: string): Promise<DniFaceMatchResult> {
     const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const docs = await this.fleetGrpc.call<DriverDocumentsReply>(
       'GetDriverDocuments',
@@ -945,7 +943,9 @@ export class OpsService {
         this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids: pendingIds }, meta),
       ]);
       const docsById = new Map(docsReply.items.map((it) => [it.driverId, it]));
-      const verifById = new Map(driversReply.drivers.map((d) => [d.id, deriveVerificationStatus(d)]));
+      const verifById = new Map(
+        driversReply.drivers.map((d) => [d.id, deriveVerificationStatus(d)]),
+      );
       for (const id of pendingIds) {
         const dc = docsById.get(id);
         const complete = dc ? dc.validRequired >= dc.requiredTotal : false;
@@ -1187,9 +1187,12 @@ export class OpsService {
 
     // 2) identity purge (atómico, SOURCE OF TRUTH). Recibe el driverId; resuelve el userId adentro y nos lo
     //    devuelve sólo para el resumen/auditoría. Si esto falla, sube la excepción y NADA se borró: ok.
-    const identityPurge = await this.identityRest.delete<IdentityPurgeReply>(`/drivers/${driverId}`, {
-      identity,
-    });
+    const identityPurge = await this.identityRest.delete<IdentityPurgeReply>(
+      `/drivers/${driverId}`,
+      {
+        identity,
+      },
+    );
     const { userId } = identityPurge;
 
     // A partir de acá el conductor YA NO existe en la source of truth. Pase lo que pase aguas abajo, la
@@ -1236,10 +1239,9 @@ export class OpsService {
       if (!isProdTier()) {
         // 5) trip purge — viajes del conductor (+ eventos + propuestas), indexados por Trip.driverId = driverId.
         try {
-          trip = await this.tripRest.delete<TripPurgeReply>(
-            `/internal/drivers/${driverId}/trips`,
-            { identity },
-          );
+          trip = await this.tripRest.delete<TripPurgeReply>(`/internal/drivers/${driverId}/trips`, {
+            identity,
+          });
         } catch (err) {
           partialFailures.push({ stage: 'trip', cause: causeOf(err) });
         }

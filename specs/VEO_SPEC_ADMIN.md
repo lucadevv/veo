@@ -23,16 +23,19 @@ Esto **no es marketing**. Es una **herramienta de operación crítica** donde un
 ## 1. Sistema base (transversal a todas las pantallas)
 
 ### 1.1 Tipografía
-| Uso | Familia | Notas |
-|---|---|---|
-| UI general, texto | **Inter** (`--font-sans`, self-hosted) | Pesos: 400 cuerpo, 500 labels/medium, 600 títulos. Soberanía: fuente auto-hospedada, sin request a Google en runtime. |
-| IDs, montos, código, TOTP, hashes | **JetBrains Mono** (`--font-mono`) | Todo dato técnico/numérico va monospace para alinear columnas. |
-| Cifras en tablas y KPIs | clase `tabular` (tabular-nums) | Números alineados verticalmente; obligatorio en montos, contadores, fechas. |
+
+| Uso                               | Familia                                | Notas                                                                                                                 |
+| --------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| UI general, texto                 | **Inter** (`--font-sans`, self-hosted) | Pesos: 400 cuerpo, 500 labels/medium, 600 títulos. Soberanía: fuente auto-hospedada, sin request a Google en runtime. |
+| IDs, montos, código, TOTP, hashes | **JetBrains Mono** (`--font-mono`)     | Todo dato técnico/numérico va monospace para alinear columnas.                                                        |
+| Cifras en tablas y KPIs           | clase `tabular` (tabular-nums)         | Números alineados verticalmente; obligatorio en montos, contadores, fechas.                                           |
 
 **Escala de texto operativa (densa):** títulos de página 2xl/semibold; títulos de sección `text-sm` semibold; labels de campo/columna `text-xs` `text-ink-muted`; metadata `text-[11px]`/`text-xs` `text-ink-subtle`. Jerarquía de 3 niveles de tinta: `--ink` (primario) → `ink-muted` (secundario) → `ink-subtle` (terciario/placeholder).
 
 ### 1.2 Tablas densas (componente `DataTable`)
+
 El caballo de batalla del dashboard. Reglas:
+
 - Filas compactas (`px-4 py-2.5`), divisor sutil `border-border/60`, hover `bg-surface-2` solo si la fila es navegable (`cursor-pointer`).
 - **Header sticky** (`bg-surface-2`) para scroll largo. Ordenamiento por columna con **`aria-sort`** e iconos `ArrowUp`/`ArrowDown`/`ChevronsUpDown` (nunca solo color).
 - `<caption class="sr-only">` obligatorio por tabla (lectores de pantalla).
@@ -41,6 +44,7 @@ El caballo de batalla del dashboard. Reglas:
 - Scroll horizontal degrada limpio (`overflow-x-auto`).
 
 ### 1.3 Badges y estados de dominio (`StatusPill`)
+
 Mapeo semántico **texto + color** (jamás color solo). El pill traduce el enum a español y asigna tono:
 | Tono | Token | Estados incluidos |
 |---|---|---|
@@ -52,29 +56,34 @@ Mapeo semántico **texto + color** (jamás color solo). El pill traduce el enum 
 El pill **siempre muestra la etiqueta en español**; el color es refuerzo, no el único canal.
 
 ### 1.4 Grilla y layout
+
 - **Shell de altura fija** (`h-screen`, overflow controlado): sidebar fija + columna de contenido con su propio scroll. Las pantallas usan `flex h-full flex-col` con header fijo y cuerpo scrolleable.
 - Padding de contenido `px-4 lg:px-6`. Breakpoint operativo principal `lg`.
 - Vistas de operación con **split** (`lg:grid-cols-[1fr_400px]`): mapa flexible + panel lateral de ancho fijo.
 
 ### 1.5 Gráficas (recharts)
+
 - Estilo sobrio: **líneas/áreas finas**, sin gradientes chillones, sin sombras. Acento azul de marca para la serie principal, neutros para ejes/grilla.
 - Colores tomados de **tokens del tema en runtime** (hook `use-token-colors`) para respetar light/dark automáticamente.
 - Tooltip con números tabulares, fecha legible. Eje Y formateado (montos en PEN, conteos abreviados).
 - Toda gráfica acompaña a su KPI/sección, nunca decora sola.
 
 ### 1.6 Estados genéricos (componentes `EmptyState` / `ErrorState` / `Skeleton`)
-| Estado | Patrón visual | Copy |
-|---|---|---|
-| **Loading** | `Skeleton` con la silueta real (filas de tabla, mosaico de KPIs, cards de mapa). Nunca spinner pelado. | — |
-| **Vacío** | Icono neutro en chip `surface-2` + título + descripción centrados. | "Sin viajes activos", "No hay alertas en esta vista." |
-| **Sin permiso (RBAC)** | `EmptyState` con icono **candado** (`Lock`), título "Acceso restringido". | "Necesitas el rol FINANCE para ver liquidaciones y reembolsos." |
-| **Error** | `role="alert"`, icono `AlertTriangle` en chip `danger/10`, botón **Reintentar** (`RefreshCw`). | "No se pudieron cargar los datos. Intenta de nuevo." |
-| **Datos en vivo** | Badge `ConnectionStatus` (punto + texto): "En vivo" (success, pulsa), "Reconectando…" (warn), "Sin conexión" (danger). | — |
+
+| Estado                 | Patrón visual                                                                                                          | Copy                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| **Loading**            | `Skeleton` con la silueta real (filas de tabla, mosaico de KPIs, cards de mapa). Nunca spinner pelado.                 | —                                                               |
+| **Vacío**              | Icono neutro en chip `surface-2` + título + descripción centrados.                                                     | "Sin viajes activos", "No hay alertas en esta vista."           |
+| **Sin permiso (RBAC)** | `EmptyState` con icono **candado** (`Lock`), título "Acceso restringido".                                              | "Necesitas el rol FINANCE para ver liquidaciones y reembolsos." |
+| **Error**              | `role="alert"`, icono `AlertTriangle` en chip `danger/10`, botón **Reintentar** (`RefreshCw`).                         | "No se pudieron cargar los datos. Intenta de nuevo."            |
+| **Datos en vivo**      | Badge `ConnectionStatus` (punto + texto): "En vivo" (success, pulsa), "Reconectando…" (warn), "Sin conexión" (danger). | —                                                               |
 
 ### 1.7 Copy operativo
+
 Imperativo, breve, sin ambigüedad. Botones = verbo ("Reconocer", "Resolver", "Ejecutar pago", "Verificar cadena"). Confirmaciones explican consecuencia y auditoría ("Esta acción queda auditada"). Errores accionables, no técnicos.
 
 ### 1.8 Motion
+
 Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0.97]` en botones de acción crítica; pulso lento (`animate-pulse-danger`) **solo** en el chip de pánico y el punto "En vivo". Nada más se mueve.
 
 ---
@@ -86,28 +95,30 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 **Principio de RBAC en UI:** la autoridad real es el `admin-bff` (revalida con guards). La UI es **defensa en profundidad de experiencia**: si el servidor lo negaría, la UI **lo oculta o deshabilita** (`can(user, permission)`). El mapa de permisos espeja exactamente los `@Roles` de cada controller.
 
 ### 2.1 Matriz de visibilidad por rol
-| Permiso | SUPPORT_L1 | SUPPORT_L2 | COMPLIANCE_SUP. | DISPATCHER | FINANCE | ADMIN | SUPERADMIN |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| Ops "En vivo" (`ops:view`) | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Viajes / Conductores (`trips/drivers:view`) | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ |
-| Aprobar conductor (`drivers:approve`) | — | — | ✓ | — | — | ✓ | ✓ |
-| Ver pánicos (`panics:view/ack`) | — | ✓ | ✓ | ✓ | — | ✓ | ✓ |
-| Resolver pánico (`panics:resolve`) | — | — | ✓ | — | — | ✓ | ✓ |
-| Flota (`fleet:view/review`) | — | — | ✓ | — | — | ✓ | ✓ |
-| Finanzas ver/refund (`finance:view/refund`) | — | — | — | — | ✓ | ✓ | ✓ |
-| **Ejecutar payout (`finance:payout`)** | — | — | — | — | **✓ (solo FINANCE)** | — | — |
-| Video (`media:view/request/approve`) | — | — | ✓ | — | — | ✓ | ✓ |
-| Auditoría (`audit:view/verify`) | — | — | ✓ | — | — | **—** | ✓ |
+
+| Permiso                                     | SUPPORT_L1 | SUPPORT_L2 | COMPLIANCE_SUP. | DISPATCHER |       FINANCE        | ADMIN | SUPERADMIN |
+| ------------------------------------------- | :--------: | :--------: | :-------------: | :--------: | :------------------: | :---: | :--------: |
+| Ops "En vivo" (`ops:view`)                  |     —      |     ✓      |        ✓        |     ✓      |          ✓           |   ✓   |     ✓      |
+| Viajes / Conductores (`trips/drivers:view`) |     ✓      |     ✓      |        ✓        |     ✓      |          —           |   ✓   |     ✓      |
+| Aprobar conductor (`drivers:approve`)       |     —      |     —      |        ✓        |     —      |          —           |   ✓   |     ✓      |
+| Ver pánicos (`panics:view/ack`)             |     —      |     ✓      |        ✓        |     ✓      |          —           |   ✓   |     ✓      |
+| Resolver pánico (`panics:resolve`)          |     —      |     —      |        ✓        |     —      |          —           |   ✓   |     ✓      |
+| Flota (`fleet:view/review`)                 |     —      |     —      |        ✓        |     —      |          —           |   ✓   |     ✓      |
+| Finanzas ver/refund (`finance:view/refund`) |     —      |     —      |        —        |     —      |          ✓           |   ✓   |     ✓      |
+| **Ejecutar payout (`finance:payout`)**      |     —      |     —      |        —        |     —      | **✓ (solo FINANCE)** |   —   |     —      |
+| Video (`media:view/request/approve`)        |     —      |     —      |        ✓        |     —      |          —           |   ✓   |     ✓      |
+| Auditoría (`audit:view/verify`)             |     —      |     —      |        ✓        |     —      |          —           | **—** |     ✓      |
 
 > **Gotcha de diseño crítico:** `finance:payout` (ejecutar liquidación) es **exclusivo de FINANCE** — ni ADMIN ni SUPERADMIN lo ven. El servidor los negaría, así que la columna de acción **no se renderiza** para ellos (queda `—`). El diseñador no debe asumir que SUPERADMIN "puede todo".
 
 > **Gotcha de audit (separación de funciones · decisión del dueño):** LEER/VERIFICAR el audit log es **exclusivo de `COMPLIANCE_SUPERVISOR` + `SUPERADMIN`** — un `ADMIN` genérico **NO**. Quien OPERA no audita: el audit log inmutable es la pista forense (Ley 29733), y el que ejecuta las acciones del día a día no debe ser el mismo que revisa el registro de quién hizo qué.
 
-> **Principio de TRAZABILIDAD TOTAL (qué se ESCRIBE en el libro):** distinto de quién lo lee. **TODA mutación del sistema se audita** — *quién · qué · cuándo*, encadenada e inmutable. No es "auditar solo lo sensible": es auditar **todo todo**. Para cualquier acción, el audit log responde "¿quién hizo este cambio?". La fila de arriba define **quién puede leer** el libro; este principio define **qué se registra** (absolutamente todo).
+> **Principio de TRAZABILIDAD TOTAL (qué se ESCRIBE en el libro):** distinto de quién lo lee. **TODA mutación del sistema se audita** — _quién · qué · cuándo_, encadenada e inmutable. No es "auditar solo lo sensible": es auditar **todo todo**. Para cualquier acción, el audit log responde "¿quién hizo este cambio?". La fila de arriba define **quién puede leer** el libro; este principio define **qué se registra** (absolutamente todo).
 >
 > El gate ejecutable de este principio es el test golden-rule `audit.consumer.coverage.spec.ts` (todo evento de `EVENT_SCHEMAS` está auditado o excluido con razón). **DEUDA CERRADA** (antes: `driver.went_offline` fuera del WORM): el ciclo de **sesión de turno** del conductor ya se audita completo. Se agregó el par de apertura `driver.went_online` (identity emite en `startShift`, por outbox en la tx del CAS→AVAILABLE) y el cierre `driver.went_offline` se audita por `auditedWhen` **solo en la rama `shift_end`** (fin de turno deliberado); la rama `disconnect` (caída de socket best-effort) se descarta como no-op explícito — no es una mutación de negocio. Ambos con `actor=recurso=driverId, resource=driver`. Ya no hay divergencia contra "todo todo".
 
 ### 2.2 Cómo se adapta el diseño
+
 - **Sidebar:** cada grupo/ítem se filtra por permiso; si un grupo queda sin ítems, **no se renderiza** (sin huecos vacíos). Un SUPPORT_L1 ve una nav mínima (solo Viajes/Conductores); un SUPERADMIN ve todo.
 - **Acciones in-row / in-header:** botones aparecen solo con permiso (aprobar conductor, ejecutar payout, reproducir video). Sin permiso → la celda muestra `—`, no un botón deshabilitado fantasma.
 - **Estado "sin permiso" a nivel página:** cuando un rol puede llegar a la ruta pero no tiene el permiso de datos (ej. FINANCE sin `finance:view` desactivado), se muestra el `EmptyState` con candado (§1.6), nunca una tabla vacía ambigua.
@@ -121,25 +132,28 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 
 ### 3.0 Mapa de Información canónico (lo que el panel DEBE tener, por grupo)
 
-| Grupo | Subsecciones (ruta) | Qué configura/muestra | Estado del spec |
-|---|---|---|---|
-| **Operación** | En vivo (`/ops`) · Métricas (`/ops/metrics`) · Viajes (`/ops/trips`) · Conductores (`/ops/drivers`) · Operadores (`/ops/operators`) · Radios de dispatch (`/ops/dispatch-radius`) | comando en vivo, KPIs, viajes, alta de conductores, gestión de operadores, radios de matching | En vivo/Viajes/Conductores ✅ abajo · **Métricas/Operadores/Radios: existen, spec pendiente** |
-| **Seguridad** | Pánicos (`/security/panics`) · Cámaras en vivo (`/security/live-wall`) · Video (`/media`) | cola de pánicos, muro de cámaras de viajes en curso, acceso a grabaciones (doble auth) | Pánicos/Video ✅ abajo · **Cámaras en vivo: existe, spec pendiente** |
-| **Flota** | Vehículos y docs (`/fleet`) — **5 tabs**: Documentos · Vehículos · **Modelos** · Inspecciones · Vencimientos | el carril de **OPERABILIDAD**: docs, fichas (`VehicleModelSpec`) y su aprobación | ✅ abajo (actualizado a 5 tabs) |
-| **Finanzas** | Liquidaciones (`/finance`) · Precios y tarifas (`/finance/pricing`) · **Ofertas de servicio** (`/finance/catalog`) | payouts/refunds · fórmula GLOBAL de tarifa · catálogo de **ofertas** (tier) + su economía | ✅ abajo (los 3) |
-| **Cumplimiento** | Auditoría (`/audit`) | registro WORM + verificación de cadena | ✅ abajo |
+| Grupo            | Subsecciones (ruta)                                                                                                                                                               | Qué configura/muestra                                                                         | Estado del spec                                                                               |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Operación**    | En vivo (`/ops`) · Métricas (`/ops/metrics`) · Viajes (`/ops/trips`) · Conductores (`/ops/drivers`) · Operadores (`/ops/operators`) · Radios de dispatch (`/ops/dispatch-radius`) | comando en vivo, KPIs, viajes, alta de conductores, gestión de operadores, radios de matching | En vivo/Viajes/Conductores ✅ abajo · **Métricas/Operadores/Radios: existen, spec pendiente** |
+| **Seguridad**    | Pánicos (`/security/panics`) · Cámaras en vivo (`/security/live-wall`) · Video (`/media`)                                                                                         | cola de pánicos, muro de cámaras de viajes en curso, acceso a grabaciones (doble auth)        | Pánicos/Video ✅ abajo · **Cámaras en vivo: existe, spec pendiente**                          |
+| **Flota**        | Vehículos y docs (`/fleet`) — **5 tabs**: Documentos · Vehículos · **Modelos** · Inspecciones · Vencimientos                                                                      | el carril de **OPERABILIDAD**: docs, fichas (`VehicleModelSpec`) y su aprobación              | ✅ abajo (actualizado a 5 tabs)                                                               |
+| **Finanzas**     | Liquidaciones (`/finance`) · Precios y tarifas (`/finance/pricing`) · **Ofertas de servicio** (`/finance/catalog`)                                                                | payouts/refunds · fórmula GLOBAL de tarifa · catálogo de **ofertas** (tier) + su economía     | ✅ abajo (los 3)                                                                              |
+| **Cumplimiento** | Auditoría (`/audit`)                                                                                                                                                              | registro WORM + verificación de cadena                                                        | ✅ abajo                                                                                      |
 
 **Decisiones de naming (resuelven la colisión de "catálogo" — §1.5 del modelo híbrido):**
+
 - `FLOTA → Modelos` = el **catálogo de fichas/modelos** de vehículo (`VehicleModelSpec`). En copy: "Modelos" / "fichas", **nunca "el catálogo" a secas**.
 - `FINANZAS → Ofertas de servicio` (ruta `/finance/catalog`, antes rotulada "Catálogo de ofertas") = el catálogo de **ofertas** (`OfferingId`). Se **renombra** para no colisionar con el de modelos.
 
 **Dónde vive cada config (resuelve la config por-oferta hoy PARTIDA en dos páginas):**
-- **Precios y tarifas** = la fórmula **GLOBAL** (tarifa base con per-km all-in, comisión, costo/km carpooling, modo POR DEFECTO + franjas). **Sin** config por-oferta. *(Energía/combustible del pricing REMOVIDO 2026-07 — ADR-017 header.)*
+
+- **Precios y tarifas** = la fórmula **GLOBAL** (tarifa base con per-km all-in, comisión, costo/km carpooling, modo POR DEFECTO + franjas). **Sin** config por-oferta. _(Energía/combustible del pricing REMOVIDO 2026-07 — ADR-017 header.)_
 - **Ofertas de servicio** = **TODO lo por-oferta** (on/off, modo override, multiplicador, tarifa mínima, **piso de puja**). Hoy el piso de puja vive en Precios → **se mueve acá**.
 
 ---
 
 ### Login / Autenticación (ruta `/login`)
+
 - **Propósito:** autenticar personal autorizado con email + contraseña + TOTP, y enrolar TOTP la primera vez.
 - **Rol(es) que la ven:** todos (puerta de entrada, pre-sesión). El layout del dashboard redirige acá si no hay sesión.
 - **Entrada / Salida:** entra sin sesión (o sesión expirada) → sale a `next` (ruta destino) tras autenticar.
@@ -156,6 +170,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Shell del dashboard (layout `(dashboard)/layout.tsx`)
+
 - **Propósito:** marco persistente de toda la app autenticada: navegación, sesión, tema, tiempo real y banner de pánico global.
 - **Rol(es) que la ven:** todos los autenticados (contenido filtrado por rol).
 - **Entrada / Salida:** valida sesión contra `admin-bff` server-side; sin sesión → redirige a `/login`. Provee `sessionUser` (RBAC), React Query, tema, toasts y socket `/ops`.
@@ -172,6 +187,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Operación en vivo (ruta `/ops`)
+
 - **Propósito:** **centro de comando** en tiempo real — mapa de conductores, pánicos destacados, KPIs del día y viajes activos. Es la pantalla "home" del operador.
 - **Rol(es) que la ven:** SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, FINANCE, ADMIN, SUPERADMIN (`ops:view`). **SUPPORT_L1 NO.**
 - **Entrada / Salida:** entra desde nav; sale a detalle de pánico (clic en marcador) o a `/ops/trips` / detalle de viaje.
@@ -190,6 +206,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Viajes (ruta `/ops/trips`) y Detalle de viaje (ruta `/ops/trips/[id]`)
+
 - **Propósito:** explorar/buscar el universo de viajes y abrir el detalle operativo de uno.
 - **Rol(es) que la ven:** SUPPORT_L1, SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`trips:view`). FINANCE no.
 - **Entrada / Salida:** desde nav, búsqueda global del topbar (`?q=`) o "Ver todos" en `/ops`. Sale al detalle por fila.
@@ -204,6 +221,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Conductores (ruta `/ops/drivers`)
+
 - **Propósito:** aprobación de altas y gestión del estado de la flota de conductores.
 - **Rol(es) que la ven:** SUPPORT_L1, SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`drivers:view`). **Aprobar/rechazar** solo COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`drivers:approve`).
 - **Entrada / Salida:** desde nav. Acciones in-row resuelven sin cambiar de página.
@@ -218,6 +236,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Seguridad — Cola de pánicos (ruta `/security/panics`)
+
 - **Propósito:** **atender y resolver incidentes de seguridad**. Cola de trabajo de pánicos. Corazón de la promesa de VEO en el lado operación.
 - **Rol(es) que la ven:** SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`panics:view`/`ack`). **Resolver** solo COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`panics:resolve`).
 - **Entrada / Salida:** desde nav, desde el **PanicBanner** global ("Atender"), o desde un marcador del mapa de `/ops`. Sale al detalle del pánico.
@@ -230,6 +249,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 - **Seguridad / nota especial:** esta cola es lectura+acción de operación; toda acción (reconocer/resolver) queda en auditoría inmutable. Datos del pasajero/conductor truncados.
 
 #### Banner global de pánico (`PanicBanner`, transversal al shell)
+
 - **Propósito:** alerta intrusiva pero accesible cuando entra un pánico en vivo, esté donde esté el operador.
 - **Layout:** franja `role="alert" aria-live="assertive"` entre topbar y contenido (empuja, no tapa). Chip danger pulsante con `ShieldAlert` + texto **"PÁNICO ACTIVO · N alerta(s) en curso"** + metadata del viaje/estado/hora + botón **"Atender"** (danger) + descartar (X).
 - **Color & énfasis:** `--danger` con icono + texto + pulso. Cumple la regla AA: tres canales simultáneos. El pulso (`animate-pulse-danger`) está reservado exclusivamente a este banner y al chip de pánico.
@@ -238,6 +258,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Seguridad — Detalle de pánico (ruta `/security/panics/[id]`)
+
 - **Propósito:** ver todo el contexto de un incidente y ejecutar reconocer/resolver.
 - **Rol(es) que la ven:** `panics:view`. Botón **Reconocer** con `panics:ack`; botón **Resolver** con `panics:resolve`.
 - **Entrada / Salida:** desde la cola, el banner o el mapa. Acciones resuelven in-place con toast.
@@ -252,6 +273,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Flota — Vehículos y documentos (ruta `/fleet`)
+
 - **Propósito:** revisar documentos pendientes, vehículos, inspecciones y **vencimientos próximos** de la flota.
 - **Rol(es) que la ven:** COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`fleet:view`). Acciones de revisión con `fleet:review`.
 - **Entrada / Salida:** desde nav. Acciones de documento in-row.
@@ -259,7 +281,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 - **Componentes clave:**
   - **Documentos:** Tipo, Titular (Conductor/Vehículo + ID), Estado (`StatusPill`), Vence (fecha), Acciones (`DocumentActions`).
   - **Vehículos:** Placa (mono), Vehículo (marca+modelo+año), Color, **Operabilidad** (veredicto DERIVADO: Operable / No operable + motivo `Sin ficha` o `Docs vencidos` — espeja `isVehicleOperable`, ver `VEO_MODELO_HIBRIDO §1.5`), **Ofertas que califica** (los `OfferingId` cuyos `requires` cumple la **ficha** del vehículo — distinto de operabilidad), Conductor. ⚠️ "Operable" y "califica para la oferta X" son **dos columnas distintas**: un vehículo operable no está matcheado a toda oferta.
-  - **Modelos** (catálogo de **fichas** `VehicleModelSpec`): subtabs **Por revisar / Aprobados**. *Por revisar* = modelos que un conductor solicitó y aún no están en el catálogo (marca/modelo/años + segment/seats/energía propuestos) → aprobar/rechazar (`fleet:review`). **Aprobar re-linkea** atómicamente los vehículos que encolaron ese modelo → cierra el hueco de operabilidad (`modelSpecId`). Empty: "Sin modelos pendientes · cuando un conductor solicite un **modelo** que no está en el catálogo de fichas, aparece acá."
+  - **Modelos** (catálogo de **fichas** `VehicleModelSpec`): subtabs **Por revisar / Aprobados**. _Por revisar_ = modelos que un conductor solicitó y aún no están en el catálogo (marca/modelo/años + segment/seats/energía propuestos) → aprobar/rechazar (`fleet:review`). **Aprobar re-linkea** atómicamente los vehículos que encolaron ese modelo → cierra el hueco de operabilidad (`modelSpecId`). Empty: "Sin modelos pendientes · cuando un conductor solicite un **modelo** que no está en el catálogo de fichas, aparece acá."
   - **Inspecciones:** Vehículo, Estado, Programada, Realizada, Inspector, Resultado.
   - **Vencimientos:** Tipo, Titular, Vence, y **Días restantes** con **semáforo accesible**: ≤7 días = danger + icono `AlertTriangle`; ≤30 días = warn (texto); resto = neutro. El icono acompaña al texto en urgentes.
 - **Estados:** loading; vacíos por tab ("Sin documentos pendientes", "Sin vencimientos próximos · Ningún documento vence pronto."); error con reintento.
@@ -271,6 +293,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Finanzas — Liquidaciones (ruta `/finance`)
+
 - **Propósito:** gestionar payouts a conductores y reembolsos a pasajeros.
 - **Rol(es) que la ven:** FINANCE, ADMIN, SUPERADMIN (`finance:view`). **Ejecutar payout (`finance:payout`) SOLO FINANCE.** **Iniciar un reembolso = `finance:refund`** (FINANCE / ADMIN / SUPERADMIN); SUPPORT **no** ejecuta reembolsos. Refunds sobre umbral → dual-control (ver Seguridad).
 - **Entrada / Salida:** desde nav. Acciones in-row / in-header (refund).
@@ -286,7 +309,8 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Finanzas — Precios y tarifas (ruta `/finance/pricing`)
-- **Propósito:** configurar la fórmula **GLOBAL** de precio (NO por-oferta): modo por defecto, componentes de la tarifa on-demand (base + per-km all-in + per-min), costo/km del carpooling y comisión. Es el carril de pricing del DAG de configuración (`VEO_MODELO_HIBRIDO §1.5`). *(El modelo de energía/combustible del pricing fue REMOVIDO 2026-07 — el per-km all-in vive en la Tarifa base, ADR-017 header.)*
+
+- **Propósito:** configurar la fórmula **GLOBAL** de precio (NO por-oferta): modo por defecto, componentes de la tarifa on-demand (base + per-km all-in + per-min), costo/km del carpooling y comisión. Es el carril de pricing del DAG de configuración (`VEO_MODELO_HIBRIDO §1.5`). _(El modelo de energía/combustible del pricing fue REMOVIDO 2026-07 — el per-km all-in vive en la Tarifa base, ADR-017 header.)_
 - **Rol(es) que la ven:** FINANCE, ADMIN, SUPERADMIN (`pricing:view`; editar con `pricing:edit`).
 - **Entrada / Salida:** desde nav (Finanzas). Cada bloque guarda por separado.
 - **Layout & jerarquía visual:** secciones apiladas, cada una versionada (patrón singleton + `version` + outbox, auditada): **Modo de tarifa · on-demand** (modo por defecto Puja/Fijo + franjas horarias) · **Componentes de la tarifa · on-demand** (tarifa base: banderazo/km all-in/min — el per-km ya lleva todo el costo, sin bloque de energía separado) · **Carpooling · programado** (costo de operación por km, escudo cost-sharing, por país) · **Comisión · ambos modos** (on-demand: descuento al conductor · carpooling: service fee al pasajero).
@@ -297,12 +321,13 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 - **Color & énfasis:** sobrio; montos tabulares; sin rojo salvo error.
 - **Seguridad / nota especial — regla de coherencia (resuelve una incoherencia real del panel):**
   - **Esta página NO lleva config por-oferta.** El multiplicador, la tarifa mínima y el **piso de puja** por oferta viven en **Ofertas de servicio**. El "modo por defecto" de acá es el GLOBAL; el override de modo por oferta vive en Ofertas. (Resuelve el "modo en dos lugares" y los "dos mínimos por oferta".)
-  > *(La regla previa "sin control muerto — Recargo de combustible legacy / `PRICING_ENERGY_MODEL_ENABLED`" quedó MOOT 2026-07: el pricing por energía/combustible fue REMOVIDO — no hay panel de energía ni de recargo de combustible que colapsar. El per-km all-in vive en la Tarifa base. Ver ADR-017 header.)*
+    > _(La regla previa "sin control muerto — Recargo de combustible legacy / `PRICING_ENERGY_MODEL_ENABLED`" quedó MOOT 2026-07: el pricing por energía/combustible fue REMOVIDO — no hay panel de energía ni de recargo de combustible que colapsar. El per-km all-in vive en la Tarifa base. Ver ADR-017 header.)_
 
 ---
 
 ### Finanzas — Ofertas de servicio (ruta `/finance/catalog`)
-- **Propósito:** activar/desactivar cada **oferta** (`OfferingId`: VEO_MOTO/ECONÓMICO/NORMAL/XL/PREMIUM…) y fijar SU economía y SU modo. El pasajero ve/cotiza/pide solo lo habilitado. *(Antes rotulada "Catálogo de ofertas" — **renombrada** para no colisionar con el catálogo de **modelos** de Flota; ver §3.0.)*
+
+- **Propósito:** activar/desactivar cada **oferta** (`OfferingId`: VEO*MOTO/ECONÓMICO/NORMAL/XL/PREMIUM…) y fijar SU economía y SU modo. El pasajero ve/cotiza/pide solo lo habilitado. *(Antes rotulada "Catálogo de ofertas" — **renombrada** para no colisionar con el catálogo de **modelos** de Flota; ver §3.0.)\_
 - **Rol(es) que la ven:** FINANCE, ADMIN, SUPERADMIN (`catalog:view`; editar con `catalog:edit`).
 - **Entrada / Salida:** desde nav (Finanzas). Guarda por oferta.
 - **Layout & jerarquía visual:** lista de ofertas; cada una = card con Clase (`MOTO`/`CAR`), estado (Habilitada/Deshabilitada + toggle), **Modo** (override por oferta: Automático-según-horario / Puja / Precio fijo, restringido a lo que la oferta permite), **Multiplicador** (vacío = valor de código), **Tarifa mínima** (vacío = valor de código), **Piso de puja** (vacío = usa el default de Precios). Sello de versión global.
@@ -316,6 +341,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Media — Acceso a video (ruta `/media`)
+
 - **Propósito:** solicitar, aprobar/rechazar y **reproducir** grabaciones de viajes bajo **doble autenticación** (compliance Ley 29733).
 - **Rol(es) que la ven:** COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`media:view`/`request`/`approve`).
 - **Entrada / Salida:** desde nav (grupo Seguridad → "Video"). Solicitar (header) y aprobar/reproducir (in-row).
@@ -330,6 +356,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Auditoría (ruta `/audit`)
+
 - **Propósito:** consultar el **registro inmutable append-only** con cadena de hash, y **verificar su integridad** (compliance Ley 29733).
 - **Rol(es) que la ven:** COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN (`audit:view`). **Verificar cadena** con `audit:verify`.
 - **Entrada / Salida:** desde nav (grupo Cumplimiento). Búsqueda y paginación in-page.
@@ -345,17 +372,17 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 
 ## 4. Resumen de patrones reutilizables (para el diseñador)
 
-| Patrón | Componente | Dónde se usa |
-|---|---|---|
-| Tabla densa ordenable | `DataTable` | Viajes, Conductores, Pánicos, Flota×4, Finanzas, Media, Auditoría |
-| Estado de dominio | `StatusPill` (texto+color) | Todas las tablas |
-| Filtro por estado | `Tabs` | Pánicos, Conductores, Flota, Finanzas, Media |
-| Vacío / Error / Sin permiso | `EmptyState` / `ErrorState` / candado | Todas |
-| Loading | `Skeleton` con silueta real | Todas |
-| Confirmación con consecuencia | `ConfirmDialog` (+motivo opcional) | Resolver pánico, payout, rechazar media, refund |
-| Doble auth de acción sensible | `StepUpDialog` (TOTP fresco) | Aprobar/reproducir video, payout alto |
-| Alerta crítica accesible | `PanicBanner` (icono+texto+color+pulso) | Shell global |
-| Estado de tiempo real | `ConnectionStatus` (punto+texto) | Ops |
-| Detalle label/valor | `Detail` (mono para datos técnicos) | Detalle de pánico y de viaje |
+| Patrón                        | Componente                              | Dónde se usa                                                      |
+| ----------------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| Tabla densa ordenable         | `DataTable`                             | Viajes, Conductores, Pánicos, Flota×4, Finanzas, Media, Auditoría |
+| Estado de dominio             | `StatusPill` (texto+color)              | Todas las tablas                                                  |
+| Filtro por estado             | `Tabs`                                  | Pánicos, Conductores, Flota, Finanzas, Media                      |
+| Vacío / Error / Sin permiso   | `EmptyState` / `ErrorState` / candado   | Todas                                                             |
+| Loading                       | `Skeleton` con silueta real             | Todas                                                             |
+| Confirmación con consecuencia | `ConfirmDialog` (+motivo opcional)      | Resolver pánico, payout, rechazar media, refund                   |
+| Doble auth de acción sensible | `StepUpDialog` (TOTP fresco)            | Aprobar/reproducir video, payout alto                             |
+| Alerta crítica accesible      | `PanicBanner` (icono+texto+color+pulso) | Shell global                                                      |
+| Estado de tiempo real         | `ConnectionStatus` (punto+texto)        | Ops                                                               |
+| Detalle label/valor           | `Detail` (mono para datos técnicos)     | Detalle de pánico y de viaje                                      |
 
 **Regla de oro transversal:** ningún estado crítico (pánico, vencimiento ≤7d, cadena comprometida, error, sin conexión) se comunica solo por color — siempre **icono + texto + color** juntos.

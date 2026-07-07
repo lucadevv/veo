@@ -24,7 +24,17 @@
  * driver-rail. Por eso el @Audiences va POR MÉTODO (no a nivel clase): AudienceGuard a nivel clase corre para
  * TODOS los handlers (fail-closed) y cada método declara su riel — ninguno queda sin @Audiences (sería fail-open).
  */
-import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ForbiddenError } from '@veo/utils';
 import {
@@ -52,7 +62,8 @@ export class BookingsController {
   @Post()
   @HttpCode(201)
   @ApiOperation({
-    summary: 'Reservar un asiento en un viaje publicado · public-rail. Idempotente vía Idempotency-Key.',
+    summary:
+      'Reservar un asiento en un viaje publicado · public-rail. Idempotente vía Idempotency-Key.',
   })
   reserve(
     @CurrentUser() user: AuthenticatedUser,
@@ -105,7 +116,9 @@ export class BookingsController {
    */
   private requireDriverId(user: AuthenticatedUser): string {
     if (!user.driverId) {
-      throw new ForbiddenError('La identidad del conductor no porta driverId (no habilitado para esta acción)');
+      throw new ForbiddenError(
+        'La identidad del conductor no porta driverId (no habilitado para esta acción)',
+      );
     }
     return user.driverId;
   }

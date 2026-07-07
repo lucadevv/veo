@@ -307,7 +307,9 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
 
     const payouts = await prisma.payout.findMany({ where: { driverId } });
     expect(payouts).toHaveLength(1); // el bono vive en UN solo Payout, no en dos
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidInPayoutId).toBe(p1.id); // sigue ligado al ORIGINAL, no re-ligado al del período 2
   });
 });
@@ -316,7 +318,14 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
 async function seedPendingCredit(driverId: string, amountCents: number): Promise<string> {
   const id = uuidv7();
   await prisma.driverCredit.create({
-    data: { id, driverId, tripId: uuidv7(), amountCents, sourcePaymentId: uuidv7(), status: 'PENDING' },
+    data: {
+      id,
+      driverId,
+      tripId: uuidv7(),
+      amountCents,
+      sourcePaymentId: uuidv7(),
+      status: 'PENDING',
+    },
   });
   return id;
 }
@@ -471,20 +480,39 @@ describe('PayoutsService.getPayout · hueco #1 (detalle con breakdown abierto po
     // crédito APLICADO a este payout (appliedInPayoutId)
     await prisma.driverCredit.create({
       data: {
-        id: uuidv7(), driverId, tripId: uuidv7(), amountCents: 500, sourcePaymentId: uuidv7(),
-        status: 'APPLIED', appliedInPayoutId: payoutId, appliedAt: new Date(),
+        id: uuidv7(),
+        driverId,
+        tripId: uuidv7(),
+        amountCents: 500,
+        sourcePaymentId: uuidv7(),
+        status: 'APPLIED',
+        appliedInPayoutId: payoutId,
+        appliedAt: new Date(),
       },
     });
     // deuda SALDADA en este payout (settledInPayoutId)
     await prisma.driverDebt.create({
       data: {
-        id: uuidv7(), driverId, tripId: uuidv7(), paymentId: uuidv7(), amountCents: 200,
-        status: 'SETTLED', settledInPayoutId: payoutId, settledAt: new Date(),
+        id: uuidv7(),
+        driverId,
+        tripId: uuidv7(),
+        paymentId: uuidv7(),
+        amountCents: 200,
+        status: 'SETTLED',
+        settledInPayoutId: payoutId,
+        settledAt: new Date(),
       },
     });
     // RUIDO: un crédito PENDING (no ligado a ningún payout) NO debe contarse en el detalle
     await prisma.driverCredit.create({
-      data: { id: uuidv7(), driverId, tripId: uuidv7(), amountCents: 999, sourcePaymentId: uuidv7(), status: 'PENDING' },
+      data: {
+        id: uuidv7(),
+        driverId,
+        tripId: uuidv7(),
+        amountCents: 999,
+        sourcePaymentId: uuidv7(),
+        status: 'PENDING',
+      },
     });
 
     const detail = await svc.getPayout(payoutId);

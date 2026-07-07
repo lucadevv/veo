@@ -288,9 +288,9 @@ export class DriversService {
       );
       if (!driver.found) return null;
       const key = `drivers/${driver.id}/kyc-selfie.jpg`;
-      const ticket = await this.rest.client('media').post<MediaPresignPutReply>(
-        '/media/internal/presign-put',
-        {
+      const ticket = await this.rest
+        .client('media')
+        .post<MediaPresignPutReply>('/media/internal/presign-put', {
           identity,
           body: {
             bucket: this.documentsBucket,
@@ -298,8 +298,7 @@ export class DriversService {
             contentType: 'image/jpeg',
             ttlSeconds: this.documentUploadTtl,
           },
-        },
-      );
+        });
       const res = await fetch(ticket.url, {
         method: 'PUT',
         headers: ticket.requiredHeaders,
@@ -466,9 +465,9 @@ export class DriversService {
   ): Promise<string | null> {
     if (!s3Key) return null;
     try {
-      const { url } = await this.rest.client('media').post<{ url: string }>(
-        '/media/internal/presign-get',
-        {
+      const { url } = await this.rest
+        .client('media')
+        .post<{ url: string }>('/media/internal/presign-get', {
           identity,
           // audience 'device': el preview lo consume la APP en el TELÉFONO → la URL debe firmarse contra el
           // host LAN (S3_PUBLIC_BASE_URL), no localhost (que en el device es el device mismo y no alcanza MinIO).
@@ -478,8 +477,7 @@ export class DriversService {
             ttlSeconds: DOCUMENT_READ_TTL_SECONDS,
             audience: 'device',
           },
-        },
-      );
+        });
       return url;
     } catch {
       return null;
@@ -598,9 +596,9 @@ export class DriversService {
     const tickets: DocumentUploadSideTicket[] = await Promise.all(
       sides.map(async (side) => {
         const fileS3Key = this.buildDocumentKey(driver.id, input.type, input.contentType);
-        const ticket = await this.rest.client('media').post<MediaPresignPutReply>(
-          '/media/internal/presign-put',
-          {
+        const ticket = await this.rest
+          .client('media')
+          .post<MediaPresignPutReply>('/media/internal/presign-put', {
             identity,
             body: {
               bucket: this.documentsBucket,
@@ -608,8 +606,7 @@ export class DriversService {
               contentType: input.contentType,
               ttlSeconds: this.documentUploadTtl,
             },
-          },
-        );
+          });
         return {
           side,
           uploadUrl: ticket.url,
@@ -623,7 +620,12 @@ export class DriversService {
 
     // Observabilidad: driverId + type + cantidad de caras (metadatos), NUNCA el binario ni las URLs firmadas.
     this.logger.info(
-      { driverId: driver.id, type: input.type, contentType: input.contentType, sides: sides.length },
+      {
+        driverId: driver.id,
+        type: input.type,
+        contentType: input.contentType,
+        sides: sides.length,
+      },
       'tickets de subida de documento emitidos (presigned PUT, driver-scoped, 1 por cara)',
     );
 

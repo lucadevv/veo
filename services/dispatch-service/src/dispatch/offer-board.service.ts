@@ -143,11 +143,7 @@ const dedupNoOffers = (tripId: string, windowEpoch: string): string =>
 // resetea en re-bid) para que un offer_withdrawn de un CICLO no deduplique el del ciclo SIGUIENTE del
 // MISMO (trip, driver). Sin el seq, un conductor que oferta y ve expirar el board en re-bids sucesivos
 // del mismo viaje solo recibiría el PRIMER bid:closed → su "esperando" quedaría stale del 2º en adelante.
-const dedupOfferWithdrawn = (
-  tripId: string,
-  driverId: string,
-  cycle: string | number,
-): string =>
+const dedupOfferWithdrawn = (tripId: string, driverId: string, cycle: string | number): string =>
   `${DEDUP_PREFIX.OFFER_WITHDRAWN}:${tripId}:${driverId}:${cycle}`;
 const dedupBidCancelled = (tripId: string): string => `${DEDUP_PREFIX.BID_CANCELLED}:${tripId}`;
 
@@ -586,12 +582,14 @@ export class OfferBoardService {
       // El conductor ya fue reclamado por OTRO viaje → compensamos el board claim (CLOSED_MATCHED → OPEN,
       // MISMA compensación que la tx-fail) para que el pasajero pueda elegir otro conductor, y rechazamos
       // con 409 distinguible (`driver_claimed`) para que public-bff lo surface → la UI del pasajero refetch.
-      await this.store.revertClaim(tripId).catch((revertErr) =>
-        this.logger.error(
-          `A2 trip=${tripId} driver=${driverId}: conductor ya reclamado y el revert del board falló ` +
-            `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
-        ),
-      );
+      await this.store
+        .revertClaim(tripId)
+        .catch((revertErr) =>
+          this.logger.error(
+            `A2 trip=${tripId} driver=${driverId}: conductor ya reclamado y el revert del board falló ` +
+              `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
+          ),
+        );
       this.logger.log(
         `accept rechazado trip=${tripId} driver=${driverId}: conductor ya reclamado por otro viaje (A2)`,
       );
@@ -1041,9 +1039,7 @@ export class OfferBoardService {
       // ACEPTAR, no al expirar) → su estado pendiente quedaba STALE y bloqueaba re-ofertar el mismo viaje.
       const pending =
         res.offerCount > 0
-          ? (await this.store.listOffers(tripId)).filter(
-              (o) => o.status === OfferStatus.PENDING,
-            )
+          ? (await this.store.listOffers(tripId)).filter((o) => o.status === OfferStatus.PENDING)
           : [];
       // A5 — caduca TODAS las PENDING en UN solo round-trip (winner=null, sin ganador en el barrido),
       // en vez de N×setOfferStatus. Best-effort/cosmético (H7): no toca el board ni el outbox.
@@ -1149,7 +1145,10 @@ export class OfferBoardService {
           `N5 reconciliador: SKIP trip=${board.tripId} driver=${driverId} — sin DispatchMatch ACCEPTED ` +
             `con agreedPriceCents persistido (no se fabrica precio; se reintenta luego)`,
         );
-        domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: BusinessEventResult.SKIPPED });
+        domainEventsTotal.inc({
+          event: 'dispatch.offer_accepted',
+          result: BusinessEventResult.SKIPPED,
+        });
         continue;
       }
       try {
@@ -1203,8 +1202,14 @@ export class OfferBoardService {
         );
       }
       await this.store.markMatchEmitted(board.tripId);
-      domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: BusinessEventResult.RECONCILED });
-      domainEventsTotal.inc({ event: 'dispatch.match_found', result: BusinessEventResult.RECONCILED });
+      domainEventsTotal.inc({
+        event: 'dispatch.offer_accepted',
+        result: BusinessEventResult.RECONCILED,
+      });
+      domainEventsTotal.inc({
+        event: 'dispatch.match_found',
+        result: BusinessEventResult.RECONCILED,
+      });
       this.logger.warn(
         `N5 reconciliador: re-emitido match_found trip=${board.tripId} driver=${driverId} (residual hard-crash)`,
       );

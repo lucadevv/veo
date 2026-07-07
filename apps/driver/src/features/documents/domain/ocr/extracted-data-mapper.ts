@@ -26,12 +26,7 @@ import type {
   ExtractedPropertyCardData,
   ExtractedSoatData,
 } from '@veo/api-client';
-import type {
-  ParsedDni,
-  ParsedLicense,
-  ParsedPropertyCard,
-  ParsedSoat,
-} from './parsed-document';
+import type { ParsedDni, ParsedLicense, ParsedPropertyCard, ParsedSoat } from './parsed-document';
 
 /** DNI → `ExtractedDniData`. Traduce `birthDate`→`birthdate`; omite los campos que el OCR no extrajo. */
 export function parsedDniToExtracted(p: ParsedDni): ExtractedDniData {

@@ -37,8 +37,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const THRESHOLD = 5;
 const WINDOW_HOURS = 24;
 /** uuid determinista por índice (las columnas son @db.Uuid: un string arbitrario tiraría P2023). */
-const tripUuid = (n: number): string =>
-  `22222222-2222-2222-2222-${String(n).padStart(12, '0')}`;
+const tripUuid = (n: number): string => `22222222-2222-2222-2222-${String(n).padStart(12, '0')}`;
 
 let db: TestDatabase;
 let prisma: PrismaClient;
@@ -74,7 +73,11 @@ beforeEach(async () => {
 /** Emite las primeras `THRESHOLD` cancelaciones (1h aparte) → cruza el umbral exactamente en la 5ª. */
 async function emitThresholdCrossing(base: number): Promise<void> {
   for (let i = 0; i < THRESHOLD; i++) {
-    await projection.registerCancellationInWindow(DRIVER, tripUuid(i), new Date(base + i * HOUR_MS));
+    await projection.registerCancellationInWindow(
+      DRIVER,
+      tripUuid(i),
+      new Date(base + i * HOUR_MS),
+    );
   }
 }
 
@@ -107,7 +110,9 @@ describe('registerCancellationInWindow · Postgres real (cierre del 25P02)', () 
     ).resolves.toBeUndefined();
 
     // No re-contó (sigue 5 filas) ni re-emitió (sigue 1 fila de outbox).
-    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(THRESHOLD);
+    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(
+      THRESHOLD,
+    );
     expect(await prisma.outboxEvent.count({ where: { aggregateId: DRIVER } })).toBe(1);
 
     // PRUEBA DE QUE LA TX NO QUEDÓ ABORTADA: una operación NUEVA sobre el mismo cliente/pool funciona. Si la
@@ -115,33 +120,45 @@ describe('registerCancellationInWindow · Postgres real (cierre del 25P02)', () 
     await expect(
       projection.registerCancellationInWindow(DRIVER, tripUuid(99), new Date(base + 5 * HOUR_MS)),
     ).resolves.toBeUndefined();
-    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(THRESHOLD + 1);
+    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(
+      THRESHOLD + 1,
+    );
   });
 
   it('(c) el contador LIFELONG (cancelledTrips) NO se infla en la redelivery', async () => {
     const base = Date.parse('2026-06-23T00:00:00.000Z');
     await emitThresholdCrossing(base);
-    expect((await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips).toBe(
-      THRESHOLD,
-    );
+    expect(
+      (await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips,
+    ).toBe(THRESHOLD);
 
     // Redelivery del 3º evento (natural key ya existe) → early-return → lifelong NO sube.
-    await projection.registerCancellationInWindow(DRIVER, tripUuid(2), new Date(base + 2 * HOUR_MS));
-    expect((await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips).toBe(
-      THRESHOLD,
+    await projection.registerCancellationInWindow(
+      DRIVER,
+      tripUuid(2),
+      new Date(base + 2 * HOUR_MS),
     );
+    expect(
+      (await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips,
+    ).toBe(THRESHOLD);
   });
 
   it('(e) CONCURRENCIA del MISMO conductor: dos cancelaciones (trips distintos) en PARALELO emiten el cruce EXACTAMENTE una vez y el lifelong NO sufre lost-update', async () => {
     const base = Date.parse('2026-06-23T00:00:00.000Z');
     // Pre-commit THRESHOLD-2 cancelaciones (0..2 con THRESHOLD=5) → count en ventana = 3, aún por debajo del umbral.
     for (let i = 0; i < THRESHOLD - 2; i++) {
-      await projection.registerCancellationInWindow(DRIVER, tripUuid(i), new Date(base + i * HOUR_MS));
+      await projection.registerCancellationInWindow(
+        DRIVER,
+        tripUuid(i),
+        new Date(base + i * HOUR_MS),
+      );
     }
-    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(THRESHOLD - 2);
-    expect((await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips).toBe(
+    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(
       THRESHOLD - 2,
     );
+    expect(
+      (await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips,
+    ).toBe(THRESHOLD - 2);
 
     // Las DOS últimas (la (threshold-1)-ésima y la threshold-ésima), del MISMO conductor pero trips DISTINTOS
     // (en prod: keys/particiones/pods distintos → procesadas CONCURRENTEMENTE), lanzadas EN PARALELO.
@@ -224,11 +241,13 @@ describe('registerCancellationInWindow · Postgres real (cierre del 25P02)', () 
     expect(payload.payload.count).toBe(THRESHOLD);
     // (b) lifelong correcto = THRESHOLD (sin lost-update: las dos +1 concurrentes ambas contaron). ESTA aserción
     //     es la que FALLA con el read-modify-write viejo (quedaría en THRESHOLD-1) y PASA con el increment atómico.
-    expect((await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips).toBe(
+    expect(
+      (await prisma.driverStats.findUnique({ where: { driverId: DRIVER } }))?.cancelledTrips,
+    ).toBe(THRESHOLD);
+    // (c) ambas filas de cancelación persisten.
+    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(
       THRESHOLD,
     );
-    // (c) ambas filas de cancelación persisten.
-    expect(await prisma.driverCancellationEvent.count({ where: { driverId: DRIVER } })).toBe(THRESHOLD);
   });
 
   it('(f) drivers DISTINTOS no se bloquean entre sí: dos conductores cruzan su umbral en paralelo, cada uno emite su propia fila', async () => {
@@ -276,7 +295,9 @@ describe('registerCancellationInWindow · Postgres real (cierre del 25P02)', () 
       );
     }
     // La vieja fue podada (occurred_at < cutoff de la última).
-    const remaining = await prisma.driverCancellationEvent.findMany({ where: { driverId: DRIVER } });
+    const remaining = await prisma.driverCancellationEvent.findMany({
+      where: { driverId: DRIVER },
+    });
     expect(remaining.find((r) => r.tripId === tripUuid(0))).toBeUndefined();
     expect(remaining).toHaveLength(4);
     // 4 en ventana < umbral 5 → NO emite.

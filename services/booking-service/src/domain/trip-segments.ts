@@ -44,16 +44,22 @@ export function assertStopoverOrdersValid(stopovers: readonly StopoverLike[]): v
     }
     if (s.orden < 1) {
       // orden 0 = origen (reservado); negativos son inválidos. Un stopover acá pisaría el origen.
-      throw new ValidationError('El orden de un stopover debe ser ≥ 1 (el 0 está reservado al origen)', {
-        orden: s.orden,
-      });
+      throw new ValidationError(
+        'El orden de un stopover debe ser ≥ 1 (el 0 está reservado al origen)',
+        {
+          orden: s.orden,
+        },
+      );
     }
     if (s.orden > n) {
       // n+1 = destino: un stopover en orden ≥ n+1 pisaría el destino (o deja un hueco antes de él).
-      throw new ValidationError('El orden de un stopover excede el rango {1..n} (colisionaría con el destino)', {
-        orden: s.orden,
-        n,
-      });
+      throw new ValidationError(
+        'El orden de un stopover excede el rango {1..n} (colisionaría con el destino)',
+        {
+          orden: s.orden,
+          n,
+        },
+      );
     }
     if (seen.has(s.orden)) {
       throw new ValidationError('Hay stopovers con el mismo orden (los órdenes deben ser únicos)', {

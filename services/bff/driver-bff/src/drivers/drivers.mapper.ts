@@ -3,7 +3,12 @@
  * identity (driver+user), rating (agregado) y fleet (documentos) en una vista de cumplimiento.
  * Aislado del service para poder testearlo directamente.
  */
-import { DocumentSide, DriverStatus, FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
+import {
+  DocumentSide,
+  DriverStatus,
+  FleetDocumentStatus,
+  FleetDocumentType,
+} from '@veo/shared-types';
 import type {
   AggregateReply,
   DriverDocumentsReply,

@@ -21,8 +21,17 @@ export class ExpirationsController {
       'página default 25, máx 100. Devuelve { items, nextCursor }.',
   })
   @ApiQuery({ name: 'days', required: false, description: 'Ventana en días desde hoy (opcional)' })
-  @ApiQuery({ name: 'cursor', required: false, description: 'Cursor de la página previa (nextCursor)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Tamaño de página (1..100, default 25)' })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    description: 'Cursor de la página previa (nextCursor)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Tamaño de página (1..100, default 25)',
+  })
   listExpirations(
     @Query('days') days?: string,
     @Query('cursor') cursor?: string,

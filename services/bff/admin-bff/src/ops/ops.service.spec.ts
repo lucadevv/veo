@@ -89,7 +89,10 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
 
     const fleetGrpc = grpc((m) => {
       if (m === 'GetDriverVehicles')
-        return { driverId: 'd1', vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }] };
+        return {
+          driverId: 'd1',
+          vehicles: [{ id: 'v1', plate: 'ABC-123', active: true, found: true }],
+        };
       if (m === 'GetDriverDocsCompleteness') return { items: [] };
       return {};
     });
@@ -258,7 +261,12 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
 function fleetDoc(
   type: FleetDocumentType,
   status: FleetDocumentStatus,
-  overrides: Partial<{ id: string; expiresAt: string; rejectionReason: string; fileS3Key: string }> = {},
+  overrides: Partial<{
+    id: string;
+    expiresAt: string;
+    rejectionReason: string;
+    fileS3Key: string;
+  }> = {},
 ) {
   return {
     id: overrides.id ?? `doc-${type}`,
@@ -397,7 +405,8 @@ describe('OpsService.approveDriver · GATE de inspección técnica (ITV · compl
     const fleetGrpc = {
       call: vi.fn((method: string, req: Record<string, unknown>) => {
         calls.push({ method, req });
-        if (method === 'GetDriverDocuments') return Promise.resolve({ driverId: 'd1', documents: allValidDocs });
+        if (method === 'GetDriverDocuments')
+          return Promise.resolve({ driverId: 'd1', documents: allValidDocs });
         if (method === 'GetDriverInspectionStatus') return Promise.resolve(inspectionCurrent);
         return Promise.resolve({});
       }),
@@ -457,7 +466,15 @@ describe('OpsService.approveDriver · GATE de inspección técnica (ITV · compl
   it('BLOQUEA sin vehículo (NO_VEHICLE): no puede operar sin vehículo + ITV', async () => {
     const post = vi.fn();
     const svc = svcWithInspection(
-      { current: false, hasVehicle: false, vehicleId: '', plate: '', nextDueAt: '', passed: false, invalidReason: 'NO_VEHICLE' },
+      {
+        current: false,
+        hasVehicle: false,
+        vehicleId: '',
+        plate: '',
+        nextDueAt: '',
+        passed: false,
+        invalidReason: 'NO_VEHICLE',
+      },
       { post } as unknown as InternalRestClient,
       { record: vi.fn() } as unknown as AuditRecorder,
     );
@@ -621,7 +638,11 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
     // Ley 29733: ver documentos PII deja traza.
     expect(record).toHaveBeenCalledWith(
       identity,
-      expect.objectContaining({ action: 'driver.documents.view', resourceType: 'driver', resourceId: 'd1' }),
+      expect.objectContaining({
+        action: 'driver.documents.view',
+        resourceType: 'driver',
+        resourceId: 'd1',
+      }),
     );
     // FIX 3: conductor NO suspendido (proto omite suspensionCauses) → [] honesto (degradación del repeated).
     expect(view.suspensionCauses).toEqual([]);
@@ -712,7 +733,14 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
     function driverDetailService(fleetImpl: (m: string, req: Record<string, unknown>) => unknown) {
       const identityGrpc = grpc((m) =>
         m === 'GetDriver'
-          ? { id: 'd1', userId: 'u-d1', found: true, name: 'X', suspendedAt: '', rejectionReason: '' }
+          ? {
+              id: 'd1',
+              userId: 'u-d1',
+              found: true,
+              name: 'X',
+              suspendedAt: '',
+              rejectionReason: '',
+            }
           : {},
       );
       const fleetGrpc = grpc(fleetImpl);
@@ -756,7 +784,9 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       const view = await svc.driverDetail(identity, 'd1');
 
       expect(view.vehicle?.id).toBe('veh-operado');
-      const calledMethods = (fleetGrpc.call as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      const calledMethods = (fleetGrpc.call as ReturnType<typeof vi.fn>).mock.calls.map(
+        (c) => c[0],
+      );
       expect(calledMethods).toContain('GetDriverActiveVehicle');
       // El display NO debe reusar el selector divergente para la ficha del vehículo.
       expect(calledMethods).not.toContain('GetDriverVehicles');
@@ -808,13 +838,13 @@ describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lo
     );
     // Set requerido SUBIDO (el gate de inicio de verificación #2 exige presencia) + el DNI con su FRONT.
     const fleetGrpc = grpc((m) =>
-      m === 'GetDriverDocuments' ? { driverId: 'd1', documents: [...allValidDocs, dniWithFront] } : {},
+      m === 'GetDriverDocuments'
+        ? { driverId: 'd1', documents: [...allValidDocs, dniWithFront] }
+        : {},
     );
     const presignPost = vi.fn().mockResolvedValue({ url: 'https://signed/dni-front' });
     const media = { post: presignPost } as unknown as InternalRestClient;
-    const identityPost = vi
-      .fn()
-      .mockResolvedValue({ matched: true, score: 94, reason: null });
+    const identityPost = vi.fn().mockResolvedValue({ matched: true, score: 94, reason: null });
     const identityRest = { post: identityPost } as unknown as InternalRestClient;
     const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
     const audit = { record } as unknown as AuditRecorder;
@@ -1447,7 +1477,11 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
   it('read-model SUSPENDED + identity LIBRE (auto-reactivación) → badge ACTIVE (gap [4] cerrado)', async () => {
     const identityGrpc = grpc((m) =>
       m === 'GetDriversByIds'
-        ? { drivers: [{ id: 'd1', name: 'Nora', phone: '+51900000000', suspendedAt: '', found: true }] }
+        ? {
+            drivers: [
+              { id: 'd1', name: 'Nora', phone: '+51900000000', suspendedAt: '', found: true },
+            ],
+          }
         : {},
     );
     const svc = new OpsService(
@@ -1475,7 +1509,13 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
       m === 'GetDriversByIds'
         ? {
             drivers: [
-              { id: 'd1', name: 'Nora', phone: '', suspendedAt: '2026-06-21T00:00:00.000Z', found: true },
+              {
+                id: 'd1',
+                name: 'Nora',
+                phone: '',
+                suspendedAt: '2026-06-21T00:00:00.000Z',
+                found: true,
+              },
             ],
           }
         : {},
@@ -1504,7 +1544,11 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
     const grpcCall = vi.fn((m: string) =>
       Promise.resolve(
         m === 'GetDriversByIds'
-          ? { drivers: [{ id: 'd1', name: 'Nora', phone: '+51900000000', suspendedAt: '', found: true }] }
+          ? {
+              drivers: [
+                { id: 'd1', name: 'Nora', phone: '+51900000000', suspendedAt: '', found: true },
+              ],
+            }
           : {},
       ),
     );

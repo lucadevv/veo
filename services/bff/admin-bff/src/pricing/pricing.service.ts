@@ -11,11 +11,7 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type { PricingMode, BidFloorOverride } from '@veo/shared-types';
 import { REST_TRIP } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type {
-  ReplaceScheduleDto,
-  ReplaceBidFloorDto,
-  ReplaceBaseFareDto,
-} from './dto/pricing.dto';
+import type { ReplaceScheduleDto, ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
 
 /** Vista del schedule devuelta por trip-service (proyección vigente o el default). */
 export interface ModeScheduleView {

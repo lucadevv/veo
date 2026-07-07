@@ -117,7 +117,9 @@ describe('useBiometricRelogin · orden de persistencia del Keychain (A3)', () =>
   });
 
   it('DRIFT-1: un FALLO biométrico real (status failed) → setError (banner), NO fetch', async () => {
-    const unlockRefreshToken = jest.fn(() => Promise.resolve({ status: 'failed', error: new Error('no match') }));
+    const unlockRefreshToken = jest.fn(() =>
+      Promise.resolve({ status: 'failed', error: new Error('no match') }),
+    );
     const container = makeContainer({ unlockRefreshToken });
     let latest!: ReturnType<typeof useBiometricRelogin>;
 

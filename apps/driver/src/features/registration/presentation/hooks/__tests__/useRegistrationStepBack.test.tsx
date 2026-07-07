@@ -45,7 +45,11 @@ jest.mock('../useRegistrationExit', () => ({
 }));
 
 /** Host mínimo que expone el resultado del hook para inspeccionarlo en el test. */
-function HookHost({ onReady }: { onReady: (back: ReturnType<typeof useRegistrationStepBack>) => void }) {
+function HookHost({
+  onReady,
+}: {
+  onReady: (back: ReturnType<typeof useRegistrationStepBack>) => void;
+}) {
   const back = useRegistrationStepBack();
   onReady(back);
   return null;
@@ -77,11 +81,7 @@ describe('useRegistrationStepBack · reconstrucción + back seguro (fix del GO_B
     expect(mockNav.dispatch).toHaveBeenCalledWith(
       CommonActions.reset({
         index: 2,
-        routes: [
-          { name: 'PersonalData' },
-          { name: 'Vehicle' },
-          { name: 'IdentityVerification' },
-        ],
+        routes: [{ name: 'PersonalData' }, { name: 'Vehicle' }, { name: 'IdentityVerification' }],
       }),
     );
   });

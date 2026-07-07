@@ -114,7 +114,9 @@ describe('useRegistrationGate', () => {
 
   it('404 (conductor nuevo) ⇒ forceWizard (status not_started, sin tocar la sesión)', async () => {
     const getMe = jest.fn(() =>
-      Promise.reject(new ApiError(404, 'NOT_FOUND', 'No existe un perfil de conductor para este usuario')),
+      Promise.reject(
+        new ApiError(404, 'NOT_FOUND', 'No existe un perfil de conductor para este usuario'),
+      ),
     );
     await renderGate(getMe);
 

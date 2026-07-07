@@ -63,7 +63,8 @@ function matchWhere(r: Req, where: Where): boolean {
     if (k === 'renderRequestedAt') {
       const cond = v as { lt?: Date };
       if (cond.lt !== undefined) {
-        if (!(r.renderRequestedAt && r.renderRequestedAt.getTime() < cond.lt.getTime())) return false;
+        if (!(r.renderRequestedAt && r.renderRequestedAt.getTime() < cond.lt.getTime()))
+          return false;
       }
       continue;
     }
@@ -264,7 +265,10 @@ describe('VideoRenderWorker + streamAccess · burn-in end-to-end (EL TEST CRÍTI
     const access = new AccessService(
       prisma as never,
       storage,
-      new ConfigService<Env, true>({ SIGNED_URL_TTL_SECONDS: 300, WATERMARK_RENDER_MAX_ATTEMPTS: 3 }),
+      new ConfigService<Env, true>({
+        SIGNED_URL_TTL_SECONDS: 300,
+        WATERMARK_RENDER_MAX_ATTEMPTS: 3,
+      }),
     );
     const res = await access.streamAccess('req-1', 'compliance-1', now);
 
@@ -328,9 +332,11 @@ describe('VideoRenderWorker.processBatch · máquina de estados del render', () 
     const req = request({ renderStatus: VideoRenderStatus.PENDING });
     const { prisma, outbox } = makePrisma([seg], [req]);
     // NO se sube el crudo → getObjectStream lanza NotFound.
-    await makeWorker(prisma, new StorageSandboxAdapter(), new SandboxWatermarkAdapter()).processBatch(
-      now,
-    );
+    await makeWorker(
+      prisma,
+      new StorageSandboxAdapter(),
+      new SandboxWatermarkAdapter(),
+    ).processBatch(now);
 
     expect(req.renderStatus).toBe(VideoRenderStatus.FAILED);
     const failed = outbox.find((o) => o.envelope.eventType === 'media.render_failed');

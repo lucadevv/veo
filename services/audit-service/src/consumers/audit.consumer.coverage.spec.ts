@@ -34,14 +34,16 @@ function makeConfig(): ConfigService<Env, true> {
 const AUDIT_EXCLUSIONS: Readonly<Partial<Record<EventType, string>>> = {
   // Firehose (el volumen explota la hash-chain inmutable + la vuelve un tracker; valor forense nulo).
   'driver.location_updated': 'firehose GPS (1 ping/~15s por conductor online)',
-  'driver.entered_zone': 'geofence de alta frecuencia (tracking de dispatch, no una mutación de negocio)',
+  'driver.entered_zone':
+    'geofence de alta frecuencia (tracking de dispatch, no una mutación de negocio)',
   // NOTA: `driver.went_offline` YA NO se excluye — tiene handler condicional (auditedWhen) que audita la rama
   // shift_end (fin de turno deliberado) e ignora disconnect (ruido de red) como no-op. Su par de apertura
   // `driver.went_online` también se audita. DEUDA cerrada (ver audit.consumer). Excluir un evento auditado
   // rompería el XOR de este mismo spec — por eso salió de acá al agregarse el handler.
   // No es una mutación de negocio auditable.
   'audit.recorded': 'lo emite este propio servicio (auditar su auditoría sería un bucle)',
-  'fleet.document_expiring': 'pre-aviso de vencimiento (no un cambio de estado; el vencimiento es document_expired)',
+  'fleet.document_expiring':
+    'pre-aviso de vencimiento (no un cambio de estado; el vencimiento es document_expired)',
 };
 
 describe('AuditConsumer · cobertura "todo todo" (anti-drift, regla de oro)', () => {
@@ -90,7 +92,9 @@ describe('AuditConsumer · cobertura "todo todo" (anti-drift, regla de oro)', ()
 
   it('cada exclusión corresponde a un evento real de EVENT_SCHEMAS (no hay exclusión obsoleta)', () => {
     for (const eventType of Object.keys(AUDIT_EXCLUSIONS)) {
-      expect(eventType in EVENT_SCHEMAS, `exclusión de evento inexistente: ${eventType}`).toBe(true);
+      expect(eventType in EVENT_SCHEMAS, `exclusión de evento inexistente: ${eventType}`).toBe(
+        true,
+      );
     }
   });
 

@@ -4,7 +4,11 @@ import { ApiError, type DriverProfileView } from '@veo/api-client';
 import { useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
-import { isAwaitingReview, mapProfileToRegistrationStatus, resumeStepForProfile } from '../../domain';
+import {
+  isAwaitingReview,
+  mapProfileToRegistrationStatus,
+  resumeStepForProfile,
+} from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationHydration } from './useRegistrationHydration';
 

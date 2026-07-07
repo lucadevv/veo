@@ -13,11 +13,7 @@
  */
 import { anonymousIdentity, grpcIdentityMetadata, InternalAudience } from '@veo/auth';
 import { createGrpcClient, type PaymentReply, type GrpcServiceClient } from '@veo/rpc';
-import {
-  PaymentMethod,
-  PaymentStatus,
-  type PaymentView,
-} from './payment-gateway.port';
+import { PaymentMethod, PaymentStatus, type PaymentView } from './payment-gateway.port';
 
 const SERVICE_RAIL = InternalAudience.SERVICE_RAIL;
 

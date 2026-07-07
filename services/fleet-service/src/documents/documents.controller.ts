@@ -47,7 +47,9 @@ export class DocumentsController {
   @UseGuards(RolesGuard)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get()
-  @ApiOperation({ summary: 'Listar documentos (paginado cursor). Filtros: status, ownerId. ADMIN-ONLY' })
+  @ApiOperation({
+    summary: 'Listar documentos (paginado cursor). Filtros: status, ownerId. ADMIN-ONLY',
+  })
   @ApiQuery({ name: 'status', required: false, enum: FleetDocumentStatus })
   @ApiQuery({ name: 'ownerId', required: false })
   @ApiQuery({ name: 'cursor', required: false })

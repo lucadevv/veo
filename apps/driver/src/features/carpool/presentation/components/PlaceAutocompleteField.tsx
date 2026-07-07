@@ -60,7 +60,12 @@ export function PlaceAutocompleteField({
               accessibilityRole="button"
               style={[
                 styles.row,
-                i > 0 ? { borderTopColor: theme.colors.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
+                i > 0
+                  ? {
+                      borderTopColor: theme.colors.border,
+                      borderTopWidth: StyleSheet.hairlineWidth,
+                    }
+                  : null,
               ]}
             >
               <Text variant="body" numberOfLines={1}>

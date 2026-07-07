@@ -9,7 +9,11 @@ import {
   withFloorOverride,
 } from './bid-floor';
 
-const ov = (offeringId: string, floorCents: number, zone: string = GLOBAL_ZONE): BidFloorOverride => ({
+const ov = (
+  offeringId: string,
+  floorCents: number,
+  zone: string = GLOBAL_ZONE,
+): BidFloorOverride => ({
   zone,
   offeringId,
   floorCents,
@@ -28,7 +32,9 @@ const view = (overrides: BidFloorOverride[], defaultFloorCents = 700): BidFloorV
  */
 describe('offeringFloorOverrideCents · override explícito o null', () => {
   it('devuelve el override de la oferta cuando existe en la zona global', () => {
-    expect(offeringFloorOverrideCents(view([ov(OfferingId.VEO_MOTO, 300)]), OfferingId.VEO_MOTO)).toBe(300);
+    expect(
+      offeringFloorOverrideCents(view([ov(OfferingId.VEO_MOTO, 300)]), OfferingId.VEO_MOTO),
+    ).toBe(300);
   });
 
   it('devuelve null cuando la oferta no tiene override (usa el default)', () => {
@@ -37,7 +43,10 @@ describe('offeringFloorOverrideCents · override explícito o null', () => {
 
   it('ignora overrides de OTRAS zonas (hoy solo GLOBAL; zone-ready)', () => {
     expect(
-      offeringFloorOverrideCents(view([ov(OfferingId.VEO_MOTO, 300, 'LIMA_NORTE')]), OfferingId.VEO_MOTO),
+      offeringFloorOverrideCents(
+        view([ov(OfferingId.VEO_MOTO, 300, 'LIMA_NORTE')]),
+        OfferingId.VEO_MOTO,
+      ),
     ).toBeNull();
   });
 });
@@ -45,7 +54,9 @@ describe('offeringFloorOverrideCents · override explícito o null', () => {
 /** El piso efectivo = override ?? default. Siempre resoluble; es el operando de la validación cruzada. */
 describe('effectiveFloorCents · override o default', () => {
   it('usa el override cuando existe', () => {
-    expect(effectiveFloorCents(view([ov(OfferingId.VEO_MOTO, 300)], 700), OfferingId.VEO_MOTO)).toBe(300);
+    expect(
+      effectiveFloorCents(view([ov(OfferingId.VEO_MOTO, 300)], 700), OfferingId.VEO_MOTO),
+    ).toBe(300);
   });
 
   it('cae al default cuando no hay override', () => {

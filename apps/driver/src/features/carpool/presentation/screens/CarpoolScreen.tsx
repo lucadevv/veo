@@ -67,7 +67,11 @@ function TripCard({
       <Card variant="filled">
         <View style={styles.cardHead}>
           <Text variant="bodyStrong">{formatShortDate(trip.fechaHoraSalida)}</Text>
-          <StatusPill label={t(`carpool.state.${trip.estado}`)} tone={tripStateTone(trip.estado)} dot />
+          <StatusPill
+            label={t(`carpool.state.${trip.estado}`)}
+            tone={tripStateTone(trip.estado)}
+            dot
+          />
         </View>
         <View style={styles.cardMeta}>
           <Text variant="callout" color="inkMuted">
@@ -152,7 +156,12 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
 
 const styles = StyleSheet.create({
   section: { gap: 12, paddingTop: 20 },
-  cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   cardMeta: {
     flexDirection: 'row',
     alignItems: 'center',

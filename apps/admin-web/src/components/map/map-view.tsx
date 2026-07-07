@@ -134,9 +134,7 @@ export function MapView({ markers, center, zoom, className, onMarkerClick }: Map
       container: containerRef.current,
       // Con token → estilo veo-dark (Mapbox Streets v8). Sin token → fallback soberano honesto.
       // El objeto del estilo es un Style spec v8 válido; se castea porque está tipado laxo (JSON puro).
-      style: MAPBOX_TOKEN
-        ? (veoDarkMapboxStyle as unknown as StyleSpecification)
-        : fallbackStyle(),
+      style: MAPBOX_TOKEN ? (veoDarkMapboxStyle as unknown as StyleSpecification) : fallbackStyle(),
       // maplibre 4.x dropeó `mapbox://`; reescribimos tileset + glyphs a HTTPS + token público.
       transformRequest: MAPBOX_TOKEN ? transformRequest : undefined,
       center: initialCenter,

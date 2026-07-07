@@ -74,7 +74,9 @@ export function OtpInput({ value, onChange, length = 6, autoFocus }: OtpInputPro
           onKeyDown={(e) => onKeyDown(i, e)}
           className={cn(
             'h-[52px] w-full rounded-md border bg-bg text-center font-mono text-xl text-ink outline-none transition-colors',
-            d ? 'border-accent ring-1 ring-inset ring-accent/40' : 'border-border-strong focus:border-accent',
+            d
+              ? 'border-accent ring-1 ring-inset ring-accent/40'
+              : 'border-border-strong focus:border-accent',
           )}
         />
       ))}

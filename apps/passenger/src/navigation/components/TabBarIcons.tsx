@@ -146,7 +146,12 @@ export function IconTabRides({
         strokeWidth={STROKE}
         strokeLinejoin="round"
       />
-      <Path d="M5 11h14" stroke={innerColor} strokeWidth={STROKE} strokeLinecap="round" />
+      <Path
+        d="M5 11h14"
+        stroke={innerColor}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
       <Circle cx={8} cy={14.5} r={0.9} fill={innerColor} />
       <Circle cx={16} cy={14.5} r={0.9} fill={innerColor} />
     </Svg>

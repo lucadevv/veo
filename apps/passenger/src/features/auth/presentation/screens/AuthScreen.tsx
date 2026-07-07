@@ -29,7 +29,12 @@ import {isValidPhone, useAuthFlow} from '../hooks/useAuthFlow';
 import {type OAuthErrorKind, useOAuthFlow} from '../hooks/useOAuthFlow';
 import {useOnboardingStore} from '../stores/onboardingStore';
 import {OtpField} from '../components/OtpField';
-import {BrandBadge, IconApple, IconCheck, IconChevronLeft} from '../components/icons';
+import {
+  BrandBadge,
+  IconApple,
+  IconCheck,
+  IconChevronLeft,
+} from '../components/icons';
 
 /** Color de marca de Google (explícito del diseño, no token de tema). */
 const GOOGLE_BLUE = '#4285F4';
@@ -306,7 +311,10 @@ export function AuthScreen(): React.JSX.Element {
             {t('auth.countryCode')}
           </Text>
           <View
-            style={[styles.divider, {backgroundColor: theme.colors.borderStrong}]}
+            style={[
+              styles.divider,
+              {backgroundColor: theme.colors.borderStrong},
+            ]}
           />
           <TextInput
             accessibilityLabel={t('auth.phoneLabel')}

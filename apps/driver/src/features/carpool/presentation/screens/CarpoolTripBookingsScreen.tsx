@@ -63,10 +63,12 @@ function BookingCard({
   return (
     <Card variant="filled">
       <View style={styles.head}>
-        <Text variant="bodyStrong">
-          {t('carpool.seatsRequested', { count: booking.asientos })}
-        </Text>
-        <StatusPill label={t(`carpool.bookingState.${booking.estado}`)} tone={bookingTone(booking.estado)} dot />
+        <Text variant="bodyStrong">{t('carpool.seatsRequested', { count: booking.asientos })}</Text>
+        <StatusPill
+          label={t(`carpool.bookingState.${booking.estado}`)}
+          tone={bookingTone(booking.estado)}
+          dot
+        />
       </View>
       {booking.mensajeIntro ? (
         <Text variant="callout" color="inkMuted" style={styles.msg}>
@@ -115,7 +117,10 @@ export const CarpoolTripBookingsScreen = ({ route, navigation }: Props): React.J
   const bookings = useTripBookings(tripId);
 
   return (
-    <SafeScreen scroll header={<TopBar title={t('carpool.requestsTitle')} onBack={navigation.goBack} />}>
+    <SafeScreen
+      scroll
+      header={<TopBar title={t('carpool.requestsTitle')} onBack={navigation.goBack} />}
+    >
       {bookings.isLoading ? (
         <View style={styles.list}>
           <Skeleton height={120} radius={theme.radii.lg} />

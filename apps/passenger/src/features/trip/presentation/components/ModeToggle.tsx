@@ -21,7 +21,12 @@ interface SegmentProps {
   onPress: () => void;
 }
 
-function Segment({active, label, icon, onPress}: SegmentProps): React.JSX.Element {
+function Segment({
+  active,
+  label,
+  icon,
+  onPress,
+}: SegmentProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <Pressable

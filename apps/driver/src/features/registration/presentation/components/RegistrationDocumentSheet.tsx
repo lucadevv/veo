@@ -18,12 +18,7 @@ import {
   ocrTimestampNow,
   scannedImageToPickedImage,
 } from '../../../documents/data';
-import {
-  IconCamera,
-  IconCheck,
-  IconImage,
-  IconScan,
-} from '../../../../shared/presentation/icons';
+import { IconCamera, IconCheck, IconImage, IconScan } from '../../../../shared/presentation/icons';
 import { hexAlpha } from './color';
 import {
   REGISTRATION_DOCUMENT_FORM_CONFIG,
@@ -374,7 +369,9 @@ export function RegistrationDocumentSheet({
                 <IconScan size={28} color={theme.colors.inkSubtle} strokeWidth={1.8} />
               )}
               <Text variant="footnote" color="inkSubtle">
-                {t(isPhoto ? 'registration.documents.photo.noFile' : 'registration.documents.noFile')}
+                {t(
+                  isPhoto ? 'registration.documents.photo.noFile' : 'registration.documents.noFile',
+                )}
               </Text>
             </View>
           )}
@@ -423,7 +420,11 @@ export function RegistrationDocumentSheet({
               ]}
             >
               {back ? (
-                <Image source={{ uri: back.uri }} style={styles.previewImage} resizeMode="contain" />
+                <Image
+                  source={{ uri: back.uri }}
+                  style={styles.previewImage}
+                  resizeMode="contain"
+                />
               ) : (
                 <IconScan size={22} color={theme.colors.inkSubtle} strokeWidth={1.8} />
               )}
@@ -462,9 +463,7 @@ export function RegistrationDocumentSheet({
             {isPhoto ? (
               <PrimaryCaptureButton
                 label={
-                  file
-                    ? t('registration.actions.retake')
-                    : t('registration.documents.photo.take')
+                  file ? t('registration.actions.retake') : t('registration.documents.photo.take')
                 }
                 hint={t('registration.documents.photo.hint')}
                 icon={<IconCamera size={20} color={theme.colors.accent} strokeWidth={1.8} />}

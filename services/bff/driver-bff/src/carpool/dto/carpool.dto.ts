@@ -88,7 +88,10 @@ export class PublishTripDto {
   @IsLongitude()
   destinoLon!: number;
 
-  @ApiPropertyOptional({ type: [StopoverDto], description: 'Paradas intermedias (≤20, `orden` único ≥1).' })
+  @ApiPropertyOptional({
+    type: [StopoverDto],
+    description: 'Paradas intermedias (≤20, `orden` único ≥1).',
+  })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(20)
@@ -232,7 +235,9 @@ export class CarpoolPageQueryDto {
   @Max(100)
   limit?: number;
 
-  @ApiPropertyOptional({ description: 'Cursor keyset: id (UUID) del último item de la página previa.' })
+  @ApiPropertyOptional({
+    description: 'Cursor keyset: id (UUID) del último item de la página previa.',
+  })
   @IsOptional()
   @IsUUID()
   cursor?: string;

@@ -1,7 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { BadgeCheck, Car, Check, ImageOff, type LucideIcon, RefreshCw, User, X } from 'lucide-react';
+import {
+  BadgeCheck,
+  Car,
+  Check,
+  ImageOff,
+  type LucideIcon,
+  RefreshCw,
+  User,
+  X,
+} from 'lucide-react';
 import type {
   AdminDocumentImage,
   AdminDriverDocument,
@@ -89,8 +98,18 @@ const DOCUMENT_CATEGORY: Record<FleetDocumentTypeValue, DocumentCategory> = {
 
 /** Meta de cada categoría en ORDEN de despliegue (personal → vehículo → certificaciones). */
 const CATEGORY_META: { key: DocumentCategory; label: string; hint: string; Icon: LucideIcon }[] = [
-  { key: DocumentCategory.PERSONAL, label: 'Documentos personales', hint: 'Identidad del conductor', Icon: User },
-  { key: DocumentCategory.VEHICLE, label: 'Documentos del vehículo', hint: 'Habilitación del auto', Icon: Car },
+  {
+    key: DocumentCategory.PERSONAL,
+    label: 'Documentos personales',
+    hint: 'Identidad del conductor',
+    Icon: User,
+  },
+  {
+    key: DocumentCategory.VEHICLE,
+    label: 'Documentos del vehículo',
+    hint: 'Habilitación del auto',
+    Icon: Car,
+  },
   {
     key: DocumentCategory.CERTIFICATION,
     label: 'Certificaciones de operador',
@@ -414,7 +433,12 @@ function DocumentImageTile({
           </Button>
         </div>
       ) : (
-        <a href={image.url ?? undefined} target="_blank" rel="noopener noreferrer" className="block">
+        <a
+          href={image.url ?? undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block"
+        >
           <img
             key={image.url}
             src={image.url ?? undefined}

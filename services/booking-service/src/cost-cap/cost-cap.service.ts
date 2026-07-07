@@ -237,9 +237,12 @@ export class CostCapService {
    */
   private setHitoOrFail(map: Map<number, PuntoHito>, orden: number, hito: PuntoHito): void {
     if (map.has(orden)) {
-      throw new ValidationError('Colisión de orden entre hitos de la ruta (origen/stopovers/destino)', {
-        orden,
-      });
+      throw new ValidationError(
+        'Colisión de orden entre hitos de la ruta (origen/stopovers/destino)',
+        {
+          orden,
+        },
+      );
     }
     map.set(orden, hito);
   }
@@ -252,9 +255,12 @@ export class CostCapService {
   private requirePunto(map: Map<number, PuntoHito>, orden: number): PuntoHito {
     const punto = map.get(orden);
     if (!punto) {
-      throw new ExternalServiceError('No se pudo resolver el hito del tramo para calcular su distancia', {
-        orden,
-      });
+      throw new ExternalServiceError(
+        'No se pudo resolver el hito del tramo para calcular su distancia',
+        {
+          orden,
+        },
+      );
     }
     return punto;
   }

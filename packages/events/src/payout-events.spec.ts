@@ -27,9 +27,9 @@ describe('payout money-OUT events (ADR-015 §4.1)', () => {
     });
 
     it('RECHAZA un payload sin campos requeridos', () => {
-      expect(
-        schemaForEvent('payout.processing')!.safeParse({ payoutId: 'po-1' }).success,
-      ).toBe(false);
+      expect(schemaForEvent('payout.processing')!.safeParse({ payoutId: 'po-1' }).success).toBe(
+        false,
+      );
     });
 
     it('FALLA-CERRADO contra PII: rechaza un campo extra (.strict)', () => {

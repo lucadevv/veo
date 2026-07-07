@@ -60,9 +60,7 @@ export function DocumentPreviewCard({
           },
         ]}
       >
-        <View
-          style={[styles.badge, { backgroundColor: hexAlpha(theme.colors.success, 0.14) }]}
-        >
+        <View style={[styles.badge, { backgroundColor: hexAlpha(theme.colors.success, 0.14) }]}>
           <IconCheck size={15} color={theme.colors.success} strokeWidth={2.6} />
         </View>
         <View style={styles.statusText}>
@@ -84,7 +82,17 @@ const styles = StyleSheet.create({
   // Proporción de tarjeta ID-1 (DNI/licencia): el documento se ve ENTERO, sin el zoom del cover.
   image: { width: '100%', aspectRatio: DOCUMENT_CARD_ASPECT_RATIO },
   // Hairline que separa la imagen-héroe de la línea de estado, sin un divisor pesado.
-  statusBar: { flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth },
-  badge: { width: 28, height: 28, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  statusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  badge: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   statusText: { flex: 1, gap: 2 },
 });

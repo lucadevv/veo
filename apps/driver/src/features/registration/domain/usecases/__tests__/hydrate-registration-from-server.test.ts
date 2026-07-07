@@ -18,11 +18,7 @@ import {
  */
 
 /** Fabrica un `DriverDocument` del server con un estado/numero dados (resto irrelevante para el plan). */
-function serverDoc(
-  type: string,
-  status: string,
-  documentNumber = '',
-): RegistrationDocumentView {
+function serverDoc(type: string, status: string, documentNumber = ''): RegistrationDocumentView {
   return {
     type,
     documentNumber,
@@ -70,7 +66,15 @@ describe('buildRegistrationHydrationPlan', () => {
   it('los 5 docs en PENDING_REVIEW → marca los 5 tipos como subidos + hidrata el DNI', () => {
     const plan = buildRegistrationHydrationPlan(FIVE_DOCS_PENDING);
     expect(plan.uploadedDocTypes.sort()).toEqual(
-      (['DNI', 'LICENSE', 'SOAT', 'VEHICLE_REGISTRATION', 'VEHICLE_PHOTO'] as RegistrationDocumentType[]).sort(),
+      (
+        [
+          'DNI',
+          'LICENSE',
+          'SOAT',
+          'VEHICLE_REGISTRATION',
+          'VEHICLE_PHOTO',
+        ] as RegistrationDocumentType[]
+      ).sort(),
     );
     // El número del DNI sale del `documentNumber` del documento DNI del server (no hay GET de PII).
     expect(plan.dni).toBe('70123456');
@@ -129,7 +133,15 @@ describe('applyRegistrationHydration (no destructivo, idempotente)', () => {
     // Los 5 tipos quedan marcados UPLOADED (DNI incluido) → ningún paso se re-pide.
     const marked = setDocumentStatus.mock.calls.map((c) => c[0] as RegistrationDocumentType).sort();
     expect(marked).toEqual(
-      (['DNI', 'LICENSE', 'SOAT', 'VEHICLE_REGISTRATION', 'VEHICLE_PHOTO'] as RegistrationDocumentType[]).sort(),
+      (
+        [
+          'DNI',
+          'LICENSE',
+          'SOAT',
+          'VEHICLE_REGISTRATION',
+          'VEHICLE_PHOTO',
+        ] as RegistrationDocumentType[]
+      ).sort(),
     );
     expect(setDocumentStatus).toHaveBeenCalledWith('DNI', DocumentUploadStatus.UPLOADED);
   });

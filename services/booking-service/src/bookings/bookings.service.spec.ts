@@ -16,7 +16,10 @@ import { BookingState, ModoReserva, PublishedTripState } from '../generated/pris
 import { BookingsService } from './bookings.service';
 import type { BookingsRepository, CreateBookingData, OutboxIntent } from './bookings.repository';
 import type { CreateBookingDto } from './dto/create-booking.dto';
-import { FakePaymentGateway, type FakePaymentGatewayOptions } from '../ports/payment/fake-payment-gateway';
+import {
+  FakePaymentGateway,
+  type FakePaymentGatewayOptions,
+} from '../ports/payment/fake-payment-gateway';
 import { ChargePermanentlyRejectedError } from '../domain/payment-charge';
 import { BACKGROUND_CHECK_CLEARED, VEHICLE_STATUS_OPERABLE } from '../domain/driver-eligibility';
 import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
@@ -55,7 +58,9 @@ function makeDriver(over: Partial<IdentityDriver> = {}): IdentityDriver {
 }
 
 /** IdentityClient fake (gate de driver activo en approve/reject). Por default devuelve un conductor activo. */
-function makeIdentity(driver: IdentityDriver | (() => Promise<IdentityDriver>) = makeDriver()): IdentityClient {
+function makeIdentity(
+  driver: IdentityDriver | (() => Promise<IdentityDriver>) = makeDriver(),
+): IdentityClient {
   const getDriver = vi.fn(typeof driver === 'function' ? driver : async () => driver);
   return { getDriver };
 }
@@ -244,7 +249,10 @@ describe('BookingsService · smoke create/read', () => {
     expect(data.estado).toBe(BookingState.APROBADO);
     // El evento refleja el ESTADO REAL: APROBADO → booking.approved (emitir booking.requested mentiría).
     expect(intent.eventType).toBe('booking.approved');
-    expect(intent.payload).toMatchObject({ estado: BookingState.APROBADO, origen: 'INSTANT_BOOKING' });
+    expect(intent.payload).toMatchObject({
+      estado: BookingState.APROBADO,
+      origen: 'INSTANT_BOOKING',
+    });
     // FIX 1 — el payload EMITIDO valida contra el SCHEMA PUBLICADO de booking.approved (@veo/events). Un test
     // que hubiera cazado el poison message: si `origen` no estuviera en el z.enum del schema, esto fallaría.
     const schema = schemaForEvent('booking.approved');
@@ -351,7 +359,9 @@ describe('BookingsService · smoke create/read', () => {
   });
 
   it('rechaza reservar sobre una oferta no abierta (LLENO → 409)', async () => {
-    const { repo, createWithEventIdempotent } = makeRepo(makeTrip({ estado: PublishedTripState.LLENO }));
+    const { repo, createWithEventIdempotent } = makeRepo(
+      makeTrip({ estado: PublishedTripState.LLENO }),
+    );
     const service = makeService(repo);
     await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(ConflictError);
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
@@ -443,7 +453,9 @@ describe('BookingsService · gate de deuda al reservar (§5.4)', () => {
   it('DEGRADACIÓN fail-OPEN: payment caído/timeout NO bloquea la reserva (reservar no mueve plata)', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
     const service = makeService(repo, {
-      debtError: new ExternalServiceError('payment-service inaccesible para el gate de deuda al reservar'),
+      debtError: new ExternalServiceError(
+        'payment-service inaccesible para el gate de deuda al reservar',
+      ),
     });
 
     // payment está caído, pero la reserva PROCEDE (fail-open): el cobro real re-valida en F3b.
@@ -468,7 +480,13 @@ describe('BookingsService · gate de operabilidad del vehículo al reservar (Lot
     ['docs vencidos (docStatus)', { docStatus: FleetDocumentStatus.EXPIRED }],
   ])('vehículo %s → ConflictError (409) y NO se crea la reserva', async (_caso, over) => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
-    const service = makeService(repo, undefined, undefined, undefined, makeFleet(makeVehicleView(over)));
+    const service = makeService(
+      repo,
+      undefined,
+      undefined,
+      undefined,
+      makeFleet(makeVehicleView(over)),
+    );
 
     await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(ConflictError);
     // El gate corta ANTES de persistir.
@@ -484,7 +502,9 @@ describe('BookingsService · gate de operabilidad del vehículo al reservar (Lot
 
     // La operabilidad es legal/seguridad y NO es recuperable como la deuda → fail-CLOSED (contraste con el
     // gate de deuda que es fail-open): no se reserva un asiento en un vehículo que no pudimos verificar.
-    await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
   });
 
@@ -532,7 +552,13 @@ describe('BookingsService · gate de elegibilidad del conductor al reservar (Lot
     );
     const gateway = new FakePaymentGateway();
     const suspended = makeIdentity(makeDriver({ currentStatus: DriverStatus.SUSPENDED }));
-    const service = new BookingsService(repo, gateway, suspended, makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      suspended,
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(ConflictError);
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
@@ -547,7 +573,9 @@ describe('BookingsService · gate de elegibilidad del conductor al reservar (Lot
     });
     const service = makeService(repo, undefined, identityDown);
 
-    await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(service.reserve(PASSENGER_ID, makeDto())).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
   });
 });
@@ -579,11 +607,22 @@ function makeBooking(over: Record<string, unknown> = {}) {
  */
 describe('BookingsService · INSTANT dispara el CHARGE al reservar (§4.2/§5.2)', () => {
   it('INSTANT: tras crear APROBADO, dispara el charge (método/precio/passenger) y marca COBRO_PENDIENTE', async () => {
-    const { repo, markChargePending } = makeRepo(makeTrip({ modoReserva: ModoReserva.INSTANT_BOOKING }));
+    const { repo, markChargePending } = makeRepo(
+      makeTrip({ modoReserva: ModoReserva.INSTANT_BOOKING }),
+    );
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
-    const result = await service.reserve(PASSENGER_ID, makeDto({ paymentMethod: PaymentMethod.PLIN }));
+    const result = await service.reserve(
+      PASSENGER_ID,
+      makeDto({ paymentMethod: PaymentMethod.PLIN }),
+    );
 
     // El charge se disparó UNA vez con el método elegido (PLIN), el precio acordado y el passenger server-truth.
     expect(gateway.chargeCalls).toHaveLength(1);
@@ -624,7 +663,13 @@ describe('BookingsService · escudo anti-lucro: specialRequest dentro del cost-c
         { precioAcordadoCentimos: 999_999 },
       );
     });
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      costCap,
+      makeFleet(),
+    );
 
     await expect(
       service.reserve(PASSENGER_ID, makeDto({ specialRequest: 999_999 })),
@@ -643,7 +688,13 @@ describe('BookingsService · escudo anti-lucro: specialRequest dentro del cost-c
       makeTrip({ pais: 'PE', asientosTotales: 4, tollsCents: 250 }),
     );
     const { costCap, assertAgreedPriceWithinCap } = makeCostCap(); // NO-OP: dentro del cap
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      costCap,
+      makeFleet(),
+    );
 
     await service.reserve(PASSENGER_ID, makeDto({ specialRequest: 300 }));
 
@@ -663,7 +714,13 @@ describe('BookingsService · escudo anti-lucro: specialRequest dentro del cost-c
   it('SIN specialRequest (== 0) → NO se re-pega al tope (precioBase ya topado al publicar)', async () => {
     const { repo, createWithEventIdempotent } = makeRepo(makeTrip());
     const { costCap, assertAgreedPriceWithinCap } = makeCostCap();
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      costCap,
+      makeFleet(),
+    );
 
     await service.reserve(PASSENGER_ID, makeDto()); // sin specialRequest
 
@@ -692,7 +749,13 @@ describe('BookingsService · el CHARGE cobra precioAcordado × asientos (multi-a
       }),
     );
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await service.reserve(PASSENGER_ID, makeDto({ asientos: 3 })); // sin specialRequest → precioAcordado = 1500/asiento
 
@@ -715,7 +778,13 @@ describe('BookingsService · el CHARGE cobra precioAcordado × asientos (multi-a
       }),
     );
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await service.reserve(PASSENGER_ID, makeDto({ asientos: 1 }));
 
@@ -735,15 +804,26 @@ describe('BookingsService · resultado del CHARGE al disparar (FIX 2/3, §5.4)',
     const harness = makeRepo(makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }));
     harness.findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     // tx1 aprueba OK → devuelve el booking APROBADO (el estado real que triggerCharge inspecciona).
-    harness.transitionWithEvent.mockResolvedValueOnce(makeBooking({ estado: BookingState.APROBADO }));
+    harness.transitionWithEvent.mockResolvedValueOnce(
+      makeBooking({ estado: BookingState.APROBADO }),
+    );
     const gateway = new FakePaymentGateway(chargeOpts);
-    const service = new BookingsService(harness.repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      harness.repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
     return { ...harness, gateway, service };
   }
 
   it('decline SÍNCRONO status=DEBT → booking CANCELADO (NO COBRO_PENDIENTE) + booking.cancelled (razon=COBRO_RECHAZADO)', async () => {
     const { service, markChargePending, transitionWithEvent } = approveSetup({
-      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.DEBT },
+      chargeResult: {
+        paymentId: '00000000-0000-0000-0000-0000000000f1',
+        status: PaymentStatus.DEBT,
+      },
     });
 
     const result = await service.approve(BOOKING_ID, DRIVER_ID);
@@ -771,7 +851,10 @@ describe('BookingsService · resultado del CHARGE al disparar (FIX 2/3, §5.4)',
 
   it('decline SÍNCRONO status=FAILED → booking CANCELADO', async () => {
     const { service, markChargePending } = approveSetup({
-      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.FAILED },
+      chargeResult: {
+        paymentId: '00000000-0000-0000-0000-0000000000f1',
+        status: PaymentStatus.FAILED,
+      },
     });
 
     const result = await service.approve(BOOKING_ID, DRIVER_ID);
@@ -782,7 +865,10 @@ describe('BookingsService · resultado del CHARGE al disparar (FIX 2/3, §5.4)',
 
   it('charge THROW PERMANENTE (4xx) → booking CANCELADO (NO loop, NO COBRO_PENDIENTE)', async () => {
     const { service, markChargePending, transitionWithEvent } = approveSetup({
-      chargeError: new ChargePermanentlyRejectedError({ upstreamStatus: 422, code: 'PAYMENT_METHOD_INVALID' }),
+      chargeError: new ChargePermanentlyRejectedError({
+        upstreamStatus: 422,
+        code: 'PAYMENT_METHOD_INVALID',
+      }),
     });
 
     const result = await service.approve(BOOKING_ID, DRIVER_ID);
@@ -799,7 +885,9 @@ describe('BookingsService · resultado del CHARGE al disparar (FIX 2/3, §5.4)',
       chargeError: new ExternalServiceError('payment-service inaccesible (timeout)'),
     });
 
-    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     // tx1 corrió (aprobó); NO se canceló (la 2da transición no se llama) ni se marcó COBRO_PENDIENTE.
     expect(transitionWithEvent).toHaveBeenCalledOnce();
     expect(markChargePending).not.toHaveBeenCalled();
@@ -807,7 +895,10 @@ describe('BookingsService · resultado del CHARGE al disparar (FIX 2/3, §5.4)',
 
   it('charge PENDING (camino normal) → COBRO_PENDIENTE, no cancela', async () => {
     const { service, markChargePending, transitionWithEvent } = approveSetup({
-      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.PENDING },
+      chargeResult: {
+        paymentId: '00000000-0000-0000-0000-0000000000f1',
+        status: PaymentStatus.PENDING,
+      },
     });
 
     const result = await service.approve(BOOKING_ID, DRIVER_ID);
@@ -820,7 +911,10 @@ describe('BookingsService · resultado del CHARGE al disparar (FIX 2/3, §5.4)',
 
   it('charge CAPTURED síncrono → tratado IGUAL que PENDING (COBRO_PENDIENTE, NO confirma/decrementa acá: eso es F3c)', async () => {
     const { service, markChargePending } = approveSetup({
-      chargeResult: { paymentId: '00000000-0000-0000-0000-0000000000f1', status: PaymentStatus.CAPTURED },
+      chargeResult: {
+        paymentId: '00000000-0000-0000-0000-0000000000f1',
+        status: PaymentStatus.CAPTURED,
+      },
     });
 
     const result = await service.approve(BOOKING_ID, DRIVER_ID);
@@ -843,7 +937,13 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     );
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     const result = await service.approve(BOOKING_ID, DRIVER_ID);
 
@@ -877,7 +977,13 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     const gateway = new FakePaymentGateway();
     // Conductor ACTIVO/no-suspendido pero con antecedentes REJECTED (flip CLEARED→REJECTED post-publish).
     const ineligible = makeIdentity(makeDriver({ backgroundCheckStatus: 'REJECTED' }));
-    const service = new BookingsService(repo, gateway, ineligible, makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      ineligible,
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ForbiddenError);
     expect(transitionWithEvent).not.toHaveBeenCalled();
@@ -914,9 +1020,17 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     const fleet = makeFleet(async () => {
       throw new Error('fleet caída');
     });
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, fleet);
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      fleet,
+    );
 
-    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     expect(transitionWithEvent).not.toHaveBeenCalled();
     expect(gateway.chargeCalls).toHaveLength(0);
   });
@@ -927,7 +1041,13 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     );
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(transitionWithEvent).not.toHaveBeenCalled();
@@ -941,7 +1061,13 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     const gateway = new FakePaymentGateway();
     const suspended = makeIdentity(makeDriver({ suspendedAt: new Date().toISOString() }));
-    const service = new BookingsService(repo, gateway, suspended, makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      suspended,
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ForbiddenError);
     expect(transitionWithEvent).not.toHaveBeenCalled();
@@ -956,7 +1082,13 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     const identity = makeIdentity(async () => {
       throw new ExternalServiceError('identity caída');
     });
-    const service = new BookingsService(repo, new FakePaymentGateway(), identity, makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      identity,
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ForbiddenError);
     expect(transitionWithEvent).not.toHaveBeenCalled();
@@ -968,8 +1100,16 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     );
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     // El repo simula el UPDATE atómico: 0 filas (estado ya cambió) → ConflictError (P2025 traducido).
-    transitionWithEvent.mockRejectedValueOnce(new ConflictError('La reserva cambió de estado', { id: BOOKING_ID }));
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), makeCostCap().costCap, makeFleet());
+    transitionWithEvent.mockRejectedValueOnce(
+      new ConflictError('La reserva cambió de estado', { id: BOOKING_ID }),
+    );
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ConflictError);
   });
@@ -981,10 +1121,20 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     // tx1 aprueba OK (devuelve APROBADO); el charge falla.
     transitionWithEvent.mockResolvedValueOnce(makeBooking({ estado: BookingState.APROBADO }));
-    const gateway = new FakePaymentGateway({ chargeError: new ExternalServiceError('payment rechazó el charge') });
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const gateway = new FakePaymentGateway({
+      chargeError: new ExternalServiceError('payment rechazó el charge'),
+    });
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
-    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(service.approve(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     // tx1 corrió (se aprobó + emitió booking.approved), pero la tx2 (COBRO_PENDIENTE) NO: el booking queda APROBADO.
     expect(transitionWithEvent).toHaveBeenCalledOnce();
     expect(markChargePending).not.toHaveBeenCalled();
@@ -997,7 +1147,13 @@ describe('BookingsService · approve (driver-rail, §8/§10)', () => {
     // El booking ya está APROBADO (un approve previo aprobó pero el charge había fallado).
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking({ estado: BookingState.APROBADO }));
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     const result = await service.approve(BOOKING_ID, DRIVER_ID);
 
@@ -1028,7 +1184,13 @@ describe('BookingsService · ADR-015 D4: el CHARGE porta el driverId del Publish
       makeTrip({ id: TRIP_ID, driverId: TRIP_DRIVER_ID, modoReserva: ModoReserva.INSTANT_BOOKING }),
     );
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await service.reserve(PASSENGER_ID, makeDto());
 
@@ -1044,7 +1206,13 @@ describe('BookingsService · ADR-015 D4: el CHARGE porta el driverId del Publish
     );
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     // approve(bookingId, driverId): el driverId del caller es el dueño server-truth (ya validado en el gate).
     await service.approve(BOOKING_ID, TRIP_DRIVER_ID);
@@ -1062,7 +1230,13 @@ describe('BookingsService · reject (driver-rail, §4.2/§8)', () => {
     );
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
     const gateway = new FakePaymentGateway();
-    const service = new BookingsService(repo, gateway, makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await service.reject(BOOKING_ID, DRIVER_ID);
 
@@ -1081,8 +1255,16 @@ describe('BookingsService · reject (driver-rail, §4.2/§8)', () => {
     // El booking ya está RECHAZADO: el assertTransition de PENDIENTE_APROBACION→RECHAZADO pasa (se evalúa el
     // `from` esperado), pero el where atómico no matchea → ConflictError. Simulamos el 0-filas del repo.
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking({ estado: BookingState.RECHAZADO }));
-    transitionWithEvent.mockRejectedValueOnce(new ConflictError('La reserva cambió de estado', { id: BOOKING_ID }));
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), makeCostCap().costCap, makeFleet());
+    transitionWithEvent.mockRejectedValueOnce(
+      new ConflictError('La reserva cambió de estado', { id: BOOKING_ID }),
+    );
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.reject(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(ConflictError);
   });
@@ -1092,7 +1274,13 @@ describe('BookingsService · reject (driver-rail, §4.2/§8)', () => {
       makeTrip({ id: TRIP_ID, driverId: '00000000-0000-0000-0000-0000000000d9' }),
     );
     findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     await expect(service.reject(BOOKING_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
     expect(transitionWithEvent).not.toHaveBeenCalled();
@@ -1101,9 +1289,17 @@ describe('BookingsService · reject (driver-rail, §4.2/§8)', () => {
 
 describe('BookingsService · listRequestsForTrip (driver-rail, ownership)', () => {
   it('DUEÑO: lista las solicitudes del viaje (keyset paginado)', async () => {
-    const { repo, findByPublishedTripId } = makeRepo(makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }));
+    const { repo, findByPublishedTripId } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
     findByPublishedTripId.mockResolvedValueOnce([makeBooking()]);
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
     const result = await service.listRequestsForTrip(TRIP_ID, DRIVER_ID, { limit: 10 });
 
@@ -1115,15 +1311,31 @@ describe('BookingsService · listRequestsForTrip (driver-rail, ownership)', () =
     const { repo, findByPublishedTripId } = makeRepo(
       makeTrip({ id: TRIP_ID, driverId: '00000000-0000-0000-0000-0000000000d9' }),
     );
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), makeCostCap().costCap, makeFleet());
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
 
-    await expect(service.listRequestsForTrip(TRIP_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.listRequestsForTrip(TRIP_ID, DRIVER_ID)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     expect(findByPublishedTripId).not.toHaveBeenCalled();
   });
 
   it('viaje inexistente → NotFoundError', async () => {
     const { repo } = makeRepo(null);
-    const service = new BookingsService(repo, new FakePaymentGateway(), makeIdentity(), makeCostCap().costCap, makeFleet());
-    await expect(service.listRequestsForTrip(TRIP_ID, DRIVER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
+    await expect(service.listRequestsForTrip(TRIP_ID, DRIVER_ID)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 });

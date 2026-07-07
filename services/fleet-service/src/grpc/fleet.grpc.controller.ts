@@ -7,7 +7,11 @@ import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
+import {
+  verifyGrpcIdentity,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
+} from '@veo/auth';
 import { PrismaService } from '../infra/prisma.service';
 import {
   deriveVehicleReviewStatus,
@@ -199,7 +203,9 @@ export class FleetGrpcController {
 
   /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
   private requireIdentity(metadata: Metadata): void {
-    const identity = verifyGrpcIdentity(metadata, this.secret, { allowedAudiences: this.allowedAudiences });
+    const identity = verifyGrpcIdentity(metadata, this.secret, {
+      allowedAudiences: this.allowedAudiences,
+    });
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,
@@ -388,7 +394,9 @@ export class FleetGrpcController {
           current,
           passed: latest.passed,
           nextDueAt: latest.nextDueAt.toISOString(),
-          invalidReason: current ? '' : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE),
+          invalidReason: current
+            ? ''
+            : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE),
         };
       }),
     };
@@ -434,10 +442,7 @@ export class FleetGrpcController {
    * docs batched), nunca N. El `status`/`active` derivados son la MISMA señal que GetVehicle (toVehicleReply).
    */
   @GrpcMethod('FleetService', 'GetVehiclesByIds')
-  async getVehiclesByIds(
-    { ids }: GetByIdsRequest,
-    metadata: Metadata,
-  ): Promise<VehiclesReply> {
+  async getVehiclesByIds({ ids }: GetByIdsRequest, metadata: Metadata): Promise<VehiclesReply> {
     this.requireIdentity(metadata);
     const uniqueIds = [...new Set(ids ?? [])];
     if (uniqueIds.length === 0) return { vehicles: [] };
@@ -446,7 +451,10 @@ export class FleetGrpcController {
     });
     // ANTI-N+1: los docs de TODOS los vehículos en UNA query (la 2da), agrupados por vehicleId.
     // Réplica: la búsqueda es un REFINAMIENTO best-effort de display, no el gate autoritativo (ese es GetVehicle).
-    const operableById = await this.vehicleDocsOperableMap(this.prisma.read, vehicles.map((v) => v.id));
+    const operableById = await this.vehicleDocsOperableMap(
+      this.prisma.read,
+      vehicles.map((v) => v.id),
+    );
     return {
       vehicles: vehicles.map((v) => toVehicleReply(v, operableById.get(v.id) ?? false)),
     };
@@ -464,7 +472,10 @@ export class FleetGrpcController {
       orderBy: { createdAt: 'desc' },
     });
     // ANTI-N+1: los docs de TODOS los vehículos en UNA query, agrupados por vehicleId (no una por vehículo).
-    const operableById = await this.vehicleDocsOperableMap(this.prisma.read, vehicles.map((v) => v.id));
+    const operableById = await this.vehicleDocsOperableMap(
+      this.prisma.read,
+      vehicles.map((v) => v.id),
+    );
     return {
       driverId: id,
       vehicles: vehicles.map((v) => toVehicleReply(v, operableById.get(v.id) ?? false)),
@@ -479,10 +490,7 @@ export class FleetGrpcController {
    * Dispatch lo consume al adjudicar para que el vehicleId del viaje NO diverja de lo que opera el conductor.
    */
   @GrpcMethod('FleetService', 'GetDriverActiveVehicle')
-  async getDriverActiveVehicle(
-    { id }: GetByIdRequest,
-    metadata: Metadata,
-  ): Promise<VehicleReply> {
+  async getDriverActiveVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
     this.requireIdentity(metadata);
     const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId: id } });
     const active = pickActiveVehicle(vehicles);
@@ -559,7 +567,9 @@ export class FleetGrpcController {
       orderBy: { inspectedAt: 'desc' },
     });
     const current = isInspectionCurrent(latest, now);
-    const reason = current ? null : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE);
+    const reason = current
+      ? null
+      : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE);
 
     return {
       current,

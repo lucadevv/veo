@@ -194,7 +194,10 @@ describe('VehicleScreen · U3 · jerarquía 1-2-3 y un solo accent', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 
@@ -214,7 +217,10 @@ describe('VehicleScreen · U3 · jerarquía 1-2-3 y un solo accent', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 
@@ -231,7 +237,10 @@ describe('VehicleScreen · U3 · jerarquía 1-2-3 y un solo accent', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 
@@ -248,7 +257,10 @@ describe('VehicleScreen · U3 · jerarquía 1-2-3 y un solo accent', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 

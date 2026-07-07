@@ -49,7 +49,9 @@ describe('Eje Booking.estado · cobertura del producto cartesiano', () => {
 
   it('el cobro async pasa SIEMPRE por COBRO_PENDIENTE (APROBADO no salta a CONFIRMADO)', () => {
     // El corazón de la corrección consciente del ADR-014 §5: NO hay APROBADO→CONFIRMADO directo.
-    expect(bookingMachine.canTransition(BookingState.APROBADO, BookingState.CONFIRMADO)).toBe(false);
+    expect(bookingMachine.canTransition(BookingState.APROBADO, BookingState.CONFIRMADO)).toBe(
+      false,
+    );
     expect(bookingMachine.canTransition(BookingState.APROBADO, BookingState.COBRO_PENDIENTE)).toBe(
       true,
     );

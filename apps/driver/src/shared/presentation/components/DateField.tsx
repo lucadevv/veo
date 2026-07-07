@@ -1,12 +1,5 @@
 import React, { type ReactNode, useState } from 'react';
-import {
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  View,
-  type ViewStyle,
-} from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import DateTimePicker, {
@@ -179,9 +172,7 @@ export function DateField({
           </Text>
         </View>
         <View style={styles.icon}>
-          {rightIcon ?? (
-            <IconCalendar size={24} color={theme.colors.accent} strokeWidth={1.8} />
-          )}
+          {rightIcon ?? <IconCalendar size={24} color={theme.colors.accent} strokeWidth={1.8} />}
         </View>
       </Pressable>
 

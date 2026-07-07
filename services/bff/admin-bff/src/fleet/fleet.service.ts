@@ -123,9 +123,7 @@ export class FleetService {
   ): Promise<VehicleView[]> {
     if (vehicles.length === 0) return [];
     const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
-    const driverIds = [
-      ...new Set(vehicles.map((v) => v.driverId).filter((x): x is string => !!x)),
-    ];
+    const driverIds = [...new Set(vehicles.map((v) => v.driverId).filter((x): x is string => !!x))];
     const vehicleIds = vehicles.map((v) => v.id);
     const [usersReply, itvReply] = await Promise.all([
       driverIds.length > 0
@@ -231,13 +229,17 @@ export class FleetService {
     const doc = await this.rest.post<FleetDocument>(`/documents/${id}/review`, {
       identity,
       // M5: el motivo del rechazo viaja a fleet (lo persiste y el conductor lo ve). Sin motivo ⇒ se omite.
-      body: dto.reason ? { decision: dto.decision, reason: dto.reason } : { decision: dto.decision },
+      body: dto.reason
+        ? { decision: dto.decision, reason: dto.reason }
+        : { decision: dto.decision },
     });
     await this.audit.record(identity, {
       action: 'document.review',
       resourceType: 'fleet_document',
       resourceId: id,
-      payload: dto.reason ? { decision: dto.decision, reason: dto.reason } : { decision: dto.decision },
+      payload: dto.reason
+        ? { decision: dto.decision, reason: dto.reason }
+        : { decision: dto.decision },
     });
     return toFleetDocumentView(doc);
   }
@@ -403,9 +405,7 @@ function toVehicleView(
     // Un fleet-service viejo que no los envía → no-operable + motivo DOCS (degradación segura, no sobre-reporta).
     operable: v.operable ?? false,
     operabilityReason:
-      v.operable === undefined
-        ? VehicleOperabilityReason.DOCS
-        : (v.operabilityReason ?? null),
+      v.operable === undefined ? VehicleOperabilityReason.DOCS : (v.operabilityReason ?? null),
     driverId: v.driverId ?? null,
     // Ficha técnica del match (degradación honesta: un fleet-service que aún no la envía → null → "—" en el panel).
     vehicleType: v.vehicleType ?? null,

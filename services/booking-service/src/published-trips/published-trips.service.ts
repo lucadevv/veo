@@ -65,7 +65,11 @@ import {
   type StopoverPunto,
   type TramoPrecio,
 } from '../cost-cap/cost-cap.service';
-import { IDENTITY_CLIENT, type IdentityClient, type IdentityDriver } from '../identity/identity-client.port';
+import {
+  IDENTITY_CLIENT,
+  type IdentityClient,
+  type IdentityDriver,
+} from '../identity/identity-client.port';
 import {
   IDENTITY_BATCH_CLIENT,
   type IdentityBatchClient,
@@ -204,7 +208,10 @@ export class PublishedTripsService {
     await this.assertVehicleUsable(driver.userId, dto.vehicleId);
 
     // LA REGLA, NO EL IF: validar BORRADOR→PUBLICADO por la máquina tipada antes de cualquier escritura.
-    publishedTripMachine.assertTransition(PublishedTripState.BORRADOR, PublishedTripState.PUBLICADO);
+    publishedTripMachine.assertTransition(
+      PublishedTripState.BORRADOR,
+      PublishedTripState.PUBLICADO,
+    );
 
     // precioPorTramo OPCIONAL (F1a): si no llega (o llega vacío), el backend rellena el tramo full-route
     // [origen(0) → destino] con precioBase. El destino es un hito PROPIO tras el último stopover
@@ -345,10 +352,7 @@ export class PublishedTripsService {
 
     // FIX 4 — gate de visibilidad: estado searchable + salida futura. Si no, 404 (no es ofertable). Mismo
     // criterio que la búsqueda (SEARCHABLE_STATES + fechaHoraSalida > now), aplicado al detalle por id.
-    if (
-      !SEARCHABLE_STATES.includes(trip.estado) ||
-      trip.fechaHoraSalida.getTime() <= Date.now()
-    ) {
+    if (!SEARCHABLE_STATES.includes(trip.estado) || trip.fechaHoraSalida.getTime() <= Date.now()) {
       throw new NotFoundError('Viaje publicado no encontrado', { id });
     }
 
@@ -597,11 +601,7 @@ export class PublishedTripsService {
    * reservas confirmadas / pre-EN_RUTA): PARCIALMENTE_RESERVADO/LLENO ya tienen confirmadas, EN_RUTA/
    * COMPLETADO/CANCELADO son operativos/terminales → ValidationError. Emite booking.updated por outbox.
    */
-  async update(
-    id: string,
-    driverId: string,
-    dto: UpdatePublishedTripDto,
-  ): Promise<PublishedTrip> {
+  async update(id: string, driverId: string, dto: UpdatePublishedTripDto): Promise<PublishedTrip> {
     // Ownership server-truth: leo la oferta DESDE EL PRIMARY (FIX 1) y verifico que sea de ESTE conductor.
     // Miss → 404 (no revela que existe pero es de otro: mismo patrón anti-IDOR que getById de F0). El read
     // va al PRIMARY porque la réplica puede dar un estado stale; aun así, la GARANTÍA real contra TOCTOU la
@@ -638,10 +638,8 @@ export class PublishedTripsService {
     // stopovers finales. Resuelvo el set final tomando lo del DTO si llega, o lo persistido si no — así un
     // PATCH que cambia SOLO los stopovers no puede dejar tramos viejos huérfanos (ni viceversa).
     if (dto.stopovers !== undefined || dto.precioPorTramo !== undefined) {
-      const stopoversFinal =
-        dto.stopovers ?? readStopovers(trip.stopovers);
-      const tramosFinal =
-        dto.precioPorTramo ?? readTramos(trip.precioPorTramo);
+      const stopoversFinal = dto.stopovers ?? readStopovers(trip.stopovers);
+      const tramosFinal = dto.precioPorTramo ?? readTramos(trip.precioPorTramo);
       assertTramosReferToValidStopovers(stopoversFinal, tramosFinal);
     }
 
@@ -780,10 +778,13 @@ export class PublishedTripsService {
       driver = await this.identity.getDriver(driverId);
     } catch (err) {
       // fail-closed: identity caída / timeout (deadlineMs) → no se permite publicar.
-      throw new ForbiddenError('No se pudo verificar la elegibilidad del conductor (identity no disponible)', {
-        driverId,
-        cause: err instanceof Error ? err.message : String(err),
-      });
+      throw new ForbiddenError(
+        'No se pudo verificar la elegibilidad del conductor (identity no disponible)',
+        {
+          driverId,
+          cause: err instanceof Error ? err.message : String(err),
+        },
+      );
     }
     // DECISIÓN: la toma el predicado ÚNICO (todos los ejes, incl. antecedentes). Si pasa, devolvemos el driver
     // (con su userId) para el GATE del vehículo — fleet indexa por userId, no por Driver.id.
@@ -833,20 +834,26 @@ export class PublishedTripsService {
       vehicles = await this.fleet.getDriverVehicles(ownerUserId);
     } catch (err) {
       // fail-closed: fleet caída / timeout → no se publica sin validar el vehículo.
-      throw new ForbiddenError('No se pudo verificar el vehículo del conductor (fleet no disponible)', {
-        ownerUserId,
-        vehicleId,
-        cause: err instanceof Error ? err.message : String(err),
-      });
+      throw new ForbiddenError(
+        'No se pudo verificar el vehículo del conductor (fleet no disponible)',
+        {
+          ownerUserId,
+          vehicleId,
+          cause: err instanceof Error ? err.message : String(err),
+        },
+      );
     }
 
     // ANTI-IDOR: la PERTENENCIA se valida contra el userId server-truth (el key de fleet), no contra el cliente.
     const vehicle = vehicles.find((v) => v.id === vehicleId);
     if (!vehicle) {
-      throw new ForbiddenError('El vehículo no pertenece al conductor (no puede publicar con un vehículo ajeno)', {
-        ownerUserId,
-        vehicleId,
-      });
+      throw new ForbiddenError(
+        'El vehículo no pertenece al conductor (no puede publicar con un vehículo ajeno)',
+        {
+          ownerUserId,
+          vehicleId,
+        },
+      );
     }
 
     // Vigencia: la DECISIÓN la toma el predicado ÚNICO `isVehicleOperable` (el MISMO que usan detalle/reserva/búsqueda/
@@ -985,9 +992,7 @@ function readStopovers(value: unknown): { orden: number }[] {
 function readTramos(value: unknown): { desdeOrden: number; hastaOrden: number }[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) =>
-    isRecord(entry) &&
-    typeof entry.desdeOrden === 'number' &&
-    typeof entry.hastaOrden === 'number'
+    isRecord(entry) && typeof entry.desdeOrden === 'number' && typeof entry.hastaOrden === 'number'
       ? [{ desdeOrden: entry.desdeOrden, hastaOrden: entry.hastaOrden }]
       : [],
   );
@@ -1022,7 +1027,13 @@ function readTramoPrecios(value: unknown): TramoPrecio[] {
     typeof entry.desdeOrden === 'number' &&
     typeof entry.hastaOrden === 'number' &&
     typeof entry.precioCentimos === 'number'
-      ? [{ desdeOrden: entry.desdeOrden, hastaOrden: entry.hastaOrden, precioCentimos: entry.precioCentimos }]
+      ? [
+          {
+            desdeOrden: entry.desdeOrden,
+            hastaOrden: entry.hastaOrden,
+            precioCentimos: entry.precioCentimos,
+          },
+        ]
       : [],
   );
 }

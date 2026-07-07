@@ -1,4 +1,13 @@
-import { IsInt, IsObject, IsOptional, IsString, IsUUID, Max, Min, MinLength } from 'class-validator';
+import {
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -32,7 +41,9 @@ export class RecordAuditDto {
   // dedupea por eventId y no duplica la fila WORM. Omitir = caller legacy: el servicio genera uno (no
   // idempotente). El retry a nivel OPERACIÓN-BFF (doble-submit del operador) es otro tema (idempotency
   // keys en las mutaciones admin) — fuera de scope de este campo.
-  @ApiPropertyOptional({ description: 'Id estable del evento (UUIDv7) para idempotencia del registro.' })
+  @ApiPropertyOptional({
+    description: 'Id estable del evento (UUIDv7) para idempotencia del registro.',
+  })
   @IsOptional()
   @IsUUID()
   eventId?: string;

@@ -1,16 +1,17 @@
 # ADR 018 — Verificación de identidad del pasajero: PROGRESIVA (badge de confianza), no muro pre-viaje
 
 > Estado: **IMPLEMENTADO** (Lotes 1-4 en código, verificados). Fecha: 2026-07-01.
+>
 > - **Lote 1** (`4c3d67d1`): estado inicial UNVERIFIED + retiro del gate de `POST /trips`. tsc + 176 tests + auditar-core + boot-real.
 > - **Lote 2** (`bfd6cfc8`): migración 49 pasajeros PENDING → UNVERIFIED (conteos verificados).
 > - **Lote 3** (`6e01a968`): app — `KycGate` fuera de la cotización. tsc + **boot-real E2E: el pasajero UNVERIFIED pidió sin muro**.
 > - **Lote 4** (`167bb4a3`): badge "Pasajero verificado" al conductor (enrich lazy, cero PII). tsc; display E2E pendiente del fix del match-404.
 > - **Pendiente §4**: reconciliar `specs/VEO_SPEC_PASAJERO.md` + `docs/STATUS.md` (este ADR manda mientras).
-> **Revierte** la decisión-cliente previa "el pasajero debe estar KYC-VERIFIED antes de su primer viaje"
-> (`docs/STATUS.md:214,220`, comentario `services/bff/public-bff/src/trips/trips.service.ts:75-78`,
-> `specs/VEO_SPEC_PASAJERO.md` KycCamera §). El liveness del pasajero pasa de **muro pre-viaje** a
-> **verificación OPCIONAL que otorga un badge de confianza** (modelo Uber/BlaBlaCar/inDrive).
-> NO toca el KYC del CONDUCTOR (que sigue siendo gate duro con binding face↔DNI↔licencia — ADR aparte).
+>   **Revierte** la decisión-cliente previa "el pasajero debe estar KYC-VERIFIED antes de su primer viaje"
+>   (`docs/STATUS.md:214,220`, comentario `services/bff/public-bff/src/trips/trips.service.ts:75-78`,
+>   `specs/VEO_SPEC_PASAJERO.md` KycCamera §). El liveness del pasajero pasa de **muro pre-viaje** a
+>   **verificación OPCIONAL que otorga un badge de confianza** (modelo Uber/BlaBlaCar/inDrive).
+>   NO toca el KYC del CONDUCTOR (que sigue siendo gate duro con binding face↔DNI↔licencia — ADR aparte).
 
 ---
 
@@ -22,12 +23,12 @@ botón. Auditado end-to-end (2 pases adversariales, evidencia nivel 1):
 
 ### 0.1 El gate actual es real, doble-enforced y fue intencional
 
-| # | Punto | Archivo |
-| - | ----- | ------- |
-| 1 | Gate BFF: `assertKycVerified()` → 403 `KYC_REQUIRED` si `kycStatus !== VERIFIED` | `services/bff/public-bff/src/trips/trips.service.ts:161-174` (invocado `:121`) |
-| 2 | Gate defensa-en-profundidad (system-of-record) | `services/trip-service/src/trips/trips.controller.ts:65-67` (flag firmado en `public-bff/.../trips.service.ts:129`) |
-| 3 | Gate UI (pre-empt, refleja el server) | `apps/passenger/src/features/trip/presentation/components/QuotingBody.tsx:164,643-656` |
-| 4 | Transición PENDING→VERIFIED (liveness self-service, síncrono, auto-verifica) | `services/identity-service/src/kyc/kyc.service.ts:66-125` |
+| #   | Punto                                                                            | Archivo                                                                                                             |
+| --- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 1   | Gate BFF: `assertKycVerified()` → 403 `KYC_REQUIRED` si `kycStatus !== VERIFIED` | `services/bff/public-bff/src/trips/trips.service.ts:161-174` (invocado `:121`)                                      |
+| 2   | Gate defensa-en-profundidad (system-of-record)                                   | `services/trip-service/src/trips/trips.controller.ts:65-67` (flag firmado en `public-bff/.../trips.service.ts:129`) |
+| 3   | Gate UI (pre-empt, refleja el server)                                            | `apps/passenger/src/features/trip/presentation/components/QuotingBody.tsx:164,643-656`                              |
+| 4   | Transición PENDING→VERIFIED (liveness self-service, síncrono, auto-verifica)     | `services/identity-service/src/kyc/kyc.service.ts:66-125`                                                           |
 
 El pasajero se auto-verifica con **un liveness liviano** (selfie con gesto, sin DNI, sin operador) — mucho
 más liviano que el conductor. El verify es **síncrono**: liveness pasa → VERIFIED en una transacción, o
@@ -36,7 +37,7 @@ REJECTED. **No hay período de revisión asíncrona.**
 ### 0.2 El bug: conflación de estado (nace en el estado equivocado)
 
 El backend crea al pasajero nuevo directamente en `kyc_status = PENDING`. Pero la app interpreta `PENDING`
-= *"ya mandaste tu selfie, esperá el resultado"* → renderiza `KycGate` en su cara **sin CTA**
+= _"ya mandaste tu selfie, esperá el resultado"_ → renderiza `KycGate` en su cara **sin CTA**
 (`apps/passenger/.../KycGate.tsx:55-63`). Como el verify es síncrono, **`PENDING` como "en revisión" casi
 nunca es real** — es solo el estado inicial mal nombrado. Resultado: **el pasajero que NUNCA hizo nada
 queda etiquetado "en revisión" y sin salida en la pantalla de pedir.** El estado inicial correcto de "no
@@ -44,11 +45,11 @@ arrancó" es `unverified`, no `pending` (que la app SÍ renderiza accionable: bo
 
 ### 0.3 La industria no pone muro al pasajero para el primer viaje
 
-| App | Pasajero para pedir | Verificación de identidad |
-| --- | ------------------- | ------------------------- |
-| inDrive | teléfono + nombre | selfie/DNI solo en ciertas regiones; señal de confianza |
-| BlaBlaCar | puede reservar sin ID | **OPCIONAL** → badge "Perfil verificado"; obligatorio solo casos borde (transfronterizo) |
-| Uber/Lyft | teléfono + método de pago | ID opcional/regional |
+| App       | Pasajero para pedir       | Verificación de identidad                                                                |
+| --------- | ------------------------- | ---------------------------------------------------------------------------------------- |
+| inDrive   | teléfono + nombre         | selfie/DNI solo en ciertas regiones; señal de confianza                                  |
+| BlaBlaCar | puede reservar sin ID     | **OPCIONAL** → badge "Perfil verificado"; obligatorio solo casos borde (transfronterizo) |
+| Uber/Lyft | teléfono + método de pago | ID opcional/regional                                                                     |
 
 Patrón universal: **el piso es verificación de TELÉFONO** (que VEO ya hace). La identidad es un **badge de
 confianza PROGRESIVO**, no un muro. El KYC pesado es del CONDUCTOR.
@@ -111,12 +112,14 @@ REJECTED  ──(reintenta)──▶ VERIFIED     (un intento fallido NO bloquea
 ## 2. Consecuencias
 
 **A favor:**
+
 - Fricción mínima para pedir (piso teléfono, como la industria) → más conversión, menos abandono.
 - Cierra el dead-end de la conflación de estado (bug real).
 - Desbloquea el flujo de match on-demand end-to-end para pruebas y para producción.
 - El badge incentiva verificar (confianza mutua) sin obligar.
 
 **En contra / a gestionar:**
+
 - Por default el pasajero **no está identity-verified** → la trazabilidad de seguridad se apoya en (a) la
   **verificación del teléfono** (SMS soberano), (b) el **conductor verificado** + cámara + pánico, (c) el
   badge que empuja a verificar. **VEO sigue siendo seguridad-first** por el eje conductor, que es el que
@@ -128,12 +131,12 @@ REJECTED  ──(reintenta)──▶ VERIFIED     (un intento fallido NO bloquea
 
 ## 3. Plan de construcción (lotes verificables)
 
-| Lote | Alcance | Verificación |
-| ---- | ------- | ------------ |
-| **1** | Backend: estado inicial `UNVERIFIED` + retirar `assertKycVerified` de `POST /trips` (public-bff + trip-service). El viaje se crea sin gate de KYC. | `tsc` + tests identity/public-bff/trip-service + `auditar-core` (scope: trips.service/trip-service) + boot-real: pasajero `unverified` pide y crea trip |
-| **2** | Migración: los `PENDING`-nunca-verificados → `UNVERIFIED` (los realmente VERIFIED no se tocan). | migración idempotente + verificación de conteos |
-| **3** | App pasajero: quitar el `KycGate` de `QuotingBody` (pedir sin gate); mapear backend `UNVERIFIED`→app `unverified`; el entry de verificar queda SOLO en Perfil (badge). | `tsc` + boot-real: pedir viaje sin muro; verificar desde Perfil → badge |
-| **4** | Badge de confianza visible al conductor (oferta/puja): "Pasajero verificado". Sin PII. | `tsc` + boot-real driver ve el badge |
+| Lote  | Alcance                                                                                                                                                                | Verificación                                                                                                                                            |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1** | Backend: estado inicial `UNVERIFIED` + retirar `assertKycVerified` de `POST /trips` (public-bff + trip-service). El viaje se crea sin gate de KYC.                     | `tsc` + tests identity/public-bff/trip-service + `auditar-core` (scope: trips.service/trip-service) + boot-real: pasajero `unverified` pide y crea trip |
+| **2** | Migración: los `PENDING`-nunca-verificados → `UNVERIFIED` (los realmente VERIFIED no se tocan).                                                                        | migración idempotente + verificación de conteos                                                                                                         |
+| **3** | App pasajero: quitar el `KycGate` de `QuotingBody` (pedir sin gate); mapear backend `UNVERIFIED`→app `unverified`; el entry de verificar queda SOLO en Perfil (badge). | `tsc` + boot-real: pedir viaje sin muro; verificar desde Perfil → badge                                                                                 |
+| **4** | Badge de confianza visible al conductor (oferta/puja): "Pasajero verificado". Sin PII.                                                                                 | `tsc` + boot-real driver ve el badge                                                                                                                    |
 
 Cada lote se entrega verificado antes del siguiente (regla del método). Lote 1 ya destraba el match test.
 

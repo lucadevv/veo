@@ -15,11 +15,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Reflector } from '@nestjs/core';
 import type { ExecutionContext } from '@nestjs/common';
 import { ForbiddenError, SystemClock } from '@veo/utils';
-import {
-  RolesGuard,
-  StepUpMfaGuard,
-  type AuthenticatedUser,
-} from '@veo/auth';
+import { RolesGuard, StepUpMfaGuard, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { PayoutsController } from './payouts.controller';
 

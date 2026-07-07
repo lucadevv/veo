@@ -22,7 +22,7 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26):
   `credentials.createInsecure()`. La usan TODOS los clientes gRPC (los 3 BFFs + servicios consumidores como
   dispatch/booking/notification/rating).
 - **11 servidores gRPC vivos:** cada `services/*/src/main.ts` hacía `connectMicroservice({ transport:
-  Transport.GRPC, options: { … } })` **sin** pasar `credentials` → NestJS cae a su default
+Transport.GRPC, options: { … } })` **sin** pasar `credentials` → NestJS cae a su default
   `ServerCredentials.createInsecure()` (`node_modules/@nestjs/microservices/.../server-grpc.js`). Servicios:
   identity, trip, dispatch, payment, panic, media, audit, rating, share, fleet, places. (`booking-service`
   expone un server gRPC **diferido** a F2 — comentado en su `main.ts` —, no cuenta como vivo.)
@@ -71,14 +71,14 @@ servidor (cero duplicación):
 
 ### 1.2 Degradación HONESTA (nunca finge mTLS)
 
-| Estado de los certs                          | `GRPC_TLS_REQUIRED` | Comportamiento                                                        |
-| -------------------------------------------- | :-----------------: | --------------------------------------------------------------------- |
-| Las **3** rutas presentes                    | cualquiera          | **mTLS** real (cifra + verifica el peer contra la CA interna).        |
-| **Ninguna** ruta presente                    | `false` (default)   | **insecure** (texto plano). Caso dev/test — no rompe el arranque local. |
-| Ninguna ruta + entorno **endurecido** (prod) | `false` (default)   | insecure **+ WARN de boot claro** ("gRPC mTLS NO configurado… TEXTO PLANO"). NUNCA finge mTLS. |
-| **Ninguna** ruta presente                    | **`true`**          | **fail-fast** tipado (`ValidationError`). El servicio **NO arranca en texto plano** (enforcement). |
-| Ruta presente pero **archivo roto/ausente**  | cualquiera          | **fail-fast** tipado (`ValidationError`, `@veo/utils`). No degrada en silencio. |
-| Config **parcial** (1-2 de 3)                | cualquiera          | **fail-fast** tipado. Un deploy a medio provisionar **falla ruidoso**, no se esconde en insecure. |
+| Estado de los certs                          | `GRPC_TLS_REQUIRED` | Comportamiento                                                                                     |
+| -------------------------------------------- | :-----------------: | -------------------------------------------------------------------------------------------------- |
+| Las **3** rutas presentes                    |     cualquiera      | **mTLS** real (cifra + verifica el peer contra la CA interna).                                     |
+| **Ninguna** ruta presente                    |  `false` (default)  | **insecure** (texto plano). Caso dev/test — no rompe el arranque local.                            |
+| Ninguna ruta + entorno **endurecido** (prod) |  `false` (default)  | insecure **+ WARN de boot claro** ("gRPC mTLS NO configurado… TEXTO PLANO"). NUNCA finge mTLS.     |
+| **Ninguna** ruta presente                    |     **`true`**      | **fail-fast** tipado (`ValidationError`). El servicio **NO arranca en texto plano** (enforcement). |
+| Ruta presente pero **archivo roto/ausente**  |     cualquiera      | **fail-fast** tipado (`ValidationError`, `@veo/utils`). No degrada en silencio.                    |
+| Config **parcial** (1-2 de 3)                |     cualquiera      | **fail-fast** tipado. Un deploy a medio provisionar **falla ruidoso**, no se esconde en insecure.  |
 
 El `WARN` usa `isHardenedEnv()` (`@veo/utils`, único lector de `NODE_ENV==='production'`) y se emite **una
 vez por proceso** (latch módulo-level): un BFF con ~12 clientes no spamea 12 WARNs. El fail-fast (required /

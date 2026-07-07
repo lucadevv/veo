@@ -148,7 +148,10 @@ export class WhatsAppCloudSender implements SmsSender {
     const { code: errCode, message: errMsg } = extractGraphError(body);
     const detail = `WhatsApp ${res.status}${errCode ? ` (${errCode})` : ''} → ${maskPhone(to)}: ${errMsg ?? body.slice(0, 200)}`;
 
-    if (res.status === HttpStatus.TooManyRequests || (errCode !== undefined && META_RATE_LIMIT_CODES.has(errCode))) {
+    if (
+      res.status === HttpStatus.TooManyRequests ||
+      (errCode !== undefined && META_RATE_LIMIT_CODES.has(errCode))
+    ) {
       throw new RateLimitError(detail);
     }
     throw new ExternalServiceError(detail);

@@ -198,7 +198,9 @@ describe('useScanPropertyCard', () => {
     // aunque no derive a un tier soportado: el servidor la guarda y deriva el tipo server-authoritative.
     expect(vehicle.mtcCategory).toBe('N1');
     // La categoría cruda viaja también en la data OCR (el backend la conserva); el mapeo a tipo es del flujo.
-    expect(useRegistrationStore.getState().pendingPropertyCard?.extractedData?.mtcCategory).toBe('N1');
+    expect(useRegistrationStore.getState().pendingPropertyCard?.extractedData?.mtcCategory).toBe(
+      'N1',
+    );
   });
 
   it('(c) placa NO leída (foto borrosa): NO fabrica placa; el gating del campo crítico queda en falso', async () => {

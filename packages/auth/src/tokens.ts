@@ -16,7 +16,9 @@ export const EXPECTED_SUBJECT_TYPE = Symbol('VEO_EXPECTED_SUBJECT_TYPE');
  * y los controllers gRPC la usan para rechazar (fail-closed) identidades de un riel no contemplado, aunque
  * el HMAC sea válido. Acota el radio de explosión del secreto único (FOUNDATION §14).
  */
-export const INTERNAL_IDENTITY_ALLOWED_AUDIENCES = Symbol('VEO_INTERNAL_IDENTITY_ALLOWED_AUDIENCES');
+export const INTERNAL_IDENTITY_ALLOWED_AUDIENCES = Symbol(
+  'VEO_INTERNAL_IDENTITY_ALLOWED_AUDIENCES',
+);
 /**
  * Audiencia de riel (`InternalAudience`) con la que un EMISOR (BFF o servicio que hace llamadas de sistema)
  * FIRMA la identidad interna. Cada BFF provee la suya (public-bff → 'public-rail', etc.); las llamadas

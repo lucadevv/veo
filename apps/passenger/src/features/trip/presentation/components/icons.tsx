@@ -84,8 +84,20 @@ export function IconHistory({color, size = 18}: GlyphProps): React.JSX.Element {
         strokeWidth={STROKE}
         strokeLinecap="round"
       />
-      <Path d="M3 3v5h5" stroke={color} strokeWidth={STROKE} strokeLinecap="round" strokeLinejoin="round" />
-      <Path d="M12 7v5l4 2" stroke={color} strokeWidth={STROKE} strokeLinecap="round" strokeLinejoin="round" />
+      <Path
+        d="M3 3v5h5"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M12 7v5l4 2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }

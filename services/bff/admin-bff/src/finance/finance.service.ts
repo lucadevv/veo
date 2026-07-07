@@ -252,10 +252,7 @@ export class FinanceService {
    * RE-INVOCA el riel de desembolso. Idempotente por dedupKey (el riel NO doble-paga). Acá se audita la
    * acción del operador (mismo patrón que payout.release_held). El backend exige step-up MFA por monto.
    */
-  async retryPayout(
-    identity: AuthenticatedUser,
-    payoutId: string,
-  ): Promise<PayoutDisburseResult> {
+  async retryPayout(identity: AuthenticatedUser, payoutId: string): Promise<PayoutDisburseResult> {
     const res = await this.rest.post<PayoutDisburseResult>(`/payouts/${payoutId}/retry`, {
       identity,
     });
@@ -346,7 +343,11 @@ export class FinanceService {
   ): Promise<CostPerKmConfigView> {
     const res = await this.bookingRest.put<CostPerKmConfigView>(COST_PER_KM_BASE, {
       identity,
-      body: { pais: dto.pais, costPerKmCents: dto.costPerKmCents, expectedVersion: dto.expectedVersion },
+      body: {
+        pais: dto.pais,
+        costPerKmCents: dto.costPerKmCents,
+        expectedVersion: dto.expectedVersion,
+      },
     });
     await this.audit.record(identity, {
       action: 'finance.cost_per_km_replace',
@@ -377,7 +378,12 @@ export class FinanceService {
       action: 'payment.refund',
       resourceType: 'payment',
       resourceId: res.paymentId,
-      payload: { tripId, amountCents: dto.amountCents, reason: dto.reason, forceNew: dto.forceNew ?? false },
+      payload: {
+        tripId,
+        amountCents: dto.amountCents,
+        reason: dto.reason,
+        forceNew: dto.forceNew ?? false,
+      },
     });
     return res;
   }
@@ -409,10 +415,7 @@ export class FinanceService {
    * `@Roles` de clase, SIN step-up y SIN audit — espeja `listPayouts`, NO `getPaymentByTrip` (que audita por la
    * PII de riel del pasajero). El desglose lo abre payment-service por FK; acá solo se mapea.
    */
-  async getPayoutDetail(
-    identity: AuthenticatedUser,
-    payoutId: string,
-  ): Promise<PayoutDetailView> {
+  async getPayoutDetail(identity: AuthenticatedUser, payoutId: string): Promise<PayoutDetailView> {
     const row = await this.rest.get<PayoutDetailRow>(`/payouts/${payoutId}`, { identity });
     // Enriquecimiento del nombre (MISMO patrón/gate PII que la lista): un solo id → lookup batch de un elemento.
     const namesById = await this.resolveDriverNames(identity, [row.driverId]);

@@ -32,7 +32,9 @@ const TOKENS = { accessToken: 'acc-123', refreshToken: 'ref-456' };
 function makeProfileSpy() {
   const getMe = jest.fn(() =>
     // Si el login lo llamara con un conductor nuevo, esto es un 404 que ANTES rompía el login.
-    Promise.reject(new ApiError(404, 'NOT_FOUND', 'No existe un perfil de conductor para este usuario')),
+    Promise.reject(
+      new ApiError(404, 'NOT_FOUND', 'No existe un perfil de conductor para este usuario'),
+    ),
   );
   return { getMe, onboard: jest.fn() };
 }

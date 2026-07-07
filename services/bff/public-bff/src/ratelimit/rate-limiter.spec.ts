@@ -229,7 +229,10 @@ describe('RateLimitGuard', () => {
         by: ['ip', 'phone'],
       } satisfies RateLimitOptions);
       const mk = (phone: string): ExecutionContext =>
-        httpContext({ ip: '9.9.9.9', url: '/auth/otp/request', method: 'POST', body: { phone } }, handler);
+        httpContext(
+          { ip: '9.9.9.9', url: '/auth/otp/request', method: 'POST', body: { phone } },
+          handler,
+        );
       const [bare, cc, e164] = ['987654321', '51987654321', '+51987654321'];
       // 5 hits repartidos entre las 3 formas: si NO colapsaran a una key, ninguna llegaría a 5.
       await expect(guard.canActivate(mk(bare))).resolves.toBe(true);
@@ -249,7 +252,10 @@ describe('RateLimitGuard', () => {
         by: ['ip', 'phone'],
       } satisfies RateLimitOptions);
       const mk = (phone: string): ExecutionContext =>
-        httpContext({ ip: '10.10.10.10', url: '/auth/otp/request', method: 'POST', body: { phone } }, handler);
+        httpContext(
+          { ip: '10.10.10.10', url: '/auth/otp/request', method: 'POST', body: { phone } },
+          handler,
+        );
       await expect(guard.canActivate(mk('987654321'))).resolves.toBe(true);
       await expect(guard.canActivate(mk('987654322'))).resolves.toBe(true);
     });

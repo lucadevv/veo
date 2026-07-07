@@ -168,7 +168,9 @@ function RuleForm({
           onClick={() => onSave({ dayMask, startMinute, endMinute, mode })}
           className={cn(
             'rounded-md px-3 py-1.5 text-xs font-semibold',
-            invalid ? 'cursor-not-allowed bg-surface text-ink-subtle' : 'bg-brand text-white hover:opacity-90',
+            invalid
+              ? 'cursor-not-allowed bg-surface text-ink-subtle'
+              : 'bg-brand text-white hover:opacity-90',
           )}
         >
           Guardar franja
@@ -207,7 +209,9 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
   const onSave = () => save({ defaultMode, rules, expectedVersion: schedule.version });
 
   const upsertRule = (rule: Rule) => {
-    setRules((prev) => (editing === 'new' ? [...prev, rule] : prev.map((r, i) => (i === editing ? rule : r))));
+    setRules((prev) =>
+      editing === 'new' ? [...prev, rule] : prev.map((r, i) => (i === editing ? rule : r)),
+    );
     setEditing(null);
   };
 
@@ -233,9 +237,15 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <span className="text-sm text-ink-muted">Modo por defecto</span>
-          <span className="text-xs text-ink-subtle">Rige cuando el viaje no cae dentro de ninguna franja.</span>
+          <span className="text-xs text-ink-subtle">
+            Rige cuando el viaje no cae dentro de ninguna franja.
+          </span>
         </div>
-        {canManage ? <ModeToggle value={defaultMode} onChange={setDefaultMode} /> : <ModePill mode={defaultMode} />}
+        {canManage ? (
+          <ModeToggle value={defaultMode} onChange={setDefaultMode} />
+        ) : (
+          <ModePill mode={defaultMode} />
+        )}
       </div>
 
       {/* Reglas por franja */}

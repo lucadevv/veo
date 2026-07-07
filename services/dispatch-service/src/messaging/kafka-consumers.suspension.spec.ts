@@ -71,7 +71,11 @@ describe('KafkaConsumersService · wiring de suspensión', () => {
     const env = createEnvelope({
       eventType: 'driver.suspended',
       producer: 'identity-service',
-      payload: { driverId: DRIVER_ID, reason: 'disciplinary', suspendedAt: new Date().toISOString() },
+      payload: {
+        driverId: DRIVER_ID,
+        reason: 'disciplinary',
+        suspendedAt: new Date().toISOString(),
+      },
     });
     await handlers.get('driver.suspended')?.(env);
     expect(onSuspended).toHaveBeenCalledWith(DRIVER_ID);
@@ -132,7 +136,11 @@ describe('KafkaConsumersService · poison guard gRPC (head-of-line block)', () =
   const suspendedEnv = createEnvelope({
     eventType: 'fleet.driver_suspended',
     producer: 'fleet-service',
-    payload: { userId: USER_ID, reason: 'inspection_expired', suspendedAt: new Date().toISOString() },
+    payload: {
+      userId: USER_ID,
+      reason: 'inspection_expired',
+      suspendedAt: new Date().toISOString(),
+    },
   });
 
   it('error gRPC PERMANENTE (PERMISSION_DENIED) → SALTA sin relanzar (la partición avanza, no crash-loop)', async () => {
@@ -159,7 +167,11 @@ describe('KafkaConsumersService · poison guard gRPC (head-of-line block)', () =
     const env = createEnvelope({
       eventType: 'fleet.driver_reactivated',
       producer: 'fleet-service',
-      payload: { userId: USER_ID, reason: 'inspection_renewed', reactivatedAt: new Date().toISOString() },
+      payload: {
+        userId: USER_ID,
+        reason: 'inspection_renewed',
+        reactivatedAt: new Date().toISOString(),
+      },
     });
     await expect(handlers.get('fleet.driver_reactivated')?.(env)).resolves.toBeUndefined();
     await svc.onModuleDestroy();

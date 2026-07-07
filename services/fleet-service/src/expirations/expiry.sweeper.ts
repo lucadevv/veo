@@ -174,8 +174,9 @@ export class ExpirySweeper {
       // LOTE — UNA query de TODOS sus vehículos (para resolver el operado con pickActiveVehicle) + UNA query
       // de inspecciones del lote de vehículos operados — en vez de 2 queries POR conductor. La SEMÁNTICA es
       // idéntica (mismo pickActiveVehicle + isInspectionCurrent + grandfather); solo cambia el acceso a datos.
-      const userIds = [...new Set(vehicles.map((v) => v.driverId).filter((id): id is string => !!id))]
-        .filter((id) => !seen.has(id));
+      const userIds = [
+        ...new Set(vehicles.map((v) => v.driverId).filter((id): id is string => !!id)),
+      ].filter((id) => !seen.has(id));
       for (const id of userIds) seen.add(id);
       suspended += await this.suspendBatchByInspection(userIds, now);
       if (vehicles.length < PAGE_SIZE) break;

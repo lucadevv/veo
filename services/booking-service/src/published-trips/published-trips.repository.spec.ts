@@ -104,7 +104,11 @@ describe('PublishedTripsRepository · idempotencia de publish (FIX 2)', () => {
   it('ANTI-CROSS-TENANT: la fila recuperada es de OTRO conductor → ConflictError, NUNCA se devuelve la ajena', async () => {
     const ajena = { ...makeData(), driverId: 'OTRO_DRIVER' };
     const tx = {
-      publishedTrip: { create: vi.fn(async () => { throw p2002(); }) },
+      publishedTrip: {
+        create: vi.fn(async () => {
+          throw p2002();
+        }),
+      },
       outboxEvent: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
@@ -123,7 +127,11 @@ describe('PublishedTripsRepository · idempotencia de publish (FIX 2)', () => {
 
   it('P2002 pero ni el PRIMARY tiene la fila (inconsistente) → ConflictError, no un 500 opaco', async () => {
     const tx = {
-      publishedTrip: { create: vi.fn(async () => { throw p2002(); }) },
+      publishedTrip: {
+        create: vi.fn(async () => {
+          throw p2002();
+        }),
+      },
       outboxEvent: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
@@ -179,7 +187,11 @@ describe('PublishedTripsRepository · UPDATE atómico condicionado por estado (F
 
   it('0 filas matchean (estado cambió en la PRIMARIA → P2025) → ConflictError tipado, no 500', async () => {
     const tx = {
-      publishedTrip: { update: vi.fn(async () => { throw p2025(); }) },
+      publishedTrip: {
+        update: vi.fn(async () => {
+          throw p2025();
+        }),
+      },
       outboxEvent: { create: vi.fn(async () => ({})) },
     };
     const prisma = {

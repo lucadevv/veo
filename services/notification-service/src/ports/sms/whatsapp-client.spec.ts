@@ -40,7 +40,9 @@ describe('extractOtpCode · DEUDA de extracción', () => {
 
 describe('WhatsAppCloudSender · construcción del request', () => {
   it('POSTea a la URL v25.0 con Bearer y body de plantilla con el código en body+botón', async () => {
-    const { calls } = stubFetch(() => new Response('{"messages":[{"id":"wamid.X"}]}', { status: 200 }));
+    const { calls } = stubFetch(
+      () => new Response('{"messages":[{"id":"wamid.X"}]}', { status: 200 }),
+    );
     await makeSender().send('+51987654321', 'Tu código VEO es 482913');
 
     expect(calls).toHaveLength(1);
@@ -71,7 +73,12 @@ describe('WhatsAppCloudSender · construcción del request', () => {
   });
 
   it('200 con messages[] → ok', async () => {
-    stubFetch(() => new Response('{"messages":[{"id":"wamid.X","message_status":"accepted"}]}', { status: 200 }));
+    stubFetch(
+      () =>
+        new Response('{"messages":[{"id":"wamid.X","message_status":"accepted"}]}', {
+          status: 200,
+        }),
+    );
     await expect(makeSender().send('+51900000000', 'codigo 654321')).resolves.toBeUndefined();
   });
 
@@ -104,7 +111,9 @@ describe('WhatsAppCloudSender · construcción del request', () => {
 
   it('error no expone el teléfono completo ni el código', async () => {
     stubFetch(() => new Response('{"error":{"message":"boom","code":100}}', { status: 400 }));
-    const err = await makeSender().send('+51987654321', 'Tu código VEO es 482913').catch((e) => e);
+    const err = await makeSender()
+      .send('+51987654321', 'Tu código VEO es 482913')
+      .catch((e) => e);
     expect((err as Error).message).not.toContain('+51987654321');
     expect((err as Error).message).not.toContain('482913');
     expect((err as Error).message).toContain('•••4321');

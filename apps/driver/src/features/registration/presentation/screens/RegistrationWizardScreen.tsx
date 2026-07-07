@@ -46,7 +46,9 @@ export const RegistrationWizardScreen = (): React.JSX.Element => {
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
   // El índice inicial REANUDA donde quedó el conductor (paso persistido). `getState` (no selector): solo se
   // lee al montar; los cambios de página los maneja el estado local + `setCurrentStep`.
-  const [index, setIndex] = useState(() => stepToIndex(useRegistrationStore.getState().currentStep));
+  const [index, setIndex] = useState(() =>
+    stepToIndex(useRegistrationStore.getState().currentStep),
+  );
 
   // Salida de emergencia (cerrar sesión): el back del header la dispara; el back de hardware también.
   const exit = useRegistrationExit();
@@ -90,7 +92,12 @@ export const RegistrationWizardScreen = (): React.JSX.Element => {
         padded={false}
         header={<RegistrationHeader showLogo onBack={() => exit.requestExit()} />}
         footer={
-          <WizardFooter index={index} footer={activeFooter} onBack={goBack} backLabel={t('common.back')} />
+          <WizardFooter
+            index={index}
+            footer={activeFooter}
+            onBack={goBack}
+            backLabel={t('common.back')}
+          />
         }
       >
         <View style={styles.progressWrap}>

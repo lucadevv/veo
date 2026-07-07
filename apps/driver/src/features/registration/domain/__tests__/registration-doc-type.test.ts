@@ -1,8 +1,5 @@
 import { FleetDocumentType } from '@veo/shared-types';
-import {
-  registrationDocTypeToBackend,
-  type RegistrationDocumentType,
-} from '../entities';
+import { registrationDocTypeToBackend, type RegistrationDocumentType } from '../entities';
 
 /**
  * Guarda de regresión del P0: la etiqueta interna del wizard DEBE mapear al `FleetDocumentType`
@@ -15,7 +12,9 @@ describe('registrationDocTypeToBackend · alinea la etiqueta del wizard al Fleet
     expect(registrationDocTypeToBackend('LICENSE')).toBe(FleetDocumentType.LICENSE_A1);
     expect(registrationDocTypeToBackend('SOAT')).toBe(FleetDocumentType.SOAT);
     // Regresión P0: la tarjeta de propiedad es PROPERTY_CARD, NO el string mágico VEHICLE_REGISTRATION.
-    expect(registrationDocTypeToBackend('VEHICLE_REGISTRATION')).toBe(FleetDocumentType.PROPERTY_CARD);
+    expect(registrationDocTypeToBackend('VEHICLE_REGISTRATION')).toBe(
+      FleetDocumentType.PROPERTY_CARD,
+    );
   });
 
   it('nunca devuelve el valor que el presign rechazaría (VEHICLE_REGISTRATION no es un FleetDocumentType)', () => {

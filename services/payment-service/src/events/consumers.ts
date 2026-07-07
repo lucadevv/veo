@@ -161,7 +161,10 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
             `POISON incentivos: error permanente al acreditar el viaje ${tripId}; se salta`,
           );
         } else {
-          this.logger.error({ err }, `Falló acreditar incentivos del viaje ${tripId}; se reintenta`);
+          this.logger.error(
+            { err },
+            `Falló acreditar incentivos del viaje ${tripId}; se reintenta`,
+          );
           throw err;
         }
       }
@@ -305,7 +308,9 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
   private async onBookingCancelled(env: EventEnvelope<unknown>): Promise<void> {
     const parsed = EVENT_SCHEMAS['booking.cancelled'].safeParse(env.payload);
     if (!parsed.success) {
-      this.logger.warn(`booking.cancelled con payload inválido (eventId=${env.eventId}); descartado`);
+      this.logger.warn(
+        `booking.cancelled con payload inválido (eventId=${env.eventId}); descartado`,
+      );
       return;
     }
     const { bookingId, razon } = parsed.data;

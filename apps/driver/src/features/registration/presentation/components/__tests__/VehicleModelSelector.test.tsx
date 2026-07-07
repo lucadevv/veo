@@ -30,13 +30,39 @@ function withProviders(node: ReactElement): React.JSX.Element {
 }
 
 const MODELS: VehicleModelOption[] = [
-  { id: 'm1', make: 'Toyota', model: 'Yaris', yearFrom: 2018, yearTo: 2022, seats: 5, vehicleType: 'CAR' },
-  { id: 'm2', make: 'Kia', model: 'Rio', yearFrom: 2019, yearTo: 2023, seats: 5, vehicleType: 'CAR' },
-  { id: 'm3', make: 'Hyundai', model: 'Accent', yearFrom: 2017, yearTo: 2021, seats: 5, vehicleType: 'CAR' },
+  {
+    id: 'm1',
+    make: 'Toyota',
+    model: 'Yaris',
+    yearFrom: 2018,
+    yearTo: 2022,
+    seats: 5,
+    vehicleType: 'CAR',
+  },
+  {
+    id: 'm2',
+    make: 'Kia',
+    model: 'Rio',
+    yearFrom: 2019,
+    yearTo: 2023,
+    seats: 5,
+    vehicleType: 'CAR',
+  },
+  {
+    id: 'm3',
+    make: 'Hyundai',
+    model: 'Accent',
+    yearFrom: 2017,
+    yearTo: 2021,
+    seats: 5,
+    vehicleType: 'CAR',
+  },
 ];
 
 /** Resultado mínimo de useVehicleModels que el componente lee (data/isLoading/isError/refetch). */
-function queryResult(over: Partial<{ data: VehicleModelOption[]; isLoading: boolean; isError: boolean }>) {
+function queryResult(
+  over: Partial<{ data: VehicleModelOption[]; isLoading: boolean; isError: boolean }>,
+) {
   return {
     data: over.data,
     isLoading: over.isLoading ?? false,

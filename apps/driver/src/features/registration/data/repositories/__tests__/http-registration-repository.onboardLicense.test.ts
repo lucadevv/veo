@@ -25,11 +25,12 @@ const ONBOARD_RESPONSE = { driverId: 'drv_123', backgroundCheckStatus: 'PENDING'
 
 /** `HttpClient` real cuyo transporte (`fetch`) devuelve `body` con status 201; así corre el schema.parse. */
 function httpReturning(body: unknown): HttpClient {
-  const fetchImpl = jest.fn(async () =>
-    new Response(JSON.stringify(body), {
-      status: 201,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  const fetchImpl = jest.fn(
+    async () =>
+      new Response(JSON.stringify(body), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
   ) as unknown as typeof fetch;
   return new HttpClient({ baseUrl: 'http://test.local/api/v1', fetchImpl, retries: 0 });
 }

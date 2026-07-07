@@ -26,12 +26,12 @@ que el BFF propaga + `AudienceGuard` exige el riel declarado por `@Audiences` (f
 `driverId`/`passengerId` salen de la **identidad firmada** (server-truth), **nunca del body ni del path**
 (anti-IDOR por construcción).
 
-| Método | Ruta | Riel | Descripción |
-|--------|------|------|-------------|
-| `POST` | `/api/v1/published-trips` | driver-rail | El conductor publica una oferta (`BORRADOR → PUBLICADO`). |
-| `GET`  | `/api/v1/published-trips/:id` | public-rail | Ver el detalle de un viaje publicado (listado público del marketplace). |
-| `POST` | `/api/v1/bookings` | public-rail | El pasajero reserva un asiento. Idempotente vía header `Idempotency-Key`. |
-| `GET`  | `/api/v1/bookings/:id` | public-rail | El pasajero ve **su** reserva (solo si es el dueño; si no → 404, no se filtra existencia). |
+| Método | Ruta                          | Riel        | Descripción                                                                                |
+| ------ | ----------------------------- | ----------- | ------------------------------------------------------------------------------------------ |
+| `POST` | `/api/v1/published-trips`     | driver-rail | El conductor publica una oferta (`BORRADOR → PUBLICADO`).                                  |
+| `GET`  | `/api/v1/published-trips/:id` | public-rail | Ver el detalle de un viaje publicado (listado público del marketplace).                    |
+| `POST` | `/api/v1/bookings`            | public-rail | El pasajero reserva un asiento. Idempotente vía header `Idempotency-Key`.                  |
+| `GET`  | `/api/v1/bookings/:id`        | public-rail | El pasajero ve **su** reserva (solo si es el dueño; si no → 404, no se filtra existencia). |
 
 ### Idempotencia de la reserva (`POST /bookings`)
 
@@ -70,18 +70,18 @@ Admin dedicado — el OutboxRelay drena al topic `booking`, sin broker los event
 
 ## Diferido a fases futuras (degradación honesta, ADR-014)
 
-| Tema | Fase |
-|------|------|
-| Gate gRPC `identity.GetDriver` (conductor no suspendido antes de publicar/aprobar) | F1 |
-| Aprobar/rechazar reserva (`POST /bookings/:id/{approve,reject}`, driver-rail) + TTL → EXPIRADO | F1 |
-| "Ver MIS reservas" (`GET /bookings/mine`) + listado de solicitudes del conductor | F1 |
-| Búsqueda geo (índice H3, `GET /published-trips?ruta&fecha`) | F2 |
-| Pricing por tramo (`precioPorTramo` según pickup/dropoff) + stopovers ricos | F1 |
-| Validación del método de pago al reservar + gate de deuda (`PaymentStatus.DEBT`) | F1/F3 |
-| CHARGE async (`COBRO_PENDIENTE → CONFIRMADO`) consumiendo `payment.captured` + lock atómico de asientos (§6) | F3 |
-| Cancelar (`DELETE /bookings/:id` → Refund por tier) | F3 |
-| Servidor gRPC `booking.GetPublishedTrip`/`GetBooking` (`proto/booking.proto`) | F2 |
-| EC (multipaís) | F8 |
+| Tema                                                                                                         | Fase  |
+| ------------------------------------------------------------------------------------------------------------ | ----- |
+| Gate gRPC `identity.GetDriver` (conductor no suspendido antes de publicar/aprobar)                           | F1    |
+| Aprobar/rechazar reserva (`POST /bookings/:id/{approve,reject}`, driver-rail) + TTL → EXPIRADO               | F1    |
+| "Ver MIS reservas" (`GET /bookings/mine`) + listado de solicitudes del conductor                             | F1    |
+| Búsqueda geo (índice H3, `GET /published-trips?ruta&fecha`)                                                  | F2    |
+| Pricing por tramo (`precioPorTramo` según pickup/dropoff) + stopovers ricos                                  | F1    |
+| Validación del método de pago al reservar + gate de deuda (`PaymentStatus.DEBT`)                             | F1/F3 |
+| CHARGE async (`COBRO_PENDIENTE → CONFIRMADO`) consumiendo `payment.captured` + lock atómico de asientos (§6) | F3    |
+| Cancelar (`DELETE /bookings/:id` → Refund por tier)                                                          | F3    |
+| Servidor gRPC `booking.GetPublishedTrip`/`GetBooking` (`proto/booking.proto`)                                | F2    |
+| EC (multipaís)                                                                                               | F8    |
 
 > En F0 `asientosDisponibles` **no** decrementa al reservar: el decremento ocurre al CONFIRMAR (handler de
 > `payment.captured`, §6, F3). El chequeo de cupo en F0 es barato (no transaccional); la garantía dura

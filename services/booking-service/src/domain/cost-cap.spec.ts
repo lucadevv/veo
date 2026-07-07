@@ -109,9 +109,9 @@ describe('cost-cap · assertFullRouteCap (el peaje SUBE el tope full-route)', ()
       assertFullRouteCap({ ...base, tollsCents: 800, precioBaseCentimos: 575 }),
     ).not.toThrow();
     // 576 sigue excediendo el tope CON peaje.
-    expect(() =>
-      assertFullRouteCap({ ...base, tollsCents: 800, precioBaseCentimos: 576 }),
-    ).toThrow(ValidationError);
+    expect(() => assertFullRouteCap({ ...base, tollsCents: 800, precioBaseCentimos: 576 })).toThrow(
+      ValidationError,
+    );
   });
 });
 

@@ -9,7 +9,10 @@ import { deriveDocumentPhase, type DocumentFacePhases } from '../registrationSto
  *     "no aplica", así front `sent` ⇒ documento `sent`).
  *  4. si no, `idle`.
  */
-const faces = (front: DocumentFacePhases['front'], back: DocumentFacePhases['back']): DocumentFacePhases => ({
+const faces = (
+  front: DocumentFacePhases['front'],
+  back: DocumentFacePhases['back'],
+): DocumentFacePhases => ({
   front,
   back,
 });

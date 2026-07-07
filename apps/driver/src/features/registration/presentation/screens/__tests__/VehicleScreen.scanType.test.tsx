@@ -7,11 +7,7 @@ import { VehicleType } from '@veo/shared-types';
 import '../../../../../i18n';
 import { Button } from '@veo/ui-kit';
 import { VehicleScreen } from '../VehicleScreen';
-import {
-  RegistrationField,
-  ScanPropertyCardSheet,
-  VehicleTypeSelector,
-} from '../../components';
+import { RegistrationField, ScanPropertyCardSheet, VehicleTypeSelector } from '../../components';
 import { useRegistrationStore } from '../../state/registrationStore';
 import type {
   PropertyCardAutofillResult,
@@ -76,7 +72,16 @@ jest.mock('../../hooks/useScanPropertyCard', () => ({
     // El sheet solo lee estos campos para su preview; la pantalla lee el store directamente. Stub estático
     // (no referenciar el store acá: la fábrica de jest.mock se hoistea y no puede usar variables externas).
     // LOTE 1: sin seed "Auto" → `type: null`.
-    vehicle: { type: null, plate: '', year: '', modelSpecId: '', brand: '', model: '', mtcCategory: '', color: '' },
+    vehicle: {
+      type: null,
+      plate: '',
+      year: '',
+      modelSpecId: '',
+      brand: '',
+      model: '',
+      mtcCategory: '',
+      color: '',
+    },
     scan: jest.fn(),
     reset: jest.fn(),
   }),
@@ -145,9 +150,7 @@ function withProviders(node: ReactElement, client: QueryClient): React.JSX.Eleme
 
 /** El botón "Registrar vehículo" del footer (el único con la etiqueta de registro). */
 function registerButton(renderer: TestRenderer.ReactTestRenderer) {
-  return renderer.root
-    .findAllByType(Button)
-    .find((b) => b.props.label === 'Registrar vehículo');
+  return renderer.root.findAllByType(Button).find((b) => b.props.label === 'Registrar vehículo');
 }
 
 /**
@@ -199,7 +202,10 @@ describe('VehicleScreen · LOTE 1 · tipo derivado de la tarjeta (read-only) / f
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 
@@ -230,7 +236,10 @@ describe('VehicleScreen · LOTE 1 · tipo derivado de la tarjeta (read-only) / f
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 
@@ -286,7 +295,10 @@ describe('VehicleScreen · LOTE 1 · tipo derivado de la tarjeta (read-only) / f
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 
@@ -305,7 +317,10 @@ describe('VehicleScreen · LOTE 1 · tipo derivado de la tarjeta (read-only) / f
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 

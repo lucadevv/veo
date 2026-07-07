@@ -24,7 +24,8 @@ antes del cambio de schema — turbo cacheó el `codegen` y no lo regeneró.
 **Fix (durable):** `turbo.json` → `codegen` con `"cache": false` (siempre regenera; es rápido, y el `build`
 solo se rehace si el generado cambió). Nunca más queda el client stale tras tocar `schema.prisma`.
 **Manual si hace falta ahora:** `pnpm exec prisma generate --schema=services/identity-service/prisma/schema.prisma`
-+ `./dev-stack/veo.sh restart identity` (el `nest-cli.json` copia `generated/prisma` al `dist`).
+
+- `./dev-stack/veo.sh restart identity` (el `nest-cli.json` copia `generated/prisma` al `dist`).
 
 ## Gap 3 · Buckets de MinIO no creados → `404 NoSuchBucket` al subir el binario
 
@@ -33,7 +34,8 @@ solo se rehace si el generado cambió). Nunca más queda el client stale tras to
 existía — el sidecar `minio-provision` del compose nunca se disparaba (no estaba en el boot).
 **Fix (durable):** `dev-stack/veo.sh` dispara `docker compose up -d minio-provision` tras el `up` de la infra
 (one-shot idempotente que espera `minio` healthy y crea `veo-avatars-dev`/`veo-video-dev`/`veo-documents-dev`
-+ SSE-S3 en los buckets con PII).
+
+- SSE-S3 en los buckets con PII).
 
 ## Gap 4 (transversal) · packages `@veo/*` stale → símbolo `undefined` en el mobile
 

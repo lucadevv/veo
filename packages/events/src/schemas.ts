@@ -1036,9 +1036,7 @@ export const FLAG_REASON = {
 } as const;
 export type FlagReason = (typeof FLAG_REASON)[keyof typeof FLAG_REASON];
 /** z.enum tipado del contrato: el `parse` del evento RECHAZA un reason fuera de FLAG_REASON (falla-cerrado). */
-const flagReasonSchema = z.enum(
-  Object.values(FLAG_REASON) as [FlagReason, ...FlagReason[]],
-);
+const flagReasonSchema = z.enum(Object.values(FLAG_REASON) as [FlagReason, ...FlagReason[]]);
 export const ratingCreated = z.object({
   ratingId: z.string(),
   tripId: z.string(),
@@ -1278,7 +1276,8 @@ export const BookingApprovedOrigen = {
   /// El conductor aprobó una solicitud en REVISION (PENDIENTE_APROBACION → APROBADO, F1/F3b).
   APROBACION_CONDUCTOR: 'APROBACION_CONDUCTOR',
 } as const;
-export type BookingApprovedOrigen = (typeof BookingApprovedOrigen)[keyof typeof BookingApprovedOrigen];
+export type BookingApprovedOrigen =
+  (typeof BookingApprovedOrigen)[keyof typeof BookingApprovedOrigen];
 
 /// El Booking quedó APROBADO. ADR-014 §7.1: `booking.approved` = "APROBADO (dispara CHARGE async)". Dos
 /// orígenes: (a) INSTANT_BOOKING, el Booking nace APROBADO al reservar (salta PENDIENTE_APROBACION, §4.2);
@@ -1346,7 +1345,8 @@ export const BookingCancelledRazon = {
   /// causaría un payment.captured tardío sobre una oferta ya no reservable; el camino EN_RUTA real es F4.
   OFERTA_NO_DISPONIBLE: 'OFERTA_NO_DISPONIBLE',
 } as const;
-export type BookingCancelledRazon = (typeof BookingCancelledRazon)[keyof typeof BookingCancelledRazon];
+export type BookingCancelledRazon =
+  (typeof BookingCancelledRazon)[keyof typeof BookingCancelledRazon];
 
 /// `booking.cancelled` cubre DOS formas distintas que comparten topic/nombre, resueltas de forma ADITIVA
 /// (los campos nuevos son OPCIONALES → el caso viejo sigue parseando IGUAL):

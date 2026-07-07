@@ -118,7 +118,11 @@ describe('env.schema · gate de canales de entrega por entorno (superRefine)', (
     });
 
     it('PASA en development con modo sandbox (dev sin FCM/APNs)', () => {
-      const env = validateEnv({ ...base, NODE_ENV: 'development', VEO_PUSH_MODE: PushMode.Sandbox });
+      const env = validateEnv({
+        ...base,
+        NODE_ENV: 'development',
+        VEO_PUSH_MODE: PushMode.Sandbox,
+      });
       expect(env.VEO_PUSH_MODE).toBe(PushMode.Sandbox);
     });
   });

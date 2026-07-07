@@ -103,37 +103,37 @@ export function DataTable<TData>({
           {table.getRowModel().rows.map((row) => {
             const activate = onRowClick ? () => onRowClick(row.original) : undefined;
             return (
-            <tr
-              key={row.id}
-              onClick={activate}
-              // A11y por teclado: una fila con drill-down imperativo (router.push) no es activable de
-              // forma nativa. La hacemos focusable (tabIndex hereda el ring focus-visible del tema) y
-              // activable con Enter/Space; `role="link"` declara que navega (espeja el destino-ruta del
-              // caller). Solo cuando hay onRowClick: sin él la fila conserva su semántica de fila nativa.
-              {...(activate
-                ? {
-                    role: 'link',
-                    tabIndex: 0,
-                    'aria-label': rowLabel?.(row.original),
-                    onKeyDown: (e: KeyboardEvent<HTMLTableRowElement>) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        activate();
-                      }
-                    },
-                  }
-                : {})}
-              className={cn(
-                'border-b border-border/40 transition-colors',
-                onRowClick && 'cursor-pointer hover:bg-surface-2/60',
-              )}
-            >
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="px-4 py-3.5 text-ink">
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
-            </tr>
+              <tr
+                key={row.id}
+                onClick={activate}
+                // A11y por teclado: una fila con drill-down imperativo (router.push) no es activable de
+                // forma nativa. La hacemos focusable (tabIndex hereda el ring focus-visible del tema) y
+                // activable con Enter/Space; `role="link"` declara que navega (espeja el destino-ruta del
+                // caller). Solo cuando hay onRowClick: sin él la fila conserva su semántica de fila nativa.
+                {...(activate
+                  ? {
+                      role: 'link',
+                      tabIndex: 0,
+                      'aria-label': rowLabel?.(row.original),
+                      onKeyDown: (e: KeyboardEvent<HTMLTableRowElement>) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          activate();
+                        }
+                      },
+                    }
+                  : {})}
+                className={cn(
+                  'border-b border-border/40 transition-colors',
+                  onRowClick && 'cursor-pointer hover:bg-surface-2/60',
+                )}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-4 py-3.5 text-ink">
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
             );
           })}
         </tbody>

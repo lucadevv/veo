@@ -32,6 +32,7 @@ Un solo funnel de tasa + un solo de moneda.
 ## 2. Hallazgos → FASES del plan (severidad · evidencia)
 
 ### 🔴 Fase P-A — Las 3 FUGAS de dinero (CRÍTICAS · money real)
+
 - **A1 · Propina digital nunca se cobra. ✅ HECHO (Model B).** El `addTip` viejo solo creaba `TipAddition` + incrementaba `tipCents/amountCents` en un pago YA CAPTURED + emitía evento — **sin `gateway.charge`**. El conductor SÍ la recibía en el payout → la plataforma subsidiaba el 100%.
   - **Decisión del dueño (2026-07-02 · Model B, reconcilia la contradicción ADR↔app):** el borrador decía "para CASH marca 'propina en mano' sin payout digital" — pero el copy del app pasajero (`tipPromptCash`) ya promete _"en viaje efectivo la propina por estos chips se cobra DIGITAL"_. La rama "en mano" habría PERDIDO la propina (el pasajero toca un chip esperando cobro, el conductor no recibe nada). **Model B: TODA propina iniciada en el app se COBRA DIGITAL.**
   - **Implementado (backend):** `addTip` crea un cobro DEDICADO (**tip-Payment `kind=TIP`**, gross 0, comisión 0, 100% al conductor · nuevo `enum PaymentKind {FARE|TIP}` + migración) que pasa por el MISMO despacho digital que la tarifa. El MÉTODO = el de la tarifa si fue digital; si el viaje se pagó en EFECTIVO cae a **YAPE por defecto** (`DEFAULT_DIGITAL_TIP_METHOD` · on-file si hay afiliación, si no checkout QR — el gateway no cobra CASH). El conductor la cobra SOLO al CAPTURAR: `captureSuccess` emite `payment.tip_added` (no `payment.captured`) y el `tipCents` entra al payout (`collectEarnings` ya lo agrega). Idempotente por `Payment.dedupKey` (`tip-charge:`).
@@ -46,6 +47,7 @@ Un solo funnel de tasa + un solo de moneda.
 - **A3 · `changeDestination` baja el fare PUJA por debajo del bid acordado.** (trips.service.ts:1717-1740) recomputa con la fórmula FIXED **sin piso** vs el hermano `waypoint-proposal.service.ts:218` que sí pone `Math.max(policyFare, trip.fareCents)`. **Fix:** flooreá `changeDestination` al `trip.fareCents` acordado para PUJA (o bloqueá el re-quote hacia abajo de una tarifa negociada); + "el precio cambió, reconfirmá" si sube.
 
 ### 🟠 Fase P-B — Coherencia contable: el FEE de ProntoPaga (ALTA · libros ≠ banco)
+
 - **B1 · El fee PSP no se modela. 🚧 Lote 1 HECHO.** El webhook manda `amount`=gross sin fee/net; el fee se netea en la Liquidación de ProntoPaga (un REPORTE del portal, NO una API — verificado en sus docs) que VEO no ingesta → los libros divergen del banco por el fee.
   - **Investigación (docs oficiales ProntoPaga, §7):** el fee **NO lo expone la API/webhook** (es comercial, del convenio) + **varía por método** (los SLAs son por método/país). Por eso el fee se **MODELA** en VEO + se reconcilia contra el reporte (gated).
   - **Lote 1 (hecho, decisión del dueño: tarifa EDITABLE):** (a) `pspFeeCents` + `netSettledCents` (nullable) en `Payment` + migración. (b) Fee **por método, EDITABLE por admin** en `CommissionConfig` (`{yape,plin,card,pagoefectivo}FeeBps`, arranca en **0** = degradación honesta; el dueño carga la tarifa del convenio después, sin deploy). (c) En la captura se computa `pspFee = round(amount × bps)`, `net = amount − fee` y se persisten (CASH → fee 0, net = amount). (d) KPI `revenueToday` **net-aware** (usa `netSettledCents`, la plata REAL que entra; el bruto queda como throughput). Verificado: tsc + tests policy + suite 305 unit + e2e real-DB (migración + población).
@@ -56,6 +58,7 @@ Un solo funnel de tasa + un solo de moneda.
 - **B2 · KPI de recaudación inflado** por el fee no descontado (analytics.service:64 suma `amountCents` gross). **Fix:** el KPI de "money-in real" usa `netSettled`; el gross queda como "throughput".
 
 ### 🟠 Fase P-C — Consistencia del MONTO (quote → agreed → cobro) (ALTA)
+
 - **C3 · Rounding + double-source de la FÓRMULA. 🚧 Lote 1 HECHO.** La raíz de P-C: había DOS calculadoras de tarifa fija (el quote en `public-bff/maps/fare.ts` y el cobro firme en `trip-service/domain/fare.ts`) que divergían — el quote redondeaba a S/0.10 y OMITÍA surge/niño; el firme redondeaba al céntimo e incluía surge. El pasajero veía un número y se le cobraba otro.
   - **Decisiones del dueño:** (1A) redondeo a **S/0.10 en TODO** (quote y cobro); (2A) umbral de reconciliación (Lote 2) = **S/0.10** (un paso).
   - **Lote 1 (hecho):** (a) FUENTE ÚNICA `computeFixedFareCents` en `@veo/shared-types` (leaf, sin ciclo con `@veo/utils`) — la consumen el quote (BFF), el create FIXED, `changeDestination` y `waypoint-proposal` → paridad de fórmula por CONSTRUCCIÓN, cero double-source. (b) Redondeo S/0.10 con minFare aplicado DESPUÉS del redondeo (evita violar el piso con minFare admin no-múltiplo-de-10). (c) **surge server-authoritative en el QUOTE** (mismo `dispatch.getSurge` que el create, solo FIXED, fail-safe 1.0): el pasajero VE el precio surgeado que se le va a cobrar → cierra el sobrecobro SILENCIOSO. Verificado: tsc + trip-service 545 + shared-types 81 + public-bff 262 + 2 gates adversariales.
@@ -66,35 +69,44 @@ Un solo funnel de tasa + un solo de moneda.
 - **Flageados (pre-existentes, NO de P-C — decisión del dueño):** (i) 🔴 `changeDestination` re-cotiza con el pricing del catálogo de CÓDIGO, no el overlay EFECTIVO del admin (create sí usa el efectivo) → incoherencia de pricing create↔changeDest. (ii) 🔴 `changeDestination` NO exige el código de modo niño (el spec lo pide como moat de seguridad; hoy solo se valida en `startTrip`).
 
 ### 🟠 Fase P-D — Admin finance que CUADRE (ALTA)
+
 - **D1 · Liquidaciones no cuadra:** la tabla muestra Bruto/Comisión/Neto pero `Neto = gross − comisión + propina + bonos` sin columna → `Neto ≠ Bruto − Comisión`. **Fix:** agregar columnas Propinas + Bonos a `PayoutView` + la tabla (o desglose del "extra neto").
 - **D2 · Sin superficie pre-liquidación:** un viaje completado (cobrado) no tiene fila en admin hasta el batch semanal → el admin no puede reconciliar el momento. **Fix:** vista de "ganancias devengadas / por liquidar" que agrega los CAPTURED en vivo (como el breakdown del conductor), no solo los payouts.
 - **D3 · "Neto S/0.00" del conductor:** el home lee payouts (batch semanal), el breakdown lee CAPTURED en vivo → 2 números. **Fix:** el home muestra el devengado (por liquidar) de los CAPTURED, no el payout vacío.
 - **D4 · Desglose carpool del conductor MIENTE:** `earningsForDriver`+`BreakdownCard` suman `commissionCents` cross-mode → en carpool muestran bruto inflado (contribución + fee del pasajero) + "comisión −X" fantasma. **Fix:** agregación mode-aware; en carpool mostrar "contribución (100%)" sin línea de comisión.
 
 ### 🟠 Fase P-E — Membresía del CONDUCTOR (reduce comisión) — FEATURE NUEVA
+
 Benchmark: Empower $50/mes→0%, Bolt/inDrive pilots $100-200/mes→100%, inDrive baja % dinámico por surge.
+
 - **Modelo:** nuevo `DriverCommissionPlan { driverId, planTier, onDemandDiscountBps | flatRateBps, activeUntil }` en payment-service (mismo contexto "dinero").
 - **Integración (un solo seam):** threadear `driverId` por el ÚNICO funnel `resolveChargeRate(mode, driverId)` → `commission.resolveRateBps(mode, driverId)` → `resolveCommissionBps(mode, config, driverOverrideBps?)`. Sin plan activo → cae al `CommissionConfig` global (cero cambio de comportamiento). **GATED a ON_DEMAND** (en carpooling el conductor ya cobra 100%, no hay qué bajar).
 - **Billing del plan:** cobro recurrente vía el rail Yape On-File (`affiliations/`) o descuento en la liquidación semanal (`driver-payments`). Membresía = plan∩rol (MENTORIA): el gate del descuento vive server-side en la resolución de tasa, la UI solo refleja.
 - **Admin:** panel para definir tiers + su descuento; reporte de adopción.
 
 ### 🟠 Fase P-F — Membresía del PASAJERO — FEATURE NUEVA
+
 Benchmark: Uber One (6% cashback + surge relief), Cabify Club (priority + loyalty).
+
 - **Oferta COHERENTE (nunca achica el corte del conductor):** (a) waive/reduce el **carpooling service fee** (es revenue de la plataforma) — hook en `resolveCommissionBps`/`discountCents`; (b) descuentos on-demand **absorbidos por la plataforma** vía el rail promo/credit EXISTENTE (`discountCents`/`PromotionsService`/`CreditService` ya en `charge()`); (c) **priority dispatch** (hook en dispatch, sin acoplar dinero); (d) cashback vía `CreditService`.
 - **Prerequisito:** cerrar P-H (el carpool no tiene UI de pasajero → un beneficio "fee carpool waived" no tiene dónde mostrarse).
 - **Billing:** cobro recurrente (nuevo concern en payment-service).
 
 ### 🟡 Fase P-G — Money-OUT (payout real al conductor)
+
 - **G1 · El riel de desembolso está DIFERIDO** (yape-plin-payout.gateway `isAvailable()=false` + `disburse()` throws; ADR-015 D2 convenio PSP pendiente) — fail-fast honesto, NO bug, pero **nadie cobra su payout en prod hasta firmar el convenio**. **Fix (cuando el convenio esté):** activar el adapter live + verificar firma del gateway de payout.
 - **G2 · No hay modelo de cuenta-destino del conductor** (WalletAffiliation es del pasajero para COBRAR). **Fix:** modelo `DriverPayoutAccount { driverId, method (YAPE|PLIN), walletUid, verified }` + verificación (evitar plata al destino equivocado). Payout method per-driver (hoy hardcoded YAPE).
 
 ### 🟡 Fase P-H — Superficie de carpool del PASAJERO (prereq de P-F)
+
 - El carpool hoy es driver-only (no hay feature en `apps/passenger`, no hay booking controller en public-bff). **Fix:** public-bff booking/reserve controller + feature `carpool` en el pasajero (quote "contribución + service fee" transparente → reservar → cobrar por SERVICE_RAIL). Entrega la transparencia que el modelo ya soporta.
 
 ### 🟢 Bajas
+
 Idempotency-key del cliente decorativa (server dedup OK) · read-model staleness admin (money-safe por CAS) · commission degradado mostrado sin banner.
 
 ## 3. Orden de ataque recomendado
+
 1. **P-A** (las 3 fugas — money real que se pierde/cobra mal HOY).
 2. **P-B** (coherencia contable PSP — libros ≠ banco, riesgo financiero silencioso).
 3. **P-C + P-D** (consistencia monto + admin que cuadre — lo que el dueño VE).
@@ -103,12 +115,14 @@ Idempotency-key del cliente decorativa (server dedup OK) · read-model staleness
 6. **P-G** (money-OUT — gated al convenio PSP; sin esto no hay payout real).
 
 ## 4. Verificación (cada fase)
+
 tsc + tests + `auditar-core` (scope de la fase, eje código-vs-plan) + BOOT-REAL del dinero (cobro→split→
 payout→admin cuadran). Regla: una fase de dinero NO se entrega sin que los 3 planos (pasajero/plataforma/
 conductor) cuadren contra la DB en runtime. Integer cents siempre; cero strings mágicos (enums de modo/
 método/estado tipados).
 
 ## 5. Decisiones que necesita el DUEÑO (antes de construir cada fase)
+
 - **P-A2 (cash):** ¿DriverDebt (el conductor debe la comisión, se netea del payout) o excluir cash del payout y cobrar la comisión aparte? (recomendado: DriverDebt + netting).
 - **P-E:** ¿el plan del conductor es flat-fee→descuento-de-%, o %-reducido-por-tier? ¿aplica a FIXED y PUJA por igual (hoy comparten rate) o hay que separarlos?
 - **P-F:** ¿qué ofrece el plan del pasajero exactamente (waive carpool fee / cashback / priority / combo)? ¿precio?

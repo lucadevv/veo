@@ -30,7 +30,9 @@ describe('registrationStackRoutes · reconstrucción de la pila al reanudar', ()
   it('resuelve la pantalla inicial de cada paso desde STEP_ROUTES (1..3), default PersonalData', () => {
     expect(resolveInitialRoute(RegistrationStep.PERSONAL_DATA)).toBe('PersonalData');
     expect(resolveInitialRoute(RegistrationStep.VEHICLE)).toBe('Vehicle');
-    expect(resolveInitialRoute(RegistrationStep.IDENTITY_VERIFICATION)).toBe('IdentityVerification');
+    expect(resolveInitialRoute(RegistrationStep.IDENTITY_VERIFICATION)).toBe(
+      'IdentityVerification',
+    );
     // Paso fuera de rango (estado corrupto): cae a la raíz, nunca a `undefined`.
     expect(resolveInitialRoute(0)).toBe('PersonalData');
     expect(resolveInitialRoute(99)).toBe('PersonalData');
@@ -52,11 +54,7 @@ describe('registrationStackRoutes · reconstrucción de la pila al reanudar', ()
   it('reconstruye los 3 pasos con índice 2 al reanudar en el paso 3 (KYC)', () => {
     expect(buildResumeRoutes(RegistrationStep.IDENTITY_VERIFICATION)).toEqual({
       index: 2,
-      routes: [
-        { name: 'PersonalData' },
-        { name: 'Vehicle' },
-        { name: 'IdentityVerification' },
-      ],
+      routes: [{ name: 'PersonalData' }, { name: 'Vehicle' }, { name: 'IdentityVerification' }],
     });
   });
 

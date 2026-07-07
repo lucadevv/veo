@@ -300,9 +300,7 @@ export class BookingsService {
     // ESTADO INICIAL POR LA MÁQUINA (cero strings mágicos): SOLICITADO → (REVISION) PENDIENTE_APROBACION
     // o (INSTANT) APROBADO. assertTransition VALIDA la transición desde SOLICITADO antes de persistir.
     const isInstant = trip.modoReserva === ModoReserva.INSTANT_BOOKING;
-    const estadoInicial = isInstant
-      ? BookingState.APROBADO
-      : BookingState.PENDIENTE_APROBACION;
+    const estadoInicial = isInstant ? BookingState.APROBADO : BookingState.PENDIENTE_APROBACION;
     bookingMachine.assertTransition(BookingState.SOLICITADO, estadoInicial);
 
     // EVENTO alineado al estado REAL (ADR-014 §7.1): INSTANT nace APROBADO → `booking.approved`; REVISION
@@ -766,7 +764,10 @@ export class BookingsService {
         bookingId: booking.id,
         status: charge.status,
       });
-      return this.cancelForChargeRejected(booking, { status: charge.status, paymentId: charge.paymentId });
+      return this.cancelForChargeRejected(booking, {
+        status: charge.status,
+        paymentId: charge.paymentId,
+      });
     }
 
     // charge OK (PENDING — o un CAPTURED síncrono, tratado IGUAL): tx2 atómica → APROBADO → COBRO_PENDIENTE +
@@ -851,10 +852,13 @@ export class BookingsService {
       driver = await this.identity.getDriver(driverId);
     } catch (err) {
       // fail-closed: identity caída / timeout → no se permite aprobar/rechazar.
-      throw new ForbiddenError('No se pudo verificar el estado del conductor (identity no disponible)', {
-        driverId,
-        cause: err instanceof Error ? err.message : String(err),
-      });
+      throw new ForbiddenError(
+        'No se pudo verificar el estado del conductor (identity no disponible)',
+        {
+          driverId,
+          cause: err instanceof Error ? err.message : String(err),
+        },
+      );
     }
     if (isDriverActive(driver)) return;
     if (!driver.found) {
@@ -884,21 +888,27 @@ export class BookingsService {
       driver = await this.identity.getDriver(driverId);
     } catch (err) {
       // fail-closed: identity caída / timeout → no se cobra sin verificar la elegibilidad plena del conductor.
-      throw new ForbiddenError('No se pudo verificar la elegibilidad del conductor (identity no disponible)', {
-        driverId,
-        cause: err instanceof Error ? err.message : String(err),
-      });
+      throw new ForbiddenError(
+        'No se pudo verificar la elegibilidad del conductor (identity no disponible)',
+        {
+          driverId,
+          cause: err instanceof Error ? err.message : String(err),
+        },
+      );
     }
     if (isDriverEligible(driver)) return;
     // No elegible: un único 403 con los ejes diagnósticos (suspensión / KYC / antecedentes) para el conductor/soporte.
-    throw new ForbiddenError('Conductor no elegible para cobrar (suspensión / KYC / antecedentes)', {
-      driverId,
-      found: driver.found,
-      currentStatus: driver.currentStatus,
-      suspendedAt: driver.suspendedAt,
-      kycStatus: driver.kycStatus,
-      backgroundCheckStatus: driver.backgroundCheckStatus,
-    });
+    throw new ForbiddenError(
+      'Conductor no elegible para cobrar (suspensión / KYC / antecedentes)',
+      {
+        driverId,
+        found: driver.found,
+        currentStatus: driver.currentStatus,
+        suspendedAt: driver.suspendedAt,
+        kycStatus: driver.kycStatus,
+        backgroundCheckStatus: driver.backgroundCheckStatus,
+      },
+    );
   }
 
   /**

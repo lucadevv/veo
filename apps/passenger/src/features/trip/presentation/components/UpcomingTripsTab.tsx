@@ -149,7 +149,9 @@ function UpcomingTripCard({trip}: UpcomingTripCardProps): React.JSX.Element {
           <StatusPill label={t('tripStatus.SCHEDULED')} tone="brand" dot />
         </View>
 
-        <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
+        <View
+          style={[styles.divider, {backgroundColor: theme.colors.border}]}
+        />
 
         <View style={[styles.midRow, {gap: theme.spacing.md}]}>
           <View style={styles.routeCol}>

@@ -550,7 +550,13 @@ export const DraggableSheet = forwardRef<
               <Stop offset="1" stopColor="#272C38" stopOpacity={0} />
             </SvgLinearGradient>
           </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#sheetGlass)" />
+          <Rect
+            x="0"
+            y="0"
+            width="100%"
+            height="100%"
+            fill="url(#sheetGlass)"
+          />
         </Svg>
         {renderBackground ? (
           <View style={StyleSheet.absoluteFill} pointerEvents="none">

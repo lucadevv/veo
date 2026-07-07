@@ -192,8 +192,7 @@ export class HttpDocumentUploader implements DocumentUploader {
     if (byMime) {
       return byMime;
     }
-    const extension =
-      this.extractExtension(file.fileName) ?? this.extractExtension(file.uri);
+    const extension = this.extractExtension(file.fileName) ?? this.extractExtension(file.uri);
     const byExtension = extension ? EXTENSION_MAP[extension] : undefined;
     if (byExtension) {
       return byExtension;

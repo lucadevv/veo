@@ -90,20 +90,17 @@ jest.mock('@react-native-community/datetimepicker', () => {
 // no existe en Jest. El preset de RN ya auto-mockea `requireNativeComponent` (devuelve un host stub),
 // pero mockeamos el wrapper explícitamente para que la pantalla del KYC renderice predecible y para que
 // los tests puedan disparar `onCameraReady`/`onCameraError`. Es un passthrough que NO abre cámara.
-jest.mock(
-  './src/features/registration/presentation/components/BiometricCameraPreview',
-  () => {
-    const React = require('react');
-    const { View } = require('react-native');
-    const BiometricCameraPreview = (props) =>
-      React.createElement(View, { ...props, testID: 'biometric-camera-preview' });
-    return {
-      __esModule: true,
-      default: BiometricCameraPreview,
-      BIOMETRIC_CAMERA_PREVIEW_NAME: 'BiometricCameraPreview',
-    };
-  },
-);
+jest.mock('./src/features/registration/presentation/components/BiometricCameraPreview', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const BiometricCameraPreview = (props) =>
+    React.createElement(View, { ...props, testID: 'biometric-camera-preview' });
+  return {
+    __esModule: true,
+    default: BiometricCameraPreview,
+    BIOMETRIC_CAMERA_PREVIEW_NAME: 'BiometricCameraPreview',
+  };
+});
 
 // Lote 2: el liveness DIY (vision-camera v5 + face-detector + Nitro) se retiró. El KYC del alta usa una
 // SELFIE simple sobre la vista nativa `BiometricCameraPreview` (mockeada arriba) + el módulo nativo

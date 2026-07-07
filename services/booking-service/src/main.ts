@@ -56,9 +56,7 @@ async function bootstrap(): Promise<void> {
   // credentials: buildGrpcServerCredentials() } }) + startAllMicroservices — TLS-capable por env (ADR-016),
   // el MISMO helper de @veo/rpc que usan los otros 11 servidores (DRY).
   await app.listen(port);
-  logger.info(
-    `booking-service escuchando en :${port} (gRPC :${grpcUrl} reservado para F2)`,
-  );
+  logger.info(`booking-service escuchando en :${port} (gRPC :${grpcUrl} reservado para F2)`);
 }
 
 bootstrap().catch((err) => {

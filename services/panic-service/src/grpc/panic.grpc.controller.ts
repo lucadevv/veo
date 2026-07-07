@@ -7,7 +7,11 @@ import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity, INTERNAL_IDENTITY_ALLOWED_AUDIENCES, type InternalAudience } from '@veo/auth';
+import {
+  verifyGrpcIdentity,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
+} from '@veo/auth';
 import { PanicService } from '../panic/panic.service';
 import type { Env } from '../config/env.schema';
 

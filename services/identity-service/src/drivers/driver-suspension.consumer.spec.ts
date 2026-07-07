@@ -427,7 +427,11 @@ describe('DriverSuspensionConsumer · driver.suspended → BACKSTOP durable del 
     await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
     const { userId: _omit, ...noUserId } = selfSuspended;
     await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(noUserId));
-    expect(drivers.resealSuspensionRevocation).toHaveBeenCalledWith('d1', undefined, expect.any(Date));
+    expect(drivers.resealSuspensionRevocation).toHaveBeenCalledWith(
+      'd1',
+      undefined,
+      expect.any(Date),
+    );
   });
 
   it('IDEMPOTENTE: reentrega del mismo evento (outcome duplicate) no rompe ni duplica efecto', async () => {
@@ -436,7 +440,12 @@ describe('DriverSuspensionConsumer · driver.suspended → BACKSTOP durable del 
     await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(selfSuspended));
     await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope(selfSuspended));
     expect(drivers.resealSuspensionRevocation).toHaveBeenCalledTimes(2);
-    expect(drivers.resealSuspensionRevocation).toHaveBeenNthCalledWith(2, 'd1', 'user-1', expect.any(Date));
+    expect(drivers.resealSuspensionRevocation).toHaveBeenNthCalledWith(
+      2,
+      'd1',
+      'user-1',
+      expect.any(Date),
+    );
   });
 
   it("outcome 'skipped' (sin userId resoluble): no rompe (no-op observable)", async () => {
@@ -451,7 +460,9 @@ describe('DriverSuspensionConsumer · driver.suspended → BACKSTOP durable del 
   it('descarta payload inválido (sin driverId) sin resellar', async () => {
     const drivers = { resealSuspensionRevocation: vi.fn(async () => 'reconciled' as const) };
     await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
-    await captured.byEvent['driver.suspended']?.(selfSuspendedEnvelope({ reason: 'x', suspendedAt: selfSuspended.suspendedAt }));
+    await captured.byEvent['driver.suspended']?.(
+      selfSuspendedEnvelope({ reason: 'x', suspendedAt: selfSuspended.suspendedAt }),
+    );
     expect(drivers.resealSuspensionRevocation).not.toHaveBeenCalled();
   });
 

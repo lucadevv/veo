@@ -41,7 +41,11 @@ const DocStatus = { VALID: 'VALID', EXPIRING_SOON: 'EXPIRING_SOON', EXPIRED: 'EX
  *  - Activo: operable, docs vigentes e ITV vigente.
  * Alinea la columna Estado con lo que la cola de Revisiones llama "revisión de aptitud" (no "suspendido").
  */
-function estado(v: VehicleView): { key: 'activo' | 'enRevision' | 'suspendido'; label: string; tone: PillTone } {
+function estado(v: VehicleView): {
+  key: 'activo' | 'enRevision' | 'suspendido';
+  label: string;
+  tone: PillTone;
+} {
   if (v.status === DocStatus.EXPIRED || (v.itvHasInspection && !v.itvCurrent))
     return { key: 'suspendido', label: 'Suspendido', tone: 'danger' };
   if (!v.operable || !v.itvHasInspection || v.status === DocStatus.EXPIRING_SOON)
@@ -162,7 +166,9 @@ export default function VehiclesPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
         <Lock className="size-6 text-ink-subtle" aria-hidden />
-        <p className="text-sm text-ink-muted">Necesitás el rol correspondiente para ver la flota.</p>
+        <p className="text-sm text-ink-muted">
+          Necesitás el rol correspondiente para ver la flota.
+        </p>
       </div>
     );
   }
@@ -190,10 +196,37 @@ export default function VehiclesPage() {
 
       {/* Stat cards — derivados del MISMO estado() que las filas (suspensión = función de docs+ITV). */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard icon={Car} label="Total en flota" value={String(cards.total)} hint="Vehículos registrados" loading={vehicles.isLoading} />
-        <StatCard icon={CircleCheck} label="Activos" value={String(cards.activos)} hint="Operables · vigentes" hintTone="success" loading={vehicles.isLoading} />
-        <StatCard icon={CalendarClock} label="ITV por vencer" value={String(cards.itvPorVencer)} hint="Próximos 30 días" hintTone="warn" loading={vehicles.isLoading} />
-        <StatCard icon={Ban} label="Suspendidos" value={String(cards.suspendidos)} hint="Doc / ITV vencida" hintTone="danger" loading={vehicles.isLoading} />
+        <StatCard
+          icon={Car}
+          label="Total en flota"
+          value={String(cards.total)}
+          hint="Vehículos registrados"
+          loading={vehicles.isLoading}
+        />
+        <StatCard
+          icon={CircleCheck}
+          label="Activos"
+          value={String(cards.activos)}
+          hint="Operables · vigentes"
+          hintTone="success"
+          loading={vehicles.isLoading}
+        />
+        <StatCard
+          icon={CalendarClock}
+          label="ITV por vencer"
+          value={String(cards.itvPorVencer)}
+          hint="Próximos 30 días"
+          hintTone="warn"
+          loading={vehicles.isLoading}
+        />
+        <StatCard
+          icon={Ban}
+          label="Suspendidos"
+          value={String(cards.suspendidos)}
+          hint="Doc / ITV vencida"
+          hintTone="danger"
+          loading={vehicles.isLoading}
+        />
       </div>
 
       {/* Toolbar */}
@@ -236,7 +269,9 @@ export default function VehiclesPage() {
 
       {/* Tabla */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
-        <div className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}>
+        <div
+          className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
+        >
           <span>Vehículo</span>
           <span>Tipo</span>
           <span>Conductor</span>
@@ -255,7 +290,11 @@ export default function VehiclesPage() {
             ))}
           </div>
         ) : rows.length === 0 ? (
-          <EmptyState className="py-12" title="Sin vehículos" description="No hay vehículos en esta vista." />
+          <EmptyState
+            className="py-12"
+            title="Sin vehículos"
+            description="No hay vehículos en esta vista."
+          />
         ) : (
           rows.map((v) => {
             const isMoto = v.vehicleType === 'MOTO';
@@ -275,7 +314,9 @@ export default function VehiclesPage() {
                     <Icon className="size-[17px]" aria-hidden />
                   </span>
                   <div className="flex min-w-0 flex-col gap-px">
-                    <span className="truncate font-mono text-sm font-semibold text-ink">{v.plate}</span>
+                    <span className="truncate font-mono text-sm font-semibold text-ink">
+                      {v.plate}
+                    </span>
                     <span className="truncate text-[11px] text-ink-subtle">
                       {[v.brand, v.model].filter(Boolean).join(' ')}
                       {v.year ? ` · ${v.year}` : ''}

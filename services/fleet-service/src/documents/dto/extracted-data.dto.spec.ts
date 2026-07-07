@@ -100,7 +100,11 @@ describe('extractedData — validación FUERTE de la unión discriminada (Lote 0
     const errors = await errorsFor({
       ...base,
       type: FleetDocumentType.PROPERTY_CARD,
-      extractedData: { type: FleetDocumentType.PROPERTY_CARD, plate: 'ABC-123', energySource: 'GASOLINE_90' },
+      extractedData: {
+        type: FleetDocumentType.PROPERTY_CARD,
+        plate: 'ABC-123',
+        energySource: 'GASOLINE_90',
+      },
     });
     expect(errorOn(errors, 'extractedData')).toBeUndefined();
   });

@@ -260,7 +260,9 @@ describe('CommissionService (F2.7 · comisión por modo · CAS desacoplada)', ()
   // ── P-B (ADR-022) · fee del PSP por método (editable, CAS sobre `version`) ───────────────
   it('resolvePspFeeBps: por método desde la config; CASH → 0 (no pasa por el PSP)', async () => {
     const service = new CommissionService(
-      new FakeRepo(row({ yapeFeeBps: 200, plinFeeBps: 150, cardFeeBps: 350, pagoefectivoFeeBps: 400 })),
+      new FakeRepo(
+        row({ yapeFeeBps: 200, plinFeeBps: 150, cardFeeBps: 350, pagoefectivoFeeBps: 400 }),
+      ),
       fakeConfig(0.2),
       0,
     );
@@ -292,14 +294,20 @@ describe('CommissionService (F2.7 · comisión por modo · CAS desacoplada)', ()
   it('replacePspFees (version STALE) → ConflictError (CAS, sin lost update)', async () => {
     const service = new CommissionService(new FakeRepo(row({ version: 5 })), fakeConfig(0.2), 0);
     await expect(
-      service.replacePspFees({ yapeFeeBps: 100, plinFeeBps: 100, cardFeeBps: 100, pagoefectivoFeeBps: 100 }, 2),
+      service.replacePspFees(
+        { yapeFeeBps: 100, plinFeeBps: 100, cardFeeBps: 100, pagoefectivoFeeBps: 100 },
+        2,
+      ),
     ).rejects.toThrow(ConflictError);
   });
 
   it('replacePspFees rechaza un fee fuera de [0,10000] bps', async () => {
     const service = new CommissionService(new FakeRepo(row({ version: 1 })), fakeConfig(0.2), 0);
     await expect(
-      service.replacePspFees({ yapeFeeBps: 10_001, plinFeeBps: 0, cardFeeBps: 0, pagoefectivoFeeBps: 0 }, 1),
+      service.replacePspFees(
+        { yapeFeeBps: 10_001, plinFeeBps: 0, cardFeeBps: 0, pagoefectivoFeeBps: 0 },
+        1,
+      ),
     ).rejects.toThrow();
   });
 });

@@ -7,11 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { Metadata } from '@grpc/grpc-js';
-import {
-  grpcIdentityMetadata,
-  InternalAudience,
-  type AuthenticatedUser,
-} from '@veo/auth';
+import { grpcIdentityMetadata, InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { FleetGrpcController } from './fleet.grpc.controller';
 import type { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
@@ -28,7 +24,11 @@ const ADMIN: AuthenticatedUser = {
 /** Metadata gRPC entrante FIRMADA (admin-rail) con el mismo secret que el controller. */
 function signedMeta(): Metadata {
   const meta = new Metadata();
-  const headers = grpcIdentityMetadata(ADMIN, INTERNAL_IDENTITY_SECRET, InternalAudience.ADMIN_RAIL);
+  const headers = grpcIdentityMetadata(
+    ADMIN,
+    INTERNAL_IDENTITY_SECRET,
+    InternalAudience.ADMIN_RAIL,
+  );
   for (const [k, v] of Object.entries(headers)) meta.set(k, v);
   return meta;
 }
@@ -61,11 +61,7 @@ function vehicle(
 }
 
 /** Documento de vehículo (ownerType=VEHICLE) para alimentar el cómputo de docsOperable (SOAT+ITV). */
-function vehicleDoc(
-  ownerId: string,
-  type: string,
-  status: string,
-): Record<string, unknown> {
+function vehicleDoc(ownerId: string, type: string, status: string): Record<string, unknown> {
   return { ownerType: 'VEHICLE', ownerId, type, status };
 }
 
@@ -159,8 +155,16 @@ describe('FleetGrpcController.getDriverInspectionStatus (gate de aprobación · 
     // se consulta SOBRE veh-new (findFirst recibe su id). Un solo doble de inspección igual basta para
     // verificar que el vehicleId resuelto es el operado.
     const vehicles = [
-      vehicle({ id: 'veh-old', plate: 'OLD-111', selectedAt: new Date('2026-01-01T00:00:00.000Z') }),
-      vehicle({ id: 'veh-new', plate: 'NEW-222', selectedAt: new Date('2026-06-01T00:00:00.000Z') }),
+      vehicle({
+        id: 'veh-old',
+        plate: 'OLD-111',
+        selectedAt: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+      vehicle({
+        id: 'veh-new',
+        plate: 'NEW-222',
+        selectedAt: new Date('2026-06-01T00:00:00.000Z'),
+      }),
     ];
     const findFirst = vi.fn(() => Promise.resolve(inspection(true, '2099-01-01T00:00:00.000Z')));
     const prisma = {
@@ -196,8 +200,16 @@ describe('FleetGrpcController.getDriverActiveVehicle (FUENTE ÚNICA del vehícul
     // re-derivar con `.find(active)`. Así el vehicleId del viaje NO diverge del que valida el gate de ITV.
     const ctrl = makeController({
       vehicles: [
-        vehicle({ id: 'veh-old', plate: 'OLD-111', selectedAt: new Date('2026-01-01T00:00:00.000Z') }),
-        vehicle({ id: 'veh-new', plate: 'NEW-222', selectedAt: new Date('2026-06-01T00:00:00.000Z') }),
+        vehicle({
+          id: 'veh-old',
+          plate: 'OLD-111',
+          selectedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+        vehicle({
+          id: 'veh-new',
+          plate: 'NEW-222',
+          selectedAt: new Date('2026-06-01T00:00:00.000Z'),
+        }),
       ],
     });
     const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
@@ -223,9 +235,7 @@ describe('FleetGrpcController.getDriverActiveVehicle (FUENTE ÚNICA del vehícul
 
   it('rechaza (UNAUTHENTICATED) sin identidad firmada', async () => {
     const ctrl = makeController({ vehicles: [vehicle()] });
-    await expect(
-      ctrl.getDriverActiveVehicle({ id: 'u1' }, new Metadata()),
-    ).rejects.toBeDefined();
+    await expect(ctrl.getDriverActiveVehicle({ id: 'u1' }, new Metadata())).rejects.toBeDefined();
   });
 });
 
@@ -238,10 +248,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
   it('GetDriverActiveVehicle: SOAT+ITV VALID + ficha → active=true, status=ACTIVE', async () => {
     const ctrl = makeController({
       vehicles: [vehicle({ id: 'veh-1', modelSpecId: 'spec-1' })],
-      vehicleDocs: [
-        vehicleDoc('veh-1', 'SOAT', 'VALID'),
-        vehicleDoc('veh-1', 'ITV', 'VALID'),
-      ],
+      vehicleDocs: [vehicleDoc('veh-1', 'SOAT', 'VALID'), vehicleDoc('veh-1', 'ITV', 'VALID')],
     });
     const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
     expect(out.found).toBe(true);
@@ -263,10 +270,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
   it('GetDriverActiveVehicle: SOAT VALID pero ITV EXPIRED → active=false (no opera con ITV vencida)', async () => {
     const ctrl = makeController({
       vehicles: [vehicle({ id: 'veh-1', modelSpecId: 'spec-1' })],
-      vehicleDocs: [
-        vehicleDoc('veh-1', 'SOAT', 'VALID'),
-        vehicleDoc('veh-1', 'ITV', 'EXPIRED'),
-      ],
+      vehicleDocs: [vehicleDoc('veh-1', 'SOAT', 'VALID'), vehicleDoc('veh-1', 'ITV', 'EXPIRED')],
     });
     const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
     expect(out.active).toBe(false);
@@ -276,10 +280,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
   it('GetDriverActiveVehicle: SOAT+ITV VALID pero SIN ficha (modelSpecId null) → active=false', async () => {
     const ctrl = makeController({
       vehicles: [vehicle({ id: 'veh-1', modelSpecId: null })],
-      vehicleDocs: [
-        vehicleDoc('veh-1', 'SOAT', 'VALID'),
-        vehicleDoc('veh-1', 'ITV', 'VALID'),
-      ],
+      vehicleDocs: [vehicleDoc('veh-1', 'SOAT', 'VALID'), vehicleDoc('veh-1', 'ITV', 'VALID')],
     });
     const out = await ctrl.getDriverActiveVehicle({ id: 'u1' }, signedMeta());
     expect(out.active).toBe(false);
@@ -289,10 +290,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
   it('GetVehicle: SOAT+ITV VALID + ficha → active=true, status=ACTIVE', async () => {
     const ctrl = makeController({
       vehicles: [vehicle({ id: 'veh-1', modelSpecId: 'spec-1' })],
-      vehicleDocs: [
-        vehicleDoc('veh-1', 'SOAT', 'VALID'),
-        vehicleDoc('veh-1', 'ITV', 'VALID'),
-      ],
+      vehicleDocs: [vehicleDoc('veh-1', 'SOAT', 'VALID'), vehicleDoc('veh-1', 'ITV', 'VALID')],
     });
     const out = await ctrl.getVehicle({ id: 'veh-1' }, signedMeta());
     expect(out.found).toBe(true);
@@ -303,10 +301,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
   it('GetDriverVehicles: batchea los docs y deriva la operabilidad por vehículo (anti-N+1)', async () => {
     // veh-1 operable (SOAT+ITV VALID + ficha) ; veh-2 sin docs → PENDING_REVIEW. UNA sola query de docs.
     const docsFindMany = vi.fn(() =>
-      Promise.resolve([
-        vehicleDoc('veh-1', 'SOAT', 'VALID'),
-        vehicleDoc('veh-1', 'ITV', 'VALID'),
-      ]),
+      Promise.resolve([vehicleDoc('veh-1', 'SOAT', 'VALID'), vehicleDoc('veh-1', 'ITV', 'VALID')]),
     );
     const vehicles = [
       vehicle({ id: 'veh-1', plate: 'AAA-111', modelSpecId: 'spec-1' }),
@@ -335,10 +330,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
   it('GetVehiclesByIds (Lote 3b): batch por ids, deriva operabilidad por vehículo, UNA query de docs (anti-N+1)', async () => {
     // veh-1 operable (SOAT+ITV VALID + ficha) ; veh-2 sin docs → PENDING_REVIEW. UNA sola query de docs batched.
     const docsFindMany = vi.fn(() =>
-      Promise.resolve([
-        vehicleDoc('veh-1', 'SOAT', 'VALID'),
-        vehicleDoc('veh-1', 'ITV', 'VALID'),
-      ]),
+      Promise.resolve([vehicleDoc('veh-1', 'SOAT', 'VALID'), vehicleDoc('veh-1', 'ITV', 'VALID')]),
     );
     const vehiclesFindMany = vi.fn(() =>
       Promise.resolve([

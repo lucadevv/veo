@@ -365,8 +365,7 @@ export class DocumentsService {
           verifiedAt: now,
           verifiedBy: reviewerId,
           // M5: persistimos el motivo SOLO si es rechazo; al validar lo limpiamos (ya no hay rechazo).
-          rejectionReason:
-            decision === ReviewDecision.REJECTED ? reason?.trim() || null : null,
+          rejectionReason: decision === ReviewDecision.REJECTED ? reason?.trim() || null : null,
         },
       });
       if (claim.count === 0) {
@@ -466,12 +465,14 @@ export class DocumentsService {
    *   expiresAt > c.expiresAt  OR  (expiresAt = c.expiresAt AND id > c.id)
    * Esto avanza la página de forma determinista y total (sin gaps ni duplicados).
    */
-  async listExpirations(opts: {
-    withinDays?: number;
-    now?: Date;
-    cursor?: string;
-    limit?: number;
-  } = {}): Promise<Page<FleetDocument>> {
+  async listExpirations(
+    opts: {
+      withinDays?: number;
+      now?: Date;
+      cursor?: string;
+      limit?: number;
+    } = {},
+  ): Promise<Page<FleetDocument>> {
     const now = opts.now ?? new Date();
     const limit = clampLimit(opts.limit);
 

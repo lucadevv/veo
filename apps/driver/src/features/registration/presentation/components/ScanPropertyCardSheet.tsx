@@ -90,7 +90,12 @@ export function ScanPropertyCardSheet({
       title={t('registration.vehicle.scanCard.title')}
       footer={
         <View style={styles.footer}>
-          <Button label={t('common.cancel')} variant="secondary" onPress={onClose} disabled={busy} />
+          <Button
+            label={t('common.cancel')}
+            variant="secondary"
+            onPress={onClose}
+            disabled={busy}
+          />
           <Button
             label={primaryLabel}
             variant="primary"
@@ -134,7 +139,10 @@ export function ScanPropertyCardSheet({
                 {t('registration.vehicle.scanCard.capturedTitle')}
               </Text>
             </View>
-            <ReadRow label={t('registration.vehicle.scanCard.readPlate')} value={card.vehicle.plate} />
+            <ReadRow
+              label={t('registration.vehicle.scanCard.readPlate')}
+              value={card.vehicle.plate}
+            />
             {card.derivedType !== null ? (
               <ReadRow
                 label={t('registration.vehicle.typeAccessibility', {
@@ -153,7 +161,10 @@ export function ScanPropertyCardSheet({
               />
             ) : null}
             {card.vehicle.year.trim().length > 0 ? (
-              <ReadRow label={t('registration.vehicle.scanCard.readYear')} value={card.vehicle.year} />
+              <ReadRow
+                label={t('registration.vehicle.scanCard.readYear')}
+                value={card.vehicle.year}
+              />
             ) : null}
           </View>
         ) : null}

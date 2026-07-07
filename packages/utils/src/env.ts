@@ -16,7 +16,10 @@ export function secret(devDefault: string) {
   if (isHardenedEnv()) {
     return z
       .string()
-      .min(1, 'secreto requerido en producción (configurar vía secret store self-hosted: .env del host / docker-secrets / SOPS+age)')
+      .min(
+        1,
+        'secreto requerido en producción (configurar vía secret store self-hosted: .env del host / docker-secrets / SOPS+age)',
+      )
       .refine((v) => v !== devDefault, {
         message: 'no usar el secreto de desarrollo en producción',
       });

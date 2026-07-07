@@ -26,7 +26,9 @@ export class InternalStorageController {
   @UseGuards(InternalIdentityGuard)
   @Post('presign-get')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Generar URL prefirmada de descarga (presigned GET) de una key arbitraria' })
+  @ApiOperation({
+    summary: 'Generar URL prefirmada de descarga (presigned GET) de una key arbitraria',
+  })
   presignGet(@Body() dto: PresignGetDto): Promise<PresignGetView> {
     return this.storage.presignGet({
       bucket: dto.bucket,
@@ -65,7 +67,9 @@ export class InternalStorageController {
   @Roles(AdminRole.SUPERADMIN)
   @Delete('drivers/:driverId/documents')
   @HttpCode(200)
-  @ApiOperation({ summary: 'HARD purge de los binarios de documentos del conductor (drivers/<id>/). SUPERADMIN.' })
+  @ApiOperation({
+    summary: 'HARD purge de los binarios de documentos del conductor (drivers/<id>/). SUPERADMIN.',
+  })
   purgeDriverDocs(
     @Param('driverId') driverId: string,
     @Body() dto: PurgeDriverDocsDto,

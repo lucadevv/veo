@@ -285,10 +285,7 @@ export class IdentityGrpcController {
    * Devuelve solo los hallados (orden libre — el consumidor mapea por id); ids vacíos → []. Idempotente.
    */
   @GrpcMethod('IdentityService', 'GetDriversByIds')
-  async getDriversByIds(
-    { ids }: DriverIdsRequest,
-    metadata: Metadata,
-  ): Promise<DriversByIdsReply> {
+  async getDriversByIds({ ids }: DriverIdsRequest, metadata: Metadata): Promise<DriversByIdsReply> {
     this.requireIdentity('GetDriversByIds', metadata);
     if (!ids || ids.length === 0) return { drivers: [] };
     const drivers = await this.prisma.read.driver.findMany({
@@ -319,10 +316,7 @@ export class IdentityGrpcController {
    * user hallado (found=true); los ids inexistentes se omiten (el consumidor mapea por id). Riel ADMIN.
    */
   @GrpcMethod('IdentityService', 'GetUsersByIds')
-  async getUsersByIds(
-    { ids }: { ids: string[] },
-    metadata: Metadata,
-  ): Promise<UsersByIdsReply> {
+  async getUsersByIds({ ids }: { ids: string[] }, metadata: Metadata): Promise<UsersByIdsReply> {
     this.requireIdentity('GetUsersByIds', metadata);
     if (!ids || ids.length === 0) return { users: [] };
     const users = await this.prisma.read.user.findMany({ where: { id: { in: ids } } });
@@ -403,33 +397,33 @@ export class IdentityGrpcController {
    */
   private toDriverReply(
     d: {
-    id: string;
-    userId: string;
-    currentStatus: string;
-    backgroundCheckStatus: string;
-    averageRating: { toString(): string };
-    suspendedAt: Date | null;
-    legalName: string | null;
-    rejectionReason: string | null;
-    licenseNumber: string | null;
-    documentIdEnc: string | null;
-    birthDate: Date | null;
-    createdAt: Date;
-    faceEnrolledAt: Date | null;
-    lastVerifiedAt: Date | null;
-    dniFaceMatched: boolean | null;
-    dniFaceMatchScore: number | null;
-    dniFaceMatchedAt: Date | null;
-    licenseFaceMatched: boolean | null;
-    licenseFaceMatchScore: number | null;
-    licenseFaceMatchedAt: Date | null;
-    faceSelfieKey: string | null;
-    livenessChecked: boolean | null;
-    livenessScore: number | null;
-    user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
-    // Holds vigentes (solo el `cause`): presente cuando el query los incluyó (GetDriver single). Ausente en
-    // los reads que NO los traen (batch/by-user) → suspensionCauses queda [] (el badge `suspendedAt` basta ahí).
-    suspensionHolds?: { cause: string }[];
+      id: string;
+      userId: string;
+      currentStatus: string;
+      backgroundCheckStatus: string;
+      averageRating: { toString(): string };
+      suspendedAt: Date | null;
+      legalName: string | null;
+      rejectionReason: string | null;
+      licenseNumber: string | null;
+      documentIdEnc: string | null;
+      birthDate: Date | null;
+      createdAt: Date;
+      faceEnrolledAt: Date | null;
+      lastVerifiedAt: Date | null;
+      dniFaceMatched: boolean | null;
+      dniFaceMatchScore: number | null;
+      dniFaceMatchedAt: Date | null;
+      licenseFaceMatched: boolean | null;
+      licenseFaceMatchScore: number | null;
+      licenseFaceMatchedAt: Date | null;
+      faceSelfieKey: string | null;
+      livenessChecked: boolean | null;
+      livenessScore: number | null;
+      user?: { name: string | null; kycStatus?: string | null; phone?: string | null } | null;
+      // Holds vigentes (solo el `cause`): presente cuando el query los incluyó (GetDriver single). Ausente en
+      // los reads que NO los traen (batch/by-user) → suspensionCauses queda [] (el badge `suspendedAt` basta ahí).
+      suspensionHolds?: { cause: string }[];
     },
     includeSensitivePii = false,
     // Eje SEPARADO de `includeSensitivePii`: expone SOLO el ESTADO de face-match/liveness (derivado de los
@@ -522,7 +516,9 @@ export class IdentityGrpcController {
       // varias causas (ej. doc vencido + disciplinaria) las muestra TODAS, así el panel ofrece la(s) acción(es)
       // de reactivación correcta(s). [] cuando el read no trajo holds (batch/by-user) o no hay holds (libre).
       // NO es PII; el `cause` es un enum de motivo. dedup con Set (ej. 2 holds DOCUMENT_EXPIRED de docs distintos).
-      suspensionCauses: d.suspensionHolds ? [...new Set(d.suspensionHolds.map((h) => h.cause))] : [],
+      suspensionCauses: d.suspensionHolds
+        ? [...new Set(d.suspensionHolds.map((h) => h.cause))]
+        : [],
     };
   }
 }

@@ -36,9 +36,7 @@ export interface CostPerKmTx {
       where: { pais: string; version: number };
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
-    create(args: {
-      data: Record<string, unknown>;
-    }): Promise<{ version: number; updatedAt: Date }>;
+    create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
     findUnique(args: {
       where: { pais: string };
     }): Promise<{ version: number; updatedAt: Date } | null>;

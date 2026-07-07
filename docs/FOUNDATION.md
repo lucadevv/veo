@@ -41,9 +41,9 @@ Las reglas de negocio se referencian por ID: **BR-T0x** (viaje), **BR-I0x** (ide
    Los data stores y el cómputo (**Postgres, Redis, Kafka, almacenamiento de objetos MinIO, secretos**) se
    self-hostean en ese VPS. Los equivalentes **MANAGED de AWS quedan PROHIBIDOS** (EKS, RDS, MSK, ElastiCache,
    S3, CloudFront, KMS, Secrets Manager): son self-hosteables, así que usarlos VIOLA soberanía. **Regla de
-   decisión, sin ambigüedad:** *¿se puede self-hostear? → se self-hostea* (Postgres **no** RDS · Kafka **no**
+   decisión, sin ambigüedad:** _¿se puede self-hostear? → se self-hostea_ (Postgres **no** RDS · Kafka **no**
    MSK · MinIO **no** S3 · Redis **no** ElastiCache · cifrado at-rest con clave propia/SOPS — app-level (pii/biometric) **o** MinIO SSE-S3 con nuestra clave maestra (video) — **no** AWS KMS managed · `.env`/docker-secrets
-   **no** Secrets Manager · Docker Compose **no** EKS). *¿Es físicamente imposible self-hostear el riel?* (la
+   **no** Secrets Manager · Docker Compose **no** EKS). _¿Es físicamente imposible self-hostear el riel?_ (la
    red de push de Apple/Google, la red de pagos Yape/Plin, el SMS del operador) → **recién ahí** es riel externo
    inevitable tras puerto, por la regla (a). Esto **deja obsoleto** todo lo que asumía AWS managed: EKS/Terraform/
    ArgoCD, RDS, MSK, ElastiCache, S3, Secrets Manager, KMS, AWS IoT Core (ver ADR-007 reemplazado; STATUS Ola 5).
@@ -309,16 +309,16 @@ Eventos mínimos por servicio (publicar exactamente estos, ampliar si el dominio
 VEO **construye propio / self-hosted todo lo posible**. Solo los rieles físicamente externos se conectan,
 y siempre tras un puerto propio. Mapa de capacidades:
 
-| Capacidad                    | Cómo en VEO                                                                                       | Tipo                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------ |
-| Biometría (liveness + match) | **`biometric-service` PROPIO** (Python/FastAPI + ONNX open-source). identity orquesta vía puerto. | self-hosted              |
-| Video en vivo (WebRTC)       | **LiveKit self-hosted** en el VPS (Docker Compose, open-source). El video nunca sale de nuestra infra.    | self-hosted              |
-| Mapas/routing/geocoding      | **OSM propio**: OSRM/Valhalla + Nominatim self-hosted, vía `@veo/maps`.                           | self-hosted              |
-| Validación DNI (RENIEC)      | Fase 4. Ahora revisión manual del operador. Puerto `IdentityValidator` + sandbox.                 | externo (F4) tras puerto |
-| Antecedentes (PJ)            | Fase 4. Ahora subida + revisión manual. Puerto `BackgroundCheckProvider`.                         | externo (F4) tras puerto |
-| Pagos Yape/Plin              | Riel bancario inevitable. Conector mínimo tras puerto `PaymentGateway` + sandbox.                 | externo tras puerto      |
-| Push móvil FCM/APNs          | Lo exige el OS (Google/Apple). Conector tras puerto `PushSender` + sandbox.                       | externo tras puerto      |
-| SMS (OTP, alerta familia)    | Operador celular. Conector tras puerto `SmsSender` + sandbox (consola en dev).                    | externo tras puerto      |
+| Capacidad                    | Cómo en VEO                                                                                            | Tipo                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------ |
+| Biometría (liveness + match) | **`biometric-service` PROPIO** (Python/FastAPI + ONNX open-source). identity orquesta vía puerto.      | self-hosted              |
+| Video en vivo (WebRTC)       | **LiveKit self-hosted** en el VPS (Docker Compose, open-source). El video nunca sale de nuestra infra. | self-hosted              |
+| Mapas/routing/geocoding      | **OSM propio**: OSRM/Valhalla + Nominatim self-hosted, vía `@veo/maps`.                                | self-hosted              |
+| Validación DNI (RENIEC)      | Fase 4. Ahora revisión manual del operador. Puerto `IdentityValidator` + sandbox.                      | externo (F4) tras puerto |
+| Antecedentes (PJ)            | Fase 4. Ahora subida + revisión manual. Puerto `BackgroundCheckProvider`.                              | externo (F4) tras puerto |
+| Pagos Yape/Plin              | Riel bancario inevitable. Conector mínimo tras puerto `PaymentGateway` + sandbox.                      | externo tras puerto      |
+| Push móvil FCM/APNs          | Lo exige el OS (Google/Apple). Conector tras puerto `PushSender` + sandbox.                            | externo tras puerto      |
+| SMS (OTP, alerta familia)    | Operador celular. Conector tras puerto `SmsSender` + sandbox (consola en dev).                         | externo tras puerto      |
 
 Patrón de puerto para **toda** capacidad externa (incluido el sandbox para las propias en dev):
 
@@ -369,7 +369,7 @@ services/<svc>/
 > **DEUDA CONOCIDA — capa `repository.ts` no extraída (aceptada, no bug).** Hoy los services de `identity-service`
 > (y varios otros) acceden a Prisma DIRECTO (`this.prisma.read/write`, ~40 sitios solo en `drivers.service.ts`),
 > sin la capa `<feature>.repository.ts` que esta anatomía prescribe. **Funciona correctamente** — la lógica de
-> dominio, las reglas BR-*, las state machines y los tests corren igual; el repository es una convención de
+> dominio, las reglas BR-\*, las state machines y los tests corren igual; el repository es una convención de
 > arquitectura (testeabilidad: mockear el repo en vez de Prisma · desacople del ORM · un solo lugar que toca la
 > DB), NO un requisito funcional. **Techo:** mientras los services queden testeables (hoy lo son, con mocks de
 > Prisma) y no haya intención de cambiar de ORM. **Gatillo para pagarla:** cuando (a) los mocks de Prisma en los

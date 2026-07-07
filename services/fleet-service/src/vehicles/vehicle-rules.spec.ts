@@ -159,27 +159,27 @@ describe('hasRequiredVehicleDocsOperable (SOAT+ITV presentes+aprobados+vigentes)
 
 describe('deriveVehicleReviewStatus (operabilidad derivada de señales reales)', () => {
   it('docs operables + ficha linkeada → ACTIVE (operable)', () => {
-    expect(
-      deriveVehicleReviewStatus({ docsOperable: true, modelSpecId: 'spec-1' }),
-    ).toBe(VehicleReviewStatus.ACTIVE);
+    expect(deriveVehicleReviewStatus({ docsOperable: true, modelSpecId: 'spec-1' })).toBe(
+      VehicleReviewStatus.ACTIVE,
+    );
   });
 
   it('docs NO operables → PENDING_REVIEW aunque tenga ficha', () => {
-    expect(
-      deriveVehicleReviewStatus({ docsOperable: false, modelSpecId: 'spec-1' }),
-    ).toBe(VehicleReviewStatus.PENDING_REVIEW);
+    expect(deriveVehicleReviewStatus({ docsOperable: false, modelSpecId: 'spec-1' })).toBe(
+      VehicleReviewStatus.PENDING_REVIEW,
+    );
   });
 
   it('SIN ficha linkeada (modelSpecId null) → PENDING_REVIEW aunque los docs estén operables', () => {
-    expect(
-      deriveVehicleReviewStatus({ docsOperable: true, modelSpecId: null }),
-    ).toBe(VehicleReviewStatus.PENDING_REVIEW);
+    expect(deriveVehicleReviewStatus({ docsOperable: true, modelSpecId: null })).toBe(
+      VehicleReviewStatus.PENDING_REVIEW,
+    );
   });
 
   it('ni docs operables ni ficha → PENDING_REVIEW', () => {
-    expect(
-      deriveVehicleReviewStatus({ docsOperable: false, modelSpecId: null }),
-    ).toBe(VehicleReviewStatus.PENDING_REVIEW);
+    expect(deriveVehicleReviewStatus({ docsOperable: false, modelSpecId: null })).toBe(
+      VehicleReviewStatus.PENDING_REVIEW,
+    );
   });
 });
 

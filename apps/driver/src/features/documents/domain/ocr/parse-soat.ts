@@ -290,7 +290,8 @@ export function parseSoat(lines: readonly string[]): ParsedSoat {
   // OCR del device (Hasta 2027 > Desde 2026 > emisión). REFINAMIENTO/fallback solo si el max no encontró
   // ninguna fecha suelta: BOLETA La Positiva (FIN VIG. DOC/POL) y formato CERTIFICADO estándar (Hasta del
   // bloque de control). Son formatos mutuamente excluyentes en sus etiquetas, así que no se pisan.
-  const expiresAt = latestDate(lines) ?? extractFinVigExpiry(lines) ?? extractCertificateExpiry(lines);
+  const expiresAt =
+    latestDate(lines) ?? extractFinVigExpiry(lines) ?? extractCertificateExpiry(lines);
   if (expiresAt) {
     result.expiresAt = expiresAt;
   }

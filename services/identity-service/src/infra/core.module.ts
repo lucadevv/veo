@@ -76,11 +76,7 @@ const refreshStoreProvider: Provider = {
     config: ConfigService<Env, true>,
     revocation: SessionRevocationStore,
   ) =>
-    new RedisRefreshTokenStore(
-      redis,
-      config.getOrThrow<number>('REFRESH_TTL_SECONDS'),
-      revocation,
-    ),
+    new RedisRefreshTokenStore(redis, config.getOrThrow<number>('REFRESH_TTL_SECONDS'), revocation),
 };
 
 const internalSecretProvider: Provider = {

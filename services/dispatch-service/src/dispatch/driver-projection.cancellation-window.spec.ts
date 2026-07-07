@@ -65,9 +65,7 @@ function makePrisma() {
         }
         return { count: inserted };
       },
-      deleteMany: async (args: {
-        where: { driverId: string; occurredAt: { lt: Date } };
-      }) => {
+      deleteMany: async (args: { where: { driverId: string; occurredAt: { lt: Date } } }) => {
         const before = rows.length;
         for (let i = rows.length - 1; i >= 0; i--) {
           const r = rows[i]!;
@@ -79,8 +77,7 @@ function makePrisma() {
       },
       count: async (args: { where: { driverId: string; occurredAt: { gte: Date } } }) =>
         rows.filter(
-          (r) =>
-            r.driverId === args.where.driverId && r.occurredAt >= args.where.occurredAt.gte,
+          (r) => r.driverId === args.where.driverId && r.occurredAt >= args.where.occurredAt.gte,
         ).length,
     },
     driverStats: {
@@ -171,7 +168,11 @@ describe('DriverProjectionService · ventana rolling de cancelaciones', () => {
     const s = svc(prisma);
     const base = new Date('2026-06-23T00:00:00.000Z').getTime();
     for (let i = 0; i < 7; i++) {
-      await s.registerCancellationInWindow(DRIVER, `trip-${i}`, new Date(base + i * 60 * 60 * 1000));
+      await s.registerCancellationInWindow(
+        DRIVER,
+        `trip-${i}`,
+        new Date(base + i * 60 * 60 * 1000),
+      );
     }
     expect(prisma.outbox).toHaveLength(1); // solo el cruce 4→5
   });
@@ -182,7 +183,11 @@ describe('DriverProjectionService · ventana rolling de cancelaciones', () => {
     // Cada cancelación 8h después de la anterior: la 5ª está a 32h de la 1ª → al registrar la 5ª, la 1ª/2ª
     // ya cayeron fuera de la ventana de 24h (cutoff = 5ª - 24h) y se podan → el conteo no llega a 5.
     for (let i = 0; i < 5; i++) {
-      await s.registerCancellationInWindow(DRIVER, `trip-${i}`, new Date(base + i * 8 * 60 * 60 * 1000));
+      await s.registerCancellationInWindow(
+        DRIVER,
+        `trip-${i}`,
+        new Date(base + i * 8 * 60 * 60 * 1000),
+      );
     }
     expect(prisma.outbox).toHaveLength(0);
   });
@@ -202,7 +207,11 @@ describe('DriverProjectionService · ventana rolling de cancelaciones', () => {
     const base = new Date('2026-06-23T00:00:00.000Z').getTime();
     // 4 cancelaciones distintas + la MISMA 4ª re-entregada (Kafka at-least-once): el count sigue en 4, no cruza.
     for (let i = 0; i < 4; i++) {
-      await s.registerCancellationInWindow(DRIVER, `trip-${i}`, new Date(base + i * 60 * 60 * 1000));
+      await s.registerCancellationInWindow(
+        DRIVER,
+        `trip-${i}`,
+        new Date(base + i * 60 * 60 * 1000),
+      );
     }
     await s.registerCancellationInWindow(DRIVER, 'trip-3', new Date(base + 3 * 60 * 60 * 1000)); // redelivery
     expect(prisma.rows).toHaveLength(4); // no duplicó
@@ -223,7 +232,11 @@ describe('DriverProjectionService · ventana rolling de cancelaciones', () => {
       'post-accept-E',
     ];
     for (let i = 0; i < tripIds.length; i++) {
-      await s.registerCancellationInWindow(DRIVER, tripIds[i]!, new Date(base + i * 60 * 60 * 1000));
+      await s.registerCancellationInWindow(
+        DRIVER,
+        tripIds[i]!,
+        new Date(base + i * 60 * 60 * 1000),
+      );
     }
     expect(prisma.outbox).toHaveLength(1);
     expect(prisma.outbox[0]!.eventType).toBe('driver.excessive_cancellations');
@@ -245,7 +258,11 @@ describe('DriverProjectionService · ventana rolling de cancelaciones', () => {
     const base = new Date('2026-06-23T00:00:00.000Z').getTime();
     // 5 cancelaciones distintas → cruce 4→5, emite UNA vez (dedupKey por el 5º trip).
     for (let i = 0; i < 5; i++) {
-      await s.registerCancellationInWindow(DRIVER, `trip-${i}`, new Date(base + i * 60 * 60 * 1000));
+      await s.registerCancellationInWindow(
+        DRIVER,
+        `trip-${i}`,
+        new Date(base + i * 60 * 60 * 1000),
+      );
     }
     expect(prisma.outbox).toHaveLength(1);
     // Kafka at-least-once RE-ENTREGA el MISMO 5º evento (el del cruce). FIX DE RAÍZ (createMany skipDuplicates +
@@ -264,7 +281,11 @@ describe('DriverProjectionService · ventana rolling de cancelaciones', () => {
     const base = new Date('2026-06-23T00:00:00.000Z').getTime();
     // 3 cancelaciones distintas → cancelledTrips = 3.
     for (let i = 0; i < 3; i++) {
-      await s.registerCancellationInWindow(DRIVER, `trip-${i}`, new Date(base + i * 60 * 60 * 1000));
+      await s.registerCancellationInWindow(
+        DRIVER,
+        `trip-${i}`,
+        new Date(base + i * 60 * 60 * 1000),
+      );
     }
     expect(prisma.stats.get(DRIVER)?.cancelledTrips).toBe(3);
     // Re-entrega de trip-1 (mismo natural key): el insert choca P2002 → wasNew=false → NO re-incrementa el lifelong.

@@ -95,10 +95,10 @@ describe('BiometricServiceClient timeout', () => {
       receivedUrl = String(url);
       receivedBody = JSON.parse(String(init?.body));
       return Promise.resolve(
-        new Response(
-          JSON.stringify({ matched: true, score: 0.93, reason: null }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ matched: true, score: 0.93, reason: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
       );
     });
 

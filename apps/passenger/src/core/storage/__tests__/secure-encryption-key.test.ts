@@ -25,7 +25,9 @@ jest.mock('react-native-mmkv', () => {
       config,
       data,
       set: jest.fn((k: string, v: unknown) => data.set(k, String(v))),
-      getString: jest.fn((k: string) => (data.has(k) ? data.get(k) : undefined)),
+      getString: jest.fn((k: string) =>
+        data.has(k) ? data.get(k) : undefined,
+      ),
       remove: jest.fn((k: string) => data.delete(k)),
       clearAll: jest.fn(() => data.clear()),
       // `recrypt` DEBE existir en el mock para PROBAR que nunca se llama (la cura de raíz lo elimina).
@@ -130,7 +132,12 @@ describe('almacén seguro (passenger) — apertura directa con la clave del Keyc
 
   it('NUNCA abre con la clave de arranque ni llama recrypt (cura de raíz del borrado de sesión)', async () => {
     const {getMock} = keychain();
-    getMock.mockResolvedValueOnce({username: 'x', password: EXISTING_KEY, service: 's', storage: 'x'});
+    getMock.mockResolvedValueOnce({
+      username: 'x',
+      password: EXISTING_KEY,
+      service: 's',
+      storage: 'x',
+    });
 
     const {initSecureStorage} = loadStorage();
     await initSecureStorage();
@@ -143,7 +150,12 @@ describe('almacén seguro (passenger) — apertura directa con la clave del Keyc
 
   it('tras init con Keychain, secureStore LEE/ESCRIBE datos (roundtrip sobre la instancia abierta)', async () => {
     const {getMock} = keychain();
-    getMock.mockResolvedValueOnce({username: 'x', password: EXISTING_KEY, service: 's', storage: 'x'});
+    getMock.mockResolvedValueOnce({
+      username: 'x',
+      password: EXISTING_KEY,
+      service: 's',
+      storage: 'x',
+    });
 
     const {initSecureStorage, secureStore} = loadStorage();
     await initSecureStorage();
@@ -157,8 +169,12 @@ describe('almacén seguro (passenger) — apertura directa con la clave del Keyc
   it('ANTES de initSecureStorage, secureStore LANZA un error claro (no lee con clave equivocada)', () => {
     const {secureStore} = loadStorage();
 
-    expect(() => secureStore.getString(ACCESS_TOKEN_KEY)).toThrow(/antes de initSecureStorage/);
-    expect(() => secureStore.setString(ACCESS_TOKEN_KEY, 'x')).toThrow(/antes de initSecureStorage/);
+    expect(() => secureStore.getString(ACCESS_TOKEN_KEY)).toThrow(
+      /antes de initSecureStorage/,
+    );
+    expect(() => secureStore.setString(ACCESS_TOKEN_KEY, 'x')).toThrow(
+      /antes de initSecureStorage/,
+    );
     // El store seguro nunca se abrió porque nadie llamó init.
     expect(secureInstance()).toBeUndefined();
   });
@@ -185,7 +201,12 @@ describe('almacén seguro (passenger) — apertura directa con la clave del Keyc
     getMock
       .mockRejectedValueOnce(new Error('transient 1'))
       .mockRejectedValueOnce(new Error('transient 2'))
-      .mockResolvedValueOnce({username: 'x', password: EXISTING_KEY, service: 's', storage: 'x'});
+      .mockResolvedValueOnce({
+        username: 'x',
+        password: EXISTING_KEY,
+        service: 's',
+        storage: 'x',
+      });
 
     const {initSecureStorage} = loadStorage();
     const ok = await initSecureStorage();
@@ -197,16 +218,26 @@ describe('almacén seguro (passenger) — apertura directa con la clave del Keyc
 
   it('initSecureStorage es idempotente (single-flight): abre el store una sola vez', async () => {
     const {getMock} = keychain();
-    getMock.mockResolvedValue({username: 'x', password: EXISTING_KEY, service: 's', storage: 'x'});
+    getMock.mockResolvedValue({
+      username: 'x',
+      password: EXISTING_KEY,
+      service: 's',
+      storage: 'x',
+    });
 
     const {initSecureStorage} = loadStorage();
-    const [a, b] = await Promise.all([initSecureStorage(), initSecureStorage()]);
+    const [a, b] = await Promise.all([
+      initSecureStorage(),
+      initSecureStorage(),
+    ]);
     await initSecureStorage();
 
     expect(a).toBe(true);
     expect(b).toBe(true);
     // Una única instancia segura creada pese a 3 llamadas.
-    const secureCount = mmkvMock().__instances.filter(i => i.config.id === StoreId.Secure).length;
+    const secureCount = mmkvMock().__instances.filter(
+      i => i.config.id === StoreId.Secure,
+    ).length;
     expect(secureCount).toBe(1);
   });
 });
@@ -221,7 +252,8 @@ describe('getOrCreateEncryptionKey — entropía y persistencia', () => {
     const {getMock, setMock} = keychain();
     getMock.mockResolvedValueOnce(false);
 
-    const {getOrCreateEncryptionKey} = require('../secure-encryption-key') as KeyModule;
+    const {getOrCreateEncryptionKey} =
+      require('../secure-encryption-key') as KeyModule;
     const key = await getOrCreateEncryptionKey();
 
     expect(key).toMatch(/^[A-Za-z0-9+/]{32}$/);
@@ -243,6 +275,8 @@ describe('getOrCreateEncryptionKey — entropía y persistencia', () => {
       require('../secure-encryption-key') as KeyModule;
 
     await expect(getOrCreateEncryptionKey()).rejects.toThrow(/Keychain/);
-    expect(getMock).toHaveBeenCalledTimes(SECURE_ENCRYPTION_KEY_META.maxAttempts);
+    expect(getMock).toHaveBeenCalledTimes(
+      SECURE_ENCRYPTION_KEY_META.maxAttempts,
+    );
   });
 });

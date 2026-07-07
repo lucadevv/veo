@@ -25,7 +25,14 @@ export interface StatCardProps {
   loading?: boolean;
 }
 
-export function StatCard({ icon: Icon, label, value, hint, hintTone = 'neutral', loading }: StatCardProps) {
+export function StatCard({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  hintTone = 'neutral',
+  loading,
+}: StatCardProps) {
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3.5">
       <div className="flex items-center gap-2">

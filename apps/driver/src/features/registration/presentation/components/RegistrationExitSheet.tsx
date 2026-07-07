@@ -26,11 +26,7 @@ export function RegistrationExitSheet({ exit }: RegistrationExitSheetProps): Rea
       title={t('registration.exitConfirmTitle')}
       footer={
         <View style={styles.footer}>
-          <Button
-            label={t('common.cancel')}
-            variant="secondary"
-            onPress={exit.dismissExit}
-          />
+          <Button label={t('common.cancel')} variant="secondary" onPress={exit.dismissExit} />
           <Button
             label={t('registration.exit')}
             variant="danger"

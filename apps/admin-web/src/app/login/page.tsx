@@ -14,7 +14,11 @@ interface LoginPageProps {
  *  legible con jerarquía. Los iconos son los mismos que usa el sidebar (coherencia de lenguaje visual). */
 const PILLARS = [
   { icon: Radar, label: 'Mapa en vivo', desc: 'Cada viaje y conductor, en tiempo real.' },
-  { icon: ShieldAlert, label: 'Pánico priorizado', desc: 'Alertas de emergencia al frente, sin ruido.' },
+  {
+    icon: ShieldAlert,
+    label: 'Pánico priorizado',
+    desc: 'Alertas de emergencia al frente, sin ruido.',
+  },
   { icon: ScrollText, label: 'Auditoría inmutable', desc: 'Toda acción sensible deja traza WORM.' },
 ] as const;
 
@@ -61,7 +65,9 @@ export default async function LoginPage(props: LoginPageProps) {
               <div className="grid size-12 place-items-center rounded-lg bg-accent text-accent-on shadow-[0_8px_24px_-6px_rgba(45,127,249,0.45)]">
                 <ShieldCheck className="size-6" aria-hidden />
               </div>
-              <span className="text-on-media text-4xl font-semibold tracking-tight text-ink">VEO</span>
+              <span className="text-on-media text-4xl font-semibold tracking-tight text-ink">
+                VEO
+              </span>
             </div>
 
             <div className="space-y-3">
@@ -69,7 +75,8 @@ export default async function LoginPage(props: LoginPageProps) {
                 Movilidad segura, controlada al segundo.
               </h1>
               <p className="text-on-media max-w-md text-base leading-relaxed text-ink-muted">
-                El centro de control de VEO: operación en vivo, seguridad y cumplimiento, en un solo lugar.
+                El centro de control de VEO: operación en vivo, seguridad y cumplimiento, en un solo
+                lugar.
               </p>
             </div>
 
@@ -97,10 +104,7 @@ export default async function LoginPage(props: LoginPageProps) {
           </div>
         </div>
 
-        <footer
-          className="animate-rise shrink-0 p-8 lg:p-12"
-          style={{ animationDelay: '240ms' }}
-        >
+        <footer className="animate-rise shrink-0 p-8 lg:p-12" style={{ animationDelay: '240ms' }}>
           <p className="text-on-media font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-subtle">
             Acceso restringido · Cumplimiento Ley 29733
           </p>

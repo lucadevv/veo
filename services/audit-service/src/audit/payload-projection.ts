@@ -81,13 +81,15 @@ const PII_FIELD_PATTERNS: readonly string[] = [
  * Las palabras se devuelven en minúsculas para comparar contra la denylist sin importar el casing.
  */
 function tokenizeFieldName(field: string): string[] {
-  return field
-    // inserta un separador en los bordes camelCase/PascalCase: aB → a B, y XMLHttp → XML Http
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .split(/[\s_\-.]+/)
-    .filter(Boolean)
-    .map((w) => w.toLowerCase());
+  return (
+    field
+      // inserta un separador en los bordes camelCase/PascalCase: aB → a B, y XMLHttp → XML Http
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .split(/[\s_\-.]+/)
+      .filter(Boolean)
+      .map((w) => w.toLowerCase())
+  );
 }
 
 /**
@@ -106,9 +108,7 @@ export function isPiiFieldName(field: string): boolean {
  * Objetos anidados y arrays de objetos se RECHAZAN: pueden esconder PII en una hoja que la allowlist plana no ve.
  */
 function isSafeScalar(value: unknown): boolean {
-  return (
-    typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-  );
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 function isSafeValue(value: unknown): boolean {
   if (isSafeScalar(value)) return true;
@@ -189,11 +189,42 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'trip.expired': ['tripId', 'passengerId', 'driverId', 'staleMinutes', 'at'],
   'trip.failed': ['tripId', 'passengerId', 'driverId', 'staleMinutes', 'at'],
   'trip.pii_erased': ['tripId', 'passengerId', 'at'],
-  'trip.bid_posted': ['tripId', 'passengerId', 'bidCents', 'vehicleType', 'windowSec', 'negotiationSeq', 'scheduled'],
+  'trip.bid_posted': [
+    'tripId',
+    'passengerId',
+    'bidCents',
+    'vehicleType',
+    'windowSec',
+    'negotiationSeq',
+    'scheduled',
+  ],
   // `reason` acá es z.enum(['driver_cancelled']) → SEGURO, se queda
-  'trip.reassigning': ['tripId', 'driverId', 'passengerId', 'vehicleType', 'bidCents', 'reason', 'negotiationSeq'],
-  'trip.waypoint_proposed': ['proposalId', 'tripId', 'passengerId', 'driverId', 'deltaFareCents', 'newFareCents', 'expiresAt'],
-  'trip.waypoint_accepted': ['proposalId', 'tripId', 'passengerId', 'driverId', 'deltaFareCents', 'newFareCents'],
+  'trip.reassigning': [
+    'tripId',
+    'driverId',
+    'passengerId',
+    'vehicleType',
+    'bidCents',
+    'reason',
+    'negotiationSeq',
+  ],
+  'trip.waypoint_proposed': [
+    'proposalId',
+    'tripId',
+    'passengerId',
+    'driverId',
+    'deltaFareCents',
+    'newFareCents',
+    'expiresAt',
+  ],
+  'trip.waypoint_accepted': [
+    'proposalId',
+    'tripId',
+    'passengerId',
+    'driverId',
+    'deltaFareCents',
+    'newFareCents',
+  ],
   'trip.waypoint_rejected': ['proposalId', 'tripId', 'passengerId', 'driverId'],
   'trip.waypoint_expired': ['proposalId', 'tripId', 'passengerId'],
   // ── dispatch — originLat/originLon se descartan ──
@@ -209,14 +240,36 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'pricing.mode_schedule_updated': ['defaultMode', 'version', 'updatedAt'],
   'pricing.bid_floor_updated': ['defaultFloorCents', 'version', 'updatedAt'],
   // base_fare/commission: montos en céntimos y tasas bps son SEGUROS (Int; la denylist tokeniza y no matchea).
-  'pricing.base_fare_updated': ['baseFareCents', 'perKmCents', 'perMinCents', 'version', 'updatedAt'],
+  'pricing.base_fare_updated': [
+    'baseFareCents',
+    'perKmCents',
+    'perMinCents',
+    'version',
+    'updatedAt',
+  ],
   'payment.commission_updated': ['onDemandRateBps', 'carpoolingFeeBps', 'version', 'updatedAt'],
   // ── media — segmentId/tripId/operatorId sí; watermark NO (lleva identidad); operatorEmail NO ──
   'media.recording_started': ['tripId', 'startedAt'],
   'media.archived': ['tripId', 's3Key', 'bytes', 'retentionDays'],
-  'media.access_granted': ['requestId', 'tripId', 'segmentId', 'operatorId', 'approvedBy', 'expiresAt', 'at'],
+  'media.access_granted': [
+    'requestId',
+    'tripId',
+    'segmentId',
+    'operatorId',
+    'approvedBy',
+    'expiresAt',
+    'at',
+  ],
   'media.access_rejected': ['requestId', 'tripId', 'segmentId', 'operatorId', 'rejectedBy', 'at'],
-  'media.access_viewed': ['requestId', 'tripId', 'segmentId', 'operatorId', 'viewedBy', 'expiresAt', 'at'],
+  'media.access_viewed': [
+    'requestId',
+    'tripId',
+    'segmentId',
+    'operatorId',
+    'viewedBy',
+    'expiresAt',
+    'at',
+  ],
   // render (burn-in Lote 3): IDs técnicos + timestamp. `reason` de failed es una CATEGORÍA técnica (enum
   // SOURCE_NOT_FOUND/STORAGE_OR_RENDER_FAILED/INVALID_INPUT/UNKNOWN de categorizeRenderError), NO texto libre
   // ni PII → seguro. completed no porta reason (terminó OK).
@@ -224,7 +277,14 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'media.render_failed': ['requestId', 'tripId', 'reason', 'at'],
   // ── pagos / payouts ── (`method` es z.enum → SEGURO; `reason` de failed/refunded es z.string LIBRE → FUERA;
   // `period` de payout es z.string LIBRE → FUERA)
-  'payment.captured': ['paymentId', 'tripId', 'method', 'grossCents', 'commissionCents', 'passengerId'],
+  'payment.captured': [
+    'paymentId',
+    'tripId',
+    'method',
+    'grossCents',
+    'commissionCents',
+    'passengerId',
+  ],
   'payment.failed': ['paymentId', 'tripId', 'willRetry'], // reason z.string LIBRE → FUERA
   'payment.tip_added': ['paymentId', 'tripId', 'driverId', 'tipCents'],
   'payment.cash_pending': ['paymentId', 'tripId', 'grossCents', 'passengerId'],
@@ -275,18 +335,75 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   // ── fleet ── (`ownerType`/`verdict` z.enum → SEGURO; `reason`/`documentType`/`make`/`model`/`plate` z.string LIBRE → FUERA)
   'fleet.document_expired': ['documentId', 'ownerType', 'ownerId', 'expiresAt', 'critical'], // documentType z.string LIBRE → FUERA
   'fleet.document_rejected': ['documentId', 'ownerType', 'ownerId', 'rejectedAt'], // documentType z.string LIBRE → FUERA; reason no viaja en el evento
-  'fleet.driver_suspended': ['driverId', 'userId', 'documentId', 'vehicleId', 'inspectionId', 'suspendedAt'], // reason+documentType LIBRES → FUERA
-  'fleet.driver_reactivated': ['driverId', 'userId', 'vehicleId', 'inspectionId', 'documentId', 'reactivatedAt'], // reason+documentType LIBRES → FUERA
+  'fleet.driver_suspended': [
+    'driverId',
+    'userId',
+    'documentId',
+    'vehicleId',
+    'inspectionId',
+    'suspendedAt',
+  ], // reason+documentType LIBRES → FUERA
+  'fleet.driver_reactivated': [
+    'driverId',
+    'userId',
+    'vehicleId',
+    'inspectionId',
+    'documentId',
+    'reactivatedAt',
+  ], // reason+documentType LIBRES → FUERA
   'fleet.vehicle_suspended': ['vehicleId', 'suspendedAt'], // reason z.string LIBRE → FUERA
   'fleet.vehicle_registered': ['vehicleId', 'driverId', 'vehicleType', 'registeredAt'], // plate z.string LIBRE (PII de matrícula) → FUERA
   'fleet.vehicle_model_reviewed': ['modelId', 'requestedBy', 'verdict', 'reviewedAt'], // make/model z.string LIBRES → FUERA
   // ── booking (carpooling) — geo se descarta; modoReserva/estado/origen/razon son z.enum/literal → SEGUROS;
   // pais/moneda/estadoAnterior son z.string LIBRES → FUERA ──
-  'booking.published': ['publishedTripId', 'driverId', 'vehicleId', 'asientosTotales', 'precioBase', 'modoReserva', 'fechaHoraSalida'], // pais/moneda LIBRES → FUERA
-  'booking.requested': ['bookingId', 'publishedTripId', 'passengerId', 'driverId', 'asientos', 'precioAcordado', 'modoReserva', 'estado'],
-  'booking.approved': ['bookingId', 'publishedTripId', 'passengerId', 'driverId', 'asientos', 'precioAcordado', 'modoReserva', 'estado', 'origen'],
-  'booking.updated': ['publishedTripId', 'driverId', 'vehicleId', 'asientosTotales', 'precioBase', 'modoReserva', 'fechaHoraSalida'],
-  'booking.confirmed': ['bookingId', 'publishedTripId', 'passengerId', 'asientos', 'precioAcordado', 'paymentId', 'estado'],
+  'booking.published': [
+    'publishedTripId',
+    'driverId',
+    'vehicleId',
+    'asientosTotales',
+    'precioBase',
+    'modoReserva',
+    'fechaHoraSalida',
+  ], // pais/moneda LIBRES → FUERA
+  'booking.requested': [
+    'bookingId',
+    'publishedTripId',
+    'passengerId',
+    'driverId',
+    'asientos',
+    'precioAcordado',
+    'modoReserva',
+    'estado',
+  ],
+  'booking.approved': [
+    'bookingId',
+    'publishedTripId',
+    'passengerId',
+    'driverId',
+    'asientos',
+    'precioAcordado',
+    'modoReserva',
+    'estado',
+    'origen',
+  ],
+  'booking.updated': [
+    'publishedTripId',
+    'driverId',
+    'vehicleId',
+    'asientosTotales',
+    'precioBase',
+    'modoReserva',
+    'fechaHoraSalida',
+  ],
+  'booking.confirmed': [
+    'bookingId',
+    'publishedTripId',
+    'passengerId',
+    'asientos',
+    'precioAcordado',
+    'paymentId',
+    'estado',
+  ],
   'booking.cancelled': ['publishedTripId', 'driverId', 'bookingId', 'razon', 'estado'], // estadoAnterior z.string LIBRE → FUERA
 
   // ── ACCIONES SÍNCRONAS de admin (carril recordSync) — JAMÁS email/reason free-text al WORM ──
@@ -309,10 +426,7 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
  * @returns objeto plano con SOLO los campos allowlisted que (a) existen, (b) son primitivas/arrays seguros y
  *   (c) NO matchean la denylist PII. Un eventType sin allowlist o un payload no-objeto → `{}` (mapping-only).
  */
-export function projectAuditPayload(
-  eventType: string,
-  payload: unknown,
-): Record<string, unknown> {
+export function projectAuditPayload(eventType: string, payload: unknown): Record<string, unknown> {
   const allowed = AUDIT_PAYLOAD_ALLOWLIST[eventType as AuditProjectionKey];
   if (!allowed || typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return {};

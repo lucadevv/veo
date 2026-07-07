@@ -116,7 +116,10 @@ export function driverRecordToApproval(
  * (`suspendedAt` indefinido) → se conserva el status del read-model. Solo cruza entre SUSPENDED y ACTIVE: los
  * demás estados (PENDING/REJECTED) se conservan tal cual (no son sobre suspensión).
  */
-function reconcileSuspensionBadge(readModelStatus: string, enrichment?: DriverListEnrichment): string {
+function reconcileSuspensionBadge(
+  readModelStatus: string,
+  enrichment?: DriverListEnrichment,
+): string {
   if (!enrichment) return readModelStatus;
   const suspendedByIdentity = enrichment.suspendedAt !== null;
   if (suspendedByIdentity) return DRIVER_STATUS_SUSPENDED;

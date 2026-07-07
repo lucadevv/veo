@@ -20,7 +20,7 @@
 > `PRICING_ENERGY_MODEL_ENABLED`, `deriveFuelPerKmCents`, `calculateOfferingFare` y el shadow-compare. **SIGUEN
 > vigentes:** el multiplier/tiers, la tarifa base, puja/fijo, la comisión y el cost-cap del carpooling. El
 > **`EnergySource`/eficiencia de la ficha del vehículo (§1.8)** NO era pricing — es economía del conductor / OCR
-> de la TIVe — y **sigue**. Las secciones marcadas *OBSOLETO* abajo se conservan como registro histórico.
+> de la TIVe — y **sigue**. Las secciones marcadas _OBSOLETO_ abajo se conservan como registro histórico.
 
 ---
 
@@ -60,6 +60,7 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 ## 1. Decisión
 
 ### 1.1 Energía: UN precio por TIPO, class-reference, sin octanaje · 3 TIPOS de plataforma
+
 > ⛔ **OBSOLETO (2026-07):** el pricing por energía/combustible fue REMOVIDO. La tarifa on-demand ya NO deriva
 > el costo de la energía — usa un solo per-km all-in (ver bloque SUPERSEDED del header). El `EnergySource` de la
 > **ficha del vehículo** (§1.8) NO es pricing y sobrevive. El texto abajo queda como registro histórico.
@@ -80,6 +81,7 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 - La **elegibilidad de oferta NO gatea por energía** (se mantiene por clase/segmento/asientos/año/cert).
 
 ### 1.2 Tiers de servicio: Económico / Normal / Premium (calidad) + XL (capacidad), ejes SEPARADOS — ✅ HECHO (F2.3)
+
 > **Parámetros confirmados (dueño, 2026-06-27) · CONSTRUIDO** (offerings.ts: `VEO_PREMIUM` creado mult 1.8 +
 > minSegment PREMIUM + maxAge 5; `VEO_CONFORT` renombrado "Normal" (i18n, id intacto); `VEO_ECONOMICO_EV`
 > eliminado; XL queda como eje capacidad):
@@ -97,13 +99,15 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 - El panel de catálogo del admin **separa visualmente** calidad (segmento) de capacidad.
 - **`VEO_ECONOMICO_EV` se DEPRECIA** como oferta separada: el eléctrico es un **tipo de energía**, no una clase
   de servicio para el pasajero. Un auto eléctrico sirve su clase por calidad/capacidad y gana más por su menor
-  costo. *(Decisión abierta §4: una marca "verde premium" puede evaluarse a futuro.)*
+  costo. _(Decisión abierta §4: una marca "verde premium" puede evaluarse a futuro.)_
 
 ### 1.3 Tarifa base CONFIGURABLE por el admin, POR PAÍS
+
 - `base + per-km + per-min` deja de estar hardcodeada (`fare.ts:16-20`) y pasa a **configuración del admin por
   país** (PE/EC). Multipaís real necesita tarifas distintas por mercado.
 
 ### 1.4 Costo de OPERACIÓN por km — DIRECTO editable (carpooling) · ~~energía (on-demand)~~
+
 > ⛔ **OBSOLETO EN PARTE (2026-07):** la mitad **on-demand** de esta sección (costo de COMBUSTIBLE/km derivado de
 > la energía) fue REMOVIDA — el on-demand ahora usa el per-km all-in de la tarifa base (§1.3), sin derivación de
 > energía. **La mitad carpooling SIGUE VIGENTE:** el `CostPerKmConfig` DIRECTO editable por país (costo de
@@ -117,11 +121,14 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 > tope del carpooling lee ese valor directo. (Implementado: F2.5-v2, commit `18145d7`.)
 
 ### 1.5 Modo de precio: PUJA/FIJO solo en on-demand; carpooling SIEMPRE FIJO
+
 - El schedule puja/fijo por horario (ADR-011) aplica **solo al on-demand**. El **carpooling es siempre FIJO**
   (precio del conductor dentro del tope). Ratifica la decisión pendiente de `VEO_MODELO_HIBRIDO:51`.
 
 ### 1.6 Comisión por MODO — DOS modelos distintos (corregido)
+
 > ⚠️ **CORREGIDO (2026-06-27, investigación BlaBlaCar/inDrive).** No es "una rate por modo": son DOS MODELOS:
+>
 > - **on-demand (inDrive):** la comisión se **DESCUENTA al conductor** (`driverNet = tarifa − comisión`).
 > - **carpooling (BlaBlaCar):** la comisión es un **SERVICE FEE que paga el PASAJERO**, sumado ARRIBA de la
 >   contribución; el conductor cobra el **100%** de su contribución de costo-compartido. El pasajero paga
@@ -133,6 +140,7 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 > commit `18145d7`.) Per-país diferido a F8 (hoy por-modo, PE).
 
 ### 1.7 Carpooling: conductor fija DENTRO del tope + rango recomendado · por-asiento fijo · peajes EN el costo
+
 - El conductor **ingresa** el precio del asiento, **acotado server-side** por el cost-cap
   `floor((km × costo/km) / asientosTotales)` (`cost-cap.ts:57`) — un precio por encima se **rechaza** (anti
   exageración, ya existe). **NO** lo calcula el sistema (eso lo volvería precio comercial = lucro).
@@ -147,6 +155,7 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
   futuro. (F2.5-v2, commit `18145d7`.)
 
 ### 1.8 Combustible real del vehículo desde el OCR de la TIVe — ✅ HECHO (F2.2a)
+
 - El parser de la tarjeta de propiedad **extrae el combustible** (`Combustible:`, la TIVe lo trae impreso) →
   el combustible real sale del **documento oficial**, no de la curación manual. Para la **economía del
   conductor / referencia del operador**, NO para el precio del pasajero (§1.1).
@@ -155,13 +164,14 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 - Aterriza en `FleetDocument.extractedData` (contrato 3 capas sin romper `forbidNonWhitelisted`). Commit `378a7a6`.
 
 ### 1.9 Orden de configuración del admin (el DAG) + ADMIN PRIMERO
+
 - La configuración del admin tiene un **orden de dependencias explícito** (para que exista B tiene que existir
   A), reflejado como un flujo guiado con degradación honesta ("X no configurado → usando default"):
   ```
   catálogo de modelos → ofertas/clases → tarifa base → costo/km → modo → comisión
   ```
-  > *(El eslabón `energía →` inicial se ELIMINÓ 2026-07: el pricing por energía fue removido — ver header. La
-  > tarifa base ya lleva el per-km all-in.)*
+  > _(El eslabón `energía →` inicial se ELIMINÓ 2026-07: el pricing por energía fue removido — ver header. La
+  > tarifa base ya lleva el per-km all-in.)_
 - **El admin-web se construye ANTES que la UI de las apps**: las apps (publicar/buscar/reservar) CONSUMEN esta
   configuración; sin un cimiento de config coherente, la UI se construye sobre arena.
 
@@ -185,8 +195,8 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 - **Costo/km del carpooling**: ✅ HECHO (F2.5 → **corregido F2.5-v2**, commit `18145d7`). **DIRECTO editable por
   el admin por país** (`CostPerKmConfig`, seed PE=S/1.50/km = costo de operación real combustible+desgaste), NO
   derivado de energía (ver §1.4). El tope lo lee directo (degrada al env si cae). ~~El on-demand mantiene su modelo
-  de energía (`deriveCostPerKmCents` en shared-types).~~ *(⛔ OBSOLETO 2026-07: el on-demand ya NO tiene modelo de
-  energía — usa el per-km all-in de la tarifa base; ver header.)* **EC a F8.** DEUDA dueño: ajustar el valor real PE.
+  de energía (`deriveCostPerKmCents` en shared-types).~~ _(⛔ OBSOLETO 2026-07: el on-demand ya NO tiene modelo de
+  energía — usa el per-km all-in de la tarifa base; ver header.)_ **EC a F8.** DEUDA dueño: ajustar el valor real PE.
 - **OCR TIVe**: agregar el campo combustible al parser `parse-property-card.ts` (+ tests con TIVe real).
 - **Peajes**: ✅ HECHO (F2.5-v2, commit `18145d7`). El conductor **DECLARA** el peaje (`PublishedTrip.tollsCents`),
   va DENTRO del tope `floor((km×costo/km + peaje)/asientos)` (modelo BlaBlaCar, ver §1.7). Auto-cálculo (TollGuru)
@@ -211,12 +221,14 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 ## 4. Decisiones CERRADAS (2026-06-27) + abiertas
 
 **Cerradas por el dueño:**
+
 - **`VEO_ECONOMICO_EV` se DEPRECIA** — el eléctrico es solo un **tipo de energía**, no una oferta/clase para el
   pasajero. (Ya no es decisión abierta.)
 - **Energía = 3 tipos** (gasolina-90/diésel/eléctrico); GNV/GLP fuera (§1.1).
 - **Tiers**: Económico (any) · Normal MID ≤8a · Premium PREMIUM ≤5a + foto, multiplier 1.8; XL aparte (§1.2).
 
 **Abiertas (no bloquean F2.3):**
+
 - ⛔ **OBSOLETO (2026-07) — F2.1b, el FLIP** (`PRICING_ENERGY_MODEL_ENABLED`): **CANCELADO / DECISIÓN MUERTA.**
   El dueño resolvió REMOVER el modelo de energía del pricing en vez de flipearlo — no hay flip que activar. Se
   borraron el flag, el `EnergyCatalog`, el `FuelSurcharge`, `deriveFuelPerKmCents`, `calculateOfferingFare` y el
@@ -248,12 +260,13 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 > ANTES de operar. La auditoría (`auditar-core`, scope flota+finanzas+dispatch) mapeó dónde el eslabón NO cierra.
 
 **Falsos positivos refutados (NO tocar):** ~~la energía sin precio NO subsidia en silencio (`resolveAuthoritativeEnergy`
-**lanza** `InvalidStateError`, fail-CLOSED)~~ *(⛔ OBSOLETO 2026-07: el resolver de energía del pricing se borró junto
-con el modelo de energía — ya no hay energía que resolver en la tarifa; ver header)*; el costo/km NO degrada peligroso (la migración siembra PE=150/EC=50 + env=semilla);
+**lanza** `InvalidStateError`, fail-CLOSED)~~ _(⛔ OBSOLETO 2026-07: el resolver de energía del pricing se borró junto
+con el modelo de energía — ya no hay energía que resolver en la tarifa; ver header)_; el costo/km NO degrada peligroso (la migración siembra PE=150/EC=50 + env=semilla);
 el refund SÍ topa el over-refund (`payments.service.ts:1157`); los "N+1" de `expiry.sweeper` son lecturas batched en loops de
 paginación. Las **certificaciones** de verticales (ambulancia/grúa) ya son fail-CLOSED — el gate de seguridad real funciona.
 
 **Hechos (commits en `develop`):**
+
 - **F1 — visibilidad (`9d5a0ce`)**: el panel de Flota era CIEGO a la ficha del match. Ahora `vehicleView` expone
   vehicleType/mtcCategory (del `Vehicle`) + segment/energySource/efficiency/seats (del `modelSpec`, enriquecidos
   BATCHED anti-N+1, degradan a null). Columna "Ficha técnica" con flag **"Sin ficha"** cuando falta — el caso que el
@@ -265,13 +278,14 @@ paginación. Las **certificaciones** de verticales (ambulancia/grúa) ya son fai
   no editar in-place.**
 
 **C2 — CERRADO + verificado por el gate adversarial (`594553e` + `3a6a5f5`):**
+
 - **El carril PUJA ya enforça el TIER** como el FIXED. El `OfferBoard` transporta `category` (round-trip Redis JSON,
   campo en el tipo `OfferBoard`); `category` fluye `trip.bid_posted`/`trip.reassigning` (optional, compat N-2) → kafka
   consumer → board. El gate autoritativo `assertEligibleToOffer` deriva `findOffering(category)?.requires` y lo enforça
   en los **TRES** puntos: submit (`offer-board.service.ts:340`), accept (`:497`, fresh), listado (`boardMeetsRequires`)
   y broadcast (`:278`). Certs **FAIL-CLOSED**, attrs del vehículo **FAIL-OPEN** (paridad con el pool).
 - **Verificación (`auditar-core` adversarial, refutador independiente):** el claim "C2 cierra la cadena" **sobrevivió**
-  al refutador (*"no pude matar el claim: la cadena está cableada de punta a punta"*) — NO es un cierre falso de
+  al refutador (_"no pude matar el claim: la cadena está cableada de punta a punta"_) — NO es un cierre falso de
   "solo-broadcast". Cero crítico/alto nuevo; los 4 falsos positivos (compat N-2, raw-persist, métrica) refutados como
   intencional+documentado+compensado. El único residual confirmado es MEDIA y ES el C1 de abajo (no una regresión de C2).
 - **Simetría de observabilidad (`3a6a5f5`)**: el gate adversarial cazó que el branch fail-open que C2 agregó en el gate
@@ -280,6 +294,7 @@ paginación. Las **certificaciones** de verticales (ambulancia/grúa) ya son fai
   medidas, sin doble-contar. (La métrica `dispatch_puja_requires_skipped_total` se eliminó: el hueco que medía cerró.)
 
 **Finanzas money-OUT (refund admin) — CERRADO / CONVERGIDO por loop-until-dry adversarial (`4395eb2` → `2dcb6b1`):**
+
 - **Por qué primero, antes de C1:** el gate adversarial sobre la superficie operacional de finanzas cazó hallazgos de
   **mayor severidad** que C1 (sangrado de dinero por doble-refund + dead-end de step-up en prod + cap de multiplier ×100),
   así que la decisión del dueño fue **finanzas → C1**.
@@ -317,6 +332,7 @@ paginación. Las **certificaciones** de verticales (ambulancia/grúa) ya son fai
 
 **C1 — ENDURECIMIENTO previo al flip (CONSTRUIDO, `002d77f` + `767b0d0` + `084c936`, gate adversarial `wkrozhaf6`):**
 Antes de flipear, dos lotes que sanean el cimiento (el audit del hilo C1 cazó que el flip no estaba listo no solo por falta de datos):
+
 - **Lote 1 — anti-clobber del hot-index** (`hot-index/redis-hot-index.ts`): un ping SIN attrs (fleet 204/outage/legacy)
   SOBREESCRIBÍA via `SET` total del LUA los seats/segment/año BUENOS ya indexados → el gate de tier se auto-desarmaba
   AUNQUE la flota estuviera desplegada. Ahora `upsertLocation` preserva los attrs del ping previo cuando el ping los
@@ -331,6 +347,7 @@ Antes de flipear, dos lotes que sanean el cimiento (el audit del hilo C1 cazó q
   engañaría el flip).
 
 **Abierta — el FLIP de C1 (hardening previo CERRADO; el flip queda DIFERIDO por decisión del dueño, se validará sintético):**
+
 - **C1 — fail-open de atributos ALL-OR-NOTHING** (`dispatch/driver-pool.ts` + `eligibility.gate.ts`): un vehículo
   cuyo ping no trae seats **Y** segment **Y** año (legacy sin `modelSpec`, o el resolver degradado por outage de fleet)
   pasa elegible para una oferta con requisitos sin verificar el tier. Es **deliberado** (rollout). El flip a fail-closed

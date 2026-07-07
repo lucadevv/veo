@@ -45,7 +45,9 @@ export class CarpoolController {
 
   @Post('trips')
   @HttpCode(201)
-  @ApiOperation({ summary: 'Publicar un viaje de carpooling (oferta) · idempotente vía Idempotency-Key' })
+  @ApiOperation({
+    summary: 'Publicar un viaje de carpooling (oferta) · idempotente vía Idempotency-Key',
+  })
   publish(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: PublishTripDto,
@@ -84,7 +86,9 @@ export class CarpoolController {
   }
 
   @Get('trips/:id/bookings')
-  @ApiOperation({ summary: 'Listar las solicitudes (reservas) entrantes de un viaje propio (keyset paginado)' })
+  @ApiOperation({
+    summary: 'Listar las solicitudes (reservas) entrantes de un viaje propio (keyset paginado)',
+  })
   listTripBookings(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -95,7 +99,9 @@ export class CarpoolController {
 
   @Post('bookings/:id/approve')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Aprobar una solicitud (PENDIENTE_APROBACION → APROBADO → dispara CHARGE)' })
+  @ApiOperation({
+    summary: 'Aprobar una solicitud (PENDIENTE_APROBACION → APROBADO → dispara CHARGE)',
+  })
   approve(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,

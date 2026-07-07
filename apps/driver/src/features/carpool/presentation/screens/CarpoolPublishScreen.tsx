@@ -39,7 +39,13 @@ export const CarpoolPublishScreen = ({ navigation }: Props): React.JSX.Element =
   const vehicleId = activeVehicle.data?.id ?? null;
   const priceCents = Math.round(Number(price.replace(',', '.')) * 100);
   const canSubmit =
-    !!origin && !!dest && !!when && !!vehicleId && seats >= 1 && Number.isFinite(priceCents) && priceCents > 0;
+    !!origin &&
+    !!dest &&
+    !!when &&
+    !!vehicleId &&
+    seats >= 1 &&
+    Number.isFinite(priceCents) &&
+    priceCents > 0;
 
   const onPublish = (): void => {
     if (!origin || !dest || !vehicleId) {
@@ -84,7 +90,11 @@ export const CarpoolPublishScreen = ({ navigation }: Props): React.JSX.Element =
       <View style={styles.body}>
         {publish.isError ? (
           <Reveal>
-            <Banner tone="danger" title={t('carpool.publishError')} description={toErrorMessage(publish.error, t)} />
+            <Banner
+              tone="danger"
+              title={t('carpool.publishError')}
+              description={toErrorMessage(publish.error, t)}
+            />
           </Reveal>
         ) : null}
 
@@ -117,7 +127,12 @@ export const CarpoolPublishScreen = ({ navigation }: Props): React.JSX.Element =
             onChange={setWhen}
             minimumDate={new Date()}
           />
-          <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            ]}
+          >
             <Stepper label={t('carpool.seats')} value={seats} onChange={setSeats} min={1} max={8} />
           </View>
         </Reveal>
@@ -140,7 +155,12 @@ export const CarpoolPublishScreen = ({ navigation }: Props): React.JSX.Element =
 
         {/* Modo de reserva + reglas */}
         <Reveal delay={140} style={styles.group}>
-          <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            ]}
+          >
             <View style={styles.switchRow}>
               <View style={styles.switchText}>
                 <Text variant="body">{t('carpool.reviewEach')}</Text>
@@ -168,6 +188,11 @@ const styles = StyleSheet.create({
   body: { gap: 24, paddingTop: 8, paddingBottom: 16 },
   group: { gap: 12 },
   card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, padding: 16 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
   switchText: { flex: 1, gap: 2 },
 });

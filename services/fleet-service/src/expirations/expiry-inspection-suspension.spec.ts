@@ -205,8 +205,16 @@ describe('ExpirySweeper · auto-suspensión por ITV vencida (Lote B)', () => {
   it('FIX N+1: dos conductores con ITV vencida se resuelven con UNA query de inspecciones (batch), no N+1', async () => {
     const vehA = vehicle({ id: 'veh-A', driverId: 'user-A' });
     const vehB = vehicle({ id: 'veh-B', driverId: 'user-B' });
-    const inspA = inspection({ id: 'insp-A', vehicleId: 'veh-A', nextDueAt: new Date('2026-05-01T00:00:00.000Z') });
-    const inspB = inspection({ id: 'insp-B', vehicleId: 'veh-B', nextDueAt: new Date('2026-05-01T00:00:00.000Z') });
+    const inspA = inspection({
+      id: 'insp-A',
+      vehicleId: 'veh-A',
+      nextDueAt: new Date('2026-05-01T00:00:00.000Z'),
+    });
+    const inspB = inspection({
+      id: 'insp-B',
+      vehicleId: 'veh-B',
+      nextDueAt: new Date('2026-05-01T00:00:00.000Z'),
+    });
 
     const outbox = vi.fn(async (_args?: { data: Record<string, unknown> }) => ({}));
     const tx = {
@@ -225,7 +233,10 @@ describe('ExpirySweeper · auto-suspensión por ITV vencida (Lote B)', () => {
       },
       write: { $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)) },
     };
-    const config = new ConfigService({ EXPIRY_WARNING_DAYS: 30, EXPIRY_ALERT_MILESTONES: '30,15,7,1' });
+    const config = new ConfigService({
+      EXPIRY_WARNING_DAYS: 30,
+      EXPIRY_ALERT_MILESTONES: '30,15,7,1',
+    });
     const sweeper = new ExpirySweeper(prisma as never, config as never);
 
     const summary = await sweeper.sweep(NOW);

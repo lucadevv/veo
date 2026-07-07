@@ -83,7 +83,11 @@ export const outboxEnvSchema = z.object({
   /** Un claim sin ack más viejo que esto (ms) se re-toma → recovery de crashes. Default: OUTBOX_CLAIM_STALE_MS. */
   OUTBOX_CLAIM_STALE_MS: z.coerce.number().int().positive().default(OUTBOX_CLAIM_STALE_MS),
   /** Grupos de aggregate publicados en paralelo. Default: OUTBOX_PUBLISH_CONCURRENCY. */
-  OUTBOX_PUBLISH_CONCURRENCY: z.coerce.number().int().positive().default(OUTBOX_PUBLISH_CONCURRENCY),
+  OUTBOX_PUBLISH_CONCURRENCY: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(OUTBOX_PUBLISH_CONCURRENCY),
   /**
    * Timeout (ms) de UN publish. INVARIANTE: debe ser < OUTBOX_CLAIM_STALE_MS (cierra el double-publish por
    * stale). El `OutboxRelay` lo valida en el ctor (fail-fast). Default: OUTBOX_PUBLISH_TIMEOUT_MS.

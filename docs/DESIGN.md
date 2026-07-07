@@ -40,10 +40,10 @@ referencia son los del `themes.ts`; ver `./VEO_BRIEF_DISENO.md` §3):
 | --------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `--bg` / `--surface` / `--surface-2`                | lienzo azulado / tarjetas / capas elevadas (`#0A0B0F` · `#14161C` · `#1E212A`) |
 | `--ink` / `--ink-muted` / `--ink-subtle`            | texto primario / secundario / terciario (`#F5F7FA` · `#C4CBD6` · `#8A929E`)    |
-| `--border` / `--border-strong`                      | divisores y bordes (`#1C1F27` · `#2B2F3A`)                                      |
+| `--border` / `--border-strong`                      | divisores y bordes (`#1C1F27` · `#2B2F3A`)                                     |
 | `--brand` / `--on-brand`                            | azul de marca `#2D7FF9` + texto BLANCO sobre marca                             |
 | `--accent` / `--on-accent`                          | azul de acción `#2D7FF9` + texto BLANCO sobre acento                           |
-| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado (`#34D399` · `#F2AF48` · `#FF4D6A`)                        |
+| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado (`#34D399` · `#F2AF48` · `#FF4D6A`)                       |
 | `--focus`                                           | anillo de foco azul `#2D7FF9` (3px, offset 2px)                                |
 
 En Tailwind se consumen como `bg-surface`, `text-ink`, `text-ink-muted`, `border-border`, `bg-brand`, `text-accent`, etc.

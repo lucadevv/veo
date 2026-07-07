@@ -78,7 +78,8 @@ export function evaluatePassengerFlag(
   thresholds: FlagThresholds = DEFAULT_FLAG_THRESHOLDS,
 ): FlagDecision {
   if (count <= 0) return NO_FLAG;
-  if (avg < thresholds.passengerReverify) return { flagged: true, reason: FLAG_REASON.REVERIFICATION };
+  if (avg < thresholds.passengerReverify)
+    return { flagged: true, reason: FLAG_REASON.REVERIFICATION };
   return NO_FLAG;
 }
 

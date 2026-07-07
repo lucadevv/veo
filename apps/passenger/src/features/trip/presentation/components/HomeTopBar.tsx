@@ -75,9 +75,7 @@ export function HomeTopBar({
     }
   }, [locationStatus, onRetryLocation]);
 
-  const pinColor = locationActionable
-    ? theme.colors.warn
-    : theme.colors.accent;
+  const pinColor = locationActionable ? theme.colors.warn : theme.colors.accent;
 
   return (
     <View
@@ -158,6 +156,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   pillTexts: {flexShrink: 1, gap: 1},
-  kicker: {fontSize: 10, fontWeight: '500', textTransform: 'uppercase', letterSpacing: 0.4},
+  kicker: {
+    fontSize: 10,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   locationValue: {fontWeight: '600'},
 });

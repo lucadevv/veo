@@ -74,7 +74,10 @@ function grpcCodeOf(err: unknown): number | undefined {
 describe('RatingGrpcController · scoping de moderación por riel (anti-IDOR)', () => {
   it('PUBLIC_RAIL · pasajero pidiendo el agregado de un conductor → flags ZEROEADOS (IDOR cerrado)', async () => {
     const ctrl = makeController();
-    const reply = await ctrl.getAggregate({ subjectId: 'd1' }, signedMetaAs(InternalAudience.PUBLIC_RAIL));
+    const reply = await ctrl.getAggregate(
+      { subjectId: 'd1' },
+      signedMetaAs(InternalAudience.PUBLIC_RAIL),
+    );
     expect(reply.flagged).toBe(false);
     expect(reply.flagReason).toBe('');
     // Reputación pública SIGUE viajando.
@@ -85,7 +88,10 @@ describe('RatingGrpcController · scoping de moderación por riel (anti-IDOR)', 
 
   it('DRIVER_RAIL · el conductor sobre su propio record → flags VISIBLES (transparencia)', async () => {
     const ctrl = makeController();
-    const reply = await ctrl.getAggregate({ subjectId: 'd1' }, signedMetaAs(InternalAudience.DRIVER_RAIL));
+    const reply = await ctrl.getAggregate(
+      { subjectId: 'd1' },
+      signedMetaAs(InternalAudience.DRIVER_RAIL),
+    );
     expect(reply.flagged).toBe(true);
     expect(reply.flagReason).toBe('suspension');
     expect(reply.rollingAvg30d).toBe(3.2);
@@ -93,14 +99,20 @@ describe('RatingGrpcController · scoping de moderación por riel (anti-IDOR)', 
 
   it('ADMIN_RAIL · revisión del operador → flags VISIBLES', async () => {
     const ctrl = makeController();
-    const reply = await ctrl.getAggregate({ subjectId: 'd1' }, signedMetaAs(InternalAudience.ADMIN_RAIL));
+    const reply = await ctrl.getAggregate(
+      { subjectId: 'd1' },
+      signedMetaAs(InternalAudience.ADMIN_RAIL),
+    );
     expect(reply.flagged).toBe(true);
     expect(reply.flagReason).toBe('suspension');
   });
 
   it('SERVICE_RAIL · dispatch (solo scorea avg/count) → flags ZEROEADOS', async () => {
     const ctrl = makeController();
-    const reply = await ctrl.getAggregate({ subjectId: 'd1' }, signedMetaAs(InternalAudience.SERVICE_RAIL));
+    const reply = await ctrl.getAggregate(
+      { subjectId: 'd1' },
+      signedMetaAs(InternalAudience.SERVICE_RAIL),
+    );
     expect(reply.flagged).toBe(false);
     expect(reply.flagReason).toBe('');
     expect(reply.rollingAvg30d).toBe(3.2);
@@ -120,7 +132,10 @@ describe('RatingGrpcController · scoping de moderación por riel (anti-IDOR)', 
 
   it('sin agregado → EMPTY (found=false, sin flags) cualquiera sea el riel', async () => {
     const ctrl = makeController(null);
-    const reply = await ctrl.getAggregate({ subjectId: 'dX' }, signedMetaAs(InternalAudience.DRIVER_RAIL));
+    const reply = await ctrl.getAggregate(
+      { subjectId: 'dX' },
+      signedMetaAs(InternalAudience.DRIVER_RAIL),
+    );
     expect(reply.found).toBe(false);
     expect(reply.flagged).toBe(false);
     expect(reply.flagReason).toBe('');

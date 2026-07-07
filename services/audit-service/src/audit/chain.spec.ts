@@ -197,9 +197,7 @@ describe('verifyChain — streaming por lotes (hash arrastrado)', () => {
   it('caza tampering en el BORDE — la PRIMERA fila del lote siguiente (prevHash roto)', () => {
     const rows = buildChain(9);
     const firstOfBatch2 = 3; // seq=4, primera del segundo lote.
-    const tampered = rows.map((r, i) =>
-      i === firstOfBatch2 ? { ...r, prevHash: 'deadbeef' } : r,
-    );
+    const tampered = rows.map((r, i) => (i === firstOfBatch2 ? { ...r, prevHash: 'deadbeef' } : r));
     const streamed = verifyStreamed(tampered, 3, true);
     const whole = verifyChain(tampered, { expectGenesis: true });
     expect(streamed.valid).toBe(false);

@@ -977,7 +977,10 @@ describe('EventConsumerService · payout.processed → push al CONDUCTOR (ADR-01
 
   it('identity gRPC caído (TRANSITORIO) → RE-LANZA para que Kafka redelivere (no traga, no pierde el push)', async () => {
     const identity = fakeIdentity({ [DRV]: USER }, { throws: true });
-    const { store } = await buildAndInit({ [USER]: [{ token: 'tok-PO', platform: 'android' }] }, identity);
+    const { store } = await buildAndInit(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      identity,
+    );
     // ASSERT CLAVE: el handler PROPAGA el throw transitorio → el camino de error del consumer relanza y
     // Kafka redelivere el evento (simetría con el device-store transitorio). No se traga la plata en un blip.
     await expect(
@@ -997,7 +1000,10 @@ describe('EventConsumerService · payout.processed → push al CONDUCTOR (ADR-01
   it('driver no encontrado / sin userId en identity (RESULTADO permanente) → push omitido limpio (no relanza)', async () => {
     // identity vacío → DRV no mapea → found:false. Aunque haya token bajo USER, no se resuelve el target.
     const identity = fakeIdentity({});
-    const { store } = await buildAndInit({ [USER]: [{ token: 'tok-PO', platform: 'android' }] }, identity);
+    const { store } = await buildAndInit(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      identity,
+    );
     await registered.get('payout.processed')!(
       env('payout.processed', {
         payoutId: 'po-nf',

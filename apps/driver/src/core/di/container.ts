@@ -100,7 +100,10 @@ const sessionTokenPort: SessionTokenPort = {
         await keychainLocalAuthService.saveRefreshToken(tokens.refreshToken);
       }
     } catch (err) {
-      console.warn('[session] no se pudo sincronizar el refresh token biométrico tras la rotación:', err);
+      console.warn(
+        '[session] no se pudo sincronizar el refresh token biométrico tras la rotación:',
+        err,
+      );
     }
   },
   // El cliente HTTP llama a `clearSession` cuando el refresh falla: lo tratamos como EXPIRACIÓN

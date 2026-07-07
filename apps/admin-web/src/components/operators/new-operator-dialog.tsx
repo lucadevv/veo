@@ -141,8 +141,8 @@ export function NewOperatorDialog() {
                 Invitación creada
               </DialogTitle>
               <DialogDescription>
-                Comparte este enlace con el operador para que fije su contraseña. También se envió por
-                email.
+                Comparte este enlace con el operador para que fije su contraseña. También se envió
+                por email.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-1">
@@ -178,8 +178,8 @@ export function NewOperatorDialog() {
                 Nuevo operador
               </DialogTitle>
               <DialogDescription>
-                Se enviará una invitación al correo para que el operador fije su contraseña. Asigna los
-                roles que definen qué puede ver y operar.
+                Se enviará una invitación al correo para que el operador fije su contraseña. Asigna
+                los roles que definen qué puede ver y operar.
               </DialogDescription>
             </DialogHeader>
 

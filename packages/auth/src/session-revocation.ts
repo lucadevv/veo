@@ -183,7 +183,8 @@ export class SessionRevocationStore {
         // NUEVO del single-session —revoke→emit dentro del mismo segundo, `iat` floored a segundos por
         // jose— pasa. Residual (documentado): un token VIEJO acuñado en el mismísimo segundo del revoke
         // sobrevive; requiere dos logins en el mismo segundo (mismo humano) → despreciable.
-        if (Number.isFinite(revokedBefore) && claims.iat < revokedBefore) return 'sessions-superseded';
+        if (Number.isFinite(revokedBefore) && claims.iat < revokedBefore)
+          return 'sessions-superseded';
       }
       return null;
     } catch (err) {

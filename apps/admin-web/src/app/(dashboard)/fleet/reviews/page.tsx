@@ -73,7 +73,8 @@ const SLA_TEXT: Record<SlaTone, string> = {
 function driverPending(d: PendingDriver): string {
   const missing = Math.max(0, d.docsTotal - d.docsComplete);
   const needsBio = d.verificationStatus !== null && d.verificationStatus !== 'VERIFICADO';
-  if (needsBio && missing > 0) return `Biométrico + ${missing} documento${missing === 1 ? '' : 's'}`;
+  if (needsBio && missing > 0)
+    return `Biométrico + ${missing} documento${missing === 1 ? '' : 's'}`;
   if (missing > 0) return `${missing} documento${missing === 1 ? '' : 's'} por revisar`;
   if (needsBio) return 'Verificación biométrica';
   return 'Revisión de alta';
@@ -231,7 +232,9 @@ export default function ReviewsPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
         <Lock className="size-6 text-ink-subtle" aria-hidden />
-        <p className="text-sm text-ink-muted">Necesitás el rol de revisión de flota para ver la cola.</p>
+        <p className="text-sm text-ink-muted">
+          Necesitás el rol de revisión de flota para ver la cola.
+        </p>
       </div>
     );
   }
@@ -269,10 +272,37 @@ export default function ReviewsPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard icon={Inbox} label="Pendientes total" value={String(counts.total)} hint="En la cola" loading={loading} />
-        <StatCard icon={Users} label="Conductores" value={String(counts.conductor)} hint="Revisión de alta" hintTone="brand" loading={loading} />
-        <StatCard icon={Car} label="Vehículos" value={String(counts.vehiculo)} hint="Docs + ITV" hintTone="brand" loading={loading} />
-        <StatCard icon={AlarmClock} label="SLA vencido" value={String(counts.sla)} hint="Esperando > 48 h" hintTone="danger" loading={loading} />
+        <StatCard
+          icon={Inbox}
+          label="Pendientes total"
+          value={String(counts.total)}
+          hint="En la cola"
+          loading={loading}
+        />
+        <StatCard
+          icon={Users}
+          label="Conductores"
+          value={String(counts.conductor)}
+          hint="Revisión de alta"
+          hintTone="brand"
+          loading={loading}
+        />
+        <StatCard
+          icon={Car}
+          label="Vehículos"
+          value={String(counts.vehiculo)}
+          hint="Docs + ITV"
+          hintTone="brand"
+          loading={loading}
+        />
+        <StatCard
+          icon={AlarmClock}
+          label="SLA vencido"
+          value={String(counts.sla)}
+          hint="Esperando > 48 h"
+          hintTone="danger"
+          loading={loading}
+        />
       </div>
 
       {/* Toolbar */}
@@ -321,7 +351,9 @@ export default function ReviewsPage() {
 
       {/* Tabla unificada */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
-        <div className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}>
+        <div
+          className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
+        >
           <span>Tipo</span>
           <span>Ítem</span>
           <span>Pendiente</span>
@@ -334,29 +366,45 @@ export default function ReviewsPage() {
         ) : loading ? (
           <div>
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-[52px] animate-pulse border-b border-border bg-surface-2/40" />
+              <div
+                key={i}
+                className="h-[52px] animate-pulse border-b border-border bg-surface-2/40"
+              />
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <EmptyState className="py-12" title="Cola vacía" description="No hay nada esperando revisión en esta vista." />
+          <EmptyState
+            className="py-12"
+            title="Cola vacía"
+            description="No hay nada esperando revisión en esta vista."
+          />
         ) : (
           pageRows.map((r) => {
             const tm = TYPE_META[r.type];
             const w = waitParts(r.enqueuedAt);
             return (
-              <div key={r.key} className={`${GRID} border-b border-border px-5 py-3 last:border-b-0`}>
-                <span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-[5px] text-xs font-semibold ${tm.cls}`}>
+              <div
+                key={r.key}
+                className={`${GRID} border-b border-border px-5 py-3 last:border-b-0`}
+              >
+                <span
+                  className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-[5px] text-xs font-semibold ${tm.cls}`}
+                >
                   <tm.icon className="size-[13px]" aria-hidden />
                   {tm.label}
                 </span>
                 <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className={`truncate text-sm font-semibold text-ink ${r.itemAMono ? 'font-mono' : ''}`}>
+                  <span
+                    className={`truncate text-sm font-semibold text-ink ${r.itemAMono ? 'font-mono' : ''}`}
+                  >
                     {r.itemA}
                   </span>
                   <span className="truncate font-mono text-[11px] text-ink-subtle">{r.itemB}</span>
                 </div>
                 <span className="truncate text-[13px] text-ink-muted">{r.pendiente}</span>
-                <span className={`inline-flex items-center gap-1.5 font-mono text-[13px] font-semibold ${SLA_TEXT[w.tone]}`}>
+                <span
+                  className={`inline-flex items-center gap-1.5 font-mono text-[13px] font-semibold ${SLA_TEXT[w.tone]}`}
+                >
                   <Timer className="size-[13px]" aria-hidden />
                   {w.label}
                 </span>

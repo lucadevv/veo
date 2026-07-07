@@ -347,10 +347,7 @@ function ChannelTile({
         {gap: theme.spacing.xs, opacity: disabled ? 0.45 : pressed ? 0.7 : 1},
       ]}>
       <View
-        style={[
-          styles.channelCircle,
-          {backgroundColor: theme.colors.surface},
-        ]}>
+        style={[styles.channelCircle, {backgroundColor: theme.colors.surface}]}>
         {icon}
       </View>
       <Text variant="footnote" color="inkMuted">

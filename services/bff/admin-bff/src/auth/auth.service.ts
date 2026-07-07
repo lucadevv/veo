@@ -103,7 +103,10 @@ export class AuthService {
    * misma auditoría fail-OPEN (recordSession).
    */
   async logoutAll(dto: LogoutDto): Promise<{ ok: true }> {
-    const res = await this.identityAuth.post<{ ok: true; userId?: string }>('/auth/logout-all', dto);
+    const res = await this.identityAuth.post<{ ok: true; userId?: string }>(
+      '/auth/logout-all',
+      dto,
+    );
     if (res.userId) {
       const actor: AuthenticatedUser = {
         userId: res.userId,

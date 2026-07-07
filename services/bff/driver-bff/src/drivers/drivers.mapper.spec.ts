@@ -141,7 +141,12 @@ describe('buildDriverProfile', () => {
     const docs = docsWith(
       REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.VALID })),
     );
-    const view = buildDriverProfile({ ...driver, currentStatus: 'AVAILABLE' }, user, aggregate, docs);
+    const view = buildDriverProfile(
+      { ...driver, currentStatus: 'AVAILABLE' },
+      user,
+      aggregate,
+      docs,
+    );
     expect(view.compliance.compliant).toBe(true);
     expect(view.compliance.submittedAllRequired).toBe(true);
     expect(view.compliance.missing).toEqual([]);

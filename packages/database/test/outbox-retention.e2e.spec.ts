@@ -33,7 +33,15 @@ let store: PrismaOutboxStore;
 async function pushSchema(databaseUrl: string): Promise<void> {
   await execFileAsync(
     'pnpm',
-    ['exec', 'prisma', 'db', 'push', '--schema', join(HERE, 'prisma', 'schema.prisma'), '--skip-generate'],
+    [
+      'exec',
+      'prisma',
+      'db',
+      'push',
+      '--schema',
+      join(HERE, 'prisma', 'schema.prisma'),
+      '--skip-generate',
+    ],
     { cwd: join(HERE, '..'), env: { ...process.env, DATABASE_URL: databaseUrl } },
   );
 }
@@ -49,7 +57,13 @@ async function insertRow(opts: {
   claimedAgoMs?: number | null;
   createdAgoMs?: number;
 }): Promise<string> {
-  const { aggregateId, publishedAgoMs = null, failedAgoMs = null, claimedAgoMs = null, createdAgoMs = 0 } = opts;
+  const {
+    aggregateId,
+    publishedAgoMs = null,
+    failedAgoMs = null,
+    claimedAgoMs = null,
+    createdAgoMs = 0,
+  } = opts;
   const rows = await client.$queryRawUnsafe<{ id: string }[]>(
     `INSERT INTO "${SCHEMA}"."outbox_events"
        (aggregate_id, event_type, envelope, created_at, published_at, failed_at, claimed_at)
@@ -107,15 +121,37 @@ describe('PrismaOutboxStore.sweepPublished · retención (Postgres real)', () =>
 
   it('borra SOLO filas publicadas VIEJAS; preserva pendientes, poison y publicadas recientes', async () => {
     // Publicada VIEJA (10 días atrás > 7d retención) → DEBE borrarse.
-    const oldPublished = await insertRow({ aggregateId: 'a', publishedAgoMs: 10 * DAY, createdAgoMs: 10 * DAY });
+    const oldPublished = await insertRow({
+      aggregateId: 'a',
+      publishedAgoMs: 10 * DAY,
+      createdAgoMs: 10 * DAY,
+    });
     // Publicada RECIENTE (1 día atrás < 7d) → DEBE quedar.
-    const recentPublished = await insertRow({ aggregateId: 'b', publishedAgoMs: 1 * DAY, createdAgoMs: 1 * DAY });
+    const recentPublished = await insertRow({
+      aggregateId: 'b',
+      publishedAgoMs: 1 * DAY,
+      createdAgoMs: 1 * DAY,
+    });
     // PENDIENTE (publishedAt NULL, vieja) → DEBE quedar (aún no entregada a Kafka).
-    const pending = await insertRow({ aggregateId: 'c', publishedAgoMs: null, createdAgoMs: 10 * DAY });
+    const pending = await insertRow({
+      aggregateId: 'c',
+      publishedAgoMs: null,
+      createdAgoMs: 10 * DAY,
+    });
     // CLAIMED en vuelo (publishedAt NULL) → DEBE quedar.
-    const claimed = await insertRow({ aggregateId: 'd', publishedAgoMs: null, claimedAgoMs: 1000, createdAgoMs: 10 * DAY });
+    const claimed = await insertRow({
+      aggregateId: 'd',
+      publishedAgoMs: null,
+      claimedAgoMs: 1000,
+      createdAgoMs: 10 * DAY,
+    });
     // POISON terminal (failedAt set, publishedAt NULL, viejo) → DEBE quedar (Ops investiga; nunca se barre).
-    const poison = await insertRow({ aggregateId: 'e', publishedAgoMs: null, failedAgoMs: 10 * DAY, createdAgoMs: 10 * DAY });
+    const poison = await insertRow({
+      aggregateId: 'e',
+      publishedAgoMs: null,
+      failedAgoMs: 10 * DAY,
+      createdAgoMs: 10 * DAY,
+    });
 
     const deleted = await store.sweepPublished(RETENTION_MS, 1000);
     expect(deleted).toBe(1); // solo la publicada vieja
@@ -132,7 +168,11 @@ describe('PrismaOutboxStore.sweepPublished · retención (Postgres real)', () =>
   it('es ACOTADO por lote: un sweepPublished borra a lo sumo `batch` (loop hasta vaciar)', async () => {
     // 5 publicadas viejas, lote = 2.
     for (let i = 0; i < 5; i++) {
-      await insertRow({ aggregateId: `agg-${i}`, publishedAgoMs: 10 * DAY, createdAgoMs: 10 * DAY });
+      await insertRow({
+        aggregateId: `agg-${i}`,
+        publishedAgoMs: 10 * DAY,
+        createdAgoMs: 10 * DAY,
+      });
     }
     expect(await countRows()).toBe(5);
 
@@ -148,7 +188,11 @@ describe('PrismaOutboxStore.sweepPublished · retención (Postgres real)', () =>
     // 200 publicadas viejas; dos sweeps en paralelo con lote 50.
     const total = 200;
     for (let i = 0; i < total; i++) {
-      await insertRow({ aggregateId: `agg-${i}`, publishedAgoMs: 10 * DAY, createdAgoMs: 10 * DAY });
+      await insertRow({
+        aggregateId: `agg-${i}`,
+        publishedAgoMs: 10 * DAY,
+        createdAgoMs: 10 * DAY,
+      });
     }
     // Loop de barrido por "réplica" (igual que el relay): borra en lotes hasta vaciar.
     const sweepLoop = async (): Promise<number> => {

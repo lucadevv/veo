@@ -186,7 +186,10 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
         SYSTEM_IDENTITY,
       );
       if (!trip.found || !trip.driverId) {
-        domainEventsTotal.inc({ event: 'chat.message_sent', result: BusinessEventResult.NO_DRIVER });
+        domainEventsTotal.inc({
+          event: 'chat.message_sent',
+          result: BusinessEventResult.NO_DRIVER,
+        });
         return;
       }
       const msg: ChatMessage = {

@@ -16,9 +16,7 @@ export interface HomeHeroProps {
 export function HomeHero({name}: HomeHeroProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
-  const greeting = name
-    ? `${t('home.greeting')}, ${name}`
-    : t('home.greeting');
+  const greeting = name ? `${t('home.greeting')}, ${name}` : t('home.greeting');
 
   return (
     <View style={[styles.root, {gap: theme.spacing.xxs}]}>

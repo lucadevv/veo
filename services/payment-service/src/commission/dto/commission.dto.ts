@@ -62,19 +62,31 @@ export class ReplaceCarpoolingFeeDto {
  * CASH no tiene fee (no pasa por el PSP) → no hay campo.
  */
 export class ReplacePspFeeDto {
-  @ApiProperty({ description: 'Fee PSP de YAPE en bps (0..10000). Int.', minimum: 0, maximum: BPS_DENOMINATOR })
+  @ApiProperty({
+    description: 'Fee PSP de YAPE en bps (0..10000). Int.',
+    minimum: 0,
+    maximum: BPS_DENOMINATOR,
+  })
   @IsInt()
   @Min(0)
   @Max(BPS_DENOMINATOR)
   yapeFeeBps!: number;
 
-  @ApiProperty({ description: 'Fee PSP de PLIN en bps (0..10000). Int.', minimum: 0, maximum: BPS_DENOMINATOR })
+  @ApiProperty({
+    description: 'Fee PSP de PLIN en bps (0..10000). Int.',
+    minimum: 0,
+    maximum: BPS_DENOMINATOR,
+  })
   @IsInt()
   @Min(0)
   @Max(BPS_DENOMINATOR)
   plinFeeBps!: number;
 
-  @ApiProperty({ description: 'Fee PSP de TARJETA en bps (0..10000). Int.', minimum: 0, maximum: BPS_DENOMINATOR })
+  @ApiProperty({
+    description: 'Fee PSP de TARJETA en bps (0..10000). Int.',
+    minimum: 0,
+    maximum: BPS_DENOMINATOR,
+  })
   @IsInt()
   @Min(0)
   @Max(BPS_DENOMINATOR)
@@ -90,7 +102,10 @@ export class ReplacePspFeeDto {
   @Max(BPS_DENOMINATOR)
   pagoefectivoFeeBps!: number;
 
-  @ApiProperty({ description: 'Optimistic locking (CAS): la `version` vigente. 409 si otro admin la movió.', minimum: 0 })
+  @ApiProperty({
+    description: 'Optimistic locking (CAS): la `version` vigente. 409 si otro admin la movió.',
+    minimum: 0,
+  })
   @IsInt()
   @Min(0)
   expectedVersion!: number;

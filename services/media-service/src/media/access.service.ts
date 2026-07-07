@@ -268,14 +268,19 @@ export class AccessService {
         id: req.id,
         OR: [
           { renderStatus: null },
-          { renderStatus: VideoRenderStatus.FAILED, renderAttempts: { lt: this.maxRenderAttempts } },
+          {
+            renderStatus: VideoRenderStatus.FAILED,
+            renderAttempts: { lt: this.maxRenderAttempts },
+          },
         ],
       },
       data: { renderStatus: VideoRenderStatus.PENDING, renderRequestedAt: now, renderError: null },
     });
     if (claimed.count === 0) {
       // Otro carril ya lo dejó READY o lo tomó (PENDING/PROCESSING): no re-disparamos ni clobereamos.
-      this.logger.log(`Render ya en curso/listo request=${req.id} (no re-disparado) por=${viewerId}`);
+      this.logger.log(
+        `Render ya en curso/listo request=${req.id} (no re-disparado) por=${viewerId}`,
+      );
     } else {
       this.logger.log(`Render de video solicitado (lazy) request=${req.id} por=${viewerId}`);
     }
@@ -305,7 +310,8 @@ export class AccessService {
     const expiresAt = new Date(now.getTime() + this.signedUrlTtl * 1000);
     // El watermark ya está QUEMADO en la copia: devolvemos el texto persistido (fallback defensivo al recompute).
     const watermark =
-      req.watermark ?? buildWatermark({ operatorEmail: req.requestedByEmail, requestId: req.id, at: now });
+      req.watermark ??
+      buildWatermark({ operatorEmail: req.requestedByEmail, requestId: req.id, at: now });
     // INVARIANTE DE SEGURIDAD: se presigna la COPIA DERIVADA con watermark quemado, JAMÁS `segment.s3Key`.
     const signedUrl = await this.storage.presignDownloadUrl({
       key: renderedS3Key,

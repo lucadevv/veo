@@ -34,7 +34,8 @@ export class DriverTripsController {
 
   @Get(':driverId/trip-count')
   @ApiOperation({
-    summary: 'Historial operativo del conductor: cantidad de viajes (guard del HARD purge en admin-bff)',
+    summary:
+      'Historial operativo del conductor: cantidad de viajes (guard del HARD purge en admin-bff)',
   })
   async tripCount(@Param('driverId') driverId: string): Promise<DriverTripCountView> {
     // count del lado del motor (sin cargar filas). CUALQUIER viaje en CUALQUIER estado cuenta como
@@ -56,7 +57,8 @@ export class DriverTripsController {
   @Delete(':driverId/trips')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'HARD purge de los viajes del conductor (+ eventos + propuestas). DEV-only. SUPERADMIN.',
+    summary:
+      'HARD purge de los viajes del conductor (+ eventos + propuestas). DEV-only. SUPERADMIN.',
   })
   purgeTrips(@Param('driverId') driverId: string): Promise<DriverTripsPurgeView> {
     return this.driverTrips.purgeForDriver(driverId);

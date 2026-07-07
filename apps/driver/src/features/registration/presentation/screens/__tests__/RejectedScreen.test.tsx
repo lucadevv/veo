@@ -132,7 +132,9 @@ describe('RejectedScreen · navegación coherente del rechazo (U4)', () => {
       pressButton(renderer, 'Corregir mis datos')();
     });
 
-    expect(useRegistrationStore.getState().currentStep).toBe(RegistrationStep.IDENTITY_VERIFICATION);
+    expect(useRegistrationStore.getState().currentStep).toBe(
+      RegistrationStep.IDENTITY_VERIFICATION,
+    );
 
     act(() => renderer.unmount());
     client.clear();
@@ -149,7 +151,9 @@ describe('RejectedScreen · navegación coherente del rechazo (U4)', () => {
       pressButton(renderer, 'Corregir mis datos')();
     });
 
-    expect(useRegistrationStore.getState().currentStep).toBe(RegistrationStep.IDENTITY_VERIFICATION);
+    expect(useRegistrationStore.getState().currentStep).toBe(
+      RegistrationStep.IDENTITY_VERIFICATION,
+    );
 
     act(() => renderer.unmount());
     client.clear();

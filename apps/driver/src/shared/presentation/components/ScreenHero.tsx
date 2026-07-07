@@ -21,7 +21,12 @@ interface ScreenHeroProps {
  * sentir las pantallas "hechas por AI". No mete el wordmark en cada pantalla (eso sería logo-spam): la marca
  * vive en la tipografía. El escalonado del resto del contenido se hace con `Reveal delay={40/80/120…}`.
  */
-export function ScreenHero({ title, subtitle, eyebrow, trailing }: ScreenHeroProps): React.JSX.Element {
+export function ScreenHero({
+  title,
+  subtitle,
+  eyebrow,
+  trailing,
+}: ScreenHeroProps): React.JSX.Element {
   return (
     <Reveal style={styles.hero}>
       {eyebrow ? (

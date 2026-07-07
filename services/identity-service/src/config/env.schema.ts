@@ -169,12 +169,14 @@ export const envSchema = z
       {
         env: 'VEO_OAUTH_MODE',
         value: env.VEO_OAUTH_MODE,
-        reason: 'el modo sandbox acepta id_token forjado sin verificar la firma del JWKS de Google (account takeover)',
+        reason:
+          'el modo sandbox acepta id_token forjado sin verificar la firma del JWKS de Google (account takeover)',
       },
       {
         env: 'VEO_SMS_MODE',
         value: env.VEO_SMS_MODE,
-        reason: 'el modo sandbox imprime el OTP en claro al log y NO lo envía (login roto + fuga de OTP)',
+        reason:
+          'el modo sandbox imprime el OTP en claro al log y NO lo envía (login roto + fuga de OTP)',
       },
       {
         env: 'VEO_EMAIL_MODE',

@@ -15,7 +15,12 @@
  */
 
 import { EnergySource } from '@veo/shared-types';
-import { canonicalize, collapseWhitespace, lineMatchesAnyKeyword, stripDiacritics } from './ocr-text';
+import {
+  canonicalize,
+  collapseWhitespace,
+  lineMatchesAnyKeyword,
+  stripDiacritics,
+} from './ocr-text';
 import type { ParsedPropertyCard } from './parsed-document';
 
 const PLATE_KEYWORDS = ['placa', 'plate'] as const;

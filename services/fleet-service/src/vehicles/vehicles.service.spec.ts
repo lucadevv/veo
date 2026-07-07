@@ -21,7 +21,10 @@ import {
 } from '../generated/prisma';
 import { VehiclesService } from './vehicles.service';
 import type { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
-import type { VehicleModelsService, VehicleModelMatch } from '../vehicle-models/vehicle-models.service';
+import type {
+  VehicleModelsService,
+  VehicleModelMatch,
+} from '../vehicle-models/vehicle-models.service';
 
 /**
  * Doble del provider de clases operables (gate overlay-aware). Por defecto solo CAR (el catálogo de
@@ -66,7 +69,9 @@ function makeVehicleModelsDouble(opts: { match?: VehicleModelMatch | null } = {}
 }
 
 /** Doble de prisma: captura la data del create y la devuelve como Vehicle completo. */
-function makeService(opts: { spec?: ReturnType<typeof specRow> | null; match?: VehicleModelMatch | null } = {}) {
+function makeService(
+  opts: { spec?: ReturnType<typeof specRow> | null; match?: VehicleModelMatch | null } = {},
+) {
   const created: { data?: Record<string, unknown> } = {};
   const txCreate = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
     created.data = data;
@@ -102,7 +107,9 @@ function makeService(opts: { spec?: ReturnType<typeof specRow> | null; match?: V
     write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
   };
   const config = { getOrThrow: () => 2017 };
-  const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({ match: opts.match });
+  const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({
+    match: opts.match,
+  });
   const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, config as never);
   return { service, created, findFirst, txCreate, findBestApprovedMatch, requestModel };
 }
@@ -149,10 +156,18 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
     // El fuzzy devuelve el spec "Toyota Yaris" para el freetext OCR "toyota yaris".
     const match = { spec: specRow({ id: 'spec-yaris' }), score: 1 };
     const { service, created, findBestApprovedMatch, requestModel } = makeService({ match });
-    await service.registerForDriver('driver-1', { ...baseBody, make: 'toyota yaris', model: 'yaris' });
+    await service.registerForDriver('driver-1', {
+      ...baseBody,
+      make: 'toyota yaris',
+      model: 'yaris',
+    });
 
     // se consultó el fuzzy con el freetext + tipo
-    expect(findBestApprovedMatch).toHaveBeenCalledWith('toyota yaris', 'yaris', SharedVehicleType.CAR);
+    expect(findBestApprovedMatch).toHaveBeenCalledWith(
+      'toyota yaris',
+      'yaris',
+      SharedVehicleType.CAR,
+    );
     // linkea el modelSpecId del match y snapshotea make/model del spec curado (server-authoritative)
     expect(created.data?.modelSpecId).toBe('spec-yaris');
     expect(created.data?.make).toBe('Toyota');
@@ -189,7 +204,9 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
   });
 
   it('LOTE 3 · si el encolado choca por dedup (ConflictError) NO rompe el alta del vehículo', async () => {
-    const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({ match: null });
+    const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({
+      match: null,
+    });
     findBestApprovedMatch.mockResolvedValue(null);
     requestModel.mockRejectedValue(new ConflictError('ya solicitado', {}));
 
@@ -219,7 +236,9 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
-    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
+    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+      getOrThrow: () => 2017,
+    } as never);
 
     // no debe lanzar: el ConflictError de dedup se traga, el vehículo se crea con freetext
     await expect(
@@ -239,7 +258,9 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
       modelSpecId: null,
       active: false,
     } as unknown as Vehicle;
-    const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({ match: null });
+    const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({
+      match: null,
+    });
     findBestApprovedMatch.mockResolvedValue(null);
     const prisma = {
       read: {
@@ -254,10 +275,16 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
         vehicle: { update: vi.fn(), findUnique: vi.fn().mockResolvedValue(foreign) },
       },
     };
-    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
+    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+      getOrThrow: () => 2017,
+    } as never);
 
     await expect(
-      service.registerForDriver('driver-1', { ...baseBody, make: 'Marca Rara XYZ', model: 'Inexistente' }),
+      service.registerForDriver('driver-1', {
+        ...baseBody,
+        make: 'Marca Rara XYZ',
+        model: 'Inexistente',
+      }),
     ).rejects.toBeInstanceOf(ConflictError);
 
     // la cola NO se ensucia: el alta falló antes, el modelo OCR jamás se encoló
@@ -267,7 +294,9 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
   it('LOTE 3 (d) · encolado post-éxito que FALLA (no-dedup) → vehículo IGUAL creado, error NO propagado', async () => {
     // El alta del vehículo tiene éxito; el encolado post-éxito explota con un error inesperado (NO dedup).
     // El vehículo debe quedar creado con freetext y el error NO debe propagarse (es best-effort, se loguea).
-    const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({ match: null });
+    const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({
+      match: null,
+    });
     findBestApprovedMatch.mockResolvedValue(null);
     requestModel.mockRejectedValue(new Error('DB caída encolando el modelo'));
 
@@ -296,13 +325,19 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
-    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
+    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+      getOrThrow: () => 2017,
+    } as never);
     // silencia el logger.error esperado (no contamina el output del test)
     const errSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     // NO debe lanzar: el alta tuvo éxito; el fallo del encolado es best-effort
     await expect(
-      service.registerForDriver('driver-1', { ...baseBody, make: 'Marca Rara XYZ', model: 'Inexistente' }),
+      service.registerForDriver('driver-1', {
+        ...baseBody,
+        make: 'Marca Rara XYZ',
+        model: 'Inexistente',
+      }),
     ).resolves.toBeDefined();
 
     // el vehículo quedó creado con el freetext (modelSpecId null)
@@ -328,7 +363,9 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
     ).resolves.toBeDefined();
     expect(txCreate).toHaveBeenCalledTimes(1);
     expect(txCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ vehicleType: SharedVehicleType.MOTO }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ vehicleType: SharedVehicleType.MOTO }),
+      }),
     );
   });
 
@@ -388,7 +425,9 @@ function makeCreateService(opts: { spec?: ReturnType<typeof specRow> | null } = 
   };
   // Alta ADMIN: no pasa contexto fuzzy → el doble de VehicleModelsService no se ejerce (carga deliberada).
   const { double } = makeVehicleModelsDouble();
-  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
+  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+    getOrThrow: () => 2017,
+  } as never);
   return { service, created, findFirst, writeCreate };
 }
 
@@ -465,12 +504,12 @@ function makeIdempotentService(existingPlate: Vehicle | null) {
   const outboxCreate = vi.fn().mockResolvedValue({});
   const tx = { vehicle: { create: txCreate }, outboxEvent: { create: outboxCreate } };
 
-  const update = vi.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) =>
-    Promise.resolve({ ...(existingPlate as object), ...data } as unknown as Vehicle),
-  );
-  const findManyAfter = vi
+  const update = vi
     .fn()
-    .mockResolvedValue(existingPlate ? [existingPlate] : []);
+    .mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve({ ...(existingPlate as object), ...data } as unknown as Vehicle),
+    );
+  const findManyAfter = vi.fn().mockResolvedValue(existingPlate ? [existingPlate] : []);
 
   const prisma = {
     read: {
@@ -487,7 +526,9 @@ function makeIdempotentService(existingPlate: Vehicle | null) {
     },
   };
   const { double } = makeVehicleModelsDouble();
-  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never);
+  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+    getOrThrow: () => 2017,
+  } as never);
   return { service, txCreate, outboxCreate, update };
 }
 
@@ -532,9 +573,9 @@ describe('VehiclesService.registerForDriver · idempotencia ownership-aware', ()
     } as unknown as Vehicle;
     const { service, txCreate } = makeIdempotentService(foreign);
 
-    await expect(
-      service.registerForDriver('driver-1', body),
-    ).rejects.toThrowError(/otro conductor/i);
+    await expect(service.registerForDriver('driver-1', body)).rejects.toThrowError(
+      /otro conductor/i,
+    );
     await expect(service.registerForDriver('driver-1', body)).rejects.toBeInstanceOf(ConflictError);
     expect(txCreate).not.toHaveBeenCalled();
   });
@@ -593,7 +634,9 @@ describe('VehiclesService.getActiveVehicle · B5-3 enriquecimiento con seats/seg
     };
     const { double } = makeVehicleModelsDouble();
     return {
-      service: new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, { getOrThrow: () => 2017 } as never),
+      service: new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+        getOrThrow: () => 2017,
+      } as never),
       prisma,
     };
   }
@@ -668,7 +711,12 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
     };
     const config = { getOrThrow: () => 2017 };
     const { double } = makeVehicleModelsDouble();
-    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, config as never);
+    const service = new VehiclesService(
+      prisma as never,
+      double,
+      OPERABLE_CAR_ONLY,
+      config as never,
+    );
     return { service, specFindMany, docsFindMany };
   }
 
@@ -696,7 +744,15 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
   it('enriquece cada vehículo con la ficha de su modelSpec en UNA query batched (no N+1)', async () => {
     const { service, specFindMany } = listService(
       [veh({ id: 'veh-1', modelSpecId: 'spec-1' }), veh({ id: 'veh-2', modelSpecId: 'spec-1' })],
-      [specRow({ id: 'spec-1', segment: 'PREMIUM', energySource: 'DIESEL', efficiency: 12, seats: 7 })],
+      [
+        specRow({
+          id: 'spec-1',
+          segment: 'PREMIUM',
+          energySource: 'DIESEL',
+          efficiency: 12,
+          seats: 7,
+        }),
+      ],
     );
     const page = await service.list({});
     // UNA sola query de specs para toda la página, con los ids deduplicados.
@@ -740,11 +796,24 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
     { type: FleetDocumentType.ITV, status: FleetDocumentStatus.VALID, ownerId: vehicleId },
   ];
 
-  const spec = { id: 'spec-1', segment: 'NORMAL', energySource: 'GASOLINE', efficiency: 14, seats: 4 };
+  const spec = {
+    id: 'spec-1',
+    segment: 'NORMAL',
+    energySource: 'GASOLINE',
+    efficiency: 14,
+    seats: 4,
+  };
 
   it('operable=true SOLO si docs SOAT/ITV operables Y ficha Y docStatus!=EXPIRED (mismo veredicto que booking)', async () => {
     const { service } = listService(
-      [veh({ id: 'veh-ok', modelSpecId: 'spec-1', active: false, docStatus: VehicleDocStatus.VALID })],
+      [
+        veh({
+          id: 'veh-ok',
+          modelSpecId: 'spec-1',
+          active: false,
+          docStatus: VehicleDocStatus.VALID,
+        }),
+      ],
       [spec],
       operableDocs('veh-ok'),
     );
@@ -815,13 +884,12 @@ describe('VehiclesService.create · gate operabilidad por clase (overlay-aware)'
       },
     };
     const { double } = makeVehicleModelsDouble();
-    const operableClasses = { get: vi.fn(operableGet) } as unknown as OperableVehicleClassesProvider;
-    const service = new VehiclesService(
-      prisma as never,
-      double,
-      operableClasses,
-      { getOrThrow: () => 2017 } as never,
-    );
+    const operableClasses = {
+      get: vi.fn(operableGet),
+    } as unknown as OperableVehicleClassesProvider;
+    const service = new VehiclesService(prisma as never, double, operableClasses, {
+      getOrThrow: () => 2017,
+    } as never);
     return { service, created };
   }
 
@@ -850,7 +918,11 @@ describe('VehiclesService.create · gate operabilidad por clase (overlay-aware)'
 
   it('ACEPTA CAR siempre (clase operable hoy)', async () => {
     const { service, created } = makeCreateService(async () => [VehicleType.CAR]);
-    const vehicle = await service.create({ ...motoBody, vehicleType: SharedVehicleType.CAR, model: 'Civic' });
+    const vehicle = await service.create({
+      ...motoBody,
+      vehicleType: SharedVehicleType.CAR,
+      model: 'Civic',
+    });
     expect(vehicle.id).toBe('veh-created');
     expect(created.data?.vehicleType).toBe(SharedVehicleType.CAR);
   });

@@ -171,7 +171,11 @@ function SendingBar(): React.JSX.Element {
         <View style={[styles.barFill, { width: fillW, backgroundColor: theme.colors.accent }]} />
       ) : (
         <Animated.View
-          style={[styles.barFill, { width: fillW, backgroundColor: theme.colors.accent }, fillStyle]}
+          style={[
+            styles.barFill,
+            { width: fillW, backgroundColor: theme.colors.accent },
+            fillStyle,
+          ]}
         />
       )}
     </View>
@@ -375,10 +379,23 @@ const styles = StyleSheet.create({
   // Label 15pt Outfit-Medium (cara registrada) — el pen usa `font-text` peso 500 a 15pt.
   label: { fontFamily: 'Outfit-Medium', fontSize: 15, lineHeight: 20 },
   // Thumb 64×44 (frame Cards del pen), radio 8 (`$r-sm`), recorta la mini-preview.
-  thumb: { width: 64, height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  thumb: {
+    width: 64,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
   thumbImg: { width: 64, height: 44 },
   // Check verde circular 24×24 del estado enviado.
-  checkCircle: { width: 24, height: 24, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  checkCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5 },
   // Barra de progreso indeterminada bajo el label mientras sube (4pt, píldora, clip del sweep).
   barTrack: { height: 4, borderRadius: 999, overflow: 'hidden', width: '100%' },

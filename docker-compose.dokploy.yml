@@ -97,7 +97,12 @@ services:
     build:
       context: .
       dockerfile: services/identity-service/Dockerfile
-    entrypoint: ["sh", "-c", "for i in $$(seq 1 40); do npx prisma migrate deploy && exit 0; echo waiting-for-db $$i; sleep 2; done; exit 1"]
+    entrypoint:
+      [
+        "sh",
+        "-c",
+        "for i in $$(seq 1 40); do npx prisma migrate deploy && exit 0; echo waiting-for-db $$i; sleep 2; done; exit 1",
+      ]
     environment:
       DATABASE_URL: postgresql://veo:${POSTGRES_PASSWORD:?}@postgres:5432/veo?schema=identity
     depends_on:
@@ -111,7 +116,12 @@ services:
       dockerfile: services/identity-service/Dockerfile
     # Wrapper: decodifica los PEM base64 → env real y arranca. $$ = escape de
     # compose para que el $ le llegue al shell del contenedor.
-    command: ["sh", "-c", "export JWT_PRIVATE_KEY_PEM=\"$$(printf %s \"$$JWT_PRIVATE_KEY_PEM_B64\" | base64 -d)\" JWT_PUBLIC_KEY_PEM=\"$$(printf %s \"$$JWT_PUBLIC_KEY_PEM_B64\" | base64 -d)\"; exec node dist/main.js"]
+    command:
+      [
+        "sh",
+        "-c",
+        'export JWT_PRIVATE_KEY_PEM="$$(printf %s "$$JWT_PRIVATE_KEY_PEM_B64" | base64 -d)" JWT_PUBLIC_KEY_PEM="$$(printf %s "$$JWT_PUBLIC_KEY_PEM_B64" | base64 -d)"; exec node dist/main.js',
+      ]
     environment:
       NODE_ENV: production
       PORT: "3001"

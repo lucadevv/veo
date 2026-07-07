@@ -38,7 +38,11 @@ type CounterCtor = new (cfg: {
 // Clase Counter tomada de la instancia existente (misma copia de prom-client).
 const CounterClass = (domainEventsTotal as unknown as { constructor: CounterCtor }).constructor;
 
-function getOrCreateCounter(name: string, help: string, labelNames: readonly string[]): CounterLike {
+function getOrCreateCounter(
+  name: string,
+  help: string,
+  labelNames: readonly string[],
+): CounterLike {
   const existing = metricsRegistry.getSingleMetric(name) as CounterLike | undefined;
   if (existing) return existing;
   return new CounterClass({ name, help, labelNames, registers: [metricsRegistry] });
@@ -74,8 +78,7 @@ export function classifyMissingAttr(present: {
   segment: boolean;
   year: boolean;
 }): MissingAttr {
-  const missingCount =
-    (present.seats ? 0 : 1) + (present.segment ? 0 : 1) + (present.year ? 0 : 1);
+  const missingCount = (present.seats ? 0 : 1) + (present.segment ? 0 : 1) + (present.year ? 0 : 1);
   if (missingCount > 1) return 'multiple';
   if (!present.seats) return 'seats';
   if (!present.segment) return 'segment';
@@ -139,7 +142,9 @@ export type TierUnknownReason = 'absent' | 'unknown';
  * (minSeats/minSegment/maxAgeYears = los ejes de attrs del vehículo). DEUDA: promover a `@veo/shared-types`
  * (catálogo) como fuente única cuando toque un build; hoy local para no rebuildear el paquete compartido.
  */
-export function offeringRestrictsByVehicleAttrs(requires: OfferingRequirements | undefined): boolean {
+export function offeringRestrictsByVehicleAttrs(
+  requires: OfferingRequirements | undefined,
+): boolean {
   if (!requires) return false;
   return (
     requires.minSeats !== undefined ||

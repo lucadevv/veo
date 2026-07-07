@@ -125,7 +125,10 @@ export function CatalogPanel({
 
   // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió → 409 (toast de conflicto).
   const commit = (next: CatalogOverride, msg: string) =>
-    save({ overrides: withOverride(catalog.overrides, next), expectedVersion: catalog.version }, msg);
+    save(
+      { overrides: withOverride(catalog.overrides, next), expectedVersion: catalog.version },
+      msg,
+    );
 
   async function setEnabled(id: string, enabled: boolean) {
     const ov = overrideOf(id); // preserva modo/precio al togglear
@@ -179,7 +182,9 @@ export function CatalogPanel({
               <th className="w-full py-3 pl-5 pr-3 text-left text-[11px] font-semibold text-ink-subtle">
                 Categoría
               </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">Modo</th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Modo
+              </th>
               <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
                 Multiplicador
               </th>
@@ -334,8 +339,7 @@ function OfferingRow({
 
   // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
   const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
-  const minFareCents =
-    minFareSoles.trim() === '' ? undefined : solesToCents(Number(minFareSoles));
+  const minFareCents = minFareSoles.trim() === '' ? undefined : solesToCents(Number(minFareSoles));
   // Tope de cordura del multiplicador: corta el dedazo ×100 ANTES de mandar (el BFF y trip-service re-validan
   // server-side con MULTIPLIER_MAX=10 autoritativo). 0 < x ≤ 10.
   const multInvalid =
@@ -569,8 +573,10 @@ function OfferingRow({
             <p className="flex items-start gap-1.5 text-xs text-warn">
               <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
               <span>
-                Piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) &gt; tarifa mínima fija (S/
-                {formatSolesInput(crossWarn.fixedMinCents)}) — la puja no debería costar más que el fijo.
+                Piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) &gt; tarifa mínima fija
+                (S/
+                {formatSolesInput(crossWarn.fixedMinCents)}) — la puja no debería costar más que el
+                fijo.
               </span>
             </p>
           </td>

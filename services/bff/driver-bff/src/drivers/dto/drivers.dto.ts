@@ -160,7 +160,10 @@ export class AddDocumentDto {
    * Imágenes del documento (sub-lote 3A · camino nuevo, 1..N caras). DNI → [FRONT, BACK]; foto de
    * vehículo → N SINGLE; el resto → [SINGLE]. Opcional para no romper a quien aún mande `fileS3Key`.
    */
-  @ApiPropertyOptional({ type: [AddDocumentImageDto], description: 'Imágenes del documento (1..N caras)' })
+  @ApiPropertyOptional({
+    type: [AddDocumentImageDto],
+    description: 'Imágenes del documento (1..N caras)',
+  })
   @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
@@ -176,20 +179,28 @@ export class AddDocumentDto {
    * `forbidNonWhitelisted`, acota campos/tamaño y rechaza claves arbitrarias ANTES de proxyar a fleet.
    * Opcional → backward-compatible (registrar SIN OCR sigue OK). Sin `any`.
    */
-  @ApiPropertyOptional({ description: 'Data extraída por OCR on-device (ExtractedDocumentData, opcional)' })
+  @ApiPropertyOptional({
+    description: 'Data extraída por OCR on-device (ExtractedDocumentData, opcional)',
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => Object, EXTRACTED_DATA_TYPE_OPTIONS)
   extractedData?: ExtractedDocumentData;
 
   /** Motor de OCR que produjo `extractedData`. ENUM CERRADO (anti-spoof de texto libre). Trazabilidad. */
-  @ApiPropertyOptional({ enum: OcrEngine, description: 'Motor de OCR que extrajo la data (enum cerrado)' })
+  @ApiPropertyOptional({
+    enum: OcrEngine,
+    description: 'Motor de OCR que extrajo la data (enum cerrado)',
+  })
   @IsOptional()
   @IsIn(OCR_ENGINES)
   ocrEngine?: OcrEngine;
 
   /** Momento en que el cliente extrajo la data por OCR (ISO-8601). */
-  @ApiPropertyOptional({ example: '2026-06-20T10:00:00.000Z', description: 'Instante de la extracción OCR' })
+  @ApiPropertyOptional({
+    example: '2026-06-20T10:00:00.000Z',
+    description: 'Instante de la extracción OCR',
+  })
   @IsOptional()
   @IsISO8601()
   ocrAt?: string;
@@ -228,7 +239,8 @@ export const DOCUMENT_EXTENSION_BY_CONTENT_TYPE: Record<DocumentUploadContentTyp
 export class DocumentUploadTicketDto {
   @ApiProperty({
     enum: FleetDocumentType,
-    description: 'Tipo de documento (LICENSE_A1 | SOAT | PROPERTY_CARD | ITV | BACKGROUND_CHECK | ...)',
+    description:
+      'Tipo de documento (LICENSE_A1 | SOAT | PROPERTY_CARD | ITV | BACKGROUND_CHECK | ...)',
   })
   @IsEnum(FleetDocumentType)
   type!: FleetDocumentType;

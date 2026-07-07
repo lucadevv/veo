@@ -27,10 +27,7 @@ import {
 } from '@opentelemetry/sdk-trace-base';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
-import {
-  captureTraceparent,
-  runWithExtractedTraceparent,
-} from './trace-propagation.js';
+import { captureTraceparent, runWithExtractedTraceparent } from './trace-propagation.js';
 
 const W3C_TRACEPARENT_RE = /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
 

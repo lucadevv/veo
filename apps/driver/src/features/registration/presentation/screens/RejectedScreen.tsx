@@ -83,7 +83,12 @@ export const RejectedScreen = (): React.JSX.Element => {
         footer={
           <View style={{ paddingHorizontal: theme.spacing['2xl'], gap: theme.spacing.md }}>
             {/* Corregir mis datos — botón PRIMARY (frame: gradiente azul + glow; usamos el primary canónico). */}
-            <Button label={t('registration.rejected.fix')} variant="primary" fullWidth onPress={onFix} />
+            <Button
+              label={t('registration.rejected.fix')}
+              variant="primary"
+              fullWidth
+              onPress={onFix}
+            />
             {/* Reenviar a revisión — SECONDARY, deshabilitado hasta corregir (frame: opacity 0.55). */}
             <Button
               label={t('registration.rejected.resubmit')}
@@ -134,7 +139,9 @@ export const RejectedScreen = (): React.JSX.Element => {
           </View>
         }
       >
-        <View style={[styles.body, { gap: theme.spacing.lg, paddingHorizontal: theme.spacing['2xl'] }]}>
+        <View
+          style={[styles.body, { gap: theme.spacing.lg, paddingHorizontal: theme.spacing['2xl'] }]}
+        >
           {/* Wordmark "VEO" pelado centrado (frame: display 18/700, letterSpacing 1.5). */}
           <Reveal style={styles.brand}>
             <Text variant="title2" style={styles.wordmark}>
@@ -202,7 +209,11 @@ export const RejectedScreen = (): React.JSX.Element => {
                   key={doc.type}
                   style={[
                     styles.docCard,
-                    { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg },
+                    {
+                      backgroundColor: theme.colors.surface,
+                      borderColor: theme.colors.border,
+                      borderRadius: theme.radii.lg,
+                    },
                   ]}
                 >
                   <View style={styles.docRow}>

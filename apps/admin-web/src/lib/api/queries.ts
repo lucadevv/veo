@@ -304,8 +304,7 @@ export function useDriverSuspend() {
 export function useReactivateDriver() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string }) =>
-      apiClient().post(`/ops/drivers/${input.id}/reactivate`),
+    mutationFn: (input: { id: string }) => apiClient().post(`/ops/drivers/${input.id}/reactivate`),
     onSuccess: (_data, input) => {
       void qc.invalidateQueries({ queryKey: ['drivers'] });
       void qc.invalidateQueries({ queryKey: qk.driver(input.id) });
@@ -837,7 +836,11 @@ export function useRefund() {
     }) =>
       // El admin-bff expone el reembolso como POST /finance/refunds/:tripId con body {amountCents, reason, forceNew}.
       apiClient().post(`/finance/refunds/${input.tripId}`, {
-        body: { amountCents: input.amountCents, reason: input.reason, forceNew: input.forceNew ?? false },
+        body: {
+          amountCents: input.amountCents,
+          reason: input.reason,
+          forceNew: input.forceNew ?? false,
+        },
         idempotencyKey: input.idempotencyKey,
       }),
     onSuccess: () => {
@@ -851,7 +854,10 @@ export function usePaymentByTrip(tripId: string | null) {
   return useQuery({
     queryKey: qk.paymentByTrip(tripId ?? ''),
     queryFn: ({ signal }) =>
-      apiClient().get(`/finance/payments/by-trip/${tripId}`, { schema: refundablePaymentView, signal }),
+      apiClient().get(`/finance/payments/by-trip/${tripId}`, {
+        schema: refundablePaymentView,
+        signal,
+      }),
     // Solo consulta cuando hay un tripId (el operador tipeó/pegó el viaje a reembolsar); sin él no hay nada que ver.
     enabled: !!tripId,
   });
@@ -940,7 +946,10 @@ export function useReplaceCarpoolingFee() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: ReplaceCarpoolingFeeRequest) =>
-      apiClient().put('/finance/commission/carpooling-fee', { body: input, schema: commissionView }),
+      apiClient().put('/finance/commission/carpooling-fee', {
+        body: input,
+        schema: commissionView,
+      }),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.commission });
     },

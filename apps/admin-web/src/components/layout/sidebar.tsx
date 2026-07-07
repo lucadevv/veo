@@ -106,7 +106,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         <div className="min-w-0 flex-1 leading-tight">
           <p className="font-mono text-[15px] font-bold tracking-tight text-ink">VEO</p>
-          <p className="text-[10px] uppercase tracking-[0.16em] text-ink-subtle">Panel de operación</p>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-ink-subtle">
+            Panel de operación
+          </p>
         </div>
         {/* Estado de la conexión de tiempo real /ops — global: un admin en CUALQUIER página ve si el
             monitor de pánico perdió conexión. */}
@@ -196,7 +198,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           aria-label={theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'}
           className="grid size-8 place-items-center rounded-md text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink"
         >
-          {theme === 'dark' ? <Sun className="size-4" aria-hidden /> : <Moon className="size-4" aria-hidden />}
+          {theme === 'dark' ? (
+            <Sun className="size-4" aria-hidden />
+          ) : (
+            <Moon className="size-4" aria-hidden />
+          )}
         </button>
         <button
           type="button"

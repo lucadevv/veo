@@ -138,7 +138,9 @@ describe('PersonalDataScreen · U2 dedup (DUP #2): una sola affordance de re-esc
 
   it('RESUME (server tiene el DNI, sin captura local): la card es la ÚNICA affordance; el Button suelto NO se renderiza', () => {
     mockDriverExistence = DriverExistence.Exists;
-    mockServerDocs = [serverDoc(FleetDocumentType.DNI, FleetDocumentStatus.PENDING_REVIEW, '70123456')];
+    mockServerDocs = [
+      serverDoc(FleetDocumentType.DNI, FleetDocumentStatus.PENDING_REVIEW, '70123456'),
+    ];
 
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {

@@ -6,12 +6,7 @@ import { useReplaceOnDemandRate } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { useConfigSave } from '@/lib/use-config-save';
-import {
-  MAX_RATE_PCT,
-  BPS_PER_PERCENT,
-  bpsToPercentLabel,
-  percentToBps,
-} from '@/lib/commission';
+import { MAX_RATE_PCT, BPS_PER_PERCENT, bpsToPercentLabel, percentToBps } from '@/lib/commission';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 

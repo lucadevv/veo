@@ -35,7 +35,11 @@ const config = new ConfigService<Env, true>({
   EXCESSIVE_CANCELLATION_COOLDOWN_HOURS: 24,
 });
 
-function matchesExpiresAt(h: Hold, cond: { not?: null; lt?: Date } | undefined, now: Date): boolean {
+function matchesExpiresAt(
+  h: Hold,
+  cond: { not?: null; lt?: Date } | undefined,
+  now: Date,
+): boolean {
   if (cond === undefined) return true;
   // `{ not: null, lt: now }` → hold temporal vencido.
   if ('not' in cond && cond.not === null && h.expiresAt === null) return false;
@@ -63,7 +67,9 @@ function holdMatches(h: Hold, where: Record<string, unknown>, now: Date): boolea
   return true;
 }
 
-function makePrisma(opts: { initialHolds?: Hold[]; driverExists?: boolean; driverId?: string } = {}) {
+function makePrisma(
+  opts: { initialHolds?: Hold[]; driverExists?: boolean; driverId?: string } = {},
+) {
   const driverId = opts.driverId ?? 'd1';
   const driverExists = opts.driverExists ?? true;
   const holds: Hold[] = [...(opts.initialHolds ?? [])];
@@ -76,7 +82,12 @@ function makePrisma(opts: { initialHolds?: Hold[]; driverExists?: boolean; drive
   };
   const driverRow = () =>
     driverExists
-      ? { id: driverId, userId: 'u1', licenseExpiresAt: futureLicense, suspendedAt: deriveSuspendedAt() }
+      ? {
+          id: driverId,
+          userId: 'u1',
+          licenseExpiresAt: futureLicense,
+          suspendedAt: deriveSuspendedAt(),
+        }
       : null;
 
   const holdClient = {
@@ -87,8 +98,9 @@ function makePrisma(opts: { initialHolds?: Hold[]; driverExists?: boolean; drive
     }) => {
       const k = where.driverId_cause_causeRef;
       return (
-        holds.find((h) => h.driverId === k.driverId && h.cause === k.cause && h.causeRef === k.causeRef) ??
-        null
+        holds.find(
+          (h) => h.driverId === k.driverId && h.cause === k.cause && h.causeRef === k.causeRef,
+        ) ?? null
       );
     },
     findFirst: async ({ where }: { where: { driverId: string } }) => {
@@ -116,7 +128,11 @@ function makePrisma(opts: { initialHolds?: Hold[]; driverExists?: boolean; drive
       );
       // update vacío → no-op si existe (preserva createdAt Y expiresAt: no extiende el cooldown).
       if (!found) {
-        holds.push({ ...create, createdAt: create.createdAt ?? new Date(), expiresAt: create.expiresAt ?? null });
+        holds.push({
+          ...create,
+          createdAt: create.createdAt ?? new Date(),
+          expiresAt: create.expiresAt ?? null,
+        });
       }
       return {};
     },
@@ -177,12 +193,19 @@ const bio = {} as never;
  * Stub del RedisRefreshTokenStore (Lote 1b + backstop durable): suspendByCancellations llama revokeAllForUser
  * (fast-path, gateado) y resealRevokedBefore (backstop durable, INCONDICIONAL) post-commit.
  */
-const sessions = { revokeAllForUser: async () => 0, resealRevokedBefore: async () => true } as never;
+const sessions = {
+  revokeAllForUser: async () => 0,
+  resealRevokedBefore: async () => true,
+} as never;
 function svc(prisma: ReturnType<typeof makePrisma>): DriversService {
   return new DriversService(prisma.prisma as never, redis, bio, sessions, config);
 }
 
-function temporalHold(driverId: string, expiresAt: Date, createdAt = new Date('2026-06-23T00:00:00Z')): Hold {
+function temporalHold(
+  driverId: string,
+  expiresAt: Date,
+  createdAt = new Date('2026-06-23T00:00:00Z'),
+): Hold {
   return {
     driverId,
     cause: SuspensionCause.EXCESSIVE_CANCELLATIONS,

@@ -84,9 +84,7 @@ describe('outbox', () => {
       outboxEvent: { create: async () => null },
       $queryRawUnsafe: async <T>(sql: string, ...values: unknown[]): Promise<T> => {
         claimCalls.push({ sql, values });
-        return [
-          { id: 'o1', aggregate_id: 'd1', envelope: env, created_at: new Date() },
-        ] as T;
+        return [{ id: 'o1', aggregate_id: 'd1', envelope: env, created_at: new Date() }] as T;
       },
       $executeRawUnsafe: async (sql: string, ...values: unknown[]): Promise<number> => {
         ackCalls.push({ sql, values });
@@ -134,7 +132,11 @@ describe('outbox', () => {
   });
 
   it('drain: un publish que falla → ese id va a fallos (ack resetea claimed_at = NULL, no published)', async () => {
-    const env = createEnvelope({ eventType: 'rating.created', producer: 'rating-service', payload: {} });
+    const env = createEnvelope({
+      eventType: 'rating.created',
+      producer: 'rating-service',
+      payload: {},
+    });
     const ackCalls: { sql: string; values: unknown[] }[] = [];
     const fakePrisma: OutboxPrismaClient = {
       outboxEvent: { create: async () => null },
@@ -157,7 +159,11 @@ describe('outbox', () => {
   });
 
   it('drain: orden per-aggregate — los 3 eventos del MISMO aggregate se publican en orden createdAt', async () => {
-    const env = createEnvelope({ eventType: 'rating.created', producer: 'rating-service', payload: {} });
+    const env = createEnvelope({
+      eventType: 'rating.created',
+      producer: 'rating-service',
+      payload: {},
+    });
     const t = (s: number) => new Date(2026, 0, 1, 0, 0, s);
     const fakePrisma: OutboxPrismaClient = {
       outboxEvent: { create: async () => null },

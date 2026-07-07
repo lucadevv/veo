@@ -140,16 +140,18 @@ describe('OutboxRelay · invariante publishTimeoutMs < claimStaleMs (fail-fast a
       producer: fakeProducer().asKafkaProducer(),
     };
     // timeout == stale → inválido (debe ser ESTRICTAMENTE menor).
-    expect(() => new OutboxRelay({ ...opts, claimStaleMs: 30_000, publishTimeoutMs: 30_000 })).toThrow(
-      /publishTimeoutMs.*debe ser <.*claimStaleMs/,
-    );
+    expect(
+      () => new OutboxRelay({ ...opts, claimStaleMs: 30_000, publishTimeoutMs: 30_000 }),
+    ).toThrow(/publishTimeoutMs.*debe ser <.*claimStaleMs/);
     // timeout > stale → inválido.
-    expect(() => new OutboxRelay({ ...opts, claimStaleMs: 10_000, publishTimeoutMs: 30_000 })).toThrow(
-      /publishTimeoutMs/,
-    );
+    expect(
+      () => new OutboxRelay({ ...opts, claimStaleMs: 10_000, publishTimeoutMs: 30_000 }),
+    ).toThrow(/publishTimeoutMs/);
     // timeout < stale → OK (no lanza). Defaults: 30_000 < 60_000.
     expect(() => new OutboxRelay({ ...opts })).not.toThrow();
-    expect(() => new OutboxRelay({ ...opts, claimStaleMs: 60_000, publishTimeoutMs: 30_000 })).not.toThrow();
+    expect(
+      () => new OutboxRelay({ ...opts, claimStaleMs: 60_000, publishTimeoutMs: 30_000 }),
+    ).not.toThrow();
   });
 });
 

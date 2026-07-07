@@ -31,9 +31,9 @@ describe('correctionStepForRejectedDocTypes · mapea doc-types rechazados al pas
   });
 
   it('combinación CONDUCTOR + VEHÍCULO (DNI + SOAT) → el paso MÁS TEMPRANO (Conductor)', () => {
-    expect(
-      correctionStepForRejectedDocTypes([FleetDocumentType.SOAT, FleetDocumentType.DNI]),
-    ).toBe(RegistrationStep.PERSONAL_DATA);
+    expect(correctionStepForRejectedDocTypes([FleetDocumentType.SOAT, FleetDocumentType.DNI])).toBe(
+      RegistrationStep.PERSONAL_DATA,
+    );
     expect(
       correctionStepForRejectedDocTypes([
         FleetDocumentType.VEHICLE_PHOTO,

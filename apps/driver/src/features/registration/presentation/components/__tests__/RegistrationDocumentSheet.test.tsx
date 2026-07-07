@@ -58,7 +58,11 @@ const SOAT_LINES = [
   'Vigencia Desde 01/01/2026 Hasta 31/12/2026',
 ];
 /** Texto OCR de una licencia legible (GROUND TRUTH: Nro de Licencia + Fecha de Revalidacion). */
-const LICENSE_LINES = ['Nro de Licencia Q12345678', 'Categoría A-I', 'Fecha de Revalidacion 30/06/2028'];
+const LICENSE_LINES = [
+  'Nro de Licencia Q12345678',
+  'Categoría A-I',
+  'Fecha de Revalidacion 30/06/2028',
+];
 
 interface Harness {
   renderer: TestRenderer.ReactTestRenderer;
@@ -147,9 +151,8 @@ async function takePhoto(renderer: TestRenderer.ReactTestRenderer): Promise<void
 /** ¿Hay un preview/imagen montado con esta URI? */
 function hasPreviewWithUri(renderer: TestRenderer.ReactTestRenderer, uri: string): boolean {
   return (
-    renderer.root.findAll(
-      (node) => node.props.source != null && node.props.source.uri === uri,
-    ).length > 0
+    renderer.root.findAll((node) => node.props.source != null && node.props.source.uri === uri)
+      .length > 0
   );
 }
 

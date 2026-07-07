@@ -12,10 +12,7 @@ import type { RegistrationStackParamList } from '../../../../navigation/types';
 import { RegistrationStep, type VehicleErrors } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
-import {
-  REGISTRATION_VEHICLES_QUERY_KEY,
-  useDriverVehicles,
-} from '../hooks/useRegistrationWizard';
+import { REGISTRATION_VEHICLES_QUERY_KEY, useDriverVehicles } from '../hooks/useRegistrationWizard';
 import { useVehicleContinue } from '../hooks/useVehicleContinue';
 import type { PropertyCardScanOutcome } from '../hooks/useScanPropertyCard';
 import {
@@ -229,7 +226,8 @@ export const VehicleScreen = ({ navigation }: Props = {}): React.JSX.Element => 
   // `pendingPropertyCard` (captura local sin subir): el gate ESPERA a que la tarjeta aterrice en el server
   // antes de habilitar el alta, así nunca se crea un vehículo con la tarjeta a medio subir.
   const cardImageReady =
-    documents.find((d) => d.type === 'VEHICLE_REGISTRATION')?.status === DocumentUploadStatus.UPLOADED ||
+    documents.find((d) => d.type === 'VEHICLE_REGISTRATION')?.status ===
+      DocumentUploadStatus.UPLOADED ||
     serverHasAcceptableDoc(serverDocs.data, 'VEHICLE_REGISTRATION');
 
   // ¿Se capturó una tarjeta? (señal = imagen, NO los campos OCR). ¿El OCR leyó la PLACA (campo crítico)?
@@ -511,379 +509,394 @@ export const VehicleScreen = ({ navigation }: Props = {}): React.JSX.Element => 
       onPrimary: () => void onContinueRef.current(),
       primaryDisabled: vehiclePrimaryDisabled,
       primaryLoading: vehicleContinue.isPending,
-      hint: missingKey ? t('registration.vehicle.missing.label', { detail: t(missingKey) }) : undefined,
+      hint: missingKey
+        ? t('registration.vehicle.missing.label', { detail: t(missingKey) })
+        : undefined,
     });
     return () => wizard.registerFooter(pageIndex, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wizard, pageIndex, existingVehicle, vehiclePrimaryDisabled, vehicleContinue.isPending, missingKey]);
+  }, [
+    wizard,
+    pageIndex,
+    existingVehicle,
+    vehiclePrimaryDisabled,
+    vehicleContinue.isPending,
+    missingKey,
+  ]);
 
   // El CUERPO del paso (compartido por ambos modos). El chrome cambia según el modo (embebido vs standalone).
   const stepBody = (
     <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
-          {/* La BARRA de progreso (animada) es la única señal del avance: el caption "Paso N de M"
+      {/* La BARRA de progreso (animada) es la única señal del avance: el caption "Paso N de M"
               (`registration.stepOf`) se ELIMINÓ — redundante con la barra. El título display manda. */}
-          {wizard ? null : (
-            <Reveal>
-              <RegistrationProgress current={2} />
-            </Reveal>
-          )}
+      {wizard ? null : (
+        <Reveal>
+          <RegistrationProgress current={2} />
+        </Reveal>
+      )}
 
-          {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. */}
-          <Reveal delay={40} style={styles.intro}>
-            <Text variant="title1">{t('registration.vehicle.title')}</Text>
-            <Text variant="callout" color="inkMuted">
-              {existingVehicle
-                ? t('registration.vehicle.registeredSubtitle')
-                : t('registration.vehicle.subtitle')}
-            </Text>
-          </Reveal>
+      {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. */}
+      <Reveal delay={40} style={styles.intro}>
+        <Text variant="title1">{t('registration.vehicle.title')}</Text>
+        <Text variant="callout" color="inkMuted">
+          {existingVehicle
+            ? t('registration.vehicle.registeredSubtitle')
+            : t('registration.vehicle.subtitle')}
+        </Text>
+      </Reveal>
 
-          {serverError ? (
-            <Reveal>
-              <Banner
-                tone="danger"
-                title={t('errors.generic')}
-                description={toErrorMessage(serverError, t)}
-              />
-            </Reveal>
-          ) : null}
+      {serverError ? (
+        <Reveal>
+          <Banner
+            tone="danger"
+            title={t('errors.generic')}
+            description={toErrorMessage(serverError, t)}
+          />
+        </Reveal>
+      ) : null}
 
-          {cardUploadFailed ? (
-            <Reveal>
-              <Banner
-                tone="danger"
-                title={t('registration.vehicle.scanCard.uploadFailed')}
-                description={t('registration.vehicle.scanCard.uploadRetryHint')}
-                action={{ label: t('common.retry'), onPress: () => void uploadPropertyCardNow() }}
-              />
-            </Reveal>
-          ) : null}
+      {cardUploadFailed ? (
+        <Reveal>
+          <Banner
+            tone="danger"
+            title={t('registration.vehicle.scanCard.uploadFailed')}
+            description={t('registration.vehicle.scanCard.uploadRetryHint')}
+            action={{ label: t('common.retry'), onPress: () => void uploadPropertyCardNow() }}
+          />
+        </Reveal>
+      ) : null}
 
-          {existingVehicle ? (
-            <Reveal delay={100} spring>
-              <VehicleStatusCard vehicle={existingVehicle} />
-            </Reveal>
-          ) : (
-            <>
-              {/* PASO 1 · Tarjeta de propiedad (U3 · jerarquía 1-2-3). El "Escanear tarjeta" YA NO es un Button
+      {existingVehicle ? (
+        <Reveal delay={100} spring>
+          <VehicleStatusCard vehicle={existingVehicle} />
+        </Reveal>
+      ) : (
+        <>
+          {/* PASO 1 · Tarjeta de propiedad (U3 · jerarquía 1-2-3). El "Escanear tarjeta" YA NO es un Button
                   accent que compite con el CTA del footer ni con la foto/SOAT: es la CARD DE PASO NUMERADA
                   "1 · Tarjeta de propiedad" — MISMO patrón visual que la foto (2) y el SOAT (3) —, presionable,
                   que abre el sheet de escaneo. El chip refleja la verdad: "Listo para enviar" cuando la placa
                   crítica ya se leyó (captura usable), si no "Pendiente". El selector se mantiene la captura
                   read-only debajo (verificación). */}
-              <Reveal delay={100} from="scale">
-                <DocumentUploadCard
-                  icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
-                  stepNumber={1}
-                  label={t('registration.vehicle.scanCard.preview')}
-                  status={cardImageReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
-                  uploadedLabel={t('registration.documents.state.ready')}
-                  pendingLabel={t('registration.documents.pending')}
-                  serverState={cardServerState}
-                  accessibilityLabel={
-                    hasCapture
-                      ? t('registration.actions.rescan')
-                      : t('registration.vehicle.scanCard.cta')
-                  }
-                  onPress={() => setScanOpen(true)}
-                />
-              </Reveal>
+          <Reveal delay={100} from="scale">
+            <DocumentUploadCard
+              icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+              stepNumber={1}
+              label={t('registration.vehicle.scanCard.preview')}
+              status={cardImageReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+              uploadedLabel={t('registration.documents.state.ready')}
+              pendingLabel={t('registration.documents.pending')}
+              serverState={cardServerState}
+              accessibilityLabel={
+                hasCapture
+                  ? t('registration.actions.rescan')
+                  : t('registration.vehicle.scanCard.cta')
+              }
+              onPress={() => setScanOpen(true)}
+            />
+          </Reveal>
 
-              {/* TARJETA "Tarjeta capturada ✓" MINIMALISTA: miniatura + tilde + datos leídos (read-only). Se
+          {/* TARJETA "Tarjeta capturada ✓" MINIMALISTA: miniatura + tilde + datos leídos (read-only). Se
                   muestra cuando hay captura Y la placa crítica se leyó: parece OK SOLO cuando lo está. */}
-              {derivedFromScan && pendingPropertyCard ? (
-                <Reveal delay={140} from="scale">
-                  <View
-                    style={[
-                      styles.capturedCard,
-                      {
-                        // Estética Tesla (negro premium): superficie oscura + borde sutil + elevación, NO la
-                        // "caja verde de AI". El éxito es un ACENTO mínimo (check chico), no el fondo.
-                        backgroundColor: theme.colors.surface,
-                        borderColor: theme.colors.border,
-                        borderRadius: theme.radii.lg,
-                        padding: theme.spacing.md,
-                        gap: theme.spacing.md,
-                        ...theme.elevation.level2,
-                      },
-                    ]}
-                  >
-                    <Image
-                      source={{ uri: pendingPropertyCard.front.uri }}
-                      style={[styles.capturedThumb, { borderRadius: theme.radii.md }]}
-                      resizeMode="contain"
-                      accessibilityIgnoresInvertColors
-                    />
-                    <View style={[styles.capturedBody, { gap: theme.spacing.sm }]}>
-                      <View style={[styles.capturedHeader, { gap: theme.spacing.xs }]}>
-                        <IconCheck size={16} color={theme.colors.success} strokeWidth={2.6} />
-                        <Text variant="headline" color="ink">
-                          {t('registration.vehicle.scanCard.capturedTitle')}
-                        </Text>
-                      </View>
-                      <ReadRow label={t('registration.vehicle.scanCard.readPlate')} value={vehicle.plate} />
-                      {/* LOTE 1: el TIPO DERIVADO de la categoría MTC es una fila READ-ONLY (la tarjeta es la
+          {derivedFromScan && pendingPropertyCard ? (
+            <Reveal delay={140} from="scale">
+              <View
+                style={[
+                  styles.capturedCard,
+                  {
+                    // Estética Tesla (negro premium): superficie oscura + borde sutil + elevación, NO la
+                    // "caja verde de AI". El éxito es un ACENTO mínimo (check chico), no el fondo.
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    borderRadius: theme.radii.lg,
+                    padding: theme.spacing.md,
+                    gap: theme.spacing.md,
+                    ...theme.elevation.level2,
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri: pendingPropertyCard.front.uri }}
+                  style={[styles.capturedThumb, { borderRadius: theme.radii.md }]}
+                  resizeMode="contain"
+                  accessibilityIgnoresInvertColors
+                />
+                <View style={[styles.capturedBody, { gap: theme.spacing.sm }]}>
+                  <View style={[styles.capturedHeader, { gap: theme.spacing.xs }]}>
+                    <IconCheck size={16} color={theme.colors.success} strokeWidth={2.6} />
+                    <Text variant="headline" color="ink">
+                      {t('registration.vehicle.scanCard.capturedTitle')}
+                    </Text>
+                  </View>
+                  <ReadRow
+                    label={t('registration.vehicle.scanCard.readPlate')}
+                    value={vehicle.plate}
+                  />
+                  {/* LOTE 1: el TIPO DERIVADO de la categoría MTC es una fila READ-ONLY (la tarjeta es la
                           fuente de verdad), igual que placa/marca/año — SIN selector. Solo cuando la tarjeta
                           NO lo derivó (`vehicle.type === null`) cae al VehicleTypeSelector de fallback (abajo). */}
-                      {vehicle.type !== null ? (
-                        <ReadRow
-                          label={t('registration.vehicle.scanCard.readType')}
-                          value={vehicleTypeLabel(vehicle.type)}
-                        />
-                      ) : null}
-                      {`${vehicle.brand} ${vehicle.model}`.trim().length > 0 ? (
-                        <ReadRow
-                          label={t('registration.vehicle.scanCard.readVehicle')}
-                          value={`${vehicle.brand} ${vehicle.model}`.trim()}
-                        />
-                      ) : null}
-                      {vehicle.year.trim().length > 0 ? (
-                        <ReadRow label={t('registration.vehicle.scanCard.readYear')} value={vehicle.year} />
-                      ) : null}
-                    </View>
-                  </View>
-                </Reveal>
-              ) : null}
+                  {vehicle.type !== null ? (
+                    <ReadRow
+                      label={t('registration.vehicle.scanCard.readType')}
+                      value={vehicleTypeLabel(vehicle.type)}
+                    />
+                  ) : null}
+                  {`${vehicle.brand} ${vehicle.model}`.trim().length > 0 ? (
+                    <ReadRow
+                      label={t('registration.vehicle.scanCard.readVehicle')}
+                      value={`${vehicle.brand} ${vehicle.model}`.trim()}
+                    />
+                  ) : null}
+                  {vehicle.year.trim().length > 0 ? (
+                    <ReadRow
+                      label={t('registration.vehicle.scanCard.readYear')}
+                      value={vehicle.year}
+                    />
+                  ) : null}
+                </View>
+              </View>
+            </Reveal>
+          ) : null}
 
-              {/* Preview de la TARJETA ya subida, desde el SERVER (Opción A · URL prefirmada). Al REANUDAR
+          {/* Preview de la TARJETA ya subida, desde el SERVER (Opción A · URL prefirmada). Al REANUDAR
                   no hay captura local viva (`pendingPropertyCard` es efímero), así que el preview viene del
                   server — mismo patrón que la foto/SOAT. Solo cuando NO se está mostrando la captura local. */}
-              {!derivedFromScan && cardServerImageUri ? (
-                <Reveal delay={150} from="scale">
-                  <DocumentPreviewCard
-                    imageUri={cardServerImageUri}
-                    title={t('registration.vehicle.scanCard.preview')}
-                    caption={cardServerState?.label ?? t('registration.documents.state.ready')}
-                  />
-                </Reveal>
-              ) : null}
+          {!derivedFromScan && cardServerImageUri ? (
+            <Reveal delay={150} from="scale">
+              <DocumentPreviewCard
+                imageUri={cardServerImageUri}
+                title={t('registration.vehicle.scanCard.preview')}
+                caption={cardServerState?.label ?? t('registration.documents.state.ready')}
+              />
+            </Reveal>
+          ) : null}
 
-              {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto pero el OCR NO leyó la placa →
+          {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto pero el OCR NO leyó la placa →
                   reescaneo O un input mínimo SOLO para la placa (NUNCA se inventa). Se gatilla por la
                   captura, no por los campos OCR. U2 · dedup (DUP #4): `!manualMode` para que este input-parche
                   del scan NUNCA coexista con el campo placa del formulario manual (un solo set visible). */}
-              {hasCapture && !hasReadPlate && !manualMode ? (
-                <Reveal delay={120}>
-                  <View style={{ gap: theme.spacing.md }}>
-                    <Banner
-                      tone="warn"
-                      title={t('registration.vehicle.scanCard.criticalMissingTitle')}
-                      description={t('registration.vehicle.scanCard.criticalMissingBody')}
-                    />
-                    <RegistrationField
-                      label={t('registration.vehicle.scanCard.plateOnlyLabel')}
-                      placeholder={t('registration.vehicle.platePlaceholder')}
-                      value={vehicle.plate}
-                      onChangeText={(text) => update({ plate: text.toUpperCase() }, 'plate')}
-                      autoCapitalize="characters"
-                      maxLength={8}
-                      error={fieldError('plate')}
-                    />
-                  </View>
-                </Reveal>
-              ) : null}
+          {hasCapture && !hasReadPlate && !manualMode ? (
+            <Reveal delay={120}>
+              <View style={{ gap: theme.spacing.md }}>
+                <Banner
+                  tone="warn"
+                  title={t('registration.vehicle.scanCard.criticalMissingTitle')}
+                  description={t('registration.vehicle.scanCard.criticalMissingBody')}
+                />
+                <RegistrationField
+                  label={t('registration.vehicle.scanCard.plateOnlyLabel')}
+                  placeholder={t('registration.vehicle.platePlaceholder')}
+                  value={vehicle.plate}
+                  onChangeText={(text) => update({ plate: text.toUpperCase() }, 'plate')}
+                  autoCapitalize="characters"
+                  maxLength={8}
+                  error={fieldError('plate')}
+                />
+              </View>
+            </Reveal>
+          ) : null}
 
-              {/* Fallback HONESTO del AÑO: la tarjeta se capturó CON placa, pero el OCR no leyó un año VÁLIDO
+          {/* Fallback HONESTO del AÑO: la tarjeta se capturó CON placa, pero el OCR no leyó un año VÁLIDO
                   (no se leyó, o cayó fuera del rango del contrato y por eso NO se prellenó). En vez de fingir
                   "capturada ✓" y reventar con `year_invalid` al Registrar, ofrecemos un input de año
                   CORREGIBLE acá mismo (sin obligar a descubrir el toggle manual). Solo en el camino scan: el
                   formulario manual ya trae su propio campo de año. (FIX 4) */}
-              {hasCapture && hasReadPlate && !hasReadYear && !manualMode ? (
-                <Reveal delay={130}>
-                  <View style={{ gap: theme.spacing.md }}>
-                    <Banner
-                      tone="warn"
-                      title={t('registration.vehicle.scanCard.yearMissingTitle')}
-                      description={t('registration.vehicle.scanCard.yearMissingBody')}
-                    />
-                    <RegistrationField
-                      label={t('registration.vehicle.yearLabel')}
-                      placeholder={t('registration.vehicle.yearPlaceholder')}
-                      value={vehicle.year}
-                      onChangeText={(text) => update({ year: text }, 'year')}
-                      keyboardType="number-pad"
-                      maxLength={4}
-                      error={fieldError('year')}
-                    />
-                  </View>
-                </Reveal>
-              ) : null}
+          {hasCapture && hasReadPlate && !hasReadYear && !manualMode ? (
+            <Reveal delay={130}>
+              <View style={{ gap: theme.spacing.md }}>
+                <Banner
+                  tone="warn"
+                  title={t('registration.vehicle.scanCard.yearMissingTitle')}
+                  description={t('registration.vehicle.scanCard.yearMissingBody')}
+                />
+                <RegistrationField
+                  label={t('registration.vehicle.yearLabel')}
+                  placeholder={t('registration.vehicle.yearPlaceholder')}
+                  value={vehicle.year}
+                  onChangeText={(text) => update({ year: text }, 'year')}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  error={fieldError('year')}
+                />
+              </View>
+            </Reveal>
+          ) : null}
 
-              {/* SELECTOR DE TIPO de FALLBACK en el camino SCAN (LOTE 1): SOLO aparece cuando la tarjeta NO
+          {/* SELECTOR DE TIPO de FALLBACK en el camino SCAN (LOTE 1): SOLO aparece cuando la tarjeta NO
                   derivó el tipo (`vehicle.type === null`: categoría no leída o no soportada N1/M2/M3/*SC). Si
                   la derivó, el tipo es una FILA READ-ONLY en la tarjeta capturada (arriba) y este selector NO
                   se muestra (la tarjeta manda). Ofrece AMBOS tipos (CAR|MOTO) y un banner pide elegirlo;
                   Registrar queda BLOQUEADO hasta que el conductor toque una opción (vía `hasType`, reactivo
                   por Zustand). Nunca un "Auto" por omisión. El formulario manual trae su propio selector. */}
-              {derivedFromScan && !manualMode && vehicle.type === null ? (
-                <Reveal delay={150} from="scale">
-                  <View style={{ gap: theme.spacing.md }}>
-                    <Banner
-                      tone="warn"
-                      title={t('registration.vehicle.scanCard.typeNeedsConfirmTitle')}
-                      description={t('registration.vehicle.scanCard.typeNeedsConfirmBody')}
-                    />
-                    <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
-                  </View>
-                </Reveal>
-              ) : null}
+          {derivedFromScan && !manualMode && vehicle.type === null ? (
+            <Reveal delay={150} from="scale">
+              <View style={{ gap: theme.spacing.md }}>
+                <Banner
+                  tone="warn"
+                  title={t('registration.vehicle.scanCard.typeNeedsConfirmTitle')}
+                  description={t('registration.vehicle.scanCard.typeNeedsConfirmBody')}
+                />
+                <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
+              </View>
+            </Reveal>
+          ) : null}
 
-              {/* Toggle del fallback manual SUBORDINADO (U2 · dedup · DUP #4): NO es un Button full-width del
+          {/* Toggle del fallback manual SUBORDINADO (U2 · dedup · DUP #4): NO es un Button full-width del
                   mismo peso que "Escanear" — es un link de texto discreto, para que el escaneo siga siendo el
                   ÚNICO camino primario. Oculto cuando el scan ya rindió una captura válida (placa+año+tipo) o
                   cuando ya estás en modo manual (`showManualToggle`). */}
-              {showManualToggle ? (
-                <Reveal delay={160}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('registration.vehicle.manualToggle')}
-                    onPress={() => setManualMode(true)}
-                    style={styles.manualLink}
-                    hitSlop={8}
-                  >
-                    <Text variant="footnote" color="accent" align="center">
-                      {t('registration.vehicle.manualToggle')}
-                    </Text>
-                  </Pressable>
+          {showManualToggle ? (
+            <Reveal delay={160}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('registration.vehicle.manualToggle')}
+                onPress={() => setManualMode(true)}
+                style={styles.manualLink}
+                hitSlop={8}
+              >
+                <Text variant="footnote" color="accent" align="center">
+                  {t('registration.vehicle.manualToggle')}
+                </Text>
+              </Pressable>
+            </Reveal>
+          ) : null}
+
+          {/* FORMULARIO MANUAL (fallback): tipo + placa + año + marca/modelo a texto libre. Solo aparece
+                  cuando el conductor lo pide (toggle) o cae acá por categoría no soportada / escáner ausente.
+                  Marca/modelo van a TEXTO LIBRE (sin catálogo) — coherente con la rama del contrato. */}
+          {showManualForm ? (
+            <View style={[styles.form, { gap: theme.spacing.lg }]}>
+              {/* Carga a mano (fallback): el selector de tipo ofrece AMBOS tipos (CAR|MOTO). Arranca sin
+                      selección (`null`) — Registrar queda bloqueado hasta elegir (sin "Auto" por omisión). */}
+              <Reveal delay={100}>
+                <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
+              </Reveal>
+              {vehicle.type === null ? (
+                <Reveal delay={110}>
+                  <Text variant="footnote" color="inkMuted">
+                    {t('registration.vehicle.scanCard.typePrompt')}
+                  </Text>
                 </Reveal>
               ) : null}
 
-              {/* FORMULARIO MANUAL (fallback): tipo + placa + año + marca/modelo a texto libre. Solo aparece
-                  cuando el conductor lo pide (toggle) o cae acá por categoría no soportada / escáner ausente.
-                  Marca/modelo van a TEXTO LIBRE (sin catálogo) — coherente con la rama del contrato. */}
-              {showManualForm ? (
-                <View style={[styles.form, { gap: theme.spacing.lg }]}>
-                  {/* Carga a mano (fallback): el selector de tipo ofrece AMBOS tipos (CAR|MOTO). Arranca sin
-                      selección (`null`) — Registrar queda bloqueado hasta elegir (sin "Auto" por omisión). */}
-                  <Reveal delay={100}>
-                    <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
-                  </Reveal>
-                  {vehicle.type === null ? (
-                    <Reveal delay={110}>
-                      <Text variant="footnote" color="inkMuted">
-                        {t('registration.vehicle.scanCard.typePrompt')}
-                      </Text>
-                    </Reveal>
-                  ) : null}
+              <Reveal delay={150} from="scale">
+                <RegistrationField
+                  label={t('registration.vehicle.modelRequestMake')}
+                  placeholder={t('registration.vehicle.modelRequestMake')}
+                  value={vehicle.brand}
+                  onChangeText={(text) => update({ brand: text, modelSpecId: '' }, 'model')}
+                  maxLength={60}
+                  error={fieldError('model')}
+                />
+              </Reveal>
 
-                  <Reveal delay={150} from="scale">
-                    <RegistrationField
-                      label={t('registration.vehicle.modelRequestMake')}
-                      placeholder={t('registration.vehicle.modelRequestMake')}
-                      value={vehicle.brand}
-                      onChangeText={(text) => update({ brand: text, modelSpecId: '' }, 'model')}
-                      maxLength={60}
-                      error={fieldError('model')}
-                    />
-                  </Reveal>
+              <Reveal delay={170} from="scale">
+                <RegistrationField
+                  label={t('registration.vehicle.modelRequestModel')}
+                  placeholder={t('registration.vehicle.modelRequestModel')}
+                  value={vehicle.model}
+                  onChangeText={(text) => update({ model: text, modelSpecId: '' }, 'model')}
+                  maxLength={60}
+                />
+              </Reveal>
 
-                  <Reveal delay={170} from="scale">
-                    <RegistrationField
-                      label={t('registration.vehicle.modelRequestModel')}
-                      placeholder={t('registration.vehicle.modelRequestModel')}
-                      value={vehicle.model}
-                      onChangeText={(text) => update({ model: text, modelSpecId: '' }, 'model')}
-                      maxLength={60}
-                    />
-                  </Reveal>
+              <Reveal delay={190} from="scale">
+                <RegistrationField
+                  label={t('registration.vehicle.plateLabel')}
+                  placeholder={t('registration.vehicle.platePlaceholder')}
+                  value={vehicle.plate}
+                  onChangeText={(text) => update({ plate: text.toUpperCase() }, 'plate')}
+                  autoCapitalize="characters"
+                  maxLength={8}
+                  error={fieldError('plate')}
+                />
+              </Reveal>
 
-                  <Reveal delay={190} from="scale">
-                    <RegistrationField
-                      label={t('registration.vehicle.plateLabel')}
-                      placeholder={t('registration.vehicle.platePlaceholder')}
-                      value={vehicle.plate}
-                      onChangeText={(text) => update({ plate: text.toUpperCase() }, 'plate')}
-                      autoCapitalize="characters"
-                      maxLength={8}
-                      error={fieldError('plate')}
-                    />
-                  </Reveal>
-
-                  <Reveal delay={220} from="scale">
-                    <RegistrationField
-                      label={t('registration.vehicle.yearLabel')}
-                      placeholder={t('registration.vehicle.yearPlaceholder')}
-                      value={vehicle.year}
-                      onChangeText={(text) => update({ year: text }, 'year')}
-                      keyboardType="number-pad"
-                      maxLength={4}
-                      error={fieldError('year')}
-                    />
-                  </Reveal>
-                </View>
-              ) : null}
-            </>
-          )}
-
-          {/* Foto del vehículo (Ola 1): se captura ACÁ, es REQUERIDA para aprobar. Cámara normal (sin OCR).
-              NO SE TOCA: reusa el sheet de captura + el pipeline de subida de documentos (foto sin número). */}
-          <Reveal delay={250}>
-            <DocumentUploadCard
-              icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
-              stepNumber={2}
-              label={t('registration.vehicle.photoLabel')}
-              status={photoUploaded ? 'uploaded' : 'pending'}
-              uploadedLabel={t('registration.documents.state.ready')}
-              pendingLabel={t('registration.documents.pending')}
-              serverState={photoServerState}
-              busy={uploadDocument.isPending}
-              accessibilityLabel={t('registration.documents.uploadAccessibility', {
-                document: t('registration.vehicle.photoLabel'),
-              })}
-              onPress={() => {
-                setPhotoError(null);
-                setPhotoUploadState('idle');
-                setPhotoSheetOpen(true);
-              }}
-            />
-          </Reveal>
-
-          {/* Preview de la FOTO ya subida, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
-          {photoServerImageUri ? (
-            <Reveal delay={255} from="scale">
-              <DocumentPreviewCard
-                imageUri={photoServerImageUri}
-                title={t('registration.vehicle.photoLabel')}
-                caption={photoServerState?.label ?? t('registration.documents.state.ready')}
-              />
-            </Reveal>
+              <Reveal delay={220} from="scale">
+                <RegistrationField
+                  label={t('registration.vehicle.yearLabel')}
+                  placeholder={t('registration.vehicle.yearPlaceholder')}
+                  value={vehicle.year}
+                  onChangeText={(text) => update({ year: text }, 'year')}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  error={fieldError('year')}
+                />
+              </Reveal>
+            </View>
           ) : null}
+        </>
+      )}
 
-          {/* SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos). Reusa el componente
+      {/* Foto del vehículo (Ola 1): se captura ACÁ, es REQUERIDA para aprobar. Cámara normal (sin OCR).
+              NO SE TOCA: reusa el sheet de captura + el pipeline de subida de documentos (foto sin número). */}
+      <Reveal delay={250}>
+        <DocumentUploadCard
+          icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+          stepNumber={2}
+          label={t('registration.vehicle.photoLabel')}
+          status={photoUploaded ? 'uploaded' : 'pending'}
+          uploadedLabel={t('registration.documents.state.ready')}
+          pendingLabel={t('registration.documents.pending')}
+          serverState={photoServerState}
+          busy={uploadDocument.isPending}
+          accessibilityLabel={t('registration.documents.uploadAccessibility', {
+            document: t('registration.vehicle.photoLabel'),
+          })}
+          onPress={() => {
+            setPhotoError(null);
+            setPhotoUploadState('idle');
+            setPhotoSheetOpen(true);
+          }}
+        />
+      </Reveal>
+
+      {/* Preview de la FOTO ya subida, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
+      {photoServerImageUri ? (
+        <Reveal delay={255} from="scale">
+          <DocumentPreviewCard
+            imageUri={photoServerImageUri}
+            title={t('registration.vehicle.photoLabel')}
+            caption={photoServerState?.label ?? t('registration.documents.state.ready')}
+          />
+        </Reveal>
+      ) : null}
+
+      {/* SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos). Reusa el componente
               CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. Documento numerado que vence;
               DRIVER-scoped, se sube/registra al capturarlo. REQUERIDO para avanzar. */}
-          <Reveal delay={270}>
-            <DocumentUploadCard
-              icon={<IconShield size={26} color={theme.colors.accent} strokeWidth={1.8} />}
-              stepNumber={3}
-              label={t('registration.documents.soat')}
-              status={soatUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
-              uploadedLabel={t('registration.documents.state.ready')}
-              pendingLabel={t('registration.documents.pending')}
-              serverState={soatServerState}
-              busy={uploadDocument.isPending}
-              accessibilityLabel={t('registration.documents.uploadAccessibility', {
-                document: t('registration.documents.soat'),
-              })}
-              onPress={() => {
-                setSoatError(null);
-                setSoatUploadState('idle');
-                setSoatSheetOpen(true);
-              }}
-            />
-          </Reveal>
+      <Reveal delay={270}>
+        <DocumentUploadCard
+          icon={<IconShield size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+          stepNumber={3}
+          label={t('registration.documents.soat')}
+          status={soatUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+          uploadedLabel={t('registration.documents.state.ready')}
+          pendingLabel={t('registration.documents.pending')}
+          serverState={soatServerState}
+          busy={uploadDocument.isPending}
+          accessibilityLabel={t('registration.documents.uploadAccessibility', {
+            document: t('registration.documents.soat'),
+          })}
+          onPress={() => {
+            setSoatError(null);
+            setSoatUploadState('idle');
+            setSoatSheetOpen(true);
+          }}
+        />
+      </Reveal>
 
-          {/* Preview del SOAT ya subido, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
-          {soatServerImageUri ? (
-            <Reveal delay={295} from="scale">
-              <DocumentPreviewCard
-                imageUri={soatServerImageUri}
-                title={t('registration.documents.soat')}
-                caption={soatServerState?.label ?? t('registration.documents.state.ready')}
-              />
-            </Reveal>
-          ) : null}
-        </View>
+      {/* Preview del SOAT ya subido, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
+      {soatServerImageUri ? (
+        <Reveal delay={295} from="scale">
+          <DocumentPreviewCard
+            imageUri={soatServerImageUri}
+            title={t('registration.documents.soat')}
+            caption={soatServerState?.label ?? t('registration.documents.state.ready')}
+          />
+        </Reveal>
+      ) : null}
+    </View>
   );
 
   const photoSheet = photoSheetOpen ? (
@@ -926,7 +939,11 @@ export const VehicleScreen = ({ navigation }: Props = {}): React.JSX.Element => 
   ) : null;
 
   const scanCardSheet = (
-    <ScanPropertyCardSheet visible={scanOpen} onClose={() => setScanOpen(false)} onCaptured={onCaptured} />
+    <ScanPropertyCardSheet
+      visible={scanOpen}
+      onClose={() => setScanOpen(false)}
+      onCaptured={onCaptured}
+    />
   );
 
   // Modo EMBEBIDO (wizard): solo el cuerpo en un scroll propio + los sheets. El host pone el chrome

@@ -75,7 +75,9 @@ export type PublishedTripPublicSource = Pick<
  * explícita: solo los campos nombrados salen. `dedupKey`/`driverId`/`vehicleId`/`originH3`/`destH3` NUNCA se
  * copian — no aparecen en el objeto de retorno por construcción.
  */
-export function toPublishedTripPublicView(trip: PublishedTripPublicSource): PublishedTripPublicView {
+export function toPublishedTripPublicView(
+  trip: PublishedTripPublicSource,
+): PublishedTripPublicView {
   return {
     id: trip.id,
     origenLat: trip.origenLat,

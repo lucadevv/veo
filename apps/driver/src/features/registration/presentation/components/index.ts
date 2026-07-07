@@ -16,10 +16,7 @@ export { DocumentPreviewCard, type DocumentPreviewCardProps } from './DocumentPr
 export { firstMissingRequirement, type StepRequirement } from './missingRequirement';
 export { ScanDniSheet, type ScanDniSheetProps } from './ScanDniSheet';
 export { ScanLicenseSheet, type ScanLicenseSheetProps } from './ScanLicenseSheet';
-export {
-  ScanPropertyCardSheet,
-  type ScanPropertyCardSheetProps,
-} from './ScanPropertyCardSheet';
+export { ScanPropertyCardSheet, type ScanPropertyCardSheetProps } from './ScanPropertyCardSheet';
 export {
   default as BiometricCameraPreview,
   BIOMETRIC_CAMERA_PREVIEW_NAME,

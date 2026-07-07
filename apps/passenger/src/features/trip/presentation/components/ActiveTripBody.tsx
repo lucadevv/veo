@@ -366,9 +366,7 @@ function ActionTile({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={
-        badgeCount > 0 ? `${label} (${badgeCount})` : label
-      }
+      accessibilityLabel={badgeCount > 0 ? `${label} (${badgeCount})` : label}
       disabled={loading}
       onPress={onPress}
       style={({pressed}) => [
@@ -586,7 +584,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  actionIconWrap: {width: 24, height: 24, alignItems: 'center', justifyContent: 'center'},
+  actionIconWrap: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   actionBadge: {
     position: 'absolute',
     top: -6,

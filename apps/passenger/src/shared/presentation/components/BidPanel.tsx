@@ -128,10 +128,7 @@ export function BidPanel({
           },
         ]}>
         <IconBolt color={theme.colors.accent} size={16} />
-        <Text
-          variant="footnote"
-          color="inkMuted"
-          style={styles.noteText}>
+        <Text variant="footnote" color="inkMuted" style={styles.noteText}>
           {t('puja.betterOfferNote')}
         </Text>
       </View>

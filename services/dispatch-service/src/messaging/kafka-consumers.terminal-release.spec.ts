@@ -74,14 +74,26 @@ const expiredEnv = () =>
   createEnvelope({
     eventType: 'trip.expired',
     producer: 'trip-service',
-    payload: { tripId: VALID_TRIP_ID, passengerId: 'pax-1', fromStatus: 'ASSIGNED', staleMinutes: 15, at: new Date().toISOString() },
+    payload: {
+      tripId: VALID_TRIP_ID,
+      passengerId: 'pax-1',
+      fromStatus: 'ASSIGNED',
+      staleMinutes: 15,
+      at: new Date().toISOString(),
+    },
   });
 
 const failedEnv = () =>
   createEnvelope({
     eventType: 'trip.failed',
     producer: 'trip-service',
-    payload: { tripId: VALID_TRIP_ID, passengerId: 'pax-1', fromStatus: 'IN_PROGRESS', staleMinutes: 360, at: new Date().toISOString() },
+    payload: {
+      tripId: VALID_TRIP_ID,
+      passengerId: 'pax-1',
+      fromStatus: 'IN_PROGRESS',
+      staleMinutes: 360,
+      at: new Date().toISOString(),
+    },
   });
 
 describe('KafkaConsumersService · B2 release del conductor en los terminales (ADR-021)', () => {

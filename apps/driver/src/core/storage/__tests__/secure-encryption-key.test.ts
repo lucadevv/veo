@@ -95,7 +95,11 @@ describe('almacén seguro (driver) — apertura directa con la clave del Keystor
 
     expect(ok).toBe(true);
     expect(setMock).toHaveBeenCalledTimes(1);
-    const [, savedKey, options] = setMock.mock.calls[0] as [string, string, { service: string; accessible: string }];
+    const [, savedKey, options] = setMock.mock.calls[0] as [
+      string,
+      string,
+      { service: string; accessible: string },
+    ];
     // 32 chars base64 (entropía completa del slot AES-256, NO 64 hex débiles).
     expect(savedKey).toMatch(/^[A-Za-z0-9+/]{32}$/);
     expect(options.service).toBe('pe.veo.driver.mmkv.encryption-key');
@@ -125,7 +129,12 @@ describe('almacén seguro (driver) — apertura directa con la clave del Keystor
 
   it('NUNCA abre con la clave de arranque ni llama recrypt (cura de raíz del borrado de sesión)', async () => {
     const { getMock } = keychain();
-    getMock.mockResolvedValueOnce({ username: 'x', password: EXISTING_KEY, service: 's', storage: 'x' });
+    getMock.mockResolvedValueOnce({
+      username: 'x',
+      password: EXISTING_KEY,
+      service: 's',
+      storage: 'x',
+    });
 
     const { initSecureStorage } = loadStorage();
     await initSecureStorage();
@@ -138,7 +147,12 @@ describe('almacén seguro (driver) — apertura directa con la clave del Keystor
 
   it('tras init con Keystore, secureStore LEE/ESCRIBE datos (roundtrip sobre la instancia abierta)', async () => {
     const { getMock } = keychain();
-    getMock.mockResolvedValueOnce({ username: 'x', password: EXISTING_KEY, service: 's', storage: 'x' });
+    getMock.mockResolvedValueOnce({
+      username: 'x',
+      password: EXISTING_KEY,
+      service: 's',
+      storage: 'x',
+    });
 
     const { initSecureStorage, secureStore } = loadStorage();
     await initSecureStorage();
@@ -152,8 +166,12 @@ describe('almacén seguro (driver) — apertura directa con la clave del Keystor
   it('ANTES de initSecureStorage, secureStore LANZA un error claro (no lee con clave equivocada)', () => {
     const { secureStore } = loadStorage();
 
-    expect(() => secureStore.getString(SecureKey.AccessToken)).toThrow(/antes de initSecureStorage/);
-    expect(() => secureStore.setString(SecureKey.AccessToken, 'x')).toThrow(/antes de initSecureStorage/);
+    expect(() => secureStore.getString(SecureKey.AccessToken)).toThrow(
+      /antes de initSecureStorage/,
+    );
+    expect(() => secureStore.setString(SecureKey.AccessToken, 'x')).toThrow(
+      /antes de initSecureStorage/,
+    );
     // El store seguro nunca se abrió porque nadie llamó init.
     expect(secureInstance()).toBeUndefined();
   });
@@ -192,7 +210,12 @@ describe('almacén seguro (driver) — apertura directa con la clave del Keystor
 
   it('initSecureStorage es idempotente (single-flight): abre el store una sola vez', async () => {
     const { getMock } = keychain();
-    getMock.mockResolvedValue({ username: 'x', password: EXISTING_KEY, service: 's', storage: 'x' });
+    getMock.mockResolvedValue({
+      username: 'x',
+      password: EXISTING_KEY,
+      service: 's',
+      storage: 'x',
+    });
 
     const { initSecureStorage } = loadStorage();
     const [a, b] = await Promise.all([initSecureStorage(), initSecureStorage()]);
@@ -220,7 +243,11 @@ describe('getOrCreateEncryptionKey — entropía y persistencia', () => {
     const key = await getOrCreateEncryptionKey();
 
     expect(key).toMatch(/^[A-Za-z0-9+/]{32}$/);
-    const [, savedKey, options] = setMock.mock.calls[0] as [string, string, { accessible: string; storage: string }];
+    const [, savedKey, options] = setMock.mock.calls[0] as [
+      string,
+      string,
+      { accessible: string; storage: string },
+    ];
     expect(savedKey).toBe(key);
     expect(options.accessible).toBe('AccessibleAfterFirstUnlock');
     expect(options.storage).toBe('KeystoreAESGCM_NoAuth');

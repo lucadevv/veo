@@ -118,7 +118,11 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('B5-3 · DriverPool.eligible filtra por el `requires` de la oferta sobre el hot-index vivo', async () => {
-    const pool = new DriverPool(hotIndex, exclusion, new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'));
+    const pool = new DriverPool(
+      hotIndex,
+      exclusion,
+      new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'),
+    );
     const cellC = toH3(C, DISPATCH_H3_RESOLUTION);
     // Celda C aislada: solo estos 3 (con attrs completos, así el filtro NO degrada a "elegible").
     await hotIndex.upsertLocation('c-mid', C, VehicleClass.CAR, {
@@ -167,7 +171,11 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('B5-3.2 · DriverPool gatea las verticales FAIL-CLOSED sobre el hot-index vivo', async () => {
-    const pool = new DriverPool(hotIndex, exclusion, new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'));
+    const pool = new DriverPool(
+      hotIndex,
+      exclusion,
+      new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'),
+    );
     const cellD = toH3(D, DISPATCH_H3_RESOLUTION);
     // Celda D aislada: uno con la cert de ambulancia, uno con otra cert, uno sin certs.
     await hotIndex.upsertLocation('d-amb', D, VehicleClass.CAR, {
@@ -320,7 +328,11 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   // otros casos ya sembraron en db 0 (que NO se puede flushear a mitad del archivo).
 
   it('countOnline cuenta la presencia viva (disponible U ocupado) y honra remove()', async () => {
-    const iso = new Redis({ host: container.getHost(), port: container.getMappedPort(6379), db: 3 });
+    const iso = new Redis({
+      host: container.getHost(),
+      port: container.getMappedPort(6379),
+      db: 3,
+    });
     try {
       const hi = new RedisHotIndex(iso, 60);
       expect(await hi.countOnline()).toBe(0);
@@ -340,7 +352,11 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('countOnline EXCLUYE y PODA las presencias fuera de la ventana TTL', async () => {
-    const iso = new Redis({ host: container.getHost(), port: container.getMappedPort(6379), db: 4 });
+    const iso = new Redis({
+      host: container.getHost(),
+      port: container.getMappedPort(6379),
+      db: 4,
+    });
     try {
       const hi = new RedisHotIndex(iso, 1); // TTL de 1s = ventana de presencia de 1s
       await hi.upsertLocation('ttl1', A, VehicleClass.CAR);

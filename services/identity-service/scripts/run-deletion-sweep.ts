@@ -47,7 +47,12 @@ async function main(): Promise<void> {
     if (driverId) {
       await tx.driver.update({
         where: { id: driverId },
-        data: { faceEmbedding: [], dniFaceMatched: null, dniFaceMatchScore: null, dniFaceMatchedAt: null },
+        data: {
+          faceEmbedding: [],
+          dniFaceMatched: null,
+          dniFaceMatchScore: null,
+          dniFaceMatchedAt: null,
+        },
       });
     }
     await tx.biometricCheck.updateMany({
@@ -63,7 +68,9 @@ async function main(): Promise<void> {
   });
 
   // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ tombstoned: userId, driverId: driverId ?? null, emitted: 'user.deleted' }));
+  console.log(
+    JSON.stringify({ tombstoned: userId, driverId: driverId ?? null, emitted: 'user.deleted' }),
+  );
 }
 
 main()

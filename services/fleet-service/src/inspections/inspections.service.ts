@@ -12,7 +12,11 @@ import {
   assertInspectedAtNotFuture,
   isInspectionCurrent,
 } from './inspection-rules';
-import { buildFleetEvent, FleetEventType, type DriverReactivatedPayload } from '../events/fleet-events';
+import {
+  buildFleetEvent,
+  FleetEventType,
+  type DriverReactivatedPayload,
+} from '../events/fleet-events';
 import type { CreateInspectionDto } from './dto/inspection.dto';
 import { Prisma, type Inspection } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
@@ -79,7 +83,10 @@ export class InspectionsService {
 
         // Solo una inspección VIGENTE regulariza. Como el anti-futuro garantiza `inspectedAt <= now`, una
         // inspección vigente nueva gana el `orderBy inspectedAt desc` → es la última que verá el gate.
-        if (isInspectionCurrent({ passed: inspection.passed, nextDueAt }, now) && vehicle.driverId) {
+        if (
+          isInspectionCurrent({ passed: inspection.passed, nextDueAt }, now) &&
+          vehicle.driverId
+        ) {
           const payload: DriverReactivatedPayload = {
             // KEYEADO POR userId (User.id = Vehicle.driverId), NO driverId de perfil: identity resuelve el mapeo.
             userId: vehicle.driverId,

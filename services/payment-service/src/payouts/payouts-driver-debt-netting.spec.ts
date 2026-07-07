@@ -32,20 +32,30 @@ function mockTx(debts: DebtRow[], credits: CreditRow[] = []) {
     },
     driverCredit: {
       findMany: vi.fn(async () => credits),
-      update: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-        creditUpdates.push({ id: where.id, data });
-        return { ...where, ...data };
-      }),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          creditUpdates.push({ id: where.id, data });
+          return { ...where, ...data };
+        },
+      ),
     },
   };
   return { tx, updates, creditUpdates };
 }
 
 // Acceso al método privado (misma técnica que otros specs del servicio): probamos la lógica REAL de netteo.
-const netting = (svc: PayoutsService, tx: unknown, driverId: string, available: number, payoutId: string) =>
-  (svc as unknown as {
-    applyDebtNetting: (tx: unknown, d: string, a: number, p: string) => Promise<number>;
-  }).applyDebtNetting(tx, driverId, available, payoutId);
+const netting = (
+  svc: PayoutsService,
+  tx: unknown,
+  driverId: string,
+  available: number,
+  payoutId: string,
+) =>
+  (
+    svc as unknown as {
+      applyDebtNetting: (tx: unknown, d: string, a: number, p: string) => Promise<number>;
+    }
+  ).applyDebtNetting(tx, driverId, available, payoutId);
 
 describe('A2 · applyDebtNetting (netteo deuda CASH ⇄ ganancia digital)', () => {
   it('la ganancia CUBRE toda la deuda → settle TODO, el resto va al payout', async () => {
@@ -57,7 +67,9 @@ describe('A2 · applyDebtNetting (netteo deuda CASH ⇄ ganancia digital)', () =
     const applied = await netting(svc, tx, 'drv-1', 1000, 'pay-1');
     expect(applied).toBe(500); // 300 + 200 → payout = 1000 − 500 = 500
     expect(updates).toHaveLength(2);
-    expect(updates.every((u) => u.data.status === 'SETTLED' && u.data.settledInPayoutId === 'pay-1')).toBe(true);
+    expect(
+      updates.every((u) => u.data.status === 'SETTLED' && u.data.settledInPayoutId === 'pay-1'),
+    ).toBe(true);
   });
 
   it('la ganancia < deuda → cubre la(s) entera(s) + REDUCE la del borde (carry-forward), payout 0', async () => {
@@ -106,7 +118,10 @@ describe('A2 · applyDebtNetting (netteo deuda CASH ⇄ ganancia digital)', () =
 
   it('crédito + deuda: el crédito da MARGEN para netear la deuda entera este período', async () => {
     const svc = buildService();
-    const { tx, updates } = mockTx([{ id: 'd1', amountCents: 1300 }], [{ id: 'c1', amountCents: 400 }]);
+    const { tx, updates } = mockTx(
+      [{ id: 'd1', amountCents: 1300 }],
+      [{ id: 'c1', amountCents: 400 }],
+    );
     const applied = await netting(svc, tx, 'drv-1', 1000, 'pay-1');
     // crédito −400 + deuda 1300 = 900 → netAmount = 1000 − 900 = 100 (= ganancia 1000 − deuda 1300 + crédito 400).
     expect(applied).toBe(900);

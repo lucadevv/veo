@@ -284,7 +284,8 @@ export class PrismaOutboxStore implements OutboxStore {
     // mantiene el orden GLOBAL de creación entre aggregates distintos, no solo el per-aggregate.
     const queue = [...groups.values()];
     let next = 0;
-    const takeGroup = (): ClaimedRow[] | undefined => (next < queue.length ? queue[next++] : undefined);
+    const takeGroup = (): ClaimedRow[] | undefined =>
+      next < queue.length ? queue[next++] : undefined;
 
     const publishGroup = async (group: ClaimedRow[]): Promise<void> => {
       for (const [i, r] of group.entries()) {

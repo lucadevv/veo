@@ -100,7 +100,10 @@ export const UnderReviewScreen = (): React.JSX.Element => {
         }
       >
         <View
-          style={[styles.body, { gap: theme.spacing['2xl'], paddingHorizontal: theme.spacing['2xl'] }]}
+          style={[
+            styles.body,
+            { gap: theme.spacing['2xl'], paddingHorizontal: theme.spacing['2xl'] },
+          ]}
         >
           {/* Wordmark CENTRADO arriba — "VEO" PELADO (frame `Brand`: display 18/700, letterSpacing 1.5).
               NO el lockup completo `VeoWordmark` (VEO/CONDUCTORES/PERÚ), que carga de más esta pantalla. */}
@@ -195,7 +198,12 @@ const styles = StyleSheet.create({
   // "VEO" pelado: display a 18 con tracking (title2 es 24 → override a 18/1.5).
   wordmark: { fontSize: 18, letterSpacing: 1.5 },
   // Sección del badge: centrada; el glow (320) desborda por absoluto detrás del círculo (88).
-  badgeSection: { alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', height: BADGE },
+  badgeSection: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: BADGE,
+  },
   glow: {
     position: 'absolute',
     width: GLOW,

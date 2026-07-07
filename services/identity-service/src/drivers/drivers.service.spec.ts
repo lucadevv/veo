@@ -28,7 +28,10 @@ const config = new ConfigService<Env, true>({
  * y las 4 vías event-driven llaman `resealRevokedBefore` (backstop durable, incondicional). Default no-op; los
  * tests que ASERTAN el revoke/reseal usan su propio spy (vi.fn).
  */
-const sessions = { revokeAllForUser: async () => 0, resealRevokedBefore: async () => true } as never;
+const sessions = {
+  revokeAllForUser: async () => 0,
+  resealRevokedBefore: async () => true,
+} as never;
 const futureLicense = new Date(Date.now() + 1_000_000_000);
 const okDriver = {
   id: 'd1',
@@ -155,7 +158,11 @@ function makeRedis(opts: { fails?: number; sessions?: Record<string, string> } =
     },
     // Espeja FIXED_WINDOW_INCR_EXPIRE (ver packages/utils/src/rate-limit.ts): INCR + PEXPIRE-en-el-primer-hit
     // (o saneo si ttl===-1), retorno `[count, ttl]`. numKeys=1, args=[key, windowMs].
-    async eval(_script: string, _numKeys: number, ...args: Array<string | number>): Promise<[number, number]> {
+    async eval(
+      _script: string,
+      _numKeys: number,
+      ...args: Array<string | number>
+    ): Promise<[number, number]> {
       const key = String(args[0]);
       const windowMs = Number(args[1]);
       let count: number;
@@ -266,7 +273,13 @@ function session(ref: string, partial: Record<string, unknown> = {}) {
 describe('DriversService.verifyBiometric · minteo de sessionRef (BR-I02)', () => {
   it('mintea un sessionRef de un solo uso al verificar', async () => {
     const redis = makeRedis();
-    const svc = new DriversService(makePrisma(okDriver) as never, redis as never, bio, sessions, config);
+    const svc = new DriversService(
+      makePrisma(okDriver) as never,
+      redis as never,
+      bio,
+      sessions,
+      config,
+    );
     const out = await svc.verifyBiometric('u1', { challengeId: 'c1', frames: ['f1'] });
     expect(out.sessionRef).toBeTruthy();
     expect(out.score).toBe(96);
@@ -394,16 +407,25 @@ describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD
     const prisma = makeEnrollPrisma(okDriver);
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     // okDriver.id = 'd1'; una key de OTRO conductor NO debe persistirse (aunque el caller sea interno/firmado).
-    await svc.enrollFace('u1', { photo: 'selfie-base64', selfieKey: 'drivers/OTRO-DRIVER/kyc-selfie.jpg' });
+    await svc.enrollFace('u1', {
+      photo: 'selfie-base64',
+      selfieKey: 'drivers/OTRO-DRIVER/kyc-selfie.jpg',
+    });
     expect(prisma.updates[0]?.faceSelfieKey).toBeNull();
   });
 
   it('sin rostro (enrollPassive sin embedding) → 422 (UnprocessableEntityError) y NO escribe ni audita', async () => {
     const prisma = makeEnrollPrisma(okDriver);
-    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoFace, sessions, config);
-    await expect(
-      svc.enrollFace('u1', { photo: 'selfie-base64' }),
-    ).rejects.toBeInstanceOf(UnprocessableEntityError);
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis() as never,
+      bioNoFace,
+      sessions,
+      config,
+    );
+    await expect(svc.enrollFace('u1', { photo: 'selfie-base64' })).rejects.toBeInstanceOf(
+      UnprocessableEntityError,
+    );
     expect(prisma.updates).toHaveLength(0);
     // no_face es ruido operativo (no se detectó persona) → NO se audita (ningún evento de outbox).
     expect(prisma.outbox).toHaveLength(0);
@@ -411,10 +433,16 @@ describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD
 
   it('SPOOF (PAD: livenessChecked && !live) → 422, NO enrola, pero SÍ deja traza forense', async () => {
     const prisma = makeEnrollPrisma(okDriver);
-    const svc = new DriversService(prisma as never, makeRedis() as never, bioSpoof, sessions, config);
-    await expect(
-      svc.enrollFace('u1', { photo: 'selfie-base64' }),
-    ).rejects.toBeInstanceOf(UnprocessableEntityError);
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis() as never,
+      bioSpoof,
+      sessions,
+      config,
+    );
+    await expect(svc.enrollFace('u1', { photo: 'selfie-base64' })).rejects.toBeInstanceOf(
+      UnprocessableEntityError,
+    );
     // Un ataque de presentación (foto impresa / pantalla) NO se enrola…
     expect(prisma.updates).toHaveLength(0);
     // …PERO deja TRAZA INMUTABLE del intento de suplantación (Ley 29733 · F1), aunque el request termine en 422.
@@ -429,9 +457,9 @@ describe('DriversService.enrollFace · enrolamiento KYC con liveness PASIVO (PAD
       sessions,
       config,
     );
-    await expect(
-      svc.enrollFace('u1', { photo: 'selfie-base64' }),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc.enrollFace('u1', { photo: 'selfie-base64' })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it('FIX 1 · INVALIDA EL BINDING: re-enrolar MUTA faceEmbedding y RESETEA los 3 campos del binding en la MISMA escritura', async () => {
@@ -729,7 +757,10 @@ describe('DriversService.resubmit · reenvío a revisión (BR-I01 · M3)', () =>
 
     expect(res.backgroundCheckStatus).toBe('PENDING');
     // Limpia el motivo del rechazo previo.
-    expect(driverUpdates[0]).toMatchObject({ backgroundCheckStatus: 'PENDING', rejectionReason: null });
+    expect(driverUpdates[0]).toMatchObject({
+      backgroundCheckStatus: 'PENDING',
+      rejectionReason: null,
+    });
     // EMITE el evento que cierra el double-source (admin-bff proyecta status=PENDING).
     expect(outbox).toHaveLength(1);
     expect(outbox[0]?.eventType).toBe('driver.resubmitted');
@@ -870,13 +901,15 @@ function holdMatches(h: Hold, where: Record<string, unknown>): boolean {
  * @param driverId      id de perfil del conductor del fake (default 'd1').
  * @param userId        userId del conductor (para resolver userId→driverId en las vías por-user).
  */
-function makeHoldPrisma(opts: {
-  driverExists?: boolean;
-  initialHolds?: Hold[];
-  driverId?: string;
-  userId?: string;
-  driver?: Record<string, unknown>;
-} = {}) {
+function makeHoldPrisma(
+  opts: {
+    driverExists?: boolean;
+    initialHolds?: Hold[];
+    driverId?: string;
+    userId?: string;
+    driver?: Record<string, unknown>;
+  } = {},
+) {
   const driverId = opts.driverId ?? 'd1';
   const userId = opts.userId ?? 'u1';
   const holds: Hold[] = [...(opts.initialHolds ?? [])];
@@ -891,7 +924,13 @@ function makeHoldPrisma(opts: {
   // El driver derivado: suspendedAt SIEMPRE refleja los holds actuales (se relee fresco en cada findUnique).
   const driverRow = () =>
     driverExists
-      ? { id: driverId, userId, licenseExpiresAt: futureLicense, ...opts.driver, suspendedAt: deriveSuspendedAt() }
+      ? {
+          id: driverId,
+          userId,
+          licenseExpiresAt: futureLicense,
+          ...opts.driver,
+          suspendedAt: deriveSuspendedAt(),
+        }
       : null;
 
   const holdClient = {
@@ -901,9 +940,11 @@ function makeHoldPrisma(opts: {
       where: { driverId_cause_causeRef: { driverId: string; cause: string; causeRef: string } };
     }) => {
       const k = where.driverId_cause_causeRef;
-      return holds.find(
-        (h) => h.driverId === k.driverId && h.cause === k.cause && h.causeRef === k.causeRef,
-      ) ?? null;
+      return (
+        holds.find(
+          (h) => h.driverId === k.driverId && h.cause === k.cause && h.causeRef === k.causeRef,
+        ) ?? null
+      );
     },
     findFirst: async ({ where }: { where: { driverId: string } }) => {
       const mine = holds
@@ -1023,7 +1064,11 @@ describe('DriversService.suspendByFleet · suspensión por DOCUMENTO (hold DOCUM
       initialHolds: [hold('DOCUMENT_EXPIRED', 'SOAT', '2026-06-01T00:00:00.000Z')],
     });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
-    const applied = await svc.suspendByFleet('d1', new Date('2026-06-05T00:00:00.000Z'), 'LICENSE_A1');
+    const applied = await svc.suspendByFleet(
+      'd1',
+      new Date('2026-06-05T00:00:00.000Z'),
+      'LICENSE_A1',
+    );
     expect(applied).toBe(true);
     expect(holds).toHaveLength(2);
   });
@@ -1054,7 +1099,9 @@ describe('DriversService.suspendByFleetForUser · suspensión por ITV (keyeada p
       initialHolds: [hold('INSPECTION_EXPIRED', '', '2026-06-23T03:00:00.000Z')],
     });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
-    expect(await svc.suspendByFleetForUser('user-1', new Date('2026-06-23T04:00:00.000Z'))).toBe(false);
+    expect(await svc.suspendByFleetForUser('user-1', new Date('2026-06-23T04:00:00.000Z'))).toBe(
+      false,
+    );
     expect(holds).toHaveLength(1);
   });
 
@@ -1071,13 +1118,20 @@ describe('DriversService.suspend · suspensión MANUAL por operador (hold DISCIP
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.suspend('d1', 'Conducta peligrosa reportada');
     expect(holds).toHaveLength(1);
-    expect(holds[0]).toMatchObject({ cause: 'DISCIPLINARY', causeRef: '', reason: 'Conducta peligrosa reportada' });
+    expect(holds[0]).toMatchObject({
+      cause: 'DISCIPLINARY',
+      causeRef: '',
+      reason: 'Conducta peligrosa reportada',
+    });
     expect(outbox).toHaveLength(1);
     expect(outbox[0]?.eventType).toBe('driver.suspended');
     const envelope = outbox[0]?.envelope as {
       payload: { driverId: string; reason: string; suspendedAt: string };
     };
-    expect(envelope.payload).toMatchObject({ driverId: 'd1', reason: 'Conducta peligrosa reportada' });
+    expect(envelope.payload).toMatchObject({
+      driverId: 'd1',
+      reason: 'Conducta peligrosa reportada',
+    });
     expect(typeof envelope.payload.suspendedAt).toBe('string');
   });
 
@@ -1118,7 +1172,13 @@ describe('DriversService.suspend · suspensión MANUAL por operador (hold DISCIP
       userId: 'u-driver-1',
     });
     const revokeAllForUser = vi.fn(async () => 0);
-    const svc = new DriversService(prisma as never, makeRedis() as never, bio, { revokeAllForUser } as never, config);
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis() as never,
+      bio,
+      { revokeAllForUser } as never,
+      config,
+    );
     await svc.suspend('d1', 'otra vez');
     expect(revokeAllForUser).not.toHaveBeenCalled(); // created=false → sin transición → sin revoke
   });
@@ -1134,7 +1194,9 @@ describe('DriversService.reactivate · reactivación MANUAL (quita SOLO el hold 
     expect(holds).toHaveLength(0); // se quitó el hold disciplinario → 0 holds → libre.
     expect(outbox).toHaveLength(1);
     expect(outbox[0]?.eventType).toBe('driver.reactivated');
-    const envelope = outbox[0]?.envelope as { payload: { driverId: string; reactivatedAt: string } };
+    const envelope = outbox[0]?.envelope as {
+      payload: { driverId: string; reactivatedAt: string };
+    };
     expect(envelope.payload.driverId).toBe('d1');
   });
 
@@ -1334,7 +1396,10 @@ describe('DriversService.suspendByRating · AUTO-suspensión por RATING bajo (ho
   it('agrega un hold RATING_LOW (causeRef vacío) y deriva suspendedAt', async () => {
     const { prisma, holds } = makeHoldPrisma();
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
-    const applied = await svc.suspendByRating('d1', 'Rating bajo sostenido (auto-suspensión BR-D01)');
+    const applied = await svc.suspendByRating(
+      'd1',
+      'Rating bajo sostenido (auto-suspensión BR-D01)',
+    );
     expect(applied).toBe(true);
     expect(holds).toHaveLength(1);
     expect(holds[0]).toMatchObject({ driverId: 'd1', cause: 'RATING_LOW', causeRef: '' });
@@ -1373,7 +1438,10 @@ describe('DriversService · BACKSTOP durable del revoke en las 4 vías EVENT-DRI
   // `revoked:before:{userId}` INCONDICIONALMENTE (aún con created=false), al `suspendedAt` DERIVADO (no now()),
   // para que la REDELIVERY del evento gatillador cierre la crash-window si el fast-path best-effort no corrió.
   const epoch = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
-  const spy = () => ({ revokeAllForUser: vi.fn(async () => 0), resealRevokedBefore: vi.fn(async () => true) });
+  const spy = () => ({
+    revokeAllForUser: vi.fn(async () => 0),
+    resealRevokedBefore: vi.fn(async () => true),
+  });
 
   it('suspendByFleet (created=true): resella por userId al epoch del suspendedAt + fast-path (revoke)', async () => {
     const { prisma } = makeHoldPrisma({ userId: 'u-doc' });
@@ -1436,7 +1504,10 @@ describe('DriversService · BACKSTOP durable del revoke en las 4 vías EVENT-DRI
     // El createdAt del hold de cancelaciones es now() del stub → tomamos el suspendedAt derivado real.
     const at = deriveSuspendedAt();
     expect(at).not.toBeNull();
-    expect(s.resealRevokedBefore).toHaveBeenCalledWith('u-can', Math.floor((at as Date).getTime() / 1000));
+    expect(s.resealRevokedBefore).toHaveBeenCalledWith(
+      'u-can',
+      Math.floor((at as Date).getTime() / 1000),
+    );
   });
 
   it('suspendByRating sin perfil (purgado): NO resella (anti poison-pill, nada que revocar)', async () => {
@@ -1456,9 +1527,9 @@ describe('DriversService · BACKSTOP durable del revoke en las 4 vías EVENT-DRI
       }),
     };
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, s as never, config);
-    await expect(svc.suspendByFleet('d1', new Date('2026-06-04T10:00:00.000Z'), 'SOAT')).rejects.toThrow(
-      'redis down',
-    );
+    await expect(
+      svc.suspendByFleet('d1', new Date('2026-06-04T10:00:00.000Z'), 'SOAT'),
+    ).rejects.toThrow('redis down');
   });
 });
 
@@ -1662,11 +1733,7 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
                 },
               },
               outboxEvent: {
-                create: async ({
-                  data,
-                }: {
-                  data: { aggregateId: string; eventType: string };
-                }) => {
+                create: async ({ data }: { data: { aggregateId: string; eventType: string } }) => {
                   outboxEvents.push({ aggregateId: data.aggregateId, eventType: data.eventType });
                 },
               },
@@ -1728,7 +1795,9 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       legalName: 'Ana',
     });
     // El DNI va CIFRADO (round-trip), nunca en claro en la fila.
-    expect(open(upsertCalls[0]?.create.documentIdEnc as string, DRIVER_DNI_ENC_KEY)).toBe('87654321');
+    expect(open(upsertCalls[0]?.create.documentIdEnc as string, DRIVER_DNI_ENC_KEY)).toBe(
+      '87654321',
+    );
   });
 
   it('re-submit idempotente: llamar dos veces no rompe ni duplica (upsert por userId)', async () => {
@@ -1748,12 +1817,32 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
   it('exactly-once: SIN fila previa emite driver.registered (una vez); con fila previa NO re-emite', async () => {
     // personal-first crea el cascarón → emite el evento de registro EN la misma tx (outbox-in-tx).
     const first = makePersonalPrisma(null);
-    const svcA = new DriversService(first.prisma as never, makeRedis() as never, bio, sessions, config);
-    await svcA.updatePersonalInfo('u1', { legalName: 'Ana', dni: '87654321', birthDate: '1992-01-10' });
+    const svcA = new DriversService(
+      first.prisma as never,
+      makeRedis() as never,
+      bio,
+      sessions,
+      config,
+    );
+    await svcA.updatePersonalInfo('u1', {
+      legalName: 'Ana',
+      dni: '87654321',
+      birthDate: '1992-01-10',
+    });
     expect(first.outboxEvents.map((e) => e.eventType)).toEqual(['driver.registered']);
     // La fila ya existía (el OTRO paso del wizard la creó y ya emitió) → este no re-emite (count 0).
-    const second = makePersonalPrisma({ ...okDriver, legalName: 'Ana', backgroundCheckStatus: 'PENDING' });
-    const svcB = new DriversService(second.prisma as never, makeRedis() as never, bio, sessions, config);
+    const second = makePersonalPrisma({
+      ...okDriver,
+      legalName: 'Ana',
+      backgroundCheckStatus: 'PENDING',
+    });
+    const svcB = new DriversService(
+      second.prisma as never,
+      makeRedis() as never,
+      bio,
+      sessions,
+      config,
+    );
     await svcB.updatePersonalInfo('u1', {
       legalName: 'Ana María',
       dni: '87654321',
@@ -1766,10 +1855,17 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
     // Invariante KYC "identidad operada == identidad revisada" (Ley 29733): con el alta aprobada (CLEARED) el
     // conductor NO cambia su identidad por autoservicio (operaría bajo una identidad distinta a la revisada). La
     // máquina prohíbe CLEARED→PENDING, así que el gate corta ANTES de materializar (no hay auto-re-review).
-    const { prisma, upsertCalls } = makePersonalPrisma({ ...okDriver, backgroundCheckStatus: 'CLEARED' });
+    const { prisma, upsertCalls } = makePersonalPrisma({
+      ...okDriver,
+      backgroundCheckStatus: 'CLEARED',
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await expect(
-      svc.updatePersonalInfo('u1', { legalName: 'Otro Nombre', dni: '87654321', birthDate: '1990-05-20' }),
+      svc.updatePersonalInfo('u1', {
+        legalName: 'Otro Nombre',
+        dni: '87654321',
+        birthDate: '1990-05-20',
+      }),
     ).rejects.toBeInstanceOf(InvalidStateError);
     // Fail-closed: el gate corta ANTES de la materialización → no se escribió nada.
     expect(upsertCalls).toHaveLength(0);
@@ -1785,7 +1881,11 @@ describe('DriversService.updatePersonalInfo · datos personales (BR-I04)', () =>
       dniFaceMatchedAt: new Date('2026-01-01T00:00:00Z'),
     });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
-    await svc.updatePersonalInfo('u1', { legalName: 'Ana', dni: '87654321', birthDate: '1992-01-10' });
+    await svc.updatePersonalInfo('u1', {
+      legalName: 'Ana',
+      dni: '87654321',
+      birthDate: '1992-01-10',
+    });
     // La fila ya existía → brazo update; el updateData resetea el binding (los 6 campos juntos, coherencia atómica).
     expect(upsertCalls[0]?.update).toMatchObject({
       dniFaceMatched: null,
@@ -1912,11 +2012,7 @@ describe('DriversService.onboard · alta de licencia idempotente y orden-indepen
                 },
               },
               outboxEvent: {
-                create: async ({
-                  data,
-                }: {
-                  data: { aggregateId: string; eventType: string };
-                }) => {
+                create: async ({ data }: { data: { aggregateId: string; eventType: string } }) => {
                   outboxEvents.push({ aggregateId: data.aggregateId, eventType: data.eventType });
                 },
               },
@@ -1955,11 +2051,17 @@ describe('DriversService.onboard · alta de licencia idempotente y orden-indepen
     const out = await svc.onboard('u1', license);
     expect(out).toEqual({ driverId: 'd1', backgroundCheckStatus: 'PENDING' });
     // Solo actualiza el slice de licencia: no pisa otros campos del agregado.
-    expect(upsertCalls[0]?.update).toEqual({ licenseNumber: 'L-123', licenseExpiresAt: futureLicense });
+    expect(upsertCalls[0]?.update).toEqual({
+      licenseNumber: 'L-123',
+      licenseExpiresAt: futureLicense,
+    });
   });
 
   it('re-submit idempotente: onboard dos veces no rompe ni duplica (upsert por userId)', async () => {
-    const { prisma, upsertCalls } = makeOnboardPrisma({ id: 'd1', backgroundCheckStatus: 'PENDING' });
+    const { prisma, upsertCalls } = makeOnboardPrisma({
+      id: 'd1',
+      backgroundCheckStatus: 'PENDING',
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.onboard('u1', license);
     await svc.onboard('u1', license);
@@ -1969,13 +2071,25 @@ describe('DriversService.onboard · alta de licencia idempotente y orden-indepen
   it('exactly-once: onboard-first emite driver.registered; onboard-after-personal NO re-emite', async () => {
     // onboard-first crea el cascarón → emite el evento de registro (aggregateId = id del Driver).
     const first = makeOnboardPrisma(null);
-    const svcA = new DriversService(first.prisma as never, makeRedis() as never, bio, sessions, config);
+    const svcA = new DriversService(
+      first.prisma as never,
+      makeRedis() as never,
+      bio,
+      sessions,
+      config,
+    );
     await svcA.onboard('u1', license);
     expect(first.outboxEvents.map((e) => e.eventType)).toEqual(['driver.registered']);
     expect(first.outboxEvents[0]?.aggregateId).toBe('d-new');
     // Cascarón ya creado por updatePersonalInfo (existing) → solo fija la licencia, sin re-emitir.
     const second = makeOnboardPrisma({ id: 'd1', backgroundCheckStatus: 'PENDING' });
-    const svcB = new DriversService(second.prisma as never, makeRedis() as never, bio, sessions, config);
+    const svcB = new DriversService(
+      second.prisma as never,
+      makeRedis() as never,
+      bio,
+      sessions,
+      config,
+    );
     await svcB.onboard('u1', license);
     expect(second.outboxEvents).toHaveLength(0);
   });
@@ -2051,7 +2165,11 @@ describe('DriversService.setStatus · transición de turno validada por la máqu
   });
 
   it('Fase B · el fin de turno OFFLINE emite driver.went_offline (reason=shift_end) por outbox', async () => {
-    const { prisma, outbox } = makeStatusPrisma({ ...okDriver, id: 'drv-1', currentStatus: 'AVAILABLE' });
+    const { prisma, outbox } = makeStatusPrisma({
+      ...okDriver,
+      id: 'drv-1',
+      currentStatus: 'AVAILABLE',
+    });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     await svc.setStatus('u1', 'OFFLINE');
     expect(outbox).toHaveLength(1);
@@ -2152,7 +2270,9 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
           // DISTINTO al del pre-read (la nulificación aterriza estrictamente entre ambos); sin override, ve el
           // mismo binding que la tx. reject NO manda estas cláusulas (undefined) → no gatean.
           const casMatchedAt =
-            'casDniFaceMatchedAt' in overrides ? overrides.casDniFaceMatchedAt : fresh?.dniFaceMatchedAt;
+            'casDniFaceMatchedAt' in overrides
+              ? overrides.casDniFaceMatchedAt
+              : fresh?.dniFaceMatchedAt;
           const bindingFresh = where.dniFaceMatchedAt === undefined || casMatchedAt != null;
           const licenseFresh =
             where.licenseFaceMatchedAt === undefined || fresh?.licenseFaceMatchedAt != null;
@@ -2230,7 +2350,12 @@ describe('DriversService.approve/reject · decisión de antecedentes validada po
     // Curl-proof: sin haber corrido matchDniFace() (dniFaceMatchedAt=null) NO se aprueba a ciegas.
     // El gate corta ANTES de los asserts de máquina y de toda escritura (fail-closed, cero efectos).
     const { prisma, driverWrites, userWrites } = makeApprovalPrisma(
-      { ...okDriver, backgroundCheckStatus: 'PENDING', dniFaceMatched: null, dniFaceMatchedAt: null },
+      {
+        ...okDriver,
+        backgroundCheckStatus: 'PENDING',
+        dniFaceMatched: null,
+        dniFaceMatchedAt: null,
+      },
       { id: 'u1', kycStatus: 'PENDING' },
     );
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
@@ -2545,18 +2670,18 @@ describe('DriversService.matchDniFace · BINDING DNI↔selfie (sub-lote 3C)', ()
   it('sin biometría enrolada → 409 (ConflictError) y NO escribe nada', async () => {
     const prisma = makeMatchPrisma({ ...okDriver, faceEmbedding: [] });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
-    await expect(
-      svc.matchDniFace('d1', { image: 'base64-dni-front' }),
-    ).rejects.toBeInstanceOf(ConflictError);
+    await expect(svc.matchDniFace('d1', { image: 'base64-dni-front' })).rejects.toBeInstanceOf(
+      ConflictError,
+    );
     expect(prisma.updates).toHaveLength(0);
   });
 
   it('404 si el conductor no existe', async () => {
     const prisma = makeMatchPrisma(null);
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
-    await expect(
-      svc.matchDniFace('d1', { image: 'base64-dni-front' }),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc.matchDniFace('d1', { image: 'base64-dni-front' })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     expect(prisma.updates).toHaveLength(0);
   });
 
@@ -2569,7 +2694,13 @@ describe('DriversService.matchDniFace · BINDING DNI↔selfie (sub-lote 3C)', ()
         return { matched: false, score: 33, reason: 'no coincide' };
       },
     };
-    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoMatch, sessions, config);
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis() as never,
+      bioNoMatch,
+      sessions,
+      config,
+    );
     const out = await svc.matchDniFace('d1', { image: 'base64-dni-front' });
     expect(out.matched).toBe(false);
     expect(prisma.updates[0]?.dniFaceMatched).toBe(false);
@@ -2659,7 +2790,13 @@ describe('DriversService.matchLicenseFace · BINDING licencia↔selfie (Lote C)'
         return { matched: false, score: 28, reason: 'no coincide' };
       },
     };
-    const svc = new DriversService(prisma as never, makeRedis() as never, bioNoMatch, sessions, config);
+    const svc = new DriversService(
+      prisma as never,
+      makeRedis() as never,
+      bioNoMatch,
+      sessions,
+      config,
+    );
     const out = await svc.matchLicenseFace('d1', { image: 'base64-license-front' });
     expect(out.matched).toBe(false);
     expect(prisma.updates[0]?.licenseFaceMatched).toBe(false);
@@ -2698,7 +2835,12 @@ describe('DriversService · techo de abuso del enrol + destrabe de central (F3)'
       },
       // Simula el script Lua FIXED_WINDOW_INCR_EXPIRE de `consumeFixedWindow`: INCR de la key + PEXPIRE en el
       // primer hit; devuelve [count, ttl]. Comparte el mismo `counts` que get/incr/del (coherencia del contador).
-      async eval(_script: string, _numKeys: number, key: string, windowMs: number): Promise<[number, number]> {
+      async eval(
+        _script: string,
+        _numKeys: number,
+        key: string,
+        windowMs: number,
+      ): Promise<[number, number]> {
         const v = (counts.get(key) ?? 0) + 1;
         counts.set(key, v);
         return [v, windowMs];

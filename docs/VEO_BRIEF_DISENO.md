@@ -56,23 +56,23 @@ OKLCH); **se referencian por NOMBRE de token, nunca por hex suelto** en componen
 
 ### 3.0 Tabla de tokens
 
-| Token | Hex (sRGB) | Rol semántico | Contraste de referencia |
-| --- | --- | --- | --- |
-| `bg` | `#0A0B0F` | Lienzo base (casi-negro azulado, no negro puro) | — |
-| `surface` | `#14161C` | Tarjetas, filas, sheets base | — |
-| `surfaceElevated` | `#1E212A` | Capas elevadas: inputs, modales, sheets | — |
-| `ink` | `#F5F7FA` | Texto primario | ~17:1 sobre `bg` (AAA) |
-| `inkMuted` | `#C4CBD6` | Texto secundario | ~10:1 sobre `bg` (AAA) |
-| `inkSubtle` | `#8A929E` | Texto terciario, metadatos | ~4.7:1 sobre `bg` (AA) |
-| `border` | `#1C1F27` | Divisores y bordes sutiles | — |
-| `borderStrong` | `#2B2F3A` | Bordes de énfasis, foco no-accent | — |
-| `brand` = `accent` = `focus` | **`#2D7FF9`** | Marca, acción primaria, anillo de foco, ruta en mapa | ~5.2:1 sobre `bg` (AA texto grande / UI) |
-| `onBrand` = `onAccent` | **`#FFFFFF`** | Texto/ícono SOBRE el azul (siempre **blanco**) | ~3.6:1 blanco sobre `#2D7FF9` (AA grande/UI) |
-| `success` = `safe` | `#34D399` | OK, a bordo, vigente, "viaje seguro" | AA sobre `bg` |
-| `warn` | `#F2AF48` | Por vencer, atención | AA sobre `bg` |
-| `danger` | `#FF4D6A` | Error, vencido, cancelado, pánico-como-cancelación | AA sobre `bg` |
-| `overlay` | scrim 40–60% | Atenuar mapa de fondo, scrim de modal/sheet | — |
-| `routeColor` / `routeGlowColor` | `brand` + halo | Dibujo de ruta en el mapa (azul + glow) | — |
+| Token                           | Hex (sRGB)     | Rol semántico                                        | Contraste de referencia                      |
+| ------------------------------- | -------------- | ---------------------------------------------------- | -------------------------------------------- |
+| `bg`                            | `#0A0B0F`      | Lienzo base (casi-negro azulado, no negro puro)      | —                                            |
+| `surface`                       | `#14161C`      | Tarjetas, filas, sheets base                         | —                                            |
+| `surfaceElevated`               | `#1E212A`      | Capas elevadas: inputs, modales, sheets              | —                                            |
+| `ink`                           | `#F5F7FA`      | Texto primario                                       | ~17:1 sobre `bg` (AAA)                       |
+| `inkMuted`                      | `#C4CBD6`      | Texto secundario                                     | ~10:1 sobre `bg` (AAA)                       |
+| `inkSubtle`                     | `#8A929E`      | Texto terciario, metadatos                           | ~4.7:1 sobre `bg` (AA)                       |
+| `border`                        | `#1C1F27`      | Divisores y bordes sutiles                           | —                                            |
+| `borderStrong`                  | `#2B2F3A`      | Bordes de énfasis, foco no-accent                    | —                                            |
+| `brand` = `accent` = `focus`    | **`#2D7FF9`**  | Marca, acción primaria, anillo de foco, ruta en mapa | ~5.2:1 sobre `bg` (AA texto grande / UI)     |
+| `onBrand` = `onAccent`          | **`#FFFFFF`**  | Texto/ícono SOBRE el azul (siempre **blanco**)       | ~3.6:1 blanco sobre `#2D7FF9` (AA grande/UI) |
+| `success` = `safe`              | `#34D399`      | OK, a bordo, vigente, "viaje seguro"                 | AA sobre `bg`                                |
+| `warn`                          | `#F2AF48`      | Por vencer, atención                                 | AA sobre `bg`                                |
+| `danger`                        | `#FF4D6A`      | Error, vencido, cancelado, pánico-como-cancelación   | AA sobre `bg`                                |
+| `overlay`                       | scrim 40–60%   | Atenuar mapa de fondo, scrim de modal/sheet          | —                                            |
+| `routeColor` / `routeGlowColor` | `brand` + halo | Dibujo de ruta en el mapa (azul + glow)              | —                                            |
 
 > **`brand` = `accent` = `focus` son el mismo azul `#2D7FF9`.** Son roles distintos (marca / acción / foco)
 > que coinciden en valor. El acento ocupa ≤10% de cualquier pantalla.
@@ -129,7 +129,7 @@ Web Next.js, tokens en **OKLCH** (`tokens.css`), derivados del mismo Brand Book.
 - **Escala:** `12 · 14 · 16 · 18 · 20 · 24 · 30 · 36 · 48`. Contraste de peso ≥ 1.25 entre niveles (jerarquía
   por **escala + peso**, no por color). Cuerpo base 16px (mín. 16px en móvil para evitar auto-zoom iOS).
 - **Roles (`textStyles`):** `display, title1, title2, title3, headline, body, bodyStrong, callout, subhead,
-  footnote, caption, label/overline`. Los componentes consumen **roles**, no tamaños sueltos.
+footnote, caption, label/overline`. Los componentes consumen **roles**, no tamaños sueltos.
 - `line-height` cuerpo 1.5–1.7; longitud de línea 65–75ch. Headings `text-wrap: balance`, prosa `pretty`.
   Hero/display clamp ≤ 6rem, `letter-spacing` ≥ -0.04em. Sin ALL-CAPS en cuerpo (sólo labels ≤4 palabras).
 - **Números tabulares** (`font-variant-numeric: tabular-nums` / `<Text tabular>`) en montos (céntimos PEN → `S/`),
@@ -140,7 +140,7 @@ Web Next.js, tokens en **OKLCH** (`tokens.css`), derivados del mismo Brand Book.
 ## 5. Layout, espaciado, radios, elevación
 
 - **Espaciado base 4/8px:** `none 0 · xxs 2 · xs 4 · sm 8 · md 12 · lg 16 · xl 20 · 2xl 24 · 3xl 32 · 4xl 40 ·
-  5xl 48 · 6xl 64`. Ritmo vertical por jerarquía: `16 / 24 / 32 / 48`. Variar el espaciado da ritmo; el mismo
+5xl 48 · 6xl 64`. Ritmo vertical por jerarquía: `16 / 24 / 32 / 48`. Variar el espaciado da ritmo; el mismo
   padding en todo es monotonía. `TOUCH_TARGET = 44` (mínimo absoluto; subir a 48–56 al volante).
 - **Radios:** `sm 8 · md 12 · lg 16 · xl 20 · 2xl 28 · pill 999`. Tarjetas/inputs **12–16px**; `pill` sólo en
   botones/tags. Nada de tarjetas sobre-redondeadas (24/28/32+).
@@ -151,7 +151,7 @@ Web Next.js, tokens en **OKLCH** (`tokens.css`), derivados del mismo Brand Book.
   nunca**. No envolver todo en un contenedor. Flexbox 1D, Grid 2D; grids responsivas sin breakpoints
   (`repeat(auto-fit, minmax(280px,1fr))`).
 - **z-index semántico (web):** `dropdown(10) → sticky(20) → backdrop(30) → modal(40) → toast(50) →
-  tooltip(60)`. Nunca 999/9999. `max-w-7xl` en desktop. Mobile-first; breakpoints 375 / 768 / 1024 / 1440.
+tooltip(60)`. Nunca 999/9999. `max-w-7xl` en desktop. Mobile-first; breakpoints 375 / 768 / 1024 / 1440.
 
 ---
 
@@ -164,8 +164,8 @@ Web Next.js, tokens en **OKLCH** (`tokens.css`), derivados del mismo Brand Book.
 - **Duraciones:** press 100–160ms · tooltip 125–200ms · dropdown 150–250ms · modal/drawer 200–420ms. **UI < 300ms.**
   `ease-out` para entrar (feedback inmediato); **nunca `ease-in` en UI**. Exit ~60–70% del enter.
 - **Sólo `transform`/`opacity`** (GPU). `scale(0.97)` en press; **nunca `scale(0)`** (arrancar en `scale(0.96)`
-  + opacity). Stagger de listas 30–60ms. Animar 1–2 elementos clave por vista. Animaciones **interrumpibles**
-  (transición/spring, no keyframes que reinician). `prefers-reduced-motion` → crossfade/instant, sin movimiento.
+  - opacity). Stagger de listas 30–60ms. Animar 1–2 elementos clave por vista. Animaciones **interrumpibles**
+    (transición/spring, no keyframes que reinician). `prefers-reduced-motion` → crossfade/instant, sin movimiento.
 
 ---
 
