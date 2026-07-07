@@ -14,7 +14,7 @@ import {
   vehicleOperabilityReason,
   documentSide,
 } from './types.js';
-import { pricingMode } from './mobile.js';
+import { pricingMode, paymentStatus, mobilePaymentMethod } from './mobile.js';
 
 /* ── Autenticación admin (login + enrolamiento/step-up TOTP) ── */
 
@@ -87,6 +87,42 @@ export const analyticsOverview = z.object({
   series: z.array(overviewSeriesPoint),
 });
 export type AnalyticsOverview = z.infer<typeof analyticsOverview>;
+
+/* ── Analytics revenue por rango (/analytics/revenue?range=today|7d|30d · pantalla "Métricas") ── */
+
+/**
+ * Rango temporal de las métricas de revenue. Enum del CONTRATO (fuente única del literal): el admin-bff valida el
+ * query contra esto y payment-service lo re-estrecha. `today` = desde medianoche Lima; `7d`/`30d` = últimos 7/30
+ * días naturales (TZ America/Lima). Tiparlo como enum mata el magic string: comparar fuera del set es error de compilación.
+ */
+export const revenueRange = z.enum(['today', '7d', '30d']);
+export type RevenueRangeValue = z.infer<typeof revenueRange>;
+
+/**
+ * Un punto de la serie de revenue: `revenueCents` = money-in NETO al banco (Σ netSettled) del bucket. `bucket` es
+ * la hora local de Lima (ISO-naïve 'YYYY-MM-DDTHH:00:00') si `range=today`, o el día ('YYYY-MM-DD') si `7d`/`30d`.
+ */
+export const revenueSeriesPoint = z.object({
+  bucket: z.string(),
+  revenueCents: z.number().int(),
+});
+export type RevenueSeriesPoint = z.infer<typeof revenueSeriesPoint>;
+
+/**
+ * Métricas de revenue del rango para la pantalla "Métricas". Todo en céntimos Int (PEN). `moneyInCents` = plata
+ * digital liquidada que entró al banco; `grossCommissionCents` = comisión bruta de la plataforma sobre esos viajes;
+ * `refundedCents` = total reembolsado en el rango; `platformMarginCents = grossCommissionCents − refundedCents`
+ * (margen neto, lo DERIVA el admin-bff). `series` reconcilia con `moneyInCents` (misma definición de money-in).
+ */
+export const revenueMetricsView = z.object({
+  range: revenueRange,
+  moneyInCents: z.number().int(),
+  grossCommissionCents: z.number().int(),
+  refundedCents: z.number().int(),
+  platformMarginCents: z.number().int(),
+  series: z.array(revenueSeriesPoint),
+});
+export type RevenueMetricsView = z.infer<typeof revenueMetricsView>;
 
 /* ── Detalle de viaje (/trips/:id) ── */
 export const tripDetail = tripSummary.extend({
@@ -596,6 +632,35 @@ export const costPerKmListView = z.object({
   configs: z.array(costPerKmConfigView),
 });
 export type CostPerKmListView = z.infer<typeof costPerKmListView>;
+
+/**
+ * Cobro REEMBOLSABLE de un viaje (GET /finance/payments/by-trip/:tripId). El operador de finanzas lo consulta
+ * ANTES de reembolsar: es EXACTAMENTE el pago que el POST /finance/refunds/:tripId tocaría (mismo lookup
+ * kind=FARE, CAPTURED/PARTIALLY_REFUNDED, el más reciente). `refundableCents = amountCents − refundedCents`
+ * (saldo que aún se puede devolver). Dinero SIEMPRE Int céntimos (formatear a S/ SOLO en la UI).
+ * RECORTA la PII de riel (externalRef/payerRef/externalUid/checkoutUrl/qr/cip NO viajan); los ids de personas y
+ * los montos SÍ son PII → el acceso queda auditado (payment.view_by_trip) tras el gate FINANCE en el admin-bff.
+ */
+export const refundablePaymentView = z.object({
+  paymentId: z.string(),
+  tripId: z.string(),
+  driverId: z.string().nullable(),
+  passengerId: z.string().nullable(),
+  method: mobilePaymentMethod,
+  status: paymentStatus,
+  currency: z.string(),
+  grossCents: z.number().int(),
+  amountCents: z.number().int(),
+  refundedCents: z.number().int().nonnegative(),
+  refundableCents: z.number().int().nonnegative(),
+  discountCents: z.number().int().nonnegative(),
+  creditCents: z.number().int().nonnegative(),
+  tipCents: z.number().int().nonnegative(),
+  capturedAt: z.string().nullable(),
+  refundedAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type RefundablePaymentView = z.infer<typeof refundablePaymentView>;
 
 /**
  * Body del PUT /finance/cost-per-km (F2.5): el costo/km de UN país en céntimos PEN Int. `expectedVersion` =

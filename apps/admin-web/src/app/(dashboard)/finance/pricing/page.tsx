@@ -1,13 +1,12 @@
 'use client';
 
-import { Lock } from 'lucide-react';
+import { Lock, ShieldCheck } from 'lucide-react';
 import {
   useModeSchedule,
   useFuelSurcharge,
   useBaseFare,
   useCommission,
   useEnergyCatalog,
-  useBidFloor,
 } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -20,15 +19,14 @@ import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
 import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commission-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
-import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
-import { PricingSection } from '@/components/pricing/pricing-section';
 
 /**
- * Precios on-demand — config financiera del carril TAXI (viaje inmediato), agrupada por sección (PricingSection):
- * Modo de tarifa (PUJA↔FIJO + piso de puja · ADR 011) · Componentes (tarifa base, recargo de combustible B4,
- * precios de energía B5) · Comisión al conductor. El carril CARPOOLING (cost-sharing) vive en su propia pantalla
- * (Finanzas › Carpooling): no comparte fórmula con on-demand. Gate de presentación con `pricing:view`; el
- * admin-bff (RolesGuard) y los servicios re-autorizan server-side.
+ * Precios on-demand — config financiera del carril TAXI (viaje inmediato). El diseño (veo.pen) apila las
+ * secciones como cards PLANAS e independientes: tarifa base, comisión on-demand, recargo de combustible/energía,
+ * modo de tarificación y catálogo de energía. Cada card es una MUTACIÓN separada (su propio endpoint, CAS y
+ * step-up MFA) — el banner superior lo hace explícito. El piso de la PUJA se configura en "Tarifas por oferta"
+ * (default global + overrides por oferta). El carril CARPOOLING vive en Finanzas › Carpooling. Gate de
+ * presentación con `pricing:view`; el admin-bff (RolesGuard) y los servicios re-autorizan server-side.
  */
 export default function PricingPage() {
   const user = useSession();
@@ -37,14 +35,13 @@ export default function PricingPage() {
   const baseFareQuery = useBaseFare();
   const commissionQuery = useCommission();
   const energyQuery = useEnergyCatalog();
-  const bidFloorQuery = useBidFloor();
 
   if (!can(user, 'pricing:view')) {
     return (
       <div className="flex h-full flex-col">
         <PageHeader
           title="Precios on-demand"
-          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios on-demand' }]}
+          breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
         />
         <EmptyState
           className="flex-1"
@@ -61,63 +58,50 @@ export default function PricingPage() {
       <PageHeader
         title="Precios on-demand"
         description="Configurá cómo se calcula y se cobra el viaje inmediato: modo, componentes de la tarifa y comisión al conductor. Todos los cambios son globales, se aplican al instante y quedan auditados."
-        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios on-demand' }]}
+        breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        {/* CARRIL on-demand · cómo se fija el precio del viaje inmediato (modo + piso de puja). */}
-        <PricingSection
-          title="Modo de tarifa · on-demand"
-          hint="Cómo se fija el precio del viaje inmediato: puja del pasajero o precio fijo calculado, y el piso de la puja."
-        >
-          <AsyncSection
-            query={query}
-            skeleton={
-              <div className="grid gap-3 pt-4 sm:grid-cols-2">
-                <Skeleton className="h-28" />
-                <Skeleton className="h-28" />
-              </div>
-            }
-          >
-            {(data) => <ModeSchedulePanel schedule={data} />}
-          </AsyncSection>
+        {/* Aviso de step-up: cada card guarda por separado, con su propia mutación + MFA. */}
+        <div className="flex items-start gap-3 rounded-lg border border-brand/30 bg-brand/12 p-4">
+          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-brand" aria-hidden />
+          <div className="flex flex-col gap-0.5">
+            <p className="text-sm font-semibold text-ink">
+              Cada sección guarda por separado, con step-up MFA
+            </p>
+            <p className="text-xs text-ink-subtle">
+              Cada card es una mutación independiente (su propio endpoint y versión): al guardar te pide
+              tu código TOTP y el cambio queda auditado. No hay un guardado global.
+            </p>
+          </div>
+        </div>
 
-          {/* ADR 010 §9.3 · piso de la PUJA per-oferta. */}
-          <AsyncSection query={bidFloorQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
-            {(data) => <BidFloorPanel config={data} />}
-          </AsyncSection>
-        </PricingSection>
-
-        {/* CARRIL on-demand · las piezas que arman la tarifa (base + recargo de combustible + energía). */}
-        <PricingSection
-          title="Componentes de la tarifa · on-demand"
-          hint="Las piezas que arman el precio fijo y el sugerido de la puja: la tarifa base y el modelo de energía."
-        >
+        {/* Cards planas, en el orden del diseño (veo.pen). Cada una es su propia mutación con CAS + step-up. */}
+        <div className="mt-5 space-y-5">
           {/* F2.4 · tarifa base (banderazo + per-km + per-min). */}
-          <AsyncSection query={baseFareQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+          <AsyncSection query={baseFareQuery} skeleton={<Skeleton className="h-64" />}>
             {(data) => <BaseFarePanel config={data} />}
           </AsyncSection>
 
+          {/* F2.7 · comisión on-demand (preserva el service fee del carpooling en el mismo config · CAS). */}
+          <AsyncSection query={commissionQuery} skeleton={<Skeleton className="h-64" />}>
+            {(data) => <OnDemandCommissionPanel config={data} />}
+          </AsyncSection>
+
           {/* B3/B4 · recargo de combustible (modelo de energía LIVE mientras el flip esté OFF). */}
-          <AsyncSection query={fuelQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+          <AsyncSection query={fuelQuery} skeleton={<Skeleton className="h-64" />}>
             {(data) => <FuelSurchargePanel config={data} />}
           </AsyncSection>
 
-          {/* B5 · precios de energía multi-fuente (vista previa hasta el flip). */}
-          <AsyncSection query={energyQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+          {/* Modo de tarificación global (PUJA↔FIJO) + franjas horarias. */}
+          <AsyncSection query={query} skeleton={<Skeleton className="h-64" />}>
+            {(data) => <ModeSchedulePanel schedule={data} />}
+          </AsyncSection>
+
+          {/* B5 · catálogo de energía multi-fuente (vista previa hasta el flip). */}
+          <AsyncSection query={energyQuery} skeleton={<Skeleton className="h-64" />}>
             {(data) => <EnergyCatalogPanel config={data} />}
           </AsyncSection>
-        </PricingSection>
-
-        {/* on-demand · cómo gana la plataforma en el viaje inmediato (descuento al conductor). */}
-        <PricingSection
-          title="Comisión · on-demand"
-          hint="Cómo gana la plataforma en el viaje inmediato: la comisión que se descuenta al conductor. El service fee del carpooling se configura en Finanzas › Carpooling."
-        >
-          {/* F2.7 · comisión on-demand (preserva el service fee del carpooling en el mismo config · CAS). */}
-          <AsyncSection query={commissionQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
-            {(data) => <OnDemandCommissionPanel config={data} />}
-          </AsyncSection>
-        </PricingSection>
+        </div>
       </div>
     </div>
   );

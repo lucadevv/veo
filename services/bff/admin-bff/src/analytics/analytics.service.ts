@@ -14,6 +14,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
 import { type TripStatsView } from '@veo/shared-types';
+import type { RevenueRangeValue } from '@veo/api-client';
 import { LOGGER, type Logger } from '@veo/observability';
 import { REST_TRIP, REST_DISPATCH, REST_PANIC, REST_PAYMENT } from '../infra/tokens';
 
@@ -32,6 +33,33 @@ export interface OverviewMetrics {
   revenueTodayCents: number;
   avgDurationSeconds: number | null;
   series: OverviewSeriesPoint[];
+}
+
+/** Un punto de la serie de revenue por rango (bucket local Lima → money-in neto del bucket). */
+export interface RevenueSeriesPoint {
+  bucket: string;
+  revenueCents: number;
+}
+
+/**
+ * Contrato que la pantalla "Métricas" consume (GET /analytics/revenue?range). Espeja `revenueMetricsView`
+ * (@veo/api-client). Todo en céntimos Int. `platformMarginCents` lo DERIVA este bff (= grossCommission − refunded).
+ */
+export interface RevenueMetrics {
+  range: RevenueRangeValue;
+  moneyInCents: number;
+  grossCommissionCents: number;
+  refundedCents: number;
+  platformMarginCents: number;
+  series: RevenueSeriesPoint[];
+}
+
+/** Shape crudo servido por payment-service (GET /internal/analytics/revenue-metrics) — sin el margen derivado. */
+interface RevenueRangeStats {
+  moneyInCents: number;
+  grossCommissionCents: number;
+  refundedCents: number;
+  series: RevenueSeriesPoint[];
 }
 
 /**
@@ -89,6 +117,48 @@ export class AnalyticsService {
       revenueTodayCents: payment?.revenueTodayCents ?? 0,
       avgDurationSeconds: trip?.avgDurationSeconds ?? null,
       series: this.mergeSeries(trip?.tripsPerHour ?? [], payment?.revenuePerHour ?? []),
+    };
+  }
+
+  /**
+   * Pantalla "Métricas" (revenue por rango). Llama el interno HMAC de payment-service (money-in + comisión bruta +
+   * reembolsos + serie) y DERIVA el `platformMarginCents = grossCommissionCents − refundedCents`. Degradación
+   * HONESTA: si payment-service no responde, todo cae a 0 / [] (jamás dato inventado) y el margen a 0. Observabilidad
+   * (regla del repo): log estructurado con el rango + el resumen; la métrica HTTP la emite el interceptor global.
+   */
+  async revenue(identity: AuthenticatedUser, range: RevenueRangeValue): Promise<RevenueMetrics> {
+    const stats = await this.safe<RevenueRangeStats>(
+      () =>
+        this.paymentRest.get('/internal/analytics/revenue-metrics', {
+          identity,
+          query: { range },
+        }),
+      'revenue-metrics',
+    );
+    const moneyInCents = stats?.moneyInCents ?? 0;
+    const grossCommissionCents = stats?.grossCommissionCents ?? 0;
+    const refundedCents = stats?.refundedCents ?? 0;
+    const platformMarginCents = grossCommissionCents - refundedCents;
+    const series = stats?.series ?? [];
+    this.logger.info(
+      {
+        range,
+        moneyInCents,
+        grossCommissionCents,
+        refundedCents,
+        platformMarginCents,
+        buckets: series.length,
+        degraded: stats === null,
+      },
+      'analytics revenue por rango agregada',
+    );
+    return {
+      range,
+      moneyInCents,
+      grossCommissionCents,
+      refundedCents,
+      platformMarginCents,
+      series,
     };
   }
 

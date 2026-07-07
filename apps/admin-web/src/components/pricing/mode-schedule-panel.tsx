@@ -9,6 +9,7 @@ import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { ConfigCard } from '@/components/config/config-card';
 
 const MODES: readonly { value: PricingMode; icon: LucideIcon }[] = [
   { value: 'PUJA', icon: Gavel },
@@ -38,9 +39,14 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
     save({ defaultMode: mode, rules: schedule.rules, expectedVersion: schedule.version });
 
   return (
-    <div className="flex flex-col gap-6 pt-4">
+    <ConfigCard
+      title="Modo de tarificación"
+      tag="por franja"
+      tagTone="warn"
+      description="Elegí PUJA o precio fijo como default global; las franjas horarias pueden pinear otro modo por ventana. El cambio es global y queda auditado."
+    >
       <section>
-        <h3 className="text-sm font-medium text-ink-muted">Modo por defecto</h3>
+        <h4 className="text-sm font-medium text-ink-muted">Modo por defecto</h4>
         <p className="mt-1 text-sm text-ink-subtle">
           Se aplica a todo viaje nuevo que no caiga dentro de una franja horaria definida.
         </p>
@@ -106,7 +112,7 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
       </section>
 
       <section>
-        <h3 className="text-sm font-medium text-ink-muted">Franjas horarias</h3>
+        <h4 className="text-sm font-medium text-ink-muted">Franjas horarias</h4>
         {schedule.rules.length === 0 ? (
           <p className="mt-1 text-sm text-ink-subtle">
             Sin franjas: rige siempre el modo por defecto. El editor de franjas por horario llega
@@ -129,6 +135,6 @@ export function ModeSchedulePanel({ schedule }: { schedule: ModeScheduleView }) 
           </ul>
         )}
       </section>
-    </div>
+    </ConfigCard>
   );
 }

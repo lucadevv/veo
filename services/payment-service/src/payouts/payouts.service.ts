@@ -35,7 +35,13 @@ import {
   type PayoutGateway,
   type PayoutMethod,
 } from '../ports/gateway/payout-gateway.port';
-import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
+import {
+  Prisma,
+  PayoutStatus,
+  DriverCreditStatus,
+  DriverDebtStatus,
+  type Payout,
+} from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
@@ -98,6 +104,36 @@ export interface PayoutPage {
   items: Payout[];
   nextCursor: string | null;
 }
+
+/** Detalle de un payout = la fila completa + el desglose del netting abierto por FK (credit-back y deuda CASH
+ *  ligados a ESTE payout). `debtAppliedCents` (en la fila) es el NETO firmado; estos dos son sus componentes. */
+export interface PayoutDetail extends Payout {
+  creditBackCents: number;
+  debtSettledCents: number;
+}
+
+/**
+ * KPIs agregados de payouts para el panel FINANCE (GET /payouts/stats). `totalCents` = volumen total liquidado
+ * (suma de `amountCents` de TODOS los estados, Int céntimos); el resto son CONTEOS por estado. Un solo `groupBy`,
+ * sin materializar filas. Dinero SIEMPRE Int céntimos.
+ */
+export interface PayoutStats {
+  totalCents: number;
+  pendingCount: number;
+  processingCount: number;
+  processedCount: number;
+  heldCount: number;
+  failedCount: number;
+}
+
+/** Mapeo enum→campo de conteo (CERO strings mágicos): cada PayoutStatus va a su contador tipado en PayoutStats. */
+const PAYOUT_STATUS_COUNT_FIELD: Record<PayoutStatus, keyof Omit<PayoutStats, 'totalCents'>> = {
+  [PayoutStatus.PENDING]: 'pendingCount',
+  [PayoutStatus.PROCESSING]: 'processingCount',
+  [PayoutStatus.PROCESSED]: 'processedCount',
+  [PayoutStatus.HELD]: 'heldCount',
+  [PayoutStatus.FAILED]: 'failedCount',
+};
 const PAYOUTS_DEFAULT_LIMIT = 25;
 const PAYOUTS_MAX_LIMIT = 100;
 function clampPayoutLimit(limit?: number): number {
@@ -751,6 +787,59 @@ export class PayoutsService {
     const items = hasMore ? rows.slice(0, limit) : rows;
     const last = items[items.length - 1];
     return { items, nextCursor: hasMore && last ? last.id : null };
+  }
+
+  /**
+   * Detalle de un payout para el panel FINANCE (breakdown de auditoría). `debtAppliedCents` es el NETO firmado
+   * ya persistido (deuda CASH − credit-back); acá lo ABRIMOS en sus dos componentes por las FK dedicadas
+   * (`DriverCredit.appliedInPayoutId` / `DriverDebt.settledInPayoutId`) para que el waterfall muestre credit-back
+   * y deuda CASH por SEPARADO. Dos `aggregate` acotados por FK (no un scan difuso por driver+período).
+   */
+  async getPayout(id: string): Promise<PayoutDetail> {
+    const payout = await this.prisma.read.payout.findUnique({ where: { id } });
+    if (!payout) throw new NotFoundError('Payout no encontrado');
+    const [credits, debts] = await Promise.all([
+      this.prisma.read.driverCredit.aggregate({
+        where: { appliedInPayoutId: id, status: DriverCreditStatus.APPLIED },
+        _sum: { amountCents: true },
+      }),
+      this.prisma.read.driverDebt.aggregate({
+        where: { settledInPayoutId: id, status: DriverDebtStatus.SETTLED },
+        _sum: { amountCents: true },
+      }),
+    ]);
+    return {
+      ...payout,
+      creditBackCents: credits._sum.amountCents ?? 0,
+      debtSettledCents: debts._sum.amountCents ?? 0,
+    };
+  }
+
+  /**
+   * KPIs de la pantalla de Liquidaciones (GET /payouts/stats): volumen total liquidado + conteos por estado.
+   * UN solo `groupBy` por `status` (agrega en la DB, no materializa filas). El mapeo status→campo usa el enum
+   * `PayoutStatus` (PAYOUT_STATUS_COUNT_FIELD), sin strings mágicos. `totalCents` suma el `amountCents` de TODOS
+   * los estados (el NETO ya persistido en cada fila). Estados sin payouts no aparecen en el groupBy → quedan en 0.
+   */
+  async getStats(): Promise<PayoutStats> {
+    const grouped = await this.prisma.read.payout.groupBy({
+      by: ['status'],
+      _count: { _all: true },
+      _sum: { amountCents: true },
+    });
+    const stats: PayoutStats = {
+      totalCents: 0,
+      pendingCount: 0,
+      processingCount: 0,
+      processedCount: 0,
+      heldCount: 0,
+      failedCount: 0,
+    };
+    for (const g of grouped) {
+      stats.totalCents += g._sum.amountCents ?? 0;
+      stats[PAYOUT_STATUS_COUNT_FIELD[g.status]] = g._count._all;
+    }
+    return stats;
   }
 
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */

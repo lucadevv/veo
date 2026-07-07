@@ -16,7 +16,13 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { PayoutView } from '@veo/api-client';
+import type {
+  PayoutView,
+  PayoutDetailView,
+  PayoutStatsView,
+  RefundablePaymentView,
+  ReconciliationRunView,
+} from '@veo/api-client';
 import {
   FinanceService,
   type CommissionView,
@@ -28,6 +34,7 @@ import {
 } from './finance.service';
 import {
   PayoutsQueryDto,
+  ReconciliationQueryDto,
   RunPayoutsDto,
   RefundDto,
   ReplaceCommissionDto,
@@ -47,6 +54,34 @@ export class FinanceController {
     @Query() query: PayoutsQueryDto,
   ): Promise<{ items: PayoutView[]; nextCursor: string | null }> {
     return this.finance.listPayouts(user, query);
+  }
+
+  // Ruta ESTÁTICA `payouts/stats` declarada ANTES de la paramétrica `payouts/:id` para que `:id` no capture
+  // "stats". KPIs agregados (conteos + total): gate de clase FINANCE/ADMIN/SUPERADMIN, sin PII de persona.
+  @Get('payouts/stats')
+  @ApiOperation({ summary: 'KPIs de payouts: total liquidado + conteos por estado (stat cards)' })
+  payoutStats(@CurrentUser() user: AuthenticatedUser): Promise<PayoutStatsView> {
+    return this.finance.getPayoutStats(user);
+  }
+
+  @Get('payouts/:id')
+  @ApiOperation({
+    summary: 'Detalle de un payout con breakdown (deuda CASH y credit-back neteados por FK)',
+  })
+  payoutDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PayoutDetailView> {
+    return this.finance.getPayoutDetail(user, id);
+  }
+
+  @Get('reconciliation')
+  @ApiOperation({ summary: 'Historial de corridas de conciliación diaria (BR-P07) — FINANCE' })
+  reconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ReconciliationQueryDto,
+  ): Promise<{ items: ReconciliationRunView[]; nextCursor: string | null }> {
+    return this.finance.getReconciliation(user, query);
   }
 
   @Post('payouts/run')
@@ -139,6 +174,18 @@ export class FinanceController {
     @Body() dto: ReplaceCostPerKmDto,
   ): Promise<CostPerKmConfigView> {
     return this.finance.replaceCostPerKm(user, dto);
+  }
+
+  @Get('payments/by-trip/:tripId')
+  @ApiOperation({
+    summary:
+      'Cobro reembolsable de un viaje — inspección previa al reembolso (FINANCE; acceso a PII auditado, sin step-up por ser lectura)',
+  })
+  paymentByTrip(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId', ParseUUIDPipe) tripId: string,
+  ): Promise<RefundablePaymentView> {
+    return this.finance.getPaymentByTrip(user, tripId);
   }
 
   @Post('refunds/:tripId')

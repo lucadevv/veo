@@ -30,6 +30,20 @@ export class PayoutsQueryDto {
   limit?: number;
 }
 
+/** Historial de conciliación: paginación cursor por id descendente (uuidv7 ⇒ cronológico). */
+export class ReconciliationQueryDto {
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
 export class RunPayoutsDto {
   @IsOptional()
   @IsISO8601()

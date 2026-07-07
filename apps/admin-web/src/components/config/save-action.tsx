@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import { Button, type ButtonProps } from '@/components/ui/button';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
@@ -16,12 +17,15 @@ interface SaveActionProps {
   /** Acción a ejecutar tras el step-up (la mutación CAS del panel). El valor que resuelva se ignora (algunos
    *  `save` ahora devuelven `boolean` para short-circuit del caller) → se acepta cualquier Promise. */
   onSave: () => void | Promise<unknown>;
-  /** Título del diálogo de step-up. */
+  /** Título del diálogo de step-up (y `aria-label` del botón cuando es `icon`). */
   title: string;
   /** Descripción del diálogo de step-up. */
   description: string;
   /** Tamaño del botón (los paneles estándar usan 'md'; el catálogo usa 'sm'). */
   size?: ButtonProps['size'];
+  /** Ícono para el modo COMPACTO (tabla del catálogo): renderiza un icon-button cuadrado con tinte brand en
+   *  vez del botón de texto "Guardar", conservando el mismo gate (dirty/invalid/saving) + step-up MFA. */
+  icon?: ReactNode;
 }
 
 /**
@@ -42,10 +46,36 @@ export function SaveAction({
   title,
   description,
   size = 'md',
+  icon,
 }: SaveActionProps) {
   if (!canManage) return null;
 
-  if (!dirty || invalid || saving) {
+  const blocked = !dirty || invalid || saving;
+
+  // Modo COMPACTO (tabla del catálogo): un icon-button cuadrado con tinte brand. Mismo gate + step-up que el
+  // botón de texto; solo cambia la presentación para caber en una celda.
+  if (icon) {
+    const iconBtn = (
+      <button
+        type="button"
+        aria-label={title}
+        disabled={blocked}
+        className={cn(
+          'inline-flex size-9 items-center justify-center rounded-md border border-brand/30 bg-brand/12',
+          'text-brand transition-colors focus-visible:outline-none',
+          blocked ? 'opacity-50' : 'hover:border-brand',
+        )}
+      >
+        {icon}
+      </button>
+    );
+    if (blocked) return iconBtn;
+    return (
+      <StepUpDialog title={title} description={description} trigger={iconBtn} onVerified={onSave} />
+    );
+  }
+
+  if (blocked) {
     return (
       <Button variant="primary" size={size} disabled>
         Guardar

@@ -3,16 +3,28 @@
  * Los payouts se mapean a payoutView de @veo/api-client.
  */
 import { Injectable, Inject } from '@nestjs/common';
-import { InternalRestClient } from '@veo/rpc';
-import type { AuthenticatedUser } from '@veo/auth';
+import { ConfigService } from '@nestjs/config';
+import { InternalRestClient, type GrpcServiceClient, type DriversByIdsReply } from '@veo/rpc';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import type {
   PayoutView,
+  PayoutDetailView,
+  PayoutStatsView,
   CommissionView,
   CostPerKmConfigView,
   CostPerKmListView,
+  RefundablePaymentView,
+  ReconciliationRunView,
 } from '@veo/api-client';
-import { REST_PAYMENT, REST_BOOKING } from '../infra/tokens';
+import { REST_PAYMENT, REST_BOOKING, GRPC_IDENTITY } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { canSeeIdentity } from '../redaction/redaction.policy';
+import type { Env } from '../config/env.schema';
 import type {
   RunPayoutsDto,
   RefundDto,
@@ -47,6 +59,57 @@ interface Payout {
   heldReason: string | null;
 }
 
+/** Fila del DETALLE de un payout (GET /payouts/:id): la fila completa + el desglose del netting que
+ *  payment-service abre por FK (credit-back y deuda CASH ligados a este payout). Additive sobre `Payout`. */
+interface PayoutDetailRow extends Payout {
+  debtAppliedCents: number;
+  dedupKey: string | null;
+  externalRef: string | null;
+  createdAt: string;
+  creditBackCents: number;
+  debtSettledCents: number;
+}
+
+/** Fila cruda del Payment que sirve payment-service (GET /payments/by-trip/:tripId, SIN `select` → fila
+ *  completa). Solo declaramos los campos que el mapper consume; la PII de riel (externalRef/payerRef/
+ *  externalUid/checkoutUrl/qr/cip) llega pero NUNCA se propaga al admin-web (se recorta en el mapper). */
+interface PaymentRow {
+  id: string;
+  tripId: string;
+  driverId: string | null;
+  passengerId: string | null;
+  method: RefundablePaymentView['method'];
+  status: RefundablePaymentView['status'];
+  currency: string;
+  grossCents: number;
+  amountCents: number;
+  refundedCents: number;
+  discountCents: number;
+  creditCents: number;
+  tipCents: number;
+  capturedAt: string | null;
+  refundedAt: string | null;
+  createdAt: string;
+}
+
+/** Fila cruda de una corrida de conciliación (GET /reconciliation) que sirve payment-service: el model delgado
+ *  `ReconciliationRun` con el `details` Json opaco. El aplanado a la view tipada se hace en el mapper. */
+interface ReconRow {
+  id: string;
+  ranAt: string;
+  discrepancyPct: number;
+  alerted: boolean;
+  details: {
+    periodStart?: string;
+    periodEnd?: string;
+    dbTotalCents?: number;
+    statementTotalCents?: number;
+    dbCount?: number;
+    statementCount?: number;
+  } | null;
+  createdAt: string;
+}
+
 interface Page<T> {
   items: T[];
   nextCursor: string | null;
@@ -79,12 +142,41 @@ export interface PayoutDisburseResult {
 
 @Injectable()
 export class FinanceService {
+  /** HMAC del riel interno para firmar la metadata gRPC del lookup de nombres a identity (mismo que ops). */
+  private readonly secret: string;
+
   constructor(
     @Inject(REST_PAYMENT) private readonly rest: InternalRestClient,
     // F2.5 · el costo/km del carpooling vive en booking-service (no en payment): cliente REST propio.
     @Inject(REST_BOOKING) private readonly bookingRest: InternalRestClient,
+    // Enriquecimiento del NOMBRE del conductor (lista/detalle de payouts): identity es el dueño del dato. MISMO
+    // patrón que OpsService.listDrivers — GetDriversByIds batch (anti-N+1), keyeado por Driver.id. Es lectura.
+    @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly audit: AuditRecorder,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
+
+  /**
+   * Resuelve `driverId → nombre` para un conjunto de payouts (identity, batch anti-N+1 · MISMO patrón que
+   * OpsService). GATE PII (Ley 29733): el nombre del conductor es IDENTIDAD personal = Compliance+ — un operador
+   * FINANCE puro NO la ve (canSeeIdentity=false) → devolvemos un mapa VACÍO sin siquiera llamar a identity (ni
+   * fuga de PII ni round-trip inútil). Con rol habilitado: UNA `GetDriversByIds` por página; un id que identity no
+   * resuelve (conductor purgado / fuera de espacio) simplemente no entra al mapa → el caller degrada a null honesto.
+   */
+  private async resolveDriverNames(
+    identity: AuthenticatedUser,
+    driverIds: string[],
+  ): Promise<Map<string, string>> {
+    if (!canSeeIdentity(identity.roles) || driverIds.length === 0) return new Map();
+    const ids = [...new Set(driverIds)];
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const reply = await this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids }, meta);
+    // proto3 entrega "" para un nombre ausente → lo tratamos como no-resuelto (null honesto en el caller).
+    return new Map(reply.drivers.filter((d) => d.name).map((d) => [d.id, d.name]));
+  }
 
   /** Listado admin de TODOS los payouts (paginado, por estado) → payoutView. payment-service gatea RBAC. */
   async listPayouts(
@@ -95,7 +187,22 @@ export class FinanceService {
       identity,
       query: { status: query.status, cursor: query.cursor, limit: query.limit },
     });
-    return { items: page.items.map(toPayoutView), nextCursor: page.nextCursor };
+    // Enriquecimiento del nombre por PÁGINA (un solo lookup batch para todos los driverIds), gateado por PII.
+    const namesById = await this.resolveDriverNames(
+      identity,
+      page.items.map((p) => p.driverId),
+    );
+    return {
+      items: page.items.map((p) => toPayoutView(p, namesById.get(p.driverId) ?? null)),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  /** KPIs de la pantalla de Liquidaciones (GET /payouts/stats) → payoutStatsView. payment-service gatea RBAC.
+   *  Es agregado del sistema (conteos + un total, sin PII de persona) → passthrough tipado, SIN audit y SIN
+   *  enriquecimiento (espeja el criterio de getPayoutDetail/getReconciliation: no PII de un tercero). */
+  getPayoutStats(identity: AuthenticatedUser): Promise<PayoutStatsView> {
+    return this.rest.get<PayoutStatsView>('/payouts/stats', { identity });
   }
 
   async runPayouts(identity: AuthenticatedUser, dto: RunPayoutsDto): Promise<RunPayoutsResult> {
@@ -248,14 +355,69 @@ export class FinanceService {
     });
     return res;
   }
+
+  /**
+   * El cobro REEMBOLSABLE de un viaje (GET /payments/by-trip/:tripId en payment-service), para que el operador
+   * lo INSPECCIONE antes de reembolsar: es EXACTAMENTE el pago que `refund` tocaría. Es lectura de PII (ids de
+   * personas + montos) → se AUDITA el acceso (`payment.view_by_trip`, fail-closed) tras el gate FINANCE del
+   * controller. El shaping recorta la PII de riel; el admin-web nunca ve externalRef/payerRef/uid/checkout.
+   */
+  async getPaymentByTrip(
+    identity: AuthenticatedUser,
+    tripId: string,
+  ): Promise<RefundablePaymentView> {
+    const row = await this.rest.get<PaymentRow>(`/payments/by-trip/${tripId}`, { identity });
+    const view = toRefundablePaymentView(row);
+    await this.audit.record(identity, {
+      action: 'payment.view_by_trip',
+      resourceType: 'payment',
+      resourceId: view.paymentId,
+      payload: { tripId },
+    });
+    return view;
+  }
+
+  /**
+   * Detalle de un payout para el panel FINANCE (breakdown de auditoría: deuda CASH y credit-back neteados por
+   * FK, + traza del desembolso). Es lectura de los montos del PROPIO conductor (no PII de un tercero) → gate
+   * `@Roles` de clase, SIN step-up y SIN audit — espeja `listPayouts`, NO `getPaymentByTrip` (que audita por la
+   * PII de riel del pasajero). El desglose lo abre payment-service por FK; acá solo se mapea.
+   */
+  async getPayoutDetail(
+    identity: AuthenticatedUser,
+    payoutId: string,
+  ): Promise<PayoutDetailView> {
+    const row = await this.rest.get<PayoutDetailRow>(`/payouts/${payoutId}`, { identity });
+    // Enriquecimiento del nombre (MISMO patrón/gate PII que la lista): un solo id → lookup batch de un elemento.
+    const namesById = await this.resolveDriverNames(identity, [row.driverId]);
+    return toPayoutDetailView(row, namesById.get(row.driverId) ?? null);
+  }
+
+  /**
+   * Historial paginado de corridas de conciliación (BR-P07) para el panel FINANCE. Cierra el hueco #3: el
+   * `ReconciliationRun` lo puebla el cron pero no estaba expuesto al admin. Es data AGREGADA del sistema (no
+   * PII de una persona) → gate `@Roles` de clase, SIN step-up y SIN audit (espeja listPayouts/getPayoutDetail).
+   */
+  async getReconciliation(
+    identity: AuthenticatedUser,
+    query: { cursor?: string; limit?: number },
+  ): Promise<Page<ReconciliationRunView>> {
+    const page = await this.rest.get<Page<ReconRow>>('/reconciliation', {
+      identity,
+      query: { cursor: query.cursor, limit: query.limit },
+    });
+    return { items: page.items.map(toReconciliationRunView), nextCursor: page.nextCursor };
+  }
 }
 
 // Desglose completo al panel FINANCE (ADR-015 D6 / hueco #4): NO se descarta gross/commission/processedAt/
 // heldReason que payment-service ya sirve. `amountCents` queda = NETO (paridad con la app del conductor).
-function toPayoutView(p: Payout): PayoutView {
+// `driverName` lo resuelve el service (identity, gateado por PII); null = no visible (FINANCE puro) o no resuelto.
+function toPayoutView(p: Payout, driverName: string | null): PayoutView {
   return {
     id: p.id,
     driverId: p.driverId,
+    driverName,
     grossCents: p.grossCents,
     commissionCents: p.commissionCents,
     amountCents: p.amountCents,
@@ -263,5 +425,62 @@ function toPayoutView(p: Payout): PayoutView {
     period: `${p.periodStart}..${p.periodEnd}`,
     processedAt: p.processedAt,
     heldReason: p.heldReason,
+  };
+}
+
+// Extiende toPayoutView con el breakdown de auditoría (DRY: reusa el mapeo base). `debtAppliedCents` es el NETO
+// firmado ya persistido; `debtSettledCents`/`creditBackCents` son sus componentes abiertos por FK en el servicio.
+function toPayoutDetailView(p: PayoutDetailRow, driverName: string | null): PayoutDetailView {
+  return {
+    ...toPayoutView(p, driverName),
+    debtSettledCents: p.debtSettledCents,
+    creditBackCents: p.creditBackCents,
+    debtAppliedCents: p.debtAppliedCents,
+    dedupKey: p.dedupKey,
+    externalRef: p.externalRef,
+    createdAt: p.createdAt,
+  };
+}
+
+// Aplana el `details` Json de la corrida a la view tipada. Corridas viejas sin details → period null + 0s
+// (degradación honesta: nunca inventamos montos). `discrepancyPct`/`alerted` viven en columnas propias.
+function toReconciliationRunView(r: ReconRow): ReconciliationRunView {
+  const d = r.details ?? {};
+  return {
+    id: r.id,
+    ranAt: r.ranAt,
+    discrepancyPct: r.discrepancyPct,
+    alerted: r.alerted,
+    periodStart: d.periodStart ?? null,
+    periodEnd: d.periodEnd ?? null,
+    dbTotalCents: d.dbTotalCents ?? 0,
+    statementTotalCents: d.statementTotalCents ?? 0,
+    dbCount: d.dbCount ?? 0,
+    statementCount: d.statementCount ?? 0,
+  };
+}
+
+// Recorta a lo que la pantalla de reembolso necesita, DESCARTANDO la PII de riel (externalRef/payerRef/
+// externalUid/checkoutUrl/qr/cip nunca viajan al admin-web). `refundableCents` = saldo aún reembolsable
+// (amount − ya reembolsado), clamp a 0 por si un dato viejo tuviera refunded > amount (nunca negativo).
+function toRefundablePaymentView(p: PaymentRow): RefundablePaymentView {
+  return {
+    paymentId: p.id,
+    tripId: p.tripId,
+    driverId: p.driverId,
+    passengerId: p.passengerId,
+    method: p.method,
+    status: p.status,
+    currency: p.currency,
+    grossCents: p.grossCents,
+    amountCents: p.amountCents,
+    refundedCents: p.refundedCents,
+    refundableCents: Math.max(0, p.amountCents - p.refundedCents),
+    discountCents: p.discountCents,
+    creditCents: p.creditCents,
+    tipCents: p.tipCents,
+    capturedAt: p.capturedAt,
+    refundedAt: p.refundedAt,
+    createdAt: p.createdAt,
   };
 }

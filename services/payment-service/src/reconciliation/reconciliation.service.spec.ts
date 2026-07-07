@@ -222,3 +222,54 @@ describe('ReconciliationService.sweepStaleCashPending · red de seguridad del ef
     // El fake de payment no define update/updateMany: cualquier intento de escritura explotaría acá.
   });
 });
+
+describe('ReconciliationService.listRuns · historial paginado (hueco #3 · solo lectura)', () => {
+  function makeRun(id: string) {
+    return {
+      id,
+      ranAt: new Date('2026-06-11T04:00:00.000Z'),
+      discrepancyPct: 0.002,
+      alerted: false,
+      details: {
+        periodStart: '2026-06-10T00:00:00.000Z',
+        periodEnd: '2026-06-11T00:00:00.000Z',
+        dbTotalCents: 100_000,
+        statementTotalCents: 100_200,
+        dbCount: 40,
+        statementCount: 40,
+      },
+      createdAt: new Date('2026-06-11T04:00:00.000Z'),
+    };
+  }
+  function buildWithRuns(runs: ReturnType<typeof makeRun>[]) {
+    const findMany = vi.fn(async ({ take }: { take: number }) => runs.slice(0, take));
+    const client = { reconciliationRun: { findMany }, refund: {}, payment: {} };
+    const prisma = { read: client, write: client } as unknown as PrismaService;
+    const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig());
+    return { svc, findMany };
+  }
+
+  it('pide limit+1 ordenado por id desc y recorta a limit, devolviendo nextCursor cuando hay más', async () => {
+    const runs = ['r5', 'r4', 'r3', 'r2', 'r1'].map(makeRun); // 5 corridas, id desc
+    const { svc, findMany } = buildWithRuns(runs);
+    const page = await svc.listRuns({ limit: 3 });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { id: 'desc' }, take: 4 }),
+    );
+    expect(page.items.map((r) => r.id)).toEqual(['r5', 'r4', 'r3']);
+    expect(page.nextCursor).toBe('r3'); // id de la última fila de la página
+  });
+
+  it('sin más páginas → nextCursor null', async () => {
+    const { svc } = buildWithRuns(['r2', 'r1'].map(makeRun));
+    const page = await svc.listRuns({ limit: 30 });
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('aplica el cursor como filtro id < cursor (paginación estable)', async () => {
+    const { svc, findMany } = buildWithRuns(['r1'].map(makeRun));
+    await svc.listRuns({ cursor: 'r9', limit: 10 });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { lt: 'r9' } } }));
+  });
+});

@@ -6,6 +6,7 @@ import { apiClient } from './client';
 import { FILTER_ALL } from '@/lib/filters';
 import {
   analyticsOverview,
+  revenueMetricsView,
   auditChainVerification,
   auditEntryView,
   type CreateDocumentRequest,
@@ -34,6 +35,10 @@ import {
   costPerKmListView,
   energyCatalogView,
   bidFloorView,
+  refundablePaymentView,
+  payoutDetailView,
+  payoutStatsView,
+  reconciliationRunView,
   type ReplaceBaseFareRequest,
   type ReplaceCommissionRequest,
   type ReplaceCostPerKmRequest,
@@ -60,11 +65,13 @@ import {
   tripSummary,
   vehicleView,
   type TripStatus,
+  type RevenueRangeValue,
 } from './schemas';
 
 /** Llaves de caché centralizadas para invalidaciones consistentes. */
 export const qk = {
   overview: ['overview'] as const,
+  revenueMetrics: (range: string) => ['analytics-revenue', range] as const,
   trips: (f: TripFilters) => ['trips', f] as const,
   trip: (id: string) => ['trip', id] as const,
   drivers: (status: string) => ['drivers', status] as const,
@@ -83,6 +90,10 @@ export const qk = {
   modelReview: (status: string) => ['vehicle-model-review', status] as const,
   vehicleModels: ['vehicle-models'] as const,
   payouts: (status: string) => ['payouts', status] as const,
+  payoutStats: ['payout-stats'] as const,
+  paymentByTrip: (tripId: string) => ['payment-by-trip', tripId] as const,
+  payoutDetail: (id: string) => ['payout-detail', id] as const,
+  reconciliation: ['reconciliation'] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
@@ -118,6 +129,19 @@ export function useOverview() {
     queryFn: ({ signal }) =>
       apiClient().get('/analytics/overview', { schema: analyticsOverview, signal }),
     refetchInterval: REALTIME_REFETCH,
+  });
+}
+
+/**
+ * Métricas de INGRESOS del período (money-in, comisión bruta, margen, reembolsado + serie por bucket). El rango
+ * (today/7d/30d) es parte de la queryKey → cambiar de rango re-consulta y cachea por separado. Dato real de
+ * payment-service (agregado en TZ Lima); sin refetch en vivo (es analítica, no operación instantánea).
+ */
+export function useRevenueMetrics(range: RevenueRangeValue) {
+  return useQuery({
+    queryKey: qk.revenueMetrics(range),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/analytics/revenue?range=${range}`, { schema: revenueMetricsView, signal }),
   });
 }
 
@@ -711,6 +735,15 @@ export function useCreateInspection() {
 /* ── Finanzas ── */
 const payoutPage = paginated(payoutView);
 
+/* ── KPIs de Liquidaciones: total liquidado + conteos por estado (stat cards) — FINANCE/ADMIN ── */
+export function usePayoutStats() {
+  return useQuery({
+    queryKey: qk.payoutStats,
+    queryFn: ({ signal }) =>
+      apiClient().get('/finance/payouts/stats', { schema: payoutStatsView, signal }),
+  });
+}
+
 export function usePayouts(status: string) {
   return useInfiniteQuery({
     queryKey: qk.payouts(status),
@@ -720,6 +753,23 @@ export function usePayouts(status: string) {
         schema: payoutPage,
         signal,
         query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+const reconciliationPage = paginated(reconciliationRunView);
+
+/* ── Historial de conciliación diaria (BR-P07): corridas DB vs extracto del gateway — FINANCE/ADMIN ── */
+export function useReconciliation() {
+  return useInfiniteQuery({
+    queryKey: qk.reconciliation,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/finance/reconciliation', {
+        schema: reconciliationPage,
+        signal,
+        query: cleanQuery({ cursor: pageParam, limit: 50 }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
@@ -798,6 +848,27 @@ export function useRefund() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['payouts'] });
     },
+  });
+}
+
+/* ── Cobro reembolsable de un viaje: inspección PREVIA al reembolso (FINANCE · acceso a PII auditado server-side) ── */
+export function usePaymentByTrip(tripId: string | null) {
+  return useQuery({
+    queryKey: qk.paymentByTrip(tripId ?? ''),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/finance/payments/by-trip/${tripId}`, { schema: refundablePaymentView, signal }),
+    // Solo consulta cuando hay un tripId (el operador tipeó/pegó el viaje a reembolsar); sin él no hay nada que ver.
+    enabled: !!tripId,
+  });
+}
+
+/* ── Detalle de un payout: breakdown de auditoría (deuda CASH + credit-back neteados por FK) — FINANCE/ADMIN ── */
+export function usePayoutDetail(payoutId: string | null) {
+  return useQuery({
+    queryKey: qk.payoutDetail(payoutId ?? ''),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/finance/payouts/${payoutId}`, { schema: payoutDetailView, signal }),
+    enabled: !!payoutId,
   });
 }
 

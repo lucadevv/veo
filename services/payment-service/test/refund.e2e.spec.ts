@@ -711,3 +711,68 @@ describe('PaymentsService.refund · backstop de VENTANA de idempotencia (cross-k
     expect((await prisma.payment.findUnique({ where: { id } }))?.refundedCents).toBe(1500);
   });
 });
+
+describe('PaymentsService.getPaymentByTrip · hueco #2 (lookup del cobro reembolsable)', () => {
+  /** Inserta un Payment del viaje con kind/status/captura controlados (el resto = defaults conocidos-buenos). */
+  async function seedPayment(o: {
+    tripId: string;
+    kind: 'FARE' | 'TIP';
+    status?: 'CAPTURED' | 'PENDING';
+    capturedAt?: Date;
+    amountCents?: number;
+  }): Promise<string> {
+    const id = uuidv7();
+    const amountCents = o.amountCents ?? 2000;
+    const status = o.status ?? 'CAPTURED';
+    await prisma.payment.create({
+      data: {
+        id,
+        tripId: o.tripId,
+        passengerId: PAX,
+        dedupKey: `${o.kind.toLowerCase()}:${id}`,
+        amountCents,
+        grossCents: amountCents,
+        commissionCents: 400,
+        feeCents: 0,
+        refundedCents: 0,
+        method: 'YAPE',
+        kind: o.kind,
+        status,
+        capturedAt: status === 'PENDING' ? null : (o.capturedAt ?? new Date()),
+      },
+    });
+    return id;
+  }
+
+  it('devuelve el cobro FARE del viaje, NUNCA el TIP del mismo trip (A1 · ADR-022)', async () => {
+    const { service } = makeService();
+    const tripId = uuidv7();
+    await seedPayment({ tripId, kind: 'TIP' }); // propina del mismo viaje — NO elegible para reembolso
+    const fareId = await seedPayment({ tripId, kind: 'FARE' });
+
+    const payment = await service.getPaymentByTrip(tripId);
+    expect(payment.id).toBe(fareId);
+    expect(payment.kind).toBe('FARE');
+  });
+
+  it('elige el FARE reembolsable MÁS RECIENTE (orderBy capturedAt desc)', async () => {
+    const { service } = makeService();
+    const tripId = uuidv7();
+    await seedPayment({ tripId, kind: 'FARE', capturedAt: new Date(Date.now() - 3_600_000) });
+    const newer = await seedPayment({ tripId, kind: 'FARE', capturedAt: new Date() });
+
+    expect((await service.getPaymentByTrip(tripId)).id).toBe(newer);
+  });
+
+  it('sin cobro reembolsable para el viaje → NotFoundError (mismo desenlace que refund)', async () => {
+    const { service } = makeService();
+    await expect(service.getPaymentByTrip(uuidv7())).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('un cobro PENDING (no capturado) NO es reembolsable → NotFoundError', async () => {
+    const { service } = makeService();
+    const tripId = uuidv7();
+    await seedPayment({ tripId, kind: 'FARE', status: 'PENDING' });
+    await expect(service.getPaymentByTrip(tripId)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});

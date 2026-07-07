@@ -1,9 +1,19 @@
 'use client';
 
-import { useState } from 'react';
-import { AlertTriangle, Check, RefreshCw, X } from 'lucide-react';
+import { forwardRef, useState } from 'react';
+import {
+  Ambulance,
+  Bike,
+  Car,
+  Check,
+  RefreshCw,
+  Truck,
+  TriangleAlert,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react';
 import { solesToCents } from '@veo/utils/money';
-import { PricingMode, ServiceType } from '@veo/shared-types';
+import { PricingMode, ServiceType, VehicleClass } from '@veo/shared-types';
 import type {
   BidFloorView,
   CatalogOffering,
@@ -20,14 +30,13 @@ import {
 import { useReplaceBidFloor, useReplaceCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
+import { cn } from '@/lib/cn';
 import { formatSolesInput, parseSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
+import { RateInput } from '@/components/config/config-card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
-import { Badge } from '@/components/ui/badge';
 
 /** Valor del select "Automático" (sin pin → manda el schedule global). */
 const AUTO = '';
@@ -40,42 +49,21 @@ const MODE_LABEL: Record<PricingMode, string> = { PUJA: 'Puja', FIXED: 'Precio f
 const MULTIPLIER_MAX_UI = 10;
 
 /**
- * Ejes de presentación del catálogo (ADR-017 §1.2 · F2.3): el panel agrupa las ofertas por su eje de
- * diferenciación en vez de una lista plana — CALIDAD (tier de confort) y CAPACIDAD (tamaño) son ejes
- * SEPARADOS, más los SERVICIOS ESPECIALES (verticales). El eje se DERIVA del dominio, nunca del `id`.
+ * Ícono de la oferta, DERIVADO del dominio (vertical + clase de vehículo), nunca del `id` mágico: las
+ * verticales especiales (ambulancia/grúa/mecánico) llevan su ícono; entre las RIDE, MOTO → bici, CAR → auto.
  */
-const CatalogAxis = { CALIDAD: 'CALIDAD', CAPACIDAD: 'CAPACIDAD', ESPECIAL: 'ESPECIAL' } as const;
-type CatalogAxis = (typeof CatalogAxis)[keyof typeof CatalogAxis];
-
-/**
- * Eje de una oferta, derivado de su VERTICAL (`serviceType`) y su requisito de TAMAÑO (`requires.minSeats`):
- * las verticales no-RIDE (ambulancia/grúa/mecánico) son SERVICIOS ESPECIALES; entre las RIDE, la que exige
- * asientos es CAPACIDAD (VEO XL) y el resto CALIDAD (la escalera de confort). Sin comparar ids mágicos.
- */
-function offeringAxis(o: CatalogOffering): CatalogAxis {
-  if (o.serviceType !== ServiceType.RIDE) return CatalogAxis.ESPECIAL;
-  if (o.requires?.minSeats != null) return CatalogAxis.CAPACIDAD;
-  return CatalogAxis.CALIDAD;
+function offeringIcon(o: CatalogOffering): LucideIcon {
+  switch (o.serviceType) {
+    case ServiceType.AMBULANCE:
+      return Ambulance;
+    case ServiceType.TOW:
+      return Truck;
+    case ServiceType.MECHANIC:
+      return Wrench;
+    default:
+      return o.vehicleClass === VehicleClass.MOTO ? Bike : Car;
+  }
 }
-
-/** Secciones en orden de presentación + su copy. Las ofertas de cada sección conservan su `sortOrder`. */
-const AXIS_SECTIONS: readonly { axis: CatalogAxis; label: string; hint: string }[] = [
-  {
-    axis: CatalogAxis.CALIDAD,
-    label: 'Calidad',
-    hint: 'Nivel de confort del viaje. La fórmula (distancia/tiempo) es la misma; el multiplicador la escala por tier.',
-  },
-  {
-    axis: CatalogAxis.CAPACIDAD,
-    label: 'Capacidad',
-    hint: 'Diferenciada por tamaño del vehículo (asientos), no por confort.',
-  },
-  {
-    axis: CatalogAxis.ESPECIAL,
-    label: 'Servicios especiales',
-    hint: 'Verticales con flujo propio (emergencia/asistencia). Solo precio fijo: no se pujan.',
-  },
-];
 
 /**
  * Tarifas por oferta (ADR 013 · Fase B / A1). El admin prende/apaga cada oferta y, por oferta, pinea el MODO
@@ -86,6 +74,10 @@ const AXIS_SECTIONS: readonly { axis: CatalogAxis; label: string; hint: string }
  *
  * El catálogo y el piso de la PUJA son DOS configs distintas (endpoint + versión/CAS propios): cada una tiene
  * su Guardar, su step-up y su optimistic-locking. No se mezclan en un PUT — serían dos mutations no-atómicas.
+ *
+ * Diseño (veo.pen · "Tarifas por oferta"): UNA tabla PLANA — las ofertas se listan por su `sortOrder`, sin
+ * agrupar por eje (calidad/capacidad/especial). Cada fila trae modo (select), multiplicador, los dos mínimos,
+ * el switch de disponibilidad y un icon-button de guardado.
  */
 /** Datos del piso de la PUJA que necesita UNA fila, o `undefined` si su config (bid-floor) no está disponible. */
 interface OfferingFloor {
@@ -165,78 +157,147 @@ export function CatalogPanel({
   }
 
   const activeCount = catalog.offerings.filter((o) => o.enabled).length;
+  // Lista PLANA por `sortOrder` (copia — no mutar el array de la query). El diseño no agrupa por eje.
+  const rows = [...catalog.offerings].sort((a, b) => a.sortOrder - b.sortOrder);
 
   return (
-    <div className="flex flex-col gap-6 pt-4">
-      <section>
-        <h2 className="text-sm font-medium text-ink-muted">Ofertas de servicio</h2>
-        <p className="mt-1 text-sm text-ink-subtle">
-          El pasajero ve, cotiza y pide solo con lo configurado acá. El modo se restringe a lo que
-          cada oferta permite; el precio sale de la fórmula (distancia/tiempo) y estos valores lo
-          escalan. Cada oferta lleva dos mínimos: la tarifa fija y, si puja, el piso de la puja. El
-          cambio es global y queda auditado.
+    <div className="space-y-4 pt-4">
+      {activeCount === 0 ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger"
+        >
+          Ninguna oferta habilitada: los pasajeros no podrán pedir un viaje hasta que actives al
+          menos una.
         </p>
+      ) : null}
 
-        {activeCount === 0 ? (
-          <p
-            role="alert"
-            className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger"
-          >
-            Ninguna oferta habilitada: los pasajeros no podrán pedir un viaje hasta que actives al
-            menos una.
-          </p>
-        ) : null}
+      <div className="overflow-hidden rounded-lg border border-border">
+        <table className="w-full border-collapse">
+          <thead className="bg-surface-2">
+            <tr className="border-b border-border">
+              <th className="w-full py-3 pl-5 pr-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Categoría
+              </th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">Modo</th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Multiplicador
+              </th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Tarifa mínima
+              </th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Piso de puja
+              </th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Activa
+              </th>
+              <th className="py-3 pl-3 pr-5" aria-label="Guardar" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((o) => (
+              // El `key` incluye la disponibilidad del bid-floor: cuando su query resuelve (undefined→data),
+              // la fila se re-monta y el input del piso re-siembra su estado desde el override ya cargado (sin
+              // esto el `useState` inicial — sembrado en '' mientras el piso cargaba — quedaría stale → dirty falso).
+              <OfferingRow
+                key={`${o.id}:${bidFloor ? 'floor' : 'no-floor'}`}
+                offering={o}
+                override={overrideOf(o.id)}
+                floor={
+                  bidFloor
+                    ? {
+                        overrideCents: offeringFloorOverrideCents(bidFloor, o.id),
+                        defaultFloorCents: bidFloor.defaultFloorCents,
+                      }
+                    : undefined
+                }
+                canManage={canManage}
+                canManageFloor={canManageFloor}
+                pending={saving}
+                pendingFloor={savingBid}
+                onSetEnabled={setEnabled}
+                onSavePricing={savePricing}
+                onSaveFloor={saveFloor}
+                onRetryFloor={onRetryBidFloor}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-        {/* Agrupado por EJE (F2.3): CALIDAD / CAPACIDAD / SERVICIOS ESPECIALES. Cada sección solo se
-            muestra si tiene ofertas; dentro, el orden es el `sortOrder` que ya trae el catálogo. */}
-        {AXIS_SECTIONS.map((sec) => {
-          const rows = catalog.offerings.filter((o) => offeringAxis(o) === sec.axis);
-          if (rows.length === 0) return null;
-          return (
-            <div key={sec.axis} className="mt-5">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">
-                {sec.label}
-              </h3>
-              <p className="mt-1 text-xs text-ink-subtle">{sec.hint}</p>
-              <ul className="mt-2 divide-y divide-border rounded-lg border border-border">
-                {rows.map((o) => (
-                  // El `key` incluye la disponibilidad del bid-floor: cuando su query resuelve (undefined→data),
-                  // la fila se re-monta y el input del piso re-siembra su estado desde el override ya cargado (sin
-                  // esto el `useState` inicial — sembrado en '' mientras el piso cargaba — quedaría stale → dirty falso).
-                  <OfferingRow
-                    key={`${o.id}:${bidFloor ? 'floor' : 'no-floor'}`}
-                    offering={o}
-                    override={overrideOf(o.id)}
-                    floor={
-                      bidFloor
-                        ? {
-                            overrideCents: offeringFloorOverrideCents(bidFloor, o.id),
-                            defaultFloorCents: bidFloor.defaultFloorCents,
-                          }
-                        : undefined
-                    }
-                    canManage={canManage}
-                    canManageFloor={canManageFloor}
-                    pending={saving}
-                    pendingFloor={savingBid}
-                    onSetEnabled={setEnabled}
-                    onSavePricing={savePricing}
-                    onSaveFloor={saveFloor}
-                    onRetryFloor={onRetryBidFloor}
-                  />
-                ))}
-              </ul>
-            </div>
-          );
-        })}
+      {/* Nota informativa de la validación cruzada (A1) — el aviso POR FILA aparece bajo la oferta afectada. */}
+      <p className="flex items-start gap-2 text-xs text-ink-muted">
+        <TriangleAlert className="mt-px size-3.5 shrink-0 text-warn" aria-hidden />
+        <span>
+          Validación cruzada: se avisa por fila si el piso de puja de una oferta supera su tarifa
+          mínima fija (el mismo viaje saldría más barato en FIJO que el mínimo pujable).
+        </span>
+      </p>
 
-        <ReadOnlyNote canManage={canManage} noun="el catálogo" className="mt-3" />
-      </section>
+      <ReadOnlyNote canManage={canManage} noun="el catálogo" />
     </div>
   );
 }
 
-/** Una fila de oferta: estado + (si canManage) editor de modo + precio + piso de puja, cada uno con su guardado dirty. */
+/**
+ * Switch accesible (button role="switch"): sirve de estado editable (envuelto en StepUpDialog dispara
+ * setEnabled) o de indicador de solo-lectura (disabled). forwardRef para que Radix (DialogTrigger asChild) le
+ * inyecte onClick/ref al usarlo como trigger del step-up.
+ */
+const Switch = forwardRef<
+  HTMLButtonElement,
+  { checked: boolean; label: string } & React.ButtonHTMLAttributes<HTMLButtonElement>
+>(function Switch({ checked, label, disabled, className, ...props }, ref) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      className={cn(
+        'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline-none',
+        checked ? 'justify-end bg-brand' : 'justify-start border border-border-strong bg-surface-2',
+        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+        className,
+      )}
+      {...props}
+    >
+      <span className="size-5 rounded-full bg-ink" />
+    </button>
+  );
+});
+
+/** Celda tipo RateField (config-card): box con borde + input + sufijo de unidad + error debajo. Sin label (el
+ *  encabezado de la columna hace de label). Reusa RateInput (mono/tabular) para el value. */
+function RateCell({
+  unit,
+  error,
+  children,
+}: {
+  unit: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="w-28">
+      <div
+        className={cn(
+          'flex items-center gap-1.5 rounded-md border bg-surface-2 px-2.5 py-1.5 focus-within:border-brand',
+          error ? 'border-danger' : 'border-border-strong',
+        )}
+      >
+        {children}
+        <span className="shrink-0 text-xs text-ink-subtle">{unit}</span>
+      </div>
+      {error ? <p className="mt-1 text-xs text-danger">{error}</p> : null}
+    </div>
+  );
+}
+
+/** Una fila de oferta (tabla): estado + editor de modo + precio + piso de puja + switch, cada uno con su guardado dirty. */
 function OfferingRow({
   offering,
   override,
@@ -347,97 +408,47 @@ function OfferingRow({
     }
   }
 
+  const Icon = offeringIcon(offering);
+  const toggleTitle = `${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${offeringLabel(offering.id)}`;
+  const toggleDescription = offering.enabled
+    ? `Los pasajeros dejarán de ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`
+    : `Los pasajeros volverán a ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`;
+
   return (
-    <li className="flex flex-col gap-3 px-4 py-3">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col">
-          <span className="font-medium text-ink">{offeringLabel(offering.id)}</span>
-          <span className="text-xs text-ink-subtle">
-            {offering.vehicleClass} · efectivo ×{offering.pricing.multiplier} · mín S/
-            {formatSolesInput(offering.pricing.minFareCents)}
-            {offering.modePin ? ` · modo ${MODE_LABEL[offering.modePin]}` : ' · modo automático'}
-          </span>
-        </div>
+    <>
+      <tr className={cn('bg-surface', crossWarn ? '' : 'border-b border-border')}>
+        {/* Categoría: ícono en cuadrito + nombre legible. */}
+        <td className="py-2.5 pl-5 pr-3 align-middle">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-ink-muted">
+              <Icon className="size-4" aria-hidden />
+            </span>
+            <span className="text-sm font-semibold text-ink">{offeringLabel(offering.id)}</span>
+          </div>
+        </td>
 
-        <div className="flex items-center gap-3">
-          {offering.enabled ? (
-            <Badge tone="success" className="gap-1">
-              <Check className="size-3.5" aria-hidden /> Habilitada
-            </Badge>
-          ) : (
-            <Badge tone="neutral" className="gap-1">
-              <X className="size-3.5" aria-hidden /> Deshabilitada
-            </Badge>
-          )}
-
-          {canManage ? (
-            pending ? (
-              <Button variant={offering.enabled ? 'ghost' : 'primary'} size="sm" disabled>
-                {offering.enabled ? 'Deshabilitar' : 'Habilitar'}
-              </Button>
-            ) : (
-              <StepUpDialog
-                trigger={
-                  <Button variant={offering.enabled ? 'ghost' : 'primary'} size="sm">
-                    {offering.enabled ? 'Deshabilitar' : 'Habilitar'}
-                  </Button>
-                }
-                title={`${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${offeringLabel(offering.id)}`}
-                description={
-                  offering.enabled
-                    ? `Los pasajeros dejarán de ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`
-                    : `Los pasajeros volverán a ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`
-                }
-                onVerified={() => onSetEnabled(offering.id, !offering.enabled)}
-              />
-            )
-          ) : null}
-        </div>
-      </div>
-
-      {/* Validación cruzada (A1): visible también en solo-lectura, porque es una incongruencia del DATO. */}
-      {crossWarn ? (
-        <p className="flex items-start gap-1.5 text-xs text-warn">
-          <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
-          <span>
-            El piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) supera la tarifa mínima fija
-            (S/{formatSolesInput(crossWarn.fixedMinCents)}): el mismo viaje sale más barato en FIJO
-            que el mínimo que se puede pujar.
-          </span>
-        </p>
-      ) : null}
-
-      {canManage ? (
-        // UN grid con todos los knobs per-oferta + UN Guardar. Las ofertas que pujan suman la 4ta columna
-        // "Piso de puja" ADYACENTE a "Tarifa mínima" → los dos mínimos se leen juntos, sin hueco ni 2do botón.
-        <div
-          className={`grid grid-cols-1 items-end gap-3 ${
-            allowsPuja && canManageFloor
-              ? 'sm:grid-cols-[1fr_1fr_1fr_1fr_auto]'
-              : 'sm:grid-cols-[1fr_1fr_1fr_auto]'
-          }`}
-        >
-          <Field label="Modo" hint="Restringido a lo que la oferta permite">
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-              className="h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-ink hover:border-border-strong focus-visible:outline-none"
-            >
-              <option value={AUTO}>Automático (según horario)</option>
-              {offering.allowedModes.map((m) => (
-                <option key={m} value={m}>
-                  {MODE_LABEL[m]}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field
-            label="Multiplicador"
-            hint="Vacío = valor de código"
-            error={multInvalid ? 'Debe ser > 0' : undefined}
+        {/* Modo: select compacto restringido a los modos que la oferta permite. */}
+        <td className="px-3 py-2.5 align-middle">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            disabled={!canManage}
+            aria-label={`Modo de ${offeringLabel(offering.id)}`}
+            className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
           >
-            <Input
+            <option value={AUTO}>Auto</option>
+            {offering.allowedModes.map((m) => (
+              <option key={m} value={m}>
+                {MODE_LABEL[m]}
+              </option>
+            ))}
+          </select>
+        </td>
+
+        {/* Multiplicador. */}
+        <td className="px-3 py-2.5 align-middle">
+          <RateCell unit="×" error={multInvalid ? 'Debe ser > 0' : undefined}>
+            <RateInput
               type="number"
               inputMode="decimal"
               step="0.05"
@@ -446,15 +457,16 @@ function OfferingRow({
               placeholder={offering.pricing.multiplier.toString()}
               value={multiplier}
               onChange={(e) => setMultiplier(e.target.value)}
+              disabled={!canManage}
+              aria-label={`Multiplicador de ${offeringLabel(offering.id)}`}
             />
-          </Field>
+          </RateCell>
+        </td>
 
-          <Field
-            label="Tarifa mínima (S/)"
-            hint="Mínimo en modo FIJO · vacío = valor de código"
-            error={minFareInvalid ? 'Debe ser ≥ 0' : undefined}
-          >
-            <Input
+        {/* Tarifa mínima FIJA. */}
+        <td className="px-3 py-2.5 align-middle">
+          <RateCell unit="S/" error={minFareInvalid ? 'Debe ser ≥ 0' : undefined}>
+            <RateInput
               type="number"
               inputMode="decimal"
               step="0.50"
@@ -462,53 +474,103 @@ function OfferingRow({
               placeholder={formatSolesInput(offering.pricing.minFareCents)}
               value={minFareSoles}
               onChange={(e) => setMinFareSoles(e.target.value)}
+              disabled={!canManage}
+              aria-label={`Tarifa mínima de ${offeringLabel(offering.id)}`}
             />
-          </Field>
+          </RateCell>
+        </td>
 
-          {allowsPuja && canManageFloor ? (
+        {/* Piso de la PUJA: solo para las que pujan; FIXED-only → "— solo fijo". Degradación honesta si el
+            bid-floor (config aparte) no cargó: "No disponible" + Reintentar, sin tumbar el resto de la fila. */}
+        <td className="px-3 py-2.5 align-middle">
+          {allowsPuja ? (
             floor !== undefined ? (
-              <Field
-                label="Piso de puja (S/)"
-                hint="Mínimo en modo PUJA · vacío = usa el default"
+              <RateCell
+                unit="S/"
                 error={floorInvalid ? `Entre 1 y ${BID_FLOOR_MAX_SOLES}` : undefined}
               >
-                <Input
+                <RateInput
                   type="number"
                   inputMode="decimal"
                   step="0.50"
                   min="1"
                   max={BID_FLOOR_MAX_SOLES}
-                  placeholder={`default S/${formatSolesInput(floor.defaultFloorCents)}`}
+                  placeholder={formatSolesInput(floor.defaultFloorCents)}
                   value={floorSoles}
                   onChange={(e) => setFloorSoles(e.target.value)}
+                  disabled={!canManageFloor}
+                  aria-label={`Piso de puja de ${offeringLabel(offering.id)}`}
                 />
-              </Field>
+              </RateCell>
             ) : (
-              // Degradación honesta: el bid-floor (config aparte) falló o sigue cargando → SOLO esta columna cae,
-              // el resto de la fila (modo/multiplicador/tarifa mínima/habilitar) sigue operativo.
-              <Field label="Piso de puja (S/)" hint="Config aparte — no se pudo cargar">
-                <div className="flex h-11 items-center gap-2">
-                  <span className="text-xs text-ink-subtle">No disponible.</span>
-                  <Button variant="ghost" size="sm" onClick={onRetryFloor}>
-                    <RefreshCw className="size-3.5" aria-hidden /> Reintentar
-                  </Button>
-                </div>
-              </Field>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-ink-subtle">No disponible</span>
+                <Button variant="ghost" size="sm" onClick={onRetryFloor}>
+                  <RefreshCw className="size-3.5" aria-hidden /> Reintentar
+                </Button>
+              </div>
             )
-          ) : null}
+          ) : (
+            <span className="text-sm text-ink-subtle">— solo fijo</span>
+          )}
+        </td>
 
-          <SaveAction
-            canManage={canManage}
-            dirty={dirty || (allowsPuja && floorDirty)}
-            invalid={multInvalid || minFareInvalid || (allowsPuja && floorInvalid)}
-            saving={pending || pendingFloor}
-            onSave={saveRow}
-            title={`Guardar ${offeringLabel(offering.id)}`}
-            description="Esta acción cambia la config de pricing de la oferta (catálogo y/o piso de puja) y queda auditada."
-            size="sm"
-          />
-        </div>
+        {/* Activa: switch. Editable (canManage y no en vuelo) → dispara setEnabled tras step-up; si no, indicador. */}
+        <td className="px-3 py-2.5 align-middle">
+          {canManage && !pending ? (
+            <StepUpDialog
+              title={toggleTitle}
+              description={toggleDescription}
+              onVerified={() => onSetEnabled(offering.id, !offering.enabled)}
+              trigger={
+                <Switch
+                  checked={offering.enabled}
+                  label={`${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${offeringLabel(offering.id)}`}
+                />
+              }
+            />
+          ) : (
+            <Switch
+              checked={offering.enabled}
+              disabled
+              label={`${offeringLabel(offering.id)} ${offering.enabled ? 'habilitada' : 'deshabilitada'}`}
+            />
+          )}
+        </td>
+
+        {/* Guardar (icon-button): mismo gate + step-up que SaveAction; solo se muestra con permiso de catálogo. */}
+        <td className="py-2.5 pl-3 pr-5 align-middle">
+          <div className="flex justify-end">
+            <SaveAction
+              canManage={canManage}
+              dirty={dirty || (allowsPuja && floorDirty)}
+              invalid={multInvalid || minFareInvalid || (allowsPuja && floorInvalid)}
+              saving={pending || pendingFloor}
+              onSave={saveRow}
+              title={`Guardar ${offeringLabel(offering.id)}`}
+              description="Esta acción cambia la config de pricing de la oferta (catálogo y/o piso de puja) y queda auditada."
+              icon={<Check className="size-4" aria-hidden />}
+            />
+          </div>
+        </td>
+      </tr>
+
+      {/* Validación cruzada (A1): fila de aviso DEBAJO de la afectada, visible también en solo-lectura (es una
+          incongruencia del DATO). */}
+      {crossWarn ? (
+        <tr className="border-b border-border bg-surface">
+          <td colSpan={7} className="px-5 pb-3">
+            <p className="flex items-start gap-1.5 text-xs text-warn">
+              <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
+              <span>
+                El piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) supera la tarifa mínima
+                fija (S/{formatSolesInput(crossWarn.fixedMinCents)}): el mismo viaje sale más barato
+                en FIJO que el mínimo que se puede pujar.
+              </span>
+            </p>
+          </td>
+        </tr>
       ) : null}
-    </li>
+    </>
   );
 }

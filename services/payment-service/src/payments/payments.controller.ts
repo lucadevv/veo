@@ -164,6 +164,17 @@ export class PaymentsController {
     return user.userId;
   }
 
+  // Va ANTES de `@Get(':id')`: segmento literal `by-trip/...` que la ruta paramétrica no debe capturar.
+  @Get('by-trip/:tripId')
+  @Audiences(...PASSENGER_RAILS)
+  @ApiOperation({
+    summary:
+      'Cobro REEMBOLSABLE de un viaje (kind=FARE, CAPTURED/PARTIALLY_REFUNDED) — inspección previa al reembolso del admin',
+  })
+  getByTrip(@Param('tripId') tripId: string) {
+    return this.payments.getPaymentByTrip(tripId);
+  }
+
   @Get(':id')
   @Audiences(...PASSENGER_RAILS)
   @ApiOperation({ summary: 'Obtener un pago por id' })

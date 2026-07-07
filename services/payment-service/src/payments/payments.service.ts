@@ -659,6 +659,31 @@ export class PaymentsService {
   }
 
   /**
+   * Lookup canónico del cobro REEMBOLSABLE de un viaje (A1 · `kind=FARE`: la TARIFA, nunca la propina del
+   * mismo viaje). Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular parciales, BR-P06);
+   * el más reciente. Devuelve `null` si no hay — cada caller decide el desenlace (refund lanza, la
+   * cancelación de booking hace skip, el getter del admin lanza NotFound). Único punto que define "el pago
+   * que se reembolsaría", para que la vista del admin == lo que efectivamente se reembolsa.
+   */
+  private findRefundablePaymentByTrip(tripId: string): Promise<Payment | null> {
+    return this.prisma.read.payment.findFirst({
+      where: { tripId, kind: 'FARE', status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
+      orderBy: { capturedAt: 'desc' },
+    });
+  }
+
+  /**
+   * El cobro reembolsable de un viaje, para que el operador de finanzas lo INSPECCIONE antes de reembolsar
+   * (misma cláusula que `refund` → "lo que veo es lo que se reembolsará"). Lanza NotFound si no hay. La
+   * fila cruda se recorta a una view PII-consciente en el admin-bff (el shaping vive en el BFF, no acá).
+   */
+  async getPaymentByTrip(tripId: string): Promise<Payment> {
+    const payment = await this.findRefundablePaymentByTrip(tripId);
+    if (!payment) throw new NotFoundError('No hay un cobro reembolsable para este viaje');
+    return payment;
+  }
+
+  /**
    * Ítems ACCIONABLES de un pasajero (BR-P02). Tres clases, en una sola respuesta:
    *  - kind=DEBT: cobros en status=DEBT (reintentos agotados). Alimentan el GATE de nuevos viajes del
    *    BFF y la franja "Resolver" del home.
@@ -1280,11 +1305,7 @@ export class PaymentsService {
     forceNew = false,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
-    const payment = await this.prisma.read.payment.findFirst({
-      // A1 · `kind=FARE`: un refund reembolsa la TARIFA, nunca un cobro de propina (tip-Payment) del mismo viaje.
-      where: { tripId, kind: 'FARE', status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
-      orderBy: { capturedAt: 'desc' },
-    });
+    const payment = await this.findRefundablePaymentByTrip(tripId);
     if (!payment) throw new NotFoundError('No hay un cobro reembolsable para este viaje');
     if (amountCents <= 0) throw new InvalidStateError('El reembolso debe ser un monto positivo');
     // Valida contra el SALDO reembolsable (amount − ya reembolsado), no contra el bruto original.
@@ -1425,11 +1446,7 @@ export class PaymentsService {
   > {
     // tripId = bookingId (UUID opaco · §5.5). Mismo lookup que refund(): un cobro CAPTURED o ya parcialmente
     // reembolsado. Si no hay → el cobro no capturó / ya se reembolsó / el evento se adelantó a la captura.
-    const payment = await this.prisma.read.payment.findFirst({
-      // A1 · `kind=FARE`: un refund reembolsa la TARIFA, nunca un cobro de propina (tip-Payment) del mismo viaje.
-      where: { tripId, kind: 'FARE', status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
-      orderBy: { capturedAt: 'desc' },
-    });
+    const payment = await this.findRefundablePaymentByTrip(tripId);
     if (!payment) {
       return {
         skipped: true,
