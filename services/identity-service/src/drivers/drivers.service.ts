@@ -113,10 +113,7 @@ function driverStatusSources(to: DriverStatus): DriverStatus[] {
  * ni toca un SUSPENDED (que ni siquiera es fuente legal de AVAILABLE). Sin este recorte, `driverStatusSources
  * (AVAILABLE)` incluiría OFFLINE/ON_BREAK y un release por Kafka saltaría el gate biométrico. Enum tipado.
  */
-const TRIP_ACTIVE_STATES: readonly DriverStatus[] = [
-  DriverStatus.ASSIGNED,
-  DriverStatus.ON_TRIP,
-];
+const TRIP_ACTIVE_STATES: readonly DriverStatus[] = [DriverStatus.ASSIGNED, DriverStatus.ON_TRIP];
 
 /**
  * Estados desde los que el GATE BIOMÉTRICO de `startShift` legítimamente (re)admite el conductor a AVAILABLE:
@@ -553,7 +550,9 @@ export class DriversService {
           select: { backgroundCheckStatus: true },
         });
         if (current?.backgroundCheckStatus === BackgroundCheckStatus.REJECTED) return;
-        throw new ConcurrencyConflictError('Otra decisión concurrente ganó la transición del conductor');
+        throw new ConcurrencyConflictError(
+          'Otra decisión concurrente ganó la transición del conductor',
+        );
       }
       // Rama GANADORA (count === 1): sincronizamos el KYC del usuario y emitimos el evento UNA sola vez.
       await tx.user.update({
@@ -1129,7 +1128,9 @@ export class DriversService {
         if (current?.backgroundCheckStatus === BackgroundCheckStatus.PENDING) {
           return { id: driver.id, backgroundCheckStatus: BackgroundCheckStatus.PENDING };
         }
-        throw new ConcurrencyConflictError('Otra operación concurrente cambió el estado del conductor');
+        throw new ConcurrencyConflictError(
+          'Otra operación concurrente cambió el estado del conductor',
+        );
       }
       // Rama GANADORA (count === 1): sincronizamos el KYC y emitimos driver.resubmitted UNA sola vez.
       await tx.user.update({
@@ -1212,7 +1213,11 @@ export class DriversService {
    * @param documentType el tipo de documento vencido (causeRef del hold). Distingue cada doc de los demás.
    * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
-  async suspendByFleet(driverId: string, suspendedAt: Date, documentType: string): Promise<boolean> {
+  async suspendByFleet(
+    driverId: string,
+    suspendedAt: Date,
+    documentType: string,
+  ): Promise<boolean> {
     const result = await this.prisma.write.$transaction(async (tx) => {
       // `userId` (además del id) para el revoke de sesión post-commit (Lote 1b): revokeAllForUser espera el sub.
       const driver = await tx.driver.findUnique({
@@ -1528,7 +1533,9 @@ export class DriversService {
     // La app degrada HONESTO ("No detectamos tu rostro") y pide reintentar la selfie. Nunca un PASS inventado.
     // (no_face NO se audita: es ruido operativo —no se detectó persona—, no un evento de identidad/seguridad.)
     if (!embedding.length) {
-      throw new UnprocessableEntityError('No detectamos tu rostro', { reason: ENROLL_REJECT_NO_FACE });
+      throw new UnprocessableEntityError('No detectamos tu rostro', {
+        reason: ENROLL_REJECT_NO_FACE,
+      });
     }
 
     const enrolledAt = new Date();
@@ -1624,10 +1631,7 @@ export class DriversService {
    * predicado `hasFaceEmbedding` que el gate de aprobación y el de turno). El guardado va en UNA escritura
    * atómica (driver.update con los 3 campos del resultado) — el operador lee siempre un resultado coherente.
    */
-  async matchDniFace(
-    driverId: string,
-    input: { image: string },
-  ): Promise<BiometricDniMatchResult> {
+  async matchDniFace(driverId: string, input: { image: string }): Promise<BiometricDniMatchResult> {
     const driver = await this.prisma.read.driver.findUnique({ where: { id: driverId } });
     if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
     // Gate: sin embedding de referencia enrolado NO hay match (no hay contra qué cotejar). 409 tipado,
@@ -2213,7 +2217,9 @@ export class DriversService {
           select: { currentStatus: true },
         });
         if (current?.currentStatus === status) return current.currentStatus;
-        throw new ConcurrencyConflictError('El estado del conductor cambió; reintentá la operación');
+        throw new ConcurrencyConflictError(
+          'El estado del conductor cambió; reintentá la operación',
+        );
       }
       // Rama GANADORA (count === 1): el fin de turno emite went_offline UNA sola vez, en la MISMA tx que el CAS.
       if (emitOffline) {

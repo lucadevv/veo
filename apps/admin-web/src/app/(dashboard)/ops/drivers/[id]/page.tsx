@@ -152,7 +152,13 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
 
 /* ────────────────────────────── HEADER ────────────────────────────── */
 
-function Header({ driver, onItvRegistered }: { driver: DriverDetail; onItvRegistered: () => void }) {
+function Header({
+  driver,
+  onItvRegistered,
+}: {
+  driver: DriverDetail;
+  onItvRegistered: () => void;
+}) {
   const user = useSession();
   const { toast } = useToast();
   const decision = useDriverDecision();
@@ -312,7 +318,11 @@ function DocsCard({ driver, onReviewed }: { driver: DriverDetail; onReviewed: ()
       </div>
       <div className="flex flex-col gap-2.5 p-3.5">
         {driver.documents.length === 0 ? (
-          <EmptyState className="py-6" title="Sin documentos" description="El conductor no subió documentos." />
+          <EmptyState
+            className="py-6"
+            title="Sin documentos"
+            description="El conductor no subió documentos."
+          />
         ) : (
           driver.documents.map((doc) => (
             <DocRow key={doc.id} doc={doc} driverId={driver.id} onReviewed={onReviewed} />
@@ -343,7 +353,10 @@ function DocRow({
   const act = async (d: 'approve' | 'reject', reason?: string) => {
     try {
       await review.mutateAsync({ id: doc.id, decision: d, driverId, reason });
-      toast({ tone: 'success', title: d === 'approve' ? 'Documento aprobado' : 'Documento rechazado' });
+      toast({
+        tone: 'success',
+        title: d === 'approve' ? 'Documento aprobado' : 'Documento rechazado',
+      });
       onReviewed();
     } catch (e) {
       toast({
@@ -428,8 +441,16 @@ function BioCard({ driver }: { driver: DriverDetail }) {
           <StepBadge n={2} />
           <span className="text-[15px] font-bold text-ink">Verificación biométrica</span>
         </div>
-        <DotPill tone={livePassed ? 'success' : bio.livenessStatus === Liveness.DEGRADED ? 'warn' : 'neutral'}>
-          {livePassed ? 'Prueba de vida ✓' : bio.livenessStatus === Liveness.DEGRADED ? 'Sin anti-spoofing' : 'Sin enrolar'}
+        <DotPill
+          tone={
+            livePassed ? 'success' : bio.livenessStatus === Liveness.DEGRADED ? 'warn' : 'neutral'
+          }
+        >
+          {livePassed
+            ? 'Prueba de vida ✓'
+            : bio.livenessStatus === Liveness.DEGRADED
+              ? 'Sin anti-spoofing'
+              : 'Sin enrolar'}
         </DotPill>
       </div>
       <div className="flex flex-col gap-3.5 p-4">
@@ -500,7 +521,9 @@ function MatchCard({
         {matched ? (
           <DotPill tone="success">{band ? `Coincide · similitud ${band}` : 'Coincide'}</DotPill>
         ) : noMatch ? (
-          <DotPill tone="danger">{band ? `No coincide · similitud ${band}` : 'No coincide'}</DotPill>
+          <DotPill tone="danger">
+            {band ? `No coincide · similitud ${band}` : 'No coincide'}
+          </DotPill>
         ) : (
           <button
             type="button"
@@ -661,7 +684,13 @@ function friendlyDeleteError(error: unknown): string {
   return 'No se pudo eliminar al conductor.';
 }
 
-function DeleteDriverAction({ driverId, driverName }: { driverId: string; driverName: string | null }) {
+function DeleteDriverAction({
+  driverId,
+  driverName,
+}: {
+  driverId: string;
+  driverName: string | null;
+}) {
   const user = useSession();
   const router = useRouter();
   const { toast } = useToast();
@@ -690,7 +719,11 @@ function DeleteDriverAction({ driverId, driverName }: { driverId: string; driver
           toast({ tone: 'success', title: 'Conductor eliminado' });
           router.push('/ops/drivers');
         } catch (error) {
-          toast({ tone: 'danger', title: 'No se pudo eliminar', description: friendlyDeleteError(error) });
+          toast({
+            tone: 'danger',
+            title: 'No se pudo eliminar',
+            description: friendlyDeleteError(error),
+          });
         }
       }}
     />

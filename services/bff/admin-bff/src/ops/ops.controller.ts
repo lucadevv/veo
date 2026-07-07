@@ -155,7 +155,9 @@ export class OpsController {
   // Par de approve (BR-S07 / FOUNDATION §7): rechazar un conductor es el otro veredicto de compliance — mismo
   // riesgo de sabotaje (una sesión comprometida rechazando conductores legítimos) → exige TOTP fresco, no solo RBAC.
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Rechaza un conductor con motivo opcional (compliance/admin · exige step-up MFA)' })
+  @ApiOperation({
+    summary: 'Rechaza un conductor con motivo opcional (compliance/admin · exige step-up MFA)',
+  })
   rejectDriver(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
@@ -171,10 +173,7 @@ export class OpsController {
     summary:
       'Destraba la verificación biométrica del conductor (central · regla #1: solo la central destraba)',
   })
-  unlockBiometric(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<void> {
+  unlockBiometric(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
     return this.ops.unlockBiometric(user, id);
   }
 
@@ -198,10 +197,7 @@ export class OpsController {
   @ApiOperation({
     summary: 'Reactiva a un conductor (solo suspensiones disciplinarias · compliance/admin)',
   })
-  reactivateDriver(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-  ): Promise<void> {
+  reactivateDriver(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
     return this.ops.reactivateDriver(user, id);
   }
 
@@ -251,7 +247,9 @@ export class OpsController {
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Crea un operador (email+roles) → INVITED + link de invitación (admin)' })
+  @ApiOperation({
+    summary: 'Crea un operador (email+roles) → INVITED + link de invitación (admin)',
+  })
   createOperator(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateOperatorDto,

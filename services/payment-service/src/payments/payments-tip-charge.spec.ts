@@ -52,12 +52,13 @@ function buildService(
   const gateway = {
     chargeFlow: 'aggregator' as const,
     supports: () => true,
-    charge: vi.fn(async () =>
-      opts.chargeResult ?? {
-        status: 'PENDING_EXTERNAL' as const,
-        externalRef: 'uid-tip-1',
-        checkout: { qrCodeBase64: 'data:image/png;base64,AAAA' },
-      },
+    charge: vi.fn(
+      async () =>
+        opts.chargeResult ?? {
+          status: 'PENDING_EXTERNAL' as const,
+          externalRef: 'uid-tip-1',
+          checkout: { qrCodeBase64: 'data:image/png;base64,AAAA' },
+        },
     ),
   };
   const affiliations = { resolveActiveWalletUid: vi.fn(async () => opts.walletUid ?? null) };
@@ -73,8 +74,15 @@ function buildService(
 }
 
 const yapeFare: Row = {
-  id: 'fare-1', tripId: 'trip-1', method: 'YAPE', driverId: 'drv-1', passengerId: 'pax-1',
-  payerRef: '999888777', kind: 'FARE', status: 'CAPTURED', tipCents: 0,
+  id: 'fare-1',
+  tripId: 'trip-1',
+  method: 'YAPE',
+  driverId: 'drv-1',
+  passengerId: 'pax-1',
+  payerRef: '999888777',
+  kind: 'FARE',
+  status: 'CAPTURED',
+  tipCents: 0,
 };
 const plinFare: Row = { ...yapeFare, id: 'fare-plin', method: 'PLIN' };
 const cashFare: Row = { ...yapeFare, id: 'fare-cash', method: 'CASH', payerRef: null };
@@ -96,7 +104,9 @@ describe('A1 · addTip — la propina SIEMPRE se cobra digital (Model B)', () =>
     expect(tip.driverId).toBe('drv-1');
     expect(tip.status).toBe('PENDING'); // entra al payout recién al CAPTURAR (webhook), no ahora
     expect(String(tip.dedupKey)).toBe(`${TIP_CHARGE_DEDUP_PREFIX}nonce-1`);
-    expect(gateway.charge).toHaveBeenCalledWith(expect.objectContaining({ amountCents: 500, method: 'YAPE' }));
+    expect(gateway.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ amountCents: 500, method: 'YAPE' }),
+    );
   });
 
   it('viaje en EFECTIVO → la propina se cobra DIGITAL con YAPE por defecto (no "en mano", el conductor la cobra)', async () => {
@@ -110,7 +120,9 @@ describe('A1 · addTip — la propina SIEMPRE se cobra digital (Model B)', () =>
     expect(tip.tipCents).toBe(300);
     expect(tip.amountCents).toBe(300);
     // se DESPACHÓ un cobro real de la propina por el riel digital (no se perdió por "en mano")
-    expect(gateway.charge).toHaveBeenCalledWith(expect.objectContaining({ amountCents: 300, method: 'YAPE' }));
+    expect(gateway.charge).toHaveBeenCalledWith(
+      expect.objectContaining({ amountCents: 300, method: 'YAPE' }),
+    );
   });
 
   it('viaje PLIN → la propina cobra con PLIN (hereda el método digital de la tarifa)', async () => {
@@ -131,8 +143,12 @@ describe('A1 · addTip — la propina SIEMPRE se cobra digital (Model B)', () =>
 
   it('rechaza propina no-entera o <= 0', async () => {
     const { service } = buildService(yapeFare);
-    await expect(service.addTip({ tripId: 'trip-1', tipCents: 0, dedupKey: 'x' })).rejects.toThrow();
-    await expect(service.addTip({ tripId: 'trip-1', tipCents: 1.5, dedupKey: 'x' })).rejects.toThrow();
+    await expect(
+      service.addTip({ tripId: 'trip-1', tipCents: 0, dedupKey: 'x' }),
+    ).rejects.toThrow();
+    await expect(
+      service.addTip({ tripId: 'trip-1', tipCents: 1.5, dedupKey: 'x' }),
+    ).rejects.toThrow();
   });
 
   it('la propina que DECLINA → FAILED terminal (no DEBT), sin emitir payment.failed (no bloquea ni alerta)', async () => {
@@ -157,7 +173,11 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
       },
     };
     const svc = new PaymentsService(
-      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { getOrThrow: () => 0 } as never,
     );
     const out = await svc.getDebtForPassenger('pax-1');
     expect(out.hasDebt).toBe(false);
@@ -170,8 +190,14 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
 
   it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markDebt kind-aware)', async () => {
     const tip: Row = {
-      id: 'tip-x', tripId: 'trip-1', kind: 'TIP', status: 'PENDING', method: 'YAPE',
-      amountCents: 500, tipCents: 500, driverId: 'drv-1',
+      id: 'tip-x',
+      tripId: 'trip-1',
+      kind: 'TIP',
+      status: 'PENDING',
+      method: 'YAPE',
+      amountCents: 500,
+      tipCents: 500,
+      driverId: 'drv-1',
     };
     const updates: Row[] = [];
     const txSpy = vi.fn(); // la tx SOLO se usa en el camino de la TARIFA (que emite payment.failed)
@@ -188,10 +214,16 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
       },
     };
     const svc = new PaymentsService(
-      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { getOrThrow: () => 0 } as never,
     );
     const out = await svc.applyWebhookResult({
-      paymentId: 'tip-x', externalUid: 'uid-x', status: 'EXPIRED',
+      paymentId: 'tip-x',
+      externalUid: 'uid-x',
+      status: 'EXPIRED',
     });
     expect(out.status).toBe('FAILED');
     expect(updates[0]!.status).toBe('FAILED');
@@ -200,8 +232,13 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
 
   it('FARE que EXPIRA (checkout de un viaje COMPLETADO) → DEBT, NO FAILED terminal: gatea + reintentable (no viaje gratis)', async () => {
     const fare: Row = {
-      id: 'fare-x', tripId: 'trip-1', kind: 'FARE', status: 'PENDING', method: 'YAPE',
-      amountCents: 5000, driverId: 'drv-1',
+      id: 'fare-x',
+      tripId: 'trip-1',
+      kind: 'FARE',
+      status: 'PENDING',
+      method: 'YAPE',
+      amountCents: 5000,
+      driverId: 'drv-1',
     };
     const updates: Row[] = [];
     const outbox: { eventType: string }[] = [];
@@ -229,10 +266,16 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
       },
     };
     const svc = new PaymentsService(
-      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { getOrThrow: () => 0 } as never,
     );
     const out = await svc.applyWebhookResult({
-      paymentId: 'fare-x', externalUid: 'uid-x', status: 'EXPIRED',
+      paymentId: 'fare-x',
+      externalUid: 'uid-x',
+      status: 'EXPIRED',
     });
     expect(out.status).toBe('DEBT'); // NO 'FAILED' terminal → el viaje NO queda gratis
     expect(updates[0]!.status).toBe('DEBT'); // el pago queda en DEBT: gatea al pasajero + reintentable
@@ -246,7 +289,11 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     ];
     const prisma = { read: { payment: { findMany: vi.fn(async () => rows) } } };
     const svc = new PaymentsService(
-      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { getOrThrow: () => 0 } as never,
     );
     const out = await svc.earningsForDriver('drv-1', new Date(0), new Date(1e13));
     expect(out.tipCents).toBe(300); // la propina SÍ cuenta como ganancia
@@ -258,12 +305,21 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
 describe('applyWebhookResult · idempotente sobre pagos YA LIQUIDADOS (no loop de re-entrega no-2xx)', () => {
   const svcFor = (status: string) => {
     const payment: Row = {
-      id: 'p-x', tripId: 'trip-1', kind: 'FARE', status, method: 'YAPE', amountCents: 5000,
+      id: 'p-x',
+      tripId: 'trip-1',
+      kind: 'FARE',
+      status,
+      method: 'YAPE',
+      amountCents: 5000,
     };
     const write = { payment: { update: vi.fn() }, $transaction: vi.fn() };
     const prisma = { read: { payment: { findUnique: vi.fn(async () => payment) } }, write };
     const svc = new PaymentsService(
-      prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { getOrThrow: () => 0 } as never,
     );
     return { svc, write };
   };
@@ -272,7 +328,11 @@ describe('applyWebhookResult · idempotente sobre pagos YA LIQUIDADOS (no loop d
     for (const hook of ['CONFIRMED', 'DECLINED', 'EXPIRED'] as const) {
       it(`${hook} sobre un pago ${settled} → no-op idempotente (NO InvalidStateError, sin escrituras)`, async () => {
         const { svc, write } = svcFor(settled);
-        const out = await svc.applyWebhookResult({ paymentId: 'p-x', externalUid: 'uid', status: hook });
+        const out = await svc.applyWebhookResult({
+          paymentId: 'p-x',
+          externalUid: 'uid',
+          status: hook,
+        });
         // Antes PARTIALLY_REFUNDED (y REFUNDED en CONFIRMED) caía a captureSuccess/markDebt → assertTransition
         // lanzaba InvalidStateError (loop del proveedor). Ahora es un no-op limpio, sin tocar la DB.
         expect(out).toEqual({ applied: false, status: settled });

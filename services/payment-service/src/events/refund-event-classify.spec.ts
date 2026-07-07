@@ -42,7 +42,9 @@ describe('classifyRefundError · clasificación TIPADA del error de refund (F3c 
     // fresco el reintento de Kafka tendría éxito. NO debe caer en unrecoverable (descartaría el retry válido
     // y dispararía una FALSA alerta de backstop sobre una simple carrera optimista). Distinto del
     // InvalidStateError PERMANENTE de arriba (gateway sin reembolsos / sin railRef).
-    const err = new ConcurrencyConflictError('El cobro cambió de saldo por una operación concurrente (CAS)');
+    const err = new ConcurrencyConflictError(
+      'El cobro cambió de saldo por una operación concurrente (CAS)',
+    );
     expect(classifyRefundError(err)).toBe('transient');
   });
 

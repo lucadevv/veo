@@ -137,9 +137,11 @@ export class FcmPushService implements PushService {
       });
 
       // App abierta desde la notificación (quita/background→foreground): mismo filtro de pánico.
-      const unsubscribeOpened = messaging().onNotificationOpenedApp((remoteMessage: PushMessage) => {
-        handleRelevant(remoteMessage);
-      });
+      const unsubscribeOpened = messaging().onNotificationOpenedApp(
+        (remoteMessage: PushMessage) => {
+          handleRelevant(remoteMessage);
+        },
+      );
 
       // Notificación que arrancó la app desde estado "quit".
       messaging()

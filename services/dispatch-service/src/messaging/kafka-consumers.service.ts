@@ -211,7 +211,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
         env.eventId,
         isPermanentDataError,
         () =>
-          this.projection.registerCancellationInWindow(driverId, p.tripId, new Date(env.occurredAt)),
+          this.projection.registerCancellationInWindow(
+            driverId,
+            p.tripId,
+            new Date(env.occurredAt),
+          ),
         `driver=${driverId}, trip=${p.tripId}`,
       );
     }
@@ -316,7 +320,12 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
    * REJECTED) y devuelve `true` → el caller DEBE `return` para saltar el evento (el offset avanza). UUID
    * válido ⇒ `false`. `detail` opcional = contexto forense extra (ej. `panicId=...` en el path de pánico).
    */
-  private isPoisonNonUuid(eventType: string, eventId: string, id: string, detail?: string): boolean {
+  private isPoisonNonUuid(
+    eventType: string,
+    eventId: string,
+    id: string,
+    detail?: string,
+  ): boolean {
     if (isUuid(id)) return false;
     this.logger.error(
       `POISON ${eventType}: id no-UUID "${String(id)}" (${this.poisonCtx(eventId, detail)}); descartado sin reintento`,
@@ -449,7 +458,8 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       'trip.cancelled',
       env.eventId,
       isPermanentDataError,
-      () => this.projection.registerCancellationInWindow(driverId, p.tripId, new Date(env.occurredAt)),
+      () =>
+        this.projection.registerCancellationInWindow(driverId, p.tripId, new Date(env.occurredAt)),
       `driver=${driverId}, trip=${p.tripId}`,
     );
   }

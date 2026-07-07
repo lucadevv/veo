@@ -15,7 +15,14 @@
  */
 import { Controller, Delete, HttpCode, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { InternalIdentityGuard, AudienceGuard, RolesGuard, Roles, Audiences, InternalAudience } from '@veo/auth';
+import {
+  InternalIdentityGuard,
+  AudienceGuard,
+  RolesGuard,
+  Roles,
+  Audiences,
+  InternalAudience,
+} from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 import { DriverPaymentsService, type DriverPaymentsPurgeView } from './driver-payments.service';
@@ -34,7 +41,11 @@ export class DriverPaymentsController {
   @Roles(AdminRole.SUPERADMIN)
   @Delete(':driverId/payments')
   @HttpCode(200)
-  @ApiQuery({ name: 'userId', required: true, description: 'User.id de identity (indexa 4 tablas por user_id)' })
+  @ApiQuery({
+    name: 'userId',
+    required: true,
+    description: 'User.id de identity (indexa 4 tablas por user_id)',
+  })
   @ApiOperation({
     summary:
       'HARD purge del dinero del conductor (5 tablas por driver_id + 4 por user_id). DEV-only. SUPERADMIN.',

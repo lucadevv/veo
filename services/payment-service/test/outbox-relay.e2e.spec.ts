@@ -225,7 +225,11 @@ async function seedRaw(opts: {
 }): Promise<string> {
   const eventId = opts.eventId ?? uuidv7();
   const env: EventEnvelope<unknown> = {
-    ...createEnvelope({ eventType: opts.eventType, producer: 'payment-service', payload: opts.payload }),
+    ...createEnvelope({
+      eventType: opts.eventType,
+      producer: 'payment-service',
+      payload: opts.payload,
+    }),
     eventId,
   };
   if (opts.seq !== undefined) {
@@ -320,7 +324,12 @@ describe('OutboxRelay e2e (Postgres real) · FIX 1 — poison terminal NO bloque
 
     const store = new PrismaOutboxStore(prisma, 'payment');
     const publishedEventIds: string[] = [];
-    const result = await store.drain(BATCH, STALE_MS, CONCURRENCY, validatingPublish(publishedEventIds));
+    const result = await store.drain(
+      BATCH,
+      STALE_MS,
+      CONCURRENCY,
+      validatingPublish(publishedEventIds),
+    );
 
     // El grupo AVANZÓ pese al poison en la cabeza: los 2 sanos se publicaron.
     expect(result.published).toBe(2);
@@ -332,7 +341,12 @@ describe('OutboxRelay e2e (Postgres real) · FIX 1 — poison terminal NO bloque
 
     // En la DB real: el poison quedó failed_at (terminal, claim liberado), no published.
     const all = await prisma.$queryRawUnsafe<
-      { aggregate_id: string; published_at: Date | null; failed_at: Date | null; claimed_at: Date | null }[]
+      {
+        aggregate_id: string;
+        published_at: Date | null;
+        failed_at: Date | null;
+        claimed_at: Date | null;
+      }[]
     >(
       `SELECT aggregate_id, published_at, failed_at, claimed_at FROM "payment"."outbox_events"
        WHERE failed_at IS NOT NULL`,
@@ -368,8 +382,7 @@ describe('OutboxRelay e2e (Postgres real) · FIX seq — orden intra-tx DETERMIN
     // cola random. El orden lexicográfico entre ellos es AZAR (no temporal). Construimos un caso ADVERSARIAL:
     // el orden de inserción (seq 1<2<3 = orden REAL de creación intra-tx) es OPUESTO al orden lexicográfico del
     // eventId, para que el tiebreak VIEJO (eventId) hubiera dado el orden INVERTIDO y este test lo CACE.
-    const mkEvent = (tail: string) =>
-      `0192f8a0-0000-7000-8000-${tail}`; // v7 válido con prefijo de ms fijo; tail controla el orden lexicográfico
+    const mkEvent = (tail: string) => `0192f8a0-0000-7000-8000-${tail}`; // v7 válido con prefijo de ms fijo; tail controla el orden lexicográfico
     void ms;
     // Orden de creación intra-tx (lo que el negocio emitió): primero el de tail ALTO, después medio, después bajo.
     // → seq 1,2,3 sigue ESE orden; el eventId lexicográfico (tail) es 'fff' > 'aaa' > '000' = orden CONTRARIO.
@@ -377,9 +390,30 @@ describe('OutboxRelay e2e (Postgres real) · FIX seq — orden intra-tx DETERMIN
     const second = mkEvent('00000000aaaa'); // creado 2º → seq=2
     const third = mkEvent('000000000000'); // creado 3º → seq=3, eventId el MÁS CHICO
     const p = (u: string) => ({ userId: u, phone: '+51', kycStatus: 'V' });
-    await seedRaw({ aggregateId: AGG, eventType: 'user.registered', payload: p('u1'), createdAt: sameInstant, eventId: first, seq: 1n });
-    await seedRaw({ aggregateId: AGG, eventType: 'user.registered', payload: p('u2'), createdAt: sameInstant, eventId: second, seq: 2n });
-    await seedRaw({ aggregateId: AGG, eventType: 'user.registered', payload: p('u3'), createdAt: sameInstant, eventId: third, seq: 3n });
+    await seedRaw({
+      aggregateId: AGG,
+      eventType: 'user.registered',
+      payload: p('u1'),
+      createdAt: sameInstant,
+      eventId: first,
+      seq: 1n,
+    });
+    await seedRaw({
+      aggregateId: AGG,
+      eventType: 'user.registered',
+      payload: p('u2'),
+      createdAt: sameInstant,
+      eventId: second,
+      seq: 2n,
+    });
+    await seedRaw({
+      aggregateId: AGG,
+      eventType: 'user.registered',
+      payload: p('u3'),
+      createdAt: sameInstant,
+      eventId: third,
+      seq: 3n,
+    });
 
     const store = new PrismaOutboxStore(prisma, 'payment');
     const publishedEventIds: string[] = [];
@@ -401,9 +435,27 @@ describe('OutboxRelay e2e (Postgres real) · FIX seq — orden intra-tx DETERMIN
     const a = uuidv7(ms);
     const b = uuidv7(ms);
     const c = uuidv7(ms);
-    await seedRaw({ aggregateId: AGG, eventType: 'user.registered', payload: p('a'), createdAt: sameInstant, eventId: a });
-    await seedRaw({ aggregateId: AGG, eventType: 'user.registered', payload: p('b'), createdAt: sameInstant, eventId: b });
-    await seedRaw({ aggregateId: AGG, eventType: 'user.registered', payload: p('c'), createdAt: sameInstant, eventId: c });
+    await seedRaw({
+      aggregateId: AGG,
+      eventType: 'user.registered',
+      payload: p('a'),
+      createdAt: sameInstant,
+      eventId: a,
+    });
+    await seedRaw({
+      aggregateId: AGG,
+      eventType: 'user.registered',
+      payload: p('b'),
+      createdAt: sameInstant,
+      eventId: b,
+    });
+    await seedRaw({
+      aggregateId: AGG,
+      eventType: 'user.registered',
+      payload: p('c'),
+      createdAt: sameInstant,
+      eventId: c,
+    });
 
     const store = new PrismaOutboxStore(prisma, 'payment');
     const publishedEventIds: string[] = [];
@@ -422,7 +474,14 @@ describe('OutboxRelay e2e (Postgres real) · FIX seq — orden intra-tx DETERMIN
     for (let i = 1; i <= 5; i++) {
       const eid = uuidv7(sameInstant.getTime());
       ids.push(eid);
-      await seedRaw({ aggregateId: AGG, eventType: 'user.registered', payload: p(`u${i}`), createdAt: sameInstant, eventId: eid, seq: BigInt(i) });
+      await seedRaw({
+        aggregateId: AGG,
+        eventType: 'user.registered',
+        payload: p(`u${i}`),
+        createdAt: sameInstant,
+        eventId: eid,
+        seq: BigInt(i),
+      });
     }
 
     const store = new PrismaOutboxStore(prisma, 'payment');

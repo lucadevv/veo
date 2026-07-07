@@ -81,7 +81,11 @@ function build() {
   return { svc, windowCalls, driverForTrip };
 }
 
-function cancelledEnvelope(over: { by: 'DRIVER' | 'PASSENGER'; driverId?: string; tripId?: string }) {
+function cancelledEnvelope(over: {
+  by: 'DRIVER' | 'PASSENGER';
+  driverId?: string;
+  tripId?: string;
+}) {
   return createEnvelope({
     eventType: 'trip.cancelled',
     producer: 'trip-service',

@@ -29,9 +29,18 @@ import mock3 from '../assets/onboarding-mock-3.jpg';
 /** Un slide del carrusel de bienvenida: mockup de la app + título + copy (fuente: `design/veo.pen`). */
 interface Slide {
   mock: ImageSourcePropType;
-  title: 'onboarding.slide1.title' | 'onboarding.slide2.title' | 'onboarding.slide3.title';
-  body: 'onboarding.slide1.body' | 'onboarding.slide2.body' | 'onboarding.slide3.body';
-  alt: 'onboarding.slide1.imageAlt' | 'onboarding.slide2.imageAlt' | 'onboarding.slide3.imageAlt';
+  title:
+    | 'onboarding.slide1.title'
+    | 'onboarding.slide2.title'
+    | 'onboarding.slide3.title';
+  body:
+    | 'onboarding.slide1.body'
+    | 'onboarding.slide2.body'
+    | 'onboarding.slide3.body';
+  alt:
+    | 'onboarding.slide1.imageAlt'
+    | 'onboarding.slide2.imageAlt'
+    | 'onboarding.slide3.imageAlt';
 }
 
 const SLIDES: readonly Slide[] = [

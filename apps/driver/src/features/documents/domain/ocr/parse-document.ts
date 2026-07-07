@@ -35,7 +35,10 @@ export type ParsableDocumentType = Exclude<
  * un prompt en tiempo de compilación, no un olvido silencioso. Cada parser ya degrada honestamente
  * (devuelve solo lo que extrajo), así que un documento ilegible produce un resultado con solo `kind`.
  */
-export function parseDocument(type: ParsableDocumentType, lines: readonly string[]): ParsedDocument {
+export function parseDocument(
+  type: ParsableDocumentType,
+  lines: readonly string[],
+): ParsedDocument {
   switch (type) {
     case FleetDocumentType.LICENSE_A1:
       return { kind: 'license', ...parseLicense(lines) };

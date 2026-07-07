@@ -135,7 +135,9 @@ export class TripLifecycleConsumer extends KafkaConsumerBootstrap {
         this.logger.log(`Conductor ${driverId} → ${to} (por ${eventType})`);
       } else {
         // NO-OP legítimo (transición ilegal desde el estado actual: redelivery, SUSPENDED/OFFLINE, etc.).
-        this.logger.debug(`${eventType}: transición a ${to} no aplicable al conductor ${driverId} (no-op)`);
+        this.logger.debug(
+          `${eventType}: transición a ${to} no aplicable al conductor ${driverId} (no-op)`,
+        );
       }
     } catch (err) {
       // Veneno de datos (P2023/P2009/…) → saltar sin reintento; lo transitorio (DB caída, deadlock) se relanza
@@ -148,7 +150,10 @@ export class TripLifecycleConsumer extends KafkaConsumerBootstrap {
         domainEventsTotal.inc({ event: eventType, result: BusinessEventResult.REJECTED });
         return;
       }
-      this.logger.error({ err }, `Falló la transición de estado del conductor ${driverId} por ${eventType}`);
+      this.logger.error(
+        { err },
+        `Falló la transición de estado del conductor ${driverId} por ${eventType}`,
+      );
       throw err;
     }
   }

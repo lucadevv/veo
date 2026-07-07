@@ -249,9 +249,12 @@ export class BookingsRepository {
       });
     } catch (err) {
       if (isRecordNotFound(err)) {
-        throw new ConflictError('La reserva ya no está APROBADA (cobro ya registrado o estado cambió)', {
-          id,
-        });
+        throw new ConflictError(
+          'La reserva ya no está APROBADA (cobro ya registrado o estado cambió)',
+          {
+            id,
+          },
+        );
       }
       throw err;
     }
@@ -299,10 +302,7 @@ export class BookingsRepository {
    * lock, solo para early-return barato (NOOP si ya no está en COBRO_PENDIENTE); la GARANTÍA la da el where
    * atómico DENTRO de la tx, no ese precheck.
    */
-  async confirmAndLockSeats(
-    booking: Booking,
-    paymentId: string,
-  ): Promise<ConfirmSeatOutcome> {
+  async confirmAndLockSeats(booking: Booking, paymentId: string): Promise<ConfirmSeatOutcome> {
     return this.prisma.write.$transaction(async (tx) => {
       // 1. LOCK PESIMISTA de la fila de la oferta. (timeout/maxWait EXPLÍCITOS abajo · TX_OPTIONS — hot-path.) $queryRaw parametrizado (Prisma.sql) — nunca interpolación
       //    cruda. Devuelve [] si la oferta no existe (no debería: el booking referencia un PublishedTrip real).
@@ -315,10 +315,13 @@ export class BookingsRepository {
       const trip = rows[0];
       if (!trip) {
         // Oferta inexistente bajo el lock: estado inconsistente. No confirmamos ni decrementamos nada.
-        throw new ConflictError('La oferta del booking no existe (no se puede confirmar el asiento)', {
-          publishedTripId: booking.publishedTripId,
-          bookingId: booking.id,
-        });
+        throw new ConflictError(
+          'La oferta del booking no existe (no se puede confirmar el asiento)',
+          {
+            publishedTripId: booking.publishedTripId,
+            bookingId: booking.id,
+          },
+        );
       }
 
       // 1.bis GUARD DEFENSIVO (§6 · F3c): ¿la oferta sigue en un estado RESERVABLE? Hoy es inocuo (EN_RUTA no

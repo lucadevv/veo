@@ -145,9 +145,7 @@ describe('useScanDni', () => {
     // El uploader NO debe tocarse durante el escaneo (la subida está DIFERIDA al continue del paso 1).
     const upload = jest.fn();
     const submitDocument = jest.fn();
-    const handle = renderHookWith(
-      fakeContainer(scanner, { upload }, { submitDocument }),
-    );
+    const handle = renderHookWith(fakeContainer(scanner, { upload }, { submitDocument }));
 
     await act(async () => {
       await handle.current?.scan();
@@ -168,9 +166,7 @@ describe('useScanDni', () => {
     const scanner: ScannerDouble = { scan: jest.fn(async () => dniScan()) };
     const upload = jest.fn();
     const submitDocument = jest.fn();
-    const handle = renderHookWith(
-      fakeContainer(scanner, { upload }, { submitDocument }),
-    );
+    const handle = renderHookWith(fakeContainer(scanner, { upload }, { submitDocument }));
 
     await act(async () => {
       await handle.current?.scan();

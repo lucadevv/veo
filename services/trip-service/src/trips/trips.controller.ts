@@ -53,10 +53,7 @@ export class TripsController {
   @ApiOperation({
     summary: 'Crear y cotizar un viaje (→ REQUESTED). Idempotente vía Idempotency-Key.',
   })
-  create(
-    @Body() dto: CreateTripDto,
-    @Headers('idempotency-key') idempotencyKey?: string,
-  ) {
+  create(@Body() dto: CreateTripDto, @Headers('idempotency-key') idempotencyKey?: string) {
     // ADR-018: se retiró el gate de KYC del pasajero (ya no hay `kycVerified` firmado que exigir). La
     // verificación de identidad pasó de muro pre-viaje a badge de confianza OPCIONAL; el viaje se crea
     // sin gate de KYC (el piso de seguridad es teléfono verificado + conductor verificado + cámara/pánico).

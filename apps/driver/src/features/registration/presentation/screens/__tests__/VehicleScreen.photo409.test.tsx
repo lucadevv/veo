@@ -6,10 +6,7 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { ApiError } from '@veo/api-client';
 import '../../../../../i18n';
 import { VehicleScreen } from '../VehicleScreen';
-import {
-  DocumentUploadCard,
-  RegistrationDocumentSheet,
-} from '../../components';
+import { DocumentUploadCard, RegistrationDocumentSheet } from '../../components';
 import type { RegistrationDocumentInput } from '../../components/RegistrationDocumentSheet';
 import { useRegistrationStore } from '../../state/registrationStore';
 import { REGISTRATION_DOCUMENTS_QUERY_KEY } from '../../hooks/useRegistrationDocuments';
@@ -162,7 +159,10 @@ describe('VehicleScreen · FIX A · 409 de la foto del vehículo se trata como �
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 
@@ -192,7 +192,10 @@ describe('VehicleScreen · FIX A · 409 de la foto del vehículo se trata como �
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        withProviders(<VehicleScreen navigation={fakeNavigation()} route={{} as never} />, queryClient),
+        withProviders(
+          <VehicleScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
       );
     });
 

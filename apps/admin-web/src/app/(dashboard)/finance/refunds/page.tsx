@@ -95,9 +95,7 @@ function PaymentCard({ payment }: { payment: RefundablePaymentView }) {
         <span
           className={cn(
             'rounded-full px-2 py-0.5 text-xs font-medium',
-            payment.status === 'CAPTURED'
-              ? 'bg-success/12 text-success'
-              : 'bg-warn/12 text-warn',
+            payment.status === 'CAPTURED' ? 'bg-success/12 text-success' : 'bg-warn/12 text-warn',
           )}
         >
           {STATUS_LABEL[payment.status]}

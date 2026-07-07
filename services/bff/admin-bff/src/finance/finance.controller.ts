@@ -135,7 +135,8 @@ export class FinanceController {
   // step-up (defensa en profundidad) y audita el cambio. ──
   @Get('commission')
   @ApiOperation({
-    summary: 'Comisión por modo vigente (tasa ON-DEMAND + service fee CARPOOLING, ambas editables). finance:view',
+    summary:
+      'Comisión por modo vigente (tasa ON-DEMAND + service fee CARPOOLING, ambas editables). finance:view',
   })
   getCommission(@CurrentUser() user: AuthenticatedUser): Promise<CommissionView> {
     return this.finance.getCommission(user);
@@ -145,7 +146,8 @@ export class FinanceController {
   @HttpCode(200)
   @RequireStepUpMfa()
   @ApiOperation({
-    summary: 'Edita SOLO la comisión ON-DEMAND (bps, CAS sobre `version`). finance:manage + step-up',
+    summary:
+      'Edita SOLO la comisión ON-DEMAND (bps, CAS sobre `version`). finance:manage + step-up',
   })
   replaceOnDemandRate(
     @CurrentUser() user: AuthenticatedUser,
@@ -173,7 +175,8 @@ export class FinanceController {
   // booking-service RE-valida RBAC + step-up (defensa en profundidad) y aplica el CAS. ──
   @Get('cost-per-km')
   @ApiOperation({
-    summary: 'Costo de operación por km vigente por país (PE/EC). Alimenta el tope de cost-sharing. finance:view. F2.5',
+    summary:
+      'Costo de operación por km vigente por país (PE/EC). Alimenta el tope de cost-sharing. finance:view. F2.5',
   })
   getCostPerKm(@CurrentUser() user: AuthenticatedUser): Promise<CostPerKmListView> {
     return this.finance.getCostPerKm(user);

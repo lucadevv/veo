@@ -80,10 +80,7 @@ type TopicKey = (typeof TOPICS)[number]['key'];
 /** Normaliza para buscar: minúsculas y sin acentos (así "pánico" matchea "panico"). */
 function normalizeForSearch(value: string): string {
   // NFD separa la letra base de su diacrítico; el rango U+0300–U+036F son los diacríticos sueltos.
-  return value
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
+  return value.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
 /**
@@ -187,9 +184,7 @@ export function HelpScreen(): React.JSX.Element {
       question={t(`support.faq.${key}.q` as const)}
       answer={t(`support.faq.${key}.a` as const)}
       expanded={expandedFaq === key}
-      onToggle={() =>
-        setExpandedFaq(current => (current === key ? null : key))
-      }
+      onToggle={() => setExpandedFaq(current => (current === key ? null : key))}
     />
   );
 

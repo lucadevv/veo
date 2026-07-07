@@ -144,9 +144,7 @@ function makeFleet(
     | Map<string, FleetVehicleView>
     | ((ids: readonly string[]) => Promise<Map<string, FleetVehicleView>>),
 ): FleetClient {
-  const getDriverVehicles = vi.fn(
-    typeof vehicles === 'function' ? vehicles : async () => vehicles,
-  );
+  const getDriverVehicles = vi.fn(typeof vehicles === 'function' ? vehicles : async () => vehicles);
   const getVehicle = vi.fn(typeof vehicle === 'function' ? vehicle : async () => vehicle);
   const getVehiclesOperability = vi.fn(
     typeof operability === 'function'
@@ -200,9 +198,10 @@ function makePublicDriver(id: string, over: Partial<PublicDriver> = {}): PublicD
  * IdentityBatchClient fake (enriquecimiento anti-N+1). Cuenta las invocaciones: la aserción central de F2 es
  * "UNA sola llamada getDriversByIds para N viajes". Por default devuelve un PublicDriver ELEGIBLE por cada id.
  */
-function makeIdentityBatch(
-  impl?: (ids: string[]) => Promise<PublicDriver[]>,
-): { client: IdentityBatchClient; getDriversByIds: ReturnType<typeof vi.fn> } {
+function makeIdentityBatch(impl?: (ids: string[]) => Promise<PublicDriver[]>): {
+  client: IdentityBatchClient;
+  getDriversByIds: ReturnType<typeof vi.fn>;
+} {
   const getDriversByIds = vi.fn(
     impl ?? (async (ids: string[]) => ids.map((id) => makePublicDriver(id))),
   );
@@ -219,9 +218,10 @@ function makeSearchConfig(over: Partial<SearchH3Config> = {}): SearchH3Config {
  * dejan así (aislados del motor de mapas). Los tests del gate F1b inyectan un CostCapService REAL con un
  * MapsClient MOCKEADO (ver describe '· gate F1b') — NUNCA se llama a OSRM real en tests.
  */
-function makeCostCap(
-  assertPriceCap: (input: PriceCapInput) => Promise<void> = async () => {},
-): { costCap: CostCapService; assertPriceCap: ReturnType<typeof vi.fn> } {
+function makeCostCap(assertPriceCap: (input: PriceCapInput) => Promise<void> = async () => {}): {
+  costCap: CostCapService;
+  assertPriceCap: ReturnType<typeof vi.fn>;
+} {
   const spy = vi.fn(assertPriceCap);
   const costCap = { assertPriceCap: spy } as unknown as CostCapService;
   return { costCap, assertPriceCap: spy };
@@ -241,7 +241,14 @@ function makeService(opts: {
   const fleet = opts.fleet ?? makeFleet([makeVehicle()]);
   const costCap = opts.costCap ?? makeCostCap().costCap;
   const searchConfig = opts.searchConfig ?? makeSearchConfig();
-  return new PublishedTripsService(opts.repo, identity, identityBatch, fleet, costCap, searchConfig);
+  return new PublishedTripsService(
+    opts.repo,
+    identity,
+    identityBatch,
+    fleet,
+    costCap,
+    searchConfig,
+  );
 }
 
 describe('PublishedTripsService · publish (happy path + relleno precioPorTramo)', () => {
@@ -316,7 +323,10 @@ describe('PublishedTripsService · publish (happy path + relleno precioPorTramo)
     const { repo, createWithEventIdempotent } = makeRepo();
     const service = makeService({ repo });
     await expect(
-      service.publish(DRIVER_ID, makeDto({ fechaHoraSalida: new Date(Date.now() - 1000).toISOString() })),
+      service.publish(
+        DRIVER_ID,
+        makeDto({ fechaHoraSalida: new Date(Date.now() - 1000).toISOString() }),
+      ),
     ).rejects.toBeInstanceOf(ValidationError);
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
   });
@@ -375,9 +385,9 @@ describe('PublishedTripsService · idempotencia de publish (FIX 2, namespaceada 
   it('Idempotency-Key malformado (no UUID) → ValidationError (no se degrada en silencio)', async () => {
     const { repo, createWithEventIdempotent } = makeRepo();
     const service = makeService({ repo });
-    await expect(
-      service.publish(DRIVER_ID, makeDto(), 'no-es-un-uuid'),
-    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(service.publish(DRIVER_ID, makeDto(), 'no-es-un-uuid')).rejects.toBeInstanceOf(
+      ValidationError,
+    );
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
   });
 });
@@ -433,9 +443,9 @@ describe('PublishedTripsService · integridad stopovers↔tramos (FIX 3)', () =>
     });
     const service = makeService({ repo });
     // El PATCH reduce los stopovers a [] → hitos válidos { 0, 1 } → el tramo viejo 0→2 queda huérfano.
-    await expect(
-      service.update('x', DRIVER_ID, { stopovers: [] }),
-    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(service.update('x', DRIVER_ID, { stopovers: [] })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
     expect(updateWithEvent).not.toHaveBeenCalled();
   });
 });
@@ -667,7 +677,9 @@ describe('PublishedTripsService · editar (F1a ownership + estado + UPDATE atóm
       estado: PublishedTripState.PUBLICADO, // read stale: pasó el chequeo temprano
     });
     // El repo (where condicionado) ya no matchea porque la PRIMARIA cambió → traduce P2025 a ConflictError.
-    updateWithEvent.mockRejectedValueOnce(new ConflictError('El viaje cambió de estado, recargá', {}));
+    updateWithEvent.mockRejectedValueOnce(
+      new ConflictError('El viaje cambió de estado, recargá', {}),
+    );
     const service = makeService({ repo });
     await expect(service.update('x', DRIVER_ID, dto)).rejects.toBeInstanceOf(ConflictError);
   });
@@ -725,7 +737,9 @@ describe('PublishedTripsService · cancelar (F1a ownership + máquina + UPDATE a
       driverId: DRIVER_ID,
       estado: PublishedTripState.PUBLICADO,
     });
-    updateWithEvent.mockRejectedValueOnce(new ConflictError('El viaje cambió de estado, recargá', {}));
+    updateWithEvent.mockRejectedValueOnce(
+      new ConflictError('El viaje cambió de estado, recargá', {}),
+    );
     const service = makeService({ repo });
     await expect(service.cancel('x', DRIVER_ID)).rejects.toBeInstanceOf(ConflictError);
   });
@@ -802,9 +816,9 @@ describe('PublishedTripsService · gate F1b (tope cost-sharing) cableado en publ
     });
     const service = makeService({ repo, costCap });
 
-    await expect(service.publish(DRIVER_ID, makeDto({ precioBase: 999_999 }))).rejects.toBeInstanceOf(
-      ValidationError,
-    );
+    await expect(
+      service.publish(DRIVER_ID, makeDto({ precioBase: 999_999 })),
+    ).rejects.toBeInstanceOf(ValidationError);
     expect(createWithEventIdempotent).not.toHaveBeenCalled(); // gate ANTES de la escritura
   });
 
@@ -815,7 +829,9 @@ describe('PublishedTripsService · gate F1b (tope cost-sharing) cableado en publ
     });
     const service = makeService({ repo, costCap });
 
-    await expect(service.publish(DRIVER_ID, makeDto())).rejects.toBeInstanceOf(ExternalServiceError);
+    await expect(service.publish(DRIVER_ID, makeDto())).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
     expect(createWithEventIdempotent).not.toHaveBeenCalled();
   });
 
@@ -842,9 +858,9 @@ describe('PublishedTripsService · gate F1b (tope cost-sharing) cableado en publ
     });
     const service = makeService({ repo, costCap });
 
-    await expect(
-      service.update('x', DRIVER_ID, { precioBase: 999_999 }),
-    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(service.update('x', DRIVER_ID, { precioBase: 999_999 })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
 
     // re-validó con el precioBase EDITADO sobre el estado final (merge DTO ∪ persistido).
     const input = assertPriceCap.mock.calls[0]![0] as PriceCapInput;
@@ -880,9 +896,9 @@ describe('PublishedTripsService · gate F1b (tope cost-sharing) cableado en publ
     const service = makeService({ repo, costCap });
 
     // Solo se edita asientosTotales (de 2 → 8): tope nuevo más chico, precioBase persistido (4000) lo excede.
-    await expect(
-      service.update('x', DRIVER_ID, { asientosTotales: 8 }),
-    ).rejects.toBeInstanceOf(ValidationError);
+    await expect(service.update('x', DRIVER_ID, { asientosTotales: 8 })).rejects.toBeInstanceOf(
+      ValidationError,
+    );
 
     // Se re-validó: el merge usó asientosTotales EDITADO (8) y el precioBase PERSISTIDO (4000).
     expect(assertPriceCap).toHaveBeenCalledOnce();
@@ -1137,7 +1153,10 @@ describe('PublishedTripsService · DETALLE enriquecido (F2 · conductor + vehíc
       fechaHoraSalida: new Date(Date.now() + 90_000_000), // futura (FIX 4)
     });
     const identity = makeIdentity(makeDriver({ name: 'Ana Pérez', averageRating: 4.9 }));
-    const fleet = makeFleet([makeVehicle()], makeVehicleView({ model: 'Corolla', plate: 'XYZ-789' }));
+    const fleet = makeFleet(
+      [makeVehicle()],
+      makeVehicleView({ model: 'Corolla', plate: 'XYZ-789' }),
+    );
     const service = makeService({ repo, identity, fleet });
 
     const detail = await service.getDetail('trip-1');
@@ -1473,7 +1492,9 @@ describe('PublishedTripsService · FIX 3 · filtro de elegibilidad del conductor
     ]);
     const { client } = makeIdentityBatch(async (ids) =>
       ids.map((id) =>
-        id === dBg ? makePublicDriver(id, { backgroundCheckStatus: 'PENDING' }) : makePublicDriver(id),
+        id === dBg
+          ? makePublicDriver(id, { backgroundCheckStatus: 'PENDING' })
+          : makePublicDriver(id),
       ),
     );
     const service = makeService({ repo, identityBatch: client });

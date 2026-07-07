@@ -124,7 +124,11 @@ export function RatingBody({
             {driverName}
           </Text>
           {vehicleLabel || plate ? (
-            <Text variant="footnote" color="inkMuted" align="center" numberOfLines={1}>
+            <Text
+              variant="footnote"
+              color="inkMuted"
+              align="center"
+              numberOfLines={1}>
               {[vehicleLabel, plate].filter(Boolean).join(' · ')}
             </Text>
           ) : null}

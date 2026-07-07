@@ -40,7 +40,10 @@ describe('OperableVehicleClassesProvider (gate de operabilidad overlay-aware)', 
     expect(classes).toContain(VehicleClass.MOTO);
     expect(classes).toContain(VehicleClass.CAR);
     // Pegó al endpoint interno del catálogo (mismo que el quote/createTrip).
-    expect(get).toHaveBeenCalledWith('/internal/catalog', expect.objectContaining({ identity: expect.anything() }));
+    expect(get).toHaveBeenCalledWith(
+      '/internal/catalog',
+      expect.objectContaining({ identity: expect.anything() }),
+    );
   });
 
   it('solo CAR habilitada (MOTO diferida) → [CAR], el gate sigue bloqueando MOTO', async () => {

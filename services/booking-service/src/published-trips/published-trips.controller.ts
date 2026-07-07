@@ -68,7 +68,8 @@ export class PublishedTripsController {
   @Post()
   @HttpCode(201)
   @ApiOperation({
-    summary: 'Publicar un viaje de carpooling (BORRADOR → PUBLICADO) · driver-rail. Idempotente vía Idempotency-Key.',
+    summary:
+      'Publicar un viaje de carpooling (BORRADOR → PUBLICADO) · driver-rail. Idempotente vía Idempotency-Key.',
   })
   publish(
     @CurrentUser() user: AuthenticatedUser,
@@ -84,7 +85,9 @@ export class PublishedTripsController {
   // GET /mine ANTES de GET /:id: ruta estática, scoped por el driverId server-truth (nunca por param).
   @Audiences(InternalAudience.DRIVER_RAIL)
   @Get('mine')
-  @ApiOperation({ summary: 'Listar las ofertas del conductor (scoped server-truth, paginado) · driver-rail' })
+  @ApiOperation({
+    summary: 'Listar las ofertas del conductor (scoped server-truth, paginado) · driver-rail',
+  })
   listMine(@CurrentUser() user: AuthenticatedUser, @Query() page: ListMinePageDto) {
     return this.trips.listMine(this.requireDriverId(user), page);
   }
@@ -104,7 +107,9 @@ export class PublishedTripsController {
 
   @Audiences(InternalAudience.DRIVER_RAIL)
   @Patch(':id')
-  @ApiOperation({ summary: 'Editar una oferta publicada (solo el dueño, solo si PUBLICADO) · driver-rail' })
+  @ApiOperation({
+    summary: 'Editar una oferta publicada (solo el dueño, solo si PUBLICADO) · driver-rail',
+  })
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -116,11 +121,10 @@ export class PublishedTripsController {
   @Audiences(InternalAudience.DRIVER_RAIL)
   @Post(':id/cancel')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cancelar una oferta publicada (solo el dueño, pre-EN_RUTA) · driver-rail' })
-  cancel(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ) {
+  @ApiOperation({
+    summary: 'Cancelar una oferta publicada (solo el dueño, pre-EN_RUTA) · driver-rail',
+  })
+  cancel(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.trips.cancel(id, this.requireDriverId(user));
   }
 
@@ -143,7 +147,8 @@ export class PublishedTripsController {
   @Audiences(InternalAudience.PUBLIC_RAIL)
   @Get(':id')
   @ApiOperation({
-    summary: 'Ver el detalle ENRIQUECIDO de un viaje publicado (conductor + vehículo) · public-rail',
+    summary:
+      'Ver el detalle ENRIQUECIDO de un viaje publicado (conductor + vehículo) · public-rail',
   })
   getById(@Param('id', new ParseUUIDPipe()) id: string) {
     // Detalle enriquecido (F2): viaje + conductor público (name/rating) + vehículo público (modelo/placa).
@@ -157,7 +162,9 @@ export class PublishedTripsController {
    */
   private requireDriverId(user: AuthenticatedUser): string {
     if (!user.driverId) {
-      throw new ForbiddenError('La identidad del conductor no porta driverId (no habilitado para esta acción)');
+      throw new ForbiddenError(
+        'La identidad del conductor no porta driverId (no habilitado para esta acción)',
+      );
     }
     return user.driverId;
   }

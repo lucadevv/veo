@@ -37,7 +37,14 @@ const VALID_VEHICLE: VehicleData = {
 
 /** Imagen de la tarjeta de mentira (el flujo la trata como opaca). */
 function img(uri: string): PickedImage {
-  return { uri, mimeType: 'image/jpeg', fileName: 'card.jpg', width: null, height: null, fileSize: null };
+  return {
+    uri,
+    mimeType: 'image/jpeg',
+    fileName: 'card.jpg',
+    width: null,
+    height: null,
+    fileSize: null,
+  };
 }
 
 interface RepoDouble {

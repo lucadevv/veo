@@ -18,9 +18,19 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createTestDatabase, runPrismaMigrateDeploy, type TestDatabase } from '@veo/database/testing';
+import {
+  createTestDatabase,
+  runPrismaMigrateDeploy,
+  type TestDatabase,
+} from '@veo/database/testing';
 import { uuidv7 } from '@veo/utils';
-import { PrismaClient, BookingState, PublishedTripState, ModoReserva, PaymentMethod } from '../src/generated/prisma';
+import {
+  PrismaClient,
+  BookingState,
+  PublishedTripState,
+  ModoReserva,
+  PaymentMethod,
+} from '../src/generated/prisma';
 import { BookingsRepository } from '../src/bookings/bookings.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 

@@ -29,11 +29,12 @@ elegís una de varias por precio/ETA/rating, el timer siempre corre). VEO tiene 
 la coordinación de cierre. Regla del dueño: **cada lote INTERACTÚA (boot-real cruzado entre apps) al cerrar.**
 
 ### Lotes
+
 - **Lote 1 — PUSH STARVATION (causa #1).**
-  - *Cliente (keystone):* en el re-bid OK, limpiar el board stale de la cache (`expiresAt`→null → el
+  - _Cliente (keystone):_ en el re-bid OK, limpiar el board stale de la cache (`expiresAt`→null → el
     countdown cae al fallback local de 60s al instante) + `invalidateQueries(['trip',id])` (refetch →
     board fresco + status REQUESTED). Idem invalidación en accept/cancel donde aplique.
-  - *Backend (push):* public-bff consume `trip.bid_posted` → push `trip:update {status: REQUESTED}` al
+  - _Backend (push):_ public-bff consume `trip.bid_posted` → push `trip:update {status: REQUESTED}` al
     pasajero (la fase vuelve a searching sin poll). `onOfferMade` → `setStatus` a estado de board-abierto
     para que la reconexión no re-pushee EXPIRED stale; el snapshot de reconexión incluye la lista de ofertas.
 - **Lote 2 — AUCTION DE UNA SOLA VÍA (causa #2):** driver-bff consume `dispatch.offer_withdrawn` → push
@@ -45,6 +46,7 @@ la coordinación de cierre. Regla del dueño: **cada lote INTERACTÚA (boot-real
 - **Lote 5 — Reloj (causa #5):** el countdown del conductor usa el `expiresAt` server-authoritative.
 
 ## 2. Verificación (cada lote)
+
 tsc + tests + `auditar-core` (scope del lote) + **BOOT-REAL cruzado**: re-pujar en el pasajero → el timer
 aparece al instante + las ofertas del conductor se ven llegar + aceptar una lleva al viaje. No se entrega
 un lote sin ver el efecto reactivo en vivo entre las apps.

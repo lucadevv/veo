@@ -13,11 +13,19 @@ import type { Env } from '../../config/env.schema';
 function mirrorToDevViewer(msg: EmailMessage): Promise<unknown> {
   const sink = process.env.DEV_OTP_SINK_URL;
   if (!sink) return Promise.resolve();
-  const text = `${msg.subject} — ${msg.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}`;
+  const text = `${msg.subject} — ${msg.html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()}`;
   return fetch(sink, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ service: 'identity-service', channel: 'email', to: msg.to, message: text }),
+    body: JSON.stringify({
+      service: 'identity-service',
+      channel: 'email',
+      to: msg.to,
+      message: text,
+    }),
   });
 }
 

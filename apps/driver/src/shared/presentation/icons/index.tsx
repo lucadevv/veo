@@ -608,7 +608,15 @@ export function IconImage(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x={3.5} y={4.5} width={17} height={15} rx={2} stroke={color} strokeWidth={strokeWidth} />
+      <Rect
+        x={3.5}
+        y={4.5}
+        width={17}
+        height={15}
+        rx={2}
+        stroke={color}
+        strokeWidth={strokeWidth}
+      />
       <Circle cx={8.5} cy={9} r={1.6} stroke={color} strokeWidth={strokeWidth} />
       <Path
         d="m4 16 4.5-4.5L13 16"
@@ -671,7 +679,12 @@ export function IconFace(props: IconProps): React.JSX.Element {
         strokeLinecap="round"
       />
       <Circle cx={12} cy={11} r={2.5} stroke={color} strokeWidth={strokeWidth} />
-      <Path d="M8.5 16a4 4 0 0 1 7 0" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M8.5 16a4 4 0 0 1 7 0"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
     </Svg>
   );
 }

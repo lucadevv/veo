@@ -88,41 +88,82 @@ beforeAll(async () => {
 
   // ── Cobros digitales (cohorte de money-in + comisión) ──
   const p1 = await seedPayment({
-    method: 'YAPE', status: 'CAPTURED', netSettledCents: 1000, commissionCents: 200,
+    method: 'YAPE',
+    status: 'CAPTURED',
+    netSettledCents: 1000,
+    commissionCents: 200,
     capturedAt: '2026-07-15T14:00:00Z', // hoy · Lima 09:00
   });
   await seedPayment({
-    method: 'PLIN', status: 'CAPTURED', netSettledCents: 500, commissionCents: 100,
+    method: 'PLIN',
+    status: 'CAPTURED',
+    netSettledCents: 500,
+    commissionCents: 100,
     capturedAt: '2026-07-15T16:30:00Z', // hoy · Lima 11:30
   });
   const p3 = await seedPayment({
-    method: 'CARD', status: 'CAPTURED', netSettledCents: 800, commissionCents: 160,
+    method: 'CARD',
+    status: 'CAPTURED',
+    netSettledCents: 800,
+    commissionCents: 160,
     capturedAt: '2026-07-12T15:00:00Z', // hace 3 días · dentro de 7d/30d
   });
   const p4 = await seedPayment({
-    method: 'YAPE', status: 'CAPTURED', netSettledCents: 700, commissionCents: 140,
+    method: 'YAPE',
+    status: 'CAPTURED',
+    netSettledCents: 700,
+    commissionCents: 140,
     capturedAt: '2026-06-25T15:00:00Z', // hace 20 días · solo dentro de 30d
   });
   await seedPayment({
-    method: 'YAPE', status: 'CAPTURED', netSettledCents: 900, commissionCents: 180,
+    method: 'YAPE',
+    status: 'CAPTURED',
+    netSettledCents: 900,
+    commissionCents: 180,
     capturedAt: '2026-06-05T15:00:00Z', // hace 40 días · FUERA de todos los rangos
   });
 
   // ── Ruido que NO debe contar ──
   await seedPayment({
-    method: 'CASH', status: 'CAPTURED', netSettledCents: 2000, commissionCents: 400,
+    method: 'CASH',
+    status: 'CAPTURED',
+    netSettledCents: 2000,
+    commissionCents: 400,
     capturedAt: '2026-07-15T14:00:00Z', // efectivo: excluido (no entra al banco)
   });
   await seedPayment({
-    method: 'YAPE', status: 'REFUNDED', netSettledCents: 400, commissionCents: 80,
+    method: 'YAPE',
+    status: 'REFUNDED',
+    netSettledCents: 400,
+    commissionCents: 80,
     capturedAt: '2026-07-15T14:00:00Z', // reembolsado TOTAL: fuera del cohorte CAPTURED/PARTIALLY_REFUNDED
   });
 
   // ── Reembolsos (por createdAt · solo COMPLETED cuenta) ──
-  await seedRefund({ paymentId: p1, amountCents: 300, status: 'COMPLETED', createdAt: '2026-07-15T17:00:00Z' }); // hoy
-  await seedRefund({ paymentId: p3, amountCents: 150, status: 'COMPLETED', createdAt: '2026-07-05T12:00:00Z' }); // 10d → solo 30d
-  await seedRefund({ paymentId: p1, amountCents: 999, status: 'PENDING', createdAt: '2026-07-15T18:00:00Z' });   // PENDING → nunca
-  await seedRefund({ paymentId: p4, amountCents: 500, status: 'COMPLETED', createdAt: '2026-06-01T12:00:00Z' }); // 40d → fuera de todo
+  await seedRefund({
+    paymentId: p1,
+    amountCents: 300,
+    status: 'COMPLETED',
+    createdAt: '2026-07-15T17:00:00Z',
+  }); // hoy
+  await seedRefund({
+    paymentId: p3,
+    amountCents: 150,
+    status: 'COMPLETED',
+    createdAt: '2026-07-05T12:00:00Z',
+  }); // 10d → solo 30d
+  await seedRefund({
+    paymentId: p1,
+    amountCents: 999,
+    status: 'PENDING',
+    createdAt: '2026-07-15T18:00:00Z',
+  }); // PENDING → nunca
+  await seedRefund({
+    paymentId: p4,
+    amountCents: 500,
+    status: 'COMPLETED',
+    createdAt: '2026-06-01T12:00:00Z',
+  }); // 40d → fuera de todo
 }, 180_000);
 
 afterAll(async () => {

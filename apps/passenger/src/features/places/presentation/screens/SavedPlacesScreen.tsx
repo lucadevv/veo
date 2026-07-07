@@ -414,8 +414,7 @@ function PrimaryPlaceCard({
     : theme.colors.surfaceElevated;
   const title = place?.label ?? t(isHome ? 'places.home' : 'places.work');
   const subtitle =
-    place?.subtitle ??
-    t(isHome ? 'places.addHomeHint' : 'places.addWorkHint');
+    place?.subtitle ?? t(isHome ? 'places.addHomeHint' : 'places.addWorkHint');
 
   return (
     <Card

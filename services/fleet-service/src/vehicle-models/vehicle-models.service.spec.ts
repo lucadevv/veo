@@ -215,13 +215,11 @@ function makeReviewService(rows: VehicleModelSpec[], vehicles: VehicleRow[] = []
 
   // findUniqueOrThrow: la relectura post-CAS dentro de la tx (transition() lee la fila ya transicionada
   // para proyectarla al view). Espeja findUnique pero LANZA si no existe (invariante: el CAS ya validó id).
-  const findUniqueOrThrow = vi
-    .fn()
-    .mockImplementation(({ where }: { where: { id: string } }) => {
-      const found = store.find((r) => r.id === where.id);
-      if (!found) return Promise.reject(new Error(`No VehicleModelSpec found for id ${where.id}`));
-      return Promise.resolve(found);
-    });
+  const findUniqueOrThrow = vi.fn().mockImplementation(({ where }: { where: { id: string } }) => {
+    const found = store.find((r) => r.id === where.id);
+    if (!found) return Promise.reject(new Error(`No VehicleModelSpec found for id ${where.id}`));
+    return Promise.resolve(found);
+  });
   // outboxEvent.create: el evento VEHICLE_MODEL_REVIEWED que transition() emite en la MISMA tx tras
   // aprobar/rechazar. El doble solo lo registra (no asertamos su contenido acá); devuelve la fila creada.
   const outboxCreate = vi
@@ -238,35 +236,33 @@ function makeReviewService(rows: VehicleModelSpec[], vehicles: VehicleRow[] = []
   // pisa los ya linkeados) + vehicleType + año en [from,to] + canon normalizado (normalizeModelTerm espeja la
   // expr SQL). Los valores bindeados llegan en orden: [specId, specMake, specModel, vehicleType, yearFrom,
   // yearTo, specMakeNorm, specModelNorm]. Devuelve el count de filas afectadas (como Prisma.$executeRaw).
-  const executeRaw = vi
-    .fn()
-    .mockImplementation((_sql: TemplateStringsArray, ...v: unknown[]) => {
-      const [specId, specMake, specModel, vehicleType, yearFrom, yearTo, makeNorm, modelNorm] = v as [
-        string,
-        string,
-        string,
-        VehicleType,
-        number,
-        number,
-        string,
-        string,
-      ];
-      let count = 0;
-      vehicleStore.forEach((veh, i) => {
-        if (
-          veh.modelSpecId === null &&
-          veh.vehicleType === vehicleType &&
-          veh.year >= yearFrom &&
-          veh.year <= yearTo &&
-          normalizeModelTerm(veh.make) === makeNorm &&
-          normalizeModelTerm(veh.model) === modelNorm
-        ) {
-          vehicleStore[i] = { ...veh, modelSpecId: specId, make: specMake, model: specModel };
-          count++;
-        }
-      });
-      return Promise.resolve(count);
+  const executeRaw = vi.fn().mockImplementation((_sql: TemplateStringsArray, ...v: unknown[]) => {
+    const [specId, specMake, specModel, vehicleType, yearFrom, yearTo, makeNorm, modelNorm] = v as [
+      string,
+      string,
+      string,
+      VehicleType,
+      number,
+      number,
+      string,
+      string,
+    ];
+    let count = 0;
+    vehicleStore.forEach((veh, i) => {
+      if (
+        veh.modelSpecId === null &&
+        veh.vehicleType === vehicleType &&
+        veh.year >= yearFrom &&
+        veh.year <= yearTo &&
+        normalizeModelTerm(veh.make) === makeNorm &&
+        normalizeModelTerm(veh.model) === modelNorm
+      ) {
+        vehicleStore[i] = { ...veh, modelSpecId: specId, make: specMake, model: specModel };
+        count++;
+      }
     });
+    return Promise.resolve(count);
+  });
 
   const writeClient = {
     vehicleModelSpec: { create, updateMany, findUnique, findUniqueOrThrow },
@@ -345,13 +341,11 @@ function makeMatchService(opts: {
   threshold?: number;
 }) {
   const captured: { sql?: TemplateStringsArray; values?: unknown[] } = {};
-  const queryRaw = vi
-    .fn()
-    .mockImplementation((sql: TemplateStringsArray, ...values: unknown[]) => {
-      captured.sql = sql;
-      captured.values = values;
-      return Promise.resolve(opts.queryRows);
-    });
+  const queryRaw = vi.fn().mockImplementation((sql: TemplateStringsArray, ...values: unknown[]) => {
+    captured.sql = sql;
+    captured.values = values;
+    return Promise.resolve(opts.queryRows);
+  });
   const findUnique = vi.fn().mockResolvedValue(opts.spec ?? null);
   const prisma = {
     read: { $queryRaw: queryRaw, vehicleModelSpec: { findUnique } },
@@ -534,9 +528,27 @@ describe('VehicleModelsService.approve · HEAL re-link del eslabón vehículo↔
     const { service, vehicleStore } = makeReviewService(
       [pendingKtm()],
       [
-        vrow({ id: 'otroModelo', make: 'KTM', model: 'Duke 200', year: 2021, vehicleType: VehicleType.MOTO }),
-        vrow({ id: 'otroTipo', make: 'KTM', model: 'RC 200', year: 2021, vehicleType: VehicleType.CAR }),
-        vrow({ id: 'otroAnio', make: 'KTM', model: 'RC 200', year: 2019, vehicleType: VehicleType.MOTO }),
+        vrow({
+          id: 'otroModelo',
+          make: 'KTM',
+          model: 'Duke 200',
+          year: 2021,
+          vehicleType: VehicleType.MOTO,
+        }),
+        vrow({
+          id: 'otroTipo',
+          make: 'KTM',
+          model: 'RC 200',
+          year: 2021,
+          vehicleType: VehicleType.CAR,
+        }),
+        vrow({
+          id: 'otroAnio',
+          make: 'KTM',
+          model: 'RC 200',
+          year: 2019,
+          vehicleType: VehicleType.MOTO,
+        }),
       ],
     );
     await service.approve('spec-ktm', 'admin-9', approveDto);
@@ -557,7 +569,16 @@ describe('VehicleModelsService.approve · HEAL re-link del eslabón vehículo↔
   it('idempotente: un vehículo YA linkeado a otro modelo no se pisa', async () => {
     const { service, vehicleStore } = makeReviewService(
       [pendingKtm()],
-      [vrow({ id: 'yaLinkeado', make: 'KTM', model: 'RC 200', year: 2021, vehicleType: VehicleType.MOTO, modelSpecId: 'spec-viejo' })],
+      [
+        vrow({
+          id: 'yaLinkeado',
+          make: 'KTM',
+          model: 'RC 200',
+          year: 2021,
+          vehicleType: VehicleType.MOTO,
+          modelSpecId: 'spec-viejo',
+        }),
+      ],
     );
     await service.approve('spec-ktm', 'admin-9', approveDto);
     expect(vehicleStore.find((v) => v.id === 'yaLinkeado')!.modelSpecId).toBe('spec-viejo');

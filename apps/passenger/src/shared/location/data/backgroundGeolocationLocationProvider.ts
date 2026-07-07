@@ -165,7 +165,9 @@ export class BackgroundGeolocationLocationProvider implements LocationProvider {
     if (!point) {
       // Fix sin coordenadas válidas: rechazamos para que el hook degrade a `error` (reintentable),
       // en vez de propagar un GeoPoint inventado. Nunca inventamos coordenadas.
-      throw new Error('getCurrentPosition: el SDK devolvió un fix sin coordenadas válidas');
+      throw new Error(
+        'getCurrentPosition: el SDK devolvió un fix sin coordenadas válidas',
+      );
     }
     return point;
   }

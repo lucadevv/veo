@@ -103,10 +103,10 @@ docker compose -f infra/docker/dev/docker-compose.yml logs -f <svc>
 
 **Cada app tiene SU puerto fijo** para poder correr ambas (con sus dos Metros) a la vez:
 
-| App                | Puerto Metro | Dónde está configurado                                                                     |
-| ------------------ | ------------ | ------------------------------------------------------------------------------------------ |
-| `apps/passenger`   | **8081**     | default de Metro (scripts sin `--port`)                                                     |
-| `apps/driver`      | **8084**     | `--port 8084` en TODOS los scripts de su package.json (`start`/`dev`/`ios`/`android`) + `RCT_METRO_PORT=8084` en los de iOS + `react_native_dev_server_port=8084` en `android/gradle.properties` (bakea el puerto en el build debug: emulador y device físico) |
+| App              | Puerto Metro | Dónde está configurado                                                                                                                                                                                                                                         |
+| ---------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/passenger` | **8081**     | default de Metro (scripts sin `--port`)                                                                                                                                                                                                                        |
+| `apps/driver`    | **8084**     | `--port 8084` en TODOS los scripts de su package.json (`start`/`dev`/`ios`/`android`) + `RCT_METRO_PORT=8084` en los de iOS + `react_native_dev_server_port=8084` en `android/gradle.properties` (bakea el puerto en el build debug: emulador y device físico) |
 
 ```bash
 pnpm --filter veo-passenger-app dev   # Metro passenger :8081

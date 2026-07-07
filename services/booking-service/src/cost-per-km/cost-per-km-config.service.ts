@@ -68,7 +68,9 @@ export class CostPerKmConfigService {
    */
   async getConfig(pais: string): Promise<PersistedCostPerKm> {
     if (!isPais(pais)) {
-      throw new ValidationError('País no soportado para el cálculo del tope de cost-sharing', { pais });
+      throw new ValidationError('País no soportado para el cálculo del tope de cost-sharing', {
+        pais,
+      });
     }
     const now = Date.now();
     const cached = this.cache.get(pais);

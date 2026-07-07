@@ -380,7 +380,10 @@ describe('IdentityGrpcController · GetDriverByUser (driver-rail) emite el estad
 
   it('faceEnrolledAt/lastVerifiedAt presentes en driver-rail → el gate biometricEnrolled del onboarding funciona', async () => {
     const ctrl = makeController({ findUnique: () => ({ ...enrolledDriverRow }) });
-    const reply = await ctrl.getDriverByUser({ id: 'u1' }, signedMetaAs(InternalAudience.DRIVER_RAIL));
+    const reply = await ctrl.getDriverByUser(
+      { id: 'u1' },
+      signedMetaAs(InternalAudience.DRIVER_RAIL),
+    );
 
     expect(reply.found).toBe(true);
     // El núcleo de la regresión: el ESTADO de enrollment llega al conductor (no vacío) en SU propio rail.
@@ -392,7 +395,10 @@ describe('IdentityGrpcController · GetDriverByUser (driver-rail) emite el estad
 
   it('driver-rail NO recibe la PII sensible (DNI/licencia/fecha-nac/binding) — H8 intacto para el propio conductor', async () => {
     const ctrl = makeController({ findUnique: () => ({ ...enrolledDriverRow }) });
-    const reply = await ctrl.getDriverByUser({ id: 'u1' }, signedMetaAs(InternalAudience.DRIVER_RAIL));
+    const reply = await ctrl.getDriverByUser(
+      { id: 'u1' },
+      signedMetaAs(InternalAudience.DRIVER_RAIL),
+    );
 
     // El conductor NO necesita su DNI/licencia/fecha-nac descifrados en este reply (los edita por REST,
     // no los lee de acá): siguen gateados admin-only. El DNI ni se descifra para el driver-rail.
@@ -418,8 +424,9 @@ describe('IdentityGrpcController · GetDriver expone las CAUSAS de suspensión (
 
   it('GetDriver incluye los holds en el query (include suspensionHolds: select cause)', async () => {
     const ctrl = makeController({ findUnique: () => ({ ...baseDriverRow, suspensionHolds: [] }) });
-    const prismaFindUnique = (ctrl as unknown as { prisma: { read: { driver: { findUnique: ReturnType<typeof vi.fn> } } } })
-      .prisma.read.driver.findUnique;
+    const prismaFindUnique = (
+      ctrl as unknown as { prisma: { read: { driver: { findUnique: ReturnType<typeof vi.fn> } } } }
+    ).prisma.read.driver.findUnique;
 
     await ctrl.getDriver({ id: 'd1' }, signedMeta());
 

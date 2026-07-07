@@ -82,7 +82,11 @@ function EstadoPill({ row }: { row: Row }) {
   if (row.backgroundStatus === 'CLEARED') return <DotPill tone="success">Aprobado</DotPill>;
   if (row.backgroundStatus === 'REJECTED') return <DotPill tone="danger">Rechazado</DotPill>;
   const docsOk = row.docsTotal > 0 && row.docsComplete >= row.docsTotal;
-  return docsOk ? <DotPill tone="warn">En revisión</DotPill> : <DotPill tone="muted">Pendiente</DotPill>;
+  return docsOk ? (
+    <DotPill tone="warn">En revisión</DotPill>
+  ) : (
+    <DotPill tone="muted">Pendiente</DotPill>
+  );
 }
 
 type Tab = 'todos' | 'sinDocs' | 'listos' | 'enRevision' | 'aprobados' | 'rechazados';

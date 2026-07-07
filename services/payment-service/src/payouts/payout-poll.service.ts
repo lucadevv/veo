@@ -113,7 +113,9 @@ export class PayoutPollService implements OnModuleInit, OnModuleDestroy {
           await this.pollOnce();
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'error';
-          this.logger.warn(`Poll fallback de desembolso: tick con error (continúa el próximo): ${msg}`);
+          this.logger.warn(
+            `Poll fallback de desembolso: tick con error (continúa el próximo): ${msg}`,
+          );
         } finally {
           this.running = false;
         }
@@ -199,7 +201,9 @@ export class PayoutPollService implements OnModuleInit, OnModuleDestroy {
       }
     }
     if (applied > 0)
-      this.logger.log(`Poll fallback de desembolso: ${applied}/${processing.length} payouts confirmados`);
+      this.logger.log(
+        `Poll fallback de desembolso: ${applied}/${processing.length} payouts confirmados`,
+      );
     return { scanned: processing.length, applied };
   }
 }

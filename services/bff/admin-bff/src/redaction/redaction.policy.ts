@@ -23,7 +23,11 @@ const IDENTITY_ROLES: readonly AdminRole[] = [
 ];
 
 /** Montos (fareCents y derivados): solo finanzas (+admin). */
-const AMOUNT_ROLES: readonly AdminRole[] = [AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN];
+const AMOUNT_ROLES: readonly AdminRole[] = [
+  AdminRole.FINANCE,
+  AdminRole.ADMIN,
+  AdminRole.SUPERADMIN,
+];
 
 /** Placa del vehículo: dispatch operativo + compliance + admin (SUPPORT → enmascarada). */
 const PLATE_ROLES: readonly AdminRole[] = [

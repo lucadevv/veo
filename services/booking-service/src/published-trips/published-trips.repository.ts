@@ -249,11 +249,7 @@ export class PublishedTripsRepository {
    * el cursor y el sort no pueden divergir → la página no salta ni duplica filas (antes ordenaba por createdAt
    * pero cursoreaba por id → dos relojes distintos, keyset inconsistente).
    */
-  findByDriverId(
-    driverId: string,
-    take: number,
-    cursorId?: string,
-  ): Promise<PublishedTrip[]> {
+  findByDriverId(driverId: string, take: number, cursorId?: string): Promise<PublishedTrip[]> {
     return this.prisma.read.publishedTrip.findMany({
       where: { driverId },
       orderBy: { id: 'desc' }, // id uuidv7 time-ordered: misma columna que el cursor → keyset consistente.

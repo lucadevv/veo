@@ -162,8 +162,9 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
           <div>
             <CardTitle>Ventanas de dispatch</CardTitle>
             <CardDescription>
-              Cuánto tiempo espera cada mecánica de match. Una ventana corta cierra antes (más reintentos);
-              una larga da más margen al conductor. El cambio aplica en vivo, sin reiniciar el servicio.
+              Cuánto tiempo espera cada mecánica de match. Una ventana corta cierra antes (más
+              reintentos); una larga da más margen al conductor. El cambio aplica en vivo, sin
+              reiniciar el servicio.
             </CardDescription>
           </div>
         </CardHeader>
@@ -216,7 +217,9 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
             </Field>
             <p className="flex items-center gap-1.5 text-xs text-ink-muted">
               <Gavel className="size-3.5" aria-hidden />
-              {isValidBidWindowSec(values.bidWindowSec) ? `${values.bidWindowSec} s por tablero` : '—'}
+              {isValidBidWindowSec(values.bidWindowSec)
+                ? `${values.bidWindowSec} s por tablero`
+                : '—'}
             </p>
           </div>
         </CardContent>
@@ -256,7 +259,8 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
           )
         ) : (
           <p className="text-xs text-ink-subtle">
-            Solo lectura: necesitas el rol DISPATCHER, ADMIN o SUPERADMIN para cambiar la configuración.
+            Solo lectura: necesitas el rol DISPATCHER, ADMIN o SUPERADMIN para cambiar la
+            configuración.
           </p>
         )}
       </div>

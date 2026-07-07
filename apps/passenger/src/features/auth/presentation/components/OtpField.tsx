@@ -130,7 +130,12 @@ export function OtpField({
 
   return (
     <Pressable onPress={() => editable && inputRef.current?.focus()}>
-      <Animated.View style={[styles.row, {gap: theme.spacing.sm, opacity: editable ? 1 : 0.55}, rowStyle]}>
+      <Animated.View
+        style={[
+          styles.row,
+          {gap: theme.spacing.sm, opacity: editable ? 1 : 0.55},
+          rowStyle,
+        ]}>
         {Array.from({length}).map((_, index) => {
           const char = value[index] ?? '';
           const active =

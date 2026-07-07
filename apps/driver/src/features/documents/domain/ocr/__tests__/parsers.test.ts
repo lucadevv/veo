@@ -303,8 +303,16 @@ describe('parseMrzTd1 · MRZ TD1 del DNIe (función pura)', () => {
 
   it('pivote de siglo del nacimiento: YY > año actual de 2 díg → 19YY (no futuro)', () => {
     // Referencia 2026 → YY=50 (>26) ⇒ 1950; YY=10 (<=26) ⇒ 2010.
-    const old = ['I<PER111111111<<<<<<<<<<<<<<<<', '5001015M3001017PER<<<<<<<<<<<<', 'A<<B<<<<<<<<<<<<<<<<<<<<<<<<<<'];
-    const young = ['I<PER111111111<<<<<<<<<<<<<<<<', '1001015M3001017PER<<<<<<<<<<<<', 'A<<B<<<<<<<<<<<<<<<<<<<<<<<<<<'];
+    const old = [
+      'I<PER111111111<<<<<<<<<<<<<<<<',
+      '5001015M3001017PER<<<<<<<<<<<<',
+      'A<<B<<<<<<<<<<<<<<<<<<<<<<<<<<',
+    ];
+    const young = [
+      'I<PER111111111<<<<<<<<<<<<<<<<',
+      '1001015M3001017PER<<<<<<<<<<<<',
+      'A<<B<<<<<<<<<<<<<<<<<<<<<<<<<<',
+    ];
     expect(parseMrzTd1(old, REF)?.birthDate).toBe('1950-01-01');
     expect(parseMrzTd1(young, REF)?.birthDate).toBe('2010-01-01');
   });
@@ -413,7 +421,11 @@ describe('parseLicense · licencia de conducir peruana (GROUND TRUTH: documento 
   });
 
   it('respaldo: categoría YA combinada en la línea de Categoría (sin rótulo Clase) sigue funcionando', () => {
-    const lines = ['Categoría: A-IIb', 'Nro de Licencia Q70128450', 'Fecha de Revalidación 15/06/2028'];
+    const lines = [
+      'Categoría: A-IIb',
+      'Nro de Licencia Q70128450',
+      'Fecha de Revalidación 15/06/2028',
+    ];
     expect(parseLicense(lines)).toEqual({
       number: 'Q70128450',
       category: 'A-IIb',
@@ -513,7 +525,14 @@ describe('parseLicense · licencia de conducir peruana (GROUND TRUTH: documento 
   });
 
   it('degradado: categoría que NO arma (clase sin ordinal) → category undefined', () => {
-    const parsed = parseLicense(['Nro de Licencia', 'F73694046', 'Clase', 'A', 'Fecha de Revalidación', '17/10/2032']);
+    const parsed = parseLicense([
+      'Nro de Licencia',
+      'F73694046',
+      'Clase',
+      'A',
+      'Fecha de Revalidación',
+      '17/10/2032',
+    ]);
     expect(parsed.category).toBeUndefined();
     expect(parsed.number).toBe('F73694046');
     expect(parsed.expiresAt).toBe('2032-10-17');
@@ -841,7 +860,9 @@ describe('parsePropertyCard · tarjeta de propiedad / TIVe (GROUND TRUTH: Catego
       // GLP es común en taxis de Lima pero NO está en los 4 tipos de ADR-017 §1.1: degradación honesta. OJO:
       // "GAS LICUADO DE PETROLEO" contiene "PETROLEO" → NO debe caer como DIESEL (cortocircuito explícito).
       expect(parsePropertyCard(['Combustible: GLP']).energySource).toBeUndefined();
-      expect(parsePropertyCard(['Combustible: GAS LICUADO DE PETROLEO']).energySource).toBeUndefined();
+      expect(
+        parsePropertyCard(['Combustible: GAS LICUADO DE PETROLEO']).energySource,
+      ).toBeUndefined();
     });
 
     it('combustible DISPERSO: etiqueta "Combustible" sola + valor en la línea siguiente', () => {
@@ -919,7 +940,11 @@ describe('parseDocument · dispatcher tipado por FleetDocumentType', () => {
       'N° Póliza - Certificado: 2012044701 - 1',
       'Hasta 31/12/2027',
     ]);
-    expect(result).toEqual({ kind: 'soat', policyNumber: '2012044701 - 1', expiresAt: '2027-12-31' });
+    expect(result).toEqual({
+      kind: 'soat',
+      policyNumber: '2012044701 - 1',
+      expiresAt: '2027-12-31',
+    });
   });
 
   it('PROPERTY_CARD → parser de tarjeta (kind=propertyCard)', () => {

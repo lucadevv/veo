@@ -17,11 +17,7 @@ import { AdminRole, PricingMode } from '@veo/shared-types';
 import type { InternalRestClient } from '@veo/rpc';
 import { PricingService, type ModeScheduleView } from './pricing.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
-import {
-  ReplaceScheduleDto,
-  PricingModeRuleDto,
-  ReplaceBaseFareDto,
-} from './dto/pricing.dto';
+import { ReplaceScheduleDto, PricingModeRuleDto, ReplaceBaseFareDto } from './dto/pricing.dto';
 
 const admin: AuthenticatedUser = {
   userId: 'a1',

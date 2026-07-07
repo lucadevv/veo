@@ -94,9 +94,7 @@ const OFFLINE_GRACE_MS = 20_000;
 
 @Injectable()
 @WebSocketGateway({ namespace: '/driver', cors: { origin: true, credentials: true } })
-export class DriverGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
-{
+export class DriverGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   private server?: Server;
 
@@ -287,11 +285,15 @@ export class DriverGateway
     } catch (err) {
       // Adapter degradado: no podemos confirmar la ausencia → NO emitir (un falso offline reasignaría un
       // viaje vivo). El watchdog pre-recojo de trip-service es el backstop.
-      this.logger.warn({ err, driverId }, 'ws offline-grace: fetchSockets falló → no se declara offline');
+      this.logger.warn(
+        { err, driverId },
+        'ws offline-grace: fetchSockets falló → no se declara offline',
+      );
       return;
     }
     const emitted = await this.locationPublisher.publishDriverWentOffline(driverId);
-    if (emitted) this.logger.info({ driverId }, 'ws conductor offline (gracia vencida sin reconexión)');
+    if (emitted)
+      this.logger.info({ driverId }, 'ws conductor offline (gracia vencida sin reconexión)');
   }
 
   /**
@@ -322,7 +324,10 @@ export class DriverGateway
   private onSupersedeBroadcast({ driverId, sid }: SupersedeBroadcast): void {
     const local = this.activeByDriver.get(driverId);
     if (!local || local.sid >= sid) return;
-    this.logger.info({ driverId }, 'ws sesión superada en otra réplica: echando socket local viejo');
+    this.logger.info(
+      { driverId },
+      'ws sesión superada en otra réplica: echando socket local viejo',
+    );
     this.kickSocket(local.socket, SESSION_SUPERSEDED_EVENT);
     // Sin sesión nueva local que sobreescriba el Map (el ganador vive en otro pod) → lo limpiamos acá.
     this.activeByDriver.delete(driverId);

@@ -127,8 +127,8 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
         ))
       ) : (
         <p className="text-sm text-ink-subtle">
-          Sin costos de operación configurados todavía. Definí el costo por km por país para activar el
-          techo anti-lucro del carpooling.
+          Sin costos de operación configurados todavía. Definí el costo por km por país para activar
+          el techo anti-lucro del carpooling.
         </p>
       )}
       <ReadOnlyNote canManage={canManage} noun="el costo/km" />

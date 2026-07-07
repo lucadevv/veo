@@ -80,7 +80,9 @@ export class BookingPaymentConsumer extends KafkaConsumerBootstrap {
   private async onPaymentCaptured(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = schemaForEvent(PAYMENT_CAPTURED)?.safeParse(envelope.payload);
     if (!parsed?.success) {
-      this.logger.warn(`${PAYMENT_CAPTURED} con payload inválido (eventId=${envelope.eventId}); ignorado`);
+      this.logger.warn(
+        `${PAYMENT_CAPTURED} con payload inválido (eventId=${envelope.eventId}); ignorado`,
+      );
       return;
     }
     const { tripId, paymentId } = parsed.data as EventPayload<typeof PAYMENT_CAPTURED>;
@@ -92,7 +94,10 @@ export class BookingPaymentConsumer extends KafkaConsumerBootstrap {
     } catch (err) {
       // No-ack/retry lo gestiona kafkajs; el dedup NO se marcó → el reintento re-procesa (idempotente por el
       // where atómico del seat-lock). Log estructurado para diagnóstico.
-      this.logger.error({ err, tripId, paymentId }, 'Falló el seat-lock al confirmar la captura del cobro');
+      this.logger.error(
+        { err, tripId, paymentId },
+        'Falló el seat-lock al confirmar la captura del cobro',
+      );
       throw err;
     }
   }
@@ -105,7 +110,9 @@ export class BookingPaymentConsumer extends KafkaConsumerBootstrap {
   private async onPaymentFailed(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = schemaForEvent(PAYMENT_FAILED)?.safeParse(envelope.payload);
     if (!parsed?.success) {
-      this.logger.warn(`${PAYMENT_FAILED} con payload inválido (eventId=${envelope.eventId}); ignorado`);
+      this.logger.warn(
+        `${PAYMENT_FAILED} con payload inválido (eventId=${envelope.eventId}); ignorado`,
+      );
       return;
     }
     const { tripId, willRetry } = parsed.data as EventPayload<typeof PAYMENT_FAILED>;
@@ -115,7 +122,10 @@ export class BookingPaymentConsumer extends KafkaConsumerBootstrap {
         this.bookings.handlePaymentFailed(tripId, willRetry),
       );
     } catch (err) {
-      this.logger.error({ err, tripId, willRetry }, 'Falló el manejo de payment.failed en el booking');
+      this.logger.error(
+        { err, tripId, willRetry },
+        'Falló el manejo de payment.failed en el booking',
+      );
       throw err;
     }
   }

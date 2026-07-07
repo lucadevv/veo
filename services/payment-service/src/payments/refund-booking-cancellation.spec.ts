@@ -43,7 +43,11 @@ interface FakeRefund {
   reason: string;
 }
 
-type OutboxRow = { aggregateId: string; eventType: string; envelope: { payload: Record<string, unknown> } };
+type OutboxRow = {
+  aggregateId: string;
+  eventType: string;
+  envelope: { payload: Record<string, unknown> };
+};
 
 // P2002 (unique violation) con la shape que `isUniqueViolation` reconoce (name + code + meta.target).
 function uniqueViolation(target: string): Prisma.PrismaClientKnownRequestError {
@@ -128,10 +132,11 @@ function makePrisma(payment: FakePayment | null) {
   const prisma = {
     read: {
       payment: {
-        findFirst: vi.fn(async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
-          payment && payment.tripId === where.tripId && where.status.in.includes(payment.status)
-            ? payment
-            : null,
+        findFirst: vi.fn(
+          async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
+            payment && payment.tripId === where.tripId && where.status.in.includes(payment.status)
+              ? payment
+              : null,
         ),
       },
     },
@@ -188,7 +193,10 @@ describe('PaymentsService.refundForBookingCancellation (F3c · refund automátic
     const { prisma, refunds } = makePrisma(payment);
     const svc = buildService(prisma);
 
-    const res = await svc.refundForBookingCancellation('bkg-1', BookingCancelledRazon.OFERTA_NO_DISPONIBLE);
+    const res = await svc.refundForBookingCancellation(
+      'bkg-1',
+      BookingCancelledRazon.OFERTA_NO_DISPONIBLE,
+    );
 
     expect('skipped' in res).toBe(false);
     expect(refunds).toHaveLength(1);

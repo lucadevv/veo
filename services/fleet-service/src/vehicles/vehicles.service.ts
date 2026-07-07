@@ -133,10 +133,13 @@ export class VehiclesService {
   private async assertOperableVehicleType(vehicleType: VehicleType): Promise<void> {
     const operable = await this.operableClasses.get();
     if (!(operable as readonly string[]).includes(vehicleType)) {
-      throw new ValidationError('Por ahora solo se registran autos; la mototaxi llega más adelante', {
-        vehicleType,
-        operable,
-      });
+      throw new ValidationError(
+        'Por ahora solo se registran autos; la mototaxi llega más adelante',
+        {
+          vehicleType,
+          operable,
+        },
+      );
     }
   }
 
@@ -411,9 +414,7 @@ export class VehiclesService {
     // (OCR on-device del conductor), no un re-OCR de confianza del servidor. La corroboración real contra la
     // imagen de la tarjeta es la VERIFICACIÓN DEL OPERADOR en el panel admin (gate de operabilidad, pendiente)
     // + un futuro re-OCR server-side. Acá solo se prefiere una aserción del cliente (categoría) sobre la otra.
-    const derivedType = input.mtcCategory
-      ? mapMtcCategoryToVehicleType(input.mtcCategory)
-      : null;
+    const derivedType = input.mtcCategory ? mapMtcCategoryToVehicleType(input.mtcCategory) : null;
     const resolvedInput = { ...input, vehicleType: derivedType ?? input.vehicleType };
 
     // B5-2: si el conductor eligió un modelo del catálogo, make/model/vehicleType salen del spec

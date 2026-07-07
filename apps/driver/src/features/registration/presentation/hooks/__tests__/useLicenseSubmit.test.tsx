@@ -98,11 +98,7 @@ function renderHookWith(container: AppContainer): HookHandle {
 function okUploaderWithPhases(): UploaderDouble {
   return {
     upload: jest.fn(
-      async (
-        _type: string,
-        sides: DocumentSideFile[],
-        onSidePhase?: DocumentSidePhaseCallback,
-      ) => {
+      async (_type: string, sides: DocumentSideFile[], onSidePhase?: DocumentSidePhaseCallback) => {
         for (const { side } of sides) {
           onSidePhase?.(side, 'sending');
           onSidePhase?.(side, 'sent');
@@ -168,9 +164,9 @@ describe('useLicenseSubmit · subida eager de la licencia', () => {
     );
 
     act(() => {
-      useRegistrationStore.getState().setPendingLicense(
-        pendingLicense(face('data:image/jpeg;base64,/9j/back')),
-      );
+      useRegistrationStore
+        .getState()
+        .setPendingLicense(pendingLicense(face('data:image/jpeg;base64,/9j/back')));
     });
 
     const handle = renderHookWith(fakeContainer(repo, uploader));
@@ -217,7 +213,11 @@ describe('useLicenseSubmit · subida eager de la licencia', () => {
     // Los PUT van OK (caras sent), pero el ONBOARD responde 409 → éxito.
     const uploader: UploaderDouble = {
       upload: jest.fn(
-        async (_type: string, sides: DocumentSideFile[], onSidePhase?: DocumentSidePhaseCallback) => {
+        async (
+          _type: string,
+          sides: DocumentSideFile[],
+          onSidePhase?: DocumentSidePhaseCallback,
+        ) => {
           for (const { side } of sides) {
             onSidePhase?.(side, 'sending');
             onSidePhase?.(side, 'sent');
@@ -250,7 +250,11 @@ describe('useLicenseSubmit · subida eager de la licencia', () => {
     // El uploader marca la cara FRONT `sending` y luego LANZA (falla el PUT): la fase de esa cara queda error.
     const uploader: UploaderDouble = {
       upload: jest.fn(
-        async (_type: string, sides: DocumentSideFile[], onSidePhase?: DocumentSidePhaseCallback) => {
+        async (
+          _type: string,
+          sides: DocumentSideFile[],
+          onSidePhase?: DocumentSidePhaseCallback,
+        ) => {
           const first = sides[0];
           if (first) {
             onSidePhase?.(first.side, 'sending');

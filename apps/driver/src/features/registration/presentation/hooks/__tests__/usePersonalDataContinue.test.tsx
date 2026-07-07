@@ -32,7 +32,14 @@ const VALID_PERSONAL: PersonalData = {
 
 /** Cara del DNI de mentira (el flujo la trata como opaca: la foto es la fuente de verdad). */
 function face(uri: string): PickedImage {
-  return { uri, mimeType: 'image/jpeg', fileName: 'dni.jpg', width: null, height: null, fileSize: null };
+  return {
+    uri,
+    mimeType: 'image/jpeg',
+    fileName: 'dni.jpg',
+    width: null,
+    height: null,
+    fileSize: null,
+  };
 }
 
 interface RepoDouble {
@@ -149,10 +156,7 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
 
     // El uploader recibió el DNI con AMBAS caras (FRONT + BACK).
     expect(uploader.upload).toHaveBeenCalledTimes(1);
-    const [type, sides] = uploader.upload.mock.calls[0] as unknown as [
-      string,
-      { side: string }[],
-    ];
+    const [type, sides] = uploader.upload.mock.calls[0] as unknown as [string, { side: string }[]];
     expect(type).toBe('DNI');
     expect(sides.map((s) => s.side)).toEqual(['FRONT', 'BACK']);
 
@@ -160,7 +164,12 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
     expect(repo.submitDocument).toHaveBeenCalledTimes(1);
     const body = repo.submitDocument.mock.calls[0]?.[0] as {
       type: string;
-      extractedData?: { type: string; documentNumber?: string; fullName?: string; birthdate?: string };
+      extractedData?: {
+        type: string;
+        documentNumber?: string;
+        fullName?: string;
+        birthdate?: string;
+      };
       ocrEngine?: string;
       ocrAt?: string;
     };
@@ -250,7 +259,11 @@ describe('usePersonalDataContinue · subida DIFERIDA del DNI (bug de secuencia)'
     // ("Ya existe un documento activo de ese tipo para el dueño"). Es un retry legítimo → ÉXITO, no error.
     const uploader: UploaderDouble = {
       upload: jest.fn(async () => {
-        throw new ApiError(409, 'CONFLICT', 'Ya existe un documento activo de ese tipo para el dueño');
+        throw new ApiError(
+          409,
+          'CONFLICT',
+          'Ya existe un documento activo de ese tipo para el dueño',
+        );
       }),
     };
 

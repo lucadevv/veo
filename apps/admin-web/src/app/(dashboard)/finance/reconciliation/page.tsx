@@ -86,9 +86,7 @@ function CompareRow({ run }: { run: ReconciliationRunView }) {
         >
           {pct(run.discrepancyPct)}
         </span>
-        <span
-          className={cn('text-xs font-semibold', run.alerted ? 'text-danger' : 'text-success')}
-        >
+        <span className={cn('text-xs font-semibold', run.alerted ? 'text-danger' : 'text-success')}>
           {run.alerted ? 'Discrepancia · SOBRE umbral' : 'Discrepancia · dentro de umbral'}
         </span>
       </div>
@@ -122,9 +120,7 @@ const columns: ColumnDef<ReconciliationRunView, unknown>[] = [
     accessorKey: 'discrepancyPct',
     header: 'Discrepancia',
     cell: ({ row }) => (
-      <span
-        className={cn('tabular', row.original.alerted ? 'text-danger' : 'text-ink-muted')}
-      >
+      <span className={cn('tabular', row.original.alerted ? 'text-danger' : 'text-ink-muted')}>
         {pct(row.original.discrepancyPct)}
       </span>
     ),

@@ -267,7 +267,10 @@ export class CommissionService {
    * que ya persistió su fee en la captura). NO emite outbox (a diferencia de los PUT de comisión): el fee ya no
    * cambia cobros pasados (están persistidos), y el TTL cubre los futuros dentro de 10s.
    */
-  async replacePspFees(rates: PspFeeRatesBps, expectedVersion: number): Promise<PersistedCommission> {
+  async replacePspFees(
+    rates: PspFeeRatesBps,
+    expectedVersion: number,
+  ): Promise<PersistedCommission> {
     assertBps(rates.yapeFeeBps, 'el fee PSP de Yape');
     assertBps(rates.plinFeeBps, 'el fee PSP de Plin');
     assertBps(rates.cardFeeBps, 'el fee PSP de tarjeta');
@@ -301,11 +304,18 @@ export class CommissionService {
         }
         // Primer write sin fila (DB fresca/tests): crear con los fees PSP + los defaults de comisión.
         await tx.commissionConfig.create({
-          data: { id: COMMISSION_SINGLETON_ID, onDemandRateBps: this.envFallbackBps, carpoolingFeeBps: 0, ...data },
+          data: {
+            id: COMMISSION_SINGLETON_ID,
+            onDemandRateBps: this.envFallbackBps,
+            carpoolingFeeBps: 0,
+            ...data,
+          },
         });
         return;
       }
-      throw new ConflictError(`la config cambió (esperabas v${expectedVersion}); recargá y reintentá`);
+      throw new ConflictError(
+        `la config cambió (esperabas v${expectedVersion}); recargá y reintentá`,
+      );
     });
 
     this.invalidateCache();

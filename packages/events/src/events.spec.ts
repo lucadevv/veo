@@ -133,10 +133,12 @@ describe('registro de schemas', () => {
         EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: FLAG_REASON.REVIEW }).success,
       ).toBe(true);
       // reason fuera de FLAG_REASON → falla-cerrado (no se acopla por string crudo).
-      expect(
-        EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: 'banned' }).success,
-      ).toBe(false);
-      expect(EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: '' }).success).toBe(false);
+      expect(EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: 'banned' }).success).toBe(
+        false,
+      );
+      expect(EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: '' }).success).toBe(
+        false,
+      );
     });
 
     it('passenger.flagged ACEPTA reverification y RECHAZA un reason desconocido', () => {
@@ -602,12 +604,22 @@ describe('booking.cancelled · contrato aditivo (oferta + booking individual)', 
   });
 
   it('rechaza una razon fuera del enum tipado (no es un BookingCancelledRazon)', () => {
-    const bad = { bookingId: 'b1', razon: 'PORQUE_SI', estado: 'CANCELADO', estadoAnterior: 'APROBADO' };
+    const bad = {
+      bookingId: 'b1',
+      razon: 'PORQUE_SI',
+      estado: 'CANCELADO',
+      estadoAnterior: 'APROBADO',
+    };
     expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);
   });
 
   it('rechaza estado != CANCELADO (el literal del evento)', () => {
-    const bad = { publishedTripId: 'pt1', driverId: 'd1', estado: 'PUBLICADO', estadoAnterior: 'PUBLICADO' };
+    const bad = {
+      publishedTripId: 'pt1',
+      driverId: 'd1',
+      estado: 'PUBLICADO',
+      estadoAnterior: 'PUBLICADO',
+    };
     expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);
   });
 });

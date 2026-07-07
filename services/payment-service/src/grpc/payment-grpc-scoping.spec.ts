@@ -86,7 +86,10 @@ describe('PaymentGrpcController · scoping por riel (per-RPC · ADR-014 §5.5)',
   describe('GetPayment · SUMA service-rail (booking lee el cobro del carpooling)', () => {
     it('service-rail (PERMITIDO) pasa y devuelve el pago', async () => {
       const ctrl = makeController();
-      const reply = await ctrl.getPayment({ id: 'p1' }, signedMetaAs(InternalAudience.SERVICE_RAIL));
+      const reply = await ctrl.getPayment(
+        { id: 'p1' },
+        signedMetaAs(InternalAudience.SERVICE_RAIL),
+      );
       expect(reply.found).toBe(true);
       expect(reply.id).toBe('p1');
     });
@@ -117,7 +120,10 @@ describe('PaymentGrpcController · scoping por riel (per-RPC · ADR-014 §5.5)',
 
     it('public-rail (riel previo) sigue pasando', async () => {
       const ctrl = makeController();
-      const reply = await ctrl.getPaymentByTrip({ tripId: 't1' }, signedMetaAs(InternalAudience.PUBLIC_RAIL));
+      const reply = await ctrl.getPaymentByTrip(
+        { tripId: 't1' },
+        signedMetaAs(InternalAudience.PUBLIC_RAIL),
+      );
       expect(reply.found).toBe(true);
     });
   });
@@ -135,7 +141,10 @@ describe('PaymentGrpcController · scoping por riel (per-RPC · ADR-014 §5.5)',
 
     it('admin-rail (riel previo) sigue pasando', async () => {
       const ctrl = makeController();
-      const reply = await ctrl.getUserCredit({ userId: 'u-1' }, signedMetaAs(InternalAudience.ADMIN_RAIL));
+      const reply = await ctrl.getUserCredit(
+        { userId: 'u-1' },
+        signedMetaAs(InternalAudience.ADMIN_RAIL),
+      );
       expect(reply.balanceCents).toBe(500);
     });
   });

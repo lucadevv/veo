@@ -3,7 +3,10 @@
 // runtime es `undefined` → "TypeError: undefined cannot be used as a constructor" al arrancar.
 import {createMMKV, type MMKV} from 'react-native-mmkv';
 import {StoreId} from './keys';
-import {SECURE_ENCRYPTION_TYPE, getOrCreateEncryptionKey} from './secure-encryption-key';
+import {
+  SECURE_ENCRYPTION_TYPE,
+  getOrCreateEncryptionKey,
+} from './secure-encryption-key';
 
 /**
  * Wrapper de persistencia sobre MMKV (3-5x más rápido que AsyncStorage; regla del repo).

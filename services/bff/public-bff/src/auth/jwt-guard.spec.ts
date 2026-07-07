@@ -62,7 +62,9 @@ describe('JwtAuthGuard · public-bff escopa typ=passenger', () => {
     const reflector = new Reflector();
     vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(false);
     const jwtForTyp = {
-      verifyAccess: vi.fn().mockResolvedValue({ sub: 'u1', typ: tokenTyp, roles: [], sid: 'sess-1' }),
+      verifyAccess: vi
+        .fn()
+        .mockResolvedValue({ sub: 'u1', typ: tokenTyp, roles: [], sid: 'sess-1' }),
     } as unknown as JwtService;
     // 4º arg = expectedType, igual que el provider EXPECTED_SUBJECT_TYPE='passenger' en app.module.
     return new JwtAuthGuard(reflector, jwtForTyp, EXPECTED);

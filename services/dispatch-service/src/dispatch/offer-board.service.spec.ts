@@ -851,8 +851,18 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       windowSec: 60,
       negotiationSeq: 1,
     });
-    await c.svc.submitOffer({ driverId: 'd1', tripId: tripA, kind: 'ACCEPT_PRICE', priceCents: 700 });
-    await c.svc.submitOffer({ driverId: 'd1', tripId: tripB, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    await c.svc.submitOffer({
+      driverId: 'd1',
+      tripId: tripA,
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+    });
+    await c.svc.submitOffer({
+      driverId: 'd1',
+      tripId: tripB,
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+    });
 
     // 1er accept: gana el board Y reclama a d1 de forma síncrona (tryClaimDriver).
     await c.svc.acceptOffer(tripA, 'd1', PASSENGER);
@@ -887,8 +897,18 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       windowSec: 60,
       negotiationSeq: 1,
     });
-    await c.svc.submitOffer({ driverId: 'd1', tripId: tripA, kind: 'ACCEPT_PRICE', priceCents: 700 });
-    await c.svc.submitOffer({ driverId: 'd1', tripId: tripB, kind: 'ACCEPT_PRICE', priceCents: 700 });
+    await c.svc.submitOffer({
+      driverId: 'd1',
+      tripId: tripA,
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+    });
+    await c.svc.submitOffer({
+      driverId: 'd1',
+      tripId: tripB,
+      kind: 'ACCEPT_PRICE',
+      priceCents: 700,
+    });
     await c.svc.acceptOffer(tripA, 'd1', PASSENGER);
 
     // El viaje A terminó → releaseClaim suelta el claim per-conductor (lo que hace dispatch.releaseDriver).

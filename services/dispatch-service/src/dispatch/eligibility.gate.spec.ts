@@ -206,7 +206,11 @@ describe('EligibilityGate · B5-3 — elegibilidad por TIER en PUJA (paridad con
   });
 
   it('(c-bis) con attrs PRESENTES y válidos NO instrumenta el fail-open (no hay bypass)', async () => {
-    const gate = await gateWithAttrs({ seats: 7, segment: VehicleSegment.ECONOMY, vehicleYear: 2022 });
+    const gate = await gateWithAttrs({
+      seats: 7,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
     await expect(
       gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
     ).resolves.toBeUndefined();
@@ -431,7 +435,10 @@ describe('EligibilityGate.assertActiveDriver (gate de estado del accept FIXED)',
   });
 
   it('no online (ON_TRIP) → 403 (la presencia GPS no basta)', async () => {
-    const gate = await gateWith({ identity: identityFake({ currentStatus: 'ON_TRIP' }), seedVehicle: null });
+    const gate = await gateWith({
+      identity: identityFake({ currentStatus: 'ON_TRIP' }),
+      seedVehicle: null,
+    });
     await expectForbidden(gate.assertActiveDriver(DRIVER));
   });
 

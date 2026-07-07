@@ -96,7 +96,10 @@ export function useDniSubmit(): DniSubmit {
         : {}),
     };
     // Fase POR CARA: el uploader llama este callback (sending→sent/error) por cada cara mientras sube.
-    const onSidePhase = (side: DocumentSide, phase: 'idle' | 'sending' | 'sent' | 'error'): void => {
+    const onSidePhase = (
+      side: DocumentSide,
+      phase: 'idle' | 'sending' | 'sent' | 'error',
+    ): void => {
       setSendPhase('dni', faceForSide(side), phase);
     };
     try {

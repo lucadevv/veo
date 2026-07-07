@@ -28,7 +28,14 @@ function fakeStore(recordCount: number): OutboxStore {
         const record: OutboxRecord = {
           id: `id-${i}`,
           aggregateId: `agg-${i}`,
-          envelope: { eventId: `ev-${i}`, eventType: 'x', occurredAt: '', producer: '', schemaVersion: 1, payload: {} },
+          envelope: {
+            eventId: `ev-${i}`,
+            eventType: 'x',
+            occurredAt: '',
+            producer: '',
+            schemaVersion: 1,
+            payload: {},
+          },
           createdAt: new Date(),
           publishedAt: null,
         };
@@ -58,7 +65,14 @@ describe('drainOutbox · publishTimeoutMs (FIX 4 — cierre del double-publish p
           const rec: OutboxRecord = {
             id: 'id-0',
             aggregateId: 'a',
-            envelope: { eventId: 'e', eventType: 'x', occurredAt: '', producer: '', schemaVersion: 1, payload: {} },
+            envelope: {
+              eventId: 'e',
+              eventType: 'x',
+              occurredAt: '',
+              producer: '',
+              schemaVersion: 1,
+              payload: {},
+            },
             createdAt: new Date(),
             publishedAt: null,
           };

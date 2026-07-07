@@ -52,8 +52,18 @@ function build(charge: ReturnType<typeof vi.fn>): {
   const credit = { creditFromReferral: vi.fn(async () => true) } as unknown as CreditService;
   // Redis solo lo usa onBookingCancelled (no ejercitado acá): dedup que nunca marca → siempre ejecuta.
   const redis = { get: vi.fn(async () => null), set: vi.fn(async () => 'OK') } as never;
-  const metrics = { incRefundBackstop: vi.fn() } as unknown as import('../metrics/payment.metrics').PaymentMetrics;
-  const svc = new PaymentEventConsumers(payments, payouts, incentives, credit, redis, metrics, config);
+  const metrics = {
+    incRefundBackstop: vi.fn(),
+  } as unknown as import('../metrics/payment.metrics').PaymentMetrics;
+  const svc = new PaymentEventConsumers(
+    payments,
+    payouts,
+    incentives,
+    credit,
+    redis,
+    metrics,
+    config,
+  );
   return { svc, creditTrip };
 }
 

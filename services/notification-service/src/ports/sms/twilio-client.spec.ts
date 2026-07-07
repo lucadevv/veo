@@ -6,7 +6,9 @@ const ACCOUNT_SID = 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 const AUTH_TOKEN = 'tok_secret';
 const FROM = '+15005550006';
 
-function makeSender(over: Partial<ConstructorParameters<typeof TwilioSmsSender>[0]> = {}): TwilioSmsSender {
+function makeSender(
+  over: Partial<ConstructorParameters<typeof TwilioSmsSender>[0]> = {},
+): TwilioSmsSender {
   return new TwilioSmsSender({
     accountSid: ACCOUNT_SID,
     authToken: AUTH_TOKEN,
@@ -32,7 +34,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('TwilioSmsSender · construcción del request', () => {
   it('POSTea a la URL oficial con Basic auth y form To/From/Body; 201 → ok', async () => {
-    const { calls } = stubFetch(() => new Response('{"sid":"SM1","status":"queued"}', { status: 201 }));
+    const { calls } = stubFetch(
+      () => new Response('{"sid":"SM1","status":"queued"}', { status: 201 }),
+    );
     await makeSender().send('+51987654321', 'Tu código VEO es 482913');
 
     expect(calls).toHaveLength(1);
@@ -56,7 +60,10 @@ describe('TwilioSmsSender · construcción del request', () => {
 
   it('con MessagingServiceSid usa ese campo en vez de From', async () => {
     const { calls } = stubFetch(() => new Response('{}', { status: 201 }));
-    await makeSender({ from: undefined, messagingServiceSid: 'MGzzzz' }).send('+51900000000', 'x 123456');
+    await makeSender({ from: undefined, messagingServiceSid: 'MGzzzz' }).send(
+      '+51900000000',
+      'x 123456',
+    );
     const body = new URLSearchParams(calls[0]!.init.body as string);
     expect(body.get('MessagingServiceSid')).toBe('MGzzzz');
     expect(body.get('From')).toBeNull();
@@ -85,7 +92,9 @@ describe('TwilioSmsSender · construcción del request', () => {
 
   it('error de red → ExternalServiceError sin filtrar el teléfono completo', async () => {
     vi.stubGlobal('fetch', () => Promise.reject(new Error('ECONNRESET')));
-    const err = await makeSender().send('+51987654321', 'secreto 123456').catch((e) => e);
+    const err = await makeSender()
+      .send('+51987654321', 'secreto 123456')
+      .catch((e) => e);
     expect(err).toBeInstanceOf(ExternalServiceError);
     expect((err as Error).message).not.toContain('+51987654321');
     expect((err as Error).message).not.toContain('123456'); // nunca el Body

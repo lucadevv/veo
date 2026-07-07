@@ -132,23 +132,26 @@ function makePrisma(payment: FakePayment | null) {
   const prisma = {
     read: {
       payment: {
-        findFirst: vi.fn(async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
-          payment && payment.tripId === where.tripId && where.status.in.includes(payment.status)
-            ? payment
-            : null,
+        findFirst: vi.fn(
+          async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
+            payment && payment.tripId === where.tripId && where.status.in.includes(payment.status)
+              ? payment
+              : null,
         ),
       },
       refund: {
-        findFirst: vi.fn(async ({ where }: { where: { dedupKey: string } }) =>
-          refunds.find((r) => r.dedupKey === where.dedupKey) ?? null,
+        findFirst: vi.fn(
+          async ({ where }: { where: { dedupKey: string } }) =>
+            refunds.find((r) => r.dedupKey === where.dedupKey) ?? null,
         ),
       },
     },
     write: {
       // El handler de idempotencia relee del PRIMARIO (read-after-write): el doble lo expone igual que `read`.
       refund: {
-        findFirst: vi.fn(async ({ where }: { where: { dedupKey: string } }) =>
-          refunds.find((r) => r.dedupKey === where.dedupKey) ?? null,
+        findFirst: vi.fn(
+          async ({ where }: { where: { dedupKey: string } }) =>
+            refunds.find((r) => r.dedupKey === where.dedupKey) ?? null,
         ),
       },
       $transaction: async <T>(cb: (t: typeof tx) => Promise<T>): Promise<T> => cb(tx),

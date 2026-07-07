@@ -58,7 +58,9 @@ export class HoldExpirySweeper implements OnModuleInit {
     try {
       const reactivated = await this.drivers.sweepExpiredHolds();
       if (reactivated > 0) {
-        this.logger.log(`Holds temporales vencidos barridos: ${reactivated} conductor(es) reactivado(s)`);
+        this.logger.log(
+          `Holds temporales vencidos barridos: ${reactivated} conductor(es) reactivado(s)`,
+        );
       }
     } catch (err) {
       // No relanzamos: un fallo de un tick NO debe matar el intervalo. El próximo tick reintenta (idempotente).

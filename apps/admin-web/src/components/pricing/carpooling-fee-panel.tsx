@@ -6,12 +6,7 @@ import { useReplaceCarpoolingFee } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { useConfigSave } from '@/lib/use-config-save';
-import {
-  MAX_RATE_PCT,
-  BPS_PER_PERCENT,
-  bpsToPercentLabel,
-  percentToBps,
-} from '@/lib/commission';
+import { MAX_RATE_PCT, BPS_PER_PERCENT, bpsToPercentLabel, percentToBps } from '@/lib/commission';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 
@@ -32,7 +27,8 @@ export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
     mutation: replace,
     conflictNoun: 'el service fee del carpooling',
     error: 'No se pudo guardar el service fee del carpooling',
-    success: (p) => `Service fee del carpooling actualizado · ${bpsToPercentLabel(p.carpoolingFeeBps)}%`,
+    success: (p) =>
+      `Service fee del carpooling actualizado · ${bpsToPercentLabel(p.carpoolingFeeBps)}%`,
   });
 
   const [pct, setPct] = useState<string>(bpsToPercentLabel(config.carpoolingFeeBps));
@@ -42,7 +38,8 @@ export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
   const dirty = bps !== config.carpoolingFeeBps;
 
   // Solo el fee de carpooling + su CAS INDEPENDIENTE (`config.carpoolingFeeVersion`): NO toca la comisión on-demand.
-  const onSave = () => save({ carpoolingFeeBps: bps, expectedVersion: config.carpoolingFeeVersion });
+  const onSave = () =>
+    save({ carpoolingFeeBps: bps, expectedVersion: config.carpoolingFeeVersion });
 
   return (
     <ConfigCard

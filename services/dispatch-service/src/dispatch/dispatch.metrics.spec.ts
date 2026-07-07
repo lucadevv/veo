@@ -20,8 +20,8 @@ async function counterValue(name: string, labels: Record<string, string>): Promi
     | undefined;
   if (!metric) return 0;
   const snapshot = await metric.get();
-  const match = snapshot.values.find(
-    (v) => Object.entries(labels).every(([k, val]) => v.labels[k] === val),
+  const match = snapshot.values.find((v) =>
+    Object.entries(labels).every(([k, val]) => v.labels[k] === val),
   );
   return match?.value ?? 0;
 }
@@ -69,18 +69,27 @@ describe('classifyMissingAttr · qué atributo faltó', () => {
 
 describe('counters de elegibilidad · cableado al registry', () => {
   it('el denominador incrementa por source', async () => {
-    expect(await counterValue('dispatch_eligibility_tier_evaluations_total', { source: 'gate' })).toBe(0);
+    expect(
+      await counterValue('dispatch_eligibility_tier_evaluations_total', { source: 'gate' }),
+    ).toBe(0);
     bumpEligibilityTierEvaluation('gate');
     bumpEligibilityTierEvaluation('gate');
     bumpEligibilityTierEvaluation('pool');
-    expect(await counterValue('dispatch_eligibility_tier_evaluations_total', { source: 'gate' })).toBe(2);
-    expect(await counterValue('dispatch_eligibility_tier_evaluations_total', { source: 'pool' })).toBe(1);
+    expect(
+      await counterValue('dispatch_eligibility_tier_evaluations_total', { source: 'gate' }),
+    ).toBe(2);
+    expect(
+      await counterValue('dispatch_eligibility_tier_evaluations_total', { source: 'pool' }),
+    ).toBe(1);
   });
 
   it('el numerador (fail-open) incrementa por source + atributo ausente', async () => {
     bumpEligibilityFailOpen('gate', 'seats');
     expect(
-      await counterValue('dispatch_eligibility_fail_open_total', { source: 'gate', missing: 'seats' }),
+      await counterValue('dispatch_eligibility_fail_open_total', {
+        source: 'gate',
+        missing: 'seats',
+      }),
     ).toBe(1);
   });
 
@@ -88,7 +97,11 @@ describe('counters de elegibilidad · cableado al registry', () => {
     bumpEligibilityTierUnknown('absent');
     bumpEligibilityTierUnknown('unknown');
     bumpEligibilityTierUnknown('unknown');
-    expect(await counterValue('dispatch_eligibility_tier_unknown_total', { reason: 'absent' })).toBe(1);
-    expect(await counterValue('dispatch_eligibility_tier_unknown_total', { reason: 'unknown' })).toBe(2);
+    expect(
+      await counterValue('dispatch_eligibility_tier_unknown_total', { reason: 'absent' }),
+    ).toBe(1);
+    expect(
+      await counterValue('dispatch_eligibility_tier_unknown_total', { reason: 'unknown' }),
+    ).toBe(2);
   });
 });

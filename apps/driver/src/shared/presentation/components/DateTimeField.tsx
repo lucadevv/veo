@@ -195,7 +195,12 @@ export function DateTimeField({
                 <Text variant="bodyStrong" numberOfLines={1} style={styles.sheetTitle}>
                   {label}
                 </Text>
-                <Button label={t('common.confirm')} variant="ghost" size="sm" onPress={confirmIos} />
+                <Button
+                  label={t('common.confirm')}
+                  variant="ghost"
+                  size="sm"
+                  onPress={confirmIos}
+                />
               </View>
               <DateTimePicker
                 value={tempDate ?? pickerValue}

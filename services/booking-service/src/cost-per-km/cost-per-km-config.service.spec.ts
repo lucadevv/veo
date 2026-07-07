@@ -21,7 +21,10 @@ class FakeRepo implements CostPerKmConfigRepository {
   /** Store por país: lo que el GET lee y el PUT muta (CAS). */
   private store = new Map<string, PersistedCostPerKm>();
 
-  constructor(rows: PersistedCostPerKm[] = [], private failFind = false) {
+  constructor(
+    rows: PersistedCostPerKm[] = [],
+    private failFind = false,
+  ) {
     for (const r of rows) this.store.set(r.pais, r);
   }
 

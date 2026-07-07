@@ -514,12 +514,16 @@ describe('PaymentsService · FIX 1 · UNIQUE PARCIAL del dedupKey (Postgres real
     // bloquea → se crea un Refund NUEVO y (CASH local) sale COMPLETED → la plata SÍ vuelve.
     const res = await service.refundForBookingCancellation(tripId, REASON);
     expect('skipped' in res).toBe(false);
-    if ('skipped' in res) throw new Error('el reintento NO debía saltarse: el pasajero quedaría sin plata');
+    if ('skipped' in res)
+      throw new Error('el reintento NO debía saltarse: el pasajero quedaría sin plata');
     expect(res.status).toBe('COMPLETED');
 
     // Quedan 2 Refunds con la MISMA dedupKey: el REJECTED viejo + el COMPLETED nuevo (coexisten porque el UNIQUE
     // es parcial). El pasajero recibió su plata UNA vez (el nuevo) y el Payment quedó REFUNDED.
-    const refunds = await prisma.refund.findMany({ where: { dedupKey }, orderBy: { status: 'asc' } });
+    const refunds = await prisma.refund.findMany({
+      where: { dedupKey },
+      orderBy: { status: 'asc' },
+    });
     expect(refunds.map((r) => r.status).sort()).toEqual(['COMPLETED', 'REJECTED']);
     expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('REFUNDED');
     const [payload] = await refundedEvents();
@@ -636,11 +640,17 @@ describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión 
   it('DIFERENCIA DELIBERADA: el system-initiated NO tiene gate L2 ni ventana (refund OBLIGATORIO)', async () => {
     // Monto alto (>S/30) Y fuera de la ventana de 7 días: para el ADMIN serían DOS rechazos. El system-initiated
     // (refundForBookingCancellation) los IGNORA — el pasajero pagó y no viajó → se le devuelve SIEMPRE.
-    const { service } = makeService(async () => ({ status: 'ACCEPTED', externalRefundId: 'rev-sys' }));
+    const { service } = makeService(async () => ({
+      status: 'ACCEPTED',
+      externalRefundId: 'rev-sys',
+    }));
     const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000);
     const { id, tripId } = await seedCaptured({ amountCents: 8000, capturedAt: tenDaysAgo });
 
-    const res = await service.refundForBookingCancellation(tripId, BookingCancelledRazon.ASIENTO_LLENO);
+    const res = await service.refundForBookingCancellation(
+      tripId,
+      BookingCancelledRazon.ASIENTO_LLENO,
+    );
     expect('skipped' in res).toBe(false);
     if ('skipped' in res) throw new Error('el refund OBLIGATORIO no debía saltarse');
     expect(res.status).toBe('COMPLETED');

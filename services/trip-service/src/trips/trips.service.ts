@@ -1593,9 +1593,7 @@ export class TripsService {
     // negociación hacia abajo) — espejo del piso de waypoint-proposal.service. En FIXED sí abarata (la tarifa
     // es fórmula de la ruta: un destino más cerca cuesta menos, sin negociación que respetar).
     const fareCents =
-      trip.dispatchMode === PricingMode.FIXED
-        ? fare.cents
-        : Math.max(fare.cents, trip.fareCents);
+      trip.dispatchMode === PricingMode.FIXED ? fare.cents : Math.max(fare.cents, trip.fareCents);
 
     const updated = await this.prisma.write.$transaction(async (tx) => {
       // CAS: el gate de estado (DESTINATION_EDITABLE) se RE-VALIDA dentro de la tx (viaja en el WHERE). El

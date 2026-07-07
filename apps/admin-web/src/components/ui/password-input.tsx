@@ -14,7 +14,12 @@ export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputProps, 'type
     const [visible, setVisible] = useState(false);
     return (
       <div className="relative">
-        <Input ref={ref} type={visible ? 'text' : 'password'} className={cn('pr-11', className)} {...props} />
+        <Input
+          ref={ref}
+          type={visible ? 'text' : 'password'}
+          className={cn('pr-11', className)}
+          {...props}
+        />
         <button
           type="button"
           tabIndex={-1}
@@ -23,7 +28,11 @@ export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputProps, 'type
           aria-pressed={visible}
           className="absolute inset-y-0 right-0 grid w-11 place-items-center text-ink-muted transition-colors hover:text-ink"
         >
-          {visible ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+          {visible ? (
+            <EyeOff className="size-4" aria-hidden />
+          ) : (
+            <Eye className="size-4" aria-hidden />
+          )}
         </button>
       </div>
     );

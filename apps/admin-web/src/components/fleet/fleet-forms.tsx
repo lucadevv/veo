@@ -105,7 +105,8 @@ export function CreateVehicleDialog() {
         <DialogHeader>
           <DialogTitle>Registrar vehículo</DialogTitle>
           <DialogDescription>
-            El modelo sale del catálogo curado; el año mínimo y la placa los revalida el servidor (BR-D04).
+            El modelo sale del catálogo curado; el año mínimo y la placa los revalida el servidor
+            (BR-D04).
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-1">
@@ -144,7 +145,9 @@ export function CreateVehicleDialog() {
                 inputMode="numeric"
                 value={form.year}
                 onChange={(e) => setForm({ ...form, year: e.target.value })}
-                placeholder={selectedModel ? `${selectedModel.yearFrom}–${selectedModel.yearTo}` : '2020'}
+                placeholder={
+                  selectedModel ? `${selectedModel.yearFrom}–${selectedModel.yearTo}` : '2020'
+                }
               />
             </Field>
             <Field label="Color">

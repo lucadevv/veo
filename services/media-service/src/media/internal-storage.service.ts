@@ -6,7 +6,11 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ValidationError } from '@veo/utils';
-import { STORAGE_PORT, type StoragePort, type PresignAudience } from '../ports/storage/storage.port';
+import {
+  STORAGE_PORT,
+  type StoragePort,
+  type PresignAudience,
+} from '../ports/storage/storage.port';
 import {
   DEFAULT_PRESIGN_GET_TTL_SECONDS,
   DEFAULT_PRESIGN_PUT_TTL_SECONDS,

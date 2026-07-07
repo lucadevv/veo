@@ -48,15 +48,21 @@ describe('isInspectionCurrent (vigencia ITV: passed && no vencida)', () => {
   const now = new Date('2026-05-28T12:00:00.000Z');
 
   it('vigente: passed=true y nextDueAt futuro', () => {
-    expect(isInspectionCurrent({ passed: true, nextDueAt: new Date('2026-08-01T00:00:00.000Z') }, now)).toBe(true);
+    expect(
+      isInspectionCurrent({ passed: true, nextDueAt: new Date('2026-08-01T00:00:00.000Z') }, now),
+    ).toBe(true);
   });
 
   it('NO vigente: reprobada (passed=false) aunque no esté vencida', () => {
-    expect(isInspectionCurrent({ passed: false, nextDueAt: new Date('2026-08-01T00:00:00.000Z') }, now)).toBe(false);
+    expect(
+      isInspectionCurrent({ passed: false, nextDueAt: new Date('2026-08-01T00:00:00.000Z') }, now),
+    ).toBe(false);
   });
 
   it('NO vigente: vencida (nextDueAt pasado) aunque passed=true', () => {
-    expect(isInspectionCurrent({ passed: true, nextDueAt: new Date('2026-05-27T00:00:00.000Z') }, now)).toBe(false);
+    expect(
+      isInspectionCurrent({ passed: true, nextDueAt: new Date('2026-05-27T00:00:00.000Z') }, now),
+    ).toBe(false);
   });
 
   it('NO vigente: sin inspección (null)', () => {
@@ -68,7 +74,12 @@ describe('inspectionInvalidReason (motivo tipado de invalidez)', () => {
   const now = new Date('2026-05-28T12:00:00.000Z');
 
   it('null cuando es vigente', () => {
-    expect(inspectionInvalidReason({ passed: true, nextDueAt: new Date('2026-08-01T00:00:00.000Z') }, now)).toBeNull();
+    expect(
+      inspectionInvalidReason(
+        { passed: true, nextDueAt: new Date('2026-08-01T00:00:00.000Z') },
+        now,
+      ),
+    ).toBeNull();
   });
 
   it('NONE sin inspección', () => {
@@ -78,13 +89,19 @@ describe('inspectionInvalidReason (motivo tipado de invalidez)', () => {
   it('NOT_PASSED si reprobó (precede a vencida)', () => {
     // reprobada Y vencida → NOT_PASSED gana por precedencia.
     expect(
-      inspectionInvalidReason({ passed: false, nextDueAt: new Date('2026-05-01T00:00:00.000Z') }, now),
+      inspectionInvalidReason(
+        { passed: false, nextDueAt: new Date('2026-05-01T00:00:00.000Z') },
+        now,
+      ),
     ).toBe(InspectionInvalidReason.NOT_PASSED);
   });
 
   it('OVERDUE si passed pero vencida', () => {
     expect(
-      inspectionInvalidReason({ passed: true, nextDueAt: new Date('2026-05-27T00:00:00.000Z') }, now),
+      inspectionInvalidReason(
+        { passed: true, nextDueAt: new Date('2026-05-27T00:00:00.000Z') },
+        now,
+      ),
     ).toBe(InspectionInvalidReason.OVERDUE);
   });
 });

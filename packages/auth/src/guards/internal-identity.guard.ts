@@ -45,7 +45,8 @@ export class InternalIdentityGuard implements CanActivate {
       ...(isHardenedEnv() ? {} : { maxAgeMs: 86_400_000 }),
     };
     const identity = verifyInternalIdentity(header ?? '', sig ?? '', this.secret, opts);
-    if (!identity) throw new UnauthorizedError('Identidad interna inválida o de un riel no permitido');
+    if (!identity)
+      throw new UnauthorizedError('Identidad interna inválida o de un riel no permitido');
     req.user = identity;
     return true;
   }

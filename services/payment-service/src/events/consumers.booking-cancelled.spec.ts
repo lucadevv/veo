@@ -6,7 +6,12 @@
  * refund-booking-cancellation.spec; acá se verifica el ENRUTADO del consumer.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createEnvelope, BookingCancelledRazon, KafkaEventConsumer, type EventHandler } from '@veo/events';
+import {
+  createEnvelope,
+  BookingCancelledRazon,
+  KafkaEventConsumer,
+  type EventHandler,
+} from '@veo/events';
 import { InvalidStateError, UnprocessableEntityError } from '@veo/utils';
 import { PaymentEventConsumers } from './consumers';
 import type { PaymentsService } from '../payments/payments.service';
@@ -58,8 +63,18 @@ function build(
   const incentives = { creditTrip: vi.fn(async () => {}) } as unknown as IncentivesService;
   const credit = { creditFromReferral: vi.fn(async () => true) } as unknown as CreditService;
   const incRefundBackstop = vi.fn();
-  const metrics = { incRefundBackstop } as unknown as import('../metrics/payment.metrics').PaymentMetrics;
-  const svc = new PaymentEventConsumers(payments, payouts, incentives, credit, redis as never, metrics, config);
+  const metrics = {
+    incRefundBackstop,
+  } as unknown as import('../metrics/payment.metrics').PaymentMetrics;
+  const svc = new PaymentEventConsumers(
+    payments,
+    payouts,
+    incentives,
+    credit,
+    redis as never,
+    metrics,
+    config,
+  );
   return { svc, refund, redis, incRefundBackstop };
 }
 
@@ -82,7 +97,11 @@ beforeEach(() => handlers.clear());
 
 describe('PaymentEventConsumers · onBookingCancelled (F3c · refund automático)', () => {
   it('ASIENTO_LLENO → llama refundForBookingCancellation(bookingId, razon)', async () => {
-    const refund = vi.fn(async () => ({ refundId: 'ref-1', paymentId: 'pay-1', status: 'COMPLETED' }));
+    const refund = vi.fn(async () => ({
+      refundId: 'ref-1',
+      paymentId: 'pay-1',
+      status: 'COMPLETED',
+    }));
     const { svc } = build(refund);
     await svc.onModuleInit();
 
@@ -94,7 +113,11 @@ describe('PaymentEventConsumers · onBookingCancelled (F3c · refund automático
   });
 
   it('OFERTA_NO_DISPONIBLE → también refunda', async () => {
-    const refund = vi.fn(async () => ({ refundId: 'ref-1', paymentId: 'pay-1', status: 'COMPLETED' }));
+    const refund = vi.fn(async () => ({
+      refundId: 'ref-1',
+      paymentId: 'pay-1',
+      status: 'COMPLETED',
+    }));
     const { svc } = build(refund);
     await svc.onModuleInit();
 
@@ -148,7 +171,11 @@ describe('PaymentEventConsumers · onBookingCancelled (F3c · refund automático
   });
 
   it('IDEMPOTENCIA (dedup eventId): el MISMO evento entregado 2× → refund UNA sola vez', async () => {
-    const refund = vi.fn(async () => ({ refundId: 'ref-1', paymentId: 'pay-1', status: 'COMPLETED' }));
+    const refund = vi.fn(async () => ({
+      refundId: 'ref-1',
+      paymentId: 'pay-1',
+      status: 'COMPLETED',
+    }));
     const { svc } = build(refund);
     await svc.onModuleInit();
 
@@ -231,7 +258,9 @@ describe('PaymentEventConsumers · onBookingCancelled (F3c · refund automático
     // La métrica `payment_refund_backstop_total{reason="rejected"}` se emite en el RIEL COMÚN
     // (rejectRefundAndCompensate, cubierto por refund-reject-backstop.spec), NO en el consumer — así el riel
     // ASÍNCRONO por callback también queda cubierto y NO hay doble conteo. Acá el consumer solo ABSORBE (no emite).
-    const rejected = new UnprocessableEntityError('El proveedor rechazó el reembolso: reverse_rejected');
+    const rejected = new UnprocessableEntityError(
+      'El proveedor rechazó el reembolso: reverse_rejected',
+    );
     const refund = vi.fn(async () => {
       throw rejected;
     });
@@ -264,7 +293,9 @@ describe('PaymentEventConsumers · onBookingCancelled (F3c · refund automático
   it('no-recuperable sin Refund persistido (InvalidStateError: gateway sin reembolsos) → ALERTA + return, NO loop', async () => {
     // Abortó ANTES de persistir un Refund REJECTED → el cron no tiene qué retomar. Reintentar por Kafka loopearía
     // ∞ (la condición es permanente). El consumer NO relanza: surfacea para backstop admin (alerta), NO loop.
-    const unrecoverable = new InvalidStateError('El gateway activo no soporta reembolsos digitales');
+    const unrecoverable = new InvalidStateError(
+      'El gateway activo no soporta reembolsos digitales',
+    );
     const refund = vi.fn(async () => {
       throw unrecoverable;
     });

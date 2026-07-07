@@ -28,7 +28,9 @@ function buildService(opts: { commission?: Partial<CommissionService>; envRate?:
     },
   };
   // Solo COMMISSION_RATE importa para la comisión; el resto del ctor lee números que no afectan este camino.
-  const config = { getOrThrow: (k: string) => (k === 'COMMISSION_RATE' ? (opts.envRate ?? 0.2) : 0) };
+  const config = {
+    getOrThrow: (k: string) => (k === 'COMMISSION_RATE' ? (opts.envRate ?? 0.2) : 0),
+  };
   const service = new PaymentsService(
     prisma as never,
     {} as never, // gateway: CASH no lo toca
@@ -45,7 +47,9 @@ function buildService(opts: { commission?: Partial<CommissionService>; envRate?:
 describe('charge() · comisión por modo (camino de dinero + legal)', () => {
   it('CARPOOLING → el service fee se SUMA al pasajero; el conductor cobra FULL (contribución 2000, fee 15%)', async () => {
     const commission = {
-      resolveRateBps: vi.fn(async (mode: ChargeMode) => (mode === ChargeMode.CARPOOLING ? 1500 : 2000)),
+      resolveRateBps: vi.fn(async (mode: ChargeMode) =>
+        mode === ChargeMode.CARPOOLING ? 1500 : 2000,
+      ),
     };
     const { service, created } = buildService({ commission });
     const payment = await service.charge({
@@ -81,7 +85,11 @@ describe('charge() · comisión por modo (camino de dinero + legal)', () => {
   });
 
   it('ON_DEMAND → usa la tasa CONFIGURADA (15%) y persiste mode=ON_DEMAND', async () => {
-    const commission = { resolveRateBps: vi.fn(async (mode: ChargeMode) => (mode === ChargeMode.CARPOOLING ? 0 : 1500)) };
+    const commission = {
+      resolveRateBps: vi.fn(async (mode: ChargeMode) =>
+        mode === ChargeMode.CARPOOLING ? 0 : 1500,
+      ),
+    };
     const { service, created } = buildService({ commission });
     await service.charge({
       tripId: 't-1',

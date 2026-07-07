@@ -21,7 +21,14 @@ function makeService(restOver: Record<string, unknown> = {}) {
     ...restOver,
   };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FleetService(rest as never, grpcNoop as never, grpcNoop as never, "admin-rail" as never, configNoop as never, audit as never);
+  const svc = new FleetService(
+    rest as never,
+    grpcNoop as never,
+    grpcNoop as never,
+    'admin-rail' as never,
+    configNoop as never,
+    audit as never,
+  );
   return { svc, rest, audit };
 }
 
@@ -104,7 +111,14 @@ describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
       post: vi.fn(),
     };
     const audit = { record: vi.fn() };
-    const svc = new FleetService(rest as never, grpcNoop as never, grpcNoop as never, "admin-rail" as never, configNoop as never, audit as never);
+    const svc = new FleetService(
+      rest as never,
+      grpcNoop as never,
+      grpcNoop as never,
+      'admin-rail' as never,
+      configNoop as never,
+      audit as never,
+    );
 
     const page = await svc.expirations(operator, {
       days: 30,
@@ -131,7 +145,14 @@ describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
     const rest = {
       get: vi.fn().mockResolvedValue({
         items: [
-          { id: 'd1', ownerType: 'DRIVER', ownerId: 'drv-1', type: 'LICENSE_A1', status: 'EXPIRING_SOON', expiresAt: null },
+          {
+            id: 'd1',
+            ownerType: 'DRIVER',
+            ownerId: 'drv-1',
+            type: 'LICENSE_A1',
+            status: 'EXPIRING_SOON',
+            expiresAt: null,
+          },
           {
             id: 'd2',
             ownerType: 'VEHICLE',
@@ -147,7 +168,14 @@ describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
       post: vi.fn(),
     };
     const audit = { record: vi.fn() };
-    const svc = new FleetService(rest as never, grpcNoop as never, grpcNoop as never, "admin-rail" as never, configNoop as never, audit as never);
+    const svc = new FleetService(
+      rest as never,
+      grpcNoop as never,
+      grpcNoop as never,
+      'admin-rail' as never,
+      configNoop as never,
+      audit as never,
+    );
 
     const page = await svc.expirations(operator, {} as never);
     // d1 (sin expiresAt) se descarta → página de 1, pero el cursor de avance NO se rompe.

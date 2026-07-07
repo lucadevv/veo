@@ -103,7 +103,9 @@ export default function VehicleDetailPage(props: { params: Promise<{ id: string 
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
         <Lock className="size-6 text-ink-subtle" aria-hidden />
-        <p className="text-sm text-ink-muted">Necesitás el rol correspondiente para ver este vehículo.</p>
+        <p className="text-sm text-ink-muted">
+          Necesitás el rol correspondiente para ver este vehículo.
+        </p>
       </div>
     );
   }
@@ -209,13 +211,19 @@ function DocsCard({ vehicleId, onReviewed }: { vehicleId: string; onReviewed: ()
             </DotPill>
           ) : null}
         </div>
-        <span className="hidden text-xs text-ink-subtle sm:block">Requisito para verificar el vehículo</span>
+        <span className="hidden text-xs text-ink-subtle sm:block">
+          Requisito para verificar el vehículo
+        </span>
       </div>
       <div className="flex flex-col gap-2.5 p-3.5">
         {docs.isLoading ? (
           <Skeleton className="h-16" />
         ) : items.length === 0 ? (
-          <EmptyState className="py-6" title="Sin documentos" description="El vehículo no tiene documentos cargados." />
+          <EmptyState
+            className="py-6"
+            title="Sin documentos"
+            description="El vehículo no tiene documentos cargados."
+          />
         ) : (
           items.map((doc) => <DocRow key={doc.id} doc={doc} onReviewed={onReviewed} />)
         )}
@@ -234,7 +242,10 @@ function DocRow({ doc, onReviewed }: { doc: FleetDocumentView; onReviewed: () =>
   const act = async (d: 'approve' | 'reject', reason?: string) => {
     try {
       await review.mutateAsync({ id: doc.id, decision: d, reason });
-      toast({ tone: 'success', title: d === 'approve' ? 'Documento aprobado' : 'Documento rechazado' });
+      toast({
+        tone: 'success',
+        title: d === 'approve' ? 'Documento aprobado' : 'Documento rechazado',
+      });
       onReviewed();
     } catch (e) {
       toast({
@@ -301,14 +312,22 @@ function ItvCard({ v, vehicleId }: { v: VehicleView; vehicleId: string }) {
   const headTone: PillTone = v.itvCurrent ? 'success' : v.itvHasInspection ? 'danger' : 'neutral';
   const headLabel = v.itvCurrent ? 'Vigente' : v.itvHasInspection ? 'Vencida' : 'Sin ITV';
   const kpis: { icon: LucideIcon; label: string; value: string; tone?: PillTone }[] = [
-    { icon: CalendarCheck, label: 'Última inspección', value: latest?.inspectedAt ? date(latest.inspectedAt) : '—' },
+    {
+      icon: CalendarCheck,
+      label: 'Última inspección',
+      value: latest?.inspectedAt ? date(latest.inspectedAt) : '—',
+    },
     {
       icon: CircleCheck,
       label: 'Resultado',
       value: latest ? resultPill(latest.result).label : '—',
       tone: latest ? resultPill(latest.result).tone : undefined,
     },
-    { icon: CalendarClock, label: 'Próximo vencimiento', value: v.itvNextDueAt ? date(v.itvNextDueAt) : '—' },
+    {
+      icon: CalendarClock,
+      label: 'Próximo vencimiento',
+      value: v.itvNextDueAt ? date(v.itvNextDueAt) : '—',
+    },
     { icon: Building2, label: 'Centro (CITV)', value: '—' },
   ];
   return (
@@ -323,7 +342,10 @@ function ItvCard({ v, vehicleId }: { v: VehicleView; vehicleId: string }) {
       <div className="flex flex-col gap-3.5 p-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {kpis.map((k) => (
-            <div key={k.label} className="flex flex-col gap-1.5 rounded-md border border-border bg-bg p-3.5">
+            <div
+              key={k.label}
+              className="flex flex-col gap-1.5 rounded-md border border-border bg-bg p-3.5"
+            >
               <div className="flex items-center gap-1.5">
                 <k.icon className="size-3.5 text-ink-subtle" aria-hidden />
                 <span className="text-[11px] font-medium text-ink-subtle">{k.label}</span>
@@ -423,7 +445,10 @@ function OwnerCard({ v }: { v: VehicleView }) {
               {v.driverName ?? `drv_${v.driverId.slice(0, 8)}`}
             </span>
             <span className="flex items-center gap-1.5 text-xs text-ink-subtle">
-              <span className={`size-1.5 rounded-full ${v.operable ? 'bg-success' : 'bg-warn'}`} aria-hidden />
+              <span
+                className={`size-1.5 rounded-full ${v.operable ? 'bg-success' : 'bg-warn'}`}
+                aria-hidden
+              />
               {v.operable ? 'Conductor verificado' : 'Revisión pendiente'}
             </span>
           </div>
@@ -441,8 +466,8 @@ function Callout() {
     <div className="flex gap-3 rounded-sm border-l-[3px] border-accent bg-accent/10 p-4">
       <Info className="size-[18px] shrink-0 text-accent" aria-hidden />
       <p className="text-[13px] leading-relaxed text-ink-muted">
-        Un vehículo sin ITV vigente o con documento rechazado deja de ser operable. El estado lo deriva el
-        backend de sus documentos e inspección; la UI solo lo refleja.
+        Un vehículo sin ITV vigente o con documento rechazado deja de ser operable. El estado lo
+        deriva el backend de sus documentos e inspección; la UI solo lo refleja.
       </p>
     </div>
   );

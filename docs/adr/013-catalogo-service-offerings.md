@@ -175,7 +175,6 @@ export interface OfferingSpec {
 > elegibilidad de oferta**: [`VEO_MODELO_HIBRIDO §1.5`](../../specs/VEO_MODELO_HIBRIDO.md).
 
 ```ts
-
 export const OFFERINGS = {
   [OfferingId.VEO_MOTO]: {
     id: OfferingId.VEO_MOTO,

@@ -207,10 +207,7 @@ export class AnalyticsService {
    * banco de VEO) en estado CAPTURED/PARTIALLY_REFUNDED con `capturedAt` en el rango. Legacy (netSettled NULL) → el
    * SUM lo ignora (undercount honesto). La serie usa EXACTAMENTE este cohorte → sus buckets reconcilian con el total.
    */
-  async revenueMetrics(
-    range: RevenueRange,
-    now: Date = new Date(),
-  ): Promise<RevenueRangeMetrics> {
+  async revenueMetrics(range: RevenueRange, now: Date = new Date()): Promise<RevenueRangeMetrics> {
     const [totals, refundedCents, series] = await Promise.all([
       this.rangeTotals(range, now),
       this.refundedInRange(range, now),

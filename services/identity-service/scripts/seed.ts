@@ -34,7 +34,10 @@ async function main(): Promise<void> {
     ? {}
     : {
         totpEnrolled: true,
-        totpSecretEnc: seal(DEV_TOTP_SECRET, process.env.TOTP_ENC_KEY ?? 'dev-totp-enc-key-change-me'),
+        totpSecretEnc: seal(
+          DEV_TOTP_SECRET,
+          process.env.TOTP_ENC_KEY ?? 'dev-totp-enc-key-change-me',
+        ),
       };
 
   const admin = await prisma.adminUser.upsert({

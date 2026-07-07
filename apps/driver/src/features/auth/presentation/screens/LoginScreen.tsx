@@ -279,111 +279,115 @@ export const LoginScreen = (): React.JSX.Element => {
             <View
               style={[
                 styles.body,
-                { backgroundColor: theme.colors.bg, paddingHorizontal: sideGutter, gap: theme.spacing['2xl'] },
+                {
+                  backgroundColor: theme.colors.bg,
+                  paddingHorizontal: sideGutter,
+                  gap: theme.spacing['2xl'],
+                },
               ]}
             >
-            {/* Título directo bajo la banda hero: la foto ya lleva la marca, así que NO repetimos el
+              {/* Título directo bajo la banda hero: la foto ya lleva la marca, así que NO repetimos el
                 wordmark "VEO CONDUCTORES" (el `loginTitle` ya dice "Ingresa a VEO Conductores") — espeja
                 el frame C/Login del pen, que quitó ese lockup redundante. */}
-            <Reveal style={{ gap: theme.spacing.xs }}>
-              <Text variant="title1">{t('auth.loginTitle')}</Text>
-              <Text variant="callout" color="inkMuted">
-                {t('auth.loginSubtitle')}
-              </Text>
-            </Reveal>
+              <Reveal style={{ gap: theme.spacing.xs }}>
+                <Text variant="title1">{t('auth.loginTitle')}</Text>
+                <Text variant="callout" color="inkMuted">
+                  {t('auth.loginSubtitle')}
+                </Text>
+              </Reveal>
 
-            {expired ? <Banner tone="warn" title={t('auth.sessionExpired')} /> : null}
+              {expired ? <Banner tone="warn" title={t('auth.sessionExpired')} /> : null}
 
-            {/* Re-login rápido con biometría del dispositivo (solo si hay token guardado; oculto en dev). */}
-            {faceIdEnabled && showBiometricCard ? (
-              <Reveal delay={100}>
-                <Card variant="filled" padding="xl" style={{ gap: theme.spacing.lg }}>
-                  <View style={[styles.biometricHead, { gap: theme.spacing.md }]}>
-                    <View
-                      style={[
-                        styles.shieldCircle,
-                        { backgroundColor: theme.colors.surface, borderRadius: theme.radii.pill },
-                      ]}
-                    >
-                      <FaceIdGlyph color={theme.colors.accent} />
+              {/* Re-login rápido con biometría del dispositivo (solo si hay token guardado; oculto en dev). */}
+              {faceIdEnabled && showBiometricCard ? (
+                <Reveal delay={100}>
+                  <Card variant="filled" padding="xl" style={{ gap: theme.spacing.lg }}>
+                    <View style={[styles.biometricHead, { gap: theme.spacing.md }]}>
+                      <View
+                        style={[
+                          styles.shieldCircle,
+                          { backgroundColor: theme.colors.surface, borderRadius: theme.radii.pill },
+                        ]}
+                      >
+                        <FaceIdGlyph color={theme.colors.accent} />
+                      </View>
+                      <View style={styles.biometricCopy}>
+                        <Text variant="bodyStrong">{t('auth.faceIdTitle')}</Text>
+                        <Text variant="footnote" color="inkMuted">
+                          {t('auth.faceIdBody')}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={styles.biometricCopy}>
-                      <Text variant="bodyStrong">{t('auth.faceIdTitle')}</Text>
-                      <Text variant="footnote" color="inkMuted">
-                        {t('auth.faceIdBody')}
+                    <Button
+                      label={t('auth.faceIdTitle')}
+                      variant="accent"
+                      fullWidth
+                      loading={biometric.isPending}
+                      onPress={() => {
+                        biometric.relogin().catch(() => undefined);
+                      }}
+                    />
+                    <Button
+                      label={t('auth.useCodeInstead')}
+                      variant="secondary"
+                      size="sm"
+                      fullWidth
+                      onPress={() => setShowBiometricCard(false)}
+                    />
+                    {biometric.error ? (
+                      <Banner
+                        tone="danger"
+                        title={t('errors.generic')}
+                        description={toErrorMessage(biometric.error, t)}
+                      />
+                    ) : null}
+                  </Card>
+                </Reveal>
+              ) : null}
+
+              {/* Formulario de teléfono con prefijo +51 visible y CTA cian full-width. */}
+              <Reveal delay={140} style={{ gap: theme.spacing.lg }}>
+                {faceIdEnabled ? (
+                  <Text variant="footnote" color="inkSubtle" align="center">
+                    {t('auth.phoneDivider')}
+                  </Text>
+                ) : null}
+                <TextField
+                  label={t('auth.phoneLabel')}
+                  placeholder={t('auth.phonePlaceholder')}
+                  helperText={t('auth.loginHelper')}
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                  autoComplete="tel"
+                  textContentType="telephoneNumber"
+                  error={phone.length > 0 && !phoneValid ? t('auth.invalidPhone') : undefined}
+                  leftIcon={
+                    <View style={[styles.prefix, { borderRightColor: theme.colors.border }]}>
+                      <Text variant="bodyStrong" color="inkMuted">
+                        +51
                       </Text>
                     </View>
-                  </View>
-                  <Button
-                    label={t('auth.faceIdTitle')}
-                    variant="accent"
-                    fullWidth
-                    loading={biometric.isPending}
-                    onPress={() => {
-                      biometric.relogin().catch(() => undefined);
-                    }}
-                  />
-                  <Button
-                    label={t('auth.useCodeInstead')}
-                    variant="secondary"
-                    size="sm"
-                    fullWidth
-                    onPress={() => setShowBiometricCard(false)}
-                  />
-                  {biometric.error ? (
-                    <Banner
-                      tone="danger"
-                      title={t('errors.generic')}
-                      description={toErrorMessage(biometric.error, t)}
-                    />
-                  ) : null}
-                </Card>
-              </Reveal>
-            ) : null}
-
-            {/* Formulario de teléfono con prefijo +51 visible y CTA cian full-width. */}
-            <Reveal delay={140} style={{ gap: theme.spacing.lg }}>
-              {faceIdEnabled ? (
-                <Text variant="footnote" color="inkSubtle" align="center">
-                  {t('auth.phoneDivider')}
-                </Text>
-              ) : null}
-              <TextField
-                label={t('auth.phoneLabel')}
-                placeholder={t('auth.phonePlaceholder')}
-                helperText={t('auth.loginHelper')}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                autoComplete="tel"
-                textContentType="telephoneNumber"
-                error={phone.length > 0 && !phoneValid ? t('auth.invalidPhone') : undefined}
-                leftIcon={
-                  <View style={[styles.prefix, { borderRightColor: theme.colors.border }]}>
-                    <Text variant="bodyStrong" color="inkMuted">
-                      +51
-                    </Text>
-                  </View>
-                }
-              />
-              {requestOtp.isError ? (
-                <Banner
-                  tone="danger"
-                  title={t('errors.generic')}
-                  description={toErrorMessage(requestOtp.error, t)}
+                  }
                 />
-              ) : null}
-              <Button
-                label={t('auth.requestOtp')}
-                variant="accent"
-                size="lg"
-                fullWidth
-                disabled={!phoneValid}
-                loading={requestOtp.isPending}
-                onPress={onRequest}
-              />
-            </Reveal>
-          </View>
+                {requestOtp.isError ? (
+                  <Banner
+                    tone="danger"
+                    title={t('errors.generic')}
+                    description={toErrorMessage(requestOtp.error, t)}
+                  />
+                ) : null}
+                <Button
+                  label={t('auth.requestOtp')}
+                  variant="accent"
+                  size="lg"
+                  fullWidth
+                  disabled={!phoneValid}
+                  loading={requestOtp.isPending}
+                  onPress={onRequest}
+                />
+              </Reveal>
+            </View>
           </ScrollView>
         </>
       ) : (

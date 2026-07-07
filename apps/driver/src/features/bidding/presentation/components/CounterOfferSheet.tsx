@@ -41,9 +41,7 @@ export const CounterOfferSheet = ({ bid, gone = false, onClose }: Props): React.
   // ADR-020 Lote 2 (2b) — pendiente "esperando al pasajero". El estado vive en el store (sesión en vivo):
   // así sobrevive a cerrar/reabrir el sheet, y el realtime lo limpia al GANAR (onMatch) o PERDER (bid:closed).
   const addPendingBid = useDispatchStore((s) => s.addPendingBid);
-  const pending = useDispatchStore(
-    (s) => bid !== null && s.pendingBidTripIds.includes(bid.tripId),
-  );
+  const pending = useDispatchStore((s) => bid !== null && s.pendingBidTripIds.includes(bid.tripId));
 
   const [mode, setMode] = useState<'view' | 'counter'>('view');
   const [counterText, setCounterText] = useState('');
@@ -117,120 +115,120 @@ export const CounterOfferSheet = ({ bid, gone = false, onClose }: Props): React.
             <Button label={t('common.close')} variant="accent" fullWidth onPress={onClose} />
           </View>
         ) : (
-        <View style={styles.body}>
-          <View style={styles.ringWrap}>
-            <CountdownRing seconds={secondsLeft} progress={progress} expired={expired} />
-          </View>
-
-          <View style={styles.amountBlock}>
-            <Text variant="subhead" color="inkMuted" align="center">
-              {t('trips.bid.subtitle')}
-            </Text>
-            <Text variant="display" align="center" tabular>
-              {formatPEN(bid.bidCents)}
-            </Text>
-          </View>
-
-          {bid.specialRequests.length > 0 ? (
-            <View style={styles.specials}>
-              {bid.specialRequests.map((req) => (
-                <StatusPill
-                  key={req}
-                  label={t(`trips.bid.special.${req}`, { defaultValue: req })}
-                  tone="neutral"
-                />
-              ))}
+          <View style={styles.body}>
+            <View style={styles.ringWrap}>
+              <CountdownRing seconds={secondsLeft} progress={progress} expired={expired} />
             </View>
-          ) : null}
 
-          {mode === 'counter' && !unavailable ? (
-            <View style={styles.counterBlock}>
-              <Text variant="footnote" color="inkMuted">
-                {t('trips.bid.yourCounter')}
+            <View style={styles.amountBlock}>
+              <Text variant="subhead" color="inkMuted" align="center">
+                {t('trips.bid.subtitle')}
               </Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  { borderColor: theme.colors.border, borderRadius: theme.radii.lg },
-                ]}
-              >
-                <Text variant="title3" color="inkMuted">
-                  S/
+              <Text variant="display" align="center" tabular>
+                {formatPEN(bid.bidCents)}
+              </Text>
+            </View>
+
+            {bid.specialRequests.length > 0 ? (
+              <View style={styles.specials}>
+                {bid.specialRequests.map((req) => (
+                  <StatusPill
+                    key={req}
+                    label={t(`trips.bid.special.${req}`, { defaultValue: req })}
+                    tone="neutral"
+                  />
+                ))}
+              </View>
+            ) : null}
+
+            {mode === 'counter' && !unavailable ? (
+              <View style={styles.counterBlock}>
+                <Text variant="footnote" color="inkMuted">
+                  {t('trips.bid.yourCounter')}
                 </Text>
-                <Text variant="title2" tabular style={styles.inputValue}>
-                  {counterText.length > 0 ? counterText : '0.00'}
+                <View
+                  style={[
+                    styles.inputRow,
+                    { borderColor: theme.colors.border, borderRadius: theme.radii.lg },
+                  ]}
+                >
+                  <Text variant="title3" color="inkMuted">
+                    S/
+                  </Text>
+                  <Text variant="title2" tabular style={styles.inputValue}>
+                    {counterText.length > 0 ? counterText : '0.00'}
+                  </Text>
+                </View>
+                {/* Teclado numérico inline para no depender del foco del sheet sobre el teclado nativo. */}
+                <CounterPad
+                  onDigit={(d) => setCounterText((prev) => appendDigit(prev, d))}
+                  onClear={() => setCounterText('')}
+                  onBackspace={() => setCounterText((prev) => prev.slice(0, -1))}
+                />
+                <Text
+                  variant="footnote"
+                  color={counterValid || counterText.length === 0 ? 'inkSubtle' : 'danger'}
+                >
+                  {t('trips.bid.counterHelper', { min: formatPEN(bid.bidCents) })}
                 </Text>
               </View>
-              {/* Teclado numérico inline para no depender del foco del sheet sobre el teclado nativo. */}
-              <CounterPad
-                onDigit={(d) => setCounterText((prev) => appendDigit(prev, d))}
-                onClear={() => setCounterText('')}
-                onBackspace={() => setCounterText((prev) => prev.slice(0, -1))}
-              />
-              <Text
-                variant="footnote"
-                color={counterValid || counterText.length === 0 ? 'inkSubtle' : 'danger'}
-              >
-                {t('trips.bid.counterHelper', { min: formatPEN(bid.bidCents) })}
-              </Text>
-            </View>
-          ) : null}
+            ) : null}
 
-          {unavailable ? (
-            <Banner tone="danger" title={t('trips.bid.gone')} />
-          ) : (
-            <>
-              {accept.isError ? (
-                <Banner
-                  tone="danger"
-                  title={t('errors.generic')}
-                  description={toErrorMessage(accept.error, t)}
-                />
-              ) : null}
-              {counter.isError ? (
-                <Banner
-                  tone="danger"
-                  title={t('errors.generic')}
-                  description={toErrorMessage(counter.error, t)}
-                />
-              ) : null}
-              {expired ? <Banner tone="danger" title={t('trips.bid.expired')} /> : null}
-            </>
-          )}
+            {unavailable ? (
+              <Banner tone="danger" title={t('trips.bid.gone')} />
+            ) : (
+              <>
+                {accept.isError ? (
+                  <Banner
+                    tone="danger"
+                    title={t('errors.generic')}
+                    description={toErrorMessage(accept.error, t)}
+                  />
+                ) : null}
+                {counter.isError ? (
+                  <Banner
+                    tone="danger"
+                    title={t('errors.generic')}
+                    description={toErrorMessage(counter.error, t)}
+                  />
+                ) : null}
+                {expired ? <Banner tone="danger" title={t('trips.bid.expired')} /> : null}
+              </>
+            )}
 
-          {unavailable ? (
-            // Puja muerta: única salida es cerrar (la lista ya se refrescó para soltarla).
-            <Button label={t('common.close')} variant="accent" fullWidth onPress={onClose} />
-          ) : mode === 'view' ? (
-            <View style={styles.actions}>
+            {unavailable ? (
+              // Puja muerta: única salida es cerrar (la lista ya se refrescó para soltarla).
+              <Button label={t('common.close')} variant="accent" fullWidth onPress={onClose} />
+            ) : mode === 'view' ? (
+              <View style={styles.actions}>
+                <Button
+                  label={t('trips.bid.counter')}
+                  variant="ghost"
+                  disabled={expired}
+                  onPress={() => setMode('counter')}
+                  style={styles.counterBtn}
+                />
+                <Button
+                  label={t('trips.bid.acceptFare', { amount: formatPEN(bid.bidCents) })}
+                  variant="accent"
+                  fullWidth
+                  disabled={expired || accept.isPending}
+                  loading={accept.isPending}
+                  onPress={onAccept}
+                  style={styles.acceptBtn}
+                />
+              </View>
+            ) : (
               <Button
-                label={t('trips.bid.counter')}
-                variant="ghost"
-                disabled={expired}
-                onPress={() => setMode('counter')}
-                style={styles.counterBtn}
-              />
-              <Button
-                label={t('trips.bid.acceptFare', { amount: formatPEN(bid.bidCents) })}
+                label={t('trips.bid.send')}
                 variant="accent"
                 fullWidth
-                disabled={expired || accept.isPending}
-                loading={accept.isPending}
-                onPress={onAccept}
-                style={styles.acceptBtn}
+                disabled={!counterValid || counter.isPending}
+                loading={counter.isPending}
+                onPress={onSendCounter}
               />
-            </View>
-          ) : (
-            <Button
-              label={t('trips.bid.send')}
-              variant="accent"
-              fullWidth
-              disabled={!counterValid || counter.isPending}
-              loading={counter.isPending}
-              onPress={onSendCounter}
-            />
-          )}
-        </View>
+            )}
+          </View>
         )
       ) : null}
     </BottomSheet>

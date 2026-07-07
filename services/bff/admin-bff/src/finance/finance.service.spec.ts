@@ -550,19 +550,23 @@ describe('FinanceService.getPayoutStats · Seam 1 (KPIs de Liquidaciones)', () =
  */
 describe('FinanceService.listPayouts · Seam 2 (driverName enrichment + gate PII)', () => {
   it('FINANCE puro: driverName null y NO se llama a identity (sin fuga de PII ni round-trip)', async () => {
-    const { svc, identityGrpc } = makeService([processedRow(), heldRow()], [
-      { id: 'drv-1', name: 'María Ravello' },
-    ]);
+    const { svc, identityGrpc } = makeService(
+      [processedRow(), heldRow()],
+      [{ id: 'drv-1', name: 'María Ravello' }],
+    );
     const page = await svc.listPayouts(operator, {});
     expect(page.items.every((v) => v.driverName === null)).toBe(true);
     expect(identityGrpc.call).not.toHaveBeenCalled();
   });
 
   it('ADMIN: resuelve driverName con UN solo GetDriversByIds para toda la página (anti-N+1)', async () => {
-    const { svc, identityGrpc } = makeService([processedRow(), heldRow()], [
-      { id: 'drv-1', name: 'María Ravello' },
-      { id: 'drv-2', name: 'Juan Pérez' },
-    ]);
+    const { svc, identityGrpc } = makeService(
+      [processedRow(), heldRow()],
+      [
+        { id: 'drv-1', name: 'María Ravello' },
+        { id: 'drv-2', name: 'Juan Pérez' },
+      ],
+    );
     const page = await svc.listPayouts(adminOperator, {});
     expect(identityGrpc.call).toHaveBeenCalledTimes(1);
     expect(identityGrpc.call).toHaveBeenCalledWith(
@@ -575,10 +579,13 @@ describe('FinanceService.listPayouts · Seam 2 (driverName enrichment + gate PII
   });
 
   it('ADMIN: un driverId que identity NO resuelve degrada a null honesto (no se inventa)', async () => {
-    const { svc } = makeService([processedRow(), heldRow()], [
-      { id: 'drv-1', name: 'María Ravello' },
-      // drv-2 ausente en el reply de identity → null honesto
-    ]);
+    const { svc } = makeService(
+      [processedRow(), heldRow()],
+      [
+        { id: 'drv-1', name: 'María Ravello' },
+        // drv-2 ausente en el reply de identity → null honesto
+      ],
+    );
     const page = await svc.listPayouts(adminOperator, {});
     expect(page.items[0]?.driverName).toBe('María Ravello');
     expect(page.items[1]?.driverName).toBeNull();
@@ -595,12 +602,16 @@ describe('FinanceService.listPayouts · Seam 2 (driverName enrichment + gate PII
 
 describe('FinanceService.getPayoutDetail · Seam 2 (driverName enrichment + gate PII)', () => {
   it('ADMIN: enriquece driverName; FINANCE puro lo deja null', async () => {
-    const admin = makePayoutDetailService(payoutDetailRow(), [{ id: 'drv-1', name: 'María Ravello' }]);
+    const admin = makePayoutDetailService(payoutDetailRow(), [
+      { id: 'drv-1', name: 'María Ravello' },
+    ]);
     const adminView = await admin.svc.getPayoutDetail(adminOperator, 'pay-detail-1');
     expect(adminView.driverName).toBe('María Ravello');
     expect(admin.identityGrpc.call).toHaveBeenCalledTimes(1);
 
-    const fin = makePayoutDetailService(payoutDetailRow(), [{ id: 'drv-1', name: 'María Ravello' }]);
+    const fin = makePayoutDetailService(payoutDetailRow(), [
+      { id: 'drv-1', name: 'María Ravello' },
+    ]);
     const finView = await fin.svc.getPayoutDetail(operator, 'pay-detail-1');
     expect(finView.driverName).toBeNull();
     expect(fin.identityGrpc.call).not.toHaveBeenCalled();

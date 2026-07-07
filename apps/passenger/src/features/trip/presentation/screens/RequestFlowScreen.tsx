@@ -24,7 +24,12 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import Svg, {Defs, LinearGradient as SvgLinearGradient, Rect, Stop} from 'react-native-svg';
+import Svg, {
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {
@@ -619,7 +624,6 @@ export function RequestFlowScreen(): React.JSX.Element {
     return [HOME_SHEET_COLLAPSED_FRACTION, Math.min(visible / available, 0.92)];
   }, [mapMode, windowHeight, insets.top, bottomInset]);
 
-
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
   // solo lugar. Cada fase toma de acá exactamente lo que su body/header necesita.
   const ctx: RequestFlowContext = {
@@ -793,13 +797,35 @@ export function RequestFlowScreen(): React.JSX.Element {
           <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
             <Defs>
               <SvgLinearGradient id="homeScrim" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0.5} />
-                <Stop offset="0.34" stopColor={theme.colors.bg} stopOpacity={0.08} />
-                <Stop offset="0.6" stopColor={theme.colors.bg} stopOpacity={0.74} />
-                <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={0.98} />
+                <Stop
+                  offset="0"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.5}
+                />
+                <Stop
+                  offset="0.34"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.08}
+                />
+                <Stop
+                  offset="0.6"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.74}
+                />
+                <Stop
+                  offset="1"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.98}
+                />
               </SvgLinearGradient>
             </Defs>
-            <Rect x="0" y="0" width="100%" height="100%" fill="url(#homeScrim)" />
+            <Rect
+              x="0"
+              y="0"
+              width="100%"
+              height="100%"
+              fill="url(#homeScrim)"
+            />
           </Svg>
         </View>
       ) : null}
@@ -868,8 +894,7 @@ export function RequestFlowScreen(): React.JSX.Element {
                     : theme.spacing.xl,
                 // Ritmo vertical del pen en el Home (HomeContent gap $s-lg = 16, con aire); el
                 // resto de fases conserva md.
-                gap:
-                  mapMode === 'idle' ? theme.spacing.lg : theme.spacing.md,
+                gap: mapMode === 'idle' ? theme.spacing.lg : theme.spacing.md,
               },
             ]}
             showsVerticalScrollIndicator={false}>

@@ -49,8 +49,8 @@ export function MediaPlayer({ media, error, open, onOpenChange }: MediaPlayerPro
 
           {media?.status === 'READY' ? (
             <p className="text-xs text-ink-muted">
-              Acceso temporal · expira {dateTime(media.expiresAt)}. Marca de agua permanente sobre cada
-              frame. Toda reproducción queda auditada.
+              Acceso temporal · expira {dateTime(media.expiresAt)}. Marca de agua permanente sobre
+              cada frame. Toda reproducción queda auditada.
             </p>
           ) : !error ? (
             <p className="text-xs text-ink-muted">
@@ -73,8 +73,8 @@ function Preparing() {
       <div className="space-y-1">
         <p className="text-sm font-semibold text-white">Preparando el video de forma segura</p>
         <p className="max-w-sm text-xs text-white/55">
-          Se está grabando la marca de agua forense (operador, motivo y fecha) sobre cada frame. Tarda
-          unos segundos y queda permanente.
+          Se está grabando la marca de agua forense (operador, motivo y fecha) sobre cada frame.
+          Tarda unos segundos y queda permanente.
         </p>
       </div>
     </div>

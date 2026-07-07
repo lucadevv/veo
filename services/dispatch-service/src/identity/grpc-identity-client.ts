@@ -35,7 +35,11 @@ export class GrpcIdentityClient implements IdentityClient {
   async getDriverByUser(userId: string): Promise<IdentityDriver> {
     // Resuelve User.id → perfil Driver (mismo DriverReply que GetDriver). Lo usa la exclusión por
     // suspensión del eje FLEET en la vía ITV, donde el evento viaja keyeado por User.id (= Vehicle.driverId).
-    const reply = await this.client.call<DriverReply>('GetDriverByUser', { id: userId }, this.meta());
+    const reply = await this.client.call<DriverReply>(
+      'GetDriverByUser',
+      { id: userId },
+      this.meta(),
+    );
     return this.toDriver(reply);
   }
 

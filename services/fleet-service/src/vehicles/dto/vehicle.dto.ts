@@ -44,7 +44,8 @@ export class CreateVehicleDto {
 
   @ApiPropertyOptional({
     example: 'Toyota',
-    description: 'Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo (modelSpecId).',
+    description:
+      'Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo (modelSpecId).',
   })
   @IsOptional()
   @IsString()
@@ -53,7 +54,8 @@ export class CreateVehicleDto {
 
   @ApiPropertyOptional({
     example: 'Yaris',
-    description: 'Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo (modelSpecId).',
+    description:
+      'Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo (modelSpecId).',
   })
   @IsOptional()
   @IsString()
@@ -129,7 +131,10 @@ export class RegisterDriverVehicleDto {
   })
   mtcCategory?: string;
 
-  @ApiProperty({ example: 'ABC-123', description: 'Placa peruana (auto ABC-123 o moto 1234-AB, guion opcional)' })
+  @ApiProperty({
+    example: 'ABC-123',
+    description: 'Placa peruana (auto ABC-123 o moto 1234-AB, guion opcional)',
+  })
   @IsString()
   @Matches(PLATE_PATTERN, { message: PLATE_INVALID_MESSAGE })
   plate!: string;

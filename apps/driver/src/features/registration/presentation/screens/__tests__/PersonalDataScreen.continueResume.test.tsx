@@ -31,7 +31,8 @@ import type {
 let mockSubmitResult: PersonalDataContinueResult = { status: 'ok' };
 /** Captura el último `params` con que la pantalla llamó al continue (para verificar `driverExists`). */
 const mockSubmit = jest.fn(
-  async (_params: PersonalDataContinueParams): Promise<PersonalDataContinueResult> => mockSubmitResult,
+  async (_params: PersonalDataContinueParams): Promise<PersonalDataContinueResult> =>
+    mockSubmitResult,
 );
 /** Señal de existencia del driver que el mock de `useDriverExists` devuelve (cada test la fija). */
 let mockDriverExistence: DriverExistence = DriverExistence.NotFound;

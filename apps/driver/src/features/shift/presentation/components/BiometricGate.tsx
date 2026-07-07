@@ -175,7 +175,10 @@ export const BiometricGate = ({
             <View
               style={[
                 styles.circle,
-                { borderColor: hexAlpha(theme.colors.accent, 0.6), backgroundColor: theme.colors.bg },
+                {
+                  borderColor: hexAlpha(theme.colors.accent, 0.6),
+                  backgroundColor: theme.colors.bg,
+                },
               ]}
             >
               <BiometricCameraPreview

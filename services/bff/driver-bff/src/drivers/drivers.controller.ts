@@ -113,7 +113,8 @@ export class DriversController {
   @Post('me/check-dni')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
+    summary:
+      'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
   })
   checkDni(
     @CurrentUser() user: AuthenticatedUser,

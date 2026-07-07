@@ -211,7 +211,10 @@ export const LivenessAction = {
 export type LivenessAction = (typeof LivenessAction)[keyof typeof LivenessAction];
 
 /** Valores de `LivenessAction` para validadores de borde (`@IsIn`) y `z.enum`. Derivado del const, no re-tipeado. */
-export const LIVENESS_ACTIONS = Object.values(LivenessAction) as [LivenessAction, ...LivenessAction[]];
+export const LIVENESS_ACTIONS = Object.values(LivenessAction) as [
+  LivenessAction,
+  ...LivenessAction[],
+];
 
 /**
  * Tipo de actor humano de la plataforma: PASSENGER (pasajero) · DRIVER (conductor). Es la FUENTE ÚNICA

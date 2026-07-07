@@ -134,9 +134,9 @@ describe('AdminService.reject · anti-escalada + máquina dentro de la tx', () =
       status: 'ACTIVE',
       roles: [AdminRole.SUPERADMIN],
     });
-    await expect(makeService(prisma).reject([AdminRole.ADMIN], 'admin', 'a1')).rejects.toBeInstanceOf(
-      ForbiddenError,
-    );
+    await expect(
+      makeService(prisma).reject([AdminRole.ADMIN], 'admin', 'a1'),
+    ).rejects.toBeInstanceOf(ForbiddenError);
     expect(writes).toHaveLength(0);
   });
 
@@ -225,12 +225,9 @@ describe('AdminService.createOperator · alta por invitación + anti-escalada', 
   it('rol fuera del enum → ValidationError ANTES del check de jerarquía y sin tocar DB', async () => {
     const { prisma, findUnique, create } = makeCreatePrisma();
     await expect(
-      makeService(prisma).createOperator(
-        [AdminRole.SUPERADMIN],
-        'actor-1',
-        'op@veo.pe',
-        ['NO_EXISTE' as AdminRole],
-      ),
+      makeService(prisma).createOperator([AdminRole.SUPERADMIN], 'actor-1', 'op@veo.pe', [
+        'NO_EXISTE' as AdminRole,
+      ]),
     ).rejects.toBeInstanceOf(ValidationError);
     expect(findUnique).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
@@ -367,7 +364,10 @@ describe('AdminService · emite admin.role_changed por outbox (auditoría de pri
 /**
  * Prisma doble para acceptInvite: read.findFirst (por hash+INVITED) + tx (findUnique + update).
  */
-function makeAcceptPrisma(found: Record<string, unknown> | null, txFresh?: Record<string, unknown> | null) {
+function makeAcceptPrisma(
+  found: Record<string, unknown> | null,
+  txFresh?: Record<string, unknown> | null,
+) {
   const writes: Record<string, unknown>[] = [];
   const fresh = txFresh === undefined ? found : txFresh;
   return {
@@ -464,7 +464,10 @@ function makeReinvitePrisma(
   replicaAdmin: Record<string, unknown> | null,
   txAdmin: Record<string, unknown> | null = replicaAdmin,
 ) {
-  const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'a1', ...data }));
+  const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+    id: 'a1',
+    ...data,
+  }));
   const outboxCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({}));
   const $transaction = vi.fn(async (fn: (t: unknown) => Promise<unknown>) =>
     fn({
@@ -502,16 +505,18 @@ describe('AdminService.reinvite · re-emite invitación solo si sigue INVITED', 
       status: 'ACTIVE',
       roles: [AdminRole.SUPPORT_L2],
     });
-    await expect(makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1')).rejects.toMatchObject({
+    await expect(
+      makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1'),
+    ).rejects.toMatchObject({
       httpStatus: 409,
     });
   });
 
   it('404 si el operador no existe', async () => {
     const { prisma } = makeReinvitePrisma(null);
-    await expect(makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1')).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(
+      makeService(prisma).reinvite([AdminRole.ADMIN], 'actor-1', 'a1'),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('TOCTOU: la réplica decía INVITED pero un reject() concurrente lo dejó REJECTED → 409, SIN update NI evento', async () => {
@@ -583,7 +588,9 @@ describe('AdminService.login · lockout anti brute-force', () => {
     const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis);
 
     for (let i = 0; i < 5; i++) {
-      await expect(svc.login(EMAIL, 'password-incorrecta')).rejects.toBeInstanceOf(UnauthorizedError);
+      await expect(svc.login(EMAIL, 'password-incorrecta')).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
     }
     expect(redis._store.get(LOCK_KEY)).toBeDefined();
 
@@ -617,7 +624,9 @@ describe('AdminService.login · lockout anti brute-force', () => {
 
     // 3 fallos por debajo del tope → contador en 3, sin lock.
     for (let i = 0; i < 3; i++) {
-      await expect(svc.login(EMAIL, 'password-incorrecta')).rejects.toBeInstanceOf(UnauthorizedError);
+      await expect(svc.login(EMAIL, 'password-incorrecta')).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
     }
     expect(redis._store.get(ATTEMPTS_KEY)).toBe('3');
 
@@ -633,7 +642,14 @@ describe('AdminService.login · lockout anti brute-force', () => {
     const redis = fakeRedis();
     // Reloj fijado a 2026: el servicio NO depende del reloj de pared para verificar el código.
     const clock = new FixedClock(Date.UTC(2026, 5, 20));
-    const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis, makeJwt(), makeSessions(), clock);
+    const svc = makeService(
+      makeLoginPrisma(admin),
+      makeEmail(),
+      redis,
+      makeJwt(),
+      makeSessions(),
+      clock,
+    );
 
     // El código se genera para EL MISMO instante del reloj inyectado.
     const totpAt2026 = generateTotp(secret, clock.now());
@@ -645,7 +661,14 @@ describe('AdminService.login · lockout anti brute-force', () => {
     const { admin, secret } = await makeActiveAdmin();
     const redis = fakeRedis();
     const clock = new FixedClock(Date.UTC(2026, 5, 20));
-    const svc = makeService(makeLoginPrisma(admin), makeEmail(), redis, makeJwt(), makeSessions(), clock);
+    const svc = makeService(
+      makeLoginPrisma(admin),
+      makeEmail(),
+      redis,
+      makeJwt(),
+      makeSessions(),
+      clock,
+    );
 
     // Código generado 60s ANTES del instante del reloj del servicio → fuera de window:1.
     const staleTotp = generateTotp(secret, clock.now() - 60_000);

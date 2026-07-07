@@ -58,8 +58,13 @@ export class FleetController {
   }
 
   @Get('vehicles/:id')
-  @ApiOperation({ summary: 'Detalle de un vehículo (ENRIQUECIDO con la ficha del modelSpec, igual que la lista)' })
-  getVehicle(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<VehicleView> {
+  @ApiOperation({
+    summary: 'Detalle de un vehículo (ENRIQUECIDO con la ficha del modelSpec, igual que la lista)',
+  })
+  getVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<VehicleView> {
     return this.fleet.getVehicle(user, id);
   }
 
@@ -124,7 +129,9 @@ export class FleetController {
   // ── Catálogo de modelos: cola de revisión del operador (B5-2.c) ──
 
   @Get('vehicle-models')
-  @ApiOperation({ summary: 'Catálogo APROBADO de modelos (selector del alta admin). Filtros: vehicleType, q' })
+  @ApiOperation({
+    summary: 'Catálogo APROBADO de modelos (selector del alta admin). Filtros: vehicleType, q',
+  })
   listModels(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ListVehicleModelsQueryDto,

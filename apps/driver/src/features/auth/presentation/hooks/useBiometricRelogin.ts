@@ -56,7 +56,9 @@ export function useBiometricRelogin(): BiometricReloginState {
         return;
       }
       if (unlock.status === 'failed') {
-        throw new Error('No pudimos verificar tu identidad. Intentá de nuevo o ingresá con tu número.');
+        throw new Error(
+          'No pudimos verificar tu identidad. Intentá de nuevo o ingresá con tu número.',
+        );
       }
       const refreshToken = unlock.token;
 
@@ -93,7 +95,10 @@ export function useBiometricRelogin(): BiometricReloginState {
         await localAuth.saveRefreshToken(tokens.refreshToken);
       } catch (persistError) {
         // Best-effort + observable (no silencioso): si el Keychain no guarda, el próximo relogin cae a OTP.
-        console.warn('[relogin] no se pudo persistir el refresh token en el Keychain:', persistError);
+        console.warn(
+          '[relogin] no se pudo persistir el refresh token en el Keychain:',
+          persistError,
+        );
       }
       const driverProfile = await new GetProfileUseCase(profile).execute();
       useSessionStore.getState().setSession({ tokens, user: profileToSessionUser(driverProfile) });

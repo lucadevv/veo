@@ -56,52 +56,49 @@ export const RegistrationGateRetryScreen = ({
 
   return (
     <>
-    <SafeScreen
-      footer={
-        <View style={{ gap: theme.spacing.sm }}>
-          <Button
-            label={t('registration.actions.retry')}
-            variant="primary"
-            fullWidth
-            onPress={onRetry}
-          />
-          <Button
-            label={t('registration.exit')}
-            variant="ghost"
-            fullWidth
-            loading={exit.isLoggingOut}
-            onPress={exit.requestExit}
-          />
-        </View>
-      }
-    >
-      <View style={styles.container}>
-        <Reveal>
-          <VeoWordmark />
-        </Reveal>
-        <Reveal delay={80}>
-          <View
-            style={[
-              styles.glyphWrap,
-              { backgroundColor: hexAlpha(theme.colors.accent, 0.08) },
-            ]}
-          >
-            <RetryGlyph color={theme.colors.accent} />
+      <SafeScreen
+        footer={
+          <View style={{ gap: theme.spacing.sm }}>
+            <Button
+              label={t('registration.actions.retry')}
+              variant="primary"
+              fullWidth
+              onPress={onRetry}
+            />
+            <Button
+              label={t('registration.exit')}
+              variant="ghost"
+              fullWidth
+              loading={exit.isLoggingOut}
+              onPress={exit.requestExit}
+            />
           </View>
-        </Reveal>
-        <Reveal delay={160}>
-          <Text variant="title2" style={styles.title}>
-            {t('registration.gateRetry.title')}
-          </Text>
-        </Reveal>
-        <Reveal delay={220}>
-          <Text variant="body" color="inkSubtle" style={styles.body}>
-            {t('registration.gateRetry.body')}
-          </Text>
-        </Reveal>
-      </View>
-    </SafeScreen>
-    <RegistrationExitSheet exit={exit} />
+        }
+      >
+        <View style={styles.container}>
+          <Reveal>
+            <VeoWordmark />
+          </Reveal>
+          <Reveal delay={80}>
+            <View
+              style={[styles.glyphWrap, { backgroundColor: hexAlpha(theme.colors.accent, 0.08) }]}
+            >
+              <RetryGlyph color={theme.colors.accent} />
+            </View>
+          </Reveal>
+          <Reveal delay={160}>
+            <Text variant="title2" style={styles.title}>
+              {t('registration.gateRetry.title')}
+            </Text>
+          </Reveal>
+          <Reveal delay={220}>
+            <Text variant="body" color="inkSubtle" style={styles.body}>
+              {t('registration.gateRetry.body')}
+            </Text>
+          </Reveal>
+        </View>
+      </SafeScreen>
+      <RegistrationExitSheet exit={exit} />
     </>
   );
 };

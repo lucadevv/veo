@@ -146,10 +146,15 @@ class BiometricSandboxProvider implements BiometricProvider {
    */
   async matchDniFace(input: BiometricDniMatchInput): Promise<BiometricDniMatchResult> {
     const imageEmbedding = deterministicEmbedding(input.image);
-    const matched = cosineSimilarity(imageEmbedding, input.referenceEmbedding) >= SANDBOX_MATCH_THRESHOLD;
+    const matched =
+      cosineSimilarity(imageEmbedding, input.referenceEmbedding) >= SANDBOX_MATCH_THRESHOLD;
     return matched
       ? { matched: true, score: 96, reason: null }
-      : { matched: false, score: 40, reason: 'El rostro del DNI no coincide con la biometría enrolada (sandbox)' };
+      : {
+          matched: false,
+          score: 40,
+          reason: 'El rostro del DNI no coincide con la biometría enrolada (sandbox)',
+        };
   }
 }
 
@@ -271,10 +276,7 @@ export class BiometricServiceClient implements BiometricProvider {
    * no del servicio: lo devolvemos como `NO_FACE` para que el caller lo traduzca a embedding vacío. El
    * timeout/red sigue cayendo en el `catch` de `request`-style (ExternalServiceError 502).
    */
-  private async requestWithNoFace<T>(
-    path: string,
-    body: unknown,
-  ): Promise<T | typeof NO_FACE> {
+  private async requestWithNoFace<T>(path: string, body: unknown): Promise<T | typeof NO_FACE> {
     const { header, signature } = signInternalIdentity(
       anonymousIdentity('driver'),
       this.internalSecret,
@@ -353,7 +355,9 @@ export class BiometricServiceClient implements BiometricProvider {
    * toma el caller por booleanos (`livenessChecked`/`live`), no por el string `reason`.
    */
   async enrollPassive(photo: string): Promise<BiometricPassiveEnrollResult> {
-    const out = await this.requestWithNoFace<PassiveEnrollServiceResponse>('/v1/enroll-passive', { photo });
+    const out = await this.requestWithNoFace<PassiveEnrollServiceResponse>('/v1/enroll-passive', {
+      photo,
+    });
     if (out === NO_FACE) {
       return { embedding: null, live: false, livenessChecked: false, score: 0, reason: 'no_face' };
     }

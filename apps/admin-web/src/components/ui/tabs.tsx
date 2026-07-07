@@ -11,10 +11,7 @@ export function TabsList({
 }: React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>) {
   return (
     <TabsPrimitive.List
-      className={cn(
-        'inline-flex items-center gap-1 rounded-lg bg-surface-2/70 p-1',
-        className,
-      )}
+      className={cn('inline-flex items-center gap-1 rounded-lg bg-surface-2/70 p-1', className)}
       {...props}
     />
   );

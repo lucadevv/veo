@@ -85,9 +85,11 @@ function makeService(opts: {
   const prisma = {
     read: {
       vehicle: {
-        findUnique: vi.fn().mockResolvedValue(
-          opts.vehicle === undefined ? ({ id: VEHICLE_ID } as Vehicle) : opts.vehicle,
-        ),
+        findUnique: vi
+          .fn()
+          .mockResolvedValue(
+            opts.vehicle === undefined ? ({ id: VEHICLE_ID } as Vehicle) : opts.vehicle,
+          ),
       },
       inspection: { findUnique: findInspectionUnique },
     },

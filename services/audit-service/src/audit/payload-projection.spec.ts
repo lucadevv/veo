@@ -281,51 +281,111 @@ describe('payload-projection · PII-guard por VALOR (texto libre fuera del allow
     const cases: Array<[string, Record<string, unknown>]> = [
       ['driver.rejected', { driverId: 'd', userId: 'u', reason: PII_TEXT, rejectedAt: 'x' }],
       ['driver.suspended', { driverId: 'd', reason: PII_TEXT, suspendedAt: 'x' }],
-      ['biometric.enroll_rejected', { driverId: 'd', userId: 'u', reason: PII_TEXT, score: 0.1, at: 'x' }],
+      [
+        'biometric.enroll_rejected',
+        { driverId: 'd', userId: 'u', reason: PII_TEXT, score: 0.1, at: 'x' },
+      ],
       ['trip.cancelled', { tripId: 't', by: 'PASSENGER', reason: PII_TEXT, penaltyCents: 0 }],
       ['payment.failed', { paymentId: 'p', tripId: 't', reason: PII_TEXT, willRetry: false }],
-      ['payment.refunded', { paymentId: 'p', tripId: 't', amountCents: 100, reason: PII_TEXT, approvedBy: 'op' }],
+      [
+        'payment.refunded',
+        { paymentId: 'p', tripId: 't', amountCents: 100, reason: PII_TEXT, approvedBy: 'op' },
+      ],
       ['fleet.driver_suspended', { driverId: 'd', reason: PII_TEXT, suspendedAt: 'x' }],
       ['fleet.vehicle_suspended', { vehicleId: 'v', reason: PII_TEXT, suspendedAt: 'x' }],
     ];
     for (const [eventType, payload] of cases) {
       const safe = projectAuditPayload(eventType, payload);
       expect('reason' in safe, `${eventType} filtró reason free-text al WORM`).toBe(false);
-      expect(JSON.stringify(safe).includes('Juan Perez'), `${eventType} filtró el VALOR PII`).toBe(false);
+      expect(JSON.stringify(safe).includes('Juan Perez'), `${eventType} filtró el VALOR PII`).toBe(
+        false,
+      );
     }
   });
 
   it('otros z.string LIBRES fuera del allowlist: kycStatus/fromStatus/documentType/make/model/plate/pais/period/estadoAnterior', () => {
-    expect(projectAuditPayload('user.kyc_verified', { userId: 'u', kycStatus: PII_TEXT, verifiedAt: 'x' })).toEqual({
+    expect(
+      projectAuditPayload('user.kyc_verified', {
+        userId: 'u',
+        kycStatus: PII_TEXT,
+        verifiedAt: 'x',
+      }),
+    ).toEqual({
       userId: 'u',
       verifiedAt: 'x',
     });
-    expect(projectAuditPayload('trip.expired', { tripId: 't', passengerId: 'p', fromStatus: PII_TEXT, staleMinutes: 5, at: 'x' })).toEqual({
+    expect(
+      projectAuditPayload('trip.expired', {
+        tripId: 't',
+        passengerId: 'p',
+        fromStatus: PII_TEXT,
+        staleMinutes: 5,
+        at: 'x',
+      }),
+    ).toEqual({
       tripId: 't',
       passengerId: 'p',
       staleMinutes: 5,
       at: 'x',
     });
-    expect(projectAuditPayload('fleet.document_expired', { documentId: 'd', ownerType: 'DRIVER', ownerId: 'o', documentType: PII_TEXT, expiresAt: 'x', critical: true })).toEqual({
+    expect(
+      projectAuditPayload('fleet.document_expired', {
+        documentId: 'd',
+        ownerType: 'DRIVER',
+        ownerId: 'o',
+        documentType: PII_TEXT,
+        expiresAt: 'x',
+        critical: true,
+      }),
+    ).toEqual({
       documentId: 'd',
       ownerType: 'DRIVER',
       ownerId: 'o',
       expiresAt: 'x',
       critical: true,
     });
-    expect(projectAuditPayload('fleet.vehicle_registered', { vehicleId: 'v', driverId: 'd', plate: 'ABC-123', vehicleType: 'CAR', registeredAt: 'x' })).toEqual({
+    expect(
+      projectAuditPayload('fleet.vehicle_registered', {
+        vehicleId: 'v',
+        driverId: 'd',
+        plate: 'ABC-123',
+        vehicleType: 'CAR',
+        registeredAt: 'x',
+      }),
+    ).toEqual({
       vehicleId: 'v',
       driverId: 'd',
       vehicleType: 'CAR',
       registeredAt: 'x',
     });
-    expect(projectAuditPayload('fleet.vehicle_model_reviewed', { modelId: 'm', requestedBy: 'u', verdict: 'APPROVED', make: 'Toyota', model: 'Yaris', reviewedAt: 'x' })).toEqual({
+    expect(
+      projectAuditPayload('fleet.vehicle_model_reviewed', {
+        modelId: 'm',
+        requestedBy: 'u',
+        verdict: 'APPROVED',
+        make: 'Toyota',
+        model: 'Yaris',
+        reviewedAt: 'x',
+      }),
+    ).toEqual({
       modelId: 'm',
       requestedBy: 'u',
       verdict: 'APPROVED',
       reviewedAt: 'x',
     });
-    expect(projectAuditPayload('booking.published', { publishedTripId: 'pt', driverId: 'd', vehicleId: 'v', asientosTotales: 3, precioBase: 1500, modoReserva: 'INSTANT_BOOKING', fechaHoraSalida: 'x', pais: 'PE', moneda: 'PEN' })).toEqual({
+    expect(
+      projectAuditPayload('booking.published', {
+        publishedTripId: 'pt',
+        driverId: 'd',
+        vehicleId: 'v',
+        asientosTotales: 3,
+        precioBase: 1500,
+        modoReserva: 'INSTANT_BOOKING',
+        fechaHoraSalida: 'x',
+        pais: 'PE',
+        moneda: 'PEN',
+      }),
+    ).toEqual({
       publishedTripId: 'pt',
       driverId: 'd',
       vehicleId: 'v',
@@ -334,25 +394,46 @@ describe('payload-projection · PII-guard por VALOR (texto libre fuera del allow
       modoReserva: 'INSTANT_BOOKING',
       fechaHoraSalida: 'x',
     });
-    expect(projectAuditPayload('payout.processed', { payoutId: 'po', driverId: 'd', amountCents: 5000, period: '2026-06' })).toEqual({
+    expect(
+      projectAuditPayload('payout.processed', {
+        payoutId: 'po',
+        driverId: 'd',
+        amountCents: 5000,
+        period: '2026-06',
+      }),
+    ).toEqual({
       payoutId: 'po',
       driverId: 'd',
       amountCents: 5000,
     });
-    expect(projectAuditPayload('notification.failed', { notificationId: 'n', channel: PII_TEXT, error: PII_TEXT })).toEqual({
+    expect(
+      projectAuditPayload('notification.failed', {
+        notificationId: 'n',
+        channel: PII_TEXT,
+        error: PII_TEXT,
+      }),
+    ).toEqual({
       notificationId: 'n',
     });
   });
 
   it('reason-ENUM (tipado/acotado) SÍ sobrevive — no se rompió lo forense seguro', () => {
     // driver.flagged: reason = flagReasonSchema (review/suspension/reverification)
-    expect(projectAuditPayload('driver.flagged', { driverId: 'd', rollingAvg: 3.9, reason: 'suspension' })).toEqual({
+    expect(
+      projectAuditPayload('driver.flagged', {
+        driverId: 'd',
+        rollingAvg: 3.9,
+        reason: 'suspension',
+      }),
+    ).toEqual({
       driverId: 'd',
       rollingAvg: 3.9,
       reason: 'suspension',
     });
     // dispatch.no_offers: reason = z.enum(window_expired/all_lapsed/no_candidates)
-    expect(projectAuditPayload('dispatch.no_offers', { tripId: 't', reason: 'window_expired' })).toEqual({
+    expect(
+      projectAuditPayload('dispatch.no_offers', { tripId: 't', reason: 'window_expired' }),
+    ).toEqual({
       tripId: 't',
       reason: 'window_expired',
     });
@@ -369,12 +450,42 @@ describe('payload-projection · PII-guard por VALOR (texto libre fuera del allow
       }).reason,
     ).toBe('driver_cancelled');
     // panic.resolved: status = z.enum(RESOLVED/FALSE_ALARM); booking.approved: origen = z.enum
-    expect(projectAuditPayload('panic.resolved', { panicId: 'pn', tripId: 't', passengerId: 'p', status: 'RESOLVED', resolvedBy: 'op', at: 'x' }).status).toBe('RESOLVED');
-    expect(projectAuditPayload('booking.approved', { bookingId: 'b', publishedTripId: 'pt', passengerId: 'p', driverId: 'd', asientos: 1, precioAcordado: 1500, modoReserva: 'INSTANT_BOOKING', estado: 'APROBADO', origen: 'INSTANT_BOOKING' }).origen).toBe('INSTANT_BOOKING');
+    expect(
+      projectAuditPayload('panic.resolved', {
+        panicId: 'pn',
+        tripId: 't',
+        passengerId: 'p',
+        status: 'RESOLVED',
+        resolvedBy: 'op',
+        at: 'x',
+      }).status,
+    ).toBe('RESOLVED');
+    expect(
+      projectAuditPayload('booking.approved', {
+        bookingId: 'b',
+        publishedTripId: 'pt',
+        passengerId: 'p',
+        driverId: 'd',
+        asientos: 1,
+        precioAcordado: 1500,
+        modoReserva: 'INSTANT_BOOKING',
+        estado: 'APROBADO',
+        origen: 'INSTANT_BOOKING',
+      }).origen,
+    ).toBe('INSTANT_BOOKING');
   });
 
   it('los nombres de campo de texto libre están en la denylist (defensa en profundidad)', () => {
-    for (const field of ['note', 'comment', 'description', 'subject', 'text', 'remarks', 'body', 'plate']) {
+    for (const field of [
+      'note',
+      'comment',
+      'description',
+      'subject',
+      'text',
+      'remarks',
+      'body',
+      'plate',
+    ]) {
       expect(isPiiFieldName(field), `${field} debe estar en la denylist de texto libre`).toBe(true);
     }
     // pero los IDs/enum NO caen (no romper messageId con el token 'message', ni reason-enum):
@@ -421,7 +532,9 @@ describe('AuditService.recordSync · PII-guard del carril síncrono (gRPC Record
       },
     };
     // El AuditService solo usa repo.appendEntry en recordSync; el resto de métodos del repo no se tocan acá.
-    const service = new AuditService(repo as unknown as ConstructorParameters<typeof AuditService>[0]);
+    const service = new AuditService(
+      repo as unknown as ConstructorParameters<typeof AuditService>[0],
+    );
     return { service, captured };
   };
 

@@ -70,7 +70,11 @@ describe('extractedData — validación FUERTE en el borde público (Lote 0)', (
     const errors = await errorsFor({
       ...base,
       type: FleetDocumentType.SOAT,
-      extractedData: { type: FleetDocumentType.SOAT, policyNumber: 'POL-77', expiresAt: '2027-12-31' },
+      extractedData: {
+        type: FleetDocumentType.SOAT,
+        policyNumber: 'POL-77',
+        expiresAt: '2027-12-31',
+      },
     });
     expect(errorOn(errors, 'extractedData')).toBeUndefined();
   });
@@ -79,7 +83,11 @@ describe('extractedData — validación FUERTE en el borde público (Lote 0)', (
     const errors = await errorsFor({
       ...base,
       type: FleetDocumentType.PROPERTY_CARD,
-      extractedData: { type: FleetDocumentType.PROPERTY_CARD, plate: 'ABC-123', energySource: 'DIESEL' },
+      extractedData: {
+        type: FleetDocumentType.PROPERTY_CARD,
+        plate: 'ABC-123',
+        energySource: 'DIESEL',
+      },
     });
     expect(errorOn(errors, 'extractedData')).toBeUndefined();
   });

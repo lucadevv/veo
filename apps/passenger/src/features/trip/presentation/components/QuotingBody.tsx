@@ -478,7 +478,10 @@ export function QuotingBody({
             const optionIsPuja = isPujaMode(option.mode ?? quote?.mode);
             const isSelected = option.id === selectedId;
             return (
-              <SelectionBump key={option.id} index={index} selected={isSelected}>
+              <SelectionBump
+                key={option.id}
+                index={index}
+                selected={isSelected}>
                 {optionIsPuja && !isSelected ? (
                   // Per pen qAT2P: la oferta PUJA sin seleccionar se presenta como la card
                   // affordance "Pon tu precio" (no una fila con precio firme que no existe).

@@ -175,7 +175,9 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
               );
             }
           } else {
-            this.logger.debug(`Poll: proveedor no reconoce uid=${uid} (pago=${p.id}); se reintenta luego`);
+            this.logger.debug(
+              `Poll: proveedor no reconoce uid=${uid} (pago=${p.id}); se reintenta luego`,
+            );
           }
           continue;
         }

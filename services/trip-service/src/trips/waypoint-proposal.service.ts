@@ -97,7 +97,11 @@ export class WaypointProposalService {
     if (!this.baseFare) return {};
     try {
       const c = await this.baseFare.getConfig();
-      return { baseFareCents: c.baseFareCents, perKmCents: c.perKmCents, perMinCents: c.perMinCents };
+      return {
+        baseFareCents: c.baseFareCents,
+        perKmCents: c.perKmCents,
+        perMinCents: c.perMinCents,
+      };
     } catch {
       return {};
     }

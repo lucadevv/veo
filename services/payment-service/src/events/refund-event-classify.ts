@@ -78,10 +78,7 @@ export function classifyRefundError(err: unknown): RefundErrorAction {
   // 2) Rechazo del refund que YA dejó un Refund REJECTED persistido → backstop admin (métrica + alerta + return).
   //    UnprocessableEntityError: el gateway rechazó síncrono y `rejectRefundAndCompensate` persistió REJECTED
   //    ANTES de lanzar. GatewayCapabilityUnavailableError: rechazo permanente de capacidad (defensa en profundidad).
-  if (
-    err instanceof UnprocessableEntityError ||
-    err instanceof GatewayCapabilityUnavailableError
-  ) {
+  if (err instanceof UnprocessableEntityError || err instanceof GatewayCapabilityUnavailableError) {
     return 'rejected_settled';
   }
 

@@ -32,7 +32,11 @@ function buildService() {
     },
   };
   const svc = new PaymentsService(
-    prisma as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+    prisma as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { getOrThrow: () => 0 } as never,
   );
   return { svc, created };
 }
@@ -44,8 +48,15 @@ describe('A2 · captureCash acumula la deuda CASH del conductor', () => {
   it('viaje CASH con comisión → crea DriverDebt = commissionCents (PENDING, reason CASH_COMMISSION)', async () => {
     const { svc, created } = buildService();
     await captureCash(svc, {
-      id: 'pay-cash', tripId: 'trip-1', method: 'CASH', driverId: 'drv-1', passengerId: 'pax-1',
-      grossCents: 2000, commissionCents: 400, currency: 'PEN', status: 'PENDING',
+      id: 'pay-cash',
+      tripId: 'trip-1',
+      method: 'CASH',
+      driverId: 'drv-1',
+      passengerId: 'pax-1',
+      grossCents: 2000,
+      commissionCents: 400,
+      currency: 'PEN',
+      status: 'PENDING',
     });
     expect(created).toHaveLength(1);
     expect(created[0]!.amountCents).toBe(400); // = la comisión que el conductor cobró EN MANO
@@ -58,8 +69,14 @@ describe('A2 · captureCash acumula la deuda CASH del conductor', () => {
   it('viaje CASH SIN comisión (carpooling 100% al conductor) → NO acumula deuda', async () => {
     const { svc, created } = buildService();
     await captureCash(svc, {
-      id: 'pay-cp', tripId: 'trip-2', method: 'CASH', driverId: 'drv-1',
-      grossCents: 2000, commissionCents: 0, currency: 'PEN', status: 'PENDING',
+      id: 'pay-cp',
+      tripId: 'trip-2',
+      method: 'CASH',
+      driverId: 'drv-1',
+      grossCents: 2000,
+      commissionCents: 0,
+      currency: 'PEN',
+      status: 'PENDING',
     });
     expect(created).toHaveLength(0);
   });
@@ -71,7 +88,11 @@ describe('A2 · captureCash acumula la deuda CASH del conductor', () => {
  */
 function svcOnly(): PaymentsService {
   return new PaymentsService(
-    {} as never, {} as never, {} as never, {} as never, { getOrThrow: () => 0 } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { getOrThrow: () => 0 } as never,
   );
 }
 function debtTx(debt: Row | null) {
@@ -95,9 +116,11 @@ function debtTx(debt: Row | null) {
   return { tx, updates, credits };
 }
 const reverse = (svc: PaymentsService, tx: unknown, pid: string, amt: number, gross: number) =>
-  (svc as unknown as {
-    reverseCashDebtInTx: (tx: unknown, pid: string, amt: number, gross: number) => Promise<void>;
-  }).reverseCashDebtInTx(tx, pid, amt, gross);
+  (
+    svc as unknown as {
+      reverseCashDebtInTx: (tx: unknown, pid: string, amt: number, gross: number) => Promise<void>;
+    }
+  ).reverseCashDebtInTx(tx, pid, amt, gross);
 
 describe('A2 · refund CASH revierte la deuda de comisión (proporcional al bruto)', () => {
   it('full refund → deuda REVERSED (el conductor ya no debe la comisión del viaje revertido)', async () => {

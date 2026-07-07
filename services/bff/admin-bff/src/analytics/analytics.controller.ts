@@ -32,7 +32,8 @@ export class AnalyticsController {
 
   @Get('revenue')
   @ApiOperation({
-    summary: 'Métricas de revenue por rango (today/7d/30d): money-in, comisión bruta, reembolsos, margen + serie',
+    summary:
+      'Métricas de revenue por rango (today/7d/30d): money-in, comisión bruta, reembolsos, margen + serie',
   })
   revenue(
     @CurrentUser() user: AuthenticatedUser,

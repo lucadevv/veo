@@ -21,9 +21,7 @@ export function offeringFloorOverrideCents(
   bidFloor: Pick<BidFloorView, 'overrides'>,
   offeringId: string,
 ): number | null {
-  const ov = bidFloor.overrides.find(
-    (o) => o.zone === GLOBAL_ZONE && o.offeringId === offeringId,
-  );
+  const ov = bidFloor.overrides.find((o) => o.zone === GLOBAL_ZONE && o.offeringId === offeringId);
   return ov ? ov.floorCents : null;
 }
 

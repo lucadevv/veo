@@ -24,10 +24,7 @@ export interface UseAutocompleteResult {
  * Query. No llama al bff hasta que la consulta alcanza la longitud mínima (regla aplicada también en el
  * caso de uso). Espejo EXACTO del hook del pasajero, adaptado al DI del conductor.
  */
-export function useAutocomplete(
-  query: string,
-  near?: MapPoint | null,
-): UseAutocompleteResult {
+export function useAutocomplete(query: string, near?: MapPoint | null): UseAutocompleteResult {
   const { maps } = useRepositories();
   const [debounced, setDebounced] = useState(query);
 

@@ -5,7 +5,14 @@ import type {
   TripResource,
 } from '@veo/api-client';
 import {tripStatus} from '@veo/api-client';
-import {IconButton, SearchField, Skeleton, Text, TextField, useTheme} from '@veo/ui-kit';
+import {
+  IconButton,
+  SearchField,
+  Skeleton,
+  Text,
+  TextField,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {Pressable, StyleSheet, View} from 'react-native';
@@ -17,7 +24,12 @@ import {DebtStrip} from '../components/DebtStrip';
 import {HomeHero} from '../components/HomeHero';
 import {HomeShortcutChips} from '../components/HomeShortcutChips';
 import {ModeToggle, TripTimeMode} from '../components/ModeToggle';
-import {IconArrowLeft, IconClose, IconMap, IconSearch} from '../components/icons';
+import {
+  IconArrowLeft,
+  IconClose,
+  IconMap,
+  IconSearch,
+} from '../components/icons';
 import {IdleBody} from '../components/IdleBody';
 import {LastDriverCard} from '../components/LastDriverCard';
 import {EnterView} from '../components/motion';

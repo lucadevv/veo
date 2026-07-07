@@ -87,7 +87,9 @@ describe('PaymentsService.charge · tarifa server-authoritative', () => {
 
   it('404 si el viaje es de OTRO pasajero (anti-IDOR: no cobra)', async () => {
     const { svc, post } = makeService({ found: true, passengerId: 'otro', fareCents: 2000 });
-    await expect(svc.charge(user, dto({ grossCents: 1 }))).rejects.toMatchObject({ httpStatus: 404 });
+    await expect(svc.charge(user, dto({ grossCents: 1 }))).rejects.toMatchObject({
+      httpStatus: 404,
+    });
     expect(post).not.toHaveBeenCalled();
   });
 

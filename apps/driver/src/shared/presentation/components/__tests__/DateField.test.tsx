@@ -1,9 +1,7 @@
 import React, { type ReactElement } from 'react';
 import { Platform, Text as RNText } from 'react-native';
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
-import DateTimePicker, {
-  DateTimePickerAndroid,
-} from '@react-native-community/datetimepicker';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import TestRenderer, { act } from 'react-test-renderer';
 import { ThemeProvider, driverTheme } from '@veo/ui-kit';
 import '../../../../i18n';

@@ -41,8 +41,12 @@ describe('computeChargeAmounts · ON_DEMAND — comisión DESCONTADA al conducto
 
   it('rechaza montos no enteros o negativos', () => {
     expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, -1, 0, 0.2)).toThrow(InvalidStateError);
-    expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, 100.5, 0, 0.2)).toThrow(InvalidStateError);
-    expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, 100, -5, 0.2)).toThrow(InvalidStateError);
+    expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, 100.5, 0, 0.2)).toThrow(
+      InvalidStateError,
+    );
+    expect(() => computeChargeAmounts(ChargeMode.ON_DEMAND, 100, -5, 0.2)).toThrow(
+      InvalidStateError,
+    );
   });
 });
 

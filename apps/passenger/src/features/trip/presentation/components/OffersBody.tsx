@@ -317,10 +317,7 @@ function OfferCard({
         </View>
         <View style={{alignItems: 'flex-end', gap: theme.spacing.xs}}>
           {/* Tono del precio per pen C/BidCard: verde si acepta TU precio, warn si propone otro. */}
-          <Text
-            variant="title3"
-            color={acceptsPrice ? 'safe' : 'warn'}
-            tabular>
+          <Text variant="title3" color={acceptsPrice ? 'safe' : 'warn'} tabular>
             {formatPEN(offer.priceCents)}
           </Text>
           <Button
@@ -339,7 +336,11 @@ function OfferCard({
 
 const styles = StyleSheet.create({
   header: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
-  yourOffer: {flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start'},
+  yourOffer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
   takingLong: {alignItems: 'center', gap: 8},
   row: {flexDirection: 'row', alignItems: 'center', gap: 12},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},

@@ -75,7 +75,9 @@ function extractOtpCode(message: string): string {
   const match = OTP_CODE_PATTERN.exec(message);
   const code = match?.[1];
   if (!code) {
-    throw new ValidationError('No se pudo extraer el código OTP del mensaje para notification-service');
+    throw new ValidationError(
+      'No se pudo extraer el código OTP del mensaje para notification-service',
+    );
   }
   return code;
 }
@@ -132,7 +134,8 @@ export class NotificationSmsSender implements SmsSender {
       //  - resto (5xx/4xx) → ExternalServiceError (502, fallo del riel downstream).
       if (err instanceof DownstreamError) {
         const details = { to: maskPhone(to), status: err.status, code: err.code };
-        if (err.status === 429) throw new RateLimitError('notification-service rate-limited el OTP', details);
+        if (err.status === 429)
+          throw new RateLimitError('notification-service rate-limited el OTP', details);
         throw new ExternalServiceError('notification-service rechazó el OTP', details);
       }
       // Fallo de red/timeout (AbortError) u otro: degradar honesto (502 reintentable) en vez de 500 opaco.

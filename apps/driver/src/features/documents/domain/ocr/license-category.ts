@@ -172,10 +172,7 @@ export function combineClassAndCategory(
  * palabra) se usa `combineClassAndCategory`. Si no matchea una categoría conocida, devuelve `null`.
  */
 export function normalizeLicenseCategory(raw: string): LicenseCategory | null {
-  const compact = raw
-    .toUpperCase()
-    .replace(/\s+/g, '')
-    .replace(/[-_.]/g, '');
+  const compact = raw.toUpperCase().replace(/\s+/g, '').replace(/[-_.]/g, '');
   // Letra de clase (A/B) seguida del cuerpo romano (I/V) con sub-letra opcional. Convierte los árabes que
   // el OCR a veces produce (2→II, 3→III). El orden importa: alternativas MÁS LARGAS primero. Se admite la
   // sub-letra C en el cuerpo `II` (`B-IIc` existe en clase B; el filtro final por catálogo descarta lo inválido).

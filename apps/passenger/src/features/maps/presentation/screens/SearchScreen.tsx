@@ -83,10 +83,7 @@ function recentDestinations(
  * Distancia legible desde la ubicación actual hasta un punto ("3.1 km", pen P/Search), o `null`
  * sin fix de GPS — degradación honesta: la fila simplemente no muestra distancia, no inventa una.
  */
-function distanceLabel(
-  from: GeoPoint | null,
-  to: GeoPoint,
-): string | null {
+function distanceLabel(from: GeoPoint | null, to: GeoPoint): string | null {
   return from ? formatDistance(distanceMeters(from, to)) : null;
 }
 

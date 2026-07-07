@@ -1620,7 +1620,10 @@ export class PaymentsService {
     // parte del viaje que se mantuvo. grossCents>0 siempre (un cobro con deuda tuvo bruto); cap a la deuda.
     const reversedCents =
       grossCents > 0
-        ? Math.min(debt.amountCents, Math.round((debt.amountCents * refundAmountCents) / grossCents))
+        ? Math.min(
+            debt.amountCents,
+            Math.round((debt.amountCents * refundAmountCents) / grossCents),
+          )
         : debt.amountCents;
     if (reversedCents <= 0) return;
 

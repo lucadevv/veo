@@ -20,7 +20,11 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { anonymousIdentity } from '@veo/auth';
 import { InternalRestClient } from '@veo/rpc';
-import { operableVehicleClasses, OPERABLE_VEHICLE_CLASSES, type VehicleClass } from '@veo/shared-types';
+import {
+  operableVehicleClasses,
+  OPERABLE_VEHICLE_CLASSES,
+  type VehicleClass,
+} from '@veo/shared-types';
 import { TRIP_REST } from '../infra/downstream.tokens';
 import { bumpCatalogDegraded } from './fleet-catalog-metrics';
 

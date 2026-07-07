@@ -73,9 +73,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
     const prisma = {
       read: {
         mediaSegment: {
-          findMany: async (
-            args: FindManyArgs,
-          ): Promise<Pick<Seg, 'id' | 's3Key' | 'tripId'>[]> => {
+          findMany: async (args: FindManyArgs): Promise<Pick<Seg, 'id' | 's3Key' | 'tripId'>[]> => {
             findManyCalls.push(args);
             const due = live()
               .filter(
@@ -302,9 +300,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
   it('borra la copia HUÉRFANA de un segmento barrido (renderedS3Key=null) por clave COMPUTADA (PII)', async () => {
     const now = new Date('2026-06-15T00:00:00.000Z');
     const retentionUntil = new Date('2026-06-01T00:00:00.000Z');
-    const segments: Seg[] = [
-      { id: 'seg-1', s3Key: 'recordings/t/seg-1.mp4', retentionUntil },
-    ];
+    const segments: Seg[] = [{ id: 'seg-1', s3Key: 'recordings/t/seg-1.mp4', retentionUntil }];
     // Solicitud cuyo render subió la copia pero la tx de READY falló → renderedS3Key quedó null en DB.
     // La copia con PII sigue en el storage bajo la clave determinista; DEBE borrarse igual (Ley 29733).
     const rendered = [{ segmentId: 'seg-1', id: 'req-orphan' }];

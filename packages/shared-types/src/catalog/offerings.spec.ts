@@ -303,11 +303,7 @@ describe('isEligibleForOffering (B5-3.2 · vehículo ∧ conductor)', () => {
 });
 
 describe('verticales especiales (B5-4 · codeadas pero OCULTAS)', () => {
-  const HIDDEN = [
-    OfferingId.VEO_AMBULANCE,
-    OfferingId.VEO_TOW,
-    OfferingId.VEO_MECHANIC,
-  ];
+  const HIDDEN = [OfferingId.VEO_AMBULANCE, OfferingId.VEO_TOW, OfferingId.VEO_MECHANIC];
 
   it('sin overlay, el quote (activeOfferings) muestra SOLO las 4 RIDE de AUTO, NO moto ni verticales', () => {
     // Ola 1 "solo autos": la moto (Ola 2B) está DIFERIDA (defaultEnabled:false) → fuera del quote por

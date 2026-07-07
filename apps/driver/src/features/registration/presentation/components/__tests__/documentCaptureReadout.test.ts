@@ -61,7 +61,9 @@ describe('documentCaptureReadout · "Capturado ✓" + gating del campo crítico'
 
   it('campo crítico FALTANTE (licencia sin número) → reescaneo', () => {
     const parsed: ParsedDocument = { kind: 'license', expiresAt: '2028-06-30' };
-    expect(isCriticalFieldMissing(FleetDocumentType.LICENSE_A1, readoutFromParsed(parsed))).toBe(true);
+    expect(isCriticalFieldMissing(FleetDocumentType.LICENSE_A1, readoutFromParsed(parsed))).toBe(
+      true,
+    );
   });
 
   it('sin readout (escaneo sin texto OCR) → falta el crítico de un tipo numerado', () => {

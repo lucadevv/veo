@@ -153,32 +153,26 @@ export class MapsService {
     // Ola 2B · paradas múltiples: la ruta (y por tanto distancia/duración/tarifa) pasa por las paradas.
     const waypoints = (dto.waypoints ?? []).map((w) => ({ lat: w.lat, lon: w.lng }));
     // La ruta, el modo, el crédito y el catálogo activo son independientes → en paralelo.
-    const [
-      route,
-      scheduledMode,
-      creditBalanceCents,
-      effective,
-      bidFloorConfig,
-      fareBase,
-    ] = await Promise.all([
-      this.maps.route(origin, destination, waypoints),
-      // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
-      // RECOJO, no la actual: el preview muestra la política de la hora a la que VA a viajar el pasajero.
-      this.resolveMode(dto.origin.lat, dto.origin.lng, identity, dto.scheduledFor),
-      // Lote C3 · saldo de crédito de referido para el PREVIEW (server-side, §INTEGRACIONES). 0 si anónimo/
-      // sin cliente/error (no rompe el quote: el crédito es secundario a la ruta).
-      this.fetchCreditBalance(identity),
-      // B2 · catálogo EFECTIVO del admin (habilitadas + pricing + pin de modo). `null` = no disponible →
-      // cotizamos TODAS con pricing/modo de CÓDIGO (degradación honesta, como el modo degrada a PUJA).
-      this.fetchEffectiveCatalog(identity),
-      // ADR 010 §9.3 · config del piso de la PUJA per-(zona, oferta) para el DISPLAY del quote. Degradación
-      // honesta: trip-service caído → DEFAULT_BID_FLOOR_CONFIG (piso S/7). El autoritativo lo re-resuelve
-      // trip-service en createTrip — acá es solo el piso que la app MUESTRA en "proponé tu precio".
-      this.fetchBidFloorConfig(identity),
-      // F2.4 · banderazo/km/min vigentes (admin). Degradación honesta: trip-service caído → constantes de
-      // código (= el seed) → el preview no diverge del cobro en el caso común.
-      this.fetchBaseFare(identity),
-    ]);
+    const [route, scheduledMode, creditBalanceCents, effective, bidFloorConfig, fareBase] =
+      await Promise.all([
+        this.maps.route(origin, destination, waypoints),
+        // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
+        // RECOJO, no la actual: el preview muestra la política de la hora a la que VA a viajar el pasajero.
+        this.resolveMode(dto.origin.lat, dto.origin.lng, identity, dto.scheduledFor),
+        // Lote C3 · saldo de crédito de referido para el PREVIEW (server-side, §INTEGRACIONES). 0 si anónimo/
+        // sin cliente/error (no rompe el quote: el crédito es secundario a la ruta).
+        this.fetchCreditBalance(identity),
+        // B2 · catálogo EFECTIVO del admin (habilitadas + pricing + pin de modo). `null` = no disponible →
+        // cotizamos TODAS con pricing/modo de CÓDIGO (degradación honesta, como el modo degrada a PUJA).
+        this.fetchEffectiveCatalog(identity),
+        // ADR 010 §9.3 · config del piso de la PUJA per-(zona, oferta) para el DISPLAY del quote. Degradación
+        // honesta: trip-service caído → DEFAULT_BID_FLOOR_CONFIG (piso S/7). El autoritativo lo re-resuelve
+        // trip-service en createTrip — acá es solo el piso que la app MUESTRA en "proponé tu precio".
+        this.fetchBidFloorConfig(identity),
+        // F2.4 · banderazo/km/min vigentes (admin). Degradación honesta: trip-service caído → constantes de
+        // código (= el seed) → el preview no diverge del cobro en el caso común.
+        this.fetchBaseFare(identity),
+      ]);
 
     // ADR 013 §1.3 · el `mode` top-level = el modo de la oferta ANCLA (VEO Económico). B2: respeta su pin
     // de modo efectivo si el admin lo configuró. Sin pin/catálogo caído → schedule ∩ oferta (como antes).
@@ -309,7 +303,9 @@ export class MapsService {
         !Number.isFinite(reply.perKmCents) ||
         !Number.isFinite(reply.perMinCents)
       ) {
-        this.logger.warn('tarifa base con shape inválido; preview con tarifa base de código (F2.4)');
+        this.logger.warn(
+          'tarifa base con shape inválido; preview con tarifa base de código (F2.4)',
+        );
         return DEFAULT_FARE_BASE;
       }
       return {

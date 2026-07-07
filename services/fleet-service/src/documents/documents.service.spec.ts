@@ -89,29 +89,26 @@ function makeService(
     });
   const docFindMany = vi
     .fn()
-    .mockImplementation(
-      ({ take, where }: { take?: number; where?: Record<string, unknown> }) => {
-        let rows = sortRows(opts.expirationRows ?? []);
-        // El keyset llega anidado en where.AND[1].OR cuando hay cursor (ver listExpirations).
-        const and = where?.AND as Array<Record<string, unknown>> | undefined;
-        const orClause = and?.[1]?.OR as
-          | Array<{ expiresAt?: { gt?: Date } | Date; id?: { gt?: string } }>
-          | undefined;
-        if (orClause) {
-          const gt = orClause[0]?.expiresAt as { gt?: Date } | undefined;
-          const eqAt = orClause[1]?.expiresAt as Date | undefined;
-          const idGt = orClause[1]?.id as { gt?: string } | undefined;
-          rows = rows.filter((r) => {
-            const t = r.expiresAt ? r.expiresAt.getTime() : 0;
-            const afterDate = gt?.gt ? t > gt.gt.getTime() : false;
-            const sameDateAfterId =
-              eqAt && idGt?.gt ? t === eqAt.getTime() && r.id > idGt.gt : false;
-            return afterDate || sameDateAfterId;
-          });
-        }
-        return Promise.resolve(typeof take === 'number' ? rows.slice(0, take) : rows);
-      },
-    );
+    .mockImplementation(({ take, where }: { take?: number; where?: Record<string, unknown> }) => {
+      let rows = sortRows(opts.expirationRows ?? []);
+      // El keyset llega anidado en where.AND[1].OR cuando hay cursor (ver listExpirations).
+      const and = where?.AND as Array<Record<string, unknown>> | undefined;
+      const orClause = and?.[1]?.OR as
+        | Array<{ expiresAt?: { gt?: Date } | Date; id?: { gt?: string } }>
+        | undefined;
+      if (orClause) {
+        const gt = orClause[0]?.expiresAt as { gt?: Date } | undefined;
+        const eqAt = orClause[1]?.expiresAt as Date | undefined;
+        const idGt = orClause[1]?.id as { gt?: string } | undefined;
+        rows = rows.filter((r) => {
+          const t = r.expiresAt ? r.expiresAt.getTime() : 0;
+          const afterDate = gt?.gt ? t > gt.gt.getTime() : false;
+          const sameDateAfterId = eqAt && idGt?.gt ? t === eqAt.getTime() && r.id > idGt.gt : false;
+          return afterDate || sameDateAfterId;
+        });
+      }
+      return Promise.resolve(typeof take === 'number' ? rows.slice(0, take) : rows);
+    });
 
   // Sub-lote 3A: el create persiste el doc + sus N DocumentImage en una transacción. El doble de `tx`
   // captura las imágenes creadas (createMany) y las devuelve por findMany(order asc) — emula la lectura
@@ -150,19 +147,18 @@ function makeService(
     imagesCreated.data = [];
     return Promise.resolve({ count: 0 });
   });
-  const txUpdate = vi.fn((args: { where: Record<string, unknown>; data: Record<string, unknown> }) =>
-    docUpdate(args),
+  const txUpdate = vi.fn(
+    (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => docUpdate(args),
   );
-  const $transaction = vi.fn(
-    (fn: (tx: Record<string, unknown>) => Promise<unknown>) =>
-      fn({
-        fleetDocument: { create: txCreate, update: txUpdate },
-        documentImage: {
-          createMany: imageCreateMany,
-          findMany: imageFindMany,
-          deleteMany: imageDeleteMany,
-        },
-      }),
+  const $transaction = vi.fn((fn: (tx: Record<string, unknown>) => Promise<unknown>) =>
+    fn({
+      fleetDocument: { create: txCreate, update: txUpdate },
+      documentImage: {
+        createMany: imageCreateMany,
+        findMany: imageFindMany,
+        deleteMany: imageDeleteMany,
+      },
+    }),
   );
 
   // El chequeo de duplicado (dedup) lee del PRIMARY (`write`) por read-your-writes (replica-lag): por eso
@@ -223,7 +219,10 @@ describe('DocumentsService.create · anti-IDOR DRIVER', () => {
   it('RECHAZA: identidad de conductor SIN driverId firmado (BFF antiguo) → fail-closed', async () => {
     const { service, docCreate } = makeService();
     await expect(
-      service.create({ ...driverDoc, ownerId: 'driver-profile-1' }, driverIdentity({ driverId: undefined })),
+      service.create(
+        { ...driverDoc, ownerId: 'driver-profile-1' },
+        driverIdentity({ driverId: undefined }),
+      ),
     ).rejects.toBeInstanceOf(ForbiddenError);
     expect(docCreate).not.toHaveBeenCalled();
   });
@@ -254,8 +253,14 @@ describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => 
         ...driverDoc,
         ownerId: 'driver-profile-1',
         images: [
-          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/back.jpg', side: DocumentSide.BACK },
-          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/front.jpg', side: DocumentSide.FRONT },
+          {
+            s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/back.jpg',
+            side: DocumentSide.BACK,
+          },
+          {
+            s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/front.jpg',
+            side: DocumentSide.FRONT,
+          },
         ],
       },
       driverIdentity({ driverId: 'driver-profile-1' }),
@@ -275,7 +280,9 @@ describe('DocumentsService.create · múltiples imágenes (sub-lote 3A)', () => 
   });
 
   it('N fotos SINGLE (foto de vehículo): persiste N DocumentImage con order 0..N-1', async () => {
-    const { service, imagesCreated } = makeService({ vehicle: { id: 'veh-1', driverId: 'user-1' } });
+    const { service, imagesCreated } = makeService({
+      vehicle: { id: 'veh-1', driverId: 'user-1' },
+    });
 
     await service.create(
       {
@@ -465,9 +472,7 @@ describe('DocumentsService.create · UPSERT ACOTADO por status (no des-verificar
     // El contenido se reemplazó; sigue PENDING_REVIEW (no estaba aprobado, así que el reset es no-op).
     expect(updated.data?.status).toBe(FleetDocumentStatus.PENDING_REVIEW);
     expect(updated.data?.documentNumber).toBe('A1-NUEVO');
-    expect(updated.data?.fileS3Key).toBe(
-      'drivers/driver-profile-1/documents/LICENSE_A1/nuevo.jpg',
-    );
+    expect(updated.data?.fileS3Key).toBe('drivers/driver-profile-1/documents/LICENSE_A1/nuevo.jpg');
   });
 
   it('(b) CON doc VALID (aprobado) → ConflictError 409, NO des-verifica (NO update, verifiedAt/verifiedBy intactos)', async () => {
@@ -525,8 +530,14 @@ describe('DocumentsService.create · UPSERT ACOTADO por status (no des-verificar
         ...driverDoc,
         ownerId: 'driver-profile-1',
         images: [
-          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/r1.jpg', side: DocumentSide.SINGLE },
-          { s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/r2.jpg', side: DocumentSide.SINGLE },
+          {
+            s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/r1.jpg',
+            side: DocumentSide.SINGLE,
+          },
+          {
+            s3Key: 'drivers/driver-profile-1/documents/LICENSE_A1/r2.jpg',
+            side: DocumentSide.SINGLE,
+          },
         ],
       },
       driverIdentity({ driverId: 'driver-profile-1' }),

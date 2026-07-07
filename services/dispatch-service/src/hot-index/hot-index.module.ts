@@ -32,7 +32,10 @@ const suspensionProvider: Provider = {
   provide: SUSPENSION_REGISTRY,
   inject: [REDIS, ConfigService],
   useFactory: (redis: Redis, config: ConfigService<Env, true>) =>
-    new RedisTtlExclusionRegistry(redis, config.getOrThrow<number>('SUSPENSION_EXCLUSION_TTL_SECONDS')),
+    new RedisTtlExclusionRegistry(
+      redis,
+      config.getOrThrow<number>('SUSPENSION_EXCLUSION_TTL_SECONDS'),
+    ),
 };
 
 @Global()

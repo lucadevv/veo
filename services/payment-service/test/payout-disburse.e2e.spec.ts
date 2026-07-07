@@ -109,7 +109,9 @@ class PartiallyTransientGateway implements PayoutGateway, PayoutStatusQuery {
   }
   async disburse(req: DisburseRequest): Promise<DisburseResult> {
     if (this.transientFor.has(req.amountCents)) {
-      throw new ExternalServiceError(`sandbox: transitorio determinista para monto ${req.amountCents}`);
+      throw new ExternalServiceError(
+        `sandbox: transitorio determinista para monto ${req.amountCents}`,
+      );
     }
     return this.inner.disburse(req);
   }
@@ -148,10 +150,7 @@ const operatorFreshMfa: AuthenticatedUser = {
 const operatorNoMfa = { userId: 'op-1', roles: ['FINANCE'] } as AuthenticatedUser;
 
 /** Crea un Payout PENDING directo (simula lo que dejó el cron) + opcionalmente un incentivo ligado. */
-async function seedPendingPayout(
-  driverId: string,
-  amountCents: number,
-): Promise<string> {
+async function seedPendingPayout(driverId: string, amountCents: number): Promise<string> {
   const id = uuidv7();
   await prisma.payout.create({
     data: {
@@ -170,7 +169,11 @@ async function seedPendingPayout(
 }
 
 /** Liga un incentivo COMPLETADO no-pagado al payout (paidInPayoutId set, paidAt NULL — como deja el cron). */
-async function seedLinkedIncentive(driverId: string, payoutId: string, rewardCents: number): Promise<string> {
+async function seedLinkedIncentive(
+  driverId: string,
+  payoutId: string,
+  rewardCents: number,
+): Promise<string> {
   const incentiveId = uuidv7();
   await prisma.incentive.create({
     data: {
@@ -296,7 +299,9 @@ describe('ADR-015 2b · confirmación PROCESSING→PROCESSED|FAILED (espejo appl
     const payout = await prisma.payout.findUniqueOrThrow({ where: { id: payoutId } });
     expect(payout.status).toBe('PROCESSED');
     expect(payout.processedAt).toBeInstanceOf(Date);
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).not.toBeNull(); // el bono se marca RECIÉN al confirmar (§3/§D5)
     expect(await eventTypes(payoutId)).toEqual(['payout.processing', 'payout.processed']);
   });
@@ -317,7 +322,9 @@ describe('ADR-015 2b · confirmación PROCESSING→PROCESSED|FAILED (espejo appl
     const dup = await svc.applyPayoutDisbursementResult({ payoutId, resolution: 'CONFIRMED' });
 
     expect(dup).toEqual({ applied: false, status: 'PROCESSED' }); // §8: redelivery no-op
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).toEqual(firstPaidAt); // mismo timestamp: no re-marcado
     expect(await eventTypes(payoutId)).toEqual(['payout.processing', 'payout.processed']); // un solo processed
   });
@@ -336,7 +343,9 @@ describe('ADR-015 2b · confirmación PROCESSING→PROCESSED|FAILED (espejo appl
     expect(summary.dispatched).toBe(0);
     const payout = await prisma.payout.findUniqueOrThrow({ where: { id: payoutId } });
     expect(payout.status).toBe('FAILED');
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).toBeNull(); // la plata no salió → el bono NO se marca pagado
     expect(await eventTypes(payoutId)).toEqual(['payout.processing', 'payout.failed']);
   });
@@ -387,7 +396,11 @@ describe('ADR-015 2b · poll fallback cierra el ciclo async (espejo PaymentPollS
 
     // El poll consulta el sandbox (CONFIRMED) y aplica por el camino idempotente.
     const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-    const scheduler = { addInterval: () => {}, deleteInterval: () => {}, doesExist: () => false } as never;
+    const scheduler = {
+      addInterval: () => {},
+      deleteInterval: () => {},
+      doesExist: () => false,
+    } as never;
     const poll = new PayoutPollService(
       prismaService,
       redis as never,
@@ -403,7 +416,9 @@ describe('ADR-015 2b · poll fallback cierra el ciclo async (espejo PaymentPollS
     expect(out.applied).toBe(1);
     const payout = await prisma.payout.findUniqueOrThrow({ where: { id: payoutId } });
     expect(payout.status).toBe('PROCESSED');
-    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({
+      where: { id: progressId },
+    });
     expect(progress.paidAt).not.toBeNull(); // el poll cerró el ciclo: el bono se marcó al confirmar
   });
 });
@@ -427,10 +442,14 @@ describe('FIX 1 · retryPayout SOLO desde FAILED (cierra la doble-transferencia)
       const { svc, gateway } = makeService(redis);
       const spy = vi.spyOn(gateway, 'disburse');
 
-      await expect(svc.retryPayout(payoutId, operatorFreshMfa)).rejects.toBeInstanceOf(ConflictError);
+      await expect(svc.retryPayout(payoutId, operatorFreshMfa)).rejects.toBeInstanceOf(
+        ConflictError,
+      );
       expect(spy).not.toHaveBeenCalled(); // el riel NO se invocó: no hay segunda transferencia
       // El estado no cambió por el reintento rechazado.
-      expect((await prisma.payout.findUniqueOrThrow({ where: { id: payoutId } })).status).toBe(status);
+      expect((await prisma.payout.findUniqueOrThrow({ where: { id: payoutId } })).status).toBe(
+        status,
+      );
     },
   );
 });
@@ -455,8 +474,19 @@ describe('FIX 2 · el poll reconcilia un PROCESSING HUÉRFANO (dedupKey sin exte
     });
 
     const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-    const scheduler = { addInterval: () => {}, deleteInterval: () => {}, doesExist: () => false } as never;
-    const poll = new PayoutPollService(prismaService, redis as never, gateway, svc, scheduler, makeConfig());
+    const scheduler = {
+      addInterval: () => {},
+      deleteInterval: () => {},
+      doesExist: () => false,
+    } as never;
+    const poll = new PayoutPollService(
+      prismaService,
+      redis as never,
+      gateway,
+      svc,
+      scheduler,
+      makeConfig(),
+    );
     (poll as unknown as { running: boolean }).running = true;
     const out = await poll.pollOnce();
 
@@ -535,8 +565,12 @@ describe('FIX 4 · releaseHeldPayouts no deja al conductor flaggeado-para-siempr
     // CRÍTICO: el conductor quedó DES-flaggeado pese al transitorio (antes quedaba flaggeado para siempre).
     expect(flagged.has(driverId)).toBe(false);
     // Ambos HELD se movieron a PROCESSING (el transitorio incluido: su plata ya está en el riel/poll).
-    expect((await prisma.payout.findUniqueOrThrow({ where: { id: h1 } })).status).toBe('PROCESSING');
-    expect((await prisma.payout.findUniqueOrThrow({ where: { id: h2 } })).status).toBe('PROCESSING');
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: h1 } })).status).toBe(
+      'PROCESSING',
+    );
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: h2 } })).status).toBe(
+      'PROCESSING',
+    );
   });
 });
 
@@ -668,7 +702,9 @@ describe('ALTA · gate pre-claim: riel money-OUT no disponible (ADR-015 §8 · c
     );
 
     expect(gateway.disburse).not.toHaveBeenCalled();
-    expect((await prisma.payout.findUniqueOrThrow({ where: { id: failedId } })).status).toBe('FAILED');
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: failedId } })).status).toBe(
+      'FAILED',
+    );
   });
 
   it('sandbox (isAvailable=true): el flujo corre IGUAL — regresión, el gate no afecta dev/test', async () => {

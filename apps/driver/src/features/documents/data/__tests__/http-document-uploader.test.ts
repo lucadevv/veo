@@ -1,9 +1,6 @@
 import type { HttpClient } from '@veo/api-client';
 import { DocumentSide } from '@veo/shared-types';
-import {
-  type DocumentSideFile,
-  DocumentUploadError,
-} from '../../domain/ports/document-uploader';
+import { type DocumentSideFile, DocumentUploadError } from '../../domain/ports/document-uploader';
 import type { PickedImage } from '../../domain/ports/image-picker-service';
 import { HttpDocumentUploader } from '../uploaders/http-document-uploader';
 
@@ -73,11 +70,17 @@ describe('HttpDocumentUploader', () => {
       expect.objectContaining({ method: 'PUT', headers: SINGLE_TICKET.requiredHeaders }),
     );
     // 4) Devuelve las imágenes subidas (key + cara) para que el caso de uso registre el documento.
-    expect(result).toEqual({ images: [{ s3Key: SINGLE_TICKET.fileS3Key, side: DocumentSide.SINGLE }] });
+    expect(result).toEqual({
+      images: [{ s3Key: SINGLE_TICKET.fileS3Key, side: DocumentSide.SINGLE }],
+    });
   });
 
   it('DNI: presign con sides [FRONT, BACK] → sube cada cara emparejando ticket↔archivo por side', async () => {
-    const front: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,FRONT', fileName: 'front.jpg' };
+    const front: PickedImage = {
+      ...FILE,
+      uri: 'data:image/jpeg;base64,FRONT',
+      fileName: 'front.jpg',
+    };
     const back: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,BACK', fileName: 'back.jpg' };
     const dniSides: DocumentSideFile[] = [
       { side: DocumentSide.FRONT, file: front },
@@ -154,7 +157,12 @@ describe('HttpDocumentUploader', () => {
       .fn()
       .mockResolvedValueOnce(localReadOk())
       .mockResolvedValueOnce({ ok: true, status: 200 } as Response);
-    const pdf: PickedImage = { ...FILE, mimeType: null, fileName: 'tarjeta.PDF', uri: 'file:///x.PDF' };
+    const pdf: PickedImage = {
+      ...FILE,
+      mimeType: null,
+      fileName: 'tarjeta.PDF',
+      uri: 'file:///x.PDF',
+    };
 
     await new HttpDocumentUploader(httpStub(post), fetchImpl as unknown as typeof fetch).upload(
       'PROPERTY_CARD',
@@ -164,7 +172,11 @@ describe('HttpDocumentUploader', () => {
     expect(post).toHaveBeenCalledWith(
       '/drivers/me/documents/presign',
       expect.objectContaining({
-        body: { type: 'PROPERTY_CARD', contentType: 'application/pdf', sides: [DocumentSide.SINGLE] },
+        body: {
+          type: 'PROPERTY_CARD',
+          contentType: 'application/pdf',
+          sides: [DocumentSide.SINGLE],
+        },
       }),
     );
   });
@@ -172,7 +184,12 @@ describe('HttpDocumentUploader', () => {
   it('falla con `unsupported-type` ANTES del presign si el formato no está en la allowlist', async () => {
     const post = jest.fn(async () => SINGLE_RESPONSE);
     const fetchImpl = jest.fn();
-    const gif: PickedImage = { ...FILE, mimeType: 'image/gif', fileName: 'x.gif', uri: 'file:///x.gif' };
+    const gif: PickedImage = {
+      ...FILE,
+      mimeType: 'image/gif',
+      fileName: 'x.gif',
+      uri: 'file:///x.gif',
+    };
 
     await expect(
       new HttpDocumentUploader(httpStub(post), fetchImpl as unknown as typeof fetch).upload(
@@ -244,7 +261,11 @@ describe('HttpDocumentUploader', () => {
   });
 
   it('reporta la fase POR CARA (sending→sent por cada cara) vía onSidePhase en el happy path del DNI', async () => {
-    const front: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,FRONT', fileName: 'front.jpg' };
+    const front: PickedImage = {
+      ...FILE,
+      uri: 'data:image/jpeg;base64,FRONT',
+      fileName: 'front.jpg',
+    };
     const back: PickedImage = { ...FILE, uri: 'data:image/jpeg;base64,BACK', fileName: 'back.jpg' };
     const dniSides: DocumentSideFile[] = [
       { side: DocumentSide.FRONT, file: front },

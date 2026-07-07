@@ -216,7 +216,10 @@ export class DriversController {
   @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('biometric/enroll')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor con UNA selfie (KYC selfie-only, sin liveness)' })
+  @ApiOperation({
+    summary:
+      'Enrolar el rostro de referencia del conductor con UNA selfie (KYC selfie-only, sin liveness)',
+  })
   enrollFace(@CurrentUser() user: AuthenticatedUser, @Body() dto: EnrollFaceDto) {
     return this.drivers.enrollFace(user.userId, dto);
   }
@@ -273,7 +276,8 @@ export class DriversController {
   @Post('check-dni')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
+    summary:
+      'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
   })
   async checkDni(@CurrentUser() user: AuthenticatedUser, @Body() dto: CheckDniDto) {
     const exists = await this.drivers.dniExists(user.userId, dto.dni);

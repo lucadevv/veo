@@ -20,10 +20,7 @@ import {
   useRegistrationStore,
   type DocumentSendPhase,
 } from '../state/registrationStore';
-import {
-  usePersonalDataContinue,
-  type DeferredDocument,
-} from '../hooks/usePersonalDataContinue';
+import { usePersonalDataContinue, type DeferredDocument } from '../hooks/usePersonalDataContinue';
 import { useDniSubmit } from '../hooks/useDniSubmit';
 import { useLicenseSubmit } from '../hooks/useLicenseSubmit';
 import { DriverExistence, useDriverExists } from '../hooks/useDriverExists';
@@ -250,8 +247,7 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // flag local `documents.UPLOADED`: se seteaba OPTIMISTA en el escaneo y SOBREVIVÍA al reload sin su captura
   // (el array `documents` se persiste, la captura no) → mentía "subida" sin que el server la tuviera. Un fallo
   // de subida conserva `pendingLicense` (sigue "lista para enviar/reintentar") y el banner de fallo lo dice.
-  const licenseUploaded =
-    pendingLicense != null || serverHasLicense || licensePhase === 'sent';
+  const licenseUploaded = pendingLicense != null || serverHasLicense || licensePhase === 'sent';
   // Lote 4 · el check de la licencia (espejo del DNI): `sent` de esta sesión o el server ya la tiene.
   const licenseSent = licensePhase === 'sent' || serverHasLicense;
 
@@ -284,7 +280,6 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     { satisfied: licenseSent, missingKey: 'registration.personal.missing.license' },
   ];
   const missingKey = firstMissingRequirement(personalRequirements);
-
 
   const onContinue = async (): Promise<void> => {
     if (personalContinue.isPending) {
@@ -435,7 +430,14 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
     void runEagerSync();
     // `runEagerSync` toma el estado actual en cada corrida; las deps de abajo regobiernan el disparo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanOpen, licenseSheetOpen, personal, pendingDni, pendingLicense, personalContinue.isPending]);
+  }, [
+    scanOpen,
+    licenseSheetOpen,
+    personal,
+    pendingDni,
+    pendingLicense,
+    personalContinue.isPending,
+  ]);
 
   // EMBEBIDO (wizard): publica el footer del paso al host — "Continuar" + el hint "Te falta: …". `onContinueRef`
   // evita re-registrar en cada render (el footer solo cambia cuando cambia el gating). Standalone: no hace nada
@@ -451,7 +453,9 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
       onPrimary: () => void onContinueRef.current(),
       primaryDisabled: !canContinue,
       primaryLoading: personalContinue.isPending,
-      hint: missingKey ? t('registration.personal.missing.label', { detail: t(missingKey) }) : undefined,
+      hint: missingKey
+        ? t('registration.personal.missing.label', { detail: t(missingKey) })
+        : undefined,
     });
     return () => wizard.registerFooter(pageIndex, null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -460,141 +464,139 @@ export const PersonalDataScreen = ({ navigation }: Props = {}): React.JSX.Elemen
   // El CUERPO del paso (compartido por ambos modos). El chrome cambia según el modo (embebido vs standalone).
   const stepBody = (
     <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
-          {/* La BARRA de progreso (animada) se mantiene como única señal visual del avance: el caption
+      {/* La BARRA de progreso (animada) se mantiene como única señal visual del avance: el caption
               textual "Paso N de M" (`registration.stepOf`) se ELIMINÓ — era redundante con la barra y
               empujaba el contenido, invirtiendo la jerarquía. Ahora el TÍTULO display manda. */}
-          {wizard ? null : (
-            <Reveal>
-              <RegistrationProgress current={1} />
-            </Reveal>
-          )}
+      {wizard ? null : (
+        <Reveal>
+          <RegistrationProgress current={1} />
+        </Reveal>
+      )}
 
-          {/* Bloque héroe alineado a la IZQUIERDA con aire generoso (estándar Tesla: Onboarding/Login):
+      {/* Bloque héroe alineado a la IZQUIERDA con aire generoso (estándar Tesla: Onboarding/Login):
               título `display` que domina + subtítulo `callout` muted. Sin "Paso N de M" encima. */}
-          <Reveal delay={80} style={styles.intro}>
-            <Text variant="title1">{t('registration.personal.title')}</Text>
-            <Text variant="callout" color="inkMuted">
-              {t('registration.personal.scanSubtitle')}
-            </Text>
-          </Reveal>
+      <Reveal delay={80} style={styles.intro}>
+        <Text variant="title1">{t('registration.personal.title')}</Text>
+        <Text variant="callout" color="inkMuted">
+          {t('registration.personal.scanSubtitle')}
+        </Text>
+      </Reveal>
 
-          {/* PASO 1 · DNI (U3 · jerarquía 1-2-3). El "Escanear DNI" YA NO es un botón accent que compite con el
+      {/* PASO 1 · DNI (U3 · jerarquía 1-2-3). El "Escanear DNI" YA NO es un botón accent que compite con el
               CTA del footer: es una CARD DE PASO NUMERADA "1 · DNI" — MISMO patrón visual que la licencia
               (`DocumentUploadCard` con estado + acción) — para comunicar "primero esto, después esto". Toda la
               card es presionable y abre el sheet de escaneo (acción DENTRO de la card). El estado del chip
               refleja la verdad: "Listo para enviar" si hay DNI leído/server, o el estado real del servidor; si
               no, "Pendiente". U2 · dedup (DUP #2): una sola affordance de re-escaneo por estado se mantiene —
               la card ES esa única entrada (ya no hay Button suelto con el mismo `setScanOpen`). */}
-          <Reveal delay={100} from="scale">
-            <DocumentUploadCard
-              icon={<IconDocument size={26} color={theme.colors.accent} strokeWidth={1.8} />}
-              stepNumber={1}
-              label={t('registration.documents.dni')}
-              status={dniDocReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
-              uploadedLabel={t('registration.documents.state.ready')}
-              pendingLabel={t('registration.documents.pending')}
-              serverState={phaseChip(dniPhase) ?? dniServerState}
-              sending={dniPhase === 'sending'}
-              sent={dniSent}
-              thumbUri={pendingDni?.front.uri ?? dniServerImageUri ?? undefined}
-              {...cardSubtitle(dniPhase, dniSent)}
-              accessibilityLabel={
-                hasCapture || hasReadDni
-                  ? t('registration.actions.rescan')
-                  : t('registration.personal.scanDni.cta')
-              }
-              onPress={() => {
-                setDniTaken(false);
-                setDniSubmitError(false);
-                setScanOpen(true);
-              }}
-            />
-            <Text variant="footnote" color="inkSubtle" align="center" style={styles.scanHint}>
-              {t('registration.personal.scanDni.hint')}
-            </Text>
-          </Reveal>
+      <Reveal delay={100} from="scale">
+        <DocumentUploadCard
+          icon={<IconDocument size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+          stepNumber={1}
+          label={t('registration.documents.dni')}
+          status={dniDocReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+          uploadedLabel={t('registration.documents.state.ready')}
+          pendingLabel={t('registration.documents.pending')}
+          serverState={phaseChip(dniPhase) ?? dniServerState}
+          sending={dniPhase === 'sending'}
+          sent={dniSent}
+          thumbUri={pendingDni?.front.uri ?? dniServerImageUri ?? undefined}
+          {...cardSubtitle(dniPhase, dniSent)}
+          accessibilityLabel={
+            hasCapture || hasReadDni
+              ? t('registration.actions.rescan')
+              : t('registration.personal.scanDni.cta')
+          }
+          onPress={() => {
+            setDniTaken(false);
+            setDniSubmitError(false);
+            setScanOpen(true);
+          }}
+        />
+        <Text variant="footnote" color="inkSubtle" align="center" style={styles.scanHint}>
+          {t('registration.personal.scanDni.hint')}
+        </Text>
+      </Reveal>
 
-          {serverError ? (
-            <Reveal>
-              <Banner
-                tone="danger"
-                title={t('errors.generic')}
-                description={toErrorMessage(serverError, t)}
-              />
-            </Reveal>
-          ) : null}
+      {serverError ? (
+        <Reveal>
+          <Banner
+            tone="danger"
+            title={t('errors.generic')}
+            description={toErrorMessage(serverError, t)}
+          />
+        </Reveal>
+      ) : null}
 
-          {uploadFailedDoc ? (
-            <Reveal>
-              <Banner
-                tone="danger"
-                title={
-                  uploadFailedDoc === 'license'
-                    ? t('registration.documents.licenseUploadFailed')
-                    : t('registration.personal.scanDni.uploadFailed')
-                }
-                description={
-                  uploadFailedDoc === 'license'
-                    ? t('registration.documents.licenseUploadRetryHint')
-                    : t('registration.personal.scanDni.uploadRetryHint')
-                }
-              />
-            </Reveal>
-          ) : null}
+      {uploadFailedDoc ? (
+        <Reveal>
+          <Banner
+            tone="danger"
+            title={
+              uploadFailedDoc === 'license'
+                ? t('registration.documents.licenseUploadFailed')
+                : t('registration.personal.scanDni.uploadFailed')
+            }
+            description={
+              uploadFailedDoc === 'license'
+                ? t('registration.documents.licenseUploadRetryHint')
+                : t('registration.personal.scanDni.uploadRetryHint')
+            }
+          />
+        </Reveal>
+      ) : null}
 
-
-          {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto del DNI pero el OCR NO leyó el número →
+      {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto del DNI pero el OCR NO leyó el número →
               reescaneo (NO un formulario, NO una tarjeta vacía que finge éxito). Se gatilla por la IMAGEN
               capturada (no por los campos OCR), así un OCR que no leyó NADA igual cae acá en vez de quedar
               mudo. Sin el número no se puede registrar el documento ni avanzar. */}
-          {hasCapture && !hasReadDni ? (
-            <Reveal>
-              <Banner
-                tone="warn"
-                title={t('registration.personal.scanDni.criticalMissingTitle')}
-                description={t('registration.personal.scanDni.criticalMissingBody')}
-              />
-            </Reveal>
-          ) : null}
+      {hasCapture && !hasReadDni ? (
+        <Reveal>
+          <Banner
+            tone="warn"
+            title={t('registration.personal.scanDni.criticalMissingTitle')}
+            description={t('registration.personal.scanDni.criticalMissingBody')}
+          />
+        </Reveal>
+      ) : null}
 
-          {serverDocs.isError ? (
-            <Reveal>
-              <Banner
-                tone="warn"
-                title={t('errors.generic')}
-                description={toErrorMessage(serverDocs.error, t)}
-              />
-            </Reveal>
-          ) : null}
+      {serverDocs.isError ? (
+        <Reveal>
+          <Banner
+            tone="warn"
+            title={t('errors.generic')}
+            description={toErrorMessage(serverDocs.error, t)}
+          />
+        </Reveal>
+      ) : null}
 
-          {/* LICENCIA de conducir (LOTE B · doc del CONDUCTOR, bajada del viejo paso Documentos). Reusa el
+      {/* LICENCIA de conducir (LOTE B · doc del CONDUCTOR, bajada del viejo paso Documentos). Reusa el
               componente CANÓNICO `RegistrationDocumentSheet` + el parser `parseLicense` (Lote A). Requerida
               para avanzar (gating: DNI + licencia). */}
-          <Reveal delay={160}>
-            <DocumentUploadCard
-              icon={<IconDocument size={26} color={theme.colors.accent} strokeWidth={1.8} />}
-              stepNumber={2}
-              label={t('registration.documents.license')}
-              status={licenseUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
-              uploadedLabel={t('registration.documents.state.ready')}
-              pendingLabel={t('registration.documents.pending')}
-              serverState={phaseChip(licensePhase) ?? licenseServerState}
-              sending={licensePhase === 'sending'}
-              sent={licenseSent}
-              thumbUri={pendingLicense?.file?.uri ?? licenseServerImageUri ?? undefined}
-              {...cardSubtitle(licensePhase, licenseSent)}
-              busy={personalContinue.isPending}
-              accessibilityLabel={t('registration.documents.uploadAccessibility', {
-                document: t('registration.documents.license'),
-              })}
-              onPress={() => {
-                setLicenseNeedsDni(false);
-                setLicenseSheetOpen(true);
-              }}
-            />
-          </Reveal>
-
-        </View>
+      <Reveal delay={160}>
+        <DocumentUploadCard
+          icon={<IconDocument size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+          stepNumber={2}
+          label={t('registration.documents.license')}
+          status={licenseUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+          uploadedLabel={t('registration.documents.state.ready')}
+          pendingLabel={t('registration.documents.pending')}
+          serverState={phaseChip(licensePhase) ?? licenseServerState}
+          sending={licensePhase === 'sending'}
+          sent={licenseSent}
+          thumbUri={pendingLicense?.file?.uri ?? licenseServerImageUri ?? undefined}
+          {...cardSubtitle(licensePhase, licenseSent)}
+          busy={personalContinue.isPending}
+          accessibilityLabel={t('registration.documents.uploadAccessibility', {
+            document: t('registration.documents.license'),
+          })}
+          onPress={() => {
+            setLicenseNeedsDni(false);
+            setLicenseSheetOpen(true);
+          }}
+        />
+      </Reveal>
+    </View>
   );
 
   const licenseSheet = licenseSheetOpen ? (

@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { InternalIdentityGuard, RolesGuard, Roles } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
@@ -43,7 +53,10 @@ export class VehiclesController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Obtener un vehículo por id (ENRIQUECIDO con la ficha del modelSpec, igual que la lista)' })
+  @ApiOperation({
+    summary:
+      'Obtener un vehículo por id (ENRIQUECIDO con la ficha del modelSpec, igual que la lista)',
+  })
   getById(@Param('id') id: string): Promise<VehicleListItem> {
     return this.vehicles.getById(id);
   }
@@ -59,8 +72,14 @@ export class VehiclesController {
   @Roles(AdminRole.SUPERADMIN)
   @Delete('drivers/:driverId')
   @HttpCode(200)
-  @ApiQuery({ name: 'userId', required: true, description: 'User.id de identity (indexa los vehículos)' })
-  @ApiOperation({ summary: 'HARD purge de la flota (vehículos + documentos) de un conductor. SUPERADMIN.' })
+  @ApiQuery({
+    name: 'userId',
+    required: true,
+    description: 'User.id de identity (indexa los vehículos)',
+  })
+  @ApiOperation({
+    summary: 'HARD purge de la flota (vehículos + documentos) de un conductor. SUPERADMIN.',
+  })
   purgeForDriver(
     @Param('driverId') driverId: string,
     @Query('userId') userId?: string,

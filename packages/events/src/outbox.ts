@@ -121,7 +121,10 @@ export async function drainOutbox(
   return store.drain(options.batchSize, options.staleMs, options.concurrency, (record) =>
     // El envelope se persistió genérico; en publicación T se resuelve por eventType del registro.
     withPublishTimeout(
-      producer.publish(record.envelope as EventEnvelope<EventPayload<EventType>>, record.aggregateId),
+      producer.publish(
+        record.envelope as EventEnvelope<EventPayload<EventType>>,
+        record.aggregateId,
+      ),
       options.publishTimeoutMs,
     ),
   );

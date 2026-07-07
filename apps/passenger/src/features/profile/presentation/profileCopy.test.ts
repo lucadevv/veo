@@ -101,7 +101,9 @@ describe('Copy-contract · perfil rediseñado + verificación de celular (es-PE)
   // conductor confirma a quién recoge (copy actual del CompleteProfileScreen). El test afirma esa
   // intención, no la palabra literal de la versión anterior.
   it('CompleteProfileScreen explica para qué se pide el perfil (el conductor sabe a quién recoge)', () => {
-    expect(i18n.t('profileSetup.subtitle').toLowerCase()).toContain('conductor');
+    expect(i18n.t('profileSetup.subtitle').toLowerCase()).toContain(
+      'conductor',
+    );
   });
 
   it('el correo de la cuenta se presenta como tomado de tu cuenta (genérico, sin proveedor)', () => {

@@ -16,7 +16,13 @@ interface StepperProps {
  * de `surface` con borde tenue, valor tabular al centro. El acento se reserva a lo interactivo primario, así que
  * los botones son neutros (no gritan). Respeta min/max deshabilitando el extremo correspondiente.
  */
-export function Stepper({ label, value, onChange, min = 0, max = 99 }: StepperProps): React.JSX.Element {
+export function Stepper({
+  label,
+  value,
+  onChange,
+  min = 0,
+  max = 99,
+}: StepperProps): React.JSX.Element {
   const theme = useTheme();
   const atMin = value <= min;
   const atMax = value >= max;

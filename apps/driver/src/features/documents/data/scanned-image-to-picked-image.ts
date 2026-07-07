@@ -12,10 +12,7 @@ import type { PickedImage } from '../domain/ports/image-picker-service';
  * @param base64Jpeg Imagen base64 JPEG SIN prefijo `data:` (lo que entrega `ScannedDocument.images[i]`).
  * @param fileName Nombre lógico del archivo (solo para trazabilidad/derivación de extensión). Default `scan.jpg`.
  */
-export function scannedImageToPickedImage(
-  base64Jpeg: string,
-  fileName = 'scan.jpg',
-): PickedImage {
+export function scannedImageToPickedImage(base64Jpeg: string, fileName = 'scan.jpg'): PickedImage {
   return {
     uri: `data:image/jpeg;base64,${base64Jpeg}`,
     mimeType: 'image/jpeg',

@@ -54,8 +54,8 @@ export default function CatalogPage() {
           <div className="flex flex-col gap-0.5">
             <p className="text-sm font-semibold text-ink">Cambios con step-up MFA</p>
             <p className="text-xs text-ink-subtle">
-              Cada servicio se guarda por separado (modo, multiplicador, tarifa mínima, piso de puja,
-              activar/desactivar): cada Guardar pide tu código TOTP, valida la versión
+              Cada servicio se guarda por separado (modo, multiplicador, tarifa mínima, piso de
+              puja, activar/desactivar): cada Guardar pide tu código TOTP, valida la versión
               (optimistic-locking) y queda auditado. Modo y piso se configuran por servicio, acá.
             </p>
           </div>

@@ -94,4 +94,3 @@ export interface FleetClient {
    */
   getVehiclesOperability(vehicleIds: readonly string[]): Promise<Map<string, FleetVehicleView>>;
 }
-

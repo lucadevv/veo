@@ -36,7 +36,9 @@ describe('withDayDividers', () => {
     );
 
     expect(
-      items.map(item => (item.kind === 'divider' ? item.label : item.message.id)),
+      items.map(item =>
+        item.kind === 'divider' ? item.label : item.message.id,
+      ),
     ).toEqual(['Lun 29 jun', 'a', 'b', 'Ayer', 'c', 'Hoy', 'd']);
   });
 

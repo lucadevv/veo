@@ -22,6 +22,7 @@
 ## 1. Sistema base de la app
 
 ### 1.1 Tema
+
 - Único tema: **oscuro** ("Noche"). No hay modo claro en pasajero.
 - Fondo de app = `bg`. Tarjetas = `surface`. Sheets, inputs y elementos elevados = `surfaceElevated`. Scrim de modales/sheets = `overlay`.
 - El **acento azul de marca es escaso y caro**: se reserva para **1 acción primaria por pantalla**, el dibujo de ruta en el mapa (`routeColor` + halo `routeGlowColor`) y micro-acentos de marca. Cuando el azul rellena, el texto encima es **blanco** (`onAccent`). Si todo es azul, nada es azul.
@@ -29,22 +30,24 @@
 - El **verde `success`/`safe`** comunica confianza y estados OK (contacto verificado, modo niño activo, pago confirmado, KYC aprobado, "alerta enviada"). Principio del brief: _la seguridad se siente (verde), no se grita (rojo)_ — salvo en pánico real.
 
 ### 1.2 Tipografía (sugerida, sobria, mobile)
+
 El kit expone **roles de tipografía** (no fuentes exóticas). Proponé una familia **sans geométrica/neutra de sistema ampliado**: **Inter** o **SF Pro / Roboto** como base, con un dígito **tabular** para precios, ETAs, OTP y contadores (el código usa `tabular` en todos esos lugares).
 
-| Rol (variant del kit) | Uso |
-|---|---|
-| `display` | Títulos hero de pantalla (Auth, Profile setup, Panic, montos de pago) |
-| `title1` / `title2` / `title3` | Encabezados de sección y de tarjeta |
-| `bodyStrong` | Énfasis dentro de cuerpo, labels de fila |
-| `body` / `callout` | Texto corrido, subtítulos |
-| `subhead` | Etiquetas de sección (gris `inkMuted`) |
-| `footnote` / `caption` | Ayudas, metadatos, helpers, pills |
-| `label` | Eyebrows en mayúsculas (ej. onboarding) |
+| Rol (variant del kit)          | Uso                                                                   |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `display`                      | Títulos hero de pantalla (Auth, Profile setup, Panic, montos de pago) |
+| `title1` / `title2` / `title3` | Encabezados de sección y de tarjeta                                   |
+| `bodyStrong`                   | Énfasis dentro de cuerpo, labels de fila                              |
+| `body` / `callout`             | Texto corrido, subtítulos                                             |
+| `subhead`                      | Etiquetas de sección (gris `inkMuted`)                                |
+| `footnote` / `caption`         | Ayudas, metadatos, helpers, pills                                     |
+| `label`                        | Eyebrows en mayúsculas (ej. onboarding)                               |
 
 - **Tabular obligatorio** en: precios PEN, ETA en minutos, OTP, cuenta regresiva de reenvío, montos, IDs de pánico, teléfono.
 - Jerarquía por **peso + tamaño + color**, no por color solo (accesibilidad).
 
 ### 1.3 Grilla, espaciado, forma
+
 - El kit usa una **escala de espaciado** `xs / sm / md / lg / xl` y **radios** `sm / md / lg / xl / pill`. Respetala; no inventes valores sueltos.
 - **Padding lateral de pantalla:** `xl` (márgenes generosos, respira).
 - **Tarjetas:** radio `md`; sheets de mapa con esquinas superiores radio `xl` + **grabber** (barra `borderStrong`).
@@ -53,12 +56,14 @@ El kit expone **roles de tipografía** (no fuentes exóticas). Proponé una fami
 - **Elevación:** niveles `level1`/`level2` para overlays sobre el mapa (pill de ubicación, chips, FAB).
 
 ### 1.4 Tono de copy (español peruano)
+
 - Cálido, directo, claro, **sin jerga técnica**. Tuteo neutro peruano ("¿A dónde vamos?", "Confirmar viaje", "Listo").
 - Nunca alarmista (salvo el botón SOS). La seguridad tranquiliza.
 - Localismos correctos: **Yape, Plin**, **moto** y **auto** como categorías, soles **S/**.
 - Microcopy honesto: si algo no está disponible, se dice claro y se ofrece reintento (el código nunca inventa datos).
 
 ### 1.5 Accesibilidad (no opcional)
+
 - **Contraste AA** mínimo en todo texto. El azul de marca sobre el lienzo oscuro pasa para texto grande/acento/UI; texto largo va en `ink`/`inkMuted`.
 - **Áreas táctiles ≥ 44pt** en todo control (botones, IconButton, chips, filas).
 - **Nunca comunicar solo por color**: todo estado lleva texto/ícono además del color (ej. StatusPill con label + dot; "REC" con texto).
@@ -66,6 +71,7 @@ El kit expone **roles de tipografía** (no fuentes exóticas). Proponé una fami
 - **Reduce-motion**: todas las animaciones tienen variante estática. El diseñador debe entregar el estado "sin movimiento" de splash, anillos que respiran, parallax y dots.
 
 ### 1.6 Reglas de seguridad innegociables (resumen — detalle en cada pantalla)
+
 1. **El pánico automático es INVISIBLE.** Triple botón de volumen, detección nativa en background, **sin UI, sin confirmación, sin cambio de layout**. Ante coacción NO se delata a la víctima. (`usePanicAutoTrigger`).
 2. **SOS manual = rojo `danger`**, fullscreen, siempre accesible en viaje activo.
 3. **Indicador "REC" siempre visible** cuando hay cámara de cabina (tono `danger`, `live`, texto + dot).
@@ -74,6 +80,7 @@ El kit expone **roles de tipografía** (no fuentes exóticas). Proponé una fami
 6. **Biometría** degrada seguro: si el equipo no soporta Face ID/huella, no bloquea.
 
 ### 1.7 Componentes globales del kit (los vas a reusar en todo el doc)
+
 `SafeScreen` (shell con footer fijo) · `Button` (variants: `accent` / `primary` / `secondary` / `ghost` / `danger`, tamaños `sm`/`md`/`lg`) · `IconButton` · `Card` (`outlined`/`elevated`/`filled`) · `ListItem` (title/subtitle/leading/trailing/chevron) · `TextField` · `Banner` (tonos `danger`/`success`/`safe`/`warn`/`info`) · `StatusPill` (tonos + `dot` + `live`) · `BottomSheet` · `Avatar` · `Skeleton` · `MapShell` + `AppMap` · `DriverCard` · `SosButton` · `RoutePin` · `RideOptionRow` · `OriginDestinationField` · `SearchField` · `VeoWordmark` · `RouteMotif` (ruta azul punteada animada) · estados `LoadingState` / `EmptyState` / `ErrorState`.
 
 ---
@@ -83,6 +90,7 @@ El kit expone **roles de tipografía** (no fuentes exóticas). Proponé una fami
 Mapa: `Splash → Onboarding → Auth (phone→OTP) → CompleteProfile → Main`. Cold-start con sesión → `BiometricLock`. La conmutación de stacks la hace `RootNavigator` por **estado derivado** (no hay navegación imperativa: el diseñador piensa en estados, no en botones "siguiente pantalla").
 
 ### Splash (`SplashScreen.tsx`)
+
 - **Propósito:** ocupar el tiempo de rehidratación de sesión con una entrada de marca elegante.
 - **Entrada / Salida:** primer frame de cold-start → el navigator decide destino real (Onboarding / Auth / BiometricLock / Main).
 - **Layout & jerarquía visual:** **centro** domina: wordmark "VEO" grande + **RouteMotif** (ruta azul punteada que se dibuja) justo debajo, tagline gris debajo. **Abajo (anclado):** loader azul tipo "barrido" en pista `surfaceElevated`.
@@ -94,6 +102,7 @@ Mapa: `Splash → Onboarding → Auth (phone→OTP) → CompleteProfile → Main
 - **Seguridad / nota especial:** ninguna.
 
 ### Onboarding (`OnboardingScreen.tsx`)
+
 - **Propósito:** presentar el valor (seguridad, precio claro) y capturar los **3 consentimientos obligatorios (Ley N.° 29733)**.
 - **Entrada / Salida:** primer uso (sin flag de onboarding) → al **aceptar** persiste el flag y el navigator pasa a Auth.
 - **Layout & jerarquía visual:** **carrusel horizontal de 3 slides** paginado. Cabecera: wordmark `sm` centrado + pill de paso ("2 de 3") a la derecha (desde slide 2). **Footer fijo:** dots animados (píldora azul) + acciones.
@@ -115,6 +124,7 @@ Mapa: `Splash → Onboarding → Auth (phone→OTP) → CompleteProfile → Main
 - **Seguridad / nota especial:** **gate legal Ley 29733** — los 3 consentimientos son condición dura. Diseñá el estado disabled del CTA de forma evidente (no engañar al usuario haciéndolo creer que puede avanzar).
 
 ### Auth — Login multi-método (`AuthScreen.tsx`)
+
 - **Propósito:** ingresar a VEO. El login es **multi-método** (ADR-012, ratificado): **Google OAuth · Sign in with Apple (iOS) · correo+contraseña (argon2id) · teléfono+OTP**, con **account-linking** (un mismo `User` puede tener varios métodos vinculados). El **teléfono + OTP de 6 dígitos** es el **camino feliz para Perú** (mercado masivo, sin correo). La verificación de cada método vive **server-side** (firma JWKS de Google / Apple, argon2.verify, OTP); el cliente nunca se autodeclara autenticado.
 - **Entrada / Salida:** desde Onboarding → al verificar (cualquier método), la sesión pasa a `authenticated` y el navigator avanza a CompleteProfile (o Main si el perfil ya está completo).
 - **Layout & jerarquía visual:** dos pasos en la misma pantalla.
@@ -135,6 +145,7 @@ Mapa: `Splash → Onboarding → Auth (phone→OTP) → CompleteProfile → Main
 - **Canal de entrega del OTP (ADR-012 §1.2/§6):** **WhatsApp como canal PRINCIPAL** (Meta Cloud API tras el puerto `WhatsAppSender`, excepción §0.7 acotada) con **fallback automático a SMS soberano** (SMPP) si WhatsApp no entrega. El copy lo refleja ("te enviamos un código por WhatsApp"). _⏳ Estado: WhatsApp es el objetivo (ADR-012); hoy el código entrega por SMS — el puerto `WhatsAppSender` está pendiente de construir. No afirmar que WhatsApp ya funciona._
 
 ### CompleteProfile (`CompleteProfileScreen.tsx`)
+
 - **Propósito:** completar nombre (obligatorio), correo (opcional) y avatar (opcional, con subida real) tras el primer login.
 - **Entrada / Salida:** desde Auth si el perfil no tiene nombre → al guardar, navigator pasa a Main.
 - **Layout & jerarquía visual:** scroll. **Arriba:** wordmark + título `display` centrado + subtítulo. **Centro:** **avatar circular con anillo azul punteado** + FAB de cámara azul abajo-derecha. Debajo: formulario (nombre, correo) + fila de nota de privacidad con escudo. CTA footer "Guardar".
@@ -149,6 +160,7 @@ Mapa: `Splash → Onboarding → Auth (phone→OTP) → CompleteProfile → Main
 - **Seguridad / nota especial:** nota de privacidad explícita (transparencia de datos). La subida del avatar es real y reversible.
 
 ### BiometricLock (`BiometricLockScreen.tsx`)
+
 - **Propósito:** re-login biométrico (Face ID / huella) en cold-start con sesión persistida, para desbloquear el refresh token.
 - **Entrada / Salida:** cold-start con sesión + candado bloqueado → al desbloquear pasa a Main; "Usar otra cuenta" olvida sesión y borra el secreto HMAC de pánico.
 - **Layout & jerarquía visual:** **centro** minimalista: título `display color="brand"` + subtítulo + spinner (mientras verifica). Footer: botón "Desbloquear" + "Usar otra cuenta" (ghost).
@@ -168,6 +180,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 ### Home (`RequestFlowScreen.tsx`)
 
 > Nota de reconciliación (2026-07-03): el Home real es `RequestFlowScreen.tsx` (flujo unificado en un DraggableSheet por fase); `HomeScreen.tsx` quedó legacy sin registrar.
+
 - **Propósito:** punto de partida — mapa oscuro a pantalla completa con tu ubicación y el acceso "¿A dónde vamos?".
 - **Entrada / Salida:** tab principal → toca el SearchField → Search; toca un destino reciente → RouteQuote; toca avatar → Profile.
 - **Layout & jerarquía visual:** **mapa domina toda la pantalla** (`MapShell` + `AppMap` oscuro con punto de usuario). **Overlay superior:** pill de "Tu ubicación" (etiqueta real por geocoding inverso) a la izquierda + **avatar** de perfil a la derecha. **Overlay inferior:** fila horizontal de **chips de destinos recientes** (máx 3) + **SearchField** "¿A dónde vamos?".
@@ -179,6 +192,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** ninguna directa.
 
 ### Search (`SearchScreen.tsx`)
+
 - **Propósito:** buscar y fijar origen y destino con autocompletado, atajos de lugares guardados y "usar mi ubicación".
 - **Entrada / Salida:** desde Home (o desde RouteQuote para editar un punto/parada) → al fijar ambos extremos navega a RouteQuote.
 - **Layout & jerarquía visual:** **arriba (header fijo):** título "¿A dónde vas?" + cerrar (✕); **`OriginDestinationField`** (origen ◎ + destino ◍, tap para elegir cuál editás); **TextField** de búsqueda con label dinámico (Origen / Destino / Parada N). **Cuerpo:** lista de resultados (`FlatList`) con header de atajos.
@@ -190,6 +204,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** ninguna.
 
 ### RouteQuote (`RouteQuoteScreen.tsx`)
+
 - **Propósito:** dibujar la ruta real y cotizar — elegir categoría (Moto/Auto) con precio PEN + ETA, agregar paradas, programar, promo, y confirmar el viaje.
 - **Entrada / Salida:** desde Search con origen+destino → al confirmar crea el viaje real; si es inmediato → TripActive; si es programado → ScheduledTrips.
 - **Layout & jerarquía visual:** **mitad superior:** mapa con **polyline azul** (ruta real, `fitToRoute`) + botón volver flotante. **Mitad inferior:** **sheet** (esquinas radio `xl` + grabber) que domina la decisión:
@@ -215,6 +230,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 # FLUJO 3 · Viaje activo
 
 ### TripActive (`TripActiveScreen.tsx`) — pantalla más crítica
+
 - **Propósito:** seguimiento en vivo del viaje: conductor, ruta, ubicación, SOS, chat, cámara de cabina, compartir con familia, cancelar/cambiar destino.
 - **Entrada / Salida:** desde RouteQuote (viaje inmediato) o desde TripHistory (viaje vivo) → al completar ofrece Payment/Rating; al cancelar queda en estado cancelado.
 - **Layout & jerarquía visual:** **mitad superior:** mapa en vivo (`MapShell live`) con ruta, ubicación del conductor y origen/destino. **Flotantes sobre el mapa:** **SosButton** arriba-derecha (rojo, siempre visible en viaje activo) + **botón chat** arriba-izquierda con **badge de no leídos** azul (cuando hay conductor). **Mitad inferior (sheet scrolleable):**
@@ -244,6 +260,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
   - **Compartir con familia** = enlace firmado (HMAC) que caduca al terminar el viaje.
 
 ### ScheduledTrips (`ScheduledTripsScreen.tsx`)
+
 - **Propósito:** listar y cancelar viajes programados (estado SCHEDULED) antes de que entren a dispatch.
 - **Entrada / Salida:** desde Profile → Preferencias, o tras programar en RouteQuote → cada card permite cancelar.
 - **Layout & jerarquía visual:** lista de **tarjetas**; cada una: pill de fecha/hora (`StatusPill brand` + dot), tarifa estimada (tabular), trayecto origen→destino (etiquetas reales por geocoding), conteo de paradas, "Tarifa estimada", botón "Cancelar".
@@ -259,6 +276,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 # FLUJO 4 · Pago & Rating
 
 ### Payment (`PaymentScreen.tsx`)
+
 - **Propósito:** cobrar el viaje (cargo idempotente), elegir método y propina opcional; para efectivo, confirmar el pago.
 - **Entrada / Salida:** desde TripActive/TripDetail completado → al pagar muestra éxito y cierra.
 - **Layout & jerarquía visual:** **arriba:** card elevada con **monto grande** (`display` tabular, = tarifa + propina). **Centro:** título "¿Cómo pagas?" + card con lista de **métodos** (Cash/Yape/Plin; el por defecto marca pill "Predeterminado"). **Abajo:** campo **Propina** (decimal). Nota de efectivo si aplica. CTA footer "Pagar ahora".
@@ -275,6 +293,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** propina 100% al conductor; cargo idempotente (no doble cobro).
 
 ### Rating (`RatingScreen.tsx`)
+
 - **Propósito:** calificar al conductor (1–5 estrellas) con comentario opcional, y ofrecer propina tras calificar.
 - **Entrada / Salida:** desde TripActive/TripDetail completado → al enviar agradece; "Omitir" cierra.
 - **Layout & jerarquía visual:** **centro:** subtítulo, **estrellas grandes** (`StarRating`), comentario (multiline, máx 1000). Footer: "Enviar" + "Omitir" (ghost).
@@ -290,6 +309,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 # FLUJO 5 · Seguridad / Privacidad
 
 ### Panic (`PanicScreen.tsx`)
+
 - **Propósito:** disparo **MANUAL** de pánico (SOS) — envía ubicación + mensaje firmado (HMAC) y muestra el `panicId` de confirmación.
 - **Entrada / Salida:** desde el SOS de TripActive (o acceso de soporte) → al enviar muestra confirmación; "Cerrar" vuelve.
 - **Layout & jerarquía visual:** **fullscreen, centrado, sobrio y serio.** Título `display` **en `danger`** + subtítulo tranquilizador. Footer: **botón "Enviar alerta" en `danger size="lg"`** + "Cerrar" (ghost).
@@ -305,6 +325,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial (CRÍTICA):** esta es la versión **manual/visible**. La versión **automática es invisible** (triple volumen, nativa, background) y **NO tiene UI** — no la dibujes. Mensaje firmado HMAC; muestra `panicId` para que la víctima sepa que se envió.
 
 ### TrustedContacts (`TrustedContactsScreen.tsx`)
+
 - **Propósito:** gestionar hasta **3 contactos de confianza**, cada uno **verificado por OTP**, que reciben tu viaje compartido y tus alertas.
 - **Entrada / Salida:** desde Profile → Seguridad → agregar/verificar/reenviar/eliminar.
 - **Layout & jerarquía visual:** subtítulo explicativo; **lista de tarjetas** de contacto (nombre, teléfono·relación, **StatusPill** Verificado=success / Pendiente=warn) con acciones por contacto (Verificar, Reenviar, Eliminar). Footer: "Agregar contacto" (disabled al llegar a 3).
@@ -316,6 +337,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** cada contacto se verifica por OTP propio (no se confía en un número sin validar).
 
 ### ChildMode (`ChildModeScreen.tsx`)
+
 - **Propósito:** activar el **Modo niño** con un código de 4–6 dígitos que se exige para cambios de destino (protege a un menor que viaja solo).
 - **Entrada / Salida:** desde Profile → Seguridad → al guardar, queda disponible para la próxima solicitud en RouteQuote.
 - **Layout & jerarquía visual:** subtítulo; **switch** "Activar modo niño"; **StatusPill** Activo(safe)/Inactivo(neutral); campo **código enmascarado** (numérico, secureTextEntry) solo si está activo; `Banner info` explicativo. Footer "Guardar".
@@ -327,6 +349,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial (CRÍTICA):** el código **NUNCA se muestra al conductor**; el backend valida un hash. Campo enmascarado, solo en memoria.
 
 ### KycCamera (`KycCameraScreen.tsx`)
+
 - **Propósito:** verificación de identidad (KYC) con **liveness activo** — preview de cámara frontal, reto del backend (parpadear/girar), captura de 3 frames, motor ONNX propio.
 - **Entrada / Salida:** desde Profile (si no verificado) → resultado aprobado/pendiente/rechazado.
 - **Layout & jerarquía visual:** **pantalla de cámara a sangre.** **Zona cámara (domina):** preview frontal espejado, **scrims** arriba/abajo (vignette para legibilidad), **óvalo guía de rostro que "respira"** al centro, **badge "Capturando" (danger, live, dot)** arriba-izquierda, **banner de instrucción del reto** prominente abajo ("Gira la cabeza a la izquierda"). **Panel inferior (`surface`):** título, hint, banners de estado, botones.
@@ -348,6 +371,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 # FLUJO 6 · Soporte / Comunidad
 
 ### Chat (`ChatScreen.tsx`)
+
 - **Propósito:** conversar con el conductor del viaje en vivo (historial REST + entrantes por socket), con plantillas rápidas.
 - **Entrada / Salida:** desde TripActive (botón chat) → solo-lectura si el viaje terminó.
 - **Layout & jerarquía visual:** **lista de burbujas** (`MessageBubble`): propias en **acento a la derecha**, del conductor en **`surface` a la izquierda**. **Composer abajo:** fila de **chips de plantillas rápidas** + input multiline + botón enviar (↑, tinted azul).
@@ -359,6 +383,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** ninguna directa.
 
 ### Help (`HelpScreen.tsx`)
+
 - **Propósito:** centro de ayuda — FAQ, reportar un problema (ticket) y ver mis solicitudes.
 - **Entrada / Salida:** desde Profile → Cuenta → crea tickets / lista tickets.
 - **Layout & jerarquía visual:** scroll con 2 bloques: **FAQ** (acordeón `FaqItem` dentro de card) y **Mis solicitudes** (lista de tickets con `StatusPill`). Footer: "Reportar un problema". El reporte vive en un **BottomSheet**: selector de **categoría** (chips), asunto, descripción, opción "adjuntar viaje reciente".
@@ -370,6 +395,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** ninguna directa (los tickets de seguridad escalan en backend).
 
 ### Referrals (`ReferralsScreen.tsx`)
+
 - **Propósito:** "Invita y gana" — mostrar tu código (héroe), métricas (referidos / crédito) y canjear el código de un amigo.
 - **Entrada / Salida:** desde Profile → Preferencias.
 - **Layout & jerarquía visual:** título + subtítulo; **card "héroe"** (`filled`) con tu **código en `display color="accent"`** centrado + Copiar/Compartir; **dos tarjetas de métricas** (referidos · crédito ganado, tabular); sección **Canjear** con input + botón →.
@@ -385,6 +411,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 # FLUJO 7 · Perfil / Preferencias
 
 ### Profile (`ProfileScreen.tsx`)
+
 - **Propósito:** hub del usuario — datos, estado KYC, accesos de seguridad/preferencias/cuenta, derecho al olvido y logout.
 - **Entrada / Salida:** tab principal → navega a todas las pantallas de seguridad/prefs/soporte.
 - **Layout & jerarquía visual:** scroll con secciones:
@@ -401,6 +428,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** **derecho al olvido (Ley 29733)** con período de gracia. Logout re-arma el candado biométrico y borra el secreto HMAC de pánico.
 
 ### SavedPlaces (`SavedPlacesScreen.tsx`)
+
 - **Propósito:** gestionar lugares guardados (Casa, Trabajo únicos + Favoritos), locales en el dispositivo.
 - **Entrada / Salida:** desde Profile → Preferencias; se usan como atajos en Search.
 - **Layout & jerarquía visual:** scroll: card con **Casa** (🏠) y **Trabajo** (💼) — fila para agregar si no existen, fila editable si existen (con ✕ eliminar); sección **Favoritos** (★) con lista o vacío; botón "Agregar favorito"; nota "se guardan solo en este equipo". Editor en **BottomSheet** (etiqueta para favoritos + buscador de dirección con autocompletado).
@@ -412,6 +440,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** datos **solo locales** (privacidad/soberanía); comunicarlo en copy.
 
 ### PaymentMethods (`PaymentMethodsScreen.tsx`)
+
 - **Propósito:** elegir el método de pago **predeterminado** (Cash/Yape/Plin). Preferencia local; el cobro real ocurre en Payment.
 - **Entrada / Salida:** desde Profile → Seguridad.
 - **Layout & jerarquía visual:** subtítulo + card con lista de métodos; el predeterminado marca **StatusPill "Predeterminado"** (accent + dot).
@@ -423,6 +452,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 - **Seguridad / nota especial:** ninguna (no se guardan datos sensibles de pago aún).
 
 ### TripHistory (`TripHistoryScreen.tsx`)
+
 - **Propósito:** historial de viajes del dispositivo; abre detalle (o re-abre seguimiento si el viaje sigue vivo).
 - **Entrada / Salida:** tab principal → fila viva → TripActive; fila terminada → TripDetail.
 - **Layout & jerarquía visual:** lista de **tarjetas** (monto tabular como título, fecha + estado como subtítulo, chevron). Footer nota explicativa.
@@ -436,6 +466,7 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 ### TripDetail (`TripDetailSheet.tsx`)
 
 > Nota de reconciliación (2026-07-03): el detalle de un viaje terminal ya NO es pantalla — es un sheet sobre "Tus viajes" (`navigation/types.ts` documenta la decisión).
+
 - **Propósito:** detalle de solo-lectura de un viaje pasado: mapa de la ruta, recibo, propina, y pagar/calificar si está completado.
 - **Entrada / Salida:** desde TripHistory (viaje terminado) → puede ir a Payment / Rating.
 - **Layout & jerarquía visual:** **mapa arriba** (ruta estática, no interactivo) + **sheet** abajo: fila estado + fecha; card tarifa + método; si completado: **recibo** (`TripReceiptCard`, con compartir), **propina** (`TipCard`), botones Pagar/Calificar.
@@ -450,30 +481,30 @@ Mapa: `Home → Search → RouteQuote → (crea viaje) → TripActive`. Borrador
 
 ## Anexo A · Cobertura de pantallas (23)
 
-| # | Flujo | Pantalla | Archivo |
-|---|---|---|---|
-| 1 | Onboarding & Auth | Splash | `SplashScreen.tsx` |
-| 2 | Onboarding & Auth | Onboarding | `OnboardingScreen.tsx` |
-| 3 | Onboarding & Auth | Auth (phone+OTP) | `AuthScreen.tsx` |
-| 4 | Onboarding & Auth | CompleteProfile | `CompleteProfileScreen.tsx` |
-| 5 | Onboarding & Auth | BiometricLock | `BiometricLockScreen.tsx` |
-| 6 | Pedir viaje | Home | `RequestFlowScreen.tsx` |
-| 7 | Pedir viaje | Search | `SearchScreen.tsx` |
-| 8 | Pedir viaje | RouteQuote | `RouteQuoteScreen.tsx` |
-| 9 | Viaje activo | TripActive | `TripActiveScreen.tsx` |
-| 10 | Viaje activo | ScheduledTrips | `ScheduledTripsScreen.tsx` |
-| 11 | Pago & Rating | Payment | `PaymentScreen.tsx` |
-| 12 | Pago & Rating | Rating | `RatingScreen.tsx` |
-| 13 | Seguridad | Panic | `PanicScreen.tsx` |
-| 14 | Seguridad | TrustedContacts | `TrustedContactsScreen.tsx` |
-| 15 | Seguridad | ChildMode | `ChildModeScreen.tsx` |
-| 16 | Seguridad | KycCamera | `KycCameraScreen.tsx` |
-| 17 | Soporte | Chat | `ChatScreen.tsx` |
-| 18 | Soporte | Help | `HelpScreen.tsx` |
-| 19 | Soporte | Referrals | `ReferralsScreen.tsx` |
-| 20 | Perfil/Prefs | Profile | `ProfileScreen.tsx` |
-| 21 | Perfil/Prefs | SavedPlaces | `SavedPlacesScreen.tsx` |
-| 22 | Perfil/Prefs | PaymentMethods | `PaymentMethodsScreen.tsx` |
-| 23 | Perfil/Prefs | TripHistory + TripDetail | `TripHistoryScreen.tsx` · `TripDetailSheet.tsx` (sheet, no pantalla) |
+| #   | Flujo             | Pantalla                 | Archivo                                                              |
+| --- | ----------------- | ------------------------ | -------------------------------------------------------------------- |
+| 1   | Onboarding & Auth | Splash                   | `SplashScreen.tsx`                                                   |
+| 2   | Onboarding & Auth | Onboarding               | `OnboardingScreen.tsx`                                               |
+| 3   | Onboarding & Auth | Auth (phone+OTP)         | `AuthScreen.tsx`                                                     |
+| 4   | Onboarding & Auth | CompleteProfile          | `CompleteProfileScreen.tsx`                                          |
+| 5   | Onboarding & Auth | BiometricLock            | `BiometricLockScreen.tsx`                                            |
+| 6   | Pedir viaje       | Home                     | `RequestFlowScreen.tsx`                                              |
+| 7   | Pedir viaje       | Search                   | `SearchScreen.tsx`                                                   |
+| 8   | Pedir viaje       | RouteQuote               | `RouteQuoteScreen.tsx`                                               |
+| 9   | Viaje activo      | TripActive               | `TripActiveScreen.tsx`                                               |
+| 10  | Viaje activo      | ScheduledTrips           | `ScheduledTripsScreen.tsx`                                           |
+| 11  | Pago & Rating     | Payment                  | `PaymentScreen.tsx`                                                  |
+| 12  | Pago & Rating     | Rating                   | `RatingScreen.tsx`                                                   |
+| 13  | Seguridad         | Panic                    | `PanicScreen.tsx`                                                    |
+| 14  | Seguridad         | TrustedContacts          | `TrustedContactsScreen.tsx`                                          |
+| 15  | Seguridad         | ChildMode                | `ChildModeScreen.tsx`                                                |
+| 16  | Seguridad         | KycCamera                | `KycCameraScreen.tsx`                                                |
+| 17  | Soporte           | Chat                     | `ChatScreen.tsx`                                                     |
+| 18  | Soporte           | Help                     | `HelpScreen.tsx`                                                     |
+| 19  | Soporte           | Referrals                | `ReferralsScreen.tsx`                                                |
+| 20  | Perfil/Prefs      | Profile                  | `ProfileScreen.tsx`                                                  |
+| 21  | Perfil/Prefs      | SavedPlaces              | `SavedPlacesScreen.tsx`                                              |
+| 22  | Perfil/Prefs      | PaymentMethods           | `PaymentMethodsScreen.tsx`                                           |
+| 23  | Perfil/Prefs      | TripHistory + TripDetail | `TripHistoryScreen.tsx` · `TripDetailSheet.tsx` (sheet, no pantalla) |
 
 > Total: **24 pantallas** documentadas (TripHistory y TripDetail comparten fila por pertenecer al mismo flujo de historial). Todas verificadas contra el código real en `veo-passenger-app/src/features/*/presentation/screens/`.

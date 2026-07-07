@@ -38,7 +38,8 @@ export class AnalyticsController {
   // profundidad) y cae a `today` si llega ausente/ inválido — el interno nunca revienta por un query malformado.
   @Get('revenue-metrics')
   @ApiOperation({
-    summary: 'Métricas de revenue por rango (today/7d/30d, TZ Lima): money-in + comisión + reembolsos + serie',
+    summary:
+      'Métricas de revenue por rango (today/7d/30d, TZ Lima): money-in + comisión + reembolsos + serie',
   })
   @ApiQuery({ name: 'range', required: false, enum: Object.values(RevenueRange) })
   revenueMetrics(@Query('range') range?: string): Promise<RevenueRangeMetrics> {

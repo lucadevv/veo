@@ -175,7 +175,12 @@ describe('RestPaymentGateway (booking-service)', () => {
     const gw = new RestPaymentGateway(BASE_URL, SECRET);
 
     const err = await gw
-      .charge({ bookingId: BOOKING_ID, grossCents: 5000, method: PaymentMethod.YAPE, passengerId: PASSENGER_ID })
+      .charge({
+        bookingId: BOOKING_ID,
+        grossCents: 5000,
+        method: PaymentMethod.YAPE,
+        passengerId: PASSENGER_ID,
+      })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ChargePermanentlyRejectedError);
     // NO debe ser un ExternalServiceError (eso reintentaría → loop).
@@ -187,7 +192,12 @@ describe('RestPaymentGateway (booking-service)', () => {
       stubFetch(status, { error: { code: 'RATE_LIMIT', message: 'slow down' } });
       const gw = new RestPaymentGateway(BASE_URL, SECRET);
       const err = await gw
-        .charge({ bookingId: BOOKING_ID, grossCents: 5000, method: PaymentMethod.YAPE, passengerId: PASSENGER_ID })
+        .charge({
+          bookingId: BOOKING_ID,
+          grossCents: 5000,
+          method: PaymentMethod.YAPE,
+          passengerId: PASSENGER_ID,
+        })
         .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ExternalServiceError);
       expect(err).not.toBeInstanceOf(ChargePermanentlyRejectedError);

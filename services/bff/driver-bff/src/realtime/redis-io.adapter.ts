@@ -38,7 +38,10 @@ export class RedisIoAdapter extends IoAdapter {
       ['sub', this.sub],
     ] as const) {
       client.on('error', (err: Error): void => {
-        this.logger.warn({ err, client: name }, 'redis-adapter pub/sub error (auto-retry en curso)');
+        this.logger.warn(
+          { err, client: name },
+          'redis-adapter pub/sub error (auto-retry en curso)',
+        );
       });
     }
   }

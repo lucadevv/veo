@@ -1,7 +1,11 @@
 import { DocumentSide, FleetDocumentType } from '@veo/shared-types';
 import type { DocumentSideFile } from '../../../documents/domain';
 import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
-import { PersonalDataValidationError, type PersonalData, type PersonalDataErrors } from '../../domain';
+import {
+  PersonalDataValidationError,
+  type PersonalData,
+  type PersonalDataErrors,
+} from '../../domain';
 import { isConflictError } from '../../../../shared/presentation/errors';
 import { deriveDocumentPhase, useRegistrationStore } from '../state/registrationStore';
 import { useUpdatePersonalData } from './useRegistrationWizard';

@@ -89,7 +89,10 @@ describe('ratingAggregateView (contrato soberano del pasajero)', () => {
 
   it('tolera lastComputedAt null (agregado aún no computado)', () => {
     expect(() =>
-      ratingAggregateView.parse({...bffAggregateResponse, lastComputedAt: null}),
+      ratingAggregateView.parse({
+        ...bffAggregateResponse,
+        lastComputedAt: null,
+      }),
     ).not.toThrow();
   });
 

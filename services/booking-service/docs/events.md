@@ -15,59 +15,62 @@ Envelope estándar (`@veo/events`): `{ eventId (UUIDv7), eventType, producer, oc
 ## Eventos emitidos (F0)
 
 ### `booking.published`
+
 Se publicó un `PublishedTrip` (la **oferta** del conductor: `BORRADOR → PUBLICADO`).
 
 - **Topic**: `booking` · **key**: `publishedTripId`
 - **Payload**:
 
-| campo | tipo | nota |
-|-------|------|------|
-| `publishedTripId` | string (UUID) | id de la oferta |
-| `driverId` | string (UUID) | server-truth (identidad firmada) |
-| `vehicleId` | string (UUID) | |
-| `asientosTotales` | int | |
-| `precioBase` | int | céntimos PEN |
-| `modoReserva` | `'INSTANT_BOOKING' \| 'REVISION_CADA_SOLICITUD'` | |
-| `fechaHoraSalida` | string (ISO) | salida futura |
-| `pais` | string | `PE` en F0 (EC → F8) |
-| `moneda` | string | `PEN` |
+| campo             | tipo                                             | nota                             |
+| ----------------- | ------------------------------------------------ | -------------------------------- |
+| `publishedTripId` | string (UUID)                                    | id de la oferta                  |
+| `driverId`        | string (UUID)                                    | server-truth (identidad firmada) |
+| `vehicleId`       | string (UUID)                                    |                                  |
+| `asientosTotales` | int                                              |                                  |
+| `precioBase`      | int                                              | céntimos PEN                     |
+| `modoReserva`     | `'INSTANT_BOOKING' \| 'REVISION_CADA_SOLICITUD'` |                                  |
+| `fechaHoraSalida` | string (ISO)                                     | salida futura                    |
+| `pais`            | string                                           | `PE` en F0 (EC → F8)             |
+| `moneda`          | string                                           | `PEN`                            |
 
 ### `booking.requested`
+
 Se creó un `Booking` en modo **REVISION** (`→ PENDIENTE_APROBACION`, espera al conductor). SOLO se emite en
 `REVISION_CADA_SOLICITUD`; en INSTANT el Booking nace APROBADO y emite `booking.approved`.
 
 - **Topic**: `booking` · **key**: `bookingId`
 - **Payload**:
 
-| campo | tipo | nota |
-|-------|------|------|
-| `bookingId` | string (UUID) | |
-| `publishedTripId` | string (UUID) | |
-| `passengerId` | string (UUID) | server-truth (identidad firmada, anti-IDOR) |
-| `driverId` | string (UUID) | dueño de la oferta |
-| `asientos` | int | |
-| `precioAcordado` | int | céntimos PEN = `precioBase + specialRequest` |
-| `modoReserva` | `'REVISION_CADA_SOLICITUD'` | literal |
-| `estado` | `'PENDIENTE_APROBACION'` | literal |
+| campo             | tipo                        | nota                                         |
+| ----------------- | --------------------------- | -------------------------------------------- |
+| `bookingId`       | string (UUID)               |                                              |
+| `publishedTripId` | string (UUID)               |                                              |
+| `passengerId`     | string (UUID)               | server-truth (identidad firmada, anti-IDOR)  |
+| `driverId`        | string (UUID)               | dueño de la oferta                           |
+| `asientos`        | int                         |                                              |
+| `precioAcordado`  | int                         | céntimos PEN = `precioBase + specialRequest` |
+| `modoReserva`     | `'REVISION_CADA_SOLICITUD'` | literal                                      |
+| `estado`          | `'PENDIENTE_APROBACION'`    | literal                                      |
 
 ### `booking.approved`
+
 El `Booking` quedó **APROBADO**. En F0 solo el caso **INSTANT** (el booking nace APROBADO al reservar, salta
 `PENDIENTE_APROBACION`, §4.2). El caso "el conductor aprueba" (`origen: 'APROBACION_CONDUCTOR'`) es F1.
 
 - **Topic**: `booking` · **key**: `bookingId`
 - **Payload**:
 
-| campo | tipo | nota |
-|-------|------|------|
-| `bookingId` | string (UUID) | |
-| `publishedTripId` | string (UUID) | |
-| `passengerId` | string (UUID) | server-truth |
-| `driverId` | string (UUID) | |
-| `asientos` | int | |
-| `precioAcordado` | int | céntimos PEN |
-| `modoReserva` | `'INSTANT_BOOKING' \| 'REVISION_CADA_SOLICITUD'` | |
-| `estado` | `'APROBADO'` | literal |
-| `origen` | `'INSTANT_BOOKING' \| 'APROBACION_CONDUCTOR'` | F0 emite `INSTANT_BOOKING` |
+| campo             | tipo                                             | nota                       |
+| ----------------- | ------------------------------------------------ | -------------------------- |
+| `bookingId`       | string (UUID)                                    |                            |
+| `publishedTripId` | string (UUID)                                    |                            |
+| `passengerId`     | string (UUID)                                    | server-truth               |
+| `driverId`        | string (UUID)                                    |                            |
+| `asientos`        | int                                              |                            |
+| `precioAcordado`  | int                                              | céntimos PEN               |
+| `modoReserva`     | `'INSTANT_BOOKING' \| 'REVISION_CADA_SOLICITUD'` |                            |
+| `estado`          | `'APROBADO'`                                     | literal                    |
+| `origen`          | `'INSTANT_BOOKING' \| 'APROBACION_CONDUCTOR'`    | F0 emite `INSTANT_BOOKING` |
 
 > El evento refleja el **estado real**: emitir `booking.requested` en INSTANT (que el ADR mapea a
 > "→ PENDIENTE_APROBACION") sería semánticamente falso, por eso INSTANT emite `booking.approved`.
@@ -79,13 +82,13 @@ El `Booking` quedó **APROBADO**. En F0 solo el caso **INSTANT** (el booking nac
 Están en el registro (`@veo/events` y `events/booking-events.ts`) para que el contrato exista, pero su
 **emisión** vive en la fase que la gatilla (degradación honesta):
 
-| evento | gatillo | fase |
-|--------|---------|------|
-| `booking.rejected` | el conductor rechaza la solicitud | F1 |
-| `booking.expired` | TTL ~5 min sin respuesta → EXPIRADO | F1 |
-| `booking.confirmed` | se consume `payment.captured` → CONFIRMADO | F3 |
-| `booking.started` | `PublishedTrip → EN_RUTA` (trip-service crea el Trip en vivo) | F4 |
-| `booking.completed` | el viaje terminó | F4/F5 |
+| evento              | gatillo                                                         | fase  |
+| ------------------- | --------------------------------------------------------------- | ----- |
+| `booking.rejected`  | el conductor rechaza la solicitud                               | F1    |
+| `booking.expired`   | TTL ~5 min sin respuesta → EXPIRADO                             | F1    |
+| `booking.confirmed` | se consume `payment.captured` → CONFIRMADO                      | F3    |
+| `booking.started`   | `PublishedTrip → EN_RUTA` (trip-service crea el Trip en vivo)   | F4    |
+| `booking.completed` | el viaje terminó                                                | F4/F5 |
 | `booking.cancelled` | cancelación (con tier) o cobro fallido / asiento-lleno → Refund | F3/F5 |
 
 ---

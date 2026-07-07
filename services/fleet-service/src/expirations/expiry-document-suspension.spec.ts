@@ -72,16 +72,26 @@ function makeSweeper(docs: Record<string, unknown>[]): Harness {
       $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
     },
   };
-  const config = new ConfigService({ EXPIRY_WARNING_DAYS: 30, EXPIRY_ALERT_MILESTONES: '30,15,7,1' });
+  const config = new ConfigService({
+    EXPIRY_WARNING_DAYS: 30,
+    EXPIRY_ALERT_MILESTONES: '30,15,7,1',
+  });
   const sweeper = new ExpirySweeper(prisma as never, config as never);
   return { sweeper, outbox, docUpdate };
 }
 
 /** Todos los payloads de un eventType encolados en el outbox. */
-function payloadsOf(outbox: ReturnType<typeof vi.fn>, eventType: string): Record<string, unknown>[] {
+function payloadsOf(
+  outbox: ReturnType<typeof vi.fn>,
+  eventType: string,
+): Record<string, unknown>[] {
   return outbox.mock.calls
     .filter((c) => (c[0] as { data: { eventType?: string } }).data.eventType === eventType)
-    .map((c) => (c[0] as { data: { envelope: { payload: Record<string, unknown> } } }).data.envelope.payload);
+    .map(
+      (c) =>
+        (c[0] as { data: { envelope: { payload: Record<string, unknown> } } }).data.envelope
+          .payload,
+    );
 }
 
 describe('ExpirySweeper · FIX 2 · suspensión por DOCUMENTO crítico RE-ASSERTIVA (latch-free)', () => {
@@ -130,7 +140,9 @@ describe('ExpirySweeper · FIX 2 · suspensión por DOCUMENTO crítico RE-ASSERT
   });
 
   it('RE-ASSERCIÓN no spamea document_expired: doc YA EXPIRED → re-emite SUSPENSIÓN pero NO document_expired', async () => {
-    const { sweeper, outbox, docUpdate } = makeSweeper([doc({ status: FleetDocumentStatus.EXPIRED })]);
+    const { sweeper, outbox, docUpdate } = makeSweeper([
+      doc({ status: FleetDocumentStatus.EXPIRED }),
+    ]);
 
     await sweeper.sweep(NOW);
 
@@ -155,7 +167,11 @@ describe('ExpirySweeper · FIX 2 · suspensión por DOCUMENTO crítico RE-ASSERT
 
   it('doc crítico pero VEHICLE-scoped EXPIRED → NO suspende al conductor (suspensión es DRIVER-scoped)', async () => {
     const { sweeper, outbox } = makeSweeper([
-      doc({ status: FleetDocumentStatus.EXPIRED, ownerType: FleetOwnerType.VEHICLE, ownerId: 'veh-1' }),
+      doc({
+        status: FleetDocumentStatus.EXPIRED,
+        ownerType: FleetOwnerType.VEHICLE,
+        ownerId: 'veh-1',
+      }),
     ]);
 
     const summary = await sweeper.sweep(NOW);

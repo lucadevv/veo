@@ -17,8 +17,7 @@ export const CARPOOL_QUERY_KEY = ['carpool'] as const;
 /** Clave de caché de mis ofertas publicadas. */
 export const CARPOOL_TRIPS_QUERY_KEY = ['carpool', 'trips'] as const;
 /** Clave de caché de las solicitudes de un viaje (factory por tripId). */
-export const carpoolBookingsQueryKey = (tripId: string) =>
-  ['carpool', 'bookings', tripId] as const;
+export const carpoolBookingsQueryKey = (tripId: string) => ['carpool', 'bookings', tripId] as const;
 
 /** Query: mis ofertas de carpooling publicadas. */
 export function useMyPublishedTrips() {

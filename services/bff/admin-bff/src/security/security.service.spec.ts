@@ -46,7 +46,14 @@ describe('SecurityService', () => {
   it('mapea PanicEntity → panicSummary (geoPoint → geo, acknowledgedAt nullable)', async () => {
     const rest = { get: vi.fn().mockResolvedValue([panicEntity]) } as unknown as InternalRestClient;
     const audit = { record: vi.fn() } as unknown as AuditRecorder;
-    const svc = new SecurityService(rest, identityGrpc, tripGrpc, InternalAudience.ADMIN_RAIL, audit, config);
+    const svc = new SecurityService(
+      rest,
+      identityGrpc,
+      tripGrpc,
+      InternalAudience.ADMIN_RAIL,
+      audit,
+      config,
+    );
     const page = await svc.listPanics(identity, {});
     // El contrato admin es paginado: { items, nextCursor } (panic-service devuelve array → nextCursor null).
     expect(page.nextCursor).toBeNull();
@@ -74,7 +81,14 @@ describe('SecurityService', () => {
     const audit = {
       record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }),
     } as unknown as AuditRecorder;
-    const svc = new SecurityService(rest, identityGrpc, tripGrpc, InternalAudience.ADMIN_RAIL, audit, config);
+    const svc = new SecurityService(
+      rest,
+      identityGrpc,
+      tripGrpc,
+      InternalAudience.ADMIN_RAIL,
+      audit,
+      config,
+    );
     // Actor COMPLIANCE_SUPERVISOR: este test verifica ENRIQUECIMIENTO+mapeo, no redacción → debe ver
     // los nombres. (La redacción sub-Compliance se cubre en su propio test).
     const compliance: AuthenticatedUser = { ...identity, roles: ['COMPLIANCE_SUPERVISOR'] };
@@ -97,7 +111,14 @@ describe('SecurityService', () => {
       get: vi.fn().mockResolvedValue({ ...panicEntity, status: 'TRIGGERED' }),
     } as unknown as InternalRestClient;
     const audit = { record: vi.fn() } as unknown as AuditRecorder;
-    const svc = new SecurityService(rest, identityGrpc, tripGrpc, InternalAudience.ADMIN_RAIL, audit, config);
+    const svc = new SecurityService(
+      rest,
+      identityGrpc,
+      tripGrpc,
+      InternalAudience.ADMIN_RAIL,
+      audit,
+      config,
+    );
     // identity por defecto ya es SUPPORT_L2 (sub-Compliance).
     const out = await svc.getPanic(identity, 'pa1');
     // IDENTIDAD → null (Compliance+)
@@ -114,7 +135,14 @@ describe('SecurityService', () => {
       get: vi.fn().mockResolvedValue({ ...panicEntity, status: 'TRIGGERED' }),
     } as unknown as InternalRestClient;
     const audit = { record: vi.fn() } as unknown as AuditRecorder;
-    const svc = new SecurityService(rest, identityGrpc, tripGrpc, InternalAudience.ADMIN_RAIL, audit, config);
+    const svc = new SecurityService(
+      rest,
+      identityGrpc,
+      tripGrpc,
+      InternalAudience.ADMIN_RAIL,
+      audit,
+      config,
+    );
     const compliance: AuthenticatedUser = { ...identity, roles: ['COMPLIANCE_SUPERVISOR'] };
     const out = await svc.getPanic(compliance, 'pa1');
     expect(out.passengerName).toBe('Ana Pérez');

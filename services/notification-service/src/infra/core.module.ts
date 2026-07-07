@@ -28,7 +28,11 @@ const internalSecretProvider: Provider = {
 //  - driver-rail / public-rail: los BFFs que registran device-tokens y abren tickets de soporte
 //    (conductor vía driver-bff, pasajero vía public-bff) + lectura de notificaciones.
 // El resto del trabajo de notification es event-driven (Kafka), no gateado por audiencia.
-const ALLOWED_AUDIENCES: readonly InternalAudience[] = ['service-rail', 'driver-rail', 'public-rail'];
+const ALLOWED_AUDIENCES: readonly InternalAudience[] = [
+  'service-rail',
+  'driver-rail',
+  'public-rail',
+];
 
 @Global()
 @Module({

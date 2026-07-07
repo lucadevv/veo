@@ -172,7 +172,9 @@ async function tryStep(label, fn) {
     log(`${label}: OK`);
     return out;
   } catch (err) {
-    warn(`${label} falló (${err.status ?? '?'}): ${err.message} — sigo (probablemente ya estaba hecho)`);
+    warn(
+      `${label} falló (${err.status ?? '?'}): ${err.message} — sigo (probablemente ya estaba hecho)`,
+    );
     return undefined;
   }
 }
@@ -327,7 +329,9 @@ async function cmdReady(latRaw, lonRaw) {
   socket.on('payment:tip', (envelope) => {
     log(`propina en vivo (payment:tip): ${JSON.stringify(envelope?.payload ?? {})}`);
   });
-  socket.on('disconnect', (reason) => warn(`socket desconectado (${reason}) — reintento automático`));
+  socket.on('disconnect', (reason) =>
+    warn(`socket desconectado (${reason}) — reintento automático`),
+  );
 
   // Primer ack con poll (el handshake resuelve el driverId async DESPUÉS de `connect`; el primer
   // `location` puede caer en 'unauthenticated' — misma receta que el golden path paso 3).
@@ -340,7 +344,9 @@ async function cmdReady(latRaw, lonRaw) {
   }
   if (!firstAck.ok) fatal(`el socket no acepta location: ${firstAck.error ?? 'sin detalle'}`);
 
-  log(`AVAILABLE y publicando en ${lat},${lon} cada ${LOCATION_INTERVAL_MS / 1000}s — Ctrl-C para cortar`);
+  log(
+    `AVAILABLE y publicando en ${lat},${lon} cada ${LOCATION_INTERVAL_MS / 1000}s — Ctrl-C para cortar`,
+  );
   let published = 1;
   const interval = setInterval(async () => {
     const ack = await publishLocation().catch((err) => ({ ok: false, error: err.message }));
@@ -364,20 +370,25 @@ async function cmdReady(latRaw, lonRaw) {
 
 async function cmdOffer(priceRaw) {
   const st = loadState();
-  if (!st.accessToken) fatal('no hay sesión en .state.json — corré primero `node driver-sim ready`');
+  if (!st.accessToken)
+    fatal('no hay sesión en .state.json — corré primero `node driver-sim ready`');
   const token = st.accessToken;
 
   // Camino FIXED: llegó una oferta directa por el socket (dispatch:offer) → se acepta como el golden
   // path paso 4: POST /dispatch/offers/:matchId/accept (dispatch.controller.ts del driver-bff).
   if (st.lastOffer && !st.lastOffer.consumed) {
-    log(`hay una oferta directa pendiente (FIXED) · trip ${st.lastOffer.tripId} · match ${st.lastOffer.matchId} — la acepto`);
+    log(
+      `hay una oferta directa pendiente (FIXED) · trip ${st.lastOffer.tripId} · match ${st.lastOffer.matchId} — la acepto`,
+    );
     await api('POST', `/dispatch/offers/${st.lastOffer.matchId}/accept`, { token });
     saveState({
       tripId: st.lastOffer.tripId,
       matchId: st.lastOffer.matchId,
       lastOffer: { ...st.lastOffer, consumed: true },
     });
-    log(`oferta aceptada · tripId ${st.lastOffer.tripId} guardado. Seguí con \`node driver-sim fsm accept\``);
+    log(
+      `oferta aceptada · tripId ${st.lastOffer.tripId} guardado. Seguí con \`node driver-sim fsm accept\``,
+    );
     return;
   }
 
@@ -402,16 +413,23 @@ async function cmdOffer(priceRaw) {
   }
   // ACCEPT_PRICE debe IGUALAR el bid; COUNTER debe superarlo (reglas en dispatch downstream).
   const kind = priceCents === bid.bidCents ? 'ACCEPT_PRICE' : 'COUNTER';
-  const view = await api('POST', `/bids/${bid.tripId}/offer`, { token, body: { kind, priceCents } });
+  const view = await api('POST', `/bids/${bid.tripId}/offer`, {
+    token,
+    body: { kind, priceCents },
+  });
   saveState({ tripId: bid.tripId, driverId: view.driverId, submittedOffer: view });
   log(
     `oferta enviada (${kind} S/ ${(priceCents / 100).toFixed(2)}) → status ${view.status} · ` +
       `tripId ${bid.tripId} guardado en .state.json`,
   );
   if (kind === 'COUNTER') {
-    log('ahora el pasajero elige: mirá el proceso `ready` (loguea dispatch:match / trip:update cuando te elijan)');
+    log(
+      'ahora el pasajero elige: mirá el proceso `ready` (loguea dispatch:match / trip:update cuando te elijan)',
+    );
   } else {
-    log('aceptaste el precio del pasajero: mirá el proceso `ready` para el match y seguí con `fsm accept`');
+    log(
+      'aceptaste el precio del pasajero: mirá el proceso `ready` para el match y seguí con `fsm accept`',
+    );
   }
 }
 
@@ -428,10 +446,12 @@ const FSM_STAGES = {
 
 async function cmdFsm(stage, tripFlag) {
   const spec = FSM_STAGES[stage];
-  if (!spec) fatal(`etapa desconocida: "${stage}". Usá una de: ${Object.keys(FSM_STAGES).join('|')}`);
+  if (!spec)
+    fatal(`etapa desconocida: "${stage}". Usá una de: ${Object.keys(FSM_STAGES).join('|')}`);
 
   const st = loadState();
-  if (!st.accessToken) fatal('no hay sesión en .state.json — corré primero `node driver-sim ready`');
+  if (!st.accessToken)
+    fatal('no hay sesión en .state.json — corré primero `node driver-sim ready`');
   const token = st.accessToken;
 
   let tripId = tripFlag ?? st.tripId;
@@ -440,7 +460,8 @@ async function cmdFsm(stage, tripFlag) {
     const active = await api('GET', '/trips/active', { token });
     tripId = active?.id;
   }
-  if (!tripId) fatal('no tengo tripId: ni en .state.json, ni --trip, ni viaje activo en /trips/active');
+  if (!tripId)
+    fatal('no tengo tripId: ni en .state.json, ni --trip, ni viaje activo en /trips/active');
 
   log(`transiciono trip ${tripId}: ${stage} → espero ${spec.expect}`);
   await api('POST', `/trips/${tripId}/${stage}`, { token, body: spec.body });

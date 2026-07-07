@@ -80,7 +80,9 @@ const KEYCHAIN_RETRY_BACKOFF_MS = 20;
 /** Error tipado: el Keychain no estuvo disponible tras agotar los reintentos. */
 export class KeychainUnavailableError extends Error {
   constructor(cause?: unknown) {
-    super('No se pudo acceder al Keychain para la clave de cifrado del almacén seguro.');
+    super(
+      'No se pudo acceder al Keychain para la clave de cifrado del almacén seguro.',
+    );
     this.name = 'KeychainUnavailableError';
     if (cause !== undefined) {
       this.cause = cause;
@@ -164,7 +166,9 @@ function generateEncryptionKey(): string {
 
 /** Lee la clave existente del Keychain/Keystore; `null` si no hay (primer arranque). Puede lanzar. */
 async function readExistingKey(): Promise<string | null> {
-  const existing = await Keychain.getGenericPassword({service: SECURE_KEY_SERVICE});
+  const existing = await Keychain.getGenericPassword({
+    service: SECURE_KEY_SERVICE,
+  });
   return existing && existing.password ? existing.password : null;
 }
 

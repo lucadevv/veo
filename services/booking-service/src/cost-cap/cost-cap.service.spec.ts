@@ -22,7 +22,10 @@ function routeOf(distanceMeters: number): RouteResult {
  * MapsClient MOCKEADO — NUNCA toca OSRM. `route` devuelve la distancia que dicte `routeFn` (por defecto
  * fija). El resto de métodos del puerto no se usan en el gate → stubs que lanzan si alguien los llama.
  */
-function makeMaps(routeFn: () => Promise<RouteResult>): { maps: MapsClient; route: ReturnType<typeof vi.fn> } {
+function makeMaps(routeFn: () => Promise<RouteResult>): {
+  maps: MapsClient;
+  route: ReturnType<typeof vi.fn>;
+} {
   const route = vi.fn(routeFn);
   const notUsed = () => {
     throw new Error('no debería llamarse en el gate F1b');
@@ -44,7 +47,10 @@ function makeCostPerKm(
   getCostPerKmCents: (pais: string) => Promise<number> = async (pais) => COST_PER_KM[pais] ?? 0,
 ): { svc: CostPerKmConfigService; getCostPerKmCents: ReturnType<typeof vi.fn> } {
   const spy = vi.fn(getCostPerKmCents);
-  return { svc: { getCostPerKmCents: spy } as unknown as CostPerKmConfigService, getCostPerKmCents: spy };
+  return {
+    svc: { getCostPerKmCents: spy } as unknown as CostPerKmConfigService,
+    getCostPerKmCents: spy,
+  };
 }
 
 function makeService(
@@ -77,7 +83,9 @@ describe('CostCapService · gate F1b full-route (costo/km DIRECTO del admin)', (
     const { maps, route } = makeMaps(async () => routeOf(10_000));
     const service = makeService(maps);
 
-    await expect(service.assertPriceCap(makeInput({ precioBaseCentimos: 375 }))).resolves.toBeUndefined();
+    await expect(
+      service.assertPriceCap(makeInput({ precioBaseCentimos: 375 })),
+    ).resolves.toBeUndefined();
     expect(route).toHaveBeenCalled();
   });
 
@@ -88,9 +96,9 @@ describe('CostCapService · gate F1b full-route (costo/km DIRECTO del admin)', (
     await expect(
       service.assertPriceCap(makeInput({ precioBaseCentimos: 376 })),
     ).rejects.toMatchObject({ details: { topeCentimos: 375, precioBaseCentimos: 376 } });
-    await expect(service.assertPriceCap(makeInput({ precioBaseCentimos: 376 }))).rejects.toBeInstanceOf(
-      ValidationError,
-    );
+    await expect(
+      service.assertPriceCap(makeInput({ precioBaseCentimos: 376 })),
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('lee el costo/km de la config del admin (per-país), no de un valor fijo', async () => {

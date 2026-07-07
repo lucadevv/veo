@@ -106,7 +106,11 @@ function makePrisma(payment: FakePayment, seedRefund?: FakeRefund) {
           data,
         }: {
           where: { id: string };
-          data: { refundedCents?: { decrement: number }; status?: string; refundedAt?: Date | null };
+          data: {
+            refundedCents?: { decrement: number };
+            status?: string;
+            refundedAt?: Date | null;
+          };
         }) => {
           if (data.refundedCents?.decrement !== undefined) {
             payment.refundedCents -= data.refundedCents.decrement;
@@ -149,13 +153,17 @@ function makePrisma(payment: FakePayment, seedRefund?: FakeRefund) {
   const prisma = {
     read: {
       payment: {
-        findFirst: vi.fn(async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
-          payment.tripId === where.tripId && where.status.in.includes(payment.status) ? payment : null,
+        findFirst: vi.fn(
+          async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
+            payment.tripId === where.tripId && where.status.in.includes(payment.status)
+              ? payment
+              : null,
         ),
       },
       refund: {
-        findFirst: vi.fn(async ({ where }: { where: { externalRefundId: string } }) =>
-          refunds.find((r) => r.externalRefundId === where.externalRefundId) ?? null,
+        findFirst: vi.fn(
+          async ({ where }: { where: { externalRefundId: string } }) =>
+            refunds.find((r) => r.externalRefundId === where.externalRefundId) ?? null,
         ),
       },
     },
@@ -163,11 +171,13 @@ function makePrisma(payment: FakePayment, seedRefund?: FakeRefund) {
       $transaction: async <T>(cb: (t: typeof tx) => Promise<T>): Promise<T> => cb(tx),
       // Persistencia del uid del reverso (refundViaGateway, fuera de la tx de reserva).
       refund: {
-        update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<FakeRefund> }) => {
-          const r = refunds.find((x) => x.id === where.id);
-          if (r) Object.assign(r, data);
-          return r;
-        }),
+        update: vi.fn(
+          async ({ where, data }: { where: { id: string }; data: Partial<FakeRefund> }) => {
+            const r = refunds.find((x) => x.id === where.id);
+            if (r) Object.assign(r, data);
+            return r;
+          },
+        ),
       },
     },
   } as unknown as PrismaService;
@@ -190,15 +200,7 @@ function rejectingGateway(result: RefundResult): PaymentGateway {
 
 function buildService(prisma: PrismaService, gateway: PaymentGateway, metrics: PaymentMetrics) {
   // Orden del constructor: (prisma, gateway, affiliations, promotions, config, credit?, metrics?).
-  return new PaymentsService(
-    prisma,
-    gateway,
-    {} as never,
-    {} as never,
-    config,
-    undefined,
-    metrics,
-  );
+  return new PaymentsService(prisma, gateway, {} as never, {} as never, config, undefined, metrics);
 }
 
 const BOOKING_ID = '018f9a3e-1c2b-7d4e-8a1f-0123456789ab';
@@ -207,7 +209,11 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
   it('ASYNC (callback DECLINED, system-initiated) → emite incRefundBackstop("rejected") + Refund REJECTED durable + Payment restaurado a CAPTURED', async () => {
     // El reverso fue ACEPTADO (PENDING) y el callback lo RECHAZA días después. ESTE es el riel que ANTES evadía
     // la métrica (el consumer ya commiteó el offset al ver PENDING). Ahora la emite rejectRefundAndCompensate.
-    const payment = capturedPayment({ status: 'REFUNDED', refundedCents: 4500, refundedAt: new Date() });
+    const payment = capturedPayment({
+      status: 'REFUNDED',
+      refundedCents: 4500,
+      refundedAt: new Date(),
+    });
     const pendingRefund: FakeRefund = {
       id: 'ref-async',
       paymentId: 'pay-1',
@@ -241,7 +247,11 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
   });
 
   it('ASYNC EXPIRED (system-initiated) → también emite el backstop (mismo riel de rechazo)', async () => {
-    const payment = capturedPayment({ status: 'REFUNDED', refundedCents: 4500, refundedAt: new Date() });
+    const payment = capturedPayment({
+      status: 'REFUNDED',
+      refundedCents: 4500,
+      refundedAt: new Date(),
+    });
     const pendingRefund: FakeRefund = {
       id: 'ref-exp',
       paymentId: 'pay-1',
@@ -266,7 +276,11 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
 
   it('ASYNC re-entregado (callback DECLINED 2×, system-initiated) → métrica UNA sola vez (CAS idempotente)', async () => {
     // Una redelivery del callback NO debe volver a contar: el CAS PENDING→REJECTED ya no aplica (count=0).
-    const payment = capturedPayment({ status: 'REFUNDED', refundedCents: 4500, refundedAt: new Date() });
+    const payment = capturedPayment({
+      status: 'REFUNDED',
+      refundedCents: 4500,
+      refundedAt: new Date(),
+    });
     const pendingRefund: FakeRefund = {
       id: 'ref-redeliv',
       paymentId: 'pay-1',
@@ -284,8 +298,14 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
     const metrics = { incRefundBackstop } as unknown as PaymentMetrics;
     const svc = buildService(prisma, rejectingGateway({ status: 'PENDING' }), metrics);
 
-    await svc.applyRefundWebhookResult({ externalRefundId: 'reverse-uid-redeliv', status: 'DECLINED' });
-    await svc.applyRefundWebhookResult({ externalRefundId: 'reverse-uid-redeliv', status: 'DECLINED' });
+    await svc.applyRefundWebhookResult({
+      externalRefundId: 'reverse-uid-redeliv',
+      status: 'DECLINED',
+    });
+    await svc.applyRefundWebhookResult({
+      externalRefundId: 'reverse-uid-redeliv',
+      status: 'DECLINED',
+    });
 
     expect(incRefundBackstop).toHaveBeenCalledTimes(1);
   });
@@ -297,7 +317,11 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
     const { prisma } = makePrisma(payment);
     const incRefundBackstop = vi.fn();
     const metrics = { incRefundBackstop } as unknown as PaymentMetrics;
-    const svc = buildService(prisma, rejectingGateway({ status: 'REJECTED', reason: 'reverse_rejected' }), metrics);
+    const svc = buildService(
+      prisma,
+      rejectingGateway({ status: 'REJECTED', reason: 'reverse_rejected' }),
+      metrics,
+    );
 
     await expect(
       svc.refundForBookingCancellation(BOOKING_ID, BookingCancelledRazon.ASIENTO_LLENO),
@@ -314,7 +338,11 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
   it('ADMIN rechazado (dedupKey NULL) por callback → NO emite la métrica de backstop (lo ve el operador en su UI)', async () => {
     // Un refund ADMIN discrecional lleva dedupKey NULL. Su rechazo pasa por el MISMO rejectRefundAndCompensate,
     // pero la métrica de backstop es SOLO para los system-initiated (sin humano monitoreando).
-    const payment = capturedPayment({ status: 'REFUNDED', refundedCents: 4500, refundedAt: new Date() });
+    const payment = capturedPayment({
+      status: 'REFUNDED',
+      refundedCents: 4500,
+      refundedAt: new Date(),
+    });
     const adminRefund: FakeRefund = {
       id: 'ref-admin',
       paymentId: 'pay-1',

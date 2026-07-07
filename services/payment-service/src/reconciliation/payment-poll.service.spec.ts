@@ -123,9 +123,12 @@ describe('PaymentPollService.pollOnce · poll fallback', () => {
   // #24 · huérfano viejo: el proveedor nunca registró el cobro y ya pasó la ventana → se EXPIRA (no queda PENDING).
   it('found=false VIEJO (> maxAgeMin, checkout abandonado) → EXPIRA por applyWebhookResult(EXPIRED)', async () => {
     const old = new Date(Date.now() - 120 * 60_000); // 120min > maxAgeMin (60)
-    const { svc, applyWebhookResult } = build([{ id: 'pay-old', externalUid: 'U1', createdAt: old }], {
-      U1: { found: false, status: 'PENDING' },
-    });
+    const { svc, applyWebhookResult } = build(
+      [{ id: 'pay-old', externalUid: 'U1', createdAt: old }],
+      {
+        U1: { found: false, status: 'PENDING' },
+      },
+    );
     const res = await svc.pollOnce();
     expect(applyWebhookResult).toHaveBeenCalledWith({
       paymentId: 'pay-old',

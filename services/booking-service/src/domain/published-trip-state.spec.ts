@@ -62,9 +62,7 @@ describe('Eje PublishedTrip.estado · cobertura del producto cartesiano', () => 
   it('COMPLETADO y CANCELADO son terminales (sin salida)', () => {
     for (const to of ALL_STATES) {
       if (to === PublishedTripState.COMPLETADO) continue; // from===to idempotente
-      expect(
-        publishedTripMachine.canTransition(PublishedTripState.COMPLETADO, to),
-      ).toBe(false);
+      expect(publishedTripMachine.canTransition(PublishedTripState.COMPLETADO, to)).toBe(false);
     }
     for (const to of ALL_STATES) {
       if (to === PublishedTripState.CANCELADO) continue;

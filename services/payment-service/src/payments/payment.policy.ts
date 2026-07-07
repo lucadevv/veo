@@ -60,7 +60,9 @@ export const BPS_DENOMINATOR = 10_000;
  * aplica al COBRAR; el valor de dominio/persistido es SIEMPRE el Int en bps. */
 export function bpsToRate(bps: number): number {
   if (!Number.isInteger(bps) || bps < 0 || bps > BPS_DENOMINATOR) {
-    throw new InvalidStateError(`tasa en bps inválida: ${bps} (esperado un entero 0..${BPS_DENOMINATOR})`);
+    throw new InvalidStateError(
+      `tasa en bps inválida: ${bps} (esperado un entero 0..${BPS_DENOMINATOR})`,
+    );
   }
   return bps / BPS_DENOMINATOR;
 }
@@ -401,4 +403,3 @@ export const ADMIN_REFUND_DEDUP_PREFIX = 'admin-refund:' as const;
 export function deriveAdminRefundDedupKey(idempotencyKey: string): string {
   return `${ADMIN_REFUND_DEDUP_PREFIX}${idempotencyKey}`;
 }
-

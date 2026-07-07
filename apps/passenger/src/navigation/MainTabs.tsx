@@ -2,7 +2,10 @@ import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import React from 'react';
 import {ProfileScreen} from '../features/profile/presentation';
 import {SeguridadScreen} from '../features/security/presentation/screens/SeguridadScreen';
-import {RequestFlowScreen, TripHistoryScreen} from '../features/trip/presentation';
+import {
+  RequestFlowScreen,
+  TripHistoryScreen,
+} from '../features/trip/presentation';
 import {AppTabBar} from './components/AppTabBar';
 import type {MainTabsParamList} from './types';
 

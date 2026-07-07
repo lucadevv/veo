@@ -226,7 +226,11 @@ export function TripStatusStrip({
           no en el tamaño/color más apagado. Personalizado con el nombre real cuando existe + ETA como
           pill a la derecha (design/veo.pen fLKdk StatusRow). */}
       <View style={styles.labelRow}>
-        <Text variant="subhead" color="ink" style={styles.label} numberOfLines={1}>
+        <Text
+          variant="subhead"
+          color="ink"
+          style={styles.label}
+          numberOfLines={1}>
           {firstName ? t(namedKey, {name: firstName}) : t(labelKey)}
         </Text>
         {etaLabel ? (

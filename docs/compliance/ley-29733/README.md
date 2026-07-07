@@ -4,27 +4,27 @@
 
 ## Principios aplicados
 
-| Principio                | Cómo lo implementamos                                                                                            |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| **Consentimiento**       | Pantallas dedicadas al onboarding, no enterradas en T&C. Granular por propósito (KYC, video, geo).               |
-| **Finalidad**            | Datos usados solo para el propósito declarado. NO marketing, NO entrenamiento de modelos sin consent específico. |
-| **Proporcionalidad**     | Mínimo necesario (video 22 min/trip, no audio fuera del trip, GPS solo durante viaje).                           |
-| **Calidad**              | Validación de datos en ingreso. Mecanismo de corrección.                                                         |
+| Principio                | Cómo lo implementamos                                                                                                                                                                                                             |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Consentimiento**       | Pantallas dedicadas al onboarding, no enterradas en T&C. Granular por propósito (KYC, video, geo).                                                                                                                                |
+| **Finalidad**            | Datos usados solo para el propósito declarado. NO marketing, NO entrenamiento de modelos sin consent específico.                                                                                                                  |
+| **Proporcionalidad**     | Mínimo necesario (video 22 min/trip, no audio fuera del trip, GPS solo durante viaje).                                                                                                                                            |
+| **Calidad**              | Validación de datos en ingreso. Mecanismo de corrección.                                                                                                                                                                          |
 | **Seguridad**            | TLS 1.3, cifrado at-rest con clave self-hosted (SOPS+age, NO AWS KMS — §0.7c): **AES-256-GCM app-level** (pii/biometric) + **MinIO SSE-S3 server-side** (video, envelope transparente). mTLS interno, RBAC, MFA, audit inmutable. |
-| **Confidencialidad**     | Doble auth para acceso a video. Watermark dinámico. Audit log inmutable.                                         |
-| **Derechos del titular** | Rectificación, cancelación, oposición — endpoints en código. **Acceso (data-export): planificado, aún NO implementado** (ver §Acceso).                                    |
+| **Confidencialidad**     | Doble auth para acceso a video. Watermark dinámico. Audit log inmutable.                                                                                                                                                          |
+| **Derechos del titular** | Rectificación, cancelación, oposición — endpoints en código. **Acceso (data-export): planificado, aún NO implementado** (ver §Acceso).                                                                                            |
 
 ## Datos personales que tratamos
 
-| Categoría              | Tipo                             | Retención              | Cifrado                               |
-| ---------------------- | -------------------------------- | ---------------------- | ------------------------------------- |
-| Identidad básica       | nombre, phone, email             | Vida cuenta + 30d      | AES-256-GCM app-level, dominio `pii`              |
-| Documento de identidad | DNI (hash)                       | Vida cuenta            | AES-256-GCM app-level, dominio `pii`              |
-| Datos biométricos      | foto facial + score liveness     | Vida cuenta            | AES-256-GCM app-level, dominio `biometric` (clave separada) |
-| Ubicación              | GPS pings histórico              | 90 días (configurable) | ClickHouse cifrado                               |
+| Categoría              | Tipo                             | Retención              | Cifrado                                                                                                   |
+| ---------------------- | -------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| Identidad básica       | nombre, phone, email             | Vida cuenta + 30d      | AES-256-GCM app-level, dominio `pii`                                                                      |
+| Documento de identidad | DNI (hash)                       | Vida cuenta            | AES-256-GCM app-level, dominio `pii`                                                                      |
+| Datos biométricos      | foto facial + score liveness     | Vida cuenta            | AES-256-GCM app-level, dominio `biometric` (clave separada)                                               |
+| Ubicación              | GPS pings histórico              | 90 días (configurable) | ClickHouse cifrado                                                                                        |
 | Video del viaje        | grabación interior               | 30/90/180 días         | **MinIO SSE-S3 server-side (envelope)**, clave maestra self-hosted vía SOPS+age, dominio `video` — NO AWS |
-| Comunicaciones         | chat anónimo conductor↔pasajero  | 90 días                | AES-256-GCM app-level, dominio `pii`             |
-| Pagos                  | últimos 4 dígitos, transacciones | 5 años (regulatorio)   | AES-256-GCM app-level, dominio `pii`             |
+| Comunicaciones         | chat anónimo conductor↔pasajero  | 90 días                | AES-256-GCM app-level, dominio `pii`                                                                      |
+| Pagos                  | últimos 4 dígitos, transacciones | 5 años (regulatorio)   | AES-256-GCM app-level, dominio `pii`                                                                      |
 
 ## Derechos del titular
 

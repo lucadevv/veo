@@ -1,8 +1,5 @@
 import { useEffect, useRef } from 'react';
-import {
-  applyRegistrationHydration,
-  buildRegistrationHydrationPlan,
-} from '../../domain';
+import { applyRegistrationHydration, buildRegistrationHydrationPlan } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationDocuments } from './useRegistrationDocuments';
 

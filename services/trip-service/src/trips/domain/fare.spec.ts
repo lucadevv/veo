@@ -62,7 +62,11 @@ describe('BR-T05 · cálculo de tarifa', () => {
       surgeMultiplier: 1.5,
       childMode: true,
     });
-    const sinChild = calculateFare({ distanceMeters: 5000, durationSeconds: 600, surgeMultiplier: 1.5 });
+    const sinChild = calculateFare({
+      distanceMeters: 5000,
+      durationSeconds: 600,
+      surgeMultiplier: 1.5,
+    });
     // calculateFare devuelve la BASE (2250) sin importar childMode: el fee lo suma calculateFirmFare al final.
     expect(conChild.cents).toBe(2250);
     expect(conChild.cents).toBe(sinChild.cents);
@@ -190,6 +194,8 @@ describe('BR-T05 + BR-T07 · calculateFirmFare (tarifa firme + fee de niño PLAN
       { ...smallInput, childMode: true },
       OFFERINGS[OfferingId.VEO_MOTO].pricing,
     );
-    expect(con.cents).toBe(OFFERINGS[OfferingId.VEO_MOTO].pricing.minFareCents + CHILD_MODE_FEE_CENTS);
+    expect(con.cents).toBe(
+      OFFERINGS[OfferingId.VEO_MOTO].pricing.minFareCents + CHILD_MODE_FEE_CENTS,
+    );
   });
 });

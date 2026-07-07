@@ -16,37 +16,46 @@ accept a driver recién-offline, y sin release del pool.
 ## 1. Hallazgos por tema (severidad · evidencia file:line)
 
 ### 🔴 A — Integridad driver 1-viaje (CRÍTICA)
+
 - **A1** driver gana N viajes: accept CAS es per-trip no per-driver (`redis-offer-board.store.ts:109`); currentStatus nunca ON_TRIP; `markBusy` (`offer-board.service.ts:716`) nunca leído en `eligibility.gate.ts:94-194`; trip-service assign guarda per-trip. 2 pasajeros aceptan al mismo driver a la vez = ambos ganan.
 - **A2** accept a driver recién-offline dentro del loc-TTL (identity sigue AVAILABLE) → luego B.
 
 ### 🔴 B — Señal de driver-offline / release del pool (CRÍTICA/ALTA)
+
 - **B1** driver-offline tras ganar → SIN reassign: no hay `driver.went_offline`; `driver-status.ts:22-36` permite ON_TRIP→OFFLINE sin guard; watchdog pre-pickup 15min → EXPIRED (no reassign). Solo el cancel EXPLÍCITO reabre board (`trips.service.ts:1137,1222`).
 - **B2** driver NO liberado del pool en `trip.cancelled`/`expired`/`failed` → busy 2h (BUSY_TTL 7200). `onTripCancelled` sin `releaseDriver`; el consumer (`kafka-consumers.service.ts`) no maneja expired/failed; comentario "mirror" miente. (`releaseDriver` solo en completed/reassigning.)
 
 ### 🟠 C — Dinero (ALTA)
+
 - **C1** surge confiado del DTO del cliente sin re-quote server (`trip.dto.ts:115` → `trips.service.ts:506` `surge=dto.surgeMultiplier??1.0` → `fixed-dispatch.strategy.ts:45`). Cliente puede esquivar surge. Viola dinero-server-side. (PUJA no afectada: el bid es el precio.)
 
 ### 🟠 D — Concurrencia / guards (ALTA)
+
 - **D1** sin índice único parcial `(passengerId) WHERE status IN (live)` → 2 requests concurrentes = 2 viajes (`trips.service.ts:470` check-then-act).
 - **D2** create idempotente → 500 bajo doble-tap concurrente (sin catch P2002 en la tx, `trips.service.ts:593`).
 
 ### 🟠 E — Rating bilateral (ALTA)
+
 - **E1** `rating tripId @unique` (`schema.prisma:30`) bloquea al 2do rater (`ratings.service.ts:91,125`); el comentario `:166` dice "DOS ratings" (contradicho) → rompe `passenger.flagged`.
 
 ### 🟠 F — Timing de oferta al conductor (ALTA)
+
 - **F1** `expiresAt` calculado post-`await maps.eta()` (`matching.service.ts:325→331`) diverge de `offeredAt` → el driver ve más tiempo → aceptar tarde = 409.
 - **F2** 12s default tenso (relay + 2do GET del fare). Ya admin-config (ADR-019); subir default ~20-25s.
 - **F3** solo-driver: 1 sola oferta de 12s → no_offers, sin re-oferta.
 - **F4** FIXED sin push FCM (no consumer notification de `dispatch.offered`) ni poll de respaldo (`/bids/open` es solo PUJA).
 
 ### 🟠 G — Driver cancel desde ASSIGNED (ALTA)
+
 - **G1** cancel del driver desde ASSIGNED (pre-accept PUJA) es terminal, sin reopen (`POST_ACCEPT_STATES` excluye ASSIGNED, `trips.service.ts:130`).
 
 ### 🟠 H — UI = marioneta (ALTA/MED)
+
 - **H1** el conductor decide el expiry con el reloj LOCAL → des-autoriza una puja válida (`CounterOfferSheet.tsx:61`); el pasajero ya lo arregló (display-only, espera EXPIRED del server) — asimetría.
 - **H2** el panel de config del admin (Lote A / ADR-019) usó `onSuccess` en vez de `onSettled` (`queries.ts:947`) → read-model stale + loop de guardado muerto en 409. **Regresión introducida en ADR-019.**
 
 ### 🟡 Medias/Bajas
+
 IN_PROGRESS offline→6h FAILED (I1) · SCHEDULED no en Kafka → admin ciego (I2, = ADR-019 D3) · board pujas sin orden + rebaraja cada 12s (I3) · FIXED vs PUJA pelean navegación + FIXED single-slot (I4) · cards expired linger 12s (I5) · CounterScreen fabrica ASSIGNED optimista (I6) · pending driver client-only no rehidratable (I7) · mergeOffers un-withdraw en evento stale (I8) · demand counter sin EXPIRE si crash post-INCR (I9).
 
 ## 2. Decisión — hardening por FASES (cada fase gated + boot-real cruzado)
@@ -76,5 +85,6 @@ IN_PROGRESS offline→6h FAILED (I1) · SCHEDULED no en Kafka → admin ciego (I
   - Ventana sigue difiriendo por mecánica (FIXED=turno del conductor vs PUJA=board compartido) — aceptado por el dueño; lo que se unifica es el LOOK + el encoding + la honestidad del pasajero.
 
 ## 3. Verificación (cada fase)
+
 tsc + tests + `auditar-core` (scope de la fase) + BOOT-REAL cruzado entre superficies. No se entrega una
 fase sin cerrar su hallazgo contra el código/DB en runtime.

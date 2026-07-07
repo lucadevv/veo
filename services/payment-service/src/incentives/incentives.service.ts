@@ -117,7 +117,9 @@ export class IncentivesService {
     // de plata lo paga todavía (collectEarnings no aplica el multiplicador). Mostrarlo sería prometer una
     // ganancia que no llega ("promesa sin pago"). Se DES-OCULTA cuando el payout implemente el multiplicador de
     // hora-pico. La config (multiplierBps + peakStart/EndMinute) queda en el modelo para ese momento.
-    const active = incentives.filter((i) => isActiveAt(i, now) && i.type !== IncentiveType.HORA_PICO);
+    const active = incentives.filter(
+      (i) => isActiveAt(i, now) && i.type !== IncentiveType.HORA_PICO,
+    );
     const progresses = await this.prisma.read.incentiveProgress.findMany({
       where: { driverId, incentiveId: { in: active.map((i) => i.id) } },
     });

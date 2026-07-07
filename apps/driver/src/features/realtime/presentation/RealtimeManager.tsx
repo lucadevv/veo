@@ -40,7 +40,10 @@ export const RealtimeManager = (): null => {
   // HTTP-refresh (que puede ser un blip de red): ahí conservar el Keychain permite un relogin cuando la red vuelve.
   const expireOnRemoteRevocation = () => {
     localAuth.clear().catch((err) => {
-      console.warn('[realtime] no se pudo limpiar el Keychain biométrico tras revocación remota:', err);
+      console.warn(
+        '[realtime] no se pudo limpiar el Keychain biométrico tras revocación remota:',
+        err,
+      );
     });
     useSessionStore.getState().expireSession();
   };

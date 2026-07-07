@@ -26,7 +26,10 @@ describe('NativeDocumentScanner', () => {
   it('devuelve las imágenes base64 y el texto OCR que entrega el módulo nativo (en orden, alineados)', async () => {
     const scan = jest.fn().mockResolvedValue({
       images: ['/9j/aaa', '/9j/bbb'],
-      textLines: [['DNI', '12345678'], ['SOAT', 'Hasta 31/12/2027']],
+      textLines: [
+        ['DNI', '12345678'],
+        ['SOAT', 'Hasta 31/12/2027'],
+      ],
     });
     (NativeModules as Record<string, unknown>).VeoDocumentScanner = { scan };
 
@@ -34,7 +37,10 @@ describe('NativeDocumentScanner', () => {
     const result = await nativeDocumentScanner.scan({ maxPages: 2 });
 
     expect(result.images).toEqual(['/9j/aaa', '/9j/bbb']);
-    expect(result.textLines).toEqual([['DNI', '12345678'], ['SOAT', 'Hasta 31/12/2027']]);
+    expect(result.textLines).toEqual([
+      ['DNI', '12345678'],
+      ['SOAT', 'Hasta 31/12/2027'],
+    ]);
     expect(scan).toHaveBeenCalledWith({ maxPages: 2 });
     expect(nativeDocumentScannerLinked).toBe(true);
   });

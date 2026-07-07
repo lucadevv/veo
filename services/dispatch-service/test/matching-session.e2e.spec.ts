@@ -457,7 +457,11 @@ describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin hu
     expect(timeoutCount1).toBe(K);
     // Las (N-K) no tomadas SIGUEN OFFERED y vencidas → su 1ra oferta aún viva (no huérfana, no avanzada).
     const stillExpiredOffered = await prisma.dispatchMatch.count({
-      where: { tripId: { in: trips }, outcome: DispatchOutcome.OFFERED, offeredAt: { lt: new Date(Date.now() - 12_000) } },
+      where: {
+        tripId: { in: trips },
+        outcome: DispatchOutcome.OFFERED,
+        offeredAt: { lt: new Date(Date.now() - 12_000) },
+      },
     });
     expect(stillExpiredOffered).toBe(N - K);
 
@@ -466,7 +470,11 @@ describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin hu
     expect(advanced2).toBe(N - K);
     expect(
       await prisma.dispatchMatch.count({
-        where: { tripId: { in: trips }, outcome: DispatchOutcome.OFFERED, offeredAt: { lt: new Date(Date.now() - 12_000) } },
+        where: {
+          tripId: { in: trips },
+          outcome: DispatchOutcome.OFFERED,
+          offeredAt: { lt: new Date(Date.now() - 12_000) },
+        },
       }),
     ).toBe(0); // ya no quedan vencidas sin avanzar → cero huérfanas
   });
@@ -478,7 +486,10 @@ describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin hu
     // (la anti-doble-oferta es per-trip, vía el Set `attempted` en memoria; no coordina entre viajes). Por eso el
     // barrido recorre las ofertas vencidas con un `for ... of` + `await offerNext` (una a la vez), JAMÁS con
     // Promise.all/allSettled. Este test lee el código fuente y FALLA si alguien mete paralelización en el sweep.
-    const src = readFileSync(new URL('../src/dispatch/matching.service.ts', import.meta.url), 'utf8');
+    const src = readFileSync(
+      new URL('../src/dispatch/matching.service.ts', import.meta.url),
+      'utf8',
+    );
     const sweepBody = src.slice(
       src.indexOf('async sweepExpiredOffers'),
       src.indexOf('private async createAndDeliverOffer'),
@@ -505,9 +516,21 @@ describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin hu
       new DispatchScorer({ distance: 5000, rating: 1, idle: 10, cancel: 5 }),
       {
         getStats: async (ids: string[]) =>
-          new Map(ids.map((id) => [id, { avgRating: 5, secondsSinceLastTrip: 1e9, cancellationRate: 0 }])),
+          new Map(
+            ids.map((id) => [id, { avgRating: 5, secondsSinceLastTrip: 1e9, cancellationRate: 0 }]),
+          ),
       } as never,
-      { quote: async () => ({ multiplier: 1, zoneId: null, zoneName: null, active: false, demand: 0, supply: 0, ratio: 0 }) } as never,
+      {
+        quote: async () => ({
+          multiplier: 1,
+          zoneId: null,
+          zoneName: null,
+          active: false,
+          demand: 0,
+          supply: 0,
+          ratio: 0,
+        }),
+      } as never,
       { eta: async () => 60 } as never,
       { deliver: (): void => {} },
       { getWindows: async () => ({ offerTimeoutMs: 12_000, bidWindowSec: 60 }) } as never,

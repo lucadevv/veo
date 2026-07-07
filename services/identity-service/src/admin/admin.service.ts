@@ -8,7 +8,12 @@ import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import argon2 from 'argon2';
 import { JwtService, RedisRefreshTokenStore, enrollTotp, verifyTotp } from '@veo/auth';
-import { AdminRole as AdminRoles, canGrantRoles, maxRoleRank, type AdminRole } from '@veo/shared-types';
+import {
+  AdminRole as AdminRoles,
+  canGrantRoles,
+  maxRoleRank,
+  type AdminRole,
+} from '@veo/shared-types';
 import { enqueueOutbox } from '@veo/database';
 import { createEnvelope } from '@veo/events';
 import {
@@ -25,11 +30,7 @@ import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { AdminStatus } from '../generated/prisma';
 import { adminStatusMachine, isOperationalAdmin } from '../domain/admin-status';
-import {
-  generateInviteToken,
-  hashInviteToken,
-  INVITE_TTL_HOURS,
-} from '../domain/invite-token';
+import { generateInviteToken, hashInviteToken, INVITE_TTL_HOURS } from '../domain/invite-token';
 import { seal, open } from '../common/secret-box';
 import { EMAIL_SENDER, type EmailSender } from '../ports/email/email.port';
 import type { Env } from '../config/env.schema';
@@ -378,7 +379,11 @@ export class AdminService {
    * password): un código equivocado tras una password correcta sigue siendo brute-force sobre los
    * 6 dígitos. `email` es opcional para que el caller decida si cuenta el fallo (siempre lo pasa hoy).
    */
-  private async assertTotp(totpSecretEnc: string | null, totp: string, email?: string): Promise<void> {
+  private async assertTotp(
+    totpSecretEnc: string | null,
+    totp: string,
+    email?: string,
+  ): Promise<void> {
     if (!totpSecretEnc) throw new UnauthorizedError('TOTP no configurado');
     if (!verifyTotp(totp, open(totpSecretEnc, this.totpEncKey), this.clock.now())) {
       if (email) await this.registerAdminLoginFailure(email);
@@ -391,7 +396,9 @@ export class AdminService {
     try {
       return Boolean(await this.redis.get(`${ADMIN_LOGIN_LOCK_PREFIX}${this.lockKeyEmail(email)}`));
     } catch (err) {
-      this.logger.warn(`Redis no disponible para chequear el lock de login admin: ${asMessage(err)}`);
+      this.logger.warn(
+        `Redis no disponible para chequear el lock de login admin: ${asMessage(err)}`,
+      );
       return false;
     }
   }
@@ -412,7 +419,9 @@ export class AdminService {
         await this.redis.set(`${ADMIN_LOGIN_LOCK_PREFIX}${key}`, '1', 'EX', this.loginLockSeconds);
       }
     } catch (err) {
-      this.logger.warn(`Redis no disponible para registrar fallo de login admin: ${asMessage(err)}`);
+      this.logger.warn(
+        `Redis no disponible para registrar fallo de login admin: ${asMessage(err)}`,
+      );
     }
   }
 
@@ -425,7 +434,9 @@ export class AdminService {
         `${ADMIN_LOGIN_LOCK_PREFIX}${key}`,
       );
     } catch (err) {
-      this.logger.warn(`Redis no disponible para limpiar el lockout de login admin: ${asMessage(err)}`);
+      this.logger.warn(
+        `Redis no disponible para limpiar el lockout de login admin: ${asMessage(err)}`,
+      );
     }
   }
 

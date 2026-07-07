@@ -9,11 +9,7 @@
  */
 import { Logger } from '@nestjs/common';
 import { ExternalServiceError } from '@veo/utils';
-import type {
-  PayoutGateway,
-  DisburseRequest,
-  DisburseResult,
-} from './payout-gateway.port';
+import type { PayoutGateway, DisburseRequest, DisburseResult } from './payout-gateway.port';
 
 export interface YapePlinPayoutGatewayOptions {
   baseUrl?: string;

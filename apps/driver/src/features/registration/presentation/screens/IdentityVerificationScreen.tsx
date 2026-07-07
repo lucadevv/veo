@@ -172,7 +172,9 @@ export const IdentityVerificationScreen = (_props: Props = {}): React.JSX.Elemen
   const unavailable = errorSource === 'capture' && errorCode === FACE_PHOTO_GRABBER_UNAVAILABLE;
 
   // Subtítulo: en preview, "¿Se ve bien?"; encuadrando, el genérico.
-  const subtitle = isPreview ? t('registration.kyc.previewSubtitle') : t('registration.kyc.subtitle');
+  const subtitle = isPreview
+    ? t('registration.kyc.previewSubtitle')
+    : t('registration.kyc.subtitle');
 
   // EMBEBIDO: publica el footer del KYC al host, ADAPTADO a la fase (el KYC no tiene un "Continuar" plano):
   //  · idle    → "Tomar foto" (+ hint si la cámara arranca).
@@ -337,7 +339,9 @@ export const IdentityVerificationScreen = (_props: Props = {}): React.JSX.Elemen
   // Modo STANDALONE (fuera del wizard, p. ej. tests): chrome propio + exit sheet.
   return (
     <>
-      <SafeScreen header={<RegistrationHeader showLogo onBack={back.onBack} peruRight />}>{stepBody}</SafeScreen>
+      <SafeScreen header={<RegistrationHeader showLogo onBack={back.onBack} peruRight />}>
+        {stepBody}
+      </SafeScreen>
       <RegistrationExitSheet exit={back.exit} />
     </>
   );

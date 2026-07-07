@@ -105,7 +105,13 @@ describe('audience scoping de identidad interna (fail-closed)', () => {
 
   it('RECHAZA (fail-closed) una identidad sin claim aud cuando se exigen audiencias', () => {
     // Header forjado SIN aud pero con HMAC válido (simula un emisor legacy/atacante con el secreto).
-    const legacy = { userId: 'u1', type: 'passenger', roles: [], sessionId: 's1', issuedAt: Date.now() };
+    const legacy = {
+      userId: 'u1',
+      type: 'passenger',
+      roles: [],
+      sessionId: 's1',
+      issuedAt: Date.now(),
+    };
     const header = Buffer.from(JSON.stringify(legacy)).toString('base64url');
     const signature = signHmac(header, 'sec');
     const verified = verifyInternalIdentity(header, signature, 'sec', {
@@ -442,7 +448,9 @@ describe('SessionRevocationStore (denylist de revocación server-side)', () => {
     await rev.revokeAllForUser('u1');
     const nowSec = Math.floor(Date.now() / 1000);
     // Token VIEJO (emitido antes del revoke) → superado.
-    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: nowSec - 2 })).toBe('sessions-superseded');
+    expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: nowSec - 2 })).toBe(
+      'sessions-superseded',
+    );
     // Token NUEVO (emitido después del revoke, iat mayor) → pasa. Esto es el login single-session.
     expect(await rev.isRevoked({ sub: 'u1', sid: 's', iat: nowSec + 2 })).toBeNull();
     // Otro user no se ve afectado por el revoke de u1.

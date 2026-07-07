@@ -1,10 +1,6 @@
 import type { RegistrationRepository } from '../repositories/registration-repository';
 import type { PersonalData, PersonalDataInput, PersonalDataView } from '../entities';
-import {
-  MAX_DRIVER_AGE_YEARS,
-  MIN_DRIVER_AGE_YEARS,
-  ageInYears,
-} from './birthdate-age';
+import { MAX_DRIVER_AGE_YEARS, MIN_DRIVER_AGE_YEARS, ageInYears } from './birthdate-age';
 
 /**
  * Código de error de validación por campo de datos personales. El dominio NO conoce i18n: emite

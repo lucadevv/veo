@@ -31,7 +31,14 @@ const VALID_PERSONAL: PersonalData = {
 };
 
 function face(uri: string): PickedImage {
-  return { uri, mimeType: 'image/jpeg', fileName: 'dni.jpg', width: null, height: null, fileSize: null };
+  return {
+    uri,
+    mimeType: 'image/jpeg',
+    fileName: 'dni.jpg',
+    width: null,
+    height: null,
+    fileSize: null,
+  };
 }
 
 interface RepoDouble {
@@ -85,11 +92,7 @@ function renderHookWith(container: AppContainer): HookHandle {
 function okUploaderWithPhases(): UploaderDouble {
   return {
     upload: jest.fn(
-      async (
-        _type: string,
-        sides: DocumentSideFile[],
-        onSidePhase?: DocumentSidePhaseCallback,
-      ) => {
+      async (_type: string, sides: DocumentSideFile[], onSidePhase?: DocumentSidePhaseCallback) => {
         for (const { side } of sides) {
           onSidePhase?.(side, 'sending');
           onSidePhase?.(side, 'sent');
@@ -275,7 +278,11 @@ describe('useDniSubmit · subida eager del DNI', () => {
     // El uploader marca la cara FRONT `sending` y luego LANZA (falla el PUT): la fase de esa cara queda error.
     const uploader: UploaderDouble = {
       upload: jest.fn(
-        async (_type: string, sides: DocumentSideFile[], onSidePhase?: DocumentSidePhaseCallback) => {
+        async (
+          _type: string,
+          sides: DocumentSideFile[],
+          onSidePhase?: DocumentSidePhaseCallback,
+        ) => {
           const first = sides[0];
           if (first) {
             onSidePhase?.(first.side, 'sending');
@@ -322,7 +329,11 @@ describe('useDniSubmit · subida eager del DNI', () => {
     // Los PUT van OK (caras sent), pero el REGISTRO responde 409 (documento ya activo) → éxito.
     const uploader: UploaderDouble = {
       upload: jest.fn(
-        async (_type: string, sides: DocumentSideFile[], onSidePhase?: DocumentSidePhaseCallback) => {
+        async (
+          _type: string,
+          sides: DocumentSideFile[],
+          onSidePhase?: DocumentSidePhaseCallback,
+        ) => {
           for (const { side } of sides) {
             onSidePhase?.(side, 'sending');
             onSidePhase?.(side, 'sent');

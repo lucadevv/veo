@@ -115,7 +115,8 @@ export class VehicleModelsController {
   @Roles(...CATALOG_REVIEWERS)
   @Put(':id/reopen')
   @ApiOperation({
-    summary: 'Reabrir un modelo APROBADO para corregir su ficha (APPROVED→PENDING_REVIEW). Solo operador',
+    summary:
+      'Reabrir un modelo APROBADO para corregir su ficha (APPROVED→PENDING_REVIEW). Solo operador',
   })
   reopen(@Param('id', ParseUUIDPipe) id: string): Promise<VehicleModelReviewView> {
     return this.models.reopen(id);

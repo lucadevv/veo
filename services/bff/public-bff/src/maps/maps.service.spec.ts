@@ -54,7 +54,11 @@ class FakeTripRest {
     private readonly bidFloorError?: Error,
     // F2.4: tarifa base (banderazo/km/min) que devuelve /internal/pricing/base-fare. Default = las
     // constantes de código (= el seed) → el quote computa igual que antes de F2.4.
-    private readonly baseFare: { baseFareCents: number; perKmCents: number; perMinCents: number } = {
+    private readonly baseFare: {
+      baseFareCents: number;
+      perKmCents: number;
+      perMinCents: number;
+    } = {
       baseFareCents: 600,
       perKmCents: 120,
       perMinCents: 30,
@@ -420,13 +424,19 @@ describe('MapsService.quote', () => {
   it('ADR 010 §9.3 · PUJA: el piso es PER-OFERTA (override del admin gana; sin override cae al default)', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
     // Config del admin: económico S/3 (300), confort S/9 (900); el resto (xl) cae al default S/7.
-    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {}, {
-      defaultFloorCents: 700,
-      overrides: [
-        { zone: 'GLOBAL', offeringId: OfferingId.VEO_ECONOMICO, floorCents: 300 },
-        { zone: 'GLOBAL', offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
-      ],
-    });
+    const tripRest = new FakeTripRest(
+      { mode: 'PUJA' },
+      [],
+      undefined,
+      {},
+      {
+        defaultFloorCents: 700,
+        overrides: [
+          { zone: 'GLOBAL', offeringId: OfferingId.VEO_ECONOMICO, floorCents: 300 },
+          { zone: 'GLOBAL', offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
+        ],
+      },
+    );
     const service = buildService(fake, tripRest, fakeConfig());
 
     const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);

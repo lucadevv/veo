@@ -133,7 +133,10 @@ describe('DriverGateway', () => {
   });
 
   it('rechaza (disconnect) a un conductor SUSPENDIDO en el handshake (gate del re-login)', async () => {
-    const { gateway } = makeGateway({ driverId: 'drv-42', suspendedAt: '2026-07-01T00:00:00.000Z' });
+    const { gateway } = makeGateway({
+      driverId: 'drv-42',
+      suspendedAt: '2026-07-01T00:00:00.000Z',
+    });
     const socket = fakeSocket('Bearer abc.def.ghi');
     await gateway.handleConnection(socket as never);
     expect(socket.disconnect).toHaveBeenCalledWith(true);

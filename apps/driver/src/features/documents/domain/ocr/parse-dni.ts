@@ -39,7 +39,13 @@ const BIRTH_KEYWORDS = ['nacimiento', 'fecha de nacimiento', 'birth'] as const;
  * es el nacimiento — sirve para no confundir la fecha de emisión (2025) ni la de caducidad (2033) con la
  * de nacimiento cuando se cae al fallback por patrón.
  */
-const NON_BIRTH_DATE_KEYWORDS = ['emision', 'expedicion', 'caducidad', 'vencimiento', 'expiry'] as const;
+const NON_BIRTH_DATE_KEYWORDS = [
+  'emision',
+  'expedicion',
+  'caducidad',
+  'vencimiento',
+  'expiry',
+] as const;
 /**
  * Etiqueta del PRIMER apellido (Modelo 2020 / viejo azul). GROUND TRUTH: NO existe "Apellido Paterno"
  * impreso — el rótulo real es "Primer Apellido".
@@ -269,10 +275,7 @@ function parseFront(lines: readonly string[]): ParsedDni {
  * @param frontLines Líneas OCR del ANVERSO (donde vive el MRZ del viejo azul).
  * @param backLines  Líneas OCR del REVERSO (donde vive el MRZ del DNIe). Opcional.
  */
-export function parseDni(
-  frontLines: readonly string[],
-  backLines?: readonly string[],
-): ParsedDni {
+export function parseDni(frontLines: readonly string[], backLines?: readonly string[]): ParsedDni {
   const front = parseFront(frontLines);
 
   // MRZ-first: reverso (DNIe) primero; si no hay, frente (viejo azul tiene el MRZ en el anverso).

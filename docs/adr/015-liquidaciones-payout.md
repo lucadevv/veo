@@ -63,11 +63,11 @@ La policy declara una máquina completa:
 ```ts
 // services/payment-service/src/payouts/payout.policy.ts:79-87
 const PAYOUT_TRANSITIONS: Readonly<Record<PayoutStatus, readonly PayoutStatus[]>> = {
-  PENDING:    ['PROCESSING', 'PROCESSED', 'HELD', 'FAILED'],
+  PENDING: ['PROCESSING', 'PROCESSED', 'HELD', 'FAILED'],
   PROCESSING: ['PROCESSED', 'FAILED'],
-  HELD:       ['PROCESSED'],
-  FAILED:     ['PROCESSING', 'PROCESSED'],
-  PROCESSED:  [], // terminal
+  HELD: ['PROCESSED'],
+  FAILED: ['PROCESSING', 'PROCESSED'],
+  PROCESSED: [], // terminal
 };
 ```
 
@@ -159,8 +159,8 @@ Se reusa el flujo de hoy con la separación correcta de responsabilidades:
 - **El cron semanal AGREGA**: corre `collectEarnings` (filtro `driverId: { not: null }`), crea los Payout del
   período con su `gross/commission/neto`. **El cron ya NO los nace `PROCESSED`**: los crea `PENDING`.
 - **El operador DISPARA**: desde el panel FINANCE ejecuta la liquidación (la transición `PENDING → PROCESSING`
-  + `disburse`) y **libera los `HELD`**, con **step-up MFA sobre el umbral** (BR-S07, el gate que ya existe
-  en `payouts.service.ts:140,296`). El desembolso es un acto humano auditado, no un efecto silencioso del cron.
+  - `disburse`) y **libera los `HELD`**, con **step-up MFA sobre el umbral** (BR-S07, el gate que ya existe
+    en `payouts.service.ts:140,296`). El desembolso es un acto humano auditado, no un efecto silencioso del cron.
 
 ### D4 — `driverId` wireado (cierra el hueco 1)
 
@@ -231,10 +231,10 @@ export const PAYOUT_GATEWAY = Symbol('PAYOUT_GATEWAY');
 /** Entrada del DESEMBOLSO. Dinero SIEMPRE Int céntimos PEN. SIN PII: el walletUid destino lo resuelve el
  *  adapter server-side desde el driverId (espejo de resolveActiveWalletUid del money-IN). */
 export interface DisburseRequest {
-  payoutId: string;               // = idempotencia: dedupKey = payout-disburse:{payoutId}
-  driverId: string;               // el adapter resuelve la billetera destino; el dominio NO la porta
-  amountCents: number;            // NETO a desembolsar (gross - commission)
-  method: PaymentMethod;          // YAPE | PLIN (riel money-OUT; live DIFERIDO)
+  payoutId: string; // = idempotencia: dedupKey = payout-disburse:{payoutId}
+  driverId: string; // el adapter resuelve la billetera destino; el dominio NO la porta
+  amountCents: number; // NETO a desembolsar (gross - commission)
+  method: PaymentMethod; // YAPE | PLIN (riel money-OUT; live DIFERIDO)
   currency: 'PEN';
 }
 
@@ -272,15 +272,15 @@ La policy `payout.policy.ts:79-87` ya describe la máquina; este ADR la pone a c
 es la regla, no el `if`: cada mutación de estado valida contra `PAYOUT_TRANSITIONS` y escribe el evento en la
 MISMA transacción (outbox).
 
-| Desde | Evento | Hacia | Invariante / nota |
-|---|---|---|---|
-| (crear) | cron agrega el período | `PENDING` | `collectEarnings` filtra `driverId: { not: null }`; calcula `gross/commission/neto`. **Cambio: ya NO nace `PROCESSED`** |
-| (crear) | cron detecta motivo de hold | `HELD` | flag de retención (rating/disputa/etc.); `heldReason` seteado |
-| `PENDING` | operador dispara (step-up MFA · BR-S07) | `PROCESSING` | invoca `PayoutGateway.disburse(req)`; `dedupKey = payout-disburse:{payoutId}` |
-| `HELD` | operador libera (step-up MFA) | `PROCESSING` | mismo carril de desembolso (no salta el riel) |
-| `PROCESSING` | webhook/poll confirma la salida | `PROCESSED` | **terminal OK**: emite `payout.processed`, marca `paidAt` del incentivo. La plata SALIÓ |
-| `PROCESSING` | riel rechaza / timeout | `FAILED` | el dinero NO salió; `paidAt` del incentivo NO se marca |
-| `FAILED` | operador reintenta | `PROCESSING` | idempotente por `dedupKey` → no doble-desembolso |
+| Desde        | Evento                                  | Hacia        | Invariante / nota                                                                                                       |
+| ------------ | --------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| (crear)      | cron agrega el período                  | `PENDING`    | `collectEarnings` filtra `driverId: { not: null }`; calcula `gross/commission/neto`. **Cambio: ya NO nace `PROCESSED`** |
+| (crear)      | cron detecta motivo de hold             | `HELD`       | flag de retención (rating/disputa/etc.); `heldReason` seteado                                                           |
+| `PENDING`    | operador dispara (step-up MFA · BR-S07) | `PROCESSING` | invoca `PayoutGateway.disburse(req)`; `dedupKey = payout-disburse:{payoutId}`                                           |
+| `HELD`       | operador libera (step-up MFA)           | `PROCESSING` | mismo carril de desembolso (no salta el riel)                                                                           |
+| `PROCESSING` | webhook/poll confirma la salida         | `PROCESSED`  | **terminal OK**: emite `payout.processed`, marca `paidAt` del incentivo. La plata SALIÓ                                 |
+| `PROCESSING` | riel rechaza / timeout                  | `FAILED`     | el dinero NO salió; `paidAt` del incentivo NO se marca                                                                  |
+| `FAILED`     | operador reintenta                      | `PROCESSING` | idempotente por `dedupKey` → no doble-desembolso                                                                        |
 
 > **`PROCESSED` ya NO se marca en el create**: se marca cuando el riel confirma. El `paidAt` del incentivo
 > (`payouts.service.ts:198`) se mueve a ESE punto — del create del Payout al handler de confirmación del
@@ -295,11 +295,11 @@ en la MISMA transacción (atomicidad estado↔evento).
 
 ### 4.1 Emitidos (topic `payment`)
 
-| Evento | Cuándo | Cambio vs hoy | Consumidor núcleo |
-|---|---|---|---|
-| `payout.processing` | `PENDING/HELD → PROCESSING` (operador dispara) | **NUEVO** | audit (traza del disparo humano) |
-| `payout.processed` | `PROCESSING → PROCESSED` (riel confirmó la SALIDA) | **semántica corregida**: antes se emitía en el create optimista; ahora solo cuando la plata salió | audit + **notification (push al conductor, D7)** |
-| `payout.failed` | `PROCESSING → FAILED` (riel rechazó) | **NUEVO** | audit + notification (avisa al operador) |
+| Evento              | Cuándo                                             | Cambio vs hoy                                                                                     | Consumidor núcleo                                |
+| ------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `payout.processing` | `PENDING/HELD → PROCESSING` (operador dispara)     | **NUEVO**                                                                                         | audit (traza del disparo humano)                 |
+| `payout.processed`  | `PROCESSING → PROCESSED` (riel confirmó la SALIDA) | **semántica corregida**: antes se emitía en el create optimista; ahora solo cuando la plata salió | audit + **notification (push al conductor, D7)** |
+| `payout.failed`     | `PROCESSING → FAILED` (riel rechazó)               | **NUEVO**                                                                                         | audit + notification (avisa al operador)         |
 
 ### 4.2 Consumidos del riel (la confirmación asíncrona)
 
@@ -314,12 +314,12 @@ riel resuelve la transferencia (espejo del `applyWebhookResult` del money-IN). E
 Se reusa el carril del panel FINANCE existente (`admin-bff` → payment-service, firmado service-rail). El
 desembolso es admin-rail con step-up MFA sobre el umbral (BR-S07).
 
-| Capacidad | Endpoint (forma) | Riel | Rol | Regla server-side |
-|---|---|---|---|---|
-| Listar liquidaciones del período | `GET /payouts?period` | `admin-rail` | FINANCE | desglose `gross/commission/neto` (§D6) |
-| Disparar liquidación (PENDING→PROCESSING) | `POST /payouts/run` | `admin-rail` | FINANCE | step-up MFA si `total > umbral` (BR-S07); invoca `disburse` |
-| Liberar retenidos (HELD→PROCESSING) | `POST /payouts/release` | `admin-rail` | FINANCE | step-up MFA; entra al carril de desembolso |
-| Reintentar fallido (FAILED→PROCESSING) | `POST /payouts/:id/retry` | `admin-rail` | FINANCE | step-up MFA; idempotente por `dedupKey` |
+| Capacidad                                 | Endpoint (forma)          | Riel         | Rol     | Regla server-side                                           |
+| ----------------------------------------- | ------------------------- | ------------ | ------- | ----------------------------------------------------------- |
+| Listar liquidaciones del período          | `GET /payouts?period`     | `admin-rail` | FINANCE | desglose `gross/commission/neto` (§D6)                      |
+| Disparar liquidación (PENDING→PROCESSING) | `POST /payouts/run`       | `admin-rail` | FINANCE | step-up MFA si `total > umbral` (BR-S07); invoca `disburse` |
+| Liberar retenidos (HELD→PROCESSING)       | `POST /payouts/release`   | `admin-rail` | FINANCE | step-up MFA; entra al carril de desembolso                  |
+| Reintentar fallido (FAILED→PROCESSING)    | `POST /payouts/:id/retry` | `admin-rail` | FINANCE | step-up MFA; idempotente por `dedupKey`                     |
 
 El cron NO tiene endpoint de desembolso: solo agrega (`PENDING`). El acto de mover plata es siempre humano + auditado.
 
@@ -327,14 +327,14 @@ El cron NO tiene endpoint de desembolso: solo agrega (`PENDING`). El acto de mov
 
 ## 6. Integración con servicios existentes (qué reusa, por evento/gRPC)
 
-| Servicio | Cómo se integra | Qué reusa / qué cambia |
-|---|---|---|
-| **booking-service** | wirea `driverId` en el CHARGE (`triggerCharge`, ambos callers) | el puerto `ChargeInput.driverId?` ya existe (port:43) — solo se pasa el `trip.driverId` ya disponible |
-| **payment-service** | dueño del Payout + el nuevo `PayoutGateway` (money-OUT) | reusa `commission()`, `COMMISSION_RATE`, la máquina `payout.policy.ts` (la EJERCE), el step-up MFA (BR-S07), el outbox |
-| **PSP (Yape/Plin)** | riel money-OUT detrás del `PayoutGateway` | sandbox AHORA; live DIFERIDO (convenio PSP, como el charge live) |
-| **audit-service** | consume `payout.processing/processed/failed` | ya consume `payout.processed` (`audit.consumer.ts:194`); se le suman los dos nuevos |
-| **notification-service** | consume `payout.processed` → push al conductor (D7) | su puerto push existente; sin PII en el payload |
-| **admin-bff** | `toPayoutView` amplía el desglose (D6) | `finance.service.ts:118-126` + contrato `payoutView` (`api-client/types.ts:205`) |
+| Servicio                 | Cómo se integra                                                | Qué reusa / qué cambia                                                                                                 |
+| ------------------------ | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **booking-service**      | wirea `driverId` en el CHARGE (`triggerCharge`, ambos callers) | el puerto `ChargeInput.driverId?` ya existe (port:43) — solo se pasa el `trip.driverId` ya disponible                  |
+| **payment-service**      | dueño del Payout + el nuevo `PayoutGateway` (money-OUT)        | reusa `commission()`, `COMMISSION_RATE`, la máquina `payout.policy.ts` (la EJERCE), el step-up MFA (BR-S07), el outbox |
+| **PSP (Yape/Plin)**      | riel money-OUT detrás del `PayoutGateway`                      | sandbox AHORA; live DIFERIDO (convenio PSP, como el charge live)                                                       |
+| **audit-service**        | consume `payout.processing/processed/failed`                   | ya consume `payout.processed` (`audit.consumer.ts:194`); se le suman los dos nuevos                                    |
+| **notification-service** | consume `payout.processed` → push al conductor (D7)            | su puerto push existente; sin PII en el payload                                                                        |
+| **admin-bff**            | `toPayoutView` amplía el desglose (D6)                         | `finance.service.ts:118-126` + contrato `payoutView` (`api-client/types.ts:205`)                                       |
 
 ---
 
@@ -349,15 +349,15 @@ re-disparar un payout fallido nunca paga dos veces.
 
 ## 8. Caminos infelices (PLAYBOOK §5.3) — el "¿y si…?"
 
-| ¿Y si…? | Resultado de diseño |
-|---|---|
-| el `disburse` falla (riel rechaza / timeout) | `PROCESSING → FAILED`. La plata NO salió; el `paidAt` del incentivo NO se marca; el operador reintenta (`FAILED → PROCESSING`, idempotente por `dedupKey`). |
-| doble-click del operador al disparar | `assertTransition` rechaza el 2º `PENDING→PROCESSING`; el `disburse` lleva `dedupKey` → el riel no duplica. |
-| webhook duplicado del riel (misma confirmación 2×) | el handler es idempotente: `assertTransition` ya en `PROCESSED` rechaza la 2ª transición; el `paidAt` ya marcado no se re-marca. |
-| total del run supera el umbral, operador sin MFA fresca | `ForbiddenError` (BR-S07, `payouts.service.ts:140,296`) — el desembolso masivo exige step-up MFA. |
-| cobro de carpooling con `driverId` ausente (app vieja pre-wiring) | el Payment nace `driverId: null` → queda fuera del payout (filtro `not: null`). Es el comportamiento de hoy; el wiring (D4) lo cierra hacia adelante. NO se inventa un payout sin conductor. |
-| el adapter live no está (convenio PSP pendiente) | el sandbox confirma de forma determinista en dev; en prod sin adapter live el disparo falla-rápido (no hay silencio): el operador no puede desembolsar lo que el riel no soporta aún. |
-| el conductor recupera menos que su costo compartido (cost-cap) | **tensión REAL del modelo cost-sharing** (§11.2) — NO es un bug del payout: es la consecuencia de comisión-sobre-bruto (D1). Registrado como follow-up que legal valida por país antes de prod. |
+| ¿Y si…?                                                           | Resultado de diseño                                                                                                                                                                             |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| el `disburse` falla (riel rechaza / timeout)                      | `PROCESSING → FAILED`. La plata NO salió; el `paidAt` del incentivo NO se marca; el operador reintenta (`FAILED → PROCESSING`, idempotente por `dedupKey`).                                     |
+| doble-click del operador al disparar                              | `assertTransition` rechaza el 2º `PENDING→PROCESSING`; el `disburse` lleva `dedupKey` → el riel no duplica.                                                                                     |
+| webhook duplicado del riel (misma confirmación 2×)                | el handler es idempotente: `assertTransition` ya en `PROCESSED` rechaza la 2ª transición; el `paidAt` ya marcado no se re-marca.                                                                |
+| total del run supera el umbral, operador sin MFA fresca           | `ForbiddenError` (BR-S07, `payouts.service.ts:140,296`) — el desembolso masivo exige step-up MFA.                                                                                               |
+| cobro de carpooling con `driverId` ausente (app vieja pre-wiring) | el Payment nace `driverId: null` → queda fuera del payout (filtro `not: null`). Es el comportamiento de hoy; el wiring (D4) lo cierra hacia adelante. NO se inventa un payout sin conductor.    |
+| el adapter live no está (convenio PSP pendiente)                  | el sandbox confirma de forma determinista en dev; en prod sin adapter live el disparo falla-rápido (no hay silencio): el operador no puede desembolsar lo que el riel no soporta aún.           |
+| el conductor recupera menos que su costo compartido (cost-cap)    | **tensión REAL del modelo cost-sharing** (§11.2) — NO es un bug del payout: es la consecuencia de comisión-sobre-bruto (D1). Registrado como follow-up que legal valida por país antes de prod. |
 
 ---
 
@@ -415,12 +415,12 @@ re-disparar un payout fallido nunca paga dos veces.
 
 ## 11. Qué se difiere (degradación honesta)
 
-| Diferido | Por qué fuera de este ADR |
-|---|---|
-| **Adapter LIVE de Yape/Plin payout** | bloqueado por convenio PSP (igual que el charge live, ADR 014 §11.3). El puerto + sandbox + ciclo de estados se construyen ya. |
-| **Reembolso por tiers de cancelación** | es dominio de `booking-service` (F3/F5), no del payout. El payout consume `booking.completed`/cobros CAPTURED, no gestiona refunds. |
-| **PUJA en carpooling** | F6 (ADR 010/014). El payout es agnóstico al modo de pricing: liquida el cobro CAPTURED, venga de FIJO o PUJA. |
-| **Validación legal del cost-sharing por país** | tracking de producto/legal (§9.2), no una decisión de arquitectura — pero **bloquea prod** para carpooling. |
+| Diferido                                       | Por qué fuera de este ADR                                                                                                           |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Adapter LIVE de Yape/Plin payout**           | bloqueado por convenio PSP (igual que el charge live, ADR 014 §11.3). El puerto + sandbox + ciclo de estados se construyen ya.      |
+| **Reembolso por tiers de cancelación**         | es dominio de `booking-service` (F3/F5), no del payout. El payout consume `booking.completed`/cobros CAPTURED, no gestiona refunds. |
+| **PUJA en carpooling**                         | F6 (ADR 010/014). El payout es agnóstico al modo de pricing: liquida el cobro CAPTURED, venga de FIJO o PUJA.                       |
+| **Validación legal del cost-sharing por país** | tracking de producto/legal (§9.2), no una decisión de arquitectura — pero **bloquea prod** para carpooling.                         |
 
 ---
 

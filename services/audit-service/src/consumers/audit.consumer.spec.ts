@@ -299,7 +299,11 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
       },
     });
     await handlers.get('media.access_viewed')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('media.access_viewed'));
     expect(mapping).toEqual({ actorId: 'op-7', resourceType: 'media', resourceId: 'seg-9' });
   });
@@ -318,7 +322,11 @@ describe('AuditConsumer · compliance crítico (cadena de custodia Ley 29733)', 
       },
     });
     await handlers.get('media.access_rejected')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('media.access_rejected'));
     expect(mapping).toEqual({ actorId: 'sup-3', resourceType: 'media', resourceId: 'seg-9' });
   });
@@ -537,9 +545,17 @@ describe('AuditConsumer · pagos (movimiento de dinero al WORM inmutable · Ley 
       },
     });
     await handlers.get('payment.refunded')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('payment.refunded'));
-    expect(mapping).toEqual({ actorId: 'op-admin-3', resourceType: 'payment', resourceId: 'pay-9' });
+    expect(mapping).toEqual({
+      actorId: 'op-admin-3',
+      resourceType: 'payment',
+      resourceId: 'pay-9',
+    });
   });
 
   it('payment.refunded system-initiated (approvedBy=system) → actorId=system (refund automático por cancelación)', async () => {
@@ -598,7 +614,11 @@ describe('AuditConsumer · desembolsos (ciclo de payout al WORM inmutable · ADR
       payload: { payoutId: 'po-1', driverId: 'drv-9', amountCents: 45000, period: '2026-06' },
     });
     await handlers.get('payout.processing')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('payout.processing'));
     expect(mapping).toEqual({ actorId: 'drv-9', resourceType: 'payout', resourceId: 'po-1' });
   });
@@ -610,7 +630,11 @@ describe('AuditConsumer · desembolsos (ciclo de payout al WORM inmutable · ADR
       payload: { payoutId: 'po-2', driverId: 'drv-7', amountCents: 32000, period: '2026-06' },
     });
     await handlers.get('payout.failed')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('payout.failed'));
     expect(mapping).toEqual({ actorId: 'drv-7', resourceType: 'payout', resourceId: 'po-2' });
   });
@@ -622,7 +646,11 @@ describe('AuditConsumer · desembolsos (ciclo de payout al WORM inmutable · ADR
       payload: { payoutId: 'po-3', driverId: 'drv-5', amountCents: 50000, period: '2026-06' },
     });
     await handlers.get('payout.processed')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('payout.processed'));
     expect(mapping).toEqual({ actorId: 'drv-5', resourceType: 'payout', resourceId: 'po-3' });
   });
@@ -652,7 +680,8 @@ describe('AuditConsumer · trazabilidad total (representativos por categoría ·
 
   afterEach(() => vi.restoreAllMocks());
 
-  const mappingOf = () => (recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping])[2];
+  const mappingOf = () =>
+    (recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping])[2];
 
   // ── A · money ──
   it('A/money · payment.cancellation_penalty_recorded → actor=passengerId, recurso=penalty/penaltyId', async () => {
@@ -901,10 +930,19 @@ describe('AuditConsumer · render del burn-in (cadena de custodia · Lote 3 · B
     const envelope = createEnvelope({
       eventType: 'media.render_completed',
       producer: 'media-service',
-      payload: { requestId: 'req-1', tripId: 't-1', segmentId: 'seg-9', at: new Date().toISOString() },
+      payload: {
+        requestId: 'req-1',
+        tripId: 't-1',
+        segmentId: 'seg-9',
+        at: new Date().toISOString(),
+      },
     });
     await handlers.get('media.render_completed')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('media.render_completed'));
     expect(mapping).toEqual({ actorId: 'system', resourceType: 'media', resourceId: 'seg-9' });
   });
@@ -921,7 +959,11 @@ describe('AuditConsumer · render del burn-in (cadena de custodia · Lote 3 · B
       },
     });
     await handlers.get('media.render_failed')!(envelope);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('media.render_failed'));
     expect(mapping).toEqual({ actorId: 'system', resourceType: 'media', resourceId: 't-42' });
   });
@@ -959,7 +1001,11 @@ describe('AuditConsumer · sesión de turno del conductor (went_online/went_offl
     });
     await handlers.get('driver.went_online')!(envelope);
     expect(recordFromEvent).toHaveBeenCalledTimes(1);
-    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [unknown, string, EventAuditMapping];
+    const [, topic, mapping] = recordFromEvent.mock.calls[0] as [
+      unknown,
+      string,
+      EventAuditMapping,
+    ];
     expect(topic).toBe(topicForEvent('driver.went_online'));
     expect(mapping).toEqual({ actorId: 'drv-1', resourceType: 'driver', resourceId: 'drv-1' });
   });
@@ -968,7 +1014,11 @@ describe('AuditConsumer · sesión de turno del conductor (went_online/went_offl
     const envelope = createEnvelope({
       eventType: 'driver.went_offline',
       producer: 'identity-service',
-      payload: { driverId: 'drv-1', at: '2026-07-06T18:00:00.000Z', reason: DRIVER_OFFLINE_REASON.SHIFT_END },
+      payload: {
+        driverId: 'drv-1',
+        at: '2026-07-06T18:00:00.000Z',
+        reason: DRIVER_OFFLINE_REASON.SHIFT_END,
+      },
     });
     await handlers.get('driver.went_offline')!(envelope);
     expect(recordFromEvent).toHaveBeenCalledTimes(1);
@@ -980,7 +1030,11 @@ describe('AuditConsumer · sesión de turno del conductor (went_online/went_offl
     const envelope = createEnvelope({
       eventType: 'driver.went_offline',
       producer: 'driver-bff',
-      payload: { driverId: 'drv-1', at: '2026-07-06T18:00:00.000Z', reason: DRIVER_OFFLINE_REASON.DISCONNECT },
+      payload: {
+        driverId: 'drv-1',
+        at: '2026-07-06T18:00:00.000Z',
+        reason: DRIVER_OFFLINE_REASON.DISCONNECT,
+      },
     });
     await handlers.get('driver.went_offline')!(envelope);
     expect(recordFromEvent).not.toHaveBeenCalled();

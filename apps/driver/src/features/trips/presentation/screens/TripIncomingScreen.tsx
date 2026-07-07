@@ -16,10 +16,7 @@ import {
   useTheme,
 } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
-import {
-  useCountdownMs,
-  toEpochMs,
-} from '../../../../shared/presentation/hooks/useCountdownMs';
+import { useCountdownMs, toEpochMs } from '../../../../shared/presentation/hooks/useCountdownMs';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';

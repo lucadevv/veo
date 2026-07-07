@@ -176,7 +176,8 @@ export function TripHistoryScreen(): React.JSX.Element {
         </EnterView>
       )}
       ListFooterComponent={
-        <View style={{paddingVertical: theme.spacing.lg, gap: theme.spacing.sm}}>
+        <View
+          style={{paddingVertical: theme.spacing.lg, gap: theme.spacing.sm}}>
           {isFetchingNextPage ? (
             // "Cargando más" al paginar: indicador + copy, no un salto en seco.
             <View style={styles.footerLoading}>

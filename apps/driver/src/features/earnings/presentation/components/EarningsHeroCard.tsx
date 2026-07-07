@@ -37,7 +37,11 @@ export function EarningsHeroCard({ summary, t }: EarningsHeroCardProps): React.J
       </Text>
 
       <View style={[styles.stats, { borderTopColor: theme.colors.border }]}>
-        <Stat label={t('earnings.paidNet')} value={formatPEN(summary.paidNetCents)} valueColor="ink" />
+        <Stat
+          label={t('earnings.paidNet')}
+          value={formatPEN(summary.paidNetCents)}
+          valueColor="ink"
+        />
         <Stat
           label={t('earnings.pendingNet')}
           value={formatPEN(summary.pendingNetCents)}

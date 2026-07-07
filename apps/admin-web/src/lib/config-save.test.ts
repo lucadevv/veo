@@ -28,7 +28,9 @@ describe('runConfigSave', () => {
 
   it('409 (ApiError) → toast info con el copy CANÓNICO de conflicto', async () => {
     const toast = vi.fn();
-    const mutateAsync = vi.fn().mockRejectedValue(new ApiError(409, 'CONFLICT', 'version mismatch'));
+    const mutateAsync = vi
+      .fn()
+      .mockRejectedValue(new ApiError(409, 'CONFLICT', 'version mismatch'));
 
     await runConfigSave({ ...base, toast, mutateAsync });
 

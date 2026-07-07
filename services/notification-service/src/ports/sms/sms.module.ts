@@ -115,7 +115,9 @@ const SMS_REGISTRY: Readonly<Record<SmsProvider, SmsProviderFactory>> = {
 function resolveProvider(config: ConfigService<Env, true>): SmsProvider {
   const explicit = config.get<SmsProvider>('SMS_PROVIDER');
   if (explicit) return explicit;
-  return config.getOrThrow<string>('VEO_SMS_MODE') === 'live' ? SmsProvider.Smpp : SmsProvider.Sandbox;
+  return config.getOrThrow<string>('VEO_SMS_MODE') === 'live'
+    ? SmsProvider.Smpp
+    : SmsProvider.Sandbox;
 }
 
 const smsProvider: Provider = {

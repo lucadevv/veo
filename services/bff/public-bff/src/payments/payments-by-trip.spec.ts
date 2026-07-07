@@ -45,7 +45,14 @@ function makeService(opts: {
   } as unknown as GrpcServiceClient;
   const restStub = {} as unknown as InternalRestClient;
   const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as Redis;
-  const svc = new PaymentsService(paymentGrpc, tripGrpc, restStub, SECRET, InternalAudience.PUBLIC_RAIL, redisStub);
+  const svc = new PaymentsService(
+    paymentGrpc,
+    tripGrpc,
+    restStub,
+    SECRET,
+    InternalAudience.PUBLIC_RAIL,
+    redisStub,
+  );
   return { svc, tripGrpc, paymentGrpc };
 }
 
@@ -122,7 +129,14 @@ describe('PaymentsService.getPaymentByTrip', () => {
       }),
     } as unknown as InternalRestClient;
     const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as Redis;
-    const svc = new PaymentsService(paymentGrpc, tripGrpc, restStub, SECRET, InternalAudience.PUBLIC_RAIL, redisStub);
+    const svc = new PaymentsService(
+      paymentGrpc,
+      tripGrpc,
+      restStub,
+      SECRET,
+      InternalAudience.PUBLIC_RAIL,
+      redisStub,
+    );
 
     const view = await svc.confirmCash(user, 'pay-1', { confirmed: true });
 
@@ -182,7 +196,14 @@ describe('PaymentsService.getPayment · anti-IDOR por id', () => {
       }),
     } as unknown as InternalRestClient;
     const redisStub = { get: vi.fn(), set: vi.fn(), del: vi.fn() } as unknown as Redis;
-    const svc = new PaymentsService(paymentGrpc, tripGrpc, restStub, SECRET, InternalAudience.PUBLIC_RAIL, redisStub);
+    const svc = new PaymentsService(
+      paymentGrpc,
+      tripGrpc,
+      restStub,
+      SECRET,
+      InternalAudience.PUBLIC_RAIL,
+      redisStub,
+    );
     return { svc, paymentGrpc };
   }
 

@@ -129,7 +129,14 @@ describe('AuditGrpcController · integridad del actorId del WORM (anti-spoof)', 
 
     // proto3 + defaults:true entrega "" cuando el caller no lo manda → debe llegar undefined, no "".
     await ctrl.record(
-      { actorId: 'x', action: 'a', resourceType: 'r', resourceId: 'i', payloadJson: '{}', eventId: '' },
+      {
+        actorId: 'x',
+        action: 'a',
+        resourceType: 'r',
+        resourceId: 'i',
+        payloadJson: '{}',
+        eventId: '',
+      },
       signedMetaAs(InternalAudience.ADMIN_RAIL),
     );
     expect((recordSync.mock.calls[1]![0] as { eventId?: string }).eventId).toBeUndefined();
@@ -184,7 +191,10 @@ describe('AuditGrpcController · integridad del actorId del WORM (anti-spoof)', 
 describe('AuditGrpcController · Verify gateado por identidad firmada', () => {
   it('Verify · admin-rail → ejecuta la verificación de integridad', async () => {
     const { ctrl, verifyRange } = makeController();
-    const reply = await ctrl.verify({ fromSeq: '', toSeq: '' }, signedMetaAs(InternalAudience.ADMIN_RAIL));
+    const reply = await ctrl.verify(
+      { fromSeq: '', toSeq: '' },
+      signedMetaAs(InternalAudience.ADMIN_RAIL),
+    );
     expect(verifyRange).toHaveBeenCalledTimes(1);
     expect(reply.valid).toBe(true);
     expect(reply.checked).toBe(1);

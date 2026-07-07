@@ -74,8 +74,8 @@ export default function PricingPage() {
               Cada sección guarda por separado, con step-up MFA
             </p>
             <p className="text-xs text-ink-subtle">
-              Cada card es una mutación independiente (su propio endpoint y versión): al guardar te pide
-              tu código TOTP y el cambio queda auditado. No hay un guardado global.
+              Cada card es una mutación independiente (su propio endpoint y versión): al guardar te
+              pide tu código TOTP y el cambio queda auditado. No hay un guardado global.
             </p>
           </div>
         </div>

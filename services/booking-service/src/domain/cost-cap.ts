@@ -65,7 +65,9 @@ export interface CostPerKmConfig {
  */
 export function costPerKmCentsFor(pais: string, config: CostPerKmConfig): number {
   if (!isPais(pais)) {
-    throw new ValidationError('País no soportado para el cálculo del tope de cost-sharing', { pais });
+    throw new ValidationError('País no soportado para el cálculo del tope de cost-sharing', {
+      pais,
+    });
   }
   return config[pais];
 }

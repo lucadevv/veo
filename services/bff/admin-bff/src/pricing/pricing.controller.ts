@@ -17,11 +17,7 @@ import {
   type BidFloorView,
   type BaseFareView,
 } from './pricing.service';
-import {
-  ReplaceScheduleDto,
-  ReplaceBidFloorDto,
-  ReplaceBaseFareDto,
-} from './dto/pricing.dto';
+import { ReplaceScheduleDto, ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
 
 @ApiTags('pricing')
 @Controller('pricing')
@@ -53,7 +49,8 @@ export class PricingController {
 
   @Get('base-fare')
   @ApiOperation({
-    summary: 'Tarifa base vigente (banderazo + per-km + per-min, o los defaults). pricing:view. F2.4',
+    summary:
+      'Tarifa base vigente (banderazo + per-km + per-min, o los defaults). pricing:view. F2.4',
   })
   getBaseFare(@CurrentUser() user: AuthenticatedUser): Promise<BaseFareView> {
     return this.pricing.getBaseFare(user);

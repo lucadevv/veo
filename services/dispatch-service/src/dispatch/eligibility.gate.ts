@@ -160,7 +160,11 @@ export class EligibilityGate {
           // DENOMINADOR de la prevalencia (source=gate): esta evaluación SÍ podría caer a fail-open.
           bumpEligibilityTierEvaluation('gate');
           // Solo se enforça cuando los TRES attrs están presentes; si falta alguno, fail-open medido.
-          if (loc.seats !== undefined && loc.segment !== undefined && loc.vehicleYear !== undefined) {
+          if (
+            loc.seats !== undefined &&
+            loc.segment !== undefined &&
+            loc.vehicleYear !== undefined
+          ) {
             const currentYear = new Date().getUTCFullYear();
             if (
               !isVehicleEligibleForOffering(

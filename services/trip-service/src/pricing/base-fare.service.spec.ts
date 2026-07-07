@@ -6,11 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { BaseFareService } from './base-fare.service';
 import { BASE_FARE_CENTS, PER_KM_CENTS, PER_MIN_CENTS } from '../trips/domain/fare';
 import { pricingConfigChangedTotal } from '../trips/trip-metrics';
-import type {
-  BaseFareRepository,
-  BaseFareTx,
-  PersistedBaseFare,
-} from './base-fare.repository';
+import type { BaseFareRepository, BaseFareTx, PersistedBaseFare } from './base-fare.repository';
 
 /** Lee el valor actual del counter veo_pricing_config_changed_total para un `kind` (#3 observabilidad). */
 async function readPricingChanged(kind: string): Promise<number> {

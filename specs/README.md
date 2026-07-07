@@ -9,12 +9,12 @@
 
 ## Los 4 documentos
 
-| App | Documento | Plataforma | Tema | Pantallas |
-|---|---|---|---|---|
-| **Pasajero** | [`VEO_SPEC_PASAJERO.md`](./VEO_SPEC_PASAJERO.md) | iOS + Android | "Noche" — azul de marca `#2D7FF9` sobre lienzo oscuro | 24 |
-| **Conductor** | [`VEO_SPEC_CONDUCTOR.md`](./VEO_SPEC_CONDUCTOR.md) | Android (iOS fase 3) | "Noche" — azul de marca `#2D7FF9` sobre lienzo oscuro | 19 |
-| **Familia** | [`VEO_SPEC_FAMILIA.md`](./VEO_SPEC_FAMILIA.md) | Web pública, sin login, mobile-first | Azul de marca `#2D7FF9` (OKLCH, light+dark) | Landing + viaje en vivo + estados terminales |
-| **Admin** | [`VEO_SPEC_ADMIN.md`](./VEO_SPEC_ADMIN.md) | Web dashboard (7 roles RBAC) | Azul de marca `#2D7FF9` (OKLCH, sobrio/data-first) | Login/MFA + 7 secciones |
+| App           | Documento                                          | Plataforma                           | Tema                                                  | Pantallas                                    |
+| ------------- | -------------------------------------------------- | ------------------------------------ | ----------------------------------------------------- | -------------------------------------------- |
+| **Pasajero**  | [`VEO_SPEC_PASAJERO.md`](./VEO_SPEC_PASAJERO.md)   | iOS + Android                        | "Noche" — azul de marca `#2D7FF9` sobre lienzo oscuro | 24                                           |
+| **Conductor** | [`VEO_SPEC_CONDUCTOR.md`](./VEO_SPEC_CONDUCTOR.md) | Android (iOS fase 3)                 | "Noche" — azul de marca `#2D7FF9` sobre lienzo oscuro | 19                                           |
+| **Familia**   | [`VEO_SPEC_FAMILIA.md`](./VEO_SPEC_FAMILIA.md)     | Web pública, sin login, mobile-first | Azul de marca `#2D7FF9` (OKLCH, light+dark)           | Landing + viaje en vivo + estados terminales |
+| **Admin**     | [`VEO_SPEC_ADMIN.md`](./VEO_SPEC_ADMIN.md)         | Web dashboard (7 roles RBAC)         | Azul de marca `#2D7FF9` (OKLCH, sobrio/data-first)    | Login/MFA + 7 secciones                      |
 
 ## Plantilla por pantalla (común a los 4 docs)
 
@@ -25,9 +25,9 @@ Cada pantalla se especifica con: **Propósito · Entrada/Salida · Layout & jera
 Estas tres atraviesan todo el ecosistema. El diseñador tiene que respetarlas siempre:
 
 1. **El pánico es invisible por diseño.**
-   - *Pasajero:* se dispara con triple botón de volumen, **sin ninguna UI** — para no alertar al agresor.
-   - *Conductor:* cuando el pasajero entra en pánico, el conductor **solo ve una cancelación normal**. Prohibido: UI roja, alertas, mensajes o cambios de layout. La pantalla de cancelación por pánico y la de cancelación común deben ser **indistinguibles**.
-   - *Familia:* la vista de "viaje cancelado" también debe verse idéntica ante un pánico.
+   - _Pasajero:_ se dispara con triple botón de volumen, **sin ninguna UI** — para no alertar al agresor.
+   - _Conductor:_ cuando el pasajero entra en pánico, el conductor **solo ve una cancelación normal**. Prohibido: UI roja, alertas, mensajes o cambios de layout. La pantalla de cancelación por pánico y la de cancelación común deben ser **indistinguibles**.
+   - _Familia:_ la vista de "viaje cancelado" también debe verse idéntica ante un pánico.
 2. **Gate biométrico del conductor.** Verificación facial (liveness + match) obligatoria por turno, sin bypass. 3 fallos = bloqueo de 1 hora.
 3. **Accesibilidad reforzada.** Contraste AA, áreas táctiles ≥44pt (≥48 en conductor), y **nunca comunicar un estado crítico solo por color** (los pánicos en admin llevan icono + texto + color).
 

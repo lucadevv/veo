@@ -84,8 +84,7 @@ export class RateLimitGuard implements CanActivate {
         throw new RateLimitError('Límite de peticiones excedido', {
           limit: limit.max,
           windowMs: limit.windowMs,
-          retryAfterSeconds:
-            Math.ceil(result.resetMs / 1000) || Math.ceil(limit.windowMs / 1000),
+          retryAfterSeconds: Math.ceil(result.resetMs / 1000) || Math.ceil(limit.windowMs / 1000),
         });
       }
     }

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConflictError } from '@veo/utils';
-import { BookingsRepository, type CreateBookingData, type OutboxIntent } from './bookings.repository';
+import {
+  BookingsRepository,
+  type CreateBookingData,
+  type OutboxIntent,
+} from './bookings.repository';
 import type { PrismaService } from '../infra/prisma.service';
 import { BookingState } from '../generated/prisma';
 import { BookingEventType } from '../events/booking-events';
@@ -98,7 +102,12 @@ describe('BookingsRepository · idempotencia de request (doble-POST → 1 fila)'
     const repo = new BookingsRepository(prisma);
 
     const first = await repo.createWithEventIdempotent(DEDUP_KEY, PASSENGER_ID, makeData(), intent);
-    const second = await repo.createWithEventIdempotent(DEDUP_KEY, PASSENGER_ID, makeData(), intent);
+    const second = await repo.createWithEventIdempotent(
+      DEDUP_KEY,
+      PASSENGER_ID,
+      makeData(),
+      intent,
+    );
 
     expect(first).toMatchObject({ id: created.id });
     expect(second).toMatchObject({ id: created.id }); // mismo Booking, no una fila nueva
@@ -110,7 +119,11 @@ describe('BookingsRepository · idempotencia de request (doble-POST → 1 fila)'
 
   it('P2002 sin fila ni en el PRIMARY (estado inconsistente) → ConflictError tipado, no un 500 opaco', async () => {
     const tx = {
-      booking: { create: vi.fn(async () => { throw p2002(); }) },
+      booking: {
+        create: vi.fn(async () => {
+          throw p2002();
+        }),
+      },
       outboxEvent: { create: vi.fn() },
     };
     const prisma = {
@@ -135,7 +148,11 @@ describe('BookingsRepository · idempotencia de request (doble-POST → 1 fila)'
     const victimRow = { ...makeData(), passengerId: PASSENGER_ID }; // la fila es de A (PASSENGER_ID)
 
     const tx = {
-      booking: { create: vi.fn(async () => { throw p2002(); }) },
+      booking: {
+        create: vi.fn(async () => {
+          throw p2002();
+        }),
+      },
       outboxEvent: { create: vi.fn() },
     };
     const writeFindUnique = vi.fn(async () => victimRow); // recupera la fila de A
@@ -196,7 +213,11 @@ describe('BookingsRepository · transitionWithEvent (outbox-in-transaction, F3b)
 
   it('0 filas (doble-tap / estado ya cambiado) → P2025 → ConflictError tipado, no un 500', async () => {
     const tx = {
-      booking: { update: vi.fn(async () => { throw p2025(); }) },
+      booking: {
+        update: vi.fn(async () => {
+          throw p2025();
+        }),
+      },
       outboxEvent: { create: vi.fn() },
     };
     const prisma = {
@@ -238,10 +259,14 @@ describe('BookingsRepository · markChargePending (tx2 del charge, F3b)', () => 
   });
 
   it('ya no está APROBADO (cobro ya registrado) → P2025 → ConflictError (idempotente)', async () => {
-    const update = vi.fn(async () => { throw p2025(); });
+    const update = vi.fn(async () => {
+      throw p2025();
+    });
     const prisma = { write: { booking: { update } } } as unknown as PrismaService;
 
     const repo = new BookingsRepository(prisma);
-    await expect(repo.markChargePending(BOOKING_ID, PAYMENT_ID)).rejects.toBeInstanceOf(ConflictError);
+    await expect(repo.markChargePending(BOOKING_ID, PAYMENT_ID)).rejects.toBeInstanceOf(
+      ConflictError,
+    );
   });
 });

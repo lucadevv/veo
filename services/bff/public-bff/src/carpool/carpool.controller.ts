@@ -3,7 +3,17 @@
  * (`/carpool/*`) para que ambos rieles hablen el mismo idioma de paths. La sesión del pasajero es la
  * normal del BFF (JWT); la identidad se propaga FIRMADA al downstream (public-rail).
  */
-import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import type { CarpoolBookingView, CarpoolSearchPage, CarpoolTripDetail } from '@veo/api-client';
@@ -29,7 +39,9 @@ export class CarpoolController {
   }
 
   @Get('trips/:id')
-  @ApiOperation({ summary: 'Detalle enriquecido de un viaje publicado (conductor + vehículo públicos)' })
+  @ApiOperation({
+    summary: 'Detalle enriquecido de un viaje publicado (conductor + vehículo públicos)',
+  })
   getDetail(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -40,7 +52,8 @@ export class CarpoolController {
   @Post('bookings')
   @HttpCode(201)
   @ApiOperation({
-    summary: 'Solicitar la reserva de asiento(s) en un viaje publicado. Idempotente vía Idempotency-Key.',
+    summary:
+      'Solicitar la reserva de asiento(s) en un viaje publicado. Idempotente vía Idempotency-Key.',
   })
   reserve(
     @CurrentUser() user: AuthenticatedUser,

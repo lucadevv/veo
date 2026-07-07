@@ -13,10 +13,7 @@ async function errorsFor(input: unknown): Promise<string[]> {
   const dto = plainToInstance(EnrollFaceDto, input);
   const errors = await validate(dto);
   const collect = (es: Awaited<ReturnType<typeof validate>>): string[] =>
-    es.flatMap((e) => [
-      ...Object.keys(e.constraints ?? {}),
-      ...collect(e.children ?? []),
-    ]);
+    es.flatMap((e) => [...Object.keys(e.constraints ?? {}), ...collect(e.children ?? [])]);
   return collect(errors);
 }
 

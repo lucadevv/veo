@@ -2184,7 +2184,10 @@ describe('TripsService.reassignForDriverOffline · Fase B (ADR-021 B1)', () => {
     const outbox: { eventType: string }[] = [];
     const tx = {
       trip: {
-        update: async ({ data }: { data: Record<string, unknown> }) => ({ ...(found as Trip), ...data }),
+        update: async ({ data }: { data: Record<string, unknown> }) => ({
+          ...(found as Trip),
+          ...data,
+        }),
         findUniqueOrThrow: async () => found,
       },
       tripEvent: { create: async () => ({}) },
