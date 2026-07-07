@@ -1,4 +1,4 @@
-import { FleetDocumentType } from '../enums/index.js';
+import { type FleetDocumentType } from '../enums/index.js';
 import type { FleetDocumentStatus } from '../enums/index.js';
 
 /** Documento de conductor o vehículo con vencimiento (BR-I04, BR-D04). */

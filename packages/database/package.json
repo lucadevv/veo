@@ -18,6 +18,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "codegen": "prisma generate --schema test/prisma/schema.prisma",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --max-warnings 0",
     "test": "vitest run",

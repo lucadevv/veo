@@ -276,7 +276,7 @@ export const OFFERING_LIST: readonly OfferingSpec[] = Object.values(OFFERINGS).s
  * unit-testeable (sin I/O ni catálogo hardcodeado): recibe las ofertas ya resueltas y deriva el set.
  */
 export function operableVehicleClasses(
-  offerings: ReadonlyArray<{ enabled: boolean; vehicleClass: VehicleClass }>,
+  offerings: readonly { enabled: boolean; vehicleClass: VehicleClass }[],
 ): VehicleClass[] {
   const enabled = new Set(offerings.filter((o) => o.enabled).map((o) => o.vehicleClass));
   return Object.values(VehicleClass).filter((c) => enabled.has(c));
