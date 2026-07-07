@@ -3,7 +3,6 @@
  * y modos de pricing permitidos.
  */
 export * from './offerings.js';
-export * from './cost-per-km.js';
 export * from './bid-floor.js';
 export * from './vehicle-category.js';
 export * from './vehicle-plate.js';

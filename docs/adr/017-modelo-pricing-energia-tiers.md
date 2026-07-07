@@ -13,6 +13,15 @@
 > [`VEO_MODELO_HIBRIDO §1.5`](../../specs/VEO_MODELO_HIBRIDO.md), que consolida el §1.9 (DAG de config) y el §5
 > (la cadena) de ESTE ADR en una sola tabla de referencia.
 
+> 🔴 **SUPERSEDED IN PART (2026-07):** el modelo de **energía/combustible del pricing** fue **REMOVIDO** — la
+> tarifa on-demand usa **un solo per-km all-in** (fórmula canónica Uber:
+> `tarifa FIJA = max( round((base + perKm·km + perMin·min) × multiplier × surge), minFare ) [+ fee niño]`).
+> Se borró el catálogo de energía (`EnergyCatalog`), el recargo de combustible (`FuelSurcharge`), el flip
+> `PRICING_ENERGY_MODEL_ENABLED`, `deriveFuelPerKmCents`, `calculateOfferingFare` y el shadow-compare. **SIGUEN
+> vigentes:** el multiplier/tiers, la tarifa base, puja/fijo, la comisión y el cost-cap del carpooling. El
+> **`EnergySource`/eficiencia de la ficha del vehículo (§1.8)** NO era pricing — es economía del conductor / OCR
+> de la TIVe — y **sigue**. Las secciones marcadas *OBSOLETO* abajo se conservan como registro histórico.
+
 ---
 
 ## 0. Contexto y problema
@@ -51,6 +60,10 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 ## 1. Decisión
 
 ### 1.1 Energía: UN precio por TIPO, class-reference, sin octanaje · 3 TIPOS de plataforma
+> ⛔ **OBSOLETO (2026-07):** el pricing por energía/combustible fue REMOVIDO. La tarifa on-demand ya NO deriva
+> el costo de la energía — usa un solo per-km all-in (ver bloque SUPERSEDED del header). El `EnergySource` de la
+> **ficha del vehículo** (§1.8) NO es pricing y sobrevive. El texto abajo queda como registro histórico.
+
 - El admin configura **un precio por TIPO de energía de PLATAFORMA**: **gasolina (referencia 90, la común)**,
   **diésel**, **eléctrico**. Son **3 tipos** (decisión del dueño 2026-06-27). Se **elimina el octanaje**
   (84/95: no importa) y se **EXCLUYEN GNV y GLP** como tipos de plataforma.
@@ -90,7 +103,12 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 - `base + per-km + per-min` deja de estar hardcodeada (`fare.ts:16-20`) y pasa a **configuración del admin por
   país** (PE/EC). Multipaís real necesita tarifas distintas por mercado.
 
-### 1.4 Costo de OPERACIÓN por km — DIRECTO editable (carpooling) · energía (on-demand)
+### 1.4 Costo de OPERACIÓN por km — DIRECTO editable (carpooling) · ~~energía (on-demand)~~
+> ⛔ **OBSOLETO EN PARTE (2026-07):** la mitad **on-demand** de esta sección (costo de COMBUSTIBLE/km derivado de
+> la energía) fue REMOVIDA — el on-demand ahora usa el per-km all-in de la tarifa base (§1.3), sin derivación de
+> energía. **La mitad carpooling SIGUE VIGENTE:** el `CostPerKmConfig` DIRECTO editable por país (costo de
+> operación real, combustible+desgaste) que alimenta el cost-cap del carpooling no cambió.
+
 > ⚠️ **CORREGIDO (2026-06-27, investigación BlaBlaCar/inDrive).** El "unificar en una derivación de energía"
 > fue un error de interpretación: son conceptos DISTINTOS. El **on-demand** mantiene su costo de COMBUSTIBLE/km
 > derivado de la energía (precio fuente ÷ rendimiento). El **carpooling** usa el **costo de OPERACIÓN real/km**
@@ -140,8 +158,10 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 - La configuración del admin tiene un **orden de dependencias explícito** (para que exista B tiene que existir
   A), reflejado como un flujo guiado con degradación honesta ("X no configurado → usando default"):
   ```
-  energía → catálogo de modelos → ofertas/clases → tarifa base → costo/km → modo → comisión
+  catálogo de modelos → ofertas/clases → tarifa base → costo/km → modo → comisión
   ```
+  > *(El eslabón `energía →` inicial se ELIMINÓ 2026-07: el pricing por energía fue removido — ver header. La
+  > tarifa base ya lleva el per-km all-in.)*
 - **El admin-web se construye ANTES que la UI de las apps**: las apps (publicar/buscar/reservar) CONSUMEN esta
   configuración; sin un cimiento de config coherente, la UI se construye sobre arena.
 
@@ -149,7 +169,8 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 
 ## 2. Consecuencias (lo que implica construir)
 
-- **Catálogo de energía**: **3 tipos** (gasolina-90/diésel/eléctrico), un precio c/u; GNV/GLP fuera (§1.1). ✅ HECHO (F2.1a).
+- ~~**Catálogo de energía**: **3 tipos** (gasolina-90/diésel/eléctrico), un precio c/u; GNV/GLP fuera (§1.1). ✅ HECHO (F2.1a).~~
+  ⛔ **OBSOLETO (2026-07):** el `EnergyCatalog` del pricing fue BORRADO (el on-demand usa per-km all-in). El `EnergySource` de la ficha del vehículo (§1.8, OCR de la TIVe) NO es esto y sigue.
 - **Catálogo de ofertas**: crear `VEO_PREMIUM` + verificación por foto; separar calidad/capacidad en la UI;
   deprecar `VEO_ECONOMICO_EV`.
 - **Tarifa base**: ✅ HECHO (F2.4, commit `f76a500`). Singleton GLOBAL `BaseFareConfig` (banderazo/km/min)
@@ -163,8 +184,9 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
   modelo correcto (fee al pasajero) no tiene nudo legal. Per-país a F8.
 - **Costo/km del carpooling**: ✅ HECHO (F2.5 → **corregido F2.5-v2**, commit `18145d7`). **DIRECTO editable por
   el admin por país** (`CostPerKmConfig`, seed PE=S/1.50/km = costo de operación real combustible+desgaste), NO
-  derivado de energía (ver §1.4). El tope lo lee directo (degrada al env si cae). El on-demand mantiene su modelo
-  de energía (`deriveCostPerKmCents` en shared-types). **EC a F8.** DEUDA dueño: ajustar el valor real PE.
+  derivado de energía (ver §1.4). El tope lo lee directo (degrada al env si cae). ~~El on-demand mantiene su modelo
+  de energía (`deriveCostPerKmCents` en shared-types).~~ *(⛔ OBSOLETO 2026-07: el on-demand ya NO tiene modelo de
+  energía — usa el per-km all-in de la tarifa base; ver header.)* **EC a F8.** DEUDA dueño: ajustar el valor real PE.
 - **OCR TIVe**: agregar el campo combustible al parser `parse-property-card.ts` (+ tests con TIVe real).
 - **Peajes**: ✅ HECHO (F2.5-v2, commit `18145d7`). El conductor **DECLARA** el peaje (`PublishedTrip.tollsCents`),
   va DENTRO del tope `floor((km×costo/km + peaje)/asientos)` (modelo BlaBlaCar, ver §1.7). Auto-cálculo (TollGuru)
@@ -195,7 +217,12 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 - **Tiers**: Económico (any) · Normal MID ≤8a · Premium PREMIUM ≤5a + foto, multiplier 1.8; XL aparte (§1.2).
 
 **Abiertas (no bloquean F2.3):**
-- **F2.1b — el FLIP** (`PRICING_ENERGY_MODEL_ENABLED`): activar B5 cambia precios reales.
+- ⛔ **OBSOLETO (2026-07) — F2.1b, el FLIP** (`PRICING_ENERGY_MODEL_ENABLED`): **CANCELADO / DECISIÓN MUERTA.**
+  El dueño resolvió REMOVER el modelo de energía del pricing en vez de flipearlo — no hay flip que activar. Se
+  borraron el flag, el `EnergyCatalog`, el `FuelSurcharge`, `deriveFuelPerKmCents`, `calculateOfferingFare` y el
+  shadow-compare. El análisis de impacto / boot-guard / resolver autoritativo de abajo quedan como registro
+  histórico de un camino NO tomado.
+  <br>~~**F2.1b — el FLIP** (`PRICING_ENERGY_MODEL_ENABLED`): activar B5 cambia precios reales.~~
   - ✅ **Análisis de impacto HECHO** (2026-06-26): grilla de rutas × ofertas × precios reales de energía, por las
     dos fórmulas (vieja = fuel global plegado y ×multiplier · nueva = energía pass-through por eficiencia). Resultado:
     el flip **BAJA precios ~1-3% típico** (saca el sobrecargo que el multiplicador metía sobre la energía); económico
@@ -220,8 +247,9 @@ Evidencia nivel-1 (working tree, verificado 2026-06-26) de las incoherencias que
 > efficiency/seats) debe **hacer MATCH** con la config del admin (energía con precio, oferta/tier que lo acepte)
 > ANTES de operar. La auditoría (`auditar-core`, scope flota+finanzas+dispatch) mapeó dónde el eslabón NO cierra.
 
-**Falsos positivos refutados (NO tocar):** la energía sin precio NO subsidia en silencio (`resolveAuthoritativeEnergy`
-**lanza** `InvalidStateError`, fail-CLOSED); el costo/km NO degrada peligroso (la migración siembra PE=150/EC=50 + env=semilla);
+**Falsos positivos refutados (NO tocar):** ~~la energía sin precio NO subsidia en silencio (`resolveAuthoritativeEnergy`
+**lanza** `InvalidStateError`, fail-CLOSED)~~ *(⛔ OBSOLETO 2026-07: el resolver de energía del pricing se borró junto
+con el modelo de energía — ya no hay energía que resolver en la tarifa; ver header)*; el costo/km NO degrada peligroso (la migración siembra PE=150/EC=50 + env=semilla);
 el refund SÍ topa el over-refund (`payments.service.ts:1157`); los "N+1" de `expiry.sweeper` son lecturas batched en loops de
 paginación. Las **certificaciones** de verticales (ambulancia/grúa) ya son fail-CLOSED — el gate de seguridad real funciona.
 

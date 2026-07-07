@@ -9,7 +9,6 @@
  * entrada en `OFFERINGS` no compila.
  */
 import {
-  EnergySource,
   FleetDocumentType,
   PricingMode,
   ServiceType,
@@ -55,9 +54,10 @@ export type OfferingIcon = (typeof OfferingIcon)[keyof typeof OfferingIcon];
 
 /**
  * Recargo del Modo Niño (BR-T07): S/ 2.00 en céntimos PEN. FUENTE ÚNICA — aplica SOLO en viajes de
- * precio FIJO (en PUJA el bid ES el precio, no se recarga). trip-service lo suma en `calculateFare`
- * (FIXED) y la app lo muestra en el desglose ANTES de confirmar; ambos consumen ESTA constante para
- * que el número no diverja entre server y cliente. `as const` la fija como literal `200`.
+ * precio FIJO (en PUJA el bid ES el precio, no se recarga). trip-service lo suma PLANO en `calculateFirmFare`
+ * (DESPUÉS del multiplier de la oferta, así el tier NO lo escala) y la app lo muestra en el desglose ANTES
+ * de confirmar; ambos consumen ESTA constante y el número cobrado coincide EXACTO en cualquier tier.
+ * `as const` la fija como literal `200`.
  */
 export const CHILD_MODE_FEE_CENTS = 200 as const;
 
@@ -112,13 +112,6 @@ export interface OfferingSpec {
    * (AMBULANCE/TOW/MECHANIC) se shippean OCULTAS hasta desbloquearse. Default RIDE en el backfill.
    */
   serviceType: ServiceType;
-  /**
-   * B5 · Eje energía PARA EL QUOTE: fuente + rendimiento de REFERENCIA de la oferta. El quote cotiza
-   * ANTES de asignar vehículo, así que usa esta referencia por CLASE (no el modelSpec del auto, que es
-   * para la economía del conductor). `referenceEfficiency` = km por unidad de energía (km/L o km/kWh).
-   */
-  referenceEnergySourceId: EnergySource;
-  referenceEfficiency: number;
   pricing: OfferingPricingPolicy;
   /**
    * B5-3 · requisitos de eligibilidad del vehículo (seats/segment/antigüedad). Omitido o `{}` = sin
@@ -153,8 +146,6 @@ export const OFFERINGS = {
     icon: OfferingIcon.MOTO,
     vehicleClass: VehicleClass.MOTO,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_90,
-    referenceEfficiency: 40, // km/L (mototaxi)
     pricing: { multiplier: 0.55, minFareCents: 300 },
     allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
     flow: OfferingFlow.STANDARD,
@@ -171,8 +162,6 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_90,
-    referenceEfficiency: 12, // km/L (auto económico)
     pricing: { multiplier: 1.0, minFareCents: 500 },
     allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
     flow: OfferingFlow.STANDARD,
@@ -185,8 +174,6 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_90,
-    referenceEfficiency: 11, // km/L (auto confort, motor mayor)
     pricing: { multiplier: 1.25, minFareCents: 500 },
     // Confort = auto de gama media o mejor, no muy viejo (BR-D04 ya exige >=2017; esto es más estricto).
     requires: { minSegment: VehicleSegment.MID, maxAgeYears: 8 },
@@ -201,8 +188,6 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_90,
-    referenceEfficiency: 8, // km/L (XL/van, mayor consumo)
     pricing: { multiplier: 1.6, minFareCents: 500 },
     // XL = capacidad: 6 asientos o más (familias/grupos). El segmento no importa, sí el tamaño.
     requires: { minSeats: 6 },
@@ -217,8 +202,6 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR, // no hay token premium; CAR es seguro. (Glyph premium dedicado = follow-up de UX.)
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_90,
-    referenceEfficiency: 9, // km/L (premium, motor mayor)
     pricing: { multiplier: 1.8, minFareCents: 800 },
     // Premium = alta gama (segmento PREMIUM) + unidad nueva (<=5 años). La FOTO del vehículo (REQUERIDA
     // para aprobar, ya capturada en onboarding) es la evidencia del operador para asignar segmento PREMIUM.
@@ -239,8 +222,6 @@ export const OFFERINGS = {
     icon: OfferingIcon.AMBULANCE,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.AMBULANCE,
-    referenceEnergySourceId: EnergySource.DIESEL,
-    referenceEfficiency: 9, // km/L (ambulancia/van diésel)
     pricing: { multiplier: 2.5, minFareCents: 3000 },
     // La ambulancia NO negocia (invariante de dominio): solo FIXED.
     allowedModes: [PricingMode.FIXED],
@@ -256,8 +237,6 @@ export const OFFERINGS = {
     icon: OfferingIcon.TOW,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.TOW,
-    referenceEnergySourceId: EnergySource.DIESEL,
-    referenceEfficiency: 6, // km/L (grúa, alto consumo)
     pricing: { multiplier: 2.0, minFareCents: 4000 },
     allowedModes: [PricingMode.FIXED],
     flow: OfferingFlow.STANDARD,
@@ -273,8 +252,6 @@ export const OFFERINGS = {
     // Mecánico móvil: llega en moto al vehículo varado (no traslada pasajeros).
     vehicleClass: VehicleClass.MOTO,
     serviceType: ServiceType.MECHANIC,
-    referenceEnergySourceId: EnergySource.GASOLINE_90,
-    referenceEfficiency: 35, // km/L (moto del mecánico)
     pricing: { multiplier: 1.0, minFareCents: 2000 },
     allowedModes: [PricingMode.FIXED],
     flow: OfferingFlow.STANDARD,

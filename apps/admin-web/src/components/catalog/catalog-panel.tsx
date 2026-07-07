@@ -226,15 +226,6 @@ export function CatalogPanel({
         </table>
       </div>
 
-      {/* Nota informativa de la validación cruzada (A1) — el aviso POR FILA aparece bajo la oferta afectada. */}
-      <p className="flex items-start gap-2 text-xs text-ink-muted">
-        <TriangleAlert className="mt-px size-3.5 shrink-0 text-warn" aria-hidden />
-        <span>
-          Validación cruzada: se avisa por fila si el piso de puja de una oferta supera su tarifa
-          mínima fija (el mismo viaje saldría más barato en FIJO que el mínimo pujable).
-        </span>
-      </p>
-
       <ReadOnlyNote canManage={canManage} noun="el catálogo" />
     </div>
   );
@@ -338,6 +329,8 @@ function OfferingRow({
 
   // ¿Esta oferta puja? Las FIXED-only (ambulancia/grúa/mecánico) NO llevan piso de puja.
   const allowsPuja = offering.allowedModes.includes(PricingMode.PUJA);
+  // Modo ÚNICO: si la oferta permite un solo modo, no hay elección real → label, no un selector falso.
+  const soleMode = offering.allowedModes.length === 1 ? offering.allowedModes[0] : undefined;
 
   // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
   const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
@@ -383,8 +376,16 @@ function OfferingRow({
     minFareCents !== undefined && !minFareInvalid ? minFareCents : offering.pricing.minFareCents;
   // crossWarn carga los DOS números ya narrowed (no-null) para el render; null = no se advierte (sin bidFloor,
   // sin allowsPuja, o piso ≤ mínimo fijo). El `effFloorCents !== null` narrowea a number.
+  //
+  // LIVE (no banner permanente): el aviso solo se muestra mientras el operador EDITA el piso o la mínima de ESTA
+  // fila — no sobre datos que ya venían inconsistentes. Sin tocar nada → tabla limpia; al cambiar el valor valida
+  // en vivo y desaparece cuando queda coherente. `minTouched` usa el MISMO criterio que el `dirty` de la mínima.
+  const minTouched = (minFareCents ?? null) !== (override?.minFareCents ?? null);
   const crossWarn =
-    allowsPuja && effFloorCents !== null && pujaFloorExceedsFixedMin(effFloorCents, effFixedMinCents)
+    (floorDirty || minTouched) &&
+    allowsPuja &&
+    effFloorCents !== null &&
+    pujaFloorExceedsFixedMin(effFloorCents, effFixedMinCents)
       ? { floorCents: effFloorCents, fixedMinCents: effFixedMinCents }
       : null;
 
@@ -427,22 +428,27 @@ function OfferingRow({
           </div>
         </td>
 
-        {/* Modo: select compacto restringido a los modos que la oferta permite. */}
+        {/* Modo: si la oferta permite UN solo modo (ej. Ambulancia = solo fijo) no hay elección real → label,
+            no un dropdown falso. Con ≥2 modos, el select ("Auto" = usa el schedule global de On-demand). */}
         <td className="px-3 py-2.5 align-middle">
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
-            disabled={!canManage}
-            aria-label={`Modo de ${offeringLabel(offering.id)}`}
-            className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
-          >
-            <option value={AUTO}>Auto</option>
-            {offering.allowedModes.map((m) => (
-              <option key={m} value={m}>
-                {MODE_LABEL[m]}
-              </option>
-            ))}
-          </select>
+          {soleMode ? (
+            <span className="text-sm text-ink-muted">{MODE_LABEL[soleMode]}</span>
+          ) : (
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              disabled={!canManage}
+              aria-label={`Modo de ${offeringLabel(offering.id)}`}
+              className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
+            >
+              <option value={AUTO}>Auto</option>
+              {offering.allowedModes.map((m) => (
+                <option key={m} value={m}>
+                  {MODE_LABEL[m]}
+                </option>
+              ))}
+            </select>
+          )}
         </td>
 
         {/* Multiplicador. */}
@@ -563,9 +569,8 @@ function OfferingRow({
             <p className="flex items-start gap-1.5 text-xs text-warn">
               <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
               <span>
-                El piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) supera la tarifa mínima
-                fija (S/{formatSolesInput(crossWarn.fixedMinCents)}): el mismo viaje sale más barato
-                en FIJO que el mínimo que se puede pujar.
+                Piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) &gt; tarifa mínima fija (S/
+                {formatSolesInput(crossWarn.fixedMinCents)}) — la puja no debería costar más que el fijo.
               </span>
             </p>
           </td>

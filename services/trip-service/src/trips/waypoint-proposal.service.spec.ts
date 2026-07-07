@@ -7,11 +7,8 @@
  * (agregar parada BAJABA la tarifa — se regalaba plata) y sobre-cobraba moto ×1/0.55 (tasa auto).
  */
 import { describe, it, expect } from 'vitest';
-import type { ConfigService } from '@nestjs/config';
 import { TripStatus } from '@veo/shared-types';
-import { InvalidStateError } from '@veo/utils';
 import type { MapsClient } from '@veo/maps';
-import type { EnergyCatalogService } from '../pricing/energy-catalog.service';
 import { WaypointProposalService } from './waypoint-proposal.service';
 import { WaypointProposalStatus } from './domain/waypoint-proposal';
 import type { PrismaService } from '../infra/prisma.service';
@@ -118,82 +115,6 @@ function makeService(trip: Trip, newRoute: { distanceMeters: number; durationSec
   );
   return { service, prisma };
 }
-
-/** Config con el flip ON (lo único que el re-quote autoritativo lee, además del TTL → default). */
-const flipOnConfig = {
-  get: (k: string) => (k === 'PRICING_ENERGY_MODEL_ENABLED' ? true : undefined),
-} as unknown as ConfigService<Record<string, unknown>, true>;
-
-/** Variante flip-ON: inyecta config + un catálogo de energía que devuelve `price` (o null = sin cargar). */
-function makeServiceFlip(
-  trip: Trip,
-  newRoute: { distanceMeters: number; durationSeconds: number },
-  price: number | null,
-) {
-  const prisma = makePrisma(trip);
-  const energyCatalog = {
-    getPriceFor: () => Promise.resolve(price),
-  } as unknown as EnergyCatalogService;
-  const service = new WaypointProposalService(
-    prisma as unknown as PrismaService,
-    makeMaps(newRoute.distanceMeters, newRoute.durationSeconds),
-    flipOnConfig,
-    energyCatalog,
-  );
-  return { service, prisma };
-}
-
-describe('proposeWaypoint · F2.1b · re-quote con energía AUTORITATIVA bajo el flip', () => {
-  it('FIXED + flip ON: el re-quote SUMA la energía pass-through (más caro que sin flip)', async () => {
-    // Confort (×1.25, rendimiento 11), ruta nueva 5.5 km/11 min. Sin flip: 1590×1.25 = 1988.
-    // Con flip + gasolina 1100¢/L → energía 100¢/km → +100×5.5 = 550 ⇒ 1987.5+550 = 2537.5 → 2538.
-    const trip = buildTrip({ category: 'veo_confort', fareCents: 1875 });
-    const { service } = makeServiceFlip(trip, { distanceMeters: 5500, durationSeconds: 660 }, 1100);
-
-    const result = await service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' });
-
-    expect(result.newFareCents).toBe(2538);
-    expect(result.newFareCents).toBeGreaterThan(1988); // la energía se sumó (vs sin flip)
-  });
-
-  it('FIXED + flip ON + catálogo VACÍO (fuente sin precio) → InvalidStateError (NUNCA cobra de menos)', async () => {
-    const trip = buildTrip({ category: 'veo_confort', fareCents: 1875 });
-    const { service } = makeServiceFlip(trip, { distanceMeters: 5500, durationSeconds: 660 }, null);
-
-    await expect(
-      service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' }),
-    ).rejects.toBeInstanceOf(InvalidStateError);
-  });
-
-  it('FIXED + flip OFF: pliega el combustible B3 en el re-quote (espejo del create, no lo descarta)', async () => {
-    // Confort (×1.25), ruta nueva 5.5 km/11 min, fuel 40¢/km: 600 + (120+40)·5.5 + 30·11 = 1810 → ×1.25 = 2263.
-    // SIN el fix daba 1988 (sin combustible). Floor en trip.fareCents (1875) no domina.
-    const trip = buildTrip({ category: 'veo_confort', fareCents: 1875 });
-    const prisma = makePrisma(trip);
-    const fuel = { getPerKmCents: () => Promise.resolve(40) } as never;
-    const service = new WaypointProposalService(
-      prisma as unknown as PrismaService,
-      makeMaps(5500, 660),
-      undefined, // config (flip OFF)
-      undefined, // energyCatalog
-      fuel, // FuelSurchargeService
-    );
-
-    const result = await service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' });
-
-    expect(result.newFareCents).toBe(2263);
-  });
-
-  it('PUJA + flip ON: NO suma energía (la puja ignora la energía; mantiene la política vieja)', async () => {
-    // PUJA confort: sin energía aunque el flip esté ON → 1590×1.25 = 1988 (igual que sin flip).
-    const trip = buildTrip({ category: 'veo_confort', dispatchMode: 'PUJA', fareCents: 1875 });
-    const { service } = makeServiceFlip(trip, { distanceMeters: 5500, durationSeconds: 660 }, 1100);
-
-    const result = await service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' });
-
-    expect(result.newFareCents).toBe(1988); // sin el +550 de energía
-  });
-});
 
 const POINT = { lat: -12.08, lon: -77.03 };
 

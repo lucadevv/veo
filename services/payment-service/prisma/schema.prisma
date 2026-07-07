@@ -267,7 +267,12 @@ model CommissionConfig {
   plinFeeBps         Int    @default(0) @map("plin_fee_bps")
   cardFeeBps         Int    @default(0) @map("card_fee_bps")
   pagoefectivoFeeBps Int    @default(0) @map("pagoefectivo_fee_bps")
+  /// CAS de la comisión ON-DEMAND + los fees PSP (yape/plin/card/pagoefectivo). El PUT de on-demand y el de
+  /// PSP fees bumpean ESTA version. NO la toca el PUT del service fee de carpooling (que tiene su propia CAS).
   version          Int      @default(0)
+  /// CAS INDEPENDIENTE del service fee de CARPOOLING (`carpoolingFeeBps`). El PUT de carpooling bumpea SOLO esta
+  /// version → editar el carpooling y editar la comisión on-demand ya NO se 409ean entre sí (cada panel su CAS).
+  carpoolingFeeVersion Int  @default(0) @map("carpooling_fee_version")
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("commission_config")

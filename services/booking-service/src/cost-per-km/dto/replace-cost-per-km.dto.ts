@@ -1,6 +1,6 @@
 /**
  * DTO del endpoint interno del costo/km por país (F2.5). El costo va en CÉNTIMOS PEN Int (jamás float).
- * `expectedVersion` = optimistic locking (CAS) per-país. Espeja ReplaceCommissionDto de payment-service.
+ * `expectedVersion` = optimistic locking (CAS) per-país. Espeja ReplaceOnDemandRateDto de payment-service.
  */
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsInt, Max, Min } from 'class-validator';

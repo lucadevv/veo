@@ -8,30 +8,12 @@ import {
 import {
   calculateFare,
   applyOfferingPricing,
-  calculateOfferingFare,
-  shadowCompareFare,
-  deriveFuelPerKmCents,
+  calculateFirmFare,
   BASE_FARE_CENTS,
   PER_KM_CENTS,
   PER_MIN_CENTS,
   CHILD_MODE_FEE_CENTS,
 } from './fare';
-
-describe('B4 · deriveFuelPerKmCents (precio ÷ rendimiento)', () => {
-  it('S/4.20/L (420c) ÷ 12 km/L = 35 céntimos/km', () => {
-    expect(deriveFuelPerKmCents(420, 12)).toBe(35);
-  });
-  it('redondea al céntimo (500 ÷ 12 = 41.66 → 42)', () => {
-    expect(deriveFuelPerKmCents(500, 12)).toBe(42);
-  });
-  it('rendimiento 0 o negativo → 0 (sin división por cero)', () => {
-    expect(deriveFuelPerKmCents(420, 0)).toBe(0);
-    expect(deriveFuelPerKmCents(420, -5)).toBe(0);
-  });
-  it('precio 0 → 0 (sin recargo)', () => {
-    expect(deriveFuelPerKmCents(0, 12)).toBe(0);
-  });
-});
 
 describe('BR-T05 · cálculo de tarifa', () => {
   it('tarifa base sin distancia ni tiempo = banderazo', () => {
@@ -63,35 +45,7 @@ describe('BR-T05 · cálculo de tarifa', () => {
     expect(calculateFare({ distanceMeters: 5000, durationSeconds: 600 }).cents).toBe(1500);
   });
 
-  it('B3 · el recargo de combustible se pliega al per-km (5 km, +40 céntimos/km = +200)', () => {
-    const fare = calculateFare({ distanceMeters: 5000, durationSeconds: 600, fuelPerKmCents: 40 });
-    // 600 + (120+40)*5 + 30*10 = 600 + 800 + 300 = 1700
-    expect(fare.cents).toBe(BASE_FARE_CENTS + (PER_KM_CENTS + 40) * 5 + PER_MIN_CENTS * 10);
-    expect(fare.cents).toBe(1700);
-  });
-
-  it('B3 · el fuel se surge junto al resto (1500+200 base ×1.5 = 2550)', () => {
-    const fare = calculateFare({
-      distanceMeters: 5000,
-      durationSeconds: 600,
-      fuelPerKmCents: 40,
-      surgeMultiplier: 1.5,
-    });
-    expect(fare.cents).toBe(
-      Math.round((BASE_FARE_CENTS + (PER_KM_CENTS + 40) * 5 + PER_MIN_CENTS * 10) * 1.5),
-    );
-  });
-
-  it('B3 · fuel default 0 = sin recargo; fuel negativo → ValidationError', () => {
-    const a = calculateFare({ distanceMeters: 5000, durationSeconds: 600 });
-    const b = calculateFare({ distanceMeters: 5000, durationSeconds: 600, fuelPerKmCents: 0 });
-    expect(a.cents).toBe(b.cents);
-    expect(() =>
-      calculateFare({ distanceMeters: 1000, durationSeconds: 60, fuelPerKmCents: -5 }),
-    ).toThrow();
-  });
-
-  it('aplica surge multiplicador antes del recargo de niño', () => {
+  it('aplica surge multiplicador a la base', () => {
     const fare = calculateFare({
       distanceMeters: 5000,
       durationSeconds: 600,
@@ -101,15 +55,17 @@ describe('BR-T05 · cálculo de tarifa', () => {
     expect(fare.cents).toBe(2250);
   });
 
-  it('modo niño suma 200 céntimos (S/2) después del surge', () => {
-    const fare = calculateFare({
+  it('calculateFare NO suma el recargo de niño (es plano, lo aplica calculateFirmFare)', () => {
+    const conChild = calculateFare({
       distanceMeters: 5000,
       durationSeconds: 600,
       surgeMultiplier: 1.5,
       childMode: true,
     });
-    // 1500 * 1.5 + 200 = 2450
-    expect(fare.cents).toBe(2250 + CHILD_MODE_FEE_CENTS);
+    const sinChild = calculateFare({ distanceMeters: 5000, durationSeconds: 600, surgeMultiplier: 1.5 });
+    // calculateFare devuelve la BASE (2250) sin importar childMode: el fee lo suma calculateFirmFare al final.
+    expect(conChild.cents).toBe(2250);
+    expect(conChild.cents).toBe(sinChild.cents);
   });
 
   it('anti-divergencia: el recargo de niño de fare ES el de @veo/shared-types (sin copia local)', () => {
@@ -193,73 +149,47 @@ describe('ADR 013 §1.7 · applyOfferingPricing (tarifa firme desde base — FUE
   });
 });
 
-describe('B5-1 · calculateOfferingFare (energía pass-through · multiplier solo posición)', () => {
-  const eco = OFFERINGS[OfferingId.VEO_ECONOMICO].pricing; // mult 1.0, minFare 500
-  const xl = OFFERINGS[OfferingId.VEO_XL].pricing; // mult 1.6, minFare 500
-  const ride = { distanceMeters: 5000, durationSeconds: 600 }; // 5km, 10min → servicio 1500
+describe('BR-T05 + BR-T07 · calculateFirmFare (tarifa firme + fee de niño PLANO)', () => {
+  // FUENTE ÚNICA del cobro FIXED. El fee de niño NO lo escala el multiplier de la oferta ni el surge:
+  // cuesta S/2.00 en cualquier tier (regresión que este bloque congela).
+  const baseInput = { distanceMeters: 5000, durationSeconds: 600 }; // base = 1500
 
-  it('económico (mult 1.0) sin energía → 1500 (servicio puro)', () => {
-    expect(calculateOfferingFare(ride, eco, 0).cents).toBe(1500);
+  it('sin modo niño = applyOfferingPricing(calculateFare): confort ×1.25 → 1875', () => {
+    const fare = calculateFirmFare(baseInput, OFFERINGS[OfferingId.VEO_CONFORT].pricing);
+    expect(fare.cents).toBe(1875); // 1500 × 1.25
   });
 
-  it('F2.4 · la tarifa base configurable mueve el servicio (700/140/40 ×1.6 XL → 2880)', () => {
-    // servicio (700 + 140·5 + 40·10) = 1800; ×1.6 = 2880 (vs 2400 con las constantes)
-    const fare = calculateOfferingFare(
-      { ...ride, baseFareCents: 700, perKmCents: 140, perMinCents: 40 },
-      xl,
-      0,
+  it('el fee de niño es PLANO: se suma DESPUÉS del multiplier, el tier NO lo escala (confort ×1.25)', () => {
+    const fare = calculateFirmFare(
+      { ...baseInput, childMode: true },
+      OFFERINGS[OfferingId.VEO_CONFORT].pricing,
     );
-    expect(fare.cents).toBe(2880);
+    // CORRECTO: 1500×1.25 + 200 = 2075.  BUG viejo (fee dentro de la base): (1500+200)×1.25 = 2125.
+    expect(fare.cents).toBe(1875 + CHILD_MODE_FEE_CENTS);
+    expect(fare.cents).toBe(2075);
   });
 
-  it('energía es PASS-THROUGH: el multiplier NO la escala (económico +40/km = +200)', () => {
-    expect(calculateOfferingFare(ride, eco, 40).cents).toBe(1700); // 1500×1.0 + 40·5
+  it('el delta por modo niño es EXACTAMENTE S/2.00 en todos los tiers (moto ×0.55, confort ×1.25, xl ×1.6)', () => {
+    for (const id of [OfferingId.VEO_MOTO, OfferingId.VEO_CONFORT, OfferingId.VEO_XL]) {
+      const sin = calculateFirmFare(baseInput, OFFERINGS[id].pricing);
+      const con = calculateFirmFare({ ...baseInput, childMode: true }, OFFERINGS[id].pricing);
+      expect(con.cents - sin.cents).toBe(CHILD_MODE_FEE_CENTS);
+    }
   });
 
-  it('XL (mult 1.6): el multiplier escala el SERVICIO, NO la energía', () => {
-    // servicio 1500×1.6 = 2400; + energía 40·5 = 200 → 2600 (NO 2720 como el viejo)
-    expect(calculateOfferingFare(ride, xl, 40).cents).toBe(2600);
-  });
-
-  it('surge escala todo (servicio posicionado + energía)', () => {
-    expect(calculateOfferingFare({ ...ride, surgeMultiplier: 1.5 }, eco, 40).cents).toBe(2550); // 1700×1.5
-  });
-
-  it('respeta la tarifa mínima', () => {
-    expect(calculateOfferingFare({ distanceMeters: 0, durationSeconds: 0 }, eco, 0).cents).toBe(
-      600,
-    ); // BASE 600 > minFare? no, 600>500 → 600
-  });
-
-  it('fee de niño es FLAT (no escalado por multiplier ni surge)', () => {
-    expect(calculateOfferingFare({ ...ride, childMode: true }, eco, 40).cents).toBe(
-      1700 + CHILD_MODE_FEE_CENTS,
+  it('el fee de niño se suma AUN cuando la mínima de la oferta pisa la base', () => {
+    // 400 × 0.55 = 220 < mínima moto → firm = mínima; + niño 200 plano.
+    const smallInput = {
+      distanceMeters: 0,
+      durationSeconds: 0,
+      baseFareCents: 400,
+      perKmCents: 0,
+      perMinCents: 0,
+    };
+    const con = calculateFirmFare(
+      { ...smallInput, childMode: true },
+      OFFERINGS[OfferingId.VEO_MOTO].pricing,
     );
-  });
-
-  it('rechaza insumos inválidos (energía negativa, surge fuera de rango)', () => {
-    expect(() => calculateOfferingFare(ride, eco, -1)).toThrow(ValidationError);
-    expect(() => calculateOfferingFare({ ...ride, surgeMultiplier: 3 }, eco, 0)).toThrow(
-      ValidationError,
-    );
-  });
-});
-
-describe('B5-1 · shadowCompareFare (viejo vs nuevo)', () => {
-  const eco = OFFERINGS[OfferingId.VEO_ECONOMICO].pricing;
-  const xl = OFFERINGS[OfferingId.VEO_XL].pricing;
-  const ride = { distanceMeters: 5000, durationSeconds: 600 };
-
-  it('económico (mult 1.0): viejo == nuevo (delta 0, el multiplier 1.0 no cambia nada)', () => {
-    const d = shadowCompareFare(ride, eco, 40, 40);
-    expect(d).toEqual({ oldCents: 1700, newCents: 1700, deltaCents: 0 });
-  });
-
-  it('XL (mult 1.6): el nuevo es MENOR — la energía ya no se infla por el multiplier', () => {
-    // viejo: max(round((1700)×1.6),500)=2720 · nuevo: 1500×1.6 + 200 = 2600 → delta -120
-    const d = shadowCompareFare(ride, xl, 40, 40);
-    expect(d.oldCents).toBe(2720);
-    expect(d.newCents).toBe(2600);
-    expect(d.deltaCents).toBe(-120);
+    expect(con.cents).toBe(OFFERINGS[OfferingId.VEO_MOTO].pricing.minFareCents + CHILD_MODE_FEE_CENTS);
   });
 });

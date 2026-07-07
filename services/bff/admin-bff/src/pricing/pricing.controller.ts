@@ -14,18 +14,14 @@ import { AdminRole } from '@veo/shared-types';
 import {
   PricingService,
   type ModeScheduleView,
-  type FuelSurchargeView,
-  type EnergyCatalogView,
   type BidFloorView,
   type BaseFareView,
 } from './pricing.service';
 import {
   ReplaceScheduleDto,
-  ReplaceFuelSurchargeDto,
   ReplaceBidFloorDto,
   ReplaceBaseFareDto,
 } from './dto/pricing.dto';
-import { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
 
 @ApiTags('pricing')
 @Controller('pricing')
@@ -55,27 +51,6 @@ export class PricingController {
     return this.pricing.replaceSchedule(user, dto);
   }
 
-  @Get('fuel-surcharge')
-  @ApiOperation({ summary: 'Recargo de combustible por km vigente (o 0). pricing:view. B3' })
-  getFuelSurcharge(@CurrentUser() user: AuthenticatedUser): Promise<FuelSurchargeView> {
-    return this.pricing.getFuelSurcharge(user);
-  }
-
-  @Put('fuel-surcharge')
-  @HttpCode(200)
-  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
-  @RequireStepUpMfa()
-  @ApiOperation({
-    summary:
-      'REEMPLAZA el recargo de combustible por km. pricing:manage (ADMIN/SUPERADMIN/FINANCE).',
-  })
-  replaceFuelSurcharge(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ReplaceFuelSurchargeDto,
-  ): Promise<FuelSurchargeView> {
-    return this.pricing.replaceFuelSurcharge(user, dto);
-  }
-
   @Get('base-fare')
   @ApiOperation({
     summary: 'Tarifa base vigente (banderazo + per-km + per-min, o los defaults). pricing:view. F2.4',
@@ -97,27 +72,6 @@ export class PricingController {
     @Body() dto: ReplaceBaseFareDto,
   ): Promise<BaseFareView> {
     return this.pricing.replaceBaseFare(user, dto);
-  }
-
-  @Get('energy-catalog')
-  @ApiOperation({ summary: 'Catálogo de precios de energía por fuente vigente. pricing:view. B5' })
-  getEnergyCatalog(@CurrentUser() user: AuthenticatedUser): Promise<EnergyCatalogView> {
-    return this.pricing.getEnergyCatalog(user);
-  }
-
-  @Put('energy-catalog')
-  @HttpCode(200)
-  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
-  @RequireStepUpMfa()
-  @ApiOperation({
-    summary:
-      'REEMPLAZA wholesale los precios de energía. pricing:manage (ADMIN/SUPERADMIN/FINANCE). B5',
-  })
-  replaceEnergyCatalog(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ReplaceEnergyCatalogDto,
-  ): Promise<EnergyCatalogView> {
-    return this.pricing.replaceEnergyCatalog(user, dto);
   }
 
   @Get('bid-floor')

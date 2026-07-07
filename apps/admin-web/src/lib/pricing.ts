@@ -22,7 +22,7 @@ export function modeDescription(mode: PricingMode): string {
  * Bits del bitmask de días del schedule (Lun=1 … Dom=64). Orden de visualización empieza en Lunes,
  * coherente con la semana laboral peruana.
  */
-const DAY_BITS: readonly { bit: number; short: string }[] = [
+export const DAY_BITS: readonly { bit: number; short: string }[] = [
   { bit: 1, short: 'Lun' },
   { bit: 2, short: 'Mar' },
   { bit: 4, short: 'Mié' },
@@ -48,4 +48,14 @@ export function formatMinute(minute: number): string {
 /** Ventana horaria de una regla: 'HH:MM–HH:MM'. */
 export function formatWindow(startMinute: number, endMinute: number): string {
   return `${formatMinute(startMinute)}–${formatMinute(endMinute)}`;
+}
+
+/** 'HH:MM' → minuto del día (0-1439). NaN si el formato/rango es inválido (para validar el editor de franjas). */
+export function parseMinute(hhmm: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!match) return Number.NaN;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h > 23 || m > 59) return Number.NaN;
+  return h * 60 + m;
 }

@@ -14,7 +14,7 @@ export interface ConfigMutation<TPayload> {
 }
 
 export interface UseConfigSaveOptions<TPayload> {
-  /** La mutation del panel (`useReplaceBaseFare()`, `useReplaceCommission()`, …). */
+  /** La mutation del panel (`useReplaceBaseFare()`, `useReplaceOnDemandRate()`, …). */
   mutation: ConfigMutation<TPayload>;
   /**
    * Título del toast de éxito: estático, o derivado del payload (paneles con éxito dinámico: tarifa base muestra

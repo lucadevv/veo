@@ -12,15 +12,11 @@
 import { Body, Controller, Get, HttpCode, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InternalIdentityGuard } from '@veo/auth';
-import { ENERGY_SOURCE_UNIT } from '@veo/shared-types';
 import { PricingScheduleService } from './pricing-schedule.service';
-import { FuelSurchargeService } from './fuel-surcharge.service';
-import { EnergyCatalogService } from './energy-catalog.service';
 import { BidFloorService } from './bid-floor.service';
 import { BaseFareService } from './base-fare.service';
 import { AdminIdentityGuard } from './admin-identity.guard';
-import { ReplaceScheduleDto, ReplaceFuelSurchargeDto, ReplaceBaseFareDto } from './dto/pricing.dto';
-import { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
+import { ReplaceScheduleDto, ReplaceBaseFareDto } from './dto/pricing.dto';
 import { ReplaceBidFloorDto } from './dto/bid-floor.dto';
 import { ResolveQueryDto } from './dto/resolve-query.dto';
 import { toZone } from '../trips/domain/pricing-mode';
@@ -32,8 +28,6 @@ import { toZone } from '../trips/domain/pricing-mode';
 export class PricingController {
   constructor(
     private readonly pricing: PricingScheduleService,
-    private readonly fuel: FuelSurchargeService,
-    private readonly energy: EnergyCatalogService,
     private readonly bidFloor: BidFloorService,
     private readonly baseFare: BaseFareService,
   ) {}
@@ -62,24 +56,6 @@ export class PricingController {
     });
   }
 
-  @Get('fuel-surcharge')
-  @ApiOperation({ summary: 'Recargo de combustible por km vigente (o 0 si no hay config). B3' })
-  getFuelSurcharge() {
-    return this.fuel.getConfig();
-  }
-
-  @Put('fuel-surcharge')
-  @HttpCode(200)
-  @UseGuards(AdminIdentityGuard)
-  @ApiOperation({
-    summary:
-      'REEMPLAZA el recargo de combustible por km (bump version) y emite fuel.surcharge_updated. ' +
-      'Solo identidad admin (B3).',
-  })
-  replaceFuelSurcharge(@Body() dto: ReplaceFuelSurchargeDto) {
-    return this.fuel.replace(dto.fuelPricePerLiterCents, dto.kmPerLiter, dto.expectedVersion);
-  }
-
   @Get('base-fare')
   @ApiOperation({
     summary:
@@ -104,32 +80,6 @@ export class PricingController {
       dto.perMinCents,
       dto.expectedVersion,
     );
-  }
-
-  @Get('energy-catalog')
-  @ApiOperation({
-    summary: 'Catálogo de precios de energía por fuente vigente (o vacío si no hay config). B5',
-  })
-  getEnergyCatalog() {
-    return this.energy.getCatalog();
-  }
-
-  @Put('energy-catalog')
-  @HttpCode(200)
-  @UseGuards(AdminIdentityGuard)
-  @ApiOperation({
-    summary:
-      'REEMPLAZA wholesale el catálogo de energía (precios por fuente, bump version) y emite ' +
-      'energy.catalog_updated. La `unit` se deriva de la fuente (no se ingresa). Solo identidad admin (B5).',
-  })
-  replaceEnergyCatalog(@Body() dto: ReplaceEnergyCatalogDto) {
-    // La unidad NO la elige el admin: se deriva de la fuente (gasolina→litro, eléctrico→kWh).
-    const sources = dto.sources.map((s) => ({
-      sourceId: s.sourceId,
-      unit: ENERGY_SOURCE_UNIT[s.sourceId],
-      pricePerUnitCents: s.pricePerUnitCents,
-    }));
-    return this.energy.replace(sources, dto.expectedVersion);
   }
 
   @Get('bid-floor')

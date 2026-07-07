@@ -110,47 +110,6 @@ export class ReplaceScheduleDto {
   expectedVersion!: number;
 }
 
-/** Techos de cordura: precio S/100/L y rendimiento 200 km/L (evitan un dedazo catastrófico del admin). */
-export const FUEL_PRICE_MAX_CENTS_PER_LITER = 10_000;
-export const FUEL_KM_PER_LITER_MAX = 200;
-
-/**
- * Body del PUT /internal/pricing/fuel-surcharge (B4) — el admin ingresa el PRECIO del combustible (lo que
- * ve en el grifo) + el RENDIMIENTO (km/litro); el server deriva el recargo/km = precio ÷ rendimiento.
- */
-export class ReplaceFuelSurchargeDto {
-  @ApiProperty({
-    description: 'Precio del combustible por litro en céntimos PEN (0 = sin recargo)',
-    minimum: 0,
-    maximum: FUEL_PRICE_MAX_CENTS_PER_LITER,
-  })
-  @IsInt()
-  @Min(0)
-  @Max(FUEL_PRICE_MAX_CENTS_PER_LITER)
-  fuelPricePerLiterCents!: number;
-
-  @ApiProperty({
-    description: 'Rendimiento del vehículo de referencia en km por litro (1..200; 0 = sin recargo)',
-    minimum: 0,
-    maximum: FUEL_KM_PER_LITER_MAX,
-  })
-  @IsInt()
-  @Min(0)
-  @Max(FUEL_KM_PER_LITER_MAX)
-  kmPerLiter!: number;
-
-  @ApiProperty({
-    description:
-      'Optimistic locking: la `version` que el cliente cargó. El server REEMPLAZA solo si la versión ' +
-      'vigente sigue siendo esta (CAS); si otro admin cambió el config mientras tanto → 409 ConflictError. ' +
-      '0 = el cliente no vio ninguna fila (primer write).',
-    minimum: 0,
-  })
-  @IsInt()
-  @Min(0)
-  expectedVersion!: number;
-}
-
 /**
  * Techos de cordura de la tarifa base (F2.4) en céntimos PEN — evitan un dedazo catastrófico del admin.
  * Banderazo S/200, S/50/km, S/20/min: holgados sobre los valores vigentes (S/6 · S/1.20 · S/0.30).

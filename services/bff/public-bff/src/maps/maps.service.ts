@@ -36,14 +36,7 @@ import { GRPC_PAYMENT, MAPS, REST_TRIP } from '../infra/downstream.tokens';
 import { ANONYMOUS_IDENTITY } from '../common/identities';
 import type { UserCreditReply } from '../infra/grpc-types';
 import type { Env } from '../config/env.schema';
-import {
-  categoryFareCents,
-  categoryFareCentsV2,
-  shadowCompareCategoryFare,
-  deriveEnergyPerKmCents,
-  DEFAULT_FARE_BASE,
-  type FareBase,
-} from './fare';
+import { categoryFareCents, DEFAULT_FARE_BASE, type FareBase } from './fare';
 import { OFFERING_DISPLAY_NAMES } from './offering-names';
 import { bumpCatalogDegraded } from './maps-metrics';
 import {
@@ -68,18 +61,6 @@ const ANCHOR_OFFERING = OFFERINGS[OfferingId.VEO_ECONOMICO];
 /** Respuesta del endpoint interno GET /internal/pricing/resolve de trip-service (ADR 011). */
 interface ResolveModeReply {
   mode: PricingMode;
-}
-
-/** Respuesta de GET /internal/pricing/fuel-surcharge (trip-service · B4): el per-km DERIVADO (precio÷rendimiento). */
-interface FuelSurchargeReply {
-  perKmCents: number;
-}
-
-/** Respuesta de GET /internal/pricing/energy-catalog (trip-service · B5): precios de energía por fuente. */
-interface EnergyCatalogReply {
-  sources: { sourceId: string; unit: string; pricePerUnitCents: number }[];
-  version: number;
-  updatedAt: string;
 }
 
 /** Respuesta de GET /internal/pricing/bid-floor (trip-service · ADR 010 §9.3): piso por (zona, oferta). */
@@ -115,8 +96,6 @@ interface EffectiveOffering {
 @Injectable()
 export class MapsService {
   private readonly logger = new Logger(MapsService.name);
-  /** B5-1.d · FLIP del modelo de energía en el quote (default false). ON = fórmula nueva (pass-through). */
-  private readonly energyModelEnabled: boolean;
 
   constructor(
     @Inject(MAPS) private readonly maps: MapsClient,
@@ -127,9 +106,7 @@ export class MapsService {
     @Optional() @Inject(GRPC_PAYMENT) private readonly paymentGrpc?: GrpcServiceClient,
     @Optional() @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret?: string,
     @Optional() @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience?: InternalAudience,
-  ) {
-    this.energyModelEnabled = config.getOrThrow<boolean>('PRICING_ENERGY_MODEL_ENABLED');
-  }
+  ) {}
 
   /**
    * Autocompletado de direcciones. Devuelve `[]` si el texto es muy corto (<3) o no hay resultados.
@@ -181,8 +158,6 @@ export class MapsService {
       scheduledMode,
       creditBalanceCents,
       effective,
-      fuelPerKmCents,
-      energyPrices,
       bidFloorConfig,
       fareBase,
     ] = await Promise.all([
@@ -196,10 +171,6 @@ export class MapsService {
       // B2 · catálogo EFECTIVO del admin (habilitadas + pricing + pin de modo). `null` = no disponible →
       // cotizamos TODAS con pricing/modo de CÓDIGO (degradación honesta, como el modo degrada a PUJA).
       this.fetchEffectiveCatalog(identity),
-      // B3 · recargo de combustible por km (admin). 0 si no disponible → preview sin recargo (degradación).
-      this.fetchFuelPerKmCents(identity),
-      // B5-1 · precios de energía por fuente (para el shadow-compare; post-flip será la tarifa autoritativa).
-      this.fetchEnergyPrices(identity),
       // ADR 010 §9.3 · config del piso de la PUJA per-(zona, oferta) para el DISPLAY del quote. Degradación
       // honesta: trip-service caído → DEFAULT_BID_FLOOR_CONFIG (piso S/7). El autoritativo lo re-resuelve
       // trip-service en createTrip — acá es solo el piso que la app MUESTRA en "proponé tu precio".
@@ -230,16 +201,8 @@ export class MapsService {
       .map((offering) => {
         const ov = effective?.get(offering.id);
         const pricing = ov?.pricing ?? offering.pricing; // efectivo (admin) o de código (degradación)
-        // B5-1.d · FLIP: con el modelo de energía activo, precio por oferta con energía pass-through
-        // (energyPerKm por fuente); con el flag OFF, la fórmula vieja (fuel global). Mismo motor que el create.
-        const priceCents = this.offeringPriceCents(
-          offering,
-          pricing,
-          route,
-          fuelPerKmCents,
-          energyPrices,
-          fareBase,
-        );
+        // Precio por oferta: base + km + min × multiplier, con mínima. Mismo motor que el create.
+        const priceCents = this.offeringPriceCents(pricing, route, fareBase);
         // B2 · modo POR oferta = pin del admin (si ∈ allowedModes) > schedule ∩ oferta. Mismo motor que create.
         const offeringMode = resolveOfferingModeWithPin(offering, ov?.modePin, scheduledMode).mode;
         return {
@@ -272,9 +235,6 @@ export class MapsService {
         };
       });
 
-    // B5-1.b · shadow-compare del quote (log-only): mide el delta viejo↔nuevo sin cambiar lo que se muestra.
-    this.logQuoteFareShadow(energyPrices, route, effective, fuelPerKmCents, fareBase);
-
     const base: QuoteResult = {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
@@ -287,14 +247,7 @@ export class MapsService {
       // El ancla sugerida es la tarifa que SERÍA fija con la oferta base (VEO Económico): mismo cálculo
       // determinista que el modo fijo. B2: con el pricing EFECTIVO del ancla (overlay del admin) si existe.
       const anchorPricing = effective?.get(ANCHOR_OFFERING.id)?.pricing ?? ANCHOR_OFFERING.pricing;
-      const suggestedCents = this.offeringPriceCents(
-        ANCHOR_OFFERING,
-        anchorPricing,
-        route,
-        fuelPerKmCents,
-        energyPrices,
-        fareBase,
-      );
+      const suggestedCents = this.offeringPriceCents(anchorPricing, route, fareBase);
       // El piso top-level (compat apps viejas) = el de la oferta ANCLA (VEO Económico), mismo resolver.
       const bidFloorCents = resolveBidFloorCents(bidFloorConfig, GLOBAL_ZONE, ANCHOR_OFFERING.id);
       return { ...base, bidFloorCents, suggestedCents };
@@ -342,28 +295,6 @@ export class MapsService {
   }
 
   /**
-   * B3 · recargo de combustible por km vigente (céntimos PEN) desde trip-service. DEGRADACIÓN HONESTA: si
-   * la llamada falla → 0 (sin recargo) — el preview muestra la tarifa base, NUNCA un precio inventado.
-   * Mismo criterio que el modo degradando a PUJA: el quote es informativo, el autoritativo es el create.
-   */
-  private async fetchFuelPerKmCents(identity: AuthenticatedUser): Promise<number> {
-    try {
-      const reply = await this.tripRest.get<FuelSurchargeReply>(
-        '/internal/pricing/fuel-surcharge',
-        {
-          identity,
-        },
-      );
-      return reply.perKmCents;
-    } catch (err) {
-      this.logger.warn(
-        `recargo de combustible no disponible (${(err as Error).message}); preview sin recargo (B3 · degradación honesta)`,
-      );
-      return 0;
-    }
-  }
-
-  /**
    * F2.4 · banderazo/km/min vigentes (céntimos PEN) desde trip-service. DEGRADACIÓN HONESTA: si la llamada
    * falla → las constantes de código (= el seed) — el preview cobra lo de siempre, NUNCA un precio inventado
    * ni 0 (0 = viajes gratis). El quote es informativo; el autoritativo es el create.
@@ -395,30 +326,6 @@ export class MapsService {
   }
 
   /**
-   * B5-1 · precios de energía por fuente (céntimos/unidad) del EnergyCatalog del admin, para el
-   * shadow-compare del quote (y, post-flip, la tarifa autoritativa). `null` = no disponible → el shadow
-   * se saltea (degradación honesta, no rompe el quote). Map<sourceId, pricePerUnitCents>.
-   */
-  private async fetchEnergyPrices(
-    identity: AuthenticatedUser,
-  ): Promise<Map<string, number> | null> {
-    try {
-      const reply = await this.tripRest.get<EnergyCatalogReply>(
-        '/internal/pricing/energy-catalog',
-        {
-          identity,
-        },
-      );
-      return new Map(reply.sources.map((s) => [s.sourceId, s.pricePerUnitCents]));
-    } catch (err) {
-      this.logger.warn(
-        `catálogo de energía no disponible (${(err as Error).message}); shadow B5-1 salteado`,
-      );
-      return null;
-    }
-  }
-
-  /**
    * ADR 010 §9.3 · config del piso de la PUJA (default + overrides por oferta) desde trip-service, para el
    * DISPLAY del quote. DEGRADACIÓN HONESTA: si la llamada falla → DEFAULT_BID_FLOOR_CONFIG (piso S/7, sin
    * overrides) — el quote muestra el piso por defecto, NUNCA un valor inventado. El autoritativo lo
@@ -444,77 +351,19 @@ export class MapsService {
   }
 
   /**
-   * B5-1.b · SHADOW-COMPARE del quote (NO cambia el precio mostrado). Por cada oferta cotizada computa el
-   * delta viejo↔nuevo (energía pass-through derivada del EnergyCatalog por la fuente de la oferta) y loguea
-   * UNA línea agregada. Mide el impacto del flip con muchas más muestras que el create. Degrada honesto:
-   * sin precios de energía → no loguea. Solo computa para las ofertas FIXED del quote (en PUJA el bid manda).
-   */
-  private logQuoteFareShadow(
-    energyPrices: Map<string, number> | null,
-    route: { distanceMeters: number; durationSeconds: number },
-    effective: Map<string, EffectiveOffering> | null,
-    oldFuelPerKmCents: number,
-    fareBase: FareBase,
-  ): void {
-    if (!energyPrices) return;
-    const deltas = this.quotedOfferings()
-      .filter((offering) => effective === null || effective.has(offering.id))
-      .map((offering) => {
-        const pricing = effective?.get(offering.id)?.pricing ?? offering.pricing;
-        const energyPrice = energyPrices.get(offering.referenceEnergySourceId);
-        const energyPerKm =
-          energyPrice === undefined
-            ? 0
-            : deriveEnergyPerKmCents(energyPrice, offering.referenceEfficiency);
-        const d = shadowCompareCategoryFare(
-          route.distanceMeters,
-          route.durationSeconds,
-          pricing.multiplier,
-          pricing.minFareCents,
-          oldFuelPerKmCents,
-          energyPerKm,
-          fareBase,
-        );
-        return `${offering.id}:${d.oldCents}→${d.newCents}(${d.deltaCents >= 0 ? '+' : ''}${d.deltaCents})`;
-      });
-    if (deltas.length > 0) {
-      this.logger.log(`B5-1 quote-shadow (sin flip) · ${deltas.join(' ')}`);
-    }
-  }
-
-  /**
-   * B5-1.d · precio de una oferta para el quote. Con el FLIP activo usa la fórmula NUEVA (energía
-   * pass-through por fuente, multiplier solo posición); con el flag OFF, la vieja (fuel global plegado).
-   * Espejo EXACTO del create (trip-service) → consistencia quote↔create por construcción.
+   * Precio de una oferta para el quote: BASE + km·POR_KM + min·POR_MIN, escalado por el multiplier de la
+   * oferta y con su tarifa mínima. Espejo EXACTO del create (trip-service) → consistencia quote↔create.
    */
   private offeringPriceCents(
-    offering: OfferingSpec,
     pricing: OfferingPricingPolicy,
     route: { distanceMeters: number; durationSeconds: number },
-    fuelPerKmCents: number,
-    energyPrices: Map<string, number> | null,
     fareBase: FareBase,
   ): number {
-    if (this.energyModelEnabled) {
-      const energyPerKm = deriveEnergyPerKmCents(
-        energyPrices?.get(offering.referenceEnergySourceId) ?? 0,
-        offering.referenceEfficiency,
-      );
-      return categoryFareCentsV2(
-        route.distanceMeters,
-        route.durationSeconds,
-        pricing.multiplier,
-        pricing.minFareCents,
-        energyPerKm,
-        fareBase,
-      );
-    }
     return categoryFareCents(
       route.distanceMeters,
       route.durationSeconds,
       pricing.multiplier,
       pricing.minFareCents,
-      fuelPerKmCents,
       fareBase,
     );
   }

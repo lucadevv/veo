@@ -536,35 +536,6 @@ export const replaceScheduleRequest = z.object({
 export type ReplaceScheduleRequest = z.infer<typeof replaceScheduleRequest>;
 
 /**
- * Config de combustible vigente (GET /pricing/fuel-surcharge · B4): el admin ingresa precio/litro +
- * rendimiento; `perKmCents` es el recargo/km DERIVADO (precio ÷ rendimiento) que el sistema aplica.
- */
-export const fuelSurchargeView = z.object({
-  fuelPricePerLiterCents: z.number().int().nonnegative(),
-  kmPerLiter: z.number().int().nonnegative(),
-  perKmCents: z.number().int().nonnegative(),
-  version: z.number().int(),
-  updatedAt: z.string(),
-  // `active` = este recargo (B4) es el que HOY afecta la tarifa. Es el inverso exacto de
-  // `energyCatalogView.active`: el flag de servidor PRICING_ENERGY_MODEL_ENABLED elige UN solo
-  // modelo de energía vivo (OFF → combustible B4; ON → catálogo de energía B5). El panel lo refleja
-  // (badge Activo / Vista previa) — la UI nunca decide cuál manda, lo lee del server.
-  active: z.boolean(),
-});
-export type FuelSurchargeView = z.infer<typeof fuelSurchargeView>;
-
-/**
- * Body del PUT /pricing/fuel-surcharge (B4): precio del combustible/litro + rendimiento km/litro.
- * `expectedVersion` = optimistic locking (CAS): la versión que el panel cargó; el server reemplaza solo si
- * sigue vigente, si otro admin la movió responde 409 (el panel recarga y reintenta). 0 = primer write.
- */
-export const replaceFuelSurchargeRequest = z.object({
-  fuelPricePerLiterCents: z.number().int().nonnegative(),
-  kmPerLiter: z.number().int().nonnegative(),
-  expectedVersion: z.number().int().nonnegative(),
-});
-
-/**
  * Tarifa base vigente (GET /pricing/base-fare · F2.4): banderazo + per-km + per-min en céntimos PEN.
  * Reemplaza los escalares hardcodeados de la fórmula de tarifa; el admin los edita en caliente.
  */
@@ -598,21 +569,35 @@ export type ReplaceBaseFareRequest = z.infer<typeof replaceBaseFareRequest>;
 export const commissionView = z.object({
   onDemandRateBps: z.number().int().min(0).max(10_000),
   carpoolingFeeBps: z.number().int().min(0).max(10_000),
+  /** CAS de la comisión on-demand (+ fees PSP). El panel on-demand la usa como `expectedVersion`. */
   version: z.number().int(),
+  /** CAS INDEPENDIENTE del service fee de carpooling. El panel de carpooling la usa como `expectedVersion`. */
+  carpoolingFeeVersion: z.number().int(),
   updatedAt: z.string(),
 });
 export type CommissionView = z.infer<typeof commissionView>;
 
 /**
- * Body del PUT /finance/commission (F2.7): AMBAS tasas en basis points Int (full-replace). `expectedVersion` =
- * CAS (la versión que el panel cargó; 409 si otro admin la movió → recargar).
+ * Body del PUT /finance/commission/on-demand (F2.7 · CAS desacoplada #3): SOLO la comisión on-demand en bps Int.
+ * `expectedVersion` = la `version` que el panel cargó (409 si otro admin la movió → recargar). Editar esto ya NO
+ * 409ea el panel de carpooling (cada uno tiene su propia CAS).
  */
-export const replaceCommissionRequest = z.object({
+export const replaceOnDemandRateRequest = z.object({
   onDemandRateBps: z.number().int().min(0).max(10_000),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type ReplaceOnDemandRateRequest = z.infer<typeof replaceOnDemandRateRequest>;
+
+/**
+ * Body del PUT /finance/commission/carpooling-fee (F2.7 · CAS desacoplada #3): SOLO el service fee de carpooling
+ * en bps Int. `expectedVersion` = la `carpoolingFeeVersion` que el panel cargó (INDEPENDIENTE de la de on-demand;
+ * 409 si otro admin la movió → recargar).
+ */
+export const replaceCarpoolingFeeRequest = z.object({
   carpoolingFeeBps: z.number().int().min(0).max(10_000),
   expectedVersion: z.number().int().nonnegative(),
 });
-export type ReplaceCommissionRequest = z.infer<typeof replaceCommissionRequest>;
+export type ReplaceCarpoolingFeeRequest = z.infer<typeof replaceCarpoolingFeeRequest>;
 
 /**
  * Costo de OPERACIÓN por km del carpooling, por país (GET /finance/cost-per-km · F2.5 · escudo legal). Es el
@@ -672,37 +657,6 @@ export const replaceCostPerKmRequest = z.object({
   expectedVersion: z.number().int().nonnegative(),
 });
 export type ReplaceCostPerKmRequest = z.infer<typeof replaceCostPerKmRequest>;
-
-/**
- * Catálogo de precios de energía por fuente (B5). El admin edita el precio por unidad (céntimos/litro o
- * /kWh según la fuente); la `unit` la deriva el server. `expectedVersion` = optimistic locking (CAS).
- */
-export const energySourcePrice = z.object({
-  sourceId: z.string(),
-  unit: z.string(),
-  pricePerUnitCents: z.number().int().nonnegative(),
-});
-export type EnergySourcePrice = z.infer<typeof energySourcePrice>;
-
-export const energyCatalogView = z.object({
-  sources: z.array(energySourcePrice),
-  version: z.number().int(),
-  updatedAt: z.string(),
-  // `active` = este catálogo (B5) es el que HOY afecta la tarifa (flag PRICING_ENERGY_MODEL_ENABLED
-  // ON). Inverso de `fuelSurchargeView.active`. Mientras esté en false, editar acá NO mueve la tarifa
-  // (queda guardado para el día del flip) — el panel lo dice explícito (badge Vista previa).
-  active: z.boolean(),
-});
-export type EnergyCatalogView = z.infer<typeof energyCatalogView>;
-
-export const replaceEnergyCatalogRequest = z.object({
-  sources: z.array(
-    z.object({ sourceId: z.string(), pricePerUnitCents: z.number().int().nonnegative() }),
-  ),
-  expectedVersion: z.number().int().nonnegative(),
-});
-export type ReplaceEnergyCatalogRequest = z.infer<typeof replaceEnergyCatalogRequest>;
-export type ReplaceFuelSurchargeRequest = z.infer<typeof replaceFuelSurchargeRequest>;
 
 /* ── Piso de la PUJA (bid floor) per-(zona, oferta) · ADR 010 §9.3 ── */
 

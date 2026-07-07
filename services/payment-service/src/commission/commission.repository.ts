@@ -29,26 +29,42 @@ export interface PersistedCommission {
   plinFeeBps?: number;
   cardFeeBps?: number;
   pagoefectivoFeeBps?: number;
+  /** CAS de la comisión ON-DEMAND + los fees PSP. El PUT de on-demand / PSP la bumpea; el de carpooling NO. */
   version: number;
+  /** CAS INDEPENDIENTE del service fee de CARPOOLING. Solo la bumpea el PUT de carpooling → sin 409 cruzado. */
+  carpoolingFeeVersion: number;
   updatedAt: string;
 }
 
 /**
- * Cliente de transacción mínimo aceptado por `replace` (config + outbox en la MISMA tx).
- * Optimistic locking (CAS): `updateMany` con `version` en el WHERE → el predicado se evalúa bajo lock al
- * escribir, así dos PUT concurrentes NO pueden ambos bumpear desde la misma versión (el 2º ve count=0).
- * `create` cubre el primer write (sin fila); `findUnique` relee la fila escrita para el `updatedAt`.
+ * Fila resultante que `runInTx` relee (o crea) para construir el snapshot del evento + el retorno del service.
+ * Incluye AMBAS versions (on-demand y carpooling) y AMBAS tasas: cada PUT toca un solo campo, pero el snapshot
+ * vigente necesita también el campo NO tocado (el consumer solo invalida cache, pero el payload es fiel).
+ */
+export interface CommissionRow {
+  version: number;
+  carpoolingFeeVersion: number;
+  onDemandRateBps: number;
+  carpoolingFeeBps: number;
+  updatedAt: Date;
+}
+
+/**
+ * Cliente de transacción mínimo aceptado por los PUT (config + outbox en la MISMA tx).
+ * Optimistic locking (CAS): `updateMany` con la version RELEVANTE en el WHERE (`version` para on-demand/PSP,
+ * `carpoolingFeeVersion` para carpooling) → el predicado se evalúa bajo lock al escribir, así dos PUT
+ * concurrentes del MISMO carril NO pueden ambos bumpear desde la misma versión (el 2º ve count=0). Los PUT de
+ * carriles DISTINTOS ya no compiten (cada uno filtra por su columna). `create` cubre el primer write (sin fila);
+ * `findUnique` relee la fila escrita para el snapshot (versions + tasas + `updatedAt`).
  */
 export interface CommissionTx {
   commissionConfig: {
     updateMany(args: {
-      where: { id: string; version: number };
+      where: { id: string; version?: number; carpoolingFeeVersion?: number };
       data: Record<string, unknown>;
     }): Promise<{ count: number }>;
-    create(args: { data: Record<string, unknown> }): Promise<{ version: number; updatedAt: Date }>;
-    findUnique(args: {
-      where: { id: string };
-    }): Promise<{ version: number; updatedAt: Date } | null>;
+    create(args: { data: Record<string, unknown> }): Promise<CommissionRow>;
+    findUnique(args: { where: { id: string } }): Promise<CommissionRow | null>;
   };
   outboxEvent: {
     create(args: {
@@ -82,6 +98,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
       cardFeeBps: row.cardFeeBps,
       pagoefectivoFeeBps: row.pagoefectivoFeeBps,
       version: row.version,
+      carpoolingFeeVersion: row.carpoolingFeeVersion,
       updatedAt: row.updatedAt.toISOString(),
     };
   }

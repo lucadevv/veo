@@ -20,15 +20,10 @@ import type { Env } from '../config/env.schema';
 /** Identidad de prueba del pasajero (la quote la firma para la lectura interna del modo). */
 const USER: AuthenticatedUser = { userId: 'p1', type: 'passenger', roles: [], sessionId: 's1' };
 
-/** ConfigService falso: solo devuelve el piso de la PUJA. */
-function fakeConfig(
-  bidFloorCents = DEFAULT_BID_FLOOR_CENTS,
-  energyModelEnabled = false,
-): ConfigService<Env, true> {
-  // Key-aware: el flag B5-1.d devuelve su booleano; el resto cae al bidFloorCents (back-compat de los specs).
+/** ConfigService falso. El MapsService ya no lee env; se mantiene por compat de la firma del constructor. */
+function fakeConfig(bidFloorCents = DEFAULT_BID_FLOOR_CENTS): ConfigService<Env, true> {
   return {
-    getOrThrow: (key: string) =>
-      key === 'PRICING_ENERGY_MODEL_ENABLED' ? energyModelEnabled : bidFloorCents,
+    getOrThrow: () => bidFloorCents,
   } as unknown as ConfigService<Env, true>;
 }
 
@@ -49,10 +44,6 @@ class FakeTripRest {
     private readonly catalogOverrides: Partial<
       Record<OfferingId, { multiplier?: number; minFareCents?: number; modePin?: PricingMode }>
     > = {},
-    // B3: recargo de combustible por km que devuelve /internal/pricing/fuel-surcharge.
-    private readonly fuelPerKmCents = 0,
-    // B4: simula el endpoint de fuel CAÍDO (degradación honesta: el quote cae a 0 recargo, no rompe).
-    private readonly fuelError?: Error,
     // ADR 010 §9.3: config del piso de la PUJA que devuelve /internal/pricing/bid-floor (default + overrides
     // por oferta). Default = piso global S/7 sin overrides (= comportamiento previo de los specs).
     private readonly bidFloor: {
@@ -72,21 +63,9 @@ class FakeTripRest {
     private readonly baseFareError?: Error,
   ) {}
   async get<T>(path: string, req: { query?: Record<string, unknown> }): Promise<T> {
-    if (path.includes('/internal/pricing/energy-catalog')) {
-      // B5 · catálogo de energía: GASOLINE_90 al precio que espeja el fuel global (shadow-compare del quote).
-      return {
-        sources: [{ sourceId: 'GASOLINE_90', unit: 'LITER', pricePerUnitCents: 0 }],
-        version: 1,
-        updatedAt: new Date(0).toISOString(),
-      } as T;
-    }
     if (path.includes('/internal/pricing/bid-floor')) {
       if (this.bidFloorError) throw this.bidFloorError; // simula el piso CAÍDO (degradación)
       return { ...this.bidFloor, version: 1, updatedAt: new Date(0).toISOString() } as T;
-    }
-    if (path.includes('/internal/pricing/fuel-surcharge')) {
-      if (this.fuelError) throw this.fuelError; // simula el recargo CAÍDO (degradación)
-      return { perKmCents: this.fuelPerKmCents } as T; // B4 · el derivado precio÷rendimiento
     }
     if (path.includes('/internal/pricing/base-fare')) {
       if (this.baseFareError) throw this.baseFareError; // F2.4 · simula tarifa base CAÍDA (degradación)
@@ -299,8 +278,6 @@ describe('MapsService.quote', () => {
       [],
       undefined,
       {},
-      0,
-      undefined,
       { defaultFloorCents: 700, overrides: [] },
       undefined,
       { baseFareCents: 700, perKmCents: 140, perMinCents: 40 },
@@ -312,7 +289,7 @@ describe('MapsService.quote', () => {
     const economico = out.options.find((o) => o.id === 'veo_economico');
     expect(economico?.priceCents).toBe(1800);
     // Espeja lo que el create FIXED cobraría con la misma base → sin divergencia preview-vs-cobro.
-    expect(economico?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, undefined, 0, BASE_700));
+    expect(economico?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, undefined, BASE_700));
   });
 
   it('modo FIXED: ruta + opciones con priceCents firme; SIN bidFloor/suggested', async () => {
@@ -443,7 +420,7 @@ describe('MapsService.quote', () => {
   it('ADR 010 §9.3 · PUJA: el piso es PER-OFERTA (override del admin gana; sin override cae al default)', async () => {
     const fake = new FakeMapsClient({ route: ROUTE });
     // Config del admin: económico S/3 (300), confort S/9 (900); el resto (xl) cae al default S/7.
-    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {}, 0, undefined, {
+    const tripRest = new FakeTripRest({ mode: 'PUJA' }, [], undefined, {}, {
       defaultFloorCents: 700,
       overrides: [
         { zone: 'GLOBAL', offeringId: OfferingId.VEO_ECONOMICO, floorCents: 300 },
@@ -467,8 +444,6 @@ describe('MapsService.quote', () => {
       [],
       undefined,
       {},
-      0,
-      undefined,
       undefined,
       new Error('boom'),
     );
@@ -522,41 +497,6 @@ describe('MapsService.quote', () => {
     // Otra oferta sin override conserva su pricing de código.
     const confort = out.options.find((o) => o.id === OfferingId.VEO_CONFORT);
     expect(confort?.priceCents).toBe(categoryFareCents(5000, 600, 1.25, 500));
-  });
-
-  it('B3 · el recargo de combustible (admin) se refleja en el priceCents del quote', async () => {
-    const fake = new FakeMapsClient({ route: ROUTE });
-    // fuel 40 céntimos/km. economico mult 1.0, minFare 500.
-    const tripRest = new FakeTripRest({ mode: 'FIXED' }, [], undefined, {}, 40);
-    const service = buildService(fake, tripRest, fakeConfig(700));
-
-    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
-
-    const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
-    expect(eco?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, 500, 40)); // con recargo
-    // Sin recargo daría menos: prueba que el fuel efectivamente sube el precio.
-    expect(eco!.priceCents).toBeGreaterThan(categoryFareCents(5000, 600, 1.0, 500, 0));
-  });
-
-  it('B4 · degradación HONESTA: si el endpoint de fuel CAE, el quote cotiza con 0 recargo (no rompe ni inventa)', async () => {
-    const fake = new FakeMapsClient({ route: ROUTE });
-    // fuel-surcharge CAÍDO: fetchFuelPerKmCents catchea → 0. El resto del quote sigue normal.
-    const tripRest = new FakeTripRest(
-      { mode: 'FIXED' },
-      [],
-      undefined,
-      {},
-      0,
-      new Error('fuel-surcharge caído'),
-    );
-    const service = buildService(fake, tripRest, fakeConfig(700));
-
-    const out = await service.quote({ origin: ORIGIN, destination: DESTINATION }, USER);
-
-    // Degradación honesta: la tarifa es la de SIN recargo (0), no un crash ni un precio inventado.
-    const eco = out.options.find((o) => o.id === OfferingId.VEO_ECONOMICO);
-    expect(eco?.priceCents).toBe(categoryFareCents(5000, 600, 1.0, 500, 0));
-    expect(out.options.length).toBeGreaterThan(0); // el quote NO se rompe por la caída del fuel
   });
 
   it('B2 · el pin de modo del admin GANA en el quote (schedule PUJA, pin FIXED → opción FIXED)', async () => {

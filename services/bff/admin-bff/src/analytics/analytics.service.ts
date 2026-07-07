@@ -65,7 +65,7 @@ interface RevenueRangeStats {
 /**
  * Shapes internos servidos por cada microservicio (GET /internal/analytics/*).
  * El de trip-stats es el contrato compartido TripStatsView (@veo/shared-types) — MISMA forma que
- * produce trip-service, así el contrato no diverge (mismo patrón que EnergySourcePrice).
+ * produce trip-service, así el contrato no diverge (productor↔consumidor).
  */
 interface OnlineDriversStat {
   onlineDrivers: number;

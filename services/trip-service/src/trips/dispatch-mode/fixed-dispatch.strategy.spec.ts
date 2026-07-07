@@ -1,8 +1,7 @@
 /**
- * FixedDispatchStrategy (B5-1.d) — el FLIP del modelo de energía gateado por `energyModelEnabled`:
- *  - OFF (default): fórmula vieja (fuel global plegado al per-km y escalado por el multiplier).
- *  - ON: fórmula nueva (calculateOfferingFare: energía pass-through, multiplier solo posición).
- * El XL (multiplier 1.6) distingue los dos modelos: con la vieja la energía se infla ×1.6.
+ * FixedDispatchStrategy — tarifa FIXED = applyOfferingPricing(calculateFare(...), pricing):
+ *   max(round((base + perKm·km + perMin·min) × multiplier × surge), minFareCents) [+ FEE_NIÑO plano].
+ * El XL (multiplier 1.6) verifica que el multiplier de la oferta escala la tarifa firme.
  */
 import { describe, it, expect } from 'vitest';
 import { OFFERINGS, OfferingId } from '@veo/shared-types';
@@ -17,33 +16,31 @@ const baseInput = {
   pricing: xl,
 };
 
-describe('FixedDispatchStrategy · B5-1.d FLIP', () => {
+describe('FixedDispatchStrategy · resolveCreation', () => {
   const strategy = new FixedDispatchStrategy();
 
-  it('flag OFF (default) → fórmula VIEJA: fuel plegado y escalado por el multiplier (XL = 2720)', () => {
-    const out = strategy.resolveCreation({ ...baseInput, fuelPerKmCents: 40 });
-    // calculateFare 1700 (incluye fuel) × multiplier 1.6 = 2720
-    expect(out.fareCents).toBe(2720);
+  it('aplica la política de la oferta a la tarifa base (XL ×1.6 → 2400)', () => {
+    const out = strategy.resolveCreation({ ...baseInput });
+    // calculateFare 1500 × multiplier 1.6 = 2400
+    expect(out.fareCents).toBe(2400);
     expect(out.negotiationSeq).toBe(0);
   });
 
-  it('flag ON → fórmula NUEVA: energía pass-through (NO ×multiplier) → XL = 2600', () => {
+  it('F2.4 · la tarifa base configurable mueve la firme (700/140/40 ×1.6 XL → 2880)', () => {
     const out = strategy.resolveCreation({
       ...baseInput,
-      energyModelEnabled: true,
-      energyPerKmCents: 40,
+      baseFareCents: 700,
+      perKmCents: 140,
+      perMinCents: 40,
     });
-    // servicio 1500×1.6 = 2400; + energía 40·5 = 200 → 2600 (la energía NO se infla por el 1.6)
-    expect(out.fareCents).toBe(2600);
+    // servicio (700 + 140·5 + 40·10) = 1800; ×1.6 = 2880
+    expect(out.fareCents).toBe(2880);
     expect(out.negotiationSeq).toBe(0);
   });
 
-  it('flag ON sin precio de energía cargado → solo servicio posicionado (energía 0)', () => {
-    const out = strategy.resolveCreation({
-      ...baseInput,
-      energyModelEnabled: true,
-      energyPerKmCents: 0,
-    });
-    expect(out.fareCents).toBe(2400); // 1500×1.6, sin energía
+  it('el surge escala la tarifa firme (XL ×1.6 ×1.5 → 3600)', () => {
+    const out = strategy.resolveCreation({ ...baseInput, surge: 1.5 });
+    // calculateFare(1500 ×1.5)=2250 × multiplier 1.6 = 3600
+    expect(out.fareCents).toBe(3600);
   });
 });

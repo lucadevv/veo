@@ -82,13 +82,12 @@ export const ServiceType = {
 export type ServiceType = (typeof ServiceType)[keyof typeof ServiceType];
 
 /**
- * Fuente de energía del vehículo (B5). El costo de energía por km se UNIFICA como precio_por_unidad ÷
- * rendimiento (km por unidad): líquido (S/litro ÷ km/L) y eléctrico (S/kWh ÷ km/kWh) usan la MISMA
- * fórmula, solo cambia la `EnergyUnit`. Los precios viven en EnergyCatalog (hot-config, admin-editable).
+ * Fuente de energía del vehículo (B5). Es un atributo de la FICHA del vehículo (fleet/OCR/modelo), no del
+ * pricing: el modelo de precio por energía se retiró de los contratos compartidos.
  *
- * 3 TIPOS de plataforma (ADR-017): GASOLINE_90, DIESEL, ELECTRIC. Hay UNA sola gasolina para el pricing
- * — la referencia 90, la octanaje común. Se ELIMINA la granularidad de octanaje (antes 84/95): el octanaje
- * real del vehículo del conductor NO importa para el precio del pasajero (eso es su economía privada, §1.1).
+ * 3 TIPOS de plataforma (ADR-017): GASOLINE_90, DIESEL, ELECTRIC. Hay UNA sola gasolina — la referencia 90,
+ * la octanaje común. Se ELIMINA la granularidad de octanaje (antes 84/95): el octanaje real del vehículo del
+ * conductor NO importa para el precio del pasajero (eso es su economía privada, §1.1).
  *
  * GNV/GLP NO son tipos de energía de la plataforma: el combustible REAL del vehículo (si el dueño convirtió
  * a GNV o usa GLP para ahorrar) es su margen PRIVADO — la plataforma no lo trackea como tipo de energía.
@@ -99,13 +98,6 @@ export const EnergySource = {
   ELECTRIC: 'ELECTRIC',
 } as const;
 export type EnergySource = (typeof EnergySource)[keyof typeof EnergySource];
-
-/** Unidad de la fuente de energía: litro (combustibles líquidos) o kWh (eléctrico). B5. */
-export const EnergyUnit = {
-  LITER: 'LITER',
-  KWH: 'KWH',
-} as const;
-export type EnergyUnit = (typeof EnergyUnit)[keyof typeof EnergyUnit];
 
 /**
  * Segmento del vehículo (B5) — eje de calidad/confort del modelo, derivado de su ficha (no del precio).
@@ -126,26 +118,6 @@ export const VEHICLE_SEGMENT_RANK: Record<VehicleSegment, number> = {
   [VehicleSegment.PREMIUM]: 2,
 };
 
-/** Unidad canónica de cada fuente de energía (evita que el admin la elija mal). B5. */
-export const ENERGY_SOURCE_UNIT: Record<EnergySource, EnergyUnit> = {
-  [EnergySource.GASOLINE_90]: EnergyUnit.LITER,
-  [EnergySource.DIESEL]: EnergyUnit.LITER,
-  [EnergySource.ELECTRIC]: EnergyUnit.KWH,
-};
-
-/**
- * Precio de UNA fuente de energía (céntimos PEN por unidad: litro o kWh). B5.
- *
- * CONTRATO COMPARTIDO productor(trip-service · EnergyCatalog) ↔ consumidor(admin-bff · pricing proxy):
- * vive ACÁ, junto a EnergySource/EnergyUnit, para que NO diverja entre el servicio que lo produce y el
- * BFF que lo re-expone. El quote/economía derivan el costo/km = pricePerUnitCents ÷ rendimiento.
- */
-export interface EnergySourcePrice {
-  sourceId: EnergySource;
-  unit: EnergyUnit;
-  pricePerUnitCents: number;
-}
-
 /**
  * Un bucket horario del histograma de viajes creados del dashboard: hora UTC truncada (`bucket`,
  * ISO UTC vía toStartOfHour / date_trunc) + conteo (`trips`).
@@ -161,7 +133,7 @@ export interface TripsPerHourBucket {
  *
  * CONTRATO COMPARTIDO productor(trip-service · AnalyticsService) ↔ consumidor(admin-bff · overview proxy)
  * del endpoint interno GET /internal/analytics/trip-stats: vive ACÁ (junto a TripsPerHourBucket) para que
- * NO diverja entre el servicio que lo produce y el BFF que lo agrega. Mismo patrón que EnergySourcePrice.
+ * NO diverja entre el servicio que lo produce y el BFF que lo agrega. Mismo patrón que TripsPerHourBucket.
  */
 export interface TripStatsView {
   /** Viajes en vuelo AHORA (estados activos). */

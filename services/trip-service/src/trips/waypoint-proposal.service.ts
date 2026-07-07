@@ -26,18 +26,15 @@ import {
   geoPointSchema,
   type LatLon,
 } from '@veo/utils';
-import { PricingMode, TripStatus } from '@veo/shared-types';
+import { TripStatus } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { PrismaService } from '../infra/prisma.service';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
-import { applyOfferingPricing, calculateFare, calculateOfferingFare } from './domain/fare';
+import { calculateFirmFare } from './domain/fare';
 import { resolveTripOffering } from './domain/offering';
-import { EnergyCatalogService } from '../pricing/energy-catalog.service';
-import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
 import { BaseFareService } from '../pricing/base-fare.service';
-import { resolveAuthoritativeEnergy } from '../pricing/energy-requirements';
 import { WaypointProposalStatus, computeFareDelta, isExpired } from './domain/waypoint-proposal';
 import { readWaypoints } from './trip-view.mapper';
 import { MAX_WAYPOINTS } from './dto/trip.dto';
@@ -80,32 +77,15 @@ export interface RespondWaypointResult {
 export class WaypointProposalService {
   private readonly logger = new Logger(WaypointProposalService.name);
   private readonly ttlSeconds: number;
-  private readonly energyModelEnabled: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Optional() config?: ConfigService<Env, true>,
-    // F2.1b · catálogo de energía para el re-quote autoritativo bajo el flip. @Optional: tests legacy
-    // construyen sin él (flip OFF → política vieja, como en producción pre-flip).
-    @Optional() private readonly energyCatalog?: EnergyCatalogService,
-    // F2.1b · recargo de combustible (B3) para plegarlo en el re-quote flip-OFF — espejo del create.
-    @Optional() private readonly fuel?: FuelSurchargeService,
     // F2.4 · tarifa base configurable (banderazo/km/min). @Optional: sin él → constantes de código.
     @Optional() private readonly baseFare?: BaseFareService,
   ) {
     this.ttlSeconds = config?.get('WAYPOINT_PROPOSAL_TTL_SEC') ?? DEFAULT_WAYPOINT_PROPOSAL_TTL_SEC;
-    this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
-  }
-
-  /** B3 · recargo de combustible por km vigente. Sin servicio (tests) o lectura caída → 0 (degradación honesta). */
-  private async resolveFuelPerKmCents(): Promise<number> {
-    if (!this.fuel) return 0;
-    try {
-      return await this.fuel.getPerKmCents();
-    } catch {
-      return 0;
-    }
   }
 
   /** F2.4 · banderazo/km/min vigentes (config admin). Sin servicio o lectura caída → `{}` (constantes de código). */
@@ -176,8 +156,8 @@ export class WaypointProposalService {
     // ADR 013 §1.7 · el re-quote de la parada valora la ruta NUEVA con la MISMA política de la OFERTA
     // del viaje que la tarifa original: resolvemos la oferta persistida (`Trip.category`; null en
     // viajes pre-catálogo → fallback por `vehicleType`, la MISMA precedencia de createTrip) y
-    // aplicamos la fórmula firme compartida con FixedDispatchStrategy (`applyOfferingPricing`:
-    // multiplier + mínima — UNA fuente, domain/fare.ts). Sin esto, un viaje FIXED confort/xl recibía
+    // aplicamos la fórmula firme compartida con FixedDispatchStrategy (`calculateFirmFare`:
+    // multiplier + mínima + fee de niño plano — UNA fuente, domain/fare.ts). Sin esto, un viaje FIXED confort/xl recibía
     // un delta NEGATIVO al agregar parada (la ruta nueva se cotizaba a tasa económico-base, por debajo
     // de la tarifa firme ya multiplicada del Lote B) y moto se sobre-cobraba ×1/0.55.
     //
@@ -190,28 +170,15 @@ export class WaypointProposalService {
     // "reemplazar" vs "delta marginal aditivo sobre lo negociado" requiere su propio ADR).
     const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
     const surge = Number(trip.surgeMultiplier.toString());
-    // El combustible (B3) se pliega en la rama flip-OFF (espejo del create); en flip-ON la energía
-    // pass-through lo reemplaza (calculateOfferingFare ignora fuelPerKmCents).
     const fareInput = {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       surgeMultiplier: surge,
       childMode: trip.childMode,
-      fuelPerKmCents: await this.resolveFuelPerKmCents(),
       // F2.4 · banderazo/km/min configurables (degradan a las constantes de código).
       ...(await this.resolveBaseFare()),
     };
-    // F2.1b · bajo el flip + FIXED la ruta extendida se cotiza con la energía AUTORITATIVA (espejo del
-    // create): sin esto el tramo nuevo se cobraba sin energía → cobro-de-menos. PUJA/flip-OFF: política
-    // vieja (multiplier + mínima). El piso monótono de abajo (Math.max) sigue cubriendo ambos.
-    const policyFare =
-      this.energyModelEnabled && trip.dispatchMode === PricingMode.FIXED
-        ? calculateOfferingFare(
-            fareInput,
-            offering.pricing,
-            await resolveAuthoritativeEnergy(this.energyCatalog, offering),
-          )
-        : applyOfferingPricing(calculateFare(fareInput), offering.pricing);
+    const policyFare = calculateFirmFare(fareInput, offering.pricing);
     // Invariante de dominio: agregar una parada NUNCA abarata el viaje (delta ≥ 0). Piso en la tarifa
     // VIGENTE: cubre la puja con bid generoso (no se regala plata reseteando la negociación hacia
     // abajo) y rutas raras del motor. En FIXED es no-op (la fórmula es monótona con la ruta).

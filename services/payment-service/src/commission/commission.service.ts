@@ -8,8 +8,10 @@
  *  - `getConfig()`: GET vigente (el panel admin) — la tasa bps + version + updatedAt.
  *  - `resolveRateBps(mode)`: CARPOOLING → `carpoolingFeeBps` (service fee al pasajero), ON_DEMAND → `onDemandRateBps`
  *    (comisión al conductor). Único punto de resolución por modo.
- *  - `replace(onDemandRateBps, carpoolingFeeBps, expectedVersion)`: PUT — REEMPLAZA AMBAS tasas, bumpea `version`
- *    (CAS) y persiste + EMITE payment.commission_updated por outbox en la MISMA tx.
+ *  - `replaceOnDemandRate(onDemandRateBps, expectedVersion)`: PUT — edita SOLO la comisión on-demand, CAS sobre
+ *    `version`. `replaceCarpoolingFee(carpoolingFeeBps, expectedVersion)`: PUT — edita SOLO el service fee de
+ *    carpooling, CAS sobre `carpoolingFeeVersion` (INDEPENDIENTE). Cada panel su CAS → editar uno NO 409ea al
+ *    otro. Ambos persisten + EMITEN payment.commission_updated por outbox en la MISMA tx.
  *  - `invalidateCache()`: lo llama el PUT local y el CommissionCacheConsumer (evento cross-réplica).
  *
  * La tasa SIEMPRE en bps Int (0..10000), JAMÁS float persistido. La división /10000 ocurre al APLICAR
@@ -32,6 +34,8 @@ import {
   COMMISSION_REPO,
   COMMISSION_SINGLETON_ID,
   type CommissionRepository,
+  type CommissionRow,
+  type CommissionTx,
   type PersistedCommission,
 } from './commission.repository';
 import { bumpCommissionDegraded } from '../metrics/payment.metrics';
@@ -125,27 +129,26 @@ export class CommissionService {
   }
 
   /**
-   * PUT: REEMPLAZA AMBAS tasas (on-demand + carpooling fee), bumpea `version` y persiste + EMITE
-   * payment.commission_updated por outbox en la MISMA tx. Full-replace con CAS optimista: el UPDATE solo pega si
-   * la versión vigente sigue siendo `expectedVersion` (si no, ConflictError 409 → sin lost update).
+   * PUT: edita SOLO la comisión ON-DEMAND, bumpea `version` (CAS) y persiste + EMITE payment.commission_updated
+   * por outbox en la MISMA tx. CAS optimista sobre `version`: el UPDATE solo pega si la versión vigente sigue
+   * siendo `expectedVersion` (si no, ConflictError 409 → sin lost update). NO toca `carpoolingFeeBps` ni su
+   * `carpoolingFeeVersion` (los preserva) → editar la comisión on-demand ya no 409ea el panel de carpooling.
    */
-  async replace(
+  async replaceOnDemandRate(
     onDemandRateBps: number,
-    carpoolingFeeBps: number,
     expectedVersion: number,
   ): Promise<PersistedCommission> {
-    // Guard de dominio (defensa en profundidad sobre el DTO): ambas tasas bps Int en rango. Cero floats.
+    // Guard de dominio (defensa en profundidad sobre el DTO): la tasa bps Int en rango. Cero floats.
     assertBps(onDemandRateBps, 'la comisión on-demand');
-    assertBps(carpoolingFeeBps, 'el service fee de carpooling');
     const nextVersion = expectedVersion + 1;
 
     const result = await this.repo.runInTx(async (tx) => {
       const updated = await tx.commissionConfig.updateMany({
         where: { id: COMMISSION_SINGLETON_ID, version: expectedVersion },
-        data: { onDemandRateBps, carpoolingFeeBps, version: nextVersion },
+        data: { onDemandRateBps, version: nextVersion },
       });
 
-      let row: { version: number; updatedAt: Date };
+      let row: CommissionRow;
       if (updated.count === 1) {
         const persisted = await tx.commissionConfig.findUnique({
           where: { id: COMMISSION_SINGLETON_ID },
@@ -162,44 +165,98 @@ export class CommissionService {
             `la comisión ya fue inicializada (v${existing.version}); recargá y reintentá`,
           );
         }
+        // Init: carpooling arranca en 0 con su propia version en 0; PSP fees por defecto 0.
         row = await tx.commissionConfig.create({
-          data: { id: COMMISSION_SINGLETON_ID, onDemandRateBps, carpoolingFeeBps, version: nextVersion },
+          data: {
+            id: COMMISSION_SINGLETON_ID,
+            onDemandRateBps,
+            carpoolingFeeBps: 0,
+            version: nextVersion,
+            carpoolingFeeVersion: 0,
+          },
         });
       } else {
         throw new ConflictError(
           `la comisión cambió (esperabas v${expectedVersion}); recargá y reintentá`,
         );
       }
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: COMMISSION_SINGLETON_ID,
-          eventType: 'payment.commission_updated',
-          envelope: createEnvelope({
-            eventType: 'payment.commission_updated',
-            producer: PRODUCER,
-            payload: {
-              onDemandRateBps,
-              carpoolingFeeBps,
-              version: row.version,
-              updatedAt: row.updatedAt.toISOString(),
-            },
-          }),
-        },
-      });
+      await this.emitCommissionUpdated(tx, row);
       return row;
     });
 
     this.invalidateCache(); // el PUT y el getConfig viven en el mismo proceso → el cambio se ve ya
     this.logger.log(
-      `comisión REEMPLAZADA → version ${result.version} (on-demand ${onDemandRateBps} bps, ` +
-        `carpooling-fee ${carpoolingFeeBps} bps); payment.commission_updated emitido; cache invalidado`,
+      `comisión ON-DEMAND reemplazada → version ${result.version} (${onDemandRateBps} bps); ` +
+        `payment.commission_updated emitido; cache invalidado`,
     );
-    return {
-      onDemandRateBps,
-      carpoolingFeeBps,
-      version: result.version,
-      updatedAt: result.updatedAt.toISOString(),
-    };
+    return this.toView(result);
+  }
+
+  /**
+   * PUT: edita SOLO el service fee de CARPOOLING, bumpea `carpoolingFeeVersion` (CAS INDEPENDIENTE) y persiste +
+   * EMITE payment.commission_updated por outbox en la MISMA tx. CAS optimista sobre `carpoolingFeeVersion`: el
+   * UPDATE solo pega si la version vigente de carpooling sigue siendo `expectedVersion` (si no, 409 → sin lost
+   * update). NO toca `onDemandRateBps` ni `version` (los preserva) → editar el carpooling ya no 409ea el panel
+   * on-demand.
+   */
+  async replaceCarpoolingFee(
+    carpoolingFeeBps: number,
+    expectedVersion: number,
+  ): Promise<PersistedCommission> {
+    assertBps(carpoolingFeeBps, 'el service fee de carpooling');
+    const nextCarpoolingVersion = expectedVersion + 1;
+
+    const result = await this.repo.runInTx(async (tx) => {
+      const updated = await tx.commissionConfig.updateMany({
+        where: { id: COMMISSION_SINGLETON_ID, carpoolingFeeVersion: expectedVersion },
+        data: { carpoolingFeeBps, carpoolingFeeVersion: nextCarpoolingVersion },
+      });
+
+      let row: CommissionRow;
+      if (updated.count === 1) {
+        const persisted = await tx.commissionConfig.findUnique({
+          where: { id: COMMISSION_SINGLETON_ID },
+        });
+        if (!persisted) throw new ConflictError('la comisión desapareció durante el reemplazo');
+        row = persisted;
+      } else if (expectedVersion === 0) {
+        // carpoolingFeeVersion 0 esperado y el updateMany no pegó → o no hay fila (init), o la fila tiene una
+        // carpoolingFeeVersion distinta de 0 (otro ya la movió → conflicto). Distinguimos releyendo.
+        const existing = await tx.commissionConfig.findUnique({
+          where: { id: COMMISSION_SINGLETON_ID },
+        });
+        if (existing) {
+          // La fila existe pero su carpoolingFeeVersion no era 0 (si lo fuera, el updateMany habría pegado).
+          throw new ConflictError(
+            `el service fee de carpooling ya fue inicializado (v${existing.carpoolingFeeVersion}); recargá y reintentá`,
+          );
+        }
+        // Init sin fila (DB fresca/tests): on-demand al fallback del env, su version en 0; carpooling con su
+        // fee + carpoolingFeeVersion 1; PSP fees por defecto 0.
+        row = await tx.commissionConfig.create({
+          data: {
+            id: COMMISSION_SINGLETON_ID,
+            onDemandRateBps: this.envFallbackBps,
+            carpoolingFeeBps,
+            version: 0,
+            carpoolingFeeVersion: nextCarpoolingVersion,
+          },
+        });
+      } else {
+        throw new ConflictError(
+          `el service fee de carpooling cambió (esperabas v${expectedVersion}); recargá y reintentá`,
+        );
+      }
+      await this.emitCommissionUpdated(tx, row);
+      return row;
+    });
+
+    this.invalidateCache();
+    this.logger.log(
+      `service fee CARPOOLING reemplazado → carpoolingFeeVersion ${result.carpoolingFeeVersion} ` +
+        `(${carpoolingFeeBps} bps); payment.commission_updated emitido; cache invalidado`,
+    );
+    return this.toView(result);
   }
 
   /**
@@ -207,8 +264,8 @@ export class CommissionService {
    * carga la tarifa REAL del convenio acá (arranca en 0). Full-replace de los 4 fees con CAS optimista sobre
    * `version` (dos PUT concurrentes NO bumpean desde la misma versión). Invalida el cache LOCAL; la propagación
    * cross-réplica cae al TTL del cache (10s) — aceptable para un cambio de config (no es el hot-path del cobro,
-   * que ya persistió su fee en la captura). NO emite outbox (a diferencia de `replace`): el fee ya no cambia
-   * cobros pasados (están persistidos), y el TTL cubre los futuros dentro de 10s.
+   * que ya persistió su fee en la captura). NO emite outbox (a diferencia de los PUT de comisión): el fee ya no
+   * cambia cobros pasados (están persistidos), y el TTL cubre los futuros dentro de 10s.
    */
   async replacePspFees(rates: PspFeeRatesBps, expectedVersion: number): Promise<PersistedCommission> {
     assertBps(rates.yapeFeeBps, 'el fee PSP de Yape');
@@ -276,13 +333,50 @@ export class CommissionService {
     this.cache = null;
   }
 
-  /** Snapshot de degradación honesta: on-demand a la tasa del env, carpooling-fee a 0 (sin fee), version 0. */
+  /** Snapshot de degradación honesta: on-demand a la tasa del env, carpooling-fee a 0 (sin fee), ambas versions 0. */
   private envFallback(): PersistedCommission {
     return {
       onDemandRateBps: this.envFallbackBps,
       carpoolingFeeBps: 0,
       version: 0,
+      carpoolingFeeVersion: 0,
       updatedAt: new Date(0).toISOString(),
+    };
+  }
+
+  /**
+   * Emite payment.commission_updated por outbox EN LA MISMA tx del PUT. El payload es el snapshot VIGENTE (ambas
+   * tasas + ambas versions, leídas de la fila resultante): el consumer solo invalida cache, pero el payload es
+   * fiel para cualquier otro observador. Compartido por los dos PUT de comisión (on-demand y carpooling).
+   */
+  private async emitCommissionUpdated(tx: CommissionTx, row: CommissionRow): Promise<void> {
+    await tx.outboxEvent.create({
+      data: {
+        aggregateId: COMMISSION_SINGLETON_ID,
+        eventType: 'payment.commission_updated',
+        envelope: createEnvelope({
+          eventType: 'payment.commission_updated',
+          producer: PRODUCER,
+          payload: {
+            onDemandRateBps: row.onDemandRateBps,
+            carpoolingFeeBps: row.carpoolingFeeBps,
+            version: row.version,
+            carpoolingFeeVersion: row.carpoolingFeeVersion,
+            updatedAt: row.updatedAt.toISOString(),
+          },
+        }),
+      },
+    });
+  }
+
+  /** Proyecta la fila resultante de un PUT al contrato PersistedCommission (retorno del service · read-your-writes). */
+  private toView(row: CommissionRow): PersistedCommission {
+    return {
+      onDemandRateBps: row.onDemandRateBps,
+      carpoolingFeeBps: row.carpoolingFeeBps,
+      version: row.version,
+      carpoolingFeeVersion: row.carpoolingFeeVersion,
+      updatedAt: row.updatedAt.toISOString(),
     };
   }
 }

@@ -134,7 +134,7 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 - `FINANZAS → Ofertas de servicio` (ruta `/finance/catalog`, antes rotulada "Catálogo de ofertas") = el catálogo de **ofertas** (`OfferingId`). Se **renombra** para no colisionar con el de modelos.
 
 **Dónde vive cada config (resuelve la config por-oferta hoy PARTIDA en dos páginas):**
-- **Precios y tarifas** = la fórmula **GLOBAL** (tarifa base, energía, comisión, costo/km carpooling, modo POR DEFECTO + franjas). **Sin** config por-oferta.
+- **Precios y tarifas** = la fórmula **GLOBAL** (tarifa base con per-km all-in, comisión, costo/km carpooling, modo POR DEFECTO + franjas). **Sin** config por-oferta. *(Energía/combustible del pricing REMOVIDO 2026-07 — ADR-017 header.)*
 - **Ofertas de servicio** = **TODO lo por-oferta** (on/off, modo override, multiplicador, tarifa mínima, **piso de puja**). Hoy el piso de puja vive en Precios → **se mueve acá**.
 
 ---
@@ -286,18 +286,18 @@ Discreto y funcional: transiciones de color 150ms en hover/nav; `active:scale-[0
 ---
 
 ### Finanzas — Precios y tarifas (ruta `/finance/pricing`)
-- **Propósito:** configurar la fórmula **GLOBAL** de precio (NO por-oferta): modo por defecto, componentes de la tarifa on-demand, energía, costo/km del carpooling y comisión. Es el carril de pricing del DAG de configuración (`VEO_MODELO_HIBRIDO §1.5`).
+- **Propósito:** configurar la fórmula **GLOBAL** de precio (NO por-oferta): modo por defecto, componentes de la tarifa on-demand (base + per-km all-in + per-min), costo/km del carpooling y comisión. Es el carril de pricing del DAG de configuración (`VEO_MODELO_HIBRIDO §1.5`). *(El modelo de energía/combustible del pricing fue REMOVIDO 2026-07 — el per-km all-in vive en la Tarifa base, ADR-017 header.)*
 - **Rol(es) que la ven:** FINANCE, ADMIN, SUPERADMIN (`pricing:view`; editar con `pricing:edit`).
 - **Entrada / Salida:** desde nav (Finanzas). Cada bloque guarda por separado.
-- **Layout & jerarquía visual:** secciones apiladas, cada una versionada (patrón singleton + `version` + outbox, auditada): **Modo de tarifa · on-demand** (modo por defecto Puja/Fijo + franjas horarias) · **Componentes de la tarifa · on-demand** (tarifa base: banderazo/km/min · precios de energía: un precio por tipo) · **Carpooling · programado** (costo de operación por km, escudo cost-sharing, por país) · **Comisión · ambos modos** (on-demand: descuento al conductor · carpooling: service fee al pasajero).
+- **Layout & jerarquía visual:** secciones apiladas, cada una versionada (patrón singleton + `version` + outbox, auditada): **Modo de tarifa · on-demand** (modo por defecto Puja/Fijo + franjas horarias) · **Componentes de la tarifa · on-demand** (tarifa base: banderazo/km all-in/min — el per-km ya lleva todo el costo, sin bloque de energía separado) · **Carpooling · programado** (costo de operación por km, escudo cost-sharing, por país) · **Comisión · ambos modos** (on-demand: descuento al conductor · carpooling: service fee al pasajero).
 - **Componentes clave:** cada bloque = card con inputs numéricos + "Guardar" (disabled sin cambios) + sello "Versión {n} · actualizado {fecha}".
 - **Estados:** loading; error con reintento; "sin permiso" → `EmptyState` con candado; éxito → toast + bump de versión.
 - **Interacciones & transiciones:** guardar es inmediato, server-side y queda auditado; el cambio rige global.
 - **Contenido & copy:** "Precios y tarifas · Cómo se calcula y se cobra cada viaje: modo, componentes on-demand, costo del carpooling y comisión."
 - **Color & énfasis:** sobrio; montos tabulares; sin rojo salvo error.
-- **Seguridad / nota especial — DOS reglas de coherencia (resuelven incoherencias reales del panel):**
-  1. **Sin control muerto:** el "Recargo de combustible" legacy **no se muestra editable** cuando el modelo de energía está activo (`PRICING_ENERGY_MODEL_ENABLED`). Hoy aparece rotulado "Reemplazado" pero editable y sin efecto → confunde. Spec: colapsarlo a read-only (en un "avanzado/legacy") mientras la energía mande.
-  2. **Esta página NO lleva config por-oferta.** El multiplicador, la tarifa mínima y el **piso de puja** por oferta viven en **Ofertas de servicio**. El "modo por defecto" de acá es el GLOBAL; el override de modo por oferta vive en Ofertas. (Resuelve el "modo en dos lugares" y los "dos mínimos por oferta".)
+- **Seguridad / nota especial — regla de coherencia (resuelve una incoherencia real del panel):**
+  - **Esta página NO lleva config por-oferta.** El multiplicador, la tarifa mínima y el **piso de puja** por oferta viven en **Ofertas de servicio**. El "modo por defecto" de acá es el GLOBAL; el override de modo por oferta vive en Ofertas. (Resuelve el "modo en dos lugares" y los "dos mínimos por oferta".)
+  > *(La regla previa "sin control muerto — Recargo de combustible legacy / `PRICING_ENERGY_MODEL_ENABLED`" quedó MOOT 2026-07: el pricing por energía/combustible fue REMOVIDO — no hay panel de energía ni de recargo de combustible que colapsar. El per-km all-in vive en la Tarifa base. Ver ADR-017 header.)*
 
 ---
 

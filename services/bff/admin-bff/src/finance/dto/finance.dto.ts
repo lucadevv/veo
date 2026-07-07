@@ -70,16 +70,27 @@ export class RefundDto {
 }
 
 /**
- * Reemplaza AMBAS tasas de comisión (F2.7 · full-replace): la comisión ON-DEMAND (descontada al conductor) y el
- * service fee CARPOOLING (sumado al pasajero). En BASIS POINTS Int (0..10000; 2000 = 20%) — jamás float.
- * `expectedVersion` = CAS.
+ * Edita SOLO la comisión ON-DEMAND (F2.7 · CAS desacoplada #3): la comisión descontada al conductor. En BASIS
+ * POINTS Int (0..10000; 2000 = 20%) — jamás float. `expectedVersion` = CAS sobre `version` (independiente de la
+ * de carpooling → editar esto ya no 409ea el otro panel).
  */
-export class ReplaceCommissionDto {
+export class ReplaceOnDemandRateDto {
   @IsInt()
   @Min(0)
   @Max(10_000)
   onDemandRateBps!: number;
 
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
+}
+
+/**
+ * Edita SOLO el service fee de CARPOOLING (F2.7 · CAS desacoplada #3): el fee sumado al pasajero. En BASIS POINTS
+ * Int (0..10000) — jamás float. `expectedVersion` = CAS sobre `carpoolingFeeVersion` (INDEPENDIENTE de la de
+ * on-demand).
+ */
+export class ReplaceCarpoolingFeeDto {
   @IsInt()
   @Min(0)
   @Max(10_000)

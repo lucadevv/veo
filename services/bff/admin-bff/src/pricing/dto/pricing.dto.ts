@@ -117,46 +117,6 @@ export class ReplaceScheduleDto {
   expectedVersion!: number;
 }
 
-/** Techos de cordura; espejo de trip-service. */
-export const FUEL_PRICE_MAX_CENTS_PER_LITER = 10_000;
-export const FUEL_KM_PER_LITER_MAX = 200;
-
-/**
- * Body del PUT /pricing/fuel-surcharge (B4) — el admin ingresa PRECIO del combustible (céntimos/litro) +
- * RENDIMIENTO (km/litro); trip-service deriva el recargo/km. Espejo del DTO de trip-service (re-valida abajo).
- */
-export class ReplaceFuelSurchargeDto {
-  @ApiProperty({
-    description: 'Precio del combustible por litro en céntimos PEN',
-    minimum: 0,
-    maximum: FUEL_PRICE_MAX_CENTS_PER_LITER,
-  })
-  @IsInt()
-  @Min(0)
-  @Max(FUEL_PRICE_MAX_CENTS_PER_LITER)
-  fuelPricePerLiterCents!: number;
-
-  @ApiProperty({
-    description: 'Rendimiento del vehículo de referencia en km por litro',
-    minimum: 0,
-    maximum: FUEL_KM_PER_LITER_MAX,
-  })
-  @IsInt()
-  @Min(0)
-  @Max(FUEL_KM_PER_LITER_MAX)
-  kmPerLiter!: number;
-
-  @ApiProperty({
-    description:
-      'Optimistic locking (CAS): la `version` que el panel cargó. trip-service reemplaza solo si sigue vigente; ' +
-      'si otro admin la movió → 409. 0 = primer write.',
-    minimum: 0,
-  })
-  @IsInt()
-  @Min(0)
-  expectedVersion!: number;
-}
-
 /** Techos de cordura de la tarifa base (F2.4); espejo de trip-service. */
 export const BASE_FARE_MAX_CENTS = 20_000;
 export const PER_KM_MAX_CENTS = 5_000;
