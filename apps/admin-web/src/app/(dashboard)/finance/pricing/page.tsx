@@ -26,8 +26,8 @@ import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
  * Precios on-demand — config financiera del carril TAXI (viaje inmediato). El diseño (veo.pen) apila las
  * secciones como cards PLANAS e independientes: tarifa base, comisión on-demand, recargo de combustible/energía,
  * modo de tarificación y catálogo de energía. Cada card es una MUTACIÓN separada (su propio endpoint, CAS y
- * step-up MFA) — el banner superior lo hace explícito. El piso de la PUJA se configura en "Tarifas por oferta"
- * (default global + overrides por oferta). El carril CARPOOLING vive en Finanzas › Carpooling. Gate de
+ * step-up MFA) — el banner superior lo hace explícito. El piso de la PUJA por DEFECTO se edita acá (junto al
+ * modo); los overrides POR SERVICIO viven en "Ofertas de servicio". El carril CARPOOLING vive en Finanzas › Carpooling. Gate de
  * presentación con `pricing:view`; el admin-bff (RolesGuard) y los servicios re-autorizan server-side.
  */
 export default function PricingPage() {
