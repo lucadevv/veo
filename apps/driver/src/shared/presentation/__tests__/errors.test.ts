@@ -9,7 +9,11 @@ import { isConflictError, isNetworkError } from '../errors';
  */
 describe('shared/errors · isConflictError (FIX C · 409-como-éxito)', () => {
   it('ApiError 409 (documento ya registrado) → isConflictError true (se trata como subido)', () => {
-    const conflict = new ApiError(409, 'CONFLICT', 'Ya existe un documento activo de ese tipo para el dueño');
+    const conflict = new ApiError(
+      409,
+      'CONFLICT',
+      'Ya existe un documento activo de ese tipo para el dueño',
+    );
     expect(isConflictError(conflict)).toBe(true);
   });
 

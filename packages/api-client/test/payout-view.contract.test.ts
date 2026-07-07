@@ -12,6 +12,7 @@ describe('payoutView contract · ADR-015 D6', () => {
     const fromBff = {
       id: 'pay-1',
       driverId: 'drv-1',
+      driverName: 'Juan Pérez',
       grossCents: 10000,
       commissionCents: 2000,
       amountCents: 8000, // NETO = gross − commission
@@ -27,6 +28,7 @@ describe('payoutView contract · ADR-015 D6', () => {
     const held = payoutView.parse({
       id: 'pay-2',
       driverId: 'drv-2',
+      driverName: null,
       grossCents: 5000,
       commissionCents: 1000,
       amountCents: 4000,
@@ -44,6 +46,7 @@ describe('payoutView contract · ADR-015 D6', () => {
       payoutView.parse({
         id: 'pay-3',
         driverId: 'drv-3',
+        driverName: null,
         amountCents: 8000,
         status: 'PROCESSED',
         period: '2026-06-16..2026-06-22',
@@ -58,6 +61,7 @@ describe('payoutView contract · ADR-015 D6', () => {
       payoutView.parse({
         id: 'pay-4',
         driverId: 'drv-4',
+        driverName: null,
         grossCents: 100.5,
         commissionCents: 2000,
         amountCents: 8000,
