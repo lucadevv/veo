@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Gavel } from 'lucide-react';
 import type { BidFloorView } from '@/lib/api/schemas';
 import { useReplaceBidFloor } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
@@ -9,9 +8,8 @@ import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { bidFloorDefaultReplace } from '@/lib/bid-floor';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
+import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 
 /** Techo de cordura (espejo del DTO server-side BID_FLOOR_MAX_CENTS, defensa en profundidad UI). S/1000. */
 const MAX_SOLES = 1000;
@@ -53,33 +51,11 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
   const onSave = () => save(bidFloorDefaultReplace(config, defaultCents));
 
   return (
-    <section className="pt-6">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
-        <Gavel className="size-4" aria-hidden /> Piso de la puja por defecto
-      </h3>
-      <p className="mt-1 text-sm text-ink-subtle">
-        El mínimo que un pasajero puede ofertar en PUJA, por defecto. El piso por oferta (ej. moto
-        más bajo) se configura en Tarifas por oferta.
-      </p>
-
-      <div className="mt-4 max-w-2xl space-y-3">
-        <Field
-          label="Piso por defecto (S/)"
-          hint={`Actual: S/${formatSolesInput(config.defaultFloorCents)}`}
-          error={invalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
-        >
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="0.50"
-            min="1"
-            max={MAX_SOLES}
-            value={defaultSoles}
-            onChange={(e) => setDefaultSoles(e.target.value)}
-            disabled={!canManage}
-          />
-        </Field>
-
+    <ConfigCard
+      title="Piso de puja"
+      tag="default global"
+      description="La oferta MÍNIMA que un pasajero puede proponer en el carril PUJA, por defecto. El piso por oferta (ej. moto más bajo) se configura por fila en la tabla de abajo."
+      footer={
         <SaveAction
           canManage={canManage}
           dirty={dirty}
@@ -89,9 +65,26 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
           title="Confirmar cambio del piso de la puja"
           description="Esta acción cambia el pricing (piso mínimo de oferta) y queda auditada."
         />
-      </div>
-
-      <ReadOnlyNote canManage={canManage} noun="el piso de la puja" className="mt-2" />
-    </section>
+      }
+    >
+      <RateField
+        label="Piso por defecto"
+        sub={`Actual: S/${formatSolesInput(config.defaultFloorCents)}`}
+        unit="S/"
+        error={invalid ? `Entre 1 y ${MAX_SOLES}` : undefined}
+      >
+        <RateInput
+          type="number"
+          inputMode="decimal"
+          step="0.50"
+          min="1"
+          max={MAX_SOLES}
+          value={defaultSoles}
+          onChange={(e) => setDefaultSoles(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
+      <ReadOnlyNote canManage={canManage} noun="el piso de la puja" />
+    </ConfigCard>
   );
 }
