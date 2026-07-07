@@ -14,7 +14,7 @@ import {
   vehicleOperabilityReason,
   documentSide,
 } from './types.js';
-import { pricingMode } from './mobile.js';
+import { pricingMode, paymentStatus, mobilePaymentMethod } from './mobile.js';
 
 /* ── Autenticación admin (login + enrolamiento/step-up TOTP) ── */
 
@@ -596,6 +596,35 @@ export const costPerKmListView = z.object({
   configs: z.array(costPerKmConfigView),
 });
 export type CostPerKmListView = z.infer<typeof costPerKmListView>;
+
+/**
+ * Cobro REEMBOLSABLE de un viaje (GET /finance/payments/by-trip/:tripId). El operador de finanzas lo consulta
+ * ANTES de reembolsar: es EXACTAMENTE el pago que el POST /finance/refunds/:tripId tocaría (mismo lookup
+ * kind=FARE, CAPTURED/PARTIALLY_REFUNDED, el más reciente). `refundableCents = amountCents − refundedCents`
+ * (saldo que aún se puede devolver). Dinero SIEMPRE Int céntimos (formatear a S/ SOLO en la UI).
+ * RECORTA la PII de riel (externalRef/payerRef/externalUid/checkoutUrl/qr/cip NO viajan); los ids de personas y
+ * los montos SÍ son PII → el acceso queda auditado (payment.view_by_trip) tras el gate FINANCE en el admin-bff.
+ */
+export const refundablePaymentView = z.object({
+  paymentId: z.string(),
+  tripId: z.string(),
+  driverId: z.string().nullable(),
+  passengerId: z.string().nullable(),
+  method: mobilePaymentMethod,
+  status: paymentStatus,
+  currency: z.string(),
+  grossCents: z.number().int(),
+  amountCents: z.number().int(),
+  refundedCents: z.number().int().nonnegative(),
+  refundableCents: z.number().int().nonnegative(),
+  discountCents: z.number().int().nonnegative(),
+  creditCents: z.number().int().nonnegative(),
+  tipCents: z.number().int().nonnegative(),
+  capturedAt: z.string().nullable(),
+  refundedAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type RefundablePaymentView = z.infer<typeof refundablePaymentView>;
 
 /**
  * Body del PUT /finance/cost-per-km (F2.5): el costo/km de UN país en céntimos PEN Int. `expectedVersion` =

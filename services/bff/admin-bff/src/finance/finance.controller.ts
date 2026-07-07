@@ -16,7 +16,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { PayoutView } from '@veo/api-client';
+import type { PayoutView, RefundablePaymentView } from '@veo/api-client';
 import {
   FinanceService,
   type CommissionView,
@@ -139,6 +139,18 @@ export class FinanceController {
     @Body() dto: ReplaceCostPerKmDto,
   ): Promise<CostPerKmConfigView> {
     return this.finance.replaceCostPerKm(user, dto);
+  }
+
+  @Get('payments/by-trip/:tripId')
+  @ApiOperation({
+    summary:
+      'Cobro reembolsable de un viaje — inspección previa al reembolso (FINANCE; acceso a PII auditado, sin step-up por ser lectura)',
+  })
+  paymentByTrip(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('tripId', ParseUUIDPipe) tripId: string,
+  ): Promise<RefundablePaymentView> {
+    return this.finance.getPaymentByTrip(user, tripId);
   }
 
   @Post('refunds/:tripId')

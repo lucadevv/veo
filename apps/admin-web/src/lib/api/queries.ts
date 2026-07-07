@@ -34,6 +34,7 @@ import {
   costPerKmListView,
   energyCatalogView,
   bidFloorView,
+  refundablePaymentView,
   type ReplaceBaseFareRequest,
   type ReplaceCommissionRequest,
   type ReplaceCostPerKmRequest,
@@ -83,6 +84,7 @@ export const qk = {
   modelReview: (status: string) => ['vehicle-model-review', status] as const,
   vehicleModels: ['vehicle-models'] as const,
   payouts: (status: string) => ['payouts', status] as const,
+  paymentByTrip: (tripId: string) => ['payment-by-trip', tripId] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
@@ -798,6 +800,17 @@ export function useRefund() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['payouts'] });
     },
+  });
+}
+
+/* ── Cobro reembolsable de un viaje: inspección PREVIA al reembolso (FINANCE · acceso a PII auditado server-side) ── */
+export function usePaymentByTrip(tripId: string | null) {
+  return useQuery({
+    queryKey: qk.paymentByTrip(tripId ?? ''),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/finance/payments/by-trip/${tripId}`, { schema: refundablePaymentView, signal }),
+    // Solo consulta cuando hay un tripId (el operador tipeó/pegó el viaje a reembolsar); sin él no hay nada que ver.
+    enabled: !!tripId,
   });
 }
 

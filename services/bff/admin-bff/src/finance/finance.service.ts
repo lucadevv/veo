@@ -10,6 +10,7 @@ import type {
   CommissionView,
   CostPerKmConfigView,
   CostPerKmListView,
+  RefundablePaymentView,
 } from '@veo/api-client';
 import { REST_PAYMENT, REST_BOOKING } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
@@ -45,6 +46,28 @@ interface Payout {
   periodEnd: string;
   processedAt: string | null;
   heldReason: string | null;
+}
+
+/** Fila cruda del Payment que sirve payment-service (GET /payments/by-trip/:tripId, SIN `select` → fila
+ *  completa). Solo declaramos los campos que el mapper consume; la PII de riel (externalRef/payerRef/
+ *  externalUid/checkoutUrl/qr/cip) llega pero NUNCA se propaga al admin-web (se recorta en el mapper). */
+interface PaymentRow {
+  id: string;
+  tripId: string;
+  driverId: string | null;
+  passengerId: string | null;
+  method: RefundablePaymentView['method'];
+  status: RefundablePaymentView['status'];
+  currency: string;
+  grossCents: number;
+  amountCents: number;
+  refundedCents: number;
+  discountCents: number;
+  creditCents: number;
+  tipCents: number;
+  capturedAt: string | null;
+  refundedAt: string | null;
+  createdAt: string;
 }
 
 interface Page<T> {
@@ -248,6 +271,27 @@ export class FinanceService {
     });
     return res;
   }
+
+  /**
+   * El cobro REEMBOLSABLE de un viaje (GET /payments/by-trip/:tripId en payment-service), para que el operador
+   * lo INSPECCIONE antes de reembolsar: es EXACTAMENTE el pago que `refund` tocaría. Es lectura de PII (ids de
+   * personas + montos) → se AUDITA el acceso (`payment.view_by_trip`, fail-closed) tras el gate FINANCE del
+   * controller. El shaping recorta la PII de riel; el admin-web nunca ve externalRef/payerRef/uid/checkout.
+   */
+  async getPaymentByTrip(
+    identity: AuthenticatedUser,
+    tripId: string,
+  ): Promise<RefundablePaymentView> {
+    const row = await this.rest.get<PaymentRow>(`/payments/by-trip/${tripId}`, { identity });
+    const view = toRefundablePaymentView(row);
+    await this.audit.record(identity, {
+      action: 'payment.view_by_trip',
+      resourceType: 'payment',
+      resourceId: view.paymentId,
+      payload: { tripId },
+    });
+    return view;
+  }
 }
 
 // Desglose completo al panel FINANCE (ADR-015 D6 / hueco #4): NO se descarta gross/commission/processedAt/
@@ -263,5 +307,30 @@ function toPayoutView(p: Payout): PayoutView {
     period: `${p.periodStart}..${p.periodEnd}`,
     processedAt: p.processedAt,
     heldReason: p.heldReason,
+  };
+}
+
+// Recorta a lo que la pantalla de reembolso necesita, DESCARTANDO la PII de riel (externalRef/payerRef/
+// externalUid/checkoutUrl/qr/cip nunca viajan al admin-web). `refundableCents` = saldo aún reembolsable
+// (amount − ya reembolsado), clamp a 0 por si un dato viejo tuviera refunded > amount (nunca negativo).
+function toRefundablePaymentView(p: PaymentRow): RefundablePaymentView {
+  return {
+    paymentId: p.id,
+    tripId: p.tripId,
+    driverId: p.driverId,
+    passengerId: p.passengerId,
+    method: p.method,
+    status: p.status,
+    currency: p.currency,
+    grossCents: p.grossCents,
+    amountCents: p.amountCents,
+    refundedCents: p.refundedCents,
+    refundableCents: Math.max(0, p.amountCents - p.refundedCents),
+    discountCents: p.discountCents,
+    creditCents: p.creditCents,
+    tipCents: p.tipCents,
+    capturedAt: p.capturedAt,
+    refundedAt: p.refundedAt,
+    createdAt: p.createdAt,
   };
 }

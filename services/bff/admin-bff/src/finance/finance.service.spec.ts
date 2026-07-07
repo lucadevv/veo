@@ -6,7 +6,7 @@
  * conductor). Este test es el guardrail de que el desglose viaja de punta a punta.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { payoutView } from '@veo/api-client';
+import { payoutView, refundablePaymentView } from '@veo/api-client';
 import { FinanceService } from './finance.service';
 
 const operator = { userId: 'op-1', type: 'admin', roles: ['FINANCE'] } as never;
@@ -106,5 +106,123 @@ describe('FinanceService.listPayouts · ADR-015 D6 (desglose)', () => {
     expect(view?.status).toBe('HELD');
     expect(view?.heldReason).toBe('driver_in_review');
     expect(view?.processedAt).toBeNull();
+  });
+});
+
+/**
+ * getPaymentByTrip · hueco #2 — el operador inspecciona el cobro reembolsable ANTES de reembolsar. Lo crítico:
+ *  (1) llama la ruta interna correcta con la identidad; (2) el mapper RECORTA la PII de riel (externalRef/
+ *  payerRef/externalUid) — NUNCA viaja al admin-web; (3) refundableCents = amount − refunded (clamp 0);
+ *  (4) el acceso a la PII del pago queda AUDITADO (fail-closed).
+ */
+interface PaymentRowFull {
+  id: string;
+  tripId: string;
+  driverId: string | null;
+  passengerId: string | null;
+  method: 'YAPE' | 'PLIN' | 'CASH' | 'CARD' | 'PAGOEFECTIVO';
+  status: 'PENDING' | 'CAPTURED' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'DEBT';
+  currency: string;
+  grossCents: number;
+  amountCents: number;
+  refundedCents: number;
+  discountCents: number;
+  creditCents: number;
+  tipCents: number;
+  capturedAt: string | null;
+  refundedAt: string | null;
+  createdAt: string;
+  // PII de RIEL que payment-service incluye en la fila cruda pero NO debe salir al admin-web:
+  externalRef: string | null;
+  payerRef: string | null;
+  externalUid: string | null;
+}
+
+function paymentRow(over: Partial<PaymentRowFull> = {}): PaymentRowFull {
+  return {
+    id: 'pay-fare-1',
+    tripId: 'trip-1',
+    driverId: 'drv-1',
+    passengerId: 'psg-1',
+    method: 'YAPE',
+    status: 'PARTIALLY_REFUNDED',
+    currency: 'PEN',
+    grossCents: 10000,
+    amountCents: 9000,
+    refundedCents: 2000,
+    discountCents: 500,
+    creditCents: 300,
+    tipCents: 400,
+    capturedAt: '2026-06-20T12:00:00.000Z',
+    refundedAt: '2026-06-21T09:00:00.000Z',
+    createdAt: '2026-06-20T11:59:00.000Z',
+    externalRef: 'pp-ext-abc',
+    payerRef: '+51999888777',
+    externalUid: 'pp-uid-xyz',
+    ...over,
+  };
+}
+
+function makePaymentService(row: PaymentRowFull) {
+  const rest = { get: vi.fn().mockResolvedValue(row), post: vi.fn() };
+  const bookingRest = { get: vi.fn(), put: vi.fn() };
+  const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
+  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
+  return { svc, rest, audit };
+}
+
+describe('FinanceService.getPaymentByTrip · hueco #2 (inspección previa al reembolso)', () => {
+  it('llama la ruta interna /payments/by-trip/:tripId con la identidad del operador', async () => {
+    const { svc, rest } = makePaymentService(paymentRow());
+    await svc.getPaymentByTrip(operator, 'trip-1');
+    expect(rest.get).toHaveBeenCalledWith(
+      '/payments/by-trip/trip-1',
+      expect.objectContaining({ identity: operator }),
+    );
+  });
+
+  it('RECORTA la PII de riel: externalRef/payerRef/externalUid NUNCA salen en la view', async () => {
+    const { svc } = makePaymentService(paymentRow());
+    const view = await svc.getPaymentByTrip(operator, 'trip-1');
+    expect(view).not.toHaveProperty('externalRef');
+    expect(view).not.toHaveProperty('payerRef');
+    expect(view).not.toHaveProperty('externalUid');
+    // sí expone lo que la pantalla de reembolso necesita (ids de personas + montos, gateados + auditados):
+    expect(view.paymentId).toBe('pay-fare-1');
+    expect(view.driverId).toBe('drv-1');
+    expect(view.passengerId).toBe('psg-1');
+    expect(view.method).toBe('YAPE');
+  });
+
+  it('refundableCents = amount − ya reembolsado (el saldo que aún se puede devolver)', async () => {
+    const { svc } = makePaymentService(paymentRow({ amountCents: 9000, refundedCents: 2000 }));
+    const view = await svc.getPaymentByTrip(operator, 'trip-1');
+    expect(view.refundableCents).toBe(7000);
+  });
+
+  it('refundableCents nunca es negativo (clamp a 0 si un dato viejo tuviera refunded > amount)', async () => {
+    const { svc } = makePaymentService(paymentRow({ amountCents: 1000, refundedCents: 1500 }));
+    const view = await svc.getPaymentByTrip(operator, 'trip-1');
+    expect(view.refundableCents).toBe(0);
+  });
+
+  it('AUDITA el acceso a la PII del pago (payment.view_by_trip, resourceId = paymentId)', async () => {
+    const { svc, audit } = makePaymentService(paymentRow());
+    await svc.getPaymentByTrip(operator, 'trip-1');
+    expect(audit.record).toHaveBeenCalledWith(
+      operator,
+      expect.objectContaining({
+        action: 'payment.view_by_trip',
+        resourceType: 'payment',
+        resourceId: 'pay-fare-1',
+        payload: expect.objectContaining({ tripId: 'trip-1' }),
+      }),
+    );
+  });
+
+  it('el resultado satisface el contrato Zod refundablePaymentView (parse no lanza)', async () => {
+    const { svc } = makePaymentService(paymentRow());
+    const view = await svc.getPaymentByTrip(operator, 'trip-1');
+    expect(() => refundablePaymentView.parse(view)).not.toThrow();
   });
 });
