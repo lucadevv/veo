@@ -109,14 +109,18 @@ export default function PricingPage() {
           <AsyncSection query={baseFareQuery} skeleton={<Skeleton className="h-64" />}>
             {(data) => <BaseFarePanel config={data} />}
           </AsyncSection>
-          {/* B3/B4 · recargo de combustible (modelo de energía LIVE mientras el flip esté OFF). */}
-          <AsyncSection query={fuelQuery} skeleton={<Skeleton className="h-64" />}>
-            {(data) => <FuelSurchargePanel config={data} />}
-          </AsyncSection>
-          {/* B5 · catálogo de energía multi-fuente (vista previa hasta el flip). */}
-          <AsyncSection query={energyQuery} skeleton={<Skeleton className="h-64" />}>
-            {(data) => <EnergyCatalogPanel config={data} />}
-          </AsyncSection>
+          {/* Recargo de energía: se muestra SOLO el modelo activo. Combustible (B4) y catálogo de energía (B5)
+              son mutuamente excluyentes — el flip lo decide el sistema. El inactivo NO se renderiza: es UI
+              muerta que llena la vista y confunde (lo que se edita ahí no tiene efecto). */}
+          {fuelQuery.isLoading ? (
+            <Skeleton className="h-64" />
+          ) : fuelQuery.data?.active ? (
+            <FuelSurchargePanel config={fuelQuery.data} />
+          ) : (
+            <AsyncSection query={energyQuery} skeleton={<Skeleton className="h-64" />}>
+              {(data) => <EnergyCatalogPanel config={data} />}
+            </AsyncSection>
+          )}
 
           {/* Lo ÚNICO exclusivo de PUJA: el piso (gate duro del bid). Overrides por servicio en Ofertas de servicio. */}
           <SectionHeader

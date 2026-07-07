@@ -54,7 +54,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
     <ConfigCard
       title="Piso de puja"
       tag="default global"
-      description="La oferta MÍNIMA que un pasajero puede proponer en PUJA, por defecto. Debería ser ≤ la tarifa mínima fija de cada servicio (si no, el mismo viaje sale más barato en FIJO que el mínimo pujable). El piso por servicio se ajusta en Ofertas de servicio, donde se valida contra su mínima."
+      description="La oferta MÍNIMA que un pasajero puede proponer en PUJA, por defecto. El piso por servicio se ajusta en Ofertas de servicio."
       footer={
         <SaveAction
           canManage={canManage}

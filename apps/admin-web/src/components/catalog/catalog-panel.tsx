@@ -226,17 +226,6 @@ export function CatalogPanel({
         </table>
       </div>
 
-      {/* Nota informativa de la validación cruzada (A1) — el aviso POR FILA aparece bajo la oferta afectada. */}
-      <p className="flex items-start gap-2 text-xs text-ink-subtle">
-        <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
-        <span>
-          El piso de puja tiene su <strong className="font-medium text-ink-muted">default global en On-demand</strong>{' '}
-          y se pisa por servicio acá; la <strong className="font-medium text-ink-muted">tarifa mínima</strong> es por
-          servicio. Al editar, se valida en vivo: se avisa si el piso supera la mínima (el mismo viaje
-          saldría más barato en FIJO que el mínimo pujable).
-        </span>
-      </p>
-
       <ReadOnlyNote canManage={canManage} noun="el catálogo" />
     </div>
   );
@@ -573,10 +562,8 @@ function OfferingRow({
             <p className="flex items-start gap-1.5 text-xs text-warn">
               <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
               <span>
-                El piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) supera la tarifa mínima
-                fija (S/{formatSolesInput(crossWarn.fixedMinCents)}): el mismo viaje sale más barato
-                en FIJO que el mínimo que se puede pujar. Bajá el piso (su default vive en On-demand;
-                acá lo pisás por servicio) o subí la tarifa mínima de esta fila.
+                Piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) &gt; tarifa mínima fija (S/
+                {formatSolesInput(crossWarn.fixedMinCents)}) — la puja no debería costar más que el fijo.
               </span>
             </p>
           </td>
