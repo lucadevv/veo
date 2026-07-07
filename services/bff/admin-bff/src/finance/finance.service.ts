@@ -28,7 +28,8 @@ import type { Env } from '../config/env.schema';
 import type {
   RunPayoutsDto,
   RefundDto,
-  ReplaceCommissionDto,
+  ReplaceOnDemandRateDto,
+  ReplaceCarpoolingFeeDto,
   ReplaceCostPerKmDto,
 } from './dto/finance.dto';
 
@@ -277,18 +278,17 @@ export class FinanceService {
   }
 
   /**
-   * finance:manage — reemplaza AMBAS tasas (comisión ON-DEMAND + service fee CARPOOLING). payment-service bump-ea
-   * version (CAS) y emite el evento. Mutación de config financiera → auditada.
+   * finance:manage — edita SOLO la comisión ON-DEMAND (CAS sobre `version`). payment-service bump-ea la version y
+   * emite el evento. Mutación de config financiera → auditada. Editar esto ya NO 409ea el panel de carpooling.
    */
-  async replaceCommission(
+  async replaceOnDemandRate(
     identity: AuthenticatedUser,
-    dto: ReplaceCommissionDto,
+    dto: ReplaceOnDemandRateDto,
   ): Promise<CommissionView> {
-    const res = await this.rest.put<CommissionView>(COMMISSION_BASE, {
+    const res = await this.rest.put<CommissionView>(`${COMMISSION_BASE}/on-demand`, {
       identity,
       body: {
         onDemandRateBps: dto.onDemandRateBps,
-        carpoolingFeeBps: dto.carpoolingFeeBps,
         expectedVersion: dto.expectedVersion,
       },
     });
@@ -298,8 +298,34 @@ export class FinanceService {
       resourceId: String(res.version),
       payload: {
         onDemandRateBps: dto.onDemandRateBps,
-        carpoolingFeeBps: dto.carpoolingFeeBps,
         version: res.version,
+      },
+    });
+    return res;
+  }
+
+  /**
+   * finance:manage — edita SOLO el service fee de CARPOOLING (CAS sobre `carpoolingFeeVersion`, INDEPENDIENTE).
+   * payment-service bump-ea la carpoolingFeeVersion y emite el evento. Auditada. NO 409ea el panel on-demand.
+   */
+  async replaceCarpoolingFee(
+    identity: AuthenticatedUser,
+    dto: ReplaceCarpoolingFeeDto,
+  ): Promise<CommissionView> {
+    const res = await this.rest.put<CommissionView>(`${COMMISSION_BASE}/carpooling-fee`, {
+      identity,
+      body: {
+        carpoolingFeeBps: dto.carpoolingFeeBps,
+        expectedVersion: dto.expectedVersion,
+      },
+    });
+    await this.audit.record(identity, {
+      action: 'finance.commission_replace',
+      resourceType: 'commission_config',
+      resourceId: String(res.carpoolingFeeVersion),
+      payload: {
+        carpoolingFeeBps: dto.carpoolingFeeBps,
+        carpoolingFeeVersion: res.carpoolingFeeVersion,
       },
     });
     return res;

@@ -1,12 +1,14 @@
 /**
- * DTOs del endpoint interno de comisión por modo (F2.7). AMBAS tasas van en BASIS POINTS Int (0..10000) — jamás
- * float. Full-replace. `expectedVersion` = optimistic locking (CAS). Espeja ReplaceBaseFareDto de trip-service.
+ * DTOs del endpoint interno de comisión por modo (F2.7 · CAS desacoplada #3). Las tasas van en BASIS POINTS Int
+ * (0..10000) — jamás float. La comisión ON-DEMAND y el service fee CARPOOLING se editan por SEPARADO, cada uno con
+ * SU `expectedVersion` (optimistic locking · CAS independiente): editar uno ya NO 409ea el otro. Espeja
+ * ReplaceBaseFareDto de trip-service.
  */
 import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, Max, Min } from 'class-validator';
 import { BPS_DENOMINATOR } from '../../payments/payment.policy';
 
-export class ReplaceCommissionDto {
+export class ReplaceOnDemandRateDto {
   @ApiProperty({
     description:
       'Tasa de comisión ON-DEMAND en basis points (0..10000; 2000 = 20%). Int, jamás float. Es la comisión ' +
@@ -21,6 +23,18 @@ export class ReplaceCommissionDto {
 
   @ApiProperty({
     description:
+      'Optimistic locking (CAS): la `version` de on-demand que el cliente cargó. El server edita SOLO si la ' +
+      'versión vigente sigue siendo esta; si otro admin la movió → 409 ConflictError. 0 = primer write.',
+    minimum: 0,
+  })
+  @IsInt()
+  @Min(0)
+  expectedVersion!: number;
+}
+
+export class ReplaceCarpoolingFeeDto {
+  @ApiProperty({
+    description:
       'Service fee CARPOOLING en basis points (0..10000). Int, jamás float. Es el fee que se SUMA al pasajero ' +
       '(cost-sharing): el conductor cobra el 100% de su contribución.',
     minimum: 0,
@@ -33,8 +47,8 @@ export class ReplaceCommissionDto {
 
   @ApiProperty({
     description:
-      'Optimistic locking (CAS): la `version` que el cliente cargó. El server REEMPLAZA solo si la versión ' +
-      'vigente sigue siendo esta; si otro admin la movió → 409 ConflictError. 0 = primer write.',
+      'Optimistic locking (CAS): la `carpoolingFeeVersion` que el cliente cargó (INDEPENDIENTE de la de on-demand). ' +
+      'El server edita SOLO si la versión vigente sigue siendo esta; si otro admin la movió → 409. 0 = primer write.',
     minimum: 0,
   })
   @IsInt()

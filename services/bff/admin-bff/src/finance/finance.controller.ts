@@ -37,7 +37,8 @@ import {
   ReconciliationQueryDto,
   RunPayoutsDto,
   RefundDto,
-  ReplaceCommissionDto,
+  ReplaceOnDemandRateDto,
+  ReplaceCarpoolingFeeDto,
   ReplaceCostPerKmDto,
 } from './dto/finance.dto';
 
@@ -126,10 +127,11 @@ export class FinanceController {
     return this.finance.retryPayout(user, id);
   }
 
-  // ── Comisión por modo (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). GET = finance:view (rol de clase). PUT =
-  // finance:manage (FINANCE/ADMIN/SUPERADMIN) + step-up MFA: cambia AMBAS tasas — comisión ON-DEMAND (descontada
-  // al conductor) y service fee CARPOOLING (sumado al pasajero, cost-sharing), ambas editables (ADR-017 §1.6; el
-  // escudo legal anti-lucro del carpooling es el cap costo/km, NO un fee=0). payment-service RE-valida RBAC +
+  // ── Comisión por modo (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · CAS desacoplada #3). GET = finance:view (rol de
+  // clase). PUT = finance:manage (FINANCE/ADMIN/SUPERADMIN) + step-up MFA. Las dos tasas se editan por SEPARADO,
+  // cada una con SU CAS: comisión ON-DEMAND (descontada al conductor, CAS sobre `version`) y service fee CARPOOLING
+  // (sumado al pasajero, CAS sobre `carpoolingFeeVersion` independiente) → editar una ya no 409ea la otra. El
+  // escudo legal anti-lucro del carpooling es el cap costo/km, NO un fee=0. payment-service RE-valida RBAC +
   // step-up (defensa en profundidad) y audita el cambio. ──
   @Get('commission')
   @ApiOperation({
@@ -139,17 +141,31 @@ export class FinanceController {
     return this.finance.getCommission(user);
   }
 
-  @Put('commission')
+  @Put('commission/on-demand')
   @HttpCode(200)
   @RequireStepUpMfa()
   @ApiOperation({
-    summary: 'REEMPLAZA AMBAS tasas (ON-DEMAND + service fee CARPOOLING, bps). finance:manage + step-up',
+    summary: 'Edita SOLO la comisión ON-DEMAND (bps, CAS sobre `version`). finance:manage + step-up',
   })
-  replaceCommission(
+  replaceOnDemandRate(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ReplaceCommissionDto,
+    @Body() dto: ReplaceOnDemandRateDto,
   ): Promise<CommissionView> {
-    return this.finance.replaceCommission(user, dto);
+    return this.finance.replaceOnDemandRate(user, dto);
+  }
+
+  @Put('commission/carpooling-fee')
+  @HttpCode(200)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'Edita SOLO el service fee CARPOOLING (bps, CAS sobre `carpoolingFeeVersion` independiente). finance:manage + step-up',
+  })
+  replaceCarpoolingFee(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ReplaceCarpoolingFeeDto,
+  ): Promise<CommissionView> {
+    return this.finance.replaceCarpoolingFee(user, dto);
   }
 
   // ── Costo/km del carpooling (F2.5 · escudo legal anti-lucro). GET = finance:view (rol de clase). PUT =

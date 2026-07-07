@@ -6,9 +6,10 @@
  *  - RolesGuard + @Roles(FINANCE/ADMIN/SUPERADMIN) → RBAC server-side (es config financiera).
  *  - @RequireStepUpMfa + StepUpMfaGuard en el PUT → mutación de config sensible.
  *
- * Se configuran AMBAS tasas (full-replace): la comisión ON-DEMAND (descontada al conductor) y el service fee
- * CARPOOLING (sumado al pasajero). Ambas admin-editables — el carpooling fee NO tiene nudo legal (es un cargo al
- * pasajero en cost-sharing, NO lucro sobre el conductor).
+ * Se configuran por SEPARADO (CAS desacoplada #3): la comisión ON-DEMAND (PUT commission/on-demand, CAS sobre
+ * `version`) y el service fee CARPOOLING (PUT commission/carpooling-fee, CAS sobre `carpoolingFeeVersion`
+ * independiente) — editar uno ya NO 409ea el otro. Ambas admin-editables — el carpooling fee NO tiene nudo legal
+ * (es un cargo al pasajero en cost-sharing, NO lucro sobre el conductor).
  */
 import { Body, Controller, Get, HttpCode, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -24,7 +25,11 @@ import {
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { CommissionService } from './commission.service';
-import { ReplaceCommissionDto, ReplacePspFeeDto } from './dto/commission.dto';
+import {
+  ReplaceCarpoolingFeeDto,
+  ReplaceOnDemandRateDto,
+  ReplacePspFeeDto,
+} from './dto/commission.dto';
 import type { PersistedCommission } from './commission.repository';
 
 /** Vista del endpoint: ambas tasas configurables (on-demand + carpooling fee) en bps + version. */
@@ -48,16 +53,28 @@ export class CommissionController {
     return this.commission.getConfig();
   }
 
-  @Put('commission')
+  @Put('commission/on-demand')
   @HttpCode(200)
   @UseGuards(StepUpMfaGuard)
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
-      'REEMPLAZA AMBAS tasas: comisión ON-DEMAND + service fee CARPOOLING (bps). finance:manage + step-up MFA. F2.7',
+      'Edita SOLO la comisión ON-DEMAND (bps), CAS sobre `version`. finance:manage + step-up MFA. F2.7',
   })
-  async replaceCommission(@Body() dto: ReplaceCommissionDto): Promise<CommissionView> {
-    return this.commission.replace(dto.onDemandRateBps, dto.carpoolingFeeBps, dto.expectedVersion);
+  async replaceOnDemandRate(@Body() dto: ReplaceOnDemandRateDto): Promise<CommissionView> {
+    return this.commission.replaceOnDemandRate(dto.onDemandRateBps, dto.expectedVersion);
+  }
+
+  @Put('commission/carpooling-fee')
+  @HttpCode(200)
+  @UseGuards(StepUpMfaGuard)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'Edita SOLO el service fee CARPOOLING (bps), CAS sobre `carpoolingFeeVersion` (independiente). finance:manage + step-up MFA. F2.7',
+  })
+  async replaceCarpoolingFee(@Body() dto: ReplaceCarpoolingFeeDto): Promise<CommissionView> {
+    return this.commission.replaceCarpoolingFee(dto.carpoolingFeeBps, dto.expectedVersion);
   }
 
   @Put('psp-fee')

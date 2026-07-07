@@ -569,21 +569,35 @@ export type ReplaceBaseFareRequest = z.infer<typeof replaceBaseFareRequest>;
 export const commissionView = z.object({
   onDemandRateBps: z.number().int().min(0).max(10_000),
   carpoolingFeeBps: z.number().int().min(0).max(10_000),
+  /** CAS de la comisión on-demand (+ fees PSP). El panel on-demand la usa como `expectedVersion`. */
   version: z.number().int(),
+  /** CAS INDEPENDIENTE del service fee de carpooling. El panel de carpooling la usa como `expectedVersion`. */
+  carpoolingFeeVersion: z.number().int(),
   updatedAt: z.string(),
 });
 export type CommissionView = z.infer<typeof commissionView>;
 
 /**
- * Body del PUT /finance/commission (F2.7): AMBAS tasas en basis points Int (full-replace). `expectedVersion` =
- * CAS (la versión que el panel cargó; 409 si otro admin la movió → recargar).
+ * Body del PUT /finance/commission/on-demand (F2.7 · CAS desacoplada #3): SOLO la comisión on-demand en bps Int.
+ * `expectedVersion` = la `version` que el panel cargó (409 si otro admin la movió → recargar). Editar esto ya NO
+ * 409ea el panel de carpooling (cada uno tiene su propia CAS).
  */
-export const replaceCommissionRequest = z.object({
+export const replaceOnDemandRateRequest = z.object({
   onDemandRateBps: z.number().int().min(0).max(10_000),
+  expectedVersion: z.number().int().nonnegative(),
+});
+export type ReplaceOnDemandRateRequest = z.infer<typeof replaceOnDemandRateRequest>;
+
+/**
+ * Body del PUT /finance/commission/carpooling-fee (F2.7 · CAS desacoplada #3): SOLO el service fee de carpooling
+ * en bps Int. `expectedVersion` = la `carpoolingFeeVersion` que el panel cargó (INDEPENDIENTE de la de on-demand;
+ * 409 si otro admin la movió → recargar).
+ */
+export const replaceCarpoolingFeeRequest = z.object({
   carpoolingFeeBps: z.number().int().min(0).max(10_000),
   expectedVersion: z.number().int().nonnegative(),
 });
-export type ReplaceCommissionRequest = z.infer<typeof replaceCommissionRequest>;
+export type ReplaceCarpoolingFeeRequest = z.infer<typeof replaceCarpoolingFeeRequest>;
 
 /**
  * Costo de OPERACIÓN por km del carpooling, por país (GET /finance/cost-per-km · F2.5 · escudo legal). Es el

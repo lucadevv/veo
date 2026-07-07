@@ -38,7 +38,8 @@ import {
   payoutStatsView,
   reconciliationRunView,
   type ReplaceBaseFareRequest,
-  type ReplaceCommissionRequest,
+  type ReplaceOnDemandRateRequest,
+  type ReplaceCarpoolingFeeRequest,
   type ReplaceCostPerKmRequest,
   type ReplaceBidFloorRequest,
   operator,
@@ -920,13 +921,26 @@ export function useCommission() {
   });
 }
 
-export function useReplaceCommission() {
+// CAS desacoplada #3: on-demand y carpooling se editan por SEPARADO, cada uno con su propia version → editar uno
+// ya no 409ea al otro. Cada mutation pega a SU endpoint y remanda la versión que le corresponde (via el panel).
+export function useReplaceOnDemandRate() {
   const qc = useQueryClient();
   return useMutation({
     // El admin-bff revalida `@Roles(FINANCE, ADMIN, SUPERADMIN)` + step-up MFA, y payment-service re-autoriza: la UI solo refleja.
-    mutationFn: (input: ReplaceCommissionRequest) =>
-      apiClient().put('/finance/commission', { body: input, schema: commissionView }),
+    mutationFn: (input: ReplaceOnDemandRateRequest) =>
+      apiClient().put('/finance/commission/on-demand', { body: input, schema: commissionView }),
     // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.commission });
+    },
+  });
+}
+
+export function useReplaceCarpoolingFee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ReplaceCarpoolingFeeRequest) =>
+      apiClient().put('/finance/commission/carpooling-fee', { body: input, schema: commissionView }),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.commission });
     },

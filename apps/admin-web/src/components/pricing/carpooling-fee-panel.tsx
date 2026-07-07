@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { CommissionView } from '@/lib/api/schemas';
-import { useReplaceCommission } from '@/lib/api/queries';
+import { useReplaceCarpoolingFee } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { useConfigSave } from '@/lib/use-config-save';
@@ -10,24 +10,24 @@ import {
   MAX_RATE_PCT,
   BPS_PER_PERCENT,
   bpsToPercentLabel,
-  commissionReplace,
   percentToBps,
 } from '@/lib/commission';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 
 /**
- * Service fee del CARPOOLING (carril cost-sharing · F2.7 · ADR-015 §11.2) — card del diseño (veo.pen). El admin
- * edita SOLO el fee que se SUMA al pasajero — el conductor cobra el 100% de su contribución, así que no hay nudo
- * legal (es un cargo al pasajero, no lucro sobre el conductor). La comisión ON-DEMAND vive en Precios on-demand:
- * comparten un mismo config con UNA versión, por eso el save de acá PRESERVA `onDemandRateBps` vía
- * `commissionReplace` (perderlo sería borrar dinero). Full-replace con CAS: 409 si otro admin movió la versión.
- * La UI solo refleja `finance:manage`; admin-bff + payment-service re-autorizan.
+ * Service fee del CARPOOLING (carril cost-sharing · F2.7 · ADR-015 §11.2 · CAS desacoplada #3) — card del diseño
+ * (veo.pen). El admin edita SOLO el fee que se SUMA al pasajero — el conductor cobra el 100% de su contribución,
+ * así que no hay nudo legal (es un cargo al pasajero, no lucro sobre el conductor). La comisión ON-DEMAND vive en
+ * Precios on-demand con su PROPIA version, así que este save manda SOLO `carpoolingFeeBps` + `expectedVersion =
+ * config.carpoolingFeeVersion` a su propio endpoint: editar acá ya NO 409ea el panel on-demand. CAS: 409 solo si
+ * otro admin movió la version del CARPOOLING. La UI solo refleja `finance:manage`; admin-bff + payment-service
+ * re-autorizan.
  */
 export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
   const user = useSession();
   const canManage = can(user, 'finance:manage');
-  const replace = useReplaceCommission();
+  const replace = useReplaceCarpoolingFee();
   const { save, saving } = useConfigSave({
     mutation: replace,
     conflictNoun: 'el service fee del carpooling',
@@ -41,8 +41,8 @@ export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
   const invalid = !Number.isFinite(bps) || bps < 0 || bps > MAX_RATE_PCT * BPS_PER_PERCENT;
   const dirty = bps !== config.carpoolingFeeBps;
 
-  // commissionReplace PRESERVA onDemandRateBps tal cual está persistido; expectedVersion = el CAS cargado.
-  const onSave = () => save(commissionReplace(config, { carpoolingFeeBps: bps }));
+  // Solo el fee de carpooling + su CAS INDEPENDIENTE (`config.carpoolingFeeVersion`): NO toca la comisión on-demand.
+  const onSave = () => save({ carpoolingFeeBps: bps, expectedVersion: config.carpoolingFeeVersion });
 
   return (
     <ConfigCard
