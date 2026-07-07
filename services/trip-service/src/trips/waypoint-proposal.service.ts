@@ -32,7 +32,7 @@ import { PrismaService } from '../infra/prisma.service';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
-import { applyOfferingPricing, calculateFare } from './domain/fare';
+import { calculateFirmFare } from './domain/fare';
 import { resolveTripOffering } from './domain/offering';
 import { BaseFareService } from '../pricing/base-fare.service';
 import { WaypointProposalStatus, computeFareDelta, isExpired } from './domain/waypoint-proposal';
@@ -156,8 +156,8 @@ export class WaypointProposalService {
     // ADR 013 §1.7 · el re-quote de la parada valora la ruta NUEVA con la MISMA política de la OFERTA
     // del viaje que la tarifa original: resolvemos la oferta persistida (`Trip.category`; null en
     // viajes pre-catálogo → fallback por `vehicleType`, la MISMA precedencia de createTrip) y
-    // aplicamos la fórmula firme compartida con FixedDispatchStrategy (`applyOfferingPricing`:
-    // multiplier + mínima — UNA fuente, domain/fare.ts). Sin esto, un viaje FIXED confort/xl recibía
+    // aplicamos la fórmula firme compartida con FixedDispatchStrategy (`calculateFirmFare`:
+    // multiplier + mínima + fee de niño plano — UNA fuente, domain/fare.ts). Sin esto, un viaje FIXED confort/xl recibía
     // un delta NEGATIVO al agregar parada (la ruta nueva se cotizaba a tasa económico-base, por debajo
     // de la tarifa firme ya multiplicada del Lote B) y moto se sobre-cobraba ×1/0.55.
     //
@@ -178,7 +178,7 @@ export class WaypointProposalService {
       // F2.4 · banderazo/km/min configurables (degradan a las constantes de código).
       ...(await this.resolveBaseFare()),
     };
-    const policyFare = applyOfferingPricing(calculateFare(fareInput), offering.pricing);
+    const policyFare = calculateFirmFare(fareInput, offering.pricing);
     // Invariante de dominio: agregar una parada NUNCA abarata el viaje (delta ≥ 0). Piso en la tarifa
     // VIGENTE: cubre la puja con bid generoso (no se regala plata reseteando la negociación hacia
     // abajo) y rutas raras del motor. En FIXED es no-op (la fórmula es monótona con la ruta).

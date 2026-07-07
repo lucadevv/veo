@@ -54,9 +54,10 @@ export type OfferingIcon = (typeof OfferingIcon)[keyof typeof OfferingIcon];
 
 /**
  * Recargo del Modo Niño (BR-T07): S/ 2.00 en céntimos PEN. FUENTE ÚNICA — aplica SOLO en viajes de
- * precio FIJO (en PUJA el bid ES el precio, no se recarga). trip-service lo suma en `calculateFare`
- * (FIXED) y la app lo muestra en el desglose ANTES de confirmar; ambos consumen ESTA constante para
- * que el número no diverja entre server y cliente. `as const` la fija como literal `200`.
+ * precio FIJO (en PUJA el bid ES el precio, no se recarga). trip-service lo suma PLANO en `calculateFirmFare`
+ * (DESPUÉS del multiplier de la oferta, así el tier NO lo escala) y la app lo muestra en el desglose ANTES
+ * de confirmar; ambos consumen ESTA constante y el número cobrado coincide EXACTO en cualquier tier.
+ * `as const` la fija como literal `200`.
  */
 export const CHILD_MODE_FEE_CENTS = 200 as const;
 

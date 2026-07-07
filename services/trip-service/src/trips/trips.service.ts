@@ -56,7 +56,7 @@ import {
 } from './domain/trip-state-machine';
 import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { CatalogService } from '../catalog/catalog.service';
-import { calculateFare, applyOfferingPricing } from './domain/fare';
+import { calculateFirmFare } from './domain/fare';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
@@ -1573,7 +1573,7 @@ export class TripsService {
     const waypoints = readWaypoints(trip);
     const route = await this.maps.route(origin, destination, waypoints);
     const surge = Number(trip.surgeMultiplier.toString());
-    // Re-cotiza con la MISMA política de la oferta del viaje (multiplier + mínima) — espejo del create.
+    // Re-cotiza con la MISMA fórmula firme del create (`calculateFirmFare`: multiplier + mínima + fee de niño plano).
     // Sin esto, `calculateFare` base reseteaba la tarifa sin multiplier: un FIXED Premium/XL podía cambiar
     // de destino (aun al mismo punto) y cobrar de menos. En FIXED SIN piso contra `trip.fareCents` (un
     // destino MÁS CERCA debe abaratar); en PUJA SÍ hay piso al bid acordado (ver A3, más abajo). El piso de
@@ -1587,7 +1587,7 @@ export class TripsService {
       // F2.4 · banderazo/km/min configurables (degradan a las constantes de código).
       ...(await this.resolveBaseFare()),
     };
-    const fare = applyOfferingPricing(calculateFare(fareInput), offering.pricing);
+    const fare = calculateFirmFare(fareInput, offering.pricing);
     // ADR-022 P-A (A3) · en PUJA el `trip.fareCents` es un BID NEGOCIADO que el conductor ACEPTÓ. Cambiar el
     // destino NO puede cobrar por DEBAJO de lo acordado (regalarle plata al pasajero reseteando la
     // negociación hacia abajo) — espejo del piso de waypoint-proposal.service. En FIXED sí abarata (la tarifa

@@ -1,10 +1,12 @@
 /**
- * BR-T05 — Cálculo de tarifa (lógica de dominio pura, sin I/O).
+ * BR-T05 — Cálculo de tarifa (lógica de dominio pura, sin I/O). Dos piezas:
  *
- *   tarifa = (BASE + POR_KM·km + POR_MIN·min) · surge   [+ FEE_NIÑO si childMode]
+ *   calculateFare     = (BASE + POR_KM·km + POR_MIN·min) · surge           (la base, SIN fee de niño)
+ *   calculateFirmFare = max(base × multiplier, mínima) + FEE_NIÑO(plano)   (la tarifa FIRME de la oferta)
  *
- * Todo en céntimos PEN usando los helpers de @veo/utils. km y min se derivan de la ruta
- * que entrega @veo/maps (distanceMeters, durationSeconds). surge ∈ [1.0, 2.0] (default 1.0).
+ * El FEE_NIÑO es PLANO: se suma al FINAL, así NO lo escala el multiplier de la oferta ni el surge — un
+ * asiento de niño cuesta igual en cualquier tier, y es el mismo número que la app muestra en el desglose.
+ * Todo en céntimos PEN (@veo/utils). km/min salen de la ruta de @veo/maps. surge ∈ [1.0, 2.0] (default 1.0).
  */
 import { money, scaleMoney, addMoney, type Money, ValidationError } from '@veo/utils';
 import { CHILD_MODE_FEE_CENTS, type OfferingPricingPolicy } from '@veo/shared-types';
@@ -17,8 +19,9 @@ export const PER_KM_CENTS = 120;
 export const PER_MIN_CENTS = 30;
 /**
  * Recargo por modo niño (BR-T07): S/ 2.00. FUENTE ÚNICA en `@veo/shared-types` (junto al catálogo de
- * pricing) — re-exportado acá para los consumidores que ya lo importan de `./fare`. El mismo número lo
- * muestra la app en el desglose ANTES de confirmar, así no diverge entre server y cliente.
+ * pricing) — re-exportado acá para los consumidores que ya lo importan de `./fare`. Se cobra PLANO
+ * (`calculateFirmFare` lo suma al final, sin escalarlo el multiplier ni el surge): así el número cobrado
+ * coincide EXACTO con el que la app muestra en el desglose ANTES de confirmar.
  */
 export { CHILD_MODE_FEE_CENTS };
 
@@ -30,6 +33,7 @@ export interface FareInput {
   durationSeconds: number;
   /** Multiplicador de demanda calculado por dispatch (1.0–2.0). Default 1.0. */
   surgeMultiplier?: number;
+  /** BR-T07 · modo niño. El recargo (FEE_NIÑO) lo aplica `calculateFirmFare` PLANO al final — NO `calculateFare`. */
   childMode?: boolean;
   /**
    * F2.4 · tarifa base configurable por el admin (`BaseFareConfig`, céntimos PEN). Default = las constantes
@@ -54,13 +58,13 @@ function isValidFareBase(baseFareCents: number, perKmCents: number, perMinCents:
 }
 
 /**
- * Calcula la tarifa total en céntimos PEN. Lanza ValidationError si los insumos son inválidos
- * (distancia/duración negativas o surge fuera de rango).
+ * Calcula la tarifa BASE en céntimos PEN (banderazo + km + min, con surge). SIN el fee de niño ni el
+ * multiplier de la oferta — esos los aplica `calculateFirmFare`. Lanza ValidationError si los insumos son
+ * inválidos (distancia/duración negativas o surge fuera de rango).
  */
 export function calculateFare(input: FareInput): Money {
   const { distanceMeters, durationSeconds } = input;
   const surge = input.surgeMultiplier ?? 1.0;
-  const childMode = input.childMode ?? false;
   // F2.4 · tarifa base configurable (default = constantes de código → retro-compat).
   const baseFareCents = input.baseFareCents ?? BASE_FARE_CENTS;
   const perKmCents = input.perKmCents ?? PER_KM_CENTS;
@@ -89,8 +93,9 @@ export function calculateFare(input: FareInput): Money {
   const min = durationSeconds / 60;
 
   const subtotalCents = Math.round(baseFareCents + perKmCents * km + perMinCents * min);
-  const surged = scaleMoney(money(subtotalCents), surge);
-  return childMode ? addMoney(surged, money(CHILD_MODE_FEE_CENTS)) : surged;
+  // El FEE_NIÑO NO se suma acá: es PLANO y lo aplica `calculateFirmFare` DESPUÉS del multiplier de la oferta,
+  // para que un tier premium (×1.8) no escale el recargo de un asiento que cuesta igual en todos los tiers.
+  return scaleMoney(money(subtotalCents), surge);
 }
 
 /**
@@ -107,4 +112,17 @@ export function calculateFare(input: FareInput): Money {
 export function applyOfferingPricing(base: Money, pricing: OfferingPricingPolicy): Money {
   const scaled = scaleMoney(base, pricing.multiplier);
   return money(Math.max(scaled.cents, pricing.minFareCents), base.currency);
+}
+
+/**
+ * BR-T05 + BR-T07 — tarifa FIRME de una oferta: `applyOfferingPricing(calculateFare(input), pricing)` MÁS el
+ * FEE_NIÑO PLANO. FUENTE ÚNICA del cobro FIXED (FixedDispatchStrategy) y del re-quote de la parada mid-trip
+ * (WaypointProposalService + changeDestination): NO se compone la fórmula a mano en ningún otro lado. El fee
+ * de niño se suma AL FINAL para que ni el multiplier de la oferta ni el surge lo escalen (un asiento de niño
+ * cuesta S/2.00 en moto o en premium por igual, y es el número que la app muestra en el desglose). PUJA no
+ * pasa por acá: el bid ES el fareCents, sin add-ons.
+ */
+export function calculateFirmFare(input: FareInput, pricing: OfferingPricingPolicy): Money {
+  const firm = applyOfferingPricing(calculateFare(input), pricing);
+  return input.childMode ? addMoney(firm, money(CHILD_MODE_FEE_CENTS)) : firm;
 }

@@ -6,7 +6,7 @@
 import type { LatLon } from '@veo/utils';
 import { PricingMode, TripStatus } from '@veo/shared-types';
 import { emitTripRequested } from '../trip-events';
-import { applyOfferingPricing, calculateFare } from '../domain/fare';
+import { calculateFirmFare } from '../domain/fare';
 import type { Prisma, Trip } from '../../generated/prisma';
 import type {
   DispatchModeStrategy,
@@ -22,30 +22,32 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
 
   /**
    * FIXED (BR-T05 + ADR 013 §1.7): IGNORA cualquier bid; calcula la tarifa FIRME por ruta
-   * (distancia/duración/surge/niño) y le APLICA la política de la OFERTA:
+   * (distancia/duración/surge) le APLICA la política de la OFERTA y le suma el fee de niño PLANO:
    *
-   *   fareCents = max(round(calculateFare(...) × pricing.multiplier), pricing.minFareCents)
+   *   fareCents = max(round(calculateFare(...) × pricing.multiplier), pricing.minFareCents) + FEE_NIÑO(plano)
    *
    * Cierra el bug del multiplier: antes veo_confort/veo_xl cobraban la tarifa de económico y veo_moto
-   * cobraba MÁS que su preview. La fórmula vive en `applyOfferingPricing` (domain/fare.ts, FUENTE
-   * ÚNICA — también la consume el re-quote de la parada mid-trip): céntimos ENTEROS vía `scaleMoney`
-   * (Math.round), la MISMA convención de calculateFare (que ya usa scaleMoney para el surge). Acá NO
-   * se redondea a S/0.10 como el preview del BFF (FARE_ROUNDING_CENTS): ese redondeo es cosmético del
-   * quote (que tampoco incluye surge/niño); la tarifa firme es exacta al céntimo. No negocia →
-   * negotiationSeq=0 (nunca emite offer_accepted).
+   * cobraba MÁS que su preview. La fórmula vive en `calculateFirmFare` (domain/fare.ts, FUENTE ÚNICA —
+   * también la consume el re-quote de la parada mid-trip): céntimos ENTEROS vía `scaleMoney` (Math.round),
+   * y el FEE_NIÑO plano al final (ni el multiplier ni el surge lo escalan). Acá NO se redondea a S/0.10
+   * como el preview del BFF (FARE_ROUNDING_CENTS): ese redondeo es cosmético del quote (que tampoco
+   * incluye surge/niño); la tarifa firme es exacta al céntimo. No negocia → negotiationSeq=0.
    */
   resolveCreation(input: DispatchCreationInput): DispatchCreation {
-    const base = calculateFare({
-      distanceMeters: input.route.distanceMeters,
-      durationSeconds: input.route.durationSeconds,
-      surgeMultiplier: input.surge,
-      childMode: input.childMode,
-      // F2.4 · tarifa base configurable (banderazo/km/min editables por el admin).
-      baseFareCents: input.baseFareCents,
-      perKmCents: input.perKmCents,
-      perMinCents: input.perMinCents,
-    });
-    return { fareCents: applyOfferingPricing(base, input.pricing).cents, negotiationSeq: 0 };
+    const fareCents = calculateFirmFare(
+      {
+        distanceMeters: input.route.distanceMeters,
+        durationSeconds: input.route.durationSeconds,
+        surgeMultiplier: input.surge,
+        childMode: input.childMode,
+        // F2.4 · tarifa base configurable (banderazo/km/min editables por el admin).
+        baseFareCents: input.baseFareCents,
+        perKmCents: input.perKmCents,
+        perMinCents: input.perMinCents,
+      },
+      input.pricing,
+    ).cents;
+    return { fareCents, negotiationSeq: 0 };
   }
 
   async openDispatch(

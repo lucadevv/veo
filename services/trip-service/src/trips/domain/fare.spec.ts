@@ -8,6 +8,7 @@ import {
 import {
   calculateFare,
   applyOfferingPricing,
+  calculateFirmFare,
   BASE_FARE_CENTS,
   PER_KM_CENTS,
   PER_MIN_CENTS,
@@ -44,7 +45,7 @@ describe('BR-T05 · cálculo de tarifa', () => {
     expect(calculateFare({ distanceMeters: 5000, durationSeconds: 600 }).cents).toBe(1500);
   });
 
-  it('aplica surge multiplicador antes del recargo de niño', () => {
+  it('aplica surge multiplicador a la base', () => {
     const fare = calculateFare({
       distanceMeters: 5000,
       durationSeconds: 600,
@@ -54,15 +55,17 @@ describe('BR-T05 · cálculo de tarifa', () => {
     expect(fare.cents).toBe(2250);
   });
 
-  it('modo niño suma 200 céntimos (S/2) después del surge', () => {
-    const fare = calculateFare({
+  it('calculateFare NO suma el recargo de niño (es plano, lo aplica calculateFirmFare)', () => {
+    const conChild = calculateFare({
       distanceMeters: 5000,
       durationSeconds: 600,
       surgeMultiplier: 1.5,
       childMode: true,
     });
-    // 1500 * 1.5 + 200 = 2450
-    expect(fare.cents).toBe(2250 + CHILD_MODE_FEE_CENTS);
+    const sinChild = calculateFare({ distanceMeters: 5000, durationSeconds: 600, surgeMultiplier: 1.5 });
+    // calculateFare devuelve la BASE (2250) sin importar childMode: el fee lo suma calculateFirmFare al final.
+    expect(conChild.cents).toBe(2250);
+    expect(conChild.cents).toBe(sinChild.cents);
   });
 
   it('anti-divergencia: el recargo de niño de fare ES el de @veo/shared-types (sin copia local)', () => {
@@ -143,5 +146,50 @@ describe('ADR 013 §1.7 · applyOfferingPricing (tarifa firme desde base — FUE
     expect(applyOfferingPricing(money(1500), OFFERINGS[OfferingId.VEO_XL].pricing).currency).toBe(
       'PEN',
     );
+  });
+});
+
+describe('BR-T05 + BR-T07 · calculateFirmFare (tarifa firme + fee de niño PLANO)', () => {
+  // FUENTE ÚNICA del cobro FIXED. El fee de niño NO lo escala el multiplier de la oferta ni el surge:
+  // cuesta S/2.00 en cualquier tier (regresión que este bloque congela).
+  const baseInput = { distanceMeters: 5000, durationSeconds: 600 }; // base = 1500
+
+  it('sin modo niño = applyOfferingPricing(calculateFare): confort ×1.25 → 1875', () => {
+    const fare = calculateFirmFare(baseInput, OFFERINGS[OfferingId.VEO_CONFORT].pricing);
+    expect(fare.cents).toBe(1875); // 1500 × 1.25
+  });
+
+  it('el fee de niño es PLANO: se suma DESPUÉS del multiplier, el tier NO lo escala (confort ×1.25)', () => {
+    const fare = calculateFirmFare(
+      { ...baseInput, childMode: true },
+      OFFERINGS[OfferingId.VEO_CONFORT].pricing,
+    );
+    // CORRECTO: 1500×1.25 + 200 = 2075.  BUG viejo (fee dentro de la base): (1500+200)×1.25 = 2125.
+    expect(fare.cents).toBe(1875 + CHILD_MODE_FEE_CENTS);
+    expect(fare.cents).toBe(2075);
+  });
+
+  it('el delta por modo niño es EXACTAMENTE S/2.00 en todos los tiers (moto ×0.55, confort ×1.25, xl ×1.6)', () => {
+    for (const id of [OfferingId.VEO_MOTO, OfferingId.VEO_CONFORT, OfferingId.VEO_XL]) {
+      const sin = calculateFirmFare(baseInput, OFFERINGS[id].pricing);
+      const con = calculateFirmFare({ ...baseInput, childMode: true }, OFFERINGS[id].pricing);
+      expect(con.cents - sin.cents).toBe(CHILD_MODE_FEE_CENTS);
+    }
+  });
+
+  it('el fee de niño se suma AUN cuando la mínima de la oferta pisa la base', () => {
+    // 400 × 0.55 = 220 < mínima moto → firm = mínima; + niño 200 plano.
+    const smallInput = {
+      distanceMeters: 0,
+      durationSeconds: 0,
+      baseFareCents: 400,
+      perKmCents: 0,
+      perMinCents: 0,
+    };
+    const con = calculateFirmFare(
+      { ...smallInput, childMode: true },
+      OFFERINGS[OfferingId.VEO_MOTO].pricing,
+    );
+    expect(con.cents).toBe(OFFERINGS[OfferingId.VEO_MOTO].pricing.minFareCents + CHILD_MODE_FEE_CENTS);
   });
 });
