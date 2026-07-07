@@ -12,8 +12,8 @@ El pricing de VEO acumuló perillas y conceptos incoherentes frente a los modelo
 3. **Código muerto** — las 5 ofertas RIDE tienen `allowedModes:[PUJA,FIXED]` idéntico → la intersección oferta∩schedule es no-op (`trips.service.ts:430`).
 4. **Franjas sin uso** — `DEFAULT_SCHEDULE.rules=[]`; flipear el mecanismo por hora no tiene análogo (Uber flipea el PRECIO con surge, no el mecanismo).
 5. **Surge sin lugar** — `surgeMultiplier` existe en la fórmula pero ningún admin lo configura; y aplicado a los 3 modos rompería el cost-share (inflaría el cap = lucro, ilegal en BlaBlaCar). → se REMUEVE del modelo de pricing.
-6. **Verticales forzados** — Mecánico ×1.0 cobra por-km sin trasladar.
-7. **Carpooling huérfano** — pantalla aparte, desconectado del catálogo.
+6. **Verticales mal modelados** — el Mecánico (una VISITA) se trataba como un viaje que cobra por-km, cuando no traslada a nadie.
+7. **Carpooling mal encuadrado** — o "huérfano sin relación", o forzado como "una fila más" del catálogo. Es un producto propio (cost-share programado); ninguna de las dos.
 
 ## Corrección (mi error inicial)
 
@@ -23,7 +23,7 @@ En una primera pasada propuse "3 motores de precio" (RIDE fórmula, SPECIAL flat
 
 - **Uber**: *"Every Uber tier uses the SAME four-part formula, just with different rates"* — `base + per-km·km + per-min·min + booking`, × surge, mínima. Cada producto = mismas piezas, otras tasas. ([RideWise](https://getridewise.com/blog/uber-fare-calculator-2026))
 - **Grúa/tow**: hook-up fee (~$75) **+ per-milla** ($2–4). = `base + per-km`. ([HomeGuide](https://homeguide.com/costs/towing-service-cost))
-- **Mecánico**: **por hora** ($175–250/h), **per-km = 0** (es una visita, no traslada). (id.)
+- **Mecánico**: es una **visita** — call-out plano upfront + **labor por hora cobrada DESPUÉS** (no se sabe al cotizar), **per-km = 0** (no traslada). (id.)
 - **Emergencia / after-hours**: **+20–50 %** = un multiplicador. (id.)
 - **inDrive**: computa un *"recommended fare por ruta"* (la fórmula) y el pasajero **puja ≥ ese piso**. ([inDrive Help](https://indrive.com/help/passengers/how-fares-are-calculated))
 - **BlaBlaCar**: el conductor pone el precio **≤ tope** (distancia × costo/km) ÷ asientos + service fee. = la misma base de distancia, el conductor pone el número topeado. ([Brineweb](https://www.brineweb.com/blog/blablacar-business-model-how-blablacar-works-and-makes-money))
@@ -42,7 +42,16 @@ Todo servicio ES esta fórmula. Cambian **solo dos cosas**:
    - **PUJA** (inDrive): la fórmula da el piso/sugerido; el pasajero puja ≥.
    - **COST-SHARE** (BlaBlaCar): la fórmula da el TOPE; el conductor pone ≤, ÷ asientos + service fee.
 
-**No hay "motor flat", ni "pricing de especiales", ni carril huérfano.** Hay: 1 fórmula · params por servicio · 3 modos. Las categorías (viaje / especial / carpooling) son solo AGRUPACIÓN del menú (presentación), ortogonales al precio.
+**No hay "motor flat" ni "pricing de especiales" separados** — viajes, ambulancia y grúa son la MISMA fórmula (params + modo); las categorías viaje/especial son AGRUPACIÓN del menú. Pero hay **dos excepciones honestas** (ver Límites): el **Mecánico** (visita → call-out plano) y el **Carpooling** (producto cost-share propio, con su flujo y economía).
+
+## Límites del modelo (dónde la fórmula NO estira)
+
+La fórmula asume `km` (distancia) y `min` (duración) **conocidos al cotizar**. Eso vale para lo que **transporta** (viajes, ambulancia, grúa) — no para todo:
+
+- **Visitas (Mecánico)**: el cliente no viaja (`perKm=0`) y la **labor no se sabe al cotizar** (el `perMin` de labor no existe aún). → NO es "la fórmula con ceros": es un **call-out plano** (`base`, perKm=perMin=0) cotizado upfront; labor/repuestos se cobran **aparte**, tras el diagnóstico.
+- **Carpooling (COST-SHARE)**: es un **producto propio**, no una fila del catálogo de viajes. Comparte la **cuenta de distancia** (costo/km) pero tiene **flujo propio** (publicado/programado + reservar asientos), **params propios** (costo/km-cap por país · asientos · service fee) y **economía propia** (no-comercial: conductor 100 %, fee al pasajero). Vive en su **pantalla propia**.
+
+**Conclusión honesta:** la unificación es REAL para **viajes on-demand que transportan** (FIJO=Uber + PUJA=inDrive, una fórmula + toggle de modo; ambulancia/grúa entran con multiplicador). El **Mecánico** degenera a call-out plano y el **Carpooling** es un producto aparte que comparte solo la cuenta de distancia. **No hay "una fórmula para todo": hay una fórmula de viaje + dos bordes honestos.**
 
 ## Alcance / No-goals
 

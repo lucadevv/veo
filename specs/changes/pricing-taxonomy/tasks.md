@@ -7,7 +7,7 @@
 Rehacer sobre el modelo unificado (1 fórmula · params · 3 modos):
 - [ ] **On-demand**: Tarifa base (los DEFAULT de la fórmula: banderazo/km/min) · Comisión.
 - [ ] **Catálogo de servicios** (UNA tabla): Servicio · **Modo[Fijo\|Puja\|Cost-share]** · Multiplicador · Mínima · Activa. Overrides de params (base/perKm/perMin) en un detalle/avanzado por servicio (ej. Mecánico perKm=0).
-- [ ] **Carpooling**: filas mode=COST_SHARE (costo/km país + service fee + ÷asientos) — dentro del mismo modelo, aunque su flujo (publicado/programado) sea aparte.
+- [ ] **Carpooling**: pantalla PROPIA (producto aparte) — mode=COST_SHARE con costo/km-cap por país + service fee + ÷asientos + flujo publicado/programado. Comparte la cuenta de distancia, NO el catálogo de viajes.
 - [ ] Nav de "Precios" acorde. Aprobación del dueño → recién ahí, código.
 - Nota: las frames actuales (On-demand ✅, Viajes ✅, Especiales, Carpooling) se REHACEN/ajustan a este modelo (Especiales deja de ser "flat aparte" → params + modo; ver corrección del proposal).
 
@@ -20,8 +20,8 @@ Rehacer sobre el modelo unificado (1 fórmula · params · 3 modos):
 - [ ] **Verificar**: `fareCents` FIXED idéntico (fare.spec/fixed-dispatch.spec); typecheck global; MCP en vivo.
 
 ## Fase B · Aditivo
-- [ ] **Params por servicio en la UI**: overrides base/perKm/perMin por oferta (Mecánico perKm=0, Grúa perMin=0). Verificar Mecánico = `base + perMin·min`, sin km.
-- [ ] **COST_SHARE como modo**: unificar el pricing del carpooling bajo `mode=COST_SHARE` (el cost-cap ya es la fórmula con perKm=costoPorKm; ÷asientos + service fee). El flujo publicado/programado queda como está (operativo).
+- [ ] **Params por servicio en la UI**: overrides base/perKm/perMin por oferta (Mecánico perKm=0 **Y** perMin=0 = call-out plano; Grúa perMin=0). Verificar Mecánico = `base` (call-out, sin km ni min); labor/repuestos se cobran aparte.
+- [ ] **COST_SHARE (carpooling)**: producto propio con `mode=COST_SHARE` (cost-cap = distancia × costo/km; ÷asientos + service fee); flujo publicado/programado queda como está. NO se fuerza al catálogo de viajes.
 - [ ] **Verificar**: tests de params (perKm=0) + del cost-share (cap ÷ asientos); MCP en vivo.
 
 ## Riesgos / notas

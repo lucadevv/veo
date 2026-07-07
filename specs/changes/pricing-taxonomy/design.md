@@ -20,13 +20,13 @@ El global (banderazo/km/min) es el DEFAULT. Cada oferta overridea lo que necesit
 | Premium | (default) | (default) | (default) | 1.8 | FIJO/PUJA |
 | Ambulancia | (default o mayor) | ✅ | ✅ | 2.5 (emergencia) | FIJO |
 | Grúa | hook-up | ✅ | **0** | 1.0 | FIJO |
-| Mecánico | call-out | **0** | por-min (labor) | 1.0 | FIJO |
-| Carpooling | 0 | costo/km país | 0 | 1.0 | COST-SHARE |
+| Mecánico | call-out (S/50) | **0** | **0** (labor aparte) | 1.0 | FIJO |
+| Carpooling | 0 | costo/km país | 0 | 1.0 | COST-SHARE (producto aparte) |
 
 ### Eje 2 · Modo (quién pone el número)
 ```
 FIJO        → fareCents = fórmula                     (plataforma computa; ignora bid)
-PUJA        → floor = fórmula; el bid ES el precio, validado bid ≥ floor
+PUJA        → floor = fórmula; el pasajero ofrece ≥ floor; el conductor ACEPTA o CONTRA-OFERTA (inDrive)
 COST-SHARE  → cap = fórmula; el conductor pone precio ≤ cap, luego ÷ asientos + service fee
 ```
 
@@ -65,8 +65,8 @@ ServiceOffering (por servicio)
 ## Qué se AGREGA
 
 - `offering.mode ∈ {FIXED, PUJA, COST_SHARE}` (un solo modo por servicio).
-- `pricing.{baseFareCents?, perKmCents?, perMinCents?}` overrides por servicio (para que Mecánico ponga perKm=0, Grúa perMin=0, etc.). Null = default global.
-- Carpooling entra al modelo como `mode=COST_SHARE` (su cost-cap ya es la fórmula con `perKm=costoPorKm`; el flujo publicado/programado + ÷asientos es operativo, no de pricing).
+- `pricing.{baseFareCents?, perKmCents?, perMinCents?}` overrides por servicio (Mecánico → perKm=0 **Y** perMin=0 = call-out plano; Grúa → perMin=0; etc.). Null = default global.
+- Carpooling es un **producto propio** con `mode=COST_SHARE`: comparte la cuenta de distancia (`perKm=costoPorKm`) pero su **flujo** (publicado/programado + reservar asientos), sus **params** (costo/km-cap por país · asientos · service fee) y su **economía** (no-comercial: conductor 100 %, fee al pasajero) son suyos. Vive en su pantalla, **no** en el catálogo de viajes.
 
 ## Cambios por capa
 
