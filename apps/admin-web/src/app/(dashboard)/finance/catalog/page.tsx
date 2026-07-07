@@ -27,7 +27,7 @@ export default function CatalogPage() {
       <div className="flex h-full flex-col">
         <PageHeader
           title="Tarifas por oferta"
-          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Tarifas por oferta' }]}
+          breadcrumbs={[{ label: 'Precios' }, { label: 'Tarifas por oferta' }]}
         />
         <EmptyState
           className="flex-1"
@@ -44,7 +44,7 @@ export default function CatalogPage() {
       <PageHeader
         title="Tarifas por oferta"
         description="Configurá cada servicio en un solo lugar: disponibilidad, modo, multiplicador y los dos mínimos (tarifa fija y piso de puja). El pasajero ve y cotiza solo lo habilitado."
-        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Tarifas por oferta' }]}
+        breadcrumbs={[{ label: 'Precios' }, { label: 'Tarifas por oferta' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         {/*

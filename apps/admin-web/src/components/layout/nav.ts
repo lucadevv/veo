@@ -7,11 +7,13 @@ import {
   Coins,
   MapPinned,
   Radar,
+  Scale,
   ScrollText,
   ShieldAlert,
   Tags,
   TrendingUp,
   Truck,
+  Undo2,
   UserCog,
   Users,
   UsersRound,
@@ -78,6 +80,8 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    // FINANZAS = la OPERACIÓN del dinero (el flujo de la plata): liquidaciones + reembolsos + reconciliación.
+    // Los 3 modos de precio se movieron a su propio grupo PRECIOS (config de cómo se cobra, no flujo).
     title: 'Finanzas',
     items: [
       {
@@ -88,14 +92,33 @@ export const NAV: NavGroup[] = [
         exact: true,
       },
       {
+        href: '/finance/refunds',
+        label: 'Reembolsos',
+        icon: Undo2,
+        permission: 'finance:view',
+      },
+      {
+        href: '/finance/reconciliation',
+        label: 'Reconciliación',
+        icon: Scale,
+        permission: 'finance:view',
+      },
+    ],
+  },
+  {
+    // PRECIOS — el HÍBRIDO de VEO (on-demand · oferta · carpooling): la config de cómo se cobra por cada
+    // modelo, separada de Finanzas (operación del dinero). Cada modo es un carril de pricing distinto.
+    title: 'Precios',
+    items: [
+      {
         href: '/finance/pricing',
-        label: 'Precios on-demand',
+        label: 'On-demand',
         icon: Coins,
         permission: 'pricing:view',
       },
       {
         href: '/finance/catalog',
-        label: 'Tarifas por oferta',
+        label: 'Por oferta',
         icon: Tags,
         permission: 'catalog:view',
       },

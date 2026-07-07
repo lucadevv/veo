@@ -44,7 +44,7 @@ export default function PricingPage() {
       <div className="flex h-full flex-col">
         <PageHeader
           title="Precios on-demand"
-          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios on-demand' }]}
+          breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
         />
         <EmptyState
           className="flex-1"
@@ -61,7 +61,7 @@ export default function PricingPage() {
       <PageHeader
         title="Precios on-demand"
         description="Configurá cómo se calcula y se cobra el viaje inmediato: modo, componentes de la tarifa y comisión al conductor. Todos los cambios son globales, se aplican al instante y quedan auditados."
-        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Precios on-demand' }]}
+        breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         {/* CARRIL on-demand · cómo se fija el precio del viaje inmediato (modo + piso de puja). */}

@@ -29,7 +29,7 @@ export default function CarpoolingPage() {
       <div className="flex h-full flex-col">
         <PageHeader
           title="Carpooling"
-          breadcrumbs={[{ label: 'Finanzas' }, { label: 'Carpooling' }]}
+          breadcrumbs={[{ label: 'Precios' }, { label: 'Carpooling' }]}
         />
         <EmptyState
           className="flex-1"
@@ -46,7 +46,7 @@ export default function CarpoolingPage() {
       <PageHeader
         title="Carpooling"
         description="El carril cost-sharing: el conductor pone el precio del asiento y la plataforma solo limita el lucro. Acá fijás el techo anti-lucro (costo de operación por km) y el service fee al pasajero. Los cambios son globales, se aplican al instante y quedan auditados."
-        breadcrumbs={[{ label: 'Finanzas' }, { label: 'Carpooling' }]}
+        breadcrumbs={[{ label: 'Precios' }, { label: 'Carpooling' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         {/* Techo anti-lucro · el costo/km que limita el precio del asiento (escudo legal · per-país). */}
