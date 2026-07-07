@@ -1,23 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { Zap } from 'lucide-react';
 import type { EnergyCatalogView } from '@/lib/api/schemas';
 import { useReplaceEnergyCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
-import { Badge } from '@/components/ui/badge';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
+import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 
 /** Techo de cordura (espejo del DTO server-side): S/100 por unidad. */
 const MAX_PER_UNIT = 100;
 
-/** Etiqueta legible de la unidad (display). */
-const UNIT_LABEL: Record<string, string> = { LITER: 'S/ por litro', KWH: 'S/ por kWh' };
+/** Sufijo de unidad (display) para la fila de cada tipo de energía. */
+const UNIT_SUFFIX: Record<string, string> = { LITER: 'S/·L', KWH: 'S/·kWh' };
 
 /**
  * Los 3 TIPOS de energía de ADR-017 (UN precio por tipo, sin octanaje). Lista canónica que espeja el
@@ -75,42 +72,16 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
     });
 
   return (
-    <section className="pt-6">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
-        <Zap className="size-4" aria-hidden /> Precios de energía
-        {config.active ? (
-          <Badge tone="success">Activo</Badge>
-        ) : (
-          <Badge tone="neutral">Vista previa</Badge>
-        )}
-      </h3>
-      <p className="mt-1 text-sm text-ink-subtle">
-        {config.active
+    <ConfigCard
+      title="Energy catalog"
+      tag={config.active ? 'fórmula ON' : 'vista previa'}
+      tagTone={config.active ? 'success' : 'neutral'}
+      description={
+        config.active
           ? 'Un precio por tipo de energía (grifo o kWh). El sistema deriva el recargo por km de cada servicio según su rendimiento.'
-          : 'Un precio por tipo de energía (grifo o kWh). Todavía no afecta la tarifa: lo que edites queda guardado para cuando se active el modelo de energía.'}
-      </p>
-
-      <div className="mt-4 flex max-w-2xl flex-wrap items-start gap-3">
-        {ENERGY_TYPES.map((t) => (
-          <Field
-            key={t.id}
-            label={`${t.label} (${UNIT_LABEL[t.unit] ?? t.unit})`}
-            hint={t.note ?? `Actual: S/${formatSolesInput(persistedCents(t.id))}`}
-            error={invalidOf(t.id) ? `Entre 0 y ${MAX_PER_UNIT}` : undefined}
-          >
-            <Input
-              type="number"
-              inputMode="decimal"
-              step="0.10"
-              min="0"
-              max={MAX_PER_UNIT}
-              value={prices[t.id] ?? ''}
-              onChange={(e) => setPrices((p) => ({ ...p, [t.id]: e.target.value }))}
-              disabled={!canManage}
-            />
-          </Field>
-        ))}
-
+          : 'Un precio por tipo de energía (grifo o kWh). Todavía no afecta la tarifa: lo que edites queda guardado para cuando se active el modelo de energía.'
+      }
+      footer={
         <SaveAction
           canManage={canManage}
           dirty={dirty}
@@ -120,9 +91,30 @@ export function EnergyCatalogPanel({ config }: { config: EnergyCatalogView }) {
           title="Confirmar cambio de precios de energía"
           description="Esta acción cambia el pricing global y queda auditada."
         />
-      </div>
+      }
+    >
+      {ENERGY_TYPES.map((t) => (
+        <RateField
+          key={t.id}
+          label={t.label}
+          sub={t.note ?? `Actual: S/${formatSolesInput(persistedCents(t.id))}`}
+          unit={UNIT_SUFFIX[t.unit] ?? t.unit}
+          error={invalidOf(t.id) ? `Entre 0 y ${MAX_PER_UNIT}` : undefined}
+        >
+          <RateInput
+            type="number"
+            inputMode="decimal"
+            step="0.10"
+            min="0"
+            max={MAX_PER_UNIT}
+            value={prices[t.id] ?? ''}
+            onChange={(e) => setPrices((p) => ({ ...p, [t.id]: e.target.value }))}
+            disabled={!canManage}
+          />
+        </RateField>
+      ))}
 
-      <ReadOnlyNote canManage={canManage} noun="los precios de energía" className="mt-2" />
-    </section>
+      <ReadOnlyNote canManage={canManage} noun="los precios de energía" />
+    </ConfigCard>
   );
 }

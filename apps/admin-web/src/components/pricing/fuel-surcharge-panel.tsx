@@ -1,17 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Fuel } from 'lucide-react';
 import type { FuelSurchargeView } from '@/lib/api/schemas';
 import { useReplaceFuelSurcharge } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
-import { Badge } from '@/components/ui/badge';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
+import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 
 /** Techos de cordura (espejo del DTO server-side, defensa en profundidad UI). */
 const MAX_SOLES_PER_LITER = 100;
@@ -24,11 +21,10 @@ const MAX_KM_PER_LITER = 200;
  * el quote/create del pasajero lo reflejan al instante. La UI solo refleja `pricing:manage`; el admin-bff +
  * trip-service re-autorizan. Precio en SOLES/litro (se persiste en céntimos); rendimiento en km/litro entero.
  *
- * UX — DOS modelos, UNO activo: el recargo de combustible (B4) y el modelo de energía (B5) son mutuamente
- * excluyentes (el flip lo decide la config del sistema, NO este panel). Cuando B5 reemplazó a B4, este panel
- * NO se muestra como un formulario activo (confunde: editable pero sin efecto, y el operador no puede
- * re-activarlo desde acá) → se COLAPSA en un acordeón muteado "modelo anterior". El modelo ACTIVO es el único
- * prominente. (El estado "Vista previa" del panel de energía es distinto: forward-config legítimo, sí editable.)
+ * DOS modelos, UNO activo: el recargo de combustible (B4) y el modelo de energía (B5) son mutuamente
+ * excluyentes (el flip lo decide la config del sistema, NO este panel). El tag de la card refleja cuál rige
+ * hoy: "activo" cuando el recargo está en efecto, "inactivo" cuando fue reemplazado por el modelo de energía
+ * (lo que se edita queda guardado pero sin efecto hasta que el flip revierta).
  */
 export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
   const user = useSession();
@@ -65,51 +61,17 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
   const onSave = () =>
     save({ fuelPricePerLiterCents: priceCents, kmPerLiter: km, expectedVersion: config.version });
 
-  // Cuerpo editable (descripción + inputs + preview + versión). El MISMO para ambos estados — la descripción
-  // y la etiqueta del derivado ya se ramifican por `config.active`.
-  const body = (
-    <>
-      <p className="mt-1 text-sm text-ink-subtle">
-        {config.active
+  return (
+    <ConfigCard
+      title="Recargo por combustible / energía"
+      tag={config.active ? 'activo' : 'inactivo'}
+      tagTone={config.active ? 'success' : 'neutral'}
+      description={
+        config.active
           ? 'Ingresá el precio del combustible (lo que ves en el grifo) y el rendimiento del vehículo de referencia. El sistema deriva el recargo por km = precio ÷ rendimiento y lo aplica a la tarifa (precio fijo y sugerido de puja). El cambio es global, inmediato y queda auditado.'
-          : 'Reemplazado por el modelo de precios de energía: lo que edites acá NO afecta la tarifa mientras el modelo de energía esté activo. El cambio de modelo lo decide la configuración del sistema, no este panel.'}
-      </p>
-
-      <div className="mt-4 flex max-w-2xl flex-wrap items-end gap-3">
-        <Field
-          label="Precio del combustible (S/ por litro)"
-          hint={`Actual: S/${formatSolesInput(config.fuelPricePerLiterCents)}`}
-          error={priceInvalid ? `Entre 0 y ${MAX_SOLES_PER_LITER}` : undefined}
-        >
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="0.10"
-            min="0"
-            max={MAX_SOLES_PER_LITER}
-            value={priceSoles}
-            onChange={(e) => setPriceSoles(e.target.value)}
-            disabled={!canManage}
-          />
-        </Field>
-
-        <Field
-          label="Rendimiento (km por litro)"
-          hint="Vehículo de referencia; 0 = sin recargo"
-          error={kmInvalid ? `Entre 0 y ${MAX_KM_PER_LITER}` : undefined}
-        >
-          <Input
-            type="number"
-            inputMode="numeric"
-            step="1"
-            min="0"
-            max={MAX_KM_PER_LITER}
-            value={kmPerLiter}
-            onChange={(e) => setKmPerLiter(e.target.value)}
-            disabled={!canManage}
-          />
-        </Field>
-
+          : 'Reemplazado por el modelo de precios de energía: lo que edites acá NO afecta la tarifa mientras el modelo de energía esté activo. El cambio de modelo lo decide la configuración del sistema, no este panel.'
+      }
+      footer={
         <SaveAction
           canManage={canManage}
           dirty={dirty}
@@ -119,11 +81,47 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
           title="Confirmar cambio de recargo de combustible"
           description="Esta acción cambia el pricing global y queda auditada."
         />
-      </div>
+      }
+    >
+      <RateField
+        label="Precio del combustible"
+        sub={`Actual: S/${formatSolesInput(config.fuelPricePerLiterCents)}`}
+        unit="S/·L"
+        error={priceInvalid ? `Entre 0 y ${MAX_SOLES_PER_LITER}` : undefined}
+      >
+        <RateInput
+          type="number"
+          inputMode="decimal"
+          step="0.10"
+          min="0"
+          max={MAX_SOLES_PER_LITER}
+          value={priceSoles}
+          onChange={(e) => setPriceSoles(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
+
+      <RateField
+        label="Rendimiento"
+        sub="Vehículo de referencia; 0 = sin recargo"
+        unit="km/L"
+        error={kmInvalid ? `Entre 0 y ${MAX_KM_PER_LITER}` : undefined}
+      >
+        <RateInput
+          type="number"
+          inputMode="numeric"
+          step="1"
+          min="0"
+          max={MAX_KM_PER_LITER}
+          value={kmPerLiter}
+          onChange={(e) => setKmPerLiter(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
 
       {/* Preview del recargo derivado. El valor PERSISTIDO se etiqueta según el estado: "vigente" SOLO si el
           recargo está activo; si fue reemplazado, "guardado · sin efecto" (no mentir que está en efecto). */}
-      <p className="mt-3 text-sm text-ink">
+      <p className="text-sm text-ink">
         Recargo derivado:{' '}
         <span className="font-medium text-accent">
           S/{formatSolesInput(derivedPerKmCents)} por km
@@ -135,23 +133,7 @@ export function FuelSurchargePanel({ config }: { config: FuelSurchargeView }) {
         </span>
       </p>
 
-      <ReadOnlyNote canManage={canManage} noun="el combustible" className="mt-2" />
-    </>
-  );
-
-  // REEMPLAZADO → NO se renderiza. Un modelo que no afecta la tarifa es config muerta: mostrar un editor
-  // inerte (aunque sea colapsado) confunde al operador. El backend conserva el valor; si el flip revierte
-  // (energía → combustible), `active` vuelve a true y el panel reaparece solo. La UI muestra SOLO lo vivo.
-  if (!config.active) return null;
-
-  // ACTIVO → panel pleno.
-  return (
-    <section className="pt-6">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
-        <Fuel className="size-4" aria-hidden /> Recargo de combustible
-        <Badge tone="success">Activo</Badge>
-      </h3>
-      {body}
-    </section>
+      <ReadOnlyNote canManage={canManage} noun="el combustible" />
+    </ConfigCard>
   );
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Percent } from 'lucide-react';
 import type { CommissionView } from '@/lib/api/schemas';
 import { useReplaceCommission } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
@@ -14,9 +13,8 @@ import {
   commissionReplace,
   percentToBps,
 } from '@/lib/commission';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
+import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 
 /**
  * Comisión ON-DEMAND (carril taxi · F2.7 · ADR-017 §1.6). El admin edita SOLO la tasa que se DESCUENTA al
@@ -46,33 +44,12 @@ export function OnDemandCommissionPanel({ config }: { config: CommissionView }) 
   const onSave = () => save(commissionReplace(config, { onDemandRateBps: bps }));
 
   return (
-    <section className="pt-6">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
-        <Percent className="size-4" aria-hidden /> Comisión al conductor (on-demand)
-      </h3>
-      <p className="mt-1 max-w-2xl text-sm text-ink-subtle">
-        La comisión se <strong>descuenta al conductor</strong>: el pasajero paga la tarifa del viaje y el
-        conductor recibe la tarifa menos esta comisión.
-      </p>
-
-      <div className="mt-4 flex max-w-3xl flex-wrap items-end gap-3">
-        <Field
-          label="Comisión al conductor (%)"
-          hint={`Actual: ${bpsToPercentLabel(config.onDemandRateBps)}%`}
-          error={invalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
-        >
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="0.5"
-            min="0"
-            max={MAX_RATE_PCT}
-            value={pct}
-            onChange={(e) => setPct(e.target.value)}
-            disabled={!canManage}
-          />
-        </Field>
-
+    <ConfigCard
+      title="Comisión ON-DEMAND"
+      tag="descuento al conductor"
+      tagTone="brand"
+      description="La comisión se descuenta al conductor: el pasajero paga la tarifa del viaje y el conductor recibe la tarifa menos esta comisión."
+      footer={
         <SaveAction
           canManage={canManage}
           dirty={dirty}
@@ -82,9 +59,26 @@ export function OnDemandCommissionPanel({ config }: { config: CommissionView }) 
           title="Confirmar comisión on-demand"
           description="Esta acción cambia la comisión global que se descuenta al conductor en los viajes on-demand y queda auditada."
         />
-      </div>
-
-      <ReadOnlyNote canManage={canManage} noun="la comisión" className="mt-3" />
-    </section>
+      }
+    >
+      <RateField
+        label="Tasa on-demand"
+        sub={`Actual: ${bpsToPercentLabel(config.onDemandRateBps)}% · ${config.onDemandRateBps} bps`}
+        unit="%"
+        error={invalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
+      >
+        <RateInput
+          type="number"
+          inputMode="decimal"
+          step="0.5"
+          min="0"
+          max={MAX_RATE_PCT}
+          value={pct}
+          onChange={(e) => setPct(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
+      <ReadOnlyNote canManage={canManage} noun="la comisión" />
+    </ConfigCard>
   );
 }

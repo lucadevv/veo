@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { CatalogPanel } from '@/components/catalog/catalog-panel';
+import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
 /**
  * Tarifas por oferta (ADR 013 · Fase B / A1). Vive bajo Finanzas: la disponibilidad y el precio de los
@@ -71,6 +72,15 @@ export default function CatalogPage() {
               onRetryBidFloor={() => void bidFloorQuery.refetch()}
             />
           )}
+        </AsyncSection>
+
+        {/*
+          Piso de la PUJA por DEFECTO (global). Los pisos POR OFERTA se editan arriba, en cada fila del
+          catálogo; el default global (fallback cuando una oferta no tiene override) vive acá — su config es
+          la misma (/pricing/bid-floor, mismo CAS) pero es la ÚNICA superficie que edita `defaultFloorCents`.
+        */}
+        <AsyncSection query={bidFloorQuery} skeleton={<Skeleton className="mt-6 h-28" />}>
+          {(data) => <BidFloorPanel config={data} />}
         </AsyncSection>
       </div>
     </div>

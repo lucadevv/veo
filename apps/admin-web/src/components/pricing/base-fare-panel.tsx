@@ -1,16 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Banknote } from 'lucide-react';
 import type { BaseFareView } from '@/lib/api/schemas';
 import { useReplaceBaseFare } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
 import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
+import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
 
 /** Techos de cordura (espejo del DTO server-side, defensa en profundidad UI). En SOLES. */
 const MAX_BASE_FARE_SOLES = 200;
@@ -18,11 +16,9 @@ const MAX_PER_KM_SOLES = 50;
 const MAX_PER_MIN_SOLES = 20;
 
 /**
- * Tarifa base (F2.4). El admin edita los tres componentes base de la fórmula de tarifa — banderazo (tarifa
- * fija de arranque), costo por kilómetro y costo por minuto — que antes estaban hardcodeados. El cambio es
- * global, inmediato (server-driven: el quote/create del pasajero lo reflejan al instante) y queda auditado.
- * La UI solo refleja `pricing:manage`; el admin-bff + trip-service re-autorizan. Valores en SOLES (se
- * persisten en céntimos Int).
+ * Tarifa base (F2.4) — card del diseño (veo.pen): banderazo + por km + por minuto, cada componente editable,
+ * guardado por sección detrás de step-up MFA (SaveAction). El cambio es global, inmediato y auditado. La UI
+ * solo refleja `pricing:manage`; el admin-bff + trip-service re-autorizan. Valores en SOLES (persistidos en Int).
  */
 export function BaseFarePanel({ config }: { config: BaseFareView }) {
   const user = useSession();
@@ -57,72 +53,15 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
     perKmCents !== config.perKmCents ||
     perMinCents !== config.perMinCents;
 
-  // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió, el server responde 409 y
-  // useConfigSave muestra el toast de conflicto. El onSettled de la mutation (queries.ts) re-sincroniza.
   const onSave = () =>
     save({ baseFareCents: baseCents, perKmCents, perMinCents, expectedVersion: config.version });
 
   return (
-    <section className="pt-6">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-ink-muted">
-        <Banknote className="size-4" aria-hidden /> Tarifa base
-      </h3>
-      <p className="mt-1 text-sm text-ink-subtle">
-        Los tres componentes base de la fórmula de tarifa (precio fijo y sugerido de puja).
-      </p>
-
-      <div className="mt-4 flex max-w-3xl flex-wrap items-end gap-3">
-        <Field
-          label="Banderazo (S/)"
-          hint={`Actual: S/${formatSolesInput(config.baseFareCents)}`}
-          error={baseInvalid ? `Entre 0 y ${MAX_BASE_FARE_SOLES}` : undefined}
-        >
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="0.10"
-            min="0"
-            max={MAX_BASE_FARE_SOLES}
-            value={baseSoles}
-            onChange={(e) => setBaseSoles(e.target.value)}
-            disabled={!canManage}
-          />
-        </Field>
-
-        <Field
-          label="Por kilómetro (S/)"
-          hint={`Actual: S/${formatSolesInput(config.perKmCents)}`}
-          error={perKmInvalid ? `Entre 0 y ${MAX_PER_KM_SOLES}` : undefined}
-        >
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="0.10"
-            min="0"
-            max={MAX_PER_KM_SOLES}
-            value={perKmSoles}
-            onChange={(e) => setPerKmSoles(e.target.value)}
-            disabled={!canManage}
-          />
-        </Field>
-
-        <Field
-          label="Por minuto (S/)"
-          hint={`Actual: S/${formatSolesInput(config.perMinCents)}`}
-          error={perMinInvalid ? `Entre 0 y ${MAX_PER_MIN_SOLES}` : undefined}
-        >
-          <Input
-            type="number"
-            inputMode="decimal"
-            step="0.10"
-            min="0"
-            max={MAX_PER_MIN_SOLES}
-            value={perMinSoles}
-            onChange={(e) => setPerMinSoles(e.target.value)}
-            disabled={!canManage}
-          />
-        </Field>
-
+    <ConfigCard
+      title="Tarifa base"
+      tag="componentes"
+      description="Los tres componentes base de la fórmula de tarifa (precio fijo y sugerido de puja)."
+      footer={
         <SaveAction
           canManage={canManage}
           dirty={dirty}
@@ -132,9 +71,60 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
           title="Confirmar cambio de tarifa base"
           description="Esta acción cambia el pricing global y queda auditada."
         />
-      </div>
-
-      <ReadOnlyNote canManage={canManage} noun="la tarifa base" className="mt-3" />
-    </section>
+      }
+    >
+      <RateField
+        label="Banderazo"
+        sub={`Actual: S/${formatSolesInput(config.baseFareCents)}`}
+        unit="S/"
+        error={baseInvalid ? `Entre 0 y ${MAX_BASE_FARE_SOLES}` : undefined}
+      >
+        <RateInput
+          type="number"
+          inputMode="decimal"
+          step="0.10"
+          min="0"
+          max={MAX_BASE_FARE_SOLES}
+          value={baseSoles}
+          onChange={(e) => setBaseSoles(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
+      <RateField
+        label="Por kilómetro"
+        sub={`Actual: S/${formatSolesInput(config.perKmCents)}`}
+        unit="S/·km"
+        error={perKmInvalid ? `Entre 0 y ${MAX_PER_KM_SOLES}` : undefined}
+      >
+        <RateInput
+          type="number"
+          inputMode="decimal"
+          step="0.10"
+          min="0"
+          max={MAX_PER_KM_SOLES}
+          value={perKmSoles}
+          onChange={(e) => setPerKmSoles(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
+      <RateField
+        label="Por minuto"
+        sub={`Actual: S/${formatSolesInput(config.perMinCents)}`}
+        unit="S/·min"
+        error={perMinInvalid ? `Entre 0 y ${MAX_PER_MIN_SOLES}` : undefined}
+      >
+        <RateInput
+          type="number"
+          inputMode="decimal"
+          step="0.10"
+          min="0"
+          max={MAX_PER_MIN_SOLES}
+          value={perMinSoles}
+          onChange={(e) => setPerMinSoles(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
+      <ReadOnlyNote canManage={canManage} noun="la tarifa base" />
+    </ConfigCard>
   );
 }
