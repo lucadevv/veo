@@ -9,14 +9,12 @@ import {
   OFFERINGS,
   OfferingId,
   VehicleClass,
-  type OfferingSpec,
 } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
 import { OfferingUnavailableError } from './trips.errors';
 import { emitTripRequested, emitBidPosted } from './trip-events';
-import { offeringModeOverriddenTotal, catalogDegradedTotal } from './trip-metrics';
-import type { TripOfferingResolution } from './domain/offering';
+import { catalogDegradedTotal } from './trip-metrics';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
 import { InvalidTripTransition } from './domain/trip-state-machine';
@@ -29,15 +27,16 @@ async function readCatalogDegraded(site: string): Promise<number> {
 }
 
 /**
- * Doble de CatalogService.resolveOffering (B2): devuelve una oferta EFECTIVA a medida (enabled + pricing
- * efectivo + modePin), o lanza para simular el catálogo caído. `as never` porque createTrip solo usa
- * resolveOffering del puerto.
+ * Doble de CatalogService.resolveOffering (ADR 013 · ADR 023): devuelve una oferta EFECTIVA a medida
+ * (enabled + pricing efectivo + `mode` efectivo), o lanza para simular el catálogo caído. `mode` modela la
+ * palanca manual del admin sobre el modo de la oferta (default = el de código). `as never` porque createTrip
+ * solo usa resolveOffering del puerto.
  */
 function fakeCatalog(opts: {
   enabled?: boolean;
   multiplier?: number;
   minFareCents?: number;
-  modePin?: PricingMode;
+  mode?: PricingMode;
   throws?: boolean;
 }) {
   return {
@@ -51,7 +50,7 @@ function fakeCatalog(opts: {
           multiplier: opts.multiplier ?? base.pricing.multiplier,
           minFareCents: opts.minFareCents ?? base.pricing.minFareCents,
         },
-        modePin: opts.modePin,
+        mode: opts.mode ?? base.mode,
       };
     },
   } as never;
@@ -285,14 +284,6 @@ const baseCreateDto = {
   paymentMethod: PaymentMethod.YAPE,
 };
 
-/**
- * ADR 011 · doble del ModeResolver (PricingScheduleService) que FUERZA un modo fijo, para testear la
- * resolución server-side de createTrip independientemente de la presencia de bidCents del cliente.
- */
-function fakeResolver(mode: 'PUJA' | 'FIXED') {
-  return { resolve: async () => mode } as never;
-}
-
 describe('TripsService.createTrip · BR-T05 + outbox', () => {
   it('crea en REQUESTED, calcula tarifa real y encola trip.requested', async () => {
     const prisma = makePrisma(null);
@@ -367,7 +358,15 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
 
   it('Ola 2B · las paradas (waypoints) viajan en trip.bid_posted', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    // ADR 023: la PUJA la determina la oferta → catálogo con la oferta pineada a PUJA.
+    const svc = new TripsService(
+      prisma as never,
+      maps,
+      undefined,
+      undefined,
+      undefined,
+      fakeCatalog({ mode: PricingMode.PUJA }),
+    );
     const stops = [{ lat: -12.07, lon: -77.06 }];
     await svc.createTrip({ ...baseCreateDto, bidCents: 900, waypoints: stops });
     const bid = prisma._outbox.find((e) => e.eventType === 'trip.bid_posted');
@@ -381,7 +380,6 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     const svc = new TripsService(
       prisma as never,
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -403,7 +401,6 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       enabledCatalog,
     );
     const view = await svc.createTrip({ ...baseCreateDto });
@@ -416,7 +413,6 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     const svc = new TripsService(
       prisma as never,
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -438,7 +434,6 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       brokenCatalog,
     );
     // Request crafteado: category de una vertical oculta + catálogo caído. La UI nunca la ofrece; el
@@ -449,31 +444,30 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     expect(prisma._store).toBeNull();
   });
 
-  it('B2 · el admin PINEA el modo de la oferta → GANA sobre el schedule (pin FIXED vs schedule PUJA)', async () => {
+  it('ADR 023 · el admin PINEA el modo PUJA de la oferta → el viaje es PUJA (palanca manual)', async () => {
     const prisma = makePrisma(null);
-    // schedule pide PUJA; el admin pineó FIXED para esta oferta → gana FIXED (sin bid, NO lanza).
+    // La oferta nace FIXED en código; el admin la pineó a PUJA (overlay) → el modo EFECTIVO es PUJA. Con
+    // bid válido, el viaje abre OfferBoard (trip.bid_posted), no el matching secuencial (trip.requested).
     const svc = new TripsService(
       prisma as never,
       maps,
       undefined,
-      fakeResolver('PUJA'),
       undefined,
       undefined,
-      fakeCatalog({ modePin: PricingMode.FIXED }),
+      fakeCatalog({ mode: PricingMode.PUJA }),
     );
-    const view = await svc.createTrip({ ...baseCreateDto });
-    expect(view.status).toBe(TripStatus.REQUESTED);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true); // FIXED
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false); // no PUJA
+    const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
+    expect(view.dispatchMode).toBe('PUJA');
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true); // PUJA
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false); // no FIXED
   });
 
   it('B2 · el override de multiplier del admin sube la tarifa FIXED (×2.0 → fareCents 3000)', async () => {
     const prisma = makePrisma(null);
-    // FIXED por default (sin resolver, sin bid). calculateFare(5000m,600s)=1500; ×2.0=3000 (> minFare 500).
+    // FIXED por default (oferta FIXED, sin bid). calculateFare(5000m,600s)=1500; ×2.0=3000 (> minFare 500).
     const svc = new TripsService(
       prisma as never,
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -958,8 +952,8 @@ describe('TripsService.start · B · lockout anti-brute-force del código de mod
         driverId: 'drv-1',
       }),
     );
-    // constructor: (prisma, maps, config?, modeResolver?, redis?) — redis va 5º.
-    const svc = new TripsService(prisma as never, maps, undefined, undefined, redis as never);
+    // constructor (ADR 023): (prisma, maps, config?, redis?, dispatchModes?, catalog?, …) — redis va 4º.
+    const svc = new TripsService(prisma as never, maps, undefined, redis as never);
     return { prisma, svc };
   }
 
@@ -1165,10 +1159,16 @@ describe('TripsService.cancel · BR-T03', () => {
 
 // ──────────────────────────── PUJA (ADR 010 · Lote C) ────────────────────────────
 
-describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2)', () => {
+describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2 · ADR 023)', () => {
+  // ADR 023: el modo vive POR OFERTA. Para probar la mecánica de la PUJA el catálogo pinea la oferta a PUJA
+  // (palanca manual del admin); sin catálogo la oferta nace FIXED y el bid se IGNORA.
+  const pujaCatalog = () => fakeCatalog({ mode: PricingMode.PUJA });
+  const pujaSvc = (prisma: unknown) =>
+    new TripsService(prisma as never, maps, undefined, undefined, undefined, pujaCatalog());
+
   it('rechaza un bid por debajo del piso global (ValidationError)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     // piso default S/7 = 700; bid 500 < 700 → rechazo
     await expect(svc.createTrip({ ...baseCreateDto, bidCents: 500 })).rejects.toBeInstanceOf(
       ValidationError,
@@ -1178,7 +1178,7 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
 
   it('acepta un bid válido (≥ piso): fareCents = bid y emite trip.bid_posted (NO trip.requested)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900, vehicleType: 'MOTO' });
     expect(view.status).toBe(TripStatus.REQUESTED);
     expect(view.fareCents).toBe(900); // el bid manda, NO la tarifa por ruta (1500)
@@ -1194,13 +1194,13 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
     expect(payload.windowSec).toBe(60); // default §9.1
     // El camino de puja NO emite el legacy trip.requested (no doble-dispatch).
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false);
-    // ADR 011 M1: con bid ⇒ dispatchMode PUJA persistido en la fila.
+    // ADR 023: oferta PUJA ⇒ dispatchMode PUJA persistido en la fila.
     expect(prisma._store?.dispatchMode).toBe('PUJA');
   });
 
   it('bid exactamente en el piso (700) es válido', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 700 });
     expect(view.fareCents).toBe(700);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
@@ -1208,7 +1208,7 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
 
   it('rechaza un bid por encima del techo (ValidationError, gate AUTORITATIVO anti-overflow int4)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     // techo default BID_MAX_CENTS = 999_900; un bid desbocado overflowearía el int4 de fareCents.
     await expect(
       svc.createTrip({ ...baseCreateDto, bidCents: 9_999_999_999 }),
@@ -1218,13 +1218,13 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
 
   it('bid exactamente en el techo (999_900) es válido', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 999_900 });
     expect(view.fareCents).toBe(999_900);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
   });
 
-  it('sin bid → flujo legacy (tarifa por ruta) emite trip.requested', async () => {
+  it('oferta FIXED (default de código) → tarifa por ruta y emite trip.requested (ignora el bid)', async () => {
     const prisma = makePrisma(null);
     const svc = new TripsService(prisma as never, maps);
     const view = await svc.createTrip({ ...baseCreateDto });
@@ -1234,13 +1234,15 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
   });
 });
 
-// ──────────────────────── ADR 011 · createTrip server-resolved (ModeResolver) ────────────────────────
+// ──────────────── ADR 023 · createTrip · el modo lo resuelve la OFERTA (no el cliente) ────────────────
 
-describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no el cliente)', () => {
-  it('mode=PUJA REQUIERE bidCents: si falta → 400 "falta tu oferta"', async () => {
+describe('TripsService.createTrip · ADR 023 · el modo lo resuelve la OFERTA (no el cliente)', () => {
+  const pujaCatalog = () => fakeCatalog({ mode: PricingMode.PUJA });
+
+  it('oferta PUJA REQUIERE bidCents: si falta → 400 "falta tu oferta"', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
-    // El resolver fuerza PUJA pero el cliente NO mandó bid → ValidationError (HTTP 400).
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, pujaCatalog());
+    // La oferta es PUJA pero el cliente NO mandó bid → ValidationError (HTTP 400).
     await expect(svc.createTrip({ ...baseCreateDto })).rejects.toMatchObject({
       httpStatus: 400,
       message: 'falta tu oferta',
@@ -1248,9 +1250,9 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
     expect(prisma._outbox).toHaveLength(0); // no se creó nada
   });
 
-  it('mode=PUJA con bidCents → emite trip.bid_posted y persiste dispatchMode PUJA', async () => {
+  it('oferta PUJA con bidCents → emite trip.bid_posted y persiste dispatchMode PUJA', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, pujaCatalog());
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
     expect(view.fareCents).toBe(900);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
@@ -1258,10 +1260,10 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
     expect(prisma._store?.dispatchMode).toBe('PUJA');
   });
 
-  it('mode=FIXED IGNORA bidCents, usa calculateFare y emite trip.requested (dispatchMode FIXED)', async () => {
+  it('oferta FIXED IGNORA bidCents, usa calculateFare y emite trip.requested (dispatchMode FIXED)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
-    // El cliente manda un bid, pero el SERVIDOR resolvió FIXED → se IGNORA el bid; tarifa por ruta (1500).
+    const svc = new TripsService(prisma as never, maps);
+    // El cliente manda un bid, pero la oferta es FIXED → se IGNORA el bid; tarifa por ruta (1500).
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
     expect(view.fareCents).toBe(1500); // calculateFare, NO el bid de 900
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
@@ -1270,16 +1272,16 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
   });
 
   // S1 (M5) — el modo CONGELADO viaja en la TripView (createTrip + getTrip) para que la app reconcilie.
-  it('S1: la vista de createTrip expone dispatchMode = PUJA (server-resolved)', async () => {
+  it('S1: la vista de createTrip expone dispatchMode = PUJA (oferta PUJA)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    const svc = new TripsService(prisma as never, maps, undefined, undefined, undefined, pujaCatalog());
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
     expect(view.dispatchMode).toBe('PUJA');
   });
 
-  it('S1: la vista de createTrip expone dispatchMode = FIXED (server-resolved)', async () => {
+  it('S1: la vista de createTrip expone dispatchMode = FIXED (oferta FIXED)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(prisma as never, maps);
     const view = await svc.createTrip({ ...baseCreateDto });
     expect(view.dispatchMode).toBe('FIXED');
   });
@@ -1289,56 +1291,6 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
     const svc = new TripQueryService(prisma as never);
     const view = await svc.getTrip('trip-1');
     expect(view.dispatchMode).toBe('FIXED');
-  });
-});
-
-describe('TripsService.createTrip · ADR 011 · S2 · resuelve para la hora de RECOJO (lock-at-booking)', () => {
-  /**
-   * S2 — doble del ModeResolver que CAPTURA el instante `at` con el que createTrip lo invoca, y que puede
-   * devolver modos distintos según la hora (now vs pickup) para probar que se usa la hora de RECOJO.
-   */
-  function capturingResolver(modeByAt: (at: Date) => 'PUJA' | 'FIXED') {
-    const calls: Date[] = [];
-    const resolver = {
-      resolve: async (_zone: 'GLOBAL', at: Date) => {
-        calls.push(at);
-        return modeByAt(at);
-      },
-    } as never;
-    return { resolver, calls };
-  }
-
-  it('un viaje programado resuelve con scheduledFor (pickup), NO con now', async () => {
-    // Schedule simulado: a las 14:00 (now) sería PUJA, pero a las 22:00 (recojo) es FIXED. El viaje debe
-    // congelarse FIXED (la política de la HORA de recojo, lo que el pasajero vio en el quote).
-    const PICKUP = new Date(Date.now() + 6 * 60 * 60 * 1000); // +6h, dentro de la ventana de reserva
-    const { resolver, calls } = capturingResolver((at) =>
-      at.getTime() >= PICKUP.getTime() - 60_000 ? 'FIXED' : 'PUJA',
-    );
-    const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, resolver);
-
-    const view = await svc.createTrip({ ...baseCreateDto, scheduledFor: PICKUP.toISOString() });
-
-    // Se resolvió con la hora de RECOJO (no now): el resolver recibió ~PICKUP.
-    expect(calls).toHaveLength(1);
-    expect(Math.abs(calls[0]!.getTime() - PICKUP.getTime())).toBeLessThan(2000);
-    // Y el modo congelado refleja la política del recojo (FIXED), no la de now (PUJA).
-    expect(view.dispatchMode).toBe('FIXED');
-    expect(prisma._store?.dispatchMode).toBe('FIXED');
-    expect(view.status).toBe(TripStatus.SCHEDULED);
-  });
-
-  it('un viaje INMEDIATO (sin scheduledFor) resuelve con now (sin cambio de comportamiento)', async () => {
-    const { resolver, calls } = capturingResolver(() => 'PUJA');
-    const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, resolver);
-    const before = Date.now();
-    await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
-    expect(calls).toHaveLength(1);
-    // Sin reserva → at ≈ now.
-    expect(calls[0]!.getTime()).toBeGreaterThanOrEqual(before - 1000);
-    expect(calls[0]!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
   });
 });
 
@@ -1992,7 +1944,7 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(e) FIXED + veo_confort: la tarifa FIRME es ×1.25 → 1875 (= round(1500 × 1.25), mínima 500 no muerde)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(prisma as never, maps);
     const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_CONFORT });
     expect(view.fareCents).toBe(1875); // ANTES del fix: 1500 (cobraba la tarifa de económico)
     expect(prisma._store?.dispatchMode).toBe('FIXED');
@@ -2001,7 +1953,7 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(e) FIXED + veo_moto: ×0.55 con minFare 300 → 825 (moto DEJA de cobrar de más que su preview)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(prisma as never, maps);
     const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_MOTO });
     expect(view.fareCents).toBe(825); // max(round(1500 × 0.55), 300) — ANTES del fix: 1500
     expect(view.fareCents).toBeLessThan(1500);
@@ -2010,14 +1962,22 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(e) FIXED + veo_economico: ×1.0 → 1500 INVARIANTE (golden-path/pricing-switch no cambian de montos)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(prisma as never, maps);
     const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_ECONOMICO });
     expect(view.fareCents).toBe(1500); // max(round(1500 × 1.0), 500) = 1500: cero regresión
   });
 
   it('PUJA + category premium: el bid sigue siendo la tarifa (la política NO toca el bid)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    // ADR 023: la oferta confort está pineada a PUJA (palanca del admin) → el bid ES la tarifa.
+    const svc = new TripsService(
+      prisma as never,
+      maps,
+      undefined,
+      undefined,
+      undefined,
+      fakeCatalog({ mode: PricingMode.PUJA }),
+    );
     const view = await svc.createTrip({
       ...baseCreateDto,
       category: OfferingId.VEO_CONFORT,
@@ -2025,71 +1985,6 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
     });
     expect(view.fareCents).toBe(900); // el bid ES la tarifa; el multiplier solo afecta el quote
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
-  });
-});
-
-describe('TripsService.createTrip · ADR 013 §1.3.3 · conflicto de modo: la oferta veta al schedule', () => {
-  /**
-   * El catálogo REAL aún no tiene ofertas restringidas (las 4 permiten [PUJA, FIXED] → intersección
-   * no-op), así que el conflicto se testea por el SEAM protected `resolveOffering` (subclase del spec
-   * inyecta una oferta solo-FIXED). NO se mockea el módulo del catálogo (vi.mock contaminaría TODOS los
-   * specs del archivo) ni se inventa una entrada fantasma en producción. La precedencia pura ya está
-   * cubierta por resolveOfferingMode (shared-types); acá se verifica el CABLEADO: modo efectivo
-   * persistido + warn + counter.
-   */
-  const SOLO_FIXED_OFFERING: OfferingSpec = {
-    ...OFFERINGS[OfferingId.VEO_ECONOMICO],
-    allowedModes: [PricingMode.FIXED], // fixture de oferta que NO negocia (estilo ambulancia futura)
-  };
-
-  class SoloFixedOfferingTripsService extends TripsService {
-    protected override resolveOffering(): TripOfferingResolution {
-      return { offering: SOLO_FIXED_OFFERING, mismatch: false };
-    }
-  }
-
-  /** Suma total del counter pricing_offering_mode_overridden_total (todas las labels). */
-  async function readOverriddenTotal(): Promise<number> {
-    const { values } = await offeringModeOverriddenTotal.get();
-    return values.reduce((sum, v) => sum + v.value, 0);
-  }
-
-  it('(d) schedule pide PUJA pero la oferta solo permite FIXED → gana la oferta + warn + counter', async () => {
-    const prisma = makePrisma(null);
-    const svc = new SoloFixedOfferingTripsService(
-      prisma as never,
-      maps,
-      undefined,
-      fakeResolver('PUJA'),
-    );
-    const warnSpy = vi.spyOn(svc['logger'], 'warn');
-    const before = await readOverriddenTotal();
-
-    // Sin bid: el modo EFECTIVO es FIXED (preferido de la oferta) y FIXED no exige bid.
-    const view = await svc.createTrip({ ...baseCreateDto });
-
-    expect(view.dispatchMode).toBe('FIXED'); // allowedModes[0]: la oferta vetó el PUJA del schedule
-    expect(prisma._store?.dispatchMode).toBe('FIXED'); // persist-once intacto (Trip.dispatchMode)
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('gana la oferta'));
-    expect(await readOverriddenTotal()).toBe(before + 1); // pricing_offering_mode_overridden_total++
-  });
-
-  it('sin conflicto (schedule FIXED ∈ allowedModes) → NO hay warn ni counter (no-op de la intersección)', async () => {
-    const prisma = makePrisma(null);
-    const svc = new SoloFixedOfferingTripsService(
-      prisma as never,
-      maps,
-      undefined,
-      fakeResolver('FIXED'),
-    );
-    const warnSpy = vi.spyOn(svc['logger'], 'warn');
-    const before = await readOverriddenTotal();
-    const view = await svc.createTrip({ ...baseCreateDto });
-    expect(view.dispatchMode).toBe('FIXED');
-    expect(warnSpy).not.toHaveBeenCalled();
-    expect(await readOverriddenTotal()).toBe(before); // sin override no se bumpea
   });
 });
 

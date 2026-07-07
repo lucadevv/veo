@@ -128,7 +128,7 @@ describe('CatalogService', () => {
       0,
     );
     const eco = await service.resolveOffering(OfferingId.VEO_ECONOMICO);
-    expect(eco?.modePin).toBe(PricingMode.FIXED);
+    expect(eco?.mode).toBe(PricingMode.FIXED);
     expect(eco?.pricing.multiplier).toBe(1.5);
     expect(eco?.pricing.minFareCents).toBe(700);
   });

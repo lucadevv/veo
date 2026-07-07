@@ -46,7 +46,7 @@ export class OfferingOverrideDto {
   @ApiPropertyOptional({
     enum: PRICING_MODES,
     description:
-      'B2: pin del modo de pricing. Si ∉ allowedModes de la oferta, se ignora (la oferta veta).',
+      'ADR 023: palanca manual del modo de pricing de la oferta. En una vertical `modeLocked` se ignora.',
   })
   @IsOptional()
   @IsIn(PRICING_MODES)

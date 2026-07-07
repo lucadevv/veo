@@ -243,28 +243,6 @@ model TripEvent {
   @@schema("trip")
 }
 
-/// Schedule de modo de pricing (ADR 011 · Tier 1 GLOBAL). SINGLETON: una sola fila de config (id fijo)
-/// que el ModeResolver lee para resolver PUJA|FIXED por horario. Reemplazo WHOLESALE en el PUT del admin
-/// (se sobrescribe `rules`+`defaultMode` enteros, se bumpea `version`). El schedule lo OWNE trip-service
-/// (admin-bff es stateless): co-locar acá evita un hop de red por cada createTrip (§3 ADR 011). Sin fila →
-/// el resolver degrada honestamente a defaultMode=PUJA con rules=[] (decisión §8.2). `rules` es un array
-/// JSON de { dayMask:1..127 (Lun=1..Dom=64), startMinute:0..1439, endMinute:0..1439, mode:PUJA|FIXED } en
-/// hora LOCAL de Lima (UTC-5, sin DST); la PRIMERA regla que matchea (día, minuto) gana.
-model PricingModeSchedule {
-  /// Singleton: una única fila de config global (Tier 1). Valor fijo 'GLOBAL'.
-  id          String      @id
-  /// Modo aplicado cuando ninguna regla matchea (§8.2 default = PUJA).
-  defaultMode PricingMode @default(PUJA) @map("default_mode")
-  /// Reglas horarias { dayMask, startMinute, endMinute, mode } evaluadas en orden; la primera que matchea gana.
-  rules       Json        @default("[]")
-  /// Versión MONOTÓNICA del schedule (se bumpea en cada PUT; viaja en pricing.mode_schedule_updated).
-  version     Int         @default(0)
-  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@map("pricing_mode_schedule")
-  @@schema("trip")
-}
-
 /// Overlay del catálogo de ofertas (ADR 013 §1.2 · puerta de escape · Fase B/B1). SINGLETON: una sola
 /// fila de config que el admin edita EN CALIENTE. El catálogo BASE (ids, clase de vehículo, pricing) vive
 /// en código (@veo/shared-types `OFFERINGS`, inmutable: cambiar un id rompe el contrato, una clase nueva

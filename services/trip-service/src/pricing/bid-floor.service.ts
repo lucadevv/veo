@@ -1,6 +1,6 @@
 /**
- * BidFloorService (ADR 010 §9.3) — piso de la PUJA editable en caliente, keyed por (zona, oferta). Espeja
- * FuelSurchargeService/PricingScheduleService (singleton + version + CAS + outbox + cache):
+ * BidFloorService (ADR 010 §9.3) — piso de la PUJA editable en caliente, keyed por (zona, oferta). Patrón
+ * de singleton de config hot-editable (version + CAS + outbox + cache), igual que BaseFareService/CatalogService:
  *  - `resolve(zone, offeringId)`: el piso AUTORITATIVO que createTrip/rebid usan como gate del bid. Delega
  *    en `resolveBidFloorCents` (PURO, @veo/shared-types) — el MISMO resolver que el public-bff usa para el
  *    display del quote, así quote↔create no divergen.

@@ -1,8 +1,8 @@
 /**
- * DispatchModeStrategy (ADR 010/011) — puerto que encapsula la VARIACIÓN de comportamiento por modo de
+ * DispatchModeStrategy (ADR 010/011/023) — puerto que encapsula la VARIACIÓN de comportamiento por modo de
  * despacho (PUJA bidding / FIXED precio fijo). Hace el sistema OPEN/CLOSED: un modo nuevo se agrega
  * implementando esta interfaz + registrándola en DispatchModeRegistry, SIN tocar createTrip / reassign /
- * activateScheduledTrip con if/else. La DECISIÓN de qué modo (resolveMode) sigue en domain/pricing-mode.
+ * activateScheduledTrip con if/else. La DECISIÓN de qué modo la da la OFERTA (ADR 023 `effectiveOfferingMode`).
  *
  * Hoy captura `openDispatch` (qué evento de apertura emite cada modo); `resolveCreation` (tarifa+seq) y
  * `reassign` se incorporan en lotes siguientes (la firma se extiende, no se rompe).

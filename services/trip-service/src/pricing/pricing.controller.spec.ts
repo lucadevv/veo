@@ -1,26 +1,12 @@
 /**
- * S2 (ADR 011 · M5) — el GET /internal/pricing/resolve acepta un `at` (ISO) opcional: resuelve el modo
- * para ESE instante (la hora de recojo del quote de una reserva), o `now` si se omite. Probamos que el
- * controller reenvía el instante correcto al PricingScheduleService.
+ * PricingController (ADR 023) — endpoints internos de config de pricing editable en caliente. El schedule
+ * de modo (ADR 011) se retiró: el modo vive POR OFERTA en el catálogo. Acá quedan la tarifa base global
+ * (F2.4) y el piso de la puja (ADR 010 §9.3). Probamos el cableado GET/PUT contra dobles de los servicios.
  */
 import { describe, it, expect } from 'vitest';
-import { PricingMode } from '@veo/shared-types';
 import { PricingController } from './pricing.controller';
-import type { PricingScheduleService } from './pricing-schedule.service';
 import type { BidFloorService } from './bid-floor.service';
 import type { BaseFareService } from './base-fare.service';
-
-/** Doble del service que CAPTURA el instante con el que se lo invoca y devuelve un modo fijo. */
-function fakePricing(mode: PricingMode) {
-  const calls: Date[] = [];
-  const svc = {
-    resolve: async (_zone: 'GLOBAL', at: Date) => {
-      calls.push(at);
-      return mode;
-    },
-  } as unknown as PricingScheduleService;
-  return { svc, calls };
-}
 
 /** Doble del BidFloorService (ADR 010 §9.3): captura el config reemplazado, devuelve config fija. */
 function fakeBidFloor() {
@@ -85,41 +71,9 @@ function fakeBaseFare() {
   return { svc, replaced };
 }
 
-const LIMA = { lat: -12.0464, lon: -77.0428 };
-
-describe('PricingController.resolve · S2 · `at` opcional', () => {
-  it('con `at` → resuelve para ESE instante (hora de recojo)', async () => {
-    const { svc, calls } = fakePricing(PricingMode.FIXED);
-    const controller = new PricingController(svc, fakeBidFloor().svc, fakeBaseFare().svc);
-    const at = '2026-06-01T22:00:00.000Z';
-
-    const out = await controller.resolve({ ...LIMA, at });
-
-    expect(out).toEqual({ mode: PricingMode.FIXED });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.toISOString()).toBe(at);
-  });
-
-  it('sin `at` → resuelve para now (default)', async () => {
-    const { svc, calls } = fakePricing(PricingMode.PUJA);
-    const controller = new PricingController(svc, fakeBidFloor().svc, fakeBaseFare().svc);
-    const before = Date.now();
-
-    const out = await controller.resolve({ ...LIMA });
-
-    expect(out).toEqual({ mode: PricingMode.PUJA });
-    expect(calls[0]!.getTime()).toBeGreaterThanOrEqual(before - 1000);
-    expect(calls[0]!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
-  });
-});
-
 describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
   it('GET bid-floor → devuelve la config vigente (default + overrides por oferta)', async () => {
-    const controller = new PricingController(
-      fakePricing(PricingMode.PUJA).svc,
-      fakeBidFloor().svc,
-      fakeBaseFare().svc,
-    );
+    const controller = new PricingController(fakeBidFloor().svc, fakeBaseFare().svc);
     expect(await controller.getBidFloor()).toEqual({
       defaultFloorCents: 700,
       overrides: [{ zone: 'GLOBAL', offeringId: 'veo_moto', floorCents: 300 }],
@@ -130,11 +84,7 @@ describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
 
   it('PUT bid-floor → reemplaza con default + overrides del DTO', async () => {
     const bid = fakeBidFloor();
-    const controller = new PricingController(
-      fakePricing(PricingMode.PUJA).svc,
-      bid.svc,
-      fakeBaseFare().svc,
-    );
+    const controller = new PricingController(bid.svc, fakeBaseFare().svc);
     const dto = {
       defaultFloorCents: 700,
       overrides: [{ zone: 'GLOBAL' as const, offeringId: 'veo_moto' as const, floorCents: 300 }],
@@ -144,5 +94,28 @@ describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
     expect(bid.replaced).toEqual([dto]);
     expect(out.version).toBe(3);
     expect(out.defaultFloorCents).toBe(700);
+  });
+});
+
+describe('PricingController · base fare (F2.4)', () => {
+  it('GET base-fare → devuelve el triple vigente + version', async () => {
+    const controller = new PricingController(fakeBidFloor().svc, fakeBaseFare().svc);
+    expect(await controller.getBaseFare()).toEqual({
+      baseFareCents: 600,
+      perKmCents: 120,
+      perMinCents: 30,
+      version: 1,
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    });
+  });
+
+  it('PUT base-fare → reemplaza el banderazo/km/min del DTO (CAS por expectedVersion)', async () => {
+    const base = fakeBaseFare();
+    const controller = new PricingController(fakeBidFloor().svc, base.svc);
+    const dto = { baseFareCents: 700, perKmCents: 130, perMinCents: 40, expectedVersion: 1 };
+    const out = await controller.replaceBaseFare(dto);
+    expect(base.replaced).toEqual([dto]);
+    expect(out.version).toBe(2);
+    expect(out.baseFareCents).toBe(700);
   });
 });

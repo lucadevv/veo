@@ -31,9 +31,9 @@ import {
   TripStatus,
   PaymentMethod,
   ActorType,
-  resolveOfferingModeWithPin,
   findOffering,
   OfferingId,
+  GLOBAL_ZONE,
   type OfferingSpec,
   type OfferingPricingPolicy,
 } from '@veo/shared-types';
@@ -59,13 +59,11 @@ import { CatalogService } from '../catalog/catalog.service';
 import { calculateFirmFare } from './domain/fare';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
-import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { resolveTripOffering, type TripOfferingResolution } from './domain/offering';
-import { bumpOfferingModeOverridden, bumpCatalogDegraded } from './trip-metrics';
+import { bumpCatalogDegraded } from './trip-metrics';
 import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
-import { PricingScheduleService } from '../pricing/pricing-schedule.service';
 import { BaseFareService } from '../pricing/base-fare.service';
 import { BidFloorService } from '../pricing/bid-floor.service';
 import type { Env } from '../config/env.schema';
@@ -139,16 +137,6 @@ const FARE_APPLICABLE_STATES: readonly TripStatus[] = [
   TripStatus.IN_PROGRESS,
 ];
 
-/**
- * Puerto del ModeResolver (ADR 011 §1.1) que createTrip consume para CONGELAR el modo del viaje. La
- * implementación real es PricingScheduleService (carga el schedule + delega en el resolver puro). Se
- * tipa como interfaz para que el servicio NO dependa de la clase concreta (clean arch) y para que los
- * tests unitarios inyecten un doble determinista.
- */
-export interface ModeResolverPort {
-  resolve(zone: ZoneKey, now: Date): Promise<PricingMode>;
-}
-
 @Injectable()
 export class TripsService {
   private readonly logger = new Logger(TripsService.name);
@@ -164,15 +152,6 @@ export class TripsService {
   private readonly bidWindowSec: number;
   /** Tope de re-asignaciones tras cancelación del conductor post-accept (PUJA robustez #4). */
   private readonly maxReassign: number;
-
-  /**
-   * ModeResolver (ADR 011 §1.1) que resuelve PUJA|FIXED en createTrip. En producción es
-   * PricingScheduleService (inyectado): carga el schedule admin + delega en el resolver puro. Si no se
-   * inyecta (tests legacy H1-H13 que construyen el servicio con 2 args, que NUNCA conocieron el schedule),
-   * `null` ⇒ createTrip degrada a la derivación M1-compatible bidCents-driven (presencia de bid ⇒ PUJA,
-   * si no ⇒ FIXED), preservando su comportamiento. Los tests NUEVOS de server-resolution inyectan un doble.
-   */
-  private readonly modeResolver: ModeResolverPort | null;
 
   /**
    * Cliente Redis para el lockout anti-brute-force del código de modo niño (B). `@Optional()` para no
@@ -206,7 +185,6 @@ export class TripsService {
     private readonly prisma: PrismaService,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Optional() config?: ConfigService<Env, true>,
-    @Optional() modeResolver?: PricingScheduleService,
     @Optional() @Inject(REDIS) redis?: Pick<Redis, 'get' | 'incr' | 'expire' | 'del' | 'set'>,
     @Optional() dispatchModes?: DispatchModeRegistry,
     @Optional() catalog?: CatalogService,
@@ -217,7 +195,6 @@ export class TripsService {
     this.bidMaxCents = config?.get('BID_MAX_CENTS') ?? DEFAULT_BID_MAX_CENTS;
     this.bidWindowSec = config?.get('BID_WINDOW_SEC') ?? DEFAULT_BID_WINDOW_SEC;
     this.maxReassign = config?.get('TRIP_MAX_REASSIGN') ?? DEFAULT_MAX_REASSIGN;
-    this.modeResolver = modeResolver ?? null;
     this.redis = redis ?? null;
     this.dispatchModes = dispatchModes ?? new DispatchModeRegistry(config);
     this.catalog = catalog ?? null;
@@ -226,17 +203,19 @@ export class TripsService {
   }
 
   /**
-   * ADR 013 · Fase B — resuelve la oferta EFECTIVA para CREAR en UNA lectura del catálogo: valida que esté
-   * HABILITADA (defensa en profundidad de la carrera "el admin la apagó entre el quote y el create"; el
-   * gate primario es que el quote ya no la cotiza) y devuelve el pricing + pin de modo EFECTIVOS (overlay
-   * del admin, B2). DEGRADACIÓN HONESTA: sin catálogo inyectado (tests legacy) o si la lectura FALLA, usa
-   * el pricing de CÓDIGO sin pin y PERMITE el viaje — no se bloquea un pedido por una lectura de config
-   * (mismo criterio que el quote degradando a todas). Oferta deshabilitada → OfferingUnavailableError (409).
+   * ADR 013 · Fase B / ADR 023 — resuelve la oferta EFECTIVA para CREAR en UNA lectura del catálogo: valida
+   * que esté HABILITADA (defensa en profundidad de la carrera "el admin la apagó entre el quote y el create";
+   * el gate primario es que el quote ya no la cotiza) y devuelve el pricing + el MODO EFECTIVOS (base ⟕
+   * overlay del admin: `resolveCatalog` ya aplicó `effectiveOfferingMode` — la palanca manual del admin sobre
+   * el default de código, respetando `modeLocked`). DEGRADACIÓN HONESTA: sin catálogo inyectado (tests legacy)
+   * o si la lectura FALLA, usa el pricing + modo de CÓDIGO y PERMITE el viaje — no se bloquea un pedido por una
+   * lectura de config caída (mismo criterio que el quote degradando a todas). Oferta deshabilitada →
+   * OfferingUnavailableError (409).
    */
   private async resolveEffectiveOffering(
     base: OfferingSpec,
-  ): Promise<{ pricing: OfferingPricingPolicy; modePin?: PricingMode }> {
-    if (!this.catalog) return { pricing: base.pricing };
+  ): Promise<{ pricing: OfferingPricingPolicy; mode: PricingMode }> {
+    if (!this.catalog) return { pricing: base.pricing, mode: base.mode };
     let resolved;
     try {
       resolved = await this.catalog.resolveOffering(base.id);
@@ -247,15 +226,15 @@ export class TripsService {
       if (!base.defaultEnabled) throw new OfferingUnavailableError(base.id);
       this.logger.warn(
         `catálogo no disponible al resolver '${base.id}' (${(err as Error).message}); ` +
-          `uso el pricing de código y permito el viaje (degradación honesta · ADR 013)`,
+          `uso el pricing y modo de código y permito el viaje (degradación honesta · ADR 013)`,
       );
       bumpCatalogDegraded('create');
-      return { pricing: base.pricing };
+      return { pricing: base.pricing, mode: base.mode };
     }
     if (resolved && !resolved.enabled) throw new OfferingUnavailableError(base.id);
-    // Sin entrada en el overlay (no debería pasar: el id sale del catálogo de código) → pricing de código.
-    if (!resolved) return { pricing: base.pricing };
-    return { pricing: resolved.pricing, modePin: resolved.modePin };
+    // Sin entrada en el overlay (no debería pasar: el id sale del catálogo de código) → pricing/modo de código.
+    if (!resolved) return { pricing: base.pricing, mode: base.mode };
+    return { pricing: resolved.pricing, mode: resolved.mode };
   }
 
   /**
@@ -285,24 +264,9 @@ export class TripsService {
   }
 
   /**
-   * Resuelve el modo de despacho AUTORITATIVO del viaje (ADR 011 §1.2 · resolve-once). Con resolver
-   * inyectado → server-resolved desde el schedule admin (zona, ahora). Sin resolver (tests legacy) →
-   * derivación M1-compatible bidCents-driven. El resultado se CONGELA en Trip.dispatchMode.
-   */
-  private async resolveDispatchMode(
-    zone: ZoneKey,
-    now: Date,
-    hasBid: boolean,
-  ): Promise<PricingMode> {
-    if (this.modeResolver) return this.modeResolver.resolve(zone, now);
-    return hasBid ? PricingMode.PUJA : PricingMode.FIXED;
-  }
-
-  /**
    * ADR 013 §2 · seam de resolución de la oferta del create. Delegación PURA en el resolver de dominio
-   * (domain/offering.ts). `protected` a propósito: los specs del conflicto de modo (§1.3.3) subclasean
-   * el servicio para inyectar una oferta restringida (solo-FIXED) — el catálogo real aún no tiene
-   * ofertas con allowedModes ≠ [PUJA, FIXED] y NO se inventa una entrada fantasma en producción.
+   * (domain/offering.ts). `protected` a propósito: los specs subclasean el servicio para inyectar una
+   * oferta a medida (p.ej. una vertical solo-FIXED) sin inventar una entrada fantasma en producción.
    */
   protected resolveOffering(dto: CreateTripDto): TripOfferingResolution {
     return resolveTripOffering(dto.category, dto.vehicleType);
@@ -312,17 +276,15 @@ export class TripsService {
    * Piso del bid para (zona, oferta) (ADR 010 §9.3). Resuelto por BidFloorService: config versionada que el
    * admin maneja en caliente (default + overrides por oferta), vía el resolver PURO `resolveBidFloorCents`
    * (@veo/shared-types) — el MISMO que el public-bff usa para el display del quote (consistencia por
-   * construcción). Per-oferta hoy; per-zona no-breaking (la firma ya transporta la zona vía `toZone`).
+   * construcción). Per-oferta hoy; per-zona no-breaking (la firma ya transporta la zona vía `GLOBAL_ZONE`).
    * DEGRADACIÓN: sin el servicio inyectado (tests legacy) cae al piso global de env (`this.bidFloorCents`).
    */
-  private async resolveBidFloorCents(
-    origin: LatLon,
-    offeringId: OfferingId | null,
-  ): Promise<number> {
+  private async resolveBidFloorCents(offeringId: OfferingId | null): Promise<number> {
     if (this.bidFloor) {
       // Sin oferta conocida (viaje legacy con `category` null) → la oferta fue la ancla económico (el default
-      // de `resolveOffering`); resolvemos su piso (si no tiene override, cae al default igual).
-      return this.bidFloor.resolve(toZone(origin), offeringId ?? OfferingId.VEO_ECONOMICO);
+      // de `resolveOffering`); resolvemos su piso (si no tiene override, cae al default igual). MVP Tier 1:
+      // zona SIEMPRE GLOBAL (per-zona es no-breaking cuando exista).
+      return this.bidFloor.resolve(GLOBAL_ZONE, offeringId ?? OfferingId.VEO_ECONOMICO);
     }
     return this.bidFloorCents;
   }
@@ -380,10 +342,10 @@ export class TripsService {
       }
     }
 
-    // ADR 013 §2 · resuelve la OFERTA del catálogo (fuente única de pool + pricing + modos) con la
+    // ADR 013 §2 · resuelve la OFERTA del catálogo (fuente única de pool + pricing + modo) con la
     // precedencia EXACTA: category > vehicleType > default económico. Categoría desconocida → 400
     // UNKNOWN_OFFERING (jamás default silencioso a económico). El seam protected permite a los specs
-    // inyectar una oferta restringida (el catálogo real aún no tiene allowedModes ≠ [PUJA, FIXED]).
+    // inyectar una oferta a medida (p.ej. una vertical PUJA/FIXED) sin tocar el catálogo de producción.
     const { offering, mismatch } = this.resolveOffering(dto);
     if (mismatch) {
       // category y vehicleType inconsistentes (bug de UI de una app vieja): GANA la oferta —
@@ -393,10 +355,10 @@ export class TripsService {
           `gana la oferta (pool ${offering.vehicleClass}) (ADR 013 §2)`,
       );
     }
-    // ADR 013 · Fase B — resuelve la oferta EFECTIVA (overlay del admin) en UNA lectura: valida que esté
-    // HABILITADA (defensa en profundidad: el quote ya no cotiza las apagadas; cubre la carrera
-    // admin-apaga-entre-quote-y-create) y trae el pricing + pin de modo efectivos (B2). Degrada honesto.
-    const { pricing: effectivePricing, modePin } = await this.resolveEffectiveOffering(offering);
+    // ADR 013 · Fase B / ADR 023 — resuelve la oferta EFECTIVA (base ⟕ overlay del admin) en UNA lectura:
+    // valida que esté HABILITADA (defensa en profundidad: el quote ya no cotiza las apagadas; cubre la
+    // carrera admin-apaga-entre-quote-y-create) y trae el pricing + el MODO efectivos. Degrada honesto.
+    const { pricing: effectivePricing, mode } = await this.resolveEffectiveOffering(offering);
     // ADR 013 · Trip.vehicleType DERIVA de la oferta (no del dto suelto): dispatch filtra por el pool
     // certificable de la oferta elegida.
     const vehicleType: PrismaVehicleType = offering.vehicleClass;
@@ -407,39 +369,13 @@ export class TripsService {
     const route = await this.maps.route(origin, destination, waypoints);
     const surge = dto.surgeMultiplier ?? 1.0;
 
-    // ADR 011 §1.2/§4 · resolve-once-persist-forever: el SERVIDOR resuelve el modo de despacho UNA vez
-    // acá (autoritativo: zona + instante + schedule admin), ignorando lo que mande el cliente. Reemplaza
-    // el viejo fork client-driven por presencia de `dto.bidCents`. El modo se CONGELA en Trip.dispatchMode.
+    // ADR 023 · resolve-once-persist-forever: el modo de despacho del viaje es el MODO EFECTIVO de la
+    // OFERTA (default de código ⟕ palanca manual del admin; una vertical `modeLocked` lo fija). YA NO hay
+    // schedule/franjas (ADR 011 superseded) ni derivación por `dto.bidCents` del cliente: la oferta manda.
+    // `mode` ya viene resuelto de `resolveEffectiveOffering` y se CONGELA en Trip.dispatchMode — la
+    // reasignación / activación de programados lo leen de la fila, NUNCA re-resuelven de la config actual.
     //
-    // S2 (ADR 011) — LOCK-AT-BOOKING: para una RESERVA (scheduledFor futuro) resolvemos con la hora de
-    // RECOJO, no la de creación. Un viaje pedido a las 14:00 para recoger a las 22:00 toma la política de
-    // las 22:00 (la que el pasajero VIO en el quote), no la de las 14:00. El modo SIGUE congelándose una
-    // sola vez al crear (persist-once intacto): si el admin cambia la política de esa hora DESPUÉS de la
-    // reserva, el viaje ya reservado conserva lo que se le prometió — predecible y honesto. Inmediato →
-    // `scheduledFor` es null → resolvemos con `now` (sin cambio de comportamiento).
-    const now = new Date();
-    const resolveAt = scheduledFor ?? now;
-    const scheduledMode = await this.resolveDispatchMode(
-      toZone(origin),
-      resolveAt,
-      dto.bidCents !== undefined,
-    );
-    // ADR 013 §1.3 · la oferta ACOTA al schedule: el admin PROPONE (scheduledMode) y la oferta decide
-    // si lo permite. Conflicto (modo fuera de allowedModes) → gana la oferta con su modo PREFERIDO
-    // (allowedModes[0]) + warn + counter (observabilidad: el flip del admin NUNCA hace negociar a una
-    // oferta que no negocia). Con las 4 ofertas actuales [PUJA, FIXED] la intersección es no-op.
-    // B2: si el admin PINEÓ un modo para esta oferta (overlay, ya validado ∈ allowedModes), GANA sobre el
-    // schedule. Sin pin → intersección schedule ∩ oferta (comportamiento previo). El veto de la oferta
-    // (overridden) sigue siendo observable.
-    const { mode, overridden } = resolveOfferingModeWithPin(offering, modePin, scheduledMode);
-    if (overridden) {
-      this.logger.warn(
-        `createTrip: el schedule pidió ${scheduledMode} pero la oferta ${offering.id} solo permite ` +
-          `[${offering.allowedModes.join(', ')}]; gana la oferta → ${mode} (ADR 013 §1.3.3)`,
-      );
-      bumpOfferingModeOverridden({ offering: offering.id, scheduledMode, mode });
-    }
-    // El modo elegido por el SERVIDOR fija la tarifa + el seq de negociación vía Strategy (open/closed):
+    // El modo fija la tarifa + el seq de negociación vía Strategy (open/closed):
     //  - PUJA (ADR 010 §2): valida el bid (piso ≤ bid ≤ techo) y el bid ES el fareCents; seq=1. Falta el
     //    bid → 400 "falta tu oferta". El surge solo SUGIERE (decisión #5), no se aplica al bid.
     //  - FIXED (BR-T05 + ADR 013 §1.7): IGNORA el bid, calcula la tarifa firme por ruta y le aplica la
@@ -448,24 +384,30 @@ export class TripsService {
     // Las 2 lecturas de config de pricing son INDEPENDIENTES entre sí → en paralelo (no encadenar awaits en
     // el hot-path del create). Notas por insumo:
     //  - bid-floor: piso AUTORITATIVO de la puja per-(zona, oferta) (ADR 010 §9.3).
-    //  - F2.4 base: banderazo/km/min vigentes (admin); solo FIXED; degrada a las constantes de código.
+    //  - base: banderazo/km/min GLOBALES vigentes (admin, F2.4); solo FIXED; degrada a las constantes de código.
     const [bidFloorCents, baseFare] = await Promise.all([
-      this.resolveBidFloorCents(origin, offering.id),
+      this.resolveBidFloorCents(offering.id),
       this.resolveBaseFare(),
     ]);
+    // ADR 023 §3 · los params POR-SERVICIO de la oferta (banderazo/km/min) PISAN el default global; si la
+    // oferta no los define (`undefined`) → el global (BaseFareService); si el global tampoco → las constantes
+    // de código (en `calculateFare`). Así el Mecánico (call-out plano, perKm/perMin 0) y la Grúa (sin per-min)
+    // cobran su fórmula propia sin tocar el resto del catálogo. Para los rides (params `undefined`) el número
+    // NO cambia: cae al global exactamente como antes.
     const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
       bidCents: dto.bidCents,
       floorCents: bidFloorCents,
       route: { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
       surge,
       childMode: dto.childMode ?? false,
-      ...baseFare,
+      baseFareCents: effectivePricing.baseFareCents ?? baseFare.baseFareCents,
+      perKmCents: effectivePricing.perKmCents ?? baseFare.perKmCents,
+      perMinCents: effectivePricing.perMinCents ?? baseFare.perMinCents,
       pricing: effectivePricing,
     });
     const currency = 'PEN';
 
-    // ADR 011 · el modo RESUELTO se CONGELA en la fila del viaje. Reasignación / activación de
-    // programados leen ESTE modo (dispatchMode), NUNCA re-resuelven de la config admin actual (§1.2).
+    // El modo RESUELTO se CONGELA en la fila del viaje (ADR 023 · resolve-once-persist-forever).
     const dispatchMode: PrismaPricingMode = mode;
 
     const id = uuidv7();
@@ -482,7 +424,7 @@ export class TripsService {
             waypoints.length > 0 ? (waypoints as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
           scheduledFor,
           vehicleType,
-          // ADR 011: modo de despacho congelado del viaje (PUJA si hubo bid, FIXED si tarifa por ruta).
+          // ADR 023: modo de despacho congelado del viaje = el modo EFECTIVO de la oferta (FIXED/PUJA).
           dispatchMode,
           fareCents,
           currency,
@@ -1464,7 +1406,7 @@ export class TripsService {
     // El piso es el de la oferta del viaje (`trip.category`); legacy sin categoría → ancla económico.
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
     const offeringId = findOffering(trip.category ?? '')?.id ?? null;
-    const floor = await this.resolveBidFloorCents(origin, offeringId);
+    const floor = await this.resolveBidFloorCents(offeringId);
     if (bidCents < floor) {
       throw new ValidationError(
         `El bid (${bidCents}) es menor al piso de la oferta (${floor}) (ADR 010 §9.3)`,

@@ -1,6 +1,6 @@
 /**
  * CatalogService (ADR 013 §1.2 · puerta de escape) — overlay del catálogo de ofertas editable en
- * caliente. Espeja `PricingScheduleService`:
+ * caliente. Patrón de singleton de config hot-editable (version + CAS + outbox + cache):
  *  - `getCatalog()`: GET interno — catálogo EFECTIVO (base de código ⟕ overlay DB) + version.
  *  - `resolveActive()`: ofertas ACTIVAS (lo que el quote cotiza / la teaser muestra / createTrip valida).
  *  - `replaceOverlay(...)`: PUT interno — REEMPLAZA wholesale el overlay, bumpea version, persiste +
@@ -82,8 +82,9 @@ export class CatalogService {
   }
 
   /**
-   * La oferta EFECTIVA por id (base ⟕ overlay: enabled + pricing + modePin), o undefined si no existe en
-   * el catálogo de código. B2: createTrip la usa para resolver pricing + pin de modo en UNA lectura.
+   * La oferta EFECTIVA por id (base ⟕ overlay: enabled + pricing + `mode` efectivo), o undefined si no
+   * existe en el catálogo de código. ADR 023: createTrip la usa para resolver pricing + modo en UNA lectura;
+   * `resolveCatalog` ya aplicó `effectiveOfferingMode` (palanca manual del admin, respetando `modeLocked`).
    */
   async resolveOffering(offeringId: string): Promise<ResolvedOffering | undefined> {
     const persisted = await this.loadOverlay();
