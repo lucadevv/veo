@@ -329,6 +329,8 @@ function OfferingRow({
 
   // ¿Esta oferta puja? Las FIXED-only (ambulancia/grúa/mecánico) NO llevan piso de puja.
   const allowsPuja = offering.allowedModes.includes(PricingMode.PUJA);
+  // Modo ÚNICO: si la oferta permite un solo modo, no hay elección real → label, no un selector falso.
+  const soleMode = offering.allowedModes.length === 1 ? offering.allowedModes[0] : undefined;
 
   // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
   const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
@@ -426,22 +428,27 @@ function OfferingRow({
           </div>
         </td>
 
-        {/* Modo: select compacto restringido a los modos que la oferta permite. */}
+        {/* Modo: si la oferta permite UN solo modo (ej. Ambulancia = solo fijo) no hay elección real → label,
+            no un dropdown falso. Con ≥2 modos, el select ("Auto" = usa el schedule global de On-demand). */}
         <td className="px-3 py-2.5 align-middle">
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
-            disabled={!canManage}
-            aria-label={`Modo de ${offeringLabel(offering.id)}`}
-            className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
-          >
-            <option value={AUTO}>Auto</option>
-            {offering.allowedModes.map((m) => (
-              <option key={m} value={m}>
-                {MODE_LABEL[m]}
-              </option>
-            ))}
-          </select>
+          {soleMode ? (
+            <span className="text-sm text-ink-muted">{MODE_LABEL[soleMode]}</span>
+          ) : (
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              disabled={!canManage}
+              aria-label={`Modo de ${offeringLabel(offering.id)}`}
+              className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
+            >
+              <option value={AUTO}>Auto</option>
+              {offering.allowedModes.map((m) => (
+                <option key={m} value={m}>
+                  {MODE_LABEL[m]}
+                </option>
+              ))}
+            </select>
+          )}
         </td>
 
         {/* Multiplicador. */}
