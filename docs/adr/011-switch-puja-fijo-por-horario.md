@@ -5,6 +5,12 @@
 > **PUJA** (ADR 010, "proponé tu precio") o **PRECIO FIJO** (tarifa calculada estilo Uber), en vez de
 > que lo decida el cliente.
 
+> 🔴 **SUPERSEDED EN PARTE por [ADR-023](./023-modelo-pricing-coexistencia.md) (2026-07-07):** el switch de modo
+> por HORARIO (schedule/franjas) se **ELIMINA**. El modo pasa a ser **`offering.mode` per-service, asignado a MANO
+> por el admin** (palanca manual — sin auto-flip por horario ni por demanda). **SOBREVIVE** la regla de oro
+> `resolve-once-persist-forever` (`Trip.dispatchMode` congelado): solo cambia la FUENTE (la oferta, no el schedule).
+> Se borran `PricingModeSchedule` / `resolveMode(schedule)` / `PricingModeRule`. Plan: `specs/changes/pricing-taxonomy/`.
+
 ---
 
 ## 0. Contexto y problema

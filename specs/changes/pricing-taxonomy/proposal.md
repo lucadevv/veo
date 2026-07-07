@@ -2,6 +2,7 @@
 
 > Estado: **APROBADO (modelo)** · 2026-07-07 · Diseño a rehacer (veo.pen) · Código pendiente.
 > Reemplaza el framing anterior de "3 motores / taxonomía por tipo" — era sobre-ingeniería (ver §Corrección).
+> **ADR canónico del modelo:** [`docs/adr/023-modelo-pricing-coexistencia.md`](../../../docs/adr/023-modelo-pricing-coexistencia.md) (coexistencia FIJO·PUJA·COST-SHARE, modo per-service manual, surge afuera).
 
 ## Problema
 

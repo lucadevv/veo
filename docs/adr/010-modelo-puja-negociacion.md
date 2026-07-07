@@ -4,6 +4,12 @@
 > Introduce el **marketplace de puja** ("proponé tu precio"), diferenciador de VEO según el diseño (Claude Design) y el chat fundacional.
 >
 > ⚠️ **REFINADO por [ADR-011](./011-switch-puja-fijo-por-horario.md):** la puja NO reemplaza al precio-fijo on-demand — **COEXISTEN**. El pricing es un EJE (FIJO · PUJA), no una sustitución; el admin elige el modo por franja/zona (ModeResolver). El framing original "reemplaza el precio-fijo" quedó superado — nadie construye asumiendo que se retira el carril FIJO on-demand. (Divergencia specs↔docs #5, reconciliada 2026-07-02.)
+>
+> 🔵 **ALINEADO por [ADR-023](./023-modelo-pricing-coexistencia.md) (2026-07-07):** la coexistencia FIJO·PUJA que
+> este ADR estableció se ratifica y se extiende a **3 modos** (+ COST_SHARE). El modo es per-service **MANUAL** (no
+> por schedule — ver 011 superseded). ⚠️ El **surge que "solo sugería" en la puja (§9.5) se REMUEVE** del modelo
+> (decisión del dueño): rompía el anti-lucro del cost-share y estaba a medio construir. La **contra-oferta del
+> conductor** (§9.2) sigue vigente y es el sello de inDrive.
 
 ---
 

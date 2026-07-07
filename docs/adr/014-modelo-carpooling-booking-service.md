@@ -5,6 +5,12 @@
 > el marketplace de **carpooling** donde el conductor PUBLICA un viaje y el pasajero BUSCA y RESERVA un asiento.
 > Define el servicio nuevo, los dos agregados (`PublishedTrip` + `Booking`), sus máquinas de estado tipadas,
 > y el **cobro diferido charge-on-approval (SIN hold)** — la corrección consciente a la nota "hold→charge" del spec.
+>
+> 🔵 **NAMING RECONCILIADO por [ADR-023](./023-modelo-pricing-coexistencia.md) (2026-07-07):** el carpooling se
+> confirma como **producto propio** (este servicio, aparte del catálogo on-demand) ✅. Pero su `pricingMode = FIJO`
+> (el conductor fija un precio por asiento ≤ cost-cap) es, en la taxonomía de 023, el modo **COST_SHARE**
+> (BlaBlaCar: conductor ≤ tope · ÷ asientos · service fee · no-comercial) — **NO** el `FIXED`=Uber (plataforma
+> computa) del on-demand. Recomendado migrar el rótulo del enum del carpooling a `COST_SHARE` para no colisionar. Ver 023 §6.
 
 ---
 

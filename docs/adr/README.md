@@ -53,11 +53,12 @@ Links, PRs, papers.
 | [007](./007-eks-no-fargate.md)                     | EKS sobre ECS Fargate                                          | Reemplazado (modelo VPS) |
 | [008](./008-h3-dispatch.md)                        | H3 hex tiles para dispatch geoespacial                         | Aceptado                 |
 | [009](./009-multi-repo-strategy.md)                | Estrategia multi-repo (split inicial)                          | Aceptado                 |
-| [010](./010-modelo-puja-negociacion.md)            | Modelo de PUJA (negociación pasajero↔conductor)                | Ratificado               |
-| [011](./011-switch-puja-fijo-por-horario.md)       | Switch PUJA/FIJO por horario                                   | Ratificado               |
+| [010](./010-modelo-puja-negociacion.md)            | Modelo de PUJA (negociación pasajero↔conductor)                | Ratificado · alineado 023 |
+| [011](./011-switch-puja-fijo-por-horario.md)       | Switch PUJA/FIJO por horario                                   | Superseded (franjas) → 023 |
 | [012](./012-metodos-de-autenticacion-soberanos.md) | Métodos de auth multi-método soberanos                         | Ratificado               |
-| [013](./013-catalogo-service-offerings.md)         | Catálogo de service offerings                                  | Ratificado               |
-| [014](./014-modelo-carpooling-booking-service.md)  | Carpooling: `booking-service` (marketplace PROGRAMADO)         | Ratificado               |
+| [013](./013-catalogo-service-offerings.md)         | Catálogo de service offerings                                  | Ratificado · alineado 023 |
+| [014](./014-modelo-carpooling-booking-service.md)  | Carpooling: `booking-service` (marketplace PROGRAMADO)         | Ratificado · naming 023  |
 | [015](./015-liquidaciones-payout.md)               | Liquidaciones y payout (`PayoutGateway` money-OUT)             | Ratificado               |
 | [016](./016-mtls-grpc-interno.md)                  | mTLS para el gRPC interno (TLS-capable env-gated)              | Aceptado                 |
-| [017](./017-modelo-pricing-energia-tiers.md)       | Modelo de pricing, energía y tiers del híbrido (admin primero) | Aceptado                 |
+| [017](./017-modelo-pricing-energia-tiers.md)       | Modelo de pricing, energía y tiers del híbrido (admin primero) | Aceptado · energía removida |
+| [023](./023-modelo-pricing-coexistencia.md)        | **Modelo de pricing por COEXISTENCIA (FIJO·PUJA·COST-SHARE)**   | **Ratificado (fuente de verdad)** |

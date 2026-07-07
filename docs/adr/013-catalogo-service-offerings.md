@@ -17,6 +17,12 @@
 > · **UI admin** = **"Ofertas de servicio"** (ruta `/finance/catalog`) — antes rotulada "Catálogo de ofertas"
 > · **Flota** = **"Modelos"** (`VehicleModelSpec`) — es OTRO catálogo, no confundir.
 > El label de producto es **"Ofertas de servicio"**; "Catálogo" queda solo como término técnico interno. Fuente única: `specs/VEO_MODELO_HIBRIDO.md §1.5` + `specs/VEO_SPEC_ADMIN.md §3.0`. (Divergencia specs↔docs #3, reconciliada 2026-07-02.)
+>
+> 🔵 **ALINEADO por [ADR-023](./023-modelo-pricing-coexistencia.md) (2026-07-07):** el `allowedModes` (+ la
+> intersección `allowedModes ∩ schedule` de §1.3) se REEMPLAZA por **un solo `mode` por oferta** (`FIXED`|`PUJA`|
+> `COST_SHARE`), asignado a mano por el admin (sin schedule). `OfferingPricingPolicy` gana overrides opcionales
+> `{baseFareCents?, perKmCents?, perMinCents?}` (params por servicio: Mecánico perKm=0 **Y** perMin=0 = call-out
+> plano; Grúa perMin=0). Los especiales (ambulancia/grúa/mecánico) son ofertas FIXED con sus params. Ver 023 §3.
 
 ---
 
