@@ -227,13 +227,13 @@ export function CatalogPanel({
       </div>
 
       {/* Nota informativa de la validación cruzada (A1) — el aviso POR FILA aparece bajo la oferta afectada. */}
-      <div className="flex items-start gap-2 rounded-md border border-warn/30 bg-warn/12 p-3 text-xs text-ink-muted">
-        <TriangleAlert className="mt-px size-4 shrink-0 text-warn" aria-hidden />
+      <p className="flex items-start gap-2 text-xs text-ink-subtle">
+        <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
         <span>
-          Validación cruzada: se avisa por fila si el piso de puja de una oferta supera su tarifa
-          mínima fija (el mismo viaje saldría más barato en FIJO que el mínimo pujable).
+          Al editar, se valida en vivo: se avisa en la fila si el piso de puja de una oferta supera su
+          tarifa mínima fija (el mismo viaje saldría más barato en FIJO que el mínimo pujable).
         </span>
-      </div>
+      </p>
 
       <ReadOnlyNote canManage={canManage} noun="el catálogo" />
     </div>
@@ -383,8 +383,16 @@ function OfferingRow({
     minFareCents !== undefined && !minFareInvalid ? minFareCents : offering.pricing.minFareCents;
   // crossWarn carga los DOS números ya narrowed (no-null) para el render; null = no se advierte (sin bidFloor,
   // sin allowsPuja, o piso ≤ mínimo fijo). El `effFloorCents !== null` narrowea a number.
+  //
+  // LIVE (no banner permanente): el aviso solo se muestra mientras el operador EDITA el piso o la mínima de ESTA
+  // fila — no sobre datos que ya venían inconsistentes. Sin tocar nada → tabla limpia; al cambiar el valor valida
+  // en vivo y desaparece cuando queda coherente. `minTouched` usa el MISMO criterio que el `dirty` de la mínima.
+  const minTouched = (minFareCents ?? null) !== (override?.minFareCents ?? null);
   const crossWarn =
-    allowsPuja && effFloorCents !== null && pujaFloorExceedsFixedMin(effFloorCents, effFixedMinCents)
+    (floorDirty || minTouched) &&
+    allowsPuja &&
+    effFloorCents !== null &&
+    pujaFloorExceedsFixedMin(effFloorCents, effFixedMinCents)
       ? { floorCents: effFloorCents, fixedMinCents: effFixedMinCents }
       : null;
 
