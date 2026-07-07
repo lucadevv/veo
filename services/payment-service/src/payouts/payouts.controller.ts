@@ -30,6 +30,7 @@ import {
   previousWeek,
   type PayoutPage,
   type PayoutDetail,
+  type PayoutStats,
   type PayoutDisburseSummary,
   type ReleaseHeldPayoutsResult,
 } from './payouts.service';
@@ -74,8 +75,21 @@ export class PayoutsController {
     return this.payouts.listAll({ status: query.status, cursor: query.cursor, limit: query.limit });
   }
 
-  // ── Detalle de UN payout con breakdown de auditoría (FINANCE/ADMIN). Segmento `:id` DESPUÉS de `all` (estático)
-  // para que la paramétrica no capture "all". Lectura (sin step-up): el desglose es de los montos del conductor. ──
+  // ── KPIs agregados de payouts (stat cards del panel · FINANCE/ADMIN). Ruta ESTÁTICA `stats` declarada ANTES de
+  // la paramétrica `:id` para que `:id` no capture "stats". MISMO gate que `all` (RBAC finanzas/admin, no por-dueño).
+  // Lectura de agregado (sin step-up, sin PII de persona): solo conteos y un total. ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get('stats')
+  @ApiOperation({
+    summary: 'KPIs de payouts: total liquidado + conteos por estado — FINANCE/ADMIN',
+  })
+  stats(): Promise<PayoutStats> {
+    return this.payouts.getStats();
+  }
+
+  // ── Detalle de UN payout con breakdown de auditoría (FINANCE/ADMIN). Segmento `:id` DESPUÉS de `all`/`stats`
+  // (estáticos) para que la paramétrica no los capture. Lectura (sin step-up): el desglose es de los montos del conductor. ──
   @UseGuards(RolesGuard)
   @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get(':id')

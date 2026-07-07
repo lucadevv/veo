@@ -19,6 +19,7 @@ import { AdminRole } from '@veo/shared-types';
 import type {
   PayoutView,
   PayoutDetailView,
+  PayoutStatsView,
   RefundablePaymentView,
   ReconciliationRunView,
 } from '@veo/api-client';
@@ -53,6 +54,14 @@ export class FinanceController {
     @Query() query: PayoutsQueryDto,
   ): Promise<{ items: PayoutView[]; nextCursor: string | null }> {
     return this.finance.listPayouts(user, query);
+  }
+
+  // Ruta ESTÁTICA `payouts/stats` declarada ANTES de la paramétrica `payouts/:id` para que `:id` no capture
+  // "stats". KPIs agregados (conteos + total): gate de clase FINANCE/ADMIN/SUPERADMIN, sin PII de persona.
+  @Get('payouts/stats')
+  @ApiOperation({ summary: 'KPIs de payouts: total liquidado + conteos por estado (stat cards)' })
+  payoutStats(@CurrentUser() user: AuthenticatedUser): Promise<PayoutStatsView> {
+    return this.finance.getPayoutStats(user);
   }
 
   @Get('payouts/:id')

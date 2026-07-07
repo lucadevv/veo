@@ -225,6 +225,10 @@ export type PayoutStatus = z.infer<typeof payoutStatus>;
 export const payoutView = z.object({
   id: z.string(),
   driverId: z.string(),
+  // Nombre del conductor resuelto en el admin-bff (identity, batch anti-N+1). NULLABLE por DOS motivos honestos:
+  //  (1) PII de IDENTIDAD (Ley 29733): solo Compliance+ la ve — un operador FINANCE puro recibe null (usar driverId).
+  //  (2) degradación: identity no resolvió el id (id fuera de espacio / conductor purgado) → null, nunca inventado.
+  driverName: z.string().nullable(),
   grossCents: z.number().int(),
   commissionCents: z.number().int(),
   amountCents: z.number().int(),
@@ -251,6 +255,22 @@ export const payoutDetailView = payoutView.extend({
   createdAt: z.string(),
 });
 export type PayoutDetailView = z.infer<typeof payoutDetailView>;
+
+/**
+ * KPIs de la pantalla de Liquidaciones (GET /finance/payouts/stats) — agregado del panel FINANCE.
+ * `totalCents` = volumen TOTAL liquidado (suma de `amountCents` de TODOS los payouts, Int céntimos, cualquier
+ * estado); el resto son CONTEOS por estado del enum `PayoutStatus` (no montos). Un solo `groupBy` en
+ * payment-service, sin materializar filas. Dinero SIEMPRE Int céntimos.
+ */
+export const payoutStatsView = z.object({
+  totalCents: z.number().int(),
+  pendingCount: z.number().int().nonnegative(),
+  processingCount: z.number().int().nonnegative(),
+  processedCount: z.number().int().nonnegative(),
+  heldCount: z.number().int().nonnegative(),
+  failedCount: z.number().int().nonnegative(),
+});
+export type PayoutStatsView = z.infer<typeof payoutStatsView>;
 
 /**
  * Corrida de conciliación diaria (GET /finance/reconciliation · BR-P07) — compara lo capturado en DB (Yape/Plin)

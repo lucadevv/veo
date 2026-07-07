@@ -36,6 +36,7 @@ import {
   bidFloorView,
   refundablePaymentView,
   payoutDetailView,
+  payoutStatsView,
   reconciliationRunView,
   type ReplaceBaseFareRequest,
   type ReplaceCommissionRequest,
@@ -86,6 +87,7 @@ export const qk = {
   modelReview: (status: string) => ['vehicle-model-review', status] as const,
   vehicleModels: ['vehicle-models'] as const,
   payouts: (status: string) => ['payouts', status] as const,
+  payoutStats: ['payout-stats'] as const,
   paymentByTrip: (tripId: string) => ['payment-by-trip', tripId] as const,
   payoutDetail: (id: string) => ['payout-detail', id] as const,
   reconciliation: ['reconciliation'] as const,
@@ -716,6 +718,15 @@ export function useCreateInspection() {
 
 /* ── Finanzas ── */
 const payoutPage = paginated(payoutView);
+
+/* ── KPIs de Liquidaciones: total liquidado + conteos por estado (stat cards) — FINANCE/ADMIN ── */
+export function usePayoutStats() {
+  return useQuery({
+    queryKey: qk.payoutStats,
+    queryFn: ({ signal }) =>
+      apiClient().get('/finance/payouts/stats', { schema: payoutStatsView, signal }),
+  });
+}
 
 export function usePayouts(status: string) {
   return useInfiniteQuery({

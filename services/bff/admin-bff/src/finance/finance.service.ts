@@ -3,19 +3,28 @@
  * Los payouts se mapean a payoutView de @veo/api-client.
  */
 import { Injectable, Inject } from '@nestjs/common';
-import { InternalRestClient } from '@veo/rpc';
-import type { AuthenticatedUser } from '@veo/auth';
+import { ConfigService } from '@nestjs/config';
+import { InternalRestClient, type GrpcServiceClient, type DriversByIdsReply } from '@veo/rpc';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import type {
   PayoutView,
   PayoutDetailView,
+  PayoutStatsView,
   CommissionView,
   CostPerKmConfigView,
   CostPerKmListView,
   RefundablePaymentView,
   ReconciliationRunView,
 } from '@veo/api-client';
-import { REST_PAYMENT, REST_BOOKING } from '../infra/tokens';
+import { REST_PAYMENT, REST_BOOKING, GRPC_IDENTITY } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
+import { canSeeIdentity } from '../redaction/redaction.policy';
+import type { Env } from '../config/env.schema';
 import type {
   RunPayoutsDto,
   RefundDto,
@@ -133,12 +142,41 @@ export interface PayoutDisburseResult {
 
 @Injectable()
 export class FinanceService {
+  /** HMAC del riel interno para firmar la metadata gRPC del lookup de nombres a identity (mismo que ops). */
+  private readonly secret: string;
+
   constructor(
     @Inject(REST_PAYMENT) private readonly rest: InternalRestClient,
     // F2.5 · el costo/km del carpooling vive en booking-service (no en payment): cliente REST propio.
     @Inject(REST_BOOKING) private readonly bookingRest: InternalRestClient,
+    // Enriquecimiento del NOMBRE del conductor (lista/detalle de payouts): identity es el dueño del dato. MISMO
+    // patrón que OpsService.listDrivers — GetDriversByIds batch (anti-N+1), keyeado por Driver.id. Es lectura.
+    @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly audit: AuditRecorder,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
+
+  /**
+   * Resuelve `driverId → nombre` para un conjunto de payouts (identity, batch anti-N+1 · MISMO patrón que
+   * OpsService). GATE PII (Ley 29733): el nombre del conductor es IDENTIDAD personal = Compliance+ — un operador
+   * FINANCE puro NO la ve (canSeeIdentity=false) → devolvemos un mapa VACÍO sin siquiera llamar a identity (ni
+   * fuga de PII ni round-trip inútil). Con rol habilitado: UNA `GetDriversByIds` por página; un id que identity no
+   * resuelve (conductor purgado / fuera de espacio) simplemente no entra al mapa → el caller degrada a null honesto.
+   */
+  private async resolveDriverNames(
+    identity: AuthenticatedUser,
+    driverIds: string[],
+  ): Promise<Map<string, string>> {
+    if (!canSeeIdentity(identity.roles) || driverIds.length === 0) return new Map();
+    const ids = [...new Set(driverIds)];
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const reply = await this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids }, meta);
+    // proto3 entrega "" para un nombre ausente → lo tratamos como no-resuelto (null honesto en el caller).
+    return new Map(reply.drivers.filter((d) => d.name).map((d) => [d.id, d.name]));
+  }
 
   /** Listado admin de TODOS los payouts (paginado, por estado) → payoutView. payment-service gatea RBAC. */
   async listPayouts(
@@ -149,7 +187,22 @@ export class FinanceService {
       identity,
       query: { status: query.status, cursor: query.cursor, limit: query.limit },
     });
-    return { items: page.items.map(toPayoutView), nextCursor: page.nextCursor };
+    // Enriquecimiento del nombre por PÁGINA (un solo lookup batch para todos los driverIds), gateado por PII.
+    const namesById = await this.resolveDriverNames(
+      identity,
+      page.items.map((p) => p.driverId),
+    );
+    return {
+      items: page.items.map((p) => toPayoutView(p, namesById.get(p.driverId) ?? null)),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  /** KPIs de la pantalla de Liquidaciones (GET /payouts/stats) → payoutStatsView. payment-service gatea RBAC.
+   *  Es agregado del sistema (conteos + un total, sin PII de persona) → passthrough tipado, SIN audit y SIN
+   *  enriquecimiento (espeja el criterio de getPayoutDetail/getReconciliation: no PII de un tercero). */
+  getPayoutStats(identity: AuthenticatedUser): Promise<PayoutStatsView> {
+    return this.rest.get<PayoutStatsView>('/payouts/stats', { identity });
   }
 
   async runPayouts(identity: AuthenticatedUser, dto: RunPayoutsDto): Promise<RunPayoutsResult> {
@@ -335,7 +388,9 @@ export class FinanceService {
     payoutId: string,
   ): Promise<PayoutDetailView> {
     const row = await this.rest.get<PayoutDetailRow>(`/payouts/${payoutId}`, { identity });
-    return toPayoutDetailView(row);
+    // Enriquecimiento del nombre (MISMO patrón/gate PII que la lista): un solo id → lookup batch de un elemento.
+    const namesById = await this.resolveDriverNames(identity, [row.driverId]);
+    return toPayoutDetailView(row, namesById.get(row.driverId) ?? null);
   }
 
   /**
@@ -357,10 +412,12 @@ export class FinanceService {
 
 // Desglose completo al panel FINANCE (ADR-015 D6 / hueco #4): NO se descarta gross/commission/processedAt/
 // heldReason que payment-service ya sirve. `amountCents` queda = NETO (paridad con la app del conductor).
-function toPayoutView(p: Payout): PayoutView {
+// `driverName` lo resuelve el service (identity, gateado por PII); null = no visible (FINANCE puro) o no resuelto.
+function toPayoutView(p: Payout, driverName: string | null): PayoutView {
   return {
     id: p.id,
     driverId: p.driverId,
+    driverName,
     grossCents: p.grossCents,
     commissionCents: p.commissionCents,
     amountCents: p.amountCents,
@@ -373,9 +430,9 @@ function toPayoutView(p: Payout): PayoutView {
 
 // Extiende toPayoutView con el breakdown de auditoría (DRY: reusa el mapeo base). `debtAppliedCents` es el NETO
 // firmado ya persistido; `debtSettledCents`/`creditBackCents` son sus componentes abiertos por FK en el servicio.
-function toPayoutDetailView(p: PayoutDetailRow): PayoutDetailView {
+function toPayoutDetailView(p: PayoutDetailRow, driverName: string | null): PayoutDetailView {
   return {
-    ...toPayoutView(p),
+    ...toPayoutView(p, driverName),
     debtSettledCents: p.debtSettledCents,
     creditBackCents: p.creditBackCents,
     debtAppliedCents: p.debtAppliedCents,

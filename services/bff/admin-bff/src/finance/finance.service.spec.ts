@@ -9,12 +9,23 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   payoutView,
   payoutDetailView,
+  payoutStatsView,
   refundablePaymentView,
   reconciliationRunView,
 } from '@veo/api-client';
 import { FinanceService } from './finance.service';
 
+// FINANCE puro: NO ve identidad personal (canSeeIdentity=false) → driverName degrada a null y NO se llama a identity.
 const operator = { userId: 'op-1', type: 'admin', roles: ['FINANCE'] } as never;
+// ADMIN: SÍ ve identidad (canSeeIdentity=true) → driverName se resuelve vía GetDriversByIds.
+const adminOperator = { userId: 'op-2', type: 'admin', roles: ['ADMIN'] } as never;
+
+/** Deps de identidad para el enriquecimiento de nombres (gRPC identity + config del secret HMAC). */
+function identityDeps(drivers: { id: string; name: string }[] = []) {
+  const identityGrpc = { call: vi.fn().mockResolvedValue({ drivers }) };
+  const config = { get: vi.fn().mockReturnValue('test-secret') };
+  return { identityGrpc, config };
+}
 
 /** Fila REAL que payment-service sirve en GET /payouts/all (findMany SIN select → Payout completo). */
 interface PayoutRow {
@@ -60,7 +71,7 @@ function heldRow(): PayoutRow {
   };
 }
 
-function makeService(rows: PayoutRow[]) {
+function makeService(rows: PayoutRow[], drivers: { id: string; name: string }[] = []) {
   const rest = {
     get: vi.fn().mockResolvedValue({ items: rows, nextCursor: null }),
     post: vi.fn(),
@@ -68,8 +79,16 @@ function makeService(rows: PayoutRow[]) {
   // REST_BOOKING (F2.5 · costo/km): cliente separado hacia booking-service. Stub vacío salvo en sus tests.
   const bookingRest = { get: vi.fn(), put: vi.fn() };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
-  return { svc, rest, bookingRest, audit };
+  const { identityGrpc, config } = identityDeps(drivers);
+  const svc = new FinanceService(
+    rest as never,
+    bookingRest as never,
+    identityGrpc as never,
+    'admin-rail' as never,
+    audit as never,
+    config as never,
+  );
+  return { svc, rest, bookingRest, audit, identityGrpc };
 }
 
 describe('FinanceService.listPayouts · ADR-015 D6 (desglose)', () => {
@@ -86,6 +105,7 @@ describe('FinanceService.listPayouts · ADR-015 D6 (desglose)', () => {
     expect(view).toEqual({
       id: 'pay-1',
       driverId: 'drv-1',
+      driverName: null, // operador FINANCE puro: identidad redactada (canSeeIdentity=false)
       grossCents: 10000,
       commissionCents: 2000,
       amountCents: 8000, // amountCents = NETO
@@ -172,7 +192,15 @@ function makePaymentService(row: PaymentRowFull) {
   const rest = { get: vi.fn().mockResolvedValue(row), post: vi.fn() };
   const bookingRest = { get: vi.fn(), put: vi.fn() };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
+  const { identityGrpc, config } = identityDeps();
+  const svc = new FinanceService(
+    rest as never,
+    bookingRest as never,
+    identityGrpc as never,
+    'admin-rail' as never,
+    audit as never,
+    config as never,
+  );
   return { svc, rest, audit };
 }
 
@@ -278,12 +306,23 @@ function payoutDetailRow(over: Partial<PayoutDetailRowFull> = {}): PayoutDetailR
   };
 }
 
-function makePayoutDetailService(row: PayoutDetailRowFull) {
+function makePayoutDetailService(
+  row: PayoutDetailRowFull,
+  drivers: { id: string; name: string }[] = [],
+) {
   const rest = { get: vi.fn().mockResolvedValue(row), post: vi.fn() };
   const bookingRest = { get: vi.fn(), put: vi.fn() };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
-  return { svc, rest, audit };
+  const { identityGrpc, config } = identityDeps(drivers);
+  const svc = new FinanceService(
+    rest as never,
+    bookingRest as never,
+    identityGrpc as never,
+    'admin-rail' as never,
+    audit as never,
+    config as never,
+  );
+  return { svc, rest, audit, identityGrpc };
 }
 
 describe('FinanceService.getPayoutDetail · hueco #1 (breakdown de auditoría)', () => {
@@ -371,7 +410,15 @@ function makeReconService(rows: ReconRowFull[]) {
   const rest = { get: vi.fn().mockResolvedValue({ items: rows, nextCursor: null }), post: vi.fn() };
   const bookingRest = { get: vi.fn(), put: vi.fn() };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
+  const { identityGrpc, config } = identityDeps();
+  const svc = new FinanceService(
+    rest as never,
+    bookingRest as never,
+    identityGrpc as never,
+    'admin-rail' as never,
+    audit as never,
+    config as never,
+  );
   return { svc, rest, audit };
 }
 
@@ -425,5 +472,137 @@ describe('FinanceService.getReconciliation · hueco #3 (historial de conciliaci�
     for (const view of page.items) {
       expect(() => reconciliationRunView.parse(view)).not.toThrow();
     }
+  });
+});
+
+/**
+ * getPayoutStats · Seam 1 — KPIs de la pantalla de Liquidaciones (total liquidado + conteos por estado).
+ * Passthrough tipado: (1) ruta interna /payouts/stats con la identidad; (2) NO audita (agregado, no PII);
+ * (3) el resultado satisface el contrato Zod payoutStatsView.
+ */
+interface PayoutStatsFull {
+  totalCents: number;
+  pendingCount: number;
+  processingCount: number;
+  processedCount: number;
+  heldCount: number;
+  failedCount: number;
+}
+
+function statsFixture(over: Partial<PayoutStatsFull> = {}): PayoutStatsFull {
+  return {
+    totalCents: 123_400,
+    pendingCount: 3,
+    processingCount: 1,
+    processedCount: 12,
+    heldCount: 2,
+    failedCount: 1,
+    ...over,
+  };
+}
+
+function makeStatsService(stats: PayoutStatsFull) {
+  const rest = { get: vi.fn().mockResolvedValue(stats), post: vi.fn() };
+  const bookingRest = { get: vi.fn(), put: vi.fn() };
+  const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
+  const { identityGrpc, config } = identityDeps();
+  const svc = new FinanceService(
+    rest as never,
+    bookingRest as never,
+    identityGrpc as never,
+    'admin-rail' as never,
+    audit as never,
+    config as never,
+  );
+  return { svc, rest, audit };
+}
+
+describe('FinanceService.getPayoutStats · Seam 1 (KPIs de Liquidaciones)', () => {
+  it('llama la ruta interna /payouts/stats con la identidad del operador', async () => {
+    const { svc, rest } = makeStatsService(statsFixture());
+    await svc.getPayoutStats(operator);
+    expect(rest.get).toHaveBeenCalledWith(
+      '/payouts/stats',
+      expect.objectContaining({ identity: operator }),
+    );
+  });
+
+  it('NO audita (agregado del sistema, no PII de persona)', async () => {
+    const { svc, audit } = makeStatsService(statsFixture());
+    await svc.getPayoutStats(operator);
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('el resultado satisface el contrato Zod payoutStatsView (parse no lanza)', async () => {
+    const { svc } = makeStatsService(statsFixture());
+    const stats = await svc.getPayoutStats(operator);
+    expect(() => payoutStatsView.parse(stats)).not.toThrow();
+    expect(stats.totalCents).toBe(123_400);
+    expect(stats.processedCount).toBe(12);
+  });
+});
+
+/**
+ * Seam 2 — enriquecimiento del NOMBRE del conductor (identity, batch anti-N+1) con GATE PII (Ley 29733).
+ * Lo crítico: (1) FINANCE puro NO ve el nombre (canSeeIdentity=false) → null y NI SIQUIERA se llama a identity;
+ * (2) ADMIN sí lo ve → un solo GetDriversByIds resuelve todos los driverIds de la página; (3) un id que identity
+ * no resuelve degrada a null honesto; (4) idéntico gate en el detalle (getPayoutDetail).
+ */
+describe('FinanceService.listPayouts · Seam 2 (driverName enrichment + gate PII)', () => {
+  it('FINANCE puro: driverName null y NO se llama a identity (sin fuga de PII ni round-trip)', async () => {
+    const { svc, identityGrpc } = makeService([processedRow(), heldRow()], [
+      { id: 'drv-1', name: 'María Ravello' },
+    ]);
+    const page = await svc.listPayouts(operator, {});
+    expect(page.items.every((v) => v.driverName === null)).toBe(true);
+    expect(identityGrpc.call).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN: resuelve driverName con UN solo GetDriversByIds para toda la página (anti-N+1)', async () => {
+    const { svc, identityGrpc } = makeService([processedRow(), heldRow()], [
+      { id: 'drv-1', name: 'María Ravello' },
+      { id: 'drv-2', name: 'Juan Pérez' },
+    ]);
+    const page = await svc.listPayouts(adminOperator, {});
+    expect(identityGrpc.call).toHaveBeenCalledTimes(1);
+    expect(identityGrpc.call).toHaveBeenCalledWith(
+      'GetDriversByIds',
+      { ids: ['drv-1', 'drv-2'] },
+      expect.anything(),
+    );
+    expect(page.items[0]?.driverName).toBe('María Ravello');
+    expect(page.items[1]?.driverName).toBe('Juan Pérez');
+  });
+
+  it('ADMIN: un driverId que identity NO resuelve degrada a null honesto (no se inventa)', async () => {
+    const { svc } = makeService([processedRow(), heldRow()], [
+      { id: 'drv-1', name: 'María Ravello' },
+      // drv-2 ausente en el reply de identity → null honesto
+    ]);
+    const page = await svc.listPayouts(adminOperator, {});
+    expect(page.items[0]?.driverName).toBe('María Ravello');
+    expect(page.items[1]?.driverName).toBeNull();
+  });
+
+  it('el resultado con driverName satisface el contrato Zod payoutView', async () => {
+    const { svc } = makeService([processedRow()], [{ id: 'drv-1', name: 'María Ravello' }]);
+    const page = await svc.listPayouts(adminOperator, {});
+    for (const view of page.items) {
+      expect(() => payoutView.parse(view)).not.toThrow();
+    }
+  });
+});
+
+describe('FinanceService.getPayoutDetail · Seam 2 (driverName enrichment + gate PII)', () => {
+  it('ADMIN: enriquece driverName; FINANCE puro lo deja null', async () => {
+    const admin = makePayoutDetailService(payoutDetailRow(), [{ id: 'drv-1', name: 'María Ravello' }]);
+    const adminView = await admin.svc.getPayoutDetail(adminOperator, 'pay-detail-1');
+    expect(adminView.driverName).toBe('María Ravello');
+    expect(admin.identityGrpc.call).toHaveBeenCalledTimes(1);
+
+    const fin = makePayoutDetailService(payoutDetailRow(), [{ id: 'drv-1', name: 'María Ravello' }]);
+    const finView = await fin.svc.getPayoutDetail(operator, 'pay-detail-1');
+    expect(finView.driverName).toBeNull();
+    expect(fin.identityGrpc.call).not.toHaveBeenCalled();
   });
 });
