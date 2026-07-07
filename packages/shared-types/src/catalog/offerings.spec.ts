@@ -9,8 +9,8 @@ import {
   OfferingId,
   operableVehicleClasses,
   OPERABLE_VEHICLE_CLASSES,
+  effectiveOfferingMode,
   resolveCatalog,
-  resolveOfferingModeWithPin,
   VehicleClass,
   type OfferingCatalogOverlay,
   type OfferingSpec,
@@ -81,10 +81,10 @@ describe('catálogo efectivo (overlay editable en caliente · B1)', () => {
     expect(activeOfferings(overlay)).toHaveLength(0);
   });
 
-  it('la oferta resuelta conserva la spec base (pricing, clase, modos)', () => {
+  it('la oferta resuelta conserva la spec base (pricing, clase, modo)', () => {
     const moto = resolveCatalog(null).find((o) => o.id === OfferingId.VEO_MOTO);
     expect(moto?.pricing.multiplier).toBeGreaterThan(0);
-    expect(moto?.allowedModes.length).toBeGreaterThan(0);
+    expect(moto?.mode).toBeTruthy();
     expect(moto?.vehicleClass).toBeTruthy();
   });
 });
@@ -107,53 +107,64 @@ describe('override de precio + modo por oferta (B2)', () => {
     expect(eco?.pricing).toEqual(OFFERINGS[OfferingId.VEO_ECONOMICO].pricing);
   });
 
-  it('mode pineado VÁLIDO (∈ allowedModes) → modePin lo refleja', () => {
+  it('params override (perKmCents) pisa el de código, campo a campo', () => {
     const overlay: OfferingCatalogOverlay = {
       version: 1,
-      overrides: [{ id: OfferingId.VEO_ECONOMICO, enabled: true, mode: PricingMode.FIXED }],
+      overrides: [{ id: OfferingId.VEO_ECONOMICO, enabled: true, perKmCents: 999 }],
     };
     const eco = resolveCatalog(overlay).find((o) => o.id === OfferingId.VEO_ECONOMICO);
-    expect(eco?.modePin).toBe(PricingMode.FIXED);
+    expect(eco?.pricing.perKmCents).toBe(999);
   });
 
-  it('mode pineado INVÁLIDO (∉ allowedModes) → se descarta (modePin undefined, la oferta veta)', () => {
-    // veo_moto con allowedModes recortado a [FIXED]: un pin PUJA es inválido.
+  it('el Mecánico trae perKmCents:0 Y perMinCents:0 (call-out plano · ADR 023)', () => {
+    const mech = OFFERINGS[OfferingId.VEO_MECHANIC];
+    expect(mech.pricing.perKmCents).toBe(0);
+    expect(mech.pricing.perMinCents).toBe(0);
+  });
+
+  it('la Grúa trae perMinCents:0 (hook-up + por-km, sin tiempo · ADR 023)', () => {
+    expect(OFFERINGS[OfferingId.VEO_TOW].pricing.perMinCents).toBe(0);
+  });
+
+  it('mode pineado en una oferta NO lockeada (ride) → el modo efectivo lo refleja (palanca manual)', () => {
     const overlay: OfferingCatalogOverlay = {
       version: 1,
-      overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, mode: PricingMode.PUJA }],
+      overrides: [{ id: OfferingId.VEO_ECONOMICO, enabled: true, mode: PricingMode.PUJA }],
     };
-    const moto = resolveCatalog(overlay).find((o) => o.id === OfferingId.VEO_MOTO);
-    // moto real permite PUJA → el pin es válido; este test verifica el camino feliz del pin.
-    expect(moto?.modePin).toBe(PricingMode.PUJA);
+    const eco = resolveCatalog(overlay).find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(eco?.mode).toBe(PricingMode.PUJA);
   });
 
-  it('resolveOfferingModeWithPin: pin válido GANA sobre el schedule (sin overridden)', () => {
-    const eco = OFFERINGS[OfferingId.VEO_ECONOMICO];
-    // schedule pide PUJA, el admin pineó FIXED → gana el pin, NO es veto.
-    expect(resolveOfferingModeWithPin(eco, PricingMode.FIXED, PricingMode.PUJA)).toEqual({
-      mode: PricingMode.FIXED,
-      overridden: false,
-    });
-  });
-
-  it('resolveOfferingModeWithPin: sin pin → cae a la intersección schedule ∩ oferta', () => {
-    const eco = OFFERINGS[OfferingId.VEO_ECONOMICO];
-    expect(resolveOfferingModeWithPin(eco, undefined, PricingMode.PUJA)).toEqual({
-      mode: PricingMode.PUJA,
-      overridden: false,
-    });
-  });
-
-  it('resolveOfferingModeWithPin: pin inválido (∉ allowedModes) → se ignora, manda el schedule', () => {
-    const fixedOnly = {
-      ...OFFERINGS[OfferingId.VEO_MOTO],
-      allowedModes: [PricingMode.FIXED] as const,
+  it('mode pineado en una oferta LOCKEADA (ambulancia) → se IGNORA (queda FIXED, no negocia)', () => {
+    const overlay: OfferingCatalogOverlay = {
+      version: 1,
+      overrides: [{ id: OfferingId.VEO_AMBULANCE, enabled: true, mode: PricingMode.PUJA }],
     };
-    // pin PUJA inválido → ignora el pin; schedule pide FIXED (∈ allowedModes) → FIXED.
-    expect(resolveOfferingModeWithPin(fixedOnly, PricingMode.PUJA, PricingMode.FIXED)).toEqual({
-      mode: PricingMode.FIXED,
-      overridden: false,
-    });
+    const amb = resolveCatalog(overlay).find((o) => o.id === OfferingId.VEO_AMBULANCE);
+    expect(amb?.mode).toBe(PricingMode.FIXED);
+  });
+
+  it('sin pin → el modo efectivo = el de código', () => {
+    const eco = resolveCatalog(null).find((o) => o.id === OfferingId.VEO_ECONOMICO);
+    expect(eco?.mode).toBe(OFFERINGS[OfferingId.VEO_ECONOMICO].mode);
+  });
+
+  it('effectiveOfferingMode: ride no lockeada → el pin del admin GANA', () => {
+    expect(effectiveOfferingMode(OFFERINGS[OfferingId.VEO_ECONOMICO], PricingMode.PUJA)).toBe(
+      PricingMode.PUJA,
+    );
+  });
+
+  it('effectiveOfferingMode: sin pin → el modo de código', () => {
+    expect(effectiveOfferingMode(OFFERINGS[OfferingId.VEO_ECONOMICO], undefined)).toBe(
+      OFFERINGS[OfferingId.VEO_ECONOMICO].mode,
+    );
+  });
+
+  it('effectiveOfferingMode: vertical LOCKEADA → ignora el pin, siempre su modo (ambulancia FIXED)', () => {
+    expect(effectiveOfferingMode(OFFERINGS[OfferingId.VEO_AMBULANCE], PricingMode.PUJA)).toBe(
+      PricingMode.FIXED,
+    );
   });
 });
 
@@ -331,9 +342,10 @@ describe('verticales especiales (B5-4 · codeadas pero OCULTAS)', () => {
     expect(active).not.toContain(OfferingId.VEO_TOW);
   });
 
-  it('la ambulancia NO negocia: solo permite FIXED + flow EMERGENCY', () => {
+  it('la ambulancia NO negocia: mode FIXED + lockeado + flow EMERGENCY', () => {
     const amb = OFFERINGS[OfferingId.VEO_AMBULANCE];
-    expect(amb.allowedModes).toEqual([PricingMode.FIXED]);
+    expect(amb.mode).toBe(PricingMode.FIXED);
+    expect(amb.modeLocked).toBe(true);
     expect(amb.flow).toBe('EMERGENCY');
   });
 
