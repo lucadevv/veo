@@ -7,6 +7,7 @@ import {
   useBaseFare,
   useCommission,
   useEnergyCatalog,
+  useBidFloor,
 } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -19,6 +20,7 @@ import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
 import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commission-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
+import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
 /**
  * Precios on-demand — config financiera del carril TAXI (viaje inmediato). El diseño (veo.pen) apila las
@@ -35,6 +37,7 @@ export default function PricingPage() {
   const baseFareQuery = useBaseFare();
   const commissionQuery = useCommission();
   const energyQuery = useEnergyCatalog();
+  const bidFloorQuery = useBidFloor();
 
   if (!can(user, 'pricing:view')) {
     return (
@@ -57,7 +60,7 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios on-demand"
-        description="Configurá cómo se calcula y se cobra el viaje inmediato: modo, componentes de la tarifa y comisión al conductor. Todos los cambios son globales, se aplican al instante y quedan auditados."
+        description="El carril del viaje inmediato. Corre en DOS modos que coexisten — FIJO (tarifa calculada, estilo Uber) y PUJA (el pasajero ofrece su precio, estilo inDrive). Acá va la config global de ambos: tarifa base, comisión, recargo, el modo por horario y el piso de la puja. Cambios globales, al instante y auditados."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
@@ -95,6 +98,12 @@ export default function PricingPage() {
           {/* Modo de tarificación global (PUJA↔FIJO) + franjas horarias. */}
           <AsyncSection query={query} skeleton={<Skeleton className="h-64" />}>
             {(data) => <ModeSchedulePanel schedule={data} />}
+          </AsyncSection>
+
+          {/* Piso de la PUJA por DEFECTO global — co-locado con el modo (puja = modo + su piso). Los overrides
+              POR servicio viven en "Ofertas de servicio"; misma config /pricing/bid-floor con su propio CAS. */}
+          <AsyncSection query={bidFloorQuery} skeleton={<Skeleton className="h-64" />}>
+            {(data) => <BidFloorPanel config={data} />}
           </AsyncSection>
 
           {/* B5 · catálogo de energía multi-fuente (vista previa hasta el flip). */}

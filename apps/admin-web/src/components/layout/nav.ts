@@ -106,8 +106,10 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    // PRECIOS — el HÍBRIDO de VEO (on-demand · oferta · carpooling): la config de cómo se cobra por cada
-    // modelo, separada de Finanzas (operación del dinero). Cada modo es un carril de pricing distinto.
+    // PRECIOS — el híbrido de VEO son DOS carriles de mercado (on-demand inmediato · carpooling programado)
+    // + el CATÁLOGO de ofertas de servicio (el menú de servicios, transversal — NO un carril). El modo
+    // PUJA↔FIJO es un EJE dentro de on-demand (coexisten, estilo inDrive/Uber), no un carril aparte. Orden:
+    // el carril on-demand y su catálogo juntos, luego el carril carpooling. Separado de Finanzas (el dinero).
     title: 'Precios',
     items: [
       {
@@ -118,7 +120,7 @@ export const NAV: NavGroup[] = [
       },
       {
         href: '/finance/catalog',
-        label: 'Por oferta',
+        label: 'Ofertas de servicio',
         icon: Tags,
         permission: 'catalog:view',
       },

@@ -9,10 +9,9 @@ import { EmptyState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { CatalogPanel } from '@/components/catalog/catalog-panel';
-import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
 /**
- * Tarifas por oferta (ADR 013 · Fase B / A1). Vive bajo Finanzas: la disponibilidad y el precio de los
+ * Ofertas de servicio (ADR 013 · Fase B / A1). Vive bajo Finanzas: la disponibilidad y el precio de los
  * servicios es decisión comercial/operativa. A1 unifica acá los DOS mínimos por oferta que antes vivían
  * partidos: la tarifa mínima FIJA (catálogo) y el piso de la PUJA (Precios) — el operador los ve juntos y
  * con validación cruzada. Gate de presentación con `catalog:view`; el admin-bff (RolesGuard) + trip-service
@@ -27,14 +26,14 @@ export default function CatalogPage() {
     return (
       <div className="flex h-full flex-col">
         <PageHeader
-          title="Tarifas por oferta"
-          breadcrumbs={[{ label: 'Precios' }, { label: 'Tarifas por oferta' }]}
+          title="Ofertas de servicio"
+          breadcrumbs={[{ label: 'Precios' }, { label: 'Ofertas de servicio' }]}
         />
         <EmptyState
           className="flex-1"
           icon={<Lock className="size-6" aria-hidden />}
           title="Acceso restringido"
-          description="Necesitas el rol FINANCE o ADMIN para ver las tarifas por oferta."
+          description="Necesitas el rol FINANCE o ADMIN para ver las ofertas de servicio."
         />
       </div>
     );
@@ -43,9 +42,9 @@ export default function CatalogPage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="Tarifas por oferta"
-        description="Configurá cada servicio en un solo lugar: disponibilidad, modo, multiplicador y los dos mínimos (tarifa fija y piso de puja). El pasajero ve y cotiza solo lo habilitado."
-        breadcrumbs={[{ label: 'Precios' }, { label: 'Tarifas por oferta' }]}
+        title="Ofertas de servicio"
+        description="El menú de servicios que el pasajero puede pedir (VEO Moto, Económico…). Cada servicio hereda la config global de On-demand y puede overridear su modo, sus mínimos (tarifa fija y piso de puja) y activarse/desactivarse. Es el catálogo, no un carril de precio."
+        breadcrumbs={[{ label: 'Precios' }, { label: 'Ofertas de servicio' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         {/* Aviso de step-up (mismo patrón que Precios on-demand): el catálogo y el piso de la puja son DOS
@@ -55,23 +54,14 @@ export default function CatalogPage() {
           <div className="flex flex-col gap-0.5">
             <p className="text-sm font-semibold text-ink">Cambios con step-up MFA</p>
             <p className="text-xs text-ink-subtle">
-              El catálogo (modo, multiplicador, tarifa mínima, activar/desactivar) y el piso de la
-              puja son configs SEPARADAS: cada Guardar pide tu código TOTP, valida la versión
-              (optimistic-locking) y queda auditado. No hay un guardado global.
+              Cada servicio se guarda por separado (modo, multiplicador, tarifa mínima, piso de puja
+              override, activar/desactivar): cada Guardar pide tu código TOTP, valida la versión
+              (optimistic-locking) y queda auditado. El piso de puja por DEFECTO vive en On-demand.
             </p>
           </div>
         </div>
 
         <div className="mt-5 space-y-5">
-          {/*
-            Piso de la PUJA por DEFECTO (global). Los pisos POR OFERTA se editan abajo, en cada fila del
-            catálogo; el default global (fallback cuando una oferta no tiene override) vive acá — su config es
-            la misma (/pricing/bid-floor, mismo CAS) pero es la ÚNICA superficie que edita `defaultFloorCents`.
-          */}
-          <AsyncSection query={bidFloorQuery} skeleton={<Skeleton className="h-40" />}>
-            {(data) => <BidFloorPanel config={data} />}
-          </AsyncSection>
-
           {/*
             DESACOPLE de carriles: la LISTA de ofertas (catálogo: enable/disable, modo, multiplicador, tarifa
             mínima) depende SOLO de `catalogQuery`. El piso de la PUJA es OTRA config (endpoint + CAS propios):
