@@ -102,14 +102,14 @@ model Trip {
   vehicleId   String? @map("vehicle_id") @db.Uuid
 
   /// Origen/destino como lat/lon (geography reservado para una iteración con PostGIS).
-  originLat   Float @map("origin_lat")
-  originLon   Float @map("origin_lon")
-  destLat     Float @map("dest_lat")
-  destLon     Float @map("dest_lon")
+  originLat Float @map("origin_lat")
+  originLon Float @map("origin_lon")
+  destLat   Float @map("dest_lat")
+  destLon   Float @map("dest_lon")
 
   /// Paradas intermedias ORDENADAS (Ola 2B · waypoints), array JSON de {lat,lon} (máx 3). Entre
   /// origen y destino; la ruta y la tarifa (BR-T05) las incluyen. Null/[] = viaje directo.
-  waypoints   Json?   @map("waypoints")
+  waypoints Json? @map("waypoints")
 
   /// Hora programada del viaje (Ola 2B · viajes programados). Si está presente el viaje nace en
   /// estado SCHEDULED y el scheduler lo activa (→ REQUESTED) restando el lead time. Null = inmediato.
@@ -145,7 +145,7 @@ model Trip {
   passengerClosedAt DateTime? @map("passenger_closed_at") @db.Timestamptz
 
   /// Tarifa total en céntimos PEN (BR-T05). Inmutable salvo cambio de destino (BR-T01).
-  fareCents       Int           @map("fare_cents")
+  fareCents Int @map("fare_cents")
 
   /// PUJA (ADR 010 §4 · N7): precio ACORDADO al aceptar la oferta, escrito UNA SOLA VEZ por
   /// `applyAgreedFare`. Sirve de guard idempotente-por-EVENTO (no por valor): una redelivery
@@ -165,7 +165,7 @@ model Trip {
   /// p.ej. veo_economico|veo_confort|veo_xl). El multiplicador por categoría lo aplica la
   /// PREVISUALIZACIÓN en public-bff (maps/fare.ts); aquí solo se PERSISTE la elección: la tarifa
   /// firme (fareCents) sigue la fórmula base BR-T05 y no se recalcula por categoría (BR-T05/BR-T01).
-  category        String?       @map("category")
+  category String? @map("category")
 
   /// Modo niño (BR-T07): solo se guarda el hash bcrypt del código, nunca el código en claro.
   childMode     Boolean @default(false) @map("child_mode")
@@ -174,7 +174,7 @@ model Trip {
   /// Código de promoción elegido al pedir el viaje (Ola 2A). Se PERSISTE y se propaga en
   /// trip.completed para que payment-service lo canjee al cobrar (el descuento reduce SOLO lo que
   /// paga el pasajero; comisión y propina intactas). Null si no se aplicó promo.
-  promoCode     String? @map("promo_code")
+  promoCode String? @map("promo_code")
 
   /// Solicitudes especiales del pasajero (mascota/equipaje/silla de niño, BE-2). El conductor las ve
   /// antes de aceptar. Vacío = ninguna. "Parada" no va acá (es un waypoint del trayecto).
@@ -188,7 +188,7 @@ model Trip {
   /// Veces que el viaje se RE-ASIGNÓ tras una cancelación del conductor post-accept (ADR 010 #4).
   /// Tope (env TRIP_MAX_REASSIGN, default 3): superado el tope NO se re-puja más — el viaje cae a un
   /// terminal HONESTO (FAILED) y se notifica al pasajero (callejón sin salida con razón, no bucle infinito).
-  reassignCount      Int          @default(0) @map("reassign_count")
+  reassignCount Int @default(0) @map("reassign_count")
 
   /// H13 · sello MONOTÓNICO del ciclo de negociación. A DIFERENCIA de `reassignCount` (que rebid resetea
   /// a 0), este NUNCA decrece: se incrementa cada vez que la negociación ABRE o RE-ABRE (createTrip-puja=1,
@@ -196,7 +196,7 @@ model Trip {
   /// estampa en dispatch.offer_accepted, y applyAgreedFare lo exige en el `where` atómico: una redelivery
   /// Kafka STALE de un offer_accepted de un ciclo VIEJO (seq menor) NO matchea la fila vigente → no-op,
   /// y no escribe la tarifa rancia del conductor del ciclo anterior. Viajes legacy sin puja quedan en 0.
-  negotiationSeq     Int          @default(0) @map("negotiation_seq")
+  negotiationSeq Int @default(0) @map("negotiation_seq")
 
   /// Clave de idempotencia de creación (header Idempotency-Key del BFF).
   idempotencyKey String? @unique @map("idempotency_key")
@@ -204,10 +204,10 @@ model Trip {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  events             TripEvent[]
+  events            TripEvent[]
   /// Propuestas de parada mid-trip negociadas (Lote C1). A lo sumo UNA PROPOSED viva a la vez (índice
   /// único parcial en TripWaypointProposal); el resto son históricas (ACCEPTED/REJECTED/EXPIRED).
-  waypointProposals  TripWaypointProposal[]
+  waypointProposals TripWaypointProposal[]
 
   /// Historial del pasajero (hot-path): SUS viajes ordenados por requestedAt DESC con tie-break por id
   /// DESC para la paginación keyset (cursor). Postgres escanea el btree HACIA ATRÁS para el DESC, así que
@@ -287,28 +287,6 @@ model OfferingCatalog {
   @@schema("trip")
 }
 
-/// Recargo de combustible GLOBAL por km (B3). SINGLETON editable EN CALIENTE por el admin: el combustible
-/// cambia seguido y el admin lo ajusta SIN deploy. El motor de tarifa (domain/fare.ts) lo recibe como
-/// parámetro y lo pliega al costo POR KM. Sin fila → 0 (degradación honesta: sin recargo). Reemplazo del
-/// valor en el PUT del admin (bump `version`, emite fuel.surcharge_updated por outbox). Tier 1 GLOBAL
-/// (un solo valor; Tier 2 per-zona = no-breaking).
-model FuelSurchargeConfig {
-  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
-  id                  String   @id
-  /// B4 · precio del combustible por litro en céntimos PEN (lo que el admin ve en el grifo). Default 0.
-  fuelPricePerLiterCents Int   @default(0) @map("fuel_price_per_liter_cents")
-  /// B4 · rendimiento del vehículo de referencia en km por litro. El recargo/km = precio ÷ rendimiento.
-  /// Default 0 = sin recargo (degradación honesta: rendimiento 0 → no se divide). El multiplier de la
-  /// oferta escala el per-km derivado por clase (moto < auto < XL).
-  kmPerLiter          Int      @default(0) @map("km_per_liter")
-  /// Versión MONOTÓNICA (se bumpea en cada PUT; viaja en fuel.surcharge_updated por outbox).
-  version             Int      @default(0)
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@map("fuel_surcharge_config")
-  @@schema("trip")
-}
-
 /// F2.4 · Tarifa base GLOBAL (banderazo + per-km + per-min). SINGLETON editable EN CALIENTE por el admin:
 /// los tres componentes base de la fórmula de tarifa dejan de estar hardcodeados (domain/fare.ts:
 /// BASE_FARE_CENTS/PER_KM_CENTS/PER_MIN_CENTS) y pasan a ser config. El motor de tarifa los recibe como
@@ -332,26 +310,8 @@ model BaseFareConfig {
   @@schema("trip")
 }
 
-/// B5 · Catálogo de precios de energía por fuente, editable en caliente (singleton + version + CAS +
-/// outbox + cache, espejo de offering_catalog). `sources` = array JSON { sourceId, unit, pricePerUnitCents }.
-/// El costo de energía por km se deriva = precio_por_unidad ÷ rendimiento (km por unidad), unificando
-/// líquido (S/litro) y eléctrico (S/kWh). B5-0: se siembra (GASOLINE_90 = precio global actual) pero aún
-/// NO se cablea a la tarifa (eso es B5-1 con shadow-compare).
-model EnergyCatalog {
-  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
-  id        String   @id
-  /// Precios por fuente { sourceId, unit, pricePerUnitCents } (B5). Default [] = sin precios cargados.
-  sources   Json     @default("[]")
-  /// Versión MONOTÓNICA (CAS; se bumpea en cada PUT; viaja en energy.catalog_updated por outbox).
-  version   Int      @default(0)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@map("energy_catalog")
-  @@schema("trip")
-}
-
 /// Piso de la PUJA (bid floor) editable en caliente, keyed por (zona, oferta) — ADR 010 §9.3. SINGLETON
-/// (Tier 1 GLOBAL) + version + outbox + cache, espejo de fuel_surcharge_config/energy_catalog. Reemplaza el
+/// (Tier 1 GLOBAL) + version + outbox + cache, mismo patrón que base_fare_config. Reemplaza el
 /// escalar global hardcodeado en env (BID_FLOOR_CENTS) por config que el admin maneja sin deploy. Sin fila →
 /// DEFAULT_BID_FLOOR_CONFIG (piso S/7, sin overrides) = comportamiento previo (degradación honesta). El gate
 /// AUTORITATIVO de la puja (createTrip/rebid) y el piso de DISPLAY del quote resuelven con resolveBidFloorCents

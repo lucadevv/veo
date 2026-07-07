@@ -28,12 +28,10 @@ import {
   mediaAccessRequestView,
   catalogView,
   modeScheduleView,
-  fuelSurchargeView,
   baseFareView,
   commissionView,
   costPerKmConfigView,
   costPerKmListView,
-  energyCatalogView,
   bidFloorView,
   refundablePaymentView,
   payoutDetailView,
@@ -54,8 +52,6 @@ import {
   panicDetail,
   type ReplaceCatalogRequest,
   type ReplaceScheduleRequest,
-  type ReplaceFuelSurchargeRequest,
-  type ReplaceEnergyCatalogRequest,
   panicSummary,
   payoutView,
   runPayoutsResult,
@@ -97,11 +93,9 @@ export const qk = {
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
-  fuelSurcharge: ['fuel-surcharge'] as const,
   baseFare: ['base-fare'] as const,
   commission: ['commission'] as const,
   costPerKm: ['cost-per-km'] as const,
-  energyCatalog: ['energy-catalog'] as const,
   bidFloor: ['bid-floor'] as const,
   catalog: ['catalog'] as const,
   dispatchRadiusConfig: ['dispatch-radius-config'] as const,
@@ -895,29 +889,6 @@ export function useReplaceSchedule() {
   });
 }
 
-/* ── Pricing: recargo de combustible por km (global · B3 · ADMIN/SUPERADMIN/FINANCE) ── */
-export function useFuelSurcharge() {
-  return useQuery({
-    queryKey: qk.fuelSurcharge,
-    queryFn: ({ signal }) =>
-      apiClient().get('/pricing/fuel-surcharge', { schema: fuelSurchargeView, signal }),
-  });
-}
-
-export function useReplaceFuelSurcharge() {
-  const qc = useQueryClient();
-  return useMutation({
-    // El admin-bff revalida `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma: la UI solo refleja.
-    mutationFn: (input: ReplaceFuelSurchargeRequest) =>
-      apiClient().put('/pricing/fuel-surcharge', { body: input, schema: fuelSurchargeView }),
-    // onSettled (no onSuccess): re-sincroniza con el server tras éxito O conflicto (409 CAS) — así el panel
-    // muestra la versión/valores vigentes aunque otro admin haya cambiado el config mientras editabas.
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: qk.fuelSurcharge });
-    },
-  });
-}
-
 /* ── Pricing: tarifa base global (banderazo + per-km + per-min · F2.4 · ADMIN/SUPERADMIN/FINANCE) ── */
 export function useBaseFare() {
   return useQuery({
@@ -1002,27 +973,6 @@ export function useReplaceBidFloor() {
     // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.bidFloor });
-    },
-  });
-}
-
-/* ── Pricing: catálogo de precios de energía por fuente (B5 · ADMIN/SUPERADMIN/FINANCE) ── */
-export function useEnergyCatalog() {
-  return useQuery({
-    queryKey: qk.energyCatalog,
-    queryFn: ({ signal }) =>
-      apiClient().get('/pricing/energy-catalog', { schema: energyCatalogView, signal }),
-  });
-}
-
-export function useReplaceEnergyCatalog() {
-  const qc = useQueryClient();
-  return useMutation({
-    // El admin-bff revalida `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma: la UI solo refleja.
-    mutationFn: (input: ReplaceEnergyCatalogRequest) =>
-      apiClient().put('/pricing/energy-catalog', { body: input, schema: energyCatalogView }),
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: qk.energyCatalog });
     },
   });
 }

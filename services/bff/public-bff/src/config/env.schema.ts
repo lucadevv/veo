@@ -63,12 +63,6 @@ export const envSchema = z
 
     // ── Pricing (ADR 011 M4). El piso de la PUJA ya NO vive en env: el quote lo trae de trip-service
     // (GET /internal/pricing/bid-floor) y lo resuelve per-oferta con resolveBidFloorCents (ADR 010 §9.3). ──
-    // B5-1.d · FLIP del modelo de energía en el quote. OFF (default) = fórmula vieja (fuel global); ON =
-    // fórmula nueva (energía pass-through por oferta · multiplier solo posición). Espeja trip-service.
-    PRICING_ENERGY_MODEL_ENABLED: z
-      .string()
-      .default('false')
-      .transform((v) => v === 'true'),
 
     // ── gRPC downstream (lecturas) ──
     IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),

@@ -3,8 +3,6 @@ import { OFFERING_LIST } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 import {
   categoryFareCents,
-  categoryFareCentsV2,
-  shadowCompareCategoryFare,
   minFareForCategory,
   BASE_FARE_CENTS,
   PER_KM_CENTS,
@@ -24,12 +22,6 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
     const expected = BASE_FARE_CENTS + PER_KM_CENTS * 5 + PER_MIN_CENTS * 10;
     expect(categoryFareCents(5000, 600, 1.0)).toBe(expected);
     expect(categoryFareCents(5000, 600, 1.0)).toBe(1500);
-  });
-
-  it('B3 · el recargo de combustible se pliega al per-km (5 km, +40 céntimos/km = +200 → 1700)', () => {
-    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 40)).toBe(1700);
-    // default 0 = sin recargo (no cambia el comportamiento previo).
-    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0)).toBe(1500);
   });
 
   it('aplica el multiplicador de categoría y redondea a S/0.10', () => {
@@ -89,43 +81,5 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
     expect(() => categoryFareCents(-1, 60, 1.0)).toThrow(ValidationError);
     expect(() => categoryFareCents(1000, -1, 1.0)).toThrow(ValidationError);
     expect(() => categoryFareCents(Number.NaN, 60, 1.0)).toThrow(ValidationError);
-  });
-});
-
-describe('B5-1 · categoryFareCentsV2 (quote · energía pass-through · multiplier solo posición)', () => {
-  it('económico (×1.0) sin energía → 1500; energía +40/km es pass-through (+200) → 1700', () => {
-    expect(categoryFareCentsV2(5000, 600, 1.0, MIN_FARE_CENTS, 0)).toBe(1500);
-    expect(categoryFareCentsV2(5000, 600, 1.0, MIN_FARE_CENTS, 40)).toBe(1700);
-  });
-
-  it('XL (×1.6): el multiplier escala el servicio, NO la energía → 2600 (no 2720)', () => {
-    expect(categoryFareCentsV2(5000, 600, 1.6, MIN_FARE_CENTS, 40)).toBe(2600);
-  });
-
-  it('respeta la mínima y redondea a S/0.10', () => {
-    expect(categoryFareCentsV2(0, 0, 1.0, 500, 0)).toBe(600); // BASE 600 > 500
-    expect(categoryFareCentsV2(0, 0, 0.55, 300, 0)).toBe(330); // 600×0.55=330 > 300
-  });
-
-  it('rechaza insumos inválidos', () => {
-    expect(() => categoryFareCentsV2(5000, 600, 1.0, 500, -1)).toThrow(ValidationError);
-    expect(() => categoryFareCentsV2(-1, 600, 1.0)).toThrow(ValidationError);
-  });
-});
-
-describe('B5-1 · shadowCompareCategoryFare (quote: viejo vs nuevo)', () => {
-  it('económico (×1.0): delta 0', () => {
-    expect(shadowCompareCategoryFare(5000, 600, 1.0, 500, 40, 40)).toEqual({
-      oldCents: 1700,
-      newCents: 1700,
-      deltaCents: 0,
-    });
-  });
-
-  it('XL (×1.6): el nuevo es MENOR (energía ya no inflada por el multiplier) → delta -120', () => {
-    const d = shadowCompareCategoryFare(5000, 600, 1.6, 500, 40, 40);
-    expect(d.oldCents).toBe(2720);
-    expect(d.newCents).toBe(2600);
-    expect(d.deltaCents).toBe(-120);
   });
 });

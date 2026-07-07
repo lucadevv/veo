@@ -86,9 +86,6 @@ export function categoryFareCents(
   multiplier: number,
   /** Tarifa mínima aplicable (`offering.pricing.minFareCents`). Default MIN_FARE_CENTS (auto). */
   minFareCents: number = MIN_FARE_CENTS,
-  /** B3 · recargo de combustible por km (céntimos PEN, admin). Default 0. Se pliega al per-km (espejo
-   *  de trip-service domain/fare.ts) para que el preview muestre lo que el create FIXED va a cobrar. */
-  fuelPerKmCents = 0,
   /** F2.4 · banderazo/km/min vigentes (config admin). Default = constantes de código. */
   fareBase: FareBase = DEFAULT_FARE_BASE,
 ): number {
@@ -101,111 +98,11 @@ export function categoryFareCents(
   if (!Number.isFinite(multiplier) || multiplier <= 0) {
     throw new ValidationError('multiplier inválido', { multiplier });
   }
-  if (!Number.isFinite(fuelPerKmCents) || fuelPerKmCents < 0) {
-    throw new ValidationError('fuelPerKmCents inválido (≥ 0)', { fuelPerKmCents });
-  }
 
   const km = distanceMeters / 1000;
   const min = durationSeconds / 60;
-  // B3 · el recargo de combustible se pliega al per-km (es costo por distancia), igual que en trip-service.
-  const subtotal =
-    fareBase.baseFareCents + (fareBase.perKmCents + fuelPerKmCents) * km + fareBase.perMinCents * min;
+  const subtotal = fareBase.baseFareCents + fareBase.perKmCents * km + fareBase.perMinCents * min;
   const scaled = subtotal * multiplier;
   const rounded = Math.round(scaled / FARE_ROUNDING_CENTS) * FARE_ROUNDING_CENTS;
   return Math.max(minFareCents, rounded);
-}
-
-/**
- * B5-1 · ESPEJO del quote para la fórmula NUEVA (energía pass-through · multiplier solo posición) — debe
- * coincidir con `calculateOfferingFare` de trip-service (sin surge, que es create-time). Separa el
- * servicio (escalado por multiplier) del costo de energía (pass-through, NO marcado-up):
- *   servicio   = (BASE + POR_KM·km + POR_MIN·min) × multiplier
- *   total      = servicio + energyPerKm·km
- *   precio     = max(minFare, round(total a S/0.10))
- * `energyPerKmCents` = precio_energía(fuente de la oferta) ÷ rendimiento de la oferta (lo deriva el caller,
- * B5-1.b). NO se activa hasta el flip (B5-1.d); por ahora solo la usa el shadow-compare del quote.
- */
-export function categoryFareCentsV2(
-  distanceMeters: number,
-  durationSeconds: number,
-  multiplier: number,
-  minFareCents: number = MIN_FARE_CENTS,
-  energyPerKmCents = 0,
-  /** F2.4 · banderazo/km/min vigentes (config admin). Default = constantes de código. */
-  fareBase: FareBase = DEFAULT_FARE_BASE,
-): number {
-  if (!Number.isFinite(distanceMeters) || distanceMeters < 0) {
-    throw new ValidationError('distanceMeters inválida', { distanceMeters });
-  }
-  if (!Number.isFinite(durationSeconds) || durationSeconds < 0) {
-    throw new ValidationError('durationSeconds inválida', { durationSeconds });
-  }
-  if (!Number.isFinite(multiplier) || multiplier <= 0) {
-    throw new ValidationError('multiplier inválido', { multiplier });
-  }
-  if (!Number.isFinite(energyPerKmCents) || energyPerKmCents < 0) {
-    throw new ValidationError('energyPerKmCents inválido (≥ 0)', { energyPerKmCents });
-  }
-
-  const km = distanceMeters / 1000;
-  const min = durationSeconds / 60;
-  const service =
-    (fareBase.baseFareCents + fareBase.perKmCents * km + fareBase.perMinCents * min) * multiplier; // posicionamiento
-  const total = service + energyPerKmCents * km; // energía pass-through (no ×multiplier)
-  const rounded = Math.round(total / FARE_ROUNDING_CENTS) * FARE_ROUNDING_CENTS;
-  return Math.max(minFareCents, rounded);
-}
-
-/**
- * B5-1 · costo de energía por km DERIVADO = precio_por_unidad ÷ rendimiento (km por unidad). Mismo cálculo
- * que `deriveFuelPerKmCents` de trip-service (precio÷rendimiento, ≤0 → 0). Unifica líquido y eléctrico.
- */
-export function deriveEnergyPerKmCents(
-  pricePerUnitCents: number,
-  efficiencyKmPerUnit: number,
-): number {
-  if (!Number.isFinite(pricePerUnitCents) || pricePerUnitCents < 0) return 0;
-  if (!Number.isFinite(efficiencyKmPerUnit) || efficiencyKmPerUnit <= 0) return 0;
-  return Math.round(pricePerUnitCents / efficiencyKmPerUnit);
-}
-
-/** Delta del shadow-compare del quote entre el modelo viejo y el nuevo (B5-1). */
-export interface QuoteShadowDelta {
-  oldCents: number;
-  newCents: number;
-  deltaCents: number;
-}
-
-/**
- * B5-1 · compara el precio del quote VIEJO (categoryFareCents, fuel plegado y ×multiplier) contra el
- * NUEVO (categoryFareCentsV2, energía pass-through). Para LOGUEAR el delta por oferta en el quote antes
- * de activar el flip — medimos el impacto sin cambiar lo que el pasajero paga. Puro.
- */
-export function shadowCompareCategoryFare(
-  distanceMeters: number,
-  durationSeconds: number,
-  multiplier: number,
-  minFareCents: number,
-  oldFuelPerKmCents: number,
-  newEnergyPerKmCents: number,
-  /** F2.4 · banderazo/km/min vigentes — el MISMO para ambas fórmulas (el delta aísla energía, no la base). */
-  fareBase: FareBase = DEFAULT_FARE_BASE,
-): QuoteShadowDelta {
-  const oldCents = categoryFareCents(
-    distanceMeters,
-    durationSeconds,
-    multiplier,
-    minFareCents,
-    oldFuelPerKmCents,
-    fareBase,
-  );
-  const newCents = categoryFareCentsV2(
-    distanceMeters,
-    durationSeconds,
-    multiplier,
-    minFareCents,
-    newEnergyPerKmCents,
-    fareBase,
-  );
-  return { oldCents, newCents, deltaCents: newCents - oldCents };
 }

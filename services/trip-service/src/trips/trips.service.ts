@@ -56,15 +56,7 @@ import {
 } from './domain/trip-state-machine';
 import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { CatalogService } from '../catalog/catalog.service';
-import {
-  calculateFare,
-  calculateOfferingFare,
-  applyOfferingPricing,
-  shadowCompareFare,
-  deriveFuelPerKmCents,
-} from './domain/fare';
-import { resolveAuthoritativeEnergy } from '../pricing/energy-requirements';
-import { EnergyCatalogService } from '../pricing/energy-catalog.service';
+import { calculateFare, applyOfferingPricing } from './domain/fare';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
 import { toZone, type ZoneKey } from './domain/pricing-mode';
@@ -74,7 +66,6 @@ import { toTripView, readWaypoints } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
 import { PricingScheduleService } from '../pricing/pricing-schedule.service';
-import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
 import { BaseFareService } from '../pricing/base-fare.service';
 import { BidFloorService } from '../pricing/bid-floor.service';
 import type { Env } from '../config/env.schema';
@@ -202,20 +193,14 @@ export class TripsService {
    * criterio que el quote, que degrada a "todas las ofertas").
    */
   private readonly catalog: CatalogService | null;
-  /** Recargo de combustible global (B3). `@Optional()`: tests legacy degradan a 0 (sin recargo). */
-  private readonly fuel: FuelSurchargeService | null;
   /**
    * Piso de la PUJA per-(zona, oferta) (ADR 010 §9.3). `@Optional()`: si no se inyecta (tests legacy que
    * construyen el servicio sin él), `null` ⇒ resolveBidFloorCents degrada al piso global de env
    * (`this.bidFloorCents`) — comportamiento previo. En producción PricingModule lo provee.
    */
   private readonly bidFloor: BidFloorService | null;
-  /** B5-1 · catálogo de energía multi-fuente. `@Optional()`: si no está, el shadow-compare se saltea (no rompe). */
-  private readonly energyCatalog: EnergyCatalogService | null;
   /** F2.4 · tarifa base configurable (banderazo/km/min). `@Optional()`: sin él → constantes de código. */
   private readonly baseFare: BaseFareService | null;
-  /** B5-1.d · FLIP del modelo de energía (default false). ON = fórmula nueva autoritativa (energía pass-through). */
-  private readonly energyModelEnabled: boolean;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -225,8 +210,6 @@ export class TripsService {
     @Optional() @Inject(REDIS) redis?: Pick<Redis, 'get' | 'incr' | 'expire' | 'del' | 'set'>,
     @Optional() dispatchModes?: DispatchModeRegistry,
     @Optional() catalog?: CatalogService,
-    @Optional() fuel?: FuelSurchargeService,
-    @Optional() energyCatalog?: EnergyCatalogService,
     @Optional() bidFloor?: BidFloorService,
     @Optional() baseFare?: BaseFareService,
   ) {
@@ -238,11 +221,8 @@ export class TripsService {
     this.redis = redis ?? null;
     this.dispatchModes = dispatchModes ?? new DispatchModeRegistry(config);
     this.catalog = catalog ?? null;
-    this.fuel = fuel ?? null;
-    this.energyCatalog = energyCatalog ?? null;
     this.bidFloor = bidFloor ?? null;
     this.baseFare = baseFare ?? null;
-    this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
   }
 
   /**
@@ -279,24 +259,6 @@ export class TripsService {
   }
 
   /**
-   * B3 · recargo de combustible por km vigente (céntimos PEN). DEGRADACIÓN HONESTA: sin servicio inyectado
-   * (tests legacy) o si la lectura FALLA → 0 (sin recargo). NO se bloquea un viaje por una lectura de
-   * config caída; mejor cobrar la tarifa base que rechazar el pedido (mismo criterio que el catálogo).
-   */
-  private async resolveFuelPerKmCents(): Promise<number> {
-    if (!this.fuel) return 0;
-    try {
-      return await this.fuel.getPerKmCents();
-    } catch (err) {
-      this.logger.warn(
-        `recargo de combustible no disponible (${(err as Error).message}); ` +
-          `uso 0 (degradación honesta · B3)`,
-      );
-      return 0;
-    }
-  }
-
-  /**
    * F2.4 · banderazo/km/min vigentes (config del admin, `BaseFareConfig`). Devuelve el triple o `{}` si el
    * servicio no está (tests) o la lectura cae → la fórmula usa las constantes de código (degradación honesta;
    * el seed sembró los valores actuales, así que en prod la fila existe y NO hay cambio de precio).
@@ -319,66 +281,6 @@ export class TripsService {
         `tarifa base no disponible (${(err as Error).message}); uso las constantes de código (F2.4)`,
       );
       return {};
-    }
-  }
-
-  /**
-   * B5-1.b · SHADOW-COMPARE (NO cambia el precio cobrado). Computa el delta entre la tarifa VIEJA
-   * (fuel global plegado y escalado por el multiplier) y la NUEVA (energía PASS-THROUGH, derivada del
-   * EnergyCatalog por la fuente de referencia de la oferta) y lo LOGUEA. Sirve para MEDIR el impacto de
-   * B5-1 en producción-dev ANTES del flip (B5-1.d). Nunca rompe el create: sin EnergyCatalog inyectado,
-   * fuente no cargada o cualquier falla → se saltea (degradación honesta). El precio autoritativo sigue
-   * siendo el viejo.
-   */
-  /**
-   * B5 · costo de energía por km de una oferta = precio(fuente del EnergyCatalog) ÷ rendimiento de la
-   * oferta. 0 si no hay catálogo inyectado / fuente no cargada / falla (degradación honesta). Lo usan el
-   * shadow-compare (flag OFF) y la tarifa autoritativa nueva (flag ON · B5-1.d).
-   */
-  private async resolveEnergyPerKmCents(offering: OfferingSpec): Promise<number> {
-    if (!this.energyCatalog) return 0;
-    try {
-      const price = await this.energyCatalog.getPriceFor(offering.referenceEnergySourceId);
-      if (price === null) return 0; // fuente no cargada → sin recargo (degradación honesta)
-      return deriveFuelPerKmCents(price, offering.referenceEfficiency);
-    } catch (err) {
-      this.logger.warn(
-        `energía no disponible (${(err as Error).message}); uso 0 (degradación honesta · B5)`,
-      );
-      return 0;
-    }
-  }
-
-  private async shadowLogFareDelta(
-    offering: OfferingSpec,
-    route: { distanceMeters: number; durationSeconds: number },
-    surge: number,
-    childMode: boolean,
-    pricing: OfferingPricingPolicy,
-    oldFuelPerKmCents: number,
-    authoritativeFareCents: number,
-  ): Promise<void> {
-    if (!this.energyCatalog) return;
-    try {
-      const energyPerKmCents = await this.resolveEnergyPerKmCents(offering);
-      const delta = shadowCompareFare(
-        {
-          distanceMeters: route.distanceMeters,
-          durationSeconds: route.durationSeconds,
-          surgeMultiplier: surge,
-          childMode,
-        },
-        pricing,
-        oldFuelPerKmCents,
-        energyPerKmCents,
-      );
-      this.logger.log(
-        `B5-1 shadow · oferta=${offering.id} energia=${offering.referenceEnergySourceId} ` +
-          `energyPerKm=${energyPerKmCents} viejo=${delta.oldCents} nuevo=${delta.newCents} ` +
-          `delta=${delta.deltaCents} (autoritativo=viejo=${authoritativeFareCents}, sin flip)`,
-      );
-    } catch (err) {
-      this.logger.warn(`B5-1 shadow-compare falló (${(err as Error).message}); ignorado`);
     }
   }
 
@@ -543,18 +445,11 @@ export class TripsService {
     //  - FIXED (BR-T05 + ADR 013 §1.7): IGNORA el bid, calcula la tarifa firme por ruta y le aplica la
     //    política de la oferta — max(round(calculateFare × multiplier), minFareCents); seq=0.
     // Un modo sin strategy falla FUERTE (forMode lanza), no cae silenciosamente en PUJA.
-    // Las 4 lecturas de config de pricing son INDEPENDIENTES entre sí → en paralelo (no encadenar awaits en
+    // Las 2 lecturas de config de pricing son INDEPENDIENTES entre sí → en paralelo (no encadenar awaits en
     // el hot-path del create). Notas por insumo:
-    //  - B3 fuel: recargo de combustible por km (admin). Solo FIXED lo aplica; degradación honesta a 0.
-    //  - B5-1.d energía: con el FLIP+FIXED, precio fuente ÷ rendimiento (autoritativo, lanza si falta precio);
-    //    fuera de ese gate → 0 (PUJA/flip-OFF la ignoran; resolverla acoplaría la puja al catálogo).
     //  - bid-floor: piso AUTORITATIVO de la puja per-(zona, oferta) (ADR 010 §9.3).
     //  - F2.4 base: banderazo/km/min vigentes (admin); solo FIXED; degrada a las constantes de código.
-    const [fuelPerKmCents, energyPerKmCents, bidFloorCents, baseFare] = await Promise.all([
-      this.resolveFuelPerKmCents(),
-      this.energyModelEnabled && mode === PricingMode.FIXED
-        ? resolveAuthoritativeEnergy(this.energyCatalog, offering)
-        : Promise.resolve(0),
+    const [bidFloorCents, baseFare] = await Promise.all([
       this.resolveBidFloorCents(origin, offering.id),
       this.resolveBaseFare(),
     ]);
@@ -564,25 +459,9 @@ export class TripsService {
       route: { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
       surge,
       childMode: dto.childMode ?? false,
-      fuelPerKmCents,
-      energyPerKmCents,
       ...baseFare,
-      energyModelEnabled: this.energyModelEnabled,
       pricing: effectivePricing,
     });
-    // B5-1.b · shadow-compare SOLO cuando el flag está OFF (solo FIXED; en PUJA el bid ES el precio).
-    // Con el flag ON la fórmula nueva ya es autoritativa → no hay nada que "shadowear".
-    if (mode === PricingMode.FIXED && !this.energyModelEnabled) {
-      await this.shadowLogFareDelta(
-        offering,
-        { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
-        surge,
-        dto.childMode ?? false,
-        effectivePricing,
-        fuelPerKmCents,
-        fareCents,
-      );
-    }
     const currency = 'PEN';
 
     // ADR 011 · el modo RESUELTO se CONGELA en la fila del viaje. Reasignación / activación de
@@ -1694,34 +1573,21 @@ export class TripsService {
     const waypoints = readWaypoints(trip);
     const route = await this.maps.route(origin, destination, waypoints);
     const surge = Number(trip.surgeMultiplier.toString());
-    // Re-cotiza con la MISMA política de la oferta del viaje (multiplier + mínima) y, bajo el flip + FIXED,
-    // la energía autoritativa — espejo del create (F2.1b). Sin esto, `calculateFare` base reseteaba la tarifa
-    // sin multiplier ni energía: un FIXED Premium/XL podía cambiar de destino (aun al mismo punto) y cobrar
-    // de menos. En FIXED SIN piso contra `trip.fareCents` (un destino MÁS CERCA debe abaratar); en PUJA SÍ hay
-    // piso al bid acordado (ver A3, más abajo). El piso de la mínima de la oferta ya está dentro de las fórmulas.
+    // Re-cotiza con la MISMA política de la oferta del viaje (multiplier + mínima) — espejo del create.
+    // Sin esto, `calculateFare` base reseteaba la tarifa sin multiplier: un FIXED Premium/XL podía cambiar
+    // de destino (aun al mismo punto) y cobrar de menos. En FIXED SIN piso contra `trip.fareCents` (un
+    // destino MÁS CERCA debe abaratar); en PUJA SÍ hay piso al bid acordado (ver A3, más abajo). El piso de
+    // la mínima de la oferta ya está dentro de la fórmula.
     const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
-    // El recargo de combustible (B3) se pliega en la rama flip-OFF — espejo COMPLETO del create FIXED, que
-    // resuelve y aplica el fuel (fixed-dispatch.strategy). En la rama flip-ON la energía pass-through lo
-    // reemplaza (calculateOfferingFare IGNORA fuelPerKmCents). Sin esto, cambiar de destino con fuel admin>0
-    // abarataba la tarifa por el componente de combustible (cobro-de-menos en el camino legacy, el ACTIVO hoy).
-    const fuelPerKmCents = await this.resolveFuelPerKmCents();
     const fareInput = {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       surgeMultiplier: surge,
       childMode: trip.childMode,
-      fuelPerKmCents,
       // F2.4 · banderazo/km/min configurables (degradan a las constantes de código).
       ...(await this.resolveBaseFare()),
     };
-    const fare =
-      this.energyModelEnabled && trip.dispatchMode === PricingMode.FIXED
-        ? calculateOfferingFare(
-            fareInput,
-            offering.pricing,
-            await resolveAuthoritativeEnergy(this.energyCatalog, offering),
-          )
-        : applyOfferingPricing(calculateFare(fareInput), offering.pricing);
+    const fare = applyOfferingPricing(calculateFare(fareInput), offering.pricing);
     // ADR-022 P-A (A3) · en PUJA el `trip.fareCents` es un BID NEGOCIADO que el conductor ACEPTÓ. Cambiar el
     // destino NO puede cobrar por DEBAJO de lo acordado (regalarle plata al pasajero reseteando la
     // negociación hacia abajo) — espejo del piso de waypoint-proposal.service. En FIXED sí abarata (la tarifa

@@ -83,14 +83,6 @@ export const envSchema = z
     // HORAS, así que un cache corto absorbe el read-per-resolve (createTrip + quote). El PUT lo invalida
     // (cambio inmediato), así que el TTL solo acota la staleness ante ediciones desde OTRO proceso. 0 = off.
     PRICING_SCHEDULE_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10_000),
-    // B5-1.d · FLIP del modelo de energía. OFF (default) = fórmula vieja (fuel global plegado al per-km).
-    // ON = fórmula nueva (energía pass-through por oferta desde EnergyCatalog · multiplier solo posición).
-    // Se activa SOLO tras medir los shadow logs. `z.string().transform` robusto: solo 'true' → true (coerce.boolean
-    // trataría "false" como true). Default 'false'.
-    PRICING_ENERGY_MODEL_ENABLED: z
-      .string()
-      .default('false')
-      .transform((v) => v === 'true'),
   })
   .superRefine((env, ctx) => {
     // Mapbox sin token reventaría al construir el cliente (createMapsClient). Falla temprano y claro.

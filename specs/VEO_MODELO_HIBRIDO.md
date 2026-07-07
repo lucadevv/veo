@@ -63,16 +63,17 @@
 ### La cadena (DAG de configuración — ADR-017 §1.9)
 
 ```
-energía-con-precio → catálogo de MODELOS (fichas aprobadas) → OFERTAS/clases (requires)
+catálogo de MODELOS (fichas aprobadas) → OFERTAS/clases (requires)
    → tarifa base → costo/km → modo → comisión   →   dispatch / booking
 ```
+> *(El eslabón `energía-con-precio →` inicial se ELIMINÓ 2026-07: el modelo de energía/combustible del PRICING fue REMOVIDO — la tarifa on-demand usa un solo per-km all-in en la tarifa base. El `EnergySource` de la **ficha del vehículo** — fila de la tabla de arriba — NO era pricing y sigue. Ver ADR-017 header.)*
 
-El operador configura en ESTE orden ("admin primero"): sin energía no hay recargo; sin ficha aprobada el vehículo no es operable; sin oferta no hay tier que matchear.
+El operador configura en ESTE orden ("admin primero"): sin ficha aprobada el vehículo no es operable; sin oferta no hay tier que matchear.
 
 ### Dónde vive cada config (código vs admin-DB)
 
 - **EN CÓDIGO** (cambian al ritmo de releases, no de operación — ADR-013 §1, YAGNI): el set de `OfferingId`, la `VehicleClass`, y los `requires` de cada oferta. El admin solo cura **visibilidad** (overrides) y la **economía** por oferta.
-- **EN ADMIN-DB** (editable en caliente — ADR-017): tarifa base, comisión, costo/km (carpooling), precios de energía, modo, y la **aprobación de fichas** (`VehicleModelSpec`).
+- **EN ADMIN-DB** (editable en caliente — ADR-017): tarifa base (con per-km all-in), comisión, costo/km (carpooling), modo, y la **aprobación de fichas** (`VehicleModelSpec`). *(Los "precios de energía" del pricing se removieron 2026-07 — el per-km all-in vive en la tarifa base; ADR-017 header.)*
 
 ### El desacople (la deuda DURA del match — ADR-017 §5)
 
@@ -102,7 +103,7 @@ El tier-gate de dispatch lee `seats`/`segment`/`vehicleYear` del **ping de GPS**
 
 > **Decisión RATIFICADA (2026-06-26 · [ADR-017](../docs/adr/017-modelo-pricing-energia-tiers.md)):** el **carpooling es SOLO FIJO** — el conductor fija el precio del asiento DENTRO de un tope cost-sharing (server-side, anti-exageración), nunca el sistema (eso sería precio comercial = "lucro"). **PUJA queda solo para AHORA** (inDrive, F6). El nudo legal cost-sharing vs comercial se valida con legal PE/EC antes de prod.
 >
-> 📐 **El modelo COMPLETO de pricing/energía/tiers/comisión del híbrido está en [ADR-017](../docs/adr/017-modelo-pricing-energia-tiers.md)** (energía: un precio por tipo, sin octanaje, class-reference · tiers: Económico/Normal/**Premium** por segmento + XL por capacidad · tarifa base y comisión configurables por país · **dos** costo/km distintos (combustible/km on-demand, derivado de energía · operación/km carpooling, directo editable — NO se unifican, ADR-017 §1.4) · peajes **dentro** del cost-cap del carpooling (ADR-017 §1.7) · OCR del combustible de la TIVe · y el **orden de configuración del admin**, que va ANTES que la UI de las apps).
+> 📐 **El modelo COMPLETO de pricing/tiers/comisión del híbrido está en [ADR-017](../docs/adr/017-modelo-pricing-energia-tiers.md)** (⚠️ el modelo de **energía/combustible del PRICING fue REMOVIDO 2026-07** — la tarifa on-demand usa **un solo per-km all-in** en la tarifa base, ver ADR-017 header · tiers: Económico/Normal/**Premium** por segmento + XL por capacidad · tarifa base y comisión configurables por país · el carpooling usa su **costo de operación/km directo editable** en el cost-cap (ADR-017 §1.4) · peajes **dentro** del cost-cap del carpooling (ADR-017 §1.7) · OCR del combustible de la TIVe **para la ficha/economía del conductor, NO para el precio** (§1.8) · y el **orden de configuración del admin**, que va ANTES que la UI de las apps).
 
 ---
 
@@ -270,7 +271,7 @@ El **cimiento backend del carpooling ya está** (F0 + backend de F1/F2/F3). Pero
 
 0. **Alinear los planos** ([ADR-017](../docs/adr/017-modelo-pricing-energia-tiers.md) + este doc) con las decisiones de pricing/energía/tiers. *(en curso)*
 1. **Cablear `booking-service` en el dev-stack** — enabler: hoy no se levanta con el orquestador; sin esto no hay e2e local.
-2. **Cimiento de configuración del admin (la ESPINA, en orden de dependencia)** — energía → catálogo de modelos → ofertas/clases (incl. **Premium** + foto) → tarifa base por país → costo/km del carpooling (directo, distinto del on-demand) → modo → comisión por país/modo. Acá se arreglan las 3 incoherencias de Finanzas + la legibilidad de Flotas. Vocabulario canónico de toda esta cadena: §1.5. **(Es el A: sin esto, las apps no tienen de dónde leer.)**
+2. **Cimiento de configuración del admin (la ESPINA, en orden de dependencia)** — catálogo de modelos → ofertas/clases (incl. **Premium** + foto) → tarifa base por país (con el per-km all-in) → costo/km del carpooling (directo, cost-cap del carpooling) → modo → comisión por país/modo. *(El eslabón `energía →` inicial se removió 2026-07 — el pricing por energía fue eliminado, ADR-017 header.)* Acá se arreglan las 3 incoherencias de Finanzas + la legibilidad de Flotas. Vocabulario canónico de toda esta cadena: §1.5. **(Es el A: sin esto, las apps no tienen de dónde leer.)**
 3. **F1 UI conductor** — publicar viaje (ruta→stopovers→fecha/hora→asientos→precio FIJO) contra `published-trips`.
 4. **F2 UI pasajero** — búsqueda ruta+fecha+#asientos → resultados+filtros → detalle, contra la búsqueda H3.
 5. **F3 UI** — reservar (pasajero) + aprobar/rechazar (conductor); el backend ya está. Apenas la UI se enchufa, el marketplace TRANSACCIONA.
