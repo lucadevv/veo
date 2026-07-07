@@ -230,8 +230,10 @@ export function CatalogPanel({
       <p className="flex items-start gap-2 text-xs text-ink-subtle">
         <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
         <span>
-          Al editar, se valida en vivo: se avisa en la fila si el piso de puja de una oferta supera su
-          tarifa mínima fija (el mismo viaje saldría más barato en FIJO que el mínimo pujable).
+          El piso de puja tiene su <strong className="font-medium text-ink-muted">default global en On-demand</strong>{' '}
+          y se pisa por servicio acá; la <strong className="font-medium text-ink-muted">tarifa mínima</strong> es por
+          servicio. Al editar, se valida en vivo: se avisa si el piso supera la mínima (el mismo viaje
+          saldría más barato en FIJO que el mínimo pujable).
         </span>
       </p>
 
@@ -573,7 +575,8 @@ function OfferingRow({
               <span>
                 El piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) supera la tarifa mínima
                 fija (S/{formatSolesInput(crossWarn.fixedMinCents)}): el mismo viaje sale más barato
-                en FIJO que el mínimo que se puede pujar.
+                en FIJO que el mínimo que se puede pujar. Bajá el piso (su default vive en On-demand;
+                acá lo pisás por servicio) o subí la tarifa mínima de esta fila.
               </span>
             </p>
           </td>
