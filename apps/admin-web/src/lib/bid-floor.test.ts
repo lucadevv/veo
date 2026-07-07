@@ -90,7 +90,7 @@ describe('withFloorOverride · upsert/quita preservando el resto', () => {
 
 /**
  * A2 — el panel de Precios edita SOLO el piso por defecto global. Como el `PUT` es wholesale, el body debe
- * REMANDAR los overrides por oferta TAL CUAL están persistidos (se editan en "Tarifas por oferta"): perderlos
+ * REMANDAR los overrides por oferta TAL CUAL están persistidos (se editan en "Ofertas de servicio"): perderlos
  * sería borrar dinero. Este es el invariante que blinda el adelgazamiento del panel.
  */
 describe('bidFloorDefaultReplace · cambia el default PRESERVANDO los overrides por oferta', () => {

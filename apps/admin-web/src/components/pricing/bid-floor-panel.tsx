@@ -16,8 +16,8 @@ const MAX_SOLES = 1000;
 
 /**
  * Piso por DEFECTO de la PUJA (ADR 010 §9.3). Este panel edita SOLO el piso global por defecto: el mínimo que un
- * pasajero puede ofertar en modo PUJA cuando la oferta no tiene un piso propio. Los pisos POR OFERTA (ej. moto
- * más bajo que confort) se editan en "Tarifas por oferta" (A1) — acá se PRESERVAN intactos (el `PUT` es
+ * pasajero puede ofertar en modo PUJA cuando la oferta no tiene un piso propio. Los pisos POR SERVICIO (ej. moto
+ * más bajo que confort) se editan en "Ofertas de servicio" (A1) — acá se PRESERVAN intactos (el `PUT` es
  * wholesale, así que se remandan tal cual con `bidFloorDefaultReplace`). trip-service aplica el piso como gate
  * AUTORITATIVO en createTrip/rebid y el quote lo MUESTRA por oferta (el MISMO resolver). Per-zona queda
  * zone-ready (hoy zona única GLOBAL). Server-driven: la UI solo refleja `pricing:manage`; admin-bff +
@@ -34,7 +34,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
     success: (p) => `Piso por defecto guardado: S/${formatSolesInput(p.defaultFloorCents)}`,
   });
 
-  // Piso por defecto (soles). Los overrides por oferta NO se editan acá — viven en "Tarifas por oferta".
+  // Piso por defecto (soles). Los overrides por servicio NO se editan acá — viven en "Ofertas de servicio".
   const [defaultSoles, setDefaultSoles] = useState<string>(formatSolesInput(config.defaultFloorCents));
 
   const defaultCents = parseSolesInput(defaultSoles);
@@ -54,7 +54,7 @@ export function BidFloorPanel({ config }: { config: BidFloorView }) {
     <ConfigCard
       title="Piso de puja"
       tag="default global"
-      description="La oferta MÍNIMA que un pasajero puede proponer en el carril PUJA, por defecto. El piso por oferta (ej. moto más bajo) se configura por fila en la tabla de abajo."
+      description="La oferta MÍNIMA que un pasajero puede proponer en el carril PUJA, por defecto. El piso por servicio (ej. moto más bajo) se configura por fila en Ofertas de servicio."
       footer={
         <SaveAction
           canManage={canManage}

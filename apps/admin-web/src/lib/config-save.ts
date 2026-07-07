@@ -33,7 +33,7 @@ export function errorMessage(prefix: string, err: unknown): string {
  * NO re-lanza: la re-sincronización (refetch) ya la hace el `onSettled` de la mutation en queries.ts.
  *
  * DEVUELVE `true` si el write tuvo éxito, `false` si fue conflicto (409) o cualquier otro error. Esto deja
- * que un caller con DOS writes secuenciales (catálogo + piso de puja en "Tarifas por oferta") haga
+ * que un caller con DOS writes secuenciales (catálogo + piso de puja en "Ofertas de servicio") haga
  * short-circuit: si el primero falla, NO dispara el segundo sobre un estado parcial. El toast no cambia;
  * el boolean es señal adicional para el caller (los call-sites que lo ignoran siguen compilando).
  */

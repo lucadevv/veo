@@ -66,7 +66,7 @@ function offeringIcon(o: CatalogOffering): LucideIcon {
 }
 
 /**
- * Tarifas por oferta (ADR 013 · Fase B / A1). El admin prende/apaga cada oferta y, por oferta, pinea el MODO
+ * Ofertas de servicio (ADR 013 · Fase B / A1). El admin prende/apaga cada oferta y, por oferta, pinea el MODO
  * (PUJA/FIXED, restringido a lo que la oferta permite), ajusta el PRECIO (multiplicador + tarifa mínima FIJA)
  * y —para las ofertas que pujan— el PISO de la PUJA. A1 unifica acá los DOS mínimos que antes vivían partidos
  * (tarifa fija en Catálogo, piso de puja en Precios) con validación cruzada visible. El pasajero ve/cotiza/crea
@@ -75,7 +75,7 @@ function offeringIcon(o: CatalogOffering): LucideIcon {
  * El catálogo y el piso de la PUJA son DOS configs distintas (endpoint + versión/CAS propios): cada una tiene
  * su Guardar, su step-up y su optimistic-locking. No se mezclan en un PUT — serían dos mutations no-atómicas.
  *
- * Diseño (veo.pen · "Tarifas por oferta"): UNA tabla PLANA — las ofertas se listan por su `sortOrder`, sin
+ * Diseño (veo.pen · "Ofertas de servicio"): UNA tabla PLANA — las ofertas se listan por su `sortOrder`, sin
  * agrupar por eje (calidad/capacidad/especial). Cada fila trae modo (select), multiplicador, los dos mínimos,
  * el switch de disponibilidad y un icon-button de guardado.
  */
