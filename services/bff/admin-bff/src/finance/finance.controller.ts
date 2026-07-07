@@ -16,7 +16,12 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { PayoutView, PayoutDetailView, RefundablePaymentView } from '@veo/api-client';
+import type {
+  PayoutView,
+  PayoutDetailView,
+  RefundablePaymentView,
+  ReconciliationRunView,
+} from '@veo/api-client';
 import {
   FinanceService,
   type CommissionView,
@@ -28,6 +33,7 @@ import {
 } from './finance.service';
 import {
   PayoutsQueryDto,
+  ReconciliationQueryDto,
   RunPayoutsDto,
   RefundDto,
   ReplaceCommissionDto,
@@ -58,6 +64,15 @@ export class FinanceController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PayoutDetailView> {
     return this.finance.getPayoutDetail(user, id);
+  }
+
+  @Get('reconciliation')
+  @ApiOperation({ summary: 'Historial de corridas de conciliación diaria (BR-P07) — FINANCE' })
+  reconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ReconciliationQueryDto,
+  ): Promise<{ items: ReconciliationRunView[]; nextCursor: string | null }> {
+    return this.finance.getReconciliation(user, query);
   }
 
   @Post('payouts/run')

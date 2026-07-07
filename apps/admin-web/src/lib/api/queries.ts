@@ -36,6 +36,7 @@ import {
   bidFloorView,
   refundablePaymentView,
   payoutDetailView,
+  reconciliationRunView,
   type ReplaceBaseFareRequest,
   type ReplaceCommissionRequest,
   type ReplaceCostPerKmRequest,
@@ -87,6 +88,7 @@ export const qk = {
   payouts: (status: string) => ['payouts', status] as const,
   paymentByTrip: (tripId: string) => ['payment-by-trip', tripId] as const,
   payoutDetail: (id: string) => ['payout-detail', id] as const,
+  reconciliation: ['reconciliation'] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
@@ -724,6 +726,23 @@ export function usePayouts(status: string) {
         schema: payoutPage,
         signal,
         query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+const reconciliationPage = paginated(reconciliationRunView);
+
+/* ── Historial de conciliación diaria (BR-P07): corridas DB vs extracto del gateway — FINANCE/ADMIN ── */
+export function useReconciliation() {
+  return useInfiniteQuery({
+    queryKey: qk.reconciliation,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/finance/reconciliation', {
+        schema: reconciliationPage,
+        signal,
+        query: cleanQuery({ cursor: pageParam, limit: 50 }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });

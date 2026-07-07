@@ -12,6 +12,7 @@ import type {
   CostPerKmConfigView,
   CostPerKmListView,
   RefundablePaymentView,
+  ReconciliationRunView,
 } from '@veo/api-client';
 import { REST_PAYMENT, REST_BOOKING } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
@@ -79,6 +80,24 @@ interface PaymentRow {
   tipCents: number;
   capturedAt: string | null;
   refundedAt: string | null;
+  createdAt: string;
+}
+
+/** Fila cruda de una corrida de conciliación (GET /reconciliation) que sirve payment-service: el model delgado
+ *  `ReconciliationRun` con el `details` Json opaco. El aplanado a la view tipada se hace en el mapper. */
+interface ReconRow {
+  id: string;
+  ranAt: string;
+  discrepancyPct: number;
+  alerted: boolean;
+  details: {
+    periodStart?: string;
+    periodEnd?: string;
+    dbTotalCents?: number;
+    statementTotalCents?: number;
+    dbCount?: number;
+    statementCount?: number;
+  } | null;
   createdAt: string;
 }
 
@@ -318,6 +337,22 @@ export class FinanceService {
     const row = await this.rest.get<PayoutDetailRow>(`/payouts/${payoutId}`, { identity });
     return toPayoutDetailView(row);
   }
+
+  /**
+   * Historial paginado de corridas de conciliación (BR-P07) para el panel FINANCE. Cierra el hueco #3: el
+   * `ReconciliationRun` lo puebla el cron pero no estaba expuesto al admin. Es data AGREGADA del sistema (no
+   * PII de una persona) → gate `@Roles` de clase, SIN step-up y SIN audit (espeja listPayouts/getPayoutDetail).
+   */
+  async getReconciliation(
+    identity: AuthenticatedUser,
+    query: { cursor?: string; limit?: number },
+  ): Promise<Page<ReconciliationRunView>> {
+    const page = await this.rest.get<Page<ReconRow>>('/reconciliation', {
+      identity,
+      query: { cursor: query.cursor, limit: query.limit },
+    });
+    return { items: page.items.map(toReconciliationRunView), nextCursor: page.nextCursor };
+  }
 }
 
 // Desglose completo al panel FINANCE (ADR-015 D6 / hueco #4): NO se descarta gross/commission/processedAt/
@@ -347,6 +382,24 @@ function toPayoutDetailView(p: PayoutDetailRow): PayoutDetailView {
     dedupKey: p.dedupKey,
     externalRef: p.externalRef,
     createdAt: p.createdAt,
+  };
+}
+
+// Aplana el `details` Json de la corrida a la view tipada. Corridas viejas sin details → period null + 0s
+// (degradación honesta: nunca inventamos montos). `discrepancyPct`/`alerted` viven en columnas propias.
+function toReconciliationRunView(r: ReconRow): ReconciliationRunView {
+  const d = r.details ?? {};
+  return {
+    id: r.id,
+    ranAt: r.ranAt,
+    discrepancyPct: r.discrepancyPct,
+    alerted: r.alerted,
+    periodStart: d.periodStart ?? null,
+    periodEnd: d.periodEnd ?? null,
+    dbTotalCents: d.dbTotalCents ?? 0,
+    statementTotalCents: d.statementTotalCents ?? 0,
+    dbCount: d.dbCount ?? 0,
+    statementCount: d.statementCount ?? 0,
   };
 }
 

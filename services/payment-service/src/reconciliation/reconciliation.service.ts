@@ -14,7 +14,13 @@ import { uuidv7, withDistributedLock } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/gateway/payment-gateway.port';
-import { Prisma, PaymentMethod, PaymentStatus, RefundStatus } from '../generated/prisma';
+import {
+  Prisma,
+  PaymentMethod,
+  PaymentStatus,
+  RefundStatus,
+  type ReconciliationRun,
+} from '../generated/prisma';
 import { discrepancyPct } from '../payouts/payout.policy';
 import type { Env } from '../config/env.schema';
 
@@ -37,6 +43,18 @@ export interface ReconciliationResult {
   statementTotalCents: number;
   discrepancyPct: number;
   alerted: boolean;
+}
+
+const RECON_DEFAULT_LIMIT = 30;
+const RECON_MAX_LIMIT = 100;
+function clampReconLimit(limit?: number): number {
+  if (limit === undefined || !Number.isFinite(limit)) return RECON_DEFAULT_LIMIT;
+  return Math.min(Math.max(Math.trunc(limit), 1), RECON_MAX_LIMIT);
+}
+
+export interface ReconciliationRunPage {
+  items: ReconciliationRun[];
+  nextCursor: string | null;
 }
 
 export interface StaleRefundSweepResult {
@@ -283,6 +301,26 @@ export class ReconciliationService {
       discrepancyPct: pct,
       alerted,
     };
+  }
+
+  /**
+   * Historial paginado de corridas de conciliación (BR-P07) para el panel FINANCE. Orden cronológico
+   * descendente por id (uuidv7 ⇒ monotónico temporal, mismo criterio que `listAll` de payouts). El detalle rico
+   * (montos DB vs extracto + conteos) viaja en `details` Json; el admin-bff lo aplana a una view tipada.
+   */
+  async listRuns(opts: { cursor?: string; limit?: number }): Promise<ReconciliationRunPage> {
+    const limit = clampReconLimit(opts.limit);
+    const where: Prisma.ReconciliationRunWhereInput = {};
+    if (opts.cursor) where.id = { lt: opts.cursor };
+    const rows = await this.prisma.read.reconciliationRun.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: limit + 1,
+    });
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items[items.length - 1];
+    return { items, nextCursor: hasMore && last ? last.id : null };
   }
 }
 

@@ -252,6 +252,26 @@ export const payoutDetailView = payoutView.extend({
 });
 export type PayoutDetailView = z.infer<typeof payoutDetailView>;
 
+/**
+ * Corrida de conciliación diaria (GET /finance/reconciliation · BR-P07) — compara lo capturado en DB (Yape/Plin)
+ * contra el extracto del gateway. `discrepancyPct` (0..1) + `alerted` (true = sobre umbral) resumen el resultado;
+ * el detalle (montos DB vs extracto + conteos) se aplana desde el `details` Json de la corrida. Corridas viejas
+ * sin `details` exponen period null + montos/conteos en 0. Dinero SIEMPRE Int céntimos.
+ */
+export const reconciliationRunView = z.object({
+  id: z.string(),
+  ranAt: z.string(),
+  discrepancyPct: z.number(),
+  alerted: z.boolean(),
+  periodStart: z.string().nullable(),
+  periodEnd: z.string().nullable(),
+  dbTotalCents: z.number().int(),
+  statementTotalCents: z.number().int(),
+  dbCount: z.number().int().nonnegative(),
+  statementCount: z.number().int().nonnegative(),
+});
+export type ReconciliationRunView = z.infer<typeof reconciliationRunView>;
+
 export const auditEntryView = z.object({
   id: z.string(),
   seq: z.string(),

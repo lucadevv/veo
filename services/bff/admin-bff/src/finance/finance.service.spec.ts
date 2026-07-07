@@ -6,7 +6,12 @@
  * conductor). Este test es el guardrail de que el desglose viaja de punta a punta.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { payoutView, payoutDetailView, refundablePaymentView } from '@veo/api-client';
+import {
+  payoutView,
+  payoutDetailView,
+  refundablePaymentView,
+  reconciliationRunView,
+} from '@veo/api-client';
 import { FinanceService } from './finance.service';
 
 const operator = { userId: 'op-1', type: 'admin', roles: ['FINANCE'] } as never;
@@ -319,5 +324,106 @@ describe('FinanceService.getPayoutDetail · hueco #1 (breakdown de auditoría)',
     const { svc } = makePayoutDetailService(payoutDetailRow());
     const view = await svc.getPayoutDetail(operator, 'pay-detail-1');
     expect(() => payoutDetailView.parse(view)).not.toThrow();
+  });
+});
+
+/**
+ * getReconciliation · hueco #3 — el panel FINANCE ve el historial de conciliación. Lo crítico: (1) ruta interna
+ * /reconciliation con paginación; (2) el mapper APLANA el `details` Json a la view tipada; (3) corridas viejas
+ * SIN details → period null + montos 0 (degradación honesta); (4) NO audita (data agregada, no PII de persona).
+ */
+interface ReconRowFull {
+  id: string;
+  ranAt: string;
+  discrepancyPct: number;
+  alerted: boolean;
+  details: {
+    periodStart?: string;
+    periodEnd?: string;
+    dbTotalCents?: number;
+    statementTotalCents?: number;
+    dbCount?: number;
+    statementCount?: number;
+  } | null;
+  createdAt: string;
+}
+
+function reconRow(over: Partial<ReconRowFull> = {}): ReconRowFull {
+  return {
+    id: 'recon-1',
+    ranAt: '2026-06-11T04:00:00.000Z',
+    discrepancyPct: 0.002,
+    alerted: false,
+    details: {
+      periodStart: '2026-06-10T00:00:00.000Z',
+      periodEnd: '2026-06-11T00:00:00.000Z',
+      dbTotalCents: 100_000,
+      statementTotalCents: 100_200,
+      dbCount: 40,
+      statementCount: 40,
+    },
+    createdAt: '2026-06-11T04:00:00.000Z',
+    ...over,
+  };
+}
+
+function makeReconService(rows: ReconRowFull[]) {
+  const rest = { get: vi.fn().mockResolvedValue({ items: rows, nextCursor: null }), post: vi.fn() };
+  const bookingRest = { get: vi.fn(), put: vi.fn() };
+  const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
+  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
+  return { svc, rest, audit };
+}
+
+describe('FinanceService.getReconciliation · hueco #3 (historial de conciliación)', () => {
+  it('llama la ruta interna /reconciliation con la identidad + paginación', async () => {
+    const { svc, rest } = makeReconService([reconRow()]);
+    await svc.getReconciliation(operator, { cursor: 'c1', limit: 20 });
+    expect(rest.get).toHaveBeenCalledWith(
+      '/reconciliation',
+      expect.objectContaining({
+        identity: operator,
+        query: expect.objectContaining({ cursor: 'c1', limit: 20 }),
+      }),
+    );
+  });
+
+  it('APLANA el details Json a la view tipada (montos DB vs extracto + conteos + discrepancia)', async () => {
+    const { svc } = makeReconService([reconRow()]);
+    const page = await svc.getReconciliation(operator, {});
+    const view = page.items[0]!;
+    expect(view.periodStart).toBe('2026-06-10T00:00:00.000Z');
+    expect(view.dbTotalCents).toBe(100_000);
+    expect(view.statementTotalCents).toBe(100_200);
+    expect(view.dbCount).toBe(40);
+    expect(view.discrepancyPct).toBe(0.002);
+    expect(view.alerted).toBe(false);
+  });
+
+  it('corrida vieja SIN details → period null + montos/conteos en 0 (degradación honesta)', async () => {
+    const { svc } = makeReconService([reconRow({ details: null })]);
+    const page = await svc.getReconciliation(operator, {});
+    const view = page.items[0]!;
+    expect(view.periodStart).toBeNull();
+    expect(view.periodEnd).toBeNull();
+    expect(view.dbTotalCents).toBe(0);
+    expect(view.statementCount).toBe(0);
+  });
+
+  it('NO audita (data agregada del sistema, no PII de una persona)', async () => {
+    const { svc, audit } = makeReconService([reconRow()]);
+    await svc.getReconciliation(operator, {});
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('el resultado satisface el contrato Zod reconciliationRunView (parse no lanza)', async () => {
+    const { svc } = makeReconService([
+      reconRow(),
+      reconRow({ id: 'recon-2', alerted: true, discrepancyPct: 0.05 }),
+    ]);
+    const page = await svc.getReconciliation(operator, {});
+    for (const view of page.items) {
+      expect(() => reconciliationRunView.parse(view)).not.toThrow();
+    }
   });
 });
