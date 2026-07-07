@@ -235,6 +235,23 @@ export const payoutView = z.object({
 });
 export type PayoutView = z.infer<typeof payoutView>;
 
+/**
+ * Detalle de un payout (GET /finance/payouts/:id) para el panel FINANCE — el breakdown de AUDITORÍA que la lista
+ * no trae. Abre el NETO firmado `debtAppliedCents` en sus dos componentes por FK: `debtSettledCents` (deuda CASH
+ * deducida en ESTE payout, DriverDebt.settledInPayoutId) y `creditBackCents` (credit-back acreditado,
+ * DriverCredit.appliedInPayoutId). Suma la traza del desembolso (`dedupKey`, `externalRef`) y `createdAt`.
+ * Dinero SIEMPRE Int céntimos. Invariante: `debtAppliedCents = debtSettledCents − creditBackCents`.
+ */
+export const payoutDetailView = payoutView.extend({
+  debtSettledCents: z.number().int().nonnegative(),
+  creditBackCents: z.number().int().nonnegative(),
+  debtAppliedCents: z.number().int(),
+  dedupKey: z.string().nullable(),
+  externalRef: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type PayoutDetailView = z.infer<typeof payoutDetailView>;
+
 export const auditEntryView = z.object({
   id: z.string(),
   seq: z.string(),

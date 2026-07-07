@@ -35,6 +35,7 @@ import {
   energyCatalogView,
   bidFloorView,
   refundablePaymentView,
+  payoutDetailView,
   type ReplaceBaseFareRequest,
   type ReplaceCommissionRequest,
   type ReplaceCostPerKmRequest,
@@ -85,6 +86,7 @@ export const qk = {
   vehicleModels: ['vehicle-models'] as const,
   payouts: (status: string) => ['payouts', status] as const,
   paymentByTrip: (tripId: string) => ['payment-by-trip', tripId] as const,
+  payoutDetail: (id: string) => ['payout-detail', id] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
   modeSchedule: ['mode-schedule'] as const,
@@ -811,6 +813,16 @@ export function usePaymentByTrip(tripId: string | null) {
       apiClient().get(`/finance/payments/by-trip/${tripId}`, { schema: refundablePaymentView, signal }),
     // Solo consulta cuando hay un tripId (el operador tipeó/pegó el viaje a reembolsar); sin él no hay nada que ver.
     enabled: !!tripId,
+  });
+}
+
+/* ── Detalle de un payout: breakdown de auditoría (deuda CASH + credit-back neteados por FK) — FINANCE/ADMIN ── */
+export function usePayoutDetail(payoutId: string | null) {
+  return useQuery({
+    queryKey: qk.payoutDetail(payoutId ?? ''),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/finance/payouts/${payoutId}`, { schema: payoutDetailView, signal }),
+    enabled: !!payoutId,
   });
 }
 

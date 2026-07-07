@@ -16,7 +16,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import type { PayoutView, RefundablePaymentView } from '@veo/api-client';
+import type { PayoutView, PayoutDetailView, RefundablePaymentView } from '@veo/api-client';
 import {
   FinanceService,
   type CommissionView,
@@ -47,6 +47,17 @@ export class FinanceController {
     @Query() query: PayoutsQueryDto,
   ): Promise<{ items: PayoutView[]; nextCursor: string | null }> {
     return this.finance.listPayouts(user, query);
+  }
+
+  @Get('payouts/:id')
+  @ApiOperation({
+    summary: 'Detalle de un payout con breakdown (deuda CASH y credit-back neteados por FK)',
+  })
+  payoutDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PayoutDetailView> {
+    return this.finance.getPayoutDetail(user, id);
   }
 
   @Post('payouts/run')

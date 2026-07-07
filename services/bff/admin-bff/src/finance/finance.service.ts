@@ -7,6 +7,7 @@ import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
 import type {
   PayoutView,
+  PayoutDetailView,
   CommissionView,
   CostPerKmConfigView,
   CostPerKmListView,
@@ -46,6 +47,17 @@ interface Payout {
   periodEnd: string;
   processedAt: string | null;
   heldReason: string | null;
+}
+
+/** Fila del DETALLE de un payout (GET /payouts/:id): la fila completa + el desglose del netting que
+ *  payment-service abre por FK (credit-back y deuda CASH ligados a este payout). Additive sobre `Payout`. */
+interface PayoutDetailRow extends Payout {
+  debtAppliedCents: number;
+  dedupKey: string | null;
+  externalRef: string | null;
+  createdAt: string;
+  creditBackCents: number;
+  debtSettledCents: number;
 }
 
 /** Fila cruda del Payment que sirve payment-service (GET /payments/by-trip/:tripId, SIN `select` → fila
@@ -292,6 +304,20 @@ export class FinanceService {
     });
     return view;
   }
+
+  /**
+   * Detalle de un payout para el panel FINANCE (breakdown de auditoría: deuda CASH y credit-back neteados por
+   * FK, + traza del desembolso). Es lectura de los montos del PROPIO conductor (no PII de un tercero) → gate
+   * `@Roles` de clase, SIN step-up y SIN audit — espeja `listPayouts`, NO `getPaymentByTrip` (que audita por la
+   * PII de riel del pasajero). El desglose lo abre payment-service por FK; acá solo se mapea.
+   */
+  async getPayoutDetail(
+    identity: AuthenticatedUser,
+    payoutId: string,
+  ): Promise<PayoutDetailView> {
+    const row = await this.rest.get<PayoutDetailRow>(`/payouts/${payoutId}`, { identity });
+    return toPayoutDetailView(row);
+  }
 }
 
 // Desglose completo al panel FINANCE (ADR-015 D6 / hueco #4): NO se descarta gross/commission/processedAt/
@@ -307,6 +333,20 @@ function toPayoutView(p: Payout): PayoutView {
     period: `${p.periodStart}..${p.periodEnd}`,
     processedAt: p.processedAt,
     heldReason: p.heldReason,
+  };
+}
+
+// Extiende toPayoutView con el breakdown de auditoría (DRY: reusa el mapeo base). `debtAppliedCents` es el NETO
+// firmado ya persistido; `debtSettledCents`/`creditBackCents` son sus componentes abiertos por FK en el servicio.
+function toPayoutDetailView(p: PayoutDetailRow): PayoutDetailView {
+  return {
+    ...toPayoutView(p),
+    debtSettledCents: p.debtSettledCents,
+    creditBackCents: p.creditBackCents,
+    debtAppliedCents: p.debtAppliedCents,
+    dedupKey: p.dedupKey,
+    externalRef: p.externalRef,
+    createdAt: p.createdAt,
   };
 }
 

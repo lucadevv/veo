@@ -23,7 +23,7 @@ import {
   runPrismaMigrateDeploy,
   type TestDatabase,
 } from '@veo/database/testing';
-import { uuidv7 } from '@veo/utils';
+import { uuidv7, NotFoundError } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PayoutsService } from '../src/payouts/payouts.service';
@@ -439,5 +439,73 @@ describe('PayoutsService.runPayouts · credit-only (#25): pagar al conductor sin
     expect(payout.amountCents).toBe(7000); // 8000 crédito − 1000 deuda
     const debts = await prisma.driverDebt.findMany({ where: { driverId, status: 'PENDING' } });
     expect(debts).toHaveLength(0); // la deuda se saldó contra el crédito (SETTLED)
+  });
+});
+
+describe('PayoutsService.getPayout · hueco #1 (detalle con breakdown abierto por FK)', () => {
+  /** Inserta un Payout PROCESADO con su NETO firmado (debtAppliedCents) + traza del desembolso. */
+  async function seedPayout(debtAppliedCents = 0): Promise<string> {
+    const id = uuidv7();
+    await prisma.payout.create({
+      data: {
+        id,
+        driverId: uuidv7(),
+        periodStart: PERIOD_START,
+        periodEnd: PERIOD_END,
+        grossCents: 10000,
+        commissionCents: 2000,
+        amountCents: 8300,
+        debtAppliedCents,
+        status: 'PROCESSED',
+        dedupKey: `payout-disburse:${id}`,
+        externalRef: 'rail-ref-1',
+      },
+    });
+    return id;
+  }
+
+  it('abre el NETO en creditBack + debtSettled sumando SOLO lo ligado por FK a ESTE payout', async () => {
+    const svc = makeService(makeRedis().redis);
+    const payoutId = await seedPayout(-300); // 200 deuda − 500 crédito = −300 (a favor del conductor)
+    const driverId = uuidv7();
+    // crédito APLICADO a este payout (appliedInPayoutId)
+    await prisma.driverCredit.create({
+      data: {
+        id: uuidv7(), driverId, tripId: uuidv7(), amountCents: 500, sourcePaymentId: uuidv7(),
+        status: 'APPLIED', appliedInPayoutId: payoutId, appliedAt: new Date(),
+      },
+    });
+    // deuda SALDADA en este payout (settledInPayoutId)
+    await prisma.driverDebt.create({
+      data: {
+        id: uuidv7(), driverId, tripId: uuidv7(), paymentId: uuidv7(), amountCents: 200,
+        status: 'SETTLED', settledInPayoutId: payoutId, settledAt: new Date(),
+      },
+    });
+    // RUIDO: un crédito PENDING (no ligado a ningún payout) NO debe contarse en el detalle
+    await prisma.driverCredit.create({
+      data: { id: uuidv7(), driverId, tripId: uuidv7(), amountCents: 999, sourcePaymentId: uuidv7(), status: 'PENDING' },
+    });
+
+    const detail = await svc.getPayout(payoutId);
+    expect(detail.creditBackCents).toBe(500);
+    expect(detail.debtSettledCents).toBe(200);
+    expect(detail.debtAppliedCents).toBe(-300);
+    expect(detail.debtAppliedCents).toBe(detail.debtSettledCents - detail.creditBackCents); // invariante
+    expect(detail.dedupKey).toBe(`payout-disburse:${payoutId}`);
+    expect(detail.externalRef).toBe('rail-ref-1');
+  });
+
+  it('sin credit/debt ligados → creditBackCents y debtSettledCents en 0', async () => {
+    const svc = makeService(makeRedis().redis);
+    const payoutId = await seedPayout();
+    const detail = await svc.getPayout(payoutId);
+    expect(detail.creditBackCents).toBe(0);
+    expect(detail.debtSettledCents).toBe(0);
+  });
+
+  it('payout inexistente → NotFoundError', async () => {
+    const svc = makeService(makeRedis().redis);
+    await expect(svc.getPayout(uuidv7())).rejects.toBeInstanceOf(NotFoundError);
   });
 });

@@ -35,7 +35,13 @@ import {
   type PayoutGateway,
   type PayoutMethod,
 } from '../ports/gateway/payout-gateway.port';
-import { Prisma, PayoutStatus, type Payout } from '../generated/prisma';
+import {
+  Prisma,
+  PayoutStatus,
+  DriverCreditStatus,
+  DriverDebtStatus,
+  type Payout,
+} from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
@@ -97,6 +103,13 @@ export interface ReleaseHeldPayoutsResult {
 export interface PayoutPage {
   items: Payout[];
   nextCursor: string | null;
+}
+
+/** Detalle de un payout = la fila completa + el desglose del netting abierto por FK (credit-back y deuda CASH
+ *  ligados a ESTE payout). `debtAppliedCents` (en la fila) es el NETO firmado; estos dos son sus componentes. */
+export interface PayoutDetail extends Payout {
+  creditBackCents: number;
+  debtSettledCents: number;
 }
 const PAYOUTS_DEFAULT_LIMIT = 25;
 const PAYOUTS_MAX_LIMIT = 100;
@@ -751,6 +764,32 @@ export class PayoutsService {
     const items = hasMore ? rows.slice(0, limit) : rows;
     const last = items[items.length - 1];
     return { items, nextCursor: hasMore && last ? last.id : null };
+  }
+
+  /**
+   * Detalle de un payout para el panel FINANCE (breakdown de auditoría). `debtAppliedCents` es el NETO firmado
+   * ya persistido (deuda CASH − credit-back); acá lo ABRIMOS en sus dos componentes por las FK dedicadas
+   * (`DriverCredit.appliedInPayoutId` / `DriverDebt.settledInPayoutId`) para que el waterfall muestre credit-back
+   * y deuda CASH por SEPARADO. Dos `aggregate` acotados por FK (no un scan difuso por driver+período).
+   */
+  async getPayout(id: string): Promise<PayoutDetail> {
+    const payout = await this.prisma.read.payout.findUnique({ where: { id } });
+    if (!payout) throw new NotFoundError('Payout no encontrado');
+    const [credits, debts] = await Promise.all([
+      this.prisma.read.driverCredit.aggregate({
+        where: { appliedInPayoutId: id, status: DriverCreditStatus.APPLIED },
+        _sum: { amountCents: true },
+      }),
+      this.prisma.read.driverDebt.aggregate({
+        where: { settledInPayoutId: id, status: DriverDebtStatus.SETTLED },
+        _sum: { amountCents: true },
+      }),
+    ]);
+    return {
+      ...payout,
+      creditBackCents: credits._sum.amountCents ?? 0,
+      debtSettledCents: debts._sum.amountCents ?? 0,
+    };
   }
 
   /** Retención de payouts del conductor en review (consumido desde driver.flagged). */

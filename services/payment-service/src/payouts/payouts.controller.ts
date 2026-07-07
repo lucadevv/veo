@@ -29,6 +29,7 @@ import {
   PayoutsService,
   previousWeek,
   type PayoutPage,
+  type PayoutDetail,
   type PayoutDisburseSummary,
   type ReleaseHeldPayoutsResult,
 } from './payouts.service';
@@ -71,6 +72,19 @@ export class PayoutsController {
   })
   listAll(@Query() query: ListAllPayoutsQueryDto): Promise<PayoutPage> {
     return this.payouts.listAll({ status: query.status, cursor: query.cursor, limit: query.limit });
+  }
+
+  // ── Detalle de UN payout con breakdown de auditoría (FINANCE/ADMIN). Segmento `:id` DESPUÉS de `all` (estático)
+  // para que la paramétrica no capture "all". Lectura (sin step-up): el desglose es de los montos del conductor. ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get(':id')
+  @ApiOperation({
+    summary:
+      'Detalle de un payout con breakdown (deuda CASH y credit-back neteados por FK) — FINANCE/ADMIN',
+  })
+  getOne(@Param('id', ParseUUIDPipe) id: string): Promise<PayoutDetail> {
+    return this.payouts.getPayout(id);
   }
 
   // ── Disparo manual (BR-P05): mutación de PLATA → finance:payout es EXCLUSIVO de FINANCE (VEO_SPEC_ADMIN

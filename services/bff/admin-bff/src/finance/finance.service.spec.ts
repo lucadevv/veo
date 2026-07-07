@@ -6,7 +6,7 @@
  * conductor). Este test es el guardrail de que el desglose viaja de punta a punta.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { payoutView, refundablePaymentView } from '@veo/api-client';
+import { payoutView, payoutDetailView, refundablePaymentView } from '@veo/api-client';
 import { FinanceService } from './finance.service';
 
 const operator = { userId: 'op-1', type: 'admin', roles: ['FINANCE'] } as never;
@@ -224,5 +224,100 @@ describe('FinanceService.getPaymentByTrip · hueco #2 (inspección previa al ree
     const { svc } = makePaymentService(paymentRow());
     const view = await svc.getPaymentByTrip(operator, 'trip-1');
     expect(() => refundablePaymentView.parse(view)).not.toThrow();
+  });
+});
+
+/**
+ * getPayoutDetail · hueco #1 — el panel FINANCE ve el breakdown de auditoría (deuda CASH + credit-back neteados
+ * por FK). Lo crítico: (1) ruta interna correcta; (2) el mapper reusa toPayoutView + suma el breakdown;
+ * (3) NO audita (a diferencia de getPaymentByTrip) — son montos del propio conductor, no PII de un tercero.
+ */
+interface PayoutDetailRowFull {
+  id: string;
+  driverId: string;
+  grossCents: number;
+  commissionCents: number;
+  amountCents: number;
+  status: 'PENDING' | 'PROCESSING' | 'PROCESSED' | 'HELD' | 'FAILED';
+  periodStart: string;
+  periodEnd: string;
+  processedAt: string | null;
+  heldReason: string | null;
+  debtAppliedCents: number;
+  dedupKey: string | null;
+  externalRef: string | null;
+  createdAt: string;
+  creditBackCents: number;
+  debtSettledCents: number;
+}
+
+function payoutDetailRow(over: Partial<PayoutDetailRowFull> = {}): PayoutDetailRowFull {
+  return {
+    id: 'pay-detail-1',
+    driverId: 'drv-1',
+    grossCents: 10000,
+    commissionCents: 2000,
+    amountCents: 8300, // gross − commission − debtApplied(neto −300 = crédito a favor)
+    status: 'PROCESSED',
+    periodStart: '2026-06-16T00:00:00.000Z',
+    periodEnd: '2026-06-22T23:59:59.999Z',
+    processedAt: '2026-06-23T12:00:00.000Z',
+    heldReason: null,
+    debtAppliedCents: -300, // NETO firmado: 200 deuda − 500 crédito = −300 (a favor del conductor)
+    dedupKey: 'payout-disburse:pay-detail-1',
+    externalRef: 'rail-ref-xyz',
+    createdAt: '2026-06-23T11:00:00.000Z',
+    creditBackCents: 500,
+    debtSettledCents: 200,
+    ...over,
+  };
+}
+
+function makePayoutDetailService(row: PayoutDetailRowFull) {
+  const rest = { get: vi.fn().mockResolvedValue(row), post: vi.fn() };
+  const bookingRest = { get: vi.fn(), put: vi.fn() };
+  const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
+  const svc = new FinanceService(rest as never, bookingRest as never, audit as never);
+  return { svc, rest, audit };
+}
+
+describe('FinanceService.getPayoutDetail · hueco #1 (breakdown de auditoría)', () => {
+  it('llama la ruta interna /payouts/:id con la identidad del operador', async () => {
+    const { svc, rest } = makePayoutDetailService(payoutDetailRow());
+    await svc.getPayoutDetail(operator, 'pay-detail-1');
+    expect(rest.get).toHaveBeenCalledWith('/payouts/pay-detail-1', { identity: operator });
+  });
+
+  it('expone el breakdown: debtSettled + creditBack + debtApplied(neto) + traza del desembolso', async () => {
+    const { svc } = makePayoutDetailService(payoutDetailRow());
+    const view = await svc.getPayoutDetail(operator, 'pay-detail-1');
+    expect(view.debtSettledCents).toBe(200);
+    expect(view.creditBackCents).toBe(500);
+    expect(view.debtAppliedCents).toBe(-300);
+    expect(view.dedupKey).toBe('payout-disburse:pay-detail-1');
+    expect(view.externalRef).toBe('rail-ref-xyz');
+    // invariante del netting: debtApplied (neto firmado) = debtSettled − creditBack
+    expect(view.debtAppliedCents).toBe(view.debtSettledCents - view.creditBackCents);
+  });
+
+  it('reusa el mapeo base (gross/commission/neto/period/status) — paridad con payoutView', async () => {
+    const { svc } = makePayoutDetailService(payoutDetailRow());
+    const view = await svc.getPayoutDetail(operator, 'pay-detail-1');
+    expect(view.grossCents).toBe(10000);
+    expect(view.commissionCents).toBe(2000);
+    expect(view.amountCents).toBe(8300);
+    expect(view.period).toBe('2026-06-16T00:00:00.000Z..2026-06-22T23:59:59.999Z');
+  });
+
+  it('NO audita (montos del propio conductor, no PII de tercero — a diferencia de getPaymentByTrip)', async () => {
+    const { svc, audit } = makePayoutDetailService(payoutDetailRow());
+    await svc.getPayoutDetail(operator, 'pay-detail-1');
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('el resultado satisface el contrato Zod payoutDetailView (parse no lanza)', async () => {
+    const { svc } = makePayoutDetailService(payoutDetailRow());
+    const view = await svc.getPayoutDetail(operator, 'pay-detail-1');
+    expect(() => payoutDetailView.parse(view)).not.toThrow();
   });
 });
