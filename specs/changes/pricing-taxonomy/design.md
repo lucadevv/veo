@@ -1,64 +1,82 @@
-# Diseño — Pricing por tipo de servicio
+# Diseño — Pricing unificado (1 fórmula · params · 3 modos)
 
-## Modelo de dominio
-
-**Un servicio tiene un TIPO; el tipo determina el MOTOR de precio.**
+## La fórmula (única, money-critical — YA EXISTE)
 
 ```
-ServiceOffering
-  id, labelKey, icon, vehicleClass, serviceType, requires, defaultEnabled, sortOrder
-  serviceType ∈ { RIDE, SPECIAL, CARPOOL }   ← el eje que elige el motor
+tarifa = max( round( (base + perKm·km + perMin·min) × multiplier × surge ), minFare )   [+ FEE_NIÑO plano]
 ```
 
-### Motor 1 · RIDE (viajes on-demand)
+Es exactamente `calculateFirmFare(input, pricing)` de `trip-service/domain/fare.ts` (ya construido).
+**No cambia.** Todo servicio la usa. Lo "plano" de un mecánico = `perKm=0` → la fórmula da `base (+ perMin·min)`.
+
+## Los dos ejes de variación
+
+### Eje 1 · Parámetros por servicio
+El global (banderazo/km/min) es el DEFAULT. Cada oferta overridea lo que necesita:
+
+| Servicio | base | perKm | perMin | multiplier | modo |
+|---|---|---|---|---|---|
+| Económico | (default 6) | (1.20) | (0.30) | 1.0 | FIJO/PUJA |
+| Premium | (default) | (default) | (default) | 1.8 | FIJO/PUJA |
+| Ambulancia | (default o mayor) | ✅ | ✅ | 2.5 (emergencia) | FIJO |
+| Grúa | hook-up | ✅ | **0** | 1.0 | FIJO |
+| Mecánico | call-out | **0** | por-min (labor) | 1.0 | FIJO |
+| Carpooling | 0 | costo/km país | 0 | 1.0 | COST-SHARE |
+
+### Eje 2 · Modo (quién pone el número)
 ```
-mode ∈ { FIXED, PUJA }              ← UNO por servicio (no schedule, no pin, no allowedModes)
-multiplier                          ← tier (moto 0.55 … premium 1.8)
-floorCents                          ← UN piso: es la mínima si FIXED, el piso de puja si PUJA
-FIXED: fareCents = calculateFirmFare(base, {multiplier, minFareCents: floorCents})   [SIN CAMBIOS]
-PUJA:  el bid ES el precio, validado bid ≥ floorCents
-surge: multiplicador por demanda (dispatch), acotado por un TOPE admin global
+FIJO        → fareCents = fórmula                     (plataforma computa; ignora bid)
+PUJA        → floor = fórmula; el bid ES el precio, validado bid ≥ floor
+COST-SHARE  → cap = fórmula; el conductor pone precio ≤ cap, luego ÷ asientos + service fee
 ```
 
-### Motor 2 · SPECIAL (verticales)
+## Modelo de datos
+
 ```
-tarifa PLANA por servicio (Ambulancia S/…, Grúa S/…, Mecánico S/…)
-NO usa multiplier×km. Ambulancia/Grúa pueden sumar per-km del TRAMO de traslado (Fase B, opcional);
-Mecánico es visita → plano puro.
+GlobalPricing (singleton on-demand)
+  baseFareCents, perKmCents, perMinCents      ← DEFAULT de la fórmula
+  surge: { maxMultiplier, enabled }           ← eje dinámico (tope admin)
+  commissionBps                                ← comisión (ya desacoplada)
+
+ServiceOffering (por servicio)
+  id, labelKey, icon, category, vehicleClass, requires, defaultEnabled, sortOrder
+  mode ∈ { FIXED, PUJA, COST_SHARE }
+  pricing: {
+    baseFareCents?, perKmCents?, perMinCents?  ← overrides opcionales (null = usa el default global)
+    multiplier
+    minFareCents                                ← piso de la fórmula
+    floorCents?                                 ← piso de PUJA (solo mode=PUJA) o cap-base de COST-SHARE
+    seats?, serviceFeeBps?                       ← solo COST-SHARE
+  }
+  category ∈ { RIDE, SPECIAL, CARPOOL }         ← SOLO para agrupar en el menú (no afecta el precio)
 ```
 
-### Motor 3 · CARPOOL (compartido programado)
-```
-seat_price = conductor (precioBase) ≤ tope
-tope = floor( (distancia_km × costoPorKm[pais] + peaje) / asientos )   [SIN CAMBIOS — ya existe]
-fee al pasajero = contribución × carpoolingFeeBps                       [SIN CAMBIOS]
-```
+`category` es presentación (cómo se agrupa en el picker del pasajero), **ortogonal** al motor. Ambulancia es `category=SPECIAL` pero se pricea con la misma fórmula que un viaje (mode=FIXED, multiplier alto).
 
-## Qué se ELIMINA (D1)
+## Qué se ELIMINA (vs hoy)
 
 | Elemento | Ubicación | Acción |
 |---|---|---|
-| `PricingModeRule` / franjas / `resolveMode(schedule)` | `trip-service/domain/pricing-mode.ts` | borrar el schedule por franjas |
-| `resolveOfferingModeWithPin` / `resolveOfferingMode` / `overridden` / counter | `shared-types/catalog/offerings.ts`, `trips.service.ts` | borrar; el modo se lee de `offering.mode` |
-| `offering.allowedModes` (cap) + `modePin` | `shared-types/catalog/offerings.ts` | reemplazar por `offering.mode: FIXED\|PUJA` |
-| `schedule.defaultMode` global + pantalla de franjas | `admin-web` On-demand | borrar el card "Modo de tarificación" |
-| doble piso (`minFareCents` + `floorCents` separados) | offerings + bid-floor | colapsar a UN `floorCents` por servicio (semántica según `mode`) |
-| validación cruzada mínima↔piso | admin-web catalog-panel | ya no aplica (un solo piso) |
+| franjas / `resolveMode(schedule)` / `PricingModeRule` | `trip-service/domain/pricing-mode.ts` | borrar |
+| `resolveOfferingModeWithPin` / `resolveOfferingMode` / `overridden` / counter | `shared-types`, `trips.service.ts` | borrar; el modo se lee de `offering.mode` |
+| `allowedModes` (cap) + `modePin` | `shared-types/catalog/offerings.ts` | reemplazar por `offering.mode` |
+| `schedule.defaultMode` global + card de franjas | `admin-web` On-demand | borrar |
+| doble piso (min + floor separados sin relación) | offerings + bid-floor | un `minFareCents` (fórmula) + `floorCents` solo si PUJA |
 
-## Qué se AGREGA (D2 / Fase B)
+## Qué se AGREGA
 
-- **Surge admin**: config global `SurgeConfig { maxMultiplier, enabled }` en trip-service; dispatch lee el tope; pantalla On-demand con la perilla.
-- **SPECIAL flat pricing**: `serviceType === SPECIAL` → motor de tarifa plana (`flatFareCents` por oferta), fuera de la tabla de tiers. Mecánico sin per-km.
-- **Carpooling reenmarcado** como el 3er tipo de servicio (motor cost-share ya existe; solo cambia el mapa mental / IA de la UI).
+- `offering.mode ∈ {FIXED, PUJA, COST_SHARE}` (un solo modo por servicio).
+- `pricing.{baseFareCents?, perKmCents?, perMinCents?}` overrides por servicio (para que Mecánico ponga perKm=0, Grúa perMin=0, etc.). Null = default global.
+- `GlobalPricing.surge {maxMultiplier, enabled}` + perilla admin (dispatch lee el tope).
+- Carpooling entra al modelo como `mode=COST_SHARE` (su cost-cap ya es la fórmula con `perKm=costoPorKm`; el flujo publicado/programado + ÷asientos es operativo, no de pricing).
 
 ## Cambios por capa
 
-- **`packages/shared-types`** (`catalog/offerings.ts`): `OfferingSpec.allowedModes` → `mode: PricingMode`; borrar `modePin`/`resolveOfferingMode*`; agregar `flatFareCents?` para SPECIAL. `OFFERINGS`: setear `mode` por oferta + sacar verticales del pricing de tiers.
-- **`services/trip-service`**: borrar `domain/pricing-mode.ts` (schedule); `createTrip` lee `offering.mode` (resolve-once sigue: se congela en `Trip.dispatchMode`); un `floorCents` por servicio; SPECIAL → tarifa plana; `SurgeConfig` (Fase B). `calculateFirmFare` **intacto**.
-- **`services/bff/admin-bff` + `packages/api-client`**: contratos — `mode` en vez de pin/schedule; un piso; endpoints de surge + flat (Fase B). Borrar el endpoint/vista de mode-schedule (franjas).
-- **`apps/admin-web`**: On-demand (Tarifa base FIJO + Surge + Comisión, sin franjas); Viajes (tabla Modo[Fijo\|Puja]·Mult·Piso); Especiales (nueva, tarifa plana); Carpooling (igual, reenmarcado). Borrar `mode-schedule-panel` (franjas) + `bid-floor` global.
-- **Diseño (`veo.pen`)**: On-demand ✅, Viajes ✅ (hechos). Falta: Especiales, Carpooling, nav de "Precios".
+- **`packages/shared-types`** (`catalog/offerings.ts`): `allowedModes`→`mode`; borrar `modePin`/`resolveOfferingMode*`; `OfferingPricingPolicy` gana overrides opcionales `{baseFareCents?, perKmCents?, perMinCents?}`. `OFFERINGS`: `mode` + params por oferta (Mecánico perKm=0, etc.).
+- **`services/trip-service`**: borrar `domain/pricing-mode.ts`; `createTrip` lee `offering.mode` (resolve-once → `Trip.dispatchMode`); la fórmula usa params efectivos (override ?? default); COST_SHARE usa el cap. `calculateFirmFare` **intacto** (solo se le pasan los params efectivos). `SurgeConfig` (tope).
+- **`admin-bff` + `api-client`**: `mode` + params opcionales por oferta; endpoints de surge. Borrar mode-schedule (franjas).
+- **`apps/admin-web`**: On-demand (Tarifa base default + Surge + Comisión); UN catálogo de servicios (Servicio · Modo · Multiplicador · Mínima · Activa, con overrides de params en un detalle/avanzado); carpooling como servicios mode=COST_SHARE. Borrar `mode-schedule-panel` + `bid-floor` global.
 
 ## Invariante money-critical
 
-La fórmula del cobro FIXED (`calculateFirmFare`) **no se toca**. Con el modo resuelto per-servicio en vez de por schedule, un servicio hoy en FIXED sigue cobrando exactamente igual. La verificación debe probar: mismo `fareCents` para un viaje FIXED antes/después (los tests de `fare.spec` + `fixed-dispatch` no deben cambiar sus cifras).
+`calculateFirmFare` no cambia. Un viaje FIXED con params default sigue cobrando idéntico. Verificar: paridad de `fareCents` FIXED (los tests `fare.spec`/`fixed-dispatch.spec` mantienen sus cifras); un servicio con `perKm=0` da `base + perMin·min` (probar Mecánico).

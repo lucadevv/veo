@@ -1,44 +1,50 @@
-# Propuesta — Simplificación del pricing: modo per-servicio + taxonomía por tipo de servicio
+# Propuesta — Pricing unificado: UNA fórmula · parámetros por servicio · 3 modos
 
-> Estado: **APROBADO (modelo)** · 2026-07-07 · Diseño en curso (veo.pen) · Código pendiente
-> Decisiones del dueño registradas en engram `architecture/pricing-taxonomy`.
+> Estado: **APROBADO (modelo)** · 2026-07-07 · Diseño a rehacer (veo.pen) · Código pendiente.
+> Reemplaza el framing anterior de "3 motores / taxonomía por tipo" — era sobre-ingeniería (ver §Corrección).
 
 ## Problema
 
-El pricing de VEO acumuló sobre-ingeniería y mezcló conceptos, volviéndose incoherente frente a los modelos de referencia (Uber/inDrive/BlaBlaCar). Incoherencias verificadas (archivo:línea):
+El pricing de VEO acumuló perillas y conceptos incoherentes frente a los modelos de referencia. Verificado (archivo:línea):
 
-1. **El modo (PUJA/FIJO) se configura en 4 lugares** — `schedule.defaultMode` global, `schedule.rules[]` (franjas horarias), `offering.modePin` (pin por-servicio), `offering.allowedModes` (cap de código). Precedencia: `allowedModes > modePin > franja > default` (`trips.service.ts:420-441`). Uber e inDrive: **0 perillas de modo**.
-2. **Doble piso por servicio sin validación** — `minFareCents` (piso FIJO) y `floorCents` (piso PUJA) conviven por oferta; nada valida su relación → un admin puede invertirlos.
-3. **Código muerto** — las 5 ofertas RIDE tienen `allowedModes: [PUJA, FIXED]` idéntico → la intersección oferta∩schedule es **no-op** (comentado en `trips.service.ts:430`). Toda la maquinaria `resolveOfferingMode`/`overridden`/counter no muerde hoy.
-4. **Franjas horarias sin uso** — `DEFAULT_SCHEDULE.rules = []` (`pricing-mode.ts:50`); flipear el MECANISMO de pricing por hora no tiene análogo en Uber (que flipea el PRECIO con surge, no el mecanismo).
-5. **Surge a medio construir** — existe `surgeMultiplier` [1.0–2.0] en la fórmula + `surgeQuote` en dispatch, pero **ninguna pantalla admin lo configura**.
-6. **Verticales forzados al molde de viaje** — Ambulancia/Grúa/Mecánico (`allowedModes:[FIXED]`) se pricean con `multiplier × km`; Mecánico ×1.0 cobra por km cuando **no traslada** (es una visita).
-7. **Carpooling huérfano** — es un servicio que el pasajero pide, pero vive en pantalla aparte con motor cost-share, desconectado del catálogo que dice ser "el menú de servicios".
+1. **El modo (PUJA/FIJO) se configura en 4 lugares** — default global, franjas horarias, pin por-servicio, `allowedModes` de código (`trips.service.ts:420-441`). Uber e inDrive: 0 perillas de modo visibles.
+2. **Doble piso por servicio sin validación** — `minFareCents` (FIJO) + `floorCents` (PUJA) conviven, nada valida su relación.
+3. **Código muerto** — las 5 ofertas RIDE tienen `allowedModes:[PUJA,FIXED]` idéntico → la intersección oferta∩schedule es no-op (`trips.service.ts:430`).
+4. **Franjas sin uso** — `DEFAULT_SCHEDULE.rules=[]`; flipear el mecanismo por hora no tiene análogo (Uber flipea el PRECIO con surge, no el mecanismo).
+5. **Surge a medio construir** — `surgeMultiplier` existe en la fórmula pero ninguna pantalla admin lo configura.
+6. **Verticales forzados** — Mecánico ×1.0 cobra por-km sin trasladar.
+7. **Carpooling huérfano** — pantalla aparte, desconectado del catálogo.
 
-## Referencia de industria
+## Corrección (mi error inicial)
 
-- **Uber**: UN catálogo con 10+ productos (X, Comfort, XL, Black, Reserve, y **Share/pool**), cada uno priceado por su lógica (Share = descuento ~0.7× sobre la misma fórmula). Eje dinámico = **surge**. Cero perillas de modo.
-- **inDrive**: el pasajero puja ≥ un piso. Sin tiers, sin fórmula.
-- **BlaBlaCar**: producto **separado**. El conductor pone el precio (cubre nafta/peaje), la plataforma lo **topea** (sin lucro → legalmente *cost-sharing*, no transporte comercial) + service fee. Programado, conductor no-profesional.
+En una primera pasada propuse "3 motores de precio" (RIDE fórmula, SPECIAL flat, CARPOOL cost-share) y una taxonomía por tipo. **Era sobre-ingeniería.** La investigación con fuentes lo desmiente: **es UNA sola fórmula**; lo "flat" es simplemente `per-km = 0`.
 
-El carpooling de VEO es **BlaBlaCar** (no Uber Pool): motor genuinamente distinto.
+## Investigación (fuentes)
 
-## Decisiones
+- **Uber**: *"Every Uber tier uses the SAME four-part formula, just with different rates"* — `base + per-km·km + per-min·min + booking`, × surge, mínima. Cada producto = mismas piezas, otras tasas. ([RideWise](https://getridewise.com/blog/uber-fare-calculator-2026))
+- **Grúa/tow**: hook-up fee (~$75) **+ per-milla** ($2–4). = `base + per-km`. ([HomeGuide](https://homeguide.com/costs/towing-service-cost))
+- **Mecánico**: **por hora** ($175–250/h), **per-km = 0** (es una visita, no traslada). (id.)
+- **Emergencia / after-hours**: **+20–50 %** = un multiplicador. (id.)
+- **inDrive**: computa un *"recommended fare por ruta"* (la fórmula) y el pasajero **puja ≥ ese piso**. ([inDrive Help](https://indrive.com/help/passengers/how-fares-are-calculated))
+- **BlaBlaCar**: el conductor pone el precio **≤ tope** (distancia × costo/km) ÷ asientos + service fee. = la misma base de distancia, el conductor pone el número topeado. ([Brineweb](https://www.brineweb.com/blog/blablacar-business-model-how-blablacar-works-and-makes-money))
 
-### D1 — Modo PER-SERVICIO (no híbrido con franjas)
-Se elimina el flip de modo por franja horaria + el default global + el pin. El modo (**Fijo XOR Puja**) es UNA elección por servicio. **Un solo piso por servicio** (mínima si Fijo, piso si Puja — nunca los dos). **Surge = el eje dinámico** (como Uber). Se elimina el código muerto de `allowedModes`.
+## Decisión — UNA fórmula, dos ejes de variación
 
-### D2 — Taxonomía por TIPO de servicio (el tipo determina el motor)
-| Tipo | Servicios | Motor de precio |
-|---|---|---|
-| **Viajes on-demand** | Moto · Económico · Estándar · Premium · XL | tier × multiplicador · fijo/puja |
-| **Especiales** | Ambulancia · Grúa · Mecánico | **tarifa PLANA** por servicio (no ×km) |
-| **Carpooling** | compartido programado | conductor ≤ tope cost-share + service fee (BlaBlaCar) |
+```
+tarifa = ( base + perKm·km + perMin·min ) × multiplicador × surge     [piso: mínima]
+```
 
-Carpooling deja de ser huérfano (3er tipo de servicio); los especiales salen de la tabla de tiers; los viajes quedan con la tabla fijo/puja.
+Todo servicio ES esta fórmula. Cambian **solo dos cosas**:
+
+1. **Parámetros por servicio** (algunos en CERO): `{base, perKm, perMin, multiplier, minFare}`. El global (banderazo/km/min) es el DEFAULT; cada servicio overridea lo que necesite. Mecánico → `perKm=0`; Grúa → `perMin=0`; Ambulancia → `multiplier` alto.
+2. **Modo — quién pone el número**:
+   - **FIJO** (Uber): la plataforma calcula la fórmula = el precio.
+   - **PUJA** (inDrive): la fórmula da el piso/sugerido; el pasajero puja ≥.
+   - **COST-SHARE** (BlaBlaCar): la fórmula da el TOPE; el conductor pone ≤, ÷ asientos + service fee.
+
+**No hay "motor flat", ni "pricing de especiales", ni carril huérfano.** Hay: 1 fórmula · params por servicio · 3 modos. Las categorías (viaje / especial / carpooling) son solo AGRUPACIÓN del menú (presentación), ortogonales al precio.
 
 ## Alcance / No-goals
 
-- **Money-safe**: la fórmula FIJO (`calculateFirmFare` = base × multiplier, con mínima, + fee niño plano) **no cambia**. La remoción es de la CAPA de resolución de modo, no del cálculo del fare.
-- **No se toca**: biometría, pánico, video, KYC, liquidaciones/payouts, la comisión (ya desacoplada).
-- El `EnergySource` de la ficha del vehículo (fleet/OCR) **no** es pricing y no se toca (el modelo de energía del pricing ya se removió antes).
+- **Money-safe**: la fórmula `calculateFirmFare` (base × multiplier, mínima, + fee niño plano) **YA es esta fórmula y no cambia**. El cambio es de la CAPA de resolución (modo per-servicio, params por servicio), no del cálculo.
+- **No se toca**: biometría, pánico, video, KYC, liquidaciones, comisión (ya desacoplada), el `EnergySource` de la ficha del vehículo.
