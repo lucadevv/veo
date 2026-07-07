@@ -83,10 +83,7 @@ export function captureTraceparent(): string | undefined {
  * Sin `traceparent` (envelope viejo o request sin span) ejecuta `fn` tal cual — backward-compat total.
  * Si el extract/with fallara, cae al camino normal: la publicación NUNCA se bloquea por la traza.
  */
-export function runWithExtractedTraceparent<R>(
-  traceparent: string | undefined,
-  fn: () => R,
-): R {
+export function runWithExtractedTraceparent<R>(traceparent: string | undefined, fn: () => R): R {
   if (!traceparent) return fn(); // backward-compat: envelope sin traceparent publica normal.
   let parentCtx: Context;
   try {
@@ -99,4 +96,7 @@ export function runWithExtractedTraceparent<R>(
 }
 
 /** Re-export de las claves W3C por si un caller necesita armar el carrier a mano (tests, debug). */
-export const W3C_TRACE_HEADERS = { traceparent: W3C_TRACEPARENT, tracestate: W3C_TRACESTATE } as const;
+export const W3C_TRACE_HEADERS = {
+  traceparent: W3C_TRACEPARENT,
+  tracestate: W3C_TRACESTATE,
+} as const;
