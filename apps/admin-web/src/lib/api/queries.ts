@@ -6,6 +6,7 @@ import { apiClient } from './client';
 import { FILTER_ALL } from '@/lib/filters';
 import {
   analyticsOverview,
+  revenueMetricsView,
   auditChainVerification,
   auditEntryView,
   type CreateDocumentRequest,
@@ -64,11 +65,13 @@ import {
   tripSummary,
   vehicleView,
   type TripStatus,
+  type RevenueRangeValue,
 } from './schemas';
 
 /** Llaves de caché centralizadas para invalidaciones consistentes. */
 export const qk = {
   overview: ['overview'] as const,
+  revenueMetrics: (range: string) => ['analytics-revenue', range] as const,
   trips: (f: TripFilters) => ['trips', f] as const,
   trip: (id: string) => ['trip', id] as const,
   drivers: (status: string) => ['drivers', status] as const,
@@ -126,6 +129,19 @@ export function useOverview() {
     queryFn: ({ signal }) =>
       apiClient().get('/analytics/overview', { schema: analyticsOverview, signal }),
     refetchInterval: REALTIME_REFETCH,
+  });
+}
+
+/**
+ * Métricas de INGRESOS del período (money-in, comisión bruta, margen, reembolsado + serie por bucket). El rango
+ * (today/7d/30d) es parte de la queryKey → cambiar de rango re-consulta y cachea por separado. Dato real de
+ * payment-service (agregado en TZ Lima); sin refetch en vivo (es analítica, no operación instantánea).
+ */
+export function useRevenueMetrics(range: RevenueRangeValue) {
+  return useQuery({
+    queryKey: qk.revenueMetrics(range),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/analytics/revenue?range=${range}`, { schema: revenueMetricsView, signal }),
   });
 }
 
