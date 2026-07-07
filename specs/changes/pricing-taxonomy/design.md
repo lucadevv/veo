@@ -3,7 +3,7 @@
 ## La fórmula (única, money-critical — YA EXISTE)
 
 ```
-tarifa = max( round( (base + perKm·km + perMin·min) × multiplier × surge ), minFare )   [+ FEE_NIÑO plano]
+tarifa = max( round( (base + perKm·km + perMin·min) × multiplier ), minFare )   [+ FEE_NIÑO plano]
 ```
 
 Es exactamente `calculateFirmFare(input, pricing)` de `trip-service/domain/fare.ts` (ya construido).
@@ -35,7 +35,6 @@ COST-SHARE  → cap = fórmula; el conductor pone precio ≤ cap, luego ÷ asien
 ```
 GlobalPricing (singleton on-demand)
   baseFareCents, perKmCents, perMinCents      ← DEFAULT de la fórmula
-  surge: { maxMultiplier, enabled }           ← eje dinámico (tope admin)
   commissionBps                                ← comisión (ya desacoplada)
 
 ServiceOffering (por servicio)
@@ -67,15 +66,14 @@ ServiceOffering (por servicio)
 
 - `offering.mode ∈ {FIXED, PUJA, COST_SHARE}` (un solo modo por servicio).
 - `pricing.{baseFareCents?, perKmCents?, perMinCents?}` overrides por servicio (para que Mecánico ponga perKm=0, Grúa perMin=0, etc.). Null = default global.
-- `GlobalPricing.surge {maxMultiplier, enabled}` + perilla admin (dispatch lee el tope).
 - Carpooling entra al modelo como `mode=COST_SHARE` (su cost-cap ya es la fórmula con `perKm=costoPorKm`; el flujo publicado/programado + ÷asientos es operativo, no de pricing).
 
 ## Cambios por capa
 
 - **`packages/shared-types`** (`catalog/offerings.ts`): `allowedModes`→`mode`; borrar `modePin`/`resolveOfferingMode*`; `OfferingPricingPolicy` gana overrides opcionales `{baseFareCents?, perKmCents?, perMinCents?}`. `OFFERINGS`: `mode` + params por oferta (Mecánico perKm=0, etc.).
-- **`services/trip-service`**: borrar `domain/pricing-mode.ts`; `createTrip` lee `offering.mode` (resolve-once → `Trip.dispatchMode`); la fórmula usa params efectivos (override ?? default); COST_SHARE usa el cap. `calculateFirmFare` **intacto** (solo se le pasan los params efectivos). `SurgeConfig` (tope).
-- **`admin-bff` + `api-client`**: `mode` + params opcionales por oferta; endpoints de surge. Borrar mode-schedule (franjas).
-- **`apps/admin-web`**: On-demand (Tarifa base default + Surge + Comisión); UN catálogo de servicios (Servicio · Modo · Multiplicador · Mínima · Activa, con overrides de params en un detalle/avanzado); carpooling como servicios mode=COST_SHARE. Borrar `mode-schedule-panel` + `bid-floor` global.
+- **`services/trip-service`**: borrar `domain/pricing-mode.ts`; `createTrip` lee `offering.mode` (resolve-once → `Trip.dispatchMode`); la fórmula usa params efectivos (override ?? default); COST_SHARE usa el cap. `calculateFirmFare` **intacto** (solo se le pasan los params efectivos; su `surgeMultiplier` queda en 1.0 — el surge se REMOVIÓ del modelo, no es config del admin).
+- **`admin-bff` + `api-client`**: `mode` + params opcionales por oferta. Borrar mode-schedule (franjas).
+- **`apps/admin-web`**: On-demand (Tarifa base default + Comisión); UN catálogo de servicios (Servicio · Modo · Multiplicador · Mínima · Activa, con overrides de params en un detalle/avanzado); carpooling como servicios mode=COST_SHARE. Borrar `mode-schedule-panel` + `bid-floor` global.
 
 ## Invariante money-critical
 

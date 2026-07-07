@@ -11,7 +11,7 @@ El pricing de VEO acumuló perillas y conceptos incoherentes frente a los modelo
 2. **Doble piso por servicio sin validación** — `minFareCents` (FIJO) + `floorCents` (PUJA) conviven, nada valida su relación.
 3. **Código muerto** — las 5 ofertas RIDE tienen `allowedModes:[PUJA,FIXED]` idéntico → la intersección oferta∩schedule es no-op (`trips.service.ts:430`).
 4. **Franjas sin uso** — `DEFAULT_SCHEDULE.rules=[]`; flipear el mecanismo por hora no tiene análogo (Uber flipea el PRECIO con surge, no el mecanismo).
-5. **Surge a medio construir** — `surgeMultiplier` existe en la fórmula pero ninguna pantalla admin lo configura.
+5. **Surge sin lugar** — `surgeMultiplier` existe en la fórmula pero ningún admin lo configura; y aplicado a los 3 modos rompería el cost-share (inflaría el cap = lucro, ilegal en BlaBlaCar). → se REMUEVE del modelo de pricing.
 6. **Verticales forzados** — Mecánico ×1.0 cobra por-km sin trasladar.
 7. **Carpooling huérfano** — pantalla aparte, desconectado del catálogo.
 
@@ -31,7 +31,7 @@ En una primera pasada propuse "3 motores de precio" (RIDE fórmula, SPECIAL flat
 ## Decisión — UNA fórmula, dos ejes de variación
 
 ```
-tarifa = ( base + perKm·km + perMin·min ) × multiplicador × surge     [piso: mínima]
+tarifa = ( base + perKm·km + perMin·min ) × multiplicador     [piso: mínima]
 ```
 
 Todo servicio ES esta fórmula. Cambian **solo dos cosas**:
