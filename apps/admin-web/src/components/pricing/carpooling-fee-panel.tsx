@@ -46,8 +46,8 @@ export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
 
   return (
     <ConfigCard
-      title="Service fee al pasajero"
-      tag="cost-sharing"
+      title="Service fee"
+      tag="fee al pasajero"
       tagTone="brand"
       description="El service fee se suma al pasajero sobre el costo compartido. El conductor cobra el 100% de su contribución, así que no hay lucro sobre el conductor."
       footer={

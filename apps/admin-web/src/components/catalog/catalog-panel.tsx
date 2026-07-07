@@ -227,13 +227,13 @@ export function CatalogPanel({
       </div>
 
       {/* Nota informativa de la validación cruzada (A1) — el aviso POR FILA aparece bajo la oferta afectada. */}
-      <p className="flex items-start gap-2 text-xs text-ink-muted">
-        <TriangleAlert className="mt-px size-3.5 shrink-0 text-warn" aria-hidden />
+      <div className="flex items-start gap-2 rounded-md border border-warn/30 bg-warn/12 p-3 text-xs text-ink-muted">
+        <TriangleAlert className="mt-px size-4 shrink-0 text-warn" aria-hidden />
         <span>
           Validación cruzada: se avisa por fila si el piso de puja de una oferta supera su tarifa
           mínima fija (el mismo viaje saldría más barato en FIJO que el mínimo pujable).
         </span>
-      </p>
+      </div>
 
       <ReadOnlyNote canManage={canManage} noun="el catálogo" />
     </div>

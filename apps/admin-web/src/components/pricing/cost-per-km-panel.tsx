@@ -79,8 +79,8 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
 
   return (
     <ConfigCard
-      title="Costo por km · tope cost-sharing"
-      tag="escudo anti-lucro"
+      title="Costo por km · tope de cost-sharing"
+      tag="por país"
       tagTone="success"
       description="El costo real de operar el vehículo por km (combustible + desgaste). Limita el precio del carpooling: el asiento no puede pasar de (distancia × costo/km + peaje) ÷ asientos. El peaje lo declara el conductor por viaje."
       footer={
