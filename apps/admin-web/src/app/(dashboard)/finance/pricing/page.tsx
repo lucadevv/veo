@@ -7,7 +7,6 @@ import {
   useBaseFare,
   useCommission,
   useEnergyCatalog,
-  useBidFloor,
 } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -20,7 +19,6 @@ import { FuelSurchargePanel } from '@/components/pricing/fuel-surcharge-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
 import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commission-panel';
 import { EnergyCatalogPanel } from '@/components/pricing/energy-catalog-panel';
-import { BidFloorPanel } from '@/components/pricing/bid-floor-panel';
 
 /**
  * Encabezado de sección: separa visualmente los grupos de config (línea divisoria + label + aclaración).
@@ -40,8 +38,8 @@ function SectionHeader({ label, hint }: { label: string; hint: string }) {
  * Precios on-demand — config financiera del carril TAXI (viaje inmediato). El diseño (veo.pen) apila las
  * secciones como cards PLANAS e independientes: tarifa base, comisión on-demand, recargo de combustible/energía,
  * modo de tarificación y catálogo de energía. Cada card es una MUTACIÓN separada (su propio endpoint, CAS y
- * step-up MFA) — el banner superior lo hace explícito. El piso de la PUJA por DEFECTO se edita acá (junto al
- * modo); los overrides POR SERVICIO viven en "Ofertas de servicio". El carril CARPOOLING vive en Finanzas › Carpooling. Gate de
+ * step-up MFA) — el banner superior lo hace explícito. El piso de la PUJA se configura POR SERVICIO en "Ofertas
+ * de servicio" (no acá): es un dato per-oferta, no un global. El carril CARPOOLING vive en Finanzas › Carpooling. Gate de
  * presentación con `pricing:view`; el admin-bff (RolesGuard) y los servicios re-autorizan server-side.
  */
 export default function PricingPage() {
@@ -51,7 +49,6 @@ export default function PricingPage() {
   const baseFareQuery = useBaseFare();
   const commissionQuery = useCommission();
   const energyQuery = useEnergyCatalog();
-  const bidFloorQuery = useBidFloor();
 
   if (!can(user, 'pricing:view')) {
     return (
@@ -74,7 +71,7 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios on-demand"
-        description="El carril del viaje inmediato. Corre en DOS modos que coexisten — FIJO (tarifa calculada, estilo Uber) y PUJA (el pasajero ofrece su precio, estilo inDrive). Acá va la config global de ambos: tarifa base, comisión, recargo, el modo por horario y el piso de la puja. Cambios globales, al instante y auditados."
+        description="El carril del viaje inmediato. Corre en DOS modos que coexisten — FIJO (tarifa calculada, estilo Uber) y PUJA (el pasajero ofrece su precio, estilo inDrive). Acá va la config global: tarifa base, comisión, recargo y el modo por horario. El piso de la puja se configura por servicio en Ofertas de servicio."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
@@ -122,15 +119,8 @@ export default function PricingPage() {
             </AsyncSection>
           )}
 
-          {/* Lo ÚNICO exclusivo de PUJA: el piso (gate duro del bid). Overrides por servicio en Ofertas de servicio. */}
-          <SectionHeader
-            label="Piso de la puja"
-            hint="solo aplica en modo PUJA · el mínimo que el pasajero puede ofrecer"
-          />
-          <AsyncSection query={bidFloorQuery} skeleton={<Skeleton className="h-64" />}>
-            {(data) => <BidFloorPanel config={data} />}
-          </AsyncSection>
-
+          {/* El piso de la PUJA se configura por servicio en Ofertas de servicio (no acá): es un dato per-oferta,
+              no un global. Acá quedan la fórmula (compartida) y la comisión (transversal). */}
           {/* Transversal: la comisión vive aguas abajo de fareCents — misma tasa venga de un bid (PUJA) o un cálculo (FIJO). */}
           <SectionHeader
             label="Comisión"
