@@ -1,10 +1,15 @@
 /**
  * Dominio de mapas del pasajero (UX de previsualización antes de confirmar el viaje).
- * Habla con la infra soberana OSRM/Nominatim vía la fachada @veo/maps; y con trip-service SOLO para
- * resolver el MODO de pricing del quote (ADR 011 M4), no para crear viajes.
+ * Habla con la infra soberana OSRM/Nominatim vía la fachada @veo/maps; y con trip-service para leer el
+ * catálogo EFECTIVO (pricing + modo POR oferta), no para crear viajes.
  * - autocomplete: sugerencias de direcciones (Nominatim).
  * - reverse: etiqueta del punto actual ("Tu ubicación").
  * - quote: ruta + ETA + tarifa por categoría (OSRM + cálculo determinista local) + modo PUJA/FIXED.
+ *
+ * ADR 023: el MODO de pricing lo manda la OFERTA (palanca manual del admin), NO el horario ni el cliente
+ * (ADR 011 schedule/franjas superseded). El quote lee el `mode` EFECTIVO por oferta del catálogo
+ * (`/internal/catalog`, ya resuelto por trip-service con `effectiveOfferingMode`); en degradación
+ * (catálogo caído) cae al `mode` de CÓDIGO de la oferta (`effectiveOfferingMode(offering)`).
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -20,11 +25,10 @@ import type { GeocodeResult, MapsClient } from '@veo/maps';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import {
   isPujaMode,
+  effectiveOfferingMode,
   OFFERING_LIST,
   OFFERINGS,
   OfferingId,
-  PricingMode as PricingModeEnum,
-  resolveOfferingModeWithPin,
   resolveBidFloorCents,
   DEFAULT_BID_FLOOR_CONFIG,
   GLOBAL_ZONE,
@@ -53,15 +57,10 @@ const MIN_QUERY_LENGTH = 3;
 
 /**
  * Oferta ANCLA del quote (ADR 013 §1.3): VEO Económico. Su política alimenta el `suggestedCents`
- * de la PUJA (la tarifa que SERÍA fija con la oferta base) y su modo es el `mode` top-level
+ * de la PUJA (la tarifa que SERÍA fija con la oferta base) y su modo EFECTIVO es el `mode` top-level
  * (compat con apps viejas que no leen `options[].mode`).
  */
 const ANCHOR_OFFERING = OFFERINGS[OfferingId.VEO_ECONOMICO];
-
-/** Respuesta del endpoint interno GET /internal/pricing/resolve de trip-service (ADR 011). */
-interface ResolveModeReply {
-  mode: PricingMode;
-}
 
 /** Respuesta de GET /internal/pricing/bid-floor (trip-service · ADR 010 §9.3): piso por (zona, oferta). */
 interface BidFloorReply {
@@ -81,16 +80,17 @@ interface CatalogReply {
     icon: string;
     vehicleClass: 'CAR' | 'MOTO';
     enabled: boolean;
-    // B2: pricing EFECTIVO (overlay del admin ⟕ código) + pin de modo (ya validado por trip-service).
+    // ADR 023: pricing + `mode` EFECTIVOS (overlay del admin ⟕ código). El `mode` YA lo resolvió
+    // trip-service con `effectiveOfferingMode` (palanca manual del admin, respetando `modeLocked`).
     pricing: OfferingPricingPolicy;
-    modePin?: PricingMode;
+    mode: PricingMode;
   }[];
 }
 
 /** Estado configurable EFECTIVO de una oferta (overlay del admin) que el quote aplica sobre la base de código. */
 interface EffectiveOffering {
   pricing: OfferingPricingPolicy;
-  modePin?: PricingMode;
+  mode: PricingMode;
 }
 
 @Injectable()
@@ -152,39 +152,33 @@ export class MapsService {
     const destination = { lat: dto.destination.lat, lon: dto.destination.lng };
     // Ola 2B · paradas múltiples: la ruta (y por tanto distancia/duración/tarifa) pasa por las paradas.
     const waypoints = (dto.waypoints ?? []).map((w) => ({ lat: w.lat, lon: w.lng }));
-    // La ruta, el modo, el crédito y el catálogo activo son independientes → en paralelo.
-    const [route, scheduledMode, creditBalanceCents, effective, bidFloorConfig, fareBase] =
-      await Promise.all([
-        this.maps.route(origin, destination, waypoints),
-        // S2 (ADR 011) — si el quote es de una RESERVA (scheduledFor), resolvemos el modo para la hora de
-        // RECOJO, no la actual: el preview muestra la política de la hora a la que VA a viajar el pasajero.
-        this.resolveMode(dto.origin.lat, dto.origin.lng, identity, dto.scheduledFor),
-        // Lote C3 · saldo de crédito de referido para el PREVIEW (server-side, §INTEGRACIONES). 0 si anónimo/
-        // sin cliente/error (no rompe el quote: el crédito es secundario a la ruta).
-        this.fetchCreditBalance(identity),
-        // B2 · catálogo EFECTIVO del admin (habilitadas + pricing + pin de modo). `null` = no disponible →
-        // cotizamos TODAS con pricing/modo de CÓDIGO (degradación honesta, como el modo degrada a PUJA).
-        this.fetchEffectiveCatalog(identity),
-        // ADR 010 §9.3 · config del piso de la PUJA per-(zona, oferta) para el DISPLAY del quote. Degradación
-        // honesta: trip-service caído → DEFAULT_BID_FLOOR_CONFIG (piso S/7). El autoritativo lo re-resuelve
-        // trip-service en createTrip — acá es solo el piso que la app MUESTRA en "proponé tu precio".
-        this.fetchBidFloorConfig(identity),
-        // F2.4 · banderazo/km/min vigentes (admin). Degradación honesta: trip-service caído → constantes de
-        // código (= el seed) → el preview no diverge del cobro en el caso común.
-        this.fetchBaseFare(identity),
-      ]);
+    // La ruta, el crédito y el catálogo activo son independientes → en paralelo. ADR 023: el modo YA NO
+    // se resuelve aparte (no hay schedule/franjas): sale del catálogo EFECTIVO, por oferta.
+    const [route, creditBalanceCents, effective, bidFloorConfig, fareBase] = await Promise.all([
+      this.maps.route(origin, destination, waypoints),
+      // Lote C3 · saldo de crédito de referido para el PREVIEW (server-side, §INTEGRACIONES). 0 si anónimo/
+      // sin cliente/error (no rompe el quote: el crédito es secundario a la ruta).
+      this.fetchCreditBalance(identity),
+      // ADR 023 · catálogo EFECTIVO del admin (habilitadas + pricing + `mode` por oferta). `null` = no
+      // disponible → cotizamos TODAS con pricing/modo de CÓDIGO (degradación honesta).
+      this.fetchEffectiveCatalog(identity),
+      // ADR 010 §9.3 · config del piso de la PUJA per-(zona, oferta) para el DISPLAY del quote. Degradación
+      // honesta: trip-service caído → DEFAULT_BID_FLOOR_CONFIG (piso S/7). El autoritativo lo re-resuelve
+      // trip-service en createTrip — acá es solo el piso que la app MUESTRA en "proponé tu precio".
+      this.fetchBidFloorConfig(identity),
+      // F2.4 · banderazo/km/min vigentes (admin). Degradación honesta: trip-service caído → constantes de
+      // código (= el seed) → el preview no diverge del cobro en el caso común.
+      this.fetchBaseFare(identity),
+    ]);
 
-    // ADR 013 §1.3 · el `mode` top-level = el modo de la oferta ANCLA (VEO Económico). B2: respeta su pin
-    // de modo efectivo si el admin lo configuró. Sin pin/catálogo caído → schedule ∩ oferta (como antes).
-    const mode = resolveOfferingModeWithPin(
-      ANCHOR_OFFERING,
-      effective?.get(ANCHOR_OFFERING.id)?.modePin,
-      scheduledMode,
-    ).mode;
+    // ADR 023 · el `mode` top-level = el modo EFECTIVO de la oferta ANCLA (VEO Económico), tal cual lo
+    // resolvió trip-service en el catálogo (palanca manual del admin). Catálogo caído / ancla apagada →
+    // el modo de CÓDIGO de la oferta (`effectiveOfferingMode`), NO un default global.
+    const mode = effective?.get(ANCHOR_OFFERING.id)?.mode ?? effectiveOfferingMode(ANCHOR_OFFERING);
 
     // Las opciones SALEN del catálogo (ADR 013): OFFERING_LIST (código = estructura) ya ordenado por
-    // sortOrder. B2: el overlay del admin aporta enabled (filtro) + pricing + pin de modo EFECTIVOS — el
-    // MISMO contrato que createTrip (degradación honesta: catálogo caído → pricing/modo de código).
+    // sortOrder. El overlay del admin aporta enabled (filtro) + pricing + `mode` EFECTIVOS — el MISMO
+    // contrato que createTrip (degradación honesta: catálogo caído → pricing/modo de código).
     const options = this.quotedOfferings()
       // Con catálogo del admin: solo las habilitadas (effective.has). En DEGRADACIÓN (effective null):
       // solo las que shippean visibles por default (defaultEnabled) — B5-4: las verticales ocultas
@@ -197,8 +191,9 @@ export class MapsService {
         const pricing = ov?.pricing ?? offering.pricing; // efectivo (admin) o de código (degradación)
         // Precio por oferta: base + km + min × multiplier, con mínima. Mismo motor que el create.
         const priceCents = this.offeringPriceCents(pricing, route, fareBase);
-        // B2 · modo POR oferta = pin del admin (si ∈ allowedModes) > schedule ∩ oferta. Mismo motor que create.
-        const offeringMode = resolveOfferingModeWithPin(offering, ov?.modePin, scheduledMode).mode;
+        // ADR 023 · modo POR oferta = el `mode` EFECTIVO del catálogo (palanca del admin, ya resuelto por
+        // trip-service) o, en degradación, el de CÓDIGO de la oferta. Mismo criterio que createTrip.
+        const offeringMode = ov?.mode ?? effectiveOfferingMode(offering);
         return {
           id: offering.id,
           // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
@@ -251,41 +246,12 @@ export class MapsService {
 
   /**
    * ADR 013 · seam de las ofertas cotizables. Delegación PURA en el catálogo (`OFFERING_LIST`, ya
-   * ordenado por `sortOrder`). `protected` a propósito: los specs de la intersección oferta×schedule
-   * (§1.3) subclasean el servicio para inyectar una oferta restringida (solo-FIXED) — el catálogo
-   * real aún no tiene ofertas con `allowedModes ≠ [PUJA, FIXED]` y NO se inventa una entrada
-   * fantasma en producción (mismo seam que `TripsService.resolveOffering`).
+   * ordenado por `sortOrder`). `protected` a propósito: es el punto de extensión para que un spec
+   * subclase el servicio e inyecte un catálogo de ofertas de prueba sin inventar una entrada fantasma
+   * en producción (mismo seam que `TripsService.resolveOffering`).
    */
   protected quotedOfferings(): readonly OfferingSpec[] {
     return OFFERING_LIST;
-  }
-
-  /**
-   * Resuelve el modo de pricing del origen vía trip-service (GET /internal/pricing/resolve?lat&lon).
-   * DEGRADACIÓN HONESTA (ADR 011 §8.2): si la llamada falla, devuelve PUJA (el default ratificado del
-   * sistema) — NUNCA asume FIXED, porque mostrar un precio fijo que no podemos confirmar sería deshonesto
-   * (el pasajero creería un precio firme inexistente). Ante la duda, puja: la app pide la oferta.
-   */
-  private async resolveMode(
-    lat: number,
-    lon: number,
-    identity: AuthenticatedUser,
-    at?: string,
-  ): Promise<PricingMode> {
-    try {
-      // S2 — `at` (hora de recojo de una reserva) se reenvía a trip-service para resolver el modo de esa
-      // hora; si no hay reserva, se omite y trip-service resuelve con `now`.
-      const reply = await this.tripRest.get<ResolveModeReply>('/internal/pricing/resolve', {
-        identity,
-        query: at ? { lat, lon, at } : { lat, lon },
-      });
-      return reply.mode;
-    } catch (err) {
-      this.logger.warn(
-        `resolve de modo falló (${(err as Error).message}); degradando a PUJA (ADR 011 §8.2)`,
-      );
-      return PricingModeEnum.PUJA;
-    }
   }
 
   /**
@@ -365,17 +331,11 @@ export class MapsService {
   }
 
   /**
-   * B1c · ids de las ofertas ACTIVAS (overlay del admin, vía trip-service GET /internal/catalog). El quote
-   * filtra `quotedOfferings()` por este set. DEGRADACIÓN HONESTA: si el catálogo no está disponible,
-   * devuelve `null` → el quote cotiza TODAS las ofertas (no romper el pedido por una lectura de config;
-   * mismo criterio que `resolveMode` degradando a PUJA).
-   */
-  /**
-   * Catálogo EFECTIVO del admin para el quote: Map id → { pricing, modePin } SOLO de las ofertas
+   * Catálogo EFECTIVO del admin para el quote: Map id → { pricing, mode } SOLO de las ofertas
    * HABILITADAS (presencia en el map = activa). `null` = catálogo no disponible → el quote cotiza TODAS
-   * con el pricing/modo de CÓDIGO (degradación honesta, como el modo degrada a PUJA). B2: trae el pricing
-   * efectivo + el pin de modo para que el quote MUESTRE lo que createTrip va a cobrar/usar (cierra el gap
-   * quote↔create).
+   * con el pricing/modo de CÓDIGO (degradación honesta). ADR 023: trae el pricing + el `mode` EFECTIVOS
+   * (ya resueltos por trip-service con la palanca del admin) para que el quote MUESTRE lo que createTrip
+   * va a cobrar/usar (cierra el gap quote↔create).
    */
   private async fetchEffectiveCatalog(
     identity: AuthenticatedUser,
@@ -385,7 +345,7 @@ export class MapsService {
       return new Map(
         reply.offerings
           .filter((o) => o.enabled)
-          .map((o) => [o.id, { pricing: o.pricing, modePin: o.modePin }]),
+          .map((o) => [o.id, { pricing: o.pricing, mode: o.mode }]),
       );
     } catch (err) {
       this.logger.warn(
