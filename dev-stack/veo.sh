@@ -1432,6 +1432,46 @@ cmd_seed_finance() {
   blue "  Reembolsos ya se ve: reembolsá cualquiera de los tripIds recientes desde el panel."
 }
 
+cmd_seed_fleet() {
+  hdr "SEED FLOTA (conductor PENDING + vehículo en revisión + docs/inspección → Conductores/Vehículos/Revisiones)"
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${PG_CONT}\$"; then
+    red "  postgres ($PG_CONT) no está arriba — levantá la infra (veo.sh up / dev)"; return 1
+  fi
+  if ! docker exec -i "$PG_CONT" psql -U veo -d veo -q < "$SCRIPT_DIR/seed-fleet-dev.sql"; then
+    red "  el seed falló (revisá el error de psql arriba)"; return 1
+  fi
+  green "  seed aplicado (idempotente: re-correr NO duplica y RE-ARMA los estados PENDING para volver a probar)"
+  echo
+  blue "  IDs sembrados (PEGABLES para probar aprobar/rechazar en el panel de FLOTA):"
+  printf '    %-16s %-38s %s\n' "QUÉ" "ID / PLACA" "ENCIENDE"
+  printf '    %-16s %-38s %s\n' "conductor"  "d1000000-0000-4000-8000-0000000000a1" "Conductores (Pendientes/Todos) + Revisiones"
+  printf '    %-16s %-38s %s\n' "  user_id"  "d1000000-0000-4000-8000-000000000001" "(sujeto de identidad del conductor)"
+  printf '    %-16s %-38s %s\n' "vehículo"   "REV-456 · d1000000-…-0000000000b1"    "Vehículos ('En revisión' · operable=false/DOCS)"
+  printf '    %-16s %-38s %s\n' "  doc SOAT"  "d1000000-0000-4000-8000-0000000000c1" "Revisiones (PENDING_REVIEW, VEHICLE)"
+  printf '    %-16s %-38s %s\n' "  doc ITV"   "d1000000-0000-4000-8000-0000000000c2" "Revisiones (PENDING_REVIEW, VEHICLE)"
+  printf '    %-16s %-38s %s\n' "  inspección" "d1000000-0000-4000-8000-0000000000e1" "Vehículos → columna ITV en 'Vigente'"
+  echo
+  blue "  estado real en la DB tras el seed:"
+  docker exec "$PG_CONT" psql -U veo -d veo -t -A -F $'\t' -c \
+    "SELECT 'conductor', legal_name, background_check_status::text FROM identity.drivers
+      WHERE id='d1000000-0000-4000-8000-0000000000a1'
+     UNION ALL
+     SELECT 'doc '||type::text, status::text, to_char(coalesce(expires_at, now()) AT TIME ZONE 'UTC','YYYY-MM-DD')
+      FROM fleet.fleet_documents WHERE owner_id='d1000000-0000-4000-8000-0000000000b1'
+     UNION ALL
+     SELECT 'ITV inspeccion', case when passed then 'passed' else 'failed' end,
+      case when next_due_at>now() then 'vigente' else 'vencida' end
+      FROM fleet.inspections WHERE vehicle_id='d1000000-0000-4000-8000-0000000000b1';" 2>/dev/null \
+  | while IFS=$'\t' read -r what a b; do
+      [[ -z "$what" ]] && continue
+      printf '    %-20s %-24s %s\n' "$what" "$a" "$b"
+    done
+  echo
+  yel "  'Todos' de Conductores lee el read-model Redis: el evento driver.registered del outbox lo proyecta."
+  yel "  El relay corre en el identity-service VIVO — si el conductor NO sale en 'Todos', reiniciá identity"
+  yel "  (o esperá al próximo tick del relay). En 'Pendientes' y 'Revisiones' aparece YA (leen identity/fleet directo)."
+}
+
 cmd_run_payouts() {
   hdr "RUN PAYOUTS (disparo manual del cron semanal de liquidación)"
   local body='{}'
@@ -1467,6 +1507,7 @@ case "${1:-}" in
   otp)     shift; cmd_otp "${1:-}" ;;
   trazar)  shift; cmd_trazar "${1:-}" ;;
   seed-finance)  cmd_seed_finance ;;
+  seed-fleet)    cmd_seed_fleet ;;
   run-payouts)   shift; cmd_run_payouts "${1:-}" "${2:-}" ;;
   run-reconcile) shift; cmd_run_reconcile "${1:-}" ;;
   *)
@@ -1485,6 +1526,7 @@ ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
   ${C_BOLD}trazar${C_RESET} <paquete>   Gate determinista SCOPEADO (index + veredicto + findings de UN paquete · ~2s). El root cuelga (~32 pkgs)
 
   ${C_BOLD}seed-finance${C_RESET}       Siembra pagos DEV CAPTURED (para Liquidaciones/Reembolsos/Reconciliación) e imprime los tripIds
+  ${C_BOLD}seed-fleet${C_RESET}         Siembra FLOTA DEV: conductor PENDING + vehículo en revisión + docs/inspección (Conductores/Vehículos/Revisiones) e imprime los IDs
   ${C_BOLD}run-payouts${C_RESET} [i f]  Dispara el run de liquidación (POST /payouts/run · FINANCE firmado). Default = semana previa
   ${C_BOLD}run-reconcile${C_RESET} [d]  Dispara la conciliación de un día (POST /reconciliation/run · dev-only). [d]=YYYY-MM-DD, default ayer
 
