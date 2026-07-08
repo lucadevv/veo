@@ -10,7 +10,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import type Redis from 'ioredis';
-import { uuidv7, withDistributedLock } from '@veo/utils';
+import { uuidv7, withDistributedLock, ValidationError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/gateway/payment-gateway.port';
@@ -329,5 +329,28 @@ export function previousDay(now: Date): { start: Date; end: Date } {
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const start = new Date(end);
   start.setUTCDate(end.getUTCDate() - 1);
+  return { start, end };
+}
+
+/**
+ * Ventana [00:00, 00:00) UTC de un día `YYYY-MM-DD` (para el trigger dev de la conciliación). Valida el
+ * formato y que sea una fecha real (rechaza 2026-13-40); el resto de la validación de forma la hace el DTO.
+ */
+export function dayWindowUtc(date: string): { start: Date; end: Date } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) throw new ValidationError(`Fecha inválida (esperado YYYY-MM-DD): ${date}`);
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const start = new Date(Date.UTC(y, mo - 1, d));
+  if (
+    start.getUTCFullYear() !== y ||
+    start.getUTCMonth() !== mo - 1 ||
+    start.getUTCDate() !== d
+  ) {
+    throw new ValidationError(`Fecha inexistente: ${date}`);
+  }
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 1);
   return { start, end };
 }

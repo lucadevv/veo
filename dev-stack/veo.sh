@@ -1348,6 +1348,111 @@ cmd_trazar() {
   yel  "  'orphan-receiver'/'dead-end' acá son RUIDO del scoping de un lado (el otro extremo no está en el grafo)."
 }
 
+# ── SUBCOMANDOS: FINANZAS DEV (seed de pagos + triggers manuales de los crons) ─────────────────
+# Alimentan las 3 pantallas de finanzas del admin (Liquidaciones · Reembolsos · Reconciliación) sin
+# depender de webhooks reales. El dato de origen es un Payment FARE CAPTURED (viaje cobrado); en dev
+# el riel corre en `prontopaga` (cobros nacen PENDING) → sin este seed las pantallas quedan VACÍAS.
+#   seed-finance            siembra los cobros CAPTURED e imprime los tripIds (para Reembolsos).
+#   run-payouts  [ini fin]  dispara el run de liquidación (POST /payouts/run). Default = semana previa.
+#   run-reconcile [YYYY-MM-DD]  dispara la conciliación de un día (POST /reconciliation/run, dev-only). Default = ayer.
+#
+# Los dos triggers pegan al endpoint INTERNO de payment-service (:3005, prefijo /api/v1) FIRMANDO la
+# identidad interna igual que el admin-bff: header `x-veo-identity` (base64url del JSON) + `x-veo-identity-sig`
+# (HMAC-SHA256 hex con el INTERNAL_IDENTITY_SECRET compartido). Forjamos una identidad de riel ADMIN con rol
+# FINANCE (lo exige el RolesGuard de esos endpoints). En dev el step-up MFA se omite (StepUpMfaGuard →
+# !isHardenedEnv()), así que NO hace falta TOTP. El secreto se LEE del env de payment en runtime (boot-passenger
+# lo sincroniza entre servicios) — nunca hardcodeado acá.
+
+# Secreto HMAC de identidad interna que usa el payment-service CORRIENDO (del env que cargó al bootear).
+finance_payment_secret() {
+  local envf="$ROOT_DIR/services/payment-service/env/${APP_ENV:-development}.env"
+  grep -m1 '^INTERNAL_IDENTITY_SECRET=' "$envf" 2>/dev/null | cut -d= -f2-
+}
+
+# Forja la identidad interna firmada (idéntica a signInternalIdentity de @veo/auth): imprime 2 líneas,
+# HEADER y luego SIG. type='admin' (SubjectType del JWT en minúsculas), roles=[FINANCE], aud='admin-rail'.
+# Usa node (mismo createHmac('sha256').digest('hex') que @veo/utils signHmac) para que la firma matchee bit a bit.
+finance_forge_identity() {  # $1 = secret
+  node -e '
+    const c = require("crypto");
+    const secret = process.argv[1];
+    const id = { userId: "dev-finance-op", type: "admin", roles: ["FINANCE"], sessionId: "dev-finance-seed", issuedAt: Date.now(), aud: "admin-rail" };
+    const header = Buffer.from(JSON.stringify(id)).toString("base64url");
+    const sig = c.createHmac("sha256", secret).update(header).digest("hex");
+    process.stdout.write(header + "\n" + sig + "\n");
+  ' "$1"
+}
+
+# POST a un endpoint interno de payment-service con la identidad ADMIN/FINANCE firmada. $1=path, $2=body JSON.
+finance_internal_post() {
+  local path="$1" body="${2:-{}}"
+  local line port secret hdr sig
+  line="$(svc_line payment)" || { red "  servicio 'payment' desconocido en el mapa"; return 1; }
+  IFS='|' read -r _ port _ _ _ <<<"$line"
+  if ! command -v node >/dev/null 2>&1; then red "  falta node en PATH (necesario para firmar la identidad interna)"; return 1; fi
+  if ! port_in_use "$port"; then
+    red "  payment-service no responde en :$port — levantá el stack primero (veo.sh dev / up)"; return 1
+  fi
+  secret="$(finance_payment_secret)"
+  if [[ -z "$secret" ]]; then
+    red "  no pude leer INTERNAL_IDENTITY_SECRET del env de payment — ¿corriste el boot? (veo.sh up/dev sincroniza el secreto)"; return 1
+  fi
+  { read -r hdr; read -r sig; } < <(finance_forge_identity "$secret")
+  blue "  POST http://localhost:$port$path  body=$body"
+  curl -sS -X POST "http://localhost:$port$path" \
+    -H 'content-type: application/json' \
+    -H "x-veo-identity: $hdr" \
+    -H "x-veo-identity-sig: $sig" \
+    -w $'\n  ← HTTP %{http_code}\n' \
+    --data "$body"
+}
+
+cmd_seed_finance() {
+  hdr "SEED FINANZAS (pagos DEV → Liquidaciones/Reembolsos/Reconciliación)"
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${PG_CONT}\$"; then
+    red "  postgres ($PG_CONT) no está arriba — levantá la infra (veo.sh up / dev)"; return 1
+  fi
+  if ! docker exec -i "$PG_CONT" psql -U veo -d veo -q < "$SCRIPT_DIR/seed-finance-dev.sql"; then
+    red "  el seed falló (revisá el error de psql arriba)"; return 1
+  fi
+  green "  seed aplicado (idempotente: re-correr NO duplica ni rota los tripIds)"
+  echo
+  blue "  cobros CAPTURED sembrados — los tripIds son PEGABLES en la pantalla de Reembolsos:"
+  printf '    %-38s %-8s %-18s\n' "TRIP_ID" "MONTO" "CAPTURADO (UTC)"
+  docker exec "$PG_CONT" psql -U veo -d veo -t -A -F $'\t' -c \
+    "SELECT trip_id, gross_cents, to_char(captured_at AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI')
+     FROM payment.payments WHERE dedup_key LIKE 'seed-fare:%' ORDER BY captured_at;" 2>/dev/null \
+  | while IFS=$'\t' read -r tid gross cap; do
+      [[ -z "$tid" ]] && continue
+      printf '    %-38s S/%-6s %-18s\n' "$tid" "$(awk "BEGIN{printf \"%.2f\", $gross/100}")" "$cap"
+    done
+  echo
+  yel "  siguiente: 'veo.sh run-payouts' (Liquidaciones) · 'veo.sh run-reconcile' (Reconciliación)."
+  blue "  Reembolsos ya se ve: reembolsá cualquiera de los tripIds recientes desde el panel."
+}
+
+cmd_run_payouts() {
+  hdr "RUN PAYOUTS (disparo manual del cron semanal de liquidación)"
+  local body='{}'
+  if [[ -n "${1:-}" ]]; then
+    # periodStart [periodEnd] en ISO (ej. 2026-06-29T00:00:00Z). Default (sin args) = semana previa (lo calcula el servicio).
+    body="{\"periodStart\":\"$1\"${2:+,\"periodEnd\":\"$2\"}}"
+  fi
+  finance_internal_post /api/v1/payouts/run "$body"
+  echo
+  yel "  el run AGREGA los PENDING faltantes y los DESEMBOLSA (riel sandbox en dev) — refrescá Liquidaciones."
+}
+
+cmd_run_reconcile() {
+  hdr "RUN RECONCILE (disparo manual del cron diario de conciliación · dev-only)"
+  local body='{}'
+  [[ -n "${1:-}" ]] && body="{\"date\":\"$1\"}"   # YYYY-MM-DD (UTC). Default (sin arg) = día previo.
+  finance_internal_post /api/v1/reconciliation/run "$body"
+  echo
+  yel "  crea una ReconciliationRun (visible en el panel). OJO: en modo prontopaga getStatement()=[] →"
+  yel "  la discrepancia sale ALTA (extracto vacío vs DB con cobros) y la corrida queda 'alerted'. Es esperado en dev."
+}
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 case "${1:-}" in
   up)      cmd_up ;;
@@ -1360,6 +1465,9 @@ case "${1:-}" in
   migrate) cmd_migrate ;;
   otp)     shift; cmd_otp "${1:-}" ;;
   trazar)  shift; cmd_trazar "${1:-}" ;;
+  seed-finance)  cmd_seed_finance ;;
+  run-payouts)   shift; cmd_run_payouts "${1:-}" "${2:-}" ;;
+  run-reconcile) shift; cmd_run_reconcile "${1:-}" ;;
   *)
     cat <<EOF
 ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
@@ -1374,6 +1482,10 @@ ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
   ${C_BOLD}migrate${C_RESET}            prisma migrate deploy de todos los servicios (idempotente)
   ${C_BOLD}otp${C_RESET} [-f]           Escáner de OTP de dev (driver/pasajero · SMS sandbox + email). -f = en vivo. Admin=TOTP aparte
   ${C_BOLD}trazar${C_RESET} <paquete>   Gate determinista SCOPEADO (index + veredicto + findings de UN paquete · ~2s). El root cuelga (~32 pkgs)
+
+  ${C_BOLD}seed-finance${C_RESET}       Siembra pagos DEV CAPTURED (para Liquidaciones/Reembolsos/Reconciliación) e imprime los tripIds
+  ${C_BOLD}run-payouts${C_RESET} [i f]  Dispara el run de liquidación (POST /payouts/run · FINANCE firmado). Default = semana previa
+  ${C_BOLD}run-reconcile${C_RESET} [d]  Dispara la conciliación de un día (POST /reconciliation/run · dev-only). [d]=YYYY-MM-DD, default ayer
 
   servicios: $(printf '%s ' "${SERVICES[@]%%|*}")
 EOF
