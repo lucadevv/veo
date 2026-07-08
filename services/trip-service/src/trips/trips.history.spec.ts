@@ -98,6 +98,39 @@ function makePrisma(rows: Trip[]) {
   return { read: { trip: { findMany } } } as never;
 }
 
+/**
+ * Igual que makePrisma pero filtrando por `driverId` (espejo del historial del CONDUCTOR): modela el
+ * mismo keyset + orden + take, sobre el where que arma driverHistoryWhere.
+ */
+function makeDriverPrisma(rows: Trip[]) {
+  const findMany = async ({
+    where,
+    take,
+  }: {
+    where: { driverId: string; OR?: Record<string, unknown>[] };
+    orderBy: unknown;
+    take: number;
+  }) => {
+    let filtered = rows.filter((r) => r.driverId === where.driverId);
+    if (where.OR) {
+      const ltClause = where.OR[0] as { requestedAt: { lt: Date } };
+      const eqClause = where.OR[1] as { requestedAt: Date; id: { lt: string } };
+      const cAt = ltClause.requestedAt.lt.getTime();
+      const cId = eqClause.id.lt;
+      filtered = filtered.filter((r) => {
+        const at = r.requestedAt.getTime();
+        return at < cAt || (at === cAt && r.id < cId);
+      });
+    }
+    filtered.sort((a, b) => {
+      const d = b.requestedAt.getTime() - a.requestedAt.getTime();
+      return d !== 0 ? d : b.id < a.id ? -1 : b.id > a.id ? 1 : 0;
+    });
+    return filtered.slice(0, take);
+  };
+  return { read: { trip: { findMany } } } as never;
+}
+
 describe('TripQueryService.listPassengerTrips · historial keyset', () => {
   it('ordena por requestedAt DESC (los más recientes primero)', async () => {
     const rows = [
@@ -170,5 +203,52 @@ describe('TripQueryService.listPassengerTrips · historial keyset', () => {
     ]);
     expect(page.items[1]!.driverId).toBeNull();
     expect(page.items[2]!.cancelledAt).toBe('2026-06-01T10:05:00.000Z');
+  });
+});
+
+describe('TripQueryService.listDriverTrips · historial keyset del CONDUCTOR (espejo)', () => {
+  it('ordena por requestedAt DESC (los más recientes primero)', async () => {
+    const rows = [
+      trip('a', 'pax-1', '2026-06-01T10:00:00.000Z', { driverId: 'drv-1' }),
+      trip('b', 'pax-2', '2026-06-03T10:00:00.000Z', { driverId: 'drv-1' }),
+      trip('c', 'pax-3', '2026-06-02T10:00:00.000Z', { driverId: 'drv-1' }),
+    ];
+    const svc = new TripQueryService(makeDriverPrisma(rows));
+    const page = await svc.listDriverTrips('drv-1');
+    expect(page.items.map((i) => i.id)).toEqual(['b', 'c', 'a']);
+    expect(page.nextCursor).toBeNull(); // 3 ≤ limit → no hay más
+  });
+
+  it('pagina: limit devuelve nextCursor y la 2da página continúa exacto donde terminó', async () => {
+    const rows = Array.from({ length: 5 }, (_, i) =>
+      trip(`t${i}`, `pax-${i}`, `2026-06-0${i + 1}T10:00:00.000Z`, { driverId: 'drv-1' }),
+    );
+    const svc = new TripQueryService(makeDriverPrisma(rows));
+
+    const page1 = await svc.listDriverTrips('drv-1', undefined, 2);
+    expect(page1.items.map((i) => i.id)).toEqual(['t4', 't3']); // 06-05, 06-04
+    expect(decodeCursor(page1.nextCursor)).toEqual({
+      requestedAt: '2026-06-04T10:00:00.000Z',
+      id: 't3',
+    });
+
+    const page2 = await svc.listDriverTrips('drv-1', page1.nextCursor!, 2);
+    expect(page2.items.map((i) => i.id)).toEqual(['t2', 't1']); // 06-03, 06-02
+
+    const page3 = await svc.listDriverTrips('drv-1', page2.nextCursor!, 2);
+    expect(page3.items.map((i) => i.id)).toEqual(['t0']); // 06-01, última fila
+    expect(page3.nextCursor).toBeNull(); // 1 < limit → fin
+  });
+
+  it('solo devuelve los viajes DE ese conductor (anti-IDOR estructural por driverId)', async () => {
+    const rows = [
+      trip('mine-1', 'pax-1', '2026-06-02T10:00:00.000Z', { driverId: 'drv-1' }),
+      trip('other-1', 'pax-1', '2026-06-03T10:00:00.000Z', { driverId: 'drv-OTRO' }),
+      trip('mine-2', 'pax-2', '2026-06-01T10:00:00.000Z', { driverId: 'drv-1' }),
+    ];
+    const svc = new TripQueryService(makeDriverPrisma(rows));
+    const page = await svc.listDriverTrips('drv-1');
+    expect(page.items.map((i) => i.id)).toEqual(['mine-1', 'mine-2']);
+    expect(page.items.every((i) => i.id.startsWith('mine'))).toBe(true);
   });
 });

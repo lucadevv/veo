@@ -35,6 +35,34 @@ export function formatShortDate(iso: string): string {
   return date.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+/**
+ * Hora del día es-PE (ej. "14:05") a partir de un ISO-8601; vacío si la fecha es inválida. Se localiza en
+ * el huso del device (Lima = UTC-5). Para la fila del historial de viajes (hora de salida).
+ */
+export function formatTimeOfDay(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Días de CALENDARIO transcurridos entre `iso` y hoy (0 = hoy, 1 = ayer, …), comparando por día LOCAL
+ * (no por 24 h exactas), para elegir la etiqueta "Hoy"/"Ayer"/fecha en la fila del historial. `NaN` si la
+ * fecha es inválida (el consumidor degrada a la fecha corta).
+ */
+export function calendarDaysAgo(iso: string): number {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) {
+    return Number.NaN;
+  }
+  const now = new Date();
+  const thenDay = new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime();
+  const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.round((nowDay - thenDay) / 86_400_000);
+}
+
 /** Formatea segundos a "m min" redondeando hacia arriba (ETAs/duración). */
 export function secondsToMinutes(seconds: number): number {
   return Math.max(0, Math.ceil(seconds / 60));

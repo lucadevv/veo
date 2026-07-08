@@ -96,6 +96,12 @@ interface ListPassengerTripsRequest {
   limit: number;
 }
 
+interface ListDriverTripsRequest {
+  driverId: string;
+  cursor: string;
+  limit: number;
+}
+
 interface TripHistoryItemReply {
   id: string;
   status: string;
@@ -363,6 +369,50 @@ export class TripGrpcController {
   }: ListPassengerTripsRequest): Promise<PassengerTripsReply> {
     const page = await this.query.listPassengerTrips(
       passengerId,
+      cursor || undefined,
+      limit || undefined,
+    );
+    return {
+      items: page.items.map((it) => ({
+        id: it.id,
+        status: it.status,
+        originLat: it.origin.lat,
+        originLng: it.origin.lng,
+        destinationLat: it.destination.lat,
+        destinationLng: it.destination.lng,
+        fareCents: it.fareCents,
+        currency: it.currency,
+        paymentMethod: it.paymentMethod,
+        distanceMeters: it.distanceMeters,
+        durationSeconds: it.durationSeconds,
+        requestedAt: it.requestedAt,
+        completedAt: it.completedAt ?? '',
+        cancelledAt: it.cancelledAt ?? '',
+        driverId: it.driverId ?? '',
+        vehicleType: it.vehicleType,
+        category: it.category ?? '',
+      })),
+      // proto3 no tiene null para string: '' = no hay siguiente página; el BFF lo re-mapea a null.
+      nextCursor: page.nextCursor ?? '',
+    };
+  }
+
+  /**
+   * Historial REAL del CONDUCTOR (servidor, no la lista local): SUS viajes ordenados por requestedAt DESC,
+   * id DESC, paginados por cursor opaco. ESPEJO EXACTO de listPassengerTrips (mismo map de items →
+   * PassengerTripsReply, que reusamos porque el item del historial es idéntico). Delega en
+   * TripQueryService.listDriverTrips (keyset, clamp del limit, anti-N+1). El driverId lo fija el BFF desde
+   * el JWT (anti-IDOR); acá solo se confía y se filtra por él (un viaje de OTRO conductor NUNCA aparece
+   * porque el `where` siempre lleva driverId). proto3 colapsa los string opcionales a '' cuando son null.
+   */
+  @GrpcMethod('TripService', 'ListDriverTrips')
+  async listDriverTrips({
+    driverId,
+    cursor,
+    limit,
+  }: ListDriverTripsRequest): Promise<PassengerTripsReply> {
+    const page = await this.query.listDriverTrips(
+      driverId,
       cursor || undefined,
       limit || undefined,
     );

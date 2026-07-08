@@ -595,6 +595,8 @@
       "reconnecting": "Reconectando…"
     },
     "status": {
+      "requested": "Solicitado",
+      "matching": "Buscando conductor",
       "scheduled": "Reservado",
       "assigned": "Asignado",
       "accepted": "Aceptado",
@@ -636,6 +638,17 @@
     "geoUnavailable": "El servidor del conductor aún no entrega las coordenadas de recojo/destino.",
     "historyTitle": "Historial",
     "historyUnavailable": "El historial de viajes aún no está disponible desde el servidor.",
+    "history": {
+      "emptyTitle": "Aún no hay viajes para mostrar",
+      "emptyBody": "Cuando completes tu primer viaje, aparecerá acá con su ruta, tarifa y estado.",
+      "errorTitle": "No pudimos cargar tu historial",
+      "loadingMore": "Cargando más viajes…",
+      "endOfList": "No hay más viajes",
+      "dayToday": "Hoy",
+      "dayYesterday": "Ayer",
+      "departedAt": "Salida {{time}}",
+      "tripSummary": "{{distance}} · {{duration}}"
+    },
     "completedTitle": "Viaje completado",
     "completedBody": "El viaje finalizó correctamente.",
     "bid": {

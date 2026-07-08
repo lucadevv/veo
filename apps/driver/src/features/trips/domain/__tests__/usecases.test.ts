@@ -1,4 +1,4 @@
-import type { RespondWaypointView } from '@veo/api-client';
+import type { RespondWaypointView, TripHistoryPage } from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
@@ -53,6 +53,9 @@ class FakeTripsRepository implements TripsRepository {
   }
   getTripState(): Promise<TripState> {
     return Promise.resolve({ id: 't1', status: 'IN_PROGRESS' });
+  }
+  getTripHistory(): Promise<TripHistoryPage> {
+    return Promise.resolve({ items: [], nextCursor: null });
   }
   getRoute(): Promise<TripRouteView> {
     return Promise.resolve({

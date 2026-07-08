@@ -14,6 +14,7 @@ import { toTripView } from './trip-view.mapper';
 import {
   clampLimit,
   decodeCursor,
+  driverHistoryWhere,
   encodeCursor,
   historyWhere,
   tripToHistoryItem,
@@ -74,6 +75,37 @@ export class TripQueryService {
     const cursor = decodeCursor(rawCursor);
     const rows = await this.prisma.read.trip.findMany({
       where: historyWhere(passengerId, cursor),
+      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1, // peek: 1 fila extra para saber si hay siguiente página sin COUNT
+    });
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const last = page[page.length - 1];
+    const nextCursor =
+      hasMore && last
+        ? encodeCursor({ requestedAt: last.requestedAt.toISOString(), id: last.id })
+        : null;
+    return { items: page.map((t) => tripToHistoryItem(t)), nextCursor };
+  }
+
+  /**
+   * Historial REAL del CONDUCTOR (servidor, no MMKV local): SUS viajes ordenados por requestedAt DESC,
+   * id DESC, paginados por CURSOR (keyset). ESPEJO EXACTO de listPassengerTrips pero filtrando por
+   * `driverId` (id de PERFIL Driver de identity, NO userId — ver el invariante en driver-trips.service).
+   * El driverId lo fija el BFF desde el JWT (anti-IDOR): este método NUNCA recibe el id del cliente.
+   *
+   * Mismo keyset (take = limit + 1 para el "peek" sin COUNT), mismo clamp del limit, mismo orden y mismo
+   * anti-N+1 (el item NO trae el nombre del pasajero: la card muestra tier+ruta+monto+estado+fecha).
+   */
+  async listDriverTrips(
+    driverId: string,
+    rawCursor?: string,
+    rawLimit?: number,
+  ): Promise<TripHistoryPage> {
+    const limit = clampLimit(rawLimit);
+    const cursor = decodeCursor(rawCursor);
+    const rows = await this.prisma.read.trip.findMany({
+      where: driverHistoryWhere(driverId, cursor),
       orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
       take: limit + 1, // peek: 1 fila extra para saber si hay siguiente página sin COUNT
     });

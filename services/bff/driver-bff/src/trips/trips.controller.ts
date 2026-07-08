@@ -25,6 +25,8 @@ import {
   RespondWaypointDto,
   RouteQueryDto,
   StartTripDto,
+  TripHistoryQueryDto,
+  type TripHistoryPageView,
   type TripRouteView,
   type TripStateView,
   type TripView,
@@ -59,6 +61,24 @@ export class TripsController {
       return undefined;
     }
     return trip;
+  }
+
+  // IMPORTANTE: `history` va ANTES de `:id` — si no, `@Get(':id')` con ParseUUIDPipe captura "history"
+  // como id y responde 400 (mismo motivo que `active`). El orden de declaración define el matching.
+  @Get('history')
+  @ApiOperation({
+    summary:
+      'Historial REAL de viajes del conductor (servidor, no la lista local): SUS viajes ordenados por ' +
+      'requestedAt DESC, paginados por cursor. Trae los estados REALES (COMPLETED/CANCELLED/EXPIRED). ' +
+      'El driverId se DERIVA del perfil del JWT (anti-IDOR). Ruta literal: declarada antes de :id.',
+  })
+  history(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: TripHistoryQueryDto,
+  ): Promise<TripHistoryPageView> {
+    // driverId DERIVADO del perfil del JWT (user), NUNCA del query: el historial solo puede ser el del
+    // conductor autenticado.
+    return this.trips.getTripHistory(user, query.cursor, query.limit);
   }
 
   @Get(':id')

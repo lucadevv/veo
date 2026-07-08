@@ -113,6 +113,24 @@ export function historyWhere(
   };
 }
 
+/**
+ * Espejo de `historyWhere` para el historial del CONDUCTOR: mismo comparador keyset (requestedAt DESC,
+ * id DESC) pero filtrando por `driverId` (id de PERFIL Driver de identity, NO userId). Sin cursor → solo
+ * el filtro por conductor (primera página). El driverId lo FIJA el BFF desde el JWT (anti-IDOR): un viaje
+ * de OTRO conductor NUNCA aparece porque el `where` siempre lleva driverId.
+ */
+export function driverHistoryWhere(
+  driverId: string,
+  cursor: HistoryCursor | null,
+): Record<string, unknown> {
+  if (!cursor) return { driverId };
+  const at = new Date(cursor.requestedAt);
+  return {
+    driverId,
+    OR: [{ requestedAt: { lt: at } }, { requestedAt: at, id: { lt: cursor.id } }],
+  };
+}
+
 /** Mapea una fila Trip al item del historial (ISO-8601, null para sin-valor). */
 export function tripToHistoryItem(t: Trip): TripHistoryItem {
   return {

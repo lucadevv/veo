@@ -4,9 +4,15 @@ import {
   driverTripStateView,
   driverTripView,
   respondWaypointView,
+  tripHistoryPage,
   tripRoute,
 } from '@veo/api-client';
-import type { GeoPoint, RespondWaypointView } from '@veo/api-client';
+import type {
+  GeoPoint,
+  RespondWaypointView,
+  TripHistoryPage,
+  TripHistoryQuery,
+} from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
@@ -53,6 +59,15 @@ export class HttpTripsRepository implements TripsRepository {
 
   getTripState(tripId: string): Promise<TripState> {
     return this.http.get(`/trips/${tripId}/state`, { schema: driverTripStateView });
+  }
+
+  getTripHistory(query?: TripHistoryQuery): Promise<TripHistoryPage> {
+    // GET /trips/history?cursor=&limit= — mismo patrón que `/trips/active` (schema-validado). El BFF arma
+    // el query string (RN no tiene URL.searchParams) y deriva el driverId del JWT (no viaja acá, anti-IDOR).
+    return this.http.get(`/trips/history`, {
+      query: { cursor: query?.cursor, limit: query?.limit },
+      schema: tripHistoryPage,
+    });
   }
 
   getRoute(tripId: string, from?: GeoPoint): Promise<TripRouteView> {

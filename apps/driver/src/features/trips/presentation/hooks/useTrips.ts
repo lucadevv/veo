@@ -1,5 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { GeoPoint } from '@veo/api-client';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import type { GeoPoint, TripHistoryItem } from '@veo/api-client';
 import { useRepositories } from '../../../../core/di/useDi';
 import { SHIFT_STATE_QUERY_KEY } from '../../../shift/presentation/hooks/useShift';
 import {
@@ -12,6 +17,7 @@ import {
   EnsureTripAcceptedUseCase,
   GetActiveTripUseCase,
   GetOfferUseCase,
+  GetTripHistoryUseCase,
   GetTripRouteUseCase,
   GetTripUseCase,
   RejectOfferUseCase,
@@ -75,6 +81,78 @@ export function useTrip(tripId: string) {
     queryFn: () => new GetTripUseCase(trips).execute(tripId),
     enabled: tripId.length > 0,
   });
+}
+
+/** Clave de caché del historial paginado del conductor (una sola "lista infinita"). */
+export const TRIP_HISTORY_QUERY_KEY = ['trips', 'history'] as const;
+
+/** Tamaño de página pedido al BFF (el servidor lo acota a su tope; es solo una sugerencia). */
+const TRIP_HISTORY_PAGE_SIZE = 20;
+
+/** Estado aplanado del historial que consume la pantalla (mismo contrato que el hook del pasajero). */
+export interface UseTripHistoryResult {
+  /** Items de todas las páginas cargadas, aplanados y en orden del servidor (requestedAt DESC). */
+  items: TripHistoryItem[];
+  /** Primera carga sin datos: la pantalla pinta el skeleton. */
+  isLoading: boolean;
+  /** Error de la primera carga: la pantalla pinta el estado reintentable. */
+  isError: boolean;
+  /** Hay página siguiente (nextCursor != null). */
+  hasNextPage: boolean;
+  /** Se está trayendo la página siguiente (footer "cargando más"). */
+  isFetchingNextPage: boolean;
+  /** Pull-to-refresh en curso (con datos ya en pantalla). */
+  isRefetching: boolean;
+  /** Pide la página siguiente (idempotente si ya carga o no hay más). */
+  fetchNextPage: () => void;
+  /** Reintenta desde cero (error) o refresca (pull-to-refresh). */
+  refetch: () => void;
+}
+
+/**
+ * Historial de viajes del CONDUCTOR leído del SERVIDOR con paginación infinita por CURSOR (keyset).
+ *
+ * Espeja el `useTripHistory` del pasajero: cada página trae `{ items, nextCursor }`; `getNextPageParam`
+ * devuelve `nextCursor ?? undefined` (undefined corta la paginación → `hasNextPage` pasa a false). El
+ * cursor es OPACO — se re-pasa tal cual sin parsearlo. Server-authoritative: los ESTADOS son los reales
+ * (COMPLETED/CANCELLED/EXPIRED), no una foto local. Sin fallback offline a propósito (HONESTO): sin red se
+ * muestra error reintentable, no datos viejos como si fueran verdad.
+ */
+export function useTripHistory(): UseTripHistoryResult {
+  const { trips } = useRepositories();
+
+  const query = useInfiniteQuery({
+    queryKey: TRIP_HISTORY_QUERY_KEY,
+    queryFn: ({ pageParam }) =>
+      new GetTripHistoryUseCase(trips).execute({
+        cursor: pageParam ?? undefined,
+        limit: TRIP_HISTORY_PAGE_SIZE,
+      }),
+    initialPageParam: undefined as string | undefined,
+    // `null` (sin más) → undefined corta la paginación; un cursor opaco se re-pasa tal cual.
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    staleTime: 60_000,
+  });
+
+  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+
+  return {
+    items,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    hasNextPage: query.hasNextPage,
+    isFetchingNextPage: query.isFetchingNextPage,
+    isRefetching: query.isRefetching,
+    fetchNextPage: () => {
+      // Solo pide si hay más y no hay una página en vuelo (evita disparos dobles al llegar al fondo).
+      if (query.hasNextPage && !query.isFetchingNextPage) {
+        void query.fetchNextPage();
+      }
+    },
+    refetch: () => {
+      void query.refetch();
+    },
+  };
 }
 
 /**

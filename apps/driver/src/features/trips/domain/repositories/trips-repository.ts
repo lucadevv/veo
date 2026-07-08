@@ -1,4 +1,9 @@
-import type { GeoPoint, RespondWaypointView } from '@veo/api-client';
+import type {
+  GeoPoint,
+  RespondWaypointView,
+  TripHistoryPage,
+  TripHistoryQuery,
+} from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
@@ -32,6 +37,13 @@ export interface TripsRepository {
   getActiveTrip(): Promise<Trip | null>;
   /** GET /trips/:id/state — estado ligero del viaje. */
   getTripState(tripId: string): Promise<TripState>;
+  /**
+   * GET /trips/history — historial paginado por CURSOR (keyset) del CONDUCTOR, con los ESTADOS REALES
+   * del servidor (COMPLETED/CANCELLED/EXPIRED). El driverId lo DERIVA el BFF del JWT (anti-IDOR, no se
+   * manda). Cada página trae `{ items, nextCursor }`; `nextCursor === null` corta la paginación. El cursor
+   * es OPACO: se re-pasa tal cual sin parsearlo.
+   */
+  getTripHistory(query?: TripHistoryQuery): Promise<TripHistoryPage>;
   /**
    * GET /trips/:id/route — ruta + pasos de navegación turn-by-turn del viaje activo. `from` (posición
    * ACTUAL del conductor, opcional) hace que el BFF trace la ruta desde donde está (ETA vivo + próxima

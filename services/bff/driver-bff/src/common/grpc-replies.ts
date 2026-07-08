@@ -8,6 +8,8 @@ export type {
   DriverReply,
   TripReply,
   TripStateReply,
+  TripHistoryItem,
+  PassengerTripsReply,
   MatchReply,
   SurgeReply,
   PaymentReply,

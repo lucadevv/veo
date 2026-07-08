@@ -85,3 +85,16 @@ export interface PassengerTripsReply {
   items: TripHistoryItem[];
   nextCursor: string;
 }
+
+/**
+ * trip.ListDriverTrips — request del historial del CONDUCTOR. Espejo de ListPassengerTrips pero con
+ * driverId (id de PERFIL Driver de identity, NO userId). La respuesta reusa PassengerTripsReply (el item
+ * del historial es idéntico). El driverId lo FIJA el BFF desde el JWT (anti-IDOR); el cliente no lo provee.
+ */
+export interface ListDriverTripsRequest {
+  driverId: string;
+  /** Cursor opaco devuelto por la página previa (nextCursor). "" = arrancar desde el más reciente. */
+  cursor: string;
+  /** Tamaño de página pedido; el servidor lo acota a [1, MAX_HISTORY_PAGE]. 0/ausente → default. */
+  limit: number;
+}

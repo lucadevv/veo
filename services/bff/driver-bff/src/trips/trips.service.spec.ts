@@ -211,3 +211,91 @@ describe('TripsService.getTrip — anti-IDOR (no enumerar datos de viajes ajenos
     await expect(service.getTrip('trip-1', identity)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
+
+describe('TripsService.getTripHistory — anti-IDOR (driverId DERIVADO del perfil, no del query)', () => {
+  /**
+   * grpc.call resuelve según el método: GetDriverByUser → perfil del conductor; ListDriverTrips → página
+   * gRPC del historial (PassengerTripsReply, reusado). Modela la resolución del driverId + el passthrough
+   * de cursor/limit sin una DB.
+   */
+  function makeHistoryService(opts: { driverFound?: boolean; driverId?: string }) {
+    const driverReply = {
+      id: opts.driverId ?? 'drv-9',
+      userId: 'usr-1',
+      found: opts.driverFound ?? true,
+    };
+    const page = {
+      items: [
+        {
+          id: 'trip-1',
+          status: 'COMPLETED',
+          originLat: -12.04,
+          originLng: -77.04,
+          destinationLat: -12.12,
+          destinationLng: -77.02,
+          fareCents: 1500,
+          currency: 'PEN',
+          paymentMethod: 'CASH',
+          distanceMeters: 4200,
+          durationSeconds: 900,
+          requestedAt: '2026-06-03T10:00:00.000Z',
+          completedAt: '2026-06-03T10:15:00.000Z',
+          cancelledAt: '',
+          driverId: 'drv-9',
+          vehicleType: 'CAR',
+          category: '',
+        },
+      ],
+      nextCursor: '',
+    };
+    const call = vi.fn((_svc: string, method: string) =>
+      Promise.resolve(method === 'GetDriverByUser' ? driverReply : page),
+    );
+    const grpc = { call };
+    const rest = { client: vi.fn() };
+    const service = new TripsService(grpc as never, rest as never, {} as never);
+    return { service, call };
+  }
+
+  it('deriva el driverId del perfil y lo manda al gRPC (NUNCA del query); mapea la página', async () => {
+    const { service, call } = makeHistoryService({ driverId: 'drv-9' });
+    const result = await service.getTripHistory(identity, 'cur-abc', 20);
+    expect(call).toHaveBeenCalledWith('identity', 'GetDriverByUser', { id: 'usr-1' }, identity);
+    // driverId DERIVADO (drv-9), NO el userId ni un valor del cliente; cursor/limit passthrough.
+    expect(call).toHaveBeenCalledWith(
+      'trip',
+      'ListDriverTrips',
+      { driverId: 'drv-9', cursor: 'cur-abc', limit: 20 },
+      identity,
+    );
+    // proto3 '' → null en los opcionales; status normalizado.
+    expect(result.nextCursor).toBeNull();
+    expect(result.items[0]!.cancelledAt).toBeNull();
+    expect(result.items[0]!.category).toBeNull();
+    expect(result.items[0]!.status).toBe('COMPLETED');
+    expect(result.items[0]!.origin).toEqual({ lat: -12.04, lng: -77.04 });
+  });
+
+  it('sin cursor/limit → manda cursor="" y limit=0 (el servidor clampa)', async () => {
+    const { service, call } = makeHistoryService({ driverId: 'drv-9' });
+    await service.getTripHistory(identity);
+    expect(call).toHaveBeenCalledWith(
+      'trip',
+      'ListDriverTrips',
+      { driverId: 'drv-9', cursor: '', limit: 0 },
+      identity,
+    );
+  });
+
+  it('sin perfil de conductor → página vacía y NO llama a ListDriverTrips', async () => {
+    const { service, call } = makeHistoryService({ driverFound: false });
+    const result = await service.getTripHistory(identity);
+    expect(result).toEqual({ items: [], nextCursor: null });
+    expect(call).not.toHaveBeenCalledWith(
+      'trip',
+      'ListDriverTrips',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});

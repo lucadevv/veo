@@ -18,13 +18,21 @@ import type { LatLon, MapsClient } from '@veo/maps';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import { MAPS } from '../infra/maps.client';
-import type { DriverReply, TripReply, TripStateReply } from '../common/grpc-replies';
+import type {
+  DriverReply,
+  PassengerTripsReply,
+  TripHistoryItem,
+  TripReply,
+  TripStateReply,
+} from '../common/grpc-replies';
 import type {
   AcceptTripDto,
   ArrivingTripDto,
   CancelTripDto,
   CompleteTripDto,
   StartTripDto,
+  TripHistoryItemView,
+  TripHistoryPageView,
   TripRouteView,
   TripStateView,
   TripView,
@@ -70,6 +78,41 @@ export function toTripView(trip: TripReply): TripView {
     paymentMethod: trip.paymentMethod,
     childMode: trip.childMode,
     penaltyCents: trip.penaltyCents,
+  };
+}
+
+/**
+ * Mapea un item gRPC del historial (PassengerTripsReply.items, reusado por ListDriverTrips) a la vista
+ * mobile del conductor. Espejo del `buildTripHistoryItem` del pasajero: normaliza el status crudo del
+ * downstream (CANCELLED_BY_* → CANCELLED, igual que el detalle) y re-mapea los '' de proto3 a null. Sin
+ * lookups extra (anti-N+1).
+ */
+export function buildTripHistoryItem(it: TripHistoryItem): TripHistoryItemView {
+  return {
+    id: it.id,
+    status: toTripStatus(it.status),
+    origin: { lat: it.originLat, lng: it.originLng },
+    destination: { lat: it.destinationLat, lng: it.destinationLng },
+    fareCents: it.fareCents,
+    currency: it.currency,
+    paymentMethod: it.paymentMethod,
+    distanceMeters: it.distanceMeters,
+    durationSeconds: it.durationSeconds,
+    requestedAt: it.requestedAt,
+    // proto3 '' → null en los opcionales.
+    completedAt: it.completedAt || null,
+    cancelledAt: it.cancelledAt || null,
+    driverId: it.driverId || null,
+    vehicleType: it.vehicleType,
+    category: it.category || null,
+  };
+}
+
+/** Mapea la página gRPC del historial a la vista mobile del conductor (items + nextCursor; '' → null). */
+export function buildTripHistoryPage(reply: PassengerTripsReply): TripHistoryPageView {
+  return {
+    items: reply.items.map(buildTripHistoryItem),
+    nextCursor: reply.nextCursor || null,
   };
 }
 
@@ -124,6 +167,41 @@ export class TripsService {
     );
     if (!trip.found) return null;
     return toTripView(trip);
+  }
+
+  /**
+   * Historial REAL del conductor autenticado (servidor, no la lista local de la app): SUS viajes ordenados
+   * por requestedAt DESC, paginados por cursor. Espejo del getTripHistory del pasajero, pero filtrando por
+   * el driverId de PERFIL del conductor.
+   *
+   * ANTI-IDOR BY CONSTRUCTION: el driverId NO viene del query — se DERIVA del perfil del conductor
+   * (GetDriverByUser con el userId del JWT), igual que el gate de getTrip/getActiveTrip. `Trip.driverId` es
+   * el id de PERFIL Driver de identity (NO el userId), así que el filtro server-side por ESE driverId hace
+   * que la lista solo pueda contener viajes propios. Sin perfil de conductor → página vacía (no es error).
+   *
+   * ANTI-N+1: la lista NO resuelve datos por-item (mismo criterio que el pasajero); el detalle
+   * (GET /trips/:id) resuelve lo que falte on-demand al abrir el viaje.
+   */
+  async getTripHistory(
+    identity: AuthenticatedUser,
+    cursor?: string,
+    limit?: number,
+  ): Promise<TripHistoryPageView> {
+    const driver = await this.grpc.call<DriverReply>(
+      'identity',
+      'GetDriverByUser',
+      { id: identity.userId },
+      identity,
+    );
+    if (!driver.found) return { items: [], nextCursor: null };
+    const page = await this.grpc.call<PassengerTripsReply>(
+      'trip',
+      'ListDriverTrips',
+      // driverId DERIVADO del perfil, NUNCA del query (anti-IDOR). El limit lo CLAMPea trip-service.
+      { driverId: driver.id, cursor: cursor ?? '', limit: limit ?? 0 },
+      identity,
+    );
+    return buildTripHistoryPage(page);
   }
 
   async getTripState(id: string, identity: AuthenticatedUser): Promise<TripStateView> {

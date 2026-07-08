@@ -215,6 +215,11 @@ model Trip {
   /// (requestedAt, id) < (cursorReqAt, cursorId) quede 100% cubierto por el índice (sin sort ni filtro
   /// residual). Reemplaza al índice previo [passengerId, requestedAt] (prefijo, lo subsume).
   @@index([passengerId, requestedAt, id])
+  /// Historial del CONDUCTOR (hot-path): ESPEJO del índice del pasajero para SUS viajes ordenados por
+  /// requestedAt DESC con tie-break por id DESC (paginación keyset por cursor). Postgres escanea el btree
+  /// HACIA ATRÁS para el DESC; incluir `id` deja el comparador keyset 100% cubierto (sin sort residual).
+  /// El [driverId, status] de abajo sirve a GetActiveTripByDriver, no cubre el orden del historial.
+  @@index([driverId, requestedAt, id])
   @@index([driverId, status])
   @@index([status])
   /// Re-entrada del cierre: pending settlement = COMPLETED MÁS VIEJO del pasajero sin cerrar, orden FIFO

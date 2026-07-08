@@ -16,6 +16,7 @@ export type {
   TripStateReply,
   TripHistoryItem,
   PassengerTripsReply,
+  ListDriverTripsRequest,
 } from './trip.js';
 export type { MatchReply, SurgeReply, NearbyDriver, NearbyDriversReply } from './dispatch.js';
 export type { PaymentReply, UserCreditReply } from './payment.js';
