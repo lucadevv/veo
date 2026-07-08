@@ -54843,6 +54843,54 @@
                     },
                     {
                       "type": "frame",
+                      "id": "wIDvB",
+                      "name": "Tab-Por vencer",
+                      "fill": "#00000000",
+                      "cornerRadius": "$r-sm",
+                      "gap": 6,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "t6SVFu",
+                          "name": "l",
+                          "fill": "$ink-muted",
+                          "content": "Modelos",
+                          "fontFamily": "$font-text",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "NV7D0",
+                          "name": "c",
+                          "fill": "$surface-elevated",
+                          "cornerRadius": "$r-pill",
+                          "padding": [
+                            1,
+                            7
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "f0JyZ",
+                              "name": "t",
+                              "fill": "$ink-subtle",
+                              "content": "1",
+                              "fontFamily": "$font-mono",
+                              "fontSize": 11,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "lFSzV",
                       "name": "Tab-SLA vencido",
                       "fill": "#00000000",
