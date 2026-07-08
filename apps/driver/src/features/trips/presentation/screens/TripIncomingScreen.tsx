@@ -139,9 +139,16 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
         style={[
           styles.sheet,
           {
-            backgroundColor: theme.colors.surface,
-            borderTopLeftRadius: theme.radii.xl,
-            borderTopRightRadius: theme.radii.xl,
+            // Glass sheet del diseño: translúcido ~96% (frosted sobre el mapa), hairline highlight arriba
+            // + borde sutil, esquinas superiores. Fiel al gradiente #272C38E0→#14161CF2 del frame.
+            backgroundColor: 'rgba(30,33,42,0.96)',
+            borderTopLeftRadius: theme.radii['2xl'],
+            borderTopRightRadius: theme.radii['2xl'],
+            borderTopWidth: 1,
+            borderTopColor: 'rgba(255,255,255,0.16)',
+            borderLeftWidth: 1,
+            borderRightWidth: 1,
+            borderColor: 'rgba(76,84,104,0.55)',
             paddingBottom: insets.bottom + theme.spacing.xl,
             ...theme.elevation.level3,
           },
