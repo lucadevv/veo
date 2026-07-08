@@ -5,12 +5,12 @@
  */
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
+import { ForbiddenError, NotFoundError, ValidationError, uuidv7 } from '@veo/utils';
 import { createLogger, type Logger } from '@veo/observability';
 import {
   DocumentSide,
+  FleetDocumentType,
   type ExtractedDocumentData,
-  type FleetDocumentType,
 } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { Env } from '../config/env.schema';
@@ -78,6 +78,20 @@ import type {
  * (no silencioso) y el conductor puede acotar con `q`. Si se vuelve recurrente, paginar en la UI.
  */
 const VEHICLE_MODELS_PAGE_LIMIT = 100;
+
+/**
+ * Documentos que pertenecen al VEHÍCULO (no al conductor): SOAT, ITV, tarjeta de propiedad y la foto del
+ * vehículo. La operabilidad del vehículo (fleet · `hasRequiredVehicleDocsOperable` busca SOAT+ITV como
+ * `ownerType=VEHICLE`) SOLO los ve si el doc se atribuye al vehículo. El resto (DNI, licencia, antecedentes,
+ * certs de operador) son del conductor → `ownerType=DRIVER`. El BINARIO en S3 sigue driver-scoped en ambos
+ * casos (el conductor lo subió); acá se decide únicamente el DUEÑO de dominio del FleetDocument.
+ */
+const VEHICLE_OWNED_DOCUMENT_TYPES: ReadonlySet<FleetDocumentType> = new Set([
+  FleetDocumentType.SOAT,
+  FleetDocumentType.ITV,
+  FleetDocumentType.PROPERTY_CARD,
+  FleetDocumentType.VEHICLE_PHOTO,
+]);
 
 /**
  * TTL (segundos) de la presigned GET con la que el conductor RE-RENDERIZA sus propias caras de documento
@@ -528,11 +542,26 @@ export class DriversService {
     // dispatch/payments/trips), no solo en el body. fleet valida `ownerId === identity.driverId`
     // (assertDriverOwnsResource), así un conductor no puede atribuir un doc a OTRO driverId.
     const signedIdentity: AuthenticatedUser = { ...identity, driverId: driver.id };
+    // Ruteo del DUEÑO por TIPO (cablea el seam app→fleet): los docs del VEHÍCULO (SOAT/ITV/tarjeta/foto) van
+    // como `ownerType=VEHICLE, ownerId=<id del vehículo activo>` para que la operabilidad del vehículo los vea;
+    // los del conductor siguen `DRIVER`. Sin vehículo registrado no se puede colgar un doc de vehículo → 400
+    // honesto (antes se archivaban TODOS como DRIVER y la operabilidad nunca los encontraba). fleet revalida
+    // que el vehículo exista y le pertenezca al conductor autenticado.
+    let ownerType: 'DRIVER' | 'VEHICLE' = 'DRIVER';
+    let ownerId = driver.id;
+    if (VEHICLE_OWNED_DOCUMENT_TYPES.has(input.type as FleetDocumentType)) {
+      const vehicle = await this.getActiveVehicle(identity);
+      if (!vehicle) {
+        throw new ValidationError('Registrá tu vehículo antes de subir sus documentos');
+      }
+      ownerType = 'VEHICLE';
+      ownerId = vehicle.id;
+    }
     const created = await this.rest.client('fleet').post<FleetDocumentReply>('/documents', {
       identity: signedIdentity,
       body: {
-        ownerType: 'DRIVER',
-        ownerId: driver.id,
+        ownerType,
+        ownerId,
         type: input.type,
         documentNumber: input.documentNumber,
         issuedAt: input.issuedAt,

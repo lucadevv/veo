@@ -9,7 +9,7 @@
  *  - key sin prefijo driver-scoped → ForbiddenError (403).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenError, NotFoundError } from '@veo/utils';
+import { ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { DocumentSide } from '@veo/shared-types';
 import { DriversService } from './drivers.service';
@@ -127,6 +127,37 @@ describe('DriversService.addDocument (driver-bff) — anti-IDOR storage (prefijo
         fileS3Key: 'drivers/drv-9/documents/LICENSE_A1/abc.jpg',
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('RUTEA un doc de VEHÍCULO (SOAT) → ownerType=VEHICLE con el id del vehículo activo', async () => {
+    const { service, post } = makeService();
+    vi.spyOn(service, 'getActiveVehicle').mockResolvedValue({ id: 'veh-1' } as never);
+    await service.addDocument(identity, {
+      type: 'SOAT',
+      documentNumber: 'SOAT-1',
+      expiresAt: '2027-01-01T00:00:00.000Z',
+      // El BINARIO sigue driver-scoped (el conductor lo subió); solo cambia el dueño de dominio del doc.
+      fileS3Key: 'drivers/drv-9/documents/SOAT/abc.jpg',
+    });
+    expect(post).toHaveBeenCalledWith(
+      '/documents',
+      expect.objectContaining({
+        body: expect.objectContaining({ ownerType: 'VEHICLE', ownerId: 'veh-1' }),
+      }),
+    );
+  });
+
+  it('RECHAZA un doc de VEHÍCULO sin vehículo activo → ValidationError, NO proxya a fleet', async () => {
+    const { service, post } = makeService();
+    vi.spyOn(service, 'getActiveVehicle').mockResolvedValue(null);
+    await expect(
+      service.addDocument(identity, {
+        type: 'SOAT',
+        documentNumber: 'SOAT-1',
+        fileS3Key: 'drivers/drv-9/documents/SOAT/abc.jpg',
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
     expect(post).not.toHaveBeenCalled();
   });
 });
