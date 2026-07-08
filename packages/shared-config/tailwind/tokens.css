@@ -33,8 +33,10 @@
   --accent-hover: oklch(0.5497 0.1943 259.65);
   --on-accent: oklch(1 0 0);
 
-  /* Estado (driverTheme: success #34D399 · warn #F2AF48 · danger #FF4D6A) */
-  --success: oklch(0.78 0.14 162);
+  /* Estado (driverTheme/ui-kit: success #17C08A jade · warn #F2AF48 · danger #FF4D6A). El success
+   * ERA #34D399 (mint) por un comentario stale que creía que el conductor usaba mint; el ui-kit
+   * elige jade a propósito (NO el mint "de app hecha por AI") → un solo verde de marca en RN + admin. */
+  --success: oklch(0.717 0.149 163.9);
   --on-success: oklch(0 0 0);
   --warn: oklch(0.80 0.13 75);
   --on-warn: oklch(0 0 0);
@@ -81,7 +83,7 @@
   --accent-hover: oklch(0.5497 0.1943 259.65);
   --on-accent: oklch(1 0 0);
 
-  --success: oklch(0.78 0.14 162);
+  --success: oklch(0.717 0.149 163.9);
   --on-success: oklch(0 0 0);
   --warn: oklch(0.80 0.13 75);
   --on-warn: oklch(0 0 0);
