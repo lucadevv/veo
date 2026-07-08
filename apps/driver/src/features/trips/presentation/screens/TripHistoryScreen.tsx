@@ -43,8 +43,8 @@ function HistorySkeleton(): React.JSX.Element {
  *  - vacío   → empty state premium con el copy honesto ("Aún no hay viajes para mostrar"),
  *  - datos   → FlatList de filas + paginación infinita (onEndReached → fetchNextPage) + pull-to-refresh.
  *
- * La fila es estática por ahora (el BFF aún no expone un DETALLE del historial): no se finge un tap-target
- * que no lleve a ningún lado. Cuando exista el detalle, la fila se hace pressable.
+ * La fila es PRESSABLE: navega al detalle/recibo del viaje (frame C/Historial-Detalle) pasando el
+ * `TripHistoryItem` completo que ya cargó (fuente real del recibo, más rica que el `GET /trips/:id`).
  */
 export const TripHistoryScreen = (): React.JSX.Element => {
   const { t } = useTranslation();

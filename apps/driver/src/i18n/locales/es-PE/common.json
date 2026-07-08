@@ -696,6 +696,19 @@
       "departedAt": "Salida {{time}}",
       "tripSummary": "{{distance}} · {{duration}}"
     },
+    "detail": {
+      "title": "Detalle del viaje",
+      "mapLabel": "Mapa del recorrido",
+      "origin": "Punto de recojo",
+      "destination": "Destino",
+      "date": "Fecha",
+      "fareLabel": "Tarifa",
+      "commissionLabel": "Comisión ({{pct}}%)",
+      "netLabel": "Neto",
+      "passenger": "Pasajero",
+      "youRated": "Le pusiste",
+      "notRated": "Sin calificar"
+    },
     "completedTitle": "Viaje completado",
     "completedBody": "El viaje finalizó correctamente.",
     "bid": {

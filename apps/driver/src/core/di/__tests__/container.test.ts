@@ -5,8 +5,19 @@ describe('AppContainer (DI)', () => {
 
   it('registra un repositorio por cada feature, expuesto por su interfaz', () => {
     const container = getContainer();
-    const { auth, shift, trips, earnings, profile, documents, registration, chat, ops, support } =
-      container.repositories;
+    const {
+      auth,
+      shift,
+      trips,
+      ratings,
+      earnings,
+      profile,
+      documents,
+      registration,
+      chat,
+      ops,
+      support,
+    } = container.repositories;
 
     expect(typeof auth.requestOtp).toBe('function');
     expect(typeof auth.verifyOtp).toBe('function');
@@ -14,6 +25,8 @@ describe('AppContainer (DI)', () => {
     expect(typeof shift.getState).toBe('function');
     expect(typeof trips.getTrip).toBe('function');
     expect(typeof trips.accept).toBe('function');
+    expect(typeof ratings.rate).toBe('function');
+    expect(typeof ratings.getMyTripRating).toBe('function');
     expect(typeof earnings.getSummary).toBe('function');
     expect(typeof profile.getMe).toBe('function');
     expect(typeof documents.list).toBe('function');

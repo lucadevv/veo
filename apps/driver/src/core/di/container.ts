@@ -9,6 +9,8 @@ import type { ShiftRepository, ForegroundServicePort } from '../../features/shif
 import { HttpShiftRepository, nativeForegroundService } from '../../features/shift/data';
 import type { TripsRepository } from '../../features/trips/domain';
 import { HttpTripsRepository } from '../../features/trips/data';
+import type { RatingsRepository } from '../../features/ratings/domain';
+import { HttpRatingsRepository } from '../../features/ratings/data';
 import type { BiddingRepository } from '../../features/bidding/domain';
 import { HttpBiddingRepository } from '../../features/bidding/data';
 import type { EarningsRepository } from '../../features/earnings/domain';
@@ -50,6 +52,7 @@ export interface AppRepositories {
   auth: AuthRepository;
   shift: ShiftRepository;
   trips: TripsRepository;
+  ratings: RatingsRepository;
   bidding: BiddingRepository;
   earnings: EarningsRepository;
   carpool: CarpoolRepository;
@@ -121,6 +124,7 @@ function buildContainer(): AppContainer {
     auth: new HttpAuthRepository(httpClient),
     shift: new HttpShiftRepository(httpClient),
     trips: new HttpTripsRepository(httpClient),
+    ratings: new HttpRatingsRepository(httpClient),
     bidding: new HttpBiddingRepository(httpClient),
     earnings: new HttpEarningsRepository(httpClient),
     carpool: new HttpCarpoolRepository(httpClient),

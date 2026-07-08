@@ -1,8 +1,11 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { TripHistoryItem, TripStatus } from '@veo/api-client';
 import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
+import type { RootStackParamList } from '../../../../navigation/types';
 import {
   calendarDaysAgo,
   formatPEN,
@@ -68,12 +71,14 @@ export interface TripHistoryRowProps {
  *    origen→destino con su resumen (distancia · duración). NO se inventan direcciones: solo lo que el item sabe.
  *  - PIE: hairline + el MONTO con presencia (payoff). En un cancelado/vencido sin cobro, un guion sobrio.
  *
- * Estática por diseño: el driver-bff aún no expone un DETALLE de viaje del historial, así que la fila no
- * navega a ningún lado (no fingimos un tap-target que no lleva a nada). Cuando exista, se hace pressable.
+ * PRESSABLE: navega al detalle/recibo del viaje (frame C/Historial-Detalle) pasando el `TripHistoryItem`
+ * COMPLETO que ya trae la fila (origen/destino, distancia, duración, fecha, tarifa, tier) — la fuente real
+ * del recibo, más rica que el `GET /trips/:id`. El feedback táctil es una atenuación sobria al presionar.
  */
 export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element {
   const theme = useTheme();
   const { t } = useTranslation();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const status = parseTripStatus(trip.status);
   const tone: StatusTone = status === 'UNKNOWN' ? 'accent' : STATUS_TONE[status] ?? 'accent';
@@ -109,16 +114,20 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
   const showFare = isCompleted || trip.fareCents > 0;
 
   return (
-    <View
+    <Pressable
       accessible
+      accessibilityRole="button"
       accessibilityLabel={t('trips.history.departedAt', { time })}
-      style={[
+      accessibilityHint={t('trips.detail.title')}
+      onPress={() => navigation.navigate('TripDetail', { trip })}
+      style={({ pressed }) => [
         styles.card,
         {
           backgroundColor: theme.colors.surface,
           borderColor: theme.colors.border,
           borderRadius: theme.radii.lg,
           padding: theme.spacing.lg,
+          opacity: pressed ? 0.85 : 1,
         },
       ]}
     >
@@ -198,7 +207,7 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
           </Text>
         )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 

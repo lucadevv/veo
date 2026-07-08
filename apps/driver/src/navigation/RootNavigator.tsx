@@ -31,6 +31,7 @@ import {
 import {
   TripActiveScreen,
   TripCompleteScreen,
+  TripDetailScreen,
   TripHistoryScreen,
   TripIncomingScreen,
 } from '../features/trips/presentation';
@@ -271,6 +272,12 @@ export const RootNavigator = (): React.JSX.Element => {
           name="TripComplete"
           component={TripCompleteScreen}
           options={{ gestureEnabled: false, animation: 'fade' }}
+        />
+        {/* Detalle/recibo de un viaje del historial (se llega desde la fila del historial). */}
+        <Stack.Screen
+          name="TripDetail"
+          component={TripDetailScreen}
+          options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen
           name="Bids"

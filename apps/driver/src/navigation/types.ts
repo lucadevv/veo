@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { TripHistoryItem } from '@veo/api-client';
 
 /**
  * Tabs principales del conductor (bottom tab bar). Híbrido: DOS modos de ganar first-class —
@@ -54,6 +55,14 @@ export type RootStackParamList = {
    * TripActive; `passengerName` es opcional (el contrato del viaje no lo trae — pregunta genérica si falta).
    */
   TripComplete: { tripId: string; passengerId: string; fareCents: number; passengerName?: string };
+  /**
+   * Detalle/recibo de un viaje del HISTORIAL (frame C/Historial-Detalle). Recibe el `TripHistoryItem`
+   * COMPLETO que la fila ya cargó (origen/destino, distancia, duración, fecha, tarifa, tier) — la fuente
+   * REAL del recibo. El `GET /trips/:id` (driverTripView) es MÁS POBRE que este item (no trae coords ni
+   * fecha ni tier), así que reusarlo degradaría la pantalla; el rating dado se resuelve on-demand por
+   * `id`. Sin PII: el nombre del pasajero no viaja en el contrato (regla #5) → se degrada a genérico.
+   */
+  TripDetail: { trip: TripHistoryItem };
   /** Pujas abiertas (marketplace conductor): lista de bids cercanos a los que ofertar/contraofertar. */
   Bids: undefined;
   Chat: { tripId: string };
