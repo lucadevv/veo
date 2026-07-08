@@ -54427,95 +54427,158 @@
               "id": "xUeKT",
               "name": "Stats",
               "width": "fill_container",
+              "layout": "vertical",
               "gap": 16,
               "children": [
                 {
-                  "id": "VCSkZ",
-                  "type": "ref",
-                  "ref": "Ip9s6",
-                  "name": "Conductores",
+                  "type": "frame",
+                  "id": "yvOGH",
+                  "name": "StatsRow1",
                   "width": "fill_container",
-                  "descendants": {
-                    "q4MRzS": {
-                      "icon": "users"
+                  "gap": 16,
+                  "children": [
+                    {
+                      "id": "VCSkZ",
+                      "type": "ref",
+                      "ref": "Ip9s6",
+                      "name": "Conductores",
+                      "width": "fill_container",
+                      "descendants": {
+                        "q4MRzS": {
+                          "icon": "users"
+                        },
+                        "RmMSE": {
+                          "content": "Conductores"
+                        },
+                        "V9eY6r": {
+                          "content": "3"
+                        },
+                        "JowkP": {
+                          "content": "Altas por revisar",
+                          "fill": "$brand"
+                        }
+                      }
                     },
-                    "RmMSE": {
-                      "content": "Conductores"
+                    {
+                      "id": "rBNcw",
+                      "type": "ref",
+                      "ref": "Ip9s6",
+                      "name": "Documentos",
+                      "width": "fill_container",
+                      "descendants": {
+                        "q4MRzS": {
+                          "icon": "file-text"
+                        },
+                        "RmMSE": {
+                          "content": "Documentos"
+                        },
+                        "V9eY6r": {
+                          "content": "6"
+                        },
+                        "JowkP": {
+                          "content": "Reenviados a revisión",
+                          "fill": "$brand"
+                        }
+                      }
                     },
-                    "V9eY6r": {
-                      "content": "3"
-                    },
-                    "JowkP": {
-                      "content": "Altas por revisar",
-                      "fill": "$brand"
+                    {
+                      "id": "eHVn4",
+                      "type": "ref",
+                      "ref": "Ip9s6",
+                      "name": "Vehículos",
+                      "width": "fill_container",
+                      "descendants": {
+                        "q4MRzS": {
+                          "icon": "car"
+                        },
+                        "RmMSE": {
+                          "content": "Vehículos"
+                        },
+                        "V9eY6r": {
+                          "content": "2"
+                        },
+                        "JowkP": {
+                          "content": "Docs + ITV",
+                          "fill": "$brand"
+                        }
+                      }
                     }
-                  }
+                  ]
                 },
                 {
-                  "id": "rBNcw",
-                  "type": "ref",
-                  "ref": "Ip9s6",
-                  "name": "Documentos",
+                  "type": "frame",
+                  "id": "ozeXO",
+                  "name": "StatsRow2",
                   "width": "fill_container",
-                  "descendants": {
-                    "q4MRzS": {
-                      "icon": "file-text"
+                  "gap": 16,
+                  "children": [
+                    {
+                      "id": "d2WW8",
+                      "type": "ref",
+                      "ref": "Ip9s6",
+                      "name": "Por vencer",
+                      "width": "fill_container",
+                      "descendants": {
+                        "q4MRzS": {
+                          "icon": "calendar-clock"
+                        },
+                        "RmMSE": {
+                          "content": "Por vencer"
+                        },
+                        "V9eY6r": {
+                          "content": "0"
+                        },
+                        "JowkP": {
+                          "content": "Docs próximos a vencer",
+                          "fill": "$warn"
+                        }
+                      }
                     },
-                    "RmMSE": {
-                      "content": "Documentos"
+                    {
+                      "id": "w16vF6",
+                      "type": "ref",
+                      "ref": "Ip9s6",
+                      "name": "Modelos",
+                      "width": "fill_container",
+                      "descendants": {
+                        "q4MRzS": {
+                          "icon": "boxes"
+                        },
+                        "RmMSE": {
+                          "content": "Modelos"
+                        },
+                        "V9eY6r": {
+                          "content": "1"
+                        },
+                        "JowkP": {
+                          "content": "Solicitudes por aprobar",
+                          "fill": "$brand"
+                        }
+                      }
                     },
-                    "V9eY6r": {
-                      "content": "6"
-                    },
-                    "JowkP": {
-                      "content": "Reenviados a revisión",
-                      "fill": "$brand"
+                    {
+                      "id": "ysv2C",
+                      "type": "ref",
+                      "ref": "Ip9s6",
+                      "name": "SLA vencido",
+                      "width": "fill_container",
+                      "descendants": {
+                        "q4MRzS": {
+                          "icon": "alarm-clock"
+                        },
+                        "RmMSE": {
+                          "content": "SLA vencido"
+                        },
+                        "V9eY6r": {
+                          "content": "7"
+                        },
+                        "JowkP": {
+                          "content": "Esperando > 48 h",
+                          "fill": "$danger"
+                        }
+                      }
                     }
-                  }
-                },
-                {
-                  "id": "eHVn4",
-                  "type": "ref",
-                  "ref": "Ip9s6",
-                  "name": "Vehículos",
-                  "width": "fill_container",
-                  "descendants": {
-                    "q4MRzS": {
-                      "icon": "car"
-                    },
-                    "RmMSE": {
-                      "content": "Vehículos"
-                    },
-                    "V9eY6r": {
-                      "content": "11"
-                    },
-                    "JowkP": {
-                      "content": "Docs + ITV",
-                      "fill": "$brand"
-                    }
-                  }
-                },
-                {
-                  "id": "ysv2C",
-                  "type": "ref",
-                  "ref": "Ip9s6",
-                  "name": "SLA vencido",
-                  "width": "fill_container",
-                  "descendants": {
-                    "q4MRzS": {
-                      "icon": "alarm-clock"
-                    },
-                    "RmMSE": {
-                      "content": "SLA vencido"
-                    },
-                    "V9eY6r": {
-                      "content": "4"
-                    },
-                    "JowkP": {
-                      "content": "Esperando > 48 h",
-                      "fill": "$danger"
-                    }
-                  }
+                  ]
                 }
               ]
             },
@@ -54722,6 +54785,54 @@
                               "name": "t",
                               "fill": "$ink-subtle",
                               "content": "4",
+                              "fontFamily": "$font-mono",
+                              "fontSize": 11,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "f4hih",
+                      "name": "Tab-Modelos",
+                      "fill": "#00000000",
+                      "cornerRadius": "$r-sm",
+                      "gap": 6,
+                      "padding": [
+                        7,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ymB89",
+                          "name": "l",
+                          "fill": "$ink-muted",
+                          "content": "Modelos",
+                          "fontFamily": "$font-text",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "a1Pw2",
+                          "name": "c",
+                          "fill": "$surface-elevated",
+                          "cornerRadius": "$r-pill",
+                          "padding": [
+                            1,
+                            7
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "xyr5e",
+                              "name": "t",
+                              "fill": "$ink-subtle",
+                              "content": "1",
                               "fontFamily": "$font-mono",
                               "fontSize": 11,
                               "fontWeight": "700"
