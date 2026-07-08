@@ -33,7 +33,16 @@ export const MIN_FARE_MAX_CENTS = 100_000;
  */
 export const MULTIPLIER_MAX = 10;
 
-/** Override de UNA oferta: habilitarla o no (B1) + pin de modo y precio (B2). */
+/**
+ * ADR 023 §3 · techos de cordura de los OVERRIDES de params por-oferta (banderazo/por-km/por-min) en céntimos
+ * PEN. ESPEJAN los techos de la tarifa base GLOBAL (pricing/dto/pricing.dto): banderazo S/200, S/50/km, S/20/min
+ * — holgados sobre los valores vigentes y cortan un dedazo del admin (un `600` donde iba `60` no dispara el cobro).
+ */
+export const BASE_FARE_MAX_CENTS = 20_000;
+export const PER_KM_MAX_CENTS = 5_000;
+export const PER_MIN_MAX_CENTS = 2_000;
+
+/** Override de UNA oferta: habilitarla o no (B1) + pin de modo y precio (B2) + params por-servicio (ADR 023 §3). */
 export class OfferingOverrideDto {
   @ApiProperty({ enum: OFFERING_IDS, description: 'Id de la oferta del catálogo' })
   @IsIn(OFFERING_IDS)
@@ -69,6 +78,36 @@ export class OfferingOverrideDto {
   @Min(0)
   @Max(MIN_FARE_MAX_CENTS)
   minFareCents?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'ADR 023 §3: override del banderazo por-oferta en céntimos PEN (0..20000). Ausente → el default global.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(BASE_FARE_MAX_CENTS)
+  baseFareCents?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'ADR 023 §3: override del costo por-km por-oferta en céntimos PEN (0..5000). 0 = no cobra distancia (Mecánico). Ausente → el default global.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(PER_KM_MAX_CENTS)
+  perKmCents?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'ADR 023 §3: override del costo por-min por-oferta en céntimos PEN (0..2000). 0 = no cobra tiempo (Grúa/Mecánico). Ausente → el default global.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(PER_MIN_MAX_CENTS)
+  perMinCents?: number;
 }
 
 /** Body del PUT /internal/catalog — reemplazo wholesale del overlay. */

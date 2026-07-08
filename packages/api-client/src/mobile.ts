@@ -508,9 +508,10 @@ export const quoteOption = z.object({
   creditAppliedCents: z.number().int().nonnegative().optional(),
   currency: z.literal('PEN'),
   /**
-   * ADR 013 §1.3 (additive) · modo de pricing RESUELTO POR OFERTA (`offering.allowedModes` ∩ schedule
-   * del admin): pinta la pantalla de puja o de precio firme POR opción. Opcional: un server viejo no
-   * lo manda — fallback: el `mode` top-level del quote (ancla VEO Económico).
+   * ADR 023 (additive) · modo de pricing RESUELTO POR OFERTA (`offering.mode` con la palanca manual del
+   * admin encima; ya NO hay schedule/franjas — ADR 011 superseded): pinta la pantalla de puja o de precio
+   * firme POR opción. Opcional: un server viejo no lo manda — fallback: el `mode` top-level del quote
+   * (ancla VEO Económico).
    */
   mode: pricingMode.optional(),
   /**

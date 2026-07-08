@@ -133,6 +133,29 @@ describe('CatalogService', () => {
     expect(eco?.pricing.minFareCents).toBe(700);
   });
 
+  it('ADR 023 §3 · replaceOverlay persiste los params por-servicio (base/km/min, incl. 0) y resolveOffering los refleja', async () => {
+    const repo = new FakeRepo(null);
+    const service = new CatalogService(repo, 0);
+    await service.replaceOverlay(
+      [
+        {
+          id: OfferingId.VEO_MECHANIC,
+          enabled: true,
+          baseFareCents: 2500,
+          // 0 = no cobra distancia/tiempo (call-out plano). `0` es un valor VÁLIDO: NO debe perderse por un
+          // guard truthy (normalize usa `!== undefined`, parse usa `>= 0`).
+          perKmCents: 0,
+          perMinCents: 0,
+        },
+      ],
+      0,
+    );
+    const mech = await service.resolveOffering(OfferingId.VEO_MECHANIC);
+    expect(mech?.pricing.baseFareCents).toBe(2500);
+    expect(mech?.pricing.perKmCents).toBe(0);
+    expect(mech?.pricing.perMinCents).toBe(0);
+  });
+
   it('B2 · resolveOffering de un id inexistente → undefined', async () => {
     const service = new CatalogService(new FakeRepo(null), 0);
     expect(await service.resolveOffering('veo_fantasma')).toBeUndefined();

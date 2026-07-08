@@ -506,34 +506,13 @@ export type AcceptInviteRequest = z.infer<typeof acceptInviteRequest>;
 export const acceptInviteResult = z.object({ email: z.string() });
 export type AcceptInviteResult = z.infer<typeof acceptInviteResult>;
 
-/* ── Pricing: modo de despacho PUJA↔FIJO (schedule global · ADR 011) ── */
-/* `pricingMode` ('PUJA'|'FIXED') se reutiliza de ./mobile (fuente única del enum), no se redefine. */
-
-/** Una regla horaria del schedule: día (bitmask Lun=1..Dom=64) + rango en minutos del día (Lima) → modo. */
-export const pricingModeRule = z.object({
-  dayMask: z.number().int().min(1).max(127),
-  startMinute: z.number().int().min(0).max(1439),
-  endMinute: z.number().int().min(0).max(1439),
-  mode: pricingMode,
-});
-export type PricingModeRule = z.infer<typeof pricingModeRule>;
-
-/** Schedule vigente (GET /pricing/mode-schedule): default + reglas + versión. */
-export const modeScheduleView = z.object({
-  version: z.number().int(),
-  defaultMode: pricingMode,
-  rules: z.array(pricingModeRule),
-  updatedAt: z.string().nullable(),
-});
-export type ModeScheduleView = z.infer<typeof modeScheduleView>;
-
-/** Body del PUT /pricing/mode-schedule: REEMPLAZA wholesale (default + reglas). `expectedVersion` = CAS. */
-export const replaceScheduleRequest = z.object({
-  defaultMode: pricingMode,
-  rules: z.array(pricingModeRule),
-  expectedVersion: z.number().int().nonnegative(),
-});
-export type ReplaceScheduleRequest = z.infer<typeof replaceScheduleRequest>;
+/* ── Pricing: modo de despacho PUJA↔FIJO ──
+ * ADR 023 (supersedes ADR 011): el schedule/franjas horarias del modo se RETIRÓ. El modo vive POR OFERTA
+ * (`catalogOffering.mode` + `catalogOverride.mode` = la palanca manual del admin, más abajo); ya NO existe
+ * el endpoint `/pricing/mode-schedule` (trip-service lo eliminó → un cliente que lo llame daría 404). Por
+ * eso se borraron `ModeScheduleView`/`ReplaceScheduleRequest`/`PricingModeRule`. `pricingMode` sigue
+ * reutilizándose de ./mobile (fuente única del enum) en la sección de catálogo.
+ */
 
 /**
  * Tarifa base vigente (GET /pricing/base-fare · F2.4): banderazo + per-km + per-min en céntimos PEN.
@@ -700,9 +679,12 @@ export const offeringPricing = z.object({
 export type OfferingPricing = z.infer<typeof offeringPricing>;
 
 /**
- * Una oferta del catálogo efectivo (GET /catalog): tokens de display + estado configurable. B2 suma
- * `allowedModes` (el panel restringe el select del modo a esto — la UI refleja el invariante de producto),
- * `pricing` EFECTIVO (lo que se cobra hoy) y `modePin` (modo pineado por el admin, o ausente = manda el schedule).
+ * Una oferta del catálogo efectivo (GET /catalog): tokens de display + estado configurable. ADR 023: el modo
+ * vive POR OFERTA — `mode` es el modo EFECTIVO (base de código ⟕ palanca manual del admin, ya resuelto
+ * server-side) y `modeLocked` dice si el admin PUEDE cambiarlo (las verticales especiales van locked: "la
+ * ambulancia NO negocia"). El panel pinta el select del modo habilitado/deshabilitado según `modeLocked` y
+ * refleja `mode` como el valor vigente. `pricing` es el EFECTIVO (lo que se cobra hoy). Reemplaza el par
+ * `allowedModes`/`modePin` (ADR 011, superseded): ya no hay schedule.
  */
 export const catalogOffering = z.object({
   id: z.string(),
@@ -715,29 +697,40 @@ export const catalogOffering = z.object({
   serviceType: z.enum(['RIDE', 'AMBULANCE', 'TOW', 'MECHANIC']),
   sortOrder: z.number().int(),
   enabled: z.boolean(),
-  allowedModes: z.array(pricingMode),
+  // ADR 023 · modo EFECTIVO de la oferta (PUJA/FIXED), resuelto server-side (código ⟕ pin del admin).
+  mode: pricingMode,
+  // ADR 023 · true = el admin NO puede cambiar el modo (invariante de dominio: verticales especiales). El
+  // panel deshabilita el select cuando es true. Reemplaza el candado que antes daba `allowedModes`.
+  modeLocked: z.boolean(),
   pricing: offeringPricing,
   // EJE de CAPACIDAD (B5-3): `minSeats` distingue una oferta por TAMAÑO (VEO XL = 6 asientos) de las de
   // CALIDAD/confort. Es lo único que el panel necesita del bloque `requires` para separar los dos ejes; el
   // resto de requisitos (segmento/antigüedad/certs) son del matching, no del agrupado de la UI.
   requires: z.object({ minSeats: z.number().int().positive().optional() }).optional(),
-  modePin: pricingMode.optional(),
 });
 export type CatalogOffering = z.infer<typeof catalogOffering>;
 
 /**
  * Override CRUDO de una oferta (lo que el admin tiene seteado explícitamente). B1: enabled. B2: mode
- * (pin), multiplier, minFareCents (opcionales; ausentes → el valor de código). Es el shape que viaja en
- * AMBOS sentidos: GET /catalog lo devuelve (overlay actual) y PUT /catalog lo reemplaza wholesale.
+ * (pin), multiplier, minFareCents. ADR 023 §3: params por-servicio `baseFareCents`/`perKmCents`/`perMinCents`
+ * (banderazo/por-km/por-min por oferta). Todos OPCIONALES; ausentes → el valor de código (que a su vez, si es
+ * `undefined`, cae al default GLOBAL de la tarifa base). Es el shape que viaja en AMBOS sentidos: GET /catalog
+ * lo devuelve (overlay actual) y PUT /catalog lo reemplaza wholesale. Los topes de cordura ESPEJAN los del DTO
+ * autoritativo de trip-service (contrato desacoplado de shared-types → literales); trip-service RE-valida.
  */
 export const catalogOverride = z.object({
   id: z.string(),
   enabled: z.boolean(),
   mode: pricingMode.optional(),
-  // Tope de cordura: espeja MULTIPLIER_MAX (=10) del DTO autoritativo de trip-service (el contrato se mantiene
-  // desacoplado de shared-types, por eso el literal). Corta el dedazo ×100; trip-service RE-valida con @Max.
+  // Tope de cordura: espeja MULTIPLIER_MAX (=10) del DTO autoritativo de trip-service. Corta el dedazo ×100.
   multiplier: z.number().positive().max(10).optional(),
-  minFareCents: z.number().int().nonnegative().optional(),
+  minFareCents: z.number().int().nonnegative().max(100_000).optional(),
+  // ADR 023 §3 · overrides de params por-oferta en céntimos PEN. Topes espejo de la tarifa base GLOBAL
+  // (trip-service pricing.dto): banderazo S/200, S/50/km, S/20/min. `0` en per-km/per-min = no cobra
+  // distancia/tiempo (Mecánico/Grúa). Ausente → el global. Dinero SIEMPRE Int, nunca float.
+  baseFareCents: z.number().int().nonnegative().max(20_000).optional(),
+  perKmCents: z.number().int().nonnegative().max(5_000).optional(),
+  perMinCents: z.number().int().nonnegative().max(2_000).optional(),
 });
 export type CatalogOverride = z.infer<typeof catalogOverride>;
 

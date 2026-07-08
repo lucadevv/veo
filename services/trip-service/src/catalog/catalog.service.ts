@@ -100,8 +100,9 @@ export class CatalogService {
     expectedVersion: number,
   ): Promise<CatalogView> {
     const nextVersion = expectedVersion + 1;
-    // B2: persistimos también mode/multiplier/minFareCents (solo los definidos → JSON limpio). El repo
-    // los re-parsea defensivo y resolveCatalog los aplica/valida.
+    // B2 + ADR 023 §3: persistimos también mode/multiplier/minFareCents y los params por-servicio
+    // (baseFareCents/perKmCents/perMinCents), solo los definidos → JSON limpio. El repo los re-parsea
+    // defensivo y resolveCatalog los aplica/valida.
     const overridesJson = overrides.map((o) => normalizeOverride(o));
 
     const result = await this.repo.runInTx(async (tx) => {
@@ -198,7 +199,12 @@ function toOverlay(persisted: PersistedOverlay | null): OfferingCatalogOverlay |
   return persisted ? { overrides: persisted.overrides, version: persisted.version } : null;
 }
 
-/** Normaliza un override para persistir: id + enabled siempre; mode/multiplier/minFareCents solo si vienen. */
+/**
+ * Normaliza un override para persistir: id + enabled siempre; mode/multiplier/minFareCents y los params
+ * por-servicio (ADR 023 §3 · baseFareCents/perKmCents/perMinCents) SOLO si vienen definidos → JSON limpio.
+ * Ojo: `0` es un valor VÁLIDO de perKmCents/perMinCents (Mecánico/Grúa no cobran distancia/tiempo), por eso
+ * el guard es `!== undefined` y NO un truthy check (un `0` truthy-falso se perdería y caería al global).
+ */
 function normalizeOverride(o: OfferingOverride): Record<string, unknown> {
   return {
     id: o.id,
@@ -206,5 +212,8 @@ function normalizeOverride(o: OfferingOverride): Record<string, unknown> {
     ...(o.mode !== undefined ? { mode: o.mode } : {}),
     ...(o.multiplier !== undefined ? { multiplier: o.multiplier } : {}),
     ...(o.minFareCents !== undefined ? { minFareCents: o.minFareCents } : {}),
+    ...(o.baseFareCents !== undefined ? { baseFareCents: o.baseFareCents } : {}),
+    ...(o.perKmCents !== undefined ? { perKmCents: o.perKmCents } : {}),
+    ...(o.perMinCents !== undefined ? { perMinCents: o.perMinCents } : {}),
   };
 }

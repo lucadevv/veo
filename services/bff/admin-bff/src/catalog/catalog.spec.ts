@@ -176,6 +176,23 @@ describe('Catalog DTO · validación', () => {
     expect(await errorsOf(ReplaceCatalogDto, ok)).toEqual([]);
   });
 
+  it('ADR 023 §3 · acepta los params por-servicio válidos (base/km/min, incl. 0)', async () => {
+    const ok = {
+      overrides: [
+        {
+          id: OfferingId.VEO_MECHANIC,
+          enabled: true,
+          baseFareCents: 2500,
+          // 0 es válido (call-out plano no cobra distancia/tiempo): @Min(0) lo acepta.
+          perKmCents: 0,
+          perMinCents: 0,
+        },
+      ],
+      expectedVersion: 0,
+    };
+    expect(await errorsOf(ReplaceCatalogDto, ok)).toEqual([]);
+  });
+
   it('B2 · rechaza mode inválido / multiplier ≤ 0 / minFareCents negativo', async () => {
     const badMode = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, mode: 'REGATEO' }] };
     expect(await errorsOf(ReplaceCatalogDto, badMode)).toContain('overrides');
@@ -186,6 +203,19 @@ describe('Catalog DTO · validación', () => {
     // hardening: minFareCents por encima del techo de cordura (S/1000 = 100000 céntimos) → rechazado.
     const tooHighMin = {
       overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, minFareCents: 200_000 }],
+      expectedVersion: 0,
+    };
+    expect(await errorsOf(ReplaceCatalogDto, tooHighMin)).toContain('overrides');
+  });
+
+  it('ADR 023 §3 · rechaza params por-servicio negativos o sobre el techo de cordura', async () => {
+    const badBase = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, baseFareCents: -1 }] };
+    expect(await errorsOf(ReplaceCatalogDto, badBase)).toContain('overrides');
+    const badKm = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, perKmCents: -1 }] };
+    expect(await errorsOf(ReplaceCatalogDto, badKm)).toContain('overrides');
+    // per-min por encima del techo (S/20 = 2000 céntimos) → rechazado (dedazo del admin).
+    const tooHighMin = {
+      overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, perMinCents: 9_999 }],
       expectedVersion: 0,
     };
     expect(await errorsOf(ReplaceCatalogDto, tooHighMin)).toContain('overrides');

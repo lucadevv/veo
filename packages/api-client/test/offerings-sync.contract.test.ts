@@ -65,15 +65,14 @@ describe('sync api-client ↔ catálogo de offerings (@veo/shared-types)', () =>
   /**
    * Lote C (ADR 013) · los campos ADDITIVE del quote (`mode`/`labelKey`/`icon`) aceptan los valores
    * reales del catálogo y son OPCIONALES: una opción de un server viejo (sin los campos) sigue
-   * parseando — apps viejas y nuevas conviven.
+   * parseando — apps viejas y nuevas conviven. ADR 023: el modo es UNO por oferta (`spec.mode`), ya no
+   * un array `allowedModes` (superseded); el wire acepta ese modo tal cual.
    */
   it('options[].mode/labelKey/icon (Lote C) aceptan los valores del catálogo y son opcionales', () => {
     for (const spec of Object.values(OFFERINGS)) {
       expect(quoteOption.shape.labelKey.safeParse(spec.labelKey).success).toBe(true);
       expect(quoteOption.shape.icon.safeParse(spec.icon).success).toBe(true);
-      for (const allowedMode of spec.allowedModes) {
-        expect(quoteOption.shape.mode.safeParse(allowedMode).success).toBe(true);
-      }
+      expect(quoteOption.shape.mode.safeParse(spec.mode).success).toBe(true);
     }
     // Server viejo: la opción SIN los campos additive sigue siendo válida (compat hacia atrás).
     const legacyOption = {
