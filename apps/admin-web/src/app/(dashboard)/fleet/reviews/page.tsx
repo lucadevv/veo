@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import {
   useDriversPending,
+  useExpiringDocuments,
   useFleetDocuments,
   useModelReview,
   useReviewsSummary,
@@ -78,6 +79,11 @@ const SLA_TEXT: Record<SlaTone, string> = {
   neutral: 'text-ink-muted',
 };
 
+/** Tono del vencimiento por días restantes (≤0 vencido → danger, ≤7 → warn, resto neutro). Análogo a waitParts. */
+function expiryTone(days: number): SlaTone {
+  return days <= 0 ? 'danger' : days <= 7 ? 'warn' : 'neutral';
+}
+
 /** "Pendiente" derivado de un conductor pendiente (docs incompletos + verificación biométrica). */
 function driverPending(d: PendingDriver): string {
   const missing = Math.max(0, d.docsTotal - d.docsComplete);
@@ -114,19 +120,22 @@ const TYPE_META: Record<QueueType, { icon: LucideIcon; label: string; cls: strin
   documento: { icon: FileText, label: 'Documento', cls: 'bg-warn/15 text-warn' },
 };
 
-type Tab = 'todos' | 'conductor' | 'vehiculo' | 'documento' | 'modelo' | 'sla';
+type Tab = 'todos' | 'conductor' | 'vehiculo' | 'documento' | 'modelo' | 'vencer' | 'sla';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'todos', label: 'Todos' },
   { key: 'conductor', label: 'Conductores' },
   { key: 'vehiculo', label: 'Vehículos' },
   { key: 'documento', label: 'Documentos' },
   { key: 'modelo', label: 'Modelos' },
+  { key: 'vencer', label: 'Por vencer' },
   { key: 'sla', label: 'SLA vencido' },
 ];
 
 const GRID = 'grid grid-cols-[120px_1fr_210px_110px_120px] items-center gap-4';
 // Cola de modelos: forma distinta a la unificada (make/model/años/tipo/asientos + 2 acciones).
 const MODEL_GRID = 'grid grid-cols-[1fr_130px_130px_90px_130px_190px] items-center gap-4';
+// Cola de vencimientos: forma propia (tipo/dueño/vence/restan + acción "Ver").
+const EXPIRING_GRID = 'grid grid-cols-[150px_1fr_150px_130px_110px] items-center gap-4';
 
 export default function ReviewsPage() {
   const user = useSession();
@@ -144,6 +153,13 @@ export default function ReviewsPage() {
   // vehicleModelStatus). Se muestra en su propia pestaña con tabla y acciones dedicadas.
   const models = useModelReview('PENDING_REVIEW');
   const modelRows = useMemo(() => models.data?.pages.flatMap((p) => p.items) ?? [], [models.data]);
+  // Cola de documentos próximos a vencer (SOAT/DNI/ITV…). Su propia pestaña con tabla y acción de salto
+  // al detalle del dueño (conductor o vehículo). Paginado por cursor en el servidor (fleet-service).
+  const expiring = useExpiringDocuments();
+  const expiringRows = useMemo(
+    () => expiring.data?.pages.flatMap((p) => p.items) ?? [],
+    [expiring.data],
+  );
 
   const rows = useMemo<QueueRow[]>(() => {
     const out: QueueRow[] = [];
@@ -269,7 +285,9 @@ export default function ReviewsPage() {
             ? counts.vehiculo
             : k === 'modelo'
               ? (summary.data?.modelsPendingReview ?? modelRows.length)
-              : counts.documento;
+              : k === 'vencer'
+                ? (summary.data?.docsExpiringSoon ?? expiringRows.length)
+                : counts.documento;
 
   return (
     <div className="flex min-h-full flex-col gap-[22px] px-8 py-7">
@@ -318,14 +336,20 @@ export default function ReviewsPage() {
           hintTone="brand"
           loading={loading}
         />
-        <StatCard
-          icon={CalendarClock}
-          label="Por vencer"
-          value={summary.data ? String(summary.data.docsExpiringSoon) : '—'}
-          hint="Docs próximos a vencer"
-          hintTone="warn"
-          loading={summary.isLoading}
-        />
+        <button
+          type="button"
+          onClick={() => setTab('vencer')}
+          className="rounded-lg text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <StatCard
+            icon={CalendarClock}
+            label="Por vencer"
+            value={summary.data ? String(summary.data.docsExpiringSoon) : '—'}
+            hint="Docs próximos a vencer"
+            hintTone="warn"
+            loading={summary.isLoading}
+          />
+        </button>
         <StatCard
           icon={Boxes}
           label="Modelos"
@@ -437,6 +461,79 @@ export default function ReviewsPage() {
                 <ModelReviewActions model={m} />
               </div>
             ))
+          )}
+        </div>
+      ) : tab === 'vencer' ? (
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+          <div
+            className={`${EXPIRING_GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
+          >
+            <span>Tipo</span>
+            <span>Dueño</span>
+            <span>Vence</span>
+            <span>Restan</span>
+            <span />
+          </div>
+
+          {expiring.isError ? (
+            <ErrorState className="py-10" onRetry={() => void expiring.refetch()} />
+          ) : expiring.isLoading ? (
+            <div>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-[52px] animate-pulse border-b border-border bg-surface-2/40"
+                />
+              ))}
+            </div>
+          ) : expiringRows.length === 0 ? (
+            <EmptyState
+              className="py-12"
+              title="Nada por vencer"
+              description="No hay documentos próximos a vencer."
+            />
+          ) : (
+            expiringRows.map((d) => {
+              const owner = d.ownerType === 'VEHICLE' ? TYPE_META.vehiculo : TYPE_META.conductor;
+              const mono = `${d.ownerType === 'VEHICLE' ? 'veh' : 'drv'}_${d.ownerId.slice(0, 8)}`;
+              const tone = expiryTone(d.daysUntilExpiry);
+              const href =
+                d.ownerType === 'VEHICLE' ? `/fleet/${d.ownerId}` : `/ops/drivers/${d.ownerId}`;
+              return (
+                <div
+                  key={d.id}
+                  className={`${EXPIRING_GRID} border-b border-border px-5 py-3 last:border-b-0`}
+                >
+                  <span className="truncate text-sm font-semibold text-ink">
+                    {DOC_LABEL[d.type] ?? d.type}
+                  </span>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full px-2.5 py-[5px] text-xs font-semibold ${owner.cls}`}
+                    >
+                      <owner.icon className="size-[13px]" aria-hidden />
+                      {owner.label}
+                    </span>
+                    <span className="truncate font-mono text-[11px] text-ink-subtle">{mono}</span>
+                  </div>
+                  <span className="truncate text-[13px] text-ink-muted">{fmtDate(d.expiresAt)}</span>
+                  <span
+                    className={`inline-flex items-center gap-1.5 font-mono text-[13px] font-semibold ${SLA_TEXT[tone]}`}
+                  >
+                    <CalendarClock className="size-[13px]" aria-hidden />
+                    {d.daysUntilExpiry <= 0 ? 'vencido' : `${d.daysUntilExpiry} días`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => router.push(href)}
+                    className="inline-flex w-fit items-center gap-1.5 justify-self-end rounded-full border border-accent bg-accent/15 px-3.5 py-2 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/20"
+                  >
+                    Ver
+                    <ArrowRight className="size-[13px]" aria-hidden />
+                  </button>
+                </div>
+              );
+            })
           )}
         </div>
       ) : (
