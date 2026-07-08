@@ -46,6 +46,7 @@ import {
   type VehicleType,
 } from '../../domain';
 import { useEndShift, usePauseShift, useShiftState } from '../hooks/useShift';
+import { consumeShiftStartedAt } from '../state/shiftClock';
 import { useActiveVehicle } from '../../../registration/presentation';
 import { useUnreadNotificationsCount } from '../../../notifications/presentation';
 import { VehicleTypeSelector } from '../components/VehicleTypeSelector';
@@ -545,7 +546,15 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               variant="danger"
               onPress={() => {
                 setEndConfirm(false);
-                end.mutate();
+                // Al cerrar turno con éxito: consumimos el reloj LOCAL (lee + borra la marca de inicio) y
+                // vamos al resumen de cierre en vez de quedarnos en el dock offline. Si falla el mutate, no
+                // navegamos (el estado sigue en turno y se muestra el error habitual).
+                end.mutate(undefined, {
+                  onSuccess: () => {
+                    const shiftStartedAt = consumeShiftStartedAt();
+                    navigation.navigate('ShiftSummary', { shiftStartedAt });
+                  },
+                });
               }}
             />
           </View>

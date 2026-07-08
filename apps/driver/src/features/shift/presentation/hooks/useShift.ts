@@ -9,6 +9,7 @@ import {
   type ShiftStartGeo,
   type ShiftStatus,
 } from '../../domain';
+import { recordShiftStart } from '../state/shiftClock';
 
 /** Clave de caché del estado de turno. */
 export const SHIFT_STATE_QUERY_KEY = ['shift', 'state'] as const;
@@ -56,7 +57,12 @@ export function useStartShift() {
   return useMutation({
     mutationFn: ({ sessionRef, geo }: { sessionRef: string; geo?: ShiftStartGeo }) =>
       new StartShiftUseCase(shift).execute(sessionRef, geo),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY }),
+    onSuccess: () => {
+      // Sella el reloj de turno LOCAL: el backend no expone `startedAt`, así que el resumen de cierre
+      // mide la duración desde este instante (degrada honesto si la marca no está al cerrar).
+      recordShiftStart();
+      queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
+    },
   });
 }
 

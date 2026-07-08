@@ -688,6 +688,65 @@ export function IconBell(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Banderín a la derecha (cierre de turno / meta): mástil + triángulo. Espeja lucide `flag-triangle-right`. */
+export function IconFlag(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 22V2l10 5-10 5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Recorrido / ruta: dos nodos unidos por un trazo con quiebre. Espeja lucide `route`. */
+export function IconRoute(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={6} cy={19} r={3} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Circle cx={18} cy={5} r={3} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Monedas (propinas): dos discos superpuestos. Espeja lucide `coins`. */
+export function IconCoins(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={8} cy={8} r={6} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M18.09 10.37A6 6 0 1 1 10.34 18"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M7 6h1v4" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path
+        d="m16.71 13.88.7.71-2.82 2.82"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** Rostro escaneado (KYC / biometría): corchetes de esquina + cara mínima (círculo + arco de sonrisa). */
 export function IconFace(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);

@@ -26,6 +26,7 @@ import {
   BiometricEnrollScreen,
   DashboardScreen,
   ShiftStartScreen,
+  ShiftSummaryScreen,
 } from '../features/shift/presentation';
 import {
   TripActiveScreen,
@@ -239,6 +240,12 @@ export const RootNavigator = (): React.JSX.Element => {
       <Stack.Navigator initialRouteName="Main" screenOptions={screenOptions}>
         <Stack.Screen name="Main" component={MainTabs} />
         <Stack.Screen name="ShiftStart" component={ShiftStartScreen} />
+        {/* Cierre de turno (resumen + ganancias del día). Terminal: sin gesto atrás — se sale con los CTA. */}
+        <Stack.Screen
+          name="ShiftSummary"
+          component={ShiftSummaryScreen}
+          options={{ gestureEnabled: false, animation: 'fade' }}
+        />
         <Stack.Screen name="BiometricEnroll" component={BiometricEnrollScreen} />
         <Stack.Screen name="Documents" component={DocumentsScreen} />
         <Stack.Screen name="Vehicles" component={VehiclesScreen} />

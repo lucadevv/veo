@@ -32,6 +32,12 @@ export type RootStackParamList = {
   RegistrationGateRetry: undefined;
   Main: NavigatorScreenParams<MainTabParamList>;
   ShiftStart: undefined;
+  /**
+   * Resumen de CIERRE de turno (frame C/CierreTurno): tras finalizar el turno, celebra el cierre y muestra
+   * lo ganado hoy + stats. `shiftStartedAt` es la marca de inicio LOCAL (epoch ms) para calcular la
+   * duración; `null` si no se pudo medir (degrada a "—"). Terminal: se sale con "Ver ganancias" o "Listo".
+   */
+  ShiftSummary: { shiftStartedAt: number | null };
   BiometricEnroll: undefined;
   Documents: undefined;
   Incentives: undefined;

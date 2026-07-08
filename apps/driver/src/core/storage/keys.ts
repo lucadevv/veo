@@ -29,6 +29,12 @@ export const PrefKey = {
   LastShiftStatus: 'pref.lastShiftStatus',
   /** Tipo de vehículo activo declarado por el conductor (CAR | MOTO). */
   VehicleType: 'pref.vehicleType',
+  /**
+   * Marca de tiempo (epoch ms, string) del inicio del turno EN CURSO. La escribe el cliente al abrir
+   * turno y la consume el resumen de cierre para calcular la duración ("en la calle hoy"): el backend
+   * NO expone `startedAt` en el estado de turno, así que el reloj es local (degrada honesto si falta).
+   */
+  ShiftStartedAt: 'pref.shiftStartedAt',
 } as const;
 
 export type SecureKeyName = (typeof SecureKey)[keyof typeof SecureKey];

@@ -546,6 +546,20 @@
     "offlineHint": "Inicia tu turno para recibir viajes.",
     "endConfirmTitle": "¿Finalizar el turno?",
     "endConfirmBody": "Dejarás de recibir viajes hasta iniciar un nuevo turno.",
+    "summary": {
+      "title": "Turno cerrado",
+      "subtitle": "{{duration}} en la calle hoy · buen laburo",
+      "subtitleNoDuration": "Buen laburo · nos vemos en el próximo turno",
+      "earnedLabel": "GANASTE HOY",
+      "viewEarnings": "Ver mis ganancias",
+      "done": "Listo",
+      "stats": {
+        "trips": "Viajes",
+        "online": "En turno",
+        "distance": "Recorrido",
+        "tips": "Propinas"
+      }
+    },
     "startTitle": "Iniciar turno",
     "biometricTitle": "Verificación de identidad",
     "biometricBody": "Por seguridad, debes verificar tu rostro (prueba de vida) antes de iniciar el turno.",
@@ -652,6 +666,22 @@
     "cashCollectBody": "Confirmá que recibiste el importe del viaje en efectivo, en mano. El pasajero confirma su lado desde su app.",
     "cashCollectConfirm": "Sí, cobré {{amount}}",
     "cashCollectSkip": "Terminar sin cobrar",
+    "complete": {
+      "title": "Viaje completado",
+      "subtitle": "¡Buen trabajo!",
+      "subtitleNamed": "Buen trabajo, {{name}}",
+      "earningsLabel": "GANANCIA DE ESTE VIAJE",
+      "fareLabel": "Tarifa del viaje",
+      "commissionLabel": "Comisión VEO ({{pct}}%)",
+      "netLabel": "Neto para vos",
+      "ratePassenger": "¿Cómo estuvo tu pasajero?",
+      "ratePassengerNamed": "¿Cómo estuvo {{name}}?",
+      "commentLabel": "Comentario (opcional)",
+      "commentPlaceholder": "Contanos cómo fue el viaje",
+      "rateError": "No pudimos guardar tu calificación. Probá de nuevo.",
+      "thanks": "¡Gracias por calificar!",
+      "done": "Listo"
+    },
     "geoUnavailable": "El servidor del conductor aún no entrega las coordenadas de recojo/destino.",
     "historyTitle": "Historial",
     "historyUnavailable": "El historial de viajes aún no está disponible desde el servidor.",
