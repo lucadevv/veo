@@ -63849,7 +63849,7 @@
                                   "id": "XYzZC",
                                   "name": "t",
                                   "fill": "$ink",
-                                  "content": "Por defecto",
+                                  "content": "Precio fijo",
                                   "fontFamily": "$font-text",
                                   "fontSize": 12,
                                   "fontWeight": "600"
@@ -63938,7 +63938,7 @@
                               "id": "UfroK",
                               "name": "t",
                               "fill": "$ink-subtle",
-                              "content": "— solo fijo",
+                              "content": "—",
                               "fontFamily": "$font-text",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -64282,7 +64282,7 @@
                                   "id": "PRHwR",
                                   "name": "t",
                                   "fill": "$ink",
-                                  "content": "Por defecto",
+                                  "content": "Precio fijo",
                                   "fontFamily": "$font-text",
                                   "fontSize": 12,
                                   "fontWeight": "600"
@@ -64371,7 +64371,7 @@
                               "id": "lROKY",
                               "name": "t",
                               "fill": "$ink-subtle",
-                              "content": "— solo fijo",
+                              "content": "—",
                               "fontFamily": "$font-text",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -64782,7 +64782,7 @@
                                   "id": "P0qDEb",
                                   "name": "t",
                                   "fill": "$ink",
-                                  "content": "Por defecto",
+                                  "content": "Precio fijo",
                                   "fontFamily": "$font-text",
                                   "fontSize": 12,
                                   "fontWeight": "600"
@@ -64871,7 +64871,7 @@
                               "id": "KSUGc",
                               "name": "t",
                               "fill": "$ink-subtle",
-                              "content": "— solo fijo",
+                              "content": "—",
                               "fontFamily": "$font-text",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -65027,7 +65027,7 @@
                                   "id": "WRi7Z",
                                   "name": "t",
                                   "fill": "$ink",
-                                  "content": "Por defecto",
+                                  "content": "Precio fijo",
                                   "fontFamily": "$font-text",
                                   "fontSize": 12,
                                   "fontWeight": "600"
@@ -65116,7 +65116,7 @@
                               "id": "Aynfl",
                               "name": "t",
                               "fill": "$ink-subtle",
-                              "content": "— solo fijo",
+                              "content": "—",
                               "fontFamily": "$font-text",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -65345,7 +65345,7 @@
                               "id": "z73TPp",
                               "name": "t",
                               "fill": "$ink-subtle",
-                              "content": "— solo fijo",
+                              "content": "—",
                               "fontFamily": "$font-text",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -65574,7 +65574,7 @@
                               "id": "W917XJ",
                               "name": "t",
                               "fill": "$ink-subtle",
-                              "content": "— solo fijo",
+                              "content": "—",
                               "fontFamily": "$font-text",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -65803,7 +65803,7 @@
                               "id": "k6eD0",
                               "name": "t",
                               "fill": "$ink-subtle",
-                              "content": "— solo fijo",
+                              "content": "—",
                               "fontFamily": "$font-text",
                               "fontSize": 12,
                               "fontWeight": "normal"
