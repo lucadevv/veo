@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Banknote,
+  CalendarCheck,
   Car,
   Cctv,
   ClipboardCheck,
@@ -62,6 +63,12 @@ export const NAV: NavGroup[] = [
         href: '/fleet/reviews',
         label: 'Revisiones',
         icon: ClipboardCheck,
+        permission: 'fleet:review',
+      },
+      {
+        href: '/fleet/inspections',
+        label: 'Inspecciones',
+        icon: CalendarCheck,
         permission: 'fleet:review',
       },
     ],

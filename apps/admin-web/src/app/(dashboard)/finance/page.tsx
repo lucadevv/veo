@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { type MouseEvent, useState } from 'react';
 import { Lock, Banknote, Clock, Pause, CircleAlert, Search } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { usePayouts, usePayoutStats } from '@/lib/api/queries';
@@ -22,6 +22,7 @@ import {
   RetryPayoutButton,
   RunPayoutsButton,
 } from '@/components/finance/payout-actions';
+import { PayoutDetailDialog } from '@/components/finance/payout-detail-dialog';
 
 // Columnas fieles al frame: Conductor (avatar + nombre, fallback driverId) · Período · Bruto · Comisión · Neto ·
 // Estado (+heldReason en HELD) · Acción. `driverName` lo enriquece el bff desde identity — es null para roles
@@ -91,17 +92,24 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
     // reintentar el desembolso (ADR-015 §5). Ambos botones se auto-ocultan sin finance:payout. `status` es el
     // enum tipado del contrato (payoutStatus): nada de literales sueltos.
     cell: ({ row }) => {
+      // La fila entera abre el detalle (onRowClick); los botones de acción viven DENTRO de la fila, así
+      // que frenamos la propagación acá para que disparar/liberar/reintentar NO abra además el sheet.
+      const stop = (e: MouseEvent) => e.stopPropagation();
       if (row.original.status === payoutStatus.enum.HELD) {
         return (
-          <ReleaseHeldPayoutButton
-            driverId={row.original.driverId}
-            amountCents={row.original.amountCents}
-          />
+          <span onClick={stop}>
+            <ReleaseHeldPayoutButton
+              driverId={row.original.driverId}
+              amountCents={row.original.amountCents}
+            />
+          </span>
         );
       }
       if (row.original.status === payoutStatus.enum.FAILED) {
         return (
-          <RetryPayoutButton payoutId={row.original.id} amountCents={row.original.amountCents} />
+          <span onClick={stop}>
+            <RetryPayoutButton payoutId={row.original.id} amountCents={row.original.amountCents} />
+          </span>
         );
       }
       return <span className="text-ink-subtle">—</span>;
@@ -133,6 +141,8 @@ export default function FinancePage() {
   const user = useSession();
   const [tab, setTab] = useState<string>(FILTER_ALL);
   const [search, setSearch] = useState('');
+  // Fila seleccionada → alimenta el sheet de detalle (usePayoutDetail, enabled: !!id). null = cerrado.
+  const [selectedPayoutId, setSelectedPayoutId] = useState<string | null>(null);
   const query = usePayouts(tab);
   const statsQuery = usePayoutStats();
 
@@ -238,6 +248,10 @@ export default function FinancePage() {
                   columns={columns}
                   data={data}
                   loading={query.isLoading}
+                  onRowClick={(row) => setSelectedPayoutId(row.id)}
+                  rowLabel={(row) =>
+                    `Ver detalle de la liquidación de ${row.driverName ?? row.driverId}`
+                  }
                   emptyTitle="Sin liquidaciones"
                   emptyDescription={
                     term
@@ -255,6 +269,10 @@ export default function FinancePage() {
           </TabsContent>
         </Tabs>
       </div>
+      <PayoutDetailDialog
+        payoutId={selectedPayoutId}
+        onClose={() => setSelectedPayoutId(null)}
+      />
     </div>
   );
 }
