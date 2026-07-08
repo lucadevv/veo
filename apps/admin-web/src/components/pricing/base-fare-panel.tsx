@@ -60,7 +60,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
     <ConfigCard
       title="Tarifa base"
       tag="componentes"
-      description="Banderazo + por-km + por-minuto (el precio en FIJO, el sugerido en PUJA). El por-km es all-in: incluye el combustible, como Uber."
+      description="Banderazo + por-km + por-minuto (el precio en FIJO, el sugerido en PUJA). El por-km es all-in: ya incluye el combustible, no se cobra aparte."
       footer={
         <SaveAction
           canManage={canManage}

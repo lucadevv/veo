@@ -46,7 +46,7 @@ export default function CarpoolingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Carpooling"
-        description="El carril PROGRAMADO (el conductor publica y el pasajero reserva asiento), separado del on-demand y siempre FIJO. Es cost-sharing: el conductor pone el precio del asiento y la plataforma solo limita el lucro. Acá fijás el service fee al pasajero y el techo anti-lucro (costo de operación por km). Cambios globales, al instante y auditados."
+        description="El viaje compartido y programado: el conductor publica un viaje y los pasajeros reservan asiento. Siempre en modo FIJO y con reparto de costos —el conductor pone el precio del asiento y VEO solo evita que haya lucro—. Acá se fija el service fee al pasajero y el techo anti-lucro (el costo de operar el vehículo por km). Cambios globales, al instante y auditados."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Carpooling' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

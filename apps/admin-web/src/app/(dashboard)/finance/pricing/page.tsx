@@ -60,7 +60,7 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios on-demand"
-        description="El carril del viaje inmediato. Corre en DOS modos que coexisten — FIJO (tarifa calculada, estilo Uber) y PUJA (el pasajero ofrece su precio, estilo inDrive). Acá va la config global de la fórmula: tarifa base y comisión. El modo (FIJO/PUJA) y el piso de la puja se configuran por servicio en Ofertas de servicio."
+        description="La modalidad de viaje inmediato. Cada servicio corre en uno de dos modos: FIJO —VEO calcula la tarifa por la ruta y esa se cobra— o PUJA —el pasajero ofrece su precio y el conductor lo acepta o contraoferta—. Acá se configura lo global de la fórmula: tarifa base y comisión. El modo y el piso de la puja de cada servicio se definen en Ofertas de servicio."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

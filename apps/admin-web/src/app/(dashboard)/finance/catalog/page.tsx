@@ -46,7 +46,7 @@ export default function CatalogPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Ofertas de servicio"
-        description="El menú de servicios que el pasajero puede pedir (VEO Moto, Económico…). Cada servicio hereda la config global de On-demand y puede overridear su modo, sus mínimos (tarifa fija y piso de puja) y activarse/desactivarse. Es el catálogo, no un carril de precio."
+        description="El menú de servicios que el pasajero puede pedir (VEO Moto, VEO Económico…). Cada servicio hereda la fórmula global de On-demand y puede ajustar su modo, sus mínimos (tarifa fija y piso de puja) o activarse y desactivarse. Es el catálogo, no la fórmula de precio."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Ofertas de servicio' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
