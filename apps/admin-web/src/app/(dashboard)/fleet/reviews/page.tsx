@@ -10,7 +10,6 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
-  Inbox,
   Lock,
   Search,
   Timer,
@@ -18,7 +17,12 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import { useDriversPending, useFleetDocuments, useVehicles } from '@/lib/api/queries';
+import {
+  useDriversPending,
+  useFleetDocuments,
+  useReviewsSummary,
+  useVehicles,
+} from '@/lib/api/queries';
 import type { PendingDriver, VehicleView } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -125,6 +129,9 @@ export default function ReviewsPage() {
   const drivers = useDriversPending();
   const documents = useFleetDocuments('PENDING_REVIEW');
   const vehicles = useVehicles();
+  // Conteos AUTORITATIVOS de la cola (server-side, /ops/reviews/summary): no dependen de las páginas ya
+  // cargadas en el cliente (que sub-cuentan). Alimentan las stat cards de Conductores y Documentos.
+  const summary = useReviewsSummary();
 
   const rows = useMemo<QueueRow[]>(() => {
     const out: QueueRow[] = [];
@@ -270,22 +277,24 @@ export default function ReviewsPage() {
         </button>
       </div>
 
-      {/* Stat cards */}
+      {/* Stat cards · Conductores y Documentos son AUTORITATIVOS (server: /ops/reviews/summary), no del set
+          paginado. Vehículos y SLA se derivan de la cola cargada (el summary no los cubre hoy). */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          icon={Inbox}
-          label="Pendientes total"
-          value={String(counts.total)}
-          hint="En la cola"
-          loading={loading}
-        />
         <StatCard
           icon={Users}
           label="Conductores"
-          value={String(counts.conductor)}
-          hint="Revisión de alta"
+          value={summary.data ? String(summary.data.driversPending) : '—'}
+          hint="Altas por revisar"
           hintTone="brand"
-          loading={loading}
+          loading={summary.isLoading}
+        />
+        <StatCard
+          icon={FileText}
+          label="Documentos"
+          value={summary.data ? String(summary.data.docsPendingReview) : '—'}
+          hint="Reenviados a revisión"
+          hintTone="brand"
+          loading={summary.isLoading}
         />
         <StatCard
           icon={Car}
