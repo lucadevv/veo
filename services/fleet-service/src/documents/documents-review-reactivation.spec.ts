@@ -45,6 +45,11 @@ function makeService(docRow: Record<string, unknown> | null) {
       }),
       findUniqueOrThrow: vi.fn(async () => applied),
     },
+    // Rama ITV+VEHICLE del review: chequeo de duplicado (findUnique) + resolución del conductor del vehículo.
+    inspection: {
+      findUnique: vi.fn(async (): Promise<Record<string, unknown> | null> => null),
+    },
+    vehicle: { findUnique: vi.fn(async () => ({ driverId: 'user-owner-1' })) },
     outboxEvent: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         outbox.push(data);
@@ -57,8 +62,9 @@ function makeService(docRow: Record<string, unknown> | null) {
     write: { $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)) },
   };
   const config = { getOrThrow: () => 30 };
-  const service = new DocumentsService(prisma as never, config as never);
-  return { service, outbox };
+  const inspections = { createInTx: vi.fn() };
+  const service = new DocumentsService(prisma as never, inspections as never, config as never);
+  return { service, outbox, inspections, tx };
 }
 
 /** Encuentra el evento de reactivación en el outbox (o null). */
@@ -140,5 +146,60 @@ describe('DocumentsService.review · auto-reactivación por documento crítico r
     // Cae en EXPIRED → la rama de suspensión, NO la de reactivación (no se regulariza algo ya vencido).
     expect(reactivatedPayload(outbox)).toBeNull();
     expect(outbox.some((o) => o.eventType === FleetEventType.DRIVER_SUSPENDED)).toBe(true);
+  });
+});
+
+describe('DocumentsService.review · unifica ITV: aprobar el DOCUMENTO ITV registra la Inspección', () => {
+  const ISSUED = new Date('2026-06-01T00:00:00.000Z');
+  const itvDoc = (over: Record<string, unknown> = {}) =>
+    doc({
+      ownerType: FleetOwnerType.VEHICLE,
+      ownerId: 'vehicle-1',
+      type: FleetDocumentType.ITV,
+      issuedAt: ISSUED,
+      expiresAt: FUTURE,
+      ...over,
+    });
+
+  it('VALIDA el doc ITV de un VEHÍCULO → createInTx en la MISMA tx: issuedAt→inspectedAt, expiresAt→nextDueAt, inspector=revisor, driverId del vehículo', async () => {
+    const { service, inspections } = makeService(itvDoc());
+    await service.review('doc-1', ReviewDecision.VALID, REVIEWER, undefined, NOW);
+    expect(inspections.createInTx).toHaveBeenCalledTimes(1);
+    const [, params, inspectorId, when] = inspections.createInTx.mock.calls[0]!;
+    expect(params).toMatchObject({
+      vehicleId: 'vehicle-1',
+      driverId: 'user-owner-1',
+      passed: true,
+      inspectedAt: ISSUED,
+      nextDueAt: FUTURE,
+    });
+    expect(inspectorId).toBe(REVIEWER);
+    expect(when).toBe(NOW);
+  });
+
+  it('IDEMPOTENTE: si ya existe la inspección (natural key) NO llama createInTx', async () => {
+    const { service, inspections, tx } = makeService(itvDoc());
+    tx.inspection.findUnique.mockResolvedValueOnce({ id: 'insp-existente' });
+    await service.review('doc-1', ReviewDecision.VALID, REVIEWER, undefined, NOW);
+    expect(inspections.createInTx).not.toHaveBeenCalled();
+  });
+
+  it('sin issuedAt en el doc → inspectedAt cae a `now`', async () => {
+    const { service, inspections } = makeService(itvDoc({ issuedAt: null }));
+    await service.review('doc-1', ReviewDecision.VALID, REVIEWER, undefined, NOW);
+    const [, params] = inspections.createInTx.mock.calls[0]!;
+    expect(params.inspectedAt).toEqual(NOW);
+  });
+
+  it('un doc de VEHÍCULO que NO es ITV (SOAT) → NO crea Inspección', async () => {
+    const { service, inspections } = makeService(itvDoc({ type: FleetDocumentType.SOAT }));
+    await service.review('doc-1', ReviewDecision.VALID, REVIEWER, undefined, NOW);
+    expect(inspections.createInTx).not.toHaveBeenCalled();
+  });
+
+  it('RECHAZAR el doc ITV → NO crea Inspección (solo VALID)', async () => {
+    const { service, inspections } = makeService(itvDoc());
+    await service.review('doc-1', ReviewDecision.REJECTED, REVIEWER, 'ilegible', NOW);
+    expect(inspections.createInTx).not.toHaveBeenCalled();
   });
 });

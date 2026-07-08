@@ -176,7 +176,8 @@ function makeService(
     },
   };
   const config = { getOrThrow: () => 30 };
-  const service = new DocumentsService(prisma as never, config as never);
+  const inspections = { createInTx: vi.fn() };
+  const service = new DocumentsService(prisma as never, inspections as never, config as never);
   return {
     service,
     created,

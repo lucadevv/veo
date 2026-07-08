@@ -32,6 +32,9 @@ import {
 } from './document-rules';
 import { ReviewDecision } from './dto/document.dto';
 import type { CreateDocumentDto } from './dto/document.dto';
+import { InspectionsService } from '../inspections/inspections.service';
+import { computeNextInspectionDue } from '../inspections/inspection-rules';
+import { FleetDocumentType } from '@veo/shared-types';
 import {
   FleetDocumentStatus,
   FleetOwnerType,
@@ -50,6 +53,7 @@ export class DocumentsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly inspections: InspectionsService,
     config: ConfigService<Env, true>,
   ) {
     this.warningDays = config.getOrThrow<number>('EXPIRY_WARNING_DAYS');
@@ -445,6 +449,48 @@ export class DocumentsService {
             rejectedAt: now.toISOString(),
           }),
         );
+      }
+
+      // UNIFICA LAS 2 FUENTES DE ITV: aprobar el DOCUMENTO ITV del vehículo (el certificado ES la prueba de la
+      // inspección) registra la Inspección en la MISMA tx del CAS — así una sola aprobación deja al vehículo
+      // operable (itvHasInspection/current reales) sin un paso manual aparte. Mapea `issuedAt→inspectedAt` y
+      // `expiresAt→nextDueAt` (o +intervalo por defecto), inspector = el operador que aprueba. IDEMPOTENTE: si
+      // ya existe esa inspección (natural key vehicleId+inspectedAt+inspector) no se duplica — evita que un
+      // P2002 aborte la tx del review. Reusa la auto-reactivación por ITV (createInTx).
+      if (
+        decision === ReviewDecision.VALID &&
+        updated.ownerType === FleetOwnerType.VEHICLE &&
+        updated.type === FleetDocumentType.ITV
+      ) {
+        const inspectedAt = updated.issuedAt ?? now;
+        const nextDueAt = updated.expiresAt ?? computeNextInspectionDue(inspectedAt);
+        const already = await tx.inspection.findUnique({
+          where: {
+            vehicleId_inspectedAt_inspectorId: {
+              vehicleId: updated.ownerId,
+              inspectedAt,
+              inspectorId: reviewerId,
+            },
+          },
+        });
+        if (!already) {
+          const vehicle = await tx.vehicle.findUnique({
+            where: { id: updated.ownerId },
+            select: { driverId: true },
+          });
+          await this.inspections.createInTx(
+            tx,
+            {
+              vehicleId: updated.ownerId,
+              driverId: vehicle?.driverId ?? null,
+              passed: true,
+              inspectedAt,
+              nextDueAt,
+            },
+            reviewerId,
+            now,
+          );
+        }
       }
       return updated;
     });

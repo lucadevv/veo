@@ -68,45 +68,24 @@ export class InspectionsService {
     // no-op honesto en identity (no había hold que quitar) y NO toca las otras causas (documento, DISCIPLINARY).
     // Es el espejo del sweeper, que también re-emite la suspensión sin latch y deja que identity dedup-ee.
     try {
-      return await this.prisma.write.$transaction(async (tx) => {
-        const inspection = await tx.inspection.create({
-          data: {
-            id: uuidv7(),
+      // El insert + la posible auto-reactivación viven en `createInTx` (tx-aware) para poder REUSARLOS desde
+      // `documents.review()`: al aprobar el documento ITV del vehículo, la Inspección se crea en la MISMA tx del
+      // CAS (una sola aprobación deja la ITV registrada y, si corresponde, levanta la suspensión — atómico).
+      return await this.prisma.write.$transaction((tx) =>
+        this.createInTx(
+          tx,
+          {
             vehicleId: input.vehicleId,
-            inspectorId,
-            inspectedAt,
+            driverId: vehicle.driverId,
             passed: input.passed,
-            notes: input.notes ?? null,
+            inspectedAt,
             nextDueAt,
+            notes: input.notes ?? null,
           },
-        });
-
-        // Solo una inspección VIGENTE regulariza. Como el anti-futuro garantiza `inspectedAt <= now`, una
-        // inspección vigente nueva gana el `orderBy inspectedAt desc` → es la última que verá el gate.
-        if (
-          isInspectionCurrent({ passed: inspection.passed, nextDueAt }, now) &&
-          vehicle.driverId
-        ) {
-          const payload: DriverReactivatedPayload = {
-            // KEYEADO POR userId (User.id = Vehicle.driverId), NO driverId de perfil: identity resuelve el mapeo.
-            userId: vehicle.driverId,
-            reason: 'Inspección técnica (ITV) regularizada',
-            vehicleId: input.vehicleId,
-            inspectionId: inspection.id,
-            nextDueAt: nextDueAt.toISOString(),
-            reactivatedAt: now.toISOString(),
-          };
-          const envelope = buildFleetEvent(FleetEventType.DRIVER_REACTIVATED, payload);
-          await tx.outboxEvent.create({
-            data: {
-              aggregateId: vehicle.driverId,
-              eventType: envelope.eventType,
-              envelope: envelope as unknown as Prisma.InputJsonValue,
-            },
-          });
-        }
-        return inspection;
-      });
+          inspectorId,
+          now,
+        ),
+      );
     } catch (err) {
       // IDEMPOTENCIA (FOUNDATION §0.4): el natural key `[vehicleId, inspectedAt, inspectorId]` colapsa un
       // re-POST (doble click / retry de red) a una sola fila. Dos inspecciones REALES distintas del mismo
@@ -129,6 +108,68 @@ export class InspectionsService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Inserta la inspección y —si es VIGENTE (`passed && nextDueAt > now`) y el vehículo tiene conductor— emite
+   * `fleet.driver_reactivated`, TODO dentro de la `tx` recibida (outbox-in-tx, FOUNDATION §6). Server-truth del
+   * inspector: el `inspectorId` lo pone el caller (actor autenticado), nunca el body.
+   *
+   * Reutilizable: `create()` la envuelve en su propia tx + idempotencia (P2002); `documents.review()` la llama
+   * en la MISMA tx del CAS al APROBAR el documento ITV del vehículo — así una sola aprobación registra la ITV y
+   * levanta la suspensión por ITV de forma atómica. Emitimos la reactivación INCONDICIONALMENTE cuando la ITV es
+   * vigente: identity quita SOLO el hold INSPECTION_EXPIRED y es idempotente (borrar 0 holds = no-op).
+   */
+  async createInTx(
+    tx: Prisma.TransactionClient,
+    params: {
+      vehicleId: string;
+      // Conductor dueño (User.id = Vehicle.driverId) resuelto por el CALLER, para keyear la reactivación sin
+      // que createInTx haga I/O oculto. `null` si el vehículo no tiene conductor → no se emite reactivación.
+      driverId: string | null;
+      passed: boolean;
+      inspectedAt: Date;
+      nextDueAt: Date;
+      notes?: string | null;
+    },
+    inspectorId: string,
+    now: Date,
+  ): Promise<Inspection> {
+    const inspection = await tx.inspection.create({
+      data: {
+        id: uuidv7(),
+        vehicleId: params.vehicleId,
+        inspectorId,
+        inspectedAt: params.inspectedAt,
+        passed: params.passed,
+        notes: params.notes ?? null,
+        nextDueAt: params.nextDueAt,
+      },
+    });
+
+    if (
+      isInspectionCurrent({ passed: inspection.passed, nextDueAt: params.nextDueAt }, now) &&
+      params.driverId
+    ) {
+      const payload: DriverReactivatedPayload = {
+        // KEYEADO POR userId (User.id = Vehicle.driverId), NO driverId de perfil: identity resuelve el mapeo.
+        userId: params.driverId,
+        reason: 'Inspección técnica (ITV) regularizada',
+        vehicleId: params.vehicleId,
+        inspectionId: inspection.id,
+        nextDueAt: params.nextDueAt.toISOString(),
+        reactivatedAt: now.toISOString(),
+      };
+      const envelope = buildFleetEvent(FleetEventType.DRIVER_REACTIVATED, payload);
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: params.driverId,
+          eventType: envelope.eventType,
+          envelope: envelope as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
+    return inspection;
   }
 
   listByVehicle(vehicleId: string): Promise<Inspection[]> {
