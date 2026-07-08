@@ -1,7 +1,7 @@
 'use client';
 import { use } from 'react';
 
-import { BellRing, CheckCircle2, FileText } from 'lucide-react';
+import { BellRing, CheckCircle2, FileText, Paperclip } from 'lucide-react';
 import { usePanic, usePanicAction } from '@/lib/api/queries';
 import { dateTime } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
@@ -14,6 +14,7 @@ import { StatusPill } from '@/components/ui/status-pill';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
+import { PanicEvidenceDialog } from '@/components/security/panic-evidence-dialog';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
 
 export default function PanicDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -125,6 +126,17 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
             <Card>
               <CardHeader>
                 <CardTitle>Evidencia</CardTitle>
+                {can(user, 'panics:ack') ? (
+                  <PanicEvidenceDialog
+                    id={id}
+                    trigger={
+                      <Button size="sm" variant="secondary">
+                        <Paperclip className="size-4" aria-hidden />
+                        Adjuntar evidencia
+                      </Button>
+                    }
+                  />
+                ) : null}
               </CardHeader>
               <CardContent>
                 {panic.evidence.length === 0 ? (

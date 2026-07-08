@@ -10,10 +10,11 @@ import {
   CircleCheck,
   CalendarClock,
   Download,
+  FileClock,
   Lock,
   Search,
 } from 'lucide-react';
-import { useVehicles } from '@/lib/api/queries';
+import { useVehicles, useVehiclesSummary } from '@/lib/api/queries';
 import type { VehicleView } from '@/lib/api/schemas';
 import { downloadCsv } from '@/lib/csv';
 import { useSession } from '@/lib/session-context';
@@ -100,6 +101,9 @@ export default function VehiclesPage() {
   const [search, setSearch] = useState('');
 
   const vehicles = useVehicles();
+  // Resumen AUTORITATIVO por estado documental (server-side, sobre TODA la flota) — las otras cards derivan del
+  // set paginado ya cargado en el cliente; esta card muestra el conteo REAL de documentos próximos a vencer.
+  const vehiclesSummary = useVehiclesSummary();
 
   // Todos los vehículos cargados. Cards + tab-counts + filas derivan de ESTE set con el MISMO estado() → la
   // columna Estado, las cards y los badges de tab SIEMPRE coinciden (antes las cards usaban docStatus del BFF y
@@ -194,8 +198,9 @@ export default function VehiclesPage() {
         </button>
       </div>
 
-      {/* Stat cards — derivados del MISMO estado() que las filas (suspensión = función de docs+ITV). */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* Stat cards — las 4 primeras derivan del MISMO estado() que las filas (suspensión = función de docs+ITV);
+          "Docs por vencer" es AUTORITATIVA (server: /ops/vehicles/summary), sobre toda la flota, no el set cargado. */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatCard
           icon={Car}
           label="Total en flota"
@@ -226,6 +231,14 @@ export default function VehiclesPage() {
           hint="Doc / ITV vencida"
           hintTone="danger"
           loading={vehicles.isLoading}
+        />
+        <StatCard
+          icon={FileClock}
+          label="Docs por vencer"
+          value={vehiclesSummary.data ? String(vehiclesSummary.data.expiringSoon) : '—'}
+          hint="Documentos · toda la flota"
+          hintTone="warn"
+          loading={vehiclesSummary.isLoading}
         />
       </div>
 

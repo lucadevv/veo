@@ -45,8 +45,11 @@ import {
   paginated,
   pendingDriver,
   driverCounts,
+  vehicleCounts,
   reviewQueueSummary,
   panicDetail,
+  panicEvidenceResult,
+  type AttachPanicEvidenceRequest,
   type ReplaceCatalogRequest,
   panicSummary,
   payoutView,
@@ -70,6 +73,7 @@ export const qk = {
   driver: (id: string) => ['driver', id] as const,
   driversPending: ['drivers-pending'] as const,
   driversSummary: ['drivers-summary'] as const,
+  vehiclesSummary: ['vehicles-summary'] as const,
   reviewsSummary: ['reviews-summary'] as const,
   operators: ['operators'] as const,
   panics: (status: string) => ['panics', status] as const,
@@ -366,6 +370,19 @@ export function useDriversSummary() {
   });
 }
 
+/**
+ * Conteo AUTORITATIVO de vehículos por estado documental (valid/expiringSoon/expired · GET /ops/vehicles/summary).
+ * A diferencia de las cards derivadas de `useVehicles` (que solo cuentan las páginas YA cargadas en el cliente),
+ * este resumen lo agrega el servidor sobre TODA la flota. Mismo patrón que useDriversSummary/useReviewsSummary.
+ */
+export function useVehiclesSummary() {
+  return useQuery({
+    queryKey: qk.vehiclesSummary,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/vehicles/summary', { schema: vehicleCounts, signal }),
+  });
+}
+
 /** Conteo de las colas de revisión (conductores + docs + modelos) para los stat cards de la cola unificada. */
 export function useReviewsSummary() {
   return useQuery({
@@ -468,6 +485,27 @@ export function usePanicAction() {
       }),
     onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: qk.panic(data.id) });
+      void qc.invalidateQueries({ queryKey: ['panics'] });
+    },
+  });
+}
+
+/**
+ * Adjunta (y opcionalmente PROTEGE) evidencia a un incidente de pánico (POST /security/panics/:id/evidence).
+ * `keys` = claves S3 ya subidas; `finalize` aplica retención/object-lock (cadena de custodia · Ley 29733). El
+ * server devuelve las claves adjuntas + las protegidas. El éxito invalida el detalle del pánico (la card de
+ * Evidencia refleja lo recién adjuntado) y los listados. El admin-bff revalida @Roles server-side; la UI refleja.
+ */
+export function useAttachPanicEvidence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string } & AttachPanicEvidenceRequest) =>
+      apiClient().post(`/security/panics/${input.id}/evidence`, {
+        body: { keys: input.keys, ...(input.finalize ? { finalize: input.finalize } : {}) },
+        schema: panicEvidenceResult,
+      }),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: qk.panic(input.id) });
       void qc.invalidateQueries({ queryKey: ['panics'] });
     },
   });
@@ -656,6 +694,24 @@ export function useModelReviewAction() {
         schema: vehicleModelReviewView,
       });
     },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
+    },
+  });
+}
+
+/**
+ * Reabre un modelo YA APROBADO para corregir su ficha técnica (POST /fleet/vehicle-models/:id/reopen ·
+ * APPROVED→PENDING_REVIEW). Devuelve la vista de revisión actualizada. Invalida la cola para que el modelo
+ * reaparezca en la pestaña de pendientes. El admin-bff revalida @Roles(COMPLIANCE_SUPERVISOR/ADMIN/SUPERADMIN).
+ */
+export function useReopenModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/fleet/vehicle-models/${input.id}/reopen`, {
+        schema: vehicleModelReviewView,
+      }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
     },

@@ -149,9 +149,11 @@ export default function ReviewsPage() {
   // Conteos AUTORITATIVOS de la cola (server-side, /ops/reviews/summary): no dependen de las páginas ya
   // cargadas en el cliente (que sub-cuentan). Alimentan las stat cards de Conductores y Documentos.
   const summary = useReviewsSummary();
-  // Cola de modelos pendientes de aprobar (B5-2.c). Estado del dominio = 'PENDING_REVIEW' (enum
-  // vehicleModelStatus). Se muestra en su propia pestaña con tabla y acciones dedicadas.
-  const models = useModelReview('PENDING_REVIEW');
+  // Cola de modelos (B5-2.c). Sub-filtro por estado del dominio (enum vehicleModelStatus): PENDING_REVIEW =
+  // solicitudes por aprobar (approve/reject); APPROVED = modelos ya curados que se pueden REABRIR para corregir
+  // la ficha. Se muestra en su propia pestaña con tabla y acciones dedicadas (status-aware en ModelReviewActions).
+  const [modelStatus, setModelStatus] = useState<'PENDING_REVIEW' | 'APPROVED'>('PENDING_REVIEW');
+  const models = useModelReview(modelStatus);
   const modelRows = useMemo(() => models.data?.pages.flatMap((p) => p.items) ?? [], [models.data]);
   // Cola de documentos próximos a vencer (SOAT/DNI/ITV…). Su propia pestaña con tabla y acción de salto
   // al detalle del dueño (conductor o vehículo). Paginado por cursor en el servidor (fleet-service).
@@ -414,7 +416,31 @@ export default function ReviewsPage() {
 
       {/* Cola de modelos (forma propia) vs. cola unificada (conductor/vehículo/documento). */}
       {tab === 'modelo' ? (
-        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="flex flex-col gap-3">
+          {/* Sub-filtro de estado: pendientes (approve/reject) vs. aprobados (reabrir para corregir la ficha). */}
+          <div className="inline-flex w-fit gap-[3px] rounded-md border border-border bg-surface p-1">
+            {(
+              [
+                { key: 'PENDING_REVIEW', label: 'Pendientes' },
+                { key: 'APPROVED', label: 'Aprobados' },
+              ] as const
+            ).map(({ key, label }) => {
+              const active = modelStatus === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setModelStatus(key)}
+                  className={`rounded-sm px-3 py-[7px] text-[13px] font-semibold transition-colors ${
+                    active ? 'bg-accent/15 text-accent' : 'text-ink-muted hover:text-ink'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border bg-surface">
           <div
             className={`${MODEL_GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
           >
@@ -440,8 +466,12 @@ export default function ReviewsPage() {
           ) : modelRows.length === 0 ? (
             <EmptyState
               className="py-12"
-              title="Sin solicitudes"
-              description="No hay solicitudes de modelo esperando aprobación."
+              title={modelStatus === 'APPROVED' ? 'Sin modelos aprobados' : 'Sin solicitudes'}
+              description={
+                modelStatus === 'APPROVED'
+                  ? 'No hay modelos aprobados para reabrir.'
+                  : 'No hay solicitudes de modelo esperando aprobación.'
+              }
             />
           ) : (
             modelRows.map((m) => (
@@ -462,6 +492,7 @@ export default function ReviewsPage() {
               </div>
             ))
           )}
+          </div>
         </div>
       ) : tab === 'vencer' ? (
         <div className="overflow-hidden rounded-lg border border-border bg-surface">

@@ -163,6 +163,24 @@ export const panicDetail = z.object({
 });
 export type PanicDetail = z.infer<typeof panicDetail>;
 
+/**
+ * Body del POST /security/panics/:id/evidence: claves S3 de la evidencia a adjuntar al incidente y,
+ * opcionalmente, `finalize` para PROTEGERLAS con retención/object-lock (cadena de custodia · Ley 29733).
+ * Espejo de `PanicEvidenceDto` del admin-bff (que re-valida: 1..50 claves, cada una string).
+ */
+export const attachPanicEvidenceRequest = z.object({
+  keys: z.array(z.string().min(1)).min(1).max(50),
+  finalize: z.boolean().optional(),
+});
+export type AttachPanicEvidenceRequest = z.infer<typeof attachPanicEvidenceRequest>;
+
+/** Respuesta del POST /security/panics/:id/evidence: claves adjuntas + las que quedaron protegidas. */
+export const panicEvidenceResult = z.object({
+  evidenceS3Keys: z.array(z.string()),
+  protectedKeys: z.array(z.string()),
+});
+export type PanicEvidenceResult = z.infer<typeof panicEvidenceResult>;
+
 /* ── Conductor con datos de aprobación (/drivers) ── */
 export const driverApproval = driverSummary.extend({
   fullName: z.string().nullable(),

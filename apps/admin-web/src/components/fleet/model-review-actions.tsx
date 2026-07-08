@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Check } from 'lucide-react';
-import { useModelReviewAction } from '@/lib/api/queries';
+import { Check, RotateCcw } from 'lucide-react';
+import { useModelReviewAction, useReopenModel } from '@/lib/api/queries';
 import type { VehicleModelReviewView } from '@/lib/api/schemas';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,7 @@ const ENERGY_SOURCES = ['GASOLINE_90', 'DIESEL', 'ELECTRIC'] as const;
  */
 export function ModelReviewActions({ model }: { model: VehicleModelReviewView }) {
   const action = useModelReviewAction();
+  const reopen = useReopenModel();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -83,6 +84,34 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
   async function reject() {
     await action.mutateAsync({ id: model.id, decision: 'reject' });
     toast({ tone: 'success', title: 'Solicitud rechazada' });
+  }
+
+  async function reopenModel() {
+    await reopen.mutateAsync({ id: model.id });
+    toast({ tone: 'success', title: 'Modelo reabierto para revisión' });
+  }
+
+  // Un modelo YA APROBADO no se aprueba/rechaza: se REABRE (APPROVED→PENDING_REVIEW) para corregir su ficha.
+  if (model.status === 'APPROVED') {
+    return (
+      <div className="inline-flex items-center gap-2 justify-self-end">
+        <ConfirmDialog
+          trigger={
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3.5 py-2 text-[13px] font-semibold text-ink-muted transition-colors hover:bg-surface-2"
+            >
+              <RotateCcw className="size-[13px]" aria-hidden />
+              Reabrir
+            </button>
+          }
+          title="Reabrir modelo aprobado"
+          description={`Se reabrirá ${model.make} ${model.model} para corregir su ficha técnica. Volverá a la cola de revisión (pendiente) hasta que se apruebe de nuevo.`}
+          confirmLabel="Reabrir"
+          onConfirm={reopenModel}
+        />
+      </div>
+    );
   }
 
   return (

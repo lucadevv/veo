@@ -3,12 +3,13 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, Menu, Moon, Search, ShieldCheck, Sun, X } from 'lucide-react';
+import { LogOut, Menu, MonitorSmartphone, Moon, Search, ShieldCheck, Sun, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session-context';
 import { useTheme } from '@/lib/theme';
 import { can } from '@/lib/rbac';
-import { logout } from '@/lib/api/auth';
+import { logout, logoutAll } from '@/lib/api/auth';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Avatar } from '@/components/ui/avatar';
 import { ConnectionStatus } from '@/components/ops/connection-status';
 import { NAV } from './nav';
@@ -93,6 +94,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   async function onLogout() {
     await logout();
+    router.replace('/login');
+    router.refresh();
+  }
+
+  async function onLogoutAll() {
+    await logoutAll();
     router.replace('/login');
     router.refresh();
   }
@@ -204,6 +211,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <Moon className="size-4" aria-hidden />
           )}
         </button>
+        {/* Cerrar sesión en TODOS los dispositivos: acción sensible (revoca todas las sesiones) → confirmación. */}
+        <ConfirmDialog
+          trigger={
+            <button
+              type="button"
+              aria-label="Cerrar sesión en todos los dispositivos"
+              className="grid size-8 place-items-center rounded-md text-ink-subtle transition-colors hover:bg-danger/15 hover:text-danger"
+            >
+              <MonitorSmartphone className="size-4" aria-hidden />
+            </button>
+          }
+          title="Cerrar sesión en todos los dispositivos"
+          description="Se cerrará tu sesión en TODOS los dispositivos donde tengas la sesión abierta, no solo en este. Tendrás que volver a iniciar sesión en cada uno."
+          confirmLabel="Cerrar en todos"
+          variant="danger"
+          onConfirm={onLogoutAll}
+        />
         <button
           type="button"
           onClick={() => void onLogout()}
