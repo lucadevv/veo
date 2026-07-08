@@ -1,7 +1,7 @@
 'use client';
 
 import { Lock, ShieldCheck } from 'lucide-react';
-import { useBidFloor, useCatalog } from '@/lib/api/queries';
+import { useBaseFare, useBidFloor, useCatalog } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
@@ -21,6 +21,9 @@ export default function CatalogPage() {
   const user = useSession();
   const catalogQuery = useCatalog();
   const bidFloorQuery = useBidFloor();
+  // Tarifa base GLOBAL: SOLO para el placeholder de los params a medida del catálogo (muestra el número que se
+  // usa si el campo queda vacío). Su fallo/carga NO tumba nada — el placeholder cae a "global".
+  const baseFareQuery = useBaseFare();
 
   if (!can(user, 'catalog:view')) {
     return (
@@ -83,6 +86,7 @@ export default function CatalogPage() {
               <CatalogPanel
                 catalog={catalog}
                 bidFloor={bidFloorQuery.data}
+                baseFare={baseFareQuery.data}
                 onRetryBidFloor={() => void bidFloorQuery.refetch()}
               />
             )}

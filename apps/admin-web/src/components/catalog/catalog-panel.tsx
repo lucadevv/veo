@@ -6,6 +6,8 @@ import {
   Bike,
   Car,
   Check,
+  ChevronDown,
+  ChevronRight,
   RefreshCw,
   Truck,
   TriangleAlert,
@@ -15,6 +17,7 @@ import {
 import { solesToCents } from '@veo/utils/money';
 import { PricingMode, ServiceType, VehicleClass } from '@veo/shared-types';
 import type {
+  BaseFareView,
   BidFloorView,
   CatalogOffering,
   CatalogOverride,
@@ -98,12 +101,17 @@ interface OfferingFloor {
 export function CatalogPanel({
   catalog,
   bidFloor,
+  baseFare,
   onRetryBidFloor,
 }: {
   catalog: CatalogView;
   // POSIBLEMENTE undefined: el piso de la PUJA es OTRA config (endpoint + CAS propios). Si su query carga o
   // falla, la lista de ofertas (catálogo) sigue operativa y SOLO la columna del piso degrada (no toda la fila).
   bidFloor: BidFloorView | undefined;
+  // Tarifa base GLOBAL (F2.4) — SOLO para el placeholder de los params por-servicio (muestra el número que
+  // se usaría si el campo queda vacío). POSIBLEMENTE undefined (su query carga/falla): el placeholder cae a
+  // "global" y la edición de params sigue operativa (el valor real lo resuelve el server igual).
+  baseFare: BaseFareView | undefined;
   /** Reintenta SOLO la query del bid-floor (la del catálogo tiene su propio retry en el AsyncSection padre). */
   onRetryBidFloor: () => void;
 }) {
@@ -206,15 +214,6 @@ export function CatalogPanel({
                 Multiplicador
               </th>
               <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Banderazo
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Por km
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Por min
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
                 Tarifa mínima
               </th>
               <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
@@ -235,6 +234,7 @@ export function CatalogPanel({
                 key={`${o.id}:${bidFloor ? 'floor' : 'no-floor'}`}
                 offering={o}
                 override={overrideOf(o.id)}
+                baseFare={baseFare}
                 floor={
                   bidFloor
                     ? {
@@ -323,6 +323,7 @@ function RateCell({
 function OfferingRow({
   offering,
   override,
+  baseFare,
   floor,
   canManage,
   canManageFloor,
@@ -335,6 +336,8 @@ function OfferingRow({
 }: {
   offering: CatalogOffering;
   override: CatalogOverride | undefined;
+  // Tarifa base GLOBAL (o undefined si su query no cargó) → placeholder de los params a medida.
+  baseFare: BaseFareView | undefined;
   // undefined = el bid-floor (config propia) no está disponible (loading o error) → la columna del piso degrada.
   floor: OfferingFloor | undefined;
   canManage: boolean;
@@ -367,6 +370,13 @@ function OfferingRow({
   const [floorSoles, setFloorSoles] = useState<string>(
     floorOverrideCents != null ? formatSolesInput(floorOverrideCents) : '',
   );
+  // ¿Esta oferta ya tiene ALGÚN param a medida? (banderazo/km/min). Marca el chip "a medida" y arranca la fila
+  // de detalle ABIERTA — si no tiene ninguno, el detalle empieza colapsado (la mayoría hereda el global).
+  const hasParamOverride =
+    override?.baseFareCents != null ||
+    override?.perKmCents != null ||
+    override?.perMinCents != null;
+  const [expanded, setExpanded] = useState<boolean>(hasParamOverride);
 
   // Modo EFECTIVO en vivo (ADR 023): si la oferta está LOCKED (verticales especiales: ambulancia/grúa/mecánico)
   // manda el modo fijo del server (el admin NO lo cambia); si no, el pin en draft, o el efectivo del server
@@ -403,6 +413,14 @@ function OfferingRow({
   const perMinInvalid =
     perMinCents !== undefined &&
     (!Number.isFinite(perMinCents) || perMinCents < 0 || perMinCents > MAX_PER_MIN_SOLES * 100);
+  const paramInvalid = baseFareInvalid || perKmInvalid || perMinInvalid;
+  // La fila de detalle (params a medida) está ABIERTA si el operador la expandió O si hay un param inválido
+  // (nunca escondas un error detrás del colapso). El chevron togglea `expanded`; el error la fuerza abierta.
+  const detailOpen = expanded || paramInvalid;
+  // Placeholder de un param: el valor GLOBAL real (lo que se usa si el campo queda vacío) o "global" si su
+  // query aún no cargó. Comunica el fallback SIN que el operador tenga que ir a la pantalla de tarifa base.
+  const globalPlaceholder = (cents: number | undefined): string =>
+    cents != null ? formatSolesInput(cents) : 'global';
 
   // Piso de puja: '' = null (sin override). Bounds 1..MAX (espejo del server, igual que el panel de Precios).
   // Sin bidFloor (`floor === undefined`) la columna degrada → no hay draft válido ni dirty (no se puede editar).
@@ -484,13 +502,33 @@ function OfferingRow({
   return (
     <>
       <tr className={cn('bg-surface', crossWarn ? '' : 'border-b border-border')}>
-        {/* Categoría: ícono en cuadrito + nombre legible. */}
-        <td className="py-2.5 pl-5 pr-3 align-middle">
-          <div className="flex items-center gap-2.5">
+        {/* Categoría: chevron (abre la tarifa a medida) + ícono en cuadrito + nombre legible + chip "a medida". */}
+        <td className="py-2.5 pl-3 pr-3 align-middle">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={detailOpen}
+              aria-label={`${detailOpen ? 'Ocultar' : 'Mostrar'} la tarifa a medida de ${offeringLabel(offering.id)}`}
+              className="flex size-6 shrink-0 items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              {detailOpen ? (
+                <ChevronDown className="size-4" aria-hidden />
+              ) : (
+                <ChevronRight className="size-4" aria-hidden />
+              )}
+            </button>
             <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-ink-muted">
               <Icon className="size-4" aria-hidden />
             </span>
-            <span className="text-sm font-semibold text-ink">{offeringLabel(offering.id)}</span>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-ink">{offeringLabel(offering.id)}</span>
+              {hasParamOverride ? (
+                <span className="text-[10px] font-medium uppercase tracking-wide text-brand">
+                  Tarifa a medida
+                </span>
+              ) : null}
+            </div>
           </div>
         </td>
 
@@ -531,57 +569,6 @@ function OfferingRow({
               onChange={(e) => setMultiplier(e.target.value)}
               disabled={!canManage}
               aria-label={`Multiplicador de ${offeringLabel(offering.id)}`}
-            />
-          </RateCell>
-        </td>
-
-        {/* Params por-servicio (ADR 023 §3): banderazo / por-km / por-min POR OFERTA. Vacío = usa el global de la
-            tarifa base (placeholder "global"). `0` válido (Mecánico plano perKm/perMin=0; Grúa sin per-min). */}
-        <td className="px-3 py-2.5 align-middle">
-          <RateCell unit="S/" error={baseFareInvalid ? `0–${MAX_BASE_FARE_SOLES}` : undefined}>
-            <RateInput
-              type="number"
-              inputMode="decimal"
-              step="0.10"
-              min="0"
-              max={MAX_BASE_FARE_SOLES}
-              placeholder="global"
-              value={baseFareSoles}
-              onChange={(e) => setBaseFareSoles(e.target.value)}
-              disabled={!canManage}
-              aria-label={`Banderazo de ${offeringLabel(offering.id)} (vacío = usa el global)`}
-            />
-          </RateCell>
-        </td>
-        <td className="px-3 py-2.5 align-middle">
-          <RateCell unit="S/·km" error={perKmInvalid ? `0–${MAX_PER_KM_SOLES}` : undefined}>
-            <RateInput
-              type="number"
-              inputMode="decimal"
-              step="0.10"
-              min="0"
-              max={MAX_PER_KM_SOLES}
-              placeholder="global"
-              value={perKmSoles}
-              onChange={(e) => setPerKmSoles(e.target.value)}
-              disabled={!canManage}
-              aria-label={`Precio por km de ${offeringLabel(offering.id)} (vacío = usa el global)`}
-            />
-          </RateCell>
-        </td>
-        <td className="px-3 py-2.5 align-middle">
-          <RateCell unit="S/·min" error={perMinInvalid ? `0–${MAX_PER_MIN_SOLES}` : undefined}>
-            <RateInput
-              type="number"
-              inputMode="decimal"
-              step="0.10"
-              min="0"
-              max={MAX_PER_MIN_SOLES}
-              placeholder="global"
-              value={perMinSoles}
-              onChange={(e) => setPerMinSoles(e.target.value)}
-              disabled={!canManage}
-              aria-label={`Precio por min de ${offeringLabel(offering.id)} (vacío = usa el global)`}
             />
           </RateCell>
         </td>
@@ -685,11 +672,81 @@ function OfferingRow({
         </td>
       </tr>
 
+      {/* Tarifa a medida (ADR 023 §3 · progressive disclosure): los params POR-SERVICIO (banderazo/km/min) viven
+          en una fila de detalle expandible — la mayoría de las ofertas hereda el global, así que la tabla queda
+          limpia y solo se abre cuando el operador quiere anular la fórmula para ESTE servicio. Placeholder en gris
+          = el valor GLOBAL real (vacío lo usa). `0` válido (Mecánico plano perKm/perMin=0; Grúa sin per-min). */}
+      {detailOpen ? (
+        <tr className="border-b border-border bg-surface-2/40">
+          <td colSpan={7} className="px-5 pb-4 pt-1">
+            <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+              <p className="w-full text-[11px] text-ink-subtle">
+                Tarifa a medida de{' '}
+                <span className="font-medium text-ink-muted">{offeringLabel(offering.id)}</span> —
+                anulá la fórmula global solo para este servicio. Cada campo vacío usa el global (el
+                número en gris).
+              </p>
+              <div>
+                <p className="mb-1 text-[11px] font-medium text-ink-subtle">Banderazo</p>
+                <RateCell unit="S/" error={baseFareInvalid ? `0–${MAX_BASE_FARE_SOLES}` : undefined}>
+                  <RateInput
+                    type="number"
+                    inputMode="decimal"
+                    step="0.10"
+                    min="0"
+                    max={MAX_BASE_FARE_SOLES}
+                    placeholder={globalPlaceholder(baseFare?.baseFareCents)}
+                    value={baseFareSoles}
+                    onChange={(e) => setBaseFareSoles(e.target.value)}
+                    disabled={!canManage}
+                    aria-label={`Banderazo de ${offeringLabel(offering.id)} (vacío = usa el global)`}
+                  />
+                </RateCell>
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] font-medium text-ink-subtle">Por km</p>
+                <RateCell unit="S/·km" error={perKmInvalid ? `0–${MAX_PER_KM_SOLES}` : undefined}>
+                  <RateInput
+                    type="number"
+                    inputMode="decimal"
+                    step="0.10"
+                    min="0"
+                    max={MAX_PER_KM_SOLES}
+                    placeholder={globalPlaceholder(baseFare?.perKmCents)}
+                    value={perKmSoles}
+                    onChange={(e) => setPerKmSoles(e.target.value)}
+                    disabled={!canManage}
+                    aria-label={`Precio por km de ${offeringLabel(offering.id)} (vacío = usa el global)`}
+                  />
+                </RateCell>
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] font-medium text-ink-subtle">Por min</p>
+                <RateCell unit="S/·min" error={perMinInvalid ? `0–${MAX_PER_MIN_SOLES}` : undefined}>
+                  <RateInput
+                    type="number"
+                    inputMode="decimal"
+                    step="0.10"
+                    min="0"
+                    max={MAX_PER_MIN_SOLES}
+                    placeholder={globalPlaceholder(baseFare?.perMinCents)}
+                    value={perMinSoles}
+                    onChange={(e) => setPerMinSoles(e.target.value)}
+                    disabled={!canManage}
+                    aria-label={`Precio por min de ${offeringLabel(offering.id)} (vacío = usa el global)`}
+                  />
+                </RateCell>
+              </div>
+            </div>
+          </td>
+        </tr>
+      ) : null}
+
       {/* Validación cruzada (A1): fila de aviso DEBAJO de la afectada, visible también en solo-lectura (es una
           incongruencia del DATO). */}
       {crossWarn ? (
         <tr className="border-b border-border bg-surface">
-          <td colSpan={10} className="px-5 pb-3">
+          <td colSpan={7} className="px-5 pb-3">
             <p className="flex items-start gap-1.5 text-xs text-warn">
               <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
               <span>
