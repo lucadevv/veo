@@ -22,6 +22,23 @@
     "trips": "Viajes",
     "account": "Cuenta"
   },
+  "notifications": {
+    "title": "Notificaciones",
+    "open": "Ver notificaciones",
+    "unread": "No leído",
+    "loadError": "No pudimos cargar tus avisos",
+    "emptyTitle": "No tienes notificaciones",
+    "emptyBody": "Aquí verás los avisos de tus viajes, pagos y tu cuenta.",
+    "end": "No hay más notificaciones.",
+    "time": {
+      "now": "Ahora",
+      "minutes_one": "hace {{count}} min",
+      "minutes_other": "hace {{count}} min",
+      "hours_one": "hace {{count}} h",
+      "hours_other": "hace {{count}} h",
+      "yesterday": "Ayer"
+    }
+  },
   "carpool": {
     "title": "Compartir",
     "subtitle": "Publicá viajes y elegí a tus pasajeros",

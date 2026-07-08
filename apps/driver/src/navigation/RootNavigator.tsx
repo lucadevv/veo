@@ -45,7 +45,7 @@ import {
   CarpoolTripBookingsScreen,
 } from '../features/carpool/presentation';
 import { RealtimeManager } from '../features/realtime/presentation';
-import { PushManager } from '../features/notifications/presentation';
+import { NotificationsScreen, PushManager } from '../features/notifications/presentation';
 import {
   IconAccount,
   IconCarpool,
@@ -242,6 +242,11 @@ export const RootNavigator = (): React.JSX.Element => {
         <Stack.Screen name="Documents" component={DocumentsScreen} />
         <Stack.Screen name="Vehicles" component={VehiclesScreen} />
         <Stack.Screen name="Incentives" component={IncentivesScreen} />
+        <Stack.Screen
+          name="Notifications"
+          component={NotificationsScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
         <Stack.Screen name="Support" component={SupportScreen} />
         <Stack.Screen
           name="TripIncoming"

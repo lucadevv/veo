@@ -667,6 +667,27 @@ export function IconScan(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Campana (notificaciones / avisos): cuerpo + badajo. */
+export function IconBell(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 9a6 6 0 0 1 12 0c0 4 1 5.5 2 6.5H4c1-1 2-2.5 2-6.5Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M10 18.5a2 2 0 0 0 4 0"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 /** Rostro escaneado (KYC / biometría): corchetes de esquina + cara mínima (círculo + arco de sonrisa). */
 export function IconFace(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);

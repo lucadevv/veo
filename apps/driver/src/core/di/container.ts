@@ -39,6 +39,8 @@ import type { OpsRepository } from '../../features/ops/domain';
 import { HttpOpsRepository } from '../../features/ops/data';
 import type { SupportRepository } from '../../features/support/domain';
 import { HttpSupportRepository } from '../../features/support/data';
+import type { NotificationsRepository } from '../../features/notifications/domain';
+import { HttpNotificationsRepository } from '../../features/notifications/data';
 
 /**
  * Repositorios registrados, tipados por su INTERFAZ de dominio (no por la implementación).
@@ -58,6 +60,7 @@ export interface AppRepositories {
   chat: ChatRepository;
   ops: OpsRepository;
   support: SupportRepository;
+  notifications: NotificationsRepository;
 }
 
 /** Contenedor de inyección de dependencias de la app (service locator manual, tipado y ligero). */
@@ -128,6 +131,7 @@ function buildContainer(): AppContainer {
     chat: new HttpChatRepository(httpClient),
     ops: new HttpOpsRepository(httpClient),
     support: new HttpSupportRepository(httpClient),
+    notifications: new HttpNotificationsRepository(httpClient),
   };
 
   return {

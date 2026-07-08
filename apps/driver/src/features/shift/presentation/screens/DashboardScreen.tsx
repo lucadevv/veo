@@ -13,6 +13,7 @@ import {
   BottomSheet,
   Button,
   Card,
+  IconButton,
   MapShell,
   SafeScreen,
   Skeleton,
@@ -23,7 +24,7 @@ import {
 } from '@veo/ui-kit';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
-import { IconFlame, IconPower } from '../../../../shared/presentation/icons';
+import { IconBell, IconFlame, IconPower } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
@@ -46,6 +47,7 @@ import {
 } from '../../domain';
 import { useEndShift, usePauseShift, useShiftState } from '../hooks/useShift';
 import { useActiveVehicle } from '../../../registration/presentation';
+import { useUnreadNotificationsCount } from '../../../notifications/presentation';
 import { VehicleTypeSelector } from '../components/VehicleTypeSelector';
 import { Appear, PressableScale, Pulse } from '../components/motion';
 
@@ -114,6 +116,8 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const lastTip = useTipStore((s) => s.lastTip);
   const clearTip = useTipStore((s) => s.clearTip);
   const activeVehicle = useActiveVehicle();
+  // Avisos no leídos: enciende el punto de la campana del header (entrada al feed de notificaciones).
+  const unreadCount = useUnreadNotificationsCount();
   const [endConfirm, setEndConfirm] = useState(false);
   // Toggle "Zonas de demanda": pinta el mapa de calor sobre el mapa para orientar al conductor.
   const [demandOn, setDemandOn] = useState(false);
@@ -204,6 +208,23 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       </PressableScale>
       <View style={styles.topRight}>
+        {/* Campana → feed de avisos (Notifications). Punto rojo cuando hay no-leídos. */}
+        <View style={styles.bellWrap}>
+          <IconButton
+            accessibilityLabel={t('notifications.open')}
+            variant="surface"
+            onPress={() => navigation.navigate('Notifications')}
+            icon={<IconBell size={20} color={theme.colors.ink} strokeWidth={2} />}
+          />
+          {unreadCount > 0 ? (
+            <View
+              style={[
+                styles.bellDot,
+                { backgroundColor: theme.colors.danger, borderColor: theme.colors.surface },
+              ]}
+            />
+          ) : null}
+        </View>
         <StatusPill label={pill.label} tone={pill.tone} live={pill.live} dot />
         {/* Indicador del vehículo ACTIVO (server-authoritative): con qué vehículo opera, que es lo que el
             dispatch usa para ofrecerle viajes. Solo EN TURNO: fuera de turno el vehículo no es relevante y
@@ -546,6 +567,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   topRight: { alignItems: 'flex-end', gap: 8 },
+  bellWrap: { position: 'relative' },
+  bellDot: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+  },
   demandToggle: {
     flexDirection: 'row',
     alignItems: 'center',

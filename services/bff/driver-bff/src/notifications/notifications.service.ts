@@ -12,7 +12,9 @@ export class NotificationsService {
   constructor(private readonly rest: RestGateway) {}
 
   listMine(identity: AuthenticatedUser, limit?: number): Promise<unknown> {
-    return this.rest.client('notification').get('/notifications', {
+    // Bandeja RENDERIZADA (título+cuerpo por i18n), igual que el pasajero — NO el listado operacional
+    // crudo (/notifications, template keys). recipientId = userId del JWT, JAMÁS del cliente (anti-IDOR).
+    return this.rest.client('notification').get('/notifications/inbox', {
       identity,
       query: { recipientId: identity.userId, limit },
     });
