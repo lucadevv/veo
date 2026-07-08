@@ -1,17 +1,15 @@
 /**
- * Helper para hablar con el endpoint INTERNO del schedule de modo de pricing de trip-service
- * (ADR 011 §3/§6) SIN levantar admin-bff. trip-service protege esas rutas con InternalIdentityGuard
- * (firma HMAC del header `x-veo-identity` + `x-veo-identity-sig`) y, para el PUT, AdminIdentityGuard
- * (la identidad firmada debe ser `type === 'admin'`).
+ * Helper E2E para la PALANCA MANUAL del modo de pricing (ADR 023). El modo YA NO vive en un schedule de
+ * franjas horarias (ADR 011 superseded · el schedule se BORRÓ de trip-service en Fase A/A2): ahora vive
+ * POR OFERTA en el overlay del catálogo (`effectiveOfferingMode`). Hablamos DIRECTO con el endpoint interno
+ * del catálogo de trip-service (GET/PUT `/api/v1/internal/catalog`) SIN levantar admin-bff, firmando una
+ * identidad admin (HMAC `x-veo-identity`) — un "admin-bff de una línea".
  *
- * Replicamos EXACTAMENTE lo que hace un BFF: serializamos la identidad a base64url, la firmamos con
- * HMAC-SHA256 usando el INTERNAL_IDENTITY_SECRET compartido (el MISMO que el harness inyecta a todos
- * los procesos en config.ts → commonEnv), y lo mandamos en los headers. Es un "admin-bff de una línea":
- * en prod admin-bff valida el JWT + RBAC `pricing:manage`; acá inyectamos directo la identidad admin
- * firmada, que es justo lo que trip-service confía (decisión: validación en el borde/BFF).
+ * trip-service protege esas rutas con InternalIdentityGuard (firma HMAC del header `x-veo-identity` +
+ * `x-veo-identity-sig`) y, para el PUT, AdminIdentityGuard (la identidad firmada debe ser `type === 'admin'`).
  *
- * NO mockea dominio: el PUT corre la lógica REAL de PricingScheduleService (persiste la fila +
- * bump version + emite pricing.mode_schedule_updated), y el resolver real (resolveMode) decide el modo.
+ * NO mockea dominio: el PUT corre la lógica REAL de CatalogService (persiste el overlay + bump version +
+ * emite `catalog.updated` por outbox), y el quote/createTrip resuelven el modo desde ESE catálogo.
  */
 import { createHmac } from 'node:crypto';
 import { SECRETS, PORTS } from './config.js';
@@ -25,20 +23,25 @@ const TRIP_BASE = `http://localhost:${PORTS.trip}/api/v1`;
 /** Modo de pricing (espeja PricingMode de @veo/shared-types). */
 export type PricingMode = 'PUJA' | 'FIXED';
 
-/** Una regla horaria del schedule (hora local de Lima). */
-export interface PricingModeRule {
-  /** Bitmask Lun=1..Dom=64 (1..127). */
-  dayMask: number;
-  /** Minuto del día (0..1439) en hora local de Lima, inicio del rango [start,end). */
-  startMinute: number;
-  /** Minuto del día (0..1439), fin EXCLUSIVO del rango. */
-  endMinute: number;
-  mode: PricingMode;
+/** Override de UNA oferta del overlay del catálogo (ADR 013 §1.2 · ADR 023). */
+export interface OfferingOverride {
+  id: string;
+  enabled: boolean;
+  mode?: PricingMode;
+  multiplier?: number;
+  minFareCents?: number;
+  baseFareCents?: number;
+  perKmCents?: number;
+  perMinCents?: number;
 }
 
-export interface ModeSchedule {
-  defaultMode: PricingMode;
-  rules: PricingModeRule[];
+/** Vista del catálogo EFECTIVO (GET /internal/catalog): ofertas resueltas + overlay crudo + version. */
+export interface CatalogView {
+  version: number;
+  /** Ofertas EFECTIVAS (base ⟕ overlay). Tipamos solo el subconjunto que el helper lee. */
+  offerings: { id: string; enabled: boolean; mode: PricingMode }[];
+  /** Overlay CRUDO (lo que el admin tiene seteado explícitamente). */
+  overrides: OfferingOverride[];
 }
 
 /**
@@ -69,77 +72,54 @@ function adminHeaders(): Record<string, string> {
   };
 }
 
+/** GET /internal/catalog — el catálogo efectivo (ofertas + overlay crudo + version). */
+export async function getCatalog(): Promise<{ status: number; body: CatalogView | undefined }> {
+  const res = await fetch(`${TRIP_BASE}/internal/catalog`, {
+    method: 'GET',
+    headers: adminHeaders(),
+  });
+  const text = await res.text();
+  return { status: res.status, body: text ? (safeJson(text) as CatalogView) : undefined };
+}
+
 /**
- * PUT /internal/pricing/mode-schedule — REEMPLAZA wholesale el schedule (ADR 011 §6). Devuelve el
- * status HTTP y el body (la vista del schedule persistido, con version bumpeada). Lanza si !ok para
- * que el test vea el error real.
+ * PALANCA MANUAL del modo de UNA oferta (ADR 023 §1.1): PUT /internal/catalog wholesale con el `mode` pineado
+ * en la oferta objetivo, PRESERVANDO el resto del overlay (upsert que conserva enabled/precios de las demás y
+ * de la propia). Resuelve la version vigente para el CAS (fresh = 0). Lanza si !ok para que el test vea el error.
  */
-export async function putModeSchedule(
-  schedule: ModeSchedule,
+export async function setOfferingMode(
+  offeringId: string,
+  mode: PricingMode,
 ): Promise<{ status: number; body: unknown }> {
-  // CAS (optimistic locking): el DTO EXIGE `expectedVersion`. Resolvemos la version vigente (fresh = 0)
-  // y reemplazamos desde ahí → robusto para el primer write y para llamadas repetidas en la misma corrida.
-  const current = await getModeSchedule();
-  const expectedVersion = (current.body as { version?: number } | undefined)?.version ?? 0;
-  const res = await fetch(`${TRIP_BASE}/internal/pricing/mode-schedule`, {
+  const current = await getCatalog();
+  const version = current.body?.version ?? 0;
+  const existing = current.body?.overrides ?? [];
+  const prev = existing.find((o) => o.id === offeringId);
+  const overrides: OfferingOverride[] = [
+    ...existing.filter((o) => o.id !== offeringId),
+    { ...prev, id: offeringId, enabled: prev?.enabled ?? true, mode },
+  ];
+  const res = await fetch(`${TRIP_BASE}/internal/catalog`, {
     method: 'PUT',
     headers: adminHeaders(),
-    body: JSON.stringify({ ...schedule, expectedVersion }),
+    body: JSON.stringify({ overrides, expectedVersion: version }),
   });
   const text = await res.text();
   const body = text ? safeJson(text) : undefined;
   if (!res.ok) {
     throw new Error(
-      `PUT mode-schedule → ${res.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`,
+      `PUT /internal/catalog (${offeringId}→${mode}) → ${res.status}: ${
+        typeof body === 'string' ? body : JSON.stringify(body)
+      }`,
     );
   }
   return { status: res.status, body };
 }
 
-/** GET /internal/pricing/mode-schedule — el schedule vigente (o el default PUJA). */
-export async function getModeSchedule(): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(`${TRIP_BASE}/internal/pricing/mode-schedule`, {
-    method: 'GET',
-    headers: adminHeaders(),
-  });
-  const text = await res.text();
-  return { status: res.status, body: text ? safeJson(text) : undefined };
-}
-
-/** GET /internal/pricing/resolve?lat&lon — el modo { mode } para (lat,lon, AHORA). */
-export async function resolveMode(
-  lat: number,
-  lon: number,
-): Promise<{ status: number; mode?: string }> {
-  const url = new URL(`${TRIP_BASE}/internal/pricing/resolve`);
-  url.searchParams.set('lat', String(lat));
-  url.searchParams.set('lon', String(lon));
-  const res = await fetch(url, { method: 'GET', headers: adminHeaders() });
-  const text = await res.text();
-  const body = text ? safeJson(text) : undefined;
-  return { status: res.status, mode: (body as { mode?: string } | undefined)?.mode };
-}
-
-/**
- * Construye una regla que cubre el AHORA de Lima → `mode`, con un margen amplio alrededor del minuto
- * actual para que la prueba no curse en una frontera de minuto. dayMask = el día de hoy en Lima.
- * Si el rango se saliera del día (madrugada/medianoche), lo clampa a [0,1440) — el caller debe estar
- * lejos de los bordes para una ventana amplia; el clamp evita un rango inválido en horas extremas.
- */
-export function ruleCoveringNow(mode: PricingMode, marginMin = 120): PricingModeRule {
-  // Lima = UTC-5 fijo (sin DST). minuto del día y weekday local.
-  const LIMA_OFFSET_MIN = -300;
-  const limaMs = Date.now() + LIMA_OFFSET_MIN * 60_000;
-  const limaDate = new Date(limaMs);
-  // getUTC* sobre el instante ya desplazado nos da los componentes "locales de Lima".
-  const minuteOfDay = limaDate.getUTCHours() * 60 + limaDate.getUTCMinutes();
-  // getUTCDay: 0=Dom..6=Sáb → ISO Lun=1..Dom=7.
-  const jsDay = limaDate.getUTCDay();
-  const isoWeekday = jsDay === 0 ? 7 : jsDay;
-  const dayMask = 1 << (isoWeekday - 1);
-  const startMinute = Math.max(0, minuteOfDay - marginMin);
-  const endMinute = Math.min(1439, minuteOfDay + marginMin);
-  return { dayMask, startMinute, endMinute, mode };
+/** El modo EFECTIVO de una oferta en el catálogo vigente (aserción AUTORITATIVA del switch). */
+export async function offeringMode(offeringId: string): Promise<PricingMode | undefined> {
+  const { body } = await getCatalog();
+  return body?.offerings.find((o) => o.id === offeringId)?.mode;
 }
 
 function safeJson(text: string): unknown {

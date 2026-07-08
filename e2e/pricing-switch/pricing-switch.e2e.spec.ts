@@ -1,18 +1,22 @@
 /**
- * E2E CROSS-SERVICIO ORQUESTADO · "PUJA ↔ FIXED por schedule" de VEO (ADR 010 + ADR 011).
+ * E2E CROSS-SERVICIO ORQUESTADO · "PUJA ↔ FIXED por OFERTA" de VEO (ADR 010 + ADR 023).
  *
  * Reusa el MISMO harness del golden path (orchestrator, fixtures, http, events, driver-socket, auth):
  * levanta identity/trip/dispatch/payment/panic + public-bff/driver-bff contra el dev-stack y valida,
- * extremo a extremo y por HTTP/WS/Kafka REALES, el marketplace de pricing y el switch admin del modo.
+ * extremo a extremo y por HTTP/WS/Kafka REALES, el marketplace de pricing y la palanca admin del modo.
+ *
+ * ADR 023: el modo YA NO es un schedule de franjas (ADR 011 superseded · borrado de trip-service en A2).
+ * Es una palanca MANUAL POR OFERTA en el overlay del catálogo (PUT /internal/catalog). El switch de este
+ * suite ahora pinea el `mode` de la oferta ANCLA (veo_economico) — el `mode` top-level del quote sale de ahí.
  *
  * Cubre:
- *  A) FIXED por schedule — admin PUT /internal/pricing/mode-schedule (identidad admin firmada) con una
- *     regla que hace AHORA→FIXED. quote → mode==='FIXED' (sin bidFloorCents). createTrip SIN bid →
- *     trip REQUESTED, dispatchMode CONGELADO en FIXED, matching secuencial → oferta por socket → accept
- *     → dispatch.match_found → trip ASSIGNED, dispatchMode==='FIXED'. (driverA.)
- *  C) Persist-once — tras crear el viaje FIXED, se FLIPEA el schedule a PUJA; el viaje en vuelo
- *     CONSERVA su dispatchMode==='FIXED' (resolve-once-persist-forever, ADR 011 §1.2).
- *  B) PUJA por schedule — schedule AHORA→PUJA (default). quote → mode==='PUJA' + bidFloorCents.
+ *  A) FIXED por oferta — admin PUT /internal/catalog (identidad admin firmada) pineando la oferta ancla en
+ *     FIXED. quote → mode==='FIXED' (sin bidFloorCents). createTrip SIN bid → trip REQUESTED, dispatchMode
+ *     CONGELADO en FIXED, matching secuencial → oferta por socket → accept → dispatch.match_found → trip
+ *     ASSIGNED, dispatchMode==='FIXED'. (driverA.)
+ *  C) Persist-once — tras crear el viaje FIXED, se FLIPEA la oferta ancla a PUJA; el viaje en vuelo
+ *     CONSERVA su dispatchMode==='FIXED' (resolve-once-persist-forever, ADR 011 §1.2 · ADR 023).
+ *  B) PUJA por oferta — la oferta ancla queda en PUJA (flip de C). quote → mode==='PUJA' + bidFloorCents.
  *     createTrip CON bid → trip.bid_posted → un conductor elegible (online + gate biométrico) hace
  *     ACCEPT_PRICE → el pasajero lista ofertas → acepta → dispatch.offer_accepted + dispatch.match_found
  *     → trip ASSIGNED con fareCents == precio acordado, dispatchMode==='PUJA'. (driverB.)
@@ -42,13 +46,7 @@ import {
   injectOtp,
   getTripPricingRow,
 } from '../lib/fixtures.js';
-import {
-  getModeSchedule,
-  putModeSchedule,
-  resolveMode,
-  ruleCoveringNow,
-  type ModeSchedule,
-} from '../lib/pricing-admin.js';
+import { setOfferingMode, offeringMode } from '../lib/pricing-admin.js';
 import { pollUntil } from '../lib/wait.js';
 
 interface AuthTokens {
@@ -100,9 +98,9 @@ const DRIVER_A_PHONE = `9${run}44`.slice(0, 9).padEnd(9, '0');
 const DRIVER_B_PHONE = `9${run}55`.slice(0, 9).padEnd(9, '0');
 const OTP_CODE = '424242';
 
-// Schedules: AHORA→FIXED (regla del día/hora actual) y AHORA→PUJA (default PUJA sin reglas).
-const FIXED_NOW: ModeSchedule = { defaultMode: 'PUJA', rules: [ruleCoveringNow('FIXED')] };
-const PUJA_NOW: ModeSchedule = { defaultMode: 'PUJA', rules: [] };
+// La oferta ANCLA del quote (su modo efectivo es el `mode` top-level del QuoteResult) y la que crea el viaje
+// (`category: 'veo_economico'`). ADR 023: el modo se cambia POR OFERTA vía la palanca del catálogo, no por schedule.
+const ANCHOR_OFFERING = 'veo_economico';
 
 const gate = await checkStack();
 const orchestrator = new Orchestrator();
@@ -125,7 +123,7 @@ interface ReadyDriver {
 }
 
 (gate.ready ? describe : describe.skip)(
-  'VEO · PUJA↔FIXED por schedule E2E (cross-servicio orquestado)',
+  'VEO · PUJA↔FIXED por oferta E2E (cross-servicio orquestado)',
   () => {
     const passenger = new BffClient(BASE_URLS.publicBff);
 
@@ -225,17 +223,13 @@ interface ReadyDriver {
       await orchestrator.stop().catch(() => undefined);
     }, 60_000);
 
-    // ── A) FIXED por schedule ──────────────────────────────────────────────────────────────────────
+    // ── A) FIXED por oferta ────────────────────────────────────────────────────────────────────────
 
-    it('A1. admin fija el schedule AHORA→FIXED (PUT interno firmado) y resolve devuelve FIXED', async () => {
-      const put = await putModeSchedule(FIXED_NOW);
+    it('A1. admin pinea el modo de la oferta ancla a FIXED (PUT catálogo firmado) y el catálogo lo refleja', async () => {
+      const put = await setOfferingMode(ANCHOR_OFFERING, 'FIXED');
       expect(put.status).toBe(200);
-      const got = await getModeSchedule();
-      expect(got.status).toBe(200);
-      // Prueba AUTORITATIVA del switch: el resolver (lógica real) devuelve FIXED para AHORA.
-      const resolved = await resolveMode(ORIGIN.lat, ORIGIN.lon);
-      expect(resolved.status).toBe(200);
-      expect(resolved.mode).toBe('FIXED');
+      // Prueba AUTORITATIVA del switch: el catálogo efectivo (lógica real) resuelve FIXED para la oferta ancla.
+      expect(await offeringMode(ANCHOR_OFFERING)).toBe('FIXED');
     });
 
     it('A2. quote del pasajero devuelve mode FIXED (sin bidFloorCents)', async () => {
@@ -294,22 +288,21 @@ interface ReadyDriver {
 
     // ── C) Persist-once (sobre el viaje FIXED en vuelo) ──────────────────────────────────────────────
 
-    it('C1. flip schedule → PUJA NO cambia el dispatchMode del viaje FIXED en vuelo (persist-once)', async () => {
-      const put = await putModeSchedule(PUJA_NOW);
+    it('C1. flip del modo de la oferta ancla → PUJA NO cambia el dispatchMode del viaje FIXED en vuelo (persist-once)', async () => {
+      const put = await setOfferingMode(ANCHOR_OFFERING, 'PUJA');
       expect(put.status).toBe(200);
-      // El resolver YA devuelve PUJA para nuevos viajes…
-      const resolved = await resolveMode(ORIGIN.lat, ORIGIN.lon);
-      expect(resolved.mode).toBe('PUJA');
-      // …pero el viaje FIXED creado antes conserva su modo congelado (ADR 011 §1.2).
+      // El catálogo YA resuelve PUJA para nuevos viajes…
+      expect(await offeringMode(ANCHOR_OFFERING)).toBe('PUJA');
+      // …pero el viaje FIXED creado antes conserva su modo congelado (ADR 011 §1.2 · ADR 023).
       const row = await getTripPricingRow(fixedTripId);
       expect(row?.dispatchMode).toBe('FIXED');
     });
 
-    // ── B) PUJA por schedule ─────────────────────────────────────────────────────────────────────────
+    // ── B) PUJA por oferta ───────────────────────────────────────────────────────────────────────────
 
-    it('B1. con schedule PUJA (default), quote devuelve mode PUJA + bidFloorCents', async () => {
-      const resolved = await resolveMode(ORIGIN.lat, ORIGIN.lon);
-      expect(resolved.mode).toBe('PUJA');
+    it('B1. con la oferta ancla en PUJA, quote devuelve mode PUJA + bidFloorCents', async () => {
+      // Ancla ya en PUJA por C1: el catálogo lo confirma y el quote lo refleja.
+      expect(await offeringMode(ANCHOR_OFFERING)).toBe('PUJA');
 
       const quote = await passenger.post<QuoteResult>('/maps/quote', {
         origin: { lat: ORIGIN.lat, lng: ORIGIN.lon },

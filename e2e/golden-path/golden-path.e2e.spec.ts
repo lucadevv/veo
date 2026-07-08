@@ -31,7 +31,7 @@ import { BffClient } from '../lib/http.js';
 import { BASE_URLS } from '../lib/config.js';
 import { signPanic, uuidv7 } from '../lib/panic.js';
 import { approveDriverByUserId, clearDispatchHotIndex, injectOtp } from '../lib/fixtures.js';
-import { putModeSchedule, ruleCoveringNow } from '../lib/pricing-admin.js';
+import { setOfferingMode } from '../lib/pricing-admin.js';
 import { pollUntil } from '../lib/wait.js';
 
 // ── Tipos mínimos de las respuestas que consumimos de los BFFs ──
@@ -106,10 +106,10 @@ const collector = new EventCollector([
     await orchestrator.start();
     // Limpia conductores fantasma de corridas previas del hot index de dispatch (anti-flaky).
     await clearDispatchHotIndex();
-    // El default del sistema evolucionó a PUJA (marketplace "proponé tu precio"): sin schedule, una
-    // creación de viaje SIN bid se rechaza con "falta tu oferta {mode: PUJA}". El golden path valida el
-    // flujo FIXED (oferta directa → accept), así que congelamos FIXED-ahora vía el PUT admin firmado.
-    await putModeSchedule({ defaultMode: 'PUJA', rules: [ruleCoveringNow('FIXED')] });
+    // ADR 023: el modo es una palanca POR OFERTA (no un schedule). El golden path valida el flujo FIXED
+    // (oferta directa → accept), así que fijamos la oferta ancla (veo_economico) en FIXED por el PUT del
+    // catálogo admin firmado — determinista aunque una corrida previa la haya dejado en PUJA.
+    await setOfferingMode('veo_economico', 'FIXED');
     await collector.start();
   }, 600_000);
 

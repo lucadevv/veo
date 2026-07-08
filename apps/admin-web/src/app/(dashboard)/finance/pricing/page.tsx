@@ -1,14 +1,13 @@
 'use client';
 
 import { Lock, ShieldCheck } from 'lucide-react';
-import { useModeSchedule, useBaseFare, useCommission } from '@/lib/api/queries';
+import { useBaseFare, useCommission } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
 import { EmptyState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
-import { ModeSchedulePanel } from '@/components/pricing/mode-schedule-panel';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
 import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commission-panel';
 
@@ -37,7 +36,6 @@ function SectionHeader({ label, hint }: { label: string; hint: string }) {
  */
 export default function PricingPage() {
   const user = useSession();
-  const query = useModeSchedule();
   const baseFareQuery = useBaseFare();
   const commissionQuery = useCommission();
 
@@ -62,7 +60,7 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios on-demand"
-        description="El carril del viaje inmediato. Corre en DOS modos que coexisten — FIJO (tarifa calculada, estilo Uber) y PUJA (el pasajero ofrece su precio, estilo inDrive). Acá va la config global: tarifa base, comisión y el modo por horario. El piso de la puja se configura por servicio en Ofertas de servicio."
+        description="El carril del viaje inmediato. Corre en DOS modos que coexisten — FIJO (tarifa calculada, estilo Uber) y PUJA (el pasajero ofrece su precio, estilo inDrive). Acá va la config global de la fórmula: tarifa base y comisión. El modo (FIJO/PUJA) y el piso de la puja se configuran por servicio en Ofertas de servicio."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
@@ -80,14 +78,9 @@ export default function PricingPage() {
           </div>
         </div>
 
-        {/* El orden cuenta la historia (veo.pen): el MODO arriba (el selector), después las piezas agrupadas por
-            lo que hacen — la fórmula (compartida), el piso (solo puja) y la comisión (transversal). */}
+        {/* El orden cuenta la historia (veo.pen): la FÓRMULA (compartida) y después la comisión (transversal).
+            El MODO (FIJO/PUJA) ya no vive acá — con ADR-023 es una palanca per-oferta en Ofertas de servicio. */}
         <div className="mt-5 space-y-5">
-          {/* EL SELECTOR: qué modo corre (PUJA↔FIJO) por franja horaria — resolve-once por viaje. */}
-          <AsyncSection query={query} skeleton={<Skeleton className="h-64" />}>
-            {(data) => <ModeSchedulePanel schedule={data} />}
-          </AsyncSection>
-
           {/* La FÓRMULA es UNA sola: el precio exacto en FIJO y el sugerido que ve el pasajero en PUJA. */}
           <SectionHeader
             label="Fórmula de tarifa"

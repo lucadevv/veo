@@ -27,7 +27,6 @@ import {
   liveViewerToken,
   mediaAccessRequestView,
   catalogView,
-  modeScheduleView,
   baseFareView,
   commissionView,
   costPerKmConfigView,
@@ -52,7 +51,6 @@ import {
   reviewQueueSummary,
   panicDetail,
   type ReplaceCatalogRequest,
-  type ReplaceScheduleRequest,
   panicSummary,
   payoutView,
   runPayoutsResult,
@@ -93,7 +91,6 @@ export const qk = {
   reconciliation: ['reconciliation'] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
-  modeSchedule: ['mode-schedule'] as const,
   baseFare: ['base-fare'] as const,
   commission: ['commission'] as const,
   costPerKm: ['cost-per-km'] as const,
@@ -870,29 +867,6 @@ export function usePayoutDetail(payoutId: string | null) {
     queryFn: ({ signal }) =>
       apiClient().get(`/finance/payouts/${payoutId}`, { schema: payoutDetailView, signal }),
     enabled: !!payoutId,
-  });
-}
-
-/* ── Pricing: modo de despacho PUJA↔FIJO (schedule global · ADR 011 · ADMIN/SUPERADMIN/FINANCE) ── */
-export function useModeSchedule() {
-  return useQuery({
-    queryKey: qk.modeSchedule,
-    queryFn: ({ signal }) =>
-      apiClient().get('/pricing/mode-schedule', { schema: modeScheduleView, signal }),
-  });
-}
-
-export function useReplaceSchedule() {
-  const qc = useQueryClient();
-  return useMutation({
-    // PUT reemplaza el schedule wholesale (default + reglas). El admin-bff revalida
-    // `@Roles(ADMIN, SUPERADMIN, FINANCE)` y trip-service re-firma server-side: la UI solo refleja.
-    mutationFn: (input: ReplaceScheduleRequest) =>
-      apiClient().put('/pricing/mode-schedule', { body: input, schema: modeScheduleView }),
-    // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: qk.modeSchedule });
-    },
   });
 }
 

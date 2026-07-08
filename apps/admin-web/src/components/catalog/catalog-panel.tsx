@@ -48,6 +48,14 @@ const MODE_LABEL: Record<PricingMode, string> = { PUJA: 'Puja', FIXED: 'Precio f
 // el valor vive acá como literal documentado. trip-service y el admin-bff RE-validan server-side.
 const MULTIPLIER_MAX_UI = 10;
 
+// Topes de cordura de los params POR-OFERTA (ADR 023 §3), en SOLES: ESPEJO de los caps del override en el
+// contrato (@veo/api-client: baseFareCents≤20000, perKmCents≤5000, perMinCents≤2000 céntimos) y de la tarifa
+// base GLOBAL (base-fare-panel). El admin los edita en soles; se persisten Int en céntimos. `0` es válido
+// (Mecánico call-out plano perKm/perMin=0; Grúa sin per-min). trip-service RE-valida server-side.
+const MAX_BASE_FARE_SOLES = 200;
+const MAX_PER_KM_SOLES = 50;
+const MAX_PER_MIN_SOLES = 20;
+
 /**
  * Ícono de la oferta, DERIVADO del dominio (vertical + clase de vehículo), nunca del `id` mágico: las
  * verticales especiales (ambulancia/grúa/mecánico) llevan su ícono; entre las RIDE, MOTO → bici, CAR → auto.
@@ -131,9 +139,18 @@ export function CatalogPanel({
     );
 
   async function setEnabled(id: string, enabled: boolean) {
-    const ov = overrideOf(id); // preserva modo/precio al togglear
+    const ov = overrideOf(id); // preserva modo/precio/params por-servicio al togglear
     await commit(
-      { id, enabled, mode: ov?.mode, multiplier: ov?.multiplier, minFareCents: ov?.minFareCents },
+      {
+        id,
+        enabled,
+        mode: ov?.mode,
+        multiplier: ov?.multiplier,
+        minFareCents: ov?.minFareCents,
+        baseFareCents: ov?.baseFareCents,
+        perKmCents: ov?.perKmCents,
+        perMinCents: ov?.perMinCents,
+      },
       `${offeringLabel(id)} ${enabled ? 'habilitada' : 'deshabilitada'}`,
     );
   }
@@ -175,7 +192,7 @@ export function CatalogPanel({
         </p>
       ) : null}
 
-      <div className="overflow-hidden rounded-lg border border-border">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full border-collapse">
           <thead className="bg-surface-2">
             <tr className="border-b border-border">
@@ -187,6 +204,15 @@ export function CatalogPanel({
               </th>
               <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
                 Multiplicador
+              </th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Banderazo
+              </th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Por km
+              </th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
+                Por min
               </th>
               <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
                 Tarifa mínima
@@ -327,15 +353,30 @@ function OfferingRow({
   const [minFareSoles, setMinFareSoles] = useState<string>(
     override?.minFareCents != null ? formatSolesInput(override.minFareCents) : '',
   );
+  // ADR 023 §3 · params POR-SERVICIO (banderazo/km/min por OFERTA). '' = sin override → cae al global. En SOLES.
+  const [baseFareSoles, setBaseFareSoles] = useState<string>(
+    override?.baseFareCents != null ? formatSolesInput(override.baseFareCents) : '',
+  );
+  const [perKmSoles, setPerKmSoles] = useState<string>(
+    override?.perKmCents != null ? formatSolesInput(override.perKmCents) : '',
+  );
+  const [perMinSoles, setPerMinSoles] = useState<string>(
+    override?.perMinCents != null ? formatSolesInput(override.perMinCents) : '',
+  );
   // Piso de la PUJA: '' = sin override (usa el default), igual que en el panel de Precios.
   const [floorSoles, setFloorSoles] = useState<string>(
     floorOverrideCents != null ? formatSolesInput(floorOverrideCents) : '',
   );
 
-  // ¿Esta oferta puja? Las FIXED-only (ambulancia/grúa/mecánico) NO llevan piso de puja.
-  const allowsPuja = offering.allowedModes.includes(PricingMode.PUJA);
-  // Modo ÚNICO: si la oferta permite un solo modo, no hay elección real → label, no un selector falso.
-  const soleMode = offering.allowedModes.length === 1 ? offering.allowedModes[0] : undefined;
+  // Modo EFECTIVO en vivo (ADR 023): si la oferta está LOCKED (verticales especiales: ambulancia/grúa/mecánico)
+  // manda el modo fijo del server (el admin NO lo cambia); si no, el pin en draft, o el efectivo del server
+  // cuando el admin no pinó (AUTO). La puja —y por ende su piso— solo tiene sentido en modo PUJA.
+  const effectiveMode: PricingMode = offering.modeLocked
+    ? offering.mode
+    : mode === AUTO
+      ? offering.mode
+      : (mode as PricingMode);
+  const allowsPuja = effectiveMode === PricingMode.PUJA;
 
   // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
   const multNum = multiplier.trim() === '' ? undefined : Number(multiplier);
@@ -347,6 +388,21 @@ function OfferingRow({
     (!Number.isFinite(multNum) || multNum <= 0 || multNum > MULTIPLIER_MAX_UI);
   const minFareInvalid =
     minFareCents !== undefined && (!Number.isFinite(minFareCents) || minFareCents < 0);
+
+  // Params por-servicio: '' → undefined (cae al global). `0` es válido. Tope espejo del contrato (en céntimos).
+  const baseFareCents =
+    baseFareSoles.trim() === '' ? undefined : solesToCents(Number(baseFareSoles));
+  const perKmCents = perKmSoles.trim() === '' ? undefined : solesToCents(Number(perKmSoles));
+  const perMinCents = perMinSoles.trim() === '' ? undefined : solesToCents(Number(perMinSoles));
+  const baseFareInvalid =
+    baseFareCents !== undefined &&
+    (!Number.isFinite(baseFareCents) || baseFareCents < 0 || baseFareCents > MAX_BASE_FARE_SOLES * 100);
+  const perKmInvalid =
+    perKmCents !== undefined &&
+    (!Number.isFinite(perKmCents) || perKmCents < 0 || perKmCents > MAX_PER_KM_SOLES * 100);
+  const perMinInvalid =
+    perMinCents !== undefined &&
+    (!Number.isFinite(perMinCents) || perMinCents < 0 || perMinCents > MAX_PER_MIN_SOLES * 100);
 
   // Piso de puja: '' = null (sin override). Bounds 1..MAX (espejo del server, igual que el panel de Precios).
   // Sin bidFloor (`floor === undefined`) la columna degrada → no hay draft válido ni dirty (no se puede editar).
@@ -365,7 +421,10 @@ function OfferingRow({
   const dirty =
     (mode || AUTO) !== (override?.mode ?? AUTO) ||
     (multNum ?? null) !== (override?.multiplier ?? null) ||
-    (minFareCents ?? null) !== (override?.minFareCents ?? null);
+    (minFareCents ?? null) !== (override?.minFareCents ?? null) ||
+    (baseFareCents ?? null) !== (override?.baseFareCents ?? null) ||
+    (perKmCents ?? null) !== (override?.perKmCents ?? null) ||
+    (perMinCents ?? null) !== (override?.perMinCents ?? null);
 
   // Validación cruzada: comparo los mínimos EFECTIVOS (draft válido si lo hay, si no el persistido). El piso
   // efectivo = override ?? default; la tarifa fija efectiva = draft ?? la del catálogo (`pricing` ya es efectivo).
@@ -405,6 +464,9 @@ function OfferingRow({
         mode: (mode as PricingMode) || undefined,
         multiplier: multNum,
         minFareCents,
+        baseFareCents,
+        perKmCents,
+        perMinCents,
       });
       if (!ok) return;
     }
@@ -432,11 +494,14 @@ function OfferingRow({
           </div>
         </td>
 
-        {/* Modo: si la oferta permite UN solo modo (ej. Ambulancia = solo fijo) no hay elección real → label,
-            no un dropdown falso. Con ≥2 modos, el select ("Auto" = usa el schedule global de On-demand). */}
+        {/* Modo (ADR 023): si la oferta está LOCKED (verticales especiales — "la ambulancia NO negocia") el modo lo
+            fija la vertical → label read-only, no un dropdown falso. Si no, el select FIJO↔PUJA ("Por defecto" = sin
+            pin, cae al modo por defecto de la oferta). COST_SHARE es booking-service (Fase B), no va en on-demand. */}
         <td className="px-3 py-2.5 align-middle">
-          {soleMode ? (
-            <span className="text-sm text-ink-muted">{MODE_LABEL[soleMode]}</span>
+          {offering.modeLocked ? (
+            <span className="text-sm text-ink-muted" title="Fijo por la vertical del servicio">
+              {MODE_LABEL[offering.mode]}
+            </span>
           ) : (
             <select
               value={mode}
@@ -445,12 +510,9 @@ function OfferingRow({
               aria-label={`Modo de ${offeringLabel(offering.id)}`}
               className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
             >
-              <option value={AUTO}>Auto</option>
-              {offering.allowedModes.map((m) => (
-                <option key={m} value={m}>
-                  {MODE_LABEL[m]}
-                </option>
-              ))}
+              <option value={AUTO}>Por defecto</option>
+              <option value={PricingMode.FIXED}>{MODE_LABEL[PricingMode.FIXED]}</option>
+              <option value={PricingMode.PUJA}>{MODE_LABEL[PricingMode.PUJA]}</option>
             </select>
           )}
         </td>
@@ -469,6 +531,57 @@ function OfferingRow({
               onChange={(e) => setMultiplier(e.target.value)}
               disabled={!canManage}
               aria-label={`Multiplicador de ${offeringLabel(offering.id)}`}
+            />
+          </RateCell>
+        </td>
+
+        {/* Params por-servicio (ADR 023 §3): banderazo / por-km / por-min POR OFERTA. Vacío = usa el global de la
+            tarifa base (placeholder "global"). `0` válido (Mecánico plano perKm/perMin=0; Grúa sin per-min). */}
+        <td className="px-3 py-2.5 align-middle">
+          <RateCell unit="S/" error={baseFareInvalid ? `0–${MAX_BASE_FARE_SOLES}` : undefined}>
+            <RateInput
+              type="number"
+              inputMode="decimal"
+              step="0.10"
+              min="0"
+              max={MAX_BASE_FARE_SOLES}
+              placeholder="global"
+              value={baseFareSoles}
+              onChange={(e) => setBaseFareSoles(e.target.value)}
+              disabled={!canManage}
+              aria-label={`Banderazo de ${offeringLabel(offering.id)} (vacío = usa el global)`}
+            />
+          </RateCell>
+        </td>
+        <td className="px-3 py-2.5 align-middle">
+          <RateCell unit="S/·km" error={perKmInvalid ? `0–${MAX_PER_KM_SOLES}` : undefined}>
+            <RateInput
+              type="number"
+              inputMode="decimal"
+              step="0.10"
+              min="0"
+              max={MAX_PER_KM_SOLES}
+              placeholder="global"
+              value={perKmSoles}
+              onChange={(e) => setPerKmSoles(e.target.value)}
+              disabled={!canManage}
+              aria-label={`Precio por km de ${offeringLabel(offering.id)} (vacío = usa el global)`}
+            />
+          </RateCell>
+        </td>
+        <td className="px-3 py-2.5 align-middle">
+          <RateCell unit="S/·min" error={perMinInvalid ? `0–${MAX_PER_MIN_SOLES}` : undefined}>
+            <RateInput
+              type="number"
+              inputMode="decimal"
+              step="0.10"
+              min="0"
+              max={MAX_PER_MIN_SOLES}
+              placeholder="global"
+              value={perMinSoles}
+              onChange={(e) => setPerMinSoles(e.target.value)}
+              disabled={!canManage}
+              aria-label={`Precio por min de ${offeringLabel(offering.id)} (vacío = usa el global)`}
             />
           </RateCell>
         </td>
@@ -554,7 +667,14 @@ function OfferingRow({
             <SaveAction
               canManage={canManage}
               dirty={dirty || (allowsPuja && floorDirty)}
-              invalid={multInvalid || minFareInvalid || (allowsPuja && floorInvalid)}
+              invalid={
+                multInvalid ||
+                minFareInvalid ||
+                baseFareInvalid ||
+                perKmInvalid ||
+                perMinInvalid ||
+                (allowsPuja && floorInvalid)
+              }
               saving={pending || pendingFloor}
               onSave={saveRow}
               title={`Guardar ${offeringLabel(offering.id)}`}
@@ -569,7 +689,7 @@ function OfferingRow({
           incongruencia del DATO). */}
       {crossWarn ? (
         <tr className="border-b border-border bg-surface">
-          <td colSpan={7} className="px-5 pb-3">
+          <td colSpan={10} className="px-5 pb-3">
             <p className="flex items-start gap-1.5 text-xs text-warn">
               <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
               <span>
