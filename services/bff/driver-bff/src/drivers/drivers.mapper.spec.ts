@@ -89,6 +89,19 @@ const aggregate: AggregateReply = {
 };
 
 describe('buildDriverProfile', () => {
+  it('proyecta la foto de perfil (avatar) del user; null cuando el user no trae foto', () => {
+    const withPhoto = buildDriverProfile(
+      driver,
+      { ...user, photoUrl: 'https://cdn.veo.pe/veo-avatars/avatars/usr-1/avatar.jpg' },
+      aggregate,
+      docsWith([]),
+    );
+    expect(withPhoto.photoUrl).toBe('https://cdn.veo.pe/veo-avatars/avatars/usr-1/avatar.jpg');
+
+    // proto3 default "" (o user no hallado) → null honesto para el fallback a iniciales.
+    expect(buildDriverProfile(driver, user, aggregate, docsWith([])).photoUrl).toBeNull();
+  });
+
   it('REQUIRED_DRIVER_DOCS = solo los docs que sube el conductor (licencia, SOAT, tarjeta)', () => {
     // BACKGROUND_CHECK (eje identity) e ITV (doc del vehículo) NO son docs del alta del conductor.
     expect(REQUIRED_DRIVER_DOCS).toEqual([

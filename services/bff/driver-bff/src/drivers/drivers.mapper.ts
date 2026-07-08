@@ -338,6 +338,10 @@ export function buildDriverProfile(
     fullName: emptyToNull(driver.name),
     phone: user.found ? user.phone : '',
     kycStatus: user.found ? user.kycStatus : '',
+    // Foto de perfil (avatar): publicUrl del media-service persistida en identity `User.photoUrl`. gRPC
+    // proto3 entrega "" si no hay foto (o si el user no se halló) → null honesto para la app (fallback a
+    // iniciales). Espejo del pasajero, que la lee del REST `ProfileView.photoUrl`.
+    photoUrl: user.found ? emptyToNull(user.photoUrl ?? '') : null,
     currentStatus: driver.currentStatus,
     backgroundCheckStatus: driver.backgroundCheckStatus,
     // Wire gRPC entrega "" si no hay rechazo (proto3 defaults); lo normalizamos a null para la app.

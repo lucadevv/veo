@@ -40,6 +40,8 @@ export type RootStackParamList = {
    */
   ShiftSummary: { shiftStartedAt: number | null };
   BiometricEnroll: undefined;
+  /** Editar perfil del conductor (frame C/Editar-Perfil): datos de contacto + foto. */
+  EditProfile: undefined;
   Documents: undefined;
   Incentives: undefined;
   /** Centro de avisos (feed in-app): bandeja de notificaciones del conductor. */

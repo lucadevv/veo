@@ -556,6 +556,8 @@ export interface DriverProfileView {
   fullName: string | null;
   phone: string;
   kycStatus: string;
+  /** Foto de perfil (avatar) del conductor · publicUrl del media-service; `null` si no tiene (fallback a iniciales). */
+  photoUrl: string | null;
   currentStatus: string;
   backgroundCheckStatus: string;
   /** Motivo del último rechazo de antecedentes; null si no está rechazado o no se dio motivo. */

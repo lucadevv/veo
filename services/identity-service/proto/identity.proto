@@ -58,6 +58,9 @@ message UserReply {
   bool found = 6;
   // Nombre visible del usuario. Opcional ("" si no fue registrado). Añadido sin romper compatibilidad.
   string name = 7;
+  // Foto de perfil (avatar) del usuario · publicUrl del media-service. "" si no tiene. Sincronizado con
+  // el proto compartido (packages/rpc/proto): el driver-bff lee el avatar del conductor por GetUser.
+  string photo_url = 8;
 }
 
 message DriverReply {

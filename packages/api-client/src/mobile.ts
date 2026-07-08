@@ -2074,6 +2074,8 @@ export const driverProfileView = z.object({
   fullName: z.string().nullable().optional(),
   phone: z.string(),
   kycStatus: z.string(),
+  /** Foto de perfil (avatar); `null` si no tiene, ausente si el bff es viejo (backward-compat → fallback a iniciales). */
+  photoUrl: z.string().url().nullable().optional(),
   currentStatus: z.string(),
   backgroundCheckStatus: z.string(),
   /**

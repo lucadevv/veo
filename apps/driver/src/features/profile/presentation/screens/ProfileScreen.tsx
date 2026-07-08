@@ -22,6 +22,7 @@ import { StateView } from '../../../../shared/presentation/components/StateView'
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPersonName } from '../../../../shared/presentation/format';
 import {
+  IconAccount,
   IconClock,
   IconDocument,
   IconGift,
@@ -75,6 +76,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           <Reveal delay={40}>
             <ProfileIdentityCard
               name={formatPersonName(data.fullName) ?? data.phone}
+              photoUrl={data.photoUrl}
               verified={data.kycStatus === KYC_VERIFIED}
               online={data.currentStatus === DriverStatus.AVAILABLE}
               ratingValue={data.averageRating.toFixed(1)}
@@ -176,6 +178,12 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           {/* Accesos rápidos: documentos + biometría (stack) + tabs Ganancias/Viajes. */}
           <Reveal delay={200}>
             <Card padding="sm">
+              <ProfileLinkRow
+                icon={<IconAccount size={20} color={theme.colors.inkMuted} />}
+                label={t('profile.edit.entry')}
+                onPress={() => navigation.navigate('EditProfile')}
+                showDivider
+              />
               <ProfileLinkRow
                 icon={<IconDocument size={20} color={theme.colors.inkMuted} />}
                 label={t('documents.title')}

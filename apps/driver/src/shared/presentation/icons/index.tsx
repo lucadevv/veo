@@ -603,6 +603,40 @@ export function IconCamera(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Candado cerrado: dato bloqueado (campo KYC no editable). */
+export function IconLock(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={5} y={11} width={14} height={9} rx={2} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M8 11V8a4 4 0 0 1 8 0v3"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Flecha izquierda (retroceso de pantalla). */
+export function IconArrowLeft(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M19 12H5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Polyline
+        points="12,5 5,12 12,19"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 /** Imagen / galería: marco + un círculo (sol) + una línea mínima de "montaña". */
 export function IconImage(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);

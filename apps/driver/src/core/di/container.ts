@@ -19,8 +19,8 @@ import type { CarpoolRepository } from '../../features/carpool/domain';
 import { HttpCarpoolRepository } from '../../features/carpool/data';
 import type { MapsRepository } from '../../features/maps/domain';
 import { HttpMapsRepository } from '../../features/maps/data';
-import type { ProfileRepository } from '../../features/profile/domain';
-import { HttpProfileRepository } from '../../features/profile/data';
+import type { AvatarUploader, ProfileRepository } from '../../features/profile/domain';
+import { HttpAvatarUploader, HttpProfileRepository } from '../../features/profile/data';
 import type {
   DocumentsRepository,
   DocumentScannerService,
@@ -80,8 +80,10 @@ export interface AppContainer {
   localAuth: LocalAuthService;
   /** Subida del binario de documentos: presign por el BFF + PUT crudo directo al almacén soberano. */
   documentUploader: DocumentUploader;
-  /** Captura/selección de imagen (cámara o galería) para el binario de documentos. */
+  /** Captura/selección de imagen (cámara o galería) para el binario de documentos Y la foto de perfil. */
   imagePicker: ImagePickerService;
+  /** Subida de la foto de perfil (avatar): presign por el BFF + PUT crudo directo al almacén soberano. */
+  avatarUploader: AvatarUploader;
   /** Escáner nativo de documentos (bordes + auto-captura + corrección) para el binario de documentos. */
   documentScanner: DocumentScannerService;
 }
@@ -149,6 +151,9 @@ function buildContainer(): AppContainer {
     documentUploader: new HttpDocumentUploader(httpClient),
     imagePicker: nativeImagePickerService,
     documentScanner: nativeDocumentScanner,
+    // El avatar reusa el MISMO httpClient autenticado SOLO para presign/confirm; el PUT del binario va por
+    // `fetch` crudo (sin el Bearer del BFF) que el uploader inyecta por defecto.
+    avatarUploader: new HttpAvatarUploader(httpClient),
   };
 }
 

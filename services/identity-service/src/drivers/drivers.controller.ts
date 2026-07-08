@@ -20,6 +20,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   Matches,
   MaxLength,
   MinLength,
@@ -186,6 +187,17 @@ class UpdatePersonalInfoDto {
 }
 
 /**
+ * PATCH /drivers/me/photo → body. Foto de perfil (avatar) del conductor. `photoUrl` es la publicUrl
+ * estable que el media-service selló en el confirm (bucket público de avatares). Espeja la validación
+ * del pasajero (`users.controller UpdateProfileDto.photoUrl`: @IsUrl + @IsString).
+ */
+class UpdateDriverPhotoDto {
+  @IsUrl()
+  @IsString()
+  photoUrl!: string;
+}
+
+/**
  * POST /drivers/check-dni → body. Chequeo de unicidad del DNI (blind index `dni_hash`) ANTES de completar
  * el alta (F0: escaneo del DNI). Misma validación que `UpdatePersonalInfoDto.dni`.
  */
@@ -270,6 +282,17 @@ export class DriversController {
   @ApiOperation({ summary: 'Registrar/actualizar datos personales del conductor (BR-I04)' })
   updatePersonalInfo(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdatePersonalInfoDto) {
     return this.drivers.updatePersonalInfo(user.userId, dto);
+  }
+
+  // Foto de perfil (avatar) del conductor · driver-rail. Espejo del pasajero, que la persiste en User.photoUrl
+  // vía PATCH /users/me (public-rail). El conductor NO puede usar ese endpoint (riel PUBLIC_RAIL), así que su
+  // propio riel expone este setter mínimo. Anti-IDOR: el userId sale del JWT propagado, nunca del body.
+  @Audiences(InternalAudience.DRIVER_RAIL)
+  @Patch('me/photo')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Actualizar la foto de perfil (avatar) del conductor' })
+  updatePhoto(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateDriverPhotoDto) {
+    return this.drivers.updatePhoto(user.userId, dto.photoUrl);
   }
 
   @Audiences(InternalAudience.DRIVER_RAIL)

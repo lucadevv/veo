@@ -6,6 +6,8 @@ import { IconCheck, IconStar } from '../../../../shared/presentation/icons';
 export interface ProfileIdentityCardProps {
   /** Nombre/teléfono mostrado como identidad principal. */
   name: string;
+  /** Foto de perfil (avatar); si falta, el `Avatar` cae a las iniciales del nombre. */
+  photoUrl?: string | null;
   /** Anillo "en línea" en el avatar (conductor disponible). */
   online: boolean;
   /** Rating formateado (ej. "4.9"). */
@@ -23,6 +25,7 @@ export interface ProfileIdentityCardProps {
  */
 export const ProfileIdentityCard = ({
   name,
+  photoUrl,
   online,
   ratingValue,
   ratingMeta,
@@ -33,7 +36,7 @@ export const ProfileIdentityCard = ({
   return (
     <Card variant="filled">
       <View style={styles.row}>
-        <Avatar name={name} size="xl" online={online} />
+        <Avatar uri={photoUrl ?? undefined} name={name} size="xl" online={online} />
         <View style={styles.info}>
           <View style={styles.nameRow}>
             <Text variant="title3" numberOfLines={1} style={styles.nameText}>

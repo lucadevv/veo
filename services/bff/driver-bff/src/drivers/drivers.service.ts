@@ -54,6 +54,12 @@ import {
   type DocumentUploadSideTicket,
   type DocumentUploadTicketView,
 } from './dto/drivers.dto';
+import {
+  type AvatarUploadConfirmed,
+  type AvatarUploadTicket,
+  type ConfirmAvatarUploadDto,
+  type PresignAvatarUploadDto,
+} from './dto/presign-avatar.dto';
 import type {
   DriverDniCheckResult,
   DriverDocumentDetail,
@@ -659,6 +665,44 @@ export class DriversService {
     );
 
     return { tickets, expiresAt };
+  }
+
+  /**
+   * Presign de subida del AVATAR del conductor → media-service (REST interno firmado). ESPEJO del public-bff
+   * (`UsersService.presignAvatarUpload`): proxya el ticket tal cual a `/media/avatars/presign`. media-service
+   * resuelve la key DRIVER-SCOPED del avatar (`avatars/{userId}/avatar.{ext}`) desde la identidad propagada
+   * (el cliente NO envía el userId → anti-IDOR). La app sube el binario a `uploadUrl` y luego confirma.
+   */
+  presignAvatarUpload(
+    identity: AuthenticatedUser,
+    dto: PresignAvatarUploadDto,
+  ): Promise<AvatarUploadTicket> {
+    return this.rest
+      .client('media')
+      .post<AvatarUploadTicket>('/media/avatars/presign', { identity, body: dto });
+  }
+
+  /**
+   * Confirma la subida del avatar y PERSISTE la foto en el perfil del conductor. Dos pasos:
+   *  1. media-service valida la cuota de tamaño (`/media/avatars/confirm`; borra el objeto si excede) y
+   *     devuelve la `publicUrl` definitiva del bucket público.
+   *  2. Con la confirmación OK, se guarda esa `publicUrl` en `User.photoUrl` vía identity por el RIEL del
+   *     conductor (`PATCH /drivers/me/photo`). El pasajero lo hace desde la app con `PATCH /users/me`
+   *     (PUBLIC_RAIL), vedado al conductor; por eso el driver-bff cierra el paso acá (mismo transporte REST
+   *     interno firmado). El userId sale de la identidad propagada en ambos hops (anti-IDOR).
+   */
+  async confirmAvatarUpload(
+    identity: AuthenticatedUser,
+    dto: ConfirmAvatarUploadDto,
+  ): Promise<AvatarUploadConfirmed> {
+    const confirmed = await this.rest
+      .client('media')
+      .post<AvatarUploadConfirmed>('/media/avatars/confirm', { identity, body: dto });
+    await this.identity().patch('/drivers/me/photo', {
+      identity,
+      body: { photoUrl: confirmed.publicUrl },
+    });
+    return confirmed;
   }
 
   /**

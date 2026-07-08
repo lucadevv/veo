@@ -14,6 +14,12 @@ export interface UserReply {
   found: boolean;
   /** Nombre visible del usuario; "" si no fue registrado. */
   name: string;
+  /**
+   * Foto de perfil (avatar) del usuario · `publicUrl` del media-service; "" si no tiene. OPCIONAL en el
+   * contrato (additivo · backward-compat): un `UserReply` construido a mano por un consumidor que aún no
+   * lo setea sigue compilando; en el wire proto3 (defaults:true) llega SIEMPRE ("" si no hay foto).
+   */
+  photoUrl?: string;
 }
 
 /** identity.GetDriversByIds / mensaje DriverIdsRequest (lectura batch para listados del admin). */

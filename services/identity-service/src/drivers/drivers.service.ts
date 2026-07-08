@@ -2166,6 +2166,24 @@ export class DriversService {
   }
 
   /**
+   * Actualiza la foto de perfil (avatar) del conductor en `User.photoUrl`. `photoUrl` es la publicUrl
+   * estable que el media-service selló en el confirm de la subida (bucket público de avatares). Espeja al
+   * pasajero (que la persiste vía `UsersService.updateProfile`), pero por el riel del conductor: el
+   * driver-bff no puede tocar el `PATCH /users/me` (riel PUBLIC_RAIL). Anti-IDOR: el `userId` viene del
+   * JWT propagado; un conductor solo escribe su propia foto. NO toca la máquina de estados del alta ni la
+   * PII de identidad (la foto no es un dato de KYC). Devuelve la foto persistida.
+   */
+  async updatePhoto(userId: string, photoUrl: string): Promise<{ photoUrl: string }> {
+    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
+    const updated = await this.prisma.write.user.update({
+      where: { id: userId },
+      data: { photoUrl },
+    });
+    return { photoUrl: updated.photoUrl ?? '' };
+  }
+
+  /**
    * Chequea si el DNI escaneado ya está registrado en OTRA cuenta de conductor (blind index `dni_hash`),
    * ANTES de que el conductor complete el alta (F0: escaneo del DNI). Excluye al propio `userId` para que
    * re-escanear SU PROPIO DNI en el resume del wizard no se reporte como duplicado. Solo lectura (no

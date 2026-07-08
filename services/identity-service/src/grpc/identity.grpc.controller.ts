@@ -35,6 +35,8 @@ interface UserReply {
   deleted: boolean;
   found: boolean;
   name: string;
+  /** Foto de perfil (avatar) · publicUrl del media-service; "" si no tiene. */
+  photoUrl: string;
 }
 interface DriverReply {
   id: string;
@@ -225,7 +227,16 @@ export class IdentityGrpcController {
     this.requireIdentity('GetUser', metadata);
     const u = await this.prisma.read.user.findUnique({ where: { id } });
     if (!u) {
-      return { id: '', phone: '', type: '', kycStatus: '', deleted: false, found: false, name: '' };
+      return {
+        id: '',
+        phone: '',
+        type: '',
+        kycStatus: '',
+        deleted: false,
+        found: false,
+        name: '',
+        photoUrl: '',
+      };
     }
     return {
       id: u.id,
@@ -235,6 +246,7 @@ export class IdentityGrpcController {
       deleted: u.deletedAt !== null,
       found: true,
       name: u.name ?? '',
+      photoUrl: u.photoUrl ?? '',
     };
   }
 
@@ -329,6 +341,7 @@ export class IdentityGrpcController {
         deleted: u.deletedAt !== null,
         found: true,
         name: u.name ?? '',
+        photoUrl: u.photoUrl ?? '',
       })),
     };
   }

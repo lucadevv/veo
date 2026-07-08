@@ -37,6 +37,12 @@ import {
   type DriverVehicleModelView,
   type DriverVehicleView,
 } from './dto/drivers.dto';
+import {
+  ConfirmAvatarUploadDto,
+  PresignAvatarUploadDto,
+  type AvatarUploadConfirmed,
+  type AvatarUploadTicket,
+} from './dto/presign-avatar.dto';
 
 /** Mínimo del response para fijar el status (204) sin acoplar a express/fastify. */
 interface HttpResponseLike {
@@ -84,6 +90,30 @@ export class DriversController {
     @Body() dto: DocumentUploadTicketDto,
   ): Promise<DocumentUploadTicketView> {
     return this.drivers.presignDocumentUpload(user, dto);
+  }
+
+  @Post('me/avatar/presign')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Presign de subida del avatar del conductor (PUT directo a S3/MinIO vía media-service)',
+  })
+  presignAvatar(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: PresignAvatarUploadDto,
+  ): Promise<AvatarUploadTicket> {
+    return this.drivers.presignAvatarUpload(user, dto);
+  }
+
+  @Post('me/avatar/confirm')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Confirmar la subida del avatar (valida cuota) y persistir la foto en el perfil',
+  })
+  confirmAvatar(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ConfirmAvatarUploadDto,
+  ): Promise<AvatarUploadConfirmed> {
+    return this.drivers.confirmAvatarUpload(user, dto);
   }
 
   @Post('onboard')

@@ -37,7 +37,7 @@ import {
 } from '../features/trips/presentation';
 import { BidsScreen } from '../features/bidding/presentation';
 import { EarningsScreen } from '../features/earnings/presentation';
-import { ProfileScreen } from '../features/profile/presentation';
+import { EditProfileScreen, ProfileScreen } from '../features/profile/presentation';
 import { DocumentsScreen } from '../features/documents/presentation';
 import { IncentivesScreen } from '../features/ops/presentation';
 import { SupportScreen } from '../features/support/presentation';
@@ -248,6 +248,11 @@ export const RootNavigator = (): React.JSX.Element => {
           options={{ gestureEnabled: false, animation: 'fade' }}
         />
         <Stack.Screen name="BiometricEnroll" component={BiometricEnrollScreen} />
+        <Stack.Screen
+          name="EditProfile"
+          component={EditProfileScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
         <Stack.Screen name="Documents" component={DocumentsScreen} />
         <Stack.Screen name="Vehicles" component={VehiclesScreen} />
         <Stack.Screen name="Incentives" component={IncentivesScreen} />
