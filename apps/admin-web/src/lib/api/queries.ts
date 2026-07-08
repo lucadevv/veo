@@ -9,9 +9,7 @@ import {
   revenueMetricsView,
   auditChainVerification,
   auditEntryView,
-  type CreateDocumentRequest,
   type CreateInspectionRequest,
-  type CreateVehicleRequest,
   dispatchRadiusConfigView,
   type ReplaceRadiusConfigRequest,
   driverApproval,
@@ -21,8 +19,6 @@ import {
   fleetDocumentView,
   inspectionView,
   vehicleModelReviewView,
-  vehicleModelSpecView,
-  type ApproveVehicleModelRequest,
   type LiveAccessRequest,
   liveViewerToken,
   mediaAccessRequestView,
@@ -83,7 +79,6 @@ export const qk = {
   expiring: ['fleet-expiring'] as const,
   documents: (status: string) => ['fleet-documents', status] as const,
   modelReview: (status: string) => ['vehicle-model-review', status] as const,
-  vehicleModels: ['vehicle-models'] as const,
   payouts: (status: string) => ['payouts', status] as const,
   payoutStats: ['payout-stats'] as const,
   paymentByTrip: (tripId: string) => ['payment-by-trip', tripId] as const,
@@ -628,86 +623,6 @@ export function useModelReview(status: string) {
         query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-  });
-}
-
-/**
- * Aprobar/rechazar/reabrir una solicitud de modelo. La UI habla approve/reject/reopen; el bff traduce al
- * endpoint (POST /fleet/vehicle-models/:id/approve|reject|reopen) y el fleet-service revalida + audita.
- * `reopen` (F2) devuelve un modelo APROBADO a PENDING_REVIEW para corregir su ficha mal cargada.
- */
-export function useModelReviewAction() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (
-      input:
-        | ({ id: string; decision: 'approve' } & ApproveVehicleModelRequest)
-        | { id: string; decision: 'reject' }
-        | { id: string; decision: 'reopen' },
-    ) => {
-      if (input.decision === 'approve') {
-        return apiClient().post(`/fleet/vehicle-models/${input.id}/approve`, {
-          body: {
-            segment: input.segment,
-            energySource: input.energySource,
-            efficiency: input.efficiency,
-            ...(input.seats !== undefined ? { seats: input.seats } : {}),
-          },
-          schema: vehicleModelReviewView,
-        });
-      }
-      return apiClient().post(`/fleet/vehicle-models/${input.id}/${input.decision}`, {
-        schema: vehicleModelReviewView,
-      });
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
-    },
-  });
-}
-
-/**
- * Catálogo APROBADO de modelos para el selector del alta admin (F4 · C2). Página única: el catálogo curado
- * es chico (tope 100 server-side) — el selector lo ordena alfabético al render. El operador elige un modelo
- * y manda su `modelSpecId`; el fleet-service snapshotea make/model/tipo (fuente única, sin texto libre).
- */
-const modelSpecPage = paginated(vehicleModelSpecView);
-
-export function useVehicleModels() {
-  return useQuery({
-    queryKey: qk.vehicleModels,
-    queryFn: ({ signal }) =>
-      // DEUDA: el selector trae una sola página (no sigue nextCursor) · techo: si el catálogo aprobado supera 100 modelos, el selector trunca en silencio · gatillo: si el catálogo crece >100 → useInfiniteQuery + buscador server-side (q)
-      apiClient().get('/fleet/vehicle-models', {
-        schema: modelSpecPage,
-        signal,
-        query: { limit: 100 },
-      }),
-  });
-}
-
-/** Alta de vehículo (operador). El bff/fleet-service revalidan BR-D04 (año mínimo, placa única). */
-export function useCreateVehicle() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateVehicleRequest) =>
-      apiClient().post('/fleet/vehicles', { body: input }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: qk.vehicles });
-    },
-  });
-}
-
-/** Alta de documento (conductor/vehículo). Entra PENDING_REVIEW. */
-export function useCreateDocument() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateDocumentRequest) =>
-      apiClient().post('/fleet/documents', { body: input, schema: fleetDocumentView }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['fleet-documents'] });
-      void qc.invalidateQueries({ queryKey: qk.expiring });
-    },
   });
 }
 
