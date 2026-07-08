@@ -42,9 +42,6 @@ import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { RateInput } from '@/components/config/config-card';
 import { Button } from '@/components/ui/button';
 
-/** Valor del select "Automático" (sin pin → manda el schedule global). */
-const AUTO = '';
-
 /** Etiqueta legible del modo de pricing para el panel (display, no comparación de dominio). */
 const MODE_LABEL: Record<PricingMode, string> = { PUJA: 'Puja', FIXED: 'Precio fijo' };
 
@@ -352,7 +349,7 @@ function OfferingRow({
 }) {
   const floorOverrideCents = floor?.overrideCents ?? null;
 
-  const [mode, setMode] = useState<string>(override?.mode ?? AUTO);
+  const [mode, setMode] = useState<PricingMode>(override?.mode ?? offering.mode);
   const [multiplier, setMultiplier] = useState<string>(override?.multiplier?.toString() ?? '');
   const [minFareSoles, setMinFareSoles] = useState<string>(
     override?.minFareCents != null ? formatSolesInput(override.minFareCents) : '',
@@ -380,13 +377,9 @@ function OfferingRow({
   const [expanded, setExpanded] = useState<boolean>(hasParamOverride);
 
   // Modo EFECTIVO en vivo (ADR 023): si la oferta está LOCKED (verticales especiales: ambulancia/grúa/mecánico)
-  // manda el modo fijo del server (el admin NO lo cambia); si no, el pin en draft, o el efectivo del server
-  // cuando el admin no pinó (AUTO). La puja —y por ende su piso— solo tiene sentido en modo PUJA.
-  const effectiveMode: PricingMode = offering.modeLocked
-    ? offering.mode
-    : mode === AUTO
-      ? offering.mode
-      : (mode as PricingMode);
+  // manda el modo fijo del server (el admin NO lo cambia); si no, el modo elegido en el select (Fijo/Puja,
+  // explícito). La puja —y por ende su piso— solo tiene sentido en modo PUJA.
+  const effectiveMode: PricingMode = offering.modeLocked ? offering.mode : mode;
   const allowsPuja = effectiveMode === PricingMode.PUJA;
 
   // Parseo: vacío → undefined (usar el de código). Inválido → bloquea el guardado.
@@ -438,7 +431,7 @@ function OfferingRow({
   const floorDirty = floorEditable && floorDraftCents !== floorOverrideCents;
 
   const dirty =
-    (mode || AUTO) !== (override?.mode ?? AUTO) ||
+    mode !== (override?.mode ?? offering.mode) ||
     (multNum ?? null) !== (override?.multiplier ?? null) ||
     (minFareCents ?? null) !== (override?.minFareCents ?? null) ||
     (baseFareCents ?? null) !== (override?.baseFareCents ?? null) ||
@@ -480,7 +473,7 @@ function OfferingRow({
       const ok = await onSavePricing({
         id: offering.id,
         enabled: offering.enabled,
-        mode: (mode as PricingMode) || undefined,
+        mode,
         multiplier: multNum,
         minFareCents,
         baseFareCents,
@@ -533,9 +526,9 @@ function OfferingRow({
           </div>
         </td>
 
-        {/* Modo (ADR 023): si la oferta está LOCKED (verticales especiales — "la ambulancia NO negocia") el modo lo
-            fija la vertical → label read-only, no un dropdown falso. Si no, el select FIJO↔PUJA ("Por defecto" = sin
-            pin, cae al modo por defecto de la oferta). COST_SHARE es booking-service (Fase B), no va en on-demand. */}
+        {/* Modo (ADR 023): las verticales especiales van LOCKED ("la ambulancia NO negocia") → label read-only con
+            candado. El resto elige el modo EXPLÍCITO Fijo↔Puja (sin "por defecto" ambiguo: el select muestra el modo
+            vigente y, al elegir, lo fija). COST_SHARE es booking-service (Fase B), no va en on-demand. */}
         <td className="px-3 py-2.5 align-middle">
           {offering.modeLocked ? (
             <span
@@ -548,12 +541,11 @@ function OfferingRow({
           ) : (
             <select
               value={mode}
-              onChange={(e) => setMode(e.target.value)}
+              onChange={(e) => setMode(e.target.value as PricingMode)}
               disabled={!canManage}
               aria-label={`Modo de ${offeringLabel(offering.id)}`}
               className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
             >
-              <option value={AUTO}>Por defecto</option>
               <option value={PricingMode.FIXED}>{MODE_LABEL[PricingMode.FIXED]}</option>
               <option value={PricingMode.PUJA}>{MODE_LABEL[PricingMode.PUJA]}</option>
             </select>
@@ -626,7 +618,9 @@ function OfferingRow({
               </div>
             )
           ) : (
-            <span className="text-sm text-ink-subtle">— solo fijo</span>
+            <span className="text-sm text-ink-subtle" title="El piso solo aplica en modo Puja">
+              —
+            </span>
           )}
         </td>
 
