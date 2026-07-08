@@ -19,6 +19,7 @@ import {
   fleetDocumentView,
   inspectionView,
   vehicleModelReviewView,
+  type ApproveVehicleModelRequest,
   type LiveAccessRequest,
   liveViewerToken,
   mediaAccessRequestView,
@@ -623,6 +624,41 @@ export function useModelReview(status: string) {
         query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/**
+ * Resolución de una solicitud de modelo por el operador (B5-2.c):
+ * - `approve` completa la ficha técnica (segment/energySource/efficiency/seats) → PENDING→APPROVED.
+ * - `reject` descarta la solicitud (sin body) → PENDING→REJECTED.
+ * Ambas devuelven la vista de revisión actualizada. Invalida la cola para refrescar todas las pestañas.
+ */
+export function useModelReviewAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      input:
+        | ({ id: string; decision: 'approve' } & ApproveVehicleModelRequest)
+        | { id: string; decision: 'reject' },
+    ) => {
+      if (input.decision === 'approve') {
+        return apiClient().post(`/fleet/vehicle-models/${input.id}/approve`, {
+          body: {
+            segment: input.segment,
+            energySource: input.energySource,
+            efficiency: input.efficiency,
+            ...(input.seats !== undefined ? { seats: input.seats } : {}),
+          },
+          schema: vehicleModelReviewView,
+        });
+      }
+      return apiClient().post(`/fleet/vehicle-models/${input.id}/reject`, {
+        schema: vehicleModelReviewView,
+      });
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['vehicle-model-review'] });
+    },
   });
 }
 

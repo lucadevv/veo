@@ -6,6 +6,8 @@ import {
   AlarmClock,
   ArrowDownWideNarrow,
   ArrowRight,
+  Boxes,
+  CalendarClock,
   Car,
   ChevronLeft,
   ChevronRight,
@@ -20,6 +22,7 @@ import {
 import {
   useDriversPending,
   useFleetDocuments,
+  useModelReview,
   useReviewsSummary,
   useVehicles,
 } from '@/lib/api/queries';
@@ -27,8 +30,10 @@ import type { PendingDriver, VehicleView } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { downloadCsv } from '@/lib/csv';
+import { date as fmtDate } from '@/lib/formatters';
 import { StatCard } from '@/components/ui/stat-card';
 import { EmptyState, ErrorState } from '@/components/ui/states';
+import { ModelReviewActions } from '@/components/fleet/model-review-actions';
 
 type QueueType = 'conductor' | 'vehiculo' | 'documento';
 
@@ -109,16 +114,19 @@ const TYPE_META: Record<QueueType, { icon: LucideIcon; label: string; cls: strin
   documento: { icon: FileText, label: 'Documento', cls: 'bg-warn/15 text-warn' },
 };
 
-type Tab = 'todos' | 'conductor' | 'vehiculo' | 'documento' | 'sla';
+type Tab = 'todos' | 'conductor' | 'vehiculo' | 'documento' | 'modelo' | 'sla';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'todos', label: 'Todos' },
   { key: 'conductor', label: 'Conductores' },
   { key: 'vehiculo', label: 'Vehículos' },
   { key: 'documento', label: 'Documentos' },
+  { key: 'modelo', label: 'Modelos' },
   { key: 'sla', label: 'SLA vencido' },
 ];
 
 const GRID = 'grid grid-cols-[120px_1fr_210px_110px_120px] items-center gap-4';
+// Cola de modelos: forma distinta a la unificada (make/model/años/tipo/asientos + 2 acciones).
+const MODEL_GRID = 'grid grid-cols-[1fr_130px_130px_90px_130px_190px] items-center gap-4';
 
 export default function ReviewsPage() {
   const user = useSession();
@@ -132,6 +140,10 @@ export default function ReviewsPage() {
   // Conteos AUTORITATIVOS de la cola (server-side, /ops/reviews/summary): no dependen de las páginas ya
   // cargadas en el cliente (que sub-cuentan). Alimentan las stat cards de Conductores y Documentos.
   const summary = useReviewsSummary();
+  // Cola de modelos pendientes de aprobar (B5-2.c). Estado del dominio = 'PENDING_REVIEW' (enum
+  // vehicleModelStatus). Se muestra en su propia pestaña con tabla y acciones dedicadas.
+  const models = useModelReview('PENDING_REVIEW');
+  const modelRows = useMemo(() => models.data?.pages.flatMap((p) => p.items) ?? [], [models.data]);
 
   const rows = useMemo<QueueRow[]>(() => {
     const out: QueueRow[] = [];
@@ -255,7 +267,9 @@ export default function ReviewsPage() {
           ? counts.conductor
           : k === 'vehiculo'
             ? counts.vehiculo
-            : counts.documento;
+            : k === 'modelo'
+              ? (summary.data?.modelsPendingReview ?? modelRows.length)
+              : counts.documento;
 
   return (
     <div className="flex min-h-full flex-col gap-[22px] px-8 py-7">
@@ -279,7 +293,7 @@ export default function ReviewsPage() {
 
       {/* Stat cards · Conductores y Documentos son AUTORITATIVOS (server: /ops/reviews/summary), no del set
           paginado. Vehículos y SLA se derivan de la cola cargada (el summary no los cubre hoy). */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <StatCard
           icon={Users}
           label="Conductores"
@@ -303,6 +317,22 @@ export default function ReviewsPage() {
           hint="Docs + ITV"
           hintTone="brand"
           loading={loading}
+        />
+        <StatCard
+          icon={CalendarClock}
+          label="Por vencer"
+          value={summary.data ? String(summary.data.docsExpiringSoon) : '—'}
+          hint="Docs próximos a vencer"
+          hintTone="warn"
+          loading={summary.isLoading}
+        />
+        <StatCard
+          icon={Boxes}
+          label="Modelos"
+          value={summary.data ? String(summary.data.modelsPendingReview) : '—'}
+          hint="Solicitudes por aprobar"
+          hintTone="brand"
+          loading={summary.isLoading}
         />
         <StatCard
           icon={AlarmClock}
@@ -358,105 +388,162 @@ export default function ReviewsPage() {
         </div>
       </div>
 
-      {/* Tabla unificada */}
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
-        <div
-          className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
-        >
-          <span>Tipo</span>
-          <span>Ítem</span>
-          <span>Pendiente</span>
-          <span>Esperando</span>
-          <span />
-        </div>
-
-        {errored ? (
-          <ErrorState className="py-10" onRetry={() => void drivers.refetch()} />
-        ) : loading ? (
-          <div>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-[52px] animate-pulse border-b border-border bg-surface-2/40"
-              />
-            ))}
+      {/* Cola de modelos (forma propia) vs. cola unificada (conductor/vehículo/documento). */}
+      {tab === 'modelo' ? (
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+          <div
+            className={`${MODEL_GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
+          >
+            <span>Modelo</span>
+            <span>Años</span>
+            <span>Tipo</span>
+            <span>Asientos</span>
+            <span>Solicitado</span>
+            <span />
           </div>
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            className="py-12"
-            title="Cola vacía"
-            description="No hay nada esperando revisión en esta vista."
-          />
-        ) : (
-          pageRows.map((r) => {
-            const tm = TYPE_META[r.type];
-            const w = waitParts(r.enqueuedAt);
-            return (
+
+          {models.isError ? (
+            <ErrorState className="py-10" onRetry={() => void models.refetch()} />
+          ) : models.isLoading ? (
+            <div>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-[52px] animate-pulse border-b border-border bg-surface-2/40"
+                />
+              ))}
+            </div>
+          ) : modelRows.length === 0 ? (
+            <EmptyState
+              className="py-12"
+              title="Sin solicitudes"
+              description="No hay solicitudes de modelo esperando aprobación."
+            />
+          ) : (
+            modelRows.map((m) => (
               <div
-                key={r.key}
-                className={`${GRID} border-b border-border px-5 py-3 last:border-b-0`}
+                key={m.id}
+                className={`${MODEL_GRID} border-b border-border px-5 py-3 last:border-b-0`}
               >
-                <span
-                  className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-[5px] text-xs font-semibold ${tm.cls}`}
-                >
-                  <tm.icon className="size-[13px]" aria-hidden />
-                  {tm.label}
+                <span className="truncate text-sm font-semibold text-ink">
+                  {m.make} {m.model}
                 </span>
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span
-                    className={`truncate text-sm font-semibold text-ink ${r.itemAMono ? 'font-mono' : ''}`}
+                <span className="font-mono text-[13px] text-ink-muted">
+                  {m.yearFrom}–{m.yearTo}
+                </span>
+                <span className="truncate text-[13px] text-ink-muted">{m.vehicleType}</span>
+                <span className="font-mono text-[13px] text-ink-muted">{m.seats}</span>
+                <span className="truncate text-[13px] text-ink-muted">{fmtDate(m.createdAt)}</span>
+                <ModelReviewActions model={m} />
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Tabla unificada */}
+          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+            <div
+              className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
+            >
+              <span>Tipo</span>
+              <span>Ítem</span>
+              <span>Pendiente</span>
+              <span>Esperando</span>
+              <span />
+            </div>
+
+            {errored ? (
+              <ErrorState className="py-10" onRetry={() => void drivers.refetch()} />
+            ) : loading ? (
+              <div>
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-[52px] animate-pulse border-b border-border bg-surface-2/40"
+                  />
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                className="py-12"
+                title="Cola vacía"
+                description="No hay nada esperando revisión en esta vista."
+              />
+            ) : (
+              pageRows.map((r) => {
+                const tm = TYPE_META[r.type];
+                const w = waitParts(r.enqueuedAt);
+                return (
+                  <div
+                    key={r.key}
+                    className={`${GRID} border-b border-border px-5 py-3 last:border-b-0`}
                   >
-                    {r.itemA}
-                  </span>
-                  <span className="truncate font-mono text-[11px] text-ink-subtle">{r.itemB}</span>
-                </div>
-                <span className="truncate text-[13px] text-ink-muted">{r.pendiente}</span>
-                <span
-                  className={`inline-flex items-center gap-1.5 font-mono text-[13px] font-semibold ${SLA_TEXT[w.tone]}`}
-                >
-                  <Timer className="size-[13px]" aria-hidden />
-                  {w.label}
-                </span>
+                    <span
+                      className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-[5px] text-xs font-semibold ${tm.cls}`}
+                    >
+                      <tm.icon className="size-[13px]" aria-hidden />
+                      {tm.label}
+                    </span>
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span
+                        className={`truncate text-sm font-semibold text-ink ${r.itemAMono ? 'font-mono' : ''}`}
+                      >
+                        {r.itemA}
+                      </span>
+                      <span className="truncate font-mono text-[11px] text-ink-subtle">
+                        {r.itemB}
+                      </span>
+                    </div>
+                    <span className="truncate text-[13px] text-ink-muted">{r.pendiente}</span>
+                    <span
+                      className={`inline-flex items-center gap-1.5 font-mono text-[13px] font-semibold ${SLA_TEXT[w.tone]}`}
+                    >
+                      <Timer className="size-[13px]" aria-hidden />
+                      {w.label}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => router.push(r.href)}
+                      className="inline-flex w-fit items-center gap-1.5 justify-self-end rounded-full border border-accent bg-accent/15 px-3.5 py-2 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/20"
+                    >
+                      Revisar
+                      <ArrowRight className="size-[13px]" aria-hidden />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+
+            <div className="flex items-center justify-between border-t border-border bg-surface-2 px-5 py-3">
+              <span className="text-[13px] text-ink-subtle">
+                {`Mostrando ${pageRows.length} de ${filtered.length} en la cola`}
+              </span>
+              <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => router.push(r.href)}
-                  className="inline-flex w-fit items-center gap-1.5 justify-self-end rounded-full border border-accent bg-accent/15 px-3.5 py-2 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/20"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={clampedPage === 0}
+                  aria-label="Página anterior"
+                  className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-surface"
                 >
-                  Revisar
-                  <ArrowRight className="size-[13px]" aria-hidden />
+                  <ChevronLeft className="size-4" aria-hidden />
+                </button>
+                <span className="text-[13px] text-ink-muted">{`Página ${clampedPage + 1} de ${totalPages}`}</span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={clampedPage >= totalPages - 1}
+                  aria-label="Página siguiente"
+                  className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-surface"
+                >
+                  <ChevronRight className="size-4" aria-hidden />
                 </button>
               </div>
-            );
-          })
-        )}
-
-        <div className="flex items-center justify-between border-t border-border bg-surface-2 px-5 py-3">
-          <span className="text-[13px] text-ink-subtle">
-            {`Mostrando ${pageRows.length} de ${filtered.length} en la cola`}
-          </span>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={clampedPage === 0}
-              aria-label="Página anterior"
-              className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-surface"
-            >
-              <ChevronLeft className="size-4" aria-hidden />
-            </button>
-            <span className="text-[13px] text-ink-muted">{`Página ${clampedPage + 1} de ${totalPages}`}</span>
-            <button
-              type="button"
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              disabled={clampedPage >= totalPages - 1}
-              aria-label="Página siguiente"
-              className="grid size-[34px] place-items-center rounded-sm border border-border bg-surface text-ink-muted transition-colors hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-surface"
-            >
-              <ChevronRight className="size-4" aria-hidden />
-            </button>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
