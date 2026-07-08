@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Lock,
   RefreshCw,
   Truck,
   TriangleAlert,
@@ -537,7 +538,11 @@ function OfferingRow({
             pin, cae al modo por defecto de la oferta). COST_SHARE es booking-service (Fase B), no va en on-demand. */}
         <td className="px-3 py-2.5 align-middle">
           {offering.modeLocked ? (
-            <span className="text-sm text-ink-muted" title="Fijo por la vertical del servicio">
+            <span
+              className="inline-flex items-center gap-1.5 text-sm text-ink-muted"
+              title="Fijo por la vertical del servicio"
+            >
+              <Lock className="size-3.5 text-ink-subtle" aria-hidden />
               {MODE_LABEL[offering.mode]}
             </span>
           ) : (
