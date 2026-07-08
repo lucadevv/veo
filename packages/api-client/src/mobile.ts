@@ -1949,9 +1949,20 @@ export const extractedLicenseA1Data = z.object({
 });
 export type ExtractedLicenseA1Data = z.infer<typeof extractedLicenseA1Data>;
 
+/** ITV: data extraída del certificado de inspección técnica (espeja `ExtractedItvData`). */
+export const extractedItvData = z.object({
+  type: z.literal('ITV'),
+  /** Centro de Inspección Técnica Vehicular (CITV) donde se realizó. */
+  center: ocrText.optional(),
+  documentNumber: ocrId.optional(),
+  issuedAt: ocrIsoDate.optional(),
+  expiresAt: ocrIsoDate.optional(),
+});
+export type ExtractedItvData = z.infer<typeof extractedItvData>;
+
 /**
  * Data extraída por OCR, UNIÓN DISCRIMINADA por `type` (espeja `ExtractedDocumentData`). Paridad COMPLETA
- * con el backend (las 4 variantes) aunque el cliente hoy solo PRODUCE DNI/SOAT/LICENSE_A1. `forbidNonWhitelisted`
+ * con el backend (5 variantes) aunque el cliente hoy solo PRODUCE DNI/SOAT/LICENSE_A1. `forbidNonWhitelisted`
  * del backend rechaza claves extra, así que el cliente debe enviar EXACTO la forma de la variante.
  */
 export const extractedDocumentData = z.discriminatedUnion('type', [
@@ -1959,6 +1970,7 @@ export const extractedDocumentData = z.discriminatedUnion('type', [
   extractedSoatData,
   extractedPropertyCardData,
   extractedLicenseA1Data,
+  extractedItvData,
 ]);
 export type ExtractedDocumentData = z.infer<typeof extractedDocumentData>;
 

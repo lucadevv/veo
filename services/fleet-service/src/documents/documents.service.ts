@@ -464,6 +464,12 @@ export class DocumentsService {
       ) {
         const inspectedAt = updated.issuedAt ?? now;
         const nextDueAt = updated.expiresAt ?? computeNextInspectionDue(inspectedAt);
+        // Centro (CITV) desde el OCR del certificado: si el cliente extrajo `center` en el `extractedData`
+        // (ITV-shaped, persistido como Json), lo hereda la Inspección auto-registrada. Si no hubo OCR o no
+        // trae centro → null (el ItvCard muestra "—"). El alta manual del operador lo captura por el diálogo.
+        const extractedCenter = (updated.extractedData as { center?: unknown } | null)?.center;
+        const center =
+          typeof extractedCenter === 'string' && extractedCenter.trim() ? extractedCenter.trim() : null;
         const already = await tx.inspection.findUnique({
           where: {
             vehicleId_inspectedAt_inspectorId: {
@@ -486,6 +492,7 @@ export class DocumentsService {
               passed: true,
               inspectedAt,
               nextDueAt,
+              center,
             },
             reviewerId,
             now,

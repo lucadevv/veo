@@ -78,11 +78,25 @@ export interface ExtractedLicenseA1Data {
  * y la persiste tal cual (Lote 0); el cliente la PRODUCE (Lote 1) y el parser de tarjeta la enriquece
  * (Lote 2). Todos los campos son opcionales → un OCR parcial sigue siendo válido.
  */
+/** ITV: data extraída del certificado de inspección técnica vehicular. */
+export interface ExtractedItvData {
+  type: typeof FleetDocumentType.ITV;
+  /** Centro de Inspección Técnica Vehicular (CITV) donde se realizó. */
+  center?: string;
+  /** Número del certificado ITV. */
+  documentNumber?: string;
+  /** Fecha de inspección, ISO `YYYY-MM-DD`. */
+  issuedAt?: string;
+  /** Vencimiento (próxima ITV), ISO `YYYY-MM-DD`. */
+  expiresAt?: string;
+}
+
 export type ExtractedDocumentData =
   | ExtractedDniData
   | ExtractedSoatData
   | ExtractedPropertyCardData
-  | ExtractedLicenseA1Data;
+  | ExtractedLicenseA1Data
+  | ExtractedItvData;
 
 /**
  * Motor de OCR que produjo la `ExtractedDocumentData` (trazabilidad/observabilidad). ENUM CERRADO

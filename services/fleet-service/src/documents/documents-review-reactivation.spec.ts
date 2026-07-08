@@ -177,6 +177,22 @@ describe('DocumentsService.review · unifica ITV: aprobar el DOCUMENTO ITV regis
     expect(when).toBe(NOW);
   });
 
+  it('hereda el Centro (CITV) del OCR del certificado (extractedData.center) → createInTx con ese center', async () => {
+    const { service, inspections } = makeService(
+      itvDoc({ extractedData: { type: 'ITV', center: 'CITV Los Olivos' } }),
+    );
+    await service.review('doc-1', ReviewDecision.VALID, REVIEWER, undefined, NOW);
+    const [, params] = inspections.createInTx.mock.calls[0]!;
+    expect(params.center).toBe('CITV Los Olivos');
+  });
+
+  it('sin center en el OCR (o sin extractedData) → createInTx con center null', async () => {
+    const { service, inspections } = makeService(itvDoc());
+    await service.review('doc-1', ReviewDecision.VALID, REVIEWER, undefined, NOW);
+    const [, params] = inspections.createInTx.mock.calls[0]!;
+    expect(params.center).toBeNull();
+  });
+
   it('IDEMPOTENTE: si ya existe la inspección (natural key) NO llama createInTx', async () => {
     const { service, inspections, tx } = makeService(itvDoc());
     tx.inspection.findUnique.mockResolvedValueOnce({ id: 'insp-existente' });

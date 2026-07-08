@@ -140,6 +140,33 @@ export class ExtractedLicenseA1DataDto {
   category?: string;
 }
 
+/** ITV: data extraída del certificado de inspección técnica vehicular. */
+export class ExtractedItvDataDto {
+  @Equals(FleetDocumentType.ITV)
+  type!: typeof FleetDocumentType.ITV;
+
+  /** Centro de Inspección Técnica Vehicular (CITV) donde se realizó. */
+  @IsOptional()
+  @IsString()
+  @Length(1, OCR_TEXT_MAX)
+  center?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, OCR_ID_MAX)
+  documentNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(ISO_DATE_PATTERN, { message: 'issuedAt debe tener formato YYYY-MM-DD' })
+  issuedAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(ISO_DATE_PATTERN, { message: 'expiresAt debe tener formato YYYY-MM-DD' })
+  expiresAt?: string;
+}
+
 /**
  * Opciones del `@Type` para el campo `extractedData` de un DTO contenedor: discriminador por `type`
  * (= FleetDocumentType, sin string mágico) que enruta a la sub-clase correcta. Con `@ValidateNested` +
@@ -154,6 +181,7 @@ export const EXTRACTED_DATA_TYPE_OPTIONS: TypeOptions = {
       { value: ExtractedSoatDataDto, name: FleetDocumentType.SOAT },
       { value: ExtractedPropertyCardDataDto, name: FleetDocumentType.PROPERTY_CARD },
       { value: ExtractedLicenseA1DataDto, name: FleetDocumentType.LICENSE_A1 },
+      { value: ExtractedItvDataDto, name: FleetDocumentType.ITV },
     ],
   },
   keepDiscriminatorProperty: true,
