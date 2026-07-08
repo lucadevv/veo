@@ -12,7 +12,6 @@ import {
   Banner,
   BottomSheet,
   Button,
-  Card,
   IconButton,
   MapShell,
   SafeScreen,
@@ -24,6 +23,7 @@ import {
 } from '@veo/ui-kit';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
 import { IconBell, IconFlame, IconPower } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
@@ -333,13 +333,13 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
 
   if (shift.isLoading) {
     bottomOverlay = (
-      <Card variant="filled">
+      <GlassSheet>
         <Skeleton height={96} />
-      </Card>
+      </GlassSheet>
     );
   } else if (shift.isError || !shift.data) {
     bottomOverlay = (
-      <Card variant="filled">
+      <GlassSheet>
         <Banner
           tone="danger"
           title={t('errors.generic')}
@@ -351,12 +351,12 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           onPress={() => shift.refetch()}
           style={styles.spaced}
         />
-      </Card>
+      </GlassSheet>
     );
   } else if (activeTripId) {
     // Prioridad máxima: acceso directo al viaje en curso.
     bottomOverlay = (
-      <Card variant="filled">
+      <GlassSheet>
         <Text variant="subhead" color="inkMuted">
           {t('trips.activeTitle')}
         </Text>
@@ -367,13 +367,13 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           onPress={() => navigation.navigate('TripActive', { tripId: activeTripId })}
           style={styles.spaced}
         />
-      </Card>
+      </GlassSheet>
     );
   } else if (online) {
     // En línea: sheet slim con métricas en vivo, pausa y desconexión (misma lógica de mutaciones).
     bottomOverlay = (
       <Appear key="online">
-        <Card variant="filled" padding="lg">
+        <GlassSheet>
           {/* GPS apagado/sin permiso EN TURNO: el conductor no emite posición y el dispatch no lo ve.
             Aviso prioritario (arriba de todo) para que lo corrija antes de seguir esperando viajes. */}
           {gpsUnavailable ? (
@@ -444,14 +444,14 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               style={styles.spaced}
             />
           ) : null}
-        </Card>
+        </GlassSheet>
       </Appear>
     );
   } else {
     // Desconectado / en pausa: dock con resumen de ganancias y CTA principal "Conéctate".
     bottomOverlay = (
       <Appear key="offline">
-        <Card variant="filled">
+        <GlassSheet>
           {/* Elige el vehículo ANTES de conectarte: define qué viajes recibirás al iniciar turno. */}
           <View style={styles.vehiclePicker}>
             <VehicleTypeSelector />
@@ -513,7 +513,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               style={styles.spaced}
             />
           ) : null}
-        </Card>
+        </GlassSheet>
       </Appear>
     );
   }
