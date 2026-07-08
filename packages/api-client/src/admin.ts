@@ -862,6 +862,8 @@ export const inspectionView = z.object({
   scheduledAt: z.string().nullable(),
   inspector: z.string().nullable(),
   result: z.string().nullable(),
+  // Centro (CITV) donde se realizó la inspección. Nullable: las auto-registradas al aprobar el doc ITV no lo traen.
+  center: z.string().nullable(),
 });
 export type InspectionView = z.infer<typeof inspectionView>;
 
@@ -986,6 +988,7 @@ export const createInspectionRequest = z.object({
   passed: z.boolean(),
   inspectedAt: z.string().optional(),
   notes: z.string().optional(),
+  center: z.string().optional(),
 });
 export type CreateInspectionRequest = z.infer<typeof createInspectionRequest>;
 

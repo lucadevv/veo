@@ -57,6 +57,7 @@ export function CreateInspectionDialog({
     vehicleId: presetVehicleId ?? '',
     passed: 'true',
     inspectedAt: '',
+    center: '',
     notes: '',
   });
 
@@ -71,11 +72,18 @@ export function CreateInspectionDialog({
         vehicleId: form.vehicleId.trim(),
         passed: form.passed === 'true',
         inspectedAt: form.inspectedAt || undefined,
+        center: form.center.trim() || undefined,
         notes: form.notes.trim() || undefined,
       });
       toast({ tone: 'success', title: 'Inspección registrada' });
       setOpen(false);
-      setForm({ vehicleId: presetVehicleId ?? '', passed: 'true', inspectedAt: '', notes: '' });
+      setForm({
+        vehicleId: presetVehicleId ?? '',
+        passed: 'true',
+        inspectedAt: '',
+        center: '',
+        notes: '',
+      });
       onCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo registrar la inspección.');
@@ -129,6 +137,13 @@ export function CreateInspectionDialog({
               />
             </Field>
           </div>
+          <Field label="Centro (CITV) (opcional)">
+            <Input
+              value={form.center}
+              onChange={(e) => setForm({ ...form, center: e.target.value })}
+              placeholder="Ej. CITV Lima Norte"
+            />
+          </Field>
           <Field label="Notas (opcional)">
             <Input
               value={form.notes}

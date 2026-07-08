@@ -24,4 +24,10 @@ export class CreateInspectionDto {
   @IsString()
   @Length(1, 500)
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'Centro de Inspección Técnica Vehicular (CITV) donde se realizó' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  center?: string;
 }

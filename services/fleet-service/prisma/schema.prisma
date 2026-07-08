@@ -286,6 +286,9 @@ model Inspection {
   inspectedAt DateTime @map("inspected_at") @db.Timestamptz
   passed      Boolean
   notes       String?
+  // Centro de Inspección Técnica Vehicular (CITV) donde se realizó. Texto libre, opcional: las inspecciones
+  // auto-registradas al aprobar el documento ITV no lo traen (el doc no lo captura hoy); el alta manual sí.
+  center      String?  @map("center")
   nextDueAt   DateTime @map("next_due_at") @db.Timestamptz
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 

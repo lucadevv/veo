@@ -328,7 +328,7 @@ function ItvCard({ v, vehicleId }: { v: VehicleView; vehicleId: string }) {
       label: 'Próximo vencimiento',
       value: v.itvNextDueAt ? date(v.itvNextDueAt) : '—',
     },
-    { icon: Building2, label: 'Centro (CITV)', value: '—' },
+    { icon: Building2, label: 'Centro (CITV)', value: latest?.center ?? '—' },
   ];
   return (
     <div className={CARD}>

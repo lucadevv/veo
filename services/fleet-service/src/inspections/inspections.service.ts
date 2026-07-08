@@ -81,6 +81,7 @@ export class InspectionsService {
             inspectedAt,
             nextDueAt,
             notes: input.notes ?? null,
+            center: input.center ?? null,
           },
           inspectorId,
           now,
@@ -131,6 +132,7 @@ export class InspectionsService {
       inspectedAt: Date;
       nextDueAt: Date;
       notes?: string | null;
+      center?: string | null;
     },
     inspectorId: string,
     now: Date,
@@ -143,6 +145,7 @@ export class InspectionsService {
         inspectedAt: params.inspectedAt,
         passed: params.passed,
         notes: params.notes ?? null,
+        center: params.center ?? null,
         nextDueAt: params.nextDueAt,
       },
     });

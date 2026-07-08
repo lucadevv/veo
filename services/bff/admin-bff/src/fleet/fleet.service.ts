@@ -96,6 +96,7 @@ interface Inspection {
   inspectorId: string;
   passed: boolean;
   inspectedAt: string;
+  center: string | null;
 }
 
 @Injectable()
@@ -427,6 +428,7 @@ function toInspectionView(i: Inspection): InspectionView {
     scheduledAt: null,
     inspector: i.inspectorId,
     result: i.passed ? 'PASSED' : 'FAILED',
+    center: i.center,
   };
 }
 

@@ -145,6 +145,10 @@ export class CreateInspectionDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  center?: string;
 }
 
 /** Paginación cursor común a las listas de flota (cursor = id uuidv7 de la última fila previa). */
