@@ -1,4 +1,4 @@
-import type { MapPoint, PlaceSuggestionList, ReversePlace } from '@veo/api-client';
+import type { MapPoint, PlaceSuggestionList } from '@veo/api-client';
 import { MIN_QUERY_LENGTH } from '../entities';
 import type { MapsRepository } from '../repositories/maps-repository';
 
@@ -16,14 +16,5 @@ export class AutocompletePlacesUseCase {
       return Promise.resolve([]);
     }
     return this.maps.autocomplete(trimmed, near);
-  }
-}
-
-/** Geocoding inverso: etiqueta legible de un punto (p. ej. para nombrar la ubicación actual). */
-export class ReverseGeocodeUseCase {
-  constructor(private readonly maps: MapsRepository) {}
-
-  execute(point: MapPoint): Promise<ReversePlace> {
-    return this.maps.reverse(point);
   }
 }

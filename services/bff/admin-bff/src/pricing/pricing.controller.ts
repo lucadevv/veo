@@ -11,41 +11,14 @@ import { Body, Controller, Get, HttpCode, Put } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import {
-  PricingService,
-  type ModeScheduleView,
-  type BidFloorView,
-  type BaseFareView,
-} from './pricing.service';
-import { ReplaceScheduleDto, ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
+import { PricingService, type BidFloorView, type BaseFareView } from './pricing.service';
+import { ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
 
 @ApiTags('pricing')
 @Controller('pricing')
 @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
 export class PricingController {
   constructor(private readonly pricing: PricingService) {}
-
-  @Get('mode-schedule')
-  @ApiOperation({
-    summary: 'Schedule de modo de pricing vigente (o el default PUJA). pricing:view. ADR 011',
-  })
-  getSchedule(@CurrentUser() user: AuthenticatedUser): Promise<ModeScheduleView> {
-    return this.pricing.getSchedule(user);
-  }
-
-  @Put('mode-schedule')
-  @HttpCode(200)
-  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
-  @RequireStepUpMfa()
-  @ApiOperation({
-    summary: 'REEMPLAZA wholesale el schedule de modo. pricing:manage (ADMIN/SUPERADMIN/FINANCE).',
-  })
-  replaceSchedule(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ReplaceScheduleDto,
-  ): Promise<ModeScheduleView> {
-    return this.pricing.replaceSchedule(user, dto);
-  }
 
   @Get('base-fare')
   @ApiOperation({

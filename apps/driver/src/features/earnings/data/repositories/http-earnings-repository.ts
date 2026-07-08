@@ -1,11 +1,6 @@
 import type { HttpClient } from '@veo/api-client';
-import { driverEarningsSummary, driverPayoutList, earningsSummary } from '@veo/api-client';
-import type {
-  EarningsBreakdown,
-  EarningsOverview,
-  EarningsRepository,
-  PayoutList,
-} from '../../domain';
+import { driverEarningsSummary, earningsSummary } from '@veo/api-client';
+import type { EarningsBreakdown, EarningsOverview, EarningsRepository } from '../../domain';
 
 /** Implementación HTTP del `EarningsRepository` contra el driver-bff. */
 export class HttpEarningsRepository implements EarningsRepository {
@@ -13,10 +8,6 @@ export class HttpEarningsRepository implements EarningsRepository {
 
   getSummary(): Promise<EarningsOverview> {
     return this.http.get('/earnings/summary', { schema: earningsSummary });
-  }
-
-  listPayouts(): Promise<PayoutList> {
-    return this.http.get('/payouts', { schema: driverPayoutList });
   }
 
   getBreakdown(): Promise<EarningsBreakdown> {

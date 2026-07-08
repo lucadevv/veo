@@ -8,18 +8,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import type { AuthenticatedUser } from '@veo/auth';
-import type { PricingMode, BidFloorOverride } from '@veo/shared-types';
+import type { BidFloorOverride } from '@veo/shared-types';
 import { REST_TRIP } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { ReplaceScheduleDto, ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
-
-/** Vista del schedule devuelta por trip-service (proyección vigente o el default). */
-export interface ModeScheduleView {
-  version: number;
-  defaultMode: PricingMode;
-  rules: { dayMask: number; startMinute: number; endMinute: number; mode: PricingMode }[];
-  updatedAt: string | null;
-}
+import type { ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
 
 /** Vista de la tarifa base devuelta por trip-service (F2.4): banderazo + per-km + per-min + version. */
 export interface BaseFareView {
@@ -38,7 +30,6 @@ export interface BidFloorView {
   updatedAt: string;
 }
 
-const BASE = '/internal/pricing/mode-schedule';
 const BID_FLOOR_BASE = '/internal/pricing/bid-floor';
 const BASE_FARE_BASE = '/internal/pricing/base-fare';
 
@@ -48,33 +39,6 @@ export class PricingService {
     @Inject(REST_TRIP) private readonly rest: InternalRestClient,
     private readonly audit: AuditRecorder,
   ) {}
-
-  /** pricing:view — lee el schedule vigente (o el default PUJA si no hay config). */
-  getSchedule(identity: AuthenticatedUser): Promise<ModeScheduleView> {
-    return this.rest.get<ModeScheduleView>(BASE, { identity });
-  }
-
-  /** pricing:manage — reemplaza wholesale el schedule. trip-service bump-ea version y emite el evento. */
-  async replaceSchedule(
-    identity: AuthenticatedUser,
-    dto: ReplaceScheduleDto,
-  ): Promise<ModeScheduleView> {
-    const res = await this.rest.put<ModeScheduleView>(BASE, {
-      identity,
-      body: {
-        defaultMode: dto.defaultMode,
-        rules: dto.rules,
-        expectedVersion: dto.expectedVersion,
-      },
-    });
-    await this.audit.record(identity, {
-      action: 'pricing.mode_schedule_replace',
-      resourceType: 'pricing_mode_schedule',
-      resourceId: String(res.version),
-      payload: { defaultMode: dto.defaultMode, ruleCount: dto.rules.length, version: res.version },
-    });
-    return res;
-  }
 
   /** pricing:view — lee la tarifa base vigente (banderazo + per-km + per-min, o los defaults del código). F2.4 */
   getBaseFare(identity: AuthenticatedUser): Promise<BaseFareView> {

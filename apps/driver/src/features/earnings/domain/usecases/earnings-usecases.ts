@@ -1,5 +1,5 @@
 import type { EarningsRepository } from '../repositories/earnings-repository';
-import type { EarningsBreakdown, EarningsOverview, PayoutList } from '../entities';
+import type { EarningsBreakdown, EarningsOverview } from '../entities';
 
 /** Caso de uso: resumen agregado de ganancias del conductor (incluye sus payouts). */
 export class GetEarningsSummaryUseCase {
@@ -7,15 +7,6 @@ export class GetEarningsSummaryUseCase {
 
   execute(): Promise<EarningsOverview> {
     return this.earnings.getSummary();
-  }
-}
-
-/** Caso de uso: lista de liquidaciones (payouts) del conductor. */
-export class ListPayoutsUseCase {
-  constructor(private readonly earnings: EarningsRepository) {}
-
-  execute(): Promise<PayoutList> {
-    return this.earnings.listPayouts();
   }
 }
 

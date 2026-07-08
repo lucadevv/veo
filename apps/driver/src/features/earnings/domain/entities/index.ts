@@ -1,7 +1,6 @@
 import type {
   DriverEarningsBreakdown,
   DriverEarningsSummary,
-  DriverPayoutList,
   DriverPayoutView,
   EarningsSummary,
 } from '@veo/api-client';
@@ -12,7 +11,6 @@ import type {
  */
 export type EarningsOverview = EarningsSummary;
 export type Payout = DriverPayoutView;
-export type PayoutList = DriverPayoutList;
 
 /**
  * Desglose de ganancias de un período (HOY o SEMANA): bruto, comisión, propinas, NETO y nº de

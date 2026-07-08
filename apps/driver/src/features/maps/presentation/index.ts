@@ -3,4 +3,3 @@ export {
   useAutocomplete,
   type UseAutocompleteResult,
 } from './hooks/useAutocomplete';
-export { useReverseGeocode } from './hooks/useReverseGeocode';
