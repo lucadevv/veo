@@ -5,38 +5,48 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button, useTheme } from '@veo/ui-kit';
 import { NoticeHero } from '../../../shared/presentation/components/NoticeHero';
 import { IconWifiOff } from '../../../shared/presentation/icons';
+import NetInfo from '@react-native-community/netinfo';
 import { useDispatchStore } from './state/dispatchStore';
 
 /**
- * ¿Estamos SIN conexión con VEO? Deriva del estado `connected` del socket `/driver` (única señal de
- * conectividad global que ya existe en la app). Dos defensas contra falsos positivos:
- *  1. Solo se activa si YA estuvimos conectados alguna vez (`connected` arranca `false`: sin esto el
- *     overlay parpadearía en cada arranque, antes del primer handshake).
- *  2. Debounce de 2.5s: un blip transitorio (túnel, zona muerta breve) no dispara el overlay a
- *     pantalla completa — para eso ya está el pill "Reconectando…" del dashboard/viaje.
- *
- * LIMITACIÓN HONESTA: sin `@react-native-community/netinfo` (no está en las deps del driver) NO hay
- * detección de internet real a nivel de SO; esto refleja la salud del socket, no del enlace físico.
+ * ¿Estamos SIN conexión? Combina DOS señales:
+ *  1. Conectividad REAL del dispositivo (SO) vía `@react-native-community/netinfo`: airplane mode, sin
+ *     wifi ni datos, o internet inalcanzable → offline inmediato (el enlace físico cayó).
+ *  2. Salud del socket `/driver`: VEO backend inalcanzable AUNQUE el dispositivo tenga internet.
+ *     Con debounce de 2.5s (un blip transitorio no dispara el overlay full-screen — para eso está el
+ *     pill "Reconectando…") y solo tras el primer handshake (`connected` arranca `false`, evita el
+ *     parpadeo de arranque).
  */
 function useIsOffline(): boolean {
   const connected = useDispatchStore((s) => s.connected);
-  const [offline, setOffline] = useState(false);
+  const [socketDown, setSocketDown] = useState(false);
+  const [deviceOffline, setDeviceOffline] = useState(false);
   const hasConnected = useRef(false);
 
+  // (1) Conectividad del SO. `isInternetReachable` puede ser null mientras se resuelve → no lo tratamos
+  //     como offline (solo `false` explícito o `isConnected=false`).
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener((state) => {
+      setDeviceOffline(!state.isConnected || state.isInternetReachable === false);
+    });
+    return () => unsub();
+  }, []);
+
+  // (2) Socket con VEO, debounced.
   useEffect(() => {
     if (connected) {
       hasConnected.current = true;
-      setOffline(false);
+      setSocketDown(false);
       return;
     }
     if (!hasConnected.current) {
       return;
     }
-    const timer = setTimeout(() => setOffline(true), 2500);
+    const timer = setTimeout(() => setSocketDown(true), 2500);
     return () => clearTimeout(timer);
   }, [connected]);
 
-  return offline;
+  return deviceOffline || socketDown;
 }
 
 /**
