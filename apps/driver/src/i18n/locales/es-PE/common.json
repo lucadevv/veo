@@ -103,6 +103,11 @@
     "network": "Sin conexión",
     "networkDescription": "Revisa tu conexión a internet e inténtalo de nuevo."
   },
+  "offline": {
+    "title": "Sin conexión",
+    "body": "Perdimos la conexión con VEO. Revisá tu internet y volvé a intentar.",
+    "retry": "Reintentar"
+  },
   "auth": {
     "title": "Inicia sesión",
     "subtitle": "Ingresa con tu número de conductor registrado.",
@@ -117,6 +122,14 @@
     "invalidPhone": "Ingresa un teléfono peruano válido",
     "invalidCode": "El código debe tener 6 dígitos",
     "sessionExpired": "Tu sesión expiró. Vuelve a ingresar para continuar.",
+    "sessionClosed": {
+      "title": "Tu sesión se cerró",
+      "body": {
+        "superseded": "Iniciaste sesión en otro dispositivo. Por seguridad, solo podés estar en uno a la vez.",
+        "revoked": "Tu sesión se cerró de forma remota. Volvé a ingresar para continuar."
+      },
+      "action": "Volver a ingresar"
+    },
     "biometricRelogin": "Entrar con Face ID o huella",
     "profileLoadFailed": "No pudimos cargar tu perfil de conductor.",
     "tagline": "Maneja. Gana. Protegido.",
@@ -561,6 +574,18 @@
       }
     },
     "startTitle": "Iniciar turno",
+    "blocked": {
+      "title": "No podés iniciar turno",
+      "body": "Tu vehículo tiene un documento vencido. Actualizalo para volver a operar.",
+      "actionOne": "Actualizar {{doc}}",
+      "actionMany": "Actualizar documentos"
+    },
+    "locationPermission": {
+      "title": "Activá tu ubicación",
+      "body": "VEO necesita el GPS durante el turno para asignarte viajes cercanos y compartir tu posición con el pasajero.",
+      "openSettings": "Abrir Ajustes",
+      "notNow": "Ahora no"
+    },
     "biometricTitle": "Verificación de identidad",
     "biometricBody": "Por seguridad, debes verificar tu rostro (prueba de vida) antes de iniciar el turno.",
     "biometricStart": "Verificar mi rostro",
@@ -662,6 +687,19 @@
     "cancelConfirmTitle": "¿Cancelar el viaje?",
     "cancelConfirmBody": "Puede aplicar una penalización según las reglas de la operación.",
     "cancelReasonLabel": "Motivo (opcional)",
+    "cancelReason": {
+      "title": "¿Por qué cancelás?",
+      "confirm": "Confirmar cancelación",
+      "warn": "Cancelar seguido afecta tu tasa de aceptación",
+      "otherLabel": "Contanos qué pasó",
+      "reasons": {
+        "noShow": "El pasajero no apareció",
+        "wrongAddress": "Dirección incorrecta o inaccesible",
+        "vehicle": "Problema con mi vehículo",
+        "passengerRequested": "El pasajero pidió cancelar",
+        "other": "Otro motivo"
+      }
+    },
     "cashCollectTitle": "Cobro en efectivo",
     "cashCollectBody": "Confirmá que recibiste el importe del viaje en efectivo, en mano. El pasajero confirma su lado desde su app.",
     "cashCollectConfirm": "Sí, cobré {{amount}}",

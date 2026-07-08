@@ -31,6 +31,8 @@ import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-cl
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
 import { useProfile } from '../../../profile/presentation/hooks/useProfile';
+import { isBlocking } from '../../../documents/domain';
+import { useDocuments } from '../../../documents/presentation/hooks/useDocuments';
 import { DemandLegend, useHeatCells, useHeatmap } from '../../../ops/presentation';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import {
@@ -168,6 +170,33 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     gpsAvailability && !gpsAvailability.permissionGranted
       ? t('shift.gpsPermissionBody')
       : t('shift.gpsServicesBody');
+
+  // Gate de iniciar turno. Documentos BLOQUEANTES (vencido/rechazado): sin ellos vigentes el conductor
+  // no puede operar (frame C/Turno-DocsVencidos). Si la lista aún no cargó, NO bloqueamos (degradación
+  // honesta: mejor dejar iniciar que bloquear por un dato ausente; el backend igual valida).
+  const documents = useDocuments();
+  const hasBlockingDocs = (documents.data ?? []).some((doc) => isBlocking(doc.simpleStatus));
+  // Permiso de ubicación denegado: sin GPS el dispatch no lo ve → pantalla dedicada (C/Permiso-Ubicacion).
+  // Solo cuando el adapter nativo reportó disponibilidad (null = sin GPS nativo en dev → no gateamos).
+  const locationPermissionDenied =
+    gpsAvailability != null && !gpsAvailability.permissionGranted;
+
+  /**
+   * Inicia (o reanuda) el turno con dos gates previos, en orden: (1) documentos bloqueantes →
+   * `ShiftBlocked`; (2) permiso de ubicación denegado → `LocationPermission`. Si no aplica ninguno,
+   * sigue el flujo normal a `ShiftStart`.
+   */
+  const handleConnect = () => {
+    if (hasBlockingDocs) {
+      navigation.navigate('ShiftBlocked');
+      return;
+    }
+    if (locationPermissionDenied) {
+      navigation.navigate('LocationPermission');
+      return;
+    }
+    navigation.navigate('ShiftStart');
+  };
 
   // Mapa de calor de demanda: solo cuando el conductor está en línea, sin viaje, con el toggle
   // activo y con ubicación conocida. Si falta cualquier condición, la query queda inactiva (null).
@@ -462,7 +491,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               size="lg"
               fullWidth
               leftIcon={<IconPower size={20} color={theme.colors.onAccent} />}
-              onPress={() => navigation.navigate('ShiftStart')}
+              onPress={handleConnect}
               style={styles.spaced}
             />
           ) : (

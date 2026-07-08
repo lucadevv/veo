@@ -34,6 +34,17 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList>;
   ShiftStart: undefined;
   /**
+   * Gate al iniciar turno (frame C/Turno-DocsVencidos): el vehículo/conductor tiene un documento
+   * BLOQUEANTE (vencido/rechazado) → no se puede iniciar turno. El dashboard enruta aquí antes de
+   * `ShiftStart` cuando detecta docs bloqueantes; el CTA lleva a Documentos a actualizarlos.
+   */
+  ShiftBlocked: undefined;
+  /**
+   * Permiso de ubicación denegado (frame C/Permiso-Ubicacion): pantalla dedicada que se presenta
+   * cuando el conductor intenta conectarse sin permiso de GPS. "Abrir Ajustes" → SO; "Ahora no" → atrás.
+   */
+  LocationPermission: undefined;
+  /**
    * Resumen de CIERRE de turno (frame C/CierreTurno): tras finalizar el turno, celebra el cierre y muestra
    * lo ganado hoy + stats. `shiftStartedAt` es la marca de inicio LOCAL (epoch ms) para calcular la
    * duración; `null` si no se pudo medir (degrada a "—"). Terminal: se sale con "Ver ganancias" o "Listo".

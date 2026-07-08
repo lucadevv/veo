@@ -7,9 +7,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { driverTheme, useTheme } from '@veo/ui-kit';
 import type { MainTabParamList, RootStackParamList } from './types';
 import { useSessionStore } from '../core/session/sessionStore';
+import { useSessionClosedStore } from '../core/session/sessionClosedStore';
 import {
   LoginScreen,
   OnboardingScreen,
+  SessionClosedScreen,
   SplashScreen,
   useOnboardingStore,
 } from '../features/auth/presentation';
@@ -25,6 +27,8 @@ import { RegistrationNavigator } from './RegistrationNavigator';
 import {
   BiometricEnrollScreen,
   DashboardScreen,
+  LocationPermissionScreen,
+  ShiftBlockedScreen,
   ShiftStartScreen,
   ShiftSummaryScreen,
 } from '../features/shift/presentation';
@@ -47,7 +51,7 @@ import {
   CarpoolScreen,
   CarpoolTripBookingsScreen,
 } from '../features/carpool/presentation';
-import { RealtimeManager } from '../features/realtime/presentation';
+import { OfflineOverlay, RealtimeManager } from '../features/realtime/presentation';
 import { NotificationsScreen, PushManager } from '../features/notifications/presentation';
 import {
   IconAccount,
@@ -159,6 +163,9 @@ function MainTabs(): React.JSX.Element {
  */
 export const RootNavigator = (): React.JSX.Element => {
   const status = useSessionStore((s) => s.status);
+  // Cierre REMOTO de sesión (single-active-session / revocación): se muestra un aviso explícito antes de
+  // volver al login (frame C/Sesion-Cerrada), en vez de mandar a login en silencio.
+  const sessionClosedReason = useSessionClosedStore((s) => s.reason);
   const onboardingCompleted = useOnboardingStore((s) => s.completed);
   const registrationStatus = useRegistrationStore((s) => s.status);
   // Resuelve el estado del alta desde el backend tras autenticar (no parpadea hacia el wizard).
@@ -169,6 +176,11 @@ export const RootNavigator = (): React.JSX.Element => {
   }
 
   if (status === 'unauthenticated') {
+    // Aviso de cierre remoto (superseded/revoked): pantalla terminal con "Volver a ingresar" que limpia
+    // la señal y deja pasar al login. Va ANTES del stack de login para no parpadear el login debajo.
+    if (sessionClosedReason) {
+      return <SessionClosedScreen />;
+    }
     return (
       <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
         {onboardingCompleted ? (
@@ -241,6 +253,14 @@ export const RootNavigator = (): React.JSX.Element => {
       <Stack.Navigator initialRouteName="Main" screenOptions={screenOptions}>
         <Stack.Screen name="Main" component={MainTabs} />
         <Stack.Screen name="ShiftStart" component={ShiftStartScreen} />
+        {/* Gate de docs vencidos al iniciar turno (C/Turno-DocsVencidos). */}
+        <Stack.Screen name="ShiftBlocked" component={ShiftBlockedScreen} />
+        {/* Permiso de ubicación denegado al conectarse (C/Permiso-Ubicacion). */}
+        <Stack.Screen
+          name="LocationPermission"
+          component={LocationPermissionScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
         {/* Cierre de turno (resumen + ganancias del día). Terminal: sin gesto atrás — se sale con los CTA. */}
         <Stack.Screen
           name="ShiftSummary"
@@ -306,6 +326,8 @@ export const RootNavigator = (): React.JSX.Element => {
         />
       </Stack.Navigator>
       <RealtimeManager />
+      {/* Overlay global "Sin conexión" (C/SinConexion): por encima de todo el árbol de navegación. */}
+      <OfflineOverlay />
       <PushManager />
     </>
   );

@@ -24,6 +24,7 @@ import type { RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
+import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
 import { IconNavigation } from '../../../../shared/presentation/icons';
@@ -43,6 +44,19 @@ import { ExternalNavButtons } from '../components/ExternalNavButtons';
 import { Appear } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripActive'>;
+
+/**
+ * Motivos tipados de cancelación del conductor (frame C/Cancelar-Conductor). El orden es el del diseño;
+ * `noShow` es el "no-show" (el pasajero no apareció). `other` abre el campo de texto libre.
+ */
+const CANCEL_REASON_KEYS = [
+  'noShow',
+  'wrongAddress',
+  'vehicle',
+  'passengerRequested',
+  'other',
+] as const;
+type CancelReasonKey = (typeof CANCEL_REASON_KEYS)[number];
 
 const statusTone: Record<DriverTripStatus, StatusTone> = {
   REQUESTED: 'neutral',
@@ -131,6 +145,7 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [cancelReasonKey, setCancelReasonKey] = useState<CancelReasonKey | null>(null);
   const [childOpen, setChildOpen] = useState(false);
   const [childCode, setChildCode] = useState('');
   const [cashOpen, setCashOpen] = useState(false);
@@ -499,37 +514,69 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
 
       <BottomSheet
         visible={cancelOpen}
-        onClose={() => setCancelOpen(false)}
-        title={t('trips.cancelConfirmTitle')}
+        onClose={() => {
+          setCancelOpen(false);
+          setCancelReasonKey(null);
+          setCancelReason('');
+        }}
+        title={t('trips.cancelReason.title')}
         footer={
           <View style={styles.sheetFooter}>
             <Button
               label={t('common.back')}
               variant="secondary"
-              onPress={() => setCancelOpen(false)}
+              onPress={() => {
+                setCancelOpen(false);
+                setCancelReasonKey(null);
+                setCancelReason('');
+              }}
             />
             <Button
-              label={t('trips.actions.cancel')}
+              label={t('trips.cancelReason.confirm')}
               variant="danger"
               loading={actions.cancel.isPending}
-              onPress={() =>
-                actions.cancel.mutate(cancelReason.trim() || undefined, {
-                  onSuccess: finishToDashboard,
-                })
+              // Deshabilitado hasta elegir un motivo; si es "Otro", exige el texto libre.
+              disabled={
+                cancelReasonKey == null ||
+                (cancelReasonKey === 'other' && cancelReason.trim().length === 0)
               }
+              onPress={() => {
+                // El motivo elegido viaja como `reason` al POST /trips/:id/cancel: los tipados como su
+                // etiqueta legible; "Otro" como el texto libre que escribió el conductor.
+                const reason =
+                  cancelReasonKey === 'other'
+                    ? cancelReason.trim()
+                    : cancelReasonKey
+                      ? t(`trips.cancelReason.reasons.${cancelReasonKey}`)
+                      : undefined;
+                actions.cancel.mutate(reason || undefined, {
+                  onSuccess: finishToDashboard,
+                });
+              }}
             />
           </View>
         }
       >
-        <Text variant="callout" color="inkMuted" style={styles.spacer}>
-          {t('trips.cancelConfirmBody')}
-        </Text>
-        <TextField
-          label={t('trips.cancelReasonLabel')}
-          value={cancelReason}
-          onChangeText={setCancelReason}
-          multiline
-        />
+        <View style={styles.cancelReasons}>
+          {CANCEL_REASON_KEYS.map((key) => (
+            <RadioOptionCard
+              key={key}
+              label={t(`trips.cancelReason.reasons.${key}`)}
+              selected={cancelReasonKey === key}
+              onPress={() => setCancelReasonKey(key)}
+            />
+          ))}
+          {cancelReasonKey === 'other' ? (
+            <TextField
+              label={t('trips.cancelReason.otherLabel')}
+              value={cancelReason}
+              onChangeText={setCancelReason}
+              multiline
+            />
+          ) : null}
+          {/* Se mantiene el aviso de cargo/tasa del frame (afecta la tasa de aceptación). */}
+          <Banner tone="warn" title={t('trips.cancelReason.warn')} />
+        </View>
       </BottomSheet>
 
       <BottomSheet
@@ -624,5 +671,6 @@ const styles = StyleSheet.create({
   actions: { gap: 12, marginTop: 4 },
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
   spacer: { marginTop: 12 },
+  cancelReasons: { gap: 8 },
   cashAmount: { textAlign: 'center', marginTop: 4 },
 });

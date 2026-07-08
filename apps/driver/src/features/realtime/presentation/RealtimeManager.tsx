@@ -7,6 +7,10 @@ import {
 } from '../../../navigation/navigationRef';
 import { useDi } from '../../../core/di/useDi';
 import { useSessionStore } from '../../../core/session/sessionStore';
+import {
+  useSessionClosedStore,
+  type SessionClosedReason,
+} from '../../../core/session/sessionClosedStore';
 import { SHIFT_STATE_QUERY_KEY } from '../../shift/presentation/hooks/useShift';
 import { useShiftState } from '../../shift/presentation/hooks/useShift';
 import { isOnShift } from '../../shift/domain';
@@ -38,13 +42,16 @@ export const RealtimeManager = (): null => {
   // que el material sensible NO debe sobrevivir localmente. Best-effort + observable (no bloquea el expire; si el
   // clear falla, el relogin igual fallaría contra el server). NO se usa en la expiración TRANSITORIA del
   // HTTP-refresh (que puede ser un blip de red): ahí conservar el Keychain permite un relogin cuando la red vuelve.
-  const expireOnRemoteRevocation = () => {
+  const expireOnRemoteRevocation = (reason: SessionClosedReason) => {
     localAuth.clear().catch((err) => {
       console.warn(
         '[realtime] no se pudo limpiar el Keychain biométrico tras revocación remota:',
         err,
       );
     });
+    // Aviso explícito ANTES de expirar: el RootNavigator muestra `SessionClosedScreen` con el motivo
+    // (frame C/Sesion-Cerrada) en vez de mandar a login en silencio.
+    useSessionClosedStore.getState().setReason(reason);
     useSessionStore.getState().expireSession();
   };
   const setIncomingOffer = useDispatchStore((s) => s.setIncomingOffer);
@@ -217,13 +224,13 @@ export const RealtimeManager = (): null => {
     // limpiamos el estado local y volvemos al login. No re-suscribimos el socket (el server rechaza este
     // `sid` viejo, así que no hay guerra de reconexión).
     onSessionSuperseded: () => {
-      expireOnRemoteRevocation();
+      expireOnRemoteRevocation('superseded');
     },
     // ENFORCEMENT DE REVOCACIÓN: el gateway rechazó el handshake porque la sesión está revocada (logout
     // remoto, suspensión, o superada). Mismo destino que `superseded`: `expireSession` limpia el estado
     // local y vuelve al login. La revocación server-side ya la aplicó identity (el refresh también fallará).
     onSessionRevoked: () => {
-      expireOnRemoteRevocation();
+      expireOnRemoteRevocation('revoked');
     },
   });
 

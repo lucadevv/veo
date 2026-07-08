@@ -802,3 +802,112 @@ export function IconFace(props: IconProps): React.JSX.Element {
     </Svg>
   );
 }
+
+/** Wifi tachado (sin conexión): arcos de señal rotos + diagonal. Espeja lucide `wifi-off`. */
+export function IconWifiOff(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M8.5 16.4a5 5 0 0 1 7 0"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M5 12.9a10 10 0 0 1 5.2-2.7"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M19 12.9a10 10 0 0 0-2-1.5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M2 8.8a15 15 0 0 1 4.2-2.6"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M22 8.8a15 15 0 0 0-11.3-3.8"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path d="M3 3 21 21" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Circle cx={12} cy={20} r={0.6} fill={color} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Pin de ubicación tachado (GPS/permiso denegado): pin roto + diagonal. Espeja lucide `map-pin-off`. */
+export function IconMapPinOff(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9.3 5.3A7 7 0 0 1 19 10c0 2.2-1.2 4.5-2.7 6.4"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M14.2 14.3c-1 1.3-2 2.5-2.2 2.7a15 15 0 0 1-1-1.1"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M6 6.3A7 7 0 0 0 5 10c0 3.1 2.4 6.5 4.2 8.6"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M10.4 8.4a2.5 2.5 0 0 0 3.2 3.2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path d="M3 3 21 21" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Monitor/dispositivo tachado (sesión cerrada en otro equipo): pantalla + pie + diagonal. */
+export function IconMonitorOff(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M20 15V6a2 2 0 0 0-2-2H8"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M4 6.1V14a2 2 0 0 0 2 2h11"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M9 20h6M12 16v4"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M3 3 21 21" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
