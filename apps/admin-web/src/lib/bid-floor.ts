@@ -1,4 +1,3 @@
-import { GLOBAL_ZONE } from '@veo/shared-types';
 import type { BidFloorOverride, BidFloorView, ReplaceBidFloorRequest } from '@/lib/api/schemas';
 
 /**
@@ -13,15 +12,15 @@ import type { BidFloorOverride, BidFloorView, ReplaceBidFloorRequest } from '@/l
 export const BID_FLOOR_MAX_SOLES = 1000;
 
 /**
- * El override EXPLÍCITO del piso de ESTA oferta en la zona global, o `null` si no tiene (cae al default).
+ * El override EXPLÍCITO del piso de ESTA oferta, o `null` si no tiene (cae al default).
  * Es el valor que puebla el `<input>` de la fila (vacío = sin override), espejo de cómo el panel de Precios
- * lee `config.overrides` por (GLOBAL_ZONE, offeringId).
+ * lee `config.overrides` por offeringId.
  */
 export function offeringFloorOverrideCents(
   bidFloor: Pick<BidFloorView, 'overrides'>,
   offeringId: string,
 ): number | null {
-  const ov = bidFloor.overrides.find((o) => o.zone === GLOBAL_ZONE && o.offeringId === offeringId);
+  const ov = bidFloor.overrides.find((o) => o.offeringId === offeringId);
   return ov ? ov.floorCents : null;
 }
 
@@ -34,19 +33,19 @@ export function effectiveFloorCents(bidFloor: BidFloorView, offeringId: string):
 }
 
 /**
- * FULL-REPLACE de los overrides del bid-floor cambiando SOLO el de una oferta (zona global): upsert con
- * `cents`, o quita el override con `null` (vacío = sin override → usa el default). Preserva TODO lo demás,
- * incluidos overrides de otras zonas (zone-ready) y de otras ofertas — el `PUT /pricing/bid-floor` es
- * wholesale, así que hay que remandar el set entero. Hermano de `withOverride` del catálogo.
+ * FULL-REPLACE de los overrides del bid-floor cambiando SOLO el de una oferta: upsert con
+ * `cents`, o quita el override con `null` (vacío = sin override → usa el default). Preserva TODO lo demás
+ * (los overrides de otras ofertas) — el `PUT /pricing/bid-floor` es wholesale, así que hay que remandar el
+ * set entero. Hermano de `withOverride` del catálogo.
  */
 export function withFloorOverride(
   base: readonly BidFloorOverride[],
   offeringId: string,
   cents: number | null,
 ): BidFloorOverride[] {
-  const rest = base.filter((o) => !(o.zone === GLOBAL_ZONE && o.offeringId === offeringId));
+  const rest = base.filter((o) => o.offeringId !== offeringId);
   if (cents === null) return rest;
-  return [...rest, { zone: GLOBAL_ZONE, offeringId, floorCents: cents }];
+  return [...rest, { offeringId, floorCents: cents }];
 }
 
 /**

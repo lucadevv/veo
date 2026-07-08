@@ -15,7 +15,7 @@ function fakeBidFloor() {
   const svc = {
     getConfig: async () => ({
       defaultFloorCents: 700,
-      overrides: [{ zone: 'GLOBAL', offeringId: 'veo_moto', floorCents: 300 }],
+      overrides: [{ offeringId: 'veo_moto', floorCents: 300 }],
       version: 2,
       updatedAt: '2026-06-17T00:00:00.000Z',
     }),
@@ -76,7 +76,7 @@ describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
     const controller = new PricingController(fakeBidFloor().svc, fakeBaseFare().svc);
     expect(await controller.getBidFloor()).toEqual({
       defaultFloorCents: 700,
-      overrides: [{ zone: 'GLOBAL', offeringId: 'veo_moto', floorCents: 300 }],
+      overrides: [{ offeringId: 'veo_moto', floorCents: 300 }],
       version: 2,
       updatedAt: '2026-06-17T00:00:00.000Z',
     });
@@ -87,7 +87,7 @@ describe('PricingController · bid floor (ADR 010 §9.3 · per-oferta)', () => {
     const controller = new PricingController(bid.svc, fakeBaseFare().svc);
     const dto = {
       defaultFloorCents: 700,
-      overrides: [{ zone: 'GLOBAL' as const, offeringId: 'veo_moto' as const, floorCents: 300 }],
+      overrides: [{ offeringId: 'veo_moto' as const, floorCents: 300 }],
       expectedVersion: 2,
     };
     const out = await controller.replaceBidFloor(dto);

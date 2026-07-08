@@ -288,19 +288,19 @@ model BaseFareConfig {
   @@schema("trip")
 }
 
-/// Piso de la PUJA (bid floor) editable en caliente, keyed por (zona, oferta) — ADR 010 §9.3. SINGLETON
-/// (Tier 1 GLOBAL) + version + outbox + cache, mismo patrón que base_fare_config. Reemplaza el
+/// Piso de la PUJA (bid floor) editable en caliente, per-OFERTA — ADR 010 §9.3. SINGLETON (una fila global)
+/// + version + outbox + cache, mismo patrón que base_fare_config. Reemplaza el
 /// escalar global hardcodeado en env (BID_FLOOR_CENTS) por config que el admin maneja sin deploy. Sin fila →
 /// DEFAULT_BID_FLOOR_CONFIG (piso S/7, sin overrides) = comportamiento previo (degradación honesta). El gate
 /// AUTORITATIVO de la puja (createTrip/rebid) y el piso de DISPLAY del quote resuelven con resolveBidFloorCents
-/// (@veo/shared-types). `overrides` = array JSON { zone, offeringId, floorCents }; un id de oferta que ya no
-/// existe en código se IGNORA al resolver. Per-oferta funciona hoy; per-zona es no-breaking (la firma ya lleva zona).
+/// (@veo/shared-types). `overrides` = array JSON { offeringId, floorCents }; un id de oferta que ya no
+/// existe en código se IGNORA al resolver. (La dimensión ZONA se podó en A6: era capacidad latente.)
 model BidFloorConfig {
-  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL'.
+  /// Singleton: una única fila de config global. Valor fijo 'GLOBAL' (id de la FILA, no una zona).
   id                String   @id
-  /// Piso por defecto en céntimos PEN cuando no hay override para la (zona, oferta). Default 700 (S/7).
+  /// Piso por defecto en céntimos PEN cuando no hay override para la oferta. Default 700 (S/7).
   defaultFloorCents Int      @default(700) @map("default_floor_cents")
-  /// Overrides del piso por (zona, oferta) { zone, offeringId, floorCents }. Default [] = solo el default.
+  /// Overrides del piso por oferta { offeringId, floorCents }. Default [] = solo el default.
   overrides         Json     @default("[]")
   /// Versión MONOTÓNICA (CAS; se bumpea en cada PUT; viaja en pricing.bid_floor_updated por outbox).
   version           Int      @default(0)

@@ -637,17 +637,16 @@ export const replaceCostPerKmRequest = z.object({
 });
 export type ReplaceCostPerKmRequest = z.infer<typeof replaceCostPerKmRequest>;
 
-/* ── Piso de la PUJA (bid floor) per-(zona, oferta) · ADR 010 §9.3 ── */
+/* ── Piso de la PUJA (bid floor) per-oferta · ADR 010 §9.3 ── */
 
-/** Un override del piso para una (zona, oferta). `zone`/`offeringId` viajan como string (enums del dominio). */
+/** Un override del piso para una OFERTA. `offeringId` viaja como string (enum del dominio). */
 export const bidFloorOverride = z.object({
-  zone: z.string(),
   offeringId: z.string(),
   floorCents: z.number().int().nonnegative(),
 });
 export type BidFloorOverride = z.infer<typeof bidFloorOverride>;
 
-/** Piso vigente (GET /pricing/bid-floor): piso por defecto + overrides por (zona, oferta) + versión. */
+/** Piso vigente (GET /pricing/bid-floor): piso por defecto + overrides por oferta + versión. */
 export const bidFloorView = z.object({
   defaultFloorCents: z.number().int().nonnegative(),
   overrides: z.array(bidFloorOverride),
@@ -657,7 +656,7 @@ export const bidFloorView = z.object({
 export type BidFloorView = z.infer<typeof bidFloorView>;
 
 /**
- * Body del PUT /pricing/bid-floor (ADR 010 §9.3): piso por defecto + overrides por (zona, oferta).
+ * Body del PUT /pricing/bid-floor (ADR 010 §9.3): piso por defecto + overrides por oferta.
  * `expectedVersion` = optimistic locking (CAS); si otro admin la movió → 409 (el panel recarga). 0 = primer write.
  */
 export const replaceBidFloorRequest = z.object({

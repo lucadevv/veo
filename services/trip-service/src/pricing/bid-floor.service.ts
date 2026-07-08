@@ -1,7 +1,7 @@
 /**
- * BidFloorService (ADR 010 §9.3) — piso de la PUJA editable en caliente, keyed por (zona, oferta). Patrón
+ * BidFloorService (ADR 010 §9.3) — piso de la PUJA editable en caliente, per-OFERTA. Patrón
  * de singleton de config hot-editable (version + CAS + outbox + cache), igual que BaseFareService/CatalogService:
- *  - `resolve(zone, offeringId)`: el piso AUTORITATIVO que createTrip/rebid usan como gate del bid. Delega
+ *  - `resolve(offeringId)`: el piso AUTORITATIVO que createTrip/rebid usan como gate del bid. Delega
  *    en `resolveBidFloorCents` (PURO, @veo/shared-types) — el MISMO resolver que el public-bff usa para el
  *    display del quote, así quote↔create no divergen.
  *  - `getConfig()`: GET interno (admin) — defaultFloorCents + overrides + version + updatedAt.
@@ -9,7 +9,7 @@
  *    EMITE pricing.bid_floor_updated por outbox en la MISMA transacción (audit + invalidación de cache).
  *
  * Reemplaza el escalar global hardcodeado en env (BID_FLOOR_CENTS): ahora el piso es config que el admin
- * maneja sin deploy, con piso por defecto + overrides por oferta (per-oferta hoy; per-zona no-breaking).
+ * maneja sin deploy, con piso por defecto + overrides por oferta.
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
@@ -20,7 +20,6 @@ import {
   type BidFloorConfig,
   type BidFloorOverride,
   type OfferingId,
-  type PricingZoneKey,
 } from '@veo/shared-types';
 import { bumpPricingConfigChanged } from '../trips/trip-metrics';
 import {
@@ -50,13 +49,13 @@ export class BidFloorService {
   ) {}
 
   /**
-   * Piso AUTORITATIVO del bid para (zona, oferta) en céntimos PEN. Carga la config (cacheada) y delega en el
+   * Piso AUTORITATIVO del bid para una oferta en céntimos PEN. Carga la config (cacheada) y delega en el
    * resolver PURO. Sin fila → DEFAULT_BID_FLOOR_CONFIG (piso S/7, sin overrides) = comportamiento previo
    * (degradación honesta). El PUT invalida el cache → un cambio de piso se ve en el siguiente resolve.
    */
-  async resolve(zone: PricingZoneKey, offeringId: OfferingId): Promise<number> {
+  async resolve(offeringId: OfferingId): Promise<number> {
     const config = await this.loadConfig();
-    return resolveBidFloorCents(config, zone, offeringId);
+    return resolveBidFloorCents(config, offeringId);
   }
 
   /** GET interno: la config vigente + metadatos de versión (o el DEFAULT explícito si no hay fila). */
@@ -80,7 +79,6 @@ export class BidFloorService {
     const nextVersion = input.expectedVersion + 1;
     // Serializamos los overrides tal cual (ya validados por el DTO) como JSON de la fila.
     const overridesJson = input.overrides.map((o) => ({
-      zone: o.zone,
       offeringId: o.offeringId,
       floorCents: o.floorCents,
     }));

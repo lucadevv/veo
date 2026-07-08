@@ -3,13 +3,12 @@
  * PrismaFuelSurchargeRepository: el BidFloorService depende de la INTERFAZ (BID_FLOOR_REPO), no de Prisma
  * — se testea con un repo en memoria; la persistencia vive en el adaptador.
  *
- * La config es { defaultFloorCents, overrides[] } (Tier 1 GLOBAL; per-zona = no-breaking). `overrides` es
- * un array JSON { zone, offeringId, floorCents } que se parsea DEFENSIVAMENTE (fila corrupta → []).
+ * La config es { defaultFloorCents, overrides[] } (per-OFERTA). `overrides` es
+ * un array JSON { offeringId, floorCents } que se parsea DEFENSIVAMENTE (fila corrupta → []).
  */
 import { Injectable } from '@nestjs/common';
 import {
   findOffering,
-  GLOBAL_ZONE,
   type BidFloorConfig,
   type BidFloorOverride,
 } from '@veo/shared-types';
@@ -19,7 +18,7 @@ import { Prisma } from '../generated/prisma';
 /** Token DI del puerto (inyección por interfaz). */
 export const BID_FLOOR_REPO = Symbol('BID_FLOOR_REPO');
 
-/** Id fijo del singleton (Tier 1 GLOBAL). */
+/** Id fijo de la FILA singleton (no una zona: es la única fila de config global). */
 export const BID_FLOOR_SINGLETON_ID = 'GLOBAL';
 
 /** Config persistida del piso + metadatos de versión (lo que el GET expone y el PUT bumpea). */
@@ -85,7 +84,8 @@ export class PrismaBidFloorRepository implements BidFloorRepository {
 /**
  * Parsea de forma DEFENSIVA el `overrides` JSON de la fila (Prisma.JsonValue) a BidFloorOverride[]. Sin `any`:
  * estrechamos cada elemento. Una fila corrupta/forma inesperada degrada a [] (honesto, no crash) — el PUT
- * valida el shape antes de escribir, así que esto es cinturón-y-tirantes. `zone` se acota a 'GLOBAL' (Tier 1).
+ * valida el shape antes de escribir, así que esto es cinturón-y-tirantes. Una `zone` residual en una fila
+ * pre-A6 se IGNORA (extra key): el override se acepta por su offeringId/floorCents.
  */
 function parseOverrides(raw: Prisma.JsonValue): BidFloorOverride[] {
   if (!Array.isArray(raw)) return [];
@@ -93,12 +93,12 @@ function parseOverrides(raw: Prisma.JsonValue): BidFloorOverride[] {
   for (const item of raw) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
     const rec = item as Record<string, unknown>;
-    const { zone, offeringId, floorCents } = rec;
+    const { offeringId, floorCents } = rec;
     // Un id de oferta que ya no existe en código se IGNORA (el código es la fuente de ids válidos, igual
     // que `resolveCatalog`). `findOffering` además NARROWING string → OfferingId tipado.
     const spec = typeof offeringId === 'string' ? findOffering(offeringId) : undefined;
-    if (zone === GLOBAL_ZONE && spec && typeof floorCents === 'number') {
-      out.push({ zone, offeringId: spec.id, floorCents });
+    if (spec && typeof floorCents === 'number') {
+      out.push({ offeringId: spec.id, floorCents });
     }
   }
   return out;

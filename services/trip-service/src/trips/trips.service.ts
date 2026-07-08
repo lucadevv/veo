@@ -33,7 +33,6 @@ import {
   ActorType,
   findOffering,
   OfferingId,
-  GLOBAL_ZONE,
   type OfferingSpec,
   type OfferingPricingPolicy,
 } from '@veo/shared-types';
@@ -273,18 +272,17 @@ export class TripsService {
   }
 
   /**
-   * Piso del bid para (zona, oferta) (ADR 010 §9.3). Resuelto por BidFloorService: config versionada que el
+   * Piso del bid por OFERTA (ADR 010 §9.3). Resuelto por BidFloorService: config versionada que el
    * admin maneja en caliente (default + overrides por oferta), vía el resolver PURO `resolveBidFloorCents`
    * (@veo/shared-types) — el MISMO que el public-bff usa para el display del quote (consistencia por
-   * construcción). Per-oferta hoy; per-zona no-breaking (la firma ya transporta la zona vía `GLOBAL_ZONE`).
-   * DEGRADACIÓN: sin el servicio inyectado (tests legacy) cae al piso global de env (`this.bidFloorCents`).
+   * construcción). DEGRADACIÓN: sin el servicio inyectado (tests legacy) cae al piso global de env
+   * (`this.bidFloorCents`).
    */
   private async resolveBidFloorCents(offeringId: OfferingId | null): Promise<number> {
     if (this.bidFloor) {
       // Sin oferta conocida (viaje legacy con `category` null) → la oferta fue la ancla económico (el default
-      // de `resolveOffering`); resolvemos su piso (si no tiene override, cae al default igual). MVP Tier 1:
-      // zona SIEMPRE GLOBAL (per-zona es no-breaking cuando exista).
-      return this.bidFloor.resolve(GLOBAL_ZONE, offeringId ?? OfferingId.VEO_ECONOMICO);
+      // de `resolveOffering`); resolvemos su piso (si no tiene override, cae al default igual).
+      return this.bidFloor.resolve(offeringId ?? OfferingId.VEO_ECONOMICO);
     }
     return this.bidFloorCents;
   }

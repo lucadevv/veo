@@ -623,15 +623,14 @@ export const pricingModeScheduleUpdated = z.object({
 
 /// Piso de la PUJA (bid floor) reemplazado por el admin (ADR 010 §9.3). Emitido por outbox en la MISMA tx
 /// del PUT; lo consume PricingCacheConsumer para invalidar el cache del piso cross-réplica (NO load-bearing:
-/// trip-service lee la tabla local). `overrides` = piso por (zona, oferta); sin override la combinación cae
+/// trip-service lee la tabla local). `overrides` = piso por oferta; sin override la oferta cae
 /// al `defaultFloorCents`. `version` MONOTÓNICA (la invalidación de cache es idempotente y tolera reorden).
 export const pricingBidFloorUpdated = z.object({
-  /// Piso por defecto en céntimos PEN (cuando no hay override para la (zona, oferta)).
+  /// Piso por defecto en céntimos PEN (cuando no hay override para la oferta).
   defaultFloorCents: z.number().int().nonnegative(),
-  /// Overrides del piso por (zona, oferta). `zone`/`offeringId` son los enums de @veo/shared-types (string en wire).
+  /// Overrides del piso por oferta. `offeringId` es el enum de @veo/shared-types (string en wire).
   overrides: z.array(
     z.object({
-      zone: z.string(),
       offeringId: z.string(),
       floorCents: z.number().int().nonnegative(),
     }),

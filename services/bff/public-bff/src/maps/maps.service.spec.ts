@@ -43,7 +43,7 @@ class FakeTripRest {
     // por oferta). Default = piso global S/7 sin overrides (= comportamiento previo de los specs).
     private readonly bidFloor: {
       defaultFloorCents: number;
-      overrides: { zone: string; offeringId: string; floorCents: number }[];
+      overrides: { offeringId: string; floorCents: number }[];
     } = { defaultFloorCents: 700, overrides: [] },
     // Simula el endpoint del piso CAÍDO (degradación honesta: el quote cae a DEFAULT_BID_FLOOR_CONFIG).
     private readonly bidFloorError?: Error,
@@ -428,8 +428,8 @@ describe('MapsService.quote', () => {
       {
         defaultFloorCents: 700,
         overrides: [
-          { zone: 'GLOBAL', offeringId: OfferingId.VEO_ECONOMICO, floorCents: 300 },
-          { zone: 'GLOBAL', offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
+          { offeringId: OfferingId.VEO_ECONOMICO, floorCents: 300 },
+          { offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
         ],
       },
     );

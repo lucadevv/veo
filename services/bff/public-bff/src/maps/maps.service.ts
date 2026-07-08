@@ -31,7 +31,6 @@ import {
   OfferingId,
   resolveBidFloorCents,
   DEFAULT_BID_FLOOR_CONFIG,
-  GLOBAL_ZONE,
   type BidFloorConfig,
   type OfferingSpec,
   type OfferingPricingPolicy,
@@ -215,7 +214,7 @@ export class MapsService {
           // re-resuelve trip-service en createTrip (la app no lo manda).
           ...(isPujaMode(offeringMode)
             ? {
-                bidFloorCents: resolveBidFloorCents(bidFloorConfig, GLOBAL_ZONE, offering.id),
+                bidFloorCents: resolveBidFloorCents(bidFloorConfig, offering.id),
                 suggestedCents: priceCents,
               }
             : {}),
@@ -238,7 +237,7 @@ export class MapsService {
       const anchorPricing = effective?.get(ANCHOR_OFFERING.id)?.pricing ?? ANCHOR_OFFERING.pricing;
       const suggestedCents = this.offeringPriceCents(anchorPricing, route, fareBase);
       // El piso top-level (compat apps viejas) = el de la oferta ANCLA (VEO Económico), mismo resolver.
-      const bidFloorCents = resolveBidFloorCents(bidFloorConfig, GLOBAL_ZONE, ANCHOR_OFFERING.id);
+      const bidFloorCents = resolveBidFloorCents(bidFloorConfig, ANCHOR_OFFERING.id);
       return { ...base, bidFloorCents, suggestedCents };
     }
     return base;

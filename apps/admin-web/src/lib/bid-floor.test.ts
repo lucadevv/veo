@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { GLOBAL_ZONE, OfferingId } from '@veo/shared-types';
+import { OfferingId } from '@veo/shared-types';
 import type { BidFloorOverride, BidFloorView } from '@/lib/api/schemas';
 import {
   bidFloorDefaultReplace,
@@ -9,12 +9,7 @@ import {
   withFloorOverride,
 } from './bid-floor';
 
-const ov = (
-  offeringId: string,
-  floorCents: number,
-  zone: string = GLOBAL_ZONE,
-): BidFloorOverride => ({
-  zone,
+const ov = (offeringId: string, floorCents: number): BidFloorOverride => ({
   offeringId,
   floorCents,
 });
@@ -27,11 +22,11 @@ const view = (overrides: BidFloorOverride[], defaultFloorCents = 700): BidFloorV
 });
 
 /**
- * Resolución del piso por oferta: el override explícito (zona global) o `null` (cae al default). Es lo que
+ * Resolución del piso por oferta: el override explícito o `null` (cae al default). Es lo que
  * puebla el `<input>` de la fila — vacío = sin override.
  */
 describe('offeringFloorOverrideCents · override explícito o null', () => {
-  it('devuelve el override de la oferta cuando existe en la zona global', () => {
+  it('devuelve el override de la oferta cuando existe', () => {
     expect(
       offeringFloorOverrideCents(view([ov(OfferingId.VEO_MOTO, 300)]), OfferingId.VEO_MOTO),
     ).toBe(300);
@@ -41,12 +36,9 @@ describe('offeringFloorOverrideCents · override explícito o null', () => {
     expect(offeringFloorOverrideCents(view([]), OfferingId.VEO_MOTO)).toBeNull();
   });
 
-  it('ignora overrides de OTRAS zonas (hoy solo GLOBAL; zone-ready)', () => {
+  it('devuelve null para una oferta distinta a la que tiene override', () => {
     expect(
-      offeringFloorOverrideCents(
-        view([ov(OfferingId.VEO_MOTO, 300, 'LIMA_NORTE')]),
-        OfferingId.VEO_MOTO,
-      ),
+      offeringFloorOverrideCents(view([ov(OfferingId.VEO_CONFORT, 900)]), OfferingId.VEO_MOTO),
     ).toBeNull();
   });
 });
@@ -90,13 +82,6 @@ describe('withFloorOverride · upsert/quita preservando el resto', () => {
     expect(out).toContainEqual(ov(OfferingId.VEO_CONFORT, 900));
     expect(out).toContainEqual(ov(OfferingId.VEO_MOTO, 300));
   });
-
-  it('preserva overrides de OTRAS zonas al tocar la global (zone-ready, no los pisa)', () => {
-    const base = [ov(OfferingId.VEO_MOTO, 500, 'LIMA_NORTE')];
-    const out = withFloorOverride(base, OfferingId.VEO_MOTO, 300);
-    expect(out).toContainEqual(ov(OfferingId.VEO_MOTO, 500, 'LIMA_NORTE'));
-    expect(out).toContainEqual(ov(OfferingId.VEO_MOTO, 300));
-  });
 });
 
 /**
@@ -116,7 +101,7 @@ describe('bidFloorDefaultReplace · cambia el default PRESERVANDO los overrides 
   });
 
   it('NO borra ningún override aunque el panel ya no los muestre (regresión de A2)', () => {
-    const overrides = [ov(OfferingId.VEO_MOTO, 300), ov(OfferingId.VEO_XL, 1200, 'LIMA_NORTE')];
+    const overrides = [ov(OfferingId.VEO_MOTO, 300), ov(OfferingId.VEO_XL, 1200)];
     const body = bidFloorDefaultReplace(view(overrides, 700), 500);
     expect(body.overrides).toEqual(overrides);
   });

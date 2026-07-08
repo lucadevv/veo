@@ -19,16 +19,9 @@ import {
   type ValidatorConstraintInterface,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  BID_FLOOR_MAX_CENTS,
-  GLOBAL_ZONE,
-  OfferingId,
-  PricingMode,
-  type PricingZoneKey,
-} from '@veo/shared-types';
+import { BID_FLOOR_MAX_CENTS, OfferingId, PricingMode } from '@veo/shared-types';
 
 const MODES = [PricingMode.PUJA, PricingMode.FIXED] as const;
-const ZONES = [GLOBAL_ZONE] as const satisfies readonly PricingZoneKey[];
 const OFFERING_IDS = Object.values(OfferingId);
 
 /**
@@ -168,18 +161,14 @@ export class ReplaceBaseFareDto {
   expectedVersion!: number;
 }
 
-/** Un override del piso de la PUJA para una (zona, oferta). Espejo del DTO de trip-service (re-valida abajo). */
+/** Un override del piso de la PUJA para una OFERTA. Espejo del DTO de trip-service (re-valida abajo). */
 export class BidFloorOverrideDto {
-  @ApiProperty({ enum: ZONES, description: 'Zona (Tier 1: solo GLOBAL)' })
-  @IsIn(ZONES)
-  zone!: PricingZoneKey;
-
   @ApiProperty({ enum: OFFERING_IDS, description: 'Oferta a la que aplica este piso' })
   @IsIn(OFFERING_IDS)
   offeringId!: OfferingId;
 
   @ApiProperty({
-    description: 'Piso EFECTIVO de esta (zona, oferta) en céntimos PEN',
+    description: 'Piso EFECTIVO de esta oferta en céntimos PEN',
     minimum: 1,
     maximum: BID_FLOOR_MAX_CENTS,
   })
@@ -190,12 +179,12 @@ export class BidFloorOverrideDto {
 }
 
 /**
- * Body del PUT /pricing/bid-floor (ADR 010 §9.3) — piso de la PUJA por defecto + overrides por (zona, oferta).
+ * Body del PUT /pricing/bid-floor (ADR 010 §9.3) — piso de la PUJA por defecto + overrides por oferta.
  * Reemplazo wholesale; espejo del DTO de trip-service (re-valida aguas abajo).
  */
 export class ReplaceBidFloorDto {
   @ApiProperty({
-    description: 'Piso por defecto en céntimos PEN (sin override para la (zona, oferta))',
+    description: 'Piso por defecto en céntimos PEN (sin override para la oferta)',
     minimum: 1,
     maximum: BID_FLOOR_MAX_CENTS,
   })
@@ -206,7 +195,7 @@ export class ReplaceBidFloorDto {
 
   @ApiProperty({
     type: [BidFloorOverrideDto],
-    description: 'Pisos por (zona, oferta). Sin override → el default.',
+    description: 'Pisos por oferta. Sin override → el default.',
   })
   @IsArray()
   @ArrayMaxSize(64)
