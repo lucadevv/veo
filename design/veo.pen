@@ -54433,28 +54433,6 @@
                   "id": "VCSkZ",
                   "type": "ref",
                   "ref": "Ip9s6",
-                  "name": "Pendientes total",
-                  "width": "fill_container",
-                  "descendants": {
-                    "q4MRzS": {
-                      "icon": "inbox"
-                    },
-                    "RmMSE": {
-                      "content": "Pendientes total"
-                    },
-                    "V9eY6r": {
-                      "content": "23"
-                    },
-                    "JowkP": {
-                      "content": "En la cola",
-                      "fill": "$ink-subtle"
-                    }
-                  }
-                },
-                {
-                  "id": "rBNcw",
-                  "type": "ref",
-                  "ref": "Ip9s6",
                   "name": "Conductores",
                   "width": "fill_container",
                   "descendants": {
@@ -54465,10 +54443,32 @@
                       "content": "Conductores"
                     },
                     "V9eY6r": {
-                      "content": "8"
+                      "content": "3"
                     },
                     "JowkP": {
-                      "content": "Revisión de alta",
+                      "content": "Altas por revisar",
+                      "fill": "$brand"
+                    }
+                  }
+                },
+                {
+                  "id": "rBNcw",
+                  "type": "ref",
+                  "ref": "Ip9s6",
+                  "name": "Documentos",
+                  "width": "fill_container",
+                  "descendants": {
+                    "q4MRzS": {
+                      "icon": "file-text"
+                    },
+                    "RmMSE": {
+                      "content": "Documentos"
+                    },
+                    "V9eY6r": {
+                      "content": "6"
+                    },
+                    "JowkP": {
+                      "content": "Reenviados a revisión",
                       "fill": "$brand"
                     }
                   }
@@ -56521,7 +56521,7 @@
       "type": "frame",
       "id": "QTKgb",
       "x": 17197,
-      "y": 4770,
+      "y": 4834,
       "name": "AdminLogin",
       "clip": true,
       "width": 1440,
