@@ -1,5 +1,6 @@
 export { TripIncomingScreen } from './screens/TripIncomingScreen';
 export { TripActiveScreen } from './screens/TripActiveScreen';
+export { TripCompleteScreen } from './screens/TripCompleteScreen';
 export { TripHistoryScreen } from './screens/TripHistoryScreen';
 export { ManeuverBanner } from './components/ManeuverBanner';
 export { RouteStepsList } from './components/RouteStepsList';

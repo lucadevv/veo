@@ -24,7 +24,8 @@ export type DownstreamRestService =
   | 'fleet'
   | 'media'
   | 'chat'
-  | 'booking';
+  | 'booking'
+  | 'rating';
 
 const URL_ENV: Record<DownstreamRestService, keyof Env> = {
   identity: 'IDENTITY_URL',
@@ -37,6 +38,7 @@ const URL_ENV: Record<DownstreamRestService, keyof Env> = {
   media: 'MEDIA_URL',
   chat: 'CHAT_URL',
   booking: 'BOOKING_SERVICE_URL',
+  rating: 'RATING_URL',
 };
 
 @Injectable()

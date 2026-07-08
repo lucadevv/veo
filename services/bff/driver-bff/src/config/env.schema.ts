@@ -76,6 +76,10 @@ export const envSchema = z
     // booking-service (ADR-014 · carpooling PROGRAMADO): publicar/listar/editar/cancelar ofertas + ver y
     // aprobar/rechazar solicitudes entrantes. REST fijo 3016 (ADR-014 §12).
     BOOKING_SERVICE_URL: requiredInProd('http://localhost:3016', { url: true }),
+    // rating-service: comandos de calificación post-viaje (el conductor califica al pasajero) + MI rating
+    // de un viaje. REST fijo 3010 (mismo servicio que expone el gRPC RATING_GRPC_URL). Sin /api/v1 (lo
+    // añade el RestGateway), a diferencia del public-bff que lo lleva embebido en su propio provider.
+    RATING_URL: requiredInProd('http://localhost:3010', { url: true }),
 
     // Bucket S3/MinIO PRIVADO de documentos de flota (PII). Debe coincidir con media-service
     // (S3_BUCKET_DOCUMENTS). El driver-bff lo pasa explícito al presign-put de media.

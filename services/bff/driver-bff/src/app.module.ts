@@ -22,6 +22,7 @@ import { SupportModule } from './support/support.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { CarpoolModule } from './carpool/carpool.module';
 import { MapsModule } from './maps/maps.module';
+import { RatingsModule } from './ratings/ratings.module';
 
 // Probes de orquestación / scraping de Prometheus: deben quedar ABIERTAS pese al JwtAuthGuard global.
 // Se subclasean los controllers compartidos de @veo/observability SOLO para marcarlos @Public a nivel
@@ -54,6 +55,7 @@ class PublicMetricsController extends MetricsController {}
     RealtimeModule,
     CarpoolModule,
     MapsModule,
+    RatingsModule,
   ],
   controllers: [PublicHealthController, PublicMetricsController],
   providers: [

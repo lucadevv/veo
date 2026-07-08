@@ -29,6 +29,7 @@ import {
 } from '../features/shift/presentation';
 import {
   TripActiveScreen,
+  TripCompleteScreen,
   TripHistoryScreen,
   TripIncomingScreen,
 } from '../features/trips/presentation';
@@ -257,6 +258,12 @@ export const RootNavigator = (): React.JSX.Element => {
           name="TripActive"
           component={TripActiveScreen}
           options={{ gestureEnabled: false }}
+        />
+        {/* Cierre del viaje (resumen + rating). Terminal: sin gesto atrás — se sale con "Listo". */}
+        <Stack.Screen
+          name="TripComplete"
+          component={TripCompleteScreen}
+          options={{ gestureEnabled: false, animation: 'fade' }}
         />
         <Stack.Screen
           name="Bids"

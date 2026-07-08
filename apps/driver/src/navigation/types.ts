@@ -42,6 +42,12 @@ export type RootStackParamList = {
   Support: { tripId?: string } | undefined;
   TripIncoming: { matchId: string; tripId: string };
   TripActive: { tripId: string };
+  /**
+   * Cierre del viaje: resumen de ganancia (tarifa − comisión = neto) + calificar al pasajero. Se llega
+   * al COMPLETAR (reemplaza a TripActive). `fareCents`/`passengerId` vienen del viaje ya cargado en
+   * TripActive; `passengerName` es opcional (el contrato del viaje no lo trae — pregunta genérica si falta).
+   */
+  TripComplete: { tripId: string; passengerId: string; fareCents: number; passengerName?: string };
   /** Pujas abiertas (marketplace conductor): lista de bids cercanos a los que ofertar/contraofertar. */
   Bids: undefined;
   Chat: { tripId: string };

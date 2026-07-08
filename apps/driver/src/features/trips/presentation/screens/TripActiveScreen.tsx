@@ -183,6 +183,26 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
     navigation.popToTop();
   };
 
+  // Al COMPLETAR, en vez de volver directo al dashboard, mostramos el cierre del viaje (resumen de
+  // ganancia + calificar al pasajero, frame C/TripComplete). Limpiamos el viaje activo + el chat (el
+  // viaje terminó) y REEMPLAZAMOS TripActive por TripComplete (no se vuelve atrás a un viaje cerrado).
+  // El botón "Listo" del cierre hace popToTop al dashboard. Sin `trip.data` (no debería en éxito),
+  // degradamos al dashboard directo — nunca trabados.
+  const goToComplete = () => {
+    const active = trip.data;
+    setActiveTripId(null);
+    clearChat(tripId);
+    if (!active) {
+      navigation.popToTop();
+      return;
+    }
+    navigation.replace('TripComplete', {
+      tripId,
+      passengerId: active.passengerId,
+      fareCents: active.fareCents,
+    });
+  };
+
   const onStart = () => {
     if (trip.data?.childMode) {
       setChildOpen(true);
@@ -199,14 +219,14 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
       setCashOpen(true);
       return;
     }
-    actions.complete.mutate(undefined, { onSuccess: finishToDashboard });
+    actions.complete.mutate(undefined, { onSuccess: goToComplete });
   };
 
   // Cierra el viaje declarando si se cobró el efectivo. `collected=false` lo termina igual (flujo
   // bilateral: el cobro queda a la espera de la confirmación del pasajero), nunca data falsa.
   const completeCash = (collected: boolean) => {
     setCashOpen(false);
-    actions.complete.mutate({ cashCollected: collected }, { onSuccess: finishToDashboard });
+    actions.complete.mutate({ cashCollected: collected }, { onSuccess: goToComplete });
   };
 
   // Entrada al chat con el pasajero (con badge de no leídos). Solo tiene sentido mientras el viaje
@@ -455,8 +475,15 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           {/* Salida al dashboard cuando el viaje NO es accionable: cualquier cierre (completado,
               cancelado, vencido, fallido, reasignado) Y TAMBIÉN un estado UNKNOWN (contrato no reconocido).
               `!isTripActive` = terminal o desconocido → siempre hay botón para volver, nunca trabado. */}
+          {/* Cierre no accionable: si el viaje se COMPLETÓ (p. ej. estado llegado por socket), el botón
+              lleva al resumen + rating (TripComplete); para otros cierres (cancelado/vencido/fallido) o
+              UNKNOWN, vuelve directo al dashboard — nunca trabado. */}
           {!isTripActive(status) ? (
-            <Button label={t('shift.dashboardTitle')} fullWidth onPress={finishToDashboard} />
+            <Button
+              label={t('shift.dashboardTitle')}
+              fullWidth
+              onPress={status === 'COMPLETED' ? goToComplete : finishToDashboard}
+            />
           ) : null}
 
           {isTripActive(status) && status !== 'IN_PROGRESS' ? (
