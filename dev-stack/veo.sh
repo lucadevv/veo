@@ -1385,7 +1385,8 @@ finance_forge_identity() {  # $1 = secret
 
 # POST a un endpoint interno de payment-service con la identidad ADMIN/FINANCE firmada. $1=path, $2=body JSON.
 finance_internal_post() {
-  local path="$1" body="${2:-{}}"
+  local path="$1" body="${2:-}"
+  [[ -z "$body" ]] && body='{}'
   local line port secret hdr sig
   line="$(svc_line payment)" || { red "  servicio 'payment' desconocido en el mapa"; return 1; }
   IFS='|' read -r _ port _ _ _ <<<"$line"
