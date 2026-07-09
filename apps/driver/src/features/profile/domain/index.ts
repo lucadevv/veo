@@ -1,4 +1,5 @@
 export * from './entities';
+export * from './profile-query-key';
 export * from './repositories/profile-repository';
 export * from './ports/avatar-uploader';
 export * from './mappers/session-user';

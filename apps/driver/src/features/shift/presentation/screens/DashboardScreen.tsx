@@ -31,7 +31,7 @@ import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../..
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
-import { useProfile } from '../../../profile/presentation/hooks/useProfile';
+import { useProfileData } from '../hooks/useProfileData';
 import { isBlocking } from '../../../documents/domain';
 import { useDocuments } from '../../../documents/presentation/hooks/useDocuments';
 import { DemandLegend, useHeatCells, useHeatmap } from '../../../ops/presentation';
@@ -107,7 +107,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const shift = useShiftState();
   const earnings = useEarningsSummary();
   // Nombre del conductor para el saludo (perfil server-authoritative). Mientras carga → cae al rol genérico.
-  const profile = useProfile();
+  const profile = useProfileData();
   const driverName = formatPersonName(profile.data?.fullName);
   // Saludo compacto fiel al frame ("Carlos R."): primer nombre + inicial del apellido.
   const greetingName = abbreviateGreetingName(profile.data?.fullName);

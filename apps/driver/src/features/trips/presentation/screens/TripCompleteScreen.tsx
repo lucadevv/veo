@@ -9,7 +9,7 @@ import type { RootStackParamList } from '../../../../navigation/types';
 import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { IconCheck } from '../../../../shared/presentation/icons';
 import type { DriverProfile } from '../../../profile/domain';
-import { PROFILE_QUERY_KEY } from '../../../profile/presentation/hooks/useProfile';
+import { PROFILE_QUERY_KEY } from '../../../profile/domain';
 import { StarRating, useMyTripRating, useRatePassenger } from '../../../ratings/presentation';
 import { commissionPercent, computeTripEarnings } from '../../domain';
 import { Appear } from '../components/motion';

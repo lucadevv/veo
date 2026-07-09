@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useLogout } from '../../../profile/presentation/hooks/useProfile';
+import { useLogout } from '../../../../core/session/useLogout';
 
 /**
  * Salida de emergencia del onboarding (LOTE 1). Encapsula el ÚNICO camino de salida de las pantallas

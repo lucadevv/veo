@@ -32,7 +32,8 @@ import {
   IconReceipt,
   IconShield,
 } from '../../../../shared/presentation/icons';
-import { useLogout, useProfile } from '../hooks/useProfile';
+import { useProfile } from '../hooks/useProfile';
+import { useLogout } from '../../../../core/session/useLogout';
 import { BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel } from '../labels';
 import { ProfileIdentityCard } from '../components/ProfileIdentityCard';
 import { ProfileLinkRow } from '../components/ProfileLinkRow';
