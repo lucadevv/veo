@@ -93,5 +93,7 @@ export function OfflineOverlay(): React.JSX.Element | null {
 
 const styles = StyleSheet.create({
   overlay: { zIndex: 1000, elevation: 1000 },
-  action: { alignItems: 'center' },
+  // Botón "Reintentar" centrado (frame C/SinConexion): el wrapper se auto-centra dentro del slot
+  // `extra` (full-width) de NoticeHero, en vez de quedar pegado a la izquierda.
+  action: { alignSelf: 'center' },
 });
