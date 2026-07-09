@@ -224,10 +224,10 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         <View style={styles.greetCard}>
           <Avatar name={driverName ?? 'VEO'} size="sm" tone="neutral" />
           <View style={styles.greetText}>
-            <Text variant="footnote" color="inkSubtle">
+            <Text variant="caption" color="inkSubtle">
               {t('shift.greetingHi')}
             </Text>
-            <Text variant="subhead" numberOfLines={1}>
+            <Text variant="bodyStrong" numberOfLines={1}>
               {greetingName ?? t('shift.greetingRole')}
             </Text>
           </View>
@@ -459,7 +459,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
                 <Text variant="caption" color="inkSubtle">
                   {t('shift.vehicleType.label')}
                 </Text>
-                <Text variant="subhead" numberOfLines={1}>
+                <Text variant="bodyStrong" numberOfLines={1}>
                   {`${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`}
                 </Text>
               </View>
