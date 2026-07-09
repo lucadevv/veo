@@ -12,7 +12,6 @@ import {
   Banner,
   BottomSheet,
   Button,
-  IconButton,
   MapShell,
   SafeScreen,
   Skeleton,
@@ -22,10 +21,11 @@ import {
   type StatusTone,
 } from '@veo/ui-kit';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
+import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
 import { MapTopScrim } from '../../../../shared/presentation/components/MapTopScrim';
-import { IconBell, IconFlame } from '../../../../shared/presentation/icons';
+import { IconFlame } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
@@ -51,7 +51,6 @@ import {
 import { useEndShift, usePauseShift, useShiftState } from '../hooks/useShift';
 import { consumeShiftStartedAt } from '../state/shiftClock';
 import { useActiveVehicle } from '../../../registration/presentation';
-import { useUnreadNotificationsCount } from '../../../notifications/presentation';
 import { VehicleTypeSelector } from '../components/VehicleTypeSelector';
 import { Appear, PressableScale, Pulse } from '../components/motion';
 
@@ -122,8 +121,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const lastTip = useTipStore((s) => s.lastTip);
   const clearTip = useTipStore((s) => s.clearTip);
   const activeVehicle = useActiveVehicle();
-  // Avisos no leídos: enciende el punto de la campana del header (entrada al feed de notificaciones).
-  const unreadCount = useUnreadNotificationsCount();
+  // El tab bar flota SOBRE el mapa (absolute, no reserva alto): el dock debe elevarse por encima de él.
+  const tabBarHeight = useDriverTabBarHeight();
+  const dockLift = { marginBottom: tabBarHeight - 4 };
   const [endConfirm, setEndConfirm] = useState(false);
   // Toggle "Zonas de demanda": pinta el mapa de calor sobre el mapa para orientar al conductor.
   const [demandOn, setDemandOn] = useState(false);
@@ -218,36 +218,23 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         accessibilityRole="button"
         accessibilityLabel={t('shift.viewProfile')}
         onPress={() => navigation.navigate('Cuenta')}
-        style={styles.greetCard}
       >
-        <Avatar name={driverName ?? 'VEO'} size="sm" online={online} />
-        <View style={styles.greetText}>
-          <Text variant="footnote" color="inkSubtle">
-            {t('shift.greetingHi')}
-          </Text>
-          <Text variant="subhead" numberOfLines={1}>
-            {greetingName ?? t('shift.greetingRole')}
-          </Text>
+        {/* GreetPill (frame C/Dashboard): avatar + saludo dentro de una pastilla glass. El fondo va en un
+            View plano — el AnimatedPressable de PressableScale no pinta backgroundColor de forma fiable. */}
+        <View style={styles.greetCard}>
+          <Avatar name={driverName ?? 'VEO'} size="sm" tone="neutral" />
+          <View style={styles.greetText}>
+            <Text variant="footnote" color="inkSubtle">
+              {t('shift.greetingHi')}
+            </Text>
+            <Text variant="subhead" numberOfLines={1}>
+              {greetingName ?? t('shift.greetingRole')}
+            </Text>
+          </View>
         </View>
       </PressableScale>
       <View style={styles.topRight}>
-        {/* Campana → feed de avisos (Notifications). Punto rojo cuando hay no-leídos. */}
-        <View style={styles.bellWrap}>
-          <IconButton
-            accessibilityLabel={t('notifications.open')}
-            variant="surface"
-            onPress={() => navigation.navigate('Notifications')}
-            icon={<IconBell size={20} color={theme.colors.ink} strokeWidth={2} />}
-          />
-          {unreadCount > 0 ? (
-            <View
-              style={[
-                styles.bellDot,
-                { backgroundColor: theme.colors.danger, borderColor: theme.colors.surface },
-              ]}
-            />
-          ) : null}
-        </View>
+        {/* El acceso a avisos vive en Cuenta (el frame C/Dashboard no tiene campana en el header). */}
         <StatusPill label={pill.label} tone={pill.tone} live={pill.live} dot />
         {/* Indicador del vehículo ACTIVO (server-authoritative): con qué vehículo opera, que es lo que el
             dispatch usa para ofrecerle viajes. Solo EN TURNO: fuera de turno el vehículo no es relevante y
@@ -332,13 +319,13 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
 
   if (shift.isLoading) {
     bottomOverlay = (
-      <GlassSheet floating>
+      <GlassSheet floating style={dockLift}>
         <Skeleton height={96} />
       </GlassSheet>
     );
   } else if (shift.isError || !shift.data) {
     bottomOverlay = (
-      <GlassSheet floating>
+      <GlassSheet floating style={dockLift}>
         <Banner
           tone="danger"
           title={t('errors.generic')}
@@ -355,7 +342,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   } else if (activeTripId) {
     // Prioridad máxima: acceso directo al viaje en curso.
     bottomOverlay = (
-      <GlassSheet floating>
+      <GlassSheet floating style={dockLift}>
         <Text variant="subhead" color="inkMuted">
           {t('trips.activeTitle')}
         </Text>
@@ -372,7 +359,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     // En línea: sheet slim con métricas en vivo, pausa y desconexión (misma lógica de mutaciones).
     bottomOverlay = (
       <Appear key="online">
-        <GlassSheet floating>
+        <GlassSheet floating style={dockLift}>
           {/* GPS apagado/sin permiso EN TURNO: el conductor no emite posición y el dispatch no lo ve.
             Aviso prioritario (arriba de todo) para que lo corrija antes de seguir esperando viajes. */}
           {gpsUnavailable ? (
@@ -452,7 +439,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     const ActiveVehIcon = activeVeh ? vehicleClassGlyph(activeVeh.vehicleType) : null;
     bottomOverlay = (
       <Appear key="offline">
-        <GlassSheet floating>
+        <GlassSheet floating style={dockLift}>
           {/* Vehículo activo (frame C/Dashboard-Offline): UNA fila = tile del icono + (etiqueta / vehículo)
               apilados + link "Gestionar" a la derecha. Registrar/cambiar se hace en la pantalla Vehículos. */}
           {activeVehicle.isLoading ? (
@@ -624,16 +611,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   topRight: { alignItems: 'flex-end', gap: 8 },
-  bellWrap: { position: 'relative' },
-  bellDot: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 2,
-  },
   demandToggle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -647,7 +624,19 @@ const styles = StyleSheet.create({
   vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   vehicleTile: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   vehicleInfo: { flex: 1, gap: 1 },
-  greetCard: { flexDirection: 'row', alignItems: 'center', gap: 10, maxWidth: 220 },
+  greetCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: 240,
+    paddingVertical: 5,
+    paddingLeft: 5,
+    paddingRight: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: 'rgba(30,33,42,0.92)', // surfaceElevated ~92% → glass sobre el mapa (sin BlurView)
+    borderColor: 'rgba(255,255,255,0.12)', // labio de vidrio (como GlassSheet)
+  },
   greetText: { flexShrink: 1, paddingRight: 4 },
   dim: { ...StyleSheet.absoluteFill, opacity: 0.55 },
   kpisRow: { flexDirection: 'row', gap: 12 },

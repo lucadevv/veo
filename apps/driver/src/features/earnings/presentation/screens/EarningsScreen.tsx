@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Banner, SafeScreen, Skeleton, Text, useTheme, type StatusTone } from '@veo/ui-kit';
+import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import type { DriverPayoutView } from '@veo/api-client';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, formatShortDate } from '../../../../shared/presentation/format';
@@ -202,10 +203,11 @@ function PayoutsBlock({ t }: { t: TFunction }): React.JSX.Element {
 export const EarningsScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const tabBarHeight = useDriverTabBarHeight();
   const [period, setPeriod] = useState<Period>('week');
 
   return (
-    <SafeScreen scroll>
+    <SafeScreen scroll contentContainerStyle={{ paddingBottom: tabBarHeight }}>
       <ScreenHero title={t('earnings.title')} />
       <View style={[styles.tabsWrap, { marginBottom: theme.spacing.lg }]}>
         <SegmentedTabs

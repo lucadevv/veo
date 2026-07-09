@@ -4,6 +4,21 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Text, useTheme } from '@veo/ui-kit';
 
+/** Alto del pill flotante (fila del item + padding del pill), sin el inset inferior. */
+const PILL_HEIGHT = 66;
+/** Padding superior del wrap (aire entre el contenido y el pill). */
+const WRAP_TOP = 8;
+
+/**
+ * Alto TOTAL que ocupa el tab bar flotante (pill + aire + home-indicator). El tab bar es `absolute`
+ * (flota SOBRE el mapa a pantalla completa, fiel al frame), así que NO reserva espacio: las pantallas
+ * con lista deben paddear su fondo con esto, y el dock del Inicio debe elevarse por encima.
+ */
+export function useDriverTabBarHeight(): number {
+  const insets = useSafeAreaInsets();
+  return WRAP_TOP + PILL_HEIGHT + Math.max(insets.bottom, 12);
+}
+
 /**
  * Tab bar del conductor: PILL FLOTANTE de vidrio (frame `C/TabBarCond`), no la barra plana por defecto
  * de React Navigation. Inset de los bordes, translúcido (~90% surfaceElevated → frosted sobre el mapa,
@@ -74,11 +89,16 @@ export function DriverTabBar({
 }
 
 const styles = StyleSheet.create({
-  // NO absolute: así React Navigation reserva su alto y el contenido (el glass sheet) queda ARRIBA del
-  // tab bar (sin overlap), con el pill flotando en su franja inferior — como en el frame.
+  // ABSOLUTE: el tab bar flota SOBRE el mapa a pantalla completa (fiel al frame — el mapa llega hasta el
+  // borde inferior, sin banda negra detrás del pill). Como no reserva alto, las pantallas con lista
+  // paddean su fondo con `useDriverTabBarHeight()` y el dock del Inicio se eleva por encima.
   wrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: 18,
-    paddingTop: 8,
+    paddingTop: WRAP_TOP,
     alignItems: 'stretch',
   },
   pill: {

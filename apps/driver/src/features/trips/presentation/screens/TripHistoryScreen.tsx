@@ -3,6 +3,7 @@ import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from 'r
 import { useTranslation } from 'react-i18next';
 import type { TripHistoryItem } from '@veo/api-client';
 import { SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-kit';
+import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TripsEmptyState } from '../components/TripsEmptyState';
@@ -49,6 +50,7 @@ function HistorySkeleton(): React.JSX.Element {
 export const TripHistoryScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const tabBarHeight = useDriverTabBarHeight();
   const {
     items,
     isLoading,
@@ -106,7 +108,7 @@ export const TripHistoryScreen = (): React.JSX.Element => {
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{
         paddingTop: theme.spacing.md,
-        paddingBottom: theme.spacing.xl,
+        paddingBottom: tabBarHeight,
         gap: theme.spacing.md,
       }}
       refreshControl={

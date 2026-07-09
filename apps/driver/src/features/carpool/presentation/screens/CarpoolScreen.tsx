@@ -16,6 +16,7 @@ import {
 } from '@veo/ui-kit';
 import type { PublishedTripView } from '@veo/api-client';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
+import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { ScreenHero } from '../../../../shared/presentation/components/ScreenHero';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { StateView } from '../../../../shared/presentation/components/StateView';
@@ -96,10 +97,11 @@ function TripCard({
 export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const tabBarHeight = useDriverTabBarHeight();
   const trips = useMyPublishedTrips();
 
   return (
-    <SafeScreen scroll>
+    <SafeScreen scroll contentContainerStyle={{ paddingBottom: tabBarHeight }}>
       <ScreenHero title={t('carpool.title')} subtitle={t('carpool.subtitle')} />
 
       {/* CTA "Publicar un viaje" fiel al frame C/Compartir: action-row con círculo + `plus`, etiqueta que

@@ -18,11 +18,13 @@ import {
 } from '@veo/ui-kit';
 import { DriverStatus } from '@veo/shared-types';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
+import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPersonName } from '../../../../shared/presentation/format';
 import {
   IconAccount,
+  IconBell,
   IconClock,
   IconDocument,
   IconGift,
@@ -52,10 +54,11 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
   const theme = useTheme();
   const { data, isLoading, isError, error, refetch } = useProfile();
   const logout = useLogout();
+  const tabBarHeight = useDriverTabBarHeight();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
-    <SafeScreen scroll>
+    <SafeScreen scroll contentContainerStyle={{ paddingBottom: tabBarHeight }}>
       <ScreenHero title={t('profile.title')} subtitle={t('profile.subtitle')} />
       {isLoading ? (
         <View style={styles.section}>
@@ -157,6 +160,13 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                 icon={<IconAccount size={20} color={theme.colors.inkMuted} />}
                 label={t('profile.edit.entry')}
                 onPress={() => navigation.navigate('EditProfile')}
+                showDivider
+              />
+              {/* Avisos: el acceso vive acá (el header del Inicio ya no tiene campana, fiel al frame). */}
+              <ProfileLinkRow
+                icon={<IconBell size={20} color={theme.colors.inkMuted} />}
+                label={t('notifications.title')}
+                onPress={() => navigation.navigate('Notifications')}
                 showDivider
               />
               <ProfileLinkRow
