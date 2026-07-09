@@ -1,0 +1,107 @@
+import React from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { Text, useTheme } from '@veo/ui-kit';
+
+/**
+ * Tab bar del conductor: PILL FLOTANTE de vidrio (frame `C/TabBarCond`), no la barra plana por defecto
+ * de React Navigation. Inset de los bordes, translúcido (~90% surfaceElevated → frosted sobre el mapa,
+ * sin BlurView), esquinas pill, sombra; el item ACTIVO va en un chip `brand-dim` con icono/label en
+ * brand. Reemplaza al tab bar estándar vía la prop `tabBar` del Navigator.
+ */
+export function DriverTabBar({
+  state,
+  descriptors,
+  navigation,
+}: BottomTabBarProps): React.JSX.Element {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View
+      style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 12) }]}
+      pointerEvents="box-none"
+    >
+      <View
+        style={[
+          styles.pill,
+          { backgroundColor: 'rgba(30,33,42,0.92)', borderColor: theme.colors.borderStrong },
+        ]}
+      >
+        {state.routes.map((route, index) => {
+          const descriptor = descriptors[route.key];
+          if (!descriptor) {
+            return null;
+          }
+          const { options } = descriptor;
+          const focused = state.index === index;
+          const label =
+            typeof options.tabBarLabel === 'string' ? options.tabBarLabel : route.name;
+          const color = focused ? theme.colors.brand : theme.colors.inkSubtle;
+          const icon = options.tabBarIcon?.({ focused, color, size: 22 });
+
+          const onPress = () => {
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+            if (!focused && !event.defaultPrevented) {
+              navigation.navigate(route.name);
+            }
+          };
+
+          return (
+            <Pressable
+              key={route.key}
+              accessibilityRole="button"
+              accessibilityState={{ selected: focused }}
+              accessibilityLabel={label}
+              onPress={onPress}
+              style={[styles.item, focused ? styles.itemActive : null]}
+            >
+              {icon}
+              <Text variant="caption" color={focused ? 'brand' : 'inkSubtle'} numberOfLines={1}>
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  // NO absolute: así React Navigation reserva su alto y el contenido (el glass sheet) queda ARRIBA del
+  // tab bar (sin overlap), con el pill flotando en su franja inferior — como en el frame.
+  wrap: {
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    alignItems: 'stretch',
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 999,
+    borderWidth: 1,
+    padding: 6,
+    shadowColor: '#000000',
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 16,
+  },
+  item: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  // Chip del item activo: brand-dim (#2D7FF9 ~16%), como el frame.
+  itemActive: { backgroundColor: 'rgba(45,127,249,0.16)' },
+});

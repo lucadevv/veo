@@ -1,10 +1,9 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { driverTheme, useTheme } from '@veo/ui-kit';
+import { DriverTabBar } from './DriverTabBar';
+import { driverTheme } from '@veo/ui-kit';
 import type { MainTabParamList, RootStackParamList } from './types';
 import { useSessionStore } from '../core/session/sessionStore';
 import { useSessionClosedStore } from '../core/session/sessionClosedStore';
@@ -74,29 +73,13 @@ const screenOptions = {
  * El acento activo es el cian del `driverTheme`; el inactivo, `inkSubtle`. Fondo `surface`.
  */
 function MainTabs(): React.JSX.Element {
-  const theme = useTheme();
   const { t } = useTranslation();
-  // El home-indicator (iPhone) y la barra de gestos (Android) viven en `insets.bottom`. Un `height`
-  // fijo en `tabBarStyle` PISA el inset que React Navigation añade solo, dejando el tab bar pegado al
-  // borde. Sumamos el inset al alto y al padding inferior: mantenemos el look compacto de 64px de
-  // CONTENIDO y reservamos la zona segura debajo (igual criterio que el footer de `SafeScreen`).
-  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       detachInactiveScreens={false}
+      tabBar={(props) => <DriverTabBar {...props} />}
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.inkSubtle,
-        tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.border,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          height: 64 + insets.bottom,
-          paddingTop: 8,
-          paddingBottom: 10 + insets.bottom,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         tabBarIcon: ({ color, focused }) => {
           const size = 24;
           const sw = focused ? 2.4 : 2;
