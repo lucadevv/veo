@@ -2417,6 +2417,12 @@ export const driverTripView = z.object({
   paymentMethod: z.string(),
   childMode: z.boolean(),
   penaltyCents: z.number().int(),
+  /**
+   * PRIMER nombre del pasajero (solo el primer token, PII mínima · Ley 29733), para el header del chat
+   * del conductor. `null` si no se resolvió o el pasajero no tiene nombre. El BFF lo resuelve SOLO en el
+   * detalle (`GET /trips/:id`), post-aceptación; el resto de endpoints lo devuelven `null`.
+   */
+  passengerFirstName: z.string().nullable(),
 });
 export type DriverTripView = z.infer<typeof driverTripView>;
 

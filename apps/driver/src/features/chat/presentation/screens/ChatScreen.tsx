@@ -86,9 +86,14 @@ export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
     [],
   );
 
+  // Header fiel al frame C/Chat: el PRIMER nombre del pasajero (server-authoritative, PII mínima) o el
+  // título genérico mientras carga / si el backend no lo resolvió.
   const header = (
     <View style={styles.headerPad}>
-      <TopBar title={t('chat.title')} onBack={navigation.goBack} />
+      <TopBar
+        title={trip.data?.passengerFirstName ?? t('chat.title')}
+        onBack={navigation.goBack}
+      />
     </View>
   );
 

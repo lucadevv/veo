@@ -5,6 +5,13 @@
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    // `tsc` resuelve @veo/api-client desde su SRC (igual que Metro en runtime, per CLAUDE.md), no desde
+    // el dist compilado — así un cambio de contrato en el paquete se ve sin rebuildear el dist.
+    "baseUrl": ".",
+    "paths": {
+      "@veo/api-client": ["../../packages/api-client/src"],
+      "@veo/api-client/*": ["../../packages/api-client/src/*"]
+    },
     // Resuelve los tipos por plataforma igual que Metro (`foo.native.ts` antes que `foo.ts`). Sin
     // esto, `tsc` toma el barrel web de `@rnmapbox/maps` (sin ShapeSource/LineLayer/CircleLayer y con
     // props distintos en Camera/MarkerView) en vez del barrel nativo que la app usa en runtime.

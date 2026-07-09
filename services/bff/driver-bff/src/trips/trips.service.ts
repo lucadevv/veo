@@ -24,6 +24,7 @@ import type {
   TripHistoryItem,
   TripReply,
   TripStateReply,
+  UserReply,
 } from '../common/grpc-replies';
 import type {
   AcceptTripDto,
@@ -64,7 +65,7 @@ function toTripStatus(raw: string): TripStatus {
   return normalized;
 }
 
-export function toTripView(trip: TripReply): TripView {
+export function toTripView(trip: TripReply, passengerFirstName: string | null = null): TripView {
   return {
     id: trip.id,
     passengerId: trip.passengerId,
@@ -78,6 +79,8 @@ export function toTripView(trip: TripReply): TripView {
     paymentMethod: trip.paymentMethod,
     childMode: trip.childMode,
     penaltyCents: trip.penaltyCents,
+    // PII mínima (Ley 29733): solo el PRIMER nombre, y SOLO cuando el caller lo resolvió (detalle post-aceptación).
+    passengerFirstName,
   };
 }
 
@@ -140,10 +143,17 @@ export class TripsService {
     if (!driver.found || trip.driverId !== driver.id) {
       throw new NotFoundError('Viaje no encontrado');
     }
-    // ADR-018 §1(3) · el badge de confianza YA NO vive acá: se movió a la OFERTA entrante
-    // (dispatch.service `getOffer`), su único consumidor (fuente única). Así `getTrip` no dispara un
-    // GetUser redundante a identity en cada lectura post-aceptación.
-    return toTripView(trip);
+    // ADR-018 §1(3) · el badge de confianza YA NO vive acá (se movió a la OFERTA · dispatch.getOffer).
+    // Header del chat (frame C/Chat): resolvemos SOLO el PRIMER nombre del pasajero (PII MÍNIMA · Ley
+    // 29733 — nunca el nombre completo ni el teléfono), post-aceptación. GetUser a identity, nos quedamos
+    // con el primer token; degradación honesta: null si identity no responde o el pasajero no tiene nombre.
+    // Ver docs/compliance/ley-29733/passenger-first-name-driver-chat.md.
+    const passenger = await this.grpc
+      .call<UserReply>('identity', 'GetUser', { id: trip.passengerId }, identity)
+      .catch(() => null);
+    const rawName = passenger?.found ? (passenger.name ?? '').trim() : '';
+    const passengerFirstName = rawName ? (rawName.split(/\s+/)[0] ?? null) : null;
+    return toTripView(trip, passengerFirstName);
   }
 
   /**

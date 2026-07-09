@@ -30,6 +30,7 @@ const TRIP: Trip = {
   paymentMethod: 'CASH',
   childMode: true,
   penaltyCents: 0,
+  passengerFirstName: null,
 };
 
 /** Doble de prueba del repositorio de viajes (no es un mock de producción). */

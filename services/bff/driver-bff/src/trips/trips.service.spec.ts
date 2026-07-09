@@ -18,6 +18,7 @@ function makeService(opts: {
   driverId?: string;
   tripFound?: boolean;
   tripDriverId?: string;
+  passengerName?: string;
 }) {
   const driverReply = {
     id: opts.driverId ?? 'drv-9',
@@ -32,9 +33,13 @@ function makeService(opts: {
     // válido; antes faltaba y el test de getTrip propio reventaba con "Estado de viaje desconocido".
     status: 'IN_PROGRESS',
   };
-  // grpc.call resuelve según el método: GetDriverByUser → perfil; GetTrip → viaje.
+  // GetUser (identity) del pasajero: solo `name` importa acá (para el primer nombre del chat).
+  const userReply = { found: true, name: opts.passengerName ?? '' };
+  // grpc.call resuelve según el método: GetDriverByUser → perfil; GetUser → pasajero; GetTrip → viaje.
   const call = vi.fn((_svc: string, method: string) =>
-    Promise.resolve(method === 'GetDriverByUser' ? driverReply : tripReply),
+    Promise.resolve(
+      method === 'GetDriverByUser' ? driverReply : method === 'GetUser' ? userReply : tripReply,
+    ),
   );
   const grpc = { call };
   const post = vi.fn(() => Promise.resolve({ id: 'trip-1', status: 'IN_PROGRESS' }));
@@ -194,6 +199,22 @@ describe('TripsService.getTrip — anti-IDOR (no enumerar datos de viajes ajenos
     const view = await service.getTrip('trip-1', identity);
     expect(view.id).toBe('trip-1');
     expect(call).toHaveBeenCalledWith('identity', 'GetDriverByUser', { id: 'usr-1' }, identity);
+  });
+
+  it('expone SOLO el PRIMER nombre del pasajero (PII mínima · Ley 29733), nunca el completo', async () => {
+    const { service } = makeService({
+      driverId: 'drv-9',
+      tripDriverId: 'drv-9',
+      passengerName: 'Ana Torres López',
+    });
+    const view = await service.getTrip('trip-1', identity);
+    expect(view.passengerFirstName).toBe('Ana');
+  });
+
+  it('sin nombre del pasajero → passengerFirstName null (degradación honesta)', async () => {
+    const { service } = makeService({ driverId: 'drv-9', tripDriverId: 'drv-9' });
+    const view = await service.getTrip('trip-1', identity);
+    expect(view.passengerFirstName).toBeNull();
   });
 
   it('un viaje de OTRO conductor → 404 NotFound (no filtra existencia ni expone passengerId)', async () => {

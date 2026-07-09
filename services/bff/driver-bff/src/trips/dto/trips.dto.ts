@@ -170,6 +170,8 @@ export interface TripView {
   paymentMethod: string;
   childMode: boolean;
   penaltyCents: number;
+  /** Primer nombre del pasajero (PII mínima, Ley 29733) para el header del chat; `null` si no se resolvió. */
+  passengerFirstName: string | null;
 }
 
 /** Vista del estado del viaje (para tracking ligero). */
