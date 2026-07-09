@@ -4,7 +4,12 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
-import type { DriverEarningsSummary, DriverPayoutView, EarningsSummary } from '@veo/api-client';
+import type {
+  DriverEarningsDailySeries,
+  DriverEarningsSummary,
+  DriverPayoutView,
+  EarningsSummary,
+} from '@veo/api-client';
 import { DriverApi } from '../common/driver-api.decorator';
 import { EarningsService } from './earnings.service';
 
@@ -27,6 +32,15 @@ export class EarningsController {
   })
   breakdown(@CurrentUser() user: AuthenticatedUser): Promise<DriverEarningsSummary> {
     return this.earnings.breakdown(user);
+  }
+
+  @Get('daily')
+  @ApiOperation({
+    summary:
+      'Serie diaria de ganancias de la semana en curso (lun→dom, 7 puntos) para el bar chart',
+  })
+  daily(@CurrentUser() user: AuthenticatedUser): Promise<DriverEarningsDailySeries> {
+    return this.earnings.daily(user);
   }
 
   @Get('payouts')

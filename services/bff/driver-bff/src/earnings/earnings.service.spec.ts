@@ -36,7 +36,7 @@ function makeService(payouts: DriverPayoutView[]) {
 }
 
 describe('EarningsService.breakdown', () => {
-  it('agrega hoy y semana desde payment-service por ventana', async () => {
+  it('agrega hoy, semana y mes desde payment-service por ventana', async () => {
     const today = {
       grossCents: 4000,
       commissionCents: 800,
@@ -51,9 +51,19 @@ describe('EarningsService.breakdown', () => {
       netCents: 17500,
       tripCount: 12,
     };
-    const get = vi.fn((_path: string, opts: { query: { from: string } }) =>
-      Promise.resolve(opts.query.from.startsWith('2026-05-27') ? today : week),
-    );
+    const month = {
+      grossCents: 80000,
+      commissionCents: 16000,
+      tipCents: 6000,
+      netCents: 70000,
+      tripCount: 48,
+    };
+    // Discrimina la ventana por su `from`: día (27), semana (25) o mes (01).
+    const get = vi.fn((_path: string, opts: { query: { from: string } }) => {
+      if (opts.query.from.startsWith('2026-05-27')) return Promise.resolve(today);
+      if (opts.query.from.startsWith('2026-05-01')) return Promise.resolve(month);
+      return Promise.resolve(week);
+    });
     const grpc = {
       call: vi.fn(() => Promise.resolve({ id: 'drv-1', userId: 'usr-1', found: true })),
     };
@@ -67,6 +77,8 @@ describe('EarningsService.breakdown', () => {
     expect(summary.today.netCents).toBe(3700);
     expect(summary.week.tipCents).toBe(1500);
     expect(summary.week.tripCount).toBe(12);
+    expect(summary.month.netCents).toBe(70000);
+    expect(summary.month.tripCount).toBe(48);
     // Las ventanas se pasaron como [from,to) ISO al endpoint de payment.
     // La identidad propagada lleva el driverId resuelto y firmado (anti-IDOR aguas abajo).
     expect(get).toHaveBeenCalledWith('/payments/earnings', {
@@ -77,6 +89,54 @@ describe('EarningsService.breakdown', () => {
         to: '2026-05-28T00:00:00.000Z',
       },
     });
+    // La ventana del mes se pasó como [día 1, día 1 del mes siguiente) UTC.
+    expect(get).toHaveBeenCalledWith('/payments/earnings', {
+      identity: { ...identity, driverId: 'drv-1' },
+      query: {
+        driverId: 'drv-1',
+        from: '2026-05-01T00:00:00.000Z',
+        to: '2026-06-01T00:00:00.000Z',
+      },
+    });
+  });
+});
+
+describe('EarningsService.daily', () => {
+  it('devuelve 7 puntos lun→dom con netCents/tripCount por día', async () => {
+    // Cada día devuelve un breakdown cuyo net/trip codifica su fecha, para verificar el mapeo.
+    const get = vi.fn((_path: string, opts: { query: { from: string } }) => {
+      const dom = Number(opts.query.from.slice(8, 10)); // día del mes en el `from`
+      return Promise.resolve({
+        grossCents: dom * 100,
+        commissionCents: dom * 20,
+        tipCents: dom * 10,
+        netCents: dom * 80,
+        tripCount: dom,
+      });
+    });
+    const grpc = {
+      call: vi.fn(() => Promise.resolve({ id: 'drv-1', userId: 'usr-1', found: true })),
+    };
+    const rest = { client: vi.fn(() => ({ get })) };
+    const service = new EarningsService(grpc as never, rest as never);
+
+    const series = await service.daily(identity, new Date('2026-05-27T14:30:00.000Z'));
+    expect(series.driverId).toBe('drv-1');
+    expect(series.currency).toBe('PEN');
+    expect(series.days).toHaveLength(7);
+    // Semana del lunes 2026-05-25 → domingo 2026-05-31.
+    expect(series.days.map((d) => d.date)).toEqual([
+      '2026-05-25',
+      '2026-05-26',
+      '2026-05-27',
+      '2026-05-28',
+      '2026-05-29',
+      '2026-05-30',
+      '2026-05-31',
+    ]);
+    expect(series.days[0]).toEqual({ date: '2026-05-25', netCents: 25 * 80, tripCount: 25 });
+    expect(series.days[6]).toEqual({ date: '2026-05-31', netCents: 31 * 80, tripCount: 31 });
+    expect(get).toHaveBeenCalledTimes(7);
   });
 });
 

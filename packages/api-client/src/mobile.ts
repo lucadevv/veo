@@ -2636,16 +2636,39 @@ export const driverEarningsBreakdown = z.object({
 export type DriverEarningsBreakdown = z.infer<typeof driverEarningsBreakdown>;
 
 /**
- * GET /earnings/breakdown → desglose de ganancias HOY y de la SEMANA del conductor autenticado,
- * agregado sobre cobros CAPTURED reales de payment-service (sin mocks). Incluye las propinas.
+ * GET /earnings/breakdown → desglose de ganancias HOY, de la SEMANA y del MES del conductor
+ * autenticado, agregado sobre cobros CAPTURED reales de payment-service (sin mocks). Incluye
+ * las propinas. `month` = mes calendario UTC en curso (día 1 → fin de mes).
  */
 export const driverEarningsSummary = z.object({
   driverId: z.string(),
   currency: z.string(),
   today: driverEarningsBreakdown,
   week: driverEarningsBreakdown,
+  month: driverEarningsBreakdown,
 });
 export type DriverEarningsSummary = z.infer<typeof driverEarningsSummary>;
+
+/** Ganancia neta y nº de viajes de UN día natural (UTC). Punto de la serie diaria del bar chart. */
+export const driverDailyEarnings = z.object({
+  /** Fecha del día en formato ISO YYYY-MM-DD (UTC). */
+  date: z.string(),
+  netCents: z.number().int(),
+  tripCount: z.number().int(),
+});
+export type DriverDailyEarnings = z.infer<typeof driverDailyEarnings>;
+
+/**
+ * GET /earnings/daily → serie diaria de ganancias de la SEMANA en curso del conductor autenticado
+ * (lunes→domingo, EXACTAMENTE 7 puntos), agregada por día sobre payment-service. Alimenta el bar
+ * chart de la pantalla de ingresos. Días sin viajes vienen en cero (nunca se omiten).
+ */
+export const driverEarningsDailySeries = z.object({
+  driverId: z.string(),
+  currency: z.string(),
+  days: z.array(driverDailyEarnings),
+});
+export type DriverEarningsDailySeries = z.infer<typeof driverEarningsDailySeries>;
 
 /* ═══════════════════════ CHAT IN-APP (conductor↔pasajero) ═══════════════════════ */
 

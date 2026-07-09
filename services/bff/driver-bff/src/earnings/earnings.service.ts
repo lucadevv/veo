@@ -8,7 +8,9 @@ import { Injectable } from '@nestjs/common';
 import { NotFoundError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import type {
+  DriverDailyEarnings,
   DriverEarningsBreakdown,
+  DriverEarningsDailySeries,
   DriverEarningsSummary,
   DriverPayoutView,
   EarningsSummary,
@@ -16,7 +18,7 @@ import type {
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import type { DriverReply } from '../common/grpc-replies';
-import { dayWindow, weekWindow } from './earnings.windows';
+import { dayWindow, monthWindow, weekDailyWindows, weekWindow } from './earnings.windows';
 
 /** Estado de un payout liquidado (pagado al conductor). El resto se considera pendiente. */
 const PAID_STATUS = 'PROCESSED';
@@ -76,22 +78,51 @@ export class EarningsService {
     const { identity: signedIdentity, driverId } = await this.resolveDriver(identity);
     const today = dayWindow(now);
     const week = weekWindow(now);
+    const month = monthWindow(now);
     const client = this.rest.client('payment');
     const query = (from: Date, to: Date): Promise<DriverEarningsBreakdown> =>
       client.get<DriverEarningsBreakdown>('/payments/earnings', {
         identity: signedIdentity,
         query: { driverId, from: from.toISOString(), to: to.toISOString() },
       });
-    const [todayBreakdown, weekBreakdown] = await Promise.all([
+    const [todayBreakdown, weekBreakdown, monthBreakdown] = await Promise.all([
       query(today.start, today.end),
       query(week.start, week.end),
+      query(month.start, month.end),
     ]);
     return {
       driverId,
       currency: 'PEN',
       today: todayBreakdown,
       week: weekBreakdown,
+      month: monthBreakdown,
     };
+  }
+
+  /**
+   * Serie diaria de ganancias de la SEMANA en curso (lunes→domingo, EXACTAMENTE 7 puntos) del
+   * conductor autenticado, para el bar chart de la pantalla de ingresos. Una llamada a
+   * payment-service por día natural (7 en paralelo); días sin viajes vuelven en cero. `now`
+   * parametrizable para tests.
+   */
+  async daily(identity: AuthenticatedUser, now = new Date()): Promise<DriverEarningsDailySeries> {
+    const { identity: signedIdentity, driverId } = await this.resolveDriver(identity);
+    const client = this.rest.client('payment');
+    const windows = weekDailyWindows(now);
+    const days = await Promise.all(
+      windows.map(async ({ start, end }): Promise<DriverDailyEarnings> => {
+        const breakdown = await client.get<DriverEarningsBreakdown>('/payments/earnings', {
+          identity: signedIdentity,
+          query: { driverId, from: start.toISOString(), to: end.toISOString() },
+        });
+        return {
+          date: start.toISOString().slice(0, 10), // YYYY-MM-DD (UTC)
+          netCents: breakdown.netCents,
+          tripCount: breakdown.tripCount,
+        };
+      }),
+    );
+    return { driverId, currency: 'PEN', days };
   }
 
   /**
