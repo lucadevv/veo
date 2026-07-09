@@ -2,14 +2,10 @@ import type { MapPoint, PlaceSuggestionList } from '@veo/api-client';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useRepositories } from '../../../../core/di/useDi';
-import { AutocompletePlacesUseCase, MAPS_QUERY_KEY, MIN_QUERY_LENGTH } from '../../domain';
+import { AutocompletePlacesUseCase, MAPS_QUERY_KEY, MIN_QUERY_LENGTH } from '../../../maps/domain';
 
-/** Retardo del debounce del autocompletado (ms). Espeja al pasajero. */
+/** Retardo del debounce del autocompletado (ms). Espeja al de mapas/pasajero. */
 const DEBOUNCE_MS = 250;
-
-// `MAPS_QUERY_KEY` vive ahora en `maps/domain` (namespace compartido con el autocompletado de
-// carpooling). Se re-exporta para no romper a los consumidores del barrel.
-export { MAPS_QUERY_KEY };
 
 export interface UseAutocompleteResult {
   suggestions: PlaceSuggestionList;
@@ -20,10 +16,10 @@ export interface UseAutocompleteResult {
 }
 
 /**
- * Autocompletado de direcciones con debounce (~250ms) y sesgo por ubicación (`near`). Resuelve el
- * repositorio de mapas por DI (`useRepositories().maps`) y delega el cacheo/estado de servidor a React
- * Query. No llama al bff hasta que la consulta alcanza la longitud mínima (regla aplicada también en el
- * caso de uso). Espejo EXACTO del hook del pasajero, adaptado al DI del conductor.
+ * Autocompletado de direcciones para el publicador de carpool. Envuelve el caso de uso público
+ * `AutocompletePlacesUseCase` (maps/domain) sobre el namespace COMPARTIDO `MAPS_QUERY_KEY`: MISMO cache
+ * que `maps/presentation` (coherente), SIN importar sus hooks internos (feature-isolation). Debounce
+ * (~250ms) + sesgo por ubicación (`near`); no llama al bff hasta la longitud mínima.
  */
 export function useAutocomplete(query: string, near?: MapPoint | null): UseAutocompleteResult {
   const { maps } = useRepositories();

@@ -1,17 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRepositories } from '../../../../core/di/useDi';
 import {
+  EARNINGS_BREAKDOWN_QUERY_KEY,
+  EARNINGS_DAILY_QUERY_KEY,
+  EARNINGS_SUMMARY_QUERY_KEY,
   GetEarningsBreakdownUseCase,
   GetEarningsDailyUseCase,
   GetEarningsSummaryUseCase,
 } from '../../domain';
 
-/** Clave de caché del resumen de ganancias. */
-export const EARNINGS_SUMMARY_QUERY_KEY = ['earnings', 'summary'] as const;
-/** Clave de caché del desglose de ganancias (HOY/SEMANA/MES). */
-export const EARNINGS_BREAKDOWN_QUERY_KEY = ['earnings', 'breakdown'] as const;
-/** Clave de caché de la serie diaria (bar chart "Por día"). */
-export const EARNINGS_DAILY_QUERY_KEY = ['earnings', 'daily'] as const;
+// Las claves de ganancias viven ahora en `earnings/domain` (cache compartido con el dashboard de
+// turno). Se re-exportan para no romper a los consumidores del barrel.
+export { EARNINGS_BREAKDOWN_QUERY_KEY, EARNINGS_DAILY_QUERY_KEY, EARNINGS_SUMMARY_QUERY_KEY };
 
 /**
  * Query: resumen de ganancias del conductor. La respuesta incluye los payouts, así que esta única

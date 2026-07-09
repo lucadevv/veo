@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRepositories } from '../../../../core/di/useDi';
 import {
+  DOCUMENTS_QUERY_KEY,
   ListDocumentsUseCase,
   RegisterDocumentUseCase,
   type RegisterDocumentInput,
 } from '../../domain';
 
-/** Clave de caché del listado de documentos del conductor. */
-export const DOCUMENTS_QUERY_KEY = ['documents', 'list'] as const;
+// `DOCUMENTS_QUERY_KEY` vive ahora en `documents/domain` (cache compartido con el dashboard de turno).
+// Se re-exporta para no romper a los consumidores del barrel.
+export { DOCUMENTS_QUERY_KEY };
 
 /** Query: documentos del conductor, ya ordenados por urgencia en el caso de uso. */
 export function useDocuments() {

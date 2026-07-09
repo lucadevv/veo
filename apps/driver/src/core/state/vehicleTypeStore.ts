@@ -1,14 +1,21 @@
 import { create } from 'zustand';
-import { prefsStore, type KeyValueStore } from '../../../../core/storage/mmkv';
-import { PrefKey } from '../../../../core/storage/keys';
-import { DEFAULT_VEHICLE_TYPE, parseVehicleType, type VehicleType } from '../../domain';
+import { prefsStore, type KeyValueStore } from '../storage/mmkv';
+import { PrefKey } from '../storage/keys';
+import {
+  DEFAULT_VEHICLE_TYPE,
+  parseVehicleType,
+  type VehicleType,
+} from '../../features/shift/domain';
 
 /**
  * Tipo de vehículo activo del conductor (Auto | Moto), persistido en preferencias (MMKV).
  *
- * Es estado de sesión/UI en vivo, no estado de servidor: vive en Zustand y se hidrata al arrancar
- * desde `prefsStore`. El publisher de GPS lo lee con `getState()` para sellar cada reporte de
- * ubicación con el `vehicleType` correcto (así el dispatch indexa al conductor y le ofrece MOTO).
+ * Es estado de SESIÓN/UI en vivo cross-cutting (lo consumen tanto el selector de turno como el
+ * publisher de GPS de realtime), por eso vive en `core/state` y no dentro de una feature: así ninguna
+ * feature importa la `presentation` de otra para leerlo. Se hidrata al arrancar desde `prefsStore`; el
+ * publisher lo lee con `getState()` para sellar cada reporte de ubicación con el `vehicleType` correcto
+ * (así el dispatch indexa al conductor y le ofrece MOTO). El tipo/parse/default siguen siendo dominio
+ * de turno (`shift/domain`, su API pública).
  */
 export interface VehicleTypeState {
   vehicleType: VehicleType;

@@ -30,11 +30,12 @@ import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
-import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
+import { useEarningsSummary } from '../hooks/useEarnings';
 import { useProfileData } from '../hooks/useProfileData';
 import { isBlocking } from '../../../documents/domain';
-import { useDocuments } from '../../../documents/presentation/hooks/useDocuments';
-import { DemandLegend, useHeatCells, useHeatmap } from '../../../ops/presentation';
+import { useDocuments } from '../hooks/useDocuments';
+import { DemandLegend } from '../../../ops/presentation';
+import { useHeatCells, useHeatmap } from '../hooks/useDemand';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import { useTipStore } from '../../../realtime/presentation';
 import { useLocationSource } from '../../../../core/location/LocationSourceProvider';
@@ -48,7 +49,7 @@ import {
 } from '../../domain';
 import { useEndShift, usePauseShift, useShiftState } from '../hooks/useShift';
 import { consumeShiftStartedAt } from '../state/shiftClock';
-import { useActiveVehicle } from '../../../registration/presentation';
+import { useActiveVehicle } from '../hooks/useVehicleCatalog';
 import { VehicleTypeSelector } from '../components/VehicleTypeSelector';
 import { Appear, PressableScale, Pulse } from '../components/motion';
 

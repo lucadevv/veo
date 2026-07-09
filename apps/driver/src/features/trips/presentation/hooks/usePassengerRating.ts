@@ -5,11 +5,13 @@ import {
   RatePassengerUseCase,
   tripRatingQueryKey,
   type RatePassengerInput,
-} from '../../domain';
+} from '../../../ratings/domain';
 
-// `tripRatingQueryKey` vive ahora en `ratings/domain` (cache compartido con el cierre de viaje).
-// Se re-exporta para no romper a los consumidores del barrel.
-export { tripRatingQueryKey };
+/**
+ * Hooks FINOS de calificación del pasajero que consume el CIERRE del viaje. Envuelven los casos de uso
+ * públicos de `ratings/domain` sobre la clave COMPARTIDA `tripRatingQueryKey`: MISMO cache que
+ * `ratings/presentation` (coherente), SIN importar sus hooks internos (feature-isolation).
+ */
 
 /**
  * Query: MI calificación de un viaje (la que ESTE conductor le dio al pasajero). `null` si aún no

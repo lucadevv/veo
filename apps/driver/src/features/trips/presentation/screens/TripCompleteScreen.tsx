@@ -10,7 +10,8 @@ import { formatPEN, formatPersonName } from '../../../../shared/presentation/for
 import { IconCheck } from '../../../../shared/presentation/icons';
 import type { DriverProfile } from '../../../profile/domain';
 import { PROFILE_QUERY_KEY } from '../../../profile/domain';
-import { StarRating, useMyTripRating, useRatePassenger } from '../../../ratings/presentation';
+import { StarRating } from '../../../ratings/presentation';
+import { useMyTripRating, useRatePassenger } from '../hooks/usePassengerRating';
 import { commissionPercent, computeTripEarnings } from '../../domain';
 import { Appear } from '../components/motion';
 

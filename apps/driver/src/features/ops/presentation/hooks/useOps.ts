@@ -1,21 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRepositories } from '../../../../core/di/useDi';
-import { GetHeatmapUseCase, ListIncentivesUseCase, type HeatmapQuery } from '../../domain';
+import {
+  GetHeatmapUseCase,
+  INCENTIVES_QUERY_KEY,
+  ListIncentivesUseCase,
+  heatmapQueryKey,
+  type HeatmapQuery,
+} from '../../domain';
 
-/** Clave de caché del mapa de calor (depende de lat/lng redondeados + radio). */
-export const heatmapQueryKey = (query: HeatmapQuery | null) =>
-  query
-    ? ([
-        'ops',
-        'heatmap',
-        query.lat.toFixed(3),
-        query.lng.toFixed(3),
-        query.radius ?? 'default',
-      ] as const)
-    : (['ops', 'heatmap', 'idle'] as const);
-
-/** Clave de caché de incentivos. */
-export const INCENTIVES_QUERY_KEY = ['ops', 'incentives'] as const;
+// `heatmapQueryKey` e `INCENTIVES_QUERY_KEY` viven ahora en `ops/domain` (cache compartido con el
+// dashboard de turno). Se re-exportan para no romper a los consumidores del barrel.
+export { INCENTIVES_QUERY_KEY, heatmapQueryKey };
 
 /**
  * Query: mapa de calor de demanda. Solo se dispara cuando hay una consulta válida (toggle activo +

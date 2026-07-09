@@ -5,3 +5,5 @@ export * from './value-objects/maneuver';
 export * from './value-objects/trip-earnings';
 export * from './usecases/trips-usecases';
 export * from './ports/trip-media-publisher';
+
+export * from './query-keys';

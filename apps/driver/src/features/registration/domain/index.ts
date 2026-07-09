@@ -7,3 +7,5 @@ export * from './usecases/update-personal-data';
 export * from './usecases/birthdate-age';
 export * from './usecases/register-vehicle';
 export * from './usecases/hydrate-registration-from-server';
+
+export * from './query-keys';

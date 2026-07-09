@@ -16,7 +16,7 @@ import {
   metersToKm,
   secondsToMinutes,
 } from '../../../../shared/presentation/format';
-import { useMyTripRating } from '../../../ratings/presentation';
+import { useMyTripRating } from '../hooks/usePassengerRating';
 import { commissionPercent, computeTripEarnings } from '../../domain';
 import { Appear } from '../components/motion';
 

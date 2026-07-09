@@ -10,7 +10,7 @@ import { DateTimeField } from '../../../../shared/presentation/components/DateTi
 import { Stepper } from '../../../../shared/presentation/components/Stepper';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { useActiveVehicle } from '../../../registration/presentation';
+import { useActiveVehicle } from '../hooks/useActiveVehicle';
 import { usePublishTrip } from '../hooks/useCarpool';
 import { PlaceAutocompleteField } from '../components/PlaceAutocompleteField';
 

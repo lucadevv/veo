@@ -8,3 +8,5 @@ export * from './usecases/upload-and-register-document';
 export * from './value-objects/document-status';
 export * from './value-objects/document-type';
 export * from './ocr';
+
+export * from './query-keys';

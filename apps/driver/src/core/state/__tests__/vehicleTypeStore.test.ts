@@ -1,6 +1,6 @@
-import { PrefKey } from '../../../../../core/storage/keys';
-import type { KeyValueStore } from '../../../../../core/storage/mmkv';
-import { prefsStore } from '../../../../../core/storage/mmkv';
+import { PrefKey } from '../../storage/keys';
+import type { KeyValueStore } from '../../storage/mmkv';
+import { prefsStore } from '../../storage/mmkv';
 import {
   currentVehicleType,
   readPersistedVehicleType,

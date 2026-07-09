@@ -19,7 +19,7 @@ import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { IconNavigation } from '../../../../shared/presentation/icons';
 import { isTripActive, parseTripStatus } from '../../../trips/domain';
-import { useTrip } from '../../../trips/presentation/hooks/useTrips';
+import { useTrip } from '../hooks/useTrip';
 import type { Message } from '../../domain';
 import { MessageBubble } from '../components/MessageBubble';
 import { QuickReplies } from '../components/QuickReplies';

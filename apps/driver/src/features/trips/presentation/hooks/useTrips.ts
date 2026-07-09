@@ -6,8 +6,11 @@ import {
 } from '@tanstack/react-query';
 import type { GeoPoint, TripHistoryItem } from '@veo/api-client';
 import { useRepositories } from '../../../../core/di/useDi';
-import { SHIFT_STATE_QUERY_KEY } from '../../../shift/presentation/hooks/useShift';
+import { SHIFT_STATE_QUERY_KEY } from '../../../shift/domain';
 import {
+  ACTIVE_TRIP_QUERY_KEY,
+  TRIP_QUERY_PREFIX,
+  tripQueryKey,
   AcceptOfferUseCase,
   AcceptTripUseCase,
   ArrivedTripUseCase,
@@ -26,9 +29,9 @@ import {
   type Trip,
 } from '../../domain';
 
-/** Prefijo de caché de viajes (para invalidación masiva desde realtime). */
-export const TRIP_QUERY_PREFIX = ['trip'] as const;
-export const tripQueryKey = (tripId: string) => ['trip', tripId] as const;
+// `TRIP_QUERY_PREFIX`, `tripQueryKey` y `ACTIVE_TRIP_QUERY_KEY` viven ahora en `trips/domain`
+// (cache compartido con chat/realtime). Se re-exportan para no romper a los consumidores del barrel.
+export { ACTIVE_TRIP_QUERY_KEY, TRIP_QUERY_PREFIX, tripQueryKey };
 /**
  * Resolución de re-ruteo: la posición del conductor se CUANTIZA a ~4 decimales (≈11 m por décima de
  * milésima) antes de entrar en la queryKey. Así react-query solo RE-FETCHea la ruta cuando el conductor
@@ -56,9 +59,6 @@ export function useOffer(matchId: string) {
     queryFn: () => new GetOfferUseCase(trips).execute(matchId),
   });
 }
-
-/** Clave de caché del viaje activo del conductor (rehidratación tras reinicio). */
-export const ACTIVE_TRIP_QUERY_KEY = ['trip', 'active'] as const;
 
 /**
  * Query: viaje ACTIVO del conductor para REHIDRATAR tras un reinicio (sin conocer el id). `null` si no

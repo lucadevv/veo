@@ -13,7 +13,7 @@ import {
   IconRoute,
   type IconProps,
 } from '../../../../shared/presentation/icons';
-import { useEarningsBreakdown } from '../../../earnings/presentation/hooks/useEarnings';
+import { useEarningsBreakdown } from '../hooks/useEarnings';
 import {
   formatShiftDurationLong,
   formatShiftDurationShort,

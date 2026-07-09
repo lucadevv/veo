@@ -15,7 +15,7 @@ import {
   isKnownDocumentType,
 } from '../../../documents/domain';
 import { DocumentRow } from '../../../documents/presentation/components/DocumentRow';
-import { useDocuments } from '../../../documents/presentation/hooks/useDocuments';
+import { useDocuments } from '../hooks/useDocuments';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ShiftBlocked'>;
 

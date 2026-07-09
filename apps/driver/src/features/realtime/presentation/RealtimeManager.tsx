@@ -11,18 +11,14 @@ import {
   useSessionClosedStore,
   type SessionClosedReason,
 } from '../../../core/session/sessionClosedStore';
-import { SHIFT_STATE_QUERY_KEY } from '../../shift/presentation/hooks/useShift';
-import { useShiftState } from '../../shift/presentation/hooks/useShift';
-import { isOnShift } from '../../shift/domain';
-import { isTripTerminal, parseTripStatus } from '../../trips/domain';
-import { TRIP_QUERY_PREFIX, useActiveTrip, useTrip } from '../../trips/presentation/hooks/useTrips';
+import { SHIFT_STATE_QUERY_KEY, isOnShift } from '../../shift/domain';
+import { useShiftState } from './hooks/useShiftState';
+import { TRIP_QUERY_PREFIX, isTripTerminal, parseTripStatus } from '../../trips/domain';
+import { useActiveTrip, useTrip } from './hooks/useTripQueries';
 import { BIDS_QUERY_KEY } from '../../bidding/presentation';
 import type { OpenBid } from '../../bidding/domain';
 import { useChatStore } from '../../chat/presentation';
-import {
-  EARNINGS_BREAKDOWN_QUERY_KEY,
-  EARNINGS_SUMMARY_QUERY_KEY,
-} from '../../earnings/presentation/hooks/useEarnings';
+import { EARNINGS_BREAKDOWN_QUERY_KEY, EARNINGS_SUMMARY_QUERY_KEY } from '../../earnings/domain';
 import { useDriverRealtime } from './hooks/useDriverRealtime';
 import { useLocationPublisher } from './hooks/useLocationPublisher';
 import { useDispatchStore } from './state/dispatchStore';

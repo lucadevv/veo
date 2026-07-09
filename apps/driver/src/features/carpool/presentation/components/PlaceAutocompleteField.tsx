@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Card, Text, TextField, useTheme } from '@veo/ui-kit';
 import type { PlaceSuggestion } from '@veo/api-client';
-import { useAutocomplete } from '../../../maps/presentation';
+import { useAutocomplete } from '../hooks/useAutocomplete';
 
 interface PlaceAutocompleteFieldProps {
   label: string;

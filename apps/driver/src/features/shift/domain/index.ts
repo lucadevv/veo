@@ -8,3 +8,5 @@ export * from './value-objects/shift-status';
 export * from './value-objects/vehicle-type';
 export * from './value-objects/shift-clock';
 export * from './usecases/shift-usecases';
+
+export * from './query-keys';

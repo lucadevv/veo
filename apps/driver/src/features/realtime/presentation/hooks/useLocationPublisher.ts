@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { DriverLocationReport } from '@veo/api-client';
 import type { DriverSocket } from '../../../../core/realtime/socket';
 import type { LocationSample } from '../../../../core/location/location-source';
-import { currentVehicleType } from '../../../shift/presentation/state/vehicleTypeStore';
+import { currentVehicleType } from '../../../../core/state/vehicleTypeStore';
 import { useLocationSource } from '../../../../core/location/LocationSourceProvider';
 
 /**

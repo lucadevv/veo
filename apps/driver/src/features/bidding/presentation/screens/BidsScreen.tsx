@@ -9,7 +9,7 @@ import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import { isOnShift } from '../../../shift/domain';
-import { useShiftState } from '../../../shift/presentation/hooks/useShift';
+import { useShiftState } from '../hooks/useShiftState';
 import type { OpenBid } from '../../domain';
 import { useOpenBids } from '../hooks/useBids';
 import { BidCard } from '../components/BidCard';
