@@ -36,11 +36,9 @@ import { isBlocking } from '../../../documents/domain';
 import { useDocuments } from '../../../documents/presentation/hooks/useDocuments';
 import { DemandLegend, useHeatCells, useHeatmap } from '../../../ops/presentation';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
-import {
-  useLocationAvailability,
-  useLocationSource,
-  useTipStore,
-} from '../../../realtime/presentation';
+import { useTipStore } from '../../../realtime/presentation';
+import { useLocationSource } from '../../../../core/location/LocationSourceProvider';
+import { useLocationAvailability } from '../../../../core/location/useLocationAvailability';
 import {
   canStartShift,
   isOnShift,

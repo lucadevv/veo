@@ -1,5 +1,5 @@
 import React, { createContext, useContext, type ReactNode } from 'react';
-import { unavailableLocationSource, type LocationSource } from '../../domain/location-source';
+import { unavailableLocationSource, type LocationSource } from './location-source';
 
 /**
  * Contexto de la fuente de GPS nativa. Por defecto no emite (`unavailableLocationSource`).

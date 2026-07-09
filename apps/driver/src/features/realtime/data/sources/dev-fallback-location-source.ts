@@ -2,7 +2,7 @@ import type {
   LocationAvailability,
   LocationSample,
   LocationSource,
-} from '../../domain/location-source';
+} from '../../../../core/location/location-source';
 
 /** Tiempo de gracia para que el GPS nativo emita su primera muestra antes de caer al stub (ms). */
 const NATIVE_GRACE_MS = 4000;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { GeoPoint } from '@veo/api-client';
-import { useLocationSource } from '../../../realtime/presentation/providers/LocationSourceProvider';
+import { useLocationSource } from '../../../../core/location/LocationSourceProvider';
 
 /** Pose del conductor para la cámara de navegación: ubicación + rumbo (heading-up). */
 export interface DriverPose {

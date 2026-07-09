@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { LocationAvailability } from '../../domain/location-source';
-import { useLocationSource } from '../providers/LocationSourceProvider';
+import type { LocationAvailability } from './location-source';
+import { useLocationSource } from './LocationSourceProvider';
 
 /**
  * Observa la DISPONIBILIDAD del GPS del dispositivo (servicios del SO + permiso de la app) a través

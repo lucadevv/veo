@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import type { DriverLocationReport } from '@veo/api-client';
 import type { DriverSocket } from '../../../../core/realtime/socket';
-import type { LocationSample } from '../../domain/location-source';
+import type { LocationSample } from '../../../../core/location/location-source';
 import { currentVehicleType } from '../../../shift/presentation/state/vehicleTypeStore';
-import { useLocationSource } from '../providers/LocationSourceProvider';
+import { useLocationSource } from '../../../../core/location/LocationSourceProvider';
 
 /**
  * Cada cuánto RE-PUBLICAR la última ubicación conocida aunque el conductor esté QUIETO (heartbeat de

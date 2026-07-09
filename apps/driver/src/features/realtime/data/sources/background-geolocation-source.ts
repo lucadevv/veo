@@ -19,7 +19,7 @@ import type {
   LocationAvailability,
   LocationSample,
   LocationSource,
-} from '../../domain/location-source';
+} from '../../../../core/location/location-source';
 
 /**
  * Fuente de GPS nativa real sobre `react-native-background-geolocation` (Transistor Software, OSS,

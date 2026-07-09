@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { GeoPoint } from '@veo/api-client';
-import { useLocationSource } from '../../../realtime/presentation/providers/LocationSourceProvider';
+import { useLocationSource } from '../../../../core/location/LocationSourceProvider';
 
 /**
  * Ubicación en vivo del conductor para PINTAR el mapa (sólo presentación). Se suscribe a la fuente

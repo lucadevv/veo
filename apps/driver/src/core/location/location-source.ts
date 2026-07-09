@@ -5,6 +5,9 @@
  * (`useLocationPublisher`); lo que falta es la FUENTE de muestras, que instala la oleada nativa
  * (foreground service + background-geolocation). Hasta entonces se usa `unavailableLocationSource`,
  * que no emite (no es un mock: simplemente no hay GPS nativo todavía).
+ *
+ * Vive en `core/location` (capacidad transversal de ubicación compartida por `realtime`, `shift` y
+ * `trips`) porque es un puerto genérico del dispositivo, no de ninguna feature.
  */
 
 export interface LocationSample {
