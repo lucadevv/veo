@@ -619,6 +619,7 @@
   "vehicles": {
     "title": "Mis vehículos",
     "manage": "Gestionar vehículos",
+    "manageShort": "Gestionar",
     "addTitle": "Agregar un vehículo",
     "addAction": "Agregar vehículo",
     "empty": "Todavía no registraste ningún vehículo.",

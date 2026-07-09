@@ -28,7 +28,7 @@ import { MapTopScrim } from '../../../../shared/presentation/components/MapTopSc
 import { IconBell, IconFlame, IconPower } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
-import { vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
+import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
 import { useProfile } from '../../../profile/presentation/hooks/useProfile';
@@ -299,19 +299,19 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   ) : (
     <View style={styles.kpisRow}>
       <Appear style={styles.kpi} delay={40}>
-        <Text variant="footnote" color="inkMuted">
-          {t('shift.netTotal')}
-        </Text>
         <Text variant="title3" color="success" tabular>
           {formatPEN(earnings.data.totalNetCents ?? 0)}
         </Text>
+        <Text variant="footnote" color="inkMuted">
+          {t('shift.netTotal')}
+        </Text>
       </Appear>
       <Appear style={styles.kpi} delay={110}>
+        <Text variant="title3" color="ink" tabular>
+          {formatPEN(earnings.data.pendingNetCents ?? 0)}
+        </Text>
         <Text variant="footnote" color="inkMuted">
           {t('shift.pendingNet')}
-        </Text>
-        <Text variant="title3" color="inkMuted" tabular>
-          {formatPEN(earnings.data.pendingNetCents ?? 0)}
         </Text>
       </Appear>
     </View>
@@ -439,30 +439,45 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
       </Appear>
     );
   } else {
-    // Desconectado / en pausa: dock con resumen de ganancias y CTA principal "Conéctate".
+    // Desconectado / en pausa (frame C/Dashboard-Offline): vehículo activo compacto + KPIs + "Conéctate".
+    const activeVeh = activeVehicle.data;
+    const ActiveVehIcon = activeVeh ? vehicleClassGlyph(activeVeh.vehicleType) : null;
     bottomOverlay = (
       <Appear key="offline">
         <GlassSheet>
-          {/* Elige el vehículo ANTES de conectarte: define qué viajes recibirás al iniciar turno. */}
-          <View style={styles.vehiclePicker}>
-            <VehicleTypeSelector />
-            {/* Gestionar/registrar vehículos (p. ej. sumar una moto para poder cambiar de tipo). */}
-            <Button
-              label={t('vehicles.manage')}
-              variant="ghost"
-              size="sm"
-              onPress={() => navigation.navigate('Vehicles')}
-              style={styles.spaced}
-            />
+          {/* Vehículo activo (fiel al frame): etiqueta + link "Gestionar" a la derecha, y debajo el
+              vehículo con el que opera. Registrar/cambiar de vehículo se hace en la pantalla Vehículos. */}
+          <View style={styles.vehicleBlock}>
+            <View style={styles.vehicleHead}>
+              <Text variant="footnote" color="inkMuted">
+                {t('shift.vehicleType.label')}
+              </Text>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={t('vehicles.manage')}
+                onPress={() => navigation.navigate('Vehicles')}
+              >
+                <Text variant="footnote" color="accent">
+                  {t('vehicles.manageShort')}
+                </Text>
+              </PressableScale>
+            </View>
+            {activeVehicle.isLoading ? (
+              <Skeleton height={22} width={160} radius={theme.radii.sm} />
+            ) : activeVeh && ActiveVehIcon ? (
+              <View style={styles.vehicleLine}>
+                <ActiveVehIcon size={18} color={theme.colors.ink} />
+                <Text variant="subhead" numberOfLines={1}>
+                  {`${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`}
+                </Text>
+              </View>
+            ) : (
+              <Text variant="subhead" color="inkMuted">
+                {t('shift.vehicleType.none')}
+              </Text>
+            )}
           </View>
-          {earningsMetrics}
-          <Button
-            label={t('shift.viewEarnings')}
-            variant="ghost"
-            size="sm"
-            onPress={() => navigation.navigate('Ganancias')}
-            style={styles.spaced}
-          />
+          <View style={styles.spaced}>{earningsMetrics}</View>
           {/* SUSPENDED (regla de seguridad): el conductor NO puede operar. Aviso claro + salida a soporte,
             en vez del CTA "Conéctate" (que canStartShift ya bloquea para este estado). */}
           {isSuspended(status) ? (
@@ -618,7 +633,9 @@ const styles = StyleSheet.create({
   },
   legendWrap: { position: 'absolute', left: 16, right: 16, bottom: 16 },
   tipWrap: { position: 'absolute', left: 16, right: 16, top: 96 },
-  vehiclePicker: { marginBottom: 16 },
+  vehicleBlock: { gap: 8 },
+  vehicleHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  vehicleLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   greetCard: { flexDirection: 'row', alignItems: 'center', gap: 10, maxWidth: 220 },
   greetText: { flexShrink: 1, paddingRight: 4 },
   dim: { ...StyleSheet.absoluteFill, opacity: 0.55 },
