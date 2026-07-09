@@ -1,6 +1,7 @@
 import { Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RatingsService } from './ratings.service';
+import { RatingsRepository } from './ratings.repository';
 import { RatingsController } from './ratings.controller';
 import { RatingRecomputeCron } from './rating-recompute.cron';
 import { TripCompletedConsumer } from './trip-completed.consumer';
@@ -21,7 +22,13 @@ const tripClientProvider: Provider = {
 };
 
 @Module({
-  providers: [RatingsService, RatingRecomputeCron, TripCompletedConsumer, tripClientProvider],
+  providers: [
+    RatingsService,
+    RatingsRepository,
+    RatingRecomputeCron,
+    TripCompletedConsumer,
+    tripClientProvider,
+  ],
   controllers: [RatingsController],
   exports: [RatingsService],
 })
