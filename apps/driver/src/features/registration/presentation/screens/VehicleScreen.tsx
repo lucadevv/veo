@@ -29,7 +29,6 @@ import {
   DocumentPreviewCard,
   DocumentUploadCard,
   firstMissingRequirement,
-  hexAlpha,
   RegistrationDocumentSheet,
   RegistrationExitSheet,
   RegistrationField,
@@ -41,6 +40,7 @@ import {
   type DocumentCardTone,
   type StepRequirement,
 } from '../components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 import type {
   DocumentUploadState,
   RegistrationDocumentInput,

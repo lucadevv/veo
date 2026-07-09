@@ -9,7 +9,8 @@ import { Reveal } from '../../../../shared/presentation/components/motion';
 import { env } from '../../../../core/config/env';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
-import { RegistrationExitSheet, hexAlpha } from '../components';
+import { RegistrationExitSheet } from '../components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 /** Diámetro del glow radial ambiente detrás del badge (frame `C/UnderReview`: rect 320 con gradiente radial). */
 const GLOW = 320;

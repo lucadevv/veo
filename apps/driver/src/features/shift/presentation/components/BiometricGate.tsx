@@ -4,14 +4,14 @@ import { Banner, Button, IconButton, SafeScreen, Text, useTheme } from '@veo/ui-
 import { IconCheck, IconChevronLeft, IconShield } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { Pulse } from './motion';
-// Cross-feature (pragmático): la cámara frontal en vivo y el helper de alfa viven hoy en las components
-// del registro. El biométrico de turno reusa el MISMO lenguaje que el KYC del alta (cara en vivo en círculo)
-// para no divergir. DEUDA: promover BiometricCameraPreview + hexAlpha a `shared/` para no acoplar shift→registro.
+// Cross-feature (pragmático): la cámara frontal en vivo vive hoy en las components del registro. El
+// biométrico de turno reusa el MISMO lenguaje que el KYC del alta (cara en vivo en círculo) para no
+// divergir. DEUDA: promover BiometricCameraPreview a `shared/` para no acoplar shift→registro.
 import {
   BiometricCameraPreview,
-  hexAlpha,
   type BiometricCameraErrorPayload,
 } from '../../../registration/presentation/components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 /** Aviso de resultado del flujo biométrico (mismo contrato que `Banner`). */
 export interface BiometricGateBanner {

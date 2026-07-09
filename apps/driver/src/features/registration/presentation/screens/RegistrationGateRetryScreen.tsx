@@ -6,7 +6,8 @@ import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
-import { RegistrationExitSheet, VeoWordmark, hexAlpha } from '../components';
+import { RegistrationExitSheet, VeoWordmark } from '../components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 /** Ilustración de "sin conexión / reintentar" (line art) para la pantalla de reintento del gate. */
 function RetryGlyph({ color }: { color: string }): React.JSX.Element {

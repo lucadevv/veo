@@ -15,7 +15,8 @@ import { correctionStepForRejection, isRejectedStatus, RegistrationStep } from '
 import { useRegistrationStore } from '../state/registrationStore';
 import { useRegistrationExit } from '../hooks/useRegistrationExit';
 import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
-import { RegistrationExitSheet, hexAlpha } from '../components';
+import { RegistrationExitSheet } from '../components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 /** Diámetro del badge de alerta (frame `C/Rejected`: círculo 72 `$danger-dim` con `triangle-alert` 32). */
 const BADGE = 72;

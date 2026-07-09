@@ -25,4 +25,3 @@ export {
   type BiometricCameraPreviewNativeProps,
 } from './BiometricCameraPreview';
 export { VeoWordmark, PeruFlag } from '../../../../shared/presentation/components/VeoWordmark';
-export { hexAlpha } from './color';

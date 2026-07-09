@@ -5,7 +5,7 @@ import { Text, useTheme } from '@veo/ui-kit';
 import { IconCheck } from '../../../../shared/presentation/icons';
 import { DOCUMENT_CARD_ASPECT_RATIO } from '../../../documents/domain';
 import type { DocumentSendPhase } from '../state/registrationStore';
-import { hexAlpha } from './color';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 /**
  * Piezas CANÓNICAS compartidas por los sheets de escaneo EAGER (`ScanDniSheet` y `ScanLicenseSheet`): la

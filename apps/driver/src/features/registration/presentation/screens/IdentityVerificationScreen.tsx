@@ -21,8 +21,8 @@ import {
   RegistrationExitSheet,
   RegistrationHeader,
   RegistrationProgress,
-  hexAlpha,
 } from '../components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 // `Partial`: en modo EMBEBIDO (wizard) la pantalla se renderiza SIN `navigation`/`route`. Standalone: normales.
 type Props = Partial<NativeStackScreenProps<RegistrationStackParamList, 'IdentityVerification'>>;

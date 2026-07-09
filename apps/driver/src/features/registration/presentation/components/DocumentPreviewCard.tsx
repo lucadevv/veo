@@ -3,7 +3,7 @@ import { Image, StyleSheet, View } from 'react-native';
 import { Text, useTheme } from '@veo/ui-kit';
 import { IconCheck } from '../../../../shared/presentation/icons';
 import { DOCUMENT_CARD_ASPECT_RATIO } from '../../../documents/domain';
-import { hexAlpha } from './color';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 /**
  * Preview CANÓNICO de un documento capurado (DNI / licencia). Estética "Tesla" (negro premium): la IMAGEN

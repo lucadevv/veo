@@ -5,7 +5,7 @@ import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import { VehicleType } from '@veo/shared-types';
 import { IconCheck } from '../../../../shared/presentation/icons';
 import { DOCUMENT_CARD_ASPECT_RATIO, scanMessageI18nKey } from '../../../documents/domain';
-import { hexAlpha } from './color';
+import { hexAlpha } from '../../../../shared/presentation/color';
 import { useScanPropertyCard, type PropertyCardScanOutcome } from '../hooks/useScanPropertyCard';
 
 /**

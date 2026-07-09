@@ -5,7 +5,7 @@ import { Banner, BottomSheet, Button, Text, useTheme } from '@veo/ui-kit';
 import { IconAlert } from '../../../../shared/presentation/icons';
 import { scanMessageI18nKey } from '../../../documents/domain';
 import { deriveDocumentPhase, type DocumentFacePhases } from '../state/registrationStore';
-import { hexAlpha } from './color';
+import { hexAlpha } from '../../../../shared/presentation/color';
 import { useScanDni } from '../hooks/useScanDni';
 import {
   ScanExtractRow,

@@ -15,7 +15,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
-import { hexAlpha } from './color';
+import { hexAlpha } from '../../../../shared/presentation/color';
 import { IconAlert, IconCamera, IconCheck } from '../../../../shared/presentation/icons';
 import type { DocumentUploadStatus } from '../../domain';
 
