@@ -90,3 +90,20 @@ export function formatPersonName(fullName: string | null | undefined): string | 
     .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
     .join(' ');
 }
+
+/**
+ * Nombre abreviado para el SALUDO del Inicio (frame `C/Dashboard-Offline`: "Carlos R."): primer nombre +
+ * inicial del primer apellido. Compacto para el header flotante sobre el mapa. `null`/vacío → `null`.
+ * NO reemplaza a `formatPersonName` (identidad completa en la Cuenta): es sólo la variante del saludo.
+ */
+export function abbreviateGreetingName(fullName: string | null | undefined): string | null {
+  const name = formatPersonName(fullName);
+  if (!name) {
+    return null;
+  }
+  const [first, second] = name.split(' ').filter(Boolean);
+  if (!first) {
+    return null;
+  }
+  return second ? `${first} ${second.charAt(0)}.` : first;
+}

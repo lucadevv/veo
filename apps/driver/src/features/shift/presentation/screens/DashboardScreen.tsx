@@ -25,9 +25,9 @@ import type { MainTabParamList, RootStackParamList } from '../../../../navigatio
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
 import { MapTopScrim } from '../../../../shared/presentation/components/MapTopScrim';
-import { IconBell, IconFlame, IconPower } from '../../../../shared/presentation/icons';
+import { IconBell, IconFlame } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
+import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { useEarningsSummary } from '../../../earnings/presentation/hooks/useEarnings';
@@ -112,6 +112,8 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   // Nombre del conductor para el saludo (perfil server-authoritative). Mientras carga → cae al rol genérico.
   const profile = useProfile();
   const driverName = formatPersonName(profile.data?.fullName);
+  // Saludo compacto fiel al frame ("Carlos R."): primer nombre + inicial del apellido.
+  const greetingName = abbreviateGreetingName(profile.data?.fullName);
   const pause = usePauseShift();
   const end = useEndShift();
   const activeTripId = useDispatchStore((s) => s.activeTripId);
@@ -224,7 +226,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             {t('shift.greetingHi')}
           </Text>
           <Text variant="subhead" numberOfLines={1}>
-            {driverName ?? t('shift.greetingRole')}
+            {greetingName ?? t('shift.greetingRole')}
           </Text>
         </View>
       </PressableScale>
@@ -298,19 +300,25 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     <Banner tone="warn" title={t('shift.kpisUnavailable')} />
   ) : (
     <View style={styles.kpisRow}>
-      <Appear style={styles.kpi} delay={40}>
+      <Appear
+        style={[styles.kpi, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md }]}
+        delay={40}
+      >
         <Text variant="title3" color="success" tabular>
           {formatPEN(earnings.data.totalNetCents ?? 0)}
         </Text>
-        <Text variant="footnote" color="inkMuted">
+        <Text variant="caption" color="inkSubtle">
           {t('shift.netTotal')}
         </Text>
       </Appear>
-      <Appear style={styles.kpi} delay={110}>
+      <Appear
+        style={[styles.kpi, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md }]}
+        delay={110}
+      >
         <Text variant="title3" color="ink" tabular>
           {formatPEN(earnings.data.pendingNetCents ?? 0)}
         </Text>
-        <Text variant="footnote" color="inkMuted">
+        <Text variant="caption" color="inkSubtle">
           {t('shift.pendingNet')}
         </Text>
       </Appear>
@@ -324,13 +332,13 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
 
   if (shift.isLoading) {
     bottomOverlay = (
-      <GlassSheet>
+      <GlassSheet floating>
         <Skeleton height={96} />
       </GlassSheet>
     );
   } else if (shift.isError || !shift.data) {
     bottomOverlay = (
-      <GlassSheet>
+      <GlassSheet floating>
         <Banner
           tone="danger"
           title={t('errors.generic')}
@@ -347,7 +355,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   } else if (activeTripId) {
     // Prioridad máxima: acceso directo al viaje en curso.
     bottomOverlay = (
-      <GlassSheet>
+      <GlassSheet floating>
         <Text variant="subhead" color="inkMuted">
           {t('trips.activeTitle')}
         </Text>
@@ -364,7 +372,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     // En línea: sheet slim con métricas en vivo, pausa y desconexión (misma lógica de mutaciones).
     bottomOverlay = (
       <Appear key="online">
-        <GlassSheet>
+        <GlassSheet floating>
           {/* GPS apagado/sin permiso EN TURNO: el conductor no emite posición y el dispatch no lo ve.
             Aviso prioritario (arriba de todo) para que lo corrija antes de seguir esperando viajes. */}
           {gpsUnavailable ? (
@@ -444,14 +452,30 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     const ActiveVehIcon = activeVeh ? vehicleClassGlyph(activeVeh.vehicleType) : null;
     bottomOverlay = (
       <Appear key="offline">
-        <GlassSheet>
-          {/* Vehículo activo (fiel al frame): etiqueta + link "Gestionar" a la derecha, y debajo el
-              vehículo con el que opera. Registrar/cambiar de vehículo se hace en la pantalla Vehículos. */}
-          <View style={styles.vehicleBlock}>
-            <View style={styles.vehicleHead}>
-              <Text variant="footnote" color="inkMuted">
-                {t('shift.vehicleType.label')}
-              </Text>
+        <GlassSheet floating>
+          {/* Vehículo activo (frame C/Dashboard-Offline): UNA fila = tile del icono + (etiqueta / vehículo)
+              apilados + link "Gestionar" a la derecha. Registrar/cambiar se hace en la pantalla Vehículos. */}
+          {activeVehicle.isLoading ? (
+            <View style={styles.vehicleRow}>
+              <Skeleton width={40} height={40} radius={theme.radii.md} />
+              <View style={styles.vehicleInfo}>
+                <Skeleton width={90} height={11} radius={theme.radii.sm} />
+                <Skeleton width={130} height={15} radius={theme.radii.sm} />
+              </View>
+            </View>
+          ) : activeVeh && ActiveVehIcon ? (
+            <View style={styles.vehicleRow}>
+              <View style={[styles.vehicleTile, { backgroundColor: theme.colors.surfaceElevated }]}>
+                <ActiveVehIcon size={22} color={theme.colors.ink} />
+              </View>
+              <View style={styles.vehicleInfo}>
+                <Text variant="caption" color="inkSubtle">
+                  {t('shift.vehicleType.label')}
+                </Text>
+                <Text variant="subhead" numberOfLines={1}>
+                  {`${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`}
+                </Text>
+              </View>
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel={t('vehicles.manage')}
@@ -462,21 +486,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
                 </Text>
               </PressableScale>
             </View>
-            {activeVehicle.isLoading ? (
-              <Skeleton height={22} width={160} radius={theme.radii.sm} />
-            ) : activeVeh && ActiveVehIcon ? (
-              <View style={styles.vehicleLine}>
-                <ActiveVehIcon size={18} color={theme.colors.ink} />
-                <Text variant="subhead" numberOfLines={1}>
-                  {`${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`}
-                </Text>
-              </View>
-            ) : (
-              <Text variant="subhead" color="inkMuted">
-                {t('shift.vehicleType.none')}
-              </Text>
-            )}
-          </View>
+          ) : (
+            <Banner tone="warn" title={t('shift.vehicleType.none')} />
+          )}
           <View style={styles.spaced}>{earningsMetrics}</View>
           {/* SUSPENDED (regla de seguridad): el conductor NO puede operar. Aviso claro + salida a soporte,
             en vez del CTA "Conéctate" (que canStartShift ya bloquea para este estado). */}
@@ -496,7 +508,6 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               label={status === 'ON_BREAK' ? t('shift.resume') : t('shift.connect')}
               size="lg"
               fullWidth
-              leftIcon={<IconPower size={20} color={theme.colors.onAccent} />}
               onPress={handleConnect}
               style={styles.spaced}
             />
@@ -633,14 +644,14 @@ const styles = StyleSheet.create({
   },
   legendWrap: { position: 'absolute', left: 16, right: 16, bottom: 16 },
   tipWrap: { position: 'absolute', left: 16, right: 16, top: 96 },
-  vehicleBlock: { gap: 8 },
-  vehicleHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  vehicleLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  vehicleTile: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  vehicleInfo: { flex: 1, gap: 1 },
   greetCard: { flexDirection: 'row', alignItems: 'center', gap: 10, maxWidth: 220 },
   greetText: { flexShrink: 1, paddingRight: 4 },
   dim: { ...StyleSheet.absoluteFill, opacity: 0.55 },
-  kpisRow: { flexDirection: 'row', gap: 16 },
-  kpi: { flex: 1, gap: 2 },
+  kpisRow: { flexDirection: 'row', gap: 12 },
+  kpi: { flex: 1, gap: 2, padding: 14 },
   onlineHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveDotWrap: { width: 10, height: 10, alignItems: 'center', justifyContent: 'center' },
   liveDot: { width: 10, height: 10, borderRadius: 999 },

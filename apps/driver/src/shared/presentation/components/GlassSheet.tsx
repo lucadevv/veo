@@ -5,6 +5,12 @@ import { useTheme } from '@veo/ui-kit';
 export interface GlassSheetProps {
   children?: ReactNode;
   style?: ViewStyle;
+  /**
+   * Tarjeta FLOTANTE (frame `C/Dashboard-Offline`): esquinas redondeadas en los 4 lados, inset de los
+   * bordes (respeta el slot de `MapShell`) y flotando por encima del tab bar. Por defecto (`false`) es la
+   * hoja pegada al borde inferior con sólo las esquinas superiores redondeadas.
+   */
+  floating?: boolean;
 }
 
 /**
@@ -17,13 +23,22 @@ export interface GlassSheetProps {
  * Va dentro del slot inferior de `MapShell` (que aporta left/right/bottom:12): el margen negativo lo
  * lleva FLUSH a los bordes, como en los frames.
  */
-export function GlassSheet({ children, style }: GlassSheetProps): React.JSX.Element {
+export function GlassSheet({ children, style, floating = false }: GlassSheetProps): React.JSX.Element {
   const theme = useTheme();
   return (
     <View
       style={[
         styles.sheet,
-        { borderTopLeftRadius: theme.radii['2xl'], borderTopRightRadius: theme.radii['2xl'] },
+        floating
+          ? { borderRadius: theme.radii['2xl'], borderWidth: 1 }
+          : {
+              borderTopLeftRadius: theme.radii['2xl'],
+              borderTopRightRadius: theme.radii['2xl'],
+              borderBottomWidth: 0,
+              // Flush a los bordes: cancela el inset de 12px del slot inferior de MapShell.
+              marginHorizontal: -12,
+              marginBottom: -12,
+            },
         style,
       ]}
     >
@@ -39,7 +54,6 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 24,
     borderWidth: 1,
-    borderBottomWidth: 0,
     borderColor: 'rgba(76,84,104,0.55)',
     borderTopColor: 'rgba(255,255,255,0.16)', // "labio" de vidrio arriba
     shadowColor: '#000000',
@@ -47,8 +61,5 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     shadowOffset: { width: 0, height: -12 },
     elevation: 24,
-    // Flush a los bordes: cancela el inset de 12px del slot inferior de MapShell.
-    marginHorizontal: -12,
-    marginBottom: -12,
   },
 });
