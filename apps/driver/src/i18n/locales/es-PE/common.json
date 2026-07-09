@@ -989,6 +989,11 @@
     "incentives": {
       "title": "Incentivos",
       "intro": "Completa metas y aprovecha las horas pico para ganar más.",
+      "heroTitle": "Ganá {{amount}} extra esta semana",
+      "heroBody": "Completá tus retos activos",
+      "progressCount": "{{done}} de {{total}}",
+      "howTitle": "¿Cómo funcionan los incentivos?",
+      "howBody": "Completa metas de viajes para ganar un bono en soles, y viaja en horas pico para un multiplicador de tus ganancias. Sigue tu progreso y la vigencia de cada uno aquí.",
       "activeCount_one": "{{count}} incentivo activo",
       "activeCount_other": "{{count}} incentivos activos",
       "emptyTitle": "Sin incentivos por ahora",
