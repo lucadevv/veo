@@ -61,7 +61,6 @@ pnpm --filter @veo/trip-service test
 | POST   | `/trips`                 | Crear/cotizar (→ REQUESTED). Idempotente vía `Idempotency-Key` |
 | GET    | `/trips/:id`             | Obtener viaje                                                  |
 | GET    | `/trips/:id/state`       | Solo estado                                                    |
-| POST   | `/trips/:id/assign`      | Asignar conductor/vehículo (→ ASSIGNED)                        |
 | POST   | `/trips/:id/accept`      | Conductor acepta (→ ACCEPTED)                                  |
 | POST   | `/trips/:id/arriving`    | En camino (→ ARRIVING)                                         |
 | POST   | `/trips/:id/arrived`     | Llegó al recojo (→ ARRIVED)                                    |

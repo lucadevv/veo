@@ -70,7 +70,6 @@ import type {
   AcceptTripDto,
   ArrivedTripDto,
   ArrivingTripDto,
-  AssignTripDto,
   CancelTripDto,
   ChangeDestinationDto,
   CompleteTripDto,
@@ -506,11 +505,6 @@ export class TripsService {
   }
 
   // ───────────────────────────── Transiciones ─────────────────────────────
-
-  /** POST /trips/:id/assign — asigna conductor/vehículo. Emite trip.assigned. */
-  async assignDriver(id: string, dto: AssignTripDto): Promise<TripView> {
-    return this.assign(id, dto.driverId, dto.vehicleId);
-  }
 
   /**
    * Asignación disparada por dispatch.match_found (consumidor Kafka). dispatch resuelve el vehículo

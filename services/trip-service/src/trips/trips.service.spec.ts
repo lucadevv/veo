@@ -594,28 +594,6 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
 });
 
 describe('TripsService · BR-T02 guardas de transición', () => {
-  it('assign sobre un viaje COMPLETED lanza InvalidTripTransition', async () => {
-    const prisma = makePrisma(buildTrip({ status: TripStatus.COMPLETED }));
-    const svc = new TripsService(prisma as never, maps);
-    await expect(
-      svc.assignDriver('trip-1', {
-        driverId: '22222222-2222-2222-2222-222222222222',
-        vehicleId: '33333333-3333-3333-3333-333333333333',
-      }),
-    ).rejects.toBeInstanceOf(InvalidTripTransition);
-  });
-
-  it('assign en REQUESTED → ASSIGNED y emite trip.assigned', async () => {
-    const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED }));
-    const svc = new TripsService(prisma as never, maps);
-    const view = await svc.assignDriver('trip-1', {
-      driverId: '22222222-2222-2222-2222-222222222222',
-      vehicleId: '33333333-3333-3333-3333-333333333333',
-    });
-    expect(view.status).toBe(TripStatus.ASSIGNED);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.assigned')).toBe(true);
-  });
-
   it('assignFromDispatch es idempotente si ya está ASSIGNED con el mismo conductor', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-9' }));
     const svc = new TripsService(prisma as never, maps);

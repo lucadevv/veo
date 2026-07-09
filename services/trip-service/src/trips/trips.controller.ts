@@ -20,7 +20,6 @@ import {
   AcceptTripDto,
   ArrivedTripDto,
   ArrivingTripDto,
-  AssignTripDto,
   CancelScheduledDto,
   CancelTripDto,
   ChangeDestinationDto,
@@ -80,13 +79,6 @@ export class TripsController {
   @ApiOperation({ summary: 'Obtener solo el estado del viaje (BR-T02)' })
   state(@Param('id') id: string) {
     return this.query.getTripState(id);
-  }
-
-  @Post(':id/assign')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Asignar conductor/vehículo (→ ASSIGNED)' })
-  assign(@Param('id') id: string, @Body() dto: AssignTripDto) {
-    return this.trips.assignDriver(id, dto);
   }
 
   // Anti-IDOR (transiciones del conductor): el `driverId` dueño se toma de la identidad FIRMADA
