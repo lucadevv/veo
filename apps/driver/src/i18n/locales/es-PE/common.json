@@ -921,7 +921,7 @@
     },
     "docType": {
       "DRIVER_LICENSE": "Licencia de conducir",
-      "LICENSE_A1": "Licencia A1",
+      "LICENSE_A1": "Licencia",
       "SOAT": "SOAT",
       "PROPERTY_CARD": "Tarjeta de propiedad",
       "BACKGROUND_CHECK": "Antecedentes",
@@ -955,7 +955,7 @@
     },
     "type": {
       "DNI": "DNI",
-      "LICENSE_A1": "Licencia A1",
+      "LICENSE_A1": "Licencia",
       "SOAT": "SOAT",
       "PROPERTY_CARD": "Tarjeta de propiedad",
       "VEHICLE_PHOTO": "Foto del vehículo",

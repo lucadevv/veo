@@ -22,6 +22,29 @@ import { useDocuments, useRegisterDocument } from '../hooks/useDocuments';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Documents'>;
 
+/**
+ * ¿`a` es la versión MÁS ACTUAL del tipo que `b`? Un conductor puede tener varias versiones del mismo tipo
+ * (renovaciones), pero la lista muestra UNA por tipo — la vigente. Preferimos la que está `ok` (no requiere
+ * atención) y, a igualdad, la de vencimiento más lejano (la renovación más nueva). Sin fecha de creación en
+ * el contrato, `expiresAt` es el mejor proxy de "cuál es la actual".
+ */
+function isMoreCurrent(a: DriverDocument, b: DriverDocument): boolean {
+  if (a.ok !== b.ok) return a.ok;
+  const ea = a.expiresAt ? Date.parse(a.expiresAt) : 0;
+  const eb = b.expiresAt ? Date.parse(b.expiresAt) : 0;
+  return ea > eb;
+}
+
+/** Deduplica por tipo (un documento por tipo, el vigente). Preserva el orden de primera aparición. */
+function dedupeDocumentsByType(docs: DriverDocument[]): DriverDocument[] {
+  const byType = new Map<string, DriverDocument>();
+  for (const doc of docs) {
+    const current = byType.get(doc.type);
+    if (!current || isMoreCurrent(doc, current)) byType.set(doc.type, doc);
+  }
+  return Array.from(byType.values());
+}
+
 /** Encabezado con botón de retroceso (pantalla de pila, no es un tab). */
 function DocumentsHeader({
   title,
@@ -62,7 +85,9 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<DriverDocument | null>(null);
 
-  const attentionCount = useMemo(() => (data ? countDocumentsNeedingAttention(data) : 0), [data]);
+  // Una versión por tipo (la vigente): evita duplicados de renovaciones (p. ej. dos "Licencia").
+  const documents = useMemo(() => dedupeDocumentsByType(data ?? []), [data]);
+  const attentionCount = useMemo(() => countDocumentsNeedingAttention(documents), [documents]);
 
   const typeLabel = (raw: string): string =>
     isKnownDocumentType(raw) ? t(documentTypeI18nKey(raw)) : raw;
@@ -128,7 +153,7 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
             </Appear>
           ) : null}
 
-          {data.length === 0 ? (
+          {documents.length === 0 ? (
             <View
               style={[
                 styles.emptyCard,
@@ -146,7 +171,7 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
             </View>
           ) : (
             <View style={styles.list}>
-              {data.map((doc: DriverDocument, index: number) => {
+              {documents.map((doc: DriverDocument, index: number) => {
                 const tone = documentStatusTone(doc.simpleStatus);
                 const highlight = needsAttention(doc.simpleStatus);
                 return (
