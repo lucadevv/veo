@@ -1,6 +1,6 @@
 import type {ChatMessage} from '../domain/entities';
 import {calendarDaysAgo} from '../../../shared/utils/format';
-import {formatDayShort} from '../../carpool/presentation/formatDay';
+import {formatDayShort} from '../../../shared/utils/formatDay';
 
 /**
  * Ítem de la lista del chat: un mensaje real o un DIVISOR sintético de día (design/veo.pen hPrJt

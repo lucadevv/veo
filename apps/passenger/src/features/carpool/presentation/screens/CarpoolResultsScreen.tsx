@@ -20,7 +20,7 @@ import {
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {EnterView} from '../../../trip/presentation/components/motion';
-import {formatIsoDayShort} from '../formatDay';
+import {formatIsoDayShort} from '../../../../shared/utils/formatDay';
 import {CarpoolTripCard} from '../components/CarpoolTripCard';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;

@@ -28,7 +28,7 @@ import {
   bookingPhase,
   type CarpoolBookingPhase,
 } from '../../domain/entities';
-import {formatDayTimeShort} from '../formatDay';
+import {formatDayTimeShort} from '../../../../shared/utils/formatDay';
 import {usePlaceLabel} from '../usePlaceLabel';
 import {
   IconCalendarX,

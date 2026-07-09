@@ -23,7 +23,7 @@ import {
   IconCar,
   IconStarFilled,
 } from '../../../trip/presentation/components/icons';
-import {formatDayTimeShort} from '../formatDay';
+import {formatDayTimeShort} from '../../../../shared/utils/formatDay';
 import {usePlaceLabel} from '../usePlaceLabel';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;

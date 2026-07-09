@@ -21,7 +21,7 @@ import {
   IconPlus,
   IconTarget,
 } from '../../../trip/presentation/components/icons';
-import {formatIsoDayShort} from '../formatDay';
+import {formatIsoDayShort} from '../../../../shared/utils/formatDay';
 import {
   type CarpoolPlacePick,
   CarpoolPlacePickerSheet,
