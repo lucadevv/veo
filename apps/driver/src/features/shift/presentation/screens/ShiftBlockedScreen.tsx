@@ -8,7 +8,6 @@ import type { RootStackParamList } from '../../../../navigation/types';
 import { NoticeHero } from '../../../../shared/presentation/components/NoticeHero';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { IconAlert } from '../../../../shared/presentation/icons';
-import { formatShortDate } from '../../../../shared/presentation/format';
 import {
   documentStatusTone,
   documentTypeI18nKey,
@@ -69,35 +68,18 @@ export const ShiftBlockedScreen = ({ navigation }: Props): React.JSX.Element => 
         {isLoading ? (
           <Skeleton height={64} radius={theme.radii.lg} />
         ) : (
-          <View
-            style={[
-              styles.listCard,
-              {
-                backgroundColor: theme.colors.surface,
-                borderColor: theme.colors.danger,
-                borderRadius: theme.radii.lg,
-                paddingHorizontal: theme.spacing.lg,
-              },
-            ]}
-          >
+          <View style={styles.list}>
             {blocking.map((doc: DriverDocument, index: number) => {
               const tone = documentStatusTone(doc.simpleStatus);
               return (
                 <DocumentRow
                   key={`${doc.type}-${index}`}
                   typeLabel={typeLabel(doc.type)}
-                  documentNumber={doc.documentNumber}
-                  expiryLabel={
-                    doc.expiresAt
-                      ? t('documents.expiresOn', { date: formatShortDate(doc.expiresAt) })
-                      : t('documents.noExpiry')
-                  }
                   statusLabel={t(`documents.status.${doc.simpleStatus}`)}
                   statusTone={tone}
                   highlighted
                   highlightColor={theme.colors.danger}
                   onPress={() => navigation.navigate('Documents')}
-                  showDivider={index > 0}
                 />
               );
             })}
@@ -109,5 +91,5 @@ export const ShiftBlockedScreen = ({ navigation }: Props): React.JSX.Element => 
 };
 
 const styles = StyleSheet.create({
-  listCard: { borderWidth: 1 },
+  list: { gap: 8 },
 });

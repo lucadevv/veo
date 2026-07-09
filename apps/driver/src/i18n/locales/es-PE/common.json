@@ -938,6 +938,7 @@
   },
   "documents": {
     "title": "Documentos",
+    "intro": "Mantené tus documentos al día para seguir operando.",
     "addAction": "Registrar documento",
     "empty": "Aún no has registrado documentos. Mantén tu licencia, SOAT y demás al día para operar.",
     "allValid": "Tus documentos están al día.",

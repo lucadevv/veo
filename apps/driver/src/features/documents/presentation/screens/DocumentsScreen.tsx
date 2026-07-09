@@ -6,7 +6,6 @@ import { Banner, Button, SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-ki
 import type { DriverDocument } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { formatShortDate } from '../../../../shared/presentation/format';
 import { IconChevronLeft, IconPlus } from '../../../../shared/presentation/icons';
 import {
   countDocumentsNeedingAttention,
@@ -116,6 +115,11 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       ) : (
         <View style={[styles.section, { gap: theme.spacing.lg }]}>
+          {/* Intro del frame C/Documentos: contexto breve arriba de la lista. */}
+          <Text variant="footnote" color="inkMuted">
+            {t('documents.intro')}
+          </Text>
+
           {/* Status by exception: banner SOLO si hay algo que atender (por vencer/vencido/rechazado). Si todo
               está al día NO gritamos "todo válido" con un banner verde (era el slop AI que el dueño rechazó). */}
           {attentionCount > 0 ? (
@@ -141,17 +145,7 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
               </Text>
             </View>
           ) : (
-            <View
-              style={[
-                styles.listCard,
-                {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                  borderRadius: theme.radii.lg,
-                  paddingHorizontal: theme.spacing.lg,
-                },
-              ]}
-            >
+            <View style={styles.list}>
               {data.map((doc: DriverDocument, index: number) => {
                 const tone = documentStatusTone(doc.simpleStatus);
                 const highlight = needsAttention(doc.simpleStatus);
@@ -159,12 +153,6 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
                   <Appear key={`${doc.type}-${index}`} delay={index * 50} distance={8}>
                     <DocumentRow
                       typeLabel={typeLabel(doc.type)}
-                      documentNumber={doc.documentNumber}
-                      expiryLabel={
-                        doc.expiresAt
-                          ? t('documents.expiresOn', { date: formatShortDate(doc.expiresAt) })
-                          : t('documents.noExpiry')
-                      }
                       statusLabel={t(`documents.status.${doc.simpleStatus}`)}
                       statusTone={tone}
                       highlighted={highlight}
@@ -176,7 +164,6 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
                             : undefined
                       }
                       onPress={() => openRegister(doc)}
-                      showDivider={index > 0}
                     />
                   </Appear>
                 );
@@ -206,7 +193,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1 },
   section: { paddingTop: 4 },
-  listCard: { borderWidth: StyleSheet.hairlineWidth },
+  list: { gap: 8 },
   emptyCard: { borderWidth: StyleSheet.hairlineWidth },
   footer: { paddingHorizontal: 16, paddingTop: 8 },
 });

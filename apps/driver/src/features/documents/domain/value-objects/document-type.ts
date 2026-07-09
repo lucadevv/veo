@@ -11,10 +11,12 @@ import { FleetDocumentType } from '@veo/shared-types';
  * con su valor crudo) sin romper la lista.
  */
 export const DOCUMENT_TYPES = [
+  FleetDocumentType.DNI,
   FleetDocumentType.LICENSE_A1,
   FleetDocumentType.SOAT,
   FleetDocumentType.PROPERTY_CARD,
   FleetDocumentType.ITV,
+  FleetDocumentType.VEHICLE_PHOTO,
   FleetDocumentType.BACKGROUND_CHECK,
 ] as const;
 
