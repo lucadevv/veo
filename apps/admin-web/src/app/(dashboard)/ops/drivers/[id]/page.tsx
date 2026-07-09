@@ -167,7 +167,13 @@ function Header({
   const itv = readiness.inspection;
   const livenessPassed = bio.livenessStatus === Liveness.PASSED;
   const facesRun = bio.dniFaceMatchedAt != null && bio.licenseFaceMatchedAt != null;
-  const canApprove = facesRun && livenessPassed && readiness.documentsValid && itv.current;
+  // "Aprobado" NO es un estado del conductor: es el veredicto de antecedentes (`backgroundCheckStatus`
+  // CLEARED) que setea approve(). Sobre un conductor YA aprobado, "Aprobar" es una acción IMPOSIBLE
+  // (identity responde 409: CLEARED→CLEARED no es transición legal) — no se ofrece. La única acción válida
+  // es REVOCAR (CLEARED→REJECTED). Coherencia admin↔identity: la UI no ofrece acciones que el backend rechaza.
+  const isApproved = driver.backgroundCheckStatus === 'CLEARED';
+  const canApprove =
+    !isApproved && facesRun && livenessPassed && readiness.documentsValid && itv.current;
   const blockReason = !livenessPassed
     ? 'El anti-spoofing del enrol no corrió; el conductor debe re-enrolar su biometría.'
     : !facesRun
@@ -235,47 +241,60 @@ function Header({
                   className="inline-flex items-center gap-2 rounded-full border border-danger bg-danger/15 px-[18px] py-[11px] text-sm font-semibold text-danger transition-colors hover:bg-danger/20"
                 >
                   <X className="size-4" aria-hidden />
-                  Rechazar
+                  {isApproved ? 'Revocar aprobación' : 'Rechazar'}
                 </button>
               }
-              title="Rechazar alta"
+              title={isApproved ? 'Revocar aprobación' : 'Rechazar alta'}
               icon={AlertTriangle}
-              description="El conductor recibirá el motivo, podrá corregir y reenviar a revisión. Requiere tu MFA (BR-S07)."
-              confirmLabel="Rechazar alta"
+              description={
+                isApproved
+                  ? 'El conductor volverá a revisión y queda FUERA de operación de inmediato (CLEARED → REJECTED). Requiere tu MFA (BR-S07).'
+                  : 'El conductor recibirá el motivo, podrá corregir y reenviar a revisión. Requiere tu MFA (BR-S07).'
+              }
+              confirmLabel={isApproved ? 'Revocar aprobación' : 'Rechazar alta'}
               confirmVariant="danger"
               withReason
-              reasonLabel="Motivo del rechazo (visible para el conductor)"
+              reasonLabel={
+                isApproved
+                  ? 'Motivo de la revocación (visible para el conductor)'
+                  : 'Motivo del rechazo (visible para el conductor)'
+              }
               reasonPlaceholder="Ej. La foto de la licencia no es legible. Vuelve a capturarla con buena luz."
               onVerified={async (reason) => {
                 await decision.mutateAsync({ id: driver.id, decision: 'reject', reason });
-                toast({ tone: 'success', title: 'Conductor rechazado' });
+                toast({
+                  tone: 'success',
+                  title: isApproved ? 'Aprobación revocada' : 'Conductor rechazado',
+                });
               }}
             />
 
-            <StepUpDialog
-              trigger={
-                <button
-                  type="button"
-                  disabled={!canApprove}
-                  className="inline-flex items-center gap-2 rounded-full bg-accent px-[18px] py-[11px] text-sm font-semibold text-accent-on shadow-[0_8px_24px_-6px_rgba(45,127,249,0.45)] transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
-                >
-                  <Check className="size-4" aria-hidden />
-                  Aprobar conductor
-                </button>
-              }
-              title="Confirmá tu identidad"
-              icon={ShieldCheck}
-              description="Aprobar conductor · acción sensible. Ingresá el código de tu app (TOTP); la aprobación exige verificación fresca (BR-S07). El servidor revalida documentos + ITV."
-              confirmLabel="Confirmar aprobación"
-              onVerified={async () => {
-                await decision.mutateAsync({ id: driver.id, decision: 'approve' });
-                toast({ tone: 'success', title: 'Conductor aprobado' });
-              }}
-            />
+            {!isApproved ? (
+              <StepUpDialog
+                trigger={
+                  <button
+                    type="button"
+                    disabled={!canApprove}
+                    className="inline-flex items-center gap-2 rounded-full bg-accent px-[18px] py-[11px] text-sm font-semibold text-accent-on shadow-[0_8px_24px_-6px_rgba(45,127,249,0.45)] transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                  >
+                    <Check className="size-4" aria-hidden />
+                    Aprobar conductor
+                  </button>
+                }
+                title="Confirmá tu identidad"
+                icon={ShieldCheck}
+                description="Aprobar conductor · acción sensible. Ingresá el código de tu app (TOTP); la aprobación exige verificación fresca (BR-S07). El servidor revalida documentos + ITV."
+                confirmLabel="Confirmar aprobación"
+                onVerified={async () => {
+                  await decision.mutateAsync({ id: driver.id, decision: 'approve' });
+                  toast({ tone: 'success', title: 'Conductor aprobado' });
+                }}
+              />
+            ) : null}
 
             <DeleteDriverAction driverId={driver.id} driverName={driver.fullName} />
           </div>
-          {!canApprove ? (
+          {!isApproved && !canApprove ? (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/15 px-3 py-1.5 text-[11px] font-semibold text-warn">
               <Lock className="size-3" aria-hidden />
               {blockReason}
