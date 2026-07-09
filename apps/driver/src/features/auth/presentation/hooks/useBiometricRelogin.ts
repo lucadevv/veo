@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { mobileRefreshResult } from '@veo/api-client';
-import { env } from '../../../../core/config/env';
 import { useDi, useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
+import { refreshBiometricSession } from '../../data';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
-
-/** Timeout del fetch a `/auth/refresh` del relogin biométrico (ms). Evita el spinner eterno si el BFF no responde. */
-const RELOGIN_REFRESH_TIMEOUT_MS = 15_000;
 
 interface BiometricReloginState {
   /** true si hay biometría disponible y un refresh token guardado (se puede ofrecer re-login). */
@@ -62,30 +58,10 @@ export function useBiometricRelogin(): BiometricReloginState {
       }
       const refreshToken = unlock.token;
 
-      // Timeout portable (AbortController + setTimeout, mismo patrón que el HttpClient): sin esto, con el BFF
-      // inalcanzable el relogin colgaba ~60s (timeout del SO) con el spinner eterno. Falla rápido → cae a OTP.
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), RELOGIN_REFRESH_TIMEOUT_MS);
-      let response: Response;
-      try {
-        response = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ refreshToken }),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-      if (!response.ok) {
-        throw new Error('No se pudo refrescar la sesión');
-      }
-      const parsed = mobileRefreshResult.safeParse(await response.json());
-      if (!parsed.success) {
-        throw new Error('Respuesta de refresh inválida');
-      }
-
-      const tokens = parsed.data;
+      // La llamada remota (fetch + timeout + validación de schema) vive en la capa `data`
+      // (`refreshBiometricSession`), no en presentation (regla clean-remote-calls). Devuelve los tokens
+      // ya rotados o lanza (BFF no-OK / respuesta inválida / abort por timeout) → cae al catch (banner).
+      const tokens = await refreshBiometricSession(refreshToken);
       useSessionStore.getState().setTokens(tokens);
       // PERSISTIR EL KEYCHAIN PRIMERO (A3), ANTES del fetch FALIBLE del perfil: el server YA rotó el jti al
       // responder OK, así que el Keychain debe quedar con el jti NUEVO independientemente de si el perfil carga.
