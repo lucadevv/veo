@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Banner,
+  BottomSheet,
   Button,
   Card,
   SafeScreen,
@@ -14,6 +15,7 @@ import {
   useTheme,
 } from '@veo/ui-kit';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
+import { IconPlus } from '../../../../shared/presentation/icons';
 import {
   vehicleClassGlyph,
   vehicleClassLabelKey,
@@ -82,6 +84,15 @@ export const VehiclesScreen = ({ navigation }: Props): React.JSX.Element => {
   const [form, setForm] = useState<VehicleData>(EMPTY_FORM);
   const [errors, setErrors] = useState<VehicleErrors>({});
   const [serverError, setServerError] = useState<unknown>(null);
+  // El alta vive en un sheet (fiel al frame C/Vehiculos: la pantalla es la LISTA + un botón "Agregar").
+  const [addOpen, setAddOpen] = useState(false);
+
+  const closeAdd = () => {
+    setAddOpen(false);
+    setForm(EMPTY_FORM);
+    setErrors({});
+    setServerError(null);
+  };
 
   const update = (patch: Partial<VehicleData>, field: keyof VehicleErrors) => {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -117,7 +128,7 @@ export const VehiclesScreen = ({ navigation }: Props): React.JSX.Element => {
       await register.mutateAsync(form);
       queryClient.invalidateQueries({ queryKey: REGISTRATION_VEHICLES_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ACTIVE_VEHICLE_QUERY_KEY });
-      setForm(EMPTY_FORM);
+      closeAdd();
     } catch (e) {
       if (e instanceof VehicleValidationError) setErrors(e.errors);
       else setServerError(e);
@@ -197,12 +208,20 @@ export const VehiclesScreen = ({ navigation }: Props): React.JSX.Element => {
           <Banner tone="danger" title={t('shift.vehicleType.changeError')} style={styles.spaced} />
         ) : null}
 
-        {/* ── Agregar un vehículo (el 2do: moto/auto) ── */}
-        <Text variant="headline" style={styles.section}>
-          {t('vehicles.addTitle')}
-        </Text>
-        <VehicleTypeSelector value={form.type} onChange={onChangeType} />
+        {/* ── Agregar vehículo: abre el sheet de alta. La pantalla es la LISTA + esta acción (frame). ── */}
+        <Button
+          label={t('vehicles.addAction')}
+          variant="secondary"
+          fullWidth
+          leftIcon={<IconPlus size={20} color={theme.colors.accent} />}
+          onPress={() => setAddOpen(true)}
+          style={styles.section}
+        />
+      </View>
+
+      <BottomSheet visible={addOpen} onClose={closeAdd} title={t('vehicles.addTitle')}>
         <View style={styles.form}>
+          <VehicleTypeSelector value={form.type} onChange={onChangeType} />
           {/* B5-2: el modelo se ELIGE del catálogo curado (filtrado por tipo), no a texto libre. En este
               flujo el tipo del form SIEMPRE está definido (arranca CAR, el selector ofrece ambos); el `??`
               es defensa de tipos por el `VehicleType | null` de VehicleData, no un seed silencioso. */}
@@ -246,7 +265,7 @@ export const VehiclesScreen = ({ navigation }: Props): React.JSX.Element => {
             onPress={onRegister}
           />
         </View>
-      </View>
+      </BottomSheet>
     </SafeScreen>
   );
 };
