@@ -4,7 +4,7 @@ import {
   enablePush,
   getPushPermission,
   type PushPermission,
-} from '../../../../services/messaging';
+} from '../../services/messaging';
 
 export type PushPermissionUi = PushPermission | 'loading';
 

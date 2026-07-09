@@ -21,7 +21,7 @@ import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {isWithinLima, LIMA_CENTER} from '../../../../shared/utils/geo';
-import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
+import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {IconClose} from '../../../trip/presentation/components/icons';
 import {isWaypointSet, type RoutePlace} from '../../domain/entities';
 import {useRideDraftStore} from '../stores/rideDraftStore';

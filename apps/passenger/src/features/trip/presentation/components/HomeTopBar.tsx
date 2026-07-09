@@ -3,7 +3,7 @@ import React, {useCallback} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Linking, Pressable, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import type {LocationStatus} from '../hooks/useCurrentLocation';
+import type {LocationStatus} from '../../../../core/location/useCurrentLocation';
 import {IconPin} from './icons';
 
 export interface HomeTopBarProps {

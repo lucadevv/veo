@@ -1,9 +1,9 @@
 import type {GeoPoint} from '@veo/api-client';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {AppState} from 'react-native';
-import {TOKENS} from '../../../../core/di/tokens';
-import {useDependency} from '../../../../core/di/useDependency';
-import type {LocationAvailability} from '../../../../shared/location/domain/locationProvider';
+import {TOKENS} from '../di/tokens';
+import {useDependency} from '../di/useDependency';
+import type {LocationAvailability} from '../../shared/location/domain/locationProvider';
 
 /**
  * Estado del ciclo de vida de la ubicación, en términos de UI:

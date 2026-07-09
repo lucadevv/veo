@@ -41,7 +41,7 @@ import {isDocumentValid} from '../../../payments/domain/affiliationUsecases';
 import {maskDocument} from '../../../../shared/utils/format';
 import {EnterView} from '../components/motion';
 import {PhoneVerificationSheet} from '../components/PhoneVerificationSheet';
-import {usePushPermission} from '../../../notifications/presentation/hooks/usePushPermission';
+import {usePushPermission} from '../../../../core/notifications/usePushPermission';
 import {
   IconAccessibility,
   IconBadgeCheck,

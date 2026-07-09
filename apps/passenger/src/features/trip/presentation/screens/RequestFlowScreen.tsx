@@ -50,12 +50,12 @@ import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete'
 import {useRideDraftStore} from '../../../maps/presentation/stores/rideDraftStore';
 import {useSavedPlacesStore} from '../../../places/presentation/stores/savedPlacesStore';
 import {DebtSheet} from '../../../payments/presentation';
-import {usePushPermission} from '../../../notifications/presentation/hooks/usePushPermission';
+import {usePushPermission} from '../../../../core/notifications/usePushPermission';
 import {PushPrePrompt} from '../../../notifications/presentation/components/PushPrePrompt';
-import {usePanicAutoTrigger} from '../../../panic/presentation';
+import {usePanicAutoTrigger} from '../../../../core/panic/usePanicAutoTrigger';
 import {HomeTopBar} from '../components/HomeTopBar';
 import {TripTopBar} from '../components/TripTopBar';
-import {useCurrentLocation} from '../hooks/useCurrentLocation';
+import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {usePassengerTripSocket} from '../hooks/usePassengerTripSocket';
 import {useWaypointProposal} from '../hooks/useWaypointProposal';
 import {useOfferBoard} from '../hooks/useOfferBoard';

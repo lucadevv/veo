@@ -30,7 +30,7 @@ import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {distanceMeters} from '../../../../shared/utils/geo';
 import {formatDistance} from '../../../../shared/utils/format';
-import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
+import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {SavedPlacesShortcuts} from '../../../places/presentation';
 import type {SavedPlace} from '../../../places/domain/entities';
 import type {RoutePlace} from '../../domain/entities';

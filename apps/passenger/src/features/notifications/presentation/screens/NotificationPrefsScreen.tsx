@@ -11,7 +11,7 @@ import {
   IconShield,
   IconUser,
 } from '../icons';
-import {usePushPermission} from '../hooks/usePushPermission';
+import {usePushPermission} from '../../../../core/notifications/usePushPermission';
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import type {NotificationPrefs} from '../stores/notificationPrefsStore';
 import {useNotificationPrefsStore} from '../stores/notificationPrefsStore';

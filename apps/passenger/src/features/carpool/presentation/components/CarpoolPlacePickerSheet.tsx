@@ -12,7 +12,7 @@ import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {View} from 'react-native';
 import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
-import {useCurrentLocation} from '../../../trip/presentation/hooks/useCurrentLocation';
+import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {IconPin} from '../../../trip/presentation/components/icons';
 
 /** Punto elegido para la búsqueda de carpooling (coordenada + etiqueta que ve el pasajero). */

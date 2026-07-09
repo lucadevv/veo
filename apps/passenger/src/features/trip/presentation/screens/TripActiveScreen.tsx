@@ -39,7 +39,7 @@ import {
   formatPEN,
 } from '../../../../shared/utils/format';
 import type {RootStackParamList} from '../../../../navigation/types';
-import {usePanicAutoTrigger} from '../../../panic/presentation';
+import {usePanicAutoTrigger} from '../../../../core/panic/usePanicAutoTrigger';
 import {CabinVideoPanel} from '../components/CabinVideoPanel';
 import {LiveBadge} from '../components/LiveBadge';
 import {TripStatusPill} from '../components/TripStatusPill';
