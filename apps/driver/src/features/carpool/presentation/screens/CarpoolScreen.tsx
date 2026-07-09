@@ -6,7 +6,6 @@ import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  Button,
   Card,
   SafeScreen,
   Skeleton,
@@ -22,7 +21,7 @@ import { Reveal } from '../../../../shared/presentation/components/motion';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, formatShortDate } from '../../../../shared/presentation/format';
-import { IconCarpool } from '../../../../shared/presentation/icons';
+import { IconCarpool, IconChevronRight, IconPlus } from '../../../../shared/presentation/icons';
 import { useMyPublishedTrips } from '../hooks/useCarpool';
 
 type Props = CompositeScreenProps<
@@ -103,13 +102,27 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
     <SafeScreen scroll>
       <ScreenHero title={t('carpool.title')} subtitle={t('carpool.subtitle')} />
 
+      {/* CTA "Publicar un viaje" fiel al frame C/Compartir: action-row con círculo + `plus`, etiqueta que
+          crece, y chevron — no un botón sólido centrado. */}
       <Reveal delay={40}>
-        <Button
-          label={t('carpool.publishCta')}
-          variant="accent"
-          fullWidth
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('carpool.publishCta')}
           onPress={() => navigation.navigate('CarpoolPublish')}
-        />
+          style={({ pressed }) => [
+            styles.publish,
+            { borderColor: theme.colors.accent, backgroundColor: theme.colors.accent + '26' },
+            pressed && styles.publishPressed,
+          ]}
+        >
+          <View style={[styles.publishIcon, { backgroundColor: theme.colors.accent + '26' }]}>
+            <IconPlus size={22} color={theme.colors.accent} strokeWidth={2.2} />
+          </View>
+          <Text variant="body" style={styles.publishLabel}>
+            {t('carpool.publishCta')}
+          </Text>
+          <IconChevronRight size={18} color={theme.colors.accent} />
+        </Pressable>
       </Reveal>
 
       {trips.isLoading ? (
@@ -155,6 +168,23 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
 };
 
 const styles = StyleSheet.create({
+  publish: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  publishPressed: { opacity: 0.85 },
+  publishIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  publishLabel: { flex: 1, fontWeight: '600' },
   section: { gap: 12, paddingTop: 20 },
   cardHead: {
     flexDirection: 'row',

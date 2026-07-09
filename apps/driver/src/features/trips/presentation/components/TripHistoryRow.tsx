@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { TripHistoryItem, TripStatus } from '@veo/api-client';
-import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
+import { Text, useTheme } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
 import {
   calendarDaysAgo,
@@ -63,17 +63,16 @@ export interface TripHistoryRowProps {
 }
 
 /**
- * Fila del historial de viajes del CONDUCTOR (card de "Mis Viajes"). Espeja la jerarquía editorial de la
- * fila del pasajero, adaptada a los tokens del conductor (modo noche por defecto):
+ * Fila del historial de viajes del CONDUCTOR, FIEL al frame C/Historial (`Trip-*`):
  *
- *  - CABECERA fina: punto de estado + micro-label en mayúsculas trackeadas · ícono del tier a la derecha.
- *  - CUERPO: "lomo" temporal (día relativo fuerte + hora muteada) + el trayecto como RIEL continuo
- *    origen→destino con su resumen (distancia · duración). NO se inventan direcciones: solo lo que el item sabe.
- *  - PIE: hairline + el MONTO con presencia (payoff). En un cancelado/vencido sin cobro, un guion sobrio.
+ *  - CABECERA fina: punto de estado + micro-label EN EL COLOR DEL TONO (COMPLETADO en jade) · ícono del tier.
+ *  - FILA única: "lomo" temporal (día fuerte + hora muteada, ancho fijo) + trayecto en texto plano
+ *    ("Salió a las…" + distancia · duración) + el MONTO a la derecha, en la MISMA fila.
  *
- * PRESSABLE: navega al detalle/recibo del viaje (frame C/Historial-Detalle) pasando el `TripHistoryItem`
- * COMPLETO que ya trae la fila (origen/destino, distancia, duración, fecha, tarifa, tier) — la fuente real
- * del recibo, más rica que el `GET /trips/:id`. El feedback táctil es una atenuación sobria al presionar.
+ * NO hay riel origen→destino ni footer con hairline: el frame es compacto y el monto acompaña la fila, no
+ * cuelga de un pie con divisoria. No se inventan direcciones: solo lo que el `TripHistoryItem` trae.
+ *
+ * PRESSABLE: navega al detalle/recibo (frame C/Historial-Detalle) con el item COMPLETO. Feedback: atenuación.
  */
 export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element {
   const theme = useTheme();
@@ -82,14 +81,13 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
 
   const status = parseTripStatus(trip.status);
   const tone: StatusTone = status === 'UNKNOWN' ? 'accent' : STATUS_TONE[status] ?? 'accent';
-  const dotColor = theme.colors[tone];
+  const toneColor = theme.colors[tone];
   const statusLabel =
     status === 'UNKNOWN'
       ? t('trips.status.unknown')
       : t(STATUS_LABEL_KEY[status] ?? 'trips.status.unknown');
 
   const isCompleted = status === 'COMPLETED';
-  const isCancelled = status === 'CANCELLED' || status === 'FAILED' || status === 'EXPIRED';
 
   const dayLabel = useMemo(() => {
     const days = calendarDaysAgo(trip.requestedAt);
@@ -109,8 +107,7 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
     duration: t('trips.minutes', { value: secondsToMinutes(trip.durationSeconds) }),
   });
 
-  // El monto de un cancelado/vencido no es una "tarifa cobrada": si no hubo cobro (0), guion sobrio en vez
-  // de fingirlo como protagonista. Si hubo penalidad (>0) o fue completado, sí se muestra.
+  // El monto de un cancelado/vencido sin cobro (0) es un guion sobrio, no una tarifa fingida.
   const showFare = isCompleted || trip.fareCents > 0;
 
   return (
@@ -131,78 +128,43 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
         },
       ]}
     >
-      {/* CABECERA FINA: estado (punto + micro-label) a la izquierda · ícono del tier a la derecha. */}
+      {/* CABECERA FINA: estado (punto + micro-label en el tono) a la izquierda · ícono del tier a la derecha. */}
       <View style={styles.topLine}>
         <View style={styles.statusGroup}>
-          <View
-            style={[
-              styles.dot,
-              { backgroundColor: dotColor, borderColor: hexAlpha(dotColor, 0.28) },
-            ]}
-          />
-          <Text
-            variant="caption"
-            style={[
-              styles.statusLabel,
-              { color: isCancelled ? theme.colors.inkMuted : theme.colors.inkSubtle },
-            ]}
-            numberOfLines={1}
-          >
+          <View style={[styles.dot, { backgroundColor: toneColor }]} />
+          <Text variant="caption" style={[styles.statusLabel, { color: toneColor }]} numberOfLines={1}>
             {statusLabel}
           </Text>
         </View>
         <VehicleIcon color={theme.colors.inkSubtle} size={16} />
       </View>
 
-      {/* CUERPO: "lomo" temporal a la izquierda + el trayecto como riel continuo a la derecha. */}
-      <View style={styles.body}>
-        <View style={styles.dateSpine}>
-          <Text variant="title3" numberOfLines={1}>
+      {/* FILA única: fecha (ancho fijo) · trayecto (crece) · monto — todo en línea, como el frame. */}
+      <View style={styles.mid}>
+        <View style={styles.dateCol}>
+          <Text variant="bodyStrong" numberOfLines={1}>
             {dayLabel}
           </Text>
-          <Text variant="footnote" color="inkSubtle" tabular>
+          <Text variant="caption" color="inkMuted" tabular>
             {time}
           </Text>
         </View>
 
-        <View style={styles.journey}>
-          <View
-            style={styles.rail}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            <View style={[styles.railDotOrigin, { borderColor: theme.colors.brand }]} />
-            <View style={[styles.railLine, { backgroundColor: theme.colors.border }]} />
-            <View style={[styles.railDotDest, { backgroundColor: theme.colors.ink }]} />
-          </View>
-          <View style={styles.journeyLabels}>
-            <Text variant="subhead" color="inkMuted" numberOfLines={1}>
-              {t('trips.history.departedAt', { time })}
-            </Text>
-            <Text variant="bodyStrong" numberOfLines={1}>
-              {summary}
-            </Text>
-          </View>
+        <View style={styles.route}>
+          <Text variant="footnote" numberOfLines={1}>
+            {t('trips.history.departedAt', { time })}
+          </Text>
+          <Text variant="caption" color="inkMuted" numberOfLines={1}>
+            {summary}
+          </Text>
         </View>
-      </View>
 
-      {/* PIE: hairline + el MONTO con presencia (payoff), alineado a la derecha. */}
-      <View
-        style={[
-          styles.footer,
-          {
-            borderTopColor: theme.colors.border,
-            paddingTop: theme.spacing.md,
-            marginTop: theme.spacing.md,
-          },
-        ]}
-      >
         {showFare ? (
-          <Text variant="title3" tabular>
+          <Text variant="bodyStrong" tabular>
             {formatPEN(trip.fareCents)}
           </Text>
         ) : (
-          <Text variant="title3" color="inkSubtle">
+          <Text variant="bodyStrong" color="inkSubtle">
             —
           </Text>
         )}
@@ -211,26 +173,13 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
   );
 }
 
-const RAIL_DOT = 10;
-
 const styles = StyleSheet.create({
   card: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   topLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  statusGroup: { flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1 },
-  dot: { width: 8, height: 8, borderRadius: 4, borderWidth: 3 },
-  statusLabel: { textTransform: 'uppercase', letterSpacing: 0.8, flexShrink: 1 },
-  body: { flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginTop: 14 },
-  dateSpine: { width: 84, gap: 2 },
-  journey: { flex: 1, flexDirection: 'row', gap: 12 },
-  rail: { width: RAIL_DOT, alignItems: 'center', paddingTop: 5 },
-  railDotOrigin: { width: RAIL_DOT, height: RAIL_DOT, borderRadius: RAIL_DOT / 2, borderWidth: 2.5 },
-  railLine: { width: 2, flex: 1, marginVertical: 3, minHeight: 16 },
-  railDotDest: { width: RAIL_DOT, height: RAIL_DOT, borderRadius: 2 },
-  journeyLabels: { flex: 1, justifyContent: 'space-between', gap: 12 },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
+  statusGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  dot: { width: 7, height: 7, borderRadius: 3.5 },
+  statusLabel: { textTransform: 'uppercase', letterSpacing: 0.5, flexShrink: 1, fontWeight: '700' },
+  mid: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 12 },
+  dateCol: { width: 78, gap: 2 },
+  route: { flex: 1, gap: 3 },
 });

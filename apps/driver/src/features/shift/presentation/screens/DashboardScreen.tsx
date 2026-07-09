@@ -24,6 +24,7 @@ import {
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
+import { MapTopScrim } from '../../../../shared/presentation/components/MapTopScrim';
 import { IconBell, IconFlame, IconPower } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
@@ -215,17 +216,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         accessibilityRole="button"
         accessibilityLabel={t('shift.viewProfile')}
         onPress={() => navigation.navigate('Cuenta')}
-        style={[
-          styles.greetCard,
-          {
-            backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
-            borderRadius: theme.radii.pill,
-            paddingHorizontal: theme.spacing.sm,
-            paddingVertical: theme.spacing.xs,
-            ...theme.elevation.level2,
-          },
-        ]}
+        style={styles.greetCard}
       >
         <Avatar name={driverName ?? 'VEO'} size="sm" online={online} />
         <View style={styles.greetText}>
@@ -527,6 +518,8 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           heatCells={demandOn ? heatCells : undefined}
           interactive={online}
         />
+        {/* Velo superior (frame `Dim`): asegura la legibilidad del saludo/pill sobre el mapa. */}
+        <MapTopScrim />
         {/* Atenuación del mapa cuando el conductor no está en línea. */}
         {!online ? (
           <View style={[styles.dim, { backgroundColor: theme.colors.bg }]} pointerEvents="none" />
@@ -626,7 +619,7 @@ const styles = StyleSheet.create({
   legendWrap: { position: 'absolute', left: 16, right: 16, bottom: 16 },
   tipWrap: { position: 'absolute', left: 16, right: 16, top: 96 },
   vehiclePicker: { marginBottom: 16 },
-  greetCard: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, maxWidth: 220 },
+  greetCard: { flexDirection: 'row', alignItems: 'center', gap: 10, maxWidth: 220 },
   greetText: { flexShrink: 1, paddingRight: 4 },
   dim: { ...StyleSheet.absoluteFill, opacity: 0.55 },
   kpisRow: { flexDirection: 'row', gap: 16 },

@@ -146,37 +146,12 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
             </Card>
           </Reveal>
 
-          {/* Documentos como lista. */}
-          <Reveal delay={160}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
-              {t('profile.documentsTitle')}
-            </Text>
-            <Card>
-              {data.documents.length === 0 ? (
-                <Text variant="callout" color="inkMuted">
-                  {t('profile.noDocuments')}
-                </Text>
-              ) : (
-                data.documents.map((doc) => (
-                  <ListItem
-                    key={doc.type}
-                    title={enumLabel(t, 'profile.docType', doc.type)}
-                    subtitle={enumLabel(t, 'profile.docStatus', doc.status)}
-                    trailing={
-                      // Status by exception: un doc VÁLIDO ya lo dice su subtítulo ("Verificado") — no
-                      // repetimos con un badge (evita el checklist de 5 pills). Solo el problema grita.
-                      doc.ok ? null : (
-                        <StatusPill label={t('profile.documentInvalid')} tone="danger" dot />
-                      )
-                    }
-                  />
-                ))
-              )}
-            </Card>
-          </Reveal>
+          {/* La LISTA de documentos vive en su pantalla dedicada (row "Documentos" abajo), fiel al frame
+              C/Perfil: acá NO se expande inline. Eliminar la lista inline además cerró el bug de keys
+              duplicadas (dos docs con el mismo `type`, p. ej. dos SOAT, colisionaban en `key={doc.type}`). */}
 
           {/* Accesos rápidos: documentos + biometría (stack) + tabs Ganancias/Viajes. */}
-          <Reveal delay={200}>
+          <Reveal delay={160}>
             <Card padding="sm">
               <ProfileLinkRow
                 icon={<IconAccount size={20} color={theme.colors.inkMuted} />}
