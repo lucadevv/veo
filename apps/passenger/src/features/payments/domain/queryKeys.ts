@@ -9,3 +9,6 @@ export const MY_DEBTS_QUERY_KEY = ['payments', 'debts'] as const;
 
 /** Clave de caché del saldo de crédito gastable del pasajero (`GET /payments/credit`). */
 export const USER_CREDIT_QUERY_KEY = ['payments', 'credit'] as const;
+
+/** Clave de caché compartida del estado de afiliación Yape (perfil + señal en el quoting). */
+export const YAPE_AFFILIATION_QUERY_KEY = ['affiliation', 'yape'] as const;

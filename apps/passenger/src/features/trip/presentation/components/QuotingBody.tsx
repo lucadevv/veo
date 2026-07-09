@@ -43,8 +43,8 @@ import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymen
 import {
   PaymentMethodRow,
   PaymentMethodSheet,
-  useIsYapeAutoActive,
 } from '../../../payments/presentation';
+import {useIsYapeAutoActive} from '../../../../shared/presentation/hooks/useIsYapeAutoActive';
 import {PromoField, type AppliedPromo} from '../../../promos/presentation';
 import {ScheduleSheet} from './ScheduleSheet';
 import {initialBidCents, stepBidCents} from '../../../../shared/utils/bid';

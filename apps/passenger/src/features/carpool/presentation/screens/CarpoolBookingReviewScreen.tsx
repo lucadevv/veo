@@ -23,8 +23,8 @@ import type {RootStackParamList} from '../../../../navigation/types';
 import {
   PaymentMethodRow,
   PaymentMethodSheet,
-  useIsYapeAutoActive,
 } from '../../../payments/presentation';
+import {useIsYapeAutoActive} from '../../../../shared/presentation/hooks/useIsYapeAutoActive';
 import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymentPrefsStore';
 import {IconMinus, IconPlus} from '../../../trip/presentation/components/icons';
 import {
