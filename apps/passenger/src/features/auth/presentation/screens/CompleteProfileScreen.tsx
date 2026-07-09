@@ -24,7 +24,7 @@ import Animated, {
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {profileQueryKey} from '../../../profile/presentation/hooks/useProfileCompletion';
+import {profileQueryKey} from '../../../profile/domain/queryKeys';
 import {AvatarUploadError} from '../../../../shared/media/domain/avatarUploader';
 import {
   ImagePickError,

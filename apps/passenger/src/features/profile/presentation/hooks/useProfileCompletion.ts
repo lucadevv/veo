@@ -8,17 +8,7 @@ import {
   useProfileLocalStore,
 } from '../../../auth/presentation';
 import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymentPrefsStore';
-
-/**
- * Clave de caché del perfil real del pasajero (`GET /users/me`), AISLADA por `userId`.
- *
- * Incluir el `userId` evita una ventana de staleness entre cuentas: si un usuario cierra sesión y
- * otro entra (o se rehidrata otra sesión), su perfil cacheado NO se confunde con el del usuario
- * anterior. Las invalidaciones amplias (`['profile']`) siguen casando por prefijo.
- */
-export function profileQueryKey(userId: string | null) {
-  return ['profile', 'me', userId] as const;
-}
+import {profileQueryKey} from '../../domain/queryKeys';
 
 /** Estado de completitud del perfil con el que el `RootNavigator` decide el stack. */
 export type ProfileCompletion = 'loading' | 'complete' | 'incomplete';

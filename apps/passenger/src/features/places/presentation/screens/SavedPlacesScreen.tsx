@@ -17,7 +17,7 @@ import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View} from 'react-native';
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
-import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
+import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';
 import {
   IconHome,
   IconPlus,

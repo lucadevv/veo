@@ -35,7 +35,7 @@ import {
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {mergeOffers} from '../../domain/offers';
 import {IconStarFilled} from '../components/icons';
-import {usePassengerTripSocket} from '../hooks/usePassengerTripSocket';
+import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;

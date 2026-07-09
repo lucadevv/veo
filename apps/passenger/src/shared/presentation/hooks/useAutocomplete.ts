@@ -1,9 +1,17 @@
 import type {MapPoint, PlaceSuggestionList} from '@veo/api-client';
 import {keepPreviousData, useQuery} from '@tanstack/react-query';
 import {useEffect, useState} from 'react';
-import {TOKENS} from '../../../../core/di/tokens';
-import {useDependency} from '../../../../core/di/useDependency';
-import {MIN_QUERY_LENGTH} from '../../domain/entities';
+import {TOKENS} from '../../../core/di/tokens';
+import {useDependency} from '../../../core/di/useDependency';
+import {MIN_QUERY_LENGTH} from '../../../features/maps/domain/entities';
+
+/**
+ * Autocompletado de direcciones: capacidad de presentación COMPARTIDA (la usan la búsqueda de Maps, el
+ * picker de Carpool, los lugares guardados y el flujo de pedido). Vive en `shared/presentation` —como
+ * `AppMap`/`BidPanel`— porque la consumen 4 features: si viviera en `maps/presentation`, cada consumidor
+ * ajeno rompería el aislamiento de features. Depende solo del DOMINIO público de Maps (`MIN_QUERY_LENGTH`)
+ * y del caso de uso resuelto por DI —nunca de los internals de Maps.
+ */
 
 /** Retardo del debounce del autocompletado (ms). */
 const DEBOUNCE_MS = 250;

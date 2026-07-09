@@ -1,14 +1,8 @@
 import type {MyRatingView} from '@veo/api-client';
 import {useQuery, type UseQueryResult} from '@tanstack/react-query';
-import {TOKENS} from '../../../core/di/tokens';
-import {useDependency} from '../../../core/di/useDependency';
-
-/** Clave de cache compartida por la lista del historial y el detalle (una sola verdad por viaje). */
-export const myTripRatingKey = (tripId: string): readonly string[] => [
-  'rating',
-  tripId,
-  'mine',
-];
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {myTripRatingKey} from '../../../ratings/domain/queryKeys';
 
 export interface UseMyTripRatingOptions {
   /**
@@ -24,6 +18,10 @@ export interface UseMyTripRatingOptions {
  * entre el historial (indicador "Califica" vs "★ N") y el detalle (estado de solo-lectura). El
  * `staleTime` es largo: una calificación enviada es inmutable (el backend no reabre la ventana), así
  * que no tiene sentido re-pedirla en cada foco. Tras calificar, invalidamos esta clave a mano.
+ *
+ * Hook fino LOCAL del historial de viajes (Trip): envuelve el puerto público `RatingsRepository`
+ * (resuelto por DI) y la clave compartida `myTripRatingKey` de `ratings/domain` —sin tocar la
+ * `presentation` de Ratings, respetando el aislamiento de features (la caché sigue siendo una sola).
  */
 export function useMyTripRating(
   tripId: string,

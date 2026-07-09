@@ -15,7 +15,7 @@ import {StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {profileQueryKey} from '../hooks/useProfileCompletion';
+import {profileQueryKey} from '../../domain/queryKeys';
 import {
   PHONE_CODE_LENGTH,
   PHONE_LOCAL_LENGTH,

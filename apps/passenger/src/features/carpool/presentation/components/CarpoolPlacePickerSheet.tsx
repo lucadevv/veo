@@ -11,7 +11,7 @@ import {
 import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {View} from 'react-native';
-import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
+import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {IconPin} from '../../../trip/presentation/components/icons';
 

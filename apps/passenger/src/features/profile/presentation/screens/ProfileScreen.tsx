@@ -65,7 +65,7 @@ import {
 } from '../components/icons';
 import {IconPencil} from '../../../auth/presentation/components/icons';
 import {IconStarFilled} from '../../../trip/presentation/components/icons';
-import {useMyAggregateRating} from '../../../ratings/presentation/useMyAggregateRating';
+import {useMyAggregateRating} from '../hooks/useMyAggregateRating';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

@@ -9,7 +9,7 @@ import {useEffect, useRef, useState} from 'react';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {mergeOffers} from '../../domain/offers';
-import type {LiveTripState} from './usePassengerTripSocket';
+import type {LiveTripState} from '../../../../core/realtime/usePassengerTripSocket';
 
 /** Estado del BOARD de la puja (contrato nuevo `{ board, offers }`). `null` hasta el primer snapshot. */
 export interface OfferBoardState {

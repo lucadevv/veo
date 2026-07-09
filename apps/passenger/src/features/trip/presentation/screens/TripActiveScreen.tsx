@@ -45,7 +45,7 @@ import {LiveBadge} from '../components/LiveBadge';
 import {TripStatusPill} from '../components/TripStatusPill';
 import {EnterView} from '../components/motion';
 import {IconChat, IconRoute, IconShare} from '../components/icons';
-import {usePassengerTripSocket} from '../hooks/usePassengerTripSocket';
+import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import {useActiveTripStore} from '../stores/activeTripStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;

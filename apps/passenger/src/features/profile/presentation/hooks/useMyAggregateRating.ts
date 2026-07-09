@@ -1,14 +1,8 @@
 import type {RatingAggregateView} from '@veo/api-client';
 import {useQuery, type UseQueryResult} from '@tanstack/react-query';
-import {TOKENS} from '../../../core/di/tokens';
-import {useDependency} from '../../../core/di/useDependency';
-
-/** Clave de cache del agregado rolling 30d de un sujeto (pasajero o conductor). */
-export const myAggregateRatingKey = (subjectId: string): readonly string[] => [
-  'rating',
-  'aggregate',
-  subjectId,
-];
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
+import {myAggregateRatingKey} from '../../../ratings/domain/queryKeys';
 
 /**
  * Chequeo ESTRUCTURAL tipado de un 404 (sin `instanceof`): el `ApiError` del `@veo/api-client` lleva
@@ -35,6 +29,10 @@ function isNotFoundError(err: unknown): boolean {
  * (la UI lo trata silencioso, sin romper el perfil).
  *
  * `staleTime` largo: el agregado rolling se recomputa server-side de forma diferida, no en cada foco.
+ *
+ * Hook fino LOCAL de la cabecera del Perfil: envuelve el puerto público `RatingsRepository` (resuelto
+ * por DI) y la clave compartida `myAggregateRatingKey` de `ratings/domain` —sin tocar la `presentation`
+ * de Ratings, respetando el aislamiento de features (la caché del agregado sigue siendo una sola).
  */
 export function useMyAggregateRating(
   subjectId: string,

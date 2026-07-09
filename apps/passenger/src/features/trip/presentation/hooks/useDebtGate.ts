@@ -1,6 +1,6 @@
 import type {DebtView} from '@veo/api-client';
 import {useCallback, useState} from 'react';
-import {useMyDebts} from '../../../payments/presentation';
+import {useMyDebts} from './useMyDebts';
 
 export interface DebtGateController {
   /** El `DebtSheet` está visible (cualquiera de los dos orígenes: pedido bloqueado 403 / franja del home). */

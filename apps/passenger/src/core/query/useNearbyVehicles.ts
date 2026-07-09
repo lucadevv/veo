@@ -1,8 +1,8 @@
 import type {GeoPoint, NearbyVehicle} from '@veo/api-client';
 import {keepPreviousData, useQuery} from '@tanstack/react-query';
 import {useMemo} from 'react';
-import {TOKENS} from '../../../../core/di/tokens';
-import {useDependency} from '../../../../core/di/useDependency';
+import {TOKENS} from '../di/tokens';
+import {useDependency} from '../di/useDependency';
 
 /** Cada cuánto se re-consulta el ambiente de autitos (ms). 10s = vivo sin castigar batería/red. */
 const POLL_INTERVAL_MS = 10_000;

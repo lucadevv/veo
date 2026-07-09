@@ -45,8 +45,8 @@ import {
   type DraggableSheetHandle,
 } from '../../../../shared/presentation/components/DraggableSheet';
 import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
-import {useNearbyVehicles} from '../../../dispatch/presentation/hooks/useNearbyVehicles';
-import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
+import {useNearbyVehicles} from '../../../../core/query/useNearbyVehicles';
+import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';
 import {useRideDraftStore} from '../../../maps/presentation/stores/rideDraftStore';
 import {useSavedPlacesStore} from '../../../places/presentation/stores/savedPlacesStore';
 import {DebtSheet} from '../../../payments/presentation';
@@ -56,7 +56,7 @@ import {usePanicAutoTrigger} from '../../../../core/panic/usePanicAutoTrigger';
 import {HomeTopBar} from '../components/HomeTopBar';
 import {TripTopBar} from '../components/TripTopBar';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
-import {usePassengerTripSocket} from '../hooks/usePassengerTripSocket';
+import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import {useWaypointProposal} from '../hooks/useWaypointProposal';
 import {useOfferBoard} from '../hooks/useOfferBoard';
 import {useHydrateActiveTrip} from '../hooks/useHydrateActiveTrip';

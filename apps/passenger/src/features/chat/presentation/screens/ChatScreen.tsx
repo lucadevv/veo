@@ -27,7 +27,7 @@ import {
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
 import type {RootStackParamList} from '../../../../navigation/types';
-import {usePassengerTripSocket} from '../../../trip/presentation/hooks/usePassengerTripSocket';
+import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import {isChatActive, mergeMessages} from '../../domain/entities';
 import {withDayDividers, type ChatListItem} from '../dayDividers';
 import {MessageBubble} from '../components/MessageBubble';

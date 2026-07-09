@@ -2,6 +2,6 @@
 export {ProfileScreen} from './screens/ProfileScreen';
 export {
   useProfileCompletion,
-  profileQueryKey,
   type ProfileCompletion,
 } from './hooks/useProfileCompletion';
+export {profileQueryKey} from '../domain/queryKeys';

@@ -40,7 +40,7 @@ import {placeToRoute, suggestionToRoute} from '../components/routePlace';
 import {SearchingBody} from '../components/SearchingBody';
 import type {LastDriver} from './useLastDriver';
 import type {OfferBoard} from './useOfferBoard';
-import type {UsePassengerTripSocket} from './usePassengerTripSocket';
+import type {UsePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import type {WaypointProposalController} from './useWaypointProposal';
 import type {TripPhase} from './tripFlowPhase';
 

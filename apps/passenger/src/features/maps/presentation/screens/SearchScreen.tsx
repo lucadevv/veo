@@ -34,7 +34,7 @@ import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {SavedPlacesShortcuts} from '../../../places/presentation';
 import type {SavedPlace} from '../../../places/domain/entities';
 import type {RoutePlace} from '../../domain/entities';
-import {useAutocomplete} from '../hooks/useAutocomplete';
+import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';
 import {EnterView} from '../components/motion';
 import {
   IconArrowLeft,

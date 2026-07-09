@@ -25,7 +25,7 @@ import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHea
 import {formatPEN} from '../../../../shared/utils/format';
 import {ReferralCodeError} from '../../domain/usecases';
 import type {ReferralCodeReason} from '../../domain/usecases';
-import {useUserCredit} from '../../../payments/presentation/hooks/useUserCredit';
+import {useUserCredit} from '../hooks/useUserCredit';
 import {IconCopy, IconGift, IconShare2} from '../components/icons';
 
 /**

@@ -6,8 +6,8 @@ import type {
   WaypointProposalOutcome,
 } from '@veo/api-client';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {createPassengerSocket} from '../../../../core/realtime/socket';
-import {useSessionStore} from '../../../../core/session/sessionStore';
+import {createPassengerSocket} from './socket';
+import {useSessionStore} from '../session/sessionStore';
 
 /** Snapshot en vivo del viaje recibido por el socket `/passenger`. */
 export interface LiveTripState {
