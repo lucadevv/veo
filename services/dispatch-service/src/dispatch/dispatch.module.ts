@@ -7,6 +7,7 @@ import { OfferBoardController } from './offer-board.controller';
 import { DispatchService } from './dispatch.service';
 import { MatchingService } from './matching.service';
 import { DriverPool } from './driver-pool';
+import { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
 import { MatchingSessionStore } from './matching-session.store';
 import { NearbyDriversService } from './nearby-drivers.service';
 import { SurgeService } from './surge.service';
@@ -107,6 +108,9 @@ const dispatchWindowDefaultsProvider: Provider = {
     DriverProjectionService,
     DriverSuspensionService,
     SurgeService,
+    // Filtro defensivo de clase operable del pool (seam catálogo↔operabilidad · ADR 013): DriverPool lo inyecta
+    // OPCIONAL (@Optional). Lee `/internal/catalog` de trip vía TRIP_REST (CoreModule global), cache corto, degrada.
+    OperableVehicleClassesProvider,
     DriverPool,
     MatchingSessionStore,
     MatchingService,

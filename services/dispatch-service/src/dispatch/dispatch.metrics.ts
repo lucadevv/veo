@@ -63,6 +63,23 @@ const eligibilityFailOpenTotal: CounterLike = getOrCreateCounter(
   ['source', 'missing'] as const,
 );
 
+/**
+ * Veces que el FILTRO DEFENSIVO de clase operable (seam catálogo↔operabilidad, ADR 013) cayó a DEGRADACIÓN
+ * CONSERVADORA: trip-service no respondió el catálogo efectivo, así que el pool cae al default estático de código
+ * (`OPERABLE_VEHICLE_CLASSES`). No cambia el happy-path (una categoría off no genera viajes); un valor alto señala
+ * que trip-service está caído y el filtro secundario está degradado (alertable para Ops).
+ */
+const catalogDegradedTotal: CounterLike = getOrCreateCounter(
+  'dispatch_catalog_degraded_total',
+  'Filtro de clase operable degradado al default estático porque trip-service no respondió el catálogo efectivo.',
+  [] as const,
+);
+
+/** Bumpea el contador de degradación del filtro de clase operable (trip-service no respondió). */
+export function bumpCatalogDegraded(): void {
+  catalogDegradedTotal.inc({});
+}
+
 /** Superficie donde se disparó el fail-open: el barrido amplio del pool o el gate autoritativo de PUJA. */
 export type FailOpenSource = 'pool' | 'gate';
 

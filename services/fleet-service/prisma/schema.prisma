@@ -303,6 +303,26 @@ model Inspection {
 }
 
 /// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+/// SEAM catálogo↔operabilidad (ADR 013) · estado DELTA del consumidor de `catalog.updated`. Singleton
+/// (`id = 'GLOBAL'`) que recuerda la ÚLTIMA versión del catálogo procesada y el set de CLASES de vehículo
+/// operables en ESE momento. El consumidor computa el delta (nuevo set del payload − este set previo) para
+/// suspender/reincorporar SOLO a los conductores de la clase que EFECTIVAMENTE cambió — un `catalog.updated`
+/// que no altera ninguna clase (p.ej. un ajuste de precio) NO toca holds. `version` MONOTÓNICA: un evento con
+/// version ≤ a la guardada se descarta (idempotencia + tolerancia al reordenamiento at-least-once). Sin fila →
+/// baseline = las clases operables por DEFAULT de código (lo que el sistema shippeó): un cold-start reconcilia
+/// contra el default estático, no contra "nada". `operableClasses` guarda los valores del enum VehicleClass (wire).
+model CatalogOperableState {
+  id              String   @id
+  /// Última versión del catálogo (trip-service) aplicada por este consumidor. Monotónica.
+  version         Int
+  /// Clases de vehículo operables (valores de VehicleClass: 'CAR'/'MOTO') en la versión aplicada.
+  operableClasses String[] @map("operable_classes")
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("catalog_operable_state")
+  @@schema("fleet")
+}
+
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   seq         BigInt    @default(autoincrement())

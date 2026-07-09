@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { VehicleType, VehicleSegment, FleetDocumentType } from '@veo/shared-types';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
 import { DriverPool } from './driver-pool';
+import type { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
 import { bumpEligibilityFailOpen } from './dispatch.metrics';
 
 // La observabilidad es un side-effect: espiamos SOLO el bump para asertar que dispara sin tocar el registry
@@ -207,6 +208,39 @@ describe('DriverPool.eligible · B5-3.2 certificaciones (FAIL-CLOSED, opuesto a 
         }),
       ),
     ).toEqual(['a']);
+  });
+});
+
+describe('DriverPool.eligible · FILTRO DEFENSIVO de clase operable (seam catálogo↔operabilidad · ADR 013)', () => {
+  /** Doble del provider: devuelve el set de clases operables que se le configure (sin REST ni cache). */
+  const provider = (operable: VehicleType[]): OperableVehicleClassesProvider =>
+    ({ get: vi.fn(async () => operable) }) as unknown as OperableVehicleClassesProvider;
+
+  it('la clase NO operable (MOTO apagada en el catálogo) queda EXCLUIDA del pool aunque el conductor pinguee', async () => {
+    await hotIndex.seed('moto', -12, -77, CELL, VehicleType.MOTO);
+    // Catálogo efectivo: solo CAR operable → una MOTO no debe recibir ofertas.
+    const p = new DriverPool(hotIndex, new InMemoryExclusionRegistry(), suspension, provider([VehicleType.CAR]));
+    expect(ids(await p.eligible(cells, VehicleType.MOTO))).toEqual([]);
+  });
+
+  it('la clase operable (CAR) sigue entrando; la MOTO entra solo cuando el catálogo la habilita', async () => {
+    await hotIndex.seed('car', -12, -77, CELL, VehicleType.CAR);
+    await hotIndex.seed('moto', -12, -77, CELL, VehicleType.MOTO);
+    // Ambas clases operables → cada pool devuelve su clase.
+    const p = new DriverPool(
+      hotIndex,
+      new InMemoryExclusionRegistry(),
+      suspension,
+      provider([VehicleType.CAR, VehicleType.MOTO]),
+    );
+    expect(ids(await p.eligible(cells, VehicleType.CAR))).toEqual(['car']);
+    expect(ids(await p.eligible(cells, VehicleType.MOTO))).toEqual(['moto']);
+  });
+
+  it('SIN provider inyectado (@Optional) → NO filtra: comportamiento histórico intacto', async () => {
+    await hotIndex.seed('moto', -12, -77, CELL, VehicleType.MOTO);
+    // `pool` del beforeEach se construye SIN provider → el filtro se salta (la MOTO pasa).
+    expect(ids(await pool.eligible(cells, VehicleType.MOTO))).toEqual(['moto']);
   });
 });
 

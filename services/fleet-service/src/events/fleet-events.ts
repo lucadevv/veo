@@ -78,6 +78,13 @@ export interface DriverSuspendedPayload {
   vehicleId?: string;
   inspectionId?: string;
   nextDueAt?: string;
+  /**
+   * DISCRIMINADOR EXPLÍCITO de la causa (ADR 013 · seam catálogo↔operabilidad). AUSENTE en las vías históricas
+   * (identity rutea por la clave: driverId→DOCUMENT_EXPIRED · userId→INSPECTION_EXPIRED). 'CATEGORY_DISABLED' →
+   * el admin apagó del catálogo la última oferta de la CLASE del conductor: se emite por `userId` (=Vehicle.driverId)
+   * e identity materializa un hold CATEGORY_DISABLED (no INSPECTION_EXPIRED, la otra vía por userId).
+   */
+  holdCause?: 'CATEGORY_DISABLED';
   suspendedAt: string;
 }
 
@@ -103,6 +110,9 @@ export interface DriverReactivatedPayload {
   /** Trazabilidad de la reactivación por documento (ausentes en la reactivación por ITV). */
   documentId?: string;
   documentType?: string;
+  /** Espejo del discriminador de la suspensión: 'CATEGORY_DISABLED' → la clase volvió a ser operable (el admin
+   *  re-activó la oferta). Se emite por `userId` e identity quita SOLO el hold CATEGORY_DISABLED. */
+  holdCause?: 'CATEGORY_DISABLED';
   reactivatedAt: string;
 }
 

@@ -331,6 +331,85 @@ describe('DriverSuspensionConsumer · driver.flagged → AUTO-suspensión por ra
   });
 });
 
+/**
+ * SEAM catálogo↔operabilidad (ADR 013): fleet apagó/encendió una CLASE de vehículo en el catálogo. El evento llega
+ * por la MISMA vía `fleet.driver_suspended`/`fleet.driver_reactivated` pero con el discriminador explícito
+ * `holdCause='CATEGORY_DISABLED'`, keyeado por `userId` (= Vehicle.driverId). El consumer debe rutearlo a la vía de
+ * catálogo (suspendByFleetCategory/reactivateByFleetCategory), NO a la de ITV (que también va por userId).
+ */
+const categorySuspended = {
+  userId: 'user-1',
+  reason: 'Categoría de servicio desactivada por el operador (catálogo)',
+  holdCause: 'CATEGORY_DISABLED',
+  suspendedAt: '2026-07-09T10:00:00.000Z',
+};
+
+const categoryReactivated = {
+  userId: 'user-1',
+  reason: 'Categoría de servicio re-activada por el operador (catálogo)',
+  holdCause: 'CATEGORY_DISABLED',
+  reactivatedAt: '2026-07-09T12:00:00.000Z',
+};
+
+describe('DriverSuspensionConsumer · holdCause=CATEGORY_DISABLED → vía de catálogo (NO ITV)', () => {
+  beforeEach(() => {
+    captured.byEvent = {};
+    captured.handler = undefined;
+  });
+
+  it('suspende con suspendByFleetCategory(userId, at) — NUNCA con la vía de ITV/documento', async () => {
+    const drivers = {
+      suspendByFleetCategory: vi.fn(async () => true),
+      suspendByFleetForUser: vi.fn(async () => true),
+      suspendByFleet: vi.fn(async () => true),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_suspended']?.(envelope(categorySuspended));
+    expect(drivers.suspendByFleetCategory).toHaveBeenCalledTimes(1);
+    expect(drivers.suspendByFleetCategory).toHaveBeenCalledWith(
+      'user-1',
+      new Date('2026-07-09T10:00:00.000Z'),
+    );
+    // EL FILO: userId con holdCause=CATEGORY_DISABLED NUNCA cae en la vía de ITV (INSPECTION_EXPIRED) ni documento.
+    expect(drivers.suspendByFleetForUser).not.toHaveBeenCalled();
+    expect(drivers.suspendByFleet).not.toHaveBeenCalled();
+  });
+
+  it('reincorpora con reactivateByFleetCategory(userId) — NUNCA con la vía de ITV/documento', async () => {
+    const drivers = {
+      reactivateByFleetCategory: vi.fn(async () => true),
+      reactivateByFleetForUser: vi.fn(async () => true),
+      reactivateByFleet: vi.fn(async () => true),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_reactivated']?.(reactivatedEnvelope(categoryReactivated));
+    expect(drivers.reactivateByFleetCategory).toHaveBeenCalledTimes(1);
+    expect(drivers.reactivateByFleetCategory).toHaveBeenCalledWith('user-1');
+    expect(drivers.reactivateByFleetForUser).not.toHaveBeenCalled();
+    expect(drivers.reactivateByFleet).not.toHaveBeenCalled();
+  });
+
+  it('es idempotente: reentrega de la suspensión de catálogo (→ false) no rompe', async () => {
+    const drivers = { suspendByFleetCategory: vi.fn(async () => false) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['fleet.driver_suspended']?.(envelope(categorySuspended));
+    await captured.byEvent['fleet.driver_suspended']?.(envelope(categorySuspended));
+    expect(drivers.suspendByFleetCategory).toHaveBeenCalledTimes(2);
+  });
+
+  it('propaga el error para que Kafka reintente (suspendByFleetCategory es idempotente)', async () => {
+    const drivers = {
+      suspendByFleetCategory: vi.fn(async () => {
+        throw new Error('db down');
+      }),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await expect(
+      captured.byEvent['fleet.driver_suspended']?.(envelope(categorySuspended)),
+    ).rejects.toThrow('db down');
+  });
+});
+
 function excessiveCancellationsEnvelope(payload: unknown): EventEnvelope<unknown> {
   return {
     eventId: 'e4',

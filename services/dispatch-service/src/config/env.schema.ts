@@ -49,6 +49,12 @@ export const envSchema = z
     // gRPC CLIENT a fleet-service: resuelve el vehículo activo del conductor al ACEPTAR (awarding) para
     // adjuntar vehicleId al match → el viaje queda con su vehículo (trazabilidad). Default = dev-stack.
     FLEET_GRPC_URL: requiredInProd('localhost:50062'),
+    // REST CLIENT a trip-service (dueño del catálogo): lee `/internal/catalog` para el FILTRO DEFENSIVO del pool
+    // (excluir conductores cuya clase de vehículo no esté operable · seam catálogo↔operabilidad, ADR 013). Es
+    // defensa en profundidad (secundaria: el mecanismo primario son los holds de identity); cache corto +
+    // degradación conservadora en el provider. Default = dev-stack (mismo baseUrl que consume el public-bff).
+    TRIP_URL: requiredInProd('http://localhost:3002/api/v1'),
+    REST_TIMEOUT_MS: z.coerce.number().default(8000),
 
     // OpenTelemetry
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),

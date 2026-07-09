@@ -72,6 +72,10 @@ enum SuspensionCause {
   INSPECTION_EXPIRED
   RATING_LOW
   EXCESSIVE_CANCELLATIONS
+  // ADR 013 · seam catálogo↔operabilidad: fleet apagó del catálogo la última oferta de la CLASE del conductor
+  // (p.ej. "VEO Moto" off → un MOTO ya no tiene oferta operable). Hold PERMANENTE (sin expiresAt); se levanta
+  // SOLO cuando la clase vuelve a ser operable (evento de fleet), NUNCA por el override de compliance ni el sweeper.
+  CATEGORY_DISABLED
 
   @@schema("identity")
 }

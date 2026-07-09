@@ -1171,6 +1171,13 @@ export const fleetDriverSuspended = z
     vehicleId: z.string().optional(),
     inspectionId: z.string().optional(),
     nextDueAt: z.string().optional(),
+    // DISCRIMINADOR EXPLÍCITO de la CAUSA del hold (ADR 013 · seam catálogo↔operabilidad). AUSENTE en las vías
+    // históricas: identity mantiene el ruteo IMPLÍCITO por la clave (driverId→DOCUMENT_EXPIRED · userId→
+    // INSPECTION_EXPIRED). PRESENTE con 'CATEGORY_DISABLED' → fleet apagó del catálogo la última oferta de la
+    // CLASE del conductor: el sujeto viaja por `userId` (= `Vehicle.driverId`) y identity lo materializa como
+    // hold CATEGORY_DISABLED (no como INSPECTION_EXPIRED, que es la otra vía por userId). Sin este campo el
+    // ruteo por-clave colisionaría (userId ya significa ITV). Se acota al literal que fleet realmente emite.
+    holdCause: z.enum(['CATEGORY_DISABLED']).optional(),
     suspendedAt: z.string(),
   })
   .refine((p) => Boolean(p.driverId) !== Boolean(p.userId), {
@@ -1207,6 +1214,10 @@ export const fleetDriverReactivated = z
     // Trazabilidad de la reactivación por documento (opcionales; ausentes en la reactivación por ITV).
     documentId: z.string().optional(),
     documentType: z.string().optional(),
+    // Espejo del discriminador de la suspensión (ver fleetDriverSuspended.holdCause): PRESENTE con
+    // 'CATEGORY_DISABLED' → la clase del conductor volvió a ser operable (el admin re-activó una oferta) →
+    // identity QUITA el hold CATEGORY_DISABLED (por `userId`), NUNCA el INSPECTION_EXPIRED. Ausente = vía histórica.
+    holdCause: z.enum(['CATEGORY_DISABLED']).optional(),
     reactivatedAt: z.string(),
   })
   .refine((p) => Boolean(p.driverId) !== Boolean(p.userId), {
@@ -1409,6 +1420,40 @@ export const bookingConfirmed = z.object({
 // implementar F4 (su emisión vive en la fase que la gatilla).
 
 /** Registro central: eventType → schema del payload. */
+/* ── catálogo de ofertas (ADR 013 · trip-service, dueño del catálogo) ── */
+/// Un override CRUDO del overlay del catálogo tal como viaja en `catalog.updated` (lo que `normalizeOverride`
+/// de trip-service serializa): `id` + `enabled` SIEMPRE; el resto (modo + params de pricing) SOLO si el admin
+/// los seteó explícitamente. Espeja `OfferingOverride` de @veo/shared-types en el wire. `multiplier` es el único
+/// float (p.ej. 0.55); los céntimos y la version son enteros no-negativos (`perKmCents:0` es VÁLIDO — Mecánico).
+const offeringOverrideWire = z.object({
+  id: z.string(),
+  enabled: z.boolean(),
+  mode: pricingMode.optional(),
+  multiplier: z.number().nonnegative().optional(),
+  minFareCents: z.number().int().nonnegative().optional(),
+  baseFareCents: z.number().int().nonnegative().optional(),
+  perKmCents: z.number().int().nonnegative().optional(),
+  perMinCents: z.number().int().nonnegative().optional(),
+});
+/// El catálogo de ofertas (ADR 013) fue REEMPLAZADO por el admin: trip-service (dueño del catálogo) emite esto
+/// por OUTBOX en la MISMA tx que persiste el overlay + bumpea `version`. Topic 'catalog' (`topicForEvent` corta
+/// antes del punto), key = singleton 'GLOBAL'. Consumidores:
+///   - trip-service (PricingCacheConsumer): invalida su cache de catálogo cross-réplica (ignora el payload).
+///   - fleet-service (CatalogOperabilityConsumer): DERIVA las clases de vehículo operables del payload
+///     (`resolveCatalog({overrides,version})` → `operableVehicleClasses`, PURO sobre la base estática `OFFERINGS`
+///     + el overlay del evento — SIN re-leer a trip: un blip de trip NUNCA dispara holds) y, por DELTA contra el
+///     estado previo, suspende/reincorpora a los conductores de la clase que se apagó/encendió.
+/// El payload lleva el overlay CRUDO (`overrides`) — NO las offerings ya resueltas: el consumidor las resuelve
+/// con la función pura compartida, que aplica `defaultEnabled` a las ofertas sin override (la base es CÓDIGO,
+/// determinista). `version` MONOTÓNICA: el consumidor descarta un snapshot con version ≤ a la ya aplicada
+/// (idempotencia + tolerancia al reordenamiento at-least-once). Antes NO estaba registrado (viajaba SIN validar);
+/// registrarlo valida el contrato en el producer (publish) y en ambos consumidores.
+export const catalogUpdated = z.object({
+  overrides: z.array(offeringOverrideWire),
+  version: z.number().int().nonnegative(),
+  updatedAt: z.string(),
+});
+
 export const EVENT_SCHEMAS = {
   'user.registered': userRegistered,
   'user.email_verified': userEmailVerified,
@@ -1458,6 +1503,7 @@ export const EVENT_SCHEMAS = {
   'pricing.mode_schedule_updated': pricingModeScheduleUpdated,
   'pricing.bid_floor_updated': pricingBidFloorUpdated,
   'pricing.base_fare_updated': pricingBaseFareUpdated,
+  'catalog.updated': catalogUpdated,
   'driver.location_updated': driverLocationUpdated,
   'driver.entered_zone': driverEnteredZone,
   'media.recording_started': mediaRecordingStarted,

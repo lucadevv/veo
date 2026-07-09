@@ -883,9 +883,13 @@ function holdMatches(h: Hold, where: Record<string, unknown>): boolean {
     if (k === 'driverId') {
       if (h.driverId !== v) return false;
     } else if (k === 'cause') {
-      // cause puede ser un valor escalar, `{ in: [...] }` o `{ not: ... }` (complemento de una causa).
+      // cause puede ser un valor escalar, `{ in: [...] }`, `{ not: ... }` (complemento de una causa) o
+      // `{ notIn: [...] }` (complemento de un CONJUNTO de causas — p.ej. reactivateForCompliance excluye
+      // DISCIPLINARY + CATEGORY_DISABLED, las que la vía de compliance NO puede levantar).
       if (v && typeof v === 'object' && 'in' in (v as Record<string, unknown>)) {
         if (!(v as { in: string[] }).in.includes(h.cause)) return false;
+      } else if (v && typeof v === 'object' && 'notIn' in (v as Record<string, unknown>)) {
+        if ((v as { notIn: string[] }).notIn.includes(h.cause)) return false;
       } else if (v && typeof v === 'object' && 'not' in (v as Record<string, unknown>)) {
         if (h.cause === (v as { not: string }).not) return false;
       } else if (h.cause !== v) return false;
@@ -1327,6 +1331,65 @@ describe('DriversService.reactivateByFleetForUser · AUTO-reactivación por ITV 
     const { prisma } = makeHoldPrisma({ userId: 'user-1', driverExists: false });
     const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
     expect(await svc.reactivateByFleetForUser('user-1')).toBe(false);
+  });
+});
+
+describe('DriversService · seam catálogo↔operabilidad (hold CATEGORY_DISABLED, keyeado por User.id)', () => {
+  it('suspendByFleetCategory resuelve userId→driverId y agrega un hold CATEGORY_DISABLED (causeRef vacío)', async () => {
+    const { prisma, holds } = makeHoldPrisma({ userId: 'user-1' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    const applied = await svc.suspendByFleetCategory('user-1', new Date('2026-07-09T10:00:00.000Z'));
+    expect(applied).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]).toMatchObject({ driverId: 'd1', cause: 'CATEGORY_DISABLED', causeRef: '' });
+  });
+
+  it('startShift CORTA con un hold CATEGORY_DISABLED (el gate lee `suspendedAt` derivado != null)', async () => {
+    const { prisma } = makeHoldPrisma({ userId: 'user-1' });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    await svc.suspendByFleetCategory('user-1', new Date('2026-07-09T10:00:00.000Z'));
+    // El gate de inicio de turno (BR-I02) lee `Driver.suspendedAt` y bloquea: la categoría apagada NO opera.
+    await expect(svc.startShift('user-1', { sessionRef: 'ok' })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+  });
+
+  it('reactivateByFleetCategory quita SOLO el hold CATEGORY_DISABLED (deja intactos doc/ITV)', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      userId: 'user-1',
+      initialHolds: [
+        hold('CATEGORY_DISABLED', '', '2026-07-09T10:00:00.000Z'),
+        hold('DOCUMENT_EXPIRED', 'SOAT', '2026-07-08T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    expect(await svc.reactivateByFleetCategory('user-1')).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('DOCUMENT_EXPIRED');
+  });
+
+  it('idempotente: re-suspensión de la MISMA categoría (ya hay hold) → no-op false', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      userId: 'user-1',
+      initialHolds: [hold('CATEGORY_DISABLED', '', '2026-07-09T10:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    expect(await svc.suspendByFleetCategory('user-1', new Date('2026-07-09T11:00:00.000Z'))).toBe(
+      false,
+    );
+    expect(holds).toHaveLength(1);
+  });
+
+  it('COHERENCIA: el override de compliance del operador NO puede levantar un CATEGORY_DISABLED (lo gobierna el catálogo)', async () => {
+    // Suspendido SOLO por catálogo: la vía de compliance NO tiene nada que levantar (CATEGORY_DISABLED está
+    // excluida junto a DISCIPLINARY) → error honesto y el hold PERMANECE. Se levanta solo al re-activar la clase.
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('CATEGORY_DISABLED', '', '2026-07-09T10:00:00.000Z')],
+    });
+    const svc = new DriversService(prisma as never, makeRedis() as never, bio, sessions, config);
+    await expect(svc.reactivateForCompliance('d1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('CATEGORY_DISABLED');
   });
 });
 

@@ -125,10 +125,28 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
       this.logger.warn(`${DRIVER_SUSPENDED} con payload inválido; descartado`);
       return;
     }
-    const { driverId, userId, suspendedAt, reason, documentType } = parsed.data;
+    const { driverId, userId, suspendedAt, reason, documentType, holdCause } = parsed.data;
     const at = new Date(suspendedAt);
     if (Number.isNaN(at.getTime())) {
       this.logger.warn(`${DRIVER_SUSPENDED} con suspendedAt inválido (${suspendedAt}); descartado`);
+      return;
+    }
+    // SEAM catálogo↔operabilidad (ADR 013): con `holdCause='CATEGORY_DISABLED'`, el DISCRIMINADOR EXPLÍCITO gana
+    // sobre el ruteo por-clave (userId ya significa ITV). fleet keyea la suspensión de catálogo por `userId`
+    // (= Vehicle.driverId) → identity lo resuelve a Driver.id y materializa un hold CATEGORY_DISABLED, coexistiendo
+    // con documento/ITV/rating. Idempotente (unique del hold). Sin userId (payload malformado) → warn + skip.
+    if (holdCause === 'CATEGORY_DISABLED') {
+      if (!userId) {
+        this.logger.warn(`${DRIVER_SUSPENDED} holdCause=CATEGORY_DISABLED sin userId; descartado`);
+        return;
+      }
+      try {
+        const applied = await this.drivers.suspendByFleetCategory(userId, at);
+        if (applied) this.logger.log(`Conductor user:${userId} suspendido (${reason})`);
+      } catch (err) {
+        this.logger.error({ err }, `Falló la suspensión por catálogo del conductor user:${userId}`);
+        throw err; // que Kafka reintente; suspendByFleetCategory es idempotente.
+      }
       return;
     }
     // DOS VÍAS según el ORIGEN (el refine del schema garantiza EXACTAMENTE una) → cada una keyea una CAUSA
@@ -173,7 +191,27 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
       this.logger.warn(`${DRIVER_REACTIVATED} con payload inválido; descartado`);
       return;
     }
-    const { driverId, userId, reason, documentType } = parsed.data;
+    const { driverId, userId, reason, documentType, holdCause } = parsed.data;
+    // SEAM catálogo↔operabilidad (espejo de la suspensión): con `holdCause='CATEGORY_DISABLED'` la clase volvió a
+    // ser operable (el admin re-activó la oferta) → quita SOLO el hold CATEGORY_DISABLED (por userId), NUNCA el de
+    // ITV. Es la ÚNICA vía que levanta ese hold. Idempotente (borrar 0 = no-op). Sin userId → warn + skip.
+    if (holdCause === 'CATEGORY_DISABLED') {
+      if (!userId) {
+        this.logger.warn(`${DRIVER_REACTIVATED} holdCause=CATEGORY_DISABLED sin userId; descartado`);
+        return;
+      }
+      try {
+        const applied = await this.drivers.reactivateByFleetCategory(userId);
+        if (applied) this.logger.log(`Conductor user:${userId} reincorporado (${reason})`);
+      } catch (err) {
+        this.logger.error(
+          { err },
+          `Falló la reincorporación por catálogo del conductor user:${userId}`,
+        );
+        throw err; // que Kafka reintente; reactivateByFleetCategory es idempotente.
+      }
+      return;
+    }
     const subject = driverId ?? `user:${userId ?? '?'}`;
     try {
       // driverId → regularización por DOCUMENTO: quita SOLO el hold de ESE documentType (el evento lo lleva).

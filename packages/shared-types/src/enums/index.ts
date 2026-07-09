@@ -429,9 +429,17 @@ export type VehicleOperabilityReason =
  *  - EXCESSIVE_CANCELLATIONS: AUTO-suspensión por exceso de cancelaciones (≥ umbral en ventana rolling de 24h).
  *    La decide dispatch-service (`driver.excessive_cancellations`); identity la materializa como hold TEMPORAL
  *    (con `expiresAt`): un sweeper la auto-levanta al vencer el cooldown, o el operador antes vía compliance.
- * Las causas NO-DISCIPLINARY (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW + EXCESSIVE_CANCELLATIONS) se
- * levantan por la vía de compliance (→ /reactivate-compliance); una DISCIPLINARY NUNCA se toca por esa vía (y
- * viceversa) — la separación de causas es extremo-a-extremo.
+ *  - CATEGORY_DISABLED: el admin DESACTIVÓ del catálogo (ADR 013) la última oferta de la CLASE de vehículo del
+ *    conductor (p.ej. apagó "VEO Moto" → un conductor MOTO ya no tiene ninguna oferta operable). La DECIDE
+ *    fleet-service (consume `catalog.updated`, deriva las clases operables y computa el delta) e identity la
+ *    materializa como hold — así el conductor NO puede iniciar turno ni quedar en línea mientras su clase esté
+ *    apagada. Reactivación AUTOMÁTICA y EXCLUSIVA: se levanta SOLO cuando fleet reporta que la clase volvió a ser
+ *    operable (`fleet.driver_reactivated` holdCause=CATEGORY_DISABLED); a diferencia de las otras causas
+ *    automáticas, NO la levanta el override de compliance del operador (lo haría con la categoría aún apagada →
+ *    reabriría el hueco que este hold cierra). El sweeper de expiración tampoco la toca (es un hold PERMANENTE).
+ * Las causas NO-DISCIPLINARY salvo CATEGORY_DISABLED (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW +
+ * EXCESSIVE_CANCELLATIONS) se levantan por la vía de compliance (→ /reactivate-compliance); una DISCIPLINARY —y
+ * una CATEGORY_DISABLED— NUNCA se tocan por esa vía — la separación de causas es extremo-a-extremo.
  */
 export const SuspensionCause = {
   DISCIPLINARY: 'DISCIPLINARY',
@@ -439,5 +447,6 @@ export const SuspensionCause = {
   INSPECTION_EXPIRED: 'INSPECTION_EXPIRED',
   RATING_LOW: 'RATING_LOW',
   EXCESSIVE_CANCELLATIONS: 'EXCESSIVE_CANCELLATIONS',
+  CATEGORY_DISABLED: 'CATEGORY_DISABLED',
 } as const;
 export type SuspensionCause = (typeof SuspensionCause)[keyof typeof SuspensionCause];

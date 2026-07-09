@@ -128,6 +128,19 @@ const TRIP_ACTIVE_STATES: readonly DriverStatus[] = [DriverStatus.ASSIGNED, Driv
 const SHIFT_ENTRY_STATES: readonly DriverStatus[] = [DriverStatus.OFFLINE, DriverStatus.ON_BREAK];
 
 /**
+ * Causas de hold que el override de compliance del operador (`reactivateForCompliance`) NO puede levantar:
+ *  - DISCIPLINARY: la levanta SOLO la reactivación manual (`reactivate()`) — es la suspensión que el operador originó.
+ *  - CATEGORY_DISABLED: la levanta SOLO el evento de re-activación de la clase (fleet, cuando el admin re-enciende la
+ *    oferta). Dejar que el operador la quite a mano mientras la categoría sigue APAGADA reabriría el hueco que este
+ *    hold cierra (el conductor volvería a operar una clase no ofertada). Su ciclo de vida lo gobierna el catálogo,
+ *    no el operador. El resto (DOCUMENT_EXPIRED/INSPECTION_EXPIRED/RATING_LOW/EXCESSIVE_CANCELLATIONS) sí se barren.
+ */
+const COMPLIANCE_REACTIVATION_EXCLUDED_CAUSES: readonly SuspensionCause[] = [
+  SuspensionCause.DISCIPLINARY,
+  SuspensionCause.CATEGORY_DISABLED,
+];
+
+/**
  * Desenlace de una transición del eje disparada por el ciclo de vida del VIAJE (Fase A · ADR-021):
  *  - `'moved'`   — el CAS matcheó y movió el estado (o fue una re-aplicación idempotente from===to).
  *  - `'noop'`    — la transición era ILEGAL desde el estado actual (redelivery, SUSPENDED/OFFLINE, o el
@@ -957,7 +970,7 @@ export class DriversService {
       const complianceHolds = await tx.driverSuspensionHold.count({
         where: {
           driverId,
-          cause: { not: SuspensionCause.DISCIPLINARY },
+          cause: { notIn: [...COMPLIANCE_REACTIVATION_EXCLUDED_CAUSES] },
         },
       });
       if (complianceHolds === 0) {
@@ -970,10 +983,11 @@ export class DriversService {
       if (driver.licenseExpiresAt && driver.licenseExpiresAt.getTime() < Date.now()) {
         throw new ForbiddenError('No se puede reactivar: la licencia está vencida');
       }
-      // Quita TODO hold NO-disciplinario (NUNCA DISCIPLINARY) y recomputa suspendedAt. Si tras quitarlos queda
-      // un hold DISCIPLINARY, suspendedAt recomputado SIGUE seteado → el conductor permanece suspendido.
+      // Quita TODO hold de origen automático EXCEPTO CATEGORY_DISABLED (y NUNCA DISCIPLINARY) y recomputa
+      // suspendedAt. Si tras quitarlos queda un DISCIPLINARY o un CATEGORY_DISABLED, suspendedAt recomputado SIGUE
+      // seteado → el conductor permanece suspendido.
       const { removed } = await this.removeHolds(tx, driverId, {
-        cause: { not: SuspensionCause.DISCIPLINARY },
+        cause: { notIn: [...COMPLIANCE_REACTIVATION_EXCLUDED_CAUSES] },
       });
       if (removed === 0) {
         // Existían en el pre-count pero ya no: una carrera (otra reactivación/regularización) los quitó.
@@ -1419,6 +1433,64 @@ export class DriversService {
       if (!driver) return false;
       const { removed } = await this.removeHolds(tx, driver.id, {
         cause: SuspensionCause.INSPECTION_EXPIRED,
+        causeRef: '',
+      });
+      return removed > 0;
+    });
+  }
+
+  /**
+   * Suspende un conductor porque fleet DESACTIVÓ del catálogo (ADR 013) la última oferta de su CLASE de vehículo
+   * (`fleet.driver_suspended` holdCause='CATEGORY_DISABLED', keyeado por **User.id** = `Vehicle.driverId`). Es el
+   * SEAM catálogo↔operabilidad: sin este hold, un conductor MOTO seguía AVAILABLE + pingeando GPS aunque "VEO Moto"
+   * estuviera apagada (incoherente). Espeja `suspendByFleetForUser` (misma resolución User.id→Driver.id, que identity
+   * es el dueño del mapeo — fleet NO traduce a id de perfil), pero con una CAUSA DISTINTA: CATEGORY_DISABLED coexiste
+   * con documento/ITV/rating (regularizar una NUNCA quita la otra). `causeRef=''` (una sola causa de catálogo).
+   *
+   * Recomputa `Driver.suspendedAt`, que es lo que el gate de turno (startShift) y el eligibility de dispatch leen para
+   * bloquear (BR-I02). IDEMPOTENTE por el `@@unique([driverId, cause, causeRef])`: la re-emisión del delta (o una
+   * re-entrega Kafka) es un upsert no-op. Sin perfil local → no-op silencioso (evento antes del onboarding / purgado).
+   *
+   * @param suspendedAt el momento que fleet reportó (createdAt del hold, preserva el origen).
+   * @returns `true` si creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
+   */
+  async suspendByFleetCategory(userId: string, suspendedAt: Date): Promise<boolean> {
+    const result = await this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+      if (!driver) return null; // no-op silencioso: sin perfil no hay suspensión (ni sesión a revocar).
+      const { created, suspendedAt: at } = await this.addHoldAt(
+        tx,
+        driver.id,
+        SuspensionCause.CATEGORY_DISABLED,
+        '',
+        'Categoría de servicio desactivada por el operador (catálogo)',
+        suspendedAt,
+      );
+      return { created, suspendedAt: at };
+    });
+    if (!result) return false;
+    // POST-COMMIT: el `userId` YA es el sub (vía keyeada por User.id) → directo. Fast-path (mata la sesión/socket
+    // vivos del conductor que estuviera en línea) + BACKSTOP durable → la redelivery/re-emisión cierra la crash-window.
+    await this.enforceEventDrivenSuspension(userId, result.suspendedAt, result.created);
+    return result.created;
+  }
+
+  /**
+   * Reincorpora un conductor cuando fleet reporta que su CLASE de vehículo VOLVIÓ a ser operable (el admin re-activó
+   * una oferta de esa clase en el catálogo · `fleet.driver_reactivated` holdCause='CATEGORY_DISABLED', keyeado por
+   * User.id). Bajo el modelo de HOLDS: quita SOLO el hold CATEGORY_DISABLED. Documento/ITV/rating/DISCIPLINARY NUNCA
+   * se tocan → si quedan, el conductor SIGUE suspendido. Es la INVERSA EXACTA de `suspendByFleetCategory` (mismo
+   * natural key) y la ÚNICA vía que levanta este hold (ni el override de compliance ni el sweeper lo tocan: hacerlo
+   * con la categoría aún apagada reabriría el hueco). Idempotente (borrar 0 holds = no-op). Sin perfil → no-op.
+   *
+   * @returns `true` si quitó un hold; `false` si fue no-op.
+   */
+  async reactivateByFleetCategory(userId: string): Promise<boolean> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+      if (!driver) return false;
+      const { removed } = await this.removeHolds(tx, driver.id, {
+        cause: SuspensionCause.CATEGORY_DISABLED,
         causeRef: '',
       });
       return removed > 0;
