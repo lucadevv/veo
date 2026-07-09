@@ -21,7 +21,7 @@ import {
   useUploadAndRegisterDocument,
 } from '../hooks/useRegistrationDocuments';
 import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
-import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
+import { ocrEngineForPlatform, ocrTimestampNow } from '../../../../core/scanning/ocr-engine';
 import { DOCUMENT_CARD_ASPECT_RATIO } from '../../../documents/domain';
 import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
 import { useRegistrationWizardPageOptional } from './RegistrationWizardContext';

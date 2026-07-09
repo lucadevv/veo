@@ -7,19 +7,12 @@
  * acoplar las dos apps.
  */
 
-/** Imagen seleccionada por el conductor (galería o cámara). */
-export interface PickedImage {
-  /** URI local del archivo (`file://…` / `content://…`). */
-  uri: string;
-  /** MIME real (p. ej. `image/jpeg`); null si la plataforma no lo expone. */
-  mimeType: string | null;
-  /** Nombre de archivo si lo provee la plataforma. */
-  fileName: string | null;
-  width: number | null;
-  height: number | null;
-  /** Tamaño en bytes (útil para validar límites antes de subir). */
-  fileSize: number | null;
-}
+// `PickedImage` es un tipo transversal (lo comparten documents, profile y registration): vive en
+// `core/scanning` para no acoplar las features. Se re-exporta desde acá para no romper a los consumidores
+// que lo importan por el barrel `documents/domain` (contrato público del port).
+import type { PickedImage } from '../../../../core/scanning/picked-image';
+
+export type { PickedImage };
 
 /** Origen desde el que capturar la imagen. */
 export type ImageSource = 'camera' | 'library';

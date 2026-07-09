@@ -1,6 +1,6 @@
 import { DocumentSide, FleetDocumentType } from '@veo/shared-types';
 import type { DocumentSideFile } from '../../../documents/domain';
-import { ocrEngineForPlatform, ocrTimestampNow } from '../../../documents/data';
+import { ocrEngineForPlatform, ocrTimestampNow } from '../../../../core/scanning/ocr-engine';
 import { isConflictError } from '../../../../shared/presentation/errors';
 import { useRegistrationStore } from '../state/registrationStore';
 import { useOnboardLicense, useUploadAndRegisterDocument } from './useRegistrationDocuments';

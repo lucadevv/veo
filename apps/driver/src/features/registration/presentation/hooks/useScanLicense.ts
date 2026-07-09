@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useDocumentScanner } from '../../../../core/di/useDi';
-import { scannedImageToPickedImage } from '../../../documents/data';
+import { scannedImageToPickedImage } from '../../../../core/scanning/scanned-image-to-picked-image';
 import {
   isDocumentScannerError,
   isParsableDocumentType,

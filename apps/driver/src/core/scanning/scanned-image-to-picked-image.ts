@@ -1,4 +1,4 @@
-import type { PickedImage } from '../domain/ports/image-picker-service';
+import type { PickedImage } from './picked-image';
 
 /**
  * Construye un `PickedImage` a partir de una imagen base64 JPEG del escáner (croppeada + corregida por
@@ -6,8 +6,9 @@ import type { PickedImage } from '../domain/ports/image-picker-service';
  * existente (`HttpDocumentUploader` lee `file.uri` vía `fetch(uri).blob()`, que soporta `data:` en RN)
  * sin tocar el uploader. El `mimeType` explícito hace que el `contentType` se resuelva como `image/jpeg`.
  *
- * Vive en `data/` (no en un componente) para que TODOS los flujos de escaneo lo compartan: el sheet de
- * documentos (licencia/SOAT/tarjeta) y el sheet del DNI (anverso + reverso) — sin duplicar la conversión.
+ * Vive en `core/scanning` (no en una feature) para que TODOS los flujos de escaneo lo compartan: el
+ * sheet de documentos (licencia/SOAT/tarjeta) y el sheet del DNI (anverso + reverso) — sin duplicar la
+ * conversión ni acoplar `registration` a los internals de `documents`.
  *
  * @param base64Jpeg Imagen base64 JPEG SIN prefijo `data:` (lo que entrega `ScannedDocument.images[i]`).
  * @param fileName Nombre lógico del archivo (solo para trazabilidad/derivación de extensión). Default `scan.jpg`.

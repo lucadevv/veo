@@ -13,11 +13,8 @@ import {
   type PickedImage,
   type ScannedDocument,
 } from '../../../documents/domain';
-import {
-  ocrEngineForPlatform,
-  ocrTimestampNow,
-  scannedImageToPickedImage,
-} from '../../../documents/data';
+import { ocrEngineForPlatform, ocrTimestampNow } from '../../../../core/scanning/ocr-engine';
+import { scannedImageToPickedImage } from '../../../../core/scanning/scanned-image-to-picked-image';
 import { IconCamera, IconCheck, IconImage, IconScan } from '../../../../shared/presentation/icons';
 import { hexAlpha } from './color';
 import {

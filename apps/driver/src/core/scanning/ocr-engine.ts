@@ -1,8 +1,8 @@
 /**
- * Helper de plataforma (Lote 1 · onboarding sin-formularios): deriva el `OcrEngine` que produjo la data
- * extraída según la plataforma del device, para la TRAZABILIDAD del backend. Vive en `data/` (no en el
- * dominio puro) porque depende de `Platform.OS` de react-native (un detalle de plataforma, igual que el
- * resto de adaptadores nativos de esta carpeta).
+ * Helper de plataforma (onboarding sin-formularios): deriva el `OcrEngine` que produjo la data
+ * extraída según la plataforma del device, para la TRAZABILIDAD del backend. Vive en `core/scanning`
+ * (capacidad transversal de escaneo/OCR compartida por `documents` y `registration`) porque depende de
+ * `Platform.OS` de react-native (un detalle de plataforma) y no de ninguna feature.
  *
  * Mapeo (espeja el enum CERRADO `OcrEngine` de @veo/shared-types, sin string mágico):
  *  - iOS     → VisionKit on-device (`ios-visionkit`).

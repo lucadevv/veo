@@ -9,5 +9,6 @@ export {
   nativeDocumentScanner,
   nativeDocumentScannerLinked,
 } from './services/native-document-scanner';
-export { scannedImageToPickedImage } from './scanned-image-to-picked-image';
-export { ocrEngineForPlatform, ocrTimestampNow } from './ocr-engine';
+// `scannedImageToPickedImage`, `ocrEngineForPlatform` y `ocrTimestampNow` se movieron a
+// `core/scanning/*` (capacidad transversal de escaneo/OCR) para que `registration` las reuse sin
+// importar los internals (`data/`) de esta feature. Impórtalas desde `core/scanning/*`.

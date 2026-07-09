@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ExtractedDniData } from '@veo/api-client';
 import { useDocumentScanner } from '../../../../core/di/useDi';
-import { scannedImageToPickedImage } from '../../../documents/data';
+import { scannedImageToPickedImage } from '../../../../core/scanning/scanned-image-to-picked-image';
 import {
   isDocumentScannerError,
   parseDni,
