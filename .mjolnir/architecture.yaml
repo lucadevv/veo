@@ -1,0 +1,70 @@
+# La CONSTITUCIÓN de arquitectura de VEO — destilada de docs/FOUNDATION.md (§10 anatomía) + STATUS.md.
+#
+# `mjolnir arch check .` carga este archivo y mide el repo REAL contra ESTAS reglas (no contra el
+# template genérico de mjolnir). Editalo cuando la arquitectura evolucione — las reglas son de VEO.
+#
+# Decisiones conscientes de VEO que DIVERGEN del template default (por eso NO están como reglas):
+#   · Servicios PLANOS bajo services/ (NO services/{node|go|python}/): servicesByLanguage=false.
+#   · Protos: canónico en packages/rpc/proto/ + copia de deploy sincronizada por servicio
+#     (scripts/sync-protos.mjs + guardián proto-sync.spec.ts). Es duplicación POR DISEÑO → NO se
+#     declara contractsCentralized/protoMustNotDuplicate.
+#   · Capa de servicio = convención de ARCHIVOS por feature (<f>.controller/service/repository.ts),
+#     NO carpetas domain/application/infrastructure/presentation → NO se aplica clean-arch de carpetas
+#     a services/ (false-fallaría los 16). Sí se enforce el controller fino (FOUNDATION §10).
+version: 1
+packageManager: "pnpm"
+zones:
+  units:
+    apps: { path: "apps" }
+    services: { path: "services" }          # PLANO a propósito (FOUNDATION): sin byLanguage
+    packages: { path: "packages", kind: "lib" }
+  crossCutting: ["design", "dev-stack", "docs", "e2e", "infra", "mcp", "patches", "specs"]
+rules:
+  noCommittedArtifacts: [".venv", "vendor", "dist", "build", ".next", "Pods", ".cxx"]
+  crossCuttingAtRoot: true
+  servicesByLanguage: false
+  contractsCentralized: false          # VEO: protos canon en packages/rpc/proto + sync (NO contracts/)
+  envConvention: "env/local.env"
+  noRedundantNesting: true
+  boundaries:
+    - { from: "packages", mustNotImport: "apps" }
+    - { from: "packages", mustNotImport: "services" }
+    - { from: "services", mustNotImport: "apps" }
+    - { from: "apps", mustNotImport: "services" }   # las apps hablan por el BFF/HTTP, nunca importan un servicio
+# Guardián de Clean Architecture intra-unidad.
+cleanArchitecture:
+  # Apps móviles RN: Clean feature-first REAL (src/features/<f>/{domain,data,presentation}).
+  # Los Next.js (admin-web, family-web, web-hub) usan App Router (src/app) → NO se les aplica.
+  - appliesTo: "apps/passenger"
+    layersAt: "src/features/*"
+    requiredLayers: ["domain", "data", "presentation"]
+    useCases: { path: "domain", required: false, detectDuplicates: true }
+    layerRules:
+      - { from: "presentation", mustNotDependOn: ["data"] }
+      - { from: "domain", mustNotDependOn: ["presentation", "data"] }
+    remoteCalls: { allowedIn: ["**/data/**", "src/core/network/**"] }   # data + el cliente HTTP base
+    featureIsolation:
+      enabled: true
+      sharedAllowed: ["src/core/**", "src/shared/**", "src/services/**", "src/navigation/**"]
+      # Postura PRAGMÁTICA (decisión del arquitecto): una feature puede consumir la API PÚBLICA de otra
+      # (su dominio: entidades, use-cases, ports + el barrel), NUNCA sus internals (data/presentation).
+      allowInto: ["domain/**", "index.ts", "index.tsx"]
+  - appliesTo: "apps/driver"
+    layersAt: "src/features/*"
+    requiredLayers: ["domain", "data", "presentation"]
+    useCases: { path: "domain", required: false, detectDuplicates: true }
+    layerRules:
+      - { from: "presentation", mustNotDependOn: ["data"] }
+      - { from: "domain", mustNotDependOn: ["presentation", "data"] }
+    remoteCalls: { allowedIn: ["**/data/**", "src/core/network/**"] }
+    featureIsolation:
+      enabled: true
+      sharedAllowed: ["src/core/**", "src/shared/**", "src/services/**", "src/navigation/**"]
+      # Postura PRAGMÁTICA (decisión del arquitecto): una feature puede consumir la API PÚBLICA de otra
+      # (su dominio: entidades, use-cases, ports + el barrel), NUNCA sus internals (data/presentation).
+      allowInto: ["domain/**", "index.ts", "index.tsx"]
+  # Servicios NestJS: sin capas de carpeta (convención de archivos), pero el controller es FINO
+  # (valida DTO y delega — nunca toca Prisma). FOUNDATION §10.
+  - appliesTo: "services/*"
+    filePatternBoundaries:
+      - { pattern: "**/*.controller.ts", mustNotUse: ["PrismaService"] }

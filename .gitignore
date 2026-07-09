@@ -142,4 +142,6 @@ apps/admin-web/public/*.mp4
 apps/admin-web/public/*.webm
 
 # mjolnir: índice derivado del grafo de data-flow (se regenera con `mjolnir index .`)
-.mjolnir/
+.mjolnir/*
+# ...pero la CONSTITUCIÓN de arquitectura SÍ se versiona (es la fuente, no cache)
+!.mjolnir/architecture.yaml
