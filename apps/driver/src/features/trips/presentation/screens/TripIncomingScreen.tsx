@@ -22,6 +22,11 @@ import { StateView } from '../../../../shared/presentation/components/StateView'
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
+import {
+  IconClock,
+  IconNavigation,
+  IconRoute,
+} from '../../../../shared/presentation/icons';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import { useAcceptOffer, useOffer, useRejectOffer } from '../hooks/useTrips';
 import { CountdownRing } from '../components/CountdownRing';
@@ -62,6 +67,10 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
 
   const offerForMatch = incomingOffer?.matchId === matchId ? incomingOffer : undefined;
   const expiresAt = offerForMatch?.expiresAt;
+  // ETA conductor→recojo (3er stat "A recojo" del frame): dato EFÍMERO del push de oferta, no del
+  // `OfferView` REST (como el countdown). Puede faltar (dispatch lo omite si `maps.eta` no estuvo
+  // disponible) → el stat degrada a "—" sin mentir "0 min".
+  const pickupEtaSeconds = offerForMatch?.pickupEtaSeconds;
   // Reserva (viaje programado): se muestra un badge "Reservado". Si el evento no trajo la marca,
   // `scheduled` queda en falsy y no se renderiza nada (degrada con gracia).
   const scheduled = offerForMatch?.scheduled === true;
@@ -209,38 +218,63 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
                 </Text>
               </Appear>
 
-              {/* Resumen de ruta: motivo recojo→destino (sin direcciones reales en el contrato) con
-                  los datos disponibles: distancia y duración. No se inventan direcciones. */}
+              {/* Métricas de decisión (frame C/TripIncoming · bloque `Metrics`): 3 columnas ícono +
+                  valor + label, separadas por divisores verticales. Distancia y Duración salen del
+                  `OfferView`; "A recojo" (ETA conductor→recojo) del push efímero (store). Regla #5:
+                  pre-aceptación solo distancia/tarifa/tiempos, ninguna dirección real. */}
               <Appear
                 delay={120}
                 style={[
-                  styles.routeCard,
+                  styles.metricsCard,
                   { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.lg },
                 ]}
               >
-                <View style={styles.rail}>
-                  <View style={[styles.dot, { backgroundColor: theme.colors.accent }]} />
-                  <View style={[styles.connector, { backgroundColor: theme.colors.border }]} />
-                  <View style={[styles.dot, { backgroundColor: theme.colors.inkSubtle }]} />
-                </View>
-                <View style={styles.routeMetrics}>
-                  <View style={styles.metricRow}>
-                    <Text variant="footnote" color="inkMuted">
-                      {t('trips.distance')}
-                    </Text>
-                    <Text variant="bodyStrong" tabular>
-                      {t('trips.kilometers', { value: metersToKm(offer.data.distanceMeters) })}
-                    </Text>
-                  </View>
-                  <View style={styles.metricRow}>
-                    <Text variant="footnote" color="inkMuted">
-                      {t('trips.duration')}
-                    </Text>
-                    <Text variant="bodyStrong" tabular>
-                      {t('trips.minutes', { value: secondsToMinutes(offer.data.durationSeconds) })}
-                    </Text>
-                  </View>
-                </View>
+                {[
+                  {
+                    key: 'distance',
+                    Icon: IconRoute,
+                    label: t('trips.distance'),
+                    value: t('trips.kilometers', { value: metersToKm(offer.data.distanceMeters) }),
+                  },
+                  {
+                    key: 'duration',
+                    Icon: IconClock,
+                    label: t('trips.duration'),
+                    value: t('trips.minutes', {
+                      value: secondsToMinutes(offer.data.durationSeconds),
+                    }),
+                  },
+                  {
+                    key: 'pickupEta',
+                    Icon: IconNavigation,
+                    label: t('trips.pickupEta'),
+                    // Degrada a "—" si el ETA no vino (dispatch lo omite cuando maps.eta falló).
+                    value:
+                      pickupEtaSeconds && pickupEtaSeconds > 0
+                        ? t('trips.minutes', { value: secondsToMinutes(pickupEtaSeconds) })
+                        : '—',
+                  },
+                ].map(({ key, Icon, label, value }, i) => (
+                  <React.Fragment key={key}>
+                    {i > 0 ? (
+                      <View
+                        style={[
+                          styles.metricDivider,
+                          { backgroundColor: theme.colors.borderStrong },
+                        ]}
+                      />
+                    ) : null}
+                    <View style={styles.metricCol}>
+                      <Icon size={16} color={theme.colors.inkMuted} />
+                      <Text variant="title3" color="ink" tabular style={styles.metricValue}>
+                        {value}
+                      </Text>
+                      <Text variant="footnote" color="inkSubtle" style={styles.metricLabel}>
+                        {label}
+                      </Text>
+                    </View>
+                  </React.Fragment>
+                ))}
               </Appear>
 
               {/* BE-2 · solicitudes especiales (mascota/equipaje/silla): el conductor las ve para decidir.
@@ -339,12 +373,11 @@ const styles = StyleSheet.create({
   scrollContent: { gap: 16, paddingBottom: 8 },
   fareBlock: { gap: 2 },
   specials: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
-  routeCard: { flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16 },
-  rail: { alignItems: 'center', alignSelf: 'stretch', paddingVertical: 4 },
-  dot: { width: 12, height: 12, borderRadius: 999 },
-  connector: { width: 2, flex: 1, minHeight: 24, marginVertical: 4 },
-  routeMetrics: { flex: 1, gap: 12 },
-  metricRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  metricsCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  metricCol: { flex: 1, alignItems: 'center', gap: 3 },
+  metricDivider: { width: 1, height: 32 },
+  metricValue: { fontSize: 16, lineHeight: 20 },
+  metricLabel: { fontSize: 11, lineHeight: 14 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
   rejectBtn: { flex: 0 },
   acceptBtn: { flex: 1 },

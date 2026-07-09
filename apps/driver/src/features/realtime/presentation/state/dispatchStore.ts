@@ -8,6 +8,12 @@ export interface IncomingOffer {
   expiresAt: string;
   /** true si la oferta es un viaje PROGRAMADO (reserva). Opcional: degrada a no-reserva si falta. */
   scheduled?: boolean;
+  /**
+   * ETA conductor→recojo en segundos (dato EFÍMERO del momento de oferta, como `expiresAt`): la pantalla
+   * de oferta lo muestra como el 3er stat "A recojo". Opcional: dispatch lo omite si `maps.eta` no estuvo
+   * disponible al armar la oferta → el stat degrada a "—" en vez de mentir "0 min".
+   */
+  pickupEtaSeconds?: number;
 }
 
 /**

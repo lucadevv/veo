@@ -3236,6 +3236,8 @@ export interface DispatchOfferedPayload {
   originLat?: number;
   originLon?: number;
   specialRequests?: string[];
+  /** ETA conductor→recojo en segundos (efímero, solo oferta FIXED): la app lo muestra como el stat "A recojo". Ausente si el broadcast de PUJA no lo trae o si maps.eta no estuvo disponible. */
+  pickupEtaSeconds?: number;
 }
 
 /** Match encontrado (dispatch.match_found). */

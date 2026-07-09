@@ -638,6 +638,7 @@
     "estimatedFare": "Tarifa estimada",
     "distance": "Distancia",
     "duration": "Duración",
+    "pickupEta": "A recojo",
     "minutes": "{{value}} min",
     "kilometers": "{{value}} km",
     "childMode": "Modo niño activado",

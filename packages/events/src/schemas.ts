@@ -440,6 +440,10 @@ export const dispatchOffered = z.object({
   originLat: z.number().optional(),
   originLon: z.number().optional(),
   specialRequests: z.array(z.string()).optional(),
+  /// ETA conductor→recojo en segundos (efímero, momento-de-oferta, solo camino FIXED). Opcional porque el
+  /// broadcast de PUJA no lo lleva y una oferta con maps.eta caído lo omite. La app lo muestra como el stat
+  /// "A recojo".
+  pickupEtaSeconds: z.number().int().nonnegative().optional(),
 });
 
 /* ── PUJA / negociación (ADR 010 §4) ── (Lote A: contratos)

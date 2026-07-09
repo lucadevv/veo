@@ -151,6 +151,9 @@ export const RealtimeManager = (): null => {
         tripId: payload.tripId,
         expiresAt: payload.expiresAt,
         scheduled,
+        // ETA conductor→recojo (efímero, momento de oferta): alimenta el stat "A recojo" de TripIncoming.
+        // Puede venir `undefined` (dispatch lo omite si maps.eta no estuvo disponible) → el stat degrada.
+        pickupEtaSeconds: payload.pickupEtaSeconds,
       });
       navigateToIncoming({ matchId: payload.matchId, tripId: payload.tripId });
     },
