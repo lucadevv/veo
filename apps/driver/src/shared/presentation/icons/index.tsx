@@ -911,3 +911,31 @@ export function IconMonitorOff(props: IconProps): React.JSX.Element {
     </Svg>
   );
 }
+
+/** Búsqueda: lupa. */
+export function IconSearch(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M20 20l-3.6-3.6"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Más acciones: tres puntos horizontales (⋯). */
+export function IconMore(props: IconProps): React.JSX.Element {
+  const { size, color } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={5} cy={12} r={1.7} fill={color} />
+      <Circle cx={12} cy={12} r={1.7} fill={color} />
+      <Circle cx={19} cy={12} r={1.7} fill={color} />
+    </Svg>
+  );
+}

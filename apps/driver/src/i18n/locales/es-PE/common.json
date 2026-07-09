@@ -1009,7 +1009,11 @@
     "heroTitle": "¿Necesitas ayuda?",
     "heroBody": "Reporta un problema y la central te responderá lo antes posible.",
     "reportProblem": "Reportar un problema",
-    "faqTitle": "Preguntas frecuentes",
+    "faqTitle": "Temas frecuentes",
+    "searchPlaceholder": "Busca tu problema…",
+    "chatTitle": "Chatear con soporte",
+    "chatSubtitle": "Respuesta en menos de 5 min · 24/7",
+    "searchEmpty": "No encontramos temas para tu búsqueda. Prueba con otras palabras o chatea con soporte.",
     "myTickets": "Mis tickets",
     "ticketsEmpty": "Aún no has reportado ningún problema.",
     "category": {
@@ -1027,12 +1031,20 @@
     },
     "faq": {
       "shiftStart": {
-        "q": "¿Cómo inicio mi turno?",
-        "a": "Desde Inicio, elige tu vehículo y toca \"Conéctate\". Por seguridad, deberás verificar tu rostro (prueba de vida) antes de empezar a recibir viajes."
+        "q": "No pude iniciar turno",
+        "a": "Revisa tres cosas: (1) que tu vehículo y documentos estén vigentes (Documentos), (2) que hayas dado permiso de ubicación, y (3) que pases la verificación de rostro. Si alguno falla, la app te lo indica al tocar \"Conéctate\"."
       },
       "payouts": {
-        "q": "¿Cuándo y cómo recibo mis pagos?",
-        "a": "Tus ganancias se liquidan por periodos. Revisa el detalle y el estado de cada liquidación en la pestaña Ganancias. Los pagos pueden tardar según el banco."
+        "q": "¿Cómo funcionan las liquidaciones?",
+        "a": "Tus ganancias se acumulan y se liquidan por periodos. Revisa el neto acumulado, lo que está por liquidar y el detalle de cada pago en la pestaña Ganancias. El depósito puede tardar según tu banco."
+      },
+      "faceVerification": {
+        "q": "Problemas con la verificación de rostro",
+        "a": "La verificación es una prueba de vida: busca buena luz, quita gorra o lentes oscuros y encuadra tu rostro. Tras 3 intentos fallidos se bloquea por 1 hora; si sigue fallando, contacta a la central."
+      },
+      "vehicle": {
+        "q": "Cambiar o agregar un vehículo",
+        "a": "Gestiona tus vehículos desde Inicio → \"Gestionar\" o en Cuenta → Documentos. Puedes registrar uno nuevo (con sus documentos) y elegir con cuál operas; el tipo (auto o moto) define qué viajes recibes."
       },
       "documents": {
         "q": "¿Qué documentos debo mantener al día?",
