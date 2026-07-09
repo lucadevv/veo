@@ -6,17 +6,17 @@ import { Banner, SafeScreen, Skeleton, Text, useTheme, type StatusTone } from '@
 import type { DriverPayoutView } from '@veo/api-client';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, formatShortDate } from '../../../../shared/presentation/format';
-import { EarningsHeroCard } from '../components/EarningsHeroCard';
 import { PayoutRow } from '../components/PayoutRow';
-import { BreakdownCard } from '../components/BreakdownCard';
+import { PeriodTotalCard } from '../components/PeriodTotalCard';
+import { WeeklyBarChart } from '../components/WeeklyBarChart';
+import { PayoutInfoCard } from '../components/PayoutInfoCard';
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { ScreenHero } from '../../../../shared/presentation/components/ScreenHero';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { useEarningsBreakdown, useEarningsSummary } from '../hooks/useEarnings';
+import { useEarningsBreakdown, useEarningsDaily, useEarningsSummary } from '../hooks/useEarnings';
 
 // ── Mapeo de estado de payout → tono/etiqueta. `status` es el enum TIPADO del contrato
-// (`payoutStatus`), no un string libre: el switch es exhaustivo sobre el union, así un valor nuevo o
-// un literal mal escrito es error de compilación, NO un payout pagado que se ve "pendiente". ─────────
+// (`payoutStatus`): switch exhaustivo, un literal nuevo o mal escrito es error de compilación. ─────────
 type PayoutStatusValue = DriverPayoutView['status'];
 
 function payoutTone(status: PayoutStatusValue): StatusTone {
@@ -48,19 +48,77 @@ function payoutLabel(status: PayoutStatusValue, t: TFunction): string {
   }
 }
 
-type EarningsTab = 'summary' | 'breakdown';
+/** Ventana temporal seleccionable. Mapea 1:1 con `DriverEarningsSummary` (today/week/month). */
+type Period = 'today' | 'week' | 'month';
 
-/** Sección "Resumen": hero del neto total + lista de liquidaciones (comportamiento previo intacto). */
-function SummarySection({ t }: { t: TFunction }): React.JSX.Element {
+const PERIOD_NET_LABEL: Record<Period, string> = {
+  today: 'earnings.netTodayLabel',
+  week: 'earnings.netWeekLabel',
+  month: 'earnings.netMonthLabel',
+};
+
+/**
+ * Bloque "ganancias del período": card de neto (según el segmented) + bar chart semanal. El chart es
+ * SIEMPRE la semana en curso (7 días), independiente del período elegido — así lo dibuja el frame.
+ */
+function EarningsBlock({ period, t }: { period: Period; t: TFunction }): React.JSX.Element {
+  const theme = useTheme();
+  const breakdown = useEarningsBreakdown();
+  const daily = useEarningsDaily();
+
+  if (breakdown.isLoading) {
+    return (
+      <View style={[styles.section, { gap: theme.spacing.lg }]}>
+        <Skeleton height={132} radius={theme.radii.xl} />
+        <Skeleton height={148} radius={theme.radii.lg} />
+      </View>
+    );
+  }
+
+  if (breakdown.isError || !breakdown.data) {
+    return (
+      <View style={[styles.section, { gap: theme.spacing.lg }]}>
+        <Banner
+          tone="danger"
+          title={t('errors.generic')}
+          description={toErrorMessage(breakdown.error, t)}
+          action={{ label: t('common.retry'), onPress: () => breakdown.refetch() }}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.section, { gap: theme.spacing.lg }]}>
+      <Reveal>
+        <PeriodTotalCard
+          label={t(PERIOD_NET_LABEL[period])}
+          breakdown={breakdown.data[period]}
+          t={t}
+        />
+      </Reveal>
+
+      {/* El chart degrada honesto: si su query falla, la card de neto sigue en pie (no bloquea la pantalla). */}
+      {daily.isLoading ? (
+        <Skeleton height={148} radius={theme.radii.lg} />
+      ) : daily.isError || !daily.data ? null : (
+        <Reveal delay={90}>
+          <WeeklyBarChart days={daily.data.days} t={t} />
+        </Reveal>
+      )}
+    </View>
+  );
+}
+
+/** Bloque "por liquidar" + historial de liquidaciones (GET /earnings/summary). */
+function PayoutsBlock({ t }: { t: TFunction }): React.JSX.Element {
   const theme = useTheme();
   const { data, isLoading, isError, error, refetch } = useEarningsSummary();
 
   if (isLoading) {
     return (
       <View style={[styles.section, { gap: theme.spacing.lg }]}>
-        <Skeleton height={188} radius={theme.radii.xl} />
-        <Skeleton height={20} width="40%" />
-        <Skeleton height={72} radius={theme.radii.lg} />
+        <Skeleton height={96} radius={theme.radii.lg} />
         <Skeleton height={72} radius={theme.radii.lg} />
       </View>
     );
@@ -81,14 +139,12 @@ function SummarySection({ t }: { t: TFunction }): React.JSX.Element {
 
   return (
     <View style={[styles.section, { gap: theme.spacing.xl }]}>
-      {/* Tarjeta hero con el neto total y las estadísticas reales del summary. */}
       <Reveal>
-        <EarningsHeroCard summary={data} t={t} />
+        <PayoutInfoCard pendingNetCents={data.pendingNetCents} t={t} />
       </Reveal>
 
       <View style={[styles.payoutsBlock, { gap: theme.spacing.sm }]}>
         <Text variant="headline">{t('earnings.payoutsTitle')}</Text>
-
         {data.payouts.length === 0 ? (
           <View
             style={[
@@ -138,65 +194,35 @@ function SummarySection({ t }: { t: TFunction }): React.JSX.Element {
   );
 }
 
-/** Sección "Desglose": GET /earnings/breakdown con tarjetas de HOY y SEMANA (neto destacado). */
-function BreakdownSection({ t }: { t: TFunction }): React.JSX.Element {
-  const theme = useTheme();
-  const { data, isLoading, isError, error, refetch } = useEarningsBreakdown();
-
-  if (isLoading) {
-    return (
-      <View style={[styles.section, { gap: theme.spacing.lg }]}>
-        <Skeleton height={236} radius={theme.radii.xl} />
-        <Skeleton height={236} radius={theme.radii.xl} />
-      </View>
-    );
-  }
-
-  if (isError || !data) {
-    return (
-      <View style={[styles.section, { gap: theme.spacing.lg }]}>
-        <Banner
-          tone="danger"
-          title={t('errors.generic')}
-          description={toErrorMessage(error, t)}
-          action={{ label: t('common.retry'), onPress: () => refetch() }}
-        />
-      </View>
-    );
-  }
-
-  return (
-    <View style={[styles.section, { gap: theme.spacing.xl }]}>
-      <Reveal>
-        <BreakdownCard periodLabel={t('earnings.periodToday')} breakdown={data.today} t={t} />
-      </Reveal>
-      <Reveal delay={90}>
-        <BreakdownCard periodLabel={t('earnings.periodWeek')} breakdown={data.week} t={t} />
-      </Reveal>
-    </View>
-  );
-}
-
+/**
+ * Pantalla "Ganancias" del conductor, fiel al frame C/Ganancias: segmented temporal (Hoy/Semana/Mes) →
+ * card de NETO del período + bar chart "Por día" + card "Por liquidar" (informativa) + historial de
+ * liquidaciones. Sin horas trabajadas (no hay dato) y sin acción "Liquidar" (modelo LNS admin-only).
+ */
 export const EarningsScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
-  const [tab, setTab] = useState<EarningsTab>('summary');
+  const [period, setPeriod] = useState<Period>('week');
 
   return (
     <SafeScreen scroll>
-      <ScreenHero title={t('earnings.title')} subtitle={t('earnings.subtitle')} />
+      <ScreenHero title={t('earnings.title')} />
       <View style={[styles.tabsWrap, { marginBottom: theme.spacing.lg }]}>
         <SegmentedTabs
-          value={tab}
-          onChange={(key) => setTab(key as EarningsTab)}
+          value={period}
+          onChange={(key) => setPeriod(key as Period)}
           items={[
-            { key: 'summary', label: t('earnings.tabSummary') },
-            { key: 'breakdown', label: t('earnings.tabBreakdown') },
+            { key: 'today', label: t('earnings.tabToday') },
+            { key: 'week', label: t('earnings.tabWeek') },
+            { key: 'month', label: t('earnings.tabMonth') },
           ]}
         />
       </View>
 
-      {tab === 'summary' ? <SummarySection t={t} /> : <BreakdownSection t={t} />}
+      <View style={{ gap: theme.spacing.xl }}>
+        <EarningsBlock period={period} t={t} />
+        <PayoutsBlock t={t} />
+      </View>
     </SafeScreen>
   );
 };

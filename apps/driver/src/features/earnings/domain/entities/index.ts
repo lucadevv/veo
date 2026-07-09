@@ -1,5 +1,6 @@
 import type {
   DriverEarningsBreakdown,
+  DriverEarningsDailySeries,
   DriverEarningsSummary,
   DriverPayoutView,
   EarningsSummary,
@@ -18,5 +19,11 @@ export type Payout = DriverPayoutView;
  */
 export type EarningsPeriodBreakdown = DriverEarningsBreakdown;
 
-/** Respuesta de `GET /earnings/breakdown`: desglose de HOY y de la SEMANA + moneda. */
+/** Respuesta de `GET /earnings/breakdown`: desglose de HOY, SEMANA y MES + moneda. */
 export type EarningsBreakdown = DriverEarningsSummary;
+
+/**
+ * Serie diaria de la SEMANA en curso (lunes→domingo, 7 puntos): neto y nº de viajes por día. Alimenta
+ * el bar chart "Por día". Es el dato de `GET /earnings/daily`. Días sin viajes vienen en cero.
+ */
+export type EarningsDailySeries = DriverEarningsDailySeries;
