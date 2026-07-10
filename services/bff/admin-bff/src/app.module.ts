@@ -33,6 +33,7 @@ import { GobiernoModule } from './gobierno/gobierno.module';
 import { IpAllowlistGuard } from './policies/ip-allowlist.guard';
 import { SessionIdleGuard } from './policies/session-idle.guard';
 import { PolicyStepUpMfaGuard } from './policies/policy-step-up-mfa.guard';
+import { PermissionOverlayGuard } from './policies/permission-overlay.guard';
 
 @Module({
   imports: [
@@ -81,7 +82,8 @@ import { PolicyStepUpMfaGuard } from './policies/policy-step-up-mfa.guard';
     // admin-bff SOLO acepta tokens de tipo 'admin' (el JwtAuthGuard rechaza pasajero/conductor aunque
     // la firma/audiencia sean válidas) — no depende solo del RBAC. Defensa en profundidad.
     { provide: EXPECTED_SUBJECT_TYPE, useValue: 'admin' satisfies SubjectType },
-    // Orden de guards globales: Jwt (adjunta user) → SessionRevocation → RateLimit → Roles → StepUpMfa.
+    // Orden de guards globales: Jwt (adjunta user) → SessionRevocation → RateLimit → Roles →
+    // PermissionOverlay → StepUpMfa.
     // SessionRevocationGuard va JUSTO tras el Jwt (necesita req.user ya poblado) y ANTES del RateLimit:
     // un token revocado (reset anti-takeover del operador, single-session) se rechaza sin consumir cuota
     // de rate-limit ni evaluar RBAC/MFA. Lee el denylist en Redis (enforcement server-side de la
@@ -98,6 +100,13 @@ import { PolicyStepUpMfaGuard } from './policies/policy-step-up-mfa.guard';
     { provide: APP_GUARD, useClass: SessionIdleGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // OVERLAY de visibilidad (ADR-025 §3/§6/§7 · Fase 1 · Ola A). Corre JUSTO tras el RolesGuard: el @Roles
+    // base ya validó la CAPA 1 (qué rol puede); este guard REFINA restando (subtract-only), computando el
+    // EFECTIVO `base ∧ ¬override` por PERMISO para los handlers marcados con @Permission. NO-OP hasta que el
+    // barrido endpoint→permiso (Ola B) declare @Permission: sin permiso mapeado no hay overlay que aplicar,
+    // así que hoy NO cambia comportamiento. Fail-safe: reader ausente/cache frío → base pura (nunca bloquea
+    // por un fallo de lectura, nunca concede de más).
+    { provide: APP_GUARD, useClass: PermissionOverlayGuard },
     { provide: APP_GUARD, useClass: StepUpMfaGuard },
     // PBAC Fase 2 · `pii.reveal-stepup`: step-up MFA policy-aware (ventana propia) para handlers marcados con
     // @RequireStepUpMfaForPolicy. No-op salvo en el detalle de conductor que revela el DNI. DISABLED por default.
