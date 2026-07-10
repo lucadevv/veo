@@ -4,7 +4,7 @@
  */
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, Public, type AuthenticatedUser } from '@veo/auth';
+import { ALL_ADMIN_ROLES, CurrentUser, Public, Roles, type AuthenticatedUser } from '@veo/auth';
 import type { SessionUser, WsTicket } from '@veo/api-client';
 import { SkipRateLimit } from '../rate-limit/skip-rate-limit.decorator';
 import { RateLimit } from '../rate-limit/rate-limit.decorator';
@@ -73,6 +73,7 @@ export class AuthController {
     return this.auth.totpConfirm(dto);
   }
 
+  @Roles(...ALL_ADMIN_ROLES)
   @Post('step-up')
   @HttpCode(200)
   @ApiOperation({ summary: 'Step-up MFA (TOTP): re-emite un access con mfaAt fresco' })
@@ -111,12 +112,14 @@ export class AuthController {
     return this.auth.logoutAll(dto);
   }
 
+  @Roles(...ALL_ADMIN_ROLES)
   @Get('session')
   @ApiOperation({ summary: 'Valida el Bearer y devuelve el usuario de sesión' })
   session(@CurrentUser() user: AuthenticatedUser): SessionUser {
     return this.auth.session(user);
   }
 
+  @Roles(...ALL_ADMIN_ROLES)
   @Post('ws-ticket')
   @HttpCode(200)
   @ApiOperation({ summary: 'Acuña un ticket efímero de un solo uso para el handshake WS /ops' })

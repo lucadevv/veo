@@ -1,12 +1,29 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
-import { RolesGuard, StepUpMfaGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  RolesGuard,
+  StepUpMfaGuard,
+  IS_PUBLIC_KEY,
+  ROLES_KEY,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { ForbiddenError, SystemClock } from '@veo/utils';
 import { AdminRole } from '@veo/shared-types';
 
 function reflectorReturning(value: unknown): Reflector {
   return { getAllAndOverride: () => value } as unknown as Reflector;
+}
+
+/** Reflector consciente de la key: distingue ROLES_KEY de IS_PUBLIC_KEY (fail-closed vs @Public). */
+function reflectorByKey(opts: { roles?: unknown; isPublic?: boolean }): Reflector {
+  return {
+    getAllAndOverride: (key: string) => {
+      if (key === ROLES_KEY) return opts.roles;
+      if (key === IS_PUBLIC_KEY) return opts.isPublic ?? false;
+      return undefined;
+    },
+  } as unknown as Reflector;
 }
 
 function ctxWithUser(user?: AuthenticatedUser): ExecutionContext {
@@ -35,8 +52,13 @@ describe('RolesGuard (RBAC)', () => {
     expect(() => guard.canActivate(ctxWithUser(financeUser))).toThrow(ForbiddenError);
   });
 
-  it('permite si el endpoint no exige roles', () => {
-    const guard = new RolesGuard(reflectorReturning(undefined));
+  it('fail-closed: rechaza (Forbidden) una ruta autenticada SIN @Roles y que NO es @Public', () => {
+    const guard = new RolesGuard(reflectorByKey({ roles: undefined, isPublic: false }));
+    expect(() => guard.canActivate(ctxWithUser(financeUser))).toThrow(ForbiddenError);
+  });
+
+  it('permite una ruta SIN @Roles cuando es @Public (login/health/refresh — abierta a propósito)', () => {
+    const guard = new RolesGuard(reflectorByKey({ roles: undefined, isPublic: true }));
     expect(guard.canActivate(ctxWithUser(financeUser))).toBe(true);
   });
 });

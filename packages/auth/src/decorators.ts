@@ -2,7 +2,7 @@
  * Decorators de autorización (FOUNDATION §7).
  */
 import { SetMetadata, createParamDecorator, type ExecutionContext } from '@nestjs/common';
-import type { AdminRole } from '@veo/shared-types';
+import { AdminRole } from '@veo/shared-types';
 import type { AuthenticatedUser } from './jwt.js';
 import type { InternalAudience } from './internal-identity.js';
 
@@ -13,6 +13,13 @@ export const REQUIRE_MFA_KEY = 'veo:requireMfa';
 
 /** Marca un endpoint como público (sin auth). */
 export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(IS_PUBLIC_KEY, true);
+
+/**
+ * Todos los roles admin del enum. Úsalo con `@Roles(...ALL_ADMIN_ROLES)` para endpoints que solo exigen
+ * SESIÓN admin válida (cualquier rol), no un rol específico — evita el 403 fail-closed del RolesGuard sin
+ * abrir la ruta con @Public. A prueba de futuro: si se agrega un rol al enum, entra automáticamente.
+ */
+export const ALL_ADMIN_ROLES: AdminRole[] = Object.values(AdminRole);
 
 /** Restringe a los roles admin indicados (BR-S07 RBAC). */
 export const Roles = (...roles: AdminRole[]): MethodDecorator & ClassDecorator =>
