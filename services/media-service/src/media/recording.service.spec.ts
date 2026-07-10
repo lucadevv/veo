@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { RecordingService, roomNameForTrip } from './recording.service';
+import { PrismaMediaRepository } from './media.repository';
 import { LiveKitSandboxAdapter } from '../ports/livekit/livekit.module';
 import { StorageSandboxAdapter } from '../ports/storage/storage.module';
 import type { IssueTokenInput, LiveKitPort } from '../ports/livekit/livekit.port';
@@ -151,7 +152,7 @@ describe('RecordingService.issueRoomToken · token de cámara (BR-S01)', () => {
   it('emite un token para la room del viaje', async () => {
     const { prisma } = makePrisma();
     const svc = new RecordingService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new LiveKitSandboxAdapter(),
       makeSpyStorage().storage,
       config,
@@ -167,7 +168,7 @@ describe('RecordingService.issueViewerToken · espectador PURO del muro admin', 
   it('mintea SOLO-SUSCRIPCIÓN en la sala donde publica el conductor (canPublish/Data:false)', async () => {
     const { prisma } = makePrisma();
     const { livekit, captured } = makeSpyLivekit();
-    const svc = new RecordingService(prisma as never, livekit, makeSpyStorage().storage, config);
+    const svc = new RecordingService(new PrismaMediaRepository(prisma as never), livekit, makeSpyStorage().storage, config);
 
     const res = await svc.issueViewerToken({ tripId: 'trip-1', identity: 'admin-7' });
 
@@ -185,7 +186,7 @@ describe('RecordingService.startForTrip · inicio automático (BR-S01)', () => {
   it('crea un segmento con retención por defecto y emite media.recording_started', async () => {
     const { prisma, segments, outbox } = makePrisma();
     const svc = new RecordingService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new LiveKitSandboxAdapter(),
       makeSpyStorage().storage,
       config,
@@ -203,7 +204,7 @@ describe('RecordingService.startForTrip · inicio automático (BR-S01)', () => {
   it('es idempotente: no duplica la grabación si ya hay una en curso', async () => {
     const { prisma, segments } = makePrisma();
     const svc = new RecordingService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new LiveKitSandboxAdapter(),
       makeSpyStorage().storage,
       config,
@@ -220,7 +221,7 @@ describe('RecordingService.onPanic · force-start y retención indefinida (BR-S0
   it('fuerza el inicio de grabación si no había ninguna (viaje en ARRIVING)', async () => {
     const { prisma, segments } = makePrisma();
     const svc = new RecordingService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new LiveKitSandboxAdapter(),
       makeSpyStorage().storage,
       config,
@@ -237,7 +238,7 @@ describe('RecordingService.onPanic · force-start y retención indefinida (BR-S0
   it('si ya grababa, solo escala la retención a indefinida', async () => {
     const { prisma, segments } = makePrisma();
     const svc = new RecordingService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new LiveKitSandboxAdapter(),
       makeSpyStorage().storage,
       config,
@@ -257,7 +258,7 @@ describe('RecordingService.finishForTrip · archivado (BR-S01)', () => {
   it('finaliza el segmento abierto y emite media.archived', async () => {
     const { prisma, segments, outbox } = makePrisma();
     const svc = new RecordingService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new LiveKitSandboxAdapter(),
       makeSpyStorage().storage,
       config,
@@ -275,7 +276,7 @@ describe('RecordingService.finishForTrip · archivado (BR-S01)', () => {
   it('no hace nada si no hay segmento abierto', async () => {
     const { prisma } = makePrisma();
     const svc = new RecordingService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new LiveKitSandboxAdapter(),
       makeSpyStorage().storage,
       config,
@@ -289,7 +290,7 @@ describe('RecordingService.eraseTrip · derecho al olvido del video (BR-S06, Ley
   it('purga objetos S3 + filas de los segmentos del viaje', async () => {
     const { prisma, segments } = makePrisma();
     const { storage, deletes } = makeSpyStorage();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    const svc = new RecordingService(new PrismaMediaRepository(prisma as never), new LiveKitSandboxAdapter(), storage, config);
     await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
     expect(segments).toHaveLength(1);
     const s3Key = segments[0]!.s3Key;
@@ -304,7 +305,7 @@ describe('RecordingService.eraseTrip · derecho al olvido del video (BR-S06, Ley
   it('purga todos los segmentos del viaje, sin tocar los de otros viajes', async () => {
     const { prisma, segments } = makePrisma();
     const { storage } = makeSpyStorage();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    const svc = new RecordingService(new PrismaMediaRepository(prisma as never), new LiveKitSandboxAdapter(), storage, config);
     await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
     await svc.finishForTrip('trip-1', new Date('2026-05-28T20:30:00.000Z'));
     await svc.startForTrip('trip-1', new Date('2026-05-28T21:00:00.000Z')); // 2º segmento del mismo viaje
@@ -320,7 +321,7 @@ describe('RecordingService.eraseTrip · derecho al olvido del video (BR-S06, Ley
   it('es idempotente: reprocesar un viaje ya purgado es un no-op (0 segmentos)', async () => {
     const { prisma } = makePrisma();
     const { storage, deletes } = makeSpyStorage();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    const svc = new RecordingService(new PrismaMediaRepository(prisma as never), new LiveKitSandboxAdapter(), storage, config);
     await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
 
     const first = await svc.eraseTrip('trip-1');
@@ -334,7 +335,7 @@ describe('RecordingService.eraseTrip · derecho al olvido del video (BR-S06, Ley
   it('no-op si el viaje nunca tuvo grabación', async () => {
     const { prisma } = makePrisma();
     const { storage, deletes } = makeSpyStorage();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    const svc = new RecordingService(new PrismaMediaRepository(prisma as never), new LiveKitSandboxAdapter(), storage, config);
 
     const res = await svc.eraseTrip('trip-sin-video');
 
@@ -345,7 +346,7 @@ describe('RecordingService.eraseTrip · derecho al olvido del video (BR-S06, Ley
   it('purga también las COPIAS con watermark quemado del viaje (PII, Lote 3)', async () => {
     const { prisma, accessRequests } = makePrisma();
     const { storage, deletes } = makeSpyStorage();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    const svc = new RecordingService(new PrismaMediaRepository(prisma as never), new LiveKitSandboxAdapter(), storage, config);
     await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
     // Una solicitud del viaje con copia derivada READY (video de cabina con PII).
     accessRequests.push({ id: 'req-1', tripId: 'trip-1', renderedS3Key: 'watermarked/req-1.mp4' });
@@ -363,7 +364,7 @@ describe('RecordingService.eraseTrip · derecho al olvido del video (BR-S06, Ley
     const { prisma, accessRequests } = makePrisma();
     // Storage REAL (sandbox con store en memoria): el round-trip de borrado es honesto.
     const storage = new StorageSandboxAdapter();
-    const svc = new RecordingService(prisma as never, new LiveKitSandboxAdapter(), storage, config);
+    const svc = new RecordingService(new PrismaMediaRepository(prisma as never), new LiveKitSandboxAdapter(), storage, config);
     await svc.startForTrip('trip-1', new Date('2026-05-28T20:00:00.000Z'));
 
     // Render que SUBIÓ los bytes de la copia con PII pero cuya tx de READY falló → renderedS3Key quedó null.

@@ -14,7 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { uuidv7 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { MEDIA_REPO, type MediaRepository, type OpenSegment } from './media.repository';
 import { LIVEKIT_PORT, type LiveKitPort } from '../ports/livekit/livekit.port';
 import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
 import { computeRetentionUntil } from './retention';
@@ -49,7 +49,7 @@ export class RecordingService {
   private readonly renderedPrefix: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEDIA_REPO) private readonly repo: MediaRepository,
     @Inject(LIVEKIT_PORT) private readonly livekit: LiveKitPort,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
     config: ConfigService<Env, true>,
@@ -125,7 +125,7 @@ export class RecordingService {
       incidentDays: this.incidentDays,
     });
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       await tx.mediaSegment.create({
         data: {
           id: segmentId,
@@ -180,7 +180,7 @@ export class RecordingService {
       this.incidentDays,
     );
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       await tx.mediaSegment.update({
         where: { id: open.id },
         data: { endedAt, sizeBytes: BigInt(bytes), retentionUntil },
@@ -205,10 +205,7 @@ export class RecordingService {
     const open = await this.findOpenSegment(tripId);
     if (open) {
       // Ya grababa: solo escalamos la retención a indefinida (pánico).
-      await this.prisma.write.mediaSegment.update({
-        where: { id: open.id },
-        data: { hasPanic: true, retentionUntil: null },
-      });
+      await this.repo.escalatePanicRetention(open.id);
       this.logger.warn(
         `Pánico trip=${tripId}: retención escalada a indefinida (segment=${open.id})`,
       );
@@ -234,10 +231,7 @@ export class RecordingService {
    * `deleteObject` es no-op si el objeto no existe. Devuelve cuántos segmentos se purgaron.
    */
   async eraseTrip(tripId: string): Promise<{ purgedSegments: number }> {
-    const segments = await this.prisma.read.mediaSegment.findMany({
-      where: { tripId },
-      select: { id: true, s3Key: true },
-    });
+    const segments = await this.repo.listSegmentKeysByTrip(tripId);
     // Copias DERIVADAS con watermark quemado (Lote 3): video de cabina con PII → NO pueden quedar (Ley
     // 29733). Las solicitudes del viaje pueden tener una copia READY; se purgan junto al crudo. Se resuelve
     // por separado del crudo: una solicitud de acceso puede existir aunque el segmento ya haya sido barrido.
@@ -252,7 +246,7 @@ export class RecordingService {
     ]);
 
     const segmentIds = segments.map((s) => s.id);
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       // Las solicitudes de acceso referencian el segmento por FK: se borran antes que el segmento.
       await tx.videoAccessRequest.deleteMany({ where: { tripId } });
       await tx.mediaSegment.deleteMany({ where: { id: { in: segmentIds } } });
@@ -275,33 +269,12 @@ export class RecordingService {
    * existe es seguro.
    */
   private async renderedKeysForTrip(tripId: string): Promise<string[]> {
-    const rows = await this.prisma.read.videoAccessRequest.findMany({
-      where: { tripId },
-      select: { id: true },
-    });
+    const rows = await this.repo.listAccessRequestIdsByTrip(tripId);
     return rows.map((r) => renderedKeyFor(this.renderedPrefix, r.id));
   }
 
-  private async findOpenSegment(tripId: string): Promise<{
-    id: string;
-    startedAt: Date;
-    s3Key: string;
-    egressId: string | null;
-    hasIncident: boolean;
-    hasPanic: boolean;
-  } | null> {
-    return this.prisma.read.mediaSegment.findFirst({
-      where: { tripId, endedAt: null },
-      orderBy: { startedAt: 'desc' },
-      select: {
-        id: true,
-        startedAt: true,
-        s3Key: true,
-        egressId: true,
-        hasIncident: true,
-        hasPanic: true,
-      },
-    });
+  private findOpenSegment(tripId: string): Promise<OpenSegment | null> {
+    return this.repo.findOpenSegment(tripId);
   }
 }
 

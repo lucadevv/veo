@@ -30,7 +30,7 @@ import {
   ValidationError,
   uuidv7,
 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { MEDIA_REPO, type MediaRepository } from './media.repository';
 import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
 import { buildWatermark } from './watermark';
 import { VideoAccessStatus, VideoRenderStatus, type VideoAccessRequest } from '../generated/prisma';
@@ -87,7 +87,7 @@ export class AccessService {
   private readonly maxRenderAttempts: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEDIA_REPO) private readonly repo: MediaRepository,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
     config: ConfigService<Env, true>,
   ) {
@@ -107,28 +107,22 @@ export class AccessService {
     }
 
     if (input.segmentId) {
-      const seg = await this.prisma.read.mediaSegment.findUnique({
-        where: { id: input.segmentId },
-      });
+      const seg = await this.repo.findSegmentById(input.segmentId);
       if (!seg) throw new NotFoundError('Segmento de video no encontrado');
     } else {
-      const any = await this.prisma.read.mediaSegment.findFirst({
-        where: { tripId: input.tripId },
-      });
+      const any = await this.repo.findFirstSegmentByTrip(input.tripId);
       if (!any) throw new NotFoundError('No hay video grabado para el viaje');
     }
 
     const id = uuidv7();
-    await this.prisma.write.videoAccessRequest.create({
-      data: {
-        id,
-        tripId: input.tripId,
-        segmentId: input.segmentId ?? null,
-        requestedBy: input.requestedBy,
-        requestedByEmail: input.requestedByEmail,
-        reason: input.reason.trim(),
-        status: VideoAccessStatus.PENDING,
-      },
+    await this.repo.createAccessRequest({
+      id,
+      tripId: input.tripId,
+      segmentId: input.segmentId ?? null,
+      requestedBy: input.requestedBy,
+      requestedByEmail: input.requestedByEmail,
+      reason: input.reason.trim(),
+      status: VideoAccessStatus.PENDING,
     });
     return { id, status: VideoAccessStatus.PENDING };
   }
@@ -139,13 +133,13 @@ export class AccessService {
    * eso ocurre en cada `streamAccess`. Guard de transición: solo desde PENDING.
    */
   async approveAccess(requestId: string, approverId: string, now = new Date()) {
-    const req = await this.prisma.read.videoAccessRequest.findUnique({ where: { id: requestId } });
+    const req = await this.repo.findAccessRequestById(requestId);
     if (!req) throw new NotFoundError('Solicitud de acceso no encontrada');
     if (req.status !== VideoAccessStatus.PENDING) {
       throw new ConflictError('La solicitud ya fue decidida');
     }
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTx(async (tx) => {
       const row = await tx.videoAccessRequest.update({
         where: { id: req.id },
         data: { status: VideoAccessStatus.APPROVED, approvedBy: approverId, approvedAt: now },
@@ -177,13 +171,13 @@ export class AccessService {
    * Guard de transición: solo desde PENDING.
    */
   async rejectAccess(requestId: string, rejectorId: string, now = new Date()) {
-    const req = await this.prisma.read.videoAccessRequest.findUnique({ where: { id: requestId } });
+    const req = await this.repo.findAccessRequestById(requestId);
     if (!req) throw new NotFoundError('Solicitud de acceso no encontrada');
     if (req.status !== VideoAccessStatus.PENDING) {
       throw new ConflictError('La solicitud ya fue decidida');
     }
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTx(async (tx) => {
       const row = await tx.videoAccessRequest.update({
         where: { id: req.id },
         data: { status: VideoAccessStatus.REJECTED, rejectedBy: rejectorId, rejectedAt: now },
@@ -223,7 +217,7 @@ export class AccessService {
    * Guard de DECISIÓN: el status del request DEBE seguir siendo APPROVED (si no, ForbiddenError como antes).
    */
   async streamAccess(requestId: string, viewerId: string, now = new Date()): Promise<StreamResult> {
-    const req = await this.prisma.read.videoAccessRequest.findUnique({ where: { id: requestId } });
+    const req = await this.repo.findAccessRequestById(requestId);
     if (!req) throw new NotFoundError('Solicitud de acceso no encontrada');
     if (req.status !== VideoAccessStatus.APPROVED) {
       throw new ForbiddenError('La solicitud no está aprobada');
@@ -263,20 +257,8 @@ export class AccessService {
     // null OR (FAILED & attempts<cap)` EXCLUYE READY/PENDING/PROCESSING: solo dispara desde los estados que
     // legítimamente requieren render. Si `count===0`, otro ya la movió (en curso o lista) → no tocamos nada,
     // el próximo poll la resuelve. Un solo statement → sin $transaction (era over-engineering).
-    const claimed = await this.prisma.write.videoAccessRequest.updateMany({
-      where: {
-        id: req.id,
-        OR: [
-          { renderStatus: null },
-          {
-            renderStatus: VideoRenderStatus.FAILED,
-            renderAttempts: { lt: this.maxRenderAttempts },
-          },
-        ],
-      },
-      data: { renderStatus: VideoRenderStatus.PENDING, renderRequestedAt: now, renderError: null },
-    });
-    if (claimed.count === 0) {
+    const claimedCount = await this.repo.claimLazyRender(req.id, this.maxRenderAttempts, now);
+    if (claimedCount === 0) {
       // Otro carril ya lo dejó READY o lo tomó (PENDING/PROCESSING): no re-disparamos ni clobereamos.
       this.logger.log(
         `Render ya en curso/listo request=${req.id} (no re-disparado) por=${viewerId}`,
@@ -300,11 +282,8 @@ export class AccessService {
   ): Promise<Extract<StreamResult, { status: typeof StreamStatus.READY }>> {
     // `req` es la fila YA cargada por streamAccess (FIX: se elimina el segundo findUnique de la misma fila).
     const segment = req.segmentId
-      ? await this.prisma.read.mediaSegment.findUnique({ where: { id: req.segmentId } })
-      : await this.prisma.read.mediaSegment.findFirst({
-          where: { tripId: req.tripId },
-          orderBy: { startedAt: 'desc' },
-        });
+      ? await this.repo.findSegmentById(req.segmentId)
+      : await this.repo.findLatestSegmentByTrip(req.tripId);
     if (!segment) throw new NotFoundError('Segmento de video no encontrado');
 
     const expiresAt = new Date(now.getTime() + this.signedUrlTtl * 1000);
@@ -318,7 +297,7 @@ export class AccessService {
       expiresSeconds: this.signedUrlTtl,
     });
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       await tx.videoAccessRequest.update({
         where: { id: req.id },
         data: { signedUrlExpiresAt: expiresAt },
@@ -354,10 +333,7 @@ export class AccessService {
 
   /** Lista las solicitudes de acceso, opcionalmente filtradas por estado. Orden createdAt desc. */
   listAccessRequests(filter: { status?: VideoAccessStatus } = {}) {
-    return this.prisma.read.videoAccessRequest.findMany({
-      where: filter.status ? { status: filter.status } : undefined,
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.repo.listAccessRequests(filter.status);
   }
 
   /** Lista los segmentos de un viaje (metadatos, sin URLs — BR-S02). */
@@ -375,21 +351,6 @@ export class AccessService {
       hasIncident: boolean;
     }[]
   > {
-    return this.prisma.read.mediaSegment.findMany({
-      where: { tripId },
-      orderBy: { startedAt: 'asc' },
-      select: {
-        id: true,
-        tripId: true,
-        startedAt: true,
-        endedAt: true,
-        sizeBytes: true,
-        codec: true,
-        retentionUntil: true,
-        accessedCount: true,
-        hasPanic: true,
-        hasIncident: true,
-      },
-    });
+    return this.repo.listSegmentsByTrip(tripId);
   }
 }

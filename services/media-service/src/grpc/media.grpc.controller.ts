@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
+import { MEDIA_REPO, type MediaRepository } from '../media/media.repository';
 import type { Env } from '../config/env.schema';
 
 interface GetSegmentsRequest {
@@ -36,7 +36,7 @@ export class MediaGrpcController {
   private readonly secret: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEDIA_REPO) private readonly repo: MediaRepository,
     config: ConfigService<Env, true>,
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
@@ -51,10 +51,7 @@ export class MediaGrpcController {
         message: 'Identidad interna inválida o ausente',
       });
     }
-    const rows = await this.prisma.read.mediaSegment.findMany({
-      where: { tripId },
-      orderBy: { startedAt: 'asc' },
-    });
+    const rows = await this.repo.listSegmentsByTripAsc(tripId);
     return {
       segments: rows.map((r) => ({
         id: r.id,

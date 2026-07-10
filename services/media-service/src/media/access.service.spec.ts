@@ -8,6 +8,7 @@ import {
   ValidationError,
 } from '@veo/utils';
 import { AccessService, StreamStatus } from './access.service';
+import { PrismaMediaRepository } from './media.repository';
 import { StorageSandboxAdapter } from '../ports/storage/storage.module';
 import { VideoAccessStatus, VideoRenderStatus } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
@@ -177,7 +178,7 @@ function pendingRequest(over: Partial<AccessRequest> = {}): AccessRequest {
 describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => {
   it('rechaza un motivo de 20 caracteres o menos', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -195,7 +196,7 @@ describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => 
   it('crea la solicitud en estado PENDING cuando el motivo supera los 20 caracteres', async () => {
     const reqs: AccessRequest[] = [];
     const svc = new AccessService(
-      makePrisma([segment()], reqs) as never,
+      new PrismaMediaRepository(makePrisma([segment()], reqs) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -212,7 +213,7 @@ describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => 
   });
 
   it('falla si no hay video para el viaje', async () => {
-    const svc = new AccessService(makePrisma([], []) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(new PrismaMediaRepository(makePrisma([], []) as never), new StorageSandboxAdapter(), config);
     await expect(
       svc.requestAccess({
         tripId: 'trip-x',
@@ -231,7 +232,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
     const seg = segment();
     const req = pendingRequest();
     const svc = new AccessService(
-      makePrisma([seg], [req]) as never,
+      new PrismaMediaRepository(makePrisma([seg], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -254,7 +255,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
       approvedAt: now,
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -270,7 +271,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
       rejectedAt: now,
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -281,7 +282,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
 
   it('falla si la solicitud no existe', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -297,7 +298,7 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
   it('rechaza: marca REJECTED + rejectedBy + rejectedAt', async () => {
     const req = pendingRequest();
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -316,7 +317,7 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
       approvedAt: now,
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -327,7 +328,7 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
 
   it('falla si la solicitud no existe', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -350,7 +351,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
     });
     const storage = new StorageSandboxAdapter();
     const presignSpy = vi.spyOn(storage, 'presignDownloadUrl');
-    const svc = new AccessService(makePrisma([seg], [req]) as never, storage, config);
+    const svc = new AccessService(new PrismaMediaRepository(makePrisma([seg], [req]) as never), storage, config);
 
     const res = await svc.streamAccess('req-1', 'compliance-1', now);
 
@@ -376,7 +377,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
     const req = pendingRequest({ status: VideoAccessStatus.APPROVED, renderStatus: null });
     const storage = new StorageSandboxAdapter();
     const presignSpy = vi.spyOn(storage, 'presignDownloadUrl');
-    const svc = new AccessService(makePrisma([segment()], [req]) as never, storage, config);
+    const svc = new AccessService(new PrismaMediaRepository(makePrisma([segment()], [req]) as never), storage, config);
 
     const res = await svc.streamAccess('req-1', 'compliance-1', now);
 
@@ -424,7 +425,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
         },
       },
     };
-    const svc = new AccessService(prisma as never, storage, config);
+    const svc = new AccessService(new PrismaMediaRepository(prisma as never), storage, config);
 
     const res = await svc.streamAccess('req-1', 'compliance-1', now);
 
@@ -446,7 +447,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
         renderRequestedAt: requestedAt,
         renderAttempts: 1,
       });
-      const svc = new AccessService(makePrisma([segment()], [req]) as never, storage, config);
+      const svc = new AccessService(new PrismaMediaRepository(makePrisma([segment()], [req]) as never), storage, config);
 
       const res = await svc.streamAccess('req-1', 'compliance-1', now);
 
@@ -467,7 +468,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
       renderError: 'STORAGE_OR_RENDER_FAILED',
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -486,7 +487,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
       renderAttempts: 3, // = cap
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -498,7 +499,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
   it('rechaza la visualización si la DECISIÓN está PENDING (no aprobada)', async () => {
     const req = pendingRequest({ status: VideoAccessStatus.PENDING });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -510,7 +511,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
   it('rechaza la visualización si la DECISIÓN está REJECTED', async () => {
     const req = pendingRequest({ status: VideoAccessStatus.REJECTED });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -521,7 +522,7 @@ describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada
 
   it('falla si la solicitud no existe', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -542,7 +543,7 @@ describe('AccessService.listAccessRequests · filtro por estado, orden createdAt
       createdAt: new Date('2026-05-28T12:00:00.000Z'),
     });
     const svc = new AccessService(
-      makePrisma([segment()], [older, newer]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [older, newer]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -556,7 +557,7 @@ describe('AccessService.listAccessRequests · filtro por estado, orden createdAt
     const pending = pendingRequest({ id: 'req-p', status: VideoAccessStatus.PENDING });
     const approved = pendingRequest({ id: 'req-a', status: VideoAccessStatus.APPROVED });
     const svc = new AccessService(
-      makePrisma([segment()], [pending, approved]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [pending, approved]) as never),
       new StorageSandboxAdapter(),
       config,
     );

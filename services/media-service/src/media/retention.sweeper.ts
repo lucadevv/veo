@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type Redis from 'ioredis';
 import { withDistributedLock } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { MEDIA_REPO, type MediaRepository } from './media.repository';
 import { REDIS } from '../infra/redis';
 import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
 import { renderedKeyFor } from './watermark';
@@ -30,7 +30,7 @@ export class RetentionSweeper {
   private readonly renderedPrefix: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEDIA_REPO) private readonly repo: MediaRepository,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
     @Inject(REDIS) private readonly redis: Redis,
     config: ConfigService<Env, true>,
@@ -65,13 +65,7 @@ export class RetentionSweeper {
     // purgeDrainedTripCopies. Set para deduplicar (varios segmentos del mismo viaje en una o varias páginas).
     const affectedTripIds = new Set<string>();
     for (;;) {
-      const due = await this.prisma.read.mediaSegment.findMany({
-        where: { retentionUntil: { not: null, lte: now } },
-        select: { id: true, s3Key: true, tripId: true },
-        orderBy: { id: 'asc' },
-        take: PAGE_SIZE,
-        ...(cursorId ? { skip: 1, cursor: { id: cursorId } } : {}),
-      });
+      const due = await this.repo.findDueSegmentsPage(now, PAGE_SIZE, cursorId);
       if (due.length === 0) break;
       cursorId = due[due.length - 1]?.id;
 
@@ -99,10 +93,7 @@ export class RetentionSweeper {
       // fuente. Las solicitudes TRIP-LEVEL (segmentId=null) las cierra purgeDrainedTripCopies tras el loop.
       // Fail-tolerant como el resto (un fallo se reintenta el próximo barrido; no aborta el lote).
       if (deletable.length > 0) {
-        const requests = await this.prisma.read.videoAccessRequest.findMany({
-          where: { segmentId: { in: deletable } },
-          select: { id: true },
-        });
+        const requests = await this.repo.listAccessRequestIdsBySegments(deletable);
         for (const r of requests) {
           await this.purgeRenderedCopy(r.id);
         }
@@ -110,7 +101,7 @@ export class RetentionSweeper {
 
       // Fase 2 — DB en batch: una sola escritura por página para los objetos ya borrados de S3.
       if (deletable.length > 0) {
-        await this.prisma.write.mediaSegment.deleteMany({ where: { id: { in: deletable } } });
+        await this.repo.deleteSegments(deletable);
         purged += deletable.length;
       }
 
@@ -140,23 +131,12 @@ export class RetentionSweeper {
 
     // Query 1 — UNA sola: qué viajes del set TODAVÍA tienen segmentos vivos (agrupados, no count por viaje).
     // groupBy colapsa el N+1 de `count` por tripId en una única lectura. Los que NO aparecen quedaron drenados.
-    const withLiveSegments = await this.prisma.read.mediaSegment.groupBy({
-      by: ['tripId'],
-      where: { tripId: { in: candidateTripIds } },
-      _count: { _all: true },
-    });
-    const aliveTripIds = new Set<string>();
-    for (const group of withLiveSegments) {
-      if (group.tripId !== null) aliveTripIds.add(group.tripId);
-    }
+    const aliveTripIds = new Set(await this.repo.findTripIdsWithLiveSegments(candidateTripIds));
     const drainedTripIds = candidateTripIds.filter((tripId) => !aliveTripIds.has(tripId));
     if (drainedTripIds.length === 0) return; // todos conservan video → sus copias siguen vigentes.
 
     // Query 2 — UNA sola: TODAS las solicitudes de los viajes drenados (incluidas las trip-level, segmentId=null).
-    const requests = await this.prisma.read.videoAccessRequest.findMany({
-      where: { tripId: { in: drainedTripIds } },
-      select: { id: true },
-    });
+    const requests = await this.repo.listAccessRequestIdsByTrips(drainedTripIds);
     for (const r of requests) {
       await this.purgeRenderedCopy(r.id);
     }

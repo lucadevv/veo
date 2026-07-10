@@ -11,11 +11,13 @@ import { AvatarService } from './avatar.service';
 import { InternalStorageService } from './internal-storage.service';
 import { RetentionSweeper } from './retention.sweeper';
 import { VideoRenderWorker } from './video-render.worker';
+import { MEDIA_REPO, PrismaMediaRepository } from './media.repository';
 
 @Module({
   imports: [LiveKitModule, StorageModule, WatermarkModule],
   controllers: [MediaController, AvatarController, InternalStorageController],
   providers: [
+    { provide: MEDIA_REPO, useClass: PrismaMediaRepository },
     RecordingService,
     AccessService,
     AvatarService,
@@ -23,6 +25,7 @@ import { VideoRenderWorker } from './video-render.worker';
     RetentionSweeper,
     VideoRenderWorker,
   ],
-  exports: [RecordingService, AccessService, AvatarService],
+  // MEDIA_REPO se exporta porque MediaGrpcController (declarado en AppModule) lo inyecta.
+  exports: [RecordingService, AccessService, AvatarService, MEDIA_REPO],
 })
 export class MediaModule {}

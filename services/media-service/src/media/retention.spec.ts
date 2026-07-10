@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { computeRetentionUntil, isExpired } from './retention';
 import { RetentionSweeper } from './retention.sweeper';
+import { PrismaMediaRepository } from './media.repository';
 import { StorageSandboxAdapter } from '../ports/storage/storage.module';
 import type { StoragePort } from '../ports/storage/storage.port';
 import type { Env } from '../config/env.schema';
@@ -159,7 +160,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
     ];
     const { prisma, deleted } = makePrisma(segments);
     const sweeper = new RetentionSweeper(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new StorageSandboxAdapter(),
       fakeRedis as never,
       config,
@@ -182,7 +183,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
     }));
     const { prisma, deleted, findManyCalls } = makePrisma(segments);
     const sweeper = new RetentionSweeper(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new StorageSandboxAdapter(),
       fakeRedis as never,
       config,
@@ -211,7 +212,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
     }));
     const { prisma, deleteManyBatches } = makePrisma(segments);
     const sweeper = new RetentionSweeper(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       new StorageSandboxAdapter(),
       fakeRedis as never,
       config,
@@ -249,7 +250,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
         }
       },
     };
-    const sweeper = new RetentionSweeper(prisma as never, flakyStorage, fakeRedis as never, config);
+    const sweeper = new RetentionSweeper(new PrismaMediaRepository(prisma as never), flakyStorage, fakeRedis as never, config);
 
     const purged = await sweeper.sweep(now);
 
@@ -286,7 +287,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
         deletedKeys.push(key);
       },
     };
-    const sweeper = new RetentionSweeper(prisma as never, spyStorage, fakeRedis as never, config);
+    const sweeper = new RetentionSweeper(new PrismaMediaRepository(prisma as never), spyStorage, fakeRedis as never, config);
 
     await sweeper.sweep(now);
 
@@ -313,7 +314,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
       contentType: 'video/mp4',
     });
     await expect(storage.getObjectStream(orphanKey)).resolves.toBeDefined();
-    const sweeper = new RetentionSweeper(prisma as never, storage, fakeRedis as never, config);
+    const sweeper = new RetentionSweeper(new PrismaMediaRepository(prisma as never), storage, fakeRedis as never, config);
 
     await sweeper.sweep(now);
 
@@ -339,7 +340,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
       contentType: 'video/mp4',
     });
     await expect(storage.getObjectStream(tripLevelCopy)).resolves.toBeDefined();
-    const sweeper = new RetentionSweeper(prisma as never, storage, fakeRedis as never, config);
+    const sweeper = new RetentionSweeper(new PrismaMediaRepository(prisma as never), storage, fakeRedis as never, config);
 
     await sweeper.sweep(now);
 
@@ -372,7 +373,7 @@ describe('RetentionSweeper.sweep · barrido de ciclo de vida (BR-S03)', () => {
       body: Buffer.from('cabina-con-PII-aun-vigente'),
       contentType: 'video/mp4',
     });
-    const sweeper = new RetentionSweeper(prisma as never, storage, fakeRedis as never, config);
+    const sweeper = new RetentionSweeper(new PrismaMediaRepository(prisma as never), storage, fakeRedis as never, config);
 
     await sweeper.sweep(now);
 

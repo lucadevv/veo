@@ -30,7 +30,7 @@ import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { NotFoundError, withDistributedLock } from '@veo/utils';
 import type Redis from 'ioredis';
-import { PrismaService } from '../infra/prisma.service';
+import { MEDIA_REPO, type MediaRepository, type RenderTarget } from './media.repository';
 import { REDIS } from '../infra/redis';
 import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
 import {
@@ -49,14 +49,6 @@ const INTERVAL_NAME = 'media-render-worker';
 /** Cota de longitud de `renderError` (técnico, SIN PII): truncado defensivo. */
 const RENDER_ERROR_MAX = 500;
 
-/** Datos mínimos de una solicitud a rendir (proyección del findMany del batch). */
-interface RenderTarget {
-  id: string;
-  tripId: string;
-  segmentId: string | null;
-  requestedByEmail: string;
-}
-
 @Injectable()
 export class VideoRenderWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VideoRenderWorker.name);
@@ -68,7 +60,7 @@ export class VideoRenderWorker implements OnModuleInit, OnModuleDestroy {
   private readonly staleMs: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEDIA_REPO) private readonly repo: MediaRepository,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
     @Inject(VIDEO_WATERMARK_PORT) private readonly watermark: VideoWatermarkPort,
     @Inject(REDIS) private readonly redis: Redis,
@@ -120,57 +112,25 @@ export class VideoRenderWorker implements OnModuleInit, OnModuleDestroy {
 
     // 1) REAPER terminal: una PROCESSING colgada que ya gastó todos los intentos no se re-toma → marcala
     // FAILED para que streamAccess corte el loop (FAILED ≥ cap → error tipado). Janitorial: sin evento.
-    await this.prisma.write.videoAccessRequest.updateMany({
-      where: {
-        renderStatus: VideoRenderStatus.PROCESSING,
-        renderRequestedAt: { lt: staleBefore },
-        renderAttempts: { gte: this.maxAttempts },
-      },
-      data: {
-        renderStatus: VideoRenderStatus.FAILED,
-        renderError: 'render abandonado: se alcanzó el máximo de intentos sin completar',
-      },
-    });
+    await this.repo.reapStaleRenders(staleBefore, this.maxAttempts);
 
     // 2) batch de candidatas: PENDING, o PROCESSING colgada (worker muerto), siempre con intentos disponibles.
-    const candidates = await this.prisma.read.videoAccessRequest.findMany({
-      where: {
-        renderAttempts: { lt: this.maxAttempts },
-        OR: [
-          { renderStatus: VideoRenderStatus.PENDING },
-          {
-            renderStatus: VideoRenderStatus.PROCESSING,
-            renderRequestedAt: { lt: staleBefore },
-          },
-        ],
-      },
-      orderBy: { renderRequestedAt: 'asc' },
-      take: this.batchSize,
-      select: { id: true, tripId: true, segmentId: true, requestedByEmail: true },
-    });
+    const candidates = await this.repo.findRenderCandidates(
+      staleBefore,
+      this.maxAttempts,
+      this.batchSize,
+    );
 
     let processed = 0;
     for (const target of candidates) {
       // GUARD atómico anti-doble-toma: solo procede si ESTA réplica logra moverla a PROCESSING (attempts++).
-      const claimed = await this.prisma.write.videoAccessRequest.updateMany({
-        where: {
-          id: target.id,
-          renderAttempts: { lt: this.maxAttempts },
-          OR: [
-            { renderStatus: VideoRenderStatus.PENDING },
-            {
-              renderStatus: VideoRenderStatus.PROCESSING,
-              renderRequestedAt: { lt: staleBefore },
-            },
-          ],
-        },
-        data: {
-          renderStatus: VideoRenderStatus.PROCESSING,
-          renderRequestedAt: now,
-          renderAttempts: { increment: 1 },
-        },
-      });
-      if (claimed.count === 0) continue; // otra réplica la tomó → saltar.
+      const claimed = await this.repo.claimRenderTarget(
+        target.id,
+        staleBefore,
+        this.maxAttempts,
+        now,
+      );
+      if (claimed === 0) continue; // otra réplica la tomó → saltar.
 
       await this.renderOne(target, now);
       processed += 1;
@@ -199,7 +159,7 @@ export class VideoRenderWorker implements OnModuleInit, OnModuleDestroy {
       // Consumir el output es OBLIGATORIO (libera temp-files del adapter): se pipea directo a la subida.
       await this.storage.uploadObject({ key: renderedKey, body: output, contentType });
 
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         await tx.videoAccessRequest.update({
           where: { id: target.id },
           data: {
@@ -227,7 +187,7 @@ export class VideoRenderWorker implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       const reason = categorizeRenderError(err);
       const renderError = renderErrorMessage(err);
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         await tx.videoAccessRequest.update({
           where: { id: target.id },
           data: { renderStatus: VideoRenderStatus.FAILED, renderError },
@@ -256,16 +216,7 @@ export class VideoRenderWorker implements OnModuleInit, OnModuleDestroy {
     segmentId: string | null,
     tripId: string,
   ): Promise<{ id: string; s3Key: string }> {
-    const segment = segmentId
-      ? await this.prisma.read.mediaSegment.findUnique({
-          where: { id: segmentId },
-          select: { id: true, s3Key: true },
-        })
-      : await this.prisma.read.mediaSegment.findFirst({
-          where: { tripId },
-          orderBy: { startedAt: 'desc' },
-          select: { id: true, s3Key: true },
-        });
+    const segment = await this.repo.findSegmentForRender(segmentId, tripId);
     if (!segment) throw new NotFoundError('Segmento de video no encontrado', { tripId });
     return segment;
   }

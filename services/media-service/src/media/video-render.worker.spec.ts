@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { AccessService, StreamStatus } from './access.service';
 import { VideoRenderWorker } from './video-render.worker';
+import { PrismaMediaRepository } from './media.repository';
 import { StorageSandboxAdapter } from '../ports/storage/storage.module';
 import { SandboxWatermarkAdapter } from '../ports/watermark/sandbox-watermark.adapter';
 import { VideoAccessStatus, VideoRenderStatus } from '../generated/prisma';
@@ -217,7 +218,7 @@ function makeWorker(
   watermark: SandboxWatermarkAdapter,
 ): VideoRenderWorker {
   return new VideoRenderWorker(
-    prisma as never,
+    new PrismaMediaRepository(prisma as never),
     storage,
     watermark,
     fakeRedis as never,
@@ -263,7 +264,7 @@ describe('VideoRenderWorker + streamAccess · burn-in end-to-end (EL TEST CRÍTI
     // 2) streamAccess sirve la copia: presigna renderedS3Key, NUNCA segment.s3Key.
     const presignSpy = vi.spyOn(storage, 'presignDownloadUrl');
     const access = new AccessService(
-      prisma as never,
+      new PrismaMediaRepository(prisma as never),
       storage,
       new ConfigService<Env, true>({
         SIGNED_URL_TTL_SECONDS: 300,
