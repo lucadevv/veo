@@ -63,6 +63,9 @@ import {
   policyView,
   type PolicyView,
   type UpdatePolicyRequest,
+  permissionOverrideView,
+  type PermissionOverrideView,
+  type SetPermissionOverrideRequest,
   type TripStatus,
   type RevenueRangeValue,
 } from './schemas';
@@ -102,6 +105,7 @@ export const qk = {
   catalog: ['catalog'] as const,
   dispatchRadiusConfig: ['dispatch-radius-config'] as const,
   policies: ['gobierno-policies'] as const,
+  permissionOverrides: ['gobierno-permission-overrides'] as const,
 };
 
 const REALTIME_REFETCH = 15_000;
@@ -1090,6 +1094,47 @@ export function useUpdatePolicy() {
       }),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.policies });
+    },
+  });
+}
+
+/* ── Gobierno → Permisos y visibilidad (OVERLAY subtract-only · ADR-025 §3 · SOLO SUPERADMIN) ── */
+
+/**
+ * El overlay de visibilidad vigente: los pares (rol, permiso) RESTADOS (`hidden:true`). GET
+ * /gobierno/permission-overrides devuelve SOLO el estado del overlay — la matriz BASE (`PERMISSION_ROLES`) y el
+ * candado legal-mandatory los aporta `@veo/policy` en la UI, que compone el efectivo `base ∧ ¬override`. El
+ * admin-bff gatea @Roles(SUPERADMIN); la UI también con `gobierno:manage`. Sin refetch en vivo (config).
+ */
+export function usePermissionOverrides() {
+  return useQuery({
+    queryKey: qk.permissionOverrides,
+    queryFn: ({ signal }) =>
+      apiClient().get('/gobierno/permission-overrides', {
+        schema: z.array(permissionOverrideView),
+        signal,
+      }),
+  });
+}
+
+/**
+ * Aplica un override subtract-only {role, permission, hidden} al overlay (PUT /gobierno/permission-overrides).
+ * El admin-bff exige @Roles(SUPERADMIN) + @RequireStepUpMfa: el llamador asegura la MFA fresca con StepUpDialog
+ * ANTES de invocar (la matriz agrupa N cambios y los guarda uno por PUT tras un único step-up). identity VALIDA
+ * el invariante subtract-only contra la base + el candado legal-mandatory (400/403 con status/message intactos),
+ * bumpea `version` y emite permission_override.updated. onSettled (no onSuccess): re-sincroniza tras éxito O
+ * error para que la grilla refleje siempre el overlay vigente.
+ */
+export function useSetPermissionOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SetPermissionOverrideRequest): Promise<PermissionOverrideView> =>
+      apiClient().put('/gobierno/permission-overrides', {
+        body: input,
+        schema: permissionOverrideView,
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.permissionOverrides });
     },
   });
 }

@@ -64,3 +64,35 @@ export interface UpdatePolicyRequest {
   enabled?: boolean;
   params?: Record<string, unknown>;
 }
+
+/* ── Gobierno → Permisos y visibilidad (OVERLAY subtract-only · ADR-025 §3) ── */
+
+/**
+ * Vista de un override de visibilidad que devuelve el admin-bff (GET/PUT /gobierno/permission-overrides).
+ * Espejo EXACTO del `PermissionOverrideView` del wire del bff: un par (role, permission) del overlay
+ * subtract-only. `hidden:true` = el par está RESTADO (oculto) para ese rol; ausencia de fila (o `hidden:false`)
+ * = rige la BASE (`baseGrants`). La UI cruza este estado con la matriz base de `@veo/policy` (fuente única) para
+ * componer el efectivo `base ∧ ¬override`. `role`/`permission` viajan como strings del wire; identity los valida
+ * como canónicos. (admin-web define este contrato local porque @veo/api-client aún no lo expone · igual criterio
+ * que policyView.)
+ */
+export const permissionOverrideView = z.object({
+  role: z.string(),
+  permission: z.string(),
+  hidden: z.boolean(),
+  version: z.number(),
+  updatedBy: z.string(),
+  updatedAt: z.string(),
+});
+export type PermissionOverrideView = z.infer<typeof permissionOverrideView>;
+
+/**
+ * Body del PUT /gobierno/permission-overrides (espeja SetPermissionOverrideDto del bff). Override subtract-only:
+ * `hidden:true` RESTA el par (role, permission); `hidden:false` lo des-resta (vuelve a regir la base). identity
+ * valida el invariante subtract-only contra la base + el candado legal-mandatory (fuente única @veo/policy).
+ */
+export interface SetPermissionOverrideRequest {
+  role: string;
+  permission: string;
+  hidden: boolean;
+}
