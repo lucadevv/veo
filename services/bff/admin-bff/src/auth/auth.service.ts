@@ -3,10 +3,16 @@
  * El BFF NO emite tokens: devuelve al caller (admin-web) los tokens que produce identity, para que
  * admin-web los guarde en su cookie httpOnly en su propio origen.
  */
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
 import { isHardenedEnv } from '@veo/utils';
-import { isMfaFresh, type AuthenticatedUser } from '@veo/auth';
+import {
+  isMfaFresh,
+  POLICY_READER_PORT,
+  type AuthenticatedUser,
+  type PolicyReaderPort,
+} from '@veo/auth';
+import { computeHiddenPermissions } from '@veo/policy';
 import type { AdminRole } from '@veo/shared-types';
 import type { SessionUser } from '@veo/api-client';
 import { IdentityAuthClient } from './identity-auth.client';
@@ -49,6 +55,10 @@ export class AuthService {
     private readonly identityAuth: IdentityAuthClient,
     private readonly audit: AuditRecorder,
     @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
+    // Puerto síncrono del overlay (misma instancia/token que lee el PermissionOverlayGuard). OPCIONAL: sin
+    // `PolicyModule` (o antes de la Ola B) no se resta nada → `hiddenPermissions` cae a `[]` (fail-safe: el
+    // front ve TODA la base). Se lee del cache en memoria, así que `session()` sigue síncrono.
+    @Optional() @Inject(POLICY_READER_PORT) private readonly policy?: PolicyReaderPort,
   ) {}
 
   acceptInvite(dto: AcceptInviteDto): Promise<{ email: string }> {
@@ -186,6 +196,14 @@ export class AuthService {
       // header debe reflejar ESO (siempre "MFA fresco"), si no muestra "inactivo" mintiendo sobre un gate
       // que el server NO aplica. Prod (endurecido) usa la frescura real de 5min.
       mfaFresh: !isHardenedEnv() || isMfaFresh(user.mfaVerifiedAt, MFA_FRESH_MAX_AGE_SEC),
+      // OVERLAY de visibilidad (ADR-025 §3 · Fase 2): los permisos que el overlay le RESTA al actor. MISMA
+      // fórmula del efectivo que enforcea el PermissionOverlayGuard (`computeHiddenPermissions` de @veo/policy),
+      // leída del cache síncrono. El front los usa para OCULTAR nav/botones/páginas (compone base ∧ ¬oculto).
+      // Reader ausente → `[]` (fail-safe: rige la base pura).
+      hiddenPermissions: computeHiddenPermissions(
+        user.roles,
+        (role, permission) => this.policy?.isPermissionHiddenSync(role, permission) ?? false,
+      ),
     };
   }
 }

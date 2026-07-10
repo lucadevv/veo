@@ -169,3 +169,47 @@ export const LEGAL_MANDATORY_PERMISSIONS: ReadonlySet<Permission> = new Set<Perm
 export function isLegalMandatoryPermission(permission: string): boolean {
   return isPermission(permission) && LEGAL_MANDATORY_PERMISSIONS.has(permission);
 }
+
+/**
+ * Predicado del overlay: dado un par `(role, permission)`, ¿está RESTADO (hidden)? Inyecta la mitad editable
+ * del overlay (el `PolicyReader`/`PolicyReaderPort` del runtime, o un stub en tests). DEFAULT semántico `false`
+ * = no restado = rige la base (el caller endurece: ausencia de reader → siempre `false`).
+ */
+export type IsPermissionHidden = (role: string, permission: string) => boolean;
+
+/**
+ * NÚCLEO COMPARTIDO del overlay (ADR-025 §3) — la MISMA fórmula del efectivo que enforcea el server y que
+ * proyecta la sesión al front, en UN solo lugar para no divergir:
+ *
+ *   efectivo(user, P) = OR sobre los roles del user de ( baseGrants(role, P) AND NOT isHidden(role, P) )
+ *
+ * Un user multi-rol conserva P si AL MENOS UNO de sus roles lo tiene en base y NO restado (el más permisivo:
+ * el overlay solo RESTA por-rol, nunca por-user). Lo usan el `PermissionOverlayGuard` (con el puerto síncrono)
+ * y el cómputo de `hiddenPermissions` de la sesión (`computeHiddenPermissions`).
+ */
+export function isPermissionEffective(
+  roles: readonly string[],
+  permission: string,
+  isHidden: IsPermissionHidden,
+): boolean {
+  return roles.some((role) => baseGrants(role, permission) && !isHidden(role, permission));
+}
+
+/**
+ * Los permisos que el OVERLAY le RESTA a un actor con estos `roles`: cada `P` del catálogo que la BASE concede
+ * a ALGÚN rol del actor pero cuyo efectivo es `false` (todos los roles que lo concedían lo tienen restado).
+ *
+ * Es EXACTAMENTE el complemento de lo que bloquearía el guard, y lo que el front usa para OCULTAR nav/botones/
+ * páginas (compone `base ∧ ¬oculto` en `can()`). Solo se listan permisos base-concedidos: un `P` que el actor
+ * nunca tuvo (base no lo concede a ninguno de sus roles) NO es "oculto por el overlay", simplemente no lo tiene.
+ */
+export function computeHiddenPermissions(
+  roles: readonly string[],
+  isHidden: IsPermissionHidden,
+): Permission[] {
+  return PERMISSION_LIST.filter(
+    (permission) =>
+      roles.some((role) => baseGrants(role, permission)) &&
+      !isPermissionEffective(roles, permission, isHidden),
+  );
+}

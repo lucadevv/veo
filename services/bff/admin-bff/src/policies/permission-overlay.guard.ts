@@ -42,7 +42,7 @@ import {
   type PolicyReaderPort,
   type AuthenticatedUser,
 } from '@veo/auth';
-import { baseGrants } from '@veo/policy';
+import { isPermissionEffective } from '@veo/policy';
 import { PERMISSION_KEY } from './permission.decorator';
 
 @Injectable()
@@ -74,11 +74,12 @@ export class PermissionOverlayGuard implements CanActivate {
     // Sin actor autenticado → no es asunto de este guard (Jwt/Roles ya decidieron). Refinar sin roles no aplica.
     if (!user) return true;
 
-    // efectivo = OR sobre roles de ( base concede ∧ ¬ overlay restó ). Reader ausente → hidden=false (base pura).
-    const effective = user.roles.some(
-      (role) =>
-        baseGrants(role, permission) &&
-        !(this.policy?.isPermissionHiddenSync(role, permission) ?? false),
+    // efectivo = OR sobre roles de ( base concede ∧ ¬ overlay restó ) — fórmula compartida con la sesión
+    // (`computeHiddenPermissions`) vía `@veo/policy`, para no divergir. Reader ausente → hidden=false (base pura).
+    const effective = isPermissionEffective(
+      user.roles,
+      permission,
+      (role, perm) => this.policy?.isPermissionHiddenSync(role, perm) ?? false,
     );
     if (!effective) {
       throw new ForbiddenError('Permiso restado por el overlay de visibilidad', { permission });

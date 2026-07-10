@@ -15,10 +15,20 @@ import { PERMISSION_ROLES, type Permission } from '@veo/policy';
 export type { Permission };
 export { PERMISSION_ROLES };
 
+/**
+ * ¿El usuario puede ver/usar `permission`? Compone las DOS capas del gobierno unificado (ADR-025):
+ *   base ∧ ¬oculto
+ * donde `base` = la matriz `PERMISSION_ROLES` (capa 1) le concede el permiso a alguno de sus roles, y `¬oculto`
+ * = el OVERLAY (capa 2) NO se lo RESTÓ (`hiddenPermissions`, computado server-side con la MISMA fórmula que el
+ * `PermissionOverlayGuard`). Así un permiso restado desaparece de la UI (nav/botones/páginas), no solo lo bloquea
+ * el server. `hiddenPermissions` ausente (sesión vieja / sin overrides) → rige la base pura (fail-safe).
+ * Todos los helpers de abajo (`permissionsOf`, `nav`, gates de página) heredan esta composición vía `can()`.
+ */
 export function can(user: SessionUser | null | undefined, permission: Permission): boolean {
   if (!user) return false;
   const allowed = PERMISSION_ROLES[permission] as readonly string[];
-  return user.roles.some((role) => allowed.includes(role));
+  const grantedByBase = user.roles.some((role) => allowed.includes(role));
+  return grantedByBase && !user.hiddenPermissions?.includes(permission);
 }
 
 /** Conjunto de permisos efectivos del usuario (unión de los permisos que conceden sus roles). */

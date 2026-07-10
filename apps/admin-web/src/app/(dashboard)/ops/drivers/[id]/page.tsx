@@ -511,6 +511,11 @@ function MatchCard({
   docIcon: LucideIcon;
 }) {
   const { toast } = useToast();
+  const user = useSession();
+  // Correr un face-match es un paso del flujo de aprobación de compliance: el server lo gatea con
+  // `@Permission('drivers:approve')` (ops.controller dni/license-face-match). El front lo refleja: quien NO
+  // aprueba no ve el botón "Verificar" (compone base ∧ ¬overlay vía can()), solo el estado read-only.
+  const canRun = can(user, 'drivers:approve');
   const matched = status === FaceMatchStatus.MATCHED;
   const noMatch = status === FaceMatchStatus.NO_MATCH;
   const run = async () => {
@@ -543,7 +548,7 @@ function MatchCard({
           <DotPill tone="danger">
             {band ? `No coincide · similitud ${band}` : 'No coincide'}
           </DotPill>
-        ) : (
+        ) : canRun ? (
           <button
             type="button"
             onClick={() => void run()}
@@ -553,6 +558,8 @@ function MatchCard({
             <ScanFace className="size-3.5" aria-hidden />
             Verificar
           </button>
+        ) : (
+          <DotPill tone="neutral">Sin verificar</DotPill>
         )}
       </div>
       <div className="flex items-center justify-center gap-2.5">
@@ -577,7 +584,11 @@ function Thumb({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
 
 function BiometricUnlockAction({ driverId }: { driverId: string }) {
   const { toast } = useToast();
+  const user = useSession();
   const unlock = useUnlockBiometric();
+  // Destrabar la biometría es `@Permission('drivers:approve')` en el server (ops.controller unlock-biometric):
+  // paridad front — quien no aprueba no ve la acción (compone base ∧ ¬overlay vía can()).
+  if (!can(user, 'drivers:approve')) return null;
   const run = async () => {
     try {
       await unlock.mutateAsync({ id: driverId });

@@ -83,6 +83,12 @@ export const sessionUser = z.object({
   type: z.enum(['passenger', 'driver', 'admin']),
   roles: z.array(z.string()),
   mfaFresh: z.boolean(),
+  /**
+   * OVERLAY de visibilidad (ADR-025 §3 · Fase 2): los permisos que el superadmin le RESTÓ al actor según su(s)
+   * rol(es). El front compone `base ∧ ¬oculto` en `can()` → nav/botones/páginas de esos permisos se OCULTAN.
+   * Opcional (fail-safe): ausente/vacío = sin overrides = rige la base pura. La AUTORIDAD sigue siendo el server.
+   */
+  hiddenPermissions: z.array(z.string()).optional(),
 });
 export type SessionUser = z.infer<typeof sessionUser>;
 
