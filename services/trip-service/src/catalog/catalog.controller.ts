@@ -3,12 +3,22 @@
  * Protegidos por InternalIdentityGuard (firma HMAC del BFF, FOUNDATION §10):
  *  - GET   → catálogo efectivo (ofertas + enabled + version). Lectura: cualquier identidad interna firmada
  *            (public-bff lo consume para el quote/teaser; admin-bff para el panel).
- *  - PUT   → reemplazo wholesale del overlay + emite catalog.updated. MUTACIÓN: AdminIdentityGuard exige
- *            identidad `admin` (defensa en profundidad; el RBAC fino se aplica además en admin-bff).
+ *  - PUT   → reemplazo wholesale del overlay + emite catalog.updated. MUTACIÓN con DEFENSA EN PROFUNDIDAD
+ *            server-side (espeja payment-service · CommissionController; NO confía ciegamente en el caller):
+ *            AdminIdentityGuard (type==='admin') + RolesGuard/@Roles (RBAC `catalog:manage`:
+ *            FINANCE/ADMIN/SUPERADMIN, excluye SUPPORT/DISPATCHER) + StepUpMfaGuard/@RequireStepUpMfa
+ *            (step-up MFA fresca). El RBAC fino se aplica ADEMÁS en admin-bff.
  */
 import { Body, Controller, Get, HttpCode, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { InternalIdentityGuard } from '@veo/auth';
+import {
+  InternalIdentityGuard,
+  RolesGuard,
+  StepUpMfaGuard,
+  Roles,
+  RequireStepUpMfa,
+} from '@veo/auth';
+import { AdminRole } from '@veo/shared-types';
 import { CatalogService } from './catalog.service';
 import { AdminIdentityGuard } from '../pricing/admin-identity.guard';
 import { ReplaceCatalogDto } from './dto/catalog.dto';
@@ -28,11 +38,13 @@ export class CatalogController {
 
   @Put()
   @HttpCode(200)
-  @UseGuards(AdminIdentityGuard)
+  @UseGuards(AdminIdentityGuard, RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
   @ApiOperation({
     summary:
       'REEMPLAZA wholesale el overlay del catálogo (bump version) y emite catalog.updated. ' +
-      'Solo identidad admin (ADR 013).',
+      'catalog:manage (FINANCE/ADMIN/SUPERADMIN) + step-up MFA (ADR 013).',
   })
   replaceCatalog(@Body() dto: ReplaceCatalogDto) {
     return this.catalog.replaceOverlay(dto.overrides, dto.expectedVersion);

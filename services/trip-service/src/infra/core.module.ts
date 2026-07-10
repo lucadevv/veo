@@ -9,8 +9,10 @@ import {
   INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
   InternalIdentityGuard,
   RolesGuard,
+  StepUpMfaGuard,
   type InternalAudience,
 } from '@veo/auth';
+import { CLOCK, SystemClock } from '@veo/utils';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
 import { outboxRelayProvider } from './outbox.relay';
@@ -38,16 +40,23 @@ const ALLOWED_AUDIENCES: readonly InternalAudience[] = [
     internalSecretProvider,
     { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },
     outboxRelayProvider,
+    // Reloj inyectable que consume StepUpMfaGuard para evaluar la frescura de la verificación MFA.
+    { provide: CLOCK, useValue: new SystemClock() },
     InternalIdentityGuard,
     RolesGuard,
+    // Defensa en profundidad de la config admin-editable (pricing/catalog): las mutaciones exigen
+    // step-up MFA fresca, no solo una identidad admin firmada. Espeja payment-service (CommissionController).
+    StepUpMfaGuard,
   ],
   exports: [
     PrismaService,
     REDIS,
     INTERNAL_IDENTITY_SECRET,
     INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+    CLOCK,
     InternalIdentityGuard,
     RolesGuard,
+    StepUpMfaGuard,
   ],
 })
 export class CoreModule {}
