@@ -5,6 +5,7 @@ import { PanicService } from './panic.service';
 import { PanicController } from './panic.controller';
 import { PanicAnalyticsController } from './panic-analytics.controller';
 import { PANIC_HMAC_SECRET } from './panic.hmac';
+import { PANIC_REPO, PrismaPanicRepository } from './panic.repository';
 import type { Env } from '../config/env.schema';
 
 const hmacSecretProvider: Provider = {
@@ -13,9 +14,15 @@ const hmacSecretProvider: Provider = {
   useFactory: (config: ConfigService<Env, true>) => config.getOrThrow<string>('PANIC_HMAC_SECRET'),
 };
 
+// FOUNDATION §10: el service accede a Prisma SOLO por este puerto (unit-of-work), nunca `this.prisma`.
+const panicRepoProvider: Provider = {
+  provide: PANIC_REPO,
+  useClass: PrismaPanicRepository,
+};
+
 @Module({
   imports: [S3EvidenceModule],
-  providers: [PanicService, hmacSecretProvider],
+  providers: [PanicService, hmacSecretProvider, panicRepoProvider],
   controllers: [PanicController, PanicAnalyticsController],
   exports: [PanicService],
 })

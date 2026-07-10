@@ -23,10 +23,10 @@ import {
 } from '@veo/utils';
 import { PanicStatus } from '@veo/shared-types';
 import type { PanicEvent } from '../generated/prisma';
-import { PrismaService } from '../infra/prisma.service';
 import { PanicMetrics } from '../metrics/panic.metrics';
 import { S3_EVIDENCE_STORE, type S3EvidenceStore } from '../ports/s3-evidence/s3-evidence.port';
 import { PANIC_HMAC_SECRET, buildPanicSignatureMessage } from './panic.hmac';
+import { PANIC_REPO, type PanicRepository } from './panic.repository';
 import type { Env } from '../config/env.schema';
 
 const PRODUCER = 'panic-service';
@@ -57,7 +57,7 @@ export class PanicService {
   private readonly keysPerPanic: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(PANIC_REPO) private readonly repo: PanicRepository,
     private readonly metrics: PanicMetrics,
     @Inject(S3_EVIDENCE_STORE) private readonly evidence: S3EvidenceStore,
     @Inject(PANIC_HMAC_SECRET) hmacSecret: string,
@@ -93,7 +93,7 @@ export class PanicService {
     const evidenceS3Keys = this.evidence.reserveKeys(id, this.keysPerPanic);
 
     try {
-      const created = await this.prisma.write.$transaction(async (tx) => {
+      const created = await this.repo.runInTx(async (tx) => {
         const row = await tx.panicEvent.create({
           data: {
             id,
@@ -138,9 +138,7 @@ export class PanicService {
       // BR-S04: la unique(dedup_key) convierte el doble submit en no-op idempotente.
       // El P2002 se valida CONTRA la columna del dedup (no cualquier unique): @veo/database.
       if (isUniqueViolation(err, 'dedupKey')) {
-        const existing = await this.prisma.write.panicEvent.findUnique({
-          where: { dedupKey: input.dedupKey },
-        });
+        const existing = await this.repo.findByDedupKeyOnPrimary(input.dedupKey);
         if (existing) {
           const ackMs = this.metrics.observeTriggerAck(start);
           return {
@@ -161,7 +159,7 @@ export class PanicService {
   async acknowledge(panicId: string, operatorId: string): Promise<PanicEvent> {
     const start = process.hrtime.bigint();
     const ackAt = new Date();
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTx(async (tx) => {
       // CAS atómico (status-guard en el WHERE, no en una lectura previa): SOLO esta llamada transiciona
       // TRIGGERED→ACKNOWLEDGED. Dos operadores que reconocen el MISMO pánico a la vez: uno obtiene count=1,
       // el otro count=0 → recibe el error claro SIN pisar el ackBy/acknowledgedAt del primero (antes el
@@ -213,7 +211,7 @@ export class PanicService {
     operatorId: string,
   ): Promise<PanicEvent> {
     const resolvedAt = new Date();
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTx(async (tx) => {
       // CAS atómico (status-guard en el WHERE): solo transiciona si NO está YA cerrado. Dos cierres
       // concurrentes: uno gana (count=1), el otro count=0 → error claro (ya cerrado) sin pisar el
       // resolvedBy/resolvedAt del primero. Espeja el CAS de acknowledge / trip-service.
@@ -258,21 +256,18 @@ export class PanicService {
     keys: string[],
     finalize: boolean,
   ): Promise<{ evidenceS3Keys: string[]; protectedKeys: string[] }> {
-    const current = await this.prisma.read.panicEvent.findUnique({ where: { id: panicId } });
+    const current = await this.repo.findById(panicId);
     if (!current) throw new NotFoundError('Evento de pánico no encontrado');
     if (keys.length === 0) throw new ValidationError('Se requiere al menos una key');
 
     const merged = Array.from(new Set([...current.evidenceS3Keys, ...keys]));
-    const updated = await this.prisma.write.panicEvent.update({
-      where: { id: panicId },
-      data: { evidenceS3Keys: merged },
-    });
+    const updated = await this.repo.updateEvidenceKeys(panicId, merged);
     const protectedKeys = finalize ? await this.evidence.protect(keys) : [];
     return { evidenceS3Keys: updated.evidenceS3Keys, protectedKeys };
   }
 
   getById(panicId: string): Promise<PanicEvent | null> {
-    return this.prisma.read.panicEvent.findUnique({ where: { id: panicId } });
+    return this.repo.findById(panicId);
   }
 
   /** Lectura post-write crítica (sin lag de réplica): usa el primario. */
@@ -283,11 +278,7 @@ export class PanicService {
   }
 
   list(status?: PanicStatus): Promise<PanicEvent[]> {
-    return this.prisma.read.panicEvent.findMany({
-      where: status ? { status } : undefined,
-      orderBy: { triggeredAt: 'desc' },
-      take: 200,
-    });
+    return this.repo.list(status);
   }
 
   /**
@@ -296,8 +287,6 @@ export class PanicService {
    * con `status in [...]` (índice @@index([status, triggeredAt]) lo cubre) — sin N+1, sin traer filas.
    */
   countOpen(): Promise<number> {
-    return this.prisma.read.panicEvent.count({
-      where: { status: { in: [PanicStatus.TRIGGERED, PanicStatus.ACKNOWLEDGED] } },
-    });
+    return this.repo.countOpen();
   }
 }

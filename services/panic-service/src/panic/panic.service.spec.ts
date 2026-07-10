@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { UnauthorizedError, ValidationError, signHmac, uuidv7 } from '@veo/utils';
 import { PanicService } from './panic.service';
+import { PrismaPanicRepository } from './panic.repository';
 import { PanicMetrics } from '../metrics/panic.metrics';
 import { buildPanicSignatureMessage } from './panic.hmac';
 import type { S3EvidenceStore } from '../ports/s3-evidence/s3-evidence.port';
@@ -37,7 +38,9 @@ const dbForbidden = {
 };
 
 function makeService(): PanicService {
-  return new PanicService(dbForbidden as never, new PanicMetrics(), evidence, SECRET, config);
+  // El repo envuelve el prisma prohibido: si el service intentara tocar la DB (via el repo), lanza.
+  const repo = new PrismaPanicRepository(dbForbidden as never);
+  return new PanicService(repo, new PanicMetrics(), evidence, SECRET, config);
 }
 
 function validInput(

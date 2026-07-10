@@ -19,6 +19,7 @@ import {
 import { signHmac, uuidv7, UnauthorizedError } from '@veo/utils';
 import { PrismaClient } from '../src/generated/prisma';
 import { PanicService } from '../src/panic/panic.service';
+import { PrismaPanicRepository } from '../src/panic/panic.repository';
 import { PanicMetrics } from '../src/metrics/panic.metrics';
 import { buildPanicSignatureMessage } from '../src/panic/panic.hmac';
 import type { S3EvidenceStore } from '../src/ports/s3-evidence/s3-evidence.port';
@@ -58,7 +59,8 @@ beforeAll(async () => {
   client = new PrismaClient({ datasourceUrl: db.databaseUrl });
   await client.$connect();
   const prismaLike = { write: client, read: client } as never;
-  svc = new PanicService(prismaLike, new PanicMetrics(), evidence, SECRET, config);
+  const repo = new PrismaPanicRepository(prismaLike);
+  svc = new PanicService(repo, new PanicMetrics(), evidence, SECRET, config);
 });
 
 afterAll(async () => {
