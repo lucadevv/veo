@@ -12,6 +12,7 @@ import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@v
 import { AdminRole } from '@veo/shared-types';
 import { CatalogService, type CatalogView } from './catalog.service';
 import { ReplaceCatalogDto } from './dto/catalog.dto';
+import { Permission } from '../policies/permission.decorator';
 
 @ApiTags('catalog')
 @Controller('catalog')
@@ -20,6 +21,7 @@ export class CatalogController {
   constructor(private readonly catalog: CatalogService) {}
 
   @Get()
+  @Permission('catalog:view')
   @ApiOperation({
     summary: 'Catálogo efectivo (ofertas + enabled + version). catalog:view. ADR 013',
   })
@@ -30,6 +32,7 @@ export class CatalogController {
   @Put()
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
+  @Permission('catalog:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary: 'REEMPLAZA wholesale el overlay del catálogo (enabled por oferta). catalog:manage.',

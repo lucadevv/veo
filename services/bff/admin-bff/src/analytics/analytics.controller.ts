@@ -6,6 +6,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import { revenueRange } from '@veo/api-client';
+import { Permission } from '../policies/permission.decorator';
 import { AnalyticsService, type OverviewMetrics, type RevenueMetrics } from './analytics.service';
 import { RevenueQueryDto } from './dto/analytics.dto';
 
@@ -23,6 +24,7 @@ export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}
 
   @Get('overview')
+  @Permission('ops:view')
   @ApiOperation({
     summary: 'KPIs del dashboard agregados en vivo desde trip/dispatch/panic/payment',
   })
@@ -31,6 +33,7 @@ export class AnalyticsController {
   }
 
   @Get('revenue')
+  @Permission('ops:view')
   @ApiOperation({
     summary:
       'Métricas de revenue por rango (today/7d/30d): money-in, comisión bruta, reembolsos, margen + serie',

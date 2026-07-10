@@ -6,6 +6,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@ne
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { RequireStepUpMfaForPolicy } from '../policies/require-step-up-for-policy.decorator';
+import { Permission } from '../policies/permission.decorator';
 import { AdminRole } from '@veo/shared-types';
 import type {
   TripSummary,
@@ -47,6 +48,7 @@ export class OpsController {
   constructor(private readonly ops: OpsService) {}
 
   @Get('trips')
+  @Permission('trips:view')
   @ApiOperation({ summary: 'Listado/búsqueda de viajes (filtros + paginación cursor)' })
   listTrips(
     @CurrentUser() user: AuthenticatedUser,
@@ -56,12 +58,14 @@ export class OpsController {
   }
 
   @Get('trips/:id')
+  @Permission('trips:view')
   @ApiOperation({ summary: 'Detalle agregado: trip + passenger + driver + payment + rating' })
   tripDetail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripDetail> {
     return this.ops.tripDetail(user, id);
   }
 
   @Get('drivers')
+  @Permission('drivers:view')
   @ApiOperation({ summary: 'Listado de conductores (read-model)' })
   listDrivers(
     @CurrentUser() user: AuthenticatedUser,
@@ -71,6 +75,7 @@ export class OpsController {
   }
 
   @Get('drivers/pending')
+  @Permission('drivers:view')
   @ApiOperation({ summary: 'Conductores pendientes de aprobación' })
   pendingDrivers(@CurrentUser() user: AuthenticatedUser): Promise<PendingDriver[]> {
     return this.ops.listPendingDrivers(user);
@@ -78,17 +83,26 @@ export class OpsController {
 
   // ANTES de drivers/:id: Nest matchea por orden y ':id' capturaría "summary". Conteo por estado (stat cards).
   @Get('drivers/summary')
+  @Permission('drivers:view')
   @ApiOperation({ summary: 'Conteo de conductores por estado de antecedentes (stat cards)' })
   driversSummary(@CurrentUser() user: AuthenticatedUser): Promise<DriverCounts> {
     return this.ops.driversSummary(user);
   }
 
+  // SIN @Permission a propósito (Ola B · reportado): semánticamente es `fleet:view`, pero este endpoint hereda
+  // el @Roles AMPLIO de la clase ops (incluye SUPPORT/DISPATCHER) y `fleet:view` base NO concede a esos roles →
+  // mapearlo daría 403 a roles que el @Roles SÍ permite (rompe el invariante base ⊇ @Roles del overlay). El
+  // endpoint está sobre-permisionado respecto de su pantalla (/fleet, fleet:view). Queda ungobernado hasta
+  // ajustar su @Roles o moverlo al fleet.controller.
   @Get('vehicles/summary')
   @ApiOperation({ summary: 'Conteo de vehículos por estado documental (stat cards)' })
   vehiclesSummary(@CurrentUser() user: AuthenticatedUser): Promise<VehicleCounts> {
     return this.ops.vehiclesSummary(user);
   }
 
+  // SIN @Permission a propósito (Ola B · reportado): mismo caso que vehicles/summary — semánticamente
+  // `fleet:review` pero heredando el @Roles amplio de la clase ops; `fleet:review` base no concede a
+  // SUPPORT/DISPATCHER → mapearlo violaría base ⊇ @Roles. Ungobernado hasta reubicar/estrechar el endpoint.
   @Get('reviews/summary')
   @ApiOperation({ summary: 'Conteo de las colas de revisión (cola unificada de Revisiones)' })
   reviewsSummary(@CurrentUser() user: AuthenticatedUser): Promise<ReviewQueueSummary> {
@@ -97,6 +111,7 @@ export class OpsController {
 
   @Get('drivers/:id')
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('drivers:view')
   // PBAC (ADR-024 §5 · `pii.reveal-stepup`): este detalle REVELA el DNI completo del conductor. Hoy solo RBAC
   // (Compliance+); cuando el superadmin ENABLE la política, exige además MFA fresca dentro de su ventana propia
   // (default 600s, distinta del auth.stepup de 300s). DISABLED por default → comportamiento de hoy intacto.
@@ -114,6 +129,7 @@ export class OpsController {
   @Post('drivers/:id/approve')
   @HttpCode(200)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('drivers:approve')
   // BR-S07 / FOUNDATION §7: aprobar un conductor es la acción sensible por excelencia (lo habilita a operar,
   // con implicancias de seguridad Ley 29733) → exige TOTP FRESCO, no solo RBAC. Los hermanos menos críticos
   // (reactivate-compliance, DELETE driver, grant/reject operator) ya lo tenían; approve quedó sin él (drift).
@@ -129,6 +145,8 @@ export class OpsController {
   @Post('drivers/:id/dni-face-match')
   @HttpCode(200)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // Paso de verificación del flujo de aprobación de compliance (@Roles == drivers:approve base) → drivers:approve.
+  @Permission('drivers:approve')
   @ApiOperation({
     summary:
       'Verificar rostro DNI↔selfie: baja la foto FRONT del DNI de S3 y la cotea con la biometría enrolada (BINDING · 3C)',
@@ -143,6 +161,7 @@ export class OpsController {
   @Post('drivers/:id/license-face-match')
   @HttpCode(200)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('drivers:approve')
   @ApiOperation({
     summary:
       'Verificar rostro licencia↔selfie: baja la foto del brevete de S3 y la cotea con la biometría enrolada (BINDING · Lote C)',
@@ -157,6 +176,8 @@ export class OpsController {
   @Post('drivers/:id/reject')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // reject es el otro veredicto del mismo flujo de aprobación (front lo gatea con drivers:approve).
+  @Permission('drivers:approve')
   // Par de approve (BR-S07 / FOUNDATION §7): rechazar un conductor es el otro veredicto de compliance — mismo
   // riesgo de sabotaje (una sesión comprometida rechazando conductores legítimos) → exige TOTP fresco, no solo RBAC.
   @RequireStepUpMfa()
@@ -174,6 +195,8 @@ export class OpsController {
   @Post('drivers/:id/biometric/unlock')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // Acción de compliance dentro de la revisión del conductor (@Roles == drivers:approve base) → drivers:approve.
+  @Permission('drivers:approve')
   @ApiOperation({
     summary:
       'Destraba la verificación biométrica del conductor (central · regla #1: solo la central destraba)',
@@ -185,6 +208,7 @@ export class OpsController {
   @Post('drivers/:id/suspend')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('drivers:suspend')
   @ApiOperation({
     summary: 'Suspende manualmente a un conductor con motivo (SAFETY · compliance/admin)',
   })
@@ -199,6 +223,8 @@ export class OpsController {
   @Post('drivers/:id/reactivate')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // Inverso de suspend, mismo ciclo de suspensión (front gatea el componente con drivers:suspend) → drivers:suspend.
+  @Permission('drivers:suspend')
   @ApiOperation({
     summary: 'Reactiva a un conductor (solo suspensiones disciplinarias · compliance/admin)',
   })
@@ -209,6 +235,7 @@ export class OpsController {
   @Post('drivers/:id/reactivate-compliance')
   @HttpCode(204)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('drivers:suspend')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
@@ -226,6 +253,7 @@ export class OpsController {
   @Delete('drivers/:id')
   @HttpCode(200)
   @Roles(AdminRole.SUPERADMIN)
+  @Permission('drivers:delete')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
@@ -243,6 +271,7 @@ export class OpsController {
 
   @Get('operators')
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('operators:view')
   @ApiOperation({ summary: 'Listar todos los operadores (gestión de staff)' })
   listOperators(@CurrentUser() user: AuthenticatedUser): Promise<OperatorSummary[]> {
     return this.ops.listOperators(user);
@@ -251,6 +280,7 @@ export class OpsController {
   @Post('operators')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('operators:create')
   @RequireStepUpMfa()
   @ApiOperation({
     summary: 'Crea un operador (email+roles) → INVITED + link de invitación (admin)',
@@ -265,6 +295,9 @@ export class OpsController {
   @Post('operators/:id/reinvite')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // reinvite/reject son gestión del operador ya listado; la matriz base los agrupa bajo operators:view
+  // (front operator-actions gatea con can(operators:view)). operators:create es solo el alta inicial.
+  @Permission('operators:view')
   @RequireStepUpMfa()
   @ApiOperation({ summary: 'Re-emite la invitación de un operador aún no aceptada (admin)' })
   reinviteOperator(
@@ -277,6 +310,7 @@ export class OpsController {
   @Post('operators/:id/reject')
   @HttpCode(204)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('operators:view')
   @RequireStepUpMfa()
   @ApiOperation({ summary: 'Rechaza un operador (admin)' })
   rejectOperator(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {

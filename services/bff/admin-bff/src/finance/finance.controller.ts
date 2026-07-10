@@ -41,6 +41,7 @@ import {
   ReplaceCarpoolingFeeDto,
   ReplaceCostPerKmDto,
 } from './dto/finance.dto';
+import { Permission } from '../policies/permission.decorator';
 
 @ApiTags('finance')
 @Controller('finance')
@@ -49,6 +50,7 @@ export class FinanceController {
   constructor(private readonly finance: FinanceService) {}
 
   @Get('payouts')
+  @Permission('finance:view')
   @ApiOperation({ summary: 'Listado paginado de payouts (filtro por estado)' })
   payouts(
     @CurrentUser() user: AuthenticatedUser,
@@ -60,12 +62,14 @@ export class FinanceController {
   // Ruta ESTÁTICA `payouts/stats` declarada ANTES de la paramétrica `payouts/:id` para que `:id` no capture
   // "stats". KPIs agregados (conteos + total): gate de clase FINANCE/ADMIN/SUPERADMIN, sin PII de persona.
   @Get('payouts/stats')
+  @Permission('finance:view')
   @ApiOperation({ summary: 'KPIs de payouts: total liquidado + conteos por estado (stat cards)' })
   payoutStats(@CurrentUser() user: AuthenticatedUser): Promise<PayoutStatsView> {
     return this.finance.getPayoutStats(user);
   }
 
   @Get('payouts/:id')
+  @Permission('finance:view')
   @ApiOperation({
     summary: 'Detalle de un payout con breakdown (deuda CASH y credit-back neteados por FK)',
   })
@@ -77,6 +81,7 @@ export class FinanceController {
   }
 
   @Get('reconciliation')
+  @Permission('finance:view')
   @ApiOperation({ summary: 'Historial de corridas de conciliación diaria (BR-P07) — FINANCE' })
   reconciliation(
     @CurrentUser() user: AuthenticatedUser,
@@ -88,6 +93,7 @@ export class FinanceController {
   @Post('payouts/run')
   @HttpCode(200)
   @Roles(AdminRole.FINANCE)
+  @Permission('finance:payout')
   @RequireStepUpMfa()
   @ApiOperation({ summary: 'Ejecuta el batch de payouts del periodo (solo FINANCE)' })
   runPayouts(
@@ -102,6 +108,7 @@ export class FinanceController {
   @Post('payouts/drivers/:driverId/release')
   @HttpCode(200)
   @Roles(AdminRole.FINANCE)
+  @Permission('finance:payout')
   @RequireStepUpMfa()
   @ApiOperation({
     summary: 'Libera los payouts HELD de un conductor y levanta su retención (solo FINANCE)',
@@ -118,6 +125,7 @@ export class FinanceController {
   @Post('payouts/:id/retry')
   @HttpCode(200)
   @Roles(AdminRole.FINANCE)
+  @Permission('finance:payout')
   @RequireStepUpMfa()
   @ApiOperation({ summary: 'Reintenta un payout FALLIDO (FAILED→PROCESSING, solo FINANCE)' })
   retryPayout(
@@ -134,6 +142,7 @@ export class FinanceController {
   // escudo legal anti-lucro del carpooling es el cap costo/km, NO un fee=0. payment-service RE-valida RBAC +
   // step-up (defensa en profundidad) y audita el cambio. ──
   @Get('commission')
+  @Permission('finance:view')
   @ApiOperation({
     summary:
       'Comisión por modo vigente (tasa ON-DEMAND + service fee CARPOOLING, ambas editables). finance:view',
@@ -144,6 +153,7 @@ export class FinanceController {
 
   @Put('commission/on-demand')
   @HttpCode(200)
+  @Permission('finance:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
@@ -158,6 +168,7 @@ export class FinanceController {
 
   @Put('commission/carpooling-fee')
   @HttpCode(200)
+  @Permission('finance:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
@@ -174,6 +185,7 @@ export class FinanceController {
   // finance:manage + step-up MFA: cambia el costo/km de un país que alimenta DIRECTO el tope de cost-sharing.
   // booking-service RE-valida RBAC + step-up (defensa en profundidad) y aplica el CAS. ──
   @Get('cost-per-km')
+  @Permission('finance:view')
   @ApiOperation({
     summary:
       'Costo de operación por km vigente por país (PE/EC). Alimenta el tope de cost-sharing. finance:view. F2.5',
@@ -184,6 +196,7 @@ export class FinanceController {
 
   @Put('cost-per-km')
   @HttpCode(200)
+  @Permission('finance:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary: 'REEMPLAZA el costo/km de un país (céntimos PEN Int). finance:manage + step-up. F2.5',
@@ -196,6 +209,7 @@ export class FinanceController {
   }
 
   @Get('payments/by-trip/:tripId')
+  @Permission('finance:view')
   @ApiOperation({
     summary:
       'Cobro reembolsable de un viaje — inspección previa al reembolso (FINANCE; acceso a PII auditado, sin step-up por ser lectura)',
@@ -209,6 +223,7 @@ export class FinanceController {
 
   @Post('refunds/:tripId')
   @HttpCode(200)
+  @Permission('finance:refund')
   @RequireStepUpMfa()
   @ApiOperation({ summary: 'Reembolsa el pago de un viaje' })
   refund(

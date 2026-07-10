@@ -22,6 +22,7 @@ import {
   RequestAccessDto,
   SegmentsQueryDto,
 } from './dto/media.dto';
+import { Permission } from '../policies/permission.decorator';
 
 /** Página con cursor; misma forma que `paginated()` del contrato admin-web. */
 interface Page<T> {
@@ -36,6 +37,7 @@ export class MediaController {
   constructor(private readonly media: MediaService) {}
 
   @Get('access-requests')
+  @Permission('media:view')
   @ApiOperation({ summary: 'Lista las solicitudes de acceso a video (opcional por estado)' })
   async listRequests(
     @CurrentUser() user: AuthenticatedUser,
@@ -47,6 +49,7 @@ export class MediaController {
   }
 
   @Post('access-requests')
+  @Permission('media:request')
   @ApiOperation({ summary: 'Solicita acceso a video de un viaje (queda PENDING)' })
   requestAccess(
     @CurrentUser() user: AuthenticatedUser,
@@ -62,6 +65,7 @@ export class MediaController {
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
   @Post('access-requests/:id/approve')
   @HttpCode(200)
+  @Permission('media:approve')
   @RequireStepUpMfa()
   @ApiOperation({ summary: 'Aprueba el acceso (COMPLIANCE/SUPERADMIN + MFA fresca)' })
   approve(
@@ -85,6 +89,7 @@ export class MediaController {
   }
 
   @Get('access-requests/:id/stream')
+  @Permission('media:view')
   @RequireStepUpMfa()
   @ApiOperation({
     summary: 'URL firmada del video aprobado (requiere MFA fresca); incluye watermark',
@@ -95,6 +100,7 @@ export class MediaController {
 
   @Post('live/token')
   @HttpCode(200)
+  @Permission('live:view')
   @RequireStepUpMfa()
   @ApiOperation({
     summary: 'Token de cámara EN VIVO de un viaje (muro admin; doble-auth: rol + MFA fresca)',
@@ -107,6 +113,7 @@ export class MediaController {
   }
 
   @Get('segments')
+  @Permission('media:view')
   @ApiOperation({ summary: 'Segmentos de video de un viaje' })
   segments(
     @CurrentUser() user: AuthenticatedUser,

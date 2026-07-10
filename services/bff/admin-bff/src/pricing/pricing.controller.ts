@@ -13,6 +13,7 @@ import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@v
 import { AdminRole } from '@veo/shared-types';
 import { PricingService, type BidFloorView, type BaseFareView } from './pricing.service';
 import { ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
+import { Permission } from '../policies/permission.decorator';
 
 @ApiTags('pricing')
 @Controller('pricing')
@@ -21,6 +22,7 @@ export class PricingController {
   constructor(private readonly pricing: PricingService) {}
 
   @Get('base-fare')
+  @Permission('pricing:view')
   @ApiOperation({
     summary:
       'Tarifa base vigente (banderazo + per-km + per-min, o los defaults). pricing:view. F2.4',
@@ -32,6 +34,7 @@ export class PricingController {
   @Put('base-fare')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
+  @Permission('pricing:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
@@ -45,6 +48,7 @@ export class PricingController {
   }
 
   @Get('bid-floor')
+  @Permission('pricing:view')
   @ApiOperation({
     summary:
       'Piso de la PUJA vigente (default + overrides por oferta, o el default S/7). pricing:view. ADR 010 §9.3',
@@ -56,6 +60,7 @@ export class PricingController {
   @Put('bid-floor')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
+  @Permission('pricing:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:

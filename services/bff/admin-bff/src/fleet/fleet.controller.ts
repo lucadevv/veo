@@ -27,6 +27,7 @@ import {
   ApproveVehicleModelDto,
   ExpirationsQueryDto,
 } from './dto/fleet.dto';
+import { Permission } from '../policies/permission.decorator';
 
 interface Page<T> {
   items: T[];
@@ -40,6 +41,7 @@ export class FleetController {
   constructor(private readonly fleet: FleetService) {}
 
   @Post('vehicles')
+  @Permission('fleet:manage')
   @ApiOperation({ summary: 'Registra un vehículo' })
   createVehicle(
     @CurrentUser() user: AuthenticatedUser,
@@ -49,6 +51,7 @@ export class FleetController {
   }
 
   @Get('vehicles')
+  @Permission('fleet:view')
   @ApiOperation({ summary: 'Lista paginada de la flota (filtro: status)' })
   listVehicles(
     @CurrentUser() user: AuthenticatedUser,
@@ -58,6 +61,7 @@ export class FleetController {
   }
 
   @Get('vehicles/:id')
+  @Permission('fleet:view')
   @ApiOperation({
     summary: 'Detalle de un vehículo (ENRIQUECIDO con la ficha del modelSpec, igual que la lista)',
   })
@@ -69,6 +73,7 @@ export class FleetController {
   }
 
   @Post('documents')
+  @Permission('fleet:manage')
   @ApiOperation({ summary: 'Sube un documento (licencia/SOAT/tarjeta/ITV/antecedentes)' })
   createDocument(
     @CurrentUser() user: AuthenticatedUser,
@@ -78,6 +83,8 @@ export class FleetController {
   }
 
   @Get('documents/expiring')
+  // Consumido SOLO por la pantalla /fleet/reviews (gate `fleet:review` en el front) → paridad.
+  @Permission('fleet:review')
   @ApiOperation({
     summary: 'Cola paginada de documentos próximos a vencer (ventana de días, cursor compuesto)',
   })
@@ -89,6 +96,9 @@ export class FleetController {
   }
 
   @Get('documents')
+  // Read compartido por /fleet/[id] (fleet:view) y /fleet/reviews (fleet:review) → mapea al denominador
+  // común fleet:view (misma base de roles que review/manage; evita 403 en la pantalla view).
+  @Permission('fleet:view')
   @ApiOperation({ summary: 'Lista paginada de documentos (filtros: status, ownerId)' })
   listDocuments(
     @CurrentUser() user: AuthenticatedUser,
@@ -99,6 +109,7 @@ export class FleetController {
 
   @Post('documents/:id/review')
   @HttpCode(200)
+  @Permission('fleet:review')
   @RequireStepUpMfa()
   @ApiOperation({
     summary: 'Revisión manual del operador: aprueba/rechaza un documento — exige MFA fresca',
@@ -112,6 +123,7 @@ export class FleetController {
   }
 
   @Post('inspections')
+  @Permission('fleet:manage')
   @ApiOperation({ summary: 'Registra una inspección técnica (ITV)' })
   createInspection(
     @CurrentUser() user: AuthenticatedUser,
@@ -121,6 +133,8 @@ export class FleetController {
   }
 
   @Get('inspections')
+  // Read compartido por /fleet/[id] (fleet:view) y /fleet/inspections (fleet:review) → denominador fleet:view.
+  @Permission('fleet:view')
   @ApiOperation({ summary: 'Lista paginada de inspecciones (filtro: vehicleId)' })
   listInspections(
     @CurrentUser() user: AuthenticatedUser,
@@ -132,6 +146,7 @@ export class FleetController {
   // ── Catálogo de modelos: cola de revisión del operador (B5-2.c) ──
 
   @Get('vehicle-models')
+  @Permission('fleet:view')
   @ApiOperation({
     summary: 'Catálogo APROBADO de modelos (selector del alta admin). Filtros: vehicleType, q',
   })
@@ -143,6 +158,7 @@ export class FleetController {
   }
 
   @Get('vehicle-models/review')
+  @Permission('fleet:review')
   @ApiOperation({ summary: 'Cola de revisión de modelos solicitados (default PENDING_REVIEW)' })
   listModelReview(
     @CurrentUser() user: AuthenticatedUser,
@@ -153,6 +169,7 @@ export class FleetController {
 
   @Post('vehicle-models/:id/approve')
   @HttpCode(200)
+  @Permission('fleet:review')
   @ApiOperation({
     summary: 'Aprueba una solicitud de modelo completando la ficha técnica (PENDING→APPROVED)',
   })
@@ -166,6 +183,7 @@ export class FleetController {
 
   @Post('vehicle-models/:id/reject')
   @HttpCode(200)
+  @Permission('fleet:review')
   @ApiOperation({ summary: 'Rechaza una solicitud de modelo (PENDING→REJECTED)' })
   rejectModel(
     @CurrentUser() user: AuthenticatedUser,
@@ -176,6 +194,7 @@ export class FleetController {
 
   @Post('vehicle-models/:id/reopen')
   @HttpCode(200)
+  @Permission('fleet:review')
   @ApiOperation({
     summary: 'Reabre un modelo APROBADO para corregir su ficha técnica (APPROVED→PENDING_REVIEW)',
   })

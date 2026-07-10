@@ -20,12 +20,16 @@ import {
 } from './gobierno.service';
 import { UpdatePolicyDto } from './dto/update-policy.dto';
 import { SetPermissionOverrideDto } from './dto/set-permission-override.dto';
+import { Permission } from '../policies/permission.decorator';
 
 @ApiTags('gobierno')
 @Controller('gobierno')
 // Todo Gobierno → Políticas es EXCLUSIVO de SUPERADMIN (el borde de autoridad · diseño "Solo superadmin").
 // El RolesGuard usa getAllAndOverride: sin @Roles de método, los handlers heredan este set de clase.
 @Roles(AdminRole.SUPERADMIN)
+// TODO handler de gobierno mapea a `gobierno:manage` → @Permission a nivel de CLASE (getAllAndOverride cae a
+// la clase cuando el método no lo redeclara). Ningún endpoint de gobierno necesita otro permiso.
+@Permission('gobierno:manage')
 export class GobiernoController {
   constructor(private readonly gobierno: GobiernoService) {}
 

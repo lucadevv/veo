@@ -12,6 +12,7 @@ import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@v
 import { AdminRole } from '@veo/shared-types';
 import { DispatchConfigService, type RadiusConfigView } from './dispatch-config.service';
 import { ReplaceRadiusConfigDto } from './dto/dispatch-radius-config.dto';
+import { Permission } from '../policies/permission.decorator';
 
 @ApiTags('dispatch')
 // Prefijo PELADO (no 'admin/dispatch'): el admin-bff ya es admin-scoped y TODOS sus controllers usan el
@@ -23,6 +24,7 @@ export class DispatchConfigController {
   constructor(private readonly dispatch: DispatchConfigService) {}
 
   @Get('radius-config')
+  @Permission('dispatch:view')
   @ApiOperation({
     summary: 'Config de radios (k-rings) vigente (o el DEFAULT). ADMIN/SUPERADMIN/DISPATCHER.',
   })
@@ -33,6 +35,7 @@ export class DispatchConfigController {
   @Put('radius-config')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.DISPATCHER)
+  @Permission('dispatch:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:

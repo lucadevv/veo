@@ -8,6 +8,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type { AuditEntryView } from '@veo/api-client';
+import { Permission } from '../policies/permission.decorator';
 import { AuditService, type VerifyResponse } from './audit.service';
 import { AuditQueryDto, AuditVerifyDto } from './dto/audit-query.dto';
 
@@ -18,6 +19,7 @@ export class AuditController {
   constructor(private readonly audit: AuditService) {}
 
   @Get()
+  @Permission('audit:view')
   @ApiOperation({ summary: 'Listado de auditoría (cursor beforeSeq)' })
   list(
     @CurrentUser() user: AuthenticatedUser,
@@ -27,6 +29,7 @@ export class AuditController {
   }
 
   @Get('verify')
+  @Permission('audit:verify')
   @ApiOperation({ summary: 'Verifica la integridad de la hash-chain' })
   verify(
     @CurrentUser() user: AuthenticatedUser,
