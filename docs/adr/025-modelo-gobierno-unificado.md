@@ -1,13 +1,20 @@
 # ADR 025 — Modelo de Gobierno unificado (Roles · Permisos · Overlay · Políticas)
 
-> Estado: **PROPUESTO** (diseño sin código). Fecha: 2026-07-10.
-> Nace de una incoherencia REAL detectada: las **Políticas** (PBAC) son un registro editable y real
-> (ADR-024), pero los **Permisos** en código quedaron como una matriz **read-only**, y el **overlay
-> interactivo** del diseño (`design/veo.pen` frame `AdminPermisos`) **no existe**. Tres pantallas de
-> "Gobierno" con tres niveles distintos de realidad = se siente inconsistente.
+> Estado: **ACEPTADO — F0 implementada; F1 (enforcement server) en curso, F2 (front) parcial** (el código
+> aterrizó el 2026-07-10). Fecha: 2026-07-10.
+> Nació de una incoherencia REAL detectada: las **Políticas** (PBAC) eran un registro editable y real
+> (ADR-024), pero los **Permisos** en código quedaron como una matriz **read-only** y el **overlay
+> interactivo** del diseño (`design/veo.pen` frame `AdminPermisos`) **no existía**. Ya se cerró esa brecha:
+> el overlay es un registro real — modelo `PermissionOverride` (`identity-service/prisma/schema.prisma:487`
+> + migración `20260710130417_add_permission_overrides`), endpoints admin-bff
+> `GET/PUT /gobierno/permission-overrides`, evento `permission_override.updated`, y la matriz interactiva en
+> admin-web (`apps/admin-web/src/components/gobierno/permissions-matrix.tsx`). Lo que resta es el barrido
+> endpoint→`@Permission` para que el enforcement server-side deje de ser NO-OP (F1, §7).
 > Este ADR NO reemplaza a [ADR-024](./024-pbac-politicas-gobierno.md) — lo **enmarca**: las políticas son
-> UNA de las dos capas editables de un mismo gobierno. Establece el modelo por capas y diseña la pieza
-> que falta (el overlay), unificándola con las políticas en **un solo módulo**.
+> UNA de las dos capas editables de un mismo gobierno. Establece el modelo por capas y llevó a código la
+> pieza que faltaba (el overlay), unificándola con las políticas en **un solo módulo**.
+>
+> 📌 **Estado real por fase (2026-07-10, verificado contra código): ver §7.**
 
 ---
 
@@ -139,14 +146,24 @@ ADR-024 sigue vigente y CORRECTO — describe la capa 3 (Políticas/PBAC) en det
 
 ## 7. Plan por fases
 
-- **F0 — Overlay backend + UI** (reusa el molde PBAC): tabla `PermissionOverride` + migración en el módulo
-  gobierno (evoluciona `policies`) · endpoints admin-bff `GET/PUT /gobierno/permission-overrides`
-  (SUPERADMIN + step-up) · evento `permission_override.updated` + audit · lectura en `@veo/policy`
-  (overlay cache) · matriz interactiva en admin-web (reemplaza el read-only).
-- **F1 — Enforcement server**: mapear los endpoints admin a su permiso (`@Permission`/mapa) + el
-  `RolesGuard`/`PermissionGuard` computa `base ∧ ¬override`. Barrido honesto: documentar qué endpoints
-  quedan cubiertos y cuáles no aún.
-- **F2 — Front compose**: `can()` compone base ∧ ¬override; nav/botones ocultan según el overlay vigente.
+- ✅ **F0 — Overlay backend + UI. IMPLEMENTADA (2026-07-10)** (reusa el molde PBAC): tabla
+  `PermissionOverride` (`schema.prisma:487`) + migración `20260710130417_add_permission_overrides` en el
+  módulo gobierno · endpoints admin-bff `GET/PUT /gobierno/permission-overrides` (SUPERADMIN + step-up,
+  `gobierno.controller.ts` + `permission-overrides.{repository,service,controller}.ts` en identity) · evento
+  `permission_override.updated` + audit + consumer (`packages/policy/src/nest/permission-override-updated.consumer.ts`)
+  · lectura en `@veo/policy` (overlay cache · `overlay.ts`, `permissions.ts` con `baseGrants` /
+  `isPermissionEffective` / `computeHiddenPermissions`) · matriz interactiva en admin-web
+  (`components/gobierno/permissions-matrix.tsx`, reemplaza el read-only).
+- 🟡 **F1 — Enforcement server. EN CURSO.** El `PermissionOverlayGuard` ya está en la cadena de guards
+  (`services/bff/admin-bff/src/app.module.ts:109`, tras `RolesGuard`) y computa `base ∧ ¬override`, y existe
+  el decorador `@Permission` (`policies/permission.decorator.ts`) declarado en la mayoría de los controllers
+  (11/12). ⏳ **Pendiente — el barrido no está completo:** el guard es **NO-OP por handler donde falta
+  `@Permission`** (comentario explícito en `app.module.ts:105-108`; ej. `auth.controller.ts` aún sin
+  `@Permission`). Hasta cerrar el barrido, el overlay oculta en el front pero **no bloquea en server** para
+  esos endpoints — gap honesto, no se finge cobertura total.
+- 🟡 **F2 — Front compose. PARCIAL.** El helper `computeHiddenPermissions` (`@veo/policy`) y la matriz
+  interactiva ya componen `base ∧ ¬override`. ⏳ **Pendiente:** completar el ocultamiento de nav/botones
+  atado al mismo barrido endpoint→permiso de F1.
 
 ---
 

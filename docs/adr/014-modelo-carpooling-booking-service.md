@@ -11,6 +11,34 @@
 > (el conductor fija un precio por asiento ≤ cost-cap) es, en la taxonomía de 023, el modo **COST_SHARE**
 > (BlaBlaCar: conductor ≤ tope · ÷ asientos · service fee · no-comercial) — **NO** el `FIXED`=Uber (plataforma
 > computa) del on-demand. Recomendado migrar el rótulo del enum del carpooling a `COST_SHARE` para no colisionar. Ver 023 §6.
+>
+> 🟠 **CORRECCIÓN — ratificada por el dueño (2026-07-10 · Estado: Corregido).** Consolida y hace CANÓNICA la
+> decisión de cobro que este ADR ya venía materializando en §5, ahora cerrada por el dueño y anclada al contrato
+> de FOUNDATION. Los puntos, explícitos y sin ambigüedad:
+>
+> 1. **`payment-service` y los rieles Yape/Plin NO soportan HOLD ni pre-autorización.** No hay estado `HOLD` en la
+>    máquina de payment (`PENDING → [CAPTURED, FAILED, DEBT]`) y el push instantáneo Yape/Plin no pre-autoriza como
+>    una tarjeta. La nota "hold→charge on approval" del spec (`VEO_MODELO_HIBRIDO.md` §8.1, §11 F3) queda **anulada**:
+>    era imposible contra la realidad del riel. **No se le agrega HOLD a payment-service.**
+> 2. **El modelo de cobro es `charge-on-approval` SIN pre-autorización.** Al **APROBAR** el booking se **cobra
+>    directo** (transición `APROBADO → COBRO_PENDIENTE`, sin hold previo). El **método de pago se valida AL RESERVAR**
+>    (gate de deuda `getDebtForPassenger` + `paymentMethod` en el `create-booking` DTO, §5.5), no al cobrar. Si el
+>    conductor rechaza o expira el TTL → **no se cobró nada**.
+> 3. **Cobro fallido → estado `DEBT` + reintento.** Si el CHARGE falla tras aprobar (`payment.failed`), corre BR-P02
+>    (reintento, máx 3); si falla permanente el Booking va a `CANCELADO` y el gate "pasajero con deuda no reserva" se
+>    **DERIVA de `PaymentStatus.DEBT` de payment-service** — booking **NO** crea un flag `DEBT` propio (una sola
+>    fuente de verdad). El asiento NO se pierde: solo decrementa al capturar (§6).
+> 4. **La idempotencia financiera (regla no-negociable #3) se mantiene intacta:** el charge-on-approval lleva
+>    **`dedupKey = booking-charge:{bookingId}`** (`@unique` en payment) → reintentos del mismo Booking no duplican el
+>    cobro; el evento se publica por **outbox pattern** (mutación de estado + `INSERT` outbox en la misma txn, §7).
+> 5. **Las máquinas de estado de booking/PUJA y el estado `DEBT` quedan registradas como CONTRATO en
+>    `docs/FOUNDATION.md`** (las agrega otro agente en paralelo). Este ADR las **referencia** como fuente canónica y
+>    NO las duplica: el detalle operativo (transiciones, invariantes, secuencia) vive en §4–§6 de acá; el contrato
+>    transversal, en FOUNDATION.
+>
+> Esta corrección **no reescribe** la decisión original: la §5 ("Cobro diferido — CHARGE-ON-APPROVAL") ya la
+> materializaba; acá se deja el sello del dueño con fecha para trazar la evolución (spec decía hold → realidad del
+> riel lo anuló → charge-on-approval + DEBT).
 
 ---
 

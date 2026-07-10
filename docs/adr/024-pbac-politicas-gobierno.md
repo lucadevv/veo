@@ -1,10 +1,16 @@
 # ADR 024 — PBAC: capa de Políticas de gobierno sobre RBAC
 
-> Estado: **PROPUESTO** (diseño sin código). Fecha: 2026-07-10.
+> Estado: **ACEPTADO — F0 implementada; F1/F2 en curso** (el código aterrizó el 2026-07-10). Fecha: 2026-07-10.
 > Define el backend de la sección **Gobierno → Políticas** del admin (diseñada en `design/veo.pen`,
-> frames `AdminPoliticas`/`AdminPoliticas-Config`). Hoy esa pantalla es **solo diseño**: no existe motor
-> PBAC, ni tabla de políticas, ni enforcement editable. Este ADR fija cómo se lleva a código con honestidad.
-> Complementa (no reemplaza) el RBAC base (`@veo/auth` `RolesGuard`, `packages/shared-types` `AdminRole`).
+> frames `AdminPoliticas`/`AdminPoliticas-Config`). El motor PBAC ya existe en código: paquete `@veo/policy`
+> (`packages/policy/src/`), tabla `Policy` en identity-service (`prisma/schema.prisma:458` + migración
+> `20260710073631_add_policies`), endpoints admin-bff `GET/PUT /gobierno/policies`
+> (`services/bff/admin-bff/src/gobierno/gobierno.controller.ts`) y la página real en admin-web
+> (`apps/admin-web/src/app/(dashboard)/gobierno/politicas/page.tsx`). Lo que resta es el enforcement net-new
+> (F2) y completar el cableado cross-servicio de `auth.stepup` (§8). Este ADR fija cómo se llevó a código con
+> honestidad. Complementa (no reemplaza) el RBAC base (`@veo/auth` `RolesGuard`, `packages/shared-types` `AdminRole`).
+>
+> 📌 **Estado real por fase (2026-07-10, verificado contra código): ver §8.**
 >
 > 🔎 **Fundado en grounding real del código (2026-07-10):** de las 16 políticas de la pantalla, **0 son
 > editables hoy**, **7 están ENFORCED-HARDCODED** (const/env → una política solo las parametrizaría) y
@@ -182,17 +188,27 @@ visible en la UI).
 
 ## 8. Plan por fases
 
-- **Fase 0 — Fundación.** `@veo/policy` (cliente cacheado + schemas Zod + DEFAULTs) · módulo `policies` en
-  identity-service (tabla, CRUD interno, outbox `policy.updated`, audit) · endpoints admin-bff
-  (`GET/PUT /gobierno/policies`) con RBAC(SUPERADMIN)+step-up · la **página Políticas real** en admin-web
-  (reemplaza el shell del `.pen`, lee/escribe políticas reales).
-- **Fase 1 — Parametrizar los 7 HARDCODED** (alto valor, bajo costo): cablear cada const/env a
-  `@veo/policy` (step-up window, retención, erasure SLA, N-aprobadores, sets de pii.mask). Cada uno hace
-  una política **real y editable** sin enforcement nuevo.
-- **Fase 2 — NET-NEW priorizadas** (cada una un mini-feature): `access.ip-allowlist` (guard nuevo) →
-  `auth.session-timeout` (tracking idle) → `pii.reveal-stepup` → resto (JIT, daily-reauth, access.review,
-  ops.export/bulk-download).
-- **Dependencia de INFRA (no PBAC):** WORM object-lock de video (MinIO) — tarea separada.
+- ✅ **Fase 0 — Fundación. IMPLEMENTADA (2026-07-10).** `@veo/policy` con cliente cacheado + schemas/catálogo
+  + DEFAULTs (`packages/policy/src/catalog.ts`, `permissions.ts`) y runtime `@veo/policy/nest`
+  (`KafkaCachedPolicyReader` + `PolicyModule`, `packages/policy/src/nest/`) · módulo `policies` en
+  identity-service (tabla `Policy` `schema.prisma:458` + migración, repository/service/controller/seeder en
+  `services/identity-service/src/policies/`, outbox `policy.updated`, audit) · endpoints admin-bff
+  `GET/PUT /gobierno/policies` (`services/bff/admin-bff/src/gobierno/gobierno.controller.ts`) con
+  RBAC(SUPERADMIN)+step-up (guards en `services/bff/admin-bff/src/policies/`) · la **página Políticas real**
+  en admin-web (`gobierno/politicas/page.tsx` + `components/gobierno/policies-panel.tsx`).
+- 🟡 **Fase 1 — Parametrizar los HARDCODED. EN CURSO.** `auth.stepup` ya lee del registro vía
+  `PolicyReaderPort` en el step-up guard (`packages/auth/src/guards/step-up-mfa.guard.ts:47` —
+  `numberSync('auth.stepup','maxAgeSec',300)`) y `PolicyModule` está cableado en admin-bff
+  (`app.module.ts:52`). ⏳ **Pendiente:** cablear `PolicyModule`/`auth.stepup` en **payment / trip / booking**
+  (hoy no lo importan) y parametrizar el resto de los const/env (retención, erasure SLA, N-aprobadores,
+  sets de `pii.mask`).
+- 🟡 **Fase 2 — NET-NEW. PARCIAL.** ✅ Ya implementadas: `access.ip-allowlist` (`IpAllowlistGuard`) y
+  `auth.session-timeout` (`SessionIdleGuard`) en `services/bff/admin-bff/src/policies/`, más el step-up
+  policy-aware de `pii.reveal-stepup` (`PolicyStepUpMfaGuard`). ⏳ **Pendiente** (net-new que dependen de una
+  feature de export aún inexistente): `access.jit`, `auth.daily-reauth`, `access.review`,
+  `ops.export`/`ops.bulk-download` — sus keys están sembradas en el catálogo con default cerrado, sin
+  enforcement todavía.
+- ⏳ **Dependencia de INFRA (no PBAC):** WORM object-lock de video (MinIO) — tarea separada, **pendiente**.
 
 ---
 

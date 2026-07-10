@@ -454,3 +454,202 @@ Re-verificación biométrica periódica = gancho (ahora solo al inicio de turno)
 
 **API & operación:** prefijo **`/api/v1`** en BFFs; **rate limiting en BFFs** (Redis, por IP+usuario; **POST /panic jamás se limita**);
 **CI por repo** (GitHub Actions: lint+typecheck+test+build); **seeds mínimos** (sin datos demo); **git aún NO inicializado** (a pedido).
+
+---
+
+## 15. Contratos de dominio reconciliados desde specs/ADRs (2026-07-10)
+
+> Estos contratos vivían SOLO en specs de producto y ADRs; se transcriben acá para que el plano TÉCNICO los
+> cubra. Cada subsección **cita su fuente canónica** — si la fuente y este resumen difieren, manda la fuente.
+> Reconciliación de plano (decisiones del dueño ya tomadas, Opción A). No introducen decisiones nuevas.
+
+### 15.1 Motor de pricing — la fórmula única, el enum de 3 modos, el value-object `ServiceOffering`
+
+> **Fuente canónica: [ADR-023](adr/023-modelo-pricing-coexistencia.md)** (modelo de coexistencia) + **[ADR-013](adr/013-catalogo-service-offerings.md)** (lo que es código no-editable). Plan: `specs/changes/pricing-taxonomy/`.
+
+**Una sola fórmula de distancia, money-critical, que NO se reinventa** (`calculateFirmFare` en
+`services/trip-service/src/trips/domain/fare.ts`):
+
+```
+tarifa = ( base + perKm·km + perMin·min ) × multiplier      [piso: minFareCents]
+```
+
+- **`surgeMultiplier` = `1.0` fijo** (surge está AFUERA del modelo, ADR-023 §5 — no es config del admin).
+- El resultado se congela en `Trip.dispatchMode`/tarifa firme al crear el viaje (**resolve-once-persist-forever**).
+
+**Los 3 modos PUROS** son la **taxonomía conceptual de ADR-023** — el modo decide **qué SIGNIFICA** ese número.
+**En código NO viven en un solo enum** (y así se quedan): `FIXED`/`PUJA` son el `PricingMode` de `@veo/shared-types`
+(on-demand, `trip-service`); `COST_SHARE` es el modo del carpooling y se implementa como el valor **`FIJO`** del enum
+**Prisma** de `booking-service` (`carpoolPricingMode = z.enum(['FIJO'])` en el api-client) — bounded context aparte.
+
+| Modo (taxonomía ADR-023) | En código          | Referente  | La fórmula es…    | Quién fija el precio                                        |
+| ------------------------ | ------------------ | ---------- | ----------------- | ---------------------------------------------------------- |
+| `FIXED`                  | `shared-types`     | Uber       | **el precio**     | la plataforma computa; el pasajero toma/deja               |
+| `PUJA`                   | `shared-types`     | inDrive    | **piso/sugerido** | el pasajero ofrece ≥ piso; el conductor acepta/contra-oferta |
+| `COST_SHARE`             | `FIJO` (booking)   | BlaBlaCar  | **tope (cap)**    | el conductor pone ≤ cap, ÷ asientos + service fee (no-comercial) |
+
+El modo es **per-service y MANUAL** (palanca del admin): cada oferta tiene UN `mode` fijo; **el sistema NUNCA lo
+flipea solo** (ni por horario ni por demanda). Esto supersede el motor de franjas de ADR-011.
+
+**El value-object `ServiceOffering`** (`OfferingSpec` en `packages/shared-types/src/catalog/offerings.ts`) —
+fuente única de los ejes de servicio:
+
+```ts
+interface OfferingSpec {
+  id: OfferingId;              // 'veo_moto' | 'veo_economico' | … — INMUTABLE (contrato con la app)
+  mode: PricingMode;           // uno por oferta (reemplaza allowedModes, ADR-023 §6)
+  vehicleClass: VehicleClass;  // enum CERRADO — key del pool de matching, certificable por fleet
+  pricing: {                   // params por servicio; algunos en CERO (bordes)
+    multiplier: number;
+    minFareCents: number;
+    baseFareCents?: number; perKmCents?: number; perMinCents?: number;  // overrides opcionales
+  };
+  category: 'RIDE' | 'SPECIAL' | 'CARPOOL';  // ORTOGONAL al precio: es el MENÚ, no la economía
+  requires?: VehicleRequirements;  // minSeats/minSegment/maxAgeYears/certs — elegibilidad de oferta (ADR-017)
+  flow: OfferingFlow; sortOrder: number;
+}
+```
+
+- **`category` (RIDE/SPECIAL/CARPOOL) es ortogonal al precio** — clasifica el menú del pasajero, no cambia la fórmula.
+- **`OfferingId`, `VehicleClass` y `requires` son CÓDIGO no-editable** (ADR-013): agregar una oferta o una clase es
+  cambio de código (enum cerrado + entrada de catálogo), jamás string abierto ni edición en caliente.
+
+**Los DOS bordes honestos — la fórmula NO estira a todo** (asume `km` y `min` conocidos al cotizar):
+
+- **Mecánico = call-out plano** (categoría SPECIAL, `FIXED`): `perKm = 0` **Y** `perMin = 0`; se cotiza un **fee de
+  visita** (`base`, ej. S/50) upfront y la labor/repuestos se cobran **aparte** tras el diagnóstico. **NO es "la
+  fórmula con ceros"** — es otra economía (una VISITA no es un VIAJE).
+- **Carpooling = producto propio** (categoría CARPOOL, `COST_SHARE`): comparte la **cuenta de distancia** (costo/km)
+  pero su **flujo** (publicado/programado + reservar asientos), sus **params** y su **economía** (no-comercial:
+  conductor 100 %, fee al pasajero) son suyos. Vive en **`booking-service`** (ADR-014, ver §15.3), no en el catálogo on-demand.
+
+**Por qué en el contrato técnico** (reglas no-negociables #3 idempotencia financiera + #7 tests de state machine):
+la fórmula + el value-object + el enum viven acá como **fuente única** para que `trip`/`payment`/`booking` **no
+reinventen "precio"** cada uno por su lado. `FIXED` y `PUJA` son estrategias en `trip-service` (`DispatchModeRegistry`);
+`COST_SHARE` — el valor `FIJO` del enum Prisma de `booking-service` — es su bounded context. Frontera por **dominio**,
+modo por **estrategia** — jamás un microservicio por modo.
+
+> **El código es la verdad — no se renombra lo que funciona.** El carpooling opera hoy con el valor `FIJO` (enum
+> Prisma + `carpoolPricingMode` del api-client) y **funciona**: `COST_SHARE` es su nombre en la **taxonomía**, no un
+> rename pendiente. Renombrar el enum Prisma sería una **migración de BD en un path financiero por una etiqueta** — se
+> **difiere** (la sugerencia de rótulo de ADR-023 §6 es **opcional, no deuda**). El doc registra la equivalencia
+> `FIJO ≡ COST_SHARE`; el código manda.
+
+### 15.2 Mapa config-pricing: superficie de edición → servicio dueño (orquestación del BFF, no un join)
+
+> **Fuente: [`VEO_SPEC_ADMIN.md`](../specs/VEO_SPEC_ADMIN.md) §3.0 + Finanzas** · **[`VEO_MODELO_HIBRIDO.md`](../specs/VEO_MODELO_HIBRIDO.md) §1.5** · **[ADR-013](adr/013-catalogo-service-offerings.md)**.
+
+**NO es una contradicción con la regla #3 (DB-per-service) — es aclarar OWNERSHIP.** El admin edita el pricing
+desde DOS pantallas, pero el DATO tiene dueño por servicio:
+
+| Pantalla del admin                            | Qué edita                                                                   | Servicio DUEÑO del dato     |
+| --------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- |
+| **Precios y tarifas** (`/finance/pricing`)    | fórmula **GLOBAL**: base all-in, comisión, **costo/km carpooling**, **modo por defecto** + franjas | on-demand → **trip + payment**; costo/km carpooling → **booking** |
+| **Ofertas de servicio** (`/finance/catalog`)  | **TODO lo por-oferta**: on/off, modo override, multiplicador, tarifa mínima, piso de puja | **trip + payment**          |
+
+- **El `admin-bff` ORQUESTA la escritura multi-dueño** (bloques que tocan a más de un servicio) con
+  **`Idempotency-Key`** por operación. Una pantalla que escribe a varios dueños = **orquestación del BFF**, NO un
+  join cross-servicio ni una tabla compartida.
+- Se **mantiene la regla de ownership-por-servicio**: **NO se consolida en un `pricing-service`**. El pricing es una
+  responsabilidad transversal editada desde el admin, cuyo dato reside en el servicio que lo ejecuta.
+- El **SET de ofertas / `VehicleClass` / `requires`** viven **en código** (ADR-013, §15.1): estas pantallas curan
+  solo **visibilidad + economía** (toggle, modo, multiplicador, mínimo, piso), nunca el set ni la elegibilidad.
+
+### 15.3 Cobro carpooling — charge-on-approval SIN hold + estado DEBT + máquinas de estado
+
+> **Fuente: [ADR-014](adr/014-modelo-carpooling-booking-service.md)** (que se corrige en paralelo respecto del "hold→charge" del spec) · PUJA on-demand: [ADR-010].
+
+**Yape/Plin y `payment-service` NO tienen HOLD.** Máquina real de payment: **`PENDING → [CAPTURED, FAILED, DEBT]`**
+(sin `HOLD`), y la captura es **ASÍNCRONA** (webhook/poll). Por eso el cobro del carpooling es
+**charge-on-approval SIN pre-autorización**, con la garantía perdida mitigada así:
+
+1. **Validar el método al RESERVAR** (`getDebtForPassenger(passengerId)` — REST `GET /payments/debt`) antes de aceptar.
+2. **Reintento BR-P02** (máx 3) al consumir `payment.failed`.
+3. **Estado `DEBT` DERIVADO de `payment-service`** — `booking-service` **NO crea un flag DEBT propio** (sería 2ª
+   fuente de verdad): deriva el gate consultando `PaymentStatus.DEBT`.
+
+**Idempotencia financiera (regla #3):** el CHARGE lleva **`dedupKey = booking-charge:{bookingId}`** (distinta del
+`trip-completed:{tripId}` canónico del on-demand). El **monto es server-authoritative** (`precioAcordado × asientos`
+computado por el servicio, con re-cap anti-lucro), **jamás dictado por el cliente**.
+
+**Las máquinas de estado son CONTRATO** (enums tipados + `assertTransition`, cero strings mágicos; la mutación de
+estado y el evento van en la MISMA transacción vía outbox):
+
+- **Viaje publicado** (`PublishedTripState`):
+  `BORRADOR → PUBLICADO → PARCIALMENTE_RESERVADO → LLENO → EN_RUTA → COMPLETADO` · `* (pre-EN_RUTA) → CANCELADO`.
+- **Booking** (`BookingState`):
+  `SOLICITADO → PENDIENTE_APROBACION → APROBADO → COBRO_PENDIENTE → CONFIRMADO → EN_RUTA → COMPLETADO`;
+  terminales `RECHAZADO` / `EXPIRADO` (sin cobro) y `CANCELADO` (+Refund por tier).
+  - **INSTANT_BOOKING salta la aprobación** (nace `APROBADO`); REVISION pasa por `PENDIENTE_APROBACION`.
+  - `APROBADO` dispara el CHARGE (async) → `COBRO_PENDIENTE`; se confirma al consumir **`payment.captured`**.
+  - **Concurrencia de asiento** (invariante crítico): `SELECT … FOR UPDATE` + decremento de `asientosDisponibles`
+    corre **dentro del handler de `payment.captured`**; camino infeliz "cobré pero el asiento se llenó" →
+    **Refund automático** (`booking.cancelled` reason=`asiento-lleno`). Nunca oversold.
+- **PUJA (on-demand, ADR-010):** `OFERTA → [CONTRAOFERTA]* → ACEPTADA / RECHAZADA / EXPIRADA` (**gana la
+  contra-oferta del conductor** — inDrive real).
+
+### 15.4 KYC asimétrico — enforcement por tipo de actor (invariante)
+
+> **Fuente: [ADR-018](adr/018-verificacion-pasajero-progresiva.md)** (pasajero progresivo) · gate conductor: §14 (biometría) + `VEO_SPEC_CONDUCTOR` §3.
+
+El enforcement de KYC es **deliberadamente ASIMÉTRICO** por tipo de actor — es un invariante, no un descuido:
+
+- **CONDUCTOR = fail-closed (gate DURO).** No inicia turno sin **liveness + match facial ≥ umbral**
+  (`BIOMETRIC_MIN_SCORE`). **Sin bypass, sin override de UI, sin "modo demo"**; 3 fallos = bloqueo 1h (solo la
+  central destraba). Binding **face↔DNI↔licencia** en el alta. La re-validación FULL fail-closed se repite **donde
+  mueve plata** (booking approve/reservar, ADR-014 §8).
+- **PASAJERO = fail-open on-demand (badge PROGRESIVO, NO muro).** El pasajero nace **`UNVERIFIED`** y **PUEDE pedir
+  viaje** con el piso teléfono + nombre. La verificación es **opcional** (liveness liviano desde Perfil) y solo
+  otorga un **badge de confianza** visible al conductor. Se **retiró conscientemente** el `assertKycVerified()`
+  pre-viaje (`public-bff/trips.service.ts` + re-check de `trip-service`) — es el **modelo de baja fricción de
+  adquisición** (no hay requisito legal de identificar al pasajero; Ley 29733 protege el DATO, no obliga a identificar).
+
+> **INVARIANTE — no re-agregar el gate KYC del pasajero pre-viaje "por las dudas".** Volver a poner
+> `assertKycVerified()` en `POST /trips` frenaría la demanda y revierte una decisión del dueño (ADR-018). El
+> endurecimiento selectivo futuro (nocturno / efectivo / N cancelaciones) es una palanca **que NO vuelve al muro**.
+
+### 15.5 Consentimiento Ley 29733 — evento de dominio VERSIONADO (no un flag best-effort)
+
+> **Fuente: [`VEO_SPEC_PASAJERO.md`](../specs/VEO_SPEC_PASAJERO.md) §Onboarding** (3 consentimientos) · regla no-negociable #1 (audit inmutable). Reconciliación Opción A (eleva el "best-effort" del spec).
+
+El pasajero acepta **3 consentimientos OBLIGATORIOS** en el onboarding: **(1) tratamiento de datos, (2) cámara en
+cabina durante el viaje, (3) compartir ubicación** (Ley N.° 29733). El **gate legal de UI** (los 3 son condición
+dura para avanzar) vive en el spec.
+
+**Contrato técnico (lo que el spec dejaba como "best-effort, no bloquea" se ELEVA):** el consentimiento **NO es un
+flag best-effort** — es un **evento de dominio VERSIONADO** con audit inmutable:
+
+```ts
+// evento consent.granted (schemaVersion en el envelope §6)
+{ subjectId, policyId, policyVersion, consents: ['DATA_PROCESSING','CABIN_CAMERA','LOCATION'],
+  acceptedAt /* timestamp inmutable */ }
+```
+
+- **Versionado explícito:** QUÉ política + QUÉ versión aceptada + timestamp inmutable — para poder probar, ante la
+  autoridad, qué texto exacto aceptó cada titular y cuándo.
+- **Encadenado inmutable:** se archiva en el **audit WORM** (MinIO object-lock + retención, regla #1), no un simple
+  `boolean` mutable en una fila.
+- **Dueño recomendado:** **`identity-service` emite** `consent.granted` (es dueño del `User`/onboarding y ya emite
+  `user.registered`) y **`audit-service` lo persiste en la cadena inmutable WORM**. Coherente con el resto de
+  FOUNDATION: identity dueño del acto, audit dueño de la inmutabilidad.
+
+### 15.6 Invariante de fan-out del pánico invisible (contrato de SEGURIDAD, no solo de UI)
+
+> **Fuente: [`VEO_SPEC_CONDUCTOR.md`](../specs/VEO_SPEC_CONDUCTOR.md) §Regla 2/§5** · **[`VEO_SPEC_FAMILIA.md`](../specs/VEO_SPEC_FAMILIA.md) §1** · **[`VEO_SPEC_PASAJERO.md`](../specs/VEO_SPEC_PASAJERO.md) §1.6** · CLAUDE (pair-review pánico).
+
+**Safety-critical.** Cuando el pasajero dispara pánico, el fan-out del backend es **asimétrico por audiencia**:
+
+- **Al CONDUCTOR:** el backend (`panic-service`/`trip-service`) emite **SOLO un `trip:update` con estado
+  `CANCELLED` normal**, indistinguible de una cancelación común. El backend **NO le manda el evento de pánico**.
+- **A la FAMILIA:** el viaje transiciona a **`ended-cancelled`** (una cancelación normal). La familia **no se entera**.
+- **La señal REAL de pánico va SOLO por el canal de la CENTRAL:** `panic.triggered` firmado HMAC (BR-S04) →
+  **audit inmutable + operadores/dispatch de la central**.
+
+> **PROHIBIDO** en el payload al conductor/familia **cualquier marca distintiva** de que fue pánico: tipo de evento
+> especial, `reason: panic` visible, flag, campo extra, vibración/tono distinto, cambio de estado no-estándar. La UI
+> podría filtrarlo y **delatar a la víctima** aunque "se vea igual". Una cancelación por pánico y una cancelación
+> normal deben ser **byte-a-byte indistinguibles** en lo que llega al conductor y a la familia.
+
+**Es un invariante del BACKEND, no solo una regla de UI:** el mensaje al conductor/familia se **construye idéntico**
+a una cancelación cualquiera; la diferenciación existe **exclusivamente** en el canal de la central. Todo cambio que
+toque pánico requiere **pair-review con security** (CLAUDE) + tests adversariales (§11) + p99 < 3s.

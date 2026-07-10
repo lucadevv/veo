@@ -3,7 +3,7 @@
 > **Propósito (convención 2026-06-27):** este doc registra el **estado REAL implementado** del auth de dos
 > superficies, verificado contra código. Es el mapa de "dónde estamos" para no re-confundirse. Complementa
 > `specs/VEO_SPEC_CONDUCTOR.md` (producto conductor) y `specs/VEO_SPEC_ADMIN.md` (producto admin) — esos dicen
-> qué DEBE ser; este dice qué ESTÁ. Verificado: 2026-06-27 (commits hasta `378a7a6`).
+> qué DEBE ser; este dice qué ESTÁ. Verificado: 2026-07-10 (gobierno unificado 4 capas + audit de 9 fixes).
 
 ---
 
@@ -60,20 +60,25 @@ Liveness **ACTIVO** (challenge: `TURN_LEFT|TURN_RIGHT|NOD|SMILE`, one-shot, `exp
 
 **Email corporativo + password (Argon2id) + TOTP (MFA obligatorio).** Primer login: challenge QR/otpauth → enrola en Authenticator → confirma 6 díg. Logins posteriores: email+pass+TOTP. Rate-limited (login 10/10min, totp 10/10min, invite 10/10min; logout `@SkipRateLimit`).
 
-### RBAC — 7 roles + matriz ✅
+### RBAC — 7 roles + matriz ✅ · Gobierno unificado de 4 capas (ADR-024/025)
 
 Roles por rango: `SUPPORT_L1`(10) · `SUPPORT_L2`(20) · `DISPATCHER`(30) · `FINANCE`(30) · `COMPLIANCE_SUPERVISOR`(40) · `ADMIN`(90) · `SUPERADMIN`(100).
+
+**El "quién puede qué" es una pila de 4 capas (ADR-025):** **Roles** (enum) → **Permisos base** (código) → **Overlay** (registro, subtract-only) → **Políticas/PBAC** (registro, condicional). La **matriz base `PERMISSION_ROLES` es FUENTE ÚNICA** y vive en **`@veo/policy`** (`packages/policy/src/permissions.ts`) — front+backend consumen el MISMO mapa; `apps/admin-web/src/lib/rbac.ts` ya NO tiene su copia, **re-exporta** de `@veo/policy`.
 
 | Permiso                                                                                   | quién                                                                                                   |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `ops:view` · `trips/drivers:view`                                                         | SUPPORT+ / la mayoría                                                                                   |
 | `drivers:approve` · `fleet:view/review` · `panics:resolve` · `media:view/request/live`     | COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN                                                                |
-| **`media:approve`** (EXCLUSIVO)                                                            | **solo COMPLIANCE_SUPERVISOR + SUPERADMIN** (ADMIN SOLICITA pero NO APRUEBA; autorizar el acceso a video grabado es función de cumplimiento, Ley 29733). @Roles a nivel MÉTODO override al set de clase en las 3 capas (rbac.ts, admin-bff, media-service). Complementa el four-eyes por IDENTIDAD (approverId ≠ requestedBy) |
+| **`media:approve`** (EXCLUSIVO)                                                            | **solo COMPLIANCE_SUPERVISOR + SUPERADMIN** (ADMIN SOLICITA pero NO APRUEBA; autorizar el acceso a video grabado es función de cumplimiento, Ley 29733). Verificado en `@veo/policy` (`permissions.ts:100`), admin-bff (`media.controller.ts` `@Permission('media:approve')`) y media-service. Complementa el four-eyes por IDENTIDAD (approverId ≠ requestedBy) |
 | `finance:view/refund`                                                                     | FINANCE, ADMIN, SUPERADMIN                                                                              |
-| **`finance:payout`** (EXCLUSIVO)                                                          | **solo FINANCE** (ni ADMIN ni SUPERADMIN)                                                               |
-| **`audit:view/verify`** (EXCLUSIVO)                                                       | **solo COMPLIANCE_SUPERVISOR + SUPERADMIN** (separación de funciones, Ley 29733: quien opera NO audita) |
+| **`finance:payout`** (EXCLUSIVO · 🔒 candado legal)                                       | **solo FINANCE** (ni ADMIN ni SUPERADMIN) — **no-restable por el Overlay**                              |
+| **`audit:view/verify`** (EXCLUSIVO · 🔒 candado legal)                                    | **solo COMPLIANCE_SUPERVISOR + SUPERADMIN** (separación de funciones, Ley 29733: quien opera NO audita) — **no-restables por el Overlay** |
 
-- **Doble gate:** server-side `@Roles(...)` + `RolesGuard` (autoritativo) · UI `can(user, permission)` (oculta, defensa en profundidad — la UI NO autoriza).
+- **Overlay (capa 3) subtract-only:** el registro `PermissionOverride` (en `identity-service`, distribuido por Kafka + cache fail-safe) SOLO puede **RESTAR** permisos por-rol, jamás conceder (un override que intente conceder lo rechaza el server: `baseGrants` en `@veo/policy`). Efectivo = `base ∧ ¬oculto`.
+- **Candados legales no-restables** (`LEGAL_MANDATORY` en `@veo/policy`): **`audit:view`**, **`audit:verify`**, **`finance:payout`** — el Overlay NO puede ocultarlos en NINGÚN rol (análogo al `mandatory` de una Política; garantía de control interno Ley 29733).
+- **Enforcement server-side** en admin-bff (`src/policies/`): `@Permission(...)` + `PermissionOverlayGuard` (`base ∧ ¬override`), `IpAllowlistGuard`, `SessionIdleGuard`, `PolicyStepUpMfaGuard`. _Gap: el `PermissionOverlayGuard` es NO-OP en handlers que aún no declaran `@Permission` (falta el barrido endpoint→permiso, Ola B)._
+- **Doble gate:** server-side `@Roles(...)` + `RolesGuard` (autoritativo, **fail-CLOSED**: una ruta autenticada sin `@Roles` da 403, con bypass `@Public` explícito) · UI `can(user, permission)` = `base ∧ ¬hidden` (oculta, defensa en profundidad — la UI NO autoriza).
 - **Anti-escalada:** un actor solo otorga roles de rango ESTRICTAMENTE menor al suyo (excepción SUPERADMIN→SUPERADMIN). `canGrantRoles`.
 
 ### Step-up MFA ✅

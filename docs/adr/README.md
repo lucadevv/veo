@@ -61,4 +61,11 @@ Links, PRs, papers.
 | [015](./015-liquidaciones-payout.md)               | Liquidaciones y payout (`PayoutGateway` money-OUT)             | Ratificado               |
 | [016](./016-mtls-grpc-interno.md)                  | mTLS para el gRPC interno (TLS-capable env-gated)              | Aceptado                 |
 | [017](./017-modelo-pricing-energia-tiers.md)       | Modelo de pricing, energía y tiers del híbrido (admin primero) | Aceptado · energía removida |
+| [018](./018-verificacion-pasajero-progresiva.md)   | Verificación de identidad del pasajero PROGRESIVA (badge de confianza) | Implementado (Lotes 1-4) |
+| [019](./019-consistencia-match-3-superficies-ventana-configurable.md) | Consistencia del match entre 3 superficies + ventana de dispatch configurable | Propuesto (diseño) |
+| [020](./020-reactividad-flujo-puja.md)             | Reactividad del flujo de puja (loop realtime pasajero↔conductor↔admin) | En progreso (Lote 1) |
+| [021](./021-hardening-flujo-puja.md)               | Hardening del flujo de puja (integridad · dinero · concurrencia · lifecycle) | En progreso (Fase A) |
+| [022](./022-hardening-pagos-coherencia-membresias.md) | Hardening del flujo de pagos: coherencia del dinero + membresías | Propuesto (plano) |
 | [023](./023-modelo-pricing-coexistencia.md)        | **Modelo de pricing por COEXISTENCIA (FIJO·PUJA·COST-SHARE)**   | **Ratificado (fuente de verdad)** |
+| [024](./024-pbac-politicas-gobierno.md)            | PBAC: capa de Políticas de gobierno sobre RBAC                  | Propuesto (diseño) |
+| [025](./025-modelo-gobierno-unificado.md)          | **Modelo de Gobierno unificado (Roles · Permisos · Overlay · Políticas)** | Propuesto (diseño) |
