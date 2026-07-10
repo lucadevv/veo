@@ -79,6 +79,8 @@ describe('RealtimeOfferDelivery · publicación de dispatch.offered (Kafka direc
       driverId: 'd1',
       matchId: 'm1',
       expiresAt: '2026-01-01T00:00:30.000Z',
+      // ETA conductor→recojo derivado del `etaSeconds` de entrada (120 > 0 → se agrega la key).
+      pickupEtaSeconds: 120,
     });
   });
 
