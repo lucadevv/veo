@@ -18,6 +18,8 @@ import {
   InternalIdentityGuard,
   AudienceGuard,
   RolesGuard,
+  RequireStepUpMfa,
+  StepUpMfaGuard,
   InternalAudience,
   type AuthenticatedUser,
 } from '@veo/auth';
@@ -260,9 +262,12 @@ export class PaymentsController {
   // restringido al mínimo de roles que mueven dinero). Alinea payment-service con el admin-bff (`@Roles(FINANCE,
   // ADMIN, SUPERADMIN)`) y con el spec: antes payment-service exigía SUPPORT_L1/L2 y OMITÍA FINANCE, así que un
   // operador FINANCE pasaba el BFF pero el servicio lo rechazaba. NO se abre a service-rail (mínimo privilegio ·
-  // ADR-014 §5.5): el riel admin + el RBAC de operador lo gatean. ──
-  @UseGuards(RolesGuard)
+  // ADR-014 §5.5): el riel admin + el RBAC de operador lo gatean. Defensa en profundidad (igual que los payouts):
+  // step-up MFA en DOS capas — el admin-bff ya exige @RequireStepUpMfa en su borde, y aquí el servicio vuelve a
+  // exigirlo por sí mismo, sin confiar en el caller. El refund es mutación money-OUT como el payout: misma barrera. ──
+  @UseGuards(RolesGuard, StepUpMfaGuard)
   @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
   @Audiences(...PASSENGER_RAILS)
   @Post(':tripId/refund')
   @HttpCode(200)
