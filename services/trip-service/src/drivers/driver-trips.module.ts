@@ -6,9 +6,10 @@
 import { Module } from '@nestjs/common';
 import { DriverTripsController } from './driver-trips.controller';
 import { DriverTripsService } from './driver-trips.service';
+import { DriverTripsRepository } from './driver-trips.repository';
 
 @Module({
   controllers: [DriverTripsController],
-  providers: [DriverTripsService],
+  providers: [DriverTripsService, DriverTripsRepository],
 })
 export class DriverTripsModule {}

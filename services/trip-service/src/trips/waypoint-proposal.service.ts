@@ -28,7 +28,7 @@ import {
 } from '@veo/utils';
 import { TripStatus } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
-import { PrismaService } from '../infra/prisma.service';
+import { WaypointProposalRepository } from './waypoint-proposal.repository';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
@@ -79,7 +79,7 @@ export class WaypointProposalService {
   private readonly ttlSeconds: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: WaypointProposalRepository,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Optional() config?: ConfigService<Env, true>,
     // F2.4 · tarifa base configurable (banderazo/km/min). @Optional: sin él → constantes de código.
@@ -144,9 +144,7 @@ export class WaypointProposalService {
     // (el pasajero espera la respuesta del conductor o el TTL). La elección "rechazar" (vs. expirar la
     // vieja) es la más simple y honesta: no resucitamos rutas/tarifas calculadas con un estado anterior.
     // El índice único parcial en DB es el backstop ante una carrera (dos propose concurrentes).
-    const existing = await this.prisma.read.tripWaypointProposal.findFirst({
-      where: { tripId, status: WaypointProposalStatus.PROPOSED },
-    });
+    const existing = await this.repo.findLiveProposalByTrip(tripId);
     if (existing && !isExpired(existing.expiresAt, new Date())) {
       throw new WaypointProposalActiveError(existing.id);
     }
@@ -194,18 +192,16 @@ export class WaypointProposalService {
     const expiresAt = new Date(now.getTime() + this.ttlSeconds * 1000);
 
     try {
-      const proposal = await this.prisma.write.$transaction(async (tx) => {
-        const created = await tx.tripWaypointProposal.create({
-          data: {
-            tripId,
-            lat: point.lat,
-            lon: point.lon,
-            deltaFareCents,
-            newFareCents,
-            status: WaypointProposalStatus.PROPOSED,
-            proposedAt: now,
-            expiresAt,
-          },
+      const proposal = await this.repo.runInTransaction(async (tx) => {
+        const created = await this.repo.createProposalTx(tx, {
+          tripId,
+          lat: point.lat,
+          lon: point.lon,
+          deltaFareCents,
+          newFareCents,
+          status: WaypointProposalStatus.PROPOSED,
+          proposedAt: now,
+          expiresAt,
         });
         const eventData: WaypointProposalEventData = {
           proposalId: created.id,
@@ -235,9 +231,7 @@ export class WaypointProposalService {
       // Carrera: el índice único parcial `WHERE status='PROPOSED'` rechaza un segundo PROPOSED concurrente
       // (P2002). Lo traducimos al mismo 409 tipado que el chequeo de lectura (degradación honesta).
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        const live = await this.prisma.read.tripWaypointProposal.findFirst({
-          where: { tripId, status: WaypointProposalStatus.PROPOSED },
-        });
+        const live = await this.repo.findLiveProposalByTrip(tripId);
         throw new WaypointProposalActiveError(live?.id ?? tripId);
       }
       throw err;
@@ -266,9 +260,7 @@ export class WaypointProposalService {
       throw new NotFoundError('Viaje no encontrado', { id: tripId });
     }
 
-    const proposal = await this.prisma.read.tripWaypointProposal.findUnique({
-      where: { id: proposalId },
-    });
+    const proposal = await this.repo.findProposalById(proposalId);
     if (proposal?.tripId !== tripId) {
       throw new NotFoundError('Propuesta de parada no encontrada', { proposalId });
     }
@@ -321,11 +313,11 @@ export class WaypointProposalService {
     const route = await this.maps.route(origin, destination, newWaypoints);
     const waypointsJson = newWaypoints.map((w) => ({ lat: w.lat, lon: w.lon }));
 
-    const applied = await this.prisma.write.$transaction(async (tx) => {
+    const applied = await this.repo.runInTransaction(async (tx) => {
       // Guard CAS de la propuesta: solo si SIGUE PROPOSED (no doble accept ni pisar un expire/reject).
-      const moved = await tx.tripWaypointProposal.updateMany({
-        where: { id: proposalId, status: WaypointProposalStatus.PROPOSED },
-        data: { status: WaypointProposalStatus.ACCEPTED, respondedAt: new Date() },
+      const moved = await this.repo.casMoveProposalTx(tx, proposalId, {
+        status: WaypointProposalStatus.ACCEPTED,
+        respondedAt: new Date(),
       });
       if (moved.count === 0) return false; // otro actor ganó la carrera (doble-accept/expire/reject)
 
@@ -334,15 +326,12 @@ export class WaypointProposalService {
       // (cancel del pasajero, watchdog, redelivery/multi-device) en esa ventana → count 0 → throw DENTRO de la
       // tx, que REVIERTE el CAS de la propuesta (atómico). Evita la mutación financiera post-completion (mismo
       // invariante que el CAS de changeDestination).
-      const tripMoved = await tx.trip.updateMany({
-        where: { id: tripId, status: { in: [...WAYPOINT_PROPOSABLE] } },
-        data: {
-          waypoints: waypointsJson,
-          fareCents: proposal.newFareCents,
-          distanceMeters: route.distanceMeters,
-          durationSeconds: route.durationSeconds,
-          routePolyline: route.polyline || null,
-        },
+      const tripMoved = await this.repo.casApplyWaypointToTripTx(tx, tripId, [...WAYPOINT_PROPOSABLE], {
+        waypoints: waypointsJson,
+        fareCents: proposal.newFareCents,
+        distanceMeters: route.distanceMeters,
+        durationSeconds: route.durationSeconds,
+        routePolyline: route.polyline || null,
       });
       if (tripMoved.count === 0) {
         throw new ConflictError('El viaje ya no está en curso; no se puede aplicar la parada', {
@@ -355,9 +344,7 @@ export class WaypointProposalService {
 
     if (!applied) {
       // Carrera perdida: releemos el estado actual y devolvemos un 409 honesto (idempotente).
-      const fresh = await this.prisma.read.tripWaypointProposal.findUnique({
-        where: { id: proposalId },
-      });
+      const fresh = await this.repo.findProposalById(proposalId);
       throw new WaypointProposalNotPendingError(fresh?.status ?? WaypointProposalStatus.EXPIRED);
     }
 
@@ -384,18 +371,7 @@ export class WaypointProposalService {
   ): Promise<
     (Pick<TripWaypointProposal, 'id' | 'tripId' | 'lat' | 'lon'> & { passengerId: string })[]
   > {
-    const rows = await this.prisma.read.tripWaypointProposal.findMany({
-      where: { status: WaypointProposalStatus.PROPOSED, expiresAt: { lte: now } },
-      orderBy: { expiresAt: 'asc' },
-      take: limit,
-      select: {
-        id: true,
-        tripId: true,
-        lat: true,
-        lon: true,
-        trip: { select: { passengerId: true } },
-      },
-    });
+    const rows = await this.repo.findExpiredCandidates(now, limit);
     return rows.map((r) => ({
       id: r.id,
       tripId: r.tripId,
@@ -411,21 +387,14 @@ export class WaypointProposalService {
    * actor (respond/otro tick) ya la movió (count 0) → no-op. Devuelve true si la expiró, false si no.
    */
   async expireProposal(proposalId: string, now: Date = new Date()): Promise<boolean> {
-    const proposal = await this.prisma.read.tripWaypointProposal.findUnique({
-      where: { id: proposalId },
-      include: { trip: { select: { passengerId: true } } },
-    });
+    const proposal = await this.repo.findProposalByIdWithTrip(proposalId);
     if (proposal?.status !== WaypointProposalStatus.PROPOSED) return false;
     if (!isExpired(proposal.expiresAt, now)) return false;
 
-    const applied = await this.prisma.write.$transaction(async (tx) => {
-      const moved = await tx.tripWaypointProposal.updateMany({
-        where: {
-          id: proposalId,
-          status: WaypointProposalStatus.PROPOSED,
-          expiresAt: { lte: now },
-        },
-        data: { status: WaypointProposalStatus.EXPIRED, respondedAt: now },
+    const applied = await this.repo.runInTransaction(async (tx) => {
+      const moved = await this.repo.casExpireProposalTx(tx, proposalId, now, {
+        status: WaypointProposalStatus.EXPIRED,
+        respondedAt: now,
       });
       if (moved.count === 0) return false;
       await emitWaypointExpired(tx, {
@@ -446,7 +415,7 @@ export class WaypointProposalService {
   // ───────────────────────────── helpers ─────────────────────────────
 
   private async mustFindTrip(id: string): Promise<Trip> {
-    const trip = await this.prisma.write.trip.findUnique({ where: { id } });
+    const trip = await this.repo.findTripByIdOnPrimary(id);
     if (!trip) throw new NotFoundError('Viaje no encontrado', { id });
     return trip;
   }
@@ -457,19 +426,17 @@ export class WaypointProposalService {
     target: typeof WaypointProposalStatus.REJECTED,
     emit: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<WaypointProposalStatus> {
-    const applied = await this.prisma.write.$transaction(async (tx) => {
-      const moved = await tx.tripWaypointProposal.updateMany({
-        where: { id: proposal.id, status: WaypointProposalStatus.PROPOSED },
-        data: { status: target, respondedAt: new Date() },
+    const applied = await this.repo.runInTransaction(async (tx) => {
+      const moved = await this.repo.casMoveProposalTx(tx, proposal.id, {
+        status: target,
+        respondedAt: new Date(),
       });
       if (moved.count === 0) return false;
       await emit(tx);
       return true;
     });
     if (!applied) {
-      const fresh = await this.prisma.read.tripWaypointProposal.findUnique({
-        where: { id: proposal.id },
-      });
+      const fresh = await this.repo.findProposalById(proposal.id);
       throw new WaypointProposalNotPendingError(fresh?.status ?? WaypointProposalStatus.EXPIRED);
     }
     return target;

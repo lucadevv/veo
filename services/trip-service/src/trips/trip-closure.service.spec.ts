@@ -7,7 +7,9 @@ import { describe, it, expect } from 'vitest';
 import { ConflictError, NotFoundError } from '@veo/utils';
 import { TripStatus } from '@veo/shared-types';
 import { TripsService } from './trips.service';
+import { TripsRepository } from './trips.repository';
 import { TripQueryService } from './trip-query.service';
+import { TripQueryRepository } from './trip-query.repository';
 import { Prisma, type Trip } from '../generated/prisma';
 
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
@@ -133,7 +135,7 @@ const maps = {} as never;
 describe('TripQueryService.getPendingSettlement', () => {
   it('devuelve el COMPLETED MÁS VIEJO sin cerrar del pasajero', async () => {
     const prisma = makePrisma(buildTrip());
-    const svc = new TripQueryService(prisma as never);
+    const svc = new TripQueryService(new TripQueryRepository(prisma as never));
     const view = await svc.getPendingSettlement('pax-1');
     expect(view?.id).toBe('trip-1');
     expect(view?.status).toBe(TripStatus.COMPLETED);
@@ -152,26 +154,26 @@ describe('TripQueryService.getPendingSettlement', () => {
       completedAt: new Date('2026-06-06T15:00:00.000Z'),
     });
     const prisma = makePrisma([nuevo, viejo]); // orden de inserción invertido a propósito
-    const svc = new TripQueryService(prisma as never);
+    const svc = new TripQueryService(new TripQueryRepository(prisma as never));
     const view = await svc.getPendingSettlement('pax-1');
     expect(view?.id).toBe('trip-viejo');
   });
 
   it('null si el viaje ya está cerrado (passengerClosedAt seteado)', async () => {
     const prisma = makePrisma(buildTrip({ passengerClosedAt: new Date() }));
-    const svc = new TripQueryService(prisma as never);
+    const svc = new TripQueryService(new TripQueryRepository(prisma as never));
     expect(await svc.getPendingSettlement('pax-1')).toBeNull();
   });
 
   it('null si no hay viaje del pasajero', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripQueryService(prisma as never);
+    const svc = new TripQueryService(new TripQueryRepository(prisma as never));
     expect(await svc.getPendingSettlement('pax-1')).toBeNull();
   });
 
   it('null si el COMPLETED es de OTRO pasajero (no se filtra)', async () => {
     const prisma = makePrisma(buildTrip({ passengerId: 'otro' }));
-    const svc = new TripQueryService(prisma as never);
+    const svc = new TripQueryService(new TripQueryRepository(prisma as never));
     expect(await svc.getPendingSettlement('pax-1')).toBeNull();
   });
 });
@@ -179,7 +181,7 @@ describe('TripQueryService.getPendingSettlement', () => {
 describe('TripsService.closeByPassenger', () => {
   it('sella passengerClosedAt sobre el viaje COMPLETED del pasajero', async () => {
     const prisma = makePrisma(buildTrip());
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.closeByPassenger('trip-1', 'pax-1');
     expect(view.passengerClosedAt).not.toBeNull();
     expect(prisma._store?.passengerClosedAt).not.toBeNull();
@@ -190,26 +192,26 @@ describe('TripsService.closeByPassenger', () => {
   it('es IDEMPOTENTE: cerrar dos veces no es error y no re-escribe', async () => {
     const closedAt = new Date('2026-06-06T10:00:00.000Z');
     const prisma = makePrisma(buildTrip({ passengerClosedAt: closedAt }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.closeByPassenger('trip-1', 'pax-1');
     expect(view.passengerClosedAt).toBe(closedAt.toISOString());
   });
 
   it('NotFound (404) si el viaje es de OTRO pasajero (anti-enumeración)', async () => {
     const prisma = makePrisma(buildTrip({ passengerId: 'otro' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.closeByPassenger('trip-1', 'pax-1')).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('NotFound (404) si el viaje no existe', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.closeByPassenger('trip-1', 'pax-1')).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('Conflict si el viaje no está COMPLETED (no hay cierre que sellar)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.IN_PROGRESS }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.closeByPassenger('trip-1', 'pax-1')).rejects.toBeInstanceOf(ConflictError);
   });
 });

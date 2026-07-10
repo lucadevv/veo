@@ -13,7 +13,7 @@
  * cuántas filas tocó, y el resumen del purge necesita decir la verdad de lo que se borró.
  */
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../infra/prisma.service';
+import { DriverTripsRepository } from './driver-trips.repository';
 
 /** Contadores por tabla del HARD purge de viajes de un conductor (observabilidad/degradación honesta). */
 export interface DriverTripsPurgeView {
@@ -25,7 +25,7 @@ export interface DriverTripsPurgeView {
 
 @Injectable()
 export class DriverTripsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: DriverTripsRepository) {}
 
   /**
    * Borra TODOS los viajes del conductor (`Trip.driverId = driverId`) y sus dependientes, en UNA
@@ -34,10 +34,10 @@ export class DriverTripsService {
    * (DEV), no un hecho de dominio del ciclo de vida del viaje.
    */
   async purgeForDriver(driverId: string): Promise<DriverTripsPurgeView> {
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTransaction(async (tx) => {
       // Ids de los viajes del conductor: necesarios para CONTAR los dependientes (el cascade físico los
       // borra solo, pero no reporta cuántos) y, si no hubiera cascade, para borrarlos explícito.
-      const trips = await tx.trip.findMany({ where: { driverId }, select: { id: true } });
+      const trips = await this.repo.findTripIdsByDriverTx(tx, driverId);
       const tripIds = trips.map((t) => t.id);
 
       if (tripIds.length === 0) {
@@ -45,16 +45,16 @@ export class DriverTripsService {
       }
 
       const [tripEvents, waypointProposals] = await Promise.all([
-        tx.tripEvent.count({ where: { tripId: { in: tripIds } } }),
-        tx.tripWaypointProposal.count({ where: { tripId: { in: tripIds } } }),
+        this.repo.countTripEventsByTripIdsTx(tx, tripIds),
+        this.repo.countWaypointProposalsByTripIdsTx(tx, tripIds),
       ]);
 
       // Borramos los dependientes EXPLÍCITO antes del Trip: el contador es honesto y no dependemos de que
       // el cascade físico esté presente en cada entorno (defensa en profundidad; en DB con cascade es no-op
       // de filas ya idas, pero acá las sacamos nosotros primero — el deleteMany es idempotente).
-      await tx.tripEvent.deleteMany({ where: { tripId: { in: tripIds } } });
-      await tx.tripWaypointProposal.deleteMany({ where: { tripId: { in: tripIds } } });
-      const deletedTrips = await tx.trip.deleteMany({ where: { driverId } });
+      await this.repo.deleteTripEventsByTripIdsTx(tx, tripIds);
+      await this.repo.deleteWaypointProposalsByTripIdsTx(tx, tripIds);
+      const deletedTrips = await this.repo.deleteTripsByDriverTx(tx, driverId);
 
       return {
         driverId,

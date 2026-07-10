@@ -8,7 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { TripStatus } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { TripWatchdogRepository, type WatchdogSnapshot } from './trip-watchdog.repository';
 import { PRODUCER, recordTripEvent } from './trip-events';
 import { assertTransition } from './domain/trip-state-machine';
 import {
@@ -17,13 +17,12 @@ import {
   type WatchdogThresholds,
   type StalledTarget,
 } from './domain/watchdog';
-import type { Trip } from '../generated/prisma';
 
 @Injectable()
 export class TripWatchdogService {
   private readonly logger = new Logger(TripWatchdogService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: TripWatchdogRepository) {}
 
   /**
    * Selecciona viajes NO terminales cuya última actividad (`updatedAt`) es anterior al corte más
@@ -34,16 +33,8 @@ export class TripWatchdogService {
    * `staleBefore` debe ser el corte MÁS ANTIGUO posible (el mayor de los umbrales) para no perder
    * candidatos; el filtrado fino por estado lo hace el dominio.
    */
-  async findStalledCandidates(
-    staleBefore: Date,
-    limit: number,
-  ): Promise<Pick<Trip, 'id' | 'status' | 'passengerId' | 'driverId' | 'updatedAt'>[]> {
-    return this.prisma.read.trip.findMany({
-      where: { status: { in: [...WATCHED_STATES] }, updatedAt: { lte: staleBefore } },
-      orderBy: { updatedAt: 'asc' },
-      take: limit,
-      select: { id: true, status: true, passengerId: true, driverId: true, updatedAt: true },
-    });
+  async findStalledCandidates(staleBefore: Date, limit: number): Promise<WatchdogSnapshot[]> {
+    return this.repo.findStalledCandidates(WATCHED_STATES, staleBefore, limit);
   }
 
   /**
@@ -60,10 +51,7 @@ export class TripWatchdogService {
     thresholds: WatchdogThresholds,
     now: Date = new Date(),
   ): Promise<StalledTarget | null> {
-    const trip = await this.prisma.read.trip.findUnique({
-      where: { id },
-      select: { id: true, status: true, passengerId: true, driverId: true, updatedAt: true },
-    });
+    const trip = await this.repo.findWatchdogSnapshot(id);
     if (!trip) return null;
     const target = resolveStalledTarget(trip.status, trip.updatedAt, now, thresholds);
     if (target === null) return null; // ya no estancado / ya terminal / aún fresco
@@ -72,16 +60,10 @@ export class TripWatchdogService {
     const staleMinutes = Math.floor((now.getTime() - trip.updatedAt.getTime()) / 60000);
     const eventType = target === TripStatus.EXPIRED ? 'trip.expired' : 'trip.failed';
 
-    const applied = await this.prisma.write.$transaction(async (tx) => {
+    const applied = await this.repo.runInTransaction(async (tx) => {
       // Guard de carrera: solo transiciona si SIGUE en el estado observado (no doble barrido ni
       // pisar una transición legítima — accept/cancel/complete — que ocurrió entre el read y aquí).
-      const updated = await tx.trip.updateMany({
-        where: { id, status: trip.status },
-        data:
-          target === TripStatus.EXPIRED
-            ? { status: TripStatus.EXPIRED }
-            : { status: TripStatus.FAILED },
-      });
+      const updated = await this.repo.casGuardedStatusUpdate(tx, id, trip.status, target);
       if (updated.count === 0) return false; // otro actor ganó la carrera
 
       const payload = {

@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { TripStatus } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { WaypointProposalService } from './waypoint-proposal.service';
+import { WaypointProposalRepository } from './waypoint-proposal.repository';
 import { WaypointProposalStatus } from './domain/waypoint-proposal';
 import type { PrismaService } from '../infra/prisma.service';
 import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prisma';
@@ -110,7 +111,7 @@ function makeMaps(distanceMeters: number, durationSeconds: number): MapsClient {
 function makeService(trip: Trip, newRoute: { distanceMeters: number; durationSeconds: number }) {
   const prisma = makePrisma(trip);
   const service = new WaypointProposalService(
-    prisma as unknown as PrismaService,
+    new WaypointProposalRepository(prisma as unknown as PrismaService),
     makeMaps(newRoute.distanceMeters, newRoute.durationSeconds),
   );
   return { service, prisma };

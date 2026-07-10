@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { TripStatus, PaymentMethod } from '@veo/shared-types';
 import { TripWatchdogService } from './trip-watchdog.service';
+import { TripWatchdogRepository } from './trip-watchdog.repository';
 import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
 import { resolveStalledTarget, WATCHED_STATES, type WatchdogThresholds } from './domain/watchdog';
 import { Prisma, type Trip } from '../generated/prisma';
@@ -229,7 +230,7 @@ describe('watchdog · resolveStalledTarget (dominio puro)', () => {
 
 function makeScheduler(trips: Trip[]) {
   const prisma = makePrisma(trips);
-  const svc = new TripWatchdogService(prisma as never);
+  const svc = new TripWatchdogService(new TripWatchdogRepository(prisma as never));
   const scheduler = new TripWatchdogScheduler(svc, fakeConfig as never);
   return { prisma, svc, scheduler };
 }
