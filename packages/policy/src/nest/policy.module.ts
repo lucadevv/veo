@@ -23,6 +23,7 @@ import { POLICY_READER } from '../tokens.js';
 import { InternalRestPolicyRegistry, type PolicyRegistryPort } from './registry.js';
 import { KafkaCachedPolicyReader } from './kafka-cached-policy-reader.js';
 import { PolicyUpdatedConsumer } from './policy-updated.consumer.js';
+import { PermissionOverrideUpdatedConsumer } from './permission-override-updated.consumer.js';
 
 /** Config runtime que el servicio pasa para cablear el cliente de políticas. */
 export interface PolicyRuntimeConfig {
@@ -36,8 +37,10 @@ export interface PolicyRuntimeConfig {
   internalSecret: string;
   /** Riel con el que se firma la identidad de sistema. Default admin-rail (lo exige `/internal/policies`). */
   audience?: InternalAudience;
-  /** groupId del consumer. Default `${serviceName}-policy` (aislado de los demás consumers del servicio). */
+  /** groupId del consumer de políticas. Default `${serviceName}-policy` (aislado de los demás consumers). */
   groupId?: string;
+  /** groupId del consumer de overrides (overlay · ADR-025). Default `${serviceName}-permission-override`. */
+  overrideGroupId?: string;
   /** Consumir desde el principio del topic. Default false. */
   fromBeginning?: boolean;
 }
@@ -80,6 +83,21 @@ function runtimeProviders(): Provider[] {
           clientId: cfg.serviceName,
           brokers: cfg.kafkaBrokers,
           groupId: cfg.groupId ?? `${cfg.serviceName}-policy`,
+          fromBeginning: cfg.fromBeginning,
+        }),
+    },
+    {
+      // OVERLAY (ADR-025): consumer hermano con SU propio groupId (aislado del de políticas), mismo reader.
+      provide: PermissionOverrideUpdatedConsumer,
+      inject: [KafkaCachedPolicyReader, POLICY_RUNTIME_CONFIG],
+      useFactory: (
+        reader: KafkaCachedPolicyReader,
+        cfg: PolicyRuntimeConfig,
+      ): PermissionOverrideUpdatedConsumer =>
+        new PermissionOverrideUpdatedConsumer(reader, {
+          clientId: cfg.serviceName,
+          brokers: cfg.kafkaBrokers,
+          groupId: cfg.overrideGroupId ?? `${cfg.serviceName}-permission-override`,
           fromBeginning: cfg.fromBeginning,
         }),
     },

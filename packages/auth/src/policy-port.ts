@@ -19,6 +19,16 @@ export interface PolicyReaderPort {
    * o `fallback` si la política/param no está en cache ni tiene default numérico (nunca fail-open).
    */
   numberSync(key: string, param: string, fallback: number): number;
+
+  /**
+   * OVERLAY de visibilidad (ADR-025 §3, capa 2), lectura SÍNCRONA para los guards: ¿el par
+   * `(role, permission)` está RESTADO (hidden) para ese rol? El guard compone `base ∧ ¬override` sin
+   * `await` (su `canActivate` es síncrono, igual que con `numberSync`). Vive ACÁ y no en el `PolicyReader`
+   * async de `@veo/policy` por el MISMO motivo que `numberSync`: el guard no puede depender de `@veo/policy`
+   * (ciclo) y necesita lectura síncrona del cache. DEFAULT `false` = NO restado = rige la base (fail-safe:
+   * sin dato NUNCA se resta; el `@Roles` base sigue siendo el gate primario).
+   */
+  isPermissionHiddenSync(role: string, permission: string): boolean;
 }
 
 /**

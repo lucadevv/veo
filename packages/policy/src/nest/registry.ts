@@ -26,14 +26,35 @@ export interface PolicyView {
   updatedAt: string;
 }
 
-/** Puerto de lectura del registro central de políticas. Un doble en tests, el REST interno en prod. */
+/**
+ * Vista de un override de permiso tal como lo expondrá `GET /internal/permission-overlays` de
+ * identity-service en la Ola 2 (contrato del wire · ADR-025 §3). Re-declarada acá (no importada del otro
+ * bounded-context) por el mismo criterio que `PolicyView`. El cache solo consume `role/permission/hidden/version`.
+ * Subtract-only: el registro guarda SOLO los pares restados; ausencia = comportamiento base.
+ */
+export interface PermissionOverrideView {
+  role: string;
+  permission: string;
+  hidden: boolean;
+  version: number;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+/** Puerto de lectura del registro central de gobierno. Un doble en tests, el REST interno en prod. */
 export interface PolicyRegistryPort {
   /** Todas las políticas vigentes (la grilla de gobierno). Lanza si el registro es inalcanzable. */
   list(): Promise<PolicyView[]>;
+  /**
+   * Todos los overrides de permiso vigentes (overlay, capa 2 · ADR-025). Lanza si el registro es inalcanzable
+   * o si el endpoint aún no existe (Ola 2): el reader TOLERA el fallo → overlay vacío = sin overrides (fail-safe).
+   */
+  listOverrides(): Promise<PermissionOverrideView[]>;
 }
 
-/** Endpoint interno del registro (idéntico al que consume el admin-bff). */
+/** Endpoints internos del registro de gobierno (idénticos a los que consume el admin-bff). */
 const POLICIES_PATH = '/internal/policies';
+const OVERRIDES_PATH = '/internal/permission-overrides';
 
 /**
  * Adapter REST interno firmado (HMAC · riel admin) sobre `InternalRestClient`. No hay usuario final detrás de
@@ -48,5 +69,9 @@ export class InternalRestPolicyRegistry implements PolicyRegistryPort {
 
   list(): Promise<PolicyView[]> {
     return this.rest.get<PolicyView[]>(POLICIES_PATH, { identity: this.identity });
+  }
+
+  listOverrides(): Promise<PermissionOverrideView[]> {
+    return this.rest.get<PermissionOverrideView[]>(OVERRIDES_PATH, { identity: this.identity });
   }
 }

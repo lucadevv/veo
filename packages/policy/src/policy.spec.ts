@@ -112,6 +112,11 @@ describe('DefaultPolicyReader — devuelve los defaults', () => {
     await expect(reader.params('media.dual-auth')).resolves.toEqual({ approvers: 2 });
   });
 
+  it('isPermissionHidden es SIEMPRE false (sin overrides = rige la base · ADR-025 §3)', async () => {
+    await expect(reader.isPermissionHidden('DISPATCHER', 'drivers:approve')).resolves.toBe(false);
+    await expect(reader.isPermissionHidden('SUPERADMIN', 'audit:read')).resolves.toBe(false);
+  });
+
   it('DEFAULT_PARAMS devuelve una copia (no la referencia interna)', () => {
     const a = DEFAULT_PARAMS('access.ip-allowlist');
     expect(a).toEqual({ cidrs: [] });

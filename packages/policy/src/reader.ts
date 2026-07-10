@@ -24,6 +24,14 @@ export interface PolicyReader {
   list(key: PolicyKey, param: string, fallback: string[]): Promise<string[]>;
   /** Objeto `params` completo y crudo de la política. */
   params(key: PolicyKey): Promise<unknown>;
+
+  /**
+   * OVERLAY de visibilidad (ADR-025 §3, capa 2) — SOLO LECTURA: ¿el par `(role, permission)` está RESTADO
+   * (hidden) para ese rol? `@veo/policy` NO conoce la matriz base; el caller compone `base ∧ ¬override`.
+   * DEFAULT `false` = NO restado = rige la base. Fail-safe: ante ausencia de dato/fallo NUNCA se resta
+   * (no se afloja NI se endurece de más un candado por un problema de lectura).
+   */
+  isPermissionHidden(role: string, permission: string): Promise<boolean>;
 }
 
 /** Lee un param del objeto `params` con narrowing por tipo. */
@@ -63,5 +71,14 @@ export class DefaultPolicyReader implements PolicyReader {
 
   async params(key: PolicyKey): Promise<unknown> {
     return getPolicyDef(key).defaults;
+  }
+
+  /**
+   * SIN overrides (esta impl no lee registro) → SIEMPRE `false`: ningún permiso está restado, rige la base
+   * pura. Es el fail-safe del overlay: sin dato, no se resta nada. El cliente runtime cacheado
+   * (`KafkaCachedPolicyReader`) sí sirve overrides reales desde su cache, con este MISMO default.
+   */
+  async isPermissionHidden(_role: string, _permission: string): Promise<boolean> {
+    return false;
   }
 }

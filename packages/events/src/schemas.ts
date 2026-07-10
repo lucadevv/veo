@@ -1482,6 +1482,31 @@ export const policyUpdated = z.object({
   updatedAt: z.string(),
 });
 
+/* ── overlay de visibilidad de permisos (ADR-025 · gobierno unificado, capa 2 · identity-service) ── */
+/// Un OVERRIDE de permiso (overlay subtract-only, ADR-025 §3) fue MUTADO por el superadmin: identity-service
+/// (dueño del registro `PermissionOverride` en el módulo `gobierno`) lo emite por OUTBOX en la MISMA tx que
+/// persiste el par + bumpea `version` (mismo molde que `policy.updated`). DOBLE consumidor:
+///   - audit-service: traza inmutable al WORM de QUIÉN restó/des-restó QUÉ permiso a QUÉ rol
+///     (actor=`updatedBy`, recurso=`role|permission`, `hidden`, `version`).
+///   - `@veo/policy` (cliente runtime cacheado): actualiza el OVERLAY de ese par → la resta del superadmin
+///     surte efecto INMEDIATO, sin TTL. El efectivo lo compone el caller: `base ∧ ¬override`.
+/// Topic 'permission_override' (`topicForEvent` corta antes del punto), aislado del topic 'policy'.
+/// SIN PII: rol, permiso, flag, versión y actorId — nunca datos personales.
+export const permissionOverrideUpdated = z.object({
+  /// Rol al que se le restó/des-restó el permiso (un `AdminRole`, transportado como string).
+  role: z.string(),
+  /// Permiso afectado (ej. 'drivers:approve', 'ops:view').
+  permission: z.string(),
+  /// subtract-only: `true` = RESTADO al rol; `false` = des-restaurado (rige la base).
+  hidden: z.boolean(),
+  /// Versión MONOTÓNICA tras el bump (cache-busting / orden ante reentrega).
+  version: z.number().int().positive(),
+  /// actorId del superadmin que lo mutó (accountability). 'system' nunca emite esto.
+  updatedBy: z.string(),
+  /// Marca ISO del cambio.
+  updatedAt: z.string(),
+});
+
 export const EVENT_SCHEMAS = {
   'user.registered': userRegistered,
   'user.email_verified': userEmailVerified,
@@ -1533,6 +1558,7 @@ export const EVENT_SCHEMAS = {
   'pricing.base_fare_updated': pricingBaseFareUpdated,
   'catalog.updated': catalogUpdated,
   'policy.updated': policyUpdated,
+  'permission_override.updated': permissionOverrideUpdated,
   'driver.location_updated': driverLocationUpdated,
   'driver.entered_zone': driverEnteredZone,
   'media.recording_started': mediaRecordingStarted,

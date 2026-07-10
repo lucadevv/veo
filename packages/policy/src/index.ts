@@ -15,5 +15,6 @@
 export * from './keys.js';
 export * from './catalog.js';
 export * from './reader.js';
+export * from './overlay.js';
 export * from './helpers.js';
 export * from './tokens.js';

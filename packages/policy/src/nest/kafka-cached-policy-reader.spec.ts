@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { KafkaCachedPolicyReader } from './kafka-cached-policy-reader.js';
-import type { PolicyRegistryPort, PolicyView } from './registry.js';
+import type { PermissionOverrideView, PolicyRegistryPort, PolicyView } from './registry.js';
 
 /** Fila `PolicyView` completa a partir de un parche (defaults cómodos para los tests). */
 function view(partial: Partial<PolicyView> & { key: string }): PolicyView {
@@ -16,9 +16,32 @@ function view(partial: Partial<PolicyView> & { key: string }): PolicyView {
   };
 }
 
-/** Doble en memoria del registro: una lista fija, o un factory (para simular un fallo de red). */
-function registry(rows: PolicyView[] | (() => Promise<PolicyView[]>)): PolicyRegistryPort {
-  return { list: typeof rows === 'function' ? rows : () => Promise.resolve(rows) };
+/** Fila `PermissionOverrideView` completa a partir de un parche. */
+function ov(
+  partial: Partial<PermissionOverrideView> & { role: string; permission: string },
+): PermissionOverrideView {
+  return {
+    hidden: true,
+    version: 1,
+    updatedBy: 'sup1',
+    updatedAt: '2026-07-10T00:00:00.000Z',
+    ...partial,
+  };
+}
+
+/**
+ * Doble en memoria del registro. `rows` = políticas (lista fija o factory para simular fallo). `overrides`
+ * = overlay (default: endpoint AUSENTE → rechaza, como en la Ola 1 antes de que identity lo exponga).
+ */
+function registry(
+  rows: PolicyView[] | (() => Promise<PolicyView[]>),
+  overrides: PermissionOverrideView[] | (() => Promise<PermissionOverrideView[]>) = () =>
+    Promise.reject(new Error('404 /internal/permission-overrides')),
+): PolicyRegistryPort {
+  return {
+    list: typeof rows === 'function' ? rows : () => Promise.resolve(rows),
+    listOverrides: typeof overrides === 'function' ? overrides : () => Promise.resolve(overrides),
+  };
 }
 
 describe('KafkaCachedPolicyReader — cache + fail-safe (ADR-024 §2/§4)', () => {
@@ -103,5 +126,81 @@ describe('KafkaCachedPolicyReader — cache + fail-safe (ADR-024 §2/§4)', () =
   it('numberSync de una key desconocida devuelve el fallback (nunca fail-open)', () => {
     const reader = new KafkaCachedPolicyReader(registry([]));
     expect(reader.numberSync('no.existe', 'x', 555)).toBe(555);
+  });
+});
+
+describe('KafkaCachedPolicyReader — OVERLAY de permisos (ADR-025 §3)', () => {
+  it('sin overrides cargados → isPermissionHidden es false (rige la base)', async () => {
+    const reader = new KafkaCachedPolicyReader(registry([], []));
+    await reader.loadOverrides();
+
+    await expect(reader.isPermissionHidden('DISPATCHER', 'drivers:approve')).resolves.toBe(false);
+    expect(reader.isPermissionHiddenSync('DISPATCHER', 'drivers:approve')).toBe(false);
+  });
+
+  it('carga inicial: puebla el overlay con los pares restados del registro', async () => {
+    const reader = new KafkaCachedPolicyReader(
+      registry([], [ov({ role: 'DISPATCHER', permission: 'drivers:approve', hidden: true })]),
+    );
+    await reader.loadOverrides();
+
+    await expect(reader.isPermissionHidden('DISPATCHER', 'drivers:approve')).resolves.toBe(true);
+    expect(reader.isPermissionHiddenSync('DISPATCHER', 'drivers:approve')).toBe(true);
+    // Un par NO restado sigue en false.
+    expect(reader.isPermissionHiddenSync('DISPATCHER', 'ops:view')).toBe(false);
+  });
+
+  it('un permission_override.updated hidden=true RESTA el par (frescura inmediata)', async () => {
+    const reader = new KafkaCachedPolicyReader(registry([], []));
+    await reader.loadOverrides();
+    expect(reader.isPermissionHiddenSync('FINANCE', 'ops:view')).toBe(false);
+
+    reader.applyOverrideEvent({ role: 'FINANCE', permission: 'ops:view', hidden: true, version: 2 });
+
+    await expect(reader.isPermissionHidden('FINANCE', 'ops:view')).resolves.toBe(true);
+    expect(reader.isPermissionHiddenSync('FINANCE', 'ops:view')).toBe(true);
+  });
+
+  it('un permission_override.updated hidden=false DES-RESTAURA el par (vuelve la base)', async () => {
+    const reader = new KafkaCachedPolicyReader(
+      registry([], [ov({ role: 'FINANCE', permission: 'ops:view', hidden: true, version: 1 })]),
+    );
+    await reader.loadOverrides();
+    expect(reader.isPermissionHiddenSync('FINANCE', 'ops:view')).toBe(true);
+
+    reader.applyOverrideEvent({ role: 'FINANCE', permission: 'ops:view', hidden: false, version: 2 });
+
+    expect(reader.isPermissionHiddenSync('FINANCE', 'ops:view')).toBe(false);
+  });
+
+  it('un override FUERA DE ORDEN (version menor) NO pisa el overlay', async () => {
+    const reader = new KafkaCachedPolicyReader(
+      registry([], [ov({ role: 'FINANCE', permission: 'ops:view', hidden: true, version: 5 })]),
+    );
+    await reader.loadOverrides();
+
+    reader.applyOverrideEvent({ role: 'FINANCE', permission: 'ops:view', hidden: false, version: 2 });
+
+    expect(reader.isPermissionHiddenSync('FINANCE', 'ops:view')).toBe(true); // sigue restado
+  });
+
+  it('endpoint de overrides AUSENTE/inalcanzable en el boot → overlay vacío, SIN throw (fail-safe)', async () => {
+    const reader = new KafkaCachedPolicyReader(registry([])); // overrides default: rechaza (404)
+
+    await expect(reader.loadOverrides()).resolves.toBeUndefined(); // no revienta el boot
+    expect(reader.isPermissionHiddenSync('DISPATCHER', 'drivers:approve')).toBe(false); // no resta nada
+  });
+
+  it('onModuleInit carga políticas Y overlay (ambos fail-safe si el registro falla)', async () => {
+    const reader = new KafkaCachedPolicyReader(
+      registry(
+        [view({ key: 'auth.stepup', params: { maxAgeSec: 120 } })],
+        [ov({ role: 'DISPATCHER', permission: 'drivers:approve', hidden: true })],
+      ),
+    );
+    await reader.onModuleInit();
+
+    expect(reader.numberSync('auth.stepup', 'maxAgeSec', 300)).toBe(120);
+    expect(reader.isPermissionHiddenSync('DISPATCHER', 'drivers:approve')).toBe(true);
   });
 });

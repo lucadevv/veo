@@ -35,6 +35,10 @@ describe('topic routing', () => {
   it('user.kyc_verified enruta al topic user', () => {
     expect(topicForEvent('user.kyc_verified')).toBe('user');
   });
+  it('permission_override.updated (overlay ADR-025) tiene su PROPIO topic, aislado de policy', () => {
+    expect(topicForEvent('permission_override.updated')).toBe('permission_override');
+    expect(topicForEvent('policy.updated')).toBe('policy');
+  });
 
   describe('aislamiento del firehose de GPS (FIX rating-firehose)', () => {
     it('driver.location_updated (firehose) va a su PROPIO topic driver-location, NO al topic driver', () => {
@@ -50,6 +54,49 @@ describe('topic routing', () => {
       expect(topicForEvent('driver.verified')).toBe('driver');
       // Auto-suspensión por exceso de cancelaciones: ciclo de vida, comparte el topic 'driver' (no el firehose).
       expect(topicForEvent('driver.excessive_cancellations')).toBe('driver');
+    });
+  });
+
+  describe('permission_override.updated · schema tipado (overlay ADR-025)', () => {
+    it('ACEPTA el payload de un par restado y RECHAZA uno sin role/permission o con hidden no-booleano', () => {
+      const schema = schemaForEvent('permission_override.updated');
+      expect(schema).toBeDefined();
+      const ok = schema!.safeParse({
+        role: 'DISPATCHER',
+        permission: 'drivers:approve',
+        hidden: true,
+        version: 3,
+        updatedBy: 'sup1',
+        updatedAt: '2026-07-10T00:00:00.000Z',
+      });
+      expect(ok.success).toBe(true);
+      // Falta permission.
+      expect(
+        schema!.safeParse({ role: 'DISPATCHER', hidden: true, version: 1, updatedBy: 'x', updatedAt: 'y' })
+          .success,
+      ).toBe(false);
+      // hidden no-booleano.
+      expect(
+        schema!.safeParse({
+          role: 'DISPATCHER',
+          permission: 'ops:view',
+          hidden: 'yes',
+          version: 1,
+          updatedBy: 'x',
+          updatedAt: 'y',
+        }).success,
+      ).toBe(false);
+      // version no-positiva.
+      expect(
+        schema!.safeParse({
+          role: 'DISPATCHER',
+          permission: 'ops:view',
+          hidden: true,
+          version: 0,
+          updatedBy: 'x',
+          updatedAt: 'y',
+        }).success,
+      ).toBe(false);
     });
   });
 

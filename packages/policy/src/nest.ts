@@ -10,4 +10,5 @@
 export * from './nest/registry.js';
 export * from './nest/kafka-cached-policy-reader.js';
 export * from './nest/policy-updated.consumer.js';
+export * from './nest/permission-override-updated.consumer.js';
 export * from './nest/policy.module.js';
