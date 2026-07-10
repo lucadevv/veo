@@ -6,15 +6,20 @@
  * Los cierres (MATCHED/TIMED_OUT/CANCELLED) son CAS atómicos (`updateMany` con guard `status=OPEN`):
  * solo UNA transición gana → idempotentes y concurrencia-seguros (dos réplicas no cierran dos veces).
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import type { LatLon } from '@veo/utils';
 import type { VehicleClass } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
 import { DispatchSessionStatus, type DispatchSession } from '../generated/prisma';
+import {
+  MATCHING_SESSION_REPO,
+  type MatchingSessionRepository,
+} from './matching-session.repository';
 
 @Injectable()
 export class MatchingSessionStore {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(MATCHING_SESSION_REPO) private readonly repo: MatchingSessionRepository,
+  ) {}
 
   /**
    * Abre —o RE-abre, en un re-bid (EXPIRED→REQUESTED)— la sesión OPEN del viaje. `createdAt` marca el
@@ -27,7 +32,7 @@ export class MatchingSessionStore {
     vehicleType: VehicleClass;
     category?: string;
   }): Promise<DispatchSession> {
-    const data = {
+    return this.repo.upsert(input.tripId, {
       originLat: input.origin.lat,
       originLon: input.origin.lon,
       vehicleType: input.vehicleType,
@@ -35,33 +40,21 @@ export class MatchingSessionStore {
       category: input.category ?? null,
       status: DispatchSessionStatus.OPEN,
       currentKRing: 1,
-    };
-    return this.prisma.write.dispatchSession.upsert({
-      where: { tripId: input.tripId },
-      create: { tripId: input.tripId, ...data },
-      update: { ...data, createdAt: new Date() },
     });
   }
 
   get(tripId: string): Promise<DispatchSession | null> {
-    return this.prisma.read.dispatchSession.findUnique({ where: { tripId } });
+    return this.repo.find(tripId);
   }
 
   /** Avanza el k-ring de búsqueda persistido (el advance expande al agotar los candidatos cercanos). */
   async bumpKRing(tripId: string, kRing: number): Promise<void> {
-    await this.prisma.write.dispatchSession.update({
-      where: { tripId },
-      data: { currentKRing: kRing },
-    });
+    await this.repo.updateKRing(tripId, kRing);
   }
 
   /** Cierra la sesión a un terminal SOLO si seguía OPEN (CAS). Devuelve true si ESTA llamada la cerró. */
   private async close(tripId: string, status: DispatchSessionStatus): Promise<boolean> {
-    const res = await this.prisma.write.dispatchSession.updateMany({
-      where: { tripId, status: DispatchSessionStatus.OPEN },
-      data: { status },
-    });
-    return res.count === 1;
+    return (await this.repo.closeIfOpen(tripId, status)) === 1;
   }
 
   closeMatched(tripId: string): Promise<boolean> {

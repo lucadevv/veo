@@ -35,6 +35,18 @@ import {
   DISPATCH_RADIUS_CONFIG_REPO,
   PrismaDispatchRadiusConfigRepository,
 } from './dispatch-radius-config.repository';
+import { DISPATCH_REPO, PrismaDispatchRepository } from './dispatch.repository';
+import { MATCHING_REPO, PrismaMatchingRepository } from './matching.repository';
+import {
+  MATCHING_SESSION_REPO,
+  PrismaMatchingSessionRepository,
+} from './matching-session.repository';
+import {
+  DRIVER_PROJECTION_REPO,
+  PrismaDriverProjectionRepository,
+} from './driver-projection.repository';
+import { OFFER_BOARD_REPO, PrismaOfferBoardRepository } from './offer-board.repository';
+import { SURGE_REPO, PrismaSurgeRepository } from './surge.repository';
 import { IDENTITY_CLIENT } from '../identity/identity-client.port';
 import { GrpcIdentityClient } from '../identity/grpc-identity-client';
 import { FLEET_CLIENT } from '../fleet/fleet-client.port';
@@ -125,8 +137,15 @@ const dispatchWindowDefaultsProvider: Provider = {
     AdminIdentityGuard,
     radiusConfigCacheTtlProvider,
     dispatchWindowDefaultsProvider,
-    // Puerto → adaptador Prisma (clean arch: el servicio depende de la interfaz, no de la clase).
+    // Puertos → adaptadores Prisma (FOUNDATION §10: cada feature accede a Prisma SOLO por su repository;
+    // el servicio depende de la interfaz, no de la clase concreta).
     { provide: DISPATCH_RADIUS_CONFIG_REPO, useClass: PrismaDispatchRadiusConfigRepository },
+    { provide: DISPATCH_REPO, useClass: PrismaDispatchRepository },
+    { provide: MATCHING_REPO, useClass: PrismaMatchingRepository },
+    { provide: MATCHING_SESSION_REPO, useClass: PrismaMatchingSessionRepository },
+    { provide: DRIVER_PROJECTION_REPO, useClass: PrismaDriverProjectionRepository },
+    { provide: OFFER_BOARD_REPO, useClass: PrismaOfferBoardRepository },
+    { provide: SURGE_REPO, useClass: PrismaSurgeRepository },
   ],
   exports: [
     DispatchService,

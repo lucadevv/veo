@@ -28,6 +28,7 @@ import {
 } from '@veo/database/testing';
 import { PrismaClient } from '../src/generated/prisma';
 import { DriverProjectionService } from '../src/dispatch/driver-projection.service';
+import { PrismaDriverProjectionRepository } from '../src/dispatch/driver-projection.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type { Env } from '../src/config/env.schema';
 
@@ -55,7 +56,10 @@ beforeAll(async () => {
     CANCELLATION_WINDOW_HOURS: WINDOW_HOURS,
     CANCELLATION_THRESHOLD: THRESHOLD,
   } as Partial<Env> as Env);
-  projection = new DriverProjectionService(prismaService, config);
+  projection = new DriverProjectionService(
+    new PrismaDriverProjectionRepository(prismaService),
+    config,
+  );
 }, 180_000);
 
 afterAll(async () => {
@@ -212,7 +216,9 @@ describe('registerCancellationInWindow · Postgres real (cierre del 25P02)', () 
       },
     });
     const racingProjection = new DriverProjectionService(
-      { read: prisma, write: instrumentedWrite } as unknown as PrismaService,
+      new PrismaDriverProjectionRepository(
+        { read: prisma, write: instrumentedWrite } as unknown as PrismaService,
+      ),
       new ConfigService<Env, true>({
         CANCELLATION_WINDOW_HOURS: WINDOW_HOURS,
         CANCELLATION_THRESHOLD: THRESHOLD,

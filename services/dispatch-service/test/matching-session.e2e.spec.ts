@@ -23,6 +23,9 @@ import { DispatchService } from '../src/dispatch/dispatch.service';
 import { EligibilityGate } from '../src/dispatch/eligibility.gate';
 import type { DispatchOffer } from '../src/dispatch/offer-delivery.port';
 import { MatchingSessionStore } from '../src/dispatch/matching-session.store';
+import { PrismaMatchingRepository } from '../src/dispatch/matching.repository';
+import { PrismaMatchingSessionRepository } from '../src/dispatch/matching-session.repository';
+import { PrismaDispatchRepository } from '../src/dispatch/dispatch.repository';
 import { DriverPool } from '../src/dispatch/driver-pool';
 import { DispatchScorer } from '../src/dispatch/scoring';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../src/hot-index/in-memory-hot-index';
@@ -52,7 +55,9 @@ beforeAll(async () => {
   hotIndex = new InMemoryHotIndex();
   const exclusion = new InMemoryExclusionRegistry();
   const driverPool = new DriverPool(hotIndex, exclusion, new InMemoryExclusionRegistry());
-  const sessions = new MatchingSessionStore(prismaService);
+  const sessions = new MatchingSessionStore(
+    new PrismaMatchingSessionRepository(prismaService),
+  );
   const scorer = new DispatchScorer({ distance: 5000, rating: 1, idle: 10, cancel: 5 });
   const projection = {
     getStats: async (ids: string[]) =>
@@ -89,7 +94,7 @@ beforeAll(async () => {
   } as Partial<Env> as Env);
 
   matching = new MatchingService(
-    prismaService,
+    new PrismaMatchingRepository(prismaService),
     driverPool,
     sessions,
     scorer,
@@ -118,7 +123,7 @@ beforeAll(async () => {
   // casos de suspensión se cubren en el unit (dispatch.service.spec / eligibility.gate.spec). TTL 0 = sin cache.
   const eligibility = new EligibilityGate(identity as never, hotIndex, 0);
   dispatch = new DispatchService(
-    prismaService,
+    new PrismaDispatchRepository(prismaService),
     hotIndex,
     exclusion,
     fleet,
@@ -510,9 +515,13 @@ describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin hu
       DISPATCH_SWEEP_DEADLINE_MS: 1, // deadline diminuto → corta tras pocas iteraciones
     } as Partial<Env> as Env);
     const tightMatching = new MatchingService(
-      { read: prisma, write: prisma } as unknown as PrismaService,
+      new PrismaMatchingRepository({ read: prisma, write: prisma } as unknown as PrismaService),
       new DriverPool(hotIndex, new InMemoryExclusionRegistry(), new InMemoryExclusionRegistry()),
-      new MatchingSessionStore({ read: prisma, write: prisma } as unknown as PrismaService),
+      new MatchingSessionStore(
+        new PrismaMatchingSessionRepository(
+          { read: prisma, write: prisma } as unknown as PrismaService,
+        ),
+      ),
       new DispatchScorer({ distance: 5000, rating: 1, idle: 10, cancel: 5 }),
       {
         getStats: async (ids: string[]) =>

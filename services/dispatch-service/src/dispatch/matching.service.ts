@@ -32,8 +32,8 @@ import {
   type VehicleClass,
 } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
-import { PrismaService } from '../infra/prisma.service';
 import { Prisma, DispatchSessionStatus, type DispatchSession } from '../generated/prisma';
+import { MATCHING_REPO, type MatchingRepository } from './matching.repository';
 import { DriverPool } from './driver-pool';
 import { MatchingSessionStore } from './matching-session.store';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
@@ -72,7 +72,7 @@ export class MatchingService {
   private readonly sweepDeadlineMs: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MATCHING_REPO) private readonly repo: MatchingRepository,
     private readonly driverPool: DriverPool,
     private readonly sessions: MatchingSessionStore,
     @Inject(DISPATCH_SCORER) private readonly scorer: DispatchScorer,
@@ -124,16 +124,11 @@ export class MatchingService {
     }
 
     // Una oferta a la vez: si hay un OFFERED vivo no encimamos otra (la respuesta o el reconciler avanzan).
-    const inFlight = await this.prisma.read.dispatchMatch.count({
-      where: { tripId, outcome: DispatchOutcome.OFFERED },
-    });
+    const inFlight = await this.repo.countLiveOffers(tripId);
     if (inFlight > 0) return;
 
     // "Ya ofertados" = matches de ESTA ronda (offeredAt ≥ inicio de la sesión); un re-bid no los hereda.
-    const priorMatches = await this.prisma.read.dispatchMatch.findMany({
-      where: { tripId, offeredAt: { gte: session.createdAt } },
-      select: { driverId: true },
-    });
+    const priorMatches = await this.repo.findRoundDriverIds(tripId, session.createdAt);
     const attempted = new Set(priorMatches.map((m) => m.driverId));
 
     const origin: LatLon = { lat: session.originLat, lon: session.originLon };
@@ -188,10 +183,7 @@ export class MatchingService {
    */
   private async offerBroadcast(tripId: string, session: DispatchSession): Promise<void> {
     // Ofertados de ESTA ronda (vivos OFFERED + ya respondidos): no re-ofertar al mismo conductor.
-    const priorMatches = await this.prisma.read.dispatchMatch.findMany({
-      where: { tripId, offeredAt: { gte: session.createdAt } },
-      select: { driverId: true, outcome: true },
-    });
+    const priorMatches = await this.repo.findRoundMatches(tripId, session.createdAt);
     const attempted = new Set(priorMatches.map((m) => m.driverId));
     const liveOffers = priorMatches.filter((m) => m.outcome === DispatchOutcome.OFFERED).length;
 
@@ -273,12 +265,8 @@ export class MatchingService {
     // Ventana leída EN RUNTIME (cacheada): el cutoff usa el valor vigente de la config del admin.
     const { offerTimeoutMs } = await this.radiusConfig.getWindows();
     const cutoff = new Date(Date.now() - offerTimeoutMs);
-    const expired = await this.prisma.read.dispatchMatch.findMany({
-      where: { outcome: DispatchOutcome.OFFERED, offeredAt: { lt: cutoff } },
-      select: { id: true, tripId: true },
-      orderBy: { offeredAt: 'asc' },
-      take: limit, // K: presupuesto de avance por tick (no 100). El resto lo toma el próximo tick.
-    });
+    // K: presupuesto de avance por tick (no 100). El resto lo toma el próximo tick.
+    const expired = await this.repo.findExpiredOffers(cutoff, limit);
     const tickStart = Date.now();
     let advanced = 0;
     for (const m of expired) {
@@ -286,11 +274,8 @@ export class MatchingService {
       // el marcado a TIMEOUT y el avance van juntos por fila, así un corte por tiempo nunca deja una oferta
       // marcada TIMEOUT sin re-oferta. Backstop raro (K ya es chico); protege solo casos patológicos.
       if (Date.now() - tickStart > this.sweepDeadlineMs) break;
-      const claimed = await this.prisma.write.dispatchMatch.updateMany({
-        where: { id: m.id, outcome: DispatchOutcome.OFFERED },
-        data: { outcome: DispatchOutcome.TIMEOUT, respondedAt: new Date() },
-      });
-      if (claimed.count === 0) continue; // otra réplica (o un accept/reject) ya la tomó
+      const claimed = await this.repo.timeoutOffer(m.id);
+      if (claimed === 0) continue; // otra réplica (o un accept/reject) ya la tomó
       await this.offerNext(m.tripId); // re-chequea sesión OPEN + una-oferta-a-la-vez (idempotente)
       advanced += 1;
     }
@@ -309,16 +294,13 @@ export class MatchingService {
     origin: LatLon;
   }): Promise<void> {
     const matchId = uuidv7();
-    const created = await this.prisma.write.dispatchMatch.create({
-      data: {
-        id: matchId,
-        tripId: args.tripId,
-        driverId: args.candidate.driverId,
-        score: new Prisma.Decimal(args.candidate.score),
-        attempt: args.attempt,
-        surgeMultiplier: new Prisma.Decimal(args.surgeMultiplier),
-        outcome: DispatchOutcome.OFFERED,
-      },
+    const created = await this.repo.createOffer({
+      id: matchId,
+      tripId: args.tripId,
+      driverId: args.candidate.driverId,
+      score: args.candidate.score,
+      attempt: args.attempt,
+      surgeMultiplier: args.surgeMultiplier,
     });
     // ADR-021 Fase F (F1) — el `expiresAt` que ve el conductor se ANCLA al `offeredAt` REAL de la DB (el
     // mismo instante que usa `sweepExpiredOffers` para caducar la oferta: offeredAt + offerTimeoutMs). Antes
@@ -396,7 +378,7 @@ export class MatchingService {
       producer: 'dispatch-service',
       payload: { tripId, reason: 'no_candidates' },
     });
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       await tx.outboxEvent.create({
         data: {
           aggregateId: tripId,

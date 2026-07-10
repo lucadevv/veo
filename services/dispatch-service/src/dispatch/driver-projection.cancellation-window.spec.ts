@@ -138,7 +138,15 @@ const config = new ConfigService<Env, true>({
 const DRIVER = '11111111-1111-1111-1111-111111111111';
 
 function svc(prisma: ReturnType<typeof makePrisma>): DriverProjectionService {
-  return new DriverProjectionService(prisma as never, config);
+  // §10 — el repo abre la tx (runInTx delega al $transaction del doble en memoria); el cuerpo transaccional
+  // (advisory lock + createMany idempotente + poda + outbox) sigue en el service. Estos casos solo ejercitan
+  // registerCancellationInWindow (runInTx); los otros métodos del puerto son stubs inertes.
+  const repo = {
+    runInTx: (fn: (tx: unknown) => Promise<unknown>) => prisma.write.$transaction(fn),
+    upsertDriverAvgRating: async () => undefined,
+    findStats: async () => [],
+  };
+  return new DriverProjectionService(repo as never, config);
 }
 
 describe('DriverProjectionService · ventana rolling de cancelaciones', () => {

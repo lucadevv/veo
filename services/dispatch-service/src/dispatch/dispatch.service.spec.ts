@@ -45,14 +45,17 @@ function makeService(
   // Flujo STANDARD: sin ofertas hermanas (broadcast EMERGENCY) ⇒ retractSiblingOffers es no-op acá.
   const findMany = vi.fn(async () => [] as { id: string; driverId: string }[]);
 
-  // write.$transaction ejecuta el callback con un tx que comparte los mismos mocks de tabla.
+  // runInTx ejecuta el callback con un tx que comparte los mismos mocks de tabla (§10: el cuerpo
+  // transaccional —CAS + outbox— vive en el service; el repo solo abre la tx).
   const tx = {
     dispatchMatch: { findUnique, updateMany },
     outboxEvent: { create },
   };
-  const prisma = {
-    read: { dispatchMatch: { findUnique, findMany } },
-    write: { $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)) },
+  const repo = {
+    runInTx: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)),
+    findMatchById: findUnique,
+    findLiveSiblingOffers: findMany,
+    findAcceptedMatchForTrip: vi.fn(async () => null),
   };
 
   const hotIndex = {
@@ -81,7 +84,7 @@ function makeService(
   };
 
   const service = new DispatchService(
-    prisma as never,
+    repo as never,
     hotIndex as never,
     exclusion as never,
     fleet,

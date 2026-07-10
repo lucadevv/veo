@@ -10,11 +10,14 @@
  *   - trip.cancelled  → contador de cancelaciones del conductor (para la tasa de cancelación).
  * Así el scoring lee de una fuente local de baja latencia y dispatch queda desacoplado.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
-import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
+import {
+  DRIVER_PROJECTION_REPO,
+  type DriverProjectionRepository,
+} from './driver-projection.repository';
 import type { Env } from '../config/env.schema';
 
 /** Stats normalizadas que consume el scorer. */
@@ -43,7 +46,7 @@ export class DriverProjectionService {
   private readonly threshold: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(DRIVER_PROJECTION_REPO) private readonly repo: DriverProjectionRepository,
     config: ConfigService<Env, true>,
   ) {
     this.windowMs = config.getOrThrow<number>('CANCELLATION_WINDOW_HOURS') * 60 * 60 * 1000;
@@ -51,7 +54,7 @@ export class DriverProjectionService {
   }
 
   async onRatingCreated(driverId: string, stars: number): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       const existing = await tx.driverStats.findUnique({ where: { driverId } });
       const prevCount = existing?.ratingCount ?? 0;
       const prevAvg = existing ? Number(existing.avgRating.toString()) : DEFAULT_RATING;
@@ -66,15 +69,11 @@ export class DriverProjectionService {
   }
 
   async onDriverFlagged(driverId: string, rollingAvg: number): Promise<void> {
-    await this.prisma.write.driverStats.upsert({
-      where: { driverId },
-      create: { driverId, avgRating: rollingAvg },
-      update: { avgRating: rollingAvg },
-    });
+    await this.repo.upsertDriverAvgRating(driverId, rollingAvg);
   }
 
   async onTripCompleted(driverId: string, completedAt: Date): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       const existing = await tx.driverStats.findUnique({ where: { driverId } });
       await tx.driverStats.upsert({
         where: { driverId },
@@ -145,7 +144,7 @@ export class DriverProjectionService {
     occurredAt: Date,
   ): Promise<void> {
     const cutoff = new Date(occurredAt.getTime() - this.windowMs);
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       // 0) LOCK XACT-SCOPED POR-CONDUCTOR — cierra la carrera cross-réplica del cruce del umbral (ALTA).
       //    dispatch corre replicas>=2 y Kafka particiona por aggregateId=tripId, así que DOS cancelaciones del
       //    MISMO conductor en trips DISTINTOS caen en particiones/pods DISTINTOS → se procesan CONCURRENTEMENTE.
@@ -230,10 +229,7 @@ export class DriverProjectionService {
 
   /** Lee stats de varios conductores y las normaliza para el scorer (con defaults para desconocidos). */
   async getStats(driverIds: string[]): Promise<Map<string, DriverScoreStats>> {
-    const rows =
-      driverIds.length === 0
-        ? []
-        : await this.prisma.read.driverStats.findMany({ where: { driverId: { in: driverIds } } });
+    const rows = driverIds.length === 0 ? [] : await this.repo.findStats(driverIds);
     const now = Date.now();
     const map = new Map<string, DriverScoreStats>();
     for (const r of rows) {

@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { isDomainError, toH3, neighbors, DISPATCH_H3_RESOLUTION } from '@veo/utils';
-import { VehicleType, VehicleSegment, SpecialRequest, OfferingId } from '@veo/shared-types';
+import {
+  VehicleType,
+  VehicleSegment,
+  SpecialRequest,
+  OfferingId,
+  DispatchOutcome,
+} from '@veo/shared-types';
 import { OfferBoardService } from './offer-board.service';
 import type { EligibilityGate } from './eligibility.gate';
 import type { DispatchRadiusConfigService } from './dispatch-radius-config.service';
@@ -481,8 +487,17 @@ function makeService(opts: {
     getKRings: async () => ({ nearbyKRing: 1, matchKRing: 2 }),
     getWindows: async () => ({ ...opts.windows }),
   } as unknown as DispatchRadiusConfigService;
+  // §10 — el repo (puerto Prisma del board) abre la tx y batchea la lectura de matches ACCEPTED; el cuerpo
+  // transaccional (outbox + record) sigue en el service. Delega al doble de la OutboxSpy (misma semántica).
+  const repo = {
+    runInTx: (fn: (tx: unknown) => Promise<unknown>) => opts.outbox.prisma.write.$transaction(fn),
+    findAcceptedMatches: (pairs: { tripId: string; driverId: string }[]) =>
+      opts.outbox.prisma.read.dispatchMatch.findMany({
+        where: { outcome: DispatchOutcome.ACCEPTED, OR: pairs },
+      }),
+  };
   return new OfferBoardService(
-    opts.outbox.prisma as never,
+    repo as never,
     opts.store,
     opts.hotIndex,
     driverPool,

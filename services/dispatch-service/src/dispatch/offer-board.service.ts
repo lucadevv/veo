@@ -47,8 +47,8 @@ import {
 } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
-import { PrismaService } from '../infra/prisma.service';
 import { Prisma } from '../generated/prisma';
+import { OFFER_BOARD_REPO, type OfferBoardRepository } from './offer-board.repository';
 import { HOT_INDEX, type HotIndex, type DriverLocation } from '../hot-index/hot-index.port';
 import { DriverPool } from './driver-pool';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
@@ -172,7 +172,7 @@ export class OfferBoardService {
   private static readonly DRIVER_CLAIM_TTL_SECONDS = 7_200;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(OFFER_BOARD_REPO) private readonly repo: OfferBoardRepository,
     @Inject(OFFER_BOARD_STORE) private readonly store: OfferBoardStore,
     @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
     private readonly driverPool: DriverPool,
@@ -610,7 +610,7 @@ export class OfferBoardService {
     // re-abre la ventana para que el pasajero reintente el accept (las ofertas siguen ahí, ventana vigente).
     try {
       // offer_accepted + match_found en la MISMA transacción de outbox (FOUNDATION §6).
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         const acceptedDedup = dedupOfferAccepted(tripId, driverId);
         const accepted = createEnvelope({
           eventType: 'dispatch.offer_accepted',
@@ -1110,15 +1110,11 @@ export class OfferBoardService {
     // indexada en un Map por `tripId|driverId`. Dentro del loop leemos del Map → CERO queries por iteración.
     // La semántica #11 queda IDÉNTICA: si el Map no tiene precio durable para el (trip,driver) → SKIP
     // (no se fabrica precio, no se marca matchEmitted). El precio NUNCA sale del board/oferta efímeros.
-    const accepted = await this.prisma.read.dispatchMatch.findMany({
-      where: {
-        outcome: DispatchOutcome.ACCEPTED,
-        OR: pending
-          .filter((b) => b.acceptedDriverId)
-          .map((b) => ({ tripId: b.tripId, driverId: b.acceptedDriverId })),
-      },
-      select: { tripId: true, driverId: true, agreedPriceCents: true },
-    });
+    const accepted = await this.repo.findAcceptedMatches(
+      pending
+        .filter((b): b is OfferBoard & { acceptedDriverId: string } => b.acceptedDriverId !== undefined)
+        .map((b) => ({ tripId: b.tripId, driverId: b.acceptedDriverId })),
+    );
     const priceByTripDriver = new Map<string, number | null>(
       accepted.map((m) => [`${m.tripId}|${m.driverId}`, m.agreedPriceCents]),
     );
@@ -1152,7 +1148,7 @@ export class OfferBoardService {
         continue;
       }
       try {
-        await this.prisma.write.$transaction(async (tx) => {
+        await this.repo.runInTx(async (tx) => {
           const acceptedDedup = dedupOfferAccepted(board.tripId, driverId);
           const accepted = createEnvelope({
             eventType: 'dispatch.offer_accepted',
@@ -1257,7 +1253,7 @@ export class OfferBoardService {
       dedupKey,
     });
     try {
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         await tx.outboxEvent.create({
           data: {
             aggregateId,
