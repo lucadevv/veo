@@ -272,6 +272,7 @@ export class OpsController {
   @Post('operators/:id/reject')
   @HttpCode(204)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
   @ApiOperation({ summary: 'Rechaza un operador (admin)' })
   rejectOperator(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
     return this.ops.rejectOperator(user, id);
