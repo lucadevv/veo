@@ -2,7 +2,7 @@
   "name": "@veo/policy",
   "version": "0.1.0",
   "private": true,
-  "description": "PBAC (ADR-024): contrato de las 16 políticas de gobierno — tipos, catálogo Zod, defaults fail-safe e interfaz PolicyReader. Sin cliente runtime (Kafka) — eso es Fase 1.",
+  "description": "PBAC (ADR-024): contrato liviano de las 16 políticas (tipos, catálogo Zod, defaults, interfaz PolicyReader) en el entry raíz + cliente runtime cacheado (KafkaCachedPolicyReader + PolicyModule) en el subpath @veo/policy/nest.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,9 +11,20 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./nest": {
+      "types": "./dist/nest.d.ts",
+      "default": "./dist/nest.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "default": "./dist/*.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "nest": [
+        "./dist/nest.d.ts"
+      ]
     }
   },
   "scripts": {
@@ -31,6 +42,10 @@
     "rimraf": "^6.0.1"
   },
   "dependencies": {
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "@nestjs/common": "^10.4.4",
+    "@veo/auth": "workspace:*",
+    "@veo/events": "workspace:*",
+    "@veo/rpc": "workspace:*"
   }
 }

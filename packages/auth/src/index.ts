@@ -11,6 +11,7 @@ export * from './ownership.js';
 export * from './totp.js';
 export * from './decorators.js';
 export * from './tokens.js';
+export * from './policy-port.js';
 export * from './guards/jwt-auth.guard.js';
 export * from './guards/session-revocation.guard.js';
 export * from './guards/internal-identity.guard.js';

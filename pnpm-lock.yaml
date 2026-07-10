@@ -1012,6 +1012,18 @@ importers:
 
   packages/policy:
     dependencies:
+      '@nestjs/common':
+        specifier: ^10.4.4
+        version: 10.4.22(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@veo/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@veo/events':
+        specifier: workspace:*
+        version: link:../events
+      '@veo/rpc':
+        specifier: workspace:*
+        version: link:../rpc
       zod:
         specifier: ^3.23.8
         version: 3.25.76
