@@ -366,22 +366,25 @@ services/<svc>/
 - **Repositories** son el único lugar con Prisma. Devuelven entidades de dominio, no modelos Prisma crudos en la API pública.
 - gRPC entre servicios: protos en `protos/` (ya existe la carpeta). mTLS en prod (CLAUDE regla compliance).
 
-> **Capa `repository.ts` — PAGADA en los servicios críticos (gatillo (c): lote de refactor propio).**
-> La capa `<feature>.repository.ts` (único lugar que toca Prisma) ya está extraída en **`rating`, `payment`,
-> `identity` y `trip`** (los 4 más grandes/críticos): cada feature con acceso a datos delega en su repository,
-> `0 this.prisma` en los `*.service.ts`, verificado con typecheck + suites reales (payment/trip con testcontainers).
-> **Patrón canónico** (reusar para el resto): repo dueño de la query para acceso simple; **seam unit-of-work**
+> **Capa `repository.ts` — PAGADA en TODA la flota (gatillo (c): lote de refactor propio).**
+> La capa `<feature>.repository.ts` (único lugar que toca Prisma) está extraída en **los 12 servicios**: cada feature
+> con acceso a datos delega en su repository (token DI + puerto interfaz + adaptador `Prisma<X>Repository`, cliente dual
+> `read`/`write`). **`0 this.prisma` en TODOS los `*.service.ts`** (`rg 'this\.prisma\.' services --glob '*.service.ts'`
+> → cero), verificado con typecheck + suites reales (payment/trip con testcontainers). **61 `*.repository.ts`** en la flota.
+> **Patrón canónico** (uniforme en la flota): repo dueño de la query para acceso simple; **seam unit-of-work**
 > `runInTransaction(work: (tx) => Promise<T>)` + métodos tx-scoped cuando la tx envuelve lógica de dominio — el
 > service orquesta y forwardea el `tx` opaco, nunca dereferencia Prisma; los CAS/predicados de seguridad se
 > cristalizan HARDCODED en el `WHERE` del repo (no aflojables desde afuera); read/write split preservado con
 > métodos `…OnPrimary`.
 >
-> **DEUDA RESIDUAL (aceptada, no bug) — servicios medianos/chicos aún con Prisma directo en `*.service.ts`:**
-> `dispatch` (5), `fleet` (5), `share` (3), `media` (2), `chat`/`notification`/`panic`/`places` (1 c/u). **Funciona
-> correctamente** — el repository es convención de arquitectura (testeabilidad · desacople del ORM · un solo lugar
-> que toca la DB), NO un requisito funcional. Backlog: aplicarles el patrón canónico de arriba. Además, algunos
-> `*.grpc.controller.ts` y sweepers acceden a Prisma read-only (deuda separada: son controllers/workers, no services).
-> Se documenta acá para que el drift restante sea VISIBLE en el contrato, no silencioso.
+> **Adyacentes migrados (single-owner real):** los sweepers, workers y `*.grpc.controller.ts` que tocaban Prisma
+> directo también delegan ahora en el repository de su feature (no sólo los `*.service.ts`) — ej. `media` y `fleet`
+> absorbieron su sweeper/grpc; el gRPC de `fleet` cambió el eje read/write de `db: PrismaService['read']` a un booleano
+> `fresh`. El cierre de la deuda incluyó `dispatch` (6 repos por feature/store), `fleet` (7: 5 features + sweeper + grpc),
+> `share` (share + contacts + trip-snapshot), `media` (feature + worker + sweeper + grpc), `notification`
+> (`TemplateRepository`), `places`, `chat` y `panic`.
+> **Excepción explícita fuera del alcance de §10** (mantienen `PrismaService` directo — es infra compartida, no feature):
+> `infra/outbox.relay.ts`, `infra/prisma.service.ts` y el readiness probe de `app.module.ts`.
 
 ---
 
