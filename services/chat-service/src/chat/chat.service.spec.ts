@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { ValidationError } from '@veo/utils';
 import { ChatService } from './chat.service';
-import type { PrismaService } from '../infra/prisma.service';
+import type { ChatRepository } from './chat.repository';
 import type { Env } from '../config/env.schema';
 
 function makeConfig(): ConfigService<Env, true> {
@@ -12,32 +12,33 @@ function makeConfig(): ConfigService<Env, true> {
   });
 }
 
-/** Construye un PrismaService falso cuyo $transaction ejecuta el callback con un tx mockeado. */
-function makePrismaWithTx(messageRow: Record<string, unknown>): {
-  prisma: PrismaService;
+/** Construye un ChatRepository falso cuyo runInTx ejecuta el callback con un tx mockeado. */
+function makeRepoWithTx(messageRow: Record<string, unknown>): {
+  repo: ChatRepository;
   create: ReturnType<typeof vi.fn>;
   outboxCreate: ReturnType<typeof vi.fn>;
 } {
   const create = vi.fn().mockResolvedValue(messageRow);
   const outboxCreate = vi.fn().mockResolvedValue({});
   const tx = { message: { create }, outboxEvent: { create: outboxCreate } };
-  const $transaction = vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx));
-  const prisma = { write: { $transaction } } as unknown as PrismaService;
-  return { prisma, create, outboxCreate };
+  const repo = {
+    runInTx: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)),
+  } as unknown as ChatRepository;
+  return { repo, create, outboxCreate };
 }
 
 describe('ChatService.postMessage (validación de cuerpo)', () => {
   it('rechaza mensaje vacío (solo espacios)', async () => {
-    const { prisma } = makePrismaWithTx({});
-    const svc = new ChatService(prisma, makeConfig());
+    const { repo } = makeRepoWithTx({});
+    const svc = new ChatService(repo, makeConfig());
     await expect(
       svc.postMessage({ tripId: 't', senderId: 's', senderRole: 'PASSENGER', body: '   ' }),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('rechaza mensaje sobre el límite', async () => {
-    const { prisma } = makePrismaWithTx({});
-    const svc = new ChatService(prisma, makeConfig());
+    const { repo } = makeRepoWithTx({});
+    const svc = new ChatService(repo, makeConfig());
     await expect(
       svc.postMessage({ tripId: 't', senderId: 's', senderRole: 'DRIVER', body: 'x'.repeat(21) }),
     ).rejects.toBeInstanceOf(ValidationError);
@@ -45,7 +46,7 @@ describe('ChatService.postMessage (validación de cuerpo)', () => {
 
   it('persiste, encola el evento y devuelve la vista con body recortado', async () => {
     const createdAt = new Date('2026-05-30T12:00:00.000Z');
-    const { prisma, create, outboxCreate } = makePrismaWithTx({
+    const { repo, create, outboxCreate } = makeRepoWithTx({
       id: 'm1',
       tripId: 't1',
       senderId: 's1',
@@ -53,7 +54,7 @@ describe('ChatService.postMessage (validación de cuerpo)', () => {
       body: 'hola',
       createdAt,
     });
-    const svc = new ChatService(prisma, makeConfig());
+    const svc = new ChatService(repo, makeConfig());
 
     const view = await svc.postMessage({
       tripId: 't1',
@@ -79,11 +80,11 @@ describe('ChatService.postMessage (validación de cuerpo)', () => {
 
 describe('ChatService.listMessages (paginación)', () => {
   it('topa el limit al máximo de página', async () => {
-    const findMany = vi.fn().mockResolvedValue([]);
-    const prisma = { read: { message: { findMany } } } as unknown as PrismaService;
-    const svc = new ChatService(prisma, makeConfig());
+    const findByTrip = vi.fn().mockResolvedValue([]);
+    const repo = { findByTrip } as unknown as ChatRepository;
+    const svc = new ChatService(repo, makeConfig());
     await svc.listMessages('t1', 9999);
-    const findArg = findMany.mock.calls[0]?.[0] as { take: number };
-    expect(findArg.take).toBe(50); // CHAT_MAX_PAGE_SIZE
+    const take = findByTrip.mock.calls[0]?.[1] as number;
+    expect(take).toBe(50); // CHAT_MAX_PAGE_SIZE
   });
 });
