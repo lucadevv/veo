@@ -65,7 +65,12 @@ export class SecurityController {
 
   @Post('panics/:id/evidence')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Adjunta evidencia (claves S3) al incidente' })
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'Adjunta evidencia (claves S3) al incidente — retención/object-lock IRREVERSIBLE (cadena de custodia Ley 29733), exige MFA fresca',
+  })
   evidence(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,

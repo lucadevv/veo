@@ -3,7 +3,7 @@
  */
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, Roles, type AuthenticatedUser } from '@veo/auth';
+import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
 import type {
   ExpiringDocumentView,
@@ -99,7 +99,10 @@ export class FleetController {
 
   @Post('documents/:id/review')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Revisión manual del operador: aprueba/rechaza un documento' })
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary: 'Revisión manual del operador: aprueba/rechaza un documento — exige MFA fresca',
+  })
   reviewDocument(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
