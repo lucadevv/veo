@@ -20,11 +20,11 @@ describe('interpolate', () => {
   });
 });
 
-/** TemplateService.renderInbox NO toca Prisma → se instancia con stubs para probar la lógica pura. */
+/** TemplateService.renderInbox NO toca el repo → se instancia con stubs para probar la lógica pura. */
 function makeService(): TemplateService {
-  const prisma = {} as never;
+  const repo = {} as never;
   const config = { getOrThrow: () => 'es-PE' } as unknown as ConfigService<never, true>;
-  return new TemplateService(prisma, config);
+  return new TemplateService(repo, config);
 }
 
 function rec(partial: Partial<NotificationRecord>): NotificationRecord {

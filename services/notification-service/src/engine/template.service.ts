@@ -6,7 +6,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundError, ValidationError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { TemplateRepository } from './template.repository';
 import type { Env } from '../config/env.schema';
 import type { NotificationRecord, RenderedMessage, TemplateRenderer } from './types';
 
@@ -44,7 +44,7 @@ export class TemplateService implements TemplateRenderer {
   private readonly defaultLocale: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly templates: TemplateRepository,
     config: ConfigService<Env, true>,
   ) {
     this.defaultLocale = config.getOrThrow<string>('DEFAULT_LOCALE');
@@ -54,7 +54,7 @@ export class TemplateService implements TemplateRenderer {
     const to = typeof rec.payload.to === 'string' ? rec.payload.to : '';
     if (!to) throw new ValidationError('payload.to es requerido para entregar la notificación');
 
-    const tpl = await this.prisma.read.template.findUnique({ where: { key: rec.template } });
+    const tpl = await this.templates.findByKey(rec.template);
     if (!tpl) throw new NotFoundError(`Plantilla '${rec.template}' no encontrada`);
     if (tpl.channel !== rec.channel) {
       throw new ValidationError(
@@ -76,10 +76,7 @@ export class TemplateService implements TemplateRenderer {
    */
   async loadTemplatesByKeys(keys: readonly string[]): Promise<Map<string, RenderableTemplate>> {
     if (keys.length === 0) return new Map();
-    const rows = await this.prisma.read.template.findMany({
-      where: { key: { in: [...new Set(keys)] } },
-      select: { key: true, subject: true, body: true },
-    });
+    const rows = await this.templates.findRenderableByKeys(keys);
     return new Map(rows.map((t) => [t.key, { subject: t.subject, body: t.body }]));
   }
 
