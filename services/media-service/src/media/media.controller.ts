@@ -101,9 +101,14 @@ export class MediaController {
   /**
    * BR-S02 (paso 2a): COMPLIANCE_SUPERVISOR con MFA fresca APRUEBA la solicitud (solo transición de
    * estado PENDING → APPROVED, auditada). NO devuelve URL: la firma ocurre en GET access/:id/stream.
+   *
+   * Separación de funciones (decisión del dueño): AUTORIZAR el acceso a video grabado (dato sensible,
+   * Ley 29733) es función de CUMPLIMIENTO. Defensa en profundidad: este @Roles a NIVEL MÉTODO restringe
+   * a COMPLIANCE_SUPERVISOR+SUPERADMIN (ADMIN solicita/ve pero NO aprueba), re-declarando el gate que el
+   * admin-bff ya aplica. Complementa el four-eyes por IDENTIDAD (approveAccess: approverId ≠ requestedBy).
    */
   @UseGuards(InternalIdentityGuard, RolesGuard, StepUpMfaGuard)
-  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
   @RequireStepUpMfa()
   @Post('access/:id/approve')
   @HttpCode(200)

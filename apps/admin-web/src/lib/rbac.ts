@@ -84,10 +84,14 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   // finance.controller PUT commission (F2.7): cambiar la tasa de comisión ON-DEMAND. Decisión financiera +
   // step-up MFA. Mismos roles que el resto de config financiera (espejo de pricing:manage).
   'finance:manage': [FINANCE, ADMIN, SUPERADMIN],
-  // media.controller (clase): solicitar/ver/aprobar acceso a video (approve además exige step-up MFA).
+  // media.controller (clase): solicitar/ver acceso a video. ADMIN puede SOLICITAR y VER, pero NO APROBAR.
   'media:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
   'media:request': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'media:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
+  // media.controller access-requests/:id/approve (@Roles a nivel MÉTODO): AUTORIZAR el acceso a dato
+  // sensible (video Ley 29733) es función de CUMPLIMIENTO. Separación de funciones (decisión del dueño):
+  // COMPLIANCE_SUPERVISOR + SUPERADMIN, NO ADMIN. Complementa el four-eyes por IDENTIDAD (approverId ≠
+  // requestedBy) del media-service. approve además exige step-up MFA fresca.
+  'media:approve': [COMPLIANCE_SUPERVISOR, SUPERADMIN],
   // media.controller POST live/token: muro de cámaras EN VIVO. Doble-auth (rol + step-up MFA fresca).
   // Mismos roles que el acceso a grabaciones; la MFA fresca la exige el StepUpDialog + el guard del bff.
   'live:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
