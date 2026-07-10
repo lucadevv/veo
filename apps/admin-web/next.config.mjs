@@ -87,7 +87,7 @@ const csp = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ['@veo/shared-types', '@veo/api-client', '@veo/utils'],
+  transpilePackages: ['@veo/shared-types', '@veo/api-client', '@veo/utils', '@veo/policy'],
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns'],
   },

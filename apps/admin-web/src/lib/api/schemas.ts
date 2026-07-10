@@ -36,3 +36,31 @@ export const loginResult = z.object({
   enrollment: loginEnrollment.nullish(),
 });
 export type LoginResult = z.infer<typeof loginResult>;
+
+/* ── Gobierno → Políticas (PBAC · ADR-024) ── */
+
+/**
+ * Vista de una política de gobierno que devuelve el admin-bff (GET/PUT /gobierno/policies[/:key]).
+ * Espejo EXACTO del `PolicyView` del wire del bff (`GobiernoService.PolicyView`): el ESTADO vigente de la
+ * fila `Policy` (identity-service). El CONTRATO de forma (schema Zod de `params`, defaults, `mandatory`,
+ * textos UI) vive en `@veo/policy` (POLICY_CATALOG) — la UI cruza este estado con esa metadata. `params`
+ * se valida acá como objeto plano; la validación PROFUNDA por-política la hace identity con @veo/policy.
+ * (admin-web define este contrato local porque @veo/api-client aún no lo expone.)
+ */
+export const policyView = z.object({
+  key: z.string(),
+  family: z.string(),
+  enabled: z.boolean(),
+  params: z.record(z.unknown()),
+  mandatory: z.boolean(),
+  version: z.number(),
+  updatedBy: z.string(),
+  updatedAt: z.string(),
+});
+export type PolicyView = z.infer<typeof policyView>;
+
+/** Body del PUT /gobierno/policies/:key (parche PARCIAL: `enabled` y/o `params`). Espeja UpdatePolicyDto del bff. */
+export interface UpdatePolicyRequest {
+  enabled?: boolean;
+  params?: Record<string, unknown>;
+}

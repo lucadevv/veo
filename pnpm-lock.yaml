@@ -94,6 +94,9 @@ importers:
       '@veo/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@veo/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@veo/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config

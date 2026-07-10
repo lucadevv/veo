@@ -11,6 +11,8 @@ import {
   Scale,
   ScrollText,
   ShieldAlert,
+  ShieldCheck,
+  SlidersHorizontal,
   Tags,
   TrendingUp,
   Truck,
@@ -142,5 +144,26 @@ export const NAV: NavGroup[] = [
   {
     title: 'Cumplimiento',
     items: [{ href: '/audit', label: 'Auditoría', icon: ScrollText, permission: 'audit:view' }],
+  },
+  {
+    // GOBIERNO (PBAC · ADR-024) — el borde de autoridad del registro de políticas: EXCLUSIVO de SUPERADMIN
+    // (permiso `gobierno:manage` → [SUPERADMIN], espejo del @Roles(SUPERADMIN) de gobierno.controller). Va
+    // ÚLTIMO, como en el diseño AdminPoliticas. "Permisos y visibilidad" es la matriz RBAC (read-only);
+    // "Políticas" es el registro de las 16 políticas de gobierno.
+    title: 'Gobierno',
+    items: [
+      {
+        href: '/gobierno/permisos',
+        label: 'Permisos y visibilidad',
+        icon: SlidersHorizontal,
+        permission: 'gobierno:manage',
+      },
+      {
+        href: '/gobierno/politicas',
+        label: 'Políticas',
+        icon: ShieldCheck,
+        permission: 'gobierno:manage',
+      },
+    ],
   },
 ];

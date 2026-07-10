@@ -40,7 +40,8 @@ export type Permission =
   | 'dispatch:view'
   | 'dispatch:manage'
   | 'audit:view'
-  | 'audit:verify';
+  | 'audit:verify'
+  | 'gobierno:manage';
 
 const { SUPPORT_L1, SUPPORT_L2, COMPLIANCE_SUPERVISOR, DISPATCHER, FINANCE, ADMIN, SUPERADMIN } =
   AdminRole;
@@ -49,7 +50,7 @@ const { SUPPORT_L1, SUPPORT_L2, COMPLIANCE_SUPERVISOR, DISPATCHER, FINANCE, ADMI
  * Permiso → roles permitidos por el servidor. Cada entrada cita el controller/@Roles de admin-bff
  * que refleja. Cuando un método no declara @Roles propio, hereda los @Roles de su controller (clase).
  */
-const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
+export const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   // analytics.controller (clase): overview que alimenta el dashboard "En vivo".
   'ops:view': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, FINANCE, ADMIN, SUPERADMIN],
   // ops.controller (clase): listados de viajes/conductores.
@@ -112,6 +113,10 @@ const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   // Separación de funciones (decisión del dueño): COMPLIANCE_SUPERVISOR + SUPERADMIN, NO ADMIN.
   'audit:view': [COMPLIANCE_SUPERVISOR, SUPERADMIN],
   'audit:verify': [COMPLIANCE_SUPERVISOR, SUPERADMIN],
+  // gobierno.controller (clase, admin-bff): TODO Gobierno → Políticas es EXCLUSIVO de SUPERADMIN
+  // (@Roles(SUPERADMIN) a nivel de clase; el PUT suma @RequireStepUpMfa). Espejo del borde de autoridad
+  // del registro PBAC (ADR-024 §6). Gatea el grupo GOBIERNO del nav + las páginas /gobierno/*.
+  'gobierno:manage': [SUPERADMIN],
 };
 
 export function can(user: SessionUser | null | undefined, permission: Permission): boolean {

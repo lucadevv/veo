@@ -60,6 +60,9 @@ import {
   tripDetail,
   tripSummary,
   vehicleView,
+  policyView,
+  type PolicyView,
+  type UpdatePolicyRequest,
   type TripStatus,
   type RevenueRangeValue,
 } from './schemas';
@@ -98,6 +101,7 @@ export const qk = {
   bidFloor: ['bid-floor'] as const,
   catalog: ['catalog'] as const,
   dispatchRadiusConfig: ['dispatch-radius-config'] as const,
+  policies: ['gobierno-policies'] as const,
 };
 
 const REALTIME_REFETCH = 15_000;
@@ -1050,6 +1054,42 @@ export function useUpdateDispatchRadiusConfig() {
     // 409 dejaba la version stale como expectedVersion → todo re-save 409eaba en loop sin recuperación.
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.dispatchRadiusConfig });
+    },
+  });
+}
+
+/* ── Gobierno → Políticas (PBAC · ADR-024 · SOLO SUPERADMIN) ── */
+
+/**
+ * Las 16 políticas de gobierno vigentes (la grilla). GET /gobierno/policies devuelve el ESTADO real
+ * (enabled/params/version/…); la metadata de forma (familia/label/schema) la aporta @veo/policy en la UI.
+ * El admin-bff gatea @Roles(SUPERADMIN); la UI también con `gobierno:manage`. Sin refetch en vivo (config).
+ */
+export function usePolicies() {
+  return useQuery({
+    queryKey: qk.policies,
+    queryFn: ({ signal }) =>
+      apiClient().get('/gobierno/policies', { schema: z.array(policyView), signal }),
+  });
+}
+
+/**
+ * Aplica el parche {enabled?, params?} a una política (PUT /gobierno/policies/:key). El admin-bff exige
+ * @Roles(SUPERADMIN) + @RequireStepUpMfa: el llamador asegura la MFA fresca con StepUpDialog ANTES de invocar.
+ * identity-service VALIDA `params` (schema Zod de @veo/policy), aplica el candado `mandatory`, bumpea `version`
+ * y emite policy.updated. onSettled (no onSuccess): re-sincroniza tras éxito O error (403 mandatory / 400 params)
+ * para que la grilla refleje siempre el estado vigente.
+ */
+export function useUpdatePolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { key: string } & UpdatePolicyRequest): Promise<PolicyView> =>
+      apiClient().put(`/gobierno/policies/${encodeURIComponent(input.key)}`, {
+        body: { enabled: input.enabled, params: input.params },
+        schema: policyView,
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.policies });
     },
   });
 }
