@@ -21,6 +21,7 @@ function fakePolicy(opts: { enabled: boolean; cidrs: string[] }): PolicyReader {
     list: async (_k, _p, fallback) => (opts.cidrs.length ? opts.cidrs : fallback),
     number: async (_k, _p, fallback) => fallback,
     bool: async (_k, _p, fallback) => fallback,
+    isPermissionHidden: async () => false,
     params: async () => ({}),
   };
 }

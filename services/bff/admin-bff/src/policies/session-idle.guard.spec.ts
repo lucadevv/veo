@@ -40,6 +40,7 @@ function fakePolicy(enabled: boolean, idleMin = 30): PolicyReader {
     number: async (_k, _p, fallback) => (idleMin ?? fallback),
     bool: async (_k, _p, fallback) => fallback,
     list: async (_k, _p, fallback) => fallback,
+    isPermissionHidden: async () => false,
     params: async () => ({}),
   };
 }

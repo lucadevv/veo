@@ -13,8 +13,13 @@ import { Body, Controller, Get, HttpCode, Param, Put } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequireStepUpMfa, Roles, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { GobiernoService, type PolicyView } from './gobierno.service';
+import {
+  GobiernoService,
+  type PolicyView,
+  type PermissionOverrideView,
+} from './gobierno.service';
 import { UpdatePolicyDto } from './dto/update-policy.dto';
+import { SetPermissionOverrideDto } from './dto/set-permission-override.dto';
 
 @ApiTags('gobierno')
 @Controller('gobierno')
@@ -53,5 +58,36 @@ export class GobiernoController {
     @Body() dto: UpdatePolicyDto,
   ): Promise<PolicyView> {
     return this.gobierno.update(user, key, dto);
+  }
+
+  // ── Gobierno → Permisos y visibilidad (OVERLAY subtract-only · ADR-025 §3, Ola 3) ─────────────────────
+  // Segunda capa del gobierno unificado, misma autoridad: SUPERADMIN (heredado de clase) + step-up en el PUT.
+  // El BFF reenvía a identity (GET/PUT /internal/permission-overrides); identity valida subtract-only + candado
+  // legal-mandatory y propaga sus errores (400 invariante base, 403 legal) con status/message intactos.
+
+  @Get('permission-overrides')
+  @ApiOperation({
+    summary:
+      'Lista los pares (rol, permiso) RESTADOS vigentes del overlay de visibilidad (la grilla). Solo SUPERADMIN.',
+  })
+  listPermissionOverrides(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PermissionOverrideView[]> {
+    return this.gobierno.listOverrides(user);
+  }
+
+  @Put('permission-overrides')
+  @HttpCode(200)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'Aplica {role, permission, hidden} al overlay: reenvía a identity (valida subtract-only + candado ' +
+      'legal-mandatory, bump version + permission_override.updated). Solo SUPERADMIN + step-up MFA.',
+  })
+  setPermissionOverride(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SetPermissionOverrideDto,
+  ): Promise<PermissionOverrideView> {
+    return this.gobierno.setOverride(user, dto);
   }
 }

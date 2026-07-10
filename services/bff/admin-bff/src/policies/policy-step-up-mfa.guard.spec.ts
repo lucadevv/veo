@@ -28,6 +28,7 @@ function fakePolicy(enabled: boolean, maxAgeSec = 600): PolicyReader {
     number: async (_k, _p, fallback) => (maxAgeSec ?? fallback),
     bool: async (_k, _p, fallback) => fallback,
     list: async (_k, _p, fallback) => fallback,
+    isPermissionHidden: async () => false,
     params: async () => ({}),
   };
 }

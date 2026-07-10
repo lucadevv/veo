@@ -5,9 +5,10 @@
  * BORDE de autoridad del registro PBAC: TODO Gobierno → Políticas es EXCLUSIVO de SUPERADMIN (diseño "Solo
  * superadmin"), y MUTAR una política (PUT) exige además step-up MFA.
  *
- *  - list / get / update heredan el @Roles(SUPERADMIN) de CLASE (RolesGuard usa getAllAndOverride: sin
- *    override de método, vale el set de clase). COMPLIANCE_SUPERVISOR / ADMIN / FINANCE → 403 en TODOS.
- *  - update (PUT) lleva @RequireStepUpMfa() a nivel MÉTODO; las lecturas NO.
+ *  - list / get / update (políticas) + listOverrides / setOverride (overlay de permisos · ADR-025 §3) heredan el
+ *    @Roles(SUPERADMIN) de CLASE (RolesGuard usa getAllAndOverride: sin override de método, vale el set de clase).
+ *    COMPLIANCE_SUPERVISOR / ADMIN / FINANCE → 403 en TODOS.
+ *  - update (PUT policy) y setOverride (PUT override) llevan @RequireStepUpMfa() a nivel MÉTODO; las lecturas NO.
  */
 import { describe, it, expect } from 'vitest';
 import { Reflector } from '@nestjs/core';
@@ -29,11 +30,26 @@ function ctxFor(handler: (...args: never[]) => unknown, roles: AdminRole[]): Exe
 
 const rolesGuard = new RolesGuard(new Reflector());
 
-/** Los tres handlers del controller, para barrer el gate de clase en cada uno. */
+/** Todos los handlers del controller, para barrer el gate de clase en cada uno. */
 const HANDLERS = {
   list: GobiernoController.prototype.listPolicies,
   get: GobiernoController.prototype.getPolicy,
   update: GobiernoController.prototype.updatePolicy,
+  listOverrides: GobiernoController.prototype.listPermissionOverrides,
+  setOverride: GobiernoController.prototype.setPermissionOverride,
+} as const;
+
+/** Los dos handlers de LECTURA (GET): no exigen step-up. */
+const READ_HANDLERS = {
+  list: HANDLERS.list,
+  get: HANDLERS.get,
+  listOverrides: HANDLERS.listOverrides,
+} as const;
+
+/** Los dos handlers de MUTACIÓN (PUT): exigen step-up MFA. */
+const WRITE_HANDLERS = {
+  update: HANDLERS.update,
+  setOverride: HANDLERS.setOverride,
 } as const;
 
 /** Roles que NO son superadmin y deben ser rechazados en TODA la superficie de Gobierno. */
@@ -52,21 +68,23 @@ describe('GobiernoController · authz — Gobierno → Políticas es EXCLUSIVO d
     }
   });
 
-  describe('list (GET) → 403 para todo rol no-superadmin', () => {
-    for (const [name, role] of REJECTED) {
-      it(`${name} → RECHAZADO`, () => {
-        expect(() => rolesGuard.canActivate(ctxFor(HANDLERS.list, [role]))).toThrow(ForbiddenError);
-      });
+  describe('lecturas (GET policies + overrides) → 403 para todo rol no-superadmin', () => {
+    for (const [handlerName, handler] of Object.entries(READ_HANDLERS)) {
+      for (const [roleName, role] of REJECTED) {
+        it(`${handlerName} · ${roleName} → RECHAZADO`, () => {
+          expect(() => rolesGuard.canActivate(ctxFor(handler, [role]))).toThrow(ForbiddenError);
+        });
+      }
     }
   });
 
-  describe('update (PUT) → 403 para todo rol no-superadmin', () => {
-    for (const [name, role] of REJECTED) {
-      it(`${name} → RECHAZADO`, () => {
-        expect(() => rolesGuard.canActivate(ctxFor(HANDLERS.update, [role]))).toThrow(
-          ForbiddenError,
-        );
-      });
+  describe('mutaciones (PUT policy + override) → 403 para todo rol no-superadmin', () => {
+    for (const [handlerName, handler] of Object.entries(WRITE_HANDLERS)) {
+      for (const [roleName, role] of REJECTED) {
+        it(`${handlerName} · ${roleName} → RECHAZADO`, () => {
+          expect(() => rolesGuard.canActivate(ctxFor(handler, [role]))).toThrow(ForbiddenError);
+        });
+      }
     }
   });
 
@@ -80,10 +98,13 @@ describe('GobiernoController · authz — Gobierno → Políticas es EXCLUSIVO d
     }
   });
 
-  it('el PUT (update) exige step-up MFA; las lecturas NO', () => {
+  it('los PUT (update policy + setOverride) exigen step-up MFA; las lecturas NO', () => {
     const reflector = new Reflector();
-    expect(reflector.get<boolean>(REQUIRE_MFA_KEY, HANDLERS.update)).toBe(true);
-    expect(reflector.get<boolean>(REQUIRE_MFA_KEY, HANDLERS.list)).toBeUndefined();
-    expect(reflector.get<boolean>(REQUIRE_MFA_KEY, HANDLERS.get)).toBeUndefined();
+    for (const handler of Object.values(WRITE_HANDLERS)) {
+      expect(reflector.get<boolean>(REQUIRE_MFA_KEY, handler)).toBe(true);
+    }
+    for (const handler of Object.values(READ_HANDLERS)) {
+      expect(reflector.get<boolean>(REQUIRE_MFA_KEY, handler)).toBeUndefined();
+    }
   });
 });
