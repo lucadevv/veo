@@ -3,16 +3,16 @@
  * (trip.started, panic.triggered, panic.resolved). Es la ÚNICA fuente que alimenta la página pública:
  * share-service no consulta tablas de otros servicios.
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { PanicStatus } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { TRIP_SNAPSHOT_REPO, type TripSnapshotRepository } from './trip-snapshot.repository';
 
 /** Estado con el que el read-model ENMASCARA un viaje en pánico (la vista familiar nunca lo revela). */
 const PANIC_SNAPSHOT_STATUS = 'PANIC';
 
 @Injectable()
 export class TripSnapshotService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TRIP_SNAPSHOT_REPO) private readonly repo: TripSnapshotRepository) {}
 
   /**
    * trip.started → el viaje está en curso. Proyecta también el passengerId (trip-service lo enriquece
@@ -25,7 +25,7 @@ export class TripSnapshotService {
     startedAt: Date,
     passengerId?: string,
   ): Promise<void> {
-    await this.prisma.write.tripSnapshot.upsert({
+    await this.repo.upsert({
       where: { tripId },
       create: {
         tripId,
@@ -59,7 +59,7 @@ export class TripSnapshotService {
     geo: { lat: number; lon: number },
     at: Date,
   ): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       const current = await tx.tripSnapshot.findUnique({ where: { tripId } });
       // Solo capturamos el prePanicStatus si NO estábamos ya en PANIC: una redelivery no debe pisar
       // el estado real guardado (que sería "PANIC", inservible para desenmascarar). Si no hay fila previa
@@ -114,7 +114,7 @@ export class TripSnapshotService {
       // RESOLVED (emergencia real): la máscara se MANTIENE. No tocamos el snapshot.
       return;
     }
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       const current = await tx.tripSnapshot.findUnique({ where: { tripId } });
       // No enmascarado (sin fila, o ya restaurado): nada que desenmascarar.
       if (current?.status !== PANIC_SNAPSHOT_STATUS) return;

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { ConflictError } from '@veo/utils';
 import { ContactsService } from './contacts.service';
+import { PrismaContactsRepository } from './contacts.repository';
 import type { Env } from '../config/env.schema';
 
 const config = new ConfigService<Env, true>({
@@ -39,7 +40,7 @@ describe('ContactsService.add · BR-I06', () => {
     const prisma = makePrisma(1);
     const redis = makeRedis(null);
     const sms = { send: vi.fn(async () => undefined) };
-    const svc = new ContactsService(prisma as never, redis as never, otpStub as never, sms, config);
+    const svc = new ContactsService(new PrismaContactsRepository(prisma as never), redis as never, otpStub as never, sms, config);
 
     const res = await svc.add('u1', {
       phone: '+51987654321',
@@ -58,7 +59,7 @@ describe('ContactsService.add · BR-I06', () => {
     const prisma = makePrisma(3);
     const redis = makeRedis(null);
     const sms = { send: vi.fn(async () => undefined) };
-    const svc = new ContactsService(prisma as never, redis as never, otpStub as never, sms, config);
+    const svc = new ContactsService(new PrismaContactsRepository(prisma as never), redis as never, otpStub as never, sms, config);
 
     await expect(
       svc.add('u1', { phone: '+51987654321', name: 'Otro', relationship: 'amigo' }),
@@ -70,7 +71,7 @@ describe('ContactsService.add · BR-I06', () => {
     const prisma = makePrisma(1);
     const redis = makeRedis(Date.now() - 1_000); // modificado hace 1s
     const sms = { send: vi.fn(async () => undefined) };
-    const svc = new ContactsService(prisma as never, redis as never, otpStub as never, sms, config);
+    const svc = new ContactsService(new PrismaContactsRepository(prisma as never), redis as never, otpStub as never, sms, config);
 
     await expect(
       svc.add('u1', { phone: '+51987654321', name: 'Otro', relationship: 'amigo' }),

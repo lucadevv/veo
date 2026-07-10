@@ -28,9 +28,12 @@ import { createEnvelope, KafkaEventConsumer, type EventEnvelope } from '@veo/eve
 import type Redis from 'ioredis';
 import { PrismaClient } from '../src/generated/prisma';
 import { ShareService } from '../src/share/share.service';
+import { PrismaShareRepository } from '../src/share/share.repository';
 import { ContactsService } from '../src/contacts/contacts.service';
+import { PrismaContactsRepository } from '../src/contacts/contacts.repository';
 import { ContactOtpService } from '../src/contacts/contact-otp.service';
 import { TripSnapshotService } from '../src/read-model/trip-snapshot.service';
+import { PrismaTripSnapshotRepository } from '../src/read-model/trip-snapshot.repository';
 import { EventsConsumer } from '../src/consumers/events.consumer';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type { SmsSender } from '../src/ports/sms/sms.port';
@@ -78,17 +81,17 @@ beforeAll(async () => {
     KAFKA_CONSUMER_GROUP: 'share-service-test',
   } as Record<string, unknown>);
 
-  const share = new ShareService(prismaService, config);
+  const share = new ShareService(new PrismaShareRepository(prismaService), config);
   // ContactsService: en el fan-out de pánico SOLO se invoca listVerified (lectura prisma real). Redis/OTP/SMS
   // no se tocan en ese camino → dobles inertes alcanzan (no mockeamos la DB, que es lo crítico).
   const contacts = new ContactsService(
-    prismaService,
+    new PrismaContactsRepository(prismaService),
     {} as unknown as Redis,
     {} as unknown as ContactOtpService,
     { send: async () => {} } as SmsSender,
     config,
   );
-  const snapshots = new TripSnapshotService(prismaService);
+  const snapshots = new TripSnapshotService(new PrismaTripSnapshotRepository(prismaService));
   // onModuleInit registra sus handlers en el `handlers` map (vía el espía) y "arranca" el consumer anulado.
   // El consumer YA NO recibe SmsSender (fix B1: el envío se delega a notification por evento).
   await new EventsConsumer(share, contacts, snapshots, config).onModuleInit();
