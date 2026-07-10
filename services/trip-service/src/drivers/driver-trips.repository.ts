@@ -21,6 +21,15 @@ export class DriverTripsRepository {
     return this.prisma.write.$transaction(work);
   }
 
+  /**
+   * Cuenta los viajes del conductor (`Trip.driverId = driverId`) — guard del HARD purge en el admin-bff:
+   * un conductor con historial operativo NO se purga. `count` del lado del motor (sin cargar filas), read
+   * réplica (el guard tolera el lag: un viaje recién creado no cambia el veredicto "tuvo actividad").
+   */
+  countTripsByDriver(driverId: string): Promise<number> {
+    return this.prisma.read.trip.count({ where: { driverId } });
+  }
+
   /** Ids de los viajes del conductor, DENTRO de la tx (para contar dependientes y borrar explícito). */
   findTripIdsByDriverTx(tx: TripTx, driverId: string): Promise<{ id: string }[]> {
     return tx.trip.findMany({ where: { driverId }, select: { id: true } });

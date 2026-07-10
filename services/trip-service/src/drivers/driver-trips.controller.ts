@@ -12,7 +12,7 @@ import { Controller, Delete, Get, HttpCode, Param, UseGuards } from '@nestjs/com
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { InternalIdentityGuard, RolesGuard, Roles } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { DriverTripsRepository } from './driver-trips.repository';
 import { DriverTripsService, type DriverTripsPurgeView } from './driver-trips.service';
 
 /** Resumen del historial operativo de un conductor para el guard del purge. */
@@ -28,7 +28,7 @@ export interface DriverTripCountView {
 @Controller('internal/drivers')
 export class DriverTripsController {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: DriverTripsRepository,
     private readonly driverTrips: DriverTripsService,
   ) {}
 
@@ -40,7 +40,7 @@ export class DriverTripsController {
   async tripCount(@Param('driverId') driverId: string): Promise<DriverTripCountView> {
     // count del lado del motor (sin cargar filas). CUALQUIER viaje en CUALQUIER estado cuenta como
     // historial operativo: un conductor que alguna vez tuvo un trip NO es "no-operado" y no se purga.
-    const tripCount = await this.prisma.read.trip.count({ where: { driverId } });
+    const tripCount = await this.repo.countTripsByDriver(driverId);
     return { driverId, tripCount, hasTrips: tripCount > 0 };
   }
 

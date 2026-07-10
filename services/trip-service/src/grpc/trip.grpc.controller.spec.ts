@@ -15,8 +15,8 @@ import {
 } from '@veo/auth';
 import type { ConfigService } from '@nestjs/config';
 import { TripGrpcController } from './trip.grpc.controller';
+import type { TripGrpcRepository } from './trip-grpc.repository';
 import { Prisma, type Trip } from '../generated/prisma';
-import type { PrismaService } from '../infra/prisma.service';
 import type { TripsService } from '../trips/trips.service';
 import type { TripQueryService } from '../trips/trip-query.service';
 import type { Env } from '../config/env.schema';
@@ -87,11 +87,15 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
 }
 
 function makeController(trip: Trip | null, trips: Partial<TripsService> = {}): TripGrpcController {
-  const prisma = {
-    read: { trip: { findUnique: async () => trip, findFirst: async () => trip } },
-  } as unknown as PrismaService;
+  const repo: TripGrpcRepository = {
+    findById: async () => trip,
+    findActiveByPassenger: async () => trip,
+    findActiveByDriver: async () => trip,
+    findOldestPendingSettlement: async () => trip,
+    findStateById: async () => (trip ? { id: trip.id, status: trip.status } : null),
+  };
   const query = {} as unknown as TripQueryService;
-  return new TripGrpcController(prisma, trips as TripsService, query, config);
+  return new TripGrpcController(repo, trips as TripsService, query, config);
 }
 
 describe('TripGrpcController · GetTrip (detalle "Mis Viajes" enriquecido)', () => {

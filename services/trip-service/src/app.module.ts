@@ -16,6 +16,7 @@ import { TripsModule } from './trips/trips.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { DriverTripsModule } from './drivers/driver-trips.module';
 import { TripGrpcController } from './grpc/trip.grpc.controller';
+import { TRIP_GRPC_REPO, PrismaTripGrpcRepository } from './grpc/trip-grpc.repository';
 
 const readinessProvider: Provider = {
   provide: READINESS_CHECKS,
@@ -45,6 +46,10 @@ const readinessProvider: Provider = {
     DriverTripsModule,
   ],
   controllers: [HealthController, MetricsController, TripGrpcController],
-  providers: [readinessProvider],
+  // §10: TRIP_GRPC_REPO es el dueño del acceso Prisma del TripGrpcController (lector cross-servicio).
+  providers: [
+    readinessProvider,
+    { provide: TRIP_GRPC_REPO, useClass: PrismaTripGrpcRepository },
+  ],
 })
 export class AppModule {}

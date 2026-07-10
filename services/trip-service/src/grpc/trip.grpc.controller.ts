@@ -13,9 +13,7 @@ import {
   type InternalAudience,
 } from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
-import { TripStatus } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
-import { LIVE_STATES } from '../trips/domain/trip-state-machine';
+import { TRIP_GRPC_REPO, type TripGrpcRepository } from './trip-grpc.repository';
 import { TripsService } from '../trips/trips.service';
 import { TripQueryService } from '../trips/trip-query.service';
 import type { TripView } from '../trips/dto/trip.dto';
@@ -161,7 +159,7 @@ export class TripGrpcController {
   private readonly secret: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TRIP_GRPC_REPO) private readonly repo: TripGrpcRepository,
     private readonly trips: TripsService,
     private readonly query: TripQueryService,
     config: ConfigService<Env, true>,
@@ -171,7 +169,7 @@ export class TripGrpcController {
 
   @GrpcMethod('TripService', 'GetTrip')
   async getTrip({ id }: GetByIdRequest): Promise<TripReply> {
-    const t = await this.prisma.read.trip.findUnique({ where: { id } });
+    const t = await this.repo.findById(id);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
   }
@@ -185,10 +183,7 @@ export class TripGrpcController {
    */
   @GrpcMethod('TripService', 'GetActiveTrip')
   async getActiveTrip({ passengerId }: ActiveTripRequest): Promise<TripReply> {
-    const t = await this.prisma.read.trip.findFirst({
-      where: { passengerId, status: { in: [...LIVE_STATES] } },
-      orderBy: { requestedAt: 'desc' },
-    });
+    const t = await this.repo.findActiveByPassenger(passengerId);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
   }
@@ -203,10 +198,7 @@ export class TripGrpcController {
   @GrpcMethod('TripService', 'GetActiveTripByDriver')
   async getActiveTripByDriver({ driverId }: ActiveTripByDriverRequest): Promise<TripReply> {
     if (!driverId) return EMPTY_TRIP;
-    const t = await this.prisma.read.trip.findFirst({
-      where: { driverId, status: { in: [...LIVE_STATES] } },
-      orderBy: { requestedAt: 'desc' },
-    });
+    const t = await this.repo.findActiveByDriver(driverId);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
   }
@@ -223,10 +215,7 @@ export class TripGrpcController {
    */
   @GrpcMethod('TripService', 'GetPendingSettlementTrip')
   async getPendingSettlementTrip({ passengerId }: PendingSettlementRequest): Promise<TripReply> {
-    const t = await this.prisma.read.trip.findFirst({
-      where: { passengerId, status: TripStatus.COMPLETED, passengerClosedAt: null },
-      orderBy: { completedAt: 'asc' },
-    });
+    const t = await this.repo.findOldestPendingSettlement(passengerId);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
   }
@@ -345,10 +334,7 @@ export class TripGrpcController {
 
   @GrpcMethod('TripService', 'GetTripState')
   async getTripState({ id }: GetByIdRequest): Promise<TripStateReply> {
-    const t = await this.prisma.read.trip.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    });
+    const t = await this.repo.findStateById(id);
     if (!t) return { id: '', status: '', found: false };
     return { id: t.id, status: t.status, found: true };
   }
