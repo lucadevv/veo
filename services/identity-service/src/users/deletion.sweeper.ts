@@ -9,10 +9,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { deletedPlaceholder, enqueueOutbox } from '@veo/database';
+import { deletedPlaceholder } from '@veo/database';
 import { createEnvelope } from '@veo/events';
 import { RedisRefreshTokenStore } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
+import { UsersRepository } from './users.repository';
 import type { Env } from '../config/env.schema';
 
 @Injectable()
@@ -21,7 +21,9 @@ export class DeletionSweeper {
   private readonly graceDays: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    // §10: el acceso Prisma (lectura de vencidas + la tx del tombstone) vive en UsersRepository. El sweeper
+    // ORQUESTA la política del derecho al olvido (qué PII se anula) sin dereferenciar Prisma.
+    private readonly repo: UsersRepository,
     config: ConfigService<Env, true>,
     // Singleton global (CoreModule): la misma instancia que usa auth.service. Se usa para revocar TODAS
     // las sesiones de la cuenta borrada (revokeAllForUser) al aplicar el tombstone.
@@ -39,10 +41,7 @@ export class DeletionSweeper {
   /** Devuelve cuántas cuentas se anonimizaron. Público para testeo/operación manual. */
   async sweep(now = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - this.graceDays * 24 * 60 * 60 * 1000);
-    const due = await this.prisma.read.user.findMany({
-      where: { deletedAt: null, deletionRequestedAt: { lte: cutoff } },
-      select: { id: true, driver: { select: { id: true } } },
-    });
+    const due = await this.repo.findUsersDueForDeletion(cutoff);
 
     for (const { id, driver } of due) {
       await this.tombstoneUser(id, driver?.id, now);
@@ -59,18 +58,15 @@ export class DeletionSweeper {
     driverId: string | undefined,
     now: Date,
   ): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       // User: PII de contacto + biométrica (faceEmbedding de referencia del pasajero verificado).
-      await tx.user.update({
-        where: { id: userId },
-        data: {
-          deletedAt: now,
-          phone: deletedPlaceholder(userId, 'phone'),
-          email: null,
-          dniHash: null,
-          photoUrl: null,
-          faceEmbedding: [],
-        },
+      await this.repo.updateUserTx(tx, userId, {
+        deletedAt: now,
+        phone: deletedPlaceholder(userId, 'phone'),
+        email: null,
+        dniHash: null,
+        photoUrl: null,
+        faceEmbedding: [],
       });
 
       // Driver: embedding facial de enrolamiento (BR-I02). Solo si el usuario es conductor. Al vaciar el
@@ -79,22 +75,21 @@ export class DeletionSweeper {
       // embedding lo invalida — mismo patrón que enrollFace()/resubmit(). Doblemente correcto en el tombstone:
       // no dejamos evidencia biométrica stale de una cuenta borrada (PII Ley 29733).
       if (driverId) {
-        await tx.driver.update({
-          where: { id: driverId },
-          data: {
-            faceEmbedding: [],
-            dniFaceMatched: null,
-            dniFaceMatchScore: null,
-            dniFaceMatchedAt: null,
-          },
+        await this.repo.updateDriverTx(tx, driverId, {
+          faceEmbedding: [],
+          dniFaceMatched: null,
+          dniFaceMatchScore: null,
+          dniFaceMatchedAt: null,
         });
       }
 
       // BiometricCheck: anonimiza cada intento (score/geo/captureRef) conservando el id por
       // integridad referencial — tombstone, no hard-delete. Idempotente (re-correr deja igual).
-      await tx.biometricCheck.updateMany({
-        where: { userId },
-        data: { score: 0, geoLat: null, geoLon: null, captureRef: null },
+      await this.repo.anonymizeBiometricChecksTx(tx, userId, {
+        score: 0,
+        geoLat: null,
+        geoLon: null,
+        captureRef: null,
       });
 
       // Señal de cascada: borrado EFECTIVO. Los consumidores downstream purgan su PII del usuario.
@@ -103,7 +98,7 @@ export class DeletionSweeper {
         producer: 'identity-service',
         payload: { userId, driverId, at: now.toISOString() },
       });
-      await enqueueOutbox(tx, envelope, userId);
+      await this.repo.enqueueOutbox(tx, envelope, userId);
     });
 
     // Revoca TODAS las sesiones de la cuenta borrada (ADR-012 §2: revoke en borrado de cuenta).

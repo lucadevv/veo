@@ -18,6 +18,7 @@ import {
 } from '@veo/auth';
 import { DniFaceMatchStatus } from '@veo/shared-types';
 import { IdentityGrpcController } from './identity.grpc.controller';
+import { PrismaIdentityGrpcRepository } from './identity-grpc.repository';
 import { seal } from '../common/secret-box';
 import type { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
@@ -69,23 +70,38 @@ const baseDriverRow = {
 /** Driver con un `documentIdEnc` que NO es un ciphertext válido (formato roto → `open` lanza). */
 const CORRUPT_ENC = 'esto-no-es-un-secreto-sellado-valido';
 
-function makeController(opts: {
-  findUnique?: () => unknown;
-  findMany?: () => unknown[];
-}): IdentityGrpcController {
+/**
+ * Construye el controller sobre el REPO REAL (`PrismaIdentityGrpcRepository`) envolviendo un doble de Prisma
+ * (mismo patrón que fleet.grpc.controller.spec): el §10 movió el acceso Prisma al repo, pero los tests siguen
+ * ejercitando la query real a través del puerto. Devuelve los spies de `driver.findUnique/findMany` para los
+ * tests que verifican la FORMA de la query (include de holds).
+ */
+function buildController(opts: { findUnique?: () => unknown; findMany?: () => unknown[] }): {
+  ctrl: IdentityGrpcController;
+  driverFindUnique: ReturnType<typeof vi.fn>;
+  driverFindMany: ReturnType<typeof vi.fn>;
+} {
+  const driverFindUnique = vi.fn(opts.findUnique ?? (() => null));
+  const driverFindMany = vi.fn(opts.findMany ?? (() => []));
   const prisma = {
     read: {
-      driver: {
-        findUnique: vi.fn(opts.findUnique ?? (() => null)),
-        findMany: vi.fn(opts.findMany ?? (() => [])),
-      },
+      user: { findUnique: vi.fn(() => null), findMany: vi.fn(() => []) },
+      driver: { findUnique: driverFindUnique, findMany: driverFindMany },
     },
   } as unknown as PrismaService;
   const config = new ConfigService<Env, true>({
     INTERNAL_IDENTITY_SECRET,
     DRIVER_DNI_ENC_KEY,
   } as unknown as Env);
-  return new IdentityGrpcController(prisma, config);
+  const ctrl = new IdentityGrpcController(new PrismaIdentityGrpcRepository(prisma), config);
+  return { ctrl, driverFindUnique, driverFindMany };
+}
+
+function makeController(opts: {
+  findUnique?: () => unknown;
+  findMany?: () => unknown[];
+}): IdentityGrpcController {
+  return buildController(opts).ctrl;
 }
 
 /** Extrae el `code` del error gRPC envuelto en RpcException (la forma `{ code, message }`). */
@@ -237,7 +253,7 @@ describe('IdentityGrpcController · scoping por RIEL (cross-rail / confused-depu
       INTERNAL_IDENTITY_SECRET,
       DRIVER_DNI_ENC_KEY,
     } as unknown as Env);
-    const ctrl = new IdentityGrpcController(prisma, config);
+    const ctrl = new IdentityGrpcController(new PrismaIdentityGrpcRepository(prisma), config);
     const reply = await ctrl.getUser({ id: 'x' }, signedMetaAs(InternalAudience.PUBLIC_RAIL));
     expect(reply.found).toBe(false);
   });
@@ -423,14 +439,13 @@ describe('IdentityGrpcController · GetDriver expone las CAUSAS de suspensión (
   });
 
   it('GetDriver incluye los holds en el query (include suspensionHolds: select cause)', async () => {
-    const ctrl = makeController({ findUnique: () => ({ ...baseDriverRow, suspensionHolds: [] }) });
-    const prismaFindUnique = (
-      ctrl as unknown as { prisma: { read: { driver: { findUnique: ReturnType<typeof vi.fn> } } } }
-    ).prisma.read.driver.findUnique;
+    const { ctrl, driverFindUnique } = buildController({
+      findUnique: () => ({ ...baseDriverRow, suspensionHolds: [] }),
+    });
 
     await ctrl.getDriver({ id: 'd1' }, signedMeta());
 
-    expect(prismaFindUnique).toHaveBeenCalledWith(
+    expect(driverFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         include: expect.objectContaining({
           suspensionHolds: { select: { cause: true } },
@@ -497,24 +512,19 @@ describe('IdentityGrpcController · GetDriversByIds (BATCH) expone las CAUSAS de
   });
 
   it('el batch incluye los holds en UNA sola query (include suspensionHolds: select cause · sin N+1)', async () => {
-    const ctrl = makeController({
+    const { ctrl, driverFindMany } = buildController({
       findMany: () => [
         { ...baseDriverRow, id: 'd1', suspensionHolds: [] },
         { ...baseDriverRow, id: 'd2', suspensionHolds: [] },
       ],
     });
-    const prismaFindMany = (
-      ctrl as unknown as {
-        prisma: { read: { driver: { findMany: ReturnType<typeof vi.fn> } } };
-      }
-    ).prisma.read.driver.findMany;
 
     await ctrl.getDriversByIds({ ids: ['d1', 'd2'] }, signedMeta());
 
     // UNA sola llamada a la DB para TODA la página (no un query por driver) → no hay N+1.
-    expect(prismaFindMany).toHaveBeenCalledTimes(1);
+    expect(driverFindMany).toHaveBeenCalledTimes(1);
     // Y esa única query trae los holds de todos los ids vía include (mismo dato que el detalle).
-    expect(prismaFindMany).toHaveBeenCalledWith(
+    expect(driverFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: { in: ['d1', 'd2'] } },
         include: expect.objectContaining({

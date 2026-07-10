@@ -25,6 +25,21 @@ export class UsersRepository {
     return this.prisma.read.user.findUnique({ where: { id } });
   }
 
+  /**
+   * Cuentas cuya ventana de gracia de borrado (BR-S06) ya venció y aún no fueron tombstoneadas
+   * (`deletedAt null` + `deletionRequestedAt <= cutoff`). Réplica — el barrido diario del DeletionSweeper.
+   * Proyección {id, driver:{id}}: resuelve el user y su conductor asociado (si es conductor) para el
+   * tombstone atómico. Idempotente por construcción (las ya tombstoneadas quedan fuera del filtro).
+   */
+  findUsersDueForDeletion(
+    cutoff: Date,
+  ): Promise<{ id: string; driver: { id: string } | null }[]> {
+    return this.prisma.read.user.findMany({
+      where: { deletedAt: null, deletionRequestedAt: { lte: cutoff } },
+      select: { id: true, driver: { select: { id: true } } },
+    });
+  }
+
   /** Update del perfil (merge armado por el service) / cancelación de borrado. Devuelve el user actualizado. */
   updateUser(id: string, data: Prisma.UserUpdateInput): Promise<User> {
     return this.prisma.write.user.update({ where: { id }, data });
@@ -51,8 +66,29 @@ export class UsersRepository {
     return tx.user.findUnique({ where: { id } });
   }
 
-  /** Update del usuario, DENTRO de la tx (marca `deletionRequestedAt`). El service arma la data. */
+  /** Update del usuario, DENTRO de la tx (marca `deletionRequestedAt` / tombstone). El service arma la data. */
   async updateUserTx(tx: UsersTx, id: string, data: Prisma.UserUpdateInput): Promise<void> {
     await tx.user.update({ where: { id }, data });
+  }
+
+  /**
+   * Update del conductor asociado, DENTRO de la tx (derecho al olvido · BR-I02: vacía el faceEmbedding de
+   * enrolamiento y resetea el binding DNI↔selfie en la MISMA escritura). Parte de la unit-of-work del
+   * tombstone del user: por eso vive acá y no dereferencia Prisma fuera del repo. El sweeper arma la data.
+   */
+  async updateDriverTx(tx: UsersTx, id: string, data: Prisma.DriverUpdateInput): Promise<void> {
+    await tx.driver.update({ where: { id }, data });
+  }
+
+  /**
+   * Anonimiza en batch los intentos de BiometricCheck del usuario, DENTRO de la tx (score/geo/captureRef →
+   * neutro), conservando el id por integridad referencial. El sweeper arma la data (tombstone, no hard-delete).
+   */
+  async anonymizeBiometricChecksTx(
+    tx: UsersTx,
+    userId: string,
+    data: Prisma.BiometricCheckUpdateManyMutationInput,
+  ): Promise<void> {
+    await tx.biometricCheck.updateMany({ where: { userId }, data });
   }
 }

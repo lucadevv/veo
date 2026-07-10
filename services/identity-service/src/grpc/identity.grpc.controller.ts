@@ -3,14 +3,14 @@
  * Lectura síncrona de identidad para otros servicios. Devuelve `found=false` en vez de lanzar,
  * para que el llamante decida (evita ruido de errores cross-servicio).
  */
-import { Controller, Logger } from '@nestjs/common';
+import { Controller, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, InternalAudience, type InternalIdentity } from '@veo/auth';
 import { DniFaceMatchStatus, PassiveLivenessStatus } from '@veo/shared-types';
 import { BackgroundCheckStatus } from '../generated/prisma';
-import { PrismaService } from '../infra/prisma.service';
+import { IDENTITY_GRPC_REPO, type IdentityGrpcRepository } from './identity-grpc.repository';
 import { open } from '../common/secret-box';
 import type { Env } from '../config/env.schema';
 
@@ -189,7 +189,7 @@ export class IdentityGrpcController {
   private readonly dniEncKey: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(IDENTITY_GRPC_REPO) private readonly repo: IdentityGrpcRepository,
     config: ConfigService<Env, true>,
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
@@ -225,7 +225,7 @@ export class IdentityGrpcController {
   @GrpcMethod('IdentityService', 'GetUser')
   async getUser({ id }: GetByIdRequest, metadata: Metadata): Promise<UserReply> {
     this.requireIdentity('GetUser', metadata);
-    const u = await this.prisma.read.user.findUnique({ where: { id } });
+    const u = await this.repo.findUserById(id);
     if (!u) {
       return {
         id: '',
@@ -263,18 +263,11 @@ export class IdentityGrpcController {
     // binding DNI↔selfie) se descifra/emite SOLO si el caller es ADMIN_RAIL. Para los demás rieles NO se
     // descifra el DNI (no viaja por el cable) y los otros campos PII se omiten (proto3 default '').
     const includeSensitivePii = identity.aud === InternalAudience.ADMIN_RAIL;
-    // BE-1b — `include: user` trae los scalars del Driver (incluido legalName) + el nombre/kyc/phone
-    // del usuario (driver→user, ambos en identity: NO es join cross-servicio).
-    const d = await this.prisma.read.driver.findUnique({
-      where: { id },
-      include: {
-        user: { select: { name: true, kycStatus: true, phone: true } },
-        // Holds VIGENTES: el admin-bff necesita las CAUSAS distintas para saber POR QUÉ está suspendido y
-        // elegir el endpoint de reactivación (DISCIPLINARY → /reactivate; documento/ITV → /reactivate-compliance).
-        // Solo el `cause` (no PII). El detalle Compliance+ es el único consumidor del DriverReply single.
-        suspensionHolds: { select: { cause: true } },
-      },
-    });
+    // BE-1b — el repo trae los scalars del Driver (incluido legalName) + el nombre/kyc/phone del usuario
+    // (driver→user, ambos en identity: NO es join cross-servicio) + los holds VIGENTES (solo el `cause`, no
+    // PII): el admin-bff necesita las CAUSAS distintas para saber POR QUÉ está suspendido y elegir el endpoint
+    // de reactivación (DISCIPLINARY → /reactivate; documento/ITV → /reactivate-compliance).
+    const d = await this.repo.findDriverById(id);
     // El descifrado del DNI (único path costoso/peligroso) ocurre ÚNICAMENTE para ADMIN_RAIL, y aun ahí con
     // guarda (`openDniSafely`): un blob corrupto degrada a "" en vez de tumbar la RPC con un 500.
     return d ? this.toDriverReply(d, includeSensitivePii) : EMPTY_DRIVER;
@@ -283,11 +276,9 @@ export class IdentityGrpcController {
   @GrpcMethod('IdentityService', 'GetDriverByUser')
   async getDriverByUser({ id }: GetByIdRequest, metadata: Metadata): Promise<DriverReply> {
     this.requireIdentity('GetDriverByUser', metadata);
-    // `include: user` trae los scalars del Driver (incluido legalName) + nombre/kyc/phone del usuario.
-    const d = await this.prisma.read.driver.findUnique({
-      where: { userId: id },
-      include: { user: { select: { name: true, kycStatus: true, phone: true } } },
-    });
+    // El repo trae los scalars del Driver (incluido legalName) + nombre/kyc/phone del usuario (sin holds:
+    // el driver-rail no los consume).
+    const d = await this.repo.findDriverByUserId(id);
     return d ? this.toDriverReply(d) : EMPTY_DRIVER;
   }
 
@@ -300,18 +291,12 @@ export class IdentityGrpcController {
   async getDriversByIds({ ids }: DriverIdsRequest, metadata: Metadata): Promise<DriversByIdsReply> {
     this.requireIdentity('GetDriversByIds', metadata);
     if (!ids || ids.length === 0) return { drivers: [] };
-    const drivers = await this.prisma.read.driver.findMany({
-      where: { id: { in: ids } },
-      include: {
-        user: { select: { name: true, kycStatus: true, phone: true } },
-        // Holds VIGENTES (solo el `cause`, NO PII): la LISTA del panel necesita las CAUSAS distintas para
-        // ofrecer la(s) acción(es) de reactivación correcta(s) por fila (cause-aware), igual que el detalle.
-        // SIN N+1: es una SOLA query batch (`findMany WHERE id IN (...)` con `include`) — Prisma trae los
-        // holds de TODOS los ids en la misma ida a la DB, no un query por conductor. `toDriverReply` mapea
-        // `suspensionCauses` (causas distintas, dedup con Set) cuando el row trae `suspensionHolds`.
-        suspensionHolds: { select: { cause: true } },
-      },
-    });
+    // Holds VIGENTES (solo el `cause`, NO PII): la LISTA del panel necesita las CAUSAS distintas para ofrecer
+    // la(s) acción(es) de reactivación correcta(s) por fila (cause-aware), igual que el detalle. SIN N+1: el
+    // repo hace UNA sola query batch (`findMany WHERE id IN (...)` con `include`) — Prisma trae los holds de
+    // TODOS los ids en la misma ida a la DB, no un query por conductor. `toDriverReply` mapea `suspensionCauses`
+    // (causas distintas, dedup con Set) cuando el row trae `suspensionHolds`.
+    const drivers = await this.repo.findDriversByIds(ids);
     // BATCH/lista: NO se descifra el DNI (`includeDni` ausente → false). El admin-bff `listDrivers` consume
     // SOLO name/phone de este reply (jamás documentId), así que descifrar acá sería over-decryption de PII y
     // —peor— una fila con ciphertext corrupto/de-otra-clave tumbaría la página ENTERA de conductores. El DNI
@@ -331,7 +316,7 @@ export class IdentityGrpcController {
   async getUsersByIds({ ids }: { ids: string[] }, metadata: Metadata): Promise<UsersByIdsReply> {
     this.requireIdentity('GetUsersByIds', metadata);
     if (!ids || ids.length === 0) return { users: [] };
-    const users = await this.prisma.read.user.findMany({ where: { id: { in: ids } } });
+    const users = await this.repo.findUsersByIds(ids);
     return {
       users: users.map((u) => ({
         id: u.id,
@@ -354,12 +339,9 @@ export class IdentityGrpcController {
   @GrpcMethod('IdentityService', 'GetDriverCounts')
   async getDriverCounts(_request: unknown, metadata: Metadata): Promise<DriverCountsReply> {
     this.requireIdentity('GetDriverCounts', metadata);
-    const groups = await this.prisma.read.driver.groupBy({
-      by: ['backgroundCheckStatus'],
-      _count: { _all: true },
-    });
+    const groups = await this.repo.countDriversByBackgroundStatus();
     const countOf = (backgroundCheckStatus: BackgroundCheckStatus): number =>
-      groups.find((g) => g.backgroundCheckStatus === backgroundCheckStatus)?._count._all ?? 0;
+      groups.find((g) => g.backgroundCheckStatus === backgroundCheckStatus)?.count ?? 0;
     return {
       pending: countOf(BackgroundCheckStatus.PENDING),
       cleared: countOf(BackgroundCheckStatus.CLEARED),
