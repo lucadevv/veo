@@ -10,12 +10,12 @@
  *  - Validación: label 1..maxLabel (trim, con default Casa/Trabajo), lat/lng finitos.
  *  - Aislamiento: update/remove sólo afectan lugares del propio userId (NOT_FOUND si es ajeno).
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../infra/prisma.service';
-import { PlaceKind, Prisma, type SavedPlace } from '../generated/prisma';
+import { PlaceKind, type SavedPlace } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import { FavoritesLimitError, PlaceNotFoundError, PlaceValidationError } from './places.errors';
+import { PLACES_REPO, type PlacesRepository } from './places.repository';
 
 /** Entrada de creación/edición (sin id ni userId: el userId viene del contexto autenticado). */
 export interface SavePlaceInput {
@@ -50,7 +50,7 @@ export class PlacesService {
   private readonly maxLabelLength: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(PLACES_REPO) private readonly repo: PlacesRepository,
     config: ConfigService<Env, true>,
   ) {
     this.maxFavorites = config.getOrThrow<number>('MAX_FAVORITES');
@@ -87,7 +87,7 @@ export class PlacesService {
 
   /** Lista los lugares del usuario: HOME, WORK, luego FAVORITEs por createdAt desc. */
   async listByUser(userId: string): Promise<SavedPlace[]> {
-    const places = await this.prisma.read.savedPlace.findMany({ where: { userId } });
+    const places = await this.repo.findManyByUser(userId);
     return [...places].sort((a, b) => {
       const byKind = KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
       if (byKind !== 0) {
@@ -112,29 +112,26 @@ export class PlacesService {
       lng: input.lng,
     };
 
-    // Read + write en UNA transacción SERIALIZABLE: el count+create del FAVORITE y el findFirst+create
-    // del HOME/WORK eran TOCTOU (dos saves concurrentes superaban el tope o creaban dos HOME). Serializable
-    // serializa esas lecturas con el write; bajo carrera real (mismo usuario y kind a la vez) uno falla
-    // honesto (serialization error) en vez de violar el invariante.
-    return this.prisma.write.$transaction(
-      async (tx) => {
-        if (input.kind === PlaceKind.FAVORITE) {
-          const count = await tx.savedPlace.count({ where: { userId, kind: PlaceKind.FAVORITE } });
-          if (count >= this.maxFavorites) {
-            throw new FavoritesLimitError(this.maxFavorites);
-          }
-          return tx.savedPlace.create({ data });
-        }
-        // HOME/WORK únicos por usuario: si ya existe uno del mismo kind, se reemplaza (upsert manual,
-        // porque el unique parcial userId+kind sólo cubre HOME/WORK y Prisma no expresa unique parcial).
-        const existing = await tx.savedPlace.findFirst({ where: { userId, kind: input.kind } });
-        if (existing) {
-          return tx.savedPlace.update({ where: { id: existing.id }, data });
+    // Read + write en UNA transacción SERIALIZABLE (la aísla el repo · runInTx): el count+create del
+    // FAVORITE y el findFirst+create del HOME/WORK eran TOCTOU (dos saves concurrentes superaban el tope o
+    // creaban dos HOME). Serializable serializa esas lecturas con el write; bajo carrera real (mismo usuario
+    // y kind a la vez) uno falla honesto (serialization error) en vez de violar el invariante.
+    return this.repo.runInTx(async (tx) => {
+      if (input.kind === PlaceKind.FAVORITE) {
+        const count = await tx.savedPlace.count({ where: { userId, kind: PlaceKind.FAVORITE } });
+        if (count >= this.maxFavorites) {
+          throw new FavoritesLimitError(this.maxFavorites);
         }
         return tx.savedPlace.create({ data });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+      }
+      // HOME/WORK únicos por usuario: si ya existe uno del mismo kind, se reemplaza (upsert manual,
+      // porque el unique parcial userId+kind sólo cubre HOME/WORK y Prisma no expresa unique parcial).
+      const existing = await tx.savedPlace.findFirst({ where: { userId, kind: input.kind } });
+      if (existing) {
+        return tx.savedPlace.update({ where: { id: existing.id }, data });
+      }
+      return tx.savedPlace.create({ data });
+    });
   }
 
   /**
@@ -143,38 +140,35 @@ export class PlacesService {
    */
   async update(userId: string, id: string, raw: SavePlaceInput): Promise<SavedPlace> {
     const input = this.validate(raw);
-    // findFirst + deleteMany + update en UNA transacción serializable: el deleteMany (unicidad HOME/WORK)
-    // y el update deben ser atómicos — sin la tx, un edit concurrente podía borrar el registro en edición
-    // o dejar dos del mismo kind.
-    return this.prisma.write.$transaction(
-      async (tx) => {
-        const existing = await tx.savedPlace.findFirst({ where: { id, userId } });
-        if (!existing) {
-          throw new PlaceNotFoundError(id);
-        }
-        if (input.kind !== PlaceKind.FAVORITE) {
-          // Garantiza unicidad de HOME/WORK: descarta cualquier otro del mismo kind del usuario.
-          await tx.savedPlace.deleteMany({ where: { userId, kind: input.kind, id: { not: id } } });
-        }
-        return tx.savedPlace.update({
-          where: { id: existing.id },
-          data: {
-            kind: input.kind,
-            label: input.label,
-            subtitle: input.subtitle ?? null,
-            lat: input.lat,
-            lng: input.lng,
-          },
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    // findFirst + deleteMany + update en UNA transacción serializable (la aísla el repo · runInTx): el
+    // deleteMany (unicidad HOME/WORK) y el update deben ser atómicos — sin la tx, un edit concurrente podía
+    // borrar el registro en edición o dejar dos del mismo kind.
+    return this.repo.runInTx(async (tx) => {
+      const existing = await tx.savedPlace.findFirst({ where: { id, userId } });
+      if (!existing) {
+        throw new PlaceNotFoundError(id);
+      }
+      if (input.kind !== PlaceKind.FAVORITE) {
+        // Garantiza unicidad de HOME/WORK: descarta cualquier otro del mismo kind del usuario.
+        await tx.savedPlace.deleteMany({ where: { userId, kind: input.kind, id: { not: id } } });
+      }
+      return tx.savedPlace.update({
+        where: { id: existing.id },
+        data: {
+          kind: input.kind,
+          label: input.label,
+          subtitle: input.subtitle ?? null,
+          lat: input.lat,
+          lng: input.lng,
+        },
+      });
+    });
   }
 
   /** Elimina un lugar del propio usuario. NOT_FOUND si el id no existe o es ajeno. */
   async remove(userId: string, id: string): Promise<void> {
-    const result = await this.prisma.write.savedPlace.deleteMany({ where: { id, userId } });
-    if (result.count === 0) {
+    const count = await this.repo.deleteByUser(id, userId);
+    if (count === 0) {
       throw new PlaceNotFoundError(id);
     }
   }
