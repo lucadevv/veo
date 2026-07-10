@@ -27,6 +27,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { PricingModule } from './pricing/pricing.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
+import { GobiernoModule } from './gobierno/gobierno.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
     PricingModule,
     CatalogModule,
     DispatchConfigModule,
+    GobiernoModule,
   ],
   providers: [
     // admin-bff SOLO acepta tokens de tipo 'admin' (el JwtAuthGuard rechaza pasajero/conductor aunque
