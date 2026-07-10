@@ -24,6 +24,10 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { EventsModule } from './events/events.module';
 import { DriverPaymentsModule } from './drivers/driver-payments.module';
 import { PaymentGrpcController } from './grpc/payment.grpc.controller';
+import {
+  PAYMENT_GRPC_REPO,
+  PrismaPaymentGrpcRepository,
+} from './grpc/payment-grpc.repository';
 
 const readinessProvider: Provider = {
   provide: READINESS_CHECKS,
@@ -61,6 +65,10 @@ const readinessProvider: Provider = {
     DriverPaymentsModule,
   ],
   controllers: [HealthController, MetricsController, PaymentGrpcController],
-  providers: [readinessProvider],
+  // §10: PAYMENT_GRPC_REPO es el dueño del acceso Prisma del PaymentGrpcController (lector cross-feature).
+  providers: [
+    readinessProvider,
+    { provide: PAYMENT_GRPC_REPO, useClass: PrismaPaymentGrpcRepository },
+  ],
 })
 export class AppModule {}

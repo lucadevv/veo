@@ -20,7 +20,7 @@ import {
   type InternalAudience as Rail,
 } from '@veo/auth';
 import { PaymentGrpcController } from './payment.grpc.controller';
-import type { PrismaService } from '../infra/prisma.service';
+import type { PaymentGrpcRepository } from './payment-grpc.repository';
 import type { Env } from '../config/env.schema';
 
 const INTERNAL_IDENTITY_SECRET = 's'.repeat(32);
@@ -61,16 +61,16 @@ const paymentRow = {
 };
 
 function makeController(): PaymentGrpcController {
-  const prisma = {
-    read: {
-      payment: { findUnique: vi.fn(async () => paymentRow) },
-      userCredit: { findUnique: vi.fn(async () => ({ balanceCents: 500 })) },
-    },
-  } as unknown as PrismaService;
+  const repo = {
+    findPaymentById: vi.fn(async () => paymentRow),
+    findPaymentByDedupKey: vi.fn(async () => paymentRow),
+    sumCapturedTipCentsByTrip: vi.fn(async () => 0),
+    findUserCreditByUser: vi.fn(async () => ({ userId: 'u-1', balanceCents: 500 })),
+  } as unknown as PaymentGrpcRepository;
   const config = new ConfigService<Env, true>({
     INTERNAL_IDENTITY_SECRET,
   } as unknown as Env);
-  return new PaymentGrpcController(prisma, config);
+  return new PaymentGrpcController(repo, config);
 }
 
 /** Extrae el code gRPC del error lanzado (RpcException envuelve `{ code, message }`). */

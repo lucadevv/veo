@@ -2,12 +2,12 @@
  * Controlador gRPC de payment (paquete veo.payment.v1.PaymentService).
  * Lectura síncrona de un pago para otros servicios. Devuelve `found=false` en vez de lanzar.
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
 import { verifyGrpcIdentity, InternalAudience, type InternalAudience as Rail } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
+import { PAYMENT_GRPC_REPO, type PaymentGrpcRepository } from './payment-grpc.repository';
 import { deriveTripChargeDedupKey } from '../payments/payment.policy';
 import type { Payment } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
@@ -117,7 +117,7 @@ export class PaymentGrpcController {
   private readonly secret: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(PAYMENT_GRPC_REPO) private readonly repo: PaymentGrpcRepository,
     config: ConfigService<Env, true>,
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
@@ -151,7 +151,7 @@ export class PaymentGrpcController {
   @GrpcMethod('PaymentService', 'GetPayment')
   async getPayment({ id }: GetPaymentRequest, metadata: Metadata): Promise<PaymentReply> {
     this.requireIdentity('GetPayment', metadata);
-    const p = await this.prisma.read.payment.findUnique({ where: { id } });
+    const p = await this.repo.findPaymentById(id);
     if (!p) return EMPTY;
     return this.toReply(p);
   }
@@ -169,9 +169,7 @@ export class PaymentGrpcController {
     metadata: Metadata,
   ): Promise<PaymentReply> {
     this.requireIdentity('GetPaymentByTrip', metadata);
-    const p = await this.prisma.read.payment.findUnique({
-      where: { dedupKey: deriveTripChargeDedupKey(tripId) },
-    });
+    const p = await this.repo.findPaymentByDedupKey(deriveTripChargeDedupKey(tripId));
     if (!p) return EMPTY;
     // A1 · propina TOTAL del viaje para el recibo = la de la TARIFA (legacy) + Σ de las propinas DIGITALES
     // capturadas (tip-Payments kind=TIP, cobros separados en Model B). Así el recibo/app sabe que ya se dio
@@ -179,11 +177,7 @@ export class PaymentGrpcController {
     // falla, degradamos al tip de la propia tarifa (no rompemos el recibo por un cálculo secundario).
     let tipCents = p.tipCents;
     try {
-      const tipAgg = await this.prisma.read.payment.aggregate({
-        where: { tripId, kind: 'TIP', status: 'CAPTURED' },
-        _sum: { tipCents: true },
-      });
-      tipCents = p.tipCents + (tipAgg._sum.tipCents ?? 0);
+      tipCents = p.tipCents + (await this.repo.sumCapturedTipCentsByTrip(tripId));
     } catch {
       /* degradación honesta: sin la suma de tip-Payments, el recibo reporta el tip de la tarifa. */
     }
@@ -201,7 +195,7 @@ export class PaymentGrpcController {
     metadata: Metadata,
   ): Promise<UserCreditReply> {
     this.requireIdentity('GetUserCredit', metadata);
-    const credit = await this.prisma.read.userCredit.findUnique({ where: { userId } });
+    const credit = await this.repo.findUserCreditByUser(userId);
     return { balanceCents: credit?.balanceCents ?? 0 };
   }
 
