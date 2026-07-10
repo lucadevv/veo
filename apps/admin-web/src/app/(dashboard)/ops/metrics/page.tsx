@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Landmark, TrendingUp, Coins, Undo2 } from 'lucide-react';
+import { Landmark, TrendingUp, Coins, Undo2, Lock } from 'lucide-react';
 import { useRevenueMetrics } from '@/lib/api/queries';
 import type { RevenueRangeValue } from '@/lib/api/schemas';
 import { money } from '@/lib/formatters';
@@ -10,7 +10,9 @@ import { PageHeader } from '@/components/layout/page-header';
 import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
 import { RevenueChart } from '@/components/charts/revenue-chart';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState } from '@/components/ui/states';
+import { useSession } from '@/lib/session-context';
+import { can } from '@/lib/rbac';
 
 const RANGES: { value: RevenueRangeValue; label: string }[] = [
   { value: 'today', label: 'Hoy' },
@@ -54,7 +56,25 @@ function RangeToggle({
  */
 export default function MetricsPage() {
   const [range, setRange] = useState<RevenueRangeValue>('today');
+  const user = useSession();
   const revenue = useRevenueMetrics(range);
+
+  if (!can(user, 'ops:view')) {
+    return (
+      <div className="flex h-full flex-col">
+        <PageHeader
+          title="Métricas"
+          description="Ingresos de la plataforma por período · money-in, comisión, margen y reembolsos."
+        />
+        <EmptyState
+          className="flex-1"
+          icon={<Lock className="size-6" aria-hidden />}
+          title="Acceso restringido"
+          description="Necesitas el rol correspondiente para ver las métricas de ingresos."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">

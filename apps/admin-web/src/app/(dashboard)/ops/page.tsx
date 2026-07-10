@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Lock } from 'lucide-react';
 import { useOverview, useTrips } from '@/lib/api/queries';
 import { useOpsStore } from '@/lib/realtime/ops-store';
 import { money, relativeFromNow } from '@/lib/formatters';
@@ -13,9 +14,12 @@ import { MapView, type MapMarker } from '@/components/map/lazy-map';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/states';
+import { useSession } from '@/lib/session-context';
+import { can } from '@/lib/rbac';
 
 export default function OpsPage() {
   const router = useRouter();
+  const user = useSession();
   const drivers = useOpsStore((s) => s.drivers);
   const panics = useOpsStore((s) => s.panics);
   const overview = useOverview();
@@ -42,6 +46,23 @@ export default function OpsPage() {
 
   const tripItems = trips.data?.pages.flatMap((p) => p.items) ?? [];
   const activeTrips = tripItems.filter((t) => isActiveTrip(t.status));
+
+  if (!can(user, 'ops:view')) {
+    return (
+      <div className="flex h-full flex-col">
+        <PageHeader
+          title="Operación en vivo"
+          description="Conductores, viajes y alertas en tiempo real."
+        />
+        <EmptyState
+          className="flex-1"
+          icon={<Lock className="size-6" aria-hidden />}
+          title="Acceso restringido"
+          description="Necesitas el rol correspondiente para ver la operación en vivo."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
