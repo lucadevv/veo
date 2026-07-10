@@ -448,3 +448,31 @@ model OutboxEvent {
   @@map("outbox_events")
   @@schema("identity")
 }
+
+/// Registro PBAC (ADR-024 §3) — ESTADO VIGENTE de cada política de gobierno (Gobierno → Políticas del admin).
+/// El CONTRATO (schema Zod de `params`, defaults fail-safe, flag `mandatory`, textos UI) vive en `@veo/policy`
+/// (fuente única de forma); esta tabla guarda lo que el runtime aplica. El seed idempotente (PoliciesSeeder,
+/// OnModuleInit) inserta las 16 keys del catálogo que FALTEN (createMany skipDuplicates) SIN pisar los cambios
+/// del admin. Cada mutación bumpea `version` (cache-busting) + emite `policy.updated` por outbox EN LA MISMA tx
+/// (audit WORM + invalidación de cache de `@veo/policy`), molde radius-config. `key` = id canónico ('auth.stepup').
+model Policy {
+  /// Key canónica de la política (id del catálogo `@veo/policy`, ej. 'auth.stepup', 'media.dual-auth').
+  key       String   @id
+  /// Familia funcional ('auth' | 'data' | 'access' | 'ops'). Denormalizada del catálogo para agrupar en la UI.
+  family    String
+  /// Estado vigente on/off. Default true = comportamiento seguro de hoy (las mandatory/hardcoded arrancan on).
+  enabled   Boolean  @default(true)
+  /// Parámetros tipados por política (jsonb). Validados contra el schema Zod de la key en `@veo/policy`.
+  params    Json     @default("{}")
+  /// Candado Ley 29733 (ADR §3): si true, `enabled` NO se puede poner en false (pii.mask, privacy.erasure, auth.mfa).
+  mandatory Boolean  @default(false)
+  /// Versión MONOTÓNICA: bump en cada cambio (cache-busting de `@veo/policy`). Arranca en 1 (seed).
+  version   Int      @default(1)
+  /// actorId del último que la mutó (operador admin) o 'system' (seed). Accountability; el WORM es la verdad.
+  updatedBy String   @map("updated_by")
+  /// Momento del último cambio (auto). Ordena el historial junto con `version`.
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("policies")
+  @@schema("identity")
+}

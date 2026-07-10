@@ -1454,6 +1454,34 @@ export const catalogUpdated = z.object({
   updatedAt: z.string(),
 });
 
+/* ── policies / PBAC (ADR-024 · identity-service, dueño del registro de políticas de gobierno) ── */
+/// Una política de gobierno (ADR-024) fue MUTADA por el admin: identity-service (dueño del registro `Policy`)
+/// lo emite por OUTBOX en la MISMA tx que persiste el estado + bumpea `version` (molde radius-config/pricing).
+/// DOBLE consumidor, como `admin.role_changed`:
+///   - audit-service: traza inmutable al WORM de QUIÉN cambió QUÉ política (actor=`updatedBy`, recurso=`key`).
+///     La proyección allowlist deja key/family/enabled/version/updatedBy/updatedAt; `params` (objeto) se descarta
+///     (el detalle vive en la tabla `Policy`; el WORM guarda el hecho + el actor + el toggle + la versión).
+///   - `@veo/policy` (cliente runtime cacheado · Fase 1): invalida el cache de esa `key` → el cambio del
+///     superadmin surte efecto INMEDIATO, sin esperar TTL. Solo necesita `key`+`version`; el resto es enriquecido.
+/// Topic 'policy' (`topicForEvent` corta antes del punto). `key` = id canónico de la política (ej. 'auth.stepup').
+/// SIN PII: keys de config, flags, números y roles/cidrs — nunca datos personales.
+export const policyUpdated = z.object({
+  /// Key canónica de la política mutada (id del catálogo `@veo/policy`).
+  key: z.string(),
+  /// Familia funcional ('auth' | 'data' | 'access' | 'ops').
+  family: z.string(),
+  /// Estado vigente tras el cambio.
+  enabled: z.boolean(),
+  /// Parámetros vigentes (jsonb tipado por la key en `@veo/policy`). Para el cliente runtime; el WORM lo descarta.
+  params: z.record(z.unknown()),
+  /// Versión MONOTÓNICA tras el bump (cache-busting).
+  version: z.number().int().positive(),
+  /// actorId del operador que la mutó (accountability). 'system' nunca emite esto (el seed no publica).
+  updatedBy: z.string(),
+  /// Marca ISO del cambio.
+  updatedAt: z.string(),
+});
+
 export const EVENT_SCHEMAS = {
   'user.registered': userRegistered,
   'user.email_verified': userEmailVerified,
@@ -1504,6 +1532,7 @@ export const EVENT_SCHEMAS = {
   'pricing.bid_floor_updated': pricingBidFloorUpdated,
   'pricing.base_fare_updated': pricingBaseFareUpdated,
   'catalog.updated': catalogUpdated,
+  'policy.updated': policyUpdated,
   'driver.location_updated': driverLocationUpdated,
   'driver.entered_zone': driverEnteredZone,
   'media.recording_started': mediaRecordingStarted,

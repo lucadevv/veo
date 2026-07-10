@@ -175,10 +175,10 @@ importers:
         version: 10.5.0(postcss@8.5.15)
       eslint:
         specifier: ^9.12.0
-        version: 9.39.4(jiti@2.6.1)
+        version: 9.39.4(jiti@1.21.7)
       eslint-config-next:
         specifier: 15.5.19
-        version: 15.5.19(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+        version: 15.5.19(eslint@9.39.4(jiti@1.21.7))(typescript@5.9.3)
       postcss:
         specifier: ^8.4.47
         version: 8.5.15
@@ -755,10 +755,10 @@ importers:
         version: 10.5.0(postcss@8.5.15)
       eslint:
         specifier: ^9.12.0
-        version: 9.39.4(jiti@1.21.7)
+        version: 9.39.4(jiti@2.6.1)
       eslint-config-next:
         specifier: 15.5.19
-        version: 15.5.19(eslint@9.39.4(jiti@1.21.7))(typescript@5.9.3)
+        version: 15.5.19(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       postcss:
         specifier: ^8.4.47
         version: 8.5.15
@@ -2116,6 +2116,9 @@ importers:
       '@veo/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@veo/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@veo/redis':
         specifier: workspace:*
         version: link:../../packages/redis

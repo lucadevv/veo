@@ -441,6 +441,16 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'admin',
         resourceId: p.adminUserId,
       })),
+      // Cambio de una POLÍTICA de gobierno (PBAC · ADR-024): traza inmutable de QUIÉN cambió QUÉ política y a
+      // qué estado/versión. Es una MUTACIÓN de política de compliance (Ley 29733) → siempre al WORM. A diferencia
+      // de la config de pricing (actor='system'), acá el operador SÍ viaja en el payload (`updatedBy`, identidad
+      // admin-rail firmada resuelta por identity) → actor=updatedBy, recurso=policy/key. `params` (objeto) lo
+      // descarta la proyección allowlist; sobreviven family/enabled/version/updatedAt (el hecho + el toggle + la versión).
+      'policy.updated': this.audited('policy.updated', (p) => ({
+        actorId: p.updatedBy,
+        resourceType: 'policy',
+        resourceId: p.key,
+      })),
       // AUTO-suspensión por exceso de cancelaciones (regla automática de dispatch, ventana rolling 24h): no hay
       // operador → actor='system', recurso=driver/driverId. Traza la decisión automática que suspende al conductor.
       'driver.excessive_cancellations': this.audited('driver.excessive_cancellations', (p) => ({
@@ -601,6 +611,14 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         actorId: 'system',
         resourceType: 'pricing',
         resourceId: 'commission',
+      })),
+      // Catálogo de ofertas REEMPLAZADO por el admin (ADR-013 · snapshot del overlay). Mismo patrón de config-admin
+      // que pricing.*: el operador se traza por el comando admin-bff; el payload es un snapshot SIN actor ni id de
+      // entidad → actor='system' (config aplicada), recurso=catalog, id='GLOBAL' (singleton; `version` en el payload).
+      'catalog.updated': this.audited('catalog.updated', () => ({
+        actorId: 'system',
+        resourceType: 'catalog',
+        resourceId: 'GLOBAL',
       })),
       // Rating CREADO (BR-D01): una reseña entró al sistema. El payload no porta al autor (solo ratingId/tripId/driverId/stars)
       // → actor='system' (riel de rating; el autor es anónimo por diseño de la reseña), recurso=rating/ratingId.

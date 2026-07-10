@@ -149,6 +149,9 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'user.deletion_requested': ['userId', 'requestedAt', 'graceUntil'],
   'user.deleted': ['userId', 'driverId', 'at'],
   'admin.role_changed': ['adminUserId', 'roles', 'changedBy', 'at'],
+  // PBAC (ADR-024): `params` es un objeto tipado → lo descarta `isSafeValue` (posible detalle no-forense);
+  // sobreviven la key (recurso), family, el toggle `enabled`, la `version` y el actor `updatedBy` + timestamp.
+  'policy.updated': ['key', 'family', 'enabled', 'version', 'updatedBy', 'updatedAt'],
   'driver.registered': ['driverId', 'userId', 'registeredAt'],
   'driver.verified': ['driverId', 'userId', 'verifiedAt'],
   'driver.rejected': ['driverId', 'userId', 'rejectedAt'], // reason z.string LIBRE → FUERA
@@ -248,6 +251,8 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
     'updatedAt',
   ],
   'payment.commission_updated': ['onDemandRateBps', 'carpoolingFeeBps', 'version', 'updatedAt'],
+  // catálogo (ADR-013 · snapshot): `overrides` es array de objetos → lo descarta `isSafeValue`; queda la version + timestamp.
+  'catalog.updated': ['version', 'updatedAt'],
   // ── media — segmentId/tripId/operatorId sí; watermark NO (lleva identidad); operatorEmail NO ──
   'media.recording_started': ['tripId', 'startedAt'],
   'media.archived': ['tripId', 's3Key', 'bytes', 'retentionDays'],
