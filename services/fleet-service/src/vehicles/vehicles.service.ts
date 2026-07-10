@@ -2,7 +2,7 @@
  * VehiclesService — alta y consulta de vehículos (BR-D04: año mínimo, placa válida).
  * El estado documental agregado (docStatus) lo mantiene el cron de vencimientos (ExpirySweeper).
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   uuidv7,
@@ -14,7 +14,7 @@ import {
 } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
 import { mapMtcCategoryToVehicleType } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { VEHICLES_REPO, type VehiclesRepository } from './vehicles.repository';
 import { VehicleModelsService } from '../vehicle-models/vehicle-models.service';
 import { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
 import { buildFleetEvent, FleetEventType } from '../events/fleet-events';
@@ -37,7 +37,6 @@ import {
   Prisma,
   VehicleDocStatus,
   VehicleModelSource,
-  VehicleModelStatus,
   VehicleType,
   type Vehicle,
 } from '../generated/prisma';
@@ -114,7 +113,7 @@ export class VehiclesService {
   private readonly minYear: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(VEHICLES_REPO) private readonly repo: VehiclesRepository,
     private readonly vehicleModels: VehicleModelsService,
     private readonly operableClasses: OperableVehicleClassesProvider,
     config: ConfigService<Env, true>,
@@ -164,23 +163,21 @@ export class VehiclesService {
     // contra el catálogo EFECTIVO del admin (overlay-aware). await: el gate ahora hace I/O (lectura cacheada).
     await this.assertOperableVehicleType(snapshot.vehicleType);
 
-    const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
+    const existing = await this.repo.findByPlate(plate);
     if (existing) throw new ConflictError('Ya existe un vehículo con esa placa', { plate });
 
-    return this.prisma.write.vehicle.create({
-      data: {
-        id: uuidv7(),
-        plate,
-        make: snapshot.make,
-        model: snapshot.model,
-        year: input.year,
-        color: input.color.trim(),
-        vehicleType: snapshot.vehicleType,
-        modelSpecId: snapshot.modelSpecId,
-        fleetId: input.fleetId ?? null,
-        insuranceExpiresAt: input.insuranceExpiresAt ? new Date(input.insuranceExpiresAt) : null,
-        active: input.active ?? true,
-      },
+    return this.repo.create({
+      id: uuidv7(),
+      plate,
+      make: snapshot.make,
+      model: snapshot.model,
+      year: input.year,
+      color: input.color.trim(),
+      vehicleType: snapshot.vehicleType,
+      modelSpecId: snapshot.modelSpecId,
+      fleetId: input.fleetId ?? null,
+      insuranceExpiresAt: input.insuranceExpiresAt ? new Date(input.insuranceExpiresAt) : null,
+      active: input.active ?? true,
     });
   }
 
@@ -207,7 +204,7 @@ export class VehiclesService {
     ids: PurgeDriverIds,
   ): Promise<{ documents: number; vehicles: number; vehicleDocuments: number }> {
     const { driverId, userId } = ids;
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTx(async (tx) => {
       // Vehículos del conductor: indexados por userId (lo que el driver-bff persistió en Vehicle.driverId).
       const vehicles = await tx.vehicle.findMany({
         where: { driverId: userId },
@@ -255,9 +252,7 @@ export class VehiclesService {
     // Las DOS lecturas (specs por modelSpecId · docs operables por vehicleId) son INDEPENDIENTES → en PARALELO
     // (Promise.all), no en serie: la latencia de cada list()/getById() es el MÁXIMO de ambas, no su suma.
     const [specs, operableById] = await Promise.all([
-      specIds.length
-        ? this.prisma.read.vehicleModelSpec.findMany({ where: { id: { in: specIds } } })
-        : Promise.resolve([]),
+      specIds.length ? this.repo.findModelSpecsByIds(specIds) : Promise.resolve([]),
       this.vehicleDocsOperableMap(vehicles.map((v) => v.id)),
     ]);
     const specById = new Map(specs.map((s) => [s.id, s] as const));
@@ -288,9 +283,7 @@ export class VehiclesService {
    * registrado (sin docs) da `false` → PENDING_REVIEW, que es CORRECTO (no puede operar sin seguro+ITV).
    */
   private async vehicleDocsOperable(vehicleId: string): Promise<boolean> {
-    const docs = await this.prisma.read.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: vehicleId },
-    });
+    const docs = await this.repo.findVehicleDocs(vehicleId);
     return hasRequiredVehicleDocsOperable(docs);
   }
 
@@ -305,9 +298,7 @@ export class VehiclesService {
   ): Promise<Map<string, boolean>> {
     const operable = new Map<string, boolean>();
     if (vehicleIds.length === 0) return operable;
-    const docs = await this.prisma.read.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: { in: [...vehicleIds] } },
-    });
+    const docs = await this.repo.findVehicleDocsForOwners(vehicleIds);
     const byOwner = new Map<string, typeof docs>();
     for (const d of docs) {
       const list = byOwner.get(d.ownerId);
@@ -321,7 +312,7 @@ export class VehiclesService {
   }
 
   async getById(id: string): Promise<VehicleListItem> {
-    const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id } });
+    const vehicle = await this.repo.findById(id);
     if (!vehicle) throw new NotFoundError('Vehículo no encontrado', { id });
     // enrichWithSpec mapea 1:1; con un único input hay un único output. El fallback a ficha-nula nunca se
     // alcanza en la práctica, pero es la misma degradación honesta de un vehículo legacy sin modelSpec.
@@ -354,12 +345,9 @@ export class VehiclesService {
     limit?: number;
   }): Promise<Page<VehicleListItem>> {
     const limit = clampLimit(opts.limit);
-    const where: Prisma.VehicleWhereInput = {};
-    if (opts.docStatus) where.docStatus = opts.docStatus;
-    if (opts.cursor) where.id = { lt: opts.cursor };
-    const rows = await this.prisma.read.vehicle.findMany({
-      where,
-      orderBy: { id: 'desc' },
+    const rows = await this.repo.listPage({
+      docStatus: opts.docStatus,
+      cursor: opts.cursor,
       take: limit + 1,
     });
     // Enriquecimiento BATCHED (anti-N+1) vía la fuente compartida con getById(): la ficha técnica
@@ -430,14 +418,14 @@ export class VehiclesService {
     // (el gate de operabilidad/aprobación es de otro lote); el `@IsEnum(VehicleType)` del DTO ya garantiza
     // que el tipo es válido. La operabilidad para dispatch se resuelve aguas abajo, no en el alta.
 
-    const existing = await this.prisma.read.vehicle.findUnique({ where: { plate } });
+    const existing = await this.repo.findByPlate(plate);
     if (existing) {
       return this.resolveExistingForDriver(driverId, existing, resolvedInput, snapshot);
     }
 
     let vehicle: Vehicle;
     try {
-      vehicle = await this.prisma.write.$transaction(async (tx) => {
+      vehicle = await this.repo.runInTx(async (tx) => {
         const created = await tx.vehicle.create({
           data: {
             id: uuidv7(),
@@ -476,7 +464,7 @@ export class VehiclesService {
       // Carrera perdida contra otra alta concurrente con la MISMA placa (el @unique global ganó).
       // Re-resolvemos el dueño en vez de un 500: mismo dueño → idempotente; otro → conflicto.
       if (isUniqueViolation(err, 'plate')) {
-        const raced = await this.prisma.write.vehicle.findUnique({ where: { plate } });
+        const raced = await this.repo.findByPlateOnPrimary(plate);
         if (raced) return this.resolveExistingForDriver(driverId, raced, resolvedInput, snapshot);
       }
       throw err;
@@ -491,7 +479,7 @@ export class VehiclesService {
 
     // El alta puede convertir al nuevo vehículo en el activo (si es el primero/único operable): lo
     // resolvemos sobre la flota completa del conductor para no mentir el `isActive` de la respuesta.
-    const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
+    const all = await this.repo.findByDriver(driverId);
     const active = pickActiveVehicle(all);
     // Operabilidad documental REAL del vehículo recién dado de alta (sin SOAT/ITV operables → PENDING_REVIEW,
     // que es CORRECTO: un alta nace sin docs aprobados, no puede operar hasta que el operador los apruebe).
@@ -520,21 +508,18 @@ export class VehiclesService {
 
     // Mismo dueño: reenvío del wizard ⇒ actualizamos con lo último (snapshot/año/color/tipo). NO
     // tocamos `active` (sigue pendiente de verificación) ni re-emitimos `vehicle_registered`.
-    const updated = await this.prisma.write.vehicle.update({
-      where: { id: existing.id },
-      data: {
-        make: snapshot.make,
-        model: snapshot.model,
-        year: input.year,
-        color: input.color?.trim() ?? '',
-        vehicleType: snapshot.vehicleType,
-        // LOTE 1: re-scan/corrección del wizard puede traer una categoría nueva → la persistimos.
-        mtcCategory: input.mtcCategory ?? null,
-        modelSpecId: snapshot.modelSpecId,
-      },
+    const updated = await this.repo.update(existing.id, {
+      make: snapshot.make,
+      model: snapshot.model,
+      year: input.year,
+      color: input.color?.trim() ?? '',
+      vehicleType: snapshot.vehicleType,
+      // LOTE 1: re-scan/corrección del wizard puede traer una categoría nueva → la persistimos.
+      mtcCategory: input.mtcCategory ?? null,
+      modelSpecId: snapshot.modelSpecId,
     });
 
-    const all = await this.prisma.read.vehicle.findMany({ where: { driverId } });
+    const all = await this.repo.findByDriver(driverId);
     const active = pickActiveVehicle(all);
     const docsOperable = await this.vehicleDocsOperable(updated.id);
     return toDriverVehicleResponse(updated, active?.id === updated.id, docsOperable);
@@ -570,9 +555,7 @@ export class VehiclesService {
     fuzzy?: { requestedBy: string; source: VehicleModelSource },
   ): Promise<ModelSnapshot> {
     if (input.modelSpecId) {
-      const spec = await this.prisma.read.vehicleModelSpec.findFirst({
-        where: { id: input.modelSpecId, status: VehicleModelStatus.APPROVED },
-      });
+      const spec = await this.repo.findApprovedModelSpec(input.modelSpecId);
       if (!spec) {
         throw new ValidationError('El modelo seleccionado no existe o no está aprobado', {
           modelSpecId: input.modelSpecId,
@@ -675,10 +658,7 @@ export class VehiclesService {
 
   /** Rehidrata los vehículos del conductor (más recientes primero), marcando cuál es el ACTIVO. */
   async listForDriver(driverId: string): Promise<DriverVehicleResponse[]> {
-    const vehicles = await this.prisma.read.vehicle.findMany({
-      where: { driverId },
-      orderBy: { createdAt: 'desc' },
-    });
+    const vehicles = await this.repo.findByDriverRecent(driverId);
     const active = pickActiveVehicle(vehicles);
     // ANTI-N+1: los docs requeridos de TODA la flota del conductor en UNA query, agrupados por vehicleId.
     const operableById = await this.vehicleDocsOperableMap(vehicles.map((v) => v.id));
@@ -700,22 +680,18 @@ export class VehiclesService {
     // según la advertencia del wrapper read-write.ts: "NUNCA leer de `read` un registro que se acaba de
     // escribir en un flujo crítico; usar `write`". Las lecturas no-críticas de abajo (certs, docs del
     // vehículo, catálogo de specs) quedan en `read`: no las toca el swap.
-    const vehicles = await this.prisma.write.vehicle.findMany({ where: { driverId } });
+    const vehicles = await this.repo.findByDriverOnPrimary(driverId);
     const active = pickActiveVehicle(vehicles);
     if (!active) return null;
     // B5-3.2 · certificaciones de operador VIGENTES del conductor (del MISMO driverId; ownerType DRIVER).
     // El driver-bff las sella en el ping y dispatch gatea las verticales FAIL-CLOSED. Índice [ownerType,
     // ownerId]; el endpoint lo cachea el driver-bff (TTL 20s), no es hot-path directo.
-    const docs = await this.prisma.read.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.DRIVER, ownerId: driverId },
-    });
+    const docs = await this.repo.findDriverDocs(driverId);
     const certifications = validCertificationsOf(docs);
     // Operabilidad documental del vehículo OPERADO: sus docs requeridos (SOAT+ITV) son ownerType=VEHICLE,
     // ownerId=active.id (NO los certs DRIVER de arriba). Si NO está operable, NO se crashea: el `status`
     // deriva a PENDING_REVIEW correctamente y el driver-bff/dispatch sellan seats/segment solo cuando opera.
-    const vehicleDocs = await this.prisma.read.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: active.id },
-    });
+    const vehicleDocs = await this.repo.findVehicleDocs(active.id);
     const docsOperable = hasRequiredVehicleDocsOperable(vehicleDocs);
     const base: DriverVehicleResponse = {
       ...toDriverVehicleResponse(active, true, docsOperable),
@@ -725,9 +701,7 @@ export class VehiclesService {
     // driver-bff los selle en el ping (eligibilidad de oferta en dispatch). Legacy sin modelSpecId →
     // sin attrs (degradación honesta: dispatch no restringe a ese conductor).
     if (!active.modelSpecId) return base;
-    const spec = await this.prisma.read.vehicleModelSpec.findUnique({
-      where: { id: active.modelSpecId },
-    });
+    const spec = await this.repo.findModelSpecById(active.modelSpecId);
     if (!spec) return base;
     return { ...base, seats: spec.seats, segment: spec.segment ?? undefined };
   }
@@ -738,7 +712,7 @@ export class VehiclesService {
    * No se puede activar un vehículo con docs VENCIDOS (BR-D04). Idempotente: re-seleccionar el mismo es ok.
    */
   async setActiveVehicle(driverId: string, vehicleId: string): Promise<DriverVehicleResponse> {
-    const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id: vehicleId } });
+    const vehicle = await this.repo.findById(vehicleId);
     if (vehicle?.driverId !== driverId) {
       throw new NotFoundError('Vehículo no encontrado');
     }
@@ -748,10 +722,7 @@ export class VehiclesService {
         docStatus: vehicle.docStatus,
       });
     }
-    const updated = await this.prisma.write.vehicle.update({
-      where: { id: vehicleId },
-      data: { selectedAt: new Date() },
-    });
+    const updated = await this.repo.update(vehicleId, { selectedAt: new Date() });
     const docsOperable = await this.vehicleDocsOperable(updated.id);
     return toDriverVehicleResponse(updated, true, docsOperable);
   }

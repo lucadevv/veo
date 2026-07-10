@@ -13,6 +13,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { CatalogOperabilityService, type CatalogOverlayPayload } from './catalog-operability.service';
+import { PrismaCatalogOperabilityRepository } from './catalog-operability.repository';
 
 interface MockVehicle {
   id: string;
@@ -88,7 +89,7 @@ function makeHarness(opts: { state: StoredState | null; vehicles: MockVehicle[] 
       },
     },
   };
-  const service = new CatalogOperabilityService(prisma as never);
+  const service = new CatalogOperabilityService(new PrismaCatalogOperabilityRepository(prisma as never));
   return { service, outbox, upserts, prisma };
 }
 

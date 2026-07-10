@@ -14,6 +14,7 @@ import {
   type VehicleModelSpec,
 } from '../generated/prisma';
 import { VehicleModelsService } from './vehicle-models.service';
+import { PrismaVehicleModelsRepository } from './vehicle-models.repository';
 import { normalizeModelTerm } from './vehicle-model-normalize';
 
 /** Config doble: solo expone el umbral del fuzzy-match (LOTE 3). */
@@ -54,7 +55,7 @@ function makeService(rows: VehicleModelSpec[]) {
       ),
     );
   const prisma = { read: { vehicleModelSpec: { findMany, findFirst } } };
-  const service = new VehicleModelsService(prisma as never, fakeConfig);
+  const service = new VehicleModelsService(new PrismaVehicleModelsRepository(prisma as never), fakeConfig);
   return { service, findMany, findFirst };
 }
 
@@ -276,7 +277,7 @@ function makeReviewService(rows: VehicleModelSpec[], vehicles: VehicleRow[] = []
       $transaction: (fn: (tx: typeof writeClient) => unknown) => Promise.resolve(fn(writeClient)),
     },
   };
-  const service = new VehicleModelsService(prisma as never, fakeConfig);
+  const service = new VehicleModelsService(new PrismaVehicleModelsRepository(prisma as never), fakeConfig);
   return { service, captured, create, updateMany, vehicleStore };
 }
 
@@ -351,7 +352,7 @@ function makeMatchService(opts: {
     read: { $queryRaw: queryRaw, vehicleModelSpec: { findUnique } },
   };
   const config = { getOrThrow: () => opts.threshold ?? 0.45 } as never;
-  const service = new VehicleModelsService(prisma as never, config);
+  const service = new VehicleModelsService(new PrismaVehicleModelsRepository(prisma as never), config);
   return { service, captured, queryRaw, findUnique };
 }
 

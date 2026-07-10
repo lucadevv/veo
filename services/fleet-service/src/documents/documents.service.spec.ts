@@ -14,6 +14,7 @@ import type { AuthenticatedUser } from '@veo/auth';
 import { FleetDocumentStatus, FleetDocumentType, OcrEngine } from '@veo/shared-types';
 import { DocumentSide, FleetOwnerType, type FleetDocument } from '../generated/prisma';
 import { DocumentsService } from './documents.service';
+import { PrismaDocumentsRepository } from './documents.repository';
 
 /** Identidad de conductor con driverId resuelto+firmado por el BFF (anti-IDOR). */
 function driverIdentity(over: Partial<AuthenticatedUser> = {}): AuthenticatedUser {
@@ -177,7 +178,7 @@ function makeService(
   };
   const config = { getOrThrow: () => 30 };
   const inspections = { createInTx: vi.fn() };
-  const service = new DocumentsService(prisma as never, inspections as never, config as never);
+  const service = new DocumentsService(new PrismaDocumentsRepository(prisma as never), inspections as never, config as never);
   return {
     service,
     created,

@@ -14,6 +14,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { NotFoundError } from '@veo/utils';
 import { Prisma, type Inspection, type Vehicle } from '../generated/prisma';
 import { InspectionsService } from './inspections.service';
+import { PrismaInspectionsRepository } from './inspections.repository';
 
 const VEHICLE_ID = '11111111-1111-7111-8111-111111111111';
 const AUTHENTICATED_INSPECTOR = '22222222-2222-7222-8222-222222222222';
@@ -98,7 +99,7 @@ function makeService(opts: {
     },
   };
   const config = { getOrThrow: () => INTERVAL_MONTHS };
-  const service = new InspectionsService(prisma as never, config as never);
+  const service = new InspectionsService(new PrismaInspectionsRepository(prisma as never), config as never);
   return { service, captured, wrappedCreate, findInspectionUnique, outbox };
 }
 

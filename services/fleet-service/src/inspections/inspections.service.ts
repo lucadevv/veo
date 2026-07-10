@@ -1,11 +1,11 @@
 /**
  * InspectionsService — registra inspecciones técnicas y calcula su próximo vencimiento (BR-D04).
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { uuidv7, NotFoundError } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
-import { PrismaService } from '../infra/prisma.service';
+import { INSPECTIONS_REPO, type InspectionsRepository } from './inspections.repository';
 import { clampLimit, toPage, type Page } from '../infra/pagination';
 import {
   computeNextInspectionDue,
@@ -26,7 +26,7 @@ export class InspectionsService {
   private readonly intervalMonths: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(INSPECTIONS_REPO) private readonly repo: InspectionsRepository,
     config: ConfigService<Env, true>,
   ) {
     this.intervalMonths = config.getOrThrow<number>('INSPECTION_INTERVAL_MONTHS');
@@ -38,7 +38,7 @@ export class InspectionsService {
   // no-controversial; exigir que el actor que registra la ITV sea DISTINTO del que aprueba queda pendiente
   // del dueño (cambio de modelo de roles), NO se implementa acá.
   async create(input: CreateInspectionDto, inspectorId: string): Promise<Inspection> {
-    const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id: input.vehicleId } });
+    const vehicle = await this.repo.findVehicleById(input.vehicleId);
     if (!vehicle) throw new NotFoundError('Vehículo no encontrado', { vehicleId: input.vehicleId });
 
     const now = new Date();
@@ -71,7 +71,7 @@ export class InspectionsService {
       // El insert + la posible auto-reactivación viven en `createInTx` (tx-aware) para poder REUSARLOS desde
       // `documents.review()`: al aprobar el documento ITV del vehículo, la Inspección se crea en la MISMA tx del
       // CAS (una sola aprobación deja la ITV registrada y, si corresponde, levanta la suspensión — atómico).
-      return await this.prisma.write.$transaction((tx) =>
+      return await this.repo.runInTx((tx) =>
         this.createInTx(
           tx,
           {
@@ -96,15 +96,7 @@ export class InspectionsService {
       // SU tx (este re-POST es el mismo hecho): no re-emitimos (identity ya quitó el hold INSPECTION_EXPIRED →
       // un re-emit sería no-op de todas formas, pero ni siquiera llegamos acá: devolvemos la fila existente).
       if (isUniqueViolation(err)) {
-        const existing = await this.prisma.read.inspection.findUnique({
-          where: {
-            vehicleId_inspectedAt_inspectorId: {
-              vehicleId: input.vehicleId,
-              inspectedAt,
-              inspectorId,
-            },
-          },
-        });
+        const existing = await this.repo.findByNaturalKey(input.vehicleId, inspectedAt, inspectorId);
         if (existing) return existing;
       }
       throw err;
@@ -176,10 +168,7 @@ export class InspectionsService {
   }
 
   listByVehicle(vehicleId: string): Promise<Inspection[]> {
-    return this.prisma.read.inspection.findMany({
-      where: { vehicleId },
-      orderBy: { inspectedAt: 'desc' },
-    });
+    return this.repo.listByVehicle(vehicleId);
   }
 
   /**
@@ -192,12 +181,9 @@ export class InspectionsService {
     limit?: number;
   }): Promise<Page<Inspection>> {
     const limit = clampLimit(opts.limit);
-    const where: Prisma.InspectionWhereInput = {};
-    if (opts.vehicleId) where.vehicleId = opts.vehicleId;
-    if (opts.cursor) where.id = { lt: opts.cursor };
-    const rows = await this.prisma.read.inspection.findMany({
-      where,
-      orderBy: { id: 'desc' },
+    const rows = await this.repo.listPage({
+      vehicleId: opts.vehicleId,
+      cursor: opts.cursor,
       take: limit + 1,
     });
     return toPage(rows, limit);

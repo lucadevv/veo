@@ -2,7 +2,7 @@
  * DocumentsService — alta, revisión manual (RBAC) y consulta de documentos de flota (BR-I04).
  * El recálculo masivo por vencimiento y las alertas/suspensión los ejecuta ExpirySweeper (cron).
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   uuidv7,
@@ -13,7 +13,7 @@ import {
   ConcurrencyConflictError,
 } from '@veo/utils';
 import { assertDriverOwnsResource, type AuthenticatedUser } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
+import { DOCUMENTS_REPO, type DocumentsRepository } from './documents.repository';
 import {
   clampLimit,
   toPage,
@@ -52,7 +52,7 @@ export class DocumentsService {
   private readonly warningDays: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(DOCUMENTS_REPO) private readonly repo: DocumentsRepository,
     private readonly inspections: InspectionsService,
     config: ConfigService<Env, true>,
   ) {
@@ -103,7 +103,7 @@ export class DocumentsService {
     }
 
     if (input.ownerType === FleetOwnerType.VEHICLE) {
-      const vehicle = await this.prisma.read.vehicle.findUnique({ where: { id: input.ownerId } });
+      const vehicle = await this.repo.findVehicleById(input.ownerId);
       if (!vehicle)
         throw new NotFoundError('Vehículo dueño del documento no existe', {
           ownerId: input.ownerId,
@@ -125,20 +125,11 @@ export class DocumentsService {
     // `write`"). DEUDA: bajo concurrencia pura (dos altas simultáneas) esto sigue siendo TOCTOU — el cierre
     // definitivo es un partial unique index (ownerType, ownerId, type) WHERE status activo, fuera de scope
     // de este lote (lo decide el dueño).
-    const existingActive = await this.prisma.write.fleetDocument.findFirst({
-      where: {
-        ownerType: input.ownerType,
-        ownerId: input.ownerId,
-        type: input.type,
-        status: {
-          in: [
-            FleetDocumentStatus.PENDING_REVIEW,
-            FleetDocumentStatus.VALID,
-            FleetDocumentStatus.EXPIRING_SOON,
-          ],
-        },
-      },
-    });
+    const existingActive = await this.repo.findActiveDocumentOnPrimary(
+      input.ownerType,
+      input.ownerId,
+      input.type,
+    );
 
     // Sub-lote 3A: normaliza/valida las imágenes (camino nuevo `images[]` o legacy `fileS3Key`). Lanza
     // ValidationError si las caras son incoherentes (p.ej. FRONT sin BACK). Puede ser [] (doc sin archivo aún).
@@ -183,7 +174,7 @@ export class DocumentsService {
 
     // Transacción ATÓMICA: el documento y sus N imágenes se persisten juntos o no se persiste nada.
     // `fileS3Key` se sigue poblando con la primera imagen (backward-compat: consumidores legacy que aún lo lean).
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTx(async (tx) => {
       const document = await tx.fleetDocument.create({
         data: {
           id: documentId,
@@ -250,7 +241,7 @@ export class DocumentsService {
     images: readonly NormalizedDocumentImage[],
   ): Promise<FleetDocumentWithImages> {
     const documentId = existing.id;
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTx(async (tx) => {
       const document = await tx.fleetDocument.update({
         where: { id: documentId },
         data: {
@@ -300,11 +291,7 @@ export class DocumentsService {
   }
 
   listByOwner(ownerId: string): Promise<FleetDocumentWithImages[]> {
-    return this.prisma.read.fleetDocument.findMany({
-      where: { ownerId },
-      orderBy: { createdAt: 'desc' },
-      include: { images: { orderBy: { order: 'asc' } } },
-    });
+    return this.repo.listByOwner(ownerId);
   }
 
   /**
@@ -318,13 +305,10 @@ export class DocumentsService {
     limit?: number;
   }): Promise<Page<FleetDocument>> {
     const limit = clampLimit(opts.limit);
-    const where: Prisma.FleetDocumentWhereInput = {};
-    if (opts.ownerId) where.ownerId = opts.ownerId;
-    if (opts.status) where.status = opts.status;
-    if (opts.cursor) where.id = { lt: opts.cursor };
-    const rows = await this.prisma.read.fleetDocument.findMany({
-      where,
-      orderBy: { id: 'desc' },
+    const rows = await this.repo.listPage({
+      ownerId: opts.ownerId,
+      status: opts.status,
+      cursor: opts.cursor,
       take: limit + 1,
     });
     return toPage(rows, limit);
@@ -342,7 +326,7 @@ export class DocumentsService {
     reason?: string,
     now = new Date(),
   ): Promise<FleetDocument> {
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTx(async (tx) => {
       // Lectura DENTRO de la write-tx (NO de la réplica): sin lag ni TOCTOU con un review() concurrente.
       const doc = await tx.fleetDocument.findUnique({ where: { id } });
       if (!doc) throw new NotFoundError('Documento no encontrado', { id });
@@ -567,11 +551,7 @@ export class DocumentsService {
         }
       : baseWhere;
 
-    const rows = await this.prisma.read.fleetDocument.findMany({
-      where,
-      orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
-      take: limit + 1,
-    });
+    const rows = await this.repo.findExpirationsPage(where, limit + 1);
     return toExpiryPage(rows, limit);
   }
 

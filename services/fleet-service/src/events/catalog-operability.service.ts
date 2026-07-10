@@ -27,7 +27,7 @@
  * que decide la clase del conductor es su OPERADO (`pickActiveVehicle`, la MISMA regla server-authoritative que
  * usan el gate de alta y el sweeper de ITV) — no cualquier vehículo suyo.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   operableVehicleClasses,
   resolveCatalog,
@@ -37,14 +37,14 @@ import {
   type OfferingId,
   type OfferingOverride,
 } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import {
+  CATALOG_OPERABILITY_REPO,
+  type CatalogOperabilityRepository,
+} from './catalog-operability.repository';
 import { pickActiveVehicle } from '../vehicles/vehicle-rules';
 import { buildFleetEvent, FleetEventType, type DriverSuspendedPayload } from './fleet-events';
 import type { DriverReactivatedPayload } from './fleet-events';
 import { Prisma } from '../generated/prisma';
-
-/** Singleton del estado delta (una sola fila; el catálogo es global). */
-const STATE_ID = 'GLOBAL';
 
 /** Tamaño de lote para emitir eventos y para paginar la resolución de conductores afectados. */
 const CHUNK = 500;
@@ -73,7 +73,9 @@ export interface CatalogOperabilityResult {
 export class CatalogOperabilityService {
   private readonly logger = new Logger(CatalogOperabilityService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(CATALOG_OPERABILITY_REPO) private readonly repo: CatalogOperabilityRepository,
+  ) {}
 
   /**
    * Aplica un `catalog.updated`: deriva las clases operables del payload, computa el delta contra el estado previo
@@ -88,7 +90,7 @@ export class CatalogOperabilityService {
 
     // Estado PREVIO: la fila persistida, o el default ESTÁTICO de código si nunca se procesó un evento (baseline
     // honesto = lo que el sistema shippeó, no "nada" — un cold-start reconcilia contra el default).
-    const prev = await this.prisma.read.catalogOperableState.findUnique({ where: { id: STATE_ID } });
+    const prev = await this.repo.findState();
     const prevVersion = prev?.version ?? 0;
     const prevClasses = prev?.operableClasses ?? [...OPERABLE_VEHICLE_CLASSES];
     const prevSet = new Set<string>(prevClasses);
@@ -177,13 +179,7 @@ export class CatalogOperabilityService {
       // Dueños candidatos: vehículos de las clases objetivo con conductor. El sujeto es el CONDUCTOR, así que
       // deduplicamos por driverId cross-página con `seen` antes de resolver su vehículo operado. `VehicleClass`
       // (alias de @veo/shared-types) === el `VehicleType` de Prisma (mismos literales) → se pasa directo al filtro.
-      const page = await this.prisma.read.vehicle.findMany({
-        where: { driverId: { not: null }, vehicleType: { in: classes } },
-        select: { id: true, driverId: true },
-        orderBy: { id: 'asc' },
-        take: CHUNK,
-        ...(cursorId ? { skip: 1, cursor: { id: cursorId } } : {}),
-      });
+      const page = await this.repo.findVehiclesOfClassesPage(classes, CHUNK, cursorId);
       if (page.length === 0) break;
       cursorId = page[page.length - 1]?.id;
 
@@ -194,10 +190,7 @@ export class CatalogOperabilityService {
 
       if (userIds.length > 0) {
         // TODOS los vehículos de los candidatos (incluye otras clases): pickActiveVehicle elige el operado.
-        const all = await this.prisma.read.vehicle.findMany({
-          where: { driverId: { in: userIds } },
-          select: { driverId: true, vehicleType: true, docStatus: true, selectedAt: true, createdAt: true },
-        });
+        const all = await this.repo.findVehiclesByDrivers(userIds);
         const byUser = new Map<string, typeof all>();
         for (const v of all) {
           if (!v.driverId) continue;
@@ -220,7 +213,7 @@ export class CatalogOperabilityService {
   private async emitSuspensions(userIds: string[], now: Date): Promise<void> {
     for (let i = 0; i < userIds.length; i += CHUNK) {
       const chunk = userIds.slice(i, i + CHUNK);
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         for (const userId of chunk) {
           const payload: DriverSuspendedPayload = {
             userId,
@@ -238,7 +231,7 @@ export class CatalogOperabilityService {
   private async emitReactivations(userIds: string[]): Promise<void> {
     for (let i = 0; i < userIds.length; i += CHUNK) {
       const chunk = userIds.slice(i, i + CHUNK);
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         for (const userId of chunk) {
           const payload: DriverReactivatedPayload = {
             userId,
@@ -258,11 +251,7 @@ export class CatalogOperabilityService {
 
   /** Persiste el estado delta (version + set operable). Upsert del singleton. */
   private async persistState(version: number, operable: VehicleClass[]): Promise<void> {
-    await this.prisma.write.catalogOperableState.upsert({
-      where: { id: STATE_ID },
-      create: { id: STATE_ID, version, operableClasses: operable },
-      update: { version, operableClasses: operable },
-    });
+    await this.repo.upsertState(version, operable);
   }
 
   private async enqueue(

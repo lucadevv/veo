@@ -10,6 +10,7 @@ import { Metadata } from '@grpc/grpc-js';
 import { grpcIdentityMetadata, InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { FleetGrpcController } from './fleet.grpc.controller';
 import type { PrismaService } from '../infra/prisma.service';
+import { PrismaFleetGrpcRepository } from './fleet-grpc.repository';
 import type { Env } from '../config/env.schema';
 
 const INTERNAL_IDENTITY_SECRET = 's'.repeat(32);
@@ -92,7 +93,7 @@ function makeController(opts: {
     write: makeClient(),
   } as unknown as PrismaService;
   const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
-  return new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+  return new FleetGrpcController(new PrismaFleetGrpcRepository(prisma),  config, [InternalAudience.ADMIN_RAIL]);
 }
 
 describe('FleetGrpcController.getDriverInspectionStatus (gate de aprobación · ITV)', () => {
@@ -174,7 +175,7 @@ describe('FleetGrpcController.getDriverInspectionStatus (gate de aprobación · 
       },
     } as unknown as PrismaService;
     const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
-    const ctrl = new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+    const ctrl = new FleetGrpcController(new PrismaFleetGrpcRepository(prisma),  config, [InternalAudience.ADMIN_RAIL]);
 
     const out = await ctrl.getDriverInspectionStatus({ id: 'u1' }, signedMeta());
     expect(out.vehicleId).toBe('veh-new');
@@ -314,7 +315,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
       },
     } as unknown as PrismaService;
     const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
-    const ctrl = new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+    const ctrl = new FleetGrpcController(new PrismaFleetGrpcRepository(prisma),  config, [InternalAudience.ADMIN_RAIL]);
 
     const out = await ctrl.getDriverVehicles({ id: 'u1' }, signedMeta());
     // UNA sola query de docs para toda la flota (no una por vehículo).
@@ -345,7 +346,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
       },
     } as unknown as PrismaService;
     const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
-    const ctrl = new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+    const ctrl = new FleetGrpcController(new PrismaFleetGrpcRepository(prisma),  config, [InternalAudience.ADMIN_RAIL]);
 
     const out = await ctrl.getVehiclesByIds({ ids: ['veh-1', 'veh-2', 'veh-1'] }, signedMeta());
     // UNA query de vehículos + UNA de docs (anti-N+1), pese a los 3 ids (deduplica).
@@ -368,7 +369,7 @@ describe('FleetGrpcController · operabilidad derivada de los docs del vehículo
       },
     } as unknown as PrismaService;
     const config = new ConfigService<Env, true>({ INTERNAL_IDENTITY_SECRET } as Env);
-    const ctrl = new FleetGrpcController(prisma, config, [InternalAudience.ADMIN_RAIL]);
+    const ctrl = new FleetGrpcController(new PrismaFleetGrpcRepository(prisma),  config, [InternalAudience.ADMIN_RAIL]);
 
     const out = await ctrl.getVehiclesByIds({ ids: [] }, signedMeta());
     expect(out.vehicles).toEqual([]);

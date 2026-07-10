@@ -15,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { ExpirySweeper } from './expiry.sweeper';
+import { PrismaExpirationsRepository } from './expirations.repository';
 import { FleetEventType } from '../events/fleet-events';
 import { VehicleDocStatus } from '../generated/prisma';
 
@@ -95,7 +96,7 @@ function makeSweeper(s: Scenario): Harness {
     EXPIRY_ALERT_MILESTONES: '30,15,7,1',
   });
 
-  const sweeper = new ExpirySweeper(prisma as never, config as never);
+  const sweeper = new ExpirySweeper(new PrismaExpirationsRepository(prisma as never), config as never);
   return { sweeper, outbox };
 }
 
@@ -237,7 +238,7 @@ describe('ExpirySweeper · auto-suspensión por ITV vencida (Lote B)', () => {
       EXPIRY_WARNING_DAYS: 30,
       EXPIRY_ALERT_MILESTONES: '30,15,7,1',
     });
-    const sweeper = new ExpirySweeper(prisma as never, config as never);
+    const sweeper = new ExpirySweeper(new PrismaExpirationsRepository(prisma as never), config as never);
 
     const summary = await sweeper.sweep(NOW);
 

@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { DocumentsService } from './documents.service';
+import { PrismaDocumentsRepository } from './documents.repository';
 import { ReviewDecision } from './dto/document.dto';
 import { FleetDocumentStatus, FleetOwnerType, FleetDocumentType } from '../generated/prisma';
 import { FleetEventType } from '../events/fleet-events';
@@ -63,7 +64,7 @@ function makeService(docRow: Record<string, unknown> | null) {
   };
   const config = { getOrThrow: () => 30 };
   const inspections = { createInTx: vi.fn() };
-  const service = new DocumentsService(prisma as never, inspections as never, config as never);
+  const service = new DocumentsService(new PrismaDocumentsRepository(prisma as never), inspections as never, config as never);
   return { service, outbox, inspections, tx };
 }
 

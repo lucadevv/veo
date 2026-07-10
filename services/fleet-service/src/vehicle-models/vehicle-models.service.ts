@@ -6,12 +6,12 @@
  * Esta fase entrega solo LECTURA del catálogo APROBADO: el alta de modelos nuevos (PENDING_REVIEW) y la
  * aprobación por el operador son B5-2.c. La elección por el conductor (Vehicle.modelSpecId) es B5-2.b.
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { uuidv7, ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
 import { VehicleSegment, EnergySource } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { VEHICLE_MODELS_REPO, type VehicleModelsRepository } from './vehicle-models.repository';
 import type { Env } from '../config/env.schema';
 import {
   buildFleetEvent,
@@ -40,19 +40,13 @@ export interface VehicleModelMatch {
   score: number;
 }
 
-/** Fila cruda del $queryRaw del fuzzy-match: el id del mejor candidato + su score combinado. */
-interface FuzzyMatchRow {
-  id: string;
-  score: number;
-}
-
 @Injectable()
 export class VehicleModelsService {
   private readonly logger = new Logger(VehicleModelsService.name);
   private readonly matchThreshold: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(VEHICLE_MODELS_REPO) private readonly repo: VehicleModelsRepository,
     config: ConfigService<Env, true>,
   ) {
     this.matchThreshold = config.getOrThrow<number>('VEHICLE_MODEL_MATCH_THRESHOLD');
@@ -82,23 +76,12 @@ export class VehicleModelsService {
     // Sin términos normalizados no hay nada con qué comparar (degradación honesta: el caller encolará).
     if (!makeNorm || !modelNorm) return null;
 
-    // $queryRaw PARAMETRIZADO: cada `${...}` es un placeholder bindeado por el driver (no interpolación de
-    // string) → NO inyectable. `fleet.similarity()` usa el índice GIN trigram de make_norm/model_norm. La
-    // función se CALIFICA con el schema `fleet` porque pg_trgm se instaló ahí (no en public): así el match es
-    // independiente del search_path de la conexión (gotcha verificado contra la DB). Los enums status/
-    // vehicleType viajan como parámetros bindeados y se castean al tipo del schema en el borde.
-    const rows = await this.prisma.read.$queryRaw<FuzzyMatchRow[]>`
-      SELECT "id",
-             LEAST(
-               fleet.similarity("make_norm", ${makeNorm}),
-               fleet.similarity("model_norm", ${modelNorm})
-             ) AS score
-      FROM "fleet"."vehicle_model_specs"
-      WHERE "status" = ${VehicleModelStatus.APPROVED}::"fleet"."VehicleModelStatus"
-        AND "vehicle_type" = ${vehicleType}::"fleet"."VehicleType"
-      ORDER BY score DESC
-      LIMIT 1
-    `;
+    // $queryRaw PARAMETRIZADO (dentro del repo): cada `${...}` es un placeholder bindeado por el driver (no
+    // interpolación de string) → NO inyectable. `fleet.similarity()` usa el índice GIN trigram de make_norm/
+    // model_norm. La función se CALIFICA con el schema `fleet` porque pg_trgm se instaló ahí (no en public):
+    // así el match es independiente del search_path de la conexión (gotcha verificado contra la DB). Los enums
+    // status/vehicleType viajan como parámetros bindeados y se castean al tipo del schema en el borde.
+    const rows = await this.repo.fuzzyMatch(makeNorm, modelNorm, vehicleType);
 
     const best = rows[0];
     // El score puede llegar como string desde el driver (float8). Number() lo normaliza; sin fila → null.
@@ -107,7 +90,7 @@ export class VehicleModelsService {
     if (!Number.isFinite(score) || score < this.matchThreshold) return null;
 
     // Rehidrata el spec completo (el query trajo solo id+score para no acoplar el SELECT al shape del modelo).
-    const spec = await this.prisma.read.vehicleModelSpec.findUnique({ where: { id: best.id } });
+    const spec = await this.repo.findById(best.id);
     if (!spec) return null;
     return { spec, score };
   }
@@ -126,20 +109,10 @@ export class VehicleModelsService {
     limit?: number;
   }): Promise<Page<VehicleModelSpecView>> {
     const limit = clampLimit(opts.limit);
-    const where: Prisma.VehicleModelSpecWhereInput = { status: VehicleModelStatus.APPROVED };
-    if (opts.vehicleType) where.vehicleType = opts.vehicleType;
-    if (opts.q) {
-      const q = opts.q.trim();
-      where.OR = [
-        { make: { contains: q, mode: 'insensitive' } },
-        { model: { contains: q, mode: 'insensitive' } },
-      ];
-    }
-    if (opts.cursor) where.id = { gt: opts.cursor };
-
-    const rows = await this.prisma.read.vehicleModelSpec.findMany({
-      where,
-      orderBy: { id: 'asc' },
+    const rows = await this.repo.listApprovedPage({
+      vehicleType: opts.vehicleType,
+      q: opts.q,
+      cursor: opts.cursor,
       take: limit + 1,
     });
     const page = toPage(rows, limit);
@@ -153,9 +126,7 @@ export class VehicleModelsService {
    * o no está aprobado (no se filtra la existencia de un modelo no-aprobado).
    */
   async getById(id: string): Promise<VehicleModelSpecView> {
-    const spec = await this.prisma.read.vehicleModelSpec.findFirst({
-      where: { id, status: VehicleModelStatus.APPROVED },
-    });
+    const spec = await this.repo.findApprovedById(id);
     if (!spec) throw new NotFoundError('Modelo de vehículo no encontrado', { id });
     return toView(spec);
   }
@@ -186,33 +157,25 @@ export class VehicleModelsService {
 
     // Dedup case-insensitive (el unique de DB es case-sensitive: "Toyota" vs "toyota" no chocarían;
     // este pre-check atrapa la variación de mayúsculas en el caso secuencial).
-    const existing = await this.prisma.read.vehicleModelSpec.findFirst({
-      where: {
-        make: { equals: make, mode: 'insensitive' },
-        model: { equals: model, mode: 'insensitive' },
-        yearFrom: input.yearFrom,
-      },
-    });
+    const existing = await this.repo.findByNaturalKey(make, model, input.yearFrom);
     if (existing) throw this.duplicateModelError(make, model, input.yearFrom, existing.status);
 
     try {
-      const created = await this.prisma.write.vehicleModelSpec.create({
-        data: {
-          id: uuidv7(),
-          make,
-          model,
-          yearFrom: input.yearFrom,
-          yearTo: input.yearTo,
-          vehicleType: input.vehicleType,
-          seats: input.seats,
-          // Ficha técnica vacía: la completa el operador al aprobar (no inventamos datos).
-          segment: null,
-          energySource: null,
-          efficiency: null,
-          status: VehicleModelStatus.PENDING_REVIEW,
-          source,
-          requestedBy,
-        },
+      const created = await this.repo.create({
+        id: uuidv7(),
+        make,
+        model,
+        yearFrom: input.yearFrom,
+        yearTo: input.yearTo,
+        vehicleType: input.vehicleType,
+        seats: input.seats,
+        // Ficha técnica vacía: la completa el operador al aprobar (no inventamos datos).
+        segment: null,
+        energySource: null,
+        efficiency: null,
+        status: VehicleModelStatus.PENDING_REVIEW,
+        source,
+        requestedBy,
       });
       return toReviewView(created);
     } catch (err) {
@@ -249,14 +212,9 @@ export class VehicleModelsService {
     limit?: number;
   }): Promise<Page<VehicleModelReviewView>> {
     const limit = clampLimit(opts.limit);
-    const where: Prisma.VehicleModelSpecWhereInput = {
+    const rows = await this.repo.listForReviewPage({
       status: opts.status ?? VehicleModelStatus.PENDING_REVIEW,
-    };
-    if (opts.cursor) where.id = { gt: opts.cursor };
-
-    const rows = await this.prisma.read.vehicleModelSpec.findMany({
-      where,
-      orderBy: { id: 'asc' },
+      cursor: opts.cursor,
       take: limit + 1,
     });
     const page = toPage(rows, limit);
@@ -299,7 +257,7 @@ export class VehicleModelsService {
    * conductor: reabrir no es un veredicto (verdictForStatus(PENDING_REVIEW) = null).
    */
   async reopen(id: string): Promise<VehicleModelReviewView> {
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTx(async (tx) => {
       const res = await tx.vehicleModelSpec.updateMany({
         where: { id, status: VehicleModelStatus.APPROVED },
         data: { status: VehicleModelStatus.PENDING_REVIEW, verifiedBy: null },
@@ -327,7 +285,7 @@ export class VehicleModelsService {
     id: string,
     data: Prisma.VehicleModelSpecUpdateManyMutationInput,
   ): Promise<VehicleModelReviewView> {
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTx(async (tx) => {
       const res = await tx.vehicleModelSpec.updateMany({
         where: { id, status: VehicleModelStatus.PENDING_REVIEW },
         data,

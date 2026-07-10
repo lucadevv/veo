@@ -12,7 +12,7 @@ import {
   INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
   type InternalAudience,
 } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
+import { FLEET_GRPC_REPO, type FleetGrpcRepository } from './fleet-grpc.repository';
 import {
   deriveVehicleReviewStatus,
   hasRequiredVehicleDocsOperable,
@@ -193,7 +193,7 @@ export class FleetGrpcController {
   private readonly secret: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(FLEET_GRPC_REPO) private readonly repo: FleetGrpcRepository,
     config: ConfigService<Env, true>,
     @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
     private readonly allowedAudiences: readonly InternalAudience[],
@@ -220,20 +220,18 @@ export class FleetGrpcController {
    * esos son las certificaciones de operador del conductor, otra cosa). Devuelve un mapa vehicleId→docsOperable
    * (false para un vehículo sin docs requeridos operables). Espeja el batch de `purgeForDriver`/`enrichWithSpec`.
    *
-   * El `db` lo ELIGE el caller según freshness: el gate de DINERO (GetVehicle, que alimenta reserve/approve del
-   * carpooling) pasa el PRIMARY (`prisma.write`) — un doc REVOCADO por el admin debe verse al instante, no tras
-   * el lag de réplica (read-write §: nunca leer de réplica en un flujo crítico). Los caminos de display/refinamiento
-   * (batch de búsqueda, rehidratación) pasan la RÉPLICA (`prisma.read`).
+   * El `fresh` lo ELIGE el caller según freshness: el gate de DINERO (GetVehicle, que alimenta reserve/approve
+   * del carpooling) pasa `true` (PRIMARY) — un doc REVOCADO por el admin debe verse al instante, no tras el lag
+   * de réplica (read-write §: nunca leer de réplica en un flujo crítico). Los caminos de display/refinamiento
+   * (batch de búsqueda, rehidratación) pasan `false` (RÉPLICA).
    */
   private async vehicleDocsOperableMap(
-    db: PrismaService['read'],
+    fresh: boolean,
     vehicleIds: readonly string[],
   ): Promise<Map<string, boolean>> {
     const operable = new Map<string, boolean>();
     if (vehicleIds.length === 0) return operable;
-    const docs = await db.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: { in: [...vehicleIds] } },
-    });
+    const docs = await this.repo.findVehicleDocs(vehicleIds, fresh);
     const byOwner = new Map<string, typeof docs>();
     for (const d of docs) {
       const list = byOwner.get(d.ownerId);
@@ -256,9 +254,9 @@ export class FleetGrpcController {
   @GrpcMethod('FleetService', 'GetVehicle')
   async getVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
     this.requireIdentity(metadata);
-    const v = await this.prisma.write.vehicle.findUnique({ where: { id } });
+    const v = await this.repo.findVehicleById(id, true);
     if (!v) return EMPTY_VEHICLE;
-    const operableById = await this.vehicleDocsOperableMap(this.prisma.write, [v.id]);
+    const operableById = await this.vehicleDocsOperableMap(true, [v.id]);
     return toVehicleReply(v, operableById.get(v.id) ?? false);
   }
 
@@ -270,12 +268,9 @@ export class FleetGrpcController {
   @GrpcMethod('FleetService', 'GetVehicleCounts')
   async getVehicleCounts(_request: unknown, metadata: Metadata): Promise<VehicleCountsReply> {
     this.requireIdentity(metadata);
-    const groups = await this.prisma.read.vehicle.groupBy({
-      by: ['docStatus'],
-      _count: { _all: true },
-    });
+    const groups = await this.repo.countVehiclesByDocStatus();
     const countOf = (docStatus: VehicleDocStatus): number =>
-      groups.find((g) => g.docStatus === docStatus)?._count._all ?? 0;
+      groups.find((g) => g.docStatus === docStatus)?.count ?? 0;
     return {
       valid: countOf(VehicleDocStatus.VALID),
       expiringSoon: countOf(VehicleDocStatus.EXPIRING_SOON),
@@ -296,15 +291,9 @@ export class FleetGrpcController {
   ): Promise<ReviewQueueCountsReply> {
     this.requireIdentity(metadata);
     const [docsPendingReview, docsExpiringSoon, modelsPendingReview] = await Promise.all([
-      this.prisma.read.fleetDocument.count({
-        where: { status: FleetDocumentStatus.PENDING_REVIEW },
-      }),
-      this.prisma.read.fleetDocument.count({
-        where: { status: FleetDocumentStatus.EXPIRING_SOON },
-      }),
-      this.prisma.read.vehicleModelSpec.count({
-        where: { status: VehicleModelStatus.PENDING_REVIEW },
-      }),
+      this.repo.countDocuments(FleetDocumentStatus.PENDING_REVIEW),
+      this.repo.countDocuments(FleetDocumentStatus.EXPIRING_SOON),
+      this.repo.countModels(VehicleModelStatus.PENDING_REVIEW),
     ]);
     return { docsPendingReview, docsExpiringSoon, modelsPendingReview };
   }
@@ -323,15 +312,7 @@ export class FleetGrpcController {
     this.requireIdentity(metadata);
     if (!ids || ids.length === 0) return { items: [] };
     const required = REQUIRED_DRIVER_DOC_TYPES;
-    const docs = await this.prisma.read.fleetDocument.findMany({
-      where: {
-        ownerType: FleetOwnerType.DRIVER,
-        ownerId: { in: ids },
-        type: { in: [...required] },
-        status: FleetDocumentStatus.VALID,
-      },
-      select: { ownerId: true, type: true },
-    });
+    const docs = await this.repo.findDriverValidRequiredDocs(ids, required);
     // Conjunto de REQUERIDOS-en-VALID por conductor (dedup por tipo → cuenta distinct, no filas repetidas).
     const byOwner = new Map<string, Set<FleetDocumentType>>();
     for (const d of docs) {
@@ -365,11 +346,7 @@ export class FleetGrpcController {
     this.requireIdentity(metadata);
     if (!ids || ids.length === 0) return { items: [] };
     const now = new Date();
-    const inspections = await this.prisma.read.inspection.findMany({
-      where: { vehicleId: { in: ids } },
-      orderBy: [{ vehicleId: 'asc' }, { inspectedAt: 'desc' }],
-      select: { vehicleId: true, passed: true, nextDueAt: true },
-    });
+    const inspections = await this.repo.findInspectionsForVehicles(ids);
     const latestByVehicle = new Map<string, { passed: boolean; nextDueAt: Date }>();
     for (const insp of inspections) {
       if (!latestByVehicle.has(insp.vehicleId)) latestByVehicle.set(insp.vehicleId, insp);
@@ -413,11 +390,7 @@ export class FleetGrpcController {
     metadata: Metadata,
   ): Promise<DriverDocumentsReply> {
     this.requireIdentity(metadata);
-    const docs = await this.prisma.read.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.VEHICLE, ownerId: id },
-      orderBy: { createdAt: 'desc' },
-      include: { images: { orderBy: { order: 'asc' } } },
-    });
+    const docs = await this.repo.findDocsWithImagesByOwner(FleetOwnerType.VEHICLE, id);
     return {
       driverId: id,
       documents: docs.map((d) => ({
@@ -446,13 +419,11 @@ export class FleetGrpcController {
     this.requireIdentity(metadata);
     const uniqueIds = [...new Set(ids ?? [])];
     if (uniqueIds.length === 0) return { vehicles: [] };
-    const vehicles = await this.prisma.read.vehicle.findMany({
-      where: { id: { in: uniqueIds } },
-    });
+    const vehicles = await this.repo.findVehiclesByIds(uniqueIds);
     // ANTI-N+1: los docs de TODOS los vehículos en UNA query (la 2da), agrupados por vehicleId.
     // Réplica: la búsqueda es un REFINAMIENTO best-effort de display, no el gate autoritativo (ese es GetVehicle).
     const operableById = await this.vehicleDocsOperableMap(
-      this.prisma.read,
+      false,
       vehicles.map((v) => v.id),
     );
     return {
@@ -467,13 +438,10 @@ export class FleetGrpcController {
     metadata: Metadata,
   ): Promise<DriverVehiclesReply> {
     this.requireIdentity(metadata);
-    const vehicles = await this.prisma.read.vehicle.findMany({
-      where: { driverId: id },
-      orderBy: { createdAt: 'desc' },
-    });
+    const vehicles = await this.repo.findVehiclesByDriverRecent(id);
     // ANTI-N+1: los docs de TODOS los vehículos en UNA query, agrupados por vehicleId (no una por vehículo).
     const operableById = await this.vehicleDocsOperableMap(
-      this.prisma.read,
+      false,
       vehicles.map((v) => v.id),
     );
     return {
@@ -492,10 +460,10 @@ export class FleetGrpcController {
   @GrpcMethod('FleetService', 'GetDriverActiveVehicle')
   async getDriverActiveVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
     this.requireIdentity(metadata);
-    const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId: id } });
+    const vehicles = await this.repo.findVehiclesByDriver(id);
     const active = pickActiveVehicle(vehicles);
     if (!active) return EMPTY_VEHICLE;
-    const operableById = await this.vehicleDocsOperableMap(this.prisma.read, [active.id]);
+    const operableById = await this.vehicleDocsOperableMap(false, [active.id]);
     return toVehicleReply(active, operableById.get(active.id) ?? false);
   }
 
@@ -505,11 +473,7 @@ export class FleetGrpcController {
     metadata: Metadata,
   ): Promise<DriverDocumentsReply> {
     this.requireIdentity(metadata);
-    const docs = await this.prisma.read.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.DRIVER, ownerId: id },
-      orderBy: { createdAt: 'desc' },
-      include: { images: { orderBy: { order: 'asc' } } },
-    });
+    const docs = await this.repo.findDocsWithImagesByOwner(FleetOwnerType.DRIVER, id);
     return {
       driverId: id,
       documents: docs.map((d) => ({
@@ -546,7 +510,7 @@ export class FleetGrpcController {
   ): Promise<DriverInspectionStatusReply> {
     this.requireIdentity(metadata);
     const now = new Date();
-    const vehicles = await this.prisma.read.vehicle.findMany({ where: { driverId: id } });
+    const vehicles = await this.repo.findVehiclesByDriver(id);
     const active = pickActiveVehicle(vehicles);
     if (!active) {
       // Sin vehículo operable (ninguno registrado, o todos con docs vencidos): no puede operar.
@@ -562,10 +526,7 @@ export class FleetGrpcController {
     }
 
     // Última inspección del vehículo operado (orderBy inspectedAt desc, take 1 = la VIGENTE candidata).
-    const latest = await this.prisma.read.inspection.findFirst({
-      where: { vehicleId: active.id },
-      orderBy: { inspectedAt: 'desc' },
-    });
+    const latest = await this.repo.findLatestInspection(active.id);
     const current = isInspectionCurrent(latest, now);
     const reason = current
       ? null

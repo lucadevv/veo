@@ -3,6 +3,10 @@ import { VehiclesModule } from '../vehicles/vehicles.module';
 import { ErasureConsumer } from './erasure.consumer';
 import { CatalogOperabilityConsumer } from './catalog-operability.consumer';
 import { CatalogOperabilityService } from './catalog-operability.service';
+import {
+  CATALOG_OPERABILITY_REPO,
+  PrismaCatalogOperabilityRepository,
+} from './catalog-operability.repository';
 
 /**
  * Consumers Kafka de fleet-service:
@@ -14,6 +18,12 @@ import { CatalogOperabilityService } from './catalog-operability.service';
  */
 @Module({
   imports: [VehiclesModule],
-  providers: [ErasureConsumer, CatalogOperabilityConsumer, CatalogOperabilityService],
+  // §10: CATALOG_OPERABILITY_REPO es el único dueño de Prisma del seam catálogo↔operabilidad.
+  providers: [
+    ErasureConsumer,
+    CatalogOperabilityConsumer,
+    CatalogOperabilityService,
+    { provide: CATALOG_OPERABILITY_REPO, useClass: PrismaCatalogOperabilityRepository },
+  ],
 })
 export class EventsModule {}

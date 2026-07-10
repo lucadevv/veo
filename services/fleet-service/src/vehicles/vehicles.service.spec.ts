@@ -20,6 +20,7 @@ import {
   type Vehicle,
 } from '../generated/prisma';
 import { VehiclesService } from './vehicles.service';
+import { PrismaVehiclesRepository } from './vehicles.repository';
 import type { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
 import type {
   VehicleModelsService,
@@ -110,7 +111,7 @@ function makeService(
   const { double, findBestApprovedMatch, requestModel } = makeVehicleModelsDouble({
     match: opts.match,
   });
-  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, config as never);
+  const service = new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, OPERABLE_CAR_ONLY, config as never);
   return { service, created, findFirst, txCreate, findBestApprovedMatch, requestModel };
 }
 
@@ -236,7 +237,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
-    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+    const service = new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, OPERABLE_CAR_ONLY, {
       getOrThrow: () => 2017,
     } as never);
 
@@ -275,7 +276,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
         vehicle: { update: vi.fn(), findUnique: vi.fn().mockResolvedValue(foreign) },
       },
     };
-    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+    const service = new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, OPERABLE_CAR_ONLY, {
       getOrThrow: () => 2017,
     } as never);
 
@@ -325,7 +326,7 @@ describe('VehiclesService.registerForDriver · B5-2 modelSpecId', () => {
       },
       write: { $transaction: (fn: (t: typeof tx) => unknown) => Promise.resolve(fn(tx)) },
     };
-    const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+    const service = new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, OPERABLE_CAR_ONLY, {
       getOrThrow: () => 2017,
     } as never);
     // silencia el logger.error esperado (no contamina el output del test)
@@ -425,7 +426,7 @@ function makeCreateService(opts: { spec?: ReturnType<typeof specRow> | null } = 
   };
   // Alta ADMIN: no pasa contexto fuzzy → el doble de VehicleModelsService no se ejerce (carga deliberada).
   const { double } = makeVehicleModelsDouble();
-  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+  const service = new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, OPERABLE_CAR_ONLY, {
     getOrThrow: () => 2017,
   } as never);
   return { service, created, findFirst, writeCreate };
@@ -526,7 +527,7 @@ function makeIdempotentService(existingPlate: Vehicle | null) {
     },
   };
   const { double } = makeVehicleModelsDouble();
-  const service = new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+  const service = new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, OPERABLE_CAR_ONLY, {
     getOrThrow: () => 2017,
   } as never);
   return { service, txCreate, outboxCreate, update };
@@ -634,7 +635,7 @@ describe('VehiclesService.getActiveVehicle · B5-3 enriquecimiento con seats/seg
     };
     const { double } = makeVehicleModelsDouble();
     return {
-      service: new VehiclesService(prisma as never, double, OPERABLE_CAR_ONLY, {
+      service: new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, OPERABLE_CAR_ONLY, {
         getOrThrow: () => 2017,
       } as never),
       prisma,
@@ -712,7 +713,7 @@ describe('VehiclesService.list · F1 enriquecimiento de la ficha del match', () 
     const config = { getOrThrow: () => 2017 };
     const { double } = makeVehicleModelsDouble();
     const service = new VehiclesService(
-      prisma as never,
+      new PrismaVehiclesRepository(prisma as never),
       double,
       OPERABLE_CAR_ONLY,
       config as never,
@@ -887,7 +888,7 @@ describe('VehiclesService.create · gate operabilidad por clase (overlay-aware)'
     const operableClasses = {
       get: vi.fn(operableGet),
     } as unknown as OperableVehicleClassesProvider;
-    const service = new VehiclesService(prisma as never, double, operableClasses, {
+    const service = new VehiclesService(new PrismaVehiclesRepository(prisma as never), double, operableClasses, {
       getOrThrow: () => 2017,
     } as never);
     return { service, created };

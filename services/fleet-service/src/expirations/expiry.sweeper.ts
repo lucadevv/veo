@@ -6,10 +6,10 @@
  *  4) recalcula el estado documental agregado del vehículo (SOAT + ITV + seguro).
  * Toda escritura va junto a su evento en la MISMA transacción (outbox, FOUNDATION §6).
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '../infra/prisma.service';
+import { EXPIRATIONS_REPO, type ExpirationsRepository } from './expirations.repository';
 import { parseAlertMilestones } from '../config/env.schema';
 import type { Env } from '../config/env.schema';
 import {
@@ -26,11 +26,7 @@ import {
   deriveExpiryStatus,
   isCriticalDocument,
 } from '../documents/document-rules';
-import {
-  aggregateVehicleDocStatus,
-  pickActiveVehicle,
-  VEHICLE_REQUIRED_DOCUMENT_TYPES,
-} from '../vehicles/vehicle-rules';
+import { aggregateVehicleDocStatus, pickActiveVehicle } from '../vehicles/vehicle-rules';
 import { isInspectionCurrent } from '../inspections/inspection-rules';
 import {
   FleetDocumentStatus,
@@ -59,7 +55,7 @@ export class ExpirySweeper {
   private readonly milestones: number[];
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(EXPIRATIONS_REPO) private readonly repo: ExpirationsRepository,
     config: ConfigService<Env, true>,
   ) {
     this.warningDays = config.getOrThrow<number>('EXPIRY_WARNING_DAYS');
@@ -90,21 +86,7 @@ export class ExpirySweeper {
 
     let cursorId: string | undefined;
     for (;;) {
-      const docs = await this.prisma.read.fleetDocument.findMany({
-        where: {
-          expiresAt: { not: null },
-          status: {
-            in: [
-              FleetDocumentStatus.VALID,
-              FleetDocumentStatus.EXPIRING_SOON,
-              FleetDocumentStatus.EXPIRED,
-            ],
-          },
-        },
-        orderBy: { id: 'asc' },
-        take: PAGE_SIZE,
-        ...(cursorId ? { skip: 1, cursor: { id: cursorId } } : {}),
-      });
+      const docs = await this.repo.findExpirableDocumentsPage(PAGE_SIZE, cursorId);
       if (docs.length === 0) break;
       cursorId = docs[docs.length - 1]?.id;
 
@@ -160,13 +142,7 @@ export class ExpirySweeper {
       // Vehículos con conductor (driverId = User.id). SIN filtro de latch: el sweeper re-evalúa todo en cada
       // corrida y re-emite si la ITV sigue vencida; identity dedup-ea por el unique del hold. El Set evita
       // re-evaluar al mismo conductor dentro de la corrida.
-      const vehicles = await this.prisma.read.vehicle.findMany({
-        where: { driverId: { not: null } },
-        select: { id: true, driverId: true },
-        orderBy: { id: 'asc' },
-        take: PAGE_SIZE,
-        ...(cursorId ? { skip: 1, cursor: { id: cursorId } } : {}),
-      });
+      const vehicles = await this.repo.findVehiclesWithDriverPage(PAGE_SIZE, cursorId);
       if (vehicles.length === 0) break;
       cursorId = vehicles[vehicles.length - 1]?.id;
 
@@ -198,9 +174,7 @@ export class ExpirySweeper {
 
     // UNA query: TODOS los vehículos de TODOS los conductores del lote (incluye EXPIRED — pickActiveVehicle
     // los filtra). Se agrupan en memoria por conductor para elegir el operado de cada uno.
-    const allVehicles = await this.prisma.read.vehicle.findMany({
-      where: { driverId: { in: userIds } },
-    });
+    const allVehicles = await this.repo.findVehiclesByDrivers(userIds);
     const vehiclesByUser = new Map<string, typeof allVehicles>();
     for (const v of allVehicles) {
       if (!v.driverId) continue;
@@ -224,10 +198,9 @@ export class ExpirySweeper {
     // UNA query: las inspecciones de TODOS los vehículos operados del lote, ordenadas por `inspectedAt desc`
     // (mismo orderBy del gate). En memoria nos quedamos con la PRIMERA (la última) por vehículo → equivale al
     // `findFirst` per-vehículo, en una sola ida a la DB.
-    const inspections = await this.prisma.read.inspection.findMany({
-      where: { vehicleId: { in: [...userByActiveVehicle.keys()] } },
-      orderBy: { inspectedAt: 'desc' },
-    });
+    const inspections = await this.repo.findInspectionsForVehicles([
+      ...userByActiveVehicle.keys(),
+    ]);
     const latestByVehicle = new Map<string, (typeof inspections)[number]>();
     for (const insp of inspections) {
       if (!latestByVehicle.has(insp.vehicleId)) latestByVehicle.set(insp.vehicleId, insp);
@@ -260,7 +233,7 @@ export class ExpirySweeper {
     latest: { id: string; nextDueAt: Date },
     now: Date,
   ): Promise<void> {
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTx(async (tx) => {
       const suspendPayload: DriverSuspendedPayload = {
         // KEYEADO POR userId (User.id = Vehicle.driverId), NO driverId de perfil: identity resuelve el mapeo.
         userId,
@@ -308,7 +281,7 @@ export class ExpirySweeper {
     // Sin trabajo que hacer: nada cambió, no hay hito Y no hay suspensión que re-assertar → salir.
     if (!statusChanged && milestone === null && !reassertSuspension) return;
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       const data: Prisma.FleetDocumentUpdateInput = {};
       if (statusChanged) data.status = newStatus;
       if (milestone !== null) data.lastAlertedDays = milestone;
@@ -379,31 +352,13 @@ export class ExpirySweeper {
     let updated = 0;
     let cursorId: string | undefined;
     for (;;) {
-      const vehicles = await this.prisma.read.vehicle.findMany({
-        orderBy: { id: 'asc' },
-        take: PAGE_SIZE,
-        ...(cursorId ? { skip: 1, cursor: { id: cursorId } } : {}),
-      });
+      const vehicles = await this.repo.findVehiclesPage(PAGE_SIZE, cursorId);
       if (vehicles.length === 0) break;
       cursorId = vehicles[vehicles.length - 1]?.id;
 
       const vehicleIds = vehicles.map((v) => v.id);
       const docsByVehicle = new Map<string, ('VALID' | 'EXPIRING_SOON' | 'EXPIRED')[]>();
-      const allDocs = await this.prisma.read.fleetDocument.findMany({
-        where: {
-          ownerType: FleetOwnerType.VEHICLE,
-          ownerId: { in: vehicleIds },
-          type: { in: [...VEHICLE_REQUIRED_DOCUMENT_TYPES] },
-          status: {
-            in: [
-              FleetDocumentStatus.VALID,
-              FleetDocumentStatus.EXPIRING_SOON,
-              FleetDocumentStatus.EXPIRED,
-            ],
-          },
-        },
-        select: { ownerId: true, status: true },
-      });
+      const allDocs = await this.repo.findVehicleRequiredDocs(vehicleIds);
       for (const d of allDocs) {
         const arr = docsByVehicle.get(d.ownerId) ?? [];
         arr.push(d.status as 'VALID' | 'EXPIRING_SOON' | 'EXPIRED');
@@ -416,7 +371,7 @@ export class ExpirySweeper {
         const newDocStatus = aggregateVehicleDocStatus(statuses);
 
         if (newDocStatus === vehicle.docStatus) continue;
-        await this.prisma.write.$transaction(async (tx) => {
+        await this.repo.runInTx(async (tx) => {
           await tx.vehicle.update({ where: { id: vehicle.id }, data: { docStatus: newDocStatus } });
           if (newDocStatus === VehicleDocStatus.EXPIRED) {
             const payload: VehicleSuspendedPayload = {
