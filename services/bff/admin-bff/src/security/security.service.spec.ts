@@ -130,7 +130,7 @@ describe('SecurityService', () => {
     expect(out.geo).toEqual({ lat: -12.05, lon: -77.04 });
   });
 
-  it('resolve reenvía SOLO resolution downstream y registra el motivo (notes) en el audit', async () => {
+  it('resolve reenvía resolution + notes downstream y registra el motivo (notes) en el audit', async () => {
     const rest = {
       post: vi.fn().mockResolvedValue({
         ...panicEntity,
@@ -155,10 +155,10 @@ describe('SecurityService', () => {
       notes: 'Pasajero confirmó que está a salvo',
     });
     expect(out.status).toBe('RESOLVED');
-    // panic-service NO persiste notas → downstream solo va resolution (la entidad no tiene columna de notas).
+    // panic-service ahora persiste el motivo (columna resolution_notes) → downstream va resolution + notes.
     expect(rest.post).toHaveBeenCalledWith('/panic/pa1/resolve', {
       identity: compliance,
-      body: { resolution: 'RESOLVED' },
+      body: { resolution: 'RESOLVED', notes: 'Pasajero confirmó que está a salvo' },
     });
     // El motivo vive en el AUDIT (rendición de cuentas · Ley 29733).
     expect(audit.record).toHaveBeenCalledWith(

@@ -42,6 +42,7 @@ interface PanicEntity {
   acknowledgedAt?: string;
   ackBy?: string;
   resolvedAt?: string;
+  resolutionNotes?: string;
 }
 @Injectable()
 export class SecurityService {
@@ -125,9 +126,10 @@ export class SecurityService {
   ): Promise<PanicDetail> {
     const p = await this.rest.post<PanicEntity>(`/panic/${id}/resolve`, {
       identity,
-      // panic-service solo transiciona el estado (su entidad no persiste notas). El motivo NO se reenvía
-      // downstream: vive en el AUDIT de abajo (rendición de cuentas · Ley 29733).
-      body: { resolution: dto.resolution },
+      // DOBLE registro del motivo: panic-service lo persiste en la entidad (resolution_notes) para
+      // consulta/display del detalle; el AUDIT inmutable de abajo sigue siendo la fuente de verdad para
+      // rendición de cuentas (Ley 29733). `notes` opcional → solo viaja si el operador lo escribió.
+      body: { resolution: dto.resolution, ...(dto.notes ? { notes: dto.notes } : {}) },
     });
     await this.audit.record(identity, {
       action: 'panic.resolve',
@@ -169,9 +171,10 @@ function toPanicSummary(p: PanicEntity): PanicSummary {
   };
 }
 
-/** Detalle del pánico al contrato. Los nombres (passenger/driver) y notes no los provee panic-service →
- *  null honesto (no data falsa); el enriquecimiento por identity/trip es follow-up. evidence: se mapean
- *  los S3 keys a objetos mostrables (kind por extensión, label = nombre de archivo, at = inicio del incidente). */
+/** Detalle del pánico al contrato. Los nombres (passenger/driver) no los provee panic-service → null
+ *  honesto (no data falsa); el enriquecimiento por identity/trip es follow-up. `notes` = el motivo del
+ *  cierre que panic-service ahora SÍ persiste (resolution_notes); null hasta que el operador lo escriba.
+ *  evidence: se mapean los S3 keys a objetos mostrables (kind por extensión, label = nombre de archivo). */
 function toPanicDetail(p: PanicEntity): PanicDetail {
   return {
     id: p.id,
@@ -186,7 +189,7 @@ function toPanicDetail(p: PanicEntity): PanicDetail {
     acknowledgedAt: p.acknowledgedAt ?? null,
     resolvedAt: p.resolvedAt ?? null,
     acknowledgedBy: p.ackBy ?? null,
-    notes: null,
+    notes: p.resolutionNotes ?? null,
     evidence: (p.evidenceS3Keys ?? []).map((key) => ({
       id: key,
       kind: evidenceKind(key),

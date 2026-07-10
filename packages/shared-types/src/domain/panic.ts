@@ -11,4 +11,7 @@ export interface PanicEvent {
   evidenceS3Keys: string[];
   acknowledgedAt?: Date;
   ackBy?: string;
+  resolvedAt?: Date;
+  /** Motivo opcional del cierre escrito por el operador (persistido en la entidad para display). */
+  resolutionNotes?: string;
 }

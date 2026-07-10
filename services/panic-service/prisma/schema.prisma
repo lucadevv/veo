@@ -43,6 +43,10 @@ model PanicEvent {
   /// Operador (admin userId) que reconoció la alerta.
   ackBy          String?     @map("ack_by") @db.Uuid
   resolvedAt     DateTime?   @map("resolved_at") @db.Timestamptz
+  /// Motivo OPCIONAL del cierre (RESOLVED/FALSE_ALARM) que el operador escribe al resolver la alerta.
+  /// Se persiste en la MISMA tx/CAS que la transición. El audit inmutable (admin-bff) sigue siendo la
+  /// fuente de verdad para accountability (Ley 29733); esta columna es para consulta/display del detalle.
+  resolutionNotes String?    @map("resolution_notes")
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([status, triggeredAt])

@@ -189,9 +189,22 @@ describe('panic-service E2E · ack/resolve BR-S05 (Postgres real)', () => {
     const input = makeSignedInput();
     const created = await svc.trigger(input);
 
-    const resolved = await svc.resolve(created.panicId, 'FALSE_ALARM', operatorId);
+    const resolved = await svc.resolve(
+      created.panicId,
+      'FALSE_ALARM',
+      operatorId,
+      'El pasajero confirmó que fue un toque accidental del botón.',
+    );
     expect(resolved.status).toBe('FALSE_ALARM');
     expect(resolved.resolvedAt).toBeInstanceOf(Date);
+    // El MOTIVO se persiste en la MISMA tx/CAS que la transición (columna resolution_notes).
+    expect(resolved.resolutionNotes).toBe(
+      'El pasajero confirmó que fue un toque accidental del botón.',
+    );
+    const persisted = await client.panicEvent.findUniqueOrThrow({ where: { id: created.panicId } });
+    expect(persisted.resolutionNotes).toBe(
+      'El pasajero confirmó que fue un toque accidental del botón.',
+    );
 
     // Dominó: el cierre publica panic.resolved (share desenmascara si FALSE_ALARM; notification pushea).
     const events = await client.outboxEvent.findMany({
@@ -214,6 +227,18 @@ describe('panic-service E2E · ack/resolve BR-S05 (Postgres real)', () => {
       where: { aggregateId: created.panicId, eventType: 'panic.resolved' },
     });
     expect(after).toHaveLength(1);
+  });
+
+  it('resolve SIN motivo deja resolution_notes en null (columna opcional, no destructiva)', async () => {
+    const operatorId = uuidv7();
+    const created = await svc.trigger(makeSignedInput());
+
+    const resolved = await svc.resolve(created.panicId, 'RESOLVED', operatorId);
+    expect(resolved.status).toBe('RESOLVED');
+    expect(resolved.resolutionNotes).toBeNull();
+
+    const persisted = await client.panicEvent.findUniqueOrThrow({ where: { id: created.panicId } });
+    expect(persisted.resolutionNotes).toBeNull();
   });
 
   it('anexa evidencia S3 sin duplicar keys', async () => {

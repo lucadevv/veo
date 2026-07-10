@@ -133,7 +133,7 @@ export class PanicController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResolvePanicDto,
   ): Promise<PanicEntity> {
-    return this.toEntity(await this.panic.resolve(id, dto.resolution, user.userId));
+    return this.toEntity(await this.panic.resolve(id, dto.resolution, user.userId, dto.notes));
   }
 
   @UseGuards(RolesGuard)
@@ -160,6 +160,8 @@ export class PanicController {
     evidenceS3Keys: string[];
     acknowledgedAt: Date | null;
     ackBy: string | null;
+    resolvedAt: Date | null;
+    resolutionNotes: string | null;
   }): PanicEntity {
     return {
       id: row.id,
@@ -172,6 +174,8 @@ export class PanicController {
       evidenceS3Keys: row.evidenceS3Keys,
       acknowledgedAt: row.acknowledgedAt ?? undefined,
       ackBy: row.ackBy ?? undefined,
+      resolvedAt: row.resolvedAt ?? undefined,
+      resolutionNotes: row.resolutionNotes ?? undefined,
     };
   }
 }

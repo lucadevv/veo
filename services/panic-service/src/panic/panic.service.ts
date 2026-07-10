@@ -209,15 +209,18 @@ export class PanicService {
     panicId: string,
     resolution: typeof PanicStatus.RESOLVED | typeof PanicStatus.FALSE_ALARM,
     operatorId: string,
+    notes?: string,
   ): Promise<PanicEvent> {
     const resolvedAt = new Date();
     return this.repo.runInTx(async (tx) => {
       // CAS atómico (status-guard en el WHERE): solo transiciona si NO está YA cerrado. Dos cierres
       // concurrentes: uno gana (count=1), el otro count=0 → error claro (ya cerrado) sin pisar el
       // resolvedBy/resolvedAt del primero. Espeja el CAS de acknowledge / trip-service.
+      // `resolutionNotes` (motivo opcional del operador) se persiste en la MISMA tx que la transición:
+      // el motivo no puede quedar huérfano de su cierre. `undefined` → no toca la columna.
       const cas = await tx.panicEvent.updateMany({
         where: { id: panicId, status: { notIn: [PanicStatus.RESOLVED, PanicStatus.FALSE_ALARM] } },
-        data: { status: resolution, resolvedAt },
+        data: { status: resolution, resolvedAt, resolutionNotes: notes ?? null },
       });
       if (cas.count === 0) {
         const current = await tx.panicEvent.findUnique({ where: { id: panicId } });

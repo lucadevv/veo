@@ -113,6 +113,12 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
                 <Detail label="Reconocido" value={dateTime(panic.acknowledgedAt)} />
                 <Detail label="Resuelto" value={dateTime(panic.resolvedAt)} />
                 <Detail label="Atendido por" value={panic.acknowledgedBy ?? '—'} />
+                {panic.notes ? (
+                  <div className="col-span-2">
+                    <dt className="text-xs text-ink-muted">Motivo del cierre</dt>
+                    <dd className="whitespace-pre-wrap text-ink">{panic.notes}</dd>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
 
