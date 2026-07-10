@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { PoliciesModule } from '../policies/policies.module';
 import { UsersService } from './users.service';
 import { UsersRepository } from './users.repository';
 import { UsersController } from './users.controller';
@@ -9,7 +10,8 @@ import { PhoneLinkRepository } from './phone-link.repository';
 
 @Module({
   // AuthModule provee OtpService (reuso de la infra OTP del login para phone-link).
-  imports: [AuthModule],
+  // PoliciesModule exporta PoliciesService → el DeletionSweeper lee `privacy.erasure` (PBAC, ADR-024).
+  imports: [AuthModule, PoliciesModule],
   providers: [
     UsersService,
     UsersRepository,

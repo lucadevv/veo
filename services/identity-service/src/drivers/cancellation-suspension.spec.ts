@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { DriversService } from './drivers.service';
 import { DriversRepository } from './drivers.repository';
+import { PoliciesService } from './../policies/policies.service';
 import { SuspensionCause } from '@veo/shared-types';
 import type { Env } from '../config/env.schema';
 
@@ -35,6 +36,8 @@ const config = new ConfigService<Env, true>({
   DNI_HASH_SALT: 'test-dni-salt',
   EXCESSIVE_CANCELLATION_COOLDOWN_HOURS: 24,
 });
+/** Stub del PoliciesService (PBAC): este spec no ejercita el masking, pero el ctor lo exige. */
+const policies = { getPiiMaskDniTail: async () => 4 } as unknown as PoliciesService;
 
 function matchesExpiresAt(
   h: Hold,
@@ -202,7 +205,7 @@ const sessions = {
   resealRevokedBefore: async () => true,
 } as never;
 function svc(prisma: ReturnType<typeof makePrisma>): DriversService {
-  return new DriversService(new DriversRepository(prisma.prisma as never), redis, bio, sessions, config);
+  return new DriversService(new DriversRepository(prisma.prisma as never), redis, bio, sessions, config, policies);
 }
 
 function temporalHold(

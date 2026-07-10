@@ -7,6 +7,22 @@ import { StorageSandboxAdapter } from '../ports/storage/storage.module';
 import type { IssueTokenInput, LiveKitPort } from '../ports/livekit/livekit.port';
 import type { StoragePort } from '../ports/storage/storage.port';
 import type { Env } from '../config/env.schema';
+import type { PolicyReader } from '@veo/policy';
+
+/**
+ * PolicyReader falso (registro PBAC) para aseverar que la retención por defecto sale de `media.retention.days`
+ * y NO del ENV. `getEnabled` decide si la política gobierna; `number` devuelve el valor configurado. El resto
+ * de métodos son no-ops (este servicio solo lee `media.retention`).
+ */
+function makePolicyReader(days: number, enabled = true): PolicyReader {
+  return {
+    getEnabled: async () => enabled,
+    number: async () => days,
+    bool: async (_k, _p, fallback) => fallback,
+    list: async (_k, _p, fallback) => fallback,
+    params: async () => ({}),
+  };
+}
 
 /** Adapter LiveKit espía: captura el último IssueTokenInput para aseverar los grants emitidos. */
 function makeSpyLivekit(): { livekit: LiveKitPort; captured: { input?: IssueTokenInput } } {
@@ -199,6 +215,40 @@ describe('RecordingService.startForTrip · inicio automático (BR-S01)', () => {
     expect(segments).toHaveLength(1);
     expect(segments[0]?.retentionUntil).toEqual(new Date('2026-06-27T20:00:00.000Z')); // +30d
     expect(outbox).toEqual([{ eventType: 'media.recording_started' }]);
+  });
+
+  it('lee la ventana de retención del registro PBAC (media.retention.days), no del ENV', async () => {
+    const { prisma, segments } = makePrisma();
+    const svc = new RecordingService(
+      new PrismaMediaRepository(prisma as never),
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+      makePolicyReader(7), // política ENCENDIDA con days=7 (≠ 30 del ENV)
+    );
+    const startedAt = new Date('2026-05-28T20:00:00.000Z');
+
+    await svc.startForTrip('trip-1', startedAt);
+
+    // +7d (del registro), no +30d (del ENV): prueba que la política gobierna la ventana.
+    expect(segments[0]?.retentionUntil).toEqual(new Date('2026-06-04T20:00:00.000Z'));
+  });
+
+  it('política media.retention enabled:false → cae al default de ENV (nunca acorta la ventana)', async () => {
+    const { prisma, segments } = makePrisma();
+    const svc = new RecordingService(
+      new PrismaMediaRepository(prisma as never),
+      new LiveKitSandboxAdapter(),
+      makeSpyStorage().storage,
+      config,
+      makePolicyReader(3, false), // APAGADA con days=3: se IGNORA el 3, retención sigue con el default de ENV
+    );
+    const startedAt = new Date('2026-05-28T20:00:00.000Z');
+
+    await svc.startForTrip('trip-1', startedAt);
+
+    // +30d (ENV), NO +3d: apagar la política no borra video antes de tiempo (fail-safe, Ley 29733).
+    expect(segments[0]?.retentionUntil).toEqual(new Date('2026-06-27T20:00:00.000Z'));
   });
 
   it('es idempotente: no duplica la grabación si ya hay una en curso', async () => {

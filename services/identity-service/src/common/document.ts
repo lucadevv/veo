@@ -51,18 +51,30 @@ export function maskDocument(document: string | null | undefined): string {
 }
 
 /**
- * Enmascara el DNI para una VISTA dirigida al PROPIO conductor (no a compliance): conserva los últimos
- * `VISIBLE_DNI_TAIL` dígitos y oculta el resto. A diferencia de `maskDocument` (para log/audit, devuelve el
- * sentinel `∅`), aquí preservamos `null` para respetar el contrato de la vista (`dni: string | null`) y la
- * degradación honesta del cliente RN. El conductor YA tipeó el DNI; devolverle el enmascarado confirma la
- * persistencia SIN re-exponer la PII completa ni filtrar el ciphertext. Ej. '12345678' → '****5678'.
+ * Default fail-safe de dígitos del DNI visibles al dueño. Es el default del catálogo PBAC de `pii.mask`
+ * (`@veo/policy` · params.dniTail:4). Se mantiene acá como constante para que el helper sea PURO (sin DI):
+ * el número REAL vigente lo resuelve el caller con DI (`DriversService` → `PoliciesService.getPiiMaskDniTail`)
+ * y lo pasa por parámetro; este default cubre los usos sin política y el fail-safe.
  */
 export const VISIBLE_DNI_TAIL = 4;
 
-export function maskDniForOwner(dni: string | null | undefined): string | null {
+/**
+ * Enmascara el DNI para una VISTA dirigida al PROPIO conductor (no a compliance): conserva los últimos
+ * `dniTail` dígitos y oculta el resto. A diferencia de `maskDocument` (para log/audit, devuelve el
+ * sentinel `∅`), aquí preservamos `null` para respetar el contrato de la vista (`dni: string | null`) y la
+ * degradación honesta del cliente RN. El conductor YA tipeó el DNI; devolverle el enmascarado confirma la
+ * persistencia SIN re-exponer la PII completa ni filtrar el ciphertext. Ej. '12345678' → '****5678'.
+ *
+ * `dniTail` es PARAMETRIZABLE (PBAC `pii.mask`, ADR-024): el helper queda PURO (sin DI, testeable directo)
+ * y el caller con DI le inyecta el valor VIGENTE de la política; el default es el del catálogo (4).
+ */
+export function maskDniForOwner(
+  dni: string | null | undefined,
+  dniTail: number = VISIBLE_DNI_TAIL,
+): string | null {
   if (dni == null) return null;
-  if (dni.length <= VISIBLE_DNI_TAIL) return '*'.repeat(dni.length);
-  return '*'.repeat(dni.length - VISIBLE_DNI_TAIL) + dni.slice(-VISIBLE_DNI_TAIL);
+  if (dni.length <= dniTail) return '*'.repeat(dni.length);
+  return '*'.repeat(dni.length - dniTail) + dni.slice(-dniTail);
 }
 
 /**

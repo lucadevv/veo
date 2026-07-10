@@ -14,6 +14,7 @@ import {
   getPolicyDef,
   isPolicyKey,
   safeValidateParams,
+  type PolicyKey,
   type PolicyParams,
 } from '@veo/policy';
 import { ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
@@ -43,9 +44,19 @@ export interface UpdatePolicyPatch {
   params?: PolicyParams;
 }
 
+/** TTL del cache de params vigentes para enforcement interno (hot-path como el masking por request). */
+const PARAMS_CACHE_TTL_MS = 15_000;
+
 @Injectable()
 export class PoliciesService {
   private readonly logger = new Logger(PoliciesService.name);
+
+  /**
+   * Cache corto de los `params` vigentes por key, SOLO para el camino de lectura de enforcement
+   * (`readParams`). Se invalida cuando `update()` escribe una política (misma instancia, singleton).
+   * No lo usa el CRUD (`get`/`list`) — esos leen siempre fresco.
+   */
+  private readonly paramsCache = new Map<PolicyKey, { params: PolicyParams; expiresAt: number }>();
 
   constructor(@Inject(PoliciesRepository) private readonly repo: PoliciesRepository) {}
 
@@ -63,6 +74,78 @@ export class PoliciesService {
     const row = await this.repo.findByKey(key);
     if (!row) throw new NotFoundError('Política no encontrada', { key });
     return this.toView(row);
+  }
+
+  /**
+   * Lee los `params` VIGENTES de una política para ENFORCEMENT INTERNO de identity-service.
+   *
+   * identity ES el dueño del registro PBAC (tabla `Policy`), así que se lee a sí mismo DIRECTO por su
+   * repo — NUNCA por el cliente Kafka de `@veo/policy` (sería circular: el owner suscribiéndose a su
+   * propio `policy.updated`). Fail-safe (Ley 29733, políticas mandatory): si la fila no está seedeada,
+   * el jsonb quedó corrupto, o cualquier error de lectura ⇒ cae al default del catálogo. NUNCA lanza
+   * (a diferencia de `get()`, que es CRUD y sí lanza NotFound): un enforcement no se puede caer porque
+   * falte una fila. Cache corto (`PARAMS_CACHE_TTL_MS`) para el hot-path; se invalida en `update()`.
+   */
+  async readParams(key: PolicyKey): Promise<PolicyParams> {
+    const now = Date.now();
+    const hit = this.paramsCache.get(key);
+    if (hit && hit.expiresAt > now) return hit.params;
+
+    const def = getPolicyDef(key);
+    let params: PolicyParams = def.defaults;
+    try {
+      const row = await this.repo.findByKey(key);
+      if (row) {
+        const parsed = safeValidateParams(key, row.params);
+        if (parsed.success) {
+          params = parsed.data as PolicyParams;
+        } else {
+          this.logger.warn(
+            `params vigentes de '${key}' no validan contra el schema; uso el default del catálogo`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.error(
+        `lectura de enforcement de '${key}' falló; fail-safe al default del catálogo`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      params = def.defaults;
+    }
+
+    this.paramsCache.set(key, { params, expiresAt: now + PARAMS_CACHE_TTL_MS });
+    return params;
+  }
+
+  /**
+   * `graceDays` VIGENTE de `privacy.erasure` (días de gracia del derecho al olvido · Ley 29733).
+   * Lo consume el `DeletionSweeper`. Fail-safe al default del catálogo (30) si el param falta o no es
+   * numérico. `privacy.erasure` es `mandatory` (siempre enabled) — solo el número es configurable.
+   */
+  async getErasureGraceDays(): Promise<number> {
+    return this.readNumberParam('privacy.erasure', 'graceDays');
+  }
+
+  /**
+   * `dniTail` VIGENTE de `pii.mask` (nº de dígitos del DNI visibles al PROPIO dueño). Lo consume el
+   * masking de `common/document.ts` vía su caller. Fail-safe al default del catálogo (4).
+   */
+  async getPiiMaskDniTail(): Promise<number> {
+    return this.readNumberParam('pii.mask', 'dniTail');
+  }
+
+  /**
+   * Lee un param numérico vigente con narrowing + fallback al default del catálogo (centraliza acá el
+   * conocimiento de la forma, ya que este service es el dueño del registro). En la práctica, cuando la
+   * fila existe y valida, el valor ya es un número (schema Zod `z.number().int()`); el guard cubre el
+   * fail-safe (fila ausente/corrupta) y satisface a TS (`params` es `Record<string, unknown>`).
+   */
+  private async readNumberParam(key: PolicyKey, field: string): Promise<number> {
+    const params = await this.readParams(key);
+    const value = params[field];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const fallback = getPolicyDef(key).defaults[field];
+    return typeof fallback === 'number' ? fallback : 0;
   }
 
   /**
@@ -117,6 +200,10 @@ export class PoliciesService {
       await this.repo.enqueueOutbox(tx, this.policyUpdatedEnvelope(saved), key);
       return saved;
     });
+
+    // Invalida el cache de enforcement de ESTA key: la próxima `readParams` relee el estado recién escrito
+    // (el cache es para el hot-path, no para servir params stale tras un cambio del superadmin).
+    this.paramsCache.delete(key);
 
     this.logger.log(
       `política '${key}' actualizada → v${row.version} (enabled=${row.enabled}) por ${actorId}; ` +

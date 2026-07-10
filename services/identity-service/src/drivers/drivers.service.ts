@@ -21,6 +21,7 @@ import {
   uuidv7,
 } from '@veo/utils';
 import { DriversRepository, type DriverTx } from './drivers.repository';
+import { PoliciesService } from '../policies/policies.service';
 import { seal } from '../common/secret-box';
 import { maskDniForOwner } from '../common/document';
 import { REDIS } from '../infra/redis';
@@ -241,6 +242,10 @@ export class DriversService {
      */
     private readonly sessions: RedisRefreshTokenStore,
     config: ConfigService<Env, true>,
+    // PBAC (ADR-024, Ola B): el masking del DNI del propio conductor lee `pii.mask` (params.dniTail).
+    // identity ES el dueño del registro → lee su PROPIO PoliciesService (no el cliente Kafka @veo/policy,
+    // que sería circular). PoliciesService cachea el param corto → no hay una query por cada enrolamiento.
+    private readonly policies: PoliciesService,
   ) {
     this.minScore = config.getOrThrow<number>('BIOMETRIC_MIN_SCORE');
     this.dniEncKey = config.getOrThrow<string>('DRIVER_DNI_ENC_KEY');
@@ -2102,11 +2107,13 @@ export class DriversService {
       }
       throw e;
     }
-    // La vista vuelve al PROPIO conductor (que ya tipeó el DNI): se devuelve ENMASCARADO (últimos 4 dígitos),
-    // nunca el crudo ni el ciphertext. Se arma desde el input plano (no se re-descifra de la fila escrita).
+    // La vista vuelve al PROPIO conductor (que ya tipeó el DNI): se devuelve ENMASCARADO (últimos `dniTail`
+    // dígitos de la política PBAC `pii.mask`), nunca el crudo ni el ciphertext. Se arma desde el input plano
+    // (no se re-descifra de la fila escrita). El dniTail vigente sale del registro que identity ya posee.
+    const dniTail = await this.policies.getPiiMaskDniTail();
     return {
       legalName: input.legalName,
-      dni: maskDniForOwner(input.dni),
+      dni: maskDniForOwner(input.dni, dniTail),
       birthDate: input.birthDate,
     };
   }

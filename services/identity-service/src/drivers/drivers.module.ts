@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BiometricModule } from '../ports/biometric/biometric.module';
+import { PoliciesModule } from '../policies/policies.module';
 import { DriversService } from './drivers.service';
 import { DriversRepository } from './drivers.repository';
 import { DriversController } from './drivers.controller';
@@ -8,7 +9,8 @@ import { TripLifecycleConsumer } from './trip-lifecycle.consumer';
 import { HoldExpirySweeper } from './hold-expiry.sweeper';
 
 @Module({
-  imports: [BiometricModule],
+  // PoliciesModule exporta PoliciesService → el masking del DNI del conductor lee `pii.mask` (params.dniTail).
+  imports: [BiometricModule, PoliciesModule],
   providers: [
     DriversService,
     DriversRepository,

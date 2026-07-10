@@ -219,3 +219,75 @@ describe('PoliciesService.get / list', () => {
     ]);
   });
 });
+
+describe('PoliciesService · lectura de enforcement interno (identity se lee a sí mismo · ADR-024)', () => {
+  it('getErasureGraceDays: lee el graceDays VIGENTE de la fila de privacy.erasure', async () => {
+    const current = policyRow({
+      key: 'privacy.erasure',
+      family: 'data',
+      mandatory: true,
+      params: { graceDays: 7 },
+    });
+    const { repo } = makeRepo(current);
+    const svc = new PoliciesService(repo as never);
+    await expect(svc.getErasureGraceDays()).resolves.toBe(7);
+  });
+
+  it('getPiiMaskDniTail: lee el dniTail VIGENTE de la fila de pii.mask', async () => {
+    const current = policyRow({
+      key: 'pii.mask',
+      family: 'data',
+      mandatory: true,
+      params: { dniTail: 6, revealRoles: ['COMPLIANCE'] },
+    });
+    const { repo } = makeRepo(current);
+    const svc = new PoliciesService(repo as never);
+    await expect(svc.getPiiMaskDniTail()).resolves.toBe(6);
+  });
+
+  it('fail-safe: fila NO seedeada ⇒ default del catálogo (erasure 30 · mask 4)', async () => {
+    const { repo } = makeRepo(null);
+    const svc = new PoliciesService(repo as never);
+    await expect(svc.getErasureGraceDays()).resolves.toBe(30);
+    await expect(svc.getPiiMaskDniTail()).resolves.toBe(4);
+  });
+
+  it('fail-safe: params vigentes que NO validan ⇒ default del catálogo (nunca lanza)', async () => {
+    const current = policyRow({
+      key: 'privacy.erasure',
+      family: 'data',
+      mandatory: true,
+      params: { graceDays: -3 }, // viola min(0) del schema
+    });
+    const { repo } = makeRepo(current);
+    const svc = new PoliciesService(repo as never);
+    await expect(svc.getErasureGraceDays()).resolves.toBe(30);
+  });
+
+  it('fail-safe: si el repo LANZA, cae al default del catálogo (un enforcement no se cae)', async () => {
+    const { repo } = makeRepo(null);
+    repo.findByKey.mockRejectedValueOnce(new Error('DB down'));
+    const svc = new PoliciesService(repo as never);
+    await expect(svc.getErasureGraceDays()).resolves.toBe(30);
+  });
+
+  it('cachea el param vigente (dos lecturas ⇒ una sola query) y se invalida al update()', async () => {
+    const current = policyRow({
+      key: 'privacy.erasure',
+      family: 'data',
+      mandatory: true,
+      params: { graceDays: 20 },
+    });
+    const { repo } = makeRepo(current);
+    const svc = new PoliciesService(repo as never);
+
+    await svc.getErasureGraceDays();
+    await svc.getErasureGraceDays();
+    expect(repo.findByKey).toHaveBeenCalledTimes(1); // 2ª lectura sirve del cache
+
+    // Un update de la MISMA key invalida su entrada de cache → la próxima lectura re-consulta.
+    await svc.update('privacy.erasure', { params: { graceDays: 10 } }, 'admin-1');
+    await svc.getErasureGraceDays();
+    expect(repo.findByKey).toHaveBeenCalledTimes(2);
+  });
+});

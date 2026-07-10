@@ -72,8 +72,10 @@ export const envSchema = z
     // (`${ADMIN_WEB_URL}/accept-invite?token=...`). Requerida: fail-fast si falta.
     ADMIN_WEB_URL: z.string().url(),
 
-    // Días de gracia antes del tombstone por derecho al olvido (BR-S06)
-    DELETION_GRACE_DAYS: z.coerce.number().default(30),
+    // Gracia del derecho al olvido (BR-S06): YA NO es un ENV. Se parametrizó en la política PBAC
+    // `privacy.erasure` (params.graceDays · ADR-024, Ola B). La leen `DeletionSweeper` (cutoff del tombstone)
+    // y `UsersService.requestDeletion` (graceUntil notificado) desde su PROPIO PoliciesService — fuente única.
+    // El default (30) vive en el catálogo de @veo/policy. Ex `DELETION_GRACE_DAYS` removido (dead-config).
 
     // ── Auto-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad) ──
     /// COOLDOWN (horas) del hold TEMPORAL EXCESSIVE_CANCELLATIONS: al suspender, `expiresAt = now + esto`. El

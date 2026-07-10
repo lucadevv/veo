@@ -9,11 +9,12 @@
  *
  * LiveKit y el cálculo de retención van detrás de abstracciones (puerto + función pura).
  */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { uuidv7 } from '@veo/utils';
+import { POLICY_READER, type PolicyReader } from '@veo/policy';
 import { MEDIA_REPO, type MediaRepository, type OpenSegment } from './media.repository';
 import { LIVEKIT_PORT, type LiveKitPort } from '../ports/livekit/livekit.port';
 import { STORAGE_PORT, type StoragePort } from '../ports/storage/storage.port';
@@ -43,7 +44,8 @@ export class RecordingService {
   private readonly tokenTtl: number;
   /** Nombre de la clave maestra MinIO SSE-S3 bajo la que el video se cifra at-rest (metadato de auditoría). */
   private readonly sseKeyName: string;
-  private readonly defaultDays: number;
+  /** Default de retención de ENV (RETENTION_DEFAULT_DAYS): es el FALLBACK fail-safe del registro PBAC. */
+  private readonly defaultDaysFallback: number;
   private readonly incidentDays: number;
   private readonly livekitUrl: string;
   private readonly renderedPrefix: string;
@@ -53,13 +55,37 @@ export class RecordingService {
     @Inject(LIVEKIT_PORT) private readonly livekit: LiveKitPort,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
     config: ConfigService<Env, true>,
+    // Registro PBAC (ADR-024): la ventana de retención por defecto la gobierna `media.retention.days`. OPCIONAL
+    // (el guard usa el mismo patrón): sin PolicyModule cableado (tests / boot degradado) cae al default de ENV,
+    // que ES el comportamiento de hoy. En el servicio real siempre está presente (PolicyModule es global).
+    @Optional() @Inject(POLICY_READER) private readonly policy?: PolicyReader,
   ) {
     this.tokenTtl = config.getOrThrow<number>('LIVEKIT_TOKEN_TTL_SECONDS');
     this.sseKeyName = config.getOrThrow<string>('VIDEO_SSE_KEY_NAME');
-    this.defaultDays = config.getOrThrow<number>('RETENTION_DEFAULT_DAYS');
+    this.defaultDaysFallback = config.getOrThrow<number>('RETENTION_DEFAULT_DAYS');
     this.incidentDays = config.getOrThrow<number>('RETENTION_INCIDENT_DAYS');
     this.livekitUrl = config.getOrThrow<string>('LIVEKIT_URL');
     this.renderedPrefix = config.getOrThrow<string>('WATERMARK_RENDERED_PREFIX');
+  }
+
+  /**
+   * Resuelve los días de retención por defecto de un segmento SIN incidente/pánico (BR-S03) desde el registro
+   * PBAC (`media.retention.days`, ADR-024 Fase 1). Cadena fail-safe (nunca acorta la ventana por un fallo):
+   *   1. Sin reader cableado → default de ENV (comportamiento de hoy).
+   *   2. Política `enabled:false` → default de ENV. Apagar la política NO significa "sin retención" ni una
+   *      ventana arbitraria: la retención SIGUE con el default seguro; solo se ACORTA con la política ENCENDIDA
+   *      y su valor explícito. Así un flag apagado jamás borra video antes de tiempo (Ley 29733).
+   *   3. Encendida → el valor del registro; si el param falta en cache (cache frío / identity caído al boot),
+   *      `number()` ya devuelve el DEFAULT del catálogo (30) y, en última instancia, este fallback de ENV.
+   *
+   * Nota: la retención se COMPUTA y PERSISTE al crear/archivar el segmento; un cambio de política aplica a los
+   * segmentos NUEVOS, no reescribe `retentionUntil` de los ya guardados (nunca acorta una ventana ya fijada).
+   */
+  private async resolveDefaultRetentionDays(): Promise<number> {
+    if (!this.policy) return this.defaultDaysFallback;
+    const enabled = await this.policy.getEnabled('media.retention');
+    if (!enabled) return this.defaultDaysFallback;
+    return this.policy.number('media.retention', 'days', this.defaultDaysFallback);
   }
 
   /** Emite un token LiveKit de cámara para un participante del viaje (BR-S01). */
@@ -117,11 +143,12 @@ export class RecordingService {
     const s3Key = s3KeyForSegment(tripId, segmentId);
     const { egressId } = await this.livekit.startRecording({ roomName, s3Key });
 
+    const defaultDays = await this.resolveDefaultRetentionDays();
     const retentionUntil = computeRetentionUntil({
       startedAt,
       hasIncident: false,
       hasPanic: opts.panic ?? false,
-      defaultDays: this.defaultDays,
+      defaultDays,
       incidentDays: this.incidentDays,
     });
 
@@ -166,17 +193,18 @@ export class RecordingService {
       bytes = result.bytes;
     }
 
+    const defaultDays = await this.resolveDefaultRetentionDays();
     const retentionUntil = computeRetentionUntil({
       startedAt: open.startedAt,
       hasIncident: open.hasIncident,
       hasPanic: open.hasPanic,
-      defaultDays: this.defaultDays,
+      defaultDays,
       incidentDays: this.incidentDays,
     });
     const retentionDays = retentionDaysFor(
       open.hasPanic,
       open.hasIncident,
-      this.defaultDays,
+      defaultDays,
       this.incidentDays,
     );
 

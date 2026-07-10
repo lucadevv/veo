@@ -1,16 +1,18 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule, MetricsModule } from '@veo/observability';
 import {
   EXPECTED_SUBJECT_TYPE,
+  InternalAudience,
   JwtAuthGuard,
   RolesGuard,
   SessionRevocationGuard,
   StepUpMfaGuard,
   type SubjectType,
 } from '@veo/auth';
-import { validateEnv } from './config/env.schema';
+import { PolicyModule } from '@veo/policy/nest';
+import { validateEnv, type Env } from './config/env.schema';
 import { InfraModule } from './infra/infra.module';
 import { AuthCoreModule } from './auth/auth-core.module';
 import { HealthModule } from './common/health.module';
@@ -35,6 +37,27 @@ import { GobiernoModule } from './gobierno/gobierno.module';
     LoggerModule.forRoot('admin-bff'),
     MetricsModule,
     InfraModule,
+    // PBAC (ADR-024 Fase 1 · Ola B): cliente runtime de políticas. Provee `POLICY_READER_PORT` (que el
+    // StepUpMfaGuard global lee, @Optional) con la ventana `auth.stepup.maxAgeSec` VIGENTE — un cambio del
+    // superadmin surte efecto sin redeploy. Frescura por Kafka (`policy.updated`): el admin-bff YA es
+    // consumer Kafka (KafkaConsumerService del read-model CQRS + realtime), así que esto NO monta infra
+    // nueva — reusa los MISMOS brokers. Carga inicial fail-safe vía REST interno firmado (admin-rail) a
+    // identity `/internal/policies`, reusando IDENTITY_URL + el secreto HMAC del InfraModule. groupId propio
+    // (`admin-bff-policy`) para aislar sus offsets/rebalances del consumer de dominio. Si Kafka/identity no
+    // responden al boot, el reader degrada al DEFAULT endurecido (el guard sigue con 300s · fail-safe).
+    PolicyModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) => ({
+        serviceName: 'admin-bff',
+        kafkaBrokers: config
+          .get('KAFKA_BROKERS', { infer: true })
+          .split(',')
+          .map((b) => b.trim()),
+        identityBaseUrl: String(config.get('IDENTITY_URL', { infer: true })),
+        internalSecret: config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true }),
+        audience: InternalAudience.ADMIN_RAIL,
+      }),
+    }),
     AuthCoreModule,
     AuditModule,
     RealtimeModule,

@@ -6,13 +6,21 @@
  * la política del olvido, el acceso Prisma vive en UsersRepository (§10) — se mockea el repo.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ConfigService } from '@nestjs/config';
 import type { EventEnvelope } from '@veo/events';
 import { DeletionSweeper } from './deletion.sweeper';
 import type { UsersRepository, UsersTx } from './users.repository';
-import type { Env } from '../config/env.schema';
+import type { PoliciesService } from '../policies/policies.service';
 
-const config = new ConfigService<Env, true>({ DELETION_GRACE_DAYS: 30 });
+/**
+ * Doble del PoliciesService (PBAC, ADR-024): la gracia de borrado sale de la política `privacy.erasure`
+ * (params.graceDays). Default 30 (el del catálogo); los tests que verifican el parametrizado lo overridean.
+ */
+const policies = { getErasureGraceDays: vi.fn(async () => 30) } as unknown as PoliciesService;
+
+beforeEach(() => {
+  (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockClear();
+  (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockResolvedValue(30);
+});
 
 /** Doble del RedisRefreshTokenStore: solo se ejercita `revokeAllForUser` (revoke en borrado de cuenta). */
 const sessions = { revokeAllForUser: vi.fn(async () => 1) };
@@ -56,7 +64,7 @@ function makeRepo(due: { id: string; driver: { id: string } | null }[]): {
 describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)', () => {
   it('anula la PII de contacto Y la biometría del User (faceEmbedding → [])', async () => {
     const { repo, calls } = makeRepo([{ id: 'u1', driver: null }]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     const n = await sweeper.sweep();
 
     expect(n).toBe(1);
@@ -77,7 +85,7 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
 
   it('purga el faceEmbedding del Driver cuando el usuario es conductor', async () => {
     const { repo, calls } = makeRepo([{ id: 'u1', driver: { id: 'd1' } }]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     await sweeper.sweep();
 
     expect(calls.updateDriverTx).toHaveBeenCalledTimes(1);
@@ -96,14 +104,14 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
 
   it('no toca driver si el usuario es solo pasajero', async () => {
     const { repo, calls } = makeRepo([{ id: 'u1', driver: null }]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     await sweeper.sweep();
     expect(calls.updateDriverTx).not.toHaveBeenCalled();
   });
 
   it('anonimiza los intentos de BiometricCheck del usuario (score/geo/captureRef)', async () => {
     const { repo, calls } = makeRepo([{ id: 'u1', driver: null }]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     await sweeper.sweep();
 
     expect(calls.anonymizeBiometricChecksTx).toHaveBeenCalledTimes(1);
@@ -119,7 +127,7 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
 
   it('encola user.deleted en el outbox (misma tx) con el payload de cascada', async () => {
     const { repo, calls } = makeRepo([{ id: 'u1', driver: { id: 'd1' } }]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     await sweeper.sweep();
 
     expect(calls.enqueueOutbox).toHaveBeenCalledTimes(1);
@@ -139,7 +147,7 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
 
   it('omite driverId en el payload cuando no hay conductor', async () => {
     const { repo, calls } = makeRepo([{ id: 'u1', driver: null }]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     await sweeper.sweep();
     const [, envelope] = calls.enqueueOutbox.mock.calls[0] as [
       UsersTx,
@@ -151,7 +159,7 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
 
   it('es idempotente: sin cuentas vencidas no escribe nada', async () => {
     const { repo, calls } = makeRepo([]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     const n = await sweeper.sweep();
     expect(n).toBe(0);
     expect(calls.updateUserTx).not.toHaveBeenCalled();
@@ -164,7 +172,7 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
       { id: 'u1', driver: null },
       { id: 'u2', driver: { id: 'd2' } },
     ]);
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
     await sweeper.sweep();
 
     expect(sessions.revokeAllForUser).toHaveBeenCalledTimes(2);
@@ -175,7 +183,7 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
   it('fail-OPEN: si el revoke de sesiones falla, el tombstone NO se revierte (PII ya anonimizada)', async () => {
     const { repo, calls } = makeRepo([{ id: 'u1', driver: null }]);
     sessions.revokeAllForUser.mockRejectedValueOnce(new Error('Redis down'));
-    const sweeper = new DeletionSweeper(repo, config, sessions as never);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
 
     const n = await sweeper.sweep();
 
@@ -183,5 +191,39 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
     expect(n).toBe(1);
     expect(calls.updateUserTx).toHaveBeenCalledTimes(1);
     expect(calls.enqueueOutbox).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DeletionSweeper.sweep · gracia parametrizada por la política privacy.erasure (PBAC · ADR-024)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  it('deriva el cutoff del graceDays VIGENTE de la política (no de una ENV), por corrida', async () => {
+    const { repo } = makeRepo([]);
+    (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockResolvedValue(7);
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
+    const now = new Date('2026-07-10T03:00:00.000Z');
+
+    await sweeper.sweep(now);
+
+    // El sweeper leyó la gracia de la política (no de config) y la aplicó al cutoff = now - graceDays.
+    expect(policies.getErasureGraceDays).toHaveBeenCalledTimes(1);
+    const findMock = repo.findUsersDueForDeletion as ReturnType<typeof vi.fn>;
+    const [cutoff] = findMock.mock.calls[0] as [Date];
+    expect(cutoff.getTime()).toBe(now.getTime() - 7 * DAY_MS);
+  });
+
+  it('recoge un cambio de graceDays entre corridas (relee por barrido, sin reiniciar)', async () => {
+    const { repo } = makeRepo([]);
+    const findMock = repo.findUsersDueForDeletion as ReturnType<typeof vi.fn>;
+    const sweeper = new DeletionSweeper(repo, policies, sessions as never);
+    const now = new Date('2026-07-10T03:00:00.000Z');
+
+    (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockResolvedValue(30);
+    await sweeper.sweep(now);
+    (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockResolvedValue(15);
+    await sweeper.sweep(now);
+
+    expect((findMock.mock.calls[0] as [Date])[0].getTime()).toBe(now.getTime() - 30 * DAY_MS);
+    expect((findMock.mock.calls[1] as [Date])[0].getTime()).toBe(now.getTime() - 15 * DAY_MS);
   });
 });

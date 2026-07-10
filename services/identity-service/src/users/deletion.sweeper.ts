@@ -7,30 +7,30 @@
  * Idempotente: las cuentas ya tombstoneadas (deletedAt != null) quedan fuera del barrido.
  */
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { deletedPlaceholder } from '@veo/database';
 import { createEnvelope } from '@veo/events';
 import { RedisRefreshTokenStore } from '@veo/auth';
 import { UsersRepository } from './users.repository';
-import type { Env } from '../config/env.schema';
+import { PoliciesService } from '../policies/policies.service';
 
 @Injectable()
 export class DeletionSweeper {
   private readonly logger = new Logger(DeletionSweeper.name);
-  private readonly graceDays: number;
 
   constructor(
     // §10: el acceso Prisma (lectura de vencidas + la tx del tombstone) vive en UsersRepository. El sweeper
     // ORQUESTA la política del derecho al olvido (qué PII se anula) sin dereferenciar Prisma.
     private readonly repo: UsersRepository,
-    config: ConfigService<Env, true>,
+    // PBAC (ADR-024, Ola B): la gracia de borrado sale de la política `privacy.erasure` (params.graceDays).
+    // identity ES el dueño del registro → lee su PROPIO PoliciesService (no el cliente Kafka @veo/policy,
+    // que sería circular). El sweeper es cron diario: leer la gracia una vez POR CORRIDA es correcto (recoge
+    // el cambio del superadmin sin reiniciar) y barato — no hay hot-path acá.
+    private readonly policies: PoliciesService,
     // Singleton global (CoreModule): la misma instancia que usa auth.service. Se usa para revocar TODAS
     // las sesiones de la cuenta borrada (revokeAllForUser) al aplicar el tombstone.
     private readonly sessions: RedisRefreshTokenStore,
-  ) {
-    this.graceDays = config.getOrThrow<number>('DELETION_GRACE_DAYS');
-  }
+  ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async run(): Promise<void> {
@@ -40,7 +40,9 @@ export class DeletionSweeper {
 
   /** Devuelve cuántas cuentas se anonimizaron. Público para testeo/operación manual. */
   async sweep(now = new Date()): Promise<number> {
-    const cutoff = new Date(now.getTime() - this.graceDays * 24 * 60 * 60 * 1000);
+    // Gracia VIGENTE por corrida (fail-safe al default del catálogo, 30, si la política falla).
+    const graceDays = await this.policies.getErasureGraceDays();
+    const cutoff = new Date(now.getTime() - graceDays * 24 * 60 * 60 * 1000);
     const due = await this.repo.findUsersDueForDeletion(cutoff);
 
     for (const { id, driver } of due) {

@@ -4,14 +4,13 @@
  * posterior aplica el tombstone vencida la gracia (data con obligación legal queda exenta).
  */
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { ConflictError, NotFoundError } from '@veo/utils';
 import { UsersRepository } from './users.repository';
+import { PoliciesService } from '../policies/policies.service';
 import { type DocumentType } from '../generated/prisma';
 import { maskDocument } from '../common/document';
 import type { PaymentMethod } from '@veo/shared-types';
-import type { Env } from '../config/env.schema';
 
 export interface ProfileView {
   id: string;
@@ -33,14 +32,15 @@ export interface ProfileView {
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
-  private readonly graceDays: number;
 
   constructor(
     private readonly repo: UsersRepository,
-    config: ConfigService<Env, true>,
-  ) {
-    this.graceDays = config.getOrThrow<number>('DELETION_GRACE_DAYS');
-  }
+    // PBAC (ADR-024, Ola B): la gracia de borrado sale de la política `privacy.erasure` (params.graceDays),
+    // la MISMA fuente que consume el DeletionSweeper. Así el `graceUntil` que se le notifica al usuario y el
+    // cutoff con que el sweeper ejecuta el tombstone usan el valor vigente ÚNICO (no un ENV que puede diferir).
+    // identity ES el dueño del registro → lee su PROPIO PoliciesService (no el cliente Kafka @veo/policy).
+    private readonly policies: PoliciesService,
+  ) {}
 
   async getProfile(userId: string): Promise<ProfileView> {
     const user = await this.repo.findUserById(userId);
@@ -91,7 +91,9 @@ export class UsersService {
   /** Solicita el borrado: inicia la gracia y emite user.deletion_requested. */
   async requestDeletion(userId: string): Promise<{ graceUntil: string }> {
     const now = new Date();
-    const graceUntil = new Date(now.getTime() + this.graceDays * 24 * 60 * 60 * 1000);
+    // Gracia VIGENTE de la política (fail-safe al default del catálogo, 30). Misma fuente que el sweeper.
+    const graceDays = await this.policies.getErasureGraceDays();
+    const graceUntil = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000);
 
     await this.repo.runInTransaction(async (tx) => {
       const user = await this.repo.findUserByIdTx(tx, userId);

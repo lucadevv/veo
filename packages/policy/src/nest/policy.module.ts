@@ -94,6 +94,11 @@ export class PolicyModule {
   /** Config estática (valores ya resueltos). */
   static forRoot(config: PolicyRuntimeConfig): DynamicModule {
     return {
+      // GLOBAL: el reader cacheado es un SINGLETON del servicio (una carga inicial, un consumer Kafka) y lo
+      // consumen tanto los guards de bajo nivel (StepUpMfaGuard, en módulos globales) como los servicios/
+      // sweepers de cualquier módulo. Global evita re-importar el módulo en cada feature (lo que duplicaría el
+      // cache y el consumer). Los tokens que expone son de SOLO LECTURA → sin riesgo por la visibilidad global.
+      global: true,
       module: PolicyModule,
       providers: [{ provide: POLICY_RUNTIME_CONFIG, useValue: config }, ...runtimeProviders()],
       exports: RUNTIME_EXPORTS,
@@ -112,6 +117,8 @@ export class PolicyModule {
       useFactory: opts.useFactory as FactoryProvider['useFactory'],
     };
     return {
+      // GLOBAL — mismo motivo que forRoot: singleton (cache + consumer) compartido por guards y servicios.
+      global: true,
       module: PolicyModule,
       imports: opts.imports ?? [],
       providers: [configProvider, ...runtimeProviders()],

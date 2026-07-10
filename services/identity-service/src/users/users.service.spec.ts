@@ -6,12 +6,15 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { UsersService } from './users.service';
 import { UsersRepository } from './users.repository';
-import type { Env } from '../config/env.schema';
+import type { PoliciesService } from '../policies/policies.service';
 
-const config = new ConfigService<Env, true>({ DELETION_GRACE_DAYS: 30 });
+/**
+ * Doble del PoliciesService (PBAC, ADR-024): la gracia de borrado sale de `privacy.erasure`.graceDays.
+ * Default 30 (el del catálogo); el test de requestDeletion lo overridea para probar el parametrizado.
+ */
+const policies = { getErasureGraceDays: vi.fn(async () => 30) } as unknown as PoliciesService;
 
 interface UserRow {
   id: string;
@@ -59,7 +62,7 @@ function makePrisma(current: UserRow) {
 describe('UsersService.getProfile · devuelve el documento', () => {
   it('expone documentType + document completos (es SU dato, owner-only por JWT)', async () => {
     const { prisma } = makePrisma(baseUser({ documentType: 'DN', document: '12345678' }));
-    const svc = new UsersService(new UsersRepository(prisma as never), config);
+    const svc = new UsersService(new UsersRepository(prisma as never), policies);
     const view = await svc.getProfile('u1');
     expect(view.documentType).toBe('DN');
     expect(view.document).toBe('12345678');
@@ -67,7 +70,7 @@ describe('UsersService.getProfile · devuelve el documento', () => {
 
   it('documentType/document null si el usuario aún no lo cargó', async () => {
     const { prisma } = makePrisma(baseUser());
-    const svc = new UsersService(new UsersRepository(prisma as never), config);
+    const svc = new UsersService(new UsersRepository(prisma as never), policies);
     const view = await svc.getProfile('u1');
     expect(view.documentType).toBeNull();
     expect(view.document).toBeNull();
@@ -82,7 +85,7 @@ describe('UsersService.updateProfile · persiste el documento', () => {
 
   it('persiste documentType + document en el perfil', async () => {
     const { prisma, update } = makePrisma(baseUser());
-    const svc = new UsersService(new UsersRepository(prisma as never), config);
+    const svc = new UsersService(new UsersRepository(prisma as never), policies);
     const view = await svc.updateProfile('u1', { documentType: 'DN', document: '12345678' });
 
     const data = update.mock.calls[0]![0].data;
@@ -93,7 +96,7 @@ describe('UsersService.updateProfile · persiste el documento', () => {
 
   it('AUDIT log del cambio sale MASCARADO (nunca el documento completo)', async () => {
     const { prisma } = makePrisma(baseUser());
-    const svc = new UsersService(new UsersRepository(prisma as never), config);
+    const svc = new UsersService(new UsersRepository(prisma as never), policies);
     await svc.updateProfile('u1', { documentType: 'DN', document: '12345678' });
 
     expect(auditSpy).toHaveBeenCalledTimes(1);
@@ -105,17 +108,58 @@ describe('UsersService.updateProfile · persiste el documento', () => {
 
   it('NO audita cuando el documento no cambia (solo se actualiza el nombre)', async () => {
     const { prisma } = makePrisma(baseUser({ documentType: 'DN', document: '12345678' }));
-    const svc = new UsersService(new UsersRepository(prisma as never), config);
+    const svc = new UsersService(new UsersRepository(prisma as never), policies);
     await svc.updateProfile('u1', { name: 'Otro Nombre' });
     expect(auditSpy).not.toHaveBeenCalled();
   });
 
   it('preserva el documento existente si el PATCH no lo toca', async () => {
     const { prisma, update } = makePrisma(baseUser({ documentType: 'CE', document: '123456789' }));
-    const svc = new UsersService(new UsersRepository(prisma as never), config);
+    const svc = new UsersService(new UsersRepository(prisma as never), policies);
     await svc.updateProfile('u1', { name: 'Nuevo' });
     const data = update.mock.calls[0]![0].data;
     expect(data.documentType).toBe('CE');
     expect(data.document).toBe('123456789');
+  });
+});
+
+describe('UsersService.requestDeletion · gracia parametrizada por privacy.erasure (PBAC · ADR-024)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  beforeEach(() => {
+    (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockClear();
+    (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockResolvedValue(30);
+  });
+
+  /** Repo double centrado en el camino tx de requestDeletion (sin Prisma real). */
+  function makeRepo() {
+    const captured: { envelope?: { payload: { graceUntil: string } } } = {};
+    const repo = {
+      runInTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work({})),
+      findUserByIdTx: vi.fn(async () => baseUser()),
+      updateUserTx: vi.fn(async () => undefined),
+      enqueueOutbox: vi.fn(async (_tx: unknown, envelope: { payload: { graceUntil: string } }) => {
+        captured.envelope = envelope;
+      }),
+    } as unknown as UsersRepository;
+    return { repo, captured };
+  }
+
+  it('deriva graceUntil = now + graceDays VIGENTE de la política (no de un ENV)', async () => {
+    const { repo, captured } = makeRepo();
+    (policies.getErasureGraceDays as ReturnType<typeof vi.fn>).mockResolvedValue(45);
+    const svc = new UsersService(repo, policies);
+
+    const before = Date.now();
+    const { graceUntil } = await svc.requestDeletion('u1');
+    const after = Date.now();
+
+    expect(policies.getErasureGraceDays).toHaveBeenCalledTimes(1);
+    const ms = new Date(graceUntil).getTime();
+    // graceUntil ∈ [before + 45d, after + 45d] (tolerante al reloj del test).
+    expect(ms).toBeGreaterThanOrEqual(before + 45 * DAY_MS);
+    expect(ms).toBeLessThanOrEqual(after + 45 * DAY_MS);
+    // El MISMO graceUntil viaja en el evento user.deletion_requested (lo que se notifica al usuario).
+    expect(captured.envelope?.payload.graceUntil).toBe(graceUntil);
   });
 });
