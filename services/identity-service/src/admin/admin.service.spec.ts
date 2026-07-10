@@ -15,6 +15,7 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { adminRoleChanged } from '@veo/events';
 import { AdminService } from './admin.service';
+import { AdminRepository } from './admin.repository';
 import { InvalidStatusTransition } from '../domain/state-machine';
 import { hashInviteToken } from '../domain/invite-token';
 import { seal } from '../common/secret-box';
@@ -79,7 +80,7 @@ function makeService(
   clock: Clock = new SystemClock(),
 ): AdminService {
   return new AdminService(
-    prisma as never,
+    new AdminRepository(prisma as never),
     jwt as never,
     sessions as never,
     email,

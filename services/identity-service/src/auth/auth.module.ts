@@ -7,8 +7,11 @@ import { OtpService } from './otp.service';
 import { EmailCodeService } from './email-code.service';
 import { TokenIssuerService } from './token-issuer.service';
 import { OAuthLoginService } from './oauth-login.service';
+import { OAuthLoginRepository } from './oauth-login.repository';
 import { AuthService } from './auth.service';
+import { AuthRepository } from './auth.repository';
 import { EmailAuthService } from './email-auth.service';
+import { EmailAuthRepository } from './email-auth.repository';
 import { GoogleAuthService } from './google-auth.service';
 import { AppleAuthService } from './apple-auth.service';
 import { AuthController } from './auth.controller';
@@ -21,8 +24,11 @@ import { AuthController } from './auth.controller';
     EmailCodeService,
     TokenIssuerService,
     OAuthLoginService,
+    OAuthLoginRepository,
     AuthService,
+    AuthRepository,
     EmailAuthService,
+    EmailAuthRepository,
     GoogleAuthService,
     AppleAuthService,
   ],

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConsentsService } from './consents.service';
+import { ConsentsRepository } from './consents.repository';
 
 /**
  * Prisma doble: captura el `create` del consentimiento y prohíbe `update`/`delete` (append-only).
@@ -41,7 +42,7 @@ const input = {
 describe('ConsentsService.record · registro append-only (Ley 29733)', () => {
   it('inserta un nuevo consentimiento (solo create) y devuelve la vista del row', async () => {
     const captured: { create?: unknown } = {};
-    const svc = new ConsentsService(makePrisma(captured) as never);
+    const svc = new ConsentsService(new ConsentsRepository(makePrisma(captured) as never));
 
     const out = await svc.record('user-1', input);
 
@@ -71,7 +72,7 @@ describe('ConsentsService.record · registro append-only (Ley 29733)', () => {
 
   it('usa create (nunca update/delete): cada aceptación es un row inmutable', async () => {
     const prisma = makePrisma();
-    const svc = new ConsentsService(prisma as never);
+    const svc = new ConsentsService(new ConsentsRepository(prisma as never));
 
     await svc.record('user-1', input);
     await svc.record('user-1', { ...input, location: true });
@@ -85,7 +86,7 @@ describe('ConsentsService.record · registro append-only (Ley 29733)', () => {
 
   it('persiste ip null cuando el BFF no pudo determinar la IP', async () => {
     const captured: { create?: unknown } = {};
-    const svc = new ConsentsService(makePrisma(captured) as never);
+    const svc = new ConsentsService(new ConsentsRepository(makePrisma(captured) as never));
 
     await svc.record('user-1', { ...input, ip: null });
 

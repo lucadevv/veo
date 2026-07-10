@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from './users.service';
+import { UsersRepository } from './users.repository';
 import type { Env } from '../config/env.schema';
 
 const config = new ConfigService<Env, true>({ DELETION_GRACE_DAYS: 30 });
@@ -58,7 +59,7 @@ function makePrisma(current: UserRow) {
 describe('UsersService.getProfile · devuelve el documento', () => {
   it('expone documentType + document completos (es SU dato, owner-only por JWT)', async () => {
     const { prisma } = makePrisma(baseUser({ documentType: 'DN', document: '12345678' }));
-    const svc = new UsersService(prisma as never, config);
+    const svc = new UsersService(new UsersRepository(prisma as never), config);
     const view = await svc.getProfile('u1');
     expect(view.documentType).toBe('DN');
     expect(view.document).toBe('12345678');
@@ -66,7 +67,7 @@ describe('UsersService.getProfile · devuelve el documento', () => {
 
   it('documentType/document null si el usuario aún no lo cargó', async () => {
     const { prisma } = makePrisma(baseUser());
-    const svc = new UsersService(prisma as never, config);
+    const svc = new UsersService(new UsersRepository(prisma as never), config);
     const view = await svc.getProfile('u1');
     expect(view.documentType).toBeNull();
     expect(view.document).toBeNull();
@@ -81,7 +82,7 @@ describe('UsersService.updateProfile · persiste el documento', () => {
 
   it('persiste documentType + document en el perfil', async () => {
     const { prisma, update } = makePrisma(baseUser());
-    const svc = new UsersService(prisma as never, config);
+    const svc = new UsersService(new UsersRepository(prisma as never), config);
     const view = await svc.updateProfile('u1', { documentType: 'DN', document: '12345678' });
 
     const data = update.mock.calls[0]![0].data;
@@ -92,7 +93,7 @@ describe('UsersService.updateProfile · persiste el documento', () => {
 
   it('AUDIT log del cambio sale MASCARADO (nunca el documento completo)', async () => {
     const { prisma } = makePrisma(baseUser());
-    const svc = new UsersService(prisma as never, config);
+    const svc = new UsersService(new UsersRepository(prisma as never), config);
     await svc.updateProfile('u1', { documentType: 'DN', document: '12345678' });
 
     expect(auditSpy).toHaveBeenCalledTimes(1);
@@ -104,14 +105,14 @@ describe('UsersService.updateProfile · persiste el documento', () => {
 
   it('NO audita cuando el documento no cambia (solo se actualiza el nombre)', async () => {
     const { prisma } = makePrisma(baseUser({ documentType: 'DN', document: '12345678' }));
-    const svc = new UsersService(prisma as never, config);
+    const svc = new UsersService(new UsersRepository(prisma as never), config);
     await svc.updateProfile('u1', { name: 'Otro Nombre' });
     expect(auditSpy).not.toHaveBeenCalled();
   });
 
   it('preserva el documento existente si el PATCH no lo toca', async () => {
     const { prisma, update } = makePrisma(baseUser({ documentType: 'CE', document: '123456789' }));
-    const svc = new UsersService(prisma as never, config);
+    const svc = new UsersService(new UsersRepository(prisma as never), config);
     await svc.updateProfile('u1', { name: 'Nuevo' });
     const data = update.mock.calls[0]![0].data;
     expect(data.documentType).toBe('CE');

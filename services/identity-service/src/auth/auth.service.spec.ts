@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AuthService } from './auth.service';
+import { AuthRepository } from './auth.repository';
 
 /**
  * Verifica que verifyOtp engancha el AuthMethod{PHONE_OTP} (ADR-012 Lote 1):
@@ -51,8 +52,7 @@ const tokenIssuer = {
 describe('AuthService.verifyOtp · AuthMethod{PHONE_OTP}', () => {
   it('usuario nuevo: crea User + AuthMethod{PHONE_OTP, verified} + outbox', async () => {
     const prisma = makePrisma({});
-    const svc = new AuthService(
-      prisma as never,
+    const svc = new AuthService(new AuthRepository(prisma as never),
       otp as never,
       jwt as never,
       sessions as never,
@@ -75,8 +75,7 @@ describe('AuthService.verifyOtp · AuthMethod{PHONE_OTP}', () => {
     const prisma = makePrisma({
       existing: { id: 'u-1', phone: '+51987654321', type: 'PASSENGER', kycStatus: 'PENDING' },
     });
-    const svc = new AuthService(
-      prisma as never,
+    const svc = new AuthService(new AuthRepository(prisma as never),
       otp as never,
       jwt as never,
       sessions as never,
@@ -104,8 +103,7 @@ describe('AuthService.verifyOtp · AuthMethod{PHONE_OTP}', () => {
 describe('AuthService.logoutAll · cerrar sesión en todos los dispositivos', () => {
   function makeSvc() {
     const prisma = makePrisma({});
-    const svc = new AuthService(
-      prisma as never,
+    const svc = new AuthService(new AuthRepository(prisma as never),
       otp as never,
       jwt as never,
       sessions as never,

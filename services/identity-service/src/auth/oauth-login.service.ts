@@ -22,7 +22,7 @@
 import { Injectable } from '@nestjs/common';
 import { type SubjectType } from '@veo/auth';
 import { UnauthorizedError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { OAuthLoginRepository } from './oauth-login.repository';
 import { TokenIssuerService } from './token-issuer.service';
 import { resolveUserForVerifiedEmail } from './account-linking';
 import { registerUser } from './user-registration';
@@ -46,7 +46,7 @@ export interface OAuthLoginInput {
 @Injectable()
 export class OAuthLoginService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: OAuthLoginRepository,
     private readonly tokenIssuer: TokenIssuerService,
   ) {}
 
@@ -55,12 +55,9 @@ export class OAuthLoginService {
     const { methodType, sub, emailVerified, name } = input;
     const normalizedEmail = input.email ? input.email.trim().toLowerCase() : null;
 
-    const user = await this.prisma.write.$transaction(async (tx) => {
+    const user = await this.repo.runInTransaction(async (tx) => {
       // 1. Re-login: el vínculo OAuth (por `sub`) ya existe → usamos ese User.
-      const existingMethod = await tx.authMethod.findUnique({
-        where: { type_oauthSubject: { type: methodType, oauthSubject: sub } },
-        include: { user: true },
-      });
+      const existingMethod = await this.repo.findOAuthMethodWithUserTx(tx, methodType, sub);
       if (existingMethod) {
         return existingMethod.user;
       }
@@ -70,17 +67,15 @@ export class OAuthLoginService {
       if (normalizedEmail && emailVerified) {
         const linkedUserId = await resolveUserForVerifiedEmail(tx, normalizedEmail);
         if (linkedUserId) {
-          await tx.authMethod.create({
-            data: {
-              userId: linkedUserId,
-              type: methodType,
-              oauthSubject: sub,
-              email: normalizedEmail,
-              emailVerified: true,
-              verified: true,
-            },
+          await this.repo.createOAuthMethodTx(tx, {
+            userId: linkedUserId,
+            type: methodType,
+            oauthSubject: sub,
+            email: normalizedEmail,
+            emailVerified: true,
+            verified: true,
           });
-          const linked = await tx.user.findUnique({ where: { id: linkedUserId } });
+          const linked = await this.repo.findUserByIdTx(tx, linkedUserId);
           if (!linked) throw new UnauthorizedError(input.invalidTokenMessage);
           return linked;
         }

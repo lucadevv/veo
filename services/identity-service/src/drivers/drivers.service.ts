@@ -6,7 +6,6 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { createEnvelope, DRIVER_OFFLINE_REASON } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
 import { RedisRefreshTokenStore } from '@veo/auth';
 import {
   ConcurrencyConflictError,
@@ -21,7 +20,7 @@ import {
   UnprocessableEntityError,
   uuidv7,
 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { DriversRepository, type DriverTx } from './drivers.repository';
 import { seal } from '../common/secret-box';
 import { maskDniForOwner } from '../common/document';
 import { REDIS } from '../infra/redis';
@@ -232,7 +231,7 @@ export class DriversService {
   private readonly cancellationCooldownMs: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: DriversRepository,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(BIOMETRIC_PROVIDER) private readonly biometric: BiometricProvider,
     /**
@@ -274,15 +273,17 @@ export class DriversService {
     // dato fresco. Lo usa updatePersonalInfo para cerrar el TOCTOU con un approve() concurrente (A10).
     updateGuard?: Prisma.DriverWhereInput,
   ): Promise<Driver> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const inserted = await tx.driver.createMany({ data: createData, skipDuplicates: true });
+    return this.repo.runInTransaction(async (tx) => {
+      const inserted = await this.repo.createDriverIfAbsent(tx, createData);
       const created = inserted.count === 1;
       if (!created) {
         if (updateGuard) {
-          const applied = await tx.driver.updateMany({
-            where: { userId, ...updateGuard },
-            data: updateData as Prisma.DriverUpdateManyMutationInput,
-          });
+          const applied = await this.repo.casUpdateDriverByUserId(
+            tx,
+            userId,
+            updateGuard,
+            updateData as Prisma.DriverUpdateManyMutationInput,
+          );
           if (applied.count === 0) {
             throw new InvalidStateError(
               'El estado del conductor cambió durante la operación; no se aplicó el cambio.',
@@ -290,12 +291,12 @@ export class DriversService {
             );
           }
         } else {
-          await tx.driver.update({ where: { userId }, data: updateData });
+          await this.repo.updateDriverByUserId(tx, userId, updateData);
         }
       }
-      const driver = await tx.driver.findUniqueOrThrow({ where: { userId } });
+      const driver = await this.repo.getDriverByUserIdOrThrow(tx, userId);
       if (created) {
-        await enqueueOutbox(
+        await this.repo.enqueueOutbox(
           tx,
           createEnvelope({
             eventType: 'driver.registered',
@@ -325,7 +326,7 @@ export class DriversService {
     userId: string,
     input: { licenseNumber: string; licenseExpiresAt: string },
   ): Promise<{ driverId: string; backgroundCheckStatus: string }> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    const user = await this.repo.findUserById(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     if (user.type !== 'DRIVER') throw new ForbiddenError('El usuario no es conductor');
 
@@ -352,13 +353,8 @@ export class DriversService {
   > {
     // legalName = el nombre que el conductor cargó en el onboarding (lo que ve el operador en la cola;
     // sin esto la tabla solo mostraba UUIDs y no se podía distinguir un conductor de otro).
-    return this.prisma.read.driver.findMany({
-      where: { backgroundCheckStatus: BackgroundCheckStatus.PENDING },
-      select: { id: true, userId: true, licenseNumber: true, legalName: true },
-      orderBy: { createdAt: 'asc' },
-      // #24 — cap bounded (servido por el índice compuesto): la cola no trae filas sin techo. FIFO (más antiguas).
-      take: PENDING_APPROVAL_PAGE_SIZE,
-    });
+    // #24 — cap bounded (servido por el índice compuesto): la cola no trae filas sin techo. FIFO (más antiguas).
+    return this.repo.listPendingApproval(PENDING_APPROVAL_PAGE_SIZE);
   }
 
   /**
@@ -390,10 +386,10 @@ export class DriversService {
    * `dniFaceMatched` (el veredicto) para gatear: solo `dniFaceMatchedAt` (la ejecución).
    */
   async approve(driverId: string): Promise<{ id: string; backgroundCheckStatus: string }> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+    return this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverByIdTx(tx, driverId);
       if (!driver) throw new NotFoundError('Conductor no encontrado');
-      const user = await tx.user.findUnique({ where: { id: driver.userId } });
+      const user = await this.repo.findUserByIdTx(tx, driver.userId);
       if (!user) throw new NotFoundError('Usuario del conductor no encontrado');
       // GATE BIOMÉTRICO (server-truth, fail-closed): sin embedding de referencia enrolado NO hay
       // aprobación. Mismo predicado que el gate de turno (`hasFaceEmbedding`) → fuente única de
@@ -465,17 +461,9 @@ export class DriversService {
       // CAS, si el binding se nulifica bajo nuestros pies la fila ya NO matchea el WHERE → count 0 → NO se aprueba
       // ni se emite driver.verified. Es comparación contra constante (`not: null`), soportada por Prisma — no
       // hace falta comparar dos columnas entre sí. Así el gate de frescura es ATÓMICO con la transición.
-      const claim = await tx.driver.updateMany({
-        where: {
-          id: driverId,
-          backgroundCheckStatus: { in: claimSources },
-          dniFaceMatchedAt: { not: null },
-          // Mismo gate ATÓMICO para la licencia (Lote C): si un resubmit()/enrollFace() concurrente nulifica
-          // el binding del brevete entre el pre-read y este CAS, la fila ya NO matchea → count 0 → no se aprueba.
-          licenseFaceMatchedAt: { not: null },
-        },
-        data: { backgroundCheckStatus: BackgroundCheckStatus.CLEARED },
-      });
+      // El WHERE del CAS (incluidos los gates `dniFaceMatchedAt/licenseFaceMatchedAt != null` HARDCODEADOS) vive
+      // en el repo (casApproveTransition); acá solo aportamos las fuentes legales derivadas de la máquina.
+      const claim = await this.repo.casApproveTransition(tx, driverId, claimSources);
       if (claim.count === 0) {
         // count 0 tiene DOS causas, ambas resueltas como no-op idempotente SIN re-emitir driver.verified:
         // (a) IDEMPOTENTE: otra tx concurrente ya aprobó (la fila ya está CLEARED, fuera del `in` del WHERE) — el
@@ -486,10 +474,7 @@ export class DriversService {
         //     como no-op (en vez de lanzar) es seguro y honesto: la garantía dura ya la dio el WHERE (no se aprobó);
         //     el conductor quedó PENDING/re-enrolado y deberá re-correr el match — el operador reintentará el approve.
         // En ambos casos NO re-emitimos driver.verified (cero double-emit) y devolvemos el estado real de la fila.
-        const current = await tx.driver.findUnique({
-          where: { id: driverId },
-          select: { backgroundCheckStatus: true },
-        });
+        const current = await this.repo.findDriverBackgroundStatusTx(tx, driverId);
         return {
           id: driver.id,
           backgroundCheckStatus: current?.backgroundCheckStatus ?? driver.backgroundCheckStatus,
@@ -497,11 +482,11 @@ export class DriversService {
       }
       // El operador humano CONFIRMA la verificación de identidad: kycStatus→VERIFIED + timestamp en el MISMO
       // acto que el CLEARED (antes el kycVerifiedAt lo ponía la auto-verificación, ya retirada — ahora es humano).
-      await tx.user.update({
-        where: { id: driver.userId },
-        data: { kycStatus: KycStatus.VERIFIED, kycVerifiedAt: new Date() },
+      await this.repo.updateUser(tx, driver.userId, {
+        kycStatus: KycStatus.VERIFIED,
+        kycVerifiedAt: new Date(),
       });
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.verified',
@@ -526,12 +511,12 @@ export class DriversService {
    * `reason` es opcional: "" si el operador no dio motivo (degradación honesta, nunca un motivo falso).
    */
   async reject(driverId: string, reason: string): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       // Lecturas DENTRO de la tx de escritura (espeja approve): sin lag de réplica ni TOCTOU
       // con un approve concurrente — el assert se serializa con el write.
-      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+      const driver = await this.repo.findDriverByIdTx(tx, driverId);
       if (!driver) throw new NotFoundError('Conductor no encontrado');
-      const user = await tx.user.findUnique({ where: { id: driver.userId } });
+      const user = await this.repo.findUserByIdTx(tx, driver.userId);
       if (!user) throw new NotFoundError('Usuario del conductor no encontrado');
       backgroundCheckMachine.assertTransition(
         driver.backgroundCheckStatus,
@@ -547,32 +532,19 @@ export class DriversService {
       const rejectSources = backgroundCheckSources(BackgroundCheckStatus.REJECTED).filter(
         (from) => from !== BackgroundCheckStatus.REJECTED,
       );
-      const claim = await tx.driver.updateMany({
-        where: { id: driverId, backgroundCheckStatus: { in: rejectSources } },
-        data: {
-          backgroundCheckStatus: BackgroundCheckStatus.REJECTED,
-          rejectionReason: reason,
-          rejectedAt,
-        },
-      });
+      const claim = await this.repo.casRejectTransition(tx, driverId, rejectSources, reason, rejectedAt);
       if (claim.count === 0) {
         // Otra decisión concurrente ganó la transición. Releemos para discriminar: si YA está REJECTED es
         // idempotente (no re-emitimos el evento); si no, la carrera lo llevó a otro estado → conflicto transitorio.
-        const current = await tx.driver.findUnique({
-          where: { id: driverId },
-          select: { backgroundCheckStatus: true },
-        });
+        const current = await this.repo.findDriverBackgroundStatusTx(tx, driverId);
         if (current?.backgroundCheckStatus === BackgroundCheckStatus.REJECTED) return;
         throw new ConcurrencyConflictError(
           'Otra decisión concurrente ganó la transición del conductor',
         );
       }
       // Rama GANADORA (count === 1): sincronizamos el KYC del usuario y emitimos el evento UNA sola vez.
-      await tx.user.update({
-        where: { id: driver.userId },
-        data: { kycStatus: KycStatus.REJECTED },
-      });
-      await enqueueOutbox(
+      await this.repo.updateUser(tx, driver.userId, { kycStatus: KycStatus.REJECTED });
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.rejected',
@@ -604,19 +576,12 @@ export class DriversService {
    *
    * @returns el `suspendedAt` resultante (Date si quedó suspendido, null si quedó libre).
    */
-  private async recomputeSuspendedAt(
-    tx: Prisma.TransactionClient,
-    driverId: string,
-  ): Promise<Date | null> {
+  private async recomputeSuspendedAt(tx: DriverTx, driverId: string): Promise<Date | null> {
     // El PRIMER hold (más viejo) fija el momento original de la suspensión. findFirst orderBy asc → 0..1 fila.
-    const oldest = await tx.driverSuspensionHold.findFirst({
-      where: { driverId },
-      orderBy: { createdAt: 'asc' },
-      select: { createdAt: true },
-    });
+    const oldest = await this.repo.findOldestHoldCreatedAt(tx, driverId);
     const suspendedAt = oldest?.createdAt ?? null;
     // Update directo del campo derivado (dentro de la tx del add/remove): idempotente si ya tenía ese valor.
-    await tx.driver.update({ where: { id: driverId }, data: { suspendedAt } });
+    await this.repo.setDriverSuspendedAt(tx, driverId, suspendedAt);
     return suspendedAt;
   }
 
@@ -633,7 +598,7 @@ export class DriversService {
    *   decida si emitir el evento de dominio; un re-suspender idempotente NO re-emite).
    */
   private addHold(
-    tx: Prisma.TransactionClient,
+    tx: DriverTx,
     driverId: string,
     cause: SuspensionCause,
     causeRef: string,
@@ -657,7 +622,7 @@ export class DriversService {
    * levanta al vencer.
    */
   private async addHoldAt(
-    tx: Prisma.TransactionClient,
+    tx: DriverTx,
     driverId: string,
     cause: SuspensionCause,
     causeRef: string,
@@ -666,20 +631,11 @@ export class DriversService {
     expiresAt?: Date,
   ): Promise<{ created: boolean; suspendedAt: Date }> {
     // ¿Existía YA este hold exacto? (natural key). Si sí, el upsert es no-op y NO es una suspensión nueva.
-    const existing = await tx.driverSuspensionHold.findUnique({
-      where: { driverId_cause_causeRef: { driverId, cause, causeRef } },
-      select: { id: true },
-    });
-    await tx.driverSuspensionHold.upsert({
-      where: { driverId_cause_causeRef: { driverId, cause, causeRef } },
-      // create lleva el reason + createdAt + expiresAt frescos; update VACÍO → preserva createdAt + reason +
-      // expiresAt originales (idempotente). IDEMPOTENCIA DEL COOLDOWN (CRÍTICO): el `update: {}` significa que
-      // una RE-ENTREGA de Kafka (mismo cruce) NO extiende `expiresAt` — el cooldown NO se alarga con redeliveries.
-      // Un cruce REAL nuevo SIEMPRE es un `create` fresco (el sweeper ya removió el hold viejo al vencer), así que
-      // ese sí estampa un expiresAt nuevo. NO-extender-en-conflicto es la regla que protege el cooldown.
-      create: { driverId, cause, causeRef, reason, createdAt, expiresAt },
-      update: {},
-    });
+    const existing = await this.repo.findHoldByNaturalKey(tx, driverId, cause, causeRef);
+    // El upsert lleva el `update: {}` HARDCODEADO en el repo (idempotencia del cooldown: una RE-ENTREGA de Kafka
+    // del mismo cruce NO extiende `expiresAt` ni reescribe `createdAt`/`reason`; un cruce REAL nuevo es un create
+    // fresco que sí estampa un expiresAt nuevo). NO-extender-en-conflicto es la regla que protege el cooldown.
+    await this.repo.upsertHold(tx, { driverId, cause, causeRef, reason, createdAt, expiresAt });
     const suspendedAt = await this.recomputeSuspendedAt(tx, driverId);
     // suspendedAt NUNCA es null acá (acabamos de garantizar ≥1 hold) — el cast es seguro por construcción.
     return { created: existing === null, suspendedAt: suspendedAt as Date };
@@ -694,11 +650,11 @@ export class DriversService {
    *   estado DERIVADO tras quitarlos (Date si quedan otros holds → SIGUE suspendido; null → quedó LIBRE).
    */
   private async removeHolds(
-    tx: Prisma.TransactionClient,
+    tx: DriverTx,
     driverId: string,
     where: Prisma.DriverSuspensionHoldWhereInput,
   ): Promise<{ removed: number; suspendedAt: Date | null }> {
-    const deleted = await tx.driverSuspensionHold.deleteMany({ where: { driverId, ...where } });
+    const deleted = await this.repo.deleteHolds(tx, driverId, where);
     const suspendedAt = await this.recomputeSuspendedAt(tx, driverId);
     return { removed: deleted.count, suspendedAt };
   }
@@ -775,14 +731,7 @@ export class DriversService {
     payloadUserId: string | undefined,
     suspendedAt: Date,
   ): Promise<SuspensionResealOutcome> {
-    const userId =
-      payloadUserId ??
-      (
-        await this.prisma.read.driver.findUnique({
-          where: { id: driverId },
-          select: { userId: true },
-        })
-      )?.userId;
+    const userId = payloadUserId ?? (await this.repo.findDriverUserId(driverId))?.userId;
     if (!userId) return 'skipped';
     const atSeconds = Math.floor(suspendedAt.getTime() / 1000);
     const raised = await this.sessions.resealRevokedBefore(userId, atSeconds);
@@ -815,8 +764,8 @@ export class DriversService {
   }
 
   async suspend(driverId: string, reason: string): Promise<void> {
-    const { created, userId } = await this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+    const { created, userId } = await this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverByIdTx(tx, driverId);
       if (!driver) throw new NotFoundError('Conductor no encontrado');
       const { created, suspendedAt } = await this.addHold(
         tx,
@@ -827,7 +776,7 @@ export class DriversService {
       );
       // Idempotente: el hold DISCIPLINARY ya existía → no es una suspensión nueva, no se re-emite el evento.
       if (!created) return { created, userId: driver.userId };
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.suspended',
@@ -871,19 +820,19 @@ export class DriversService {
    *   5. Emite driver.reactivated por OUTBOX (misma tx).
    */
   async reactivate(driverId: string): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+    await this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverByIdTx(tx, driverId);
       if (!driver) throw new NotFoundError('Conductor no encontrado');
       // 2) FAIL-CLOSED por CAUSA: el operador solo revierte el hold DISCIPLINARY que él originó. Distinguimos
       //    "no está suspendido" (409, nada que reactivar) de "suspendido pero NO disciplinariamente" (403:
       //    es doc/ITV, se levanta cuando regulariza / por la vía de compliance). Se lee el hold DISCIPLINARY:
       //    su ausencia es la condición honesta para el error (no inferimos del flag colapsado, ya no existe).
-      const disciplinary = await tx.driverSuspensionHold.findUnique({
-        where: {
-          driverId_cause_causeRef: { driverId, cause: SuspensionCause.DISCIPLINARY, causeRef: '' },
-        },
-        select: { id: true },
-      });
+      const disciplinary = await this.repo.findHoldByNaturalKey(
+        tx,
+        driverId,
+        SuspensionCause.DISCIPLINARY,
+        '',
+      );
       if (!disciplinary) {
         if (driver.suspendedAt === null) {
           throw new ConflictError('El conductor no está suspendido');
@@ -912,7 +861,7 @@ export class DriversService {
       //    status de SUSPENDED de vuelta a ACTIVE; audit deja la traza inmutable de la decisión. (El evento se
       //    emite porque se levantó EL hold disciplinario, aunque el conductor siga suspendido por otra causa:
       //    el hecho de dominio "se revirtió la disciplinaria" ocurrió; admin-bff reconcilia el status real.)
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.reactivated',
@@ -957,8 +906,8 @@ export class DriversService {
    *   6. Emite driver.reactivated por OUTBOX (misma tx).
    */
   async reactivateForCompliance(driverId: string): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+    await this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverByIdTx(tx, driverId);
       if (!driver) throw new NotFoundError('Conductor no encontrado');
       if (driver.suspendedAt === null) {
         throw new ConflictError('El conductor no está suspendido');
@@ -967,11 +916,8 @@ export class DriversService {
       // COMPLEMENTO de DISCIPLINARY: documento, ITV, rating, y futuros). Si el conductor NO tiene ninguno (está
       // suspendido solo por DISCIPLINARY) → 403 (se levanta por reactivate()). El conteo se hace ANTES de validar
       // la licencia para dar el error correcto (no pedir licencia vigente para algo que no es de compliance).
-      const complianceHolds = await tx.driverSuspensionHold.count({
-        where: {
-          driverId,
-          cause: { notIn: [...COMPLIANCE_REACTIVATION_EXCLUDED_CAUSES] },
-        },
+      const complianceHolds = await this.repo.countHolds(tx, driverId, {
+        cause: { notIn: [...COMPLIANCE_REACTIVATION_EXCLUDED_CAUSES] },
       });
       if (complianceHolds === 0) {
         throw new ForbiddenError(
@@ -993,7 +939,7 @@ export class DriversService {
         // Existían en el pre-count pero ya no: una carrera (otra reactivación/regularización) los quitó.
         throw new ConflictError('El conductor ya fue reactivado');
       }
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.reactivated',
@@ -1034,10 +980,7 @@ export class DriversService {
    */
   async sweepExpiredHolds(now = new Date()): Promise<number> {
     // UNA query: todos los holds temporales vencidos (expiresAt NO null Y < now). Los permanentes (null) quedan fuera.
-    const expired = await this.prisma.read.driverSuspensionHold.findMany({
-      where: { expiresAt: { not: null, lt: now } },
-      select: { driverId: true },
-    });
+    const expired = await this.repo.findExpiredHoldDriverIds(now);
     if (expired.length === 0) return 0;
     // Agrupa por driver en memoria (un set de driverIds afectados) → recompute por driver, no por hold (no N+1).
     const driverIds = [...new Set(expired.map((h) => h.driverId))];
@@ -1054,7 +997,7 @@ export class DriversService {
    * emite. NUNCA toca permanentes (el `where` exige `expiresAt != null AND < now`). Devuelve `true` si reactivó.
    */
   private async expireHoldsForDriver(driverId: string, now: Date): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTransaction(async (tx) => {
       // Quita SOLO los holds temporales vencidos de este driver (expiresAt no-null Y < now). recomputa suspendedAt:
       // si quedan OTROS holds (permanentes u otro temporal aún vigente) → suspendedAt sigue seteado (sigue suspendido).
       const { removed, suspendedAt } = await this.removeHolds(tx, driverId, {
@@ -1065,7 +1008,7 @@ export class DriversService {
       // Solo emitimos driver.reactivated si el conductor quedó LIBRE (0 holds → suspendedAt null). Si quedan otras
       // causas (DISCIPLINARY, etc.) SIGUE suspendido: el cooldown venció pero la otra causa lo mantiene (separación).
       if (suspendedAt !== null) return false;
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.reactivated',
@@ -1091,10 +1034,10 @@ export class DriversService {
    * lista dejaba de mostrar REJECTED stale frente al detalle PENDING en vivo).
    */
   async resubmit(userId: string): Promise<{ id: string; backgroundCheckStatus: string }> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { userId } });
+    return this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverByUserIdTx(tx, userId);
       if (!driver) throw new NotFoundError('Conductor no encontrado');
-      const user = await tx.user.findUnique({ where: { id: driver.userId } });
+      const user = await this.repo.findUserByIdTx(tx, driver.userId);
       if (!user) throw new NotFoundError('Usuario del conductor no encontrado');
       backgroundCheckMachine.assertTransition(
         driver.backgroundCheckStatus,
@@ -1109,36 +1052,15 @@ export class DriversService {
       const resubmitSources = backgroundCheckSources(BackgroundCheckStatus.PENDING).filter(
         (from) => from !== BackgroundCheckStatus.PENDING,
       );
-      const claim = await tx.driver.updateMany({
-        where: { id: driver.id, backgroundCheckStatus: { in: resubmitSources } },
-        data: {
-          backgroundCheckStatus: BackgroundCheckStatus.PENDING,
-          rejectionReason: null,
-          rejectedAt: null,
-          // RESET DEL BINDING DNI↔selfie POR-CICLO (causa raíz, fail-closed): el binding es evidencia de
-          // ESTE ciclo de revisión, NO un hecho histórico. Al reenviar, el conductor corrigió su material
-          // (DNI o selfie); el cotejo viejo apuntaba al material OBSOLETO. Si NO lo limpiáramos, el gate de
-          // ejecución de approve() (`dniFaceMatchedAt != null`) PASARÍA con el timestamp del PRIMER cotejo
-          // (contra el DNI viejo) → un re-approve ligaría material stale. Lo reseteamos a "no corrido" en la
-          // MISMA escritura/tx que lleva el estado a PENDING: una re-aprobación OBLIGA a re-correr
-          // matchDniFace() contra el material corregido (el gate de approve() vuelve a morder). Los 3 campos
-          // del binding se setean juntos en matchDniFace() y se limpian juntos acá → coherencia atómica.
-          dniFaceMatched: null,
-          dniFaceMatchScore: null,
-          dniFaceMatchedAt: null,
-          // Mismo razonamiento para el binding licencia↔selfie (Lote C): el brevete viejo apuntaba al material
-          // obsoleto. Se limpia junto al DNI → un re-approve OBLIGA a re-correr AMBOS cotejos contra lo corregido.
-          licenseFaceMatched: null,
-          licenseFaceMatchScore: null,
-          licenseFaceMatchedAt: null,
-        },
-      });
+      // El CAS a PENDING + el RESET DEL BINDING DNI↔selfie y licencia↔selfie (invariante de FRESCURA por-ciclo,
+      // fail-closed) viven HARDCODEADOS en el repo (casResubmitTransition): el binding es evidencia de ESTE ciclo
+      // de revisión; al reenviar, el material se corrigió y el cotejo viejo apuntaba al OBSOLETO. Limpiar los 6
+      // campos en la MISMA escritura que lleva a PENDING OBLIGA a re-correr matchDniFace()/matchLicenseFace()
+      // contra el material corregido (el gate de approve() vuelve a morder). Acá solo aportamos las fuentes.
+      const claim = await this.repo.casResubmitTransition(tx, driver.id, resubmitSources);
       if (claim.count === 0) {
         // Otra decisión concurrente ganó. Si YA está PENDING es idempotente (no re-emitir); si no, conflicto.
-        const current = await tx.driver.findUnique({
-          where: { id: driver.id },
-          select: { backgroundCheckStatus: true },
-        });
+        const current = await this.repo.findDriverBackgroundStatusTx(tx, driver.id);
         if (current?.backgroundCheckStatus === BackgroundCheckStatus.PENDING) {
           return { id: driver.id, backgroundCheckStatus: BackgroundCheckStatus.PENDING };
         }
@@ -1147,13 +1069,10 @@ export class DriversService {
         );
       }
       // Rama GANADORA (count === 1): sincronizamos el KYC y emitimos driver.resubmitted UNA sola vez.
-      await tx.user.update({
-        where: { id: driver.userId },
-        data: { kycStatus: KycStatus.PENDING },
-      });
+      await this.repo.updateUser(tx, driver.userId, { kycStatus: KycStatus.PENDING });
       // El admin-bff proyecta status=PENDING en el read-model → el conductor reaparece como PENDIENTE (no
       // stale en REJECTED). Cierra el double-source entre la lista (read-model) y el detalle (identity en vivo).
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.resubmitted',
@@ -1186,18 +1105,18 @@ export class DriversService {
    * para que el orquestador encadene fleet/media (que indexan por User.id, no por Driver.id).
    */
   async purge(driverId: string): Promise<DriverPurgeResult> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { id: driverId } });
+    return this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverByIdTx(tx, driverId);
       if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
       const { userId } = driver;
 
-      const deletedDriver = await tx.driver.delete({ where: { id: driverId } });
-      const authMethods = await tx.authMethod.deleteMany({ where: { userId } });
-      const biometricChecks = await tx.biometricCheck.deleteMany({ where: { userId } });
-      const consents = await tx.consent.deleteMany({ where: { userId } });
+      const deletedDriver = await this.repo.deleteDriverById(tx, driverId);
+      const authMethods = await this.repo.deleteAuthMethodsByUser(tx, userId);
+      const biometricChecks = await this.repo.deleteBiometricChecksByUser(tx, userId);
+      const consents = await this.repo.deleteConsentsByUser(tx, userId);
       // Borra el User AL FINAL: libera el teléfono (@unique) para re-registro. delete (no deleteMany)
       // para fallar ruidosamente si por alguna razón no existe (invariante: todo Driver tiene User).
-      await tx.user.delete({ where: { id: userId } });
+      await this.repo.deleteUserById(tx, userId);
 
       return {
         userId,
@@ -1232,12 +1151,9 @@ export class DriversService {
     suspendedAt: Date,
     documentType: string,
   ): Promise<boolean> {
-    const result = await this.prisma.write.$transaction(async (tx) => {
+    const result = await this.repo.runInTransaction(async (tx) => {
       // `userId` (además del id) para el revoke de sesión post-commit (Lote 1b): revokeAllForUser espera el sub.
-      const driver = await tx.driver.findUnique({
-        where: { id: driverId },
-        select: { id: true, userId: true },
-      });
+      const driver = await this.repo.findDriverIdUserByIdTx(tx, driverId);
       if (!driver) return null; // evento antes del onboarding: no-op silencioso (coherente con el viejo CAS).
       const { created, suspendedAt: at } = await this.addHoldAt(
         tx,
@@ -1271,9 +1187,9 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op.
    */
   async suspendByFleetForUser(userId: string, suspendedAt: Date): Promise<boolean> {
-    const result = await this.prisma.write.$transaction(async (tx) => {
+    const result = await this.repo.runInTransaction(async (tx) => {
       // Resolución User.id → Driver.id (identity es el dueño del mapeo). Sin perfil → no-op (evento prematuro).
-      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+      const driver = await this.repo.findDriverIdByUserIdTx(tx, userId);
       if (!driver) return null; // no-op silencioso: sin perfil no hay suspensión (ni sesión a revocar).
       const { created, suspendedAt: at } = await this.addHoldAt(
         tx,
@@ -1314,11 +1230,8 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
   async suspendByRating(driverId: string, reason: string): Promise<boolean> {
-    const result = await this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({
-        where: { id: driverId },
-        select: { id: true, userId: true },
-      });
+    const result = await this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverIdUserByIdTx(tx, driverId);
       if (!driver) return null; // flag antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
       const { created, suspendedAt: at } = await this.addHold(
         tx,
@@ -1359,11 +1272,8 @@ export class DriversService {
    * @returns `true` si esta llamada creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
   async suspendByCancellations(driverId: string, reason: string): Promise<boolean> {
-    const result = await this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({
-        where: { id: driverId },
-        select: { id: true, userId: true },
-      });
+    const result = await this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverIdUserByIdTx(tx, driverId);
       if (!driver) return null; // evento antes del onboarding / driver purgado: no-op silencioso (anti poison-pill).
       const expiresAt = new Date(Date.now() + this.cancellationCooldownMs);
       const { created, suspendedAt: at } = await this.addHold(
@@ -1399,14 +1309,14 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente quitó un hold; `false` si fue no-op.
    */
   async reactivateByFleet(driverId: string, documentType: string): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTransaction(async (tx) => {
       // GUARD DE EXISTENCIA (espejo de suspendByFleet/suspendByFleetForUser/reactivateByFleetForUser): si el
       // Driver NO existe (purgado por derecho-al-olvido, o un evento que llegó antes del onboarding), salir
       // no-op ANTES de tocar holds/recompute. Sin esto, removeHolds→recomputeSuspendedAt hace
       // `tx.driver.update({ where: { id } })` que lanza P2025 (record-not-found) → el consumer de
       // `fleet.driver_reactivated` re-lanza → Kafka reintenta ∞ → POISON-PILL que bloquea la partición
       // (platform-wide). Con el guard, un driver inexistente se trata como YA procesado (return false).
-      const driver = await tx.driver.findUnique({ where: { id: driverId }, select: { id: true } });
+      const driver = await this.repo.findDriverIdByIdTx(tx, driverId);
       if (!driver) return false;
       const { removed } = await this.removeHolds(tx, driverId, {
         cause: SuspensionCause.DOCUMENT_EXPIRED,
@@ -1428,8 +1338,8 @@ export class DriversService {
    * @returns `true` si esta llamada efectivamente quitó un hold; `false` si fue no-op.
    */
   async reactivateByFleetForUser(userId: string): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+    return this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverIdByUserIdTx(tx, userId);
       if (!driver) return false;
       const { removed } = await this.removeHolds(tx, driver.id, {
         cause: SuspensionCause.INSPECTION_EXPIRED,
@@ -1455,8 +1365,8 @@ export class DriversService {
    * @returns `true` si creó un hold nuevo; `false` si fue no-op (ya existía / sin perfil).
    */
   async suspendByFleetCategory(userId: string, suspendedAt: Date): Promise<boolean> {
-    const result = await this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+    const result = await this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverIdByUserIdTx(tx, userId);
       if (!driver) return null; // no-op silencioso: sin perfil no hay suspensión (ni sesión a revocar).
       const { created, suspendedAt: at } = await this.addHoldAt(
         tx,
@@ -1486,8 +1396,8 @@ export class DriversService {
    * @returns `true` si quitó un hold; `false` si fue no-op.
    */
   async reactivateByFleetCategory(userId: string): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const driver = await tx.driver.findUnique({ where: { userId }, select: { id: true } });
+    return this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverIdByUserIdTx(tx, userId);
       if (!driver) return false;
       const { removed } = await this.removeHolds(tx, driver.id, {
         cause: SuspensionCause.CATEGORY_DISABLED,
@@ -1531,7 +1441,7 @@ export class DriversService {
     userId: string,
     input: { photo: string; selfieKey?: string },
   ): Promise<{ enrolled: true; enrolledAt: string }> {
-    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
+    const d = await this.repo.findDriverByUserId(userId);
     if (!d) throw new NotFoundError('Conductor no encontrado');
 
     // TECHO DE ABUSO DEL ENROL (anti-hammering del PAD, fail-fast ANTES de gastar inferencia): tras
@@ -1578,7 +1488,7 @@ export class DriversService {
           at: new Date().toISOString(),
         },
       });
-      await enqueueOutbox(this.prisma.write, rejected, d.id);
+      await this.repo.enqueueOutboxNonTx(rejected, d.id);
       // Suma al techo de abuso (anti-hammering): N spoofs seguidos → cooldown. INCREMENTO ATÓMICO (mismo fix
       // que M6 para el lockout de turno): `consumeFixedWindow` hace INCR+PEXPIRE en un solo eval Lua y re-arma
       // el TTL si se perdió → cierra el bug del `incr`+`expire`-condicional (un crash entre ambas llamadas
@@ -1630,12 +1540,10 @@ export class DriversService {
         at: enrolledAt.toISOString(),
       },
     });
-    await this.prisma.write.$transaction(async (tx) => {
-      await tx.driver.update({
-        where: { id: d.id },
-        data: {
-          faceEmbedding: embedding,
-          faceEnrolledAt: enrolledAt,
+    await this.repo.runInTransaction(async (tx) => {
+      await this.repo.updateDriverById(tx, d.id, {
+        faceEmbedding: embedding,
+        faceEnrolledAt: enrolledAt,
           // F5 · selfie del enrol (ayuda visual del operador). Validada por prefijo arriba; null si no aplica.
           faceSelfieKey: selfieKey,
           // VEREDICTO del liveness PASIVO de ESTE enrol (lo VE el operador + lo exige `approve()`): `livenessChecked`
@@ -1653,9 +1561,8 @@ export class DriversService {
           licenseFaceMatched: null,
           licenseFaceMatchScore: null,
           licenseFaceMatchedAt: null,
-        },
       });
-      await enqueueOutbox(tx, enrolled, d.id);
+      await this.repo.enqueueOutbox(tx, enrolled, d.id);
     });
     // Enrol OK: el conductor demostró ser una persona real → limpia el contador de abuso (no arrastra spoofs
     // viejos a la próxima captura). Idempotente si no había contador.
@@ -1677,10 +1584,7 @@ export class DriversService {
    * destrabe era el auto-TTL). Idempotente: si no había bloqueo, no rompe. El comando lo audita el admin-bff.
    */
   async clearBiometricLockout(driverId: string): Promise<void> {
-    const driver = await this.prisma.read.driver.findUnique({
-      where: { id: driverId },
-      select: { id: true },
-    });
+    const driver = await this.repo.findDriverIdById(driverId);
     if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
     await this.redis.del(bioLockKey(driverId));
     await this.redis.del(enrollSpoofLockKey(driverId));
@@ -1704,7 +1608,7 @@ export class DriversService {
    * atómica (driver.update con los 3 campos del resultado) — el operador lee siempre un resultado coherente.
    */
   async matchDniFace(driverId: string, input: { image: string }): Promise<BiometricDniMatchResult> {
-    const driver = await this.prisma.read.driver.findUnique({ where: { id: driverId } });
+    const driver = await this.repo.findDriverById(driverId);
     if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
     // Gate: sin embedding de referencia enrolado NO hay match (no hay contra qué cotejar). 409 tipado,
     // mismo predicado que approve()/startShift() (fuente única de "biométricamente enrolado").
@@ -1724,14 +1628,11 @@ export class DriversService {
     // redondea a entero porque su score viaja en un sessionRef de un solo uso; acá el operador lo VE y el gate
     // de approve() mira `dniFaceMatchedAt`, no el score, así que no se redondea.)
     // Persiste el binding + (si COMPLETA la identidad biométrica positiva) auto-verifica el KYC, en la MISMA tx.
-    await this.prisma.write.$transaction(async (tx) => {
-      await tx.driver.update({
-        where: { id: driverId },
-        data: {
-          dniFaceMatched: result.matched,
-          dniFaceMatchScore: result.score,
-          dniFaceMatchedAt: new Date(),
-        },
+    await this.repo.runInTransaction(async (tx) => {
+      await this.repo.updateDriverById(tx, driverId, {
+        dniFaceMatched: result.matched,
+        dniFaceMatchScore: result.score,
+        dniFaceMatchedAt: new Date(),
       });
       // El KYC NO se auto-verifica: la verificación de identidad la CONFIRMA el operador humano al aprobar
       // (approve() flipea kycStatus→VERIFIED). El match solo persiste su binding; el flip es acto humano.
@@ -1761,7 +1662,7 @@ export class DriversService {
     driverId: string,
     input: { image: string },
   ): Promise<BiometricDniMatchResult> {
-    const driver = await this.prisma.read.driver.findUnique({ where: { id: driverId } });
+    const driver = await this.repo.findDriverById(driverId);
     if (!driver) throw new NotFoundError('Conductor no encontrado', { driverId });
     if (!hasFaceEmbedding(driver)) {
       throw new ConflictError('El conductor no tiene biometría facial enrolada', { driverId });
@@ -1774,14 +1675,11 @@ export class DriversService {
     });
 
     // GUARDA el binding de licencia + (si COMPLETA la identidad biométrica positiva) auto-verifica el KYC, MISMA tx.
-    await this.prisma.write.$transaction(async (tx) => {
-      await tx.driver.update({
-        where: { id: driverId },
-        data: {
-          licenseFaceMatched: result.matched,
-          licenseFaceMatchScore: result.score,
-          licenseFaceMatchedAt: new Date(),
-        },
+    await this.repo.runInTransaction(async (tx) => {
+      await this.repo.updateDriverById(tx, driverId, {
+        licenseFaceMatched: result.matched,
+        licenseFaceMatchScore: result.score,
+        licenseFaceMatchedAt: new Date(),
       });
       // El KYC NO se auto-verifica (ver matchDniFace): el flip kycStatus→VERIFIED lo hace el operador en approve().
     });
@@ -1791,7 +1689,7 @@ export class DriversService {
 
   /** Emite un reto de liveness activo para el inicio de turno (BR-I02). */
   async createBiometricChallenge(userId: string): Promise<BiometricChallenge> {
-    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
+    const d = await this.repo.findDriverByUserId(userId);
     if (!d) throw new NotFoundError('Conductor no encontrado');
     return this.biometric.createChallenge();
   }
@@ -1806,7 +1704,7 @@ export class DriversService {
     userId: string,
     input: { challengeId: string; frames: string[] },
   ): Promise<BiometricVerifyMint> {
-    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
+    const d = await this.repo.findDriverByUserId(userId);
     if (!d) throw new NotFoundError('Conductor no encontrado');
     if (!hasFaceEmbedding(d)) {
       throw new ConflictError('Conductor no enrolado biométricamente');
@@ -1880,16 +1778,14 @@ export class DriversService {
       // Ley 29733) y devolvemos igual el 401 con los intentos restantes. El intento ya quedó contado (correcto:
       // fue un rechazo real), a diferencia de un error del PROVEEDOR (arriba) que sí se reintegra.
       try {
-        await this.prisma.write.$transaction(async (tx) => {
-          await tx.biometricCheck.create({
-            data: {
-              userId,
-              type: 'SHIFT_START',
-              score,
-              passed: false,
-            } satisfies Prisma.BiometricCheckUncheckedCreateInput,
-          });
-          await enqueueOutbox(tx, envelope, d.id);
+        await this.repo.runInTransaction(async (tx) => {
+          await this.repo.createBiometricCheckTx(tx, {
+            userId,
+            type: 'SHIFT_START',
+            score,
+            passed: false,
+          } satisfies Prisma.BiometricCheckUncheckedCreateInput);
+          await this.repo.enqueueOutbox(tx, envelope, d.id);
         });
       } catch (auditError) {
         this.logger.error(
@@ -1946,7 +1842,7 @@ export class DriversService {
     userId: string,
     input: { sessionRef: string; geoLat?: number; geoLon?: number },
   ): Promise<{ status: 'AVAILABLE'; score: number }> {
-    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
+    const d = await this.repo.findDriverByUserId(userId);
     if (!d) throw new NotFoundError('Conductor no encontrado');
     // Gates baratos de fail-fast sobre la réplica (no autoridad final): el gate de suspensión REAL se
     // re-evalúa sobre el dato fresco dentro del CAS (#10). Aquí solo evita trabajo si ya viene suspendido.
@@ -1988,34 +1884,24 @@ export class DriversService {
     // (evidencia de auditoría), independiente de si la transición de estado posterior pasa o falla. Antes vivía
     // en la MISMA tx que el assert: un assert que fallaba (suspensión/carrera) hacía rollback y se llevaba la
     // evidencia. Es una sola escritura previa e independiente de la tx del CAS — no comparte destino transaccional.
-    await this.prisma.write.biometricCheck.create({ data: biometricCheckData });
+    await this.repo.createBiometricCheck(biometricCheckData);
 
     // #2 + #10 + TOCTOU biométrico — TRANSICIÓN POR CAS ATÓMICO: el estado fuente válido (derivado de la
     // máquina, cero strings mágicos), `suspendedAt: null` Y `faceEmbedding` no vacío (`isEmpty: false`)
     // viajan en el WHERE — TODO sobre el dato FRESCO, no la réplica. Dos startShift concurrentes: solo UNO
     // matchea (el otro ve count=0 → carrera). Y si un borrado (sweeper) vació el embedding entre la réplica
     // y la tx, el `isEmpty: false` hace que NO matchee (count 0) → fail-closed, sin biometría no hay turno.
-    await this.prisma.write.$transaction(async (tx) => {
-      const claim = await tx.driver.updateMany({
-        where: {
-          id: d.id,
-          suspendedAt: null,
-          faceEmbedding: { isEmpty: false },
-          // Fuentes = SHIFT_ENTRY_STATES (OFFLINE + ON_BREAK): el gate biométrico admite a AVAILABLE desde el
-          // arranque de turno (OFFLINE) Y el RESUME de pausa (ON_BREAK, que vuelve al pool por acá, no por Kafka).
-          // EXCLUYE ASSIGNED/ON_TRIP (release por fin de viaje, vía moveStatusForTrip) → cierra el double-dispatch
-          // de un conductor EN VIAJE re-entrando al pool + el re-emit de driver.verified sobre un no-op. NO se usa
-          // `driverStatusSources(AVAILABLE)` crudo, que incluía esos estados de viaje.
-          currentStatus: { in: [...SHIFT_ENTRY_STATES] },
-        },
-        data: { currentStatus: DriverStatus.AVAILABLE, lastVerifiedAt: new Date() },
-      });
+    await this.repo.runInTransaction(async (tx) => {
+      // El WHERE del CAS (predicados de seguridad `suspendedAt: null` + `faceEmbedding.isEmpty:false` + destino
+      // AVAILABLE + lastVerifiedAt HARDCODEADOS, todo sobre el dato FRESCO) vive en el repo (casStartShift). Acá
+      // solo aportamos las fuentes SHIFT_ENTRY_STATES (OFFLINE + ON_BREAK): el gate biométrico admite a AVAILABLE
+      // desde el arranque de turno (OFFLINE) Y el RESUME de pausa (ON_BREAK, que vuelve al pool por acá, no por
+      // Kafka). EXCLUYE ASSIGNED/ON_TRIP (release por fin de viaje, vía moveStatusForTrip) → cierra el
+      // double-dispatch de un conductor EN VIAJE re-entrando al pool. NO se usa `driverStatusSources(AVAILABLE)`.
+      const claim = await this.repo.casStartShift(tx, d.id, [...SHIFT_ENTRY_STATES]);
       if (claim.count === 0) {
         // Releemos para un error HONESTO con el estado real (la auditoría del intento YA quedó persistida).
-        const current = await tx.driver.findUnique({
-          where: { id: d.id },
-          select: { currentStatus: true, suspendedAt: true, faceEmbedding: true },
-        });
+        const current = await this.repo.findDriverShiftStateTx(tx, d.id);
         if (!current) throw new NotFoundError('Conductor no encontrado');
         if (current.suspendedAt) throw new ForbiddenError('Conductor suspendido');
         // Biometría borrada bajo nuestros pies (sweeper concurrente): error tipado claro, no un falso "carrera".
@@ -2033,7 +1919,7 @@ export class DriversService {
         driverStatusMachine.assertTransition(current.currentStatus, DriverStatus.AVAILABLE);
         throw new ConflictError('Ya tienes un turno activo');
       }
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.verified',
@@ -2045,7 +1931,7 @@ export class DriversService {
       // Par de APERTURA del ciclo de sesión del conductor (espejo de went_offline·shift_end): la única transición
       // OFFLINE/ON_BREAK→AVAILABLE, ya pasado el gate biométrico. Es una MUTACIÓN deliberada → al WORM. Va en la
       // MISMA tx que el CAS (outbox-in-tx · FOUNDATION §6): o queda AVAILABLE y el evento se publica, o ninguno.
-      await enqueueOutbox(
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'driver.went_online',
@@ -2086,10 +1972,7 @@ export class DriversService {
       to === DriverStatus.AVAILABLE
         ? driverStatusSources(to).filter((from) => TRIP_ACTIVE_STATES.includes(from))
         : driverStatusSources(to);
-    const claim = await this.prisma.write.driver.updateMany({
-      where: { id: driverId, currentStatus: { in: sources } },
-      data: { currentStatus: to },
-    });
+    const claim = await this.repo.casMoveStatus(driverId, sources, to);
     return claim.count > 0 ? 'moved' : 'noop';
   }
 
@@ -2138,10 +2021,7 @@ export class DriversService {
     // PRE-CHECK (UX, no atómico): excluye al propio userId para que el RESUME del wizard (el conductor
     // re-envía SU MISMO DNI) no se auto-rechace. Da el 409 amigable en el caso común; la garantía DURA la
     // pone el `@unique` de Postgres + el backstop del catch de abajo (cierra el TOCTOU de esta carrera).
-    const clash = await this.prisma.read.driver.findFirst({
-      where: { dniHash, NOT: { userId } },
-      select: { id: true },
-    });
+    const clash = await this.repo.findConflictingDniOwner(dniHash, userId);
     if (clash) {
       throw new DniAlreadyRegisteredError('Este DNI ya está registrado en otra cuenta');
     }
@@ -2151,10 +2031,7 @@ export class DriversService {
     // CLEARED→PENDING (una aprobación no se des-decide sola), así que el cambio se BLOQUEA acá, no hay
     // auto-re-review. Lectura de la PRIMARIA (no réplica) para que el gate no dependa del lag. Los estados
     // PENDING (en revisión) y REJECTED (corrigiendo tras un rechazo) SÍ pueden editar: es parte del alta.
-    const existing = await this.prisma.write.driver.findUnique({
-      where: { userId },
-      select: { backgroundCheckStatus: true, dniHash: true, legalName: true, birthDate: true },
-    });
+    const existing = await this.repo.findDriverIdentityGateOnPrimary(userId);
     if (existing?.backgroundCheckStatus === BackgroundCheckStatus.CLEARED) {
       throw new InvalidStateError(
         'No puedes cambiar tus datos de identidad con el alta aprobada. Contacta a soporte.',
@@ -2219,10 +2096,7 @@ export class DriversService {
         throw new DniAlreadyRegisteredError('Este DNI ya está registrado en otra cuenta');
       }
       // Fallback para CUALQUIER otro error (no-P2002): re-chequeo de la réplica por si el clash ya se ve.
-      const clashAfterRace = await this.prisma.read.driver.findFirst({
-        where: { dniHash, NOT: { userId } },
-        select: { id: true },
-      });
+      const clashAfterRace = await this.repo.findConflictingDniOwner(dniHash, userId);
       if (clashAfterRace) {
         throw new DniAlreadyRegisteredError('Este DNI ya está registrado en otra cuenta');
       }
@@ -2246,12 +2120,9 @@ export class DriversService {
    * PII de identidad (la foto no es un dato de KYC). Devuelve la foto persistida.
    */
   async updatePhoto(userId: string, photoUrl: string): Promise<{ photoUrl: string }> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    const user = await this.repo.findUserById(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
-    const updated = await this.prisma.write.user.update({
-      where: { id: userId },
-      data: { photoUrl },
-    });
+    const updated = await this.repo.updateUserPhoto(userId, photoUrl);
     return { photoUrl: updated.photoUrl ?? '' };
   }
 
@@ -2263,10 +2134,7 @@ export class DriversService {
    */
   async dniExists(userId: string, dni: string): Promise<boolean> {
     const dniHash = hashPii(dni, this.dniHashSalt);
-    const found = await this.prisma.read.driver.findFirst({
-      where: { dniHash, NOT: { userId } },
-      select: { id: true },
-    });
+    const found = await this.repo.findConflictingDniOwner(dniHash, userId);
     return found != null;
   }
 
@@ -2278,7 +2146,7 @@ export class DriversService {
    * startShift detrás del gate biométrico, y el tipo lo garantiza en compile-time.
    */
   async setStatus(userId: string, status: SelfServiceDriverStatus): Promise<{ status: string }> {
-    const d = await this.prisma.read.driver.findUnique({ where: { userId } });
+    const d = await this.repo.findDriverByUserId(userId);
     if (!d) throw new NotFoundError('Conductor no encontrado');
     driverStatusMachine.assertTransition(d.currentStatus, status);
     // Fase B (ADR-021 · finding B1) — el fin de turno hacia OFFLINE emite `driver.went_offline`
@@ -2287,7 +2155,7 @@ export class DriversService {
     // pool; trip-service reasigna su viaje pre-recojo si lo tenía. ON_BREAK NO emite (es una pausa EN
     // turno, el conductor sigue online). `driverId` = id de PERFIL Driver (d.id), SIN PII.
     const emitOffline = status === DriverStatus.OFFLINE;
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico (espeja approve/reject): el estado origen viaja en el WHERE. Sin esto (update-por-id plano
       // sobre lectura de réplica) un pause autoservicio podía PISAR una asignación de viaje concurrente
       // (AVAILABLE→ASSIGNED) o des-suspender a un conductor (SUSPENDED→ON_BREAK), derrotando un estado de
@@ -2295,17 +2163,11 @@ export class DriversService {
       // (double-tap "fin de turno" OFFLINE→OFFLINE) cae en count===0 → rama idempotente SIN re-emitir el
       // evento (la máquina permite from===to, por eso hay que sacarlo o `went_offline` se duplicaría).
       const statusSources = driverStatusSources(status).filter((from) => from !== status);
-      const claim = await tx.driver.updateMany({
-        where: { id: d.id, currentStatus: { in: statusSources } },
-        data: { currentStatus: status },
-      });
+      const claim = await this.repo.casSetStatus(tx, d.id, statusSources, status);
       if (claim.count === 0) {
         // La carrera cambió el estado bajo nuestros pies. Releemos: si ya es el destino, idempotente; si no,
         // la transición desde el estado REAL no era legal (p. ej. quedó ASSIGNED/SUSPENDED) → conflicto transitorio.
-        const current = await tx.driver.findUnique({
-          where: { id: d.id },
-          select: { currentStatus: true },
-        });
+        const current = await this.repo.findDriverCurrentStatusTx(tx, d.id);
         if (current?.currentStatus === status) return current.currentStatus;
         throw new ConcurrencyConflictError(
           'El estado del conductor cambió; reintentá la operación',
@@ -2313,7 +2175,7 @@ export class DriversService {
       }
       // Rama GANADORA (count === 1): el fin de turno emite went_offline UNA sola vez, en la MISMA tx que el CAS.
       if (emitOffline) {
-        await enqueueOutbox(
+        await this.repo.enqueueOutbox(
           tx,
           createEnvelope({
             eventType: 'driver.went_offline',

@@ -19,7 +19,7 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { parseOrThrow, peruPhoneSchema } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { PhoneLinkRepository } from './phone-link.repository';
 import { OtpService } from '../auth/otp.service';
 import { UsersService, type ProfileView } from './users.service';
 import { PhoneTakenError, maskPhone } from './phone-link.errors';
@@ -29,7 +29,7 @@ export class PhoneLinkService {
   private readonly logger = new Logger(PhoneLinkService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: PhoneLinkRepository,
     private readonly otp: OtpService,
     private readonly users: UsersService,
   ) {}
@@ -65,19 +65,15 @@ export class PhoneLinkService {
     // Mismo mecanismo que el OTP de login: consume el código si acierta; cuenta intentos y bloquea al tope.
     await this.otp.verify(phone, code);
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       // Re-chequeo anti-carrera: que nadie haya tomado el número entre request y verify.
-      const owner = await tx.user.findUnique({ where: { phone } });
+      const owner = await this.repo.findUserByPhoneTx(tx, phone);
       if (owner && owner.id !== userId) throw new PhoneTakenError();
 
-      await tx.user.update({ where: { id: userId }, data: { phone } });
+      await this.repo.setUserPhoneTx(tx, userId, phone);
       // AuthMethod{PHONE_OTP} idempotente: si el usuario ya lo tenía (de otro número), se conserva
       // la fila (el número no vive aquí); si no, se crea. El método queda `verified`.
-      await tx.authMethod.upsert({
-        where: { userId_type: { userId, type: 'PHONE_OTP' } },
-        create: { userId, type: 'PHONE_OTP', verified: true },
-        update: { verified: true },
-      });
+      await this.repo.upsertPhoneOtpAuthMethodTx(tx, userId);
     });
 
     // AUDIT (Ley 29733): teléfono enmascarado, nunca el número completo.
@@ -91,7 +87,7 @@ export class PhoneLinkService {
    * usuario o de nadie, no hace nada (el flujo es idempotente / disponible).
    */
   private async assertNotTakenByOther(userId: string, phone: string): Promise<void> {
-    const owner = await this.prisma.read.user.findUnique({ where: { phone } });
+    const owner = await this.repo.findUserByPhone(phone);
     if (owner && owner.id !== userId) throw new PhoneTakenError();
   }
 }

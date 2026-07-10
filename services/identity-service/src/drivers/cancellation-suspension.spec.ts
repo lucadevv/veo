@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { DriversService } from './drivers.service';
+import { DriversRepository } from './drivers.repository';
 import { SuspensionCause } from '@veo/shared-types';
 import type { Env } from '../config/env.schema';
 
@@ -55,7 +56,10 @@ function holdMatches(h: Hold, where: Record<string, unknown>, now: Date): boolea
     if (k === 'driverId') {
       if (h.driverId !== v) return false;
     } else if (k === 'cause') {
-      if (v && typeof v === 'object' && 'not' in (v as Record<string, unknown>)) {
+      if (v && typeof v === 'object' && 'notIn' in (v as Record<string, unknown>)) {
+        // `cause: { notIn: [...] }` (barrido de compliance: todo lo NO-excluido) → excluye si está en la lista.
+        if ((v as { notIn: string[] }).notIn.includes(h.cause)) return false;
+      } else if (v && typeof v === 'object' && 'not' in (v as Record<string, unknown>)) {
         if (h.cause === (v as { not: string }).not) return false;
       } else if (h.cause !== v) return false;
     } else if (k === 'causeRef') {
@@ -198,7 +202,7 @@ const sessions = {
   resealRevokedBefore: async () => true,
 } as never;
 function svc(prisma: ReturnType<typeof makePrisma>): DriversService {
-  return new DriversService(prisma.prisma as never, redis, bio, sessions, config);
+  return new DriversService(new DriversRepository(prisma.prisma as never), redis, bio, sessions, config);
 }
 
 function temporalHold(

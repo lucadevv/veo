@@ -6,9 +6,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
 import { ConflictError, NotFoundError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { UsersRepository } from './users.repository';
 import { type DocumentType } from '../generated/prisma';
 import { maskDocument } from '../common/document';
 import type { PaymentMethod } from '@veo/shared-types';
@@ -37,14 +36,14 @@ export class UsersService {
   private readonly graceDays: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: UsersRepository,
     config: ConfigService<Env, true>,
   ) {
     this.graceDays = config.getOrThrow<number>('DELETION_GRACE_DAYS');
   }
 
   async getProfile(userId: string): Promise<ProfileView> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    const user = await this.repo.findUserById(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     return this.view(user);
   }
@@ -60,7 +59,7 @@ export class UsersService {
       defaultPaymentMethod?: PaymentMethod;
     },
   ): Promise<ProfileView> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    const user = await this.repo.findUserById(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
 
     const nextDocumentType = data.documentType ?? user.documentType;
@@ -69,16 +68,13 @@ export class UsersService {
       (data.documentType !== undefined && data.documentType !== user.documentType) ||
       (data.document !== undefined && data.document !== user.document);
 
-    const updated = await this.prisma.write.user.update({
-      where: { id: userId },
-      data: {
-        email: data.email ?? user.email,
-        photoUrl: data.photoUrl ?? user.photoUrl,
-        name: data.name ?? user.name,
-        documentType: nextDocumentType,
-        document: nextDocument,
-        defaultPaymentMethod: data.defaultPaymentMethod ?? user.defaultPaymentMethod,
-      },
+    const updated = await this.repo.updateUser(userId, {
+      email: data.email ?? user.email,
+      photoUrl: data.photoUrl ?? user.photoUrl,
+      name: data.name ?? user.name,
+      documentType: nextDocumentType,
+      document: nextDocument,
+      defaultPaymentMethod: data.defaultPaymentMethod ?? user.defaultPaymentMethod,
     });
 
     // AUDIT: cambio de documento (PII). Se registra el evento con el valor MASCARADO —
@@ -97,12 +93,12 @@ export class UsersService {
     const now = new Date();
     const graceUntil = new Date(now.getTime() + this.graceDays * 24 * 60 * 60 * 1000);
 
-    await this.prisma.write.$transaction(async (tx) => {
-      const user = await tx.user.findUnique({ where: { id: userId } });
+    await this.repo.runInTransaction(async (tx) => {
+      const user = await this.repo.findUserByIdTx(tx, userId);
       if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
       if (user.deletionRequestedAt) throw new ConflictError('Ya existe una solicitud de borrado');
-      await tx.user.update({ where: { id: userId }, data: { deletionRequestedAt: now } });
-      await enqueueOutbox(
+      await this.repo.updateUserTx(tx, userId, { deletionRequestedAt: now });
+      await this.repo.enqueueOutbox(
         tx,
         createEnvelope({
           eventType: 'user.deletion_requested',
@@ -117,10 +113,7 @@ export class UsersService {
   }
 
   async cancelDeletion(userId: string): Promise<void> {
-    await this.prisma.write.user.update({
-      where: { id: userId },
-      data: { deletionRequestedAt: null },
-    });
+    await this.repo.updateUser(userId, { deletionRequestedAt: null });
   }
 
   private view(user: {

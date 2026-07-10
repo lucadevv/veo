@@ -6,9 +6,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
 import { ConflictError, ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { KycRepository } from './kyc.repository';
 import {
   BIOMETRIC_PROVIDER,
   type BiometricChallenge,
@@ -36,7 +35,7 @@ export class KycService {
   private readonly minScore: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: KycRepository,
     @Inject(BIOMETRIC_PROVIDER) private readonly biometric: BiometricProvider,
     config: ConfigService<Env, true>,
   ) {
@@ -45,7 +44,7 @@ export class KycService {
 
   /** Carga el pasajero (User type PASSENGER) o lanza el error adecuado. */
   private async loadPassenger(userId: string): Promise<{ id: string; kycStatus: KycStatus }> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    const user = await this.repo.findUserById(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     if (user.type !== 'PASSENGER') throw new ForbiddenError('El usuario no es pasajero');
     return { id: user.id, kycStatus: user.kycStatus };
@@ -96,16 +95,9 @@ export class KycService {
       // legacy fuera del enum. Una verificación VIGENTE no se "des-decide" sola (lo garantiza la tabla).
       kycStatusMachine.assertTransition(passenger.kycStatus, KycStatus.VERIFIED);
       const verifiedAt = new Date();
-      await this.prisma.write.$transaction(async (tx) => {
-        await tx.user.update({
-          where: { id: passenger.id },
-          data: {
-            kycStatus: KycStatus.VERIFIED,
-            faceEmbedding: embedding,
-            kycVerifiedAt: verifiedAt,
-          },
-        });
-        await enqueueOutbox(
+      await this.repo.runInTransaction(async (tx) => {
+        await this.repo.markKycVerifiedTx(tx, passenger.id, embedding, verifiedAt);
+        await this.repo.enqueueOutbox(
           tx,
           createEnvelope({
             eventType: 'user.kyc_verified',

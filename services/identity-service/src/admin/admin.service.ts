@@ -14,7 +14,6 @@ import {
   maxRoleRank,
   type AdminRole,
 } from '@veo/shared-types';
-import { enqueueOutbox } from '@veo/database';
 import { createEnvelope } from '@veo/events';
 import {
   ConflictError,
@@ -26,7 +25,7 @@ import {
   CLOCK,
   type Clock,
 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { AdminRepository } from './admin.repository';
 import { REDIS } from '../infra/redis';
 import { AdminStatus } from '../generated/prisma';
 import { adminStatusMachine, isOperationalAdmin } from '../domain/admin-status';
@@ -73,7 +72,7 @@ export class AdminService {
   private readonly loginLockSeconds: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: AdminRepository,
     private readonly jwt: JwtService,
     private readonly sessions: RedisRefreshTokenStore,
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
@@ -109,24 +108,22 @@ export class AdminService {
         requested: roles,
       });
     }
-    const existing = await this.prisma.read.adminUser.findUnique({ where: { email } });
+    const existing = await this.repo.findAdminByEmail(email);
     if (existing) throw new ConflictError('Ya existe un operador con ese email');
 
     const { token, tokenHash, expiresAt } = generateInviteToken();
     // El grant inicial de roles ES una mutación de privilegio auditable (Ley 29733, libro WORM).
     // El write y el evento `admin.role_changed` van en la MISMA transacción: estado↔auditoría atómicos.
-    const admin = await this.prisma.write.$transaction(async (tx) => {
-      const created = await tx.adminUser.create({
-        data: {
-          email,
-          roles,
-          status: AdminStatus.INVITED,
-          passwordHash: null,
-          inviteTokenHash: tokenHash,
-          inviteExpiresAt: expiresAt,
-        },
+    const admin = await this.repo.runInTransaction(async (tx) => {
+      const created = await this.repo.createAdmin(tx, {
+        email,
+        roles,
+        status: AdminStatus.INVITED,
+        passwordHash: null,
+        inviteTokenHash: tokenHash,
+        inviteExpiresAt: expiresAt,
       });
-      await enqueueOutbox(tx, this.roleChangedEnvelope(created.id, roles, actorId), created.id);
+      await this.repo.enqueueOutbox(tx, this.roleChangedEnvelope(created.id, roles, actorId), created.id);
       return created;
     });
 
@@ -138,31 +135,26 @@ export class AdminService {
   /** El operador abre el link de invitación y fija su contraseña → ACTIVE (TOTP queda sin enrolar). */
   async acceptInvite(token: string, password: string): Promise<{ email: string }> {
     const tokenHash = hashInviteToken(token);
-    const admin = await this.prisma.read.adminUser.findFirst({
-      where: { inviteTokenHash: tokenHash, status: AdminStatus.INVITED },
-    });
+    const admin = await this.repo.findInvitedByTokenHash(tokenHash);
     if (!admin) throw new UnauthorizedError('Invitación inválida o ya usada');
     if (!admin.inviteExpiresAt || admin.inviteExpiresAt < new Date()) {
       throw new UnauthorizedError('La invitación expiró');
     }
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-    await this.prisma.write.$transaction(async (tx) => {
-      const fresh = await tx.adminUser.findUnique({ where: { id: admin.id } });
+    await this.repo.runInTransaction(async (tx) => {
+      const fresh = await this.repo.findAdminByIdTx(tx, admin.id);
       if (!fresh) throw new UnauthorizedError('Invitación inválida o ya usada');
       // Re-asegura un solo uso bajo concurrencia: si otro accept ya limpió el hash, no hay invitación.
       if (fresh.inviteTokenHash !== tokenHash || fresh.status !== AdminStatus.INVITED) {
         throw new UnauthorizedError('Invitación inválida o ya usada');
       }
       adminStatusMachine.assertTransition(fresh.status, AdminStatus.ACTIVE);
-      await tx.adminUser.update({
-        where: { id: admin.id },
-        // Limpiar el hash invalida el token (un solo uso).
-        data: {
-          passwordHash,
-          status: AdminStatus.ACTIVE,
-          inviteTokenHash: null,
-          inviteExpiresAt: null,
-        },
+      // Limpiar el hash invalida el token (un solo uso).
+      await this.repo.updateAdminByIdTx(tx, admin.id, {
+        passwordHash,
+        status: AdminStatus.ACTIVE,
+        inviteTokenHash: null,
+        inviteExpiresAt: null,
       });
     });
     return { email: admin.email };
@@ -174,15 +166,15 @@ export class AdminService {
     actorId: string,
     id: string,
   ): Promise<{ inviteUrl: string; expiresAt: Date }> {
-    const existing = await this.prisma.read.adminUser.findUnique({ where: { id } });
+    const existing = await this.repo.findAdminById(id);
     if (!existing) throw new NotFoundError('Operador no encontrado');
     const { token, tokenHash, expiresAt } = generateInviteToken();
     // TOCTOU-safe (espejo de reject()): la lectura del status + el check anti-escalada se RE-validan
     // DENTRO de la tx con el write client. Sin esto, un reject() concurrente entre el read y la tx
     // dejaría re-emitir el token Y un `admin.role_changed` para una cuenta ya REVOCADA → ruido
     // forense en el WORM + token inútil. El update + el evento van en la MISMA tx.
-    const email = await this.prisma.write.$transaction(async (tx) => {
-      const admin = await tx.adminUser.findUnique({ where: { id } });
+    const email = await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, id);
       if (!admin) throw new NotFoundError('Operador no encontrado');
       if (admin.status !== AdminStatus.INVITED) {
         throw new ConflictError('El operador ya aceptó o no está invitado');
@@ -195,11 +187,11 @@ export class AdminService {
           requested: roles,
         });
       }
-      await tx.adminUser.update({
-        where: { id },
-        data: { inviteTokenHash: tokenHash, inviteExpiresAt: expiresAt },
+      await this.repo.updateAdminByIdTx(tx, id, {
+        inviteTokenHash: tokenHash,
+        inviteExpiresAt: expiresAt,
       });
-      await enqueueOutbox(tx, this.roleChangedEnvelope(id, roles, actorId), id);
+      await this.repo.enqueueOutbox(tx, this.roleChangedEnvelope(id, roles, actorId), id);
       return admin.email;
     });
     const inviteUrl = this.buildInviteUrl(token);
@@ -257,8 +249,8 @@ export class AdminService {
   async reject(actorRoles: AdminRole[], actorId: string, adminId: string): Promise<void> {
     // Lectura + assert DENTRO de la tx de escritura: sin lag de réplica ni TOCTOU
     // con un approve concurrente.
-    await this.prisma.write.$transaction(async (tx) => {
-      const admin = await tx.adminUser.findUnique({ where: { id: adminId } });
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
       if (!admin) throw new NotFoundError('Operador no encontrado');
       // Anti-escalada (autoridad final): nadie deshabilita su propia cuenta ni a un operador de rango
       // IGUAL o SUPERIOR. Evita que un ADMIN bloquee a un SUPERADMIN y el lockout entre pares.
@@ -272,19 +264,13 @@ export class AdminService {
         );
       }
       adminStatusMachine.assertTransition(admin.status, AdminStatus.REJECTED);
-      await tx.adminUser.update({
-        where: { id: adminId },
-        data: { status: AdminStatus.REJECTED },
-      });
+      await this.repo.updateAdminByIdTx(tx, adminId, { status: AdminStatus.REJECTED });
     });
   }
 
   /** Todos los operadores (gestión de staff): id, email, estado, roles, alta. */
   listOperators(): Promise<OperatorSummary[]> {
-    return this.prisma.read.adminUser.findMany({
-      select: { id: true, email: true, status: true, roles: true, createdAt: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.repo.listOperators();
   }
 
   // DEUDA: no hay recovery self-service de TOTP admin (un enrolado que pierde su Authenticator solo se recupera con reset manual de totp_enrolled=false en DB) · techo: con 1-2 admins se hace a mano, con más operadores escala mal y tienta a rotar el secreto (lo que desincroniza el teléfono y rompe el login — fue la causa raíz del incidente) · gatillo: si suben los operadores o hay >1 incidente de Authenticator perdido → endpoint de reset de enrolamiento (superadmin resetea a otro operador; jamás rotar el secreto)
@@ -301,9 +287,8 @@ export class AdminService {
 
     if (!admin.totpEnrolled) {
       const { secret, otpauthUrl } = enrollTotp(admin.email);
-      await this.prisma.write.adminUser.update({
-        where: { id: admin.id },
-        data: { totpSecretEnc: seal(secret, this.totpEncKey) },
+      await this.repo.updateAdminById(admin.id, {
+        totpSecretEnc: seal(secret, this.totpEncKey),
       });
       return { mustEnrollTotp: true, otpauthUrl };
     }
@@ -320,16 +305,13 @@ export class AdminService {
     const admin = await this.requireActiveAndAuthed(email, password);
     if (admin.totpEnrolled) throw new ConflictError('TOTP ya enrolado');
     await this.assertTotp(admin.totpSecretEnc, totp, admin.email);
-    await this.prisma.write.adminUser.update({
-      where: { id: admin.id },
-      data: { totpEnrolled: true },
-    });
+    await this.repo.updateAdminById(admin.id, { totpEnrolled: true });
     return this.issueTokens(admin.id, admin.email, admin.roles);
   }
 
   /** Step-up: re-verifica TOTP y emite un access token con MFA fresca para acciones sensibles (BR-S07). */
   async stepUp(adminId: string, totp: string): Promise<{ accessToken: string }> {
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { id: adminId } });
+    const admin = await this.repo.findAdminById(adminId);
     if (!admin || !isOperationalAdmin(admin)) throw new ForbiddenError('Operador no activo');
     // Lock activo → 429 sin verificar TOTP (corta el brute-force sobre el código en step-up).
     if (await this.isLocked(admin.email)) {
@@ -359,7 +341,7 @@ export class AdminService {
     if (await this.isLocked(email)) {
       throw new RateLimitError('Demasiados intentos, esperá unos minutos.');
     }
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { email } });
+    const admin = await this.repo.findAdminByEmail(email);
     if (!admin) throw new UnauthorizedError('Credenciales inválidas');
     if (!isOperationalAdmin(admin)) {
       throw new ForbiddenError('Operador no activo (pendiente de aprobación)');

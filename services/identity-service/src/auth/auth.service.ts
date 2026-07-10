@@ -6,7 +6,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { JwtService, RedisRefreshTokenStore, RefreshError, type SubjectType } from '@veo/auth';
 import { ForbiddenError, parseOrThrow, peruPhoneSchema, UnauthorizedError } from '@veo/utils';
 import { type AdminRole } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { AuthRepository } from './auth.repository';
 import { OtpService } from './otp.service';
 import { TokenIssuerService } from './token-issuer.service';
 import { registerUser } from './user-registration';
@@ -18,7 +18,7 @@ import type { AuthTokens } from './dto/auth.dto';
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: AuthRepository,
     private readonly otp: OtpService,
     private readonly jwt: JwtService,
     private readonly sessions: RedisRefreshTokenStore,
@@ -39,15 +39,11 @@ export class AuthService {
     const phone = parseOrThrow(peruPhoneSchema, rawPhone, 'phone');
     await this.otp.verify(phone, code);
 
-    const user = await this.prisma.write.$transaction(async (tx) => {
-      const existing = await tx.user.findUnique({ where: { phone } });
+    const user = await this.repo.runInTransaction(async (tx) => {
+      const existing = await this.repo.findUserByPhoneTx(tx, phone);
       if (existing) {
         // Asegurar el AuthMethod{PHONE_OTP} de usuarios previos (idempotente, ADR-012 Lote 1).
-        await tx.authMethod.upsert({
-          where: { userId_type: { userId: existing.id, type: 'PHONE_OTP' } },
-          create: { userId: existing.id, type: 'PHONE_OTP', verified: true },
-          update: {},
-        });
+        await this.repo.ensurePhoneOtpAuthMethodTx(tx, existing.id);
         return existing;
       }
       // Alta nueva: User + credencial PHONE_OTP (ADR-012 §2) + outbox user.registered, vía el
@@ -142,7 +138,7 @@ export class AuthService {
       return this.reissueUserAccess(sub, sid);
     }
     // Backward-compat (refresh sin `typ`): User primero, AdminUser después.
-    const user = await this.prisma.read.user.findUnique({ where: { id: sub } });
+    const user = await this.repo.findUserById(sub);
     if (user && !user.deletedAt) {
       return this.reissueUserAccess(sub, sid);
     }
@@ -153,7 +149,7 @@ export class AuthService {
     sub: string,
     sid: string,
   ): Promise<{ accessToken: string; typ: SubjectType }> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: sub } });
+    const user = await this.repo.findUserById(sub);
     if (!user || user.deletedAt) throw new UnauthorizedError('Usuario no disponible');
     const resolvedTyp = this.subjectType(user.type);
     const accessToken = await this.jwt.signAccessToken({
@@ -169,7 +165,7 @@ export class AuthService {
     sub: string,
     sid: string,
   ): Promise<{ accessToken: string; typ: SubjectType }> {
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { id: sub } });
+    const admin = await this.repo.findAdminById(sub);
     if (!admin || admin.deletedAt || !isOperationalAdmin(admin)) {
       throw new UnauthorizedError('Operador no disponible');
     }
