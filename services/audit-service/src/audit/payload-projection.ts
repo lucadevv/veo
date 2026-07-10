@@ -152,6 +152,16 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   // PBAC (ADR-024): `params` es un objeto tipado → lo descarta `isSafeValue` (posible detalle no-forense);
   // sobreviven la key (recurso), family, el toggle `enabled`, la `version` y el actor `updatedBy` + timestamp.
   'policy.updated': ['key', 'family', 'enabled', 'version', 'updatedBy', 'updatedAt'],
+  // Overlay de permisos (ADR-025 §3): rol/permiso (ejes del par), el flag `hidden` (restado/des-restaurado), la
+  // `version` y el actor `updatedBy` + timestamp. CERO PII: son identificadores de gobierno, no datos personales.
+  'permission_override.updated': [
+    'role',
+    'permission',
+    'hidden',
+    'version',
+    'updatedBy',
+    'updatedAt',
+  ],
   'driver.registered': ['driverId', 'userId', 'registeredAt'],
   'driver.verified': ['driverId', 'userId', 'verifiedAt'],
   'driver.rejected': ['driverId', 'userId', 'rejectedAt'], // reason z.string LIBRE → FUERA

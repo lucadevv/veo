@@ -451,6 +451,16 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'policy',
         resourceId: p.key,
       })),
+      // Cambio de un OVERRIDE de permiso (overlay subtract-only · ADR-025 §3 · capa 2 del gobierno unificado):
+      // traza inmutable de QUIÉN restó/des-restó QUÉ permiso a QUÉ rol. Es una MUTACIÓN de gobierno del acceso
+      // (separación de funciones · Ley 29733) → siempre al WORM, MISMO patrón que policy.updated: el superadmin
+      // viaja en el payload (`updatedBy`, identidad admin-rail firmada) → actor=updatedBy, recurso=`role|permission`
+      // (el par afectado). La proyección allowlist deja pasar rol/permiso/hidden/version/updatedBy/updatedAt (cero PII).
+      'permission_override.updated': this.audited('permission_override.updated', (p) => ({
+        actorId: p.updatedBy,
+        resourceType: 'permission_override',
+        resourceId: `${p.role}|${p.permission}`,
+      })),
       // AUTO-suspensión por exceso de cancelaciones (regla automática de dispatch, ventana rolling 24h): no hay
       // operador → actor='system', recurso=driver/driverId. Traza la decisión automática que suspende al conductor.
       'driver.excessive_cancellations': this.audited('driver.excessive_cancellations', (p) => ({

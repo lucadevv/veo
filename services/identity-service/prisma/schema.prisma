@@ -476,3 +476,29 @@ model Policy {
   @@map("policies")
   @@schema("identity")
 }
+
+/// Overlay de VISIBILIDAD de permisos (ADR-025 §3) — la CAPA 2 del gobierno unificado, en el MISMO módulo que
+/// las Políticas. Registro SUBTRACT-ONLY: guarda SOLO los pares (rol, permiso) que el superadmin RESTÓ a un rol.
+/// El permiso EFECTIVO = `base(rol, permiso)` AND NOT `override.hidden` (la base vive en CÓDIGO · `@veo/policy`
+/// `PERMISSION_ROLES`; este registro solo la mitad editable). AUSENCIA de fila = rige la base (fail-safe). El
+/// invariante (solo se resta lo que la base concede; nunca un candado legal · Ley 29733) lo enforcea el service.
+/// Arranca VACÍO (sin seed) = sin restricciones = base pura. Cada mutación bumpea `version` + emite
+/// `permission_override.updated` por outbox EN LA MISMA tx (audit WORM + invalidación de cache de `@veo/policy`).
+model PermissionOverride {
+  /// Rol afectado (un `AdminRole` de `@veo/shared-types`, guardado como String — el eje FILA del overlay).
+  role       String
+  /// Permiso restado ('drivers:approve', 'ops:view', …) — el eje COLUMNA. Validado contra `PERMISSION_ROLES`.
+  permission String
+  /// subtract-only: true = RESTADO a ese rol; false = des-restaurado explícito (equivale a ausencia → base).
+  hidden     Boolean  @default(true)
+  /// actorId del superadmin que lo mutó (accountability; el WORM es la verdad). Nunca 'system' (no hay seed).
+  updatedBy  String   @map("updated_by")
+  /// Momento del último cambio (auto). Ordena el historial junto con `version`.
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  /// Versión MONOTÓNICA: bump en cada cambio (cache-busting / orden ante reentrega). Arranca en 1.
+  version    Int      @default(1)
+
+  @@id([role, permission])
+  @@map("permission_overrides")
+  @@schema("identity")
+}

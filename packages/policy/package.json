@@ -46,6 +46,7 @@
     "@nestjs/common": "^10.4.4",
     "@veo/auth": "workspace:*",
     "@veo/events": "workspace:*",
-    "@veo/rpc": "workspace:*"
+    "@veo/rpc": "workspace:*",
+    "@veo/shared-types": "workspace:*"
   }
 }
