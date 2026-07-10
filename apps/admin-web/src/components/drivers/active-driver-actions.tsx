@@ -22,6 +22,7 @@ const CAUSE_LABEL: Record<SuspensionCause, string> = {
   [SuspensionCause.INSPECTION_EXPIRED]: 'inspección técnica (ITV) vencida',
   [SuspensionCause.RATING_LOW]: 'rating bajo',
   [SuspensionCause.EXCESSIVE_CANCELLATIONS]: 'exceso de cancelaciones',
+  [SuspensionCause.CATEGORY_DISABLED]: 'clase de servicio desactivada del catálogo',
 };
 
 /**
