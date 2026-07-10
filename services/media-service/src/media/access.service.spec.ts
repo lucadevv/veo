@@ -248,6 +248,35 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
     expect(seg.accessedCount).toBe(0);
   });
 
+  it('FOUR-EYES (Ley 29733): rechaza aprobar la PROPIA solicitud (approverId === requestedBy)', async () => {
+    // El solicitante (op-1) intenta aprobar su propia solicitud: doble control por personas DISTINTAS.
+    const req = pendingRequest({ requestedBy: 'op-1' });
+    const svc = new AccessService(
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.approveAccess('req-1', 'op-1', now)).rejects.toBeInstanceOf(ForbiddenError);
+    // No transicionó: sigue PENDING, sin aprobador sellado.
+    expect(req.status).toBe(VideoAccessStatus.PENDING);
+    expect(req.approvedBy).toBeNull();
+    expect(req.approvedAt).toBeNull();
+  });
+
+  it('FOUR-EYES: aprobar la solicitud de OTRO operador sigue funcionando (APPROVED)', async () => {
+    // requestedBy=op-1, approver=compliance-2 (persona distinta) → aprueba correctamente.
+    const req = pendingRequest({ requestedBy: 'op-1' });
+    const svc = new AccessService(
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
+      new StorageSandboxAdapter(),
+      config,
+    );
+    const res = await svc.approveAccess('req-1', 'compliance-2', now);
+    expect(res.status).toBe(VideoAccessStatus.APPROVED);
+    expect(res.approvedBy).toBe('compliance-2');
+    expect(res.approvedAt).toEqual(now);
+  });
+
   it('no permite aprobar una solicitud ya decidida (guard de transición)', async () => {
     const req = pendingRequest({
       status: VideoAccessStatus.APPROVED,

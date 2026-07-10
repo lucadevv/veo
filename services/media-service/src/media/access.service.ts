@@ -131,12 +131,25 @@ export class AccessService {
    * Paso 2a: APROBACIÓN por COMPLIANCE_SUPERVISOR (RBAC + MFA fresca verificados en el controlador).
    * SOLO transiciona estado (PENDING → APPROVED) y audita por outbox. NO genera URL ni watermark:
    * eso ocurre en cada `streamAccess`. Guard de transición: solo desde PENDING.
+   *
+   * DOBLE CONTROL POR PERSONAS DISTINTAS (four-eyes · Ley 29733): el aprobador NO puede ser el solicitante.
+   * `approverId` y `req.requestedBy` son AMBOS el `user.userId` firmado del operador (media.controller: paso 1
+   * `requestedBy: user.userId`, paso 2a `approveAccess(id, user.userId)`; el admin-bff propaga la MISMA
+   * identidad interna en las dos llamadas), por lo que la comparación de identidad es válida (mismo id). Sin
+   * esta guarda, una sola persona con rol podría solicitar, aprobar SU PROPIA solicitud y reproducir el video
+   * — el step-up MFA es 2FA de la misma persona, NO una 2ª persona.
+   * DEUDA: separar media:request/media:approve por rol para forzar four-eyes también por rol (decisión de producto).
    */
   async approveAccess(requestId: string, approverId: string, now = new Date()) {
     const req = await this.repo.findAccessRequestById(requestId);
     if (!req) throw new NotFoundError('Solicitud de acceso no encontrada');
     if (req.status !== VideoAccessStatus.PENDING) {
       throw new ConflictError('La solicitud ya fue decidida');
+    }
+    if (approverId === req.requestedBy) {
+      throw new ForbiddenError(
+        'No podés aprobar tu propia solicitud de acceso a video (doble control · Ley 29733)',
+      );
     }
 
     const updated = await this.repo.runInTx(async (tx) => {
