@@ -35,6 +35,7 @@ import {
   PaymentsService,
   UNRECOVERABLE_REFUND_FAILURE_PREFIX,
 } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { deriveBookingCancellationRefundDedupKey } from '../src/payments/payment.policy';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type {
@@ -109,8 +110,7 @@ function makeService(
       : {}),
   } as unknown as PaymentGateway;
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  const service = new PaymentsService(
-    prismaService,
+  const service = new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     noAffiliation,
     noPromos,

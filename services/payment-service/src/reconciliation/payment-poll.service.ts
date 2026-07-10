@@ -27,7 +27,7 @@ import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import type Redis from 'ioredis';
 import { withDistributedLock } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { ReconciliationRepository } from './reconciliation.repository';
 import { REDIS } from '../infra/redis';
 import {
   PAYMENT_GATEWAY,
@@ -55,7 +55,7 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
   private running = false;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: ReconciliationRepository,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
     private readonly payments: PaymentsService,
@@ -139,15 +139,7 @@ export class PaymentPollService implements OnModuleInit, OnModuleDestroy {
     if (!supportsStatusQuery(this.gateway)) return { scanned: 0, applied: 0 };
 
     const since = new Date(Date.now() - this.maxAgeMin * 60_000);
-    const pending = await this.prisma.read.payment.findMany({
-      where: {
-        status: 'PENDING',
-        externalUid: { not: null },
-      },
-      select: { id: true, externalUid: true, createdAt: true },
-      orderBy: { createdAt: 'asc' },
-      take: this.batch,
-    });
+    const pending = await this.repo.findPendingPaymentsWithExternalUid(this.batch);
     if (pending.length === 0) return { scanned: 0, applied: 0 };
 
     let applied = 0;

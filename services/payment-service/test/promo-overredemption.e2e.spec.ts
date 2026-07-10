@@ -18,6 +18,7 @@ import {
 import { uuidv7 } from '@veo/utils';
 import { PrismaClient } from '../src/generated/prisma';
 import { PromotionsService } from '../src/promotions/promotions.service';
+import { PromotionsRepository } from '../src/promotions/promotions.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
@@ -34,7 +35,9 @@ beforeAll(async () => {
   prisma = new PrismaClient({ datasourceUrl: db.databaseUrl });
   await prisma.$connect();
   // read y write al MISMO cliente del contenedor (el advisory lock necesita PG real, no un doble).
-  promotions = new PromotionsService({ read: prisma, write: prisma } as unknown as PrismaService);
+  promotions = new PromotionsService(
+    new PromotionsRepository({ read: prisma, write: prisma } as unknown as PrismaService),
+  );
 }, 180_000);
 
 afterAll(async () => {

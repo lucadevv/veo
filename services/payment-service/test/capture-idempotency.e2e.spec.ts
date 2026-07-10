@@ -20,6 +20,7 @@ import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type { PaymentGateway } from '../src/ports/gateway/payment-gateway.port';
 import type { AffiliationsService } from '../src/affiliations/affiliations.service';
@@ -68,8 +69,7 @@ beforeAll(async () => {
   const gateway = {} as unknown as PaymentGateway;
   const affiliations = {} as unknown as AffiliationsService;
   const promotions = {} as unknown as PromotionsService;
-  payments = new PaymentsService(
-    prismaService,
+  payments = new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     affiliations,
     promotions,

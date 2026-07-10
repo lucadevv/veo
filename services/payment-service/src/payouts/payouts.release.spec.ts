@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ExternalServiceError, ForbiddenError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { PayoutsService } from './payouts.service';
-import type { PrismaService } from '../infra/prisma.service';
+import type { PayoutsRepository } from './payouts.repository';
 import type {
   PayoutGateway,
   DisburseRequest,
@@ -76,93 +76,66 @@ function pendingPayout(id: string, driverId: string, amountCents: number): FakeP
   return { ...heldPayout(id, driverId, amountCents), status: 'PENDING', heldReason: null };
 }
 
-function makePrisma(rows: FakePayout[]) {
+/**
+ * Fake REPO (ratings-spec style): modela el store de payouts (Map) + outbox, y expone los métodos de dominio que
+ * releaseHeldPayouts / disbursePendingForPeriod / holdDriver usan. Los métodos tx-scoped IGNORAN el `tx` opaco y
+ * mutan el store; `runInTransaction` corre el `work` con un tx vacío. Los CAS (status de origen) viven en el fake
+ * igual que en el repo real (predicado hardcodeado): si el estado no matchea, count:0 (idempotencia/no-op).
+ */
+function makeRepo(rows: FakePayout[]) {
   const payouts = new Map(rows.map((p) => [p.id, p]));
   const outbox: { aggregateId: string; eventType: string; envelope: unknown }[] = [];
-  const tx = {
-    payout: {
-      updateMany: vi.fn(
-        async ({
-          where,
-          data,
-        }: {
-          where: { id: string; status: string };
-          data: Partial<FakePayout>;
-        }) => {
-          const p = payouts.get(where.id);
-          if (p?.status !== where.status) return { count: 0 };
-          Object.assign(p, data);
-          return { count: 1 };
-        },
-      ),
-    },
-    outboxEvent: {
-      create: vi.fn(
-        async ({
-          data,
-        }: {
-          data: { aggregateId: string; eventType: string; envelope: unknown };
-        }) => {
-          outbox.push(data);
-          return data;
-        },
-      ),
-    },
+  const repo = {
+    // ── Lecturas ──
+    findHeldPayoutsByDriver: vi.fn(async (driverId: string) =>
+      [...payouts.values()]
+        .filter((p) => p.driverId === driverId && p.status === 'HELD')
+        .sort((a, b) => +a.periodStart - +b.periodStart),
+    ),
+    findPendingPayoutsForPeriod: vi.fn(async (start: Date, end: Date) =>
+      [...payouts.values()]
+        .filter(
+          (p) => p.status === 'PENDING' && +p.periodStart === +start && +p.periodEnd === +end,
+        )
+        .sort((a, b) => (a.id < b.id ? -1 : 1)),
+    ),
+    // ── Escrituras no-tx (CAS status=PENDING hardcodeado) ──
+    holdPendingPayoutsByIds: vi.fn(async (ids: string[], heldReason: string) => {
+      for (const id of ids) {
+        const p = payouts.get(id);
+        if (p?.status === 'PENDING') Object.assign(p, { status: 'HELD', heldReason });
+      }
+    }),
+    holdPendingPayoutsByDriver: vi.fn(async (driverId: string, heldReason: string) => {
+      for (const p of payouts.values()) {
+        if (p.driverId === driverId && p.status === 'PENDING') {
+          Object.assign(p, { status: 'HELD', heldReason });
+        }
+      }
+    }),
+    // disburseOne persiste el externalRef FUERA de la tx (I/O externo): el doble lo aplica al row.
+    persistPayoutExternalRef: vi.fn(async (payoutId: string, externalRef: string) => {
+      const p = payouts.get(payoutId);
+      if (p) p.externalRef = externalRef;
+    }),
+    // ── Unit-of-work ──
+    runInTransaction: vi.fn(async <T>(work: (tx: unknown) => Promise<T>): Promise<T> => work({})),
+    // CAS por status de origen: gana UNA corrida; el doble-click ve count:0 (no re-emite ni re-invoca el riel).
+    casClaimPayoutProcessingInTx: vi.fn(
+      async (_tx: unknown, payoutId: string, fromStatus: string, dedupKey: string) => {
+        const p = payouts.get(payoutId);
+        if (p?.status !== fromStatus) return { count: 0 };
+        Object.assign(p, { status: 'PROCESSING', dedupKey });
+        return { count: 1 };
+      },
+    ),
+    enqueueOutbox: vi.fn(
+      async (_tx: unknown, envelope: { eventType: string }, aggregateId: string) => {
+        outbox.push({ aggregateId, eventType: envelope.eventType, envelope });
+      },
+    ),
   };
-  // Filtro genérico: soporta la query por-driverId (release) Y la query por-período (disbursePendingForPeriod).
-  const matches = (
-    p: FakePayout,
-    where: { driverId?: string; status?: string; periodStart?: Date; periodEnd?: Date },
-  ): boolean =>
-    (where.driverId === undefined || p.driverId === where.driverId) &&
-    (where.status === undefined || p.status === where.status) &&
-    (where.periodStart === undefined || +p.periodStart === +where.periodStart) &&
-    (where.periodEnd === undefined || +p.periodEnd === +where.periodEnd);
-  const prisma = {
-    read: {
-      payout: {
-        findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
-          [...payouts.values()].filter((p) => matches(p, where)),
-        ),
-      },
-    },
-    write: {
-      $transaction: async <T>(cb: (t: typeof tx) => Promise<T>): Promise<T> => cb(tx),
-      // disburseOne persiste el externalRef FUERA de la tx (I/O externo): el doble lo aplica al row.
-      payout: {
-        update: vi.fn(
-          async ({ where, data }: { where: { id: string }; data: Partial<FakePayout> }) => {
-            const p = payouts.get(where.id);
-            if (p) Object.assign(p, data);
-            return p;
-          },
-        ),
-        // holdDriver (retro-hold por driverId) + disbursePendingForPeriod (backstop por id:{in}). CAS por status.
-        updateMany: vi.fn(
-          async ({
-            where,
-            data,
-          }: {
-            where: { driverId?: string; id?: { in: string[] }; status?: string };
-            data: Partial<FakePayout>;
-          }) => {
-            let count = 0;
-            for (const p of payouts.values()) {
-              const idOk = where.id === undefined || where.id.in.includes(p.id);
-              const drvOk = where.driverId === undefined || p.driverId === where.driverId;
-              const stOk = where.status === undefined || p.status === where.status;
-              if (idOk && drvOk && stOk) {
-                Object.assign(p, data);
-                count++;
-              }
-            }
-            return { count };
-          },
-        ),
-      },
-    },
-  } as unknown as PrismaService;
-  return { prisma, payouts, outbox };
+  return { repo: repo as unknown as PayoutsRepository, payouts, outbox };
 }
 
 function makeRedis() {
@@ -186,13 +159,13 @@ const operatorWithFreshMfa: AuthenticatedUser = {
 
 describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.flagged)', () => {
   it('libera HELD→PROCESSING, emite payout.processing por outbox, invoca el riel y des-flaguea (srem)', async () => {
-    const { prisma, payouts, outbox } = makePrisma([
+    const { repo, payouts, outbox } = makeRepo([
       heldPayout('po-1', 'drv-1', 4000),
       heldPayout('po-2', 'drv-1', 6000),
     ]);
     const { redis, flagged } = makeRedis();
     const gateway = makeGateway();
-    const svc = new PayoutsService(prisma, redis as never, gateway, config);
+    const svc = new PayoutsService(repo, redis as never, gateway, config);
 
     const res = await svc.releaseHeldPayouts('drv-1', operatorWithFreshMfa);
 
@@ -210,9 +183,9 @@ describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.fl
   });
 
   it('es idempotente: una segunda liberación libera 0 y NO re-emite eventos', async () => {
-    const { prisma, outbox } = makePrisma([heldPayout('po-1', 'drv-1', 4000)]);
+    const { repo, outbox } = makeRepo([heldPayout('po-1', 'drv-1', 4000)]);
     const { redis } = makeRedis();
-    const svc = new PayoutsService(prisma, redis as never, makeGateway(), config);
+    const svc = new PayoutsService(repo, redis as never, makeGateway(), config);
 
     await svc.releaseHeldPayouts('drv-1', operatorWithFreshMfa);
     const second = await svc.releaseHeldPayouts('drv-1', operatorWithFreshMfa);
@@ -222,10 +195,10 @@ describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.fl
   });
 
   it('plata grande SIN MFA fresca → ForbiddenError, sin liberar ni des-flaguear (BR-S07)', async () => {
-    const { prisma, payouts, outbox } = makePrisma([heldPayout('po-1', 'drv-1', 600_000)]);
+    const { repo, payouts, outbox } = makeRepo([heldPayout('po-1', 'drv-1', 600_000)]);
     const { redis, flagged } = makeRedis();
     const gateway = makeGateway();
-    const svc = new PayoutsService(prisma, redis as never, gateway, config);
+    const svc = new PayoutsService(repo, redis as never, gateway, config);
     const staleOperator = { userId: 'op-1', roles: ['FINANCE'] } as AuthenticatedUser;
 
     await expect(svc.releaseHeldPayouts('drv-1', staleOperator)).rejects.toBeInstanceOf(
@@ -238,10 +211,10 @@ describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.fl
   });
 
   it('riel money-OUT NO disponible (live diferido): falla-rápido SIN mover el HELD ni des-flaguear (ADR-015 §8)', async () => {
-    const { prisma, payouts, outbox } = makePrisma([heldPayout('po-1', 'drv-1', 4000)]);
+    const { repo, payouts, outbox } = makeRepo([heldPayout('po-1', 'drv-1', 4000)]);
     const { redis, flagged } = makeRedis();
     const gateway = makeGateway(false); // isAvailable()=false: espeja el YapePlinPayoutGateway diferido
-    const svc = new PayoutsService(prisma, redis as never, gateway, config);
+    const svc = new PayoutsService(repo, redis as never, gateway, config);
 
     // Gate pre-claim: rechaza el disparo ANTES de tocar el estado → ningún payout queda PROCESSING colgado.
     await expect(svc.releaseHeldPayouts('drv-1', operatorWithFreshMfa)).rejects.toBeInstanceOf(
@@ -255,9 +228,9 @@ describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.fl
   });
 
   it('conductor sin payouts HELD: no-op honesto (released=0) pero igual des-flaguea', async () => {
-    const { prisma, outbox } = makePrisma([]);
+    const { repo, outbox } = makeRepo([]);
     const { redis, flagged } = makeRedis();
-    const svc = new PayoutsService(prisma, redis as never, makeGateway(), config);
+    const svc = new PayoutsService(repo, redis as never, makeGateway(), config);
 
     const res = await svc.releaseHeldPayouts('drv-1', operatorWithFreshMfa);
 
@@ -270,9 +243,9 @@ describe('PayoutsService.releaseHeldPayouts (S4 · camino de vuelta de driver.fl
 describe('PayoutsService · gate de review en el DESEMBOLSO (fix crítico · driver.flagged post-cron)', () => {
   it('holdDriver retro-flippea a HELD los Payout PENDING existentes del conductor (+ sadd)', async () => {
     // drv-2 tiene un PENDING (nacido del cron) y NO estaba flaggeado; llega driver.flagged.
-    const { prisma, payouts } = makePrisma([pendingPayout('po-1', 'drv-2', 4000)]);
+    const { repo, payouts } = makeRepo([pendingPayout('po-1', 'drv-2', 4000)]);
     const { redis, flagged } = makeRedis(); // flagged = {drv-1}
-    const svc = new PayoutsService(prisma, redis as never, makeGateway(), config);
+    const svc = new PayoutsService(repo, redis as never, makeGateway(), config);
 
     await svc.holdDriver('drv-2');
 
@@ -286,13 +259,13 @@ describe('PayoutsService · gate de review en el DESEMBOLSO (fix crítico · dri
     const end = new Date('2026-05-25T00:00:00Z');
     // po-flagged: driver EN REVIEW (drv-1 ∈ flagged). po-clean: driver limpio (drv-2). Simula el flag llegado
     // DESPUÉS de la agregación (ambos ya PENDING) y ANTES del disparo del operador.
-    const { prisma, payouts } = makePrisma([
+    const { repo, payouts } = makeRepo([
       pendingPayout('po-flagged', 'drv-1', 4000),
       pendingPayout('po-clean', 'drv-2', 6000),
     ]);
     const { redis } = makeRedis(); // flagged = {drv-1}
     const gateway = makeGateway();
-    const svc = new PayoutsService(prisma, redis as never, gateway, config);
+    const svc = new PayoutsService(repo, redis as never, gateway, config);
 
     await svc.disbursePendingForPeriod(start, end);
 

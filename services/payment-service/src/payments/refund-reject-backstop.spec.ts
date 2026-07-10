@@ -20,7 +20,7 @@ import { UnprocessableEntityError } from '@veo/utils';
 import { PaymentsService } from './payments.service';
 import { BookingCancelledRazon } from '@veo/events';
 import { deriveBookingCancellationRefundDedupKey } from './payment.policy';
-import type { PrismaService } from '../infra/prisma.service';
+import type { PaymentTx } from './payments.repository';
 import type { PaymentMetrics } from '../metrics/payment.metrics';
 import type { PaymentGateway, RefundResult } from '../ports/gateway/payment-gateway.port';
 
@@ -71,118 +71,85 @@ function capturedPayment(over: Partial<FakePayment> = {}): FakePayment {
 }
 
 /**
- * Prisma double en memoria que honra el CAS del Refund (updateMany where status=PENDING) y el `decrement`
- * atómico del Payment. Soporta TANTO el camino síncrono (refundForBookingCancellation → refundViaGateway) como
- * el async (applyRefundWebhookResult → findFirst por externalRefundId → rejectRefundAndCompensate).
+ * Repo fake (mock del SEAM PaymentsRepository) que honra el CAS del Refund (PENDING→REJECTED) y el `decrement`
+ * atómico del Payment. Soporta TANTO el camino síncrono (refundForBookingCancellation → refundViaGateway) como el
+ * async (applyRefundWebhookResult → findRefundByExternalRefundId → rejectRefundAndCompensate).
  */
-function makePrisma(payment: FakePayment, seedRefund?: FakeRefund) {
+function makeRepo(payment: FakePayment, seedRefund?: FakeRefund) {
   const refunds: FakeRefund[] = seedRefund ? [seedRefund] : [];
 
-  const tx = {
-    payment: {
-      // CAS de la RESERVA (claimRefundReservationInTx) en el camino síncrono.
-      updateMany: vi.fn(
-        async ({
-          where,
-          data,
-        }: {
-          where: { id: string; status: { in: string[] }; refundedCents: number };
-          data: Partial<FakePayment>;
-        }) => {
-          if (
-            payment.id !== where.id ||
-            !where.status.in.includes(payment.status) ||
-            payment.refundedCents !== where.refundedCents
-          ) {
-            return { count: 0 };
-          }
-          Object.assign(payment, data);
-          return { count: 1 };
-        },
-      ),
-      // Compensación: decrement atómico + restauración de status (rejectRefundAndCompensate).
-      update: vi.fn(
-        async ({
-          data,
-        }: {
-          where: { id: string };
-          data: {
-            refundedCents?: { decrement: number };
-            status?: string;
-            refundedAt?: Date | null;
-          };
-        }) => {
-          if (data.refundedCents?.decrement !== undefined) {
-            payment.refundedCents -= data.refundedCents.decrement;
-          }
-          if (data.status !== undefined) payment.status = data.status;
-          if (data.refundedAt !== undefined) payment.refundedAt = data.refundedAt;
-          return { ...payment };
-        },
-      ),
-    },
-    refund: {
-      create: vi.fn(async ({ data }: { data: FakeRefund }) => {
-        refunds.push(data);
-        return data;
-      }),
-      // CAS PENDING→REJECTED.
-      updateMany: vi.fn(
-        async ({
-          where,
-          data,
-        }: {
-          where: { id: string; status: string };
-          data: Partial<FakeRefund>;
-        }) => {
-          const r = refunds.find((x) => x.id === where.id && x.status === where.status);
-          if (!r) return { count: 0 };
-          Object.assign(r, data);
-          return { count: 1 };
-        },
-      ),
-      findUniqueOrThrow: vi.fn(async ({ where }: { where: { id: string } }) => {
-        const r = refunds.find((x) => x.id === where.id);
-        if (!r) throw new Error('refund not found');
-        return { ...r };
-      }),
-    },
-    outboxEvent: { create: vi.fn(async ({ data }: { data: unknown }) => data) },
+  const repo = {
+    findRefundablePaymentByTrip: vi.fn(async (tripId: string) =>
+      payment.tripId === tripId && ['CAPTURED', 'PARTIALLY_REFUNDED'].includes(payment.status)
+        ? payment
+        : null,
+    ),
+    findRefundByExternalRefundId: vi.fn(
+      async (uid: string) => refunds.find((r) => r.externalRefundId === uid) ?? null,
+    ),
+    runInTransaction: async <T>(work: (tx: PaymentTx) => Promise<T>): Promise<T> =>
+      work({} as PaymentTx),
+    // CAS de la RESERVA (claimRefundReservationInTx) en el camino síncrono.
+    casClaimRefundReservation: vi.fn(
+      async (
+        _tx: PaymentTx,
+        paymentId: string,
+        expectedRefundedCents: number,
+        data: Partial<FakePayment>,
+      ) => {
+        if (
+          payment.id !== paymentId ||
+          !['CAPTURED', 'PARTIALLY_REFUNDED'].includes(payment.status) ||
+          payment.refundedCents !== expectedRefundedCents
+        ) {
+          return { count: 0 };
+        }
+        Object.assign(payment, data);
+        return { count: 1 };
+      },
+    ),
+    createRefundInTx: vi.fn(async (_tx: PaymentTx, data: FakeRefund) => {
+      refunds.push(data);
+      return data;
+    }),
+    // Persistencia del uid del reverso (refundViaGateway, fuera de la tx de reserva).
+    setRefundExternalId: vi.fn(async (refundId: string, externalRefundId: string) => {
+      const r = refunds.find((x) => x.id === refundId);
+      if (r) r.externalRefundId = externalRefundId;
+    }),
+    // CAS PENDING→REJECTED (único punto donde un Refund se vuelve REJECTED).
+    casRejectRefund: vi.fn(
+      async (_tx: PaymentTx, refundId: string, data: Partial<FakeRefund>) => {
+        const r = refunds.find((x) => x.id === refundId && x.status === 'PENDING');
+        if (!r) return { count: 0 };
+        Object.assign(r, data);
+        return { count: 1 };
+      },
+    ),
+    findRefundByIdInTx: vi.fn(async (_tx: PaymentTx, refundId: string) => {
+      const r = refunds.find((x) => x.id === refundId);
+      if (!r) throw new Error('refund not found');
+      return { ...r };
+    }),
+    // Compensación: decrement atómico → devuelve el Payment con el saldo real ya restado.
+    decrementPaymentRefundedInTx: vi.fn(
+      async (_tx: PaymentTx, _paymentId: string, amountCents: number) => {
+        payment.refundedCents -= amountCents;
+        return { ...payment };
+      },
+    ),
+    // Restauración del status del Payment tras compensar (PARTIALLY_REFUNDED|CAPTURED derivado del saldo).
+    restorePaymentAfterRejectInTx: vi.fn(
+      async (_tx: PaymentTx, _paymentId: string, data: { status?: string; refundedAt?: Date | null }) => {
+        if (data.status !== undefined) payment.status = data.status;
+        if (data.refundedAt !== undefined) payment.refundedAt = data.refundedAt;
+      },
+    ),
+    findDriverDebtByPaymentInTx: vi.fn(async () => null),
+    enqueueOutbox: vi.fn(async () => {}),
   };
 
-  const prisma = {
-    read: {
-      payment: {
-        findFirst: vi.fn(
-          async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
-            payment.tripId === where.tripId && where.status.in.includes(payment.status)
-              ? payment
-              : null,
-        ),
-      },
-      refund: {
-        findFirst: vi.fn(
-          async ({ where }: { where: { externalRefundId: string } }) =>
-            refunds.find((r) => r.externalRefundId === where.externalRefundId) ?? null,
-        ),
-      },
-    },
-    write: {
-      $transaction: async <T>(cb: (t: typeof tx) => Promise<T>): Promise<T> => cb(tx),
-      // Persistencia del uid del reverso (refundViaGateway, fuera de la tx de reserva).
-      refund: {
-        update: vi.fn(
-          async ({ where, data }: { where: { id: string }; data: Partial<FakeRefund> }) => {
-            const r = refunds.find((x) => x.id === where.id);
-            if (r) Object.assign(r, data);
-            return r;
-          },
-        ),
-      },
-    },
-  } as unknown as PrismaService;
-
-  return { prisma, refunds };
+  return { repo, refunds };
 }
 
 const config = { getOrThrow: () => 0 } as never;
@@ -198,9 +165,13 @@ function rejectingGateway(result: RefundResult): PaymentGateway {
   } as unknown as PaymentGateway;
 }
 
-function buildService(prisma: PrismaService, gateway: PaymentGateway, metrics: PaymentMetrics) {
-  // Orden del constructor: (prisma, gateway, affiliations, promotions, config, credit?, metrics?).
-  return new PaymentsService(prisma, gateway, {} as never, {} as never, config, undefined, metrics);
+function buildService(
+  repo: ReturnType<typeof makeRepo>['repo'],
+  gateway: PaymentGateway,
+  metrics: PaymentMetrics,
+) {
+  // Orden del constructor: (repo, gateway, affiliations, promotions, config, credit?, metrics?).
+  return new PaymentsService(repo as never, gateway, {} as never, {} as never, config, undefined, metrics);
 }
 
 const BOOKING_ID = '018f9a3e-1c2b-7d4e-8a1f-0123456789ab';
@@ -226,10 +197,10 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       reason: BookingCancelledRazon.ASIENTO_LLENO,
       failureReason: null,
     };
-    const { prisma, refunds } = makePrisma(payment, pendingRefund);
+    const { repo, refunds } = makeRepo(payment, pendingRefund);
     const incRefundBackstop = vi.fn();
     const metrics = { incRefundBackstop } as unknown as PaymentMetrics;
-    const svc = buildService(prisma, rejectingGateway({ status: 'PENDING' }), metrics);
+    const svc = buildService(repo, rejectingGateway({ status: 'PENDING' }), metrics);
 
     const res = await svc.applyRefundWebhookResult({
       externalRefundId: 'reverse-uid-async',
@@ -264,10 +235,10 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       reason: BookingCancelledRazon.OFERTA_NO_DISPONIBLE,
       failureReason: null,
     };
-    const { prisma } = makePrisma(payment, pendingRefund);
+    const { repo } = makeRepo(payment, pendingRefund);
     const incRefundBackstop = vi.fn();
     const metrics = { incRefundBackstop } as unknown as PaymentMetrics;
-    const svc = buildService(prisma, rejectingGateway({ status: 'PENDING' }), metrics);
+    const svc = buildService(repo, rejectingGateway({ status: 'PENDING' }), metrics);
 
     await svc.applyRefundWebhookResult({ externalRefundId: 'reverse-uid-exp', status: 'EXPIRED' });
 
@@ -293,10 +264,10 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       reason: BookingCancelledRazon.ASIENTO_LLENO,
       failureReason: null,
     };
-    const { prisma } = makePrisma(payment, pendingRefund);
+    const { repo } = makeRepo(payment, pendingRefund);
     const incRefundBackstop = vi.fn();
     const metrics = { incRefundBackstop } as unknown as PaymentMetrics;
-    const svc = buildService(prisma, rejectingGateway({ status: 'PENDING' }), metrics);
+    const svc = buildService(repo, rejectingGateway({ status: 'PENDING' }), metrics);
 
     await svc.applyRefundWebhookResult({
       externalRefundId: 'reverse-uid-redeliv',
@@ -314,11 +285,11 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
     // El gateway rechaza síncrono → rejectRefundAndCompensate emite la métrica y LUEGO refundViaGateway lanza
     // UnprocessableEntityError. El consumer (que YA NO emite 'rejected') solo absorbe → conteo total = 1.
     const payment = capturedPayment();
-    const { prisma } = makePrisma(payment);
+    const { repo } = makeRepo(payment);
     const incRefundBackstop = vi.fn();
     const metrics = { incRefundBackstop } as unknown as PaymentMetrics;
     const svc = buildService(
-      prisma,
+      repo,
       rejectingGateway({ status: 'REJECTED', reason: 'reverse_rejected' }),
       metrics,
     );
@@ -355,10 +326,10 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       reason: 'goodwill',
       failureReason: null,
     };
-    const { prisma, refunds } = makePrisma(payment, adminRefund);
+    const { repo, refunds } = makeRepo(payment, adminRefund);
     const incRefundBackstop = vi.fn();
     const metrics = { incRefundBackstop } as unknown as PaymentMetrics;
-    const svc = buildService(prisma, rejectingGateway({ status: 'PENDING' }), metrics);
+    const svc = buildService(repo, rejectingGateway({ status: 'PENDING' }), metrics);
 
     const res = await svc.applyRefundWebhookResult({
       externalRefundId: 'reverse-uid-admin',

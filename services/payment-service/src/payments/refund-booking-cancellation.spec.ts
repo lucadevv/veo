@@ -15,7 +15,7 @@ import { Prisma } from '../generated/prisma';
 import { PaymentsService, SYSTEM_OPERATOR } from './payments.service';
 import { BookingCancelledRazon } from '@veo/events';
 import { deriveBookingCancellationRefundDedupKey } from './payment.policy';
-import type { PrismaService } from '../infra/prisma.service';
+import type { PaymentTx } from './payments.repository';
 
 interface FakePayment {
   id: string;
@@ -43,11 +43,11 @@ interface FakeRefund {
   reason: string;
 }
 
-type OutboxRow = {
+interface OutboxRow {
   aggregateId: string;
   eventType: string;
   envelope: { payload: Record<string, unknown> };
-};
+}
 
 // P2002 (unique violation) con la shape que `isUniqueViolation` reconoce (name + code + meta.target).
 function uniqueViolation(target: string): Prisma.PrismaClientKnownRequestError {
@@ -77,81 +77,67 @@ function capturedPayment(over: Partial<FakePayment> = {}): FakePayment {
 }
 
 /**
- * Prisma double en memoria que HONRA el UNIQUE de `refund.dedupKey` (clave de la idempotencia): un 2do create
- * con un dedupKey ya usado lanza P2002. Y el CAS de `claimRefundReservationInTx` (updateMany condicionado por
- * status + refundedCents) afecta filas solo si el estado/saldo no cambió.
+ * Repo fake en memoria (mock del SEAM PaymentsRepository, no de Prisma) que HONRA el UNIQUE de `refund.dedupKey`
+ * (clave de la idempotencia): un 2do `createRefundInTx` con un dedupKey ya usado lanza P2002. Y el CAS de
+ * `casClaimRefundReservation` afecta filas solo si el estado/saldo no cambió (status + refundedCents).
  */
-function makePrisma(payment: FakePayment | null) {
+function makeRepo(payment: FakePayment | null) {
   const refunds: FakeRefund[] = [];
   const outbox: OutboxRow[] = [];
   const usedDedupKeys = new Set<string>();
 
-  const tx = {
-    payment: {
-      updateMany: vi.fn(
-        async ({
-          where,
-          data,
-        }: {
-          where: { id: string; status: { in: string[] }; refundedCents: number };
-          data: Partial<FakePayment>;
-        }) => {
-          if (
-            !payment ||
-            payment.id !== where.id ||
-            !where.status.in.includes(payment.status) ||
-            payment.refundedCents !== where.refundedCents
-          ) {
-            return { count: 0 };
-          }
-          Object.assign(payment, data);
-          return { count: 1 };
-        },
-      ),
-    },
-    // A2 · reverseCashDebtInTx consulta la deuda del cobro CASH al reembolsar; sin deuda en estos escenarios → null.
-    driverDebt: { findUnique: vi.fn(async () => null) },
-    refund: {
-      create: vi.fn(async ({ data }: { data: FakeRefund }) => {
-        if (data.dedupKey) {
-          if (usedDedupKeys.has(data.dedupKey)) throw uniqueViolation('dedup_key');
-          usedDedupKeys.add(data.dedupKey);
+  const createRefundInTx = vi.fn(async (_tx: PaymentTx, data: FakeRefund) => {
+    if (data.dedupKey) {
+      if (usedDedupKeys.has(data.dedupKey)) throw uniqueViolation('dedup_key');
+      usedDedupKeys.add(data.dedupKey);
+    }
+    refunds.push(data);
+    return data;
+  });
+
+  const repo = {
+    findRefundablePaymentByTrip: vi.fn(async (tripId: string) =>
+      payment?.tripId === tripId && ['CAPTURED', 'PARTIALLY_REFUNDED'].includes(payment.status)
+        ? payment
+        : null,
+    ),
+    runInTransaction: async <T>(work: (tx: PaymentTx) => Promise<T>): Promise<T> =>
+      work({} as PaymentTx),
+    casClaimRefundReservation: vi.fn(
+      async (
+        _tx: PaymentTx,
+        paymentId: string,
+        expectedRefundedCents: number,
+        data: Partial<FakePayment>,
+      ) => {
+        if (
+          payment?.id !== paymentId ||
+          !['CAPTURED', 'PARTIALLY_REFUNDED'].includes(payment.status) ||
+          payment.refundedCents !== expectedRefundedCents
+        ) {
+          return { count: 0 };
         }
-        refunds.push(data);
-        return data;
-      }),
-    },
-    outboxEvent: {
-      create: vi.fn(async ({ data }: { data: OutboxRow }) => {
-        outbox.push(data);
-        return data;
-      }),
-    },
+        Object.assign(payment, data);
+        return { count: 1 };
+      },
+    ),
+    // A2 · reverseCashDebtInTx consulta la deuda del cobro CASH al reembolsar; sin deuda en estos escenarios → null.
+    findDriverDebtByPaymentInTx: vi.fn(async () => null),
+    createRefundInTx,
+    enqueueOutbox: vi.fn(
+      async (_tx: PaymentTx, envelope: { eventType: string; payload: Record<string, unknown> }, aggregateId: string) => {
+        outbox.push({ aggregateId, eventType: envelope.eventType, envelope });
+      },
+    ),
   };
 
-  const prisma = {
-    read: {
-      payment: {
-        findFirst: vi.fn(
-          async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
-            payment && payment.tripId === where.tripId && where.status.in.includes(payment.status)
-              ? payment
-              : null,
-        ),
-      },
-    },
-    write: {
-      $transaction: async <T>(cb: (t: typeof tx) => Promise<T>): Promise<T> => cb(tx),
-    },
-  } as unknown as PrismaService;
-
-  return { prisma, refunds, outbox, txRefundCreate: tx.refund.create };
+  return { repo, refunds, outbox, txRefundCreate: createRefundInTx };
 }
 
 // El constructor solo lee números de config; el camino CASH no toca gateway/affiliations/promotions/credit.
 const config = { getOrThrow: () => 0 } as never;
-function buildService(prisma: PrismaService): PaymentsService {
-  return new PaymentsService(prisma, {} as never, {} as never, {} as never, config);
+function buildService(repo: ReturnType<typeof makeRepo>['repo']): PaymentsService {
+  return new PaymentsService(repo as never, {} as never, {} as never, {} as never, config);
 }
 
 const REASON_FULL = BookingCancelledRazon.ASIENTO_LLENO;
@@ -159,8 +145,8 @@ const REASON_FULL = BookingCancelledRazon.ASIENTO_LLENO;
 describe('PaymentsService.refundForBookingCancellation (F3c · refund automático system-initiated)', () => {
   it('ASIENTO_LLENO → refund FULL del saldo, Refund system-initiated y payment.refunded con passengerId', async () => {
     const payment = capturedPayment({ amountCents: 4500, passengerId: 'pax-1' });
-    const { prisma, refunds, outbox } = makePrisma(payment);
-    const svc = buildService(prisma);
+    const { repo, refunds, outbox } = makeRepo(payment);
+    const svc = buildService(repo);
 
     const res = await svc.refundForBookingCancellation('bkg-1', REASON_FULL);
 
@@ -190,8 +176,8 @@ describe('PaymentsService.refundForBookingCancellation (F3c · refund automátic
 
   it('OFERTA_NO_DISPONIBLE → también refunda (hubo captura)', async () => {
     const payment = capturedPayment();
-    const { prisma, refunds } = makePrisma(payment);
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(payment);
+    const svc = buildService(repo);
 
     const res = await svc.refundForBookingCancellation(
       'bkg-1',
@@ -206,8 +192,8 @@ describe('PaymentsService.refundForBookingCancellation (F3c · refund automátic
   it('refund FULL sobre un PARCIAL previo: devuelve solo el saldo restante', async () => {
     // Ya se reembolsó 1000 de 4500 (admin parcial) → el system-initiated devuelve los 3500 restantes.
     const payment = capturedPayment({ status: 'PARTIALLY_REFUNDED', refundedCents: 1000 });
-    const { prisma, refunds } = makePrisma(payment);
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(payment);
+    const svc = buildService(repo);
 
     const res = await svc.refundForBookingCancellation('bkg-1', REASON_FULL);
 
@@ -219,8 +205,8 @@ describe('PaymentsService.refundForBookingCancellation (F3c · refund automátic
 
   it('IDEMPOTENCIA (lo crítico): evento DUPLICADO → UN solo refund, UN solo payment.refunded', async () => {
     const payment = capturedPayment();
-    const { prisma, refunds, outbox } = makePrisma(payment);
-    const svc = buildService(prisma);
+    const { repo, refunds, outbox } = makeRepo(payment);
+    const svc = buildService(repo);
 
     const first = await svc.refundForBookingCancellation('bkg-1', REASON_FULL);
     // 2da entrega del MISMO booking.cancelled: el Payment ya está REFUNDED → findFirst no lo encuentra →
@@ -237,21 +223,19 @@ describe('PaymentsService.refundForBookingCancellation (F3c · refund automátic
     // Fuerza el caso adverso: el lookup encuentra el Payment todavía reembolsable (CAPTURED) pero el refund de
     // ESTA cancelación YA fue creado antes → el create choca contra el UNIQUE → no-op graceful, NO doble plata.
     const payment = capturedPayment();
-    const { prisma, refunds, txRefundCreate } = makePrisma(payment);
+    const { repo, refunds, txRefundCreate } = makeRepo(payment);
     // Simula que ya existía el refund: marca el dedupKey como usado pre-poblando un create previo.
-    await txRefundCreate({
-      data: {
-        id: 'pre',
-        paymentId: 'pay-1',
-        amountCents: 1,
-        requestedBy: SYSTEM_OPERATOR,
-        approvedBy: SYSTEM_OPERATOR,
-        dedupKey: deriveBookingCancellationRefundDedupKey('bkg-1'),
-        status: 'COMPLETED',
-        reason: 'x',
-      },
-    } as never);
-    const svc = buildService(prisma);
+    await txRefundCreate({} as never, {
+      id: 'pre',
+      paymentId: 'pay-1',
+      amountCents: 1,
+      requestedBy: SYSTEM_OPERATOR,
+      approvedBy: SYSTEM_OPERATOR,
+      dedupKey: deriveBookingCancellationRefundDedupKey('bkg-1'),
+      status: 'COMPLETED',
+      reason: 'x',
+    });
+    const svc = buildService(repo);
 
     const res = await svc.refundForBookingCancellation('bkg-1', REASON_FULL);
 
@@ -261,8 +245,8 @@ describe('PaymentsService.refundForBookingCancellation (F3c · refund automátic
   });
 
   it('Payment no encontrado (cobro no capturó / ya refunded / evento adelantado) → skipped, sin error', async () => {
-    const { prisma, refunds } = makePrisma(null);
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(null);
+    const svc = buildService(repo);
 
     const res = await svc.refundForBookingCancellation('bkg-404', REASON_FULL);
 
@@ -273,8 +257,8 @@ describe('PaymentsService.refundForBookingCancellation (F3c · refund automátic
   it('Payment ya totalmente REFUNDED (saldo 0) → skipped graceful (no-op)', async () => {
     // status CAPTURED pero sin saldo (caso defensivo): remaining<=0 → skip, sin crear refund.
     const payment = capturedPayment({ refundedCents: 4500 });
-    const { prisma, refunds } = makePrisma(payment);
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(payment);
+    const svc = buildService(repo);
 
     const res = await svc.refundForBookingCancellation('bkg-1', REASON_FULL);
 

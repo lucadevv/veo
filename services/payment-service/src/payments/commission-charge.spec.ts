@@ -16,23 +16,20 @@ import type { CommissionService } from '../commission/commission.service';
 /** Captura el `data` del payment.create y lo devuelve como la fila creada (status PENDING). */
 function buildService(opts: { commission?: Partial<CommissionService>; envRate?: number } = {}) {
   const created: Record<string, unknown>[] = [];
-  const prisma = {
-    read: { payment: { findUnique: vi.fn(async () => null) } },
-    write: {
-      payment: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          created.push(data);
-          return { ...data };
-        }),
-      },
-    },
+  // Mock del PaymentsRepository: charge() lee por dedupKey (idempotencia, null) y persiste el Payment.
+  const repo = {
+    findPaymentByDedupKey: vi.fn(async () => null),
+    createPayment: vi.fn(async (data: Record<string, unknown>) => {
+      created.push(data);
+      return { ...data };
+    }),
   };
   // Solo COMMISSION_RATE importa para la comisión; el resto del ctor lee números que no afectan este camino.
   const config = {
     getOrThrow: (k: string) => (k === 'COMMISSION_RATE' ? (opts.envRate ?? 0.2) : 0),
   };
   const service = new PaymentsService(
-    prisma as never,
+    repo as never,
     {} as never, // gateway: CASH no lo toca
     {} as never, // affiliations
     {} as never, // promotions

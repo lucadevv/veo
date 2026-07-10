@@ -23,7 +23,9 @@ import { ConflictError, ExternalServiceError, ForbiddenError, uuidv7 } from '@ve
 import type { AuthenticatedUser } from '@veo/auth';
 import { PrismaClient } from '../src/generated/prisma';
 import { PayoutsService } from '../src/payouts/payouts.service';
+import { PayoutsRepository } from '../src/payouts/payouts.repository';
 import { PayoutPollService } from '../src/payouts/payout-poll.service';
+import { PayoutPollRepository } from '../src/payouts/payout-poll.repository';
 import { SandboxPayoutGateway } from '../src/ports/gateway/sandbox-payout.gateway';
 import { PaymentMetrics } from '../src/metrics/payment.metrics';
 import type {
@@ -91,7 +93,13 @@ function makeService(
     confirmSync: opts.confirmSync ?? false,
   });
   return {
-    svc: new PayoutsService(prismaService, redis as never, gateway, makeConfig(), opts.metrics),
+    svc: new PayoutsService(
+      new PayoutsRepository(prismaService),
+      redis as never,
+      gateway,
+      makeConfig(),
+      opts.metrics,
+    ),
     gateway,
   };
 }
@@ -402,7 +410,7 @@ describe('ADR-015 2b · poll fallback cierra el ciclo async (espejo PaymentPollS
       doesExist: () => false,
     } as never;
     const poll = new PayoutPollService(
-      prismaService,
+      new PayoutPollRepository(prismaService),
       redis as never,
       gateway,
       svc,
@@ -480,7 +488,7 @@ describe('FIX 2 · el poll reconcilia un PROCESSING HUÉRFANO (dedupKey sin exte
       doesExist: () => false,
     } as never;
     const poll = new PayoutPollService(
-      prismaService,
+      new PayoutPollRepository(prismaService),
       redis as never,
       gateway,
       svc,
@@ -507,7 +515,12 @@ describe('FIX 3 · disburseEach resiliente por item (un transitorio NO aborta el
     const { redis } = makeRedis();
     const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
     const gateway = new PartiallyTransientGateway(new Set([6001]));
-    const svc = new PayoutsService(prismaService, redis as never, gateway, makeConfig());
+    const svc = new PayoutsService(
+      new PayoutsRepository(prismaService),
+      redis as never,
+      gateway,
+      makeConfig(),
+    );
 
     const summary = await svc.disbursePendingForPeriod(PERIOD_START, PERIOD_END, operatorFreshMfa);
 
@@ -556,7 +569,12 @@ describe('FIX 4 · releaseHeldPayouts no deja al conductor flaggeado-para-siempr
     flagged.add(driverId); // el conductor está flaggeado (review en curso)
     const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
     const gateway = new PartiallyTransientGateway(new Set([6001]));
-    const svc = new PayoutsService(prismaService, redis as never, gateway, makeConfig());
+    const svc = new PayoutsService(
+      new PayoutsRepository(prismaService),
+      redis as never,
+      gateway,
+      makeConfig(),
+    );
 
     const res = await svc.releaseHeldPayouts(driverId, operatorFreshMfa);
 
@@ -633,7 +651,12 @@ describe('ALTA · gate pre-claim: riel money-OUT no disponible (ADR-015 §8 · c
     const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
     const gateway = new LiveUnavailableGateway();
     return {
-      svc: new PayoutsService(prismaService, redis as never, gateway, makeConfig()),
+      svc: new PayoutsService(
+        new PayoutsRepository(prismaService),
+        redis as never,
+        gateway,
+        makeConfig(),
+      ),
       gateway,
     };
   }

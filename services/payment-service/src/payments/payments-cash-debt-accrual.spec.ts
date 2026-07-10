@@ -3,36 +3,26 @@
  * el conductor cobró la comisión EN MANO → la DEBE a la plataforma. Se crea un `DriverDebt` = commissionCents
  * DENTRO de la misma tx de captura (atomicidad captura ⇔ deuda). Carpooling (comisión 0, conductor 100%) NO acumula.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { PaymentsService } from './payments.service';
-
-// enqueueOutbox se stubea: la captura emite payment.captured en la misma tx, pero acá probamos la DEUDA.
-vi.mock('@veo/database', async (orig) => {
-  const actual = await (orig() as Promise<Record<string, unknown>>);
-  return { ...actual, enqueueOutbox: vi.fn(async () => {}) };
-});
 
 type Row = Record<string, unknown>;
 
 function buildService() {
   const created: Row[] = [];
-  const prisma = {
-    write: {
-      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
-        cb({
-          payment: { updateMany: vi.fn(async () => ({ count: 1 })) }, // la captura gana el CAS
-          driverDebt: {
-            create: vi.fn(async ({ data }: { data: Row }) => {
-              created.push(data);
-              return { ...data };
-            }),
-          },
-        }),
-      ),
+  // Mock del PaymentsRepository: captureCash gana el CAS (count 1) y acumula la deuda vía createDriverDebtInTx.
+  // La emisión del outbox (payment.captured) la absorbe el fake de enqueueOutbox; acá probamos la DEUDA.
+  const repo = {
+    runInTransaction: async (work: (tx: unknown) => Promise<unknown>) => work({}),
+    casCaptureCash: async () => ({ count: 1 }),
+    createDriverDebtInTx: async (_tx: unknown, data: Row) => {
+      created.push(data);
+      return { ...data };
     },
+    enqueueOutbox: async () => {},
   };
   const svc = new PaymentsService(
-    prisma as never,
+    repo as never,
     {} as never,
     {} as never,
     {} as never,
@@ -86,66 +76,64 @@ describe('A2 · captureCash acumula la deuda CASH del conductor', () => {
  * A2 (gate) · Al reembolsar un cobro CASH, la deuda de comisión se REVIERTE — si no, el conductor queda
  * sobre-cobrado la comisión de un viaje que no ocurrió (el netting se la cobraría igual de su ganancia digital).
  */
-function svcOnly(): PaymentsService {
-  return new PaymentsService(
-    {} as never,
+/**
+ * Repo fake para reverseCashDebtInTx: las lecturas/escrituras de la deuda pasan por métodos tx-scoped del repo
+ * (findDriverDebtByPaymentInTx / updateDriverDebtInTx / createDriverCreditInTx). El `tx` es un handle ficticio.
+ */
+function debtRepo(debt: Row | null) {
+  const updates: Row[] = [];
+  const credits: Row[] = [];
+  const repo = {
+    findDriverDebtByPaymentInTx: async () => debt,
+    updateDriverDebtInTx: async (_tx: unknown, _id: string, data: Row) => {
+      updates.push(data);
+      return { ...(debt ?? {}), ...data };
+    },
+    createDriverCreditInTx: async (_tx: unknown, data: Row) => {
+      credits.push(data);
+      return data;
+    },
+  };
+  const svc = new PaymentsService(
+    repo as never,
     {} as never,
     {} as never,
     {} as never,
     { getOrThrow: () => 0 } as never,
   );
+  return { svc, updates, credits };
 }
-function debtTx(debt: Row | null) {
-  const updates: Row[] = [];
-  const credits: Row[] = [];
-  const tx = {
-    driverDebt: {
-      findUnique: vi.fn(async () => debt),
-      update: vi.fn(async ({ data }: { data: Row }) => {
-        updates.push(data);
-        return { ...(debt ?? {}), ...data };
-      }),
-    },
-    driverCredit: {
-      create: vi.fn(async ({ data }: { data: Row }) => {
-        credits.push(data);
-        return data;
-      }),
-    },
-  };
-  return { tx, updates, credits };
-}
-const reverse = (svc: PaymentsService, tx: unknown, pid: string, amt: number, gross: number) =>
+const reverse = (svc: PaymentsService, pid: string, amt: number, gross: number) =>
   (
     svc as unknown as {
       reverseCashDebtInTx: (tx: unknown, pid: string, amt: number, gross: number) => Promise<void>;
     }
-  ).reverseCashDebtInTx(tx, pid, amt, gross);
+  ).reverseCashDebtInTx({}, pid, amt, gross);
 
 describe('A2 · refund CASH revierte la deuda de comisión (proporcional al bruto)', () => {
   it('full refund → deuda REVERSED (el conductor ya no debe la comisión del viaje revertido)', async () => {
-    const { tx, updates } = debtTx({ id: 'dd1', amountCents: 400, status: 'PENDING' });
-    await reverse(svcOnly(), tx, 'pay-cash', 2000, 2000); // refund del bruto ENTERO → revierte la comisión entera
+    const { svc, updates } = debtRepo({ id: 'dd1', amountCents: 400, status: 'PENDING' });
+    await reverse(svc, 'pay-cash', 2000, 2000); // refund del bruto ENTERO → revierte la comisión entera
     expect(updates[0]!.status).toBe('REVERSED');
     expect(updates[0]!.amountCents).toBe(0);
   });
 
   it('partial refund → comisión revertida PROPORCIONAL (round(deuda·refund/gross)), deuda sigue PENDING', async () => {
-    const { tx, updates } = debtTx({ id: 'dd1', amountCents: 400, status: 'PENDING' });
-    await reverse(svcOnly(), tx, 'pay-cash', 1000, 2000); // se reembolsa la MITAD (1000 de 2000)
+    const { svc, updates } = debtRepo({ id: 'dd1', amountCents: 400, status: 'PENDING' });
+    await reverse(svc, 'pay-cash', 1000, 2000); // se reembolsa la MITAD (1000 de 2000)
     expect(updates[0]!.amountCents).toBe(200); // 400 − round(400·1000/2000)=400−200 (antes, con el bug: 300)
     expect(updates[0]!.status).toBeUndefined(); // sigue PENDING (el conductor debe la comisión de la mitad servida)
   });
 
   it('deuda ya SETTLED (neteada en un payout) → ACREDITA al conductor (credit-back) + deuda REVERSED', async () => {
-    const { tx, updates, credits } = debtTx({
+    const { svc, updates, credits } = debtRepo({
       id: 'dd1',
       driverId: 'drv-1',
       tripId: 'trip-1',
       amountCents: 400,
       status: 'SETTLED',
     });
-    await reverse(svcOnly(), tx, 'pay-cash', 2000, 2000); // refund del bruto ENTERO → acredita los 400 completos
+    await reverse(svc, 'pay-cash', 2000, 2000); // refund del bruto ENTERO → acredita los 400 completos
     expect(credits).toHaveLength(1);
     expect(credits[0]!.amountCents).toBe(400); // min(400, 2000) = la comisión que ya pagó
     expect(credits[0]!.sourcePaymentId).toBe('pay-cash'); // idempotencia por cobro
@@ -154,21 +142,21 @@ describe('A2 · refund CASH revierte la deuda de comisión (proporcional al brut
   });
 
   it('deuda ya REVERSED (refund re-entregado / 2do refund) → no-op idempotente (ni crédito ni update)', async () => {
-    const { tx, updates, credits } = debtTx({
+    const { svc, updates, credits } = debtRepo({
       id: 'dd1',
       driverId: 'drv-1',
       tripId: 'trip-1',
       amountCents: 400,
       status: 'REVERSED',
     });
-    await reverse(svcOnly(), tx, 'pay-cash', 2000, 2000);
+    await reverse(svc, 'pay-cash', 2000, 2000);
     expect(credits).toHaveLength(0);
     expect(updates).toHaveLength(0);
   });
 
   it('sin deuda (viaje sin comisión / carpooling) → no-op', async () => {
-    const { tx, updates } = debtTx(null);
-    await reverse(svcOnly(), tx, 'pay-cash', 2000, 2000);
+    const { svc, updates } = debtRepo(null);
+    await reverse(svc, 'pay-cash', 2000, 2000);
     expect(updates).toHaveLength(0);
   });
 });

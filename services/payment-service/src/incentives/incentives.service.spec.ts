@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { IncentivesService } from './incentives.service';
-import type { PrismaService } from '../infra/prisma.service';
+import type { IncentivesRepository } from './incentives.repository';
 
 type Row = Record<string, unknown>;
 
@@ -30,14 +30,13 @@ function makeIncentive(id: string, type: 'META_VIAJES' | 'HORA_PICO'): Row {
 describe('IncentivesService.listForDriver · HORA_PICO oculto (multiplicador aún no pagado)', () => {
   it('NO devuelve incentivos HORA_PICO; sí los META_VIAJES (ninguna promesa de multiplicador sin pago)', async () => {
     const incentives = [makeIncentive('meta', 'META_VIAJES'), makeIncentive('peak', 'HORA_PICO')];
-    const prisma = {
-      read: {
-        incentive: { findMany: vi.fn(async () => incentives) },
-        incentiveProgress: { findMany: vi.fn(async () => []) },
-      },
-    } as unknown as PrismaService;
+    // Se MOCKEA EL REPO (seam de acceso a datos), no Prisma: el filtro HORA_PICO es del service.
+    const repo = {
+      findActiveIncentives: vi.fn(async () => incentives),
+      findProgressForDriver: vi.fn(async () => []),
+    } as unknown as IncentivesRepository;
 
-    const out = await new IncentivesService(prisma).listForDriver('drv-1');
+    const out = await new IncentivesService(repo).listForDriver('drv-1');
 
     expect(out.map((v) => v.type)).toEqual(['META_VIAJES']); // HORA_PICO filtrado del listado
     expect(out.every((v) => v.multiplierBps === 0)).toBe(true); // ningún +% se muestra al conductor

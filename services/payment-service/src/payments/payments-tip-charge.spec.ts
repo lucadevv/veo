@@ -17,37 +17,27 @@ function buildService(
 ) {
   const created: Row[] = [];
   const updated: Row[] = [];
-  const findUnique = vi.fn(async ({ where }: { where: { dedupKey?: string; id?: string } }) => {
-    if (where.dedupKey) return opts.existingTipCharge ?? null; // idempotencia del cobro de propina
-    if (where.id) return updated[0] ?? created[0] ?? fare; // getPayment(id) / dup lookups
-    return null;
-  });
-  const prisma = {
-    read: { payment: { findUnique, findFirst: vi.fn(async () => fare) } },
-    write: {
-      payment: {
-        create: vi.fn(async ({ data }: { data: Row }) => {
-          created.push(data);
-          return { ...data };
-        }),
-        update: vi.fn(async ({ data }: { data: Row }) => {
-          const u = { ...(created[0] ?? fare), ...data };
-          updated.push(u);
-          return u;
-        }),
-      },
-      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
-        cb({
-          payment: {
-            update: vi.fn(async ({ data }: { data: Row }) => {
-              const u = { ...(created[0] ?? fare), ...data };
-              updated.push(u);
-              return u;
-            }),
-          },
-        }),
-      ),
-    },
+  // Mock del PaymentsRepository: el cobro de propina lee la tarifa viva, persiste el tip-Payment y (según el
+  // desenlace del gateway) persiste el checkout o marca FAILED la propina. NO usa la tx de la tarifa (markTipFailed
+  // es un update PLANO).
+  const repo = {
+    findPaymentByDedupKey: vi.fn(async () => opts.existingTipCharge ?? null), // idempotencia del cobro de propina
+    findLiveFareByTrip: vi.fn(async () => fare),
+    findPaymentById: vi.fn(async () => updated[0] ?? created[0] ?? fare), // getPayment(id) / dup lookups
+    createPayment: vi.fn(async (data: Row) => {
+      created.push(data);
+      return { ...data };
+    }),
+    persistAggregatorCheckout: vi.fn(async (_id: string, data: Row) => {
+      const u = { ...(created[0] ?? fare), ...data };
+      updated.push(u);
+      return u;
+    }),
+    markTipFailed: vi.fn(async (_id: string, data: Row) => {
+      const u = { ...(created[0] ?? fare), ...data };
+      updated.push(u);
+      return u;
+    }),
   };
   const gateway = {
     chargeFlow: 'aggregator' as const,
@@ -64,7 +54,7 @@ function buildService(
   const affiliations = { resolveActiveWalletUid: vi.fn(async () => opts.walletUid ?? null) };
   const config = { getOrThrow: () => 0 };
   const service = new PaymentsService(
-    prisma as never,
+    repo as never,
     gateway as never,
     affiliations as never,
     {} as never, // promotions (no se usa: la propina NO canjea promo/crédito)
@@ -164,16 +154,19 @@ describe('A1 · addTip — la propina SIEMPRE se cobra digital (Model B)', () =>
 
 /** Read-side: los lookups que asumían "un payment = una tarifa" NO deben contaminarse con el tip-Payment. */
 describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
-  it('getDebtForPassenger filtra kind=FARE → una propina fallida NO entra al gate de deuda', async () => {
-    const paymentFindMany = vi.fn(async (_args: { where: Row }): Promise<Row[]> => []);
-    const prisma = {
-      read: {
-        payment: { findMany: paymentFindMany },
-        cancellationPenalty: { findMany: vi.fn(async () => []) },
-      },
+  it('getDebtForPassenger consulta las dos clases FARE (deuda + pendientes) → una propina fallida NO entra al gate', async () => {
+    // El filtro kind=FARE ahora vive DENTRO del repo (findPassengerDebtPayments / findPassengerPendingPayments,
+    // ambos hardcodean kind=FARE): el service invoca las dos lecturas FARE-scoped + las penalidades y compone el
+    // resumen. Verificamos que las dos clases de deuda de VIAJE se consultan y que, vacías, no hay gate.
+    const findDebt = vi.fn(async (): Promise<Row[]> => []);
+    const findPending = vi.fn(async (): Promise<Row[]> => []);
+    const repo = {
+      findPassengerDebtPayments: findDebt,
+      findPassengerPendingPayments: findPending,
+      findPassengerPendingPenalties: vi.fn(async () => []),
     };
     const svc = new PaymentsService(
-      prisma as never,
+      repo as never,
       {} as never,
       {} as never,
       {} as never,
@@ -181,11 +174,9 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     );
     const out = await svc.getDebtForPassenger('pax-1');
     expect(out.hasDebt).toBe(false);
-    // ambas queries (DEBT + PENDING) deben restringir a kind=FARE
-    for (const [args] of paymentFindMany.mock.calls) {
-      expect(args.where.kind).toBe('FARE');
-    }
-    expect(paymentFindMany).toHaveBeenCalledTimes(2);
+    // Las dos lecturas FARE-scoped se invocan (la garantía kind=FARE la cristaliza el repo).
+    expect(findDebt).toHaveBeenCalledTimes(1);
+    expect(findPending).toHaveBeenCalledTimes(1);
   });
 
   it('propina que EXPIRA (webhook, checkout abandonado) → FAILED terminal SIN payment.failed (markDebt kind-aware)', async () => {
@@ -200,21 +191,17 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
       driverId: 'drv-1',
     };
     const updates: Row[] = [];
-    const txSpy = vi.fn(); // la tx SOLO se usa en el camino de la TARIFA (que emite payment.failed)
-    const prisma = {
-      read: { payment: { findUnique: vi.fn(async () => tip) } },
-      write: {
-        payment: {
-          update: vi.fn(async ({ data }: { data: Row }) => {
-            updates.push(data);
-            return { ...tip, ...data };
-          }),
-        },
-        $transaction: txSpy,
-      },
+    const runInTransaction = vi.fn(); // la tx SOLO se usa en el camino de la TARIFA (que emite payment.failed)
+    const repo = {
+      findPaymentById: vi.fn(async () => tip),
+      markTipFailed: vi.fn(async (_id: string, data: Row) => {
+        updates.push(data);
+        return { ...tip, ...data };
+      }),
+      runInTransaction,
     };
     const svc = new PaymentsService(
-      prisma as never,
+      repo as never,
       {} as never,
       {} as never,
       {} as never,
@@ -227,7 +214,7 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     });
     expect(out.status).toBe('FAILED');
     expect(updates[0]!.status).toBe('FAILED');
-    expect(txSpy).not.toHaveBeenCalled(); // el tip NO pasa por la tx que emite payment.failed → no alerta seguridad
+    expect(runInTransaction).not.toHaveBeenCalled(); // el tip NO pasa por la tx que emite payment.failed → no alerta
   });
 
   it('FARE que EXPIRA (checkout de un viaje COMPLETADO) → DEBT, NO FAILED terminal: gatea + reintentable (no viaje gratis)', async () => {
@@ -242,31 +229,20 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     };
     const updates: Row[] = [];
     const outbox: { eventType: string }[] = [];
-    const prisma = {
-      read: { payment: { findUnique: vi.fn(async () => fare) } },
-      write: {
-        payment: { update: vi.fn() },
-        // markDebt (no-TIP) usa $transaction: update a DEBT + enqueueOutbox(payment.failed).
-        $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
-          cb({
-            payment: {
-              update: vi.fn(async ({ data }: { data: Row }) => {
-                updates.push(data);
-                return { ...fare, ...data };
-              }),
-            },
-            outboxEvent: {
-              create: vi.fn(async ({ data }: { data: { eventType: string } }) => {
-                outbox.push(data);
-                return data;
-              }),
-            },
-          }),
-        ),
-      },
+    // markDebt (no-TIP) corre en runInTransaction: markPaymentDebtInTx a DEBT + enqueueOutbox(payment.failed).
+    const repo = {
+      findPaymentById: vi.fn(async () => fare),
+      runInTransaction: async (work: (tx: unknown) => Promise<unknown>) => work({}),
+      markPaymentDebtInTx: vi.fn(async (_tx: unknown, _id: string, data: Row) => {
+        updates.push(data);
+        return { ...fare, ...data };
+      }),
+      enqueueOutbox: vi.fn(async (_tx: unknown, envelope: { eventType: string }) => {
+        outbox.push({ eventType: envelope.eventType });
+      }),
     };
     const svc = new PaymentsService(
-      prisma as never,
+      repo as never,
       {} as never,
       {} as never,
       {} as never,
@@ -287,9 +263,9 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
       { grossCents: 2000, commissionCents: 400, tipCents: 0, kind: 'FARE' },
       { grossCents: 0, commissionCents: 0, tipCents: 300, kind: 'TIP' }, // propina digital capturada
     ];
-    const prisma = { read: { payment: { findMany: vi.fn(async () => rows) } } };
+    const repo = { findDriverCapturedPayments: vi.fn(async () => rows) };
     const svc = new PaymentsService(
-      prisma as never,
+      repo as never,
       {} as never,
       {} as never,
       {} as never,
@@ -312,22 +288,28 @@ describe('applyWebhookResult · idempotente sobre pagos YA LIQUIDADOS (no loop d
       method: 'YAPE',
       amountCents: 5000,
     };
-    const write = { payment: { update: vi.fn() }, $transaction: vi.fn() };
-    const prisma = { read: { payment: { findUnique: vi.fn(async () => payment) } }, write };
+    // Spies de escritura: un no-op idempotente NO debe tocar ninguno (ni captura/markDebt en tx, ni update plano).
+    const runInTransaction = vi.fn();
+    const markTipFailed = vi.fn();
+    const repo = {
+      findPaymentById: vi.fn(async () => payment),
+      runInTransaction,
+      markTipFailed,
+    };
     const svc = new PaymentsService(
-      prisma as never,
+      repo as never,
       {} as never,
       {} as never,
       {} as never,
       { getOrThrow: () => 0 } as never,
     );
-    return { svc, write };
+    return { svc, runInTransaction, markTipFailed };
   };
 
   for (const settled of ['REFUNDED', 'PARTIALLY_REFUNDED'] as const) {
     for (const hook of ['CONFIRMED', 'DECLINED', 'EXPIRED'] as const) {
       it(`${hook} sobre un pago ${settled} → no-op idempotente (NO InvalidStateError, sin escrituras)`, async () => {
-        const { svc, write } = svcFor(settled);
+        const { svc, runInTransaction, markTipFailed } = svcFor(settled);
         const out = await svc.applyWebhookResult({
           paymentId: 'p-x',
           externalUid: 'uid',
@@ -336,8 +318,8 @@ describe('applyWebhookResult · idempotente sobre pagos YA LIQUIDADOS (no loop d
         // Antes PARTIALLY_REFUNDED (y REFUNDED en CONFIRMED) caía a captureSuccess/markDebt → assertTransition
         // lanzaba InvalidStateError (loop del proveedor). Ahora es un no-op limpio, sin tocar la DB.
         expect(out).toEqual({ applied: false, status: settled });
-        expect(write.payment.update).not.toHaveBeenCalled();
-        expect(write.$transaction).not.toHaveBeenCalled();
+        expect(runInTransaction).not.toHaveBeenCalled();
+        expect(markTipFailed).not.toHaveBeenCalled();
       });
     }
   }

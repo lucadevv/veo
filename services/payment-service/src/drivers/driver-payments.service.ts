@@ -22,7 +22,7 @@
  *   - NUNCA tocamos `incentives` ni `promotions` (catálogo compartido): solo sus filas POR conductor/usuario.
  */
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../infra/prisma.service';
+import { DriverPaymentsRepository } from './driver-payments.repository';
 
 /** Ids del conductor para el HARD purge del dinero: driverId (5 tablas) + userId (4 tablas). */
 export interface DriverPaymentsPurgeIds {
@@ -59,75 +59,15 @@ export interface DriverPaymentsPurgeView {
 
 @Injectable()
 export class DriverPaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: DriverPaymentsRepository) {}
 
   /**
    * Borra TODO el dinero del conductor en UNA transacción. Idempotente: re-correr sobre un conductor ya
    * purgado devuelve contadores en 0 (deleteMany no falla sin filas). NO emite eventos: borrado
-   * administrativo de data de prueba (DEV), no un hecho de dominio.
+   * administrativo de data de prueba (DEV), no un hecho de dominio. El ORDEN FK-safe del cascade y la
+   * transacción los posee el repo (persistencia); acá queda la intención de dominio.
    */
-  async purgeForDriver(ids: DriverPaymentsPurgeIds): Promise<DriverPaymentsPurgeView> {
-    const { driverId, userId } = ids;
-    return this.prisma.write.$transaction(async (tx) => {
-      // ── Tablas por driver_id ──
-      // Hijos de payments PRIMERO (FK payment_id): resolvemos los ids de los payments del conductor.
-      const driverPayments = await tx.payment.findMany({
-        where: { driverId },
-        select: { id: true },
-      });
-      const paymentIds = driverPayments.map((p) => p.id);
-
-      const refunds =
-        paymentIds.length > 0
-          ? await tx.refund.deleteMany({ where: { paymentId: { in: paymentIds } } })
-          : { count: 0 };
-      const tipAdditions =
-        paymentIds.length > 0
-          ? await tx.tipAddition.deleteMany({ where: { paymentId: { in: paymentIds } } })
-          : { count: 0 };
-
-      // DriverDebt y su gemela DriverCredit referencian un payment por soft-ref (paymentId / sourcePaymentId) →
-      // se borran ANTES de los payments. Ambas se purgan para no dejar filas huérfanas (invariante "sin
-      // huérfanos" del borrado de prueba DEV). DriverCredit se agregó con el credit-back (A2) — sin esto quedaba
-      // el MISMO hueco que DriverDebt tenía antes.
-      const driverDebts = await tx.driverDebt.deleteMany({ where: { driverId } });
-      const driverCredits = await tx.driverCredit.deleteMany({ where: { driverId } });
-      const payments = await tx.payment.deleteMany({ where: { driverId } });
-      const payouts = await tx.payout.deleteMany({ where: { driverId } });
-      const cancellationPenalties = await tx.cancellationPenalty.deleteMany({
-        where: { driverId },
-      });
-      const incentiveProgress = await tx.incentiveProgress.deleteMany({ where: { driverId } });
-      const incentiveTripCredits = await tx.incentiveTripCredit.deleteMany({ where: { driverId } });
-
-      // ── Tablas por user_id ──
-      // Entries del crédito PRIMERO (FK user_id → user_credits), luego el saldo.
-      const userCreditEntries = await tx.userCreditEntry.deleteMany({ where: { userId } });
-      const userCredits = await tx.userCredit.deleteMany({ where: { userId } });
-      const promoRedemptions = await tx.promoRedemption.deleteMany({ where: { userId } });
-      const walletAffiliations = await tx.walletAffiliation.deleteMany({ where: { userId } });
-
-      return {
-        driverId,
-        userId,
-        byDriverId: {
-          cancellationPenalties: cancellationPenalties.count,
-          driverCredits: driverCredits.count,
-          driverDebts: driverDebts.count,
-          incentiveProgress: incentiveProgress.count,
-          incentiveTripCredits: incentiveTripCredits.count,
-          payments: payments.count,
-          payouts: payouts.count,
-          refunds: refunds.count,
-          tipAdditions: tipAdditions.count,
-        },
-        byUserId: {
-          promoRedemptions: promoRedemptions.count,
-          userCreditEntries: userCreditEntries.count,
-          userCredits: userCredits.count,
-          walletAffiliations: walletAffiliations.count,
-        },
-      };
-    });
+  purgeForDriver(ids: DriverPaymentsPurgeIds): Promise<DriverPaymentsPurgeView> {
+    return this.repo.purgeDriverMoneyCascade(ids);
   }
 }

@@ -6,9 +6,10 @@
 import { Module } from '@nestjs/common';
 import { DriverPaymentsController } from './driver-payments.controller';
 import { DriverPaymentsService } from './driver-payments.service';
+import { DriverPaymentsRepository } from './driver-payments.repository';
 
 @Module({
   controllers: [DriverPaymentsController],
-  providers: [DriverPaymentsService],
+  providers: [DriverPaymentsService, DriverPaymentsRepository],
 })
 export class DriverPaymentsModule {}

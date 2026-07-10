@@ -5,7 +5,8 @@
  *  - `totalCents` = suma de `_sum.amountCents` de TODOS los estados (el NETO ya persistido en cada fila).
  *  - El mapeo status→campo usa el enum `PayoutStatus` (PAYOUT_STATUS_COUNT_FIELD), sin strings mágicos.
  *  - Estados sin payouts (ausentes del groupBy) quedan en 0 (degradación honesta del agregado).
- * READ puro (no mutación de dinero) → unit con fake prisma (mismo criterio que reconciliation.service.spec.ts).
+ * READ puro (no mutación de dinero) → unit con fake REPO (el service ya no toca Prisma; el repo es el único
+ * dueño del groupBy — mismo criterio que ratings.service.spec.ts).
  */
 import { describe, it, expect, vi } from 'vitest';
 import { PayoutsService } from './payouts.service';
@@ -18,11 +19,12 @@ interface GroupRow {
 }
 
 function makeService(rows: GroupRow[]) {
-  const groupBy = vi.fn(async () => rows);
-  const prisma = { read: { payout: { groupBy } } };
+  // El repo cristaliza el UN-SOLO-groupBy (by/_count/_sum): el fake devuelve las filas ya agrupadas.
+  const groupPayoutsByStatus = vi.fn(async () => rows);
+  const repo = { groupPayoutsByStatus };
   const config = { getOrThrow: (k: string) => (k === 'PAYOUT_MIN_CENTS' ? 0 : 500_000) };
-  const svc = new PayoutsService(prisma as never, {} as never, {} as never, config as never);
-  return { svc, groupBy };
+  const svc = new PayoutsService(repo as never, {} as never, {} as never, config as never);
+  return { svc, groupPayoutsByStatus };
 }
 
 function row(status: PayoutStatus, count: number, amountCents: number | null): GroupRow {
@@ -30,17 +32,10 @@ function row(status: PayoutStatus, count: number, amountCents: number | null): G
 }
 
 describe('PayoutsService.getStats · Seam 1 (KPIs de payouts)', () => {
-  it('agrega con UN solo groupBy por status (by:[status], _count._all, _sum.amountCents)', async () => {
-    const { svc, groupBy } = makeService([]);
+  it('agrega con UNA sola lectura agrupada por status (el repo posee el groupBy)', async () => {
+    const { svc, groupPayoutsByStatus } = makeService([]);
     await svc.getStats();
-    expect(groupBy).toHaveBeenCalledTimes(1);
-    expect(groupBy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        by: ['status'],
-        _count: { _all: true },
-        _sum: { amountCents: true },
-      }),
-    );
+    expect(groupPayoutsByStatus).toHaveBeenCalledTimes(1);
   });
 
   it('mapea cada status a su contador tipado y suma totalCents de TODOS los estados', async () => {

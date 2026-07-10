@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
+import { PromotionsRepository } from './promotions.repository';
 import { PromotionsController } from './promotions.controller';
 
 /**
@@ -9,7 +10,7 @@ import { PromotionsController } from './promotions.controller';
  */
 @Module({
   controllers: [PromotionsController],
-  providers: [PromotionsService],
+  providers: [PromotionsService, PromotionsRepository],
   exports: [PromotionsService],
 })
 export class PromotionsModule {}

@@ -8,7 +8,6 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import type Redis from 'ioredis';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
 import {
   ConflictError,
   ExternalServiceError,
@@ -21,8 +20,7 @@ import {
 } from '@veo/utils';
 import { PaymentMetrics } from '../metrics/payment.metrics';
 import type { AuthenticatedUser } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
-import { NON_CASH_METHODS } from '../payments/payment.policy';
+import { PayoutsRepository, type PayoutTx } from './payouts.repository';
 import { REDIS } from '../infra/redis';
 import {
   aggregatePayouts,
@@ -35,13 +33,7 @@ import {
   type PayoutGateway,
   type PayoutMethod,
 } from '../ports/gateway/payout-gateway.port';
-import {
-  Prisma,
-  PayoutStatus,
-  DriverCreditStatus,
-  DriverDebtStatus,
-  type Payout,
-} from '../generated/prisma';
+import { PayoutStatus, type Payout } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
@@ -148,7 +140,7 @@ export class PayoutsService {
   private readonly stepUpCents: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: PayoutsRepository,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(PAYOUT_GATEWAY) private readonly payoutGateway: PayoutGateway,
     config: ConfigService<Env, true>,
@@ -225,20 +217,12 @@ export class PayoutsService {
   private async collectCreditOnlyDrivers(
     excludeDriverIds: Set<string>,
   ): Promise<{ driverId: string; netCents: number }[]> {
-    const creditsByDriver = await this.prisma.read.driverCredit.groupBy({
-      by: ['driverId'],
-      where: { status: 'PENDING' },
-      _sum: { amountCents: true },
-    });
+    const creditsByDriver = await this.repo.sumPendingCreditsByDriver();
     const candidates = creditsByDriver.filter((c) => !excludeDriverIds.has(c.driverId));
     if (candidates.length === 0) return [];
 
     // La deuda CASH PENDIENTE se netea contra el crédito (mismo criterio que applyDebtNetting) antes del umbral.
-    const debtsByDriver = await this.prisma.read.driverDebt.groupBy({
-      by: ['driverId'],
-      where: { status: 'PENDING', driverId: { in: candidates.map((c) => c.driverId) } },
-      _sum: { amountCents: true },
-    });
+    const debtsByDriver = await this.repo.sumPendingDebtsByDriver(candidates.map((c) => c.driverId));
     const debtByDriver = new Map(debtsByDriver.map((d) => [d.driverId, d._sum.amountCents ?? 0]));
 
     return candidates
@@ -258,7 +242,7 @@ export class PayoutsService {
    * (a descontar del payout). El detalle del monto neteado queda en `Payout.debtAppliedCents` para auditoría.
    */
   private async applyDebtNetting(
-    tx: Prisma.TransactionClient,
+    tx: PayoutTx,
     driverId: string,
     availableCents: number,
     payoutId: string,
@@ -268,23 +252,14 @@ export class PayoutsService {
     // ganancia — y agregan margen para netear deudas en la MISMA corrida. Se marcan APPLIED ligados a este payout
     // (auditoría/conciliación). Idempotencia del run: el unique (driverId, período) + el lock distribuido evitan
     // el doble-pago; acá solo se aplican los créditos PENDIENTES una vez (pasan a APPLIED).
-    const credits = await tx.driverCredit.findMany({
-      where: { driverId, status: 'PENDING' },
-      orderBy: { createdAt: 'asc' },
-    });
+    const credits = await this.repo.findPendingCreditsInTx(tx, driverId);
     let applied = 0;
     for (const credit of credits) {
-      await tx.driverCredit.update({
-        where: { id: credit.id },
-        data: { status: 'APPLIED', appliedInPayoutId: payoutId, appliedAt: new Date() },
-      });
+      await this.repo.markCreditAppliedInTx(tx, credit.id, payoutId);
       applied -= credit.amountCents; // crédito (>0) baja `applied` → sube el neto (netAmount = bruto − applied)
     }
 
-    const debts = await tx.driverDebt.findMany({
-      where: { driverId, status: 'PENDING' },
-      orderBy: { createdAt: 'asc' },
-    });
+    const debts = await this.repo.findPendingDebtsInTx(tx, driverId);
     // Los créditos ya bajaron `applied` (a <=0) → suman margen a la ganancia para netear deudas este período.
     let toApply = availableCents - applied;
     for (const debt of debts) {
@@ -294,10 +269,7 @@ export class PayoutsService {
         // status+monto (updateMany, no update-by-id): un refund CONCURRENTE (reverseCashDebtInTx) pudo revertir/
         // reducir esta deuda entre el findMany de arriba y este update → si count=0 la SALTAMOS (no la neteamos
         // ni la contamos), evitando el lost-update (netear una deuda ya revertida = doble-beneficio al conductor).
-        const settled = await tx.driverDebt.updateMany({
-          where: { id: debt.id, status: 'PENDING', amountCents: debt.amountCents },
-          data: { status: 'SETTLED', settledInPayoutId: payoutId, settledAt: new Date() },
-        });
+        const settled = await this.repo.settleDebtInTx(tx, debt.id, debt.amountCents, payoutId);
         if (settled.count === 0) continue;
         toApply -= debt.amountCents;
         applied += debt.amountCents;
@@ -305,10 +277,12 @@ export class PayoutsService {
         // Cubre PARCIAL → reduce el monto de la deuda del borde (queda PENDING con el resto); lo aplicado va al
         // payout. El neteo parcial se refleja en Payout.debtAppliedCents (no se parte la fila → sin colisión de
         // UNIQUE(paymentId)). Mismo CAS por status+monto: si un refund concurrente la tocó, count=0 → la saltamos.
-        const reduced = await tx.driverDebt.updateMany({
-          where: { id: debt.id, status: 'PENDING', amountCents: debt.amountCents },
-          data: { amountCents: debt.amountCents - toApply },
-        });
+        const reduced = await this.repo.reduceDebtInTx(
+          tx,
+          debt.id,
+          debt.amountCents,
+          debt.amountCents - toApply,
+        );
         if (reduced.count === 0) continue;
         applied += toApply;
         toApply = 0;
@@ -359,16 +333,11 @@ export class PayoutsService {
     // (driverId, periodStart, periodEnd) + la tx de creación + el lock distribuido del run (withDistributedLock)
     // garantizan no-doble-pago aun con carrera; este SELECT solo evita re-trabajar lo ya hecho.
     const alreadyPaidDriverIds = new Set(
-      (
-        await this.prisma.read.payout.findMany({
-          where: {
-            periodStart: start,
-            periodEnd: end,
-            driverId: { in: aggregated.map((a) => a.driverId) },
-          },
-          select: { driverId: true },
-        })
-      ).map((p) => p.driverId),
+      await this.repo.findPaidDriverIdsForPeriod(
+        start,
+        end,
+        aggregated.map((a) => a.driverId),
+      ),
     );
 
     for (const agg of aggregated) {
@@ -386,7 +355,7 @@ export class PayoutsService {
         // handler de confirmación garantiza no-doble-marca.
         const pendingIncentiveIds = pendingIncentiveIdsByDriver.get(agg.driverId) ?? [];
         const payoutId = uuidv7();
-        const netAmountCents = await this.prisma.write.$transaction(async (tx) => {
+        const netAmountCents = await this.repo.runInTransaction(async (tx) => {
           // A2 (ADR-022 §P-A) · NETEO de la deuda CASH: el conductor cobró la comisión de sus viajes en efectivo EN
           // MANO → la debe a la plataforma. Se descuenta de su ganancia DIGITAL, DENTRO de la MISMA tx del payout
           // (atomicidad: settle-deuda ⇔ payout). El payout paga el NETO; si la deuda supera el digital, el resto
@@ -398,30 +367,25 @@ export class PayoutsService {
             payoutId,
           );
           const netAmount = agg.amountCents - debtAppliedCents;
-          await tx.payout.create({
-            data: {
-              id: payoutId,
-              driverId: agg.driverId,
-              periodStart: start,
-              periodEnd: end,
-              grossCents: agg.grossCents,
-              commissionCents: agg.commissionCents,
-              amountCents: netAmount,
-              debtAppliedCents,
-              // ADR-015 §3: el cron ya NO nace PROCESSED. PENDING (a la espera del disparo del operador) o
-              // HELD (review en curso). PROCESSED se alcanza SOLO cuando el riel confirma la salida del dinero.
-              status: flagged ? 'HELD' : 'PENDING',
-              heldReason: flagged ? HELD_REASON_REVIEW : null,
-              processedAt: null,
-            },
+          await this.repo.createPayoutInTx(tx, {
+            id: payoutId,
+            driverId: agg.driverId,
+            periodStart: start,
+            periodEnd: end,
+            grossCents: agg.grossCents,
+            commissionCents: agg.commissionCents,
+            amountCents: netAmount,
+            debtAppliedCents,
+            // ADR-015 §3: el cron ya NO nace PROCESSED. PENDING (a la espera del disparo del operador) o
+            // HELD (review en curso). PROCESSED se alcanza SOLO cuando el riel confirma la salida del dinero.
+            status: flagged ? 'HELD' : 'PENDING',
+            heldReason: flagged ? HELD_REASON_REVIEW : null,
+            processedAt: null,
           });
           // Ligamos los bonos al Payout (paidInPayoutId) SIN marcar paidAt: el marcado del bono se mueve al
           // handler de confirmación (PROCESSED), no al create. CAS `paidAt:null` para no re-ligar en un re-run.
           if (pendingIncentiveIds.length > 0) {
-            await tx.incentiveProgress.updateMany({
-              where: { id: { in: pendingIncentiveIds }, paidAt: null },
-              data: { paidInPayoutId: payoutId },
-            });
+            await this.repo.linkIncentivesToPayoutInTx(tx, pendingIncentiveIds, payoutId);
           }
           return netAmount;
         });
@@ -465,10 +429,7 @@ export class PayoutsService {
     end: Date,
     operator?: AuthenticatedUser,
   ): Promise<PayoutDisburseSummary> {
-    const pendingPayouts = await this.prisma.read.payout.findMany({
-      where: { periodStart: start, periodEnd: end, status: PayoutStatus.PENDING },
-      orderBy: { id: 'asc' },
-    });
+    const pendingPayouts = await this.repo.findPendingPayoutsForPeriod(start, end);
     // BACKSTOP DEL GATE DE REVIEW (fix crítico · último punto antes del money-out): re-consulta el set FLAGGED en
     // el MOMENTO del desembolso. Aunque holdDriver ya retro-flippea, esto cierra la ventana entre ese flip y el
     // disparo manual del operador (días): un `driver.flagged` que llegó en el ínterin RETIENE el PENDING (→HELD,
@@ -477,10 +438,10 @@ export class PayoutsService {
     const toHold = pendingPayouts.filter((p) => flaggedIds.has(p.driverId));
     const toDisburse = pendingPayouts.filter((p) => !flaggedIds.has(p.driverId));
     if (toHold.length > 0) {
-      await this.prisma.write.payout.updateMany({
-        where: { id: { in: toHold.map((p) => p.id) }, status: PayoutStatus.PENDING },
-        data: { status: PayoutStatus.HELD, heldReason: HELD_REASON_REVIEW },
-      });
+      await this.repo.holdPendingPayoutsByIds(
+        toHold.map((p) => p.id),
+        HELD_REASON_REVIEW,
+      );
       this.logger.warn(
         `Retenidos ${toHold.length} payout(s) por review tardío (driver.flagged post-agregación) en ${periodLabel(start, end)} — NO desembolsados`,
       );
@@ -512,7 +473,7 @@ export class PayoutsService {
     payoutId: string,
     operator?: AuthenticatedUser,
   ): Promise<PayoutDisburseSummary> {
-    const payout = await this.prisma.read.payout.findUnique({ where: { id: payoutId } });
+    const payout = await this.repo.findPayoutById(payoutId);
     if (!payout) throw new NotFoundError(`Payout ${payoutId} no encontrado`);
     if (payout.status !== PayoutStatus.FAILED) {
       throw new ConflictError(
@@ -611,11 +572,13 @@ export class PayoutsService {
 
     // 1. Reclamo transaccional PENDING/HELD/FAILED → PROCESSING + dedupKey + payout.processing (misma tx).
     //    CAS por status: gana UNA sola corrida; el doble-click pierde (count=0) y NO invoca el riel.
-    const claimed = await this.prisma.write.$transaction(async (tx) => {
-      const { count } = await tx.payout.updateMany({
-        where: { id: payout.id, status: payout.status },
-        data: { status: PayoutStatus.PROCESSING, dedupKey },
-      });
+    const claimed = await this.repo.runInTransaction(async (tx) => {
+      const { count } = await this.repo.casClaimPayoutProcessingInTx(
+        tx,
+        payout.id,
+        payout.status,
+        dedupKey,
+      );
       if (count === 0) return false; // otra corrida ya lo reclamó (doble-click): NO-OP.
       const envelope = createEnvelope({
         eventType: 'payout.processing',
@@ -627,7 +590,7 @@ export class PayoutsService {
           period: label,
         },
       });
-      await enqueueOutbox(tx, envelope, payout.id);
+      await this.repo.enqueueOutbox(tx, envelope, payout.id);
       return true;
     });
     if (!claimed) return 'DISPATCHED'; // ya estaba en curso por otra corrida: idempotente, no error.
@@ -644,10 +607,7 @@ export class PayoutsService {
       // Persistimos el ref externo (correlaciona el webhook/poll de confirmación). El estado queda
       // PROCESSING: SUBMITTED espera la confirmación async; CONFIRMED síncrono lo cerramos por el MISMO
       // camino idempotente que el webhook (applyPayoutDisbursementResult) — una sola fuente de verdad.
-      await this.prisma.write.payout.update({
-        where: { id: payout.id },
-        data: { externalRef: result.externalRef },
-      });
+      await this.repo.persistPayoutExternalRef(payout.id, result.externalRef);
       if (result.status === 'CONFIRMED') {
         await this.applyPayoutDisbursementResult({ payoutId: payout.id, resolution: 'CONFIRMED' });
       }
@@ -681,7 +641,7 @@ export class PayoutsService {
     payoutId: string;
     resolution: 'CONFIRMED' | 'REJECTED' | 'PENDING';
   }): Promise<ApplyDisbursementResult> {
-    const payout = await this.prisma.read.payout.findUnique({ where: { id: input.payoutId } });
+    const payout = await this.repo.findPayoutById(input.payoutId);
     if (!payout) {
       this.logger.warn(`Confirmación de desembolso sin match (payoutId=${input.payoutId}); no-op`);
       return { applied: false, status: 'NO_MATCH' };
@@ -694,19 +654,13 @@ export class PayoutsService {
       if (payout.status === PayoutStatus.PROCESSED) return { applied: false, status: 'PROCESSED' };
       assertPayoutTransition(payout.status, PayoutStatus.PROCESSED);
       const label = periodLabel(payout.periodStart, payout.periodEnd);
-      const ok = await this.prisma.write.$transaction(async (tx) => {
+      const ok = await this.repo.runInTransaction(async (tx) => {
         // CAS por status: gana UNA corrida; una confirmación concurrente ve count=0 y sale (no re-emite).
-        const { count } = await tx.payout.updateMany({
-          where: { id: payout.id, status: PayoutStatus.PROCESSING },
-          data: { status: PayoutStatus.PROCESSED, processedAt: new Date() },
-        });
+        const { count } = await this.repo.casMarkPayoutProcessedInTx(tx, payout.id);
         if (count === 0) return false;
         // El paidAt del incentivo se marca AQUÍ (ADR-015 §3/§D5): recién con el desembolso confirmado. CAS
         // `paidAt:null` para no re-marcar un bono ya pagado (webhook duplicado / poll+webhook).
-        await tx.incentiveProgress.updateMany({
-          where: { paidInPayoutId: payout.id, paidAt: null },
-          data: { paidAt: new Date() },
-        });
+        await this.repo.markIncentivesPaidInTx(tx, payout.id);
         const envelope = createEnvelope({
           eventType: 'payout.processed',
           producer: 'payment-service',
@@ -717,7 +671,7 @@ export class PayoutsService {
             period: label,
           },
         });
-        await enqueueOutbox(tx, envelope, payout.id);
+        await this.repo.enqueueOutbox(tx, envelope, payout.id);
         return true;
       });
       if (ok) {
@@ -731,11 +685,8 @@ export class PayoutsService {
     if (payout.status === PayoutStatus.FAILED) return { applied: false, status: 'FAILED' }; // idempotente
     assertPayoutTransition(payout.status, PayoutStatus.FAILED);
     const label = periodLabel(payout.periodStart, payout.periodEnd);
-    const ok = await this.prisma.write.$transaction(async (tx) => {
-      const { count } = await tx.payout.updateMany({
-        where: { id: payout.id, status: PayoutStatus.PROCESSING },
-        data: { status: PayoutStatus.FAILED },
-      });
+    const ok = await this.repo.runInTransaction(async (tx) => {
+      const { count } = await this.repo.casMarkPayoutFailedInTx(tx, payout.id);
       if (count === 0) return false;
       const envelope = createEnvelope({
         eventType: 'payout.failed',
@@ -747,7 +698,7 @@ export class PayoutsService {
           period: label,
         },
       });
-      await enqueueOutbox(tx, envelope, payout.id);
+      await this.repo.enqueueOutbox(tx, envelope, payout.id);
       return true;
     });
     if (ok) {
@@ -758,10 +709,7 @@ export class PayoutsService {
   }
 
   listByDriver(driverId: string): Promise<unknown[]> {
-    return this.prisma.read.payout.findMany({
-      where: { driverId },
-      orderBy: { periodStart: 'desc' },
-    });
+    return this.repo.findPayoutsByDriver(driverId);
   }
 
   /**
@@ -775,12 +723,9 @@ export class PayoutsService {
     limit?: number;
   }): Promise<PayoutPage> {
     const limit = clampPayoutLimit(opts.limit);
-    const where: Prisma.PayoutWhereInput = {};
-    if (opts.status) where.status = opts.status;
-    if (opts.cursor) where.id = { lt: opts.cursor };
-    const rows = await this.prisma.read.payout.findMany({
-      where,
-      orderBy: { id: 'desc' },
+    const rows = await this.repo.findPayoutsPage({
+      status: opts.status,
+      cursor: opts.cursor,
       take: limit + 1,
     });
     const hasMore = rows.length > limit;
@@ -796,22 +741,16 @@ export class PayoutsService {
    * y deuda CASH por SEPARADO. Dos `aggregate` acotados por FK (no un scan difuso por driver+período).
    */
   async getPayout(id: string): Promise<PayoutDetail> {
-    const payout = await this.prisma.read.payout.findUnique({ where: { id } });
+    const payout = await this.repo.findPayoutById(id);
     if (!payout) throw new NotFoundError('Payout no encontrado');
-    const [credits, debts] = await Promise.all([
-      this.prisma.read.driverCredit.aggregate({
-        where: { appliedInPayoutId: id, status: DriverCreditStatus.APPLIED },
-        _sum: { amountCents: true },
-      }),
-      this.prisma.read.driverDebt.aggregate({
-        where: { settledInPayoutId: id, status: DriverDebtStatus.SETTLED },
-        _sum: { amountCents: true },
-      }),
+    const [creditBackCents, debtSettledCents] = await Promise.all([
+      this.repo.sumAppliedCreditsForPayout(id),
+      this.repo.sumSettledDebtsForPayout(id),
     ]);
     return {
       ...payout,
-      creditBackCents: credits._sum.amountCents ?? 0,
-      debtSettledCents: debts._sum.amountCents ?? 0,
+      creditBackCents,
+      debtSettledCents,
     };
   }
 
@@ -822,11 +761,7 @@ export class PayoutsService {
    * los estados (el NETO ya persistido en cada fila). Estados sin payouts no aparecen en el groupBy → quedan en 0.
    */
   async getStats(): Promise<PayoutStats> {
-    const grouped = await this.prisma.read.payout.groupBy({
-      by: ['status'],
-      _count: { _all: true },
-      _sum: { amountCents: true },
-    });
+    const grouped = await this.repo.groupPayoutsByStatus();
     const stats: PayoutStats = {
       totalCents: 0,
       pendingCount: 0,
@@ -851,10 +786,7 @@ export class PayoutsService {
     // en review. CAS por-fila `status: PENDING` (transición PENDING→HELD válida · idempotente: no toca PROCESSING/
     // PROCESSED). Se liberan por el camino de vuelta (release) cuando el review se resuelve. El desembolso además
     // re-chequea el set (doble defensa: cierra la ventana entre este flip y el disparo manual del operador).
-    await this.prisma.write.payout.updateMany({
-      where: { driverId, status: PayoutStatus.PENDING },
-      data: { status: PayoutStatus.HELD, heldReason: HELD_REASON_REVIEW },
-    });
+    await this.repo.holdPendingPayoutsByDriver(driverId, HELD_REASON_REVIEW);
   }
 
   /**
@@ -887,10 +819,7 @@ export class PayoutsService {
     driverId: string,
     operator?: AuthenticatedUser,
   ): Promise<ReleaseHeldPayoutsResult> {
-    const held = await this.prisma.read.payout.findMany({
-      where: { driverId, status: PayoutStatus.HELD },
-      orderBy: { periodStart: 'asc' },
-    });
+    const held = await this.repo.findHeldPayoutsByDriver(driverId);
     const projectedTotal = held.reduce((sum, p) => sum + p.amountCents, 0);
 
     if (operator && projectedTotal > this.stepUpCents && !this.hasFreshMfa(operator)) {
@@ -934,23 +863,11 @@ export class PayoutsService {
     start: Date,
     end: Date,
   ): Promise<{ rows: DriverEarningRow[]; pendingIncentiveIdsByDriver: Map<string, string[]> }> {
-    const payments = await this.prisma.read.payment.findMany({
-      where: {
-        // A2 (ADR-022 §P-A) · EXCLUIR el efectivo del payout POSITIVO: en un viaje CASH el conductor ya cobró su
-        // neto EN MANO (la plata nunca pasó por la plataforma). Pagárselo otra vez por banco = doble-pago (el bug
-        // A2). Su comisión adeudada se acumula en `DriverDebt` (en la captura) y se NETEA aparte en el run. Los
-        // tip-Payments DIGITALES de un viaje cash (Model B) SÍ entran: son propina real por banco. Lista POSITIVA
-        // (no `method != CASH`): la negación anula el índice [method, status, capturedAt]; el `in` sí lo usa.
-        method: { in: [...NON_CASH_METHODS] },
-        // Incluye PARTIALLY_REFUNDED (F4): un reembolso PARCIAL al pasajero lo absorbe la plataforma
-        // (sale de su comisión); el conductor prestó el servicio → mantiene su neto. Un cobro REFUNDED
-        // (total) sí queda fuera (viaje revertido → el conductor no cobra).
-        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
-        driverId: { not: null },
-        capturedAt: { gte: start, lt: end },
-      },
-      select: { driverId: true, grossCents: true, commissionCents: true, tipCents: true },
-    });
+    // A2 (ADR-022 §P-A) · Cobros DIGITALES liquidados del período (excluye CASH: en un viaje cash el conductor ya
+    // cobró su neto EN MANO — pagárselo otra vez por banco sería doble-pago; su comisión adeudada se NETEA aparte).
+    // Incluye PARTIALLY_REFUNDED (F4: el conductor prestó el servicio, mantiene su neto). El filtro POSITIVO por
+    // método + estado liquidado (que usa el índice [method,status,capturedAt]) vive CRISTALIZADO en el repo.
+    const payments = await this.repo.findCapturedNonCashPayments(start, end);
     const earningRows: DriverEarningRow[] = payments
       .filter(
         (
@@ -973,14 +890,7 @@ export class PayoutsService {
     // cobra su parte del split cuando el pasajero paga. Se acredita NETA (sin comisión, no es bruto de
     // viaje). La ventana es por `collectedAt` (cuándo se saldó), no por la cancelación. driverId not null
     // y comp > 0 (una penalidad sin conductor va entera a la plataforma → no acredita a nadie).
-    const penalties = await this.prisma.read.cancellationPenalty.findMany({
-      where: {
-        status: 'COLLECTED',
-        driverId: { not: null },
-        collectedAt: { gte: start, lt: end },
-      },
-      select: { driverId: true, driverCompensationCents: true },
-    });
+    const penalties = await this.repo.findCollectedPenalties(start, end);
     const compensationRows: DriverEarningRow[] = penalties
       .filter(
         (p): p is { driverId: string; driverCompensationCents: number } =>
@@ -1009,10 +919,7 @@ export class PayoutsService {
     // doble-pago. `paidInPayoutId:null` excluye los ya-ligados (in-flight o retenidos por un FAILED): un FAILED
     // se paga RETENTÁNDOLO (retryPayout re-desembolsa el monto congelado y marca paidAt con el link intacto),
     // igual que su gross/comisión — el bono no se pierde, viaja con su Payout.
-    const pendingIncentives = await this.prisma.read.incentiveProgress.findMany({
-      where: { paidAt: null, paidInPayoutId: null, completedAt: { not: null, lt: end } },
-      select: { id: true, driverId: true, rewardGrantedCents: true },
-    });
+    const pendingIncentives = await this.repo.findUnpaidCompletedIncentives(end);
     const pendingIncentiveIdsByDriver = new Map<string, string[]>();
     const incentiveRows: DriverEarningRow[] = pendingIncentives
       .filter((p) => p.rewardGrantedCents > 0)

@@ -18,6 +18,7 @@ import {
 import { uuidv7 } from '@veo/utils';
 import { PrismaClient } from '../src/generated/prisma';
 import { AnalyticsService, RevenueRange } from '../src/analytics/analytics.service';
+import { AnalyticsRepository } from '../src/analytics/analytics.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
@@ -84,7 +85,9 @@ beforeAll(async () => {
   });
   prisma = new PrismaClient({ datasourceUrl: db.databaseUrl });
   await prisma.$connect();
-  analytics = new AnalyticsService({ read: prisma } as unknown as PrismaService);
+  analytics = new AnalyticsService(
+    new AnalyticsRepository({ read: prisma } as unknown as PrismaService),
+  );
 
   // ── Cobros digitales (cohorte de money-in + comisión) ──
   const p1 = await seedPayment({

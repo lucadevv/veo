@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CreditService } from './credit.service';
+import { CreditRepository } from './credit.repository';
 
 /**
  * Crédito gastable del usuario (Ola 2A · redención de referidos). Vive en payment-service (bounded context
@@ -7,7 +8,7 @@ import { CreditService } from './credit.service';
  * el cobro llega en el Lote B. `PrismaService` lo provee el módulo global de infra.
  */
 @Module({
-  providers: [CreditService],
+  providers: [CreditService, CreditRepository],
   exports: [CreditService],
 })
 export class CreditModule {}

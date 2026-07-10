@@ -26,14 +26,13 @@ import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import type Redis from 'ioredis';
 import { withDistributedLock } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { PayoutPollRepository } from './payout-poll.repository';
 import { REDIS } from '../infra/redis';
 import {
   PAYOUT_GATEWAY,
   supportsPayoutStatusQuery,
   type PayoutGateway,
 } from '../ports/gateway/payout-gateway.port';
-import { PayoutStatus } from '../generated/prisma';
 import { PayoutsService } from './payouts.service';
 import type { Env } from '../config/env.schema';
 
@@ -53,7 +52,7 @@ export class PayoutPollService implements OnModuleInit, OnModuleDestroy {
   private running = false;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: PayoutPollRepository,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(PAYOUT_GATEWAY) private readonly gateway: PayoutGateway,
     private readonly payouts: PayoutsService,
@@ -143,17 +142,9 @@ export class PayoutPollService implements OnModuleInit, OnModuleDestroy {
     // PROCESSING (oldest-first, capado a `batch`: los viejos se trabajan primero, tick a tick) y usamos `since`
     // solo para decidir la recuperación por CRASH de abajo (#8).
     const since = new Date(Date.now() - this.maxAgeMin * 60_000);
-    const processing = await this.prisma.read.payout.findMany({
-      where: {
-        status: PayoutStatus.PROCESSING,
-        // Ancla de reconciliación: el claim marker `dedupKey`, NO el `externalRef` (que puede faltar por
-        // orfandad). Todo PROCESSING legítimo fue reclamado con su dedupKey en la misma tx del claim.
-        dedupKey: { not: null },
-      },
-      select: { id: true, dedupKey: true, externalRef: true, updatedAt: true },
-      orderBy: { updatedAt: 'asc' },
-      take: this.batch,
-    });
+    // Ancla de reconciliación: el claim marker `dedupKey`, NO el `externalRef` (que puede faltar por orfandad).
+    // Todo PROCESSING legítimo fue reclamado con su dedupKey en la misma tx del claim. (WHERE cristalizado en el repo.)
+    const processing = await this.repo.findProcessingPayoutsForPoll(this.batch);
     if (processing.length === 0) return { scanned: 0, applied: 0 };
 
     let applied = 0;

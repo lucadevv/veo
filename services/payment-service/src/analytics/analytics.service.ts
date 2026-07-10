@@ -16,10 +16,7 @@
  * Zona horaria de negocio: America/Lima (UTC-5, sin DST). "Hoy" = desde la medianoche de Lima.
  */
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../infra/prisma.service';
-import { Prisma, PaymentMethod, PaymentStatus, RefundStatus } from '../generated/prisma';
-// Fuente ÚNICA de "métodos digitales" (lista positiva que sí usa el índice) — compartida con collectEarnings.
-import { NON_CASH_METHODS } from '../payments/payment.policy';
+import { AnalyticsRepository } from './analytics.repository';
 
 /** Punto de la serie horaria de revenue. `bucket` = hora truncada en ISO UTC (toStartOfHour). */
 export interface RevenueHourBucket {
@@ -105,7 +102,7 @@ export function limaMidnightUtc(now: Date): Date {
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: AnalyticsRepository) {}
 
   async revenue(now: Date = new Date()): Promise<RevenueAnalytics> {
     const [revenueTodayCents, platformMarginTodayCents, revenuePerHour] = await Promise.all([
@@ -124,21 +121,8 @@ export class AnalyticsService {
    */
   private async platformMarginToday(now: Date): Promise<number> {
     const since = limaMidnightUtc(now);
-    const agg = await this.prisma.read.payment.aggregate({
-      _sum: { commissionCents: true, pspFeeCents: true, discountCents: true, creditCents: true },
-      where: {
-        // Misma reformulación positiva que revenueToday: `in [digitales]` usa el índice; `!= CASH` lo anula.
-        method: { in: [...NON_CASH_METHODS] },
-        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        capturedAt: { gte: since },
-      },
-    });
-    return (
-      (agg._sum.commissionCents ?? 0) -
-      (agg._sum.pspFeeCents ?? 0) -
-      (agg._sum.discountCents ?? 0) -
-      (agg._sum.creditCents ?? 0)
-    );
+    const c = await this.repo.sumMarginComponentsSince(since);
+    return c.commissionCents - c.pspFeeCents - c.discountCents - c.creditCents;
   }
 
   /**
@@ -150,17 +134,8 @@ export class AnalyticsService {
    */
   private async revenueToday(now: Date): Promise<number> {
     const since = limaMidnightUtc(now);
-    const agg = await this.prisma.read.payment.aggregate({
-      _sum: { netSettledCents: true, refundedCents: true },
-      where: {
-        // Lista POSITIVA de métodos digitales (no `method != CASH`): la NEGACIÓN no puede seek en el índice
-        // [method, status, capturedAt] → lo anulaba (full-scan). Un `in` sí lo usa (seek por método + rango).
-        method: { in: [...NON_CASH_METHODS] },
-        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        capturedAt: { gte: since },
-      },
-    });
-    return (agg._sum.netSettledCents ?? 0) - (agg._sum.refundedCents ?? 0);
+    const c = await this.repo.sumMoneyInComponentsSince(since);
+    return c.netSettledCents - c.refundedCents;
   }
 
   /**
@@ -170,30 +145,10 @@ export class AnalyticsService {
    */
   private async revenuePerHour(now: Date): Promise<RevenueHourBucket[]> {
     const since = new Date(now.getTime() - HOURS_24_MS);
-    const rows = await this.prisma.read.$queryRaw<{ bucket: Date; revenue_cents: bigint }[]>(
-      // P-B · net-aware + EXCLUYE CASH, coherente EXACTA con revenueToday (misma definición de "money-in" en el
-      // MISMO dashboard, para que la suma de los buckets cuadre con el total del día): incluye PARTIALLY_REFUNDED
-      // y RESTA refunded_cents (antes filtraba solo CAPTURED y NO restaba → la serie 24h no reconciliaba con
-      // revenueToday). Suma el NETO al banco (net_settled_cents − refunded_cents) de los cobros DIGITALES por
-      // hora, atribuyendo el reembolso a la hora de la captura original. Legacy (net_settled NULL) → SUM lo ignora.
-      Prisma.sql`
-        SELECT date_trunc('hour', "captured_at" AT TIME ZONE 'UTC')                    AS bucket,
-               COALESCE(SUM("net_settled_cents" - COALESCE("refunded_cents", 0)), 0)::bigint AS revenue_cents
-        FROM "payment"."payments"
-        WHERE "status" IN (
-                ${PaymentStatus.CAPTURED}::"payment"."PaymentStatus",
-                ${PaymentStatus.PARTIALLY_REFUNDED}::"payment"."PaymentStatus"
-              )
-          AND "method" <> ${PaymentMethod.CASH}::"payment"."PaymentMethod"
-          AND "captured_at" >= ${since}
-        GROUP BY bucket
-        ORDER BY bucket ASC
-      `,
-    );
-    return rows.map((r) => ({
-      bucket: r.bucket.toISOString(),
-      revenueCents: Number(r.revenue_cents),
-    }));
+    // P-B · net-aware + EXCLUYE CASH, coherente EXACTA con revenueToday (misma definición de "money-in" en el MISMO
+    // dashboard, para que la suma de los buckets cuadre con el total del día): incluye PARTIALLY_REFUNDED y RESTA
+    // refunded_cents. La query cristaliza en el repo (mismo cohorte que revenueToday).
+    return this.repo.revenuePerHourBuckets(since);
   }
 
   /**
@@ -237,17 +192,10 @@ export class AnalyticsService {
     now: Date,
   ): Promise<{ moneyInCents: number; grossCommissionCents: number }> {
     const since = this.rangeStartUtc(range, now);
-    const agg = await this.prisma.read.payment.aggregate({
-      _sum: { netSettledCents: true, commissionCents: true },
-      where: {
-        method: { in: [...NON_CASH_METHODS] },
-        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        capturedAt: { gte: since },
-      },
-    });
+    const totals = await this.repo.sumRangeTotalsSince(since);
     return {
-      moneyInCents: agg._sum.netSettledCents ?? 0,
-      grossCommissionCents: agg._sum.commissionCents ?? 0,
+      moneyInCents: totals.netSettledCents,
+      grossCommissionCents: totals.commissionCents,
     };
   }
 
@@ -260,14 +208,7 @@ export class AnalyticsService {
    */
   private async refundedInRange(range: RevenueRange, now: Date): Promise<number> {
     const since = this.rangeStartUtc(range, now);
-    const agg = await this.prisma.read.refund.aggregate({
-      _sum: { amountCents: true },
-      where: {
-        status: RefundStatus.COMPLETED,
-        createdAt: { gte: since },
-      },
-    });
-    return agg._sum.amountCents ?? 0;
+    return this.repo.sumCompletedRefundsSince(since);
   }
 
   /**
@@ -279,32 +220,9 @@ export class AnalyticsService {
    */
   private async revenueSeries(range: RevenueRange, now: Date): Promise<RevenueBucket[]> {
     const since = this.rangeStartUtc(range, now);
-    const isToday = range === RevenueRange.TODAY;
-    // `date_trunc(unit, ...)` y `to_char(..., fmt)` toman el granularidad/formato como parámetros TEXT (bind-safe).
-    const granularity = isToday ? 'hour' : 'day';
-    // Literales entre comillas dobles ("T", ":00:00") → to_char no los interpreta como patrones; hora local de Lima.
-    const format = isToday ? 'YYYY-MM-DD"T"HH24":00:00"' : 'YYYY-MM-DD';
-    const methodList = Prisma.join(
-      NON_CASH_METHODS.map((m) => Prisma.sql`${m}::"payment"."PaymentMethod"`),
-    );
-    const rows = await this.prisma.read.$queryRaw<{ bucket: string; revenue_cents: bigint }[]>(
-      Prisma.sql`
-        SELECT to_char(
-                 date_trunc(${granularity}, "captured_at" AT TIME ZONE 'America/Lima'),
-                 ${format}
-               )                                                          AS bucket,
-               COALESCE(SUM("net_settled_cents"), 0)::bigint              AS revenue_cents
-        FROM "payment"."payments"
-        WHERE "status" IN (
-                ${PaymentStatus.CAPTURED}::"payment"."PaymentStatus",
-                ${PaymentStatus.PARTIALLY_REFUNDED}::"payment"."PaymentStatus"
-              )
-          AND "method" IN (${methodList})
-          AND "captured_at" >= ${since}
-        GROUP BY bucket
-        ORDER BY bucket ASC
-      `,
-    );
-    return rows.map((r) => ({ bucket: r.bucket, revenueCents: Number(r.revenue_cents) }));
+    // Decisión de DOMINIO: hora si `today`, día si `7d`/`30d`. El repo mapea la unidad al SQL (granularidad + formato)
+    // truncando en TZ America/Lima. Mismo cohorte que `rangeTotals` → los buckets reconcilian con `moneyInCents`.
+    const unit = range === RevenueRange.TODAY ? 'hour' : 'day';
+    return this.repo.revenueSeriesBuckets(since, unit);
   }
 }

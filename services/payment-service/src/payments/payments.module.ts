@@ -5,6 +5,7 @@ import { AffiliationsModule } from '../affiliations/affiliations.module';
 import { CreditModule } from '../credit/credit.module';
 import { CommissionModule } from '../commission/commission.module';
 import { PaymentsService } from './payments.service';
+import { PaymentsRepository } from './payments.repository';
 import { PaymentsController } from './payments.controller';
 
 @Module({
@@ -15,7 +16,7 @@ import { PaymentsController } from './payments.controller';
     CreditModule,
     CommissionModule,
   ],
-  providers: [PaymentsService],
+  providers: [PaymentsService, PaymentsRepository],
   controllers: [PaymentsController],
   exports: [PaymentsService],
 })

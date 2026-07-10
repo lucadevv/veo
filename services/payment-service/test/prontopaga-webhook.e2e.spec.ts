@@ -17,6 +17,7 @@ import { UnauthorizedError } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { ProntoPagaWebhookService } from '../src/webhooks/prontopaga-webhook.service';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import type { PrismaService } from '../src/infra/prisma.service';
@@ -90,8 +91,7 @@ beforeAll(async () => {
     pendingExternal: true,
     webhookSecret: SECRET,
   });
-  payments = new PaymentsService(
-    prismaService,
+  payments = new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     noAffiliation,
     noPromos,
@@ -210,8 +210,7 @@ describe('E2E ProntoPaga · tope Yape On File (2000 PEN/tx)', () => {
     const activeAffiliation = {
       resolveActiveWalletUid: async () => 'WUID-ACTIVE',
     } as unknown as AffiliationsService;
-    const onFilePayments = new PaymentsService(
-      prismaService,
+    const onFilePayments = new PaymentsService(new PaymentsRepository(prismaService),
       onFileGateway,
       activeAffiliation,
       noPromos,

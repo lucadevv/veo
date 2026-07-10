@@ -17,7 +17,9 @@ import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { CreditService } from '../src/credit/credit.service';
+import { CreditRepository } from '../src/credit/credit.repository';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import { deriveTripChargeDedupKey } from '../src/payments/payment.policy';
 import type { PrismaService } from '../src/infra/prisma.service';
@@ -82,9 +84,8 @@ beforeAll(async () => {
   await prisma.$connect();
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
-  credit = new CreditService(prismaService);
-  svc = new PaymentsService(
-    prismaService,
+  credit = new CreditService(new CreditRepository(prismaService));
+  svc = new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     noAffiliation,
     noPromos,

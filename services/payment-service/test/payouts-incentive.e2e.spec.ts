@@ -27,6 +27,7 @@ import { uuidv7, NotFoundError } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PayoutsService } from '../src/payouts/payouts.service';
+import { PayoutsRepository } from '../src/payouts/payouts.repository';
 import { SandboxPayoutGateway } from '../src/ports/gateway/sandbox-payout.gateway';
 import type { PrismaService } from '../src/infra/prisma.service';
 
@@ -75,7 +76,12 @@ function makeService(redis: unknown): PayoutsService {
   // El cron solo AGREGA (PENDING) — no toca el gateway. Igual lo inyectamos (real sandbox) para los tests
   // de desembolso de este suite. confirmSync:false ⇒ el disburse queda SUBMITTED (async), como en prod.
   const gateway = new SandboxPayoutGateway({ rejectSeed: 0, confirmSync: false });
-  return new PayoutsService(prismaService, redis as never, gateway, makeConfig() as never);
+  return new PayoutsService(
+    new PayoutsRepository(prismaService),
+    redis as never,
+    gateway,
+    makeConfig() as never,
+  );
 }
 
 /** Inserta un Incentive META_VIAJES con su bono. Una fila por test (active, sin caducidad). */

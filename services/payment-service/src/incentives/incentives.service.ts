@@ -12,9 +12,9 @@
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox, isUniqueViolation } from '@veo/database';
+import { isUniqueViolation } from '@veo/database';
 import { uuidv7 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { IncentivesRepository } from './incentives.repository';
 import { IncentiveType, type Incentive, type IncentiveProgress } from '../generated/prisma';
 import { computeCompleted, isActiveAt, isMetaCompleted } from './incentives.policy';
 
@@ -35,7 +35,7 @@ export interface DriverIncentiveView {
 export class IncentivesService {
   private readonly logger = new Logger(IncentivesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: IncentivesRepository) {}
 
   /**
    * Acredita un viaje completado del conductor a TODOS sus incentivos META_VIAJES vigentes.
@@ -44,9 +44,7 @@ export class IncentivesService {
    */
   async creditTrip(driverId: string, tripId: string): Promise<void> {
     const now = new Date();
-    const incentives = await this.prisma.read.incentive.findMany({
-      where: { active: true, type: 'META_VIAJES' },
-    });
+    const incentives = await this.repo.findActiveMetaIncentives();
     for (const incentive of incentives) {
       if (!isActiveAt(incentive, now)) continue;
       await this.creditOne(incentive, driverId, tripId);
@@ -56,31 +54,29 @@ export class IncentivesService {
   /** Acredita el viaje a UN incentivo (transacción): crédito único + incremento + bono al cumplir. */
   private async creditOne(incentive: Incentive, driverId: string, tripId: string): Promise<void> {
     try {
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTransaction(async (tx) => {
         // Crédito idempotente: si ya existe (incentivo, conductor, viaje), no cuenta de nuevo.
-        await tx.incentiveTripCredit.create({
-          data: { id: uuidv7(), incentiveId: incentive.id, driverId, tripId },
+        await this.repo.createTripCreditInTx(tx, {
+          id: uuidv7(),
+          incentiveId: incentive.id,
+          driverId,
+          tripId,
         });
 
         // Upsert del progreso + incremento atómico.
-        const existing = await tx.incentiveProgress.findUnique({
-          where: { incentiveId_driverId: { incentiveId: incentive.id, driverId } },
-        });
+        const existing = await this.repo.findProgressInTx(tx, incentive.id, driverId);
         const progress: IncentiveProgress = existing
-          ? await tx.incentiveProgress.update({
-              where: { id: existing.id },
-              data: { tripsCompleted: { increment: 1 } },
-            })
-          : await tx.incentiveProgress.create({
-              data: { id: uuidv7(), incentiveId: incentive.id, driverId, tripsCompleted: 1 },
+          ? await this.repo.incrementProgressInTx(tx, existing.id)
+          : await this.repo.createProgressInTx(tx, {
+              id: uuidv7(),
+              incentiveId: incentive.id,
+              driverId,
+              tripsCompleted: 1,
             });
 
         // ¿Alcanzó la meta y aún no se otorgó el bono? → otorgar una sola vez.
         if (!progress.completedAt && isMetaCompleted(incentive, progress.tripsCompleted)) {
-          await tx.incentiveProgress.update({
-            where: { id: progress.id },
-            data: { completedAt: new Date(), rewardGrantedCents: incentive.rewardCents },
-          });
+          await this.repo.grantRewardInTx(tx, progress.id, incentive.rewardCents);
           const envelope = createEnvelope({
             eventType: 'incentive.completed',
             producer: 'payment-service',
@@ -93,7 +89,7 @@ export class IncentivesService {
               at: new Date().toISOString(),
             },
           });
-          await enqueueOutbox(tx, envelope, incentive.id);
+          await this.repo.enqueueOutbox(tx, envelope, incentive.id);
           this.logger.log(
             `Incentivo ${incentive.id} cumplido por conductor ${driverId}: bono ${incentive.rewardCents} céntimos`,
           );
@@ -112,7 +108,7 @@ export class IncentivesService {
    */
   async listForDriver(driverId: string): Promise<DriverIncentiveView[]> {
     const now = new Date();
-    const incentives = await this.prisma.read.incentive.findMany({ where: { active: true } });
+    const incentives = await this.repo.findActiveIncentives();
     // HORA_PICO se OCULTA del conductor por ahora: su único valor es `multiplierBps` (el +X%), y NINGÚN camino
     // de plata lo paga todavía (collectEarnings no aplica el multiplicador). Mostrarlo sería prometer una
     // ganancia que no llega ("promesa sin pago"). Se DES-OCULTA cuando el payout implemente el multiplicador de
@@ -120,9 +116,10 @@ export class IncentivesService {
     const active = incentives.filter(
       (i) => isActiveAt(i, now) && i.type !== IncentiveType.HORA_PICO,
     );
-    const progresses = await this.prisma.read.incentiveProgress.findMany({
-      where: { driverId, incentiveId: { in: active.map((i) => i.id) } },
-    });
+    const progresses = await this.repo.findProgressForDriver(
+      driverId,
+      active.map((i) => i.id),
+    );
     const byIncentive = new Map(progresses.map((p) => [p.incentiveId, p]));
 
     return active

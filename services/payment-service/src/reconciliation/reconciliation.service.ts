@@ -11,16 +11,10 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import type Redis from 'ioredis';
 import { uuidv7, withDistributedLock, ValidationError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { ReconciliationRepository } from './reconciliation.repository';
 import { REDIS } from '../infra/redis';
 import { PAYMENT_GATEWAY, type PaymentGateway } from '../ports/gateway/payment-gateway.port';
-import {
-  Prisma,
-  PaymentMethod,
-  PaymentStatus,
-  RefundStatus,
-  type ReconciliationRun,
-} from '../generated/prisma';
+import { type ReconciliationRun } from '../generated/prisma';
 import { discrepancyPct } from '../payouts/payout.policy';
 import type { Env } from '../config/env.schema';
 
@@ -79,7 +73,7 @@ export class ReconciliationService {
   private readonly cashPendingAlertMin: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: ReconciliationRepository,
     @Inject(REDIS) private readonly redis: Redis,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
     config: ConfigService<Env, true>,
@@ -140,9 +134,8 @@ export class ReconciliationService {
    */
   async sweepStalePendingRefunds(now: Date): Promise<StaleRefundSweepResult> {
     const threshold = new Date(now.getTime() - this.refundPendingAlertMin * 60_000);
-    const where = { status: RefundStatus.PENDING, createdAt: { lt: threshold } };
 
-    const staleCount = await this.prisma.read.refund.count({ where });
+    const staleCount = await this.repo.countStalePendingRefunds(threshold);
     if (staleCount === 0) {
       this.logger.log(
         `Barrido de reembolsos PENDING: sin refunds más viejos que ${this.refundPendingAlertMin}min`,
@@ -150,19 +143,7 @@ export class ReconciliationService {
       return { ranAt: now.toISOString(), staleCount: 0, alerted: false };
     }
 
-    const stale = await this.prisma.read.refund.findMany({
-      where,
-      select: {
-        id: true,
-        paymentId: true,
-        amountCents: true,
-        externalRefundId: true,
-        requestedBy: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'asc' },
-      take: REFUND_SWEEP_DETAIL_LIMIT,
-    });
+    const stale = await this.repo.findStalePendingRefunds(threshold, REFUND_SWEEP_DETAIL_LIMIT);
 
     for (const r of stale) {
       const ageMin = Math.floor((now.getTime() - r.createdAt.getTime()) / 60_000);
@@ -195,13 +176,8 @@ export class ReconciliationService {
    */
   async sweepStaleCashPending(now: Date): Promise<StaleCashSweepResult> {
     const threshold = new Date(now.getTime() - this.cashPendingAlertMin * 60_000);
-    const where = {
-      status: PaymentStatus.PENDING,
-      method: PaymentMethod.CASH,
-      createdAt: { lt: threshold },
-    };
 
-    const staleCount = await this.prisma.read.payment.count({ where });
+    const staleCount = await this.repo.countStaleCashPending(threshold);
     if (staleCount === 0) {
       this.logger.log(
         `Barrido de efectivo PENDING: sin pagos más viejos que ${this.cashPendingAlertMin}min`,
@@ -209,19 +185,7 @@ export class ReconciliationService {
       return { ranAt: now.toISOString(), staleCount: 0, alerted: false };
     }
 
-    const stale = await this.prisma.read.payment.findMany({
-      where,
-      select: {
-        id: true,
-        tripId: true,
-        driverId: true,
-        passengerId: true,
-        amountCents: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'asc' },
-      take: CASH_SWEEP_DETAIL_LIMIT,
-    });
+    const stale = await this.repo.findStaleCashPending(threshold, CASH_SWEEP_DETAIL_LIMIT);
 
     for (const p of stale) {
       const ageMin = Math.floor((now.getTime() - p.createdAt.getTime()) / 60_000);
@@ -243,25 +207,10 @@ export class ReconciliationService {
   async reconcile(start: Date, end: Date): Promise<ReconciliationResult> {
     // Solo rieles externos (Yape/Plin); el efectivo no aparece en extractos del gateway. Se SUMA en la DB (no
     // materializar todos los cobros del día en memoria para reducir en JS — coherente con AnalyticsService que ya
-    // agrega). Raw SQL por el COALESCE POR-FILA (`net_settled_cents ?? amount_cents`) que un aggregate de Prisma
-    // no expresa. P-B (ADR-022): el lado DB es el NETO esperado en el banco (net_settled = bruto − fee PSP), NO el
-    // bruto (antes divergía por el fee acumulado); legacy (net_settled NULL) cae al bruto por fila. Usa el índice
-    // [method, status, capturedAt].
-    const [row] = await this.prisma.read.$queryRaw<{ db_total: bigint; db_count: bigint }[]>(
-      Prisma.sql`
-        SELECT COALESCE(SUM(COALESCE("net_settled_cents", "amount_cents")), 0)::bigint AS db_total,
-               COUNT(*)::bigint                                                        AS db_count
-        FROM "payment"."payments"
-        WHERE "status" = ${PaymentStatus.CAPTURED}::"payment"."PaymentStatus"
-          AND "method" IN (
-                ${PaymentMethod.YAPE}::"payment"."PaymentMethod",
-                ${PaymentMethod.PLIN}::"payment"."PaymentMethod"
-              )
-          AND "captured_at" >= ${start} AND "captured_at" < ${end}
-      `,
-    );
-    const dbTotalCents = Number(row?.db_total ?? 0);
-    const dbCount = Number(row?.db_count ?? 0);
+    // agrega). El repo hace el COALESCE POR-FILA (`net_settled_cents ?? amount_cents`) vía raw SQL. P-B (ADR-022):
+    // el lado DB es el NETO esperado en el banco (net_settled = bruto − fee PSP), NO el bruto (antes divergía por
+    // el fee acumulado); legacy (net_settled NULL) cae al bruto por fila. Usa el índice [method, status, capturedAt].
+    const { dbTotalCents, dbCount } = await this.repo.sumCapturedDigitalSettlement(start, end);
 
     const statement = await this.gateway.getStatement(start, end);
     const statementTotalCents = statement.reduce((sum, e) => sum + e.amountCents, 0);
@@ -269,19 +218,17 @@ export class ReconciliationService {
     const pct = discrepancyPct(dbTotalCents, statementTotalCents);
     const alerted = pct > this.alertPct;
 
-    await this.prisma.write.reconciliationRun.create({
-      data: {
-        id: uuidv7(),
-        discrepancyPct: pct,
-        alerted,
-        details: {
-          periodStart: start.toISOString(),
-          periodEnd: end.toISOString(),
-          dbTotalCents,
-          statementTotalCents,
-          dbCount,
-          statementCount: statement.length,
-        },
+    await this.repo.createReconciliationRun({
+      id: uuidv7(),
+      discrepancyPct: pct,
+      alerted,
+      details: {
+        periodStart: start.toISOString(),
+        periodEnd: end.toISOString(),
+        dbTotalCents,
+        statementTotalCents,
+        dbCount,
+        statementCount: statement.length,
       },
     });
 
@@ -310,13 +257,7 @@ export class ReconciliationService {
    */
   async listRuns(opts: { cursor?: string; limit?: number }): Promise<ReconciliationRunPage> {
     const limit = clampReconLimit(opts.limit);
-    const where: Prisma.ReconciliationRunWhereInput = {};
-    if (opts.cursor) where.id = { lt: opts.cursor };
-    const rows = await this.prisma.read.reconciliationRun.findMany({
-      where,
-      orderBy: { id: 'desc' },
-      take: limit + 1,
-    });
+    const rows = await this.repo.listReconciliationRuns({ cursor: opts.cursor, take: limit + 1 });
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
     const last = items[items.length - 1];

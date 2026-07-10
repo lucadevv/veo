@@ -12,7 +12,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { uuidv7 } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
-import { PrismaService } from '../infra/prisma.service';
+import { CreditRepository } from './credit.repository';
 import { CreditSource } from '../generated/prisma';
 
 /**
@@ -26,7 +26,7 @@ const MAX_SPEND_ATTEMPTS = 3;
 export class CreditService {
   private readonly logger = new Logger(CreditService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: CreditRepository) {}
 
   /**
    * Acredita `rewardCents` al saldo gastable de `userId` por un referido. IDEMPOTENTE por `eventId`.
@@ -42,29 +42,20 @@ export class CreditService {
     if (rewardCents <= 0) return false;
 
     try {
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTransaction(async (tx) => {
         // 1) Asegura el registro de saldo (no-op si ya existe) para que el FK del movimiento se satisfaga.
-        await tx.userCredit.upsert({
-          where: { userId },
-          create: { userId, balanceCents: 0 },
-          update: {},
-        });
+        await this.repo.ensureCreditRowInTx(tx, userId);
         // 2) GUARD de idempotencia ANTES del increment: el INSERT viola UNIQUE(source_ref) si el evento ya
         //    se procesó → P2002 → la tx ENTERA aborta (el increment de abajo NO ocurre).
-        await tx.userCreditEntry.create({
-          data: {
-            id: uuidv7(),
-            userId,
-            deltaCents: rewardCents,
-            source: CreditSource.REFERRAL,
-            sourceRef: eventId,
-          },
+        await this.repo.createEntryInTx(tx, {
+          id: uuidv7(),
+          userId,
+          deltaCents: rewardCents,
+          source: CreditSource.REFERRAL,
+          sourceRef: eventId,
         });
         // 3) Solo si el movimiento era nuevo: aplica el saldo.
-        await tx.userCredit.update({
-          where: { userId },
-          data: { balanceCents: { increment: rewardCents } },
-        });
+        await this.repo.incrementBalanceInTx(tx, userId, rewardCents);
       });
       this.logger.log(
         `Crédito de referido acreditado: user=${userId} +${rewardCents}c (event=${eventId})`,
@@ -98,7 +89,7 @@ export class CreditService {
 
     // Idempotencia: si este cobro ya gastó crédito (re-run / fallo previo tras gastar), devolver el MISMO
     // monto aplicado (el saldo ya se decrementó una vez) para que el cobro recompute idéntico.
-    const already = await this.prisma.read.userCreditEntry.findUnique({ where: { sourceRef } });
+    const already = await this.repo.findEntryBySourceRef(sourceRef);
     if (already) return -already.deltaCents;
 
     // Reintento ACOTADO solo para la carrera de saldo (CAS miss): cada vuelta es UNA llamada al helper, no
@@ -125,28 +116,23 @@ export class CreditService {
     maxApplicableCents: number,
     sourceRef: string,
   ): Promise<{ settled: boolean; applied: number }> {
-    const current = await this.prisma.read.userCredit.findUnique({ where: { userId } });
+    const current = await this.repo.findCreditByUser(userId);
     const balance = current?.balanceCents ?? 0;
     const applied = Math.min(balance, maxApplicableCents);
     if (applied <= 0) return { settled: true, applied: 0 };
 
     try {
-      const ok = await this.prisma.write.$transaction(async (tx) => {
+      const ok = await this.repo.runInTransaction(async (tx) => {
         // CAS: decrementa SOLO si el saldo SIGUE alcanzando (un gasto concurrente del mismo user pudo
         // bajarlo entre el read y este write). count=0 → carrera → reintentar con saldo fresco.
-        const dec = await tx.userCredit.updateMany({
-          where: { userId, balanceCents: { gte: applied } },
-          data: { balanceCents: { decrement: applied } },
-        });
+        const dec = await this.repo.casDecrementBalanceInTx(tx, userId, applied);
         if (dec.count === 0) return false;
-        await tx.userCreditEntry.create({
-          data: {
-            id: uuidv7(),
-            userId,
-            deltaCents: -applied,
-            source: CreditSource.TRIP_REDEMPTION,
-            sourceRef,
-          },
+        await this.repo.createEntryInTx(tx, {
+          id: uuidv7(),
+          userId,
+          deltaCents: -applied,
+          source: CreditSource.TRIP_REDEMPTION,
+          sourceRef,
         });
         return true;
       });
@@ -160,7 +146,7 @@ export class CreditService {
     } catch (err) {
       if (isUniqueViolation(err, 'sourceRef')) {
         // Doble-entrega del MISMO cobro en paralelo: el ganador ya gastó; devolver su monto.
-        const winner = await this.prisma.read.userCreditEntry.findUnique({ where: { sourceRef } });
+        const winner = await this.repo.findEntryBySourceRef(sourceRef);
         return { settled: true, applied: winner ? -winner.deltaCents : 0 };
       }
       throw err;

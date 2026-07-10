@@ -22,6 +22,7 @@ import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import { deriveTripChargeDedupKey } from '../src/payments/payment.policy';
 import type { PrismaService } from '../src/infra/prisma.service';
@@ -87,7 +88,7 @@ beforeAll(async () => {
   // prisma real (NO mock): read y write apuntan al mismo cliente del contenedor.
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
-  svc = new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never);
+  svc = new PaymentsService(new PaymentsRepository(prismaService), gateway, noAffiliation, noPromos, makeConfig() as never);
 }, 180_000);
 
 afterAll(async () => {

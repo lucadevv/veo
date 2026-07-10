@@ -19,8 +19,11 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type Redis from 'ioredis';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { PayoutsService } from '../src/payouts/payouts.service';
+import { PayoutsRepository } from '../src/payouts/payouts.repository';
 import { PromotionsService } from '../src/promotions/promotions.service';
+import { PromotionsRepository } from '../src/promotions/promotions.repository';
 import { deriveTripChargeDedupKey } from '../src/payments/payment.policy';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import { SandboxPayoutGateway } from '../src/ports/gateway/sandbox-payout.gateway';
@@ -59,12 +62,12 @@ beforeAll(async () => {
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
   // prisma real (NO mock): read y write apuntan al mismo cliente del contenedor.
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  const promotions = new PromotionsService(prismaService);
+  const promotions = new PromotionsService(new PromotionsRepository(prismaService));
   // En modo sandbox no se consultan afiliaciones; un resolver no-op alcanza para la regresión.
   const affiliations = {
     resolveActiveWalletUid: async () => null,
   } as unknown as AffiliationsService;
-  service = new PaymentsService(prismaService, gateway, affiliations, promotions, config);
+  service = new PaymentsService(new PaymentsRepository(prismaService), gateway, affiliations, promotions, config);
   // PayoutsService con Redis falso (el set de flagged/lock no es el store del dinero; la DB sí es real).
   const fakeRedis = {
     sismember: async () => 0,
@@ -74,7 +77,12 @@ beforeAll(async () => {
   } as unknown as Redis;
   // Sandbox de payout: el cron (runPayouts) solo AGREGA (PENDING) y no lo toca; igual lo inyectamos.
   const payoutGateway = new SandboxPayoutGateway({ rejectSeed: 0, confirmSync: false });
-  payouts = new PayoutsService(prismaService, fakeRedis, payoutGateway, config);
+  payouts = new PayoutsService(
+    new PayoutsRepository(prismaService),
+    fakeRedis,
+    payoutGateway,
+    config,
+  );
 }, 180_000);
 
 afterAll(async () => {

@@ -23,6 +23,7 @@ import { InvalidStateError, uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import type {
   PaymentGateway,
   GatewayChargeFlow,
@@ -90,8 +91,7 @@ function fakeGateway(decl: {
 
 function makeService(gateway: PaymentGateway): PaymentsService {
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  return new PaymentsService(
-    prismaService,
+  return new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     noAffiliation,
     noPromos,

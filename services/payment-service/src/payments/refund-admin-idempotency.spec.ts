@@ -13,7 +13,7 @@ import { PaymentsService } from './payments.service';
 import { AdminRole } from '@veo/shared-types';
 import { deriveAdminRefundDedupKey } from './payment.policy';
 import type { AuthenticatedUser } from '@veo/auth';
-import type { PrismaService } from '../infra/prisma.service';
+import type { PaymentTx } from './payments.repository';
 
 interface FakePayment {
   id: string;
@@ -68,97 +68,70 @@ function capturedPayment(over: Partial<FakePayment> = {}): FakePayment {
   };
 }
 
-/** Prisma double que HONRA el UNIQUE de `refund.dedupKey` y expone `read.refund.findFirst` (path P2002→existente). */
-function makePrisma(payment: FakePayment | null) {
+/**
+ * Repo fake (mock del SEAM PaymentsRepository) que HONRA el UNIQUE de `refund.dedupKey` y expone
+ * `findRefundByDedupKeyOnPrimary` (path P2002→existente, read-after-write en el primario).
+ */
+function makeRepo(payment: FakePayment | null) {
   const refunds: FakeRefund[] = [];
   const usedDedupKeys = new Set<string>();
 
-  const tx = {
-    payment: {
-      updateMany: vi.fn(
-        async ({
-          where,
-          data,
-        }: {
-          where: { id: string; status: { in: string[] }; refundedCents: number };
-          data: Partial<FakePayment>;
-        }) => {
-          if (
-            !payment ||
-            payment.id !== where.id ||
-            !where.status.in.includes(payment.status) ||
-            payment.refundedCents !== where.refundedCents
-          ) {
-            return { count: 0 };
-          }
-          Object.assign(payment, data);
-          return { count: 1 };
-        },
-      ),
-    },
-    // A2 · reverseCashDebtInTx consulta la deuda del cobro CASH al reembolsar; sin deuda en estos escenarios → null.
-    driverDebt: { findUnique: vi.fn(async () => null) },
-    refund: {
-      create: vi.fn(async ({ data }: { data: FakeRefund }) => {
-        if (data.dedupKey) {
-          if (usedDedupKeys.has(data.dedupKey)) throw uniqueViolation('dedup_key');
-          usedDedupKeys.add(data.dedupKey);
-        }
-        refunds.push(data);
-        return data;
-      }),
-      // Backstop de VENTANA (assertNoDuplicateAdminRefundInWindowTx): refund reciente NO-RECHAZADO del MISMO
-      // (paymentId, amountCents). El doble trata TODOS los refunds como "dentro de la ventana" (ignora createdAt)
-      // → modela el peor caso (idempotencia más agresiva), suficiente para verificar el dedup por identidad-dinero.
-      findFirst: vi.fn(
-        async ({
-          where,
-        }: {
-          where: { paymentId: string; amountCents: number; status?: { not: string } };
-        }) =>
-          refunds.find(
-            (r) =>
-              r.paymentId === where.paymentId &&
-              r.amountCents === where.amountCents &&
-              r.status !== 'REJECTED',
-          ) ?? null,
-      ),
-    },
-    outboxEvent: { create: vi.fn(async ({ data }: { data: unknown }) => data) },
+  const createRefundInTx = vi.fn(async (_tx: PaymentTx, data: FakeRefund) => {
+    if (data.dedupKey) {
+      if (usedDedupKeys.has(data.dedupKey)) throw uniqueViolation('dedup_key');
+      usedDedupKeys.add(data.dedupKey);
+    }
+    refunds.push(data);
+    return data;
+  });
+
+  const repo = {
+    findRefundablePaymentByTrip: vi.fn(async (tripId: string) =>
+      payment?.tripId === tripId && ['CAPTURED', 'PARTIALLY_REFUNDED'].includes(payment.status)
+        ? payment
+        : null,
+    ),
+    runInTransaction: async <T>(work: (tx: PaymentTx) => Promise<T>): Promise<T> =>
+      work({} as PaymentTx),
     // Advisory lock transaccional del backstop de ventana (pg_advisory_xact_lock): no-op en el doble.
-    $executeRaw: vi.fn(async () => 0),
+    acquirePaymentAdvisoryLock: vi.fn(async () => {}),
+    // Backstop de VENTANA: refund reciente NO-RECHAZADO del MISMO (paymentId, amountCents). El doble trata TODOS
+    // los refunds como "dentro de la ventana" (ignora createdAt) → peor caso (idempotencia más agresiva).
+    findRecentRefundInWindowInTx: vi.fn(
+      async (_tx: PaymentTx, paymentId: string, amountCents: number) =>
+        refunds.find(
+          (r) => r.paymentId === paymentId && r.amountCents === amountCents && r.status !== 'REJECTED',
+        ) ?? null,
+    ),
+    casClaimRefundReservation: vi.fn(
+      async (
+        _tx: PaymentTx,
+        paymentId: string,
+        expectedRefundedCents: number,
+        data: Partial<FakePayment>,
+      ) => {
+        if (
+          payment?.id !== paymentId ||
+          !['CAPTURED', 'PARTIALLY_REFUNDED'].includes(payment.status) ||
+          payment.refundedCents !== expectedRefundedCents
+        ) {
+          return { count: 0 };
+        }
+        Object.assign(payment, data);
+        return { count: 1 };
+      },
+    ),
+    // A2 · reverseCashDebtInTx consulta la deuda del cobro CASH al reembolsar; sin deuda en estos escenarios → null.
+    findDriverDebtByPaymentInTx: vi.fn(async () => null),
+    createRefundInTx,
+    enqueueOutbox: vi.fn(async () => {}),
+    // El handler de idempotencia relee del PRIMARIO (read-after-write): el doble busca por dedupKey.
+    findRefundByDedupKeyOnPrimary: vi.fn(
+      async (dedupKey: string) => refunds.find((r) => r.dedupKey === dedupKey) ?? null,
+    ),
   };
 
-  const prisma = {
-    read: {
-      payment: {
-        findFirst: vi.fn(
-          async ({ where }: { where: { tripId: string; status: { in: string[] } } }) =>
-            payment && payment.tripId === where.tripId && where.status.in.includes(payment.status)
-              ? payment
-              : null,
-        ),
-      },
-      refund: {
-        findFirst: vi.fn(
-          async ({ where }: { where: { dedupKey: string } }) =>
-            refunds.find((r) => r.dedupKey === where.dedupKey) ?? null,
-        ),
-      },
-    },
-    write: {
-      // El handler de idempotencia relee del PRIMARIO (read-after-write): el doble lo expone igual que `read`.
-      refund: {
-        findFirst: vi.fn(
-          async ({ where }: { where: { dedupKey: string } }) =>
-            refunds.find((r) => r.dedupKey === where.dedupKey) ?? null,
-        ),
-      },
-      $transaction: async <T>(cb: (t: typeof tx) => Promise<T>): Promise<T> => cb(tx),
-    },
-  } as unknown as PrismaService;
-
-  return { prisma, refunds, txRefundCreate: tx.refund.create };
+  return { repo, refunds, txRefundCreate: createRefundInTx };
 }
 
 // El constructor lee números de config; el camino CASH no toca gateway/affiliations/promotions/credit.
@@ -178,8 +151,8 @@ const config = {
   },
 } as never;
 
-function buildService(prisma: PrismaService): PaymentsService {
-  return new PaymentsService(prisma, {} as never, {} as never, {} as never, config);
+function buildService(repo: ReturnType<typeof makeRepo>['repo']): PaymentsService {
+  return new PaymentsService(repo as never, {} as never, {} as never, {} as never, config);
 }
 
 const operator: AuthenticatedUser = {
@@ -189,8 +162,8 @@ const operator: AuthenticatedUser = {
 
 describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () => {
   it('CON Idempotency-Key: persiste dedupKey derivada del key (barrera dura)', async () => {
-    const { prisma, refunds } = makePrisma(capturedPayment());
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(capturedPayment());
+    const svc = buildService(repo);
 
     const res = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
 
@@ -200,8 +173,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
   });
 
   it('SIN Idempotency-Key: dedupKey NULL (compat — idempotencia = CAS optimista, como antes)', async () => {
-    const { prisma, refunds } = makePrisma(capturedPayment());
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(capturedPayment());
+    const svc = buildService(repo);
 
     await svc.refund('trip-1', 1000, 'ajuste', operator);
 
@@ -210,11 +183,10 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
   });
 
   it('LO CRÍTICO — reintento con el MISMO key (refund parcial ya creado) → devuelve el EXISTENTE, NO doble plata', async () => {
-    const { prisma, refunds, txRefundCreate } = makePrisma(capturedPayment());
+    const { repo, refunds, txRefundCreate } = makeRepo(capturedPayment());
     // Pre-existe el refund de ESTE key (un primer submit que el server SÍ commiteó, pero el cliente vio un
     // error de red ambiguo y reintenta con el MISMO Idempotency-Key estable).
-    await txRefundCreate({
-      data: {
+    await txRefundCreate({} as never, {
         id: 'refund-existente',
         paymentId: 'pay-1',
         amountCents: 1000,
@@ -223,9 +195,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
         dedupKey: deriveAdminRefundDedupKey('KEY-A'),
         status: 'COMPLETED',
         reason: 'ajuste',
-      },
-    } as never);
-    const svc = buildService(prisma);
+    });
+    const svc = buildService(repo);
 
     const res = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
 
@@ -236,10 +207,9 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
   });
 
   it('mismo key pero OTRO monto (operador editó el form tras un timeout) → CONFLICTO, NO éxito falso', async () => {
-    const { prisma, txRefundCreate } = makePrisma(capturedPayment({ amountCents: 4500 }));
+    const { repo, txRefundCreate } = makeRepo(capturedPayment({ amountCents: 4500 }));
     // El primer submit (monto 1000) ya commiteó server-side con el key K.
-    await txRefundCreate({
-      data: {
+    await txRefundCreate({} as never, {
         id: 'refund-de-1000',
         paymentId: 'pay-1',
         amountCents: 1000,
@@ -248,9 +218,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
         dedupKey: deriveAdminRefundDedupKey('KEY-A'),
         status: 'COMPLETED',
         reason: 'ajuste',
-      },
-    } as never);
-    const svc = buildService(prisma);
+    });
+    const svc = buildService(repo);
 
     // El operador edita el monto a 500 y reenvía con el MISMO key: NO debe devolver el refund de 1000 como
     // éxito (sería un sub-reembolso enmascarado) → conflicto explícito.
@@ -262,9 +231,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
   it('mismo key, mismo dinero (pago+monto), OTRO motivo → DEDUP (el motivo NO es identidad de dinero)', async () => {
     // Un reintento donde el operador editó el motivo libre sigue siendo la MISMA operación de dinero: debe
     // devolver el existente (no doble-pagar, no conflicto). El motivo no entra en la identidad del key.
-    const { prisma, txRefundCreate } = makePrisma(capturedPayment({ amountCents: 4500 }));
-    await txRefundCreate({
-      data: {
+    const { repo, txRefundCreate } = makeRepo(capturedPayment({ amountCents: 4500 }));
+    await txRefundCreate({} as never, {
         id: 'refund-motivo-A',
         paymentId: 'pay-1',
         amountCents: 1000,
@@ -273,9 +241,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
         dedupKey: deriveAdminRefundDedupKey('KEY-A'),
         status: 'COMPLETED',
         reason: 'motivo A',
-      },
-    } as never);
-    const svc = buildService(prisma);
+    });
+    const svc = buildService(repo);
 
     const res = await svc.refund('trip-1', 1000, 'motivo B', operator, 'KEY-A');
     expect(res.refundId).toBe('refund-motivo-A');
@@ -285,8 +252,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     // El cierre DURO del residual del nonce de cliente: aunque el 2do intento traiga un Idempotency-Key DISTINTO
     // (storage bloqueado / otra pestaña / otro dispositivo re-acuñaron uno nuevo), el server lo trata como la
     // MISMA operación de dinero (mismo paymentId+monto, dentro de la ventana) → devuelve el existente, NO crea otro.
-    const { prisma, refunds } = makePrisma(capturedPayment({ amountCents: 4500 }));
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(capturedPayment({ amountCents: 4500 }));
+    const svc = buildService(repo);
 
     const first = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
     const second = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-B'); // key DIVERGENTE, sin forceNew
@@ -297,8 +264,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
 
   it('keys distintos, mismo dinero, CON forceNew → DOS refunds (el operador habilita el 2do parcial idéntico)', async () => {
     // El gesto explícito del operador salta el backstop de ventana: dos parciales LEGÍTIMOS idénticos no colapsan.
-    const { prisma, refunds } = makePrisma(capturedPayment({ amountCents: 4500 }));
-    const svc = buildService(prisma);
+    const { repo, refunds } = makeRepo(capturedPayment({ amountCents: 4500 }));
+    const svc = buildService(repo);
 
     await svc.refund('trip-1', 1000, 'ajuste 1', operator, 'KEY-A');
     await svc.refund('trip-1', 1000, 'ajuste 2', operator, 'KEY-B', true); // forceNew=true
