@@ -130,6 +130,70 @@ describe('SecurityService', () => {
     expect(out.geo).toEqual({ lat: -12.05, lon: -77.04 });
   });
 
+  it('resolve reenvía SOLO resolution downstream y registra el motivo (notes) en el audit', async () => {
+    const rest = {
+      post: vi.fn().mockResolvedValue({
+        ...panicEntity,
+        status: 'RESOLVED',
+        resolvedAt: '2026-05-29T01:00:00.000Z',
+      }),
+    } as unknown as InternalRestClient;
+    const audit = {
+      record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }),
+    } as unknown as AuditRecorder;
+    const svc = new SecurityService(
+      rest,
+      identityGrpc,
+      tripGrpc,
+      InternalAudience.ADMIN_RAIL,
+      audit,
+      config,
+    );
+    const compliance: AuthenticatedUser = { ...identity, roles: ['COMPLIANCE_SUPERVISOR'] };
+    const out = await svc.resolve(compliance, 'pa1', {
+      resolution: 'RESOLVED',
+      notes: 'Pasajero confirmó que está a salvo',
+    });
+    expect(out.status).toBe('RESOLVED');
+    // panic-service NO persiste notas → downstream solo va resolution (la entidad no tiene columna de notas).
+    expect(rest.post).toHaveBeenCalledWith('/panic/pa1/resolve', {
+      identity: compliance,
+      body: { resolution: 'RESOLVED' },
+    });
+    // El motivo vive en el AUDIT (rendición de cuentas · Ley 29733).
+    expect(audit.record).toHaveBeenCalledWith(
+      compliance,
+      expect.objectContaining({
+        action: 'panic.resolve',
+        resourceId: 'pa1',
+        payload: { resolution: 'RESOLVED', notes: 'Pasajero confirmó que está a salvo' },
+      }),
+    );
+  });
+
+  it('resolve sin notes: el audit payload no incluye notes', async () => {
+    const rest = {
+      post: vi.fn().mockResolvedValue({ ...panicEntity, status: 'FALSE_ALARM' }),
+    } as unknown as InternalRestClient;
+    const audit = {
+      record: vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' }),
+    } as unknown as AuditRecorder;
+    const svc = new SecurityService(
+      rest,
+      identityGrpc,
+      tripGrpc,
+      InternalAudience.ADMIN_RAIL,
+      audit,
+      config,
+    );
+    const compliance: AuthenticatedUser = { ...identity, roles: ['COMPLIANCE_SUPERVISOR'] };
+    await svc.resolve(compliance, 'pa1', { resolution: 'FALSE_ALARM' });
+    expect(audit.record).toHaveBeenCalledWith(
+      compliance,
+      expect.objectContaining({ payload: { resolution: 'FALSE_ALARM' } }),
+    );
+  });
+
   it('COMPLIANCE_SUPERVISOR: ve nombres reales sin redactar', async () => {
     const rest = {
       get: vi.fn().mockResolvedValue({ ...panicEntity, status: 'TRIGGERED' }),

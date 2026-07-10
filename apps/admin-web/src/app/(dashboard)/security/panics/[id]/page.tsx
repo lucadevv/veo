@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { PanicEvidenceDialog } from '@/components/security/panic-evidence-dialog';
+import { PanicResolveDialog } from '@/components/security/panic-resolve-dialog';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
 
 export default function PanicDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -69,22 +70,14 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
                 />
               ) : null}
               {can(user, 'panics:resolve') && !panic.resolvedAt ? (
-                <ConfirmDialog
+                <PanicResolveDialog
+                  id={id}
                   trigger={
                     <Button size="sm" variant="secondary">
                       <CheckCircle2 className="size-4" aria-hidden />
                       Resolver
                     </Button>
                   }
-                  title="Resolver alerta"
-                  description="Registra el desenlace del incidente. Esta acción queda auditada."
-                  confirmLabel="Resolver"
-                  withReason
-                  reasonLabel="Notas de resolución"
-                  onConfirm={async (reason) => {
-                    await action.mutateAsync({ id, action: 'resolve', notes: reason });
-                    toast({ tone: 'success', title: 'Alerta resuelta' });
-                  }}
                 />
               ) : null}
             </div>

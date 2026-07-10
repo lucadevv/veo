@@ -164,6 +164,17 @@ export const panicDetail = z.object({
 export type PanicDetail = z.infer<typeof panicDetail>;
 
 /**
+ * Body del POST /security/panics/:id/resolve: DESENLACE del incidente (RESOLVED = atendido/resuelto,
+ * FALSE_ALARM = falsa alarma) + un motivo OPCIONAL que se registra en el audit (Ley 29733 · rendición de
+ * cuentas). Espejo de `ResolvePanicDto` del admin-bff (`resolution` requerido con @IsIn, `notes` opcional).
+ */
+export const resolvePanicRequest = z.object({
+  resolution: z.enum(['RESOLVED', 'FALSE_ALARM']),
+  notes: z.string().max(2000).optional(),
+});
+export type ResolvePanicRequest = z.infer<typeof resolvePanicRequest>;
+
+/**
  * Body del POST /security/panics/:id/evidence: claves S3 de la evidencia a adjuntar al incidente y,
  * opcionalmente, `finalize` para PROTEGERLAS con retención/object-lock (cadena de custodia · Ley 29733).
  * Espejo de `PanicEvidenceDto` del admin-bff (que re-valida: 1..50 claves, cada una string).

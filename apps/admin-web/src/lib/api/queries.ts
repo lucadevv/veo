@@ -50,6 +50,7 @@ import {
   panicDetail,
   panicEvidenceResult,
   type AttachPanicEvidenceRequest,
+  type ResolvePanicRequest,
   type ReplaceCatalogRequest,
   panicSummary,
   payoutView,
@@ -475,12 +476,37 @@ export function usePanic(id: string) {
   });
 }
 
+/**
+ * Reconoce (ACK) un incidente de pánico (POST /security/panics/:id/ack). Acción NO crítica (no exige
+ * step-up MFA server-side). El éxito invalida el detalle y los listados. El resolve va aparte
+ * (`useResolvePanic`): exige elegir el desenlace + step-up MFA.
+ */
 export function usePanicAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; action: 'ack' | 'resolve'; notes?: string }) =>
+    mutationFn: (input: { id: string; action: 'ack' }) =>
       apiClient().post(`/security/panics/${input.id}/${input.action}`, {
-        body: input.notes ? { notes: input.notes } : undefined,
+        schema: panicDetail,
+      }),
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: qk.panic(data.id) });
+      void qc.invalidateQueries({ queryKey: ['panics'] });
+    },
+  });
+}
+
+/**
+ * Resuelve / marca falsa alarma un incidente (POST /security/panics/:id/resolve). Contrato:
+ * `{ resolution: 'RESOLVED' | 'FALSE_ALARM', notes?: string }` — `resolution` es REQUERIDO (el server lo
+ * exige con @IsIn y `forbidNonWhitelisted`); `notes` es el motivo opcional que queda en el audit. Acción
+ * CRÍTICA: el server exige step-up MFA fresca (@RequireStepUpMfa) → el diálogo hace `stepUp()` antes.
+ */
+export function useResolvePanic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string } & ResolvePanicRequest) =>
+      apiClient().post(`/security/panics/${input.id}/resolve`, {
+        body: { resolution: input.resolution, ...(input.notes ? { notes: input.notes } : {}) },
         schema: panicDetail,
       }),
     onSuccess: (data) => {

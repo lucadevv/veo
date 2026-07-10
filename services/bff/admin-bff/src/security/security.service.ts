@@ -125,13 +125,15 @@ export class SecurityService {
   ): Promise<PanicDetail> {
     const p = await this.rest.post<PanicEntity>(`/panic/${id}/resolve`, {
       identity,
+      // panic-service solo transiciona el estado (su entidad no persiste notas). El motivo NO se reenvía
+      // downstream: vive en el AUDIT de abajo (rendición de cuentas · Ley 29733).
       body: { resolution: dto.resolution },
     });
     await this.audit.record(identity, {
       action: 'panic.resolve',
       resourceType: 'panic',
       resourceId: id,
-      payload: { resolution: dto.resolution },
+      payload: { resolution: dto.resolution, ...(dto.notes ? { notes: dto.notes } : {}) },
     });
     return this.enrichPanicDetail(identity, p);
   }
