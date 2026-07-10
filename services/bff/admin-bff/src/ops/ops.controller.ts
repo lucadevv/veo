@@ -5,6 +5,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
+import { RequireStepUpMfaForPolicy } from '../policies/require-step-up-for-policy.decorator';
 import { AdminRole } from '@veo/shared-types';
 import type {
   TripSummary,
@@ -96,6 +97,10 @@ export class OpsController {
 
   @Get('drivers/:id')
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // PBAC (ADR-024 §5 · `pii.reveal-stepup`): este detalle REVELA el DNI completo del conductor. Hoy solo RBAC
+  // (Compliance+); cuando el superadmin ENABLE la política, exige además MFA fresca dentro de su ventana propia
+  // (default 600s, distinta del auth.stepup de 300s). DISABLED por default → comportamiento de hoy intacto.
+  @RequireStepUpMfaForPolicy('pii.reveal-stepup')
   @ApiOperation({
     summary: 'Detalle de revisión de un conductor: core + biométrico + documentos (URLs firmadas)',
   })

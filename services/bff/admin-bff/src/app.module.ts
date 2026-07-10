@@ -30,6 +30,9 @@ import { PricingModule } from './pricing/pricing.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { DispatchConfigModule } from './dispatch-config/dispatch-config.module';
 import { GobiernoModule } from './gobierno/gobierno.module';
+import { IpAllowlistGuard } from './policies/ip-allowlist.guard';
+import { SessionIdleGuard } from './policies/session-idle.guard';
+import { PolicyStepUpMfaGuard } from './policies/policy-step-up-mfa.guard';
 
 @Module({
   imports: [
@@ -87,9 +90,18 @@ import { GobiernoModule } from './gobierno/gobierno.module';
     // driver-bff (Jwt → DriverType → SessionRevocation).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: SessionRevocationGuard },
+    // PBAC Fase 2 (ADR-024 §5 · NET-NEW). Corren tras el Jwt (necesitan req.user) y ANTES del RateLimit/RBAC:
+    //  • IpAllowlistGuard  — `access.ip-allowlist`: corta una IP no autorizada temprano (antes de gastar cuota).
+    //  • SessionIdleGuard  — `auth.session-timeout`: idle tracking en Redis, complementa el TTL duro del token.
+    // Ambas arrancan DISABLED por default (NET-NEW) → fail-safe: sin cambio del superadmin, no restringen nada.
+    { provide: APP_GUARD, useClass: IpAllowlistGuard },
+    { provide: APP_GUARD, useClass: SessionIdleGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: StepUpMfaGuard },
+    // PBAC Fase 2 · `pii.reveal-stepup`: step-up MFA policy-aware (ventana propia) para handlers marcados con
+    // @RequireStepUpMfaForPolicy. No-op salvo en el detalle de conductor que revela el DNI. DISABLED por default.
+    { provide: APP_GUARD, useClass: PolicyStepUpMfaGuard },
   ],
 })
 export class AppModule {}
