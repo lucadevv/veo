@@ -75,6 +75,8 @@ VEO es una plataforma de movilidad segura (Lima) en construcción desde el scaff
   - **Modelo de deploy = VPS** (ver §0.7(c)): se **eliminó** el carril AWS/k8s; prod = VPS único + Docker Compose + GitHub Actions self-hosted; `booking-service` ya cableado al carril VPS (`4e66a06`, `d7e5a10`, `7157d2c`).
 
 - 🆕 **Modelo de pricing — COEXISTENCIA (ADR-023, 2026-07-07):** los 3 modos (**FIJO**=Uber · **PUJA**=inDrive · **COST-SHARE**=BlaBlaCar) COEXISTEN puros, asignados **por servicio a MANO por el admin** (palanca manual, sin franjas horarias — **ADR-011 superseded en su parte de schedule**). Una fórmula de distancia (`calculateFirmFare`, intacta) + params por servicio; **dos bordes honestos**: Mecánico = **call-out plano** (visita, no viaje: perKm=0 Y perMin=0, labor aparte), Carpooling = **producto propio** (`booking-service`, no "un modo del catálogo"). **Surge afuera** del modelo. Modo per-service reemplaza `allowedModes`+schedule (ADR-013 alineado). Plan de código: `specs/changes/pricing-taxonomy/` (Fases A/B, pendientes). Diseño en veo.pen (5 frames admin: On-demand · Viajes · Especiales · Carpooling · Detalle de servicio).
+  - 🆕 **Ofertas CUSTOM (alta de servicio) — admin COMPLETO, consumo del pasajero PENDIENTE (2026-07-12):** el SUPERADMIN puede crear ofertas a medida desde el admin (`/finance/catalog` → "Nuevo servicio"). Vertical real end-to-end **verificado en vivo**: tabla `trip.CustomOffering` (id `custom_*`, mapea a un `vehicleClass`/`serviceType` EXISTENTE) + `@Post /internal/catalog/offerings` (trip-service, MFA+audit+outbox) → admin-bff `@Post /catalog/offerings` (`@Roles(SUPERADMIN)` + `catalog:create` (nuevo en `@veo/policy`) + step-up MFA) → api-client `createOfferingRequest` → `useCreateOffering` → `new-offering-dialog.tsx`. El catálogo (list/config/detalle) **une built-in ∪ custom**; el pricing/overlay/analytics las trata igual (validación extendida a enum∪custom en `OfferingOverrideDto`, `offering-metrics-query.dto`). Commit `14ae3149`/`6a77e204`.
+    - **🔴 DEUDA para el agente de la APP (pasajero):** una oferta custom es 100% administrable pero el **pasajero AÚN NO la puede PEDIR**. `resolveTripOffering` (`trip-service/src/domain/offering.ts`) es puro/sync y usa `findOffering` (SOLO el enum) → un `createTrip` con `category: custom_*` da 400 `UNKNOWN_OFFERING`; el quote del public-bff queda gated por ahí. Cerrarlo: threadear el `CatalogService` (async, ya une built-in∪custom) en el seam de create-trip + el quote del pasajero. El MATCHING sí funcionaría (mapea a un `vehicleClass` existente). Secundario: `bid-floor.repository.parseOverrides` filtra por `findOffering` → una custom en PUJA usa el piso DEFAULT (su multiplier/minFare sí aplican).
 
 - 🆕 **Gobierno del admin — modelo unificado de 4 capas (ADR-024 PBAC + ADR-025 Gobierno unificado, 2026-07-10):** el "quién puede qué" del admin ahora es una pila de 4 capas: **Roles** (enum, rango) → **Permisos base** (código, `PERMISSION_ROLES`) → **Overlay** (registro, **subtract-only**: solo RESTA permisos por-rol) → **Políticas/PBAC** (registro, condicional: IP-allowlist, session-idle, step-up MFA por política).
   - **`@veo/policy` (paquete nuevo) = FUENTE ÚNICA** de la matriz base `PERMISSION_ROLES` (antes vivía duplicada en `apps/admin-web/src/lib/rbac.ts`, que ahora **re-exporta** de `@veo/policy` para no romper imports). El mismo mapa que la UI usa para ocultar es el que el servidor enforcea. Incluye el catálogo `Permission`, el predicado `baseGrants`, el set de **candados legales no-restables** (`LEGAL_MANDATORY`: `audit:view`, `audit:verify`, `finance:payout` — el overlay NO puede ocultarlos en ningún rol, análogo al `mandatory` de una Política, Ley 29733) y la fórmula compartida del efectivo `base ∧ ¬oculto`.
@@ -307,6 +309,26 @@ Auditoría módulo×módulo de `apps/driver` contra los frames del `design/veo.p
 - **F · Módulo 4 (Viaje) — SIN auditar.** Todo el flujo de viaje (TripIncoming/Active/Complete, Puja, SOS, navegación) está **detrás del gate biométrico**, que no pasa en el simulador (liveness/cámara real). Queda sin cruzar contra los frames; requiere bypass de dev del gate o verificación en device.
 
 - **G · Reuso/limpieza (mjolnir, baja prioridad).** `clones-estructurales`: boilerplate repetido de hooks React Query (`useTrip`/`useDocuments`/`useEarningsSummary`…) — arquitectural. `valor-hardcodeado`: `#1A2332` (sombra) + `rgba(255,255,255,0.92/0.96)` (tab bar/GlassSheet frosted) — excepciones documentadas (usar `hexAlpha`). `pantalla-huerfana`: `CarpoolScreen` (tab Compartir) — technicality del grafo de nav; reachable y verificada en vivo.
+
+#### Deuda frontend passenger (features sin seam a backend)
+
+Features de UI de `apps/passenger` construidas pero **sin seam a backend**, o data que hoy es estática y debería ser dinámica (server-driven). Cada fila: qué falta + el endpoint/dato a pedirle al backend + el `file:line` del marcador en código.
+
+| # | Deuda | Marcador (file:line) | Qué falta / qué pedirle al backend |
+|---|-------|----------------------|-------------------------------------|
+| 1 | OTP por WhatsApp | `i18n/es-PE/common.ts:188` | El copy dice "por WhatsApp" pero el envío real es SMS (SMPP). Backend debe entregar por **WhatsApp Business API** como canal primario. |
+| 2 | Rutas populares carpool | `carpool/.../CarpoolSearchScreen.tsx:49` | Endpoint `GET /carpool/popular-routes` (hoy hardcodeado). |
+| 3 | Filtros/orden carpool | `carpool/.../CarpoolResultsScreen.tsx:37` | Que `POST /carpool/search` acepte **sort** (precio/salida) + **filtro** (verificado). |
+| 4 | Chat carpool | `carpool/.../CarpoolBookingStatusScreen.tsx:55` | Canal `/carpool/bookings/:id/messages`. |
+| 5 | Control de cámara (preferencia) | `trip/domain/cameraShareRepository.ts:9` | Persistir "quién ve mi cámara" server-side (hoy MMKV local); `media-service` la aplica al autorizar viewers. |
+| 6 | Idioma y región | `profile/.../ProfileScreen.tsx:85` | Multi-locale + persistir preferencia de idioma (hoy solo es-PE). |
+| 7 | Términos y privacidad | `profile/.../ProfileScreen.tsx:88` | URL legal (Ley 29733) en config/env. |
+| 8 | Accesibilidad | `profile/.../ProfileScreen.tsx:83` | Pantalla de ajustes de accesibilidad de la app. |
+| 9 | Fee "Cargo por servicio S/3" carpool | `carpool/.../CarpoolBookingReviewScreen.tsx:48` | El `.pen` lo inventa; **decisión de producto** (backend agrega el fee al desglose) o corregir el `.pen`. |
+| 10 | Email login/register | `auth/data/httpAuthRepository.ts:70` | Cableado en datos+BFF pero **sin pantalla** en passenger (falta `EmailLoginScreen`). |
+| 11 | Modo niño fee | `childMode/.../ChildModeScreen.tsx` (~L204) | `CHILD_MODE_FEE_CENTS` debería ser **server-driven** (p.ej. `GET /maps/catalog` o `GET /pricing/child-mode`) para cambiar la tarifa sin release. |
+
+> Verificado con mjolnir (seams) + audit de código. Los **WIRED** confirmados (NO deuda): OAuth Google/Apple, notif-prefs sync, Promociones. Navegación: **58/58 journeys cierran (0 dead-ends)**.
 
 ---
 
