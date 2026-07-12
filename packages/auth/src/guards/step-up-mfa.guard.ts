@@ -16,8 +16,12 @@ import { isMfaFresh } from '../totp.js';
 import { POLICY_READER_PORT, type PolicyReaderPort } from '../policy-port.js';
 import type { AuthenticatedUser } from '../jwt.js';
 
-/** Ventana por default de la política `auth.stepup` (segundos). Es el DEFAULT fail-safe si no hay reader. */
-const STEP_UP_DEFAULT_MAX_AGE_SEC = 300;
+/**
+ * Ventana por default de la política `auth.stepup` (segundos). Es el DEFAULT fail-safe si no hay reader.
+ * EXPORTADO (fuente única): los servicios que re-chequean frescura MFA en capa de servicio (ej.
+ * PayoutsService.hasFreshMfa) importan ESTE valor como fallback — nunca duplicar el literal 300.
+ */
+export const STEP_UP_DEFAULT_MAX_AGE_SEC = 300;
 
 @Injectable()
 export class StepUpMfaGuard implements CanActivate {

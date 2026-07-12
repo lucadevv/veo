@@ -30,8 +30,14 @@ export const envSchema = z
     // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
     ...outboxEnvSchema.shape,
 
-    // Secreto para validar la identidad interna que el BFF propaga a servicios
+    // Secreto para validar la identidad interna que el BFF propaga a servicios. También firma la identidad
+    // de SISTEMA con la que el cliente de @veo/policy consulta el registro central (GET /internal/policies).
     INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
+
+    // Base del API interno de identity-service (registro central de políticas PBAC · ADR-024 Fase 1). El
+    // cliente de @veo/policy hace GET /internal/policies (firmado admin-rail) al boot para poblar su cache;
+    // si es inalcanzable, cae al DEFAULT del catálogo (fail-safe, nunca tumba el arranque). Incluye /api/v1.
+    IDENTITY_INTERNAL_URL: requiredInProd('http://localhost:3001/api/v1', { url: true }),
 
     // Puerto de mapas (@veo/maps). 'local' = motor propio determinista; 'osrm' = infra OSM self-hosted;
     // 'mapbox' = Directions API (token pk, detrás del puerto). Enum derivado de MAPS_MODES (sin drift).

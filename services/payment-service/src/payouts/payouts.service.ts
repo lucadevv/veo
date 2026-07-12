@@ -19,7 +19,12 @@ import {
   type DistributedLockOutcome,
 } from '@veo/utils';
 import { PaymentMetrics } from '../metrics/payment.metrics';
-import type { AuthenticatedUser } from '@veo/auth';
+import {
+  POLICY_READER_PORT,
+  STEP_UP_DEFAULT_MAX_AGE_SEC,
+  type AuthenticatedUser,
+  type PolicyReaderPort,
+} from '@veo/auth';
 import { PayoutsRepository, type PayoutTx } from './payouts.repository';
 import { REDIS } from '../infra/redis';
 import {
@@ -41,7 +46,6 @@ const FLAGGED_DRIVERS_KEY = 'veo:payment:flagged-drivers';
 const HELD_REASON_REVIEW = 'driver_in_review';
 const CRON_LOCK_KEY = 'veo:payment:lock:weekly-payouts';
 const CRON_LOCK_TTL_SECONDS = 600;
-const STEPUP_MAX_AGE_SECONDS = 300;
 /** Riel money-OUT por defecto del desembolso (ADR-015 D2: YAPE/PLIN a la billetera del conductor). */
 const DEFAULT_PAYOUT_METHOD: PayoutMethod = 'YAPE';
 
@@ -187,6 +191,11 @@ export class PayoutsService {
     // PaymentsService: los specs construyen el service a mano con menos args (sin Nest DI). PaymentMetrics es
     // @Global (CoreModule) → SIEMPRE inyectable en runtime; sin él (en tests viejos) el carril no emite métrica.
     @Optional() private readonly metrics?: PaymentMetrics,
+    // PBAC (ADR-024 §9): la ventana de frescura del step-up MFA (`auth.stepup.maxAgeSec`) se lee del MISMO
+    // reader cacheado que usa el StepUpMfaGuard (PolicyModule global en AppModule) — el cambio del superadmin
+    // surte efecto acá también, sin double-source. @Optional + trailing por la MISMA razón que metrics: los
+    // specs construyen el service a mano con menos args. Sin reader → default endurecido de @veo/auth.
+    @Optional() @Inject(POLICY_READER_PORT) private readonly policy?: PolicyReaderPort,
   ) {
     this.minCents = config.getOrThrow<number>('PAYOUT_MIN_CENTS');
     this.stepUpCents = config.getOrThrow<number>('PAYOUT_STEPUP_CENTS');
@@ -1035,8 +1044,13 @@ export class PayoutsService {
 
   private hasFreshMfa(user: AuthenticatedUser): boolean {
     if (!user.mfaVerifiedAt) return false;
+    // Ventana VIGENTE de la política `auth.stepup` (cache PBAC) o el default endurecido compartido de
+    // @veo/auth si no hay reader registrado — misma resolución que el StepUpMfaGuard (cero drift).
+    const maxAgeSec =
+      this.policy?.numberSync('auth.stepup', 'maxAgeSec', STEP_UP_DEFAULT_MAX_AGE_SEC) ??
+      STEP_UP_DEFAULT_MAX_AGE_SEC;
     const ageSeconds = Math.floor(Date.now() / 1000) - user.mfaVerifiedAt;
-    return ageSeconds <= STEPUP_MAX_AGE_SECONDS;
+    return ageSeconds <= maxAgeSec;
   }
 }
 

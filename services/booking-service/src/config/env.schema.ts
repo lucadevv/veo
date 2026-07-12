@@ -46,8 +46,15 @@ export const envSchema = z
     ...outboxEnvSchema.shape,
 
     // Secreto de identidad interna que el BFF propaga a servicios (InternalIdentityGuard). DEBE ser
-    // IDÉNTICO en todos los services y BFFs; si difiere, el guard interno rechaza la request.
+    // IDÉNTICO en todos los services y BFFs; si difiere, el guard interno rechaza la request. También firma
+    // la identidad de SISTEMA con la que el cliente de @veo/policy consulta el registro central.
     INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
+
+    // Base del API interno de identity-service (registro central de políticas PBAC · ADR-024 Fase 1). El
+    // cliente de @veo/policy hace GET /internal/policies (firmado admin-rail) al boot para poblar su cache;
+    // si es inalcanzable, cae al DEFAULT del catálogo (fail-safe, nunca tumba el arranque). Incluye /api/v1.
+    // Distinta de IDENTITY_GRPC_URL (abajo): esta es el borde REST interno, aquella el gRPC de dominio.
+    IDENTITY_INTERNAL_URL: requiredInProd('http://localhost:3001/api/v1', { url: true }),
 
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 

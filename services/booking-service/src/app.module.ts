@@ -1,5 +1,5 @@
 import { Module, type Provider } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import {
   HealthController,
@@ -7,8 +7,9 @@ import {
   READINESS_CHECKS,
   type ReadinessCheck,
 } from '@veo/observability';
+import { PolicyModule, type PolicyRuntimeConfig } from '@veo/policy/nest';
 import type { Redis } from '@veo/redis';
-import { validateEnv } from './config/env.schema';
+import { validateEnv, type Env } from './config/env.schema';
 import { CoreModule } from './infra/core.module';
 import { PrismaService } from './infra/prisma.service';
 import { REDIS } from './infra/redis';
@@ -53,6 +54,20 @@ const readinessProvider: Provider = {
   imports: [
     ConfigModule.forRoot({ isGlobal: true, cache: true, validate: validateEnv }),
     ScheduleModule.forRoot(),
+    // Cliente runtime de políticas PBAC (ADR-024 Fase 1). GLOBAL (una carga + un consumer Kafka) → el reader
+    // cacheado queda visible para el StepUpMfaGuard (`auth.stepup` en cost-per-km admin): la ventana que fija
+    // el superadmin surte efecto sin redeploy. Kafka reusa los brokers del servicio (groupId aislado
+    // `booking-service-policy`); su REST interno apunta a identity-service firmando admin-rail. FAIL-SAFE:
+    // identity/Kafka caídos NO tumban el boot — se sirven los DEFAULTS del catálogo.
+    PolicyModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>): PolicyRuntimeConfig => ({
+        serviceName: 'booking-service',
+        kafkaBrokers: config.getOrThrow<string>('KAFKA_BROKERS').split(','),
+        identityBaseUrl: config.getOrThrow<string>('IDENTITY_INTERNAL_URL'),
+        internalSecret: config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
+      }),
+    }),
     CoreModule,
     PublishedTripsModule,
     BookingsModule,

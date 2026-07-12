@@ -35,6 +35,7 @@
     "@veo/events": "workspace:*",
     "@veo/maps": "workspace:*",
     "@veo/observability": "workspace:*",
+    "@veo/policy": "workspace:*",
     "@veo/redis": "workspace:*",
     "@veo/rpc": "workspace:*",
     "@veo/shared-types": "workspace:*",
