@@ -355,6 +355,10 @@ export const auditEntryView = z.object({
   id: z.string(),
   seq: z.string(),
   actorId: z.string().nullable(),
+  // Actor enriquecido on-read (roster de operadores): nombre + rol del staff que ejecutó la acción. null si el
+  // actor no es un operador (evento de dominio: conductor/pasajero/sistema) o no resolvió → la UI cae al actorId.
+  actorName: z.string().nullable().optional(),
+  actorRole: z.string().nullable().optional(),
   action: z.string(),
   resourceType: z.string(),
   resourceId: z.string(),

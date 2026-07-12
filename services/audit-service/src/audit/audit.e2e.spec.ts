@@ -208,6 +208,59 @@ describe('triggers append-only a nivel de DB', () => {
   });
 });
 
+describe('filtros de lectura (categoría · búsqueda libre · rango de fecha · export)', () => {
+  // Entradas AISLADAS con marcadores únicos para no depender del estado previo del WORM compartido.
+  const D1 = new Date('2020-01-15T10:00:00.000Z');
+  const D2 = new Date('2020-06-20T10:00:00.000Z');
+
+  beforeAll(async () => {
+    await service.recordSync({
+      actorId: 'flt-a', action: 'zzcat.alpha', resourceType: 'zzflt', resourceId: 'r-early',
+      payload: {}, ip: '', userAgent: 'e2e', occurredAt: D1, eventId: uuidv7(),
+    });
+    await service.recordSync({
+      actorId: 'flt-b', action: 'zzcat.beta', resourceType: 'zzflt', resourceId: 'r-late',
+      payload: {}, ip: '', userAgent: 'e2e', occurredAt: D2, eventId: uuidv7(),
+    });
+    await service.recordSync({
+      actorId: 'flt-c', action: 'zzother.gamma', resourceType: 'zzflt', resourceId: 'r-other',
+      payload: {}, ip: '', userAgent: 'e2e', occurredAt: D2, eventId: uuidv7(),
+    });
+  });
+
+  it('categoría = prefijo de dominio de la acción (startsWith "${category}.")', async () => {
+    const rows = await repo.query({ category: 'zzcat', limit: 50 });
+    expect(rows.map((r) => r.action).sort()).toEqual(['zzcat.alpha', 'zzcat.beta']);
+  });
+
+  it('búsqueda libre (substring case-insensitive) sobre acción/recurso/actor', async () => {
+    const byAction = await repo.query({ q: 'ZZCAT.AL', limit: 50 });
+    expect(byAction.map((r) => r.action)).toEqual(['zzcat.alpha']);
+    const byResource = await repo.query({ q: 'r-other', limit: 50 });
+    expect(byResource.map((r) => r.resourceId)).toEqual(['r-other']);
+  });
+
+  it('rango de fecha inclusivo sobre occurredAt (from/to)', async () => {
+    const fromMarch = await repo.query({ resourceType: 'zzflt', from: new Date('2020-03-01T00:00:00.000Z'), limit: 50 });
+    expect(fromMarch.every((r) => r.occurredAt >= new Date('2020-03-01T00:00:00.000Z'))).toBe(true);
+    expect(fromMarch.some((r) => r.resourceId === 'r-early')).toBe(false);
+    expect(fromMarch.some((r) => r.resourceId === 'r-late')).toBe(true);
+
+    const toMarch = await repo.query({ resourceType: 'zzflt', to: new Date('2020-03-01T00:00:00.000Z'), limit: 50 });
+    expect(toMarch.map((r) => r.resourceId)).toEqual(['r-early']);
+  });
+
+  it('combina categoría + fecha (AND de cláusulas)', async () => {
+    const rows = await repo.query({ category: 'zzcat', from: new Date('2020-03-01T00:00:00.000Z'), limit: 50 });
+    expect(rows.map((r) => r.action)).toEqual(['zzcat.beta']);
+  });
+
+  it('export honra el MISMO filtro que el listado (set completo, sin cursor)', async () => {
+    const rows = await service.exportRows({ category: 'zzcat' });
+    expect(rows.map((r) => r.action).sort()).toEqual(['zzcat.alpha', 'zzcat.beta']);
+  });
+});
+
 describe('detección de tampering a nivel de storage', () => {
   it('detecta una fila alterada saltándose los triggers (breach de superusuario)', async () => {
     // Verificación previa: la cadena está íntegra.

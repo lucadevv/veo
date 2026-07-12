@@ -19,6 +19,7 @@ import { AuditService } from './audit.service';
 import type { RecordedEntry } from './audit.repository';
 import {
   AuditEntryResponse,
+  ExportAuditDto,
   QueryAuditDto,
   RecordAuditDto,
   VerifyAuditDto,
@@ -67,15 +68,39 @@ export class AuditController {
   @Get()
   @UseGuards(InternalIdentityGuard, RolesGuard)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
-  @ApiOperation({ summary: 'Consultar el audit log (filtros + paginación por cursor).' })
+  @ApiOperation({ summary: 'Consultar el audit log (filtros estructurados + paginación por cursor).' })
   async list(@Query() dto: QueryAuditDto): Promise<AuditEntryResponse[]> {
     const entries = await this.audit.query({
       resourceType: dto.resourceType,
       resourceId: dto.resourceId,
       actorId: dto.actorId,
       action: dto.action,
+      category: dto.category,
+      q: dto.q,
+      from: parseDate(dto.from),
+      to: parseDate(dto.to),
       limit: dto.limit ?? 50,
       beforeSeq: parseSeq(dto.beforeSeq),
+    });
+    return entries.map(toResponse);
+  }
+
+  // Export del SET COMPLETO del filtro (server-side, sin paginar). Ruta LITERAL `export` — no colisiona con
+  // ninguna paramétrica (el audit no expone `:id`). Mismo gate que el listado (COMPLIANCE_SUPERVISOR/SUPERADMIN):
+  // devuelve el set entero (acotado por el tope duro del service); el admin-bff arma el CSV y audita la exportación.
+  @Get('export')
+  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
+  @ApiOperation({ summary: 'Set completo del filtro para exportar (sin paginar, acotado por tope duro).' })
+  async export(@Query() dto: ExportAuditDto): Promise<AuditEntryResponse[]> {
+    const entries = await this.audit.exportRows({
+      resourceType: dto.resourceType,
+      actorId: dto.actorId,
+      action: dto.action,
+      category: dto.category,
+      q: dto.q,
+      from: parseDate(dto.from),
+      to: parseDate(dto.to),
     });
     return entries.map(toResponse);
   }
@@ -127,6 +152,16 @@ function parseSeq(value: string | undefined): bigint | undefined {
   } catch {
     throw new ValidationError('seq inválido (debe ser entero)', { value });
   }
+}
+
+/** Parsea el borde ISO-8601 del rango de fecha (ya validado @IsISO8601 en el DTO). Vacío → sin cota. */
+function parseDate(value: string | undefined): Date | undefined {
+  if (value === undefined || value === '') return undefined;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    throw new ValidationError('fecha inválida (ISO-8601)', { value });
+  }
+  return d;
 }
 
 /**

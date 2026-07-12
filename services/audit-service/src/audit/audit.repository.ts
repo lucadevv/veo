@@ -43,10 +43,20 @@ export interface QueryFilters {
   resourceId?: string;
   actorId?: string;
   action?: string;
+  /** Categoría = prefijo de dominio de la acción → `action startsWith "${category}."`. */
+  category?: string;
+  /** Búsqueda libre (substring, case-insensitive) sobre action/resourceType/resourceId/actorId. */
+  q?: string;
+  /** Rango de fecha (inclusive) sobre occurredAt. */
+  from?: Date;
+  to?: Date;
   limit: number;
   /** Cursor: devolver entradas con seq < beforeSeq (paginación descendente). */
   beforeSeq?: bigint;
 }
+
+/** Filtros del export: los mismos estructurados, sin cursor/limit (el service acota con un tope duro). */
+export type ExportFilters = Omit<QueryFilters, 'limit' | 'beforeSeq'>;
 
 interface AuditLogRow {
   id: string;
@@ -139,17 +149,25 @@ export class AuditRepository {
 
   /** Consulta filtrada (lectura). Orden descendente por seq. */
   async query(filters: QueryFilters): Promise<RecordedEntry[]> {
-    const where: Prisma.AuditLogWhereInput = {
-      resourceType: filters.resourceType,
-      resourceId: filters.resourceId,
-      actorId: filters.actorId,
-      action: filters.action,
-      seq: filters.beforeSeq !== undefined ? { lt: filters.beforeSeq } : undefined,
-    };
     const rows = await this.prisma.read.auditLog.findMany({
-      where,
+      where: buildQueryWhere(filters, filters.beforeSeq),
       orderBy: { seq: 'desc' },
       take: filters.limit,
+    });
+    return rows.map(toRecorded);
+  }
+
+  /**
+   * SET COMPLETO del filtro para el export CSV (GET /audit/export), acotado por un TOPE DURO (`limit`) para
+   * NO materializar el WORM entero (append-only de millones de eslabones → OOM). Orden descendente por seq
+   * (lo más reciente primero, como el listado). Sin cursor: es una lectura puntual, no paginada. El admin-bff
+   * arma el CSV y audita la exportación (accountability de acceso a datos de compliance · Ley 29733).
+   */
+  async queryForExport(filters: ExportFilters, limit: number): Promise<RecordedEntry[]> {
+    const rows = await this.prisma.read.auditLog.findMany({
+      where: buildQueryWhere(filters),
+      orderBy: { seq: 'desc' },
+      take: limit,
     });
     return rows.map(toRecorded);
   }
@@ -225,6 +243,69 @@ export class AuditRepository {
   async count(): Promise<number> {
     return this.prisma.read.auditLog.count();
   }
+}
+
+/**
+ * Construye el `where` de lectura del audit desde los filtros estructurados (compartido por `query` y
+ * `queryForExport`). Todo se compone con un AND de cláusulas; sin filtros → where vacío (trae lo más reciente).
+ *  - resourceType/resourceId/actorId/action → igualdad exacta (filtros de callers internos).
+ *  - category → `action startsWith "${category}."` (prefijo de dominio; la "categoría de acción" del panel).
+ *  - q → OR de substring (case-insensitive) sobre action/resourceType/resourceId/actorId (búsqueda libre).
+ *  - from/to → rango inclusivo sobre occurredAt; un `to` a medianoche se lleva al FIN del día para incluirlo todo.
+ *  - beforeSeq → cursor descendente (`seq < beforeSeq`), solo en el listado paginado.
+ */
+function buildQueryWhere(
+  filters: {
+    resourceType?: string;
+    resourceId?: string;
+    actorId?: string;
+    action?: string;
+    category?: string;
+    q?: string;
+    from?: Date;
+    to?: Date;
+  },
+  beforeSeq?: bigint,
+): Prisma.AuditLogWhereInput {
+  const and: Prisma.AuditLogWhereInput[] = [];
+  if (filters.resourceType) and.push({ resourceType: filters.resourceType });
+  if (filters.resourceId) and.push({ resourceId: filters.resourceId });
+  if (filters.actorId) and.push({ actorId: filters.actorId });
+  if (filters.action) and.push({ action: filters.action });
+  if (filters.category) and.push({ action: { startsWith: `${filters.category}.` } });
+  if (filters.q) {
+    const q = filters.q;
+    and.push({
+      OR: [
+        { action: { contains: q, mode: 'insensitive' } },
+        { resourceType: { contains: q, mode: 'insensitive' } },
+        { resourceId: { contains: q, mode: 'insensitive' } },
+        { actorId: { contains: q, mode: 'insensitive' } },
+      ],
+    });
+  }
+  if (filters.from || filters.to) {
+    and.push({ occurredAt: { gte: filters.from, lte: endOfDayIfDateOnly(filters.to) } });
+  }
+  if (beforeSeq !== undefined) and.push({ seq: { lt: beforeSeq } });
+  return and.length > 0 ? { AND: and } : {};
+}
+
+/**
+ * Un `to` que llega SIN componente de hora (medianoche exacta UTC) se interpreta como "todo ese día": lo lleva
+ * al último instante del día para que el rango [from, to] incluya los eventos de la fecha pedida (el operador
+ * espera que "hasta el 12/07" incluya el 12/07 completo, no se corte a las 00:00). Un `to` con hora explícita
+ * se respeta tal cual.
+ */
+function endOfDayIfDateOnly(to?: Date): Date | undefined {
+  if (!to) return undefined;
+  const isMidnightUtc =
+    to.getUTCHours() === 0 &&
+    to.getUTCMinutes() === 0 &&
+    to.getUTCSeconds() === 0 &&
+    to.getUTCMilliseconds() === 0;
+  if (!isMidnightUtc) return to;
+  return new Date(to.getTime() + 24 * 60 * 60 * 1000 - 1);
 }
 
 function toRecorded(row: AuditLogRow): RecordedEntry {

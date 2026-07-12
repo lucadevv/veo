@@ -1518,15 +1518,26 @@ export function useSignedMedia() {
 /* ── Auditoría ── */
 const auditPage = paginated(auditEntryView);
 
-export function useAudit(query: string) {
+/** Filtros del panel de auditoría: búsqueda libre + categoría (prefijo de dominio) + rango de fecha. */
+export interface AuditFilters {
+  q?: string;
+  category?: string;
+  from?: string;
+  to?: string;
+}
+
+export function useAudit(filters: AuditFilters) {
+  const { q, category, from, to } = filters;
   return useInfiniteQuery({
-    queryKey: [...qk.audit, query],
+    // La queryKey incluye TODOS los filtros → cambiar cualquiera reinicia la paginación (no arrastra el cursor viejo).
+    queryKey: [...qk.audit, q ?? '', category ?? '', from ?? '', to ?? ''],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) =>
       apiClient().get('/audit', {
         schema: auditPage,
         signal,
-        query: cleanQuery({ q: query, cursor: pageParam, limit: 50 }),
+        // cleanQuery dropea vacíos y FILTER_ALL (categoría 'ALL') → el server recibe solo los filtros activos.
+        query: cleanQuery({ q, category, from, to, cursor: pageParam, limit: 50 }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });

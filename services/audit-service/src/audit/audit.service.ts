@@ -47,6 +47,13 @@ export interface VerifyRangeResult extends ChainVerificationResult {
   toSeq: string | null;
 }
 
+/**
+ * Tope duro de filas del export CSV (GET /audit/export). Acota memoria/latencia del hot-path de compliance: el
+ * filtro (categoría + rango de fecha) ya recorta el set; este tope es la red de seguridad contra un export sin
+ * filtro que intentaría materializar el WORM entero. El admin-bff informa el corte en el CSV/audit.
+ */
+const MAX_EXPORT_ROWS = 50_000;
+
 /** Token DI del tamaño de lote de `verifyRange` (lo provee AuditModule desde `AUDIT_VERIFY_BATCH_SIZE`). */
 export const VERIFY_BATCH_SIZE = Symbol('audit.verifyBatchSize');
 
@@ -152,10 +159,30 @@ export class AuditService {
     resourceId?: string;
     actorId?: string;
     action?: string;
+    category?: string;
+    q?: string;
+    from?: Date;
+    to?: Date;
     limit: number;
     beforeSeq?: bigint;
   }): Promise<RecordedEntry[]> {
     return this.repo.query(filters);
+  }
+
+  /**
+   * SET COMPLETO del filtro para el export CSV (server-side, sin paginar), acotado por `MAX_EXPORT_ROWS` para no
+   * materializar la tabla WORM entera en memoria. Mismos filtros estructurados que `query`. Solo LECTURA.
+   */
+  async exportRows(filters: {
+    resourceType?: string;
+    actorId?: string;
+    action?: string;
+    category?: string;
+    q?: string;
+    from?: Date;
+    to?: Date;
+  }): Promise<RecordedEntry[]> {
+    return this.repo.queryForExport(filters, MAX_EXPORT_ROWS);
   }
 
   /**

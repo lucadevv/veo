@@ -1,5 +1,6 @@
 import {
   IsInt,
+  IsISO8601,
   IsObject,
   IsOptional,
   IsString,
@@ -70,6 +71,32 @@ export class QueryAuditDto {
   @IsString()
   action?: string;
 
+  // Filtro ESTRUCTURADO por CATEGORÍA = prefijo del dominio de la `action` (`payment.*`, `driver.*`, `media.*`…).
+  // Se traduce a `action startsWith "${category}."` en el repo. Es la "categoría de acción" que ve el operador.
+  @ApiPropertyOptional({ description: 'Categoría (prefijo de dominio de la acción, ej. "payment").' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  // Búsqueda LIBRE (substring, case-insensitive) sobre action/resourceType/resourceId/actorId. El operador
+  // escribe un id/acción/recurso parcial y filtra sin conocer los campos exactos.
+  @ApiPropertyOptional({ description: 'Búsqueda libre sobre acción/recurso/actor.' })
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  // Rango de FECHA sobre occurredAt (inclusive). ISO-8601. `to` sin hora = inicio del día → el repo lo lleva
+  // al fin del día para incluir todo el día pedido.
+  @ApiPropertyOptional({ description: 'Desde (ISO-8601, inclusive) sobre occurredAt.' })
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Hasta (ISO-8601, inclusive) sobre occurredAt.' })
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
+
   @ApiPropertyOptional({ default: 50, minimum: 1, maximum: 500 })
   @IsOptional()
   @Type(() => Number)
@@ -82,6 +109,47 @@ export class QueryAuditDto {
   @IsOptional()
   @IsString()
   beforeSeq?: string;
+}
+
+/**
+ * Filtros del EXPORT (GET /audit/export): los MISMOS filtros estructurados del listado, SIN cursor/limit — el
+ * export es del SET COMPLETO del filtro (server-side lo acota con un tope duro para no materializar el WORM entero).
+ */
+export class ExportAuditDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  resourceType?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  actorId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  action?: string;
+
+  @ApiPropertyOptional({ description: 'Categoría (prefijo de dominio de la acción, ej. "payment").' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional({ description: 'Búsqueda libre sobre acción/recurso/actor.' })
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @ApiPropertyOptional({ description: 'Desde (ISO-8601, inclusive) sobre occurredAt.' })
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Hasta (ISO-8601, inclusive) sobre occurredAt.' })
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
 }
 
 export class VerifyAuditDto {
