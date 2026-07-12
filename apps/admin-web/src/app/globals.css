@@ -27,22 +27,30 @@
   --border-strong: #C5CDD6;
   --divider: #E8ECF1;
 
-  /* Marca + acento = azul trust #0075A9 · texto encima = BLANCO */
+  /* Marca = azul trust #0075A9 (trust-primary) · texto encima = BLANCO */
   --brand: #0075A9;
   --brand-hover: #005A82;
   --on-brand: #FFFFFF;
+  /* Acento del ADMIN = rol PRIMARIO/marca (azul, == brand). En la Identidad Visual `trust-accent` == `trust-success`
+   * (los dos verde #00C853): el rol VERDE del sistema es `success`, no un acento aparte. El admin NUNCA usó un
+   * acento verde distinto — su `accent` siempre fue el azul de marca (logo, toggles, chrome, selección primaria).
+   * Por eso accent = brand acá; lo VERDE del admin sale de `--success`. Jerarquía: primario→brand, verde→success. */
   --accent: #0075A9;
   --accent-hover: #005A82;
   --on-accent: #FFFFFF;
 
-  /* Estado (jade de marca se mantiene; se recalibra el "on" por pantalla al migrar) */
-  --success: #17C08A;
+  /* Estado — derivado de los tokens canónicos trust-* del veo.pen (Identidad Visual).
+   * success #00C853 (trust-success) · warn #FFA000 (trust-warning) · danger #D11216 (trust-error)
+   * · info #0097CE (trust-info). Supersede el legacy jade #17C08A / ámbar #F2AF48 / rosa #FF4D6A. */
+  --success: #00C853;
   --on-success: #FFFFFF;
-  --warn: #F2AF48;
+  --warn: #FFA000;
   --on-warn: #1A2332;
-  --danger: #FF4D6A;
-  --danger-hover: #E23D59;
+  --danger: #D11216;
+  --danger-hover: #A50E12;
   --on-danger: #FFFFFF;
+  --info: #0097CE;
+  --on-info: #FFFFFF;
 
   --focus: #0075A9;
 
@@ -100,9 +108,10 @@
 }
 
 @layer utilities {
-  /* Gradiente de marca (columna del login): azul trust → azul profundo, 135°. Basado en tokens. */
+  /* Gradiente de marca (columna del login): azul trust → azul profundo, 135°. Basado en tokens.
+   * Usa --brand (no --accent): tras separar accent(verde) de brand(azul), la marca manda acá. */
   .bg-brand-gradient {
-    background-image: linear-gradient(135deg, var(--accent), var(--brand-deep));
+    background-image: linear-gradient(135deg, var(--brand), var(--brand-deep));
   }
   /* Sombra de realce del botón primario (accent al 30%), fiel al veo.pen. Basada en token. */
   .shadow-brand {
