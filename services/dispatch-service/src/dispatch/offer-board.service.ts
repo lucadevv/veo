@@ -67,6 +67,7 @@ import {
 } from './offer-board.port';
 import { EligibilityGate } from './eligibility.gate';
 import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
+import { radiusKmToKRing } from './dispatch-policy';
 import type { Env } from '../config/env.schema';
 
 export interface BidPosted {
@@ -284,6 +285,21 @@ export class OfferBoardService {
   }
 
   /**
+   * Radio (k-ring) del broadcast de PUJA vigente. FEATURE-FLAG dispatch-policy-v2: v2 → radiusKmToKRing(
+   * broadcastRadiusKm) de la política (razona en km); v1 (default, o policyV2 malformado) → matchKRing de
+   * la config de radios (comportamiento actual VERBATIM). Lo comparten `broadcast` y `listOpenBidsNear`
+   * para que el conductor VEA en su poll exactamente los boards que se le difunden (paridad de radio).
+   */
+  private async resolveBroadcastKRing(): Promise<number> {
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion === 'v2' && policy.v2) {
+      return radiusKmToKRing(policy.v2.PUJA.broadcastRadiusKm);
+    }
+    const { matchKRing } = await this.radiusConfig.getKRings();
+    return matchKRing;
+  }
+
+  /**
    * Broadcast del bid a TODOS los conductores elegibles cercanos (no "el sistema elige uno"):
    * reutiliza el hot-index para encontrar candidatos por celda H3 + tipo de vehículo, filtra los
    * excluidos por pánico, y usa el mecanismo existente de entrega de ofertas (`dispatch.offered`)
@@ -291,9 +307,10 @@ export class OfferBoardService {
    */
   private async broadcast(board: OfferBoard): Promise<void> {
     const center = toH3(board.origin, DISPATCH_H3_RESOLUTION);
-    // Radio del broadcast leído en RUNTIME (config editable por el admin, cacheado); sin config → DEFAULT.
-    const { matchKRing } = await this.radiusConfig.getKRings();
-    const cells = neighbors(center, matchKRing);
+    // Radio del broadcast leído en RUNTIME (config editable por el admin, cacheado). v2 → radiusKmToKRing(
+    // broadcastRadiusKm); v1 → matchKRing (comportamiento actual). Single-shot: sin loop de umbral (PUJA
+    // difunde a TODOS los elegibles del radio de una — a diferencia del matcher FIXED, que oferta a uno).
+    const cells = neighbors(center, await this.resolveBroadcastKRing());
     // Candidatos elegibles (disponibles + del tipo del board + que SATISFACEN los `requires` de la oferta +
     // no excluidos por pánico). Filtrado centralizado en DriverPool (misma fuente que el matcher secuencial
     // FIXED). B5-3 — el board YA lleva `category`: derivamos sus `requires` y se los pasamos a `eligible()`
@@ -860,9 +877,9 @@ export class OfferBoardService {
     await this.eligibility.assertEligibleToOffer(driverId, loc.vehicleType);
 
     const center = toH3({ lat: loc.lat, lon: loc.lon }, DISPATCH_H3_RESOLUTION);
-    // Mismo radio que el broadcast, leído en RUNTIME (config editable por el admin, cacheado).
-    const { matchKRing } = await this.radiusConfig.getKRings();
-    const cells = neighbors(center, matchKRing);
+    // MISMO radio que el broadcast (paridad conductor↔difusión: un conductor debe VER en su poll los boards
+    // que se le difundirían). v2 → broadcastRadiusKm; v1 → matchKRing.
+    const cells = neighbors(center, await this.resolveBroadcastKRing());
     // A3/H11 — índice inverso celda→board: trae SOLO los boards cuyo ORIGEN cae en el k-ring del conductor
     // (ZRANGEBYSCORE `board:cell:<c>` <now>..+inf + MGET de ESOS candidatos), no TODOS los OPEN del
     // platform-wide. El costo del poll pasa de O(total open boards) a O(boards en el k-ring). El ZSET ya

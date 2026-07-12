@@ -29,6 +29,31 @@ export interface MatchingSessionRepository {
   find(tripId: string): Promise<DispatchSession | null>;
   /** Avanza el k-ring de búsqueda persistido. */
   updateKRing(tripId: string, kRing: number): Promise<void>;
+  /**
+   * v2 · Persiste el ring del matcher FIXED v2 + el próximo instante de expansión TEMPORAL (nextExpandAt).
+   * Un solo write por oferta: fija dónde quedó la búsqueda y cuándo el sweep puede volver a ensanchar.
+   */
+  updateExpansion(tripId: string, kRing: number, nextExpandAt: Date | null): Promise<void>;
+  /**
+   * v2 · Sesiones OPEN cuya expansión TEMPORAL venció (`nextExpandAt ≤ now`) y aún NO llegaron a `maxK`.
+   * Las más urgentes primero (nextExpandAt asc), tope `limit` (presupuesto del sweep).
+   */
+  findExpandable(
+    now: Date,
+    maxK: number,
+    limit: number,
+  ): Promise<Pick<DispatchSession, 'tripId' | 'currentKRing'>[]>;
+  /**
+   * v2 · CAS de expansión temporal: sube `currentKRing` de `fromK`→`toK` y re-arma `nextExpandAt` SOLO si
+   * la sesión sigue OPEN y su ring es EXACTAMENTE `fromK` (guard anti-doble-avance entre réplicas/ticks).
+   * Devuelve cuántas filas cambió (0 = otra réplica ya la avanzó, o el ring cambió).
+   */
+  advanceExpansion(
+    tripId: string,
+    fromK: number,
+    toK: number,
+    nextExpandAt: Date | null,
+  ): Promise<number>;
   /** CAS: cierra la sesión al `status` SOLO si seguía OPEN. Devuelve cuántas filas cambió (0 o 1). */
   closeIfOpen(tripId: string, status: DispatchSessionStatus): Promise<number>;
 }
@@ -54,6 +79,43 @@ export class PrismaMatchingSessionRepository implements MatchingSessionRepositor
       where: { tripId },
       data: { currentKRing: kRing },
     });
+  }
+
+  async updateExpansion(tripId: string, kRing: number, nextExpandAt: Date | null): Promise<void> {
+    await this.prisma.write.dispatchSession.update({
+      where: { tripId },
+      data: { currentKRing: kRing, nextExpandAt },
+    });
+  }
+
+  findExpandable(
+    now: Date,
+    maxK: number,
+    limit: number,
+  ): Promise<Pick<DispatchSession, 'tripId' | 'currentKRing'>[]> {
+    return this.prisma.read.dispatchSession.findMany({
+      where: {
+        status: DispatchSessionStatus.OPEN,
+        nextExpandAt: { not: null, lte: now },
+        currentKRing: { lt: maxK },
+      },
+      select: { tripId: true, currentKRing: true },
+      orderBy: { nextExpandAt: 'asc' },
+      take: limit,
+    });
+  }
+
+  async advanceExpansion(
+    tripId: string,
+    fromK: number,
+    toK: number,
+    nextExpandAt: Date | null,
+  ): Promise<number> {
+    const res = await this.prisma.write.dispatchSession.updateMany({
+      where: { tripId, status: DispatchSessionStatus.OPEN, currentKRing: fromK },
+      data: { currentKRing: toK, nextExpandAt },
+    });
+    return res.count;
   }
 
   async closeIfOpen(tripId: string, status: DispatchSessionStatus): Promise<number> {

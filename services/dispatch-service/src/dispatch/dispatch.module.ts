@@ -30,6 +30,7 @@ import {
   DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS,
   DISPATCH_WINDOW_DEFAULTS,
 } from './dispatch-radius-config.service';
+import { RadarPreviewService } from './radar-preview.service';
 import { AdminIdentityGuard } from './admin-identity.guard';
 import {
   DISPATCH_RADIUS_CONFIG_REPO,
@@ -134,6 +135,8 @@ const dispatchWindowDefaultsProvider: Provider = {
     DispatchTimeoutReconciler,
     // Config de RADIOS (k-rings) editable en runtime por el admin (espejo del pricing del trip-service).
     DispatchRadiusConfigService,
+    // Radar-preview: densidad real de conductores por anillo para la política configurada (planning admin).
+    RadarPreviewService,
     AdminIdentityGuard,
     radiusConfigCacheTtlProvider,
     dispatchWindowDefaultsProvider,

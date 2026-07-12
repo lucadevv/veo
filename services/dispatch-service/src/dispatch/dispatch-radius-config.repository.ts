@@ -5,6 +5,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
+import { parsePolicyV2, type DispatchPolicyV2 } from './dispatch-policy';
 
 /** Token DI del puerto (inyección por interfaz, no por clase concreta). */
 export const DISPATCH_RADIUS_CONFIG_REPO = Symbol('DISPATCH_RADIUS_CONFIG_REPO');
@@ -20,6 +21,10 @@ export interface PersistedRadiusConfig {
   offerTimeoutMs: number;
   /** Ventana (s) del board de PUJA (openBoard/reopenBoard). */
   bidWindowSec: number;
+  /** Feature-flag de política: 'v1' (comportamiento actual) | 'v2' (razona en km via policyV2). */
+  policyVersion: string;
+  /** Snapshot v2 por-modo YA PARSEADO (null si v1 o JSON malformado → el hot-path degrada a v1). */
+  policyV2: DispatchPolicyV2 | null;
   version: number;
   updatedAt: string;
 }
@@ -62,6 +67,9 @@ export class PrismaDispatchRadiusConfigRepository implements DispatchRadiusConfi
       matchKRing: row.matchKRing,
       offerTimeoutMs: row.offerTimeoutMs,
       bidWindowSec: row.bidWindowSec,
+      policyVersion: row.policyVersion,
+      // Parse DEFENSIVO del JSON crudo: malformado → null → el service degrada a v1 (jamás crashea el hot-path).
+      policyV2: parsePolicyV2(row.policyV2),
       version: row.version,
       updatedAt: row.updatedAt.toISOString(),
     };

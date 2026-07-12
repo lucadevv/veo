@@ -97,11 +97,17 @@ model DispatchSession {
   category     String?               @map("category")
   /// k-ring actual de la búsqueda (1..maxKRing): el advance expande cuando se agotan los cercanos.
   currentKRing Int                   @default(1) @map("current_k_ring")
+  /// Dispatch policy v2 (FIXED) — próximo instante en el que el sweep puede EXPANDIR el ring por TIEMPO
+  /// (cadencia expandIntervalSec), desacoplado del timeout de la oferta. Null = sin expansión pendiente
+  /// (v1, o v2 ya en maxK). El barrido `sweepExpandableSessions` filtra OPEN + nextExpandAt ≤ now.
+  nextExpandAt DateTime?             @map("next_expand_at") @db.Timestamptz
   createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz
 
   /// El reconciler/limpieza lista las sesiones OPEN; los cierres consultan por status.
   @@index([status])
+  /// Hot-path del sweep de expansión temporal v2: filtra status=OPEN (igualdad) + nextExpandAt ≤ now (rango).
+  @@index([status, nextExpandAt])
   @@map("dispatch_sessions")
   @@schema("dispatch")
 }
@@ -190,6 +196,12 @@ model DispatchRadiusConfig {
   offerTimeoutMs Int      @map("offer_timeout_ms")
   /// Ventana (s) del board de PUJA (openBoard/reopenBoard): cuánto vive un board OPEN antes de EXPIRED.
   bidWindowSec   Int      @map("bid_window_sec")
+  /// FEATURE-FLAG de la política de despacho: 'v1' (default = comportamiento actual VERBATIM, razona en
+  /// k-rings crudos) | 'v2' (razona en km via policy_v2, umbral de candidatos + expansión temporal).
+  policyVersion  String   @default("v1") @map("policy_version")
+  /// Snapshot v2 por-modo (FIXED/PUJA) en km/umbrales. Null cuando policy_version='v1'. Aditivo, nullable:
+  /// una fila v1 preexistente sigue funcionando sin reescritura. Malformado → el service degrada a v1.
+  policyV2       Json?    @map("policy_v2")
   version        Int      @default(0)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 

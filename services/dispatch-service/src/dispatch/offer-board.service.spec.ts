@@ -11,6 +11,7 @@ import {
 import { OfferBoardService } from './offer-board.service';
 import type { EligibilityGate } from './eligibility.gate';
 import type { DispatchRadiusConfigService } from './dispatch-radius-config.service';
+import type { DispatchPolicyV2 } from './dispatch-policy';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
 import { DriverPool } from './driver-pool';
 import type {
@@ -477,15 +478,20 @@ function makeService(opts: {
   // getWindows() en runtime, ya no bid.windowSec). Los tests conducen la ventana cambiando este objeto
   // (p.ej. bidWindowSec=1 para "vencido", 600 para "vivo") en vez del param advisory de openBoard.
   windows: { offerTimeoutMs: number; bidWindowSec: number };
+  // Holder MUTABLE de la política de despacho (feature-flag). Default v1 → el broadcast usa matchKRing
+  // (comportamiento actual). Un test lo pasa a v2 para ejercitar radiusKmToKRing(broadcastRadiusKm).
+  policy: { policyVersion: 'v1' | 'v2'; v2: DispatchPolicyV2 | null };
 }): OfferBoardService {
   const config = new ConfigService<Env, true>({ DISPATCH_MAX_K_RING: 2 } as Partial<Env> as Env);
   const gate = opts.gate as unknown as EligibilityGate;
   const driverPool = new DriverPool(opts.hotIndex, opts.exclusion, new InMemoryExclusionRegistry());
-  // Fake de la config de radios/ventanas: el broadcast/listOpenBidsNear leen `matchKRing` (2 preserva el
-  // k-ring que estos tests asertan). getWindows() lee el holder mutable → los tests controlan la ventana.
+  // Fake de la config de radios/ventanas/política: el broadcast/listOpenBidsNear leen `matchKRing` (2
+  // preserva el k-ring que estos tests asertan) en v1, o radiusKmToKRing(broadcastRadiusKm) en v2.
+  // getWindows()/getPolicy() leen los holders mutables → los tests controlan ventana y política.
   const radiusConfig = {
     getKRings: async () => ({ nearbyKRing: 1, matchKRing: 2 }),
     getWindows: async () => ({ ...opts.windows }),
+    getPolicy: async () => ({ policyVersion: opts.policy.policyVersion, v2: opts.policy.v2 }),
   } as unknown as DispatchRadiusConfigService;
   // §10 — el repo (puerto Prisma del board) abre la tx y batchea la lectura de matches ACCEPTED; el cuerpo
   // transaccional (outbox + record) sigue en el service. Delega al doble de la OutboxSpy (misma semántica).
@@ -519,6 +525,8 @@ interface Ctx {
   maps: FakeMaps;
   /** Ventanas de runtime (autoridad de dispatch): mutable para que un test fije la ventana vigente. */
   windows: { offerTimeoutMs: number; bidWindowSec: number };
+  /** Política de despacho (feature-flag): mutable para que un test fije v1/v2. */
+  policy: { policyVersion: 'v1' | 'v2'; v2: DispatchPolicyV2 | null };
 }
 
 async function ctx(eligible = true): Promise<Ctx> {
@@ -531,11 +539,13 @@ async function ctx(eligible = true): Promise<Ctx> {
   const maps = new FakeMaps();
   // Default 60s (como el default histórico de la ventana de puja); cada test lo ajusta si lo necesita.
   const windows = { offerTimeoutMs: 12_000, bidWindowSec: 60 };
+  // Default v1 (comportamiento actual); los tests de v2 lo cambian.
+  const policy: Ctx['policy'] = { policyVersion: 'v1', v2: null };
   // Wire del sink de matches persistidos: __crashedMatch siembra la fila ACCEPTED en la OutboxSpy (el
   // crash real deja la fila committeada en Postgres) para que el reconciliador recupere el precio (Finding #11).
   store.persistMatch = (tripId, driverId, price) => outbox.seedMatch(tripId, driverId, price);
-  const svc = makeService({ store, hotIndex, exclusion, outbox, delivery, gate, maps, windows });
-  return { svc, store, hotIndex, outbox, delivery, gate, maps, windows };
+  const svc = makeService({ store, hotIndex, exclusion, outbox, delivery, gate, maps, windows, policy });
+  return { svc, store, hotIndex, outbox, delivery, gate, maps, windows, policy };
 }
 
 async function openBoard(
@@ -2056,5 +2066,47 @@ describe('OfferBoardService — N5: revert compensatorio + reconciliador del mat
       (c.outbox.byType('dispatch.offer_accepted')[0]?.payload as { priceCents: number }).priceCents,
     ).toBe(900);
     expect(c.outbox.byType('dispatch.match_found')).toHaveLength(1);
+  });
+});
+
+describe('OfferBoardService — broadcast radius (dispatch-policy v2)', () => {
+  const V2: DispatchPolicyV2 = {
+    FIXED: {
+      initialRadiusKm: 0.3,
+      incrementKm: 0.3,
+      maxRadiusKm: 1.5,
+      targetDrivers: 3,
+      offerTimeoutSec: 20,
+      expandIntervalSec: 8,
+    },
+    PUJA: { broadcastRadiusKm: 1.2, bidWindowSec: 60 }, // 1.2km → k4 (el fake v1 usa matchKRing=2)
+  };
+
+  /** Una celda exactamente en el anillo 3 del centro (fuera del k2 de v1, dentro del k4 de v2). */
+  function cellAtRing3(): string {
+    const center = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    const inner = new Set(neighbors(center, 2));
+    return neighbors(center, 3).find((cc) => !inner.has(cc))!;
+  }
+
+  it('v1: el broadcast usa matchKRing (un conductor en el anillo 3 NO recibe el bid)', async () => {
+    const c = await ctx(); // policy v1 por default
+    const center = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    await c.hotIndex.seed('d-near', ORIGIN.lat, ORIGIN.lon, center, VehicleType.CAR);
+    await c.hotIndex.seed('d-far', ORIGIN.lat, ORIGIN.lon, cellAtRing3(), VehicleType.CAR);
+    await openBoard(c);
+    // matchKRing=2 → solo el del centro; el del anillo 3 queda fuera.
+    expect(c.delivery.delivered.map((d) => d.driverId)).toEqual(['d-near']);
+  });
+
+  it('v2: el broadcast usa radiusKmToKRing(broadcastRadiusKm) (el conductor del anillo 3 SÍ recibe)', async () => {
+    const c = await ctx();
+    c.policy.policyVersion = 'v2';
+    c.policy.v2 = V2; // broadcastRadiusKm 1.2 → k4 ⊇ anillo 3
+    const center = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    await c.hotIndex.seed('d-near', ORIGIN.lat, ORIGIN.lon, center, VehicleType.CAR);
+    await c.hotIndex.seed('d-far', ORIGIN.lat, ORIGIN.lon, cellAtRing3(), VehicleType.CAR);
+    await openBoard(c);
+    expect(c.delivery.delivered.map((d) => d.driverId).sort()).toEqual(['d-far', 'd-near']);
   });
 });

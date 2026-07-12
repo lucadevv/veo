@@ -52,6 +52,29 @@ export class MatchingSessionStore {
     await this.repo.updateKRing(tripId, kRing);
   }
 
+  /**
+   * v2 · Persiste dónde quedó la búsqueda del matcher FIXED v2 (currentKRing) + cuándo el sweep puede volver
+   * a expandir por TIEMPO (nextExpandAt). Un solo write por oferta.
+   */
+  async expandTo(tripId: string, kRing: number, nextExpandAt: Date | null): Promise<void> {
+    await this.repo.updateExpansion(tripId, kRing, nextExpandAt);
+  }
+
+  /** v2 · Sesiones OPEN con expansión temporal vencida y ring aún por debajo de `maxK`. */
+  findExpandable(now: Date, maxK: number, limit: number) {
+    return this.repo.findExpandable(now, maxK, limit);
+  }
+
+  /** v2 · CAS: sube el ring de `fromK`→`toK` (+ nuevo nextExpandAt) solo si sigue OPEN y en `fromK`. */
+  advanceExpansion(
+    tripId: string,
+    fromK: number,
+    toK: number,
+    nextExpandAt: Date | null,
+  ): Promise<number> {
+    return this.repo.advanceExpansion(tripId, fromK, toK, nextExpandAt);
+  }
+
   /** Cierra la sesión a un terminal SOLO si seguía OPEN (CAS). Devuelve true si ESTA llamada la cerró. */
   private async close(tripId: string, status: DispatchSessionStatus): Promise<boolean> {
     return (await this.repo.closeIfOpen(tripId, status)) === 1;

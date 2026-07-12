@@ -43,6 +43,7 @@ import { DriverProjectionService } from './driver-projection.service';
 import { SurgeService } from './surge.service';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
 import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
+import { fixedRingBounds, type FixedPolicy } from './dispatch-policy';
 import type { Env } from '../config/env.schema';
 
 export interface TripRequest {
@@ -136,6 +137,16 @@ export class MatchingService {
     // B5-3 · requisitos de eligibilidad de la oferta del viaje (segment/seats/antigüedad). Si la category
     // está ausente o no matchea el catálogo, `findOffering` da undefined ⇒ el pool no restringe (degradación).
     const requires = findOffering(session.category ?? '')?.requires;
+
+    // FEATURE-FLAG dispatch-policy-v2 — SOLO cuando la config vigente es v2 (getPolicy, cacheado). El
+    // camino v1 (de acá para abajo) queda BYTE-FOR-BYTE intacto: policyVersion='v1' (default) o un policyV2
+    // malformado degradan a v1 (getPolicy devuelve v2:null). El lookup espacial (neighbors/DriverPool/hot
+    // index) es el MISMO; v2 solo cambia la POLÍTICA de radios (km) y el UMBRAL de candidatos encima.
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion === 'v2' && policy.v2) {
+      return this.offerNextV2(tripId, session, { center, origin, attempted, requires }, policy.v2.FIXED);
+    }
+
     // Rankea desde el k-ring actual; si está agotado, expande (persistiendo el avance) y reintenta.
     for (let k = session.currentKRing; k <= this.maxKRing; k++) {
       const ranked = await this.rankCandidates(
@@ -163,6 +174,76 @@ export class MatchingService {
     if (await this.sessions.closeTimedOut(tripId)) {
       await this.publishNoCandidates(tripId, attempted.size);
     }
+  }
+
+  /**
+   * v2 · Avance del matcher FIXED en política v2 (feature-flag). Diferencias con v1 (todo lo demás igual):
+   *  - RADIOS en km: startK = radiusKmToKRing(initialRadiusKm), maxK = radiusKmToKRing(maxRadiusKm).
+   *  - UMBRAL DE CANDIDATOS (targetDrivers): expande el ring hasta juntar ≥ targetDrivers candidatos (o
+   *    llegar a maxK), y RECIÉN AHÍ oferta al MEJOR (ranked[0]). targetDrivers es un UMBRAL de densidad,
+   *    NUNCA un broadcast: se entrega UNA sola oferta (invariante single-offer PRESERVADA; el pool no tiene
+   *    claim atómico al ofertar, así que difundir a N rompería la anti-doble-oferta — ver sweepExpiredOffers).
+   *  - EXPANSIÓN TEMPORAL: al ofertar por debajo de maxK sella `nextExpandAt`; el sweep de 2s ensancha el
+   *    ring por TIEMPO (sweepExpandableSessions), desacoplado del timeout de la oferta.
+   *  - maxK agotado SIN candidatos → el MISMO cierre honesto de v1 (closeTimedOut + publishNoCandidates).
+   */
+  private async offerNextV2(
+    tripId: string,
+    session: DispatchSession,
+    ctx: { center: string; origin: LatLon; attempted: Set<string>; requires?: OfferingRequirements },
+    fixed: FixedPolicy,
+  ): Promise<void> {
+    const { center, origin, attempted, requires } = ctx;
+    const { startK, maxK } = fixedRingBounds(fixed);
+    // El ring efectivo arranca en startK, pero NUNCA por debajo del avance ya persistido (currentKRing):
+    // así una expansión temporal previa (o un timeout que ya ensanchó) no se pierde al re-ofertar.
+    const from = Math.max(session.currentKRing, startK);
+    for (let k = from; k <= maxK; k++) {
+      const ranked = await this.rankCandidates(
+        neighbors(center, k),
+        origin,
+        attempted,
+        session.vehicleType,
+        requires,
+      );
+      const enough = ranked.length >= fixed.targetDrivers;
+      // Debajo de maxK y sin juntar el umbral → seguí ensanchando (los discos gridDisk ACUMULAN, así que
+      // ningún candidato de un ring interior se pierde: reaparece en el disco más ancho).
+      if (k < maxK && !enough) continue;
+      const top = ranked[0];
+      // Solo se llega acá con top vacío en k===maxK sin candidatos → cierre honesto abajo.
+      if (!top) break;
+      // Persiste el ring alcanzado + la cadencia de expansión temporal (null en maxK: no hay más que ensanchar).
+      const nextExpandAt =
+        k < maxK ? new Date(Date.now() + fixed.expandIntervalSec * 1000) : null;
+      await this.sessions.expandTo(tripId, k, nextExpandAt);
+      const surgeQuote = await this.surge.quote(origin);
+      await this.createAndDeliverOffer({
+        tripId,
+        candidate: top,
+        surgeMultiplier: surgeQuote.multiplier,
+        attempt: attempted.size + 1,
+        origin,
+      });
+      return;
+    }
+
+    // Sin candidatos hasta maxK (v2) → MISMO cierre honesto que v1 (idempotente por el CAS del cierre).
+    if (await this.sessions.closeTimedOut(tripId)) {
+      await this.publishNoCandidates(tripId, attempted.size);
+    }
+  }
+
+  /**
+   * Ventana (ms) de la oferta directa FIXED vigente. v2 → offerTimeoutSec de la política (× 1000); v1 →
+   * la ventana histórica (getWindows). El `expiresAt` que ve el conductor y el `cutoff` del sweep comparten
+   * ESTA misma base (ADR-021 F1): ambos deben usar el MISMO valor para no divergir.
+   */
+  private async offerTimeoutMs(): Promise<number> {
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion === 'v2' && policy.v2) return policy.v2.FIXED.offerTimeoutSec * 1000;
+    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
+    return offerTimeoutMs;
   }
 
   /**
@@ -262,8 +343,9 @@ export class MatchingService {
    * siguen OFFERED). El "N+1" de K escrituras CAS es trivial: K=25 << 100 y sin los 100 matchings encadenados.
    */
   async sweepExpiredOffers(limit = this.sweepAdvanceBudget): Promise<number> {
-    // Ventana leída EN RUNTIME (cacheada): el cutoff usa el valor vigente de la config del admin.
-    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
+    // Ventana leída EN RUNTIME (cacheada): el cutoff usa el valor vigente de la config del admin (v2 →
+    // offerTimeoutSec de la política; v1 → la ventana histórica, sin cambio de comportamiento).
+    const offerTimeoutMs = await this.offerTimeoutMs();
     const cutoff = new Date(Date.now() - offerTimeoutMs);
     // K: presupuesto de avance por tick (no 100). El resto lo toma el próximo tick.
     const expired = await this.repo.findExpiredOffers(cutoff, limit);
@@ -280,6 +362,39 @@ export class MatchingService {
       advanced += 1;
     }
     return advanced;
+  }
+
+  /**
+   * v2 · Barrido de EXPANSIÓN TEMPORAL del ring del matcher FIXED (feature-flag). Complementa a
+   * sweepExpiredOffers: en vez de disparar por el timeout de la oferta, ensancha el ring por TIEMPO
+   * (`nextExpandAt` ≤ now) — así una oferta LENTA (conductor que no responde) no CONGELA el radio de
+   * búsqueda. No-op en v1 (getPolicy → v2:null → devuelve 0). Mismo tope de presupuesto/deadline que el
+   * sweep de ofertas. Replica-safe por el CAS `advanceExpansion` (guard status=OPEN + currentKRing=fromK).
+   *
+   * INVARIANTE single-offer intacto: acá SOLO se ensancha el "piso" del ring (advanceExpansion) y se re-
+   * invoca offerNext, que HACE NO-OP si hay una oferta en vuelo (guard countLiveOffers) — jamás encima una
+   * 2ª oferta. Cuando la oferta viva caduque, sweepExpiredOffers → offerNext arrancará del ring más ancho.
+   */
+  async sweepExpandableSessions(limit = this.sweepAdvanceBudget): Promise<number> {
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion !== 'v2' || !policy.v2) return 0; // v1: sin expansión temporal
+    const fixed = policy.v2.FIXED;
+    const { maxK } = fixedRingBounds(fixed);
+    const now = new Date();
+    const due = await this.sessions.findExpandable(now, maxK, limit);
+    const tickStart = Date.now();
+    let expanded = 0;
+    for (const s of due) {
+      if (Date.now() - tickStart > this.sweepDeadlineMs) break; // DEADLINE (mismo backstop que el otro sweep)
+      const toK = Math.min(s.currentKRing + 1, maxK);
+      const nextExpandAt =
+        toK < maxK ? new Date(Date.now() + fixed.expandIntervalSec * 1000) : null;
+      const claimed = await this.sessions.advanceExpansion(s.tripId, s.currentKRing, toK, nextExpandAt);
+      if (claimed === 0) continue; // otra réplica/tick ya la avanzó (o su ring cambió)
+      await this.offerNext(s.tripId); // no-op si hay oferta viva; si no, re-oferta desde el ring más ancho
+      expanded += 1;
+    }
+    return expanded;
   }
 
   /**
@@ -306,8 +421,9 @@ export class MatchingService {
     // mismo instante que usa `sweepExpiredOffers` para caducar la oferta: offeredAt + offerTimeoutMs). Antes
     // se calculaba `Date.now() + offerTimeoutMs` DESPUÉS del `await maps.eta()` → divergía del offeredAt por
     // la latencia (variable, segundos) del ETA → el anillo del conductor mostraba MÁS tiempo del que el
-    // server permitía → aceptar en los últimos segundos daba 409. Ahora ambos comparten la MISMA base.
-    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
+    // server permitía → aceptar en los últimos segundos daba 409. Ahora ambos comparten la MISMA base
+    // (offerTimeoutMs(): v2 → política, v1 → ventana histórica — el MISMO valor que usa el cutoff del sweep).
+    const offerTimeoutMs = await this.offerTimeoutMs();
     const expiresAt = new Date(created.offeredAt.getTime() + offerTimeoutMs).toISOString();
     let etaSeconds = 0;
     try {

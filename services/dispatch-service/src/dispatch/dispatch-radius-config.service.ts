@@ -11,12 +11,14 @@
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
+import { Prisma } from '../generated/prisma';
 import {
   DISPATCH_RADIUS_CONFIG_REPO,
   SINGLETON_ID,
   type DispatchRadiusConfigRepository,
   type PersistedRadiusConfig,
 } from './dispatch-radius-config.repository';
+import type { DispatchPolicy, DispatchPolicyV2 } from './dispatch-policy';
 
 const PRODUCER = 'dispatch-service';
 
@@ -51,8 +53,17 @@ export interface DispatchWindows {
   bidWindowSec: number;
 }
 
-/** Snapshot combinado (radios + ventanas) que se cachea en UN solo slot y sirve a ambos getters. */
-type DispatchConfigSnapshot = KRings & DispatchWindows;
+/** Política de despacho vigente (feature-flag + snapshot v2 parseado) que sirve `getPolicy()`. */
+interface DispatchPolicySlot {
+  policyVersion: string;
+  policyV2: DispatchPolicyV2 | null;
+}
+
+/**
+ * Snapshot combinado (radios + ventanas + política) que se cachea en UN solo slot y sirve a los getters
+ * (getKRings/getWindows/getPolicy). Un solo `find()` alimenta a los tres: la fila cambia en orden de HORAS.
+ */
+type DispatchConfigSnapshot = KRings & DispatchWindows & DispatchPolicySlot;
 
 /** Token DI del TTL (ms) del cache de la config; lo provee el módulo. */
 export const DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS = Symbol('DISPATCH_RADIUS_CONFIG_CACHE_TTL_MS');
@@ -105,6 +116,9 @@ export class DispatchRadiusConfigService {
       matchKRing: DEFAULT_RADIUS_CONFIG.matchKRing,
       offerTimeoutMs: this.windowDefaults.offerTimeoutMs,
       bidWindowSec: this.windowDefaults.bidWindowSec,
+      // Sin fila → política v1 (comportamiento actual) explícita: el admin ve el estado real.
+      policyVersion: 'v1',
+      policyV2: null,
       version: 0,
       updatedAt: new Date(0).toISOString(),
     };
@@ -126,12 +140,16 @@ export class DispatchRadiusConfigService {
           matchKRing: persisted.matchKRing,
           offerTimeoutMs: persisted.offerTimeoutMs,
           bidWindowSec: persisted.bidWindowSec,
+          policyVersion: persisted.policyVersion,
+          policyV2: persisted.policyV2,
         }
       : {
           nearbyKRing: DEFAULT_RADIUS_CONFIG.nearbyKRing,
           matchKRing: DEFAULT_RADIUS_CONFIG.matchKRing,
           offerTimeoutMs: this.windowDefaults.offerTimeoutMs,
           bidWindowSec: this.windowDefaults.bidWindowSec,
+          policyVersion: 'v1',
+          policyV2: null,
         };
 
     if (this.cacheTtlMs > 0) {
@@ -153,12 +171,27 @@ export class DispatchRadiusConfigService {
   }
 
   /**
+   * Política de despacho vigente (feature-flag ADR dispatch-policy-v2). Lee el MISMO snapshot cacheado.
+   * Contrato de degradación: `v2` es NO-NULL SOLO cuando policyVersion==='v2' Y el JSON parseó bien; en
+   * cualquier otro caso (v1, JSON malformado, sin fila) → `{ policyVersion:'v1', v2:null }` y los
+   * consumidores (matcher FIXED, broadcast PUJA, radar) usan el camino v1 VERBATIM. Un policyVersion='v2'
+   * con policyV2 null (edición rota) se degrada a v1 en la práctica: v2 sale null → nadie ejecuta v2.
+   */
+  async getPolicy(): Promise<DispatchPolicy> {
+    const { policyVersion, policyV2 } = await this.getSnapshot();
+    if (policyVersion === 'v2' && policyV2) return { policyVersion: 'v2', v2: policyV2 };
+    return { policyVersion: 'v1', v2: null };
+  }
+
+  /**
    * PUT interno: REEMPLAZA la config (radios + ventanas), bumpea `version` y persiste + EMITE
    * dispatch.radius_config_updated por outbox en la MISMA transacción (audit + consumidores futuros).
    * Invalida el cache → el cambio se ve en el siguiente getKRings/getWindows SIN esperar el TTL.
    * Idempotente en forma: re-enviar el mismo snapshot deja el mismo estado (solo sube la version).
    */
-  async replaceConfig(input: KRings & DispatchWindows): Promise<PersistedRadiusConfig> {
+  async replaceConfig(
+    input: KRings & DispatchWindows & { policyVersion: string; policyV2: DispatchPolicyV2 | null },
+  ): Promise<PersistedRadiusConfig> {
     const current = await this.repo.find();
     const nextVersion = (current?.version ?? 0) + 1;
 
@@ -167,15 +200,23 @@ export class DispatchRadiusConfigService {
       matchKRing: input.matchKRing,
       offerTimeoutMs: input.offerTimeoutMs,
       bidWindowSec: input.bidWindowSec,
+      policyVersion: input.policyVersion,
     };
+    // Columna Json? — para escribir SQL NULL Prisma exige el sentinel `DbNull` (pasar `null` es un error de
+    // tipo en Prisma 5). El objeto validado se serializa como InputJsonValue.
+    const policyV2Db =
+      input.policyV2 === null
+        ? Prisma.DbNull
+        : (input.policyV2 as unknown as Prisma.InputJsonValue);
 
     const result = await this.repo.runInTx(async (tx) => {
       const row = await tx.dispatchRadiusConfig.upsert({
         where: { id: SINGLETON_ID },
-        create: { id: SINGLETON_ID, ...fields, version: nextVersion },
-        update: { ...fields, version: nextVersion },
+        create: { id: SINGLETON_ID, ...fields, policyV2: policyV2Db, version: nextVersion },
+        update: { ...fields, policyV2: policyV2Db, version: nextVersion },
       });
-      // Outbox EN LA MISMA TX (FOUNDATION §6): audit + consumidores futuros del cambio de config.
+      // Outbox EN LA MISMA TX (FOUNDATION §6): audit + consumidores futuros del cambio de config. El payload
+      // lleva el policyV2 como objeto plano (null real, no el sentinel DbNull) para que el evento sea legible.
       await tx.outboxEvent.create({
         data: {
           aggregateId: SINGLETON_ID,
@@ -183,7 +224,12 @@ export class DispatchRadiusConfigService {
           envelope: createEnvelope({
             eventType: DISPATCH_RADIUS_CONFIG_UPDATED,
             producer: PRODUCER,
-            payload: { ...fields, version: row.version, updatedAt: row.updatedAt.toISOString() },
+            payload: {
+              ...fields,
+              policyV2: input.policyV2,
+              version: row.version,
+              updatedAt: row.updatedAt.toISOString(),
+            },
           }),
         },
       });
@@ -191,15 +237,21 @@ export class DispatchRadiusConfigService {
     });
 
     // INVALIDA el cache: el PUT y el hot-path viven en el MISMO proceso, así que un cambio de config debe
-    // verse en el siguiente getKRings/getWindows SIN esperar el TTL (sino tardaría hasta `cacheTtlMs`).
+    // verse en el siguiente getKRings/getWindows/getPolicy SIN esperar el TTL (sino tardaría hasta `cacheTtlMs`).
     this.cache = null;
 
     this.logger.log(
       `dispatch radius config REEMPLAZADO → version ${result.version} ` +
         `(nearbyKRing ${input.nearbyKRing}, matchKRing ${input.matchKRing}, ` +
-        `offerTimeoutMs ${input.offerTimeoutMs}, bidWindowSec ${input.bidWindowSec}); ` +
+        `offerTimeoutMs ${input.offerTimeoutMs}, bidWindowSec ${input.bidWindowSec}, ` +
+        `policyVersion ${input.policyVersion}); ` +
         `${DISPATCH_RADIUS_CONFIG_UPDATED} emitido; cache invalidado`,
     );
-    return { ...fields, version: result.version, updatedAt: result.updatedAt.toISOString() };
+    return {
+      ...fields,
+      policyV2: input.policyV2,
+      version: result.version,
+      updatedAt: result.updatedAt.toISOString(),
+    };
   }
 }
