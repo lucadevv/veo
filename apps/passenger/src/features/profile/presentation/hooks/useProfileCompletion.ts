@@ -3,10 +3,7 @@ import {useEffect, useRef} from 'react';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {
-  useBiometricGateStore,
-  useProfileLocalStore,
-} from '../../../auth/presentation';
+import {useProfileLocalStore} from '../../../auth/presentation';
 import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymentPrefsStore';
 import {profileQueryKey} from '../../domain/queryKeys';
 
@@ -42,7 +39,6 @@ function hasRealName(name: string | null | undefined): boolean {
 export function useProfileCompletion(): ProfileCompletion {
   const userId = useSessionStore(state => state.user?.id ?? null);
   const status = useSessionStore(state => state.status);
-  const biometricLocked = useBiometricGateStore(state => state.locked);
 
   const hydrateUser = useProfileLocalStore(state => state.hydrateUser);
   const completedLocally = useProfileLocalStore(state =>
@@ -58,8 +54,7 @@ export function useProfileCompletion(): ProfileCompletion {
 
   const getProfile = useDependency(TOKENS.getProfileUseCase);
 
-  const active =
-    status === 'authenticated' && !biometricLocked && Boolean(userId);
+  const active = status === 'authenticated' && Boolean(userId);
   const query = useQuery({
     queryKey: profileQueryKey(userId),
     queryFn: () => getProfile.execute(),

@@ -24,7 +24,6 @@ import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {uuidv7} from '../../../../shared/utils/uuid';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {useBiometricGateStore} from '../../../auth/presentation';
 import {
   ErrorState,
   LoadingState,
@@ -81,9 +80,12 @@ type ComingSoon =
 const COMING_SOON_COPY: Record<ComingSoon, string> = {
   cameraControl: 'profile.comingSoonCameraControl',
   shareTrip: 'profile.comingSoonShareTrip',
+  // DEUDA: (app) falta pantalla de Accesibilidad (tamaño de texto, alto contraste, reduce-motion). Hoy comingSoon, sin destino.
   accessibility: 'profile.comingSoonAccessibility',
+  // DEUDA: (backend+i18n) soporte multi-locale (es-ES/en-US) + persistir preferencia de idioma/región del usuario. Hoy solo es-PE; el selector es comingSoon.
   // Idioma y región (pen c4cChO): la app hoy SOLO existe en es-PE — no fingimos un selector.
   language: 'profile.comingSoonLanguage',
+  // DEUDA: (config) falta URL legal (Términos + Privacidad Ley 29733) en config/env para linkear desde el Perfil. Hoy no hay URL → comingSoon.
   // Términos y privacidad (pen c4cChO): no hay URL legal en config/env (gap) — sheet honesto.
   terms: 'profile.comingSoonTerms',
 };
@@ -179,7 +181,6 @@ export function ProfileScreen(): React.JSX.Element {
 
   const refreshToken = useSessionStore(s => s.refreshToken);
   const clearSession = useSessionStore(s => s.clearSession);
-  const lockBiometricGate = useBiometricGateStore(s => s.lock);
 
   const profileQuery = useQuery({
     queryKey: ['profile'],
@@ -233,9 +234,6 @@ export function ProfileScreen(): React.JSX.Element {
     },
     onSuccess: () => {
       history.clear();
-      // Re-arma el candado biométrico: el próximo acceso (incluso un re-login en el mismo proceso)
-      // exige re-autenticación local. Cierra el contrato del store (antes solo se armaba en frío).
-      lockBiometricGate();
       clearSession();
     },
   });

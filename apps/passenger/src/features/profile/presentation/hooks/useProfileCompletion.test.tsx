@@ -5,10 +5,7 @@ import TestRenderer, {act} from 'react-test-renderer';
 import {TOKENS} from '../../../../core/di/tokens';
 import {container} from '../../../../core/di/registry';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {
-  useBiometricGateStore,
-  useProfileLocalStore,
-} from '../../../auth/presentation';
+import {useProfileLocalStore} from '../../../auth/presentation';
 import type {GetProfileUseCase} from '../../domain/usecases';
 import {
   useProfileCompletion,
@@ -51,13 +48,12 @@ function registerProfile(profile: PassengerProfile | Error): void {
   );
 }
 
-/** Prepara la sesión como autenticada/desbloqueada (condición `active` del hook). */
+/** Prepara la sesión como autenticada (condición `active` del hook). */
 function authenticate(): void {
   useSessionStore.setState({
     user: {id: USER_ID} as never,
     status: 'authenticated',
   });
-  useBiometricGateStore.setState({locked: false});
 }
 
 let activeClient: QueryClient | null = null;
@@ -108,7 +104,6 @@ afterEach(() => {
   activeClient?.clear();
   activeClient = null;
   useSessionStore.setState({user: null, status: 'unknown'} as never);
-  useBiometricGateStore.setState({locked: true});
   useProfileLocalStore.setState({completedByUser: {}});
   jest.clearAllMocks();
 });
