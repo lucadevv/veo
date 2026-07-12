@@ -14,7 +14,7 @@ import { wireReactQueryFocus } from './src/core/query/nativeAppState';
 import { DiProvider } from './src/core/di/useDi';
 import { useSessionStore } from './src/core/session/sessionStore';
 import { RealBiometricCaptureProvider } from './src/features/shift/presentation';
-import { LocationSourceProvider } from './src/features/realtime/presentation';
+import { LocationSourceProvider } from './src/core/location/LocationSourceProvider';
 import { selectLocationSource } from './src/features/realtime/data';
 import { TripMediaPublisherProvider } from './src/features/trips/presentation';
 import './src/i18n';

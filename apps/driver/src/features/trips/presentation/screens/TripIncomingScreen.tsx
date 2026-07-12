@@ -19,6 +19,8 @@ import type { RootStackParamList } from '../../../../navigation/types';
 import { useCountdownMs, toEpochMs } from '../../../../shared/presentation/hooks/useCountdownMs';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { StateView } from '../../../../shared/presentation/components/StateView';
+import { CountdownBadge } from '../../../../shared/presentation/components/CountdownBadge';
+import { TripStatsCard } from '../../../../shared/presentation/components/TripStatsCard';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
@@ -29,8 +31,7 @@ import {
 } from '../../../../shared/presentation/icons';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import { useAcceptOffer, useOffer, useRejectOffer } from '../hooks/useTrips';
-import { CountdownRing } from '../components/CountdownRing';
-import { Appear, Pulse } from '../components/motion';
+import { Appear } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripIncoming'>;
 
@@ -77,14 +78,6 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
   // J2 · hook canónico único; el push FIXED trae `expiresAt` como ISO → epoch en el borde (toEpochMs).
   const secondsLeft = useCountdownMs(toEpochMs(expiresAt));
   const expired = Boolean(expiresAt) && secondsLeft <= 0;
-
-  // Fracción real del anillo: el mayor valor observado del countdown hace de denominador (la ventana
-  // de respuesta), sin inventar un total fijo. Empieza en 1 y decrece con el tiempo restante.
-  const maxSecondsRef = useRef(0);
-  if (secondsLeft > maxSecondsRef.current) {
-    maxSecondsRef.current = secondsLeft;
-  }
-  const progress = maxSecondsRef.current > 0 ? secondsLeft / maxSecondsRef.current : 0;
 
   const onAccept = () => {
     acceptOffer.mutate(matchId, {
@@ -148,16 +141,16 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
         style={[
           styles.sheet,
           {
-            // Glass sheet del diseño: translúcido ~96% (frosted sobre el mapa), hairline highlight arriba
-            // + borde sutil, esquinas superiores. Fiel al gradiente #272C38E0→#14161CF2 del frame.
-            backgroundColor: 'rgba(30,33,42,0.96)',
+            // OfferSheet (frame C/TripIncoming): superficie blanca sólida, esquinas superiores redondeadas,
+            // sombra hacia arriba, flotando sobre el mapa Daylight Trust.
+            backgroundColor: theme.colors.surface,
             borderTopLeftRadius: theme.radii['2xl'],
             borderTopRightRadius: theme.radii['2xl'],
             borderTopWidth: 1,
-            borderTopColor: 'rgba(255,255,255,0.16)',
+            borderTopColor: theme.colors.border,
             borderLeftWidth: 1,
             borderRightWidth: 1,
-            borderColor: 'rgba(76,84,104,0.55)',
+            borderColor: theme.colors.border,
             paddingBottom: insets.bottom + theme.spacing.xl,
             ...theme.elevation.level3,
           },
@@ -167,30 +160,13 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
             NO un bottom-sheet arrastrable. El grabber decorativo implicaba draggability inexistente y hacía
             que la 1ra oferta pareciera el mismo sheet que la PUJA (CounterOfferSheet, ese SÍ es draggable).
             El handle real vive solo donde hay gesto real; acá el panel es fijo. */}
-        <View style={styles.ringWrap}>
-          {/* Anillo de atención cian: ping radar mientras la oferta sigue vigente. */}
-          <View style={styles.ringPulseWrap} pointerEvents="none">
-            <Pulse
-              active={!expired}
-              period={1400}
-              minOpacity={0}
-              maxOpacity={0.5}
-              maxScale={1.35}
-              style={[styles.ringPulse, { borderColor: theme.colors.accent }]}
-            >
-              {null}
-            </Pulse>
-          </View>
-          <CountdownRing seconds={secondsLeft} progress={progress} expired={expired} />
-          <Text variant="title2" align="center" style={styles.title}>
-            {t('trips.incomingTitle')}
-          </Text>
-          {scheduled ? <StatusPill label={t('trips.scheduledBadge')} tone="brand" dot /> : null}
-          {/* ADR-018 §1(3) · badge de confianza: se muestra SOLO si el pasajero está verificado. Su
-              ausencia es el estado neutro (no hay etiqueta de "no verificado"), estilo BlaBlaCar. */}
-          {offer.data?.passengerVerified ? (
-            <StatusPill label={t('trips.passengerVerified')} tone="success" dot />
-          ) : null}
+        {/* Grabber + TopRow (frame OfferSheet): "Nuevo viaje" a la izquierda + círculo countdown a la derecha. */}
+        <View style={styles.grabberWrap}>
+          <View style={[styles.grabber, { backgroundColor: theme.colors.borderStrong }]} />
+        </View>
+        <View style={styles.topRow}>
+          <Text variant="title2">{t('trips.incomingTitle')}</Text>
+          {!expired ? <CountdownBadge seconds={secondsLeft} /> : null}
         </View>
 
         <ScrollView
@@ -210,7 +186,7 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
             <>
               {/* Foco: tarifa estimada grande. */}
               <Appear style={styles.fareBlock} delay={40}>
-                <Text variant="subhead" color="inkMuted" align="center">
+                <Text variant="subhead" color="inkSubtle" align="center">
                   {t('trips.estimatedFare')}
                 </Text>
                 <Text variant="display" align="center" tabular>
@@ -222,59 +198,41 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
                   valor + label, separadas por divisores verticales. Distancia y Duración salen del
                   `OfferView`; "A recojo" (ETA conductor→recojo) del push efímero (store). Regla #5:
                   pre-aceptación solo distancia/tarifa/tiempos, ninguna dirección real. */}
-              <Appear
-                delay={120}
-                style={[
-                  styles.metricsCard,
-                  { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.lg },
-                ]}
-              >
-                {[
-                  {
-                    key: 'distance',
-                    Icon: IconRoute,
-                    label: t('trips.distance'),
-                    value: t('trips.kilometers', { value: metersToKm(offer.data.distanceMeters) }),
-                  },
-                  {
-                    key: 'duration',
-                    Icon: IconClock,
-                    label: t('trips.duration'),
-                    value: t('trips.minutes', {
-                      value: secondsToMinutes(offer.data.durationSeconds),
-                    }),
-                  },
-                  {
-                    key: 'pickupEta',
-                    Icon: IconNavigation,
-                    label: t('trips.pickupEta'),
-                    // Degrada a "—" si el ETA no vino (dispatch lo omite cuando maps.eta falló).
-                    value:
-                      pickupEtaSeconds && pickupEtaSeconds > 0
-                        ? t('trips.minutes', { value: secondsToMinutes(pickupEtaSeconds) })
-                        : '—',
-                  },
-                ].map(({ key, Icon, label, value }, i) => (
-                  <React.Fragment key={key}>
-                    {i > 0 ? (
-                      <View
-                        style={[
-                          styles.metricDivider,
-                          { backgroundColor: theme.colors.borderStrong },
-                        ]}
-                      />
-                    ) : null}
-                    <View style={styles.metricCol}>
-                      <Icon size={16} color={theme.colors.inkMuted} />
-                      <Text variant="title3" color="ink" tabular style={styles.metricValue}>
-                        {value}
-                      </Text>
-                      <Text variant="footnote" color="inkSubtle" style={styles.metricLabel}>
-                        {label}
-                      </Text>
-                    </View>
-                  </React.Fragment>
-                ))}
+              {/* Badges funcionales que el mockup happy-path omite pero el conductor necesita para decidir. */}
+              {scheduled ? <StatusPill label={t('trips.scheduledBadge')} tone="brand" dot /> : null}
+              {offer.data.passengerVerified ? (
+                <StatusPill label={t('trips.passengerVerified')} tone="success" dot />
+              ) : null}
+
+              {/* Métricas de decisión → componente canónico TripStatsCard (antes inline con .map). */}
+              <Appear delay={120}>
+                <TripStatsCard
+                  stats={[
+                    {
+                      key: 'distance',
+                      Icon: IconRoute,
+                      label: t('trips.distance'),
+                      value: t('trips.kilometers', { value: metersToKm(offer.data.distanceMeters) }),
+                    },
+                    {
+                      key: 'duration',
+                      Icon: IconClock,
+                      label: t('trips.duration'),
+                      value: t('trips.minutes', {
+                        value: secondsToMinutes(offer.data.durationSeconds),
+                      }),
+                    },
+                    {
+                      key: 'pickupEta',
+                      Icon: IconNavigation,
+                      label: t('trips.pickupEta'),
+                      value:
+                        pickupEtaSeconds && pickupEtaSeconds > 0
+                          ? t('trips.minutes', { value: secondsToMinutes(pickupEtaSeconds) })
+                          : '—',
+                    },
+                  ]}
+                />
               </Appear>
 
               {/* BE-2 · solicitudes especiales (mascota/equipaje/silla): el conductor las ve para decidir.
@@ -331,7 +289,7 @@ export const TripIncomingScreen = ({ navigation, route }: Props): React.JSX.Elem
             <>
               <Button
                 label={t('trips.reject')}
-                variant="ghost"
+                variant="secondary"
                 loading={rejectOffer.isPending}
                 onPress={onReject}
                 style={styles.rejectBtn}
@@ -357,28 +315,15 @@ const styles = StyleSheet.create({
   mapArea: { flex: 1 },
   scrim: { ...StyleSheet.absoluteFill },
   topBar: { position: 'absolute', left: 20, right: 20, alignItems: 'center' },
-  sheet: { paddingHorizontal: 20, paddingTop: 10, maxHeight: '64%' },
-  ringWrap: { alignItems: 'center', gap: 8, marginTop: 4 },
-  ringPulseWrap: {
-    position: 'absolute',
-    top: 0,
-    width: 104,
-    height: 104,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ringPulse: { width: 104, height: 104, borderRadius: 52, borderWidth: 2 },
-  title: { marginTop: 4 },
+  sheet: { paddingHorizontal: 20, paddingTop: 12, maxHeight: '72%' },
+  grabberWrap: { alignItems: 'center', paddingBottom: 8 },
+  grabber: { width: 40, height: 5, borderRadius: 999 },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   scroll: { marginTop: 16 },
   scrollContent: { gap: 16, paddingBottom: 8 },
   fareBlock: { gap: 2 },
   specials: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
-  metricsCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  metricCol: { flex: 1, alignItems: 'center', gap: 3 },
-  metricDivider: { width: 1, height: 32 },
-  metricValue: { fontSize: 16, lineHeight: 20 },
-  metricLabel: { fontSize: 11, lineHeight: 14 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
-  rejectBtn: { flex: 0 },
+  rejectBtn: { width: 120 },
   acceptBtn: { flex: 1 },
 });

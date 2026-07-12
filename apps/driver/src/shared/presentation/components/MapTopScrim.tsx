@@ -15,7 +15,7 @@ export function MapTopScrim({ height = 220 }: { height?: number }): React.JSX.El
     <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
       <Defs>
         <LinearGradient id="mapTopScrim" x1="0" y1="0" x2="0" y2="1">
-          {/* #0A0B0FCC → #0A0B0F00: 80% de opacidad arriba, transparente al pie del velo. */}
+          {/* `bg` (light) 80% opaco arriba → transparente al pie: velo claro sobre el mapa Daylight Trust. */}
           <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0.8} />
           <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={0} />
         </LinearGradient>

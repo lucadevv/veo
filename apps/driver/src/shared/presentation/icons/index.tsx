@@ -12,7 +12,10 @@ export interface IconProps {
   strokeWidth?: number;
 }
 
-const DEFAULTS = { size: 24, color: '#EFF2F6', strokeWidth: 2 } as const;
+// Fallback de color para cuando el consumidor no pasa `color`. Ink oscuro del Theme de Confianza
+// (light) — antes era gris casi-blanco #EFF2F6 (modo noche). Casi todos los consumidores pasan
+// `color` desde el tema; este default solo aplica al glifo suelto sin color explícito.
+const DEFAULTS = { size: 24, color: '#1A2332', strokeWidth: 2 } as const;
 
 const base = (props: IconProps) => {
   const size = props.size ?? DEFAULTS.size;
@@ -462,12 +465,42 @@ export function IconCalendar(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Pausa: dos barras verticales (pausar turno). */
+export function IconPause(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M9 4v16M15 4v16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 /** Más / añadir (registrar documento). */
 export function IconPlus(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M12 5v14M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Menos / restar (stepper de oferta). */
+export function IconMinus(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Círculo hueco: punto de ORIGEN en resúmenes de ruta (el destino usa el pin `IconMap`). */
+export function IconCircle(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
     </Svg>
   );
 }

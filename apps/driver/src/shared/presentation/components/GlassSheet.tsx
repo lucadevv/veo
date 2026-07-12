@@ -15,10 +15,9 @@ export interface GlassSheetProps {
 
 /**
  * Hoja "glass" del sistema VEO — el sheet inferior de los frames del conductor (Dashboard, TripIncoming,
- * Puja…). Superficie translúcida oscura, esquinas SUPERIORES redondeadas (pegada al borde inferior, sin
- * esquinas abajo), hairline highlight blanco arriba + borde sutil, y sombra hacia ARRIBA (flota sobre el
- * mapa). No hay BlurView en el stack; la opacidad ~96% ya da el frosted sobre el mapa, fiel al gradiente
- * #272C38E0→#14161CF2 del diseño.
+ * Puja…). Superficie translúcida CLARA (~96% blanco, Theme de Confianza), esquinas SUPERIORES redondeadas
+ * (pegada al borde inferior, sin esquinas abajo), borde sutil del tema, y sombra hacia ARRIBA (flota sobre
+ * el mapa Daylight Trust). No hay BlurView en el stack; la opacidad ~96% ya da el frosted sobre el mapa claro.
  *
  * Va dentro del slot inferior de `MapShell` (que aporta left/right/bottom:12): el margen negativo lo
  * lleva FLUSH a los bordes, como en los frames.
@@ -29,6 +28,8 @@ export function GlassSheet({ children, style, floating = false }: GlassSheetProp
     <View
       style={[
         styles.sheet,
+        // Frosted CLARO (~96% blanco) sobre el mapa Daylight Trust; la translucidez exige rgba.
+        { backgroundColor: 'rgba(255,255,255,0.96)', borderColor: theme.colors.border },
         floating
           ? { borderRadius: theme.radii['2xl'], borderWidth: 1 }
           : {
@@ -49,15 +50,13 @@ export function GlassSheet({ children, style, floating = false }: GlassSheetProp
 
 const styles = StyleSheet.create({
   sheet: {
-    backgroundColor: 'rgba(30,33,42,0.96)', // surfaceElevated #1E212A ~96% → frosted sobre el mapa
+    // Frosted CLARO sobre el mapa Daylight Trust; color de fondo/borde se inyectan inline desde el tema.
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 24,
     borderWidth: 1,
-    borderColor: 'rgba(76,84,104,0.55)',
-    borderTopColor: 'rgba(255,255,255,0.16)', // "labio" de vidrio arriba
-    shadowColor: '#000000',
-    shadowOpacity: 0.6,
+    shadowColor: '#1A2332',
+    shadowOpacity: 0.14,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: -12 },
     elevation: 24,

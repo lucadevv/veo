@@ -366,16 +366,16 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
         style={[
           styles.sheet,
           {
-            // Glass sheet del diseño: translúcido ~96% + hairline highlight arriba + borde sutil + esquinas
-            // superiores redondeadas (fiel al gradiente #272C38E0→#14161CF2 del frame).
-            backgroundColor: 'rgba(30,33,42,0.96)',
+            // Glass sheet CLARO (Theme de Confianza): frosted ~96% blanco + borde sutil del tema + esquinas
+            // superiores, flotando sobre el mapa Daylight Trust. TODO módulo 4: reusar el componente GlassSheet.
+            backgroundColor: 'rgba(255,255,255,0.96)',
             borderTopLeftRadius: theme.radii['2xl'],
             borderTopRightRadius: theme.radii['2xl'],
             borderTopWidth: 1,
-            borderTopColor: 'rgba(255,255,255,0.16)',
+            borderTopColor: theme.colors.border,
             borderLeftWidth: 1,
             borderRightWidth: 1,
-            borderColor: 'rgba(76,84,104,0.55)',
+            borderColor: theme.colors.border,
           },
         ]}
         contentContainerStyle={[

@@ -36,6 +36,17 @@ const SLIDE_PHOTOS: Record<string, ImageSourcePropType> = {
   protected: require('../../../../../assets/images/onboarding/slide3.jpg') as ImageSourcePropType,
 };
 
+/**
+ * Copy y scrim SOBRE FOTO: intencionalmente INDEPENDIENTES del tema. Un overlay sobre imagen se rige
+ * por la foto (borde inferior siempre oscuro + texto claro para leer sobre cualquier POV), no por el
+ * lienzo claro de la app — por eso NO salen de `useTheme`. Tras la migración Trust, el resto del
+ * chrome (CTA teal, dots) sí es del tema; solo el copy-sobre-foto queda claro-sobre-oscuro. El eyebrow
+ * usa `accentHover` (teal claro, token) que sí contrasta sobre el scrim oscuro.
+ */
+const PHOTO_SCRIM = '#0A0B0F';
+const ON_PHOTO_TITLE = '#FFFFFF';
+const ON_PHOTO_BODY = 'rgba(245,247,250,0.82)';
+
 interface SlideContent {
   key: string;
   eyebrow: string;
@@ -172,11 +183,11 @@ export const OnboardingScreen = (): React.JSX.Element => {
             <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
               <Defs>
                 <LinearGradient id={`photoScrim-${slide.key}`} x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0.15} />
-                  <Stop offset="0.35" stopColor={theme.colors.bg} stopOpacity={0} />
-                  <Stop offset="0.62" stopColor={theme.colors.bg} stopOpacity={0.55} />
-                  <Stop offset="0.82" stopColor={theme.colors.bg} stopOpacity={0.9} />
-                  <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={1} />
+                  <Stop offset="0" stopColor={PHOTO_SCRIM} stopOpacity={0.15} />
+                  <Stop offset="0.35" stopColor={PHOTO_SCRIM} stopOpacity={0} />
+                  <Stop offset="0.62" stopColor={PHOTO_SCRIM} stopOpacity={0.55} />
+                  <Stop offset="0.82" stopColor={PHOTO_SCRIM} stopOpacity={0.9} />
+                  <Stop offset="1" stopColor={PHOTO_SCRIM} stopOpacity={1} />
                 </LinearGradient>
               </Defs>
               <Rect
@@ -196,13 +207,13 @@ export const OnboardingScreen = (): React.JSX.Element => {
               ]}
             >
               <Reveal delay={60}>
-                <Text variant="label" color="accent">
+                <Text variant="label" color="accentHover">
                   {slide.eyebrow.toUpperCase()}
                 </Text>
-                <Text variant="display" color="ink" style={styles.title}>
+                <Text variant="display" style={[styles.title, { color: ON_PHOTO_TITLE }]}>
                   {slide.title}
                 </Text>
-                <Text variant="callout" color="inkMuted" style={styles.body}>
+                <Text variant="callout" style={[styles.body, { color: ON_PHOTO_BODY }]}>
                   {slide.body}
                 </Text>
               </Reveal>

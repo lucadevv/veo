@@ -27,7 +27,7 @@ App conductor React Native Android. Parte de un sistema multi-repo:
 3. **Foreground Service obligatorio en Android.** Sin esto, Android mata GPS + WebRTC en background → no podemos cumplir el SLA.
 4. **Min SDK 26 (Android 8.0).** Cubre 95% del mercado conductor en Lima. Hardware mínimo: 3 GB RAM, 64 GB storage.
 5. **No mostrar info del pasajero hasta aceptar.** Solo distancia + tarifa estimada. Datos completos post-aceptación.
-6. **Modo noche por defecto.** Conductores trabajan muchas horas en condiciones de poca luz.
+6. **Theme de Confianza (light) por defecto.** Desde la migración Trust (2026-07) el conductor usa el mismo sistema visual claro que passenger/admin (board veo.pen `Bqk6u` ya migrado). Supera al histórico "modo noche por defecto". La paleta noche se conserva íntegra en `@veo/ui-kit` (`driverDarkColors`/`driverDarkElevation`) por si se reintroduce un toggle día/noche a futuro. Las pantallas de mapa/viaje activo también van en light (estilo de mapa `veo-light`).
 
 ## Hardware certificado (recomendado por la flota)
 

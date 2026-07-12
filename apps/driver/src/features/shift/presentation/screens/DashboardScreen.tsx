@@ -15,17 +15,15 @@ import {
   MapShell,
   SafeScreen,
   Skeleton,
-  StatusPill,
   Text,
   useTheme,
-  type StatusTone,
 } from '@veo/ui-kit';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
 import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
 import { MapTopScrim } from '../../../../shared/presentation/components/MapTopScrim';
-import { IconFlame } from '../../../../shared/presentation/icons';
+import { IconFlame, IconChevronRight, IconPause } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
@@ -44,13 +42,11 @@ import {
   canStartShift,
   isOnShift,
   isSuspended,
-  type ShiftStatus,
   type VehicleType,
 } from '../../domain';
 import { useEndShift, usePauseShift, useShiftState } from '../hooks/useShift';
 import { consumeShiftStartedAt } from '../state/shiftClock';
 import { useActiveVehicle } from '../hooks/useVehicleCatalog';
-import { VehicleTypeSelector } from '../components/VehicleTypeSelector';
 import { Appear, PressableScale, Pulse } from '../components/motion';
 
 /**
@@ -63,42 +59,9 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
-/** Descriptor visual del `StatusPill` del header según el estado de turno. */
-interface ShiftPill {
-  label: string;
-  tone: StatusTone;
-  live: boolean;
-}
-
-/**
- * Mapea el estado de turno al pill del header. AVAILABLE comunica que se están buscando viajes
- * (tono éxito, pulsante); el resto reutiliza las etiquetas i18n existentes o "Desconectado".
- */
 /** Etiqueta i18n del tipo de vehículo activo (registro exhaustivo clase→clave, ADR 013 §1.6). */
 function vehicleTypeLabel(type: VehicleType, t: TFunction): string {
   return t(vehicleClassLabelKey(type));
-}
-
-function shiftPill(status: ShiftStatus, t: TFunction): ShiftPill {
-  switch (status) {
-    case 'AVAILABLE':
-      // En línea / buscando viajes: es el estado VIVO por excelencia → acento azul pulsante (NO verde:
-      // el verde-"todo ok" era el reflejo AI que el dueño rechazó). El azul es el único color interactivo.
-      return {
-        label: t('shift.status.availableSearching'),
-        tone: 'accent',
-        live: true,
-      };
-    case 'ASSIGNED':
-    case 'ON_TRIP':
-      return { label: t('shift.status.onTrip'), tone: 'accent', live: true };
-    case 'ON_BREAK':
-      return { label: t('shift.status.onBreak'), tone: 'warn', live: false };
-    case 'SUSPENDED':
-      return { label: t('shift.status.suspended'), tone: 'danger', live: false };
-    default:
-      return { label: t('shift.status.offline'), tone: 'neutral', live: false };
-  }
 }
 
 export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
@@ -150,14 +113,6 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
 
   const status = shift.data?.status ?? 'UNKNOWN';
   const online = isOnShift(status);
-  // El pill NO puede MENTIR: si el conductor está EN LÍNEA pero el socket `/driver` está caído (túnel, zona
-  // muerta, sesión revocada en otro device), dejó de publicar GPS y el dispatch/admin YA no lo ven. Mostrar
-  // "Reconectando…" (neutral, sin pulso) en vez de "En línea" evita que crea que está visible cuando no lo está
-  // — el mismo criterio honesto que ya usa TripActiveScreen durante el viaje.
-  const pill: ShiftPill =
-    online && !connected
-      ? { label: t('shift.status.reconnecting'), tone: 'neutral', live: false }
-      : shiftPill(status, t);
 
   // Disponibilidad del GPS (servicios del SO + permiso). Si el conductor está EN TURNO pero apagó la
   // ubicación o no dio permiso, NO emite su posición y el dispatch no lo ve, aunque la UI lo muestre
@@ -220,7 +175,16 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
       >
         {/* GreetPill (frame C/Dashboard): avatar + saludo dentro de una pastilla glass. El fondo va en un
             View plano — el AnimatedPressable de PressableScale no pinta backgroundColor de forma fiable. */}
-        <View style={styles.greetCard}>
+        <View
+          style={[
+            styles.greetCard,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+              ...theme.elevation.level2,
+            },
+          ]}
+        >
           <Avatar name={driverName ?? 'VEO'} size="sm" tone="neutral" />
           <View style={styles.greetText}>
             <Text variant="caption" color="inkSubtle">
@@ -233,19 +197,8 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       </PressableScale>
       <View style={styles.topRight}>
-        {/* El acceso a avisos vive en Cuenta (el frame C/Dashboard no tiene campana en el header). */}
-        <StatusPill label={pill.label} tone={pill.tone} live={pill.live} dot />
-        {/* Indicador del vehículo ACTIVO (server-authoritative): con qué vehículo opera, que es lo que el
-            dispatch usa para ofrecerle viajes. Solo EN TURNO: fuera de turno el vehículo no es relevante y
-            mostrarlo pegado a "Fuera de turno" leía raro ("Fuera de turno · Moto"). */}
-        {online && activeVehicle.data ? (
-          <StatusPill
-            label={vehicleTypeLabel(activeVehicle.data.vehicleType, t)}
-            tone="accent"
-            dot
-          />
-        ) : null}
-        {/* Toggle "Zonas de demanda": pinta el mapa de calor para saber a dónde ir. */}
+        {/* Único chip del header (frame C/Dashboard · "Demanda"): toggle del mapa de calor. El estado de
+            turno NO va arriba — vive en el dock (punto vivo + "Listo para viajes"), fiel al board. */}
         {showDemandToggle ? (
           <PressableScale
             accessibilityRole="switch"
@@ -255,10 +208,10 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             style={[
               styles.demandToggle,
               {
-                backgroundColor: demandOn ? theme.colors.accent : theme.colors.surface,
-                borderColor: demandOn ? theme.colors.accent : theme.colors.border,
+                // Off: brand-dim (container del primary) + borde teal. On: teal sólido.
+                backgroundColor: demandOn ? theme.colors.accent : theme.colors.brandDim,
+                borderColor: theme.colors.accent,
                 borderRadius: theme.radii.pill,
-                ...theme.elevation.level2,
               },
             ]}
           >
@@ -267,8 +220,8 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               color={demandOn ? theme.colors.onAccent : theme.colors.accent}
               strokeWidth={2}
             />
-            <Text variant="caption" color={demandOn ? 'onAccent' : 'inkMuted'} numberOfLines={1}>
-              {t('ops.demand.toggle')}
+            <Text variant="footnote" color={demandOn ? 'onAccent' : 'accent'} numberOfLines={1}>
+              {t('shift.demandShort')}
             </Text>
           </PressableScale>
         ) : null}
@@ -308,6 +261,37 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           {t('shift.pendingNet')}
         </Text>
       </Appear>
+    </View>
+  );
+
+  // Vehículo activo (server-authoritative): con qué vehículo opera. Compartido por el dock online/offline.
+  const activeVeh = activeVehicle.data;
+  const ActiveVehIcon = activeVeh ? vehicleClassGlyph(activeVeh.vehicleType) : null;
+
+  // KPIs del dock (frame C/Dashboard): "Neto de hoy" | "Por liquidar" (naranja) con divisor central.
+  const dockKpis = earnings.isLoading ? (
+    <Skeleton height={44} />
+  ) : earnings.isError || !earnings.data ? (
+    <Banner tone="warn" title={t('shift.kpisUnavailable')} />
+  ) : (
+    <View style={styles.kpiRow}>
+      <View style={styles.kpiCell}>
+        <Text variant="caption" color="inkSubtle">
+          {t('shift.netToday')}
+        </Text>
+        <Text variant="title3" color="ink" tabular>
+          {formatPEN(earnings.data.totalNetCents ?? 0)}
+        </Text>
+      </View>
+      <View style={[styles.kpiDivider, { backgroundColor: theme.colors.border }]} />
+      <View style={styles.kpiCell}>
+        <Text variant="caption" color="inkSubtle">
+          {t('shift.pendingNet')}
+        </Text>
+        <Text variant="title3" color="warn" tabular>
+          {formatPEN(earnings.data.pendingNetCents ?? 0)}
+        </Text>
+      </View>
     </View>
   );
 
@@ -355,44 +339,54 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
       </GlassSheet>
     );
   } else if (online) {
-    // En línea: sheet slim con métricas en vivo, pausa y desconexión (misma lógica de mutaciones).
+    // En línea (frame C/Dashboard · Dock): punto vivo + "Listo para viajes", selector de vehículo (fila),
+    // KPIs (neto de hoy / por liquidar) y Pausar/Desconectarme. Fiel a la card del board — las OFERTAS de
+    // puja llegan por push (no hay botón "Pujas abiertas" siempre visible, que el board no muestra).
     bottomOverlay = (
       <Appear key="online">
         <GlassSheet floating style={dockLift}>
-          {/* GPS apagado/sin permiso EN TURNO: el conductor no emite posición y el dispatch no lo ve.
-            Aviso prioritario (arriba de todo) para que lo corrija antes de seguir esperando viajes. */}
           {gpsUnavailable ? (
             <Banner
               tone="danger"
               title={t('shift.gpsUnavailableTitle')}
               description={gpsBannerBody}
-              // Acción directa: abre los ajustes del SO de la app, donde el conductor activa el permiso o
-              // el servicio de ubicación. Sin esto el banner solo informaba y el conductor debía adivinar.
               action={{ label: t('shift.gpsOpenSettings'), onPress: () => Linking.openSettings() }}
               style={styles.bannerBelow}
             />
           ) : null}
-          <View style={styles.onlineHead}>
-            <Pulse active={status === 'AVAILABLE'} style={styles.liveDotWrap}>
-              <View style={[styles.liveDot, { backgroundColor: theme.colors.accent }]} />
+          {/* StatusRow: punto vivo verde + "Listo para viajes" (o "Reconectando…" si el socket cayó, honesto). */}
+          <View style={styles.statusRow}>
+            <Pulse active={status === 'AVAILABLE' && connected} style={styles.liveDotWrap}>
+              <View
+                style={[
+                  styles.liveDot,
+                  { backgroundColor: connected ? theme.colors.success : theme.colors.inkSubtle },
+                ]}
+              />
             </Pulse>
-            <Text variant="headline">{t('shift.readyForTrips')}</Text>
+            <Text variant="title3">
+              {connected ? t('shift.readyForTrips') : t('shift.status.reconnecting')}
+            </Text>
           </View>
-          {/* Tipo de vehículo activo: editable en línea (bloqueado solo durante un viaje), porque es
-            lo que decide qué viajes —Auto o Moto— le ofrece el dispatch. */}
-          <View style={styles.spaced}>
-            <VehicleTypeSelector disabled={status === 'ON_TRIP' || status === 'ASSIGNED'} />
-          </View>
-          <View style={styles.spaced}>{earningsMetrics}</View>
-          {/* Pujas abiertas: el conductor entra al marketplace "proponé tu precio" para ofertar/contraofertar. */}
-          <Button
-            label={t('trips.bid.screenTitle')}
-            variant="accent"
-            fullWidth
-            leftIcon={<IconFlame size={18} color={theme.colors.onAccent} strokeWidth={2} />}
-            onPress={() => navigation.navigate('Bids')}
-            style={styles.spaced}
-          />
+          {/* Selector de vehículo (fila gris del board): con qué vehículo opera; toca para gestionar/cambiar. */}
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={t('vehicles.manage')}
+            onPress={() => navigation.navigate('Vehicles')}
+            style={[styles.vehicleSel, { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md }]}
+          >
+            <View style={styles.vehicleSelLeft}>
+              {ActiveVehIcon ? <ActiveVehIcon size={18} color={theme.colors.inkMuted} /> : null}
+              <Text variant="bodyStrong" numberOfLines={1}>
+                {activeVeh
+                  ? `${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`
+                  : t('shift.vehicleType.none')}
+              </Text>
+            </View>
+            <IconChevronRight size={18} color={theme.colors.inkSubtle} />
+          </PressableScale>
+          {dockKpis}
+          {/* Actions: Pausar (outlined, ocupa el ancho) + Desconectarme (ghost gris, fit-content). */}
           <View style={styles.actionsRow}>
             {status === 'AVAILABLE' ? (
               <Button
@@ -402,16 +396,19 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
                 loading={pause.isPending}
                 onPress={() => pause.mutate()}
                 style={styles.actionItem}
+                leftIcon={<IconPause size={16} color={theme.colors.ink} strokeWidth={2} />}
               />
             ) : null}
-            <Button
-              label={t('shift.goOffline')}
-              variant="ghost"
-              fullWidth
-              loading={end.isPending}
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel={t('shift.goOffline')}
               onPress={() => setEndConfirm(true)}
-              style={styles.actionItem}
-            />
+              style={styles.disconnectBtn}
+            >
+              <Text variant="subhead" color="inkMuted">
+                {t('shift.goOffline')}
+              </Text>
+            </PressableScale>
           </View>
           {pause.isError ? (
             <Banner
@@ -434,8 +431,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     );
   } else {
     // Desconectado / en pausa (frame C/Dashboard-Offline): vehículo activo compacto + KPIs + "Conéctate".
-    const activeVeh = activeVehicle.data;
-    const ActiveVehIcon = activeVeh ? vehicleClassGlyph(activeVeh.vehicleType) : null;
+    // `activeVeh`/`ActiveVehIcon` están hoisteados arriba (compartidos con el dock online).
     bottomOverlay = (
       <Appear key="offline">
         <GlassSheet floating style={dockLift}>
@@ -613,28 +609,47 @@ const styles = StyleSheet.create({
   demandToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderWidth: 1,
+  },
+  // Dock online (frame C/Dashboard): StatusRow + selector de vehículo + KpiRow, con gap 12 (marginTop).
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  vehicleSel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginTop: 12,
+  },
+  vehicleSelLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  kpiRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
+  kpiCell: { flex: 1, gap: 2 },
+  kpiDivider: { width: 1, height: 34 },
+  disconnectBtn: {
+    paddingVertical: 13,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   legendWrap: { position: 'absolute', left: 16, right: 16, bottom: 16 },
   tipWrap: { position: 'absolute', left: 16, right: 16, top: 96 },
   vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   vehicleTile: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   vehicleInfo: { flex: 1, gap: 1 },
+  // GreetPill (frame C/Dashboard): pastilla blanca sólida + borde + sombra suave; bg/borde/elevación del tema.
   greetCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     maxWidth: 240,
-    paddingVertical: 5,
-    paddingLeft: 5,
+    paddingVertical: 8,
+    paddingLeft: 8,
     paddingRight: 14,
     borderRadius: 999,
     borderWidth: 1,
-    backgroundColor: 'rgba(30,33,42,0.92)', // surfaceElevated ~92% → glass sobre el mapa (sin BlurView)
-    borderColor: 'rgba(255,255,255,0.12)', // labio de vidrio (como GlassSheet)
   },
   greetText: { flexShrink: 1, paddingRight: 4 },
   dim: { ...StyleSheet.absoluteFill, opacity: 0.55 },
@@ -643,7 +658,7 @@ const styles = StyleSheet.create({
   onlineHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveDotWrap: { width: 10, height: 10, alignItems: 'center', justifyContent: 'center' },
   liveDot: { width: 10, height: 10, borderRadius: 999 },
-  actionsRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
   actionItem: { flex: 1 },
   spaced: { marginTop: 12 },
   bannerBelow: { marginBottom: 12 },

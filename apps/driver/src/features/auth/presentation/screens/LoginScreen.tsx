@@ -41,6 +41,9 @@ type Step = 'phone' | 'code';
 // Longitud del OTP (solo presentación: la lógica/validación de `code` no cambia).
 const OTP_LENGTH = 6;
 
+// Cooldown (segundos) entre reenvíos de OTP para no spamear el gateway de SMS.
+const RESEND_COOLDOWN = 30;
+
 /**
  * Foto POV nocturna del héroe (luces de ciudad + celu con GPS + volante), bundleada por Metro vía
  * `require`. Va a sangre en la banda superior del paso teléfono. La ruta sube 5 niveles desde
@@ -202,6 +205,8 @@ export const LoginScreen = (): React.JSX.Element => {
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  // Segundos restantes del cooldown de reenvío de OTP; 0 = habilitado. Arranca al pedir el código.
+  const [resendIn, setResendIn] = useState(0);
   // Permite ocultar la tarjeta de Face ID para ir directo al número ("Usar código en su lugar").
   const [showBiometricCard, setShowBiometricCard] = useState(true);
 
@@ -215,8 +220,32 @@ export const LoginScreen = (): React.JSX.Element => {
   const phoneValid = isValidPeruPhone(phone);
   const codeValid = /^\d{6}$/.test(code);
 
+  // Tick del cooldown de reenvío: baja 1s hasta 0 (setTimeout encadenado, se limpia al desmontar).
+  useEffect(() => {
+    if (resendIn <= 0) {
+      return undefined;
+    }
+    const id = setTimeout(() => setResendIn(resendIn - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendIn]);
+
   const onRequest = () => {
-    requestOtp.mutate(phone, { onSuccess: () => setStep('code') });
+    requestOtp.mutate(phone, {
+      onSuccess: () => {
+        setStep('code');
+        setResendIn(RESEND_COOLDOWN);
+      },
+    });
+  };
+
+  // Reenvío del OTP (frame C/LoginOtp: "¿No llegó? Reenviar código"): reusa el mismo mutation y
+  // reinicia el cooldown. Deshabilitado mientras corre el contador o hay un envío en curso.
+  const onResend = () => {
+    if (resendIn > 0 || requestOtp.isPending) {
+      return;
+    }
+    setCode('');
+    requestOtp.mutate(phone, { onSuccess: () => setResendIn(RESEND_COOLDOWN) });
   };
 
   const onVerify = () => {
@@ -231,7 +260,9 @@ export const LoginScreen = (): React.JSX.Element => {
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
-      <StatusBar barStyle="light-content" />
+      {/* Paso teléfono: foto oscura en la banda superior → íconos claros. Paso código: lienzo claro
+          sin foto → íconos oscuros del tema (si no, quedarían blancos invisibles tras la migración). */}
+      <StatusBar barStyle={step === 'phone' ? 'light-content' : theme.statusBarStyle} />
 
       {step === 'phone' ? (
         /* ── Paso TELÉFONO (dirección Tesla "banda foto arriba") ─────────── */
@@ -439,6 +470,26 @@ export const LoginScreen = (): React.JSX.Element => {
             )}
           </View>
 
+          {/* Reenvío de OTP con cooldown (frame C/LoginOtp): "¿No llegó? Reenviar código". */}
+          <View style={styles.resendRow}>
+            <Text variant="footnote" color="inkSubtle">
+              {t('auth.otpResendPrompt')}
+            </Text>
+            <Pressable
+              onPress={onResend}
+              disabled={resendIn > 0 || requestOtp.isPending}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: resendIn > 0 || requestOtp.isPending }}
+            >
+              <Text variant="footnote" color={resendIn > 0 ? 'inkSubtle' : 'accent'}>
+                {resendIn > 0
+                  ? t('auth.otpResendIn', { seconds: resendIn })
+                  : t('auth.otpResend')}
+              </Text>
+            </Pressable>
+          </View>
+
           {login.isError ? (
             <Banner
               tone="danger"
@@ -479,6 +530,7 @@ const styles = StyleSheet.create({
   biometricCopy: { flex: 1, gap: 2 },
   shieldCircle: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   prefix: { paddingRight: 10, borderRightWidth: StyleSheet.hairlineWidth },
+  resendRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', position: 'relative' },
   otpBox: {
     flex: 1,

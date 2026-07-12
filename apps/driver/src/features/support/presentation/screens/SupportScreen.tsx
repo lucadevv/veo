@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Banner,
   BottomSheet,
+  hexAlpha,
   IconButton,
   SafeScreen,
   Skeleton,
@@ -127,7 +128,8 @@ export const SupportScreen = ({ navigation, route }: Props): React.JSX.Element =
           <View
             style={[
               styles.chatIcon,
-              { backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: theme.radii.md },
+              // Tint del onAccent (blanco al 16%) sobre el hero accent: derivado del token, no literal.
+              { backgroundColor: hexAlpha(theme.colors.onAccent, 0.16), borderRadius: theme.radii.md },
             ]}
           >
             <IconMessage size={22} color={theme.colors.onAccent} />

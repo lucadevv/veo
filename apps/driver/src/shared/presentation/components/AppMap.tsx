@@ -1,11 +1,11 @@
 import type { GeoPoint } from '@veo/api-client';
 import { Camera, CircleLayer, LineLayer, MapView, MarkerView, ShapeSource } from '@rnmapbox/maps';
-import { driverMapRoute, RoutePin } from '@veo/ui-kit';
+import { driverMapRoute, RoutePin, useTheme } from '@veo/ui-kit';
 import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { env } from '../../../core/config/env';
 import { boundsOf, LIMA_CENTER_LNGLAT, LIMA_ZOOM, toLngLat } from '../../utils/geo';
-import { veoDarkMapboxStyleJSON } from './mapbox/veoDarkStyle';
+import { veoLightMapboxStyleJSON } from './mapbox/veoLightStyle';
 import { NavPuck } from './NavPuck';
 
 /** Celda de demanda a pintar sobre el mapa (centroide + estilo ya derivado de la intensidad). */
@@ -68,8 +68,9 @@ const isValidPoint = (p: GeoPoint | null | undefined): p is GeoPoint =>
 
 /**
  * Lienzo de mapa del conductor sobre **`@rnmapbox/maps`** (Lote 0+1: migración a Mapbox). El estilo
- * veo-dark "Midnight Motion" se inyecta vía `styleJSON` (Mapbox Streets v8, paleta idéntica al
- * tileserver propio anterior). Centraliza el encuadre, los markers de conductor/recojo/destino, la
+ * veo-light "Daylight Trust" (Theme de Confianza) se inyecta vía `styleJSON` (Mapbox Streets v8, paleta
+ * idéntica al passenger/admin-web; canvas #F5F7FA = token `bg`). Centraliza el encuadre, los markers de
+ * conductor/recojo/destino (ruta teal `driverMapRoute`), la
  * polyline de ruta con glow (dos capas: halo ancho translúcido + línea cian nítida, tokens
  * `driverMapRoute`) y el mapa de calor de demanda. El chrome (overlays) lo aporta `MapShell`.
  *
@@ -89,6 +90,7 @@ function AppMapComponent({
   heading,
   interactive = true,
 }: AppMapProps): React.JSX.Element {
+  const theme = useTheme();
   // Navegación activa SOLO si se pidió `navMode` Y hay una ubicación de conductor válida que seguir
   // (sin ubicación no hay a quién seguir → degrada al encuadre normal, degradación honesta).
   const navigating = navMode && isValidPoint(driver);
@@ -164,17 +166,17 @@ function AppMapComponent({
 
   // FAIL-SAFE de token (fail-closed contra el crash NATIVO): `@rnmapbox/maps` v10 CRASHEA el proceso al
   // montar un `MapView` si nunca se llamó a `setAccessToken` (token ausente → `initMapbox` lo saltea). Sin
-  // `MAPBOX_ACCESS_TOKEN` degradamos a un lienzo oscuro (el `bg` del estilo veo-dark) en vez de montar el
-  // mapa: los overlays del `MapShell` siguen funcionando y la app NO se cierra (degradación honesta). Va
-  // DESPUÉS de los hooks (rules-of-hooks). Con token configurado, el mapa real se monta normal.
+  // `MAPBOX_ACCESS_TOKEN` degradamos a un lienzo CLARO (el `bg` del tema, = canvas del estilo veo-light) en
+  // vez de montar el mapa: los overlays del `MapShell` siguen funcionando y la app NO se cierra (degradación
+  // honesta). Va DESPUÉS de los hooks (rules-of-hooks). Con token configurado, el mapa real se monta normal.
   if (!env.MAPBOX_ACCESS_TOKEN) {
-    return <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0B0F14' }]} />;
+    return <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.bg }]} />;
   }
 
   return (
     <MapView
       style={StyleSheet.absoluteFill}
-      styleJSON={veoDarkMapboxStyleJSON}
+      styleJSON={veoLightMapboxStyleJSON}
       logoEnabled={false}
       attributionEnabled={false}
       compassEnabled={false}

@@ -17,6 +17,7 @@ import { Appear } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripComplete'>;
 
+
 /**
  * Cierre del viaje del conductor (frame C/TripComplete): resumen de ganancia (tarifa − comisión = neto)
  * + calificación al pasajero (1-5 + comentario opcional). "Listo" envía la calificación (si eligió
@@ -124,7 +125,7 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
           <Text variant="label" color="inkSubtle">
             {t('trips.complete.earningsLabel')}
           </Text>
-          <Text variant="display" color="success" tabular>
+          <Text variant="display" tabular style={{ color: theme.colors.accentStrong }}>
             {formatPEN(earnings.netCents)}
           </Text>
         </View>
@@ -150,7 +151,7 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
           <BreakdownRow
             label={t('trips.complete.netLabel')}
             value={formatPEN(earnings.netCents)}
-            valueColor="success"
+            valueColor="money"
           />
         </View>
 
@@ -202,17 +203,25 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
 interface BreakdownRowProps {
   label: string;
   value: string;
-  valueColor?: 'ink' | 'inkSubtle' | 'success';
+  valueColor?: 'ink' | 'inkSubtle' | 'money';
 }
 
-/** Fila etiqueta–monto del desglose de ganancia. Privada de la pantalla. */
+/** Fila etiqueta–monto del desglose. `money` = verde de acción profundo (`accentStrong`). */
 function BreakdownRow({ label, value, valueColor = 'ink' }: BreakdownRowProps): React.JSX.Element {
+  const theme = useTheme();
+  const isMoney = valueColor === 'money';
   return (
     <View style={styles.row}>
       <Text variant="callout" color="inkMuted" style={styles.flex} numberOfLines={1}>
         {label}
       </Text>
-      <Text variant="bodyStrong" color={valueColor} tabular numberOfLines={1}>
+      <Text
+        variant="bodyStrong"
+        color={isMoney ? 'ink' : valueColor}
+        tabular
+        numberOfLines={1}
+        style={isMoney ? { color: theme.colors.accentStrong } : undefined}
+      >
         {value}
       </Text>
     </View>

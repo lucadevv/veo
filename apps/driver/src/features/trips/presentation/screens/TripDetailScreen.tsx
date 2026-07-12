@@ -7,6 +7,7 @@ import { hexAlpha, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import { RouteSummaryCard } from '../../../../shared/presentation/components/RouteSummaryCard';
 import { IconAccount, IconStar } from '../../../../shared/presentation/icons';
 import {
   calendarDaysAgo,
@@ -86,17 +87,13 @@ export const TripDetailScreen = ({ navigation, route }: Props): React.JSX.Elemen
           <AppMap origin={origin} destination={destination} fitToRoute interactive={false} />
         </View>
 
-        {/* RUTA: origen→destino como riel de dos puntos. Sin direcciones (el contrato no las trae). */}
-        <View style={[styles.card, cardStyle(theme)]}>
-          <RouteRow
-            dotColor={theme.colors.brand}
-            label={t('trips.detail.origin')}
-          />
-          <RouteRow
-            dotColor={theme.colors.success}
-            label={t('trips.detail.destination')}
-          />
-        </View>
+        {/* RUTA: origen→destino con el card canónico. Etiquetas genéricas (el contrato no trae
+            direcciones de calle) y fill blanco porque acá va sobre el canvas gris, no sobre un sheet. */}
+        <RouteSummaryCard
+          fill="surface"
+          origin={t('trips.detail.origin')}
+          destination={t('trips.detail.destination')}
+        />
 
         {/* META: distancia · duración · fecha. */}
         <View style={styles.meta}>
@@ -169,23 +166,6 @@ function cardStyle(theme: ReturnType<typeof useTheme>): object {
   };
 }
 
-interface RouteRowProps {
-  dotColor: string;
-  label: string;
-}
-
-/** Fila de la card de ruta: punto de color + etiqueta genérica (sin dirección de calle). */
-function RouteRow({ dotColor, label }: RouteRowProps): React.JSX.Element {
-  return (
-    <View style={styles.routeRow}>
-      <View style={[styles.routeDot, { backgroundColor: dotColor, borderColor: hexAlpha(dotColor, 0.28) }]} />
-      <Text variant="callout" numberOfLines={1} style={styles.flex}>
-        {label}
-      </Text>
-    </View>
-  );
-}
-
 interface MetaCellProps {
   value: string;
   label: string;
@@ -239,8 +219,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   card: { alignSelf: 'stretch', borderWidth: StyleSheet.hairlineWidth, gap: 8 },
-  routeRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  routeDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
   meta: { flexDirection: 'row', gap: 8 },
   metaCell: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 12, paddingHorizontal: 8 },
   breakdownRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },

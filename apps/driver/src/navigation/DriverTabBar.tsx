@@ -41,7 +41,9 @@ export function DriverTabBar({
       <View
         style={[
           styles.pill,
-          { backgroundColor: 'rgba(30,33,42,0.92)', borderColor: theme.colors.borderStrong },
+          // Pill frosted CLARO sobre el mapa Daylight Trust (~92% blanco). La translucidez exige rgba
+          // (los tokens del tema son opacos): excepción frosted documentada.
+          { backgroundColor: 'rgba(255,255,255,0.92)', borderColor: theme.colors.borderStrong },
         ]}
       >
         {state.routes.map((route, index) => {
@@ -74,7 +76,7 @@ export function DriverTabBar({
               accessibilityState={{ selected: focused }}
               accessibilityLabel={label}
               onPress={onPress}
-              style={[styles.item, focused ? styles.itemActive : null]}
+              style={[styles.item, focused ? { backgroundColor: theme.colors.brandDim } : null]}
             >
               {icon}
               <Text variant="caption" color={focused ? 'brand' : 'inkSubtle'} numberOfLines={1}>
@@ -108,8 +110,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     padding: 6,
-    shadowColor: '#000000',
-    shadowOpacity: 0.4,
+    shadowColor: '#1A2332',
+    shadowOpacity: 0.14,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 8 },
     elevation: 16,
@@ -122,6 +124,4 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
   },
-  // Chip del item activo: brand-dim (#2D7FF9 ~16%), como el frame.
-  itemActive: { backgroundColor: 'rgba(45,127,249,0.16)' },
 });

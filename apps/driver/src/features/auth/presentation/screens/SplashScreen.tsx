@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import Animated, {
   Easing,
@@ -11,14 +11,14 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Text, useTheme, useReducedMotion } from '@veo/ui-kit';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
+import { VeoEmblem } from '../../../../shared/presentation/components/VeoEmblem';
 
 /**
- * Splash de arranque del conductor (drv-01), a imagen del pen `C/Splash` (board CONDUCTOR): composición
- * LIMPIA sin motivo de ruta — un glow radial azul detrás del wordmark "VEO Conductores", un acento de
- * marca (pill cian) bajo el lockup, el tagline "Maneja. Gana. Protegido." y la barra de progreso.
- * Se muestra durante el estado `bootstrapping` del RootNavigator. Respeta reduce-motion: degrada a un
- * crossfade sin escalado.
+ * Splash de arranque del conductor (drv-01), fiel al pen `C/Splash` (board CONDUCTOR, Theme de
+ * Confianza light): lienzo con gradiente claro vertical, un emblema teal (squircle + auto) sobre un
+ * glow radial teal, el lockup "VEO / CONDUCTORES" con acento de marca, el tagline "Maneja. Gana.
+ * Protegido." y una barra de progreso. Se muestra durante el estado `bootstrapping` del RootNavigator.
+ * Respeta reduce-motion: degrada a un crossfade sin escalado.
  */
 export const SplashScreen = (): React.JSX.Element => {
   const theme = useTheme();
@@ -41,54 +41,61 @@ export const SplashScreen = (): React.JSX.Element => {
     );
   }, [enter, progress, reduced, theme]);
 
-  const wordmarkStyle = useAnimatedStyle(() => ({
+  const lockupStyle = useAnimatedStyle(() => ({
     opacity: enter.value,
     transform: reduced ? [] : [{ scale: 0.92 + enter.value * 0.08 }],
   }));
 
-  const taglineStyle = useAnimatedStyle(() => ({
-    opacity: enter.value,
-  }));
+  const taglineStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
 
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progress.value * 100}%`,
-  }));
+  const progressStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
-      {/* Glow radial azul detrás del wordmark (decorativo, muy sutil). */}
+    <View style={styles.root}>
+      {/* Lienzo: gradiente vertical claro (surface #FFFFFF → bg) + glow radial teal detrás del emblema. */}
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" pointerEvents="none">
         <Defs>
-          <RadialGradient id="splashGlow" cx="50%" cy="46%" r="42%">
-            <Stop offset="0" stopColor={theme.colors.accent} stopOpacity={0.16} />
-            <Stop offset="1" stopColor={theme.colors.accent} stopOpacity={0} />
+          <LinearGradient id="splashBg" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={theme.colors.surface} />
+            <Stop offset="1" stopColor={theme.colors.bg} />
+          </LinearGradient>
+          <RadialGradient id="splashGlow" cx="50%" cy="44%" r="40%">
+            <Stop offset="0" stopColor={theme.colors.brand} stopOpacity={0.15} />
+            <Stop offset="1" stopColor={theme.colors.brand} stopOpacity={0} />
           </RadialGradient>
         </Defs>
+        <Rect x={0} y={0} width="100%" height="100%" fill="url(#splashBg)" />
         <Rect x={0} y={0} width="100%" height="100%" fill="url(#splashGlow)" />
       </Svg>
 
       <View style={styles.center}>
-        <Animated.View style={[styles.wordmark, wordmarkStyle]}>
-          {/* Wordmark del splash como el pen: "VEO" blanco (ink), "CONDUCTORES" gris sutil (inkSubtle). */}
-          <VeoWordmark size="xl" veoColor="ink" subColor="inkSubtle" />
-          {/* Acento de marca bajo el lockup: mismo lenguaje visual que la barra de progreso. */}
-          <View
-            style={[styles.brandAccent, { backgroundColor: theme.colors.accent }]}
-            accessible={false}
-          />
+        <Animated.View style={[styles.lockup, lockupStyle]}>
+          <VeoEmblem size={100} />
+          <Text
+            variant="display"
+            color="ink"
+            align="center"
+            style={styles.veo}
+          >
+            VEO
+          </Text>
+          <Text variant="caption" color="inkMuted" align="center" style={styles.sub}>
+            CONDUCTORES
+          </Text>
+          <View style={[styles.accent, { backgroundColor: theme.colors.brand }]} accessible={false} />
         </Animated.View>
       </View>
 
       <Animated.View style={[styles.taglineWrap, taglineStyle]}>
-        <Text variant="callout" color="inkMuted" align="center">
+        <Text variant="callout" color="inkMuted" align="center" style={styles.tagline}>
           {t('auth.tagline')}
         </Text>
       </Animated.View>
 
       <View style={styles.progressWrap}>
-        <View style={[styles.progressTrack, { backgroundColor: theme.colors.surfaceElevated }]}>
+        <View style={[styles.progressTrack, { backgroundColor: theme.colors.skeleton }]}>
           <Animated.View
-            style={[styles.progressFill, { backgroundColor: theme.colors.accent }, progressStyle]}
+            style={[styles.progressFill, { backgroundColor: theme.colors.brand }, progressStyle]}
           />
         </View>
       </View>
@@ -99,10 +106,14 @@ export const SplashScreen = (): React.JSX.Element => {
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   center: { alignItems: 'center' },
-  wordmark: { alignItems: 'center' },
-  brandAccent: { width: 28, height: 4, borderRadius: 2, marginTop: 12 },
-  taglineWrap: { position: 'absolute', bottom: 120, left: 0, right: 0, alignItems: 'center' },
+  // BrandLockup del pen: vertical, gap 16 uniforme entre emblema, VEO, CONDUCTORES y el acento.
+  lockup: { alignItems: 'center', gap: 16 },
+  veo: { fontSize: 64, lineHeight: 68, letterSpacing: 2 },
+  sub: { fontSize: 13, letterSpacing: 6 },
+  accent: { width: 28, height: 4, borderRadius: 999 },
+  taglineWrap: { position: 'absolute', bottom: 132, left: 0, right: 0, alignItems: 'center' },
+  tagline: { letterSpacing: 0.5 },
   progressWrap: { position: 'absolute', bottom: 56, alignItems: 'center', width: '100%' },
-  progressTrack: { width: 72, height: 4, borderRadius: 2, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 2 },
+  progressTrack: { width: 72, height: 4, borderRadius: 999, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 999 },
 });
