@@ -5,11 +5,11 @@ import {
   Ambulance,
   Bike,
   Car,
-  Check,
   ChevronDown,
   ChevronRight,
   Lock,
   RefreshCw,
+  ShieldCheck,
   Truck,
   TriangleAlert,
   Wrench,
@@ -39,7 +39,7 @@ import { formatSolesInput, parseSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
-import { RateInput } from '@/components/config/config-card';
+import { RateField, RateInput } from '@/components/config/config-card';
 import { Button } from '@/components/ui/button';
 
 /** Etiqueta legible del modo de pricing para el panel (display, no comparación de dominio). */
@@ -84,11 +84,12 @@ function offeringIcon(o: CatalogOffering): LucideIcon {
  * El catálogo y el piso de la PUJA son DOS configs distintas (endpoint + versión/CAS propios): cada una tiene
  * su Guardar, su step-up y su optimistic-locking. No se mezclan en un PUT — serían dos mutations no-atómicas.
  *
- * Diseño (veo.pen · "Ofertas de servicio"): UNA tabla PLANA — las ofertas se listan por su `sortOrder`, sin
- * agrupar por eje (calidad/capacidad/especial). Cada fila trae modo (select), multiplicador, los dos mínimos,
- * el switch de disponibilidad y un icon-button de guardado.
+ * Diseño (veo.pen · "19 · Ofertas de servicio"): GRILLA de tarjetas — una card por oferta, con el estilo del
+ * board (ícono en cuadrito, nombre, switch, footer con divisor) y la config INLINE dentro de cada card (modo,
+ * multiplicador, los dos mínimos, tarifa a medida y su Guardar). Híbrido: lo lindo del board + la funcionalidad
+ * de la tabla. Las ofertas se listan por su `sortOrder`, sin agrupar por eje (calidad/capacidad/especial).
  */
-/** Datos del piso de la PUJA que necesita UNA fila, o `undefined` si su config (bid-floor) no está disponible. */
+/** Datos del piso de la PUJA que necesita UNA card, o `undefined` si su config (bid-floor) no está disponible. */
 interface OfferingFloor {
   /** Override explícito de ESTA oferta (cents), o `null` si cae al default. */
   overrideCents: number | null;
@@ -104,7 +105,7 @@ export function CatalogPanel({
 }: {
   catalog: CatalogView;
   // POSIBLEMENTE undefined: el piso de la PUJA es OTRA config (endpoint + CAS propios). Si su query carga o
-  // falla, la lista de ofertas (catálogo) sigue operativa y SOLO la columna del piso degrada (no toda la fila).
+  // falla, la lista de ofertas (catálogo) sigue operativa y SOLO el piso degrada (no toda la card).
   bidFloor: BidFloorView | undefined;
   // Tarifa base GLOBAL (F2.4) — SOLO para el placeholder de los params por-servicio (muestra el número que
   // se usaría si el campo queda vacío). POSIBLEMENTE undefined (su query carga/falla): el placeholder cae a
@@ -161,7 +162,7 @@ export function CatalogPanel({
     );
   }
 
-  // Devuelve el ok del write (true=guardado / false=409 o error) para que `saveRow` haga short-circuit y NO
+  // Devuelve el ok del write (true=guardado / false=409 o error) para que `saveCard` haga short-circuit y NO
   // dispare el guardado del piso si el del catálogo falló (dos writes secuenciales, config de dinero).
   function savePricing(next: CatalogOverride): Promise<boolean> {
     return commit(next, `${offeringLabel(next.id)}: precio y modo actualizados`);
@@ -198,61 +199,37 @@ export function CatalogPanel({
         </p>
       ) : null}
 
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full border-collapse">
-          <thead className="bg-surface-2">
-            <tr className="border-b border-border">
-              <th className="w-full py-3 pl-5 pr-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Categoría
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Modo
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Multiplicador
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Tarifa mínima
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Piso de puja
-              </th>
-              <th className="px-3 py-3 text-left text-[11px] font-semibold text-ink-subtle">
-                Activa
-              </th>
-              <th className="py-3 pl-3 pr-5" aria-label="Guardar" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((o) => (
-              // El `key` incluye la disponibilidad del bid-floor: cuando su query resuelve (undefined→data),
-              // la fila se re-monta y el input del piso re-siembra su estado desde el override ya cargado (sin
-              // esto el `useState` inicial — sembrado en '' mientras el piso cargaba — quedaría stale → dirty falso).
-              <OfferingRow
-                key={`${o.id}:${bidFloor ? 'floor' : 'no-floor'}`}
-                offering={o}
-                override={overrideOf(o.id)}
-                baseFare={baseFare}
-                floor={
-                  bidFloor
-                    ? {
-                        overrideCents: offeringFloorOverrideCents(bidFloor, o.id),
-                        defaultFloorCents: bidFloor.defaultFloorCents,
-                      }
-                    : undefined
-                }
-                canManage={canManage}
-                canManageFloor={canManageFloor}
-                pending={saving}
-                pendingFloor={savingBid}
-                onSetEnabled={setEnabled}
-                onSavePricing={savePricing}
-                onSaveFloor={saveFloor}
-                onRetryFloor={onRetryBidFloor}
-              />
-            ))}
-          </tbody>
-        </table>
+      {/* Grilla responsive: 3 columnas holgadas a 1440 (el panel resta el sidebar), colapsa a 2 y luego a 1
+          en anchos angostos. `auto-fill` responde al ANCHO DEL CONTENEDOR (no del viewport), así una card
+          reusada en un panel angosto se acomoda sola sin media queries atadas a la ventana. */}
+      <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
+        {rows.map((o) => (
+          // El `key` incluye la disponibilidad del bid-floor: cuando su query resuelve (undefined→data),
+          // la card se re-monta y el input del piso re-siembra su estado desde el override ya cargado (sin
+          // esto el `useState` inicial — sembrado en '' mientras el piso cargaba — quedaría stale → dirty falso).
+          <OfferingCard
+            key={`${o.id}:${bidFloor ? 'floor' : 'no-floor'}`}
+            offering={o}
+            override={overrideOf(o.id)}
+            baseFare={baseFare}
+            floor={
+              bidFloor
+                ? {
+                    overrideCents: offeringFloorOverrideCents(bidFloor, o.id),
+                    defaultFloorCents: bidFloor.defaultFloorCents,
+                  }
+                : undefined
+            }
+            canManage={canManage}
+            canManageFloor={canManageFloor}
+            pending={saving}
+            pendingFloor={savingBid}
+            onSetEnabled={setEnabled}
+            onSavePricing={savePricing}
+            onSaveFloor={saveFloor}
+            onRetryFloor={onRetryBidFloor}
+          />
+        ))}
       </div>
 
       <ReadOnlyNote canManage={canManage} noun="el catálogo" />
@@ -285,40 +262,17 @@ const Switch = forwardRef<
       )}
       {...props}
     >
-      <span className="size-5 rounded-full bg-ink" />
+      <span className="size-5 rounded-full bg-surface shadow-1" />
     </button>
   );
 });
 
-/** Celda tipo RateField (config-card): box con borde + input + sufijo de unidad + error debajo. Sin label (el
- *  encabezado de la columna hace de label). Reusa RateInput (mono/tabular) para el value. */
-function RateCell({
-  unit,
-  error,
-  children,
-}: {
-  unit: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="w-28">
-      <div
-        className={cn(
-          'flex items-center gap-1.5 rounded-md border bg-surface-2 px-2.5 py-1.5 focus-within:border-brand',
-          error ? 'border-danger' : 'border-border-strong',
-        )}
-      >
-        {children}
-        <span className="shrink-0 text-xs text-ink-subtle">{unit}</span>
-      </div>
-      {error ? <p className="mt-1 text-xs text-danger">{error}</p> : null}
-    </div>
-  );
-}
-
-/** Una fila de oferta (tabla): estado + editor de modo + precio + piso de puja + switch, cada uno con su guardado dirty. */
-function OfferingRow({
+/**
+ * Una CARD de oferta (grilla): header (ícono + nombre + switch) + config inline (modo + precio + piso de puja +
+ * tarifa a medida) + footer con el Guardar. Reusa TODA la lógica de la antigua fila de tabla — solo cambia la
+ * presentación de `<tr>/<td>` a card. Cada card guarda su catálogo y/o su piso de puja por separado (CAS propio).
+ */
+function OfferingCard({
   offering,
   override,
   baseFare,
@@ -336,7 +290,7 @@ function OfferingRow({
   override: CatalogOverride | undefined;
   // Tarifa base GLOBAL (o undefined si su query no cargó) → placeholder de los params a medida.
   baseFare: BaseFareView | undefined;
-  // undefined = el bid-floor (config propia) no está disponible (loading o error) → la columna del piso degrada.
+  // undefined = el bid-floor (config propia) no está disponible (loading o error) → el piso degrada.
   floor: OfferingFloor | undefined;
   canManage: boolean;
   canManageFloor: boolean;
@@ -368,8 +322,8 @@ function OfferingRow({
   const [floorSoles, setFloorSoles] = useState<string>(
     floorOverrideCents != null ? formatSolesInput(floorOverrideCents) : '',
   );
-  // ¿Esta oferta ya tiene ALGÚN param a medida? (banderazo/km/min). Marca el chip "a medida" y arranca la fila
-  // de detalle ABIERTA — si no tiene ninguno, el detalle empieza colapsado (la mayoría hereda el global).
+  // ¿Esta oferta ya tiene ALGÚN param a medida? (banderazo/km/min). Marca el chip "a medida" y arranca el
+  // detalle ABIERTO — si no tiene ninguno, el detalle empieza colapsado (la mayoría hereda el global).
   const hasParamOverride =
     override?.baseFareCents != null ||
     override?.perKmCents != null ||
@@ -408,8 +362,8 @@ function OfferingRow({
     perMinCents !== undefined &&
     (!Number.isFinite(perMinCents) || perMinCents < 0 || perMinCents > MAX_PER_MIN_SOLES * 100);
   const paramInvalid = baseFareInvalid || perKmInvalid || perMinInvalid;
-  // La fila de detalle (params a medida) está ABIERTA si el operador la expandió O si hay un param inválido
-  // (nunca escondas un error detrás del colapso). El chevron togglea `expanded`; el error la fuerza abierta.
+  // El detalle (params a medida) está ABIERTO si el operador lo expandió O si hay un param inválido (nunca
+  // escondas un error detrás del colapso). El chevron togglea `expanded`; el error lo fuerza abierto.
   const detailOpen = expanded || paramInvalid;
   // Placeholder de un param: el valor GLOBAL real (lo que se usa si el campo queda vacío) o "global" si su
   // query aún no cargó. Comunica el fallback SIN que el operador tenga que ir a la pantalla de tarifa base.
@@ -417,7 +371,7 @@ function OfferingRow({
     cents != null ? formatSolesInput(cents) : 'global';
 
   // Piso de puja: '' = null (sin override). Bounds 1..MAX (espejo del server, igual que el panel de Precios).
-  // Sin bidFloor (`floor === undefined`) la columna degrada → no hay draft válido ni dirty (no se puede editar).
+  // Sin bidFloor (`floor === undefined`) el piso degrada → no hay draft válido ni dirty (no se puede editar).
   const floorAvailable = floor !== undefined;
   const floorDraftCents = floorSoles.trim() === '' ? null : parseSolesInput(floorSoles);
   const floorInvalid =
@@ -453,7 +407,7 @@ function OfferingRow({
   // sin allowsPuja, o piso ≤ mínimo fijo). El `effFloorCents !== null` narrowea a number.
   //
   // LIVE (no banner permanente): el aviso solo se muestra mientras el operador EDITA el piso o la mínima de ESTA
-  // fila — no sobre datos que ya venían inconsistentes. Sin tocar nada → tabla limpia; al cambiar el valor valida
+  // card — no sobre datos que ya venían inconsistentes. Sin tocar nada → card limpia; al cambiar el valor valida
   // en vivo y desaparece cuando queda coherente. `minTouched` usa el MISMO criterio que el `dirty` de la mínima.
   const minTouched = (minFareCents ?? null) !== (override?.minFareCents ?? null);
   const crossWarn =
@@ -464,11 +418,11 @@ function OfferingRow({
       ? { floorCents: effFloorCents, fixedMinCents: effFixedMinCents }
       : null;
 
-  // UN solo Guardar por fila: salva lo que cambió de CADA config (catálogo y/o piso de puja). Son dos endpoints
+  // UN solo Guardar por card: salva lo que cambió de CADA config (catálogo y/o piso de puja). Son dos endpoints
   // con su propio CAS, pero el operador no debería ver dos botones — un step-up cubre la acción y cada save
   // mantiene su 409/toast por separado. SHORT-CIRCUIT: si el write del catálogo falla (409/error), NO se dispara
   // el del piso — config de dinero, dos writes secuenciales no deben dejar una mezcla inconsistente.
-  async function saveRow() {
+  async function saveCard() {
     if (dirty) {
       const ok = await onSavePricing({
         id: offering.id,
@@ -488,51 +442,54 @@ function OfferingRow({
   }
 
   const Icon = offeringIcon(offering);
-  const toggleTitle = `${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${offeringLabel(offering.id)}`;
+  const label = offeringLabel(offering.id);
+  const toggleTitle = `${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${label}`;
   const toggleDescription = offering.enabled
-    ? `Los pasajeros dejarán de ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`
-    : `Los pasajeros volverán a ver y cotizar ${offeringLabel(offering.id)}. Esta acción cambia el catálogo global y queda auditada.`;
+    ? `Los pasajeros dejarán de ver y cotizar ${label}. Esta acción cambia el catálogo global y queda auditada.`
+    : `Los pasajeros volverán a ver y cotizar ${label}. Esta acción cambia el catálogo global y queda auditada.`;
 
   return (
-    <>
-      <tr className={cn('bg-surface', crossWarn ? '' : 'border-b border-border')}>
-        {/* Categoría: chevron (abre la tarifa a medida) + ícono en cuadrito + nombre legible + chip "a medida". */}
-        <td className="py-2.5 pl-3 pr-3 align-middle">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              aria-expanded={detailOpen}
-              aria-label={`${detailOpen ? 'Ocultar' : 'Mostrar'} la tarifa a medida de ${offeringLabel(offering.id)}`}
-              className="flex size-6 shrink-0 items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            >
-              {detailOpen ? (
-                <ChevronDown className="size-4" aria-hidden />
-              ) : (
-                <ChevronRight className="size-4" aria-hidden />
-              )}
-            </button>
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-ink-muted">
-              <Icon className="size-4" aria-hidden />
-            </span>
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-ink">{offeringLabel(offering.id)}</span>
-              {hasParamOverride ? (
-                <span className="text-[10px] font-medium uppercase tracking-wide text-brand">
-                  Tarifa a medida
-                </span>
-              ) : null}
-            </div>
-          </div>
-        </td>
+    <article className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-5 shadow-2">
+      {/* Header (board): ícono en cuadrito con tinte de marca + switch a la derecha. */}
+      <div className="flex items-start justify-between gap-3">
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
+          <Icon className="size-5" aria-hidden />
+        </span>
+        {canManage && !pending ? (
+          <StepUpDialog
+            title={toggleTitle}
+            description={toggleDescription}
+            onVerified={() => onSetEnabled(offering.id, !offering.enabled)}
+            trigger={<Switch checked={offering.enabled} label={toggleTitle} />}
+          />
+        ) : (
+          <Switch
+            checked={offering.enabled}
+            disabled
+            label={`${label} ${offering.enabled ? 'habilitada' : 'deshabilitada'}`}
+          />
+        )}
+      </div>
 
-        {/* Modo (ADR 023): las verticales especiales van LOCKED ("la ambulancia NO negocia") → label read-only con
-            candado. El resto elige el modo EXPLÍCITO Fijo↔Puja (sin "por defecto" ambiguo: el select muestra el modo
-            vigente y, al elegir, lo fija). COST_SHARE es booking-service (Fase B), no va en on-demand. */}
-        <td className="px-3 py-2.5 align-middle">
+      {/* Nombre + chip "a medida" (board). */}
+      <div className="flex flex-col gap-1">
+        <h3 className="font-display text-base font-semibold text-ink">{label}</h3>
+        {hasParamOverride ? (
+          <span className="text-[10px] font-medium uppercase tracking-wide text-brand">
+            Tarifa a medida
+          </span>
+        ) : null}
+      </div>
+
+      {/* Config inline (la funcionalidad de la tabla, dentro de la card). */}
+      <div className="flex flex-col gap-3">
+        {/* Modo (ADR 023): verticales especiales LOCKED ("la ambulancia NO negocia") → label read-only con
+            candado. El resto elige el modo EXPLÍCITO Fijo↔Puja. COST_SHARE es booking-service (Fase B). */}
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm text-ink-muted">Modo</span>
           {offering.modeLocked ? (
             <span
-              className="inline-flex items-center gap-1.5 text-sm text-ink-muted"
+              className="inline-flex w-44 items-center gap-1.5 text-sm text-ink-muted"
               title="Fijo por la vertical del servicio"
             >
               <Lock className="size-3.5 text-ink-subtle" aria-hidden />
@@ -543,221 +500,212 @@ function OfferingRow({
               value={mode}
               onChange={(e) => setMode(e.target.value as PricingMode)}
               disabled={!canManage}
-              aria-label={`Modo de ${offeringLabel(offering.id)}`}
-              className="h-9 w-28 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
+              aria-label={`Modo de ${label}`}
+              className="h-9 w-44 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
             >
               <option value={PricingMode.FIXED}>{MODE_LABEL[PricingMode.FIXED]}</option>
               <option value={PricingMode.PUJA}>{MODE_LABEL[PricingMode.PUJA]}</option>
             </select>
           )}
-        </td>
+        </div>
 
         {/* Multiplicador. */}
-        <td className="px-3 py-2.5 align-middle">
-          <RateCell unit="×" error={multInvalid ? 'Debe ser > 0' : undefined}>
-            <RateInput
-              type="number"
-              inputMode="decimal"
-              step="0.05"
-              min="0"
-              max={MULTIPLIER_MAX_UI}
-              placeholder={offering.pricing.multiplier.toString()}
-              value={multiplier}
-              onChange={(e) => setMultiplier(e.target.value)}
-              disabled={!canManage}
-              aria-label={`Multiplicador de ${offeringLabel(offering.id)}`}
-            />
-          </RateCell>
-        </td>
+        <RateField
+          label="Multiplicador"
+          unit="×"
+          error={multInvalid ? 'Debe ser > 0' : undefined}
+        >
+          <RateInput
+            type="number"
+            inputMode="decimal"
+            step="0.05"
+            min="0"
+            max={MULTIPLIER_MAX_UI}
+            placeholder={offering.pricing.multiplier.toString()}
+            value={multiplier}
+            onChange={(e) => setMultiplier(e.target.value)}
+            disabled={!canManage}
+            aria-label={`Multiplicador de ${label}`}
+          />
+        </RateField>
 
         {/* Tarifa mínima FIJA. */}
-        <td className="px-3 py-2.5 align-middle">
-          <RateCell unit="S/" error={minFareInvalid ? 'Debe ser ≥ 0' : undefined}>
-            <RateInput
-              type="number"
-              inputMode="decimal"
-              step="0.50"
-              min="0"
-              placeholder={formatSolesInput(offering.pricing.minFareCents)}
-              value={minFareSoles}
-              onChange={(e) => setMinFareSoles(e.target.value)}
-              disabled={!canManage}
-              aria-label={`Tarifa mínima de ${offeringLabel(offering.id)}`}
-            />
-          </RateCell>
-        </td>
+        <RateField
+          label="Tarifa mínima"
+          unit="S/"
+          error={minFareInvalid ? 'Debe ser ≥ 0' : undefined}
+        >
+          <RateInput
+            type="number"
+            inputMode="decimal"
+            step="0.50"
+            min="0"
+            placeholder={formatSolesInput(offering.pricing.minFareCents)}
+            value={minFareSoles}
+            onChange={(e) => setMinFareSoles(e.target.value)}
+            disabled={!canManage}
+            aria-label={`Tarifa mínima de ${label}`}
+          />
+        </RateField>
 
-        {/* Piso de la PUJA: solo para las que pujan; FIXED-only → "— solo fijo". Degradación honesta si el
-            bid-floor (config aparte) no cargó: "No disponible" + Reintentar, sin tumbar el resto de la fila. */}
-        <td className="px-3 py-2.5 align-middle">
-          {allowsPuja ? (
-            floor !== undefined ? (
-              <RateCell
-                unit="S/"
-                error={floorInvalid ? `Entre 1 y ${BID_FLOOR_MAX_SOLES}` : undefined}
-              >
-                <RateInput
-                  type="number"
-                  inputMode="decimal"
-                  step="0.50"
-                  min="1"
-                  max={BID_FLOOR_MAX_SOLES}
-                  placeholder={formatSolesInput(floor.defaultFloorCents)}
-                  value={floorSoles}
-                  onChange={(e) => setFloorSoles(e.target.value)}
-                  disabled={!canManageFloor}
-                  aria-label={`Piso de puja de ${offeringLabel(offering.id)}`}
-                />
-              </RateCell>
-            ) : (
-              <div className="flex items-center gap-2">
+        {/* Piso de la PUJA: solo para las que pujan. Degradación honesta si el bid-floor (config aparte) no
+            cargó: "No disponible" + Reintentar, sin tumbar el resto de la card. */}
+        {allowsPuja ? (
+          floor !== undefined ? (
+            <RateField
+              label="Piso de puja"
+              unit="S/"
+              error={floorInvalid ? `Entre 1 y ${BID_FLOOR_MAX_SOLES}` : undefined}
+            >
+              <RateInput
+                type="number"
+                inputMode="decimal"
+                step="0.50"
+                min="1"
+                max={BID_FLOOR_MAX_SOLES}
+                placeholder={formatSolesInput(floor.defaultFloorCents)}
+                value={floorSoles}
+                onChange={(e) => setFloorSoles(e.target.value)}
+                disabled={!canManageFloor}
+                aria-label={`Piso de puja de ${label}`}
+              />
+            </RateField>
+          ) : (
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-ink-muted">Piso de puja</span>
+              <div className="flex w-44 items-center gap-2">
                 <span className="text-xs text-ink-subtle">No disponible</span>
                 <Button variant="ghost" size="sm" onClick={onRetryFloor}>
                   <RefreshCw className="size-3.5" aria-hidden /> Reintentar
                 </Button>
               </div>
-            )
-          ) : (
-            <span className="text-sm text-ink-subtle" title="El piso solo aplica en modo Puja">
-              —
+            </div>
+          )
+        ) : null}
+
+        {/* Validación cruzada (A1): aviso vivo, visible también en solo-lectura (es una incongruencia del DATO). */}
+        {crossWarn ? (
+          <p className="flex items-start gap-1.5 text-xs text-warn">
+            <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
+            <span>
+              Piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) &gt; tarifa mínima fija (S/
+              {formatSolesInput(crossWarn.fixedMinCents)}) — la puja no debería costar más que el
+              fijo.
             </span>
-          )}
-        </td>
+          </p>
+        ) : null}
 
-        {/* Activa: switch. Editable (canManage y no en vuelo) → dispara setEnabled tras step-up; si no, indicador. */}
-        <td className="px-3 py-2.5 align-middle">
-          {canManage && !pending ? (
-            <StepUpDialog
-              title={toggleTitle}
-              description={toggleDescription}
-              onVerified={() => onSetEnabled(offering.id, !offering.enabled)}
-              trigger={
-                <Switch
-                  checked={offering.enabled}
-                  label={`${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${offeringLabel(offering.id)}`}
-                />
-              }
-            />
-          ) : (
-            <Switch
-              checked={offering.enabled}
-              disabled
-              label={`${offeringLabel(offering.id)} ${offering.enabled ? 'habilitada' : 'deshabilitada'}`}
-            />
-          )}
-        </td>
+        {/* Tarifa a medida (ADR 023 §3 · progressive disclosure): los params POR-SERVICIO (banderazo/km/min)
+            viven detrás de un toggle — la mayoría de las ofertas hereda el global, así que la card queda limpia
+            y solo se abre cuando el operador quiere anular la fórmula para ESTE servicio. */}
+        <div className="border-t border-border pt-3">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={detailOpen}
+            aria-label={`${detailOpen ? 'Ocultar' : 'Mostrar'} la tarifa a medida de ${label}`}
+            className="flex items-center gap-1.5 text-xs font-medium text-ink-muted transition-colors hover:text-ink focus-visible:outline-none"
+          >
+            {detailOpen ? (
+              <ChevronDown className="size-4" aria-hidden />
+            ) : (
+              <ChevronRight className="size-4" aria-hidden />
+            )}
+            Tarifa a medida
+          </button>
 
-        {/* Guardar (icon-button): mismo gate + step-up que SaveAction; solo se muestra con permiso de catálogo. */}
-        <td className="py-2.5 pl-3 pr-5 align-middle">
-          <div className="flex justify-end">
-            <SaveAction
-              canManage={canManage}
-              dirty={dirty || (allowsPuja && floorDirty)}
-              invalid={
-                multInvalid ||
-                minFareInvalid ||
-                baseFareInvalid ||
-                perKmInvalid ||
-                perMinInvalid ||
-                (allowsPuja && floorInvalid)
-              }
-              saving={pending || pendingFloor}
-              onSave={saveRow}
-              title={`Guardar ${offeringLabel(offering.id)}`}
-              description="Esta acción cambia la config de pricing de la oferta (catálogo y/o piso de puja) y queda auditada."
-              icon={<Check className="size-4" aria-hidden />}
-            />
-          </div>
-        </td>
-      </tr>
-
-      {/* Tarifa a medida (ADR 023 §3 · progressive disclosure): los params POR-SERVICIO (banderazo/km/min) viven
-          en una fila de detalle expandible — la mayoría de las ofertas hereda el global, así que la tabla queda
-          limpia y solo se abre cuando el operador quiere anular la fórmula para ESTE servicio. Placeholder en gris
-          = el valor GLOBAL real (vacío lo usa). `0` válido (Mecánico plano perKm/perMin=0; Grúa sin per-min). */}
-      {detailOpen ? (
-        <tr className="border-b border-border bg-surface-2/40">
-          <td colSpan={7} className="px-5 pb-4 pt-1">
-            <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-              <p className="w-full text-[11px] text-ink-subtle">
-                Tarifa a medida de{' '}
-                <span className="font-medium text-ink-muted">{offeringLabel(offering.id)}</span> —
-                anulá la fórmula global solo para este servicio. Cada campo vacío usa el global (el
+          {detailOpen ? (
+            <div className="mt-3 flex flex-col gap-3">
+              <p className="text-[11px] text-ink-subtle">
+                Anulá la fórmula global solo para este servicio. Cada campo vacío usa el global (el
                 número en gris).
               </p>
-              <div>
-                <p className="mb-1 text-[11px] font-medium text-ink-subtle">Banderazo</p>
-                <RateCell unit="S/" error={baseFareInvalid ? `0–${MAX_BASE_FARE_SOLES}` : undefined}>
-                  <RateInput
-                    type="number"
-                    inputMode="decimal"
-                    step="0.10"
-                    min="0"
-                    max={MAX_BASE_FARE_SOLES}
-                    placeholder={globalPlaceholder(baseFare?.baseFareCents)}
-                    value={baseFareSoles}
-                    onChange={(e) => setBaseFareSoles(e.target.value)}
-                    disabled={!canManage}
-                    aria-label={`Banderazo de ${offeringLabel(offering.id)} (vacío = usa el global)`}
-                  />
-                </RateCell>
-              </div>
-              <div>
-                <p className="mb-1 text-[11px] font-medium text-ink-subtle">Por km</p>
-                <RateCell unit="S/·km" error={perKmInvalid ? `0–${MAX_PER_KM_SOLES}` : undefined}>
-                  <RateInput
-                    type="number"
-                    inputMode="decimal"
-                    step="0.10"
-                    min="0"
-                    max={MAX_PER_KM_SOLES}
-                    placeholder={globalPlaceholder(baseFare?.perKmCents)}
-                    value={perKmSoles}
-                    onChange={(e) => setPerKmSoles(e.target.value)}
-                    disabled={!canManage}
-                    aria-label={`Precio por km de ${offeringLabel(offering.id)} (vacío = usa el global)`}
-                  />
-                </RateCell>
-              </div>
-              <div>
-                <p className="mb-1 text-[11px] font-medium text-ink-subtle">Por min</p>
-                <RateCell unit="S/·min" error={perMinInvalid ? `0–${MAX_PER_MIN_SOLES}` : undefined}>
-                  <RateInput
-                    type="number"
-                    inputMode="decimal"
-                    step="0.10"
-                    min="0"
-                    max={MAX_PER_MIN_SOLES}
-                    placeholder={globalPlaceholder(baseFare?.perMinCents)}
-                    value={perMinSoles}
-                    onChange={(e) => setPerMinSoles(e.target.value)}
-                    disabled={!canManage}
-                    aria-label={`Precio por min de ${offeringLabel(offering.id)} (vacío = usa el global)`}
-                  />
-                </RateCell>
-              </div>
+              <RateField
+                label="Banderazo"
+                unit="S/"
+                error={baseFareInvalid ? `0–${MAX_BASE_FARE_SOLES}` : undefined}
+              >
+                <RateInput
+                  type="number"
+                  inputMode="decimal"
+                  step="0.10"
+                  min="0"
+                  max={MAX_BASE_FARE_SOLES}
+                  placeholder={globalPlaceholder(baseFare?.baseFareCents)}
+                  value={baseFareSoles}
+                  onChange={(e) => setBaseFareSoles(e.target.value)}
+                  disabled={!canManage}
+                  aria-label={`Banderazo de ${label} (vacío = usa el global)`}
+                />
+              </RateField>
+              <RateField
+                label="Por km"
+                unit="S/·km"
+                error={perKmInvalid ? `0–${MAX_PER_KM_SOLES}` : undefined}
+              >
+                <RateInput
+                  type="number"
+                  inputMode="decimal"
+                  step="0.10"
+                  min="0"
+                  max={MAX_PER_KM_SOLES}
+                  placeholder={globalPlaceholder(baseFare?.perKmCents)}
+                  value={perKmSoles}
+                  onChange={(e) => setPerKmSoles(e.target.value)}
+                  disabled={!canManage}
+                  aria-label={`Precio por km de ${label} (vacío = usa el global)`}
+                />
+              </RateField>
+              <RateField
+                label="Por min"
+                unit="S/·min"
+                error={perMinInvalid ? `0–${MAX_PER_MIN_SOLES}` : undefined}
+              >
+                <RateInput
+                  type="number"
+                  inputMode="decimal"
+                  step="0.10"
+                  min="0"
+                  max={MAX_PER_MIN_SOLES}
+                  placeholder={globalPlaceholder(baseFare?.perMinCents)}
+                  value={perMinSoles}
+                  onChange={(e) => setPerMinSoles(e.target.value)}
+                  disabled={!canManage}
+                  aria-label={`Precio por min de ${label} (vacío = usa el global)`}
+                />
+              </RateField>
             </div>
-          </td>
-        </tr>
-      ) : null}
+          ) : null}
+        </div>
+      </div>
 
-      {/* Validación cruzada (A1): fila de aviso DEBAJO de la afectada, visible también en solo-lectura (es una
-          incongruencia del DATO). */}
-      {crossWarn ? (
-        <tr className="border-b border-border bg-surface">
-          <td colSpan={7} className="px-5 pb-3">
-            <p className="flex items-start gap-1.5 text-xs text-warn">
-              <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
-              <span>
-                Piso de puja (S/{formatSolesInput(crossWarn.floorCents)}) &gt; tarifa mínima fija
-                (S/
-                {formatSolesInput(crossWarn.fixedMinCents)}) — la puja no debería costar más que el
-                fijo.
-              </span>
-            </p>
-          </td>
-        </tr>
+      {/* Footer (board · divisor): hint de step-up + Guardar. Mismo gate (dirty/invalid/saving) + step-up MFA
+          que el resto de los paneles de config; solo se muestra con permiso de catálogo. */}
+      {canManage ? (
+        <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+          <span className="flex items-center gap-1.5 text-xs text-ink-subtle">
+            <ShieldCheck className="size-3.5" aria-hidden />
+            Guardar pide tu TOTP
+          </span>
+          <SaveAction
+            canManage={canManage}
+            dirty={dirty || (allowsPuja && floorDirty)}
+            invalid={
+              multInvalid ||
+              minFareInvalid ||
+              baseFareInvalid ||
+              perKmInvalid ||
+              perMinInvalid ||
+              (allowsPuja && floorInvalid)
+            }
+            saving={pending || pendingFloor}
+            onSave={saveCard}
+            size="sm"
+            title={`Guardar ${label}`}
+            description="Esta acción cambia la config de pricing de la oferta (catálogo y/o piso de puja) y queda auditada."
+          />
+        </div>
       ) : null}
-    </>
+    </article>
   );
 }

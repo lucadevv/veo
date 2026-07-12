@@ -75,10 +75,10 @@ export default function CatalogPage() {
           <AsyncSection
             query={catalogQuery}
             skeleton={
-              <div className="grid gap-3 pt-4">
-                <Skeleton className="h-14" />
-                <Skeleton className="h-14" />
-                <Skeleton className="h-14" />
+              <div className="grid gap-5 pt-4 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
+                <Skeleton className="h-72 rounded-xl" />
+                <Skeleton className="h-72 rounded-xl" />
+                <Skeleton className="h-72 rounded-xl" />
               </div>
             }
           >
