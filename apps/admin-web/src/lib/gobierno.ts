@@ -31,7 +31,7 @@ import {
   Trash2,
   Video,
 } from 'lucide-react';
-import type { PolicyDef, PolicyFamily, PolicyKey } from '@veo/policy';
+import type { PolicyDef, PolicyFamily, PolicyKey, PolicyParams } from '@veo/policy';
 
 /* ── Familias (orden y presentación del diseño AdminPoliticas) ── */
 
@@ -224,6 +224,174 @@ export function describeParams(def: PolicyDef): ParamField[] {
 /** ¿La política tiene parámetros configurables? (false = flag puro, solo on/off). */
 export function isConfigurable(def: PolicyDef): boolean {
   return describeParams(def).length > 0;
+}
+
+/* ── Regla PBAC (WHEN/THEN) DERIVADA de la config existente (presentación, NO backend nuevo · detalle jznes) ──
+ *
+ * La regla NO se guarda en ningún lado: es la traducción LEGIBLE de lo que la política HACE, derivada de su key
+ * (semántica del catálogo · ADR-024 §5) + sus `params` vigentes. Es "presentación de la config existente" (no un
+ * contrato del wire): la página del detalle ya recibe `params` en el `PolicyView`, así que la regla se computa
+ * client-side. Honesto: solo se afirma lo que la política realmente enforcea; los números salen de `params`. */
+
+/** Una fila de la regla: término (izq, mono) ▸ valor (der). */
+export interface RuleClause {
+  term: string;
+  value: string;
+}
+
+/** Regla WHEN/THEN derivada: condición(es) que disparan la política ▸ efecto(s) que aplica. */
+export interface DerivedRule {
+  when: RuleClause[];
+  then: RuleClause[];
+}
+
+/** Lee un `params[key]` numérico con fallback (los params ya vienen validados; el fallback cubre faltantes). */
+function pNum(params: PolicyParams, key: string, fallback: number): number {
+  const v = params[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+/** Lee un `params[key]` array-de-strings (roles / CIDRs). */
+function pList(params: PolicyParams, key: string): string[] {
+  const v = params[key];
+  return Array.isArray(v) ? v.map(String) : [];
+}
+
+/**
+ * Constructores de regla por política. Cada uno traduce key + params → WHEN/THEN legible. Es la fuente única de
+ * la traducción (16 entradas, `satisfies` garantiza que están TODAS): agregar una política obliga a declarar su
+ * regla. NO inventa efectos que la política no tenga — refleja la semántica real del catálogo (§5) con los `params`.
+ */
+const RULE_BUILDERS = {
+  'media.dual-auth': (p) => ({
+    when: [{ term: 'acción', value: 'acceder a la grabación de un viaje' }],
+    then: [
+      { term: 'requiere', value: `aprobación de ${pNum(p, 'approvers', 2)} personas distintas` },
+      { term: 'four-eyes', value: 'identidad + rol distintos por aprobador' },
+    ],
+  }),
+  'pii.mask': (p) => {
+    const roles = pList(p, 'revealRoles');
+    return {
+      when: [
+        { term: 'acción', value: 'mostrar DNI / datos personales' },
+        { term: 'excepto', value: roles.length ? roles.join(', ') : '— (nadie)' },
+      ],
+      then: [{ term: 'efecto', value: `enmascarar · dejar ${pNum(p, 'dniTail', 4)} dígitos visibles` }],
+    };
+  },
+  'pii.reveal-stepup': (p) => ({
+    when: [{ term: 'acción', value: 'revelar el DNI / PII completo' }],
+    then: [{ term: 'requiere', value: `MFA fresca (< ${pNum(p, 'maxAgeSec', 600)} s)` }],
+  }),
+  'media.retention': (p) => ({
+    when: [{ term: 'condición', value: `la grabación supera ${pNum(p, 'days', 30)} días` }],
+    then: [{ term: 'efecto', value: 'barrido / eliminación de la grabación' }],
+  }),
+  'privacy.erasure': (p) => ({
+    when: [{ term: 'acción', value: 'se solicita el borrado de la cuenta' }],
+    then: [
+      { term: 'gracia', value: `esperar ${pNum(p, 'graceDays', 30)} días` },
+      { term: 'luego', value: 'borrado definitivo (tombstone)' },
+    ],
+  }),
+  'auth.mfa': () => ({
+    when: [{ term: 'acción', value: 'un operador inicia sesión' }],
+    then: [{ term: 'requiere', value: 'segundo factor (MFA)' }],
+  }),
+  'auth.stepup': (p) => ({
+    when: [{ term: 'acción', value: 'ejecutar una acción sensible' }],
+    then: [{ term: 'requiere', value: `MFA fresca (< ${pNum(p, 'maxAgeSec', 300)} s)` }],
+  }),
+  'auth.session-timeout': (p) => ({
+    when: [{ term: 'condición', value: `inactividad > ${pNum(p, 'idleMin', 30)} min` }],
+    then: [{ term: 'efecto', value: 'cerrar la sesión (re-login)' }],
+  }),
+  'auth.daily-reauth': () => ({
+    when: [{ term: 'condición', value: 'pasó 1 día desde la última re-autenticación' }],
+    then: [{ term: 'efecto', value: 'forzar re-autenticación completa' }],
+  }),
+  'access.jit': (p) => ({
+    when: [{ term: 'acción', value: 'se concede un acceso elevado' }],
+    then: [{ term: 'efecto', value: `expira tras ${pNum(p, 'ttlHours', 8)} h` }],
+  }),
+  'access.ip-allowlist': (p) => {
+    const cidrs = pList(p, 'cidrs');
+    return cidrs.length
+      ? {
+          when: [{ term: 'condición', value: `la IP no está en ${cidrs.length} rango(s) CIDR` }],
+          then: [{ term: 'efecto', value: 'denegar el acceso admin' }],
+        }
+      : {
+          when: [{ term: 'condición', value: 'lista vacía' }],
+          then: [{ term: 'efecto', value: 'sin restricción (no bloquea a nadie)' }],
+        };
+  },
+  'access.review': (p) => ({
+    when: [
+      { term: 'condición', value: `pasaron ${pNum(p, 'periodDays', 90)} días desde la última recertificación` },
+    ],
+    then: [{ term: 'efecto', value: 'exigir recertificar los accesos' }],
+  }),
+  'access.least-privilege': () => ({
+    when: [{ term: 'acción', value: 'un rol solicita un recurso' }],
+    then: [
+      { term: 'efecto', value: 'conceder solo lo estrictamente necesario' },
+      { term: 'base', value: 'RBAC + redacción default-null' },
+    ],
+  }),
+  'ops.export': (p) => {
+    const roles = pList(p, 'allowedRoles');
+    return {
+      when: [
+        { term: 'condición', value: roles.length ? `el rol no está en {${roles.join(', ')}}` : 'ningún rol habilitado' },
+      ],
+      then: [{ term: 'efecto', value: 'denegar exportar datasets' }],
+    };
+  },
+  'ops.third-party-share': () => ({
+    when: [{ term: 'acción', value: 'compartir datos con un tercero' }],
+    then: [{ term: 'efecto', value: 'permitir (feature de producto, on/off)' }],
+  }),
+  'ops.bulk-download': (p) => {
+    const roles = pList(p, 'allowedRoles');
+    return {
+      when: [
+        { term: 'condición', value: roles.length ? `el rol no está en {${roles.join(', ')}}` : 'ningún rol habilitado' },
+      ],
+      then: [{ term: 'efecto', value: 'denegar la descarga masiva' }],
+    };
+  },
+} satisfies Record<PolicyKey, (params: PolicyParams) => DerivedRule>;
+
+/** Traduce una política (key + params vigentes) a su regla WHEN/THEN legible. Presentación, no backend. */
+export function derivePolicyRule(def: PolicyDef, params: PolicyParams): DerivedRule {
+  return RULE_BUILDERS[def.key](params);
+}
+
+/* ── Alcance (roles / recursos que la política TARGETEA) DERIVADO de sus params, o "global" ── */
+
+/**
+ * Alcance de una política: si sus `params` targetean roles (pii.mask.revealRoles, ops.*.allowedRoles) o rangos
+ * CIDR (access.ip-allowlist.cidrs), se listan; el resto es GLOBAL (aplica a todos los roles / todo el acceso). Se
+ * DERIVA de la config real — no se inventa un alcance que la política no declare. */
+export type DerivedScope =
+  | { kind: 'roles'; roles: string[] }
+  | { kind: 'cidrs'; cidrs: string[] }
+  | { kind: 'global' };
+
+export function derivePolicyScope(def: PolicyDef, params: PolicyParams): DerivedScope {
+  switch (def.key) {
+    case 'pii.mask':
+      return { kind: 'roles', roles: pList(params, 'revealRoles') };
+    case 'ops.export':
+    case 'ops.bulk-download':
+      return { kind: 'roles', roles: pList(params, 'allowedRoles') };
+    case 'access.ip-allowlist':
+      return { kind: 'cidrs', cidrs: pList(params, 'cidrs') };
+    default:
+      return { kind: 'global' };
+  }
 }
 
 /** Resumen corto del PRIMER parámetro para el chip de la fila (p. ej. "2 aprobadores", "30 min", "2 roles"). */

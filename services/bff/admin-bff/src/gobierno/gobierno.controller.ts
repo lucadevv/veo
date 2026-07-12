@@ -16,6 +16,7 @@ import { AdminRole } from '@veo/shared-types';
 import {
   GobiernoService,
   type PolicyView,
+  type PolicyVersionView,
   type PermissionOverrideView,
 } from './gobierno.service';
 import { UpdatePolicyDto } from './dto/update-policy.dto';
@@ -46,6 +47,18 @@ export class GobiernoController {
     @Param('key') key: string,
   ): Promise<PolicyView> {
     return this.gobierno.get(user, key);
+  }
+
+  @Get('policies/:key/history')
+  @ApiOperation({
+    summary:
+      'Historial de cambios de una política (timeline del detalle). Lectura, sin step-up. Solo SUPERADMIN.',
+  })
+  getPolicyHistory(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('key') key: string,
+  ): Promise<PolicyVersionView[]> {
+    return this.gobierno.history(user, key);
   }
 
   @Put('policies/:key')

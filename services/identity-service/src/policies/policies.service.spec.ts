@@ -1,17 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
 import { PoliciesService } from './policies.service';
-import type { UpsertPolicyData } from './policies.repository';
-import type { Policy } from '../generated/prisma';
+import type { PolicyVersionData, UpsertPolicyData } from './policies.repository';
+import type { Policy, PolicyVersion } from '../generated/prisma';
 
 /**
  * Doble de PoliciesRepository: `runInTransaction` ejecuta el work con un tx ficticio; `findByKeyTx` devuelve el
- * estado "actual"; `upsertTx` echoa la data como haría la DB; `enqueueOutbox` captura el envelope emitido.
- * Así el spec verifica la LÓGICA del service (validación Zod, candado mandatory, bump, outbox) sin Prisma real.
+ * estado "actual"; `upsertTx` echoa la data como haría la DB; `enqueueOutbox` captura el envelope emitido;
+ * `appendVersionsTx` captura las filas de historial. Así el spec verifica la LÓGICA del service (validación Zod,
+ * candado mandatory, bump, historial, outbox) sin Prisma real. `hasHistory` simula si la política YA tiene historia.
  */
-function makeRepo(current: Policy | null) {
+function makeRepo(current: Policy | null, hasHistory = false) {
   const captured: {
     upsert?: UpsertPolicyData;
+    versions?: PolicyVersionData[];
     envelope?: { eventType: string; payload: Record<string, unknown> };
     outboxAggregateId?: string;
   } = {};
@@ -34,6 +36,11 @@ function makeRepo(current: Policy | null) {
     findAll: vi.fn(async () => (current ? [current] : [])),
     findByKey: vi.fn(async () => current),
     findByKeyTx: vi.fn(async () => current),
+    findHistory: vi.fn(async () => [] as PolicyVersion[]),
+    hasVersionsTx: vi.fn(async () => hasHistory),
+    appendVersionsTx: vi.fn(async (_tx: unknown, rows: PolicyVersionData[]) => {
+      captured.versions = rows;
+    }),
     upsertTx,
     enqueueOutbox: vi.fn(
       async (
@@ -105,6 +112,64 @@ describe('PoliciesService.update · CRUD del registro PBAC (ADR-024)', () => {
     // Vista devuelta.
     expect(out).toMatchObject({ key: 'auth.stepup', enabled: false, version: 4 });
     expect(repo.enqueueOutbox).toHaveBeenCalledTimes(1);
+  });
+
+  it('1er PUT: SIEMBRA el baseline (versión vigente) + la versión editada en el historial (timeline completo)', async () => {
+    const current = policyRow({
+      key: 'auth.stepup',
+      family: 'auth',
+      enabled: true,
+      params: { maxAgeSec: 300 },
+      version: 1,
+      updatedBy: 'system',
+      updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+    });
+    const { repo, captured } = makeRepo(current, false); // aún sin historial
+
+    const svc = new PoliciesService(repo as never);
+    await svc.update('auth.stepup', { params: { maxAgeSec: 120 } }, 'admin-1');
+
+    // Dos filas: baseline (v1 · system, con el updatedAt histórico) + la edición (v2 · admin-1).
+    expect(captured.versions).toEqual([
+      {
+        policyKey: 'auth.stepup',
+        version: 1,
+        enabled: true,
+        params: { maxAgeSec: 300 },
+        changedBy: 'system',
+        changedAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+      {
+        policyKey: 'auth.stepup',
+        version: 2,
+        enabled: true,
+        params: { maxAgeSec: 120 },
+        changedBy: 'admin-1',
+      },
+    ]);
+  });
+
+  it('PUT posterior (ya hay historial): agrega SOLO la versión editada (sin re-sembrar baseline)', async () => {
+    const current = policyRow({
+      key: 'auth.stepup',
+      family: 'auth',
+      params: { maxAgeSec: 120 },
+      version: 2,
+    });
+    const { repo, captured } = makeRepo(current, true); // YA tiene historial
+
+    const svc = new PoliciesService(repo as never);
+    await svc.update('auth.stepup', { params: { maxAgeSec: 60 } }, 'admin-2');
+
+    expect(captured.versions).toEqual([
+      {
+        policyKey: 'auth.stepup',
+        version: 3,
+        enabled: true,
+        params: { maxAgeSec: 60 },
+        changedBy: 'admin-2',
+      },
+    ]);
   });
 
   it('RECHAZA params inválidos contra el schema Zod de la key (400) — sin persistir ni emitir', async () => {
@@ -215,6 +280,62 @@ describe('PoliciesService.get / list', () => {
         version: 2,
         updatedBy: 'system',
         updatedAt: '2026-07-01T00:00:00.000Z',
+      },
+    ]);
+  });
+});
+
+describe('PoliciesService.history · timeline del detalle', () => {
+  it('ValidationError si la key es desconocida', async () => {
+    const { repo } = makeRepo(null);
+    const svc = new PoliciesService(repo as never);
+    await expect(svc.history('nope.key')).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('devuelve [] (NO lanza) si la política es válida pero aún no tiene cambios registrados', async () => {
+    const { repo } = makeRepo(null);
+    const svc = new PoliciesService(repo as never);
+    await expect(svc.history('auth.stepup')).resolves.toEqual([]);
+  });
+
+  it('proyecta las filas a la vista (params objeto, changedAt ISO), más reciente primero', async () => {
+    const { repo } = makeRepo(null);
+    repo.findHistory.mockResolvedValueOnce([
+      {
+        id: 'v2',
+        policyKey: 'auth.stepup',
+        version: 2,
+        enabled: true,
+        params: { maxAgeSec: 120 } as PolicyVersion['params'],
+        changedBy: 'admin-1',
+        changedAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
+      {
+        id: 'v1',
+        policyKey: 'auth.stepup',
+        version: 1,
+        enabled: true,
+        params: { maxAgeSec: 300 } as PolicyVersion['params'],
+        changedBy: 'system',
+        changedAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+    ]);
+    const svc = new PoliciesService(repo as never);
+    const out = await svc.history('auth.stepup');
+    expect(out).toEqual([
+      {
+        version: 2,
+        enabled: true,
+        params: { maxAgeSec: 120 },
+        changedBy: 'admin-1',
+        changedAt: '2026-07-10T00:00:00.000Z',
+      },
+      {
+        version: 1,
+        enabled: true,
+        params: { maxAgeSec: 300 },
+        changedBy: 'system',
+        changedAt: '2026-07-01T00:00:00.000Z',
       },
     ]);
   });

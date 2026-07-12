@@ -34,6 +34,19 @@ export interface PolicyView {
 }
 
 /**
+ * Una entrada del HISTORIAL de una política (timeline del detalle · Gobierno → Políticas). Espeja el
+ * `PolicyVersionView` del wire de identity (snapshot de una versión). Re-declarada acá (contrato del wire) para
+ * no acoplar el BFF al import del service de otro bounded-context — igual criterio que `PolicyView`.
+ */
+export interface PolicyVersionView {
+  version: number;
+  enabled: boolean;
+  params: Record<string, unknown>;
+  changedBy: string;
+  changedAt: string;
+}
+
+/**
  * Vista de un override de visibilidad de permisos que devuelve el endpoint interno de identity (espeja
  * `PermissionOverrideView` · row proyectado, `updatedAt` como ISO). Re-declarada acá (contrato del wire) para
  * no acoplar el BFF al import del service de otro bounded-context — igual criterio que `PolicyView`.
@@ -73,6 +86,18 @@ export class GobiernoService {
   /** Una política por su key (404 si la política no existe/no está seedeada · 400 si la key es desconocida). */
   get(identity: AuthenticatedUser, key: string): Promise<PolicyView> {
     return this.rest.get<PolicyView>(`${BASE}/${encodeURIComponent(key)}`, { identity });
+  }
+
+  /**
+   * Historial de cambios de una política (timeline del detalle · más reciente primero). Lectura pura: identity
+   * devuelve `[]` si la política es válida pero aún no tiene cambios (400 si la key es desconocida). Sin audit
+   * de acceso (es config de gobierno visible solo a SUPERADMIN, no PII).
+   */
+  history(identity: AuthenticatedUser, key: string): Promise<PolicyVersionView[]> {
+    return this.rest.get<PolicyVersionView[]>(
+      `${BASE}/${encodeURIComponent(key)}/history`,
+      { identity },
+    );
   }
 
   /**

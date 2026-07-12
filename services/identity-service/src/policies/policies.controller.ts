@@ -18,7 +18,7 @@ import {
   InternalIdentityGuard,
   type AuthenticatedUser,
 } from '@veo/auth';
-import { PoliciesService, type PolicyView } from './policies.service';
+import { PoliciesService, type PolicyView, type PolicyVersionView } from './policies.service';
 import { UpdatePolicyDto } from './dto/policies.dto';
 
 @ApiTags('policies')
@@ -39,6 +39,15 @@ export class PoliciesController {
   @ApiOperation({ summary: 'Una política de gobierno por su key.' })
   get(@Param('key') key: string): Promise<PolicyView> {
     return this.policies.get(key);
+  }
+
+  @Get(':key/history')
+  @ApiOperation({
+    summary:
+      'Historial de cambios de una política (timeline · más reciente primero). [] si aún no tiene cambios.',
+  })
+  history(@Param('key') key: string): Promise<PolicyVersionView[]> {
+    return this.policies.history(key);
   }
 
   @Put(':key')

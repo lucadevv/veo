@@ -478,7 +478,41 @@ model Policy {
   /// Momento del último cambio (auto). Ordena el historial junto con `version`.
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  versions  PolicyVersion[]
+
   @@map("policies")
+  @@schema("identity")
+}
+
+/// HISTORIAL de cambios de una política (ADR-024 · timeline del detalle de Gobierno → Políticas). APPEND-ONLY:
+/// un row por cada VERSIÓN materializada de una política. La tabla `Policy` guarda SOLO el estado VIGENTE
+/// (updatedBy/updatedAt únicos, sin historia); esta tabla acumula el snapshot de cada transición para que el
+/// detalle liste "v1 · creada → v2 · … → v3 · …". Se escribe en la MISMA tx del PUT (`PoliciesService.update`),
+/// junto al bump de `version` + el outbox `policy.updated`: estado ↔ historial ↔ auditoría, atómicos. Las
+/// políticas EXISTENTES arrancan SIN historial (la historia empieza desde el 1er PUT): el update siembra el
+/// baseline (la versión vigente pre-edit) la primera vez, así el timeline queda completo desde v1. Es un espejo
+/// LEGIBLE del libro WORM (audit-service es la verdad inmutable); esta tabla es la proyección de UI, read-only.
+model PolicyVersion {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Key de la política (FK lógica a `Policy.key`). Denormalizada para consultar el historial por key sin join.
+  policyKey String   @map("policy_key")
+  policy    Policy   @relation(fields: [policyKey], references: [key], onDelete: Cascade)
+  /// Número de versión materializado (monotónico, espeja `Policy.version` en el momento del cambio).
+  version   Int
+  /// Snapshot del `enabled` vigente en esta versión.
+  enabled   Boolean
+  /// Snapshot de los `params` vigentes en esta versión (jsonb, validado en su momento contra @veo/policy).
+  params    Json     @default("{}")
+  /// actorId que produjo esta versión (operador admin) o 'system' (baseline sembrado / seed). Accountability.
+  changedBy String   @map("changed_by")
+  /// Momento del cambio. En el baseline sembrado = el `updatedAt` histórico de la fila; en un PUT = ahora.
+  changedAt DateTime @default(now()) @map("changed_at") @db.Timestamptz
+
+  /// UNA fila por (política, versión): la re-siembra del baseline es idempotente (createMany skipDuplicates).
+  @@unique([policyKey, version])
+  /// Hot-path del timeline: historial de UNA política, más reciente primero.
+  @@index([policyKey, version(sort: Desc)])
+  @@map("policy_versions")
   @@schema("identity")
 }
 

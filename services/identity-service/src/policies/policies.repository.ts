@@ -14,7 +14,7 @@ import { Injectable } from '@nestjs/common';
 import { enqueueOutbox as persistOutboxEvent } from '@veo/database';
 import type { EventEnvelope } from '@veo/events';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, type Policy } from '../generated/prisma';
+import { Prisma, type Policy, type PolicyVersion } from '../generated/prisma';
 
 /** Handle de transacción opaco para el service: forwardea el `tx` a los métodos del repo, no lo dereferencia. */
 export type PolicyTx = Prisma.TransactionClient;
@@ -28,6 +28,17 @@ export interface UpsertPolicyData {
   mandatory: boolean;
   version: number;
   updatedBy: string;
+}
+
+/** Data de UNA fila de historial (snapshot de una versión). El service la arma con el estado ya resuelto. */
+export interface PolicyVersionData {
+  policyKey: string;
+  version: number;
+  enabled: boolean;
+  params: Prisma.InputJsonValue;
+  changedBy: string;
+  /** Momento del cambio: `undefined` = ahora (default DB) en un PUT; seteado = el `updatedAt` del baseline. */
+  changedAt?: Date;
 }
 
 @Injectable()
@@ -44,6 +55,14 @@ export class PoliciesRepository {
   /** Una política por su key (@id). `null` si no existe. Réplica. */
   findByKey(key: string): Promise<Policy | null> {
     return this.prisma.read.policy.findUnique({ where: { key } });
+  }
+
+  /** Historial de UNA política (timeline del detalle), más reciente primero. Réplica, read-only. */
+  findHistory(key: string): Promise<PolicyVersion[]> {
+    return this.prisma.read.policyVersion.findMany({
+      where: { policyKey: key },
+      orderBy: { version: 'desc' },
+    });
   }
 
   // ── Seed idempotente (primary) ────────────────────────────────────────────────────────────────────────
@@ -79,6 +98,31 @@ export class PoliciesRepository {
       where: { key },
       create: { key, family, enabled, params, mandatory, version, updatedBy },
       update: { enabled, params, version, updatedBy },
+    });
+  }
+
+  /** ¿La política YA tiene historial? DENTRO de la tx (decide si sembrar el baseline en el 1er PUT). */
+  async hasVersionsTx(tx: PolicyTx, key: string): Promise<boolean> {
+    const count = await tx.policyVersion.count({ where: { policyKey: key } });
+    return count > 0;
+  }
+
+  /**
+   * Agrega filas de historial DENTRO de la tx (append-only). `skipDuplicates` hace idempotente la re-siembra del
+   * baseline sobre el UNIQUE (policyKey, version): reintentar el PUT nunca duplica una versión ya materializada.
+   */
+  async appendVersionsTx(tx: PolicyTx, rows: PolicyVersionData[]): Promise<void> {
+    if (rows.length === 0) return;
+    await tx.policyVersion.createMany({
+      data: rows.map((r) => ({
+        policyKey: r.policyKey,
+        version: r.version,
+        enabled: r.enabled,
+        params: r.params,
+        changedBy: r.changedBy,
+        ...(r.changedAt ? { changedAt: r.changedAt } : {}),
+      })),
+      skipDuplicates: true,
     });
   }
 

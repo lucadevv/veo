@@ -65,6 +65,21 @@ export interface UpdatePolicyRequest {
   params?: Record<string, unknown>;
 }
 
+/**
+ * Una entrada del HISTORIAL de una política (timeline del detalle · GET /gobierno/policies/:key/history). Espejo
+ * del `PolicyVersionView` del wire del bff: snapshot de una versión materializada. Backend REAL nuevo (tabla
+ * `PolicyVersion` de identity, escrita en la tx del PUT); NO derivado. `[]` si la política aún no tuvo cambios.
+ * (admin-web lo define local, igual que `policyView`: @veo/api-client aún no expone el contrato de gobierno.)
+ */
+export const policyVersionView = z.object({
+  version: z.number(),
+  enabled: z.boolean(),
+  params: z.record(z.unknown()),
+  changedBy: z.string(),
+  changedAt: z.string(),
+});
+export type PolicyVersionView = z.infer<typeof policyVersionView>;
+
 /* ── Gobierno → Permisos y visibilidad (OVERLAY subtract-only · ADR-025 §3) ── */
 
 /**

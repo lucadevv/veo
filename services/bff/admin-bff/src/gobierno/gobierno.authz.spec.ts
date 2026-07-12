@@ -34,15 +34,17 @@ const rolesGuard = new RolesGuard(new Reflector());
 const HANDLERS = {
   list: GobiernoController.prototype.listPolicies,
   get: GobiernoController.prototype.getPolicy,
+  history: GobiernoController.prototype.getPolicyHistory,
   update: GobiernoController.prototype.updatePolicy,
   listOverrides: GobiernoController.prototype.listPermissionOverrides,
   setOverride: GobiernoController.prototype.setPermissionOverride,
 } as const;
 
-/** Los dos handlers de LECTURA (GET): no exigen step-up. */
+/** Los handlers de LECTURA (GET): no exigen step-up. */
 const READ_HANDLERS = {
   list: HANDLERS.list,
   get: HANDLERS.get,
+  history: HANDLERS.history,
   listOverrides: HANDLERS.listOverrides,
 } as const;
 

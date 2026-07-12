@@ -18,8 +18,8 @@ import {
   type PolicyParams,
 } from '@veo/policy';
 import { ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
-import { PoliciesRepository } from './policies.repository';
-import { Prisma, type Policy } from '../generated/prisma';
+import { PoliciesRepository, type PolicyVersionData } from './policies.repository';
+import { Prisma, type Policy, type PolicyVersion } from '../generated/prisma';
 
 const PRODUCER = 'identity-service';
 
@@ -42,6 +42,15 @@ export interface PolicyView {
 export interface UpdatePolicyPatch {
   enabled?: boolean;
   params?: PolicyParams;
+}
+
+/** Una entrada del HISTORIAL de una política (snapshot de una versión · timeline del detalle). */
+export interface PolicyVersionView {
+  version: number;
+  enabled: boolean;
+  params: PolicyParams;
+  changedBy: string;
+  changedAt: string;
 }
 
 /** TTL del cache de params vigentes para enforcement interno (hot-path como el masking por request). */
@@ -74,6 +83,19 @@ export class PoliciesService {
     const row = await this.repo.findByKey(key);
     if (!row) throw new NotFoundError('Política no encontrada', { key });
     return this.toView(row);
+  }
+
+  /**
+   * HISTORIAL de una política (timeline del detalle · más reciente primero). `ValidationError` si la key es
+   * desconocida; devuelve `[]` (no lanza) si la política es válida pero AÚN no tiene cambios registrados — las
+   * políticas existentes arrancan sin historia y la acumulan desde el 1er PUT (baseline + versión editada).
+   */
+  async history(key: string): Promise<PolicyVersionView[]> {
+    if (!isPolicyKey(key)) {
+      throw new ValidationError('Política desconocida', { key });
+    }
+    const rows = await this.repo.findHistory(key);
+    return rows.map((r) => this.toVersionView(r));
   }
 
   /**
@@ -186,7 +208,7 @@ export class PoliciesService {
         });
       }
 
-      // 3) Bump + upsert + outbox EN LA MISMA tx (estado ↔ auditoría ↔ cache-busting, atómicos).
+      // 3) Bump + upsert + historial + outbox EN LA MISMA tx (estado ↔ historial ↔ auditoría ↔ cache-busting).
       const nextVersion = (current?.version ?? 0) + 1;
       const saved = await this.repo.upsertTx(tx, {
         key,
@@ -197,6 +219,30 @@ export class PoliciesService {
         version: nextVersion,
         updatedBy: actorId,
       });
+
+      // Historial (timeline del detalle): en el 1er PUT de una política SIN historia, sembramos el BASELINE (la
+      // versión vigente pre-edit) para que el timeline arranque en v1 (creada/seed) y no desde la 1ª edición.
+      const versionRows: PolicyVersionData[] = [];
+      const hadHistory = await this.repo.hasVersionsTx(tx, key);
+      if (!hadHistory && current) {
+        versionRows.push({
+          policyKey: key,
+          version: current.version,
+          enabled: current.enabled,
+          params: (current.params ?? {}) as Prisma.InputJsonValue,
+          changedBy: current.updatedBy,
+          changedAt: current.updatedAt,
+        });
+      }
+      versionRows.push({
+        policyKey: key,
+        version: nextVersion,
+        enabled: nextEnabled,
+        params: nextParams as Prisma.InputJsonValue,
+        changedBy: actorId,
+      });
+      await this.repo.appendVersionsTx(tx, versionRows);
+
       await this.repo.enqueueOutbox(tx, this.policyUpdatedEnvelope(saved), key);
       return saved;
     });
@@ -243,6 +289,16 @@ export class PoliciesService {
       version: row.version,
       updatedBy: row.updatedBy,
       updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  private toVersionView(row: PolicyVersion): PolicyVersionView {
+    return {
+      version: row.version,
+      enabled: row.enabled,
+      params: (row.params ?? {}) as PolicyParams,
+      changedBy: row.changedBy,
+      changedAt: row.changedAt.toISOString(),
     };
   }
 }

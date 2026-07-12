@@ -80,6 +80,7 @@ import {
   policyView,
   type PolicyView,
   type UpdatePolicyRequest,
+  policyVersionView,
   permissionOverrideView,
   type PermissionOverrideView,
   type SetPermissionOverrideRequest,
@@ -134,6 +135,8 @@ export const qk = {
   activeCarpools: ['carpool-active-monitor'] as const,
   carpoolDetail: (id: string) => ['carpool-detail', id] as const,
   policies: ['gobierno-policies'] as const,
+  policy: (key: string) => ['gobierno-policy', key] as const,
+  policyHistory: (key: string) => ['gobierno-policy-history', key] as const,
   permissionOverrides: ['gobierno-permission-overrides'] as const,
 };
 
@@ -1392,6 +1395,40 @@ export function usePolicies() {
 }
 
 /**
+ * UNA política por su key (GET /gobierno/policies/:key) — el detalle drill-in. El admin-bff gatea @Roles(SUPERADMIN);
+ * la UI también con `gobierno:manage`. `enabled` solo con key (evita el fetch en un key vacío). El backend devuelve
+ * 400 (key desconocida) / 404 (no seedeada) con status/message intactos → el llamador muestra el estado 404/error.
+ */
+export function usePolicy(key: string) {
+  return useQuery({
+    queryKey: qk.policy(key),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/gobierno/policies/${encodeURIComponent(key)}`, {
+        schema: policyView,
+        signal,
+      }),
+    enabled: key.length > 0,
+  });
+}
+
+/**
+ * HISTORIAL de cambios de una política (GET /gobierno/policies/:key/history) — el timeline del detalle. Backend
+ * REAL (tabla PolicyVersion de identity): `[]` si la política aún no tuvo cambios (arranca sin historia, la
+ * acumula desde el 1er PUT). Sin refetch en vivo (config). Se invalida al editar/togglear la política.
+ */
+export function usePolicyHistory(key: string) {
+  return useQuery({
+    queryKey: qk.policyHistory(key),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/gobierno/policies/${encodeURIComponent(key)}/history`, {
+        schema: z.array(policyVersionView),
+        signal,
+      }),
+    enabled: key.length > 0,
+  });
+}
+
+/**
  * Aplica el parche {enabled?, params?} a una política (PUT /gobierno/policies/:key). El admin-bff exige
  * @Roles(SUPERADMIN) + @RequireStepUpMfa: el llamador asegura la MFA fresca con StepUpDialog ANTES de invocar.
  * identity-service VALIDA `params` (schema Zod de @veo/policy), aplica el candado `mandatory`, bumpea `version`
@@ -1406,8 +1443,11 @@ export function useUpdatePolicy() {
         body: { enabled: input.enabled, params: input.params },
         schema: policyView,
       }),
-    onSettled: () => {
+    onSettled: (_data, _err, input) => {
       void qc.invalidateQueries({ queryKey: qk.policies });
+      // Refresca también el detalle drill-in: la ficha + el timeline (el PUT agregó una versión nueva).
+      void qc.invalidateQueries({ queryKey: qk.policy(input.key) });
+      void qc.invalidateQueries({ queryKey: qk.policyHistory(input.key) });
     },
   });
 }

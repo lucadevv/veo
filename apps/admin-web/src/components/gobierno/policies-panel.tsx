@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { ChevronRight, Circle, Lock, SlidersHorizontal, ToggleRight, Wrench } from 'lucide-react';
 import { POLICY_LIST, type PolicyDef } from '@veo/policy';
 import type { PolicyView } from '@/lib/api/schemas';
@@ -151,9 +152,16 @@ function PolicyRow({
         <Icon className="size-5" aria-hidden />
       </div>
 
-      <div className="min-w-0 flex-1">
+      {/* El bloque de identidad es un link al detalle drill-in (contenido no interactivo → link seguro). */}
+      <Link
+        href={`/gobierno/politicas/${def.key}`}
+        className="group min-w-0 flex-1 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        aria-label={`Ver detalle de ${def.label}`}
+      >
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-medium text-ink">{def.label}</p>
+          <p className="text-sm font-medium text-ink transition-colors group-hover:text-accent">
+            {def.label}
+          </p>
           {netNew ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium text-ink-muted ring-1 ring-inset ring-border">
               <Wrench className="size-3" aria-hidden />
@@ -164,7 +172,7 @@ function PolicyRow({
         <p className="mt-0.5 flex items-center gap-2 font-mono text-xs text-ink-subtle">
           policy:{def.key}
         </p>
-      </div>
+      </Link>
 
       {/* Chip de configuración: abre el editor genérico de params (solo si la política es configurable). */}
       {configurable ? (
