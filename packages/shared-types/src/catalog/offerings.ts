@@ -62,6 +62,15 @@ export type OfferingIcon = (typeof OfferingIcon)[keyof typeof OfferingIcon];
 export const CHILD_MODE_FEE_CENTS = 200 as const;
 
 /**
+ * Límites del multiplicador de surge (BR-T06 · ADR-021 Fase C): [1.0, 2.0]. FUENTE ÚNICA — el surge es
+ * server-authoritative: dispatch lo calcula, trip-service lo aplica al COBRO firme y el QUOTE del BFF lo
+ * aplica al PREVIEW; los tres consumen ESTOS límites para que el rango no diverja. 1.0 = sin recargo (default),
+ * 2.0 = tope. `as const` los fija como literales.
+ */
+export const MIN_SURGE = 1.0 as const;
+export const MAX_SURGE = 2.0 as const;
+
+/**
  * Política de pricing de una oferta. FUENTE ÚNICA (ADR 013 · ADR 023): BFF y trip-service la consumen de acá.
  * `multiplier` y `minFareCents` son OBLIGATORIOS. Los params `baseFareCents`/`perKmCents`/`perMinCents` son
  * OVERRIDES OPCIONALES por servicio (ADR 023 §3): `undefined` → usa el DEFAULT global (`BaseFareConfig`). Un

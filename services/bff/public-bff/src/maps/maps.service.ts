@@ -31,6 +31,8 @@ import {
   OfferingId,
   resolveBidFloorCents,
   DEFAULT_BID_FLOOR_CONFIG,
+  MIN_SURGE,
+  MAX_SURGE,
   type BidFloorConfig,
   type OfferingSpec,
   type OfferingPricingPolicy,
@@ -40,6 +42,7 @@ import { ANONYMOUS_IDENTITY } from '../common/identities';
 import type { UserCreditReply } from '../infra/grpc-types';
 import type { Env } from '../config/env.schema';
 import { categoryFareCents, DEFAULT_FARE_BASE, type FareBase } from './fare';
+import { DispatchService } from '../dispatch/dispatch.service';
 import { OFFERING_DISPLAY_NAMES } from './offering-names';
 import { bumpCatalogDegraded } from './maps-metrics';
 import {
@@ -105,6 +108,9 @@ export class MapsService {
     @Optional() @Inject(GRPC_PAYMENT) private readonly paymentGrpc?: GrpcServiceClient,
     @Optional() @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret?: string,
     @Optional() @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience?: InternalAudience,
+    // ADR-021 Fase C · surge autoritativo para el preview (mismo getSurge que usa createTrip). @Optional
+    // trailing: los specs que construyen el servicio con menos args no lo pasan → el quote degrada a 1.0.
+    @Optional() private readonly dispatch?: DispatchService,
   ) {}
 
   /**
@@ -152,8 +158,10 @@ export class MapsService {
     // Ola 2B · paradas múltiples: la ruta (y por tanto distancia/duración/tarifa) pasa por las paradas.
     const waypoints = (dto.waypoints ?? []).map((w) => ({ lat: w.lat, lon: w.lng }));
     // La ruta, el crédito y el catálogo activo son independientes → en paralelo. ADR 023: el modo YA NO
-    // se resuelve aparte (no hay schedule/franjas): sale del catálogo EFECTIVO, por oferta.
-    const [route, creditBalanceCents, effective, bidFloorConfig, fareBase] = await Promise.all([
+    // se resuelve aparte (no hay schedule/franjas): sale del catálogo EFECTIVO, por oferta. ADR-021 Fase C:
+    // el surge AUTORITATIVO se resuelve server-side (mismo dispatch.getSurge que el create) y se paraleliza.
+    const [route, creditBalanceCents, effective, bidFloorConfig, fareBase, surgeMultiplier] =
+      await Promise.all([
       this.maps.route(origin, destination, waypoints),
       // Lote C3 · saldo de crédito de referido para el PREVIEW (server-side, §INTEGRACIONES). 0 si anónimo/
       // sin cliente/error (no rompe el quote: el crédito es secundario a la ruta).
@@ -168,6 +176,10 @@ export class MapsService {
       // F2.4 · banderazo/km/min vigentes (admin). Degradación honesta: trip-service caído → constantes de
       // código (= el seed) → el preview no diverge del cobro en el caso común.
       this.fetchBaseFare(identity),
+      // ADR-021 Fase C · surge AUTORITATIVO server-side para el preview FIXED (mismo dispatch.getSurge que
+      // createTrip, sobre el ORIGEN). Cierra el sobrecobro silencioso quote↔create. Degradación honesta:
+      // dispatch caído/anónimo → 1.0 (sin surge, jamás sobre-cotiza).
+      this.fetchSurge(identity, origin),
     ]);
 
     // ADR 023 · el `mode` top-level = el modo EFECTIVO de la oferta ANCLA (VEO Económico), tal cual lo
@@ -188,11 +200,15 @@ export class MapsService {
       .map((offering) => {
         const ov = effective?.get(offering.id);
         const pricing = ov?.pricing ?? offering.pricing; // efectivo (admin) o de código (degradación)
-        // Precio por oferta: base + km + min × multiplier, con mínima. Mismo motor que el create.
-        const priceCents = this.offeringPriceCents(pricing, route, fareBase);
         // ADR 023 · modo POR oferta = el `mode` EFECTIVO del catálogo (palanca del admin, ya resuelto por
         // trip-service) o, en degradación, el de CÓDIGO de la oferta. Mismo criterio que createTrip.
         const offeringMode = ov?.mode ?? effectiveOfferingMode(offering);
+        // ADR-021 Fase C · el surge autoritativo aplica SOLO a la tarifa FIJA: en PUJA el bid ES el precio
+        // (surge irrelevante) — espeja createTrip, que resuelve surge solo cuando `bidCents == null`. Así el
+        // preview FIXED muestra lo que el create va a cobrar y la sugerida de PUJA no infla con surge.
+        const offeringSurge = isPujaMode(offeringMode) ? MIN_SURGE : surgeMultiplier;
+        // Precio por oferta: base + km + min × multiplier × surge, con mínima. Mismo motor que el create.
+        const priceCents = this.offeringPriceCents(pricing, route, fareBase, offeringSurge);
         return {
           id: offering.id,
           // Compat apps viejas: el server sigue resolviendo el nombre; las nuevas usan `labelKey` (i18n).
@@ -251,6 +267,30 @@ export class MapsService {
    */
   protected quotedOfferings(): readonly OfferingSpec[] {
     return OFFERING_LIST;
+  }
+
+  /**
+   * ADR-021 Fase C · resuelve el surge AUTORITATIVO para el preview FIXED, con el MISMO `dispatch.getSurge`
+   * que usa createTrip (sobre el ORIGEN). Cierra el sobrecobro silencioso: antes el quote NO aplicaba surge
+   * y el create SÍ, así que bajo demanda alta el pasajero veía un precio y se le cobraba otro mayor.
+   * DEGRADACIÓN HONESTA (nunca rompe el quote ni sobre-cotiza): sin cliente dispatch (specs) / identidad
+   * anónima / dispatch caído → 1.0 (sin recargo). El valor se clampa a [MIN_SURGE, MAX_SURGE] por defensa.
+   */
+  private async fetchSurge(
+    identity: AuthenticatedUser,
+    origin: { lat: number; lon: number },
+  ): Promise<number> {
+    if (!this.dispatch || identity === ANONYMOUS_IDENTITY) return MIN_SURGE;
+    try {
+      const { multiplier } = await this.dispatch.getSurge(identity, origin.lat, origin.lon);
+      if (!Number.isFinite(multiplier)) return MIN_SURGE;
+      return Math.min(Math.max(multiplier, MIN_SURGE), MAX_SURGE);
+    } catch (err) {
+      this.logger.warn(
+        `surge no disponible en el quote (${(err as Error).message}); preview sin surge (degradación honesta)`,
+      );
+      return MIN_SURGE;
+    }
   }
 
   /**
@@ -319,6 +359,8 @@ export class MapsService {
     pricing: OfferingPricingPolicy,
     route: { distanceMeters: number; durationSeconds: number },
     fareBase: FareBase,
+    /** ADR-021 Fase C · surge autoritativo [1.0, 2.0]. Default 1.0 (PUJA / degradación). Solo FIXED lo recibe >1. */
+    surgeMultiplier: number = MIN_SURGE,
   ): number {
     return categoryFareCents(
       route.distanceMeters,
@@ -326,6 +368,7 @@ export class MapsService {
       pricing.multiplier,
       pricing.minFareCents,
       fareBase,
+      surgeMultiplier,
     );
   }
 

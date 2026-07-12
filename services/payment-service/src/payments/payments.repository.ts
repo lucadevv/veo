@@ -194,12 +194,20 @@ export class PaymentsRepository {
     return this.prisma.write.payment.update({ where: { id: paymentId }, data });
   }
 
-  /** Marca FAILED (terminal) una PROPINA que declinó/expiró — update PLANO, sin emitir `payment.failed`. */
-  markTipFailed(
+  /**
+   * Marca FAILED (terminal) una PROPINA que declinó/expiró, sin emitir `payment.failed`. RC19 (ADR-022) · CAS de
+   * status (`where status ∈ [PENDING,DEBT]`): si un webhook CONFIRMED concurrente ya capturó el pago (CAPTURED), el
+   * updateMany no matchea → NO pisa la captura. Re-lee la fila y la devuelve (el estado real, la captura gana).
+   */
+  async markTipFailed(
     paymentId: string,
-    data: Prisma.PaymentUncheckedUpdateInput,
+    data: Prisma.PaymentUncheckedUpdateManyInput,
   ): Promise<Payment> {
-    return this.prisma.write.payment.update({ where: { id: paymentId }, data });
+    await this.prisma.write.payment.updateMany({
+      where: { id: paymentId, status: { in: ['PENDING', 'DEBT'] } },
+      data,
+    });
+    return this.prisma.write.payment.findUniqueOrThrow({ where: { id: paymentId } });
   }
 
   /** Status-guard DEBT→PENDING para re-cobrar (retryCharge). CAS: solo un llamador concurrente gana. */
@@ -343,13 +351,19 @@ export class PaymentsRepository {
 
   // markDebt (rama DEBT) ------------------------------------------------------------------------------
 
-  /** Marca DEBT un cobro (rama no-TIP), dentro de la tx que emite `payment.failed`. */
-  markPaymentDebtInTx(
+  /**
+   * Marca DEBT un cobro (rama no-TIP), dentro de la tx que emite `payment.failed`. RC19 (ADR-022) · CAS de status
+   * (`where status='PENDING'`): si un CONFIRMED concurrente ya capturó (CAPTURED) en la ventana TOCTOU, el updateMany
+   * no matchea → NO pisa la captura. Re-lee y devuelve la fila; el caller decide emitir `payment.failed` SOLO si
+   * quedó en DEBT (si el CAS no ganó, devuelve el estado real —CAPTURED— y no se emite la falla falsa).
+   */
+  async markPaymentDebtInTx(
     tx: PaymentTx,
     id: string,
-    data: Prisma.PaymentUncheckedUpdateInput,
+    data: Prisma.PaymentUncheckedUpdateManyInput,
   ): Promise<Payment> {
-    return tx.payment.update({ where: { id }, data });
+    await tx.payment.updateMany({ where: { id, status: 'PENDING' }, data });
+    return tx.payment.findUniqueOrThrow({ where: { id } });
   }
 
   // captureCash ---------------------------------------------------------------------------------------

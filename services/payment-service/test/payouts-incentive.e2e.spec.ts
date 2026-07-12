@@ -269,6 +269,39 @@ describe('PayoutsService.runPayouts · el bono de incentivo entra al Payout (fix
     expect(progress.paidInPayoutId).toBe(payout.id);
   });
 
+  it('RC15 · el bono ligado a un Payout PENDING NO se re-barre en el run del período SIGUIENTE (no double-pay cross-period)', async () => {
+    // El bug: `paidAt` se marca recién al CONFIRMAR el desembolso (async). Entre "bono ligado a Payout_A
+    // (PENDING)" y "A confirmado", paidAt sigue null → el run del período siguiente re-barría el MISMO bono
+    // (el guard viejo era solo paidAt:null) y lo metía en Payout_B → doble cobro. El fix filtra por
+    // paidInPayoutId:null tanto en el sweep como en el CAS del link.
+    const driverId = uuidv7();
+    const incentiveId = await seedIncentive(6000);
+    const progressId = await seedCompletedProgress(incentiveId, driverId, 6000, IN_WINDOW);
+    const { redis } = makeRedis();
+    const svc = makeService(redis);
+
+    // Run del período W: crea Payout_A PENDING con el bono ligado (paidAt sigue null — el cron no confirma).
+    const first = await svc.runPayouts(PERIOD_START, PERIOD_END);
+    expect(first.pending).toBe(1);
+    const payoutA = await prisma.payout.findFirstOrThrow({ where: { driverId } });
+    expect(payoutA.amountCents).toBe(6000);
+
+    // Run del período SIGUIENTE W+1 [25 may, 1 jun): el bono sigue paidAt:null (A no se confirmó) y su
+    // completedAt (20 may) < end(1 jun) → con el guard viejo se re-barrería. Con el fix: paidInPayoutId≠null → NO.
+    const NEXT_START = PERIOD_END; // 2026-05-25
+    const NEXT_END = new Date('2026-06-01T00:00:00.000Z');
+    const second = await svc.runPayouts(NEXT_START, NEXT_END);
+    expect(second.pending).toBe(0); // NADA nuevo que liquidar: el bono ya está comprometido a Payout_A
+    expect(second.totalAmountCents).toBe(0);
+
+    // La DB es la verdad: UN solo payout con el bono; el conductor NO lo cobra dos veces.
+    const payouts = await prisma.payout.findMany({ where: { driverId } });
+    expect(payouts).toHaveLength(1);
+    expect(payouts[0]!.id).toBe(payoutA.id);
+    const progress = await prisma.incentiveProgress.findUniqueOrThrow({ where: { id: progressId } });
+    expect(progress.paidInPayoutId).toBe(payoutA.id); // sigue ligado a A (no se re-ligó a un B)
+  });
+
   it('driver flaggeado → Payout HELD con el bono dentro; el progress se marca (el bono se libera al resolver)', async () => {
     const driverId = uuidv7();
     const incentiveId = await seedIncentive(6000);

@@ -18,8 +18,8 @@ function buildService(
   const created: Row[] = [];
   const updated: Row[] = [];
   // Mock del PaymentsRepository: el cobro de propina lee la tarifa viva, persiste el tip-Payment y (según el
-  // desenlace del gateway) persiste el checkout o marca FAILED la propina. NO usa la tx de la tarifa (markTipFailed
-  // es un update PLANO).
+  // desenlace del gateway) persiste el checkout o marca FAILED la propina. RC19 · `markTipFailed` es un CAS en el
+  // repo (updateMany where status∈[PENDING,DEBT] + re-read); el mock devuelve la fila resultante.
   const repo = {
     findPaymentByDedupKey: vi.fn(async () => opts.existingTipCharge ?? null), // idempotencia del cobro de propina
     findLiveFareByTrip: vi.fn(async () => fare),
@@ -194,6 +194,7 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     const runInTransaction = vi.fn(); // la tx SOLO se usa en el camino de la TARIFA (que emite payment.failed)
     const repo = {
       findPaymentById: vi.fn(async () => tip),
+      // RC19 · `markTipFailed` es un CAS en el repo (updateMany + re-read); el mock devuelve la fila resultante.
       markTipFailed: vi.fn(async (_id: string, data: Row) => {
         updates.push(data);
         return { ...tip, ...data };

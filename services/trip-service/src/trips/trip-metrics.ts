@@ -45,7 +45,7 @@ function getOrCreateCounter(
 export const CATALOG_DEGRADED_METRIC = 'veo_catalog_degraded_total';
 
 /** Punto del flujo donde el catálogo degradó (label BOUNDED, sin cardinalidad libre). */
-export type CatalogDegradedSite = 'create' | 'activate';
+export type CatalogDegradedSite = 'create' | 'activate' | 'change_destination' | 'waypoint';
 
 export const catalogDegradedTotal: CounterLike = getOrCreateCounter(
   CATALOG_DEGRADED_METRIC,

@@ -369,7 +369,8 @@ export class PayoutsRepository {
 
   /**
    * Liga los bonos pendientes al Payout (paidInPayoutId) SIN marcar paidAt: el marcado se hace al confirmar el
-   * desembolso. CAS `paidAt:null` HARDCODEADO — no re-liga un bono ya pagado en un re-run.
+   * desembolso. CAS `paidAt:null` + `paidInPayoutId:null` HARDCODEADO — no re-liga un bono ya pagado NI uno ya
+   * ligado a otro payout (RC15 · ADR-022: defensa en profundidad contra el doble-pago del bono cross-period).
    */
   async linkIncentivesToPayoutInTx(
     tx: PayoutTx,
@@ -377,7 +378,7 @@ export class PayoutsRepository {
     payoutId: string,
   ): Promise<void> {
     await tx.incentiveProgress.updateMany({
-      where: { id: { in: incentiveIds }, paidAt: null },
+      where: { id: { in: incentiveIds }, paidAt: null, paidInPayoutId: null },
       data: { paidInPayoutId: payoutId },
     });
   }

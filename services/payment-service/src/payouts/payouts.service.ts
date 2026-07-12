@@ -431,7 +431,10 @@ export class PayoutsService {
             processedAt: null,
           });
           // Ligamos los bonos al Payout (paidInPayoutId) SIN marcar paidAt: el marcado del bono se mueve al
-          // handler de confirmación (PROCESSED), no al create. CAS `paidAt:null` para no re-ligar en un re-run.
+          // handler de confirmación (PROCESSED), no al create. RC15 · el CAS filtra `paidInPayoutId:null`
+          // (además de `paidAt:null`), consistente con el sweep de collectEarnings: un bono ya ligado a otro
+          // payout NO se re-liga acá (defensa en profundidad — el sweep ya no lo trae, pero el guard cierra
+          // cualquier otra vía de re-link).
           if (pendingIncentiveIds.length > 0) {
             await this.repo.linkIncentivesToPayoutInTx(tx, pendingIncentiveIds, payoutId);
           }
@@ -1004,21 +1007,21 @@ export class PayoutsService {
         compensationCents: p.driverCompensationCents,
       }));
 
-    // Bonos de incentivo CONCEDIDOS pero aún NO pagados (paidAt:null). El `incentive.completed` era un
+    // Bonos de incentivo CONCEDIDOS pero aún NO ligados a un Payout. El `incentive.completed` era un
     // evento huérfano: el bono se concedía en IncentiveProgress pero jamás entraba a un Payout. Acá lo
     // barremos. BACK-PAY POR ARRASTRE (decisión intencional): el filtro NO acota por `completedAt ∈
-    // [start,end)` sino por `completedAt < end` con `paidAt:null`. Así el primer run post-deploy paga
-    // TODOS los bonos históricos completados-no-pagados, y se auto-limpia (una vez marcados, paidAt deja
-    // de ser null y no vuelven a aparecer). La idempotencia NO se rompe: el guard sigue siendo paidAt:null
-    // —tanto acá (lectura) como en el updateMany (CAS de marcado)—, así que un re-run no los re-paga.
+    // [start,end)` sino por `completedAt < end`. Así el primer run post-deploy paga TODOS los bonos
+    // históricos completados-no-pagados.
     //
-    // FIX DOBLE-PAGO (guard por paidInPayoutId): `paidAt` se marca SOLO al confirmar el Payout (PROCESSED),
-    // así que entre el create del Payout y su confirmación el bono queda `paidAt:null` PERO ya LIGADO
-    // (`paidInPayoutId` seteado) y su monto YA está congelado en ESE Payout. Sin este guard, un 2º run del
-    // período re-seleccionaba ese bono (seguía paidAt:null), lo re-ligaba y lo bancaba en un SEGUNDO Payout →
-    // doble-pago. `paidInPayoutId:null` excluye los ya-ligados (in-flight o retenidos por un FAILED): un FAILED
-    // se paga RETENTÁNDOLO (retryPayout re-desembolsa el monto congelado y marca paidAt con el link intacto),
-    // igual que su gross/comisión — el bono no se pierde, viaja con su Payout.
+    // RC15 (ADR-022) · el guard DEBE ser `paidInPayoutId:null`, NO solo `paidAt:null`. `paidAt` se marca
+    // recién en la CONFIRMACIÓN async del desembolso (applyPayoutDisbursementResult), no al ligar el bono.
+    // Entre "bono ligado a Payout_A (PENDING/PROCESSING/HELD)" y "A confirmado", `paidAt` sigue null → con
+    // el guard viejo, el run del PERÍODO SIGUIENTE re-barría el MISMO bono y lo metía en un Payout_B → el
+    // conductor lo cobraba DOS veces (los guards duros del run son per-período: no ven el arrastre). El link
+    // `paidInPayoutId` es el compromiso contable del bono a SU payout (persiste a través de retryPayout, que
+    // re-desembolsa el MISMO payout): mientras esté ligado, NO es re-elegible. Un bono ligado a un payout
+    // abandonado queda pendiente (sub-pago recuperable con retry), NUNCA re-pagado — el sentido correcto.
+    // El guard vive en el repo: findUnpaidCompletedIncentives (lectura) y linkIncentivesToPayoutInTx (CAS de link).
     const pendingIncentives = await this.repo.findUnpaidCompletedIncentives(end);
     const pendingIncentiveIdsByDriver = new Map<string, string[]>();
     const incentiveRows: DriverEarningRow[] = pendingIncentives

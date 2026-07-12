@@ -516,6 +516,34 @@ describe('EventConsumerService · trip.started → "tu viaje empezó"', () => {
   });
 });
 
+describe('EventConsumerService · RC5 · trip.destination_changed → alerta al guardián SOLO en modo niño', () => {
+  beforeEach(() => registered.clear());
+
+  const destChanged = (childMode: boolean) =>
+    env('trip.destination_changed', {
+      tripId: 'trip-D',
+      passengerId: PAX,
+      destination: { lat: -12.2, lon: -77.0 },
+      previousFareCents: 2400,
+      fareCents: 2600,
+      childMode,
+    });
+
+  it('modo niño → push CRÍTICO TRIP_DESTINATION_CHANGED al pasajero (guardián)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-D', platform: 'ios' }] });
+    await registered.get('trip.destination_changed')!(destChanged(true));
+    const rec = [...store.records.values()][0]!;
+    expect(rec.template).toBe(TEMPLATE_KEYS.TRIP_DESTINATION_CHANGED);
+    expect(rec.payload.data).toMatchObject({ tripId: 'trip-D', screen: 'TripActive' });
+  });
+
+  it('viaje NORMAL (childMode false) → NO pushea (el pasajero cambió su propio destino, no es spam)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-D', platform: 'ios' }] });
+    await registered.get('trip.destination_changed')!(destChanged(false));
+    expect(store.records.size).toBe(0);
+  });
+});
+
 describe('EventConsumerService · trip.arriving → "tu conductor está llegando"', () => {
   beforeEach(() => registered.clear());
 

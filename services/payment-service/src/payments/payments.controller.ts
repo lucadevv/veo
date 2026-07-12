@@ -291,6 +291,7 @@ export class PaymentsController {
       user,
       idempotencyKey,
       dto.forceNew ?? false,
+      dto.driverFault ?? false, // RC18 · clawback del neto del conductor si el refund total es por su causa
     );
   }
 }

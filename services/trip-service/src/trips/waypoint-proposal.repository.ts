@@ -125,10 +125,13 @@ export class WaypointProposalRepository {
     tx: TripTx,
     tripId: string,
     proposableStates: readonly TripStatus[],
+    // RC7-waypoint (ADR-022) · tarifa VIGENTE esperada: el CAS solo aplica si el viaje sigue en `proposableStates`
+    // Y su `fareCents` NO cambió desde el quote de la propuesta (un re-bid PUJA concurrente lo movería → count 0).
+    expectedFareCents: number,
     data: Prisma.TripUpdateManyMutationInput,
   ): Promise<{ count: number }> {
     return tx.trip.updateMany({
-      where: { id: tripId, status: { in: [...proposableStates] } },
+      where: { id: tripId, status: { in: [...proposableStates] }, fareCents: expectedFareCents },
       data,
     });
   }

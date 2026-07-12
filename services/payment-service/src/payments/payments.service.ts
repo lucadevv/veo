@@ -154,6 +154,13 @@ interface RefundClaim {
   newRefundedCents: number;
   isFullyRefunded: boolean;
   /**
+   * RC18 (ADR-022) · Causa ATRIBUIBLE al conductor (viaje no realizado / fraude del conductor). Solo entonces un
+   * refund TOTAL de una tarifa digital genera el clawback del neto del conductor (DriverDebt REFUND_CLAWBACK). El
+   * default (false) = lo absorbe la plataforma (dispute/fraude del pasajero). El system-initiated (booking cancel)
+   * es SIEMPRE false (no es culpa del conductor). Se persiste en el Refund y lo lee `completeRefund` al confirmar.
+   */
+  clawbackDriver: boolean;
+  /**
    * Aplica el backstop server-side de idempotencia por VENTANA TEMPORAL sobre (paymentId, céntimos) ANTES de
    * crear el refund (solo el camino ADMIN discrecional). El system-initiated NO lo lleva (tiene su `dedupKey`
    * determinista por bookingId). `false`/undefined = sin backstop de ventana (el operador pidió `forceNew`, o es
@@ -635,6 +642,10 @@ export class PaymentsService {
     // pasajero reintenta la propina desde su UI (nueva dedupKey → nuevo tip-Payment).
     if (payment.kind === 'TIP') {
       assertPaymentTransition(payment.status, 'FAILED');
+      // RC19 (ADR-022) · el CAS de status vive en el repo: `markTipFailed` ahora es un updateMany
+      // `where status ∈ [PENDING,DEBT]` + re-read. Si un webhook CONFIRMED concurrente ya capturó (CAPTURED),
+      // el updateMany no matchea → NO lo pisamos; devuelve el estado real (la captura gana), sin emitir
+      // `payment.failed`. El desenlace terminal de la propina no cambia (sin evento de falla).
       return this.repo.markTipFailed(payment.id, {
         status: 'FAILED',
         retries: this.maxRetries,
@@ -643,11 +654,16 @@ export class PaymentsService {
     }
     assertPaymentTransition(payment.status, 'DEBT');
     return this.repo.runInTransaction(async (tx) => {
+      // RC19 (ADR-022) · el CAS de status vive en el repo: `markPaymentDebtInTx` es un updateMany `where status=
+      // 'PENDING'` + re-read. Si un CONFIRMED concurrente ya capturó (CAPTURED) en la ventana TOCTOU, el CAS no
+      // matchea → la fila releída NO queda en DEBT → NO emitimos `payment.failed` (sería una "falla" FALSA sobre
+      // plata ya cobrada, que alertaría a seguridad + bloquearía viajes indebidamente). Espeja el CAS de captureSuccess.
       const updated = await this.repo.markPaymentDebtInTx(tx, payment.id, {
         status: 'DEBT',
         retries: this.maxRetries,
         failureReason: reason,
       });
+      if (updated.status !== 'DEBT') return updated; // otra transición ganó la carrera: no re-emitir sobre un estado ajeno
       const envelope = createEnvelope({
         eventType: 'payment.failed',
         producer: 'payment-service',
@@ -1264,6 +1280,9 @@ export class PaymentsService {
     // Gesto EXPLÍCITO del operador "es un reembolso NUEVO, no un reintento": salta el backstop de ventana para
     // permitir una 2da solicitud parcial idéntica legítima (el server no la distingue de un reintento sin esta señal).
     forceNew = false,
+    // RC18 · el operador marca que el refund es por causa ATRIBUIBLE al conductor (viaje no realizado / fraude
+    // del conductor) → un refund TOTAL clawbackea su neto ya pagado. Default false = lo absorbe la plataforma.
+    driverFault = false,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
     const payment = await this.findRefundablePaymentByTrip(tripId);
@@ -1317,6 +1336,9 @@ export class PaymentsService {
           dedupKey,
           status: RefundStatus.PENDING,
           reason,
+          // RC18 · se persiste al SOLICITAR; `completeRefund` lo lee al confirmar el reverso digital para decidir el
+          // clawback del neto del conductor (la solicitud PENDING → APPROVED/COMPLETED no lo re-escribe).
+          clawbackDriver: driverFault,
         });
         return { refundId: refund.id, paymentId: payment.id, status: refund.status };
       });
@@ -1425,6 +1447,9 @@ export class PaymentsService {
       newStatus,
       newRefundedCents,
       isFullyRefunded,
+      // RC18 · la causa (atribuible al conductor o no) se cristalizó al SOLICITAR y viaja en la fila; la propagamos
+      // al claim por consistencia (la materialización por `existingRefundId` no re-escribe la columna).
+      clawbackDriver: refund.clawbackDriver,
       // La solicitud ya dedupeó al crearse; aprobar es una acción distinta → sin backstop de ventana.
       enforceWindowDedup: false,
       // MATERIALIZA la solicitud PENDING existente (no crea una fila nueva): PENDING → APPROVED/COMPLETED por CAS.
@@ -1617,6 +1642,9 @@ export class PaymentsService {
       newStatus: 'REFUNDED',
       newRefundedCents,
       isFullyRefunded: true,
+      // RC18 · una cancelación de reserva NO es culpa del conductor (asiento lleno / oferta no disponible) → sin
+      // clawback: la plataforma absorbe el reverso, no se le cobra al conductor.
+      clawbackDriver: false,
     };
 
     try {
@@ -1712,6 +1740,8 @@ export class PaymentsService {
         newStatus: 'REFUNDED',
         newRefundedCents: tip.amountCents,
         isFullyRefunded: true,
+        // RC18 · una propina (kind=TIP) NO se clawbackea (el guard kind=FARE de applyRefundClawbackInTx igual lo excluye).
+        clawbackDriver: false,
       };
       try {
         await this.executeRefundClaim(tip, claim);
@@ -1831,6 +1861,8 @@ export class PaymentsService {
       dedupKey: claim.dedupKey,
       status,
       reason: claim.reason,
+      // RC18 · refund AUTO (system-initiated / propina): persiste la causa; `completeRefund` la evalúa al confirmar.
+      clawbackDriver: claim.clawbackDriver,
     });
   }
 
@@ -1846,6 +1878,8 @@ export class PaymentsService {
       await this.reverseCashDebtInTx(tx, payment.id, claim.amountCents, payment.grossCents);
       // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto (aprobar CASH salta
       // APPROVED: PENDING → COMPLETED directo cuando es una solicitud aprobada; o nace COMPLETED si es AUTO).
+      // RC18 · el clawback digital NO aplica a CASH (el efectivo tiene su propia reversa de comisión) y este camino
+      // NO pasa por completeRefund; `clawbackDriver` igual se persiste (materializeRefundInTx) por consistencia.
       const refund = await this.materializeRefundInTx(tx, payment, claim, RefundStatus.COMPLETED);
       await this.enqueueRefundedEventInTx(tx, payment, refund);
       return { refundId: refund.id, paymentId: payment.id, status: refund.status };
@@ -1900,6 +1934,7 @@ export class PaymentsService {
     //    transiciona la PENDING → APPROVED por CAS; si es AUTO, crea la fila APPROVED.
     const refund = await this.repo.runInTransaction(async (tx) => {
       await this.claimRefundReservationInTx(tx, payment, claim);
+      // RC18 · `clawbackDriver` viaja en el claim y lo persiste materializeRefundInTx; completeRefund lo evalúa al confirmar.
       return this.materializeRefundInTx(tx, payment, claim, RefundStatus.APPROVED);
     });
 
@@ -2104,8 +2139,71 @@ export class PaymentsService {
       if (claimed.count === 0) return false; // ya resuelto (redelivery) → idempotente, sin segundo evento.
       const refund = await this.repo.findRefundWithPaymentInTx(tx, refundId);
       await this.enqueueRefundedEventInTx(tx, refund.payment, refund);
+      await this.applyRefundClawbackInTx(tx, refund.payment, refund.clawbackDriver);
       return true;
     });
+  }
+
+  /**
+   * RC18 (ADR-022) · CLAWBACK CONDICIONAL del neto del conductor. Corre DENTRO de la tx que completa el refund
+   * digital (único punto por donde pasan AMBOS rieles: el síncrono `refundViaGateway` ACCEPTED y el asíncrono
+   * `applyRefundWebhookResult` CONFIRMED) → la deuda nace atómica con el reverso confirmado, nunca antes de que
+   * la plata vuelva.
+   *
+   * Crea una `DriverDebt` PENDING (reason REFUND_CLAWBACK) por el neto que el conductor cobró de la TARIFA
+   * (`gross − commission`), que se netea de su próximo payout (`applyDebtNetting`). SOLO si:
+   *  - `clawbackDriver` (causa atribuible al conductor; un dispute/fraude del pasajero → false → la plataforma lo come);
+   *  - el pago quedó TOTALMENTE reembolsado (status REFUNDED; un parcial lo absorbe la plataforma de su comisión);
+   *  - es una tarifa DIGITAL (method != CASH — el efectivo tiene su propia reversa) con conductor y kind=FARE;
+   *  - el conductor YA fue liquidado por ESE viaje: existe un Payout suyo cuyo período cubre el `capturedAt`. Si el
+   *    refund ocurre ANTES de la liquidación, `collectEarnings` ya excluye el pago REFUNDED (no se paga) → crear la
+   *    deuda ahí sería doble-castigo (deuda por un viaje que el conductor nunca cobró).
+   *
+   * Idempotente por el UNIQUE(paymentId) de DriverDebt: se chequea la existencia ANTES de crear (no se confía en la
+   * violación del UNIQUE, que abortaría la tx del refund en Postgres). El CAS de `completeRefund` ya serializa: un
+   * solo camino completa cada refund, así que el check-then-create acá no compite consigo mismo.
+   */
+  private async applyRefundClawbackInTx(
+    tx: PaymentTx,
+    payment: Payment,
+    clawbackDriver: boolean,
+  ): Promise<void> {
+    if (!clawbackDriver) return;
+    if (payment.status !== 'REFUNDED') return; // solo refund TOTAL
+    if (payment.method === 'CASH') return; // el efectivo tiene su propia reversa (reverseCashDebtInTx)
+    if (payment.kind !== 'FARE') return; // se clawbackea la tarifa, no una propina
+    if (!payment.driverId) return;
+    const netCents = payment.grossCents - payment.commissionCents; // lo que el conductor cobró de la tarifa
+    if (netCents <= 0) return;
+
+    const capturedAt = payment.capturedAt ?? payment.createdAt;
+    const alreadySettled = await tx.payout.findFirst({
+      where: {
+        driverId: payment.driverId,
+        periodStart: { lte: capturedAt },
+        periodEnd: { gt: capturedAt },
+      },
+      select: { id: true },
+    });
+    if (!alreadySettled) return; // aún no liquidado → el sweep ya excluye el pago REFUNDED; sin clawback.
+
+    const existing = await tx.driverDebt.findUnique({ where: { paymentId: payment.id } });
+    if (existing) return; // idempotente: el clawback de este pago ya existe.
+
+    await tx.driverDebt.create({
+      data: {
+        id: uuidv7(),
+        driverId: payment.driverId,
+        tripId: payment.tripId,
+        paymentId: payment.id,
+        amountCents: netCents,
+        reason: 'REFUND_CLAWBACK',
+        status: 'PENDING',
+      },
+    });
+    this.logger.log(
+      `RC18 · clawback ${netCents} céntimos al conductor ${payment.driverId} por refund total del viaje ${payment.tripId} (viaje revertido, causa del conductor)`,
+    );
   }
 
   /**

@@ -186,6 +186,17 @@ export class RefundDto {
   @IsOptional()
   @IsBoolean()
   forceNew?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'RC18 · el refund es por causa ATRIBUIBLE al conductor (viaje no realizado / fraude del conductor). Solo ' +
+      'entonces un refund TOTAL de una tarifa digital ya liquidada clawbackea el neto del conductor (se descuenta ' +
+      'de su próximo payout). Default false = lo absorbe la plataforma (dispute/fraude del pasajero).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  driverFault?: boolean;
 }
 
 /** Body del POST /refunds/:id/reject: motivo del rechazo del operador (se persiste en Refund.failureReason). */

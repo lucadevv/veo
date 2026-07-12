@@ -13,7 +13,7 @@ import {
 import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
 import { TripsRepository } from './trips.repository';
-import { OfferingUnavailableError } from './trips.errors';
+import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { emitTripRequested, emitBidPosted } from './trip-events';
 import { catalogDegradedTotal } from './trip-metrics';
 import { TripQueryService } from './trip-query.service';
@@ -129,13 +129,28 @@ interface PublishedEvent {
 }
 
 /** Prisma falso con un único viaje en memoria. Captura los eventos encolados en el outbox. */
-function makePrisma(initial: Trip | null) {
+function makePrisma(
+  initial: Trip | null,
+  // Simula una carrera concurrente: en el PRÓXIMO updateMany del CAS de changeDestination (el que lleva
+  // `fareCents` en el WHERE), muta el store con estos valores y devuelve count 0 — como si otro escritor
+  // hubiese ganado entre el re-read in-tx y el write. Cubre la atribución de causa (status vs fare_changed).
+  raceOnDestinationCas?: { status?: TripStatus; fareCents?: number },
+  // RC23 · simula que, tras tomar el advisory lock in-tx, el re-check `tx.trip.findFirst` encuentra un viaje
+  // vivo (otra tx concurrente lo creó y committeó primero) → createTrip debe lanzar ActiveTripExistsError.
+  liveInTx: { id: string } | null = null,
+) {
   let store = initial;
   const outbox: PublishedEvent[] = [];
   const tripEvents: { eventType: string; payload: unknown }[] = [];
 
   const tx = {
+    // RC23 · re-check in-tx del invariante "un solo viaje vivo" bajo advisory lock. En estos dobles no hay
+    // concurrencia real ni viaje vivo previo → el lock es no-op y findFirst devuelve null (no bloquea el create).
+    $executeRaw: async () => 0,
     trip: {
+      // RC23 · guard in-tx (post-lock): sin viaje vivo previo en el doble → null. El test dedicado del 409
+      // in-tx sobreescribe esta rama para simular que otra tx creó un viaje vivo entre el check y el create.
+      findFirst: async () => liveInTx,
       create: async ({ data }: { data: Partial<Trip> }) => {
         store = buildTrip(data);
         return store;
@@ -152,9 +167,19 @@ function makePrisma(initial: Trip | null) {
           status?: TripStatus | { in: readonly TripStatus[] };
           agreedFareCents?: number | null;
           negotiationSeq?: number;
+          fareCents?: number;
         };
         data: Partial<Trip>;
       }) => {
+        // CAS de changeDestination (ADR-022 A3): el WHERE lleva `fareCents`. Modo carrera: mutamos el store
+        // (otro escritor ganó) y devolvemos count 0. Si no, honramos el CAS optimista (fareCents debe coincidir).
+        if (where?.fareCents !== undefined) {
+          if (raceOnDestinationCas) {
+            store = buildTrip({ ...(store ?? {}), ...raceOnDestinationCas });
+            return { count: 0 };
+          }
+          if (store?.fareCents !== where.fareCents) return { count: 0 };
+        }
         // Guard de carrera (activateScheduledTrip, expireFromNoOffers, rebid): si el where exige un
         // status concreto y el store YA no está en él (otro tap ganó), no toca fila → count 0 (idempotente).
         // N9: applyAgreedFare usa `status: { in: [...] }` (no-terminal) — soportamos ambas formas.
@@ -309,6 +334,28 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     expect(view.fareCents).toBe(999);
     // No se encoló ningún evento nuevo (devolvió el existente).
     expect(prisma._outbox).toHaveLength(0);
+  });
+
+  it('RC23 · un viaje vivo que aparece ENTRE el fast-fail y el create (carrera) → 409 in-tx, NO doble viaje', async () => {
+    // El gate de arriba (fuera de la tx) devuelve null (no había viaje vivo al chequear), pero para cuando la tx
+    // toma el advisory lock otra tx concurrente YA creó y committeó un viaje vivo del mismo pasajero. El re-check
+    // in-tx (post-lock) lo encuentra → ActiveTripExistsError con el activeTripId. Sin este re-check nacerían DOS.
+    const prisma = makePrisma(null, undefined, { id: 'trip-vivo-concurrente' });
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    await expect(svc.createTrip({ ...baseCreateDto })).rejects.toBeInstanceOf(ActiveTripExistsError);
+    // No se creó ni encoló nada: la tx abortó antes del create (el store sigue vacío).
+    expect(prisma._store).toBeNull();
+    expect(prisma._outbox).toHaveLength(0);
+  });
+
+  it('RC23 · una RESERVA (scheduledFor) NO toma el lock ni el re-check in-tx (varias reservas conviven)', async () => {
+    // SCHEDULED no es "vivo" → el invariante de un-solo-viaje-vivo no aplica; aunque el fake tenga un liveInTx,
+    // la rama scheduled NO entra al guard (if !scheduledFor) → la reserva se crea igual.
+    const prisma = makePrisma(null, undefined, { id: 'otro-vivo' });
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    const scheduledFor = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // +1h
+    const view = await svc.createTrip({ ...baseCreateDto, scheduledFor });
+    expect(view.status).toBe(TripStatus.SCHEDULED);
   });
 
   it('modo niño sin código → ValidationError', async () => {
@@ -1065,6 +1112,111 @@ describe('TripsService.changeDestination · BR-T01 tarifa inmutable salvo cambio
     const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
     const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
     expect(view.fareCents).toBe(2600);
+  });
+
+  it('ADR-022 changeDest · el audit trip.destination_changed graba el fareCents FLOOREADO (lo cobrado), no el recompute crudo', async () => {
+    // PUJA bid 2600, recompute 2400 (< bid) → se persiste/cobra 2600 (piso A3). El log append-only (Ley 29733)
+    // DEBE registrar 2600 y previousFareCents 2600 — antes grababa fare.cents crudo (2400) → el audit mentía
+    // ±S/2.00 en el caso que el piso protege.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    const event = prisma._tripEvents.find((e) => e.eventType === 'trip.destination_changed');
+    expect(event?.payload).toMatchObject({ fareCents: 2600, previousFareCents: 2600 });
+  });
+
+  it('RC5 · changeDestination PUBLICA trip.destination_changed al OUTBOX (antes solo grababa audit interno)', async () => {
+    // El bug: era el ÚNICO mutador significativo que NO emitía al outbox → la familia (share-service) nunca se
+    // enteraba y el destino de un menor se cambiaba en silencio. Ahora publica: notification alerta al guardián.
+    const prisma = makePrisma(
+      buildTrip({
+        status: TripStatus.ACCEPTED,
+        dispatchMode: 'FIXED',
+        fareCents: 2400,
+        childMode: true,
+        passengerId: 'guardian-1',
+      }),
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+
+    const emitted = prisma._outbox.find((e) => e.eventType === 'trip.destination_changed');
+    expect(emitted).toBeTruthy(); // se publicó al outbox (no solo el trip_event interno)
+    expect(emitted!.envelope.payload).toMatchObject({
+      tripId: 'trip-1',
+      passengerId: 'guardian-1',
+      childMode: true, // viaja para que notification priorice la alerta al guardián (seguridad del menor)
+    });
+  });
+
+  it('ADR-022 changeDest · re-cotiza con el pricing EFECTIVO del admin (overlay), no el catálogo de código', async () => {
+    // Económico base ×1.0 → 2400 (ruta 10km/20min). El admin subió el multiplier a ×1.5 por overlay →
+    // 2400 × 1.5 = 3600. SIN el fix, changeDestination usaba offering.pricing de código (×1.0) → 2400,
+    // incoherente con el create (que sí usa el overlay). El fix lo alinea vía resolveEffectiveOffering.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', fareCents: 2400 }),
+    );
+    const catalog = {
+      resolveOffering: async () => ({ enabled: true, pricing: { multiplier: 1.5, minFareCents: 500 } }),
+    } as never;
+    const svc = new TripsService(
+      new TripsRepository(prisma as never),
+      longRoute10k as never,
+      undefined, // config
+      undefined, // redis
+      undefined, // dispatchModes
+      catalog, // CatalogService (posición 6)
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(3600);
+  });
+
+  it('ADR-022 changeDest · una oferta DESHABILITADA por el admin NO rompe el cambio de destino (mid-viaje, enforceEnabled:false)', async () => {
+    // El create tira 409 si el admin deshabilitó la oferta; mid-viaje el viaje YA existe → el cambio de destino
+    // debe seguir andando con el pricing del overlay, sin gate de enabled.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', fareCents: 2400 }),
+    );
+    const catalog = {
+      resolveOffering: async () => ({ enabled: false, pricing: { multiplier: 1.0, minFareCents: 500 } }),
+    } as never;
+    const svc = new TripsService(
+      new TripsRepository(prisma as never),
+      longRoute10k as never,
+      undefined, // config
+      undefined, // redis
+      undefined, // dispatchModes
+      catalog, // CatalogService (posición 6)
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(2400); // no lanza; usa el pricing del overlay (×1.0 acá)
+  });
+
+  it('ADR-022 A3 · CAS: carrera que sacó el viaje de un estado editable → ConflictError reason=status_not_editable', async () => {
+    // El viaje era editable al leerse, pero entre el re-read in-tx y el write un start/cancel lo movió.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+      { status: TripStatus.IN_PROGRESS },
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await expect(
+      svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
+    ).rejects.toMatchObject({ details: { reason: 'status_not_editable' } });
+  });
+
+  it('ADR-022 A3 · CAS: carrera de re-puja (fareCents cambió) → ConflictError reason=fare_changed (retryable), NO "estado actual"', async () => {
+    // El bid subió (re-puja aceptada) entre el re-read y el write: el CAS sobre fareCents falla. El caller debe
+    // poder distinguir esto (reintentar con el bid nuevo) de un estado no-editable (rendirse).
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+      { fareCents: 3000 }, // otro escritor subió el bid; el estado sigue editable
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await expect(
+      svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
+    ).rejects.toMatchObject({ details: { reason: 'fare_changed', currentFareCents: 3000 } });
   });
 });
 

@@ -9,7 +9,12 @@
  * Todo en céntimos PEN (@veo/utils). km/min salen de la ruta de @veo/maps. surge ∈ [1.0, 2.0] (default 1.0).
  */
 import { money, scaleMoney, addMoney, type Money, ValidationError } from '@veo/utils';
-import { CHILD_MODE_FEE_CENTS, type OfferingPricingPolicy } from '@veo/shared-types';
+import {
+  CHILD_MODE_FEE_CENTS,
+  MIN_SURGE,
+  MAX_SURGE,
+  type OfferingPricingPolicy,
+} from '@veo/shared-types';
 
 /** Banderazo base: S/ 6.00. */
 export const BASE_FARE_CENTS = 600;
@@ -25,8 +30,12 @@ export const PER_MIN_CENTS = 30;
  */
 export { CHILD_MODE_FEE_CENTS };
 
-export const MIN_SURGE = 1.0;
-export const MAX_SURGE = 2.0;
+/**
+ * Límites del surge [1.0, 2.0]. FUENTE ÚNICA en `@veo/shared-types` (junto al catálogo) — re-exportados acá
+ * para los consumidores que ya los importan de `./fare`. El QUOTE del BFF consume los MISMOS límites: el
+ * rango del surge no puede divergir entre el cobro firme y el preview.
+ */
+export { MIN_SURGE, MAX_SURGE };
 
 export interface FareInput {
   distanceMeters: number;

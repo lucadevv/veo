@@ -333,6 +333,12 @@ enum DriverDebtReason {
   /// El conductor cobró la comisión EN EFECTIVO (viaje CASH) → la debe a la plataforma.
   CASH_COMMISSION
 
+  /// RC18 (ADR-022) · El conductor YA cobró su neto de una TARIFA DIGITAL en un payout, y el viaje se
+  /// revirtió DESPUÉS con un refund TOTAL por causa atribuible a ÉL (viaje no realizado / fraude del
+  /// conductor) → debe devolver ese neto. Se netea de su próximo payout. Un dispute/fraude del PASAJERO
+  /// NO genera esta deuda (la plataforma lo absorbe — decisión de producto, no castigar al conductor honesto).
+  REFUND_CLAWBACK
+
   @@schema("payment")
 }
 
@@ -438,6 +444,11 @@ model Refund {
   /// la migración `20260622000000_refund_dedup_key` (`WHERE status <> 'REJECTED' AND dedup_key IS NOT NULL`) —
   /// NO lo "corrijas" a `@unique` ni dejes que un `prisma migrate` lo regenere como total: rompés el reintento.
   dedupKey      String?    @map("dedup_key")
+  /// RC18 (ADR-022) · Señal PERSISTIDA de que este refund es por causa ATRIBUIBLE al conductor (viaje no
+  /// realizado / fraude del conductor). Solo entonces un refund TOTAL de una tarifa digital genera el
+  /// clawback (DriverDebt REFUND_CLAWBACK) al completar. Default false = lo absorbe la plataforma
+  /// (dispute/fraude del pasajero). Lo setea el operador en el pedido (RefundDto.driverFault).
+  clawbackDriver Boolean   @default(false) @map("clawback_driver")
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
