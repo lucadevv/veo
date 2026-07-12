@@ -27,15 +27,17 @@ export function Stepper({
   const atMin = value <= min;
   const atMax = value >= max;
 
-  const btnStyle = (disabled: boolean): ViewStyle => ({
+  const btnStyle = (disabled: boolean, accent = false): ViewStyle => ({
     width: 40,
     height: 40,
     borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: accent ? 1 : StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.surface,
-    borderColor: theme.colors.border,
+    // El "+" es un círculo de acento (tint de marca + borde/glifo teal), fiel al frame de publicar viaje;
+    // el "−" queda neutro (surface + borde tenue). El acento marca la acción que SUMA.
+    backgroundColor: accent ? theme.colors.brandDim : theme.colors.surface,
+    borderColor: accent ? theme.colors.accent : theme.colors.border,
     opacity: disabled ? 0.4 : 1,
   });
 
@@ -58,11 +60,13 @@ export function Stepper({
         <Pressable
           onPress={() => onChange(Math.min(max, value + 1))}
           disabled={atMax}
-          style={btnStyle(atMax)}
+          style={btnStyle(atMax, true)}
           accessibilityRole="button"
           accessibilityLabel="Agregar uno"
         >
-          <Text variant="title3">+</Text>
+          <Text variant="title3" color="accent">
+            +
+          </Text>
         </Pressable>
       </View>
     </View>

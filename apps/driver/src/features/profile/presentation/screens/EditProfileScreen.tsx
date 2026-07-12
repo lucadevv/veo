@@ -168,7 +168,12 @@ export const EditProfileScreen = ({ navigation }: Props): React.JSX.Element => {
               onPress={() => setSheetOpen(true)}
               style={[
                 styles.chip,
-                { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill },
+                {
+                  backgroundColor: theme.colors.surfaceElevated,
+                  borderRadius: theme.radii.pill,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                },
               ]}
             >
               {uploading ? (

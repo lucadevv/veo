@@ -6,7 +6,7 @@ import { Banner, Button, SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-ki
 import type { DriverDocument } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { IconChevronLeft, IconPlus } from '../../../../shared/presentation/icons';
+import { IconArrowLeft, IconPlus } from '../../../../shared/presentation/icons';
 import {
   countDocumentsNeedingAttention,
   documentStatusTone,
@@ -67,7 +67,7 @@ function DocumentsHeader({
           pressed ? { backgroundColor: theme.colors.surfaceElevated } : null,
         ]}
       >
-        <IconChevronLeft size={24} color={theme.colors.ink} />
+        <IconArrowLeft size={24} color={theme.colors.ink} strokeWidth={2} />
       </Pressable>
       <Text variant="title1" numberOfLines={1} style={styles.headerTitle}>
         {title}

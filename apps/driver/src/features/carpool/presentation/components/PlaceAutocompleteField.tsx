@@ -9,6 +9,8 @@ interface PlaceAutocompleteFieldProps {
   placeholder: string;
   /** Texto inicial (ej. el título del lugar ya elegido al editar). */
   initialText?: string;
+  /** Glifo a la izquierda del input (ej. punto de origen lima / pin de destino verde). */
+  leftIcon?: React.ReactNode;
   /** Reporta la selección (o `null` si el conductor empezó a re-escribir → hay que re-elegir). */
   onSelect: (place: PlaceSuggestion | null) => void;
 }
@@ -23,6 +25,7 @@ export function PlaceAutocompleteField({
   label,
   placeholder,
   initialText,
+  leftIcon,
   onSelect,
 }: PlaceAutocompleteFieldProps): React.JSX.Element {
   const theme = useTheme();
@@ -37,6 +40,7 @@ export function PlaceAutocompleteField({
       <TextField
         label={label}
         placeholder={placeholder}
+        leftIcon={leftIcon}
         value={text}
         onChangeText={(next) => {
           setText(next);

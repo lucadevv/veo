@@ -13,6 +13,7 @@ import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { useActiveVehicle } from '../hooks/useActiveVehicle';
 import { usePublishTrip } from '../hooks/useCarpool';
 import { PlaceAutocompleteField } from '../components/PlaceAutocompleteField';
+import { IconCircle, IconMap } from '../../../../shared/presentation/icons';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CarpoolPublish'>;
 
@@ -106,11 +107,13 @@ export const CarpoolPublishScreen = ({ navigation }: Props): React.JSX.Element =
           <PlaceAutocompleteField
             label={t('carpool.origin')}
             placeholder={t('carpool.originPlaceholder')}
+            leftIcon={<IconCircle size={18} color={theme.colors.brand} />}
             onSelect={setOrigin}
           />
           <PlaceAutocompleteField
             label={t('carpool.destination')}
             placeholder={t('carpool.destinationPlaceholder')}
+            leftIcon={<IconMap size={18} color={theme.colors.success} />}
             onSelect={setDest}
           />
         </Reveal>

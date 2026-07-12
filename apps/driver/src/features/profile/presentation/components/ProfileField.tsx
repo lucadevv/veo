@@ -40,8 +40,8 @@ export const ProfileField = ({
         style={[
           styles.box,
           {
-            backgroundColor: theme.colors.surface,
-            borderColor: locked ? theme.colors.border : theme.colors.borderStrong,
+            backgroundColor: locked ? theme.colors.bg : theme.colors.surface,
+            borderColor: theme.colors.border,
             borderRadius: theme.radii.sm,
             paddingHorizontal: theme.spacing.lg,
             paddingVertical: theme.spacing.md,
