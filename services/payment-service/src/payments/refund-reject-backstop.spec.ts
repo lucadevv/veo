@@ -117,10 +117,10 @@ function makeRepo(payment: FakePayment, seedRefund?: FakeRefund) {
       const r = refunds.find((x) => x.id === refundId);
       if (r) r.externalRefundId = externalRefundId;
     }),
-    // CAS PENDING→REJECTED (único punto donde un Refund se vuelve REJECTED).
+    // CAS APPROVED→REJECTED (único punto que compensa un desembolso EN VUELO rechazado por el proveedor).
     casRejectRefund: vi.fn(
       async (_tx: PaymentTx, refundId: string, data: Partial<FakeRefund>) => {
-        const r = refunds.find((x) => x.id === refundId && x.status === 'PENDING');
+        const r = refunds.find((x) => x.id === refundId && x.status === 'APPROVED');
         if (!r) return { count: 0 };
         Object.assign(r, data);
         return { count: 1 };
@@ -193,7 +193,7 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       approvedBy: 'system',
       dedupKey: deriveBookingCancellationRefundDedupKey(BOOKING_ID), // SYSTEM-INITIATED.
       externalRefundId: 'reverse-uid-async',
-      status: 'PENDING',
+      status: 'APPROVED',
       reason: BookingCancelledRazon.ASIENTO_LLENO,
       failureReason: null,
     };
@@ -231,7 +231,7 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       approvedBy: 'system',
       dedupKey: deriveBookingCancellationRefundDedupKey(BOOKING_ID),
       externalRefundId: 'reverse-uid-exp',
-      status: 'PENDING',
+      status: 'APPROVED',
       reason: BookingCancelledRazon.OFERTA_NO_DISPONIBLE,
       failureReason: null,
     };
@@ -260,7 +260,7 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       approvedBy: 'system',
       dedupKey: deriveBookingCancellationRefundDedupKey(BOOKING_ID),
       externalRefundId: 'reverse-uid-redeliv',
-      status: 'PENDING',
+      status: 'APPROVED',
       reason: BookingCancelledRazon.ASIENTO_LLENO,
       failureReason: null,
     };
@@ -322,7 +322,7 @@ describe('rejectRefundAndCompensate · backstop del invariante sagrado (riel com
       approvedBy: 'admin-user-1',
       dedupKey: null, // ADMIN discrecional → sin dedupKey system-initiated.
       externalRefundId: 'reverse-uid-admin',
-      status: 'PENDING',
+      status: 'APPROVED',
       reason: 'goodwill',
       failureReason: null,
     };

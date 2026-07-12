@@ -273,17 +273,18 @@ export class PaymentsController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Reembolso de un viaje (BR-P06 · finance:refund). Ventana 7 días; montos altos (>umbral) requieren ADMIN o ' +
-      'SUPERADMIN (dual-control). Idempotente: backstop por ventana sobre (pago, monto); forceNew habilita un 2do parcial idéntico',
+      'SOLICITA un reembolso de un viaje (cola de aprobación · finance:refund): crea la solicitud PENDING, NO ' +
+      'desembolsa hasta que se apruebe (POST /refunds/:id/approve). Ventana 7 días. Idempotente: backstop por ' +
+      'ventana sobre (pago, monto) + Idempotency-Key; forceNew habilita una 2da solicitud parcial idéntica',
   })
   refund(
     @Param('tripId') tripId: string,
     @Body() dto: RefundDto,
     @CurrentUser() user: AuthenticatedUser,
-    // Idempotency-Key del operador (panel admin) → barrera dura contra el doble-reembolso parcial.
+    // Idempotency-Key del operador (panel admin) → barrera dura contra la doble-solicitud parcial.
     @Headers('Idempotency-Key') idempotencyKey?: string,
   ) {
-    return this.payments.refund(
+    return this.payments.requestRefund(
       tripId,
       dto.amountCents,
       dto.reason,

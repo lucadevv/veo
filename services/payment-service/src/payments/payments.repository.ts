@@ -453,14 +453,18 @@ export class PaymentsRepository {
 
   // completeRefund ------------------------------------------------------------------------------------
 
-  /** CAS de completar refund: PENDING → COMPLETED (idempotente; una redelivery ve count=0). */
+  /**
+   * CAS de completar refund: APPROVED → COMPLETED (idempotente; una redelivery ve count=0). El estado en vuelo
+   * de un desembolso (reserva tomada, reverso al riel esperando confirmación) es APPROVED — PENDING pasó a
+   * significar "solicitado, sin desembolsar" (cola de aprobación), así que un PENDING NUNCA se completa por acá.
+   */
   casCompleteRefund(
     tx: PaymentTx,
     refundId: string,
     data: Prisma.RefundUncheckedUpdateManyInput,
   ): Promise<{ count: number }> {
     return tx.refund.updateMany({
-      where: { id: refundId, status: RefundStatus.PENDING },
+      where: { id: refundId, status: RefundStatus.APPROVED },
       data,
     });
   }
@@ -472,8 +476,59 @@ export class PaymentsRepository {
 
   // rejectRefundAndCompensate -------------------------------------------------------------------------
 
-  /** CAS de rechazo de refund: PENDING → REJECTED (único punto; idempotente por CAS). */
+  /**
+   * CAS de rechazo de un desembolso EN VUELO: APPROVED → REJECTED (rechazo del proveedor, con compensación de la
+   * reserva; único punto que compensa; idempotente por CAS). Distinto del rechazo del OPERADOR de una solicitud
+   * PENDING (sin reserva, sin compensar): ese va por `rejectPendingRefund`.
+   */
   casRejectRefund(
+    tx: PaymentTx,
+    refundId: string,
+    data: Prisma.RefundUncheckedUpdateManyInput,
+  ): Promise<{ count: number }> {
+    return tx.refund.updateMany({
+      where: { id: refundId, status: RefundStatus.APPROVED },
+      data,
+    });
+  }
+
+  // Cola de aprobación de reembolsos (money-OUT · frame HZ8uz) ----------------------------------------
+
+  /** Un refund por id (aprobar/rechazar/detalle admin). Réplica. */
+  findRefundById(id: string): Promise<Refund | null> {
+    return this.prisma.read.refund.findUnique({ where: { id } });
+  }
+
+  /**
+   * Página de la cola de reembolsos para el admin (filtro por estado opcional, cursor por id DESC = uuidv7
+   * cronológico). Incluye el Payment por FK (tripId/passengerId/method para la fila). Trae `limit+1` para
+   * derivar el `nextCursor` sin un COUNT. Réplica.
+   */
+  findRefundsForAdmin(params: {
+    status?: RefundStatus;
+    cursorId?: string;
+    limit: number;
+  }): Promise<RefundWithPayment[]> {
+    return this.prisma.read.refund.findMany({
+      where: params.status ? { status: params.status } : {},
+      include: { payment: true },
+      orderBy: { id: 'desc' },
+      take: params.limit + 1,
+      ...(params.cursorId ? { cursor: { id: params.cursorId }, skip: 1 } : {}),
+    });
+  }
+
+  /** Detalle admin de un refund con su Payment (saldo reembolsable). Réplica. */
+  findRefundWithPaymentById(id: string): Promise<RefundWithPayment | null> {
+    return this.prisma.read.refund.findUnique({ where: { id }, include: { payment: true } });
+  }
+
+  /**
+   * CAS de APROBACIÓN / avance desde la cola: PENDING → APPROVED (desembolso al riel) o PENDING → COMPLETED
+   * (aprobación de CASH que devuelve local en el acto). Idempotente por CAS: un doble-approve concurrente ve
+   * count=0. Corre DENTRO de la tx de la reserva del Payment (atomicidad reserva ↔ avance del refund).
+   */
+  casApproveRefundFromPending(
     tx: PaymentTx,
     refundId: string,
     data: Prisma.RefundUncheckedUpdateManyInput,
@@ -482,6 +537,40 @@ export class PaymentsRepository {
       where: { id: refundId, status: RefundStatus.PENDING },
       data,
     });
+  }
+
+  /**
+   * Rechazo del OPERADOR de una solicitud PENDING (sin reserva → SIN compensación) → REJECTED. CAS por status
+   * (idempotente; un doble-submit ve count=0). Escribe en el PRIMARIO (no-tx: no hay outbox ni movimiento de plata).
+   * También lo usa el camino "irrecuperable al aprobar" (gateway sin reembolsos / cobro sin railRef).
+   */
+  rejectPendingRefund(
+    refundId: string,
+    data: Prisma.RefundUncheckedUpdateManyInput,
+  ): Promise<{ count: number }> {
+    return this.prisma.write.refund.updateMany({
+      where: { id: refundId, status: RefundStatus.PENDING },
+      data,
+    });
+  }
+
+  /** Conteo de refunds por estado (KPIs Solicitados/Aprobados). Réplica (índice `@@index([status])`). */
+  countRefundsByStatus(status: RefundStatus): Promise<number> {
+    return this.prisma.read.refund.count({ where: { status } });
+  }
+
+  /** Suma de céntimos de los refunds COMPLETED con `updatedAt` desde `since` (KPI "Procesado hoy"). Réplica. */
+  async sumCompletedRefundAmountSince(since: Date): Promise<number> {
+    const agg = await this.prisma.read.refund.aggregate({
+      _sum: { amountCents: true },
+      where: { status: RefundStatus.COMPLETED, updatedAt: { gte: since } },
+    });
+    return agg._sum.amountCents ?? 0;
+  }
+
+  /** Conteo de Payments cuyo status esté en `statuses` (base/numerador de la tasa de reembolso). Réplica. */
+  countPaymentsInStatuses(statuses: Prisma.PaymentWhereInput['status']): Promise<number> {
+    return this.prisma.read.payment.count({ where: { kind: 'FARE', status: statuses } });
   }
 
   /** Relee el Refund dentro de la tx (rechazo/compensación). */

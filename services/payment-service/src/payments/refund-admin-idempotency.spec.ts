@@ -1,9 +1,10 @@
 /**
- * Idempotencia del refund ADMIN discrecional (cierre de la ALTA del audit del panel de finanzas): cuando el
- * operador trae un `Idempotency-Key` desde el panel, el refund se vuelve IDEMPOTENTE de verdad — un doble-submit
- * o un reintento de red con el MISMO key NO doble-reembolsa (UNIQUE PARCIAL en `Refund.dedupKey`, status <>
- * REJECTED). El refund PARCIAL NO lo blindaba la máquina de estados (el CAS solo impide exceder el saldo, no hace
- * idempotente la operación lógica), así que el key es la barrera real. Sin key ⇒ dedupKey NULL (compat: como antes).
+ * Idempotencia de la SOLICITUD de reembolso ADMIN (cola de aprobación · money-OUT · frame HZ8uz): `requestRefund`
+ * crea la solicitud PENDING (NO desembolsa; eso es `approveRefund`). Un doble-submit / reintento de red NO crea DOS
+ * solicitudes del mismo dinero — doble barrera: (1) backstop de VENTANA sobre (paymentId, céntimos) bajo advisory
+ * lock, que dedupea aunque el `Idempotency-Key` diverja o falte; (2) `Idempotency-Key` → `dedupKey` (UNIQUE PARCIAL
+ * en `Refund.dedupKey`, status <> REJECTED) → P2002 devuelve la existente. Sin key ⇒ dedupKey NULL (idempotencia por
+ * ventana). `forceNew` salta la ventana para una 2da solicitud parcial idéntica deliberada.
  *
  * Estilo del repo: dobles de Prisma a mano que HONRAN el UNIQUE de `refund.dedupKey` (como refund-booking-cancellation.spec).
  */
@@ -160,23 +161,25 @@ const operator: AuthenticatedUser = {
   roles: [AdminRole.ADMIN],
 } as AuthenticatedUser;
 
-describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () => {
-  it('CON Idempotency-Key: persiste dedupKey derivada del key (barrera dura)', async () => {
+describe('PaymentsService.requestRefund · idempotencia de la solicitud (Idempotency-Key + ventana)', () => {
+  it('CON Idempotency-Key: crea la solicitud PENDING con dedupKey derivada del key (barrera dura)', async () => {
     const { repo, refunds } = makeRepo(capturedPayment());
     const svc = buildService(repo);
 
-    const res = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
+    const res = await svc.requestRefund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
 
     expect(refunds).toHaveLength(1);
     expect(refunds[0]!.dedupKey).toBe(deriveAdminRefundDedupKey('KEY-A'));
+    expect(refunds[0]!.status).toBe('PENDING');
     expect(res.refundId).toBe(refunds[0]!.id);
+    expect(res.status).toBe('PENDING');
   });
 
   it('SIN Idempotency-Key: dedupKey NULL (compat — idempotencia = CAS optimista, como antes)', async () => {
     const { repo, refunds } = makeRepo(capturedPayment());
     const svc = buildService(repo);
 
-    await svc.refund('trip-1', 1000, 'ajuste', operator);
+    await svc.requestRefund('trip-1', 1000, 'ajuste', operator);
 
     expect(refunds).toHaveLength(1);
     expect(refunds[0]!.dedupKey).toBeNull();
@@ -198,7 +201,7 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     });
     const svc = buildService(repo);
 
-    const res = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
+    const res = await svc.requestRefund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
 
     // El 2do intento chocó contra el UNIQUE (P2002) → devolvió el refund existente (mismo pago y monto), sin
     // crear uno nuevo.
@@ -223,7 +226,7 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
 
     // El operador edita el monto a 500 y reenvía con el MISMO key: NO debe devolver el refund de 1000 como
     // éxito (sería un sub-reembolso enmascarado) → conflicto explícito.
-    await expect(svc.refund('trip-1', 500, 'ajuste', operator, 'KEY-A')).rejects.toThrow(
+    await expect(svc.requestRefund('trip-1', 500, 'ajuste', operator, 'KEY-A')).rejects.toThrow(
       /distinto pago o monto/,
     );
   });
@@ -244,7 +247,7 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     });
     const svc = buildService(repo);
 
-    const res = await svc.refund('trip-1', 1000, 'motivo B', operator, 'KEY-A');
+    const res = await svc.requestRefund('trip-1', 1000, 'motivo B', operator, 'KEY-A');
     expect(res.refundId).toBe('refund-motivo-A');
   });
 
@@ -255,8 +258,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     const { repo, refunds } = makeRepo(capturedPayment({ amountCents: 4500 }));
     const svc = buildService(repo);
 
-    const first = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
-    const second = await svc.refund('trip-1', 1000, 'ajuste', operator, 'KEY-B'); // key DIVERGENTE, sin forceNew
+    const first = await svc.requestRefund('trip-1', 1000, 'ajuste', operator, 'KEY-A');
+    const second = await svc.requestRefund('trip-1', 1000, 'ajuste', operator, 'KEY-B'); // key DIVERGENTE, sin forceNew
 
     expect(refunds).toHaveLength(1); // un solo money-OUT
     expect(second.refundId).toBe(first.refundId); // el 2do devolvió el existente
@@ -267,8 +270,8 @@ describe('PaymentsService.refund · idempotencia admin (Idempotency-Key)', () =>
     const { repo, refunds } = makeRepo(capturedPayment({ amountCents: 4500 }));
     const svc = buildService(repo);
 
-    await svc.refund('trip-1', 1000, 'ajuste 1', operator, 'KEY-A');
-    await svc.refund('trip-1', 1000, 'ajuste 2', operator, 'KEY-B', true); // forceNew=true
+    await svc.requestRefund('trip-1', 1000, 'ajuste 1', operator, 'KEY-A');
+    await svc.requestRefund('trip-1', 1000, 'ajuste 2', operator, 'KEY-B', true); // forceNew=true
 
     expect(refunds).toHaveLength(2);
     expect(refunds[0]!.dedupKey).toBe(deriveAdminRefundDedupKey('KEY-A'));

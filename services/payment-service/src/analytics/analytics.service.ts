@@ -29,6 +29,8 @@ export interface RevenueAnalytics {
   revenueTodayCents: number;
   /** P-B · Margen REAL de la plataforma hoy = Σ comisión − Σ fee PSP (lo que retiene neto del costo del PSP). */
   platformMarginTodayCents: number;
+  /** Viajes digitales de HOY (cobros kind=FARE capturados desde medianoche Lima) → KPI "Viajes hoy" + ticket promedio. */
+  tripCountToday: number;
   /** Revenue por hora de las últimas 24h, bucket por hora UTC, orden ascendente. */
   revenuePerHour: RevenueHourBucket[];
 }
@@ -42,6 +44,7 @@ export const RevenueRange = {
   TODAY: 'today',
   SEVEN_DAYS: '7d',
   THIRTY_DAYS: '30d',
+  NINETY_DAYS: '90d',
 } as const;
 export type RevenueRange = (typeof RevenueRange)[keyof typeof RevenueRange];
 
@@ -50,7 +53,8 @@ export function isRevenueRange(value: unknown): value is RevenueRange {
   return (
     value === RevenueRange.TODAY ||
     value === RevenueRange.SEVEN_DAYS ||
-    value === RevenueRange.THIRTY_DAYS
+    value === RevenueRange.THIRTY_DAYS ||
+    value === RevenueRange.NINETY_DAYS
   );
 }
 
@@ -72,7 +76,17 @@ export interface RevenueRangeMetrics {
   grossCommissionCents: number;
   /** Total REEMBOLSADO en el rango: Σ `Refund.amountCents` de refunds COMPLETED (parciales + totales), por `createdAt`. */
   refundedCents: number;
-  /** Serie de money-in por bucket (hora si `today`, día si `7d`/`30d`) — MISMA definición que `moneyInCents`. */
+  /** Viajes digitales del rango (cobros kind=FARE capturados, uno por viaje). Habilita "Viajes" + "Ticket promedio". */
+  tripCount: number;
+  /** Revenue por MODO 3-way (FIXED | PUJA | CARPOOLING): el ON_DEMAND se divide por `Payment.dispatchMode`
+   *  denormalizado del viaje; CARPOOLING es el eje `mode`. Alimenta el donut "Ingresos por modo" del panel. */
+  byMode: { mode: string; revenueCents: number }[];
+  /** Revenue por DISTRITO de origen (zonificado en la captura), ordenado desc. Alimenta "Top distritos por
+   *  ingreso". Distritos sin geo/fuera de cobertura se excluyen (no hay bucket "desconocido"). */
+  topDistricts: { district: string; revenueCents: number }[];
+  /** Totales del período PREVIO (misma duración, ventana anterior) → el bff calcula los deltas %. */
+  previous: { moneyInCents: number; tripCount: number };
+  /** Serie de money-in por bucket (hora si `today`, día si `7d`/`30d`/`90d`) — MISMA definición que `moneyInCents`. */
   series: RevenueBucket[];
 }
 
@@ -86,6 +100,7 @@ const RANGE_DAYS: Readonly<Record<RevenueRange, number>> = {
   [RevenueRange.TODAY]: 1,
   [RevenueRange.SEVEN_DAYS]: 7,
   [RevenueRange.THIRTY_DAYS]: 30,
+  [RevenueRange.NINETY_DAYS]: 90,
 };
 
 /** Medianoche de Lima del día que contiene `now`, como instante UTC. */
@@ -105,12 +120,14 @@ export class AnalyticsService {
   constructor(private readonly repo: AnalyticsRepository) {}
 
   async revenue(now: Date = new Date()): Promise<RevenueAnalytics> {
-    const [revenueTodayCents, platformMarginTodayCents, revenuePerHour] = await Promise.all([
-      this.revenueToday(now),
-      this.platformMarginToday(now),
-      this.revenuePerHour(now),
-    ]);
-    return { revenueTodayCents, platformMarginTodayCents, revenuePerHour };
+    const [revenueTodayCents, platformMarginTodayCents, tripCountToday, revenuePerHour] =
+      await Promise.all([
+        this.revenueToday(now),
+        this.platformMarginToday(now),
+        this.repo.countFareTripsSince(limaMidnightUtc(now)),
+        this.revenuePerHour(now),
+      ]);
+    return { revenueTodayCents, platformMarginTodayCents, tripCountToday, revenuePerHour };
   }
 
   /**
@@ -163,15 +180,28 @@ export class AnalyticsService {
    * SUM lo ignora (undercount honesto). La serie usa EXACTAMENTE este cohorte → sus buckets reconcilian con el total.
    */
   async revenueMetrics(range: RevenueRange, now: Date = new Date()): Promise<RevenueRangeMetrics> {
-    const [totals, refundedCents, series] = await Promise.all([
-      this.rangeTotals(range, now),
-      this.refundedInRange(range, now),
-      this.revenueSeries(range, now),
-    ]);
+    // Ventana actual `[since, now]` (abierta) y ventana PREVIA `[prevStart, since)` (misma duración) para el delta.
+    const since = this.rangeStartUtc(range, now);
+    const prevStart = new Date(since.getTime() - RANGE_DAYS[range] * DAY_MS);
+    const [totals, tripCount, byMode, topDistricts, refundedCents, series, prevTotals, prevTripCount] =
+      await Promise.all([
+        this.rangeTotals(range, now),
+        this.repo.countFareTripsSince(since),
+        this.repo.sumRevenueByModeSince(since),
+        this.repo.sumRevenueByDistrictSince(since),
+        this.refundedInRange(range, now),
+        this.revenueSeries(range, now),
+        this.repo.sumRangeTotalsSince(prevStart, since),
+        this.repo.countFareTripsSince(prevStart, since),
+      ]);
     return {
       moneyInCents: totals.moneyInCents,
       grossCommissionCents: totals.grossCommissionCents,
       refundedCents,
+      tripCount,
+      byMode,
+      topDistricts,
+      previous: { moneyInCents: prevTotals.netSettledCents, tripCount: prevTripCount },
       series,
     };
   }

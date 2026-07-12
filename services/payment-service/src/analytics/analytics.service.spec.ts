@@ -21,6 +21,7 @@ function buildService(over: {
     creditCents: number;
   };
   moneyIn?: { netSettledCents: number; refundedCents: number };
+  tripCountToday?: number;
 }) {
   const repo = {
     sumMoneyInComponentsSince: vi.fn(
@@ -35,6 +36,7 @@ function buildService(over: {
           creditCents: 0,
         },
     ),
+    countFareTripsSince: vi.fn(async () => over.tripCountToday ?? 0),
     revenuePerHourBuckets: vi.fn(async () => []),
   };
   return { svc: new AnalyticsService(repo as unknown as AnalyticsRepository), repo };
@@ -58,5 +60,11 @@ describe('P-B · analytics money-in al banco (excluye CASH, net-aware)', () => {
     });
     const out = await svc.revenue(new Date('2026-07-02T18:00:00Z'));
     expect(out.platformMarginTodayCents).toBe(2000 - 350 - 100 - 50);
+  });
+
+  it('tripCountToday: expone el conteo de viajes FARE de hoy (del repo · KPI "Viajes hoy")', async () => {
+    const { svc } = buildService({ tripCountToday: 7 });
+    const out = await svc.revenue(new Date('2026-07-02T18:00:00Z'));
+    expect(out.tripCountToday).toBe(7);
   });
 });

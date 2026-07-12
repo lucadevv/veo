@@ -19,7 +19,11 @@ import {
 import type { PaymentMethod } from '@veo/shared-types';
 import { AdminRole } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
-import { PaymentsRepository, type PaymentTx } from './payments.repository';
+import {
+  PaymentsRepository,
+  type PaymentTx,
+  type RefundWithPayment,
+} from './payments.repository';
 import { CreditService } from '../credit/credit.service';
 import {
   PAYMENT_GATEWAY,
@@ -38,6 +42,7 @@ import { RefundStatus, type Payment, type Refund } from '../generated/prisma';
 import {
   assertCanAddTip,
   assertPaymentTransition,
+  assertRefundTransition,
   BOOKING_CANCEL_REFUND_DEDUP_PREFIX,
   bpsToRate,
   ChargeMode,
@@ -55,6 +60,7 @@ import {
 } from './payment.policy';
 import { CommissionService } from '../commission/commission.service';
 import { PaymentMetrics } from '../metrics/payment.metrics';
+import { zonifyLima } from '../analytics/zonify';
 import type { Env } from '../config/env.schema';
 import type { DebtItem, DebtSummary } from './dto/payments.dto';
 
@@ -101,6 +107,12 @@ export interface ChargeInput {
   promoCode?: string;
   /** Id del pasajero que paga (necesario para canjear la promo y resolver afiliación on-file). */
   userId?: string;
+  /** MÉTRICAS · modo de despacho del viaje (FIXED/PUJA) denormalizado del evento — divide el ON_DEMAND en
+   *  Fijo/Puja para el corte "Ingresos por modo". Ausente ⇒ null. */
+  dispatchMode?: string;
+  /** MÉTRICAS · origen del viaje (lat/lng) denormalizado del evento — se zonifica a distrito en la captura. */
+  originLat?: number;
+  originLng?: number;
   /**
    * Datos del cliente exigidos por el agregador (ProntoPaga: nombre/email/doc en /payment/new).
    * Opcional: solo lo usa el modo prontopaga; el resto lo ignora. PII mínima, no se persiste acá.
@@ -148,6 +160,13 @@ interface RefundClaim {
    * system-initiated).
    */
   enforceWindowDedup?: boolean;
+  /**
+   * Cola de aprobación (money-OUT · frame HZ8uz): id de una solicitud de reembolso YA existente en estado PENDING
+   * que este desembolso MATERIALIZA (aprobación del operador). Con él, el core NO crea una fila nueva: transiciona
+   * la solicitud PENDING → APPROVED/COMPLETED por CAS. AUSENTE ⇒ refund AUTO (system-initiated / propina revertida):
+   * el core CREA la fila directamente en APPROVED/COMPLETED (auto-aprobado, sin pasar por la cola).
+   */
+  existingRefundId?: string;
 }
 
 /**
@@ -355,6 +374,13 @@ export class PaymentsService {
         feeCents: amounts.feeCents,
         method: input.method,
         mode,
+        // MÉTRICAS · denorm para los cortes por modo/distrito del panel. dispatchMode divide el ON_DEMAND en
+        // Fijo/Puja; el distrito se ZONIFICA del origen ACÁ (una vez, en la captura) y se persiste para agregar
+        // sin re-zonificar. Nullable honesto: cobro sin geo o fuera de cobertura → distrito null (no se inventa).
+        dispatchMode: input.dispatchMode ?? null,
+        originLat: input.originLat ?? null,
+        originLng: input.originLng ?? null,
+        district: zonifyLima(input.originLat, input.originLng),
         payerRef: input.payerRef ?? null,
         status: 'PENDING',
       });
@@ -1217,14 +1243,26 @@ export class PaymentsService {
    * `status` devuelto = estado del REFUND: 'COMPLETED' (la plata volvió) o 'PENDING' (reverso aceptado
    * o en confirmación). Degradación honesta: nunca se reporta COMPLETED sin confirmación del proveedor.
    */
-  async refund(
+  /**
+   * COLA DE APROBACIÓN — paso 1 (SOLICITAR · money-OUT · frame HZ8uz). El operador CREA una solicitud de reembolso
+   * en estado PENDING que AÚN NO desembolsa: la plata NO se mueve hasta que un operador la APRUEBE (`approveRefund`).
+   * Esto reemplaza el direct-issue (que desembolsaba en el acto) por un flujo con approval-gate + dual-control.
+   *
+   * Valida saldo/ventana/monto>0 (el gate de AUTORIDAD por monto alto se aplica al APROBAR, no acá: un FINANCE puede
+   * FILAR la solicitud; un ADMIN/SUPERADMIN la aprueba si supera el umbral). NO reserva el Payment ni llama al riel.
+   *
+   * IDEMPOTENCIA de la CREACIÓN (no crear DOS solicitudes del mismo dinero por un doble-submit): igual barrera que el
+   * viejo direct-issue — `Idempotency-Key` → `dedupKey` (UNIQUE PARCIAL) + backstop de VENTANA sobre (paymentId,
+   * céntimos) bajo advisory lock. Un reintento devuelve la solicitud existente, no crea otra.
+   */
+  async requestRefund(
     tripId: string,
     amountCents: number,
     reason: string,
     operator: AuthenticatedUser,
     idempotencyKey?: string,
     // Gesto EXPLÍCITO del operador "es un reembolso NUEVO, no un reintento": salta el backstop de ventana para
-    // permitir un 2do parcial idéntico legítimo (el server no puede distinguirlo de un reintento sin esta señal).
+    // permitir una 2da solicitud parcial idéntica legítima (el server no la distingue de un reintento sin esta señal).
     forceNew = false,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
@@ -1247,85 +1285,60 @@ export class PaymentsService {
       );
     }
 
-    // Gate de monto alto (BR-P06 · DUAL-CONTROL, decisión del dueño): un reembolso sobre el umbral exige autoridad
-    // ELEVADA (ADMIN/SUPERADMIN); un FINANCE queda topado al umbral. Restaura el control por monto bajo el modelo
-    // finanzas-only — antes el tier era SUPPORT_L1(≤umbral)/L2(arriba), ya retirado. La rama es REACHABLE: un
-    // FINANCE refundando alto sin elevación → bloqueado. Compensa con step-up MFA + audit + tope por saldo.
-    const needsElevatedAuthority = amountCents > this.refundHighValueThresholdCents;
-    const roles = operator.roles ?? [];
-    const hasElevatedAuthority =
-      roles.includes(AdminRole.ADMIN) || roles.includes(AdminRole.SUPERADMIN);
-    if (needsElevatedAuthority && !hasElevatedAuthority) {
-      throw new ForbiddenError(
-        'Un reembolso de monto alto requiere un operador ADMIN o SUPERADMIN',
-      );
-    }
-
-    const newRefundedCents = payment.refundedCents + amountCents;
-    const isFullyRefunded = newRefundedCents === payment.amountCents;
-    const newStatus = isFullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
-    assertPaymentTransition(payment.status, newStatus);
-
-    const claim: RefundClaim = {
-      amountCents,
-      reason,
-      // Admin discrecional: el operador humano firma el pedido y la aprobación. Si el panel trae un
-      // `Idempotency-Key`, lo usamos como barrera DURA de idempotencia (UNIQUE PARCIAL en Refund) para que un
-      // doble-submit / reintento de red NO doble-reembolse — el refund PARCIAL no lo blinda la state machine
-      // (el CAS solo impide exceder el saldo). Sin key (compat) ⇒ null: idempotencia = CAS optimista, como antes.
-      requestedBy: operator.userId,
-      approvedBy: operator.userId,
-      dedupKey: idempotencyKey ? deriveAdminRefundDedupKey(idempotencyKey) : null,
-      newStatus,
-      newRefundedCents,
-      isFullyRefunded,
-      // Backstop server-side de ventana temporal sobre (paymentId, céntimos): SIEMPRE para el refund admin, salvo
-      // que el operador haya marcado `forceNew` (2do parcial idéntico deliberado). Cierra el residual del nonce de
-      // cliente (storage bloqueado, cross-tab, cross-device) que el `dedupKey` solo no puede.
-      enforceWindowDedup: !forceNew,
-    };
-
+    const dedupKey = idempotencyKey ? deriveAdminRefundDedupKey(idempotencyKey) : null;
     try {
-      const result = await this.executeRefundClaim(payment, claim);
-      // A1 · refund TOTAL del viaje → también se devuelven sus propinas digitales ya cobradas (viaje revertido).
-      // SOLO si el reverso de la TARIFA ya CONFIRMÓ (status COMPLETED: cash + direct-sync). Si es ASYNC (PENDING,
-      // ProntoPaga), NO se devuelven acá — se hace en el callback CONFIRMED (applyRefundWebhookResult): un reverso
-      // async que se RECHAZA después NO debe dejar las propinas reembolsadas sobre una tarifa que no se revirtió.
-      if (claim.isFullyRefunded && result.status === RefundStatus.COMPLETED) {
-        await this.refundTripTipsFully(payment.tripId, claim.reason);
-      }
-      return result;
+      return await this.repo.runInTransaction(async (tx) => {
+        // Backstop de VENTANA (salvo forceNew): bajo advisory lock por paymentId, si ya hay una solicitud/reembolso
+        // reciente NO-RECHAZADO del MISMO (paymentId, céntimos) → devolver esa (no crear otra). Cierra el residual
+        // del nonce de cliente (storage bloqueado, cross-tab, cross-device) que el `dedupKey` solo no cubre.
+        if (!forceNew) {
+          await this.repo.acquirePaymentAdvisoryLock(tx, payment.id);
+          const since = new Date(Date.now() - this.refundIdempotencyWindowMs);
+          const recent = await this.repo.findRecentRefundInWindowInTx(
+            tx,
+            payment.id,
+            amountCents,
+            since,
+          );
+          if (recent) {
+            throw new DuplicateRefundInWindowError({
+              refundId: recent.id,
+              paymentId: recent.paymentId,
+              status: recent.status,
+            });
+          }
+        }
+        const refund = await this.repo.createRefundInTx(tx, {
+          id: uuidv7(),
+          paymentId: payment.id,
+          amountCents,
+          requestedBy: operator.userId,
+          // approvedBy queda NULL hasta que un operador la apruebe (la cola de "Solicitados").
+          dedupKey,
+          status: RefundStatus.PENDING,
+          reason,
+        });
+        return { refundId: refund.id, paymentId: payment.id, status: refund.status };
+      });
     } catch (err) {
-      // BACKSTOP DE VENTANA: ya hay un refund reciente del MISMO dinero (paymentId, céntimos) creado dentro de la
-      // ventana → la operación es la MISMA (un reintento que llegó con otro key, o sin key) → devolvemos el
-      // existente, NO doble-pagamos. Esto cierra el hueco que el `dedupKey` deja cuando el key del cliente diverge.
+      // BACKSTOP DE VENTANA: misma operación (reintento con otro key / sin key) → devolver la solicitud existente.
       if (err instanceof DuplicateRefundInWindowError) {
         this.logger.log(
-          `Refund admin idempotente por VENTANA (mismo pago y monto, key divergente/ausente) trip=${tripId}; ` +
-            `devuelvo el refund existente ${err.existing.refundId}`,
+          `Solicitud de reembolso idempotente por VENTANA (mismo pago y monto) trip=${tripId}; ` +
+            `devuelvo la existente ${err.existing.refundId}`,
         );
         return err.existing;
       }
-      // IDEMPOTENCIA: el MISMO `Idempotency-Key` ya creó un refund ACTIVO (UNIQUE parcial) → P2002. Sin key →
-      // dedupKey null → este path no aplica (relanza). Leemos del PRIMARIO (`write`), no de la réplica: el
-      // refund se acaba de commitear ahí y bajo lag la réplica devolvería null (read-after-write).
-      if (idempotencyKey && isUniqueViolation(err, 'dedupKey')) {
-        const existing = await this.repo.findRefundByDedupKeyOnPrimary(
-          deriveAdminRefundDedupKey(idempotencyKey),
-        );
-        // El key identifica la IDENTIDAD DE DINERO de la operación: (pago, monto). Solo devolvemos el existente
-        // si coincide en AMBOS — el motivo (texto libre) NO entra: un reintento con el motivo editado sigue
-        // siendo la MISMA operación de dinero y debe dedupear, no fallar. Un key reusado para OTRO dinero
-        // (distinto pago o monto) NO debe devolver un refund ajeno como éxito falso → conflicto explícito.
+      // IDEMPOTENCIA por key: el MISMO `Idempotency-Key` ya creó una solicitud ACTIVA (UNIQUE parcial) → P2002.
+      // Leemos del PRIMARIO (read-after-write). Solo devolvemos la existente si coincide en (pago, monto); un key
+      // reusado para OTRO dinero → conflicto explícito (nunca un refund ajeno como éxito falso).
+      if (idempotencyKey && dedupKey && isUniqueViolation(err, 'dedupKey')) {
+        const existing = await this.repo.findRefundByDedupKeyOnPrimary(dedupKey);
         if (existing && existing.paymentId === payment.id && existing.amountCents === amountCents) {
           this.logger.log(
-            `Refund admin idempotente (mismo key, pago y monto) trip=${tripId}; devuelvo el refund existente`,
+            `Solicitud de reembolso idempotente (mismo key, pago y monto) trip=${tripId}; devuelvo la existente`,
           );
-          return {
-            refundId: existing.id,
-            paymentId: existing.paymentId,
-            status: existing.status,
-          };
+          return { refundId: existing.id, paymentId: existing.paymentId, status: existing.status };
         }
         throw new ConflictError(
           'El Idempotency-Key ya se usó para otro reembolso (distinto pago o monto)',
@@ -1334,6 +1347,200 @@ export class PaymentsService {
       }
       throw err;
     }
+  }
+
+  /**
+   * COLA DE APROBACIÓN — paso 2 (APROBAR + DESEMBOLSAR · money-OUT). Transiciona la solicitud PENDING → APPROVED y
+   * dispara el desembolso IDEMPOTENTE (reserva CAS + reverso al riel con key derivada del refundId → COMPLETED, o
+   * queda APPROVED esperando el callback async; CASH devuelve local → COMPLETED). Re-VALIDA saldo/ventana/monto-alto
+   * AL MOMENTO de aprobar (el estado pudo cambiar desde la solicitud). Idempotente: aprobar algo que ya salió de
+   * PENDING devuelve su estado vigente sin re-desembolsar.
+   */
+  async approveRefund(
+    refundId: string,
+    operator: AuthenticatedUser,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    const refund = await this.repo.findRefundById(refundId);
+    if (!refund) throw new NotFoundError('Reembolso no encontrado');
+    // Idempotencia: solo una solicitud PENDING se aprueba. Ya APPROVED/COMPLETED/REJECTED → devolver estado vigente
+    // (un doble-submit del operador no re-desembolsa ni error-ea).
+    if (refund.status !== RefundStatus.PENDING) {
+      return { refundId, paymentId: refund.paymentId, status: refund.status };
+    }
+    const payment = await this.repo.findPaymentById(refund.paymentId);
+    if (!payment) throw new NotFoundError('Pago no encontrado');
+
+    // Re-validación al aprobar (defensa: el saldo/estado del cobro pudo moverse desde que se filó la solicitud).
+    const remainingCents = payment.amountCents - payment.refundedCents;
+    if (refund.amountCents > remainingCents) {
+      throw new InvalidStateError(
+        `El reembolso (${refund.amountCents}) excede el saldo reembolsable actual (${remainingCents})`,
+      );
+    }
+    const capturedAt = payment.capturedAt ?? payment.createdAt;
+    const ageDays = (Date.now() - capturedAt.getTime()) / 86_400_000;
+    if (ageDays > this.refundWindowDays) {
+      throw new InvalidStateError(
+        `Fuera de la ventana de reembolso (${this.refundWindowDays} días)`,
+      );
+    }
+    // Gate de monto alto (DUAL-CONTROL, decisión del dueño): aprobar un reembolso sobre el umbral exige autoridad
+    // ELEVADA (ADMIN/SUPERADMIN); un FINANCE queda topado al umbral. Se aplica al APROBAR (es la acción que mueve
+    // plata), no al solicitar. Compensa con step-up MFA + audit + tope por saldo.
+    const needsElevatedAuthority = refund.amountCents > this.refundHighValueThresholdCents;
+    const roles = operator.roles ?? [];
+    const hasElevatedAuthority =
+      roles.includes(AdminRole.ADMIN) || roles.includes(AdminRole.SUPERADMIN);
+    if (needsElevatedAuthority && !hasElevatedAuthority) {
+      throw new ForbiddenError(
+        'Aprobar un reembolso de monto alto requiere un operador ADMIN o SUPERADMIN',
+      );
+    }
+
+    const newRefundedCents = payment.refundedCents + refund.amountCents;
+    const isFullyRefunded = newRefundedCents === payment.amountCents;
+    const newStatus = isFullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+    assertPaymentTransition(payment.status, newStatus);
+
+    const claim: RefundClaim = {
+      amountCents: refund.amountCents,
+      reason: refund.reason,
+      requestedBy: refund.requestedBy,
+      // El APROBADOR firma la aprobación (dual-control: puede diferir de quien solicitó). Viaja en payment.refunded.
+      approvedBy: operator.userId,
+      dedupKey: refund.dedupKey,
+      newStatus,
+      newRefundedCents,
+      isFullyRefunded,
+      // La solicitud ya dedupeó al crearse; aprobar es una acción distinta → sin backstop de ventana.
+      enforceWindowDedup: false,
+      // MATERIALIZA la solicitud PENDING existente (no crea una fila nueva): PENDING → APPROVED/COMPLETED por CAS.
+      existingRefundId: refund.id,
+    };
+
+    try {
+      const result = await this.executeRefundClaim(payment, claim);
+      // A1 · refund TOTAL del viaje → también se devuelven sus propinas digitales ya cobradas (viaje revertido).
+      // SOLO si el reverso de la TARIFA ya CONFIRMÓ (COMPLETED: cash + direct-sync). Si es ASYNC (queda APPROVED),
+      // lo hace el callback CONFIRMED (applyRefundWebhookResult).
+      if (isFullyRefunded && result.status === RefundStatus.COMPLETED) {
+        await this.refundTripTipsFully(payment.tripId, refund.reason);
+      }
+      return result;
+    } catch (err) {
+      // Carrera: otra acción movió la solicitud de PENDING entre el read y el CAS (doble-approve, o un reject
+      // concurrente) → devolver el estado vigente (idempotente, sin re-desembolsar).
+      if (err instanceof ConcurrencyConflictError) {
+        const fresh = await this.repo.findRefundById(refundId);
+        if (fresh && fresh.status !== RefundStatus.PENDING) {
+          return { refundId, paymentId: fresh.paymentId, status: fresh.status };
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * COLA DE APROBACIÓN — RECHAZAR una solicitud PENDING (money-OUT). NO mueve plata (la solicitud nunca reservó el
+   * cobro) → sin compensación. Persiste el `motivo` del operador en `failureReason` (distinto de `reason`, el motivo
+   * del pedido). Idempotente por CAS: un doble-submit ve count=0. SOLO una solicitud PENDING se rechaza — una APPROVED
+   * ya está en el riel (la compensa el callback del proveedor, no el operador); COMPLETED es terminal.
+   */
+  async rejectRefund(
+    refundId: string,
+    operator: AuthenticatedUser,
+    reason: string,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    const refund = await this.repo.findRefundById(refundId);
+    if (!refund) throw new NotFoundError('Reembolso no encontrado');
+    if (refund.status === RefundStatus.REJECTED) {
+      return { refundId, paymentId: refund.paymentId, status: refund.status }; // idempotente
+    }
+    if (refund.status !== RefundStatus.PENDING) {
+      throw new InvalidStateError(
+        `Solo una solicitud PENDIENTE puede rechazarse (estado actual: ${refund.status})`,
+      );
+    }
+    assertRefundTransition('PENDING', 'REJECTED');
+    const claimed = await this.repo.rejectPendingRefund(refundId, {
+      status: RefundStatus.REJECTED,
+      failureReason: reason,
+      approvedBy: operator.userId,
+    });
+    if (claimed.count === 0) {
+      // Carrera: otra acción ya la movió de PENDING → devolver el estado vigente (idempotente).
+      const fresh = await this.repo.findRefundById(refundId);
+      return {
+        refundId,
+        paymentId: fresh?.paymentId ?? refund.paymentId,
+        status: fresh?.status ?? RefundStatus.REJECTED,
+      };
+    }
+    return { refundId, paymentId: refund.paymentId, status: RefundStatus.REJECTED };
+  }
+
+  /**
+   * Página de la cola de reembolsos para el admin (filtro por estado opcional + cursor por id DESC). Devuelve la
+   * fila Refund con su Payment (tripId/passengerId/method salen del cobro por FK); el shaping PII-consciente + la
+   * resolución del nombre del pasajero viven en el admin-bff. `limit+1` deriva el `nextCursor` sin COUNT.
+   */
+  async listRefundsForAdmin(params: {
+    status?: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ items: RefundWithPayment[]; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+    const status = this.parseRefundStatusFilter(params.status);
+    const rows = await this.repo.findRefundsForAdmin({ status, cursorId: params.cursor, limit });
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    return { items, nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null };
+  }
+
+  /** Detalle admin de un reembolso (con su Payment para el saldo). Lanza NotFound si no existe. */
+  async getRefundForAdmin(id: string): Promise<RefundWithPayment> {
+    const refund = await this.repo.findRefundWithPaymentById(id);
+    if (!refund) throw new NotFoundError('Reembolso no encontrado');
+    return refund;
+  }
+
+  /**
+   * KPIs de la cabecera de la cola (money-OUT). `requestedCount`/`approvedCount` = conteos por estado. `processedTodayCents`
+   * = suma de refunds COMPLETED con `updatedAt` desde el inicio del día (UTC). `refundRatePct` = % de cobros FARE
+   * ever-capturados que terminaron reembolsados (PARTIALLY_REFUNDED|REFUNDED); null si no hay cobros capturados
+   * (degradación honesta — no se inventa una tasa sin denominador).
+   */
+  async getRefundStats(): Promise<{
+    requestedCount: number;
+    approvedCount: number;
+    processedTodayCents: number;
+    refundRatePct: number | null;
+  }> {
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    const [requestedCount, approvedCount, processedTodayCents, capturedCount, refundedCount] =
+      await Promise.all([
+        this.repo.countRefundsByStatus(RefundStatus.PENDING),
+        this.repo.countRefundsByStatus(RefundStatus.APPROVED),
+        this.repo.sumCompletedRefundAmountSince(startOfToday),
+        // Denominador: cobros FARE que SE capturaron alguna vez (capturados + los que luego se reembolsaron).
+        this.repo.countPaymentsInStatuses({
+          in: ['CAPTURED', 'PARTIALLY_REFUNDED', 'REFUNDED'],
+        }),
+        // Numerador: cobros FARE que terminaron (parcial o totalmente) reembolsados.
+        this.repo.countPaymentsInStatuses({ in: ['PARTIALLY_REFUNDED', 'REFUNDED'] }),
+      ]);
+    const refundRatePct =
+      capturedCount > 0 ? Math.round((refundedCount / capturedCount) * 1000) / 10 : null;
+    return { requestedCount, approvedCount, processedTodayCents, refundRatePct };
+  }
+
+  /** Narrowing del filtro de estado de la cola (query string → enum). Un valor inválido se ignora (lista sin filtro). */
+  private parseRefundStatusFilter(status?: string): RefundStatus | undefined {
+    if (!status) return undefined;
+    return (Object.values(RefundStatus) as string[]).includes(status)
+      ? (status as RefundStatus)
+      : undefined;
   }
 
   /**
@@ -1578,6 +1785,42 @@ export class PaymentsService {
     // REVERSED → ya revertida (refund re-entregado o 2do refund sobre el mismo cobro) → no-op idempotente.
   }
 
+  /**
+   * MATERIALIZA el Refund DENTRO de la tx de la reserva: si el claim trae `existingRefundId` (APROBACIÓN de una
+   * solicitud PENDING) la transiciona PENDING → `status` por CAS (count=0 ⇒ carrera → ConcurrencyConflict, la tx
+   * se revierte con la reserva); si NO (refund AUTO system-initiated / propina), CREA la fila directamente en
+   * `status`. Un ÚNICO punto para las dos entradas al desembolso — sin duplicar lógica ni tocar los call-sites.
+   */
+  private async materializeRefundInTx(
+    tx: PaymentTx,
+    payment: Pick<Payment, 'id'>,
+    claim: RefundClaim,
+    status: RefundStatus,
+  ): Promise<Refund> {
+    if (claim.existingRefundId) {
+      const claimed = await this.repo.casApproveRefundFromPending(tx, claim.existingRefundId, {
+        status,
+        approvedBy: claim.approvedBy,
+      });
+      if (claimed.count === 0) {
+        throw new ConcurrencyConflictError(
+          'La solicitud de reembolso ya no está PENDIENTE (aprobada/rechazada en paralelo)',
+        );
+      }
+      return this.repo.findRefundByIdInTx(tx, claim.existingRefundId);
+    }
+    return this.repo.createRefundInTx(tx, {
+      id: uuidv7(),
+      paymentId: payment.id,
+      amountCents: claim.amountCents,
+      requestedBy: claim.requestedBy,
+      approvedBy: claim.approvedBy,
+      dedupKey: claim.dedupKey,
+      status,
+      reason: claim.reason,
+    });
+  }
+
   /** Devolución LOCAL de un cobro CASH (la plata nunca pasó por el riel): COMPLETED + evento en una tx. */
   private async refundCashLocally(
     payment: Payment,
@@ -1588,17 +1831,9 @@ export class PaymentsService {
       // A2 · revertir la deuda de comisión CASH del conductor, PROPORCIONAL a lo reembolsado (grossCents da la
       // fracción; un refund parcial revierte solo la comisión de la parte devuelta, no la entera).
       await this.reverseCashDebtInTx(tx, payment.id, claim.amountCents, payment.grossCents);
-      // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto.
-      const refund = await this.repo.createRefundInTx(tx, {
-        id: uuidv7(),
-        paymentId: payment.id,
-        amountCents: claim.amountCents,
-        requestedBy: claim.requestedBy,
-        approvedBy: claim.approvedBy,
-        dedupKey: claim.dedupKey,
-        status: RefundStatus.COMPLETED,
-        reason: claim.reason,
-      });
+      // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto (aprobar CASH salta
+      // APPROVED: PENDING → COMPLETED directo cuando es una solicitud aprobada; o nace COMPLETED si es AUTO).
+      const refund = await this.materializeRefundInTx(tx, payment, claim, RefundStatus.COMPLETED);
       await this.enqueueRefundedEventInTx(tx, payment, refund);
       return { refundId: refund.id, paymentId: payment.id, status: refund.status };
     });
@@ -1647,19 +1882,12 @@ export class PaymentsService {
     }
 
     // 1) RESERVA + INTENT persistidos ANTES de llamar al proveedor (§4): el CAS bloquea refunds
-    //    concurrentes sobre el mismo saldo y el Refund PENDING es el registro durable de la operación.
+    //    concurrentes sobre el mismo saldo y el Refund APPROVED es el registro durable del desembolso EN VUELO
+    //    (reserva tomada, reverso al riel esperando confirmación). Si es la aprobación de una solicitud, materialize
+    //    transiciona la PENDING → APPROVED por CAS; si es AUTO, crea la fila APPROVED.
     const refund = await this.repo.runInTransaction(async (tx) => {
       await this.claimRefundReservationInTx(tx, payment, claim);
-      return this.repo.createRefundInTx(tx, {
-        id: uuidv7(),
-        paymentId: payment.id,
-        amountCents: claim.amountCents,
-        requestedBy: claim.requestedBy,
-        approvedBy: claim.approvedBy,
-        dedupKey: claim.dedupKey,
-        status: RefundStatus.PENDING,
-        reason: claim.reason,
-      });
+      return this.materializeRefundInTx(tx, payment, claim, RefundStatus.APPROVED);
     });
 
     // 2) Reverso REAL en el proveedor, con la idempotency key derivada de la operación (§4).
@@ -1797,6 +2025,17 @@ export class PaymentsService {
     claim: RefundClaim,
     failureReason: string,
   ): Promise<void> {
+    // APROBACIÓN de una solicitud existente: NO se crea un marcador aparte — se transiciona la MISMA solicitud
+    // PENDING → REJECTED con el motivo estructurado (no reservó plata → sin compensación). El operador la ve
+    // rechazada con la causa `unrecoverable:` en la cola.
+    if (claim.existingRefundId) {
+      await this.repo.rejectPendingRefund(claim.existingRefundId, {
+        status: RefundStatus.REJECTED,
+        failureReason,
+        approvedBy: claim.approvedBy,
+      });
+      return;
+    }
     await this.repo.createRefund({
       id: uuidv7(),
       paymentId: payment.id,
@@ -2156,6 +2395,13 @@ export class PaymentsService {
      * confirme (push). Ausente/false ⇒ flujo bilateral normal (driverConfirmed queda false).
      */
     cashCollected?: boolean;
+    /** MÉTRICAS · modo de despacho del viaje (FIXED/PUJA) denormalizado del evento — para el corte "Ingresos
+     *  por modo" (divide el ON_DEMAND en Fijo/Puja). Ausente en eventos viejos ⇒ null (sin modo). */
+    dispatchMode?: string;
+    /** MÉTRICAS · origen del viaje (lat/lng) denormalizado del evento — la captura zonifica a distrito para el
+     *  corte "Ingresos por distrito". Ausente ⇒ sin geo/distrito. */
+    originLat?: number;
+    originLng?: number;
   }): Promise<Payment> {
     // Fallback a defaultMethod SOLO para eventos viejos sin el campo (compat. con trip.completed
     // emitidos antes de que trip-service incluyera paymentMethod en el envelope). Para eventos
@@ -2173,6 +2419,10 @@ export class PaymentsService {
       dedupKey: input.dedupKey,
       promoCode: input.promoCode,
       userId: input.userId,
+      // MÉTRICAS · denormalización para los cortes por modo/distrito (charge las persiste + zonifica el origen).
+      dispatchMode: input.dispatchMode,
+      originLat: input.originLat,
+      originLng: input.originLng,
     });
 
     // EFECTIVO: el conductor ya confirmó "cobré" al terminar. Aplicamos su lado de la confirmación

@@ -191,6 +191,17 @@ model Payment {
   /// (pre-F2.7), que se LEEN como ON_DEMAND. Se setea en el punto de entrada del cobro (consumer trip.completed
   /// → ON_DEMAND; charge service-rail → CARPOOLING).
   mode            PaymentMode?  @default(ON_DEMAND)
+  /// MÉTRICAS · desglose de "Ingresos por modo" del panel (Fijo/Puja/Carpooling). `dispatchMode` (FIXED/PUJA) se
+  /// DENORMALIZA desde el evento `trip.completed` (lo congela el trip-service) para agregar SIN join cross-service:
+  /// el ON_DEMAND se divide por este campo; CARPOOLING es el eje `mode`. Nullable: filas legacy / cobros no-viaje
+  /// (propina, liquidación de penalidad) → sin modo de despacho. Valores: 'FIXED' | 'PUJA'.
+  dispatchMode    String?       @map("dispatch_mode")
+  /// MÉTRICAS · ORIGEN del viaje (denormalizado del evento) para el corte "Ingresos por distrito". `district` lo
+  /// resuelve la ZONIFICACIÓN (lat/lng → distrito de Lima) en la captura; se persiste para agregar por distrito
+  /// sin re-zonificar. Todos nullable: cobros sin geo (legacy/no-viaje) o fuera de la cobertura de distritos.
+  originLat       Float?        @map("origin_lat")
+  originLng       Float?        @map("origin_lng")
+  district        String?       @map("district")
   /// Intentos consumidos contra el gateway (BR-P02: máx 3 antes de DEBT).
   retries         Int           @default(0)
   /// Última razón de fallo (para soporte/observabilidad).

@@ -12,7 +12,14 @@
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, PaymentMethod, PaymentStatus, RefundStatus } from '../generated/prisma';
+import {
+  Prisma,
+  PaymentMethod,
+  PaymentMode,
+  PaymentKind,
+  PaymentStatus,
+  RefundStatus,
+} from '../generated/prisma';
 import { NON_CASH_METHODS } from '../payments/payment.policy';
 import type { RevenueHourBucket, RevenueBucket } from './analytics.service';
 
@@ -80,20 +87,97 @@ export class AnalyticsRepository {
     };
   }
 
-  /** Money-in + comisión bruta del rango desde `since` (mismo cohorte digital capturado). Réplica. */
-  async sumRangeTotalsSince(since: Date): Promise<RangeTotals> {
+  /**
+   * Money-in + comisión bruta de una VENTANA `[since, until)` (mismo cohorte digital capturado). `until` opcional:
+   * sin él la ventana es abierta (`>= since`, el rango actual); con él es acotada (para el período PREVIO del delta).
+   * Réplica.
+   */
+  async sumRangeTotalsSince(since: Date, until?: Date): Promise<RangeTotals> {
     const agg = await this.prisma.read.payment.aggregate({
       _sum: { netSettledCents: true, commissionCents: true },
       where: {
         method: { in: [...NON_CASH_METHODS] },
         status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
-        capturedAt: { gte: since },
+        capturedAt: { gte: since, ...(until ? { lt: until } : {}) },
       },
     });
     return {
       netSettledCents: agg._sum.netSettledCents ?? 0,
       commissionCents: agg._sum.commissionCents ?? 0,
     };
+  }
+
+  /**
+   * Conteo de VIAJES digitales de la ventana `[since, until)`: cobros `kind=FARE` capturados (uno por viaje — el
+   * `TIP` es un cobro digital aparte que NO cuenta como viaje). Mismo cohorte digital. Habilita "Viajes" y
+   * "Ticket promedio" (= moneyIn / count). Réplica.
+   */
+  async countFareTripsSince(since: Date, until?: Date): Promise<number> {
+    return this.prisma.read.payment.count({
+      where: {
+        method: { in: [...NON_CASH_METHODS] },
+        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
+        kind: PaymentKind.FARE,
+        capturedAt: { gte: since, ...(until ? { lt: until } : {}) },
+      },
+    });
+  }
+
+  /**
+   * Revenue (Σ netSettled) por MODO de la ventana `[since, until)`, en 3 VÍAS para el desglose del panel
+   * (Fijo/Puja/Carpooling): el `Payment.mode` da CARPOOLING vs ON_DEMAND, y el ON_DEMAND se DIVIDE por el
+   * `dispatchMode` (FIXED/PUJA) que payment DENORMALIZA del `trip.completed` (sin join cross-servicio · CLAUDE §2).
+   * `mode` null (legacy) → ON_DEMAND; `dispatchMode` null (evento viejo) → FIXED (el default del despacho). Mismo
+   * cohorte digital. Réplica. Devuelve buckets 'FIXED' | 'PUJA' | 'CARPOOLING'.
+   */
+  async sumRevenueByModeSince(
+    since: Date,
+    until?: Date,
+  ): Promise<{ mode: string; revenueCents: number }[]> {
+    const rows = await this.prisma.read.payment.groupBy({
+      by: ['mode', 'dispatchMode'],
+      _sum: { netSettledCents: true },
+      where: {
+        method: { in: [...NON_CASH_METHODS] },
+        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
+        capturedAt: { gte: since, ...(until ? { lt: until } : {}) },
+      },
+    });
+    const byMode = new Map<string, number>();
+    for (const r of rows) {
+      const mode = r.mode ?? PaymentMode.ON_DEMAND;
+      // Carpooling es su propio bucket; el on-demand se parte en Fijo/Puja según el modo de despacho denormalizado.
+      const bucket = mode === PaymentMode.CARPOOLING ? 'CARPOOLING' : (r.dispatchMode ?? 'FIXED');
+      byMode.set(bucket, (byMode.get(bucket) ?? 0) + (r._sum.netSettledCents ?? 0));
+    }
+    return [...byMode.entries()].map(([mode, revenueCents]) => ({ mode, revenueCents }));
+  }
+
+  /**
+   * Revenue (Σ netSettled) por DISTRITO de origen de la ventana `[since, until)`, para el corte "Ingresos por
+   * distrito" del panel. El `Payment.district` lo ZONIFICÓ payment en la captura (lat/lng del `trip.completed` →
+   * distrito de Lima) y quedó denormalizado — no se re-zonifica ni joinea. `district` null (cobro sin geo / fuera
+   * de cobertura) se EXCLUYE (degradación honesta, no un bucket "desconocido"). Mismo cohorte digital. Ordenado
+   * desc por revenue. Réplica.
+   */
+  async sumRevenueByDistrictSince(
+    since: Date,
+    until?: Date,
+  ): Promise<{ district: string; revenueCents: number }[]> {
+    const rows = await this.prisma.read.payment.groupBy({
+      by: ['district'],
+      _sum: { netSettledCents: true },
+      where: {
+        method: { in: [...NON_CASH_METHODS] },
+        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
+        capturedAt: { gte: since, ...(until ? { lt: until } : {}) },
+        district: { not: null },
+      },
+    });
+    return rows
+      .filter((r): r is typeof r & { district: string } => r.district != null)
+      .map((r) => ({ district: r.district, revenueCents: r._sum.netSettledCents ?? 0 }))
+      .sort((a, b) => b.revenueCents - a.revenueCents);
   }
 
   /** Total reembolsado desde `since`: Σ `Refund.amountCents` de refunds COMPLETED (money-out confirmado). Réplica. */

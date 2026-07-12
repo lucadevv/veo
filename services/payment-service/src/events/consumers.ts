@@ -99,8 +99,18 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
       this.logger.warn('trip.completed con payload inválido; descartado');
       return;
     }
-    const { tripId, fareCents, driverId, passengerId, promoCode, paymentMethod, cashCollected } =
-      parsed.data;
+    const {
+      tripId,
+      fareCents,
+      driverId,
+      passengerId,
+      promoCode,
+      paymentMethod,
+      cashCollected,
+      dispatchMode,
+      originLat,
+      originLng,
+    } = parsed.data;
     // HARDENING (incidente dev 2026-06): zod deja pasar `tripId` no-UUID (es `z.string()`, no
     // `.uuid()` — endurecer el schema compartido afecta a TODOS los producers/consumers). Pero la
     // columna `trip_id` es `@db.Uuid`: un id malformado → Prisma P2023 → el catch RELANZABA SIEMPRE →
@@ -123,6 +133,11 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
         method: paymentMethod,
         promoCode,
         userId: passengerId,
+        // MÉTRICAS · modo de despacho + origen del viaje (del evento) → payment los denormaliza y zonifica el
+        // origen a distrito, para los cortes "Ingresos por modo" (Fijo/Puja) y "por distrito" del panel.
+        dispatchMode,
+        originLat,
+        originLng,
         // EFECTIVO (decisión del dueño): el conductor cobró en mano al terminar (driverConfirmed). Solo
         // significativo si method=CASH; chargeFromTripCompleted crea la CashConfirmation driverConfirmed=true
         // y emite payment.cash_pending (push al pasajero para que confirme). Ausente/false ⇒ bilateral normal.

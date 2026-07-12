@@ -285,6 +285,34 @@ export function assertPaymentTransition(from: PaymentStatus, to: PaymentStatus):
 }
 
 /**
+ * Máquina de estados del REEMBOLSO (money-OUT · cola de aprobación · frame HZ8uz). El enum Prisma `RefundStatus`
+ * tiene 4 valores; acá se declaran sus aristas VÁLIDAS (cero transiciones mágicas dispersas):
+ *  - PENDING   (solicitado, sin desembolsar) → APPROVED (aprobado, al riel), COMPLETED (aprobación de CASH que
+ *              devuelve local en el acto) o REJECTED (rechazo del operador, sin mover plata).
+ *  - APPROVED  (desembolso en el riel) → COMPLETED (proveedor confirmó) o REJECTED (proveedor rechazó → compensar).
+ *  - COMPLETED / REJECTED → terminales.
+ * `RefundStatus` viaja como el string del enum ('PENDING'|'APPROVED'|'REJECTED'|'COMPLETED').
+ */
+export type RefundStatusName = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
+
+const REFUND_TRANSITIONS: Readonly<Record<RefundStatusName, readonly RefundStatusName[]>> = {
+  PENDING: ['APPROVED', 'COMPLETED', 'REJECTED'],
+  APPROVED: ['COMPLETED', 'REJECTED'],
+  COMPLETED: [],
+  REJECTED: [],
+};
+
+export function canTransitionRefund(from: RefundStatusName, to: RefundStatusName): boolean {
+  return REFUND_TRANSITIONS[from].includes(to);
+}
+
+export function assertRefundTransition(from: RefundStatusName, to: RefundStatusName): void {
+  if (!canTransitionRefund(from, to)) {
+    throw new InvalidStateError(`Transición de reembolso inválida: ${from} → ${to}`);
+  }
+}
+
+/**
  * Estados de pago a los que se les puede AÑADIR una propina (BR-P04). Una propina entra sobre
  * un cobro vivo: PENDING (efectivo aún sin confirmar, o digital en curso) o CAPTURED (ya cobrado).
  * No se admite sobre REFUNDED/FAILED/DEBT (cobro cerrado o sin liquidar).

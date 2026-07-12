@@ -188,6 +188,14 @@ export class RefundDto {
   forceNew?: boolean;
 }
 
+/** Body del POST /refunds/:id/reject: motivo del rechazo del operador (se persiste en Refund.failureReason). */
+export class RejectRefundDto {
+  @ApiProperty({ description: 'Motivo del rechazo del reembolso (mín. 3 caracteres)' })
+  @IsString()
+  @MinLength(3)
+  reason!: string;
+}
+
 /**
  * Clase de un ítem accionable del pasajero (BR-P02):
  *  - `DEBT`: cobro en status=DEBT (los reintentos se agotaron). BLOQUEA pedir un viaje nuevo (gate).

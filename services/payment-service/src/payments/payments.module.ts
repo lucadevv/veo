@@ -7,6 +7,7 @@ import { CommissionModule } from '../commission/commission.module';
 import { PaymentsService } from './payments.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsController } from './payments.controller';
+import { RefundsController } from './refunds.controller';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { PaymentsController } from './payments.controller';
     CommissionModule,
   ],
   providers: [PaymentsService, PaymentsRepository],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, RefundsController],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}
