@@ -171,4 +171,21 @@ describe('HttpCarpoolRepository · reserva', () => {
       expect.objectContaining({schema: expect.anything()}),
     );
   });
+
+  it('cancel pega a POST /carpool/bookings/:id/cancel (sin body) y devuelve la reserva en CANCELADO', async () => {
+    const post = verbWithParse({...BOOKING, estado: 'CANCELADO'});
+    const repo = new HttpCarpoolRepository(makeHttp({post}));
+
+    const booking = await repo.cancel(BOOKING.id);
+
+    // El server devuelve la reserva ya en CANCELADO (validada con el schema del contrato).
+    expect(booking.estado).toBe('CANCELADO');
+    expect(post).toHaveBeenCalledWith(
+      `/carpool/bookings/${BOOKING.id}/cancel`,
+      // Sin body: el passengerId lo toma el server de la sesión (anti-IDOR).
+      expect.objectContaining({schema: expect.anything()}),
+    );
+    const [, opts] = post.mock.calls[0] as [string, {body?: unknown}];
+    expect(opts.body).toBeUndefined();
+  });
 });

@@ -1,12 +1,14 @@
 import type {AppNotification} from './entities';
 
 /**
- * Puerto del centro de avisos (DIP). El listado de avisos NO tiene endpoint en el `public-bff`
- * todavía; este contrato existe para que la presentación dependa de la ABSTRACCIÓN y la
- * implementación concreta (hoy un feed vacío honesto; mañana una impl HTTP) sea sustituible bajo
- * el mismo token de DI sin tocar dominio ni UI.
+ * Puerto del centro de avisos (DIP). La presentación depende de esta ABSTRACCIÓN; la impl concreta
+ * (HTTP contra el public-bff) es sustituible bajo el mismo token de DI sin tocar dominio ni UI.
  */
 export interface NotificationsRepository {
-  /** Lista los avisos del pasajero, más recientes primero. */
+  /** Lista los avisos del pasajero, más recientes primero (cada uno con su estado `read` real). */
   list(): Promise<AppNotification[]>;
+  /** Marca UNA notificación como leída (el dueño lo deriva el backend del JWT: anti-IDOR). */
+  markRead(id: string): Promise<void>;
+  /** Marca TODAS las notificaciones del pasajero como leídas. */
+  markAllRead(): Promise<void>;
 }

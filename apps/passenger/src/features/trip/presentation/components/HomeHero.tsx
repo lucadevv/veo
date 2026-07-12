@@ -20,10 +20,12 @@ export function HomeHero({name}: HomeHeroProps): React.JSX.Element {
 
   return (
     <View style={[styles.root, {gap: theme.spacing.xxs}]}>
-      <Text variant="title1" color="ink">
+      {/* Fiel a design/veo.pen P/Home (Greeting LMOuo): 24px (title2), no 30 (title1). */}
+      <Text variant="title2" color="ink">
         {greeting}
       </Text>
-      <Text variant="body" color="inkMuted">
+      {/* Sub (ma19u): Outfit 14 → callout, no body (16). */}
+      <Text variant="callout" color="inkMuted">
         {t('home.greetingSub')}
       </Text>
     </View>

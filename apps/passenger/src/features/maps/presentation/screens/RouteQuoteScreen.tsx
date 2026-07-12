@@ -351,9 +351,9 @@ export function RouteQuoteScreen(): React.JSX.Element {
 
   return (
     <View style={[styles.root, {backgroundColor: theme.colors.bg}]}>
-      {/* Barra de estado clara sobre el mapa oscuro full-bleed. */}
+      {/* Barra de estado oscura sobre el mapa claro (veoLightStyle) full-bleed. */}
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         backgroundColor="transparent"
         translucent
       />
@@ -391,7 +391,7 @@ export function RouteQuoteScreen(): React.JSX.Element {
         style={[
           styles.sheet,
           {
-            backgroundColor: theme.colors.bg,
+            backgroundColor: theme.colors.surface,
             borderTopLeftRadius: theme.radii.xl,
             borderTopRightRadius: theme.radii.xl,
             borderColor: theme.colors.border,

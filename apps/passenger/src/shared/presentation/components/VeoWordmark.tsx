@@ -77,8 +77,8 @@ const SIZES: Record<VeoWordmarkSize, SizeSpec> = {
   },
   xl: {
     fontSize: 72,
-    lineHeight: 78,
-    letterSpacing: -2,
+    lineHeight: 90,
+    letterSpacing: 3,
     motifWidth: 240,
     motifHeight: 64,
     motifOffset: -18,

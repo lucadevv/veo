@@ -1,5 +1,7 @@
 import {
   getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
   type AppNotification as AppNotificationDto,
   type HttpClient,
   type NotificationCategory,
@@ -23,16 +25,16 @@ function toAppNotification(dto: AppNotificationDto): AppNotification {
     title: dto.title,
     body: dto.body,
     createdAt: dto.createdAt,
-    // MVP: el backend aún NO trackea leído/no-leído. Marcamos `true` para no mostrar un badge de
-    // "no leídos" que nunca se limpiaría (degradación honesta). El read real es un follow-up (read_at).
-    read: true,
+    // `read` REAL del server (read_at != null): ya no se hardcodea. El badge de no-leídos ahora se
+    // limpia de verdad (PATCH /notifications/:id/read · read-all).
+    read: dto.read,
   };
 }
 
 /**
- * Implementación REAL de `NotificationsRepository` contra el public-bff (`GET /notifications`). El
- * aviso llega YA renderizado y categorizado por el notification-service; acá solo mapeamos
- * `category → kind` (presentación). Reemplaza al `EmptyNotificationsRepository` (bandeja vacía honesta).
+ * Implementación REAL de `NotificationsRepository` contra el public-bff (`GET /notifications` +
+ * `PATCH /notifications/:id/read` · `PATCH /notifications/read-all`). El aviso llega YA renderizado y
+ * categorizado por el notification-service; acá solo mapeamos `category → kind` (presentación).
  */
 export class HttpNotificationsRepository implements NotificationsRepository {
   constructor(private readonly http: HttpClient) {}
@@ -40,5 +42,13 @@ export class HttpNotificationsRepository implements NotificationsRepository {
   async list(): Promise<AppNotification[]> {
     const items = await getNotifications(this.http);
     return items.map(toAppNotification);
+  }
+
+  markRead(id: string): Promise<void> {
+    return markNotificationRead(this.http, id);
+  }
+
+  async markAllRead(): Promise<void> {
+    await markAllNotificationsRead(this.http);
   }
 }

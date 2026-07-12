@@ -1,4 +1,4 @@
-import {hexAlpha, Text, useTheme} from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {Pressable, StyleSheet} from 'react-native';
 import {type GlyphProps} from './icons';
@@ -26,9 +26,9 @@ export function ShortcutChip({
       style={[
         styles.chip,
         {
-          // Piel del pen (P/Home · ShortcutChips): surface al 60% + borde del vidrio al 40%.
-          backgroundColor: hexAlpha(theme.colors.surface, 0.6),
-          borderColor: '#4C546866',
+          // Piel del pen (P/Home · Casa/Trabajo Fuxjy): lienzo #F5F7FA (bg) sólido + borde #DDE1E7.
+          backgroundColor: theme.colors.bg,
+          borderColor: theme.colors.border,
           borderRadius: theme.radii.pill,
         },
       ]}>

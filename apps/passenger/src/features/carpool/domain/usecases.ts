@@ -47,3 +47,15 @@ export class GetCarpoolBookingUseCase {
     return this.repository.getBooking(bookingId);
   }
 }
+
+/**
+ * Cancela MI solicitud aún PENDIENTE (P/WaitingApproval · "Cancelar solicitud"). El server sella ownership +
+ * estado (solo PENDIENTE_APROBACION); devuelve la reserva ya en CANCELADO. Sin cobro (charge-on-approval).
+ */
+export class CancelCarpoolBookingUseCase {
+  constructor(private readonly repository: CarpoolRepository) {}
+
+  execute(bookingId: string): Promise<CarpoolBookingView> {
+    return this.repository.cancel(bookingId);
+  }
+}

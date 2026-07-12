@@ -190,7 +190,7 @@ export function OffersBoardScreen(): React.JSX.Element {
   return (
     <View style={[styles.root, {backgroundColor: theme.colors.bg}]}>
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         backgroundColor="transparent"
         translucent
       />

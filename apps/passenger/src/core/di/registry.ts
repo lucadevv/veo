@@ -32,6 +32,7 @@ import {
 } from '../../features/kyc/domain/usecases';
 import {HttpCarpoolRepository} from '../../features/carpool/data/httpCarpoolRepository';
 import {
+  CancelCarpoolBookingUseCase,
   GetCarpoolBookingUseCase,
   GetCarpoolTripDetailUseCase,
   ReserveCarpoolSeatUseCase,
@@ -45,7 +46,16 @@ import {
   ReverseGeocodeUseCase,
 } from '../../features/maps/domain/usecases';
 import {HttpNotificationsRepository} from '../../features/notifications/data/httpNotificationsRepository';
-import {ListNotificationsUseCase} from '../../features/notifications/domain/usecases';
+import {
+  ListNotificationsUseCase,
+  MarkNotificationReadUseCase,
+  MarkAllNotificationsReadUseCase,
+} from '../../features/notifications/domain/usecases';
+import {HttpNotificationPrefsRepository} from '../../features/notifications/data/httpNotificationPrefsRepository';
+import {
+  GetNotificationPrefsUseCase,
+  UpdateNotificationPrefsUseCase,
+} from '../../features/notifications/domain/prefsUsecases';
 import {HttpPushTokenRegistrar} from '../../features/notifications/data/httpPushTokenRegistrar';
 import {LogPushTokenRegistrar} from '../../features/notifications/data/logPushTokenRegistrar';
 import {
@@ -155,6 +165,7 @@ import {TOKENS} from './tokens';
  * Resolución perezosa: nada se instancia hasta el primer `resolve`.
  */
 import {setPaymentPrefsBackendSync} from '../../features/payments/presentation/stores/paymentPrefsStore';
+import {setNotificationPrefsBackendSync} from '../../features/notifications/presentation/stores/notificationPrefsStore';
 
 export function buildContainer(): Container {
   const container = new Container();
@@ -491,6 +502,10 @@ export function buildContainer(): Container {
     TOKENS.getCarpoolBookingUseCase,
     c => new GetCarpoolBookingUseCase(c.resolve(TOKENS.carpoolRepository)),
   );
+  container.register(
+    TOKENS.cancelCarpoolBookingUseCase,
+    c => new CancelCarpoolBookingUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
 
   // Casos de uso · Maps
   container.register(
@@ -680,6 +695,36 @@ export function buildContainer(): Container {
     c =>
       new ListNotificationsUseCase(c.resolve(TOKENS.notificationsRepository)),
   );
+  container.register(
+    TOKENS.markNotificationReadUseCase,
+    c =>
+      new MarkNotificationReadUseCase(c.resolve(TOKENS.notificationsRepository)),
+  );
+  container.register(
+    TOKENS.markAllNotificationsReadUseCase,
+    c =>
+      new MarkAllNotificationsReadUseCase(
+        c.resolve(TOKENS.notificationsRepository),
+      ),
+  );
+  container.register(
+    TOKENS.notificationPrefsRepository,
+    c => new HttpNotificationPrefsRepository(c.resolve(TOKENS.httpClient)),
+  );
+  container.register(
+    TOKENS.getNotificationPrefsUseCase,
+    c =>
+      new GetNotificationPrefsUseCase(
+        c.resolve(TOKENS.notificationPrefsRepository),
+      ),
+  );
+  container.register(
+    TOKENS.updateNotificationPrefsUseCase,
+    c =>
+      new UpdateNotificationPrefsUseCase(
+        c.resolve(TOKENS.notificationPrefsRepository),
+      ),
+  );
 
   // Casos de uso · Promos
   container.register(
@@ -749,5 +794,14 @@ setPaymentPrefsBackendSync(method => {
   void container
     .resolve(TOKENS.updateProfileUseCase)
     .execute({defaultPaymentMethod: method})
+    .catch(() => {});
+});
+
+// Sincroniza las preferencias de notificaciones al backend (PUT /notification-prefs) en cada cambio.
+// Guarded: si el binding no está, el store degrada a MMKV local (offline honesto).
+setNotificationPrefsBackendSync(prefs => {
+  void container
+    .resolve(TOKENS.updateNotificationPrefsUseCase)
+    .execute(prefs)
     .catch(() => {});
 });

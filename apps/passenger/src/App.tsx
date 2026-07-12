@@ -1,5 +1,5 @@
 import {
-  DarkTheme,
+  DefaultTheme,
   NavigationContainer,
   type Theme,
 } from '@react-navigation/native';
@@ -20,6 +20,16 @@ import './i18n';
 import {RootNavigator} from './navigation/RootNavigator';
 import {navigationRef} from './navigation/navigationRef';
 import {flushPendingDeepLink} from './services/messaging';
+
+// Puente de debug SÓLO en __DEV__ (no existe en release): expone el store de sesión y el nav ref para
+// controlar la app desde herramientas externas (metro-mcp), p.ej. saltar de estado de auth durante la
+// verificación de UI: `global.__veo.session.getState().clearSession()`.
+if (__DEV__) {
+  (globalThis as {__veo?: unknown}).__veo = {
+    session: useSessionStore,
+    nav: navigationRef,
+  };
+}
 
 /**
  * Raíz de la app pasajero. Orden de providers:
@@ -86,16 +96,17 @@ export default function App(): React.JSX.Element {
 }
 
 /**
- * NavigationContainer con tema OSCURO derivado del `@veo/ui-kit` (Midnight Motion). Sin esto, React
- * Navigation usa su tema claro por defecto → fondos y headers BLANCOS que rompen el diseño oscuro en
- * varias pantallas. Vive dentro del ThemeProvider para leer los tokens reales con `useTheme`.
+ * NavigationContainer con tema CLARO derivado del `@veo/ui-kit` (Theme de Confianza). Deriva de
+ * `DefaultTheme` (base light de React Navigation) y sobreescribe los colores con los tokens reales,
+ * así fondos/headers nativos matchean el lienzo claro. Vive dentro del ThemeProvider para leer los
+ * tokens con `useTheme`.
  */
 function ThemedNavigation(): React.JSX.Element {
   const theme = useTheme();
   const navTheme: Theme = {
-    ...DarkTheme,
+    ...DefaultTheme,
     colors: {
-      ...DarkTheme.colors,
+      ...DefaultTheme.colors,
       background: theme.colors.bg,
       card: theme.colors.bg,
       text: theme.colors.ink,

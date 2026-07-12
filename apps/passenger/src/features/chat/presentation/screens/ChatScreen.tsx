@@ -212,6 +212,14 @@ export function ChatScreen(): React.JSX.Element {
                 gap: theme.spacing.sm,
               },
             ]}>
+            {/* Socket caído con el viaje aún activo: indicador honesto (antes no se veía nada). El envío
+                por REST sigue funcionando; los mensajes entrantes en vivo se reanudan al reconectar. */}
+            {!live.connected ? (
+              <Text variant="caption" color="inkSubtle" align="center">
+                {t('chat.reconnecting')}
+              </Text>
+            ) : null}
+
             {/* Plantillas rápidas: chips horizontales discretos. */}
             <View style={[styles.quickRow, {gap: theme.spacing.xs}]}>
               {QUICK_REPLY_KEYS.map(key => (

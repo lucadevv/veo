@@ -317,7 +317,8 @@ export function CompleteProfileScreen(): React.JSX.Element {
         <Animated.View
           style={[
             styles.avatarRing,
-            {backgroundColor: theme.colors.surfaceElevated},
+            // Círculo con tinte teal 8% (design/veo.pen `p7U1IM`: accent al 8% de alfa), no blanco.
+            {backgroundColor: `${theme.colors.accent}14`},
             avatarStyle,
           ]}>
           {previewUri ? (
@@ -327,7 +328,9 @@ export function CompleteProfileScreen(): React.JSX.Element {
               resizeMode="cover"
             />
           ) : initials ? (
-            <Text variant="title1">{initials}</Text>
+            <Text variant="title1" color="accent">
+              {initials}
+            </Text>
           ) : (
             <IconPerson color={theme.colors.inkSubtle} size={56} />
           )}
@@ -369,7 +372,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
           <IconCamera
             color={theme.colors.onAccent}
             holeColor={theme.colors.accent}
-            size={22}
+            size={18}
           />
         </PressableScale>
       </FadeInView>
@@ -502,26 +505,27 @@ const styles = StyleSheet.create({
   copy: {gap: spacing.sm, marginBottom: spacing['2xl']},
   subtitle: {},
   avatarWrap: {alignSelf: 'center', marginBottom: 28},
+  // Avatar 100×100 (design/veo.pen `ZobPo`): círculo teal-tinte + FAB de cámara proporcional.
   avatarRing: {
-    width: 132,
-    height: 132,
-    borderRadius: 66,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarImage: {width: '100%', height: '100%', borderRadius: 64},
+  avatarImage: {width: '100%', height: '100%', borderRadius: 50},
   avatarOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 64,
+    borderRadius: 50,
   },
-  cameraFabAnchor: {position: 'absolute', right: 0, bottom: 4},
+  cameraFabAnchor: {position: 'absolute', right: -2, bottom: 2},
   cameraFab: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',

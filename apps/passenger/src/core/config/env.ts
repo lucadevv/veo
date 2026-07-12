@@ -151,8 +151,8 @@ const devDefaults = (() => {
 const envSchema = z.object({
   PUBLIC_BFF_URL: z.string().url(),
   PUBLIC_BFF_WS_URL: z.string().url(),
-  // Estilo MapLibre oscuro legado (tileserver-gl). Lote 4: el mapa migró a Mapbox y el estilo va
-  // embebido en el bundle (`veoDarkStyle`); esta URL queda como fallback opcional.
+  // Estilo MapLibre legado (tileserver-gl). Lote 4: el mapa migró a Mapbox y el estilo va embebido
+  // en el bundle (`veoLightStyle`, Daylight Trust); esta URL queda como fallback opcional.
   PUBLIC_MAP_STYLE_URL: z.string().url(),
   // Token PÚBLICO de Mapbox (`pk.`). Lo consume `Mapbox.setAccessToken` en el bootstrap nativo.
   // Público por diseño (va al cliente): vive en `env/<tier>.env` (single-file), restringido por bundle-id en Mapbox.

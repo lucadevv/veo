@@ -1,22 +1,16 @@
 /**
- * Estilo veo-dark ("Midnight Motion") portado de MapLibre/OpenMapTiles a **Mapbox Streets v8**.
+ * Estilo veo-light ("Daylight Trust") sobre **Mapbox Streets v8**.
  *
- * Lote 4 (migración del pasajero a Mapbox). Este archivo es una COPIA EXACTA del estilo ya portado
- * en el conductor (`veo-driver-app/src/shared/presentation/components/mapbox/veoDarkStyle.ts`).
+ * Migración dark→light Trust (Theme de Confianza): el mapa del pasajero adopta la MISMA paleta clara
+ * que ya usa el admin-web (`apps/admin-web/src/lib/map/veo-map-style.ts`, `lightPalette`). La estructura
+ * de capas (filtros, minzooms, anchos de línea, símbolos) es IDÉNTICA a la variante oscura anterior
+ * (`veoDarkStyle.ts`, eliminado): solo cambian las constantes de color de la `palette`. El lienzo del
+ * mapa (`bg #F5F7FA`) matchea el token `bg` del tema (themes.ts), así que mapa y chrome (sheets)
+ * comparten el MISMO canvas sin costura visible.
  *
- * TODO(dedupe · componente canónico): el estilo está duplicado en ambas apps (driver + passenger).
- * El candidato natural para deduplicarlo es `@veo/ui-kit` (es JSON puro, sin dependencia de
- * `@rnmapbox/maps`, así que cabe junto a los tokens del tema). No se hizo ahora porque el conductor
- * ya importa su propia copia local y moverlo obligaría a tocar el conductor (fuera del alcance del
- * Lote 4). Cuando se promueva a `@veo/ui-kit`, ambas apps deben importar `veoDarkMapboxStyleJSON`
- * desde ahí y borrar estas dos copias.
- *
- * El original se servía desde tileserver-gl propio con el esquema OpenMapTiles
- * (`veo-platform/dev-stack/maps/tiles/styles/veo-dark/style.json`). Aquí se conserva EXACTA la
- * paleta (dark + acentos) y se remapean las `sources`/`source-layer` al tileset oficial
- * `mapbox://mapbox.mapbox-streets-v8`. El resultado es un Style JSON de Mapbox que la app pasa a
- * `MapView` vía `styleJSON` (string). El token público lo resuelve `Mapbox.setAccessToken` en el
- * bootstrap nativo, así que las fuentes usan la URL `mapbox://…` (sin token embebido).
+ * El objeto Style JSON se pasa a `MapView` vía `styleJSON` (string). El token público de Mapbox lo
+ * resuelve `Mapbox.setAccessToken` en el bootstrap nativo, así que las fuentes/glyphs usan las URLs
+ * `mapbox://…` (sin token embebido).
  *
  * ── Mapeo de capas OpenMapTiles → Mapbox Streets v8 (source-layer reales del tileset) ───────────
  *  background            → background (paint, sin fuente)
@@ -24,8 +18,7 @@
  *  park (fill)           → landuse (class=park) + landuse_overlay (class=national_park/wetland)
  *  landuse residential   → landuse (class=residential)
  *  landuse industrial…   → landuse (class ∈ commercial_area/industrial/cemetery/hospital/school…)
- *  water (fill)          → water   (capa única, sin class; se elimina el filtro `intermittent`,
- *                                   que no existe en el `water` de Streets v8)
+ *  water (fill)          → water   (capa única, sin class)
  *  waterway (line)       → waterway (class ∈ river/canal/stream/drain/ditch)
  *  building (fill)       → building
  *  transportation minor… → road (class ∈ service/track/path)
@@ -39,43 +32,33 @@
  *  place suburb/town/…   → place_label (type ∈ suburb/neighbourhood/quarter/town/village)
  *  place city            → place_label (type=city)
  *  place country         → place_label (type=country; filtro worldview="all")
- *
- * Notas / pendientes documentados:
- *  - Fuentes de texto: OpenMapTiles usaba "Noto Sans Regular" (servido por tileserver propio). Con
- *    Mapbox el glyph stack debe existir en la cuenta; usamos los stacks estándar de Mapbox
- *    ("DIN Pro Regular"/"Arial Unicode MS Regular") que están disponibles por defecto.
- *  - El campo de nombre de OpenMapTiles era `name:latin`/`name:es`; en Streets v8 es `name`/`name_es`.
- *  - `landcover` de OMT (bosque/pasto) no tiene capa 1:1 en Streets v8; se aproxima con `landuse`
- *    de clases naturales. Visualmente es secundario en zona urbana de Lima (el foco son
- *    calles/agua/edificios/labels, que sí están mapeados con fidelidad).
  */
 
-/** Paleta veo-dark (idéntica al style.json original). Centralizada para no repetir literales. */
+/** Paleta veo-light "Daylight Trust" (idéntica al `lightPalette` del admin-web). */
 const palette = {
-  // Negro puro = token `bg` del tema (themes.ts): el mapa y el chrome (sheets) comparten el MISMO
-  // negro, sin costura visible entre mapa y superficies. Antes #0B0F14 (navy) divergía del #000000.
-  bg: '#000000',
-  landcover: '#10161D',
-  park: '#0F1A14',
-  landuseResidential: '#0E141B',
-  landuseOther: '#11171F',
-  water: '#0A1A2A',
-  building: '#161D26',
-  buildingOutline: '#1E2832',
-  roadMinor: '#1B2530',
-  roadStreet: '#232F3B',
-  roadSecondary: '#2C3A48',
-  roadPrimary: '#3A4A5A',
-  roadMotorway: '#48607A',
-  boundary: '#2A3340',
-  labelWater: '#4A6680',
-  labelWaterHalo: '#0A1A2A',
-  labelStreet: '#7E8C9A',
-  labelStreetHalo: '#000000',
-  labelPlaceOther: '#8A98A6',
-  labelPlaceCity: '#C2CED9',
-  labelPlaceCityHalo: '#070A0E',
-  labelCountry: '#9AA8B6',
+  // Canvas claro = token `bg` del tema (themes.ts #F5F7FA): mapa y sheets comparten el mismo lienzo.
+  bg: '#F5F7FA',
+  landcover: '#E9F3EC',
+  park: '#E2F3E9',
+  landuseResidential: '#F0F3F7',
+  landuseOther: '#EDF1F5',
+  water: '#D4E6F2',
+  building: '#E6EBF1',
+  buildingOutline: '#DCE3EB',
+  roadMinor: '#E6EBF1',
+  roadStreet: '#DCE3EB',
+  roadSecondary: '#CBD3DD',
+  roadPrimary: '#BAC4CF',
+  roadMotorway: '#A7B3C1',
+  boundary: '#C5CDD6',
+  labelWater: '#7E9BB5',
+  labelWaterHalo: '#FFFFFF',
+  labelStreet: '#8A929E',
+  labelStreetHalo: '#FFFFFF',
+  labelPlaceOther: '#6B7A8F',
+  labelPlaceCity: '#1A2332',
+  labelPlaceCityHalo: '#FFFFFF',
+  labelCountry: '#6B7A8F',
 } as const;
 
 /** Fuente vectorial oficial de Mapbox (reemplaza la `source` OpenMapTiles del tileserver propio). */
@@ -100,12 +83,12 @@ const WORLDVIEW_ALL: unknown = [
  * Style JSON de Mapbox (spec v8). Tipado laxo a `Record<string, unknown>` porque el spec de estilo
  * es estructural y `@rnmapbox/maps` lo recibe como string vía `styleJSON`; no aporta tipos del spec.
  */
-export const veoDarkMapboxStyle: Record<string, unknown> = {
+export const veoLightMapboxStyle: Record<string, unknown> = {
   version: 8,
-  name: 'VEO Midnight Motion (Mapbox Streets v8)',
+  name: 'VEO Daylight Trust (Mapbox Streets v8)',
   metadata: {
     'veo:description':
-      'Estilo oscuro VEO portado a Mapbox Streets v8 (paleta idéntica al veo-dark de OpenMapTiles).',
+      'Estilo claro VEO "Daylight Trust" sobre Mapbox Streets v8 (paleta idéntica al admin-web).',
   },
   sources: {
     composite: {
@@ -113,7 +96,6 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       url: MAPBOX_STREETS,
     },
   },
-  // glyphs/sprite los resuelve Mapbox desde la cuenta del token público (mapbox://fonts, mapbox://sprites).
   glyphs: 'mapbox://fonts/mapbox/{fontstack}/{range}.pbf',
   layers: [
     {
@@ -121,7 +103,6 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'background',
       paint: {'background-color': palette.bg},
     },
-    // landcover (OMT) → cobertura natural en `landuse` de Streets v8.
     {
       id: 'landcover',
       type: 'fill',
@@ -139,7 +120,6 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         'fill-opacity': 0.6,
       },
     },
-    // park (OMT) → landuse class=park + landuse_overlay (national_park/wetland).
     {
       id: 'park',
       type: 'fill',
@@ -426,8 +406,6 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       layout: {
         'text-field': NAME_FIELD,
         'text-font': FONT_REGULAR,
-        // Más chico que antes (10→12 vs 10→14) y SIN uppercase: barrios en caja normal = ambientes,
-        // no encabezados que dominan el mapa.
         'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 17, 12],
         'text-max-width': 8,
         'text-letter-spacing': 0.05,
@@ -436,7 +414,6 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         'text-color': palette.labelPlaceOther,
         'text-halo-color': palette.labelStreetHalo,
         'text-halo-width': 1.4,
-        // Fade-in suave: invisibles a 13, ~0.5 a 14, tope 0.65. Nunca al 100% (ambientes, no foco).
         'text-opacity': [
           'interpolate',
           ['linear'],
@@ -500,5 +477,5 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
  * Style serializado para el prop `styleJSON` de `MapView`. Se memoiza a nivel de módulo (el objeto
  * es constante) para no re-stringificar en cada render del mapa.
  */
-export const veoDarkMapboxStyleJSON: string =
-  JSON.stringify(veoDarkMapboxStyle);
+export const veoLightMapboxStyleJSON: string =
+  JSON.stringify(veoLightMapboxStyle);

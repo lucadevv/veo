@@ -96,7 +96,7 @@ export function HomeTopBar({
             backgroundColor: theme.colors.surfaceElevated,
             borderColor: locationActionable
               ? theme.colors.warn
-              : theme.colors.borderStrong,
+              : theme.colors.border,
             borderRadius: theme.radii.pill,
             ...theme.elevation.level2,
           },

@@ -22,13 +22,13 @@ import {
   PressableScale,
 } from '../../../../shared/presentation/components/motion';
 import {useOnboardingStore} from '../stores/onboardingStore';
-import mock1 from '../assets/onboarding-mock-1.jpg';
-import mock2 from '../assets/onboarding-mock-2.jpg';
-import mock3 from '../assets/onboarding-mock-3.jpg';
+import photo1 from '../assets/onboarding-photo-1.jpg';
+import photo2 from '../assets/onboarding-photo-2.jpg';
+import photo3 from '../assets/onboarding-photo-3.jpg';
 
-/** Un slide del carrusel de bienvenida: mockup de la app + título + copy (fuente: `design/veo.pen`). */
+/** Un slide del carrusel de bienvenida: foto + título + copy (fuente: `design/veo.pen`). */
 interface Slide {
-  mock: ImageSourcePropType;
+  photo: ImageSourcePropType;
   title:
     | 'onboarding.slide1.title'
     | 'onboarding.slide2.title'
@@ -45,19 +45,19 @@ interface Slide {
 
 const SLIDES: readonly Slide[] = [
   {
-    mock: mock1,
+    photo: photo1,
     title: 'onboarding.slide1.title',
     body: 'onboarding.slide1.body',
     alt: 'onboarding.slide1.imageAlt',
   },
   {
-    mock: mock2,
+    photo: photo2,
     title: 'onboarding.slide2.title',
     body: 'onboarding.slide2.body',
     alt: 'onboarding.slide2.imageAlt',
   },
   {
-    mock: mock3,
+    photo: photo3,
     title: 'onboarding.slide3.title',
     body: 'onboarding.slide3.body',
     alt: 'onboarding.slide3.imageAlt',
@@ -65,15 +65,15 @@ const SLIDES: readonly Slide[] = [
 ];
 const SLIDE_COUNT = SLIDES.length;
 
-// Proporción del mockup tomada del diseño (`veo.pen` · DeviceMock 228×430).
-const MOCK_RATIO = 430 / 228;
+// Proporción de la foto: portrait 3:4 (assets 1200×1600) para un retrato limpio sin recortar caras.
+const PHOTO_RATIO = 4 / 3;
 
 /**
- * Onboarding de bienvenida del pasajero: carrusel de 3 slides de marketing con mockups de la app
- * (seguridad · los 3 modos de viaje · conductores verificados), fiel a `design/veo.pen`
- * (P/Onboarding 1-3). Cada slide centra un mockup con glow de marca + título grotesk + copy.
- * Al terminar (o al Omitir) marca el onboarding completo y el `RootNavigator` conmuta de stack.
- * El consentimiento Ley N.° 29733 ya NO vive acá: se captura en el flujo de auth.
+ * Onboarding de bienvenida del pasajero: carrusel de 3 slides de marketing (seguridad · los 3 modos
+ * de viaje · conductores verificados). Cada slide centra una FOTO en card redondeada con halo teal
+ * de marca + título grotesk + copy, con entrada animada (FadeInView). Al terminar (o al Omitir)
+ * marca el onboarding completo y el `RootNavigator` conmuta de stack. El consentimiento Ley N.° 29733
+ * ya NO vive acá: se captura en el flujo de auth.
  */
 export function OnboardingScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -116,8 +116,8 @@ export function OnboardingScreen(): React.JSX.Element {
     }
   }, [isLast, complete, goToPage, page]);
 
-  const mockWidth = Math.min(width * 0.6, 240);
-  const mockHeight = mockWidth * MOCK_RATIO;
+  const photoWidth = Math.min(width * 0.74, 300);
+  const photoHeight = photoWidth * PHOTO_RATIO;
 
   return (
     <View
@@ -125,20 +125,7 @@ export function OnboardingScreen(): React.JSX.Element {
         styles.screen,
         {backgroundColor: theme.colors.bg, paddingTop: insets.top},
       ]}>
-      {/* Barra superior: Omitir a la derecha (fiel al .pen). */}
-      <View style={[styles.topBar, {paddingHorizontal: theme.spacing.lg}]}>
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel={t('onboarding.skip')}
-          onPress={complete}
-          contentStyle={styles.skipHit}>
-          <Text variant="subhead" color="inkSubtle">
-            {t('onboarding.skip')}
-          </Text>
-        </PressableScale>
-      </View>
-
-      {/* Carrusel: mockup + copy por slide. */}
+      {/* Carrusel: foto + copy por slide. */}
       <Animated.ScrollView
         ref={scrollRef}
         horizontal
@@ -157,23 +144,23 @@ export function OnboardingScreen(): React.JSX.Element {
             ]}>
             <View
               style={[
-                styles.mockGlow,
+                styles.photoGlow,
                 {
-                  width: mockWidth,
-                  height: mockHeight,
+                  width: photoWidth,
+                  height: photoHeight,
                   shadowColor: theme.colors.accent,
                 },
               ]}>
               <Image
-                source={slide.mock}
+                source={slide.photo}
                 accessibilityLabel={t(slide.alt)}
                 resizeMode="cover"
                 style={[
-                  styles.mockImage,
+                  styles.photo,
                   {
-                    width: mockWidth,
-                    height: mockHeight,
-                    borderColor: theme.colors.borderStrong,
+                    width: photoWidth,
+                    height: photoHeight,
+                    borderColor: theme.colors.border,
                   },
                 ]}
               />
@@ -195,6 +182,18 @@ export function OnboardingScreen(): React.JSX.Element {
         ))}
       </Animated.ScrollView>
 
+      {/* Omitir FLOTANTE arriba a la derecha (sin barra: flota sobre el contenido). */}
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel={t('onboarding.skip')}
+        onPress={complete}
+        style={[styles.skipFloat, {top: insets.top + 4, right: theme.spacing.lg}]}
+        contentStyle={styles.skipHit}>
+        <Text variant="subhead" color="inkMuted">
+          {t('onboarding.skip')}
+        </Text>
+      </PressableScale>
+
       {/* Footer fijo: dots + Continuar. */}
       <View
         style={[
@@ -207,7 +206,7 @@ export function OnboardingScreen(): React.JSX.Element {
         ]}>
         <AnimatedDots count={SLIDE_COUNT} progress={dotsProgress} />
         <Button
-          label={t('onboarding.continue')}
+          label={isLast ? t('onboarding.createAccount') : t('onboarding.continue')}
           variant="accent"
           fullWidth
           size="lg"
@@ -221,28 +220,23 @@ export function OnboardingScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   screen: {flex: 1},
   flex: {flex: 1},
-  topBar: {
-    height: 44,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  skipHit: {paddingVertical: spacing.sm, paddingHorizontal: spacing.xs},
+  skipFloat: {position: 'absolute', zIndex: 10},
+  skipHit: {paddingVertical: spacing.sm, paddingHorizontal: spacing.sm},
   slide: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing['2xl'],
   },
-  // Glow de marca bajo el mockup (emil: sombra de color intencional, no decorativa recargada).
-  mockGlow: {
+  // Halo teal de marca bajo la foto (emil: sombra de color intencional, suave, no recargada).
+  photoGlow: {
     borderRadius: 32,
-    shadowOpacity: 0.32,
-    shadowRadius: 30,
-    shadowOffset: {width: 0, height: 12},
-    elevation: 16,
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    shadowOffset: {width: 0, height: 14},
+    elevation: 14,
   },
-  mockImage: {borderRadius: 32, borderWidth: 1},
+  photo: {borderRadius: 32, borderWidth: 1},
   copy: {alignItems: 'center', gap: spacing.md},
   body: {maxWidth: 320},
   footer: {},

@@ -12,6 +12,8 @@ import {
   IconUser,
 } from '../icons';
 import {usePushPermission} from '../../../../core/notifications/usePushPermission';
+import {container} from '../../../../core/di/registry';
+import {TOKENS} from '../../../../core/di/tokens';
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import type {NotificationPrefs} from '../stores/notificationPrefsStore';
 import {useNotificationPrefsStore} from '../stores/notificationPrefsStore';
@@ -20,8 +22,9 @@ import {useNotificationPrefsStore} from '../stores/notificationPrefsStore';
  * Preferencias de notificaciones (design/veo.pen P/NotifPrefs): 3 grupos de toggles en cards —
  * Viajes / Seguridad / Promociones.
  *
- *  - Persistencia LOCAL (MMKV vía `useNotificationPrefsStore`): no hay backend de preferencias
- *    todavía (gap reportado); la nota al pie lo dice honesto.
+ *  - Persistencia con FUENTE DE VERDAD server-side (notification-service, `GET/PUT
+ *    /notification-prefs`): hidrata al montar y sincroniza cada cambio (PUT best-effort), con MMKV
+ *    como cache offline-first vía `useNotificationPrefsStore`. La nota al pie lo dice honesto.
  *  - Los toggles de SEGURIDAD (pánico / biométrica) están SIEMPRE encendidos y deshabilitados:
  *    seguridad no negociable del producto — el pen los dibuja como toggles normales, pero apagar
  *    la confirmación de un pánico sería mentirle al usuario sobre su propia seguridad.
@@ -36,6 +39,25 @@ export function NotificationPrefsScreen(): React.JSX.Element {
 
   const prefs = useNotificationPrefsStore(state => state.prefs);
   const setPref = useNotificationPrefsStore(state => state.setPref);
+  const hydrate = useNotificationPrefsStore(state => state.hydrate);
+
+  // Hidrata desde el backend al montar (fuente de verdad server-side). Resolución PEREZOSA + GUARDADA:
+  // si el binding DI aún no está cableado (lo consolida el lead en el registry), no crashea — la
+  // pantalla se queda con el cache MMKV (offline-first). Si falla la red, ídem (degradación honesta).
+  React.useEffect(() => {
+    if (!container.has(TOKENS.getNotificationPrefsUseCase)) return;
+    let cancelled = false;
+    container
+      .resolve(TOKENS.getNotificationPrefsUseCase)
+      .execute()
+      .then(server => {
+        if (!cancelled) hydrate(server);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrate]);
 
   const sectionLabel = (text: string): React.JSX.Element => (
     <Text

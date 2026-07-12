@@ -31,11 +31,12 @@ export function LastDriverCard({
   const filledStars = driver.rating != null ? Math.round(driver.rating) : 0;
 
   return (
-    <Card variant="elevated" padding="lg" style={styles.card}>
+    <Card variant="outlined" padding="lg" style={styles.card}>
       <View style={[styles.row, {gap: theme.spacing.md}]}>
-        <Avatar name={driver.name ?? undefined} size="lg" />
+        {/* Avatar del pen (LastDriverCard lNpn5): 44px (md), no 56 (lg). */}
+        <Avatar name={driver.name ?? undefined} size="md" />
         <View style={styles.identity}>
-          <Text variant="headline" color="ink" numberOfLines={1}>
+          <Text variant="bodyStrong" color="ink" numberOfLines={1}>
             {name}
           </Text>
           {driver.vehicleLabel ? (

@@ -63,10 +63,11 @@ export function SeguridadScreen(): React.JSX.Element {
   const childModeEnabled = useChildModeStore(s => s.enabled);
   const activeTripId = useActiveTripStore(s => s.activeTripId);
 
-  // Subtítulo de contactos: conteo REAL de verificados; mientras no cargó (o falló), texto neutro.
+  // Subtítulo de contactos: conteo REAL de verificados; error → honesto (antes "…" para siempre); carga → neutro.
   const verifiedCount = contactsQuery.data?.filter(c => c.verified).length;
-  const contactsSubtitle =
-    verifiedCount === undefined
+  const contactsSubtitle = contactsQuery.isError
+    ? t('security.loadError')
+    : verifiedCount === undefined
       ? '…'
       : verifiedCount === 0
         ? t('security.contactsNone')
@@ -78,8 +79,9 @@ export function SeguridadScreen(): React.JSX.Element {
   const kycStatus = profileQuery.data
     ? mapKycStatus(profileQuery.data.kycStatus)
     : null;
-  const kycSubtitle =
-    kycStatus === null
+  const kycSubtitle = profileQuery.isError
+    ? t('security.loadError')
+    : kycStatus === null
       ? '…'
       : kycStatus === 'approved'
         ? t('security.kycVerified')

@@ -206,6 +206,26 @@ export function TrustedContactsScreen(): React.JSX.Element {
                   onPress={() => setRemoveTarget(contact)}
                 />
               </View>
+              {/* Feedback del reenvío SOLO en la card del contacto reenviado (mutation compartida →
+                  la discriminamos por `variables` = id). Antes el toque quedaba mudo (éxito y error). */}
+              {resendMutation.variables === contact.id &&
+              !resendMutation.isPending &&
+              resendMutation.isSuccess ? (
+                <Banner
+                  tone="success"
+                  title={t('contacts.resent')}
+                  style={{marginTop: theme.spacing.sm}}
+                />
+              ) : null}
+              {resendMutation.variables === contact.id &&
+              !resendMutation.isPending &&
+              resendMutation.isError ? (
+                <Banner
+                  tone="danger"
+                  title={t('contacts.resendError')}
+                  style={{marginTop: theme.spacing.sm}}
+                />
+              ) : null}
             </Card>
           ))}
         </ScrollView>

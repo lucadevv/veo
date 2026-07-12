@@ -6,6 +6,7 @@ import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
 import {useBiometricGateStore} from '../stores/biometricGateStore';
+import {IconFaceScan} from '../components/icons';
 
 /**
  * Candado de RE-LOGIN biométrico. Se muestra cuando hay una sesión persistida (arranque en frío) y el
@@ -83,7 +84,12 @@ export function BiometricLockScreen(): React.JSX.Element {
         </View>
       }>
       <View style={[styles.center, {gap: theme.spacing.lg}]}>
-        <Text variant="display" color="brand" align="center">
+        {/* Emblema de escaneo facial (design/veo.pen `KcQ72`): círculo teal 8% + rostro teal. */}
+        <View
+          style={[styles.emblem, {backgroundColor: `${theme.colors.accent}14`}]}>
+          <IconFaceScan color={theme.colors.accent} size={44} />
+        </View>
+        <Text variant="title1" align="center">
           {t('auth.biometricTitle')}
         </Text>
         <Text variant="body" color="inkMuted" align="center">
@@ -99,5 +105,12 @@ export function BiometricLockScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  center: {flex: 1, justifyContent: 'center'},
+  center: {flex: 1, justifyContent: 'center', alignItems: 'center'},
+  emblem: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

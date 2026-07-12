@@ -190,6 +190,16 @@ export function PaymentScreen(): React.JSX.Element {
         />
       ) : null}
 
+      {/* Confirmación de efectivo fallida (`/payments/:id/cash/confirm`): antes el toque quedaba mudo
+          (spinner que vuelve sin nada). Banner honesto → el mismo botón "Confirmar efectivo" reintenta. */}
+      {confirmMutation.isError ? (
+        <Banner
+          tone="danger"
+          title={t('payments.cashConfirmError')}
+          style={{marginTop: theme.spacing.md}}
+        />
+      ) : null}
+
       <Text
         variant="title3"
         style={{marginTop: theme.spacing.xl, marginBottom: theme.spacing.sm}}>

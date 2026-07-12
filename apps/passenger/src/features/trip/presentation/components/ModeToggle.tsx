@@ -38,7 +38,8 @@ function Segment({
         styles.segment,
         {
           borderRadius: theme.radii.pill,
-          backgroundColor: active ? `${theme.colors.brand}26` : 'transparent',
+          // Segmento activo (pen dNLCb): brand al ~8% (brandDim), no 15%.
+          backgroundColor: active ? theme.colors.brandDim : 'transparent',
         },
       ]}>
       {icon}
@@ -72,7 +73,8 @@ export function ModeToggle({
       style={[
         styles.track,
         {
-          backgroundColor: theme.colors.surface,
+          // Track (pen SX1GD): lienzo #F5F7FA (bg), no surface blanco (invisible sobre el sheet blanco).
+          backgroundColor: theme.colors.bg,
           borderRadius: theme.radii.pill,
         },
       ]}>

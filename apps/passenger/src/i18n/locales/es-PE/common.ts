@@ -93,25 +93,26 @@ export const common = {
   onboarding: {
     skip: 'Omitir',
     continue: 'Continuar',
+    // CTA del ÚLTIMO slide (design/veo.pen P/Onboarding-3): cierra el onboarding creando la cuenta.
+    createAccount: 'Crear cuenta',
     step: '{{current}} / {{total}}',
 
     slide1: {
       title: 'Vas siempre acompañado',
       body: 'Botón de pánico, cámara en vivo y tu familia siguiendo tu viaje en tiempo real.',
-      imageAlt:
-        'App VEO mostrando un viaje activo con las herramientas de seguridad',
+      imageAlt: 'Pasajera viajando tranquila mientras revisa su celular',
     },
 
     slide2: {
       title: 'Tú eliges cómo viajar',
       body: 'Precio fijo, pon tu precio o reserva un asiento compartido. Siempre a tu manera.',
-      imageAlt: 'App VEO mostrando los modos de viaje y sus precios',
+      imageAlt: 'Mujer pidiendo un viaje en una calle de la ciudad',
     },
 
     slide3: {
       title: 'Conductores verificados',
       body: 'Cada conductor pasa por KYC, biometría y documentos. Viajas tranquilo.',
-      imageAlt: 'App VEO mostrando la lista de conductores verificados',
+      imageAlt: 'Conductora verificada sonriendo al volante',
     },
   },
 
@@ -146,6 +147,8 @@ export const common = {
     shareActive: 'Enlace en vivo firmado',
     /** Sin viaje activo la fila se deshabilita: honesto, no hay nada que compartir. */
     shareUnavailable: 'Disponible durante un viaje',
+    /** Subtítulo honesto cuando la query del hub (contactos/perfil) falla (antes: "…" para siempre). */
+    loadError: 'No se pudo cargar',
   },
 
   auth: {
@@ -183,7 +186,7 @@ export const common = {
     emailLink: 'Ingresa con correo',
     phoneTitle: 'Ingresa tu número',
     phoneSubtitle: 'Te enviamos un código por SMS.',
-    phoneLabel: 'Número de teléfono',
+    phoneLabel: 'Número de celular',
     phoneHelper: 'Usaremos tu número solo para verificar tu cuenta.',
     phonePlaceholder: '987 654 321',
     countryCode: '+51',
@@ -352,6 +355,11 @@ export const common = {
     emptySubtitle: 'Cuando tengas novedades de tus viajes, las verás aquí.',
     end: 'No hay más notificaciones.',
     loadError: 'No pudimos cargar tus avisos. Inténtalo de nuevo.',
+    /** Acción para marcar toda la bandeja como leída (aparece solo si hay no leídos). */
+    markAllRead: 'Marcar todo como leído',
+    /** Error al marcar leído (una o todas): la marca se revierte y avisamos honesto. */
+    markReadErrorTitle: 'No pudimos marcar como leído',
+    markReadErrorBody: 'Revisa tu conexión e inténtalo de nuevo.',
 
     /**
      * Preferencias de notificaciones (design/veo.pen P/NotifPrefs): 3 grupos de toggles.
@@ -379,8 +387,8 @@ export const common = {
       offersSub: 'Descuentos y beneficios para ti',
       news: 'Novedades',
       newsSub: 'Nuevas funciones de VEO',
-      /** Honesto: sin backend de preferencias, se guardan solo en este teléfono. */
-      localNote: 'Estas preferencias se guardan en este teléfono.',
+      /** Honesto: ahora se sincronizan con tu cuenta (backend), no solo en este teléfono. */
+      localNote: 'Estas preferencias se sincronizan con tu cuenta.',
       /** Permiso de push del SO apagado/bloqueado: sin él, ningún aviso llega. */
       pushOffTitle: 'Las notificaciones están apagadas',
       pushOffBody:
@@ -476,6 +484,17 @@ export const common = {
     searchError: 'No pudimos buscar direcciones. Inténtalo de nuevo.',
     pickOnMap: 'Elegir en el mapa',
     pickedPoint: 'Ubicación elegida en el mapa',
+    // Permiso/GPS de ubicación no disponible (SearchScreen/MapPickScreen/CarpoolPicker): aviso honesto
+    // + acción a Ajustes o reintento. Mismo patrón que el banner de permiso de cámara del KYC.
+    locationDeniedTitle: 'Activa tu ubicación',
+    locationDeniedBody:
+      'Necesitamos tu ubicación para ubicarte y sugerirte lugares cercanos. Actívala en Ajustes.',
+    locationServicesOffTitle: 'Activa el GPS',
+    locationServicesOffBody:
+      'El GPS de tu teléfono está apagado. Actívalo para poder ubicarte.',
+    locationErrorTitle: 'No pudimos ubicarte',
+    locationErrorBody: 'No conseguimos tu ubicación ahora. Inténtalo de nuevo.',
+    openSettings: 'Abrir Ajustes',
     pickup: {
       titleOrigin: 'Ajusta tu punto de recojo',
       titleDestination: 'Ajusta tu destino',
@@ -811,11 +830,17 @@ export const common = {
     statusLoadError: 'No pudimos cargar tu reserva.',
     backHome: 'Volver al inicio',
     searchOthers: 'Buscar otros viajes',
+    /** Cancelar la propia solicitud mientras espera aprobación (P/WaitingApproval). */
+    cancelRequest: 'Cancelar solicitud',
+    cancelError: 'No pudimos cancelar tu solicitud. Inténtalo de nuevo.',
   },
 
   trip: {
     driver: 'Conductor',
     vehicle: 'Vehículo',
+    // Detalle del viaje activo/cierre no cargó (query en error): banner + reintento in-sheet.
+    detailLoadError:
+      'No pudimos cargar los datos de tu viaje. Inténtalo de nuevo.',
     // Gate de verificación facial contextual (antes de pedir el viaje). Tuteo peruano.
     kycGateTitle: 'Verifica tu identidad',
     kycGateBody:
@@ -860,6 +885,9 @@ export const common = {
     changeDestination: 'Cambiar destino',
     changeDestinationTitle: 'Nuevo destino',
     changeDestinationBody: 'Toca el mapa para elegir el nuevo destino.',
+    // Cambio de destino falló (mutation en error): banner honesto como sus hermanas cancelar/compartir.
+    changeDestinationError:
+      'No pudimos cambiar tu destino. Inténtalo de nuevo.',
     panicButton: 'Emergencia',
     recording: 'GRABANDO',
     cabinVideoTitle: 'Cámara del habitáculo',
@@ -1108,6 +1136,9 @@ export const common = {
     invalidEmail: 'Ingresa un correo válido.',
     addError: 'No pudimos agregar el contacto. Inténtalo de nuevo.',
     verifyError: 'Código incorrecto o vencido.',
+    // Feedback del reenvío de OTP al contacto (antes el toque no decía nada, ni éxito ni error).
+    resent: 'Te reenviamos el código.',
+    resendError: 'No pudimos reenviar el código. Inténtalo de nuevo.',
   },
 
   childMode: {
@@ -1299,6 +1330,9 @@ export const common = {
     cashNote: 'Paga en efectivo directamente al conductor.',
     confirmCash: 'Confirmar pago en efectivo',
     cashConfirmed: 'Pago en efectivo confirmado',
+    // Confirmación de efectivo (`/payments/:id/cash/confirm`) falló: sin este banner el toque quedaba mudo.
+    cashConfirmError:
+      'No pudimos confirmar tu pago en efectivo. Inténtalo de nuevo.',
     status: 'Estado',
     /** Desglose del pago confirmado (pantalla de éxito). */
     breakdownFare: 'Tarifa acordada',
@@ -1695,6 +1729,11 @@ export const common = {
   tripDetail: {
     title: 'Detalle del viaje',
     titleDated: 'Viaje del {{date}}',
+    // Enriquecimiento (conductor/recibo/calificación/propina) falló: lo esencial (fecha/ruta/tarifa) ya
+    // está pintado desde la semilla, pero antes lo demás desaparecía en silencio. Banner + reintento.
+    enrichErrorTitle: 'No pudimos cargar todo el detalle',
+    enrichErrorBody:
+      'Faltan algunos datos del viaje, como el conductor o el recibo. Inténtalo de nuevo.',
   },
 
   ratings: {
@@ -1992,6 +2031,8 @@ export const common = {
     emptySubtitle: 'Escríbele a tu conductor para coordinar el recojo.',
     disabledTitle: 'Chat no disponible',
     disabledBody: 'El chat se habilita mientras tu viaje está activo.',
+    // Socket del chat caído mientras el viaje sigue activo: indicador honesto (el envío por REST igual va).
+    reconnecting: 'Reconectando…',
     loadError: 'No pudimos cargar los mensajes. Inténtalo de nuevo.',
     sendError: 'No se pudo enviar tu mensaje. Inténtalo de nuevo.',
     you: 'Tú',

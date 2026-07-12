@@ -1,10 +1,11 @@
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {useQuery} from '@tanstack/react-query';
-import {Card, IconButton, SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {Banner, Card, IconButton, SafeScreen, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
-import {ScrollView, StyleSheet, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {container} from '../../../../core/di/registry';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
@@ -17,6 +18,8 @@ import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHea
 import {formatShortDate} from '../../../../shared/utils/format';
 import type {AppNotification, NotificationKind} from '../../domain/entities';
 import {IconSettings, iconForKind} from '../icons';
+
+const LIST_KEY = ['notifications', 'list'] as const;
 
 /** Tono (color del ícono) por categoría de aviso. */
 function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
@@ -44,6 +47,7 @@ export function NotificationsScreen(): React.JSX.Element {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const listNotifications = useDependency(TOKENS.listNotificationsUseCase);
+  const queryClient = useQueryClient();
 
   // Engranaje → preferencias de notificaciones (pen: el feed "Avisos" y las preferencias
   // "Notificaciones" son DOS pantallas). Antes era headerRight del header nativo; con el header
@@ -63,9 +67,60 @@ export function NotificationsScreen(): React.JSX.Element {
   );
 
   const query = useQuery({
-    queryKey: ['notifications', 'list'],
+    queryKey: LIST_KEY,
     queryFn: () => listNotifications.execute(),
   });
+
+  // Actualiza el cache de la lista marcando como leídas las notificaciones indicadas (optimistic).
+  const applyRead = React.useCallback(
+    (ids: 'all' | string[]) => {
+      queryClient.setQueryData<AppNotification[]>(LIST_KEY, prev =>
+        prev?.map(n =>
+          ids === 'all' || ids.includes(n.id) ? {...n, read: true} : n,
+        ),
+      );
+    },
+    [queryClient],
+  );
+
+  // Mutación "marcar leído". Resolución PEREZOSA + GUARDADA: si el binding DI aún no está cableado
+  // (lo consolida el lead en el registry), el tap es un no-op honesto en vez de crashear la pantalla.
+  const markReadMutation = useMutation({
+    mutationFn: async (id: string) => {
+      if (!container.has(TOKENS.markNotificationReadUseCase)) return;
+      await container.resolve(TOKENS.markNotificationReadUseCase).execute(id);
+    },
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({queryKey: LIST_KEY});
+      const prev = queryClient.getQueryData<AppNotification[]>(LIST_KEY);
+      applyRead([id]);
+      return {prev};
+    },
+    onError: (_e, _id, ctx) => {
+      // Revert: la marca no cuajó en el server → restauramos el estado previo y avisamos.
+      if (ctx?.prev) queryClient.setQueryData(LIST_KEY, ctx.prev);
+    },
+    onSettled: () => queryClient.invalidateQueries({queryKey: LIST_KEY}),
+  });
+
+  const markAllMutation = useMutation({
+    mutationFn: async () => {
+      if (!container.has(TOKENS.markAllNotificationsReadUseCase)) return;
+      await container.resolve(TOKENS.markAllNotificationsReadUseCase).execute();
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({queryKey: LIST_KEY});
+      const prev = queryClient.getQueryData<AppNotification[]>(LIST_KEY);
+      applyRead('all');
+      return {prev};
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(LIST_KEY, ctx.prev);
+    },
+    onSettled: () => queryClient.invalidateQueries({queryKey: LIST_KEY}),
+  });
+
+  const markError = markReadMutation.isError || markAllMutation.isError;
 
   if (query.isLoading) {
     return (
@@ -103,6 +158,8 @@ export function NotificationsScreen(): React.JSX.Element {
     );
   }
 
+  const unreadCount = notifications.filter(n => !n.read).length;
+
   return (
     <SafeScreen padded={false}>
       <ScrollView
@@ -113,8 +170,34 @@ export function NotificationsScreen(): React.JSX.Element {
         showsVerticalScrollIndicator={false}>
         {/* Header in-body (patrón ScreenHeader del pen): back pill + título + engranaje. */}
         {header}
+        {markError ? (
+          <Banner
+            tone="warn"
+            title={t('notifications.markReadErrorTitle')}
+            description={t('notifications.markReadErrorBody')}
+          />
+        ) : null}
+        {/* "Marcar todo leído": solo cuando hay no leídos. Optimistic con revert ante error. */}
+        {unreadCount > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('notifications.markAllRead')}
+            onPress={() => markAllMutation.mutate()}
+            disabled={markAllMutation.isPending}
+            style={styles.markAll}>
+            <Text variant="footnote" color="accent">
+              {t('notifications.markAllRead')}
+            </Text>
+          </Pressable>
+        ) : null}
         {notifications.map(item => (
-          <NotificationCard key={item.id} notification={item} />
+          <NotificationCard
+            key={item.id}
+            notification={item}
+            onPress={() => {
+              if (!item.read) markReadMutation.mutate(item.id);
+            }}
+          />
         ))}
         <Text variant="footnote" color="inkSubtle" align="center">
           {t('notifications.end')}
@@ -126,11 +209,16 @@ export function NotificationsScreen(): React.JSX.Element {
 
 interface NotificationCardProps {
   notification: AppNotification;
+  onPress: () => void;
 }
 
-/** Tarjeta de un aviso: círculo con el ícono de su categoría, título, cuerpo y fecha. */
+/**
+ * Tarjeta de un aviso: círculo con el ícono de su categoría, título, cuerpo y fecha. Al tocarla se
+ * marca como leída (si estaba no leída). Un punto de acento señala las NO leídas.
+ */
 function NotificationCard({
   notification,
+  onPress,
 }: NotificationCardProps): React.JSX.Element {
   const theme = useTheme();
   const Glyph = iconForKind(notification.kind);
@@ -138,35 +226,46 @@ function NotificationCard({
   const iconColor = theme.colors[tone];
 
   return (
-    <Card variant="outlined" padding="lg">
-      <View style={styles.row}>
-        <View
-          style={[
-            styles.leadCircle,
-            {
-              backgroundColor: theme.colors.surfaceElevated,
-              borderColor: theme.colors.border,
-            },
-          ]}>
-          <Glyph color={iconColor} size={18} />
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={notification.title}
+      onPress={onPress}>
+      <Card variant="outlined" padding="lg">
+        <View style={styles.row}>
+          <View
+            style={[
+              styles.leadCircle,
+              {
+                backgroundColor: theme.colors.surfaceElevated,
+                borderColor: theme.colors.border,
+              },
+            ]}>
+            <Glyph color={iconColor} size={18} />
+          </View>
+          <View style={styles.flex}>
+            <Text variant="bodyStrong">{notification.title}</Text>
+            <Text
+              variant="footnote"
+              color="inkMuted"
+              style={{marginTop: theme.spacing.xs}}>
+              {notification.body}
+            </Text>
+            <Text
+              variant="caption"
+              color="inkSubtle"
+              style={{marginTop: theme.spacing.xs}}>
+              {formatShortDate(notification.createdAt)}
+            </Text>
+          </View>
+          {/* Punto de "no leído": desaparece al marcar. */}
+          {!notification.read ? (
+            <View
+              style={[styles.unreadDot, {backgroundColor: theme.colors.accent}]}
+            />
+          ) : null}
         </View>
-        <View style={styles.flex}>
-          <Text variant="bodyStrong">{notification.title}</Text>
-          <Text
-            variant="footnote"
-            color="inkMuted"
-            style={{marginTop: theme.spacing.xs}}>
-            {notification.body}
-          </Text>
-          <Text
-            variant="caption"
-            color="inkSubtle"
-            style={{marginTop: theme.spacing.xs}}>
-            {formatShortDate(notification.createdAt)}
-          </Text>
-        </View>
-      </View>
-    </Card>
+      </Card>
+    </Pressable>
   );
 }
 
@@ -181,4 +280,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  markAll: {alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 4},
+  unreadDot: {width: 8, height: 8, borderRadius: 4, marginTop: 6},
 });

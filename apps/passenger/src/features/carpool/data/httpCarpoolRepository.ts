@@ -62,4 +62,12 @@ export class HttpCarpoolRepository implements CarpoolRepository {
       schema: carpoolBookingView,
     });
   }
+
+  cancel(bookingId: string): Promise<CarpoolBookingView> {
+    // POST sin body: el server toma el passengerId de la sesión (anti-IDOR) y sella ownership + estado.
+    // Devuelve la reserva ya en CANCELADO, validada con el mismo schema del contrato.
+    return this.http.post(`/carpool/bookings/${bookingId}/cancel`, {
+      schema: carpoolBookingView,
+    });
+  }
 }

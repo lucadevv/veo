@@ -27,7 +27,7 @@ import {
 import {type DirectedCameraRef, useDirectedCamera} from './useDirectedCamera';
 import {useIdleCamera} from './useIdleCamera';
 import {RecenterButton} from './RecenterButton';
-import {veoDarkMapboxStyleJSON} from './mapbox/veoDarkStyle';
+import {veoLightMapboxStyleJSON} from './mapbox/veoLightStyle';
 
 export interface AppMapProps {
   /** Centro inicial del mapa (cuando no se ajusta a la ruta). */
@@ -405,7 +405,7 @@ function AppMapComponent({
   const mapView = (
     <MapView
       style={StyleSheet.absoluteFill}
-      styleJSON={veoDarkMapboxStyleJSON}
+      styleJSON={veoLightMapboxStyleJSON}
       logoEnabled={false}
       attributionEnabled={false}
       compassEnabled={false}

@@ -22,6 +22,7 @@ import type {RootStackParamList} from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {isWithinLima, LIMA_CENTER} from '../../../../shared/utils/geo';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
+import {LocationPermissionNotice} from '../../../../shared/presentation/components/LocationPermissionNotice';
 import {IconClose} from '../../../trip/presentation/components/icons';
 import {isWaypointSet, type RoutePlace} from '../../domain/entities';
 import {useRideDraftStore} from '../stores/rideDraftStore';
@@ -43,7 +44,11 @@ export function MapPickScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
-  const {point: myLocation} = useCurrentLocation();
+  const {
+    point: myLocation,
+    status: locationStatus,
+    retry: retryLocation,
+  } = useCurrentLocation();
 
   const editing = useRideDraftStore(s => s.editing);
   const origin = useRideDraftStore(s => s.origin);
@@ -204,7 +209,7 @@ export function MapPickScreen(): React.JSX.Element {
           accessibilityLabel={t('actions.close')}
           variant="surface"
           onPress={() => navigation.goBack()}
-          icon={<IconClose color={theme.colors.inkMuted} size={20} />}
+          icon={<IconClose color={theme.colors.ink} size={20} />}
         />
         <View
           style={[
@@ -234,9 +239,16 @@ export function MapPickScreen(): React.JSX.Element {
             ...theme.elevation.level3,
           },
         ]}>
-        <Text variant="footnote" color="inkMuted">
+        {/* Hint (pen V2ri8F): #B0BEC5 (inkSubtle), no inkMuted. */}
+        <Text variant="footnote" color="inkSubtle">
           {t('maps.pickup.hint')}
         </Text>
+        {/* Permiso/GPS negado: el picker YA degrada al centro de Lima (arrastre manual), pero antes no
+            explicaba por qué no arrancó en tu ubicación. Aviso honesto, no bloquea el confirmar. */}
+        <LocationPermissionNotice
+          status={locationStatus}
+          onRetry={retryLocation}
+        />
         <View style={styles.addressRow}>
           {!inLima ? (
             <Banner tone="warn" title={t('maps.pickup.outsideLima')} />

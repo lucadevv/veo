@@ -19,12 +19,6 @@ import {
   GestureDetector,
   ScrollView as GHScrollView,
 } from 'react-native-gesture-handler';
-import Svg, {
-  Defs,
-  LinearGradient as SvgLinearGradient,
-  Rect,
-  Stop,
-} from 'react-native-svg';
 import Animated, {
   clamp,
   runOnJS,
@@ -41,12 +35,16 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 /**
  * Anclaje del sheet. Puede ser:
- *  - Una FRACCIÓN de la altura disponible (0..1). Ej. `0.92` = casi pantalla completa.
+ *  - Una FRACCIÓN de la altura disponible (0..1). Ej. `0.92` = casi pantalla completa (altura FIJA).
  *  - El literal `'content'` (CONTENT-HUGGING): la altura se MIDE del contenido (vía `onLayout`) y se
  *    CAPA a `maxContentFraction`. El sheet "abraza" lo que renderiza hasta ese máximo; si lo supera,
  *    se queda en el máximo y la lista scrollea adentro.
+ *  - `{ content: F }`: content-hugging con su PROPIO tope `F` (0..1), independiente de
+ *    `maxContentFraction`. Permite un MÁXIMO que también crece hasta el contenido (con un tope más
+ *    alto que el peek) → sheets "maxmin": `['content', { content: 0.94 }]` = peek chico que abraza +
+ *    máximo que abraza el contenido completo hasta 94%.
  */
-export type SnapPoint = number | 'content';
+export type SnapPoint = number | 'content' | {readonly content: number};
 
 export interface DraggableSheetHandle {
   /** Anima el sheet al punto de anclaje con ese índice (clamped al rango válido). */
@@ -198,18 +196,27 @@ export const DraggableSheet = forwardRef<
   // disponible entre la status bar y el tab bar.
   const available = Math.max(windowHeight - insets.top - bottomOffset, 1);
 
-  // Normaliza los anclajes preservando su tipo, ORDENADOS por su altura estimada ascendente. Para
-  // ordenar, `'content'` usa su tope (`maxContentFraction`) como cota superior; en runtime su altura
-  // real puede ser menor (la medida manda), pero a efectos de orden de anclajes el tope es estable.
-  const {maxFraction, anchors} = useMemo(() => {
-    const estimated = snapPoints.map(p =>
-      p === 'content' ? clampFraction(maxContentFraction) : clampFraction(p),
-    );
-    const indexed = snapPoints
-      .map((point, i) => ({point, estimate: estimated[i]!}))
-      .sort((a, b) => a.estimate - b.estimate);
-    const max = indexed[indexed.length - 1]?.estimate ?? 0.5;
-    return {maxFraction: max, anchors: indexed.map(it => it.point)};
+  // Normaliza cada anclaje a { estimate, kind, fraction }. Un NÚMERO = fracción FIJA de la altura.
+  // 'content' = content-hug capado a `maxContentFraction`. { content: F } = content-hug capado a la
+  // fracción F — permite un MÁXIMO que TAMBIÉN crece hasta el contenido (con un tope distinto al del
+  // peek): sheets "maxmin", min y max ambos abrazan el contenido con topes diferentes. Ordenados por
+  // altura estimada ascendente (para 'content' el tope estima el orden).
+  const {maxFraction, anchorSpecs} = useMemo(() => {
+    const normalized = snapPoints.map(p => {
+      if (p === 'content') {
+        const cap = clampFraction(maxContentFraction);
+        return {estimate: cap, kind: 'content' as const, fraction: cap};
+      }
+      if (typeof p === 'object' && p !== null) {
+        const cap = clampFraction(p.content);
+        return {estimate: cap, kind: 'content' as const, fraction: cap};
+      }
+      const f = clampFraction(p);
+      return {estimate: f, kind: 'fixed' as const, fraction: f};
+    });
+    const sorted = normalized.sort((a, b) => a.estimate - b.estimate);
+    const max = sorted[sorted.length - 1]?.estimate ?? 0.5;
+    return {maxFraction: max, anchorSpecs: sorted};
   }, [snapPoints, maxContentFraction]);
 
   // Altura física del cuerpo montado (= la del anclaje MÁS ALTO). El peek "asoma" empujándolo.
@@ -221,43 +228,47 @@ export const DraggableSheet = forwardRef<
   // Chrome no-medible que rodea al contenido medido (la fila del grabber). Se suma a la medida.
   const chrome = GRABBER_CHROME;
 
-  // Tope absoluto (px) para anclajes `'content'`.
-  const maxContentPx = useMemo(
-    () => Math.round(available * clampFraction(maxContentFraction)),
-    [available, maxContentFraction],
+  // Por anclaje: offset FIJO en px (anclajes 'fixed') o el TOPE en px del content-hug (anclajes
+  // 'content'). El content-hug real (medido) se deriva en el hilo de UI; acá solo el tope estable.
+  const anchorOffsets = useMemo(
+    () =>
+      anchorSpecs.map(s =>
+        s.kind === 'fixed'
+          ? {
+              fixedOffset: Math.round((maxFraction - s.fraction) * available),
+              capPx: 0,
+            }
+          : {fixedOffset: -1, capPx: Math.round(s.fraction * available)},
+      ),
+    [anchorSpecs, maxFraction, available],
   );
 
   // Altura medida del contenido scrolleable (px). 0 = aún sin medir → se usa una cota mínima.
   const measuredContent = useSharedValue(0);
-  // Altura medida del header FIJO (px). > 0 ⇒ el peek abraza al header (+ preview), no a la lista.
+  // Altura medida del header FIJO (px). > 0 ⇒ el sheet abraza header + cuerpo.
   const measuredHeader = useSharedValue(0);
 
-  // Offset (px que se baja el cuerpo) de CADA anclaje, derivado en el hilo de UI. Para fracciones es
-  // constante; para `'content'` depende de `measuredContent` (de ahí `useDerivedValue`).
-  const fractionOffsets = useMemo(
-    () =>
-      anchors.map(p =>
-        p === 'content'
-          ? null
-          : Math.round((maxFraction - clampFraction(p)) * available),
-      ),
-    [anchors, maxFraction, available],
-  );
-
-  // Altura VISIBLE del anclaje `'content'` (peek) = CONTENT-HUGGING del header fijo + el cuerpo
-  // (la lista), capado a `maxContentPx`. Así el peek muestra las cards (no solo el header); si el
-  // contenido supera el tope, se queda en el tope y el cuerpo scrollea adentro bajo el header fijo.
-  const peekContentVisible = useDerivedValue<number>(() => {
+  // Offset (px que se baja el cuerpo) de CADA anclaje, en el hilo de UI. 'fixed' = constante;
+  // 'content' = sheetHeight menos el content-hug REAL (header + cuerpo + chrome) capado a su tope.
+  // Así el anclaje crece con el contenido y, si lo supera, se queda en el tope y scrollea adentro.
+  const offsets = useDerivedValue<number[]>(() => {
     const minContent = Math.round(available * MIN_CONTENT_FRACTION);
     const measured = measuredHeader.value + measuredContent.value;
-    const raw = measured > 0 ? chrome + measured : minContent;
-    return Math.min(Math.max(raw, minContent), maxContentPx);
-  }, [available, chrome, maxContentPx]);
+    const fullVisible = measured > 0 ? chrome + measured : minContent;
+    return anchorOffsets.map(a => {
+      if (a.fixedOffset >= 0) {
+        return a.fixedOffset;
+      }
+      const visible = Math.min(Math.max(fullVisible, minContent), a.capPx);
+      return Math.round(sheetHeight - visible);
+    });
+  }, [anchorOffsets, available, chrome, sheetHeight]);
 
-  const offsets = useDerivedValue<number[]>(() => {
-    const contentOffset = Math.round(sheetHeight - peekContentVisible.value);
-    return fractionOffsets.map(o => (o === null ? contentOffset : o));
-  }, [fractionOffsets, sheetHeight]);
+  // Altura VISIBLE del anclaje MÁS BAJO (peek, index 0) — para compensar la cámara del mapa.
+  const peekVisible = useDerivedValue<number>(
+    () => Math.round(sheetHeight - (offsets.value[0] ?? 0)),
+    [sheetHeight],
+  );
 
   // Reporta a JS la altura visible del peek (para que el Home compense la cámara del mapa). Cambia
   // solo cuando se (re)mide el header/contenido, no por frame de drag.
@@ -268,26 +279,26 @@ export const DraggableSheet = forwardRef<
     [onPeekHeightChange],
   );
   useAnimatedReaction(
-    () => Math.round(peekContentVisible.value),
+    () => Math.round(peekVisible.value),
     (px, prev) => {
       if (px !== prev && px > 0) runOnJS(emitPeekHeight)(px);
     },
     [emitPeekHeight],
   );
 
-  const anchorCount = anchors.length;
+  const anchorCount = anchorSpecs.length;
   const safeInitial = clampIndex(initialIndex, anchorCount);
 
   // Estimación del offset inicial para sembrar `translateY` SIN flash en el primer frame (antes de
   // que el `onLayout` mida): un anclaje `'content'` sin medir parte de la cota mínima.
   const initialOffsetEstimate = useMemo(() => {
-    const fo = fractionOffsets[safeInitial];
-    if (fo !== null && fo !== undefined) {
-      return fo;
+    const a = anchorOffsets[safeInitial];
+    if (a && a.fixedOffset >= 0) {
+      return a.fixedOffset;
     }
     const minContent = Math.round(available * MIN_CONTENT_FRACTION);
     return Math.round(sheetHeight - minContent);
-  }, [fractionOffsets, safeInitial, available, sheetHeight]);
+  }, [anchorOffsets, safeInitial, available, sheetHeight]);
 
   // Índice de anclaje actualmente "fijado" (al que apunta el sheet). El offset real se lee del
   // derivado para que, si el contenido cambia mientras estamos en ese índice, la altura siga.
@@ -527,37 +538,22 @@ export const DraggableSheet = forwardRef<
             // bottom: 0 (de styles.sheet) — anclado al borde inferior, NO se levanta con bottomOffset
             // (eso solo achica el área útil de las fracciones; ver el doc del prop).
             height: sheetHeight,
+            // Theme de Confianza (light): base blanca + borde hairline (estética Trust plana).
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
             borderTopLeftRadius: theme.radii['2xl'],
             borderTopRightRadius: theme.radii['2xl'],
-            // Sombra hacia ARRIBA (pen C/DraggableSheet: 0 -10 blur 44). iOS via shadowOffset
-            // negativo; Android via elevation (no direccional, pero da profundidad equivalente).
-            shadowColor: '#000000',
-            shadowOffset: {width: 0, height: -12},
-            shadowOpacity: 0.5,
-            shadowRadius: 30,
-            elevation: 18,
+            // Sombra SUAVE hacia ARRIBA teñida de ink (no negro pesado): profundidad sin ensuciar el
+            // lienzo claro. iOS via shadowOffset negativo; Android via elevation.
+            shadowColor: theme.colors.ink,
+            shadowOffset: {width: 0, height: -10},
+            shadowOpacity: 0.12,
+            shadowRadius: 24,
+            elevation: 16,
           },
           animatedStyle,
           style,
         ]}>
-        {/* PIEL DE VIDRIO canónica (pen C/DraggableSheet · XFjV8): gradiente #272C38→#14161C sobre la
-            base casi opaca de styles.sheet. Los hex van crudos también en el pen (no son variables);
-            el background_blur 34 del pen no tiene lib en el proyecto — la opacidad ~95% lo aproxima. */}
-        <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Defs>
-            <SvgLinearGradient id="sheetGlass" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor="#272C38" stopOpacity={0.82} />
-              <Stop offset="1" stopColor="#272C38" stopOpacity={0} />
-            </SvgLinearGradient>
-          </Defs>
-          <Rect
-            x="0"
-            y="0"
-            width="100%"
-            height="100%"
-            fill="url(#sheetGlass)"
-          />
-        </Svg>
         {renderBackground ? (
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {renderBackground()}
@@ -597,17 +593,15 @@ function clampIndex(index: number, length: number): number {
 }
 
 const styles = StyleSheet.create({
-  // Base del VIDRIO del pen (C/DraggableSheet): fondo casi opaco (el color inferior del gradiente)
-  // + borde 1px #4C5468 en top y laterales. El gradiente lo pinta el SVG de adentro.
+  // Base del sheet: color (surface) y borde (token) se aplican INLINE desde el theme; acá solo el
+  // posicionamiento y el clip de esquinas redondeadas.
   sheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#14161CF2',
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: '#4C5468',
     overflow: 'hidden',
   },
   grabberRow: {alignItems: 'center', paddingTop: 8, paddingBottom: 6},

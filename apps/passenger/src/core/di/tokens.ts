@@ -30,7 +30,16 @@ import type {
   SubmitKycUseCase,
 } from '../../features/kyc/domain/usecases';
 import type {NotificationsRepository} from '../../features/notifications/domain/notificationsRepository';
-import type {ListNotificationsUseCase} from '../../features/notifications/domain/usecases';
+import type {NotificationPrefsRepository} from '../../features/notifications/domain/notificationPrefsRepository';
+import type {
+  ListNotificationsUseCase,
+  MarkAllNotificationsReadUseCase,
+  MarkNotificationReadUseCase,
+} from '../../features/notifications/domain/usecases';
+import type {
+  GetNotificationPrefsUseCase,
+  UpdateNotificationPrefsUseCase,
+} from '../../features/notifications/domain/prefsUsecases';
 import type {PushTokenRegistrar} from '../../features/notifications/domain/pushTokenRegistrar';
 import type {PanicSecretStore} from '../../features/panic/domain/panicSecretStore';
 import type {
@@ -128,6 +137,7 @@ import type {
 } from '../../features/trip/domain/usecases';
 import type {CarpoolRepository} from '../../features/carpool/domain/carpoolRepository';
 import type {
+  CancelCarpoolBookingUseCase,
   GetCarpoolBookingUseCase,
   GetCarpoolTripDetailUseCase,
   ReserveCarpoolSeatUseCase,
@@ -185,10 +195,13 @@ export const TOKENS = {
   referralsRepository: createToken<ReferralsRepository>('ReferralsRepository'),
   contactsRepository: createToken<ContactsRepository>('ContactsRepository'),
   chatRepository: createToken<ChatRepository>('ChatRepository'),
-  // Centro de avisos (LOCAL · hueco de backend: no hay listado en el bff, ver
-  // notificationsRepository.ts). Impl actual: feed vacío honesto.
+  // Centro de avisos: HTTP REAL contra el public-bff (GET /notifications + PATCH read/read-all).
   notificationsRepository: createToken<NotificationsRepository>(
     'NotificationsRepository',
+  ),
+  // Preferencias de notificación: HTTP REAL contra el public-bff (GET/PUT /notification-prefs).
+  notificationPrefsRepository: createToken<NotificationPrefsRepository>(
+    'NotificationPrefsRepository',
   ),
   kycRepository: createToken<KycRepository>('KycRepository'),
 
@@ -295,6 +308,9 @@ export const TOKENS = {
   getCarpoolBookingUseCase: createToken<GetCarpoolBookingUseCase>(
     'GetCarpoolBookingUseCase',
   ),
+  cancelCarpoolBookingUseCase: createToken<CancelCarpoolBookingUseCase>(
+    'CancelCarpoolBookingUseCase',
+  ),
 
   // Casos de uso · Maps
   autocompletePlacesUseCase: createToken<AutocompletePlacesUseCase>(
@@ -387,6 +403,19 @@ export const TOKENS = {
   // Casos de uso · Notificaciones (centro de avisos)
   listNotificationsUseCase: createToken<ListNotificationsUseCase>(
     'ListNotificationsUseCase',
+  ),
+  markNotificationReadUseCase: createToken<MarkNotificationReadUseCase>(
+    'MarkNotificationReadUseCase',
+  ),
+  markAllNotificationsReadUseCase: createToken<MarkAllNotificationsReadUseCase>(
+    'MarkAllNotificationsReadUseCase',
+  ),
+  // Casos de uso · Preferencias de notificación (sync backend)
+  getNotificationPrefsUseCase: createToken<GetNotificationPrefsUseCase>(
+    'GetNotificationPrefsUseCase',
+  ),
+  updateNotificationPrefsUseCase: createToken<UpdateNotificationPrefsUseCase>(
+    'UpdateNotificationPrefsUseCase',
   ),
 
   // Casos de uso · Promos

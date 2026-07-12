@@ -5,11 +5,12 @@ import {
   useRoute,
 } from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {useQuery} from '@tanstack/react-query';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
   Banner,
   Button,
   Card,
+  hexAlpha,
   SafeScreen,
   StatusPill,
   Text,
@@ -46,9 +47,10 @@ const PENDING_POLL_MS = 5000;
 /**
  * Estado REAL de MI solicitud de asiento (design/veo.pen P/WaitingApproval · P/BookingApproved ·
  * P/BookingRejected): UNA pantalla que refleja el `bookingState` del server, con poll cada 5s
- * mientras está pendiente. Diferencias honestas con el pen: sin "Cancelar solicitud" (no existe
- * endpoint de cancelación de booking — F3c del ADR) y sin "Enviar mensaje al conductor" (no hay
- * canal de chat carpool). El copy de cobro dice la verdad por estado: pendiente = no se cobró
+ * mientras está pendiente. En estado PENDIENTE ofrece "Cancelar solicitud" (POST
+ * /carpool/bookings/:id/cancel · el server sella ownership + estado; sin cobro porque el CHARGE
+ * solo se dispara al aprobar). Diferencia honesta con el pen: sin "Enviar mensaje al conductor" (no
+ * hay canal de chat carpool). El copy de cobro dice la verdad por estado: pendiente = no se cobró
  * nada; aprobado = cobro en proceso; confirmado = cobrado.
  */
 export function CarpoolBookingStatusScreen(): React.JSX.Element {
@@ -58,16 +60,29 @@ export function CarpoolBookingStatusScreen(): React.JSX.Element {
     useRoute<RouteProp<RootStackParamList, 'CarpoolBookingStatus'>>().params;
   const getBooking = useDependency(TOKENS.getCarpoolBookingUseCase);
   const getDetail = useDependency(TOKENS.getCarpoolTripDetailUseCase);
+  const cancelBooking = useDependency(TOKENS.cancelCarpoolBookingUseCase);
   const clearActiveBooking = useCarpoolBookingStore(s => s.clearActiveBooking);
+  const queryClient = useQueryClient();
 
+  const bookingKey = ['carpool', 'booking', bookingId] as const;
   const bookingQuery = useQuery({
-    queryKey: ['carpool', 'booking', bookingId],
+    queryKey: bookingKey,
     queryFn: () => getBooking.execute(bookingId),
     // Poll SOLO mientras espera la decisión del conductor; en estados decididos se corta.
     refetchInterval: query =>
       query.state.data && bookingPhase(query.state.data.estado) === 'pending'
         ? PENDING_POLL_MS
         : false,
+  });
+
+  // Cancelar MI solicitud: el server devuelve la reserva ya en CANCELADO. Sembramos el cache con
+  // esa vista para que la pantalla transicione a la variante "no confirmada" al instante (y el poll
+  // se corte solo). Si falla, se muestra un Banner de error y el estado sigue PENDIENTE (reintentable).
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelBooking.execute(bookingId),
+    onSuccess: updated => {
+      queryClient.setQueryData(bookingKey, updated);
+    },
   });
 
   const booking = bookingQuery.data;
@@ -127,12 +142,24 @@ export function CarpoolBookingStatusScreen(): React.JSX.Element {
         }
         note={<Banner tone="info" title={t('carpool.waitingReassure')} />}
         actions={
-          <Button
-            label={t('carpool.backHome')}
-            variant="secondary"
-            fullWidth
-            onPress={backHome}
-          />
+          <View style={styles.actionsCol}>
+            {cancelMutation.isError ? (
+              <Banner tone="danger" title={t('carpool.cancelError')} />
+            ) : null}
+            <Button
+              label={t('carpool.backHome')}
+              variant="secondary"
+              fullWidth
+              onPress={backHome}
+            />
+            <Button
+              label={t('carpool.cancelRequest')}
+              variant="ghost"
+              fullWidth
+              loading={cancelMutation.isPending}
+              onPress={() => cancelMutation.mutate()}
+            />
+          </View>
         }
       />
     );
@@ -220,12 +247,18 @@ function PhaseLayout({
 }: PhaseLayoutProps): React.JSX.Element {
   const theme = useTheme();
 
-  const emblemColor =
+  // Emblema semántico (design/veo.pen P/BookingApproved · P/WaitingApproval · P/BookingRejected):
+  // éxito = jade SÓLIDO con glifo blanco (onAccent); pendiente = warn tenue; rechazo = danger tenue.
+  // En light el bg neutro (surfaceElevated #FFFFFF) se lavaba sobre el fondo #F5F7FA, por eso el halo
+  // va teñido con el color semántico (hexAlpha), fiel a los halos del frame (~8-12% alpha).
+  const emblemTone =
     emblem === 'approved'
       ? theme.colors.success
       : emblem === 'pending'
-        ? theme.colors.accent
-        : theme.colors.inkSubtle;
+        ? theme.colors.warn
+        : theme.colors.danger;
+  const emblemSolid = emblem === 'approved';
+  const glyphColor = emblemSolid ? theme.colors.onAccent : emblemTone;
 
   return (
     <SafeScreen padded={false} footer={actions}>
@@ -238,14 +271,18 @@ function PhaseLayout({
         <View
           style={[
             styles.emblem,
-            {backgroundColor: theme.colors.surfaceElevated},
+            {
+              backgroundColor: emblemSolid
+                ? emblemTone
+                : hexAlpha(emblemTone, 0.12),
+            },
           ]}>
           {emblem === 'pending' ? (
-            <IconHourglass color={emblemColor} size={40} />
+            <IconHourglass color={glyphColor} size={40} />
           ) : emblem === 'approved' ? (
-            <IconCircleCheck color={emblemColor} size={44} />
+            <IconCircleCheck color={glyphColor} size={44} />
           ) : (
-            <IconCalendarX color={emblemColor} size={44} />
+            <IconCalendarX color={glyphColor} size={44} />
           )}
         </View>
 

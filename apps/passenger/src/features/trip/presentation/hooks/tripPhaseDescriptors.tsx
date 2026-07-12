@@ -18,6 +18,7 @@ import {useTranslation} from 'react-i18next';
 import {Pressable, StyleSheet, View} from 'react-native';
 import type {RoutePlace} from '../../../maps/domain/entities';
 import type {SavedPlace} from '../../../places/domain/entities';
+import {ErrorState} from '../../../../shared/presentation/components/ScreenStates';
 import {ActiveTripBody} from '../components/ActiveTripBody';
 import {CompletionBody} from '../components/CompletionBody';
 import {DebtStrip} from '../components/DebtStrip';
@@ -63,6 +64,10 @@ export interface RequestFlowContext {
   live: UsePassengerTripSocket;
   /** Detalle del viaje activo/cierre (`null` mientras carga → Skeleton). */
   tripDetail: TripActiveView | null;
+  /** El detalle del viaje FALLÓ (query en error) y aún no hay dato: sin esto el body cae a Skeleton infinito. */
+  tripDetailError: boolean;
+  /** Reintenta la carga del detalle del viaje (refetch de la query). */
+  onRetryTripDetail: () => void;
   /** Controlador de la PARADA negociada mid-trip (Lote C3). */
   addStop: WaypointProposalController;
   // ── Cotización (fase quoting) ──
@@ -180,7 +185,17 @@ export function BiddingPhaseBody({ctx}: SlotProps): React.JSX.Element {
 
 /** Fases `enRoute`/`arrived`/`inProgress`: el viaje VIVO (conductor real, ETA, cámara, cancelar). */
 export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  const {t} = useTranslation();
   if (!ctx.tripDetail) {
+    // Sin dato Y con error → banner + reintento (antes: Skeleton infinito). Sin error todavía → carga.
+    if (ctx.tripDetailError) {
+      return (
+        <ErrorState
+          message={t('trip.detailLoadError')}
+          onRetry={ctx.onRetryTripDetail}
+        />
+      );
+    }
     return <Skeleton variant="rect" height={140} />;
   }
   return (
@@ -201,7 +216,17 @@ export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
 
 /** Fase `completed`: el CIERRE (pago + rating) in-sheet. */
 export function CompletionPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  const {t} = useTranslation();
   if (!ctx.tripDetail) {
+    // El CIERRE (pago/rating) también caía a Skeleton infinito ante error del detalle: banner + reintento.
+    if (ctx.tripDetailError) {
+      return (
+        <ErrorState
+          message={t('trip.detailLoadError')}
+          onRetry={ctx.onRetryTripDetail}
+        />
+      );
+    }
     return <Skeleton variant="rect" height={140} />;
   }
   return (

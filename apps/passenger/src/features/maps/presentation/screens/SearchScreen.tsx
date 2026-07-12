@@ -31,6 +31,7 @@ import type {RootStackParamList} from '../../../../navigation/types';
 import {distanceMeters} from '../../../../shared/utils/geo';
 import {formatDistance} from '../../../../shared/utils/format';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
+import {LocationPermissionNotice} from '../../../../shared/presentation/components/LocationPermissionNotice';
 import {SavedPlacesShortcuts} from '../../../places/presentation';
 import type {SavedPlace} from '../../../places/domain/entities';
 import type {RoutePlace} from '../../domain/entities';
@@ -107,7 +108,11 @@ export function SearchScreen(): React.JSX.Element {
 
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
   const history = useDependency(TOKENS.tripHistoryRepository);
-  const {point: myLocation} = useCurrentLocation();
+  const {
+    point: myLocation,
+    status: locationStatus,
+    retry: retryLocation,
+  } = useCurrentLocation();
 
   // Destinos recientes únicos (hasta 3) del historial local, para la sección "Recientes" (pen P/Search).
   const recents = useMemo(() => recentDestinations(history.list()), [history]);
@@ -254,7 +259,8 @@ export function SearchScreen(): React.JSX.Element {
             variant="surface"
             icon={<IconArrowLeft color={theme.colors.ink} size={20} />}
           />
-          <Text variant="title2">{t('maps.searchScreenTitle')}</Text>
+          {/* Fiel a design/veo.pen P/Search (Title aXWyE): 20px (title3), no 24 (title2). */}
+          <Text variant="title3">{t('maps.searchScreenTitle')}</Text>
         </View>
 
         <OriginDestinationField
@@ -291,6 +297,12 @@ export function SearchScreen(): React.JSX.Element {
         }}
         ListHeaderComponent={
           <View style={{gap: theme.spacing.md}}>
+            {/* Permiso/GPS de ubicación negado: aviso honesto (antes invisible — la fila "usar mi
+                ubicación" y las distancias simplemente no aparecían, sin explicar por qué). */}
+            <LocationPermissionNotice
+              status={locationStatus}
+              onRetry={retryLocation}
+            />
             {error ? (
               <Banner tone="danger" title={t('maps.searchError')} />
             ) : null}
@@ -319,7 +331,8 @@ export function SearchScreen(): React.JSX.Element {
                 inverso real (mismo patrón que el RecentChip del legacy) + distancia desde acá. */}
             {!active && recents.length > 0 ? (
               <View style={{gap: theme.spacing.sm}}>
-                <Text variant="subhead" color="inkMuted">
+                {/* "Recientes" (pen OlKIP): #B0BEC5 (inkSubtle), no inkMuted. */}
+                <Text variant="subhead" color="inkSubtle">
                   {t('maps.recents')}
                 </Text>
                 {recents.map((point, index) => (

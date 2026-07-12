@@ -48,4 +48,11 @@ export interface CarpoolRepository {
 
   /** GET /carpool/bookings/:id — MI reserva (seguimiento del estado; ajena → 404 server-side). */
   getBooking(bookingId: string): Promise<CarpoolBookingView>;
+
+  /**
+   * POST /carpool/bookings/:id/cancel — cancela MI solicitud aún PENDIENTE (sin body). El server sella
+   * ownership + estado (solo PENDIENTE_APROBACION): ajena/inexistente → 404, ya resuelta → 409. Devuelve la
+   * reserva ya en CANCELADO. Sin cobro ni refund (charge-on-approval: nunca se aprobó).
+   */
+  cancel(bookingId: string): Promise<CarpoolBookingView>;
 }

@@ -13,6 +13,7 @@ import {useTranslation} from 'react-i18next';
 import {View} from 'react-native';
 import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
+import {LocationPermissionNotice} from '../../../../shared/presentation/components/LocationPermissionNotice';
 import {IconPin} from '../../../trip/presentation/components/icons';
 
 /** Punto elegido para la búsqueda de carpooling (coordenada + etiqueta que ve el pasajero). */
@@ -44,7 +45,11 @@ export function CarpoolPlacePickerSheet({
 }: CarpoolPlacePickerSheetProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
-  const {point: myLocation} = useCurrentLocation();
+  const {
+    point: myLocation,
+    status: locationStatus,
+    retry: retryLocation,
+  } = useCurrentLocation();
 
   const [query, setQuery] = useState('');
   const {suggestions, loading, error, active} = useAutocomplete(
@@ -88,6 +93,13 @@ export function CarpoolPlacePickerSheet({
           placeholder={t('carpool.pickerPlaceholder')}
           autoFocus
           autoCorrect={false}
+        />
+
+        {/* Permiso/GPS negado: sin él perdemos el sesgo por ubicación (la búsqueda por texto igual
+            funciona). Aviso honesto en vez de silencio. */}
+        <LocationPermissionNotice
+          status={locationStatus}
+          onRetry={retryLocation}
         />
 
         {error ? (

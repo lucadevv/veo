@@ -39,10 +39,11 @@ import type {
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 // Renombrado de home-map.jpg: Metro cacheaba el asset VIEJO por hash (el sim mostraba solo nubes,
 // sin la ruta azul de la imagen real) — nombre nuevo = URL nueva = caché bypasseada.
-import homeMapBackdrop from '../../../../shared/assets/brand/home-city-route.jpg';
+import homeMapBackdrop from '../../../../shared/assets/brand/home-map-light.jpg';
 import {
   DraggableSheet,
   type DraggableSheetHandle,
+  type SnapPoint,
 } from '../../../../shared/presentation/components/DraggableSheet';
 import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
 import {useNearbyVehicles} from '../../../../core/query/useNearbyVehicles';
@@ -92,7 +93,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  *  - `0.92` (expandido): casi pantalla completa; la lista entera, scrolleable.
  * La BÚSQUEDA es una pantalla aparte (`Search`), abierta al tocar el buscador.
  */
-const SNAP_POINTS = ['content', 0.92] as const;
+const SNAP_POINTS = ['content', {content: 0.94}] as const;
 const PEEK_MAX_FRACTION = 0.5;
 const PEEK_INDEX = 0;
 const FULL_INDEX = SNAP_POINTS.length - 1;
@@ -111,11 +112,11 @@ const HOME_SHEET_TOP_FRACTION = 190 / 844;
  */
 const HOME_SHEET_COLLAPSED_FRACTION = 0.45;
 /**
- * Dimensiones REALES del arte del backdrop (home-city-route.jpg). El pen (P/Home · rect Map de
- * 390×844, mismo aspect) mapea la imagen COMPLETA al frame; acá replicamos esa matemática EXACTA:
- * alto = pantalla, ancho = alto × aspect, centrado horizontal — sin cover ni zoom del layout.
+ * Dimensiones REALES del arte del backdrop (home-map-light.jpg · aérea de día 1200×1800, Theme de
+ * Confianza light). Alto = pantalla, ancho = alto × aspect, centrado horizontal — sin cover ni zoom
+ * del layout (el aspect ya respeta la proporción, así que `stretch` no deforma).
  */
-const HOME_BACKDROP_ASPECT = 1080 / 2337;
+const HOME_BACKDROP_ASPECT = 1200 / 1800;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -258,6 +259,13 @@ export function RequestFlowScreen(): React.JSX.Element {
   // consume para cerrar el "esperando". Si el socket está caído, el vencimiento local sigue resolviendo.
   const queryClient = useQueryClient();
   const addStop = useWaypointProposal(activeTripId ?? '', live.waypointOutcome);
+
+  // Reintento del detalle del viaje (pago/cierre): sin esto, un fallo del fetch dejaba el body en Skeleton
+  // infinito. `refetch` de react-query es referencialmente estable, así que el callback no cambia por render.
+  const retryTripDetail = useCallback(() => {
+    void tripDetailQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Al ACEPTARSE la parada, el viaje cambió server-side (ruta + paradas + tarifa): refrescamos el detalle
   // para que el mapa y la tarifa reflejen lo nuevo sin esperar al poll de 15 s.
@@ -615,13 +623,18 @@ export function RequestFlowScreen(): React.JSX.Element {
   // (eso se sentía como tocar la X sin querer): solo baja el sheet para ver el mapa con la
   // ubicación (y cierra el teclado — ver handleSnap); el único cierre es la X. En route/trip,
   // content-hug + full.
-  const sheetSnapPoints = useMemo<ReadonlyArray<number | 'content'>>(() => {
+  const sheetSnapPoints = useMemo<ReadonlyArray<SnapPoint>>(() => {
     if (mapMode !== 'idle') {
       return SNAP_POINTS;
     }
     const available = Math.max(windowHeight - insets.top - bottomInset, 1);
     const visible = windowHeight * (1 - HOME_SHEET_TOP_FRACTION);
-    return [HOME_SHEET_COLLAPSED_FRACTION, Math.min(visible / available, 0.92)];
+    // Máximo CONTENT-HUG (crece al contenido) capado a la hoja del .pen: si el contenido es corto,
+    // el sheet lo abraza; si es alto, se queda en la hoja del pen y scrollea adentro.
+    return [
+      HOME_SHEET_COLLAPSED_FRACTION,
+      {content: Math.min(visible / available, 0.94)},
+    ];
   }, [mapMode, windowHeight, insets.top, bottomInset]);
 
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
@@ -632,6 +645,9 @@ export function RequestFlowScreen(): React.JSX.Element {
     board,
     live,
     tripDetail: tripDetailQuery.data ?? null,
+    // Solo es "error de detalle" cuando ESTA fase pide el detalle y aún no hay dato; si no, el body no lo mira.
+    tripDetailError: tripDetailQuery.isError && !tripDetailQuery.data,
+    onRetryTripDetail: retryTripDetail,
     addStop,
     requestAgainToken: debtGate.requestAgainToken,
     onTripCreated,
@@ -796,21 +812,24 @@ export function RequestFlowScreen(): React.JSX.Element {
           </Animated.View>
           <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
             <Defs>
+              {/* Scrim para imagen CLARA (Theme de Confianza): tope suave (deja ver la aérea + lifta la
+                  legibilidad de la pill de ubicación), casi nada en el medio, y fade fuerte a `bg`
+                  abajo para fundir sin costura en el sheet claro. */}
               <SvgLinearGradient id="homeScrim" x1="0" y1="0" x2="0" y2="1">
                 <Stop
                   offset="0"
                   stopColor={theme.colors.bg}
-                  stopOpacity={0.5}
+                  stopOpacity={0.3}
                 />
                 <Stop
                   offset="0.34"
                   stopColor={theme.colors.bg}
-                  stopOpacity={0.08}
+                  stopOpacity={0.04}
                 />
                 <Stop
                   offset="0.6"
                   stopColor={theme.colors.bg}
-                  stopOpacity={0.74}
+                  stopOpacity={0.72}
                 />
                 <Stop
                   offset="1"

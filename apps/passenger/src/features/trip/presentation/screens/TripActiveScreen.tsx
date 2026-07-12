@@ -438,6 +438,14 @@ export function TripActiveScreen(): React.JSX.Element {
                   title={t('trip.changeDestinationTitle')}
                   description={t('trip.changeDestinationBody')}
                 />
+                {/* Fallo del cambio de destino: antes el toque de "Confirmar" quedaba mudo. Banner
+                    honesto como las hermanas (cancelar/compartir); el mismo botón reintenta. */}
+                {changeMutation.isError ? (
+                  <Banner
+                    tone="danger"
+                    title={t('trip.changeDestinationError')}
+                  />
+                ) : null}
                 <Button
                   label={t('actions.confirm')}
                   variant="primary"

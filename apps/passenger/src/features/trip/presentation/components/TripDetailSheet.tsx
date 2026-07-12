@@ -3,6 +3,7 @@ import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery} from '@tanstack/react-query';
 import {
+  Banner,
   Button,
   DriverCard,
   MapShell,
@@ -198,7 +199,12 @@ export function TripDetailSheet({
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* BACKDROP: oscurece la lista y cierra al tocar. Fade propio (el sheet no lo trae). El
           `GestureHandlerRootView` raíz de la app (App.tsx) ya habilita el pan del sheet acá. */}
-      <Animated.View style={[styles.backdrop, backdropStyle]}>
+      <Animated.View
+        style={[
+          styles.backdrop,
+          {backgroundColor: theme.colors.ink},
+          backdropStyle,
+        ]}>
         <Pressable
           style={StyleSheet.absoluteFill}
           accessibilityRole="button"
@@ -268,6 +274,23 @@ export function TripDetailSheet({
                 destination={`${distanceText} · ${durationText}`}
               />
             </EnterView>
+
+            {/* Enriquecimiento fallido: lo esencial (fecha/ruta/tarifa) ya está pintado desde la semilla,
+                pero el conductor/recibo/calificación/propina no llegaron. Antes desaparecían en silencio;
+                ahora banner honesto + reintento (best-effort: se muestra solo si aún no hay detalle). */}
+            {detailQuery.isError && !detail ? (
+              <EnterView index={2}>
+                <Banner
+                  tone="danger"
+                  title={t('tripDetail.enrichErrorTitle')}
+                  description={t('tripDetail.enrichErrorBody')}
+                  action={{
+                    label: t('actions.retry'),
+                    onPress: () => void detailQuery.refetch(),
+                  }}
+                />
+              </EnterView>
+            ) : null}
 
             {/* Conductor + vehículo (tarjeta canónica). Aparece cuando el detalle enriquece (best-effort). */}
             {detail?.driver ? (
@@ -342,11 +365,13 @@ export function TripDetailSheet({
 }
 
 /** Peek que abraza mapa + encabezado + ruta + tarifa; expandido casi-completo con el resto. */
-const SNAP_POINTS = ['content', 0.92] as const;
+const SNAP_POINTS = ['content', {content: 0.94}] as const;
 const PEEK_MAX_FRACTION = 0.6;
 
 const styles = StyleSheet.create({
-  backdrop: {...StyleSheet.absoluteFill, backgroundColor: '#000000'},
+  // Color del scrim vía token (theme.colors.ink) inline en el Animated.View — la opacidad la anima
+  // `backdropStyle` (progress · BACKDROP_OPACITY). Scrim de dim de modal: navy de marca, no negro crudo.
+  backdrop: {...StyleSheet.absoluteFill},
   mapWrap: {borderRadius: 18, overflow: 'hidden'},
   map: {height: 168},
   scroll: {flex: 1},
