@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   hexAlpha,
+  ListItem,
   SafeScreen,
   Switch,
   Text,
@@ -94,21 +95,18 @@ export function ChildModeScreen(): React.JSX.Element {
 
       {/* Toggle con hint de estado (pen): label + "Protección activada para este viaje" cuando ON. */}
       <Card variant="outlined" padding="md">
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleTexts}>
-            <Text variant="bodyStrong">{t('childMode.enable')}</Text>
-            {enabled ? (
-              <Text variant="footnote" color="inkMuted">
-                {t('childMode.hintActive')}
-              </Text>
-            ) : null}
-          </View>
-          <Switch
-            value={enabled}
-            onValueChange={setEnabled}
-            accessibilityLabel={t('childMode.enable')}
-          />
-        </View>
+        <ListItem
+          style={styles.toggleRow}
+          title={t('childMode.enable')}
+          subtitle={enabled ? t('childMode.hintActive') : undefined}
+          trailing={
+            <Switch
+              value={enabled}
+              onValueChange={setEnabled}
+              accessibilityLabel={t('childMode.enable')}
+            />
+          }
+        />
       </Card>
 
       {enabled ? (
@@ -197,6 +195,7 @@ export function ChildModeScreen(): React.JSX.Element {
 
       {/* Transparencia del recargo (BR-T07): se avisa al activar, no recién al confirmar. El monto sale
           de la constante compartida (@veo/shared-types), misma fuente que el server, formateada en PEN. */}
+      {/* DEUDA: (backend) el recargo de modo niño (CHILD_MODE_FEE_CENTS) se muestra como monto real desde una constante compartida @veo/shared-types. Idealmente server-driven (p.ej. en GET /maps/catalog o GET /pricing/child-mode) para cambiar la tarifa sin release, consistente con el resto de fees dinámicos del app. */}
       {enabled ? (
         <Banner
           tone="info"
@@ -211,8 +210,9 @@ export function ChildModeScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  toggleRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  toggleTexts: {flex: 1, gap: 2},
+  // Neutraliza el padding/minHeight propios del ListItem: la fila vive dentro de un Card padding="md"
+  // (el inset lo pone la card) y su alto es natural, como el toggleRow original.
+  toggleRow: {paddingVertical: 0, paddingHorizontal: 0, minHeight: 0, gap: 12},
   cellsWrap: {position: 'relative'},
   cellsRow: {flexDirection: 'row'},
   cell: {

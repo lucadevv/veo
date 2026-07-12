@@ -2,6 +2,7 @@ import {useMutation} from '@tanstack/react-query';
 import {
   Banner,
   Button,
+  Card,
   IconButton,
   StatusPill,
   Text,
@@ -37,8 +38,8 @@ export interface PromoFieldProps {
  * al tocarlo despliega el input. Valida contra `POST /promos/validate` con la tarifa cotizada y, si
  * es válido, muestra el descuento y el nuevo total con un chip de éxito (acento reservado al ahorro).
  *
- * El estado del cupón APLICADO se eleva al padre (RouteQuoteScreen), que envía `promoCode` al crear
- * el viaje. Aquí solo vive el estado efímero del input y el resultado de la última validación.
+ * El estado del cupón APLICADO se eleva al padre (`QuotingBody`), que envía `promoCode` al crear el
+ * viaje. Aquí solo vive el estado efímero del input y el resultado de la última validación.
  */
 export function PromoField({
   fareCents,
@@ -69,15 +70,7 @@ export function PromoField({
   if (applied) {
     const newTotal = applyDiscount(fareCents, applied.discountCents);
     return (
-      <View
-        style={[
-          styles.appliedCard,
-          {
-            backgroundColor: theme.colors.surface,
-            borderRadius: theme.radii.lg,
-            padding: theme.spacing.md,
-          },
-        ]}>
+      <Card variant="filled" padding="md">
         <View style={styles.appliedHeader}>
           <StatusPill
             label={t('promo.appliedTitle', {code: applied.code})}
@@ -110,7 +103,7 @@ export function PromoField({
             {formatPEN(newTotal)}
           </Text>
         </View>
-      </View>
+      </Card>
     );
   }
 
@@ -176,7 +169,6 @@ export function PromoField({
 }
 
 const styles = StyleSheet.create({
-  appliedCard: {},
   appliedHeader: {
     flexDirection: 'row',
     alignItems: 'center',
