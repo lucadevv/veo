@@ -1,7 +1,7 @@
 # STATUS.md · Estado del proyecto y handoff
 
 > **Documento de traspaso para cualquier agente (Claude, Cursor, etc.) o persona que retome VEO.**
-> Última actualización: **2026-07-10**.
+> Última actualización: **2026-07-12**.
 > Lee también, en este orden: `CLAUDE.md` (reglas no negociables) → `docs/FOUNDATION.md` (contrato técnico canónico,
 > incluye §14 "Decisiones registradas") → este archivo (estado actual). El blueprint de negocio es `../VEO_Blueprint.pdf`.
 
@@ -90,6 +90,13 @@ VEO es una plataforma de movilidad segura (Lima) en construcción desde el scaff
 
 - ↩️ **Revertido:** el rename "Ofertas de servicio" → "Catálogo" se **deshizo** — "Catálogo" queda PROHIBIDO como label de UI (upholdea ADR-013).
 
+- 💰 **FINANZAS admin — fidelidad pencil→web de las 3 secciones (2026-07-12):** pasada frame-first (números del `.pen`, medir vs vivo, **gating de seams reales — nada de fingir**, verificar en vivo a 1440). Metodología: cuando el frame es construible → fidelidad total; cuando el frame no tiene seam real → o se construye el seam, o se degrada honesto, o **el diseño se actualiza al código** (Direction B). Verificado en vivo con el harness dev nuevo (`veo.sh seed`/`login`, ver §2).
+  - **Liquidaciones** (`/finance`) — **backend**: `payouts/stats` expone `paidCents`/`heldCents`/`failedCents` (money-por-bucket; la query ya sumaba por status y se descartaba); `getPayout` suma `bonusCents` (IncentiveProgress.paidInPayoutId); `GET /payouts/:id/trips` (viajes-incluidos, reconstruido por driver+período — el payout no persiste líneas); `GET /payouts/export` (CSV del filtro completo). **Frontend**: página-detalle rica `/finance/[id]` (frame `t5eZt`: NETO A PAGAR + breakdown bruto/comisión%/bono/deuda-CASH/neto, viajes incluidos reales, pago, historial derivado — honest-degrade de lo sin seam: método "Yape" fijo, sin "programado", timeline de 2-3 hitos); lista fiel (KPIs money, dropdown Estado, export, Período formateado). **Commiteado limpio**: `2f04d3cd`(payment) + `92d67e7b`(bff) + `0d7e600a`(admin-nuevos).
+  - **Reembolsos** (`/finance/refunds`) — **rebuild a cola de aprobación** (money-OUT sensible). Repunteó de emisión-directa a **request→approve**: máquina de estados `RefundStatus` PENDING(cola, sin desembolsar)→APPROVED(desembolso en vuelo)→COMPLETED / REJECTED, con idempotencia (dedupKey) + step-up MFA + audit + dual-control por monto. Auto-refunds de sistema (`booking.cancelled`) nacen APPROVED (saltan la cola, no bloquean cancelaciones). Endpoints `GET /finance/refunds(+stats,+:id)`, `POST :id/approve|reject`, `POST :tripId`(crea PENDING). Frontend cola fiel al frame `HZ8uz` (KPIs, tabla, modales aprobar/rechazar). **146 tests** payment-service verdes. **LIMITACIÓN documentada**: mismo operador puede aprobar su propia solicitud (control = step-up + gate monto + audit, no dual-person estricto) — follow-up si se quiere segregación estricta.
+  - **Reconciliación** (`/finance/reconciliation`) — **el código manda** (decisión): el frame diseñaba matching PER-TRANSACCIÓN (ref interna↔externa) pero el backend solo soporta AGREGADO per-corrida, y el transaccional está **BLOQUEADO** (ProntoPaga `getStatement()` devuelve `[]` en prod). Se agregó **estado honesto "Sin extracto del proveedor"** (`statementCount===0 && statementTotalCents===0 && dbTotalCents>0`) en vez del "Alerta 100%" engañoso; el path de alerta roja legítima queda para cuando el proveedor exponga el feed. El **`.pen` se actualizó** (frames `HykVT`/`YI0IS`) al modelo agregado real (tabla per-corrida + CompareRow), con el detalle marcado **épica futura** y el matching per-tx documentado como épica condicionada a un feed de extracto.
+  - **UI global (design system)**: `table.tsx` → tabla como card elevado radio 16; `page-header.tsx`/`stat-card.tsx` → título + valor KPI en Space Grotesk (`font-display`) + gap 16 + iconos KPI coloreados por tono. Alinea el admin al `.pen` (los frames eran consistentes; el código había derivado por página) — afecta finance/audit/reconciliation/operators/drivers/trips.
+  - **Commit / working tree**: solo el backend de Liquidaciones (`payouts/*`) se commiteó limpio. Reembolsos (backend+frontend), Reconciliación y el wiring de las listas quedan en el **working tree entreverado** con la migración de tema + trabajo de métricas en vuelo (mismos archivos compartidos: `payments.service.ts`, `finance.service.ts`, `api-client/{admin,types}.ts`, `queries.ts`) → se commitean junto con el tema como una foto coherente de `develop`.
+
 **Lo siguiente:** backend y UI de carpooling están construidos y `booking-service` cableado al dev-stack (ver arriba). Para ir a producción real (carril VPS, §0.7(c)): bootstrap del VPS (Docker Engine + Compose + Cloudflare Tunnel), cargar secretos en el host (`.env`/docker-secrets/SOPS), `docker compose -f docker-compose.preview.yml up` + correr `infra/deploy/migrate-preview.sh`, activar el deploy SSH de `images.yml`, conectar los rieles bloqueados por terceros, y firmar/publicar las apps a las stores.
 
 ---
@@ -117,8 +124,19 @@ gRPC proto-first, /api/v1, rate-limit, tombstone+gracia 30d, etc.).
 cd veo-monorepo                                                            # repo único (rama develop)
 pnpm install
 docker compose -f dev-stack/docker-compose.yml up -d postgres redis kafka   # infra mínima
-# Orquestador de dev: dev-stack/veo.sh (levanta servicios + BFFs). OJO: booking-service NO está cableado acá todavía.
+# Orquestador de dev: dev-stack/veo.sh (levanta infra docker + servicios nativos + BFFs; booking-service YA cableado).
 ```
+
+**Harness de dev (2026-07-12) — arranque + seed + login en un comando:**
+
+```bash
+veo.sh dev [--no-seed] [--seed-trips[=N]]  # levanta TODO + auto-siembra identity/driver/media al final del boot
+veo.sh seed [identity|driver|media|trips]  # seeds dev idempotentes; `seed trips N` deja N viajes IN_PROGRESS por el PATH REAL de eventos (sim conductor + Kafka, no escribe el read-model a mano)
+veo.sh login [--json]                      # auto-login: lee el TOTP vivo (:5190/api/otps), POST a admin-bff, imprime las cookies veo_at/veo_rt (httpOnly) listas para curl/chrome-devtools
+```
+
+- Credenciales dev: `admin@veo.pe` / `ChangeMe_VEO_2026!`; 6 operadores por rol (`admin-role`/`dispatcher`/`support-l1`/`support-l2`/`compliance`/`finance` @veo.pe, misma pass); TOTP fijo dev `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` (visor en `:5190`).
+- El seed barato (identity/driver/media) es idempotente y corre en cada `veo.sh dev`; `seed trips` es opt-in (orquestación viva ~90s). El módulo TOTP compartido vive en `dev-stack/lib/totp.mjs`.
 
 **Quirks ya resueltos en `dev-stack/docker-compose.yml`** (importantes):
 
