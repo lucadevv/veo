@@ -9,6 +9,10 @@ import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
+import { PriceDiffHint } from '@/components/config/price-diff-hint';
+
+/** Formato del hint LIVE-DIFF (money): céntimos → "S/1.35" (mismo `formatSolesInput` que el sub "Actual"). */
+const moneyLabel = (cents: number) => `S/${formatSolesInput(cents)}`;
 
 /** Tope de cordura del costo/km (espejo del DTO server-side, defensa en profundidad UI): S/0.01 .. S/100/km. */
 const MIN_CENTS = 1;
@@ -108,6 +112,9 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
               r.invalid
                 ? `Entre S/${formatSolesInput(MIN_CENTS)} y S/${formatSolesInput(MAX_CENTS)}`
                 : undefined
+            }
+            hint={
+              <PriceDiffHint before={r.config.costPerKmCents} after={r.cents} format={moneyLabel} />
             }
           >
             <RateInput

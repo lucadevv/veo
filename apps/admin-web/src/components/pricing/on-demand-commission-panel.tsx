@@ -9,6 +9,10 @@ import { useConfigSave } from '@/lib/use-config-save';
 import { MAX_RATE_PCT, BPS_PER_PERCENT, bpsToPercentLabel, percentToBps } from '@/lib/commission';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
+import { PriceDiffHint } from '@/components/config/price-diff-hint';
+
+/** Formato del hint LIVE-DIFF (tasa): bps → "20.00%" (mismo `bpsToPercentLabel` que el sub "Actual"). */
+const pctLabel = (bps: number) => `${bpsToPercentLabel(bps)}%`;
 
 /**
  * Comisión ON-DEMAND (carril taxi · F2.7 · ADR-017 §1.6 · CAS desacoplada #3). El admin edita SOLO la tasa que se
@@ -61,6 +65,7 @@ export function OnDemandCommissionPanel({ config }: { config: CommissionView }) 
         sub={`Actual: ${bpsToPercentLabel(config.onDemandRateBps)}% · ${config.onDemandRateBps} bps`}
         unit="%"
         error={invalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
+        hint={<PriceDiffHint before={config.onDemandRateBps} after={bps} format={pctLabel} />}
       >
         <RateInput
           type="number"

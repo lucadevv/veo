@@ -9,6 +9,10 @@ import { useConfigSave } from '@/lib/use-config-save';
 import { MAX_RATE_PCT, BPS_PER_PERCENT, bpsToPercentLabel, percentToBps } from '@/lib/commission';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
+import { PriceDiffHint } from '@/components/config/price-diff-hint';
+
+/** Formato del hint LIVE-DIFF (fee): bps → "2.00%" (mismo `bpsToPercentLabel` que el sub "Actual"). */
+const pctLabel = (bps: number) => `${bpsToPercentLabel(bps)}%`;
 
 /**
  * Service fee del CARPOOLING (carril cost-sharing · F2.7 · ADR-015 §11.2 · CAS desacoplada #3) — card del diseño
@@ -64,6 +68,7 @@ export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
         sub={`Actual: ${bpsToPercentLabel(config.carpoolingFeeBps)}%`}
         unit="%"
         error={invalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
+        hint={<PriceDiffHint before={config.carpoolingFeeBps} after={bps} format={pctLabel} />}
       >
         <RateInput
           type="number"

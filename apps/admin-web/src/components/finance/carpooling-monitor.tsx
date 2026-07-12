@@ -1,19 +1,31 @@
 'use client';
 
 import Link from 'next/link';
-import { Armchair, ChevronRight, Navigation, Ticket, Users } from 'lucide-react';
+import { Armchair, ChevronRight, Landmark, Navigation, Ticket, Users } from 'lucide-react';
+import { formatPEN } from '@veo/utils/money';
 import type { ActiveCarpoolItem, ActiveCarpoolState, ActiveCarpoolsView } from '@/lib/api/schemas';
 import { cn } from '@/lib/cn';
 import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
 import { EmptyState } from '@/components/ui/states';
 
 /**
- * MONITOREO de carpools activos (board veo.pen `20 · Carpooling` · TSqpB): la fila de 4 KPIs + la tabla
- * "Carpools activos", encima de los Parámetros. TODO dato es REAL de booking-service (ocupación = reservados/
- * totales; conteos; cupos) — CERO números inventados. El board mostraba además "Ahorro prom. pasajero" y "Fee
- * recaudado": no tienen fuente en booking-service (la plata vive en payment/analytics), así que se sustituyen
- * por KPIs reales del dominio (cupos disponibles, en ruta ahora) en vez de mostrar un número falso.
+ * MONITOREO de carpools activos (board veo.pen `20 · Carpooling` · TSqpB): la fila de KPIs + la tabla
+ * "Carpools activos", encima de los Parámetros. Los 4 primeros KPIs son REALES de booking-service (ocupación =
+ * reservados/totales; conteos; cupos) — CERO números inventados. El board mostraba además "Ahorro prom.
+ * pasajero" (sin fuente → OMITIDO) y "Fee recaudado": el FEE específico del carpooling no tiene fuente, pero el
+ * revenue TOTAL del modo CARPOOLING sí (analytics `byMode`, Σ netSettled) → se cablea como 5º KPI "Recaudado
+ * carpooling" rotulado HONESTO ("total liquidado", NO el fee). Si la query de revenue no está → el KPI degrada.
  */
+
+/**
+ * Revenue del modo CARPOOLING para el 5º KPI. Discrimina los 3 estados de la query de analytics (la lleva la
+ * página, separada de la de carpools activos) para que el KPI degrade honesto: cargando (skeleton), no
+ * disponible (error) o el monto liquidado (Σ netSettled del rango). NO es el service-fee — es el total liquidado.
+ */
+export type CarpoolRevenue =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'ready'; cents: number };
 
 /** Estado de la oferta → chip (label + tono del theme). Fiel al board: publicado=brand, lleno=warn, en curso=success. */
 const STATUS_CHIP: Record<ActiveCarpoolState, { label: string; className: string }> = {
@@ -88,13 +100,22 @@ function CarpoolRow({ carpool }: { carpool: ActiveCarpoolItem }) {
 }
 
 /** Panel de monitoreo: KPIs (StatCard) + tabla "Carpools activos". `data` REAL del backend (finance/carpooling/active). */
-export function CarpoolingMonitor({ data }: { data: ActiveCarpoolsView }) {
+export function CarpoolingMonitor({
+  data,
+  revenue,
+}: {
+  data: ActiveCarpoolsView;
+  // Revenue del modo CARPOOLING (analytics `byMode`) para el 5º KPI. Query aparte (la lleva la página): degrada
+  // sola sin tumbar el resto del monitor.
+  revenue: CarpoolRevenue;
+}) {
   const { stats, carpools } = data;
   const seatsTotal = stats.seatsReserved + stats.seatsAvailable;
   return (
     <div className="space-y-5">
-      {/* 4 KPIs — todos derivados de datos reales de booking-service (cero inventados). */}
-      <StatCardGrid>
+      {/* 5 KPIs: los 4 primeros de booking-service (cero inventados) + "Recaudado carpooling" (analytics byMode,
+          Σ netSettled = total liquidado, NO el fee). La fila pasa a 5 columnas en desktop. */}
+      <StatCardGrid className="lg:grid-cols-5">
         <StatCard icon={Users} label="Carpools activos" value={String(stats.activeCount)} />
         <StatCard
           icon={Armchair}
@@ -114,6 +135,22 @@ export function CarpoolingMonitor({ data }: { data: ActiveCarpoolsView }) {
           label="En ruta ahora"
           value={String(stats.enRouteCount)}
           iconTone="brand"
+        />
+        {/* Recaudado carpooling: total LIQUIDADO del modo (Σ netSettled, últimos 30d), rótulo HONESTO — NO es el
+            service-fee (ese no tiene fuente). Degrada honesto: cargando (skeleton) / no disponible (error). */}
+        <StatCard
+          icon={Landmark}
+          label="Recaudado carpooling"
+          value={
+            revenue.status === 'ready'
+              ? formatPEN(revenue.cents)
+              : revenue.status === 'error'
+                ? '—'
+                : ''
+          }
+          loading={revenue.status === 'loading'}
+          iconTone="success"
+          hint={revenue.status === 'error' ? 'No disponible' : 'Total liquidado · 30d'}
         />
       </StatCardGrid>
 
@@ -152,8 +189,8 @@ export function CarpoolingMonitor({ data }: { data: ActiveCarpoolsView }) {
 export function CarpoolingMonitorSkeleton() {
   return (
     <div className="space-y-5" role="status" aria-label="Cargando monitoreo de carpooling">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={i}
             className="rounded-lg border border-border bg-surface px-4 py-3.5"

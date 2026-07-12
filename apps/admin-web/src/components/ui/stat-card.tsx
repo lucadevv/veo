@@ -57,7 +57,16 @@ export function StatCard({
   );
 }
 
-/** Grilla responsiva de stat cards (2 col mobile, 4 col desktop). */
-export function StatCardGrid({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{children}</div>;
+/**
+ * Grilla responsiva de stat cards (2 col mobile, 4 col desktop). `className` opcional para ajustar las
+ * columnas cuando la fila tiene otra cantidad (ej. `lg:grid-cols-5`); twMerge resuelve el conflicto de cols.
+ */
+export function StatCardGrid({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={cn('grid grid-cols-2 gap-4 lg:grid-cols-4', className)}>{children}</div>;
 }

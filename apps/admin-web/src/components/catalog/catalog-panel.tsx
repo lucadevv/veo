@@ -43,6 +43,7 @@ import { RateField, RateInput } from '@/components/config/config-card';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { EmptyState } from '@/components/ui/states';
 
 /** Etiqueta legible del modo de pricing para el panel (display, no comparación de dominio). */
 const MODE_LABEL: Record<PricingMode, string> = { PUJA: 'Puja', FIXED: 'Precio fijo' };
@@ -182,6 +183,20 @@ export function CatalogPanel({
         expectedVersion: bidFloor.version,
       },
       `Piso de puja de ${offeringLabel(offeringId)} ${cents === null ? 'restablecido al default' : 'actualizado'}`,
+    );
+  }
+
+  // Catálogo VACÍO (board veo.pen `ZC3fO`): ni una oferta publicada. Estado propio (EmptyState), no el alert
+  // danger de "ninguna habilitada" — que es OTRA cosa (hay ofertas, todas apagadas). Sin ofertas no hay grilla.
+  if (catalog.offerings.length === 0) {
+    return (
+      <div className="pt-4">
+        <EmptyState
+          title="Sin ofertas publicadas"
+          description="Todavía no hay ofertas de servicio en el catálogo. Cuando se publiquen, aparecerán acá para configurar su modo, precio y disponibilidad."
+        />
+        <ReadOnlyNote canManage={canManage} noun="el catálogo" />
+      </div>
     );
   }
 

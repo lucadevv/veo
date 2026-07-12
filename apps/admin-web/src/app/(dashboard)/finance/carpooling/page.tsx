@@ -1,7 +1,12 @@
 'use client';
 
 import { Lock } from 'lucide-react';
-import { useActiveCarpools, useCostPerKm, useCommission } from '@/lib/api/queries';
+import {
+  useActiveCarpools,
+  useCostPerKm,
+  useCommission,
+  useRevenueMetrics,
+} from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
@@ -13,6 +18,7 @@ import { CarpoolingFeePanel } from '@/components/pricing/carpooling-fee-panel';
 import {
   CarpoolingMonitor,
   CarpoolingMonitorSkeleton,
+  type CarpoolRevenue,
 } from '@/components/finance/carpooling-monitor';
 
 /**
@@ -29,6 +35,19 @@ export default function CarpoolingPage() {
   const activeCarpoolsQuery = useActiveCarpools();
   const costPerKmQuery = useCostPerKm();
   const commissionQuery = useCommission();
+  // Revenue del modo CARPOOLING para el 5º KPI del monitor (board TSqpB · "Fee recaudado"). Rango 30d — el
+  // default que usa el resto de analytics (métricas). `byMode` es Σ netSettled = TOTAL liquidado, NO el fee: el
+  // rótulo del KPI lo aclara. Query SEPARADA de los carpools activos → degrada sola (loading/error) sin tumbar
+  // el monitor. Sin CARPOOLING en `byMode` (0 viajes en el rango) → 0 liquidado (honesto), no un hueco.
+  const revenueQuery = useRevenueMetrics('30d');
+  const carpoolRevenue: CarpoolRevenue = revenueQuery.data
+    ? {
+        status: 'ready',
+        cents: revenueQuery.data.byMode.find((m) => m.mode === 'CARPOOLING')?.revenueCents ?? 0,
+      }
+    : revenueQuery.isError
+      ? { status: 'error' }
+      : { status: 'loading' };
 
   if (!can(user, 'pricing:view')) {
     return (
@@ -60,7 +79,7 @@ export default function CarpoolingPage() {
             (loading skeleton / error+retry / empty "sin carpools" dentro del panel / data). */}
         <div className="mt-2">
           <AsyncSection query={activeCarpoolsQuery} skeleton={<CarpoolingMonitorSkeleton />}>
-            {(data) => <CarpoolingMonitor data={data} />}
+            {(data) => <CarpoolingMonitor data={data} revenue={carpoolRevenue} />}
           </AsyncSection>
         </div>
 

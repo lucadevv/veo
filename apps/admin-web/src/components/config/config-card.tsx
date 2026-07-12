@@ -73,12 +73,15 @@ export function RateField({
   sub,
   unit,
   error,
+  hint,
   children,
 }: {
   label: string;
   sub?: string;
   unit?: string;
   error?: string;
+  /** Hint opcional bajo el campo (ej. el LIVE-DIFF before→after). Se oculta cuando hay `error` (el error manda). */
+  hint?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -98,7 +101,7 @@ export function RateField({
           {unit ? <span className="shrink-0 text-xs text-ink-subtle">{unit}</span> : null}
         </div>
       </div>
-      {error ? <p className="mt-1 text-right text-xs text-danger">{error}</p> : null}
+      {error ? <p className="mt-1 text-right text-xs text-danger">{error}</p> : (hint ?? null)}
     </div>
   );
 }

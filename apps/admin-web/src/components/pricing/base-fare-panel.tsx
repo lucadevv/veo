@@ -9,6 +9,10 @@ import { parseSolesInput, formatSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
+import { PriceDiffHint } from '@/components/config/price-diff-hint';
+
+/** Formato del hint LIVE-DIFF (money): céntimos → "S/1.35" (mismo `formatSolesInput` que el sub "Actual"). */
+const moneyLabel = (cents: number) => `S/${formatSolesInput(cents)}`;
 
 /** Techos de cordura (espejo del DTO server-side, defensa en profundidad UI). En SOLES. */
 const MAX_BASE_FARE_SOLES = 200;
@@ -78,6 +82,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
         sub={`Actual: S/${formatSolesInput(config.baseFareCents)}`}
         unit="S/"
         error={baseInvalid ? `Entre 0 y ${MAX_BASE_FARE_SOLES}` : undefined}
+        hint={<PriceDiffHint before={config.baseFareCents} after={baseCents} format={moneyLabel} />}
       >
         <RateInput
           type="number"
@@ -95,6 +100,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
         sub={`Actual: S/${formatSolesInput(config.perKmCents)}`}
         unit="S/·km"
         error={perKmInvalid ? `Entre 0 y ${MAX_PER_KM_SOLES}` : undefined}
+        hint={<PriceDiffHint before={config.perKmCents} after={perKmCents} format={moneyLabel} />}
       >
         <RateInput
           type="number"
@@ -112,6 +118,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
         sub={`Actual: S/${formatSolesInput(config.perMinCents)}`}
         unit="S/·min"
         error={perMinInvalid ? `Entre 0 y ${MAX_PER_MIN_SOLES}` : undefined}
+        hint={<PriceDiffHint before={config.perMinCents} after={perMinCents} format={moneyLabel} />}
       >
         <RateInput
           type="number"

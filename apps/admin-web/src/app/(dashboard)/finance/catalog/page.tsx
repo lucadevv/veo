@@ -1,11 +1,10 @@
 'use client';
 
-import { Lock } from 'lucide-react';
 import { useBaseFare, useBidFloor, useCatalog } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState } from '@/components/ui/states';
+import { PermissionState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { CatalogPanel } from '@/components/catalog/catalog-panel';
@@ -32,12 +31,7 @@ export default function CatalogPage() {
           title="Ofertas de servicio"
           breadcrumbs={[{ label: 'Precios' }, { label: 'Ofertas de servicio' }]}
         />
-        <EmptyState
-          className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol FINANCE o ADMIN para ver las ofertas de servicio."
-        />
+        <PermissionState className="flex-1" section="Ofertas de servicio" permission="catalog:view" />
       </div>
     );
   }
