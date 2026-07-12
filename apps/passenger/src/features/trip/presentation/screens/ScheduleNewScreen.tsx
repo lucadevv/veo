@@ -29,16 +29,20 @@ export function ScheduleNewScreen(): React.JSX.Element {
   const reset = useRideDraftStore(s => s.reset);
   const setEditing = useRideDraftStore(s => s.setEditing);
 
-  // Arranca un borrador limpio y abre el buscador en el destino. El origen se sembrará con la
-  // ubicación actual (igual que el flujo inmediato). Tras elegir destino, la cotización ofrece
-  // "Programar para después" con el selector de día/hora real y la tarifa estimada.
+  // Arranca un borrador limpio y lleva al SHEET UNIFICADO (Home). El origen se sembrará con la
+  // ubicación actual (igual que el flujo inmediato). El pasajero elige destino en el buscador del
+  // sheet → cae en la cotización (`QuotingBody`), donde el botón "Programar para después" abre el
+  // selector de día/hora real y la tarifa estimada, y confirma el viaje programado.
   const start = (): void => {
     reset();
+    // Deja el destino como punto en edición (el buscador in-sheet lo re-fija de todos modos; es el
+    // default del store tras `reset`, se explicita por intención). El flujo programado ya NO tiene
+    // pantalla propia: vive ENTERO en el sheet de `RequestFlowScreen` como el flujo inmediato — la
+    // ÚNICA diferencia es tocar "Programar para después" en la cotización antes de confirmar.
     setEditing({kind: 'destination'});
-    // Flujo PROGRAMADO: usa el camino legacy (Search → RouteQuote). NO pasa `flow: 'sheet'` a
-    // propósito — al fijar origen+destino, Search navega a RouteQuote, donde se elige día/hora real y
-    // se confirma el viaje programado. El sheet unificado (RequestFlowScreen) NO interviene acá.
-    navigation.navigate('Search', {flow: 'quote'});
+    // `navigate('Home')` resuelve al tab Home anidado en `Main` y descarta esta pantalla (y el
+    // listado de programados) del stack: el pasajero aterriza en el Home idle listo para pedir.
+    navigation.navigate('Home');
   };
 
   return (

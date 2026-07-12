@@ -5,6 +5,7 @@ import {
   Banner,
   Button,
   Card,
+  hexAlpha,
   StatusPill,
   Text,
   useTheme,
@@ -230,7 +231,7 @@ export function OffersBody({
           style={[
             styles.yourOffer,
             {
-              backgroundColor: `${theme.colors.brand}26`,
+              backgroundColor: hexAlpha(theme.colors.brand, 0.15),
               borderRadius: theme.radii.pill,
               paddingHorizontal: theme.spacing.md,
               paddingVertical: theme.spacing.xs,

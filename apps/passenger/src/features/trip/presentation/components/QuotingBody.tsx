@@ -19,6 +19,7 @@ import {useMutation, useQuery} from '@tanstack/react-query';
 import {
   Banner,
   Button,
+  hexAlpha,
   RideOptionRow,
   Skeleton,
   StatusPill,
@@ -272,6 +273,7 @@ export function QuotingBody({
   }, [routeCoordinates, onRouteChange]);
 
   const selectedFareCents = selectedOption?.priceCents ?? 0;
+  // DEUDA: (backend) el recargo de modo niño (CHILD_MODE_FEE_CENTS local) se muestra como monto real DENTRO de la cotización (camino de cobro) — 2da superficie de la misma deuda de ChildModeScreen: pedir el fee server-driven.
   // El recargo de modo niño aplica SOLO en FIJO (en PUJA el bid ES el precio): decide si mostrar el desglose.
   const showChildFee =
     childMode.enabled && Boolean(selectedOption) && selectedIsFixed;
@@ -297,8 +299,8 @@ export function QuotingBody({
   };
 
   // Editar un punto del trayecto: abre la búsqueda dedicada (Search) para fijar/editar ese extremo.
-  // `flow: 'sheet'` → al fijar, Search hace goBack y VOLVEMOS a esta cotización in-sheet (no a la
-  // pantalla legacy RouteQuote). El borrador (Zustand) ya quedó actualizado, así que el quote se recalcula.
+  // `flow: 'sheet'` → al fijar, Search hace goBack y VOLVEMOS a esta cotización in-sheet. El borrador
+  // (Zustand) ya quedó actualizado, así que el quote se recalcula.
   const editOrigin = useCallback(() => {
     setEditing({kind: 'origin'});
     navigation.navigate('Search', {flow: 'sheet'});
@@ -374,6 +376,15 @@ export function QuotingBody({
   });
 
   const options = quoteQuery.data?.options ?? [];
+  // "Más barato" va en la opción de MENOR precio firme, no en la primera: el server no garantiza
+  // orden por precio, así que `index === 0` etiquetaba mal (bug). PUJA no tiene precio firme → se excluye.
+  const cheapestFixedId =
+    options
+      .filter((o) => !isPujaMode(o.mode ?? quote?.mode))
+      .reduce<(typeof options)[number] | null>(
+        (min, o) => (min === null || o.priceCents < min.priceCents ? o : min),
+        null,
+      )?.id ?? null;
   const canConfirm =
     !createMutation.isPending &&
     ready &&
@@ -492,7 +503,10 @@ export function QuotingBody({
                     name={offeringDisplayName(option)}
                     price={formatPEN(option.priceCents)}
                     eta={formatEta(option)}
-                    description={optionDescription(option, index === 0)}
+                    description={optionDescription(
+                      option,
+                      option.id === cheapestFixedId,
+                    )}
                     icon={
                       <VehicleIcon
                         icon={option.icon}
@@ -717,7 +731,7 @@ function PujaOptionCard({onPress}: PujaOptionCardProps): React.JSX.Element {
       <View
         style={[
           styles.pujaGlyph,
-          {backgroundColor: `${theme.colors.brand}26`},
+          {backgroundColor: hexAlpha(theme.colors.brand, 0.15)},
         ]}>
         <IconBolt color={theme.colors.brand} size={20} />
       </View>

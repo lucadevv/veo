@@ -10,12 +10,11 @@ import {
   SearchField,
   Skeleton,
   Text,
-  TextField,
   useTheme,
 } from '@veo/ui-kit';
-import React from 'react';
+import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Pressable, StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, TextInput, View} from 'react-native';
 import type {RoutePlace} from '../../../maps/domain/entities';
 import type {SavedPlace} from '../../../places/domain/entities';
 import {ErrorState} from '../../../../shared/presentation/components/ScreenStates';
@@ -289,19 +288,23 @@ export function HomeIdleFlowBody({ctx}: SlotProps): React.JSX.Element {
   );
 }
 
-/** Home · flow `searching`: "usar mi ubicación" + guardados + sugerencias del autocompletado. */
+/**
+ * Home · flow `searching` (design/veo.pen P/HomeSearch): chips Casa/Trabajo/Favoritos + encabezado
+ * "Sugerencias"/"Ver mapa" + lista de resultados del autocompletado. La fila de ORIGEN y el input de
+ * destino viven en el header FIJO (`HomeSearchFlowHeader`), sobre el teclado.
+ */
 export function HomeSearchFlowBody({ctx}: SlotProps): React.JSX.Element {
   return (
     <SearchingBody
-      showCurrentLocation={ctx.hasCurrentLocation && !ctx.searchActive}
-      currentLocationSubtitle={ctx.currentLocationSubtitle}
-      onUseCurrentLocation={ctx.onUseCurrentLocation}
+      savedPlaces={ctx.savedPlaces}
+      onSelectSaved={p => ctx.onSelectDestination(placeToRoute(p))}
+      onOpenSavedPlaces={ctx.onSeeAllSaved}
+      onViewMap={ctx.onPickOnMap}
       suggestions={ctx.suggestions}
       loading={ctx.searchLoading}
       error={ctx.searchError}
       active={ctx.searchActive}
       onSelectSuggestion={s => ctx.onSelectDestination(suggestionToRoute(s))}
-      onSelectSaved={p => ctx.onSelectDestination(placeToRoute(p))}
     />
   );
 }
@@ -410,29 +413,109 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
   );
 }
 
-/** Home · flow `searching`: input con autofocus + cerrar (la búsqueda vive DENTRO del mismo sheet). */
+/**
+ * Input de destino EDITABLE del buscador in-sheet (design/veo.pen P/HomeSearch · InputRow · T/SearchInput):
+ * píldora con lupa a la izquierda, placeholder "¿A dónde vas?" y borde de foco TEAL (accent). El ui-kit no
+ * tiene un search-input editable (SearchField es solo-presión; TextField fuerza label), por eso se arma
+ * con tokens del tema.
+ */
+function DestinationSearchInput({
+  value,
+  onChangeText,
+}: {
+  value: string;
+  onChangeText: (query: string) => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const {t} = useTranslation();
+  const [focused, setFocused] = useState(false);
+  return (
+    <View
+      style={[
+        styles.searchInputBox,
+        {
+          backgroundColor: theme.colors.surfaceElevated,
+          borderColor: focused ? theme.colors.focus : theme.colors.border,
+          borderWidth: focused ? 1.5 : 1,
+          borderRadius: theme.radii.lg,
+        },
+      ]}>
+      <IconSearch color={theme.colors.inkSubtle} size={18} />
+      <TextInput
+        style={[
+          styles.searchTextInput,
+          {
+            color: theme.colors.ink,
+            fontFamily: theme.typography.fontFamily.text,
+            fontSize: theme.typography.fontSize.base,
+          },
+        ]}
+        placeholder={t('maps.searchPlaceholder')}
+        placeholderTextColor={theme.colors.inkSubtle}
+        accessibilityLabel={t('maps.searchPlaceholder')}
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        autoFocus
+        autoCorrect={false}
+        returnKeyType="search"
+      />
+    </View>
+  );
+}
+
+/**
+ * Home · flow `searching` (design/veo.pen P/HomeSearch · SearchHeader): fila de ORIGEN ("Mi ubicación
+ * actual" con dot verde de confianza) arriba del INPUT de destino (editable + botón cerrar). Todo vive en
+ * el header FIJO del sheet, así queda SIEMPRE sobre el teclado.
+ */
 export function HomeSearchFlowHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   return (
-    <View style={styles.searchHeader}>
-      <View style={styles.searchInput}>
-        <TextField
-          label={t('home.destination')}
-          placeholder={t('maps.inputPlaceholder')}
-          value={ctx.query}
-          onChangeText={ctx.onQueryChange}
-          autoFocus
-          autoCorrect={false}
-          returnKeyType="search"
+    <View style={styles.searchStack}>
+      {/* ORIGEN = ubicación actual (pen OriginRow): dot verde (success/jade, único verde del tema —
+          el .pen usa #00C853 pero el passenger canoniza el positivo en jade) + etiqueta. Tocarlo abre
+          la edición del origen (misma vía que la cotización). */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('maps.originCurrent')}
+        onPress={ctx.onEditOrigin}
+        style={[
+          styles.originRow,
+          {
+            backgroundColor: theme.colors.bg,
+            borderColor: theme.colors.border,
+            borderRadius: theme.radii.lg,
+          },
+        ]}>
+        <View
+          style={[styles.originDot, {backgroundColor: theme.colors.success}]}
+        />
+        <Text
+          variant="subhead"
+          color="ink"
+          numberOfLines={1}
+          style={styles.searchInput}>
+          {ctx.currentLocationTitle ?? t('maps.originCurrent')}
+        </Text>
+      </Pressable>
+      {/* DESTINO = input de búsqueda editable + cerrar (pen InputRow). */}
+      <View style={styles.searchHeader}>
+        <View style={styles.searchInput}>
+          <DestinationSearchInput
+            value={ctx.query}
+            onChangeText={ctx.onQueryChange}
+          />
+        </View>
+        <IconButton
+          accessibilityLabel={t('actions.close')}
+          onPress={ctx.onExitSearch}
+          variant="surface"
+          icon={<IconClose color={theme.colors.inkMuted} size={20} />}
         />
       </View>
-      <IconButton
-        accessibilityLabel={t('actions.close')}
-        onPress={ctx.onExitSearch}
-        variant="surface"
-        icon={<IconClose color={theme.colors.inkMuted} size={20} />}
-      />
     </View>
   );
 }
@@ -698,7 +781,28 @@ export function resolvePickupMode(
 const styles = StyleSheet.create({
   // Header FIJO del sheet (no scrollea): buscador + chips Casa/Trabajo (home) o volver + destino (quoting).
   header: {paddingBottom: 8},
-  // Header del modo búsqueda (input + cerrar), también fijo. Mismo layout para el header de cotización.
-  searchHeader: {flexDirection: 'row', alignItems: 'flex-end', gap: 10},
+  // Stack del header de búsqueda: fila de ORIGEN sobre la fila del INPUT (pen SearchHeader · gap 8).
+  searchStack: {gap: 8},
+  // Fila input + cerrar (búsqueda) o volver + destino (cotización), fija. Centrada verticalmente.
+  searchHeader: {flexDirection: 'row', alignItems: 'center', gap: 8},
   searchInput: {flex: 1},
+  // Fila de ORIGEN (pen OriginRow): dot verde + etiqueta, píldora con borde.
+  originRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+  },
+  originDot: {width: 10, height: 10, borderRadius: 999},
+  // Input de destino EDITABLE (pen InputRow · T/SearchInput): lupa + campo, borde de foco.
+  searchInputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    minHeight: 48,
+  },
+  searchTextInput: {flex: 1, paddingVertical: 12},
 });

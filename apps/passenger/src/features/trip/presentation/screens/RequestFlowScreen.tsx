@@ -13,6 +13,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Image,
   Keyboard,
+  Platform,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -287,8 +288,8 @@ export function RequestFlowScreen(): React.JSX.Element {
   // del mapa en cada keystroke del buscador / cambio de peekHeight. Un solo origen para route y trip mode.
   const originGeo = useMemo(() => draftToGeo(origin), [origin]);
   const destinationGeo = useMemo(() => draftToGeo(destination), [destination]);
-  // Paradas intermedias (Ola 2B) para pintarlas en el MAPA del flujo principal (antes solo iban al
-  // RouteQuoteScreen legacy). Filtramos los placeholders vacíos y convertimos lng→lon.
+  // Paradas intermedias (Ola 2B) para pintarlas en el MAPA del flujo principal.
+  // Filtramos los placeholders vacíos y convertimos lng→lon.
   const waypointsGeo = useMemo(
     () =>
       waypoints
@@ -492,6 +493,32 @@ export function RequestFlowScreen(): React.JSX.Element {
     }
   }, []);
 
+  // KEYBOARD-AVOIDANCE del buscador in-sheet. El sheet es `position:absolute · bottom:0`, así que en iOS
+  // (donde el teclado FLOTA sobre la ventana, sin redimensionarla) el teclado tapa la parte baja del sheet:
+  // el input y las sugerencias quedaban ocultos detrás. Fix en DOS partes, SIN tocar el DraggableSheet
+  // (que ya corre su drag/snap en el hilo de UI y no queremos pelear):
+  //   1) el flow `searching` ancla el sheet a un alto FIJO (ver `sheetSnapPoints`), no content-hug → el
+  //      header FIJO (origen + input) queda SIEMPRE arriba, sobre el teclado, aunque haya pocas sugerencias.
+  //   2) acá medimos el alto del teclado y lo sumamos al `paddingBottom` del scroll → la lista scrollea
+  //      por ENCIMA del teclado (la última sugerencia se alcanza). Android usa `adjustResize` (la ventana
+  //      ya se achica sola), por eso solo compensamos en iOS.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'ios') {
+      return;
+    }
+    const show = Keyboard.addListener('keyboardWillShow', e =>
+      setKeyboardHeight(e.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener('keyboardWillHide', () =>
+      setKeyboardHeight(0),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   // Atajo de 1 toque (chips/guardados/recientes) o elegir una sugerencia: fija el destino y la fase
   // pasa a 'quoting' EN EL MISMO sheet (no navega). Sale del modo búsqueda.
   const selectDestination = useCallback(
@@ -629,13 +656,18 @@ export function RequestFlowScreen(): React.JSX.Element {
     }
     const available = Math.max(windowHeight - insets.top - bottomInset, 1);
     const visible = windowHeight * (1 - HOME_SHEET_TOP_FRACTION);
+    const sheetFraction = Math.min(visible / available, 0.94);
+    // BÚSQUEDA: alto FIJO (no content-hug). Con content-hug, pocas sugerencias dejaban el sheet corto y
+    // el input (header fijo) caía detrás del teclado; con alto fijo el sheet siempre es alto (la hoja del
+    // .pen P/HomeSearch, con el mapa asomando arriba) → el input queda sobre el teclado y la lista
+    // scrollea debajo. El resto de idle sigue en content-hug (abraza la hoja del Home).
+    if (flow === 'searching') {
+      return [HOME_SHEET_COLLAPSED_FRACTION, sheetFraction];
+    }
     // Máximo CONTENT-HUG (crece al contenido) capado a la hoja del .pen: si el contenido es corto,
     // el sheet lo abraza; si es alto, se queda en la hoja del pen y scrollea adentro.
-    return [
-      HOME_SHEET_COLLAPSED_FRACTION,
-      {content: Math.min(visible / available, 0.94)},
-    ];
-  }, [mapMode, windowHeight, insets.top, bottomInset]);
+    return [HOME_SHEET_COLLAPSED_FRACTION, {content: sheetFraction}];
+  }, [mapMode, flow, windowHeight, insets.top, bottomInset]);
 
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
   // solo lugar. Cada fase toma de acá exactamente lo que su body/header necesita.
@@ -908,9 +940,12 @@ export function RequestFlowScreen(): React.JSX.Element {
                 // la esquiva (inset + clearance). route/trip: respiro simple (el área útil ya descuenta
                 // el chrome inferior vía bottomOffset).
                 paddingBottom:
-                  mapMode === 'idle'
+                  (mapMode === 'idle'
                     ? bottomInset + HOME_TABBAR_CLEARANCE
-                    : theme.spacing.xl,
+                    : theme.spacing.xl) +
+                  // Buscando: clearance del teclado (iOS) para que la última sugerencia scrollee por
+                  // encima de él (ver keyboard-avoidance arriba). Fuera de búsqueda es 0.
+                  (flow === 'searching' ? keyboardHeight : 0),
                 // Ritmo vertical del pen en el Home (HomeContent gap $s-lg = 16, con aire); el
                 // resto de fases conserva md.
                 gap: mapMode === 'idle' ? theme.spacing.lg : theme.spacing.md,

@@ -15,10 +15,11 @@ import {
  * presentación del pasajero. Mata los ternarios `=== 'MOTO'` dispersos: agregar una oferta nueva es
  * AGREGAR una entrada acá (+ su glyph), no editar N pantallas.
  *
- * Tres familias visuales por token (las que la app ya tenía, ahora en UNA tabla):
- *  - `emoji` + `tone`: la fila de opción del selector de tarifas (RouteQuote/QuotingBody).
+ * Dos familias visuales por token (las que la app ya tenía, ahora en UNA tabla):
  *  - `MapGlyph`: silueta top-down del mapa "Midnight Motion" (ambiente nearby + conductor asignado).
- *  - `LineIcon`: ícono de línea del historial de viajes.
+ *  - `LineIcon` + `tone`: ícono de LÍNEA real del historial Y de la fila de opción de tarifa
+ *    (`QuotingBody`, vía VehicleIcon). Reemplaza al viejo emoji (ADR 013 revisado → íconos,
+ *    fiel a design/veo.pen y a la regla no-emoji).
  *
  * Fuentes del dato (en orden): `options[].icon` del quote cuando existe (ADR 013, additive);
  * `vehicleType`→token vía `VEHICLE_CLASS_ICON` para datos que NO traen icon (historial viejo,
@@ -116,9 +117,7 @@ export const MAP_GLYPH_DEFAULTS = {
 
 /** La presentación COMPLETA de un token de ícono del catálogo (las tres familias visuales + labels). */
 export interface OfferingGlyph {
-  /** Emoji de la fila de opción del selector de tarifas. */
-  emoji: string;
-  /** Tono del emoji en la fila: la moto se distingue en lima de marca; los autos, en tinta. */
+  /** Tono del ícono en la fila: la moto se distingue en lima de marca; los autos, en tinta. */
   tone: TextTone;
   /** Clave i18n del TIPO de vehículo (subtítulo de la opción: "Mototaxi" / "Auto"). */
   vehicleLabelKey: VehicleLabelKey;
@@ -131,14 +130,12 @@ export interface OfferingGlyph {
 /** UN registro token→glyph por app (ADR 013 §1.6). Exhaustivo: token nuevo sin entrada NO compila. */
 export const OFFERING_GLYPHS: Record<OfferingIcon, OfferingGlyph> = {
   [OfferingIcon.CAR]: {
-    emoji: '🚗',
     tone: 'ink',
     vehicleLabelKey: 'quote.vehicle.car',
     MapGlyph: CarMapGlyph,
     LineIcon: IconCar,
   },
   [OfferingIcon.MOTO]: {
-    emoji: '🏍️',
     tone: 'brand',
     vehicleLabelKey: 'quote.vehicle.moto',
     MapGlyph: MotoMapGlyph,
@@ -147,30 +144,26 @@ export const OFFERING_GLYPHS: Record<OfferingIcon, OfferingGlyph> = {
   // B5-4 · verticales especiales + EV: CODEADAS pero OCULTAS (defaultEnabled:false) → el quote nunca las
   // cotiza, así que estos glyphs NO se renderizan hoy. Existen para satisfacer el registro exhaustivo
   // (token nuevo sin entrada NO compila). Reusan la familia base (auto/moto) como placeholder; cuando el
-  // admin desbloquee la feature se les da arte propia (emoji ya distingue: ⚡🚑🛻🔧).
+  // admin desbloquee la feature se les da arte propia.
   [OfferingIcon.EV]: {
-    emoji: '⚡',
     tone: 'ink',
     vehicleLabelKey: 'quote.vehicle.car',
     MapGlyph: CarMapGlyph,
     LineIcon: IconCar,
   },
   [OfferingIcon.AMBULANCE]: {
-    emoji: '🚑',
     tone: 'ink',
     vehicleLabelKey: 'quote.vehicle.car',
     MapGlyph: CarMapGlyph,
     LineIcon: IconCar,
   },
   [OfferingIcon.TOW]: {
-    emoji: '🛻',
     tone: 'ink',
     vehicleLabelKey: 'quote.vehicle.car',
     MapGlyph: CarMapGlyph,
     LineIcon: IconCar,
   },
   [OfferingIcon.WRENCH]: {
-    emoji: '🔧',
     tone: 'brand',
     vehicleLabelKey: 'quote.vehicle.moto',
     MapGlyph: MotoMapGlyph,

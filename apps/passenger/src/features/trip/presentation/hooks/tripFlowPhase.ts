@@ -2,9 +2,9 @@ import {tripStatus, type TripStatus} from '@veo/api-client';
 
 /**
  * FASE del flujo de viaje unificado: la única fuente de verdad de "qué muestra el sheet sobre el mapa
- * persistente", derivada del estado del viaje. Reemplaza los 4 `useEffect` de navegación que duplicaban
- * el mapa estados→pantalla en RouteQuote/OffersBoard/Counter/TripActive (patrón State + SRP: la UI
- * REFLEJA la fase, no decide a dónde navegar).
+ * persistente", derivada del estado del viaje. Reemplaza los `useEffect` de navegación que duplicaban
+ * el mapa estados→pantalla en las pantallas de viaje legacy (patrón State + SRP: la UI REFLEJA la fase,
+ * no decide a dónde navegar).
  *
  *  idle        → sin destino elegido (home: buscador + atajos)
  *  quoting     → destino elegido, sin viaje creado (cotización / "ofrecé tu tarifa" PUJA)

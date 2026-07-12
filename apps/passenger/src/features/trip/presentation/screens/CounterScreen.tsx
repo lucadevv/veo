@@ -10,6 +10,7 @@ import {
   Banner,
   Button,
   Card,
+  hexAlpha,
   SafeScreen,
   Text,
   useTheme,
@@ -244,7 +245,7 @@ export function CounterScreen(): React.JSX.Element {
             style={[
               styles.compareTile,
               {
-                backgroundColor: `${theme.colors.warn}26`,
+                backgroundColor: hexAlpha(theme.colors.warn, 0.15),
                 borderColor: theme.colors.warn,
                 borderRadius: theme.radii.lg,
                 padding: theme.spacing.lg,

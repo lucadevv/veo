@@ -41,9 +41,9 @@ import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /**
- * LEGACY: solo flujo PROGRAMADO/reasignación (`Reassign`, `RouteQuote`, `NoOffers` legacy). El flujo
- * NORMAL de la puja vive ENTERO en el sheet de `RequestFlowScreen` (fase `offers` = `OffersBody`); NO
- * debe pasar por esta pantalla. No borrar todavía: Reassign y el camino programado aún la referencian.
+ * LEGACY: alcanzable por DEEP-LINK de push (`data.screen: 'OffersBoard'`, ver deepLink.ts) y por la
+ * reasignación (`Reassign`). El flujo NORMAL de la puja vive ENTERO en el sheet de `RequestFlowScreen`
+ * (fase `offers` = `OffersBody`); NO debe pasar por esta pantalla. No borrar: esos dos caminos la usan.
  *
  * PUJA · board de ofertas EN VIVO (handoff `Offers`). Fusiona el snapshot REST (`GET /trips/:id/offers`)
  * con las ofertas que entran por socket (`offer:made`) y deja al pasajero ELEGIR: "Elegir" acepta el
@@ -355,7 +355,7 @@ function OfferCard({
 
 const styles = StyleSheet.create({
   root: {flex: 1},
-  // Panel flotante anclado abajo sobre el mapa (mismo lenguaje que RouteQuote).
+  // Panel flotante anclado abajo sobre el mapa (mismo lenguaje que el sheet del flujo unificado).
   sheet: {
     position: 'absolute',
     left: 0,

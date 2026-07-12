@@ -2,57 +2,96 @@ import type {PlaceSuggestion} from '@veo/api-client';
 import {Banner, ListItem, Skeleton, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
-import {View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
 import type {SavedPlace} from '../../../places/domain/entities';
-import {SavedPlacesShortcuts} from '../../../places/presentation';
-import {IconPin, IconTarget} from './icons';
+import {IconHome, IconPin, IconStar, IconWork} from './icons';
 import {EnterView} from './motion';
+import {ShortcutChip} from './ShortcutChip';
 
 export interface SearchingBodyProps {
-  showCurrentLocation: boolean;
-  currentLocationSubtitle?: string;
-  onUseCurrentLocation: () => void;
+  /** Lugares guardados del pasajero (Casa/Trabajo/favoritos) para los chips de 1 toque. */
+  savedPlaces: SavedPlace[];
+  /** Fija un lugar guardado como destino con un toque. */
+  onSelectSaved: (place: SavedPlace) => void;
+  /** Abre la gestión de lugares guardados (chip "Favoritos" y añadir Casa/Trabajo faltante). */
+  onOpenSavedPlaces: () => void;
+  /** "Ver mapa": elegir el destino arrastrando el mapa (pickOnMap). */
+  onViewMap: () => void;
   suggestions: PlaceSuggestion[];
   loading: boolean;
   error: boolean;
   active: boolean;
   onSelectSuggestion: (suggestion: PlaceSuggestion) => void;
-  onSelectSaved: (place: SavedPlace) => void;
 }
 
 /**
- * Cuerpo SCROLLABLE del modo búsqueda (DENTRO del sheet): "usar mi ubicación", atajos de guardados y
- * sugerencias de autocompletado real. El input con autofocus + cerrar viven en el HEADER FIJO, así que
- * al scrollear las sugerencias el buscador NO se va de pantalla.
+ * Cuerpo SCROLLABLE del modo búsqueda (DENTRO del sheet · design/veo.pen P/HomeSearch): chips
+ * Casa/Trabajo/Favoritos, encabezado "Sugerencias"/"Ver mapa" y la lista de resultados del
+ * autocompletado real. La fila de ORIGEN y el input de destino viven en el HEADER FIJO
+ * (`HomeSearchFlowHeader`), así al scrollear los resultados el buscador NO se va de pantalla.
  */
 export function SearchingBody({
-  showCurrentLocation,
-  currentLocationSubtitle,
-  onUseCurrentLocation,
+  savedPlaces,
+  onSelectSaved,
+  onOpenSavedPlaces,
+  onViewMap,
   suggestions,
   loading,
   error,
   active,
   onSelectSuggestion,
-  onSelectSaved,
 }: SearchingBodyProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
+
+  const home = savedPlaces.find(place => place.kind === 'HOME');
+  const work = savedPlaces.find(place => place.kind === 'WORK');
 
   return (
     <>
       {error ? <Banner tone="danger" title={t('maps.searchError')} /> : null}
 
-      {showCurrentLocation ? (
-        <ListItem
-          title={t('maps.useCurrentLocation')}
-          subtitle={currentLocationSubtitle}
-          onPress={onUseCurrentLocation}
-          leading={<IconTarget color={theme.colors.accent} size={20} />}
-        />
+      {/* Chips Casa/Trabajo/Favoritos (pen ShortcutChips) — solo SIN búsqueda activa; al tipear mandan
+          las sugerencias. Casa/Trabajo fijan el lugar guardado (o abren su gestión si falta);
+          Favoritos abre los lugares guardados. */}
+      {!active ? (
+        <View style={styles.chipsRow}>
+          <ShortcutChip
+            label={t('home.shortcutHome')}
+            Icon={IconHome}
+            present={Boolean(home)}
+            onPress={() => (home ? onSelectSaved(home) : onOpenSavedPlaces())}
+          />
+          <ShortcutChip
+            label={t('home.shortcutWork')}
+            Icon={IconWork}
+            present={Boolean(work)}
+            onPress={() => (work ? onSelectSaved(work) : onOpenSavedPlaces())}
+          />
+          <ShortcutChip
+            label={t('home.shortcutFavorites')}
+            Icon={IconStar}
+            present
+            onPress={onOpenSavedPlaces}
+          />
+        </View>
       ) : null}
 
-      {!active ? <SavedPlacesShortcuts onSelect={onSelectSaved} /> : null}
+      {/* Encabezado de resultados (pen SuggestionsHeader): "Sugerencias" + atajo "Ver mapa". */}
+      <View style={styles.suggestionsHeader}>
+        <Text variant="subhead" color="ink" style={styles.suggestionsTitle}>
+          {t('maps.suggestions')}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('maps.viewMap')}
+          hitSlop={8}
+          onPress={onViewMap}>
+          <Text variant="subhead" color="accent">
+            {t('maps.viewMap')}
+          </Text>
+        </Pressable>
+      </View>
 
       {suggestions.length > 0
         ? suggestions.map((item, index) => (
@@ -87,3 +126,13 @@ export function SearchingBody({
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  chipsRow: {flexDirection: 'row', gap: 8},
+  suggestionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  suggestionsTitle: {fontWeight: '600'},
+});

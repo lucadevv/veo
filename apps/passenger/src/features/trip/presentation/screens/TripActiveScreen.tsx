@@ -59,9 +59,8 @@ type Params = RouteProp<RootStackParamList, 'TripActive'>;
  *
  * ESTADO (deuda técnica acotada): esta pantalla es la vista de viaje en vivo LEGACY. El "Mis Viajes"
  * (historial) YA NO la usa: un viaje vivo se re-entra por el flujo unificado (sheet del Home), y uno
- * terminal abre `TripDetail`. PERO sigue VIVA porque el flujo de cotización legacy `RouteQuoteScreen`
- * (dispatch FIXED, no PUJA) todavía navega aquí tras crear el viaje (`navigate('TripActive', …)`). No se
- * elimina para no romper ese camino; su retiro va atado a migrar RouteQuote al sheet unificado.
+ * terminal abre `TripDetail`. PERO sigue VIVA porque un DEEP-LINK de push aterriza aquí (`data.screen:
+ * 'TripActive'` o el fallback con `tripId`, ver deepLink.ts). No se elimina para no romper ese camino.
  */
 export function TripActiveScreen(): React.JSX.Element {
   const theme = useTheme();

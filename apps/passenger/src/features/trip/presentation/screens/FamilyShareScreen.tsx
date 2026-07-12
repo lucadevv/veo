@@ -1,9 +1,11 @@
 import {useRoute, type RouteProp} from '@react-navigation/native';
 import {useMutation, useQuery} from '@tanstack/react-query';
 import {
+  Avatar,
   Banner,
   Button,
   Card,
+  ListItem,
   SafeScreen,
   Skeleton,
   Text,
@@ -287,6 +289,7 @@ export function FamilyShareScreen(): React.JSX.Element {
 
       {/* Contactos de confianza REALES. Sin switches de "compartir automático" (no hay backend que
           los sustente): "Enviar SMS" abre el compositor con el enlace, que sí es real. */}
+      {/* DEUDA: (backend) falta preferencia de "compartir automático" con contactos de confianza (endpoint de auto-share por contacto). Hoy solo SMS manual con enlace real. */}
       {contacts.length > 0 ? (
         <View style={{gap: theme.spacing.sm}}>
           {contacts.map(contact => (
@@ -374,44 +377,26 @@ function ContactRow({
 }: ContactRowProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
-  const initial = contact.name.trim().charAt(0).toUpperCase() || '·';
   return (
-    <View
-      style={[
-        styles.contactRow,
-        {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radii.lg,
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.lg,
-          gap: theme.spacing.md,
-        },
-      ]}>
-      <View
-        style={[
-          styles.contactAvatar,
-          {backgroundColor: theme.colors.surfaceElevated},
-        ]}>
-        <Text variant="bodyStrong" color="inkMuted">
-          {initial}
-        </Text>
-      </View>
-      <View style={[styles.contactTexts, {gap: theme.spacing.xxs}]}>
-        <Text variant="body" numberOfLines={1}>
-          {contact.name}
-        </Text>
-        <Text variant="caption" color="inkSubtle" numberOfLines={1}>
-          {contact.phone}
-        </Text>
-      </View>
-      <Button
-        label={t('familyShare.contactSms')}
-        variant="secondary"
-        size="sm"
-        disabled={disabled}
-        onPress={onSendSms}
-      />
-    </View>
+    <ListItem
+      style={{
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.radii.lg,
+        paddingHorizontal: theme.spacing.lg,
+      }}
+      leading={<Avatar name={contact.name} size="md" tone="neutral" />}
+      title={contact.name}
+      subtitle={contact.phone}
+      trailing={
+        <Button
+          label={t('familyShare.contactSms')}
+          variant="secondary"
+          size="sm"
+          disabled={disabled}
+          onPress={onSendSms}
+        />
+      }
+    />
   );
 }
 
@@ -445,13 +430,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  contactRow: {flexDirection: 'row', alignItems: 'center'},
-  contactAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  contactTexts: {flex: 1},
 });
