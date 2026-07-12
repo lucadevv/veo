@@ -97,11 +97,12 @@ function FilterChip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      // Activo: fondo brand + texto on-brand (blanco) por `style` con las vars del theme — `text-on-brand` no lo
+      // regenera el JIT acá (mismo caso que los tintes), así el contraste del chip seleccionado nunca falla.
+      style={active ? { backgroundColor: 'var(--brand)', color: 'var(--on-brand)', borderColor: 'var(--brand)' } : undefined}
       className={cn(
         'rounded-full border px-3.5 py-2 text-[13px] font-medium transition-colors',
-        active
-          ? 'border-brand bg-brand text-on-brand'
-          : 'border-border bg-surface text-ink-muted hover:border-border-strong hover:text-ink',
+        active ? '' : 'border-border bg-surface text-ink-muted hover:border-border-strong hover:text-ink',
       )}
     >
       {children}
