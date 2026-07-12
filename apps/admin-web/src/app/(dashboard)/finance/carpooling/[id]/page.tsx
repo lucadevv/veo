@@ -135,7 +135,7 @@ export default function CarpoolDetailPage(props: { params: Promise<{ id: string 
             className="m-7"
             icon={<MapPin className="size-6" aria-hidden />}
             title="Carpool no encontrado"
-            description="Este viaje compartido ya no está disponible. Si lo viste en el monitoreo, puede tardar unos segundos en desaparecer."
+            description="Este viaje compartido ya no está disponible."
           />
         ) : (
           <ErrorState onRetry={() => void query.refetch()} className="m-7" />

@@ -100,7 +100,7 @@ export function OfferingDetailView({ offeringId }: { offeringId: string }) {
           className="m-7"
           icon={<Wrench className="size-6" aria-hidden />}
           title="Servicio no encontrado"
-          description="Esta oferta no existe en el catálogo. Puede haber sido renombrada o retirada; volvé a la lista de ofertas."
+          description="Esta oferta no existe en el catálogo. Volvé a la lista de ofertas."
         />
       ) : (
         <Loaded catalog={catalog} offering={offering} offeringId={offeringId} />

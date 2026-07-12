@@ -200,7 +200,7 @@ export function CatalogPanel({
       <div className="flex flex-col items-center pt-4">
         <EmptyState
           title="Sin ofertas publicadas"
-          description="Todavía no hay ofertas de servicio en el catálogo. Cuando se publiquen, aparecerán acá para configurar su modo, precio y disponibilidad."
+          description="Sin ofertas en el catálogo todavía. Cuando se publiquen aparecerán acá."
         />
         {/* Board ZC3fO: el empty-state ofrece "Nuevo servicio" — SOLO al SUPERADMIN (catalog:create). */}
         {canCreate ? (
