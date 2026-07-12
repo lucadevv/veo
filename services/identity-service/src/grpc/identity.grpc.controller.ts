@@ -22,6 +22,8 @@ interface DriverCountsReply {
   pending: number;
   cleared: number;
   rejected: number;
+  /** Conductores EN LÍNEA (presencia operativa: current_status NO OFFLINE ni SUSPENDED) → KPI "En línea". */
+  online: number;
 }
 /** identity.GetUsersByIds — batch de users por User.id (nombre del conductor en la lista de vehículos). */
 interface UsersByIdsReply {
@@ -339,13 +341,18 @@ export class IdentityGrpcController {
   @GrpcMethod('IdentityService', 'GetDriverCounts')
   async getDriverCounts(_request: unknown, metadata: Metadata): Promise<DriverCountsReply> {
     this.requireIdentity('GetDriverCounts', metadata);
-    const groups = await this.repo.countDriversByBackgroundStatus();
+    // Dos agregados en la réplica, en paralelo: el groupBy por antecedentes + el count de presencia (online).
+    const [groups, online] = await Promise.all([
+      this.repo.countDriversByBackgroundStatus(),
+      this.repo.countOnlineDrivers(),
+    ]);
     const countOf = (backgroundCheckStatus: BackgroundCheckStatus): number =>
       groups.find((g) => g.backgroundCheckStatus === backgroundCheckStatus)?.count ?? 0;
     return {
       pending: countOf(BackgroundCheckStatus.PENDING),
       cleared: countOf(BackgroundCheckStatus.CLEARED),
       rejected: countOf(BackgroundCheckStatus.REJECTED),
+      online,
     };
   }
 

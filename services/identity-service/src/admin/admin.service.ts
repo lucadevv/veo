@@ -58,9 +58,24 @@ export interface AdminTokens {
 export interface OperatorSummary {
   id: string;
   email: string;
+  name: string | null;
   status: string;
   roles: string[];
+  totpEnrolled: boolean;
+  lastLoginAt: Date | null;
   createdAt: Date;
+}
+
+/** Una sesión activa del operador (id + última actividad ISO). Sin device/UA/geo: no se almacena. */
+export interface OperatorSession {
+  id: string;
+  lastActiveAt: string;
+}
+
+/** Detalle de un operador (GET /admin/operators/:id): la fila de la lista + sus sesiones activas.
+ *  `effectivePermissions` NO se calcula acá — lo DERIVA el admin-bff de los roles (matriz base @veo/policy). */
+export interface OperatorDetail extends OperatorSummary {
+  sessions: OperatorSession[];
 }
 
 @Injectable()
@@ -268,9 +283,146 @@ export class AdminService {
     });
   }
 
-  /** Todos los operadores (gestión de staff): id, email, estado, roles, alta. */
+  /** Todos los operadores (gestión de staff): id, email, nombre, estado, roles, 2FA, último acceso, alta. */
   listOperators(): Promise<OperatorSummary[]> {
     return this.repo.listOperators();
+  }
+
+  /**
+   * Detalle de un operador (pantalla "Detalle de operador"): la fila de la lista + sus SESIONES activas
+   * (del refresh-store en Redis). 404 si no existe o está soft-deleted (`deletedAt`). `effectivePermissions`
+   * NO se computa acá: lo DERIVA el admin-bff de los roles (matriz base @veo/policy) — identity solo da el dato.
+   */
+  async getOperatorDetail(adminId: string): Promise<OperatorDetail> {
+    const admin = await this.repo.findAdminById(adminId);
+    if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+    const sessions = await this.sessions.listSessionsForUser(admin.id);
+    return {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      status: admin.status,
+      roles: admin.roles,
+      totpEnrolled: admin.totpEnrolled,
+      lastLoginAt: admin.lastLoginAt,
+      createdAt: admin.createdAt,
+      sessions,
+    };
+  }
+
+  /**
+   * Cambia los ROLES RBAC de un operador (mutación de privilegio auditable · Ley 29733 · libro WORM). Espeja el
+   * guard de createOperator: valida el enum + anti-escalada `canGrantRoles` (el actor solo otorga rangos < al
+   * suyo, salvo SUPERADMIN→SUPERADMIN). SUMA, como reject(), el candado de OBJETIVO: nadie re-rolea su propia
+   * cuenta ni a un operador de rango IGUAL o SUPERIOR (si no, un ADMIN podría despojar a un SUPERADMIN). El write
+   * de roles + el evento `admin.role_changed` van en la MISMA tx (estado↔auditoría atómicos). Tras cambiar, se
+   * REVOCAN las sesiones del operador: su access token (≤15m) porta los roles VIEJOS → forzamos re-login para
+   * que el cambio de autoridad rija ya (no en 15 min).
+   */
+  async changeRoles(
+    actorRoles: AdminRole[],
+    actorId: string,
+    adminId: string,
+    roles: AdminRole[],
+  ): Promise<OperatorDetail> {
+    for (const r of roles) {
+      if (!VALID_ROLES.has(r)) throw new ValidationError(`Rol inválido: ${r}`);
+    }
+    if (!canGrantRoles(actorRoles, roles)) {
+      throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
+        actorRoles,
+        requested: roles,
+      });
+    }
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
+      if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+      if (actorId === adminId) throw new ForbiddenError('No podés cambiar tus propios roles');
+      if (maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)) {
+        throw new ForbiddenError('No podés modificar a un operador de rango igual o superior al tuyo', {
+          actorRoles,
+          targetRoles: admin.roles,
+        });
+      }
+      await this.repo.updateAdminByIdTx(tx, adminId, { roles });
+      await this.repo.enqueueOutbox(tx, this.roleChangedEnvelope(adminId, roles, actorId), adminId);
+    });
+    // El cambio de roles cambia la AUTORIDAD → matamos las sesiones para que el token nuevo (roles nuevos) rija ya.
+    await this.sessions.revokeAllForUser(adminId);
+    return this.getOperatorDetail(adminId);
+  }
+
+  /**
+   * Suspende un operador ACTIVO (status → SUSPENDED). Anti-escalada como reject (no uno mismo, no a un rango
+   * igual/superior) + máquina de estados DENTRO de la tx (TOCTOU-safe). Revoca sus sesiones: un suspendido no
+   * sigue operando el panel con un token vivo.
+   */
+  async suspend(actorRoles: AdminRole[], actorId: string, adminId: string): Promise<OperatorDetail> {
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
+      if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+      if (actorId === adminId) throw new ForbiddenError('No podés suspender tu propia cuenta');
+      if (maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)) {
+        throw new ForbiddenError('No podés suspender a un operador de rango igual o superior al tuyo', {
+          actorRoles,
+          targetRoles: admin.roles,
+        });
+      }
+      adminStatusMachine.assertTransition(admin.status, AdminStatus.SUSPENDED);
+      await this.repo.updateAdminByIdTx(tx, adminId, { status: AdminStatus.SUSPENDED });
+    });
+    await this.sessions.revokeAllForUser(adminId);
+    return this.getOperatorDetail(adminId);
+  }
+
+  /**
+   * Elimina (soft-delete) un operador: setea `deletedAt`. Queda FUERA de la lista (`listOperators` filtra
+   * `deletedAt = null`) y del detalle (404). Anti-escalada como reject. Revoca sus sesiones (acceso cortado ya).
+   */
+  async remove(actorRoles: AdminRole[], actorId: string, adminId: string): Promise<void> {
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
+      if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+      if (actorId === adminId) throw new ForbiddenError('No podés eliminar tu propia cuenta');
+      if (maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)) {
+        throw new ForbiddenError('No podés eliminar a un operador de rango igual o superior al tuyo', {
+          actorRoles,
+          targetRoles: admin.roles,
+        });
+      }
+      await this.repo.updateAdminByIdTx(tx, adminId, { deletedAt: new Date(this.clock.now()) });
+    });
+    await this.sessions.revokeAllForUser(adminId);
+  }
+
+  /**
+   * Revoca UNA sesión concreta de un operador (gestión de acceso del detalle). Verifica que la sesión PERTENEZCA
+   * al operador nombrado (defensa en profundidad: no se revoca un sid arbitrario) y aplica el candado de objetivo
+   * (nadie echa sesiones de un rango igual/superior, salvo las propias). Delega al refresh-store: borra el record
+   * + sella el denylist por-sid (el access token de esa sesión se rechaza al instante).
+   */
+  async revokeSession(
+    actorRoles: AdminRole[],
+    actorId: string,
+    adminId: string,
+    sessionId: string,
+  ): Promise<void> {
+    const admin = await this.repo.findAdminById(adminId);
+    if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+    if (
+      actorId !== adminId &&
+      maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)
+    ) {
+      throw new ForbiddenError(
+        'No podés revocar sesiones de un operador de rango igual o superior al tuyo',
+        { actorRoles, targetRoles: admin.roles },
+      );
+    }
+    const sessions = await this.sessions.listSessionsForUser(adminId);
+    if (!sessions.some((s) => s.id === sessionId)) {
+      throw new NotFoundError('Sesión no encontrada');
+    }
+    await this.sessions.revokeSession(sessionId);
   }
 
   // DEUDA: no hay recovery self-service de TOTP admin (un enrolado que pierde su Authenticator solo se recupera con reset manual de totp_enrolled=false en DB) · techo: con 1-2 admins se hace a mano, con más operadores escala mal y tienta a rotar el secreto (lo que desincroniza el teléfono y rompe el login — fue la causa raíz del incidente) · gatillo: si suben los operadores o hay >1 incidente de Authenticator perdido → endpoint de reset de enrolamiento (superadmin resetea a otro operador; jamás rotar el secreto)
@@ -430,6 +582,9 @@ export class AdminService {
   private async issueTokens(id: string, email: string, roles: string[]): Promise<AdminTokens> {
     // Éxito completo (tokens emitidos): limpiamos contador + lock del email.
     await this.clearAdminLoginFailures(email);
+    // Sella el "Último acceso" del operador (columna del panel de staff). Login EXITOSO = tokens emitidos;
+    // por eso va acá (login + confirmTotpEnrollment pasan por issueTokens), no en el chequeo de password.
+    await this.repo.updateAdminById(id, { lastLoginAt: new Date(this.clock.now()) });
     const { sessionId, newJti } = await this.sessions.createSession(id);
     const accessToken = await this.jwt.signAccessToken({
       sub: id,

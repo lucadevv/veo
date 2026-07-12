@@ -23,8 +23,11 @@ export type AdminTx = Prisma.TransactionClient;
 export interface OperatorRow {
   id: string;
   email: string;
+  name: string | null;
   status: AdminStatus;
   roles: string[];
+  totpEnrolled: boolean;
+  lastLoginAt: Date | null;
   createdAt: Date;
 }
 
@@ -51,10 +54,21 @@ export class AdminRepository {
     });
   }
 
-  /** Todos los operadores (gestión de staff), más recientes primero. Réplica. */
+  /** Todos los operadores NO borrados (gestión de staff), más recientes primero. Réplica. Excluye los
+   *  soft-deleted (`deletedAt != null`): un operador removido desaparece de la lista del panel. */
   listOperators(): Promise<OperatorRow[]> {
     return this.prisma.read.adminUser.findMany({
-      select: { id: true, email: true, status: true, roles: true, createdAt: true },
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        status: true,
+        roles: true,
+        totpEnrolled: true,
+        lastLoginAt: true,
+        createdAt: true,
+      },
       orderBy: { createdAt: 'desc' },
     });
   }

@@ -12,12 +12,18 @@ import {
   type AuthenticatedUser,
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { AdminService, type AdminTokens, type OperatorSummary } from './admin.service';
+import {
+  AdminService,
+  type AdminTokens,
+  type OperatorSummary,
+  type OperatorDetail,
+} from './admin.service';
 import {
   AdminLoginDto,
   AdminEnrollConfirmDto,
   AcceptInviteDto,
   CreateOperatorDto,
+  ChangeOperatorRolesDto,
   StepUpDto,
 } from './dto/admin.dto';
 
@@ -87,6 +93,66 @@ export class AdminController {
     @Body() dto: CreateOperatorDto,
   ): Promise<{ id: string; inviteToken: string; inviteUrl: string; expiresAt: Date }> {
     return this.admin.createOperator(user.roles, user.userId, dto.email, dto.roles);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get('operators/:id')
+  @ApiOperation({ summary: 'Detalle de un operador: core + 2FA + último acceso + sesiones activas' })
+  operatorDetail(@Param('id') id: string): Promise<OperatorDetail> {
+    return this.admin.getOperatorDetail(id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post('operators/:id/roles')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Cambia los roles RBAC de un operador (anti-escalada + auditoría de privilegio)' })
+  changeRoles(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ChangeOperatorRolesDto,
+  ): Promise<OperatorDetail> {
+    return this.admin.changeRoles(user.roles, user.userId, id, dto.roles);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post('operators/:id/suspend')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Suspende un operador (status → SUSPENDED · revoca sus sesiones)' })
+  suspend(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<OperatorDetail> {
+    return this.admin.suspend(user.roles, user.userId, id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post('operators/:id/remove')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Elimina (soft-delete) un operador (deletedAt · fuera de la lista · revoca sesiones)' })
+  async remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
+    await this.admin.remove(user.roles, user.userId, id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(InternalIdentityGuard, AudienceGuard, RolesGuard)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post('operators/:id/sessions/:sessionId/revoke')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Revoca UNA sesión activa de un operador (refresh-store + denylist por-sid)' })
+  async revokeSession(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<void> {
+    await this.admin.revokeSession(user.roles, user.userId, id, sessionId);
   }
 
   @ApiBearerAuth()

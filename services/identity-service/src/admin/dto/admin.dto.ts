@@ -10,6 +10,12 @@ export class CreateOperatorDto {
   roles!: AdminRole[];
 }
 
+export class ChangeOperatorRolesDto {
+  @IsArray()
+  @IsIn(Object.values(AdminRole), { each: true })
+  roles!: AdminRole[];
+}
+
 export class AcceptInviteDto {
   @IsString()
   token!: string;

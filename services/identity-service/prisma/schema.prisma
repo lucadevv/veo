@@ -339,6 +339,9 @@ model DriverSuspensionHold {
 model AdminUser {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email        String   @unique
+  /// Nombre legible del operador (columna "Nombre" del panel de staff). Nullable: el alta por invitación NO
+  /// lo pide todavía (queda null hasta que se agregue al flujo de invitación). Se EXPONE en la lista/detalle.
+  name         String?
   /// Hash argon2id de la contraseña. Null mientras el operador está INVITED (aún no la fijó).
   passwordHash String?  @map("password_hash")
   /// Roles RBAC (AdminRole[] de @veo/shared-types) serializados.
@@ -354,6 +357,8 @@ model AdminUser {
   inviteExpiresAt DateTime? @map("invite_expires_at") @db.Timestamptz
   /// Auto-registro → PENDING; un ADMIN aprueba y asigna roles → ACTIVE.
   status       AdminStatus @default(PENDING)
+  /// Último login EXITOSO (tokens emitidos). Columna "Último acceso" del panel. Null hasta el primer login.
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz

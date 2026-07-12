@@ -47,6 +47,8 @@ message DriverCountsReply {
   int32 pending = 1;
   int32 cleared = 2;
   int32 rejected = 3;
+  // Conductores EN LÍNEA (presencia operativa: current_status NO OFFLINE ni SUSPENDED) → KPI "En línea".
+  int32 online = 4;
 }
 
 message UserReply {

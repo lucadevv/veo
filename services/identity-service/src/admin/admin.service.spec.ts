@@ -675,4 +675,266 @@ describe('AdminService.login · lockout anti brute-force', () => {
     const staleTotp = generateTotp(secret, clock.now() - 60_000);
     await expect(svc.login(EMAIL, PASSWORD, staleTotp)).rejects.toBeInstanceOf(UnauthorizedError);
   });
+
+  it('login EXITOSO sella lastLoginAt (columna "Último acceso" del panel)', async () => {
+    const { admin, secret } = await makeActiveAdmin();
+    const update = vi.fn(async () => admin);
+    const prisma = {
+      read: { adminUser: { findUnique: async () => admin } },
+      write: { adminUser: { update } },
+    };
+    const svc = makeService(prisma, makeEmail(), fakeRedis(), makeJwt(), makeSessions());
+    await svc.login(EMAIL, PASSWORD, generateTotp(secret));
+    // issueTokens escribe lastLoginAt = now al emitir tokens (login + confirmTotpEnrollment pasan por ahí).
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ lastLoginAt: expect.any(Date) }) }),
+    );
+  });
+});
+
+/**
+ * Pantalla "Detalle de operador": detalle (con sesiones), cambio de roles (anti-escalada + auditoría),
+ * suspensión (transición + revoca sesiones), remove (soft-delete + la lista lo excluye) y revoke de sesión.
+ * Doble del refresh-store (Redis) que registra las llamadas de sesión.
+ */
+function makeSessionsStore(sessions: { id: string; lastActiveAt: string }[] = []) {
+  return {
+    listSessionsForUser: vi.fn(async () => sessions),
+    revokeAllForUser: vi.fn(async () => 1),
+    revokeSession: vi.fn(async () => undefined),
+    createSession: vi.fn(async () => ({ sessionId: 'sid-1', newJti: 'jti-1' })),
+  };
+}
+
+/** Prisma doble: solo lectura por id (findUnique) — detalle / revoke de sesión. */
+function makeReadByIdPrisma(admin: Record<string, unknown> | null) {
+  return { read: { adminUser: { findUnique: async () => admin } }, write: {} };
+}
+
+/** Operador de detalle con los campos NUEVOS (name/totpEnrolled/lastLoginAt) y deletedAt. */
+function detailAdmin(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'op-1',
+    email: 'op@veo.pe',
+    name: 'Op Uno',
+    status: 'ACTIVE',
+    roles: [AdminRole.SUPPORT_L1],
+    totpEnrolled: true,
+    lastLoginAt: new Date('2026-07-01T00:00:00.000Z'),
+    createdAt: new Date('2026-06-01T00:00:00.000Z'),
+    deletedAt: null,
+    ...overrides,
+  };
+}
+
+describe('AdminService.getOperatorDetail · core + 2FA + último acceso + sesiones', () => {
+  it('devuelve el detalle con totpEnrolled, lastLoginAt y las sesiones activas', async () => {
+    const sessions = makeSessionsStore([{ id: 'sess-1', lastActiveAt: '2026-07-05T00:00:00.000Z' }]);
+    const svc = makeService(makeReadByIdPrisma(detailAdmin()), makeEmail(), fakeRedis(), {}, sessions);
+    const detail = await svc.getOperatorDetail('op-1');
+    expect(detail).toMatchObject({
+      id: 'op-1',
+      email: 'op@veo.pe',
+      name: 'Op Uno',
+      status: 'ACTIVE',
+      totpEnrolled: true,
+      lastLoginAt: detailAdmin().lastLoginAt,
+      sessions: [{ id: 'sess-1', lastActiveAt: '2026-07-05T00:00:00.000Z' }],
+    });
+    expect(sessions.listSessionsForUser).toHaveBeenCalledWith('op-1');
+  });
+
+  it('404 si el operador está soft-deleted (deletedAt)', async () => {
+    const svc = makeService(
+      makeReadByIdPrisma(detailAdmin({ deletedAt: new Date() })),
+      makeEmail(),
+      fakeRedis(),
+      {},
+      makeSessionsStore(),
+    );
+    await expect(svc.getOperatorDetail('op-1')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+/** Prisma doble para las mutaciones tx-scoped que además re-leen el detalle post-write (read.findUnique). */
+function makeTxThenReadPrisma(
+  txAdmin: Record<string, unknown> | null,
+  readAdmin: Record<string, unknown> | null,
+) {
+  const writes: Record<string, unknown>[] = [];
+  const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    writes.push(data);
+    return { id: 'op-1', ...data };
+  });
+  const outboxCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({}));
+  const $transaction = vi.fn(async (fn: (t: unknown) => Promise<unknown>) =>
+    fn({
+      adminUser: { findUnique: async () => txAdmin, update },
+      outboxEvent: { create: outboxCreate },
+    }),
+  );
+  return {
+    writes,
+    update,
+    outboxCreate,
+    prisma: { read: { adminUser: { findUnique: async () => readAdmin } }, write: { $transaction } },
+  };
+}
+
+describe('AdminService.changeRoles · anti-escalada + auditoría + revoca sesiones', () => {
+  const FIXED = new FixedClock(Date.parse('2026-07-01T00:00:00.000Z'));
+
+  it('ANTI-ESCALADA: ADMIN → [SUPERADMIN] → 403 antes de tocar la DB (canGrantRoles)', async () => {
+    const { prisma, update } = makeTxThenReadPrisma(detailAdmin(), null);
+    const sessions = makeSessionsStore();
+    await expect(
+      makeService(prisma, makeEmail(), fakeRedis(), {}, sessions).changeRoles(
+        [AdminRole.ADMIN],
+        'actor',
+        'op-1',
+        [AdminRole.SUPERADMIN],
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(update).not.toHaveBeenCalled();
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+
+  it('OBJETIVO de rango ≥: un ADMIN no puede re-rolear a un SUPERADMIN → 403, CERO writes ni evento', async () => {
+    const { prisma, update, outboxCreate } = makeTxThenReadPrisma(
+      detailAdmin({ roles: [AdminRole.SUPERADMIN] }),
+      null,
+    );
+    await expect(
+      makeService(prisma, makeEmail(), fakeRedis(), {}, makeSessionsStore()).changeRoles(
+        [AdminRole.ADMIN],
+        'actor',
+        'op-1',
+        [AdminRole.SUPPORT_L2],
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('SELF: nadie re-rolea su propia cuenta → 403', async () => {
+    const { prisma } = makeTxThenReadPrisma(detailAdmin({ id: 'self', roles: [AdminRole.ADMIN] }), null);
+    await expect(
+      makeService(prisma, makeEmail(), fakeRedis(), {}, makeSessionsStore()).changeRoles(
+        [AdminRole.SUPERADMIN],
+        'self',
+        'self',
+        [AdminRole.SUPPORT_L2],
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('ÉXITO: escribe roles, emite admin.role_changed, revoca sesiones y devuelve el detalle actualizado', async () => {
+    const { prisma, update, outboxCreate } = makeTxThenReadPrisma(
+      detailAdmin({ roles: [AdminRole.SUPPORT_L1] }),
+      detailAdmin({ roles: [AdminRole.SUPPORT_L2] }),
+    );
+    const sessions = makeSessionsStore([{ id: 's1', lastActiveAt: '2026-07-05T00:00:00.000Z' }]);
+    const detail = await makeService(prisma, makeEmail(), fakeRedis(), {}, sessions, FIXED).changeRoles(
+      [AdminRole.SUPERADMIN],
+      'actor',
+      'op-1',
+      [AdminRole.SUPPORT_L2],
+    );
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0]![0].data).toEqual({ roles: [AdminRole.SUPPORT_L2] });
+    expect(outboxCreate).toHaveBeenCalledOnce();
+    const row = outboxCreate.mock.calls[0]![0];
+    expect(row.data.eventType).toBe('admin.role_changed');
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith('op-1');
+    expect(detail.roles).toEqual([AdminRole.SUPPORT_L2]);
+    expect(detail.sessions).toHaveLength(1);
+  });
+});
+
+describe('AdminService.suspend · transición ACTIVE→SUSPENDED + revoca sesiones', () => {
+  it('ACTIVE → SUSPENDED, escribe el status y revoca las sesiones del operador', async () => {
+    const { prisma, writes } = makeTxThenReadPrisma(
+      { id: 'op-1', status: 'ACTIVE', roles: [AdminRole.SUPPORT_L1], deletedAt: null },
+      detailAdmin({ status: 'SUSPENDED' }),
+    );
+    const sessions = makeSessionsStore();
+    const detail = await makeService(prisma, makeEmail(), fakeRedis(), {}, sessions).suspend(
+      [AdminRole.ADMIN],
+      'actor',
+      'op-1',
+    );
+    expect(writes).toEqual([{ status: 'SUSPENDED' }]);
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith('op-1');
+    expect(detail.status).toBe('SUSPENDED');
+  });
+
+  it('ANTI-ESCALADA: un ADMIN no suspende a un SUPERADMIN → 403, CERO writes', async () => {
+    const { prisma, writes } = makeTxThenReadPrisma(
+      { id: 'op-1', status: 'ACTIVE', roles: [AdminRole.SUPERADMIN], deletedAt: null },
+      null,
+    );
+    const sessions = makeSessionsStore();
+    await expect(
+      makeService(prisma, makeEmail(), fakeRedis(), {}, sessions).suspend([AdminRole.ADMIN], 'actor', 'op-1'),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(writes).toHaveLength(0);
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdminService.remove · soft-delete + revoca sesiones + la lista lo excluye', () => {
+  it('setea deletedAt (soft-delete) y revoca las sesiones', async () => {
+    const { prisma, writes } = makeTxThenReadPrisma(
+      { id: 'op-1', status: 'ACTIVE', roles: [AdminRole.SUPPORT_L1], deletedAt: null },
+      null,
+    );
+    const sessions = makeSessionsStore();
+    await makeService(prisma, makeEmail(), fakeRedis(), {}, sessions).remove(
+      [AdminRole.ADMIN],
+      'actor',
+      'op-1',
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.deletedAt).toBeInstanceOf(Date);
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith('op-1');
+  });
+
+  it('listOperators EXCLUYE los soft-deleted y selecciona name/totpEnrolled/lastLoginAt', async () => {
+    const findMany = vi.fn(
+      async (_args: { where: Record<string, unknown>; select: Record<string, unknown> }) => [],
+    );
+    const repo = new AdminRepository({ read: { adminUser: { findMany } } } as never);
+    await repo.listOperators();
+    const args = findMany.mock.calls[0]![0];
+    expect(args.where).toEqual({ deletedAt: null });
+    expect(args.select).toMatchObject({ name: true, totpEnrolled: true, lastLoginAt: true });
+  });
+});
+
+describe('AdminService.revokeSession · revoca UNA sesión que pertenece al operador', () => {
+  it('revoca la sesión (delega al refresh-store) cuando pertenece al operador', async () => {
+    const sessions = makeSessionsStore([{ id: 'sess-1', lastActiveAt: '2026-07-05T00:00:00.000Z' }]);
+    await makeService(
+      makeReadByIdPrisma(detailAdmin({ roles: [AdminRole.SUPPORT_L1] })),
+      makeEmail(),
+      fakeRedis(),
+      {},
+      sessions,
+    ).revokeSession([AdminRole.ADMIN], 'actor', 'op-1', 'sess-1');
+    expect(sessions.revokeSession).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('404 si el sessionId NO pertenece al operador (defensa en profundidad)', async () => {
+    const sessions = makeSessionsStore([{ id: 'otra', lastActiveAt: '2026-07-05T00:00:00.000Z' }]);
+    await expect(
+      makeService(
+        makeReadByIdPrisma(detailAdmin({ roles: [AdminRole.SUPPORT_L1] })),
+        makeEmail(),
+        fakeRedis(),
+        {},
+        sessions,
+      ).revokeSession([AdminRole.ADMIN], 'actor', 'op-1', 'sess-1'),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(sessions.revokeSession).not.toHaveBeenCalled();
+  });
 });

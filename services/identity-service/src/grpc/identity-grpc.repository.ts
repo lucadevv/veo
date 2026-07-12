@@ -12,7 +12,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, BackgroundCheckStatus, type User } from '../generated/prisma';
+import { Prisma, BackgroundCheckStatus, DriverStatus, type User } from '../generated/prisma';
 
 /** Token DI del puerto (inyección por interfaz, no por clase concreta). */
 export const IDENTITY_GRPC_REPO = Symbol('IDENTITY_GRPC_REPO');
@@ -53,6 +53,12 @@ export interface IdentityGrpcRepository {
 
   /** Conteo de conductores por backgroundCheckStatus (groupBy agregado en la réplica). */
   countDriversByBackgroundStatus(): Promise<GrpcDriverStatusCount[]>;
+
+  /**
+   * Conteo de conductores EN LÍNEA (presencia operativa): `current_status` conectado, es decir NO OFFLINE
+   * y NO SUSPENDED — MISMA definición que la columna ESTADO del panel (Presence). Alimenta el KPI "En línea".
+   */
+  countOnlineDrivers(): Promise<number>;
 }
 
 @Injectable()
@@ -94,5 +100,13 @@ export class PrismaIdentityGrpcRepository implements IdentityGrpcRepository {
       _count: { _all: true },
     });
     return groups.map((g) => ({ backgroundCheckStatus: g.backgroundCheckStatus, count: g._count._all }));
+  }
+
+  countOnlineDrivers(): Promise<number> {
+    // EN LÍNEA = conectado: NO OFFLINE y NO SUSPENDED (los otros estados — AVAILABLE/ASSIGNED/ON_TRIP/
+    // ON_BREAK — son presencia activa). Misma definición que el componente Presence del panel.
+    return this.prisma.read.driver.count({
+      where: { currentStatus: { notIn: [DriverStatus.OFFLINE, DriverStatus.SUSPENDED] } },
+    });
   }
 }
