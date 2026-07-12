@@ -137,6 +137,24 @@ const MODEL_GRID = 'grid grid-cols-[1fr_130px_130px_90px_130px_190px] items-cent
 // Cola de vencimientos: forma propia (tipo/dueño/vence/restan + acción "Ver").
 const EXPIRING_GRID = 'grid grid-cols-[150px_1fr_150px_130px_110px] items-center gap-4';
 
+/**
+ * Auto-carga TODAS las páginas de una infinite query. La cola de Revisiones es una cola de TRABAJO ACOTADA
+ * (los operadores la vacían): sin esto, el merge/orden/paginado client-side solo veía la PRIMERA página de cada
+ * fuente de fleet (vehículos/docs/modelos/por-vencer) → la cola quedaba INCOMPLETA y el "N de M" mentía. Encadena
+ * fetchNextPage hasta agotar el cursor. Si a futuro la cola escala a miles, la evolución es un cursor server
+ * unificado (merge server-side por enqueuedAt) — initiative aparte.
+ */
+function useLoadAllPages(q: {
+  hasNextPage: boolean | undefined;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => Promise<unknown>;
+}): void {
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = q;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+}
+
 export default function ReviewsPage() {
   const user = useSession();
   const router = useRouter();
@@ -163,8 +181,18 @@ export default function ReviewsPage() {
     [expiring.data],
   );
 
+  // Cola de TRABAJO acotada → auto-cargamos TODAS las páginas de cada fuente de fleet para que el merge/orden/
+  // paginado client-side sea COMPLETO (no solo la primera página). Drivers ya viene entero (array sin cursor).
+  useLoadAllPages(vehicles);
+  useLoadAllPages(documents);
+  useLoadAllPages(models);
+  useLoadAllPages(expiring);
+
   const rows = useMemo<QueueRow[]>(() => {
     const out: QueueRow[] = [];
+    // Nombre del dueño por Driver.id (los pendientes traen fullName) — para NO mostrar `drv_<id>` crudo en las
+    // filas de documento reenviado. Best-effort: si el dueño no está en la cola de pendientes, cae al id.
+    const driverNameById = new Map((drivers.data ?? []).map((d) => [d.id, d.fullName]));
     for (const d of drivers.data ?? []) {
       out.push({
         key: `c_${d.id}`,
@@ -179,12 +207,13 @@ export default function ReviewsPage() {
     }
     const docItems = documents.data?.pages.flatMap((p) => p.items) ?? [];
     for (const doc of docItems.filter((x) => x.ownerType === 'DRIVER')) {
+      const ownerName = driverNameById.get(doc.ownerId) ?? null;
       out.push({
         key: `d_${doc.id}`,
         type: 'documento',
         itemA: `${DOC_LABEL[doc.type] ?? doc.type} reenviado`,
         itemAMono: false,
-        itemB: `drv_${doc.ownerId.slice(0, 8)}`,
+        itemB: ownerName ?? `drv_${doc.ownerId.slice(0, 8)}`,
         pendiente: `${DOC_LABEL[doc.type] ?? doc.type} reenviado a revisión`,
         enqueuedAt: doc.createdAt,
         href: `/ops/drivers/${doc.ownerId}`,

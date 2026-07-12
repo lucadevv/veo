@@ -32,6 +32,20 @@ export async function POST(req: Request) {
 
   const body = (await res.json().catch(() => null)) as unknown;
   if (!res.ok) {
+    // Operador ENROLADO que envió credenciales válidas SIN código: identity responde 401
+    // "Se requiere código TOTP" (contrato: sin variante de challenge para este caso). NO es un fallo
+    // de credenciales — no penaliza la cuenta. Lo traducimos a {status:'mfa_required'} (sin enrollment)
+    // para que el cliente muestre la pantalla 2FA y reenvíe email+password+totp juntos.
+    // Señal robusta: como en este request NO se mandó totp, un 401 que mencione TOTP solo puede ser
+    // "requerido" (el "código incorrecto" exige un totp enviado, imposible acá).
+    const errMsg =
+      (body as { error?: { message?: string }; message?: string } | null)?.error?.message ??
+      (body as { message?: string } | null)?.message ??
+      '';
+    if (res.status === 401 && !parsed.data.totp && /totp/i.test(errMsg)) {
+      const out: LoginResult = { status: 'mfa_required' };
+      return NextResponse.json(out);
+    }
     return NextResponse.json(body ?? { error: { message: 'Credenciales inválidas.' } }, {
       status: res.status,
     });

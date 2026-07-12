@@ -88,6 +88,45 @@ export function number(value: number): string {
   return NUMBER.format(value);
 }
 
+/** Meses abreviados es-PE, capitalizados como el diseño ("Jul", no "jul."). */
+const PERIOD_MONTHS = [
+  'Ene',
+  'Feb',
+  'Mar',
+  'Abr',
+  'May',
+  'Jun',
+  'Jul',
+  'Ago',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dic',
+];
+
+/**
+ * Rango de período de una liquidación → "1–15 Jul" (mismo mes) o "29 Jun–15 Jul" (cruza mes), fiel al frame
+ * `idllB`. El bff manda `period` como "<startISO>..<endISO>" (p. ej.
+ * "2026-06-16T00:00:00.000Z..2026-06-22T23:59:59.999Z"); antes se pintaba crudo y se desbordaba la columna.
+ * Se ancla a UTC (las fronteras del período se guardan a medianoche UTC) para no correr el día por la TZ local
+ * (Perú UTC-5 restaría uno). Si no se pueden extraer dos fechas, devuelve el string crudo (degradación honesta).
+ */
+export function payoutPeriod(period: string | null | undefined): string {
+  if (!period) return '—';
+  const days = period.match(/\d{4}-\d{2}-\d{2}/g);
+  if (!days || days.length < 2) return period;
+  const start = new Date(`${days[0]}T00:00:00Z`);
+  const end = new Date(`${days[1]}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return period;
+  const sd = start.getUTCDate();
+  const sm = start.getUTCMonth();
+  const ed = end.getUTCDate();
+  const em = end.getUTCMonth();
+  return sm === em
+    ? `${sd}–${ed} ${PERIOD_MONTHS[em]}`
+    : `${sd} ${PERIOD_MONTHS[sm]}–${ed} ${PERIOD_MONTHS[em]}`;
+}
+
 /** Segundos → "12 min" / "1 h 05 min" para ETAs. */
 export function duration(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return '—';
@@ -97,6 +136,30 @@ export function duration(seconds: number | null | undefined): string {
   const hours = Math.floor(mins / 60);
   const rest = mins % 60;
   return `${hours} h ${rest.toString().padStart(2, '0')} min`;
+}
+
+/**
+ * Último acceso relativo, FIEL al frame de Operadores (zH2oa): "hace 2 min" · "hace 3 h" (mismo día) ·
+ * "ayer 18:40" · "hace 5 d". Distinto de `relativeFromNow` (usa Intl → "hace 2 minutos" palabra completa):
+ * acá las unidades son abreviadas y el día anterior muestra la HORA, como el diseño. null/inválido → "—".
+ */
+export function relativeAccess(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  if (diffMs < 0) return dateTime(iso); // futuro (reloj desfasado) → absoluto, no "en -N"
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return 'recién';
+  if (min < 60) return `hace ${min} min`;
+  if (d.toDateString() === now.toDateString()) return `hace ${Math.floor(min / 60)} h`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) {
+    return `ayer ${d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  }
+  return `hace ${Math.floor(diffMs / 86_400_000)} d`;
 }
 
 /** Diferencia relativa desde ahora en español ("hace 3 min", "en 2 h"). */

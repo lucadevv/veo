@@ -11,6 +11,9 @@ import {
   auditEntryView,
   type CreateInspectionRequest,
   dispatchRadiusConfigView,
+  radarPreview,
+  carpoolSearchConfigView,
+  type ReplaceCarpoolSearchConfigRequest,
   type ReplaceRadiusConfigRequest,
   driverApproval,
   driverDetail,
@@ -22,6 +25,7 @@ import {
   type ApproveVehicleModelRequest,
   type LiveAccessRequest,
   liveViewerToken,
+  liveCabin,
   mediaAccessRequestView,
   catalogView,
   baseFareView,
@@ -30,7 +34,12 @@ import {
   costPerKmListView,
   bidFloorView,
   refundablePaymentView,
+  refundView,
+  refundStatsView,
+  refundDetailView,
+  refundActionResult,
   payoutDetailView,
+  payoutTripsResult,
   payoutStatsView,
   reconciliationRunView,
   type ReplaceBaseFareRequest,
@@ -39,7 +48,9 @@ import {
   type ReplaceCostPerKmRequest,
   type ReplaceBidFloorRequest,
   operator,
+  operatorDetail,
   type CreateOperatorRequest,
+  type ChangeOperatorRolesRequest,
   createOperatorResult,
   reinviteOperatorResult,
   paginated,
@@ -83,8 +94,10 @@ export const qk = {
   vehiclesSummary: ['vehicles-summary'] as const,
   reviewsSummary: ['reviews-summary'] as const,
   operators: ['operators'] as const,
+  operator: (id: string) => ['operator', id] as const,
   panics: (status: string) => ['panics', status] as const,
   panic: (id: string) => ['panic', id] as const,
+  liveCabins: ['live-cabins'] as const,
   vehicles: ['vehicles'] as const,
   vehicle: (id: string) => ['vehicle', id] as const,
   inspections: ['inspections'] as const,
@@ -94,7 +107,11 @@ export const qk = {
   payouts: (status: string) => ['payouts', status] as const,
   payoutStats: ['payout-stats'] as const,
   paymentByTrip: (tripId: string) => ['payment-by-trip', tripId] as const,
+  refunds: (status: string) => ['refunds', status] as const,
+  refundStats: ['refund-stats'] as const,
+  refundDetail: (id: string) => ['refund-detail', id] as const,
   payoutDetail: (id: string) => ['payout-detail', id] as const,
+  payoutTrips: (id: string) => ['payout-trips', id] as const,
   reconciliation: ['reconciliation'] as const,
   media: (status: string) => ['media-requests', status] as const,
   audit: ['audit'] as const,
@@ -104,6 +121,9 @@ export const qk = {
   bidFloor: ['bid-floor'] as const,
   catalog: ['catalog'] as const,
   dispatchRadiusConfig: ['dispatch-radius-config'] as const,
+  dispatchRadar: (mode: string) => ['dispatch-radar', mode] as const,
+  carpoolConfig: ['carpool-search-config'] as const,
+  carpoolRadar: ['carpool-radar'] as const,
   policies: ['gobierno-policies'] as const,
   permissionOverrides: ['gobierno-permission-overrides'] as const,
 };
@@ -165,6 +185,17 @@ export function useTrips(filters: TripFilters) {
         }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** Muro de cámaras EN VIVO: cabinas de los viajes en curso (tiles enriquecidos). Refetch en tiempo real
+ *  para reflejar viajes que arrancan/terminan. El feed NO se abre acá (eso es doble-auth por-viaje). */
+export function useLiveCabins() {
+  return useQuery({
+    queryKey: qk.liveCabins,
+    queryFn: ({ signal }) =>
+      apiClient().get('/ops/live-cabins', { schema: z.array(liveCabin), signal }),
+    refetchInterval: REALTIME_REFETCH,
   });
 }
 
@@ -459,6 +490,64 @@ export function useRejectOperator() {
   });
 }
 
+/** Detalle de un operador (identidad + 2FA + último acceso + permisos efectivos + sesiones activas). */
+export function useOperatorDetail(id: string) {
+  return useQuery({
+    queryKey: qk.operator(id),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/ops/operators/${id}`, { schema: operatorDetail, signal }),
+  });
+}
+
+/** Invalidación compartida por las mutaciones del detalle: refresca la ficha + la lista. */
+function invalidateOperator(qc: ReturnType<typeof useQueryClient>, id: string) {
+  void qc.invalidateQueries({ queryKey: qk.operator(id) });
+  void qc.invalidateQueries({ queryKey: qk.operators });
+}
+
+/**
+ * Cambia los roles de un operador. Acción SENSIBLE: el bff exige step-up MFA + revalida anti-escalada
+ * (`canGrantRoles`) — el llamador (diálogo) verifica TOTP fresco ANTES de invocar. La UI solo refleja.
+ */
+export function useChangeOperatorRoles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string } & ChangeOperatorRolesRequest) =>
+      apiClient().post(`/ops/operators/${input.id}/roles`, { body: { roles: input.roles } }),
+    onSuccess: (_d, input) => invalidateOperator(qc, input.id),
+  });
+}
+
+/** Suspende un operador ACTIVE (status → SUSPENDED). Step-up MFA (el llamador verifica antes). 204 vacío. */
+export function useSuspendOperator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/operators/${input.id}/suspend`, {}),
+    onSuccess: (_d, input) => invalidateOperator(qc, input.id),
+  });
+}
+
+/** Remueve un operador del panel (soft-delete). Step-up MFA (el llamador verifica antes). 204 vacío. */
+export function useRemoveOperator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/ops/operators/${input.id}/remove`, {}),
+    onSuccess: (_d, input) => invalidateOperator(qc, input.id),
+  });
+}
+
+/** Revoca UNA sesión activa del operador. Step-up MFA (el llamador verifica antes). 204 vacío. */
+export function useRevokeOperatorSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; sessionId: string }) =>
+      apiClient().post(`/ops/operators/${input.id}/sessions/${input.sessionId}/revoke`, {}),
+    onSuccess: (_d, input) => invalidateOperator(qc, input.id),
+  });
+}
+
 /* ── Pánicos ── */
 const panicPage = paginated(panicSummary);
 
@@ -492,7 +581,7 @@ export function usePanic(id: string) {
 export function usePanicAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; action: 'ack' }) =>
+    mutationFn: (input: { id: string; action: 'ack' | 'dispatch' | 'escalate' }) =>
       apiClient().post(`/security/panics/${input.id}/${input.action}`, {
         schema: panicDetail,
       }),
@@ -861,32 +950,6 @@ export function useRetryPayout() {
   });
 }
 
-export function useRefund() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: {
-      tripId: string;
-      amountCents: number;
-      reason: string;
-      idempotencyKey: string;
-      // "Es un reembolso NUEVO, no un reintento": salta el backstop de ventana server-side (2do parcial idéntico).
-      forceNew?: boolean;
-    }) =>
-      // El admin-bff expone el reembolso como POST /finance/refunds/:tripId con body {amountCents, reason, forceNew}.
-      apiClient().post(`/finance/refunds/${input.tripId}`, {
-        body: {
-          amountCents: input.amountCents,
-          reason: input.reason,
-          forceNew: input.forceNew ?? false,
-        },
-        idempotencyKey: input.idempotencyKey,
-      }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['payouts'] });
-    },
-  });
-}
-
 /* ── Cobro reembolsable de un viaje: inspección PREVIA al reembolso (FINANCE · acceso a PII auditado server-side) ── */
 export function usePaymentByTrip(tripId: string | null) {
   return useQuery({
@@ -901,12 +964,128 @@ export function usePaymentByTrip(tripId: string | null) {
   });
 }
 
+/* ── Cola de aprobación de REEMBOLSOS (money-OUT · frame HZ8uz) ─────────────────────────────────────────────
+ * Espeja el patrón de payouts: lista paginada por cursor + KPIs + detalle + acciones (approve/reject) con
+ * step-up MFA. El estado del Refund (PENDING/APPROVED/COMPLETED/REJECTED) lo gobierna payment-service; acá solo
+ * se lista/actúa. `useRequestRefund` crea la solicitud PENDING (NO desembolsa hasta aprobar). */
+const refundPage = paginated(refundView);
+
+/** Cola de reembolsos (GET /finance/refunds): filtro por estado (enum) + paginación cursor. finance:view. */
+export function useRefunds(status: string) {
+  return useInfiniteQuery({
+    queryKey: qk.refunds(status),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiClient().get('/finance/refunds', {
+        schema: refundPage,
+        signal,
+        query: cleanQuery({ status, cursor: pageParam, limit: 50 }),
+      }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
+
+/** KPIs de la cabecera (GET /finance/refunds/stats): Solicitados/Aprobados/Procesado hoy/Tasa. finance:view. */
+export function useRefundStats() {
+  return useQuery({
+    queryKey: qk.refundStats,
+    queryFn: ({ signal }) =>
+      apiClient().get('/finance/refunds/stats', { schema: refundStatsView, signal }),
+  });
+}
+
+/** Detalle de un reembolso (GET /finance/refunds/:id): la fila + el saldo del cobro. enabled solo con id. */
+export function useRefundDetail(id: string | null) {
+  return useQuery({
+    queryKey: qk.refundDetail(id ?? ''),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/finance/refunds/${id}`, { schema: refundDetailView, signal }),
+    enabled: !!id,
+  });
+}
+
+/** Invalidación compartida por las acciones de la cola: refresca la cola + los KPIs (+ el detalle si aplica). */
+function invalidateRefunds(qc: ReturnType<typeof useQueryClient>, id?: string) {
+  void qc.invalidateQueries({ queryKey: ['refunds'] });
+  void qc.invalidateQueries({ queryKey: qk.refundStats });
+  if (id) void qc.invalidateQueries({ queryKey: qk.refundDetail(id) });
+}
+
+/**
+ * APRUEBA + desembolsa un reembolso PENDING (POST /finance/refunds/:id/approve · money-OUT). Exige step-up MFA
+ * fresco (el StepUpDialog lo asegura ANTES) + finance:refund; el admin-bff revalida @Permission + @RequireStepUpMfa.
+ * Idempotente. El éxito refresca la cola, los KPIs y el detalle.
+ */
+export function useApproveRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/finance/refunds/${input.id}/approve`, { schema: refundActionResult }),
+    onSuccess: (_d, input) => invalidateRefunds(qc, input.id),
+  });
+}
+
+/**
+ * RECHAZA un reembolso PENDING con motivo (POST /finance/refunds/:id/reject · sin mover plata). El motivo es
+ * OBLIGATORIO (≥3, lo captura el RejectModal) + step-up MFA. finance:refund. El éxito refresca cola/KPIs/detalle.
+ */
+export function useRejectRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; reason: string }) =>
+      apiClient().post(`/finance/refunds/${input.id}/reject`, {
+        body: { reason: input.reason },
+        schema: refundActionResult,
+      }),
+    onSuccess: (_d, input) => invalidateRefunds(qc, input.id),
+  });
+}
+
+/**
+ * SOLICITA un reembolso de un viaje (POST /finance/refunds/:tripId): crea la solicitud PENDING (entra a la cola
+ * de aprobación; NO desembolsa hasta aprobar). Idempotency-Key de extremo a extremo + step-up MFA. finance:refund.
+ * El éxito refresca la cola + los KPIs.
+ */
+export function useRequestRefund() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      tripId: string;
+      amountCents: number;
+      reason: string;
+      idempotencyKey: string;
+      // "Es un reembolso NUEVO, no un reintento": salta el backstop de ventana server-side (2do parcial idéntico).
+      forceNew?: boolean;
+    }) =>
+      apiClient().post(`/finance/refunds/${input.tripId}`, {
+        body: {
+          amountCents: input.amountCents,
+          reason: input.reason,
+          forceNew: input.forceNew ?? false,
+        },
+        schema: refundActionResult,
+        idempotencyKey: input.idempotencyKey,
+      }),
+    onSuccess: () => invalidateRefunds(qc),
+  });
+}
+
 /* ── Detalle de un payout: breakdown de auditoría (deuda CASH + credit-back neteados por FK) — FINANCE/ADMIN ── */
 export function usePayoutDetail(payoutId: string | null) {
   return useQuery({
     queryKey: qk.payoutDetail(payoutId ?? ''),
     queryFn: ({ signal }) =>
       apiClient().get(`/finance/payouts/${payoutId}`, { schema: payoutDetailView, signal }),
+    enabled: !!payoutId,
+  });
+}
+
+/* ── Viajes incluidos en un payout: reconstrucción por período (cap 50) + totalCount — FINANCE/ADMIN (finance:view) ── */
+export function usePayoutTrips(payoutId: string | null) {
+  return useQuery({
+    queryKey: qk.payoutTrips(payoutId ?? ''),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/finance/payouts/${payoutId}/trips`, { schema: payoutTripsResult, signal }),
     enabled: !!payoutId,
   });
 }
@@ -1059,6 +1238,57 @@ export function useUpdateDispatchRadiusConfig() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.dispatchRadiusConfig });
     },
+  });
+}
+
+/** Radar de cobertura del modo dispatch (Fijo/Puja): densidad REAL de conductores por anillo (hot-index). */
+export function useDispatchRadar(mode: 'FIXED' | 'PUJA', center: { lat: number; lon: number }) {
+  return useQuery({
+    queryKey: [...qk.dispatchRadar(mode), center.lat, center.lon] as const,
+    queryFn: ({ signal }) =>
+      apiClient().get('/dispatch/radar-preview', {
+        schema: radarPreview,
+        query: { mode, lat: String(center.lat), lon: String(center.lon) },
+        signal,
+      }),
+    // Barrido "vivo": refresca la densidad cada 15s para que el radar respire con la flota real.
+    refetchInterval: 15_000,
+  });
+}
+
+/* ── Carpool (booking-service): radio de búsqueda admin-editable + su radar ── */
+export function useCarpoolSearchConfig() {
+  return useQuery({
+    queryKey: qk.carpoolConfig,
+    queryFn: ({ signal }) =>
+      apiClient().get('/dispatch/carpool-radius-config', { schema: carpoolSearchConfigView, signal }),
+  });
+}
+
+export function useUpdateCarpoolSearchConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ReplaceCarpoolSearchConfigRequest) =>
+      apiClient().put('/dispatch/carpool-radius-config', {
+        body: input,
+        schema: carpoolSearchConfigView,
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.carpoolConfig });
+    },
+  });
+}
+
+export function useCarpoolRadar(center: { lat: number; lon: number }) {
+  return useQuery({
+    queryKey: [...qk.carpoolRadar, center.lat, center.lon] as const,
+    queryFn: ({ signal }) =>
+      apiClient().get('/dispatch/carpool-radar-preview', {
+        schema: radarPreview,
+        query: { lat: String(center.lat), lon: String(center.lon) },
+        signal,
+      }),
+    refetchInterval: 15_000,
   });
 }
 

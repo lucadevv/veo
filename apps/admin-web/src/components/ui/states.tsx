@@ -1,4 +1,4 @@
-import { AlertTriangle, Inbox, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Inbox, Lock, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from './button';
 
@@ -65,6 +65,58 @@ export function ErrorState({
           <RefreshCw className="size-4" aria-hidden />
           Reintentar
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+interface PermissionStateProps {
+  /** Nombre humano de la sección (ej. "Viajes") — completa "Sin permiso para {section}". */
+  section: string;
+  /** Slug REAL del permiso que exige la pantalla (ej. "ops:trips:read"). Se muestra verbatim. */
+  permission: string;
+  onRequest?: () => void;
+  className?: string;
+}
+
+/**
+ * Estado 403 fiel al board (B2v7uK): el overlay de permisos (ADR-025) OCULTA la sección para este operador.
+ * NO es un error del server — el par (rol, permiso) está restado por el overlay. Tono ÁMBAR (no rojo): es un
+ * candado de gobierno, no una falla. Muestra el slug exacto para que el operador sepa qué pedirle a un admin.
+ */
+export function PermissionState({
+  section,
+  permission,
+  onRequest,
+  className,
+}: PermissionStateProps) {
+  return (
+    <div
+      role="alert"
+      className={cn(
+        'flex flex-col items-center justify-center gap-3.5 px-6 py-12 text-center',
+        className,
+      )}
+    >
+      <div className="grid size-16 place-items-center rounded-full bg-warn/10 text-warn">
+        <Lock className="size-[30px]" aria-hidden />
+      </div>
+      <div className="max-w-[320px] space-y-1.5">
+        <p className="font-display text-[19px] font-bold tracking-[-0.3px] text-ink">
+          Sin permiso para {section}
+        </p>
+        <p className="text-sm leading-relaxed text-ink-muted">
+          <span className="font-mono text-[13px]">{permission}</span> está oculto por el overlay.
+        </p>
+      </div>
+      {onRequest ? (
+        <button
+          type="button"
+          onClick={onRequest}
+          className="rounded-control bg-warn px-5 py-3 text-[15px] font-semibold text-warn-on shadow-brand transition-opacity hover:opacity-90"
+        >
+          Solicitar acceso
+        </button>
       ) : null}
     </div>
   );

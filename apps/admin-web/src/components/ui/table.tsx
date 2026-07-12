@@ -58,7 +58,7 @@ export function DataTable<TData>({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-lg border border-black/[0.05] bg-surface shadow-3">
       <table className="w-full border-collapse text-sm tabular">
         <caption className="sr-only">{caption}</caption>
         <thead className="sticky top-0 z-sticky bg-surface-2">
@@ -73,7 +73,7 @@ export function DataTable<TData>({
                     aria-sort={
                       sortDir === 'asc' ? 'ascending' : sortDir === 'desc' ? 'descending' : 'none'
                     }
-                    className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-subtle"
+                    className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.06em] text-ink-subtle"
                   >
                     {header.isPlaceholder ? null : canSort ? (
                       <button

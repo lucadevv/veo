@@ -1,26 +1,26 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Banknote,
+  Activity,
   CalendarCheck,
   Car,
-  Cctv,
   ClipboardCheck,
-  Coins,
-  MapPinned,
+  Film,
+  Gavel,
+  Headphones,
+  KeyRound,
+  Layers,
+  Navigation,
   Radar,
+  Receipt,
   Scale,
-  ScrollText,
-  ShieldAlert,
   ShieldCheck,
-  SlidersHorizontal,
-  Tags,
+  Siren,
+  Tag,
   TrendingUp,
-  Truck,
-  Undo2,
-  UserCog,
+  User,
   Users,
-  UsersRound,
   Video,
+  Wallet,
 } from 'lucide-react';
 import type { Permission } from '@/lib/rbac';
 
@@ -38,14 +38,20 @@ export interface NavGroup {
   items: NavItem[];
 }
 
+// Iconos y labels fieles al T/AdminSidebar de veo.pen; hrefs/permisos = rutas reales del app (RBAC).
 export const NAV: NavGroup[] = [
   {
     title: 'Operación',
     items: [
-      { href: '/ops', label: 'En vivo', icon: MapPinned, permission: 'ops:view', exact: true },
+      { href: '/ops', label: 'En vivo', icon: Activity, permission: 'ops:view', exact: true },
       { href: '/ops/metrics', label: 'Métricas', icon: TrendingUp, permission: 'ops:view' },
-      { href: '/ops/trips', label: 'Viajes', icon: Car, permission: 'trips:view' },
-      { href: '/ops/operators', label: 'Operadores', icon: UserCog, permission: 'operators:view' },
+      { href: '/ops/trips', label: 'Viajes', icon: Navigation, permission: 'trips:view' },
+      {
+        href: '/ops/operators',
+        label: 'Operadores',
+        icon: Headphones,
+        permission: 'operators:view',
+      },
       {
         href: '/ops/dispatch-radius',
         label: 'Radios de dispatch',
@@ -55,12 +61,10 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    // FLOTA reagrupada (rediseño de IA): Conductores + Vehículos + la cola unificada de Revisiones.
-    // Conductores se mueve acá desde Operación (el alta/aprobación es gestión de flota, no operación en vivo).
     title: 'Flota',
     items: [
-      { href: '/ops/drivers', label: 'Conductores', icon: Users, permission: 'drivers:view' },
-      { href: '/fleet', label: 'Vehículos', icon: Truck, permission: 'fleet:view', exact: true },
+      { href: '/ops/drivers', label: 'Conductores', icon: User, permission: 'drivers:view' },
+      { href: '/fleet', label: 'Vehículos', icon: Car, permission: 'fleet:view', exact: true },
       {
         href: '/fleet/reviews',
         label: 'Revisiones',
@@ -78,32 +82,30 @@ export const NAV: NavGroup[] = [
   {
     title: 'Seguridad',
     items: [
-      { href: '/security/panics', label: 'Pánicos', icon: ShieldAlert, permission: 'panics:view' },
+      { href: '/security/panics', label: 'Pánicos', icon: Siren, permission: 'panics:view' },
       {
         href: '/security/live-wall',
         label: 'Cámaras en vivo',
-        icon: Cctv,
+        icon: Video,
         permission: 'live:view',
       },
-      { href: '/media', label: 'Video', icon: Video, permission: 'media:view' },
+      { href: '/media', label: 'Acceso a video', icon: Film, permission: 'media:view' },
     ],
   },
   {
-    // FINANZAS = la OPERACIÓN del dinero (el flujo de la plata): liquidaciones + reembolsos + reconciliación.
-    // Los 3 modos de precio se movieron a su propio grupo PRECIOS (config de cómo se cobra, no flujo).
     title: 'Finanzas',
     items: [
       {
         href: '/finance',
         label: 'Liquidaciones',
-        icon: Banknote,
+        icon: Wallet,
         permission: 'finance:view',
         exact: true,
       },
       {
         href: '/finance/refunds',
         label: 'Reembolsos',
-        icon: Undo2,
+        icon: Receipt,
         permission: 'finance:view',
       },
       {
@@ -115,53 +117,40 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    // PRECIOS — el híbrido de VEO son DOS carriles de mercado (on-demand inmediato · carpooling programado)
-    // + el CATÁLOGO de ofertas de servicio (el menú de servicios, transversal — NO un carril). El modo
-    // PUJA↔FIJO es un EJE dentro de on-demand (coexisten, estilo inDrive/Uber), no un carril aparte. Orden:
-    // el carril on-demand y su catálogo juntos, luego el carril carpooling. Separado de Finanzas (el dinero).
     title: 'Precios',
     items: [
-      {
-        href: '/finance/pricing',
-        label: 'On-demand',
-        icon: Coins,
-        permission: 'pricing:view',
-      },
+      { href: '/finance/pricing', label: 'Precios', icon: Tag, permission: 'pricing:view' },
       {
         href: '/finance/catalog',
         label: 'Ofertas de servicio',
-        icon: Tags,
+        icon: Layers,
         permission: 'catalog:view',
       },
       {
         href: '/finance/carpooling',
         label: 'Carpooling',
-        icon: UsersRound,
+        icon: Users,
         permission: 'pricing:view',
       },
     ],
   },
   {
     title: 'Cumplimiento',
-    items: [{ href: '/audit', label: 'Auditoría', icon: ScrollText, permission: 'audit:view' }],
+    items: [{ href: '/audit', label: 'Auditoría', icon: ShieldCheck, permission: 'audit:view' }],
   },
   {
-    // GOBIERNO (PBAC · ADR-024) — el borde de autoridad del registro de políticas: EXCLUSIVO de SUPERADMIN
-    // (permiso `gobierno:manage` → [SUPERADMIN], espejo del @Roles(SUPERADMIN) de gobierno.controller). Va
-    // ÚLTIMO, como en el diseño AdminPoliticas. "Permisos y visibilidad" es la matriz RBAC (read-only);
-    // "Políticas" es el registro de las 16 políticas de gobierno.
     title: 'Gobierno',
     items: [
       {
         href: '/gobierno/permisos',
         label: 'Permisos y visibilidad',
-        icon: SlidersHorizontal,
+        icon: KeyRound,
         permission: 'gobierno:manage',
       },
       {
         href: '/gobierno/politicas',
         label: 'Políticas',
-        icon: ShieldCheck,
+        icon: Gavel,
         permission: 'gobierno:manage',
       },
     ],

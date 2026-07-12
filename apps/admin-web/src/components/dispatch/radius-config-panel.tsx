@@ -1,278 +1,412 @@
 'use client';
 
-import { useState } from 'react';
-import { Map, Radar, Timer, Gavel } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import type { DispatchRadiusConfigView } from '@/lib/api/schemas';
+import { useMemo, useState } from 'react';
+import { Info } from 'lucide-react';
+import type {
+  DispatchRadiusConfigView,
+  FixedPolicy,
+  PujaPolicy,
+} from '@/lib/api/schemas';
 import {
-  K_RING_MAX,
-  K_RING_MIN,
-  isValidKRing,
-  kRingLabel,
-  OFFER_TIMEOUT_SEC_MIN,
-  OFFER_TIMEOUT_SEC_MAX,
-  BID_WINDOW_SEC_MIN,
-  BID_WINDOW_SEC_MAX,
-  isValidOfferTimeoutSec,
-  isValidBidWindowSec,
-  msToSec,
-  secToMs,
-} from '@/lib/dispatch';
+  useCarpoolSearchConfig,
+  useCarpoolRadar,
+  useDispatchRadar,
+  useUpdateDispatchRadiusConfig,
+  useUpdateCarpoolSearchConfig,
+} from '@/lib/api/queries';
 import { dateTime } from '@/lib/formatters';
-import { useUpdateDispatchRadiusConfig } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Field } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Slider } from '@/components/ui/slider';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { DispatchRadar } from './dispatch-radar';
 
-/** Metadatos de presentación de cada k-ring editable. El contrato sólo tiene dos radios. */
-const RINGS: readonly {
-  key: 'nearbyKRing' | 'matchKRing';
-  label: string;
-  description: string;
-  icon: LucideIcon;
-}[] = [
-  {
-    key: 'nearbyKRing',
-    label: 'Radio del feed de mapa',
-    description: 'Hasta dónde se muestran los conductores cercanos en el mapa del pasajero.',
-    icon: Map,
-  },
-  {
-    key: 'matchKRing',
-    label: 'Radio de pujas / matching',
-    description: 'Hasta dónde se difunde una solicitud para que los conductores pujen.',
-    icon: Radar,
-  },
-];
+/** Centro de medición del radar (Lima centro). El backend degrada honesto si no hay flota. */
+const LIMA = { lat: -12.0464, lon: -77.0428 };
+
+/** Defaults del motor v2 cuando la config aún es v1 (policyV2 null): valores sanos = los del board. */
+const FIXED_DEFAULTS: FixedPolicy = {
+  initialRadiusKm: 0.6,
+  incrementKm: 0.3,
+  maxRadiusKm: 1.5,
+  targetDrivers: 3,
+  offerTimeoutSec: 20,
+  expandIntervalSec: 8,
+};
+const PUJA_DEFAULTS: PujaPolicy = { broadcastRadiusKm: 1.2, bidWindowSec: 60 };
+
+const km = (n: number) => `${n.toFixed(1)} km`;
+const sec = (n: number) => `${n} s`;
 
 /**
- * Panel de la config de RADIOS (k-rings) + VENTANAS de dispatch. El operador edita los dos radios (1..8)
- * y las dos ventanas de tiempo: la oferta directa (FIXED) y la puja. Ambas ventanas se muestran/editan en
- * SEGUNDOS por legibilidad; la oferta directa se persiste en milisegundos (el contrato guarda ms). El
- * guardado se CONFIRMA (es global y bumpea version aguas abajo) y reemplaza los cuatro valores de una. La
- * UI sólo refleja `dispatch:manage`; el admin-bff + dispatch-service re-autorizan server-side.
+ * Panel de RADIOS de dispatch — 3 modos REALES (Fijo/Puja/Carpool), fiel al frame BemzL pero cada modo con sus
+ * palancas de verdad (el board ponía "Programado", que es un eje de tiempo, no un modo). Fijo/Puja viven en el
+ * motor de dispatch (policy v2 sobre H3, feature-flag); Carpool es booking-service (BlaBlaCar cost-share). El
+ * radar es EXACTO: densidad real del hot-index por anillo. Guardar exige step-up (cambia el matching en vivo) +
+ * activa v2. La UI solo refleja `dispatch:manage`; admin-bff + los servicios re-autorizan.
  */
 export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView }) {
   const user = useSession();
   const canManage = can(user, 'dispatch:manage');
   const { toast } = useToast();
-  const update = useUpdateDispatchRadiusConfig();
 
-  // Estado del formulario sembrado con la config vigente. Strings para tolerar el input intermedio.
-  const [nearby, setNearby] = useState(String(config.nearbyKRing));
-  const [match, setMatch] = useState(String(config.matchKRing));
-  // Ventanas en SEGUNDOS: la oferta directa llega en ms → se muestra en s (se re-multiplica al guardar).
-  const [offerSec, setOfferSec] = useState(String(msToSec(config.offerTimeoutMs)));
-  const [bidSec, setBidSec] = useState(String(config.bidWindowSec));
+  const updateDispatch = useUpdateDispatchRadiusConfig();
+  const updateCarpool = useUpdateCarpoolSearchConfig();
+  const carpoolQuery = useCarpoolSearchConfig();
 
-  const values = {
-    nearbyKRing: Number(nearby),
-    matchKRing: Number(match),
-    offerTimeoutSec: Number(offerSec),
-    bidWindowSec: Number(bidSec),
-  };
-  const errors = {
-    nearbyKRing: isValidKRing(values.nearbyKRing)
-      ? undefined
-      : `Debe ser un entero entre ${K_RING_MIN} y ${K_RING_MAX}.`,
-    matchKRing: isValidKRing(values.matchKRing)
-      ? undefined
-      : `Debe ser un entero entre ${K_RING_MIN} y ${K_RING_MAX}.`,
-    offerTimeoutSec: isValidOfferTimeoutSec(values.offerTimeoutSec)
-      ? undefined
-      : `Debe ser un entero entre ${OFFER_TIMEOUT_SEC_MIN} y ${OFFER_TIMEOUT_SEC_MAX} segundos.`,
-    bidWindowSec: isValidBidWindowSec(values.bidWindowSec)
-      ? undefined
-      : `Debe ser un entero entre ${BID_WINDOW_SEC_MIN} y ${BID_WINDOW_SEC_MAX} segundos.`,
-  };
-  const valid =
-    !errors.nearbyKRing && !errors.matchKRing && !errors.offerTimeoutSec && !errors.bidWindowSec;
-  const dirty =
-    values.nearbyKRing !== config.nearbyKRing ||
-    values.matchKRing !== config.matchKRing ||
-    secToMs(values.offerTimeoutSec) !== config.offerTimeoutMs ||
-    values.bidWindowSec !== config.bidWindowSec;
+  // Estado de formulario sembrado de la config vigente (o defaults v2 si aún es v1 / carpool cargando).
+  const [fixed, setFixed] = useState<FixedPolicy>(config.policyV2?.FIXED ?? FIXED_DEFAULTS);
+  const [puja, setPuja] = useState<PujaPolicy>(config.policyV2?.PUJA ?? PUJA_DEFAULTS);
+  const [carpoolBase, setCarpoolBase] = useState<number | null>(null);
+  const [carpoolExpand, setCarpoolExpand] = useState<number | null>(null);
 
-  const fieldFor = (key: 'nearbyKRing' | 'matchKRing') =>
-    key === 'nearbyKRing' ? ([nearby, setNearby] as const) : ([match, setMatch] as const);
+  const carpool = carpoolQuery.data;
+  const base = carpoolBase ?? carpool?.baseRadiusKm ?? 0.3;
+  const expand = carpoolExpand ?? carpool?.expandRadiusKm ?? 0.6;
+
+  const dispatchDirty =
+    JSON.stringify(fixed) !== JSON.stringify(config.policyV2?.FIXED ?? FIXED_DEFAULTS) ||
+    JSON.stringify(puja) !== JSON.stringify(config.policyV2?.PUJA ?? PUJA_DEFAULTS) ||
+    config.policyVersion !== 'v2';
+  const carpoolDirty =
+    carpool != null && (base !== carpool.baseRadiusKm || expand !== carpool.expandRadiusKm);
+  const dirty = dispatchDirty || carpoolDirty;
 
   async function save() {
-    await update.mutateAsync({
-      nearbyKRing: values.nearbyKRing,
-      matchKRing: values.matchKRing,
-      offerTimeoutMs: secToMs(values.offerTimeoutSec),
-      bidWindowSec: values.bidWindowSec,
-    });
-    toast({ tone: 'success', title: 'Configuración de dispatch actualizada' });
+    const jobs: Promise<unknown>[] = [];
+    if (dispatchDirty) {
+      jobs.push(
+        updateDispatch.mutateAsync({
+          nearbyKRing: config.nearbyKRing,
+          matchKRing: config.matchKRing,
+          offerTimeoutMs: config.offerTimeoutMs,
+          bidWindowSec: config.bidWindowSec,
+          policyVersion: 'v2',
+          policyV2: { FIXED: fixed, PUJA: puja },
+        }),
+      );
+    }
+    if (carpoolDirty) {
+      jobs.push(updateCarpool.mutateAsync({ baseRadiusKm: base, expandRadiusKm: expand }));
+    }
+    await Promise.all(jobs);
+    toast({ tone: 'success', title: 'Configuración de radios guardada' });
   }
 
+  const pending = updateDispatch.isPending || updateCarpool.isPending;
+
   return (
-    <div className="flex flex-col gap-6 pt-4">
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Radios de dispatch</CardTitle>
-            <CardDescription>
-              Cada radio se mide en anillos H3 (k-ring). A mayor k, mayor cobertura: más conductores
-              alcanzados, pero también más ruido y carga.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-5 sm:grid-cols-2">
-          {RINGS.map(({ key, label, description, icon: Icon }) => {
-            const [value, setValue] = fieldFor(key);
-            const k = Number(value);
-            return (
-              <div key={key} className="flex flex-col gap-1.5">
-                <Field
-                  label={label}
-                  hint={description}
-                  error={canManage ? errors[key] : undefined}
-                  required={canManage}
-                >
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    min={K_RING_MIN}
-                    max={K_RING_MAX}
-                    step={1}
-                    value={value}
-                    disabled={!canManage || update.isPending}
-                    onChange={(e) => setValue(e.target.value)}
-                    aria-label={`${label} (k-ring)`}
-                  />
-                </Field>
-                <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-                  <Icon className="size-3.5" aria-hidden />k = {value || '—'} ·{' '}
-                  {isValidKRing(k) ? kRingLabel(k) : '—'}
-                </p>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-5">
+      {config.policyVersion !== 'v2' ? (
+        <p className="flex items-start gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-4 py-3 text-[13px] text-ink">
+          <Info className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+          <span>
+            El motor actual (v1) usa anillos fijos. <strong>Guardar activa el motor de radio
+            adaptativo (v2)</strong>: expande por km hasta juntar los conductores objetivo, por
+            servicio. El cambio aplica en vivo.
+          </span>
+        </p>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Ventanas de dispatch</CardTitle>
-            <CardDescription>
-              Cuánto tiempo espera cada mecánica de match. Una ventana corta cierra antes (más
-              reintentos); una larga da más margen al conductor. El cambio aplica en vivo, sin
-              reiniciar el servicio.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-5 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5">
-            <Field
-              label="Ventana de oferta directa (s)"
-              hint="Segundos que tiene el conductor para responder una oferta directa (FIXED) antes de pasar al siguiente."
-              error={canManage ? errors.offerTimeoutSec : undefined}
-              required={canManage}
-            >
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={OFFER_TIMEOUT_SEC_MIN}
-                max={OFFER_TIMEOUT_SEC_MAX}
-                step={1}
-                value={offerSec}
-                disabled={!canManage || update.isPending}
-                onChange={(e) => setOfferSec(e.target.value)}
-                aria-label="Ventana de oferta directa (segundos)"
+      <Tabs defaultValue="FIXED">
+        <TabsList>
+          <TabsTrigger value="FIXED">Fijo</TabsTrigger>
+          <TabsTrigger value="PUJA">Puja</TabsTrigger>
+          <TabsTrigger value="CARPOOL">Carpool</TabsTrigger>
+        </TabsList>
+
+        {/* ── FIJO ── */}
+        <TabsContent value="FIXED">
+          <ModeLayout
+            title="Parámetros de radio · Fijo"
+            radar={
+              <RadarPanel
+                mode="FIXED"
+                maxRadiusKm={fixed.maxRadiusKm}
+                note="Oferta secuencial: expande el radio hasta juntar los conductores objetivo, ofreciendo de a uno."
               />
-            </Field>
-            <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-              <Timer className="size-3.5" aria-hidden />
-              {isValidOfferTimeoutSec(values.offerTimeoutSec)
-                ? `${values.offerTimeoutSec} s por oferta`
-                : '—'}
-            </p>
-          </div>
+            }
+          >
+            <Slider
+              label="Radio inicial"
+              hint="La búsqueda arranca en este radio."
+              displayValue={km(fixed.initialRadiusKm)}
+              value={fixed.initialRadiusKm}
+              min={0.3}
+              max={2.4}
+              step={0.1}
+              disabled={!canManage || pending}
+              onChange={(v) => setFixed((f) => ({ ...f, initialRadiusKm: v }))}
+            />
+            <Slider
+              label="Incremento por expansión"
+              hint="Cuánto crece el radio en cada paso."
+              displayValue={km(fixed.incrementKm)}
+              value={fixed.incrementKm}
+              min={0.1}
+              max={1.0}
+              step={0.1}
+              disabled={!canManage || pending}
+              onChange={(v) => setFixed((f) => ({ ...f, incrementKm: v }))}
+            />
+            <Slider
+              label="Radio máximo"
+              hint="Tope al que puede llegar la búsqueda (límite H3 ≈ 2.4 km)."
+              displayValue={km(fixed.maxRadiusKm)}
+              value={fixed.maxRadiusKm}
+              min={0.3}
+              max={2.4}
+              step={0.1}
+              disabled={!canManage || pending}
+              onChange={(v) => setFixed((f) => ({ ...f, maxRadiusKm: v }))}
+            />
+            <Slider
+              label="Conductores objetivo"
+              hint="Expande hasta tener al menos esta cantidad de candidatos en rango."
+              displayValue={String(fixed.targetDrivers)}
+              value={fixed.targetDrivers}
+              min={1}
+              max={20}
+              step={1}
+              disabled={!canManage || pending}
+              onChange={(v) => setFixed((f) => ({ ...f, targetDrivers: v }))}
+            />
+            <Slider
+              label="Tiempo de oferta"
+              hint="Segundos que tiene el conductor para aceptar una oferta directa."
+              displayValue={sec(fixed.offerTimeoutSec)}
+              value={fixed.offerTimeoutSec}
+              min={5}
+              max={120}
+              step={1}
+              disabled={!canManage || pending}
+              onChange={(v) => setFixed((f) => ({ ...f, offerTimeoutSec: v }))}
+            />
+            <Slider
+              label="Intervalo de expansión"
+              hint="Tiempo de espera entre expansiones del radio."
+              displayValue={sec(fixed.expandIntervalSec)}
+              value={fixed.expandIntervalSec}
+              min={2}
+              max={60}
+              step={1}
+              disabled={!canManage || pending}
+              onChange={(v) => setFixed((f) => ({ ...f, expandIntervalSec: v }))}
+            />
+          </ModeLayout>
+        </TabsContent>
 
-          <div className="flex flex-col gap-1.5">
-            <Field
-              label="Ventana de puja (s)"
-              hint="Segundos que un tablero de puja queda abierto para que los conductores oferten."
-              error={canManage ? errors.bidWindowSec : undefined}
-              required={canManage}
-            >
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={BID_WINDOW_SEC_MIN}
-                max={BID_WINDOW_SEC_MAX}
-                step={1}
-                value={bidSec}
-                disabled={!canManage || update.isPending}
-                onChange={(e) => setBidSec(e.target.value)}
-                aria-label="Ventana de puja (segundos)"
+        {/* ── PUJA ── */}
+        <TabsContent value="PUJA">
+          <ModeLayout
+            title="Parámetros de radio · Puja"
+            radar={
+              <RadarPanel
+                mode="PUJA"
+                maxRadiusKm={puja.broadcastRadiusKm}
+                note="Broadcast de una sola vez: la solicitud se difunde al disco y los conductores pujan dentro de la ventana."
               />
-            </Field>
-            <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-              <Gavel className="size-3.5" aria-hidden />
-              {isValidBidWindowSec(values.bidWindowSec)
-                ? `${values.bidWindowSec} s por tablero`
-                : '—'}
+            }
+          >
+            <Slider
+              label="Radio de broadcast"
+              hint="Hasta dónde se difunde la solicitud para que los conductores pujen."
+              displayValue={km(puja.broadcastRadiusKm)}
+              value={puja.broadcastRadiusKm}
+              min={0.3}
+              max={2.4}
+              step={0.1}
+              disabled={!canManage || pending}
+              onChange={(v) => setPuja((p) => ({ ...p, broadcastRadiusKm: v }))}
+            />
+            <Slider
+              label="Ventana de puja"
+              hint="Segundos que el tablero queda abierto para que los conductores oferten."
+              displayValue={sec(puja.bidWindowSec)}
+              value={puja.bidWindowSec}
+              min={15}
+              max={300}
+              step={5}
+              disabled={!canManage || pending}
+              onChange={(v) => setPuja((p) => ({ ...p, bidWindowSec: v }))}
+            />
+            <p className="mt-1 text-xs text-ink-subtle">
+              La puja no expande ni ofrece de a uno: es un disco único + ventana. Por eso tiene menos
+              palancas que Fijo.
             </p>
-          </div>
-        </CardContent>
-      </Card>
+          </ModeLayout>
+        </TabsContent>
 
-      <section>
-        <h2 className="text-sm font-medium text-ink-muted">Referencia de cobertura (H3 res-9)</h2>
-        <ul className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-border px-4 py-3 text-sm sm:grid-cols-4">
-          {Array.from({ length: K_RING_MAX - K_RING_MIN + 1 }, (_, i) => K_RING_MIN + i).map(
-            (k) => (
-              <li key={k} className="flex items-center justify-between gap-2">
-                <span className="text-ink">k={k}</span>
-                <span className="tabular text-ink-muted">{kRingLabel(k)}</span>
-              </li>
-            ),
+        {/* ── CARPOOL ── */}
+        <TabsContent value="CARPOOL">
+          {carpoolQuery.isLoading ? (
+            <div className="grid gap-5 lg:grid-cols-[1fr_440px]">
+              <Skeleton className="h-64 rounded-[20px]" />
+              <Skeleton className="h-64 rounded-[20px]" />
+            </div>
+          ) : (
+            <ModeLayout
+              title="Parámetros de radio · Carpool"
+              radar={
+                <CarpoolRadarPanel
+                  maxRadiusKm={expand}
+                  note="Producto de costo compartido (booking-service): el conductor publica una ruta y los pasajeros cercanos se suman."
+                />
+              }
+            >
+              <Slider
+                label="Radio base"
+                hint="Anillo de búsqueda inicial de rutas de carpool publicadas."
+                displayValue={km(base)}
+                value={base}
+                min={0.0}
+                max={1.5}
+                step={0.1}
+                disabled={!canManage || pending}
+                onChange={setCarpoolBase}
+              />
+              <Slider
+                label="Radio expandido"
+                hint="Si la búsqueda base no encuentra rutas, expande a este radio."
+                displayValue={km(expand)}
+                value={expand}
+                min={0.3}
+                max={2.4}
+                step={0.1}
+                disabled={!canManage || pending}
+                onChange={setCarpoolExpand}
+              />
+              <p className="mt-1 text-xs text-ink-subtle">
+                Carpool comparte la cuenta de distancia con un cap (el conductor no lucra). Su
+                búsqueda es de rutas publicadas, no de despacho on-demand.
+              </p>
+            </ModeLayout>
           )}
-        </ul>
-      </section>
+        </TabsContent>
+      </Tabs>
 
-      <div className="flex items-center gap-3">
+      {/* Nota honesta de Programado (no es un modo, es un eje de tiempo) */}
+      <p className="text-xs text-ink-subtle">
+        Los viajes <strong>programados</strong> se despachan con la config de su modo (Fijo o Puja)
+        al activarse — no son un modo aparte.
+      </p>
+
+      {/* Footer de guardado */}
+      <div className="flex items-center justify-between gap-4 border-t border-divider pt-4">
+        <p className="text-xs text-ink-subtle">
+          Dispatch v{config.version}
+          {config.version > 0 ? ` · ${dateTime(config.updatedAt)}` : ' · valor por defecto'} · motor{' '}
+          <span className={config.policyVersion === 'v2' ? 'text-success' : 'text-ink-muted'}>
+            {config.policyVersion}
+          </span>
+        </p>
         {canManage ? (
-          !valid || !dirty || update.isPending ? (
-            <Button type="button" disabled loading={update.isPending}>
-              Guardar configuración
-            </Button>
+          !dirty || pending ? (
+            <button
+              type="button"
+              disabled
+              className="rounded-control bg-accent px-5 py-2.5 text-sm font-semibold text-accent-on opacity-50"
+            >
+              {pending ? 'Guardando…' : 'Guardar cambios'}
+            </button>
           ) : (
             <StepUpDialog
-              trigger={<Button type="button">Guardar configuración</Button>}
-              title="Actualizar configuración de dispatch"
-              description={`El feed de mapa pasará a k=${values.nearbyKRing} (${kRingLabel(
-                values.nearbyKRing,
-              )}) y las pujas a k=${values.matchKRing} (${kRingLabel(
-                values.matchKRing,
-              )}). Las ventanas serán ${values.offerTimeoutSec}s (oferta directa) y ${values.bidWindowSec}s (puja). Esta acción cambia el despacho global y queda auditada.`}
+              title="¿Aplicar nueva config?"
+              description="El cambio afecta el matching de conductores en tiempo real y se aplica de inmediato a todos los servicios. Queda auditado."
+              confirmLabel="Aplicar cambios"
+              confirmVariant="primary"
               onVerified={save}
+              trigger={
+                <button
+                  type="button"
+                  className="rounded-control bg-accent px-5 py-2.5 text-sm font-semibold text-accent-on shadow-brand transition-colors hover:bg-accent-hover"
+                >
+                  Guardar cambios
+                </button>
+              }
             />
           )
         ) : (
           <p className="text-xs text-ink-subtle">
-            Solo lectura: necesitas el rol DISPATCHER, ADMIN o SUPERADMIN para cambiar la
-            configuración.
+            Solo lectura: necesitás DISPATCHER, ADMIN o SUPERADMIN para cambiar los radios.
           </p>
         )}
       </div>
-
-      <p className="text-xs text-ink-subtle">
-        Versión {config.version}
-        {/* version 0 = config por defecto nunca editada: el backend manda `updatedAt` epoch (no null), así que
-            NO se puede confiar en la truthiness de updatedAt — gateamos por version (igual que cost-per-km). */}
-        {config.version > 0
-          ? ` · actualizado ${dateTime(config.updatedAt)}`
-          : ' · valor por defecto (sin editar)'}
-      </p>
     </div>
+  );
+}
+
+/** Layout de un modo: card de sliders (izq) + card de radar (der), fiel al board (2 columnas). */
+function ModeLayout({
+  title,
+  children,
+  radar,
+}: {
+  title: string;
+  children: React.ReactNode;
+  radar: React.ReactNode;
+}) {
+  return (
+    <div className="grid gap-5 lg:grid-cols-[1fr_440px] lg:items-start">
+      <section className="flex flex-col gap-5 rounded-[20px] border border-black/[0.05] bg-surface p-6 shadow-3">
+        <h2 className="font-display text-base font-bold text-ink">{title}</h2>
+        {children}
+      </section>
+      <section className="flex flex-col gap-4 rounded-[20px] border border-black/[0.05] bg-surface p-6 shadow-3">
+        <h2 className="font-display text-base font-bold text-ink">Vista previa</h2>
+        {radar}
+      </section>
+    </div>
+  );
+}
+
+/** Radar de un modo de dispatch (Fijo/Puja) — densidad real del hot-index. */
+function RadarPanel({
+  mode,
+  maxRadiusKm,
+  note,
+}: {
+  mode: 'FIXED' | 'PUJA';
+  maxRadiusKm: number;
+  note: string;
+}) {
+  const [center, setCenter] = useState(LIMA);
+  const radar = useDispatchRadar(mode, center);
+  return (
+    <>
+      <DispatchRadar
+        preview={radar.data}
+        center={center}
+        maxRadiusKm={maxRadiusKm}
+        loading={radar.isLoading}
+        error={radar.isError}
+        onRetry={() => void radar.refetch()}
+        onRecenter={setCenter}
+      />
+      <p className="text-[11px] leading-relaxed text-ink-subtle">{note}</p>
+    </>
+  );
+}
+
+/** Radar de carpool (booking-service) — densidad real de rutas publicadas. */
+function CarpoolRadarPanel({ maxRadiusKm, note }: { maxRadiusKm: number; note: string }) {
+  const [center, setCenter] = useState(LIMA);
+  const radar = useCarpoolRadar(center);
+  return (
+    <>
+      <DispatchRadar
+        preview={radar.data}
+        center={center}
+        maxRadiusKm={maxRadiusKm}
+        loading={radar.isLoading}
+        error={radar.isError}
+        onRetry={() => void radar.refetch()}
+        onRecenter={setCenter}
+      />
+      <p className="text-[11px] leading-relaxed text-ink-subtle">{note}</p>
+    </>
   );
 }

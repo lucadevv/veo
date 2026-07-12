@@ -7,7 +7,7 @@ import { cn } from '@/lib/cn';
 
 const buttonVariants = cva(
   // Base: target ≥44px (vía altura), foco visible, press scale 0.97 (emil-design-eng).
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium ' +
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-semibold ' +
     'transition-[transform,background-color,color,border-color] duration-150 ease-out ' +
     'cursor-pointer select-none active:scale-[0.97] ' +
     'disabled:pointer-events-none disabled:opacity-50 ' +

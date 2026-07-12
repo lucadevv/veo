@@ -12,4 +12,4 @@ export const MapView = dynamic(() => import('./map-view').then((m) => m.MapView)
   loading: () => <Skeleton className="h-full w-full rounded-none" />,
 });
 
-export type { MapMarker, MarkerKind } from './map-view';
+export type { MapMarker, MarkerKind, RadiusCircle } from './map-view';

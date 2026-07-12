@@ -92,7 +92,7 @@ export default function InspectionsPage() {
                 className={`${GRID} border-b border-border px-5 py-3 last:border-b-0`}
               >
                 <span className="truncate font-mono text-sm font-semibold text-ink">
-                  {`veh_${it.vehicleId.slice(0, 8)}`}
+                  {it.plate ?? `veh_${it.vehicleId.slice(0, 8)}`}
                 </span>
                 <span className="truncate text-[13px] text-ink-muted">
                   {fmtDate(it.inspectedAt)}

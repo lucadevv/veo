@@ -1,29 +1,42 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Lock } from 'lucide-react';
-import { useOverview, useTrips } from '@/lib/api/queries';
+import { CalendarDays, RefreshCw, Radio, WifiOff } from 'lucide-react';
+import { useOverview } from '@/lib/api/queries';
 import { useOpsStore } from '@/lib/realtime/ops-store';
-import { money, relativeFromNow } from '@/lib/formatters';
-import { PageHeader } from '@/components/layout/page-header';
+import { number } from '@/lib/formatters';
+import { AdminTopbar } from '@/components/layout/admin-topbar';
+import { ConnectionStatus } from '@/components/ops/connection-status';
 import { KpiGrid } from '@/components/ops/kpi-grid';
-import { TripStatusBadge, isActiveTrip } from '@/components/trips/status-badge';
+import { DriverPopover } from '@/components/ops/driver-popover';
+import { PanicsRecent } from '@/components/ops/panics-recent';
+import { HourlyBars } from '@/components/ops/hourly-bars';
+import { ServiceModesDonut } from '@/components/ops/service-modes-donut';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
-import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+
+const LEGEND = [
+  { label: 'Conductores', className: 'bg-accent' },
+  { label: 'Pasajeros', className: 'bg-success' },
+  { label: 'Rutas activas', className: 'bg-accent/55' },
+] as const;
 
 export default function OpsPage() {
   const router = useRouter();
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const drivers = useOpsStore((s) => s.drivers);
   const panics = useOpsStore((s) => s.panics);
+  const status = useOpsStore((s) => s.status);
   const overview = useOverview();
-  const trips = useTrips({ status: 'ALL' });
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+  // El stream en vivo perdió conexión (server cerró o red caída). 'reconnecting' = reintentando con backoff.
+  const socketDown = status === 'disconnected' || status === 'reconnecting';
 
   const markers = useMemo<MapMarker[]>(() => {
     const driverMarkers: MapMarker[] = Object.values(drivers).map(({ msg: d }) => ({
@@ -44,100 +57,155 @@ export default function OpsPage() {
     return [...driverMarkers, ...panicMarkers];
   }, [drivers, panics]);
 
-  const tripItems = trips.data?.pages.flatMap((p) => p.items) ?? [];
-  const activeTrips = tripItems.filter((t) => isActiveTrip(t.status));
+  const topbar = (
+    <AdminTopbar
+      title="En vivo"
+      subtitle="Operación en tiempo real · Lima Metropolitana"
+      actions={
+        <>
+          <ConnectionStatus />
+          <span className="hidden items-center gap-2 rounded-[10px] border border-border bg-surface px-3.5 py-2 text-[13px] font-medium text-ink sm:flex">
+            <CalendarDays className="size-[15px] text-ink-subtle" aria-hidden />
+            Últimas 24 h
+          </span>
+        </>
+      }
+    />
+  );
 
   if (!can(user, 'ops:view')) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader
-          title="Operación en vivo"
-          description="Conductores, viajes y alertas en tiempo real."
-        />
-        <EmptyState
+        {topbar}
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol correspondiente para ver la operación en vivo."
+          section="En vivo"
+          permission="ops:view"
+          onRequest={() => requestAccess('ops:view')}
         />
       </div>
     );
   }
 
+  const stat = overview.data
+    ? `${number(overview.data.activeTrips)} en curso · ${number(overview.data.onlineDrivers)} en línea`
+    : null;
+
   return (
     <div className="flex h-full flex-col">
-      <PageHeader
-        title="Operación en vivo"
-        description="Conductores, viajes y alertas en tiempo real."
-      />
+      {topbar}
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[1fr_400px]">
-        <div className="relative min-h-[320px] border-b border-border lg:border-b-0">
-          <MapView
-            markers={markers}
-            onMarkerClick={(id) => {
-              const panic = panics.find((p) => `panic-${p.panicId}` === id);
-              if (panic) router.push(`/security/panics/${panic.panicId}`);
-            }}
-          />
+      <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-7">
+        {/* KPIs */}
+        <section aria-label="Indicadores">
+          {overview.isLoading ? (
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="h-[104px] rounded-[18px]" />
+              ))}
+            </div>
+          ) : overview.isError ? (
+            <ErrorState onRetry={() => void overview.refetch()} />
+          ) : overview.data ? (
+            <KpiGrid data={overview.data} />
+          ) : null}
+        </section>
+
+        {/* Mapa + pánicos recientes */}
+        <div className="flex flex-col gap-5 lg:h-[430px] lg:flex-row">
+          <div className="relative h-[320px] overflow-hidden rounded-xl border border-black/[0.05] shadow-3 lg:h-full lg:flex-1">
+            <MapView
+              markers={markers}
+              onMarkerClick={(id) => {
+                const panic = panics.find((p) => `panic-${p.panicId}` === id);
+                if (panic) {
+                  router.push(`/security/panics/${panic.panicId}`);
+                  return;
+                }
+                // Marker de conductor (`driver-<id>`) → card flotante del conductor.
+                if (id.startsWith('driver-')) setSelectedDriverId(id.slice('driver-'.length));
+              }}
+            />
+            {selectedDriverId ? (
+              <DriverPopover
+                driverId={selectedDriverId}
+                onClose={() => setSelectedDriverId(null)}
+              />
+            ) : null}
+
+            {/* Estado socket-caído (JCiBD): overlay prominente sobre el mapa. El stream auto-reintenta con
+                backoff; "Reconectar" fuerza un re-handshake recargando (último recurso). Prioriza sobre el vacío. */}
+            {socketDown ? (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-surface/75 text-center backdrop-blur-[2px]">
+                <span className="grid size-12 place-items-center rounded-full bg-danger/10 text-danger">
+                  <WifiOff className="size-6" aria-hidden />
+                </span>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-ink">Se perdió la conexión en vivo</p>
+                  <p className="text-[13px] text-ink-muted">
+                    {status === 'reconnecting'
+                      ? 'El stream se cortó. Reconectando…'
+                      : 'El stream del ops-socket se cerró.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="flex items-center gap-2 rounded-control bg-danger px-4 py-2.5 text-[13px] font-semibold text-danger-on transition-colors hover:bg-danger-hover"
+                >
+                  <RefreshCw className="size-4" aria-hidden />
+                  Reconectar
+                </button>
+              </div>
+            ) : markers.length === 0 ? (
+              /* Estado sin-actividad (SJOIJ): sin conductores ni pánicos en vivo. El mapa se alimenta del socket
+                 (se actualiza solo); "Actualizar" refresca los KPIs de contexto. */
+              <div className="pointer-events-none absolute inset-0 z-[5] flex flex-col items-center justify-center gap-3 text-center">
+                <span className="grid size-12 place-items-center rounded-full bg-surface text-ink-subtle shadow-2">
+                  <Radio className="size-6" aria-hidden />
+                </span>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-ink">Sin actividad ahora</p>
+                  <p className="text-[13px] text-ink-muted">
+                    No hay viajes ni conductores activos en este momento.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void overview.refetch()}
+                  className="pointer-events-auto flex items-center gap-2 rounded-control border border-border bg-surface px-4 py-2.5 text-[13px] font-semibold text-ink shadow-1 transition-colors hover:bg-surface-2"
+                >
+                  <RefreshCw className="size-4 text-ink-muted" aria-hidden />
+                  Actualizar
+                </button>
+              </div>
+            ) : null}
+            {/* Overlays fieles al diseño (datos reales) */}
+            {stat ? (
+              <div className="absolute left-4 top-4 rounded-[10px] bg-[#0A0B0F]/80 px-3 py-2 text-xs font-medium text-white shadow-2">
+                {stat}
+              </div>
+            ) : null}
+            <div className="absolute bottom-4 left-4 flex items-center gap-4 rounded-[10px] border border-border bg-surface px-3.5 py-2 shadow-2">
+              {LEGEND.map((l) => (
+                <span key={l.label} className="flex items-center gap-2 text-xs font-medium text-ink-muted">
+                  <span className={`size-[9px] rounded-full ${l.className}`} aria-hidden />
+                  {l.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="lg:h-full lg:w-[440px]">
+            <PanicsRecent />
+          </div>
         </div>
 
-        <aside className="flex min-h-0 flex-col overflow-y-auto border-t border-border bg-bg p-4 lg:border-l lg:border-t-0">
-          <section aria-label="Indicadores">
-            {overview.isLoading ? (
-              <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Skeleton key={i} className="h-20" />
-                ))}
-              </div>
-            ) : overview.isError ? (
-              <ErrorState onRetry={() => void overview.refetch()} />
-            ) : overview.data ? (
-              <KpiGrid data={overview.data} />
-            ) : null}
-          </section>
-
-          <section aria-label="Viajes activos" className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-ink">Viajes activos</h2>
-              <Link href="/ops/trips" className="text-xs font-medium text-accent hover:underline">
-                Ver todos
-              </Link>
-            </div>
-            {trips.isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-16" />
-                ))}
-              </div>
-            ) : trips.isError ? (
-              <ErrorState onRetry={() => void trips.refetch()} />
-            ) : activeTrips.length === 0 ? (
-              <EmptyState title="Sin viajes activos" description="No hay viajes en curso ahora." />
-            ) : (
-              <ul className="space-y-2">
-                {activeTrips.map((t) => (
-                  <li key={t.id}>
-                    <Link href={`/ops/trips/${t.id}`}>
-                      <Card className="px-3 py-2.5 transition-colors hover:bg-surface-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-mono text-xs text-ink-muted">
-                            {t.id.slice(0, 8)}
-                          </span>
-                          <TripStatusBadge status={t.status} />
-                        </div>
-                        <div className="mt-1 flex items-center justify-between text-xs">
-                          <span className="text-ink-muted">{relativeFromNow(t.createdAt)}</span>
-                          <span className="font-medium text-ink tabular">{money(t.fareCents)}</span>
-                        </div>
-                      </Card>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </aside>
+        {/* Charts */}
+        <div className="flex flex-col gap-5 xl:flex-row">
+          <HourlyBars series={overview.data?.series ?? []} />
+          <ServiceModesDonut />
+        </div>
       </div>
     </div>
   );

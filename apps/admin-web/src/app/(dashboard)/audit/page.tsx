@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ShieldCheck, ShieldX } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useAudit, useVerifyAuditChain } from '@/lib/api/queries';
@@ -61,8 +62,10 @@ export default function AuditPage() {
 
 function AuditInner() {
   const user = useSession();
-  const [search, setSearch] = useState('');
-  const [applied, setApplied] = useState('');
+  // Prefiltro por deep-link (?q=): "Ver en auditoría" desde el detalle de viaje llega con el tripId ya aplicado.
+  const initialQuery = useSearchParams().get('q') ?? '';
+  const [search, setSearch] = useState(initialQuery);
+  const [applied, setApplied] = useState(initialQuery);
   const query = useAudit(applied);
   const verify = useVerifyAuditChain();
   const rows = query.data?.pages.flatMap((p) => p.items) ?? [];

@@ -11,6 +11,7 @@ import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { LoadMore } from '@/components/ui/load-more';
@@ -18,6 +19,17 @@ import { LoadMore } from '@/components/ui/load-more';
 /** Discrepancia 0..1 → porcentaje con 2 decimales. */
 function pct(p: number): string {
   return `${(p * 100).toFixed(2)} %`;
+}
+
+/**
+ * HONESTIDAD: el proveedor (ProntoPaga) devuelve extracto vacío en prod (getStatement() → []), así que una
+ * corrida con cobros en DB pero 0 movimientos de extracto sale con discrepancia ~100% y `alerted=true` — una
+ * ALERTA ENGAÑOSA. No es una discrepancia real: es que no hay extracto contra qué cruzar. Se distingue por el
+ * contrato (`statementCount === 0 && statementTotalCents === 0`) teniendo DB con monto (`dbTotalCents > 0`).
+ * En ese caso NO pintamos alerta roja: mostramos un estado neutral "Sin extracto".
+ */
+function isStatementMissing(run: ReconciliationRunView): boolean {
+  return run.statementCount === 0 && run.statementTotalCents === 0 && run.dbTotalCents > 0;
 }
 
 const DATE_FMT = new Intl.DateTimeFormat('es-PE', {
@@ -29,17 +41,23 @@ function fmtDate(iso: string): string {
   return DATE_FMT.format(new Date(iso));
 }
 
-/** Una card del cruce (DB o Extracto): icono + label · valor grande · sub. */
+/**
+ * Una card del cruce (DB o Extracto): icono + label · valor grande · sub.
+ * `muted` = el valor no es un monto real sino un estado honesto ("Sin extracto"): se pinta chico y en gris,
+ * para NO leerse como un S/ 0.00 conciliado.
+ */
 function CompareCard({
   icon: Icon,
   label,
   value,
   sub,
+  muted = false,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   sub: string;
+  muted?: boolean;
 }) {
   return (
     <div className="flex-1 rounded-lg border border-border bg-surface p-5">
@@ -47,14 +65,26 @@ function CompareCard({
         <Icon className="size-4 text-ink-subtle" aria-hidden />
         <span className="text-xs font-medium text-ink-muted">{label}</span>
       </div>
-      <p className="tabular mt-2 font-display text-2xl font-bold text-ink">{value}</p>
+      <p
+        className={cn(
+          'mt-2 font-display font-bold',
+          muted ? 'text-lg text-ink-subtle' : 'tabular text-2xl text-ink',
+        )}
+      >
+        {value}
+      </p>
       <p className="mt-1 text-xs text-ink-subtle">{sub}</p>
     </div>
   );
 }
 
-/** Cruce de la ÚLTIMA corrida: DB neto = Extracto proveedor → discrepancia (verde dentro de umbral, rojo si alertó). */
+/**
+ * Cruce de la ÚLTIMA corrida: DB neto = Extracto proveedor → discrepancia (verde dentro de umbral, rojo si
+ * alertó). Excepción honesta: si el proveedor no expuso extracto (`isStatementMissing`), NO hay discrepancia
+ * real que reportar → panel neutral "Sin extracto" en vez de un 100% rojo engañoso.
+ */
 function CompareRow({ run }: { run: ReconciliationRunView }) {
+  const missing = isStatementMissing(run);
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
       <CompareCard
@@ -69,27 +99,39 @@ function CompareRow({ run }: { run: ReconciliationRunView }) {
       <CompareCard
         icon={FileText}
         label="Extracto proveedor"
-        value={money(run.statementTotalCents)}
-        sub="Yape/Plin · statement del período"
+        value={missing ? 'Sin extracto' : money(run.statementTotalCents)}
+        sub={missing ? 'ProntoPaga aún no expone el extracto del período' : 'Yape/Plin · statement del período'}
+        muted={missing}
       />
-      <div
-        className={cn(
-          'flex flex-col justify-center gap-1 rounded-lg border p-5 text-center lg:w-72',
-          run.alerted ? 'border-danger bg-danger/12' : 'border-success bg-success/12',
-        )}
-      >
-        <span
+      {missing ? (
+        <div className="flex flex-col justify-center gap-1.5 rounded-lg border border-border bg-surface-2 p-5 text-center lg:w-72">
+          <span className="font-display text-lg font-bold text-ink-muted">Sin extracto</span>
+          <span className="text-xs font-medium text-ink-subtle">
+            Conciliación por DB/webhooks — el proveedor aún no expone el extracto para cruzar.
+          </span>
+        </div>
+      ) : (
+        <div
           className={cn(
-            'font-display text-2xl font-bold',
-            run.alerted ? 'text-danger' : 'text-success',
+            'flex flex-col justify-center gap-1 rounded-lg border p-5 text-center lg:w-72',
+            run.alerted ? 'border-danger bg-danger/12' : 'border-success bg-success/12',
           )}
         >
-          {pct(run.discrepancyPct)}
-        </span>
-        <span className={cn('text-xs font-semibold', run.alerted ? 'text-danger' : 'text-success')}>
-          {run.alerted ? 'Discrepancia · SOBRE umbral' : 'Discrepancia · dentro de umbral'}
-        </span>
-      </div>
+          <span
+            className={cn(
+              'font-display text-2xl font-bold',
+              run.alerted ? 'text-danger' : 'text-success',
+            )}
+          >
+            {pct(run.discrepancyPct)}
+          </span>
+          <span
+            className={cn('text-xs font-semibold', run.alerted ? 'text-danger' : 'text-success')}
+          >
+            {run.alerted ? 'Discrepancia · SOBRE umbral' : 'Discrepancia · dentro de umbral'}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -112,32 +154,37 @@ const columns: ColumnDef<ReconciliationRunView, unknown>[] = [
   {
     accessorKey: 'statementTotalCents',
     header: 'Extracto',
-    cell: ({ row }) => (
-      <span className="tabular text-ink-muted">{money(row.original.statementTotalCents)}</span>
-    ),
+    cell: ({ row }) =>
+      isStatementMissing(row.original) ? (
+        <span className="text-ink-subtle">Sin extracto</span>
+      ) : (
+        <span className="tabular text-ink-muted">{money(row.original.statementTotalCents)}</span>
+      ),
   },
   {
     accessorKey: 'discrepancyPct',
     header: 'Discrepancia',
-    cell: ({ row }) => (
-      <span className={cn('tabular', row.original.alerted ? 'text-danger' : 'text-ink-muted')}>
-        {pct(row.original.discrepancyPct)}
-      </span>
-    ),
+    // Sin extracto no hay discrepancia real → guion neutral, NO el 100% engañoso.
+    cell: ({ row }) =>
+      isStatementMissing(row.original) ? (
+        <span className="text-ink-subtle">—</span>
+      ) : (
+        <span className={cn('tabular', row.original.alerted ? 'text-danger' : 'text-ink-muted')}>
+          {pct(row.original.discrepancyPct)}
+        </span>
+      ),
   },
   {
     accessorKey: 'alerted',
     header: 'Estado',
-    cell: ({ row }) => (
-      <span
-        className={cn(
-          'rounded-full px-2 py-0.5 text-xs font-medium',
-          row.original.alerted ? 'bg-danger/12 text-danger' : 'bg-success/12 text-success',
-        )}
-      >
-        {row.original.alerted ? 'Alerta' : 'Conciliado'}
-      </span>
-    ),
+    cell: ({ row }) => {
+      if (isStatementMissing(row.original)) return <Badge tone="neutral">Sin extracto</Badge>;
+      return (
+        <Badge tone={row.original.alerted ? 'danger' : 'success'}>
+          {row.original.alerted ? 'Alerta' : 'Conciliado'}
+        </Badge>
+      );
+    },
   },
 ];
 

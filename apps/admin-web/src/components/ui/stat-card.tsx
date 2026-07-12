@@ -22,6 +22,11 @@ export interface StatCardProps {
   value: string;
   hint?: string;
   hintTone?: HintTone;
+  /**
+   * Tono del icono del KPI (fiel al frame: wallet brand, check success, pause warn, x danger). NO-BREAKING:
+   * default 'neutral' → gris actual (text-ink-subtle), así las cards sin tono no cambian. Reusa la escala HintTone.
+   */
+  iconTone?: HintTone;
   loading?: boolean;
 }
 
@@ -31,18 +36,19 @@ export function StatCard({
   value,
   hint,
   hintTone = 'neutral',
+  iconTone = 'neutral',
   loading,
 }: StatCardProps) {
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3.5">
       <div className="flex items-center gap-2">
-        <Icon className="size-4 shrink-0 text-ink-subtle" aria-hidden />
+        <Icon className={cn('size-4 shrink-0', HINT_TONE[iconTone])} aria-hidden />
         <p className="text-xs font-medium text-ink-muted">{label}</p>
       </div>
       {loading ? (
         <div className="mt-2 h-9 w-16 animate-pulse rounded bg-surface-2" />
       ) : (
-        <p className="mt-2 text-3xl font-semibold tabular text-ink">{value}</p>
+        <p className="mt-2 font-display text-3xl font-bold tabular text-ink">{value}</p>
       )}
       {hint && !loading ? (
         <p className={cn('mt-1 text-xs font-medium', HINT_TONE[hintTone])}>{hint}</p>
@@ -53,5 +59,5 @@ export function StatCard({
 
 /** Grilla responsiva de stat cards (2 col mobile, 4 col desktop). */
 export function StatCardGrid({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{children}</div>;
+  return <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{children}</div>;
 }

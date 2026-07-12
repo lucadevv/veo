@@ -1,28 +1,36 @@
 'use client';
 
 import { type MouseEvent, useState } from 'react';
-import { Lock, Banknote, Clock, Pause, CircleAlert, Search } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Wallet, CircleCheck, Pause, CircleX, ChevronDown, Search } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { usePayouts, usePayoutStats } from '@/lib/api/queries';
 import { payoutStatus, type PayoutView } from '@/lib/api/schemas';
 import { FILTER_ALL } from '@/lib/filters';
-import { money } from '@/lib/formatters';
+import { money, payoutPeriod } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+import { useRequestAccess } from '@/lib/use-request-access';
+import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
 import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
 import { Avatar } from '@/components/ui/avatar';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { ErrorState, PermissionState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 import {
   ReleaseHeldPayoutButton,
   RetryPayoutButton,
   RunPayoutsButton,
 } from '@/components/finance/payout-actions';
-import { PayoutDetailDialog } from '@/components/finance/payout-detail-dialog';
+import { ExportCsvButton } from '@/components/finance/export-csv-button';
 
 // Columnas fieles al frame: Conductor (avatar + nombre, fallback driverId) · Período · Bruto · Comisión · Neto ·
 // Estado (+heldReason en HELD) · Acción. `driverName` lo enriquece el bff desde identity — es null para roles
@@ -49,7 +57,9 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
   {
     accessorKey: 'period',
     header: 'Período',
-    cell: ({ row }) => <span className="text-ink-muted">{row.original.period}</span>,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap text-ink-muted">{payoutPeriod(row.original.period)}</span>
+    ),
   },
   {
     accessorKey: 'grossCents',
@@ -117,9 +127,9 @@ const columns: ColumnDef<PayoutView, unknown>[] = [
   },
 ];
 
-// Tabs por estado (fieles al frame: Todos → Fallidos). El value es el enum del contrato; 'ALL' (FILTER_ALL) lo
-// dropea cleanQuery en el bff → trae todos.
-const TABS: { value: string; label: string }[] = [
+// Opciones del dropdown "Estado" de la toolbar (fiel al frame idllB: reemplaza los 6 tabs). El value es el enum
+// del contrato; 'ALL' (FILTER_ALL) lo dropea cleanQuery en el bff → trae todos.
+const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: FILTER_ALL, label: 'Todos' },
   { value: payoutStatus.enum.PENDING, label: 'Pendientes' },
   { value: payoutStatus.enum.PROCESSING, label: 'Procesando' },
@@ -139,22 +149,22 @@ const EMPTY_BY_TAB: Record<string, string> = {
 
 export default function FinancePage() {
   const user = useSession();
-  const [tab, setTab] = useState<string>(FILTER_ALL);
+  const router = useRouter();
+  const requestAccess = useRequestAccess();
+  const [status, setStatus] = useState<string>(FILTER_ALL);
   const [search, setSearch] = useState('');
-  // Fila seleccionada → alimenta el sheet de detalle (usePayoutDetail, enabled: !!id). null = cerrado.
-  const [selectedPayoutId, setSelectedPayoutId] = useState<string | null>(null);
-  const query = usePayouts(tab);
+  const query = usePayouts(status);
   const statsQuery = usePayoutStats();
 
   if (!can(user, 'finance:view')) {
     return (
       <div className="flex h-full flex-col">
         <PageHeader title="Liquidaciones" breadcrumbs={[{ label: 'Finanzas' }]} />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol FINANCE o ADMIN para ver liquidaciones."
+          section="Liquidaciones"
+          permission="finance:view"
+          onRequest={() => requestAccess('finance:view')}
         />
       </div>
     );
@@ -179,100 +189,114 @@ export default function FinancePage() {
         actions={can(user, 'finance:payout') ? <RunPayoutsButton /> : null}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        {/* KPIs — dato REAL de GET /finance/payouts/stats (StatCard no renderiza valor sin backend). */}
+        {/* KPIs money fieles al frame idllB — dato REAL de GET /finance/payouts/stats (los 4 buckets en céntimos).
+            A pagar = volumen total del período (totalCents: no hay bucket "pendiente-de-pago" propio); el resto,
+            su bucket money. Iconos alineados al frame (wallet/circle-check/pause/circle-x). */}
         <div className="pt-4">
           <StatCardGrid>
             <StatCard
-              icon={Banknote}
-              label="Total del período"
+              icon={Wallet}
+              iconTone="brand"
+              label="A pagar"
               value={stats ? money(stats.totalCents) : '—'}
-              hint="total liquidado"
               loading={statsQuery.isLoading}
             />
             <StatCard
-              icon={Clock}
-              label="Pendientes de disparo"
-              value={stats ? String(stats.pendingCount) : '—'}
-              hint="a la espera del run"
-              hintTone="warn"
+              icon={CircleCheck}
+              iconTone="success"
+              label="Pagado (periodo)"
+              value={stats ? money(stats.paidCents) : '—'}
               loading={statsQuery.isLoading}
             />
             <StatCard
               icon={Pause}
-              label="Retenidos (review)"
-              value={stats ? String(stats.heldCount) : '—'}
-              hint="conductores flaggeados"
+              iconTone="warn"
+              label="Retenido"
+              value={stats ? money(stats.heldCents) : '—'}
               loading={statsQuery.isLoading}
             />
             <StatCard
-              icon={CircleAlert}
-              label="Fallidos"
-              value={stats ? String(stats.failedCount) : '—'}
-              hint="requieren reintento"
-              hintTone="danger"
+              icon={CircleX}
+              iconTone="danger"
+              label="Con error"
+              value={stats ? money(stats.failedCents) : '—'}
               loading={statsQuery.isLoading}
             />
           </StatCardGrid>
         </div>
 
-        <Tabs value={tab} onValueChange={setTab} className="pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <TabsList>
-              {TABS.map((t) => (
-                <TabsTrigger key={t.value} value={t.value}>
-                  {t.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            <div className="relative w-64 max-w-full">
-              <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-subtle"
-                aria-hidden
-              />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar conductor…"
-                aria-label="Buscar conductor"
-                className="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-3 text-sm text-ink placeholder:text-ink-subtle focus:border-brand focus:outline-none"
-              />
-            </div>
+        {/* Toolbar fiel al frame (T/TableToolbar): buscador (crece) · dropdown Estado · Exportar CSV. */}
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-3">
+          <div className="relative min-w-56 flex-1">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-ink-subtle"
+              aria-hidden
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar conductor…"
+              aria-label="Buscar conductor"
+              className="w-full rounded-md border border-border bg-surface-2 py-1.5 pl-8 pr-3 text-sm text-ink placeholder:text-ink-subtle focus:border-brand focus:outline-none"
+            />
           </div>
-          <TabsContent value={tab}>
-            {query.isError ? (
-              <ErrorState onRetry={() => void query.refetch()} />
-            ) : (
-              <>
-                <DataTable
-                  caption="Liquidaciones"
-                  columns={columns}
-                  data={data}
-                  loading={query.isLoading}
-                  onRowClick={(row) => setSelectedPayoutId(row.id)}
-                  rowLabel={(row) =>
-                    `Ver detalle de la liquidación de ${row.driverName ?? row.driverId}`
-                  }
-                  emptyTitle="Sin liquidaciones"
-                  emptyDescription={
-                    term
-                      ? `Sin resultados para "${search}".`
-                      : (EMPTY_BY_TAB[tab] ?? 'No hay liquidaciones para mostrar.')
-                  }
-                />
-                <LoadMore
-                  hasNextPage={!!query.hasNextPage}
-                  isFetching={query.isFetchingNextPage}
-                  onLoadMore={() => void query.fetchNextPage()}
-                />
-              </>
-            )}
-          </TabsContent>
-        </Tabs>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-surface-2 px-3 text-sm font-medium text-ink transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+              >
+                {status === FILTER_ALL
+                  ? 'Estado'
+                  : (STATUS_OPTIONS.find((o) => o.value === status)?.label ?? 'Estado')}
+                <ChevronDown className="size-4 text-ink-subtle" aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {STATUS_OPTIONS.map((o) => (
+                <DropdownMenuItem
+                  key={o.value}
+                  onSelect={() => setStatus(o.value)}
+                  className={cn(o.value === status && 'font-semibold text-brand')}
+                >
+                  {o.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ExportCsvButton status={status} />
+        </div>
+
+        <div className="pt-4">
+          {query.isError ? (
+            <ErrorState onRetry={() => void query.refetch()} />
+          ) : (
+            <>
+              <DataTable
+                caption="Liquidaciones"
+                columns={columns}
+                data={data}
+                loading={query.isLoading}
+                onRowClick={(row) => router.push(`/finance/${row.id}`)}
+                rowLabel={(row) =>
+                  `Ver detalle de la liquidación de ${row.driverName ?? row.driverId}`
+                }
+                emptyTitle="Sin liquidaciones"
+                emptyDescription={
+                  term
+                    ? `Sin resultados para "${search}".`
+                    : (EMPTY_BY_TAB[status] ?? 'No hay liquidaciones para mostrar.')
+                }
+              />
+              <LoadMore
+                hasNextPage={!!query.hasNextPage}
+                isFetching={query.isFetchingNextPage}
+                onLoadMore={() => void query.fetchNextPage()}
+              />
+            </>
+          )}
+        </div>
       </div>
-      <PayoutDetailDialog
-        payoutId={selectedPayoutId}
-        onClose={() => setSelectedPayoutId(null)}
-      />
     </div>
   );
 }

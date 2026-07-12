@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { fontMono, fontSans } from './fonts';
+import { fontDisplay, fontMono, fontSans, fontSerif } from './fonts';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -9,19 +9,19 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  // Marca VEO = lienzo NEGRO: la barra del navegador acompaña el negro de marca (#000000).
-  themeColor: '#000000',
+  // Sistema "Trust" = lienzo CLARO: la barra del navegador acompaña el gris de página (#F5F7FA).
+  themeColor: '#F5F7FA',
 };
 
-// Aplica el tema persistido antes del primer paint para evitar parpadeo (FOUC). La marca VEO
-// es oscura: el default (sin preferencia guardada) es dark, no se delega a prefers-color-scheme.
-const themeInitScript = `(function(){try{var t=localStorage.getItem('veo-theme');var d=t?t==='dark':true;document.documentElement.classList.toggle('dark',d);}catch(e){document.documentElement.classList.add('dark');}})();`;
+// Aplica el tema persistido antes del primer paint para evitar parpadeo (FOUC). El sistema "Trust"
+// es CLARO: el default (sin preferencia guardada) es light; solo se activa .dark si el operador lo eligió.
+const themeInitScript = `(function(){try{var t=localStorage.getItem('veo-theme');document.documentElement.classList.toggle('dark',t==='dark');}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="es"
-      className={`${fontSans.variable} ${fontMono.variable}`}
+      className={`${fontSans.variable} ${fontDisplay.variable} ${fontSerif.variable} ${fontMono.variable}`}
       suppressHydrationWarning
     >
       <head>

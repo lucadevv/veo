@@ -91,3 +91,14 @@ export const useOpsStore = create<OpsState>((set) => ({
   dismissPanic: (panicId) =>
     set((s) => ({ panics: s.panics.filter((p) => p.panicId !== panicId) })),
 }));
+
+// Aid de DEV: expone el store para inyectar markers de prueba desde la consola (probar el mapa sin
+// conductores online). Nunca en producción; no altera el flujo real (los markers siguen viniendo del socket).
+declare global {
+  interface Window {
+    __opsStore?: typeof useOpsStore;
+  }
+}
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  window.__opsStore = useOpsStore;
+}

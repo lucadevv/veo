@@ -1,65 +1,50 @@
 'use client';
 
-import { Activity, Ban, CheckCircle2, Clock, ShieldAlert, UserCheck, Wallet } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type { AnalyticsOverview } from '@/lib/api/schemas';
 import { duration, money, number } from '@/lib/formatters';
 import { cn } from '@/lib/cn';
 
-interface Stat {
+interface Kpi {
   label: string;
   value: string;
-  icon: LucideIcon;
   alert?: boolean;
 }
 
-/** Mosaico de KPIs de operación. Jerarquía por tipografía/espaciado, no por color decorativo. */
+/**
+ * Fila de KPIs de operación (En Vivo). FIDELIDAD al frame `.pen` (EnVivo · Dashboard): 5 KPIs de VISTAZO EN
+ * VIVO — las 3 señales del momento (activos ahora · conductores pingueando · pánicos abiertos) + los ingresos
+ * de hoy + la duración promedio. Los agregados de CIERRE del día (margen/viajes/ticket/completados/cancelados/
+ * cancelación) NO viven acá: son análisis, y su hogar es Métricas (evita el bloat que diluye la señal de "qué
+ * pasa AHORA"). TODOS con seam REAL vía `GET /analytics/overview` (fan-out a trip/dispatch/panic/payment). El
+ * overview NO trae deltas → no se inventan; los valores caen a 0 honestos sin actividad viva/hoy (no es stub).
+ */
 export function KpiGrid({ data }: { data: AnalyticsOverview }) {
-  const stats: Stat[] = [
-    { label: 'Viajes activos', value: number(data.activeTrips), icon: Activity },
-    { label: 'Conductores en línea', value: number(data.onlineDrivers), icon: UserCheck },
-    {
-      label: 'Pánicos abiertos',
-      value: number(data.openPanics),
-      icon: ShieldAlert,
-      alert: data.openPanics > 0,
-    },
-    { label: 'Completados hoy', value: number(data.completedToday), icon: CheckCircle2 },
-    { label: 'Cancelados hoy', value: number(data.cancelledToday), icon: Ban },
-    { label: 'Recaudación hoy', value: money(data.revenueTodayCents), icon: Wallet },
-    { label: 'Duración promedio', value: duration(data.avgDurationSeconds), icon: Clock },
+  const kpis: Kpi[] = [
+    { label: 'Viajes activos', value: number(data.activeTrips) },
+    { label: 'Conductores en línea', value: number(data.onlineDrivers) },
+    { label: 'Pánicos abiertos', value: number(data.openPanics), alert: data.openPanics > 0 },
+    { label: 'Ingresos hoy', value: money(data.revenueTodayCents) },
+    { label: 'Duración promedio', value: duration(data.avgDurationSeconds) },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
-      {stats.map((s) => {
-        const Icon = s.icon;
-        return (
-          <div
-            key={s.label}
+    <div className="grid w-full grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+      {kpis.map((k) => (
+        <div
+          key={k.label}
+          className="flex flex-col gap-2.5 rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3"
+        >
+          <p className="text-[13px] font-medium text-ink-muted">{k.label}</p>
+          <p
             className={cn(
-              'rounded-md border bg-surface px-4 py-3',
-              s.alert ? 'border-danger/40 bg-danger/5' : 'border-border',
+              'font-display text-[32px] font-bold leading-none tracking-[-1px] tabular',
+              k.alert ? 'text-danger' : 'text-ink',
             )}
           >
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-ink-muted">{s.label}</p>
-              <Icon
-                className={cn('size-4', s.alert ? 'text-danger' : 'text-ink-subtle')}
-                aria-hidden
-              />
-            </div>
-            <p
-              className={cn(
-                'mt-1.5 text-2xl font-semibold tabular',
-                s.alert ? 'text-danger' : 'text-ink',
-              )}
-            >
-              {s.value}
-            </p>
-          </div>
-        );
-      })}
+            {k.value}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

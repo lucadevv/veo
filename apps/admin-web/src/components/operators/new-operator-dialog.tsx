@@ -129,7 +129,7 @@ export function NewOperatorDialog() {
       <DialogTrigger asChild>
         <Button size="sm" variant="primary">
           <UserPlus className="size-4" aria-hidden />
-          Nuevo operador
+          Invitar operador
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -175,7 +175,7 @@ export function NewOperatorDialog() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <UserPlus className="size-5 text-accent" aria-hidden />
-                Nuevo operador
+                Invitar operador
               </DialogTitle>
               <DialogDescription>
                 Se enviará una invitación al correo para que el operador fije su contraseña. Asigna

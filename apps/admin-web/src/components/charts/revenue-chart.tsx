@@ -10,6 +10,7 @@ const CHART_TITLE: Record<RevenueRangeValue, string> = {
   today: 'Recaudación por hora · últimas 24h',
   '7d': 'Recaudación por día · últimos 7 días',
   '30d': 'Recaudación por día · últimos 30 días',
+  '90d': 'Recaudación por día · últimos 90 días',
 };
 
 interface RevenueChartProps {

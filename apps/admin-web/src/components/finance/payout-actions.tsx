@@ -23,7 +23,7 @@ export function RunPayoutsButton() {
       trigger={
         <Button size="sm" variant="primary">
           <PlayCircle className="size-4" aria-hidden />
-          Ejecutar liquidaciones
+          Ejecutar liquidación
         </Button>
       }
       title="Ejecutar liquidaciones del periodo"

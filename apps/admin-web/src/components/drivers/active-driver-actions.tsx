@@ -2,7 +2,6 @@
 
 import { Ban, RotateCcw, KeyRound } from 'lucide-react';
 import { DriverStatus, SuspensionCause } from '@veo/shared-types';
-import type { DriverApproval } from '@/lib/api/schemas';
 import {
   useDriverSuspend,
   useReactivateDriver,
@@ -46,7 +45,16 @@ function isComplianceCause(cause: string): boolean {
  * `drivers:suspend`; el admin-bff revalida @Roles + (en el override) @RequireStepUpMfa server-side. La UI
  * no autoriza, solo refleja.
  */
-export function ActiveDriverActions({ driver }: { driver: DriverApproval }) {
+/**
+ * Campos mínimos que estas acciones REALMENTE consumen (id + estado operativo + causas de hold). Se acepta un
+ * tipo estructural en vez de `DriverApproval` para poder reusarlo tal cual desde el DETALLE (que expone
+ * `currentStatus`/`suspensionCauses`) sin fabricar el resto del contrato de la lista. La lógica no cambia.
+ */
+export function ActiveDriverActions({
+  driver,
+}: {
+  driver: { id: string; status: string; suspensionCauses: string[] };
+}) {
   const user = useSession();
   const { toast } = useToast();
   const suspend = useDriverSuspend();

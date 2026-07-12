@@ -57,7 +57,7 @@ export function OtpInput({ value, onChange, length = 6, autoFocus }: OtpInputPro
   };
 
   return (
-    <div className="flex gap-2" onPaste={onPaste}>
+    <div className="flex gap-2.5" onPaste={onPaste}>
       {digits.map((d, i) => (
         <input
           key={i}
@@ -73,10 +73,10 @@ export function OtpInput({ value, onChange, length = 6, autoFocus }: OtpInputPro
           onChange={(e) => onInput(i, e.target.value)}
           onKeyDown={(e) => onKeyDown(i, e)}
           className={cn(
-            'h-[52px] w-full rounded-md border bg-bg text-center font-mono text-xl text-ink outline-none transition-colors',
+            'h-[58px] w-full rounded-md bg-surface text-center font-display text-[22px] font-bold text-ink outline-none transition-colors',
             d
-              ? 'border-accent ring-1 ring-inset ring-accent/40'
-              : 'border-border-strong focus:border-accent',
+              ? 'border-2 border-accent'
+              : 'border border-border focus:border-accent',
           )}
         />
       ))}

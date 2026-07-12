@@ -6,14 +6,25 @@ import { useDecideMedia, useSignedMedia } from '@/lib/api/queries';
 import type { MediaAccessRequestView, SignedMedia } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+import { cn } from '@/lib/cn';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { MediaPlayer } from './media-player';
 
-/** Acciones sobre una solicitud de acceso a video: aprobar/rechazar y reproducir (con step-up). */
-export function MediaActions({ request }: { request: MediaAccessRequestView }) {
+/**
+ * Acciones sobre una solicitud de acceso a video: aprobar/rechazar y reproducir (con step-up MFA).
+ * `stacked` (fiel al frame rMKhS del detalle): botones a lo ANCHO apilados — Aprobar acceso (verde jade) +
+ * Rechazar (rojo outline); Reproducir a lo ancho. Sin `stacked`: botones chicos lado a lado (uso en tabla/fila).
+ */
+export function MediaActions({
+  request,
+  stacked = false,
+}: {
+  request: MediaAccessRequestView;
+  stacked?: boolean;
+}) {
   const user = useSession();
   const { toast } = useToast();
   const decide = useDecideMedia();
@@ -84,18 +95,28 @@ export function MediaActions({ request }: { request: MediaAccessRequestView }) {
     }
   }
 
+  const btnSize = stacked ? 'md' : 'sm';
+  const fullW = stacked ? 'w-full' : '';
+
   return (
-    <div className="flex items-center gap-2">
+    <div className={stacked ? 'flex flex-col gap-2.5' : 'flex items-center gap-2'}>
       {request.status === 'PENDING' && can(user, 'media:approve') ? (
         <>
-          {/* Aprobar acceso a video exige doble-auth (step-up MFA). */}
+          {/* Aprobar acceso a video exige doble-auth (step-up MFA). Verde jade en el detalle (frame rMKhS). */}
           <StepUpDialog
             title="Aprobar acceso a video"
             description="Aprobar el acceso a grabaciones requiere verificación adicional."
             trigger={
-              <Button size="sm" variant="primary">
+              <Button
+                size={btnSize}
+                variant="ghost"
+                className={cn(
+                  fullW,
+                  stacked && 'bg-success text-white hover:bg-success/90',
+                )}
+              >
                 <Check className="size-4" aria-hidden />
-                Aprobar
+                {stacked ? 'Aprobar acceso' : 'Aprobar'}
               </Button>
             }
             onVerified={async () => {
@@ -105,7 +126,14 @@ export function MediaActions({ request }: { request: MediaAccessRequestView }) {
           />
           <ConfirmDialog
             trigger={
-              <Button size="sm" variant="secondary">
+              <Button
+                size={btnSize}
+                variant={stacked ? 'ghost' : 'secondary'}
+                className={cn(
+                  fullW,
+                  stacked && 'border border-danger text-danger hover:bg-danger/5',
+                )}
+              >
                 <X className="size-4" aria-hidden />
                 Rechazar
               </Button>
@@ -127,7 +155,7 @@ export function MediaActions({ request }: { request: MediaAccessRequestView }) {
           title="Reproducir video"
           description="Reproducir grabaciones requiere verificación adicional. Toda reproducción queda auditada."
           trigger={
-            <Button size="sm" variant="primary" loading={signed.isPending}>
+            <Button size={btnSize} variant="primary" loading={signed.isPending} className={fullW}>
               <PlayCircle className="size-4" aria-hidden />
               Reproducir
             </Button>

@@ -60,18 +60,19 @@ function itvExpiringSoon(v: VehicleView): boolean {
   return v.itvCurrent && d !== null && d >= 0 && d <= 30;
 }
 
-/** Pill de DOCUMENTOS (docStatus del vehículo). */
-function docsPill(status: string): { tone: PillTone; label: string } {
-  switch (status) {
-    case DocStatus.VALID:
-      return { tone: 'success', label: 'Completos' };
-    case DocStatus.EXPIRING_SOON:
-      return { tone: 'warn', label: 'Por vencer' };
-    case DocStatus.EXPIRED:
-      return { tone: 'danger', label: 'Vencidos' };
-    default:
-      return { tone: 'neutral', label: status };
-  }
+/**
+ * Pill de DOCUMENTOS: refleja el estado REAL de los documentos, no solo el agregado `docStatus`.
+ * COHERENCIA con la columna ESTADO (que deriva de `operable`): el agregado `docStatus` puede quedar en VALID
+ * mientras los documentos individuales (SOAT/ITV) están PENDING_REVIEW o faltan — la operabilidad real lo sabe
+ * (`operabilityReason === 'DOCS'`). Sin esto la fila mostraba "Completos" junto a "En revisión" (dos fuentes
+ * que se contradicen). Vencido/por-vencer siguen mandando (son estados del propio docStatus).
+ */
+function docsPill(v: VehicleView): { tone: PillTone; label: string } {
+  if (v.status === DocStatus.EXPIRED) return { tone: 'danger', label: 'Vencidos' };
+  if (v.status === DocStatus.EXPIRING_SOON) return { tone: 'warn', label: 'Por vencer' };
+  if (!v.operable && v.operabilityReason === 'DOCS') return { tone: 'warn', label: 'Pendientes' };
+  if (v.status === DocStatus.VALID) return { tone: 'success', label: 'Completos' };
+  return { tone: 'neutral', label: v.status };
 }
 
 /** Pill de ITV (última inspección). */
@@ -160,7 +161,7 @@ export default function VehiclesPage() {
         v.year,
         v.vehicleType === 'MOTO' ? 'Moto' : 'Auto',
         v.driverName ?? '',
-        docsPill(v.status).label,
+        docsPill(v).label,
         itvPill(v).label,
         estado(v).label,
       ]),
@@ -184,7 +185,9 @@ export default function VehiclesPage() {
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Vehículos</h1>
           <p className="text-[13px] text-ink-subtle">
-            Flota registrada · verificación, documentos e inspección técnica (ITV)
+            {all.length > 0
+              ? `${cards.total} ${cards.total === 1 ? 'vehículo' : 'vehículos'} · ${tabCount('enRevision')} en revisión`
+              : 'Flota registrada · verificación, documentos e inspección técnica (ITV)'}
           </p>
         </div>
         <button
@@ -312,7 +315,7 @@ export default function VehiclesPage() {
           rows.map((v) => {
             const isMoto = v.vehicleType === 'MOTO';
             const Icon = isMoto ? Bike : Car;
-            const dp = docsPill(v.status);
+            const dp = docsPill(v);
             const ip = itvPill(v);
             const st = estado(v);
             return (

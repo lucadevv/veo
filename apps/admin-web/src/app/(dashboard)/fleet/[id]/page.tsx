@@ -239,6 +239,8 @@ function DocRow({ doc, onReviewed }: { doc: FleetDocumentView; onReviewed: () =>
   const Icon = meta.icon;
   const pill = docPill(doc.status);
   const isPending = doc.status === DocStatus.PENDING_REVIEW;
+  // Primera imagen con presigned GET URL (visor "Ver"). null si el doc no tiene archivo o la firma falló.
+  const firstImage = doc.images.find((i) => i.url)?.url ?? null;
   const act = async (d: 'approve' | 'reject', reason?: string) => {
     try {
       await review.mutateAsync({ id: doc.id, decision: d, reason });
@@ -263,10 +265,24 @@ function DocRow({ doc, onReviewed }: { doc: FleetDocumentView; onReviewed: () =>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-sm font-semibold text-ink">{meta.label}</span>
         <span className="truncate font-mono text-[11px] text-ink-subtle">
-          {doc.expiresAt ? `Vence ${date(doc.expiresAt)}` : '—'}
+          {doc.expiresAt
+            ? `Vence ${date(doc.expiresAt)}`
+            : doc.images.length > 0
+              ? `${doc.images.length} archivo(s)`
+              : '—'}
         </span>
       </div>
       <DotPill tone={pill.tone}>{pill.label}</DotPill>
+      {firstImage ? (
+        <a
+          href={firstImage}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
+        >
+          Ver
+        </a>
+      ) : null}
       {isPending ? (
         <div className="flex items-center gap-1.5">
           <StepUpDialog
