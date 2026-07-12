@@ -20,10 +20,14 @@
 #   up                 Ignición completa: infra(wait healthy) → secrets →
 #                      build(packages PRIMERO) → migrate deploy → boot uniforme
 #                      → tablero. Idempotente: lo ya arriba no se duplica.
-#   dev                Como `up` pero los servicios arrancan en WATCH (nest start
+#   dev [--no-seed] [--seed-trips[=N]]
+#                      Como `up` pero los servicios arrancan en WATCH (nest start
 #                      --watch / uvicorn --reload): editás el SRC de un servicio y
 #                      recompila + reinicia SOLO. Infra en docker; admin-web en WATCH (next dev/HMR);
 #                      apps RN aparte. Libs @veo/* y tracking(Go) → restart manual.
+#                      AUTO-SIEMBRA barato (identity/driver/media) tras las migraciones —
+#                      --no-seed lo saltea. --seed-trips[=N] (default 2) siembra viajes AL FINAL
+#                      (opt-in: necesita el stack vivo).
 #   down [--infra]     Apagado LIMPIO y robusto en capas (pidfiles → puertos →
 #                      pkill por patrón). Con --infra además baja los contenedores.
 #   status             El TABLERO: una fila por servicio (puerto, health, pid,
@@ -38,6 +42,11 @@
 #                      El admin usa TOTP (Google Authenticator), no pasa por acá.
 #   trazar <paquete>   Gate determinista (00 §8) SCOPEADO a UN paquete (~2s). El root del monorepo
 #                      compila ~32 sub-proyectos y cuelga >2min → siempre scopeá al paquete tocado.
+#   login [--json]     Auto-login del admin de dev: calcula el TOTP vivo, hace POST /auth/login y
+#                      devuelve las cookies veo_at/veo_rt pegables (chrome-devtools/curl). --json = para pipes.
+#   seed [target]      Orquestador de seeds DEV idempotentes: identity (admin+6 roles+TOTP fijo) · driver
+#                      (conductor elegible+vehículo+docs) · media (solicitudes de acceso a video). Sin arg =
+#                      los 3 (solo piden postgres). 'seed trips' es orquestación aparte (requiere stack vivo).
 #
 # REGLA DE PUERTOS (del dueño): si un puerto está ocupado por algo ajeno, se
 # REPORTA — JAMÁS se salta a otro puerto en silencio.
@@ -219,6 +228,33 @@ infra_up_and_wait() {
   done
   green "  infra OK (postgres redis kafka minio clickhouse mosquitto)"
   ensure_web_assets
+}
+
+# ── 1c. MAPS (soberano: tiles + ruteo + geocoding) — perfil "maps", best-effort ────────────────
+# tileserver (tiles MapLibre) + osrm (ruteo) + nominatim (geocoding/reverse), TODO desde datos OSM
+# propios (FOUNDATION §0.7, jamás Google) preparados por dev-stack/maps/prepare.sh. Se levanta SOLO si
+# los datos ya existen — un clone fresco sin prep NO rompe el boot (se salta con aviso). Nominatim IMPORTA
+# en su primer arranque (osm2pgsql + indexado, varios min) → NO se espera healthy: queda importando en
+# background (no bloquea el boot). Mientras, el reverse-geocode del admin cae a modo 'local' (ya funciona).
+MAPS_DIR="$SCRIPT_DIR/maps"
+maps_up() {
+  hdr "MAPS (soberano · tiles + ruteo + geocoding)"
+  local mbtiles="$MAPS_DIR/tiles/region.mbtiles"
+  local osrm="$MAPS_DIR/osrm/region.osrm.mldgr"
+  local pbf="$MAPS_DIR/nominatim/data/region.osm.pbf"
+  if [[ ! -f "$mbtiles" || ! -f "$osrm" || ! -f "$pbf" ]]; then
+    yel "  perfil maps SIN datos preparados → se salta (no crítico: el geocoder del admin cae a modo 'local')."
+    yel "  para activarlo: corré 'dev-stack/maps/prepare.sh' (baja el extracto OSM + genera tiles/ruteo/geocoding) y re-corré 'veo.sh dev'."
+    return 0
+  fi
+  blue "  levantando maps (tileserver + osrm + nominatim)…"
+  if ! docker compose -f "$COMPOSE_FILE" --profile maps up -d tileserver osrm nominatim; then
+    red "  maps FALLÓ al disparar (no crítico: el reverse-geocode del admin usa modo 'local'). Revisá docker."
+    return 0
+  fi
+  green "  maps disparado — tileserver :8082 · osrm :5005 · nominatim :8081."
+  yel "  Nominatim IMPORTA el extracto en su 1er arranque (background). Cuando termine, para geocoding a nivel"
+  yel "  calle: poné VEO_MAPS_MODE=osrm en services/bff/admin-bff/env/development.env y reiniciá el admin-bff."
 }
 
 # ── 1b. WEB ASSETS (login-hero.mp4) ───────────────────────────────────────────
@@ -649,6 +685,7 @@ wait_native_health() {
 cmd_up() {
   printf '%s%s🔑 VEO · IGNICIÓN%s\n' "$C_BOLD" "$C_BLUE" "$C_RESET"
   infra_up_and_wait || { red "Infra no quedó healthy — ABORTO la ignición (los servicios la necesitan)."; exit 1; }
+  maps_up               # perfil maps (tiles/ruteo/geocoding soberano) — best-effort, se salta sin datos preparados.
   gen_secrets
   build_all
   migrate_all
@@ -1238,6 +1275,26 @@ build_libs() {
   fi
 }
 
+# ── Detección de entorno productivo (defensiva) ───────────────────────────────
+# El auto-seed es SOLO para dev/local. Si por lo que sea NODE_ENV o APP_ENV apuntan a
+# producción, no sembramos NADA (los seeds .ts ya gatean NODE_ENV!=production por su
+# cuenta, pero acá cortamos ANTES por las dudas).
+dev_is_prod() {
+  [[ "${NODE_ENV:-}" == "production" || "${APP_ENV:-development}" == "production" ]]
+}
+
+# ── Auto-seed BARATO de dev (identity + driver + media) ───────────────────────
+# Estos 3 seeds solo piden postgres arriba + migraciones aplicadas (NO el stack node vivo),
+# así que corren seguros tras migrate_all. Son idempotentes (upsert/ON CONFLICT). NUNCA
+# abortan el boot: si uno falla, warning y seguimos — el stack ya está sano, el seed es
+# conveniencia. Cada cmd_seed_* imprime su propio bloque con IDs/credenciales pegables.
+dev_auto_seed() {
+  blue "  🌱 Sembrando datos dev (identity/driver/media)… (idempotente · no rompe el boot)"
+  cmd_seed_identity || yel "  ⚠ seed identity falló — sigo (el boot no se rompe por el seed)."
+  cmd_seed_driver   || yel "  ⚠ seed driver falló — sigo."
+  cmd_seed_media    || yel "  ⚠ seed media falló — sigo."
+}
+
 # ── SUBCOMANDO: dev (WATCH — todo en vivo) ────────────────────────────────────
 # Igual que `up`, pero los servicios arrancan en WATCH (nest start --watch / uvicorn --reload):
 # editás el SRC de un servicio → recompila y reinicia SOLO, sin tocar nada. La INFRA sigue en docker.
@@ -1245,17 +1302,56 @@ build_libs() {
 # LÍMITE HONESTO (libs): los servicios importan @veo/* desde su DIST → un cambio en una lib NO se
 # propaga solo (nest observa el src del servicio, no node_modules). tracking (Go) tampoco tiene watch.
 # ⇒ tocaste una lib o tracking → `veo.sh restart <svc>` (o `veo.sh dev` de nuevo, que rebuildea libs).
+# FLAGS: --no-seed (arranque pelado, sin auto-seed) · --seed-trips[=N] (siembra N viajes al final,
+#        con el stack ya sano; default N=2; opt-in porque necesita kafka+trip+dispatch+admin-bff vivos).
 cmd_dev() {
+  # ── Parseo de flags (mismo estilo que el resto: loop while + case + shift) ──
+  local do_seed=1 seed_trips=0 trips_n=2
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-seed)      do_seed=0 ;;
+      --seed-trips)   seed_trips=1 ;;
+      --seed-trips=*) seed_trips=1; trips_n="${1#*=}" ;;
+      *) yel "  flag desconocido para 'dev': '$1' (válidos: --no-seed | --seed-trips[=N]) — lo ignoro." ;;
+    esac
+    shift
+  done
+  # Sanea N de trips (entero >=1; default 2). El tope real (6 conductores) lo aplica cmd_seed_trips.
+  [[ "$trips_n" =~ ^[0-9]+$ ]] && (( trips_n >= 1 )) || trips_n=2
+
   printf '%s%s🔧 VEO · WATCH (dev en vivo)%s\n' "$C_BOLD" "$C_BLUE" "$C_RESET"
   infra_up_and_wait || { red "Infra no quedó healthy — ABORTO (los servicios la necesitan)."; exit 1; }
+  maps_up               # perfil maps (tiles/ruteo/geocoding soberano) — best-effort, se salta sin datos preparados.
   gen_secrets
   build_libs            # servicios NO pre-buildeados: nest los compila al vuelo. Libs SÍ (se importan de dist).
   migrate_all
+
+  # ── AUTO-SEED BARATO — la DB ya está lista (migrate_all aplicó migraciones) ──
+  # Corre ANTES de bootear los servicios: los seeds baratos escriben directo a postgres.
+  if dev_is_prod; then
+    yel "  🌱 auto-seed SALTEADO (entorno productivo: NODE_ENV/APP_ENV=production)."
+  elif (( ! do_seed )); then
+    yel "  🌱 auto-seed SALTEADO (--no-seed) — arranque pelado, sin datos dev."
+  else
+    dev_auto_seed
+  fi
+
   export VEO_WATCH=1    # ← el flag que boot-passenger/boot-extra/biometric leen para arrancar en watch.
   boot_all
   reconcile_pids
   wait_native_health    # estabiliza los lentos (biometric/tracking) ANTES del tablero.
   cmd_status
+
+  # ── SEED TRIPS (opt-in) — al FINAL: necesita el stack COMPLETO y sano (kafka+trip+dispatch+admin-bff) ──
+  if (( seed_trips )); then
+    if dev_is_prod; then
+      yel "  🚗 --seed-trips SALTEADO (entorno productivo)."
+    else
+      hdr "SEED TRIPS (--seed-trips=$trips_n · stack vivo)"
+      cmd_seed_trips "$trips_n" || yel "  ⚠ seed trips falló — el stack sigue arriba igual."
+    fi
+  fi
+
   printf '\n%s%s✓ WATCH activo:%s editá el SRC de cualquier servicio → recompila y reinicia solo.\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
   yel " Cambiaste una LIB @veo/* o tracking (Go) → 'veo.sh restart <svc>' (o 'veo.sh dev' de nuevo)."
   yel " admin-web: gestionada por veo.sh (next dev/HMR). Apps RN: las compilás vos aparte."
@@ -1472,6 +1568,402 @@ cmd_seed_fleet() {
   yel "  (o esperá al próximo tick del relay). En 'Pendientes' y 'Revisiones' aparece YA (leen identity/fleet directo)."
 }
 
+# ── SUBCOMANDO: SEED (orquestador de seeds DEV) ───────────────────────────────
+# Unifica los seeds de dev en UN comando. Cada target siembra datos IDEMPOTENTES y
+# reporta IDs/credenciales PEGABLES. `seed` sin arg corre los 3 que NO necesitan el
+# stack de SERVICIOS vivo (solo postgres arriba): identity + driver + media. `seed
+# trips` es orquestación aparte (requiere el stack vivo → un viaje real).
+
+# Guard: postgres de infra arriba (todos los seeds escriben directo a la DB).
+_seed_require_pg() {
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${PG_CONT}\$"; then
+    red "  postgres ($PG_CONT) no está arriba — levantá la infra (veo.sh up / dev)"; return 1
+  fi
+}
+
+# Corre el db:seed (tsx) de un servicio node sourceando su env/development.env (DATABASE_URL, etc.),
+# igual que migrate_all. El seed .ts gatea NODE_ENV!=production por su cuenta.
+_seed_node_pkg() {
+  local dir="$1" filter="$2"
+  ( cd "$ROOT_DIR/$dir" || exit 1
+    set -a; export APP_ENV="${APP_ENV:-development}"
+    [[ -f "env/${APP_ENV}.env" ]] && . "env/${APP_ENV}.env" 2>/dev/null
+    set +a
+    pnpm --filter "$filter" db:seed )
+}
+
+cmd_seed_identity() {
+  hdr "SEED IDENTITY (admin SUPERADMIN + 6 operadores por rol · TOTP fijo de dev)"
+  _seed_require_pg || return 1
+  if ! _seed_node_pkg services/identity-service @veo/identity-service; then
+    red "  el seed de identity falló (revisá el error arriba)"; return 1
+  fi
+  green "  seed aplicado (idempotente: upsert por email)"
+  echo
+  blue "  credenciales admin PEGABLES (login del admin-web · misma contraseña para todos):"
+  printf '    %-24s %-22s %s\n' "EMAIL" "CONTRASEÑA" "ROL"
+  printf '    %-24s %-22s %s\n' "admin@veo.pe"      "ChangeMe_VEO_2026!" "SUPERADMIN"
+  printf '    %-24s %-22s %s\n' "admin-role@veo.pe" "ChangeMe_VEO_2026!" "ADMIN"
+  printf '    %-24s %-22s %s\n' "dispatcher@veo.pe" "ChangeMe_VEO_2026!" "DISPATCHER"
+  printf '    %-24s %-22s %s\n' "support-l1@veo.pe" "ChangeMe_VEO_2026!" "SUPPORT_L1"
+  printf '    %-24s %-22s %s\n' "support-l2@veo.pe" "ChangeMe_VEO_2026!" "SUPPORT_L2"
+  printf '    %-24s %-22s %s\n' "compliance@veo.pe" "ChangeMe_VEO_2026!" "COMPLIANCE_SUPERVISOR"
+  printf '    %-24s %-22s %s\n' "finance@veo.pe"    "ChangeMe_VEO_2026!" "FINANCE"
+  echo
+  yel "  TOTP compartido de dev (Google Authenticator): JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP — el código vivo sale en el visor :5190."
+}
+
+cmd_seed_driver() {
+  hdr "SEED DRIVER (conductor elegible + vehículo + docs de flota → simula viajes sin la driver-app)"
+  _seed_require_pg || return 1
+  if ! docker exec -i "$PG_CONT" psql -U veo -d veo -q < "$SCRIPT_DIR/seed-dev-driver.sql"; then
+    red "  el seed de driver falló (revisá el error de psql arriba)"; return 1
+  fi
+  green "  seed aplicado (idempotente: ON CONFLICT)"
+  echo
+  blue "  IDs sembrados (conductor DEV elegible · PEGABLES):"
+  printf '    %-12s %s\n' "user_id"   "d0000000-0000-4000-8000-000000000001  (Carlos Conductor · DRIVER/VERIFIED)"
+  printf '    %-12s %s\n' "driver_id" "d0000000-0000-4000-8000-0000000000a1  (AVAILABLE · background CLEARED)"
+  printf '    %-12s %s\n' "vehículo"  "d0000000-0000-4000-8000-0000000000b1  (Toyota Yaris · ADV-123 · docs VALID)"
+}
+
+cmd_seed_media() {
+  hdr "SEED MEDIA (solicitudes de acceso a video en estados variados → panel Media/Solicitudes)"
+  _seed_require_pg || return 1
+  if ! _seed_node_pkg services/media-service @veo/media-service; then
+    red "  el seed de media falló (revisá el error arriba)"; return 1
+  fi
+  green "  seed aplicado (idempotente: re-arma los PENDING para volver a probar)"
+  echo
+  blue "  solicitudes sembradas (IDs PEGABLES · probá aprobar/rechazar los PENDING):"
+  printf '    %-38s %-9s %s\n' "ID" "ESTADO" "SOLICITANTE"
+  printf '    %-38s %-9s %s\n' "b0a11ce0-0000-4000-8000-000000000001" "PENDING"  "dispatcher@veo.pe"
+  printf '    %-38s %-9s %s\n' "b0a11ce0-0000-4000-8000-000000000002" "PENDING"  "support-l2@veo.pe"
+  printf '    %-38s %-9s %s\n' "b0a11ce0-0000-4000-8000-000000000003" "APPROVED" "support-l2@veo.pe"
+  printf '    %-38s %-9s %s\n' "b0a11ce0-0000-4000-8000-000000000004" "REJECTED" "support-l1@veo.pe"
+  echo
+  yel "  aprobar/rechazar = COMPLIANCE_SUPERVISOR con MFA fresca (login compliance@veo.pe). Cuatro-ojos: el aprobador ≠ el solicitante."
+}
+
+# ── SEED TRIPS (viajes reales → IN_PROGRESS por el PATH DE EVENTOS) ───────────────────────────────────
+# El read-model `bff:rm:trips:s:IN_PROGRESS` lo escribe SOLO el consumer Kafka del admin-bff al recibir
+# `trip.started`. PROHIBIDO escribir Redis a mano: acá disparamos el flujo REAL —
+#   pasajero POST /trips → dispatch matchea (FIXED) → oferta `dispatch.offered` al sim conductor "Carlos" →
+#   el sim ACEPTA el match → trip.match_found → ASSIGNED → el sim avanza la FSM accept→arriving→arrived→start
+#   → `trip.started` → admin-bff proyecta IN_PROGRESS. El sim corre con SIM_STOP_AT=IN_PROGRESS (deja el
+#   viaje EN CURSO, no lo completa). El modo del catálogo por defecto (veo_economico) es FIXED.
+# Requiere el STACK VIVO (postgres+redis+kafka + trip:3092 + dispatch:3093 + admin-bff:4003 con su consumer).
+
+# Secreto HMAC de identidad interna (mismo que firman los servicios y el sim). Fuente canónica: el archivo
+# de dev-stack (idéntico al INTERNAL_IDENTITY_SECRET que cargaron trip/dispatch al bootear).
+trips_internal_secret() {
+  local sf="$SCRIPT_DIR/secrets/internal-identity-secret.txt"
+  [[ -f "$sf" ]] && tr -d '\n' < "$sf"
+}
+
+# Forja la identidad PASAJERO firmada (public-rail) para POST /trips — idéntica a signInternalIdentity de
+# @veo/auth (base64url del JSON + HMAC-SHA256 hex). trip-service acepta cualquier riel permitido; usamos
+# public-rail por semántica (el pasajero entra por el public-bff). $1=secret $2=passengerId(uuid).
+trips_forge_passenger() {
+  node -e '
+    const c = require("crypto");
+    const [secret, passengerId] = [process.argv[1], process.argv[2]];
+    const id = { userId: passengerId, type: "passenger", roles: [], sessionId: "dev-trip-seed", issuedAt: Date.now(), aud: "public-rail" };
+    const header = Buffer.from(JSON.stringify(id)).toString("base64url");
+    const sig = c.createHmac("sha256", secret).update(header).digest("hex");
+    process.stdout.write(header + "\n" + sig + "\n");
+  ' "$1" "$2"
+}
+
+# Forja la identidad CONDUCTOR firmada (driver-rail) — para completar el viaje anterior de un conductor en
+# el reset (POST /trips/:id/complete deriva el driverId de @CurrentUser). $1=secret $2=driverId(perfil a-id).
+trips_forge_driver() {
+  node -e '
+    const c = require("crypto");
+    const [secret, driverId] = [process.argv[1], process.argv[2]];
+    const id = { userId: "dev-sim-driver", type: "driver", roles: [], sessionId: "dev-trip-seed", driverId, issuedAt: Date.now(), aud: "driver-rail" };
+    const header = Buffer.from(JSON.stringify(id)).toString("base64url");
+    const sig = c.createHmac("sha256", secret).update(header).digest("hex");
+    process.stdout.write(header + "\n" + sig + "\n");
+  ' "$1" "$2"
+}
+
+# Libera al conductor a${idx} de un viaje anterior CLAVADO (SIM_STOP_AT lo dejó IN_PROGRESS) → el seed es
+# RE-EJECUTABLE. Camino REAL: completa su(s) viaje(s) IN_PROGRESS (POST /complete → trip.completed → dispatch
+# releaseDriver suelta el busy + admin-bff lo saca del read-model IN_PROGRESS). Backstop: DEL de las claves
+# EFÍMERAS de dispatch (driver:busy/claim) por si quedó ocupado en un estado pre-IN_PROGRESS. $1=secret $2=idx.
+trips_reset_driver() {
+  local secret="$1" idx="$2" d hdr sig tids tid
+  d="d0000000-0000-4000-8000-0000000000a${idx}"
+  tids="$(docker exec -i "$PG_CONT" psql -U veo -d veo -tAc \
+    "select id from trip.trips where driver_id='$d' and status='IN_PROGRESS'" 2>/dev/null)"
+  for tid in $tids; do
+    [[ -z "$tid" ]] && continue
+    { read -r hdr; read -r sig; } < <(trips_forge_driver "$secret" "$d")
+    curl -sS -X POST "http://localhost:${TRIPS_TRIP_PORT}/api/v1/trips/${tid}/complete" \
+      -H 'content-type: application/json' -H "x-veo-identity: $hdr" -H "x-veo-identity-sig: $sig" \
+      --data '{"cashCollected":true}' >/dev/null 2>&1
+    blue "    reset: completé el viaje anterior $tid del conductor $idx (libera al conductor)"
+  done
+  docker exec -i veo-redis redis-cli DEL "driver:busy:$d" "driver:claim:$d" >/dev/null 2>&1
+}
+
+# Crea UN viaje de pasajero (POST /api/v1/trips a trip-service :3092). Pickup EN el punto del sim para que
+# el matching asigne a Carlos. Modo FIXED (default del catálogo) → dispatch ofertará al sim. Imprime
+# "tripId|status|dispatchMode" en éxito; vacío + return 1 si falló. $1=secret.
+trips_create_one() {
+  local secret="$1" pid hdr sig resp body
+  pid="$(node -e 'process.stdout.write(require("crypto").randomUUID())')"
+  { read -r hdr; read -r sig; } < <(trips_forge_passenger "$secret" "$pid")
+  body="$(printf '{"passengerId":"%s","origin":{"lat":%s,"lon":%s},"destination":{"lat":%s,"lon":%s},"paymentMethod":"CASH","category":"veo_economico"}' \
+    "$pid" "$TRIPS_ORIGIN_LAT" "$TRIPS_ORIGIN_LON" "$TRIPS_DEST_LAT" "$TRIPS_DEST_LON")"
+  resp="$(curl -sS -X POST "http://localhost:${TRIPS_TRIP_PORT}/api/v1/trips" \
+    -H 'content-type: application/json' \
+    -H "x-veo-identity: $hdr" -H "x-veo-identity-sig: $sig" \
+    --data "$body" 2>/dev/null)"
+  node -e '
+    let d=""; process.stdin.on("data",c=>d+=c).on("end",()=>{
+      try { const j=JSON.parse(d);
+        if (!j.id) { process.stderr.write(d); process.exit(2); }
+        process.stdout.write(j.id+"|"+(j.status||"?")+"|"+(j.dispatchMode||"?"));
+      } catch { process.stderr.write(d); process.exit(2); }
+    });' <<<"$resp"
+}
+
+# Estado ACTUAL de un viaje en postgres (para detectar EXPIRED/CANCELLED cuando el matching no asignó).
+trips_pg_status() {
+  docker exec -i "$PG_CONT" psql -U veo -d veo -tAc "select status from trip.trips where id='$1'" 2>/dev/null | tr -d '[:space:]'
+}
+
+# ¿el viaje ya está en el read-model IN_PROGRESS del admin-bff? (miembro del ZSET). 0 = sí.
+trips_in_progress() {
+  local sc
+  sc="$(docker exec -i veo-redis redis-cli ZSCORE bff:rm:trips:s:IN_PROGRESS "$1" 2>/dev/null)"
+  [[ -n "$sc" ]]
+}
+
+# Siembra el conductor dev #idx elegible (idx 1..6). idx=1 = Carlos (el seed-dev-driver.sql existente, sin
+# tocar). idx>=2 = conductor derivado con UUIDs por índice (user ...00${idx}, driver ...a${idx},
+# vehículo ...b${idx}), idéntico a Carlos en elegibilidad. Idempotente (ON CONFLICT). $1=idx.
+trips_ensure_driver() {
+  local idx="$1"
+  if [[ "$idx" == "1" ]]; then
+    docker exec -i "$PG_CONT" psql -U veo -d veo -q < "$SCRIPT_DIR/seed-dev-driver.sql" >/dev/null 2>&1
+    return $?
+  fi
+  local u="d0000000-0000-4000-8000-00000000000${idx}"
+  local d="d0000000-0000-4000-8000-0000000000a${idx}"
+  local v="d0000000-0000-4000-8000-0000000000b${idx}"
+  docker exec -i "$PG_CONT" psql -U veo -d veo -q >/dev/null 2>&1 <<SQL
+INSERT INTO identity.users (id, phone, name, type, kyc_status, kyc_verified_at, created_at, updated_at)
+VALUES ('$u', '+51988${idx}00000', 'Conductor DEV ${idx}', 'DRIVER', 'VERIFIED', now(), now(), now())
+ON CONFLICT (id) DO UPDATE SET type='DRIVER', kyc_status='VERIFIED', kyc_verified_at=now(), updated_at=now();
+
+INSERT INTO identity.drivers (id, user_id, current_status, background_check_status, face_embedding,
+  license_number, legal_name, average_rating, total_trips, last_verified_at, created_at, updated_at)
+VALUES ('$d', '$u', 'AVAILABLE', 'CLEARED', '{}', 'LIC-DEV-00${idx}', 'Conductor DEV ${idx}', 4.90, 100, now(), now(), now())
+ON CONFLICT (user_id) DO UPDATE SET current_status='AVAILABLE', background_check_status='CLEARED', suspended_at=NULL, updated_at=now();
+
+INSERT INTO fleet.vehicles (id, plate, make, model, year, color, vehicle_type, driver_id, doc_status, active,
+  insurance_expires_at, created_at, updated_at)
+VALUES ('$v', 'DEV-00${idx}', 'Toyota', 'Yaris', 2022, 'Plomo', 'CAR', '$u', 'VALID', true, now()+interval '1 year', now(), now())
+ON CONFLICT (id) DO UPDATE SET driver_id='$u', doc_status='VALID', active=true, insurance_expires_at=now()+interval '1 year', updated_at=now();
+
+INSERT INTO fleet.fleet_documents (id, owner_type, owner_id, type, document_number, issued_at, expires_at, status, verified_at, created_at, updated_at)
+VALUES
+ ('d0000000-0000-4000-8000-00000000d${idx}c1','DRIVER','$d','LICENSE_A1','Q-DEV${idx}', now()-interval '6 months', now()+interval '2 years','VALID',now(),now(),now()),
+ ('d0000000-0000-4000-8000-00000000d${idx}c2','DRIVER','$d','BACKGROUND_CHECK','ANT-DEV${idx}', now()-interval '1 month', now()+interval '1 year','VALID',now(),now(),now()),
+ ('d0000000-0000-4000-8000-00000000d${idx}c3','DRIVER','$d','SOAT','SOAT-DEV${idx}', now()-interval '1 month', now()+interval '1 year','VALID',now(),now(),now()),
+ ('d0000000-0000-4000-8000-00000000d${idx}c4','DRIVER','$d','PROPERTY_CARD','PROP-DEV${idx}', now()-interval '1 year', now()+interval '5 years','VALID',now(),now(),now()),
+ ('d0000000-0000-4000-8000-00000000d${idx}c5','DRIVER','$d','ITV','ITV-DEV${idx}', now()-interval '1 month', now()+interval '6 months','VALID',now(),now(),now())
+ON CONFLICT (id) DO UPDATE SET status='VALID', expires_at=EXCLUDED.expires_at, verified_at=now(), updated_at=now();
+SQL
+}
+
+# Crea UN viaje y lo espera hasta IN_PROGRESS (recrea, budget 2, si el matching lo deja EXPIRED). SERIAL:
+# creá-esperá-siguiente garantiza que cada viaje tome un conductor AVAILABLE distinto (el previo ya quedó
+# ocupado IN_PROGRESS). Imprime SOLO el tripId logrado por stdout (vacío + return 1 si no llegó). $1=secret.
+# Los logs van a stderr para no contaminar el stdout capturado.
+trips_one_to_inprogress() {
+  local secret="$1" line tid st budget=2 deadline
+  while (( budget > 0 )); do
+    budget=$((budget - 1))
+    if ! line="$(trips_create_one "$secret")"; then
+      red "    createTrip falló: $line" >&2; return 1
+    fi
+    tid="${line%%|*}"
+    blue "    → $line" >&2
+    deadline=$(( $(date +%s) + 90 ))
+    while (( $(date +%s) < deadline )); do
+      if trips_in_progress "$tid"; then printf '%s' "$tid"; return 0; fi
+      st="$(trips_pg_status "$tid")"
+      case "$st" in
+        EXPIRED|FAILED|CANCELLED*)
+          yel "    ⚠ $tid quedó en $st (matching sin candidato) — reintento" >&2
+          break ;;   # sale del wait → recrea si queda budget
+      esac
+      sleep 3
+    done
+    trips_in_progress "$tid" && { printf '%s' "$tid"; return 0; }
+  done
+  return 1
+}
+
+cmd_seed_trips() {
+  hdr "SEED TRIPS (viajes reales → IN_PROGRESS por el path de eventos · stack vivo)"
+  local count="${1:-2}"
+  [[ "$count" =~ ^[0-9]+$ ]] && (( count >= 1 )) || count=2
+  if (( count > 6 )); then yel "  máximo 6 conductores dev — limito a 6"; count=6; fi
+
+  # Coords del pickup = el punto por defecto del sim (los conductores quedan EN el recojo → matching inmediato).
+  local TRIPS_ORIGIN_LAT=-12.003267 TRIPS_ORIGIN_LON=-77.063354
+  local TRIPS_DEST_LAT=-12.012100  TRIPS_DEST_LON=-77.045100
+  local TRIPS_TRIP_PORT=3092
+
+  # ── 1. PREFLIGHT: el stack necesario debe estar vivo (NO lo levantamos nosotros) ──
+  local cont
+  for cont in "$PG_CONT" veo-redis veo-kafka; do
+    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${cont}\$"; then
+      red "  contenedor '$cont' no está arriba — levantá la infra primero: 'veo.sh dev'"; return 1
+    fi
+  done
+  if [[ "$(health_code http://localhost:3092/health)" != "200" ]]; then
+    red "  trip-service :3092 no responde — levantá 'veo.sh dev' primero"; return 1; fi
+  if [[ "$(health_code http://localhost:3093/health)" != "200" ]]; then
+    red "  dispatch-service :3093 no responde — levantá 'veo.sh dev' primero"; return 1; fi
+  # admin-bff proyecta el read-model con SU consumer Kafka. /health puede dar 401 (guard global): basta que
+  # el puerto RESPONDA (≠ 000). La prueba REAL de que su consumer proyecta es que los viajes lleguen abajo.
+  if [[ "$(health_code http://localhost:4003/health)" == "000" ]]; then
+    red "  admin-bff :4003 no responde — su consumer Kafka proyecta el read-model; levantá 'veo.sh dev'"; return 1; fi
+  if ! command -v node >/dev/null 2>&1; then
+    red "  falta node en PATH (se usa para firmar la identidad interna del pasajero)"; return 1; fi
+
+  local secret; secret="$(trips_internal_secret)"
+  if [[ -z "$secret" ]]; then
+    red "  no pude leer el secreto interno ($SCRIPT_DIR/secrets/internal-identity-secret.txt)"; return 1; fi
+
+  # ── 2. Sembrar N conductores elegibles (Carlos = idx 1; el resto derivados) ──
+  # Cada conductor solo puede estar EN UN viaje; N viajes IN_PROGRESS simultáneos ⇒ N conductores + N sims.
+  blue "  sembrando $count conductor(es) dev elegible(s)…"
+  local i
+  for (( i = 1; i <= count; i++ )); do
+    if ! trips_ensure_driver "$i"; then red "  falló el seed del conductor $i"; return 1; fi
+  done
+
+  # Reset RE-EJECUTABLE: libera a cada conductor de un viaje anterior clavado (SIM_STOP_AT deja el viaje
+  # IN_PROGRESS → el conductor queda ocupado). Sin esto una 2da corrida no matchea (busy) ni limpia el
+  # read-model. Camino real (complete) + backstop efímero. Ver trips_reset_driver.
+  blue "  liberando conductores de viajes anteriores (re-ejecutable)…"
+  for (( i = 1; i <= count; i++ )); do trips_reset_driver "$secret" "$i"; done
+
+  # ── 3. Arrancar N sims (uno por conductor) — cada uno en su PROPIO grupo de procesos (set -m) para
+  #       poder matar el ÁRBOL entero (pnpm→tsx→node) con kill al grupo. SIM_STOP_AT=IN_PROGRESS. ──
+  local -a sim_pids=() sim_logs=()
+  local u d v log
+  set -m
+  for (( i = 1; i <= count; i++ )); do
+    u="d0000000-0000-4000-8000-00000000000${i}"
+    d="d0000000-0000-4000-8000-0000000000a${i}"
+    v="d0000000-0000-4000-8000-0000000000b${i}"
+    log="$(mktemp -t "veo-sim-trips-${i}.XXXXXX")"
+    ( cd "$ROOT_DIR/services/dispatch-service" && \
+        exec env INTERNAL_IDENTITY_SECRET="$secret" KAFKA_BROKERS=localhost:9094 SIM_STOP_AT=IN_PROGRESS \
+          SIM_LAT="$TRIPS_ORIGIN_LAT" SIM_LON="$TRIPS_ORIGIN_LON" \
+          SIM_USER_ID="$u" SIM_DRIVER_ID="$d" SIM_VEHICLE_ID="$v" \
+          pnpm tsx scripts/sim-driver.ts ) >"$log" 2>&1 &
+    sim_pids[$i]=$!
+    sim_logs[$i]="$log"
+    blue "  sim conductor $i (driver ...a${i}) PID/grupo=${sim_pids[$i]} · log: $log"
+  done
+  set +m
+
+  # Mata el ÁRBOL de cada sim vía su grupo de procesos (negativo = grupo). Definido acá para ver los locales.
+  _trips_kill_sims() {
+    local p
+    for p in ${sim_pids[@]+"${sim_pids[@]}"}; do
+      [[ -n "$p" ]] || continue
+      kill -TERM -"$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null
+    done
+    wait 2>/dev/null
+    pkill -f 'scripts/sim-driver.ts' 2>/dev/null  # backstop por si algún hijo se reparentó
+  }
+
+  # ── 4. Esperar readiness de cada sim (su consumer Kafka unido al grupo) ──
+  local ready j
+  for (( i = 1; i <= count; i++ )); do
+    ready=0
+    for (( j = 0; j < 50; j++ )); do
+      if grep -q 'SIM_CONSUMER_READY' "${sim_logs[$i]}" 2>/dev/null; then ready=1; break; fi
+      if ! kill -0 "${sim_pids[$i]}" 2>/dev/null; then
+        red "  el sim $i murió al arrancar:"; tail -n 20 "${sim_logs[$i]}" | sed 's/^/    /'
+        _trips_kill_sims; return 1
+      fi
+      sleep 1
+    done
+    if (( ready == 0 )); then
+      red "  el sim $i no quedó listo en 50s (consumer no unido):"; tail -n 20 "${sim_logs[$i]}" | sed 's/^/    /'
+      _trips_kill_sims; return 1
+    fi
+  done
+  green "  $count sim(s) listos (consumers unidos). Buffer de estabilización…"
+  sleep 3
+
+  # ── 5-6. Crear N viajes SECUENCIALMENTE, cada uno hasta IN_PROGRESS (uno por conductor) ──
+  local -a ok=()
+  local tid
+  for (( i = 1; i <= count; i++ )); do
+    if tid="$(trips_one_to_inprogress "$secret")" && [[ -n "$tid" ]]; then
+      green "    ✅ viaje $i: $tid → IN_PROGRESS"; ok[$i]="$tid"
+    else
+      yel "    ✗ viaje $i no llegó a IN_PROGRESS"
+    fi
+  done
+
+  # ── 7. Bajar los sims ──
+  echo
+  blue "  bajando $count sim(s)…"
+  _trips_kill_sims
+
+  # ── Reporte final (leído del read-model REAL) ──
+  local got=0 t
+  for t in ${ok[@]+"${ok[@]}"}; do [[ -n "$t" ]] && got=$((got + 1)); done
+  echo
+  blue "  read-model bff:rm:trips:s:IN_PROGRESS ahora:"
+  docker exec -i veo-redis redis-cli ZRANGE bff:rm:trips:s:IN_PROGRESS 0 -1 2>/dev/null | sed 's/^/    /'
+  if (( got == count )); then
+    green "  seed trips OK — $got/$count viaje(s) en IN_PROGRESS por el path real de eventos."
+    return 0
+  fi
+  yel  "  seed trips incompleto — $got/$count en IN_PROGRESS. Logs de sim: ${sim_logs[*]+"${sim_logs[*]}"}"
+  yel  "  causas típicas: matching sin candidato (eligibilidad del conductor), admin-bff consumer caído, o Kafka lento."
+  return 1
+}
+
+# Dispatcher interno por target. Sin arg (o 'all') corre identity+driver+media (los que solo piden postgres).
+cmd_seed() {
+  local target="${1:-all}"
+  local arg2="${2:-}"
+  case "$target" in
+    identity) cmd_seed_identity ;;
+    driver)   cmd_seed_driver ;;
+    media)    cmd_seed_media ;;
+    trips)    cmd_seed_trips "$arg2" ;;
+    all|"")
+      cmd_seed_identity || return 1
+      cmd_seed_driver   || return 1
+      cmd_seed_media    || return 1
+      hdr "RESUMEN SEED DEV (consolidado)"
+      blue "  admin:    admin@veo.pe / ChangeMe_VEO_2026!  (SUPERADMIN) + 6 roles (dispatcher/support-l1/support-l2/compliance/finance/admin-role @veo.pe · misma pass)"
+      blue "  TOTP dev: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP  (código vivo en el visor :5190)"
+      blue "  driver:   user d0000000-…-000000000001 · driver d0000000-…-0000000000a1 · vehículo d0000000-…-0000000000b1 (ADV-123)"
+      blue "  media:    4 solicitudes b0a11ce0-…-0000000000{01..04}  (2 PENDING · 1 APPROVED · 1 REJECTED)"
+      yel  "  NO incluye trips (requiere el stack vivo): corré 'veo.sh seed trips' aparte."
+      ;;
+    *)
+      red "  target de seed desconocido: '$target' (usá: identity | driver | media | trips | <vacío>=identity+driver+media)"; return 1 ;;
+  esac
+}
+
 cmd_run_payouts() {
   hdr "RUN PAYOUTS (disparo manual del cron semanal de liquidación)"
   local body='{}'
@@ -1494,10 +1986,19 @@ cmd_run_reconcile() {
   yel "  la discrepancia sale ALTA (extracto vacío vs DB con cobros) y la corrida queda 'alerted'. Es esperado en dev."
 }
 
+cmd_login() {
+  # Delega en login.mjs (node nativo, cero deps): calcula el TOTP vivo, hace POST /auth/login contra
+  # admin-bff y devuelve las cookies veo_at/veo_rt listas para chrome-devtools / curl. --json para pipes.
+  # En --json NO imprimimos el header: stdout debe ser JSON PURO para consumir por pipe.
+  local json=0; for a in "$@"; do [[ "$a" == "--json" ]] && json=1; done
+  [[ $json -eq 0 ]] && hdr "LOGIN ADMIN DEV (auto-TOTP → cookies de sesión pegables)"
+  node "$SCRIPT_DIR/login.mjs" "$@"
+}
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 case "${1:-}" in
   up)      cmd_up ;;
-  dev)     cmd_dev ;;
+  dev)     shift; cmd_dev "$@" ;;
   down)    shift; cmd_down "${1:-}" ;;
   status)  cmd_status ;;
   monitor) cmd_monitor ;;
@@ -1506,16 +2007,21 @@ case "${1:-}" in
   migrate) cmd_migrate ;;
   otp)     shift; cmd_otp "${1:-}" ;;
   trazar)  shift; cmd_trazar "${1:-}" ;;
+  seed)          shift; cmd_seed "${1:-}" "${2:-}" ;;
   seed-finance)  cmd_seed_finance ;;
   seed-fleet)    cmd_seed_fleet ;;
   run-payouts)   shift; cmd_run_payouts "${1:-}" "${2:-}" ;;
   run-reconcile) shift; cmd_run_reconcile "${1:-}" ;;
+  login)         shift; cmd_login "$@" ;;
   *)
     cat <<EOF
 ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
 
   ${C_BOLD}up${C_RESET}                 Ignición completa (infra → secrets → build → migrate → boot → tablero)
-  ${C_BOLD}dev${C_RESET}                Como 'up' pero servicios en WATCH (nest --watch/uvicorn --reload): editás src → reinicia solo
+  ${C_BOLD}dev${C_RESET} [--no-seed] [--seed-trips[=N]]
+                     Como 'up' pero servicios en WATCH (nest --watch/uvicorn --reload): editás src → reinicia solo.
+                     AUTO-SIEMBRA barato (identity/driver/media) tras migrar · --no-seed lo saltea ·
+                     --seed-trips[=N] (default 2) siembra viajes AL FINAL (opt-in: requiere el stack vivo)
   ${C_BOLD}down${C_RESET} [--infra]     Apagado limpio en capas (pidfiles → puertos → patrón). --infra baja docker
   ${C_BOLD}status${C_RESET}             El tablero (health/pid/dist/último error por servicio + infra)
   ${C_BOLD}monitor${C_RESET}            El escáner EN VIVO: sigue todos los logs y muestra solo errores al pasar
@@ -1529,6 +2035,9 @@ ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
   ${C_BOLD}seed-fleet${C_RESET}         Siembra FLOTA DEV: conductor PENDING + vehículo en revisión + docs/inspección (Conductores/Vehículos/Revisiones) e imprime los IDs
   ${C_BOLD}run-payouts${C_RESET} [i f]  Dispara el run de liquidación (POST /payouts/run · FINANCE firmado). Default = semana previa
   ${C_BOLD}run-reconcile${C_RESET} [d]  Dispara la conciliación de un día (POST /reconciliation/run · dev-only). [d]=YYYY-MM-DD, default ayer
+  ${C_BOLD}login${C_RESET} [--json]     Auto-login admin dev (TOTP vivo → cookies veo_at/veo_rt pegables para chrome-devtools/curl). --json = para pipes
+  ${C_BOLD}seed${C_RESET} [target]      Orquesta seeds DEV idempotentes: ${C_BOLD}identity${C_RESET}(admin+6 roles+TOTP) · ${C_BOLD}driver${C_RESET}(conductor+vehículo+docs) · ${C_BOLD}media${C_RESET}(accesos a video). Sin arg = los 3
+  ${C_BOLD}seed trips${C_RESET} [N]    Siembra N viajes (default 2) hasta IN_PROGRESS por el PATH REAL de eventos (pasajero→dispatch→sim conductor→trip.started→read-model). Requiere el stack vivo
 
   servicios: $(printf '%s ' "${SERVICES[@]%%|*}")
 EOF
