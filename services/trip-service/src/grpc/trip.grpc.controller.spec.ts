@@ -93,6 +93,8 @@ function makeController(trip: Trip | null, trips: Partial<TripsService> = {}): T
     findActiveByDriver: async () => trip,
     findOldestPendingSettlement: async () => trip,
     findStateById: async () => (trip ? { id: trip.id, status: trip.status } : null),
+    findModesByIds: async (ids) =>
+      trip && ids.includes(trip.id) ? [{ id: trip.id, dispatchMode: trip.dispatchMode }] : [],
   };
   const query = {} as unknown as TripQueryService;
   return new TripGrpcController(repo, trips as TripsService, query, config);

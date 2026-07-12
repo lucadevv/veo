@@ -39,7 +39,15 @@ export interface TripGrpcRepository {
   findOldestPendingSettlement(passengerId: string): Promise<Trip | null>;
   /** Estado del viaje por id (read, proyección `{ id, status }`). `null` si no existe. */
   findStateById(id: string): Promise<TripStateRef | null>;
+  /**
+   * Modo de despacho CONGELADO (`{ id, dispatchMode }`) de un LOTE de viajes por id — enriquecimiento MODO
+   * on-read de la lista OPS admin, anti-N+1. Ids inexistentes simplemente no vienen en el resultado.
+   */
+  findModesByIds(ids: string[]): Promise<TripModeRef[]>;
 }
+
+/** Proyección mínima del modo de despacho por viaje (GetTripModesByIds). Sin PII. */
+export type TripModeRef = Pick<Trip, 'id' | 'dispatchMode'>;
 
 @Injectable()
 export class PrismaTripGrpcRepository implements TripGrpcRepository {
@@ -74,6 +82,14 @@ export class PrismaTripGrpcRepository implements TripGrpcRepository {
     return this.prisma.read.trip.findUnique({
       where: { id },
       select: { id: true, status: true },
+    });
+  }
+
+  findModesByIds(ids: string[]): Promise<TripModeRef[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.prisma.read.trip.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, dispatchMode: true },
     });
   }
 }

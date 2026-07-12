@@ -903,6 +903,13 @@ export class TripsService {
             promoCode: trip.promoCode ?? undefined,
             // EFECTIVO: "el conductor cobró en mano" → payment crea CashConfirmation driverConfirmed=true.
             cashCollected,
+            // MÉTRICAS · modo de despacho (Fijo/Puja) + origen (lat/lng), congelados en el viaje. payment los
+            // DENORMALIZA en el Payment para los cortes de ingresos por MODO y por DISTRITO del panel (sin join
+            // cross-service). El corte Fijo/Puja divide el ON_DEMAND; el distrito zonifica el origen.
+            dispatchMode: trip.dispatchMode,
+            originLat: trip.originLat,
+            // el trip-service persiste el origen como originLat/originLon; el evento lo expone como originLng.
+            originLng: trip.originLon,
           },
         }),
         id,

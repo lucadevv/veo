@@ -79,7 +79,22 @@ interface TripReply {
   /// BE-2 · solicitudes especiales del pasajero (enum SpecialRequest como string); [] si ninguna.
   /// El conductor las VE en la oferta entrante (ADR-018) para decidir antes de aceptar.
   specialRequests: string[];
+  /// Modo de despacho CONGELADO (FIXED|PUJA · PricingMode como string); '' solo en EMPTY_TRIP (→ null en el BFF).
+  dispatchMode: string;
   found: boolean;
+}
+
+interface TripIdsRequest {
+  ids: string[];
+}
+
+interface TripModeItemReply {
+  id: string;
+  dispatchMode: string;
+}
+
+interface TripModesReply {
+  items: TripModeItemReply[];
 }
 
 interface TripStateReply {
@@ -151,10 +166,12 @@ const EMPTY_TRIP: TripReply = {
   routePolyline: '',
   waypoints: [],
   specialRequests: [],
+  dispatchMode: '',
   found: false,
 };
 
 @Controller()
+// gRPC lector síncrono del viaje (detalle, rehidratación, modos por lote para la lista OPS).
 export class TripGrpcController {
   private readonly secret: string;
 
@@ -287,6 +304,8 @@ export class TripGrpcController {
       // BE-2 · solicitudes especiales del pasajero (enum SpecialRequest[]); [] si ninguna. El conductor
       // las ve en la oferta entrante (ADR-018). proto3 repeated nunca es null.
       specialRequests: t.specialRequests,
+      // Modo de despacho CONGELADO (resolve-once-persist): valor exacto de la fila, no del read-model lossy.
+      dispatchMode: t.dispatchMode,
       found: true,
     };
   }
@@ -328,6 +347,8 @@ export class TripGrpcController {
       waypoints: v.waypoints,
       // BE-2 · solicitudes especiales (el TripView ya las trae como SpecialRequest[]); [] si ninguna.
       specialRequests: v.specialRequests,
+      // Modo de despacho CONGELADO (el TripView ya lo trae como PricingMode).
+      dispatchMode: v.dispatchMode,
       found: true,
     };
   }
@@ -337,6 +358,19 @@ export class TripGrpcController {
     const t = await this.repo.findStateById(id);
     if (!t) return { id: '', status: '', found: false };
     return { id: t.id, status: t.status, found: true };
+  }
+
+  /**
+   * Modo de despacho (FIXED|PUJA) de un LOTE de viajes por id — enriquecimiento MODO on-read de la lista OPS
+   * del admin, anti-N+1 (un solo round-trip para toda la página). Lee el `dispatchMode` CONGELADO de la fila
+   * (resolve-once-persist, ADR-011), así que es SIEMPRE exacto — a diferencia del read-model event-proyectado,
+   * que pierde el flip FIXED→PUJA del re-bid. Ids inexistentes NO vienen en `items` (el BFF los trata como
+   * null → "—"). Sin PII: solo id+modo (los nombres los resuelve el batch de identity aparte).
+   */
+  @GrpcMethod('TripService', 'GetTripModesByIds')
+  async getTripModesByIds({ ids }: TripIdsRequest): Promise<TripModesReply> {
+    const rows = await this.repo.findModesByIds(ids ?? []);
+    return { items: rows.map((r) => ({ id: r.id, dispatchMode: r.dispatchMode })) };
   }
 
   /**
