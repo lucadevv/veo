@@ -28,6 +28,18 @@ if [ ! -f "tiles/region.mbtiles" ]; then
   docker run --rm -v "$HERE:/work" -w /work ghcr.io/onthegomap/planetiler:latest \
     --download --osm-path="/work/$PBF" --output="/work/tiles/region.mbtiles" --force
 fi
+# Fonts (glyphs) para el tileserver: el style veo-dark usa "Noto Sans Regular" y el config apunta a
+# tiles/fonts. NO vienen del .mbtiles → los extraemos de la imagen tileserver-gl (bundled) una sola vez.
+# Sin esto tileserver-gl aborta al boot ("path for fonts does not exist").
+if [ ! -d "tiles/fonts" ]; then
+  echo "    extrayendo fonts (glyphs) bundled de tileserver-gl → tiles/fonts"
+  docker run --rm -v "$HERE/tiles:/out" --entrypoint sh maptiler/tileserver-gl:latest \
+    -c 'cp -r /usr/src/app/node_modules/tileserver-gl-styles/fonts /out/fonts'
+fi
+# El config referencia un dir `sprites` (aunque el style veo-dark no use sprites): tileserver-gl aborta si
+# la ruta no existe → un dir vacío satisface el check.
+mkdir -p tiles/sprites
+
 cat > tiles/config.json <<'JSON'
 {
   "options": {

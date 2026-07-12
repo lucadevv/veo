@@ -122,8 +122,10 @@ async function injectOtp(phone, code) {
 /** Aprueba al conductor en la DB de identity (seed de back-office, vía docker exec psql). */
 async function approveDriverByUserId(userId) {
   const sql = [
-    `UPDATE identity.drivers SET background_check_status='CLEARED' WHERE user_id='${userId}';`,
-    `UPDATE identity.users SET kyc_status='VERIFIED' WHERE id='${userId}';`,
+    // legal_name: el onboarding del sim solo manda la licencia (no hay pantalla de nombre), así que sin esto
+    // el conductor sale "Sin nombre" en el panel admin. Le damos un nombre honesto y marcado como DEV.
+    `UPDATE identity.drivers SET background_check_status='CLEARED', legal_name=COALESCE(NULLIF(legal_name,''),'Conductor Sim (DEV)') WHERE user_id='${userId}';`,
+    `UPDATE identity.users SET kyc_status='VERIFIED', name=COALESCE(NULLIF(name,''),'Conductor Sim (DEV)') WHERE id='${userId}';`,
     `SELECT count(*) FROM identity.drivers WHERE user_id='${userId}' AND background_check_status='CLEARED';`,
   ].join(' ');
   const { stdout } = await execFileAsync('docker', [

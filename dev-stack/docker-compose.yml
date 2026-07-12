@@ -257,7 +257,7 @@ services:
       IMPORT_WIKIPEDIA: "false"
       NOMINATIM_PASSWORD: veo_dev
     ports:
-      - "${NOMINATIM_PORT:-8081}:8080" # default 8081 (contrato); override si el host lo tiene ocupado
+      - "${NOMINATIM_PORT:-8085}:8080" # 8085: el 8081 lo ocupa el Metro de passenger (fijo). override con NOMINATIM_PORT.
     volumes:
       - ./maps/nominatim/data:/nominatim/data # rw: el entrypoint mediagis hace chown -R sobre /nominatim
       - nominatim-data:/var/lib/postgresql/14/main
