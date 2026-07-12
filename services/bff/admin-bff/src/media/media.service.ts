@@ -13,7 +13,7 @@ import {
 } from '@veo/auth';
 import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { canAccessLiveCabin, normalizeTripStatus } from '@veo/api-client';
-import { GRPC_TRIP, REST_MEDIA } from '../infra/tokens';
+import { GRPC_TRIP, REST_MEDIA, REST_IDENTITY } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 import type { LiveAccessDto, RequestAccessDto, VideoAccessStatus } from './dto/media.dto';
@@ -59,11 +59,27 @@ export interface MediaAccessRequestView {
   id: string;
   tripId: string;
   requestedBy: string;
+  requesterEmail: string;
+  requesterName: string | null;
+  requesterRole: string | null;
   reason: string;
   status: VideoAccessStatus;
   requestedAt: string;
   decidedAt: string | null;
   decidedBy: string | null;
+}
+
+/** Fila del roster de operadores (identity GET /admin/operators) — subset usado para enriquecer al solicitante. */
+interface OperatorRow {
+  email: string;
+  name: string | null;
+  roles: string[];
+}
+
+/** Identidad enriquecida del solicitante (STAFF · accountability): nombre + rol primario. `null` si no se resolvió. */
+interface RequesterIdentity {
+  name: string | null;
+  role: string | null;
 }
 
 /**
@@ -99,11 +115,16 @@ export interface SegmentView {
  * Mapea el registro completo de media-service a la vista del cliente (contrato EXACTO validado por Zod).
  * `decidedAt`/`decidedBy` colapsan la rama approve/reject en un solo campo (la que esté presente, o null).
  */
-function toView(req: VideoAccessRequest): MediaAccessRequestView {
+function toView(req: VideoAccessRequest, who?: RequesterIdentity): MediaAccessRequestView {
   return {
     id: req.id,
     tripId: req.tripId,
     requestedBy: req.requestedBy,
+    // Email del solicitante: lo provee media-service (quemado en el watermark forense) → siempre presente.
+    requesterEmail: req.requestedByEmail,
+    // Nombre/rol enriquecidos on-read (roster de operadores); null en respuestas de mutación (el cliente refetchea).
+    requesterName: who?.name ?? null,
+    requesterRole: who?.role ?? null,
     reason: req.reason,
     status: req.status,
     requestedAt: req.createdAt,
@@ -118,12 +139,32 @@ export class MediaService {
 
   constructor(
     @Inject(REST_MEDIA) private readonly rest: InternalRestClient,
+    @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly audit: AuditRecorder,
     config: ConfigService<Env, true>,
   ) {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
+  }
+
+  /**
+   * Mapa email→identidad del STAFF (roster de operadores identity), para enriquecer al SOLICITANTE de cada
+   * acceso (accountability de la doble-auth · quién pide ver video). UNA lectura REST (pocos operadores). El
+   * rol primario = `roles[0]` (crudo AdminRole; el front lo traduce). fail-safe: si el roster cae → mapa vacío
+   * (la vista degrada a solo email honesto, nunca rompe la pantalla). Emails normalizados a minúsculas.
+   */
+  private async requesterDirectory(
+    identity: AuthenticatedUser,
+  ): Promise<Map<string, RequesterIdentity>> {
+    const ops = await this.identityRest
+      .get<OperatorRow[]>('/admin/operators', { identity })
+      .catch(() => [] as OperatorRow[]);
+    const map = new Map<string, RequesterIdentity>();
+    for (const o of ops) {
+      map.set(o.email.toLowerCase(), { name: o.name || null, role: o.roles?.[0] ?? null });
+    }
+    return map;
   }
 
   /** Lista las solicitudes de acceso (opcionalmente filtradas por estado). Lectura — solo rol, sin step-up. */
@@ -135,7 +176,10 @@ export class MediaService {
       identity,
       query: { status },
     });
-    return res.map(toView);
+    // Enriquecimiento del SOLICITANTE (nombre + rol) por página: UNA lectura del roster de operadores, mapeada
+    // por email (el email ya viene en cada request). No es PII de pasajero/conductor — es accountability del staff.
+    const directory = await this.requesterDirectory(identity);
+    return res.map((r) => toView(r, directory.get(r.requestedByEmail.toLowerCase())));
   }
 
   /**
@@ -163,6 +207,11 @@ export class MediaService {
       id: created.id,
       tripId: dto.tripId,
       requestedBy: identity.userId,
+      // El solicitante es el usuario actual → email de su sesión (accountability); "" si el token no lo porta.
+      requesterEmail: identity.email ?? '',
+      // Nombre/rol los rellena el refetch de la lista (enriquecido por el roster); acá null honesto.
+      requesterName: null,
+      requesterRole: null,
       reason: dto.reason,
       status: created.status,
       requestedAt: new Date().toISOString(),

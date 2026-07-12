@@ -52,6 +52,22 @@ export class SecurityController {
     return this.security.ack(user, id);
   }
 
+  @Post('panics/:id/dispatch')
+  @HttpCode(200)
+  @Permission('panics:ack')
+  @ApiOperation({ summary: 'Despacha una unidad de respuesta al incidente (acción lateral)' })
+  dispatch(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PanicDetail> {
+    return this.security.dispatch(user, id);
+  }
+
+  @Post('panics/:id/escalate')
+  @HttpCode(200)
+  @Permission('panics:ack')
+  @ApiOperation({ summary: 'Escala el incidente a autoridades (acción lateral)' })
+  escalate(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PanicDetail> {
+    return this.security.escalate(user, id);
+  }
+
   @Post('panics/:id/resolve')
   @HttpCode(200)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)

@@ -76,6 +76,31 @@ export class RefundDto {
   forceNew?: boolean;
 }
 
+/** Cola de reembolsos: filtro por estado (validado contra el enum) + paginación cursor. */
+export class RefundsQueryDto {
+  @IsOptional()
+  @IsIn(['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'])
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
+/** Body del POST /finance/refunds/:id/reject: motivo del rechazo (textarea del RejectModal). */
+export class RejectRefundBodyDto {
+  @IsString()
+  @MinLength(3)
+  reason!: string;
+}
+
 /**
  * Edita SOLO la comisión ON-DEMAND (F2.7 · CAS desacoplada #3): la comisión descontada al conductor. En BASIS
  * POINTS Int (0..10000; 2000 = 20%) — jamás float. `expectedVersion` = CAS sobre `version` (independiente de la

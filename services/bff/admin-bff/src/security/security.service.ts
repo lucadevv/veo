@@ -43,6 +43,10 @@ interface PanicEntity {
   ackBy?: string;
   resolvedAt?: string;
   resolutionNotes?: string;
+  dispatchedAt?: string;
+  dispatchedBy?: string;
+  escalatedAt?: string;
+  escalatedBy?: string;
 }
 @Injectable()
 export class SecurityService {
@@ -114,9 +118,25 @@ export class SecurityService {
     return {
       ...base,
       passengerName: identityVisible ? (passenger?.found ? passenger.name || null : null) : null,
+      // Teléfono del pasajero (PII · Compliance+) para "Contactar pasajera"; sub-Compliance → null.
+      passengerPhone: identityVisible ? (passenger?.found ? passenger.phone || null : null) : null,
       driverId,
       driverName: identityVisible ? (driver?.found ? driver.name || null : null) : null,
     };
+  }
+
+  /** Despachar unidad de respuesta (acción lateral · audit + panic.dispatched vía panic-service). */
+  async dispatch(identity: AuthenticatedUser, id: string): Promise<PanicDetail> {
+    const p = await this.rest.post<PanicEntity>(`/panic/${id}/dispatch`, { identity });
+    await this.audit.record(identity, { action: 'panic.dispatch', resourceType: 'panic', resourceId: id });
+    return this.enrichPanicDetail(identity, p);
+  }
+
+  /** Escalar a autoridades (acción lateral · audit + panic.escalated vía panic-service). */
+  async escalate(identity: AuthenticatedUser, id: string): Promise<PanicDetail> {
+    const p = await this.rest.post<PanicEntity>(`/panic/${id}/escalate`, { identity });
+    await this.audit.record(identity, { action: 'panic.escalate', resourceType: 'panic', resourceId: id });
+    return this.enrichPanicDetail(identity, p);
   }
 
   async resolve(
@@ -181,6 +201,7 @@ function toPanicDetail(p: PanicEntity): PanicDetail {
     tripId: p.tripId,
     passengerId: p.passengerId,
     passengerName: null,
+    passengerPhone: null,
     driverId: null,
     driverName: null,
     status: p.status,
@@ -189,6 +210,8 @@ function toPanicDetail(p: PanicEntity): PanicDetail {
     acknowledgedAt: p.acknowledgedAt ?? null,
     resolvedAt: p.resolvedAt ?? null,
     acknowledgedBy: p.ackBy ?? null,
+    dispatchedAt: p.dispatchedAt ?? null,
+    escalatedAt: p.escalatedAt ?? null,
     notes: p.resolutionNotes ?? null,
     evidence: (p.evidenceS3Keys ?? []).map((key) => ({
       id: key,

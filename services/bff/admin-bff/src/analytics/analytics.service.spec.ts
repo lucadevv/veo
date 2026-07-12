@@ -25,6 +25,9 @@ describe('AnalyticsService.revenue (bff) · view de revenue por rango', () => {
       moneyInCents: 3000,
       grossCommissionCents: 600,
       refundedCents: 450,
+      tripCount: 100,
+      byMode: [{ mode: 'ON_DEMAND', revenueCents: 3000 }],
+      previous: { moneyInCents: 2000, tripCount: 80 },
       series: [{ bucket: '2026-07-15', revenueCents: 3000 }],
     }));
 
@@ -36,6 +39,14 @@ describe('AnalyticsService.revenue (bff) · view de revenue por rango', () => {
       grossCommissionCents: 600,
       refundedCents: 450,
       platformMarginCents: 150, // 600 − 450, derivado por el bff
+      tripCount: 100,
+      avgTicketCents: 30, // round(3000 / 100)
+      byMode: [{ mode: 'ON_DEMAND', revenueCents: 3000 }],
+      deltas: {
+        moneyInPct: 0.5, // (3000 − 2000) / 2000
+        tripCountPct: 0.25, // (100 − 80) / 80
+        avgTicketPct: 0.2, // (30 − 25) / 25 (prev avg = 2000/80)
+      },
       series: [{ bucket: '2026-07-15', revenueCents: 3000 }],
     });
     // Llama al interno correcto con el rango en el query (HMAC · identity propagada).
@@ -58,7 +69,79 @@ describe('AnalyticsService.revenue (bff) · view de revenue por rango', () => {
       grossCommissionCents: 0,
       refundedCents: 0,
       platformMarginCents: 0,
+      tripCount: 0,
+      avgTicketCents: 0,
+      byMode: [],
+      deltas: { moneyInPct: null, tripCountPct: null, avgTicketPct: null },
       series: [],
     });
+  });
+});
+
+describe('AnalyticsService.overview (bff) · KPIs de hoy (derivados + passthrough del margen/viajes)', () => {
+  /** InternalRestClient fake: `get` resuelve el reply (o lanza, para el caso degradado de payment). */
+  function rest(reply: unknown, throws = false): InternalRestClient {
+    return {
+      get: vi.fn(async () => {
+        if (throws) throw new Error('down');
+        return reply;
+      }),
+    } as unknown as InternalRestClient;
+  }
+  const logger = { info: vi.fn(), warn: vi.fn() } as unknown as Logger;
+
+  it('deriva avgTicketTodayCents (round) y cancellationRateToday; reenvía margen y viajes de hoy', async () => {
+    const trip = rest({
+      activeTrips: 2,
+      completedToday: 8,
+      cancelledToday: 2,
+      avgDurationSeconds: 600,
+      tripsPerHour: [],
+    });
+    const payment = rest({
+      revenueTodayCents: 13500,
+      platformMarginTodayCents: 2700,
+      tripCountToday: 4,
+      revenuePerHour: [],
+    });
+    const svc = new AnalyticsService(
+      trip,
+      rest({ onlineDrivers: 5 }),
+      rest({ openPanics: 1 }),
+      payment,
+      logger,
+    );
+
+    const out = await svc.overview(IDENTITY);
+
+    expect(out.revenueTodayCents).toBe(13500);
+    expect(out.platformMarginTodayCents).toBe(2700); // reenviado (antes se dropeaba)
+    expect(out.tripCountToday).toBe(4);
+    expect(out.avgTicketTodayCents).toBe(3375); // round(13500 / 4)
+    expect(out.cancellationRateToday).toBeCloseTo(0.2); // 2 / (8 + 2)
+  });
+
+  it('degradación honesta: payment caído → margen/viajes/ticket 0; sin cierres → cancelación null', async () => {
+    const trip = rest({
+      activeTrips: 0,
+      completedToday: 0,
+      cancelledToday: 0,
+      avgDurationSeconds: null,
+      tripsPerHour: [],
+    });
+    const svc = new AnalyticsService(
+      trip,
+      rest({ onlineDrivers: 0 }),
+      rest({ openPanics: 0 }),
+      rest(null, true),
+      logger,
+    );
+
+    const out = await svc.overview(IDENTITY);
+
+    expect(out.platformMarginTodayCents).toBe(0);
+    expect(out.tripCountToday).toBe(0);
+    expect(out.avgTicketTodayCents).toBe(0); // sin viajes → no divide por 0
+    expect(out.cancellationRateToday).toBeNull(); // sin cierres hoy
   });
 });

@@ -23,6 +23,10 @@ import type {
   PayoutStatsView,
   PayoutTripsResult,
   RefundablePaymentView,
+  RefundView,
+  RefundDetailView,
+  RefundStatsView,
+  RefundActionResult,
   ReconciliationRunView,
 } from '@veo/api-client';
 import {
@@ -40,6 +44,8 @@ import {
   ReconciliationQueryDto,
   RunPayoutsDto,
   RefundDto,
+  RefundsQueryDto,
+  RejectRefundBodyDto,
   ReplaceOnDemandRateDto,
   ReplaceCarpoolingFeeDto,
   ReplaceCostPerKmDto,
@@ -251,18 +257,80 @@ export class FinanceController {
     return this.finance.getPaymentByTrip(user, tripId);
   }
 
+  // ── COLA DE APROBACIÓN DE REEMBOLSOS (money-OUT · frame HZ8uz) ──────────────────────────────────────
+  // Rutas ESTÁTICAS/literales declaradas ANTES de las paramétricas para que `:id`/`:tripId` no las capturen.
+
+  @Get('refunds')
+  @Permission('finance:view')
+  @ApiOperation({ summary: 'Cola de reembolsos (filtro por estado + cursor). Lista con PII → acceso auditado' })
+  refunds(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: RefundsQueryDto,
+  ): Promise<{ items: RefundView[]; nextCursor: string | null }> {
+    return this.finance.listRefunds(user, query);
+  }
+
+  // `refunds/stats` (literal) ANTES de `refunds/:id` para que `:id` no capture "stats".
+  @Get('refunds/stats')
+  @Permission('finance:view')
+  @ApiOperation({ summary: 'KPIs de la cola de reembolsos (Solicitados/Aprobados/Procesado hoy/Tasa)' })
+  refundStats(@CurrentUser() user: AuthenticatedUser): Promise<RefundStatsView> {
+    return this.finance.getRefundStats(user);
+  }
+
+  @Get('refunds/:id')
+  @Permission('finance:view')
+  @ApiOperation({ summary: 'Detalle de un reembolso (con el saldo del cobro) — acceso a PII auditado' })
+  refundDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<RefundDetailView> {
+    return this.finance.getRefund(user, id);
+  }
+
+  // APROBAR = desembolso money-OUT → finance:refund + step-up MFA (idéntico gate que la solicitud/el payout).
+  @Post('refunds/:id/approve')
+  @HttpCode(200)
+  @Permission('finance:refund')
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Aprueba y desembolsa un reembolso PENDING (idempotente). finance:refund + step-up' })
+  approveRefund(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<RefundActionResult> {
+    return this.finance.approveRefund(user, id);
+  }
+
+  @Post('refunds/:id/reject')
+  @HttpCode(200)
+  @Permission('finance:refund')
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Rechaza un reembolso PENDING con motivo (idempotente). finance:refund + step-up' })
+  rejectRefund(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectRefundBodyDto,
+  ): Promise<RefundActionResult> {
+    return this.finance.rejectRefund(user, id, dto.reason);
+  }
+
+  // SOLICITAR (crea la solicitud PENDING; NO desembolsa hasta aprobar). Ruta paramétrica `refunds/:tripId`
+  // declarada DESPUÉS de las literales (`refunds`, `refunds/stats`) y de las de 2 segmentos (`:id/approve`).
   @Post('refunds/:tripId')
   @HttpCode(200)
   @Permission('finance:refund')
   @RequireStepUpMfa()
-  @ApiOperation({ summary: 'Reembolsa el pago de un viaje' })
+  @ApiOperation({
+    summary:
+      'SOLICITA un reembolso de un viaje: crea la solicitud PENDING (cola de aprobación), NO desembolsa hasta aprobar',
+  })
   refund(
     @CurrentUser() user: AuthenticatedUser,
     @Param('tripId') tripId: string,
     @Body() dto: RefundDto,
     // Idempotency-Key del panel → se PROPAGA a payment-service (no muere en el bff): barrera de idempotencia.
     @Headers('Idempotency-Key') idempotencyKey?: string,
-  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+  ): Promise<RefundActionResult> {
     return this.finance.refund(user, tripId, dto, idempotencyKey);
   }
 }

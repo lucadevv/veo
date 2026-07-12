@@ -17,11 +17,14 @@ const identity: AuthenticatedUser = {
 function makeService(
   over: {
     rest?: Partial<InternalRestClient>;
+    identityRest?: Partial<InternalRestClient>;
     tripGrpc?: { call: ReturnType<typeof vi.fn> };
     audit?: { record: ReturnType<typeof vi.fn> };
   } = {},
 ) {
   const rest = over.rest ?? { get: vi.fn(), post: vi.fn() };
+  // Roster de operadores para enriquecer al solicitante; por defecto vacío (las pruebas existentes no lo miran).
+  const identityRest = over.identityRest ?? { get: vi.fn().mockResolvedValue([]), post: vi.fn() };
   const tripGrpc = over.tripGrpc ?? { call: vi.fn() };
   const audit = over.audit ?? {
     record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }),
@@ -29,12 +32,13 @@ function makeService(
   const config = { get: () => 'internal-secret' } as unknown as ConfigService<Env, true>;
   const svc = new MediaService(
     rest as unknown as InternalRestClient,
+    identityRest as unknown as InternalRestClient,
     tripGrpc as unknown as GrpcServiceClient,
     InternalAudience.ADMIN_RAIL,
     audit as unknown as AuditRecorder,
     config,
   );
-  return { svc, rest, tripGrpc, audit };
+  return { svc, rest, identityRest, tripGrpc, audit };
 }
 
 function segment(id: string, partial: Partial<SegmentView> = {}): SegmentView {

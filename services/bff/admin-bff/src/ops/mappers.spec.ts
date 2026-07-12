@@ -22,14 +22,46 @@ describe('mappers OPS', () => {
       createdAt: '2026-05-29T00:00:00.000Z',
     };
     // fareCents (monto) hoy NO se redacta: el contrato lo declara number no-nullable → diferido.
+    // Sin enrichment → nombres + modo null honesto (los resuelve ops.service on-read).
     expect(tripRecordToSummary(rec, SUPPORT)).toEqual({
+      id: 't1',
+      status: 'IN_PROGRESS',
+      passengerId: 'p1',
+      driverId: 'd1',
+      passengerName: null,
+      driverName: null,
+      fareCents: 1500,
+      createdAt: '2026-05-29T00:00:00.000Z',
+      dispatchMode: null,
+    });
+  });
+
+  it('tripRecordToSummary: proyecta el enrichment de nombres (ya PRE-redactado en ops.service)', () => {
+    const rec: TripRecord = {
       id: 't1',
       status: 'IN_PROGRESS',
       passengerId: 'p1',
       driverId: 'd1',
       fareCents: 1500,
       createdAt: '2026-05-29T00:00:00.000Z',
-    });
+    };
+    // CON enrichment visible → se proyecta tal cual (nombres + modo de despacho).
+    expect(
+      tripRecordToSummary(rec, COMPLIANCE, {
+        passengerName: 'María Q.',
+        driverName: 'José R.',
+        dispatchMode: 'PUJA',
+      }),
+    ).toMatchObject({ passengerName: 'María Q.', driverName: 'José R.', dispatchMode: 'PUJA' });
+    // Enrichment ya redactado (lo que ops.service arma para sub-Compliance) → null. El modo NO es PII
+    // (mecanismo de precio) → se proyecta igual para todos los roles.
+    expect(
+      tripRecordToSummary(rec, SUPPORT, {
+        passengerName: null,
+        driverName: null,
+        dispatchMode: 'FIXED',
+      }),
+    ).toMatchObject({ passengerName: null, driverName: null, dispatchMode: 'FIXED' });
   });
 
   it('driverRecordToApproval: proyecta el enriquecimiento YA redactado (la redacción por rol vive en ops.service)', () => {
@@ -52,6 +84,7 @@ describe('mappers OPS', () => {
       docsComplete: 4,
       docsTotal: 4,
       verificationStatus: 'VERIFICADO',
+      operationalStatus: 'AVAILABLE',
     };
     const redacted = {
       fullName: null,
@@ -61,6 +94,7 @@ describe('mappers OPS', () => {
       docsComplete: 4,
       docsTotal: 4,
       verificationStatus: null,
+      operationalStatus: 'AVAILABLE',
     };
     // SIN enriquecimiento (página vacía / sin reply) → null honesto.
     expect(driverRecordToApproval(rec, COMPLIANCE).fullName).toBeNull();
@@ -90,6 +124,7 @@ describe('mappers OPS', () => {
       docsComplete: 0,
       docsTotal: 4,
       verificationStatus: null,
+      operationalStatus: null,
     });
 
     it('read-model SUSPENDED pero identity LIBRE (auto-reactivación) → badge ACTIVE', () => {
@@ -143,6 +178,7 @@ describe('mappers OPS', () => {
         docsComplete: 2,
         docsTotal: 4,
         verificationStatus: 'PENDIENTE',
+        operationalStatus: null,
       };
       expect(driverRecordToApproval(base, COMPLIANCE, enrichment).suspensionCauses).toEqual([
         SuspensionCause.DOCUMENT_EXPIRED,

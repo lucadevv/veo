@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { OpsService } from './ops.service';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
+import type { MapsClient } from '@veo/maps';
 import type { ConfigService } from '@nestjs/config';
 import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import { ConflictError, ForbiddenError, NotFoundError } from '@veo/utils';
@@ -34,6 +35,14 @@ const noopMedia = {} as unknown as InternalRestClient;
 const noopTripRest = {} as unknown as InternalRestClient;
 const noopFleetRest = {} as unknown as InternalRestClient;
 const noopPaymentRest = {} as unknown as InternalRestClient;
+// Maps mock: reverse determinista (label fijo) → prueba el camino feliz del reverse-geocode del detalle.
+const noopMaps = {
+  reverse: async (p: { lat: number; lon: number }) => ({
+    lat: p.lat,
+    lon: p.lon,
+    displayName: 'Av. Ejemplo 123, Miraflores',
+  }),
+} as unknown as MapsClient;
 // fleet sin vehículos → vehiclePlate null; el batch de completitud devuelve el shape vacío honesto (items: []).
 const noopFleet = grpc((m) => (m === 'GetDriverDocsCompleteness' ? { items: [] } : {}));
 
@@ -106,6 +115,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -117,11 +127,16 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     expect(view.createdAt).toBe('2026-06-01T10:00:00.000Z'); // ← requestedAt
     expect(view.origin).toEqual({ lat: -12.05, lon: -77.04 }); // lng→lon
     expect(view.destination).toEqual({ lat: -12.1, lon: -77.0 });
+    // Reverse-geocode (rol con geo EXACTA): la dirección legible del puerto soberano @veo/maps.
+    expect(view.originLabel).toBe('Av. Ejemplo 123, Miraflores');
+    expect(view.destinationLabel).toBe('Av. Ejemplo 123, Miraflores');
     expect(view.passengerName).toBe('Ana Pérez');
     expect(view.driverName).toBe('Khalid Ríos');
     // El proto manda suspendedAt (identity) y la view del panel YA NO lo pierde (drift cerrado).
     expect(view.driverSuspendedAt).toBe('2026-06-02T08:00:00.000Z');
     expect(view.paymentMethod).toBe('YAPE');
+    // Duración REAL del viaje (Trip.durationSeconds del GetTrip) → el detalle ya no muestra "—".
+    expect(view.durationSeconds).toBe(1200);
     // Datos EN VIVO / no expuestos por GetTrip → null/[] honesto (no data falsa).
     expect(view.driverLocation).toBeNull();
     expect(view.etaSeconds).toBeNull();
@@ -173,6 +188,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -186,6 +202,9 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     expect(view.vehiclePlate).toBe('•••123');
     // GEO → coarse 3 decimales (~100m)
     expect(view.origin).toEqual({ lat: -12.054, lon: -77.041 });
+    // DIRECCIÓN → null: sin geo exacta no se revela la calle precisa (el reverse-geocode ni se llama).
+    expect(view.originLabel).toBeNull();
+    expect(view.destinationLabel).toBeNull();
     // MONTO → diferido (contrato no-nullable): sigue visible
     expect(view.fareCents).toBe(2500);
   });
@@ -225,6 +244,7 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -249,11 +269,82 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
     );
     await expect(svc.tripDetail(identity, 'missing')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('OpsService.listTrips · enrichment de nombres (anti-N+1 + redacción PII)', () => {
+  const records = [
+    {
+      id: 't1',
+      status: 'IN_PROGRESS' as const,
+      passengerId: 'p1',
+      driverId: 'd1',
+      fareCents: 1500,
+      createdAt: '2026-06-01T10:00:00.000Z',
+    },
+    {
+      id: 't2',
+      status: 'COMPLETED' as const,
+      passengerId: 'p2',
+      driverId: null,
+      fareCents: 2000,
+      createdAt: '2026-06-01T11:00:00.000Z',
+    },
+  ];
+
+  function svcWith(idImpl: (method: string) => unknown) {
+    const readModel = {
+      listTrips: vi.fn().mockResolvedValue({ items: records, nextCursor: null }),
+    } as unknown as ReadModelService;
+    const identityGrpc = grpc(idImpl);
+    const svc = new OpsService(
+      grpc(() => ({})),
+      identityGrpc,
+      noopFleet,
+      noopRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      noopMaps,
+      readModel,
+      noopAudit,
+      config,
+    );
+    return { svc, identityGrpc };
+  }
+
+  it('ADMIN: resuelve passengerName/driverName con UN batch cada uno (anti-N+1)', async () => {
+    const { svc, identityGrpc } = svcWith((m) => {
+      if (m === 'GetUsersByIds')
+        return { users: [{ id: 'p1', name: 'María Q.', found: true }, { id: 'p2', name: 'Lucía F.', found: true }] };
+      if (m === 'GetDriversByIds') return { drivers: [{ id: 'd1', name: 'José R.', found: true }] };
+      return {};
+    });
+    const page = await svc.listTrips(identity, {});
+    expect(page.items[0]).toMatchObject({ passengerName: 'María Q.', driverName: 'José R.' });
+    // t2 sin conductor → driverName null honesto; pasajero igual se resuelve.
+    expect(page.items[1]).toMatchObject({ passengerName: 'Lucía F.', driverName: null });
+    // Anti-N+1: UN GetUsersByIds y UN GetDriversByIds para TODA la página (no por fila).
+    const calls = (identityGrpc.call as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(calls.filter((m) => m === 'GetUsersByIds')).toHaveLength(1);
+    expect(calls.filter((m) => m === 'GetDriversByIds')).toHaveLength(1);
+  });
+
+  it('SUPPORT_L1 (sub-Compliance): nombres null y NO llama a identity (PII gateada)', async () => {
+    const { svc, identityGrpc } = svcWith(() => ({}));
+    const support: AuthenticatedUser = { ...identity, roles: ['SUPPORT_L1'] };
+    const page = await svc.listTrips(support, {});
+    expect(page.items[0]).toMatchObject({ passengerName: null, driverName: null });
+    // Sin permiso de identidad → ni siquiera se piden los nombres (cero llamadas gRPC).
+    expect(identityGrpc.call).not.toHaveBeenCalled();
   });
 });
 
@@ -334,6 +425,7 @@ describe('OpsService.approveDriver · gates server-side (documentos + ITV, autor
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -365,6 +457,7 @@ describe('OpsService.approveDriver · gates server-side (documentos + ITV, autor
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -394,6 +487,7 @@ describe('OpsService.approveDriver · GATE de inspección técnica (ITV · compl
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -424,6 +518,7 @@ describe('OpsService.approveDriver · GATE de inspección técnica (ITV · compl
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -510,6 +605,7 @@ describe('OpsService.approveDriver · GATE de inspección técnica (ITV · compl
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -593,6 +689,7 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -690,6 +787,7 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -718,6 +816,7 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -754,6 +853,7 @@ describe('OpsService.driverDetail · core + biométrico + documentos con URLs fi
         noopFleetRest,
         noopPaymentRest,
         InternalAudience.ADMIN_RAIL,
+        noopMaps,
         noopReadModel,
         noopAudit,
         config,
@@ -859,6 +959,7 @@ describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lo
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -899,6 +1000,7 @@ describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lo
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -931,6 +1033,7 @@ describe('OpsService.runDniFaceMatch · orquesta el BINDING DNI↔selfie (sub-lo
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -995,6 +1098,7 @@ describe('OpsService.runLicenseFaceMatch · orquesta el BINDING licencia↔selfi
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -1032,6 +1136,7 @@ describe('OpsService.runLicenseFaceMatch · orquesta el BINDING licencia↔selfi
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       noopAudit,
       config,
@@ -1057,6 +1162,7 @@ describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -1091,6 +1197,7 @@ describe('OpsService.createOperator · anti-escalada en la capa BFF', () => {
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -1151,6 +1258,7 @@ describe('OpsService.purgeDriver · HARD purge en cascada + guard de historial',
         fleetRest,
         paymentRest,
         InternalAudience.ADMIN_RAIL,
+        noopMaps,
         noopReadModel,
         audit,
         config,
@@ -1206,6 +1314,7 @@ describe('OpsService.purgeDriver · HARD purge en cascada + guard de historial',
       fleetRest,
       paymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModel,
       audit,
       config,
@@ -1287,6 +1396,7 @@ describe('OpsService.purgeDriver · HARD purge en cascada + guard de historial',
       fleetRest,
       paymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModel,
       audit,
       config,
@@ -1368,6 +1478,7 @@ describe('OpsService.purgeDriver · HARD purge en cascada + guard de historial',
       fleetRest,
       paymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModel,
       audit,
       config,
@@ -1436,6 +1547,7 @@ describe('OpsService.purgeDriver · HARD purge en cascada + guard de historial',
       fleetRest,
       paymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModel,
       audit,
       config,
@@ -1494,6 +1606,7 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModelWith([rmDriver('d1', 'SUSPENDED')]),
       noopAudit,
       config,
@@ -1530,6 +1643,7 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModelWith([rmDriver('d1', 'ACTIVE')]),
       noopAudit,
       config,
@@ -1563,6 +1677,7 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModelWith([rmDriver('d1', 'SUSPENDED')]),
       noopAudit,
       config,
@@ -1606,6 +1721,7 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModelWith([rmDriver('d1', 'SUSPENDED')]),
       noopAudit,
       config,
@@ -1644,6 +1760,7 @@ describe('OpsService.listDrivers · reconciliación del badge contra el suspende
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       readModelWith([rmDriver('d1', 'SUSPENDED')]),
       noopAudit,
       config,
@@ -1675,6 +1792,7 @@ describe('OpsService.reactivateDriverForCompliance · override manual (complianc
       fleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -1710,6 +1828,7 @@ describe('OpsService.reactivateDriverForCompliance · override manual (complianc
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       { record } as unknown as AuditRecorder,
       config,
@@ -1736,6 +1855,7 @@ describe('OpsService.unlockBiometric · destrabe biométrico por la central (F3)
       noopFleetRest,
       noopPaymentRest,
       InternalAudience.ADMIN_RAIL,
+      noopMaps,
       noopReadModel,
       audit,
       config,
@@ -1748,6 +1868,149 @@ describe('OpsService.unlockBiometric · destrabe biométrico por la central (F3)
     expect(record).toHaveBeenCalledWith(
       identity,
       expect.objectContaining({ action: 'driver.biometric-unlock', resourceId: 'd1' }),
+    );
+  });
+});
+
+/** Detalle CRUDO de un operador tal como lo devuelve identity (GET /admin/operators/:id). */
+function rawOperatorDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'op-1',
+    email: 'op@veo.pe',
+    name: 'Op Uno',
+    status: 'ACTIVE',
+    roles: ['ADMIN'],
+    totpEnrolled: true,
+    lastLoginAt: '2026-07-01T00:00:00.000Z',
+    createdAt: '2026-06-01T00:00:00.000Z',
+    sessions: [{ id: 'sess-1', lastActiveAt: '2026-07-05T00:00:00.000Z' }],
+    ...overrides,
+  };
+}
+
+/** Ensambla un OpsService con SOLO el identityRest + audit cableados (el resto noop) — casos de operadores. */
+function opsForOperators(rest: InternalRestClient, audit: AuditRecorder): OpsService {
+  return new OpsService(
+    grpc(() => ({})),
+    grpc(() => ({})),
+    noopFleet,
+    rest,
+    noopMedia,
+    noopTripRest,
+    noopFleetRest,
+    noopPaymentRest,
+    InternalAudience.ADMIN_RAIL,
+    noopMaps,
+    noopReadModel,
+    audit,
+    config,
+  );
+}
+
+describe('OpsService.operatorDetail · deriva effectivePermissions de los roles (matriz base @veo/policy)', () => {
+  it('FINANCE: effectivePermissions INCLUYE finance:view y EXCLUYE trips:view; conserva 2FA/último acceso/sesiones', async () => {
+    const get = vi.fn().mockResolvedValue(rawOperatorDetail({ roles: ['FINANCE'] }));
+    const rest = { get } as unknown as InternalRestClient;
+    const svc = opsForOperators(rest, noopAudit);
+
+    const detail = await svc.operatorDetail(identity, 'op-1');
+
+    expect(get).toHaveBeenCalledWith('/admin/operators/op-1', { identity });
+    // BASE (per-target): FINANCE concede finance:view, NO trips:view.
+    expect(detail.effectivePermissions).toContain('finance:view');
+    expect(detail.effectivePermissions).not.toContain('trips:view');
+    // Los tres campos de la fila + sesiones fluyen tal cual.
+    expect(detail.totpEnrolled).toBe(true);
+    expect(detail.lastLoginAt).toBe('2026-07-01T00:00:00.000Z');
+    expect(detail.name).toBe('Op Uno');
+    expect(detail.sessions).toEqual([{ id: 'sess-1', lastActiveAt: '2026-07-05T00:00:00.000Z' }]);
+  });
+});
+
+describe('OpsService · mutaciones de operador (gate anti-escalada + propaga + audita)', () => {
+  it('changeOperatorRoles ADMIN → [SUPERADMIN]: ForbiddenError CORTA antes del REST', async () => {
+    const post = vi.fn();
+    const record = vi.fn();
+    const svc = opsForOperators(
+      { post } as unknown as InternalRestClient,
+      { record } as unknown as AuditRecorder,
+    );
+    await expect(
+      svc.changeOperatorRoles(identity, 'op-1', [AdminRole.SUPERADMIN]),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(post).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('changeOperatorRoles ADMIN → [SUPPORT_L2]: propaga al REST, audita y recomputa effectivePermissions', async () => {
+    const post = vi.fn().mockResolvedValue(rawOperatorDetail({ roles: ['SUPPORT_L2'] }));
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const svc = opsForOperators(
+      { post } as unknown as InternalRestClient,
+      { record } as unknown as AuditRecorder,
+    );
+
+    const out = await svc.changeOperatorRoles(identity, 'op-1', [AdminRole.SUPPORT_L2]);
+
+    expect(post).toHaveBeenCalledWith('/admin/operators/op-1/roles', {
+      identity,
+      body: { roles: [AdminRole.SUPPORT_L2] },
+    });
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({ action: 'operator.role_change', resourceId: 'op-1' }),
+    );
+    expect(out.roles).toEqual(['SUPPORT_L2']);
+    // SUPPORT_L2 concede trips:view en la base → aparece en effectivePermissions recomputado.
+    expect(out.effectivePermissions).toContain('trips:view');
+  });
+
+  it('suspendOperator: propaga POST suspend y audita', async () => {
+    const post = vi.fn().mockResolvedValue({});
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const svc = opsForOperators(
+      { post } as unknown as InternalRestClient,
+      { record } as unknown as AuditRecorder,
+    );
+    await svc.suspendOperator(identity, 'op-1');
+    expect(post).toHaveBeenCalledWith('/admin/operators/op-1/suspend', { identity });
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({ action: 'operator.suspend', resourceId: 'op-1' }),
+    );
+  });
+
+  it('removeOperator: propaga POST remove y audita', async () => {
+    const post = vi.fn().mockResolvedValue(undefined);
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const svc = opsForOperators(
+      { post } as unknown as InternalRestClient,
+      { record } as unknown as AuditRecorder,
+    );
+    await svc.removeOperator(identity, 'op-1');
+    expect(post).toHaveBeenCalledWith('/admin/operators/op-1/remove', { identity });
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({ action: 'operator.remove', resourceId: 'op-1' }),
+    );
+  });
+
+  it('revokeOperatorSession: propaga POST del sid y audita con el sessionId', async () => {
+    const post = vi.fn().mockResolvedValue(undefined);
+    const record = vi.fn().mockResolvedValue({ id: 'a', seq: '1', hash: 'h' });
+    const svc = opsForOperators(
+      { post } as unknown as InternalRestClient,
+      { record } as unknown as AuditRecorder,
+    );
+    await svc.revokeOperatorSession(identity, 'op-1', 'sess-1');
+    expect(post).toHaveBeenCalledWith('/admin/operators/op-1/sessions/sess-1/revoke', { identity });
+    expect(record).toHaveBeenCalledWith(
+      identity,
+      expect.objectContaining({
+        action: 'operator.session.revoke',
+        resourceId: 'op-1',
+        payload: { sessionId: 'sess-1' },
+      }),
     );
   });
 });

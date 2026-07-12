@@ -282,6 +282,7 @@ interface PayoutDetailRowFull {
   createdAt: string;
   creditBackCents: number;
   debtSettledCents: number;
+  bonusCents: number;
 }
 
 function payoutDetailRow(over: Partial<PayoutDetailRowFull> = {}): PayoutDetailRowFull {
@@ -302,6 +303,7 @@ function payoutDetailRow(over: Partial<PayoutDetailRowFull> = {}): PayoutDetailR
     createdAt: '2026-06-23T11:00:00.000Z',
     creditBackCents: 500,
     debtSettledCents: 200,
+    bonusCents: 0, // payout sin bono de incentivo (componente NETO directo; no altera amountCents=8300)
     ...over,
   };
 }
@@ -482,6 +484,9 @@ describe('FinanceService.getReconciliation Â· hueco #3 (historial de conciliaciÃ
  */
 interface PayoutStatsFull {
   totalCents: number;
+  paidCents: number;
+  heldCents: number;
+  failedCents: number;
   pendingCount: number;
   processingCount: number;
   processedCount: number;
@@ -492,6 +497,11 @@ interface PayoutStatsFull {
 function statsFixture(over: Partial<PayoutStatsFull> = {}): PayoutStatsFull {
   return {
     totalCents: 123_400,
+    // Desglose de volumen por bucket (subconjuntos de totalCents): PROCESSED + HELD + FAILED = 117_400,
+    // el resto (6_000) corresponde a PENDING/PROCESSING que no tienen bucket de volumen propio.
+    paidCents: 98_000,
+    heldCents: 15_000,
+    failedCents: 4_400,
     pendingCount: 3,
     processingCount: 1,
     processedCount: 12,

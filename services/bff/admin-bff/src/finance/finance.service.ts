@@ -4,7 +4,12 @@
  */
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InternalRestClient, type GrpcServiceClient, type DriversByIdsReply } from '@veo/rpc';
+import {
+  InternalRestClient,
+  type GrpcServiceClient,
+  type DriversByIdsReply,
+  type UsersByIdsReply,
+} from '@veo/rpc';
 import {
   grpcIdentityMetadata,
   INTERNAL_IDENTITY_AUDIENCE,
@@ -21,6 +26,10 @@ import type {
   CostPerKmConfigView,
   CostPerKmListView,
   RefundablePaymentView,
+  RefundView,
+  RefundDetailView,
+  RefundStatsView,
+  RefundActionResult,
   ReconciliationRunView,
 } from '@veo/api-client';
 import { REST_PAYMENT, REST_BOOKING, GRPC_IDENTITY } from '../infra/tokens';
@@ -103,6 +112,34 @@ interface PaymentRow {
   capturedAt: string | null;
   refundedAt: string | null;
   createdAt: string;
+}
+
+/**
+ * Fila cruda de un Refund que sirve payment-service (GET /refunds, /refunds/:id · SIN `select`, con el Payment
+ * incluido por FK). Solo declaramos lo que el mapper consume; la PII de riel del cobro (externalRef/uid/checkout)
+ * NO viaja acá. `payment` trae lo que la fila de la cola necesita del cobro (tripId/passengerId/method/saldo).
+ */
+interface RefundRow {
+  id: string;
+  paymentId: string;
+  amountCents: number;
+  requestedBy: string;
+  approvedBy: string | null;
+  status: RefundView['status'];
+  reason: string;
+  failureReason: string | null;
+  externalRefundId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  payment: {
+    tripId: string;
+    passengerId: string | null;
+    method: RefundView['method'];
+    currency: string;
+    status: RefundDetailView['paymentStatus'];
+    amountCents: number;
+    refundedCents: number;
+  };
 }
 
 /** Fila cruda de una corrida de conciliación (GET /reconciliation) que sirve payment-service: el model delgado
@@ -189,6 +226,22 @@ export class FinanceService {
     const reply = await this.identityGrpc.call<DriversByIdsReply>('GetDriversByIds', { ids }, meta);
     // proto3 entrega "" para un nombre ausente → lo tratamos como no-resuelto (null honesto en el caller).
     return new Map(reply.drivers.filter((d) => d.name).map((d) => [d.id, d.name]));
+  }
+
+  /**
+   * Resuelve `userId → nombre` para un conjunto de PASAJEROS (identity, batch anti-N+1 · MISMO patrón/gate PII que
+   * resolveDriverNames). Ley 29733: el nombre del pasajero es IDENTIDAD → un FINANCE puro (canSeeIdentity=false) NO
+   * la ve → mapa VACÍO sin llamar a identity. Un id que identity no resuelve → no entra al mapa (null honesto).
+   */
+  private async resolvePassengerNames(
+    identity: AuthenticatedUser,
+    passengerIds: string[],
+  ): Promise<Map<string, string>> {
+    if (!canSeeIdentity(identity.roles) || passengerIds.length === 0) return new Map();
+    const ids = [...new Set(passengerIds)];
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const reply = await this.identityGrpc.call<UsersByIdsReply>('GetUsersByIds', { ids }, meta);
+    return new Map(reply.users.filter((u) => u.name).map((u) => [u.id, u.name]));
   }
 
   /** Listado admin de TODOS los payouts (paginado, por estado) → payoutView. payment-service gatea RBAC. */
@@ -370,32 +423,126 @@ export class FinanceService {
     return res;
   }
 
+  /**
+   * SOLICITA un reembolso (cola de aprobación · money-OUT): crea la solicitud PENDING en payment-service — NO
+   * desembolsa (eso ocurre al APROBAR). El Idempotency-Key del operador se PROPAGA al servicio dueño del dato: un
+   * reintento / doble-submit con el mismo key NO crea DOS solicitudes (UNIQUE parcial en Refund + backstop de ventana).
+   */
   async refund(
     identity: AuthenticatedUser,
     tripId: string,
     dto: RefundDto,
     idempotencyKey?: string,
-  ): Promise<{ refundId: string; paymentId: string; status: string }> {
-    const res = await this.rest.post<{ refundId: string; paymentId: string; status: string }>(
-      `/payments/${tripId}/refund`,
-      // El Idempotency-Key del operador se PROPAGA al servicio dueño del dato (no muere acá): un reintento /
-      // doble-submit con el mismo key NO doble-reembolsa (UNIQUE parcial en Refund).
-      {
-        identity,
-        body: { amountCents: dto.amountCents, reason: dto.reason, forceNew: dto.forceNew ?? false },
-        idempotencyKey,
-      },
-    );
+  ): Promise<RefundActionResult> {
+    const res = await this.rest.post<RefundActionResult>(`/payments/${tripId}/refund`, {
+      identity,
+      body: { amountCents: dto.amountCents, reason: dto.reason, forceNew: dto.forceNew ?? false },
+      idempotencyKey,
+    });
     await this.audit.record(identity, {
-      action: 'payment.refund',
+      action: 'payment.refund_request',
       resourceType: 'payment',
       resourceId: res.paymentId,
       payload: {
+        refundId: res.refundId,
         tripId,
         amountCents: dto.amountCents,
         reason: dto.reason,
         forceNew: dto.forceNew ?? false,
       },
+    });
+    return res;
+  }
+
+  /**
+   * Cola de reembolsos para el panel (GET /finance/refunds): payment-service sirve la página con el Payment por FK;
+   * acá se resuelve el NOMBRE del pasajero (identity, batch anti-N+1, gateado por PII) y se mapea a `refundView`.
+   * Es un listado con PII (ids de personas + montos) → se AUDITA el acceso (payment.refund_list, fail-closed).
+   */
+  async listRefunds(
+    identity: AuthenticatedUser,
+    query: { status?: string; cursor?: string; limit?: number },
+  ): Promise<Page<RefundView>> {
+    const page = await this.rest.get<Page<RefundRow>>('/refunds', {
+      identity,
+      query: { status: query.status, cursor: query.cursor, limit: query.limit },
+    });
+    const namesById = await this.resolvePassengerNames(
+      identity,
+      page.items.map((r) => r.payment.passengerId).filter((id): id is string => id != null),
+    );
+    await this.audit.record(identity, {
+      action: 'payment.refund_list',
+      resourceType: 'refund',
+      resourceId: query.status ?? 'ALL',
+      payload: { status: query.status ?? 'ALL', count: page.items.length },
+    });
+    return {
+      items: page.items.map((r) =>
+        toRefundView(r, r.payment.passengerId ? (namesById.get(r.payment.passengerId) ?? null) : null),
+      ),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  /** Detalle de un reembolso (GET /finance/refunds/:id) → refundDetailView. Acceso a PII auditado (fail-closed). */
+  async getRefund(identity: AuthenticatedUser, id: string): Promise<RefundDetailView> {
+    const row = await this.rest.get<RefundRow>(`/refunds/${id}`, { identity });
+    const namesById = row.payment.passengerId
+      ? await this.resolvePassengerNames(identity, [row.payment.passengerId])
+      : new Map<string, string>();
+    await this.audit.record(identity, {
+      action: 'payment.refund_view',
+      resourceType: 'refund',
+      resourceId: row.id,
+      payload: { paymentId: row.paymentId, tripId: row.payment.tripId },
+    });
+    return toRefundDetailView(
+      row,
+      row.payment.passengerId ? (namesById.get(row.payment.passengerId) ?? null) : null,
+    );
+  }
+
+  /** KPIs de la cabecera de la cola (GET /finance/refunds/stats) → refundStatsView. Agregado del sistema, sin PII
+   *  de persona → passthrough tipado, SIN audit (mismo criterio que getPayoutStats/getReconciliation). */
+  getRefundStats(identity: AuthenticatedUser): Promise<RefundStatsView> {
+    return this.rest.get<RefundStatsView>('/refunds/stats', { identity });
+  }
+
+  /**
+   * APRUEBA y desembolsa un reembolso PENDING (money-OUT). payment-service hace la transición tipada PENDING→APPROVED
+   * y DISPARA el desembolso idempotente (reserva CAS + reverso al riel; CASH devuelve local → COMPLETED). Idempotente.
+   * El backend exige step-up MFA + rol FINANCE (defensa en profundidad, además del gate del borde). Se AUDITA.
+   */
+  async approveRefund(identity: AuthenticatedUser, id: string): Promise<RefundActionResult> {
+    const res = await this.rest.post<RefundActionResult>(`/refunds/${id}/approve`, { identity });
+    await this.audit.record(identity, {
+      action: 'payment.refund_approve',
+      resourceType: 'refund',
+      resourceId: id,
+      payload: { paymentId: res.paymentId, status: res.status },
+    });
+    return res;
+  }
+
+  /**
+   * RECHAZA una solicitud PENDING con motivo (money-OUT · sin mover plata). payment-service transiciona
+   * PENDING→REJECTED (sin compensación: la solicitud nunca reservó el cobro). Idempotente. Step-up MFA + FINANCE. Auditada.
+   */
+  async rejectRefund(
+    identity: AuthenticatedUser,
+    id: string,
+    reason: string,
+  ): Promise<RefundActionResult> {
+    const res = await this.rest.post<RefundActionResult>(`/refunds/${id}/reject`, {
+      identity,
+      body: { reason },
+    });
+    await this.audit.record(identity, {
+      action: 'payment.refund_reject',
+      resourceType: 'refund',
+      resourceId: id,
+      payload: { paymentId: res.paymentId, reason },
     });
     return res;
   }
@@ -610,6 +757,42 @@ function toReconciliationRunView(r: ReconRow): ReconciliationRunView {
 // Recorta a lo que la pantalla de reembolso necesita, DESCARTANDO la PII de riel (externalRef/payerRef/
 // externalUid/checkoutUrl/qr/cip nunca viajan al admin-web). `refundableCents` = saldo aún reembolsable
 // (amount − ya reembolsado), clamp a 0 por si un dato viejo tuviera refunded > amount (nunca negativo).
+// Fila de la cola de reembolsos → refundView. Los datos del cobro (tripId/passengerId/method/currency) salen del
+// Payment por FK; `passengerName` lo resuelve el service (identity, gateado por PII) — null = no visible o no
+// resuelto. `requestedAt` = createdAt del Refund; `updatedAt` = última transición (aprobado/completado/rechazado).
+function toRefundView(r: RefundRow, passengerName: string | null): RefundView {
+  return {
+    id: r.id,
+    paymentId: r.paymentId,
+    tripId: r.payment.tripId,
+    passengerId: r.payment.passengerId,
+    passengerName,
+    amountCents: r.amountCents,
+    currency: r.payment.currency,
+    method: r.payment.method,
+    reason: r.reason,
+    status: r.status,
+    requestedBy: r.requestedBy,
+    approvedBy: r.approvedBy,
+    failureReason: r.failureReason,
+    requestedAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+// Extiende toRefundView con el saldo del cobro (contexto del detalle). `refundableCents` = amount − ya reembolsado
+// (clamp 0). `externalRefundId` = uid del reverso del proveedor (traza de correlación del callback).
+function toRefundDetailView(r: RefundRow, passengerName: string | null): RefundDetailView {
+  return {
+    ...toRefundView(r, passengerName),
+    paymentStatus: r.payment.status,
+    paymentAmountCents: r.payment.amountCents,
+    paymentRefundedCents: r.payment.refundedCents,
+    refundableCents: Math.max(0, r.payment.amountCents - r.payment.refundedCents),
+    externalRefundId: r.externalRefundId,
+  };
+}
+
 function toRefundablePaymentView(p: PaymentRow): RefundablePaymentView {
   return {
     paymentId: p.id,

@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
+import { MAPS_MODES } from '@veo/maps';
 
 /**
  * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Son los rangos de IP
@@ -88,6 +89,16 @@ export const envSchema = z.object({
   // a media-service (POST /media/internal/presign-get) para acuñar URLs GET firmadas en la revisión.
   // Debe coincidir con S3_BUCKET_DOCUMENTS de fleet-service/media-service.
   S3_BUCKET_DOCUMENTS: z.string().default('veo-documents-dev'),
+
+  // ── Mapas (FOUNDATION §0.7 soberanía: self-hosted, NUNCA Google) ──
+  // El admin-bff reverse-geocodea origin/destino del DETALLE de viaje (coords → dirección legible). Puerto
+  // @veo/maps intercambiable: 'local' (motor determinista propio, default dev/CI — dataset de Lima, sin infra
+  // externa), 'osrm' (OSM self-hosted: OSRM ruteo + Nominatim geocoding), 'mapbox' (Directions, token pk).
+  // Enum derivado de MAPS_MODES (sin drift). Solo se usa en el detalle (tráfico bajo) → no toca hot-paths.
+  VEO_MAPS_MODE: z.enum(MAPS_MODES).default('local'),
+  OSRM_BASE_URL: z.string().default('http://localhost:5000'),
+  NOMINATIM_BASE_URL: z.string().default('http://localhost:8080'),
+  MAPBOX_ACCESS_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -9,6 +9,7 @@ import {
   type GrpcServiceClient,
   type UsersByIdsReply,
   type VehiclesInspectionStatusReply,
+  type VehiclesReply,
 } from '@veo/rpc';
 import {
   grpcIdentityMetadata,
@@ -18,7 +19,7 @@ import {
 } from '@veo/auth';
 import { VehicleOperabilityReason } from '@veo/shared-types';
 import { canSeeIdentity } from '../redaction/redaction.policy';
-import { GRPC_IDENTITY, GRPC_FLEET } from '../infra/tokens';
+import { GRPC_IDENTITY, GRPC_FLEET, REST_MEDIA, REST_IDENTITY } from '../infra/tokens';
 import type { Env } from '../config/env.schema';
 import type {
   ExpiringDocumentView,
@@ -89,6 +90,9 @@ interface FleetDocument {
   expiresAt: string | null;
   /** ISO-8601 de creación (fleet-service devuelve la fila completa); encolado para el SLA de Revisiones. */
   createdAt?: string | null;
+  /** Imágenes del documento (sub-lote 3A · fleet-service las devuelve en list/create/review). Se presignan al
+   *  mapear a la vista (visor "Ver"). Opcional/ausente para productores viejos → degrada a `images: []`. */
+  images?: { s3Key: string; side: FleetDocumentView['images'][number]['side']; order: number }[];
 }
 interface Inspection {
   id: string;
@@ -102,15 +106,61 @@ interface Inspection {
 @Injectable()
 export class FleetService {
   private readonly secret: string;
+  private readonly documentsBucket: string;
   constructor(
     @Inject(REST_FLEET) private readonly rest: InternalRestClient,
     @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
     @Inject(GRPC_FLEET) private readonly fleetGrpc: GrpcServiceClient,
     @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
+    @Inject(REST_MEDIA) private readonly mediaRest: InternalRestClient,
+    @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
     config: ConfigService<Env, true>,
     private readonly audit: AuditRecorder,
   ) {
     this.secret = config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true });
+    this.documentsBucket = config.get('S3_BUCKET_DOCUMENTS', { infer: true });
+  }
+
+  /**
+   * Acuña una presigned GET URL para una imagen de documento (media-service, server-to-server). Mismo patrón
+   * que ops.service.presignDocument (docs del conductor). key vacía → null. FAIL-SOFT: si la firma falla,
+   * null y seguimos — no poder VER el archivo no debe tumbar la pantalla ni bloquear la decisión (el gate de
+   * aprobación valida el ESTADO del doc, no su URL). TTL corto (120s).
+   */
+  private async presignDocument(
+    identity: AuthenticatedUser,
+    fileS3Key: string,
+  ): Promise<string | null> {
+    if (!fileS3Key) return null;
+    try {
+      const { url } = await this.mediaRest.post<{ url: string }>('/media/internal/presign-get', {
+        identity,
+        body: { bucket: this.documentsBucket, key: fileS3Key, ttlSeconds: 120 },
+      });
+      return url;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Documento de fleet → vista del contrato, ACUÑANDO las presigned GET URL de sus imágenes (visor "Ver" del
+   * detalle de vehículo). fleet-service ya devuelve `images` (s3Key) en el list/create/review; acá las firmamos.
+   * Paralelo por imagen; fail-soft (url null si la firma falla). Sin imágenes → `images: []` (degradación honesta:
+   * la UI no muestra "Ver").
+   */
+  private async toFleetDocumentViewSigned(
+    identity: AuthenticatedUser,
+    d: FleetDocument,
+  ): Promise<FleetDocumentView> {
+    const images = await Promise.all(
+      (d.images ?? []).map(async (img) => ({
+        url: await this.presignDocument(identity, img.s3Key),
+        side: img.side,
+        order: img.order,
+      })),
+    );
+    return { ...toFleetDocumentView(d), images: images.sort((a, b) => a.order - b.order) };
   }
 
   /**
@@ -143,6 +193,41 @@ export class FleetService {
       toVehicleView(v, {
         driverName: identityVisible && v.driverId ? nameById.get(v.driverId) || null : null,
         itv: itvById.get(v.id) ?? null,
+      }),
+    );
+  }
+
+  /**
+   * Enriquece las inspecciones con la PLACA del vehículo (fleet GetVehiclesByIds) y el NOMBRE del inspector.
+   * El inspector es un OPERADOR (identity.admin_users), NO un User de dominio → se resuelve de la lista de
+   * operadores (`/admin/operators`), no de GetUsersByIds. DOS lecturas EN PARALELO (anti-N+1). La identidad
+   * del operador se gatea a Compliance+ (canSeeIdentity), fail-soft (si la lista falla → "—"). Inspector
+   * sintético/no-operador o vehículo inexistente → null honesto (la UI cae a `veh_<id>` / "—"), nunca el UUID.
+   */
+  private async enrichInspections(
+    identity: AuthenticatedUser,
+    inspections: Inspection[],
+  ): Promise<InspectionView[]> {
+    if (inspections.length === 0) return [];
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const vehicleIds = [...new Set(inspections.map((i) => i.vehicleId))];
+    const identityVisible = canSeeIdentity(identity.roles);
+    const [vehReply, operators] = await Promise.all([
+      this.fleetGrpc.call<VehiclesReply>('GetVehiclesByIds', { ids: vehicleIds }, meta),
+      identityVisible
+        ? this.identityRest
+            .get<{ id: string; name: string | null; email: string }[]>('/admin/operators', {
+              identity,
+            })
+            .catch(() => [] as { id: string; name: string | null; email: string }[])
+        : Promise.resolve<{ id: string; name: string | null; email: string }[]>([]),
+    ]);
+    const plateById = new Map(vehReply.vehicles.map((v) => [v.id, v.plate]));
+    const operatorById = new Map(operators.map((o) => [o.id, o.name || o.email]));
+    return inspections.map((i) =>
+      toInspectionView(i, {
+        plate: plateById.get(i.vehicleId) || null,
+        inspectorName: operatorById.get(i.inspectorId) ?? null,
       }),
     );
   }
@@ -193,7 +278,10 @@ export class FleetService {
         limit: query.limit,
       },
     });
-    return { items: page.items.map(toFleetDocumentView), nextCursor: page.nextCursor };
+    const items = await Promise.all(
+      page.items.map((d) => this.toFleetDocumentViewSigned(identity, d)),
+    );
+    return { items, nextCursor: page.nextCursor };
   }
 
   /** Lista paginada de inspecciones (admin), filtro opcional por vehículo. Proyección a inspectionView. */
@@ -205,7 +293,8 @@ export class FleetService {
       identity,
       query: { vehicleId: query.vehicleId, cursor: query.cursor, limit: query.limit },
     });
-    return { items: page.items.map(toInspectionView), nextCursor: page.nextCursor };
+    const items = await this.enrichInspections(identity, page.items);
+    return { items, nextCursor: page.nextCursor };
   }
 
   async createDocument(
@@ -219,7 +308,7 @@ export class FleetService {
       resourceId: doc.id,
       payload: { ownerType: dto.ownerType, ownerId: dto.ownerId, type: dto.type },
     });
-    return toFleetDocumentView(doc);
+    return this.toFleetDocumentViewSigned(identity, doc);
   }
 
   async reviewDocument(
@@ -242,7 +331,7 @@ export class FleetService {
         ? { decision: dto.decision, reason: dto.reason }
         : { decision: dto.decision },
     });
-    return toFleetDocumentView(doc);
+    return this.toFleetDocumentViewSigned(identity, doc);
   }
 
   async createInspection(
@@ -368,7 +457,7 @@ export class FleetService {
   }
 }
 
-function toFleetDocumentView(d: FleetDocument): FleetDocumentView {
+function toFleetDocumentView(d: FleetDocument): Omit<FleetDocumentView, 'images'> {
   return {
     id: d.id,
     ownerType: d.ownerType,
@@ -418,15 +507,21 @@ function toVehicleView(
   };
 }
 
-function toInspectionView(i: Inspection): InspectionView {
+function toInspectionView(
+  i: Inspection,
+  enrich?: { plate: string | null; inspectorName: string | null },
+): InspectionView {
   // fleet-service solo registra inspecciones ya realizadas → status COMPLETED; el veredicto va en `result`.
+  // `plate`/`inspector` se enriquecen on-read (fleet GetVehiclesByIds + identity GetUsersByIds); sin
+  // enriquecimiento → null honesto (la UI cae a `veh_<id>` / "—"), nunca se muestra el UUID crudo como dato.
   return {
     id: i.id,
     vehicleId: i.vehicleId,
+    plate: enrich?.plate ?? null,
     status: 'COMPLETED',
     inspectedAt: i.inspectedAt,
     scheduledAt: null,
-    inspector: i.inspectorId,
+    inspector: enrich?.inspectorName ?? null,
     result: i.passed ? 'PASSED' : 'FAILED',
     center: i.center,
   };

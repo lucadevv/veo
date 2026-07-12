@@ -71,4 +71,17 @@ export class CarpoolController {
   ): Promise<CarpoolBookingView> {
     return this.carpool.getBooking(user, id);
   }
+
+  @Post('bookings/:id/cancel')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Cancelar MI solicitud aún pendiente (PENDIENTE_APROBACION → CANCELADO, sin cobro). Ajena/inexistente → 404; ya resuelta → 409.',
+  })
+  cancelBooking(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<CarpoolBookingView> {
+    return this.carpool.cancelBooking(user, id);
+  }
 }

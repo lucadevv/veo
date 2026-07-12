@@ -19,14 +19,33 @@ import type { TripRecord, DriverRecord } from '../read-model/read-model.service'
  * /ops/trips queda DIFERIDA (identidad es la prioridad de este lote); ver reporte. `roles` se acepta
  * ya en la firma para no re-tocar call-sites cuando el contrato se haga nullable.
  */
-export function tripRecordToSummary(r: TripRecord, _roles: readonly AdminRole[]): TripSummary {
+/**
+ * Enriquecimiento on-read por viaje. `passengerName`/`driverName`: PII (identity gRPC batch), ya redactados
+ * en el service (null si no visible). `dispatchMode`: modo CONGELADO del viaje (trip-service gRPC batch), NO
+ * es PII → para todos los roles; null si trip-service no lo resolvió (degradación honesta → "—").
+ */
+export interface TripSummaryEnrichment {
+  passengerName: string | null;
+  driverName: string | null;
+  dispatchMode: 'FIXED' | 'PUJA' | null;
+}
+
+export function tripRecordToSummary(
+  r: TripRecord,
+  _roles: readonly AdminRole[],
+  enrichment?: TripSummaryEnrichment,
+): TripSummary {
   return {
     id: r.id,
     status: r.status,
     passengerId: r.passengerId,
     driverId: r.driverId,
+    passengerName: enrichment?.passengerName ?? null,
+    driverName: enrichment?.driverName ?? null,
     fareCents: r.fareCents,
     createdAt: r.createdAt,
+    // Modo de despacho (FIXED|PUJA) enriquecido on-read desde trip-service; null → "—" honesto.
+    dispatchMode: enrichment?.dispatchMode ?? null,
   };
 }
 
@@ -64,6 +83,13 @@ export interface DriverListEnrichment {
   docsTotal: number;
   /** Estado combinado de verificación biométrica (VERIFICADO/REVISAR/PENDIENTE); null si sub-Compliance (redactado). */
   verificationStatus: string | null;
+  /**
+   * Presencia OPERATIVA autoritativa del conductor (identity.currentStatus: OFFLINE/AVAILABLE/ON_TRIP/…), para
+   * la columna ESTADO. Es un EJE DISTINTO del `status` de ciclo de vida del read-model (PENDING/ACTIVE/…), que
+   * NO es presencia — por eso la lista mostraba a los postulantes "En línea". No es PII (el detalle ya lo expone
+   * por gRPC) → para todos los roles. null si identity no la trae.
+   */
+  operationalStatus: string | null;
 }
 
 /**
@@ -108,6 +134,9 @@ export function driverRecordToApproval(
     docsComplete: enrichment?.docsComplete ?? 0,
     docsTotal: enrichment?.docsTotal ?? 0,
     verificationStatus: enrichment?.verificationStatus ?? null,
+    // Presencia OPERATIVA autoritativa (identity.currentStatus) para la columna ESTADO. Sin enriquecimiento
+    // (página vacía no debería darse) → null honesto: la columna cae a "—", nunca inventa "En línea".
+    operationalStatus: enrichment?.operationalStatus ?? null,
   };
 }
 

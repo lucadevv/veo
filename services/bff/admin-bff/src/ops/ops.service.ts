@@ -8,19 +8,24 @@ import {
   InternalRestClient,
   type GrpcServiceClient,
   type TripReply,
+  type TripModesReply,
   type UserReply,
   type DriverReply,
   type DriversByIdsReply,
+  type UsersByIdsReply,
   type DriverCountsReply,
   type VehicleCountsReply,
   type ReviewQueueCountsReply,
   type DriverDocsCompletenessReply,
   type DriverVehiclesReply,
   type VehicleReply,
+  type VehiclesReply,
   type DriverDocumentsReply,
   type DriverInspectionStatusReply,
 } from '@veo/rpc';
 import { ConflictError, ForbiddenError, NotFoundError, isProdTier } from '@veo/utils';
+import type { MapsClient } from '@veo/maps';
+import { MAPS_CLIENT } from '../maps/maps.module';
 import {
   grpcIdentityMetadata,
   INTERNAL_IDENTITY_AUDIENCE,
@@ -53,7 +58,11 @@ import type {
   PassiveLivenessStatusValue,
   DniFaceMatchResult,
   GeoPoint,
+  OperatorDetail,
+  OperatorSession,
+  LiveCabin,
 } from '@veo/api-client';
+import { PERMISSION_LIST, baseGrants } from '@veo/policy';
 import {
   GRPC_TRIP,
   GRPC_IDENTITY,
@@ -132,6 +141,16 @@ function deriveVerificationStatus(d: DriverReply): VerificationStatus {
 /** proto3 entrega "" para strings ausentes; el contrato del panel los quiere `null` honesto. */
 function emptyToNull(s: string): string | null {
   return s ? s : null;
+}
+
+/**
+ * Normaliza el `dispatchMode` crudo de trip-service (PricingMode como string) al enum del contrato
+ * (`tripSummary.dispatchMode`). '' (no hallado) o cualquier valor fuera de {FIXED,PUJA} → null honesto
+ * (la UI cae a "—", nunca inventa un modo). Carpooling no es un dispatchMode de viaje on-demand (es otro
+ * producto, booking-service) → no aparece acá.
+ */
+function normalizeDispatchMode(raw: string | undefined): 'FIXED' | 'PUJA' | null {
+  return raw === 'FIXED' || raw === 'PUJA' ? raw : null;
 }
 
 /**
@@ -214,9 +233,20 @@ export interface PendingDriver {
 export interface OperatorSummary {
   id: string;
   email: string;
+  name: string | null;
   status: string;
   roles: string[];
+  totpEnrolled: boolean;
+  lastLoginAt: string | null;
   createdAt: string;
+}
+
+/**
+ * Detalle CRUDO que devuelve identity (GET /admin/operators/:id): la fila + sus sesiones. El admin-bff le
+ * SUMA `effectivePermissions` (derivado de los roles con la matriz base @veo/policy) antes de exponerlo.
+ */
+interface IdentityOperatorDetail extends OperatorSummary {
+  sessions: OperatorSession[];
 }
 
 export interface CreatedOperator {
@@ -343,6 +373,7 @@ export class OpsService {
     @Inject(REST_FLEET) private readonly fleetRest: InternalRestClient,
     @Inject(REST_PAYMENT) private readonly paymentRest: InternalRestClient,
     @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
+    @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     private readonly readModel: ReadModelService,
     private readonly audit: AuditRecorder,
     config: ConfigService<Env, true>,
@@ -351,17 +382,139 @@ export class OpsService {
     this.documentsBucket = config.get('S3_BUCKET_DOCUMENTS', { infer: true });
   }
 
-  async listTrips(roles: AdminRole[], query: ListTripsQueryDto): Promise<Page<TripSummary>> {
+  async listTrips(identity: AuthUser, query: ListTripsQueryDto): Promise<Page<TripSummary>> {
+    const roles = identity.roles;
     const limit = query.limit ?? DEFAULT_LIMIT;
     const page = await this.readModel.listTrips(
       { status: query.status, driverId: query.driverId, passengerId: query.passengerId },
       query.cursor ?? null,
       limit,
     );
+
+    // Enriquecimiento por página SIN N+1: nombres de pasajero/conductor vía DOS batches gRPC a identity en
+    // PARALELO (mismo patrón que listDrivers). PII (nombres · Ley 29733) SOLO para Compliance+ (canSeeIdentity);
+    // sub-Compliance → null honesto. No vive en el read-model (los eventos no llevan PII) → se resuelve acá.
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    const paxNameById = new Map<string, string | null>();
+    const drvNameById = new Map<string, string | null>();
+    if (canSeeIdentity(roles) && page.items.length > 0) {
+      const passengerIds = [
+        ...new Set(page.items.map((r) => r.passengerId).filter((id) => id.length > 0)),
+      ];
+      const driverIds = [
+        ...new Set(page.items.map((r) => r.driverId).filter((id): id is string => !!id)),
+      ];
+      const [usersReply, driversReply] = await Promise.all([
+        passengerIds.length > 0
+          ? this.identityGrpc
+              .call<UsersByIdsReply>('GetUsersByIds', { ids: passengerIds }, meta)
+              .catch(() => null)
+          : Promise.resolve(null),
+        driverIds.length > 0
+          ? this.identityGrpc
+              .call<DriversByIdsReply>('GetDriversByIds', { ids: driverIds }, meta)
+              .catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      for (const u of usersReply?.users ?? []) paxNameById.set(u.id, emptyToNull(u.name));
+      for (const d of driversReply?.drivers ?? []) drvNameById.set(d.id, emptyToNull(d.name));
+    }
+
+    // Enriquecimiento del MODO de despacho (columna MODO) por página, SIN N+1: UN batch gRPC a trip-service
+    // (GetTripModesByIds) que lee el `dispatchMode` CONGELADO de la fila (resolve-once-persist, ADR-011) —
+    // SIEMPRE exacto, a diferencia del read-model event-proyectado (pierde el flip FIXED→PUJA del re-bid).
+    // NO es PII (mecanismo de precio del viaje) → se resuelve para TODOS los roles (fuera del gate canSeeIdentity).
+    const modeById = new Map<string, 'FIXED' | 'PUJA' | null>();
+    if (page.items.length > 0) {
+      const tripIds = [...new Set(page.items.map((r) => r.id).filter((id) => id.length > 0))];
+      const modesReply = await this.tripGrpc
+        .call<TripModesReply>('GetTripModesByIds', { ids: tripIds }, meta)
+        .catch(() => null);
+      for (const m of modesReply?.items ?? []) modeById.set(m.id, normalizeDispatchMode(m.dispatchMode));
+    }
+
     return {
-      items: page.items.map((r) => tripRecordToSummary(r, roles)),
+      items: page.items.map((r) =>
+        tripRecordToSummary(r, roles, {
+          passengerName: paxNameById.get(r.passengerId) ?? null,
+          driverName: r.driverId ? (drvNameById.get(r.driverId) ?? null) : null,
+          dispatchMode: modeById.get(r.id) ?? null,
+        }),
+      ),
       nextCursor: page.nextCursor,
     };
+  }
+
+  /**
+   * MURO DE CÁMARAS EN VIVO (GET /ops/live-cabins · frame "Cámaras en vivo" · T/CameraTile). Lista las cabinas
+   * de los viajes EN CURSO enriquecidas con lo que el tile muestra: nombre del conductor, placa, distrito de
+   * origen y el reloj de inicio. NO abre el feed (eso exige doble-auth por-viaje en media-bff) — solo describe
+   * el tile. Fan-out acotado (el muro tiene pocos viajes activos): GetTrip por viaje (geo+vehículo+inicio
+   * autoritativos), luego DOS batches (identity nombres + fleet placas) y reverse-geocode soberano del origen.
+   * REDACCIÓN por rol (matriz aprobada): nombre=Compliance+ (sub → null), placa=dispatch+ (SUPPORT →
+   * enmascarada), distrito=geo exacta (roles sin geo exacta → null). Degradación honesta: lo ausente → null.
+   */
+  async listLiveCabins(identity: AuthUser): Promise<LiveCabin[]> {
+    const roles = identity.roles;
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
+    // Viajes activos del read-model (cap del muro: pocas cabinas simultáneas en una central real).
+    const page = await this.readModel.listTrips({ status: 'IN_PROGRESS' }, null, 60);
+    if (page.items.length === 0) return [];
+
+    // Autoritativo por viaje: GetTrip trae geo de origen (distrito), vehicleId (placa) y requestedAt (reloj).
+    // Best-effort en paralelo — un GetTrip caído descarta ESA cabina, no tumba el muro entero.
+    const trips = (
+      await Promise.all(
+        page.items.map((r) =>
+          this.tripGrpc.call<TripReply>('GetTrip', { id: r.id }, meta).catch(() => null),
+        ),
+      )
+    ).filter((t): t is TripReply => !!t?.found);
+    if (trips.length === 0) return [];
+
+    // DOS batches en paralelo (anti-N+1): nombres (identity, solo si el rol ve PII) + placas (fleet).
+    const driverIds = [...new Set(trips.map((t) => t.driverId).filter((id) => id.length > 0))];
+    const vehicleIds = [...new Set(trips.map((t) => t.vehicleId).filter((id) => id.length > 0))];
+    const identityVisible = canSeeIdentity(roles);
+    const [driversReply, vehiclesReply] = await Promise.all([
+      identityVisible && driverIds.length > 0
+        ? this.identityGrpc
+            .call<DriversByIdsReply>('GetDriversByIds', { ids: driverIds }, meta)
+            .catch(() => null)
+        : Promise.resolve(null),
+      vehicleIds.length > 0
+        ? this.fleetGrpc
+            .call<VehiclesReply>('GetVehiclesByIds', { ids: vehicleIds }, meta)
+            .catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    const nameById = new Map<string, string | null>();
+    for (const d of driversReply?.drivers ?? []) nameById.set(d.id, emptyToNull(d.name));
+    const plateById = new Map<string, string>();
+    for (const v of vehiclesReply?.vehicles ?? []) plateById.set(v.id, v.plate);
+
+    // Distrito de origen (reverse-geocode SOBERANO @veo/maps · self-hosted). MISMA gate que la geo exacta:
+    // un rol con geo coarse NO ve el distrito preciso. En paralelo; degradación honesta a null (geocoder/ sin match).
+    const geoVisible = canSeeExactTripGeo(roles);
+    const districts = await Promise.all(
+      trips.map((t) =>
+        geoVisible ? this.reverseDistrict(toGeo(t.originLat, t.originLng)) : Promise.resolve(null),
+      ),
+    );
+
+    return trips.map((t, i) => {
+      const rawPlate = t.vehicleId ? (plateById.get(t.vehicleId) ?? null) : null;
+      return {
+        tripId: t.id,
+        driverName: identityVisible ? (nameById.get(t.driverId) ?? null) : null,
+        // Placa: dispatch+ la ve completa; SUPPORT la ve enmascarada (misma matriz que el detalle de viaje).
+        plate: canSeePlate(roles) ? rawPlate : maskPlate(rawPlate),
+        district: districts[i] ?? null,
+        status: mapTripStatus(t.status),
+        // No hay timestamp de "recogida" en GetTrip → requestedAt es el reloj del viaje (honesto).
+        startedAt: t.requestedAt,
+      };
+    });
   }
 
   async listDrivers(identity: AuthUser, query: ListDriversQueryDto): Promise<Page<DriverApproval>> {
@@ -422,6 +575,11 @@ export class OpsService {
               // Verificación biométrica combinada. Señal del proceso KYC (ADMIN/Compliance+) → null para
               // sub-Compliance (mismo criterio de redacción que nombre/teléfono).
               verificationStatus: identityVisible ? deriveVerificationStatus(d) : null,
+              // Presencia OPERATIVA autoritativa (identity.currentStatus). La columna ESTADO debe mostrar
+              // presencia (En línea/Offline), NO el `status` de ciclo de vida del read-model (PENDING/ACTIVE/…)
+              // que NO es presencia — un postulante PENDING no está "en línea". No es PII (el detalle ya lo
+              // expone) → sin gate de rol. "" (proto3 sin dato) → null.
+              operationalStatus: emptyToNull(d.currentStatus),
             },
           ];
         }),
@@ -476,6 +634,14 @@ export class OpsService {
     const origin = toGeo(trip.originLat, trip.originLng);
     const destination = toGeo(trip.destinationLat, trip.destinationLng);
 
+    // Reverse-geocode SOBERANO (@veo/maps · self-hosted, jamás Google) origin/destino → dirección legible.
+    // MISMA gate de redacción que la geo: solo los roles que ven la geo EXACTA (canSeeExactTripGeo) reciben el
+    // label de calle — un rol con geo coarse NO debe ver la dirección precisa (el label la revelaría). En
+    // PARALELO (2 reverses). Degradación HONESTA: geocoder caído / sin match → null (el front muestra las coords).
+    const [originLabel, destinationLabel] = canSeeExactTripGeo(roles)
+      ? await Promise.all([this.reverseLabel(origin), this.reverseLabel(destination)])
+      : [null, null];
+
     return {
       id: trip.id,
       status: mapTripStatus(trip.status),
@@ -483,11 +649,18 @@ export class OpsService {
       driverId: trip.driverId || null,
       fareCents: trip.fareCents,
       createdAt: trip.requestedAt,
+      // Modo de despacho CONGELADO del viaje (FIXED|PUJA); '' (no hallado) o fuera del set → null honesto.
+      dispatchMode: normalizeDispatchMode(trip.dispatchMode),
       origin: canSeeExactTripGeo(roles) ? origin : coarseGeo(origin),
       destination: canSeeExactTripGeo(roles) ? destination : coarseGeo(destination),
+      // Direcciones legibles (reverse-geocode soberano); null para roles sin geo exacta o si no hubo match.
+      originLabel,
+      destinationLabel,
       driverLocation: null, // dato EN VIVO (tracking-service), no en GetTrip
       routePolyline: null, // follow-up: ruta no expuesta por GetTrip
-      etaSeconds: null, // dato EN VIVO
+      etaSeconds: null, // dato EN VIVO (ETA al destino), no en GetTrip
+      // Duración REAL del viaje (Trip.durationSeconds persistido) → KPI "Duración" del detalle. 0 → null honesto.
+      durationSeconds: trip.durationSeconds || null,
       distanceMeters: trip.distanceMeters || null,
       passengerName: canSeeIdentity(roles) ? passengerName : null,
       driverName: canSeeIdentity(roles) ? driverName : null,
@@ -497,6 +670,36 @@ export class OpsService {
       paymentMethod: trip.paymentMethod || null,
       timeline: [], // follow-up: timeline de eventos no expuesta por GetTrip
     };
+  }
+
+  /**
+   * Reverse-geocodea un punto → dirección legible (`displayName` de @veo/maps). `null` si el punto es null
+   * (viaje sin coord), no hay match, o el geocoder falla — degradación HONESTA: nunca inventa una dirección,
+   * el front cae a las coordenadas. Soberano: el puerto @veo/maps es self-hosted (local/OSRM+Nominatim).
+   */
+  private async reverseLabel(point: { lat: number; lon: number } | null): Promise<string | null> {
+    if (!point) return null;
+    try {
+      const r = await this.maps.reverse({ lat: point.lat, lon: point.lon });
+      return r?.displayName ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Reverse-geocodea un punto → DISTRITO administrativo (`district` de @veo/maps: addressdetails de Nominatim
+   * o el dataset local). `null` si el punto es null, no hay match, el geocoder falla o el proveedor no trae el
+   * distrito — degradación HONESTA (el tile cae a solo la placa, nunca inventa un distrito). Soberano.
+   */
+  private async reverseDistrict(point: { lat: number; lon: number } | null): Promise<string | null> {
+    if (!point) return null;
+    try {
+      const r = await this.maps.reverse({ lat: point.lat, lon: point.lon });
+      return r?.district ?? null;
+    } catch {
+      return null;
+    }
   }
 
   // ── Conductores ──
@@ -958,7 +1161,15 @@ export class OpsService {
         }
       }
     }
-    return { sinDocs, listos, enRevision, cleared: counts.cleared, rejected: counts.rejected };
+    return {
+      sinDocs,
+      listos,
+      enRevision,
+      cleared: counts.cleared,
+      rejected: counts.rejected,
+      // Presencia operativa real (identity.currentStatus agregado) → KPI "En línea" del panel.
+      online: counts.online,
+    };
   }
 
   /**
@@ -1354,6 +1565,119 @@ export class OpsService {
       action: 'operator.reject',
       resourceType: 'admin_user',
       resourceId: operatorId,
+    });
+  }
+
+  /**
+   * EFFECTIVE PERMISSIONS del operador OBJETIVO derivados de SUS roles con la matriz BASE (`PERMISSION_ROLES`
+   * de @veo/policy): un permiso es efectivo si ALGÚN rol del operador lo concede en base. Es per-TARGET, NO
+   * per-viewer — el overlay/hidden (capa 2) es del ACTOR que mira, NO del operador mirado; por eso acá se usa
+   * la BASE pura (lo que ese operador PUEDE por sus roles), sin restar nada. FUENTE ÚNICA compartida con el
+   * front (mismo `PERMISSION_ROLES`), así "qué puede este operador" no diverge entre server y UI.
+   */
+  private deriveEffectivePermissions(roles: string[]): string[] {
+    return PERMISSION_LIST.filter((permission) =>
+      roles.some((role) => baseGrants(role, permission)),
+    );
+  }
+
+  /** Ensambla el `operatorDetail` del contrato: la fila cruda de identity + `effectivePermissions` derivado. */
+  private toOperatorDetail(raw: IdentityOperatorDetail): OperatorDetail {
+    return {
+      id: raw.id,
+      email: raw.email,
+      name: raw.name ?? null,
+      status: raw.status as OperatorDetail['status'],
+      roles: raw.roles,
+      totpEnrolled: raw.totpEnrolled,
+      lastLoginAt: raw.lastLoginAt ?? null,
+      createdAt: raw.createdAt,
+      effectivePermissions: this.deriveEffectivePermissions(raw.roles),
+      sessions: raw.sessions ?? [],
+    };
+  }
+
+  /**
+   * Detalle de un operador (GET /ops/operators/:id): trae el detalle crudo de identity (core + 2FA + último
+   * acceso + sesiones) y DERIVA `effectivePermissions` de sus roles (matriz base @veo/policy). Es una LECTURA
+   * (no muta) → no audita, igual que `listOperators`.
+   */
+  async operatorDetail(identity: AuthUser, operatorId: string): Promise<OperatorDetail> {
+    const raw = await this.identityRest.get<IdentityOperatorDetail>(
+      `/admin/operators/${operatorId}`,
+      { identity },
+    );
+    return this.toOperatorDetail(raw);
+  }
+
+  /**
+   * Cambia los roles RBAC de un operador (POST /ops/operators/:id/roles). Anti-escalada en el borde del BFF
+   * (espejo de createOperator: el actor solo otorga rangos < al suyo) ANTES de tocar identity; identity RE-valida
+   * + suma el candado de objetivo + emite `admin.role_changed`. Audita la mutación (Ley 29733). Devuelve el
+   * `operatorDetail` actualizado (roles + effectivePermissions recomputados).
+   */
+  async changeOperatorRoles(
+    identity: AuthUser,
+    operatorId: string,
+    roles: AdminRole[],
+  ): Promise<OperatorDetail> {
+    if (!canGrantRoles(identity.roles, roles)) {
+      throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
+        actorRoles: identity.roles,
+        requested: roles,
+      });
+    }
+    const raw = await this.identityRest.post<IdentityOperatorDetail>(
+      `/admin/operators/${operatorId}/roles`,
+      { identity, body: { roles } },
+    );
+    await this.audit.record(identity, {
+      action: 'operator.role_change',
+      resourceType: 'admin_user',
+      resourceId: operatorId,
+      payload: { roles },
+    });
+    return this.toOperatorDetail(raw);
+  }
+
+  /** Suspende un operador (POST /ops/operators/:id/suspend → status SUSPENDED). Audita. */
+  async suspendOperator(identity: AuthUser, operatorId: string): Promise<void> {
+    await this.identityRest.post<IdentityOperatorDetail>(
+      `/admin/operators/${operatorId}/suspend`,
+      { identity },
+    );
+    await this.audit.record(identity, {
+      action: 'operator.suspend',
+      resourceType: 'admin_user',
+      resourceId: operatorId,
+    });
+  }
+
+  /** Elimina (soft-delete) un operador (POST /ops/operators/:id/remove → deletedAt). Audita. */
+  async removeOperator(identity: AuthUser, operatorId: string): Promise<void> {
+    await this.identityRest.post<void>(`/admin/operators/${operatorId}/remove`, { identity });
+    await this.audit.record(identity, {
+      action: 'operator.remove',
+      resourceType: 'admin_user',
+      resourceId: operatorId,
+    });
+  }
+
+  /** Revoca UNA sesión de un operador (POST /ops/operators/:id/sessions/:sessionId/revoke). Audita. */
+  async revokeOperatorSession(
+    identity: AuthUser,
+    operatorId: string,
+    sessionId: string,
+  ): Promise<void> {
+    await this.identityRest.post<void>(
+      `/admin/operators/${operatorId}/sessions/${sessionId}/revoke`,
+      { identity },
+    );
+    await this.audit.record(identity, {
+      action: 'operator.session.revoke',
+      resourceType: 'admin_user',
+      resourceId: operatorId,
+      payload: { sessionId },
     });
   }
 }

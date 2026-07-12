@@ -26,6 +26,7 @@ import { PlacesModule } from './places/places.module';
 import { KycModule } from './kyc/kyc.module';
 import { DevicesModule } from './devices/devices.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { NotificationPrefsModule } from './notification-prefs/notification-prefs.module';
 import { PromosModule } from './promos/promos.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { ChatModule } from './chat/chat.module';
@@ -54,6 +55,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     KycModule,
     DevicesModule,
     NotificationsModule,
+    NotificationPrefsModule,
     PromosModule,
     ReferralsModule,
     ChatModule,

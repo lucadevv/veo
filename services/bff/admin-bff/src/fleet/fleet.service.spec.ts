@@ -10,6 +10,10 @@ import { FleetService } from './fleet.service';
 // tocan listVehicles). GetUsersByIds → {users:[]}, GetVehiclesInspectionStatus → {items:[]} (ambos vacíos).
 const grpcNoop = { call: vi.fn().mockResolvedValue({ users: [], items: [] }) };
 const configNoop = { get: vi.fn().mockReturnValue('dev-secret') };
+// media (presign-get de imágenes de documentos): no-op para estos tests; devuelve una URL firmada dummy.
+const mediaNoop = { post: vi.fn().mockResolvedValue({ url: 'https://signed.example/doc' }) };
+// identity REST (lista de operadores para el nombre del inspector): no-op → [] (inspector cae a "—").
+const identityNoop = { get: vi.fn().mockResolvedValue([]) };
 
 function makeService(restOver: Record<string, unknown> = {}) {
   const rest = {
@@ -26,6 +30,8 @@ function makeService(restOver: Record<string, unknown> = {}) {
     grpcNoop as never,
     grpcNoop as never,
     'admin-rail' as never,
+    mediaNoop as never,
+    identityNoop as never,
     configNoop as never,
     audit as never,
   );
@@ -116,6 +122,8 @@ describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
       grpcNoop as never,
       grpcNoop as never,
       'admin-rail' as never,
+      mediaNoop as never,
+      identityNoop as never,
       configNoop as never,
       audit as never,
     );
@@ -173,6 +181,8 @@ describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
       grpcNoop as never,
       grpcNoop as never,
       'admin-rail' as never,
+      mediaNoop as never,
+      identityNoop as never,
       configNoop as never,
       audit as never,
     );

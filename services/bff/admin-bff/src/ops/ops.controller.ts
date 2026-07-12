@@ -17,6 +17,8 @@ import type {
   TripDetail,
   DriverDetail,
   DniFaceMatchResult,
+  OperatorDetail,
+  LiveCabin,
 } from '@veo/api-client';
 import {
   OpsService,
@@ -30,6 +32,7 @@ import {
   ListTripsQueryDto,
   ListDriversQueryDto,
   CreateOperatorDto,
+  ChangeOperatorRolesDto,
   RejectDriverDto,
   SuspendDriverDto,
 } from './dto/ops.dto';
@@ -54,7 +57,7 @@ export class OpsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ListTripsQueryDto,
   ): Promise<Page<TripSummary>> {
-    return this.ops.listTrips(user.roles, query);
+    return this.ops.listTrips(user, query);
   }
 
   @Get('trips/:id')
@@ -62,6 +65,16 @@ export class OpsController {
   @ApiOperation({ summary: 'Detalle agregado: trip + passenger + driver + payment + rating' })
   tripDetail(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripDetail> {
     return this.ops.tripDetail(user, id);
+  }
+
+  // Muro de cámaras EN VIVO (pantalla Seguridad · gate `live:view` = Compliance+). Sobre-restringe respecto del
+  // @Roles amplio de la clase ops A PROPÓSITO (defensa en profundidad: solo Compliance+ ve las cabinas — el
+  // front ya lo gatea con can(live:view) y media re-autoriza el feed con doble-auth). No abre video: solo el tile.
+  @Get('live-cabins')
+  @Permission('live:view')
+  @ApiOperation({ summary: 'Cabinas de los viajes en curso para el muro de cámaras (tiles enriquecidos)' })
+  liveCabins(@CurrentUser() user: AuthenticatedUser): Promise<LiveCabin[]> {
+    return this.ops.listLiveCabins(user);
   }
 
   @Get('drivers')
@@ -290,6 +303,75 @@ export class OpsController {
     @Body() dto: CreateOperatorDto,
   ): Promise<CreatedOperator> {
     return this.ops.createOperator(user, dto.email, dto.roles);
+  }
+
+  @Get('operators/:id')
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('operators:view')
+  @ApiOperation({
+    summary: 'Detalle de un operador: core + 2FA + último acceso + permisos efectivos + sesiones (admin)',
+  })
+  operatorDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<OperatorDetail> {
+    return this.ops.operatorDetail(user, id);
+  }
+
+  @Post('operators/:id/roles')
+  @HttpCode(200)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // Cambiar roles es una MUTACIÓN de privilegio (no la gestión-de-fila de reinvite/reject) → operators:create,
+  // el mismo permiso del alta con grant de roles. Step-up MFA + anti-escalada (espejo de createOperator).
+  @Permission('operators:create')
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Cambia los roles RBAC de un operador (admin · step-up MFA + anti-escalada)' })
+  changeOperatorRoles(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ChangeOperatorRolesDto,
+  ): Promise<OperatorDetail> {
+    return this.ops.changeOperatorRoles(user, id, dto.roles);
+  }
+
+  @Post('operators/:id/suspend')
+  @HttpCode(204)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('operators:create')
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Suspende un operador (status → SUSPENDED · admin · step-up MFA)' })
+  suspendOperator(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.ops.suspendOperator(user, id);
+  }
+
+  @Post('operators/:id/remove')
+  @HttpCode(204)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('operators:create')
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Elimina (soft-delete) un operador (admin · step-up MFA)' })
+  removeOperator(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.ops.removeOperator(user, id);
+  }
+
+  @Post('operators/:id/sessions/:sessionId/revoke')
+  @HttpCode(204)
+  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('operators:create')
+  @RequireStepUpMfa()
+  @ApiOperation({ summary: 'Revoca UNA sesión activa de un operador (admin · step-up MFA)' })
+  revokeOperatorSession(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<void> {
+    return this.ops.revokeOperatorSession(user, id, sessionId);
   }
 
   @Post('operators/:id/reinvite')

@@ -8,8 +8,12 @@
  * lo toma de la identidad firmada que este BFF propaga (public-rail) y scopea la reserva a su dueño (ajena →
  * 404, sin filtrar existencia).
  *
- * FUERA DE ALCANCE (gaps del downstream, honestos): "mis reservas" (GET /bookings/mine · F1) y CANCELAR la
- * solicitud (F3c · refund por tier) aún no existen en booking-service — cuando lleguen, se proxyan acá.
+ * F3c-passenger (este lote): CANCELAR la propia solicitud aún PENDIENTE (POST /bookings/:id/cancel · public-
+ * rail). Se proxya firmado igual que reserve/getBooking; el downstream sella ownership + estado (solo
+ * PENDIENTE_APROBACION) server-truth. La cancelación CON-TIER tras el cobro (refund) es OTRA fase (F3/F5).
+ *
+ * FUERA DE ALCANCE (gaps del downstream, honestos): "mis reservas" (GET /bookings/mine · F1) aún no existe en
+ * booking-service — cuando llegue, se proxya acá.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
@@ -70,6 +74,17 @@ export class CarpoolService {
   /** GET /bookings/:id — MI reserva (scoped server-truth al dueño; ajena → 404). */
   getBooking(user: AuthenticatedUser, id: string): Promise<CarpoolBookingView> {
     return this.bookingRest.get<CarpoolBookingView>(`/bookings/${id}`, {
+      identity: user,
+    });
+  }
+
+  /**
+   * POST /bookings/:id/cancel — cancela MI solicitud aún PENDIENTE (sin body). El downstream toma el
+   * passengerId de la identidad firmada (server-truth) y sella ownership + estado (solo PENDIENTE_APROBACION);
+   * ajena/inexistente → 404, ya resuelta → 409. Sin cobro ni refund (charge-on-approval: nunca se aprobó).
+   */
+  cancelBooking(user: AuthenticatedUser, id: string): Promise<CarpoolBookingView> {
+    return this.bookingRest.post<CarpoolBookingView>(`/bookings/${id}/cancel`, {
       identity: user,
     });
   }

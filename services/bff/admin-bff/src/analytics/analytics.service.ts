@@ -31,6 +31,14 @@ export interface OverviewMetrics {
   completedToday: number;
   cancelledToday: number;
   revenueTodayCents: number;
+  /** Margen REAL de la plataforma hoy (payment-service ya lo computa; el bff lo reenvía → KPI "Margen hoy"). */
+  platformMarginTodayCents: number;
+  /** Viajes digitales de HOY (cobros FARE capturados) → KPI "Viajes hoy". */
+  tripCountToday: number;
+  /** Ticket promedio de HOY, DERIVADO por el bff = revenueTodayCents / tripCountToday (0 sin viajes). */
+  avgTicketTodayCents: number;
+  /** Tasa de cancelación de HOY, DERIVADA = cancelledToday / (completedToday + cancelledToday); null sin cierres. */
+  cancellationRateToday: number | null;
   avgDurationSeconds: number | null;
   series: OverviewSeriesPoint[];
 }
@@ -45,20 +53,51 @@ export interface RevenueSeriesPoint {
  * Contrato que la pantalla "Métricas" consume (GET /analytics/revenue?range). Espeja `revenueMetricsView`
  * (@veo/api-client). Todo en céntimos Int. `platformMarginCents` lo DERIVA este bff (= grossCommission − refunded).
  */
+export interface RevenueByMode {
+  mode: string;
+  revenueCents: number;
+}
+
+export interface RevenueByDistrict {
+  district: string;
+  revenueCents: number;
+}
+
+/** Variación % vs período previo (fracción: 0.18 = +18%); `null` si el previo no tiene base (0) — no se inventa. */
+export interface RevenueDeltas {
+  moneyInPct: number | null;
+  tripCountPct: number | null;
+  avgTicketPct: number | null;
+}
+
 export interface RevenueMetrics {
   range: RevenueRangeValue;
   moneyInCents: number;
   grossCommissionCents: number;
   refundedCents: number;
   platformMarginCents: number;
+  /** Viajes digitales del rango (kind=FARE) — dato de payment-service. */
+  tripCount: number;
+  /** Ticket promedio DERIVADO por el bff = moneyInCents / tripCount (0 sin viajes). */
+  avgTicketCents: number;
+  /** Revenue por modo 3-way (FIXED | PUJA | CARPOOLING) — dato de payment-service (denormaliza el dispatchMode). */
+  byMode: RevenueByMode[];
+  /** Revenue por DISTRITO de origen (zonificado en payment), ordenado desc. Alimenta "Top distritos por ingreso". */
+  topDistricts: RevenueByDistrict[];
+  /** Deltas % vs período previo, DERIVADOS por el bff. */
+  deltas: RevenueDeltas;
   series: RevenueSeriesPoint[];
 }
 
-/** Shape crudo servido por payment-service (GET /internal/analytics/revenue-metrics) — sin el margen derivado. */
+/** Shape crudo servido por payment-service (GET /internal/analytics/revenue-metrics) — sin margen ni deltas derivados. */
 interface RevenueRangeStats {
   moneyInCents: number;
   grossCommissionCents: number;
   refundedCents: number;
+  tripCount: number;
+  byMode: RevenueByMode[];
+  topDistricts: RevenueByDistrict[];
+  previous: { moneyInCents: number; tripCount: number };
   series: RevenueSeriesPoint[];
 }
 
@@ -75,6 +114,8 @@ interface OpenPanicsStat {
 }
 interface RevenueStats {
   revenueTodayCents: number;
+  platformMarginTodayCents: number;
+  tripCountToday: number;
   revenuePerHour: { bucket: string; revenueCents: number }[];
 }
 
@@ -108,13 +149,23 @@ export class AnalyticsService {
       ),
     ]);
 
+    const completedToday = trip?.completedToday ?? 0;
+    const cancelledToday = trip?.cancelledToday ?? 0;
+    const revenueTodayCents = payment?.revenueTodayCents ?? 0;
+    const tripCountToday = payment?.tripCountToday ?? 0;
+    const closedToday = completedToday + cancelledToday;
     return {
       activeTrips: trip?.activeTrips ?? 0,
       onlineDrivers: dispatch?.onlineDrivers ?? 0,
       openPanics: panic?.openPanics ?? 0,
-      completedToday: trip?.completedToday ?? 0,
-      cancelledToday: trip?.cancelledToday ?? 0,
-      revenueTodayCents: payment?.revenueTodayCents ?? 0,
+      completedToday,
+      cancelledToday,
+      revenueTodayCents,
+      // Margen que payment YA computa (antes se dropeaba) + derivados del bff (ticket promedio, tasa cancelación).
+      platformMarginTodayCents: payment?.platformMarginTodayCents ?? 0,
+      tripCountToday,
+      avgTicketTodayCents: tripCountToday > 0 ? Math.round(revenueTodayCents / tripCountToday) : 0,
+      cancellationRateToday: closedToday > 0 ? cancelledToday / closedToday : null,
       avgDurationSeconds: trip?.avgDurationSeconds ?? null,
       series: this.mergeSeries(trip?.tripsPerHour ?? [], payment?.revenuePerHour ?? []),
     };
@@ -139,7 +190,22 @@ export class AnalyticsService {
     const grossCommissionCents = stats?.grossCommissionCents ?? 0;
     const refundedCents = stats?.refundedCents ?? 0;
     const platformMarginCents = grossCommissionCents - refundedCents;
+    const tripCount = stats?.tripCount ?? 0;
+    const byMode = stats?.byMode ?? [];
+    const topDistricts = stats?.topDistricts ?? [];
     const series = stats?.series ?? [];
+    // Derivados (una sola responsabilidad del bff, como el margen): ticket promedio + deltas % vs período previo.
+    const avgTicketCents = tripCount > 0 ? Math.round(moneyInCents / tripCount) : 0;
+    const prevMoneyIn = stats?.previous.moneyInCents ?? 0;
+    const prevTripCount = stats?.previous.tripCount ?? 0;
+    const prevAvg = prevTripCount > 0 ? prevMoneyIn / prevTripCount : 0;
+    // %Δ = (actual − previo) / previo; null si el previo es 0 (sin base) → la UI muestra el KPI sin delta, no un % falso.
+    const pct = (cur: number, prev: number): number | null => (prev > 0 ? (cur - prev) / prev : null);
+    const deltas: RevenueDeltas = {
+      moneyInPct: pct(moneyInCents, prevMoneyIn),
+      tripCountPct: pct(tripCount, prevTripCount),
+      avgTicketPct: prevAvg > 0 ? (avgTicketCents - prevAvg) / prevAvg : null,
+    };
     this.logger.info(
       {
         range,
@@ -147,6 +213,8 @@ export class AnalyticsService {
         grossCommissionCents,
         refundedCents,
         platformMarginCents,
+        tripCount,
+        avgTicketCents,
         buckets: series.length,
         degraded: stats === null,
       },
@@ -158,6 +226,11 @@ export class AnalyticsService {
       grossCommissionCents,
       refundedCents,
       platformMarginCents,
+      tripCount,
+      avgTicketCents,
+      byMode,
+      topDistricts,
+      deltas,
       series,
     };
   }
