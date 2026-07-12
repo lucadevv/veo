@@ -23,7 +23,8 @@ import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
 import { MapTopScrim } from '../../../../shared/presentation/components/MapTopScrim';
-import { IconFlame, IconChevronRight, IconPause } from '../../../../shared/presentation/icons';
+import { NoticeHero } from '../../../../shared/presentation/components/NoticeHero';
+import { IconAlert, IconFlame, IconChevronRight, IconPause } from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
@@ -164,6 +165,43 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const heatmap = useHeatmap(heatmapQuery);
   const heatCells = useHeatCells(heatmap.data);
   const showDemandToggle = online && !activeTripId;
+
+  // Cuenta suspendida (frame C/Cuenta-Suspendida): NO es un banner sobre el dashboard — es un layout
+  // dedicado a pantalla completa que reemplaza el mapa/dock, porque el conductor no puede operar. Aviso
+  // crítico centrado + salida a Documentos (regularizar) o a soporte. Colocado tras TODOS los hooks para
+  // no romper las reglas de hooks.
+  // BACKEND: el "motivo" de la suspensión (el pill "Motivo: documento vencido" del frame) NO viene del
+  // servidor; se OMITE el pill en vez de inventar la causa. GLYPH: el frame usa `octagon-alert`, que no
+  // existe en el set propio — usamos `IconAlert` (triángulo de alerta, el glifo de peligro ya en uso).
+  if (isSuspended(status)) {
+    return (
+      <SafeScreen
+        footer={
+          <View style={styles.suspendedFooter}>
+            <Button
+              label={t('shift.suspendedUpdateDocs')}
+              variant="primary"
+              fullWidth
+              onPress={() => navigation.navigate('Documents')}
+            />
+            <Button
+              label={t('shift.contactSupport')}
+              variant="ghost"
+              fullWidth
+              onPress={() => navigation.navigate('Support')}
+            />
+          </View>
+        }
+      >
+        <NoticeHero
+          tone="danger"
+          icon={({ size, color }) => <IconAlert size={size} color={color} strokeWidth={2} />}
+          title={t('shift.suspendedTitle')}
+          description={t('shift.suspendedBody')}
+        />
+      </SafeScreen>
+    );
+  }
 
   // Cabecera flotante: avatar (→ perfil) + saludo a la izquierda; pill de estado a la derecha.
   const topOverlay = (
@@ -567,20 +605,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           <View style={styles.spaced}>
             {renderEarningsMetrics(t('shift.netTotal'), 'accentStrong', 'ink')}
           </View>
-          {/* SUSPENDED (regla de seguridad): el conductor NO puede operar. Aviso claro + salida a soporte,
-            en vez del CTA "Conéctate" (que canStartShift ya bloquea para este estado). */}
-          {isSuspended(status) ? (
-            <Banner
-              tone="danger"
-              title={t('shift.suspendedTitle')}
-              description={t('shift.suspendedBody')}
-              action={{
-                label: t('shift.contactSupport'),
-                onPress: () => navigation.navigate('Support'),
-              }}
-              style={styles.spaced}
-            />
-          ) : canStartShift(status) ? (
+          {/* SUSPENDED se atiende ANTES con un layout dedicado a pantalla completa (early return), así que
+            este dock offline solo cubre: conectable (CTA "Conéctate") o estado no reconocido (aviso). */}
+          {canStartShift(status) ? (
             <Button
               label={t('shift.connect')}
               size="lg"
@@ -769,4 +796,5 @@ const styles = StyleSheet.create({
   spaced: { marginTop: 12 },
   bannerBelow: { marginBottom: 12 },
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  suspendedFooter: { gap: 8 },
 });

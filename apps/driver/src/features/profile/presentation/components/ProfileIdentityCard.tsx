@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Avatar, Card, Text, useTheme } from '@veo/ui-kit';
-import { IconCheck, IconStar } from '../../../../shared/presentation/icons';
+import { IconBadgeCheck, IconStar } from '../../../../shared/presentation/icons';
 
 export interface ProfileIdentityCardProps {
   /** Nombre/teléfono mostrado como identidad principal. */
@@ -43,7 +43,7 @@ export const ProfileIdentityCard = ({
               {name}
             </Text>
             {verified ? (
-              <IconCheck size={16} color={theme.colors.accent} strokeWidth={2.8} />
+              <IconBadgeCheck size={16} color={theme.colors.accent} strokeWidth={2.2} />
             ) : null}
           </View>
 

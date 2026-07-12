@@ -17,7 +17,7 @@ import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import {
   IconChevronRight,
-  IconMessage,
+  IconHeadset,
   IconMore,
   IconSearch,
 } from '../../../../shared/presentation/icons';
@@ -133,7 +133,7 @@ export const SupportScreen = ({ navigation, route }: Props): React.JSX.Element =
               { backgroundColor: theme.colors.surface, borderRadius: theme.radii.pill },
             ]}
           >
-            <IconMessage size={22} color={theme.colors.accent} />
+            <IconHeadset size={22} color={theme.colors.accent} />
           </View>
           <View style={styles.flex}>
             <Text variant="bodyStrong">{t('support.chatTitle')}</Text>

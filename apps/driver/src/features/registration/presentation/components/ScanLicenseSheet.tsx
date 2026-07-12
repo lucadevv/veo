@@ -161,7 +161,9 @@ export function ScanLicenseSheet({
             style={[
               s.extract,
               {
-                backgroundColor: theme.colors.surfaceElevated,
+                // Bloque recesado gris `$skeleton` (frame `Extracted` #F5F7FA). NO `surfaceElevated`:
+                // colapsa a #FFFFFF en light Trust (=== surface del sheet) → sin recess visible.
+                backgroundColor: theme.colors.skeleton,
                 borderColor: theme.colors.border,
                 borderRadius: theme.radii.md,
                 gap: theme.spacing.sm,

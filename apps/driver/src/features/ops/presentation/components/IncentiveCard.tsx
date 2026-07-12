@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
-import { IconBolt, IconGift } from '../../../../shared/presentation/icons';
+import { IconBolt, IconTarget } from '../../../../shared/presentation/icons';
 import { formatPEN } from '../../../../shared/presentation/format';
 import {
   formatMultiplier,
@@ -38,7 +38,7 @@ export function IncentiveCard({ incentive }: IncentiveCardProps): React.JSX.Elem
     : state === 'completed'
       ? theme.colors.success
       : theme.colors.accent;
-  const Glyph = isMultiplier ? IconBolt : IconGift;
+  const Glyph = isMultiplier ? IconBolt : IconTarget;
   const value = isMultiplier
     ? `+${formatMultiplier(incentive.multiplierBps)}`
     : `+${formatPEN(incentive.rewardCents)}`;

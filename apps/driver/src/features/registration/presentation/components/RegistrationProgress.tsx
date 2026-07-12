@@ -17,7 +17,7 @@ interface RegistrationProgressProps {
   total?: number;
 }
 
-/** Un segmento de la barra: pista oscura con relleno cian que crece de izquierda a derecha. */
+/** Un segmento de la barra: pista gris `$border` con relleno `$accent` que crece de izquierda a derecha. */
 function Segment({ filled, index }: { filled: boolean; index: number }): React.JSX.Element {
   const theme = useTheme();
   const reduced = useReducedMotion();
@@ -46,8 +46,10 @@ function Segment({ filled, index }: { filled: boolean; index: number }): React.J
   return (
     <View
       style={[
+        // Pista NO-rellena en `$border` #DDE1E7 (frame `Seg` unfilled). NO `surfaceElevated`: en el tema
+        // light Trust colapsa a #FFFFFF (=== surface) y la pista quedaba INVISIBLE sobre el bg claro.
         styles.track,
-        { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill },
+        { backgroundColor: theme.colors.border, borderRadius: theme.radii.pill },
       ]}
     >
       <Animated.View
@@ -63,7 +65,7 @@ function Segment({ filled, index }: { filled: boolean; index: number }): React.J
 
 /**
  * Barra de progreso del wizard: un segmento redondeado por paso (la cantidad se DERIVA de
- * `REGISTRATION_TOTAL_STEPS`, sin número mágico). Los pasos alcanzados se rellenan en cian
+ * `REGISTRATION_TOTAL_STEPS`, sin número mágico). Los pasos alcanzados se rellenan en `$accent`
  * con una animación de crecimiento (ease-out, <320ms) escalonada; respeta reduce-motion. Es un
  * indicador puramente visual con etiqueta accesible del progreso global.
  */

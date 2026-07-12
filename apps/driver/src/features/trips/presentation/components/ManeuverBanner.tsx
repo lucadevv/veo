@@ -41,7 +41,7 @@ export function ManeuverBanner({ step, remaining }: ManeuverBannerProps): React.
       <View
         style={[
           styles.iconWrap,
-          { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md },
+          { backgroundColor: theme.colors.brandDim, borderRadius: theme.radii.md },
         ]}
       >
         <IconManeuver glyph={glyph} size={36} color={theme.colors.accent} strokeWidth={2.2} />

@@ -114,9 +114,10 @@ export const UnderReviewScreen = (): React.JSX.Element => {
             </Text>
           </Reveal>
 
-          {/* Badge del escudo con GLOW radial azul detrás (frame: rect 320 gradiente `#2D7FF9` 0.14→0 +
-              círculo 88 `$brand-dim` con shield-check 40 `$brand`). El glow es un rect SVG con RadialGradient
-              real, no un shadow. */}
+          {/* Badge del escudo con GLOW radial azul detrás (frame `rnaFy`: rect 320 gradiente `$accent` #0075A9
+              0.15→0 + círculo 88 tint `$info` #0097CE con shield-check 40 `$info`). El glow ambiente sigue
+              siendo brand/accent; el ESCUDO y su disco son info-cyan (no brand). El glow es un rect SVG con
+              RadialGradient real, no un shadow. */}
           <Reveal delay={60} style={styles.badgeSection}>
             <View style={styles.glow} pointerEvents="none">
               <Svg width={GLOW} height={GLOW}>
@@ -135,8 +136,8 @@ export const UnderReviewScreen = (): React.JSX.Element => {
                 <Rect width={GLOW} height={GLOW} fill="url(#badgeGlow)" />
               </Svg>
             </View>
-            <View style={[styles.badge, { backgroundColor: hexAlpha(theme.colors.accent, 0.14) }]}>
-              <IconShield size={40} color={theme.colors.accent} strokeWidth={2} />
+            <View style={[styles.badge, { backgroundColor: hexAlpha(theme.colors.info, 0.14) }]}>
+              <IconShield size={40} color={theme.colors.info} strokeWidth={2} />
             </View>
           </Reveal>
 
@@ -161,20 +162,21 @@ export const UnderReviewScreen = (): React.JSX.Element => {
             </Reveal>
           ) : null}
 
-          {/* Card del tiempo estimado (frame: fill `$brand-dim` + stroke `#2D7FF94D`, r-lg, padding 16/18,
-              gap 6). Texto interno a la IZQUIERDA: label accent 12/600, valor display 20/700, nota muted 13. */}
+          {/* Card del tiempo estimado (frame `rnaFy` EtaCard: fill `$warn` #FFA000 tint + stroke `#FFA0004D`,
+              r-lg, padding 16/18, gap 6). Texto interno a la IZQUIERDA: label warn 12/600, valor display
+              20/700, nota muted 13. Ámbar (no brand): "espera" comunica paciencia, no acción. */}
           <Reveal delay={180}>
             <View
               style={[
                 styles.etaCard,
                 {
-                  backgroundColor: hexAlpha(theme.colors.accent, 0.14),
-                  borderColor: hexAlpha(theme.colors.accent, 0.3),
+                  backgroundColor: hexAlpha(theme.colors.warn, 0.14),
+                  borderColor: hexAlpha(theme.colors.warn, 0.3),
                   borderRadius: theme.radii.lg,
                 },
               ]}
             >
-              <Text variant="caption" color="accent" style={styles.etaLabel}>
+              <Text variant="caption" color="warn" style={styles.etaLabel}>
                 {t('registration.review.etaLabel')}
               </Text>
               <Text variant="title2" style={styles.etaValue}>

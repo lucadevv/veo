@@ -70,7 +70,9 @@ export function ScanExtractRow({
 export function ScanSendingBar(): React.JSX.Element {
   const theme = useTheme();
   return (
-    <View style={[scanSheetStyles.barTrack, { backgroundColor: theme.colors.surfaceElevated }]}>
+    // Pista gris `$skeleton` (frame `Track` #EEF1F5). NO `surfaceElevated`: en light Trust colapsa a
+    // #FFFFFF (=== surface) y la barra quedaba INVISIBLE sobre la superficie blanca del sheet.
+    <View style={[scanSheetStyles.barTrack, { backgroundColor: theme.colors.skeleton }]}>
       <View style={[scanSheetStyles.barFill, { backgroundColor: theme.colors.accent }]} />
     </View>
   );
@@ -126,7 +128,9 @@ export function ScanFacePreview({
         style={[
           scanSheetStyles.facePreview,
           {
-            backgroundColor: theme.colors.surfaceElevated,
+            // Placeholder gris `$skeleton` (frame `Anverso`/`Reverso` #F5F7FA). NO `surfaceElevated`:
+            // colapsa a #FFFFFF en light Trust (=== surface del sheet) → recuadro sin recess visible.
+            backgroundColor: theme.colors.skeleton,
             borderColor,
             borderRadius: theme.radii.md,
           },

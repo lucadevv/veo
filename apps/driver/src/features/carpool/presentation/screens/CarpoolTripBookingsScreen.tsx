@@ -21,7 +21,7 @@ import { StateView } from '../../../../shared/presentation/components/StateView'
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN } from '../../../../shared/presentation/format';
-import { IconCarpool } from '../../../../shared/presentation/icons';
+import { IconUserRoundSearch } from '../../../../shared/presentation/icons';
 import { useApproveBooking, useRejectBooking, useTripBookings } from '../hooks/useCarpool';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CarpoolTripBookings'>;
@@ -135,7 +135,7 @@ export const CarpoolTripBookingsScreen = ({ route, navigation }: Props): React.J
       ) : !bookings.data || bookings.data.length === 0 ? (
         <Reveal style={styles.empty}>
           <View style={[styles.emptyIcon, { backgroundColor: theme.colors.skeleton }]}>
-            <IconCarpool size={38} color={theme.colors.inkMuted} strokeWidth={1.8} />
+            <IconUserRoundSearch size={38} color={theme.colors.inkMuted} strokeWidth={1.8} />
           </View>
           <Text variant="title3" align="center">
             {t('carpool.noRequestsTitle')}

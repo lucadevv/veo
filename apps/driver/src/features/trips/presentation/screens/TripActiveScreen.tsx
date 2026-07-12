@@ -646,7 +646,7 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           </View>
         }
       >
-        <Text variant="title3" style={styles.cashAmount}>
+        <Text variant="title3" color="success" style={styles.cashAmount}>
           {formatPEN(trip.data?.fareCents ?? 0)}
         </Text>
         <Text variant="callout" color="inkMuted" style={styles.spacer}>
