@@ -90,6 +90,22 @@ afterAll(async () => {
   await db?.teardown();
 });
 
+/**
+ * Emite un reembolso de punta a punta (SOLICITAR → APROBAR) contra el `service` del módulo. La API de reembolsos
+ * migró de un desembolso directo (`refund()`) a una COLA DE APROBACIÓN (dual-control): `requestRefund` crea la
+ * solicitud PENDING y `approveRefund` la DESEMBOLSA. Este helper reproduce el viejo flujo de un paso —el MISMO
+ * operador solicita y aprueba— para los casos que proceden sin dual-control (monto ≤ umbral de monto alto).
+ */
+async function directRefund(
+  tripId: string,
+  amountCents: number,
+  reason: string,
+  operator: AuthenticatedUser,
+): Promise<{ refundId: string; paymentId: string; status: string }> {
+  const req = await service.requestRefund(tripId, amountCents, reason, operator);
+  return service.approveRefund(req.refundId, operator);
+}
+
 describe('Cobro idempotente con Postgres real (BR-P01/P04 + idempotencia)', () => {
   it('doble-submit secuencial con la misma dedupKey produce UN solo pago capturado', async () => {
     const tripId = uuidv7();
@@ -283,13 +299,13 @@ describe('Refund: status-guard transaccional (F1, idempotencia financiera #3)', 
     expect(captured.amountCents).toBe(2000); // ≤ umbral L2 (3000) → no exige rol L2
 
     const operator = { userId: uuidv7(), roles: [] } as unknown as AuthenticatedUser;
-    const first = await service.refund(tripId, 2000, 'ok', operator);
+    const first = await directRefund(tripId, 2000, 'ok', operator);
     // S5: status = estado del REFUND. El sandbox reembolsa síncrono (ACCEPTED) → COMPLETED.
     expect(first.status).toBe('COMPLETED');
     expect((await service.getPayment(captured.id)).status).toBe('REFUNDED');
 
     // 2do refund del mismo viaje: ya no hay CAPTURED → rechazado, sin crear otro Refund ni emitir otro evento.
-    await expect(service.refund(tripId, 2000, 'duplicado', operator)).rejects.toThrow();
+    await expect(directRefund(tripId, 2000, 'duplicado', operator)).rejects.toThrow();
 
     const refunds = await prisma.refund.findMany({ where: { paymentId: captured.id } });
     expect(refunds).toHaveLength(1);
@@ -319,7 +335,7 @@ describe('Refund PARCIAL (F4: PARTIALLY_REFUNDED + el conductor no pierde su pay
 
     // Parcial 1: 1000 de 3000 → el pago queda PARTIALLY_REFUNDED, refundedCents=1000, refundedAt null.
     // S5: el status devuelto es el del REFUND (COMPLETED: el sandbox confirma síncrono).
-    const r1 = await service.refund(tripId, 1000, 'parcial-1', operator());
+    const r1 = await directRefund(tripId, 1000, 'parcial-1', operator());
     expect(r1.status).toBe('COMPLETED');
     let p = await prisma.payment.findUnique({ where: { id: captured.id } });
     expect(p?.status).toBe('PARTIALLY_REFUNDED');
@@ -327,7 +343,7 @@ describe('Refund PARCIAL (F4: PARTIALLY_REFUNDED + el conductor no pierde su pay
     expect(p?.refundedAt).toBeNull();
 
     // Parcial 2: 2000 → completa 3000 → el pago pasa a REFUNDED, refundedAt seteado.
-    const r2 = await service.refund(tripId, 2000, 'parcial-2', operator());
+    const r2 = await directRefund(tripId, 2000, 'parcial-2', operator());
     expect(r2.status).toBe('COMPLETED');
     p = await prisma.payment.findUnique({ where: { id: captured.id } });
     expect(p?.status).toBe('REFUNDED');
@@ -353,8 +369,8 @@ describe('Refund PARCIAL (F4: PARTIALLY_REFUNDED + el conductor no pierde su pay
       payerRef: '51999111000',
       dedupKey,
     });
-    await service.refund(tripId, 1500, 'parcial', operator()); // saldo restante: 500
-    await expect(service.refund(tripId, 600, 'excede', operator())).rejects.toThrow(
+    await directRefund(tripId, 1500, 'parcial', operator()); // saldo restante: 500
+    await expect(directRefund(tripId, 600, 'excede', operator())).rejects.toThrow(
       /excede el saldo/,
     );
     const p = await prisma.payment.findUnique({ where: { id: captured.id } });
@@ -371,7 +387,7 @@ describe('Refund PARCIAL (F4: PARTIALLY_REFUNDED + el conductor no pierde su pay
       payerRef: '51999222111',
       dedupKey,
     });
-    await service.refund(tripId, 1000, 'goodwill', operator()); // parcial → PARTIALLY_REFUNDED
+    await directRefund(tripId, 1000, 'goodwill', operator()); // parcial → PARTIALLY_REFUNDED
 
     // Invariante del fix F4: collectEarnings filtra status IN (CAPTURED, PARTIALLY_REFUNDED).
     const eligible = await prisma.payment.findMany({

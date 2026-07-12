@@ -6,7 +6,8 @@
  *  - comisión bruta = Σ commissionCents del MISMO cohorte,
  *  - reembolsos = Σ Refund.amountCents COMPLETED (por createdAt, incluye parciales+totales),
  *  - `tripCount` = conteo de cobros kind=FARE del cohorte (el TIP NO cuenta como viaje),
- *  - `byMode` = Σ netSettled por `Payment.mode` (2-way ON_DEMAND | CARPOOLING),
+ *  - `byMode` = Σ netSettled por modo (3-way FIXED | PUJA | CARPOOLING): CARPOOLING es su bucket y el ON_DEMAND
+ *    se parte en FIXED/PUJA por el `dispatchMode` denormalizado (null → FIXED),
  *  - `previous` = totales de la ventana anterior (misma duración) → deltas del bff,
  *  - los límites de rango en TZ America/Lima (today vs 7d vs 30d vs 90d),
  *  - la serie por bucket (hora en today, día en 7d/30d/90d) reconcilia EXACTA con moneyInCents.
@@ -138,7 +139,7 @@ beforeAll(async () => {
     capturedAt: '2026-06-05T15:00:00Z',
   });
 
-  // ── Modo CARPOOLING (para byMode 2-way) + propina TIP (NO cuenta como viaje). Ambos HOY. ──
+  // ── Modo CARPOOLING (su propio bucket en byMode) + propina TIP (NO cuenta como viaje). Ambos HOY. ──
   await seedPayment({
     method: 'YAPE',
     status: 'CAPTURED',
@@ -237,10 +238,12 @@ describe('AnalyticsService.revenueMetrics · agregación por rango (TZ Lima, mon
     expect(d30.tripCount).toBe(5); // + P4
   });
 
-  it('byMode 30d: Σ netSettled por modo (2-way ON_DEMAND | CARPOOLING) reconcilia con money-in', async () => {
+  it('byMode 30d: Σ netSettled por modo (3-way FIXED | PUJA | CARPOOLING) reconcilia con money-in', async () => {
     const m = await analytics.revenueMetrics(RevenueRange.THIRTY_DAYS, NOW);
     const byMode = Object.fromEntries(m.byMode.map((x) => [x.mode, x.revenueCents]));
-    expect(byMode.ON_DEMAND).toBe(3100); // P1 1000 + P2 500 + tip 100 + P3 800 + P4 700
+    // El desglose es 3-way: CARPOOLING es su propio bucket y el ON_DEMAND se PARTE en FIXED/PUJA por el
+    // `dispatchMode` denormalizado. Los cobros ON_DEMAND del seed no fijan dispatchMode → caen en FIXED.
+    expect(byMode.FIXED).toBe(3100); // P1 1000 + P2 500 + tip 100 + P3 800 + P4 700 (ON_DEMAND sin dispatchMode)
     expect(byMode.CARPOOLING).toBe(300); // carpool
     const sum = m.byMode.reduce((a, x) => a + x.revenueCents, 0);
     expect(sum).toBe(m.moneyInCents); // 3400
