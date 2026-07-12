@@ -117,7 +117,8 @@ export const SupportScreen = ({ navigation, route }: Props): React.JSX.Element =
           style={({ pressed }) => [
             styles.chatCard,
             {
-              backgroundColor: theme.colors.accent,
+              backgroundColor: hexAlpha(theme.colors.accent, 0.12),
+              borderColor: theme.colors.accent,
               borderRadius: theme.radii.xl,
               padding: theme.spacing.xl,
               gap: theme.spacing.md,
@@ -128,21 +129,19 @@ export const SupportScreen = ({ navigation, route }: Props): React.JSX.Element =
           <View
             style={[
               styles.chatIcon,
-              // Tint del onAccent (blanco al 16%) sobre el hero accent: derivado del token, no literal.
-              { backgroundColor: hexAlpha(theme.colors.onAccent, 0.16), borderRadius: theme.radii.md },
+              // Disco blanco sobre la card tintada de acento (frame C/Ayuda: CIc #FFFFFF, ícono accent).
+              { backgroundColor: theme.colors.surface, borderRadius: theme.radii.pill },
             ]}
           >
-            <IconMessage size={22} color={theme.colors.onAccent} />
+            <IconMessage size={22} color={theme.colors.accent} />
           </View>
           <View style={styles.flex}>
-            <Text variant="bodyStrong" style={{ color: theme.colors.onAccent }}>
-              {t('support.chatTitle')}
-            </Text>
-            <Text variant="footnote" style={{ color: theme.colors.onAccent }}>
+            <Text variant="bodyStrong">{t('support.chatTitle')}</Text>
+            <Text variant="footnote" color="inkMuted">
               {t('support.chatSubtitle')}
             </Text>
           </View>
-          <IconChevronRight size={20} color={theme.colors.onAccent} />
+          <IconChevronRight size={20} color={theme.colors.accent} />
         </Pressable>
       </View>
 
@@ -193,6 +192,6 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 0 },
   section: {},
   sectionLabel: { marginBottom: 8 },
-  chatCard: { flexDirection: 'row', alignItems: 'center' },
+  chatCard: { flexDirection: 'row', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth },
   chatIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

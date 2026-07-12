@@ -134,8 +134,8 @@ export const CarpoolTripBookingsScreen = ({ route, navigation }: Props): React.J
         />
       ) : !bookings.data || bookings.data.length === 0 ? (
         <Reveal style={styles.empty}>
-          <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surface }]}>
-            <IconCarpool size={38} color={theme.colors.inkSubtle} strokeWidth={1.8} />
+          <View style={[styles.emptyIcon, { backgroundColor: theme.colors.skeleton }]}>
+            <IconCarpool size={38} color={theme.colors.inkMuted} strokeWidth={1.8} />
           </View>
           <Text variant="title3" align="center">
             {t('carpool.noRequestsTitle')}

@@ -95,7 +95,7 @@ export function FaqTopics({ query = '' }: FaqTopicsProps): React.JSX.Element {
               <View
                 style={[
                   styles.iconTile,
-                  { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.md },
+                  { backgroundColor: theme.colors.skeleton, borderRadius: theme.radii.md },
                 ]}
               >
                 <Glyph size={20} color={theme.colors.ink} />

@@ -178,7 +178,11 @@ function MetaCell({ value, label }: MetaCellProps): React.JSX.Element {
     <View
       style={[
         styles.metaCell,
-        { backgroundColor: theme.colors.surface, borderRadius: theme.radii.sm },
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radii.sm,
+        },
       ]}
     >
       <Text variant="bodyStrong" tabular numberOfLines={1}>
@@ -220,7 +224,14 @@ const styles = StyleSheet.create({
   },
   card: { alignSelf: 'stretch', borderWidth: StyleSheet.hairlineWidth, gap: 8 },
   meta: { flexDirection: 'row', gap: 8 },
-  metaCell: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 12, paddingHorizontal: 8 },
+  metaCell: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   breakdownRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   pax: {
     alignSelf: 'stretch',
