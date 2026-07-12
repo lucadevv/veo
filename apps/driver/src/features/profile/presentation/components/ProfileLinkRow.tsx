@@ -32,12 +32,12 @@ export const ProfileLinkRow = ({
       accessibilityLabel={label}
       onPress={onPress}
       style={[styles.row, { borderRadius: theme.radii.md }]}
-      pressedStyle={{ backgroundColor: theme.colors.surfaceElevated }}
+      pressedStyle={{ backgroundColor: theme.colors.accent + '0F' }}
     >
       <View
         style={[
           styles.iconCircle,
-          { backgroundColor: theme.colors.surfaceElevated, borderRadius: theme.radii.pill },
+          { backgroundColor: theme.colors.skeleton, borderRadius: theme.radii.pill },
         ]}
       >
         {icon}

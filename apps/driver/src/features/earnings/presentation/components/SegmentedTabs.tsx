@@ -47,13 +47,18 @@ export function SegmentedTabs({ items, value, onChange }: SegmentedTabsProps): R
               styles.segment,
               {
                 borderRadius: theme.radii.pill,
-                backgroundColor: selected ? theme.colors.surfaceElevated : 'transparent',
-                borderColor: selected ? theme.colors.accent : 'transparent',
+                // Segmento activo en acento sólido (surfaceElevated === surface === #FFFFFF sería blanco-sobre-blanco); el indicador ya no depende del borde.
+                backgroundColor: selected ? theme.colors.accent : 'transparent',
+                borderColor: 'transparent',
                 opacity: pressed ? 0.85 : 1,
               },
             ]}
           >
-            <Text variant="footnote" color={selected ? 'accent' : 'inkMuted'} numberOfLines={1}>
+            <Text
+              variant="footnote"
+              color={selected ? 'onAccent' : 'inkMuted'}
+              numberOfLines={1}
+            >
               {item.label}
             </Text>
           </Pressable>

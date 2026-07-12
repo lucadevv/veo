@@ -14,8 +14,8 @@ export interface ProfileIdentityCardProps {
   ratingValue: string;
   /** Metadato secundario opcional (ej. "120 viajes (30 días)"). */
   ratingMeta?: string;
-  /** Cuenta verificada (KYC aprobado): muestra un check JADE sutil junto al nombre (verificación
-   *  sutil, un solo acento premium — NO un checklist de badges). */
+  /** Cuenta verificada (KYC aprobado): muestra un check en el acento de marca (brand) junto al nombre
+   *  (verificación sutil, un solo acento premium — NO un checklist de badges). */
   verified?: boolean;
 }
 
@@ -43,7 +43,7 @@ export const ProfileIdentityCard = ({
               {name}
             </Text>
             {verified ? (
-              <IconCheck size={16} color={theme.colors.success} strokeWidth={2.8} />
+              <IconCheck size={16} color={theme.colors.accent} strokeWidth={2.8} />
             ) : null}
           </View>
 

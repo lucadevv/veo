@@ -175,7 +175,7 @@ export const ShiftSummaryScreen = ({ navigation, route }: Props): React.JSX.Elem
             onPress={goHome}
             style={styles.ghost}
           >
-            <Text variant="subhead" color="inkSubtle">
+            <Text variant="subhead" color="inkMuted">
               {t('shift.summary.done')}
             </Text>
           </PressableScale>
@@ -211,7 +211,7 @@ function StatCell({ icon: Icon, value, label, loading = false }: StatCellProps):
         },
       ]}
     >
-      <View style={[styles.cellIcon, { backgroundColor: theme.colors.surfaceElevated }]}>
+      <View style={[styles.cellIcon, { backgroundColor: theme.colors.divider }]}>
         <Icon size={17} color={theme.colors.inkMuted} strokeWidth={2} />
       </View>
       <View style={styles.cellText}>

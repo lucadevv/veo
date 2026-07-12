@@ -21,7 +21,7 @@ import { ScreenHero } from '../../../../shared/presentation/components/ScreenHer
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { formatPEN, formatShortDate } from '../../../../shared/presentation/format';
+import { calendarDaysAgo, formatPEN, formatShortDate } from '../../../../shared/presentation/format';
 import { IconCarpool, IconChevronRight, IconPlus } from '../../../../shared/presentation/icons';
 import { useMyPublishedTrips } from '../hooks/useCarpool';
 
@@ -32,23 +32,39 @@ type Props = CompositeScreenProps<
 
 /**
  * `estado` es el union TIPADO del contrato (`publishedTripState`): switch EXHAUSTIVO, cero strings mágicos
- * (un estado nuevo o mal escrito = error de compilación). Reserva de color de la marca: azul = vivo/activo
- * (publicado, en ruta), jade = positivo (lleno = se llenó, completado), rojo = cancelado, gris = borrador.
+ * (un estado nuevo o mal escrito = error de compilación). Reserva de color: verde = viaje vivo/activo
+ * (publicado, parcial, en ruta) y completado; ámbar = LLENO (se llenó, ya no recibe reservas); rojo =
+ * cancelado; gris = borrador.
  */
 function tripStateTone(estado: PublishedTripView['estado']): StatusTone {
   switch (estado) {
     case 'PUBLICADO':
     case 'PARCIALMENTE_RESERVADO':
     case 'EN_RUTA':
-      return 'accent';
-    case 'LLENO':
     case 'COMPLETADO':
       return 'success';
+    case 'LLENO':
+      return 'warn';
     case 'CANCELADO':
       return 'danger';
     case 'BORRADOR':
       return 'neutral';
   }
+}
+
+/**
+ * Salida del viaje como día relativo + hora ("Hoy · 6:30 p. m." / "Mañana · 8:00 a. m."); para salidas más
+ * lejanas cae a la fecha corta + hora. `calendarDaysAgo` cuenta días de calendario respecto de hoy: 0 = hoy,
+ * -1 = mañana (la salida es futura). Cabecera de la tarjeta hasta que exista la ruta por nombre (geocoding).
+ */
+function formatDeparture(iso: string, t: TFunction): string {
+  const date = new Date(iso);
+  const time = Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleTimeString('es-PE', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const days = calendarDaysAgo(iso);
+  const day = days === 0 ? t('carpool.dayToday') : days === -1 ? t('carpool.dayTomorrow') : formatShortDate(iso);
+  return time ? `${day} · ${time}` : day;
 }
 
 /** Tarjeta de un viaje publicado del conductor. La RUTA por nombre (geocoding) es un follow-up; hoy el foco
@@ -62,11 +78,14 @@ function TripCard({
   t: TFunction;
   onPress: () => void;
 }): React.JSX.Element {
+  const theme = useTheme();
   return (
     <Pressable onPress={onPress} accessibilityRole="button">
       <Card variant="filled">
         <View style={styles.cardHead}>
-          <Text variant="bodyStrong">{formatShortDate(trip.fechaHoraSalida)}</Text>
+          <Text variant="bodyStrong" color="accent">
+            {formatDeparture(trip.fechaHoraSalida, t)}
+          </Text>
           <StatusPill
             label={t(`carpool.state.${trip.estado}`)}
             tone={tripStateTone(trip.estado)}
@@ -74,15 +93,23 @@ function TripCard({
           />
         </View>
         <View style={styles.cardMeta}>
-          <Text variant="callout" color="inkMuted">
-            {t('carpool.seatsLabel', {
-              disponibles: trip.asientosDisponibles,
-              total: trip.asientosTotales,
-            })}
-          </Text>
-          <Text variant="bodyStrong" color="success" tabular>
-            {formatPEN(trip.precioBase)}
-          </Text>
+          <View style={styles.seats}>
+            <IconCarpool size={16} color={theme.colors.inkSubtle} strokeWidth={2} />
+            <Text variant="callout" color="inkMuted">
+              {t('carpool.seatsLabel', {
+                disponibles: trip.asientosDisponibles,
+                total: trip.asientosTotales,
+              })}
+            </Text>
+          </View>
+          <View style={styles.price}>
+            <Text variant="bodyStrong" color="ink" tabular>
+              {formatPEN(trip.precioBase)}
+            </Text>
+            <Text variant="footnote" color="inkMuted">
+              {t('carpool.perSeat')}
+            </Text>
+          </View>
         </View>
       </Card>
     </Pressable>
@@ -120,9 +147,14 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
           <View style={[styles.publishIcon, { backgroundColor: theme.colors.accent + '26' }]}>
             <IconPlus size={22} color={theme.colors.accent} strokeWidth={2.2} />
           </View>
-          <Text variant="body" style={styles.publishLabel}>
-            {t('carpool.publishCta')}
-          </Text>
+          <View style={styles.publishText}>
+            <Text variant="body" style={styles.publishTitle}>
+              {t('carpool.publishCta')}
+            </Text>
+            <Text variant="footnote" color="inkMuted">
+              {t('carpool.publishSubtitle')}
+            </Text>
+          </View>
           <IconChevronRight size={18} color={theme.colors.accent} />
         </Pressable>
       </Reveal>
@@ -142,7 +174,7 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       ) : !trips.data || trips.data.length === 0 ? (
         <Reveal delay={80} style={styles.empty}>
-          <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surface }]}>
+          <View style={[styles.emptyIcon, { backgroundColor: theme.colors.skeleton }]}>
             <IconCarpool size={38} color={theme.colors.inkSubtle} strokeWidth={1.8} />
           </View>
           <Text variant="title3" align="center">
@@ -154,6 +186,9 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
         </Reveal>
       ) : (
         <View style={styles.section}>
+          <Text variant="subhead" color="inkMuted">
+            {t('carpool.publishedSection')}
+          </Text>
           {trips.data.map((trip, i) => (
             <Reveal key={trip.id} delay={80 + i * 40}>
               <TripCard
@@ -186,8 +221,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  publishLabel: { flex: 1, fontWeight: '600' },
+  publishText: { flex: 1, gap: 2 },
+  publishTitle: { fontWeight: '600' },
   section: { gap: 12, paddingTop: 20 },
+  seats: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  price: { flexDirection: 'row', alignItems: 'baseline', gap: 3 },
   cardHead: {
     flexDirection: 'row',
     alignItems: 'center',

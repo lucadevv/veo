@@ -87,7 +87,12 @@ export const SplashScreen = (): React.JSX.Element => {
       </View>
 
       <Animated.View style={[styles.taglineWrap, taglineStyle]}>
-        <Text variant="callout" color="inkMuted" align="center" style={styles.tagline}>
+        <Text
+          variant="subhead"
+          color="inkMuted"
+          align="center"
+          style={[styles.tagline, { fontSize: theme.typography.fontSize.base }]}
+        >
           {t('auth.tagline')}
         </Text>
       </Animated.View>

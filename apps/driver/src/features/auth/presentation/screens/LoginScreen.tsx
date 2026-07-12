@@ -30,7 +30,12 @@ import {
 } from '@veo/ui-kit';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { IconChevronLeft } from '../../../../shared/presentation/icons';
+import {
+  IconAlertCircle,
+  IconCheckCircle,
+  IconChevronLeft,
+  IconSend,
+} from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { isValidPeruPhone } from '../../domain';
 import { useLogin, useRequestOtp } from '../hooks/useAuth';
@@ -64,6 +69,13 @@ const maskPhone = (value: string): string => {
   }
   const last = digits.slice(-3);
   return `+51 ··· ··· ${last}`;
+};
+
+/** Formatea segundos restantes a m:ss para el contador de reenvío ("24" → "0:24", "90" → "1:30"). */
+const formatMmSs = (totalSeconds: number): string => {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
 };
 
 /** Glifo de Face ID: escudo con huella (re-login biométrico). */
@@ -128,7 +140,7 @@ const OtpBox = ({ char, isActive, hasError }: OtpBoxProps): React.JSX.Element =>
       style={[
         styles.otpBox,
         {
-          backgroundColor: theme.colors.surfaceElevated,
+          backgroundColor: hasError ? theme.colors.dangerDim : theme.colors.surfaceElevated,
           borderColor,
           borderWidth: isActive || hasError ? 2 : 1,
           borderRadius: theme.radii.md,
@@ -219,6 +231,9 @@ export const LoginScreen = (): React.JSX.Element => {
 
   const phoneValid = isValidPeruPhone(phone);
   const codeValid = /^\d{6}$/.test(code);
+  // Error de FORMATO local (código incompleto mientras se tipea) vs error de VERIFICACIÓN del servidor.
+  const otpFormatError = code.length > 0 && !codeValid;
+  const otpVerifyError = login.isError;
 
   // Tick del cooldown de reenvío: baja 1s hasta 0 (setTimeout encadenado, se limpia al desmontar).
   useEffect(() => {
@@ -413,6 +428,7 @@ export const LoginScreen = (): React.JSX.Element => {
                   variant="accent"
                   size="lg"
                   fullWidth
+                  leftIcon={<IconSend size={20} color={theme.colors.onAccent} />}
                   disabled={!phoneValid}
                   loading={requestOtp.isPending}
                   onPress={onRequest}
@@ -455,14 +471,34 @@ export const LoginScreen = (): React.JSX.Element => {
           <View style={{ gap: theme.spacing.sm }}>
             <OtpField
               value={code}
-              onChangeText={setCode}
-              hasError={code.length > 0 && !codeValid}
+              onChangeText={(next) => {
+                // Al reeditar el código, limpia el error de verificación previo (evita cajas rojas stale).
+                if (login.isError) {
+                  login.reset();
+                }
+                setCode(next);
+              }}
+              hasError={otpFormatError || otpVerifyError}
               accessibilityLabel={t('auth.codeLabel')}
             />
-            {code.length > 0 && !codeValid ? (
-              <Text variant="footnote" color="danger" accessibilityRole="alert">
-                {t('auth.invalidCode')}
-              </Text>
+            {otpFormatError ? (
+              /* Error de FORMATO local (código incompleto): fila inline con circle-alert + mensaje. */
+              <View style={styles.otpErrorRow} accessibilityRole="alert">
+                <IconAlertCircle size={16} color={theme.colors.danger} />
+                <Text variant="footnote" color="danger">
+                  {t('auth.invalidCode')}
+                </Text>
+              </View>
+            ) : otpVerifyError ? (
+              /* Error de VERIFICACIÓN del servidor (frame C/LoginOtp-Error): circle-alert + mensaje real
+                 del BFF (para el código errado es "Código incorrecto"; para lockout/red, su mensaje). El
+                 BFF NO expone "intentos restantes", así que NO se fabrica ese conteo. */
+              <View style={styles.otpErrorRow} accessibilityRole="alert">
+                <IconAlertCircle size={16} color={theme.colors.danger} />
+                <Text variant="footnote" color="danger">
+                  {toErrorMessage(login.error, t)}
+                </Text>
+              </View>
             ) : (
               <Text variant="footnote" color="inkSubtle">
                 {t('auth.codeHelper')}
@@ -484,28 +520,22 @@ export const LoginScreen = (): React.JSX.Element => {
             >
               <Text variant="footnote" color={resendIn > 0 ? 'inkSubtle' : 'accent'}>
                 {resendIn > 0
-                  ? t('auth.otpResendIn', { seconds: resendIn })
+                  ? t('auth.otpResendIn', { time: formatMmSs(resendIn) })
                   : t('auth.otpResend')}
               </Text>
             </Pressable>
           </View>
 
-          {login.isError ? (
-            <Banner
-              tone="danger"
-              title={t('errors.generic')}
-              description={toErrorMessage(login.error, t)}
-            />
-          ) : null}
-
           {/* UNA sola acción por intención (U2 · dedup): verificar el código. Para CAMBIAR el número, la
               única affordance es el chevron back de arriba (gesto idiomático del paso OTP); se quitó el
-              Button ghost "Cambiar número" que ejecutaba el MISMO handler que el chevron. */}
+              Button ghost "Cambiar número" que ejecutaba el MISMO handler que el chevron. El error de
+              verificación se muestra inline bajo las cajas (no en Banner). */}
           <View style={{ gap: theme.spacing.md }}>
             <Button
               label={t('auth.verify')}
               variant="accent"
               fullWidth
+              leftIcon={<IconCheckCircle size={20} color={theme.colors.onAccent} />}
               disabled={!codeValid}
               loading={login.isPending}
               onPress={onVerify}
@@ -531,6 +561,7 @@ const styles = StyleSheet.create({
   shieldCircle: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   prefix: { paddingRight: 10, borderRightWidth: StyleSheet.hairlineWidth },
   resendRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  otpErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', position: 'relative' },
   otpBox: {
     flex: 1,

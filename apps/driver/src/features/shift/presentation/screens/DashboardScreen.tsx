@@ -197,8 +197,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       </PressableScale>
       <View style={styles.topRight}>
-        {/* Único chip del header (frame C/Dashboard · "Demanda"): toggle del mapa de calor. El estado de
-            turno NO va arriba — vive en el dock (punto vivo + "Listo para viajes"), fiel al board. */}
+        {/* Chip del header según el estado de turno (frames C/Dashboard*): EN LÍNEA → toggle "Demanda" del
+            mapa de calor; EN PAUSA → pill ámbar "En pausa"; FUERA DE TURNO → pill neutro "Fuera de turno".
+            El toggle solo vive en línea; el estado de turno sí sube al header en pausa/offline. */}
         {showDemandToggle ? (
           <PressableScale
             accessibilityRole="switch"
@@ -224,6 +225,42 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               {t('shift.demandShort')}
             </Text>
           </PressableScale>
+        ) : status === 'ON_BREAK' ? (
+          // Pill ámbar "En pausa" (frame uygho · PausePill): icono pausa + texto sobre surface, borde warn.
+          <View
+            style={[
+              styles.statusPill,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.warn,
+                borderRadius: theme.radii.pill,
+                ...theme.elevation.level1,
+              },
+            ]}
+          >
+            <IconPause size={12} color={theme.colors.warn} strokeWidth={2} />
+            <Text variant="footnote" color="warn" numberOfLines={1}>
+              {t('shift.pill.paused')}
+            </Text>
+          </View>
+        ) : shift.data && !online ? (
+          // Pill neutro "Fuera de turno" (frame Qy65J · OffPill): punto gris + texto sobre surface, borde neutro.
+          <View
+            style={[
+              styles.statusPill,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.pill,
+                ...theme.elevation.level1,
+              },
+            ]}
+          >
+            <View style={[styles.pillDot, { backgroundColor: theme.colors.inkSubtle }]} />
+            <Text variant="footnote" color="inkMuted" numberOfLines={1}>
+              {t('shift.status.offline')}
+            </Text>
+          </View>
         ) : null}
       </View>
     </View>
@@ -232,37 +269,44 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   // Pin pulsante solo cuando está en línea y hay un fix real de GPS.
   const mapDriver = online ? driverPoint : null;
 
-  // Métricas en vivo (reutiliza los campos reales del resumen: neto acumulado y por liquidar).
-  const earningsMetrics = earnings.isLoading ? (
-    <Skeleton height={56} />
-  ) : earnings.isError || !earnings.data ? (
-    <Banner tone="warn" title={t('shift.kpisUnavailable')} />
-  ) : (
-    <View style={styles.kpisRow}>
-      <Appear
-        style={[styles.kpi, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md }]}
-        delay={40}
-      >
-        <Text variant="title3" color="success" tabular>
-          {formatPEN(earnings.data.totalNetCents ?? 0)}
-        </Text>
-        <Text variant="caption" color="inkSubtle">
-          {t('shift.netTotal')}
-        </Text>
-      </Appear>
-      <Appear
-        style={[styles.kpi, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md }]}
-        delay={110}
-      >
-        <Text variant="title3" color="ink" tabular>
-          {formatPEN(earnings.data.pendingNetCents ?? 0)}
-        </Text>
-        <Text variant="caption" color="inkSubtle">
-          {t('shift.pendingNet')}
-        </Text>
-      </Appear>
-    </View>
-  );
+  // Métricas en vivo (reutiliza los campos reales del resumen: hoy/acumulado y por liquidar). Parametrizada
+  // porque el dock offline ("Neto acumulado" / Por liquidar en ink) y el dock en pausa ("Ganado hoy" /
+  // Por liquidar en ámbar) comparten estructura pero difieren en la etiqueta y el color de cada valor.
+  const renderEarningsMetrics = (
+    firstLabel: string,
+    firstColor: React.ComponentProps<typeof Text>['color'],
+    secondColor: React.ComponentProps<typeof Text>['color'],
+  ): React.ReactNode =>
+    earnings.isLoading ? (
+      <Skeleton height={56} />
+    ) : earnings.isError || !earnings.data ? (
+      <Banner tone="warn" title={t('shift.kpisUnavailable')} />
+    ) : (
+      <View style={styles.kpisRow}>
+        <Appear
+          style={[styles.kpi, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md }]}
+          delay={40}
+        >
+          <Text variant="title3" color={firstColor} tabular>
+            {formatPEN(earnings.data.totalNetCents ?? 0)}
+          </Text>
+          <Text variant="caption" color="inkSubtle">
+            {firstLabel}
+          </Text>
+        </Appear>
+        <Appear
+          style={[styles.kpi, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md }]}
+          delay={110}
+        >
+          <Text variant="title3" color={secondColor} tabular>
+            {formatPEN(earnings.data.pendingNetCents ?? 0)}
+          </Text>
+          <Text variant="caption" color="inkSubtle">
+            {t('shift.pendingNet')}
+          </Text>
+        </Appear>
+      </View>
+    );
 
   // Vehículo activo (server-authoritative): con qué vehículo opera. Compartido por el dock online/offline.
   const activeVeh = activeVehicle.data;
@@ -429,8 +473,57 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         </GlassSheet>
       </Appear>
     );
+  } else if (status === 'ON_BREAK') {
+    // En pausa (frame C/Dashboard-Pausado · uygho): dock DEDICADO, distinto del offline. SIN fila de
+    // vehículo. Punto ámbar + "Turno en pausa" (mismo peso/tamaño que "Listo para viajes"), descripción,
+    // métricas ("Ganado hoy" verde / "Por liquidar" ámbar), CTA azul "Reanudar turno" y ghost
+    // "Desconectarme" que dispara el MISMO flujo de cierre que el dock online (setEndConfirm).
+    bottomOverlay = (
+      <Appear key="paused">
+        <GlassSheet floating style={dockLift}>
+          {/* StatusRow: punto ámbar estático + "Turno en pausa" (title3, igual que el heading en línea). */}
+          <View style={styles.statusRow}>
+            <View style={[styles.liveDot, { backgroundColor: theme.colors.warn }]} />
+            <Text variant="title3">{t('shift.status.paused')}</Text>
+          </View>
+          <Text variant="footnote" color="inkMuted">
+            {t('shift.pausedBody')}
+          </Text>
+          <View style={styles.spaced}>
+            {renderEarningsMetrics(t('shift.earnedToday'), 'accentStrong', 'warn')}
+          </View>
+          {/* CTA azul: reanudar pasa por los mismos gates de iniciar turno (docs + ubicación → ShiftStart). */}
+          <Button
+            label={t('shift.resume')}
+            size="lg"
+            fullWidth
+            onPress={handleConnect}
+            style={styles.spaced}
+          />
+          {/* Ghost gris "Desconectarme": cierra turno con la misma confirmación que el dock online. */}
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={t('shift.goOffline')}
+            onPress={() => setEndConfirm(true)}
+            style={styles.disconnectBtn}
+          >
+            <Text variant="subhead" color="inkMuted">
+              {t('shift.goOffline')}
+            </Text>
+          </PressableScale>
+          {end.isError ? (
+            <Banner
+              tone="danger"
+              title={t('errors.generic')}
+              description={toErrorMessage(end.error, t)}
+              style={styles.spaced}
+            />
+          ) : null}
+        </GlassSheet>
+      </Appear>
+    );
   } else {
-    // Desconectado / en pausa (frame C/Dashboard-Offline): vehículo activo compacto + KPIs + "Conéctate".
+    // Desconectado (frame C/Dashboard-Offline): vehículo activo compacto + KPIs + "Conéctate".
     // `activeVeh`/`ActiveVehIcon` están hoisteados arriba (compartidos con el dock online).
     bottomOverlay = (
       <Appear key="offline">
@@ -471,7 +564,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           ) : (
             <Banner tone="warn" title={t('shift.vehicleType.none')} />
           )}
-          <View style={styles.spaced}>{earningsMetrics}</View>
+          <View style={styles.spaced}>
+            {renderEarningsMetrics(t('shift.netTotal'), 'accentStrong', 'ink')}
+          </View>
           {/* SUSPENDED (regla de seguridad): el conductor NO puede operar. Aviso claro + salida a soporte,
             en vez del CTA "Conéctate" (que canStartShift ya bloquea para este estado). */}
           {isSuspended(status) ? (
@@ -487,7 +582,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             />
           ) : canStartShift(status) ? (
             <Button
-              label={status === 'ON_BREAK' ? t('shift.resume') : t('shift.connect')}
+              label={t('shift.connect')}
               size="lg"
               fullWidth
               onPress={handleConnect}
@@ -606,6 +701,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   topRight: { alignItems: 'flex-end', gap: 8 },
+  // Status pills del header (frames uygho·PausePill / Qy65J·OffPill): fila con icono/punto + texto, borde
+  // fino sobre surface, radio pill (inline). Compartida por "En pausa" (borde warn) y "Fuera de turno".
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+  },
+  pillDot: { width: 8, height: 8, borderRadius: 999 },
   demandToggle: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -6,6 +6,7 @@ import { SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-kit';
 import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { StateView } from '../../../../shared/presentation/components/StateView';
+import { IconWifiOff } from '../../../../shared/presentation/icons';
 import { TripsEmptyState } from '../components/TripsEmptyState';
 import { TripHistoryRow } from '../components/TripHistoryRow';
 import { useTripHistory } from '../hooks/useTrips';
@@ -93,6 +94,8 @@ export const TripHistoryScreen = (): React.JSX.Element => {
   ) : isError ? (
     <StateView
       title={t('trips.history.errorTitle')}
+      description={t('trips.history.errorBody')}
+      icon={<IconWifiOff size={40} color={theme.colors.danger} strokeWidth={1.75} />}
       action={{ label: t('common.retry'), onPress: refetch }}
     />
   ) : items.length === 0 ? (

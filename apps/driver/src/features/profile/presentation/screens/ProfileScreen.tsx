@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -27,10 +27,11 @@ import {
   IconBell,
   IconClock,
   IconDocument,
+  IconFace,
   IconGift,
   IconLifebuoy,
+  IconLogout,
   IconReceipt,
-  IconShield,
 } from '../../../../shared/presentation/icons';
 import { useProfile } from '../hooks/useProfile';
 import { useLogout } from '../../../../core/session/useLogout';
@@ -177,7 +178,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                 showDivider
               />
               <ProfileLinkRow
-                icon={<IconShield size={20} color={theme.colors.inkMuted} />}
+                icon={<IconFace size={20} color={theme.colors.inkMuted} />}
                 label={t('shift.enrollAction')}
                 onPress={() => navigation.navigate('BiometricEnroll')}
                 showDivider
@@ -208,14 +209,29 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
             </Card>
           </Reveal>
 
+          {/* Cerrar sesión: pill de ancho completo con TINTE danger (no un botón rojo sólido) — presencia
+              serena para una acción destructiva-suave, fiel al frame C/Perfil. */}
           <Reveal delay={240}>
-            <Button
-              label={t('profile.logout')}
-              variant="danger"
-              fullWidth
-              loading={logout.isPending}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('profile.logout')}
+              disabled={logout.isPending}
               onPress={() => setConfirmOpen(true)}
-            />
+              style={({ pressed }) => [
+                styles.logout,
+                {
+                  backgroundColor: theme.colors.danger + '14',
+                  borderRadius: theme.radii.md,
+                },
+                pressed && styles.logoutPressed,
+                logout.isPending && styles.logoutDisabled,
+              ]}
+            >
+              <IconLogout size={20} color={theme.colors.danger} strokeWidth={2} />
+              <Text variant="bodyStrong" color="danger">
+                {t('profile.logout')}
+              </Text>
+            </Pressable>
           </Reveal>
         </View>
       )}
@@ -254,4 +270,15 @@ const styles = StyleSheet.create({
   section: { gap: 16, paddingTop: 8 },
   sectionLabel: { marginBottom: 8 },
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  logout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 52,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  logoutPressed: { opacity: 0.7 },
+  logoutDisabled: { opacity: 0.5 },
 });

@@ -37,15 +37,12 @@ const SLIDE_PHOTOS: Record<string, ImageSourcePropType> = {
 };
 
 /**
- * Copy y scrim SOBRE FOTO: intencionalmente INDEPENDIENTES del tema. Un overlay sobre imagen se rige
- * por la foto (borde inferior siempre oscuro + texto claro para leer sobre cualquier POV), no por el
- * lienzo claro de la app — por eso NO salen de `useTheme`. Tras la migración Trust, el resto del
- * chrome (CTA teal, dots) sí es del tema; solo el copy-sobre-foto queda claro-sobre-oscuro. El eyebrow
- * usa `accentHover` (teal claro, token) que sí contrasta sobre el scrim oscuro.
+ * Migración Trust (light): en el onboarding se conservan SOLO las fotos; TODO el resto toma el tema
+ * claro. La foto es una banda superior que se DESVANECE hacia el lienzo claro (`theme.colors.bg`), y
+ * de ahí para abajo el copy va sobre fondo claro con tinta oscura (mismo patrón que el Login). Nada de
+ * scrim negro ni texto blanco sobre foto: el eyebrow/título/cuerpo salen del tema.
  */
-const PHOTO_SCRIM = '#0A0B0F';
-const ON_PHOTO_TITLE = '#FFFFFF';
-const ON_PHOTO_BODY = 'rgba(245,247,250,0.82)';
+const PHOTO_HEIGHT_RATIO = 0.5;
 
 interface SlideContent {
   key: string;
@@ -85,13 +82,11 @@ function Dot({ active }: { active: boolean }): React.JSX.Element {
 }
 
 /**
- * Onboarding del conductor (drv-02), dirección visual TESLA con FOTO real a SANGRE COMPLETA: carrusel
- * paginado de 3 slides, cada uno una sola imagen continua que llena TODO el slide (absoluteFill,
- * cover) — cero costura, cero "dos zonas". El copy (eyebrow azul + título grande `display` + cuerpo
- * gris corto) FLOTA sobre el tercio inferior, legible gracias a un scrim (degradado SVG) que oscurece
- * solo esa franja inferior. El footer (dots + UN CTA primario azul + "Saltar") también flota, absoluto
- * sobre el scrim. Al completar (o saltar) persiste el flag y el RootNavigator conmuta al Login.
- * Respeta safe-area (foto a sangre bajo la status bar, íconos en `light-content`) y reduce-motion.
+ * Onboarding del conductor (drv-02), tema Trust (light): carrusel paginado de 3 slides. Cada slide es
+ * una FOTO POV real como banda superior (~50% del alto) que se DESVANECE hacia el lienzo claro; debajo,
+ * sobre fondo claro, el copy (eyebrow teal + título grande `display` en tinta oscura + cuerpo gris). El
+ * footer (dots + UN CTA primario teal + "Omitir") flota abajo, todo del tema. Al completar (o omitir)
+ * persiste el flag y el RootNavigator conmuta al Login. Respeta safe-area y reduce-motion.
  */
 export const OnboardingScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
@@ -151,6 +146,8 @@ export const OnboardingScreen = (): React.JSX.Element => {
   const sideGutter = theme.spacing['2xl'];
   // Alto del slide: el área medida, con fallback al alto de ventana en el primer render.
   const slideH = scrollH || height;
+  // Banda de foto: mitad superior del slide; se funde al lienzo claro por su borde inferior.
+  const photoH = Math.round(slideH * PHOTO_HEIGHT_RATIO);
   // Separación inferior del copy: el footer real + un respiro; fallback razonable antes de medirlo.
   const copyBottomInset = (footerH || (theme.spacing['5xl'] ?? 160)) + theme.spacing.lg;
 
@@ -169,51 +166,43 @@ export const OnboardingScreen = (): React.JSX.Element => {
       >
         {slides.map((slide) => (
           <View key={slide.key} style={{ width, height: slideH }}>
-            {/* Foto a SANGRE COMPLETA: ABSOLUTA (detrás del copy, fuera del flujo) pero con width/height
-                EXPLÍCITOS — así `cover` calza contra el tamaño real del slide y muestra la foto centrada.
-                Con `StyleSheet.absoluteFill` (right/bottom:0) el alto no se resolvía y cover zoomeaba mal. */}
-            <Image
-              source={slide.photo}
-              style={{ position: 'absolute', top: 0, left: 0, width, height: slideH }}
-              resizeMode="cover"
-            />
+            {/* Banda de FOTO (mitad superior). Se conserva la imagen; su borde inferior se DESVANECE
+                hacia el lienzo claro (`theme.colors.bg`) para fundirse sin costura con el copy claro. */}
+            <View style={{ width, height: photoH, overflow: 'hidden' }}>
+              <Image source={slide.photo} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+                <Defs>
+                  <LinearGradient id={`photoFade-${slide.key}`} x1="0" y1="0" x2="0" y2="1">
+                    <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0} />
+                    <Stop offset="0.6" stopColor={theme.colors.bg} stopOpacity={0} />
+                    <Stop offset="0.88" stopColor={theme.colors.bg} stopOpacity={0.92} />
+                    <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={1} />
+                  </LinearGradient>
+                </Defs>
+                <Rect x={0} y={0} width={width} height={photoH} fill={`url(#photoFade-${slide.key})`} />
+              </Svg>
+            </View>
 
-            {/* Scrim: oscurece SOLO el tercio inferior (más un velo leve arriba para la status bar)
-                para que el copy y el footer floten legibles sobre la foto. Decorativo. */}
-            <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
-              <Defs>
-                <LinearGradient id={`photoScrim-${slide.key}`} x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={PHOTO_SCRIM} stopOpacity={0.15} />
-                  <Stop offset="0.35" stopColor={PHOTO_SCRIM} stopOpacity={0} />
-                  <Stop offset="0.62" stopColor={PHOTO_SCRIM} stopOpacity={0.55} />
-                  <Stop offset="0.82" stopColor={PHOTO_SCRIM} stopOpacity={0.9} />
-                  <Stop offset="1" stopColor={PHOTO_SCRIM} stopOpacity={1} />
-                </LinearGradient>
-              </Defs>
-              <Rect
-                x={0}
-                y={0}
-                width={width}
-                height={slideH}
-                fill={`url(#photoScrim-${slide.key})`}
-              />
-            </Svg>
-
-            {/* Copy anclado ABAJO, flotando sobre el scrim; jerarquía por escala + color. */}
+            {/* Copy sobre lienzo CLARO con tinta oscura del tema, debajo de la foto. */}
             <View
               style={[
-                styles.copyAnchor,
-                { paddingHorizontal: sideGutter, paddingBottom: copyBottomInset },
+                styles.copyArea,
+                {
+                  backgroundColor: theme.colors.bg,
+                  paddingHorizontal: sideGutter,
+                  paddingTop: theme.spacing.xl,
+                  paddingBottom: copyBottomInset,
+                },
               ]}
             >
               <Reveal delay={60}>
-                <Text variant="label" color="accentHover">
+                <Text variant="label" color="accent">
                   {slide.eyebrow.toUpperCase()}
                 </Text>
-                <Text variant="display" style={[styles.title, { color: ON_PHOTO_TITLE }]}>
+                <Text variant="display" color="ink" style={styles.title}>
                   {slide.title}
                 </Text>
-                <Text variant="callout" style={[styles.body, { color: ON_PHOTO_BODY }]}>
+                <Text variant="callout" color="inkMuted" style={styles.body}>
                   {slide.body}
                 </Text>
               </Reveal>
@@ -260,7 +249,7 @@ export const OnboardingScreen = (): React.JSX.Element => {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
-  copyAnchor: { flex: 1, justifyContent: 'flex-end' },
+  copyArea: { flex: 1 },
   title: { marginTop: 12 },
   body: { marginTop: 16, maxWidth: 340 },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'stretch' },

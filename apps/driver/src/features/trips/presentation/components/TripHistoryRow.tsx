@@ -21,6 +21,12 @@ import { parseTripStatus } from '../../domain/value-objects/trip-status';
 type StatusTone = 'success' | 'danger' | 'warn' | 'accent' | 'brand';
 
 /**
+ * Verde de éxito LEGIBLE para TEXTO (el `success` #00C853 es muy claro y pierde contraste a 10px).
+ * Convención Trust del driver. TODO: promover a token `successText` en @veo/ui-kit.
+ */
+const SUCCESS_TEXT = '#00873A';
+
+/**
  * Estado → tono del punto. Terminales felices (completado) en verde de éxito; los no-felices
  * (cancelado/fallido) en alarma sobria; vencido en warn; lo vivo en accent; lo asignado/programado en brand.
  * Lookup PARCIAL con fallback explícito a `accent` (un estado nuevo del contrato no rompe la fila).
@@ -82,6 +88,8 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
   const status = parseTripStatus(trip.status);
   const tone: StatusTone = status === 'UNKNOWN' ? 'accent' : STATUS_TONE[status] ?? 'accent';
   const toneColor = theme.colors[tone];
+  // El punto conserva el tono (success #00C853); la ETIQUETA de éxito usa el verde legible para texto.
+  const labelColor = tone === 'success' ? SUCCESS_TEXT : toneColor;
   const statusLabel =
     status === 'UNKNOWN'
       ? t('trips.status.unknown')
@@ -132,7 +140,7 @@ export function TripHistoryRow({ trip }: TripHistoryRowProps): React.JSX.Element
       <View style={styles.topLine}>
         <View style={styles.statusGroup}>
           <View style={[styles.dot, { backgroundColor: toneColor }]} />
-          <Text variant="caption" style={[styles.statusLabel, { color: toneColor }]} numberOfLines={1}>
+          <Text variant="caption" style={[styles.statusLabel, { color: labelColor }]} numberOfLines={1}>
             {statusLabel}
           </Text>
         </View>

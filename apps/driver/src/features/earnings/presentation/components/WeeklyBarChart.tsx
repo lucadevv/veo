@@ -15,7 +15,7 @@ const BAR_MAX_PX = 88;
 
 /**
  * Bar chart "Por día" (frame C/Ganancias): 7 barras lun→dom con el neto diario. La barra del día de
- * MAYOR neto se resalta en acento; el resto en superficie elevada (sutiles). Alturas proporcionales al
+ * MAYOR neto se resalta en acento sólido; el resto en una tinta de marca sutil. Alturas proporcionales al
  * máximo real de la semana; días en cero muestran una barra mínima (nunca vacía). Sin librería de charts.
  */
 export function WeeklyBarChart({ days, t }: WeeklyBarChartProps): React.JSX.Element {
@@ -60,7 +60,8 @@ export function WeeklyBarChart({ days, t }: WeeklyBarChartProps): React.JSX.Elem
                   styles.bar,
                   {
                     height,
-                    backgroundColor: isPeak ? theme.colors.accent : theme.colors.surfaceElevated,
+                    // Pico sólido en acento; el resto una tinta de marca sutil (surfaceElevated === surface === #FFFFFF sería invisible en la card blanca).
+                    backgroundColor: isPeak ? theme.colors.accent : theme.colors.accent + '16',
                   },
                 ]}
               />

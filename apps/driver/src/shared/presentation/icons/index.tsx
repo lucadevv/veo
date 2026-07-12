@@ -972,3 +972,81 @@ export function IconMore(props: IconProps): React.JSX.Element {
     </Svg>
   );
 }
+
+/** Enviar / avión de papel: CTA "Enviar código" (OTP). Espeja lucide `send`. */
+export function IconSend(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M22 2 15 22l-4-9-9-4 20-7Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M22 2 11 13"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Check dentro de círculo (confirmación fuerte): CTA "Verificar e ingresar". Espeja lucide `circle-check`. */
+export function IconCheckCircle(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
+      <Polyline
+        points="8.5,12 11,14.5 15.5,9.5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Alerta dentro de círculo (error inline del OTP): "Código incorrecto". Espeja lucide `circle-alert`. */
+export function IconAlertCircle(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
+      <Path d="M12 7.5v5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Circle cx={12} cy={16} r={0.6} fill={color} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Salir de sesión: puerta con flecha saliente. Espeja lucide `log-out`. */
+export function IconLogout(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Polyline
+        points="16,17 21,12 16,7"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path d="M21 12H9" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
