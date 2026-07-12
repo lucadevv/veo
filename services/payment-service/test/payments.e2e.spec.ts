@@ -93,8 +93,9 @@ afterAll(async () => {
 /**
  * Emite un reembolso de punta a punta (SOLICITAR → APROBAR) contra el `service` del módulo. La API de reembolsos
  * migró de un desembolso directo (`refund()`) a una COLA DE APROBACIÓN (dual-control): `requestRefund` crea la
- * solicitud PENDING y `approveRefund` la DESEMBOLSA. Este helper reproduce el viejo flujo de un paso —el MISMO
- * operador solicita y aprueba— para los casos que proceden sin dual-control (monto ≤ umbral de monto alto).
+ * solicitud PENDING y `approveRefund` la DESEMBOLSA. Con la segregación de funciones (four-eyes) activa, el MISMO
+ * operador ya NO puede solicitar Y aprobar: el helper FILA la solicitud con un solicitante distinto (userId propio) y
+ * APRUEBA con `operator` (el aprobador es quien lleva el rol/monto que el test ejerce).
  */
 async function directRefund(
   tripId: string,
@@ -102,7 +103,9 @@ async function directRefund(
   reason: string,
   operator: AuthenticatedUser,
 ): Promise<{ refundId: string; paymentId: string; status: string }> {
-  const req = await service.requestRefund(tripId, amountCents, reason, operator);
+  // Solicitante ≠ aprobador (four-eyes money-OUT): userId fresco garantizado distinto del `operator` que aprueba.
+  const requester = { userId: uuidv7(), roles: [] } as unknown as AuthenticatedUser;
+  const req = await service.requestRefund(tripId, amountCents, reason, requester);
   return service.approveRefund(req.refundId, operator);
 }
 

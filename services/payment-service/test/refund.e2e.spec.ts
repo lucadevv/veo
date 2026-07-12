@@ -73,6 +73,12 @@ const ELEVATED: AuthenticatedUser = {
   userId: 'op-admin',
   roles: [AdminRole.ADMIN],
 } as unknown as AuthenticatedUser;
+/** SOLICITANTE distinto del aprobador (segregación de funciones · four-eyes money-OUT): quien FILA la solicitud
+ *  PENDING. requestRefund no valida rol → basta un userId distinto del aprobador para satisfacer la regla. */
+const REQUESTER: AuthenticatedUser = {
+  userId: 'op-requester',
+  roles: [AdminRole.FINANCE],
+} as unknown as AuthenticatedUser;
 
 function makeConfig(): ConfigService {
   const values: Record<string, unknown> = {
@@ -127,9 +133,11 @@ function makeService(
  * un desembolso directo de un solo paso (`refund()`) a una COLA DE APROBACIÓN (dual-control): `requestRefund` crea
  * la solicitud PENDING (valida saldo/ventana, NO el gate de monto alto) y `approveRefund` la DESEMBOLSA (re-valida
  * saldo/ventana + aplica el gate de monto alto + reserva + reverso al riel). Este helper reproduce el viejo flujo
- * de un paso —el MISMO operador solicita y aprueba— para los casos donde el reembolso procede sin bloqueo. Los
- * casos donde el gate de monto alto DEBE frenar (o donde la carrera solicitud↔desembolso es el objeto del test)
- * ejercen `requestRefund`/`approveRefund` por separado, no este helper.
+ * de un paso para los casos donde el reembolso procede sin bloqueo. Con la segregación de funciones (four-eyes)
+ * activa, el MISMO operador ya NO puede solicitar Y aprobar: el helper FILA la solicitud con un REQUESTER distinto
+ * y APRUEBA con `operator` (el aprobador es quien lleva el rol/monto que el test ejerce). Los casos donde el gate de
+ * monto alto DEBE frenar (o donde la carrera solicitud↔desembolso es el objeto del test) ejercen
+ * `requestRefund`/`approveRefund` por separado, no este helper.
  */
 async function directRefund(
   service: PaymentsService,
@@ -144,7 +152,7 @@ async function directRefund(
     tripId,
     amountCents,
     reason,
-    operator,
+    REQUESTER,
     idempotencyKey,
     forceNew,
   );
@@ -466,7 +474,7 @@ describe('PaymentsService · compensación del reverso rechazado vs reserva CONC
     await directRefund(service, tripId, 500, 'a', L2); // reserva A: APPROVED, refundedCents=500 (PARTIALLY_REFUNDED)
     // Solicitud B pre-creada (PENDING, sin reservar): así la carrera queda ACOTADA al APROBAR de B (que reserva
     // +800) contra la compensación de A — que es exactamente el lost-update que se prueba.
-    const reqB = await service.requestRefund(tripId, 800, 'b', L2);
+    const reqB = await service.requestRefund(tripId, 800, 'b', REQUESTER);
 
     // CARRERA REAL contra Postgres (READ COMMITTED): el callback DECLINED de A (compensa −500) corre EN
     // PARALELO con la APROBACIÓN de B (reserva CAS +800). Con el read-compute-write viejo, la compensación leía
@@ -644,7 +652,9 @@ describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión 
     // La cola de aprobación MOVIÓ el gate de dual-control del SOLICITAR al APROBAR (aprobar es lo que mueve plata):
     // un FINANCE PUEDE FILAR la solicitud (queda PENDING), pero APROBAR un monto ALTO (>umbral) exige autoridad
     // elevada (ADMIN/SUPERADMIN) → bloqueado. El gate se evalúa ANTES de reservar/llamar al riel.
-    const req = await service.requestRefund(tripId, 4000, 'x', L2);
+    // Solicita un REQUESTER distinto (satisface four-eyes) → el ForbiddenError que se prueba es el gate de MONTO ALTO,
+    // no la segregación de funciones (esa tiene su propio test dedicado más abajo).
+    const req = await service.requestRefund(tripId, 4000, 'x', REQUESTER);
     await expect(service.approveRefund(req.refundId, L2)).rejects.toBeInstanceOf(ForbiddenError);
 
     expect(calls).toHaveLength(0); // NO se intentó el reverso
@@ -661,6 +671,27 @@ describe('PaymentsService.refund · FIX 3 · gates del refund ADMIN (regresión 
     const { tripId } = await seedCaptured({ amountCents: 5000 });
     const res = await directRefund(service, tripId, 4000, 'x', ELEVATED);
     expect(res.status).toBe('COMPLETED');
+  });
+
+  it('four-eyes: el MISMO operador que solicitó NO puede aprobar su propio reembolso → ForbiddenError, sin plata', async () => {
+    const { service, calls } = makeService(async () => ({ status: 'ACCEPTED' }));
+    const { id, tripId } = await seedCaptured();
+
+    // L2 FILA la solicitud (PENDING) y el MISMO L2 intenta aprobarla → segregación de funciones lo bloquea.
+    const req = await service.requestRefund(tripId, 500, 'x', L2);
+    await expect(service.approveRefund(req.refundId, L2)).rejects.toBeInstanceOf(ForbiddenError);
+
+    // Ni se tocó el riel ni se movió el cobro; la solicitud queda PENDING esperando un aprobador distinto.
+    expect(calls).toHaveLength(0);
+    expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('CAPTURED');
+    const pending = await prisma.refund.findMany({});
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ status: 'PENDING', approvedBy: null });
+
+    // Un aprobador DISTINTO (ELEVATED) SÍ la desembolsa: la regla frena la auto-aprobación, no la cola.
+    const res = await service.approveRefund(req.refundId, ELEVATED);
+    expect(res.status).toBe('COMPLETED');
+    expect((await prisma.payment.findUnique({ where: { id } }))?.status).toBe('PARTIALLY_REFUNDED');
   });
 
   it('gate monto alto: FINANCE refundando ≤umbral → procede (el monto bajo NO exige elevación)', async () => {

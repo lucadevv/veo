@@ -175,6 +175,12 @@ function buildService(repo: ReturnType<typeof makeRepo>['repo']): PaymentsServic
 
 const finance: AuthenticatedUser = { userId: 'fin-1', roles: [AdminRole.FINANCE] } as AuthenticatedUser;
 const admin: AuthenticatedUser = { userId: 'adm-1', roles: [AdminRole.ADMIN] } as AuthenticatedUser;
+/** SOLICITANTE distinto del aprobador (segregación de funciones · four-eyes money-OUT): quien FILA la solicitud.
+ *  Su userId ('req-1') difiere de `finance`/`admin` que aprueban → el aprobador nunca es el mismo que solicitó. */
+const requester: AuthenticatedUser = {
+  userId: 'req-1',
+  roles: [AdminRole.FINANCE],
+} as AuthenticatedUser;
 
 describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () => {
   it('SOLICITAR crea PENDING y NO reserva el cobro (la plata NO se mueve hasta aprobar)', async () => {
@@ -182,7 +188,7 @@ describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () =
     const { repo, refunds } = makeRepo(payment);
     const svc = buildService(repo);
 
-    const res = await svc.requestRefund('trip-1', 1000, 'ajuste', finance);
+    const res = await svc.requestRefund('trip-1', 1000, 'ajuste', requester);
 
     expect(res.status).toBe('PENDING');
     expect(refunds).toHaveLength(1);
@@ -199,7 +205,7 @@ describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () =
     const { repo, refunds, outbox } = makeRepo(payment);
     const svc = buildService(repo);
 
-    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', finance);
+    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', requester);
     const res = await svc.approveRefund(refundId, finance);
 
     expect(res.status).toBe('COMPLETED');
@@ -216,7 +222,7 @@ describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () =
     const { repo, refunds } = makeRepo(payment);
     const svc = buildService(repo);
 
-    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', finance);
+    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', requester);
     await svc.approveRefund(refundId, finance);
     const second = await svc.approveRefund(refundId, finance);
 
@@ -232,7 +238,7 @@ describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () =
     const { repo, refunds } = makeRepo(payment);
     const svc = buildService(repo);
 
-    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', finance);
+    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', requester);
     const res = await svc.rejectRefund(refundId, finance, 'no corresponde');
 
     expect(res.status).toBe('REJECTED');
@@ -247,7 +253,7 @@ describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () =
     const { repo } = makeRepo(payment);
     const svc = buildService(repo);
 
-    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', finance);
+    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', requester);
     await svc.approveRefund(refundId, finance); // COMPLETED
 
     await expect(svc.rejectRefund(refundId, finance, 'tarde')).rejects.toThrow(
@@ -261,7 +267,7 @@ describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () =
     const svc = buildService(repo);
 
     // FINANCE puede SOLICITAR el monto alto (no hay gate al solicitar)...
-    const { refundId } = await svc.requestRefund('trip-1', 5000, 'reembolso total', finance);
+    const { refundId } = await svc.requestRefund('trip-1', 5000, 'reembolso total', requester);
     expect(refunds[0]!.status).toBe('PENDING');
 
     // ...pero NO puede aprobarlo (dual-control: >umbral requiere ADMIN/SUPERADMIN).
@@ -274,12 +280,38 @@ describe('Cola de aprobación de reembolsos · máquina de estados (CASH)', () =
     expect(payment.refundedCents).toBe(5000);
   });
 
+  it('SEGREGACIÓN DE FUNCIONES: el MISMO operador que solicitó NO puede aprobar su propio reembolso (four-eyes)', async () => {
+    const payment = capturedCashPayment();
+    const { repo, refunds } = makeRepo(payment);
+    const svc = buildService(repo);
+
+    // `finance` FILA la solicitud (queda PENDING)...
+    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', finance);
+    expect(refunds[0]!.status).toBe('PENDING');
+
+    // ...y el MISMO `finance` intenta aprobarla → BLOQUEADO por segregación de funciones (dual-PERSON estricto).
+    await expect(svc.approveRefund(refundId, finance)).rejects.toThrow(/segregación de funciones/i);
+
+    // La plata NO se movió y la solicitud sigue PENDING (esperando un aprobador DISTINTO), no desaparece.
+    expect(payment.refundedCents).toBe(0);
+    expect(payment.status).toBe('CAPTURED');
+    expect(refunds[0]!.status).toBe('PENDING');
+    expect(refunds[0]!.approvedBy).toBeNull();
+    expect(repo.casApproveRefundFromPending).not.toHaveBeenCalled();
+
+    // Un aprobador DISTINTO (admin) SÍ la desembolsa: la regla frena la auto-aprobación, no la cola.
+    const res = await svc.approveRefund(refundId, admin);
+    expect(res.status).toBe('COMPLETED');
+    expect(payment.refundedCents).toBe(1000);
+    expect(refunds[0]!.approvedBy).toBe('adm-1');
+  });
+
   it('APROBAR RE-valida el saldo: si el cobro se reembolsó por otra vía, NO desembolsa de más', async () => {
     const payment = capturedCashPayment();
     const { repo } = makeRepo(payment);
     const svc = buildService(repo);
 
-    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', finance);
+    const { refundId } = await svc.requestRefund('trip-1', 1000, 'ajuste', requester);
     // Entre solicitar y aprobar, el cobro quedó TOTALMENTE reembolsado por otra operación.
     payment.refundedCents = 4500;
     payment.status = 'REFUNDED';

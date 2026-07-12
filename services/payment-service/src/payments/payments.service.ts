@@ -1367,6 +1367,19 @@ export class PaymentsService {
     if (refund.status !== RefundStatus.PENDING) {
       return { refundId, paymentId: refund.paymentId, status: refund.status };
     }
+    // SEGREGACIÓN DE FUNCIONES (four-eyes · Ley 29733 money-OUT): el operador que APRUEBA (mueve la plata) NO puede
+    // ser el MISMO que SOLICITÓ. Cierra el hueco documentado de auto-aprobación (antes solo lo mitigaba step-up MFA +
+    // gate por monto + audit, sin dual-PERSON estricto). Se evalúa AL APROBAR (la acción que desembolsa) y ANTES de
+    // tocar el cobro/riel. Los refunds SYSTEM-INITIATED (refundForBookingCancellation / propina revertida) NO pasan
+    // por acá: nacen APPROVED vía executeRefundClaim (nunca quedan PENDING) y su `requestedBy` es SYSTEM_OPERATOR
+    // ('system'), que jamás iguala el userId de un operador humano — doble razón por la que esta regla no los alcanza.
+    if (refund.requestedBy === operator.userId) {
+      throw new ForbiddenError(
+        'Segregación de funciones: el solicitante no puede aprobar su propio reembolso; ' +
+          'debe aprobarlo un operador distinto',
+        { refundId, requestedBy: refund.requestedBy },
+      );
+    }
     const payment = await this.repo.findPaymentById(refund.paymentId);
     if (!payment) throw new NotFoundError('Pago no encontrado');
 
