@@ -6,6 +6,7 @@ import { stepUp } from '@/lib/api/auth';
 import { useAttachPanicEvidence } from '@/lib/api/queries';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
 import { OtpInput } from '@/components/ui/otp-input';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -92,12 +93,12 @@ export function PanicEvidenceDialog({ id, trigger }: { id: string; trigger: Reac
           label="Claves S3 (una por línea)"
           error={keys.length > MAX_KEYS ? `Máximo ${MAX_KEYS} claves` : undefined}
         >
-          <textarea
+          <Textarea
             value={keysText}
             onChange={(e) => setKeysText(e.target.value)}
             rows={4}
             placeholder={'panic/evidence/2026/…\npanic/evidence/2026/…'}
-            className="w-full resize-none rounded-sm border border-border-strong bg-bg px-3 py-2 font-mono text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-focus"
+            className="resize-none font-mono text-[13px]"
           />
         </Field>
         <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-surface-2/40 px-3 py-2.5">

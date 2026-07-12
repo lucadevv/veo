@@ -9,6 +9,7 @@ import { money } from '@/lib/formatters';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
@@ -176,12 +177,12 @@ function RequestForm({ payment, onDone }: { payment: RefundablePaymentView; onDo
       </Field>
 
       <Field label="Motivo" error={error ?? undefined}>
-        <textarea
+        <Textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           rows={3}
           placeholder="Detalle visible para el pasajero…"
-          className="w-full resize-none rounded-md border border-border-strong bg-surface-2 px-3 py-2 text-sm text-ink placeholder:text-ink-subtle focus:border-brand focus:outline-none"
+          className="resize-none"
         />
       </Field>
 

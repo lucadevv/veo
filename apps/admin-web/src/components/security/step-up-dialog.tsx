@@ -5,6 +5,7 @@ import { KeyRound, type LucideIcon } from 'lucide-react';
 import { stepUp } from '@/lib/api/auth';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
 import { OtpInput } from '@/components/ui/otp-input';
 import {
   Dialog,
@@ -108,12 +109,12 @@ export function StepUpDialog({
         </DialogHeader>
         {withReason ? (
           <Field label={reasonLabel}>
-            <textarea
+            <Textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={3}
               placeholder={reasonPlaceholder}
-              className="w-full resize-none rounded-sm border border-border-strong bg-bg px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-subtle focus:border-focus"
+              className="resize-none"
             />
           </Field>
         ) : null}

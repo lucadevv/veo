@@ -1,6 +1,5 @@
 'use client';
 
-import { forwardRef } from 'react';
 import { ChevronRight, Circle, Lock, SlidersHorizontal, ToggleRight, Wrench } from 'lucide-react';
 import { POLICY_LIST, type PolicyDef } from '@veo/policy';
 import type { PolicyView } from '@/lib/api/schemas';
@@ -15,6 +14,7 @@ import {
 import { useUpdatePolicy } from '@/lib/api/queries';
 import { cn } from '@/lib/cn';
 import { useToast } from '@/components/ui/toast';
+import { Switch } from '@/components/ui/switch';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { PolicyConfigDialog } from './policy-config-dialog';
 
@@ -211,29 +211,3 @@ function PolicyRow({
     </li>
   );
 }
-
-/** Switch accesible (button role="switch"), reutilizable como trigger de StepUpDialog (forwardRef para Radix). */
-const Switch = forwardRef<
-  HTMLButtonElement,
-  { checked: boolean; label: string } & React.ButtonHTMLAttributes<HTMLButtonElement>
->(function Switch({ checked, label, disabled, className, ...props }, ref) {
-  return (
-    <button
-      ref={ref}
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      className={cn(
-        'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline-none',
-        checked ? 'justify-end bg-brand' : 'justify-start border border-border-strong bg-surface-2',
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-        className,
-      )}
-      {...props}
-    >
-      <span className="size-5 rounded-full bg-ink" />
-    </button>
-  );
-});

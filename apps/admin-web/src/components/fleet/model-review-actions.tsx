@@ -7,6 +7,7 @@ import type { VehicleModelReviewView } from '@/lib/api/schemas';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Field } from '@/components/ui/field';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
@@ -19,11 +20,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-
-/** Estilo del <select> nativo, espejo del Input (admin-web no tiene primitive Select aún). */
-const selectClass =
-  'h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-ink ' +
-  'hover:border-border-strong focus-visible:outline-none';
 
 const SEGMENTS = ['ECONOMY', 'MID', 'PREMIUM'] as const;
 const ENERGY_SOURCES = ['GASOLINE_90', 'DIESEL', 'ELECTRIC'] as const;
@@ -153,8 +149,7 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
           <div className="grid gap-3 py-1">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Segmento">
-                <select
-                  className={selectClass}
+                <Select
                   value={form.segment}
                   onChange={(e) =>
                     setForm({ ...form, segment: e.target.value as (typeof SEGMENTS)[number] })
@@ -165,11 +160,10 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
                       {s}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <Field label="Energía">
-                <select
-                  className={selectClass}
+                <Select
                   value={form.energySource}
                   onChange={(e) =>
                     setForm({
@@ -183,7 +177,7 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
                       {s}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">

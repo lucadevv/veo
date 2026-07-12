@@ -6,6 +6,8 @@ import { stepUp } from '@/lib/api/auth';
 import { useResolvePanic } from '@/lib/api/queries';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
+import { Radio } from '@/components/ui/radio';
+import { Textarea } from '@/components/ui/textarea';
 import { OtpInput } from '@/components/ui/otp-input';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -136,13 +138,11 @@ export function PanicResolveDialog({ id, trigger }: { id: string; trigger: React
                     : 'border-border bg-surface-2/40 hover:border-border-strong'
                 }`}
               >
-                <input
-                  type="radio"
+                <Radio
                   name="panic-resolution"
                   value={o.value}
                   checked={selected}
                   onChange={() => setResolution(o.value)}
-                  className="mt-0.5 size-4 accent-accent"
                 />
                 <span className="flex flex-1 flex-col gap-0.5">
                   <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
@@ -160,12 +160,12 @@ export function PanicResolveDialog({ id, trigger }: { id: string; trigger: React
           label="Notas de resolución (opcional)"
           error={notes.length > MAX_NOTES ? `Máximo ${MAX_NOTES} caracteres` : undefined}
         >
-          <textarea
+          <Textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
             placeholder="Motivo del cierre (queda en el audit)…"
-            className="w-full resize-none rounded-sm border border-border-strong bg-bg px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-subtle focus:border-focus"
+            className="resize-none"
           />
         </Field>
 

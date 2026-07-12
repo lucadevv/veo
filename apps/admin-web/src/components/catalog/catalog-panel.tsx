@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   Ambulance,
@@ -35,13 +35,14 @@ import {
 import { useReplaceBidFloor, useReplaceCatalog } from '@/lib/api/queries';
 import { can } from '@/lib/rbac';
 import { useSession } from '@/lib/session-context';
-import { cn } from '@/lib/cn';
 import { formatSolesInput, parseSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { RateField, RateInput } from '@/components/config/config-card';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 
 /** Etiqueta legible del modo de pricing para el panel (display, no comparación de dominio). */
 const MODE_LABEL: Record<PricingMode, string> = { PUJA: 'Puja', FIXED: 'Precio fijo' };
@@ -237,36 +238,6 @@ export function CatalogPanel({
     </div>
   );
 }
-
-/**
- * Switch accesible (button role="switch"): sirve de estado editable (envuelto en StepUpDialog dispara
- * setEnabled) o de indicador de solo-lectura (disabled). forwardRef para que Radix (DialogTrigger asChild) le
- * inyecte onClick/ref al usarlo como trigger del step-up.
- */
-const Switch = forwardRef<
-  HTMLButtonElement,
-  { checked: boolean; label: string } & React.ButtonHTMLAttributes<HTMLButtonElement>
->(function Switch({ checked, label, disabled, className, ...props }, ref) {
-  return (
-    <button
-      ref={ref}
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      className={cn(
-        'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors focus-visible:outline-none',
-        checked ? 'justify-end bg-brand' : 'justify-start border border-border-strong bg-surface-2',
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-        className,
-      )}
-      {...props}
-    >
-      <span className="size-5 rounded-full bg-surface shadow-1" />
-    </button>
-  );
-});
 
 /**
  * Una CARD de oferta (grilla): header (ícono + nombre + switch) + config inline (modo + precio + piso de puja +
@@ -502,16 +473,17 @@ function OfferingCard({
               {MODE_LABEL[offering.mode]}
             </span>
           ) : (
-            <select
+            <Select
               value={mode}
               onChange={(e) => setMode(e.target.value as PricingMode)}
               disabled={!canManage}
               aria-label={`Modo de ${label}`}
-              className="h-9 w-44 rounded-md border border-border-strong bg-surface-2 px-2 text-sm text-ink outline-none focus:border-brand disabled:opacity-50"
+              wrapperClassName="w-44"
+              className="h-9 border-border-strong bg-surface-2 pl-2 pr-8 text-sm"
             >
               <option value={PricingMode.FIXED}>{MODE_LABEL[PricingMode.FIXED]}</option>
               <option value={PricingMode.PUJA}>{MODE_LABEL[PricingMode.PUJA]}</option>
-            </select>
+            </Select>
           )}
         </div>
 
