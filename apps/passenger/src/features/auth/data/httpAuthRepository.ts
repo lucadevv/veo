@@ -67,6 +67,7 @@ export class HttpAuthRepository implements AuthRepository {
 
   /* ── Auth por correo + contraseña (ADR-012) ── */
 
+  // DEUDA: (app) el login/registro por email está cableado acá (auth/email/*) y en el BFF, pero NO hay pantalla que lo invoque en el passenger (AuthScreen solo hace phone-OTP + OAuth Google/Apple). Falta EmailLoginScreen para exponerlo.
   registerEmail(input: EmailRegister): Promise<EmailRegisterResult> {
     return this.http.post('/auth/email/register', {
       body: input,

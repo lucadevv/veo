@@ -303,8 +303,8 @@ export function IconEye({color, size = 22}: GlyphProps): React.JSX.Element {
 }
 
 /**
- * Rostro dentro de un marco de escaneo (Face ID). Espejo del `scan-face` de lucide (design/veo.pen
- * P/BiometricLock `bFd12`): esquinas del marco + dos ojos + boca. viewBox 24×24, trazo por prop.
+ * Rostro dentro de un marco de escaneo (Face ID). Espejo del `scan-face` de lucide: esquinas del
+ * marco + dos ojos + boca. viewBox 24×24, trazo por prop. Usado en la verificación facial (KYC).
  */
 export function IconFaceScan({
   color,

@@ -4,6 +4,7 @@ import {
   BottomSheet,
   Button,
   Card,
+  hexAlpha,
   IconButton,
   SafeScreen,
   spacing,
@@ -318,7 +319,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
           style={[
             styles.avatarRing,
             // Círculo con tinte teal 8% (design/veo.pen `p7U1IM`: accent al 8% de alfa), no blanco.
-            {backgroundColor: `${theme.colors.accent}14`},
+            {backgroundColor: hexAlpha(theme.colors.accent, 0.08)},
             avatarStyle,
           ]}>
           {previewUri ? (

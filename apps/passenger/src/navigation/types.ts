@@ -33,7 +33,6 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Auth: undefined;
   CompleteProfile: undefined;
-  BiometricLock: undefined;
   /** Bottom nav autenticado (Inicio·Viajes·Seguridad·Cuenta) — design/veo.pen C/TabBar. */
   Main: undefined;
   /** Tab Seguridad (hub). Renderiza dentro de `Main`; acá para tipar navigate('Seguridad'). */
@@ -47,16 +46,13 @@ export type RootStackParamList = {
   /** Perfil del pasajero (antes tab): se alcanza por el avatar del header del Home. */
   Profile: undefined;
   /**
-   * Buscador de origen/destino. `flow` decide a dónde vuelve al fijar AMBOS extremos:
-   *  - `'sheet'`: abierto DESDE el sheet unificado (RequestFlowScreen/QuotingBody) → `goBack()` al
-   *    sheet, que sigue en fase `quoting` con el borrador actualizado. NO navega a RouteQuote.
-   *  - `'quote'` (default): callers LEGACY/no migrados (flujo PROGRAMADO `ScheduleNew`) → navega a
-   *    `RouteQuote`. Es el default a propósito para no romper esos callers.
+   * Buscador de origen/destino. Siempre abierto DESDE el sheet unificado (RequestFlowScreen/QuotingBody):
+   * al fijar AMBOS extremos hace `goBack()` al sheet, que sigue en fase `quoting` con el borrador
+   * actualizado. `flow: 'sheet'` es el único valor (se conserva como marca de intención del caller).
    */
-  Search: {flow?: 'sheet' | 'quote'} | undefined;
+  Search: {flow?: 'sheet'} | undefined;
   /** Elegir un punto (recojo/destino/parada) arrastrando el mapa bajo un pin fijo. Aplica al `editing`. */
   MapPick: undefined;
-  RouteQuote: undefined;
   /** PUJA · board de ofertas en vivo tras crear la puja (ADR 010). */
   OffersBoard: {tripId: string};
   /** PUJA · detalle de la contraoferta de UN conductor (aceptar / esperar). */

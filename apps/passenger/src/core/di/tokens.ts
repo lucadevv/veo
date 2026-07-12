@@ -3,7 +3,6 @@ import type {AuthRepository} from '../../features/auth/domain/authRepository';
 import type {ConsentRepository} from '../../features/auth/domain/consentRepository';
 import type {PendingConsentStore} from '../../features/auth/domain/pendingConsent';
 import type {SyncPendingConsentUseCase} from '../../features/auth/domain/syncPendingConsentUseCase';
-import type {LocalAuthService} from '../../features/auth/domain/localAuthService';
 import type {
   ForgotPasswordUseCase,
   LoginEmailUseCase,
@@ -209,7 +208,6 @@ export const TOKENS = {
   locationProvider: createToken<LocationProvider>('LocationProvider'),
   imagePickerService: createToken<ImagePickerService>('ImagePickerService'),
   avatarUploader: createToken<AvatarUploader>('AvatarUploader'),
-  localAuthService: createToken<LocalAuthService>('LocalAuthService'),
   panicSigner: createToken<PanicSigner>('PanicSigner'),
   panicTrigger: createToken<PanicTrigger>('PanicTrigger'),
   panicSecretStore: createToken<PanicSecretStore>('PanicSecretStore'),

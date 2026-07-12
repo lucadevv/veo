@@ -2,7 +2,6 @@ import {HttpAuthRepository} from '../../features/auth/data/httpAuthRepository';
 import {HttpConsentRepository} from '../../features/auth/data/httpConsentRepository';
 import {MmkvPendingConsentStore} from '../../features/auth/data/mmkvPendingConsentStore';
 import {SyncPendingConsentUseCase} from '../../features/auth/domain/syncPendingConsentUseCase';
-import {KeychainLocalAuthService} from '../../features/auth/data/keychainLocalAuthService';
 import {
   ForgotPasswordUseCase,
   LoginEmailUseCase,
@@ -267,7 +266,8 @@ export function buildContainer(): Container {
   // Centro de avisos: HTTP REAL contra el public-bff (`GET /notifications`). El aviso llega YA
   // renderizado y categorizado por el notification-service; el repo solo mapea category→kind. El
   // recipientId lo deriva el BFF del JWT (anti-IDOR). Reemplazó al EmptyNotificationsRepository
-  // (HUECO DE BACKEND cerrado) sin tocar dominio ni presentación. Sin leído/no-leído aún (MVP).
+  // (HUECO DE BACKEND cerrado) sin tocar dominio ni presentación. Leído/no-leído YA implementado:
+  // el `read` mapea el `read_at` real del server y markAllRead() los marca (badge de no-leídos incluido).
   container.register(
     TOKENS.notificationsRepository,
     c => new HttpNotificationsRepository(c.resolve(TOKENS.httpClient)),
@@ -296,10 +296,6 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.locationProvider,
     () => new BackgroundGeolocationLocationProvider(),
-  );
-  container.register(
-    TOKENS.localAuthService,
-    () => new KeychainLocalAuthService(),
   );
   // Selector de imágenes nativo (avatar): galería + cámara tras el puerto `ImagePickerService`.
   container.register(

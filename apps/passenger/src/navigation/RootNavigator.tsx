@@ -4,12 +4,10 @@ import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {
   AuthScreen,
-  BiometricLockScreen,
   CompleteProfileScreen,
   OnboardingScreen,
   SessionExpiredScreen,
   SplashScreen,
-  useBiometricGateStore,
   useOnboardingStore,
 } from '../features/auth/presentation';
 import {useProfileCompletion} from '../features/profile/presentation';
@@ -50,11 +48,7 @@ import {
   CarpoolSearchScreen,
   CarpoolTripDetailScreen,
 } from '../features/carpool/presentation';
-import {
-  MapPickScreen,
-  RouteQuoteScreen,
-  SearchScreen,
-} from '../features/maps/presentation';
+import {MapPickScreen, SearchScreen} from '../features/maps/presentation';
 import {useSessionStore} from '../core/session/sessionStore';
 import {syncPushRegistration} from '../services/messaging';
 import {SplashGate} from './components/SplashGate';
@@ -82,26 +76,25 @@ export function RootNavigator(): React.JSX.Element {
   const theme = useTheme();
   const status = useSessionStore(state => state.status);
   const onboardingCompleted = useOnboardingStore(state => state.completed);
-  const biometricLocked = useBiometricGateStore(state => state.locked);
   // Completitud derivada del perfil REAL (`GET /users/me`) o de la bandera local por usuario; no
   // de un flag global (que atrapaba a sesiones existentes). 'loading' mientras se resuelve.
   const profileCompletion = useProfileCompletion();
 
-  // SINCRONIZACIÓN de push una vez que la sesión está activa y desbloqueada: registra el token SOLO si
+  // SINCRONIZACIÓN de push una vez que la sesión está activa: registra el token SOLO si
   // el permiso YA estaba concedido (NO promptea — el permiso se pide PROGRESIVO: pre-prompt contextual
   // al pedir viaje + toggle del perfil). Cubre login fresco y cold-start. Best-effort, gateado por
   // FIREBASE_ENABLED; no bloquea ni tumba la navegación. Quien ya aceptó sigue recibiendo push.
   const pushRegistered = React.useRef(false);
   React.useEffect(() => {
-    const active = status === 'authenticated' && !biometricLocked;
+    const active = status === 'authenticated';
     if (active && !pushRegistered.current) {
       pushRegistered.current = true;
       void syncPushRegistration();
     } else if (!active) {
-      // Sesión cerrada/bloqueada: permite re-registrar en el próximo login.
+      // Sesión cerrada: permite re-registrar en el próximo login.
       pushRegistered.current = false;
     }
-  }, [status, biometricLocked]);
+  }, [status]);
 
   // Splash de MARCA del cold-start: se muestra con un PISO de duración (~1.9s) aunque la sesión
   // rehidrate al instante (MMKV), así no flashea y se aprecia la marca. `splashDone` mantiene el
@@ -154,16 +147,7 @@ export function RootNavigator(): React.JSX.Element {
     );
   }
 
-  // Autenticado pero con candado biométrico activo (sesión rehidratada en frío): re-login local.
-  if (biometricLocked) {
-    return (
-      <Stack.Navigator screenOptions={{headerShown: false}}>
-        <Stack.Screen name="BiometricLock" component={BiometricLockScreen} />
-      </Stack.Navigator>
-    );
-  }
-
-  // Autenticado y desbloqueado, resolviendo la completitud del perfil (`GET /users/me`): Splash
+  // Autenticado, resolviendo la completitud del perfil (`GET /users/me`): Splash
   // como pantalla de espera para no destellar "Completar perfil" a sesiones ya completas.
   if (profileCompletion === 'loading') {
     return (
@@ -173,7 +157,7 @@ export function RootNavigator(): React.JSX.Element {
     );
   }
 
-  // Autenticado y desbloqueado pero con el perfil incompleto (sin email real ni bandera local):
+  // Autenticado pero con el perfil incompleto (sin email real ni bandera local):
   // completar perfil antes de entrar. Conmutación por estado derivado, no navegación imperativa.
   if (profileCompletion === 'incomplete') {
     return (
@@ -212,11 +196,6 @@ export function RootNavigator(): React.JSX.Element {
         name="Search"
         component={SearchScreen}
         options={{headerShown: false, animation: 'slide_from_right'}}
-      />
-      <Stack.Screen
-        name="RouteQuote"
-        component={RouteQuoteScreen}
-        options={{headerShown: false}}
       />
       <Stack.Screen
         name="MapPick"

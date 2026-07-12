@@ -93,6 +93,7 @@ export function OtpHelpSheet({
       </Text>
 
       <View style={{gap: theme.spacing.sm}}>
+        {/* DEUDA: (backend) OTP por LLAMADA (voz) y por CORREO son coming-soon: falta el canal en notification-service. (WhatsApp ya está en DEUDA en common.ts.) */}
         <Row
           icon={<IconPhone color={theme.colors.ink} size={20} />}
           label={t('auth.otpHelpCall')}
