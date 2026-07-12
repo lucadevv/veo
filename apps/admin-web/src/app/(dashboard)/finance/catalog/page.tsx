@@ -1,6 +1,6 @@
 'use client';
 
-import { Lock, ShieldCheck } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useBaseFare, useBidFloor, useCatalog } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -46,25 +46,11 @@ export default function CatalogPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Ofertas de servicio"
-        description="El menú de servicios que el pasajero puede pedir (VEO Moto, VEO Económico…). Cada servicio hereda la fórmula global de On-demand y puede ajustar su modo, sus mínimos (tarifa fija y piso de puja) o activarse y desactivarse. Es el catálogo, no la fórmula de precio."
+        description="El menú de servicios que el pasajero puede pedir. Cada uno hereda la fórmula global y ajusta su modo, mínimos y disponibilidad."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Ofertas de servicio' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        {/* Aviso de step-up (mismo patrón que Precios on-demand): el catálogo y el piso de la puja son DOS
-            configs con su propia mutación + CAS; cada Guardar pide tu TOTP y queda auditado. */}
-        <div className="flex items-start gap-3 rounded-lg border border-brand/30 bg-brand/12 p-4">
-          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-brand" aria-hidden />
-          <div className="flex flex-col gap-0.5">
-            <p className="text-sm font-semibold text-ink">Cambios con step-up MFA</p>
-            <p className="text-xs text-ink-subtle">
-              Cada servicio se guarda por separado (modo, multiplicador, tarifa mínima, piso de
-              puja, activar/desactivar): cada Guardar pide tu código TOTP, valida la versión
-              (optimistic-locking) y queda auditado. Modo y piso se configuran por servicio, acá.
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-5 space-y-5">
+        <div className="mt-2 space-y-5">
           {/*
             DESACOPLE de carriles: la LISTA de ofertas (catálogo: enable/disable, modo, multiplicador, tarifa
             mínima) depende SOLO de `catalogQuery`. El piso de la PUJA es OTRA config (endpoint + CAS propios):

@@ -1,6 +1,6 @@
 'use client';
 
-import { Lock, ShieldCheck } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useActiveCarpools, useCostPerKm, useCommission } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -51,28 +51,14 @@ export default function CarpoolingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Carpooling"
-        description="El viaje compartido y programado: el conductor publica un viaje y los pasajeros reservan asiento. Siempre en modo FIJO y con reparto de costos —el conductor pone el precio del asiento y VEO solo evita que haya lucro—. Acá se fija el service fee al pasajero y el techo anti-lucro (el costo de operar el vehículo por km). Cambios globales, al instante y auditados."
+        description="El viaje compartido: el conductor publica y los pasajeros reservan asiento. Acá se fija el service fee y el techo anti-lucro (costo/km)."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Carpooling' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        {/* Aviso de step-up: cada card guarda por separado, con su propia mutación + MFA. */}
-        <div className="flex items-start gap-3 rounded-lg border border-brand/30 bg-brand/12 p-4">
-          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-brand" aria-hidden />
-          <div className="flex flex-col gap-0.5">
-            <p className="text-sm font-semibold text-ink">
-              Cada sección guarda por separado, con step-up MFA
-            </p>
-            <p className="text-xs text-ink-subtle">
-              Cada card es una mutación independiente (su propio endpoint y versión): al guardar te
-              pide tu código TOTP y el cambio queda auditado. No hay un guardado global.
-            </p>
-          </div>
-        </div>
-
         {/* MONITOREO (board veo.pen · TSqpB): 4 KPIs + tabla "Carpools activos", ENCIMA de los parámetros. Dato
             REAL de booking-service (ocupación/conteos/cupos); refresco en vivo. 4 estados vía AsyncSection
             (loading skeleton / error+retry / empty "sin carpools" dentro del panel / data). */}
-        <div className="mt-5">
+        <div className="mt-2">
           <AsyncSection query={activeCarpoolsQuery} skeleton={<CarpoolingMonitorSkeleton />}>
             {(data) => <CarpoolingMonitor data={data} />}
           </AsyncSection>

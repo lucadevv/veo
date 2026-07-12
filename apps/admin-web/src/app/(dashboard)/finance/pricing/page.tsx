@@ -1,6 +1,6 @@
 'use client';
 
-import { Lock, ShieldCheck } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useBaseFare, useCommission } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -61,24 +61,10 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios on-demand"
-        description="La modalidad de viaje inmediato. Cada servicio corre en uno de dos modos: FIJO —VEO calcula la tarifa por la ruta y esa se cobra— o PUJA —el pasajero ofrece su precio y el conductor lo acepta o contraoferta—. Acá se configura lo global de la fórmula: tarifa base y comisión. El modo y el piso de la puja de cada servicio se definen en Ofertas de servicio."
+        description="La fórmula global del viaje inmediato: tarifa base y comisión. El modo y el piso de cada servicio se definen en Ofertas de servicio."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
-        {/* Aviso de step-up: cada card guarda por separado, con su propia mutación + MFA. */}
-        <div className="flex items-start gap-3 rounded-lg border border-brand/30 bg-brand/12 p-4">
-          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-brand" aria-hidden />
-          <div className="flex flex-col gap-0.5">
-            <p className="text-sm font-semibold text-ink">
-              Cada sección guarda por separado, con step-up MFA
-            </p>
-            <p className="text-xs text-ink-subtle">
-              Cada card es una mutación independiente (su propio endpoint y versión): al guardar te
-              pide tu código TOTP y el cambio queda auditado. No hay un guardado global.
-            </p>
-          </div>
-        </div>
-
         {/* El orden cuenta la historia (veo.pen): la FÓRMULA (compartida) y después la comisión (transversal).
             El MODO (FIJO/PUJA) ya no vive acá — con ADR-023 es una palanca per-oferta en Ofertas de servicio. */}
         <div className="mt-5 space-y-5">
