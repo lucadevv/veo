@@ -1,16 +1,12 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Lock, Minus } from 'lucide-react';
-import { AdminRole } from '@veo/shared-types';
-import {
-  PERMISSION_LIST,
-  baseGrants,
-  isLegalMandatoryPermission,
-  type Permission,
-} from '@veo/policy';
+import { baseGrants, isLegalMandatoryPermission } from '@veo/policy';
 import type { PermissionOverrideView } from '@/lib/api/schemas';
 import { useSetPermissionOverride } from '@/lib/api/queries';
+import { ROLE_COLS, actionOf, groupByResource, keyOf } from '@/lib/gobierno/permissions';
 import { cn } from '@/lib/cn';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
@@ -26,78 +22,6 @@ import { StepUpDialog } from '@/components/security/step-up-dialog';
  *   • base=true, OFF    → restado por vos (el overlay lo oculta en la UI de ese rol).
  * Los cambios se ACUMULAN ("N cambios sin guardar") y se guardan con un único step-up MFA (un PUT por par).
  */
-
-/** Columnas = roles, en orden de jerarquía ascendente (mismo criterio que el rank de AdminRole). */
-const ROLE_COLS: { role: AdminRole; short: string; label: string }[] = [
-  { role: AdminRole.SUPPORT_L1, short: 'L1', label: 'Soporte L1' },
-  { role: AdminRole.SUPPORT_L2, short: 'L2', label: 'Soporte L2' },
-  { role: AdminRole.DISPATCHER, short: 'DSP', label: 'Despacho' },
-  { role: AdminRole.COMPLIANCE_SUPERVISOR, short: 'CMP', label: 'Cumplimiento' },
-  { role: AdminRole.FINANCE, short: 'FIN', label: 'Finanzas' },
-  { role: AdminRole.ADMIN, short: 'ADM', label: 'Administrador' },
-  { role: AdminRole.SUPERADMIN, short: 'SUP', label: 'Superadmin' },
-];
-
-const RESOURCE_LABELS: Record<string, string> = {
-  ops: 'Operación en vivo',
-  trips: 'Viajes',
-  drivers: 'Conductores',
-  operators: 'Operadores',
-  panics: 'Pánicos',
-  fleet: 'Flota',
-  finance: 'Finanzas',
-  media: 'Video',
-  live: 'Cámaras en vivo',
-  pricing: 'Precios',
-  catalog: 'Catálogo',
-  dispatch: 'Dispatch',
-  audit: 'Auditoría',
-  gobierno: 'Gobierno',
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  view: 'Ver',
-  create: 'Crear',
-  approve: 'Aprobar',
-  suspend: 'Suspender',
-  delete: 'Eliminar',
-  ack: 'Reconocer',
-  resolve: 'Resolver',
-  review: 'Revisar',
-  manage: 'Gestionar',
-  payout: 'Liquidar',
-  refund: 'Reembolsar',
-  request: 'Solicitar',
-  verify: 'Verificar',
-};
-
-function actionOf(permission: Permission): string {
-  const action = permission.split(':')[1] ?? permission;
-  return ACTION_LABELS[action] ?? action;
-}
-
-/** Agrupa los permisos por recurso (prefijo antes de ':') preservando el orden canónico de `PERMISSION_LIST`. */
-function groupByResource(): { resource: string; label: string; permissions: Permission[] }[] {
-  const order: string[] = [];
-  const groups = new Map<string, Permission[]>();
-  for (const permission of PERMISSION_LIST) {
-    const resource = permission.split(':')[0] ?? permission;
-    const existing = groups.get(resource);
-    if (existing) {
-      existing.push(permission);
-    } else {
-      groups.set(resource, [permission]);
-      order.push(resource);
-    }
-  }
-  return order.map((resource) => ({
-    resource,
-    label: RESOURCE_LABELS[resource] ?? resource,
-    permissions: groups.get(resource) ?? [],
-  }));
-}
-
-const keyOf = (role: string, permission: string) => `${role}|${permission}`;
 
 export function PermissionsMatrix({ overrides }: { overrides: PermissionOverrideView[] }) {
   const { toast } = useToast();
@@ -176,12 +100,14 @@ export function PermissionsMatrix({ overrides }: { overrides: PermissionOverride
                 Permiso
               </th>
               {ROLE_COLS.map((c) => (
-                <th
-                  key={c.role}
-                  className="px-3 py-3 text-center text-xs font-semibold text-ink-muted"
-                  title={c.label}
-                >
-                  {c.short}
+                <th key={c.role} className="px-3 py-3 text-center">
+                  <Link
+                    href={`/gobierno/permisos/${c.role}`}
+                    title={`Ver el overlay de ${c.label}`}
+                    className="mx-auto inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-semibold text-ink-muted transition-colors hover:bg-surface-2 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    {c.short}
+                  </Link>
                 </th>
               ))}
             </tr>
