@@ -86,7 +86,7 @@ export const ShiftSummaryScreen = ({ navigation, route }: Props): React.JSX.Elem
           >
             <IconFlag size={36} color={theme.colors.brand} strokeWidth={2} />
           </View>
-          <Text variant="title2" align="center">
+          <Text variant="titleEditorial" align="center">
             {t('shift.summary.title')}
           </Text>
           <Text variant="footnote" color="inkSubtle" align="center">

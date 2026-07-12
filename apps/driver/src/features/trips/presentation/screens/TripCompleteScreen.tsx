@@ -113,7 +113,7 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
           >
             <IconCheck size={40} color={theme.colors.success} strokeWidth={3} />
           </View>
-          <Text variant="title2" align="center">
+          <Text variant="titleEditorial" align="center">
             {t('trips.complete.title')}
           </Text>
           <Text variant="footnote" color="inkSubtle" align="center">
