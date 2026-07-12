@@ -9,7 +9,7 @@
  *            FINANCE/ADMIN/SUPERADMIN, excluye SUPPORT/DISPATCHER) + StepUpMfaGuard/@RequireStepUpMfa
  *            (step-up MFA fresca). El RBAC fino se aplica ADEMÁS en admin-bff.
  */
-import { Body, Controller, Get, HttpCode, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   InternalIdentityGuard,
@@ -21,7 +21,7 @@ import {
 import { AdminRole } from '@veo/shared-types';
 import { CatalogService } from './catalog.service';
 import { AdminIdentityGuard } from '../pricing/admin-identity.guard';
-import { ReplaceCatalogDto } from './dto/catalog.dto';
+import { CreateCustomOfferingDto, ReplaceCatalogDto } from './dto/catalog.dto';
 
 @ApiTags('catalog')
 @ApiBearerAuth()
@@ -48,5 +48,28 @@ export class CatalogController {
   })
   replaceCatalog(@Body() dto: ReplaceCatalogDto) {
     return this.catalog.replaceOverlay(dto.overrides, dto.expectedVersion);
+  }
+
+  @Post('offerings')
+  @HttpCode(201)
+  @UseGuards(AdminIdentityGuard, RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.SUPERADMIN)
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'ALTA de una oferta CUSTOM (id generado, mapea a un vehicleClass/serviceType existente). ' +
+      'EXCLUSIVO SUPERADMIN + step-up MFA (acción sensible). ADR 013.',
+  })
+  createOffering(@Body() dto: CreateCustomOfferingDto) {
+    return this.catalog.createCustomOffering({
+      name: dto.name,
+      vehicleClass: dto.vehicleClass,
+      serviceType: dto.serviceType,
+      mode: dto.mode,
+      multiplier: dto.multiplier,
+      minFareCents: dto.minFareCents,
+      enabled: dto.enabled ?? true,
+      createdBy: dto.createdBy,
+    });
   }
 }

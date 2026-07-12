@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { OfferingId } from '@veo/shared-types';
 import type { CatalogOverride } from '@/lib/api/schemas';
-import { offeringLabel, withOverride } from './catalog';
+import { offeringDisplayName, offeringLabel, withOverride } from './catalog';
 
 /**
  * El display map del admin (B5-4.1). Contrato: TODA oferta del catálogo canónico resuelve a un nombre
@@ -79,5 +79,33 @@ describe('withOverride · persistencia del override por defaultEnabled real', ()
     const base = [ov({ id: OfferingId.VEO_AMBULANCE, enabled: true })];
     const out = withOverride(base, ov({ id: OfferingId.VEO_AMBULANCE, enabled: false }));
     expect(out).toEqual([]); // deshabilitar vertical → vuelve al default → se poda, sin duplicado
+  });
+
+  it('ADR 013 · el override de una CUSTOM NUNCA se poda (su default vive en la tabla, no en código)', () => {
+    // Una custom creada deshabilitada que el admin prende: enabled:true NO debe podarse por un default
+    // adivinado (findOffering la desconoce) — si se podara, resolveCatalog caería al enabled=false de la tabla.
+    const out = withOverride([], ov({ id: 'custom_abc', enabled: true }));
+    expect(out).toEqual([{ id: 'custom_abc', enabled: true }]);
+    // Y deshabilitarla también persiste.
+    const off = withOverride([], ov({ id: 'custom_abc', enabled: false }));
+    expect(off).toEqual([{ id: 'custom_abc', enabled: false }]);
+  });
+});
+
+/**
+ * offeringDisplayName · nombre display unificado (ADR 013): las CUSTOM traen su `name` literal; las built-in
+ * caen al map `offeringLabel`. Fuente única del rótulo del panel.
+ */
+describe('offeringDisplayName · custom name vs built-in label', () => {
+  it('una oferta CUSTOM usa su `name` literal (no el id crudo)', () => {
+    expect(offeringDisplayName({ id: 'custom_abc', name: 'VEO Playa' })).toBe('VEO Playa');
+  });
+
+  it('una built-in (sin `name`) cae al map de offeringLabel', () => {
+    expect(offeringDisplayName({ id: OfferingId.VEO_ECONOMICO })).toBe('VEO Económico');
+  });
+
+  it('un id desconocido sin `name` degrada al id crudo', () => {
+    expect(offeringDisplayName({ id: 'custom_xyz' })).toBe('custom_xyz');
   });
 });

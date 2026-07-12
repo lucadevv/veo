@@ -445,7 +445,8 @@ export function effectiveOfferingMode(
  *  La tarifa SIGUE saliendo de la fórmula (distancia/tiempo); estos solo escalan/pisan.
  */
 export interface OfferingOverride {
-  id: OfferingId;
+  /** Id de la oferta: un `OfferingId` built-in O un id `custom_*` (el overlay configura ambas · ADR 013). */
+  id: string;
   enabled: boolean;
   mode?: PricingMode;
   multiplier?: number;
@@ -469,8 +470,91 @@ export interface OfferingCatalogOverlay {
  * son los EFECTIVOS (base ⟕ override del admin). El `mode` respeta `modeLocked` (un pin sobre una vertical
  * lockeada se ignora); el consumidor usa `mode` directo, no re-resuelve.
  */
-export interface ResolvedOffering extends OfferingSpec {
+export interface ResolvedOffering extends Omit<OfferingSpec, 'id'> {
+  /** Built-in → un `OfferingId` del enum; custom → un id `custom_*` de la tabla (string ancho). */
+  id: string;
   enabled: boolean;
+  /** Nombre display de una oferta CUSTOM (las built-in lo resuelven por `labelKey`). Ausente en built-in. */
+  name?: string;
+  /** true = oferta CUSTOM (alta del admin, tabla). Ausente/false = built-in del enum de código. */
+  isCustom?: boolean;
+}
+
+// ── Ofertas CUSTOM (alta del admin · ADR 013 · tabla CustomOffering) ──────────────────────────────
+// El enum `OfferingId` es el catálogo built-in INMUTABLE (contrato con la app). Una oferta CUSTOM la crea el
+// SUPERADMIN en caliente: vive en la tabla `CustomOffering` de trip-service y EXTIENDE el enum. Restricción
+// honesta: una custom mapea a un `vehicleClass`/`serviceType` que YA EXISTE (el dispatch/matching y los
+// módulos nativos trabajan por `vehicleClass` — NO se inventa un tipo de vehículo nuevo). El catálogo EFECTIVO
+// UNE built-in ∪ custom; el pricing/config per-oferta (overlay del admin) funciona igual para ambas.
+
+/** Prefijo de los ids de oferta CUSTOM. Los built-in son el enum `OfferingId` (jamás llevan este prefijo). */
+export const CUSTOM_OFFERING_ID_PREFIX = 'custom_';
+
+/** ¿`id` es el id de una oferta CUSTOM (alta del admin), no un built-in del enum? (chequeo por prefijo). */
+export function isCustomOfferingId(id: string): boolean {
+  return id.startsWith(CUSTOM_OFFERING_ID_PREFIX);
+}
+
+/**
+ * Registro de una oferta CUSTOM (la fila de la tabla `CustomOffering`). Es el equivalente al `OfferingSpec` de
+ * código para una oferta creada en caliente: guarda su `name`, el `vehicleClass`/`serviceType` existente al que
+ * mapea, y su pricing/modo/enabled INICIALES (que el overlay del admin luego puede pisar, igual que a las built-in).
+ */
+export interface CustomOfferingRecord {
+  id: string;
+  name: string;
+  vehicleClass: VehicleClass;
+  serviceType: ServiceType;
+  mode: PricingMode;
+  multiplier: number;
+  minFareCents: number;
+  enabled: boolean;
+}
+
+/** `sortOrder` base de las ofertas custom: van DESPUÉS de todas las built-in (que llegan hasta ~12). */
+export const CUSTOM_OFFERING_SORT_BASE = 100;
+
+/**
+ * Proyecta una oferta CUSTOM (fila de la tabla) al shape `ResolvedOffering` del catálogo efectivo, aplicando el
+ * overlay del admin con la MISMA mecánica que las built-in (`resolveCatalog`): pricing/mode/enabled = base de la
+ * tabla ⟕ override. Una custom NUNCA está `modeLocked` (el admin la creó y le puede cambiar el modo) y su `flow`
+ * es STANDARD (mapea a un `vehicleClass` existente; las verticales EMERGENCY son built-in). El ícono deriva del
+ * `vehicleClass` (MOTO → moto, CAR → car), nunca del id. `index` fija el desempate del `sortOrder`.
+ */
+export function customOfferingToResolved(
+  record: CustomOfferingRecord,
+  override: OfferingOverride | undefined,
+  index: number,
+): ResolvedOffering {
+  const spec: OfferingSpec = {
+    id: record.id as OfferingId, // custom id: string; `effectiveOfferingMode` solo lee `mode`/`modeLocked`.
+    labelKey: record.name,
+    icon: record.vehicleClass === VehicleClass.MOTO ? OfferingIcon.MOTO : OfferingIcon.CAR,
+    vehicleClass: record.vehicleClass,
+    serviceType: record.serviceType,
+    pricing: { multiplier: record.multiplier, minFareCents: record.minFareCents },
+    mode: record.mode,
+    modeLocked: false,
+    flow: OfferingFlow.STANDARD,
+    defaultEnabled: record.enabled,
+    sortOrder: CUSTOM_OFFERING_SORT_BASE + index,
+  };
+  const pricing: OfferingPricingPolicy = {
+    multiplier: override?.multiplier ?? record.multiplier,
+    minFareCents: override?.minFareCents ?? record.minFareCents,
+    baseFareCents: override?.baseFareCents,
+    perKmCents: override?.perKmCents,
+    perMinCents: override?.perMinCents,
+  };
+  return {
+    ...spec,
+    id: record.id,
+    pricing,
+    mode: effectiveOfferingMode(spec, override?.mode),
+    enabled: override?.enabled ?? record.enabled,
+    name: record.name,
+    isCustom: true,
+  };
 }
 
 /**
@@ -481,12 +565,19 @@ export interface ResolvedOffering extends OfferingSpec {
  *  - overlay `null` (DB vacía/caída) → todas a su `defaultEnabled`, pricing/modo de código (degradación honesta).
  *  - overrides de precio (`multiplier`/`minFareCents`/params) pisan campo a campo; el `mode` pineado se honra
  *    solo si `!modeLocked` (`effectiveOfferingMode`) — en una vertical lockeada se ignora.
+ *  - `customs` = ofertas CUSTOM (tabla del admin): se UNEN a las built-in, resueltas con el MISMO overlay
+ *    (una custom es configurable igual que una built-in). Ordenadas todas juntas por `sortOrder` (las custom
+ *    caen después, `CUSTOM_OFFERING_SORT_BASE`+). Un override con un id que no matchea NINGUNA (built-in ni
+ *    custom) se IGNORA — el código/tabla son la fuente de ids válidos (cinturón y tirantes con el DTO).
  */
 export function resolveCatalog(
   overlay: OfferingCatalogOverlay | null,
+  customs: readonly CustomOfferingRecord[] = [],
 ): readonly ResolvedOffering[] {
-  const overrideById = new Map((overlay?.overrides ?? []).map((o) => [o.id, o]));
-  return OFFERING_LIST.map((spec) => {
+  const overrideById = new Map<string, OfferingOverride>(
+    (overlay?.overrides ?? []).map((o) => [o.id, o]),
+  );
+  const builtin = OFFERING_LIST.map((spec) => {
     const ov = overrideById.get(spec.id);
     const pricing: OfferingPricingPolicy = {
       multiplier: ov?.multiplier ?? spec.pricing.multiplier,
@@ -496,13 +587,17 @@ export function resolveCatalog(
       perMinCents: ov?.perMinCents ?? spec.pricing.perMinCents,
     };
     const mode = effectiveOfferingMode(spec, ov?.mode);
-    return { ...spec, pricing, mode, enabled: ov?.enabled ?? spec.defaultEnabled };
+    const resolved: ResolvedOffering = { ...spec, pricing, mode, enabled: ov?.enabled ?? spec.defaultEnabled };
+    return resolved;
   });
+  const custom = customs.map((rec, i) => customOfferingToResolved(rec, overrideById.get(rec.id), i));
+  return [...builtin, ...custom].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-/** Solo las ofertas ACTIVAS (las que el quote cotiza y la teaser del Home muestra). */
+/** Solo las ofertas ACTIVAS (las que el quote cotiza y la teaser del Home muestra). Incluye las custom activas. */
 export function activeOfferings(
   overlay: OfferingCatalogOverlay | null,
+  customs: readonly CustomOfferingRecord[] = [],
 ): readonly ResolvedOffering[] {
-  return resolveCatalog(overlay).filter((offering) => offering.enabled);
+  return resolveCatalog(overlay, customs).filter((offering) => offering.enabled);
 }

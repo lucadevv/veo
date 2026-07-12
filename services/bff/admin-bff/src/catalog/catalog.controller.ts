@@ -6,16 +6,16 @@
  * El RolesGuard usa getAllAndOverride: el @Roles del método REEMPLAZA al de la clase → el PUT re-declara
  * su set. trip-service RE-valida: InternalIdentityGuard (firma) + AdminIdentityGuard (type==='admin').
  */
-import { Body, Controller, Get, HttpCode, Param, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
-import { AdminRole } from '@veo/shared-types';
+import { AdminRole, type ResolvedOffering } from '@veo/shared-types';
 import {
   CatalogService,
   type CatalogView,
   type OfferingMetricsView,
 } from './catalog.service';
-import { ReplaceCatalogDto } from './dto/catalog.dto';
+import { CreateOfferingDto, ReplaceCatalogDto } from './dto/catalog.dto';
 import { Permission } from '../policies/permission.decorator';
 
 @ApiTags('catalog')
@@ -59,5 +59,24 @@ export class CatalogController {
     @Body() dto: ReplaceCatalogDto,
   ): Promise<CatalogView> {
     return this.catalog.replaceCatalog(user, dto);
+  }
+
+  @Post('offerings')
+  @HttpCode(201)
+  // ALTA de una oferta CUSTOM = crear un producto nuevo → EXCLUSIVO SUPERADMIN (@Roles a nivel MÉTODO
+  // REEMPLAZA los @Roles de la clase vía getAllAndOverride; SUPERADMIN ⊆ base de la clase, invariante OK) +
+  // step-up MFA. trip-service RE-autoriza (@Roles(SUPERADMIN) + step-up). Más sensible que catalog:manage.
+  @Roles(AdminRole.SUPERADMIN)
+  @Permission('catalog:create')
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'ALTA de una oferta CUSTOM (mapea a un vehicleClass/serviceType existente). catalog:create — SUPERADMIN + step-up MFA.',
+  })
+  createOffering(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateOfferingDto,
+  ): Promise<ResolvedOffering> {
+    return this.catalog.createOffering(user, dto);
   }
 }

@@ -20,7 +20,7 @@ import {
 import { PricingMode } from '@veo/shared-types';
 import type { BaseFareView, CatalogOffering, CatalogOverride, CatalogView } from '@/lib/api/schemas';
 import { useBaseFare, useCatalog, useOfferingMetrics, useReplaceCatalog } from '@/lib/api/queries';
-import { offeringLabel, withOverride } from '@/lib/catalog';
+import { offeringDisplayName, withOverride } from '@/lib/catalog';
 import { useConfigSave } from '@/lib/use-config-save';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -132,7 +132,7 @@ function Topbar({ offering }: { offering: CatalogOffering | undefined }) {
             </Link>
           </div>
           <h1 className="truncate font-display text-[21px] font-bold tracking-[-0.4px] text-ink">
-            {offering ? offeringLabel(offering.id) : 'Servicio'}
+            {offering ? offeringDisplayName(offering) : 'Servicio'}
           </h1>
         </div>
       </div>
@@ -199,7 +199,7 @@ function Loaded({
         }),
         expectedVersion: catalog.version,
       },
-      `${offeringLabel(offeringId)} ${enabled ? 'habilitada' : 'deshabilitada'}`,
+      `${offeringDisplayName(offering)} ${enabled ? 'habilitada' : 'deshabilitada'}`,
     );
   }
 
@@ -272,7 +272,7 @@ function ConfigCard({ offering }: { offering: CatalogOffering }) {
           <Icon className="size-5" aria-hidden />
         </span>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 className="font-display text-base font-bold text-ink">{offeringLabel(offering.id)}</h2>
+          <h2 className="font-display text-base font-bold text-ink">{offeringDisplayName(offering)}</h2>
           <p className="text-[13px] text-ink-muted">{subtitle}</p>
         </div>
       </div>
@@ -419,7 +419,7 @@ function ActionsCard({
   pending: boolean;
   onSetEnabled: (enabled: boolean) => Promise<void>;
 }) {
-  const label = offeringLabel(offering.id);
+  const label = offeringDisplayName(offering);
   const willPause = offering.enabled;
   return (
     <Card title="Acciones">

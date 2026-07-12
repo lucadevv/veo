@@ -911,6 +911,11 @@ export const catalogOffering = z.object({
   id: z.string(),
   labelKey: z.string(),
   icon: z.string(),
+  // ADR 013 · ofertas CUSTOM (alta del admin): traen su `name` display (no hay clave i18n) e `isCustom:true`.
+  // Ausentes en las built-in (el panel resuelve su nombre por el map de `offeringLabel`). El panel prefiere
+  // `name` cuando está y cae a `offeringLabel(id)` si no.
+  name: z.string().optional(),
+  isCustom: z.boolean().optional(),
   vehicleClass: z.enum(['CAR', 'MOTO']),
   // EJE 1 (B5) · la VERTICAL del servicio: RIDE (las ofertas de viaje) vs verticales especiales
   // (AMBULANCE/TOW/MECHANIC, flujo propio, solo FIXED). El panel agrupa por esto (CALIDAD/CAPACIDAD vs
@@ -970,6 +975,24 @@ export const replaceCatalogRequest = z.object({
   expectedVersion: z.number().int().nonnegative(),
 });
 export type ReplaceCatalogRequest = z.infer<typeof replaceCatalogRequest>;
+
+/**
+ * Body del POST /catalog/offerings (ADR 013) — ALTA de una oferta CUSTOM (acción de SUPERADMIN + step-up MFA).
+ * El id lo GENERA trip-service (`custom_*`); `vehicleClass`/`serviceType` DEBEN ser tipos EXISTENTES (el dispatch
+ * trabaja por vehicleClass — no se inventa un tipo de vehículo). Topes de cordura espejo del DTO autoritativo
+ * (multiplier ≤ 10, minFare ≤ 100000 céntimos); el admin-bff + trip-service RE-validan. La respuesta es la oferta
+ * ya resuelta (`catalogOffering`).
+ */
+export const createOfferingRequest = z.object({
+  name: z.string().min(2).max(40),
+  vehicleClass: z.enum(['CAR', 'MOTO']),
+  serviceType: z.enum(['RIDE', 'AMBULANCE', 'TOW', 'MECHANIC']),
+  mode: pricingMode,
+  multiplier: z.number().positive().max(10),
+  minFareCents: z.number().int().nonnegative().max(100_000),
+  enabled: z.boolean().optional(),
+});
+export type CreateOfferingRequest = z.infer<typeof createOfferingRequest>;
 
 /**
  * Métricas 30d de UNA oferta (GET /catalog/:id/metrics) — página-detalle del catálogo admin (board HjDvx

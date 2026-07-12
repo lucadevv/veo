@@ -25,7 +25,7 @@ import type {
   CatalogOverride,
   CatalogView,
 } from '@/lib/api/schemas';
-import { offeringLabel, withOverride } from '@/lib/catalog';
+import { offeringDisplayName, withOverride } from '@/lib/catalog';
 import {
   BID_FLOOR_MAX_SOLES,
   offeringFloorOverrideCents,
@@ -38,6 +38,7 @@ import { useSession } from '@/lib/session-context';
 import { formatSolesInput, parseSolesInput } from '@/lib/money';
 import { useConfigSave } from '@/lib/use-config-save';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { NewOfferingDialog } from '@/components/catalog/new-offering-dialog';
 import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
 import { RateField, RateInput } from '@/components/config/config-card';
 import { Button } from '@/components/ui/button';
@@ -119,6 +120,8 @@ export function CatalogPanel({
 }) {
   const user = useSession();
   const canManage = can(user, 'catalog:manage');
+  // Alta de oferta CUSTOM: SOLO SUPERADMIN (catalog:create). Gatea el botón "Nuevo servicio" del empty-state.
+  const canCreate = can(user, 'catalog:create');
   // El piso de la PUJA es un recurso de PRICING (endpoint /pricing/bid-floor), no de catálogo: se gatea con
   // `pricing:manage` (mapea a los mismos roles que catalog:manage hoy, pero es el permiso semánticamente correcto).
   const canManageFloor = can(user, 'pricing:manage');
@@ -141,6 +144,10 @@ export function CatalogPanel({
   const overrideOf = (id: string): CatalogOverride | undefined =>
     catalog.overrides.find((o) => o.id === id);
 
+  // Nombre display por id (para los toasts): una custom trae su `name`; una built-in cae al map de offeringLabel.
+  const nameOf = (id: string): string =>
+    offeringDisplayName(catalog.offerings.find((o) => o.id === id) ?? { id });
+
   // expectedVersion = la que cargamos (optimistic locking): si otro admin la movió → 409 (toast de conflicto).
   const commit = (next: CatalogOverride, msg: string) =>
     save(
@@ -161,14 +168,14 @@ export function CatalogPanel({
         perKmCents: ov?.perKmCents,
         perMinCents: ov?.perMinCents,
       },
-      `${offeringLabel(id)} ${enabled ? 'habilitada' : 'deshabilitada'}`,
+      `${nameOf(id)} ${enabled ? 'habilitada' : 'deshabilitada'}`,
     );
   }
 
   // Devuelve el ok del write (true=guardado / false=409 o error) para que `saveCard` haga short-circuit y NO
   // dispare el guardado del piso si el del catálogo falló (dos writes secuenciales, config de dinero).
   function savePricing(next: CatalogOverride): Promise<boolean> {
-    return commit(next, `${offeringLabel(next.id)}: precio y modo actualizados`);
+    return commit(next, `${nameOf(next.id)}: precio y modo actualizados`);
   }
 
   // FULL-REPLACE del overlay del bid-floor con SOLO esta oferta tocada (cents) o quitada (null → usa el default).
@@ -182,7 +189,7 @@ export function CatalogPanel({
         overrides: withFloorOverride(bidFloor.overrides, offeringId, cents),
         expectedVersion: bidFloor.version,
       },
-      `Piso de puja de ${offeringLabel(offeringId)} ${cents === null ? 'restablecido al default' : 'actualizado'}`,
+      `Piso de puja de ${nameOf(offeringId)} ${cents === null ? 'restablecido al default' : 'actualizado'}`,
     );
   }
 
@@ -190,11 +197,17 @@ export function CatalogPanel({
   // danger de "ninguna habilitada" — que es OTRA cosa (hay ofertas, todas apagadas). Sin ofertas no hay grilla.
   if (catalog.offerings.length === 0) {
     return (
-      <div className="pt-4">
+      <div className="flex flex-col items-center pt-4">
         <EmptyState
           title="Sin ofertas publicadas"
           description="Todavía no hay ofertas de servicio en el catálogo. Cuando se publiquen, aparecerán acá para configurar su modo, precio y disponibilidad."
         />
+        {/* Board ZC3fO: el empty-state ofrece "Nuevo servicio" — SOLO al SUPERADMIN (catalog:create). */}
+        {canCreate ? (
+          <div className="mt-4">
+            <NewOfferingDialog triggerVariant="secondary" />
+          </div>
+        ) : null}
         <ReadOnlyNote canManage={canManage} noun="el catálogo" />
       </div>
     );
@@ -429,7 +442,7 @@ function OfferingCard({
   }
 
   const Icon = offeringIcon(offering);
-  const label = offeringLabel(offering.id);
+  const label = offeringDisplayName(offering);
   const toggleTitle = `${offering.enabled ? 'Deshabilitar' : 'Habilitar'} ${label}`;
   const toggleDescription = offering.enabled
     ? `Los pasajeros dejarán de ver y cotizar ${label}. Esta acción cambia el catálogo global y queda auditada.`

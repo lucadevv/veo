@@ -31,6 +31,8 @@ import {
   liveCabin,
   mediaAccessRequestView,
   catalogView,
+  catalogOffering,
+  type CreateOfferingRequest,
   baseFareView,
   commissionView,
   costPerKmConfigView,
@@ -1261,6 +1263,23 @@ export function useReplaceCatalog() {
     mutationFn: (input: ReplaceCatalogRequest) =>
       apiClient().put('/catalog', { body: input, schema: catalogView }),
     // onSettled (no onSuccess): re-sincroniza tras éxito O conflicto (409 CAS) → el panel muestra la versión vigente.
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.catalog });
+    },
+  });
+}
+
+/**
+ * ALTA de una oferta CUSTOM (POST /catalog/offerings · ADR 013). Acción EXCLUSIVA de SUPERADMIN + step-up MFA:
+ * el admin-bff (`@Roles(SUPERADMIN)`) y trip-service re-autorizan server-side; la UI solo refleja el gate. La
+ * respuesta es la oferta ya resuelta (`catalogOffering`). `onSettled` re-sincroniza el catálogo → la card nueva
+ * aparece en la grilla.
+ */
+export function useCreateOffering() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateOfferingRequest) =>
+      apiClient().post('/catalog/offerings', { body: input, schema: catalogOffering }),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.catalog });
     },

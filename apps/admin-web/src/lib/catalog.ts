@@ -1,4 +1,4 @@
-import { findOffering, OfferingId } from '@veo/shared-types';
+import { findOffering, isCustomOfferingId, OfferingId } from '@veo/shared-types';
 import type { CatalogOverride } from '@/lib/api/schemas';
 
 /**
@@ -30,6 +30,14 @@ export function offeringLabel(id: string): string {
 }
 
 /**
+ * Nombre display de una oferta (ADR 013): las CUSTOM traen su `name` literal (no hay clave i18n para un id
+ * creado en caliente); las built-in caen al map `offeringLabel`. Fuente única del rótulo en el panel del catálogo.
+ */
+export function offeringDisplayName(offering: { id: string; name?: string | null }): string {
+  return offering.name ?? offeringLabel(offering.id);
+}
+
+/**
  * Upsert del override tocado sobre el overlay CRUDO (preserva los demás; el replace al bff es wholesale).
  * Omite el override si quedó en el DEFAULT del catálogo para no ensuciar la DB con valores iguales al código.
  *
@@ -40,6 +48,12 @@ export function offeringLabel(id: string): string {
  */
 export function withOverride(base: CatalogOverride[], next: CatalogOverride): CatalogOverride[] {
   const rest = base.filter((o) => o.id !== next.id);
+  // Ofertas CUSTOM: su default de `enabled` vive en la TABLA (no en código), así que acá NO lo conocemos —
+  // podar el override por un default ADIVINADO perdería un `enabled` explícito (una custom creada deshabilitada
+  // que el admin prende quedaría apagada). Por eso el override de una custom NUNCA se poda: siempre se persiste.
+  if (isCustomOfferingId(next.id)) {
+    return [...rest, next];
+  }
   const defaultEnabled = findOffering(next.id)?.defaultEnabled ?? true;
   const isDefault =
     next.enabled === defaultEnabled &&

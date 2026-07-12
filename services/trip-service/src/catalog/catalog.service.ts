@@ -10,13 +10,20 @@
  * servicio solo orquesta IO. El repo entra por puerto (clean arch). Cache in-proc de un slot (singleton)
  * como el del schedule: absorbe el read-heavy de createTrip/quote; el PUT lo invalida.
  */
+import { randomBytes } from 'node:crypto';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { ConflictError } from '@veo/utils';
+import { ConflictError, ValidationError } from '@veo/utils';
 import { bumpPricingConfigChanged } from '../trips/trip-metrics';
 import {
-  activeOfferings,
+  CUSTOM_OFFERING_ID_PREFIX,
+  PricingMode,
+  ServiceType,
+  VehicleClass,
+  customOfferingToResolved,
+  findOffering,
   resolveCatalog,
+  type CustomOfferingRecord,
   type OfferingCatalogOverlay,
   type OfferingOverride,
   type ResolvedOffering,
@@ -27,8 +34,25 @@ import {
   type OfferingCatalogRepository,
   type PersistedOverlay,
 } from './catalog.repository';
+import {
+  CUSTOM_OFFERING_REPO,
+  type CustomOfferingRepository,
+} from './custom-offering.repository';
 
 const PRODUCER = 'trip-service';
+
+/** Datos del ALTA de una oferta custom (ya validados por el DTO; el service re-valida los enums, defensa). */
+export interface CreateCustomOfferingInput {
+  name: string;
+  vehicleClass: VehicleClass;
+  serviceType: ServiceType;
+  mode: PricingMode;
+  multiplier: number;
+  minFareCents: number;
+  enabled: boolean;
+  /** Id del admin que la crea (auditoría). Opcional (seeds/tests). */
+  createdBy?: string;
+}
 
 /** Token DI (opcional) del TTL del cache; default 10s si el módulo no lo provee. */
 export const OFFERING_CATALOG_CACHE_TTL_MS = Symbol('OFFERING_CATALOG_CACHE_TTL_MS');
@@ -51,28 +75,36 @@ export class CatalogService {
   /** Cache in-proc de un slot (singleton). SOLO lecturas exitosas; el PUT lo invalida. */
   private cache: { value: PersistedOverlay | null; expiresAt: number } | null = null;
 
+  /** Cache in-proc de las ofertas CUSTOM (tabla). Mismo TTL/invalidación que el overlay (`invalidateCache`). */
+  private customCache: { value: CustomOfferingRecord[]; expiresAt: number } | null = null;
+
   constructor(
     @Inject(OFFERING_CATALOG_REPO) private readonly repo: OfferingCatalogRepository,
     @Optional()
     @Inject(OFFERING_CATALOG_CACHE_TTL_MS)
     private readonly cacheTtlMs = 10_000,
+    // @Optional: los tests legacy construyen el servicio con 2 args (sin repo custom) → degrada a "sin customs"
+    // (catálogo = solo built-in), sin romper. En prod el módulo SIEMPRE lo provee.
+    @Optional()
+    @Inject(CUSTOM_OFFERING_REPO)
+    private readonly customRepo: CustomOfferingRepository | null = null,
   ) {}
 
-  /** GET interno: catálogo EFECTIVO (todas las ofertas con su `enabled`) + metadatos de versión. */
+  /** GET interno: catálogo EFECTIVO (built-in ∪ custom, todas con su `enabled`) + metadatos de versión. */
   async getCatalog(): Promise<CatalogView> {
-    const persisted = await this.loadOverlay();
+    const [persisted, customs] = await Promise.all([this.loadOverlay(), this.loadCustoms()]);
     return {
       version: persisted?.version ?? 0,
       updatedAt: persisted?.updatedAt ?? new Date(0).toISOString(),
-      offerings: [...resolveCatalog(toOverlay(persisted))],
+      offerings: [...resolveCatalog(toOverlay(persisted), customs)],
       overrides: persisted?.overrides ?? [],
     };
   }
 
-  /** Ofertas ACTIVAS (las que el quote cotiza, la teaser muestra y createTrip acepta). */
+  /** Ofertas ACTIVAS (built-in ∪ custom activas: las que el quote cotiza, la teaser muestra y createTrip acepta). */
   async resolveActive(): Promise<ResolvedOffering[]> {
-    const persisted = await this.loadOverlay();
-    return [...activeOfferings(toOverlay(persisted))];
+    const [persisted, customs] = await Promise.all([this.loadOverlay(), this.loadCustoms()]);
+    return resolveCatalog(toOverlay(persisted), customs).filter((offering) => offering.enabled);
   }
 
   /** ¿Esta oferta está habilitada AHORA? (createTrip lo usa para rechazar una oferta apagada). */
@@ -87,8 +119,10 @@ export class CatalogService {
    * `resolveCatalog` ya aplicó `effectiveOfferingMode` (palanca manual del admin, respetando `modeLocked`).
    */
   async resolveOffering(offeringId: string): Promise<ResolvedOffering | undefined> {
-    const persisted = await this.loadOverlay();
-    return resolveCatalog(toOverlay(persisted)).find((offering) => offering.id === offeringId);
+    const [persisted, customs] = await Promise.all([this.loadOverlay(), this.loadCustoms()]);
+    return resolveCatalog(toOverlay(persisted), customs).find(
+      (offering) => offering.id === offeringId,
+    );
   }
 
   /**
@@ -179,6 +213,104 @@ export class CatalogService {
    */
   invalidateCache(): void {
     this.cache = null;
+    this.customCache = null;
+  }
+
+  /**
+   * ALTA de una oferta CUSTOM (ADR 013). Genera un id `custom_*` ÚNICO, valida los enums (defensa en
+   * profundidad sobre el DTO), persiste la fila + EMITE `catalog.updated` por outbox en la MISMA tx (mismo
+   * patrón que el PUT del overlay: invalidación de cache cross-réplica + señal de auditoría), invalida el cache
+   * local y devuelve la oferta ya resuelta al shape del catálogo efectivo. La UNICIDAD del id se garantiza con
+   * `existsById` (reintento) + la PK de la tabla (cinturón y tirantes).
+   */
+  async createCustomOffering(input: CreateCustomOfferingInput): Promise<ResolvedOffering> {
+    // Defensa en profundidad: el DTO ya valida, pero el service NO confía ciegamente (los enums son el
+    // contrato con dispatch/matching — un valor fuera de rango rompería el pool). Rechazo explícito.
+    if (!Object.values(VehicleClass).includes(input.vehicleClass)) {
+      throw new ValidationError(`vehicleClass inválido: ${input.vehicleClass}`);
+    }
+    if (!Object.values(ServiceType).includes(input.serviceType)) {
+      throw new ValidationError(`serviceType inválido: ${input.serviceType}`);
+    }
+    if (!Object.values(PricingMode).includes(input.mode)) {
+      throw new ValidationError(`mode inválido: ${input.mode}`);
+    }
+    if (!Number.isFinite(input.multiplier) || input.multiplier <= 0) {
+      throw new ValidationError('multiplier debe ser > 0');
+    }
+    if (!Number.isInteger(input.minFareCents) || input.minFareCents < 0) {
+      throw new ValidationError('minFareCents debe ser un entero ≥ 0');
+    }
+    const name = input.name.trim();
+    if (name.length === 0) throw new ValidationError('name es obligatorio');
+
+    const id = await this.generateUniqueId();
+
+    const record: CustomOfferingRecord = {
+      id,
+      name,
+      vehicleClass: input.vehicleClass,
+      serviceType: input.serviceType,
+      mode: input.mode,
+      multiplier: input.multiplier,
+      minFareCents: input.minFareCents,
+      enabled: input.enabled,
+    };
+
+    await this.repoCustom().runInTx(async (tx) => {
+      await tx.customOffering.create({
+        data: {
+          id: record.id,
+          name: record.name,
+          vehicleClass: record.vehicleClass,
+          serviceType: record.serviceType,
+          mode: record.mode,
+          multiplier: record.multiplier,
+          minFareCents: record.minFareCents,
+          enabled: record.enabled,
+          createdBy: input.createdBy ?? null,
+        },
+      });
+      // Outbox EN LA MISMA TX (FOUNDATION §6): invalida el cache del catálogo en consumidores (mismo evento
+      // que el PUT del overlay; el consumer solo invalida, es idempotente y version-agnóstico).
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: CATALOG_SINGLETON_ID,
+          eventType: 'catalog.updated',
+          envelope: createEnvelope({
+            eventType: 'catalog.updated',
+            producer: PRODUCER,
+            payload: { customOfferingCreated: record.id },
+          }),
+        },
+      });
+    });
+
+    this.invalidateCache();
+    bumpPricingConfigChanged('offering_catalog'); // OPS: señal de cambio de config (FOUNDATION §6)
+    this.logger.log(`oferta custom CREADA '${record.id}' (${record.name}); catalog.updated emitido`);
+
+    // La devolvemos ya resuelta (sin override: recién creada). `index 0` sólo desempata el sortOrder.
+    return customOfferingToResolved(record, undefined, 0);
+  }
+
+  /** Guard: el módulo de prod SIEMPRE provee el repo custom; si falta (mal cableado) el alta no puede proceder. */
+  private repoCustom(): CustomOfferingRepository {
+    if (!this.customRepo) {
+      throw new ConflictError('el repositorio de ofertas custom no está disponible');
+    }
+    return this.customRepo;
+  }
+
+  /** Genera un id `custom_*` único (reintenta ante colisión, improbable con 8 bytes aleatorios). */
+  private async generateUniqueId(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const id = `${CUSTOM_OFFERING_ID_PREFIX}${randomBytes(8).toString('hex')}`;
+      // Un id no puede colisionar con un built-in (findOffering) ni con otra custom existente.
+      if (findOffering(id)) continue;
+      if (!(await this.repoCustom().existsById(id))) return id;
+    }
+    throw new ConflictError('no se pudo generar un id único para la oferta custom; reintentá');
   }
 
   /** Carga el overlay del repo (cacheado un slot). Miss/vencido → lee; cachea solo lecturas exitosas. */
@@ -191,6 +323,22 @@ export class CatalogService {
       this.cache = { value: persisted, expiresAt: now + this.cacheTtlMs };
     }
     return persisted;
+  }
+
+  /**
+   * Carga las ofertas CUSTOM de la tabla (cacheado un slot, mismo TTL que el overlay). Sin repo (tests legacy)
+   * → []: el catálogo degrada a solo built-in. El ALTA/`invalidateCache` limpian el cache.
+   */
+  private async loadCustoms(): Promise<CustomOfferingRecord[]> {
+    if (!this.customRepo) return [];
+    const now = Date.now();
+    if (this.customCache && this.customCache.expiresAt > now) return this.customCache.value;
+
+    const rows = await this.customRepo.findAll();
+    if (this.cacheTtlMs > 0) {
+      this.customCache = { value: rows, expiresAt: now + this.cacheTtlMs };
+    }
+    return rows;
   }
 }
 
