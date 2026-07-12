@@ -1,4 +1,4 @@
-import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
+import {useReducedMotion, useTheme} from '@veo/ui-kit';
 import React, {useEffect} from 'react';
 import {Pressable, StyleSheet, View} from 'react-native';
 import Animated, {
@@ -8,29 +8,44 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, {Path} from 'react-native-svg';
+
+const STARS = [1, 2, 3, 4, 5] as const;
+
+export interface StarRatingProps {
+  /** Estrellas seleccionadas (0 = sin elegir). */
+  value: number;
+  onChange: (stars: number) => void;
+  /** Tamaño del ícono (px). Frame de calificación = 32. */
+  size?: number;
+  /** Solo lectura (tras enviar la calificación): sin toque ni rebote. */
+  readOnly?: boolean;
+}
 
 /**
- * Selector de estrellas (1-5). Usa el carácter tipográfico ★/☆ (no es emoji-icono) y acompaña el
- * estado con `accessibilityValue` para lectores de pantalla. Al tocar, la estrella da un rebote
- * sutil (resorte) y las estrellas activas se asientan con un ligero realce. Respeta reduce-motion.
+ * Selector de estrellas 1-5. Usa el ícono de estrella lucide (SVG, no el carácter tipográfico ★/☆)
+ * del set light Trust del passenger: ámbar (`warn`) sólida las activas, contorno gris
+ * (`borderStrong`) las inactivas. Al tocar, la estrella da un rebote sutil (resorte) que respeta
+ * reduce-motion. Accesible como control ajustable. En `readOnly` no responde al toque ni anima.
  */
 export function StarRating({
   value,
   onChange,
-}: {
-  value: number;
-  onChange: (stars: number) => void;
-}): React.JSX.Element {
+  size = 32,
+  readOnly = false,
+}: StarRatingProps): React.JSX.Element {
   return (
     <View
       style={styles.row}
       accessibilityRole="adjustable"
       accessibilityValue={{min: 1, max: 5, now: value}}>
-      {[1, 2, 3, 4, 5].map(star => (
+      {STARS.map(star => (
         <Star
           key={star}
           star={star}
           active={star <= value}
+          size={size}
+          readOnly={readOnly}
           onPress={() => onChange(star)}
         />
       ))}
@@ -41,17 +56,26 @@ export function StarRating({
 interface StarProps {
   star: number;
   active: boolean;
+  size: number;
+  readOnly: boolean;
   onPress: () => void;
 }
 
-function Star({star, active, onPress}: StarProps): React.JSX.Element {
+function Star({
+  star,
+  active,
+  size,
+  readOnly,
+  onPress,
+}: StarProps): React.JSX.Element {
   const reduced = useReducedMotion();
   const theme = useTheme();
   const scale = useSharedValue(1);
 
   // Rebote al activarse (al tocar esta estrella o una superior); las inactivas vuelven a reposo.
+  // En readOnly (o con reduce-motion) no hay rebote.
   useEffect(() => {
-    if (reduced) {
+    if (reduced || readOnly) {
       scale.value = 1;
       return;
     }
@@ -63,7 +87,7 @@ function Star({star, active, onPress}: StarProps): React.JSX.Element {
     } else {
       scale.value = withTiming(1, {duration: theme.motion.exit.base});
     }
-  }, [active, reduced, scale, theme]);
+  }, [active, reduced, readOnly, scale, theme]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{scale: scale.value}],
@@ -74,14 +98,41 @@ function Star({star, active, onPress}: StarProps): React.JSX.Element {
       accessibilityRole="button"
       accessibilityLabel={`${star}`}
       hitSlop={6}
+      disabled={readOnly}
       onPress={onPress}
       style={styles.star}>
       <Animated.View style={animatedStyle}>
-        <Text variant="display" color={active ? 'warn' : 'inkSubtle'}>
-          {active ? '★' : '☆'}
-        </Text>
+        <StarGlyph
+          size={size}
+          filled={active}
+          color={active ? theme.colors.warn : theme.colors.borderStrong}
+        />
       </Animated.View>
     </Pressable>
+  );
+}
+
+interface StarGlyphProps {
+  size: number;
+  filled: boolean;
+  color: string;
+}
+
+/**
+ * Estrella lucide (viewBox 24×24), mismo trazo del set light Trust del passenger (`trip/.../icons`).
+ * `filled` la rellena con `color`; sin relleno queda el contorno visible (empty slot).
+ */
+function StarGlyph({size, filled, color}: StarGlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 17.8 6.7 19.2l1-5.8L3.5 9.2l5.9-.9z"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinejoin="round"
+        fill={filled ? color : 'none'}
+      />
+    </Svg>
   );
 }
 
