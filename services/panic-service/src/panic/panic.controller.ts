@@ -138,6 +138,30 @@ export class PanicController {
 
   @UseGuards(RolesGuard)
   @Roles(...PANIC_OPERATORS)
+  @Post(':id/dispatch')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Despachar unidad de respuesta (acción lateral + panic.dispatched)' })
+  async dispatch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PanicEntity> {
+    return this.toEntity(await this.panic.dispatch(id, user.userId));
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...PANIC_OPERATORS)
+  @Post(':id/escalate')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Escalar a autoridades (acción lateral + panic.escalated)' })
+  async escalate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PanicEntity> {
+    return this.toEntity(await this.panic.escalate(id, user.userId));
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...PANIC_OPERATORS)
   @Post(':id/evidence')
   @HttpCode(200)
   @ApiOperation({ summary: 'Anexar keys S3 de evidencia (Object Lock/WORM si finalize)' })
@@ -162,6 +186,10 @@ export class PanicController {
     ackBy: string | null;
     resolvedAt: Date | null;
     resolutionNotes: string | null;
+    dispatchedAt: Date | null;
+    dispatchedBy: string | null;
+    escalatedAt: Date | null;
+    escalatedBy: string | null;
   }): PanicEntity {
     return {
       id: row.id,
@@ -176,6 +204,10 @@ export class PanicController {
       ackBy: row.ackBy ?? undefined,
       resolvedAt: row.resolvedAt ?? undefined,
       resolutionNotes: row.resolutionNotes ?? undefined,
+      dispatchedAt: row.dispatchedAt ?? undefined,
+      dispatchedBy: row.dispatchedBy ?? undefined,
+      escalatedAt: row.escalatedAt ?? undefined,
+      escalatedBy: row.escalatedBy ?? undefined,
     };
   }
 }

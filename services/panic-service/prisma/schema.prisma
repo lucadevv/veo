@@ -43,6 +43,13 @@ model PanicEvent {
   /// Operador (admin userId) que reconoció la alerta.
   ackBy          String?     @map("ack_by") @db.Uuid
   resolvedAt     DateTime?   @map("resolved_at") @db.Timestamptz
+  /// Respuesta operativa (acciones LATERALES sobre una alerta ACTIVA, no cambian el status): el operador
+  /// despachó una unidad de respuesta y/o escaló a autoridades. Timestamps + operador (admin userId) para el
+  /// display del detalle y la línea de tiempo; el audit inmutable (admin-bff) sigue siendo la fuente de verdad.
+  dispatchedAt   DateTime?   @map("dispatched_at") @db.Timestamptz
+  dispatchedBy   String?     @map("dispatched_by") @db.Uuid
+  escalatedAt    DateTime?   @map("escalated_at") @db.Timestamptz
+  escalatedBy    String?     @map("escalated_by") @db.Uuid
   /// Motivo OPCIONAL del cierre (RESOLVED/FALSE_ALARM) que el operador escribe al resolver la alerta.
   /// Se persiste en la MISMA tx/CAS que la transición. El audit inmutable (admin-bff) sigue siendo la
   /// fuente de verdad para accountability (Ley 29733); esta columna es para consulta/display del detalle.

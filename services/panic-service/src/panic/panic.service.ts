@@ -199,6 +199,58 @@ export class PanicService {
   }
 
   /**
+   * Respuesta operativa: el operador DESPACHÓ una unidad (`dispatch`) o ESCALÓ a autoridades (`escalate`).
+   * Son acciones LATERALES sobre una alerta ACTIVA — NO cambian el status (un pánico puede estar
+   * ACKNOWLEDGED y a la vez despachado + escalado). Idempotentes: solo sellan el timestamp/operador la
+   * PRIMERA vez (WHERE ...At = null), preservando la accountability de quién actuó primero; un segundo tap
+   * es no-op (devuelve la fila). Publica el evento por OUTBOX en la MISMA tx (audit + línea de tiempo).
+   */
+  async dispatch(panicId: string, operatorId: string): Promise<PanicEvent> {
+    return this.recordResponse(panicId, operatorId, 'dispatch');
+  }
+
+  async escalate(panicId: string, operatorId: string): Promise<PanicEvent> {
+    return this.recordResponse(panicId, operatorId, 'escalate');
+  }
+
+  private async recordResponse(
+    panicId: string,
+    operatorId: string,
+    kind: 'dispatch' | 'escalate',
+  ): Promise<PanicEvent> {
+    const at = new Date();
+    const field = kind === 'dispatch' ? 'dispatchedAt' : 'escalatedAt';
+    const byField = kind === 'dispatch' ? 'dispatchedBy' : 'escalatedBy';
+    const eventType = kind === 'dispatch' ? 'panic.dispatched' : 'panic.escalated';
+    return this.repo.runInTx(async (tx) => {
+      // El pánico debe existir y NO estar cerrado (no se despacha/escala una alerta ya resuelta).
+      const cas = await tx.panicEvent.updateMany({
+        where: {
+          id: panicId,
+          [field]: null,
+          status: { notIn: [PanicStatus.RESOLVED, PanicStatus.FALSE_ALARM] },
+        },
+        data: { [field]: at, [byField]: operatorId },
+      });
+      const row = await tx.panicEvent.findUnique({ where: { id: panicId } });
+      if (!row) throw new NotFoundError('Evento de pánico no encontrado');
+      // Idempotente: si ya estaba sellado (cas.count===0 porque el WHERE At=null no matcheó) NO re-emite ni
+      // pisa al primero. Si está cerrado, tampoco actúa (fila sin el sello) → el llamante ve el estado real.
+      if (cas.count === 0) return row;
+      const payload: EventPayload<typeof eventType> = {
+        panicId: row.id,
+        tripId: row.tripId,
+        passengerId: row.passengerId,
+        operatorId,
+        at: at.toISOString(),
+      };
+      const envelope = createEnvelope({ eventType, producer: PRODUCER, payload });
+      await enqueueOutbox(tx, envelope, row.id);
+      return row;
+    });
+  }
+
+  /**
    * Cierre de la alerta por el operador: RESOLVED o FALSE_ALARM. Publica `panic.resolved` (MISMA tx que
    * el cambio de estado, vía outbox) para que el dashboard de operadores (admin-bff) y el audit conozcan
    * el cierre — sin él, una alerta cerrada quedaba como dead-end: el estado cambiaba en la DB del
