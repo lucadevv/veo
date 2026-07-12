@@ -4,11 +4,7 @@ import type {
   PlaceSuggestion,
   TripResource,
 } from '@veo/api-client';
-import {
-  type RouteProp,
-  useNavigation,
-  useRoute,
-} from '@react-navigation/native';
+import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery} from '@tanstack/react-query';
 import {
@@ -90,21 +86,15 @@ function distanceLabel(from: GeoPoint | null, to: GeoPoint): string | null {
 
 /**
  * Búsqueda inteligente de direcciones. Edita origen y destino (`OriginDestinationField`), busca con
- * autocompletado (debounce + sesgo por ubicación) y, al fijar AMBOS extremos, RESUELVE según el origen
- * del flujo (`route.params.flow`):
- *  - `'sheet'`: abierto desde el sheet unificado (QuotingBody edita un punto del trayecto) → `goBack()`
- *    al sheet, que sigue en fase `quoting` con el borrador actualizado. NO sale a la cadena legacy.
- *  - `'quote'` (default): flujo PROGRAMADO (`ScheduleNew`) y callers no migrados → navega a `RouteQuote`.
- * El origen se siembra con la ubicación actual (geocoding inverso real).
+ * autocompletado (debounce + sesgo por ubicación) y, al fijar AMBOS extremos, hace `goBack()` a quien
+ * la abrió: SIEMPRE el sheet unificado (`RequestFlowScreen`/`QuotingBody`, que la pushea para editar un
+ * punto del trayecto y sigue en fase `quoting` con el borrador actualizado). El origen se siembra con la
+ * ubicación actual (geocoding inverso real).
  */
 export function SearchScreen(): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
-  // Origen del flujo: define a dónde se vuelve al fijar ambos extremos. Default 'quote' = camino legacy
-  // (no rompe ScheduleNew ni callers viejos); el sheet pasa 'sheet' para volver a la cotización in-sheet.
-  const flow =
-    useRoute<RouteProp<RootStackParamList, 'Search'>>().params?.flow ?? 'quote';
 
   const reverseGeocode = useDependency(TOKENS.reverseGeocodeUseCase);
   const history = useDependency(TOKENS.tripHistoryRepository);
@@ -163,15 +153,12 @@ export function SearchScreen(): React.JSX.Element {
     [setEditing],
   );
 
-  // Cierra el buscador hacia su origen una vez fijados ambos extremos: 'sheet' → vuelve al sheet
-  // (fase quoting con el borrador actualizado); 'quote' (legacy/programado) → pantalla de cotización.
+  // Cierra el buscador una vez fijados ambos extremos: `goBack()` al sheet unificado que la abrió
+  // (fase quoting con el borrador actualizado). Es el ÚNICO camino de retorno — el flujo programado
+  // también vive en el sheet (ver ScheduleNew), así que ya no hay pantalla de cotización legacy.
   const resolveFlow = useCallback(() => {
-    if (flow === 'sheet') {
-      navigation.goBack();
-    } else {
-      navigation.navigate('RouteQuote');
-    }
-  }, [flow, navigation]);
+    navigation.goBack();
+  }, [navigation]);
 
   // Aplica un lugar al punto en edición y avanza el flujo.
   const applyPlace = useCallback(
