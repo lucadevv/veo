@@ -17,7 +17,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Repo fake: captura los args de `offeringMetricsSince` y devuelve el cohorte configurado. */
 function buildService(windowMetrics: OfferingWindowMetrics) {
-  const offeringMetricsSince = vi.fn(async () => windowMetrics);
+  const offeringMetricsSince = vi.fn(async (_category: string, _since: Date) => windowMetrics);
   const repo = { offeringMetricsSince } as unknown as TripStatsRepository;
   return { svc: new AnalyticsService(repo), offeringMetricsSince };
 }
