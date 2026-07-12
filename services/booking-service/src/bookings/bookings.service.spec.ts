@@ -21,6 +21,7 @@ import {
   type FakePaymentGatewayOptions,
 } from '../ports/payment/fake-payment-gateway';
 import { ChargePermanentlyRejectedError } from '../domain/payment-charge';
+import { SEAT_HOLDING_BOOKING_STATES } from '../domain/booking-state';
 import { BACKGROUND_CHECK_CLEARED, VEHICLE_STATUS_OPERABLE } from '../domain/driver-eligibility';
 import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
 import type { CostCapService } from '../cost-cap/cost-cap.service';
@@ -192,6 +193,11 @@ function makeRepo(trip: Record<string, unknown> | null) {
   }));
   // F3b: listado de solicitudes de un viaje (driver-rail). Por default vacío; los tests lo sobrescriben.
   const findByPublishedTripId = vi.fn(async () => [] as unknown[]);
+  // DETALLE admin: pasajeros VIVOS de un carpool (sin ownership). Por default vacío; los tests lo sobrescriben.
+  const listSeatHoldingByPublishedTripId = vi.fn(
+    async (_publishedTripId: string, _estados: readonly BookingState[], _take: number) =>
+      [] as unknown[],
+  );
   const repo = {
     findPublishedTrip,
     createWithEventIdempotent,
@@ -200,6 +206,7 @@ function makeRepo(trip: Record<string, unknown> | null) {
     transitionWithEvent,
     markChargePending,
     findByPublishedTripId,
+    listSeatHoldingByPublishedTripId,
   } as unknown as BookingsRepository;
   return {
     repo,
@@ -210,6 +217,7 @@ function makeRepo(trip: Record<string, unknown> | null) {
     transitionWithEvent,
     markChargePending,
     findByPublishedTripId,
+    listSeatHoldingByPublishedTripId,
   };
 }
 
@@ -1455,5 +1463,30 @@ describe('BookingsService · listRequestsForTrip (driver-rail, ownership)', () =
     await expect(service.listRequestsForTrip(TRIP_ID, DRIVER_ID)).rejects.toBeInstanceOf(
       NotFoundError,
     );
+  });
+});
+
+describe('BookingsService · listSeatBookings (detalle admin · sin ownership)', () => {
+  it('lista los pasajeros VIVOS (SEAT_HOLDING) de la oferta, capado, SIN chequear ownership del driver', async () => {
+    const { repo, listSeatHoldingByPublishedTripId, findPublishedTrip } = makeRepo(null);
+    listSeatHoldingByPublishedTripId.mockResolvedValueOnce([makeBooking(), makeBooking()]);
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
+
+    const result = await service.listSeatBookings(TRIP_ID);
+
+    expect(result).toHaveLength(2);
+    // Admin: NO llama a findPublishedTrip (no valida ownership) — la autorización es RBAC del admin-bff.
+    expect(findPublishedTrip).not.toHaveBeenCalled();
+    // Filtra por los estados que ocupan cupo (SEAT_HOLDING_BOOKING_STATES) y capa el payload.
+    const [tripId, estados, take] = listSeatHoldingByPublishedTripId.mock.calls[0]!;
+    expect(tripId).toBe(TRIP_ID);
+    expect(estados).toEqual(SEAT_HOLDING_BOOKING_STATES);
+    expect(typeof take).toBe('number');
   });
 });

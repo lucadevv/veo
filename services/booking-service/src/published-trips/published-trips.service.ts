@@ -240,6 +240,64 @@ export interface ActiveCarpoolsView {
   carpools: ActiveCarpoolItem[];
 }
 
+/** Un meeting point (stopover) del recorrido: coords públicas + orden. booking NO guarda nombres de distrito. */
+export interface AdminCarpoolStop {
+  lat: number;
+  lon: number;
+  orden: number;
+}
+
+/**
+ * DETALLE admin de UN carpool (finance/carpooling · frame m93bTI). A diferencia del DETALLE público
+ * (`getDetail`, gates SEARCHABLE + elegibilidad para el PASAJERO), este es de MONITOREO: devuelve CUALQUIER
+ * oferta viva por id (incluso LLENO/EN_RUTA o con el conductor luego suspendido) SIN los gates passenger-facing
+ * — el admin quiere VER todo lo activo. Enriquece el conductor (nombre público + rating, batch best-effort) y
+ * el vehículo (fleet best-effort); ambos NULLABLE (degradación honesta si identity/fleet no responden — el
+ * detalle no se cuelga). Los PASAJEROS (bookings) NO viajan acá: los compone el controller (concern de la
+ * reserva) y el admin-bff les resuelve el nombre gateado por Ley 29733.
+ *
+ * COST-SHARE derivable (lo que booking SABE): `precioBaseCents` (por asiento), `asientosQueReparten`
+ * (= reservados) y `tarifaTotalCents` (= precioBase × reservados). El FEE VEO y el payout al conductor NO se
+ * computan acá: el fee vive en payment-service (commission) y el payout de carpooling no está definido en
+ * booking — se OMITEN antes que inventar un número (honestidad de datos).
+ */
+export interface AdminCarpoolDetail {
+  id: string;
+  estado: PublishedTripState;
+  fechaHoraSalida: Date;
+  modoReserva: PublishedTrip['modoReserva'];
+  pais: string;
+  moneda: string;
+  origenLat: number;
+  origenLon: number;
+  originH3: string | null;
+  destinoLat: number;
+  destinoLon: number;
+  destH3: string | null;
+  stopovers: AdminCarpoolStop[];
+  asientosTotales: number;
+  asientosDisponibles: number;
+  /** Reservados = totales − disponibles (server-truth del seat-lock, no inventado). */
+  asientosReservados: number;
+  /** Precio del asiento (céntimos PEN, cost-share por asiento). */
+  precioBaseCents: number;
+  /** Asientos que reparten el costo = reservados (los cupos ya tomados). */
+  asientosQueReparten: number;
+  /** Tarifa total del trayecto = precioBaseCents × reservados (lo que reparten los cupos tomados). */
+  tarifaTotalCents: number;
+  /** Conductor público (nombre + rating). NULLABLE: identity caída / no resuelto → degradación honesta. */
+  driver: { id: string; name: string | null; averageRating: number | null };
+  /** Vehículo público (modelo/placa/color). NULLABLE: fleet caída / no encontrado → degradación honesta. */
+  vehicle: { make: string; model: string; color: string; plate: string } | null;
+}
+
+/** Resultado de la CANCELACIÓN admin de un carpool: el id + su estado nuevo (CANCELADO) + el estado previo. */
+export interface CancelCarpoolResult {
+  id: string;
+  estado: PublishedTripState;
+  estadoAnterior: PublishedTripState;
+}
+
 @Injectable()
 export class PublishedTripsService {
   private readonly logger = new Logger(PublishedTripsService.name);
@@ -967,6 +1025,115 @@ export class PublishedTripsService {
         },
       },
     );
+  }
+
+  /**
+   * DETALLE admin de UN carpool (finance/carpooling · GET interno). LECTURA de monitoreo: lee la oferta por id
+   * (404 si no existe) SIN los gates passenger-facing de `getDetail` (searchable/elegibilidad) — el admin ve
+   * CUALQUIER oferta viva. Enriquece el conductor (nombre público + rating, batch best-effort · MISMO patrón que
+   * el monitoreo) y el vehículo (fleet best-effort); ambos degradan a null si identity/fleet no responden (el
+   * detalle NO se cuelga). Los PASAJEROS los agrega el controller (concern de la reserva). Sin transacción (solo
+   * lecturas, ninguna crítica). El cost-share es DERIVABLE (precioBase por asiento, reservados, tarifa total);
+   * el fee/payout se OMITE (vive en payment, no se inventa).
+   */
+  async getAdminCarpoolDetail(id: string): Promise<AdminCarpoolDetail> {
+    const trip = await this.getById(id);
+    const asientosReservados = trip.asientosTotales - trip.asientosDisponibles;
+
+    // Conductor público best-effort (batch, espeja enrichActiveWithDriverNames): identity caída → name/rating null.
+    let driver: AdminCarpoolDetail['driver'] = { id: trip.driverId, name: null, averageRating: null };
+    try {
+      const drivers = await this.identityBatch.getDriversByIds([trip.driverId]);
+      const d = drivers.find((x) => x.id === trip.driverId);
+      if (d) {
+        driver = {
+          id: trip.driverId,
+          name: d.name && d.name.length > 0 ? d.name : null,
+          averageRating: d.averageRating,
+        };
+      }
+    } catch (err) {
+      this.logger.warn({
+        msg: 'Detalle de carpool: conductor DEGRADADO (identity inaccesible); se sirve sin nombre/rating',
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Vehículo público best-effort: fleet caída / no encontrado → null (el detalle no se cuelga).
+    let vehicle: AdminCarpoolDetail['vehicle'] = null;
+    try {
+      const v = await this.fleet.getVehicle(trip.vehicleId);
+      if (v.found) vehicle = { make: v.make, model: v.model, color: v.color, plate: v.plate };
+    } catch (err) {
+      this.logger.warn({
+        msg: 'Detalle de carpool: vehículo DEGRADADO (fleet inaccesible); se sirve sin modelo/placa',
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    return {
+      id: trip.id,
+      estado: trip.estado,
+      fechaHoraSalida: trip.fechaHoraSalida,
+      modoReserva: trip.modoReserva,
+      pais: trip.pais,
+      moneda: trip.moneda,
+      origenLat: trip.origenLat,
+      origenLon: trip.origenLon,
+      originH3: trip.originH3,
+      destinoLat: trip.destinoLat,
+      destinoLon: trip.destinoLon,
+      destH3: trip.destH3,
+      stopovers: readStopoverPuntos(trip.stopovers),
+      asientosTotales: trip.asientosTotales,
+      asientosDisponibles: trip.asientosDisponibles,
+      asientosReservados,
+      precioBaseCents: trip.precioBase,
+      asientosQueReparten: asientosReservados,
+      tarifaTotalCents: trip.precioBase * asientosReservados,
+      driver,
+      vehicle,
+    };
+  }
+
+  /**
+   * CANCELACIÓN ADMIN de una oferta (finance/carpooling · POST interno). REUSA la MISMA máquina tipada que el
+   * cancel del conductor (`publishedTripMachine.assertTransition` → CANCELADO alcanzable solo pre-EN_RUTA) y el
+   * MISMO evento `booking.cancelled` por outbox — pero SIN el gate de ownership del driver: el admin no es el
+   * dueño (la autorización es RBAC + step-up del admin-bff). Idempotente-seguro: re-cancelar → CANCELADO ∉
+   * CANCELABLE_STATES → 0 filas → ConflictError, sin emitir un segundo evento. El evento es el que LIBERA los
+   * cupos de las reservas + AVISA a los pasajeros aguas abajo (consumidores de booking.cancelled); acá se marca
+   * el actor (`canceledBy: 'admin'` + adminUserId) para la traza.
+   */
+  async cancelByAdmin(id: string, adminUserId: string | null): Promise<CancelCarpoolResult> {
+    // Read crítico DESDE EL PRIMARY: la réplica puede dar un estado stale. La garantía contra TOCTOU la sella el
+    // where condicionado del UPDATE (CANCELABLE_STATES). Admin: NO se chequea ownership (no es el dueño).
+    const trip = await this.repo.findByIdFromPrimary(id);
+    if (!trip) throw new NotFoundError('Viaje publicado no encontrado', { id });
+
+    // LA REGLA, NO EL IF: la máquina decide si CANCELADO es alcanzable desde el estado actual (lanza si es
+    // EN_RUTA/terminal). Validación TEMPRANA para un 409 claro; la atomicidad la sella el where del UPDATE.
+    publishedTripMachine.assertTransition(trip.estado, PublishedTripState.CANCELADO);
+
+    const updated = await this.repo.cancelByAdminWithEvent(
+      id,
+      CANCELABLE_STATES,
+      { estado: PublishedTripState.CANCELADO },
+      {
+        eventType: BookingEventType.CANCELLED,
+        aggregateId: id,
+        payload: {
+          publishedTripId: id,
+          driverId: trip.driverId,
+          estado: PublishedTripState.CANCELADO,
+          estadoAnterior: trip.estado,
+          // Actor de la cancelación: el ADMIN (no el conductor). Traza para el fan-out y la auditoría.
+          canceledBy: 'admin',
+          adminUserId,
+        },
+      },
+    );
+    return { id: updated.id, estado: updated.estado, estadoAnterior: trip.estado };
   }
 
   // ── Gates F1a (privados) ───────────────────────────────────────────────────────────────────────

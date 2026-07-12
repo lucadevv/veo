@@ -185,6 +185,55 @@ export class PublishedTripsRepository {
     }
   }
 
+  /**
+   * CANCELACIÓN ADMIN de una oferta + su evento en UNA transacción (outbox-in-transaction · finance/carpooling).
+   * Espeja `updateWithEvent` PERO scopea el `where` SOLO por `{ id, estado: { in: allowedStates } }` — SIN
+   * `driverId`: el admin NO es el dueño, cancela cualquier oferta viva (la autorización es RBAC del admin-bff,
+   * no ownership de fila). El `estado: { in: CANCELABLE_STATES }` sigue siendo la BARRERA ATÓMICA (UPDATE
+   * condicionado por estado): el write SOLO aplica si la PRIMARIA sigue en un estado cancelable → cierra TOCTOU
+   * e idempotencia-segura (re-cancelar: CANCELADO ∉ CANCELABLE_STATES → 0 filas → P2025 → ConflictError, sin
+   * emitir un segundo `booking.cancelled`). O se persisten mutación + evento (que libera cupos + avisa a los
+   * pasajeros aguas abajo), o ninguno.
+   */
+  async cancelByAdminWithEvent(
+    id: string,
+    allowedStates: readonly PublishedTripState[],
+    data: UpdatePublishedTripData,
+    intent: OutboxIntent,
+  ): Promise<PublishedTrip> {
+    try {
+      return await this.prisma.write.$transaction(async (tx) => {
+        const trip = await tx.publishedTrip.update({
+          where: { id, estado: { in: [...allowedStates] } },
+          data,
+        });
+        const envelope = createEnvelope({
+          eventType: intent.eventType,
+          producer: BOOKING_PRODUCER,
+          payload: intent.payload,
+        });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: intent.aggregateId,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+        return trip;
+      });
+    } catch (err) {
+      // 0 filas matchean el where atómico (id+estado): el estado cambió bajo nuestros pies (TOCTOU) o ya está
+      // en un estado no-cancelable. P2025 → ConflictError tipado, jamás un 500 ni el msg interno de Prisma.
+      if (isRecordNotFound(err)) {
+        throw new ConflictError('El viaje cambió de estado, recargá e intentá de nuevo', {
+          id,
+          allowedStates: [...allowedStates],
+        });
+      }
+      throw err;
+    }
+  }
+
   /** Lectura por id (GET /published-trips/:id). Usa la réplica (lectura no crítica). */
   findById(id: string): Promise<PublishedTrip | null> {
     return this.prisma.read.publishedTrip.findUnique({ where: { id } });

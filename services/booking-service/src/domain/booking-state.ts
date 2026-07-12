@@ -67,3 +67,20 @@ export const bookingMachine: StateMachine<BookingState> = createStateMachine(
   'estado de la reserva',
   BOOKING_TRANSITIONS,
 );
+
+/**
+ * Estados de una reserva que representan un pasajero VIVO sobre la oferta, para el DETALLE admin de un carpool
+ * (finance/carpooling · card "Asientos"): quien ya fue aprobado (APROBADO), está capturando el cobro
+ * (COBRO_PENDIENTE), confirmó su asiento (CONFIRMADO) o ya arrancó (EN_RUTA). Quedan FUERA los TRANSITORIOS
+ * previos (SOLICITADO/PENDIENTE_APROBACION: aún no es un pasajero del viaje) y los TERMINALES
+ * (RECHAZADO/EXPIRADO/CANCELADO/COMPLETADO: ya no ocupan un cupo vivo). Enum TIPADO (cero strings mágicos),
+ * fuente única del filtro del listado de pasajeros del detalle. NO es una transición de la máquina — es una
+ * LECTURA de monitoreo (a diferencia de `asientosReservados`, que es server-truth del seat-lock del §6; el
+ * conteo de esta lista y la ocupación pueden diferir: un APROBADO/COBRO_PENDIENTE aún no decrementó asiento).
+ */
+export const SEAT_HOLDING_BOOKING_STATES: readonly BookingState[] = [
+  BookingState.APROBADO,
+  BookingState.COBRO_PENDIENTE,
+  BookingState.CONFIRMADO,
+  BookingState.EN_RUTA,
+];

@@ -77,13 +77,21 @@ function makeRepo() {
       _intent: OutboxIntent,
     ) => ({ id, ...data }),
   );
+  const cancelByAdminWithEvent = vi.fn(
+    async (
+      id: string,
+      _allowedStates: readonly PublishedTripState[],
+      data: UpdatePublishedTripData,
+      _intent: OutboxIntent,
+    ) => ({ id, ...data }),
+  );
   const findById = vi.fn();
   const findByIdFromPrimary = vi.fn();
   const findByDriverId = vi.fn(async () => []);
   const searchByRoute = vi.fn(async () => []);
   const countAvailableByOriginRing = vi.fn(async () => 0);
   const sampleAvailableOriginsByRing = vi.fn(async () => [] as { lat: number; lon: number }[]);
-  const listActiveCarpools = vi.fn(async () => []);
+  const listActiveCarpools = vi.fn(async (): Promise<unknown[]> => []);
   const aggregateActiveCarpools = vi.fn(async () => ({
     count: 0,
     asientosTotales: 0,
@@ -94,6 +102,7 @@ function makeRepo() {
     createWithEvent,
     createWithEventIdempotent,
     updateWithEvent,
+    cancelByAdminWithEvent,
     findById,
     findByIdFromPrimary,
     findByDriverId,
@@ -109,6 +118,7 @@ function makeRepo() {
     createWithEvent,
     createWithEventIdempotent,
     updateWithEvent,
+    cancelByAdminWithEvent,
     findById,
     findByIdFromPrimary,
     findByDriverId,
@@ -787,6 +797,153 @@ describe('PublishedTripsService · cancelar (F1a ownership + máquina + UPDATE a
     expect(CANCELABLE_STATES).not.toContain(PublishedTripState.COMPLETADO);
     expect(CANCELABLE_STATES).not.toContain(PublishedTripState.CANCELADO);
     expect(CANCELABLE_STATES).toContain(PublishedTripState.PUBLICADO);
+  });
+});
+
+describe('PublishedTripsService · cancelar ADMIN (finance/carpooling · máquina + UPDATE atómico SIN ownership)', () => {
+  it('carpool activo → CANCELADO atómico (allowedStates=CANCELABLE_STATES, sin driverId), emite booking.cancelled con actor admin', async () => {
+    const { repo, findByIdFromPrimary, cancelByAdminWithEvent } = makeRepo();
+    findByIdFromPrimary.mockResolvedValueOnce({
+      id: 'x',
+      driverId: DRIVER_ID,
+      estado: PublishedTripState.PARCIALMENTE_RESERVADO,
+    });
+    const service = makeService({ repo });
+
+    const res = await service.cancelByAdmin('x', 'admin-1');
+
+    expect(cancelByAdminWithEvent).toHaveBeenCalledOnce();
+    const [id, allowedStates, data, intent] = cancelByAdminWithEvent.mock.calls[0]!;
+    expect(id).toBe('x');
+    // REUSA la máquina: cancelable derivado de la tabla de transiciones (no strings sueltos). Sin driverId (admin).
+    expect(allowedStates).toEqual(CANCELABLE_STATES);
+    expect(data.estado).toBe(PublishedTripState.CANCELADO);
+    expect(intent.eventType).toBe('booking.cancelled'); // MISMO evento que el cancel del conductor
+    expect(intent.payload.canceledBy).toBe('admin');
+    expect(intent.payload.adminUserId).toBe('admin-1');
+    expect(intent.payload.estadoAnterior).toBe(PublishedTripState.PARCIALMENTE_RESERVADO);
+    expect(intent.payload.driverId).toBe(DRIVER_ID); // driverId del trip (para el fan-out), no del admin
+    expect(res.estado).toBe(PublishedTripState.CANCELADO);
+    expect(res.estadoAnterior).toBe(PublishedTripState.PARCIALMENTE_RESERVADO);
+  });
+
+  it('carpool inexistente → 404, no cancela (admin: sin chequeo de ownership)', async () => {
+    const { repo, findByIdFromPrimary, cancelByAdminWithEvent } = makeRepo();
+    findByIdFromPrimary.mockResolvedValueOnce(null);
+    const service = makeService({ repo });
+    await expect(service.cancelByAdmin('x', 'admin-1')).rejects.toBeInstanceOf(NotFoundError);
+    expect(cancelByAdminWithEvent).not.toHaveBeenCalled();
+  });
+
+  it('carpool EN_RUTA → la máquina rechaza (chequeo temprano, no cancelable), no emite', async () => {
+    const { repo, findByIdFromPrimary, cancelByAdminWithEvent } = makeRepo();
+    findByIdFromPrimary.mockResolvedValueOnce({
+      id: 'x',
+      driverId: DRIVER_ID,
+      estado: PublishedTripState.EN_RUTA,
+    });
+    const service = makeService({ repo });
+    await expect(service.cancelByAdmin('x', 'admin-1')).rejects.toBeTruthy();
+    expect(cancelByAdminWithEvent).not.toHaveBeenCalled();
+  });
+
+  it('re-cancelar (TOCTOU): where atómico no matchea → ConflictError, NO emite 2º evento', async () => {
+    const { repo, findByIdFromPrimary, cancelByAdminWithEvent } = makeRepo();
+    findByIdFromPrimary.mockResolvedValueOnce({
+      id: 'x',
+      driverId: DRIVER_ID,
+      estado: PublishedTripState.PUBLICADO,
+    });
+    cancelByAdminWithEvent.mockRejectedValueOnce(
+      new ConflictError('El viaje cambió de estado, recargá', {}),
+    );
+    const service = makeService({ repo });
+    await expect(service.cancelByAdmin('x', 'admin-1')).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+describe('PublishedTripsService · DETALLE admin de carpool (monitoreo · sin gates passenger-facing)', () => {
+  const makeDetailRow = (over: Record<string, unknown> = {}) => ({
+    id: 'c1',
+    driverId: DRIVER_ID,
+    vehicleId: VEHICLE_ID,
+    estado: PublishedTripState.LLENO,
+    fechaHoraSalida: new Date('2026-08-01T12:00:00Z'),
+    modoReserva: ModoReserva.INSTANT_BOOKING,
+    pais: 'PE',
+    moneda: 'PEN',
+    origenLat: -12.1,
+    origenLon: -77.0,
+    originH3: 'h1',
+    destinoLat: -12.0,
+    destinoLon: -77.1,
+    destH3: 'h2',
+    stopovers: [{ lat: -12.05, lon: -77.05, orden: 1 }],
+    asientosTotales: 4,
+    asientosDisponibles: 1,
+    precioBase: 800,
+    ...over,
+  });
+
+  it('devuelve la oferta con cost-share derivable + conductor + vehículo, en CUALQUIER estado (sin gate)', async () => {
+    const { repo, findById } = makeRepo();
+    findById.mockResolvedValueOnce(makeDetailRow());
+    const identityBatch = makeIdentityBatch((ids) =>
+      Promise.resolve(ids.map((id) => makePublicDriver(id, { name: 'José R', averageRating: 4.9 }))),
+    ).client;
+    const fleet = makeFleet(
+      [makeVehicle()],
+      makeVehicleView({ make: 'Toyota', model: 'Yaris', plate: 'ABC-123', color: 'Gris' }),
+    );
+    const service = makeService({ repo, identityBatch, fleet });
+
+    const d = await service.getAdminCarpoolDetail('c1');
+
+    expect(d.estado).toBe(PublishedTripState.LLENO); // NO se filtra por searchable
+    expect(d.asientosReservados).toBe(3); // 4 − 1
+    expect(d.asientosQueReparten).toBe(3);
+    expect(d.precioBaseCents).toBe(800);
+    expect(d.tarifaTotalCents).toBe(2400); // 800 × 3
+    expect(d.driver).toEqual({ id: DRIVER_ID, name: 'José R', averageRating: 4.9 });
+    expect(d.vehicle).toEqual({ make: 'Toyota', model: 'Yaris', color: 'Gris', plate: 'ABC-123' });
+    expect(d.stopovers).toEqual([{ lat: -12.05, lon: -77.05, orden: 1 }]);
+  });
+
+  it('404 si la oferta no existe', async () => {
+    const { repo, findById } = makeRepo();
+    findById.mockResolvedValueOnce(null);
+    const service = makeService({ repo });
+    await expect(service.getAdminCarpoolDetail('missing')).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('degradación HONESTA: identity + fleet caídos → driver.name/rating null + vehicle null, no se cuelga', async () => {
+    const { repo, findById } = makeRepo();
+    findById.mockResolvedValueOnce(
+      makeDetailRow({
+        estado: PublishedTripState.EN_RUTA,
+        originH3: null,
+        destH3: null,
+        stopovers: [],
+        asientosDisponibles: 0,
+        precioBase: 1000,
+      }),
+    );
+    const failingBatch: IdentityBatchClient = {
+      getDriversByIds: async () => {
+        throw new Error('identity down');
+      },
+    };
+    const failingFleet = makeFleet([makeVehicle()], async () => {
+      throw new Error('fleet down');
+    });
+    const service = makeService({ repo, identityBatch: failingBatch, fleet: failingFleet });
+
+    const d = await service.getAdminCarpoolDetail('c1');
+
+    expect(d.driver).toEqual({ id: DRIVER_ID, name: null, averageRating: null });
+    expect(d.vehicle).toBeNull();
+    expect(d.asientosReservados).toBe(4); // 4 − 0
+    expect(d.tarifaTotalCents).toBe(4000); // 1000 × 4
   });
 });
 
@@ -1815,8 +1972,8 @@ describe('PublishedTripsService · MONITOREO carpools activos (KPIs agregados + 
 
     const res = await service.listActiveCarpools();
 
-    expect(res.carpools[0].driverName).toBeNull();
-    expect(res.carpools[0].asientosReservados).toBe(4);
+    expect(res.carpools[0]!.driverName).toBeNull();
+    expect(res.carpools[0]!.asientosReservados).toBe(4);
     expect(res.stats.avgOccupancyPct).toBe(100); // 4/4
   });
 

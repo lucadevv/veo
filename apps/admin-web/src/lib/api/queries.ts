@@ -14,6 +14,8 @@ import {
   radarPreview,
   carpoolSearchConfigView,
   activeCarpoolsView,
+  adminCarpoolDetailView,
+  cancelCarpoolResult,
   type ReplaceCarpoolSearchConfigRequest,
   type ReplaceRadiusConfigRequest,
   driverApproval,
@@ -128,6 +130,7 @@ export const qk = {
   carpoolConfig: ['carpool-search-config'] as const,
   carpoolRadar: ['carpool-radar'] as const,
   activeCarpools: ['carpool-active-monitor'] as const,
+  carpoolDetail: (id: string) => ['carpool-detail', id] as const,
   policies: ['gobierno-policies'] as const,
   permissionOverrides: ['gobierno-permission-overrides'] as const,
 };
@@ -1162,6 +1165,39 @@ export function useActiveCarpools() {
     queryFn: ({ signal }) =>
       apiClient().get('/finance/carpooling/active', { schema: activeCarpoolsView, signal }),
     refetchInterval: REALTIME_REFETCH,
+  });
+}
+
+/**
+ * DETALLE de un carpool (GET /finance/carpooling/:id · finance:view): recorrido + asientos/pasajeros + reparto de
+ * costo + conductor + vehículo. `enabled` solo con id. Refresco en vivo (los cupos/pasajeros respiran). El acceso
+ * (PII de pasajeros) lo AUDITA el admin-bff.
+ */
+export function useCarpoolDetail(id: string | null) {
+  return useQuery({
+    queryKey: qk.carpoolDetail(id ?? ''),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/finance/carpooling/${id}`, { schema: adminCarpoolDetailView, signal }),
+    enabled: !!id,
+    refetchInterval: REALTIME_REFETCH,
+  });
+}
+
+/**
+ * CANCELA un carpool (POST /finance/carpooling/:id/cancel · acción DESTRUCTIVA). Exige step-up MFA fresco (el
+ * StepUpDialog lo asegura ANTES) + finance:manage; el admin-bff revalida @Permission + @RequireStepUpMfa y booking
+ * aplica la transición → CANCELADO (libera cupos + avisa a los pasajeros). Idempotente-seguro. El éxito refresca el
+ * detalle + el monitoreo de activos.
+ */
+export function useCancelCarpool() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string }) =>
+      apiClient().post(`/finance/carpooling/${input.id}/cancel`, { schema: cancelCarpoolResult }),
+    onSuccess: (_d, input) => {
+      void qc.invalidateQueries({ queryKey: qk.carpoolDetail(input.id) });
+      void qc.invalidateQueries({ queryKey: qk.activeCarpools });
+    },
   });
 }
 

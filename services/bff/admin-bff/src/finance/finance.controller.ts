@@ -29,6 +29,8 @@ import type {
   RefundActionResult,
   ReconciliationRunView,
   ActiveCarpoolsView,
+  AdminCarpoolDetailView,
+  CancelCarpoolResult,
 } from '@veo/api-client';
 import {
   FinanceService,
@@ -256,6 +258,40 @@ export class FinanceController {
   })
   getActiveCarpools(@CurrentUser() user: AuthenticatedUser): Promise<ActiveCarpoolsView> {
     return this.finance.getActiveCarpools(user);
+  }
+
+  // DETALLE de un carpool (frame m93bTI). Ruta paramétrica `carpooling/:id` DESPUÉS de la literal
+  // `carpooling/active` (arriba) para que `active` no caiga en `:id` (ParseUUIDPipe lo rechazaría igual).
+  // finance:view (rol de clase). Lectura con PII (nombres de pasajeros) → el service la AUDITA.
+  @Get('carpooling/:id')
+  @Permission('finance:view')
+  @ApiOperation({
+    summary:
+      'Detalle de un carpool: recorrido (coords) + asientos/pasajeros + reparto de costo (cost-share) + conductor + vehículo. finance:view',
+  })
+  carpoolDetail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AdminCarpoolDetailView> {
+    return this.finance.getCarpoolDetail(user, id);
+  }
+
+  // CANCELAR un carpool (frame HhcYD) = acción DESTRUCTIVA (libera cupos + avisa a los pasajeros). Mismo gate
+  // que el resto de config sensible de carpooling: finance:manage + step-up MFA. Ruta de 2 segmentos, no colisiona
+  // con `carpooling/active` ni `carpooling/:id`. booking-service re-valida la firma interna y aplica la transición.
+  @Post('carpooling/:id/cancel')
+  @HttpCode(200)
+  @Permission('finance:manage')
+  @RequireStepUpMfa()
+  @ApiOperation({
+    summary:
+      'Cancela un carpool (→ CANCELADO; libera cupos + avisa a los pasajeros). Idempotente. finance:manage + step-up',
+  })
+  cancelCarpool(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<CancelCarpoolResult> {
+    return this.finance.cancelCarpool(user, id);
   }
 
   @Get('payments/by-trip/:tripId')

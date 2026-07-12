@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Armchair, ChevronRight, Navigation, Ticket, Users } from 'lucide-react';
 import type { ActiveCarpoolItem, ActiveCarpoolState, ActiveCarpoolsView } from '@/lib/api/schemas';
 import { cn } from '@/lib/cn';
@@ -45,36 +46,43 @@ function CarpoolRow({ carpool }: { carpool: ActiveCarpoolItem }) {
   const dots = Math.min(carpool.asientosTotales, MAX_SEAT_DOTS);
   const salida = departureFmt.format(new Date(carpool.fechaHoraSalida));
   return (
-    <li className="flex items-center gap-4 border-b border-border/60 px-5 py-3.5 last:border-b-0">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-sm font-medium text-ink">{routeLabel(carpool)}</span>
-        <span className="truncate text-xs text-ink-muted">
-          {carpool.driverName ?? 'Conductor'} · sale {salida}
-        </span>
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5" aria-hidden>
-        {Array.from({ length: dots }).map((_, i) => (
-          <span
-            key={i}
-            className={cn(
-              'size-3 rounded-full',
-              i < carpool.asientosReservados ? 'bg-brand' : 'bg-surface-2',
-            )}
-          />
-        ))}
-        <span className="ml-1 font-mono text-xs font-semibold text-ink-muted tabular">
-          {carpool.asientosReservados}/{carpool.asientosTotales}
-        </span>
-      </div>
-      <span
-        className={cn(
-          'shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold',
-          chip.className,
-        )}
+    <li className="border-b border-border/60 last:border-b-0">
+      {/* La fila entera LINKEA al detalle del carpool (`/finance/carpooling/:id`) — el chevron dejó de ser
+          decorativo. Foco visible + hover del theme para la afordancia. */}
+      <Link
+        href={`/finance/carpooling/${carpool.id}`}
+        className="flex items-center gap-4 px-5 py-3.5 outline-none transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
       >
-        {chip.label}
-      </span>
-      <ChevronRight className="size-4 shrink-0 text-ink-subtle" aria-hidden />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium text-ink">{routeLabel(carpool)}</span>
+          <span className="truncate text-xs text-ink-muted">
+            {carpool.driverName ?? 'Conductor'} · sale {salida}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5" aria-hidden>
+          {Array.from({ length: dots }).map((_, i) => (
+            <span
+              key={i}
+              className={cn(
+                'size-3 rounded-full',
+                i < carpool.asientosReservados ? 'bg-brand' : 'bg-surface-2',
+              )}
+            />
+          ))}
+          <span className="ml-1 font-mono text-xs font-semibold text-ink-muted tabular">
+            {carpool.asientosReservados}/{carpool.asientosTotales}
+          </span>
+        </div>
+        <span
+          className={cn(
+            'shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold',
+            chip.className,
+          )}
+        >
+          {chip.label}
+        </span>
+        <ChevronRight className="size-4 shrink-0 text-ink-subtle" aria-hidden />
+      </Link>
     </li>
   );
 }

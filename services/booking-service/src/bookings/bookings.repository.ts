@@ -184,6 +184,27 @@ export class BookingsRepository {
   }
 
   /**
+   * DETALLE admin de un carpool (finance/carpooling · card "Asientos"): las reservas VIVAS de un PublishedTrip
+   * en los estados que ocupan un cupo (`estados`, típ. SEAT_HOLDING_BOOKING_STATES), CAPADAS a `take`. Réplica
+   * (lectura de monitoreo no crítica). NO scopea por driver: la autorización es del BFF admin (finance:view +
+   * firma interna) — el admin ve las reservas de CUALQUIER oferta, no las propias. Respaldada por el índice
+   * `(published_trip_id, estado)`. Orden por `id` (uuidv7 time-ordered) → orden estable de llegada. Sin PII
+   * resuelta acá: devuelve la fila Booking (con passengerId); el NOMBRE del pasajero lo resuelve el admin-bff
+   * gateado por Ley 29733 (resolvePassengerNames).
+   */
+  listSeatHoldingByPublishedTripId(
+    publishedTripId: string,
+    estados: readonly BookingState[],
+    take: number,
+  ): Promise<Booking[]> {
+    return this.prisma.read.booking.findMany({
+      where: { publishedTripId, estado: { in: [...estados] } },
+      orderBy: { id: 'asc' },
+      take,
+    });
+  }
+
+  /**
    * Transición de estado de un Booking + su evento en UNA transacción (outbox-in-transaction). El `where`
    * incluye `estado: { in: allowedStates }` además de `{ id }` (UPDATE ATÓMICO CONDICIONADO POR ESTADO): el
    * write SOLO aplica si el estado en la PRIMARIA sigue en la lista válida → cierra la ventana TOCTOU y vuelve

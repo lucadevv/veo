@@ -71,7 +71,7 @@ import {
   type PaymentMethod,
 } from '../generated/prisma';
 import { BookingApprovedOrigen, BookingCancelledRazon } from '@veo/events';
-import { bookingMachine } from '../domain/booking-state';
+import { bookingMachine, SEAT_HOLDING_BOOKING_STATES } from '../domain/booking-state';
 import {
   ChargePermanentlyRejectedError,
   PassengerHasDebtError,
@@ -96,6 +96,9 @@ const REQUEST_DEDUP_NAMESPACE = 'booking:req:' as const;
 
 /** Default de tamaño de página de GET /published-trips/:id/bookings si el cliente no pide `limit`. Acotado por @Max en el DTO. */
 const DEFAULT_TRIP_BOOKINGS_PAGE_SIZE = 20;
+
+/** Tope del listado de pasajeros del DETALLE admin de un carpool (los asientos de una oferta son pocos; capa el payload). */
+const SEAT_HOLDING_MONITOR_LIMIT = 50;
 
 @Injectable()
 export class BookingsService {
@@ -621,6 +624,21 @@ export class BookingsService {
     }
     const take = page.limit ?? DEFAULT_TRIP_BOOKINGS_PAGE_SIZE;
     return this.repo.findByPublishedTripId(publishedTripId, take, page.cursor);
+  }
+
+  /**
+   * DETALLE admin de un carpool (finance/carpooling · card "Asientos"): lista las reservas VIVAS de un
+   * PublishedTrip (estados que ocupan cupo · SEAT_HOLDING_BOOKING_STATES), CAPADAS. A diferencia de
+   * `listRequestsForTrip` (driver-rail, ownership del conductor), esto es ADMIN: NO scopea por driver — la
+   * autorización la aplica el admin-bff (finance:view + firma interna, defensa en profundidad). Solo LECTURA
+   * (no muta). Cap `SEAT_HOLDING_MONITOR_LIMIT` (los asientos de una oferta son pocos; capa el payload igual).
+   */
+  listSeatBookings(publishedTripId: string): Promise<Booking[]> {
+    return this.repo.listSeatHoldingByPublishedTripId(
+      publishedTripId,
+      SEAT_HOLDING_BOOKING_STATES,
+      SEAT_HOLDING_MONITOR_LIMIT,
+    );
   }
 
   /**

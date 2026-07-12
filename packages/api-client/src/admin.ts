@@ -15,7 +15,14 @@ import {
   vehicleOperabilityReason,
   documentSide,
 } from './types.js';
-import { pricingMode, paymentStatus, mobilePaymentMethod } from './mobile.js';
+import {
+  pricingMode,
+  paymentStatus,
+  mobilePaymentMethod,
+  // Enums del PublishedTrip (fuente única): el detalle admin del carpool los reusa (no los redefine).
+  publishedTripState,
+  carpoolModoReserva,
+} from './mobile.js';
 
 /* ── Autenticación admin (login + enrolamiento/step-up TOTP) ── */
 
@@ -1115,6 +1122,95 @@ export const activeCarpoolsView = z.object({
   carpools: z.array(activeCarpoolItem),
 });
 export type ActiveCarpoolsView = z.infer<typeof activeCarpoolsView>;
+
+/* ── Carpooling: DETALLE de un carpool + su CANCELACIÓN (booking-service · GET/POST /finance/carpooling/:id[/cancel]) ──
+ * El detalle del panel finance/carpooling (frame m93bTI): recorrido (coords públicas — booking NO guarda nombres de
+ * distrito), asientos + pasajeros, reparto de costo COST-SHARE derivable (por asiento / reparten / total), conductor +
+ * vehículo. El FEE VEO y el "ahorro compartido" NO tienen fuente en estos seams (viven en payment/analytics) → se
+ * OMITEN, nunca se inventan. La cancelación es la acción DESTRUCTIVA (transición → CANCELADO; libera cupos + avisa a los
+ * pasajeros vía booking.cancelled). */
+
+/** Un meeting point del recorrido: coords públicas + orden (booking guarda lat/lon, no el nombre del lugar). */
+export const adminCarpoolStop = z.object({
+  lat: z.number(),
+  lon: z.number(),
+  orden: z.number().int(),
+});
+export type AdminCarpoolStop = z.infer<typeof adminCarpoolStop>;
+
+/** Un pasajero (reserva viva) del detalle: su tramo (pickup→dropoff coords) + precio acordado + estado.
+ *  `passengerName` lo resuelve el admin-bff gateado por Ley 29733 (FINANCE puro no ve PII → null). */
+export const adminCarpoolPassenger = z.object({
+  bookingId: z.string(),
+  passengerId: z.string(),
+  passengerName: z.string().nullable(),
+  asientos: z.number().int(),
+  precioAcordadoCents: z.number().int(),
+  estado: z.string(),
+  pickupLat: z.number(),
+  pickupLon: z.number(),
+  dropoffLat: z.number(),
+  dropoffLon: z.number(),
+});
+export type AdminCarpoolPassenger = z.infer<typeof adminCarpoolPassenger>;
+
+/** Conductor público del detalle (nombre + rating). NULLABLE: identity caída / no resuelto (degradación honesta). */
+export const adminCarpoolDriver = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  averageRating: z.number().nullable(),
+});
+export type AdminCarpoolDriver = z.infer<typeof adminCarpoolDriver>;
+
+/** Vehículo público del detalle (modelo/placa/color). El objeto ES nullable: fleet caída / no encontrado → null. */
+export const adminCarpoolVehicle = z.object({
+  make: z.string(),
+  model: z.string(),
+  color: z.string(),
+  plate: z.string(),
+});
+export type AdminCarpoolVehicle = z.infer<typeof adminCarpoolVehicle>;
+
+/** DETALLE de un carpool (frame m93bTI). Recorrido (coords) + asientos/pasajeros + reparto de costo derivable +
+ *  conductor + vehículo. TODO dato REAL de booking-service; el fee/payout y el ahorro se OMITEN (sin fuente). */
+export const adminCarpoolDetailView = z.object({
+  id: z.string(),
+  estado: publishedTripState,
+  fechaHoraSalida: z.string(),
+  modoReserva: carpoolModoReserva,
+  // (publishedTripState / carpoolModoReserva se importan de ./mobile.js — fuente única del enum del PublishedTrip)
+  pais: z.string(),
+  moneda: z.string(),
+  origenLat: z.number(),
+  origenLon: z.number(),
+  originH3: z.string().nullable(),
+  destinoLat: z.number(),
+  destinoLon: z.number(),
+  destH3: z.string().nullable(),
+  stopovers: z.array(adminCarpoolStop),
+  asientosTotales: z.number().int(),
+  asientosDisponibles: z.number().int(),
+  /** Reservados = totales − disponibles (server-truth del seat-lock). */
+  asientosReservados: z.number().int(),
+  /** Precio del asiento (céntimos PEN, cost-share por asiento). */
+  precioBaseCents: z.number().int(),
+  /** Asientos que reparten el costo = reservados (cupos ya tomados). */
+  asientosQueReparten: z.number().int(),
+  /** Tarifa total del trayecto = precioBaseCents × reservados (céntimos PEN). */
+  tarifaTotalCents: z.number().int(),
+  driver: adminCarpoolDriver,
+  vehicle: adminCarpoolVehicle.nullable(),
+  pasajeros: z.array(adminCarpoolPassenger),
+});
+export type AdminCarpoolDetailView = z.infer<typeof adminCarpoolDetailView>;
+
+/** Resultado de CANCELAR un carpool: el id + su estado nuevo (CANCELADO) + el estado previo. */
+export const cancelCarpoolResult = z.object({
+  id: z.string(),
+  estado: publishedTripState,
+  estadoAnterior: publishedTripState,
+});
+export type CancelCarpoolResult = z.infer<typeof cancelCarpoolResult>;
 
 /* ── Radar preview: anillos de cobertura para un punto (visualización de la config vigente) ──
  * Cada anillo lleva su radio (km), su k-ring y el conteo de conductores dentro. El admin-bff NORMALIZA el

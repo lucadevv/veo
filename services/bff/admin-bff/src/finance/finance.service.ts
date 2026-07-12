@@ -32,6 +32,9 @@ import type {
   RefundActionResult,
   ReconciliationRunView,
   ActiveCarpoolsView,
+  AdminCarpoolDetailView,
+  AdminCarpoolPassenger,
+  CancelCarpoolResult,
 } from '@veo/api-client';
 import { REST_PAYMENT, REST_BOOKING, GRPC_IDENTITY } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
@@ -166,6 +169,13 @@ interface ReconRow {
 interface Page<T> {
   items: T[];
   nextCursor: string | null;
+}
+
+/** Fila cruda del DETALLE de un carpool que sirve booking-service (GET /internal/booking/active-carpools/:id):
+ *  1:1 con AdminCarpoolDetailView SALVO que los pasajeros vienen SIN `passengerName` (booking no resuelve PII;
+ *  el nombre lo resuelve este bff gateado por Ley 29733). `estado`/`modoReserva` se alinean al enum del contrato. */
+interface RawCarpoolDetail extends Omit<AdminCarpoolDetailView, 'pasajeros'> {
+  pasajeros: Omit<AdminCarpoolPassenger, 'passengerName'>[];
 }
 
 /** Resultado del disparo de la liquidación (ADR-015 §5): agrega los PENDING + DESEMBOLSA el período.
@@ -409,6 +419,64 @@ export class FinanceService {
    */
   getActiveCarpools(identity: AuthenticatedUser): Promise<ActiveCarpoolsView> {
     return this.bookingRest.get<ActiveCarpoolsView>(ACTIVE_CARPOOLS_BASE, { identity });
+  }
+
+  /**
+   * finance:view — DETALLE de UN carpool (panel finance/carpooling · frame m93bTI): recorrido (coords) + asientos/
+   * pasajeros + reparto de costo COST-SHARE derivable + conductor + vehículo. booking-service da la oferta + los
+   * pasajeros SIN nombre; acá se resuelve el NOMBRE del pasajero (identity, batch anti-N+1, GATEADO por PII · Ley
+   * 29733: un FINANCE puro no ve nombres → null). El conductor viaja como dato PÚBLICO desde booking (name/rating,
+   * minimización H8). Es lectura con PII (ids de personas + coords) → se AUDITA el acceso (carpool.view, fail-closed).
+   */
+  async getCarpoolDetail(
+    identity: AuthenticatedUser,
+    id: string,
+  ): Promise<AdminCarpoolDetailView> {
+    const raw = await this.bookingRest.get<RawCarpoolDetail>(`${ACTIVE_CARPOOLS_BASE}/${id}`, {
+      identity,
+    });
+    const namesById = await this.resolvePassengerNames(
+      identity,
+      raw.pasajeros.map((p) => p.passengerId),
+    );
+    await this.audit.record(identity, {
+      action: 'carpool.view',
+      resourceType: 'published_trip',
+      resourceId: id,
+      payload: { estado: raw.estado, pasajeros: raw.pasajeros.length },
+    });
+    return {
+      ...raw,
+      pasajeros: raw.pasajeros.map(
+        (p): AdminCarpoolPassenger => ({
+          ...p,
+          passengerName: namesById.get(p.passengerId) ?? null,
+        }),
+      ),
+    };
+  }
+
+  /**
+   * finance:manage — CANCELA un carpool (acción DESTRUCTIVA · frame HhcYD). booking-service transiciona la oferta a
+   * CANCELADO (máquina tipada) y emite booking.cancelled → libera los cupos de las reservas + avisa a los pasajeros
+   * aguas abajo. Idempotente-seguro (re-cancelar → ConflictError, sin 2º evento). El controller exige step-up MFA +
+   * finance:manage; booking re-verifica la firma interna (defensa en profundidad). Se AUDITA la acción del operador.
+   */
+  async cancelCarpool(
+    identity: AuthenticatedUser,
+    id: string,
+  ): Promise<CancelCarpoolResult> {
+    const res = await this.bookingRest.post<CancelCarpoolResult>(
+      `${ACTIVE_CARPOOLS_BASE}/${id}/cancel`,
+      { identity },
+    );
+    await this.audit.record(identity, {
+      action: 'carpool.cancel',
+      resourceType: 'published_trip',
+      resourceId: id,
+      payload: { estadoAnterior: res.estadoAnterior, estado: res.estado },
+    });
+    return res;
   }
 
   /**
