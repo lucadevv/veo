@@ -41,7 +41,7 @@ export default function PoliciesPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Políticas"
-        description="Las reglas que gobiernan CUÁNDO y CÓMO se aplica el acceso: MFA, frescura de sesión, doble-auth de video, enmascarado de PII y retención. Cada política se activa, se configura y queda auditada. Los candados de la Ley 29733 no se pueden desactivar."
+        description="Registro PBAC · 16 políticas de gobierno · cambios con step-up MFA y auditados."
         breadcrumbs={[{ label: 'Gobierno' }, { label: 'Políticas' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
