@@ -21,6 +21,8 @@ function makePolicyReader(days: number, enabled = true): PolicyReader {
     bool: async (_k, _p, fallback) => fallback,
     list: async (_k, _p, fallback) => fallback,
     params: async () => ({}),
+    // Overlay de visibilidad (ADR-025 §3): este servicio no consulta permisos hidden → fail-safe default false (nada restado).
+    isPermissionHidden: async (_role, _permission) => false,
   };
 }
 

@@ -86,6 +86,8 @@ const trip: TripReply = {
     { lat: -12.049, lon: -77.046 },
   ],
   specialRequests: [],
+  // Modo de despacho CONGELADO (resolve-once-persist, ADR-011); FIXED = tarifa fija, coherente con paymentMethod CASH.
+  dispatchMode: 'FIXED',
   found: true,
 };
 
