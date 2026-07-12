@@ -27,8 +27,8 @@ export function TripsEmptyState({ title, description }: TripsEmptyStateProps): R
           style={[
             styles.iconCircle,
             {
-              // Disco gris (skeleton #E8ECF1): surface === #FFFFFF sería invisible sobre el fondo blanco.
-              backgroundColor: theme.colors.skeleton,
+              // Disco gris recesado (surfaceMuted #EEF1F5): surface === #FFFFFF sería invisible sobre el fondo blanco.
+              backgroundColor: theme.colors.surfaceMuted,
               borderColor: theme.colors.border,
             },
           ]}

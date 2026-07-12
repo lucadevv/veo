@@ -85,7 +85,7 @@ export function IncentiveCard({ incentive }: IncentiveCardProps): React.JSX.Elem
             fraction={fraction}
             percent={percent}
             color={tone}
-            trackColor={theme.colors.skeleton}
+            trackColor={theme.colors.surfaceMuted}
             radius={theme.radii.pill}
           />
           <Text variant="caption" color="inkSubtle" tabular>

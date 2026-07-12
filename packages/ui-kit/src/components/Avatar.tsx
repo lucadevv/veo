@@ -74,9 +74,9 @@ export function Avatar({
               backgroundColor:
                 tone === 'neutral'
                   ? theme.colors.surfaceElevated
-                  : hexAlpha(theme.colors.brand, theme.scheme === 'dark' ? 0.3 : 0.12),
-              borderWidth: tone === 'neutral' ? 1 : 0,
-              borderColor: theme.colors.borderStrong,
+                  : hexAlpha(theme.colors.brand, theme.scheme === 'dark' ? 0.3 : 0.08),
+              borderWidth: 1,
+              borderColor: tone === 'neutral' ? theme.colors.borderStrong : theme.colors.border,
             },
           ]}
         >

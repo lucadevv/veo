@@ -174,7 +174,7 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       ) : !trips.data || trips.data.length === 0 ? (
         <Reveal delay={80} style={styles.empty}>
-          <View style={[styles.emptyIcon, { backgroundColor: theme.colors.skeleton }]}>
+          <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surfaceMuted }]}>
             <IconCarpool size={38} color={theme.colors.inkSubtle} strokeWidth={1.8} />
           </View>
           <Text variant="title3" align="center">

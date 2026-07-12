@@ -36,6 +36,18 @@ const toneToColor: Record<StatusTone, keyof ThemeColors> = {
 };
 
 /**
+ * Token del TEXTO de la etiqueta. Difiere del `toneToColor` (que tiñe el punto/fondo) en los tonos
+ * `success` y `warn`: sus puntos brillantes (#00C853 / #FFA000) NO son legibles como texto pequeño
+ * sobre blanco, así que la etiqueta usa las variantes oscuras `successText`/`warnText`. El resto de
+ * los tonos ya tienen contraste suficiente y reusan el mismo token del punto.
+ */
+const toneToLabelColor: Record<StatusTone, keyof ThemeColors> = {
+  ...toneToColor,
+  success: 'successText',
+  warn: 'warnText',
+};
+
+/**
  * Etiqueta de estado compacta. El color nunca es el único indicador: usa texto y, opcionalmente,
  * un punto (con pulso para "en vivo"). Fondo tintado del tono, texto del tono para contraste.
  */
@@ -84,7 +96,7 @@ export function StatusPill({
           style={[styles.dot, { backgroundColor: toneColor }, live ? dotStyle : null]}
         />
       ) : null}
-      <Text variant="caption" color={toneToColor[tone]} numberOfLines={1}>
+      <Text variant="caption" color={toneToLabelColor[tone]} numberOfLines={1}>
         {label}
       </Text>
     </View>

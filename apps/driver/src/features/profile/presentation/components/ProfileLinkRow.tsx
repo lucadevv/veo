@@ -37,7 +37,7 @@ export const ProfileLinkRow = ({
       <View
         style={[
           styles.iconCircle,
-          { backgroundColor: theme.colors.skeleton, borderRadius: theme.radii.pill },
+          { backgroundColor: theme.colors.surfaceMuted, borderRadius: theme.radii.pill },
         ]}
       >
         {icon}

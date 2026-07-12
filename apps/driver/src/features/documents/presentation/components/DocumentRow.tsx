@@ -51,7 +51,7 @@ export function DocumentRow({
       pressedStyle={{ backgroundColor: theme.colors.surfaceElevated }}
     >
       <View style={styles.rowInner}>
-        <View style={[styles.icon, { backgroundColor: theme.colors.skeleton }]}>
+        <View style={[styles.icon, { backgroundColor: theme.colors.surfaceMuted }]}>
           <IconDocument
             size={18}
             color={highlighted && highlightColor ? highlightColor : theme.colors.inkMuted}

@@ -16,6 +16,9 @@ export interface ThemeColors {
   surface: string;
   /** Capa elevada (sheets sobre tarjetas, inputs). */
   surfaceElevated: string;
+  /** Superficie recesada/atenuada (gris sutil): discos de icono, tracks, rellenos hundidos sobre
+   * tarjetas blancas. Resuelve la colisión surfaceElevated===surface===#FFFFFF en el tema claro. */
+  surfaceMuted: string;
   /** Texto primario. */
   ink: string;
   /** Texto secundario. */
@@ -39,8 +42,12 @@ export interface ThemeColors {
   onSafe: string;
   success: string;
   onSuccess: string;
+  /** Texto de estado "éxito" legible sobre blanco (más oscuro que el punto brillante `success`). */
+  successText: string;
   warn: string;
   onWarn: string;
+  /** Texto de estado "aviso" legible sobre blanco (más oscuro que el punto brillante `warn`). */
+  warnText: string;
   danger: string;
   dangerHover: string;
   onDanger: string;
@@ -120,7 +127,7 @@ export interface Theme {
  *
  * Contraste AA verificado (calculado, ratios reales WCAG 2.1):
  *   · ink #1A2332 sobre bg #F5F7FA → 13.9:1 (AAA)
- *   · inkMuted #6B7A8F sobre bg #F5F7FA → 4.6:1 (pasa AA texto normal ≥4.5)
+ *   · inkMuted #647386 sobre bg #F5F7FA → 4.51:1 (pasa AA texto normal ≥4.5)
  *   · inkSubtle #B0BEC5 sobre surface #FFFFFF → 2.0:1 (solo hints/placeholder, no texto de lectura)
  *   · onBrand #FFFFFF sobre brand/accent #0075A9 → 4.7:1 (pasa AA normal)
  *   · onDanger #FFFFFF sobre danger #D11216 → 5.0:1
@@ -129,8 +136,9 @@ const passengerColors: ThemeColors = {
   bg: '#F5F7FA',
   surface: '#FFFFFF',
   surfaceElevated: '#FFFFFF',
+  surfaceMuted: '#EEF1F5',
   ink: '#1A2332',
-  inkMuted: '#6B7A8F',
+  inkMuted: '#647386',
   inkSubtle: '#B0BEC5',
   border: '#DDE1E7',
   borderStrong: '#C5CDD6',
@@ -147,12 +155,14 @@ const passengerColors: ThemeColors = {
   onSafe: '#04160D',
   success: '#17C08A',
   onSuccess: '#04160D',
+  successText: '#00873A',
   warn: '#FFA000',
   onWarn: '#3A2600',
+  warnText: '#B26A00',
   danger: '#D11216',
   dangerHover: '#B10E12',
   onDanger: '#FFFFFF',
-  info: '#0097CE',
+  info: '#007FAE',
   onInfo: '#FFFFFF',
   focus: '#0075A9',
   overlay: 'rgba(26,35,50,0.45)',
@@ -190,6 +200,7 @@ const driverColors: ThemeColors = {
   bg: '#F5F7FA',
   surface: '#FFFFFF',
   surfaceElevated: '#FFFFFF',
+  surfaceMuted: '#EEF1F5',
   ink: '#1A2332',
   inkMuted: '#6B7A8F',
   inkSubtle: '#B0BEC5',
@@ -208,8 +219,10 @@ const driverColors: ThemeColors = {
   onSafe: '#04160D',
   success: '#00C853',
   onSuccess: '#04160D',
+  successText: '#00873A',
   warn: '#FFA000',
   onWarn: '#3A2600',
+  warnText: '#B26A00',
   danger: '#D11216',
   dangerHover: '#B10E12',
   onDanger: '#FFFFFF',
@@ -235,6 +248,7 @@ export const driverDarkColors: ThemeColors = {
   bg: '#0A0B0F',
   surface: '#14161C',
   surfaceElevated: '#1E212A',
+  surfaceMuted: '#1E212A',
   ink: '#F5F7FA',
   inkMuted: '#C4CBD6',
   inkSubtle: '#8A929E',
@@ -250,8 +264,10 @@ export const driverDarkColors: ThemeColors = {
   onSafe: '#04160D',
   success: '#17C08A',
   onSuccess: '#04160D',
+  successText: '#3FD9A3',
   warn: '#F2AF48',
   onWarn: '#201301',
+  warnText: '#F2AF48',
   danger: '#FF4D6A',
   dangerHover: '#E63A56',
   onDanger: '#1A0306',
