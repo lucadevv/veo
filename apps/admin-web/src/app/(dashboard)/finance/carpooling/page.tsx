@@ -1,7 +1,7 @@
 'use client';
 
 import { Lock, ShieldCheck } from 'lucide-react';
-import { useCostPerKm, useCommission } from '@/lib/api/queries';
+import { useActiveCarpools, useCostPerKm, useCommission } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
@@ -10,6 +10,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { CostPerKmPanel } from '@/components/pricing/cost-per-km-panel';
 import { CarpoolingFeePanel } from '@/components/pricing/carpooling-fee-panel';
+import {
+  CarpoolingMonitor,
+  CarpoolingMonitorSkeleton,
+} from '@/components/finance/carpooling-monitor';
 
 /**
  * Carpooling — el carril COST-SHARING, separado de Precios on-demand porque NO comparte fórmula (ADR-017 §1.6 /
@@ -22,6 +26,7 @@ import { CarpoolingFeePanel } from '@/components/pricing/carpooling-fee-panel';
  */
 export default function CarpoolingPage() {
   const user = useSession();
+  const activeCarpoolsQuery = useActiveCarpools();
   const costPerKmQuery = useCostPerKm();
   const commissionQuery = useCommission();
 
@@ -62,6 +67,15 @@ export default function CarpoolingPage() {
               pide tu código TOTP y el cambio queda auditado. No hay un guardado global.
             </p>
           </div>
+        </div>
+
+        {/* MONITOREO (board veo.pen · TSqpB): 4 KPIs + tabla "Carpools activos", ENCIMA de los parámetros. Dato
+            REAL de booking-service (ocupación/conteos/cupos); refresco en vivo. 4 estados vía AsyncSection
+            (loading skeleton / error+retry / empty "sin carpools" dentro del panel / data). */}
+        <div className="mt-5">
+          <AsyncSection query={activeCarpoolsQuery} skeleton={<CarpoolingMonitorSkeleton />}>
+            {(data) => <CarpoolingMonitor data={data} />}
+          </AsyncSection>
         </div>
 
         {/* Cards planas, en el orden del diseño (veo.pen). Cada una es su propia mutación con CAS + step-up. */}

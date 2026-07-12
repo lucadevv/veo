@@ -14,6 +14,7 @@ import { Module } from '@nestjs/common';
 import { PublishedTripsService } from './published-trips.service';
 import { PublishedTripsRepository } from './published-trips.repository';
 import { PublishedTripsController } from './published-trips.controller';
+import { ActiveCarpoolsController } from './active-carpools.controller';
 import { CostCapModule } from '../cost-cap/cost-cap.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { IdentityModule } from '../identity/identity.module';
@@ -42,7 +43,7 @@ import { AdminIdentityGuard } from '../search-radius/admin-identity.guard';
     { provide: SEARCH_RADIUS_READER, useExisting: CarpoolSearchConfigService },
     AdminIdentityGuard,
   ],
-  controllers: [PublishedTripsController, SearchRadiusController],
+  controllers: [PublishedTripsController, SearchRadiusController, ActiveCarpoolsController],
   exports: [PublishedTripsService],
 })
 export class PublishedTripsModule {}

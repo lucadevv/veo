@@ -1045,6 +1045,59 @@ export const replaceCarpoolSearchConfigRequest = z.object({
 });
 export type ReplaceCarpoolSearchConfigRequest = z.infer<typeof replaceCarpoolSearchConfigRequest>;
 
+/* ── Carpooling: MONITOREO de carpools ACTIVOS (booking-service · GET /finance/carpooling/active) ──
+ * El panel de monitoreo lista las ofertas de carpooling VIVAS + KPIs agregados. TODO es dato REAL de
+ * booking-service: ocupación = reservados/totales; conteos por estado; cupos libres. NO hay revenue acá — la
+ * plata (fee recaudado) vive en payment/analytics, no en booking; este panel monitorea la OPERACIÓN, no el dinero. */
+
+/** Estados ACTIVOS de una oferta en el monitoreo (viva: publicada/reservable, llena, o en curso). */
+export const activeCarpoolState = z.enum([
+  'PUBLICADO',
+  'PARCIALMENTE_RESERVADO',
+  'LLENO',
+  'EN_RUTA',
+]);
+export type ActiveCarpoolState = z.infer<typeof activeCarpoolState>;
+
+/** Un carpool activo del listado: ruta (coords públicas origen→destino), ocupación, salida, estado + conductor.
+ *  `driverName` es best-effort (identity batch): `null` si identity no lo resolvió (degradación honesta). */
+export const activeCarpoolItem = z.object({
+  id: z.string(),
+  origenLat: z.number(),
+  origenLon: z.number(),
+  destinoLat: z.number(),
+  destinoLon: z.number(),
+  fechaHoraSalida: z.string(),
+  asientosTotales: z.number().int(),
+  /** Reservados = asientosTotales − asientosDisponibles (server-truth, no inventado). */
+  asientosReservados: z.number().int(),
+  estado: activeCarpoolState,
+  driverName: z.string().nullable(),
+});
+export type ActiveCarpoolItem = z.infer<typeof activeCarpoolItem>;
+
+/** KPIs agregados del monitoreo — todos derivados de datos reales de booking-service (cero inventados). */
+export const activeCarpoolStats = z.object({
+  /** Ofertas activas (total real, no la página capada). */
+  activeCount: z.number().int(),
+  /** Ofertas actualmente EN_RUTA (en curso). */
+  enRouteCount: z.number().int(),
+  /** Σ asientos reservados en las ofertas activas. */
+  seatsReserved: z.number().int(),
+  /** Σ cupos libres en las ofertas activas. */
+  seatsAvailable: z.number().int(),
+  /** Ocupación promedio ponderada por asientos (reservados/totales · 100, entero). 0 si no hay asientos. */
+  avgOccupancyPct: z.number().int(),
+});
+export type ActiveCarpoolStats = z.infer<typeof activeCarpoolStats>;
+
+/** Respuesta del monitoreo: KPIs agregados + el listado (capado) de ofertas activas. */
+export const activeCarpoolsView = z.object({
+  stats: activeCarpoolStats,
+  carpools: z.array(activeCarpoolItem),
+});
+export type ActiveCarpoolsView = z.infer<typeof activeCarpoolsView>;
+
 /* ── Radar preview: anillos de cobertura para un punto (visualización de la config vigente) ──
  * Cada anillo lleva su radio (km), su k-ring y el conteo de conductores dentro. El admin-bff NORMALIZA el
  * conteo a `count` sea cual sea el servicio de origen (dispatch usa `driverCount`, booking usa `count`). */

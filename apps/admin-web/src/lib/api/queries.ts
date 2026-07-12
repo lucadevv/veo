@@ -13,6 +13,7 @@ import {
   dispatchRadiusConfigView,
   radarPreview,
   carpoolSearchConfigView,
+  activeCarpoolsView,
   type ReplaceCarpoolSearchConfigRequest,
   type ReplaceRadiusConfigRequest,
   driverApproval,
@@ -124,6 +125,7 @@ export const qk = {
   dispatchRadar: (mode: string) => ['dispatch-radar', mode] as const,
   carpoolConfig: ['carpool-search-config'] as const,
   carpoolRadar: ['carpool-radar'] as const,
+  activeCarpools: ['carpool-active-monitor'] as const,
   policies: ['gobierno-policies'] as const,
   permissionOverrides: ['gobierno-permission-overrides'] as const,
 };
@@ -1147,6 +1149,17 @@ export function useReplaceCarpoolingFee() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.commission });
     },
+  });
+}
+
+/* ── Monitoreo de carpools activos (booking-service · KPIs + listado · finance:view · panel finance/carpooling) ──
+ * Refresco "en vivo" (15s) para que los KPIs de ocupación y el listado respiren con la operación real. */
+export function useActiveCarpools() {
+  return useQuery({
+    queryKey: qk.activeCarpools,
+    queryFn: ({ signal }) =>
+      apiClient().get('/finance/carpooling/active', { schema: activeCarpoolsView, signal }),
+    refetchInterval: REALTIME_REFETCH,
   });
 }
 

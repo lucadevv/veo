@@ -31,6 +31,7 @@ import type {
   RefundStatsView,
   RefundActionResult,
   ReconciliationRunView,
+  ActiveCarpoolsView,
 } from '@veo/api-client';
 import { REST_PAYMENT, REST_BOOKING, GRPC_IDENTITY } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
@@ -52,6 +53,8 @@ export type { CommissionView, CostPerKmConfigView, CostPerKmListView };
 
 const COMMISSION_BASE = '/internal/finance/commission';
 const COST_PER_KM_BASE = '/internal/finance/cost-per-km';
+/** Monitoreo de carpools activos (booking-service, F2 · panel finance/carpooling). Solo lectura. */
+const ACTIVE_CARPOOLS_BASE = '/internal/booking/active-carpools';
 
 /** Shape interno que sirve payment-service (GET /payouts/all). `status` ES el enum Prisma `PayoutStatus`
  *  serializado tal cual (sin transformación intermedia); el contrato `payoutStatus` lo espeja 1:1.
@@ -396,6 +399,16 @@ export class FinanceService {
   /** finance:view — lee el costo/km vigente por país (PE/EC) desde booking-service. F2.5 */
   getCostPerKm(identity: AuthenticatedUser): Promise<CostPerKmListView> {
     return this.bookingRest.get<CostPerKmListView>(COST_PER_KM_BASE, { identity });
+  }
+
+  /**
+   * finance:view — MONITOREO de carpools activos (panel finance/carpooling): KPIs agregados + listado de ofertas
+   * vivas, todo dato REAL de booking-service (ocupación, conteos, cupos). Solo lectura (no muta ni audita — es
+   * monitoreo operativo, sin PII sensible). Proxya al REST interno de booking-service; el RBAC fino lo aplica el
+   * controller (@Permission finance:view) y booking re-verifica la firma interna (defensa en profundidad).
+   */
+  getActiveCarpools(identity: AuthenticatedUser): Promise<ActiveCarpoolsView> {
+    return this.bookingRest.get<ActiveCarpoolsView>(ACTIVE_CARPOOLS_BASE, { identity });
   }
 
   /**

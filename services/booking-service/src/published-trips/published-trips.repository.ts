@@ -304,4 +304,49 @@ export class PublishedTripsRepository {
       ...(cursorId !== undefined ? { cursor: { id: cursorId }, skip: 1 } : {}),
     });
   }
+
+  /**
+   * MONITOREO admin — lista las ofertas de carpooling ACTIVAS (estado ∈ `estados`, típ. ACTIVE_CARPOOL_STATES)
+   * ordenadas por salida más próxima, CAPADAS a `take`. Lectura no crítica → réplica. Respaldada por el índice
+   * `(estado, fecha_hora_salida)` (el WHERE `estado IN (...)` + ORDER BY `fecha_hora_salida ASC` se sirven por
+   * índice, sin full scan). Solo LECTURA (no decrementa asientos). `id` desempata el orden (determinístico).
+   */
+  listActiveCarpools(
+    estados: readonly PublishedTripState[],
+    take: number,
+  ): Promise<PublishedTrip[]> {
+    return this.prisma.read.publishedTrip.findMany({
+      where: { estado: { in: [...estados] } },
+      orderBy: [{ fechaHoraSalida: 'asc' }, { id: 'asc' }],
+      take,
+    });
+  }
+
+  /**
+   * AGREGADOS de los carpools ACTIVOS para los KPIs (una sola pasada agregada, MISMO filtro que
+   * `listActiveCarpools`): `count` = TOTAL real de ofertas activas (no la página capada) y `_sum` de asientos
+   * totales/disponibles → deja computar ocupación (reservados = totales − disponibles) y cupos libres
+   * server-side, sin materializar todas las filas. Réplica. `_sum` es NULL si no hay filas → se normaliza a 0.
+   */
+  async aggregateActiveCarpools(estados: readonly PublishedTripState[]): Promise<{
+    count: number;
+    asientosTotales: number;
+    asientosDisponibles: number;
+  }> {
+    const agg = await this.prisma.read.publishedTrip.aggregate({
+      where: { estado: { in: [...estados] } },
+      _count: { _all: true },
+      _sum: { asientosTotales: true, asientosDisponibles: true },
+    });
+    return {
+      count: agg._count._all,
+      asientosTotales: agg._sum.asientosTotales ?? 0,
+      asientosDisponibles: agg._sum.asientosDisponibles ?? 0,
+    };
+  }
+
+  /** Cuenta las ofertas en UN estado (KPI "en ruta ahora" = EN_RUTA). Réplica; índice `(estado, fecha_hora_salida)`. */
+  countByState(estado: PublishedTripState): Promise<number> {
+    return this.prisma.read.publishedTrip.count({ where: { estado } });
+  }
 }

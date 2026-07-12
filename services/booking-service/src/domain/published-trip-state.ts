@@ -115,3 +115,24 @@ export const RESERVABLE_STATES: readonly PublishedTripState[] = [
 export function isReservableState(estado: PublishedTripState): boolean {
   return RESERVABLE_STATES.includes(estado);
 }
+
+/**
+ * Estados INACTIVOS para el MONITOREO admin de carpools: BORRADOR (aún no publicada) y los TERMINALES
+ * (COMPLETADO/CANCELADO — la oferta ya no está viva). Enum tipado, fuente única del complemento de abajo.
+ */
+export const INACTIVE_CARPOOL_STATES: readonly PublishedTripState[] = [
+  PublishedTripState.BORRADOR,
+  PublishedTripState.COMPLETADO,
+  PublishedTripState.CANCELADO,
+];
+
+/**
+ * Estados "ACTIVOS" del MONITOREO admin de carpools (finance/carpooling · panel de monitoreo): la oferta está
+ * VIVA — publicada y reservable (PUBLICADO/PARCIALMENTE_RESERVADO), llena (LLENO) o ya en curso (EN_RUTA)—, pero
+ * NO en BORRADOR ni TERMINAL. DERIVADO del enum COMPLETO menos INACTIVE_CARPOOL_STATES (cero drift: un estado
+ * nuevo en la máquina entra por default salvo que se declare inactivo). Lo consume el listado + los KPIs
+ * agregados (count/ocupación) del panel — es una LECTURA de monitoreo, NO una transición de la máquina.
+ */
+export const ACTIVE_CARPOOL_STATES: readonly PublishedTripState[] = (
+  Object.keys(PUBLISHED_TRIP_TRANSITIONS) as PublishedTripState[]
+).filter((estado) => !INACTIVE_CARPOOL_STATES.includes(estado));

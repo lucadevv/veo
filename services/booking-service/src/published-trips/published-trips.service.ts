@@ -39,6 +39,7 @@ import {
   publishedTripMachine,
   CANCELABLE_STATES,
   SEARCHABLE_STATES,
+  ACTIVE_CARPOOL_STATES,
 } from '../domain/published-trip-state';
 import { assertTramosReferToValidStopovers, destinoOrden } from '../domain/trip-segments';
 import { PAIS } from '../domain/cost-cap';
@@ -113,6 +114,9 @@ const DEFAULT_SEARCH_PAGE_SIZE = 20;
 
 /** Tope de la MUESTRA de posiciones del radar-preview (capa el payload al mapa del admin; no es un ranking). */
 const RADAR_DRIVER_SAMPLE = 100;
+
+/** Tope del LISTADO del monitoreo admin de carpools activos (capa el payload; los KPIs son agregados aparte). */
+const ACTIVE_CARPOOL_MONITOR_LIMIT = 50;
 
 /**
  * Config TIPADA de la búsqueda geo H3 (F2): k base + k expandido si la primera pasada da CERO resultados.
@@ -189,6 +193,51 @@ export interface RadarPreview {
    * marcadores en el mapa del admin. Son posiciones REALES de las ofertas — NO se inventan. `[]` sin ofertas.
    */
   drivers: RadarDriverPosition[];
+}
+
+/**
+ * Un carpool ACTIVO tal como lo ve el MONITOREO admin (finance/carpooling · panel de monitoreo). Coords públicas
+ * (origen→destino, meeting points), OCUPACIÓN (reservados/totales), salida y estado. `driverName` es best-effort
+ * (enriquecimiento batch de identity): `null` si identity no lo resolvió (degradación honesta). A diferencia de
+ * la BÚSQUEDA, el monitoreo NO filtra por elegibilidad — el admin quiere VER todo lo vivo (incluso la oferta de
+ * un conductor que luego se suspendió). SIN PII sensible: nombre público + coords públicas.
+ */
+export interface ActiveCarpoolItem {
+  id: string;
+  origenLat: number;
+  origenLon: number;
+  destinoLat: number;
+  destinoLon: number;
+  fechaHoraSalida: Date;
+  asientosTotales: number;
+  /** Asientos ya reservados = asientosTotales − asientosDisponibles (derivado del server-truth, no inventado). */
+  asientosReservados: number;
+  estado: PublishedTripState;
+  driverName: string | null;
+}
+
+/**
+ * KPIs AGREGADOS del monitoreo de carpools. TODOS derivados de datos REALES de booking-service (cero inventados):
+ * conteos por estado y sumas de asientos. NO hay revenue acá — la plata (fee recaudado) vive en payment/analytics,
+ * no en booking-service; este panel monitorea la OPERACIÓN del carpooling (ofertas vivas + ocupación), no el dinero.
+ */
+export interface ActiveCarpoolStats {
+  /** Ofertas ACTIVAS (PUBLICADO/PARCIALMENTE_RESERVADO/LLENO/EN_RUTA). TOTAL real, no la página capada. */
+  activeCount: number;
+  /** Ofertas actualmente EN_RUTA (en curso). */
+  enRouteCount: number;
+  /** Σ asientos reservados en las ofertas activas. */
+  seatsReserved: number;
+  /** Σ cupos libres (asientosDisponibles) en las ofertas activas. */
+  seatsAvailable: number;
+  /** Ocupación promedio PONDERADA por asientos = reservados/totales · 100 (entero). 0 si no hay asientos. */
+  avgOccupancyPct: number;
+}
+
+/** Respuesta del monitoreo admin de carpools: KPIs agregados + el listado (capado) de ofertas activas. */
+export interface ActiveCarpoolsView {
+  stats: ActiveCarpoolStats;
+  carpools: ActiveCarpoolItem[];
 }
 
 @Injectable()
@@ -581,6 +630,78 @@ export class PublishedTripsService {
       // Posiciones REALES de los orígenes en el radio expandido (capadas); [] honesto si no hay ofertas.
       drivers,
     };
+  }
+
+  /**
+   * MONITOREO admin de carpools ACTIVOS (finance/carpooling · panel de monitoreo). Devuelve los KPIs AGREGADOS
+   * (conteos + ocupación, todos server-truth) + el LISTADO capado de ofertas vivas, enriquecido con el nombre
+   * del conductor (batch anti-N+1, best-effort). Los agregados se computan sobre el filtro COMPLETO (no la
+   * página) → el count/ocupación son el total real. TRES lecturas en paralelo (listado + agregados + EN_RUTA):
+   * ninguna es crítica (solo réplica), no hay mutación → sin transacción/unit-of-work. Ocupación PONDERADA por
+   * asientos (Σreservados/Σtotales), no promedio de porcentajes por viaje: refleja el llenado real de la flota.
+   */
+  async listActiveCarpools(): Promise<ActiveCarpoolsView> {
+    const [trips, agg, enRouteCount] = await Promise.all([
+      this.repo.listActiveCarpools(ACTIVE_CARPOOL_STATES, ACTIVE_CARPOOL_MONITOR_LIMIT),
+      this.repo.aggregateActiveCarpools(ACTIVE_CARPOOL_STATES),
+      this.repo.countByState(PublishedTripState.EN_RUTA),
+    ]);
+    const carpools = await this.enrichActiveWithDriverNames(trips);
+    const seatsReserved = agg.asientosTotales - agg.asientosDisponibles;
+    return {
+      stats: {
+        activeCount: agg.count,
+        enRouteCount,
+        seatsReserved,
+        seatsAvailable: agg.asientosDisponibles,
+        avgOccupancyPct:
+          agg.asientosTotales > 0 ? Math.round((seatsReserved / agg.asientosTotales) * 100) : 0,
+      },
+      carpools,
+    };
+  }
+
+  /**
+   * Enriquecimiento ANTI-N+1 del monitoreo: UNA sola llamada batch `getDriversByIds` con los driverId ÚNICOS →
+   * el nombre público de cada conductor. A diferencia de la BÚSQUEDA (que FILTRA por elegibilidad), el monitoreo
+   * NO filtra: el admin quiere ver TODO lo activo. Best-effort HONESTO: si identity cae, `driverName` es `null`
+   * (el monitoreo no se cuelga por identity caída). `asientosReservados` = totales − disponibles (server-truth).
+   */
+  private async enrichActiveWithDriverNames(
+    trips: PublishedTrip[],
+  ): Promise<ActiveCarpoolItem[]> {
+    const toItem = (trip: PublishedTrip, driverName: string | null): ActiveCarpoolItem => ({
+      id: trip.id,
+      origenLat: trip.origenLat,
+      origenLon: trip.origenLon,
+      destinoLat: trip.destinoLat,
+      destinoLon: trip.destinoLon,
+      fechaHoraSalida: trip.fechaHoraSalida,
+      asientosTotales: trip.asientosTotales,
+      asientosReservados: trip.asientosTotales - trip.asientosDisponibles,
+      estado: trip.estado,
+      driverName,
+    });
+
+    if (trips.length === 0) return [];
+
+    let byId: Map<string, PublicDriver> | null = null;
+    try {
+      const uniqueDriverIds = [...new Set(trips.map((t) => t.driverId))];
+      const drivers = await this.identityBatch.getDriversByIds(uniqueDriverIds);
+      byId = new Map(drivers.map((d) => [d.id, d]));
+    } catch (err) {
+      // Best-effort (monitoreo = display): identity caída → nombres degradados (null), NO se cuelga el panel.
+      this.logger.warn({
+        msg: 'Monitoreo de carpools: nombre del conductor DEGRADADO (identity inaccesible); el listado se sirve sin nombres',
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    return trips.map((trip) => {
+      const name = byId?.get(trip.driverId)?.name;
+      return toItem(trip, name && name.length > 0 ? name : null);
+    });
   }
 
   /**

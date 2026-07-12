@@ -83,6 +83,13 @@ function makeRepo() {
   const searchByRoute = vi.fn(async () => []);
   const countAvailableByOriginRing = vi.fn(async () => 0);
   const sampleAvailableOriginsByRing = vi.fn(async () => [] as { lat: number; lon: number }[]);
+  const listActiveCarpools = vi.fn(async () => []);
+  const aggregateActiveCarpools = vi.fn(async () => ({
+    count: 0,
+    asientosTotales: 0,
+    asientosDisponibles: 0,
+  }));
+  const countByState = vi.fn(async () => 0);
   const repo = {
     createWithEvent,
     createWithEventIdempotent,
@@ -93,6 +100,9 @@ function makeRepo() {
     searchByRoute,
     countAvailableByOriginRing,
     sampleAvailableOriginsByRing,
+    listActiveCarpools,
+    aggregateActiveCarpools,
+    countByState,
   } as unknown as PublishedTripsRepository;
   return {
     repo,
@@ -105,6 +115,9 @@ function makeRepo() {
     searchByRoute,
     countAvailableByOriginRing,
     sampleAvailableOriginsByRing,
+    listActiveCarpools,
+    aggregateActiveCarpools,
+    countByState,
   };
 }
 
@@ -1705,5 +1718,121 @@ describe('PublishedTripsService · FIX 4 · detalle solo viajes searchable + fut
     const detail = await service.getDetail('x');
     expect(detail.trip.id).toBe('x');
     expect(detail.trip.estado).toBe(PublishedTripState.PARCIALMENTE_RESERVADO);
+  });
+});
+
+/** Fila de carpool activo para el monitoreo (solo los campos que lee el mapeo del service). */
+function makeActiveRow(
+  over: Partial<{
+    id: string;
+    driverId: string;
+    asientosTotales: number;
+    asientosDisponibles: number;
+    estado: PublishedTripState;
+  }> = {},
+) {
+  return {
+    id: over.id ?? 'c1',
+    driverId: over.driverId ?? DRIVER_ID,
+    vehicleId: VEHICLE_ID,
+    origenLat: -12.1,
+    origenLon: -77.0,
+    destinoLat: -12.0,
+    destinoLon: -77.1,
+    fechaHoraSalida: new Date('2026-08-01T12:00:00Z'),
+    asientosTotales: over.asientosTotales ?? 4,
+    asientosDisponibles: over.asientosDisponibles ?? 1,
+    estado: over.estado ?? PublishedTripState.PARCIALMENTE_RESERVADO,
+  };
+}
+
+describe('PublishedTripsService · MONITOREO carpools activos (KPIs agregados + listado)', () => {
+  it('computa ocupación PONDERADA (Σreservados/Σtotales), reservados=totales−disponibles, y enriquece nombre anti-N+1', async () => {
+    const { repo, listActiveCarpools, aggregateActiveCarpools, countByState } = makeRepo();
+    listActiveCarpools.mockResolvedValue([
+      makeActiveRow({ id: 'c1', driverId: 'd1', asientosTotales: 4, asientosDisponibles: 1 }),
+      makeActiveRow({
+        id: 'c2',
+        driverId: 'd2',
+        asientosTotales: 3,
+        asientosDisponibles: 3,
+        estado: PublishedTripState.PUBLICADO,
+      }),
+    ]);
+    // Agregado sobre el filtro COMPLETO (no la página): total real de activos + sumas de asientos.
+    aggregateActiveCarpools.mockResolvedValue({
+      count: 12,
+      asientosTotales: 40,
+      asientosDisponibles: 15,
+    });
+    countByState.mockResolvedValue(3);
+    const { client, getDriversByIds } = makeIdentityBatch((ids) =>
+      Promise.resolve(ids.map((id) => makePublicDriver(id, { name: `Nombre ${id}` }))),
+    );
+    const service = makeService({ repo, identityBatch: client });
+
+    const res = await service.listActiveCarpools();
+
+    expect(res.stats.activeCount).toBe(12);
+    expect(res.stats.enRouteCount).toBe(3);
+    expect(res.stats.seatsReserved).toBe(25); // 40 − 15
+    expect(res.stats.seatsAvailable).toBe(15);
+    expect(res.stats.avgOccupancyPct).toBe(63); // 25/40 = 62.5 → redondeo 63
+    expect(res.carpools).toHaveLength(2);
+    expect(res.carpools[0]).toMatchObject({
+      id: 'c1',
+      asientosReservados: 3, // 4 − 1
+      driverName: 'Nombre d1',
+      estado: PublishedTripState.PARCIALMENTE_RESERVADO,
+    });
+    expect(res.carpools[1]).toMatchObject({ id: 'c2', asientosReservados: 0, driverName: 'Nombre d2' });
+    // Anti-N+1: UNA sola llamada batch para los N carpools.
+    expect(getDriversByIds).toHaveBeenCalledOnce();
+    expect(getDriversByIds.mock.calls[0]![0] as string[]).toEqual(['d1', 'd2']);
+  });
+
+  it('degradación HONESTA: identity caída → driverName null, el monitoreo NO se cuelga (KPIs igual)', async () => {
+    const { repo, listActiveCarpools, aggregateActiveCarpools } = makeRepo();
+    listActiveCarpools.mockResolvedValue([
+      makeActiveRow({
+        id: 'c1',
+        asientosTotales: 4,
+        asientosDisponibles: 0,
+        estado: PublishedTripState.LLENO,
+      }),
+    ]);
+    aggregateActiveCarpools.mockResolvedValue({
+      count: 1,
+      asientosTotales: 4,
+      asientosDisponibles: 0,
+    });
+    const failing: IdentityBatchClient = {
+      getDriversByIds: async () => {
+        throw new Error('identity down');
+      },
+    };
+    const service = makeService({ repo, identityBatch: failing });
+
+    const res = await service.listActiveCarpools();
+
+    expect(res.carpools[0].driverName).toBeNull();
+    expect(res.carpools[0].asientosReservados).toBe(4);
+    expect(res.stats.avgOccupancyPct).toBe(100); // 4/4
+  });
+
+  it('sin carpools activos: KPIs en 0 y listado vacío (0 honesto, no se inventa)', async () => {
+    const { repo } = makeRepo(); // defaults: listado [], agregado count/sumas 0, countByState 0
+    const service = makeService({ repo });
+
+    const res = await service.listActiveCarpools();
+
+    expect(res.carpools).toEqual([]);
+    expect(res.stats).toEqual({
+      activeCount: 0,
+      enRouteCount: 0,
+      seatsReserved: 0,
+      seatsAvailable: 0,
+      avgOccupancyPct: 0,
+    });
   });
 });

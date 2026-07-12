@@ -28,6 +28,7 @@ import type {
   RefundStatsView,
   RefundActionResult,
   ReconciliationRunView,
+  ActiveCarpoolsView,
 } from '@veo/api-client';
 import {
   FinanceService,
@@ -242,6 +243,19 @@ export class FinanceController {
     @Body() dto: ReplaceCostPerKmDto,
   ): Promise<CostPerKmConfigView> {
     return this.finance.replaceCostPerKm(user, dto);
+  }
+
+  // ── MONITOREO de carpools activos (panel finance/carpooling · F2). Ruta LITERAL `carpooling/active` (no
+  // colisiona con ninguna paramétrica). GET = finance:view (rol de clase FINANCE/ADMIN/SUPERADMIN). Solo lectura:
+  // KPIs agregados + listado de ofertas vivas, todo dato real de booking-service (ocupación, conteos, cupos). ──
+  @Get('carpooling/active')
+  @Permission('finance:view')
+  @ApiOperation({
+    summary:
+      'Monitoreo de carpools activos: KPIs agregados (activos/en ruta/ocupación/cupos) + listado. finance:view. F2',
+  })
+  getActiveCarpools(@CurrentUser() user: AuthenticatedUser): Promise<ActiveCarpoolsView> {
+    return this.finance.getActiveCarpools(user);
   }
 
   @Get('payments/by-trip/:tripId')

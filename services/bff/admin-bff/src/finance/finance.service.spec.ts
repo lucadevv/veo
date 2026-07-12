@@ -627,3 +627,41 @@ describe('FinanceService.getPayoutDetail · Seam 2 (driverName enrichment + gate
     expect(fin.identityGrpc.call).not.toHaveBeenCalled();
   });
 });
+
+describe('FinanceService.getActiveCarpools · monitoreo (proxy a booking-service)', () => {
+  it('proxya al REST interno de booking (active-carpools) propagando la identidad y devuelve el view tal cual', async () => {
+    const view = {
+      stats: {
+        activeCount: 12,
+        enRouteCount: 3,
+        seatsReserved: 25,
+        seatsAvailable: 15,
+        avgOccupancyPct: 63,
+      },
+      carpools: [
+        {
+          id: 'c1',
+          origenLat: -12.1,
+          origenLon: -77.0,
+          destinoLat: -12.0,
+          destinoLon: -77.1,
+          fechaHoraSalida: '2026-08-01T12:00:00.000Z',
+          asientosTotales: 4,
+          asientosReservados: 3,
+          estado: 'PARCIALMENTE_RESERVADO',
+          driverName: 'José Ramírez',
+        },
+      ],
+    };
+    const { svc, bookingRest } = makeService([]);
+    bookingRest.get.mockResolvedValue(view);
+
+    const res = await svc.getActiveCarpools(operator);
+
+    expect(bookingRest.get).toHaveBeenCalledWith(
+      '/internal/booking/active-carpools',
+      expect.objectContaining({ identity: operator }),
+    );
+    expect(res).toEqual(view);
+  });
+});
