@@ -1805,6 +1805,8 @@ export const common = {
     noAddress: 'Sin dirección seleccionada',
     empty: 'Aún no tienes lugares guardados',
     emptySubtitle: 'Agrega tu Casa, tu Trabajo o tus sitios favoritos.',
+    /** Error de CARGA (red caída + sin caché): distinto del vacío legítimo. Ofrece reintentar. */
+    loadError: 'No pudimos cargar tus lugares guardados. Inténtalo de nuevo.',
     removeTitle: '¿Eliminar lugar?',
     removeBody: 'Dejará de aparecer en tus accesos rápidos.',
     invalidLabel: 'Ingresa un nombre (1 a 40 caracteres).',

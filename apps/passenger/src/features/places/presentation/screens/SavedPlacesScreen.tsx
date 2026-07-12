@@ -15,6 +15,10 @@ import {
 import React, {useCallback, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ScrollView, StyleSheet, View} from 'react-native';
+import {
+  ErrorState,
+  LoadingState,
+} from '../../../../shared/presentation/components/ScreenStates';
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';
@@ -55,6 +59,9 @@ export function SavedPlacesScreen(): React.JSX.Element {
   const {t} = useTranslation();
 
   const places = useSavedPlacesStore(s => s.places);
+  const placesLoading = useSavedPlacesStore(s => s.loading);
+  const loadError = useSavedPlacesStore(s => s.loadError);
+  const retry = useSavedPlacesStore(s => s.retry);
   const save = useSavedPlacesStore(s => s.save);
   const update = useSavedPlacesStore(s => s.update);
   const remove = useSavedPlacesStore(s => s.remove);
@@ -131,6 +138,38 @@ export function SavedPlacesScreen(): React.JSX.Element {
     }
   }, [editor, places]);
 
+  // Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. Se reusa en
+  // TODAS las branches (carga/error/contenido) para no perder el encabezado en los caminos infelices.
+  const header = (
+    <ScreenHeader
+      title={t('screens.savedPlaces')}
+      subtitle={t('places.subtitle')}
+    />
+  );
+
+  // Error de CARGA: la red/servidor falló Y no hay caché que mostrar (el repo solo prende `loadError`
+  // cuando el caché está vacío → degradación offline honesta). Es distinto del vacío legítimo: acá NO
+  // hubo respuesta, así que se ofrece REINTENTAR en vez de un falso "aún no tienes lugares".
+  if (loadError && places.length === 0) {
+    return (
+      <SafeScreen>
+        {header}
+        <ErrorState message={t('places.loadError')} onRetry={retry} />
+      </SafeScreen>
+    );
+  }
+
+  // Carga: primera hidratación (o reintento) en vuelo SIN caché. Skeleton honesto para no pintar el
+  // vacío/accesos antes de saber si el usuario tiene lugares guardados en el servidor.
+  if (placesLoading && places.length === 0) {
+    return (
+      <SafeScreen>
+        {header}
+        <LoadingState />
+      </SafeScreen>
+    );
+  }
+
   return (
     <SafeScreen padded={false}>
       <ScrollView
@@ -138,11 +177,7 @@ export function SavedPlacesScreen(): React.JSX.Element {
           padding: theme.spacing.xl,
           gap: theme.spacing.lg,
         }}>
-        {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
-        <ScreenHeader
-          title={t('screens.savedPlaces')}
-          subtitle={t('places.subtitle')}
-        />
+        {header}
 
         {/* Casa y Trabajo per pen b7muEo: DOS cards separadas y prominentes (icono en círculo +
             label + dirección + pencil). Vacías, la MISMA card invita a agregar (affordance plus). */}

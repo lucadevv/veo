@@ -76,6 +76,10 @@ export default function App(): React.JSX.Element {
     if (repo instanceof HttpSavedPlacesRepository) {
       repo.setReconcileHooks({
         onCacheUpdated: () => useSavedPlacesStore.getState().refresh(),
+        // Hidratación fallida SIN caché que mostrar: la pantalla pinta ERROR + reintento en vez de un
+        // falso vacío (el repo solo emite este hook cuando no hay nada cacheado: degradación honesta).
+        onLoadError: () =>
+          useSavedPlacesStore.setState({loading: false, loadError: true}),
       });
       // Primera hidratación desde el servidor al arrancar (boot-real): la lista refleja el backend.
       useSavedPlacesStore.getState().refresh();

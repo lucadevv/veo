@@ -47,6 +47,13 @@ export interface PlacesReconcileHooks {
   onCacheUpdated?: () => void;
   /** Se llama cuando una mutación de fondo falla de forma NO transitoria (p. ej. 409 tope favoritos). */
   onReconcileError?: (error: Error) => void;
+  /**
+   * Se llama cuando la hidratación de fondo (GET /places) falla Y NO hay caché que mostrar: la lista
+   * quedaría MUDA e indistinguible de "vacío legítimo". La presentación lo usa para pintar el estado de
+   * ERROR con reintento (antes el error se tragaba en silencio y no había cómo mostrarlo). Con caché
+   * presente NO se llama: se conserva lo cacheado (degradación offline honesta) y se reconcilia luego.
+   */
+  onLoadError?: (error: Error) => void;
 }
 
 /**
@@ -143,8 +150,20 @@ export class HttpSavedPlacesRepository implements PlacesRepository {
       const dtos = await this.http.get('/places', {schema: savedPlaceList});
       this.writeCache(dtos.map(toDomain));
       this.hooks.onCacheUpdated?.();
-    } catch {
-      // Offline / transitorio: conservamos el caché actual (degradación offline honesta).
+    } catch (error) {
+      // Degradación offline HONESTA con propagación del error cuando NO hay nada que mostrar:
+      //  - Si YA hay caché, la conservamos y NO molestamos al usuario (la lista sigue viva, el próximo
+      //    list() reconcilia). El error se traga a propósito acá: es el offline honesto.
+      //  - Si el caché está VACÍO y la red/servidor falló, el error DEBE propagarse. Antes se tragaba
+      //    en silencio y la lista quedaba muda — indistinguible de "sin lugares guardados". Ahora se
+      //    reporta por `onLoadError` para que la pantalla muestre ERROR + reintento (no un falso vacío).
+      if (this.readCache().length === 0) {
+        this.hooks.onLoadError?.(
+          error instanceof Error
+            ? error
+            : new Error('No se pudieron cargar los lugares'),
+        );
+      }
     }
   }
 
