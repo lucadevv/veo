@@ -536,6 +536,73 @@ export class BookingsService {
   }
 
   /**
+   * CANCELA la propia solicitud del PASAJERO (POST /bookings/:id/cancel · public-rail · ADR-014 §4.2). Es la
+   * cara del PASAJERO (dueño de la reserva), simétrica a reject() (que es la del CONDUCTOR): transición
+   * PENDIENTE_APROBACION → CANCELADO + outbox `booking.cancelled` (razon=CANCELADO_PASAJERO) en UNA
+   * $transaction (outbox-en-transacción). NO cobra ni reembolsa (terminal sin movimiento de plata: el CHARGE
+   * solo se dispara al APROBAR — charge-on-approval · §5.1 — y acá nunca se aprobó, así que nada se capturó).
+   *
+   * ANTI-IDOR (capa 2/3, no solo el guard): el `passengerId` viene de la identidad firmada del pasajero
+   * (server-truth, NUNCA del path/body). Solo el DUEÑO puede cancelar SU reserva; una reserva inexistente O de
+   * otro pasajero colapsa al MISMO NotFoundError (no se filtra la existencia de una reserva ajena — espeja
+   * getById/assertDriverOwnsBookingTrip). El read va al PRIMARY (estado fresco): la decisión no se apoya en una
+   * réplica stale.
+   *
+   * REGLA DE NEGOCIO (más ESTRECHA que la máquina): el pasajero solo cancela una solicitud AÚN NO resuelta
+   * (PENDIENTE_APROBACION). La máquina permite CANCELADO desde varios estados (SOLICITADO/APROBADO/
+   * COBRO_PENDIENTE/CONFIRMADO — es del EJE, no de este endpoint), así que el subset se enforce ACÁ con un
+   * ConflictError (409) explícito: una reserva ya APROBADA/COBRO_PENDIENTE/CONFIRMADO no se cancela por este
+   * camino (una cancelación con-tier tras el cobro/confirmación es OTRO flujo · F3/F5). Idempotente: re-cancelar
+   * una reserva ya no-PENDIENTE → el where atómico no matchea PENDIENTE_APROBACION → 0 filas → ConflictError,
+   * sin re-emitir el evento (mismo sellado que reject).
+   */
+  async cancel(bookingId: string, passengerId: string): Promise<Booking> {
+    // Read CRÍTICO desde el PRIMARY: la decisión (estado + ownership) no puede apoyarse en una réplica stale.
+    const booking = await this.repo.findByIdFromPrimary(bookingId);
+    // Existencia y ownership colapsan al MISMO 404 (anti-IDOR, NO 403): un no-dueño no distingue "no existe" de
+    // "no es tuya". El gate vive en el service (capa 2), no solo en el guard.
+    if (booking?.passengerId !== passengerId) {
+      throw new NotFoundError('Reserva no encontrada', { id: bookingId });
+    }
+    // REGLA DE NEGOCIO: solo una solicitud PENDIENTE de aprobación es cancelable por el pasajero. Estados
+    // avanzados (APROBADO/COBRO_PENDIENTE/CONFIRMADO/terminal) NO se cancelan por acá (charge en vuelo / con-tier
+    // → F3/F5). Se rechaza ANTES del where atómico con un mensaje claro (la máquina no basta: CANCELADO es
+    // alcanzable desde varios estados del eje, este endpoint es un subconjunto).
+    if (booking.estado !== BookingState.PENDIENTE_APROBACION) {
+      throw new ConflictError('Solo se puede cancelar una solicitud pendiente de aprobación', {
+        estado: booking.estado,
+      });
+    }
+    // LA REGLA, NO EL IF: valida la legalidad del eje contra el estado REAL antes del where atómico (espeja
+    // approve/reject). A esta altura es PENDIENTE_APROBACION (chequeado arriba) → PENDIENTE_APROBACION → CANCELADO.
+    bookingMachine.assertTransition(booking.estado, BookingState.CANCELADO);
+
+    // OBSERVABILIDAD (regla #6): log estructurado del hecho de negocio (el pasajero cancela su solicitud). El
+    // tracing/metrics de request los aporta el interceptor global del servicio (mismo que approve/reject).
+    this.logger.log({
+      msg: 'El pasajero CANCELA su solicitud PENDIENTE_APROBACION (booking.cancelled razon=CANCELADO_PASAJERO). Sin cobro ni Refund (charge-on-approval: nunca se aprobó)',
+      bookingId,
+      passengerId,
+    });
+
+    return this.repo.transitionWithEvent(
+      bookingId,
+      [BookingState.PENDIENTE_APROBACION],
+      { estado: BookingState.CANCELADO },
+      {
+        eventType: BookingEventType.CANCELLED,
+        aggregateId: bookingId,
+        payload: {
+          bookingId,
+          razon: BookingCancelledRazon.CANCELADO_PASAJERO,
+          estado: BookingState.CANCELADO,
+          estadoAnterior: BookingState.PENDIENTE_APROBACION,
+        },
+      },
+    );
+  }
+
+  /**
    * Lista las solicitudes de un viaje del conductor (GET /published-trips/:id/bookings · driver-rail). SOLO el
    * DUEÑO del PublishedTrip (server-truth); no-dueño / inexistente → NotFoundError (anti-IDOR, no filtra
    * existencia). Keyset paginado (mismo patrón que las otras listas). Devuelve los Bookings del viaje.

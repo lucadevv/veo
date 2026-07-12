@@ -230,6 +230,52 @@ export class PublishedTripsRepository {
   }
 
   /**
+   * RADAR PREVIEW (endpoint interno admin): cuenta las ofertas DISPONIBLES (estado SEARCHABLE + salida futura)
+   * cuyo `origin_h3` cae dentro del anillo dado. Lectura no crítica → réplica. Respaldada por el MISMO índice
+   * F2 `(origin_h3, estado, fecha_hora_salida)` que la búsqueda — NO agrega estructura espacial nueva; es un
+   * `COUNT` con el prefijo del índice (origin_h3 IN ring + estado IN estados + fecha_hora_salida > now).
+   */
+  countAvailableByOriginRing(
+    originRing: string[],
+    estados: readonly PublishedTripState[],
+    ahora: Date,
+  ): Promise<number> {
+    return this.prisma.read.publishedTrip.count({
+      where: {
+        originH3: { in: originRing },
+        estado: { in: [...estados] },
+        fechaHoraSalida: { gt: ahora },
+      },
+    });
+  }
+
+  /**
+   * MUESTRA de ORÍGENES (lat/lon) de las ofertas DISPONIBLES (estado SEARCHABLE + salida futura) cuyo
+   * `origin_h3` cae dentro del anillo dado, capada a `limit`. Espeja `countAvailableByOriginRing` (mismo WHERE,
+   * mismo índice F2 `(origin_h3, estado, fecha_hora_salida)`) pero materializa las coordenadas del origen para
+   * que el mapa del radar admin plotee marcadores REALES (no solo conteos). Selecciona solo lat/lon (sin PII).
+   * Lectura no crítica → réplica. Orden por `fecha_hora_salida` ASC (determinístico y alineado con la búsqueda).
+   */
+  async sampleAvailableOriginsByRing(
+    originRing: string[],
+    estados: readonly PublishedTripState[],
+    ahora: Date,
+    limit: number,
+  ): Promise<{ lat: number; lon: number }[]> {
+    const rows = await this.prisma.read.publishedTrip.findMany({
+      where: {
+        originH3: { in: originRing },
+        estado: { in: [...estados] },
+        fechaHoraSalida: { gt: ahora },
+      },
+      select: { origenLat: true, origenLon: true },
+      orderBy: { fechaHoraSalida: 'asc' },
+      take: limit,
+    });
+    return rows.map((r) => ({ lat: r.origenLat, lon: r.origenLon }));
+  }
+
+  /**
    * Lectura por id desde el PRIMARY (prisma.write), para decisiones CRÍTICAS del write path (ownership +
    * estado en update/cancel): la réplica puede estar stale y filtrar un estado viejo. La GARANTÍA de
    * atomicidad la da igual el `where` condicionado del UPDATE; este read primary solo evita 404/mensajes

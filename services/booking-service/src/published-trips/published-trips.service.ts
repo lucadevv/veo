@@ -82,6 +82,11 @@ import {
   type FleetVehicleView,
   type PublicVehicle,
 } from '../fleet/fleet-client.port';
+import {
+  SEARCH_RADIUS_READER,
+  type SearchRadiusReader,
+  type KRings,
+} from '../search-radius/carpool-search-config.service';
 import type { CreatePublishedTripDto } from './dto/create-published-trip.dto';
 import type { UpdatePublishedTripDto } from './dto/update-published-trip.dto';
 import type { ListMinePageDto } from './dto/list-mine-page.dto';
@@ -106,16 +111,15 @@ const PUBLISH_COUNTRY = PAIS.PE;
 /** Default de tamaño de página de la BÚSQUEDA (F2) si el cliente no pide `limit`. Acotado por @Max(50) en el DTO. */
 const DEFAULT_SEARCH_PAGE_SIZE = 20;
 
-/** Token DI de la config de la búsqueda H3 (k del anillo + k expandido), provista desde env por el módulo. */
-export const SEARCH_H3_CONFIG = Symbol('SEARCH_H3_CONFIG');
+/** Tope de la MUESTRA de posiciones del radar-preview (capa el payload al mapa del admin; no es un ranking). */
+const RADAR_DRIVER_SAMPLE = 100;
 
-/** Config TIPADA de la búsqueda geo H3 (F2): k base + k expandido si la primera pasada da CERO resultados. */
-export interface SearchH3Config {
-  /** k del anillo base (neighbors(celda, kRing)). Default env 1. */
-  kRing: number;
-  /** k del anillo EXPANDIDO: se reintenta con este k SOLO si la búsqueda base da 0 resultados. Default env 2. */
-  kRingExpand: number;
-}
+/**
+ * Config TIPADA de la búsqueda geo H3 (F2): k base + k expandido si la primera pasada da CERO resultados.
+ * Ya NO viene de un env estático: la RESUELVE en runtime `CarpoolSearchConfigService` (radio km → k), editable
+ * por el admin sin redeploy. Este alias mantiene el shape { kRing, kRingExpand } que consume `search()`.
+ */
+export type SearchH3Config = KRings;
 
 /**
  * Resultado de la BÚSQUEDA (F2): la VISTA PÚBLICA del viaje (FIX 1 · sin dedupKey/driverId/vehicleId/H3) + el
@@ -155,6 +159,38 @@ export interface PublishedTripDetail {
   vehicle: PublicVehicle | null;
 }
 
+/** Densidad de UN anillo del radar preview: su radio (km), su k H3 y cuántas ofertas disponibles caen dentro. */
+export interface RadarRing {
+  /** Radio del anillo (km) tal como lo tiene la config. */
+  radiusKm: number;
+  /** k-ring H3 res-9 derivado del radio (neighbors(centro, kRing)). */
+  kRing: number;
+  /** Ofertas AVAILABLE (SEARCHABLE + futuras) cuyo origen cae dentro de ESTE radio (disco acumulado, no annulus). */
+  count: number;
+}
+
+/** Una POSICIÓN (lat/lon) del ORIGEN de una oferta de carpooling en rango, para plotear en el mapa del radar. */
+export interface RadarDriverPosition {
+  lat: number;
+  lon: number;
+}
+
+/**
+ * Preview del RADAR (F2 · endpoint interno admin): densidad REAL de ofertas de carpooling disponibles alrededor
+ * de un punto, por el radio base y el expandido de la config vigente. Reusa el índice H3 de published-trips
+ * (NO agrega una estructura espacial nueva). `totalInRange` = ofertas dentro del radio MAYOR (el expandido).
+ */
+export interface RadarPreview {
+  center: { lat: number; lon: number };
+  rings: RadarRing[];
+  totalInRange: number;
+  /**
+   * MUESTRA (capada a 100) de los ORÍGENES reales de las ofertas en rango (el radio expandido), para plotear
+   * marcadores en el mapa del admin. Son posiciones REALES de las ofertas — NO se inventan. `[]` sin ofertas.
+   */
+  drivers: RadarDriverPosition[];
+}
+
 @Injectable()
 export class PublishedTripsService {
   private readonly logger = new Logger(PublishedTripsService.name);
@@ -165,7 +201,9 @@ export class PublishedTripsService {
     @Inject(IDENTITY_BATCH_CLIENT) private readonly identityBatch: IdentityBatchClient,
     @Inject(FLEET_CLIENT) private readonly fleet: FleetClient,
     private readonly costCap: CostCapService,
-    @Inject(SEARCH_H3_CONFIG) private readonly searchConfig: SearchH3Config,
+    // Radio de búsqueda RESUELTO EN RUNTIME (editable por el admin, sin redeploy): mapea el radio km de la
+    // config a k-rings H3. Inyectado por token (SEARCH_RADIUS_READER) → CarpoolSearchConfigService.
+    @Inject(SEARCH_RADIUS_READER) private readonly searchConfig: SearchRadiusReader,
   ) {}
 
   /**
@@ -446,6 +484,10 @@ export class PublishedTripsService {
     const take = dto.limit ?? DEFAULT_SEARCH_PAGE_SIZE;
     const cursor = decodeSearchCursor(dto.cursor);
 
+    // Radio de búsqueda VIGENTE (editable por el admin en caliente, sin redeploy): el radio km de la config
+    // mapeado a k-rings H3. Un cambio del admin surte efecto en la siguiente búsqueda (cache invalidado al PUT).
+    const { kRing, kRingExpand } = await this.searchConfig.getKRings();
+
     // Celdas índice de los EXTREMOS buscados (mismo @veo/utils que el publish → consistencia de celdas).
     const originCell = toH3({ lat: dto.originLat, lon: dto.originLon }, DISPATCH_H3_RESOLUTION);
     const destCell = toH3({ lat: dto.destLat, lon: dto.destLon }, DISPATCH_H3_RESOLUTION);
@@ -463,22 +505,18 @@ export class PublishedTripsService {
     // Pasada base (k = kRing).
     let trips = await this.repo.searchByRoute({
       ...baseCriteria,
-      originRing: neighbors(originCell, this.searchConfig.kRing),
-      destRing: neighbors(destCell, this.searchConfig.kRing),
+      originRing: neighbors(originCell, kRing),
+      destRing: neighbors(destCell, kRing),
     });
 
     // EXPANSIÓN: si la base dio CERO y el k expandido es MAYOR, reintentar UNA vez con el anillo más grande.
     // Solo en la PRIMERA página (sin cursor): expandir el anillo a mitad de paginación cambiaría el universo
     // de resultados y rompería la consistencia del keyset (mejor: la primera página decide el radio).
-    if (
-      trips.length === 0 &&
-      cursor === undefined &&
-      this.searchConfig.kRingExpand > this.searchConfig.kRing
-    ) {
+    if (trips.length === 0 && cursor === undefined && kRingExpand > kRing) {
       trips = await this.repo.searchByRoute({
         ...baseCriteria,
-        originRing: neighbors(originCell, this.searchConfig.kRingExpand),
-        destRing: neighbors(destCell, this.searchConfig.kRingExpand),
+        originRing: neighbors(originCell, kRingExpand),
+        destRing: neighbors(destCell, kRingExpand),
       });
     }
 
@@ -493,6 +531,56 @@ export class PublishedTripsService {
     const nextCursor = last ? encodeSearchCursor(last.fechaHoraSalida, last.id) : null;
 
     return { items, nextCursor };
+  }
+
+  /**
+   * RADAR PREVIEW (endpoint interno admin · GET /internal/booking/radar-preview): densidad REAL de ofertas de
+   * carpooling DISPONIBLES (SEARCHABLE + salida futura) cuyo ORIGEN cae alrededor de un punto, por el radio base
+   * y el expandido de la config vigente. Deja que el admin vea el impacto de subir/bajar el radio antes de
+   * aplicarlo.
+   *
+   * REUSA el índice H3 de published-trips (`countAvailableByOriginRing` sobre `[origin_h3, estado,
+   * fecha_hora_salida]`) — NO agrega una estructura espacial nueva. Cuenta el DISCO ACUMULADO de cada radio
+   * (todas las ofertas dentro del anillo k), no el annulus. Si base y expand mapean al mismo k, ambos anillos
+   * dan el mismo count (honesto, no se oculta). `totalInRange` = ofertas dentro del radio MAYOR (el expandido).
+   * Sin ofertas → 0 honesto (no se inventa densidad).
+   */
+  async radarPreview(lat: number, lon: number): Promise<RadarPreview> {
+    const { baseRadiusKm, expandRadiusKm, baseKRing, expandKRing } =
+      await this.searchConfig.getResolvedRadii();
+    const ahora = new Date();
+    const centerCell = toH3({ lat, lon }, DISPATCH_H3_RESOLUTION);
+
+    // Una cuenta por radio (disco acumulado). El expand suele abarcar al base (radio ≥), pero se cuentan por
+    // separado para que el admin vea la densidad de CADA radio configurado. En paralelo, una MUESTRA de los
+    // orígenes reales del radio MÁS ANCHO (el expandido) para plotear marcadores en el mapa — posiciones REALES
+    // de las ofertas, capadas a RADAR_DRIVER_SAMPLE (no se inventan coordenadas).
+    const [baseCount, expandCount, drivers] = await Promise.all([
+      this.repo.countAvailableByOriginRing(neighbors(centerCell, baseKRing), SEARCHABLE_STATES, ahora),
+      this.repo.countAvailableByOriginRing(
+        neighbors(centerCell, expandKRing),
+        SEARCHABLE_STATES,
+        ahora,
+      ),
+      this.repo.sampleAvailableOriginsByRing(
+        neighbors(centerCell, expandKRing),
+        SEARCHABLE_STATES,
+        ahora,
+        RADAR_DRIVER_SAMPLE,
+      ),
+    ]);
+
+    return {
+      center: { lat, lon },
+      rings: [
+        { radiusKm: baseRadiusKm, kRing: baseKRing, count: baseCount },
+        { radiusKm: expandRadiusKm, kRing: expandKRing, count: expandCount },
+      ],
+      // Dentro del radio MAYOR (el expandido abarca el base): la cuenta del radio más grande es el total en rango.
+      totalInRange: expandCount,
+      // Posiciones REALES de los orígenes en el radio expandido (capadas); [] honesto si no hay ofertas.
+      drivers,
+    };
   }
 
   /**

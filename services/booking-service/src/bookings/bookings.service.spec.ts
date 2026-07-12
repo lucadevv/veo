@@ -1287,6 +1287,124 @@ describe('BookingsService · reject (driver-rail, §4.2/§8)', () => {
   });
 });
 
+/**
+ * CANCELAR la propia solicitud (public-rail · ADR-014 §4.2) — la cara del PASAJERO, simétrica a reject:
+ * ownership por passengerId server-truth (dueño OK / no-dueño → 404 anti-IDOR), regla de negocio (solo
+ * PENDIENTE_APROBACION es cancelable → 409 si no), transición PENDIENTE_APROBACION → CANCELADO + evento
+ * booking.cancelled(razon=CANCELADO_PASAJERO), sin cobro, e idempotencia (where atómico → ConflictError).
+ */
+describe('BookingsService · cancel (public-rail, §4.2)', () => {
+  it('happy path: DUEÑO cancela su solicitud PENDIENTE_APROBACION → CANCELADO (booking.cancelled razon=CANCELADO_PASAJERO), NO cobra', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    const gateway = new FakePaymentGateway();
+    const service = new BookingsService(
+      repo,
+      gateway,
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
+
+    const result = await service.cancel(BOOKING_ID, PASSENGER_ID);
+
+    const [, allowed, data, intent] = transitionWithEvent.mock.calls[0]!;
+    expect(allowed).toEqual([BookingState.PENDIENTE_APROBACION]);
+    expect(data).toMatchObject({ estado: BookingState.CANCELADO });
+    expect(intent.eventType).toBe('booking.cancelled');
+    expect(intent.payload).toMatchObject({
+      bookingId: BOOKING_ID,
+      razon: 'CANCELADO_PASAJERO',
+      estado: BookingState.CANCELADO,
+      estadoAnterior: BookingState.PENDIENTE_APROBACION,
+    });
+    // El payload EMITIDO valida contra el SCHEMA PUBLICADO de booking.cancelled (@veo/events): un razon fuera
+    // del enum o un estado mal tipado sería un poison message en el relay (mismo blindaje que approve/reserve).
+    const cancelledSchema = schemaForEvent('booking.cancelled');
+    expect(cancelledSchema!.safeParse(intent.payload).success).toBe(true);
+    // Cancelar NO mueve plata (charge-on-approval: nunca se aprobó).
+    expect(gateway.chargeCalls).toHaveLength(0);
+    expect(result.estado).toBe(BookingState.CANCELADO);
+  });
+
+  it('anti-IDOR: NO-DUEÑO (otro passengerId) → NotFoundError, no transiciona (no filtra existencia)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    // La reserva es de OTRO pasajero: el dueño server-truth no coincide → 404.
+    findByIdFromPrimary.mockResolvedValueOnce(
+      makeBooking({ passengerId: '00000000-0000-0000-0000-0000000000c9' }),
+    );
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
+
+    await expect(service.cancel(BOOKING_ID, PASSENGER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+  });
+
+  it('anti-IDOR: reserva inexistente → NotFoundError (mismo 404 que una ajena)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(null);
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
+
+    await expect(service.cancel(BOOKING_ID, PASSENGER_ID)).rejects.toBeInstanceOf(NotFoundError);
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+  });
+
+  it('estado inválido: solicitud YA APROBADA → ConflictError (409), no transiciona (charge en vuelo → F3/F5)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    // El pasajero es el DUEÑO, pero la reserva ya no está PENDIENTE (fue aprobada): no se cancela por este camino.
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking({ estado: BookingState.APROBADO }));
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
+
+    await expect(service.cancel(BOOKING_ID, PASSENGER_ID)).rejects.toBeInstanceOf(ConflictError);
+    expect(transitionWithEvent).not.toHaveBeenCalled();
+  });
+
+  it('idempotente: la reserva cambió de estado bajo el where atómico → ConflictError (no re-emite el evento)', async () => {
+    const { repo, transitionWithEvent, findByIdFromPrimary } = makeRepo(
+      makeTrip({ id: TRIP_ID, driverId: DRIVER_ID }),
+    );
+    findByIdFromPrimary.mockResolvedValueOnce(makeBooking());
+    // El UPDATE atómico no matchea PENDIENTE_APROBACION (doble-tap / TOCTOU) → 0 filas → ConflictError (P2025).
+    transitionWithEvent.mockRejectedValueOnce(
+      new ConflictError('La reserva cambió de estado', { id: BOOKING_ID }),
+    );
+    const service = new BookingsService(
+      repo,
+      new FakePaymentGateway(),
+      makeIdentity(),
+      makeCostCap().costCap,
+      makeFleet(),
+    );
+
+    await expect(service.cancel(BOOKING_ID, PASSENGER_ID)).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
 describe('BookingsService · listRequestsForTrip (driver-rail, ownership)', () => {
   it('DUEÑO: lista las solicitudes del viaje (keyset paginado)', async () => {
     const { repo, findByPublishedTripId } = makeRepo(

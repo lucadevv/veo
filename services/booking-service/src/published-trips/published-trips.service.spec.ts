@@ -24,6 +24,7 @@ import { BACKGROUND_CHECK_CLEARED, VEHICLE_STATUS_OPERABLE } from '../domain/dri
 import { CANCELABLE_STATES } from '../domain/published-trip-state';
 import type { SearchPublishedTripsDto } from './dto/search-published-trips.dto';
 import type { SearchH3Config } from './published-trips.service';
+import type { SearchRadiusReader } from '../search-radius/carpool-search-config.service';
 import type { CreatePublishedTripDto } from './dto/create-published-trip.dto';
 import type { UpdatePublishedTripDto } from './dto/update-published-trip.dto';
 
@@ -80,6 +81,8 @@ function makeRepo() {
   const findByIdFromPrimary = vi.fn();
   const findByDriverId = vi.fn(async () => []);
   const searchByRoute = vi.fn(async () => []);
+  const countAvailableByOriginRing = vi.fn(async () => 0);
+  const sampleAvailableOriginsByRing = vi.fn(async () => [] as { lat: number; lon: number }[]);
   const repo = {
     createWithEvent,
     createWithEventIdempotent,
@@ -88,6 +91,8 @@ function makeRepo() {
     findByIdFromPrimary,
     findByDriverId,
     searchByRoute,
+    countAvailableByOriginRing,
+    sampleAvailableOriginsByRing,
   } as unknown as PublishedTripsRepository;
   return {
     repo,
@@ -98,6 +103,8 @@ function makeRepo() {
     findByIdFromPrimary,
     findByDriverId,
     searchByRoute,
+    countAvailableByOriginRing,
+    sampleAvailableOriginsByRing,
   };
 }
 
@@ -214,6 +221,23 @@ function makeSearchConfig(over: Partial<SearchH3Config> = {}): SearchH3Config {
 }
 
 /**
+ * Reader del radio fake (SEARCH_RADIUS_READER): envuelve un SearchH3Config { kRing, kRingExpand } en el
+ * contrato que consume el service (getKRings + getResolvedRadii). Los radios km se derivan de los k
+ * (km = k × 0.3, la inversa aproximada del mapeo real) — el radar preview solo necesita coherencia k↔km.
+ */
+function makeSearchReader(config: SearchH3Config = makeSearchConfig()): SearchRadiusReader {
+  return {
+    getKRings: async () => config,
+    getResolvedRadii: async () => ({
+      baseRadiusKm: config.kRing * 0.3,
+      expandRadiusKm: config.kRingExpand * 0.3,
+      baseKRing: config.kRing,
+      expandKRing: config.kRingExpand,
+    }),
+  };
+}
+
+/**
  * CostCapService fake (gate F1b): por default PASA (no-op resuelto). Los tests que NO prueban el tope lo
  * dejan así (aislados del motor de mapas). Los tests del gate F1b inyectan un CostCapService REAL con un
  * MapsClient MOCKEADO (ver describe '· gate F1b') — NUNCA se llama a OSRM real en tests.
@@ -235,19 +259,20 @@ function makeService(opts: {
   fleet?: FleetClient;
   costCap?: CostCapService;
   searchConfig?: SearchH3Config;
+  searchReader?: SearchRadiusReader;
 }) {
   const identity = opts.identity ?? makeIdentity(makeDriver());
   const identityBatch = opts.identityBatch ?? makeIdentityBatch().client;
   const fleet = opts.fleet ?? makeFleet([makeVehicle()]);
   const costCap = opts.costCap ?? makeCostCap().costCap;
-  const searchConfig = opts.searchConfig ?? makeSearchConfig();
+  const searchReader = opts.searchReader ?? makeSearchReader(opts.searchConfig ?? makeSearchConfig());
   return new PublishedTripsService(
     opts.repo,
     identity,
     identityBatch,
     fleet,
     costCap,
-    searchConfig,
+    searchReader,
   );
 }
 
@@ -1085,6 +1110,112 @@ describe('PublishedTripsService · BÚSQUEDA (F2 · H3 ring AND + filtros + orde
       ValidationError,
     );
     expect(searchByRoute).not.toHaveBeenCalled();
+  });
+});
+
+describe('PublishedTripsService · BÚSQUEDA · radio EDITABLE EN RUNTIME (config del admin, F2)', () => {
+  it('usa el k VIGENTE del reader (no un env estático): un radio admin k=3/k=4 arma neighbors(centro, 3) y expande a 4', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    const spy = searchByRoute as ReturnType<typeof vi.fn>;
+    spy.mockResolvedValueOnce([]); // base k=3 vacío → expande
+    spy.mockResolvedValueOnce([makeTripRow()]); // expand k=4 encuentra
+    // El admin subió el radio (config): base=3, expand=4. El service DEBE leerlo en runtime.
+    const service = makeService({ repo, searchConfig: { kRing: 3, kRingExpand: 4 } });
+
+    await service.search(makeSearchDto());
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls[0]![0].originRing).toEqual(
+      neighbors(toH3(SEARCH_ORIGIN, DISPATCH_H3_RESOLUTION), 3),
+    );
+    expect(spy.mock.calls[1]![0].originRing).toEqual(
+      neighbors(toH3(SEARCH_ORIGIN, DISPATCH_H3_RESOLUTION), 4),
+    );
+  });
+
+  it('un cambio del reader entre búsquedas se HONRA sin reconstruir el service (admin edita en caliente)', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValue([makeTripRow()]);
+    // Reader mutable: emula el PUT del admin que invalida el cache → la siguiente búsqueda ve el k nuevo.
+    let kRing = 1;
+    const mutableReader: SearchRadiusReader = {
+      getKRings: async () => ({ kRing, kRingExpand: kRing + 1 }),
+      getResolvedRadii: async () => ({
+        baseRadiusKm: kRing * 0.3,
+        expandRadiusKm: (kRing + 1) * 0.3,
+        baseKRing: kRing,
+        expandKRing: kRing + 1,
+      }),
+    };
+    const service = makeService({ repo, searchReader: mutableReader });
+
+    await service.search(makeSearchDto());
+    const firstK = (searchByRoute as ReturnType<typeof vi.fn>).mock.calls[0]![0].originRing;
+    expect(firstK).toEqual(neighbors(toH3(SEARCH_ORIGIN, DISPATCH_H3_RESOLUTION), 1));
+
+    kRing = 5; // el admin editó el radio en caliente
+    await service.search(makeSearchDto());
+    const secondK = (searchByRoute as ReturnType<typeof vi.fn>).mock.calls[1]![0].originRing;
+    expect(secondK).toEqual(neighbors(toH3(SEARCH_ORIGIN, DISPATCH_H3_RESOLUTION), 5));
+  });
+});
+
+describe('PublishedTripsService · RADAR PREVIEW (F2 · densidad real por radio)', () => {
+  const CENTER = { lat: -12.05, lon: -77.04 };
+
+  it('cuenta ofertas disponibles por radio base/expand (reusa el índice H3) y arma la vista', async () => {
+    const { repo, countAvailableByOriginRing } = makeRepo();
+    const spy = countAvailableByOriginRing as ReturnType<typeof vi.fn>;
+    spy.mockResolvedValueOnce(2); // dentro del radio base (k=1)
+    spy.mockResolvedValueOnce(7); // dentro del radio expand (k=2)
+    const service = makeService({ repo }); // reader default k=1/k=2 → km 0.3/0.6
+
+    const preview = await service.radarPreview(CENTER.lat, CENTER.lon);
+
+    expect(preview.center).toEqual(CENTER);
+    expect(preview.rings).toEqual([
+      { radiusKm: 0.3, kRing: 1, count: 2 },
+      { radiusKm: 0.6, kRing: 2, count: 7 },
+    ]);
+    // totalInRange = dentro del radio MAYOR (el expandido).
+    expect(preview.totalInRange).toBe(7);
+    // Cada anillo consultó neighbors(centro, k) — reusa el mismo índice H3, sin estructura nueva.
+    expect(spy.mock.calls[0]![0]).toEqual(
+      neighbors(toH3(CENTER, DISPATCH_H3_RESOLUTION), 1),
+    );
+    expect(spy.mock.calls[1]![0]).toEqual(
+      neighbors(toH3(CENTER, DISPATCH_H3_RESOLUTION), 2),
+    );
+  });
+
+  it('devuelve la MUESTRA de orígenes reales (lat/lon) del radio expandido para plotear en el mapa', async () => {
+    const { repo, sampleAvailableOriginsByRing } = makeRepo();
+    const spy = sampleAvailableOriginsByRing as ReturnType<typeof vi.fn>;
+    const origins = [
+      { lat: -12.05, lon: -77.04 },
+      { lat: -12.06, lon: -77.05 },
+    ];
+    spy.mockResolvedValue(origins);
+    const service = makeService({ repo }); // reader default k=1/k=2
+
+    const preview = await service.radarPreview(CENTER.lat, CENTER.lon);
+
+    expect(preview.drivers).toEqual(origins);
+    // Se muestrea el anillo MÁS ANCHO (el expandido, k=2) y con el tope de 100.
+    expect(spy.mock.calls[0]![0]).toEqual(neighbors(toH3(CENTER, DISPATCH_H3_RESOLUTION), 2));
+    expect(spy.mock.calls[0]![3]).toBe(100);
+  });
+
+  it('0 honesto cuando no hay ofertas alrededor (no inventa densidad ni posiciones)', async () => {
+    const { repo, countAvailableByOriginRing } = makeRepo();
+    (countAvailableByOriginRing as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+    const service = makeService({ repo });
+
+    const preview = await service.radarPreview(CENTER.lat, CENTER.lon);
+
+    expect(preview.totalInRange).toBe(0);
+    expect(preview.rings.every((r) => r.count === 0)).toBe(true);
+    expect(preview.drivers).toEqual([]);
   });
 });
 

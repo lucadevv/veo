@@ -233,3 +233,25 @@ model CostPerKmConfig {
   @@map("cost_per_km_config")
   @@schema("booking")
 }
+
+/// Radio de BÚSQUEDA del carpooling (F2 · §6.2), editable EN CALIENTE por el admin. SINGLETON GLOBAL
+/// (id='GLOBAL') — espeja dispatch_radius_config de dispatch-service: version CAS + outbox al PUT + cache
+/// in-proc con invalidación. Los radios se guardan en KM (unidad del admin) y se mapean a k-rings H3 res-9
+/// en runtime (`kRingForRadiusKm`, ~0.3km/anillo): `base` = anillo de la pasada base, `expand` = anillo
+/// EXPANDIDO al que la búsqueda reintenta UNA vez si la base da 0 resultados. Se SIEMBRA base=0.3km (k1) /
+/// expand=0.6km (k2), equivalente a los defaults env SEARCH_H3_K_RING=1 / _EXPAND=2 (env queda de FALLBACK).
+/// DEGRADACIÓN HONESTA: si la fila no existe (DB sin migrar) el service degrada al env (version 0).
+model CarpoolSearchConfig {
+  /// Id fijo del singleton (Tier 1 GLOBAL). Una sola fila para todo el marketplace.
+  id             String   @id
+  /// Radio base de la búsqueda en KM (pasada base). Se mapea a k-ring H3 res-9 en runtime (~0.3km/anillo).
+  baseRadiusKm   Float    @map("base_radius_km")
+  /// Radio EXPANDIDO en KM: la búsqueda reintenta UNA vez con este radio si la base da 0 resultados.
+  expandRadiusKm Float    @map("expand_radius_km")
+  /// Versión MONOTÓNICA (se bumpea en cada PUT · optimistic locking CAS).
+  version        Int      @default(0)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("carpool_search_config")
+  @@schema("booking")
+}

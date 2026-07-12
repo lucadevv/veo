@@ -1,37 +1,30 @@
 /**
  * PublishedTripsModule — el ciclo lado-conductor de la oferta de carpooling (publicar/editar/cancelar/
- * listar). Cablea los clientes gRPC SALIENTES de los gates F1a (identity + fleet) como providers locales
- * del módulo (mismo patrón que dispatch-service): cada uno se construye con su URL del ConfigService + el
- * INTERNAL_IDENTITY_SECRET (provisto global por CoreModule). El servicio depende de los PUERTOS
- * (IDENTITY_CLIENT/FLEET_CLIENT), no de las clases gRPC — en tests se inyecta un fake del mismo contrato.
+ * listar) + la BÚSQUEDA geo. Cablea los clientes gRPC SALIENTES de los gates F1a (identity + fleet) como
+ * providers locales del módulo (mismo patrón que dispatch-service): cada uno se construye con su URL del
+ * ConfigService + el INTERNAL_IDENTITY_SECRET (provisto global por CoreModule). El servicio depende de los
+ * PUERTOS (IDENTITY_CLIENT/FLEET_CLIENT), no de las clases gRPC — en tests se inyecta un fake del mismo contrato.
+ *
+ * F2 — RADIO EDITABLE POR EL ADMIN: importa CarpoolSearchConfigModule y cablea el reader del radio
+ * (SEARCH_RADIUS_READER → CarpoolSearchConfigService) que PublishedTripsService consume en runtime (búsqueda +
+ * radar). El controller interno admin (GET/PUT config + radar-preview) se monta ACÁ (no en el módulo de config)
+ * porque el radar-preview reusa PublishedTripsService — así ambos deps conviven sin ciclo de módulos.
  */
-import { Module, type Provider } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import {
-  PublishedTripsService,
-  SEARCH_H3_CONFIG,
-  type SearchH3Config,
-} from './published-trips.service';
+import { Module } from '@nestjs/common';
+import { PublishedTripsService } from './published-trips.service';
 import { PublishedTripsRepository } from './published-trips.repository';
 import { PublishedTripsController } from './published-trips.controller';
 import { CostCapModule } from '../cost-cap/cost-cap.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { IdentityModule } from '../identity/identity.module';
 import { FleetModule } from '../fleet/fleet.module';
-import type { Env } from '../config/env.schema';
-
-/**
- * Config de la BÚSQUEDA geo H3 (F2): k del anillo base + k expandido (si la base da 0). Desde env
- * (SEARCH_H3_K_RING / SEARCH_H3_K_RING_EXPAND), tunable sin redeploy. Objeto TIPADO (SearchH3Config).
- */
-const searchH3ConfigProvider: Provider = {
-  provide: SEARCH_H3_CONFIG,
-  inject: [ConfigService],
-  useFactory: (config: ConfigService<Env, true>): SearchH3Config => ({
-    kRing: config.getOrThrow<number>('SEARCH_H3_K_RING'),
-    kRingExpand: config.getOrThrow<number>('SEARCH_H3_K_RING_EXPAND'),
-  }),
-};
+import { CarpoolSearchConfigModule } from '../search-radius/carpool-search-config.module';
+import {
+  CarpoolSearchConfigService,
+  SEARCH_RADIUS_READER,
+} from '../search-radius/carpool-search-config.service';
+import { SearchRadiusController } from '../search-radius/search-radius.controller';
+import { AdminIdentityGuard } from '../search-radius/admin-identity.guard';
 
 @Module({
   // BookingsModule exporta BookingsService (lo consume el handler GET /:id/bookings del controller, F3b).
@@ -39,9 +32,17 @@ const searchH3ConfigProvider: Provider = {
   // BookingsModule también lo consuma sin cerrar un ciclo published-trips ↔ bookings).
   // IdentityModule provee IDENTITY_CLIENT + IDENTITY_BATCH_CLIENT (gates del conductor en publish + búsqueda).
   // FleetModule provee FLEET_CLIENT. Ambos son proveedores ÚNICOS (antes duplicados inline en cada módulo).
-  imports: [CostCapModule, BookingsModule, FleetModule, IdentityModule],
-  providers: [PublishedTripsService, PublishedTripsRepository, searchH3ConfigProvider],
-  controllers: [PublishedTripsController],
+  // CarpoolSearchConfigModule exporta CarpoolSearchConfigService (radio de búsqueda editable en runtime).
+  imports: [CostCapModule, BookingsModule, FleetModule, IdentityModule, CarpoolSearchConfigModule],
+  providers: [
+    PublishedTripsService,
+    PublishedTripsRepository,
+    // El reader del radio (búsqueda + radar) inyecta la MISMA instancia del CarpoolSearchConfigService (que
+    // el controller GET/PUT también usa) → un solo cache in-proc: el PUT invalida y la búsqueda lo ve al toque.
+    { provide: SEARCH_RADIUS_READER, useExisting: CarpoolSearchConfigService },
+    AdminIdentityGuard,
+  ],
+  controllers: [PublishedTripsController, SearchRadiusController],
   exports: [PublishedTripsService],
 })
 export class PublishedTripsModule {}

@@ -46,6 +46,11 @@ export const BookingEventType = {
   COMPLETED: 'booking.completed',
   /// Cancelación (con tier) o cobro fallido / asiento-lleno → payment-service gestiona el Refund (F3/F5).
   CANCELLED: 'booking.cancelled',
+
+  // ── F2 · config editable por el admin ──
+  /// El admin REEMPLAZÓ el radio de búsqueda del carpooling (CarpoolSearchConfig). Outbox-en-transacción del
+  /// PUT interno (audit + consumidores futuros). Espeja dispatch.radius_config_updated de dispatch-service.
+  SEARCH_RADIUS_CONFIG_UPDATED: 'booking.search_radius_config_updated',
 } as const;
 
 export type BookingEventType = (typeof BookingEventType)[keyof typeof BookingEventType];

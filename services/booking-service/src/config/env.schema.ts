@@ -81,6 +81,13 @@ export const envSchema = z
     SEARCH_H3_K_RING: z.coerce.number().int().min(0).max(5).default(1),
     SEARCH_H3_K_RING_EXPAND: z.coerce.number().int().min(0).max(8).default(2),
 
+    // FUENTE AUTORITATIVA del radio de búsqueda: la config editable por el admin (CarpoolSearchConfig en DB,
+    // singleton GLOBAL, sembrada base=0.3km/expand=0.6km). Los env SEARCH_H3_K_RING/_EXPAND de arriba quedan
+    // como SEED del default (env → km = k × 0.3) y FALLBACK de degradación honesta si la config no está.
+    // TTL del cache in-proc de la config del radio (ms). Slot corto; el PUT del admin invalida la réplica que
+    // lo atiende de inmediato (autoaplica) y las demás convergen al vencer el TTL (sin acoplar a Kafka).
+    CARPOOL_SEARCH_CONFIG_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10_000),
+
     // ── @veo/maps (F1b · tope de cost-sharing por distancia) · ROUTING SOBERANO (§0.7) ────────────
     // El tope legal anti-lucro se calcula sobre la DISTANCIA real de la ruta (km) × costo/km. La distancia
     // sale SÓLO de @veo/maps (paquete workspace, soberanía OSM self-hosted §0.7 — NUNCA un tercero SaaS),

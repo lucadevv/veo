@@ -16,9 +16,14 @@
  * F3b (este lote): aprobar/rechazar una solicitud (POST /bookings/:id/{approve,reject}, driver-rail). El gate
  * server-side (dueño del PublishedTrip + driver activo) vive en el service (capa 2/3), no solo en el guard.
  *
- * NOTA de scope: cancelar (DELETE /bookings/:id → Refund por tier) es F3c; "ver MIS reservas" (GET
- * /bookings/mine) es F1. Listar las solicitudes de un viaje (GET /published-trips/:id/bookings, driver-rail)
- * vive en PublishedTripsController (su path es /published-trips/...), delegando a BookingsService.
+ * F3c-passenger (este lote): el PASAJERO cancela su PROPIA solicitud aún PENDIENTE (POST /bookings/:id/cancel,
+ * public-rail). Cara del pasajero simétrica a reject (conductor): PENDIENTE_APROBACION → CANCELADO, sin cobro ni
+ * Refund (charge-on-approval: nunca se aprobó). El gate de ownership + estado vive en el service (capa 2/3).
+ *
+ * NOTA de scope: la cancelación CON-TIER tras el cobro/confirmación (Refund por tier) es F3/F5 — este endpoint
+ * SOLO cubre la solicitud aún no resuelta (sin plata en juego). "Ver MIS reservas" (GET /bookings/mine) es F1.
+ * Listar las solicitudes de un viaje (GET /published-trips/:id/bookings, driver-rail) vive en
+ * PublishedTripsController (su path es /published-trips/...), delegando a BookingsService.
  *
  * RIEL MIXTO: el grueso de los handlers es public-rail (el pasajero reserva/lee), pero approve/reject son
  * driver-rail. Por eso el @Audiences va POR MÉTODO (no a nivel clase): AudienceGuard a nivel clase corre para
@@ -82,6 +87,19 @@ export class BookingsController {
   getById(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
     // passengerId = la identidad del pasajero (server-truth, no del path · anti-IDOR): solo lee SU reserva.
     return this.bookings.getById(id, user.userId);
+  }
+
+  @Audiences(InternalAudience.PUBLIC_RAIL)
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Cancelar la PROPIA solicitud (PENDIENTE_APROBACION → CANCELADO, sin cobro) · public-rail. Cara del pasajero, simétrica a reject (conductor).',
+  })
+  cancel(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    // passengerId = la identidad del pasajero (server-truth, no del path · anti-IDOR): solo cancela SU reserva.
+    // El gate de ownership + estado (solo PENDIENTE_APROBACION) vive en el service (capa 2/3), no solo en el guard.
+    return this.bookings.cancel(id, user.userId);
   }
 
   // ── driver-rail: el CONDUCTOR aprueba/rechaza una solicitud sobre uno de SUS viajes (ADR-014 §8) ────────
