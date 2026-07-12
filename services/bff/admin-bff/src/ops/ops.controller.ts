@@ -71,6 +71,7 @@ export class OpsController {
   // @Roles amplio de la clase ops A PROPÓSITO (defensa en profundidad: solo Compliance+ ve las cabinas — el
   // front ya lo gatea con can(live:view) y media re-autoriza el feed con doble-auth). No abre video: solo el tile.
   @Get('live-cabins')
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Permission('live:view')
   @ApiOperation({ summary: 'Cabinas de los viajes en curso para el muro de cámaras (tiles enriquecidos)' })
   liveCabins(@CurrentUser() user: AuthenticatedUser): Promise<LiveCabin[]> {
@@ -102,21 +103,22 @@ export class OpsController {
     return this.ops.driversSummary(user);
   }
 
-  // SIN @Permission a propósito (Ola B · reportado): semánticamente es `fleet:view`, pero este endpoint hereda
-  // el @Roles AMPLIO de la clase ops (incluye SUPPORT/DISPATCHER) y `fleet:view` base NO concede a esos roles →
-  // mapearlo daría 403 a roles que el @Roles SÍ permite (rompe el invariante base ⊇ @Roles del overlay). El
-  // endpoint está sobre-permisionado respecto de su pantalla (/fleet, fleet:view). Queda ungobernado hasta
-  // ajustar su @Roles o moverlo al fleet.controller.
+  // Estrechado a los roles de `fleet:view` (cierra el reporte de Ola B): su pantalla (/fleet) ya gatea con
+  // fleet:view, así que sobre-restringir el @Roles amplio de la clase ops no le quita el dato a nadie que vea
+  // la pantalla — y permite gobernarlo con @Permission sin romper el invariante base ⊇ @Roles del overlay.
   @Get('vehicles/summary')
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('fleet:view')
   @ApiOperation({ summary: 'Conteo de vehículos por estado documental (stat cards)' })
   vehiclesSummary(@CurrentUser() user: AuthenticatedUser): Promise<VehicleCounts> {
     return this.ops.vehiclesSummary(user);
   }
 
-  // SIN @Permission a propósito (Ola B · reportado): mismo caso que vehicles/summary — semánticamente
-  // `fleet:review` pero heredando el @Roles amplio de la clase ops; `fleet:review` base no concede a
-  // SUPPORT/DISPATCHER → mapearlo violaría base ⊇ @Roles. Ungobernado hasta reubicar/estrechar el endpoint.
+  // Mismo cierre que vehicles/summary: la pantalla (/fleet/reviews) gatea con fleet:review, cuya base es
+  // Compliance+ → estrechar el @Roles heredado de la clase ops mantiene base ⊇ @Roles y gobierna el endpoint.
   @Get('reviews/summary')
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Permission('fleet:review')
   @ApiOperation({ summary: 'Conteo de las colas de revisión (cola unificada de Revisiones)' })
   reviewsSummary(@CurrentUser() user: AuthenticatedUser): Promise<ReviewQueueSummary> {
     return this.ops.reviewsSummary(user);

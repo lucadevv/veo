@@ -27,6 +27,7 @@ describe('AnalyticsService.revenue (bff) · view de revenue por rango', () => {
       refundedCents: 450,
       tripCount: 100,
       byMode: [{ mode: 'ON_DEMAND', revenueCents: 3000 }],
+      topDistricts: [{ district: 'Miraflores', revenueCents: 1800 }],
       previous: { moneyInCents: 2000, tripCount: 80 },
       series: [{ bucket: '2026-07-15', revenueCents: 3000 }],
     }));
@@ -42,6 +43,7 @@ describe('AnalyticsService.revenue (bff) · view de revenue por rango', () => {
       tripCount: 100,
       avgTicketCents: 30, // round(3000 / 100)
       byMode: [{ mode: 'ON_DEMAND', revenueCents: 3000 }],
+      topDistricts: [{ district: 'Miraflores', revenueCents: 1800 }], // passthrough del zonificado de payment
       deltas: {
         moneyInPct: 0.5, // (3000 − 2000) / 2000
         tripCountPct: 0.25, // (100 − 80) / 80
@@ -72,6 +74,7 @@ describe('AnalyticsService.revenue (bff) · view de revenue por rango', () => {
       tripCount: 0,
       avgTicketCents: 0,
       byMode: [],
+      topDistricts: [],
       deltas: { moneyInPct: null, tripCountPct: null, avgTicketPct: null },
       series: [],
     });
