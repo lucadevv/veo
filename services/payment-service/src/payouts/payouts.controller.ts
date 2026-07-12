@@ -31,10 +31,18 @@ import {
   type PayoutPage,
   type PayoutDetail,
   type PayoutStats,
+  type PayoutTripsResult,
   type PayoutDisburseSummary,
   type ReleaseHeldPayoutsResult,
 } from './payouts.service';
-import { RunPayoutsDto, ListPayoutsQueryDto, ListAllPayoutsQueryDto } from './dto/payouts.dto';
+import type { Payout } from '../generated/prisma';
+import {
+  RunPayoutsDto,
+  ListPayoutsQueryDto,
+  ListAllPayoutsQueryDto,
+  ExportPayoutsQueryDto,
+  EXPORT_STATUS_ALL,
+} from './dto/payouts.dto';
 
 // Riel del conductor/operador (NO service-rail · mínimo privilegio ADR-014 §5.5): declara explícito el set
 // previo a F3a para que el AudienceGuard rechace fail-closed a un service-rail (la membresía global ahora
@@ -88,6 +96,20 @@ export class PayoutsController {
     return this.payouts.getStats();
   }
 
+  // ── Export del SET COMPLETO del filtro (sin paginar) para el CSV server-side (FINANCE/ADMIN). Ruta ESTÁTICA
+  // `export` ANTES de la paramétrica `:id` (que no capture "export"). Devuelve las filas Payout crudas: el CSV lo
+  // arma el admin-bff (resuelve nombre gateado por PII, formatea a soles, audita). `status=ALL`|omitido = todo. ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get('export')
+  @ApiOperation({
+    summary: 'Todas las filas del filtro (sin paginar) para el export CSV — FINANCE/ADMIN',
+  })
+  exportAll(@Query() query: ExportPayoutsQueryDto): Promise<Payout[]> {
+    const status = !query.status || query.status === EXPORT_STATUS_ALL ? undefined : query.status;
+    return this.payouts.listAllForExport(status);
+  }
+
   // ── Detalle de UN payout con breakdown de auditoría (FINANCE/ADMIN). Segmento `:id` DESPUÉS de `all`/`stats`
   // (estáticos) para que la paramétrica no los capture. Lectura (sin step-up): el desglose es de los montos del conductor. ──
   @UseGuards(RolesGuard)
@@ -99,6 +121,19 @@ export class PayoutsController {
   })
   getOne(@Param('id', ParseUUIDPipe) id: string): Promise<PayoutDetail> {
     return this.payouts.getPayout(id);
+  }
+
+  // ── "Viajes incluidos" del payout (FINANCE/ADMIN): reconstrucción por período de los Payment del conductor
+  // (el payout no persiste sus líneas). Lista capada + totalCount para el "+N más". Lectura de agregado del
+  // propio conductor (sin step-up, mismo gate que el detalle). Ruta `:id/trips` (2 segmentos) no colisiona con `:id`. ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get(':id/trips')
+  @ApiOperation({
+    summary: 'Viajes incluidos en un payout (reconstrucción por período) — FINANCE/ADMIN',
+  })
+  getTrips(@Param('id', ParseUUIDPipe) id: string): Promise<PayoutTripsResult> {
+    return this.payouts.getPayoutTrips(id);
   }
 
   // ── Disparo manual (BR-P05): mutación de PLATA → finance:payout es EXCLUSIVO de FINANCE (VEO_SPEC_ADMIN

@@ -1,9 +1,10 @@
 /**
  * PayoutsService.getStats · Seam 1 — KPIs de la pantalla de Liquidaciones (panel FINANCE): volumen total
- * liquidado + conteos por estado. Lo crítico a fijar:
+ * liquidado + volumen por bucket + conteos por estado. Lo crítico a fijar:
  *  - UN solo `groupBy` por `status` (agrega en la DB, no materializa filas).
  *  - `totalCents` = suma de `_sum.amountCents` de TODOS los estados (el NETO ya persistido en cada fila).
- *  - El mapeo status→campo usa el enum `PayoutStatus` (PAYOUT_STATUS_COUNT_FIELD), sin strings mágicos.
+ *  - `paidCents`/`heldCents`/`failedCents` = el `_sum.amountCents` del bucket PROCESSED/HELD/FAILED (mismo groupBy).
+ *  - El mapeo status→campo usa el enum `PayoutStatus` (PAYOUT_STATUS_COUNT_FIELD/_CENTS_FIELD), sin strings mágicos.
  *  - Estados sin payouts (ausentes del groupBy) quedan en 0 (degradación honesta del agregado).
  * READ puro (no mutación de dinero) → unit con fake REPO (el service ya no toca Prisma; el repo es el único
  * dueño del groupBy — mismo criterio que ratings.service.spec.ts).
@@ -49,12 +50,32 @@ describe('PayoutsService.getStats · Seam 1 (KPIs de payouts)', () => {
     const stats = await svc.getStats();
     expect(stats).toEqual({
       totalCents: 185_000, // 30k + 10k + 120k + 20k + 5k
+      paidCents: 120_000, // PROCESSED
+      heldCents: 20_000, // HELD
+      failedCents: 5_000, // FAILED
       pendingCount: 3,
       processingCount: 1,
       processedCount: 12,
       heldCount: 2,
       failedCount: 1,
     });
+  });
+
+  it('abre el volumen por bucket: paid/held/failed = _sum.amountCents de su estado (PENDING/PROCESSING no exponen bucket)', async () => {
+    const { svc } = makeService([
+      row(PayoutStatus.PENDING, 3, 30_000), // suma a totalCents pero NO a ningún bucket
+      row(PayoutStatus.PROCESSING, 1, 10_000), // idem
+      row(PayoutStatus.PROCESSED, 12, 120_000),
+      row(PayoutStatus.HELD, 2, 20_000),
+      row(PayoutStatus.FAILED, 1, 5_000),
+    ]);
+    const stats = await svc.getStats();
+    expect(stats.paidCents).toBe(120_000);
+    expect(stats.heldCents).toBe(20_000);
+    expect(stats.failedCents).toBe(5_000);
+    // Los buckets NO suman el total: PENDING(30k)+PROCESSING(10k) quedan solo en totalCents.
+    expect(stats.paidCents + stats.heldCents + stats.failedCents).toBe(145_000);
+    expect(stats.totalCents).toBe(185_000);
   });
 
   it('estados AUSENTES del groupBy quedan en 0 (sin payouts de ese estado)', async () => {
@@ -66,13 +87,18 @@ describe('PayoutsService.getStats · Seam 1 (KPIs de payouts)', () => {
     expect(stats.processedCount).toBe(0);
     expect(stats.heldCount).toBe(0);
     expect(stats.failedCount).toBe(0);
+    // Sin PROCESSED/HELD/FAILED → sus buckets de volumen quedan en 0.
+    expect(stats.paidCents).toBe(0);
+    expect(stats.heldCents).toBe(0);
+    expect(stats.failedCents).toBe(0);
   });
 
-  it('_sum.amountCents null (grupo sin montos) cuenta como 0 en totalCents', async () => {
-    const { svc } = makeService([row(PayoutStatus.PENDING, 2, null)]);
+  it('_sum.amountCents null (grupo sin montos) cuenta como 0 en totalCents y en su bucket', async () => {
+    const { svc } = makeService([row(PayoutStatus.HELD, 2, null)]);
     const stats = await svc.getStats();
-    expect(stats.pendingCount).toBe(2);
+    expect(stats.heldCount).toBe(2);
     expect(stats.totalCents).toBe(0);
+    expect(stats.heldCents).toBe(0);
   });
 
   it('sin payouts (groupBy vacío) → todo en 0', async () => {
@@ -80,6 +106,9 @@ describe('PayoutsService.getStats · Seam 1 (KPIs de payouts)', () => {
     const stats = await svc.getStats();
     expect(stats).toEqual({
       totalCents: 0,
+      paidCents: 0,
+      heldCents: 0,
+      failedCents: 0,
       pendingCount: 0,
       processingCount: 0,
       processedCount: 0,

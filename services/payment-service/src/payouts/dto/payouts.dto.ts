@@ -1,7 +1,21 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { PayoutStatus } from '../../generated/prisma';
+
+/** Filtro del export CSV: un PayoutStatus concreto o 'ALL' (todo el set). `undefined` se trata como ALL. */
+export const EXPORT_STATUS_ALL = 'ALL';
+export type ExportPayoutStatus = PayoutStatus | typeof EXPORT_STATUS_ALL;
 
 export class RunPayoutsDto {
   @ApiPropertyOptional({ description: 'Inicio del período (ISO). Por defecto, la semana previa' })
@@ -41,4 +55,15 @@ export class ListAllPayoutsQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+/** Export CSV de payouts: filtro por estado (o 'ALL' = todo el set). Sin paginación (exporta el filtro entero). */
+export class ExportPayoutsQueryDto {
+  @ApiPropertyOptional({
+    enum: [...Object.values(PayoutStatus), EXPORT_STATUS_ALL],
+    description: "Filtra por estado del payout, o 'ALL' para todo el set (default ALL)",
+  })
+  @IsOptional()
+  @IsIn([...Object.values(PayoutStatus), EXPORT_STATUS_ALL])
+  status?: ExportPayoutStatus;
 }

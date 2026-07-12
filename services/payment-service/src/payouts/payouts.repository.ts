@@ -197,6 +197,62 @@ export class PayoutsRepository {
     return rows;
   }
 
+  /** Suma de los BONOS de incentivo ligados a ESTE payout (paidInPayoutId · componente NETO del monto). Réplica.
+   *  Mismo patrón acotado-por-FK que sumAppliedCreditsForPayout/sumSettledDebtsForPayout (no un scan por driver). */
+  async sumBonusForPayout(payoutId: string): Promise<number> {
+    const agg = await this.prisma.read.incentiveProgress.aggregate({
+      where: { paidInPayoutId: payoutId },
+      _sum: { rewardGrantedCents: true },
+    });
+    return agg._sum.rewardGrantedCents ?? 0;
+  }
+
+  /**
+   * "Viajes incluidos" de un payout: los Payment del conductor capturados en el período. RECONSTRUCCIÓN — el
+   * payout NO persiste sus líneas; se rearman con la MISMA condición POSITIVA que usa el run de liquidación
+   * (`findCapturedNonCashPayments`): método NON-CASH + estado liquidado (CAPTURED/PARTIALLY_REFUNDED) + rango
+   * `capturedAt`, acotado al conductor. Empuja el índice [driverId, status, capturedAt]. `take` capa la lista
+   * (el conteo total va aparte). Réplica. */
+  findDriverCapturedPaymentsForPeriod(
+    driverId: string,
+    from: Date,
+    to: Date,
+    take: number,
+  ): Promise<Pick<Payment, 'tripId' | 'grossCents' | 'capturedAt' | 'method'>[]> {
+    return this.prisma.read.payment.findMany({
+      where: {
+        driverId,
+        method: { in: [...NON_CASH_METHODS] },
+        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
+        capturedAt: { gte: from, lt: to },
+      },
+      select: { tripId: true, grossCents: true, capturedAt: true, method: true },
+      orderBy: { capturedAt: 'desc' },
+      take,
+    });
+  }
+
+  /** Conteo TOTAL de los viajes reconstruidos del payout (para el "+N más" del panel). MISMA condición que
+   *  findDriverCapturedPaymentsForPeriod, sin materializar filas. Réplica. */
+  countDriverCapturedPaymentsForPeriod(driverId: string, from: Date, to: Date): Promise<number> {
+    return this.prisma.read.payment.count({
+      where: {
+        driverId,
+        method: { in: [...NON_CASH_METHODS] },
+        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
+        capturedAt: { gte: from, lt: to },
+      },
+    });
+  }
+
+  /** TODAS las filas del filtro admin (sin paginar) para el export CSV. Filtrable por estado; orden id desc
+   *  (uuidv7 ⇒ cronológico estable, mismo criterio que findPayoutsPage). Réplica. */
+  findAllPayoutsForExport(status?: PayoutStatus): Promise<Payout[]> {
+    const where: Prisma.PayoutWhereInput = {};
+    if (status) where.status = status;
+    return this.prisma.read.payout.findMany({ where, orderBy: { id: 'desc' } });
+  }
+
   // ── Escrituras no transaccionales (primary) ─────────────────────────────────────────────────────────
 
   /** BACKSTOP del gate de review en el DESEMBOLSO: retiene (→HELD) los PENDING flaggeados por id. CAS

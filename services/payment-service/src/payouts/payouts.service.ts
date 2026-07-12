@@ -102,15 +102,38 @@ export interface PayoutPage {
 export interface PayoutDetail extends Payout {
   creditBackCents: number;
   debtSettledCents: number;
+  /** Bono de incentivo pagado en ESTE payout (suma de IncentiveProgress ligados por paidInPayoutId). NETO. */
+  bonusCents: number;
 }
+
+/** Una línea de "viajes incluidos" de un payout (reconstrucción por período). `amountCents` = BRUTO del viaje. */
+export interface PayoutTrip {
+  tripId: string;
+  amountCents: number;
+  capturedAt: string | null;
+  method: string | null;
+}
+
+/** Resultado de "viajes incluidos": lista capada (`trips`) + conteo TOTAL del período (`totalCount`). */
+export interface PayoutTripsResult {
+  trips: PayoutTrip[];
+  totalCount: number;
+}
+
+/** Cap de la lista de "viajes incluidos" que devuelve el endpoint (el resto se resume en `totalCount`). */
+const PAYOUT_TRIPS_CAP = 50;
 
 /**
  * KPIs agregados de payouts para el panel FINANCE (GET /payouts/stats). `totalCents` = volumen total liquidado
- * (suma de `amountCents` de TODOS los estados, Int céntimos); el resto son CONTEOS por estado. Un solo `groupBy`,
- * sin materializar filas. Dinero SIEMPRE Int céntimos.
+ * (suma de `amountCents` de TODOS los estados, Int céntimos); `paidCents`/`heldCents`/`failedCents` abren ese
+ * volumen por bucket (PROCESSED/HELD/FAILED) del MISMO groupBy que ya suma `amountCents` por status; el resto son
+ * CONTEOS por estado. Un solo `groupBy`, sin materializar filas. Dinero SIEMPRE Int céntimos.
  */
 export interface PayoutStats {
   totalCents: number;
+  paidCents: number;
+  heldCents: number;
+  failedCents: number;
   pendingCount: number;
   processingCount: number;
   processedCount: number;
@@ -119,12 +142,28 @@ export interface PayoutStats {
 }
 
 /** Mapeo enum→campo de conteo (CERO strings mágicos): cada PayoutStatus va a su contador tipado en PayoutStats. */
-const PAYOUT_STATUS_COUNT_FIELD: Record<PayoutStatus, keyof Omit<PayoutStats, 'totalCents'>> = {
+const PAYOUT_STATUS_COUNT_FIELD: Record<
+  PayoutStatus,
+  keyof Pick<
+    PayoutStats,
+    'pendingCount' | 'processingCount' | 'processedCount' | 'heldCount' | 'failedCount'
+  >
+> = {
   [PayoutStatus.PENDING]: 'pendingCount',
   [PayoutStatus.PROCESSING]: 'processingCount',
   [PayoutStatus.PROCESSED]: 'processedCount',
   [PayoutStatus.HELD]: 'heldCount',
   [PayoutStatus.FAILED]: 'failedCount',
+};
+
+/** Mapeo enum→campo de VOLUMEN por bucket (parcial: solo los estados que exponen su cents). El `_sum.amountCents`
+ *  del groupBy se enruta a su bucket tipado sin strings mágicos; los estados sin bucket solo aportan a `totalCents`. */
+const PAYOUT_STATUS_CENTS_FIELD: Partial<
+  Record<PayoutStatus, keyof Pick<PayoutStats, 'paidCents' | 'heldCents' | 'failedCents'>>
+> = {
+  [PayoutStatus.PROCESSED]: 'paidCents',
+  [PayoutStatus.HELD]: 'heldCents',
+  [PayoutStatus.FAILED]: 'failedCents',
 };
 const PAYOUTS_DEFAULT_LIMIT = 25;
 const PAYOUTS_MAX_LIMIT = 100;
@@ -743,15 +782,60 @@ export class PayoutsService {
   async getPayout(id: string): Promise<PayoutDetail> {
     const payout = await this.repo.findPayoutById(id);
     if (!payout) throw new NotFoundError('Payout no encontrado');
-    const [creditBackCents, debtSettledCents] = await Promise.all([
+    const [creditBackCents, debtSettledCents, bonusCents] = await Promise.all([
       this.repo.sumAppliedCreditsForPayout(id),
       this.repo.sumSettledDebtsForPayout(id),
+      // Bono de incentivo pagado en este payout (ligado por paidInPayoutId · mismo patrón acotado-por-FK).
+      this.repo.sumBonusForPayout(id),
     ]);
     return {
       ...payout,
       creditBackCents,
       debtSettledCents,
+      bonusCents,
     };
+  }
+
+  /**
+   * "Viajes incluidos" de un payout (GET /payouts/:id/trips). RECONSTRUCCIÓN POR PERÍODO — el payout NO persiste
+   * sus líneas de viaje: se cargan los Payment del conductor capturados en [periodStart, periodEnd) con la MISMA
+   * condición que usa el run de liquidación (findCapturedNonCashPayments), para que la lista MATCHEE lo que se
+   * agregó. NOTA HONESTA: es reconstrucción, no links persistidos — si el período de este payout se SOLAPA con
+   * otro run (períodos manuales que se pisan), la lista podría diferir de lo efectivamente liquidado en esta fila.
+   * Cap `PAYOUT_TRIPS_CAP` en la lista + `totalCount` para el "+N más". `amountCents` de cada viaje = su BRUTO.
+   */
+  async getPayoutTrips(id: string): Promise<PayoutTripsResult> {
+    const payout = await this.repo.findPayoutById(id);
+    if (!payout) throw new NotFoundError('Payout no encontrado');
+    const [rows, totalCount] = await Promise.all([
+      this.repo.findDriverCapturedPaymentsForPeriod(
+        payout.driverId,
+        payout.periodStart,
+        payout.periodEnd,
+        PAYOUT_TRIPS_CAP,
+      ),
+      this.repo.countDriverCapturedPaymentsForPeriod(
+        payout.driverId,
+        payout.periodStart,
+        payout.periodEnd,
+      ),
+    ]);
+    const trips: PayoutTrip[] = rows.map((r) => ({
+      tripId: r.tripId,
+      amountCents: r.grossCents, // BRUTO del viaje (el neto/comisión se agrega a nivel payout, no por línea).
+      capturedAt: r.capturedAt ? r.capturedAt.toISOString() : null,
+      method: r.method,
+    }));
+    return { trips, totalCount };
+  }
+
+  /**
+   * TODAS las filas del filtro admin (sin paginar) para el export CSV server-side (el operador exporta el SET
+   * COMPLETO del filtro, no solo la página cargada). Devuelve las filas Payout crudas; el admin-bff resuelve el
+   * nombre (gateado por PII), formatea a soles y arma el CSV. RBAC FINANCE/ADMIN lo gatea el controller.
+   */
+  listAllForExport(status?: PayoutStatus): Promise<Payout[]> {
+    return this.repo.findAllPayoutsForExport(status);
   }
 
   /**
@@ -764,6 +848,9 @@ export class PayoutsService {
     const grouped = await this.repo.groupPayoutsByStatus();
     const stats: PayoutStats = {
       totalCents: 0,
+      paidCents: 0,
+      heldCents: 0,
+      failedCents: 0,
       pendingCount: 0,
       processingCount: 0,
       processedCount: 0,
@@ -771,8 +858,12 @@ export class PayoutsService {
       failedCount: 0,
     };
     for (const g of grouped) {
-      stats.totalCents += g._sum.amountCents ?? 0;
+      const sumCents = g._sum.amountCents ?? 0;
+      stats.totalCents += sumCents;
       stats[PAYOUT_STATUS_COUNT_FIELD[g.status]] = g._count._all;
+      // Bucket de volumen del estado (si expone uno: PROCESSED/HELD/FAILED). PENDING/PROCESSING solo suman al total.
+      const centsField = PAYOUT_STATUS_CENTS_FIELD[g.status];
+      if (centsField) stats[centsField] = sumCents;
     }
     return stats;
   }
