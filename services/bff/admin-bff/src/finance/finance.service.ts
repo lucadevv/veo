@@ -15,6 +15,8 @@ import type {
   PayoutView,
   PayoutDetailView,
   PayoutStatsView,
+  PayoutTripView,
+  PayoutTripsResult,
   CommissionView,
   CostPerKmConfigView,
   CostPerKmListView,
@@ -69,6 +71,16 @@ interface PayoutDetailRow extends Payout {
   createdAt: string;
   creditBackCents: number;
   debtSettledCents: number;
+  bonusCents: number;
+}
+
+/** Fila cruda de "viajes incluidos" que sirve payment-service (GET /payouts/:id/trips). Shape 1:1 con payoutTripView
+ *  (no lleva PII de persona: id de viaje + monto + método). El aplanado a la view es passthrough. */
+interface PayoutTripRow {
+  tripId: string;
+  amountCents: number;
+  capturedAt: string | null;
+  method: string | null;
 }
 
 /** Fila cruda del Payment que sirve payment-service (GET /payments/by-trip/:tripId, SIN `select` → fila
@@ -423,6 +435,47 @@ export class FinanceService {
   }
 
   /**
+   * "Viajes incluidos" de un payout (GET /payouts/:id/trips): reconstrucción por período que hace payment-service.
+   * Passthrough tipado — la lista NO lleva PII de persona (id de viaje + monto + método), solo agregado del propio
+   * conductor → gate `@Roles` de clase, SIN audit ni enriquecimiento (mismo criterio que getPayoutDetail).
+   */
+  async getPayoutTrips(identity: AuthenticatedUser, payoutId: string): Promise<PayoutTripsResult> {
+    const res = await this.rest.get<{ trips: PayoutTripRow[]; totalCount: number }>(
+      `/payouts/${payoutId}/trips`,
+      { identity },
+    );
+    return { trips: res.trips.map(toPayoutTripView), totalCount: res.totalCount };
+  }
+
+  /**
+   * Export CSV del SET COMPLETO del filtro (GET /payouts/export) — el operador exporta TODO el filtro, no solo la
+   * página cargada, por eso el corte es SERVER-SIDE (payment-service devuelve el set entero sin paginar). Acá:
+   *  1. resolvemos el nombre del conductor (batch anti-N+1) GATEADO por PII — un FINANCE puro (canSeeIdentity=false)
+   *     recibe un mapa vacío → el CSV lleva driverId, NUNCA el nombre (Ley 29733);
+   *  2. formateamos money a soles y el período legible;
+   *  3. AUDITAMOS la exportación (payout.export) como el resto de acciones finance (rastro de acceso a datos).
+   * Devuelve el CSV como string; el controller le pone Content-Type/Content-Disposition de descarga.
+   */
+  async exportPayouts(identity: AuthenticatedUser, status?: string): Promise<string> {
+    const rows = await this.rest.get<Payout[]>('/payouts/export', {
+      identity,
+      query: { status },
+    });
+    const namesById = await this.resolveDriverNames(
+      identity,
+      rows.map((p) => p.driverId),
+    );
+    const csv = buildPayoutsCsv(rows, namesById);
+    await this.audit.record(identity, {
+      action: 'payout.export',
+      resourceType: 'payout_batch',
+      resourceId: status && status !== 'ALL' ? status : 'ALL',
+      payload: { status: status ?? 'ALL', rowCount: rows.length },
+    });
+    return csv;
+  }
+
+  /**
    * Historial paginado de corridas de conciliación (BR-P07) para el panel FINANCE. Cierra el hueco #3: el
    * `ReconciliationRun` lo puebla el cron pero no estaba expuesto al admin. Es data AGREGADA del sistema (no
    * PII de una persona) → gate `@Roles` de clase, SIN step-up y SIN audit (espeja listPayouts/getPayoutDetail).
@@ -465,10 +518,75 @@ function toPayoutDetailView(p: PayoutDetailRow, driverName: string | null): Payo
     debtSettledCents: p.debtSettledCents,
     creditBackCents: p.creditBackCents,
     debtAppliedCents: p.debtAppliedCents,
+    bonusCents: p.bonusCents,
     dedupKey: p.dedupKey,
     externalRef: p.externalRef,
     createdAt: p.createdAt,
   };
+}
+
+// Passthrough 1:1 de una línea de viaje incluido (no lleva PII de persona). Existe como mapper explícito
+// (no un cast) para que un cambio de shape del contrato rompa acá y no silenciosamente aguas abajo.
+function toPayoutTripView(t: PayoutTripRow): PayoutTripView {
+  return {
+    tripId: t.tripId,
+    amountCents: t.amountCents,
+    capturedAt: t.capturedAt,
+    method: t.method,
+  };
+}
+
+// ── Export CSV de payouts ────────────────────────────────────────────────────────────────────────────────
+/** Céntimos → soles con 2 decimales (S/). Dinero SIEMPRE Int céntimos aguas arriba; el string es solo del CSV. */
+function centsToSoles(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+/** Período legible: dos ISO datetime → `YYYY-MM-DD — YYYY-MM-DD` (recorta la hora). */
+function readablePeriod(periodStart: string, periodEnd: string): string {
+  return `${periodStart.slice(0, 10)} — ${periodEnd.slice(0, 10)}`;
+}
+
+/** Escapa un campo CSV (RFC 4180): entrecomilla si lleva coma/comillas/salto y duplica las comillas internas. */
+function csvField(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+/**
+ * Arma el CSV del export. Columnas = payoutView (id, driverId, driverName, gross/commission/neto en soles, status,
+ * period, processedAt). `driverName` sale vacío para un rol que no ve PII (map vacío) → el CSV lleva driverId, jamás
+ * el nombre. Header en español con "(S/)" para dejar explícito que los montos ya están en soles.
+ */
+function buildPayoutsCsv(rows: Payout[], namesById: Map<string, string>): string {
+  const header = [
+    'id',
+    'driverId',
+    'driverName',
+    'grossSoles(S/)',
+    'commissionSoles(S/)',
+    'netoSoles(S/)',
+    'status',
+    'period',
+    'processedAt',
+  ];
+  const lines = rows.map((p) =>
+    [
+      p.id,
+      p.driverId,
+      namesById.get(p.driverId) ?? '',
+      centsToSoles(p.grossCents),
+      centsToSoles(p.commissionCents),
+      centsToSoles(p.amountCents),
+      p.status,
+      readablePeriod(p.periodStart, p.periodEnd),
+      p.processedAt ?? '',
+    ]
+      .map((f) => csvField(f))
+      .join(','),
+  );
+  // CRLF (RFC 4180) — Excel/Sheets lo prefieren para no fusionar líneas.
+  return [header.map(csvField).join(','), ...lines].join('\r\n');
 }
 
 // Aplana el `details` Json de la corrida a la view tipada. Corridas viejas sin details → period null + 0s

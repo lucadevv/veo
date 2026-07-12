@@ -30,6 +30,13 @@ export class PayoutsQueryDto {
   limit?: number;
 }
 
+/** Export CSV de payouts: filtro por estado (o 'ALL'/omitido = todo el set). payment-service valida el valor. */
+export class ExportPayoutsQueryDto {
+  @IsOptional()
+  @IsString()
+  status?: string;
+}
+
 /** Historial de conciliación: paginación cursor por id descendente (uuidv7 ⇒ cronológico). */
 export class ReconciliationQueryDto {
   @IsOptional()

@@ -5,6 +5,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Headers,
   HttpCode,
   Param,
@@ -20,6 +21,7 @@ import type {
   PayoutView,
   PayoutDetailView,
   PayoutStatsView,
+  PayoutTripsResult,
   RefundablePaymentView,
   ReconciliationRunView,
 } from '@veo/api-client';
@@ -34,6 +36,7 @@ import {
 } from './finance.service';
 import {
   PayoutsQueryDto,
+  ExportPayoutsQueryDto,
   ReconciliationQueryDto,
   RunPayoutsDto,
   RefundDto,
@@ -68,6 +71,21 @@ export class FinanceController {
     return this.finance.getPayoutStats(user);
   }
 
+  // Export CSV del SET COMPLETO del filtro (server-side: exporta TODO el filtro, no la página cargada). Ruta
+  // ESTÁTICA `payouts/export` ANTES de `payouts/:id` para que `:id` no capture "export". Devuelve text/csv con
+  // headers de descarga; la acción se AUDITA en el service. `driverName` sale solo si el rol ve PII (Ley 29733).
+  @Get('payouts/export')
+  @Permission('finance:view')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="payouts-export.csv"')
+  @ApiOperation({ summary: 'Export CSV de payouts del filtro completo (sin paginar) — acceso auditado' })
+  exportPayouts(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ExportPayoutsQueryDto,
+  ): Promise<string> {
+    return this.finance.exportPayouts(user, query.status);
+  }
+
   @Get('payouts/:id')
   @Permission('finance:view')
   @ApiOperation({
@@ -78,6 +96,18 @@ export class FinanceController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PayoutDetailView> {
     return this.finance.getPayoutDetail(user, id);
+  }
+
+  // "Viajes incluidos" del payout (reconstrucción por período que hace payment-service). Ruta `payouts/:id/trips`
+  // (2 segmentos) no colisiona con `payouts/:id`. Agregado del propio conductor (sin PII de tercero) → finance:view.
+  @Get('payouts/:id/trips')
+  @Permission('finance:view')
+  @ApiOperation({ summary: 'Viajes incluidos en un payout (reconstrucción por período)' })
+  payoutTrips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PayoutTripsResult> {
+    return this.finance.getPayoutTrips(user, id);
   }
 
   @Get('reconciliation')
