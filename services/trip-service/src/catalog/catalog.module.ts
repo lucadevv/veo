@@ -9,6 +9,10 @@ import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
 import { AdminIdentityGuard } from '../pricing/admin-identity.guard';
 import { OFFERING_CATALOG_REPO, PrismaOfferingCatalogRepository } from './catalog.repository';
+import {
+  CUSTOM_OFFERING_REPO,
+  PrismaCustomOfferingRepository,
+} from './custom-offering.repository';
 
 @Module({
   controllers: [CatalogController],
@@ -17,6 +21,8 @@ import { OFFERING_CATALOG_REPO, PrismaOfferingCatalogRepository } from './catalo
     AdminIdentityGuard,
     // Puerto → adaptador Prisma (clean arch: el servicio depende de la interfaz, no de la clase).
     { provide: OFFERING_CATALOG_REPO, useClass: PrismaOfferingCatalogRepository },
+    // ADR 013 · tabla de ofertas CUSTOM (built-in ∪ custom en el catálogo efectivo).
+    { provide: CUSTOM_OFFERING_REPO, useClass: PrismaCustomOfferingRepository },
   ],
   exports: [CatalogService],
 })

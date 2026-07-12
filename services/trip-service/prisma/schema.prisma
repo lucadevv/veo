@@ -320,6 +320,37 @@ model BidFloorConfig {
   @@schema("trip")
 }
 
+/// Oferta CUSTOM (alta del admin en caliente · ADR 013). EXTIENDE el enum OfferingId de @veo/shared-types: los
+/// built-in viven en código (OFFERINGS), las custom acá. Restricción HONESTA: `vehicleClass`/`serviceType` son
+/// tipos que YA EXISTEN (el dispatch/matching trabaja por vehicleClass — NO se inventa un tipo de vehículo). El
+/// catálogo efectivo (CatalogService.getCatalog) UNE built-in ∪ custom; el overlay del admin (offering_catalog)
+/// configura ambas igual (pricing/modo/enabled por oferta). `mode`/`multiplier`/`minFareCents`/`enabled` son los
+/// valores INICIALES (el overlay los pisa después). Crearla es acción de SUPERADMIN + step-up MFA (admin-bff), auditada.
+model CustomOffering {
+  /// Id `custom_*` único (contrato con Trip.category, igual que un OfferingId built-in).
+  id           String      @id
+  /// Nombre display (no hay clave i18n para una oferta creada en caliente).
+  name         String
+  /// Clase de vehículo EXISTENTE a la que mapea (pool de matching certificable). CAR | MOTO.
+  vehicleClass VehicleType @map("vehicle_class")
+  /// Vertical del servicio EXISTENTE (RIDE|AMBULANCE|TOW|MECHANIC). String: el enum canónico vive en shared-types.
+  serviceType  String      @map("service_type")
+  /// Modo de pricing INICIAL (PUJA|FIXED). El overlay del admin lo puede pisar (una custom nunca está locked).
+  mode         PricingMode
+  /// Multiplicador INICIAL sobre la fórmula base. El overlay lo puede pisar.
+  multiplier   Float
+  /// Tarifa mínima INICIAL en céntimos PEN. El overlay la puede pisar.
+  minFareCents Int         @map("min_fare_cents")
+  /// Visible/cotizable por default. El overlay lo puede pisar (habilitar/deshabilitar).
+  enabled      Boolean     @default(true)
+  /// Admin que la creó (auditoría; el id del actor autenticado). Nullable: seeds/migraciones sin actor.
+  createdBy    String?     @map("created_by")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("custom_offering")
+  @@schema("trip")
+}
+
 /// Estado de una PROPUESTA de parada mid-trip negociada (Lote C1). Coincide con
 /// WaypointProposalStatus del dominio (trips/domain/waypoint-proposal.ts). Solo PROPOSED es vivo;
 /// el resto son terminales. El pasajero PROPONE durante IN_PROGRESS, el conductor acepta/rechaza, o

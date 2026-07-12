@@ -11,7 +11,7 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type { ResolvedOffering, OfferingOverride } from '@veo/shared-types';
 import { REST_TRIP } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
-import type { ReplaceCatalogDto } from './dto/catalog.dto';
+import type { CreateOfferingDto, ReplaceCatalogDto } from './dto/catalog.dto';
 
 /**
  * Vista del catálogo efectivo que trip-service produce (base de código ⟕ overlay del admin). Contrato
@@ -41,6 +41,7 @@ export interface OfferingMetricsView {
 }
 
 const BASE = '/internal/catalog';
+const OFFERINGS = '/internal/catalog/offerings';
 const ANALYTICS_OFFERING_METRICS = '/internal/analytics/offering-metrics';
 
 @Injectable()
@@ -80,5 +81,39 @@ export class CatalogService {
       payload: { overrideCount: dto.overrides.length, version: res.version },
     });
     return res;
+  }
+
+  /**
+   * catalog:create (SUPERADMIN) — ALTA de una oferta CUSTOM. Propaga la identidad admin firmada + el `createdBy`
+   * (el userId autenticado, para la auditoría de trip-service). trip-service genera el id, valida los enums,
+   * persiste + emite catalog.updated. La acción se AUDITA acá (Ley 29733) con el id de la oferta creada.
+   */
+  async createOffering(identity: AuthenticatedUser, dto: CreateOfferingDto): Promise<ResolvedOffering> {
+    const created = await this.rest.post<ResolvedOffering>(OFFERINGS, {
+      identity,
+      body: {
+        name: dto.name,
+        vehicleClass: dto.vehicleClass,
+        serviceType: dto.serviceType,
+        mode: dto.mode,
+        multiplier: dto.multiplier,
+        minFareCents: dto.minFareCents,
+        enabled: dto.enabled ?? true,
+        createdBy: identity.userId,
+      },
+    });
+    await this.audit.record(identity, {
+      action: 'catalog.offering_create',
+      resourceType: 'offering_catalog',
+      resourceId: created.id,
+      payload: {
+        id: created.id,
+        name: dto.name,
+        vehicleClass: dto.vehicleClass,
+        serviceType: dto.serviceType,
+        mode: dto.mode,
+      },
+    });
+    return created;
   }
 }

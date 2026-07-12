@@ -42,6 +42,7 @@ export type Permission =
   | 'pricing:manage'
   | 'catalog:view'
   | 'catalog:manage'
+  | 'catalog:create'
   | 'dispatch:view'
   | 'dispatch:manage'
   | 'audit:view'
@@ -109,6 +110,10 @@ export const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
   'catalog:view': [FINANCE, ADMIN, SUPERADMIN],
   // catalog.controller PUT /catalog: reemplazar el overlay (prender/apagar ofertas). Mismos roles.
   'catalog:manage': [FINANCE, ADMIN, SUPERADMIN],
+  // catalog.controller POST /catalog/offerings: ALTA de una oferta CUSTOM (crea un producto nuevo). EXCLUSIVO
+  // SUPERADMIN (@Roles(SUPERADMIN) explícito en el bff + trip-service; espejo de gobierno:manage/drivers:delete)
+  // + step-up MFA. Es más sensible que manage (prender/apagar) — crea capacidad de producto, no configura la existente.
+  'catalog:create': [SUPERADMIN],
   // dispatch-config.controller (clase): ver la config de RADIOS (k-rings) de dispatch. DISPATCHER es el
   // rol operativo natural del despacho; ADMIN/SUPERADMIN mantienen control.
   'dispatch:view': [DISPATCHER, ADMIN, SUPERADMIN],

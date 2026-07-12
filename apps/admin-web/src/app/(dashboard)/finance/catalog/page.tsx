@@ -8,6 +8,7 @@ import { PermissionState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { CatalogPanel } from '@/components/catalog/catalog-panel';
+import { NewOfferingDialog } from '@/components/catalog/new-offering-dialog';
 
 /**
  * Ofertas de servicio (ADR 013 · Fase B / A1). Vive bajo Finanzas: la disponibilidad y el precio de los
@@ -42,6 +43,9 @@ export default function CatalogPage() {
         title="Ofertas de servicio"
         description="El menú de servicios que el pasajero puede pedir. Cada uno hereda la fórmula global y ajusta su modo, mínimos y disponibilidad."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Ofertas de servicio' }]}
+        // "Nuevo servicio" (alta de oferta custom) — SOLO SUPERADMIN (catalog:create). El admin-bff + trip-service
+        // re-autorizan; la UI solo refleja el gate. Board kmbzI (topbar).
+        actions={can(user, 'catalog:create') ? <NewOfferingDialog /> : undefined}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         <div className="mt-2 space-y-5">
