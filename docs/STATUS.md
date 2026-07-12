@@ -274,6 +274,40 @@ Deploy carril VPS (§0.7(c)): `docker-compose.preview.yml` + `images.yml` (build
 - Adapters "live" de rieles externos (SMS operador, Yape/Plin, push) son placeholders hasta tener credenciales/convenio (sandbox es el default y funciona).
 - **Ola 4 — residuales no bloqueantes:** (1) build iOS **firmado/device** falla por `resource fork/detritus` en `WebRTC.framework` al vivir en carpeta sincronizada (Desktop) — el simulador compila con `CODE_SIGNING_ALLOWED=NO`; para device hacer `xattr -rc` fuera de la carpeta sincronizada. (2) `POST /media/rooms/:tripId/publisher-token` admite `name?` opcional que la app aún no envía (el grant funciona sin él). (3) El overlay visual que guía la `action` de liveness durante la captura facial del conductor aún no se renderiza (la captura es funcional). (4) El gate biométrico ONNX se valida en dev con `VEO_BIOMETRIC_MODE=sandbox` (selección por entorno, no mock); el match real con rostro requiere device/cámara. (5) **`pod install` pendiente** en ambas apps por la nueva dep `react-native-get-random-values` (autolink Android automático). (6) Los módulos nativos nuevos (`VeoKycFrameGrabber` pasajero) están registrados (MainApplication.kt + pbxproj) pero **solo verificados por inspección**; falta compilar nativo en device. (7) **KYC pasajero**: el flujo está E2E y verde estáticamente; el liveness es ACTIVO (el motor ONNX exige acción), así que el match real requiere device/cámara con `VEO_BIOMETRIC_MODE=live`.
 
+#### Driver app — auditoría de fidelidad `.pen`↔RN, completitud de UI y trazabilidad (2026-07-12)
+
+Auditoría módulo×módulo de `apps/driver` contra los frames del `design/veo.pen` (board Conductor `Bqk6u`), verificada en simulador iOS (iPhone 17 Pro Max @ Metro 8084). Muchos fixes ya se aplicaron y committearon (`d56c447c`, `ac500bc4`, `fbd16f58` en `develop`). Lo que sigue es la **deuda pendiente**, agrupada. Detalle vivo en engram/`MEMORY.md`.
+
+- **A · Trazabilidad estática (mjolnir) — deuda de OBSERVABILIDAD, NO bug.** `get_verdict` reporta 1/47 journeys "cierran" (healthScore 2%) con **83/112 seams `untraceable` (BAJA) y 0 dead-ends**. Causa: el driver **auto-deriva la base del BFF del host de Metro** (base dinámica `this.http:/…`, `apps/driver/env/development.env` deja las URLs vacías) → el estático no cose `fetch`↔ruta backend. **Los flujos cierran en runtime** (corrido en vivo); `0 dead-ends` = ningún fetch a ruta inexistente. Para trazabilidad end-to-end en CI: `mjolnir ingest_traces` (runtime) o pinnear una base resoluble. `journey_coverage` queda inconclusa por lo mismo (87 test-refs existen; solo 1 journey evaluable estáticamente).
+
+- **B · Completitud de UI (caminos infelices) — enumerado, parcialmente verificado en runtime.**
+  - **Ganancias-Vacío NO implementado**: con cero ganancias renderiza las cards en `S/0.00` en vez del empty dedicado (`C/Ganancias-Vacio` = EmptyState + CTA "Conectarme"). `features/earnings/.../EarningsScreen.tsx`.
+  - **Estados de turno colapsados en banners inline**, no los layouts dedicados del diseño: `C/ShiftStart-Error`, `C/Biometrico-Bloqueado`, `C/Cuenta-Suspendida` → faltan pill "te quedan N intentos", countdown de bloqueo, motivo de suspensión, CTA "Contactar a la central"/"Actualizar documentos" (varios son dead-ends de UI: CTA deshabilitado en bloqueo). `ShiftStartScreen.tsx`, `BiometricGate.tsx`, `DashboardScreen.tsx`.
+  - **Runtime NO verificado** para los estados **vacío/error** de las tabs (Carlos R. tiene data; con esa cuenta no aparecen). Falta: cuenta aprobada-sin-actividad (vacíos) + inyección de fallo/BFF-down (errores) para fotografiarlos.
+
+- **C · Fundación `@veo/ui-kit` (COMPARTIDO — afecta passenger, decidir con cuidado).**
+  - **Colisión `surfaceElevated`===`surface`===`#FFFFFF`** en el theme light → discos de ícono / tracks / pill activa quedan invisibles (blanco sobre blanco). Tapado LOCAL con `skeleton` (`#E8ECF1`) en ~10 sitios (chart bars, segmented, discos de Cuenta/Documentos/Incentivos/Ayuda/Bookings, CierreTurno). Fix correcto: token **`surfaceMuted` (`#EEF1F5`)** en `ThemeColors` + migrar.
+  - Falta **token de texto legible** para pills/valores de estado: `successText #00873A` / `warnText #B26A00` (hoy usa el brillante `#00C853`/`#FFA000` para el punto Y el texto → bajo contraste en blanco). Rebota en `StatusPill`, "COMPLETADO", montos, "+20%".
+  - **Avatar fallback**: iniciales sobre disco brand-tinted (`#0075A916`) + ring `#DDE1E7`; hoy disco blanco + borderStrong.
+  - **Glyphs faltantes**: `target`, `headset`, `badge-check`, `user-round-search` (se usaron proxies razonables).
+
+- **D · Bloqueada por backend (gaps de contrato — degradación honesta hoy).**
+  - **Contador de intentos**: ni `POST /auth/otp/verify` ni el gate biométrico (`/drivers/shift/biometric/verify`) devuelven `attempts`/`maxAttempts` → no se muestra "te quedan N intentos" (identity los cuenta server-side, no los expone).
+  - **`lockedUntil`** en el 403 del bloqueo biométrico → falta para el countdown de reintento.
+  - **Motivo de suspensión** de cuenta → falta en el status del driver.
+  - **Geocoding**: direcciones reales en `TripDetailScreen`/carpool (el contrato solo trae lat/lng).
+  - **PII del pasajero** (nombre/rating) no está en el contrato de trip/booking (regla #5, correcto) → cards adaptados sin PII.
+  - **Editar Perfil**: no hay campo de contacto editable/persistible en `driver-bff` → email "No registrado" + CTA deshabilitado.
+  - **Notificaciones**: falta tono `danger`/kind para "documento por vencer". **Incentivos**: falta el tipo "Racha de días" (streak) en el modelo de dominio (`ops`).
+
+- **E · Sincronización diseño↔código (`.pen`).**
+  - Los 3 frames **`C/Onboarding` del `veo.pen` siguen dark full-bleed**; el código se migró a **light** (foto arriba fundiéndose al lienzo claro) por decisión del dueño → **sincronizar los frames** para que diseño↔código no queden separados.
+  - **Módulo 2 `UnderReviewScreen`**: restos pre-Trust **dark en el CÓDIGO** (ETA card azul en vez de ámbar `warn`, escudo azul en vez de cyan `info`) — se construyó contra el frame dark viejo. `UnderReviewScreen.tsx:138,166-186`.
+
+- **F · Módulo 4 (Viaje) — SIN auditar.** Todo el flujo de viaje (TripIncoming/Active/Complete, Puja, SOS, navegación) está **detrás del gate biométrico**, que no pasa en el simulador (liveness/cámara real). Queda sin cruzar contra los frames; requiere bypass de dev del gate o verificación en device.
+
+- **G · Reuso/limpieza (mjolnir, baja prioridad).** `clones-estructurales`: boilerplate repetido de hooks React Query (`useTrip`/`useDocuments`/`useEarningsSummary`…) — arquitectural. `valor-hardcodeado`: `#1A2332` (sombra) + `rgba(255,255,255,0.92/0.96)` (tab bar/GlassSheet frosted) — excepciones documentadas (usar `hexAlpha`). `pantalla-huerfana`: `CarpoolScreen` (tab Compartir) — technicality del grafo de nav; reachable y verificada en vivo.
+
 ---
 
 ## 6. Cómo continuar (receta para el próximo agente)

@@ -422,3 +422,15 @@ Tab "Viajes". No estaba en la lista mínima pero existe: lista de viajes pasados
 ---
 
 _Referencias de código (driver-app): `features/auth/presentation/screens/*`, `navigation/RegistrationNavigator.tsx`, `features/registration/presentation/screens/*`, `features/shift/presentation/{screens,components}/*`, `features/trips/presentation/screens/*`, `features/chat|earnings|documents|ops|profile|support/presentation/screens/*`, `navigation/RootNavigator.tsx`. Tokens: `@veo/ui-kit/src/tokens/{themes,spacing,radii,typography,motion}.ts`. Reglas no negociables: `veo-driver-app/CLAUDE.md`._
+
+---
+
+## Estado de implementación & deuda (auditoría fidelidad `.pen`↔RN · 2026-07-12)
+
+La app está construida a alta fidelidad; la mayoría de los deltas contra los frames ya se cerraron y committearon. **Deuda pendiente completa y agrupada (A–G) en `docs/STATUS.md` § "Deuda técnica / TODOs conocidos" → "Driver app — auditoría de fidelidad".** Gaps relevantes para diseño/producto:
+
+- **Completitud (§1.5 estados):** `Ganancias-Vacío` NO implementado (renderiza S/0.00 en vez del empty con CTA "Conectarme"). Los edge-states del turno (`ShiftStart-Error`, `Biometrico-Bloqueado`, `Cuenta-Suspendida`) están como **banners inline, no los layouts dedicados** → faltan "te quedan N intentos", countdown de bloqueo, motivo de suspensión, CTA "Contactar a la central". Los vacíos/errores de las tabs no se verificaron en runtime (falta cuenta aprobada-sin-actividad + inyección de fallo).
+- **Divergencia diseño↔código decidida por el dueño:** el **Onboarding se migró a LIGHT** (foto arriba fundiéndose al lienzo claro + copy en tinta oscura); los 3 frames `C/Onboarding` del `.pen` siguen dark → **sincronizar los frames**. `UnderReviewScreen` quedó con restos pre-Trust **dark en código** (ETA card debe ser ámbar, escudo cyan).
+- **Bloqueado por backend (degradación honesta hoy):** contador de intentos (OTP + gate no exponen `attempts`), `lockedUntil`, motivo de suspensión, geocoding de direcciones, tipo "Racha" de incentivos, email editable.
+- **Módulo 4 (Viaje) SIN auditar contra frames** — detrás del gate biométrico (no pasa en simulador).
+- **Fundación `@veo/ui-kit` (afecta passenger):** colisión `surfaceElevated`===`surface` (falta `surfaceMuted`), falta texto legible `successText`/`warnText`, Avatar fallback, glyphs `target`/`headset`/`badge-check`/`user-round-search`.
