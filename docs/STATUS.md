@@ -315,7 +315,7 @@ Auditoría módulo×módulo de `apps/driver` contra los frames del `design/veo.p
 
 - **H · Identidad tipográfica — serif editorial DORMIDO.** `Fraunces72pt-SemiBold` (`displaySerif`, variantes `displayEditorial`/`titleEditorial`) está bundleado y en el theme, pero **NO se usa en el driver** — todos los títulos van en Clash Display (`display`). Los frames celebratorios del `.pen` (CierreTurno, TripComplete, Puja-Ganada) TAMPOCO lo usan (van en Space Grotesk/Clash) → Fraunces está dormido en diseño Y código. Es una **decisión de identidad** (¿prender la voz serif en los momentos héroe/celebratorios: "GANASTE HOY", "Viaje completado", "¡Ganaste!", hero de Ganancias?), no un fix de fidelidad — requiere OK del dueño + sincronizar el `.pen`.
 
-> **Resuelto en la ronda 2 (2026-07-12, commits `150166ad` y previos):** el ítem **E · UnderReview dark→light** (escudo → info-cyan, ETA card → warn-ámbar) está **HECHO**; los **edge-states del turno (B)** ahora son **layouts dedicados** (`NoticeHero`) con el dead-end del CTA arreglado (falta solo la data de backend: intentos/countdown/motivo); la **colisión surfaceElevated (C)** se tapó local en ~15 sitios más (RegistrationProgress, scan-sheets, discos). Pendiente el token `surfaceMuted` propio + los ítems A/D/F/G/H + sync del `.pen` (onboarding light + serif).
+> **Resuelto en la ronda 2 (2026-07-12, commits `150166ad` y previos):** el ítem **E · UnderReview dark→light** (escudo → info-cyan, ETA card → warn-ámbar) está **HECHO**; los **edge-states del turno (B)** ahora son **layouts dedicados** (`NoticeHero`) con el dead-end del CTA arreglado (falta solo la data de backend: intentos/countdown/motivo); la **colisión surfaceElevated (C)** se tapó local en ~15 sitios más (RegistrationProgress, scan-sheets, discos). **C · fundación ui-kit HECHA** (commit `516ca654`): tokens `surfaceMuted` (#EEF1F5/dark), `successText` (#00873A) y `warnText` (#B26A00) en `@veo/ui-kit`, `StatusPill` con texto oscuro legible, `Avatar` fallback brand-tinted, ~7 discos del driver migrados — typecheck driver + **passenger** verde. **H · serif editorial** prendido en CierreTurno + TripComplete (`titleEditorial`=Fraunces, commit `e9fc4111`). **`.pen`** sincronizado (onboarding→light + serif en los 2 hero) — **requiere Cmd+S en Pencil para persistir**. **Pendiente:** A (trazabilidad/base dinámica), D (backend: contadores/geocoding/PII/streak), F (🔴 feature SOS del conductor · Puja-Ganada/Perdida · nav-shell), G (limpieza cosmética), y que passenger adopte los tokens nuevos donde le sirvan.
 
 - **G · Reuso/limpieza (mjolnir, baja prioridad).** `clones-estructurales`: boilerplate repetido de hooks React Query (`useTrip`/`useDocuments`/`useEarningsSummary`…) — arquitectural. `valor-hardcodeado`: `#1A2332` (sombra) + `rgba(255,255,255,0.92/0.96)` (tab bar/GlassSheet frosted) — excepciones documentadas (usar `hexAlpha`). `pantalla-huerfana`: `CarpoolScreen` (tab Compartir) — technicality del grafo de nav; reachable y verificada en vivo.
 
@@ -338,6 +338,25 @@ Features de UI de `apps/passenger` construidas pero **sin seam a backend**, o da
 | 11 | Modo niño fee | `childMode/.../ChildModeScreen.tsx` (~L204) | `CHILD_MODE_FEE_CENTS` debería ser **server-driven** (p.ej. `GET /maps/catalog` o `GET /pricing/child-mode`) para cambiar la tarifa sin release. |
 
 > Verificado con mjolnir (seams) + audit de código. Los **WIRED** confirmados (NO deuda): OAuth Google/Apple, notif-prefs sync, Promociones. Navegación: **58/58 journeys cierran (0 dead-ends)**.
+
+##### Deuda adicional (barrido completo 2026-07-12)
+
+Segundo barrido de marcadores `// DEUDA:` en `apps/passenger/src`. Con estas 10, el ledger passenger sube a **~21 deudas** registradas en código.
+
+| # | Deuda | Marcador (file:line) | Categoría | Qué falta / qué pedirle al backend |
+|---|-------|----------------------|-----------|-------------------------------------|
+| 12 | Motivos de rating como tags[] | `ratings/.../RatingScreen.tsx:61` | backend | El POST de ratings solo acepta `comment`; los motivos (chips) se anteponen al texto libre. Pedir `tags[]` estructurado para analítica real. |
+| 13 | Agregar método de pago | `payments/.../PaymentMethodsScreen.tsx:42` | backend | "Agregar método/tarjeta" del `.pen` no existe: bff sin instrumentos guardados + enum cerrado. Falta backend de instrumentos (`/cards`) + tarjeta F4. |
+| 14 | Monto de recompensa de referido | `referrals/.../ReferralsScreen.tsx:37` | backend | `REFERRAL_REWARD_CENTS` es local y NO viaja en `GET /referrals/me` → hero sin cifra. Pedir `rewardCents`. |
+| 15 | Horas de paradas carpool | `carpool/.../CarpoolTripDetailScreen.tsx:44` | backend | `GET /carpool/trips/:id` no trae `stopTimes`/ETA de paradas/llegada → se omiten (el `.pen` las muestra). |
+| 16 | Compartir automático con contactos | `trip/.../FamilyShareScreen.tsx:292` | backend | Falta preferencia de auto-share por contacto de confianza (endpoint). Hoy solo SMS manual con enlace real. |
+| 17 | OTP por llamada y correo | `auth/.../OtpHelpSheet.tsx:96` | backend | OTP por LLAMADA (voz) y CORREO son coming-soon: falta el canal en notification-service. |
+| 18 | Modo niño fee en cotización | `trip/.../QuotingBody.tsx:276` | backend | 2da superficie de la deuda de ChildModeScreen: `CHILD_MODE_FEE_CENTS` local se muestra como monto real dentro del cobro. Pedir fee server-driven. |
+| 19 | Cluster de pantallas LEGACY | `maps/.../RouteQuoteScreen.tsx:69` | cleanup | RouteQuote/TripActive/OffersBoard/NoOffers vivas solo por el dispatch FIJO del flujo programado. Migrar RouteQuote al sheet unificado → borrar legacy. |
+| 20 | Claves i18n muertas | `i18n/es-PE/common.ts:173` | cleanup | `comingSoonGoogle` (OAuth Google ya LIVE) + lista plana legacy (~L1073). Podar cuando se confirme que nada las referencia. |
+| 21 | Alcance Lima-only | `i18n/es-PE/common.ts:337` | producto | "Operamos solo en Lima Metropolitana". Expansión geográfica = decisión de producto, no hueco técnico. |
+
+> Reconciliado en el mismo barrido (NO deuda — comentario que mentía): el `read_at` de notificaciones **YA está implementado** (server `read` + badge de no-leídos + `markAllRead`). Se corrigieron los comentarios stale en `NotificationsScreen.tsx` y `core/di/registry.ts` que decían "sin leído/no-leído (MVP)".
 
 ---
 
