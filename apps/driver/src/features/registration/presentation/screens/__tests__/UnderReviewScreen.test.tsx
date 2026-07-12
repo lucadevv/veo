@@ -141,6 +141,24 @@ describe('UnderReviewScreen · "Verificar mi estado" no aprueba localmente', () 
     return node.props.onPress as () => void;
   }
 
+  /**
+   * Encuentra el `onPress` de una FILA text-link (rediseño Trust: soporte/salir ya NO son `Button`
+   * sino `Pressable` discretos, ver `UnderReviewScreen.tsx` footer). Se localiza por su
+   * `accessibilityLabel` — el contrato accesible del link, no un detalle de implementación.
+   * No se usa `findAllByType(Pressable)` porque RN exporta `Pressable` como `memo(forwardRef(...))`
+   * y el fiber nunca matchea el import; el predicado por props (label accesible + onPress) sí.
+   */
+  function findLinkPress(renderer: TestRenderer.ReactTestRenderer, label: string): () => void {
+    const node = renderer.root.findAll(
+      (instance) =>
+        instance.props.accessibilityLabel === label && typeof instance.props.onPress === 'function',
+    )[0];
+    if (!node) {
+      throw new Error(`No se encontró el link con etiqueta accesible "${label}"`);
+    }
+    return node.props.onPress as () => void;
+  }
+
   it('re-chequea contra el backend y mantiene `in_review` tras pulsar "Verificar mi estado"', () => {
     const invalidate = jest.spyOn(queryClient, 'invalidateQueries');
 
@@ -172,7 +190,7 @@ describe('UnderReviewScreen · "Verificar mi estado" no aprueba localmente', () 
       renderer = TestRenderer.create(withProviders(<UnderReviewScreen />, queryClient));
     });
 
-    const onContactSupport = findButtonPress(renderer, 'Contactar a soporte');
+    const onContactSupport = findLinkPress(renderer, 'Contactar a soporte');
     act(() => {
       onContactSupport();
     });
