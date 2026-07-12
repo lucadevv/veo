@@ -252,6 +252,10 @@ model FleetDocument {
   /// Cubre el orderBy compuesto de listExpirations `(expiresAt, id)` con `status IN (...)`: el `id` final
   /// evita el Sort del keyset. Por leftmost-prefix también cubre los queries que filtran solo (status, expiresAt).
   @@index([status, expiresAt, id])
+  /// TOCTOU-guard: existe un índice PARCIAL UNIQUE `(owner_type, owner_id, type) WHERE status IN
+  /// (PENDING_REVIEW, VALID, EXPIRING_SOON)` que Prisma NO puede expresar acá (no soporta índices parciales).
+  /// Lo crea la migración 20260712120000_fleet_document_active_unique por SQL crudo y cierra la carrera de dos
+  /// altas concurrentes (ver documents.service.ts · resolveActiveUpsert). NO borrar en un `migrate dev`.
   @@map("fleet_documents")
   @@schema("fleet")
 }

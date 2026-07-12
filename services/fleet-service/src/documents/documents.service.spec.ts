@@ -12,7 +12,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ConflictError, ForbiddenError, ValidationError } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { FleetDocumentStatus, FleetDocumentType, OcrEngine } from '@veo/shared-types';
-import { DocumentSide, FleetOwnerType, type FleetDocument } from '../generated/prisma';
+import { DocumentSide, FleetOwnerType, Prisma, type FleetDocument } from '../generated/prisma';
 import { DocumentsService } from './documents.service';
 import { PrismaDocumentsRepository } from './documents.repository';
 
@@ -51,6 +51,18 @@ function passengerIdentity(over: Partial<AuthenticatedUser> = {}): Authenticated
     sessionId: 'sess-pax',
     ...over,
   };
+}
+
+/**
+ * P2002 con la shape estructural que `isUniqueViolation` reconoce (name + code + meta.target). Simula que el
+ * índice PARCIAL UNIQUE `(owner_type, owner_id, type) WHERE status activo` rechazó el 2do insert de una carrera.
+ */
+function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'x',
+    meta: { target: ['owner_type', 'owner_id', 'type'] },
+  });
 }
 
 /**
@@ -581,6 +593,88 @@ describe('DocumentsService.create · UPSERT ACOTADO por status (no des-verificar
     expect(updated.data?.extractedData).toEqual(extractedData);
     expect(updated.data?.ocrEngine).toBe(OcrEngine.ANDROID_MLKIT);
     expect(updated.data?.ocrAt).toEqual(new Date('2026-06-20T10:00:00.000Z'));
+  });
+});
+
+describe('DocumentsService.create · TOCTOU de dos altas concurrentes (índice parcial unique + P2002)', () => {
+  /** Doc GANADOR de la carrera, aún sin revisar (PENDING_REVIEW): el perdedor lo re-resuelve como reemplazo. */
+  const winnerPending = {
+    id: 'existing-doc-1',
+    ownerType: FleetOwnerType.DRIVER,
+    ownerId: 'driver-profile-1',
+    type: FleetDocumentType.LICENSE_A1,
+    status: FleetDocumentStatus.PENDING_REVIEW,
+    documentNumber: 'A1-GANADOR',
+    verifiedAt: null,
+    verifiedBy: null,
+    rejectionReason: null,
+  } as unknown as FleetDocument;
+
+  /** Doc GANADOR ya APROBADO (VALID): el perdedor debe re-resolver a 409, NUNCA des-verificarlo. */
+  const winnerValid = {
+    ...winnerPending,
+    status: FleetDocumentStatus.VALID,
+    verifiedAt: new Date('2026-07-01T00:00:00Z'),
+    verifiedBy: 'admin-1',
+  } as unknown as FleetDocument;
+
+  const upload = {
+    ...driverDoc,
+    ownerId: 'driver-profile-1',
+    documentNumber: 'A1-PERDEDOR',
+  };
+
+  it('PERDEDOR (P2002) con ganador PENDING_REVIEW → re-resuelve por reemplazo del MISMO id (idempotente, NO 500)', async () => {
+    const { service, docFindFirst, docCreate, docUpdate, updated } = makeService();
+    // CHECK inicial: no hay activo (null). El insert pierde la carrera (P2002). Re-lectura ve al ganador.
+    docFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(winnerPending);
+    docCreate.mockRejectedValueOnce(uniqueViolation());
+
+    const doc = await service.create(upload, driverIdentity({ driverId: 'driver-profile-1' }));
+
+    // Intentó insertar (perdió), re-leyó el PRIMARY (2 findFirst: CHECK + re-resolución) y reemplazó el ganador.
+    expect(docCreate).toHaveBeenCalledTimes(1);
+    expect(docFindFirst).toHaveBeenCalledTimes(2);
+    expect(docUpdate).toHaveBeenCalledTimes(1);
+    expect(updated.where?.id).toBe('existing-doc-1');
+    expect(doc.id).toBe('existing-doc-1');
+  });
+
+  it('PERDEDOR (P2002) con ganador ya APROBADO (VALID) → re-resuelve a ConflictError 409, NO des-verifica', async () => {
+    const { service, docFindFirst, docCreate, docUpdate } = makeService();
+    docFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(winnerValid);
+    docCreate.mockRejectedValueOnce(uniqueViolation());
+
+    await expect(
+      service.create(upload, driverIdentity({ driverId: 'driver-profile-1' })),
+    ).rejects.toBeInstanceOf(ConflictError);
+
+    // El ganador aprobado NO se toca (no update); el perdedor honra el guard de "no des-verificar en silencio".
+    expect(docUpdate).not.toHaveBeenCalled();
+    expect(winnerValid.status).toBe(FleetDocumentStatus.VALID);
+  });
+
+  it('DEGENERADO: P2002 pero la fila ganadora no aparece en la re-lectura → propaga el error (no lo traga)', async () => {
+    const { service, docFindFirst, docCreate } = makeService();
+    docFindFirst.mockResolvedValue(null); // ni el CHECK ni la re-lectura ven un activo
+    docCreate.mockRejectedValueOnce(uniqueViolation());
+
+    await expect(
+      service.create(upload, driverIdentity({ driverId: 'driver-profile-1' })),
+    ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    expect(docFindFirst).toHaveBeenCalledTimes(2);
+  });
+
+  it('un error NO-P2002 del insert se propaga tal cual (no se confunde con una carrera → no re-resuelve)', async () => {
+    const { service, docFindFirst, docCreate } = makeService();
+    docFindFirst.mockResolvedValueOnce(null);
+    docCreate.mockRejectedValueOnce(new Error('boom-db'));
+
+    await expect(
+      service.create(upload, driverIdentity({ driverId: 'driver-profile-1' })),
+    ).rejects.toThrow('boom-db');
+    // Solo el CHECK: sin P2002 no hay re-resolución (findFirst NO se llama una 2da vez).
+    expect(docFindFirst).toHaveBeenCalledTimes(1);
   });
 });
 

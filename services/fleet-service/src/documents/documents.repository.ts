@@ -43,9 +43,10 @@ export interface DocumentsRepository {
   findVehicleById(id: string): Promise<Vehicle | null>;
 
   /**
-   * Documento activo (PENDING_REVIEW/VALID/EXPIRING_SOON) del mismo owner+type desde el PRIMARIO (write):
-   * read-your-writes del chequeo de duplicado (un doc recién creado puede no haberse replicado aún). `null`
-   * si no hay activo.
+   * Documento activo (PENDING_REVIEW/VALID/EXPIRING_SOON) del mismo owner+type desde el PRIMARIO (write).
+   * Dos usos, ambos exigen leer del primary (nunca de la réplica): (1) read-your-writes del CHECK de duplicado
+   * (un doc recién creado puede no haberse replicado aún); (2) RE-RESOLUCIÓN tras un P2002 del índice parcial
+   * unique (carrera perdida) — la fila ganadora recién commiteada tiene que ser legible. `null` si no hay activo.
    */
   findActiveDocumentOnPrimary(
     ownerType: FleetOwnerType,

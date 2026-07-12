@@ -13,6 +13,7 @@ import {
   ConcurrencyConflictError,
 } from '@veo/utils';
 import { assertDriverOwnsResource, type AuthenticatedUser } from '@veo/auth';
+import { isUniqueViolation } from '@veo/database';
 import { DOCUMENTS_REPO, type DocumentsRepository } from './documents.repository';
 import {
   clampLimit,
@@ -118,21 +119,9 @@ export class DocumentsService {
       }
     }
 
-    // Read-your-writes (cierra la ALTA del replica-lag): el chequeo del doc activo existente DEBE leer del
-    // primary (`write`), no de la réplica. Un doc recién creado puede no haberse replicado aún → leer de
-    // `read` dejaría pasar un duplicado/desincronizar el upsert en una ventana de lag (@veo/database
-    // read-write.ts §14: "NUNCA leer de `read` un registro recién escrito en un flujo crítico... usar
-    // `write`"). DEUDA: bajo concurrencia pura (dos altas simultáneas) esto sigue siendo TOCTOU — el cierre
-    // definitivo es un partial unique index (ownerType, ownerId, type) WHERE status activo, fuera de scope
-    // de este lote (lo decide el dueño).
-    const existingActive = await this.repo.findActiveDocumentOnPrimary(
-      input.ownerType,
-      input.ownerId,
-      input.type,
-    );
-
     // Sub-lote 3A: normaliza/valida las imágenes (camino nuevo `images[]` o legacy `fileS3Key`). Lanza
     // ValidationError si las caras son incoherentes (p.ej. FRONT sin BACK). Puede ser [] (doc sin archivo aún).
+    // Se hace ANTES de tocar la DB: una imagen inválida no debe siquiera abrir una transacción.
     const images = normalizeDocumentImages({ images: input.images, fileS3Key: input.fileS3Key });
 
     // Anti-IDOR de STORAGE (defensa en profundidad): el `ownerId` ya quedó probado contra el principal
@@ -141,39 +130,101 @@ export class DocumentsService {
     // Cubre TODAS las fuentes (images[] + fileS3Key legacy, ya unificadas en `images`). 403 fail-closed.
     assertS3KeysBelongToOwner(input.ownerType, input.ownerId, images);
 
-    // UPSERT ACOTADO por status del doc activo (FOUNDATION §14: transiciones autorizadas). El set activo
-    // (PENDING_REVIEW/VALID/EXPIRING_SOON) NO es homogéneo: re-subir NO puede des-verificar en silencio un
-    // doc que el operador YA APROBÓ. Ramificamos por el status del `existingActive`:
-    //
-    //  - PENDING_REVIEW (aún en cola, no aprobado): re-subir es una CORRECCIÓN pre-revisión legítima
-    //    (caso onboarding: el conductor re-escanea antes de que el operador valide). → `replaceActiveDocument`
-    //    (reemplaza imágenes/OCR/metadatos; el reset de verifiedAt/verifiedBy es un no-op, ya estaban nulos).
-    //
-    //  - VALID / EXPIRING_SOON (APROBADO por el operador): re-subir NO debe resetear a PENDING_REVIEW ni
-    //    limpiar verifiedAt/verifiedBy — eso DES-VERIFICARÍA el doc en silencio, sin transición autorizada.
-    //    Este endpoint es general (no solo onboarding) → lanzamos 409 ConflictError, como era antes. El
-    //    cliente trata el 409 como éxito y el doc aprobado QUEDA intacto.
-    //    DEUDA: renovar un doc aprobado es un flujo EXPLÍCITO/AUDITADO futuro (transición autorizada con
-    //    su propio endpoint), NO una re-subida silenciosa sobre este POST general.
-    //
-    // (REJECTED no está en el set activo → cae al `create` de abajo, sin cambio.)
-    if (existingActive) {
-      if (existingActive.status === FleetDocumentStatus.PENDING_REVIEW) {
-        return this.replaceActiveDocument(existingActive, input, images);
+    return this.resolveActiveUpsert(input, images);
+  }
+
+  /**
+   * UPSERT del doc + CIERRE de la ventana TOCTOU de dos altas CONCURRENTES del mismo (ownerType, ownerId, type).
+   *
+   * El patrón es check-then-act: `findActiveDocumentOnPrimary` (CHECK: ¿ya hay un doc activo de este tipo?) y
+   * luego `insertNewDocument`/`replaceActiveDocument` (ACT). Leer del PRIMARY cerró el replica-lag (un doc recién
+   * escrito puede no haberse replicado aún; @veo/database read-write.ts §14: "NUNCA leer de `read` un registro
+   * recién escrito en un flujo crítico... usar `write`"), pero NO la concurrencia pura: dos requests simultáneas
+   * pueden AMBAS leer `null` en el CHECK antes de que cualquiera ESCRIBA, y AMBAS insertar → dos docs ACTIVOS del
+   * mismo tipo para el mismo dueño (rompe el invariante "un solo doc activo por (ownerType, ownerId, type)").
+   *
+   * Cierre definitivo a nivel DB (migración 20260712120000_fleet_document_active_unique): índice PARCIAL UNIQUE
+   * (owner_type, owner_id, type) WHERE status ∈ {PENDING_REVIEW, VALID, EXPIRING_SOON} — el MISMO set activo que
+   * consulta el CHECK. Bajo carrera, el GANADOR inserta y el PERDEDOR recibe P2002; lo detectamos con
+   * `isUniqueViolation` y RE-RESOLVEMOS contra la fila YA commiteada → el MISMO desenlace determinista que si la
+   * 2da request hubiera llegado DESPUÉS de la 1ra (sin carrera). PARCIAL a propósito: REJECTED/EXPIRED quedan
+   * FUERA del unique (un doc rechazado/vencido se RE-SUBE legítimamente como fila activa nueva). Mismo arquetipo
+   * que vehicles.create (unique `plate`) e inspections.create (natural key) de este servicio: unique en DB +
+   * `isUniqueViolation` + re-lectura del primary.
+   */
+  private async resolveActiveUpsert(
+    input: CreateDocumentDto,
+    images: readonly NormalizedDocumentImage[],
+  ): Promise<FleetDocumentWithImages> {
+    const existingActive = await this.repo.findActiveDocumentOnPrimary(
+      input.ownerType,
+      input.ownerId,
+      input.type,
+    );
+    if (existingActive) return this.resolveAgainstActive(existingActive, input, images);
+
+    try {
+      return await this.insertNewDocument(input, images);
+    } catch (err) {
+      // Carrera perdida: otra alta concurrente ganó el índice parcial unique entre nuestro CHECK y nuestro ACT.
+      // No es un 500: re-resolvemos contra la fila ganadora (ya commiteada, legible desde el primary), igual que
+      // si esta request hubiera llegado segunda en el orden secuencial (PENDING_REVIEW → reemplazo; aprobado → 409).
+      if (isUniqueViolation(err)) {
+        const raced = await this.repo.findActiveDocumentOnPrimary(
+          input.ownerType,
+          input.ownerId,
+          input.type,
+        );
+        // El unique parcial SOLO dispara sobre un activo ya commiteado → `raced` debe existir. Si por un
+        // borrado/transición en la ventana no aparece (caso degenerado), propagamos el error, no lo tragamos.
+        if (raced) return this.resolveAgainstActive(raced, input, images);
       }
-      // VALID o EXPIRING_SOON: aprobado → no des-verificar en silencio.
-      throw new ConflictError('Ya tenés un documento aprobado de este tipo', {
-        ownerType: input.ownerType,
-        ownerId: input.ownerId,
-        type: input.type,
-        status: existingActive.status,
-      });
+      throw err;
     }
+  }
 
+  /**
+   * Ramifica el UPSERT por el STATUS del doc activo existente (FOUNDATION §14: transiciones autorizadas). El set
+   * activo NO es homogéneo: re-subir NO puede des-verificar en silencio un doc que el operador YA APROBÓ.
+   *
+   *  - PENDING_REVIEW (aún en cola, no aprobado): re-subir es una CORRECCIÓN pre-revisión legítima (onboarding:
+   *    el conductor re-escanea antes de que el operador valide) → `replaceActiveDocument` (reemplaza imágenes/OCR/
+   *    metadatos; el reset de verifiedAt/verifiedBy es un no-op, ya estaban nulos).
+   *  - VALID / EXPIRING_SOON (APROBADO): re-subir NO debe resetear a PENDING_REVIEW ni limpiar verifiedAt/
+   *    verifiedBy — eso DES-VERIFICARÍA el doc en silencio, sin transición autorizada → 409 ConflictError. El
+   *    cliente trata el 409 como éxito y el doc aprobado QUEDA intacto. (Renovar un doc aprobado es un flujo
+   *    EXPLÍCITO/AUDITADO futuro con su propio endpoint, NO una re-subida silenciosa sobre este POST general.)
+   *
+   * (REJECTED/EXPIRED no están en el set activo → nunca llegan acá; caen a `insertNewDocument` como fila nueva.)
+   */
+  private resolveAgainstActive(
+    existingActive: FleetDocument,
+    input: CreateDocumentDto,
+    images: readonly NormalizedDocumentImage[],
+  ): Promise<FleetDocumentWithImages> {
+    if (existingActive.status === FleetDocumentStatus.PENDING_REVIEW) {
+      return this.replaceActiveDocument(existingActive, input, images);
+    }
+    // VALID o EXPIRING_SOON: aprobado → no des-verificar en silencio.
+    throw new ConflictError('Ya tenés un documento aprobado de este tipo', {
+      ownerType: input.ownerType,
+      ownerId: input.ownerId,
+      type: input.type,
+      status: existingActive.status,
+    });
+  }
+
+  /**
+   * Inserta un documento NUEVO (sin activo previo) + sus N imágenes en UNA transacción ATÓMICA (todo o nada).
+   * `fileS3Key` se puebla con la primera imagen (backward-compat: consumidores legacy que aún lo lean). Bajo
+   * carrera con otra alta del mismo (ownerType, ownerId, type), el índice PARCIAL UNIQUE rechaza el segundo
+   * insert con P2002 (lo maneja `resolveActiveUpsert`): la tx completa hace ROLLBACK → no quedan imágenes huérfanas.
+   */
+  private insertNewDocument(
+    input: CreateDocumentDto,
+    images: readonly NormalizedDocumentImage[],
+  ): Promise<FleetDocumentWithImages> {
     const documentId = uuidv7();
-
-    // Transacción ATÓMICA: el documento y sus N imágenes se persisten juntos o no se persiste nada.
-    // `fileS3Key` se sigue poblando con la primera imagen (backward-compat: consumidores legacy que aún lo lean).
     return this.repo.runInTx(async (tx) => {
       const document = await tx.fleetDocument.create({
         data: {
@@ -186,11 +237,9 @@ export class DocumentsService {
           issuedAt: input.issuedAt ? new Date(input.issuedAt) : null,
           expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
           fileS3Key: primaryS3Key(images),
-          // Onboarding sin-formularios (Lote 0): la data extraída por OCR on-device se persiste EN LA
-          // MISMA transacción atómica que el doc + sus imágenes. Opcional → si no vino OCR, las 3 columnas
-          // quedan null (Prisma omite el set con `undefined`), y el registro legacy sigue idéntico.
-          // `extractedData` es Json?: el contrato tipado ExtractedDocumentData se serializa tal cual; el
-          // cast a InputJsonValue es el puente al tipo Json de Prisma (no hay `any`).
+          // Onboarding sin-formularios (Lote 0): la data OCR on-device se persiste EN LA MISMA tx atómica que el
+          // doc + sus imágenes. Opcional → si no vino OCR, las 3 columnas quedan null (Prisma omite el set con
+          // `undefined`). El cast a InputJsonValue es el puente al tipo Json de Prisma (no hay `any`).
           extractedData: input.extractedData
             ? (input.extractedData as unknown as Prisma.InputJsonValue)
             : undefined,
