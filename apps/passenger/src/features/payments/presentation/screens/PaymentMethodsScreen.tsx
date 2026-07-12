@@ -39,6 +39,7 @@ const DISPLAY_METHODS: readonly MobilePaymentMethod[] = [
  * HUECO DE CONTRATO: el bff no expone métodos guardados; los métodos son el enum `mobilePaymentMethod`
  * y el default es una preferencia local. El cobro real ocurre al terminar el viaje (server-side).
  * El "Agregar método" del pen NO se implementa: el enum es cerrado (gap de producto reportado).
+ * DEUDA: (backend) "Agregar método/tarjeta" (del .pen) no se implementa: el bff no expone instrumentos guardados y MobilePaymentMethod es enum cerrado. Falta backend de instrumentos (p.ej. /cards) + tarjeta F4 del roadmap.
  */
 export function PaymentMethodsScreen(): React.JSX.Element {
   const theme = useTheme();

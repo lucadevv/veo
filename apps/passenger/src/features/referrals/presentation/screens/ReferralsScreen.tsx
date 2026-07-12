@@ -34,6 +34,7 @@ import {IconCopy, IconGift, IconShare2} from '../components/icons';
  *  - HERO: círculo tenue de marca con gift + copy de la recompensa. SIN cifra a propósito: el
  *    monto real es config del backend (`REFERRAL_REWARD_CENTS`, env-configurable, default S/ 5)
  *    y NO viaja en `GET /referrals/me` — el "S/ 10" del pen no es sustentable desde el cliente.
+ *    DEUDA: (backend) el monto de recompensa (REFERRAL_REWARD_CENTS local) NO viaja en GET /referrals/me → el hero se muestra sin cifra (el "S/X" del .pen no es sustentable client-side). Pedir que /referrals/me devuelva rewardCents.
  *  - CÓDIGO: card con el código en MONO grande + pill "Copiar" DENTRO de la card; "Compartir mi
  *    código" como CTA primario full-width separado debajo.
  *  - MÉTRICAS: una card partida en 2 (Invitados / Ganado) con divisor central.

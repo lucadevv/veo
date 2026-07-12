@@ -41,6 +41,7 @@ export function carpoolTripDetailKey(tripId: string): readonly unknown[] {
  * esa sección NO se pinta (identity/fleet pueden no responder; el detalle igual sirve).
  * Diferencia honesta con el pen: las horas de las paradas/llegada NO existen en el contrato (solo
  * `fechaHoraSalida`), así que solo el origen lleva hora.
+ * DEUDA: (backend) el contrato GET /carpool/trips/:id no trae horas de paradas/llegada (stopTimes/ETA) → se omiten (el .pen las muestra).
  */
 export function CarpoolTripDetailScreen(): React.JSX.Element {
   const theme = useTheme();

@@ -34,6 +34,7 @@ const PAGE_SIZE = 20;
  * al llegar al final). Estados loading/error/empty honestos. Los FILTROS del pen
  * (Ordenar/Verificado/Precio/Salida) NO tienen backend (la búsqueda no acepta sort/filter) → se
  * omiten a propósito en vez de pintar controles que no filtran nada.
+ * DEUDA: (backend) el search carpool (POST /carpool/search) debe aceptar sort (precio/salida) y filtro (soloVerificado) para habilitar los controles Ordenar/Verificado/Precio/Salida del .pen. Hoy solo manda geo+fecha+asientos+paging.
  */
 export function CarpoolResultsScreen(): React.JSX.Element {
   const theme = useTheme();

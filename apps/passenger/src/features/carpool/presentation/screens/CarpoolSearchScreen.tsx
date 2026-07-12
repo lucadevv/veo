@@ -46,6 +46,7 @@ const WEEKDAY_LABELS = [
  * (chips, sin hora: el intercity se busca por día) y stepper de ASIENTOS (1..8). El CTA navega a
  * los resultados con la query completa en params. La sección "Rutas populares" del pen NO tiene
  * backend (no existe endpoint de rutas populares) → se omite a propósito, sin datos inventados.
+ * DEUDA: (backend) falta endpoint de rutas populares carpool (p.ej. GET /carpool/popular-routes → [{desde, hasta, precioDesde}]). Sin él, la sección "Rutas populares" del .pen se omite.
  */
 export function CarpoolSearchScreen(): React.JSX.Element {
   const theme = useTheme();

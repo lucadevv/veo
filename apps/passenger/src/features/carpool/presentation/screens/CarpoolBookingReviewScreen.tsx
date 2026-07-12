@@ -45,6 +45,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * Diferencias honestas con el pen: NO se pinta la línea "Cargo por servicio S/ 3" (el contrato de
  * reserva no tiene fee: el total es precioBase×asientos, sin montos inventados). La nota de cobro
  * dice la VERDAD del ADR-014: se cobra recién cuando el conductor aprueba.
+ * DEUDA: (producto/.pen) el .pen muestra "Cargo por servicio S/ 3" que el contrato de reserva NO tiene (total = precioBase×asientos). Decidir: o producto define un fee de servicio carpool (backend lo agrega al desglose) o se corrige el .pen. Hoy sin fee inventado.
  */
 export function CarpoolBookingReviewScreen(): React.JSX.Element {
   const theme = useTheme();

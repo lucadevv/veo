@@ -52,6 +52,7 @@ const PENDING_POLL_MS = 5000;
  * solo se dispara al aprobar). Diferencia honesta con el pen: sin "Enviar mensaje al conductor" (no
  * hay canal de chat carpool). El copy de cobro dice la verdad por estado: pendiente = no se cobró
  * nada; aprobado = cobro en proceso; confirmado = cobrado.
+ * DEUDA: (backend) falta canal de chat carpool (p.ej. /carpool/bookings/:id/messages) para "Enviar mensaje al conductor" post-reserva. Hoy solo existe mensajeIntro one-shot en la reserva; el chat /trips/:id/messages es solo para viajes normales, no carpool.
  */
 export function CarpoolBookingStatusScreen(): React.JSX.Element {
   const {t} = useTranslation();
