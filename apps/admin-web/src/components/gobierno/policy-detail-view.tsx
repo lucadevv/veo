@@ -14,17 +14,17 @@ import {
 import { getPolicyDef, isPolicyKey, type PolicyKey } from '@veo/policy';
 import { ApiError, type PolicyView, type PolicyVersionView } from '@/lib/api/schemas';
 import {
+  derivePolicyFootprint,
   derivePolicyRule,
-  derivePolicyScope,
+  derivePolicyScopeRows,
   FAMILY_META,
   isConfigurable,
   isNetNew,
   paramChipSummary,
-  POLICY_ICONS,
-  type DerivedScope,
+  type PolicyFootprint,
   type RuleClause,
+  type ScopeRowData,
 } from '@/lib/gobierno';
-import { roleMeta } from '@/lib/gobierno/permissions';
 import { usePolicy, usePolicyHistory, useUpdatePolicy } from '@/lib/api/queries';
 import { date } from '@/lib/formatters';
 import { cn } from '@/lib/cn';
@@ -48,12 +48,15 @@ const LINK_BTN_VARIANT = {
  * Detalle de UNA política de gobierno (drill-in del board `jznes` "Políticas · Detalle"). Anatomía espejo del
  * detalle de oferta (`offering-detail-view`): topbar (back + breadcrumb + estado) + grid 1fr/360 con cards.
  *
- * HONESTIDAD de datos (ver reporte):
- *  • Regla (WHEN/THEN) y Alcance → DERIVADOS de key + `params` vigentes (`derivePolicyRule`/`derivePolicyScope`).
- *    Presentación de la config existente, no backend nuevo.
- *  • Historial → backend REAL nuevo (tabla `PolicyVersion` de identity). `[]` = sin cambios aún (arranca vacío).
- *  • Impacto → SOLO stats con fuente real: Versión (view.version), Cambios (history.length), Alcance (nº de roles /
- *    rangos, o "Global"). Los "Endpoints" y "App" del board se OMITEN (sin fuente que los compute).
+ * HONESTIDAD de datos (fidelidad al board `jznes`, sin fabricar valores):
+ *  • Regla (WHEN/THEN, vocabulario PBAC técnico) y Alcance (Acciones/Recursos/Roles) → DERIVADOS de la semántica
+ *    real (catálogo §5 + `PERMISSION_ROLES`) y los `params` vigentes. Presentación, no backend nuevo. Lo que la
+ *    política NO tiene NO se muestra (p. ej. dual-auth no tiene `ttl` → no aparece; el board lo ilustra pero no existe).
+ *  • Impacto (blast-radius) → footprint REAL: Roles (nº alcanzados), Recursos, Apps. El "6 Endpoints" del board NO
+ *    es computable (enforcement = lecturas dispersas del `PolicyReader`, no un decorator por-ruta) → se sustituye por
+ *    Recursos, que sí sale de la semántica. Valores honestos (por eso más chicos que el 6/3/1 ilustrativo).
+ *  • Historial → backend REAL (tabla `PolicyVersion` de identity). `[]` = sin cambios aún (arranca vacío, honesto).
+ *  • ID/Categoría/Versión reales (no el POL-013/Acceso/v3 del board, que son datos-muestra del specimen).
  */
 export function PolicyDetailView({
   policyKey,
@@ -181,14 +184,15 @@ function Loaded({
 }) {
   const def = getPolicyDef(policy.key as PolicyKey);
   const rule = derivePolicyRule(def, policy.params);
-  const scope = derivePolicyScope(def, policy.params);
+  const scopeRows = derivePolicyScopeRows(def, policy.params);
+  const footprint = derivePolicyFootprint(def, policy.params);
 
   return (
     <div className="grid flex-1 gap-5 overflow-y-auto p-7 lg:grid-cols-[1fr_360px] lg:items-start">
       {/* Izquierda: Regla + Alcance + Historial */}
       <div className="flex flex-col gap-[18px]">
         <RuleCard rule={rule} />
-        <ScopeCard def={def} scope={scope} />
+        <ScopeCard rows={scopeRows} description={def.description} />
         <HistoryCard
           def={def}
           history={history}
@@ -200,7 +204,7 @@ function Loaded({
       {/* Derecha: Política + Impacto + Acciones */}
       <div className="flex flex-col gap-[18px]">
         <MetaCard def={def} policy={policy} />
-        <ImpactCard scope={scope} version={policy.version} changes={history?.length ?? 0} />
+        <ImpactCard footprint={footprint} />
         <ActionsCard def={def} policy={policy} canManage={canManage} />
       </div>
     </div>
@@ -266,41 +270,27 @@ function RuleBlock({
   );
 }
 
-/* ── Alcance: roles / rangos CIDR targeteados, o "Global" ── */
-function ScopeCard({ def, scope }: { def: ReturnType<typeof getPolicyDef>; scope: DerivedScope }) {
+/* ── Alcance: 3 filas del board (Acciones · Recursos · Roles alcanzados) DERIVADAS de la semántica + params ── */
+function ScopeCard({ rows, description }: { rows: ScopeRowData[]; description: string }) {
   return (
     <Card title="Alcance">
-      {scope.kind === 'global' ? (
-        <ScopeRow
-          label="Alcance"
-          chips={['Todos los roles · global']}
-          empty="—"
-        />
-      ) : scope.kind === 'roles' ? (
-        <ScopeRow
-          label="Roles alcanzados"
-          chips={scope.roles.map((r) => roleMeta(r)?.label ?? r)}
-          empty="Ningún rol — la política no habilita a nadie"
-        />
-      ) : (
-        <ScopeRow
-          label="Rangos IP (CIDR)"
-          chips={scope.cidrs}
-          empty="Lista vacía — sin restricción de IP"
-        />
-      )}
-      <p className="text-xs leading-relaxed text-ink-muted">{def.description}</p>
+      <div className="flex flex-col gap-3">
+        {rows.map((row) => (
+          <ScopeRow key={row.label} row={row} />
+        ))}
+      </div>
+      <p className="text-xs leading-relaxed text-ink-muted">{description}</p>
     </Card>
   );
 }
 
-function ScopeRow({ label, chips, empty }: { label: string; chips: string[]; empty: string }) {
+function ScopeRow({ row }: { row: ScopeRowData }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="w-[130px] shrink-0 text-[13px] text-ink-muted">{label}</span>
+      <span className="w-[130px] shrink-0 text-[13px] text-ink-muted">{row.label}</span>
       <div className="flex flex-1 flex-wrap gap-1.5">
-        {chips.length > 0 ? (
-          chips.map((c) => (
+        {row.chips.length > 0 ? (
+          row.chips.map((c) => (
             <span
               key={c}
               className="inline-flex rounded-full border border-border bg-surface-2 px-2.5 py-1 font-mono text-xs font-semibold text-ink"
@@ -309,7 +299,7 @@ function ScopeRow({ label, chips, empty }: { label: string; chips: string[]; emp
             </span>
           ))
         ) : (
-          <span className="text-xs text-ink-subtle">{empty}</span>
+          <span className="text-xs text-ink-subtle">{row.emptyHint ?? '—'}</span>
         )}
       </div>
     </div>
@@ -428,6 +418,10 @@ function MetaCard({
         <MetaRow label="Estado" value={<StatusBadge enabled={policy.enabled} />} />
         <MetaRow label="Versión" value={<span className="font-mono text-sm font-semibold text-ink">v{policy.version}</span>} />
         <MetaRow
+          label="Decisión"
+          value={<span className="font-mono text-xs text-ink-muted">ADR-024 · ADR-025</span>}
+        />
+        <MetaRow
           label="Modificación"
           value={
             <span className="inline-flex rounded-full bg-warn/15 px-2.5 py-1 text-xs font-bold text-warn">
@@ -469,28 +463,16 @@ function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-/* ── Impacto: SOLO stats con fuente real. Endpoints/App del board OMITIDOS (sin fuente). ── */
-function ImpactCard({
-  scope,
-  version,
-  changes,
-}: {
-  scope: DerivedScope;
-  version: number;
-  changes: number;
-}) {
-  const scopeStat =
-    scope.kind === 'roles'
-      ? { value: String(scope.roles.length), label: scope.roles.length === 1 ? 'Rol' : 'Roles' }
-      : scope.kind === 'cidrs'
-        ? { value: String(scope.cidrs.length), label: scope.cidrs.length === 1 ? 'Rango IP' : 'Rangos IP' }
-        : { value: 'Global', label: 'Alcance' };
+/* ── Impacto (blast-radius): stats REALES del footprint (Roles · Recursos · Apps). El "Endpoints" del board no es
+   computable (el enforcement son lecturas dispersas del PolicyReader, no un decorator por-ruta) → se sustituye por
+   Recursos, que sí sale de la semántica real. Los valores son honestos (por eso más chicos que el 6/3/1 ilustrativo). */
+function ImpactCard({ footprint }: { footprint: PolicyFootprint }) {
   return (
     <Card title="Impacto">
       <div className="grid grid-cols-3 gap-3">
-        <Stat value={`v${version}`} label="Versión" />
-        <Stat value={String(changes)} label={changes === 1 ? 'Cambio' : 'Cambios'} />
-        <Stat value={scopeStat.value} label={scopeStat.label} />
+        <Stat value={String(footprint.roles)} label={footprint.roles === 1 ? 'Rol' : 'Roles'} />
+        <Stat value={String(footprint.recursos)} label={footprint.recursos === 1 ? 'Recurso' : 'Recursos'} />
+        <Stat value={String(footprint.apps)} label={footprint.apps === 1 ? 'App' : 'Apps'} />
       </div>
     </Card>
   );

@@ -8,6 +8,7 @@
  * catálogo agrega un parámetro nuevo, el editor lo renderiza solo con un label humanizado por defecto.
  */
 import { z } from 'zod';
+import { AdminRole } from '@veo/shared-types';
 import type { LucideIcon } from 'lucide-react';
 import {
   CalendarClock,
@@ -32,6 +33,7 @@ import {
   Video,
 } from 'lucide-react';
 import type { PolicyDef, PolicyFamily, PolicyKey, PolicyParams } from '@veo/policy';
+import { roleMeta } from './gobierno/permissions';
 
 /* ── Familias (orden y presentación del diseño AdminPoliticas) ── */
 
@@ -258,140 +260,351 @@ function pList(params: PolicyParams, key: string): string[] {
 }
 
 /**
- * Constructores de regla por política. Cada uno traduce key + params → WHEN/THEN legible. Es la fuente única de
- * la traducción (16 entradas, `satisfies` garantiza que están TODAS): agregar una política obliga a declarar su
- * regla. NO inventa efectos que la política no tenga — refleja la semántica real del catálogo (§5) con los `params`.
+ * Semántica PBAC técnica por política (vocabulario del board `jznes`: `action`/`resource` + acciones/recursos/roles
+ * del Alcance). NO es contrato del wire — es la traducción LEGIBLE de lo que la política gobierna, en el mismo
+ * vocabulario técnico del diseño. Los `roles` salen de `PERMISSION_ROLES` real (@veo/policy): son los roles que la
+ * política ALCANZA (los que ejercen la acción gobernada), no un set inventado. `apps` = frontends donde el efecto
+ * es visible. Honesto: describe la semántica real del catálogo (§5), no fabrica efectos que la política no tenga.
+ */
+const R = AdminRole;
+/** Los 7 roles admin (orden del ADR) — una política "global" alcanza a todos. */
+const ALL_ROLES: readonly AdminRole[] = [
+  R.SUPPORT_L1,
+  R.SUPPORT_L2,
+  R.DISPATCHER,
+  R.COMPLIANCE_SUPERVISOR,
+  R.FINANCE,
+  R.ADMIN,
+  R.SUPERADMIN,
+];
+
+interface PolicySemantics {
+  /** Acciones (técnicas) que la política gobierna → chips del Alcance. */
+  acciones: readonly string[];
+  /** Recursos (técnicos) sobre los que aplica → chips del Alcance. */
+  recursos: readonly string[];
+  /**
+   * Roles ALCANZADOS: lista fija de `PERMISSION_ROLES`, `'all'` (los 7), o `'param'` (se lee de los `params`
+   * role-scoped: revealRoles / allowedRoles). Fuente real — no inventa roles.
+   */
+  roles: readonly AdminRole[] | 'all' | 'param';
+  /** Frontends donde el efecto de la política es visible. */
+  apps: readonly string[];
+}
+
+const POLICY_SEMANTICS: Record<PolicyKey, PolicySemantics> = {
+  // Acceso a grabación exige four-eyes. Roles = quienes pueden acceder a video (media:view) = CMP/ADM/SUP.
+  'media.dual-auth': {
+    acciones: ['video.access'],
+    recursos: ['recorded_video', 'live_stream'],
+    roles: [R.COMPLIANCE_SUPERVISOR, R.ADMIN, R.SUPERADMIN],
+    apps: ['admin'],
+  },
+  // Enmascarado universal del DNI/PII; la excepción (quién ve sin enmascarar) sale de revealRoles (param).
+  'pii.mask': {
+    acciones: ['pii.render'],
+    recursos: ['dni', 'personal_data'],
+    roles: 'param',
+    apps: ['admin', 'family'],
+  },
+  'pii.reveal-stepup': {
+    acciones: ['pii.reveal'],
+    recursos: ['dni', 'personal_data'],
+    roles: [R.COMPLIANCE_SUPERVISOR, R.ADMIN, R.SUPERADMIN],
+    apps: ['admin'],
+  },
+  'media.retention': {
+    acciones: ['media.sweep'],
+    recursos: ['recorded_video'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'privacy.erasure': {
+    acciones: ['account.erase'],
+    recursos: ['pii', 'account_data'],
+    roles: 'all',
+    apps: ['admin', 'passenger', 'family'],
+  },
+  'auth.mfa': {
+    acciones: ['operator.login'],
+    recursos: ['admin_session'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'auth.stepup': {
+    acciones: ['sensitive.action'],
+    recursos: ['admin_session'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'auth.session-timeout': {
+    acciones: ['session.idle'],
+    recursos: ['admin_session'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'auth.daily-reauth': {
+    acciones: ['session.daily'],
+    recursos: ['admin_session'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'access.jit': {
+    acciones: ['access.grant'],
+    recursos: ['elevated_access'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'access.ip-allowlist': {
+    acciones: ['access.connect'],
+    recursos: ['admin_endpoint'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'access.review': {
+    acciones: ['access.recertify'],
+    recursos: ['role_grant'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'access.least-privilege': {
+    acciones: ['resource.access'],
+    recursos: ['any_resource'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'ops.export': {
+    acciones: ['data.export'],
+    recursos: ['dataset'],
+    roles: 'param',
+    apps: ['admin'],
+  },
+  'ops.third-party-share': {
+    acciones: ['data.share'],
+    recursos: ['user_data'],
+    roles: 'all',
+    apps: ['admin'],
+  },
+  'ops.bulk-download': {
+    acciones: ['data.bulk-download'],
+    recursos: ['dataset'],
+    roles: 'param',
+    apps: ['admin'],
+  },
+};
+
+/**
+ * Roles ALCANZADOS reales (resueltos): `'all'`→los 7, `'param'`→los del set role-scoped (revealRoles/allowedRoles
+ * TAL CUAL están configurados — no se filtran ni normalizan, así se refleja la config real aunque use una etiqueta
+ * suelta como `COMPLIANCE`), o la lista fija de `PERMISSION_ROLES`. Devuelve strings porque los params son strings.
+ */
+export function policyRoles(def: PolicyDef, params: PolicyParams): readonly string[] {
+  const sem = POLICY_SEMANTICS[def.key];
+  if (sem.roles === 'all') return ALL_ROLES;
+  if (sem.roles === 'param') {
+    return pList(params, def.key === 'pii.mask' ? 'revealRoles' : 'allowedRoles');
+  }
+  return sem.roles;
+}
+
+/**
+ * Constructores de regla por política. Cada uno traduce key + params → WHEN/THEN en el vocabulario PBAC TÉCNICO del
+ * board (`action`/`resource` ▸ `require`/`effect`), con los valores VIGENTES de `params`. Fuente única (16 entradas,
+ * `satisfies` garantiza que están TODAS). NO inventa efectos ni valores que la política no tenga (p. ej. no hay
+ * `ttl` en dual-auth → no se muestra): refleja la semántica real del catálogo (§5).
  */
 const RULE_BUILDERS = {
   'media.dual-auth': (p) => ({
-    when: [{ term: 'acción', value: 'acceder a la grabación de un viaje' }],
+    when: [
+      { term: 'action', value: 'video.access' },
+      { term: 'resource', value: 'recorded_video' },
+    ],
     then: [
-      { term: 'requiere', value: `aprobación de ${pNum(p, 'approvers', 2)} personas distintas` },
-      { term: 'four-eyes', value: 'identidad + rol distintos por aprobador' },
+      { term: 'require', value: 'two_person_approval' },
+      { term: 'approvers', value: `× ${pNum(p, 'approvers', 2)}` },
+      { term: 'four_eyes', value: 'identity + role' },
     ],
   }),
   'pii.mask': (p) => {
     const roles = pList(p, 'revealRoles');
     return {
       when: [
-        { term: 'acción', value: 'mostrar DNI / datos personales' },
-        { term: 'excepto', value: roles.length ? roles.join(', ') : '— (nadie)' },
+        { term: 'action', value: 'pii.render' },
+        { term: 'resource', value: 'dni · personal_data' },
       ],
-      then: [{ term: 'efecto', value: `enmascarar · dejar ${pNum(p, 'dniTail', 4)} dígitos visibles` }],
+      then: [
+        { term: 'effect', value: 'mask' },
+        { term: 'keep', value: `${pNum(p, 'dniTail', 4)} digits` },
+        { term: 'except', value: roles.length ? roles.join(' · ').toLowerCase() : '∅' },
+      ],
     };
   },
   'pii.reveal-stepup': (p) => ({
-    when: [{ term: 'acción', value: 'revelar el DNI / PII completo' }],
-    then: [{ term: 'requiere', value: `MFA fresca (< ${pNum(p, 'maxAgeSec', 600)} s)` }],
+    when: [{ term: 'action', value: 'pii.reveal' }],
+    then: [
+      { term: 'require', value: 'fresh_mfa' },
+      { term: 'max_age', value: `${pNum(p, 'maxAgeSec', 600)}s` },
+    ],
   }),
   'media.retention': (p) => ({
-    when: [{ term: 'condición', value: `la grabación supera ${pNum(p, 'days', 30)} días` }],
-    then: [{ term: 'efecto', value: 'barrido / eliminación de la grabación' }],
+    when: [
+      { term: 'resource', value: 'recorded_video' },
+      { term: 'age', value: `> ${pNum(p, 'days', 30)} days` },
+    ],
+    then: [{ term: 'effect', value: 'sweep · delete' }],
   }),
   'privacy.erasure': (p) => ({
-    when: [{ term: 'acción', value: 'se solicita el borrado de la cuenta' }],
+    when: [{ term: 'action', value: 'account.erase' }],
     then: [
-      { term: 'gracia', value: `esperar ${pNum(p, 'graceDays', 30)} días` },
-      { term: 'luego', value: 'borrado definitivo (tombstone)' },
+      { term: 'grace', value: `${pNum(p, 'graceDays', 30)} days` },
+      { term: 'then', value: 'tombstone' },
     ],
   }),
   'auth.mfa': () => ({
-    when: [{ term: 'acción', value: 'un operador inicia sesión' }],
-    then: [{ term: 'requiere', value: 'segundo factor (MFA)' }],
+    when: [{ term: 'action', value: 'operator.login' }],
+    then: [{ term: 'require', value: 'second_factor' }],
   }),
   'auth.stepup': (p) => ({
-    when: [{ term: 'acción', value: 'ejecutar una acción sensible' }],
-    then: [{ term: 'requiere', value: `MFA fresca (< ${pNum(p, 'maxAgeSec', 300)} s)` }],
+    when: [{ term: 'action', value: 'sensitive.action' }],
+    then: [
+      { term: 'require', value: 'fresh_mfa' },
+      { term: 'max_age', value: `${pNum(p, 'maxAgeSec', 300)}s` },
+    ],
   }),
   'auth.session-timeout': (p) => ({
-    when: [{ term: 'condición', value: `inactividad > ${pNum(p, 'idleMin', 30)} min` }],
-    then: [{ term: 'efecto', value: 'cerrar la sesión (re-login)' }],
+    when: [
+      { term: 'resource', value: 'admin_session' },
+      { term: 'idle', value: `> ${pNum(p, 'idleMin', 30)} min` },
+    ],
+    then: [{ term: 'effect', value: 'logout · re-login' }],
   }),
   'auth.daily-reauth': () => ({
-    when: [{ term: 'condición', value: 'pasó 1 día desde la última re-autenticación' }],
-    then: [{ term: 'efecto', value: 'forzar re-autenticación completa' }],
+    when: [{ term: 'condition', value: 'age > 1 day' }],
+    then: [{ term: 'effect', value: 'force_reauth' }],
   }),
   'access.jit': (p) => ({
-    when: [{ term: 'acción', value: 'se concede un acceso elevado' }],
-    then: [{ term: 'efecto', value: `expira tras ${pNum(p, 'ttlHours', 8)} h` }],
+    when: [{ term: 'action', value: 'access.grant' }],
+    then: [{ term: 'expires', value: `${pNum(p, 'ttlHours', 8)}h` }],
   }),
   'access.ip-allowlist': (p) => {
     const cidrs = pList(p, 'cidrs');
     return cidrs.length
       ? {
-          when: [{ term: 'condición', value: `la IP no está en ${cidrs.length} rango(s) CIDR` }],
-          then: [{ term: 'efecto', value: 'denegar el acceso admin' }],
+          when: [
+            { term: 'action', value: 'access.connect' },
+            { term: 'ip', value: `∉ ${cidrs.length} cidr` },
+          ],
+          then: [{ term: 'effect', value: 'deny' }],
         }
       : {
-          when: [{ term: 'condición', value: 'lista vacía' }],
-          then: [{ term: 'efecto', value: 'sin restricción (no bloquea a nadie)' }],
+          when: [{ term: 'cidrs', value: '∅ (empty)' }],
+          then: [{ term: 'effect', value: 'allow_all' }],
         };
   },
   'access.review': (p) => ({
     when: [
-      { term: 'condición', value: `pasaron ${pNum(p, 'periodDays', 90)} días desde la última recertificación` },
+      { term: 'resource', value: 'role_grant' },
+      { term: 'age', value: `> ${pNum(p, 'periodDays', 90)} days` },
     ],
-    then: [{ term: 'efecto', value: 'exigir recertificar los accesos' }],
+    then: [{ term: 'effect', value: 'recertify' }],
   }),
   'access.least-privilege': () => ({
-    when: [{ term: 'acción', value: 'un rol solicita un recurso' }],
+    when: [{ term: 'action', value: 'resource.access' }],
     then: [
-      { term: 'efecto', value: 'conceder solo lo estrictamente necesario' },
-      { term: 'base', value: 'RBAC + redacción default-null' },
+      { term: 'effect', value: 'grant_minimal' },
+      { term: 'base', value: 'rbac · default_null' },
     ],
   }),
   'ops.export': (p) => {
     const roles = pList(p, 'allowedRoles');
     return {
       when: [
-        { term: 'condición', value: roles.length ? `el rol no está en {${roles.join(', ')}}` : 'ningún rol habilitado' },
+        { term: 'action', value: 'data.export' },
+        { term: 'role', value: roles.length ? `∉ {${roles.join(', ').toLowerCase()}}` : '∅ allowed' },
       ],
-      then: [{ term: 'efecto', value: 'denegar exportar datasets' }],
+      then: [{ term: 'effect', value: 'deny' }],
     };
   },
   'ops.third-party-share': () => ({
-    when: [{ term: 'acción', value: 'compartir datos con un tercero' }],
-    then: [{ term: 'efecto', value: 'permitir (feature de producto, on/off)' }],
+    when: [{ term: 'action', value: 'data.share' }],
+    then: [{ term: 'effect', value: 'allow (product_flag)' }],
   }),
   'ops.bulk-download': (p) => {
     const roles = pList(p, 'allowedRoles');
     return {
       when: [
-        { term: 'condición', value: roles.length ? `el rol no está en {${roles.join(', ')}}` : 'ningún rol habilitado' },
+        { term: 'action', value: 'data.bulk-download' },
+        { term: 'role', value: roles.length ? `∉ {${roles.join(', ').toLowerCase()}}` : '∅ allowed' },
       ],
-      then: [{ term: 'efecto', value: 'denegar la descarga masiva' }],
+      then: [{ term: 'effect', value: 'deny' }],
     };
   },
 } satisfies Record<PolicyKey, (params: PolicyParams) => DerivedRule>;
 
-/** Traduce una política (key + params vigentes) a su regla WHEN/THEN legible. Presentación, no backend. */
+/** Traduce una política (key + params vigentes) a su regla WHEN/THEN técnica. Presentación, no backend. */
 export function derivePolicyRule(def: PolicyDef, params: PolicyParams): DerivedRule {
   return RULE_BUILDERS[def.key](params);
 }
 
-/* ── Alcance (roles / recursos que la política TARGETEA) DERIVADO de sus params, o "global" ── */
+/* ── Alcance: 3 filas del board (Acciones / Recursos / Roles alcanzados) DERIVADAS de la semántica + params ── */
+
+/** Una fila del Alcance: label + chips (mono). `emptyHint` cuando el set está vacío (honesto, no oculta). */
+export interface ScopeRowData {
+  label: string;
+  chips: string[];
+  emptyHint?: string;
+}
 
 /**
- * Alcance de una política: si sus `params` targetean roles (pii.mask.revealRoles, ops.*.allowedRoles) o rangos
- * CIDR (access.ip-allowlist.cidrs), se listan; el resto es GLOBAL (aplica a todos los roles / todo el acceso). Se
- * DERIVA de la config real — no se inventa un alcance que la política no declare. */
-export type DerivedScope =
-  | { kind: 'roles'; roles: string[] }
-  | { kind: 'cidrs'; cidrs: string[] }
-  | { kind: 'global' };
-
-export function derivePolicyScope(def: PolicyDef, params: PolicyParams): DerivedScope {
-  switch (def.key) {
-    case 'pii.mask':
-      return { kind: 'roles', roles: pList(params, 'revealRoles') };
-    case 'ops.export':
-    case 'ops.bulk-download':
-      return { kind: 'roles', roles: pList(params, 'allowedRoles') };
-    case 'access.ip-allowlist':
-      return { kind: 'cidrs', cidrs: pList(params, 'cidrs') };
-    default:
-      return { kind: 'global' };
+ * Las 3 filas del Alcance del board: Acciones (técnicas) · Recursos (técnicos) · Roles alcanzados (labels de rol,
+ * de `PERMISSION_ROLES` real o de los params role-scoped). Para `access.ip-allowlist` la 3ra fila son los rangos
+ * CIDR configurados (su "scope" real). Todo DERIVADO — nada inventado. */
+export function derivePolicyScopeRows(def: PolicyDef, params: PolicyParams): ScopeRowData[] {
+  const sem = POLICY_SEMANTICS[def.key];
+  const rows: ScopeRowData[] = [
+    { label: 'Acciones', chips: [...sem.acciones] },
+    { label: 'Recursos', chips: [...sem.recursos] },
+  ];
+  if (def.key === 'access.ip-allowlist') {
+    const cidrs = pList(params, 'cidrs');
+    rows.push({
+      label: 'Rangos IP',
+      chips: cidrs,
+      emptyHint: 'Lista vacía — sin restricción de IP',
+    });
+    return rows;
   }
+  const roles = policyRoles(def, params);
+  rows.push({
+    label: 'Roles alcanzados',
+    chips: roles.map((r) => roleMeta(r)?.label ?? r),
+    emptyHint:
+      sem.roles === 'param' ? 'Ningún rol — la política no habilita a nadie' : undefined,
+  });
+  return rows;
+}
+
+/* ── Impacto (blast-radius): stats REALES del footprint de la política ── */
+
+export interface PolicyFootprint {
+  acciones: number;
+  recursos: number;
+  roles: number;
+  apps: number;
+}
+
+/**
+ * Footprint de una política: cuántas acciones/recursos gobierna, cuántos roles alcanza y en cuántas apps se ve el
+ * efecto. Todo DERIVADO de la semántica real (`PERMISSION_ROLES`, params). Reemplaza los "6 Endpoints" del board,
+ * que no son computables (el enforcement son lecturas dispersas del `PolicyReader`, no un decorator por-ruta). */
+export function derivePolicyFootprint(def: PolicyDef, params: PolicyParams): PolicyFootprint {
+  const sem = POLICY_SEMANTICS[def.key];
+  return {
+    acciones: sem.acciones.length,
+    recursos: sem.recursos.length,
+    roles: policyRoles(def, params).length,
+    apps: sem.apps.length,
+  };
 }
 
 /** Resumen corto del PRIMER parámetro para el chip de la fila (p. ej. "2 aprobadores", "30 min", "2 roles"). */
