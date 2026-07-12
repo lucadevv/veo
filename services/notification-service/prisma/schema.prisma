@@ -63,6 +63,10 @@ model Notification {
   sentAt        DateTime?           @map("sent_at") @db.Timestamptz
   deliveredAt   DateTime?           @map("delivered_at") @db.Timestamptz
   failedReason  String?             @map("failed_reason")
+  /// Bandeja in-app: marca de LECTURA del destinatario. NULL = no leído (cuenta para el badge). El
+  /// cliente NO lo inventa: lo deriva de acá (`read = readAt != null`). Solo aplica al canal PUSH
+  /// (la bandeja); SMS/WEBHOOK nunca se "leen" en la app. Lo sella PATCH /notifications/:id/read.
+  readAt        DateTime?           @map("read_at") @db.Timestamptz
   createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz
 
   /// Índice del worker: filtra PENDING vencidas y ordena por prioridad y luego antigüedad.
@@ -87,6 +91,31 @@ model DeviceToken {
 
   @@index([userId])
   @@map("device_tokens")
+  @@schema("notification")
+}
+
+/// Preferencias in-app de notificaciones del usuario (una fila por usuario). FUENTE DE VERDAD
+/// server-side: reemplaza la persistencia SOLO-LOCAL (MMKV) del cliente para que sobrevivan a
+/// reinstalación y sincronicen entre dispositivos. `userId` lo fija el BFF desde la identidad firmada
+/// (nunca del cuerpo). Booleans por categoría — ESPEJA el shape del store del passenger
+/// (notificationPrefsStore.ts). Las categorías de SEGURIDAD (pánico/biométrica) NO viven acá: son
+/// no-desactivables por diseño del producto. Ausencia de fila = defaults (opt-in de promos apagado).
+model NotificationPreference {
+  userId             String   @id @map("user_id")
+  /// Viajes · confirmación/cancelación del conductor.
+  tripStatus         Boolean  @default(true) @map("trip_status")
+  /// Viajes · llegada y demoras del conductor.
+  driverEnRoute      Boolean  @default(true) @map("driver_en_route")
+  /// Viajes · recordatorios de viajes programados.
+  scheduledReminders Boolean  @default(true) @map("scheduled_reminders")
+  /// Promociones · ofertas y cupones (opt-in: default apagado).
+  offers             Boolean  @default(false)
+  /// Promociones · novedades de VEO (opt-in: default apagado).
+  news               Boolean  @default(false)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("notification_preferences")
   @@schema("notification")
 }
 

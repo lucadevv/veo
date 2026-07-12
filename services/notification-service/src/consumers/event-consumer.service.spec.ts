@@ -66,6 +66,7 @@ class InMemoryStore implements NotificationStore {
       attempts: 0,
       sentAt: null,
       deliveredAt: null,
+      readAt: null,
       failedReason: null,
       createdAt: new Date(),
     };

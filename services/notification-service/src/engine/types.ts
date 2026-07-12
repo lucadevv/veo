@@ -28,6 +28,8 @@ export interface NotificationRecord {
   sentAt: Date | null;
   deliveredAt: Date | null;
   failedReason: string | null;
+  /** Bandeja in-app: marca de lectura del destinatario. `null` = no leído (cuenta para el badge). */
+  readAt: Date | null;
   createdAt: Date;
 }
 

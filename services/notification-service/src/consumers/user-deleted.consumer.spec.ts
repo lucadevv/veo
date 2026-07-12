@@ -13,6 +13,7 @@ import { NotificationRepository } from '../engine/notification.repository';
 import { UserDeletedConsumer } from './user-deleted.consumer';
 import type { DeviceTokenRepository } from '../devices/device-token.repository';
 import type { SupportTicketRepository } from '../support/support.repository';
+import type { NotificationPreferenceRepository } from '../notification-prefs/notification-prefs.repository';
 import type { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
 
@@ -96,11 +97,13 @@ describe('UserDeletedConsumer', () => {
     const devices = { deleteByUser: vi.fn(async () => 2) };
     const notifications = { eraseByRecipients: vi.fn(async () => 5) };
     const tickets = { deleteByUser: vi.fn(async () => 1) };
+    const prefs = { deleteByUser: vi.fn(async () => 1) };
     const redis = makeRedis();
     const consumer = new UserDeletedConsumer(
       devices as unknown as DeviceTokenRepository,
       notifications as unknown as NotificationRepository,
       tickets as unknown as SupportTicketRepository,
+      prefs as unknown as NotificationPreferenceRepository,
       redis as never,
       config,
     );
@@ -110,17 +113,18 @@ describe('UserDeletedConsumer', () => {
           onUserDeleted(e: EventEnvelope<unknown>): Promise<void>;
         }
       ).onUserDeleted(e);
-    return { consumer, devices, notifications, tickets, invoke };
+    return { consumer, devices, notifications, tickets, prefs, invoke };
   }
 
-  it('purga tokens push, notificaciones (historial + cola) y tickets al recibir user.deleted', async () => {
-    const { devices, notifications, tickets, invoke } = makeConsumer();
+  it('purga tokens push, notificaciones (historial + cola), tickets y preferencias al recibir user.deleted', async () => {
+    const { devices, notifications, tickets, prefs, invoke } = makeConsumer();
 
     await invoke(envelope({ userId: 'usr-1', at: '2026-06-10T00:00:00.000Z' }));
 
     expect(devices.deleteByUser).toHaveBeenCalledWith('usr-1');
     expect(notifications.eraseByRecipients).toHaveBeenCalledWith(['usr-1']);
     expect(tickets.deleteByUser).toHaveBeenCalledWith('usr-1');
+    expect(prefs.deleteByUser).toHaveBeenCalledWith('usr-1');
   });
 
   it('si la identidad era conductor, purga también las notificaciones dirigidas a su driverId', async () => {
@@ -132,13 +136,14 @@ describe('UserDeletedConsumer', () => {
   });
 
   it('ignora payloads inválidos sin borrar nada (no lanza)', async () => {
-    const { devices, notifications, tickets, invoke } = makeConsumer();
+    const { devices, notifications, tickets, prefs, invoke } = makeConsumer();
 
     await invoke(envelope({ nope: true }));
 
     expect(devices.deleteByUser).not.toHaveBeenCalled();
     expect(notifications.eraseByRecipients).not.toHaveBeenCalled();
     expect(tickets.deleteByUser).not.toHaveBeenCalled();
+    expect(prefs.deleteByUser).not.toHaveBeenCalled();
   });
 
   it('deduplica por eventId: reprocesar el mismo evento NO vuelve a purgar', async () => {

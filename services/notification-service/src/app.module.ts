@@ -14,6 +14,7 @@ import { PrismaService } from './infra/prisma.service';
 import { REDIS } from './infra/redis';
 import { EngineModule } from './engine/engine.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { NotificationPrefsModule } from './notification-prefs/notification-prefs.module';
 import { DevicesModule } from './devices/devices.module';
 import { SupportModule } from './support/support.module';
 import { ConsumersModule } from './consumers/consumers.module';
@@ -43,6 +44,7 @@ const readinessProvider: Provider = {
     CoreModule,
     EngineModule,
     NotificationsModule,
+    NotificationPrefsModule,
     DevicesModule,
     SupportModule,
     ConsumersModule,

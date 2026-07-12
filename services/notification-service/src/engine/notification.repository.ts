@@ -27,9 +27,13 @@ function toRecord(row: PrismaNotification): NotificationRecord {
     sentAt: row.sentAt,
     deliveredAt: row.deliveredAt,
     failedReason: row.failedReason,
+    readAt: row.readAt,
     createdAt: row.createdAt,
   };
 }
+
+/** Resultado de marcar UNA notificación como leída (anti-IDOR: distingue no-dueño de ya-leída). */
+export type MarkReadOutcome = 'ok' | 'notFound';
 
 @Injectable()
 export class NotificationRepository implements NotificationStore {
@@ -84,6 +88,39 @@ export class NotificationRepository implements NotificationStore {
       take: limit,
     });
     return rows.map(toRecord);
+  }
+
+  /**
+   * Marca UNA notificación como leída, SCOPEADA al destinatario (anti-IDOR: nunca por `id` solo — un
+   * usuario no puede marcar la notificación de otro). Idempotente: si ya estaba leída no re-sella la
+   * marca (conserva el timestamp original). Devuelve `notFound` si la fila no existe o no es del
+   * usuario (el caller responde 404 sin filtrar de quién era: no revela ajenas).
+   */
+  async markRead(id: string, recipientId: string): Promise<MarkReadOutcome> {
+    return this.prisma.write.$transaction(async (tx) => {
+      const row = await tx.notification.findFirst({
+        where: { id, recipientId },
+        select: { id: true, readAt: true },
+      });
+      if (!row) return 'notFound';
+      if (!row.readAt) {
+        await tx.notification.update({ where: { id }, data: { readAt: new Date() } });
+      }
+      return 'ok';
+    });
+  }
+
+  /**
+   * Marca TODAS las no leídas del destinatario como leídas (solo la BANDEJA = canal PUSH; SMS/WEBHOOK
+   * no se leen en la app). Filtra `readAt: null` para no re-sellar las ya leídas. Devuelve cuántas
+   * marcó. Servido por @@index([recipientId, channel, createdAt]) (prefijo recipient+channel).
+   */
+  async markAllRead(recipientId: string): Promise<number> {
+    const { count } = await this.prisma.write.notification.updateMany({
+      where: { recipientId, channel: NotificationChannel.PUSH, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return count;
   }
 
   async findDue(now: Date, limit: number): Promise<NotificationRecord[]> {
