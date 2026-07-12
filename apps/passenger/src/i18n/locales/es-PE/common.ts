@@ -8,8 +8,8 @@
 export const common = {
   appName: 'VEO',
   tagline: 'Tu viaje, vigilado y seguro',
-  /** Tagline del splash (pantalla de arranque). */
-  splashTagline: 'Movilidad segura',
+  /** Tagline del splash (pantalla de arranque). Fuente: design/veo.pen P/Splash. */
+  splashTagline: 'Yo veo. Tú vas seguro.',
   /** Taglines de marca usadas en cabeceras del flujo de ingreso. */
   brandTaglineCity: 'Tu viaje. Tu ciudad.',
   brandTaglinePeru: 'Tu viaje en Perú',
@@ -170,8 +170,6 @@ export const common = {
     oauthErrorUnknown: 'Algo salió mal. Inténtalo de nuevo en un momento.',
     /** Aviso de degradación honesta para métodos sin backend. */
     comingSoonTitle: 'Próximamente',
-    comingSoonGoogle:
-      'El ingreso con Google estará disponible pronto. Por ahora, entra con tu teléfono.',
     comingSoonEmail:
       'El ingreso con correo estará disponible pronto. Por ahora, entra con tu teléfono.',
     comingSoonCall: 'Recibir el código por llamada estará disponible pronto.',
@@ -185,7 +183,8 @@ export const common = {
     orContinueWith: 'o continúa con',
     emailLink: 'Ingresa con correo',
     phoneTitle: 'Ingresa tu número',
-    phoneSubtitle: 'Te enviamos un código por SMS.',
+    // DEUDA: (backend) el copy dice "por WhatsApp" pero el envío real de auth/otp/request es SMS (notification-service SMPP). Pedir al backend entregar el OTP por WhatsApp Business API como canal PRIMARIO (no swap de proveedor tras el puerto SMS) para que el texto sea veraz; hasta entonces la app promete un canal que no usa. En DEV el OTP se lee del visor :5190 (dev-stack/otp-viewer) sin importar el canal, así que el mismatch NO bloquea el testing de dev.
+    phoneSubtitle: 'Te enviamos un código por WhatsApp.',
     phoneLabel: 'Número de celular',
     phoneHelper: 'Usaremos tu número solo para verificar tu cuenta.',
     phonePlaceholder: '987 654 321',
@@ -225,13 +224,6 @@ export const common = {
     expiredSubtitle:
       'Por tu seguridad cerramos la sesión. Vuelve a iniciar sesión para verificar tu identidad y continuar.',
     expiredAction: 'Volver a iniciar sesión',
-    biometricTitle: 'Desbloquea VEO',
-    biometricSubtitle:
-      'Usa tu rostro o huella para continuar tu sesión de forma segura.',
-    biometricUnlock: 'Desbloquear',
-    biometricReason: 'Verifica tu identidad para continuar tu sesión',
-    biometricError: 'No pudimos verificar tu identidad. Inténtalo de nuevo.',
-    biometricLogout: 'Usar otra cuenta',
   },
 
   /** Completar perfil tras verificar el OTP (usuario nuevo / sin perfil). */
@@ -295,6 +287,8 @@ export const common = {
     servicesTitle: 'Nuestros servicios',
     shortcutHome: 'Casa',
     shortcutWork: 'Trabajo',
+    /** Chip "Favoritos" del buscador in-sheet (design/veo.pen P/HomeSearch ShortcutChips). */
+    shortcutFavorites: 'Favoritos',
     shortcutRecent: 'Recientes',
     /** Título de la sección "Tus últimos viajes" del Home idle (últimos 3 viajes reales). */
     recentTripsTitle: 'Tus últimos viajes',
@@ -337,6 +331,7 @@ export const common = {
     requesting: 'Solicitando…',
     needDestination: 'Fija un destino para cotizar.',
     quoteError: 'No pudimos cotizar el viaje. Inténtalo de nuevo.',
+    // DEUDA: (producto) alcance Lima-only ("operamos solo en Lima Metropolitana"). Expansión geográfica = decisión de producto, no hueco técnico.
     outsideLima: 'Por ahora operamos solo en Lima Metropolitana.',
   },
 
@@ -477,6 +472,14 @@ export const common = {
     originPlaceholder: 'Punto de recogida',
     destinationPlaceholder: '¿A dónde vamos?',
     inputPlaceholder: 'Busca una dirección o lugar',
+    /** Placeholder del input de búsqueda in-sheet del Home (design/veo.pen P/HomeSearch InputRow). */
+    searchPlaceholder: '¿A dónde vas?',
+    /** Fila de origen del buscador in-sheet: el origen es la ubicación actual (design/veo.pen OriginRow). */
+    originCurrent: 'Mi ubicación actual',
+    /** Encabezado de la lista de resultados del buscador in-sheet (design/veo.pen SuggestionsHeader). */
+    suggestions: 'Sugerencias',
+    /** Atajo "Ver mapa" del buscador in-sheet → elegir el destino arrastrando el mapa. */
+    viewMap: 'Ver mapa',
     currentLocation: 'Tu ubicación actual',
     useCurrentLocation: 'Usar mi ubicación actual',
     noResults: 'Sin resultados para tu búsqueda.',
@@ -1066,9 +1069,6 @@ export const common = {
     ratedValue: 'Calificaste con {{stars}} estrellas',
     /** A11y: etiqueta hablada de la fila completa. */
     rowLabel: '{{day}} {{time}}, {{fare}}, {{status}}',
-    // Claves antiguas conservadas por compatibilidad (lista plana legacy). No usar en UI nueva.
-    empty: 'Aún no tienes viajes',
-    emptySubtitle: 'Cuando pidas tu primer viaje aparecerá aquí.',
   },
 
   panic: {
