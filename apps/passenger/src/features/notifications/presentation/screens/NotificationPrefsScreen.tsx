@@ -1,4 +1,12 @@
-import {Banner, Card, SafeScreen, Switch, Text, useTheme} from '@veo/ui-kit';
+import {
+  Banner,
+  Card,
+  ListItem,
+  SafeScreen,
+  Switch,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {Linking, ScrollView, StyleSheet, View} from 'react-native';
@@ -208,20 +216,19 @@ function PrefToggleRow({
 }: PrefToggleRowProps): React.JSX.Element {
   const theme = useTheme();
   return (
-    <View style={[styles.row, {gap: theme.spacing.md}]}>
-      <Icon color={theme.colors.inkMuted} size={20} />
-      <View style={styles.texts}>
-        <Text variant="bodyStrong">{title}</Text>
-        <Text variant="footnote" color="inkSubtle">
-          {subtitle}
-        </Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={next => onChange(prefKey, next)}
-        accessibilityLabel={title}
-      />
-    </View>
+    <ListItem
+      style={styles.prefRow}
+      leading={<Icon color={theme.colors.inkMuted} size={20} />}
+      title={title}
+      subtitle={subtitle}
+      trailing={
+        <Switch
+          value={value}
+          onValueChange={next => onChange(prefKey, next)}
+          accessibilityLabel={title}
+        />
+      }
+    />
   );
 }
 
@@ -233,21 +240,20 @@ function PrefToggleRow({
 function LockedRow({Icon, title, subtitle}: BaseRowProps): React.JSX.Element {
   const theme = useTheme();
   return (
-    <View style={[styles.row, {gap: theme.spacing.md}]}>
-      <Icon color={theme.colors.inkMuted} size={20} />
-      <View style={styles.texts}>
-        <Text variant="bodyStrong">{title}</Text>
-        <Text variant="footnote" color="inkSubtle">
-          {subtitle}
-        </Text>
-      </View>
-      <Switch
-        value
-        disabled
-        onValueChange={() => undefined}
-        accessibilityLabel={title}
-      />
-    </View>
+    <ListItem
+      style={styles.prefRow}
+      leading={<Icon color={theme.colors.inkMuted} size={20} />}
+      title={title}
+      subtitle={subtitle}
+      trailing={
+        <Switch
+          value
+          disabled
+          onValueChange={() => undefined}
+          accessibilityLabel={title}
+        />
+      }
+    />
   );
 }
 
@@ -262,13 +268,9 @@ function RowDivider(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-  },
-  texts: {flex: 1, gap: 2},
+  // Conserva el inset horizontal de 16 del pen (ListItem default = xs/4, pegaría el icono al borde
+  // de la card padding="none"); el gap lg del kit alinea el texto al indent 52 del divisor.
+  prefRow: {paddingHorizontal: 16},
   dividerWrap: {paddingLeft: 52},
   divider: {height: StyleSheet.hairlineWidth},
 });

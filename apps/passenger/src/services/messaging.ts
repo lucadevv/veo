@@ -136,9 +136,9 @@ export async function registerBackgroundMessageHandler(): Promise<void> {
 
 /**
  * Deep-link pendiente. Se mantiene hasta que la navegación REALMENTE pueda aterrizar: las pantallas de
- * viaje (OffersBoard/TripActive/NoOffers) SOLO existen en el stack autenticado+desbloqueado+perfil-completo
- * (RootNavigator). Si el push se toca con la sesión BLOQUEADA (BiometricLock, común en cold-start) o el
- * perfil incompleto, navegar sería un no-op silencioso y el deep-link se perdería. Por eso no lo navegamos
+ * viaje (OffersBoard/TripActive/NoOffers) SOLO existen en el stack autenticado+perfil-completo
+ * (RootNavigator). Si el push se toca con el perfil incompleto, navegar sería un no-op silencioso y el
+ * deep-link se perdería. Por eso no lo navegamos
  * a ciegas: lo dejamos pendiente y `flushPendingDeepLink` reintenta en cada cambio de estado de navegación
  * (App.tsx `onReady` + `onStateChange`), aterrizando recién cuando la ruta destino está montada.
  */
@@ -185,7 +185,7 @@ export function flushPendingDeepLink(): void {
   }
   if (!navigationRef.isReady()) return;
   // La ruta destino solo existe en el stack autenticado: si el navegador montado es Splash/Auth/
-  // BiometricLock/CompleteProfile, esperá (no la consumas) hasta que conmute al stack de viaje.
+  // CompleteProfile, esperá (no la consumas) hasta que conmute al stack de viaje.
   const routeNames = navigationRef.getRootState()?.routeNames ?? [];
   if (!routeNames.includes(target.screen)) return;
   clearPendingDeepLink();

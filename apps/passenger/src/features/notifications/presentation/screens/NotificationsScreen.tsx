@@ -1,7 +1,15 @@
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
-import {Banner, Card, IconButton, SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import {
+  Banner,
+  Button,
+  Card,
+  IconButton,
+  SafeScreen,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
@@ -38,8 +46,9 @@ function toneForKind(kind: NotificationKind): 'accent' | 'warn' | 'inkMuted' {
  *
  * Conectado al backend REAL (`GET /notifications` del public-bff → notification-service): trae las
  * notificaciones PUSH del pasajero ya renderizadas (título + cuerpo del template i18n). Lista vacía =
- * el pasajero todavía no tiene avisos (estado vacío HONESTO, sin "próximamente" falso). Sin
- * leído/no-leído por ahora (MVP cronológico; el `read_at` real es un follow-up).
+ * el pasajero todavía no tiene avisos (estado vacío HONESTO, sin "próximamente" falso). Leído/no-leído
+ * YA implementado: el `read` viene del `read_at` real del server, el badge cuenta los no-leídos y
+ * "marcar todo como leído" (markAllRead) los limpia.
  */
 export function NotificationsScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -179,16 +188,14 @@ export function NotificationsScreen(): React.JSX.Element {
         ) : null}
         {/* "Marcar todo leído": solo cuando hay no leídos. Optimistic con revert ante error. */}
         {unreadCount > 0 ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('notifications.markAllRead')}
+          <Button
+            variant="ghost"
+            size="sm"
+            label={t('notifications.markAllRead')}
             onPress={() => markAllMutation.mutate()}
             disabled={markAllMutation.isPending}
-            style={styles.markAll}>
-            <Text variant="footnote" color="accent">
-              {t('notifications.markAllRead')}
-            </Text>
-          </Pressable>
+            style={styles.markAll}
+          />
         ) : null}
         {notifications.map(item => (
           <NotificationCard
@@ -280,6 +287,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  markAll: {alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 4},
+  markAll: {alignSelf: 'flex-end'},
   unreadDot: {width: 8, height: 8, borderRadius: 4, marginTop: 6},
 });
