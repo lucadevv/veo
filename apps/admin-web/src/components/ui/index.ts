@@ -8,6 +8,7 @@ export { Field, type FieldProps } from './field';
 export { Card, CardHeader, CardTitle, CardDescription, CardContent } from './card';
 export { Badge, type BadgeProps } from './badge';
 export { Skeleton, TableSkeleton } from './skeleton';
+export { Alert, Callout, type AlertProps, type CalloutProps } from './alert';
 export { EmptyState, ErrorState } from './states';
 export { DataTable } from './table';
 export { Tooltip } from './tooltip';
