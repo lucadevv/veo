@@ -47,7 +47,7 @@ export function OnDemandCommissionPanel({ config }: { config: CommissionView }) 
       title="Comisión ON-DEMAND"
       tag="descuento al conductor"
       tagTone="brand"
-      description="La comisión se descuenta al conductor: el pasajero paga la tarifa del viaje y el conductor recibe la tarifa menos esta comisión."
+      description="Se descuenta al conductor sobre la tarifa del viaje."
       footer={
         <SaveAction
           canManage={canManage}

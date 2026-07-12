@@ -86,7 +86,7 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
       title="Costo por km · tope de cost-sharing"
       tag="por país"
       tagTone="success"
-      description="El costo real de operar el vehículo por km (combustible + desgaste). Limita el precio del carpooling: el asiento no puede pasar de (distancia × costo/km + peaje) ÷ asientos. El peaje lo declara el conductor por viaje."
+      description="Costo real de operar el vehículo por km. Es el techo anti-lucro del precio del asiento."
       footer={
         hasCountries ? (
           <SaveAction
@@ -133,10 +133,7 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
           </RateField>
         ))
       ) : (
-        <p className="text-sm text-ink-subtle">
-          Sin costos de operación configurados todavía. Definí el costo por km por país para activar
-          el techo anti-lucro del carpooling.
-        </p>
+        <p className="text-sm text-ink-subtle">Sin costos configurados. Definí el costo/km por país.</p>
       )}
       <ReadOnlyNote canManage={canManage} noun="el costo/km" />
     </ConfigCard>

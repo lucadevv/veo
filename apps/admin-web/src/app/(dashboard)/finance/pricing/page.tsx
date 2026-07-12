@@ -69,10 +69,7 @@ export default function PricingPage() {
             El MODO (FIJO/PUJA) ya no vive acá — con ADR-023 es una palanca per-oferta en Ofertas de servicio. */}
         <div className="mt-5 space-y-5">
           {/* La FÓRMULA es UNA sola: el precio exacto en FIJO y el sugerido que ve el pasajero en PUJA. */}
-          <SectionHeader
-            label="Fórmula de tarifa"
-            hint="el precio exacto en FIJO · el sugerido que ve el pasajero en PUJA"
-          />
+          <SectionHeader label="Fórmula de tarifa" hint="el precio en FIJO, el sugerido en PUJA" />
           {/* F2.4 · tarifa base (banderazo + per-km + per-min). El por-km es ÚNICO y all-in (incluye el
               combustible), como Uber. El modelo de energía/combustible se sacó: era una variable de más que se
               sumaba al per-km (riesgo de doble-cuenta) y no existe en la fórmula canónica del mercado. */}
@@ -89,10 +86,7 @@ export default function PricingPage() {
           {/* El piso de la PUJA se configura por servicio en Ofertas de servicio (no acá): es un dato per-oferta,
               no un global. Acá quedan la fórmula (compartida) y la comisión (transversal). */}
           {/* Transversal: la comisión vive aguas abajo de fareCents — misma tasa venga de un bid (PUJA) o un cálculo (FIJO). */}
-          <SectionHeader
-            label="Comisión"
-            hint="igual en FIJO y en PUJA · se descuenta al conductor"
-          />
+          <SectionHeader label="Comisión" hint="se descuenta al conductor" />
           <AsyncSection query={commissionQuery} skeleton={<Skeleton className="h-64" />}>
             {(data) => <OnDemandCommissionPanel config={data} />}
           </AsyncSection>
