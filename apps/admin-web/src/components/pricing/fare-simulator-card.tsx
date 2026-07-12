@@ -38,7 +38,7 @@ export function FareSimulatorCard({ config }: { config: BaseFareView }) {
   const timeCents = Math.round(min * config.perMinCents);
   const totalCents = config.baseFareCents + distanceCents + timeCents;
 
-  const rows: Array<{ label: string; value: number }> = [
+  const rows: { label: string; value: number }[] = [
     { label: 'Banderazo', value: config.baseFareCents },
     { label: `Distancia · ${km} km`, value: distanceCents },
     { label: `Tiempo · ${min} min`, value: timeCents },
