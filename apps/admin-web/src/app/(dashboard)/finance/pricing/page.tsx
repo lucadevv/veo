@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
+import { FareSimulatorCard } from '@/components/pricing/fare-simulator-card';
 import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commission-panel';
 
 /**
@@ -90,7 +91,13 @@ export default function PricingPage() {
               combustible), como Uber. El modelo de energía/combustible se sacó: era una variable de más que se
               sumaba al per-km (riesgo de doble-cuenta) y no existe en la fórmula canónica del mercado. */}
           <AsyncSection query={baseFareQuery} skeleton={<Skeleton className="h-64" />}>
-            {(data) => <BaseFarePanel config={data} />}
+            {(data) => (
+              <div className="space-y-5">
+                <BaseFarePanel config={data} />
+                {/* Simulador (veo.pen cuH7M): preview de la fórmula con la MISMA data persistida (no el draft). */}
+                <FareSimulatorCard config={data} />
+              </div>
+            )}
           </AsyncSection>
 
           {/* El piso de la PUJA se configura por servicio en Ofertas de servicio (no acá): es un dato per-oferta,
