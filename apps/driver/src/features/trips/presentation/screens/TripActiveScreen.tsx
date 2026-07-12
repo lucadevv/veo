@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ import {
 import { mobilePaymentMethod } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';
@@ -361,23 +362,12 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
         </MapShell>
       </View>
 
-      {/* Sheet inferior: panel del pasajero + estado + acción principal de la FSM. */}
-      <ScrollView
-        style={[
-          styles.sheet,
-          {
-            // Glass sheet CLARO (Theme de Confianza): frosted ~96% blanco + borde sutil del tema + esquinas
-            // superiores, flotando sobre el mapa Daylight Trust. TODO módulo 4: reusar el componente GlassSheet.
-            backgroundColor: 'rgba(255,255,255,0.96)',
-            borderTopLeftRadius: theme.radii['2xl'],
-            borderTopRightRadius: theme.radii['2xl'],
-            borderTopWidth: 1,
-            borderTopColor: theme.colors.border,
-            borderLeftWidth: 1,
-            borderRightWidth: 1,
-            borderColor: theme.colors.border,
-          },
-        ]}
+      {/* Sheet inferior: panel del pasajero + estado + acción principal de la FSM. Glass sheet CLARO
+          (Theme de Confianza) vía el componente compartido `GlassSheet` en modo scroll — el frosted
+          ~96% blanco + borde sutil + esquinas superiores vive ahí (antes era inline). */}
+      <GlassSheet
+        scrollable
+        style={styles.sheet}
         contentContainerStyle={[
           styles.sheetContent,
           { paddingBottom: insets.bottom + theme.spacing.xl },
@@ -524,7 +514,7 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             />
           ) : null}
         </Appear>
-      </ScrollView>
+      </GlassSheet>
 
       <BottomSheet
         visible={cancelOpen}
