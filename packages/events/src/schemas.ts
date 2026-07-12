@@ -306,6 +306,14 @@ export const tripCompleted = z.object({
   /// DIGITALES el flag se ignora (el cobro va por el riel). Ausente/false ⇒ flujo bilateral normal
   /// (el conductor confirmará por separado). Compat N-2: eventos viejos sin el campo ⇒ undefined.
   cashCollected: z.boolean().optional(),
+  /// MÉTRICAS · MODO de despacho del viaje (FIXED/PUJA) para el desglose "Ingresos por modo" del panel
+  /// (Fijo/Puja/Carpooling). Lo tiene el trip-service (Trip.dispatchMode); payment lo DENORMALIZA en el
+  /// Payment para agregar por modo sin join cross-service. Compat N-2: ausente ⇒ undefined (cae a ON_DEMAND).
+  dispatchMode: pricingMode.optional(),
+  /// MÉTRICAS · ORIGEN del viaje (lat/lng) para el corte "Ingresos por distrito" (zonificación lat/lng→distrito
+  /// en payment). Lo tiene el trip-service (Trip.originLat/originLng). Compat N-2: ausente ⇒ undefined (sin distrito).
+  originLat: z.number().optional(),
+  originLng: z.number().optional(),
 });
 export const tripCancelled = z.object({
   tripId: z.string(),
@@ -980,6 +988,24 @@ export const panicResolved = z.object({
   resolvedBy: z.string(),
   at: z.string(),
 });
+/// Respuesta operativa del operador sobre una alerta ACTIVA (NO cambian el status): despachó una unidad de
+/// respuesta y/o escaló a autoridades. panic-service los emite por OUTBOX en la MISMA tx que el set del
+/// timestamp (RolesGuard + PANIC_OPERATORS: no forjable por el agresor). `tripId`+`passengerId` enriquecidos
+/// desde la fila. Para el audit inmutable + el dashboard (línea de tiempo del incidente).
+export const panicDispatched = z.object({
+  panicId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  operatorId: z.string(),
+  at: z.string(),
+});
+export const panicEscalated = z.object({
+  panicId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  operatorId: z.string(),
+  at: z.string(),
+});
 /**
  * panic.fanout_requested (BR-S05, fix de durabilidad del SMS de pánico): share-service ya creó el
  * enlace de seguimiento y DELEGA el fan-out durable de SMS a notification-service (engine con
@@ -1358,6 +1384,11 @@ export const BookingCancelledRazon = {
   /// ASIENTO_LLENO: el dinero se movió y hay que devolverlo · F3c-payment). Defensa contra el poison-pill que
   /// causaría un payment.captured tardío sobre una oferta ya no reservable; el camino EN_RUTA real es F4.
   OFERTA_NO_DISPONIBLE: 'OFERTA_NO_DISPONIBLE',
+  /// (F3c-passenger · el PASAJERO cancela su propia SOLICITUD aún no resuelta · ADR-014 §4.2) La reserva
+  /// estaba en PENDIENTE_APROBACION (esperando la decisión del conductor) y su DUEÑO la canceló →
+  /// PENDIENTE_APROBACION → CANCELADO. SIN Refund: charge-on-approval, el CHARGE solo se dispara al APROBAR y
+  /// acá nunca se aprobó → no se capturó nada que devolver. estadoAnterior='PENDIENTE_APROBACION'.
+  CANCELADO_PASAJERO: 'CANCELADO_PASAJERO',
 } as const;
 export type BookingCancelledRazon =
   (typeof BookingCancelledRazon)[keyof typeof BookingCancelledRazon];
@@ -1368,9 +1399,11 @@ export type BookingCancelledRazon =
 ///       `publishedTripId` + `driverId` + `estadoAnterior` del PublishedTrip. NO lleva `bookingId` ni `razon`.
 ///       key = publishedTripId. El fan-out de Refund a las reservas activas lo gestiona payment-service.
 ///   (B) CANCELACIÓN DE UN BOOKING INDIVIDUAL (F3b/F3c · ADR-014 §5.4 / §6): lleva `bookingId` + `razon`
-///       (BookingCancelledRazon) + `estadoAnterior`. key = bookingId. TRES sub-formas por `razon`:
+///       (BookingCancelledRazon) + `estadoAnterior`. key = bookingId. Sub-formas por `razon`:
 ///         · COBRO_RECHAZADO (F3b): el cobro síncrono rechazó al disparar el CHARGE → estadoAnterior='APROBADO'.
 ///           SIN Refund (no se capturó nada).
+///         · CANCELADO_PASAJERO (F3c-passenger): el pasajero canceló su solicitud PENDIENTE_APROBACION →
+///           estadoAnterior='PENDIENTE_APROBACION'. SIN Refund (charge-on-approval, nunca se aprobó ni capturó).
 ///         · COBRO_FALLIDO  (F3c): el riel agotó reintentos (payment.failed willRetry=false) →
 ///           estadoAnterior='COBRO_PENDIENTE'. SIN Refund (no se capturó nada).
 ///         · ASIENTO_LLENO  (F3c): el cobro CAPTURÓ pero el asiento ya se llenó (§6 camino infeliz) →
@@ -1395,6 +1428,7 @@ export const bookingCancelled = z.object({
       BookingCancelledRazon.ASIENTO_LLENO,
       BookingCancelledRazon.COBRO_FALLIDO,
       BookingCancelledRazon.OFERTA_NO_DISPONIBLE,
+      BookingCancelledRazon.CANCELADO_PASAJERO,
     ])
     .optional(),
   estado: z.literal('CANCELADO'),
@@ -1587,6 +1621,8 @@ export const EVENT_SCHEMAS = {
   'panic.fanout_requested': panicFanoutRequested,
   'panic.acknowledged': panicAcknowledged,
   'panic.resolved': panicResolved,
+  'panic.dispatched': panicDispatched,
+  'panic.escalated': panicEscalated,
   'notification.sent': notificationSent,
   'notification.delivered': notificationDelivered,
   'notification.failed': notificationFailed,

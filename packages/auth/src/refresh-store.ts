@@ -240,6 +240,41 @@ export class RedisRefreshTokenStore {
   async isValid(sessionId: string): Promise<boolean> {
     return (await this.redis.exists(this.key(sessionId))) === 1;
   }
+
+  /**
+   * Enumera las sesiones VIVAS de un usuario (gestión de acceso del panel: "ver/revocar sesiones de un
+   * operador"). Usa el ÍNDICE SECUNDARIO `veo:user-sessions:{userId}` (SET de sessionIds) → O(sesiones-del-user),
+   * no un barrido global. Por cada sid vivo devuelve `{ id, lastActiveAt }`:
+   *  - `id`: el sessionId.
+   *  - `lastActiveAt`: última ACTIVIDAD de la sesión = `rotatedAt` (último refresh) ?? `createdAt` (login), en ISO
+   *    8601. Es el ÚNICO dato temporal del record (no hay device/UA/geo almacenado → no se inventa).
+   * Los sids STALE del índice (record ya vencido por TTL) se DESCARTAN (mismo criterio benigno que
+   * `revokeAllForUser`): el SET puede contener un sid cuya key ya no existe → GET null → se omite.
+   */
+  async listSessionsForUser(userId: string): Promise<{ id: string; lastActiveAt: string }[]> {
+    const sids = await this.redis.smembers(this.userSessionsKey(userId));
+    if (sids.length === 0) return [];
+    const raws = await this.redis.mget(...sids.map((sid) => this.key(sid)));
+    const sessions: { id: string; lastActiveAt: string }[] = [];
+    for (let i = 0; i < sids.length; i++) {
+      const raw = raws[i];
+      if (!raw) continue; // sid stale (sesión ya vencida por TTL) → no está viva, se omite.
+      const rec = JSON.parse(raw) as SessionRecord;
+      const activeMs = rec.rotatedAt ?? rec.createdAt;
+      sessions.push({ id: sids[i]!, lastActiveAt: new Date(activeMs).toISOString() });
+    }
+    return sessions;
+  }
+
+  /**
+   * Revoca UNA sesión concreta por su id (gestión de acceso del panel: el ADMIN echa una sesión puntual de un
+   * operador, sin tumbar las demás). Alias semántico de {@link revoke}: borra el record de refresh + sella la
+   * entrada del denylist por-sid (el access token de esa sesión, aún con firma válida ≤15m, se rechaza al
+   * instante en los BFFs). Idempotente.
+   */
+  async revokeSession(sessionId: string): Promise<void> {
+    await this.revoke(sessionId);
+  }
 }
 
 export type RefreshErrorCode = 'SESSION_REVOKED' | 'TOKEN_REUSE_DETECTED';

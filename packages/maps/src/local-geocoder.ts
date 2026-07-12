@@ -59,6 +59,8 @@ function toGeocodeResult(place: LimaPlace): GeocodeResult {
     lon: place.lon,
     displayName: placeDisplayName(place),
     name: place.name,
+    // Distrito del dataset local (soberano dev/CI) → paridad con el reverse Nominatim (addressdetails).
+    district: place.district,
   };
 }
 

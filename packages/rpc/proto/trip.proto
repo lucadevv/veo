@@ -36,6 +36,27 @@ service TripService {
   // El driver_id lo FIJA el BFF desde el JWT (anti-IDOR): el cliente nunca lo provee. Reusa
   // PassengerTripsReply — el item del historial es idéntico (tier+ruta+monto+estado+fecha, anti-N+1).
   rpc ListDriverTrips (ListDriverTripsRequest) returns (PassengerTripsReply);
+  // Modo de despacho (FIXED|PUJA) de un LOTE de viajes por id — enriquecimiento on-read para la lista OPS
+  // del admin (columna MODO), anti-N+1. Lee el valor CONGELADO Trip.dispatch_mode (resolve-once-persist),
+  // así que es SIEMPRE exacto (a diferencia del read-model event-proyectado, que pierde el flip FIXED→PUJA
+  // del re-bid). Solo devuelve id+modo (sin PII): la lista resuelve nombres por el batch de identity aparte.
+  rpc GetTripModesByIds (TripIdsRequest) returns (TripModesReply);
+}
+
+// Lote de ids de viaje para GetTripModesByIds. [] → respuesta vacía (el llamante degrada a "—").
+message TripIdsRequest {
+  repeated string ids = 1;
+}
+
+message TripModesReply {
+  repeated TripModeItem items = 1;
+}
+
+// Modo de despacho de UN viaje. dispatch_mode = FIXED|PUJA (enum PricingMode como string); un id no
+// hallado simplemente no aparece en items (el llamante lo trata como null → "—").
+message TripModeItem {
+  string id = 1;
+  string dispatch_mode = 2;
 }
 
 // Historial paginado del pasajero. cursor='' = primera página. limit lo CLAMPea el servidor (1..MAX).
@@ -152,6 +173,9 @@ message TripReply {
   // Trip.special_requests. [] si ninguna (proto3 → repeated nunca es null). El conductor las VE en la
   // oferta entrante para decidir antes de aceptar (ADR-018); valores del enum SpecialRequest como string.
   repeated string special_requests = 24;
+  // Modo de despacho CONGELADO del viaje (FIXED|PUJA · enum PricingMode como string). resolve-once-persist
+  // (ADR-011): se fija en la creación y solo flipea a PUJA en un re-bid. '' solo en el EMPTY_TRIP (no hallado).
+  string dispatch_mode = 25;
 }
 
 // Punto geográfico del viaje (lat/lon). Reusado por las paradas intermedias del TripReply.

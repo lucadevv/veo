@@ -72,6 +72,12 @@ export interface GeocodeResult {
   displayName: string;
   /** Nombre corto del lugar (Nominatim `name`), si lo entrega el proveedor. */
   name?: string;
+  /**
+   * DISTRITO administrativo del punto (Lima: Miraflores, Los Olivos, …). Del reverse con detalle de
+   * dirección (Nominatim `addressdetails`: suburb/city_district) o del dataset local (`place.district`).
+   * `undefined` si el proveedor no lo entrega — el consumidor degrada honesto (no lo inventa). No es PII.
+   */
+  district?: string;
 }
 
 /** Opciones del autocompletado de direcciones. */

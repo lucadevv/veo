@@ -1024,8 +1024,8 @@ export function getTripHistory(
 /**
  * Bandeja de notificaciones in-app del pasajero. La notificación llega YA RENDERIZADA por el
  * notification-service (título + cuerpo interpolados desde la plantilla i18n) y categorizada: el
- * cliente NUNCA ve la key interna del template, solo su `category` (para ícono/tono). Sin estado
- * leído/no-leído por ahora (MVP cronológico — el `read_at` real es un follow-up).
+ * cliente NUNCA ve la key interna del template, solo su `category` (para ícono/tono). El estado
+ * `read` lo DERIVA el backend de `read_at` (el cliente ya no lo inventa).
  */
 export const notificationCategory = z.enum(['trip', 'safety', 'payment', 'promo', 'general']);
 export type NotificationCategory = z.infer<typeof notificationCategory>;
@@ -1040,6 +1040,8 @@ export const appNotification = z.object({
   body: z.string(),
   /** ISO-8601 de emisión (orden DESC por este campo). */
   createdAt: z.string(),
+  /** true si el pasajero ya la leyó (derivado de read_at server-side). */
+  read: z.boolean(),
 });
 export type AppNotification = z.infer<typeof appNotification>;
 
@@ -1068,6 +1070,67 @@ export function getNotifications(
   return http.get<AppNotification[]>('/notifications', {
     query: { limit: query.limit },
     schema: z.array(appNotification),
+  });
+}
+
+/** Resultado de `markAllNotificationsRead`: cuántas pasaron a leídas. */
+export const markAllReadResult = z.object({ updated: z.number().int() });
+export type MarkAllReadResult = z.infer<typeof markAllReadResult>;
+
+/**
+ * PATCH /notifications/:id/read → marca UNA como leída. El dueño lo deriva el BFF del JWT (anti-IDOR):
+ * marcar una notificación ajena da 404. Respuesta 204 sin body.
+ */
+export function markNotificationRead(
+  http: { patch<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T> },
+  id: string,
+): Promise<void> {
+  return http.patch<void>(`/notifications/${id}/read`);
+}
+
+/** PATCH /notifications/read-all → marca TODAS mis notificaciones como leídas. Devuelve el conteo. */
+export function markAllNotificationsRead(
+  http: { patch<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T> },
+): Promise<MarkAllReadResult> {
+  return http.patch<MarkAllReadResult>('/notifications/read-all', { schema: markAllReadResult });
+}
+
+/**
+ * Preferencias in-app de notificaciones del pasajero. FUENTE DE VERDAD server-side (notification-service):
+ * sincroniza entre dispositivos y sobrevive reinstalación. Espeja el shape del store local del passenger
+ * (5 booleans por categoría). Las de SEGURIDAD (pánico/biométrica) NO viven acá (no-desactivables).
+ */
+export const notificationPrefs = z.object({
+  /** Viajes · confirmación/cancelación del conductor. */
+  tripStatus: z.boolean(),
+  /** Viajes · llegada y demoras del conductor. */
+  driverEnRoute: z.boolean(),
+  /** Viajes · recordatorios de viajes programados. */
+  scheduledReminders: z.boolean(),
+  /** Promociones · ofertas y cupones (opt-in). */
+  offers: z.boolean(),
+  /** Promociones · novedades de VEO (opt-in). */
+  news: z.boolean(),
+});
+export type NotificationPrefs = z.infer<typeof notificationPrefs>;
+
+/** GET /notification-prefs → mis preferencias (el server devuelve defaults si nunca guardé). */
+export function getNotificationPrefs(
+  http: { get<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T> },
+): Promise<NotificationPrefs> {
+  return http.get<NotificationPrefs>('/notification-prefs', { schema: notificationPrefs });
+}
+
+/** PUT /notification-prefs → reemplaza el objeto COMPLETO de preferencias (idempotente). */
+export function updateNotificationPrefs(
+  http: {
+    put<T>(path: string, opts?: { body?: unknown; schema?: z.ZodType<T> }): Promise<T>;
+  },
+  prefs: NotificationPrefs,
+): Promise<NotificationPrefs> {
+  return http.put<NotificationPrefs>('/notification-prefs', {
+    body: prefs,
+    schema: notificationPrefs,
   });
 }
 

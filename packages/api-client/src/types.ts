@@ -143,8 +143,19 @@ export const tripSummary = z.object({
   status: adminTripStatus,
   passengerId: z.string(),
   driverId: z.string().nullable(),
+  /** Nombre del pasajero (enriquecido on-read por el bff · PII gateada a Compliance+ → null para sub-Compliance). */
+  passengerName: z.string().nullable(),
+  /** Nombre del conductor (enriquecido on-read · PII gateada → null sub-Compliance; null si aún sin asignar). */
+  driverName: z.string().nullable(),
   fareCents: z.number().int(),
   createdAt: z.string(),
+  /**
+   * Modo de despacho del viaje (FIXED|PUJA): enriquecido on-read desde trip-service (valor CONGELADO
+   * Trip.dispatchMode, resolve-once-persist ADR-011), NO del read-model event-proyectado (que pierde el
+   * flip FIXED→PUJA del re-bid). `null` si trip-service no lo resolvió (degradación honesta → "—"). No es
+   * PII (mecanismo de precio del viaje) → para todos los roles.
+   */
+  dispatchMode: z.enum(['FIXED', 'PUJA']).nullable(),
 });
 export type TripSummary = z.infer<typeof tripSummary>;
 
@@ -206,6 +217,14 @@ export const fleetDocumentView = z.object({
   expiresAt: z.string().nullable(),
   /** ISO-8601 de creación del documento (encolado para el SLA de la cola de Revisiones); null si sin dato. */
   createdAt: z.string().nullable(),
+  /**
+   * Imágenes del documento con su presigned GET URL (visor "Ver" del detalle de vehículo · sub-lote 3A). El
+   * admin-bff las firma on-read contra media-service (TTL corto). `[]` si no se subió ninguna (degradación
+   * honesta: la UI no muestra "Ver"); `url` null si la firma falló (fail-soft, no bloquea la revisión).
+   */
+  images: z.array(
+    z.object({ url: z.string().nullable(), side: documentSide, order: z.number().int() }),
+  ),
 });
 export type FleetDocumentView = z.infer<typeof fleetDocumentView>;
 
@@ -256,11 +275,39 @@ export const payoutDetailView = payoutView.extend({
   debtSettledCents: z.number().int().nonnegative(),
   creditBackCents: z.number().int().nonnegative(),
   debtAppliedCents: z.number().int(),
+  // Bono de incentivo pagado en ESTE payout (suma de IncentiveProgress.rewardGrantedCents ligados por
+  // paidInPayoutId). Componente NETO del monto (entra directo, sin comisión). 0 si el payout no llevó bono.
+  bonusCents: z.number().int().nonnegative(),
   dedupKey: z.string().nullable(),
   externalRef: z.string().nullable(),
   createdAt: z.string(),
 });
 export type PayoutDetailView = z.infer<typeof payoutDetailView>;
+
+/**
+ * Un viaje incluido en un payout (GET /finance/payouts/:id/trips). El payout NO persiste sus líneas de viaje:
+ * la lista se RECONSTRUYE por período (los Payment del conductor capturados en [periodStart, periodEnd) con la
+ * MISMA condición que usó el run de liquidación). `amountCents` = BRUTO del viaje (grossCents del cobro).
+ * `method` = riel del cobro (YAPE/PLIN/CARD/…) si está. Dinero SIEMPRE Int céntimos.
+ */
+export const payoutTripView = z.object({
+  tripId: z.string(),
+  amountCents: z.number().int(),
+  capturedAt: z.string().nullable(),
+  method: z.string().nullable(),
+});
+export type PayoutTripView = z.infer<typeof payoutTripView>;
+
+/**
+ * Resultado de "viajes incluidos" de un payout: la lista (capada a los primeros N, ver `trips`) + el conteo
+ * TOTAL de viajes del período (`totalCount`) para el "+N más" del panel. Reconstrucción por período — si el
+ * período del payout se solapa con otro run, la lista podría diferir de lo efectivamente agregado.
+ */
+export const payoutTripsResult = z.object({
+  trips: z.array(payoutTripView),
+  totalCount: z.number().int().nonnegative(),
+});
+export type PayoutTripsResult = z.infer<typeof payoutTripsResult>;
 
 /**
  * KPIs de la pantalla de Liquidaciones (GET /finance/payouts/stats) — agregado del panel FINANCE.
@@ -270,6 +317,12 @@ export type PayoutDetailView = z.infer<typeof payoutDetailView>;
  */
 export const payoutStatsView = z.object({
   totalCents: z.number().int(),
+  // Desglose de VOLUMEN (Int céntimos) por bucket, del MISMO groupBy que los conteos (la query ya suma
+  // amountCents por status; antes se colapsaba en totalCents y se descartaba). `paidCents` = PROCESSED
+  // (plata que ya salió), `heldCents` = HELD (retenida en review), `failedCents` = FAILED (rechazada).
+  paidCents: z.number().int().nonnegative(),
+  heldCents: z.number().int().nonnegative(),
+  failedCents: z.number().int().nonnegative(),
   pendingCount: z.number().int().nonnegative(),
   processingCount: z.number().int().nonnegative(),
   processedCount: z.number().int().nonnegative(),

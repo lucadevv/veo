@@ -37,6 +37,8 @@ export interface DriverCountsReply {
   pending: number;
   cleared: number;
   rejected: number;
+  /** Conductores EN LÍNEA (presencia operativa: current_status NO OFFLINE ni SUSPENDED) → KPI "En línea". */
+  online: number;
 }
 
 /** identity.GetUsersByIds / mensaje UsersByIdsReply. Orden libre; el consumidor mapea por id (User.id → name). */

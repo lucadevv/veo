@@ -9,6 +9,7 @@ import {
   geoPoint,
   tripStatus,
   tripSummary,
+  adminTripStatus,
   driverSummary,
   fleetDocumentStatus,
   vehicleOperabilityReason,
@@ -83,6 +84,14 @@ export const analyticsOverview = z.object({
   completedToday: z.number().int(),
   cancelledToday: z.number().int(),
   revenueTodayCents: z.number().int(),
+  /** Margen neto de la plataforma HOY (comisión − fee PSP · payment-service). KPI "Margen hoy". */
+  platformMarginTodayCents: z.number().int(),
+  /** Viajes digitales de HOY (cobros FARE capturados desde medianoche Lima). KPI "Viajes hoy". */
+  tripCountToday: z.number().int(),
+  /** Ticket promedio de HOY (derivado = revenueTodayCents / tripCountToday; 0 sin viajes). KPI "Ticket hoy". */
+  avgTicketTodayCents: z.number().int(),
+  /** Tasa de cancelación de HOY (derivada; null sin cierres). KPI "Cancelación hoy" (fracción, 0.05 = 5%). */
+  cancellationRateToday: z.number().nullable(),
   avgDurationSeconds: z.number().nullable(),
   series: z.array(overviewSeriesPoint),
 });
@@ -95,7 +104,7 @@ export type AnalyticsOverview = z.infer<typeof analyticsOverview>;
  * query contra esto y payment-service lo re-estrecha. `today` = desde medianoche Lima; `7d`/`30d` = últimos 7/30
  * días naturales (TZ America/Lima). Tiparlo como enum mata el magic string: comparar fuera del set es error de compilación.
  */
-export const revenueRange = z.enum(['today', '7d', '30d']);
+export const revenueRange = z.enum(['today', '7d', '30d', '90d']);
 export type RevenueRangeValue = z.infer<typeof revenueRange>;
 
 /**
@@ -114,12 +123,49 @@ export type RevenueSeriesPoint = z.infer<typeof revenueSeriesPoint>;
  * `refundedCents` = total reembolsado en el rango; `platformMarginCents = grossCommissionCents − refundedCents`
  * (margen neto, lo DERIVA el admin-bff). `series` reconcilia con `moneyInCents` (misma definición de money-in).
  */
+/** Revenue por MODO 3-way (FIXED | PUJA | CARPOOLING): payment divide el ON_DEMAND por el `dispatchMode`
+ *  denormalizado del viaje; CARPOOLING es el eje `Payment.mode`. `revenueCents` = Σ netSettled. */
+export const revenueByModePoint = z.object({
+  mode: z.string(),
+  revenueCents: z.number().int(),
+});
+export type RevenueByModePoint = z.infer<typeof revenueByModePoint>;
+
+/** Revenue por DISTRITO de origen (payment zonifica lat/lng→distrito de Lima en la captura). `revenueCents` = Σ
+ *  netSettled. Distritos sin geo / fuera de cobertura NO aparecen (degradación honesta). Ordenado desc. */
+export const revenueByDistrictPoint = z.object({
+  district: z.string(),
+  revenueCents: z.number().int(),
+});
+export type RevenueByDistrictPoint = z.infer<typeof revenueByDistrictPoint>;
+
+/**
+ * Variación % vs el período PREVIO (misma duración, ventana inmediatamente anterior). `null` cuando el período
+ * previo no tiene base (0) — NO se inventa un %: la UI muestra el KPI sin delta. Fracción (0.18 = +18%).
+ */
+export const revenueDeltas = z.object({
+  moneyInPct: z.number().nullable(),
+  tripCountPct: z.number().nullable(),
+  avgTicketPct: z.number().nullable(),
+});
+export type RevenueDeltas = z.infer<typeof revenueDeltas>;
+
 export const revenueMetricsView = z.object({
   range: revenueRange,
   moneyInCents: z.number().int(),
   grossCommissionCents: z.number().int(),
   refundedCents: z.number().int(),
   platformMarginCents: z.number().int(),
+  /** Viajes digitales capturados (kind=FARE) del rango → habilita "Viajes" y "Ticket promedio". */
+  tripCount: z.number().int(),
+  /** Ticket promedio derivado = moneyInCents / tripCount (0 si no hay viajes). */
+  avgTicketCents: z.number().int(),
+  /** Revenue por modo 3-way (Fijo/Puja/Carpooling) → donut "Ingresos por modo". */
+  byMode: z.array(revenueByModePoint),
+  /** Revenue por distrito de origen (zonificado), ordenado desc → "Top distritos por ingreso". [] si sin data. */
+  topDistricts: z.array(revenueByDistrictPoint),
+  /** Variación % vs período previo (null sin base). */
+  deltas: revenueDeltas,
   series: z.array(revenueSeriesPoint),
 });
 export type RevenueMetricsView = z.infer<typeof revenueMetricsView>;
@@ -128,9 +174,19 @@ export type RevenueMetricsView = z.infer<typeof revenueMetricsView>;
 export const tripDetail = tripSummary.extend({
   origin: geoPoint.nullable(),
   destination: geoPoint.nullable(),
+  /**
+   * Direcciones legibles de origen/destino (reverse-geocode SOBERANO en el bff · @veo/maps self-hosted).
+   * `null` si el rol no ve la geo exacta (misma gate que origin/destination), si no hubo match o si el
+   * geocoder está caído — degradación honesta: la UI cae a las coordenadas, nunca inventa una dirección.
+   */
+  originLabel: z.string().nullable(),
+  destinationLabel: z.string().nullable(),
   driverLocation: geoPoint.nullable(),
   routePolyline: z.string().nullable(),
   etaSeconds: z.number().int().nullable(),
+  /** Duración REAL del viaje en segundos (Trip.durationSeconds persistido); null si aún no se conoce. Es el
+   *  tiempo del viaje — distinto de `etaSeconds` (ETA EN VIVO al destino, null en viajes terminados). */
+  durationSeconds: z.number().int().nullable(),
   distanceMeters: z.number().nullable(),
   passengerName: z.string().nullable(),
   driverName: z.string().nullable(),
@@ -148,6 +204,8 @@ export const panicDetail = z.object({
   tripId: z.string(),
   passengerId: z.string(),
   passengerName: z.string().nullable(),
+  /** Teléfono del pasajero (identity, PII → null para sub-Compliance). Para la acción "Contactar pasajera". */
+  passengerPhone: z.string().nullable(),
   driverId: z.string().nullable(),
   driverName: z.string().nullable(),
   status: z.string(),
@@ -156,6 +214,10 @@ export const panicDetail = z.object({
   acknowledgedAt: z.string().nullable(),
   resolvedAt: z.string().nullable(),
   acknowledgedBy: z.string().nullable(),
+  /** Respuesta operativa (acciones laterales; no cambian el status): despacho de unidad / escalación a
+   *  autoridades — timestamp del sello (ISO) para la línea de tiempo + estado de los botones. */
+  dispatchedAt: z.string().nullable(),
+  escalatedAt: z.string().nullable(),
   notes: z.string().nullable(),
   evidence: z.array(
     z.object({ id: z.string(), kind: z.string(), label: z.string(), at: z.string() }),
@@ -213,6 +275,14 @@ export const driverApproval = driverSummary.extend({
    *  coinciden) · REVISAR (algún NO_MATCH) · PENDIENTE (aún no corrió). `null` para roles sub-Compliance
    *  (redactado como el nombre/teléfono — es señal del proceso KYC, ADMIN/Compliance+). */
   verificationStatus: z.string().nullable(),
+  /**
+   * Presencia OPERATIVA real del conductor para la columna ESTADO (En línea/Offline): el `currentStatus`
+   * AUTORITATIVO de identity (OFFLINE/AVAILABLE/ASSIGNED/ON_TRIP/ON_BREAK/SUSPENDED), enriquecido on-read.
+   * Es un EJE DISTINTO del `status` de ciclo de vida (PENDING/ACTIVE/REJECTED/SUSPENDED que proyecta el
+   * read-model por eventos): un postulante PENDING está OFFLINE, no "en línea". No es PII (el detalle ya lo
+   * expone) → para todos los roles. `null` cuando la fuente no la trae (la cola de pendientes no la proyecta).
+   */
+  operationalStatus: z.string().nullable(),
 });
 export type DriverApproval = z.infer<typeof driverApproval>;
 
@@ -270,6 +340,8 @@ export const driverCounts = z.object({
   enRevision: z.number().int(),
   cleared: z.number().int(),
   rejected: z.number().int(),
+  /** Conductores EN LÍNEA (presencia operativa real: current_status NO OFFLINE ni SUSPENDED) → KPI "En línea". */
+  online: z.number().int(),
 });
 export type DriverCounts = z.infer<typeof driverCounts>;
 
@@ -491,15 +563,55 @@ export type OperatorApproval = z.infer<typeof operatorApproval>;
 export const operatorStatus = z.enum(['INVITED', 'ACTIVE', 'SUSPENDED', 'REJECTED']);
 export type OperatorStatus = z.infer<typeof operatorStatus>;
 
-/** Un operador del panel tal como lo lista GET /ops/operators (gestión de staff · ADMIN/SUPERADMIN). */
+/** Un operador del panel tal como lo lista GET /ops/operators (gestión de staff · ADMIN/SUPERADMIN).
+ *  La tabla del panel muestra por fila: Nombre (`name`), 2FA (`totpEnrolled`) y Último acceso (`lastLoginAt`),
+ *  además del email/estado/roles/alta. Los tres nuevos salen de la MISMA fuente que el detalle (identity). */
 export const operator = z.object({
   id: z.string(),
   email: z.string(),
+  /** Nombre legible del operador (columna "Nombre"). null si el alta por invitación aún no lo capturó. */
+  name: z.string().nullable(),
   status: operatorStatus,
   roles: z.array(z.string()),
+  /** ¿Enroló su segundo factor (TOTP)? Columna "2FA". */
+  totpEnrolled: z.boolean(),
+  /** ISO-8601 del último login EXITOSO (columna "Último acceso"); null si nunca ingresó. */
+  lastLoginAt: z.string().nullable(),
   createdAt: z.string(),
 });
 export type Operator = z.infer<typeof operator>;
+
+/**
+ * Una SESIÓN activa del operador (pantalla de detalle · gestión de acceso). Las sesiones viven en Redis
+ * (refresh-store); NO hay device/UA/geo almacenados, así que se expone SOLO `id` + `lastActiveAt` (última
+ * rotación/actividad de la sesión). El operador ADMIN puede revocar una sesión puntual desde el detalle.
+ */
+export const operatorSession = z.object({
+  id: z.string(),
+  lastActiveAt: z.string(),
+});
+export type OperatorSession = z.infer<typeof operatorSession>;
+
+/**
+ * Detalle de un operador (GET /ops/operators/:id · pantalla "Detalle de operador"). Extiende la fila de la
+ * lista (hereda name/totpEnrolled/lastLoginAt) con:
+ *  - `effectivePermissions`: los permisos que sus roles le conceden según la matriz BASE (`PERMISSION_ROLES`
+ *    de @veo/policy). Es per-TARGET (el operador mirado), NO per-viewer: el overlay/hidden es del ACTOR que
+ *    mira, no del operador objetivo → acá se usa la base pura (lo que ese operador PUEDE por sus roles).
+ *  - `sessions`: sus sesiones activas (para revisarlas/revocarlas).
+ */
+export const operatorDetail = operator.extend({
+  effectivePermissions: z.array(z.string()),
+  sessions: z.array(operatorSession),
+});
+export type OperatorDetail = z.infer<typeof operatorDetail>;
+
+/** Body del POST /ops/operators/:id/roles: reemplaza los roles RBAC del operador. Step-up MFA + anti-escalada.
+ *  `roles` como `string[]` (contrato del wire); el admin-bff RE-valida cada uno contra `AdminRole` server-side. */
+export const changeOperatorRolesRequest = z.object({
+  roles: z.array(z.string()).min(1),
+});
+export type ChangeOperatorRolesRequest = z.infer<typeof changeOperatorRolesRequest>;
 
 /** Body del POST /ops/operators: alta por invitación (email + roles RBAC a otorgar). Step-up MFA. */
 export const createOperatorRequest = z.object({
@@ -655,6 +767,80 @@ export const refundablePaymentView = z.object({
 });
 export type RefundablePaymentView = z.infer<typeof refundablePaymentView>;
 
+/* ── Cola de aprobación de REEMBOLSOS (money-OUT · frame HZ8uz) ──────────────────────────────────────────
+ * Máquina de estados del Refund (enum Prisma `RefundStatus`):
+ *   PENDING   → solicitado por un operador, AÚN NO desembolsado (espera aprobación). Es la cola.
+ *   APPROVED  → aprobado y con el desembolso EN EL RIEL (reserva tomada; espera confirmación del proveedor,
+ *               o transitorio para CASH/confirmación síncrona que salta a COMPLETED).
+ *   COMPLETED → la plata volvió (confirmada por el proveedor o devolución local de efectivo).
+ *   REJECTED  → rechazado por el operador (solicitud PENDING, sin mover plata) o por el proveedor (reverso
+ *               APPROVED rechazado → reserva compensada). Terminal.
+ * Los refunds de SISTEMA (booking.cancelled) y las propinas revertidas NACEN en APPROVED (auto-aprobados, no
+ * bloquean cancelaciones); SOLO los admin-iniciados entran a la cola PENDING con approval-gate. */
+export const refundStatus = z.enum(['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED']);
+export type RefundStatusValue = z.infer<typeof refundStatus>;
+
+/**
+ * Fila de la cola de reembolsos (GET /finance/refunds). Los datos del cobro (tripId, passengerId, method) salen
+ * del Payment ligado por FK; `passengerName` lo resuelve identity gateado por PII (Ley 29733: un FINANCE puro no
+ * ve identidad → null). Dinero SIEMPRE Int céntimos (formatear a S/ SOLO en la UI). `requestedBy`/`approvedBy` son
+ * ids de operador (o 'system' para los auto-refunds). `failureReason` = motivo del rechazo (operador o proveedor).
+ */
+export const refundView = z.object({
+  id: z.string(),
+  paymentId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string().nullable(),
+  passengerName: z.string().nullable(),
+  amountCents: z.number().int(),
+  currency: z.string(),
+  method: mobilePaymentMethod,
+  reason: z.string(),
+  status: refundStatus,
+  requestedBy: z.string(),
+  approvedBy: z.string().nullable(),
+  failureReason: z.string().nullable(),
+  requestedAt: z.string(),
+  updatedAt: z.string(),
+});
+export type RefundView = z.infer<typeof refundView>;
+
+/** Detalle de un reembolso (GET /finance/refunds/:id): la fila de la cola + el saldo del cobro para contexto. */
+export const refundDetailView = refundView.extend({
+  paymentStatus,
+  paymentAmountCents: z.number().int(),
+  paymentRefundedCents: z.number().int().nonnegative(),
+  refundableCents: z.number().int().nonnegative(),
+  externalRefundId: z.string().nullable(),
+});
+export type RefundDetailView = z.infer<typeof refundDetailView>;
+
+/**
+ * KPIs de la cabecera de la cola (GET /finance/refunds/stats). `refundRatePct` = % de cobros capturados que
+ * terminaron reembolsados (derivable); null si no hay cobros capturados aún (degradación honesta, no se inventa).
+ */
+export const refundStatsView = z.object({
+  requestedCount: z.number().int().nonnegative(),
+  approvedCount: z.number().int().nonnegative(),
+  processedTodayCents: z.number().int().nonnegative(),
+  refundRatePct: z.number().nonnegative().nullable(),
+});
+export type RefundStatsView = z.infer<typeof refundStatsView>;
+
+/** Resultado de una acción sobre la cola (crear/aprobar/rechazar): id del refund + el estado resultante. */
+export const refundActionResult = z.object({
+  refundId: z.string(),
+  paymentId: z.string(),
+  status: refundStatus,
+});
+export type RefundActionResult = z.infer<typeof refundActionResult>;
+
+/** Body del POST /finance/refunds/:id/reject: motivo del rechazo (textarea del RejectModal, se persiste). */
+export const rejectRefundRequest = z.object({
+  reason: z.string().min(3),
+});
+export type RejectRefundRequest = z.infer<typeof rejectRefundRequest>;
+
 /**
  * Body del PUT /finance/cost-per-km (F2.5): el costo/km de UN país en céntimos PEN Int. `expectedVersion` =
  * CAS per-país (409 si otro admin lo movió → recargar). El peaje NO va acá: lo declara el conductor por viaje.
@@ -784,24 +970,110 @@ export type ReplaceCatalogRequest = z.infer<typeof replaceCatalogRequest>;
  * Config de dispatch vigente (GET /admin/dispatch/radius-config): k-rings + ventanas + versión + sello.
  * `offerTimeoutMs` = ventana de la oferta directa FIXED (ms); `bidWindowSec` = ventana del board de PUJA (s).
  */
+/**
+ * Política v2 del modo FIXED (radio geométrico + expansión por anillos): el dispatch arranca en
+ * `initialRadiusKm`, expande de a `incrementKm` cada `expandIntervalSec` hasta `maxRadiusKm` buscando
+ * `targetDrivers`; cada oferta directa dura `offerTimeoutSec`. Radios/incrementos en KM (float), ventanas en s.
+ */
+export const fixedPolicy = z.object({
+  initialRadiusKm: z.number(),
+  incrementKm: z.number(),
+  maxRadiusKm: z.number(),
+  targetDrivers: z.number().int(),
+  offerTimeoutSec: z.number().int(),
+  expandIntervalSec: z.number().int(),
+});
+export type FixedPolicy = z.infer<typeof fixedPolicy>;
+
+/** Política v2 del modo PUJA (broadcast a un radio único + ventana de board). */
+export const pujaPolicy = z.object({
+  broadcastRadiusKm: z.number(),
+  bidWindowSec: z.number().int(),
+});
+export type PujaPolicy = z.infer<typeof pujaPolicy>;
+
+/** Bloque de política v2 por modo (FIXED radio-geométrico + PUJA broadcast). `null` cuando `policyVersion==='v1'`. */
+export const dispatchPolicyV2 = z.object({
+  FIXED: fixedPolicy,
+  PUJA: pujaPolicy,
+});
+export type DispatchPolicyV2 = z.infer<typeof dispatchPolicyV2>;
+
 export const dispatchRadiusConfigView = z.object({
   nearbyKRing: z.number().int().min(1).max(8),
   matchKRing: z.number().int().min(1).max(8),
   offerTimeoutMs: z.number().int().min(5_000).max(120_000),
   bidWindowSec: z.number().int().min(15).max(300),
+  /** `v1` = solo k-rings (legacy); `v2` = política geométrica por modo (FIXED/PUJA) en `policyV2`. */
+  policyVersion: z.enum(['v1', 'v2']),
+  /** Política geométrica por modo. `null` en `v1`. */
+  policyV2: dispatchPolicyV2.nullable(),
   version: z.number().int(),
   updatedAt: z.string(),
 });
 export type DispatchRadiusConfigView = z.infer<typeof dispatchRadiusConfigView>;
 
-/** Body del PUT /admin/dispatch/radius-config: REEMPLAZA k-rings + ventanas (bump version aguas abajo). */
+/**
+ * Body del PUT /admin/dispatch/radius-config: REEMPLAZA k-rings + ventanas (bump version aguas abajo).
+ * `policyVersion`/`policyV2` son OPCIONALES (back-compat): un panel v1 sigue mandando solo k-rings + ventanas.
+ */
 export const replaceRadiusConfigRequest = z.object({
   nearbyKRing: z.number().int().min(1).max(8),
   matchKRing: z.number().int().min(1).max(8),
   offerTimeoutMs: z.number().int().min(5_000).max(120_000),
   bidWindowSec: z.number().int().min(15).max(300),
+  policyVersion: z.enum(['v1', 'v2']).optional(),
+  policyV2: dispatchPolicyV2.optional(),
 });
 export type ReplaceRadiusConfigRequest = z.infer<typeof replaceRadiusConfigRequest>;
+
+/* ── Carpooling: config del radio de BÚSQUEDA (booking-service, singleton global) ──
+ * El carpooling matchea por radio geométrico simple: `baseRadiusKm` es el radio inicial de búsqueda y
+ * `expandRadiusKm` el radio ampliado si el base no cubre. Vive en booking-service (no en dispatch). */
+export const carpoolSearchConfigView = z.object({
+  baseRadiusKm: z.number(),
+  expandRadiusKm: z.number(),
+  version: z.number().int(),
+  updatedAt: z.string(),
+});
+export type CarpoolSearchConfigView = z.infer<typeof carpoolSearchConfigView>;
+
+/** Body del PUT /admin/dispatch/carpool-radius-config: REEMPLAZA los radios de búsqueda (bump version abajo). */
+export const replaceCarpoolSearchConfigRequest = z.object({
+  baseRadiusKm: z.number(),
+  expandRadiusKm: z.number(),
+});
+export type ReplaceCarpoolSearchConfigRequest = z.infer<typeof replaceCarpoolSearchConfigRequest>;
+
+/* ── Radar preview: anillos de cobertura para un punto (visualización de la config vigente) ──
+ * Cada anillo lleva su radio (km), su k-ring y el conteo de conductores dentro. El admin-bff NORMALIZA el
+ * conteo a `count` sea cual sea el servicio de origen (dispatch usa `driverCount`, booking usa `count`). */
+export const radarRing = z.object({
+  radiusKm: z.number(),
+  kRing: z.number().int(),
+  count: z.number().int(),
+});
+export type RadarRing = z.infer<typeof radarRing>;
+
+/**
+ * Una POSICIÓN real de un conductor/oferta para plotear en el mapa del radar (lat/lon). MUESTRA acotada
+ * (no el set completo): dispatch la deriva del anillo más ancho del hot-index (posiciones de conductores
+ * disponibles); booking la deriva de los ORÍGENES de las ofertas de carpooling en rango. Sin PII (solo el
+ * punto). `[]` honesto si el servicio no puede materializar posiciones (nunca se inventan coordenadas).
+ */
+export const radarDriverPosition = z.object({ lat: z.number(), lon: z.number() });
+export type RadarDriverPosition = z.infer<typeof radarDriverPosition>;
+
+/** Preview del radar: centro + anillos de cobertura + total en rango + muestra de posiciones. `mode` presente solo en el radar de dispatch. */
+export const radarPreview = z.object({
+  mode: z.string().optional(),
+  center: z.object({ lat: z.number(), lon: z.number() }),
+  rings: z.array(radarRing),
+  totalInRange: z.number().int(),
+  /** MUESTRA (capada a 100) de posiciones reales para plotear marcadores en el mapa. Ausente/`[]` si el servicio no las provee. */
+  drivers: z.array(radarDriverPosition).optional(),
+});
+export type RadarPreview = z.infer<typeof radarPreview>;
 
 /* ── Finanzas: resultado del disparo de la liquidación (POST /finance/payouts/run · ADR-015 §5) ──
  * El operador AGREGA + DESEMBOLSA el período. El desembolso es ASÍNCRONO: `dispatched` = payouts que
@@ -886,9 +1158,14 @@ export type ReviewQueueSummary = z.infer<typeof reviewQueueSummary>;
 export const inspectionView = z.object({
   id: z.string(),
   vehicleId: z.string(),
+  /** Placa del vehículo (enriquecida on-read desde fleet · GetVehiclesByIds), para NO mostrar `veh_<id>` crudo
+   *  en la tabla de Inspecciones. null si el vehículo ya no existe (degradación honesta → cae al id). */
+  plate: z.string().nullable(),
   status: z.string(),
   inspectedAt: z.string().nullable(),
   scheduledAt: z.string().nullable(),
+  /** Nombre del inspector (enriquecido on-read desde identity · GetUsersByIds · PII gateada a Compliance+). null
+   *  para sub-Compliance, o si el inspector no es un usuario resoluble (p.ej. registro sintético). */
   inspector: z.string().nullable(),
   result: z.string().nullable(),
   // Centro (CITV) donde se realizó la inspección. Nullable: las auto-registradas al aprobar el doc ITV no lo traen.
@@ -1037,6 +1314,12 @@ export const mediaAccessRequestView = z.object({
   id: z.string(),
   tripId: z.string(),
   requestedBy: z.string(),
+  /** Email del solicitante (STAFF · accountability de la doble-auth). Lo provee media-service; siempre presente. */
+  requesterEmail: z.string(),
+  /** Nombre del solicitante (enriquecido on-read desde el roster de operadores identity); null si no se resolvió. */
+  requesterName: z.string().nullable(),
+  /** Rol admin CRUDO del solicitante (AdminRole · el front lo traduce a etiqueta); null si no se resolvió. */
+  requesterRole: z.string().nullable(),
   reason: z.string(),
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED']),
   requestedAt: z.string(),
@@ -1081,6 +1364,29 @@ export const liveViewerToken = z.object({
   expiresInSeconds: z.number().int(),
 });
 export type LiveViewerToken = z.infer<typeof liveViewerToken>;
+
+/* ── Muro de cámaras en vivo (/security/live-cabins) ── */
+/**
+ * Cabina de un viaje EN CURSO para el muro de cámaras (frame "Cámaras en vivo" · T/CameraTile). Enriquecida
+ * on-read por el admin-bff (fan-out gRPC + reverse-geocode soberano): NO abre el feed (eso exige doble-auth
+ * por-viaje), solo describe el tile. `startedAt` alimenta el timer EN VIVO client-side (tiempo en curso).
+ * PII/redacción por rol: `driverName` (Compliance+ → null sub-Compliance), `plate` (dispatch+ → enmascarada
+ * SUPPORT), `district` (geo — solo roles con geo exacta). Degradación honesta: lo ausente → null, nunca inventa.
+ */
+export const liveCabin = z.object({
+  tripId: z.string(),
+  /** Nombre del conductor (PII · Compliance+ → null); null si aún sin asignar. */
+  driverName: z.string().nullable(),
+  /** Placa del vehículo operado (dispatch+ ve completa, SUPPORT enmascarada); null si no hay vehículo. */
+  plate: z.string().nullable(),
+  /** Distrito de origen del viaje (reverse-geocode soberano); null sin geo exacta / sin match / geocoder caído. */
+  district: z.string().nullable(),
+  /** Estado del viaje (siempre IN_PROGRESS en el muro, pero tipado por si el read-model trae otro). */
+  status: adminTripStatus,
+  /** ISO-8601 del inicio del viaje (requestedAt) → timer "tiempo en curso" en vivo del tile. */
+  startedAt: z.string(),
+});
+export type LiveCabin = z.infer<typeof liveCabin>;
 
 /* ── Auditoría: verificación de cadena hash ── */
 export const auditChainVerification = z.object({

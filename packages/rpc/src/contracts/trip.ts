@@ -45,6 +45,27 @@ export interface TripReply {
    * oferta entrante (ADR-018) para decidir antes de aceptar.
    */
   specialRequests: string[];
+  /**
+   * Modo de despacho CONGELADO del viaje (FIXED|PUJA · enum PricingMode como string). resolve-once-persist
+   * (ADR-011). '' solo en el EMPTY_TRIP (viaje no hallado); el BFF lo re-mapea a null.
+   */
+  dispatchMode: string;
+}
+
+/** trip.GetTripModesByIds — lote de ids de viaje (enriquecimiento MODO on-read de la lista OPS admin). */
+export interface TripIdsRequest {
+  ids: string[];
+}
+
+/** Modo de despacho de UN viaje. `dispatchMode` = FIXED|PUJA. Un id no hallado NO aparece en items. */
+export interface TripModeItem {
+  id: string;
+  dispatchMode: string;
+}
+
+/** trip.GetTripModesByIds — modos por id, anti-N+1. Solo id+modo (sin PII). */
+export interface TripModesReply {
+  items: TripModeItem[];
 }
 
 /** trip.GetTripState / mensaje TripStateReply. */
