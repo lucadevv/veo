@@ -964,6 +964,24 @@ export const replaceCatalogRequest = z.object({
 });
 export type ReplaceCatalogRequest = z.infer<typeof replaceCatalogRequest>;
 
+/**
+ * Métricas 30d de UNA oferta (GET /catalog/:id/metrics) — página-detalle del catálogo admin (board HjDvx
+ * "Ofertas · Detalle"). Datos PROPIOS de trip-service por `Trip.category`. HONESTIDAD DE DATOS: `grossFareCents`
+ * es facturación BRUTA (Σ Trip.fareCents), NO el revenue NETO de la plataforma (payment-service no denormaliza
+ * la oferta → sin fuente limpia); el rating por oferta tampoco tiene fuente. Por eso el contrato expone SOLO
+ * los dos hechos con fuente real (viajes + bruto); la UI omite honestamente lo que no está.
+ */
+export const offeringMetricsView = z.object({
+  offeringId: z.string(),
+  /** Tamaño de la ventana en días (30). */
+  windowDays: z.number().int().positive(),
+  /** Viajes COMPLETADOS de la oferta en la ventana (Trip.category = offeringId). */
+  tripCount: z.number().int().nonnegative(),
+  /** Facturación BRUTA (Σ Trip.fareCents, céntimos PEN). NO es el neto de la plataforma. */
+  grossFareCents: z.number().int().nonnegative(),
+});
+export type OfferingMetricsView = z.infer<typeof offeringMetricsView>;
+
 /* ── Dispatch: config de RADIOS (k-rings) + VENTANAS singleton global ── */
 
 /**

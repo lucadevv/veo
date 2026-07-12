@@ -64,6 +64,7 @@ import {
   type AttachPanicEvidenceRequest,
   type ResolvePanicRequest,
   type ReplaceCatalogRequest,
+  offeringMetricsView,
   panicSummary,
   payoutView,
   runPayoutsResult,
@@ -121,6 +122,7 @@ export const qk = {
   costPerKm: ['cost-per-km'] as const,
   bidFloor: ['bid-floor'] as const,
   catalog: ['catalog'] as const,
+  offeringMetrics: (id: string) => ['offering-metrics', id] as const,
   dispatchRadiusConfig: ['dispatch-radius-config'] as const,
   dispatchRadar: (mode: string) => ['dispatch-radar', mode] as const,
   carpoolConfig: ['carpool-search-config'] as const,
@@ -1226,6 +1228,20 @@ export function useReplaceCatalog() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.catalog });
     },
+  });
+}
+
+/**
+ * Métricas 30d de UNA oferta (GET /catalog/:id/metrics) — página-detalle del catálogo (board HjDvx). Datos
+ * REALES de trip-service por `Trip.category`: viajes completados + facturación bruta (Σ fareCents). NO hay
+ * revenue neto ni rating por oferta (sin fuente). Analítica, sin refetch en vivo; `enabled` solo con id.
+ */
+export function useOfferingMetrics(id: string) {
+  return useQuery({
+    queryKey: qk.offeringMetrics(id),
+    queryFn: ({ signal }) =>
+      apiClient().get(`/catalog/${id}/metrics`, { schema: offeringMetricsView, signal }),
+    enabled: id.length > 0,
   });
 }
 

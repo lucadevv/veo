@@ -230,6 +230,11 @@ model Trip {
   @@index([passengerId, status, completedAt])
   /// El scheduler escanea viajes SCHEDULED con scheduledFor vencido (lead time): índice compuesto.
   @@index([status, scheduledFor])
+  /// Métricas 30d por OFERTA (página-detalle del catálogo admin, board HjDvx): agregación count + Σ fareCents
+  /// del cohorte (category = offeringId, status=COMPLETED, completedAt en ventana). El orden [category, status,
+  /// completedAt] cubre el filtro por igualdad (category, status) + el rango de completedAt sin escanear todo el
+  /// histórico de COMPLETED. Read-only (réplica); una sola pega por carga del detalle.
+  @@index([category, status, completedAt])
   @@map("trips")
   @@schema("trip")
 }

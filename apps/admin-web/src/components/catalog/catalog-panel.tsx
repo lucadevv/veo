@@ -1,6 +1,7 @@
 'use client';
 
 import { forwardRef, useState } from 'react';
+import Link from 'next/link';
 import {
   Ambulance,
   Bike,
@@ -471,9 +472,14 @@ function OfferingCard({
         )}
       </div>
 
-      {/* Nombre + chip "a medida" (board). */}
+      {/* Nombre (→ página-detalle de la oferta) + chip "a medida" (board). */}
       <div className="flex flex-col gap-1">
-        <h3 className="font-display text-base font-semibold text-ink">{label}</h3>
+        <Link
+          href={`/finance/catalog/${offering.id}`}
+          className="font-display text-base font-semibold text-ink transition-colors hover:text-brand focus-visible:outline-none focus-visible:text-brand"
+        >
+          {label}
+        </Link>
         {hasParamOverride ? (
           <span className="text-[10px] font-medium uppercase tracking-wide text-brand">
             Tarifa a medida

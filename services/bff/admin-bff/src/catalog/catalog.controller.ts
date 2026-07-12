@@ -6,11 +6,15 @@
  * El RolesGuard usa getAllAndOverride: el @Roles del método REEMPLAZA al de la clase → el PUT re-declara
  * su set. trip-service RE-valida: InternalIdentityGuard (firma) + AdminIdentityGuard (type==='admin').
  */
-import { Body, Controller, Get, HttpCode, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Put } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { CatalogService, type CatalogView } from './catalog.service';
+import {
+  CatalogService,
+  type CatalogView,
+  type OfferingMetricsView,
+} from './catalog.service';
 import { ReplaceCatalogDto } from './dto/catalog.dto';
 import { Permission } from '../policies/permission.decorator';
 
@@ -27,6 +31,19 @@ export class CatalogController {
   })
   getCatalog(@CurrentUser() user: AuthenticatedUser): Promise<CatalogView> {
     return this.catalog.getCatalog(user);
+  }
+
+  @Get(':id/metrics')
+  @Permission('catalog:view')
+  @ApiOperation({
+    summary:
+      'Métricas 30d de UNA oferta (viajes completados + facturación bruta). catalog:view. Board HjDvx.',
+  })
+  getMetrics(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<OfferingMetricsView> {
+    return this.catalog.getMetrics(user, id);
   }
 
   @Put()
