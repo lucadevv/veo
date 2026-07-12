@@ -48,7 +48,7 @@ export interface FleetGrpcRepository {
   /** Conteo de vehículos por docStatus (groupBy agregado en la réplica). */
   countVehiclesByDocStatus(): Promise<GrpcVehicleDocStatusCount[]>;
   /** Conteo de documentos por estado (read). */
-  countDocuments(status: FleetDocumentStatus): Promise<number>;
+  countDocuments(status: FleetDocumentStatus, ownerType?: FleetOwnerType): Promise<number>;
   /** Conteo de modelos de vehículo por estado (read). */
   countModels(status: VehicleModelStatus): Promise<number>;
 
@@ -104,8 +104,12 @@ export class PrismaFleetGrpcRepository implements FleetGrpcRepository {
     return groups.map((g) => ({ docStatus: g.docStatus, count: g._count._all }));
   }
 
-  countDocuments(status: FleetDocumentStatus): Promise<number> {
-    return this.prisma.read.fleetDocument.count({ where: { status } });
+  countDocuments(status: FleetDocumentStatus, ownerType?: FleetOwnerType): Promise<number> {
+    // ownerType opcional: la cola de "Documentos reenviados" del admin es SOLO de conductor (los docs de
+    // vehículo se cuentan/muestran en el eje Vehículos). El índice [ownerType, ownerId] cubre el filtro.
+    return this.prisma.read.fleetDocument.count({
+      where: { status, ...(ownerType ? { ownerType } : {}) },
+    });
   }
 
   countModels(status: VehicleModelStatus): Promise<number> {

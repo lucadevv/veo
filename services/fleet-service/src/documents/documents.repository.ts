@@ -56,13 +56,14 @@ export interface DocumentsRepository {
   /** Documentos de un owner con sus imágenes (read, `createdAt desc`). */
   listByOwner(ownerId: string): Promise<FleetDocumentWithImages[]>;
 
-  /** Página admin de documentos por keyset de id (read, `id desc`, `take`). Filtros opcionales owner/status. */
+  /** Página admin de documentos por keyset de id (read, `id desc`, `take`). Filtros opcionales owner/status.
+   *  Incluye las `images` (con presigned GET URL aguas arriba en el admin-bff · visor "Ver" del detalle). */
   listPage(opts: {
     ownerId?: string;
     status?: FleetDocumentStatus;
     cursor?: string;
     take: number;
-  }): Promise<FleetDocument[]>;
+  }): Promise<FleetDocumentWithImages[]>;
 
   /**
    * Página de vencimientos por keyset compuesto (read, `expiresAt asc, id asc`, `take`). El `where` (base +
@@ -120,7 +121,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
     status?: FleetDocumentStatus;
     cursor?: string;
     take: number;
-  }): Promise<FleetDocument[]> {
+  }): Promise<FleetDocumentWithImages[]> {
     const where: Prisma.FleetDocumentWhereInput = {};
     if (opts.ownerId) where.ownerId = opts.ownerId;
     if (opts.status) where.status = opts.status;
@@ -129,6 +130,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       where,
       orderBy: { id: 'desc' },
       take: opts.take,
+      include: { images: { orderBy: { order: 'asc' } } },
     });
   }
 

@@ -303,7 +303,7 @@ export class DocumentsService {
     status?: FleetDocumentStatus;
     cursor?: string;
     limit?: number;
-  }): Promise<Page<FleetDocument>> {
+  }): Promise<Page<FleetDocumentWithImages>> {
     const limit = clampLimit(opts.limit);
     const rows = await this.repo.listPage({
       ownerId: opts.ownerId,

@@ -59,7 +59,7 @@ export class DocumentsController {
     @Query('ownerId') ownerId?: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
-  ): Promise<Page<FleetDocument>> {
+  ): Promise<Page<FleetDocumentWithImages>> {
     return this.documents.list({
       status,
       ownerId,

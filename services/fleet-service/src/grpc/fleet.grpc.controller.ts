@@ -291,7 +291,9 @@ export class FleetGrpcController {
   ): Promise<ReviewQueueCountsReply> {
     this.requireIdentity(metadata);
     const [docsPendingReview, docsExpiringSoon, modelsPendingReview] = await Promise.all([
-      this.repo.countDocuments(FleetDocumentStatus.PENDING_REVIEW),
+      // "Documentos reenviados a revisión" = SOLO docs de conductor (los de vehículo viven en el eje Vehículos
+      // de la cola; contarlos acá los doble-representaba: KPI "Documentos" + fila "Vehículo · revisión de aptitud").
+      this.repo.countDocuments(FleetDocumentStatus.PENDING_REVIEW, FleetOwnerType.DRIVER),
       this.repo.countDocuments(FleetDocumentStatus.EXPIRING_SOON),
       this.repo.countModels(VehicleModelStatus.PENDING_REVIEW),
     ]);
