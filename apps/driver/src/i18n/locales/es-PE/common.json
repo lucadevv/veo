@@ -670,6 +670,8 @@
     "reject": "Rechazar",
     "activeTitle": "Viaje en curso",
     "passenger": "Pasajero",
+    "passengerRatingTrips": "{{rating}} · {{trips}} viajes",
+    "passengerNew": "Pasajero nuevo",
     "confirmingAssignment": "Confirmando asignación…",
     "connection": {
       "live": "En vivo",

@@ -35,6 +35,8 @@ export { RideOptionRow, type RideOptionRowProps } from './RideOptionRow';
 export { DriverCard, type DriverCardProps } from './DriverCard';
 export { SosButton, type SosButtonProps } from './SosButton';
 export { RoutePin, type RoutePinProps, type RoutePinVariant } from './RoutePin';
+// Estrella de rating compartida (mismo glifo en passenger + driver: DriverCard y la card del pasajero).
+export { StarGlyph } from './internal/StarGlyph';
 // Glifos de tab bar compartidos (misma identidad passenger + driver): fill-on-active.
 export {
   TabGlyphHome,

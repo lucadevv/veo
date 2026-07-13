@@ -12,6 +12,7 @@ import {
   MapShell,
   SafeScreen,
   Skeleton,
+  StarGlyph,
   StatusPill,
   Text,
   TextField,
@@ -24,7 +25,12 @@ import { StateView } from '../../../../shared/presentation/components/StateView'
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
+import {
+  formatInt,
+  formatPEN,
+  metersToKm,
+  secondsToMinutes,
+} from '../../../../shared/presentation/format';
 import { IconChevronLeft } from '../../../../shared/presentation/icons';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { decodePolyline, decodePolylineToCoordinates } from '../../../../shared/utils/polyline';
@@ -337,6 +343,35 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
                 <Text variant="title3" numberOfLines={1}>
                   {data.passengerFirstName ?? t('trips.passenger')}
                 </Text>
+                {/* Valoración + cantidad de viajes del PASAJERO (simétrico a lo que ve el pasajero del
+                    conductor): estrellas (redondeadas) + "4.9 · N viajes" del contrato. Sin rating →
+                    "Pasajero nuevo" (sin estrellas), nunca en blanco. Es un AGREGADO (no PII). */}
+                {data.passengerRating != null ? (
+                  <View style={styles.paxRatingRow}>
+                    <View style={styles.paxStars}>
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <StarGlyph
+                          key={i}
+                          color={theme.colors.warn}
+                          size={12}
+                          filled={i < Math.round(data.passengerRating as number)}
+                        />
+                      ))}
+                    </View>
+                    <Text variant="caption" color="inkMuted" tabular>
+                      {(data.passengerTripCount ?? 0) > 0
+                        ? t('trips.passengerRatingTrips', {
+                            rating: data.passengerRating.toFixed(1),
+                            trips: formatInt(data.passengerTripCount ?? 0),
+                          })
+                        : data.passengerRating.toFixed(1)}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text variant="caption" color="inkMuted">
+                    {t('trips.passengerNew')}
+                  </Text>
+                )}
               </View>
               <View style={styles.fareCol}>
                 <Text variant="footnote" color="inkMuted" align="right">
@@ -630,6 +665,8 @@ const styles = StyleSheet.create({
   },
   sheetContent: { paddingHorizontal: 20, paddingTop: 2, gap: 14 },
   passengerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  paxRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  paxStars: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   fareCol: { alignItems: 'flex-end' },
   statusPillRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   actions: { gap: 12, marginTop: 4 },

@@ -12,6 +12,13 @@ export function formatPEN(cents: number | null | undefined): string {
   return formatPENRaw(typeof cents === 'number' && Number.isFinite(cents) ? cents : 0);
 }
 
+/** Entero con separador de miles (es-PE usa coma): 1890 → "1,890". Sin Intl (Hermes-safe). */
+export function formatInt(value: number): string {
+  return Math.trunc(value)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 /** Patrón de una fecha canónica `YYYY-MM-DD` (el formato de los contratos y del `DateField`). */
 const ISO_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
