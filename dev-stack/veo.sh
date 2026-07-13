@@ -2019,7 +2019,9 @@ _prepare_local_env() {
     src="$ROOT_DIR/$dir/env/development.env"
     dst="$ROOT_DIR/$dir/env/local.env"
     [[ -f "$src" ]] || continue
-    [[ -f "$dst" ]] || cp "$src" "$dst"
+    # SIEMPRE refresca local.env desde development.env (local = dev + bypass). Copiar solo-si-falta dejaba
+    # los local.env HUÉRFANOS/stale sin vars nuevas (ej. ADMIN_WEB_URL) → el servicio no arrancaba.
+    cp "$src" "$dst"
     _set_env_kv "$dst" VEO_DEPLOY_TIER local
     _set_env_kv "$dst" VEO_BYPASS_VERIFICATION true
     _set_env_kv "$dst" VEO_BIOMETRIC_MODE sandbox
