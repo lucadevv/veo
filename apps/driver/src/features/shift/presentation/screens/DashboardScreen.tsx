@@ -217,7 +217,8 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           style={[
             styles.greetCard,
             {
-              backgroundColor: theme.colors.surface,
+              // surfaceElevated (mismo token que el pill superior del passenger): chrome elevado sobre el mapa.
+              backgroundColor: theme.colors.surfaceElevated,
               borderColor: theme.colors.border,
               ...theme.elevation.level2,
             },

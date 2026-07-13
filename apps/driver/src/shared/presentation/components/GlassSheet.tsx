@@ -25,11 +25,11 @@ export interface GlassSheetProps {
 }
 
 /**
- * Hoja "glass" del sistema VEO — el sheet inferior de los frames del conductor (Dashboard, TripIncoming,
- * Puja, TripActive…). Superficie translúcida CLARA (~96% blanco, Theme de Confianza), esquinas SUPERIORES
+ * Hoja del sistema VEO — el sheet inferior de los frames del conductor (Dashboard, TripIncoming, Puja,
+ * TripActive…). Superficie SÓLIDA clara (`surfaceElevated`, Theme de Confianza), esquinas SUPERIORES
  * redondeadas (pegada al borde inferior, sin esquinas abajo), borde sutil del tema, y sombra hacia ARRIBA
- * (flota sobre el mapa Daylight Trust). No hay BlurView en el stack; la opacidad ~96% ya da el frosted
- * sobre el mapa claro.
+ * (flota sobre el mapa Daylight Trust). Antes era frosted ~96%; se unificó a sólido con el sheet del
+ * passenger (superficie de contenido = confianza y legibilidad; el frost queda para el pill del tab bar).
  *
  * Va dentro del slot inferior de `MapShell` (que aporta left/right/bottom:12): el margen negativo lo
  * lleva FLUSH a los bordes, como en los frames. La variante `scrollable` es la excepción: es hermana del
@@ -45,10 +45,12 @@ export function GlassSheet({
 }: GlassSheetProps): React.JSX.Element {
   const theme = useTheme();
 
-  // Superficie "glass" común a todas las variantes: frosted CLARO (~96% blanco) sobre el mapa Daylight
-  // Trust + borde sutil del tema. La translucidez frosted EXIGE rgba (excepción documentada del driver).
+  // Superficie SÓLIDA común a todas las variantes: `surfaceElevated` (blanco en el Theme de Confianza,
+  // theme-aware) + borde sutil del tema. Antes era frosted (~96% blanco): se pasó a sólido para que los
+  // sheets de CONTENIDO sean superficies de confianza legibles sobre el mapa — el frost queda reservado
+  // para el pill chico del tab bar. MISMO criterio que el sheet del passenger (DraggableSheet, sólido).
   const surface: ViewStyle = {
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    backgroundColor: theme.colors.surfaceElevated,
     borderColor: theme.colors.border,
   };
 
@@ -101,7 +103,7 @@ export function GlassSheet({
 
 const styles = StyleSheet.create({
   sheet: {
-    // Frosted CLARO sobre el mapa Daylight Trust; color de fondo/borde se inyectan inline desde el tema.
+    // Superficie sólida sobre el mapa Daylight Trust; color de fondo/borde se inyectan inline desde el tema.
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 24,

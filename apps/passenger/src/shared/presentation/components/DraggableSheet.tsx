@@ -163,7 +163,8 @@ const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
  * modo que el offset se recalcula en el hilo de UI y la altura re-anima suave (`withSpring`) cuando el
  * contenido cambia (idle→searching, aparición de sugerencias) sin saltos.
  *
- * Estilo visual `.bsheet` del design-handoff: fondo surface, esquinas superiores redondeadas (≈26),
+ * Estilo visual `.bsheet` del design-handoff: fondo surfaceElevated (sólido, MISMO token que el sheet
+ * del driver `GlassSheet`), esquinas superiores redondeadas (≈26),
  * borde superior, sombra hacia ARRIBA y un grabber (40×5) centrado. El área del grabber + el cuerpo
  * son arrastrables.
  */
@@ -539,7 +540,7 @@ export const DraggableSheet = forwardRef<
             // (eso solo achica el área útil de las fracciones; ver el doc del prop).
             height: sheetHeight,
             // Theme de Confianza (light): base blanca + borde hairline (estética Trust plana).
-            backgroundColor: theme.colors.surface,
+            backgroundColor: theme.colors.surfaceElevated,
             borderColor: theme.colors.border,
             borderTopLeftRadius: theme.radii['2xl'],
             borderTopRightRadius: theme.radii['2xl'],
