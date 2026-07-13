@@ -265,9 +265,32 @@ export default function DriversPage() {
       {topbar}
 
       <div className="flex flex-1 flex-col gap-[22px] overflow-y-auto p-7">
+        {/* Error del summary: los KPIs y los badges de tab se alimentan de ESTE seam — si falla, no los degradamos a
+            0 silenciosos (mentiría). Afordancia inline con reintento; la tabla (otro seam) sigue renderizando. */}
+        {summary.isError ? (
+          <div className="flex items-center justify-between gap-3 rounded-[18px] border border-danger/30 bg-danger/[0.04] px-[22px] py-3.5">
+            <span className="text-[13px] font-medium text-ink-muted">
+              No se pudieron cargar los indicadores.
+            </span>
+            <button
+              type="button"
+              onClick={() => void summary.refetch()}
+              className="shrink-0 rounded-control border border-border-strong bg-surface px-3.5 py-2 text-[13px] font-semibold text-ink transition-colors hover:bg-surface-2"
+            >
+              Reintentar
+            </button>
+          </div>
+        ) : null}
+
         {/* KPIs — Total, En línea y Pendientes KYC del summary real; Suspendidos sin seam → "—" honesto. */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <Kpi label="Total" value={String(total ?? 0)} loading={summary.isLoading} icon={Users} tone="neutral" />
+          <Kpi
+            label="Total"
+            value={summary.isError ? '—' : String(total ?? 0)}
+            loading={summary.isLoading}
+            icon={Users}
+            tone="neutral"
+          />
           <Kpi
             label="En línea"
             value={c ? String(c.online) : '—'}
@@ -277,7 +300,7 @@ export default function DriversPage() {
           />
           <Kpi
             label="Pendientes KYC"
-            value={String(pendientesKyc ?? 0)}
+            value={summary.isError ? '—' : String(pendientesKyc ?? 0)}
             loading={summary.isLoading}
             icon={Clock}
             tone="warn"

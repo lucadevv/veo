@@ -11,7 +11,6 @@ import {
   CalendarClock,
   Download,
   FileClock,
-  Lock,
   Search,
 } from 'lucide-react';
 import { useVehicles, useVehiclesSummary } from '@/lib/api/queries';
@@ -19,9 +18,10 @@ import type { VehicleView } from '@/lib/api/schemas';
 import { downloadCsv } from '@/lib/csv';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { StatCard } from '@/components/ui/stat-card';
 import { DotPill, type PillTone } from '@/components/ui/dot-pill';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 
 /** Días entre hoy y una fecha ISO (para "Vence N días"). null si no hay fecha. */
@@ -98,6 +98,7 @@ const GRID = 'grid grid-cols-[1fr_90px_170px_130px_130px_120px_24px] items-cente
 export default function VehiclesPage() {
   const router = useRouter();
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const [tab, setTab] = useState<Tab>('todos');
   const [search, setSearch] = useState('');
 
@@ -177,12 +178,12 @@ export default function VehiclesPage() {
 
   if (!can(user, 'fleet:view')) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-        <Lock className="size-6 text-ink-subtle" aria-hidden />
-        <p className="text-sm text-ink-muted">
-          Necesitás el rol correspondiente para ver la flota.
-        </p>
-      </div>
+      <PermissionState
+        className="min-h-full"
+        section="Vehículos"
+        permission="fleet:view"
+        onRequest={() => requestAccess('fleet:view')}
+      />
     );
   }
 

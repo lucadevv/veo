@@ -611,7 +611,16 @@ export default function ReviewsPage() {
             </div>
 
             {errored ? (
-              <ErrorState className="py-10" onRetry={() => void drivers.refetch()} />
+              <ErrorState
+                className="py-10"
+                // La cola unificada se alimenta de TRES seams (conductores + documentos + vehículos) y `errored`
+                // se dispara si cualquiera falla → el reintento re-consulta los tres, no solo conductores.
+                onRetry={() => {
+                  void drivers.refetch();
+                  void documents.refetch();
+                  void vehicles.refetch();
+                }}
+              />
             ) : loading ? (
               <div>
                 {Array.from({ length: 6 }).map((_, i) => (

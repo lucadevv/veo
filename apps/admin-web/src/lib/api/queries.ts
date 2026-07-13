@@ -182,6 +182,9 @@ export function useRevenueMetrics(range: RevenueRangeValue) {
 const tripPage = paginated(tripSummary);
 
 export function useTrips(filters: TripFilters) {
+  // Los filtros terminales (COMPLETED/CANCELLED) son HISTORIAL → no se re-consultan solos. El resto (Todos o
+  // cualquier estado en vuelo) incluye viajes EN CURSO → refetch modesto para que la lista respire con la operación.
+  const isTerminalView = filters.status === 'COMPLETED' || filters.status === 'CANCELLED';
   return useInfiniteQuery({
     queryKey: qk.trips(filters),
     initialPageParam: undefined as string | undefined,
@@ -197,6 +200,7 @@ export function useTrips(filters: TripFilters) {
         }),
       }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    refetchInterval: isTerminalView ? false : REALTIME_REFETCH,
   });
 }
 

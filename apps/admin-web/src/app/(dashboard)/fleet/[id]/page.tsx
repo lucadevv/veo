@@ -16,6 +16,7 @@ import {
   FileText,
   Info,
   Lock,
+  Plus,
   ShieldCheck,
   User,
   X,
@@ -37,6 +38,7 @@ import { DotPill, type PillTone } from '@/components/ui/dot-pill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
+import { CreateInspectionDialog } from '@/components/fleet/fleet-forms';
 import { useToast } from '@/components/ui/toast';
 
 const DocStatus = {
@@ -137,7 +139,7 @@ export default function VehicleDetailPage(props: { params: Promise<{ id: string 
           <div className="grid min-h-0 gap-5 lg:grid-cols-[1fr_320px]">
             <div className="flex flex-col gap-[18px]">
               <DocsCard vehicleId={id} onReviewed={() => void query.refetch()} />
-              <ItvCard v={v} vehicleId={id} />
+              <ItvCard v={v} vehicleId={id} onRegistered={() => void query.refetch()} />
             </div>
             <div className="flex flex-col gap-4">
               <FichaCard v={v} />
@@ -321,7 +323,16 @@ function DocRow({ doc, onReviewed }: { doc: FleetDocumentView; onReviewed: () =>
 
 /* ── ITV ── */
 
-function ItvCard({ v, vehicleId }: { v: VehicleView; vehicleId: string }) {
+function ItvCard({
+  v,
+  vehicleId,
+  onRegistered,
+}: {
+  v: VehicleView;
+  vehicleId: string;
+  onRegistered: () => void;
+}) {
+  const user = useSession();
   const insp = useVehicleInspections(vehicleId);
   const items = insp.data?.items ?? [];
   const latest = items[0];
@@ -353,7 +364,31 @@ function ItvCard({ v, vehicleId }: { v: VehicleView; vehicleId: string }) {
           <StepBadge n={2} />
           <span className="text-[15px] font-bold text-ink">Inspección técnica (ITV)</span>
         </div>
-        <DotPill tone={headTone}>{headLabel}</DotPill>
+        <div className="flex items-center gap-2.5">
+          <DotPill tone={headTone}>{headLabel}</DotPill>
+          {/* Registrar ITV: mismo seam que la barra de aprobación del conductor (POST /fleet/inspections ·
+              @Permission('fleet:manage')). Gateado a fleet:manage — un rol que solo VE la flota no comería un 403.
+              vehicleId FIJO (este vehículo) → el operador no pega uuids. El éxito refetchea la ficha (itvCurrent). */}
+          {can(user, 'fleet:manage') ? (
+            <CreateInspectionDialog
+              vehicleId={vehicleId}
+              vehicleLabel={v.plate}
+              onCreated={() => {
+                void insp.refetch();
+                onRegistered();
+              }}
+              trigger={
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3 py-1.5 text-xs font-semibold text-ink-muted transition-colors hover:text-ink"
+                >
+                  <Plus className="size-3.5" aria-hidden />
+                  Registrar ITV
+                </button>
+              }
+            />
+          ) : null}
+        </div>
       </div>
       <div className="flex flex-col gap-3.5 p-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
