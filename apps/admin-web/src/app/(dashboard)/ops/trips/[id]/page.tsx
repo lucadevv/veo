@@ -7,10 +7,13 @@ import { ApiError } from '@veo/api-client';
 import { useTrip } from '@/lib/api/queries';
 import type { TripDetail } from '@/lib/api/schemas';
 import { dateTime, duration, money } from '@/lib/formatters';
+import { can } from '@/lib/rbac';
+import { useSession } from '@/lib/session-context';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { AdminTopbar } from '@/components/layout/admin-topbar';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
 import { TripStatusBadge } from '@/components/trips/status-badge';
 import { dispatchModeLabel } from '@/components/trips/mode-pill';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
@@ -20,7 +23,10 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
   const params = use(props.params);
   const { id } = params;
   const short = id.slice(0, 8);
-  const query = useTrip(id);
+  const user = useSession();
+  const canView = can(user, 'trips:view');
+  const requestAccess = useRequestAccess();
+  const query = useTrip(canView ? id : '');
   const trip = query.data;
 
   const markers = useMemo<MapMarker[]>(() => buildMarkers(trip), [trip]);
@@ -41,6 +47,22 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
     />
   );
 
+  // Gate de permiso (paridad con la lista): sin `trips:view`, PermissionState con solicitar-acceso — NO el
+  // ErrorState genérico con retry que loopea sobre el 403.
+  if (!canView) {
+    return (
+      <div className="flex h-full flex-col">
+        {topbar}
+        <PermissionState
+          className="flex-1"
+          section="Viajes"
+          permission="trips:view"
+          onRequest={() => requestAccess('trips:view')}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       {topbar}
@@ -60,6 +82,14 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
             icon={<Archive className="size-6" aria-hidden />}
             title="Viaje no disponible"
             description="Este viaje ya no está en el sistema. Si lo viste en el listado, puede tardar unos minutos en desaparecer."
+          />
+        ) : query.error instanceof ApiError && query.error.status === 403 ? (
+          // Permiso revocado a mitad de sesión → PermissionState, no un retry que loopea sobre el 403.
+          <PermissionState
+            className="flex-1"
+            section="Viajes"
+            permission="trips:view"
+            onRequest={() => requestAccess('trips:view')}
           />
         ) : (
           <ErrorState onRetry={() => void query.refetch()} className="m-7" />

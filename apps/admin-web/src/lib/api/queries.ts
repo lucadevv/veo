@@ -776,6 +776,9 @@ export function useDocumentReview() {
       }),
     onSuccess: (_data, input) => {
       void qc.invalidateQueries({ queryKey: ['fleet-documents'] });
+      // Patrón D: la DocsCard del detalle de VEHÍCULO lee ['vehicle-documents', id] (no ['fleet-documents']),
+      // así que sin esto la fila quedaba "Por revisar" tras aprobar/rechazar hasta recargar.
+      void qc.invalidateQueries({ queryKey: ['vehicle-documents'] });
       void qc.invalidateQueries({ queryKey: qk.expiring });
       if (input.driverId) void qc.invalidateQueries({ queryKey: qk.driver(input.driverId) });
     },
@@ -922,7 +925,12 @@ export function useRunPayout() {
         idempotencyKey: input.idempotencyKey,
       }),
     onSuccess: () => {
+      // Patrón D: invalidar TAMBIÉN stats (KPIs de dinero) + detalle/trips (la pantalla desde la que se opera),
+      // no solo la lista — si no, los KPIs y el StatusPill del detalle quedan stale tras la propia mutación.
       void qc.invalidateQueries({ queryKey: ['payouts'] });
+      void qc.invalidateQueries({ queryKey: qk.payoutStats });
+      void qc.invalidateQueries({ queryKey: ['payout-detail'] });
+      void qc.invalidateQueries({ queryKey: ['payout-trips'] });
     },
   });
 }
@@ -938,7 +946,12 @@ export function useReleaseDriverPayouts() {
     mutationFn: (input: { driverId: string }) =>
       apiClient().post(`/finance/payouts/drivers/${input.driverId}/release`, {}),
     onSuccess: () => {
+      // Patrón D: invalidar TAMBIÉN stats (KPIs de dinero) + detalle/trips (la pantalla desde la que se opera),
+      // no solo la lista — si no, los KPIs y el StatusPill del detalle quedan stale tras la propia mutación.
       void qc.invalidateQueries({ queryKey: ['payouts'] });
+      void qc.invalidateQueries({ queryKey: qk.payoutStats });
+      void qc.invalidateQueries({ queryKey: ['payout-detail'] });
+      void qc.invalidateQueries({ queryKey: ['payout-trips'] });
     },
   });
 }
@@ -957,7 +970,12 @@ export function useRetryPayout() {
         idempotencyKey: input.idempotencyKey,
       }),
     onSuccess: () => {
+      // Patrón D: invalidar TAMBIÉN stats (KPIs de dinero) + detalle/trips (la pantalla desde la que se opera),
+      // no solo la lista — si no, los KPIs y el StatusPill del detalle quedan stale tras la propia mutación.
       void qc.invalidateQueries({ queryKey: ['payouts'] });
+      void qc.invalidateQueries({ queryKey: qk.payoutStats });
+      void qc.invalidateQueries({ queryKey: ['payout-detail'] });
+      void qc.invalidateQueries({ queryKey: ['payout-trips'] });
     },
   });
 }
