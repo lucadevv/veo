@@ -192,7 +192,7 @@ export function ActiveTripBody({
           {/* Fila de 3 acciones con icono (design/veo.pen fLKdk Actions): Mensaje (chat + badge de
               no-leídos, mudado del chrome flotante) · Compartir · Cancelar. Tiles iguales, el peligro
               (cancelar) en tono danger. */}
-          <View style={[styles.actionsRow, {gap: theme.spacing.sm}]}>
+          <View style={[styles.actionsRow, {gap: 10}]}>
             <ActionTile
               icon={<IconChat color={theme.colors.ink} size={20} />}
               label={t('trip.actionMessage')}
@@ -351,8 +351,9 @@ interface ActionTileProps {
 }
 
 /**
- * Tile de acción del viaje activo (design/veo.pen fLKdk Actions): icono en círculo + etiqueta corta,
- * tres iguales en fila. El badge de no-leídos vivía en el chrome flotante y se muda acá con el chat.
+ * Tile de acción del viaje activo (design/veo.pen `Actions`): tile-icono CUADRADO 46×46 (relleno gris
+ * recesado + borde) con la etiqueta DEBAJO, tres iguales en fila. El badge de no-leídos se posa sobre el
+ * tile. El pressed tiñe SOLO el tile. `danger` (Cancelar) va con icono + label en rojo.
  */
 function ActionTile({
   icon,
@@ -369,42 +370,44 @@ function ActionTile({
       accessibilityLabel={badgeCount > 0 ? `${label} (${badgeCount})` : label}
       disabled={loading}
       onPress={onPress}
-      style={({pressed}) => [
-        styles.actionTile,
-        {
-          backgroundColor: pressed
-            ? theme.colors.surfaceElevated
-            : theme.colors.surface,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radii.lg,
-          paddingVertical: theme.spacing.md,
-          gap: theme.spacing.xs,
-          opacity: loading ? 0.55 : 1,
-        },
-      ]}>
-      <View style={styles.actionIconWrap}>
-        {icon}
-        {badgeCount > 0 ? (
+      style={[styles.actionCol, {opacity: loading ? 0.55 : 1}]}>
+      {({pressed}) => (
+        <>
           <View
             style={[
-              styles.actionBadge,
+              styles.actionBtn,
               {
-                backgroundColor: theme.colors.accent,
-                borderColor: theme.colors.surface,
+                backgroundColor: pressed
+                  ? theme.colors.surface
+                  : theme.colors.surfaceMuted,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.sm,
               },
             ]}>
-            <Text variant="caption" color="onAccent" tabular>
-              {badgeCount > 9 ? '9+' : badgeCount}
-            </Text>
+            {icon}
+            {badgeCount > 0 ? (
+              <View
+                style={[
+                  styles.actionBadge,
+                  {
+                    backgroundColor: theme.colors.accent,
+                    borderColor: theme.colors.surface,
+                  },
+                ]}>
+                <Text variant="caption" color="onAccent" tabular>
+                  {badgeCount > 9 ? '9+' : badgeCount}
+                </Text>
+              </View>
+            ) : null}
           </View>
-        ) : null}
-      </View>
-      <Text
-        variant="footnote"
-        color={tone === 'danger' ? 'danger' : 'ink'}
-        numberOfLines={1}>
-        {label}
-      </Text>
+          <Text
+            variant="caption"
+            color={tone === 'danger' ? 'danger' : 'inkMuted'}
+            numberOfLines={1}>
+            {label}
+          </Text>
+        </>
+      )}
     </Pressable>
   );
 }
@@ -560,7 +563,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  actionsRow: {flexDirection: 'row', alignItems: 'stretch'},
+  actionsRow: {flexDirection: 'row', alignItems: 'flex-start'},
   // Fila-radio del motivo de cancelación (pen AULzA): label + círculo, borde de selección.
   reasonRow: {
     flexDirection: 'row',
@@ -578,22 +581,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   radioDot: {width: 9, height: 9, borderRadius: 4.5},
-  actionTile: {
-    flex: 1,
+  // Columna de acción (pen `Actions`): tile 46×46 arriba + label debajo, centrada; 3 iguales (flex 1).
+  actionCol: {flex: 1, alignItems: 'center', gap: 6},
+  actionBtn: {
+    width: 46,
+    height: 46,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
   },
-  actionIconWrap: {
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   actionBadge: {
     position: 'absolute',
     top: -6,
-    right: -10,
+    right: -6,
     minWidth: 18,
     height: 18,
     borderRadius: 9,

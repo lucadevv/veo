@@ -289,10 +289,12 @@ export function IconStarFilled({
 
 /** Globo de chat (mensajería con el conductor). Espejo de `I.chat`. */
 export function IconChat({color, size = 20}: GlyphProps): React.JSX.Element {
+  // UNIFICADO con el conductor (`IconMessage` del driver, lucide message-square del board): TODA la app
+  // usa el MISMO glifo de mensaje. Antes era un globo redondo (message-circle) y divergía del conductor.
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
-        d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.7A8 8 0 1 1 21 12Z"
+        d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 3v-3a2 2 0 0 1-1-2V6Z"
         stroke={color}
         strokeWidth={STROKE}
         strokeLinejoin="round"
