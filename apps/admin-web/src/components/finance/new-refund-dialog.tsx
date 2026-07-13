@@ -26,6 +26,11 @@ import {
 
 const REASON_MIN_LENGTH = 3;
 
+/** El backstop de VENTANA del server (2do parcial idéntico) rebota con este mensaje → habilita el "forzar". */
+function isDuplicateWindowError(message: string): boolean {
+  return /reembolso reciente/i.test(message) || /ventana de idempotencia/i.test(message);
+}
+
 // ── Idempotencia del money-OUT: nonce ligado a (tripId, céntimos) en sessionStorage, sobrevive remonte/refresh
 // hasta el ÉXITO. Tolerante a storage caído (nunca bloquea el reembolso). ──
 const ATTEMPT_SLOT_PREFIX = 'veo:refund-attempt:';
@@ -74,6 +79,9 @@ function RequestForm({ payment, onDone }: { payment: RefundablePaymentView; onDo
   const [soles, setSoles] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // El server rebotó por el backstop de ventana (parcial idéntico reciente). Habilita un "forzar" DELIBERADO
+  // (segundo submit con forceNew) para el caso legítimo de un 2do reembolso parcial distinto.
+  const [forceable, setForceable] = useState(false);
   const attemptRef = useRef<{ sig: string; key: string } | null>(null);
 
   const amountCents =
@@ -93,7 +101,7 @@ function RequestForm({ payment, onDone }: { payment: RefundablePaymentView; onDo
     return attemptRef.current.key;
   }
 
-  async function submit() {
+  async function submit(force = false) {
     setError(null);
     try {
       await request.mutateAsync({
@@ -101,13 +109,18 @@ function RequestForm({ payment, onDone }: { payment: RefundablePaymentView; onDo
         amountCents,
         reason: reason.trim(),
         idempotencyKey: operationKey(amountCents),
+        forceNew: force,
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo crear la solicitud.');
+      const message = e instanceof Error ? e.message : 'No se pudo crear la solicitud.';
+      // Si rebotó por la ventana de idempotencia y NO veníamos forzando, ofrecemos el "forzar" deliberado.
+      setForceable(!force && isDuplicateWindowError(message));
+      setError(message);
       return;
     }
     clearNonce(attemptSlot(payment.tripId, amountCents));
     attemptRef.current = null;
+    setForceable(false);
     toast({
       tone: 'success',
       title: 'Solicitud creada',
@@ -195,8 +208,24 @@ function RequestForm({ payment, onDone }: { payment: RefundablePaymentView; onDo
             Solicitar {money(amountCents)}
           </Button>
         }
-        onVerified={submit}
+        onVerified={() => submit(false)}
       />
+
+      {/* Forzar: el server marcó un parcial idéntico reciente. Si es un reembolso DISTINTO y legítimo (no un
+          reintento), el operador lo confirma explícitamente y se re-envía con forceNew (salta el backstop). */}
+      {forceable ? (
+        <StepUpDialog
+          title="Forzar un reembolso distinto"
+          description="El sistema detectó un reembolso reciente idéntico (ventana de idempotencia). Si este es un reembolso DISTINTO y legítimo —no un reintento del anterior—, confirmá para crearlo de todos modos."
+          confirmLabel="Forzar reembolso"
+          trigger={
+            <Button variant="secondary" className="w-full" loading={request.isPending} disabled={!valid}>
+              ¿Es un reembolso distinto? Forzar de todos modos
+            </Button>
+          }
+          onVerified={() => submit(true)}
+        />
+      ) : null}
     </div>
   );
 }

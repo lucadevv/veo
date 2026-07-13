@@ -43,13 +43,18 @@ export function LiveAccessDialog({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Espejo del `StepUpMfaGuard` del backend (`if (!isHardenedEnv()) return true`): en local/dev el server NO exige
+  // la doble-auth fresca (solo NODE_ENV=production la mantiene) → el TOTP se salta, igual que en las otras acciones
+  // sensibles (step-up-dialog / panic-resolve). El MOTIVO SÍ se sigue capturando y auditando en dev.
+  const isProd = process.env.NODE_ENV === 'production';
+
   const reasonOk = reason.trim().length >= MIN_REASON;
 
   async function submit() {
     setError(null);
     setPending(true);
     try {
-      await stepUp(code); // 1) segundo factor: MFA fresca en la sesión
+      if (isProd) await stepUp(code); // 1) segundo factor: MFA fresca en la sesión (solo prod)
       const grant = await live.mutateAsync({ tripId, reason }); // 2) token (auditado server-side con el motivo)
       setOpen(false);
       setReason('');
@@ -86,17 +91,21 @@ export function LiveAccessDialog({
             placeholder="Ej. verificación de incidente reportado por el pasajero…"
           />
         </Field>
-        <Field label="Código TOTP" error={error ?? undefined}>
-          <Input
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={8}
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-            className="text-center font-mono text-lg tracking-[0.4em]"
-            placeholder="••••••"
-          />
-        </Field>
+        {isProd ? (
+          <Field label="Código TOTP" error={error ?? undefined}>
+            <Input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={8}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              className="text-center font-mono text-lg tracking-[0.4em]"
+              placeholder="••••••"
+            />
+          </Field>
+        ) : error ? (
+          <p className="text-sm text-danger">{error}</p>
+        ) : null}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="ghost">Cancelar</Button>
@@ -104,7 +113,7 @@ export function LiveAccessDialog({
           <Button
             variant="primary"
             loading={pending}
-            disabled={!reasonOk || code.length < 6}
+            disabled={!reasonOk || (isProd && code.length < 6)}
             onClick={() => void submit()}
           >
             Abrir cámara

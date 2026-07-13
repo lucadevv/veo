@@ -66,6 +66,11 @@ export default function LiveWallPage() {
   // al operador sin salida.
   const focusGone = !!focusTrip && !focusInCabins && !query.isLoading && !query.isError;
 
+  // Cabinas con un VISOR ABIERTO cuyo viaje ya no está en la lista en vivo (terminó / dejó de publicar). En vez de
+  // hacer desaparecer el visor sin aviso, se renderiza un cierre honesto "El viaje finalizó" con botón de cerrar.
+  const cabinIds = new Set(cabins.map((c) => c.tripId));
+  const endedGrantIds = Object.keys(grants).filter((id) => !cabinIds.has(id));
+
   function closeCamera(tripId: string) {
     setGrants((prev) => {
       const next = { ...prev };
@@ -120,7 +125,7 @@ export default function LiveWallPage() {
               <Skeleton key={i} className="aspect-[269/176] rounded-[14px]" />
             ))}
           </div>
-        ) : cabins.length === 0 ? (
+        ) : cabins.length === 0 && endedGrantIds.length === 0 ? (
           <EmptyState
             className="flex-1"
             icon={<Video className="size-6" aria-hidden />}
@@ -129,6 +134,26 @@ export default function LiveWallPage() {
           />
         ) : (
           <div className="grid gap-4 pt-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {/* Visores abiertos cuyo viaje terminó: cierre honesto en vez de que el tile desaparezca sin aviso. */}
+            {endedGrantIds.map((tripId) => (
+              <div
+                key={`ended-${tripId}`}
+                className="flex aspect-[269/176] flex-col items-center justify-center gap-2.5 rounded-[14px] border border-border bg-surface-2 p-4 text-center"
+              >
+                <Radio className="size-5 text-ink-subtle" aria-hidden />
+                <div>
+                  <p className="text-sm font-semibold text-ink">El viaje finalizó</p>
+                  <p className="mt-0.5 font-mono text-xs text-ink-muted">{tripId.slice(0, 8)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => closeCamera(tripId)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-ink transition-colors hover:border-border-strong"
+                >
+                  <X className="size-3.5" aria-hidden /> Cerrar
+                </button>
+              </div>
+            ))}
             {cabins.map((cabin) => {
               const grant = grants[cabin.tripId];
               const label = cabin.driverName ?? `Viaje ${cabin.tripId.slice(0, 8)}`;

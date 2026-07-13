@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BellRing, CheckCircle2, FileText, Paperclip, Video } from 'lucide-react';
+import { BellRing, CheckCircle2, FileText, Paperclip, ShieldPlus, Siren, Video } from 'lucide-react';
 import { usePanic, usePanicAction, useTrip } from '@/lib/api/queries';
 import { dateTime, relativeFromNow } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
@@ -126,6 +126,25 @@ export function PanicDetailPanel({ id }: { id: string }) {
             }}
           />
         ) : null}
+        {/* Despachar unidad: misma acción/gating que la página `[id]` (dispatch), para no obligar a un click-through
+            en plena emergencia. Deshabilitada si ya se despachó. */}
+        {can(user, 'panics:ack') ? (
+          <ConfirmDialog
+            trigger={
+              <Button variant={panic.dispatchedAt ? 'secondary' : 'primary'} disabled={!!panic.dispatchedAt}>
+                <ShieldPlus className="size-4" aria-hidden />
+                {panic.dispatchedAt ? 'Unidad despachada' : 'Despachar unidad'}
+              </Button>
+            }
+            title="Despachar unidad de respuesta"
+            description="Registrás que se despachó una unidad de respuesta a la ubicación del incidente."
+            confirmLabel="Despachar"
+            onConfirm={async () => {
+              await action.mutateAsync({ id, action: 'dispatch' });
+              toast({ tone: 'success', title: 'Unidad despachada' });
+            }}
+          />
+        ) : null}
         {can(user, 'live:view') ? (
           <Link
             href={`/security/live-wall?trip=${panic.tripId}`}
@@ -144,6 +163,27 @@ export function PanicDetailPanel({ id }: { id: string }) {
                 Marcar resuelto
               </Button>
             }
+          />
+        ) : null}
+        {/* Escalar a autoridades: misma acción/gating que la página `[id]` (escalate). Deshabilitada si ya se escaló. */}
+        {can(user, 'panics:ack') ? (
+          <ConfirmDialog
+            trigger={
+              <Button
+                className="border border-danger/40 bg-transparent text-danger hover:bg-danger/10"
+                disabled={!!panic.escalatedAt}
+              >
+                <Siren className="size-4" aria-hidden />
+                {panic.escalatedAt ? 'Escalado a autoridades' : 'Escalar a autoridades'}
+              </Button>
+            }
+            title="Escalar a autoridades"
+            description="Registrás que el incidente fue escalado a las autoridades competentes. Queda en la auditoría inmutable."
+            confirmLabel="Escalar"
+            onConfirm={async () => {
+              await action.mutateAsync({ id, action: 'escalate' });
+              toast({ tone: 'success', title: 'Escalado a autoridades' });
+            }}
           />
         ) : null}
       </div>

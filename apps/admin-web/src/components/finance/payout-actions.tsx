@@ -21,7 +21,7 @@ export function RunPayoutsButton() {
   return (
     <StepUpDialog
       trigger={
-        <Button size="sm" variant="primary">
+        <Button size="sm" variant="primary" loading={run.isPending} disabled={run.isPending}>
           <PlayCircle className="size-4" aria-hidden />
           Ejecutar liquidación
         </Button>

@@ -1,7 +1,7 @@
 'use client';
 
 import type { LucideIcon } from 'lucide-react';
-import { Lock, Equal, Scale, Database, FileText } from 'lucide-react';
+import { Equal, Scale, Database, FileText } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useReconciliation } from '@/lib/api/queries';
 import type { ReconciliationRunView } from '@/lib/api/schemas';
@@ -9,10 +9,11 @@ import { money } from '@/lib/formatters';
 import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
 import { LoadMore } from '@/components/ui/load-more';
 
@@ -190,6 +191,7 @@ const columns: ColumnDef<ReconciliationRunView, unknown>[] = [
 
 export default function ReconciliationPage() {
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const query = useReconciliation();
 
   if (!can(user, 'finance:view')) {
@@ -199,11 +201,11 @@ export default function ReconciliationPage() {
           title="Reconciliación"
           breadcrumbs={[{ label: 'Finanzas' }, { label: 'Reconciliación' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol FINANCE o ADMIN para ver la reconciliación."
+          section="Reconciliación"
+          permission="finance:view"
+          onRequest={() => requestAccess('finance:view')}
         />
       </div>
     );

@@ -243,7 +243,7 @@ export function NewOfferingDialog({
             confirmLabel="Crear servicio"
             onVerified={submit}
             trigger={
-              <Button variant="primary" disabled={invalid} loading={create.isPending}>
+              <Button variant="primary" disabled={invalid || create.isPending} loading={create.isPending}>
                 Crear servicio
               </Button>
             }
