@@ -202,6 +202,38 @@
   .animate-pulse-danger {
     animation: veo-pulse-danger 1.4s ease-in-out infinite;
   }
+  /* Entrada ESCALONADA de grillas/listas del dashboard (KPIs, cards, filas): cascada sutil (translateY corto,
+     snappy) — nunca todo de golpe. Se pone en el CONTENEDOR (`.stagger`); los hijos directos cascadean por orden. */
+  @keyframes veo-enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .stagger > * {
+    animation: veo-enter 380ms var(--ease-out) both;
+  }
+  .stagger > *:nth-child(2) { animation-delay: 45ms; }
+  .stagger > *:nth-child(3) { animation-delay: 90ms; }
+  .stagger > *:nth-child(4) { animation-delay: 135ms; }
+  .stagger > *:nth-child(5) { animation-delay: 180ms; }
+  .stagger > *:nth-child(6) { animation-delay: 225ms; }
+  .stagger > *:nth-child(7) { animation-delay: 270ms; }
+  .stagger > *:nth-child(n + 8) { animation-delay: 315ms; }
+  /* Card CLICKEABLE: micro-lift al hover (lo interactivo se ve interactivo). Solo transform/opacity/sombra (GPU).
+     NO usar en cards estáticas (KPIs) — un lift sin destino confunde. */
+  .card-interactive {
+    transition:
+      transform 180ms var(--ease-out),
+      box-shadow 180ms var(--ease-out),
+      border-color 180ms var(--ease-out);
+  }
+  .card-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-3);
+    border-color: var(--border-strong);
+  }
+  .card-interactive:active {
+    transform: translateY(0);
+  }
   /* Legibilidad de texto sobre imagen/video: halo oscuro que rodea cada glifo, así el texto
      se lee incluso sobre zonas claras del video (cielo, edificios) SIN necesitar una banda
      oscura de fondo. El anillo tight (0 0 3px) hace el grueso del trabajo; el glow (10px) suaviza. */
@@ -216,8 +248,15 @@
     .animate-fade-in,
     .animate-scale-in,
     .animate-slide-in,
-    .animate-rise {
+    .animate-rise,
+    .stagger > * {
       animation: none;
+    }
+    .card-interactive {
+      transition: none;
+    }
+    .card-interactive:hover {
+      transform: none;
     }
     .animate-pulse-danger {
       animation: none;

@@ -28,16 +28,22 @@ export function KpiGrid({ data }: { data: AnalyticsOverview }) {
   ];
 
   return (
-    <div className="grid w-full grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+    <div className="stagger grid w-full grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
       {kpis.map((k) => (
         <div
           key={k.label}
-          className="flex flex-col gap-2.5 rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3"
+          className={cn(
+            'flex flex-col gap-3 rounded-[18px] border p-[22px] shadow-3',
+            // La KPI de alerta (pánicos > 0) se tinta suave: la señal salta por el fondo, no solo por el número rojo.
+            k.alert
+              ? 'border-danger/25 bg-danger/[0.04]'
+              : 'border-black/[0.05] bg-surface',
+          )}
         >
           <p className="text-[13px] font-medium text-ink-muted">{k.label}</p>
           <p
             className={cn(
-              'font-display text-[32px] font-bold leading-none tracking-[-1px] tabular',
+              'font-display text-[34px] font-bold leading-none tracking-[-1.2px] tabular',
               k.alert ? 'text-danger' : 'text-ink',
             )}
           >
