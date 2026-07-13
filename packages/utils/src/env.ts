@@ -95,22 +95,37 @@ export function isHardenedEnv(): boolean {
 }
 
 /** Tier de despliegue (EJE distinto al de endurecimiento): qué ambiente lógico es, no si es internet-facing. */
-export type DeployTier = 'local' | 'preview' | 'production';
+export type DeployTier = 'local' | 'dev' | 'preview' | 'production';
 
 /**
- * Tier de despliegue, leído de `VEO_DEPLOY_TIER`. Distingue PREVIEW de PRODUCTION (cosa que `NODE_ENV` NO
- * puede: ambos son `production`/endurecidos). Default SEGURO = `production` (lo más restrictivo): un tier
- * solo es permisivo si se declara EXPLÍCITAMENTE `local` o `preview`; cualquier otra cosa (unset/desconocido)
- * cae a `production`. Único punto que lee la var — centralizado, sin string mágico esparcido.
+ * Tier de despliegue, leído de `VEO_DEPLOY_TIER`. Distingue los 4 ambientes lógicos (cosa que `NODE_ENV`
+ * NO puede: preview y prod son ambos `production`/endurecidos). Default SEGURO = `production` (lo más
+ * restrictivo): un tier solo es permisivo si se declara EXPLÍCITAMENTE `local`/`dev`/`preview`; cualquier
+ * otra cosa (unset/desconocido) cae a `production`. Único punto que lee la var — centralizado, sin string mágico.
  */
 export function deployTier(): DeployTier {
   const t = process.env.VEO_DEPLOY_TIER;
-  return t === 'local' || t === 'preview' ? t : 'production';
+  return t === 'local' || t === 'dev' || t === 'preview' ? t : 'production';
 }
 
 /** ¿Es el tier de PRODUCCIÓN real? Para gates de operaciones DESTRUCTIVAS que dev+preview SÍ permiten y prod NO. */
 export function isProdTier(): boolean {
   return deployTier() === 'production';
+}
+
+/**
+ * ¿Se SALTEAN las verificaciones (alta/background-check del conductor, biométrico de turno, KYC) para poder
+ * correr flujos de punta a punta SIN verificar? SOLO para desarrollo local — NUNCA en un entorno endurecido:
+ * si `NODE_ENV=production` (cubre preview Y prod) devuelve SIEMPRE `false`, pase lo que pase en la env, así un
+ * release/deploy jamás honra el bypass. En local/dev lee `VEO_BYPASS_VERIFICATION` (default `false`).
+ *
+ * Convención: `true` SOLO en `env/local.env`; `dev/preview/production` lo dejan `false`/vacío. Espeja el molde
+ * de `VEO_BIOMETRIC_MODE` (permisivo en local, forzado seguro en prod). Los gates que lo usan deben además
+ * agregarlo al `superRefine` de su env.schema para que el servicio NO ARRANQUE con bypass=true bajo prod.
+ */
+export function bypassVerification(): boolean {
+  if (isHardenedEnv()) return false;
+  return process.env.VEO_BYPASS_VERIFICATION === 'true';
 }
 
 /**

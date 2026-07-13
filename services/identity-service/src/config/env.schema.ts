@@ -147,6 +147,15 @@ export const envSchema = z
     /// resto de clientes salientes, porque liveness+match es más caro), pero acotado.
     BIOMETRIC_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
 
+    /// BYPASS de verificación SOLO para desarrollo local (correr flujos de punta a punta sin alta/KYC
+    /// aprobados). Default `false`. El helper `bypassVerification()` (@veo/utils) además lo fuerza a `false`
+    /// cuando NODE_ENV=production (nunca bypass en preview/prod), y el superRefine de abajo hace fail-fast si
+    /// alguien lo setea `true` en un entorno endurecido → el servicio NO arranca. Setear `true` solo en local.env.
+    VEO_BYPASS_VERIFICATION: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
+
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
     // gRPC (lectura síncrona desde otros servicios)
@@ -196,6 +205,16 @@ export const envSchema = z
             message: `${port.env} debe ser "${LIVE_MODE}" en entornos productivos (NODE_ENV=production): ${port.reason}`,
           });
         }
+      }
+      // El bypass de verificación (saltea el gate de alta/background del conductor) JAMÁS en producción:
+      // fail-fast al boot si alguien lo dejó activado en un entorno endurecido.
+      if (env.VEO_BYPASS_VERIFICATION) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['VEO_BYPASS_VERIFICATION'],
+          message:
+            'VEO_BYPASS_VERIFICATION no puede ser "true" en entornos productivos (NODE_ENV=production): saltea el gate de alta/background del conductor',
+        });
       }
     }
   });

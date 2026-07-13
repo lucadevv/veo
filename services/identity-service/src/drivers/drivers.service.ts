@@ -11,6 +11,7 @@ import {
   ConcurrencyConflictError,
   ConflictError,
   consumeFixedWindow,
+  bypassVerification,
   DniAlreadyRegisteredError,
   ForbiddenError,
   hashPii,
@@ -1852,7 +1853,11 @@ export class DriversService {
     // Gates baratos de fail-fast sobre la réplica (no autoridad final): el gate de suspensión REAL se
     // re-evalúa sobre el dato fresco dentro del CAS (#10). Aquí solo evita trabajo si ya viene suspendido.
     if (d.suspendedAt) throw new ForbiddenError('Conductor suspendido');
-    if (!isBackgroundCleared(d.backgroundCheckStatus)) throw new ForbiddenError('KYC no aprobado');
+    // Gate de alta/background — se SALTEA solo con VEO_BYPASS_VERIFICATION en local (nunca en prod: el helper
+    // fuerza false bajo NODE_ENV=production + el env.schema hace fail-fast al boot). La suspensión NO se saltea.
+    if (!bypassVerification() && !isBackgroundCleared(d.backgroundCheckStatus)) {
+      throw new ForbiddenError('KYC no aprobado');
+    }
     if (d.licenseExpiresAt && d.licenseExpiresAt.getTime() < Date.now()) {
       throw new ForbiddenError('Licencia vencida');
     }
