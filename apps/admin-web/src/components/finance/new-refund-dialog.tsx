@@ -103,8 +103,9 @@ function RequestForm({ payment, onDone }: { payment: RefundablePaymentView; onDo
 
   async function submit(force = false) {
     setError(null);
+    let res: Awaited<ReturnType<typeof request.mutateAsync>>;
     try {
-      await request.mutateAsync({
+      res = await request.mutateAsync({
         tripId: payment.tripId,
         amountCents,
         reason: reason.trim(),
@@ -113,9 +114,20 @@ function RequestForm({ payment, onDone }: { payment: RefundablePaymentView; onDo
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'No se pudo crear la solicitud.';
-      // Si rebotó por la ventana de idempotencia y NO veníamos forzando, ofrecemos el "forzar" deliberado.
+      // Belt-and-suspenders: si el server llegara a REBOTAR por la ventana (en vez del flag deduped) y NO
+      // veníamos forzando, igual ofrecemos el "forzar" deliberado.
       setForceable(!force && isDuplicateWindowError(message));
       setError(message);
+      return;
+    }
+    // El server NO creó una solicitud nueva: devolvió una RECIENTE existente (backstop de ventana). No mentimos
+    // "creada" — ofrecemos el "forzar" deliberado para el 2do parcial legítimo distinto. NO limpiamos el nonce
+    // (el forzar re-usa el flujo con forceNew).
+    if (res.deduped && !force) {
+      setForceable(true);
+      setError(
+        'Ya existe un reembolso reciente para este pago y monto. Si es uno DISTINTO, forzá uno nuevo.',
+      );
       return;
     }
     clearNonce(attemptSlot(payment.tripId, amountCents));

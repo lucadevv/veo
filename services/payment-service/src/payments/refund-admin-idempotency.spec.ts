@@ -173,6 +173,8 @@ describe('PaymentsService.requestRefund · idempotencia de la solicitud (Idempot
     expect(refunds[0]!.status).toBe('PENDING');
     expect(res.refundId).toBe(refunds[0]!.id);
     expect(res.status).toBe('PENDING');
+    // Solicitud NUEVA (no dedup) → el panel confirma "creada".
+    expect(res.deduped).toBe(false);
   });
 
   it('SIN Idempotency-Key: dedupKey NULL (compat — idempotencia = CAS optimista, como antes)', async () => {
@@ -207,6 +209,8 @@ describe('PaymentsService.requestRefund · idempotencia de la solicitud (Idempot
     // crear uno nuevo.
     expect(res.refundId).toBe('refund-existente');
     expect(refunds).toHaveLength(1);
+    // Devolvió una existente (idempotencia por key) → `deduped` avisa al panel para ofrecer "forzar uno nuevo".
+    expect(res.deduped).toBe(true);
   });
 
   it('mismo key pero OTRO monto (operador editó el form tras un timeout) → CONFLICTO, NO éxito falso', async () => {
@@ -263,6 +267,9 @@ describe('PaymentsService.requestRefund · idempotencia de la solicitud (Idempot
 
     expect(refunds).toHaveLength(1); // un solo money-OUT
     expect(second.refundId).toBe(first.refundId); // el 2do devolvió el existente
+    // El backstop de ventana marca el 2do como dedup (el panel ofrece "forzar"); el 1ro fue creación real.
+    expect(first.deduped).toBe(false);
+    expect(second.deduped).toBe(true);
   });
 
   it('keys distintos, mismo dinero, CON forceNew → DOS refunds (el operador habilita el 2do parcial idéntico)', async () => {

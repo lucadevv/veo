@@ -842,6 +842,12 @@ export const refundActionResult = z.object({
   refundId: z.string(),
   paymentId: z.string(),
   status: refundStatus,
+  /**
+   * Solo en requestRefund: `true` ⇒ NO se creó una solicitud nueva, se devolvió una RECIENTE existente (backstop
+   * de ventana / idempotencia). El panel lo usa para no mentir "enviada" y ofrecer "forzar uno nuevo". Ausente en
+   * approve/reject (comparten este schema).
+   */
+  deduped: z.boolean().optional(),
 });
 export type RefundActionResult = z.infer<typeof refundActionResult>;
 

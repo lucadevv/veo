@@ -1283,7 +1283,9 @@ export class PaymentsService {
     // RC18 · el operador marca que el refund es por causa ATRIBUIBLE al conductor (viaje no realizado / fraude
     // del conductor) → un refund TOTAL clawbackea su neto ya pagado. Default false = lo absorbe la plataforma.
     driverFault = false,
-  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    // `deduped=true` ⇒ NO se creó una solicitud nueva: se devolvió una RECIENTE existente (backstop de ventana o
+    // idempotencia por key). El panel lo usa para NO mentir "enviada" y ofrecer "forzar uno nuevo" (forceNew).
+  ): Promise<{ refundId: string; paymentId: string; status: string; deduped: boolean }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
     const payment = await this.findRefundablePaymentByTrip(tripId);
     if (!payment) throw new NotFoundError('No hay un cobro reembolsable para este viaje');
@@ -1340,7 +1342,7 @@ export class PaymentsService {
           // clawback del neto del conductor (la solicitud PENDING → APPROVED/COMPLETED no lo re-escribe).
           clawbackDriver: driverFault,
         });
-        return { refundId: refund.id, paymentId: payment.id, status: refund.status };
+        return { refundId: refund.id, paymentId: payment.id, status: refund.status, deduped: false };
       });
     } catch (err) {
       // BACKSTOP DE VENTANA: misma operación (reintento con otro key / sin key) → devolver la solicitud existente.
@@ -1349,7 +1351,7 @@ export class PaymentsService {
           `Solicitud de reembolso idempotente por VENTANA (mismo pago y monto) trip=${tripId}; ` +
             `devuelvo la existente ${err.existing.refundId}`,
         );
-        return err.existing;
+        return { ...err.existing, deduped: true };
       }
       // IDEMPOTENCIA por key: el MISMO `Idempotency-Key` ya creó una solicitud ACTIVA (UNIQUE parcial) → P2002.
       // Leemos del PRIMARIO (read-after-write). Solo devolvemos la existente si coincide en (pago, monto); un key
@@ -1360,7 +1362,12 @@ export class PaymentsService {
           this.logger.log(
             `Solicitud de reembolso idempotente (mismo key, pago y monto) trip=${tripId}; devuelvo la existente`,
           );
-          return { refundId: existing.id, paymentId: existing.paymentId, status: existing.status };
+          return {
+            refundId: existing.id,
+            paymentId: existing.paymentId,
+            status: existing.status,
+            deduped: true,
+          };
         }
         throw new ConflictError(
           'El Idempotency-Key ya se usó para otro reembolso (distinto pago o monto)',
