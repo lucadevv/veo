@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
+import {
+  ConcurrencyConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '@veo/utils';
 import { PoliciesService } from './policies.service';
 import type { PolicyVersionData, UpsertPolicyData } from './policies.repository';
 import type { Policy, PolicyVersion } from '../generated/prisma';
@@ -112,6 +117,33 @@ describe('PoliciesService.update · CRUD del registro PBAC (ADR-024)', () => {
     // Vista devuelta.
     expect(out).toMatchObject({ key: 'auth.stepup', enabled: false, version: 4 });
     expect(repo.enqueueOutbox).toHaveBeenCalledTimes(1);
+  });
+
+  it('CAS: expectedVersion desactualizado → 409 (ConcurrencyConflictError) y NO persiste (no pisa el cambio ajeno)', async () => {
+    const current = policyRow({ key: 'auth.stepup', family: 'auth', version: 3 });
+    const { repo, captured } = makeRepo(current);
+    const svc = new PoliciesService(repo as never);
+
+    // El admin tenía v2 a la vista pero la fila ya está en v3 (otro admin la movió) → aborta.
+    await expect(
+      svc.update('auth.stepup', { enabled: false, expectedVersion: 2 }, 'admin-1'),
+    ).rejects.toBeInstanceOf(ConcurrencyConflictError);
+    expect(captured.upsert).toBeUndefined();
+    expect(repo.enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it('CAS: expectedVersion en sync (=version vigente) → aplica y bumpea normal', async () => {
+    const current = policyRow({
+      key: 'auth.stepup',
+      family: 'auth',
+      version: 3,
+      params: { maxAgeSec: 300 },
+    });
+    const { repo, captured } = makeRepo(current);
+    const svc = new PoliciesService(repo as never);
+
+    await svc.update('auth.stepup', { enabled: false, expectedVersion: 3 }, 'admin-1');
+    expect(captured.upsert).toMatchObject({ version: 4, enabled: false });
   });
 
   it('1er PUT: SIEMBRA el baseline (versión vigente) + la versión editada en el historial (timeline completo)', async () => {

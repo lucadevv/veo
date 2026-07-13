@@ -1462,7 +1462,7 @@ export function useUpdatePolicy() {
   return useMutation({
     mutationFn: (input: { key: string } & UpdatePolicyRequest): Promise<PolicyView> =>
       apiClient().put(`/gobierno/policies/${encodeURIComponent(input.key)}`, {
-        body: { enabled: input.enabled, params: input.params },
+        body: { enabled: input.enabled, params: input.params, expectedVersion: input.expectedVersion },
         schema: policyView,
       }),
     onSettled: (_data, _err, input) => {

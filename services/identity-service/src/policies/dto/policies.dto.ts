@@ -1,4 +1,4 @@
-import { IsBoolean, IsObject, IsOptional } from 'class-validator';
+import { IsBoolean, IsInt, IsObject, IsOptional, Min } from 'class-validator';
 import type { PolicyParams } from '@veo/policy';
 
 /**
@@ -16,4 +16,10 @@ export class UpdatePolicyDto {
   @IsOptional()
   @IsObject()
   params?: PolicyParams;
+
+  /** CAS optimista: la `version` que el admin tenía a la vista. Si la fila ya avanzó → 409 (no pisa el ajeno). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number;
 }

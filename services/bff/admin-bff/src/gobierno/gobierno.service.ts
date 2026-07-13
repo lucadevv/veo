@@ -111,7 +111,7 @@ export class GobiernoService {
   ): Promise<PolicyView> {
     const res = await this.rest.put<PolicyView>(`${BASE}/${encodeURIComponent(key)}`, {
       identity,
-      body: { enabled: dto.enabled, params: dto.params },
+      body: { enabled: dto.enabled, params: dto.params, expectedVersion: dto.expectedVersion },
     });
     await this.audit.record(identity, {
       action: AUDIT_ACTION,

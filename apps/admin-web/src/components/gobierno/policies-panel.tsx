@@ -149,7 +149,7 @@ function PolicyRow({
 
   async function toggle() {
     try {
-      await update.mutateAsync({ key: def.key, enabled: !view.enabled });
+      await update.mutateAsync({ key: def.key, enabled: !view.enabled, expectedVersion: view.version });
       toast({
         tone: 'success',
         title: view.enabled ? 'Política desactivada' : 'Política activada',

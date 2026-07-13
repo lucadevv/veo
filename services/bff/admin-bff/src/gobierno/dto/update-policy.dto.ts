@@ -1,4 +1,4 @@
-import { IsBoolean, IsObject, IsOptional } from 'class-validator';
+import { IsBoolean, IsInt, IsObject, IsOptional, Min } from 'class-validator';
 
 /**
  * Body del PUT /gobierno/policies/:key (parche PARCIAL: el superadmin toca `enabled` y/o `params`).
@@ -17,4 +17,10 @@ export class UpdatePolicyDto {
   @IsOptional()
   @IsObject()
   params?: Record<string, unknown>;
+
+  /** CAS optimista: la `version` que el admin tenía a la vista. identity aborta con 409 si la fila ya avanzó. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number;
 }

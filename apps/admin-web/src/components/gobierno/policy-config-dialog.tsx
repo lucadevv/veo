@@ -119,7 +119,7 @@ function ConfigForm({
     if (!validation.success) return;
     try {
       if (IS_PROD) await stepUp(code);
-      await update.mutateAsync({ key: def.key, params });
+      await update.mutateAsync({ key: def.key, params, expectedVersion: policy.version });
       toast({ tone: 'success', title: 'Política actualizada', description: def.label });
       onDone();
     } catch (e) {

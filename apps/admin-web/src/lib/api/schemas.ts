@@ -63,6 +63,8 @@ export type PolicyView = z.infer<typeof policyView>;
 export interface UpdatePolicyRequest {
   enabled?: boolean;
   params?: Record<string, unknown>;
+  /** CAS optimista: la `version` que se tenía a la vista. El bff/identity abortan con 409 si la fila ya avanzó. */
+  expectedVersion?: number;
 }
 
 /**

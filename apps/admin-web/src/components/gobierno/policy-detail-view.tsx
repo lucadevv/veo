@@ -503,7 +503,7 @@ function ActionsCard({
 
   async function toggle() {
     try {
-      await update.mutateAsync({ key: def.key, enabled: !policy.enabled });
+      await update.mutateAsync({ key: def.key, enabled: !policy.enabled, expectedVersion: policy.version });
       toast({
         tone: 'success',
         title: policy.enabled ? 'Política desactivada' : 'Política activada',

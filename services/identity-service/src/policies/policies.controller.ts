@@ -62,6 +62,10 @@ export class PoliciesController {
     @Param('key') key: string,
     @Body() dto: UpdatePolicyDto,
   ): Promise<PolicyView> {
-    return this.policies.update(key, { enabled: dto.enabled, params: dto.params }, user.userId);
+    return this.policies.update(
+      key,
+      { enabled: dto.enabled, params: dto.params, expectedVersion: dto.expectedVersion },
+      user.userId,
+    );
   }
 }

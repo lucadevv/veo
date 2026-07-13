@@ -17,7 +17,12 @@ import {
   type PolicyKey,
   type PolicyParams,
 } from '@veo/policy';
-import { ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
+import {
+  ConcurrencyConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '@veo/utils';
 import { PoliciesRepository, type PolicyVersionData } from './policies.repository';
 import { Prisma, type Policy, type PolicyVersion } from '../generated/prisma';
 
@@ -42,6 +47,12 @@ export interface PolicyView {
 export interface UpdatePolicyPatch {
   enabled?: boolean;
   params?: PolicyParams;
+  /**
+   * CAS optimista (opcional): la versión que el admin TENÍA a la vista al editar. Si al aplicar la fila ya está
+   * en otra versión (otro admin la cambió entremedio), se aborta con 409 en vez de pisar el cambio ajeno
+   * (last-write-wins). `undefined` = sin CAS (compat / mutaciones internas que no lo mandan).
+   */
+  expectedVersion?: number;
 }
 
 /** Una entrada del HISTORIAL de una política (snapshot de una versión · timeline del detalle). */
@@ -185,6 +196,20 @@ export class PoliciesService {
 
     const row = await this.repo.runInTransaction(async (tx) => {
       const current = await this.repo.findByKeyTx(tx, key);
+
+      // CAS optimista: si el admin mandó la versión que tenía a la vista y la fila ya avanzó (otro admin la
+      // cambió entremedio), abortar con 409 en vez de pisar el cambio ajeno. Read fresco DENTRO de la tx (sin
+      // lag de réplica). Sin `expectedVersion` o sin fila (primer write) → no aplica (compat).
+      if (
+        patch.expectedVersion !== undefined &&
+        current &&
+        current.version !== patch.expectedVersion
+      ) {
+        throw new ConcurrencyConflictError(
+          'La política cambió desde que la abriste; recargá y reintentá',
+          { key, expected: patch.expectedVersion, actual: current.version },
+        );
+      }
 
       // Estado resultante: el parche gana; si no viene, se conserva lo actual; si no hay fila, el default seguro.
       const nextEnabled = patch.enabled ?? current?.enabled ?? def.defaultEnabled;
