@@ -11,6 +11,7 @@ import {
 } from '@veo/api-client';
 import { useDi } from '../../../../core/di/useDi';
 import type { DriverSocket } from '../../../../core/realtime/socket';
+import { useDispatchStore } from '../state/dispatchStore';
 
 export interface DriverRealtimeHandlers {
   /**
@@ -107,6 +108,10 @@ export function useDriverRealtime(
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
   const [socket, setSocket] = useState<DriverSocket | null>(null);
+  // RECONEXIÓN MANUAL ("Reintentar" del overlay de sin-conexión): al bumpear el nonce, el efecto se
+  // re-ejecuta → derriba el socket viejo y crea uno FRESCO que conecta ya (token re-leído), sin esperar
+  // el backoff de socket.io. Es lo que le da dientes al botón (antes solo refetcheaba queries).
+  const reconnectNonce = useDispatchStore((s) => s.reconnectNonce);
 
   useEffect(() => {
     if (!enabled) {
@@ -248,7 +253,9 @@ export function useDriverRealtime(
       // Al desmontar/deshabilitar, el indicador ya no debe quedar "conectado" de un socket muerto.
       handlersRef.current.onConnectionChange(false);
     };
-  }, [enabled, di]);
+    // `reconnectNonce` en las deps: un tap en "Reintentar" lo bumpea → cleanup (derriba el socket) + re-run
+    // (socket fresco que reconecta). El resto de deps no cambia en caliente.
+  }, [enabled, di, reconnectNonce]);
 
   return socket;
 }

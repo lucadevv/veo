@@ -60,6 +60,29 @@ export function OfflineOverlay(): React.JSX.Element | null {
   const theme = useTheme();
   const queryClient = useQueryClient();
   const offline = useIsOffline();
+  const requestReconnect = useDispatchStore((s) => s.requestReconnect);
+  // Feedback del tap: el botón queda en "reconectando…" un momento (si la conexión vuelve, el overlay se
+  // cierra solo al llegar `connected`; si no, el botón se re-habilita para reintentar). Antes el tap no
+  // daba NINGUNA señal → se sentía muerto.
+  const [retrying, setRetrying] = useState(false);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+  }, []);
+
+  const onRetry = (): void => {
+    setRetrying(true);
+    // (1) Reevaluar la conectividad REAL del SO: `isInternetReachable` de NetInfo puede quedar STALE en
+    //     `false` aunque la red haya vuelto → sin este refresh el overlay no cerraba nunca.
+    NetInfo.refresh().catch(() => undefined);
+    // (2) Forzar la reconexión del socket `/driver` YA (socket fresco + token re-leído), sin esperar el
+    //     backoff de socket.io. Al volver `connected`, `useIsOffline` cae a false y el overlay se cierra.
+    requestReconnect();
+    // (3) Refrescar el estado autoritativo por REST (turno/viaje/pujas) una vez que haya red.
+    queryClient.invalidateQueries();
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => setRetrying(false), 2500);
+  };
 
   if (!offline) {
     return null;
@@ -81,9 +104,9 @@ export function OfflineOverlay(): React.JSX.Element | null {
           <Button
             label={t('offline.retry')}
             variant="primary"
-            onPress={() => {
-              queryClient.invalidateQueries();
-            }}
+            loading={retrying}
+            disabled={retrying}
+            onPress={onRetry}
           />
         </View>
       </NoticeHero>

@@ -31,6 +31,13 @@ export interface DispatchState {
    */
   connected: boolean;
   /**
+   * Contador de RECONEXIÓN MANUAL: lo incrementa el botón "Reintentar" del overlay de sin-conexión.
+   * `useDriverRealtime` lo observa en las deps de su efecto → al cambiar, DERRIBA el socket actual y crea
+   * uno FRESCO que reconecta ya (con token re-leído), sin esperar el backoff de socket.io. Es la palanca
+   * que le da dientes al "Reintentar": sin esto el botón solo refetcheaba queries y el overlay no cerraba.
+   */
+  reconnectNonce: number;
+  /**
    * ADR-020 Lote 2 (2b) — tripIds de pujas en las que el conductor YA envió su oferta (ACCEPT/COUNTER) y
    * espera la elección del pasajero. Alimenta el estado HONESTO "Esperando al pasajero…" (enviada, NO
    * ganada). Se limpia al GANAR (onMatch) o al PERDER/cerrarse la puja (bid:closed → offer_withdrawn).
@@ -47,6 +54,8 @@ export interface DispatchState {
   setIncomingOffer(offer: IncomingOffer | null): void;
   setActiveTripId(tripId: string | null): void;
   setConnected(connected: boolean): void;
+  /** Fuerza una reconexión del socket `/driver` (lo tapea "Reintentar"): incrementa `reconnectNonce`. */
+  requestReconnect(): void;
   /** Limpia la oferta tras aceptarla/rechazarla o cuando vence. */
   clearOffer(): void;
   /** 2b — marca una puja como "oferta enviada, esperando al pasajero". Idempotente. */
@@ -61,11 +70,13 @@ export const useDispatchStore = create<DispatchState>((set) => ({
   incomingOffer: null,
   activeTripId: null,
   connected: false,
+  reconnectNonce: 0,
   pendingBidTripIds: [],
   pujaRebidNotice: null,
   setIncomingOffer: (offer) => set({ incomingOffer: offer }),
   setActiveTripId: (tripId) => set({ activeTripId: tripId }),
   setConnected: (connected) => set({ connected }),
+  requestReconnect: () => set((s) => ({ reconnectNonce: s.reconnectNonce + 1 })),
   clearOffer: () => set({ incomingOffer: null }),
   addPendingBid: (tripId) =>
     set((s) =>
