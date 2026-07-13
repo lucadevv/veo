@@ -135,7 +135,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
         </span>
       }
       title={driver?.fullName ?? `Conductor ${id.slice(0, 8)}`}
-      subtitle={chips.length > 0 ? chips.join('  ·  ') : 'Verificación KYC · aprobación de alta'}
+      subtitle={chips.length > 0 ? chips.join('  ·  ') : undefined}
       actions={st ? <DotPill tone={st.tone}>{st.label}</DotPill> : undefined}
     />
   );
@@ -626,10 +626,6 @@ function DecisionCard({
     <section className={CARD}>
       <div className="border-b border-[color:var(--divider)] px-[22px] py-[18px]">
         <h2 className={CARD_TITLE}>Decisión de verificación</h2>
-        <p className="mt-1 flex items-start gap-1.5 text-[13px] text-ink-muted">
-          <ShieldCheck className="mt-px size-3.5 shrink-0 text-accent" aria-hidden />
-          Requiere doble verificación (four-eyes) y tu MFA.
-        </p>
       </div>
 
       <div className="flex flex-col gap-2.5 p-[18px]">

@@ -253,7 +253,7 @@ export default function DriversPage() {
       subtitle={
         total !== undefined
           ? `${total} conductores${c ? ` · ${c.online} en línea` : ''}`
-          : 'Cola de revisión · aprobación de la flota'
+          : undefined
       }
       actions={
         <button

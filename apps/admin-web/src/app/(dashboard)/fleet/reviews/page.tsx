@@ -342,24 +342,21 @@ export default function ReviewsPage() {
           icon={Users}
           label="Conductores"
           value={summary.data ? String(summary.data.driversPending) : '—'}
-          hint="Altas por revisar"
-          hintTone="brand"
+          iconTone="brand"
           loading={summary.isLoading}
         />
         <StatCard
           icon={FileText}
           label="Documentos"
           value={summary.data ? String(summary.data.docsPendingReview) : '—'}
-          hint="Reenviados a revisión"
-          hintTone="brand"
+          iconTone="brand"
           loading={summary.isLoading}
         />
         <StatCard
           icon={Car}
           label="Vehículos"
           value={String(counts.vehiculo)}
-          hint="Docs + ITV"
-          hintTone="brand"
+          iconTone="brand"
           loading={loading}
         />
         <button
@@ -371,8 +368,7 @@ export default function ReviewsPage() {
             icon={CalendarClock}
             label="Por vencer"
             value={summary.data ? String(summary.data.docsExpiringSoon) : '—'}
-            hint="Docs próximos a vencer"
-            hintTone="warn"
+            iconTone="warn"
             loading={summary.isLoading}
           />
         </button>
@@ -380,16 +376,14 @@ export default function ReviewsPage() {
           icon={Boxes}
           label="Modelos"
           value={summary.data ? String(summary.data.modelsPendingReview) : '—'}
-          hint="Solicitudes por aprobar"
-          hintTone="brand"
+          iconTone="brand"
           loading={summary.isLoading}
         />
         <StatCard
           icon={AlarmClock}
           label="SLA vencido"
           value={String(counts.sla)}
-          hint="Esperando > 48 h"
-          hintTone="danger"
+          iconTone="danger"
           loading={loading}
         />
       </div>

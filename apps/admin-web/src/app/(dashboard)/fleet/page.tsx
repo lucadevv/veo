@@ -193,11 +193,11 @@ export default function VehiclesPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Vehículos</h1>
-          <p className="text-[13px] text-ink-subtle">
-            {fleetTotal > 0
-              ? `${fleetTotal} ${fleetTotal === 1 ? 'vehículo' : 'vehículos'} · ${tabCount('enRevision')} en revisión`
-              : 'Flota registrada · verificación, documentos e inspección técnica (ITV)'}
-          </p>
+          {fleetTotal > 0 ? (
+            <p className="text-[13px] text-ink-subtle">
+              {`${fleetTotal} ${fleetTotal === 1 ? 'vehículo' : 'vehículos'} · ${tabCount('enRevision')} en revisión`}
+            </p>
+          ) : null}
         </div>
         <button
           type="button"
@@ -217,39 +217,34 @@ export default function VehiclesPage() {
           icon={Car}
           label="Total en flota"
           value={String(fleetTotal)}
-          hint="Vehículos registrados"
           loading={vehiclesSummary.isLoading}
         />
         <StatCard
           icon={CircleCheck}
           label="Activos"
           value={String(cards.activos)}
-          hint="Operables · vigentes"
-          hintTone="success"
+          iconTone="success"
           loading={vehicles.isLoading}
         />
         <StatCard
           icon={CalendarClock}
           label="ITV por vencer"
           value={String(cards.itvPorVencer)}
-          hint="Próximos 30 días"
-          hintTone="warn"
+          iconTone="warn"
           loading={vehicles.isLoading}
         />
         <StatCard
           icon={Ban}
           label="Suspendidos"
           value={String(cards.suspendidos)}
-          hint="Doc / ITV vencida"
-          hintTone="danger"
+          iconTone="danger"
           loading={vehicles.isLoading}
         />
         <StatCard
           icon={FileClock}
           label="Docs por vencer"
           value={vehiclesSummary.data ? String(vehiclesSummary.data.expiringSoon) : '—'}
-          hint="Documentos · toda la flota"
-          hintTone="warn"
+          iconTone="warn"
           loading={vehiclesSummary.isLoading}
         />
       </div>

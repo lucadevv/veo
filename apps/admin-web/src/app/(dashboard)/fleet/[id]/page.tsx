@@ -14,7 +14,6 @@ import {
   CircleCheck,
   ClipboardCheck,
   FileText,
-  Info,
   Lock,
   Plus,
   ShieldCheck,
@@ -144,7 +143,6 @@ export default function VehicleDetailPage(props: { params: Promise<{ id: string 
             <div className="flex flex-col gap-4">
               <FichaCard v={v} />
               <OwnerCard v={v} />
-              <Callout />
             </div>
           </div>
         </>
@@ -515,14 +513,3 @@ function OwnerCard({ v }: { v: VehicleView }) {
   );
 }
 
-function Callout() {
-  return (
-    <div className="flex gap-3 rounded-xl border border-accent/25 bg-accent/[0.06] p-4">
-      <Info className="size-[18px] shrink-0 text-accent" aria-hidden />
-      <p className="text-[13px] leading-relaxed text-ink-muted">
-        Un vehículo sin ITV vigente o con documento rechazado deja de ser operable. El estado lo
-        deriva el backend de sus documentos e inspección; la UI solo lo refleja.
-      </p>
-    </div>
-  );
-}
