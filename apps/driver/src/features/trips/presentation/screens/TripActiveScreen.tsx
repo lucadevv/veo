@@ -295,8 +295,26 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
       {/* Sheet ARRASTRABLE dinámico al contenido (DraggableSheet · grabber en color primario/accent). Abraza
           su contenido y crece al expandir las indicaciones. SIN appbar: el back + chat viven en su header. */}
       <DraggableSheet
-        snapPoints={['content', { content: 0.9 }]}
+        snapPoints={['header', 'content', { content: 0.94 }]}
         maxContentFraction={0.74}
+        initialIndex={1}
+        renderHeader={() => (
+          // Header FIJO (visible en TODOS los estados, incluido el COLAPSADO): back (chevron iOS) + chat.
+          // Arrastrando el grabber hacia abajo, el sheet COLAPSA a solo este header (con rebote) → el mapa
+          // queda máximo, viéndose únicamente el chevron ‹ y el ícono de mensaje.
+          <View style={styles.sheetHeader}>
+            <Pressable
+              onPress={navigation.goBack}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.back')}
+            >
+              <IconChevronLeft size={28} color={theme.colors.ink} strokeWidth={2.25} />
+            </Pressable>
+            <View style={styles.flex} />
+            {chatTrailing}
+          </View>
+        )}
         renderScroll={(Scroll) => (
           <Scroll
             contentContainerStyle={[
@@ -305,21 +323,6 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             ]}
             showsVerticalScrollIndicator={false}
           >
-            {/* Header DENTRO del sheet (sin appbar): back (chevron iOS) a la izquierda + chat a la derecha.
-                Sin título de fase: el CTA + el mapa ya comunican qué está pasando. */}
-            <View style={styles.sheetHeader}>
-              <Pressable
-                onPress={navigation.goBack}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel={t('common.back')}
-              >
-                <IconChevronLeft size={28} color={theme.colors.ink} strokeWidth={2.25} />
-              </Pressable>
-              <View style={styles.flex} />
-              {chatTrailing}
-            </View>
-
             {/* Card del pasajero: avatar (iniciales) + primer nombre (PII mínima post-aceptación) + tarifa. */}
             <View style={styles.passengerRow}>
               <Avatar
@@ -615,9 +618,17 @@ const styles = StyleSheet.create({
   // Banner de la próxima maniobra sobre el mapa (marginTop dinámico en el JSX para respetar el notch).
   maneuverWrap: {},
   flex: { flex: 1 },
-  // Header dentro del sheet (reemplaza el appbar): back + fase + chat en una fila.
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  sheetContent: { paddingHorizontal: 20, paddingTop: 4, gap: 14 },
+  // Header FIJO del sheet (renderHeader, fuera del scroll): back + chat. Lleva su propio padding porque no
+  // está dentro del contenedor padded del scroll. Visible en el estado colapsado ('header').
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 2,
+    paddingBottom: 10,
+  },
+  sheetContent: { paddingHorizontal: 20, paddingTop: 2, gap: 14 },
   passengerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   fareCol: { alignItems: 'flex-end' },
   statusPillRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },

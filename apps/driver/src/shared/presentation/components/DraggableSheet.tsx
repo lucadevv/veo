@@ -43,8 +43,10 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
  *    `maxContentFraction`. Permite un MÁXIMO que también crece hasta el contenido (con un tope más
  *    alto que el peek) → sheets "maxmin": `['content', { content: 0.94 }]` = peek chico que abraza +
  *    máximo que abraza el contenido completo hasta 94%.
+ *  - El literal `'header'` (COLAPSADO): abraza SOLO el `renderHeader` (+ el grabber), ocultando el cuerpo
+ *    → estado mínimo que maximiza lo de atrás (mapa). Ej. `['header', 'content', { content: 0.94 }]`.
  */
-export type SnapPoint = number | 'content' | {readonly content: number};
+export type SnapPoint = number | 'content' | 'header' | {readonly content: number};
 
 export interface DraggableSheetHandle {
   /** Anima el sheet al punto de anclaje con ese índice (clamped al rango válido). */
@@ -204,6 +206,11 @@ export const DraggableSheet = forwardRef<
   // altura estimada ascendente (para 'content' el tope estima el orden).
   const {maxFraction, anchorSpecs} = useMemo(() => {
     const normalized = snapPoints.map(p => {
+      if (p === 'header') {
+        // Colapsado: abraza SOLO el header. estimate bajo (ordena primero); fraction alta = tope que no se
+        // alcanza (el header es chico), así el offset lo decide `chrome + measuredHeader` en el hilo de UI.
+        return {estimate: 0.12, kind: 'header' as const, fraction: 0.5};
+      }
       if (p === 'content') {
         const cap = clampFraction(maxContentFraction);
         return {estimate: cap, kind: 'content' as const, fraction: cap};
@@ -236,10 +243,11 @@ export const DraggableSheet = forwardRef<
       anchorSpecs.map(s =>
         s.kind === 'fixed'
           ? {
+              kind: 'fixed' as const,
               fixedOffset: Math.round((maxFraction - s.fraction) * available),
               capPx: 0,
             }
-          : {fixedOffset: -1, capPx: Math.round(s.fraction * available)},
+          : {kind: s.kind, fixedOffset: -1, capPx: Math.round(s.fraction * available)},
       ),
     [anchorSpecs, maxFraction, available],
   );
@@ -254,13 +262,20 @@ export const DraggableSheet = forwardRef<
   // Así el anclaje crece con el contenido y, si lo supera, se queda en el tope y scrollea adentro.
   const offsets = useDerivedValue<number[]>(() => {
     const minContent = Math.round(available * MIN_CONTENT_FRACTION);
-    const measured = measuredHeader.value + measuredContent.value;
-    const fullVisible = measured > 0 ? chrome + measured : minContent;
     return anchorOffsets.map(a => {
       if (a.fixedOffset >= 0) {
         return a.fixedOffset;
       }
-      const visible = Math.min(Math.max(fullVisible, minContent), a.capPx);
+      // 'header' (COLAPSADO): abraza SOLO el header medido + el grabber (chrome), ocultando el cuerpo → el
+      // mapa se maximiza. 'content': abraza header + cuerpo, capado a su tope. Piso distinto: header cae al
+      // chrome (nunca tapa el grabber), content a la cota mínima.
+      const measured =
+        a.kind === 'header'
+          ? measuredHeader.value
+          : measuredHeader.value + measuredContent.value;
+      const fullVisible = measured > 0 ? chrome + measured : a.kind === 'header' ? chrome : minContent;
+      const floor = a.kind === 'header' ? chrome : minContent;
+      const visible = Math.min(Math.max(fullVisible, floor), a.capPx);
       return Math.round(sheetHeight - visible);
     });
   }, [anchorOffsets, available, chrome, sheetHeight]);
