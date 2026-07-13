@@ -1,5 +1,10 @@
 import type {ChatMessage} from '@veo/api-client';
-import {useRoute, type RouteProp} from '@react-navigation/native';
+import {
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
+import {useHeaderHeight} from '@react-navigation/elements';
 import {useMutation, useQuery} from '@tanstack/react-query';
 import {Banner, SafeScreen, Text, TextField, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
@@ -42,7 +47,18 @@ export function ChatScreen(): React.JSX.Element {
   const {t} = useTranslation();
   const insets = useSafeAreaInsets();
   const {params} = useRoute<Params>();
-  const {tripId} = params;
+  const {tripId, driverName} = params;
+  const navigation = useNavigation();
+  // Alto REAL del header de navegación → el `KeyboardAvoidingView` levanta el composer justo lo necesario
+  // para que quede LIMPIO sobre el teclado (antes un aproximado `insets.top + xl` lo dejaba pegado/tapado
+  // por el teclado, y el botón enviar se veía "desvanecido").
+  const headerHeight = useHeaderHeight();
+
+  // Título = primer nombre del conductor (simétrico al conductor, que muestra el del pasajero); genérico
+  // si aún no se resolvió. El header lo centra (RN iOS). Unifica el título de chat entre ambas apps.
+  useEffect(() => {
+    navigation.setOptions({title: driverName ?? t('chat.title')});
+  }, [navigation, driverName, t]);
 
   const listMessages = useDependency(TOKENS.listMessagesUseCase);
   const sendMessage = useDependency(TOKENS.sendMessageUseCase);
@@ -163,7 +179,7 @@ export function ChatScreen(): React.JSX.Element {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + theme.spacing.xl}>
+        keyboardVerticalOffset={headerHeight}>
         <FlatList
           ref={listRef}
           style={styles.flex}
@@ -280,14 +296,16 @@ export function ChatScreen(): React.JSX.Element {
                 style={({pressed}) => [
                   styles.sendBtn,
                   {
+                    // Verde PROFUNDO (`accentStrong`) + flecha BLANCA: el jade `success` con flecha oscura
+                    // se veía "desvanecido"; este verde saturado con el ícono blanco lee claro como CTA.
                     backgroundColor: canSend
-                      ? theme.colors.success
+                      ? theme.colors.accentStrong
                       : theme.colors.surfaceMuted,
                     opacity: pressed && canSend ? 0.85 : 1,
                   },
                 ]}>
                 <IconArrowRight
-                  color={canSend ? theme.colors.onSuccess : theme.colors.inkSubtle}
+                  color={canSend ? theme.colors.onBrand : theme.colors.inkSubtle}
                   size={22}
                 />
               </Pressable>

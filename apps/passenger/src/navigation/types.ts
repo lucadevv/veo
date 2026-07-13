@@ -103,7 +103,7 @@ export type RootStackParamList = {
   Rating: {tripId: string; driverId: string};
   SavedPlaces: undefined;
   Referrals: undefined;
-  Chat: {tripId: string};
+  Chat: {tripId: string; driverName?: string};
   Help: undefined;
 };
 

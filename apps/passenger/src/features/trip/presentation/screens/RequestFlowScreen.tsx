@@ -342,8 +342,14 @@ export function RequestFlowScreen(): React.JSX.Element {
   const unreadCount = live.incomingMessages.length;
   const openChat = useCallback(() => {
     live.acknowledgeMessages(live.incomingMessages.map(m => m.id));
-    navigation.navigate('Chat', {tripId: activeTripId as string});
-  }, [live, navigation, activeTripId]);
+    // El primer nombre del conductor para el título del chat (simétrico al conductor, que muestra el del
+    // pasajero). `undefined` si aún no se resolvió → el chat cae al título genérico.
+    const driverName = tripDetailQuery.data?.driver?.name?.trim().split(/\s+/)[0];
+    navigation.navigate('Chat', {
+      tripId: activeTripId as string,
+      driverName: driverName || undefined,
+    });
+  }, [live, navigation, activeTripId, tripDetailQuery.data]);
 
   // Compartir con la familia: pantalla dedicada (pen zKyic) — mismo patrón que openChat. La acción
   // "Compartir" del sheet ya no dispara el Share nativo directo.

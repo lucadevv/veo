@@ -43,15 +43,19 @@ export function formatShortDate(iso: string): string {
 }
 
 /**
- * Hora del día es-PE (ej. "14:05") a partir de un ISO-8601; vacío si la fecha es inválida. Se localiza en
- * el huso del device (Lima = UTC-5). Para la fila del historial de viajes (hora de salida).
+ * Hora del día en 24h ("14:05") a partir de un ISO-8601; vacío si la fecha es inválida. Se localiza en el
+ * huso del device (Lima = UTC-5). MANUAL (sin Intl) → Hermes-safe e IDÉNTICO al del pasajero (formato
+ * unificado 24h en toda la app: burbuja de chat + fila del historial). Antes usaba `toLocaleTimeString`,
+ * que en este device rendía 12h "11:30 a. m." — divergía del pasajero (24h) y arriesgaba en Hermes.
  */
 export function formatTimeOfDay(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
     return '';
   }
-  return date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
 }
 
 /**
