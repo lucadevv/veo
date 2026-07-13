@@ -87,10 +87,13 @@ export function UpcomingTripsTab({
             {t('history.upcomingEmptyBody')}
           </Text>
         </View>
+        {/* El Button sin `fullWidth` trae `alignSelf:'flex-start'` (gana sobre el alignItems:center del
+            contenedor) → quedaba a la izquierda. `alignSelf:'center'` lo centra bajo el texto centrado. */}
         <Button
           label={t('history.upcomingCta')}
           variant="accent"
           onPress={onSchedule}
+          style={styles.emptyCta}
         />
       </View>
     );
@@ -195,6 +198,7 @@ function usePointLabel(point: {lat: number; lon: number}): string {
 const styles = StyleSheet.create({
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   emptyBody: {maxWidth: 280},
+  emptyCta: {alignSelf: 'center'},
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
