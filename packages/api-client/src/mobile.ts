@@ -845,6 +845,12 @@ export const tripDriverView = z.object({
   backgroundCheckStatus: z.string(),
   rating: z.number().nullable(),
   ratingCount: z.number().int(),
+  /**
+   * Conteo de viajes COMPLETED de por vida del conductor (señal de confianza "N viajes", pen z2MKq).
+   * OPTIONAL por compat N-2: un backend que aún no lo emite (BFF sin desplegar) no rompe el parseo del
+   * viaje activo — la app degrada a ocultar el conteo. El BFF nuevo siempre lo manda (0 si no resuelve).
+   */
+  tripCount: z.number().int().optional(),
 });
 export type TripDriverView = z.infer<typeof tripDriverView>;
 

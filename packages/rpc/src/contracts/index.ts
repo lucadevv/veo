@@ -17,6 +17,8 @@ export type {
   TripHistoryItem,
   PassengerTripsReply,
   ListDriverTripsRequest,
+  DriverTripStatsRequest,
+  DriverTripStatsReply,
   TripIdsRequest,
   TripModeItem,
   TripModesReply,

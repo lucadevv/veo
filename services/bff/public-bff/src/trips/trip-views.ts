@@ -8,6 +8,7 @@ import { ExternalServiceError } from '@veo/utils';
 import type {
   AggregateReply,
   DriverReply,
+  DriverTripStatsReply,
   PassengerTripsReply,
   TripHistoryItemReply,
   TripReply,
@@ -24,6 +25,8 @@ export interface TripDriverView {
   backgroundCheckStatus: string;
   rating: number | null;
   ratingCount: number;
+  /** Conteo de viajes COMPLETED del conductor, señal de confianza ("N viajes" en la card del pasajero). */
+  tripCount: number;
 }
 
 export interface TripVehicleView {
@@ -150,6 +153,7 @@ export function toTripStatus(raw: string): TripStatus {
 export function buildDriverView(
   driver: DriverReply | null,
   aggregate: AggregateReply | null,
+  tripStats: DriverTripStatsReply | null = null,
 ): TripDriverView | null {
   if (!driver) return null;
   const rating =
@@ -166,6 +170,8 @@ export function buildDriverView(
     backgroundCheckStatus: driver.backgroundCheckStatus,
     rating,
     ratingCount: aggregate?.count30d ?? 0,
+    // Viajes COMPLETED del conductor (trip-service); best-effort, 0 si no se pudo resolver.
+    tripCount: tripStats?.completedTrips ?? 0,
   };
 }
 
@@ -190,6 +196,8 @@ export function buildTripDetail(
   vehicle: VehicleReply | null,
   tipCents = 0,
   myRatingStars: number | null = null,
+  // Al FINAL (con default) para no correr los callers posicionales existentes; alimenta el tripCount del conductor.
+  tripStats: DriverTripStatsReply | null = null,
 ): TripDetailView {
   return {
     id: trip.id,
@@ -215,7 +223,7 @@ export function buildTripDetail(
     // Paradas intermedias del trip del servidor (passthrough gRPC); [] si directo (proto3 nunca null).
     waypoints: trip.waypoints ?? [],
     routePolyline: trip.routePolyline || null,
-    driver: buildDriverView(driver, aggregate),
+    driver: buildDriverView(driver, aggregate, tripStats),
     vehicle: buildVehicleView(vehicle),
     myRatingStars,
   };

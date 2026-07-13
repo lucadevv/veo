@@ -9,6 +9,7 @@ export type {
   DriverReply,
   TripReply,
   TripStateReply,
+  DriverTripStatsReply,
   PassengerTripsReply,
   SurgeReply,
   NearbyDriversReply,

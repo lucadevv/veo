@@ -38,6 +38,7 @@ import { REDIS } from '../infra/redis';
 import type {
   AggregateReply,
   DriverReply,
+  DriverTripStatsReply,
   DriverVehiclesReply,
   PassengerTripsReply,
   PaymentReply,
@@ -325,7 +326,7 @@ export class TripsService {
           .call<DriverReply>('GetDriver', { id: trip.driverId }, meta)
           .catch(() => null)
       : null;
-    const [vehicle, aggregate, myRating, tipCents] = await Promise.all([
+    const [vehicle, aggregate, myRating, tipCents, tripStats] = await Promise.all([
       this.resolveTripVehicle(trip, driver?.found ? driver.userId : undefined, meta),
       trip.driverId
         ? this.ratingGrpc
@@ -338,6 +339,12 @@ export class TripsService {
       // A1 · propina TOTAL cobrada del viaje (recibo de payment; agrega los tip-Payments digitales de Model B).
       // Así el detalle/app sabe que ya se dio propina y no habilita re-propinar al re-montar. Best-effort → 0.
       this.fetchTripTipCents(trip.id, meta),
+      // Conteo de viajes COMPLETED del conductor (señal de confianza "N viajes"); best-effort → null (degradación honesta).
+      trip.driverId
+        ? this.tripGrpc
+            .call<DriverTripStatsReply>('GetDriverTripStats', { driverId: trip.driverId }, meta)
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     return buildTripDetail(
@@ -347,6 +354,7 @@ export class TripsService {
       vehicle,
       tipCents,
       myRating,
+      tripStats,
     );
   }
 

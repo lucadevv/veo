@@ -14,6 +14,8 @@ service TripService {
   // el viaje en curso tras un reinicio (app matada mid-viaje → reabre → vuelve a la pantalla del viaje y
   // reanuda la cámara de seguridad). Filtra por driver_id + LIVE_STATES; found=false si no tiene ninguno.
   rpc GetActiveTripByDriver (ActiveTripByDriverRequest) returns (TripReply);
+  // Conteo de viajes COMPLETED de un conductor (señal de confianza "N viajes" en la card del pasajero).
+  rpc GetDriverTripStats (DriverTripStatsRequest) returns (DriverTripStatsReply);
   // Pending settlement (re-entrada del cierre): viaje MÁS VIEJO COMPLETED del pasajero sin cerrar
   // (passenger_closed_at = null), orden FIFO (completedAt asc). found=false si no hay ninguno. COMPLETED
   // es terminal (fuera de LIVE_STATES) → GetActiveTrip no lo devuelve y el pasajero perdería el cierre
@@ -123,6 +125,15 @@ message ActiveTripRequest {
 
 message ActiveTripByDriverRequest {
   string driver_id = 1;
+}
+
+// Conteo de viajes COMPLETED de un conductor (señal de confianza "N viajes" en la card del pasajero).
+message DriverTripStatsRequest {
+  string driver_id = 1;
+}
+
+message DriverTripStatsReply {
+  int32 completed_trips = 1;
 }
 
 message PendingSettlementRequest {

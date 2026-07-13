@@ -32,6 +32,8 @@ export interface TripGrpcRepository {
   findActiveByPassenger(passengerId: string): Promise<Trip | null>;
   /** Viaje VIVO del conductor (LIVE_STATES, `requestedAt desc`). `null` si no tiene ninguno. */
   findActiveByDriver(driverId: string): Promise<Trip | null>;
+  /** Conteo de viajes COMPLETED del conductor (señal de confianza "N viajes" en la card del pasajero). */
+  countCompletedByDriver(driverId: string): Promise<number>;
   /**
    * Viaje COMPLETED más VIEJO sin cerrar del pasajero (`passengerClosedAt = null`, `completedAt asc`) —
    * pending-settlement. `null` si no hay ninguno.
@@ -68,6 +70,12 @@ export class PrismaTripGrpcRepository implements TripGrpcRepository {
     return this.prisma.read.trip.findFirst({
       where: { driverId, status: { in: [...LIVE_STATES] } },
       orderBy: { requestedAt: 'desc' },
+    });
+  }
+
+  countCompletedByDriver(driverId: string): Promise<number> {
+    return this.prisma.read.trip.count({
+      where: { driverId, status: TripStatus.COMPLETED },
     });
   }
 

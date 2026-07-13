@@ -33,6 +33,14 @@ interface ActiveTripByDriverRequest {
   driverId: string;
 }
 
+interface DriverTripStatsRequest {
+  driverId: string;
+}
+
+interface DriverTripStatsReply {
+  completedTrips: number;
+}
+
 interface PendingSettlementRequest {
   passengerId: string;
 }
@@ -218,6 +226,16 @@ export class TripGrpcController {
     const t = await this.repo.findActiveByDriver(driverId);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
+  }
+
+  /**
+   * Conteo de viajes COMPLETED de un conductor (señal de confianza "N viajes" en la card del pasajero).
+   * driverId vacío/ausente → { completedTrips: 0 } (no es error: el viaje puede no tener conductor asignado).
+   */
+  @GrpcMethod('TripService', 'GetDriverTripStats')
+  async getDriverTripStats({ driverId }: DriverTripStatsRequest): Promise<DriverTripStatsReply> {
+    if (!driverId) return { completedTrips: 0 };
+    return { completedTrips: await this.repo.countCompletedByDriver(driverId) };
   }
 
   /**
