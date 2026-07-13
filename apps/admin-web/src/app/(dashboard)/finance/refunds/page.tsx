@@ -171,7 +171,6 @@ export default function RefundsPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Reembolsos"
-        description="Aprobá o rechazá cada devolución · money-OUT con step-up MFA, queda auditado."
         breadcrumbs={[{ label: 'Finanzas' }, { label: 'Reembolsos' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

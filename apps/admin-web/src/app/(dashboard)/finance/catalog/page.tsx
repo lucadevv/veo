@@ -41,7 +41,6 @@ export default function CatalogPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Ofertas de servicio"
-        description="Cada servicio hereda la fórmula global y ajusta su modo, mínimos y disponibilidad."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Ofertas de servicio' }]}
         // "Nuevo servicio" (alta de oferta custom) — SOLO SUPERADMIN (catalog:create). El admin-bff + trip-service
         // re-autorizan; la UI solo refleja el gate. Board kmbzI (topbar).

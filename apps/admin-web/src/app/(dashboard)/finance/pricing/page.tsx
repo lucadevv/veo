@@ -61,7 +61,6 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios on-demand"
-        description="El modo y el piso de cada servicio se definen en Ofertas de servicio."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

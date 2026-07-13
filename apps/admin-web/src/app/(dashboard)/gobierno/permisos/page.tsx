@@ -57,7 +57,6 @@ function PermissionsPageInner() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Permisos y visibilidad"
-        description="Overlay subtract-only: ocultás en la UI de un rol permisos que la base le concede, nunca los agregás."
         breadcrumbs={[{ label: 'Gobierno' }, { label: 'Permisos y visibilidad' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

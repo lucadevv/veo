@@ -71,7 +71,6 @@ export default function CarpoolingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Carpooling"
-        description="El viaje compartido: el conductor publica y los pasajeros reservan asiento. Acá se fija el service fee y el techo anti-lucro (costo/km)."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Carpooling' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
