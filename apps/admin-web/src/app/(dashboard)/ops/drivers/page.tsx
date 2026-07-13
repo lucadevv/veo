@@ -138,15 +138,29 @@ function Kpi({
   loading,
   icon: Icon,
   tone,
+  alert,
 }: {
   label: string;
   value: string;
   loading?: boolean;
   icon: LucideIcon;
   tone: keyof typeof KPI_TONE;
+  /** KPI en estado de atención (p. ej. pendientes KYC > 0): tinta suave la card + colorea el número, como
+   *  la KpiGrid de En Vivo (la señal salta por el fondo, no solo por el icono). Solo aplica a warn/danger. */
+  alert?: boolean;
 }) {
+  const alerted = alert && (tone === 'warn' || tone === 'danger');
   return (
-    <div className="flex items-center gap-3.5 rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
+    <div
+      className={cn(
+        'flex items-center gap-3.5 rounded-[18px] border p-[22px] shadow-3',
+        alerted && tone === 'danger'
+          ? 'border-danger/25 bg-danger/[0.04]'
+          : alerted
+            ? 'border-warn/25 bg-warn/[0.04]'
+            : 'border-black/[0.05] bg-surface',
+      )}
+    >
       <span className={cn('grid size-11 shrink-0 place-items-center rounded-[13px]', KPI_TONE[tone])}>
         <Icon className="size-5" aria-hidden />
       </span>
@@ -154,7 +168,16 @@ function Kpi({
         {loading ? (
           <div className="h-8 w-16 animate-pulse rounded-md bg-surface-2" />
         ) : (
-          <p className="font-display text-[28px] font-bold leading-none tracking-[-1px] tabular text-ink">
+          <p
+            className={cn(
+              'font-display text-[28px] font-bold leading-none tracking-[-1px] tabular',
+              alerted && tone === 'danger'
+                ? 'text-danger'
+                : alerted
+                  ? 'text-warn'
+                  : 'text-ink',
+            )}
+          >
             {value}
           </p>
         )}
@@ -283,7 +306,7 @@ export default function DriversPage() {
         ) : null}
 
         {/* KPIs — Total, En línea y Pendientes KYC del summary real; Suspendidos sin seam → "—" honesto. */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="stagger grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Kpi
             label="Total"
             value={summary.isError ? '—' : String(total ?? 0)}
@@ -304,6 +327,7 @@ export default function DriversPage() {
             loading={summary.isLoading}
             icon={Clock}
             tone="warn"
+            alert={(pendientesKyc ?? 0) > 0}
           />
           <Kpi label="Suspendidos" value="—" icon={Ban} tone="danger" />
         </div>

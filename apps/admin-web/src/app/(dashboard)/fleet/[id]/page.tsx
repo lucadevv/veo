@@ -89,7 +89,7 @@ function headerStatus(v: VehicleView): { tone: PillTone; label: string } {
   return { tone: 'success', label: 'Activo' };
 }
 
-const CARD = 'overflow-hidden rounded-lg border border-border bg-surface';
+const CARD = 'overflow-hidden rounded-[18px] border border-black/[0.05] bg-surface shadow-3';
 
 /** Muestra el valor o "—" si es vacío/null (fallback de display; empty-string → "—"). */
 const dash = (x: string | null | undefined): string => (x && x.length > 0 ? x : '—');
@@ -213,9 +213,6 @@ function DocsCard({ vehicleId, onReviewed }: { vehicleId: string; onReviewed: ()
             </DotPill>
           ) : null}
         </div>
-        <span className="hidden text-xs text-ink-subtle sm:block">
-          Requisito para verificar el vehículo
-        </span>
       </div>
       <div className="flex flex-col gap-2.5 p-3.5">
         {docs.isLoading ? (
@@ -479,42 +476,48 @@ function FichaCard({ v }: { v: VehicleView }) {
 }
 
 function OwnerCard({ v }: { v: VehicleView }) {
-  return (
-    <div className={CARD}>
-      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <User className="size-4 text-ink-subtle" aria-hidden />
-        <span className="text-[13px] font-bold text-ink">Conductor dueño</span>
-      </div>
-      {v.driverId ? (
-        <Link
-          href={`/ops/drivers/${v.driverId}`}
-          className="flex items-center gap-3 p-4 transition-colors hover:bg-surface-2/50"
-        >
-          <Avatar name={v.driverName} />
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-sm font-semibold text-ink">
-              {v.driverName ?? `drv_${v.driverId.slice(0, 8)}`}
-            </span>
-            <span className="flex items-center gap-1.5 text-xs text-ink-subtle">
-              <span
-                className={`size-1.5 rounded-full ${v.operable ? 'bg-success' : 'bg-warn'}`}
-                aria-hidden
-              />
-              {v.operable ? 'Conductor verificado' : 'Revisión pendiente'}
-            </span>
-          </div>
-          <ChevronRight className="size-4 shrink-0 text-ink-subtle" aria-hidden />
-        </Link>
-      ) : (
-        <p className="p-4 text-[13px] text-ink-subtle">Sin conductor asignado.</p>
-      )}
+  const header = (
+    <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+      <User className="size-4 text-ink-subtle" aria-hidden />
+      <span className="text-[13px] font-bold text-ink">Conductor dueño</span>
     </div>
+  );
+  if (!v.driverId) {
+    return (
+      <div className={CARD}>
+        {header}
+        <p className="p-4 text-[13px] text-ink-subtle">Sin conductor asignado.</p>
+      </div>
+    );
+  }
+  // La card entera lleva al detalle del conductor → toda ella es la afordancia (card-interactive: micro-lift al
+  // hover, como las cards clickeables del panel). Antes solo la fila inferior tenía hover.
+  return (
+    <Link href={`/ops/drivers/${v.driverId}`} className={`${CARD} card-interactive block`}>
+      {header}
+      <div className="flex items-center gap-3 p-4">
+        <Avatar name={v.driverName} />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-sm font-semibold text-ink">
+            {v.driverName ?? `drv_${v.driverId.slice(0, 8)}`}
+          </span>
+          <span className="flex items-center gap-1.5 text-xs text-ink-subtle">
+            <span
+              className={`size-1.5 rounded-full ${v.operable ? 'bg-success' : 'bg-warn'}`}
+              aria-hidden
+            />
+            {v.operable ? 'Conductor verificado' : 'Revisión pendiente'}
+          </span>
+        </div>
+        <ChevronRight className="size-4 shrink-0 text-ink-subtle" aria-hidden />
+      </div>
+    </Link>
   );
 }
 
 function Callout() {
   return (
-    <div className="flex gap-3 rounded-sm border-l-[3px] border-accent bg-accent/10 p-4">
+    <div className="flex gap-3 rounded-xl border border-accent/25 bg-accent/[0.06] p-4">
       <Info className="size-[18px] shrink-0 text-accent" aria-hidden />
       <p className="text-[13px] leading-relaxed text-ink-muted">
         Un vehículo sin ITV vigente o con documento rechazado deja de ser operable. El estado lo

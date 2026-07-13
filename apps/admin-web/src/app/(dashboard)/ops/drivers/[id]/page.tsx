@@ -174,7 +174,7 @@ export default function DriverDetailPage(props: { params: Promise<{ id: string }
               <DocsCard driver={driver} onReviewed={() => void query.refetch()} />
             </div>
             {/* Rail de decisión */}
-            <div className="flex flex-col gap-4">
+            <div className="stagger flex flex-col gap-4">
               <DecisionCard driver={driver} onItvRegistered={() => void query.refetch()} />
               <VehiculoCard driver={driver} />
               <ActividadCard driver={driver} />
@@ -465,9 +465,6 @@ function DocsCard({ driver, onReviewed }: { driver: DriverDetail; onReviewed: ()
             {`${valid} verificados${pending > 0 ? ` · ${pending} por revisar` : ''}`}
           </DotPill>
         </div>
-        <span className="hidden text-xs text-ink-subtle sm:block">
-          Requisito para iniciar la verificación
-        </span>
       </div>
       <div className="flex flex-col gap-2.5 p-[18px]">
         {driver.documents.length === 0 ? (

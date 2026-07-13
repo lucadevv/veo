@@ -324,12 +324,7 @@ export default function ReviewsPage() {
     <div className="flex min-h-full flex-col gap-[22px] px-8 py-7">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Revisiones</h1>
-          <p className="text-[13px] text-ink-subtle">
-            Cola unificada de aprobación · conductores, vehículos y documentos · ordenada por espera
-          </p>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Revisiones</h1>
         <button
           type="button"
           onClick={exportCsv}
@@ -342,7 +337,7 @@ export default function ReviewsPage() {
 
       {/* Stat cards · Conductores y Documentos son AUTORITATIVOS (server: /ops/reviews/summary), no del set
           paginado. Vehículos y SLA se derivan de la cola cargada (el summary no los cubre hoy). */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div className="stagger grid grid-cols-2 gap-4 lg:grid-cols-3">
         <StatCard
           icon={Users}
           label="Conductores"

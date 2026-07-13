@@ -99,7 +99,7 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
   const pending = updateDispatch.isPending || updateCarpool.isPending;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="stagger flex flex-col gap-5">
       {config.policyVersion !== 'v2' ? (
         <p className="flex items-start gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-4 py-3 text-[13px] text-ink">
           <Info className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />

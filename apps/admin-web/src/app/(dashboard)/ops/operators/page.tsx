@@ -80,7 +80,7 @@ export default function OperatorsPage() {
   const pending = rows.filter((op) => op.status === 'INVITED').length;
   const subtitle = query.data
     ? `${rows.length} ${rows.length === 1 ? 'operador' : 'operadores'} del panel · ${pending} ${pending === 1 ? 'invitación pendiente' : 'invitaciones pendientes'}`
-    : 'Staff del panel · alta por invitación y gestión de roles';
+    : undefined;
 
   const topbar = <AdminTopbar title="Operadores" subtitle={subtitle} />;
 
@@ -162,7 +162,7 @@ export default function OperatorsPage() {
                 description="Ningún operador coincide con la búsqueda o el filtro de rol."
               />
             ) : (
-              <ul>
+              <ul className="stagger">
                 {filtered.map((op, i) => {
                   const fa = twoFa(op);
                   return (

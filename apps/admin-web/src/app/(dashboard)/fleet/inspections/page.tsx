@@ -44,14 +44,8 @@ export default function InspectionsPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-col gap-[22px] px-8 py-7">
-      {/* Header */}
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Inspecciones</h1>
-        <p className="text-[13px] text-ink-subtle">
-          Historial global de inspecciones técnicas (ITV) de toda la flota
-        </p>
-      </div>
+    <div className="stagger flex min-h-full flex-col gap-[22px] px-8 py-7">
+      <h1 className="text-2xl font-semibold tracking-tight text-ink">Inspecciones</h1>
 
       {/* Tabla */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface">

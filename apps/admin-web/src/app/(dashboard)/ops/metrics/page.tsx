@@ -22,13 +22,6 @@ const RANGES: { value: RevenueRangeValue; label: string }[] = [
   { value: '90d', label: '90d' },
 ];
 
-const RANGE_SUBTITLE: Record<RevenueRangeValue, string> = {
-  today: 'Rendimiento del negocio · hoy',
-  '7d': 'Rendimiento del negocio · últimos 7 días',
-  '30d': 'Rendimiento del negocio · últimos 30 días',
-  '90d': 'Rendimiento del negocio · últimos 90 días',
-};
-
 /** Formato compacto de dinero para KPIs (S/ 1.42M · S/ 356K). Valores chicos → formato completo. */
 function moneyCompact(cents: number): string {
   const soles = cents / 100;
@@ -122,7 +115,7 @@ export default function MetricsPage() {
     </>
   );
 
-  const topbar = <AdminTopbar title="Métricas" subtitle={RANGE_SUBTITLE[range]} actions={actions} />;
+  const topbar = <AdminTopbar title="Métricas" actions={actions} />;
 
   if (!can(user, 'ops:view')) {
     return (
@@ -170,7 +163,7 @@ export default function MetricsPage() {
         ) : d ? (
           <>
             {/* KPIs */}
-            <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <div className="stagger grid grid-cols-2 gap-4 xl:grid-cols-4">
               <KpiCard label={`Ingresos (${range})`} value={moneyCompact(d.moneyInCents)} deltaPct={d.deltas.moneyInPct} />
               <KpiCard label={`Viajes (${range})`} value={d.tripCount.toLocaleString('es-PE')} deltaPct={d.deltas.tripCountPct} />
               <KpiCard label="Ticket promedio" value={money(d.avgTicketCents)} deltaPct={d.deltas.avgTicketPct} />
@@ -220,7 +213,7 @@ export default function MetricsPage() {
             </div>
 
             {/* Ingresos por modo + Top distritos */}
-            <div className="flex flex-col gap-5 xl:flex-row">
+            <div className="stagger flex flex-col gap-5 xl:flex-row">
               <div className="flex flex-col gap-4 rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3 xl:w-[440px]">
                 <h2 className="font-display text-base font-bold text-ink">Ingresos por modo</h2>
                 {modeSegments.length > 0 ? (

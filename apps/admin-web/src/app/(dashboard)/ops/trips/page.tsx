@@ -112,11 +112,7 @@ function TripsInner() {
   }
 
   const topbar = (
-    <AdminTopbar
-      title="Viajes"
-      subtitle="Historial y viajes en curso · filtros y búsqueda"
-      actions={<ConnectionStatus />}
-    />
+    <AdminTopbar title="Viajes" actions={<ConnectionStatus />} />
   );
 
   if (!can(user, 'trips:view')) {
@@ -201,7 +197,7 @@ function TripsInner() {
                 description={q ? 'Ningún viaje cargado coincide con la búsqueda.' : 'No hay viajes que coincidan con el filtro.'}
               />
             ) : (
-              <ul>
+              <ul className="stagger">
                 {filtered.map((t, i) => (
                   <li key={t.id}>
                     <button

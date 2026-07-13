@@ -212,7 +212,7 @@ export default function VehiclesPage() {
 
       {/* Stat cards — las 4 primeras derivan del MISMO estado() que las filas (suspensión = función de docs+ITV);
           "Docs por vencer" es AUTORITATIVA (server: /ops/vehicles/summary), sobre toda la flota, no el set cargado. */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="stagger grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatCard
           icon={Car}
           label="Total en flota"
