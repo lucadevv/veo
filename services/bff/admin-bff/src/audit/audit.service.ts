@@ -26,13 +26,26 @@ interface AuditEntryResponse {
   occurredAt: string;
 }
 
-export interface VerifyResponse {
+/** Respuesta CRUDA de audit-service (`GET /audit/verify`). El bff la remapea a la forma del front. */
+interface UpstreamVerifyResponse {
   valid: boolean;
   checked: number;
   fromSeq: string | null;
   toSeq: string | null;
   brokenAtSeq?: string;
   reason?: string;
+}
+
+/**
+ * Forma del verify HACIA el front (schema `auditChainVerification` de @veo/api-client): el bff es el boundary que
+ * le da forma. Remapea `checked→checkedEntries`, normaliza `brokenAtSeq` a `null` (el schema lo exige PRESENTE,
+ * nullable ≠ optional) y stampa `verifiedAt` = instante en que corrió la verificación (la chequeo es síncrona).
+ */
+export interface VerifyResponse {
+  valid: boolean;
+  checkedEntries: number;
+  brokenAtSeq: string | null;
+  verifiedAt: string;
 }
 
 /** Fila del roster de operadores (identity GET /admin/operators) — subset usado para enriquecer al actor. */
@@ -121,11 +134,17 @@ export class AuditService {
     return csv;
   }
 
-  verify(identity: AuthenticatedUser, query: AuditVerifyDto): Promise<VerifyResponse> {
-    return this.rest.get<VerifyResponse>('/audit/verify', {
+  async verify(identity: AuthenticatedUser, query: AuditVerifyDto): Promise<VerifyResponse> {
+    const raw = await this.rest.get<UpstreamVerifyResponse>('/audit/verify', {
       identity,
       query: { fromSeq: query.fromSeq, toSeq: query.toSeq },
     });
+    return {
+      valid: raw.valid,
+      checkedEntries: raw.checked,
+      brokenAtSeq: raw.brokenAtSeq ?? null,
+      verifiedAt: new Date().toISOString(),
+    };
   }
 
   /**
