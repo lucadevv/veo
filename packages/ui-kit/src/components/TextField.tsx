@@ -12,8 +12,14 @@ import { TOUCH_TARGET } from '../tokens/spacing';
 import { Text } from './Text';
 
 export interface TextFieldProps extends Omit<TextInputProps, 'style' | 'placeholderTextColor'> {
-  /** Label visible (nunca placeholder-only). */
+  /** Label del campo. Siempre requerido: se usa como nombre accesible del input. */
   label: string;
+  /**
+   * Oculta el label VISUALMENTE (sigue siendo el `accessibilityLabel` del input). Para composers/inputs
+   * cuyo contexto ya nombra el campo (p. ej. el input del chat bajo el header "Chat con tu conductor") y
+   * el label repetido sería ruido — sin sacrificar accesibilidad.
+   */
+  hideLabel?: boolean;
   /** Texto de ayuda persistente bajo el campo. */
   helperText?: string;
   /** Mensaje de error (reemplaza al helper y se anuncia como alerta). */
@@ -31,6 +37,7 @@ export interface TextFieldProps extends Omit<TextInputProps, 'style' | 'placehol
  */
 export function TextField({
   label,
+  hideLabel = false,
   helperText,
   error,
   required = false,
@@ -55,16 +62,18 @@ export function TextField({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      <View style={styles.labelRow}>
-        <Text variant="subhead" color="inkMuted">
-          {label}
-        </Text>
-        {required ? (
-          <Text variant="subhead" color="danger">
-            {' *'}
+      {hideLabel ? null : (
+        <View style={styles.labelRow}>
+          <Text variant="subhead" color="inkMuted">
+            {label}
           </Text>
-        ) : null}
-      </View>
+          {required ? (
+            <Text variant="subhead" color="danger">
+              {' *'}
+            </Text>
+          ) : null}
+        </View>
+      )}
 
       <View
         style={[

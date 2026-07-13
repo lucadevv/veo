@@ -3,16 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { Text, useTheme } from '@veo/ui-kit';
 import type { Message } from '../../domain';
 import { isOwnMessage } from '../../domain';
+import { formatTimeOfDay } from '../../../../shared/presentation/format';
 import { BubbleAppear } from './motion';
-
-/** Hora corta (HH:mm) es-PE de un ISO; vacío si la fecha es inválida. */
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
-}
 
 export interface MessageBubbleProps {
   message: Message;
@@ -26,7 +18,7 @@ export interface MessageBubbleProps {
 export const MessageBubble = React.memo(({ message }: MessageBubbleProps): React.JSX.Element => {
   const theme = useTheme();
   const own = isOwnMessage(message);
-  const time = formatTime(message.createdAt);
+  const time = formatTimeOfDay(message.createdAt);
 
   const bubbleStyle = {
     backgroundColor: own ? theme.colors.accent : theme.colors.surface,

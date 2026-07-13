@@ -254,6 +254,7 @@ export function ChatScreen(): React.JSX.Element {
               <View style={styles.flex}>
                 <TextField
                   label={t('chat.title')}
+                  hideLabel
                   placeholder={t('chat.inputPlaceholder')}
                   value={draft}
                   onChangeText={setDraft}
