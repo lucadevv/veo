@@ -136,7 +136,7 @@ export default function OperatorsPage() {
         ) : (
           <div className="overflow-hidden rounded-lg border border-black/[0.05] bg-surface shadow-3">
             {/* Header */}
-            <div className="flex items-center gap-4 border-b border-[color:var(--divider)] bg-bg px-[22px] py-3 text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
+            <div className="flex items-center gap-4 border-b border-[color:var(--divider)] bg-bg px-[22px] py-3 font-display text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-subtle">
               <span className="flex-1">Operador</span>
               <span className="hidden w-[200px] shrink-0 md:block">Rol</span>
               <span className="w-[110px] shrink-0">Estado</span>

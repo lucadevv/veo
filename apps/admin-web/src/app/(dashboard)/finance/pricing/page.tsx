@@ -19,7 +19,7 @@ import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commissi
 function SectionHeader({ label }: { label: string }) {
   return (
     <div className="border-t border-border pt-5">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">{label}</h2>
+      <h2 className="font-display text-xs font-semibold uppercase tracking-wide text-ink-subtle">{label}</h2>
     </div>
   );
 }

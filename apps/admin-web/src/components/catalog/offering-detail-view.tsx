@@ -253,7 +253,7 @@ function InfoRow({
       <span className="text-sm text-ink-muted">{label}</span>
       <span className="flex items-center gap-2 text-right">
         {hint ? (
-          <span className="text-[10px] font-medium uppercase tracking-wide text-brand">{hint}</span>
+          <span className="font-display text-[10px] font-medium uppercase tracking-wide text-brand">{hint}</span>
         ) : null}
         <span className={cn('text-sm font-semibold text-ink', mono && 'font-mono')}>{value}</span>
       </span>

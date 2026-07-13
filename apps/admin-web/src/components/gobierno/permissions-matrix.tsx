@@ -123,7 +123,7 @@ export function PermissionsMatrix({
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border bg-surface-2/50">
-              <th className="sticky left-0 z-10 bg-surface px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-subtle">
+              <th className="sticky left-0 z-10 bg-surface px-4 py-3 text-left font-display text-xs font-semibold uppercase tracking-wide text-ink-subtle">
                 Permiso
               </th>
               {ROLE_COLS.map((c) => {
@@ -158,7 +158,7 @@ export function PermissionsMatrix({
                 <tr className="bg-surface-2/30">
                   <td
                     colSpan={ROLE_COLS.length + 1}
-                    className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink-subtle"
+                    className="px-4 py-2 font-display text-xs font-semibold uppercase tracking-wide text-ink-subtle"
                   >
                     {group.label}
                   </td>

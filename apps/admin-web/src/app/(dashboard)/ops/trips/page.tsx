@@ -175,7 +175,7 @@ function TripsInner() {
         ) : (
           <div className="overflow-hidden rounded-lg border border-black/[0.05] bg-surface shadow-3">
             {/* Header */}
-            <div className="flex items-center gap-4 border-b border-[color:var(--divider)] bg-bg px-[22px] py-3 text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
+            <div className="flex items-center gap-4 border-b border-[color:var(--divider)] bg-bg px-[22px] py-3 font-display text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-subtle">
               <span className="w-[130px] shrink-0">Viaje</span>
               <span className="flex-1">Pasajero</span>
               <span className="hidden w-[180px] shrink-0 lg:block">Conductor</span>

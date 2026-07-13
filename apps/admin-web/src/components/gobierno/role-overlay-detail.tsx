@@ -136,7 +136,7 @@ export function RoleOverlayDetail({
             <div className="flex flex-col">
               {modules.map((group) => (
                 <div key={group.resource} className="border-b border-border last:border-b-0">
-                  <p className="bg-surface-2/30 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink-subtle">
+                  <p className="bg-surface-2/30 px-4 py-2 font-display text-xs font-semibold uppercase tracking-wide text-ink-subtle">
                     {group.label}
                   </p>
                   <ul>

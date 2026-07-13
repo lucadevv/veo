@@ -180,7 +180,7 @@ export default function MediaPage() {
 /** Celda de encabezado de la tabla (uppercase · muted). */
 function Th({ children }: { children: React.ReactNode }) {
   return (
-    <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-subtle">
+    <th className="px-4 py-3 font-display text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-subtle">
       {children}
     </th>
   );

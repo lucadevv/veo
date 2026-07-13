@@ -20,7 +20,7 @@ export function PricingSection({
 }) {
   return (
     <section className="mt-8 border-t border-border pt-5 first:mt-2 first:border-t-0 first:pt-0">
-      <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-subtle">
+      <h2 className="font-display text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-subtle">
         {title}
       </h2>
       {hint ? <p className="mt-1 max-w-2xl text-xs text-ink-subtle">{hint}</p> : null}

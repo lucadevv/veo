@@ -73,7 +73,7 @@ export function DataTable<TData>({
                     aria-sort={
                       sortDir === 'asc' ? 'ascending' : sortDir === 'desc' ? 'descending' : 'none'
                     }
-                    className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.06em] text-ink-subtle"
+                    className="px-4 py-3 text-left font-display text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-subtle"
                   >
                     {header.isPlaceholder ? null : canSort ? (
                       <button

@@ -412,7 +412,7 @@ function ItvCard({
         </div>
 
         <div className="flex flex-col gap-2.5">
-          <span className="text-xs font-semibold uppercase tracking-[0.3px] text-ink-subtle">
+          <span className="font-display text-xs font-semibold uppercase tracking-[0.3px] text-ink-subtle">
             Historial de inspecciones
           </span>
           {insp.isLoading ? (

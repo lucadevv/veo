@@ -122,7 +122,7 @@ function NetCard({ payout, tripCount }: { payout: PayoutDetail; tripCount: numbe
   return (
     <section className="flex flex-col gap-4 rounded-[20px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
       <div className="flex flex-col">
-        <p className="text-[11px] font-bold uppercase tracking-[1px] text-ink-subtle">Neto a pagar</p>
+        <p className="font-display text-[11px] font-semibold uppercase tracking-[1px] text-ink-subtle">Neto a pagar</p>
         <p className="font-display text-[40px] font-bold leading-[1.1] tracking-[-1px] text-ink tabular">
           {money(payout.amountCents)}
         </p>

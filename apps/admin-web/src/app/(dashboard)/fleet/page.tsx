@@ -290,7 +290,7 @@ export default function VehiclesPage() {
       {/* Tabla */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <div
-          className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 text-[11px] font-bold uppercase tracking-[0.5px] text-ink-subtle`}
+          className={`${GRID} border-b border-border bg-surface-2 px-5 py-3 font-display text-[11px] font-semibold uppercase tracking-[0.5px] text-ink-subtle`}
         >
           <span>Vehículo</span>
           <span>Tipo</span>

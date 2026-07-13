@@ -310,7 +310,7 @@ function RingGauge({ score, noMatch }: { score: number | null; noMatch: boolean 
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
         <span className="font-display text-lg font-bold tracking-[-0.5px] text-ink">{center}</span>
-        <span className="text-[10px] uppercase tracking-[0.06em] text-ink-subtle">similitud</span>
+        <span className="font-display text-[10px] font-medium uppercase tracking-[0.06em] text-ink-subtle">similitud</span>
       </div>
     </div>
   );
@@ -721,7 +721,7 @@ function DecisionCard({
         {/* Suspender / reactivar (safety, operativo) — dato REAL: currentStatus + suspensionCauses del detalle. */}
         {canSuspend ? (
           <div className="flex flex-col gap-2 border-t border-[color:var(--divider)] pt-3">
-            <span className="text-[11px] font-bold uppercase tracking-[0.05em] text-ink-subtle">
+            <span className="font-display text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-subtle">
               Estado operativo
             </span>
             <ActiveDriverActions

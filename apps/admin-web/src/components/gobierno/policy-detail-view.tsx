@@ -247,7 +247,7 @@ function RuleBlock({
     <div className="flex flex-col gap-2.5 rounded-[14px] border border-border bg-surface-2 p-4">
       <p
         className={cn(
-          'text-[11px] font-bold uppercase tracking-[0.06em]',
+          'font-display text-[11px] font-semibold uppercase tracking-[0.06em]',
           tone === 'accent' ? 'text-accent' : 'text-success',
         )}
       >

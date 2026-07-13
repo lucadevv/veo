@@ -164,7 +164,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           if (items.length === 0) return null;
           return (
             <div key={group.title}>
-              <p className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.05em] text-ink-subtle">
+              <p className="px-2.5 pb-1 pt-2 font-display text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
                 {group.title}
               </p>
               <ul className="space-y-0.5">

@@ -480,7 +480,7 @@ function OfferingCard({
           {label}
         </Link>
         {hasParamOverride ? (
-          <span className="text-[10px] font-medium uppercase tracking-wide text-brand">
+          <span className="font-display text-[10px] font-medium uppercase tracking-wide text-brand">
             Tarifa a medida
           </span>
         ) : null}
