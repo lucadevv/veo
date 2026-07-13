@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -90,6 +90,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const activeVehicle = useActiveVehicle();
   // El tab bar flota SOBRE el mapa (absolute, no reserva alto): el dock debe elevarse por encima de él.
   const tabBarHeight = useDriverTabBarHeight();
+  const { height: screenH } = useWindowDimensions();
   const dockLift = { marginBottom: tabBarHeight - 4 };
   const [endConfirm, setEndConfirm] = useState(false);
   // Toggle "Zonas de demanda": pinta el mapa de calor sobre el mapa para orientar al conductor.
@@ -400,27 +401,26 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     </View>
   );
 
-  // Cola de pujas en el dock: cuando hay pujas OPEN, reemplazan al selector de vehículo + KPIs (que son
-  // el estado "en reposo") por la LISTA editorial de ofertas — lo que el conductor necesita decidir AHORA.
+  // Cola de pujas FLOTANTE (no vive DENTRO del dock): es una columna que baja DESDE ARRIBA (bajo el
+  // header) — cada puja nueva entra arriba y empuja a las anteriores hacia abajo, y la banda scrollea si
+  // desborda. Acotada por `bidsBandMaxHeight` para que NUNCA tape el dock (queda siempre visible abajo).
   const openBidsList = openBids.data ?? [];
   const hasBids = online && !activeTripId && openBidsList.length > 0;
-  const dockBids = (
-    <View style={styles.bidsSection}>
-      <Text variant="caption" color="inkSubtle" style={styles.bidsEyebrow}>
-        {t('trips.bid.dockLabel', { count: openBidsList.length })}
-      </Text>
+  // Banda disponible entre el header (arriba) y el dock+tab bar (abajo): se reserva alto de sobra para el
+  // dock (≈300) para GARANTIZAR que la columna se corte antes de llegar a él (erra chico = seguro).
+  const bidsBandMaxHeight = Math.max(140, screenH - insets.top - 76 - tabBarHeight - 300);
+  const bidsColumn = hasBids ? (
+    <View style={[styles.bidsColumn, { top: insets.top + 76, maxHeight: bidsBandMaxHeight }]}>
       <ScrollView
-        style={styles.bidsScroll}
         contentContainerStyle={styles.bidsScrollContent}
         showsVerticalScrollIndicator={false}
-        nestedScrollEnabled
       >
         {openBidsList.map((bid) => (
           <BidCard key={bid.tripId} bid={bid} onPress={() => setSelectedBid(bid)} />
         ))}
       </ScrollView>
     </View>
-  );
+  ) : null;
 
   // ─── Dock inferior: estados de carga/error > viaje activo > en línea > desconectado.
   // El mapa de fondo se monta UNA sola vez (return único más abajo): nunca se desmonta entre
@@ -495,31 +495,24 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               {connected ? t('shift.readyForTrips') : t('shift.status.reconnecting')}
             </Text>
           </View>
-          {hasBids ? (
-            // Con pujas cerca: la cola editorial de ofertas es el foco (reemplaza vehículo + KPIs de reposo).
-            dockBids
-          ) : (
-            <>
-              {/* Selector de vehículo (fila gris del board): con qué vehículo opera; toca para gestionar/cambiar. */}
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel={t('vehicles.manage')}
-                onPress={() => navigation.navigate('Vehicles')}
-                style={[styles.vehicleSel, { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md }]}
-              >
-                <View style={styles.vehicleSelLeft}>
-                  {ActiveVehIcon ? <ActiveVehIcon size={18} color={theme.colors.inkMuted} /> : null}
-                  <Text variant="bodyStrong" numberOfLines={1}>
-                    {activeVeh
-                      ? `${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`
-                      : t('shift.vehicleType.none')}
-                  </Text>
-                </View>
-                <IconChevronRight size={18} color={theme.colors.inkSubtle} />
-              </PressableScale>
-              {dockKpis}
-            </>
-          )}
+          {/* Selector de vehículo (fila gris del board): con qué vehículo opera; toca para gestionar/cambiar. */}
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={t('vehicles.manage')}
+            onPress={() => navigation.navigate('Vehicles')}
+            style={[styles.vehicleSel, { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md }]}
+          >
+            <View style={styles.vehicleSelLeft}>
+              {ActiveVehIcon ? <ActiveVehIcon size={18} color={theme.colors.inkMuted} /> : null}
+              <Text variant="bodyStrong" numberOfLines={1}>
+                {activeVeh
+                  ? `${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`
+                  : t('shift.vehicleType.none')}
+              </Text>
+            </View>
+            <IconChevronRight size={18} color={theme.colors.inkSubtle} />
+          </PressableScale>
+          {dockKpis}
           {/* Actions: Pausar (outlined, ocupa el ancho) + Desconectarme (ghost gris, fit-content). */}
           <View style={styles.actionsRow}>
             {status === 'AVAILABLE' ? (
@@ -706,6 +699,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         {!online ? (
           <View style={[styles.dim, { backgroundColor: theme.colors.bg }]} pointerEvents="none" />
         ) : null}
+        {/* Cola de pujas: columna flotante que baja desde el header. Renderizada como hijo del MapShell →
+            queda POR DEBAJO del header y del dock (los overlays van después): nunca los tapa visualmente. */}
+        {bidsColumn}
         {/* Propina recibida en vivo (100% del conductor): banner celebratorio flotante, descartable.
             Aparece en cualquier estado de turno; el monto real ya entró a ganancias. */}
         {lastTip ? (
@@ -807,11 +803,11 @@ const styles = StyleSheet.create({
   },
   // Dock online (frame C/Dashboard): StatusRow + selector de vehículo + KpiRow, con gap 12 (marginTop).
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  bidsSection: { marginTop: 12, gap: 10 },
-  bidsEyebrow: { textTransform: 'uppercase', letterSpacing: 0.6 },
-  // Cola acotada: ~2.5 cards visibles, el resto scrollea DENTRO del dock (no lo deja crecer sin techo).
-  bidsScroll: { maxHeight: 320 },
-  bidsScrollContent: { gap: 10, paddingBottom: 2 },
+  // Columna flotante de pujas: absoluta bajo el header, ancho inset (left/right 12 como los overlays del
+  // MapShell). `top`/`maxHeight` se inyectan inline (dependen de insets + tab bar). El ScrollView hug-ea el
+  // contenido: con pocas pujas es corto (el mapa respira debajo); si desborda, scrollea dentro de la banda.
+  bidsColumn: { position: 'absolute', left: 12, right: 12 },
+  bidsScrollContent: { gap: 10 },
   vehicleSel: {
     flexDirection: 'row',
     alignItems: 'center',
