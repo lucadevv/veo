@@ -28,7 +28,7 @@ import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {
   DraggableSheet,
   type DraggableSheetHandle,
-} from '../../../../shared/presentation/components/DraggableSheet';
+} from '@veo/ui-kit';
 import {decodePolylineToCoordinates} from '../../../../shared/utils/polyline';
 import {
   formatDistance,

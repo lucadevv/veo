@@ -45,7 +45,7 @@ import {
   DraggableSheet,
   type DraggableSheetHandle,
   type SnapPoint,
-} from '../../../../shared/presentation/components/DraggableSheet';
+} from '@veo/ui-kit';
 import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
 import {useNearbyVehicles} from '../../../../core/query/useNearbyVehicles';
 import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';

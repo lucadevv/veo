@@ -8,6 +8,7 @@ import {
   Banner,
   BottomSheet,
   Button,
+  DraggableSheet,
   MapShell,
   SafeScreen,
   Skeleton,
@@ -19,7 +20,6 @@ import {
 import { mobilePaymentMethod } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
-import { DraggableSheet } from '../../../../shared/presentation/components/DraggableSheet';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';

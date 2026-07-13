@@ -8,6 +8,13 @@ export {
   type IconButtonSize,
 } from './IconButton';
 export { StatusPill, type StatusPillProps, type StatusTone } from './StatusPill';
+export {
+  DraggableSheet,
+  type DraggableSheetProps,
+  type DraggableSheetHandle,
+  type DraggableSheetScrollRenderer,
+  type SnapPoint,
+} from './DraggableSheet';
 export { Avatar, type AvatarProps, type AvatarSize } from './Avatar';
 export { Banner, type BannerProps, type BannerTone } from './Banner';
 export { ListItem, type ListItemProps } from './ListItem';
