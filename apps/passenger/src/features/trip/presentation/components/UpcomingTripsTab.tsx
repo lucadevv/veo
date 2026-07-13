@@ -1,6 +1,6 @@
 import type {MapPoint, TripResource} from '@veo/api-client';
 import {useQuery} from '@tanstack/react-query';
-import {Button, Card, StatusPill, Text, useTheme} from '@veo/ui-kit';
+import {Button, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {FlatList, StyleSheet, View} from 'react-native';
@@ -10,9 +10,12 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
-import {formatDateTime, formatPEN} from '../../../../shared/utils/format';
+import {
+  formatPEN,
+  formatShortDate,
+  formatTimeOfDay,
+} from '../../../../shared/utils/format';
 import {EnterView} from './motion';
-import {IconCalendar} from './icons';
 
 /**
  * MISMA query key que `ScheduledTripsScreen`: ambos tabs beben del MISMO dato real
@@ -124,8 +127,11 @@ interface UpcomingTripCardProps {
 }
 
 /**
- * Card de un viaje próximo (pen UcekU "Upcoming"): fila superior con fecha/hora (icono calendario) y
- * StatusPill del estado REAL (SCHEDULED → "Programado"), divider, y fila ruta + tarifa estimada.
+ * Card de un viaje próximo — MISMO lenguaje EDITORIAL que la fila del Historial (`TripHistoryRow`): una
+ * sola card en ambos tabs de "Tus viajes". Punto de estado (brand) + micro-label "PROGRAMADO" neutro ·
+ * "lomo" temporal (día `scheduledFor` + hora) · TRAYECTO como riel origen→destino con los lugares REALES
+ * geocodificados (los programados sí los tienen) · footer con hairline + "estimada" + monto `title3`.
+ * SUPERFICIE surface con elevación, sin borde duro (editorial, no plantilla).
  */
 function UpcomingTripCard({trip}: UpcomingTripCardProps): React.JSX.Element {
   const theme = useTheme();
@@ -133,49 +139,88 @@ function UpcomingTripCard({trip}: UpcomingTripCardProps): React.JSX.Element {
 
   const originLabel = usePointLabel(trip.origin);
   const destinationLabel = usePointLabel(trip.destination);
+  const day = trip.scheduledFor ? formatShortDate(trip.scheduledFor) : '—';
+  const time = trip.scheduledFor ? formatTimeOfDay(trip.scheduledFor) : '';
 
   return (
-    <Card variant="outlined" padding="lg">
-      <View style={{gap: theme.spacing.md}}>
-        <View style={styles.topRow}>
-          {trip.scheduledFor ? (
-            <View style={[styles.dateWrap, {gap: theme.spacing.sm}]}>
-              <IconCalendar color={theme.colors.inkSubtle} size={15} />
-              <Text variant="subhead" color="inkMuted" tabular>
-                {formatDateTime(trip.scheduledFor)}
-              </Text>
-            </View>
-          ) : (
-            // Sin fecha (no debería pasar en SCHEDULED, pero el campo es opcional): sin inventar.
-            <View />
-          )}
-          <StatusPill label={t('tripStatus.SCHEDULED')} tone="brand" dot />
-        </View>
-
-        <View
-          style={[styles.divider, {backgroundColor: theme.colors.border}]}
-        />
-
-        <View style={[styles.midRow, {gap: theme.spacing.md}]}>
-          <View style={styles.routeCol}>
-            <Text variant="bodyStrong" numberOfLines={1}>
-              {t('scheduled.route', {
-                origin: originLabel,
-                destination: destinationLabel,
-              })}
-            </Text>
-            {/* El pen pinta conductor/vehículo acá; SCHEDULED aún no tiene conductor → la línea
-                honesta es la aclaración de que la tarifa es estimada. */}
-            <Text variant="footnote" color="inkSubtle">
-              {t('scheduled.fare')}
-            </Text>
-          </View>
-          <Text variant="headline" tabular>
-            {formatPEN(trip.fareCents)}
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radii.lg,
+          padding: theme.spacing.lg,
+          ...theme.elevation.level1,
+        },
+      ]}>
+      {/* CABECERA FINA: estado (punto brand + micro-label NEUTRO "PROGRAMADO"). */}
+      <View style={styles.topLine}>
+        <View style={styles.statusGroup}>
+          <View style={[styles.dot, {backgroundColor: theme.colors.brand}]} />
+          <Text
+            variant="caption"
+            style={[styles.statusLabel, {color: theme.colors.inkSubtle}]}
+            numberOfLines={1}>
+            {t('tripStatus.SCHEDULED')}
           </Text>
         </View>
       </View>
-    </Card>
+
+      {/* CUERPO: "lomo" temporal (día + hora) + TRAYECTO como riel origen→destino (lugares reales). */}
+      <View style={styles.body}>
+        <View style={styles.dateSpine}>
+          <Text variant="title3" numberOfLines={1}>
+            {day}
+          </Text>
+          <Text variant="footnote" color="inkSubtle" tabular>
+            {time}
+          </Text>
+        </View>
+
+        <View style={styles.journey}>
+          <View
+            style={styles.rail}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants">
+            <View
+              style={[styles.railDotOrigin, {borderColor: theme.colors.brand}]}
+            />
+            <View
+              style={[styles.railLine, {backgroundColor: theme.colors.border}]}
+            />
+            <View
+              style={[styles.railDotDest, {backgroundColor: theme.colors.ink}]}
+            />
+          </View>
+          <View style={styles.journeyLabels}>
+            <Text variant="subhead" color="inkMuted" numberOfLines={1}>
+              {originLabel}
+            </Text>
+            <Text variant="bodyStrong" numberOfLines={1}>
+              {destinationLabel}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* PIE: hairline + aclaración "estimada" (la tarifa se confirma al activar) + monto (payoff). */}
+      <View
+        style={[
+          styles.footer,
+          {
+            borderTopColor: theme.colors.border,
+            paddingTop: theme.spacing.md,
+            marginTop: theme.spacing.md,
+          },
+        ]}>
+        <Text variant="caption" color="inkSubtle">
+          {t('scheduled.fare')}
+        </Text>
+        <Text variant="title3" tabular>
+          {formatPEN(trip.fareCents)}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -195,17 +240,40 @@ function usePointLabel(point: {lat: number; lon: number}): string {
   return labelQuery.data?.title ?? t('home.selectedOnMap');
 }
 
+const RAIL_DOT = 10;
+
 const styles = StyleSheet.create({
   empty: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   emptyBody: {maxWidth: 280},
   emptyCta: {alignSelf: 'center'},
-  topRow: {
+  // Card editorial (espejo de TripHistoryRow): superficie con elevación, sin borde duro.
+  card: {minHeight: 44, overflow: 'hidden'},
+  topLine: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  dateWrap: {flexDirection: 'row', alignItems: 'center'},
-  divider: {height: StyleSheet.hairlineWidth, alignSelf: 'stretch'},
-  midRow: {flexDirection: 'row', alignItems: 'center'},
-  routeCol: {flex: 1, gap: 3},
+  statusGroup: {flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1},
+  dot: {width: 8, height: 8, borderRadius: 4},
+  statusLabel: {textTransform: 'uppercase', letterSpacing: 0.8, flexShrink: 1},
+  body: {flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginTop: 14},
+  dateSpine: {width: 84, gap: 2},
+  journey: {flex: 1, flexDirection: 'row', gap: 12},
+  rail: {width: RAIL_DOT, alignItems: 'center', paddingTop: 5},
+  railDotOrigin: {
+    width: RAIL_DOT,
+    height: RAIL_DOT,
+    borderRadius: RAIL_DOT / 2,
+    borderWidth: 2.5,
+  },
+  railLine: {width: 2, flex: 1, marginVertical: 3, minHeight: 16},
+  railDotDest: {width: RAIL_DOT, height: RAIL_DOT, borderRadius: 2},
+  journeyLabels: {flex: 1, justifyContent: 'space-between', gap: 12},
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
 });
