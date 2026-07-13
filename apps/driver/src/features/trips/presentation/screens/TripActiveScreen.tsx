@@ -286,8 +286,11 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
     actions.arrived.isPending ||
     actions.start.isPending ||
     actions.complete.isPending;
+  // El error de `ensureAccepted` (ASSIGNED→ACCEPTED) NO va en este banner: esa transición tiene su PROPIA
+  // UI (spinner "confirmando" + botón "reintentar" mientras `isPreAccepted`). Metía un "Algo salió mal /
+  // revisá tu conexión" FANTASMA justo al aceptar (el usecase erra transitorio y se auto-recupera al quedar
+  // ACCEPTED) — banner de un error ya resuelto. Acá solo los errores de ACCIÓN reales del viaje.
   const actionError =
-    ensureAccepted.error ??
     actions.arriving.error ??
     actions.arrived.error ??
     actions.start.error ??
@@ -309,7 +312,7 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
   const tripMetrics = `${t('trips.kilometers', { value: metersToKm(data.distanceMeters) })} · ${t('trips.minutes', { value: secondsToMinutes(data.durationSeconds) })}`;
 
   return (
-    <SafeScreen padded={false} header={<View style={styles.headerPad}>{header}</View>}>
+    <SafeScreen padded={false} topInset={false}>
       {/* Área de mapa en vivo (hero). Cuando hay ruta del contrato se pinta la polyline y, sobre el
           mapa, el banner de la PRÓXIMA maniobra (prioridad: lo que el conductor necesita de un
           vistazo). Sin ruta aún, cae al banner de estado del viaje. */}
@@ -318,11 +321,11 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           live={status === 'ARRIVING' || status === 'IN_PROGRESS'}
           topOverlay={
             nextStep ? (
-              <View style={styles.maneuverWrap}>
+              <View style={[styles.maneuverWrap, { marginTop: insets.top + 44 }]}>
                 <ManeuverBanner step={nextStep} remaining={tripRoute?.steps.length} />
               </View>
             ) : (
-              <Appear key={status} style={styles.statusBanner}>
+              <Appear key={status} style={[styles.statusBanner, { marginTop: insets.top + 44 }]}>
                 <Card variant="filled">
                   <View style={styles.statusRow}>
                     <View
@@ -360,6 +363,15 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             interactive={false}
           />
         </MapShell>
+        {/* Appbar TRANSPARENTE: flota SOBRE el mapa hero (renderiza después del MapShell = por encima).
+            Sin barra sólida — el mapa va full-bleed hasta arriba. box-none deja pasar el toque al mapa
+            salvo en los botones del propio TopBar. */}
+        <View
+          style={[styles.headerOverlay, { paddingTop: insets.top }]}
+          pointerEvents="box-none"
+        >
+          {header}
+        </View>
       </View>
 
       {/* Sheet inferior: panel del pasajero + estado + acción principal de la FSM. Glass sheet CLARO
@@ -658,12 +670,12 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
 };
 
 const styles = StyleSheet.create({
-  headerPad: { paddingHorizontal: 20 },
+  // Appbar transparente flotante: absoluto sobre el mapa, ancho completo, sin fondo (el mapa se ve debajo).
+  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 20, zIndex: 10 },
   mapArea: { flex: 1 },
-  // Empuja el banner de estado por debajo del pill "EN VIVO" de MapShell (esquina superior izq.).
-  statusBanner: { marginTop: 32 },
-  // Banner de maniobra: mismo respiro bajo el pill "EN VIVO".
-  maneuverWrap: { marginTop: 32 },
+  // Banner de estado/maniobra: por debajo del appbar transparente flotante (marginTop dinámico en el JSX).
+  statusBanner: {},
+  maneuverWrap: {},
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   statusIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },
