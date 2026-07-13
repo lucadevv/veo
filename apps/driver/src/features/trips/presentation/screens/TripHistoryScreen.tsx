@@ -28,7 +28,7 @@ function HistorySkeleton(): React.JSX.Element {
   return (
     <View style={{ paddingTop: theme.spacing.md, gap: theme.spacing.md }}>
       {[0, 1, 2, 3].map((i) => (
-        <Skeleton key={i} height={132} radius={theme.radii.lg} />
+        <Skeleton key={i} height={150} radius={theme.radii.lg} />
       ))}
     </View>
   );
