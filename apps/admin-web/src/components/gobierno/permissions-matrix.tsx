@@ -224,9 +224,8 @@ export function PermissionsMatrix({
       </div>
 
       <p className="text-xs text-ink-subtle">
-        El overlay solo RESTA: podés ocultar un permiso que la base concede, nunca concederlo de más. Restar un
-        permiso lo oculta en la UI del rol; el bloqueo duro server-side (guard <code>base ∧ ¬override</code>) llega
-        en la fase siguiente (F1).
+        Restar un permiso lo oculta hoy en la UI del rol; el bloqueo duro server-side (guard{' '}
+        <code>base ∧ ¬override</code>) llega en la fase siguiente (F1).
       </p>
 
       {/* Barra de guardado: aparece SOLO con cambios pendientes; el guardado exige step-up MFA fresco. */}

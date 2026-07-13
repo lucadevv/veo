@@ -126,8 +126,6 @@ export function RoleOverlayDetail({
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {/* ── Columna principal ── */}
         <div className="stagger flex flex-col gap-5">
-          <EffectiveExplainer />
-
           <section className="rounded-xl border border-border bg-surface">
             <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
               <h2 className="text-sm font-semibold text-ink">Permisos por módulo</h2>
@@ -210,10 +208,6 @@ export function RoleOverlayDetail({
           </section>
 
           <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-4">
-            <p className="text-xs text-ink-muted">
-              Editar el overlay exige autenticación step-up y queda registrado en auditoría. El overlay solo{' '}
-              <span className="font-medium text-ink">RESTA</span>: nunca concede de más.
-            </p>
             <Link
               href={`/gobierno/permisos?role=${role}`}
               className={cn(LINK_BTN_BASE, LINK_BTN_VARIANT.primary)}
@@ -251,30 +245,6 @@ export function RoleOverlayDetail({
         </aside>
       </div>
     </div>
-  );
-}
-
-/** Explainer del efectivo: `base ∧ ¬overlay`, con las píldoras de la fórmula. */
-function EffectiveExplainer() {
-  return (
-    <section className="rounded-xl border border-border bg-surface px-4 py-4">
-      <h2 className="text-sm font-semibold text-ink">Cómo se calcula el permiso efectivo</h2>
-      <p className="mt-1.5 text-sm text-ink-muted">
-        El overlay solo puede <span className="font-medium text-ink">QUITAR</span> permisos del rol base — nunca
-        agregar. El permiso efectivo es la base menos los overrides ocultos.
-      </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Badge tone="neutral">Base</Badge>
-        <span className="font-mono text-sm text-ink-subtle" aria-hidden>
-          ∧ ¬
-        </span>
-        <Badge tone="warn">Overlay</Badge>
-        <span className="font-mono text-sm text-ink-subtle" aria-hidden>
-          =
-        </span>
-        <Badge tone="success">Efectivo</Badge>
-      </div>
-    </section>
   );
 }
 
