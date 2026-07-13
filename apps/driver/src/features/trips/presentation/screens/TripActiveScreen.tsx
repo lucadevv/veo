@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -26,7 +25,7 @@ import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
-import { IconArrowLeft } from '../../../../shared/presentation/icons';
+import { IconChevronLeft } from '../../../../shared/presentation/icons';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { decodePolyline, decodePolylineToCoordinates } from '../../../../shared/utils/polyline';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
@@ -56,54 +55,6 @@ const CANCEL_REASON_KEYS = [
   'other',
 ] as const;
 type CancelReasonKey = (typeof CANCEL_REASON_KEYS)[number];
-
-function statusLabel(status: DriverTripStatus, t: TFunction): string {
-  switch (status) {
-    case 'SCHEDULED':
-      return t('trips.status.scheduled');
-    case 'ASSIGNED':
-      return t('trips.status.assigned');
-    case 'ACCEPTED':
-      return t('trips.status.accepted');
-    case 'ARRIVING':
-      return t('trips.status.arriving');
-    case 'ARRIVED':
-      return t('trips.status.arrived');
-    case 'IN_PROGRESS':
-      return t('trips.status.inProgress');
-    case 'COMPLETED':
-      return t('trips.status.completed');
-    case 'CANCELLED':
-      return t('trips.status.cancelled');
-    case 'EXPIRED':
-      return t('trips.status.expired');
-    case 'FAILED':
-      return t('trips.status.failed');
-    case 'REASSIGNING':
-      return t('trips.status.reassigning');
-    default:
-      return t('trips.status.unknown');
-  }
-}
-
-/**
- * Etiqueta de FASE del trayecto (lo que el conductor está HACIENDO ahora), NO el título genérico "Viaje
- * en curso": ACCEPTED/ARRIVING = yendo a recoger; ARRIVED = en el recojo; IN_PROGRESS = viaje en curso.
- * El resto cae al label de status normal (terminal/desconocido).
- */
-function tripPhaseLabel(status: DriverTripStatus, t: TFunction): string {
-  switch (status) {
-    case 'ACCEPTED':
-    case 'ARRIVING':
-      return t('trips.phase.toPickup');
-    case 'ARRIVED':
-      return t('trips.phase.atPickup');
-    case 'IN_PROGRESS':
-      return t('trips.phase.inProgress');
-    default:
-      return statusLabel(status, t);
-  }
-}
 
 export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Element => {
   const { t } = useTranslation();
@@ -354,7 +305,8 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             ]}
             showsVerticalScrollIndicator={false}
           >
-            {/* Header DENTRO del sheet (sin appbar): back + FASE del trayecto + chat. */}
+            {/* Header DENTRO del sheet (sin appbar): back (chevron iOS) a la izquierda + chat a la derecha.
+                Sin título de fase: el CTA + el mapa ya comunican qué está pasando. */}
             <View style={styles.sheetHeader}>
               <Pressable
                 onPress={navigation.goBack}
@@ -362,11 +314,9 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
                 accessibilityRole="button"
                 accessibilityLabel={t('common.back')}
               >
-                <IconArrowLeft size={24} color={theme.colors.ink} />
+                <IconChevronLeft size={28} color={theme.colors.ink} strokeWidth={2.25} />
               </Pressable>
-              <Text variant="title3" numberOfLines={1} style={styles.flex}>
-                {tripPhaseLabel(status, t)}
-              </Text>
+              <View style={styles.flex} />
               {chatTrailing}
             </View>
 
