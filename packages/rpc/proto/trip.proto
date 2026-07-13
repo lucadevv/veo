@@ -16,6 +16,8 @@ service TripService {
   rpc GetActiveTripByDriver (ActiveTripByDriverRequest) returns (TripReply);
   // Conteo de viajes COMPLETED de un conductor (señal de confianza "N viajes" en la card del pasajero).
   rpc GetDriverTripStats (DriverTripStatsRequest) returns (DriverTripStatsReply);
+  // Conteo de viajes COMPLETED de un pasajero (señal de confianza "N viajes" en la card del conductor).
+  rpc GetPassengerTripStats (PassengerTripStatsRequest) returns (PassengerTripStatsReply);
   // Pending settlement (re-entrada del cierre): viaje MÁS VIEJO COMPLETED del pasajero sin cerrar
   // (passenger_closed_at = null), orden FIFO (completedAt asc). found=false si no hay ninguno. COMPLETED
   // es terminal (fuera de LIVE_STATES) → GetActiveTrip no lo devuelve y el pasajero perdería el cierre
@@ -133,6 +135,15 @@ message DriverTripStatsRequest {
 }
 
 message DriverTripStatsReply {
+  int32 completed_trips = 1;
+}
+
+// Conteo de viajes COMPLETED de un pasajero (señal de confianza "N viajes" en la card del conductor).
+message PassengerTripStatsRequest {
+  string passenger_id = 1;
+}
+
+message PassengerTripStatsReply {
   int32 completed_trips = 1;
 }
 

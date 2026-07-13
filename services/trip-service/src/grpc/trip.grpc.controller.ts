@@ -41,6 +41,14 @@ interface DriverTripStatsReply {
   completedTrips: number;
 }
 
+interface PassengerTripStatsRequest {
+  passengerId: string;
+}
+
+interface PassengerTripStatsReply {
+  completedTrips: number;
+}
+
 interface PendingSettlementRequest {
   passengerId: string;
 }
@@ -236,6 +244,18 @@ export class TripGrpcController {
   async getDriverTripStats({ driverId }: DriverTripStatsRequest): Promise<DriverTripStatsReply> {
     if (!driverId) return { completedTrips: 0 };
     return { completedTrips: await this.repo.countCompletedByDriver(driverId) };
+  }
+
+  /**
+   * Conteo de viajes COMPLETED de un pasajero (señal de confianza "N viajes" en la card del conductor).
+   * passengerId vacío/ausente → { completedTrips: 0 } (no es error; el llamante degrada honestamente).
+   */
+  @GrpcMethod('TripService', 'GetPassengerTripStats')
+  async getPassengerTripStats({
+    passengerId,
+  }: PassengerTripStatsRequest): Promise<PassengerTripStatsReply> {
+    if (!passengerId) return { completedTrips: 0 };
+    return { completedTrips: await this.repo.countCompletedByPassenger(passengerId) };
   }
 
   /**

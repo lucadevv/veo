@@ -172,6 +172,12 @@ export interface TripView {
   penaltyCents: number;
   /** Primer nombre del pasajero (PII mínima, Ley 29733) para el header del chat; `null` si no se resolvió. */
   passengerFirstName: string | null;
+  /** Rating del pasajero (0–5), `null` si no tiene calificaciones (señal de confianza, agregado — no identifica). */
+  passengerRating: number | null;
+  /** Nº de calificaciones del pasajero (count30d de rating-service). */
+  passengerRatingCount: number;
+  /** Viajes COMPLETED de por vida del pasajero (señal de confianza, agregado — no identifica). */
+  passengerTripCount: number;
 }
 
 /** Vista del estado del viaje (para tracking ligero). */

@@ -92,6 +92,7 @@ function makeController(trip: Trip | null, trips: Partial<TripsService> = {}): T
     findActiveByPassenger: async () => trip,
     findActiveByDriver: async () => trip,
     countCompletedByDriver: async () => (trip && trip.status === 'COMPLETED' ? 1 : 0),
+    countCompletedByPassenger: async () => (trip && trip.status === 'COMPLETED' ? 1 : 0),
     findOldestPendingSettlement: async () => trip,
     findStateById: async () => (trip ? { id: trip.id, status: trip.status } : null),
     findModesByIds: async (ids) =>

@@ -65,6 +65,19 @@ export interface DriverTripStatsReply {
   completedTrips: number;
 }
 
+/**
+ * trip.GetPassengerTripStats — request: conteo de viajes COMPLETED de un pasajero (señal de confianza
+ * "N viajes" en la card del conductor). El passengerId es el userId del pasajero (dueño de las filas Trip).
+ */
+export interface PassengerTripStatsRequest {
+  passengerId: string;
+}
+
+/** trip.GetPassengerTripStats — reply: cantidad de viajes COMPLETED del pasajero. */
+export interface PassengerTripStatsReply {
+  completedTrips: number;
+}
+
 /** trip.GetTripModesByIds — lote de ids de viaje (enriquecimiento MODO on-read de la lista OPS admin). */
 export interface TripIdsRequest {
   ids: string[];

@@ -10,6 +10,7 @@ export type {
   TripStateReply,
   TripHistoryItem,
   PassengerTripsReply,
+  PassengerTripStatsReply,
   MatchReply,
   SurgeReply,
   PaymentReply,

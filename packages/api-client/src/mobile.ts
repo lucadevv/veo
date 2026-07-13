@@ -2497,6 +2497,12 @@ export const driverTripView = z.object({
    * detalle (`GET /trips/:id`), post-aceptación; el resto de endpoints lo devuelven `null`.
    */
   passengerFirstName: z.string().nullable(),
+  /** Rating del pasajero (0–5), null si aún no tiene calificaciones (señal de confianza, PII mínima OK — es agregado, no identifica). OPTIONAL por compat N-2. */
+  passengerRating: z.number().nullable().optional(),
+  /** Nº de calificaciones del pasajero (count30d de rating-service) (señal de confianza, PII mínima OK — es agregado, no identifica). OPTIONAL por compat N-2. */
+  passengerRatingCount: z.number().int().optional(),
+  /** Viajes COMPLETED de por vida del pasajero (señal de confianza, PII mínima OK — es agregado, no identifica). OPTIONAL por compat N-2. */
+  passengerTripCount: z.number().int().optional(),
 });
 export type DriverTripView = z.infer<typeof driverTripView>;
 

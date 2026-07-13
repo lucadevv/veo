@@ -19,8 +19,10 @@ import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import { MAPS } from '../infra/maps.client';
 import type {
+  AggregateReply,
   DriverReply,
   PassengerTripsReply,
+  PassengerTripStatsReply,
   TripHistoryItem,
   TripReply,
   TripStateReply,
@@ -65,7 +67,12 @@ function toTripStatus(raw: string): TripStatus {
   return normalized;
 }
 
-export function toTripView(trip: TripReply, passengerFirstName: string | null = null): TripView {
+export function toTripView(
+  trip: TripReply,
+  passengerFirstName: string | null = null,
+  agg: AggregateReply | null = null,
+  tripStats: PassengerTripStatsReply | null = null,
+): TripView {
   return {
     id: trip.id,
     passengerId: trip.passengerId,
@@ -81,6 +88,11 @@ export function toTripView(trip: TripReply, passengerFirstName: string | null = 
     penaltyCents: trip.penaltyCents,
     // PII mínima (Ley 29733): solo el PRIMER nombre, y SOLO cuando el caller lo resolvió (detalle post-aceptación).
     passengerFirstName,
+    // Señales de confianza del pasajero (agregados, NO identifican): rating rolling 30d + conteo de
+    // calificaciones + viajes COMPLETED de por vida. Degradación honesta: null/0 si el downstream no responde.
+    passengerRating: agg && agg.count30d > 0 ? agg.rollingAvg30d : null,
+    passengerRatingCount: agg?.count30d ?? 0,
+    passengerTripCount: tripStats?.completedTrips ?? 0,
   };
 }
 
@@ -148,12 +160,28 @@ export class TripsService {
     // 29733 — nunca el nombre completo ni el teléfono), post-aceptación. GetUser a identity, nos quedamos
     // con el primer token; degradación honesta: null si identity no responde o el pasajero no tiene nombre.
     // Ver docs/compliance/ley-29733/passenger-first-name-driver-chat.md.
-    const passenger = await this.grpc
-      .call<UserReply>('identity', 'GetUser', { id: trip.passengerId }, identity)
-      .catch(() => null);
+    // ENRIQUECIMIENTO EN PARALELO (todo keya por trip.passengerId): además del primer nombre, las señales
+    // de confianza del pasajero (rating agregado de rating-service + viajes COMPLETED de trip). Son
+    // AGREGADOS (no identifican), PII mínima OK. Degradación honesta: null en cada uno si su downstream falla.
+    const [passenger, agg, tripStats] = await Promise.all([
+      this.grpc
+        .call<UserReply>('identity', 'GetUser', { id: trip.passengerId }, identity)
+        .catch(() => null),
+      this.grpc
+        .call<AggregateReply>('rating', 'GetAggregate', { subjectId: trip.passengerId }, identity)
+        .catch(() => null),
+      this.grpc
+        .call<PassengerTripStatsReply>(
+          'trip',
+          'GetPassengerTripStats',
+          { passengerId: trip.passengerId },
+          identity,
+        )
+        .catch(() => null),
+    ]);
     const rawName = passenger?.found ? (passenger.name ?? '').trim() : '';
     const passengerFirstName = rawName ? (rawName.split(/\s+/)[0] ?? null) : null;
-    return toTripView(trip, passengerFirstName);
+    return toTripView(trip, passengerFirstName, agg, tripStats);
   }
 
   /**

@@ -19,6 +19,8 @@ export type {
   ListDriverTripsRequest,
   DriverTripStatsRequest,
   DriverTripStatsReply,
+  PassengerTripStatsRequest,
+  PassengerTripStatsReply,
   TripIdsRequest,
   TripModeItem,
   TripModesReply,
