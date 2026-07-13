@@ -74,7 +74,6 @@ export default function MediaPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Acceso a video grabado"
-        description="Doble autorización de Cumplimiento · Ley 29733"
         breadcrumbs={[{ label: 'Seguridad' }, { label: 'Video' }]}
         actions={
           <div className="flex items-center gap-3">

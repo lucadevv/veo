@@ -267,7 +267,6 @@ function CameraCard({ driverName }: { driverName: string | null }) {
     <Card>
       <div className="flex items-center justify-between px-4 pt-4">
         <p className="text-sm font-semibold text-ink">Cámara en vivo</p>
-        <span className="text-xs text-ink-muted">Grabación resguardada · MinIO (WORM)</span>
       </div>
       <CardContent className="p-4">
         <div className="grid size-full min-h-[120px] place-items-center rounded-xl border border-border bg-ink/[0.03] p-4 text-center">
@@ -275,10 +274,6 @@ function CameraCard({ driverName }: { driverName: string | null }) {
             <Video className="size-6 text-ink-subtle" aria-hidden />
             <p className="text-sm text-ink-muted">
               {driverName ? `Cámara del viaje de ${driverName}.` : 'Cámara del viaje en curso.'}
-            </p>
-            <p className="max-w-md text-xs text-ink-subtle">
-              El video se almacena en infraestructura propia con object-lock y retención conforme a la Ley
-              29733. El acceso requiere doble autorización.
             </p>
             <Link
               href="/media"

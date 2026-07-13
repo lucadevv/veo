@@ -83,7 +83,6 @@ export default function LiveWallPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Cámaras en vivo"
-        description="Cabinas de viajes en curso. Abrir una cámara exige motivo + verificación (doble-auth) y queda auditado."
         breadcrumbs={[{ label: 'Seguridad' }, { label: 'Cámaras en vivo' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

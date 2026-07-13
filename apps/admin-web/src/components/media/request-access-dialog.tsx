@@ -11,7 +11,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -60,9 +59,6 @@ export function RequestAccessDialog({ defaultTripId = '' }: { defaultTripId?: st
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Solicitar acceso a video</DialogTitle>
-          <DialogDescription>
-            El acceso a grabaciones queda registrado y requiere aprobación de seguridad.
-          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <Field label="ID de viaje">
