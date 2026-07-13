@@ -657,7 +657,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 20,
-    paddingTop: 2,
+    // paddingTop generoso: el badge de no-leídos del chat (top:-4 sobre el IconButton) quedaba pegado al
+    // borde superior del sheet (overflow:hidden + esquina redondeada) y se recortaba/veía subtle. Con aire
+    // arriba, el badge se ve completo. También da mejor ritmo al header colapsado.
+    paddingTop: 10,
     paddingBottom: 10,
   },
   sheetContent: { paddingHorizontal: 20, paddingTop: 2, gap: 14 },
