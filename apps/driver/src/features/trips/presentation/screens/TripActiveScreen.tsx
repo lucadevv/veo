@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,7 +9,6 @@ import {
   Banner,
   BottomSheet,
   Button,
-  Card,
   MapShell,
   SafeScreen,
   Skeleton,
@@ -17,18 +16,17 @@ import {
   Text,
   TextField,
   useTheme,
-  type StatusTone,
 } from '@veo/ui-kit';
 import { mobilePaymentMethod } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
-import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
+import { DraggableSheet } from '../../../../shared/presentation/components/DraggableSheet';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { formatPEN, metersToKm, secondsToMinutes } from '../../../../shared/presentation/format';
-import { IconNavigation } from '../../../../shared/presentation/icons';
+import { IconArrowLeft } from '../../../../shared/presentation/icons';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { decodePolyline, decodePolylineToCoordinates } from '../../../../shared/utils/polyline';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
@@ -59,26 +57,6 @@ const CANCEL_REASON_KEYS = [
 ] as const;
 type CancelReasonKey = (typeof CANCEL_REASON_KEYS)[number];
 
-const statusTone: Record<DriverTripStatus, StatusTone> = {
-  REQUESTED: 'neutral',
-  MATCHING: 'neutral',
-  SCHEDULED: 'brand',
-  ASSIGNED: 'brand',
-  ACCEPTED: 'brand',
-  ARRIVING: 'accent',
-  ARRIVED: 'accent',
-  IN_PROGRESS: 'success',
-  COMPLETED: 'success',
-  CANCELLED: 'danger',
-  // Estados añadidos al contrato (@veo/api-client) que el mapa de tonos debe cubrir de forma
-  // exhaustiva: REASSIGNING es transitorio (re-puja, activo → accent); EXPIRED/FAILED son cierres
-  // sin éxito (neutral/danger). Sin esto el Record no es exhaustivo sobre DriverTripStatus.
-  REASSIGNING: 'accent',
-  EXPIRED: 'neutral',
-  FAILED: 'danger',
-  UNKNOWN: 'neutral',
-};
-
 function statusLabel(status: DriverTripStatus, t: TFunction): string {
   switch (status) {
     case 'SCHEDULED':
@@ -105,6 +83,25 @@ function statusLabel(status: DriverTripStatus, t: TFunction): string {
       return t('trips.status.reassigning');
     default:
       return t('trips.status.unknown');
+  }
+}
+
+/**
+ * Etiqueta de FASE del trayecto (lo que el conductor está HACIENDO ahora), NO el título genérico "Viaje
+ * en curso": ACCEPTED/ARRIVING = yendo a recoger; ARRIVED = en el recojo; IN_PROGRESS = viaje en curso.
+ * El resto cae al label de status normal (terminal/desconocido).
+ */
+function tripPhaseLabel(status: DriverTripStatus, t: TFunction): string {
+  switch (status) {
+    case 'ACCEPTED':
+    case 'ARRIVING':
+      return t('trips.phase.toPickup');
+    case 'ARRIVED':
+      return t('trips.phase.atPickup');
+    case 'IN_PROGRESS':
+      return t('trips.phase.inProgress');
+    default:
+      return statusLabel(status, t);
   }
 }
 
@@ -320,34 +317,13 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
         <MapShell
           live={status === 'ARRIVING' || status === 'IN_PROGRESS'}
           topOverlay={
+            // Solo el banner de la PRÓXIMA maniobra (cuando hay ruta). El estado/fase + métricas ahora
+            // viven en el sheet (sin duplicar), y NO hay appbar: el mapa es el hero, full-bleed.
             nextStep ? (
-              <View style={[styles.maneuverWrap, { marginTop: insets.top + 44 }]}>
+              <View style={[styles.maneuverWrap, { marginTop: insets.top + 8 }]}>
                 <ManeuverBanner step={nextStep} remaining={tripRoute?.steps.length} />
               </View>
-            ) : (
-              <Appear key={status} style={[styles.statusBanner, { marginTop: insets.top + 44 }]}>
-                <Card variant="filled">
-                  <View style={styles.statusRow}>
-                    <View
-                      style={[
-                        styles.statusIcon,
-                        { backgroundColor: theme.colors.surface, borderRadius: theme.radii.md },
-                      ]}
-                    >
-                      <IconNavigation size={22} color={theme.colors.accent} />
-                    </View>
-                    <View style={styles.flex}>
-                      <Text variant="title3" numberOfLines={1}>
-                        {statusLabel(status, t)}
-                      </Text>
-                      <Text variant="footnote" color="inkMuted" tabular>
-                        {tripMetrics}
-                      </Text>
-                    </View>
-                  </View>
-                </Card>
-              </Appear>
-            )
+            ) : undefined
           }
         >
           <AppMap
@@ -363,103 +339,104 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             interactive={false}
           />
         </MapShell>
-        {/* Appbar TRANSPARENTE: flota SOBRE el mapa hero (renderiza después del MapShell = por encima).
-            Sin barra sólida — el mapa va full-bleed hasta arriba. box-none deja pasar el toque al mapa
-            salvo en los botones del propio TopBar. */}
-        <View
-          style={[styles.headerOverlay, { paddingTop: insets.top }]}
-          pointerEvents="box-none"
-        >
-          {header}
-        </View>
       </View>
 
-      {/* Sheet inferior: panel del pasajero + estado + acción principal de la FSM. Glass sheet CLARO
-          (Theme de Confianza) vía el componente compartido `GlassSheet` en modo scroll — el frosted
-          ~96% blanco + borde sutil + esquinas superiores vive ahí (antes era inline). */}
-      <GlassSheet
-        scrollable
-        style={styles.sheet}
-        contentContainerStyle={[
-          styles.sheetContent,
-          { paddingBottom: insets.bottom + theme.spacing.xl },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        <Appear style={styles.passengerRow}>
-          <Avatar size="lg" online={status === 'IN_PROGRESS'} />
-          <View style={styles.flex}>
-            <Text variant="footnote" color="inkMuted">
-              {t('trips.activeTitle')}
-            </Text>
-            <Text variant="title3" numberOfLines={1}>
-              {statusLabel(status, t)}
-            </Text>
-          </View>
-          <View style={styles.fareCol}>
-            <Text variant="footnote" color="inkMuted" align="right">
-              {t('trips.fare')}
-            </Text>
-            <Text variant="title3" tabular align="right">
-              {formatPEN(data.fareCents)}
-            </Text>
-          </View>
-        </Appear>
+      {/* Sheet ARRASTRABLE dinámico al contenido (DraggableSheet · grabber en color primario/accent). Abraza
+          su contenido y crece al expandir las indicaciones. SIN appbar: el back + chat viven en su header. */}
+      <DraggableSheet
+        snapPoints={['content', { content: 0.9 }]}
+        maxContentFraction={0.74}
+        renderScroll={(Scroll) => (
+          <Scroll
+            contentContainerStyle={[
+              styles.sheetContent,
+              { paddingBottom: insets.bottom + theme.spacing.xl },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Header DENTRO del sheet (sin appbar): back + FASE del trayecto + chat. */}
+            <View style={styles.sheetHeader}>
+              <Pressable
+                onPress={navigation.goBack}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.back')}
+              >
+                <IconArrowLeft size={24} color={theme.colors.ink} />
+              </Pressable>
+              <Text variant="title3" numberOfLines={1} style={styles.flex}>
+                {tripPhaseLabel(status, t)}
+              </Text>
+              {chatTrailing}
+            </View>
 
-        <Appear key={`pill-${status}`} style={styles.statusPillRow}>
-          <StatusPill label={statusLabel(status, t)} tone={statusTone[status]} dot />
-          {/* Indicador de conexión en vivo: "En vivo" (pulso) cuando el socket está conectado;
-              "Reconectando…" (neutral, sin pulso) cuando se cayó. Igual que el board del pasajero. */}
-          <StatusPill
-            label={connected ? t('trips.connection.live') : t('trips.connection.reconnecting')}
-            tone={connected ? 'brand' : 'neutral'}
-            live={connected}
-          />
-        </Appear>
+            {/* Card del pasajero: avatar (iniciales) + primer nombre (PII mínima post-aceptación) + tarifa. */}
+            <View style={styles.passengerRow}>
+              <Avatar
+                name={data.passengerFirstName ?? undefined}
+                size="lg"
+                online={status === 'IN_PROGRESS'}
+              />
+              <View style={styles.flex}>
+                <Text variant="footnote" color="inkMuted">
+                  {t('trips.passenger')}
+                </Text>
+                <Text variant="title3" numberOfLines={1}>
+                  {data.passengerFirstName ?? t('trips.passenger')}
+                </Text>
+              </View>
+              <View style={styles.fareCol}>
+                <Text variant="footnote" color="inkMuted" align="right">
+                  {t('trips.fare')}
+                </Text>
+                <Text variant="title3" tabular align="right">
+                  {formatPEN(data.fareCents)}
+                </Text>
+              </View>
+            </View>
 
-        {data.childMode ? (
-          <Banner tone="info" title={t('trips.childMode')} description={t('trips.childModeHint')} />
-        ) : null}
+            {/* En vivo + métricas del trayecto (distancia · duración). */}
+            <View style={styles.statusPillRow}>
+              <StatusPill
+                label={connected ? t('trips.connection.live') : t('trips.connection.reconnecting')}
+                tone={connected ? 'brand' : 'neutral'}
+                live={connected}
+              />
+              <Text variant="footnote" color="inkMuted" tabular>
+                {tripMetrics}
+              </Text>
+            </View>
 
-        {/* Navegación turn-by-turn: lista desplegable de pasos + fallback a apps externas. El banner
-            de la próxima maniobra ya vive sobre el mapa (prioridad). Solo cuando hay ruta. */}
-        {isNavigating && tripRoute ? (
-          <>
-            <RouteStepsList
-              steps={tripRoute.steps}
-              totalDistanceMeters={tripRoute.distanceMeters}
-            />
-            <ExternalNavButtons destination={externalDestination} />
-          </>
-        ) : null}
+            {data.childMode ? (
+              <Banner tone="info" title={t('trips.childMode')} description={t('trips.childModeHint')} />
+            ) : null}
 
-        {/* Mientras se consigue la ruta de navegación, avisa de forma discreta. */}
-        {isNavigating && routeQuery.isError ? (
-          <Banner tone="warn" title={t('navigation.routeUnavailable')} />
-        ) : null}
+            {isNavigating && routeQuery.isError ? (
+              <Banner tone="warn" title={t('navigation.routeUnavailable')} />
+            ) : null}
 
-        {actionError ? (
-          <Banner
-            tone="danger"
-            title={t('errors.generic')}
-            description={toErrorMessage(actionError, t)}
-          />
-        ) : null}
+            {actionError ? (
+              <Banner
+                tone="danger"
+                title={t('errors.generic')}
+                description={toErrorMessage(actionError, t)}
+              />
+            ) : null}
 
-        {/* Parada propuesta por el pasajero (Lote C4): tarjeta para aceptar/rechazar, sobre las acciones
-            normales del viaje, solo en curso. El server recalcula tarifa+ruta si el conductor acepta. */}
-        {showWaypointProposal && waypointProposal.proposal ? (
-          <Appear key="waypoint-proposal">
-            <WaypointProposalCard
-              proposal={waypointProposal.proposal}
-              isResponding={waypointProposal.isResponding}
-              isError={waypointProposal.isError}
-              onRespond={waypointProposal.respond}
-            />
-          </Appear>
-        ) : null}
+            {/* Parada propuesta por el pasajero (Lote C4): aceptar/rechazar, solo en curso. */}
+            {showWaypointProposal && waypointProposal.proposal ? (
+              <Appear key="waypoint-proposal">
+                <WaypointProposalCard
+                  proposal={waypointProposal.proposal}
+                  isResponding={waypointProposal.isResponding}
+                  isError={waypointProposal.isError}
+                  onRespond={waypointProposal.respond}
+                />
+              </Appear>
+            ) : null}
 
-        <Appear key={`actions-${status}`} style={styles.actions}>
+            {/* ACCIONES (principal de la FSM + salidas) — en el peek, siempre visibles. */}
+            <Appear key={`actions-${status}`} style={styles.actions}>
           {confirming ? (
             <Button label={t('trips.confirmingAssignment')} fullWidth loading disabled />
           ) : null}
@@ -517,16 +494,30 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             />
           ) : null}
 
-          {isTripActive(status) && status !== 'IN_PROGRESS' ? (
-            <Button
-              label={t('trips.actions.cancel')}
-              variant="ghost"
-              fullWidth
-              onPress={() => setCancelOpen(true)}
-            />
-          ) : null}
-        </Appear>
-      </GlassSheet>
+              {isTripActive(status) && status !== 'IN_PROGRESS' ? (
+                <Button
+                  label={t('trips.actions.cancel')}
+                  variant="ghost"
+                  fullWidth
+                  onPress={() => setCancelOpen(true)}
+                />
+              ) : null}
+            </Appear>
+
+            {/* INDICACIONES turn-by-turn (se revelan al arrastrar/expandir el sheet → crece dinámico):
+                pasos + fallback a nav externa. Solo con ruta. El banner de la próxima maniobra ya va sobre el mapa. */}
+            {isNavigating && tripRoute ? (
+              <>
+                <RouteStepsList
+                  steps={tripRoute.steps}
+                  totalDistanceMeters={tripRoute.distanceMeters}
+                />
+                <ExternalNavButtons destination={externalDestination} />
+              </>
+            ) : null}
+          </Scroll>
+        )}
+      />
 
       <BottomSheet
         visible={cancelOpen}
@@ -670,17 +661,13 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
 };
 
 const styles = StyleSheet.create({
-  // Appbar transparente flotante: absoluto sobre el mapa, ancho completo, sin fondo (el mapa se ve debajo).
-  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 20, zIndex: 10 },
   mapArea: { flex: 1 },
-  // Banner de estado/maniobra: por debajo del appbar transparente flotante (marginTop dinámico en el JSX).
-  statusBanner: {},
+  // Banner de la próxima maniobra sobre el mapa (marginTop dinámico en el JSX para respetar el notch).
   maneuverWrap: {},
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  statusIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   flex: { flex: 1 },
-  sheet: { flexShrink: 0, maxHeight: '46%' },
-  sheetContent: { paddingHorizontal: 20, paddingTop: 16, gap: 14 },
+  // Header dentro del sheet (reemplaza el appbar): back + fase + chat en una fila.
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  sheetContent: { paddingHorizontal: 20, paddingTop: 4, gap: 14 },
   passengerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   fareCol: { alignItems: 'flex-end' },
   statusPillRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },

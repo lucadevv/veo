@@ -669,6 +669,12 @@
     "accept": "Aceptar viaje",
     "reject": "Rechazar",
     "activeTitle": "Viaje en curso",
+    "passenger": "Pasajero",
+    "phase": {
+      "toPickup": "Yendo a recoger",
+      "atPickup": "En el punto de recojo",
+      "inProgress": "Viaje en curso"
+    },
     "confirmingAssignment": "Confirmando asignación…",
     "connection": {
       "live": "En vivo",
