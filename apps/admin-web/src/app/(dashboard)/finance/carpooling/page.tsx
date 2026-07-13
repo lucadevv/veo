@@ -27,8 +27,9 @@ import {
  * pasajero (F2.7) y el costo de operación por km (escudo legal anti-lucro · F2.5). Acá el conductor pone el
  * precio del asiento; la plataforma solo fija el TECHO anti-lucro y el service fee. Cada card es una MUTACIÓN
  * separada (su propio endpoint, CAS y step-up MFA) — el banner superior lo hace explícito. El costo/km vive en
- * booking-service; la comisión en payment-service. Gate de presentación con `pricing:view`; el admin-bff
- * (RolesGuard) + cada servicio re-autorizan server-side. Nada se decide en la UI.
+ * booking-service; la comisión en payment-service. Gate de presentación con `finance:view` (mismo permiso que
+ * TODOS sus datos y su detalle `finance/carpooling/[id]`); el admin-bff (RolesGuard) + cada servicio re-autorizan
+ * server-side. Nada se decide en la UI.
  */
 export default function CarpoolingPage() {
   const user = useSession();
@@ -49,7 +50,7 @@ export default function CarpoolingPage() {
       ? { status: 'error' }
       : { status: 'loading' };
 
-  if (!can(user, 'pricing:view')) {
+  if (!can(user, 'finance:view')) {
     return (
       <div className="flex h-full flex-col">
         <PageHeader

@@ -703,7 +703,10 @@ function DecisionCard({
               }}
             />
 
-            {!itv.current && (itv.vehicleId || driver.vehicle) ? (
+            {/* "Registrar ITV" crea una inspección (POST /fleet/inspections · @Permission('fleet:manage')). Un rol
+                que APRUEBA conductores pero NO gestiona flota comería un 403 al enviarla → la afordancia solo se
+                muestra si además puede crear la inspección (fleet:manage), no solo por el contexto de aprobación. */}
+            {can(user, 'fleet:manage') && !itv.current && (itv.vehicleId || driver.vehicle) ? (
               <CreateInspectionDialog
                 vehicleId={itv.vehicleId ?? driver.vehicle?.id}
                 vehicleLabel={driver.vehicle?.plate ?? undefined}
