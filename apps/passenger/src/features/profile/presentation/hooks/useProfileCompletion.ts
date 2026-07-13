@@ -1,5 +1,6 @@
 import {useQuery} from '@tanstack/react-query';
 import {useEffect, useRef} from 'react';
+import {isVerificationBypassed} from '../../../../core/config/env';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
@@ -87,6 +88,11 @@ export function useProfileCompletion(): ProfileCompletion {
     }
   }, [query.data, userId]);
 
+  // BYPASS local (solo dev, ver `isVerificationBypassed`): saltea CompleteProfile → la app entra directo.
+  // Va DESPUÉS de todos los hooks (arriba) para no romper rules-of-hooks; el flag es constante en runtime.
+  if (isVerificationBypassed) {
+    return 'complete';
+  }
   if (!active) {
     return 'loading';
   }

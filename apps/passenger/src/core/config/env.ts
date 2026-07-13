@@ -164,6 +164,15 @@ const envSchema = z.object({
     .string()
     .default('false')
     .transform(value => value === 'true'),
+  /**
+   * BYPASS de verificación SOLO para desarrollo local (correr el flujo sin CompleteProfile/KYC). Leído de
+   * la env (`VEO_BYPASS_VERIFICATION=true` solo en `env/local.env`). El consumo real va por
+   * `isVerificationBypassed` (abajo), que además exige `__DEV__` → un release/build de prod jamás lo honra.
+   */
+  VEO_BYPASS_VERIFICATION: z
+    .string()
+    .default('false')
+    .transform(value => value === 'true'),
 });
 
 const parsed = envSchema.safeParse({
@@ -179,6 +188,7 @@ const parsed = envSchema.safeParse({
   MAPBOX_ACCESS_TOKEN: Config.MAPBOX_ACCESS_TOKEN ?? '',
   LIVEKIT_URL: Config.LIVEKIT_URL ?? '',
   FIREBASE_ENABLED: Config.FIREBASE_ENABLED ?? 'false',
+  VEO_BYPASS_VERIFICATION: Config.VEO_BYPASS_VERIFICATION ?? 'false',
 });
 
 if (!parsed.success) {
@@ -202,6 +212,15 @@ export const env = {
   livekitUrl: parsed.data.LIVEKIT_URL,
   /** FCM habilitado sólo cuando hay credenciales reales. */
   firebaseEnabled: parsed.data.FIREBASE_ENABLED,
+  /** Bypass de verificación (raw del env); usar `isVerificationBypassed` que además exige `__DEV__`. */
+  veoBypassVerification: parsed.data.VEO_BYPASS_VERIFICATION,
 } as const;
 
 export type AppEnv = typeof env;
+
+/**
+ * ¿Se saltean las verificaciones (CompleteProfile/KYC) para correr el flujo en local? Doble candado:
+ * el flag de env (`VEO_BYPASS_VERIFICATION`, true solo en local) Y `__DEV__` → un build de release/prod
+ * (donde `__DEV__` es false) NUNCA lo honra, aunque el flag quedara prendido.
+ */
+export const isVerificationBypassed: boolean = __DEV__ && env.veoBypassVerification;
