@@ -169,7 +169,6 @@ function AuditInner() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Auditoría"
-        description="Registro append-only con cadena de hash verificable."
         breadcrumbs={[{ label: 'Cumplimiento' }, { label: 'Auditoría' }]}
         actions={
           <div className="flex items-center gap-2">
@@ -192,7 +191,7 @@ function AuditInner() {
       {verify.isError ? (
         <div
           role="alert"
-          className="mx-4 mt-4 flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-danger lg:mx-6"
+          className="mx-4 mt-4 flex items-center gap-3 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-danger lg:mx-6"
         >
           <ShieldX className="size-5" aria-hidden />
           <div className="flex-1 text-sm">
@@ -208,7 +207,7 @@ function AuditInner() {
       ) : verify.data ? (
         <div
           role="status"
-          className={`mx-4 mt-4 flex items-center gap-3 rounded-md border px-4 py-3 lg:mx-6 ${
+          className={`mx-4 mt-4 flex items-center gap-3 rounded-xl border px-4 py-3 lg:mx-6 ${
             verify.data.valid
               ? 'border-success/30 bg-success/10 text-success'
               : 'border-danger/30 bg-danger/10 text-danger'

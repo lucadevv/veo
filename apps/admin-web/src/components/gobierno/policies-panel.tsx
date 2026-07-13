@@ -59,11 +59,11 @@ export function PoliciesPanel({
   const missingCount = POLICY_LIST.filter((def) => !byKey.has(def.key)).length;
 
   return (
-    <div className="flex flex-col gap-4 pt-4">
+    <div className="stagger flex flex-col gap-4 pt-4">
       {missingCount > 0 ? (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn"
+          className="flex items-center gap-2 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn"
         >
           <AlertTriangle className="size-4 shrink-0" aria-hidden />
           <span>
@@ -167,7 +167,7 @@ function PolicyRow({
   return (
     <li
       className={cn(
-        'flex items-center gap-3.5 px-[22px] py-[15px]',
+        'flex items-center gap-3.5 px-[22px] py-[15px] transition-colors hover:bg-surface-2/40',
         last ? '' : 'border-b border-b-[color:var(--divider)]',
       )}
     >

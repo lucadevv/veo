@@ -57,7 +57,7 @@ function PermissionsPageInner() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Permisos y visibilidad"
-        description="Qué ve y hace cada rol del panel. La matriz BASE es código (cambia por PR); acá aplicás un overlay que solo RESTA: ocultás en la UI de un rol permisos que la base le concede. Hoy el overlay OCULTA/RESTA en la interfaz; el bloqueo duro server-side (guard base ∧ ¬override) llega en la fase siguiente (F1). Los candados de la Ley 29733 no se pueden restar."
+        description="Overlay subtract-only: ocultás en la UI de un rol permisos que la base le concede, nunca los agregás."
         breadcrumbs={[{ label: 'Gobierno' }, { label: 'Permisos y visibilidad' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

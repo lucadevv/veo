@@ -125,7 +125,7 @@ export function RoleOverlayDetail({
 
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
         {/* ── Columna principal ── */}
-        <div className="flex flex-col gap-5">
+        <div className="stagger flex flex-col gap-5">
           <EffectiveExplainer />
 
           <section className="rounded-xl border border-border bg-surface">
@@ -164,7 +164,7 @@ export function RoleOverlayDetail({
         </div>
 
         {/* ── Columna lateral ── */}
-        <aside className="flex flex-col gap-5">
+        <aside className="stagger flex flex-col gap-5">
           <section className="rounded-xl border border-border bg-surface px-4 py-4">
             <h2 className="text-sm font-semibold text-ink">Rol</h2>
             <dl className="mt-3 flex flex-col gap-2.5 text-sm">

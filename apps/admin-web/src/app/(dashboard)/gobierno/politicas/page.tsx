@@ -41,7 +41,7 @@ export default function PoliciesPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Políticas"
-        description="Registro PBAC · 16 políticas de gobierno · cambios con step-up MFA y auditados."
+        description="16 políticas PBAC · cambios con step-up MFA, auditados."
         breadcrumbs={[{ label: 'Gobierno' }, { label: 'Políticas' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">

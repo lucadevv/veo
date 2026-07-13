@@ -190,7 +190,7 @@ function Loaded({
   return (
     <div className="grid flex-1 gap-5 overflow-y-auto p-7 lg:grid-cols-[1fr_360px] lg:items-start">
       {/* Izquierda: Regla + Alcance + Historial */}
-      <div className="flex flex-col gap-[18px]">
+      <div className="stagger flex flex-col gap-[18px]">
         <RuleCard rule={rule} />
         <ScopeCard rows={scopeRows} description={def.description} />
         <HistoryCard
@@ -202,7 +202,7 @@ function Loaded({
         />
       </div>
       {/* Derecha: Política + Impacto + Acciones */}
-      <div className="flex flex-col gap-[18px]">
+      <div className="stagger flex flex-col gap-[18px]">
         <MetaCard def={def} policy={policy} />
         <ImpactCard footprint={footprint} />
         <ActionsCard def={def} policy={policy} canManage={canManage} />
@@ -480,9 +480,11 @@ function ImpactCard({ footprint }: { footprint: PolicyFootprint }) {
 
 function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div className="flex flex-col items-center gap-1 rounded-[14px] border border-border bg-surface-2 p-3.5">
-      <p className="font-display text-2xl font-bold text-ink">{value}</p>
-      <p className="text-center text-[11px] text-ink-subtle">{label}</p>
+    <div className="flex flex-col items-center gap-1.5 rounded-[14px] border border-border bg-surface-2 p-4">
+      <p className="font-display text-2xl font-bold leading-none tracking-[-0.5px] tabular text-ink">
+        {value}
+      </p>
+      <p className="text-center text-[11px] font-medium text-ink-muted">{label}</p>
     </div>
   );
 }

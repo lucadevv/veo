@@ -116,7 +116,7 @@ export function PermissionsMatrix({
   }
 
   return (
-    <div className="flex flex-col gap-4 pt-4">
+    <div className="stagger flex flex-col gap-4 pt-4">
       <Legend />
 
       <div className="overflow-x-auto rounded-xl border border-border">
