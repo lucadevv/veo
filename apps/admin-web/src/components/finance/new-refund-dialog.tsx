@@ -18,7 +18,6 @@ import { RefundMethodCell } from '@/components/finance/refund-method';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -275,10 +274,6 @@ export function NewRefundDialog() {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Nuevo reembolso</DialogTitle>
-          <DialogDescription>
-            Buscá el viaje, revisá el cobro reembolsable y creá la solicitud. Entra a la cola de
-            aprobación; recién al aprobar se desembolsa.
-          </DialogDescription>
         </DialogHeader>
 
         <form

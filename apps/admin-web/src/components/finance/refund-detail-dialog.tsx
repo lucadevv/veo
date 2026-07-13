@@ -5,13 +5,7 @@ import type { RefundDetailView } from '@/lib/api/schemas';
 import { money, dateTime, relativeAccess } from '@/lib/formatters';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/states';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { RefundStatusPill } from '@/components/finance/refund-status-pill';
 import { RefundMethodCell } from '@/components/finance/refund-method';
 import { ApproveRefundButton, RejectRefundButton } from '@/components/finance/refund-actions';
@@ -36,9 +30,6 @@ export function RefundDetailDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Detalle del reembolso</DialogTitle>
-          <DialogDescription>
-            La solicitud, el saldo del cobro ligado y la traza del desembolso.
-          </DialogDescription>
         </DialogHeader>
         {query.isLoading ? (
           <DetailSkeleton />

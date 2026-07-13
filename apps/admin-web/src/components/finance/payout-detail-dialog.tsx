@@ -6,13 +6,7 @@ import { money, dateTime } from '@/lib/formatters';
 import { StatusPill } from '@/components/ui/status-pill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/states';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 /**
  * Detalle de auditoría de una liquidación (GET /finance/payouts/:id vía `usePayoutDetail`). La lista de
@@ -35,10 +29,6 @@ export function PayoutDetailDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Detalle de liquidación</DialogTitle>
-          <DialogDescription>
-            Breakdown de auditoría: el neto abierto en deuda CASH y credit-back, más la traza del
-            desembolso.
-          </DialogDescription>
         </DialogHeader>
         {query.isLoading ? (
           <DetailSkeleton />
