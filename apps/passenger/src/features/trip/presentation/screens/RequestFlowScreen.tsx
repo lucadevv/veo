@@ -187,7 +187,9 @@ export function RequestFlowScreen(): React.JSX.Element {
   // Viaje VIVO del pasajero. Vive en un store (no useState) para SOBREVIVIR al desmontaje del tab Home
   // (detachInactiveScreens): al volver, el sheet re-entra al viaje. La fuente de verdad es el server.
   const activeTripId = useActiveTripStore(s => s.activeTripId);
+  const activeTripMode = useActiveTripStore(s => s.activeTripMode);
   const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
+  const setActiveTripMode = useActiveTripStore(s => s.setActiveTripMode);
   const clearActiveTrip = useActiveTripStore(s => s.clear);
 
   // Re-entrada: al enfocar (montaje + volver al tab), rehidrata el viaje activo desde el server.
@@ -228,6 +230,7 @@ export function RequestFlowScreen(): React.JSX.Element {
     activeTripId,
     status: board.status,
     offerCount: board.offers.length,
+    mode: activeTripMode,
   });
   const descriptor = TRIP_PHASE_DESCRIPTORS[phase];
 
@@ -542,8 +545,10 @@ export function RequestFlowScreen(): React.JSX.Element {
     (trip: TripResource) => {
       history.record(trip);
       setActiveTripId(trip.id);
+      // Modo congelado por el server → la fase EXPIRED distingue FIXED (sin conductor) de PUJA (sin ofertas).
+      setActiveTripMode(trip.dispatchMode);
     },
-    [history, setActiveTripId],
+    [history, setActiveTripId, setActiveTripMode],
   );
 
   // Elegir una oferta del board: ACCEPT_PRICE → aceptar (match); COUNTER → contraoferta (INTERINO Lote 3).
@@ -696,6 +701,8 @@ export function RequestFlowScreen(): React.JSX.Element {
     onOpenFamilyShare: openFamilyShare,
     unreadChatCount: unreadCount,
     clearTrip,
+    // Reintentar FIJO sin conductor: limpia SOLO el viaje (store.clear) → conserva el borrador → 'quoting'.
+    onRetryRequest: clearActiveTrip,
     hasDebt: debtGate.hasDebt,
     debtTotalCents: debtGate.debtTotalCents,
     hasPendingAction: debtGate.hasPendingAction,

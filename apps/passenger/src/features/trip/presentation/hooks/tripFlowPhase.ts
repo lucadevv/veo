@@ -1,4 +1,4 @@
-import {tripStatus, type TripStatus} from '@veo/api-client';
+import {tripStatus, type PricingMode, type TripStatus} from '@veo/api-client';
 
 /**
  * FASE del flujo de viaje unificado: la única fuente de verdad de "qué muestra el sheet sobre el mapa
@@ -10,7 +10,8 @@ import {tripStatus, type TripStatus} from '@veo/api-client';
  *  quoting     → destino elegido, sin viaje creado (cotización / "ofrecé tu tarifa" PUJA)
  *  searching   → viaje creado, puja abierta SIN ofertas todavía ("buscando conductores")
  *  offers      → puja abierta CON ≥1 oferta (el pasajero elige)
- *  noOffers    → la puja expiró sin match (re-pujar más alto)        [Lote 3]
+ *  noOffers    → la PUJA expiró sin match (re-pujar más alto)        [Lote 3]
+ *  noDriver    → el FIJO expiró sin conductor (reintentar / salir)   — contraparte FIXED de noOffers
  *  reassigning → el conductor asignado canceló; se reabre el board   [Lote 3]
  *  enRoute     → conductor asignado/aceptó/en camino al recojo       [Lote 2]
  *  arrived     → el conductor llegó al punto de recojo               [Lote 2]
@@ -24,6 +25,7 @@ export type TripPhase =
   | 'searching'
   | 'offers'
   | 'noOffers'
+  | 'noDriver'
   | 'reassigning'
   | 'enRoute'
   | 'arrived'
@@ -45,6 +47,12 @@ export interface TripPhaseInput {
   status: TripStatus | string | null;
   /** Ofertas vivas en el board (para distinguir "buscando" de "hay ofertas"). */
   offerCount: number;
+  /**
+   * Modo de despacho CONGELADO del viaje (PUJA | FIXED), o `null` si aún no se adoptó. Decide qué muestra
+   * un EXPIRED: PUJA → 'noOffers' (re-pujar); FIXED → 'noDriver' (sin conductor, reintentar/salir). `null`
+   * degrada a PUJA (comportamiento histórico) — nunca peor que hoy.
+   */
+  mode?: PricingMode | null;
 }
 
 /** Deriva la fase del flujo. PURA (sin efectos) → fácil de testear y razonar. */
@@ -53,6 +61,7 @@ export function resolveTripPhase({
   activeTripId,
   status,
   offerCount,
+  mode,
 }: TripPhaseInput): TripPhase {
   // Sin viaje creado: home (idle) o cotización (destino elegido).
   if (!activeTripId) {
@@ -63,7 +72,9 @@ export function resolveTripPhase({
     case tripStatus.enum.MATCHING:
       return offerCount > 0 ? 'offers' : 'searching';
     case tripStatus.enum.EXPIRED:
-      return 'noOffers';
+      // La expiración sin match se muestra SEGÚN EL MODO: PUJA → re-pujar ('noOffers'); FIXED → sin
+      // conductor ('noDriver'). Un FIXED NO debe caer en "Pon tu precio / Re-pujar" (lenguaje de puja).
+      return mode === 'FIXED' ? 'noDriver' : 'noOffers';
     case tripStatus.enum.REASSIGNING:
       return 'reassigning';
     case tripStatus.enum.ASSIGNED:
@@ -105,8 +116,10 @@ export function isLiveSocketPhase(phase: TripPhase): boolean {
       return true;
     case 'idle':
     case 'quoting':
+    case 'noDriver':
     case 'completed':
     case 'ended':
+      // 'noDriver' es TERMINAL (FIXED expiró): no hay viaje vivo al que el conductor emita → sin socket.
       return false;
     default:
       return false;
@@ -125,6 +138,7 @@ export function mapModeForPhase(phase: TripPhase): MapMode {
     case 'searching':
     case 'offers':
     case 'noOffers':
+    case 'noDriver':
     case 'reassigning':
       return 'route';
     case 'enRoute':

@@ -34,6 +34,7 @@ import {IdleBody} from '../components/IdleBody';
 import {LastDriverCard} from '../components/LastDriverCard';
 import {EnterView} from '../components/motion';
 import {NoOffersBody} from '../components/NoOffersBody';
+import {NoDriverBody} from '../components/NoDriverBody';
 import {OffersBody} from '../components/OffersBody';
 import {QuotingBody} from '../components/QuotingBody';
 import {placeToRoute, suggestionToRoute} from '../components/routePlace';
@@ -91,6 +92,12 @@ export interface RequestFlowContext {
   unreadChatCount: number;
   /** Vuelve al home LIMPIO (cierre canónico del ciclo). */
   clearTrip: () => void;
+  /**
+   * REINTENTAR un FIJO sin conductor (fase noDriver): limpia el viaje EXPIRED pero CONSERVA el borrador
+   * (origen/destino) → la fase vuelve a 'quoting' con el destino intacto (re-confirmar a un tap). A
+   * diferencia de `clearTrip`, NO resetea el borrador.
+   */
+  onRetryRequest: () => void;
   // ── Home idle (franja de deuda + atajos) ──
   hasDebt: boolean;
   debtTotalCents: number;
@@ -249,6 +256,14 @@ export function NoOffersPhaseBody({ctx}: SlotProps): React.JSX.Element {
       onExit={ctx.clearTrip}
     />
   );
+}
+
+/**
+ * Fase `noDriver` · FIJO SIN CONDUCTOR (EXPIRED en modo FIXED): in-sheet, sin navegar. Reintentar re-pide
+ * el mismo viaje (conserva el borrador → vuelve a 'quoting'); Salir vuelve al home limpio.
+ */
+export function NoDriverPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  return <NoDriverBody onRetry={ctx.onRetryRequest} onExit={ctx.clearTrip} />;
 }
 
 /** Home · flow `idle`: franja pasiva de deuda/pago por completar + favoritos y recientes. */
@@ -674,6 +689,21 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
     // La PUJA sin ofertas (re-pujar) trae el stepper + mínimo + hints + nota de peajes: NO entra en el
     // peek (content-hug capado a 0.5) y se cortaba. `expanded` → snap a FULL (content-hug 0.94) → el
     // sheet crece al alto de su contenido (max/min) y se ve completo.
+    expanded: true,
+    showNearby: false,
+    activeTrip: false,
+    needsTripDetail: false,
+    pickupEligible: false,
+    pollsDebts: false,
+    showsPushPrePrompt: false,
+    tripMapShowsOrigin: true,
+    handoff: null,
+  },
+  // FIJO sin conductor (EXPIRED en modo FIXED): mensaje honesto + Reintentar/Salir. `expanded` para que el
+  // sheet crezca a su contenido (mismo criterio que noOffers). Terminal: sin viaje vivo, sin socket.
+  noDriver: {
+    Body: NoDriverPhaseBody,
+    Header: null,
     expanded: true,
     showNearby: false,
     activeTrip: false,

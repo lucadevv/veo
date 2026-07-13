@@ -1,4 +1,5 @@
 import {create} from 'zustand';
+import type {PricingMode} from '@veo/api-client';
 
 export interface ActiveTripState {
   /**
@@ -9,6 +10,14 @@ export interface ActiveTripState {
    * se ADOPTA al crear un viaje (local) o al rehidratar desde `GET /trips/active`.
    */
   activeTripId: string | null;
+  /**
+   * Modo de despacho AUTORITATIVO del viaje activo (PUJA | FIXED), CONGELADO por el server al crear
+   * (ADR 011). Se co-loca acá con el id porque es un atributo estable y decisivo para la MÁQUINA DE FASES:
+   * un FIXED EXPIRED (sin conductor) NO va a la pantalla de "re-pujar" (esa es de PUJA) sino a su propio
+   * estado terminal. `null` = desconocido (sin viaje o modo no adoptado) → la fase degrada al comportamiento
+   * PUJA histórico (no hay regresión). Se setea al crear (`onTripCreated`) y al rehidratar.
+   */
+  activeTripMode: PricingMode | null;
   /**
    * Id del enlace de seguimiento ACTIVO de la sesión actual (o `null` si no se compartió, o ya se
    * revocó). Se retiene al crear el enlace para poder REVOCARLO (kill-switch): antes la app lo
@@ -25,6 +34,8 @@ export interface ActiveTripState {
   shareUrl: string | null;
   /** Adopta un viaje activo (creación local o rehidratación desde el server). */
   setActiveTripId: (tripId: string) => void;
+  /** Fija el modo de despacho del viaje activo (PUJA | FIXED); se conoce al crear/rehidratar. */
+  setActiveTripMode: (mode: PricingMode) => void;
   /** Retiene el enlace recién creado (shareId + caducidad + URL) para revocar/reusar/countdown. */
   setActiveShare: (shareId: string, expiresAt: string, url?: string) => void;
   /** Olvida el enlace activo (tras revocar o al terminar el viaje). NO toca el viaje en sí. */
@@ -41,10 +52,12 @@ export interface ActiveTripState {
  */
 export const useActiveTripStore = create<ActiveTripState>(set => ({
   activeTripId: null,
+  activeTripMode: null,
   activeShareId: null,
   shareExpiresAt: null,
   shareUrl: null,
   setActiveTripId: activeTripId => set({activeTripId}),
+  setActiveTripMode: activeTripMode => set({activeTripMode}),
   setActiveShare: (activeShareId, shareExpiresAt, url) =>
     set({activeShareId, shareExpiresAt, shareUrl: url ?? null}),
   clearShare: () =>
@@ -54,6 +67,7 @@ export const useActiveTripStore = create<ActiveTripState>(set => ({
   clear: () =>
     set({
       activeTripId: null,
+      activeTripMode: null,
       activeShareId: null,
       shareExpiresAt: null,
       shareUrl: null,

@@ -43,6 +43,9 @@ export function useHydrateActiveTrip(): void {
         .then(trip => {
           if (!cancelled && trip) {
             setActiveTripId(trip.id);
+            // NOTA: la vista de `/trips/active` no trae `dispatchMode` → el modo NO se adopta acá; lo setea
+            // `onTripCreated` (POST /trips SÍ lo trae). En el borde de relanzar la app A MITAD de una búsqueda
+            // FIXED, el modo queda null y un EXPIRED degrada al flujo PUJA histórico (no peor que hoy).
           }
         })
         .catch(() => {

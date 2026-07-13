@@ -669,6 +669,15 @@ export const common = {
       'Todavía estamos cerrando la búsqueda anterior. Inténtalo de nuevo en unos segundos.',
   },
 
+  /** FIJO sin conductor (fase noDriver · EXPIRED en modo FIXED): contraparte de noOffers, sin "pon tu precio". */
+  noDriver: {
+    title: 'No encontramos conductor',
+    body: 'Ningún conductor tomó tu viaje esta vez. Puedes reintentar en un momento.',
+    retry: 'Reintentar',
+    /** Salida local: abandona la búsqueda expirada y vuelve al home. */
+    exit: 'Salir',
+  },
+
   /** Paradas intermedias del trayecto (Ola 2B · paradas múltiples, máx 3). */
   waypoints: {
     title: 'Paradas del viaje',

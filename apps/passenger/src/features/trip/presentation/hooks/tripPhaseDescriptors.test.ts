@@ -10,6 +10,7 @@ import {
   HomeSearchFlowHeader,
   HomeSheetHeader,
   NoOffersPhaseBody,
+  NoDriverPhaseBody,
   QuotingPhaseBody,
   QuotingSheetHeader,
   resolvePickupMode,
@@ -31,6 +32,7 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
       searching: BiddingPhaseBody,
       offers: BiddingPhaseBody,
       noOffers: NoOffersPhaseBody,
+      noDriver: NoDriverPhaseBody,
       // Transitorias: el PUENTE navega/limpia; mientras tanto el sheet muestra el home (igual que antes).
       reassigning: HomePhaseBody,
       ended: HomePhaseBody,
@@ -51,6 +53,7 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
       searching: null,
       offers: null,
       noOffers: null,
+      noDriver: null,
       reassigning: null,
       enRoute: null,
       arrived: null,
@@ -63,11 +66,17 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
     }
   });
 
-  it('snap a FULL en cotización, cierre y OFERTAS (ADR-020 Lote 3: con ≥1 oferta el sheet crece para ver la lista); el resto abraza el contenido (peek)', () => {
+  it('snap a FULL en cotización, cierre, OFERTAS y los sin-match (noOffers/noDriver crecen para ver el contenido completo); el resto abraza el contenido (peek)', () => {
     const fullPhases = (
       Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]
     ).filter(phase => TRIP_PHASE_DESCRIPTORS[phase].expanded);
-    expect(fullPhases.sort()).toEqual(['completed', 'offers', 'quoting']);
+    expect(fullPhases.sort()).toEqual([
+      'completed',
+      'noDriver',
+      'noOffers',
+      'offers',
+      'quoting',
+    ]);
   });
 
   it('AMBIENTE (autitos cercanos) solo en idle, searching y completed', () => {
