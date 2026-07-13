@@ -109,6 +109,11 @@ export function isLiveSocketPhase(phase: TripPhase): boolean {
     case 'searching':
     case 'offers':
     case 'noOffers':
+    // 'noDriver' (FIXED EXPIRED) MANTIENE el socket ABIERTO — igual que 'noOffers' (PUJA EXPIRED). NO es
+    // opcional: si se cierra, `live.status` se resetea y el status efectivo cae al `stateQuery` STALE
+    // (REQUESTED) → la fase FLIPEA a 'searching' → reabre el socket → EXPIRED → 'noDriver' → cierra → … =
+    // OSCILACIÓN visible (parpadeo). El gateway acepta el handshake en EXPIRED (noOffers ya lo prueba).
+    case 'noDriver':
     case 'reassigning':
     case 'enRoute':
     case 'arrived':
@@ -116,10 +121,8 @@ export function isLiveSocketPhase(phase: TripPhase): boolean {
       return true;
     case 'idle':
     case 'quoting':
-    case 'noDriver':
     case 'completed':
     case 'ended':
-      // 'noDriver' es TERMINAL (FIXED expiró): no hay viaje vivo al que el conductor emita → sin socket.
       return false;
     default:
       return false;

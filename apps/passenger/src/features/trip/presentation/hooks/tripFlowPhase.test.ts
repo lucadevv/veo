@@ -145,6 +145,9 @@ describe('isLiveSocketPhase', () => {
       'searching',
       'offers',
       'noOffers',
+      // noDriver (FIXED EXPIRED) mantiene el socket como noOffers: cerrarlo resetea live.status y la fase
+      // oscila noDriver↔searching (parpadeo). El socket abierto en EXPIRED mantiene el status estable.
+      'noDriver',
       'reassigning',
       'enRoute',
       'arrived',
