@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Lock, Minus } from 'lucide-react';
 import { baseGrants, isLegalMandatoryPermission } from '@veo/policy';
@@ -23,10 +23,24 @@ import { StepUpDialog } from '@/components/security/step-up-dialog';
  * Los cambios se ACUMULAN ("N cambios sin guardar") y se guardan con un único step-up MFA (un PUT por par).
  */
 
-export function PermissionsMatrix({ overrides }: { overrides: PermissionOverrideView[] }) {
+export function PermissionsMatrix({
+  overrides,
+  focusRole,
+}: {
+  overrides: PermissionOverrideView[];
+  focusRole?: string | null;
+}) {
   const { toast } = useToast();
   const setOverride = useSetPermissionOverride();
   const groups = useMemo(groupByResource, []);
+
+  // Deep-link `?role=X`: enfoca la COLUMNA del rol — tinta su header + celdas y la centra en el scroll horizontal.
+  const focusHeaderRef = useRef<HTMLTableCellElement | null>(null);
+  useEffect(() => {
+    if (focusRole && focusHeaderRef.current) {
+      focusHeaderRef.current.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, [focusRole]);
 
   // Estado del servidor: set de pares RESTADOS (hidden=true). Ausencia = rige la base.
   const serverHidden = useMemo(() => {
@@ -99,17 +113,30 @@ export function PermissionsMatrix({ overrides }: { overrides: PermissionOverride
               <th className="sticky left-0 z-10 bg-surface px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-subtle">
                 Permiso
               </th>
-              {ROLE_COLS.map((c) => (
-                <th key={c.role} className="px-3 py-3 text-center">
-                  <Link
-                    href={`/gobierno/permisos/${c.role}`}
-                    title={`Ver el overlay de ${c.label}`}
-                    className="mx-auto inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-semibold text-ink-muted transition-colors hover:bg-surface-2 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              {ROLE_COLS.map((c) => {
+                const focused = c.role === focusRole;
+                return (
+                  <th
+                    key={c.role}
+                    ref={focused ? focusHeaderRef : undefined}
+                    className={cn(
+                      'px-3 py-3 text-center',
+                      focused ? 'bg-brand/10 ring-1 ring-inset ring-brand' : '',
+                    )}
                   >
-                    {c.short}
-                  </Link>
-                </th>
-              ))}
+                    <Link
+                      href={`/gobierno/permisos/${c.role}`}
+                      title={`Ver el overlay de ${c.label}`}
+                      className={cn(
+                        'mx-auto inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-semibold transition-colors hover:bg-surface-2 hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                        focused ? 'text-brand' : 'text-ink-muted',
+                      )}
+                    >
+                      {c.short}
+                    </Link>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -135,10 +162,11 @@ export function PermissionsMatrix({ overrides }: { overrides: PermissionOverride
                         <span className="ml-2 font-mono text-xs text-ink-subtle">{permission}</span>
                       </td>
                       {ROLE_COLS.map((c) => {
+                        const colFocus = c.role === focusRole ? 'bg-brand/5' : '';
                         const base = baseGrants(c.role, permission);
                         if (!base) {
                           return (
-                            <td key={c.role} className="px-3 py-2.5 text-center">
+                            <td key={c.role} className={cn('px-3 py-2.5 text-center', colFocus)}>
                               <Minus
                                 className="mx-auto size-4 text-ink-subtle/40"
                                 aria-label={`${c.label}: no aplica`}
@@ -148,7 +176,7 @@ export function PermissionsMatrix({ overrides }: { overrides: PermissionOverride
                         }
                         if (legal) {
                           return (
-                            <td key={c.role} className="px-3 py-2.5 text-center">
+                            <td key={c.role} className={cn('px-3 py-2.5 text-center', colFocus)}>
                               <span
                                 className="grid size-6 mx-auto place-items-center text-warn"
                                 title="Candado legal (Ley 29733): no se puede restar"
@@ -162,7 +190,7 @@ export function PermissionsMatrix({ overrides }: { overrides: PermissionOverride
                         const hidden = effectiveHidden(key);
                         const dirty = pending.has(key);
                         return (
-                          <td key={c.role} className="px-3 py-2.5 text-center">
+                          <td key={c.role} className={cn('px-3 py-2.5 text-center', colFocus)}>
                             <CellToggle
                               granted={!hidden}
                               dirty={dirty}

@@ -46,6 +46,20 @@ const CATEGORY_OPTIONS: { value: string; label: string }[] = [
   { value: 'biometric', label: 'Biometría' },
 ];
 
+// Lima es UTC-5 sin horario de verano (offset constante). El input `type=date` da 'YYYY-MM-DD' que, sin hora, el
+// audit-service interpreta como MEDIANOCHE UTC → `to` se expande a fin-de-día UTC = 18:59 Lima (pierde las últimas
+// ~5h del día pedido) y `from` arranca 19:00 Lima del día anterior. El backend RESPETA un timestamp con hora
+// explícita tal cual (audit.repository → endOfDayIfDateOnly), así que mandamos los bordes del día LIMA en UTC:
+//   from 00:00 Lima → +5h UTC (mismo día) · to 23:59:59.999 Lima → +5h UTC (día siguiente 04:59:59.999Z).
+const LIMA_UTC_OFFSET_MS = 5 * 60 * 60 * 1000;
+function limaDayStartUtc(date: string): string {
+  return new Date(new Date(`${date}T00:00:00.000Z`).getTime() + LIMA_UTC_OFFSET_MS).toISOString();
+}
+function limaDayEndUtc(date: string): string {
+  const dayEndUtc = new Date(`${date}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000 - 1;
+  return new Date(dayEndUtc + LIMA_UTC_OFFSET_MS).toISOString();
+}
+
 const columns: ColumnDef<AuditEntryView, unknown>[] = [
   {
     accessorKey: 'seq',
@@ -120,7 +134,14 @@ function AuditInner() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
-  const filters = { q: appliedQ, category, from, to };
+  // `from`/`to` (state) quedan crudos 'YYYY-MM-DD' para los <input type=date>; a la API van como bordes del día LIMA
+  // en UTC para no perder las últimas horas del día ni arrastrar el día previo (ver limaDay* arriba).
+  const filters = {
+    q: appliedQ,
+    category,
+    from: from ? limaDayStartUtc(from) : '',
+    to: to ? limaDayEndUtc(to) : '',
+  };
   const query = useAudit(filters);
   const verify = useVerifyAuditChain();
   const rows = query.data?.pages.flatMap((p) => p.items) ?? [];

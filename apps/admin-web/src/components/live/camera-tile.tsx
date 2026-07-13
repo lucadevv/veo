@@ -65,7 +65,7 @@ export const CameraTile = forwardRef<HTMLButtonElement, { cabin: LiveCabin } & R
         />
 
         {/* Badge EN VIVO */}
-        <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-[5px] rounded-md bg-[#D11216]/90 px-[9px] py-1">
+        <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-[5px] rounded-md bg-danger/90 px-[9px] py-1">
           <span className="size-1.5 rounded-full bg-white" aria-hidden />
           <span className="text-[10px] font-bold leading-none text-white">EN VIVO</span>
         </span>
@@ -81,7 +81,7 @@ export const CameraTile = forwardRef<HTMLButtonElement, { cabin: LiveCabin } & R
             <span className="truncate text-[13px] font-semibold leading-tight text-white">{driver}</span>
             <span className="truncate font-mono text-[11px] text-white/70">{subLine(cabin)}</span>
           </span>
-          <span className="shrink-0 rounded-full bg-[#00C853]/80 px-2 py-[3px] text-[10px] font-semibold leading-none text-white">
+          <span className="shrink-0 rounded-full bg-success/80 px-2 py-[3px] text-[10px] font-semibold leading-none text-white">
             En viaje
           </span>
         </span>

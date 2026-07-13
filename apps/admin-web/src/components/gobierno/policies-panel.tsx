@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Lock, Wrench } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Lock, Wrench } from 'lucide-react';
 import { POLICY_LIST, type PolicyDef, type PolicyFamily } from '@veo/policy';
 import type { PolicyView } from '@/lib/api/schemas';
 import { FAMILY_ORDER, isConfigurable, isNetNew, paramChipSummary, POLICY_ICONS } from '@/lib/gobierno';
@@ -54,8 +54,25 @@ export function PoliciesPanel({
     .filter((r): r is { def: PolicyDef; view: PolicyView } => r.view !== undefined)
     .filter((r) => filter === 'all' || r.def.family === filter);
 
+  // Políticas del catálogo (@veo/policy) que el backend NO devolvió: NO se pintan filas fantasma, pero tampoco
+  // se desaparecen en silencio — señal honesta de que puede faltar el seed del registro.
+  const missingCount = POLICY_LIST.filter((def) => !byKey.has(def.key)).length;
+
   return (
     <div className="flex flex-col gap-4 pt-4">
+      {missingCount > 0 ? (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn"
+        >
+          <AlertTriangle className="size-4 shrink-0" aria-hidden />
+          <span>
+            {missingCount} {missingCount === 1 ? 'política' : 'políticas'} del catálogo no{' '}
+            {missingCount === 1 ? 'está' : 'están'} en el registro — puede faltar el seed.
+          </span>
+        </div>
+      ) : null}
+
       {/* Filtro por familia — chips (board): "Todas" + las 4 familias reales. Filtra client-side. */}
       <div className="flex flex-wrap items-center gap-2">
         <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>

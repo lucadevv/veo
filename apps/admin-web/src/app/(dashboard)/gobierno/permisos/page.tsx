@@ -1,5 +1,7 @@
 'use client';
 
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Lock } from 'lucide-react';
 import { usePermissionOverrides } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
@@ -20,9 +22,19 @@ import { PermissionsMatrix } from '@/components/gobierno/permissions-matrix';
  * server-side (guard base ∧ ¬override) llega en la fase siguiente (F1) — no se afirma que ya bloquee en el server.
  */
 export default function PermissionsPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-ink-muted">Cargando…</div>}>
+      <PermissionsPageInner />
+    </Suspense>
+  );
+}
+
+function PermissionsPageInner() {
   const user = useSession();
   const canManage = can(user, 'gobierno:manage');
   const query = usePermissionOverrides();
+  // Deep-link "Editar overlay en la matriz" (role-overlay-detail): `?role=X` enfoca la COLUMNA de ese rol.
+  const focusRole = useSearchParams().get('role');
 
   if (!canManage) {
     return (
@@ -57,7 +69,7 @@ export default function PermissionsPage() {
             <Skeleton className="h-96" />
           </div>
         ) : (
-          <PermissionsMatrix overrides={query.data} />
+          <PermissionsMatrix overrides={query.data} focusRole={focusRole} />
         )}
       </div>
     </div>
