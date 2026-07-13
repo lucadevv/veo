@@ -77,6 +77,7 @@ export class AuditController {
       action: dto.action,
       category: dto.category,
       q: dto.q,
+      actorIds: parseIdList(dto.actorIds),
       from: parseDate(dto.from),
       to: parseDate(dto.to),
       limit: dto.limit ?? 50,
@@ -99,6 +100,7 @@ export class AuditController {
       action: dto.action,
       category: dto.category,
       q: dto.q,
+      actorIds: parseIdList(dto.actorIds),
       from: parseDate(dto.from),
       to: parseDate(dto.to),
     });
@@ -152,6 +154,20 @@ function parseSeq(value: string | undefined): bigint | undefined {
   } catch {
     throw new ValidationError('seq inválido (debe ser entero)', { value });
   }
+}
+
+/**
+ * Parsea la lista COMA-SEPARADA de `actorIds` (name→ids resueltos por el bff) a un array. El InternalRestClient
+ * serializa un solo valor por clave → los ids viajan CSV. Trimea, descarta vacíos; lista vacía/ausente → undefined
+ * (el repo la trata como "sin filtro" → búsqueda idéntica a hoy, sin regresión).
+ */
+function parseIdList(value: string | undefined): string[] | undefined {
+  if (value === undefined || value === '') return undefined;
+  const ids = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return ids.length > 0 ? ids : undefined;
 }
 
 /** Parsea el borde ISO-8601 del rango de fecha (ya validado @IsISO8601 en el DTO). Vacío → sin cota. */

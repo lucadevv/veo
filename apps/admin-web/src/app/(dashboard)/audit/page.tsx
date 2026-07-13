@@ -249,10 +249,9 @@ function AuditInner() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            // DEUDA: (backend) el `q` de audit-service matchea substring sobre action/resource/actorId (el ID
-            // hash), NO el nombre enriquecido del operador (se resuelve on-read en el bff). Por eso el placeholder
-            // NO promete "por actor" (nombre): buscar por nombre requiere resolver nombre→actorIds en el bff.
-            placeholder="Buscar por acción, recurso o ID…"
+            // El `q` matchea action/resource/actorId Y el NOMBRE del operador: el bff resuelve nombre→actorIds
+            // contra el roster y los ORea en la query de audit-service (búsqueda por persona, no solo por hash).
+            placeholder="Buscar por actor, acción o recurso…"
             aria-label="Buscar en auditoría"
             className="pl-9"
           />

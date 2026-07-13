@@ -161,6 +161,7 @@ export class AuditService {
     action?: string;
     category?: string;
     q?: string;
+    actorIds?: string[];
     from?: Date;
     to?: Date;
     limit: number;
@@ -179,6 +180,7 @@ export class AuditService {
     action?: string;
     category?: string;
     q?: string;
+    actorIds?: string[];
     from?: Date;
     to?: Date;
   }): Promise<RecordedEntry[]> {

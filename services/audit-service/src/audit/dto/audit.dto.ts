@@ -85,6 +85,14 @@ export class QueryAuditDto {
   @IsString()
   q?: string;
 
+  // IDs de actor (CSV) resueltos por el bff a partir del NOMBRE del operador (roster identity). Viajan
+  // COMA-SEPARADOS por el wire (InternalRestClient serializa un solo valor por clave) y el controller los
+  // parsea a un array. Se combinan con `q` en el mismo OR → el buscador matchea por nombre de operador.
+  @ApiPropertyOptional({ description: 'IDs de actor (CSV) resueltos por nombre de operador; se ORean con q.' })
+  @IsOptional()
+  @IsString()
+  actorIds?: string;
+
   // Rango de FECHA sobre occurredAt (inclusive). ISO-8601. `to` sin hora = inicio del día → el repo lo lleva
   // al fin del día para incluir todo el día pedido.
   @ApiPropertyOptional({ description: 'Desde (ISO-8601, inclusive) sobre occurredAt.' })
@@ -140,6 +148,13 @@ export class ExportAuditDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  // Mismo carril que el listado: IDs de actor (CSV) resueltos por el bff a partir del NOMBRE del operador → el
+  // export por nombre también matchea (comparte la forma de filtro con el listado, `ExportFilters`).
+  @ApiPropertyOptional({ description: 'IDs de actor (CSV) resueltos por nombre de operador; se ORean con q.' })
+  @IsOptional()
+  @IsString()
+  actorIds?: string;
 
   @ApiPropertyOptional({ description: 'Desde (ISO-8601, inclusive) sobre occurredAt.' })
   @IsOptional()

@@ -84,6 +84,11 @@ export class AuditService {
     query: AuditQueryDto,
   ): Promise<{ items: AuditEntryView[]; nextCursor: string | null }> {
     const limit = query.limit ?? DEFAULT_LIMIT;
+    // Con búsqueda libre presente, resolvemos NOMBRE de operador → actorIds contra el roster ANTES de consultar
+    // audit-service (para que `q` matchee por nombre, no solo por el hash actorId). El roster que leemos acá se
+    // REUSA para el enriquecimiento del actor abajo (una sola lectura, anti-N+1). Sin `q` → no se lee todavía.
+    const roster = hasText(query.q) ? await this.fetchRoster(identity) : null;
+    const actorIds = roster ? matchOperatorIds(roster, query.q!) : [];
     const entries = await this.rest.get<AuditEntryResponse[]>('/audit', {
       identity,
       query: {
@@ -93,6 +98,9 @@ export class AuditService {
         action: query.action,
         category: query.category,
         q: query.q,
+        // Ids resueltos por nombre (CSV): audit-service los ORea con `q`. Vacío ⇒ omitido ⇒ búsqueda solo-`q`
+        // (degradación honesta si el roster no matcheó / cayó).
+        actorIds: actorIds.length > 0 ? actorIds.join(',') : undefined,
         from: query.from,
         to: query.to,
         limit,
@@ -100,7 +108,8 @@ export class AuditService {
         beforeSeq: query.cursor,
       },
     });
-    const directory = await this.actorDirectory(identity, entries);
+    // Reusa el roster ya leído (si `q` estaba presente); si no, lo lee ahora sólo si hay algún actorId real.
+    const directory = await this.actorDirectory(identity, entries, roster);
     const items = entries.map((e) => toAuditEntryView(e, directory.get(e.actorId ?? '')));
     // El listado viene en orden descendente por seq; el siguiente cursor es el seq del último.
     const nextCursor = items.length === limit ? (items[items.length - 1]?.seq ?? null) : null;
@@ -114,16 +123,22 @@ export class AuditService {
    * libro de compliance · Ley 29733). Devuelve el CSV como string; el controller le pone los headers de descarga.
    */
   async exportAudit(identity: AuthenticatedUser, filters: AuditFilters): Promise<string> {
+    // MISMO carril que `list`: si hay búsqueda libre, resolvemos nombre de operador → actorIds contra el roster
+    // (leído una vez) y lo pasamos a audit-service para que el export por nombre también matchee; reusamos ese
+    // roster para enriquecer el actor del CSV.
+    const roster = hasText(filters.q) ? await this.fetchRoster(identity) : null;
+    const actorIds = roster ? matchOperatorIds(roster, filters.q!) : [];
     const entries = await this.rest.get<AuditEntryResponse[]>('/audit/export', {
       identity,
       query: {
         category: filters.category,
         q: filters.q,
+        actorIds: actorIds.length > 0 ? actorIds.join(',') : undefined,
         from: filters.from,
         to: filters.to,
       },
     });
-    const directory = await this.actorDirectory(identity, entries);
+    const directory = await this.actorDirectory(identity, entries, roster);
     const csv = buildAuditCsv(entries, directory);
     await this.audit.record(identity, {
       action: 'audit.export',
@@ -150,24 +165,54 @@ export class AuditService {
   /**
    * Mapa actorId→identidad del STAFF (roster de operadores identity) para enriquecer al actor de cada entrada.
    * UNA lectura REST por página (anti-N+1); el rol primario = `roles[0]` (crudo AdminRole; el front lo traduce).
-   * fail-safe: si el roster cae → mapa vacío (la vista degrada a solo-id honesto). Solo se consulta si hay algún
-   * actorId real (un set de puras entradas de sistema no dispara la lectura).
+   * fail-safe: si el roster cae → mapa vacío (la vista degrada a solo-id honesto).
+   *
+   * `prefetched` = el roster que `list`/`exportAudit` YA leyeron para resolver name→actorIds (búsqueda por nombre):
+   * si viene, se REUSA (no se re-lee → una sola lectura del roster por request). Si es `null` (sin `q`), se lee
+   * ahora sólo si hay algún actorId real (un set de puras entradas de sistema no dispara la lectura).
    */
   private async actorDirectory(
     identity: AuthenticatedUser,
     entries: AuditEntryResponse[],
+    prefetched: OperatorRow[] | null,
   ): Promise<Map<string, ActorIdentity>> {
+    if (prefetched) return directoryFromRoster(prefetched);
     const hasActor = entries.some((e) => e.actorId);
     if (!hasActor) return new Map();
-    const ops = await this.identityRest
+    return directoryFromRoster(await this.fetchRoster(identity));
+  }
+
+  /** Lee el roster de operadores (identity GET /admin/operators). fail-safe: si cae → [] (degrada honesto). */
+  private async fetchRoster(identity: AuthenticatedUser): Promise<OperatorRow[]> {
+    return this.identityRest
       .get<OperatorRow[]>('/admin/operators', { identity })
       .catch(() => [] as OperatorRow[]);
-    const map = new Map<string, ActorIdentity>();
-    for (const o of ops) {
-      map.set(o.id, { name: o.name || null, role: o.roles?.[0] ?? null });
-    }
-    return map;
   }
+}
+
+/** Construye el mapa actorId→identidad (nombre + rol primario) desde las filas del roster. */
+function directoryFromRoster(ops: OperatorRow[]): Map<string, ActorIdentity> {
+  const map = new Map<string, ActorIdentity>();
+  for (const o of ops) {
+    map.set(o.id, { name: o.name || null, role: o.roles?.[0] ?? null });
+  }
+  return map;
+}
+
+/**
+ * Resuelve name→actorIds: los ids de los operadores cuyo NOMBRE contiene `q` (substring, case-insensitive, MISMA
+ * semántica que la búsqueda `q` de audit-service). Vacío si ninguno matchea (⇒ el bff no manda actorIds ⇒ búsqueda
+ * solo-`q`). Es lo que hace que teclear un NOMBRE (enriquecido on-read, no persistido en el WORM) devuelva filas.
+ */
+function matchOperatorIds(ops: OperatorRow[], q: string): string[] {
+  const needle = q.trim().toLowerCase();
+  if (needle === '') return [];
+  return ops.filter((o) => (o.name ?? '').toLowerCase().includes(needle)).map((o) => o.id);
+}
+
+/** true si el string tiene contenido no vacío (tras trim). Gate de "hay búsqueda libre". */
+function hasText(value: string | undefined): value is string {
+  return value !== undefined && value.trim() !== '';
 }
 
 export function toAuditEntryView(e: AuditEntryResponse, who?: ActorIdentity): AuditEntryView {

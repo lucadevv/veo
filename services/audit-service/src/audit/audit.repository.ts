@@ -47,6 +47,13 @@ export interface QueryFilters {
   category?: string;
   /** Búsqueda libre (substring, case-insensitive) sobre action/resourceType/resourceId/actorId. */
   q?: string;
+  /**
+   * IDs de actor resueltos AGUAS ARRIBA por el bff (name→ids contra el roster de operadores): permite que la
+   * búsqueda libre `q` matchee por NOMBRE del operador —enriquecido on-read, no persistido en el WORM— y no solo
+   * por el hash `actorId`. Se combina con `q` en un ÚNICO predicado OR (un row matchea si `q` sustring-matchea O
+   * `actorId IN actorIds`). Vacío/ausente ⇒ SIN efecto: el filtro se comporta EXACTO a hoy (solo-`q`, sin regresión).
+   */
+  actorIds?: string[];
   /** Rango de fecha (inclusive) sobre occurredAt. */
   from?: Date;
   to?: Date;
@@ -250,11 +257,14 @@ export class AuditRepository {
  * `queryForExport`). Todo se compone con un AND de cláusulas; sin filtros → where vacío (trae lo más reciente).
  *  - resourceType/resourceId/actorId/action → igualdad exacta (filtros de callers internos).
  *  - category → `action startsWith "${category}."` (prefijo de dominio; la "categoría de acción" del panel).
- *  - q → OR de substring (case-insensitive) sobre action/resourceType/resourceId/actorId (búsqueda libre).
+ *  - q / actorIds → un ÚNICO predicado OR (búsqueda libre): substring (case-insensitive) sobre
+ *    action/resourceType/resourceId/actorId, O `actorId IN actorIds` (los ids que el bff resolvió por NOMBRE de
+ *    operador). Un row matchea si CUALQUIERA aplica. `actorIds` vacío/ausente ⇒ el OR queda idéntico a hoy (solo-q);
+ *    `q` ausente con `actorIds` presente ⇒ el OR es solo el `IN`. Ninguno de los dos ⇒ no se agrega el OR.
  *  - from/to → rango inclusivo sobre occurredAt; un `to` a medianoche se lleva al FIN del día para incluirlo todo.
  *  - beforeSeq → cursor descendente (`seq < beforeSeq`), solo en el listado paginado.
  */
-function buildQueryWhere(
+export function buildQueryWhere(
   filters: {
     resourceType?: string;
     resourceId?: string;
@@ -262,6 +272,7 @@ function buildQueryWhere(
     action?: string;
     category?: string;
     q?: string;
+    actorIds?: string[];
     from?: Date;
     to?: Date;
   },
@@ -273,17 +284,22 @@ function buildQueryWhere(
   if (filters.actorId) and.push({ actorId: filters.actorId });
   if (filters.action) and.push({ action: filters.action });
   if (filters.category) and.push({ action: { startsWith: `${filters.category}.` } });
+  // Búsqueda libre = UN solo OR: las 4 substrings de `q` + el `actorId IN actorIds` (name→ids del bff). Así el
+  // buscador matchea por NOMBRE del operador (enriquecido on-read) sin dejar de matchear por id/acción/recurso.
+  const searchOr: Prisma.AuditLogWhereInput[] = [];
   if (filters.q) {
     const q = filters.q;
-    and.push({
-      OR: [
-        { action: { contains: q, mode: 'insensitive' } },
-        { resourceType: { contains: q, mode: 'insensitive' } },
-        { resourceId: { contains: q, mode: 'insensitive' } },
-        { actorId: { contains: q, mode: 'insensitive' } },
-      ],
-    });
+    searchOr.push(
+      { action: { contains: q, mode: 'insensitive' } },
+      { resourceType: { contains: q, mode: 'insensitive' } },
+      { resourceId: { contains: q, mode: 'insensitive' } },
+      { actorId: { contains: q, mode: 'insensitive' } },
+    );
   }
+  if (filters.actorIds && filters.actorIds.length > 0) {
+    searchOr.push({ actorId: { in: filters.actorIds } });
+  }
+  if (searchOr.length > 0) and.push({ OR: searchOr });
   if (filters.from || filters.to) {
     and.push({ occurredAt: { gte: filters.from, lte: endOfDayIfDateOnly(filters.to) } });
   }

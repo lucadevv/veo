@@ -140,6 +140,69 @@ describe('AuditService.list (cursor + filtros)', () => {
     await svc.list(identity, { limit: 50 });
     expect(identityRest.get).not.toHaveBeenCalled();
   });
+
+  it('resuelve nombre→actorIds del roster y los pasa (CSV) a audit-service cuando q matchea un operador', async () => {
+    const restGet = vi.fn().mockResolvedValue([]);
+    const { svc } = makeSvc({
+      restGet,
+      opsRows: [
+        { id: 'op-1', name: 'Ana Paredes', roles: ['COMPLIANCE_SUPERVISOR'] },
+        { id: 'op-2', name: 'Bruno Díaz', roles: ['ADMIN'] },
+      ],
+    });
+    await svc.list(identity, { q: 'ana' });
+    const [path, opts] = restGet.mock.calls[0]!;
+    expect(path).toBe('/audit');
+    expect(opts.query.q).toBe('ana');
+    // Solo Ana matchea (case-insensitive), Bruno no → actorIds = solo su id, propagado al upstream.
+    expect(opts.query.actorIds).toBe('op-1');
+  });
+
+  it('junta en un CSV todos los ids cuyo nombre matchea', async () => {
+    const restGet = vi.fn().mockResolvedValue([]);
+    const { svc } = makeSvc({
+      restGet,
+      opsRows: [
+        { id: 'op-1', name: 'Ana Paredes', roles: ['X'] },
+        { id: 'op-3', name: 'Ana Torres', roles: ['Y'] },
+      ],
+    });
+    await svc.list(identity, { q: 'ana' });
+    expect(restGet.mock.calls[0]![1].query.actorIds).toBe('op-1,op-3');
+  });
+
+  it('omite actorIds si q no matchea ningún nombre (degrada a búsqueda solo-q, sin regresión)', async () => {
+    const restGet = vi.fn().mockResolvedValue([]);
+    const { svc } = makeSvc({ restGet, opsRows: [{ id: 'op-1', name: 'Ana', roles: ['X'] }] });
+    await svc.list(identity, { q: 'zzz' });
+    expect(restGet.mock.calls[0]![1].query.actorIds).toBeUndefined();
+  });
+
+  it('degrada honesto a solo-q si el roster cae (sin actorIds, igual consulta /audit)', async () => {
+    const restGet = vi.fn().mockResolvedValue([]);
+    const rest = { get: restGet } as unknown as InternalRestClient;
+    const identityRest = {
+      get: vi.fn().mockRejectedValue(new Error('roster down')),
+    } as unknown as InternalRestClient;
+    const audit = { record: vi.fn().mockResolvedValue(undefined) } as unknown as AuditRecorder;
+    const svc = new AuditService(rest, identityRest, audit);
+    await svc.list(identity, { q: 'ana' });
+    expect(restGet).toHaveBeenCalled();
+    expect(restGet.mock.calls[0]![1].query.actorIds).toBeUndefined();
+  });
+
+  it('lee el roster UNA sola vez: resolución de filtro + enriquecimiento comparten la lectura (anti-N+1)', async () => {
+    const restGet = vi.fn().mockResolvedValue([entry('10', { actorId: 'op-1' })]);
+    const { svc, identityRest } = makeSvc({
+      restGet,
+      opsRows: [{ id: 'op-1', name: 'Ana Paredes', roles: ['COMPLIANCE_SUPERVISOR'] }],
+    });
+    const out = await svc.list(identity, { q: 'ana' });
+    expect(identityRest.get).toHaveBeenCalledTimes(1);
+    expect(restGet.mock.calls[0]![1].query.actorIds).toBe('op-1');
+    // El mismo roster enriquece el actor de la fila.
+    expect(out.items[0]).toMatchObject({ actorName: 'Ana Paredes', actorRole: 'COMPLIANCE_SUPERVISOR' });
+  });
 });
 
 describe('AuditService.exportAudit', () => {
@@ -175,6 +238,19 @@ describe('AuditService.exportAudit', () => {
       identity,
       expect.objectContaining({ action: 'audit.export', resourceType: 'audit_log', resourceId: 'driver' }),
     );
+  });
+
+  it('resuelve nombre→actorIds del roster y los pasa al export cuando q matchea un operador', async () => {
+    const restGet = vi.fn().mockResolvedValue([]);
+    const { svc } = makeSvc({
+      restGet,
+      opsRows: [{ id: 'op-7', name: 'Luis Carranza', roles: ['SUPERADMIN'] }],
+      record: vi.fn().mockResolvedValue(undefined),
+    });
+    await svc.exportAudit(identity, { q: 'carranza' });
+    const [path, opts] = restGet.mock.calls[0]!;
+    expect(path).toBe('/audit/export');
+    expect(opts.query.actorIds).toBe('op-7');
   });
 
   it('escapa campos CSV con comas/comillas (RFC 4180)', async () => {
