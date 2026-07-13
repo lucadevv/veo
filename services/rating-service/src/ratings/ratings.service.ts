@@ -83,9 +83,10 @@ export class RatingsService {
     // responde, getTrip PROPAGA el error (no se atrapa): sin verificación NO se permite calificar.
     await this.assertRatableTrip(raterId, input);
 
-    // Pre-chequeo amistoso; la UNIQUE de trip_id es la garantía real ante carreras.
-    const existing = await this.repo.findRatingByTripId(input.tripId);
-    if (existing) throw new ConflictError('Ya existe una calificación para este viaje');
+    // Pre-chequeo amistoso: ¿ESTE rater ya calificó este viaje? (NO si lo calificó el OTRO participante —
+    // la calificación es bidireccional). La UNIQUE (trip_id, rater_id) es la garantía real ante carreras.
+    const existing = await this.repo.findRatingByTripAndRater(input.tripId, raterId);
+    if (existing) throw new ConflictError('Ya calificaste este viaje');
 
     const ratingId = uuidv7();
     const now = new Date();
@@ -116,8 +117,10 @@ export class RatingsService {
       });
       return toEntity(rating);
     } catch (err) {
+      // La UNIQUE compuesta (trip_id, rater_id): P2002 con `meta.target` que incluye trip_id →
+      // `isUniqueViolation(err, 'tripId')` la matchea igual. Carrera del MISMO rater sobre el mismo viaje.
       if (isUniqueViolation(err, 'tripId')) {
-        throw new ConflictError('Ya existe una calificación para este viaje');
+        throw new ConflictError('Ya calificaste este viaje');
       }
       throw err;
     }

@@ -43,19 +43,9 @@ export class RatingsRepository {
   // ── Lecturas no críticas (réplica) ──────────────────────────────────────────────────────────────────
 
   /**
-   * Pre-chequeo amistoso de existencia por viaje (GET-antes-de-crear). Solo el `id` (la UNIQUE de trip_id es
-   * la garantía real ante carreras). Réplica.
-   */
-  findRatingByTripId(tripId: string): Promise<{ id: string } | null> {
-    return this.prisma.read.rating.findUnique({
-      where: { tripId },
-      select: { id: true },
-    });
-  }
-
-  /**
    * Calificación que UN rater dio en un viaje (GET /ratings?tripId, filtrada por el rater autenticado —
-   * anti-IDOR: el filtro por `raterId` lo pone el service). Réplica.
+   * anti-IDOR: el filtro por `raterId` lo pone el service). También el pre-chequeo del create (¿este rater
+   * ya calificó?). Réplica.
    */
   findRatingByTripAndRater(tripId: string, raterId: string): Promise<Rating | null> {
     return this.prisma.read.rating.findFirst({ where: { tripId, raterId } });

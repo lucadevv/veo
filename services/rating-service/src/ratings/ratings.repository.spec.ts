@@ -15,22 +15,6 @@ const RATER = '00000000-0000-0000-0000-0000000000cc';
  */
 
 describe('RatingsRepository · lecturas (réplica)', () => {
-  it('findRatingByTripId lee de la RÉPLICA sólo el id (pre-chequeo barato)', async () => {
-    const readFindUnique = vi.fn(async () => ({ id: 'r0' }));
-    const prisma = {
-      read: { rating: { findUnique: readFindUnique } },
-    } as unknown as PrismaService;
-
-    const repo = new RatingsRepository(prisma);
-    const r = await repo.findRatingByTripId(TRIP);
-
-    expect(r).toEqual({ id: 'r0' });
-    expect(readFindUnique).toHaveBeenCalledWith({
-      where: { tripId: TRIP },
-      select: { id: true },
-    });
-  });
-
   it('findRatingByTripAndRater filtra por tripId Y raterId (seam anti-IDOR)', async () => {
     const readFindFirst = vi.fn(async () => null);
     const prisma = {

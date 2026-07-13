@@ -27,13 +27,17 @@ enum SubjectRole {
 /// `raterId` califica a `ratedId`; `stars` 1..5 (CHECK en migración).
 model Rating {
   id        String   @id @db.Uuid
-  tripId    String   @unique @map("trip_id") @db.Uuid
+  tripId    String   @map("trip_id") @db.Uuid
   raterId   String   @map("rater_id") @db.Uuid
   ratedId   String   @map("rated_id") @db.Uuid
   stars     Int
   comment   String?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
+  // BIDIRECCIONAL: conductor y pasajero pueden calificar el MISMO viaje (cada uno a su contraparte).
+  // Antes era `tripId @unique` → SOLO una calificación por viaje (el que calificaba primero ganaba; el
+  // otro recibía 409). El unique correcto es (trip, rater): una por viaje POR rater.
+  @@unique([tripId, raterId])
   @@index([ratedId, createdAt])
   @@map("ratings")
   @@schema("rating")

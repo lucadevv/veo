@@ -58,7 +58,7 @@ function makeRepo(opts: {
     updates: [] as Record<string, unknown>[],
   };
   const repo = {
-    findRatingByTripId: async () => (opts.existingTrip ? { id: 'r0' } : null),
+    findRatingByTripAndRater: async () => (opts.existingTrip ? { id: 'r0' } : null),
     runInTransaction: async (work: (tx: unknown) => Promise<unknown>) => work({}),
     createRating: async (_tx: unknown, data: Record<string, unknown>) => ({
       ...data,
@@ -96,7 +96,7 @@ const okTripClient = makeTripClient({
 });
 
 describe('RatingsService.create · un rating por viaje', () => {
-  it('rechaza un segundo rating del mismo viaje (ConflictError)', async () => {
+  it('rechaza un segundo rating del MISMO rater sobre el mismo viaje (ConflictError)', async () => {
     const { repo } = makeRepo({ existingTrip: true, windowStars: [] });
     const svc = new RatingsService(repo as never, config, okTripClient);
     await expect(
