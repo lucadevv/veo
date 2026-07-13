@@ -1995,10 +1995,44 @@ cmd_login() {
   node "$SCRIPT_DIR/login.mjs" "$@"
 }
 
+# Reemplaza (o agrega) KEY=VALUE en un env file (idempotente). Usado por el modo `local`.
+_set_env_kv() {
+  local f="$1" k="$2" v="$3"
+  [[ -f "$f" ]] || return 0
+  grep -v "^${k}=" "$f" > "${f}.veo.tmp" 2>/dev/null || true
+  mv "${f}.veo.tmp" "$f"
+  printf '%s=%s\n' "$k" "$v" >> "$f"
+}
+
+# Modo LOCAL: deriva env/local.env de env/development.env (por servicio + apps) y PRENDE el bypass de
+# verificación (VEO_BYPASS_VERIFICATION=true) + el tier (VEO_DEPLOY_TIER=local) + biométrico sandbox.
+# El local.env es gitignoreado (config local del dev). Idempotente: re-corre sin duplicar.
+_prepare_local_env() {
+  local entry dir src dst
+  local dirs=()
+  for entry in "${SERVICES[@]}"; do
+    dir="$(printf '%s' "$entry" | cut -d'|' -f3)"
+    [[ -n "$dir" ]] && dirs+=("$dir")
+  done
+  dirs+=("apps/driver" "apps/passenger")
+  for dir in "${dirs[@]}"; do
+    src="$ROOT_DIR/$dir/env/development.env"
+    dst="$ROOT_DIR/$dir/env/local.env"
+    [[ -f "$src" ]] || continue
+    [[ -f "$dst" ]] || cp "$src" "$dst"
+    _set_env_kv "$dst" VEO_DEPLOY_TIER local
+    _set_env_kv "$dst" VEO_BYPASS_VERIFICATION true
+    _set_env_kv "$dst" VEO_BIOMETRIC_MODE sandbox
+  done
+  yel "  🔓 modo LOCAL: env/local.env derivado + bypass de verificación PRENDIDO (VEO_BYPASS_VERIFICATION=true)."
+  yel "     Para las apps RN, buildeá con: ENVFILE=env/local.env pnpm --filter veo-driver-app ios (idem passenger)."
+}
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 case "${1:-}" in
   up)      cmd_up ;;
   dev)     shift; cmd_dev "$@" ;;
+  local)   shift; export APP_ENV=local; _prepare_local_env; cmd_dev "$@" ;;
   down)    shift; cmd_down "${1:-}" ;;
   status)  cmd_status ;;
   monitor) cmd_monitor ;;
@@ -2022,6 +2056,8 @@ ${C_BOLD}veo.sh${C_RESET} · ignición + apagado + tablero del stack de dev VEO
                      Como 'up' pero servicios en WATCH (nest --watch/uvicorn --reload): editás src → reinicia solo.
                      AUTO-SIEMBRA barato (identity/driver/media) tras migrar · --no-seed lo saltea ·
                      --seed-trips[=N] (default 2) siembra viajes AL FINAL (opt-in: requiere el stack vivo)
+  ${C_BOLD}local${C_RESET} [...]        Como 'dev' pero tier LOCAL: deriva env/local.env de development.env y PRENDE el bypass
+                     de verificación (correr el flujo e2e sin alta/KYC/biométrico). Solo local — jamás en dev/prod.
   ${C_BOLD}down${C_RESET} [--infra]     Apagado limpio en capas (pidfiles → puertos → patrón). --infra baja docker
   ${C_BOLD}status${C_RESET}             El tablero (health/pid/dist/último error por servicio + infra)
   ${C_BOLD}monitor${C_RESET}            El escáner EN VIVO: sigue todos los logs y muestra solo errores al pasar
