@@ -53,12 +53,12 @@ import {
 import { OfflineOverlay, RealtimeManager } from '../features/realtime/presentation';
 import { NotificationsScreen, PushManager } from '../features/notifications/presentation';
 import {
-  IconAccount,
-  IconCarpool,
-  IconEarnings,
-  IconMap,
-  IconTrips,
-} from '../shared/presentation/icons';
+  TabGlyphAccount,
+  TabGlyphCarpool,
+  TabGlyphEarnings,
+  TabGlyphHome,
+  TabGlyphTrips,
+} from '@veo/ui-kit';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -81,19 +81,19 @@ function MainTabs(): React.JSX.Element {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarIcon: ({ color, focused }) => {
-          const size = 24;
-          const sw = focused ? 2.4 : 2;
+          // Glifos compartidos con el passenger (fill-on-active): misma identidad en ambas apps.
+          const size = 22;
           switch (route.name) {
             case 'Inicio':
-              return <IconMap size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphHome size={size} color={color} active={focused} />;
             case 'Compartir':
-              return <IconCarpool size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphCarpool size={size} color={color} active={focused} />;
             case 'Ganancias':
-              return <IconEarnings size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphEarnings size={size} color={color} active={focused} />;
             case 'Viajes':
-              return <IconTrips size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphTrips size={size} color={color} active={focused} />;
             case 'Cuenta':
-              return <IconAccount size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphAccount size={size} color={color} active={focused} />;
             default:
               return null;
           }

@@ -1,25 +1,30 @@
 import type {BottomTabBarProps} from '@react-navigation/bottom-tabs';
-import {hexAlpha, Text, useTheme} from '@veo/ui-kit';
+import {
+  hexAlpha,
+  TabGlyphAccount,
+  TabGlyphHome,
+  TabGlyphSecurity,
+  TabGlyphTrips,
+  type TabGlyphProps,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {Pressable, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {
-  IconTabHome,
-  IconTabRides,
-  IconTabSecurity,
-  IconTabUser,
-  type TabIconProps,
-} from './TabBarIcons';
 
-type IconCmp = (props: TabIconProps) => React.JSX.Element;
+type IconCmp = (props: TabGlyphProps) => React.JSX.Element;
 
-/** Config por route.name: ícono + key i18n del label (fuente: design/veo.pen C/TabBar). */
+/**
+ * Config por route.name: glifo compartido (`@veo/ui-kit`, MISMA identidad que el driver) + key i18n del
+ * label (fuente: design/veo.pen C/TabBar). Inicio/Viajes/Cuenta usan el glifo idéntico al del conductor.
+ */
 const TABS: Record<string, {icon: IconCmp; label: string}> = {
-  Home: {icon: IconTabHome, label: 'tabs.inicio'},
-  TripHistory: {icon: IconTabRides, label: 'tabs.viajes'},
-  Seguridad: {icon: IconTabSecurity, label: 'tabs.seguridad'},
-  Profile: {icon: IconTabUser, label: 'tabs.cuenta'},
+  Home: {icon: TabGlyphHome, label: 'tabs.inicio'},
+  TripHistory: {icon: TabGlyphTrips, label: 'tabs.viajes'},
+  Seguridad: {icon: TabGlyphSecurity, label: 'tabs.seguridad'},
+  Profile: {icon: TabGlyphAccount, label: 'tabs.cuenta'},
 };
 
 /**
@@ -59,9 +64,9 @@ export function AppTabBar({
         style={[
           styles.pill,
           {
-            // Pill TRANSLÚCIDA como el pen (C/TabBar: #1E212ACC): el mapa/fondo respira detrás.
-            // El background_blur del pen no tiene lib en el proyecto; el alpha 0.8 lo aproxima.
-            backgroundColor: hexAlpha(theme.colors.surfaceElevated, 0.8),
+            // Pill frosted (~92% surfaceElevated) — MISMO tratamiento que el driver (DriverTabBar):
+            // superficie de confianza sobre el mapa, no un vidrio translúcido que ensucia el contenido.
+            backgroundColor: hexAlpha(theme.colors.surfaceElevated, 0.92),
             borderColor: theme.colors.borderStrong,
             borderRadius: theme.radii.pill,
           },
@@ -96,9 +101,8 @@ export function AppTabBar({
                 styles.item,
                 {
                   borderRadius: theme.radii.pill,
-                  backgroundColor: focused
-                    ? `${theme.colors.brand}26`
-                    : 'transparent',
+                  // Chip activo `brandDim` (token, MISMO que el driver) en vez de un alpha suelto.
+                  backgroundColor: focused ? theme.colors.brandDim : 'transparent',
                 },
               ]}>
               <Icon active={focused} color={tint} size={22} />

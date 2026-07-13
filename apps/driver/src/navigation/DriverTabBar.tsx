@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Text, useTheme } from '@veo/ui-kit';
+import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
 
 /** Alto del pill flotante (fila del item + padding del pill), sin el inset inferior. */
 const PILL_HEIGHT = 66;
@@ -41,9 +41,12 @@ export function DriverTabBar({
       <View
         style={[
           styles.pill,
-          // Pill frosted CLARO sobre el mapa Daylight Trust (~92% blanco). La translucidez exige rgba
-          // (los tokens del tema son opacos): excepción frosted documentada.
-          { backgroundColor: 'rgba(255,255,255,0.92)', borderColor: theme.colors.borderStrong },
+          // Pill frosted CLARO sobre el mapa (~92% surfaceElevated) — MISMO tratamiento que el passenger
+          // (AppTabBar): superficie de confianza sobre el mapa, no un vidrio translúcido que ensucia.
+          {
+            backgroundColor: hexAlpha(theme.colors.surfaceElevated, 0.92),
+            borderColor: theme.colors.borderStrong,
+          },
         ]}
       >
         {state.routes.map((route, index) => {

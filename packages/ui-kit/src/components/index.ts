@@ -28,6 +28,16 @@ export { RideOptionRow, type RideOptionRowProps } from './RideOptionRow';
 export { DriverCard, type DriverCardProps } from './DriverCard';
 export { SosButton, type SosButtonProps } from './SosButton';
 export { RoutePin, type RoutePinProps, type RoutePinVariant } from './RoutePin';
+// Glifos de tab bar compartidos (misma identidad passenger + driver): fill-on-active.
+export {
+  TabGlyphHome,
+  TabGlyphTrips,
+  TabGlyphAccount,
+  TabGlyphSecurity,
+  TabGlyphCarpool,
+  TabGlyphEarnings,
+  type TabGlyphProps,
+} from './TabGlyphs';
 export {
   Appear,
   PressableScale,
