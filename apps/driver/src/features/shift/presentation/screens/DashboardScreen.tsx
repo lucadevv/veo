@@ -404,7 +404,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   // Cola de pujas FLOTANTE (no vive DENTRO del dock): es una columna que baja DESDE ARRIBA (bajo el
   // header) — cada puja nueva entra arriba y empuja a las anteriores hacia abajo, y la banda scrollea si
   // desborda. Acotada por `bidsBandMaxHeight` para que NUNCA tape el dock (queda siempre visible abajo).
-  const openBidsList = openBids.data ?? [];
+  // Orden NEWEST-FIRST: la puja más nueva entra ARRIBA y empuja a las anteriores hacia abajo (pedido del
+  // jefe). `expiresAt` es fijo por puja y la ventana es constante → más reciente ⇒ expira más tarde ⇒ va arriba.
+  const openBidsList = [...(openBids.data ?? [])].sort((a, b) => b.expiresAt - a.expiresAt);
   const hasBids = online && !activeTripId && openBidsList.length > 0;
   // Banda disponible entre el header (arriba) y el dock+tab bar (abajo): se reserva alto de sobra para el
   // dock (≈300) para GARANTIZAR que la columna se corte antes de llegar a él (erra chico = seguro).
