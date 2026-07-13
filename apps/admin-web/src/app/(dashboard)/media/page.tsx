@@ -144,7 +144,7 @@ export default function MediaPage() {
                     <th className="w-10" />
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="stagger">
                   {rows.map((r) => (
                     <RequestRow
                       key={r.id}

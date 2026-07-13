@@ -124,7 +124,7 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
             </div>
 
             {/* Sidebar */}
-            <div className="flex flex-col gap-4">
+            <div className="stagger flex flex-col gap-4">
               <IncidentStateCard panic={panic} elapsedStr={elapsed(panic.triggeredAt, now)} />
               <PeopleCard panic={panic} />
               <TripContextCard panic={panic} trip={trip} />
@@ -344,22 +344,28 @@ function TimelineCard({ panic }: { panic: Panic }) {
 }
 
 function IncidentStateCard({ panic, elapsedStr }: { panic: Panic; elapsedStr: string }) {
+  // Incidente abierto (sin resolver): la tarjeta se tinta de alerta y el cronómetro sube a número-display —
+  // el tiempo corriendo es EL dato urgente del vistazo (ritmo En Vivo). Resuelto → neutro.
+  const open = !panic.resolvedAt;
   return (
-    <Card>
+    <Card className={cn(open && 'border-danger/25 bg-danger/[0.04]')}>
       <div className="px-4 pt-4">
         <p className="text-sm font-semibold text-ink">Estado del incidente</p>
       </div>
+      {open ? (
+        <div className="px-4 pt-3.5">
+          <p className="text-[13px] font-medium text-ink-muted">Tiempo transcurrido</p>
+          <p className="mt-1 font-display text-[34px] font-bold leading-none tracking-[-1.2px] tabular text-danger">
+            {elapsedStr}
+          </p>
+        </div>
+      ) : null}
       <CardContent className="grid grid-cols-2 gap-x-4 gap-y-3 p-4 text-sm">
         {/* Tipo/Origen/Severidad son CONSTANTES del diseño VEO (pánico OCULTO por botón engañoso, siempre
             urgente) — no campos inventados. Operador a cargo = quien reconoció. */}
         <Row k="Tipo" v="Pánico oculto" tone="accent" />
         <Row k="Severidad" v="Alta" tone="danger" />
-        <Row
-          k="Tiempo transcurrido"
-          v={panic.resolvedAt ? 'Cerrado' : elapsedStr}
-          tone={panic.resolvedAt ? undefined : 'danger'}
-          mono
-        />
+        {open ? null : <Row k="Tiempo transcurrido" v="Cerrado" mono />}
         <Row k="Origen" v="Botón oculto" />
         <Row k="Operador a cargo" v={panic.acknowledgedBy ?? '—'} />
       </CardContent>

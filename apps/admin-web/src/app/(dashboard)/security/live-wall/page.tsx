@@ -133,7 +133,7 @@ export default function LiveWallPage() {
             description="No hay viajes activos para monitorear en este momento."
           />
         ) : (
-          <div className="grid gap-4 pt-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="stagger grid gap-4 pt-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {/* Visores abiertos cuyo viaje terminó: cierre honesto en vez de que el tile desaparezca sin aviso. */}
             {endedGrantIds.map((tripId) => (
               <div

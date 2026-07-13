@@ -64,7 +64,6 @@ export default function PanicsPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Centro de pánico"
-        description="Respuesta a incidentes en tiempo real"
         breadcrumbs={[{ label: 'Seguridad' }, { label: 'Pánicos' }]}
         actions={
           activos > 0 ? (
@@ -110,7 +109,7 @@ export default function PanicsPage() {
             ) : rows.length === 0 ? (
               <EmptyState title="Sin alertas" description="No hay alertas en esta vista." />
             ) : (
-              <ul className="space-y-2">
+              <ul className="stagger space-y-2">
                 {rows.map((r) => (
                   <li key={r.id}>
                     <IncidentCard
@@ -161,7 +160,7 @@ function IncidentCard({
       onClick={onSelect}
       aria-pressed={selected}
       className={cn(
-        'w-full rounded-xl border p-3 text-left transition-colors',
+        'card-interactive w-full rounded-xl border p-3 text-left',
         selected
           ? 'border-accent bg-accent/[0.04]'
           : active
