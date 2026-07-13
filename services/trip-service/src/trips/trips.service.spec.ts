@@ -2031,6 +2031,29 @@ describe('TripsService.complete · EFECTIVO (cashCollected propaga al evento)', 
   });
 });
 
+describe('TripsService.complete · MÉTRICAS (origen viaja en trip.completed → corte "Ingresos por distrito")', () => {
+  function inProgress() {
+    return buildTrip({ status: TripStatus.IN_PROGRESS, driverId: 'drv-1' });
+  }
+
+  /** Extrae el origen del payload trip.completed encolado (lat = originLat, lon = originLng en el evento). */
+  function completedGeo(prisma: ReturnType<typeof makePrisma>) {
+    const ev = prisma._outbox.find((e) => e.eventType === 'trip.completed');
+    return ev?.envelope.payload as { originLat?: number; originLng?: number } | undefined;
+  }
+
+  it('el ORIGEN del viaje (originLat + originLon→originLng) viaja en trip.completed → payment lo zonifica a distrito', async () => {
+    const prisma = makePrisma(inProgress());
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    await svc.complete('trip-1');
+    const payload = completedGeo(prisma);
+    // el trip persiste el origen como originLat/originLon; el evento expone la lat como originLat y la lon
+    // como originLng (buildTrip default: -12.0464 / -77.0428). SIN esto el corte por distrito queda vacío.
+    expect(payload?.originLat).toBe(-12.0464);
+    expect(payload?.originLng).toBe(-77.0428);
+  });
+});
+
 // ──────────────────────── ADR 013 · catálogo de ofertas en createTrip (Lote B) ────────────────────────
 
 describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedencia + pool + pricing)', () => {
