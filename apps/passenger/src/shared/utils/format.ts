@@ -14,6 +14,13 @@ export function formatPEN(cents: number): string {
   return `${sign}S/ ${grouped}.${remainder.toString().padStart(2, '0')}`;
 }
 
+/** Entero con separador de miles (es-PE usa coma): 1890 → "1,890". Sin Intl (Hermes-safe). */
+export function formatInt(value: number): string {
+  return Math.trunc(value)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 /** Distancia en metros a texto legible: 850 → "850 m", 4200 → "4.2 km". */
 export function formatDistance(meters: number): string {
   if (meters < 1000) {

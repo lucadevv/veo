@@ -19,21 +19,19 @@ import {useTranslation} from 'react-i18next';
 import {Pressable, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
-import {
-  formatDurationMinutes,
-  formatPEN,
-} from '../../../../shared/utils/format';
+import {formatInt, formatPEN} from '../../../../shared/utils/format';
 import type {WaypointProposalController} from '../hooks/useWaypointProposal';
-import {TripStatusStrip} from './TripStatusStrip';
 import {IconCamera, IconChat, IconClose, IconRoute, IconShare} from './icons';
 import {EnterView} from './motion';
 
 export interface ActiveTripBodyProps {
   tripId: string;
   trip: TripActiveView;
-  /** Estado efectivo (socket o REST) + ETA en vivo. */
+  /**
+   * Estado efectivo (socket o REST). El ETA en vivo se muestra en la franja de estado, que ahora es el
+   * HEADER colapsable del sheet (`ActiveTripSheetHeader`), no dentro de este cuerpo.
+   */
   status: TripStatus | string;
-  etaSeconds: number | null;
   /** Abrir la cámara del habitáculo a pantalla completa (solo en curso). */
   onOpenCamera: () => void;
   /** Abrir el chat con el conductor (acción "Mensaje" del sheet — design/veo.pen fLKdk Actions). */
@@ -63,7 +61,6 @@ export function ActiveTripBody({
   tripId,
   trip,
   status,
-  etaSeconds,
   onOpenCamera,
   onOpenChat,
   onOpenFamilyShare,
@@ -84,8 +81,6 @@ export function ActiveTripBody({
   const [reasonDetail, setReasonDetail] = useState('');
 
   const isInProgress = status === tripStatus.enum.IN_PROGRESS;
-  const etaMinutes =
-    etaSeconds != null ? formatDurationMinutes(etaSeconds) : null;
   const hasDriver = Boolean(trip.driver);
 
   const cancelMutation = useMutation({
@@ -107,30 +102,35 @@ export function ActiveTripBody({
 
   return (
     <View style={{gap: theme.spacing.md}}>
-      {/* Franja de estado canónica: línea sutil de extremo a extremo con el vehículo del trip animado
-          (se desliza → cuando el viaje está en movimiento; quieto con pulso al llegar) + etiqueta de
-          estado PERSONALIZADA con el nombre del conductor y el ETA como pill (design/veo.pen fLKdk
-          StatusRow: "Carlos está en camino" + "3 min"). */}
-      <TripStatusStrip
-        status={status}
-        driverName={trip.driver?.name ?? null}
-        etaLabel={
-          etaMinutes != null
-            ? t('trip.etaMinutes', {minutes: etaMinutes})
-            : null
-        }
-      />
-
+      {/* La franja de estado (conductor + ETA) subió al HEADER colapsable del sheet
+          (`ActiveTripSheetHeader`): queda visible aun con el sheet plegado al mínimo. Este cuerpo abre
+          directo con la tarjeta del conductor. */}
       {hasDriver ? (
         <EnterView>
           <DriverCard
             // SEGURIDAD: nombre real del conductor; "Conductor" genérico solo si el backend no lo tiene.
             name={trip.driver?.name ?? t('trip.driver')}
             // Sello VERIFICADO (pen DriverCard badge-check): derivado del background check REAL del
-            // contrato — nunca se asume. El ETA vive en la franja de estado (pen), no acá.
-            verified={trip.driver?.backgroundCheckStatus === 'APPROVED'}
+            // contrato — nunca se asume. El valor del backend (identity) es 'CLEARED' (su vocabulario para
+            // "antecedentes aprobados"), NO 'APPROVED' — antes se comparaba mal y el sello no salía jamás.
+            verified={trip.driver?.backgroundCheckStatus === 'CLEARED'}
             verifiedLabel={t('trip.verifiedDriver')}
             rating={trip.driver?.rating ?? undefined}
+            // Línea de rating (pen z2MKq):
+            //  · con rating y viajes (>0) → "4.9 · 1,890 viajes" (`tripCount` = viajes COMPLETED de por
+            //    vida, del contrato — señal de confianza real, NO el conteo de 30 días); miles formateados;
+            //  · con rating pero 0 viajes → solo "5.0" (undefined → la card cae a rating.toFixed);
+            //  · SIN rating (conductor nuevo) → "Conductor nuevo" (sin estrellas), nunca en blanco.
+            ratingText={
+              trip.driver?.rating == null
+                ? t('trip.driverNew')
+                : (trip.driver.tripCount ?? 0) > 0
+                  ? t('trip.driverRatingTrips', {
+                      rating: trip.driver.rating.toFixed(1),
+                      trips: formatInt(trip.driver.tripCount ?? 0),
+                    })
+                  : undefined
+            }
             vehicle={
               trip.vehicle
                 ? `${trip.vehicle.make} ${trip.vehicle.model} · ${trip.vehicle.color}`

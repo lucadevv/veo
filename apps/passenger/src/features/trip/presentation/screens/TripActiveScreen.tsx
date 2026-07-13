@@ -344,11 +344,6 @@ export function TripActiveScreen(): React.JSX.Element {
                   : undefined
               }
               plate={trip.vehicle?.plate}
-              eta={
-                etaMinutes != null
-                  ? t('trip.etaMinutes', {minutes: etaMinutes})
-                  : undefined
-              }
             />
           </EnterView>
         ) : !isCompleted && !isAborted ? (

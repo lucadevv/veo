@@ -16,14 +16,19 @@ import Animated, {
 
 /**
  * Pill "EN VIVO" sobre el mapa del viaje activo. Pieza PREMIUM dedicada (no el StatusPill genérico): es
- * la señal del diferenciador de seguridad de VEO ("tu viaje se transmite en vivo"), así que merece su
- * propio tratamiento — fondo GLASS oscuro del DS (`overlay`), borde sutil, tipografía chica en
- * VERSALITAS con tracking (variante `label`) y un punto VERDE (token `success`) que PULSA suave (~2s,
- * opacidad + halo en escala) en el UI thread (reanimated, sin timers JS → pausa solo en background).
+ * la señal del diferenciador de seguridad de VEO ("tu viaje se transmite/graba en vivo"), así que merece
+ * su propio tratamiento — fondo GLASS oscuro del DS (`overlay`), borde sutil, tipografía chica en
+ * VERSALITAS con tracking (variante `label`) y un punto ROJO que PULSA suave (~2s, opacidad + halo en
+ * escala) en el UI thread (reanimated, sin timers JS → pausa solo en background).
+ *
+ * COLOR — deliberado, NO tocar a verde: el punto es `danger` (ROJO) porque su semántica es REC/grabación
+ * (la cámara del habitáculo está transmitiendo), el código universal de "estás siendo grabado". No es un
+ * indicador de conexión (eso sí sería verde, como el "En vivo" del conductor). Cambiarlo a `success`
+ * rompería la señal de seguridad. Cero hex inline: sale de `theme.colors.danger`.
  *
  * Por qué dedicada y no el StatusPill: el StatusPill se reusa para muchos estados (su fondo es un tinte
  * del tono); para el overlay del mapa queríamos un cristal oscuro legible sobre cualquier punto del mapa
- * y un dot vivo, sin mutar el componente compartido. Color verde = token `success` (cero hex inline).
+ * y un dot vivo, sin mutar el componente compartido.
  *
  * Accesibilidad: expone el label como texto ("EN VIVO"); el pulso es decorativo. Respeta reduce-motion.
  */

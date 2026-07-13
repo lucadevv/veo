@@ -19,6 +19,8 @@ import type {RoutePlace} from '../../../maps/domain/entities';
 import type {SavedPlace} from '../../../places/domain/entities';
 import {ErrorState} from '../../../../shared/presentation/components/ScreenStates';
 import {ActiveTripBody} from '../components/ActiveTripBody';
+import {TripStatusStrip} from '../components/TripStatusStrip';
+import {formatDurationMinutes} from '../../../../shared/utils/format';
 import {CompletionBody} from '../components/CompletionBody';
 import {DebtStrip} from '../components/DebtStrip';
 import {HomeHero} from '../components/HomeHero';
@@ -209,7 +211,6 @@ export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
       tripId={ctx.activeTripId as string}
       trip={ctx.tripDetail}
       status={ctx.board.status ?? ctx.tripDetail.status}
-      etaSeconds={ctx.live.etaSeconds}
       onOpenCamera={ctx.onOpenCamera}
       onOpenChat={ctx.onOpenChat}
       onOpenFamilyShare={ctx.onOpenFamilyShare}
@@ -217,6 +218,44 @@ export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
       onCancelled={ctx.clearTrip}
       addStop={ctx.addStop}
     />
+  );
+}
+
+/**
+ * Header COLAPSABLE del viaje vivo: la franja de estado (conductor + ETA) es lo ÚNICO que sigue visible
+ * cuando el pasajero arrastra el grabber hacia abajo (snap 'header' → mapa al máximo). Es el gesto del
+ * conductor, espejado: la info esencial persiste, el detalle (tarjeta/tarifa/acciones) se pliega. Sin
+ * `tripDetail` todavía (ventana breve de carga) el header queda vacío; el cuerpo muestra el skeleton.
+ */
+export function ActiveTripSheetHeader({ctx}: SlotProps): React.JSX.Element {
+  const theme = useTheme();
+  const {t} = useTranslation();
+  // El header va FUERA del scroll padded del sheet → lleva su propio padding (mismo criterio que el header
+  // del conductor). El `paddingBottom` da aire a la franja cuando el sheet está COLAPSADO en 'header' (es
+  // lo único visible sobre el borde inferior); el `paddingHorizontal` la alinea con las cards del cuerpo.
+  const headerPad = {
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: theme.spacing.xs,
+    paddingBottom: theme.spacing.sm,
+  };
+  if (!ctx.tripDetail) {
+    return <View style={headerPad} />;
+  }
+  const {etaSeconds} = ctx.live;
+  const etaMinutes =
+    etaSeconds != null ? formatDurationMinutes(etaSeconds) : null;
+  return (
+    <View style={headerPad}>
+      <TripStatusStrip
+        status={ctx.board.status ?? ctx.tripDetail.status}
+        driverName={ctx.tripDetail.driver?.name ?? null}
+        etaLabel={
+          etaMinutes != null
+            ? t('trip.etaMinutes', {minutes: etaMinutes})
+            : null
+        }
+      />
+    </View>
   );
 }
 
@@ -730,7 +769,7 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   },
   enRoute: {
     Body: ActiveTripPhaseBody,
-    Header: null,
+    Header: ActiveTripSheetHeader,
     expanded: false,
     showNearby: false,
     activeTrip: true,
@@ -743,7 +782,7 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   },
   arrived: {
     Body: ActiveTripPhaseBody,
-    Header: null,
+    Header: ActiveTripSheetHeader,
     expanded: false,
     showNearby: false,
     activeTrip: true,
@@ -756,7 +795,7 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   },
   inProgress: {
     Body: ActiveTripPhaseBody,
-    Header: null,
+    Header: ActiveTripSheetHeader,
     expanded: false,
     showNearby: false,
     activeTrip: true,

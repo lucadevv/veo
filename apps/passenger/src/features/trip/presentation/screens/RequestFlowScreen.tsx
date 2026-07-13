@@ -589,9 +589,13 @@ export function RequestFlowScreen(): React.JSX.Element {
 
   // Snap por fase: lo declara el descriptor (`expanded`: cotización y cierre a full; el resto, su
   // REPOSO). El reposo del Home idle es la HOJA del pen (índice 1) — el índice 0 es el anclaje
-  // colapsado, al que solo se llega arrastrando. En route/trip el reposo es el peek content-hug (0).
+  // colapsado, al que solo se llega arrastrando. El VIAJE VIVO también reposa expandido (índice 1 =
+  // content-hug de la tarjeta+tarifa+acciones): el índice 0 es la franja de estado sola, a la que solo
+  // se llega arrastrando el grabber hacia abajo para maximizar el mapa (misma personalidad que el
+  // conductor). En route/trip por peek content-hug quedó atrás.
   const expandedPhase = descriptor.expanded;
-  const restingIndex = mapMode === 'idle' ? FULL_INDEX : PEEK_INDEX;
+  const restingIndex =
+    mapMode === 'idle' || descriptor.activeTrip ? FULL_INDEX : PEEK_INDEX;
   useEffect(() => {
     sheetRef.current?.snapToIndex(expandedPhase ? FULL_INDEX : restingIndex);
   }, [expandedPhase, restingIndex]);
@@ -656,6 +660,12 @@ export function RequestFlowScreen(): React.JSX.Element {
   // ubicación (y cierra el teclado — ver handleSnap); el único cierre es la X. En route/trip,
   // content-hug + full.
   const sheetSnapPoints = useMemo<ReadonlyArray<SnapPoint>>(() => {
+    // VIAJE VIVO (enRoute/arrived/inProgress): colapsable a la SOLA franja de estado (snap 'header') → el
+    // pasajero baja el grabber y el mapa queda al máximo; el reposo abraza el contenido (tarjeta del
+    // conductor + tarifa + acciones) capado a la hoja del pen (0.94). Es el gesto del conductor, espejado.
+    if (descriptor.activeTrip) {
+      return ['header', {content: 0.94}];
+    }
     if (mapMode !== 'idle') {
       return SNAP_POINTS;
     }
@@ -672,7 +682,14 @@ export function RequestFlowScreen(): React.JSX.Element {
     // Máximo CONTENT-HUG (crece al contenido) capado a la hoja del .pen: si el contenido es corto,
     // el sheet lo abraza; si es alto, se queda en la hoja del pen y scrollea adentro.
     return [HOME_SHEET_COLLAPSED_FRACTION, {content: sheetFraction}];
-  }, [mapMode, flow, windowHeight, insets.top, bottomInset]);
+  }, [
+    descriptor.activeTrip,
+    mapMode,
+    flow,
+    windowHeight,
+    insets.top,
+    bottomInset,
+  ]);
 
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
   // solo lugar. Cada fase toma de acá exactamente lo que su body/header necesita.

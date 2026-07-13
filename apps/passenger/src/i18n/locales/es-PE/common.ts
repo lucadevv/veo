@@ -913,6 +913,14 @@ export const common = {
     actionCancel: 'Cancelar',
     /** A11y del badge-check junto al nombre (pen DriverCard): el conductor pasó la verificación. */
     verifiedDriver: 'Conductor verificado',
+    /**
+     * Línea de rating de la DriverCard (pen z2MKq): "4.9 · 1,890 viajes". `count` es el número de
+     * calificaciones recibidas (`ratingCount` del contrato) ya formateado con miles — el conteo REAL de
+     * viajes calificados que el conductor acumuló; nunca un valor inventado.
+     */
+    driverRatingTrips: '{{rating}} · {{trips}} viajes',
+    /** Línea de rating cuando el conductor aún no tiene calificaciones (sin estrellas, no queda en blanco). */
+    driverNew: 'Conductor nuevo',
     waitingDriver: 'Buscando un conductor para ti…',
     arrived: 'Tu conductor llegó',
     completedTitle: 'Viaje completado',
