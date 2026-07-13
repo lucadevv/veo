@@ -105,6 +105,11 @@ describe('AnalyticsService.overview (bff) · KPIs de hoy (derivados + passthroug
       revenueTodayCents: 13500,
       platformMarginTodayCents: 2700,
       tripCountToday: 4,
+      byMode: [
+        { mode: 'FIXED', trips: 2 },
+        { mode: 'PUJA', trips: 1 },
+        { mode: 'CARPOOLING', trips: 1 },
+      ],
       revenuePerHour: [],
     });
     const svc = new AnalyticsService(
@@ -122,6 +127,11 @@ describe('AnalyticsService.overview (bff) · KPIs de hoy (derivados + passthroug
     expect(out.tripCountToday).toBe(4);
     expect(out.avgTicketTodayCents).toBe(3375); // round(13500 / 4)
     expect(out.cancellationRateToday).toBeCloseTo(0.2); // 2 / (8 + 2)
+    expect(out.byMode).toEqual([
+      { mode: 'FIXED', trips: 2 },
+      { mode: 'PUJA', trips: 1 },
+      { mode: 'CARPOOLING', trips: 1 },
+    ]); // passthrough del desglose por modo de payment (donut)
   });
 
   it('degradación honesta: payment caído → margen/viajes/ticket 0; sin cierres → cancelación null', async () => {
@@ -146,5 +156,6 @@ describe('AnalyticsService.overview (bff) · KPIs de hoy (derivados + passthroug
     expect(out.tripCountToday).toBe(0);
     expect(out.avgTicketTodayCents).toBe(0); // sin viajes → no divide por 0
     expect(out.cancellationRateToday).toBeNull(); // sin cierres hoy
+    expect(out.byMode).toEqual([]); // payment caído → donut sin data (no inventado)
   });
 });

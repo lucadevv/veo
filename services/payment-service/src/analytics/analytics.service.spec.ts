@@ -22,6 +22,7 @@ function buildService(over: {
   };
   moneyIn?: { netSettledCents: number; refundedCents: number };
   tripCountToday?: number;
+  byMode?: { mode: string; trips: number }[];
 }) {
   const repo = {
     sumMoneyInComponentsSince: vi.fn(
@@ -37,6 +38,7 @@ function buildService(over: {
         },
     ),
     countFareTripsSince: vi.fn(async () => over.tripCountToday ?? 0),
+    countTripsByModeSince: vi.fn(async () => over.byMode ?? []),
     revenuePerHourBuckets: vi.fn(async () => []),
   };
   return { svc: new AnalyticsService(repo as unknown as AnalyticsRepository), repo };
@@ -66,5 +68,27 @@ describe('P-B · analytics money-in al banco (excluye CASH, net-aware)', () => {
     const { svc } = buildService({ tripCountToday: 7 });
     const out = await svc.revenue(new Date('2026-07-02T18:00:00Z'));
     expect(out.tripCountToday).toBe(7);
+  });
+
+  it('byMode: expone los viajes de hoy por modo 3-way tal cual los agrupa el repo (donut "Modos de servicio")', async () => {
+    const { svc } = buildService({
+      byMode: [
+        { mode: 'FIXED', trips: 5 },
+        { mode: 'PUJA', trips: 3 },
+        { mode: 'CARPOOLING', trips: 2 },
+      ],
+    });
+    const out = await svc.revenue(new Date('2026-07-02T18:00:00Z'));
+    expect(out.byMode).toEqual([
+      { mode: 'FIXED', trips: 5 },
+      { mode: 'PUJA', trips: 3 },
+      { mode: 'CARPOOLING', trips: 2 },
+    ]);
+  });
+
+  it('byMode: sin cobros del día → [] (degradación honesta, no un bucket inventado)', async () => {
+    const { svc } = buildService({});
+    const out = await svc.revenue(new Date('2026-07-02T18:00:00Z'));
+    expect(out.byMode).toEqual([]);
   });
 });

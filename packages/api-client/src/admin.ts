@@ -100,6 +100,9 @@ export const analyticsOverview = z.object({
   /** Tasa de cancelación de HOY (derivada; null sin cierres). KPI "Cancelación hoy" (fracción, 0.05 = 5%). */
   cancellationRateToday: z.number().nullable(),
   avgDurationSeconds: z.number().nullable(),
+  /** Viajes de HOY por MODO 3-way (FIXED | PUJA | CARPOOLING · payment-service, mismo bucketing que el
+   *  revenue-por-modo). Alimenta el donut "Modos de servicio · viajes de hoy". [] si payment cae o no hay data. */
+  byMode: z.array(z.object({ mode: z.string(), trips: z.number().int() })),
   series: z.array(overviewSeriesPoint),
 });
 export type AnalyticsOverview = z.infer<typeof analyticsOverview>;

@@ -31,6 +31,9 @@ export interface RevenueAnalytics {
   platformMarginTodayCents: number;
   /** Viajes digitales de HOY (cobros kind=FARE capturados desde medianoche Lima) → KPI "Viajes hoy" + ticket promedio. */
   tripCountToday: number;
+  /** Viajes de HOY por MODO 3-way (FIXED | PUJA | CARPOOLING): mismo bucketing/cohorte que el revenue-por-modo
+   *  (`sumRevenueByModeSince`) pero contando cobros. Alimenta el donut "Modos de servicio · viajes de hoy". [] si sin data. */
+  byMode: { mode: string; trips: number }[];
   /** Revenue por hora de las últimas 24h, bucket por hora UTC, orden ascendente. */
   revenuePerHour: RevenueHourBucket[];
 }
@@ -120,14 +123,15 @@ export class AnalyticsService {
   constructor(private readonly repo: AnalyticsRepository) {}
 
   async revenue(now: Date = new Date()): Promise<RevenueAnalytics> {
-    const [revenueTodayCents, platformMarginTodayCents, tripCountToday, revenuePerHour] =
+    const [revenueTodayCents, platformMarginTodayCents, tripCountToday, byMode, revenuePerHour] =
       await Promise.all([
         this.revenueToday(now),
         this.platformMarginToday(now),
         this.repo.countFareTripsSince(limaMidnightUtc(now)),
+        this.repo.countTripsByModeSince(limaMidnightUtc(now)),
         this.revenuePerHour(now),
       ]);
-    return { revenueTodayCents, platformMarginTodayCents, tripCountToday, revenuePerHour };
+    return { revenueTodayCents, platformMarginTodayCents, tripCountToday, byMode, revenuePerHour };
   }
 
   /**

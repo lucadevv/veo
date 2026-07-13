@@ -154,6 +154,36 @@ export class AnalyticsRepository {
   }
 
   /**
+   * Conteo de VIAJES por MODO de la ventana `[since, until)`, en las MISMAS 3 vías que `sumRevenueByModeSince`
+   * (Fijo/Puja/Carpooling) — mismo `groupBy(['mode','dispatchMode'])`, mismo cohorte digital capturado, mismos
+   * fallbacks legacy (`mode` null → ON_DEMAND, `dispatchMode` null → FIXED) — pero agregando `_count` en vez de
+   * `_sum`. Espeja EXACTO la regla de bucketing del revenue-por-modo para que el conteo del donut y el desglose de
+   * ingresos reconcilien. Réplica. Devuelve buckets 'FIXED' | 'PUJA' | 'CARPOOLING'.
+   */
+  async countTripsByModeSince(
+    since: Date,
+    until?: Date,
+  ): Promise<{ mode: string; trips: number }[]> {
+    const rows = await this.prisma.read.payment.groupBy({
+      by: ['mode', 'dispatchMode'],
+      _count: { _all: true },
+      where: {
+        method: { in: [...NON_CASH_METHODS] },
+        status: { in: [PaymentStatus.CAPTURED, PaymentStatus.PARTIALLY_REFUNDED] },
+        capturedAt: { gte: since, ...(until ? { lt: until } : {}) },
+      },
+    });
+    const byMode = new Map<string, number>();
+    for (const r of rows) {
+      const mode = r.mode ?? PaymentMode.ON_DEMAND;
+      // MISMA regla que sumRevenueByModeSince: carpooling es su bucket; el on-demand se parte en Fijo/Puja.
+      const bucket = mode === PaymentMode.CARPOOLING ? 'CARPOOLING' : (r.dispatchMode ?? 'FIXED');
+      byMode.set(bucket, (byMode.get(bucket) ?? 0) + (r._count._all ?? 0));
+    }
+    return [...byMode.entries()].map(([mode, trips]) => ({ mode, trips }));
+  }
+
+  /**
    * Revenue (Σ netSettled) por DISTRITO de origen de la ventana `[since, until)`, para el corte "Ingresos por
    * distrito" del panel. El `Payment.district` lo ZONIFICÓ payment en la captura (lat/lng del `trip.completed` →
    * distrito de Lima) y quedó denormalizado — no se re-zonifica ni joinea. `district` null (cobro sin geo / fuera

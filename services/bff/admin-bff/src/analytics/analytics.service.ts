@@ -40,6 +40,9 @@ export interface OverviewMetrics {
   /** Tasa de cancelación de HOY, DERIVADA = cancelledToday / (completedToday + cancelledToday); null sin cierres. */
   cancellationRateToday: number | null;
   avgDurationSeconds: number | null;
+  /** Viajes de HOY por MODO 3-way (FIXED | PUJA | CARPOOLING) — dato de payment-service (mismo bucketing que el
+   *  revenue-por-modo). Alimenta el donut "Modos de servicio · viajes de hoy". [] si payment cae o no hay data. */
+  byMode: { mode: string; trips: number }[];
   series: OverviewSeriesPoint[];
 }
 
@@ -116,6 +119,7 @@ interface RevenueStats {
   revenueTodayCents: number;
   platformMarginTodayCents: number;
   tripCountToday: number;
+  byMode: { mode: string; trips: number }[];
   revenuePerHour: { bucket: string; revenueCents: number }[];
 }
 
@@ -167,6 +171,8 @@ export class AnalyticsService {
       avgTicketTodayCents: tripCountToday > 0 ? Math.round(revenueTodayCents / tripCountToday) : 0,
       cancellationRateToday: closedToday > 0 ? cancelledToday / closedToday : null,
       avgDurationSeconds: trip?.avgDurationSeconds ?? null,
+      // Viajes de hoy por modo (donut). Degradación honesta: payment caído → [] (no dato inventado).
+      byMode: payment?.byMode ?? [],
       series: this.mergeSeries(trip?.tripsPerHour ?? [], payment?.revenuePerHour ?? []),
     };
   }

@@ -204,7 +204,7 @@ export default function OpsPage() {
         {/* Charts */}
         <div className="flex flex-col gap-5 xl:flex-row">
           <HourlyBars series={overview.data?.series ?? []} />
-          <ServiceModesDonut />
+          <ServiceModesDonut byMode={overview.data?.byMode ?? []} />
         </div>
       </div>
     </div>
