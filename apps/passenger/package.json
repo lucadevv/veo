@@ -5,7 +5,9 @@
   "description": "VEO Passenger · React Native iOS + Android",
   "scripts": {
     "android": "ENVFILE=env/development.env react-native run-android",
+    "android:local": "ENVFILE=env/local.env react-native run-android",
     "ios": "ENVFILE=env/development.env react-native run-ios --list-devices",
+    "ios:local": "ENVFILE=env/local.env react-native run-ios --list-devices",
     "android:preview": "ENVFILE=env/preview.env react-native run-android",
     "ios:preview": "ENVFILE=env/preview.env react-native run-ios --list-devices",
     "start": "react-native start",

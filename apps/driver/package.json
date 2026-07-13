@@ -5,7 +5,9 @@
   "description": "VEO Conductor · React Native (iOS + Android) · New Architecture",
   "scripts": {
     "android": "ENVFILE=env/development.env react-native run-android --port 8084",
+    "android:local": "ENVFILE=env/local.env react-native run-android --port 8084",
     "ios": "RCT_METRO_PORT=8084 ENVFILE=env/development.env react-native run-ios --list-devices --port 8084",
+    "ios:local": "RCT_METRO_PORT=8084 ENVFILE=env/local.env react-native run-ios --list-devices --port 8084",
     "android:preview": "ENVFILE=env/preview.env react-native run-android --port 8084",
     "ios:preview": "RCT_METRO_PORT=8084 ENVFILE=env/preview.env react-native run-ios --list-devices --port 8084",
     "start": "react-native start --host 0.0.0.0 --port 8084",
