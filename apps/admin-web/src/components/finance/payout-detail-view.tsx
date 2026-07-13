@@ -51,7 +51,7 @@ export function PayoutDetailView({ payoutId }: { payoutId: string }) {
           <ErrorState onRetry={() => void detail.refetch()} className="m-7" />
         )
       ) : (
-        <div className="grid flex-1 gap-5 overflow-y-auto p-7 lg:grid-cols-[1fr_340px] lg:items-start">
+        <div className="stagger grid flex-1 gap-5 overflow-y-auto p-7 lg:grid-cols-[1fr_340px] lg:items-start">
           {/* Columna izquierda: Neto a pagar + Viajes incluidos */}
           <div className="flex flex-col gap-[18px]">
             <NetCard payout={payout} tripCount={trips.data?.totalCount ?? null} />

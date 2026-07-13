@@ -85,7 +85,7 @@ export default function CarpoolingPage() {
         </div>
 
         {/* Cards planas, en el orden del diseño (veo.pen). Cada una es su propia mutación con CAS + step-up. */}
-        <div className="mt-5 space-y-5">
+        <div className="stagger mt-5 space-y-5">
           {/* F2.7 · service fee del carpooling (preserva la comisión on-demand en el mismo config · CAS). */}
           <AsyncSection query={commissionQuery} skeleton={<Skeleton className="h-64" />}>
             {(data) => <CarpoolingFeePanel config={data} />}

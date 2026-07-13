@@ -61,20 +61,20 @@ function CompareCard({
   muted?: boolean;
 }) {
   return (
-    <div className="flex-1 rounded-lg border border-border bg-surface p-5">
+    <div className="flex-1 rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
       <div className="flex items-center gap-2">
         <Icon className="size-4 text-ink-subtle" aria-hidden />
-        <span className="text-xs font-medium text-ink-muted">{label}</span>
+        <span className="text-[13px] font-medium text-ink-muted">{label}</span>
       </div>
       <p
         className={cn(
-          'mt-2 font-display font-bold',
-          muted ? 'text-lg text-ink-subtle' : 'tabular text-2xl text-ink',
+          'mt-3 font-display font-bold leading-none',
+          muted ? 'text-lg text-ink-subtle' : 'tabular text-[30px] tracking-[-0.8px] text-ink',
         )}
       >
         {value}
       </p>
-      <p className="mt-1 text-xs text-ink-subtle">{sub}</p>
+      <p className="mt-2 text-xs text-ink-subtle">{sub}</p>
     </div>
   );
 }
@@ -105,7 +105,7 @@ function CompareRow({ run }: { run: ReconciliationRunView }) {
         muted={missing}
       />
       {missing ? (
-        <div className="flex flex-col justify-center gap-1.5 rounded-lg border border-border bg-surface-2 p-5 text-center lg:w-72">
+        <div className="flex flex-col justify-center gap-1.5 rounded-[18px] border border-border bg-surface-2 p-[22px] text-center shadow-3 lg:w-72">
           <span className="font-display text-lg font-bold text-ink-muted">Sin extracto</span>
           <span className="text-xs font-medium text-ink-subtle">
             Conciliación por DB/webhooks — el proveedor aún no expone el extracto para cruzar.
@@ -114,7 +114,7 @@ function CompareRow({ run }: { run: ReconciliationRunView }) {
       ) : (
         <div
           className={cn(
-            'flex flex-col justify-center gap-1 rounded-lg border p-5 text-center lg:w-72',
+            'flex flex-col justify-center gap-1 rounded-[18px] border p-[22px] text-center shadow-3 lg:w-72',
             run.alerted ? 'border-danger bg-danger/12' : 'border-success bg-success/12',
           )}
         >
@@ -218,10 +218,9 @@ export default function ReconciliationPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Reconciliación"
-        description="Cruce diario (BR-P07): el neto capturado en la DB (Yape/Plin) contra el extracto del proveedor."
         breadcrumbs={[{ label: 'Finanzas' }, { label: 'Reconciliación' }]}
       />
-      <div className="min-h-0 flex-1 space-y-5 overflow-auto px-4 pb-6 pt-4 lg:px-6">
+      <div className="stagger min-h-0 flex-1 space-y-5 overflow-auto px-4 pb-6 pt-4 lg:px-6">
         {query.isError ? (
           <ErrorState onRetry={() => void query.refetch()} />
         ) : query.isLoading ? (

@@ -13,7 +13,7 @@ import { useRequestAccess } from '@/lib/use-request-access';
 import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
-import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
+import { MoneyStat, MoneyStatGrid } from '@/components/finance/money-stat-grid';
 import { ErrorState, PermissionState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
 import {
@@ -171,35 +171,37 @@ export default function RefundsPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Reembolsos"
-        description="Solicitudes de devolución a pasajeros · aprobá o rechazá cada una (money-OUT con step-up MFA, auditado)."
+        description="Aprobá o rechazá cada devolución · money-OUT con step-up MFA, queda auditado."
         breadcrumbs={[{ label: 'Finanzas' }, { label: 'Reembolsos' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         {/* KPIs fieles al frame HZ8uz — dato REAL de GET /finance/refunds/stats. */}
         <div className="pt-4">
-          <StatCardGrid>
-            <StatCard
+          <MoneyStatGrid>
+            <MoneyStat
               icon={Inbox}
               iconTone="warn"
               label="Solicitados"
               value={stats ? String(stats.requestedCount) : '—'}
+              // Señal: hay solicitudes esperando aprobación → la card se tinta warn (cola por resolver).
+              alert={stats && stats.requestedCount > 0 ? 'warn' : false}
               loading={statsQuery.isLoading}
             />
-            <StatCard
+            <MoneyStat
               icon={CircleCheck}
               iconTone="brand"
               label="Aprobados"
               value={stats ? String(stats.approvedCount) : '—'}
               loading={statsQuery.isLoading}
             />
-            <StatCard
+            <MoneyStat
               icon={Banknote}
               iconTone="success"
               label="Procesado hoy"
               value={stats ? money(stats.processedTodayCents) : '—'}
               loading={statsQuery.isLoading}
             />
-            <StatCard
+            <MoneyStat
               icon={Percent}
               iconTone="neutral"
               label="Tasa de reembolso"
@@ -207,7 +209,7 @@ export default function RefundsPage() {
               value={stats ? (stats.refundRatePct === null ? '—' : `${stats.refundRatePct.toFixed(1)}%`) : '—'}
               loading={statsQuery.isLoading}
             />
-          </StatCardGrid>
+          </MoneyStatGrid>
         </div>
 
         {/* Toolbar fiel al frame (T/TableToolbar): buscador (crece) · dropdown Estado · Nuevo reembolso. */}

@@ -61,13 +61,13 @@ export default function PricingPage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Precios on-demand"
-        description="La fórmula global del viaje inmediato: tarifa base y comisión. El modo y el piso de cada servicio se definen en Ofertas de servicio."
+        description="El modo y el piso de cada servicio se definen en Ofertas de servicio."
         breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
         {/* El orden cuenta la historia (veo.pen): la FÓRMULA (compartida) y después la comisión (transversal).
             El MODO (FIJO/PUJA) ya no vive acá — con ADR-023 es una palanca per-oferta en Ofertas de servicio. */}
-        <div className="mt-5 space-y-5">
+        <div className="stagger mt-5 space-y-5">
           {/* La FÓRMULA es UNA sola: el precio exacto en FIJO y el sugerido que ve el pasajero en PUJA. */}
           <SectionHeader label="Fórmula de tarifa" hint="el precio en FIJO, el sugerido en PUJA" />
           {/* F2.4 · tarifa base (banderazo + per-km + per-min). El por-km es ÚNICO y all-in (incluye el

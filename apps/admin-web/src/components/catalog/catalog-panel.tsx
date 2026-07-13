@@ -232,7 +232,7 @@ export function CatalogPanel({
       {/* Grilla responsive: 3 columnas holgadas a 1440 (el panel resta el sidebar), colapsa a 2 y luego a 1
           en anchos angostos. `auto-fill` responde al ANCHO DEL CONTENEDOR (no del viewport), así una card
           reusada en un panel angosto se acomoda sola sin media queries atadas a la ventana. */}
-      <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
+      <div className="stagger grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(20rem,1fr))]">
         {rows.map((o) => (
           // El `key` incluye la disponibilidad del bid-floor: cuando su query resuelve (undefined→data),
           // la card se re-monta y el input del piso re-siembra su estado desde el override ya cargado (sin
@@ -449,7 +449,7 @@ function OfferingCard({
     : `Los pasajeros volverán a ver y cotizar ${label}. Esta acción cambia el catálogo global y queda auditada.`;
 
   return (
-    <article className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-5 shadow-2">
+    <article className="card-interactive flex flex-col gap-4 rounded-xl border border-border bg-surface p-5 shadow-2">
       {/* Header (board): ícono en cuadrito con tinte de marca + switch a la derecha. */}
       <div className="flex items-start justify-between gap-3">
         <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">

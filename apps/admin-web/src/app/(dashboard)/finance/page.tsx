@@ -15,7 +15,7 @@ import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/ui/table';
 import { StatusPill } from '@/components/ui/status-pill';
-import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
+import { MoneyStat, MoneyStatGrid } from '@/components/finance/money-stat-grid';
 import { Avatar } from '@/components/ui/avatar';
 import { ErrorState, PermissionState } from '@/components/ui/states';
 import { LoadMore } from '@/components/ui/load-more';
@@ -184,7 +184,6 @@ export default function FinancePage() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Liquidaciones"
-        description="Payouts semanales · el neto = ganancia digital − comisión y deuda CASH neteadas."
         breadcrumbs={[{ label: 'Finanzas' }]}
         actions={can(user, 'finance:payout') ? <RunPayoutsButton /> : null}
       />
@@ -193,36 +192,38 @@ export default function FinancePage() {
             A pagar = volumen total del período (totalCents: no hay bucket "pendiente-de-pago" propio); el resto,
             su bucket money. Iconos alineados al frame (wallet/circle-check/pause/circle-x). */}
         <div className="pt-4">
-          <StatCardGrid>
-            <StatCard
+          <MoneyStatGrid>
+            <MoneyStat
               icon={Wallet}
               iconTone="brand"
               label="A pagar"
               value={stats ? money(stats.totalCents) : '—'}
               loading={statsQuery.isLoading}
             />
-            <StatCard
+            <MoneyStat
               icon={CircleCheck}
               iconTone="success"
               label="Pagado (periodo)"
               value={stats ? money(stats.paidCents) : '—'}
               loading={statsQuery.isLoading}
             />
-            <StatCard
+            <MoneyStat
               icon={Pause}
               iconTone="warn"
               label="Retenido"
               value={stats ? money(stats.heldCents) : '—'}
               loading={statsQuery.isLoading}
             />
-            <StatCard
+            <MoneyStat
               icon={CircleX}
               iconTone="danger"
               label="Con error"
               value={stats ? money(stats.failedCents) : '—'}
+              // Señal: si hay plata rechazada por el riel, la card entera se tinta (no solo el número).
+              alert={stats && stats.failedCents > 0 ? 'danger' : false}
               loading={statsQuery.isLoading}
             />
-          </StatCardGrid>
+          </MoneyStatGrid>
         </div>
 
         {/* Toolbar fiel al frame (T/TableToolbar): buscador (crece) · dropdown Estado · Exportar CSV. */}

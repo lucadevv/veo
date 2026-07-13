@@ -204,7 +204,7 @@ function Loaded({
   }
 
   return (
-    <div className="grid flex-1 gap-5 overflow-y-auto p-7 lg:grid-cols-[1fr_340px] lg:items-start">
+    <div className="stagger grid flex-1 gap-5 overflow-y-auto p-7 lg:grid-cols-[1fr_340px] lg:items-start">
       {/* Columna izquierda: Configuración + Tarifa + Disponibilidad */}
       <div className="flex flex-col gap-[18px]">
         <ConfigCard offering={offering} />
@@ -399,9 +399,11 @@ function MetricsCard({ query }: { query: ReturnType<typeof useOfferingMetrics> }
 /** Un número de métrica (valor grande + label + caption honesta opcional). */
 function Metric({ label, value, caption }: { label: string; value: string; caption?: string }) {
   return (
-    <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-bg px-3.5 py-3">
+    <div className="flex flex-col gap-1 rounded-xl border border-border bg-bg px-4 py-3.5">
       <p className="text-xs font-medium text-ink-muted">{label}</p>
-      <p className="font-display text-2xl font-bold tabular text-ink">{value}</p>
+      <p className="font-display text-[26px] font-bold leading-none tracking-[-0.8px] tabular text-ink">
+        {value}
+      </p>
       {caption ? <p className="text-[10px] text-ink-subtle">{caption}</p> : null}
     </div>
   );

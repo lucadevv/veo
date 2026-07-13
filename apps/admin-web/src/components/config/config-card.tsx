@@ -31,7 +31,7 @@ export function ConfigCard({
   footer?: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-5">
+    <div className="rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-ink">{title}</h3>

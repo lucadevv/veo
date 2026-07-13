@@ -1,11 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { Armchair, ChevronRight, Landmark, Navigation, Ticket, Users } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { formatPEN } from '@veo/utils/money';
 import type { ActiveCarpoolItem, ActiveCarpoolState, ActiveCarpoolsView } from '@/lib/api/schemas';
 import { cn } from '@/lib/cn';
-import { StatCard, StatCardGrid } from '@/components/ui/stat-card';
 import { EmptyState } from '@/components/ui/states';
 
 /**
@@ -99,7 +98,40 @@ function CarpoolRow({ carpool }: { carpool: ActiveCarpoolItem }) {
   );
 }
 
-/** Panel de monitoreo: KPIs (StatCard) + tabla "Carpools activos". `data` REAL del backend (finance/carpooling/active). */
+/**
+ * KPI del monitor con el ritmo de la card de "En vivo" (KpiGrid): label apagado + número display grande
+ * (tabular, tracking apretado) y una línea de contexto opcional. Sin ícono ni tinte — ninguno de estos KPIs
+ * tiene estado de alerta real, así que el tinte danger se reserva para cuando lo haya (fiel a En vivo).
+ */
+function KpiCard({
+  label,
+  value,
+  hint,
+  loading,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  loading?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
+      <p className="text-[13px] font-medium text-ink-muted">{label}</p>
+      {loading ? (
+        <div className="h-8 w-20 animate-pulse rounded bg-surface-2" />
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <p className="font-display text-[34px] font-bold leading-none tracking-[-1.2px] tabular text-ink">
+            {value}
+          </p>
+          {hint ? <p className="text-[13px] text-ink-subtle">{hint}</p> : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Panel de monitoreo: KPIs + tabla "Carpools activos". `data` REAL del backend (finance/carpooling/active). */
 export function CarpoolingMonitor({
   data,
   revenue,
@@ -114,32 +146,19 @@ export function CarpoolingMonitor({
   return (
     <div className="space-y-5">
       {/* 5 KPIs: los 4 primeros de booking-service (cero inventados) + "Recaudado carpooling" (analytics byMode,
-          Σ netSettled = total liquidado, NO el fee). La fila pasa a 5 columnas en desktop. */}
-      <StatCardGrid className="lg:grid-cols-5">
-        <StatCard icon={Users} label="Carpools activos" value={String(stats.activeCount)} />
-        <StatCard
-          icon={Armchair}
+          Σ netSettled = total liquidado, NO el fee). La fila cascadea (stagger) y pasa a 5 columnas en desktop. */}
+      <div className="stagger grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+        <KpiCard label="Carpools activos" value={String(stats.activeCount)} />
+        <KpiCard
           label="Asientos ocupados"
           value={`${stats.avgOccupancyPct}%`}
-          iconTone="success"
           hint={seatsTotal > 0 ? `${stats.seatsReserved} de ${seatsTotal} asientos` : undefined}
         />
-        <StatCard
-          icon={Ticket}
-          label="Cupos disponibles"
-          value={String(stats.seatsAvailable)}
-          iconTone="brand"
-        />
-        <StatCard
-          icon={Navigation}
-          label="En ruta ahora"
-          value={String(stats.enRouteCount)}
-          iconTone="brand"
-        />
+        <KpiCard label="Cupos disponibles" value={String(stats.seatsAvailable)} />
+        <KpiCard label="En ruta ahora" value={String(stats.enRouteCount)} />
         {/* Recaudado carpooling: total LIQUIDADO del modo (Σ netSettled, últimos 30d), rótulo HONESTO — NO es el
             service-fee (ese no tiene fuente). Degrada honesto: cargando (skeleton) / no disponible (error). */}
-        <StatCard
-          icon={Landmark}
+        <KpiCard
           label="Recaudado carpooling"
           value={
             revenue.status === 'ready'
@@ -149,10 +168,9 @@ export function CarpoolingMonitor({
                 : ''
           }
           loading={revenue.status === 'loading'}
-          iconTone="success"
           hint={revenue.status === 'error' ? 'No disponible' : 'Total liquidado · 30d'}
         />
-      </StatCardGrid>
+      </div>
 
       {/* Tabla "Carpools activos" (board TSqpB · Left). */}
       <section className="overflow-hidden rounded-[18px] border border-black/[0.05] bg-surface shadow-3">
@@ -189,14 +207,14 @@ export function CarpoolingMonitor({
 export function CarpoolingMonitorSkeleton() {
   return (
     <div className="space-y-5" role="status" aria-label="Cargando monitoreo de carpooling">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={i}
-            className="rounded-lg border border-border bg-surface px-4 py-3.5"
+            className="rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3"
           >
             <div className="h-3 w-24 animate-pulse rounded bg-surface-2" />
-            <div className="mt-2 h-9 w-16 animate-pulse rounded bg-surface-2" />
+            <div className="mt-4 h-8 w-16 animate-pulse rounded bg-surface-2" />
           </div>
         ))}
       </div>

@@ -141,7 +141,7 @@ export default function CarpoolDetailPage(props: { params: Promise<{ id: string 
           <ErrorState onRetry={() => void query.refetch()} className="m-7" />
         )
       ) : detail ? (
-        <div className="grid flex-1 gap-[18px] overflow-y-auto p-7 lg:grid-cols-[1fr_360px] lg:items-start">
+        <div className="stagger grid flex-1 gap-[18px] overflow-y-auto p-7 lg:grid-cols-[1fr_360px] lg:items-start">
           {/* Columna izquierda: Recorrido · Asientos · Reparto de costo */}
           <div className="flex flex-col gap-[18px]">
             <RecorridoCard detail={detail} markers={markers} route={route} />
