@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, type DriverProfileView } from '@veo/api-client';
+import { isVerificationBypassed } from '../../../../core/config/env';
 import { useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
@@ -116,8 +117,12 @@ export function useRegistrationGate(): RegistrationGate {
   const { data, error, isError } = query;
   useEffect(() => {
     if (data) {
-      // Sincroniza el cache del servidor → store de dominio mediante una acción (no setState suelto).
-      applyBackendStatus(mapProfileToRegistrationStatus(data));
+      // BYPASS local (solo dev, ver `isVerificationBypassed`): fuerza `approved` para saltar el gate de
+      // revisión/alta y aterrizar en las tabs directo. Solo aplica a un conductor que YA existe en el
+      // backend (un 404 sigue yendo al wizard: no se puede "aprobar" un conductor inexistente).
+      applyBackendStatus(
+        isVerificationBypassed ? 'approved' : mapProfileToRegistrationStatus(data),
+      );
       // Defense-in-depth de routing: un conductor con TODOS los documentos pero SIN biometría enrolada
       // vuelve al wizard como `in_progress` (ver `mapProfileToRegistrationStatus`). Debe REANUDAR en el
       // paso 3 (IdentityVerification / KYC, último del wizard de 3 pasos) para completar la biometría, no

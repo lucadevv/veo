@@ -137,6 +137,12 @@ const envSchema = z.object({
    * Con `false` el push se saltea (degradación honesta). `true` SOLO con Firebase + APNs configurados.
    */
   FIREBASE_ENABLED: z.boolean(),
+  /**
+   * BYPASS de verificación SOLO para desarrollo local (correr el flujo sin alta/KYC/biométrico aprobados).
+   * Leído de la env (`VEO_BYPASS_VERIFICATION=true` solo en `env/local.env`). El consumo real va por
+   * `isVerificationBypassed` (abajo), que además exige `__DEV__` → un release/build de prod jamás lo honra.
+   */
+  VEO_BYPASS_VERIFICATION: z.boolean(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -151,6 +157,7 @@ function loadEnv(): AppEnv {
     SUPPORT_EMAIL: Config.SUPPORT_EMAIL || DEFAULT_SUPPORT_EMAIL,
     // react-native-config entrega strings → 'true' es el ÚNICO valor que habilita el push. Ausente/'' → false.
     FIREBASE_ENABLED: Config.FIREBASE_ENABLED === 'true',
+    VEO_BYPASS_VERIFICATION: Config.VEO_BYPASS_VERIFICATION === 'true',
   };
 
   const parsed = envSchema.safeParse(raw);
@@ -165,3 +172,11 @@ function loadEnv(): AppEnv {
 
 /** Configuración resuelta y validada, lista para inyectar en los servicios del core. */
 export const env: AppEnv = loadEnv();
+
+/**
+ * ¿Se saltean las verificaciones (alta/KYC/biométrico) para correr el flujo en local? Doble candado:
+ * el flag de env (`VEO_BYPASS_VERIFICATION`, true solo en local) Y `__DEV__` → un build de release/prod
+ * (donde `__DEV__` es false) NUNCA lo honra, aunque el flag quedara prendido. Espeja el backend
+ * (`bypassVerification()` de @veo/utils, que fuerza false bajo NODE_ENV=production).
+ */
+export const isVerificationBypassed: boolean = __DEV__ && env.VEO_BYPASS_VERIFICATION;
