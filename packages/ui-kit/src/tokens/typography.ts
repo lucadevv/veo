@@ -3,10 +3,11 @@ import { Platform, type TextStyle } from 'react-native';
 /**
  * Tipografía VEO para RN · dirección "Midnight Motion".
  *
- * Jerarquía grotesk fuerte: contraste por ESCALA + PESO (display/title bold 700, cuerpo 400,
- * label 600). Tamaños cómodos en móvil; nada de texto diminuto (mínimo efectivo 12pt en labels,
- * 14pt en cuerpo de lectura). `mono` tabular para datos: tarifas (céntimos PEN -> S/), ETAs,
- * timers, placas, IDs.
+ * Jerarquía grotesk fuerte por ESCALA + PESO, con la gama completa de Clash Display (igual que el
+ * admin-web): `display`/números héroe → Clash **Bold 700**; `title1/2/3`/títulos de texto → Clash
+ * **Semibold 600**; `label`/eyebrows → Clash **Medium 500**; cuerpo → Outfit 400. Tamaños cómodos
+ * en móvil; nada de texto diminuto (mínimo efectivo 12pt en labels, 14pt en cuerpo de lectura).
+ * `mono` tabular para datos: tarifas (céntimos PEN -> S/), ETAs, timers, placas, IDs.
  *
  * Fuentes de marca VEO (bundleadas en la app pasajero):
  *   - Títulos / display: **Clash Display Bold** (Fontshare, licencia Fontshare Free).
@@ -34,8 +35,19 @@ type FontWeight = NonNullable<TextStyle['fontWeight']>;
  * `display` → Clash Display Bold (títulos héroe). `text*` → Outfit por peso. `mono` → sistema.
  */
 export const fontFamily = {
-  /** Títulos / héroe: Clash Display Bold. */
+  /** Números / héroe: Clash Display Bold (tarifa total, ETA grande — el peso máximo). */
   display: 'ClashDisplay-Bold',
+  /**
+   * Títulos de TEXTO: Clash Display Semibold (600). Escalón por debajo del `display` bold — da la
+   * misma jerarquía que el admin-web (números/marca bold, títulos de texto semibold). Nombre
+   * PostScript verificado con `mdls` (no adivinado): `ClashDisplay-Semibold`. Cara ya bundleada y
+   * registrada en UIAppFonts (iOS) / assets/fonts (Android) de passenger y driver.
+   */
+  displaySemibold: 'ClashDisplay-Semibold',
+  /** Clash Display Medium (500): eyebrows/labels cortos en versalitas. PostScript verificado. */
+  displayMedium: 'ClashDisplay-Medium',
+  /** Clash Display Regular (400): display en tono más liviano si hace falta. PostScript verificado. */
+  displayRegular: 'ClashDisplay-Regular',
   /**
    * Display serif editorial: Fraunces 72pt SemiBold (óptico 72pt, OFL).
    * Nombre PostScript REAL leído de la tabla `name` (fc-scan): `Fraunces72pt-SemiBold`.
@@ -106,10 +118,10 @@ export const textStyles = {
     letterSpacing: -0.5,
   },
   title1: {
-    fontFamily: fontFamily.display,
+    fontFamily: fontFamily.displaySemibold,
     fontSize: fontSize['2xl'],
     lineHeight: 38,
-    fontWeight: fontWeight.bold,
+    fontWeight: fontWeight.semibold,
     letterSpacing: -0.6,
   },
   /** Título editorial (serif): paralelo a `title1` con Fraunces y tracking más suelto (-0.3). */
@@ -121,17 +133,17 @@ export const textStyles = {
     letterSpacing: -0.3,
   },
   title2: {
-    fontFamily: fontFamily.display,
+    fontFamily: fontFamily.displaySemibold,
     fontSize: fontSize.xl,
     lineHeight: 32,
-    fontWeight: fontWeight.bold,
+    fontWeight: fontWeight.semibold,
     letterSpacing: -0.4,
   },
   title3: {
-    fontFamily: fontFamily.display,
+    fontFamily: fontFamily.displaySemibold,
     fontSize: fontSize.lg,
     lineHeight: 28,
-    fontWeight: fontWeight.bold,
+    fontWeight: fontWeight.semibold,
     letterSpacing: -0.3,
   },
   headline: {
@@ -183,12 +195,16 @@ export const textStyles = {
     fontWeight: fontWeight.medium,
     letterSpacing: 0.2,
   },
-  /** Etiquetas cortas / pills (≤4 palabras). Bold + tracking (estilo grotesk en versalitas). */
+  /**
+   * Etiquetas cortas / pills / eyebrows (≤4 palabras). Clash Display Medium + tracking — versalitas
+   * de marca (mismo criterio que los eyebrows/headers del admin-web). El display da carácter donde
+   * Outfit-Bold quedaba genérico; a 12pt con tracking 0.6 la Medium se lee sin pesar.
+   */
   label: {
-    fontFamily: fontFamily.textBold,
+    fontFamily: fontFamily.displayMedium,
     fontSize: fontSize.xs,
     lineHeight: 16,
-    fontWeight: fontWeight.bold,
+    fontWeight: fontWeight.medium,
     letterSpacing: 0.6,
   },
 } satisfies Record<string, TextToken>;
