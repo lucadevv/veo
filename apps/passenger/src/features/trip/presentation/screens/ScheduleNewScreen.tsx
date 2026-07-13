@@ -49,7 +49,11 @@ export function ScheduleNewScreen(): React.JSX.Element {
     <SafeScreen
       padded={false}
       footer={
-        <Button label={t('scheduleNew.cta')} fullWidth onPress={start} />
+        // `padded={false}` deja el footer sin padding horizontal → el CTA iba borde a borde. Lo
+        // envolvemos con el padding estándar para que respire a los costados como el contenido.
+        <View style={{paddingHorizontal: theme.spacing.xl}}>
+          <Button label={t('scheduleNew.cta')} fullWidth onPress={start} />
+        </View>
       }>
       <ScrollView
         contentContainerStyle={{
@@ -60,18 +64,22 @@ export function ScheduleNewScreen(): React.JSX.Element {
         {/* Header in-body: back pill + título display (sin intro descriptivo — el flujo se explica solo). */}
         <ScreenHeader title={t('screens.scheduleNew')} />
 
-        {/* Los 3 pasos como estructura escaneable (icono + título), sin la prosa descriptiva de cada uno. */}
-        <Card variant="outlined" padding="lg">
-          <View style={{gap: theme.spacing.lg}}>
-            <Step icon={IconSearch} title={t('scheduleNew.step1Title')} />
-            <Step icon={IconPin} title={t('scheduleNew.step2Title')} />
-            <Step icon={IconClock} title={t('scheduleNew.step3Title')} />
+        {/* Los 3 pasos como TIMELINE editorial: círculos conectados por un riel continuo (el mismo motivo
+            origen→destino de las cards de viaje), en superficie elevada sin borde. */}
+        <Card variant="elevated" padding="lg">
+          <View style={styles.timeline}>
+            {/* Riel continuo detrás, del centro del 1er círculo al del último (los círculos opacos lo tapan
+                por dentro → se ve como conector entre pasos). */}
+            <View style={[styles.timelineLine, {backgroundColor: theme.colors.border}]} />
+            <StepRow icon={IconSearch} title={t('scheduleNew.step1Title')} />
+            <StepRow icon={IconPin} title={t('scheduleNew.step2Title')} />
+            <StepRow icon={IconClock} title={t('scheduleNew.step3Title')} last />
           </View>
         </Card>
 
         {/* Carpooling (ADR-014): entrada SECUNDARIA al marketplace de asientos entre ciudades (otro
-            producto). Título + CTA, sin la prosa de apoyo. */}
-        <Card variant="outlined" padding="lg">
+            producto). Título + CTA, sin la prosa de apoyo. Misma superficie elevada. */}
+        <Card variant="elevated" padding="lg">
           <View style={{gap: theme.spacing.md}}>
             <Text variant="bodyStrong">{t('carpool.entryTitle')}</Text>
             <Button
@@ -87,18 +95,21 @@ export function ScheduleNewScreen(): React.JSX.Element {
   );
 }
 
-interface StepProps {
+interface StepRowProps {
   icon: (props: GlyphProps) => React.JSX.Element;
   title: string;
-  /** Descripción opcional; hoy los pasos van solo con título (sin prosa descriptiva). */
-  body?: string;
+  /** Último paso: sin margen inferior (no hay siguiente círculo que conectar). */
+  last?: boolean;
 }
 
-/** Paso del flujo de programación: círculo con ícono del set + título (+ descripción opcional). */
-function Step({icon: Glyph, title, body}: StepProps): React.JSX.Element {
+/**
+ * Paso del timeline: círculo con ícono del set (opaco, tapa el riel por dentro) + título. El `marginBottom`
+ * separa cada paso del siguiente; el riel continuo lo dibuja el contenedor detrás.
+ */
+function StepRow({icon: Glyph, title, last = false}: StepRowProps): React.JSX.Element {
   const theme = useTheme();
   return (
-    <View style={styles.stepRow}>
+    <View style={[styles.stepRow, last ? null : {marginBottom: theme.spacing.lg}]}>
       <View
         style={[
           styles.leadCircle,
@@ -109,28 +120,32 @@ function Step({icon: Glyph, title, body}: StepProps): React.JSX.Element {
         ]}>
         <Glyph color={theme.colors.accent} size={18} />
       </View>
-      <View style={styles.flex}>
-        <Text variant="bodyStrong">{title}</Text>
-        {body ? (
-          <Text
-            variant="footnote"
-            color="inkMuted"
-            style={{marginTop: theme.spacing.xs}}>
-            {body}
-          </Text>
-        ) : null}
-      </View>
+      <Text variant="bodyStrong" style={styles.flex}>
+        {title}
+      </Text>
     </View>
   );
 }
 
+const CIRCLE = 40;
+
 const styles = StyleSheet.create({
-  stepRow: {flexDirection: 'row', gap: 13, alignItems: 'center'},
+  timeline: {position: 'relative'},
+  // Riel continuo: del centro del 1er círculo (top: CIRCLE/2) al del último (bottom: CIRCLE/2). Va PRIMERO
+  // en el árbol → los círculos (hermanos posteriores, opacos) quedan encima y lo tapan por dentro.
+  timelineLine: {
+    position: 'absolute',
+    left: CIRCLE / 2 - 1,
+    top: CIRCLE / 2,
+    bottom: CIRCLE / 2,
+    width: 2,
+  },
+  stepRow: {flexDirection: 'row', gap: 14, alignItems: 'center'},
   flex: {flex: 1},
   leadCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: CIRCLE,
+    height: CIRCLE,
+    borderRadius: CIRCLE / 2,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
