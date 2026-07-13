@@ -349,7 +349,7 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             <View style={styles.statusPillRow}>
               <StatusPill
                 label={connected ? t('trips.connection.live') : t('trips.connection.reconnecting')}
-                tone={connected ? 'brand' : 'neutral'}
+                tone={connected ? 'success' : 'neutral'}
                 live={connected}
               />
               <Text variant="footnote" color="inkMuted" tabular>
