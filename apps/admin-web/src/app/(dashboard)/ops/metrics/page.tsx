@@ -173,10 +173,7 @@ export default function MetricsPage() {
             {/* Ingresos por día */}
             <div className="flex flex-col gap-[18px] rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3">
               <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-display text-base font-bold text-ink">Ingresos por día</h2>
-                  <p className="text-xs text-ink-muted">Money-in neto al banco · {range}</p>
-                </div>
+                <h2 className="font-display text-base font-bold text-ink">Ingresos por día</h2>
                 {d.deltas.moneyInPct != null ? (
                   <span
                     className={cn(
@@ -221,9 +218,6 @@ export default function MetricsPage() {
                 ) : (
                   <p className="py-8 text-center text-[13px] text-ink-subtle">Sin ingresos por modo en el período.</p>
                 )}
-                <p className="text-[11px] text-ink-subtle">
-                  Split 3-way: Fijo/Puja (según el modo de despacho del viaje) + Carpooling.
-                </p>
               </div>
 
               <div className="flex flex-1 flex-col gap-4 rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3">

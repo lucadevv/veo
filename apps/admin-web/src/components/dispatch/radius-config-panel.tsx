@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Info } from 'lucide-react';
 import type {
   DispatchRadiusConfigView,
   FixedPolicy,
@@ -100,17 +99,6 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
 
   return (
     <div className="stagger flex flex-col gap-5">
-      {config.policyVersion !== 'v2' ? (
-        <p className="flex items-start gap-2 rounded-xl border border-accent/20 bg-accent/[0.06] px-4 py-3 text-[13px] text-ink">
-          <Info className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
-          <span>
-            El motor actual (v1) usa anillos fijos. <strong>Guardar activa el motor de radio
-            adaptativo (v2)</strong>: expande por km hasta juntar los conductores objetivo, por
-            servicio. El cambio aplica en vivo.
-          </span>
-        </p>
-      ) : null}
-
       <Tabs defaultValue="FIXED">
         <TabsList>
           <TabsTrigger value="FIXED">Fijo</TabsTrigger>
@@ -233,10 +221,6 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
               disabled={!canManage || pending}
               onChange={(v) => setPuja((p) => ({ ...p, bidWindowSec: v }))}
             />
-            <p className="mt-1 text-xs text-ink-subtle">
-              La puja no expande ni ofrece de a uno: es un disco único + ventana. Por eso tiene menos
-              palancas que Fijo.
-            </p>
           </ModeLayout>
         </TabsContent>
 
@@ -279,20 +263,10 @@ export function RadiusConfigPanel({ config }: { config: DispatchRadiusConfigView
                 disabled={!canManage || pending}
                 onChange={setCarpoolExpand}
               />
-              <p className="mt-1 text-xs text-ink-subtle">
-                Carpool comparte la cuenta de distancia con un cap (el conductor no lucra). Su
-                búsqueda es de rutas publicadas, no de despacho on-demand.
-              </p>
             </ModeLayout>
           )}
         </TabsContent>
       </Tabs>
-
-      {/* Nota honesta de Programado (no es un modo, es un eje de tiempo) */}
-      <p className="text-xs text-ink-subtle">
-        Los viajes <strong>programados</strong> se despachan con la config de su modo (Fijo o Puja)
-        al activarse — no son un modo aparte.
-      </p>
 
       {/* Footer de guardado */}
       <div className="flex items-center justify-between gap-4 border-t border-divider pt-4">

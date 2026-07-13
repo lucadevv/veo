@@ -19,10 +19,7 @@ export default function DispatchRadiusPage() {
   const query = useDispatchRadiusConfig();
 
   const topbar = (
-    <AdminTopbar
-      title="Radios de dispatch"
-      subtitle="Hasta dónde se buscan conductores · feed del mapa y alcance de las pujas"
-    />
+    <AdminTopbar title="Radios de dispatch" />
   );
 
   if (!can(user, 'dispatch:view')) {

@@ -3,7 +3,7 @@
 import { use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArchiveX, Ban, Check, Lock, LogOut, ShieldCheck } from 'lucide-react';
+import { ArchiveX, Ban, Check, LogOut, ShieldCheck } from 'lucide-react';
 import { ApiError } from '@veo/api-client';
 import {
   useOperatorDetail,
@@ -178,10 +178,6 @@ export default function OperatorDetailPage(props: { params: Promise<{ id: string
                   }
                 />
               ) : null}
-              <p className="flex items-center gap-1.5 text-xs font-medium text-accent">
-                <Lock className="size-3.5" aria-hidden />
-                Cambiar rol requiere step-up
-              </p>
             </Card>
 
             <Card>
