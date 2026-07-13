@@ -127,8 +127,7 @@ export const common = {
   /** Hub de Seguridad (tab del bottom nav) — design/veo.pen P/Seguridad. Copy en TUTEO (el pen vosea). */
   security: {
     heroTitle: 'Vas protegido',
-    heroSubtitle:
-      'Pánico, cámara en vivo y tu familia siguiéndote, activo en cada viaje',
+    heroSubtitle: 'Pánico, cámara y familia, activos en cada viaje',
     toolsLabel: 'Herramientas',
     contactsTitle: 'Contactos de confianza',
     /** Subtítulo con el conteo REAL de contactos verificados (del bff /contacts). */

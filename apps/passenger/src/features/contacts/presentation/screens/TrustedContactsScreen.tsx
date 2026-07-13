@@ -126,12 +126,10 @@ export function TrustedContactsScreen(): React.JSX.Element {
           }}
         />
       }>
-      {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
+      {/* Header in-body — sin subtítulo descriptivo: el límite lo surface el banner `atMax` + el botón
+          deshabilitado, y el empty state guía; el propósito ya viene del hub Seguridad. */}
       <View style={{marginBottom: theme.spacing.lg}}>
-        <ScreenHeader
-          title={t('screens.trustedContacts')}
-          subtitle={t('contacts.subtitle')}
-        />
+        <ScreenHeader title={t('screens.trustedContacts')} />
       </View>
 
       {atMax ? (

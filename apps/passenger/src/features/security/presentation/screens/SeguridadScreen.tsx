@@ -109,9 +109,10 @@ export function SeguridadScreen(): React.JSX.Element {
             styles.hero,
             {
               borderRadius: theme.radii.lg,
-              borderColor: theme.colors.borderStrong,
               padding: theme.spacing.lg,
               gap: theme.spacing.md,
+              // Superficie EDITORIAL: elevación en vez de borde duro (coherente con las cards de viaje).
+              ...theme.elevation.level1,
             },
           ]}>
           <Svg style={StyleSheet.absoluteFill}>
@@ -211,7 +212,6 @@ const styles = StyleSheet.create({
   hero: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
     overflow: 'hidden',
   },
   heroEmblem: {
