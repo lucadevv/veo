@@ -337,9 +337,6 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
                 online={status === 'IN_PROGRESS'}
               />
               <View style={styles.flex}>
-                <Text variant="footnote" color="inkMuted">
-                  {t('trips.passenger')}
-                </Text>
                 <Text variant="title3" numberOfLines={1}>
                   {data.passengerFirstName ?? t('trips.passenger')}
                 </Text>
