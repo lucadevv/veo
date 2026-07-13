@@ -73,12 +73,24 @@ export function RoleOverlayDetail({
     [modules],
   );
 
+  /** Versión vigente por permiso de ESTE rol (para el CAS optimista al des-restar). */
+  const versionByPermission = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const o of overrides) if (o.role === role) m.set(o.permission, o.version);
+    return m;
+  }, [overrides, role]);
+
   async function resetToBase() {
     setResetting(true);
     try {
       // Un PUT hidden=false por par restado (identity re-valida subtract-only + candado en cada uno).
       for (const permission of hiddenPermissions) {
-        await setOverride.mutateAsync({ role, permission, hidden: false });
+        await setOverride.mutateAsync({
+          role,
+          permission,
+          hidden: false,
+          expectedVersion: versionByPermission.get(permission),
+        });
       }
       toast({
         tone: 'success',

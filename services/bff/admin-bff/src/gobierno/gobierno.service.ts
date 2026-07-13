@@ -143,7 +143,12 @@ export class GobiernoService {
   ): Promise<PermissionOverrideView> {
     const res = await this.rest.put<PermissionOverrideView>(OVERRIDES_BASE, {
       identity,
-      body: { role: dto.role, permission: dto.permission, hidden: dto.hidden },
+      body: {
+        role: dto.role,
+        permission: dto.permission,
+        hidden: dto.hidden,
+        expectedVersion: dto.expectedVersion,
+      },
     });
     await this.audit.record(identity, {
       action: AUDIT_OVERRIDE_ACTION,

@@ -1,4 +1,4 @@
-import { IsBoolean, IsString } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 /**
  * Body del PUT /internal/permission-overrides. Un override subtract-only sobre el par (role, permission).
@@ -18,4 +18,10 @@ export class SetPermissionOverrideDto {
   /** subtract-only: true = RESTAR al rol; false = des-restaurar (rige la base). */
   @IsBoolean()
   hidden!: boolean;
+
+  /** CAS optimista (opcional): la `version` del par a la vista. 409 si ya avanzó. Ausente en la 1ª resta (create). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number;
 }

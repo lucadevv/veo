@@ -53,6 +53,12 @@ export class PermissionOverridesController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SetPermissionOverrideDto,
   ): Promise<PermissionOverrideView> {
-    return this.overrides.set(dto.role, dto.permission, dto.hidden, user.userId);
+    return this.overrides.set(
+      dto.role,
+      dto.permission,
+      dto.hidden,
+      user.userId,
+      dto.expectedVersion,
+    );
   }
 }

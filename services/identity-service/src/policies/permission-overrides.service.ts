@@ -24,7 +24,7 @@ import {
   isPermission,
   overrideKey,
 } from '@veo/policy';
-import { ForbiddenError, ValidationError } from '@veo/utils';
+import { ConcurrencyConflictError, ForbiddenError, ValidationError } from '@veo/utils';
 import { PermissionOverridesRepository } from './permission-overrides.repository';
 import type { PermissionOverride } from '../generated/prisma';
 
@@ -71,6 +71,7 @@ export class PermissionOverridesService {
     permission: string,
     hidden: boolean,
     actorId: string,
+    expectedVersion?: number,
   ): Promise<PermissionOverrideView> {
     // 1) Ejes canónicos: rol conocido (fila) y permiso del catálogo (columna).
     if (!isAdminRole(role)) {
@@ -102,6 +103,19 @@ export class PermissionOverridesService {
     // 4) Bump + upsert + outbox EN LA MISMA tx (estado ↔ auditoría ↔ cache-busting, atómicos).
     const row = await this.repo.runInTransaction(async (tx) => {
       const current = await this.repo.findByPairTx(tx, role, permission);
+      // CAS optimista: si el admin mandó la versión que tenía a la vista y el par ya avanzó (otro superadmin lo
+      // cambió), abortar con 409 en vez de pisar el cambio ajeno. Read fresco DENTRO de la tx. Un par SIN fila
+      // (primera resta) no lleva expectedVersion → no aplica.
+      if (
+        expectedVersion !== undefined &&
+        current &&
+        current.version !== expectedVersion
+      ) {
+        throw new ConcurrencyConflictError(
+          'El permiso cambió desde que abriste la matriz; recargá y reintentá',
+          { role, permission, expected: expectedVersion, actual: current.version },
+        );
+      }
       const nextVersion = (current?.version ?? 0) + 1;
       const saved = await this.repo.upsertTx(tx, {
         role,

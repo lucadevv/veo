@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ForbiddenError, ValidationError } from '@veo/utils';
+import { ConcurrencyConflictError, ForbiddenError, ValidationError } from '@veo/utils';
 import { PermissionOverridesService } from './permission-overrides.service';
 import type { UpsertPermissionOverrideData } from './permission-overrides.repository';
 import type { PermissionOverride } from '../generated/prisma';
@@ -90,6 +90,35 @@ describe('PermissionOverridesService.set · overlay subtract-only (ADR-025 §3)'
     });
     expect(out).toMatchObject({ role: 'ADMIN', permission: 'drivers:approve', hidden: true, version: 3 });
     expect(repo.enqueueOutbox).toHaveBeenCalledTimes(1);
+  });
+
+  it('CAS: expectedVersion desactualizado → 409 (ConcurrencyConflictError) y NO persiste (no pisa el ajeno)', async () => {
+    const current = overrideRow({ role: 'ADMIN', permission: 'drivers:approve', version: 2 });
+    const { repo, captured } = makeRepo(current);
+    const svc = new PermissionOverridesService(repo as never);
+
+    // El superadmin tenía v1 a la vista pero el par ya está en v2 (otro lo movió) → aborta.
+    await expect(
+      svc.set('ADMIN', 'drivers:approve', true, 'super-1', 1),
+    ).rejects.toBeInstanceOf(ConcurrencyConflictError);
+    expect(captured.upsert).toBeUndefined();
+    expect(repo.enqueueOutbox).not.toHaveBeenCalled();
+  });
+
+  it('CAS: expectedVersion en sync (=version vigente) → aplica y bumpea normal', async () => {
+    const current = overrideRow({ role: 'ADMIN', permission: 'drivers:approve', version: 2 });
+    const { repo, captured } = makeRepo(current);
+    const svc = new PermissionOverridesService(repo as never);
+
+    await svc.set('ADMIN', 'drivers:approve', true, 'super-1', 2);
+    expect(captured.upsert).toMatchObject({ version: 3, hidden: true });
+  });
+
+  it('CAS: sin expectedVersion (1ª resta / compat) → aplica sin chequear (no rompe el create)', async () => {
+    const { repo, captured } = makeRepo(null);
+    const svc = new PermissionOverridesService(repo as never);
+    await svc.set('COMPLIANCE_SUPERVISOR', 'fleet:review', true, 'super-1');
+    expect(captured.upsert).toMatchObject({ version: 1 });
   });
 
   it('crea la fila (version 1) si el par aún no tiene override (fail-safe)', async () => {

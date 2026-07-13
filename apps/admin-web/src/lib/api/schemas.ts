@@ -112,4 +112,6 @@ export interface SetPermissionOverrideRequest {
   role: string;
   permission: string;
   hidden: boolean;
+  /** CAS optimista: la `version` del par a la vista. El bff/identity abortan con 409 si ya avanzó. Ausente = create. */
+  expectedVersion?: number;
 }

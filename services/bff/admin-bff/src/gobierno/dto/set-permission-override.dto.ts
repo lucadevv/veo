@@ -1,4 +1,4 @@
-import { IsBoolean, IsString } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 /**
  * Body del PUT /gobierno/permission-overrides (OVERLAY de visibilidad de permisos · ADR-025 §3). Un override
@@ -20,4 +20,10 @@ export class SetPermissionOverrideDto {
   /** subtract-only: true = RESTAR al rol; false = des-restaurar (rige la base). */
   @IsBoolean()
   hidden!: boolean;
+
+  /** CAS optimista: la `version` del par a la vista. identity aborta con 409 si ya avanzó. Ausente en la 1ª resta. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number;
 }

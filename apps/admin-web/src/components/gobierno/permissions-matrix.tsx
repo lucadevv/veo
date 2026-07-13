@@ -49,6 +49,14 @@ export function PermissionsMatrix({
     return s;
   }, [overrides]);
 
+  // Versión vigente por par (para el CAS optimista al guardar). Un par SIN fila de override no está acá →
+  // se manda sin expectedVersion (es la 1ª resta = create, no un update que pueda pisar a otro).
+  const versionByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const o of overrides) m.set(keyOf(o.role, o.permission), o.version);
+    return m;
+  }, [overrides]);
+
   // Cambios pendientes: key → estado `hidden` DESEADO. Solo contiene celdas que DIFIEREN del servidor.
   const [pending, setPending] = useState<Map<string, boolean>>(new Map());
   const [saving, setSaving] = useState(false);
@@ -79,7 +87,12 @@ export function PermissionsMatrix({
       // Un PUT por par cambiado, secuencial (identity re-valida subtract-only + candado legal en cada uno).
       for (const [key, hidden] of pending) {
         const [role, permission] = key.split('|');
-        await setOverride.mutateAsync({ role: role!, permission: permission!, hidden });
+        await setOverride.mutateAsync({
+          role: role!,
+          permission: permission!,
+          hidden,
+          expectedVersion: versionByKey.get(key),
+        });
         remaining.delete(key);
       }
       setPending(new Map());
