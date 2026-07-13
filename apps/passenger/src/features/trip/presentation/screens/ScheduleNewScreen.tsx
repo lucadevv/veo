@@ -57,48 +57,23 @@ export function ScheduleNewScreen(): React.JSX.Element {
           gap: theme.spacing.lg,
         }}
         showsVerticalScrollIndicator={false}>
-        {/* Header in-body (patrón ScreenHeader del pen): back pill + título display + intro. */}
-        <ScreenHeader
-          title={t('screens.scheduleNew')}
-          subtitle={t('scheduleNew.intro')}
-        />
+        {/* Header in-body: back pill + título display (sin intro descriptivo — el flujo se explica solo). */}
+        <ScreenHeader title={t('screens.scheduleNew')} />
 
+        {/* Los 3 pasos como estructura escaneable (icono + título), sin la prosa descriptiva de cada uno. */}
         <Card variant="outlined" padding="lg">
           <View style={{gap: theme.spacing.lg}}>
-            <Step
-              icon={IconSearch}
-              title={t('scheduleNew.step1Title')}
-              body={t('scheduleNew.step1Body')}
-            />
-            <Step
-              icon={IconPin}
-              title={t('scheduleNew.step2Title')}
-              body={t('scheduleNew.step2Body')}
-            />
-            <Step
-              icon={IconClock}
-              title={t('scheduleNew.step3Title')}
-              body={t('scheduleNew.step3Body')}
-            />
+            <Step icon={IconSearch} title={t('scheduleNew.step1Title')} />
+            <Step icon={IconPin} title={t('scheduleNew.step2Title')} />
+            <Step icon={IconClock} title={t('scheduleNew.step3Title')} />
           </View>
         </Card>
 
-        <Card variant="filled" padding="md">
-          <Text variant="footnote" color="inkMuted">
-            {t('scheduleNew.note')}
-          </Text>
-        </Card>
-
-        {/* Carpooling (ADR-014): entrada SECUNDARIA al marketplace de asientos publicados entre
-            ciudades. No toca el flujo de programación on-demand de arriba: es otro producto. */}
+        {/* Carpooling (ADR-014): entrada SECUNDARIA al marketplace de asientos entre ciudades (otro
+            producto). Título + CTA, sin la prosa de apoyo. */}
         <Card variant="outlined" padding="lg">
           <View style={{gap: theme.spacing.md}}>
-            <View style={{gap: theme.spacing.xs}}>
-              <Text variant="bodyStrong">{t('carpool.entryTitle')}</Text>
-              <Text variant="footnote" color="inkMuted">
-                {t('carpool.entryBody')}
-              </Text>
-            </View>
+            <Text variant="bodyStrong">{t('carpool.entryTitle')}</Text>
             <Button
               label={t('carpool.entryCta')}
               variant="secondary"
@@ -115,10 +90,11 @@ export function ScheduleNewScreen(): React.JSX.Element {
 interface StepProps {
   icon: (props: GlyphProps) => React.JSX.Element;
   title: string;
-  body: string;
+  /** Descripción opcional; hoy los pasos van solo con título (sin prosa descriptiva). */
+  body?: string;
 }
 
-/** Paso del flujo de programación: círculo con ícono del set + título y descripción. */
+/** Paso del flujo de programación: círculo con ícono del set + título (+ descripción opcional). */
 function Step({icon: Glyph, title, body}: StepProps): React.JSX.Element {
   const theme = useTheme();
   return (
@@ -135,19 +111,21 @@ function Step({icon: Glyph, title, body}: StepProps): React.JSX.Element {
       </View>
       <View style={styles.flex}>
         <Text variant="bodyStrong">{title}</Text>
-        <Text
-          variant="footnote"
-          color="inkMuted"
-          style={{marginTop: theme.spacing.xs}}>
-          {body}
-        </Text>
+        {body ? (
+          <Text
+            variant="footnote"
+            color="inkMuted"
+            style={{marginTop: theme.spacing.xs}}>
+            {body}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  stepRow: {flexDirection: 'row', gap: 13, alignItems: 'flex-start'},
+  stepRow: {flexDirection: 'row', gap: 13, alignItems: 'center'},
   flex: {flex: 1},
   leadCircle: {
     width: 40,
