@@ -1,14 +1,7 @@
 import type {ChatMessage} from '@veo/api-client';
 import {useRoute, type RouteProp} from '@react-navigation/native';
 import {useMutation, useQuery} from '@tanstack/react-query';
-import {
-  Banner,
-  IconButton,
-  SafeScreen,
-  Text,
-  TextField,
-  useTheme,
-} from '@veo/ui-kit';
+import {Banner, SafeScreen, Text, TextField, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {
@@ -31,6 +24,7 @@ import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTrip
 import {isChatActive, mergeMessages} from '../../domain/entities';
 import {withDayDividers, type ChatListItem} from '../dayDividers';
 import {MessageBubble} from '../components/MessageBubble';
+import {IconArrowRight} from '../../../trip/presentation/components/icons';
 
 type Params = RouteProp<RootStackParamList, 'Chat'>;
 
@@ -63,6 +57,11 @@ export function ChatScreen(): React.JSX.Element {
 
   // Mensajes confirmados localmente tras enviar (eco optimista del POST hasta que llegue por socket).
   const [sentMessages, setSentMessages] = useState<ChatMessage[]>([]);
+  // Mensajes ENTRANTES del conductor ya integrados (acumulados de forma ESTABLE). El socket los deja en
+  // `live.incomingMessages` como buffer TRANSITORIO y `acknowledgeMessages` los DRENA; si no los
+  // copiáramos acá antes de drenar, el mensaje del conductor aparecía un instante y DESAPARECÍA (había
+  // que salir y re-entrar para que el historial REST lo trajera). Ahora persisten en la pantalla en vivo.
+  const [receivedMessages, setReceivedMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<ChatListItem>>(null);
 
@@ -78,14 +77,14 @@ export function ChatScreen(): React.JSX.Element {
     },
   });
 
-  // Lista única y estable: historial + enviados + entrantes del socket, deduplicados y ordenados.
+  // Lista única y estable: historial + enviados + entrantes YA acumulados, deduplicados y ordenados.
   const messages = useMemo(
     () =>
       mergeMessages(historyQuery.data ?? [], [
         ...sentMessages,
-        ...live.incomingMessages,
+        ...receivedMessages,
       ]),
-    [historyQuery.data, sentMessages, live.incomingMessages],
+    [historyQuery.data, sentMessages, receivedMessages],
   );
 
   // Ítems de la lista CON divisores de día sintéticos (pen hPrJt DayDivider: "Hoy"/"Ayer"/"Lun 30
@@ -99,24 +98,23 @@ export function ChatScreen(): React.JSX.Element {
     [messages, t],
   );
 
-  // Drena los entrantes ya integrados para no reprocesarlos y mantener limpio el badge de no leídos.
+  // Copia los entrantes a un estado ESTABLE y DESPUÉS drena el buffer transitorio del socket (para no
+  // reprocesarlos ni ensuciar el badge). El orden importa: primero acumular, luego acknowledge — así el
+  // mensaje del conductor persiste en la pantalla en vivo (no depende de re-entrar para verlo).
   useEffect(() => {
-    if (live.incomingMessages.length > 0) {
-      acknowledgeMessages(live.incomingMessages.map(message => message.id));
+    if (live.incomingMessages.length === 0) {
+      return;
     }
+    setReceivedMessages(prev => mergeMessages(prev, live.incomingMessages));
+    acknowledgeMessages(live.incomingMessages.map(message => message.id));
   }, [live.incomingMessages, acknowledgeMessages]);
-
-  // Autoscroll al final cuando llega/sale un mensaje (ease del propio FlatList; respeta el sistema).
-  useEffect(() => {
-    if (messages.length > 0) {
-      listRef.current?.scrollToEnd({animated: true});
-    }
-  }, [messages.length]);
 
   const liveStatusKnown = live.status !== null || live.ended;
   const active = liveStatusKnown
     ? isChatActive(live.ended ? 'COMPLETED' : live.status)
     : true;
+  // El envío se habilita SOLO con texto real (y viaje activo, sin envío en vuelo): el botón lo refleja.
+  const canSend = draft.trim().length > 0 && !sendMutation.isPending && active;
 
   const onSend = useCallback(
     (body: string) => {
@@ -168,11 +166,18 @@ export function ChatScreen(): React.JSX.Element {
         keyboardVerticalOffset={insets.top + theme.spacing.xl}>
         <FlatList
           ref={listRef}
+          style={styles.flex}
           data={listItems}
           keyExtractor={item =>
             item.kind === 'divider' ? item.id : item.message.id
           }
           renderItem={renderItem}
+          // Autoscroll al final por CADA mensaje que llega/sale: se dispara al cambiar el ALTO del
+          // contenido (después del layout, no antes → confiable). El composer con los chips fijos es un
+          // hermano DEBAJO de la lista, así que el último mensaje queda visible sobre él, nunca tapado.
+          onContentSizeChange={() =>
+            listRef.current?.scrollToEnd({animated: true})
+          }
           contentContainerStyle={{
             padding: theme.spacing.xl,
             gap: theme.spacing.md,
@@ -264,18 +269,28 @@ export function ChatScreen(): React.JSX.Element {
                   onSubmitEditing={() => onSend(draft)}
                 />
               </View>
-              <IconButton
+              {/* Botón enviar: círculo VERDE (success) que se ACTIVA solo cuando hay texto; deshabilitado
+                  queda gris (recesado) — señal clara de "escribí algo para enviar" (mejor feedback). */}
+              <Pressable
+                accessibilityRole="button"
                 accessibilityLabel={t('chat.send')}
-                variant="tinted"
-                size="lg"
-                disabled={draft.trim().length === 0 || sendMutation.isPending}
+                accessibilityState={{disabled: !canSend}}
+                disabled={!canSend}
                 onPress={() => onSend(draft)}
-                icon={
-                  <Text variant="bodyStrong" color="onAccent">
-                    ↑
-                  </Text>
-                }
-              />
+                style={({pressed}) => [
+                  styles.sendBtn,
+                  {
+                    backgroundColor: canSend
+                      ? theme.colors.success
+                      : theme.colors.surfaceMuted,
+                    opacity: pressed && canSend ? 0.85 : 1,
+                  },
+                ]}>
+                <IconArrowRight
+                  color={canSend ? theme.colors.onSuccess : theme.colors.inkSubtle}
+                  size={22}
+                />
+              </Pressable>
             </View>
           </View>
         )}
@@ -293,4 +308,11 @@ const styles = StyleSheet.create({
   quickRow: {flexDirection: 'row', flexWrap: 'wrap'},
   chip: {borderWidth: StyleSheet.hairlineWidth},
   inputRow: {flexDirection: 'row', alignItems: 'flex-end'},
+  sendBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
