@@ -777,6 +777,10 @@
     "bid": {
       "screenTitle": "Pujas abiertas",
       "title": "Puja abierta",
+      "tag": "Puja",
+      "locating": "Ubicando…",
+      "dockLabel_one": "{{count}} puja cerca",
+      "dockLabel_other": "{{count}} pujas cerca",
       "subtitle": "Aceptá la tarifa o contraofertá tu precio.",
       "expiresIn": "Vence en {{seconds}} s",
       "expired": "La puja venció",

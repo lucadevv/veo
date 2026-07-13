@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, StyleSheet, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -49,6 +49,10 @@ import { useEndShift, usePauseShift, useShiftState } from '../hooks/useShift';
 import { consumeShiftStartedAt } from '../state/shiftClock';
 import { useActiveVehicle } from '../hooks/useVehicleCatalog';
 import { Appear, PressableScale, Pulse } from '../components/motion';
+import { useOpenBids } from '../../../bidding/presentation/hooks/useBids';
+import { BidCard } from '../../../bidding/presentation/components/BidCard';
+import { CounterOfferSheet } from '../../../bidding/presentation/components/CounterOfferSheet';
+import type { OpenBid } from '../../../bidding/domain';
 
 /**
  * "Inicio" es una tab dentro del stack `Main`. Tipamos la navegación de forma compuesta para poder
@@ -114,6 +118,24 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
 
   const status = shift.data?.status ?? 'UNKNOWN';
   const online = isOnShift(status);
+
+  // Pujas OPEN cercanas (llegan por socket, `dispatch:offer` invalida la query): en el dock online se
+  // listan como cards EDITORIALES para TOMAR/OFERTAR sin salir del dashboard (estilo cola inDrive). Solo
+  // se consulta en turno y sin viaje activo (offline el backend daría []/403; en viaje no se puja).
+  const openBids = useOpenBids(online && !activeTripId);
+  const [selectedBid, setSelectedBid] = useState<OpenBid | null>(null);
+  // Si el conductor GANA una puja, el dock salta al viaje activo → cerramos el sheet para que no quede
+  // overlaid sobre el viaje (mismo guard que BidsScreen: "La puja venció" sin forma de cerrar).
+  useEffect(() => {
+    if (activeTripId) {
+      setSelectedBid(null);
+    }
+  }, [activeTripId]);
+  // La puja abierta en el sheet desapareció de la lista viva (otro la tomó / venció): el sheet lo refleja.
+  const selectedBidGone =
+    selectedBid !== null &&
+    openBids.data !== undefined &&
+    !openBids.data.some((b) => b.tripId === selectedBid.tripId);
 
   // Disponibilidad del GPS (servicios del SO + permiso). Si el conductor está EN TURNO pero apagó la
   // ubicación o no dio permiso, NO emite su posición y el dispatch no lo ve, aunque la UI lo muestre
@@ -378,6 +400,28 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     </View>
   );
 
+  // Cola de pujas en el dock: cuando hay pujas OPEN, reemplazan al selector de vehículo + KPIs (que son
+  // el estado "en reposo") por la LISTA editorial de ofertas — lo que el conductor necesita decidir AHORA.
+  const openBidsList = openBids.data ?? [];
+  const hasBids = online && !activeTripId && openBidsList.length > 0;
+  const dockBids = (
+    <View style={styles.bidsSection}>
+      <Text variant="caption" color="inkSubtle" style={styles.bidsEyebrow}>
+        {t('trips.bid.dockLabel', { count: openBidsList.length })}
+      </Text>
+      <ScrollView
+        style={styles.bidsScroll}
+        contentContainerStyle={styles.bidsScrollContent}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+      >
+        {openBidsList.map((bid) => (
+          <BidCard key={bid.tripId} bid={bid} onPress={() => setSelectedBid(bid)} />
+        ))}
+      </ScrollView>
+    </View>
+  );
+
   // ─── Dock inferior: estados de carga/error > viaje activo > en línea > desconectado.
   // El mapa de fondo se monta UNA sola vez (return único más abajo): nunca se desmonta entre
   // estados, evitando el reciclaje de la vista nativa en Fabric y la cancelación del estilo. ───
@@ -451,24 +495,31 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
               {connected ? t('shift.readyForTrips') : t('shift.status.reconnecting')}
             </Text>
           </View>
-          {/* Selector de vehículo (fila gris del board): con qué vehículo opera; toca para gestionar/cambiar. */}
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel={t('vehicles.manage')}
-            onPress={() => navigation.navigate('Vehicles')}
-            style={[styles.vehicleSel, { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md }]}
-          >
-            <View style={styles.vehicleSelLeft}>
-              {ActiveVehIcon ? <ActiveVehIcon size={18} color={theme.colors.inkMuted} /> : null}
-              <Text variant="bodyStrong" numberOfLines={1}>
-                {activeVeh
-                  ? `${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`
-                  : t('shift.vehicleType.none')}
-              </Text>
-            </View>
-            <IconChevronRight size={18} color={theme.colors.inkSubtle} />
-          </PressableScale>
-          {dockKpis}
+          {hasBids ? (
+            // Con pujas cerca: la cola editorial de ofertas es el foco (reemplaza vehículo + KPIs de reposo).
+            dockBids
+          ) : (
+            <>
+              {/* Selector de vehículo (fila gris del board): con qué vehículo opera; toca para gestionar/cambiar. */}
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={t('vehicles.manage')}
+                onPress={() => navigation.navigate('Vehicles')}
+                style={[styles.vehicleSel, { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md }]}
+              >
+                <View style={styles.vehicleSelLeft}>
+                  {ActiveVehIcon ? <ActiveVehIcon size={18} color={theme.colors.inkMuted} /> : null}
+                  <Text variant="bodyStrong" numberOfLines={1}>
+                    {activeVeh
+                      ? `${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`
+                      : t('shift.vehicleType.none')}
+                  </Text>
+                </View>
+                <IconChevronRight size={18} color={theme.colors.inkSubtle} />
+              </PressableScale>
+              {dockKpis}
+            </>
+          )}
           {/* Actions: Pausar (outlined, ocupa el ancho) + Desconectarme (ghost gris, fit-content). */}
           <View style={styles.actionsRow}>
             {status === 'AVAILABLE' ? (
@@ -717,6 +768,12 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           {t('shift.endConfirmBody')}
         </Text>
       </BottomSheet>
+      {/* Sheet TOMAR/OFERTAR de la puja tocada en el dock (mismo componente que el board dedicado de pujas). */}
+      <CounterOfferSheet
+        bid={selectedBid}
+        gone={selectedBidGone}
+        onClose={() => setSelectedBid(null)}
+      />
     </SafeScreen>
   );
 };
@@ -750,6 +807,11 @@ const styles = StyleSheet.create({
   },
   // Dock online (frame C/Dashboard): StatusRow + selector de vehículo + KpiRow, con gap 12 (marginTop).
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bidsSection: { marginTop: 12, gap: 10 },
+  bidsEyebrow: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  // Cola acotada: ~2.5 cards visibles, el resto scrollea DENTRO del dock (no lo deja crecer sin techo).
+  bidsScroll: { maxHeight: 320 },
+  bidsScrollContent: { gap: 10, paddingBottom: 2 },
   vehicleSel: {
     flexDirection: 'row',
     alignItems: 'center',
