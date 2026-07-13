@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Film, Lock } from 'lucide-react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { ChevronRight, Film, Lock, X } from 'lucide-react';
 import { FILTER_ALL } from '@/lib/filters';
 import { useMediaRequests } from '@/lib/api/queries';
 import type { MediaAccessRequestView } from '@/lib/api/schemas';
@@ -28,17 +30,28 @@ export default function MediaPage() {
   const rows = useMemo<MediaAccessRequestView[]>(() => query.data?.items ?? [], [query.data]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Auto-selección: primera solicitud de la vista, conservando la selección si sigue presente al recargar.
+  // Deep-link desde el detalle de un pánico (`?trip=`): la solicitud de ESE viaje. Antes el param se ignoraba y
+  // el operador caía en la tabla completa (auto-select del primero) sin llegar a la grabación del pánico.
+  const focusTrip = useSearchParams().get('trip');
+  const focusRow = focusTrip ? (rows.find((r) => r.tripId === focusTrip) ?? null) : null;
+
+  // Auto-selección: la solicitud del `?trip` si existe; si no, la primera, conservando la selección al recargar.
   useEffect(() => {
     if (rows.length === 0) {
       setSelectedId(null);
       return;
     }
-    setSelectedId((cur) => (cur && rows.some((r) => r.id === cur) ? cur : (rows[0]?.id ?? null)));
-  }, [rows]);
+    const focusMatch = focusTrip ? rows.find((r) => r.tripId === focusTrip) : undefined;
+    setSelectedId((cur) => {
+      if (focusMatch) return focusMatch.id;
+      return cur && rows.some((r) => r.id === cur) ? cur : (rows[0]?.id ?? null);
+    });
+  }, [rows, focusTrip]);
 
   const selected = rows.find((r) => r.id === selectedId) ?? null;
   const pending = rows.filter((r) => r.status === 'PENDING').length;
+  // El pánico apunta a un viaje SIN solicitud de acceso todavía → guiar a crearla (prefill).
+  const focusNoRequest = !!focusTrip && !focusRow && !query.isLoading && !query.isError;
 
   if (!can(user, 'media:view')) {
     return (
@@ -74,6 +87,32 @@ export default function MediaPage() {
           </div>
         }
       />
+
+      {/* Contexto del deep-link de pánico: la solicitud del viaje, o guiar a crearla si no existe. */}
+      {focusTrip && focusRow ? (
+        <div className="mx-4 mt-4 flex items-center gap-2.5 rounded-xl border border-brand/25 bg-brand/8 px-4 py-2.5 text-sm text-brand lg:mx-6">
+          <Film className="size-4 shrink-0" aria-hidden />
+          <span className="flex-1">
+            Mostrando la solicitud del viaje del pánico{' '}
+            <span className="font-mono text-xs">{focusTrip.slice(0, 8)}</span>.
+          </span>
+          <Link
+            href="/media"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold hover:bg-brand/10"
+          >
+            <X className="size-3.5" aria-hidden /> Ver todas
+          </Link>
+        </div>
+      ) : focusNoRequest ? (
+        <div className="mx-4 mt-4 flex items-center gap-2.5 rounded-xl border border-warn/30 bg-warn/10 px-4 py-2.5 text-sm text-warn lg:mx-6">
+          <Film className="size-4 shrink-0" aria-hidden />
+          <span className="flex-1">
+            No hay solicitud de acceso para el viaje{' '}
+            <span className="font-mono text-xs">{focusTrip.slice(0, 8)}</span> del pánico.
+          </span>
+          {can(user, 'media:request') ? <RequestAccessDialog defaultTripId={focusTrip} /> : null}
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 gap-4 p-4 lg:p-6">
         {/* Área principal: tabla de solicitudes (todos los estados) */}

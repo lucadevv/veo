@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { Lock, Video } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { Film, Lock, Radio, Video, X } from 'lucide-react';
 import { useLiveCabins } from '@/lib/api/queries';
 import type { LiveViewerToken } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
+import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/page-header';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -24,6 +27,17 @@ export default function LiveWallPage() {
   const query = useLiveCabins();
   // tripId → grant activo. Abrir una cámara es por-viaje (cada una con su doble-auth); cerrar la quita.
   const [grants, setGrants] = useState<Record<string, LiveViewerToken>>({});
+  // Deep-link desde el detalle de un pánico (`?trip=`): resalta y prioriza esa cabina. Antes el param se
+  // ignoraba y el operador caía en el muro completo sin contexto (flujo de seguridad roto).
+  const focusTrip = useSearchParams().get('trip');
+  const focusRef = useRef<HTMLDivElement>(null);
+
+  // Cuando llega el deep-link y la cabina existe, la trae a la vista (por si el muro es largo).
+  useEffect(() => {
+    if (focusTrip && focusRef.current) {
+      focusRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [focusTrip, query.data]);
 
   if (!can(user, 'live:view')) {
     return (
@@ -42,7 +56,15 @@ export default function LiveWallPage() {
     );
   }
 
-  const cabins = query.data ?? [];
+  const rawCabins = query.data ?? [];
+  // La cabina del pánico va PRIMERA (visible sin scroll en el muro).
+  const cabins = focusTrip
+    ? [...rawCabins].sort((a, b) => (a.tripId === focusTrip ? -1 : b.tripId === focusTrip ? 1 : 0))
+    : rawCabins;
+  const focusInCabins = !!focusTrip && rawCabins.some((c) => c.tripId === focusTrip);
+  // El viaje del pánico ya NO transmite en vivo (terminó / dejó de publicar) → ofrecer la grabación, no dejar
+  // al operador sin salida.
+  const focusGone = !!focusTrip && !focusInCabins && !query.isLoading && !query.isError;
 
   function closeCamera(tripId: string) {
     setGrants((prev) => {
@@ -60,6 +82,36 @@ export default function LiveWallPage() {
         breadcrumbs={[{ label: 'Seguridad' }, { label: 'Cámaras en vivo' }]}
       />
       <div className="min-h-0 flex-1 overflow-auto px-4 pb-6 lg:px-6">
+        {/* Contexto del deep-link de pánico: resaltando la cabina, o su grabación si ya no transmite. */}
+        {focusTrip && focusInCabins ? (
+          <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-brand/25 bg-brand/8 px-4 py-2.5 text-sm text-brand">
+            <Radio className="size-4 shrink-0" aria-hidden />
+            <span className="flex-1">
+              Resaltando la cabina del viaje del pánico{' '}
+              <span className="font-mono text-xs">{focusTrip.slice(0, 8)}</span>.
+            </span>
+            <Link
+              href="/security/live-wall"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold hover:bg-brand/10"
+            >
+              <X className="size-3.5" aria-hidden /> Ver todas
+            </Link>
+          </div>
+        ) : focusGone ? (
+          <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-warn/30 bg-warn/10 px-4 py-2.5 text-sm text-warn">
+            <Film className="size-4 shrink-0" aria-hidden />
+            <span className="flex-1">
+              El viaje <span className="font-mono text-xs">{focusTrip.slice(0, 8)}</span> ya no transmite en
+              vivo (terminó o dejó de publicar).
+            </span>
+            <Link
+              href={`/media?trip=${focusTrip}`}
+              className="inline-flex items-center gap-1 rounded-md bg-warn/15 px-2.5 py-1 text-xs font-semibold hover:bg-warn/25"
+            >
+              <Film className="size-3.5" aria-hidden /> Ver grabación
+            </Link>
+          </div>
+        ) : null}
         {query.isError ? (
           <ErrorState onRetry={() => void query.refetch()} />
         ) : query.isLoading ? (
@@ -80,23 +132,30 @@ export default function LiveWallPage() {
             {cabins.map((cabin) => {
               const grant = grants[cabin.tripId];
               const label = cabin.driverName ?? `Viaje ${cabin.tripId.slice(0, 8)}`;
-              if (grant) {
-                return (
-                  <LiveCabinViewer
-                    key={cabin.tripId}
-                    grant={grant}
-                    label={label}
-                    onClose={() => closeCamera(cabin.tripId)}
-                  />
-                );
-              }
+              const focused = cabin.tripId === focusTrip;
               return (
-                <LiveAccessDialog
+                <div
                   key={cabin.tripId}
-                  tripId={cabin.tripId}
-                  onGranted={(g) => setGrants((prev) => ({ ...prev, [cabin.tripId]: g }))}
-                  trigger={<CameraTile cabin={cabin} />}
-                />
+                  ref={focused ? focusRef : undefined}
+                  className={cn(
+                    'rounded-[16px]',
+                    focused && 'ring-2 ring-brand ring-offset-2 ring-offset-bg',
+                  )}
+                >
+                  {grant ? (
+                    <LiveCabinViewer
+                      grant={grant}
+                      label={label}
+                      onClose={() => closeCamera(cabin.tripId)}
+                    />
+                  ) : (
+                    <LiveAccessDialog
+                      tripId={cabin.tripId}
+                      onGranted={(g) => setGrants((prev) => ({ ...prev, [cabin.tripId]: g }))}
+                      trigger={<CameraTile cabin={cabin} />}
+                    />
+                  )}
+                </div>
               );
             })}
           </div>

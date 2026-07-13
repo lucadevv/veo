@@ -3,6 +3,7 @@
 import { cloneElement, isValidElement, useState, type MouseEventHandler } from 'react';
 import { KeyRound, type LucideIcon } from 'lucide-react';
 import { stepUp } from '@/lib/api/auth';
+import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
@@ -55,6 +56,7 @@ export function StepUpDialog({
   reasonPlaceholder,
   onVerified,
 }: StepUpDialogProps) {
+  const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState('');
   const [reason, setReason] = useState('');
@@ -65,12 +67,24 @@ export function StepUpDialog({
   // NO exige la doble-auth fresca (solo NODE_ENV=production la mantiene). El TOTP se salta en dev.
   const isProd = process.env.NODE_ENV === 'production';
 
-  // DEV sin motivo: no hay nada que capturar → salta el diálogo y corre la acción directo (el superadmin no
+  // DEV sin motivo: no hay TOTP que capturar → salta el diálogo y corre la acción directo (el superadmin no
   // re-tipea el código en cada acción sensible). CON motivo NO se salta: el diálogo debe capturar el motivo
-  // igual (dev o prod); solo el TOTP se omite en dev.
+  // igual (dev o prod); solo el TOTP se omite en dev. IMPORTANTE: acá NO hay Field donde mostrar un error, así
+  // que un fallo de la acción (409/403/riel caído) se surfacéa por TOAST — si se descartara la promesa
+  // (`void onVerified()`), las mutaciones de dinero fallarían MUDAS en el entorno donde el equipo trabaja (dev).
   if (!isProd && !withReason && isValidElement(trigger)) {
     return cloneElement(trigger as React.ReactElement<{ onClick?: MouseEventHandler }>, {
-      onClick: () => void onVerified(),
+      onClick: async () => {
+        try {
+          await onVerified();
+        } catch (e) {
+          toast({
+            tone: 'danger',
+            title: 'No se pudo completar la acción',
+            description: e instanceof Error ? e.message : undefined,
+          });
+        }
+      },
     });
   }
 

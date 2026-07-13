@@ -168,7 +168,23 @@ function AuditInner() {
         }
       />
 
-      {verify.data ? (
+      {verify.isError ? (
+        <div
+          role="alert"
+          className="mx-4 mt-4 flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-danger lg:mx-6"
+        >
+          <ShieldX className="size-5" aria-hidden />
+          <div className="flex-1 text-sm">
+            <p className="font-semibold">No se pudo verificar la cadena</p>
+            <p className="text-ink-muted">
+              {verify.error instanceof Error ? verify.error.message : 'Intentá de nuevo en un momento.'}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => verify.mutate()}>
+            Reintentar
+          </Button>
+        </div>
+      ) : verify.data ? (
         <div
           role="status"
           className={`mx-4 mt-4 flex items-center gap-3 rounded-md border px-4 py-3 lg:mx-6 ${
