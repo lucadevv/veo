@@ -128,6 +128,12 @@ export async function emitBidPosted(
         // FIXED. Sin esto el board queda mudo y un tier inferior puede ganar un bid de tier superior.
         category: trip.category ?? undefined,
         origin,
+        // Destino + distancia/duración del viaje (del row Trip): el conductor pinta pickup→destino + distancia
+        // en la tarjeta de puja ANTES de aceptar. dispatch los guarda en el board (el destino se engrosa a
+        // ~111m antes de exponerse a los conductores no asignados, distancia/duración pasan directo).
+        destination: { lat: trip.destLat, lon: trip.destLon },
+        distanceMeters: trip.distanceMeters,
+        durationSeconds: trip.durationSeconds,
         windowSec: bidWindowSec,
         // H13 — dispatch persiste este seq en el board y lo estampa en dispatch.offer_accepted.
         negotiationSeq: trip.negotiationSeq,

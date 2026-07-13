@@ -2438,6 +2438,11 @@ export const openBidView = z.object({
   expiresAt: z.number(),
   originLat: z.number(),
   originLon: z.number(),
+  /** Destino ENGROSADO a ~111m (privacidad pre-aceptación) + distancia/duración: la app pinta pickup→destino + distancia. */
+  destLat: z.number(),
+  destLon: z.number(),
+  distanceMeters: z.number(),
+  durationSeconds: z.number(),
   /** BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla). */
   specialRequests: z.array(z.string()),
 });
@@ -3298,6 +3303,11 @@ export interface DispatchOfferedPayload {
   vehicleType?: string;
   originLat?: number;
   originLon?: number;
+  /** Destino ENGROSADO a ~111m (privacidad pre-aceptación) + distancia/duración del viaje: el ping pinta la tarjeta de puja (pickup→destino + distancia) sin refetch. Ausentes en la oferta FIXED. */
+  destLat?: number;
+  destLon?: number;
+  distanceMeters?: number;
+  durationSeconds?: number;
   specialRequests?: string[];
   /** ETA conductor→recojo en segundos (efímero, solo oferta FIXED): la app lo muestra como el stat "A recojo". Ausente si el broadcast de PUJA no lo trae o si maps.eta no estuvo disponible. */
   pickupEtaSeconds?: number;

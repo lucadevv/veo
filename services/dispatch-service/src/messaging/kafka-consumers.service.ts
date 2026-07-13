@@ -150,6 +150,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       // por TIER en PUJA igual que en FIXED. Opcional/compat N-2 (bid_posted previos sin category).
       category: p.category,
       origin: p.origin,
+      // Destino + distancia/duración del viaje: el board los guarda para que el conductor pinte pickup→destino
+      // + distancia en la tarjeta de puja (el destino se engrosa a ~111m al exponerse a los no asignados).
+      destination: p.destination,
+      distanceMeters: p.distanceMeters,
+      durationSeconds: p.durationSeconds,
       windowSec: p.windowSec,
       // H13 — propaga el ciclo de negociación al board (se estampa en offer_accepted).
       negotiationSeq: p.negotiationSeq,
@@ -191,6 +196,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       // B5-3 — re-persiste el tier en el board re-abierto para enforcar el TIER en el re-match.
       category: p.category,
       origin: p.origin,
+      // Destino + distancia/duración: el board re-abierto los conserva para que el conductor del re-match
+      // vea pickup→destino + distancia igual que la puja original (trip.reassigning ya los transporta).
+      destination: p.destination,
+      distanceMeters: p.distanceMeters,
+      durationSeconds: p.durationSeconds,
       bidCents: p.bidCents,
       // H13 — el seq del NUEVO ciclo de la reasignación: el board re-abierto lo estampa en offer_accepted.
       negotiationSeq: p.negotiationSeq,

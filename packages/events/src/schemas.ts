@@ -489,6 +489,13 @@ export const tripBidPosted = z.object({
   /// solo filtra por vehicleType, como antes).
   category: z.string().optional(),
   origin: geo,
+  /// Destino del viaje (geo) + distancia/duración estimadas: el conductor las VE en la tarjeta de puja
+  /// (pickup→destino + distancia) ANTES de aceptar, sin un join cross-servicio. dispatch las guarda en el
+  /// board (el destino se ENGROSA a ~111m antes de exponerlo a los N conductores no asignados, igual que el
+  /// origen; distancia/duración no son sensibles). Vienen del row Trip (destLat/destLon/distanceMeters/durationSeconds).
+  destination: geo,
+  distanceMeters: z.number().int().nonnegative(),
+  durationSeconds: z.number().int().nonnegative(),
   windowSec: z.number().int().positive(),
   /// H13 — secuencia MONOTÓNICA de negociación del viaje (NUNCA se resetea, a diferencia de
   /// reassignCount). Sella el ciclo de negociación que abrió este bid: dispatch la persiste en el board
@@ -609,6 +616,12 @@ export const tripReassigning = z.object({
   category: z.string().optional(),
   /// Origen del viaje (geo): centro del broadcast a conductores elegibles cercanos.
   origin: geo,
+  /// Destino + distancia/duración del viaje: el board re-abierto los conserva para que el conductor del
+  /// re-match VEA pickup→destino + distancia igual que en la puja original (cierra el MISMO gap que tenía
+  /// specialRequests, que no viajaba en reassigning y se degradaba a [] al reconstruir el board). Del row Trip.
+  destination: geo,
+  distanceMeters: z.number().int().nonnegative(),
+  durationSeconds: z.number().int().nonnegative(),
   bidCents: z.number().int().positive(),
   reason: z.enum(['driver_cancelled']),
   /// H13 — secuencia MONOTÓNICA del NUEVO ciclo de negociación que abre esta reasignación (trip la

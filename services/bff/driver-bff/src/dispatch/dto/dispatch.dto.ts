@@ -79,6 +79,11 @@ export interface OpenBidView {
   expiresAt: number;
   originLat: number;
   originLon: number;
+  /** Destino ENGROSADO a ~111m (privacidad pre-aceptación) + distancia/duración: el conductor pinta pickup→destino + distancia. Mismos nombres que `OfferView` (FIXED). */
+  destLat: number;
+  destLon: number;
+  distanceMeters: number;
+  durationSeconds: number;
   /** BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla); el conductor las ve. */
   specialRequests: string[];
 }

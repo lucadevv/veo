@@ -79,6 +79,12 @@ export interface BidPosted {
   /// eligibilidad por TIER en PUJA igual que FIXED. Opcional por compat N-2 (bid_posted previos sin él).
   category?: string;
   origin: LatLon;
+  /// Destino + distancia/duración del viaje (del row Trip vía `trip.bid_posted`): el board los guarda para
+  /// que el conductor VEA pickup→destino + distancia en la tarjeta de puja. El destino se ENGROSA a ~111m
+  /// antes de exponerlo a los conductores no asignados (`coarsenPreBid`); distancia/duración pasan directo.
+  destination: LatLon;
+  distanceMeters: number;
+  durationSeconds: number;
   /// ADVISORY (ADR-019 Lote A). La ventana la decide dispatch (config editable por el admin,
   /// `getWindows().bidWindowSec`): TANTO openBoard (bid inicial) COMO reopenBoard (re-match) usan ese valor
   /// de runtime. Este campo lo sigue enviando el productor (trip-service) por compat N-2 del contrato, pero
@@ -101,6 +107,11 @@ export interface Reassigning {
   /// Opcional por compat N-2 (reassigning previos sin él).
   category?: string;
   origin: LatLon;
+  /// Destino + distancia/duración del viaje: el board re-abierto los conserva para que el conductor del
+  /// re-match VEA pickup→destino + distancia igual que en la puja original (trip.reassigning ya los transporta).
+  destination: LatLon;
+  distanceMeters: number;
+  durationSeconds: number;
   bidCents: number;
   /// H13 — ciclo de negociación del NUEVO re-match (seq incrementado por trip al pasar a REASSIGNING).
   negotiationSeq: number;
@@ -207,6 +218,12 @@ export class OfferBoardService {
       // elegibilidad en PUJA (un tier inferior no puede ganar un bid de tier superior).
       category: bid.category,
       origin: bid.origin,
+      // Destino + distancia/duración del viaje: el board los guarda para que el conductor pinte pickup→destino
+      // + distancia. El destino se engrosa a ~111m recién al DERIVAR los campos de puja (bidFieldsFromBoard);
+      // acá se persiste el exacto (need-to-know del conductor ASIGNADO, que lo obtiene por /route al match).
+      destination: bid.destination,
+      distanceMeters: bid.distanceMeters,
+      durationSeconds: bid.durationSeconds,
       // A3 — celda H3 del origen calculada UNA vez acá: alimenta el índice inverso `board:cell:<cell>`
       // que `listOpenBidsNear` consulta por k-ring (en vez de cargar TODOS los boards y filtrar en Node).
       originCell: toH3(bid.origin, DISPATCH_H3_RESOLUTION),
@@ -258,6 +275,13 @@ export class OfferBoardService {
       // re-abierto NUNCA pierde sus `requires` y el re-match enforça el TIER igual que la puja original.
       category: existing?.category ?? reassign.category,
       origin,
+      // Destino + distancia/duración: se preservan del board previo si sobrevivió (TTL no expiró); si se rearma
+      // SOLO desde el evento (board ya expirado), los toma del payload ENRIQUECIDO de trip.reassigning. Así el
+      // board re-abierto NUNCA pierde el destino y el conductor del re-match ve pickup→destino igual que la puja
+      // original (a diferencia de specialRequests, reassigning SÍ transporta estos campos → sin degradación a []).
+      destination: existing?.destination ?? reassign.destination,
+      distanceMeters: existing?.distanceMeters ?? reassign.distanceMeters,
+      durationSeconds: existing?.durationSeconds ?? reassign.durationSeconds,
       // A3 — re-deriva la celda del origen resuelto (reusa la del board previo si existía, o la del evento).
       originCell: existing?.originCell ?? toH3(origin, DISPATCH_H3_RESOLUTION),
       bidCents: reassign.bidCents,

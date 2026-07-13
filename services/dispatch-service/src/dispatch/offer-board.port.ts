@@ -87,6 +87,15 @@ export interface OfferBoard {
   category?: string;
   origin: LatLon;
   /**
+   * Destino del viaje (del row Trip vía `trip.bid_posted`/`trip.reassigning`). Se persiste EXACTO en el
+   * board (need-to-know del conductor ASIGNADO, que lo obtiene por `/route` al match); al DERIVAR los campos
+   * de puja pre-aceptación (`bidFieldsFromBoard`) se ENGROSA a ~111m con `coarsenPreBid`, igual que el origen.
+   */
+  destination: LatLon;
+  /** Distancia/duración estimadas del viaje (metros/segundos). El conductor las ve en la tarjeta de puja. */
+  distanceMeters: number;
+  durationSeconds: number;
+  /**
    * A3 — celda H3 (a `DISPATCH_H3_RESOLUTION`) del ORIGEN del board, calculada UNA vez al abrirlo. Es la
    * clave del índice inverso `board:cell:<originCell>` (ZSET tripId→expiresAt, H11) que `boardsInCells`
    * consulta: así `listOpenBidsNear` lee SOLO los boards del k-ring del conductor (ZRANGEBYSCORE por celda
@@ -145,6 +154,15 @@ export interface BidBroadcastFields {
   vehicleType: VehicleClass;
   originLat: number;
   originLon: number;
+  /**
+   * Destino del viaje ENGROSADO a ~111m (mismo `coarsenPreBid` que el origen): el conductor pinta
+   * pickup→destino en la tarjeta de puja SIN ver el punto exacto de bajada. El destino exacto va SOLO al
+   * conductor asignado por `/route`. distanceMeters/durationSeconds no son sensibles → pasan directo.
+   */
+  destLat: number;
+  destLon: number;
+  distanceMeters: number;
+  durationSeconds: number;
   specialRequests: string[];
 }
 
@@ -169,6 +187,13 @@ export function bidFieldsFromBoard(b: OfferBoard): BidBroadcastFields {
     // Origen ENGROSADO a ~111m pre-aceptación (privacidad). El exacto va por /route al asignarse.
     originLat: coarsenPreBid(b.origin.lat),
     originLon: coarsenPreBid(b.origin.lon),
+    // Destino ENGROSADO a ~111m con el MISMO coarsenPreBid (privacidad): el conductor no asignado ve la zona
+    // de bajada para juzgar el viaje, no la puerta exacta. El destino exacto va por /route al asignarse.
+    destLat: coarsenPreBid(b.destination.lat),
+    destLon: coarsenPreBid(b.destination.lon),
+    // Distancia/duración NO son sensibles (no revelan un punto) → pasan directo, sin engrosar.
+    distanceMeters: b.distanceMeters,
+    durationSeconds: b.durationSeconds,
     specialRequests: b.specialRequests,
   };
 }

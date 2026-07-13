@@ -91,6 +91,14 @@ export class OpenBidDto {
   originLat!: number;
   @ApiProperty({ example: -77.0428 })
   originLon!: number;
+  @ApiProperty({ example: -12.0931, description: 'Destino ENGROSADO a ~111m (privacidad pre-aceptación).' })
+  destLat!: number;
+  @ApiProperty({ example: -77.0465, description: 'Destino ENGROSADO a ~111m (privacidad pre-aceptación).' })
+  destLon!: number;
+  @ApiProperty({ example: 4200, description: 'Distancia estimada del viaje en metros.' })
+  distanceMeters!: number;
+  @ApiProperty({ example: 900, description: 'Duración estimada del viaje en segundos.' })
+  durationSeconds!: number;
   @ApiProperty({
     isArray: true,
     enum: ['PET', 'LUGGAGE', 'CHILD_SEAT'],

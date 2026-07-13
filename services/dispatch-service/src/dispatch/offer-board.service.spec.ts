@@ -27,6 +27,9 @@ import type { OfferDelivery, DispatchOffer } from './offer-delivery.port';
 import type { Env } from '../config/env.schema';
 
 const ORIGIN = { lat: -12.0464, lon: -77.0428 };
+const DEST = { lat: -12.0931, lon: -77.0465 };
+const DIST_METERS = 4200;
+const DUR_SECONDS = 900;
 const PASSENGER = 'passenger-1';
 
 /** OfferBoardStore en memoria (mismo contrato que RedisOfferBoardStore). */
@@ -564,6 +567,9 @@ async function openBoard(
     bidCents,
     vehicleType: VehicleType.CAR,
     origin: ORIGIN,
+    destination: DEST,
+    distanceMeters: DIST_METERS,
+    durationSeconds: DUR_SECONDS,
     windowSec,
     negotiationSeq,
   });
@@ -612,6 +618,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 850,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
       specialRequests: [SpecialRequest.PET],
@@ -767,6 +776,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       passengerId: PASSENGER,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       bidCents: 900,
       negotiationSeq: 2,
     });
@@ -873,6 +885,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -919,6 +934,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1149,6 +1167,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 1,
       negotiationSeq: 1,
     });
@@ -1160,6 +1181,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 600,
       negotiationSeq: 1,
     });
@@ -1210,6 +1234,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
         bidCents: 700,
         vehicleType: VehicleType.CAR,
         origin: ORIGIN,
+        destination: DEST,
+        distanceMeters: DIST_METERS,
+        durationSeconds: DUR_SECONDS,
         windowSec: 600,
         negotiationSeq: 1,
       });
@@ -1268,6 +1295,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       passengerId: PASSENGER,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       bidCents: 900,
       negotiationSeq: 1,
     });
@@ -1331,6 +1361,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       passengerId: PASSENGER,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       bidCents: 900,
       negotiationSeq: 1,
     });
@@ -1354,6 +1387,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       passengerId: PASSENGER,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       bidCents: 1100,
       negotiationSeq: 1,
     });
@@ -1549,6 +1585,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       passengerId: PASSENGER,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       bidCents: 950,
       negotiationSeq: 1,
     });
@@ -1575,6 +1614,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 800,
       vehicleType: VehicleType.CAR,
       origin: { lat: 40.4168, lon: -3.7038 }, // Madrid, fuera del k-ring de Lima
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1585,6 +1627,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 600,
       vehicleType: VehicleType.MOTO,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1610,6 +1655,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       vehicleType: VehicleType.CAR,
       category: OfferingId.VEO_XL,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1620,6 +1668,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1651,6 +1702,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       vehicleType: VehicleType.CAR,
       category: OfferingId.VEO_XL,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1690,6 +1744,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 800,
       vehicleType: VehicleType.CAR,
       origin: { lat: 40.4168, lon: -3.7038 },
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1714,6 +1771,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
@@ -1736,6 +1796,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 1,
       negotiationSeq: 1,
     });
@@ -1752,6 +1815,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       bidCents: 700,
       vehicleType: VehicleType.CAR,
       origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       windowSec: 60,
       negotiationSeq: 1,
     });
