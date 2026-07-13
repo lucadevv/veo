@@ -114,6 +114,14 @@ export default function VehiclesPage() {
     [vehicles.data],
   );
 
+  // Total AUTORITATIVO de la flota (server · /ops/vehicles/summary, sobre TODA la flota) = suma de los buckets
+  // documentales. El `all.length` derivado solo cuenta las PÁGINAS ya cargadas → subcuenta hasta "Cargar más".
+  // OJO: las cards Activos/ITV/Suspendidos son OTRO eje (operable + ITV vigente) que DEBE coincidir con las filas
+  // visibles → se dejan derivadas del set cargado; mapearlas a los buckets doc del summary contradiría la columna
+  // Estado (un vehículo doc-VALID con ITV vencida es "Suspendido" en la fila, no "Activo").
+  const vs = vehiclesSummary.data;
+  const fleetTotal = vs ? vs.valid + vs.expiringSoon + vs.expired : all.length;
+
   const matchesTab = (v: VehicleView, t: Tab): boolean => {
     if (t === 'todos') return true;
     if (t === 'itvPorVencer') return itvExpiringSoon(v);
@@ -185,8 +193,8 @@ export default function VehiclesPage() {
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Vehículos</h1>
           <p className="text-[13px] text-ink-subtle">
-            {all.length > 0
-              ? `${cards.total} ${cards.total === 1 ? 'vehículo' : 'vehículos'} · ${tabCount('enRevision')} en revisión`
+            {fleetTotal > 0
+              ? `${fleetTotal} ${fleetTotal === 1 ? 'vehículo' : 'vehículos'} · ${tabCount('enRevision')} en revisión`
               : 'Flota registrada · verificación, documentos e inspección técnica (ITV)'}
           </p>
         </div>
@@ -207,9 +215,9 @@ export default function VehiclesPage() {
         <StatCard
           icon={Car}
           label="Total en flota"
-          value={String(cards.total)}
+          value={String(fleetTotal)}
           hint="Vehículos registrados"
-          loading={vehicles.isLoading}
+          loading={vehiclesSummary.isLoading}
         />
         <StatCard
           icon={CircleCheck}

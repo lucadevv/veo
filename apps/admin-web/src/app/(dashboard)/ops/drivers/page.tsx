@@ -321,7 +321,7 @@ export default function DriversPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar conductor, DNI o placa…"
+              placeholder="Buscar conductor…"
               className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-subtle"
             />
           </div>

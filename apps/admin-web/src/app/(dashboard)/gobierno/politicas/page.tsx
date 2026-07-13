@@ -53,6 +53,13 @@ export default function PoliciesPage() {
             <Skeleton className="h-40" />
             <Skeleton className="h-40" />
           </div>
+        ) : query.data.length === 0 ? (
+          // `data=[]` es truthy → sin este branch el panel renderiza 0 filas (card en blanco con solo los chips).
+          <EmptyState
+            className="pt-16"
+            title="Sin políticas"
+            description="El registro de políticas de gobierno está vacío. Aún no hay ninguna política configurada."
+          />
         ) : (
           <PoliciesPanel policies={query.data} canManage={canManage} />
         )}
