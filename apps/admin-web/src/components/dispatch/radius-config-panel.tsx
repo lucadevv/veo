@@ -326,11 +326,11 @@ function ModeLayout({
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_440px] lg:items-start">
       <section className="flex flex-col gap-5 rounded-[20px] border border-black/[0.05] bg-surface p-6 shadow-3">
-        <h2 className="font-display text-base font-bold text-ink">{title}</h2>
+        <h2 className="font-display text-base font-semibold text-ink">{title}</h2>
         {children}
       </section>
       <section className="flex flex-col gap-4 rounded-[20px] border border-black/[0.05] bg-surface p-6 shadow-3">
-        <h2 className="font-display text-base font-bold text-ink">Vista previa</h2>
+        <h2 className="font-display text-base font-semibold text-ink">Vista previa</h2>
         {radar}
       </section>
     </div>

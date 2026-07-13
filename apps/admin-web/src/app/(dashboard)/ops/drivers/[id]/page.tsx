@@ -103,7 +103,7 @@ function scoreBand(score: number | null): 'alta' | 'media' | 'baja' | null {
 }
 
 const CARD = 'rounded-[20px] border border-black/[0.05] bg-surface shadow-3';
-const CARD_TITLE = 'font-display text-base font-bold text-ink';
+const CARD_TITLE = 'font-display text-base font-semibold text-ink';
 
 export default function DriverDetailPage(props: { params: Promise<{ id: string }> }) {
   const params = use(props.params);

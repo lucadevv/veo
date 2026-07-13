@@ -25,7 +25,7 @@ export function DriverPopover({ driverId, onClose }: { driverId: string; onClose
           {initials(name)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-display text-base font-bold text-ink">
+          <p className="truncate font-display text-base font-semibold text-ink">
             {name ?? <span className="font-mono text-sm text-ink-muted">{driverId.slice(0, 8)}</span>}
           </p>
           <p className="text-[13px] text-ink-muted">Conductor</p>

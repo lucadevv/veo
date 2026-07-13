@@ -174,7 +174,7 @@ function Card({
   return (
     <section className="flex flex-col gap-3.5 rounded-[20px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-display text-base font-bold text-ink">{title}</h2>
+        <h2 className="font-display text-base font-semibold text-ink">{title}</h2>
         {aside}
       </div>
       {children}
@@ -417,7 +417,7 @@ function ConductorCard({ detail }: { detail: AdminCarpoolDetailView }) {
   return (
     <Card title="Conductor">
       <div className="flex items-center gap-3">
-        <span className="grid size-11 shrink-0 place-items-center rounded-full bg-brand/10 font-display text-base font-bold text-brand">
+        <span className="grid size-11 shrink-0 place-items-center rounded-full bg-brand/10 font-display text-base font-semibold text-brand">
           {initials(driver.name)}
         </span>
         <div className="min-w-0 flex-1">

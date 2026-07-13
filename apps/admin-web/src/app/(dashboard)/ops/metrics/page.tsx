@@ -173,7 +173,7 @@ export default function MetricsPage() {
             {/* Ingresos por día */}
             <div className="flex flex-col gap-[18px] rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3">
               <div className="flex items-center justify-between">
-                <h2 className="font-display text-base font-bold text-ink">Ingresos por día</h2>
+                <h2 className="font-display text-base font-semibold text-ink">Ingresos por día</h2>
                 {d.deltas.moneyInPct != null ? (
                   <span
                     className={cn(
@@ -212,7 +212,7 @@ export default function MetricsPage() {
             {/* Ingresos por modo + Top distritos */}
             <div className="stagger flex flex-col gap-5 xl:flex-row">
               <div className="flex flex-col gap-4 rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3 xl:w-[440px]">
-                <h2 className="font-display text-base font-bold text-ink">Ingresos por modo</h2>
+                <h2 className="font-display text-base font-semibold text-ink">Ingresos por modo</h2>
                 {modeSegments.length > 0 ? (
                   <Donut segments={modeSegments} centerValue={moneyCompact(d.moneyInCents)} centerLabel="total" />
                 ) : (
@@ -221,7 +221,7 @@ export default function MetricsPage() {
               </div>
 
               <div className="flex flex-1 flex-col gap-4 rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3">
-                <h2 className="font-display text-base font-bold text-ink">Top distritos por ingreso</h2>
+                <h2 className="font-display text-base font-semibold text-ink">Top distritos por ingreso</h2>
                 {d.topDistricts.length > 0 ? (
                   <ul className="flex flex-col gap-3">
                     {(() => {
@@ -270,7 +270,7 @@ export default function MetricsPage() {
               <Download className="size-[26px]" aria-hidden />
             </span>
             <div className="flex flex-col gap-2">
-              <DialogTitle className="font-display text-[22px] font-bold tracking-[-0.4px] text-ink">
+              <DialogTitle className="font-display text-[22px] font-semibold tracking-[-0.4px] text-ink">
                 Exportar métricas
               </DialogTitle>
               <DialogDescription className="text-sm leading-relaxed text-ink-muted">

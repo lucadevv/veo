@@ -131,7 +131,7 @@ function Topbar({ offering }: { offering: CatalogOffering | undefined }) {
               Ofertas de servicio
             </Link>
           </div>
-          <h1 className="truncate font-display text-[21px] font-bold tracking-[-0.4px] text-ink">
+          <h1 className="truncate font-display text-[21px] font-semibold tracking-[-0.4px] text-ink">
             {offering ? offeringDisplayName(offering) : 'Servicio'}
           </h1>
         </div>
@@ -230,7 +230,7 @@ function Loaded({
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-4 rounded-[20px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
-      <h2 className="font-display text-base font-bold text-ink">{title}</h2>
+      <h2 className="font-display text-base font-semibold text-ink">{title}</h2>
       {children}
     </section>
   );
@@ -272,7 +272,7 @@ function ConfigCard({ offering }: { offering: CatalogOffering }) {
           <Icon className="size-5" aria-hidden />
         </span>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 className="font-display text-base font-bold text-ink">{offeringDisplayName(offering)}</h2>
+          <h2 className="font-display text-base font-semibold text-ink">{offeringDisplayName(offering)}</h2>
           <p className="text-[13px] text-ink-muted">{subtitle}</p>
         </div>
       </div>

@@ -62,7 +62,7 @@ export function PanicModal() {
             <Siren className="size-[26px]" aria-hidden />
           </span>
           <div className="flex flex-col gap-2">
-            <DialogTitle className="font-display text-[22px] font-bold tracking-[-0.4px] text-ink">
+            <DialogTitle className="font-display text-[22px] font-semibold tracking-[-0.4px] text-ink">
               Pánico activo · #{target?.panicId.slice(0, 8) ?? ''}
             </DialogTitle>
             <DialogDescription className="text-sm leading-relaxed text-ink-muted">

@@ -47,7 +47,7 @@ export function FareSimulatorCard({ config }: { config: BaseFareView }) {
   return (
     <div className="rounded-[18px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
       <div className="flex flex-col gap-4">
-        <h3 className="font-display text-base font-bold text-ink">Simulador de tarifa</h3>
+        <h3 className="font-display text-base font-semibold text-ink">Simulador de tarifa</h3>
 
         {/* Inputs de prueba (i-Distancia / i-Tiempo): estado local, cajas recesadas. */}
         <div className="flex gap-2.5">

@@ -176,7 +176,7 @@ export function CarpoolingMonitor({
       <section className="overflow-hidden rounded-[18px] border border-black/[0.05] bg-surface shadow-3">
         <header className="flex items-center justify-between border-b border-border px-5 py-4">
           <div className="flex items-baseline gap-2.5">
-            <h2 className="font-display text-base font-bold text-ink">Carpools activos</h2>
+            <h2 className="font-display text-base font-semibold text-ink">Carpools activos</h2>
             <span className="text-xs text-ink-muted">
               {carpools.length} {carpools.length === 1 ? 'listado' : 'listados'}
             </span>

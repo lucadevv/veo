@@ -27,7 +27,7 @@ export default function PayoutDetailPage(props: { params: Promise<{ id: string }
           >
             <ArrowLeft className="size-[17px]" aria-hidden />
           </Link>
-          <h1 className="font-display text-[21px] font-bold tracking-[-0.4px] text-ink">Liquidación</h1>
+          <h1 className="font-display text-[21px] font-semibold tracking-[-0.4px] text-ink">Liquidación</h1>
         </header>
         <PermissionState className="flex-1" section="Liquidaciones" permission="finance:view" />
       </div>

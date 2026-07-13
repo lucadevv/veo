@@ -46,7 +46,7 @@ export function PanicsRecent() {
   return (
     <div className="flex h-full flex-1 flex-col rounded-xl border border-black/[0.05] bg-surface p-[22px] shadow-3">
       <div className="flex items-center justify-between pb-2">
-        <h2 className="font-display text-base font-bold text-ink">Pánicos recientes</h2>
+        <h2 className="font-display text-base font-semibold text-ink">Pánicos recientes</h2>
         <Link href="/security/panics" className="text-[13px] font-medium text-accent hover:underline">
           Ver todos
         </Link>

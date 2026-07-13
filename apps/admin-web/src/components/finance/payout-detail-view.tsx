@@ -93,7 +93,7 @@ function Topbar({ short, payout }: { short: string; payout: PayoutDetail | undef
             <span>/</span>
             <span className="font-mono text-ink-muted">#{short}</span>
           </div>
-          <h1 className="truncate font-display text-[21px] font-bold tracking-[-0.4px] text-ink">
+          <h1 className="truncate font-display text-[21px] font-semibold tracking-[-0.4px] text-ink">
             Liquidación{who ? ` · ${who}` : ''}
           </h1>
         </div>
@@ -107,7 +107,7 @@ function Topbar({ short, payout }: { short: string; payout: PayoutDetail | undef
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-4 rounded-[20px] border border-black/[0.05] bg-surface p-[22px] shadow-3">
-      <h2 className="font-display text-base font-bold text-ink">{title}</h2>
+      <h2 className="font-display text-base font-semibold text-ink">{title}</h2>
       {children}
     </section>
   );

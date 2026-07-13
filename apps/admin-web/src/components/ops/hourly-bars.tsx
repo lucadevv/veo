@@ -21,7 +21,7 @@ export function HourlyBars({ series }: { series: OverviewSeriesPoint[] }) {
 
   return (
     <div className="flex flex-1 flex-col gap-[18px] rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3">
-      <h2 className="font-display text-base font-bold text-ink">Viajes por hora</h2>
+      <h2 className="font-display text-base font-semibold text-ink">Viajes por hora</h2>
       {series.length === 0 ? (
         <p className="py-8 text-center text-[13px] text-ink-subtle">Sin datos de las últimas horas.</p>
       ) : (

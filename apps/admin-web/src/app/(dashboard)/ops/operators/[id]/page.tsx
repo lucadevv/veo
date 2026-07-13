@@ -131,7 +131,7 @@ export default function OperatorDetailPage(props: { params: Promise<{ id: string
             </Card>
 
             <Card>
-              <h2 className="font-display text-base font-bold text-ink">Permisos efectivos</h2>
+              <h2 className="font-display text-base font-semibold text-ink">Permisos efectivos</h2>
               {op.effectivePermissions.length === 0 ? (
                 <p className="text-sm text-ink-muted">Sin permisos efectivos.</p>
               ) : (
@@ -158,7 +158,7 @@ export default function OperatorDetailPage(props: { params: Promise<{ id: string
           {/* Columna derecha: rol + sesiones + acciones */}
           <div className="flex flex-col gap-[18px]">
             <Card>
-              <h2 className="font-display text-base font-bold text-ink">Rol</h2>
+              <h2 className="font-display text-base font-semibold text-ink">Rol</h2>
               <div className="flex flex-wrap gap-2">
                 {op.roles.map((role) => (
                   <RolePill key={role} role={role} />
@@ -181,7 +181,7 @@ export default function OperatorDetailPage(props: { params: Promise<{ id: string
             </Card>
 
             <Card>
-              <h2 className="font-display text-base font-bold text-ink">Sesiones activas</h2>
+              <h2 className="font-display text-base font-semibold text-ink">Sesiones activas</h2>
               {op.sessions.length === 0 ? (
                 <p className="text-sm text-ink-muted">Sin sesiones activas.</p>
               ) : (

@@ -102,7 +102,7 @@ export function PermissionState({
         <Lock className="size-[30px]" aria-hidden />
       </div>
       <div className="max-w-[320px] space-y-1.5">
-        <p className="font-display text-[19px] font-bold tracking-[-0.3px] text-ink">
+        <p className="font-display text-[19px] font-semibold tracking-[-0.3px] text-ink">
           Sin permiso para {section}
         </p>
         <p className="text-sm leading-relaxed text-ink-muted">

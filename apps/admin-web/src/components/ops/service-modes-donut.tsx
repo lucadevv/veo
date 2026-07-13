@@ -47,7 +47,7 @@ export function ServiceModesDonut({ byMode }: { byMode: ByMode[] }) {
   return (
     <div className="flex w-full flex-col gap-4 rounded-xl border border-black/[0.05] bg-surface p-6 shadow-3 xl:w-[380px]">
       <div className="flex flex-col gap-0.5">
-        <h2 className="font-display text-base font-bold text-ink">Modos de servicio</h2>
+        <h2 className="font-display text-base font-semibold text-ink">Modos de servicio</h2>
         <p className="text-xs text-ink-subtle">Viajes de hoy · Lima Metropolitana</p>
       </div>
 
