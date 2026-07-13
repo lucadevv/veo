@@ -1819,6 +1819,8 @@ export const common = {
 
   profile: {
     title: 'Tu cuenta',
+    /** Subtítulo del hero (mismo tratamiento que el ScreenHero del conductor: display izq + sub muted). */
+    subtitle: 'Perfil, seguridad y preferencias',
     phoneLabel: 'Teléfono',
     nameLabel: 'Nombre',
     nameEmpty: 'Sin nombre registrado',

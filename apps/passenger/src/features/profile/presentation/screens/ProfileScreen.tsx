@@ -8,7 +8,6 @@ import {
   BottomSheet,
   Button,
   Card,
-  hexAlpha,
   ListItem,
   SafeScreen,
   StatusPill,
@@ -344,113 +343,114 @@ export function ProfileScreen(): React.JSX.Element {
           padding: theme.spacing.xl,
           gap: theme.spacing.lg,
         }}>
-        {/* Header del hub */}
-        <Text variant="title1">{t('profile.title')}</Text>
+        {/* Header del hub · hero editorial IZQUIERDA (display + subtítulo), MISMO tratamiento que el
+            ScreenHero del conductor — coherencia de identidad entre apps (anti-centrado). */}
+        <View style={{gap: theme.spacing.xxs}}>
+          <Text variant="display">{t('profile.title')}</Text>
+          <Text variant="callout" color="inkMuted">
+            {t('profile.subtitle')}
+          </Text>
+        </View>
 
-        {/* CABECERA · avatar (→ editar, gesto pro) + nombre/CTA + línea de identidad + Editar perfil. */}
+        {/* CABECERA · identidad en CARD a la izquierda (avatar + nombre/badge + rating + contacto),
+            espejo del `ProfileIdentityCard` del conductor. El editar queda como affordance explícito
+            (ghost, visible) debajo de la card — el .pen del passenger exige descubribilidad real. */}
         <EnterView index={0}>
-          <View style={{alignItems: 'center', gap: theme.spacing.sm}}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('profile.editProfile')}
-              onPress={openEdit}>
-              <Avatar
-                uri={profile.photoUrl ?? undefined}
-                name={hasName ? displayName : undefined}
-                size="xl"
-              />
-            </Pressable>
+          <View style={{gap: theme.spacing.sm}}>
+            <Card variant="filled">
+              <View style={styles.identityRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('profile.editProfile')}
+                  onPress={openEdit}>
+                  <Avatar
+                    uri={profile.photoUrl ?? undefined}
+                    name={hasName ? displayName : undefined}
+                    size="xl"
+                  />
+                </Pressable>
 
-            {hasName ? (
-              <View style={styles.nameRow}>
-                <Text variant="title2">{displayName}</Text>
+                <View style={styles.identityInfo}>
+                  {hasName ? (
+                    <View style={styles.nameRow}>
+                      <Text variant="title3" numberOfLines={1} style={styles.nameText}>
+                        {displayName}
+                      </Text>
+                      {/* Verificado KYC (pen c4cChO): badge-check en success junto al nombre — verificación
+                          sutil, un solo acento (espejo del ProfileIdentityCard del conductor). */}
+                      {verified ? (
+                        <View accessibilityLabel={t('profile.identityConfirmed')}>
+                          <IconBadgeCheck color={success} size={16} />
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : (
+                    // El dato faltante ES la invitación: CTA explícito, no un misterio.
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t('profile.addName')}
+                      onPress={openEdit}
+                      style={styles.addNameCta}>
+                      <Text variant="title3" color="accent">
+                        {t('profile.addName')}
+                      </Text>
+                    </Pressable>
+                  )}
+
+                  {/* CALIFICACIÓN RECIBIDA · estrella accent + score + viajes. Vacío honesto si no tiene. */}
+                  {hasRating ? (
+                    <View
+                      accessible
+                      accessibilityLabel={`${ratingScore} · ${
+                        aggregate!.count30d === 1
+                          ? t('profile.ratingCountOne')
+                          : t('profile.ratingCountMany', {count: aggregate!.count30d})
+                      }`}
+                      style={styles.ratingRow}>
+                      <IconStarFilled color={accent} size={16} />
+                      <Text variant="bodyStrong" color="ink" tabular>
+                        {ratingScore}
+                      </Text>
+                      <Text variant="footnote" color="inkMuted">
+                        {'· '}
+                        {aggregate!.count30d === 1
+                          ? t('profile.ratingCountOne')
+                          : t('profile.ratingCountMany', {
+                              count: aggregate!.count30d,
+                            })}
+                      </Text>
+                    </View>
+                  ) : ratingEmpty ? (
+                    <Text variant="footnote" color="inkSubtle">
+                      {t('profile.ratingNone')}
+                    </Text>
+                  ) : null}
+
+                  {/* Contacto + documento en UNA línea muted (identidad secundaria). */}
+                  {contact ? (
+                    <Text variant="footnote" color="inkMuted" numberOfLines={1} tabular>
+                      {contact}
+                      {maskedDocument
+                        ? ` · ${t(`profile.docType.${profile.documentType ?? 'DN'}`)} ${maskedDocument}`
+                        : ''}
+                    </Text>
+                  ) : maskedDocument ? (
+                    <Text variant="footnote" color="inkSubtle" tabular>
+                      {t(`profile.docType.${profile.documentType ?? 'DN'}`)} {maskedDocument}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
-            ) : (
-              // El dato faltante ES la invitación: CTA explícito, no un misterio.
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('profile.addName')}
-                onPress={openEdit}
-                style={styles.addNameCta}>
-                <Text variant="title3" color="accent">
-                  {t('profile.addName')}
-                </Text>
-              </Pressable>
-            )}
+            </Card>
 
-            {/* Estado VERIFICADO per design/veo.pen c4cChO: pill "Verificado con KYC" (badge-check +
-                texto success sobre fondo success tenue) bajo el nombre — reemplaza al check fino.
-                Los demás estados (pendiente / sin verificar) conservan su card de invitación. */}
-            {verified ? (
-              <View
-                accessibilityLabel={t('profile.identityConfirmed')}
-                style={[
-                  styles.verifiedPill,
-                  {
-                    backgroundColor: hexAlpha(
-                      success,
-                      theme.scheme === 'dark' ? 0.16 : 0.12,
-                    ),
-                  },
-                ]}>
-                <IconBadgeCheck color={success} size={13} />
-                <Text
-                  variant="footnote"
-                  style={{color: success, fontWeight: '500'}}>
-                  {t('profile.verifiedKycPill')}
-                </Text>
-              </View>
-            ) : null}
-
-            {contact ? (
-              <Text variant="subhead" color="inkMuted" tabular>
-                {contact}
-              </Text>
-            ) : null}
-            {maskedDocument ? (
-              <Text variant="footnote" color="inkSubtle" tabular>
-                {t(`profile.docType.${profile.documentType ?? 'DN'}`)}{' '}
-                {maskedDocument}
-              </Text>
-            ) : null}
-
-            {/* CALIFICACIÓN RECIBIDA · protagonista de la cabecera (img2): estrella accent + score con 1
-                decimal + cantidad de viajes. Vacío honesto si aún no tiene; loading/error → silencio. */}
-            {hasRating ? (
-              <View
-                accessible
-                accessibilityLabel={`${ratingScore} · ${
-                  aggregate!.count30d === 1
-                    ? t('profile.ratingCountOne')
-                    : t('profile.ratingCountMany', {count: aggregate!.count30d})
-                }`}
-                style={styles.ratingRow}>
-                <IconStarFilled color={accent} size={16} />
-                <Text variant="headline" color="ink" tabular>
-                  {ratingScore}
-                </Text>
-                <Text variant="footnote" color="inkMuted">
-                  {'· '}
-                  {aggregate!.count30d === 1
-                    ? t('profile.ratingCountOne')
-                    : t('profile.ratingCountMany', {
-                        count: aggregate!.count30d,
-                      })}
-                </Text>
-              </View>
-            ) : ratingEmpty ? (
-              <Text variant="footnote" color="inkSubtle">
-                {t('profile.ratingNone')}
-              </Text>
-            ) : null}
-
-            {/* Affordance VISIBLE de edición (ghost chico) — no escondida tras el avatar. */}
+            {/* Affordance VISIBLE de edición (ghost chico, IZQUIERDA) — no escondida tras el avatar. */}
             <Button
               label={t('profile.editProfile')}
               variant="ghost"
               size="sm"
               leftIcon={<IconPencil color={accent} size={16} />}
               onPress={openEdit}
+              style={styles.editBtn}
             />
           </View>
         </EnterView>
@@ -900,17 +900,13 @@ export function ProfileScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  // Identidad en card left-aligned (espejo del ProfileIdentityCard del conductor): avatar + info column.
+  identityRow: {flexDirection: 'row', alignItems: 'center', gap: 16},
+  identityInfo: {flex: 1, gap: 6},
+  nameText: {flexShrink: 1},
+  editBtn: {alignSelf: 'flex-start'},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
   ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
-  // Pill "Verificado con KYC" (pen c4cChO): badge + texto en success sobre fondo success tenue.
-  verifiedPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
   addNameCta: {paddingVertical: 2},
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   chip: {
