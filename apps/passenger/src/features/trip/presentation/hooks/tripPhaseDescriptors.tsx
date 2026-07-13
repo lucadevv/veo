@@ -671,7 +671,10 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   noOffers: {
     Body: NoOffersPhaseBody,
     Header: null,
-    expanded: false,
+    // La PUJA sin ofertas (re-pujar) trae el stepper + mínimo + hints + nota de peajes: NO entra en el
+    // peek (content-hug capado a 0.5) y se cortaba. `expanded` → snap a FULL (content-hug 0.94) → el
+    // sheet crece al alto de su contenido (max/min) y se ve completo.
+    expanded: true,
     showNearby: false,
     activeTrip: false,
     needsTripDetail: false,
