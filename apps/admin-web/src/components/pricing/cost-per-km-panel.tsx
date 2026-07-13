@@ -85,9 +85,7 @@ export function CostPerKmPanel({ config }: { config: CostPerKmListView }) {
     <ConfigCard
       title="Costo por km · tope de cost-sharing"
       tag="por país"
-      tagTone="success"
-      description="Costo real de operar el vehículo por km. Es el techo anti-lucro del precio del asiento."
-      footer={
+      tagTone="success"      footer={
         hasCountries ? (
           <SaveAction
             canManage={canManage}

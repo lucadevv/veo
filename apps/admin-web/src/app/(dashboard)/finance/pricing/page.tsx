@@ -16,12 +16,10 @@ import { OnDemandCommissionPanel } from '@/components/pricing/on-demand-commissi
  * Encabezado de sección: separa visualmente los grupos de config (línea divisoria + label + aclaración).
  * El ORDEN cuenta la historia: primero el modo (selector), después las piezas agrupadas por lo que hacen.
  */
-function SectionHeader({ label, hint }: { label: string; hint: string }) {
+function SectionHeader({ label }: { label: string }) {
   return (
     <div className="border-t border-border pt-5">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">
-        {label} <span className="font-normal normal-case tracking-normal">· {hint}</span>
-      </h2>
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">{label}</h2>
     </div>
   );
 }
@@ -68,7 +66,7 @@ export default function PricingPage() {
             El MODO (FIJO/PUJA) ya no vive acá — con ADR-023 es una palanca per-oferta en Ofertas de servicio. */}
         <div className="stagger mt-5 space-y-5">
           {/* La FÓRMULA es UNA sola: el precio exacto en FIJO y el sugerido que ve el pasajero en PUJA. */}
-          <SectionHeader label="Fórmula de tarifa" hint="el precio en FIJO, el sugerido en PUJA" />
+          <SectionHeader label="Fórmula de tarifa" />
           {/* F2.4 · tarifa base (banderazo + per-km + per-min). El por-km es ÚNICO y all-in (incluye el
               combustible), como Uber. El modelo de energía/combustible se sacó: era una variable de más que se
               sumaba al per-km (riesgo de doble-cuenta) y no existe en la fórmula canónica del mercado. */}
@@ -85,7 +83,7 @@ export default function PricingPage() {
           {/* El piso de la PUJA se configura por servicio en Ofertas de servicio (no acá): es un dato per-oferta,
               no un global. Acá quedan la fórmula (compartida) y la comisión (transversal). */}
           {/* Transversal: la comisión vive aguas abajo de fareCents — misma tasa venga de un bid (PUJA) o un cálculo (FIJO). */}
-          <SectionHeader label="Comisión" hint="se descuenta al conductor" />
+          <SectionHeader label="Comisión" />
           <AsyncSection query={commissionQuery} skeleton={<Skeleton className="h-64" />}>
             {(data) => <OnDemandCommissionPanel config={data} />}
           </AsyncSection>

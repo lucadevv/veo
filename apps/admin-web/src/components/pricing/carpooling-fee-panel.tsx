@@ -49,9 +49,7 @@ export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
     <ConfigCard
       title="Service fee"
       tag="fee al pasajero"
-      tagTone="brand"
-      description="Se suma al pasajero; el conductor cobra el 100%."
-      footer={
+      tagTone="brand"      footer={
         <SaveAction
           canManage={canManage}
           dirty={dirty}

@@ -63,9 +63,7 @@ export function BaseFarePanel({ config }: { config: BaseFareView }) {
   return (
     <ConfigCard
       title="Tarifa base"
-      tag="componentes"
-      description="El por-km es all-in (incluye combustible)."
-      footer={
+      tag="componentes"      footer={
         <SaveAction
           canManage={canManage}
           dirty={dirty}
