@@ -53,6 +53,7 @@ import { useOpenBids } from '../../../bidding/presentation/hooks/useBids';
 import { BidCard } from '../../../bidding/presentation/components/BidCard';
 import { CounterOfferSheet } from '../../../bidding/presentation/components/CounterOfferSheet';
 import type { OpenBid } from '../../../bidding/domain';
+import { FixedOfferCard } from '../../../trips/presentation/components/FixedOfferCard';
 
 /**
  * "Inicio" es una tab dentro del stack `Main`. Tipamos la navegación de forma compuesta para poder
@@ -83,6 +84,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const pause = usePauseShift();
   const end = useEndShift();
   const activeTripId = useDispatchStore((s) => s.activeTripId);
+  // Oferta FIXED entrante ("Nuevo viaje"): ya NO abre un full-screen — se surfacea como card en la columna
+  // flotante (arriba de las pujas). Al aceptarla, el store setea activeTripId y navegamos al viaje activo.
+  const incomingOffer = useDispatchStore((s) => s.incomingOffer);
   // Salud del socket `/driver`: si está caído, el conductor NO publica GPS → el dispatch/admin dejan de verlo.
   const connected = useDispatchStore((s) => s.connected);
   const lastTip = useTipStore((s) => s.lastTip);
@@ -407,16 +411,26 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   // Orden NEWEST-FIRST: la puja más nueva entra ARRIBA y empuja a las anteriores hacia abajo (pedido del
   // jefe). `expiresAt` es fijo por puja y la ventana es constante → más reciente ⇒ expira más tarde ⇒ va arriba.
   const openBidsList = [...(openBids.data ?? [])].sort((a, b) => b.expiresAt - a.expiresAt);
-  const hasBids = online && !activeTripId && openBidsList.length > 0;
+  // La columna muestra TODAS las ofertas entrantes: la FIXED ("Nuevo viaje", arriba de todo por ser la más
+  // nueva) + las pujas OPEN debajo. Misma lista editorial, top-down.
+  const showOffer = incomingOffer != null;
+  const hasColumn = online && !activeTripId && (showOffer || openBidsList.length > 0);
   // Banda disponible entre el header (arriba) y el dock+tab bar (abajo): se reserva alto de sobra para el
   // dock (≈300) para GARANTIZAR que la columna se corte antes de llegar a él (erra chico = seguro).
   const bidsBandMaxHeight = Math.max(140, screenH - insets.top - 76 - tabBarHeight - 300);
-  const bidsColumn = hasBids ? (
+  const bidsColumn = hasColumn ? (
     <View style={[styles.bidsColumn, { top: insets.top + 76, maxHeight: bidsBandMaxHeight }]}>
       <ScrollView
         contentContainerStyle={styles.bidsScrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* FIXED "Nuevo viaje" primero (la más nueva empuja a las pujas hacia abajo). */}
+        {incomingOffer ? (
+          <FixedOfferCard
+            offer={incomingOffer}
+            onAccepted={(tripId) => navigation.navigate('TripActive', { tripId })}
+          />
+        ) : null}
         {openBidsList.map((bid) => (
           <BidCard key={bid.tripId} bid={bid} onPress={() => setSelectedBid(bid)} />
         ))}

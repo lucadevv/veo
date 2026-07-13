@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   navigateToBids,
-  navigateToIncoming,
   navigateToTripActive,
 } from '../../../navigation/navigationRef';
 import { useDi } from '../../../core/di/useDi';
@@ -141,17 +140,20 @@ export const RealtimeManager = (): null => {
         }
         return;
       }
-      // Oferta FIXED (por defecto): el conductor debe aceptar/rechazar antes de `expiresAt`.
+      // Oferta FIXED (por defecto): el conductor debe aceptar/rechazar antes de `expiresAt`. YA NO abre un
+      // full-screen (TripIncoming): la oferta entra como CARD editorial en la MISMA columna flotante del
+      // dashboard que las pujas (newest-first, arriba de todo), con Aceptar/Rechazar inline. Solo se
+      // persiste en el store; el DashboardScreen la surfacea. Si el conductor está en otra pantalla, la ve
+      // al volver al dashboard (mientras no venza) — mismo criterio que las pujas.
       setIncomingOffer({
         matchId: payload.matchId,
         tripId: payload.tripId,
         expiresAt: payload.expiresAt,
         scheduled,
-        // ETA conductor→recojo (efímero, momento de oferta): alimenta el stat "A recojo" de TripIncoming.
+        // ETA conductor→recojo (efímero, momento de oferta): alimenta el stat "A recojo" de la card.
         // Puede venir `undefined` (dispatch lo omite si maps.eta no estuvo disponible) → el stat degrada.
         pickupEtaSeconds: payload.pickupEtaSeconds,
       });
-      navigateToIncoming({ matchId: payload.matchId, tripId: payload.tripId });
     },
     onMatch: (payload) => {
       // Match confirmado: cualquier oferta FIXED entrante colgada en el store ya no aplica (o ganamos por
