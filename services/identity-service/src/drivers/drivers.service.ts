@@ -1867,13 +1867,21 @@ export class DriversService {
     // eso re-validamos el enrolamiento AQUÍ, igual que `approve()` (mismo `hasFaceEmbedding`). Este es el gate
     // BARATO de fail-fast sobre la réplica; la AUTORIDAD final es el CAS atómico de abajo (`isEmpty: false` en
     // el where), que cierra la ventana de carrera contra un borrado concurrente sobre el dato FRESCO.
-    if (!hasFaceEmbedding(d)) throw new ConflictError('Biometría facial no enrolada');
+    // El enrolamiento se re-valida (gate barato + CAS). Con VEO_BYPASS_VERIFICATION (solo local) NO se exige
+    // (el flujo de live-entry se saltea entero); el CAS igual necesita un embedding, que en local se siembra sintético.
+    if (!bypassVerification() && !hasFaceEmbedding(d)) {
+      throw new ConflictError('Biometría facial no enrolada');
+    }
 
     const lockKey = bioLockKey(d.id);
     // Consume el sessionRef de un solo uso. `verifyBiometric` SOLO mintea sesión cuando la verificación PASÓ
     // (liveness ∧ match ∧ score) y aplica AHÍ el lockout anti-bruteforce (A1) → acá la sesión ya es prueba de
     // "pasó". No re-evaluamos el veredicto ni el lockout (eso reabriría el oráculo y duplicaría el conteo).
-    const session = await this.consumeSession(input.sessionRef, userId);
+    // BYPASS local (solo dev; el helper fuerza false bajo NODE_ENV=production): sesión SINTÉTICA sin consumir
+    // → saltea el gate biométrico de inicio de turno / resume (lo que el usuario pidió para "entrar a live").
+    const session = bypassVerification()
+      ? { livenessPassed: true, matchPassed: true, score: 100 }
+      : await this.consumeSession(input.sessionRef, userId);
     // Guard DEFENSIVO (no debería disparar: verify no mintea sesión que no pasó). Si por corrupción llegara una
     // sesión no-válida, cortamos SIN incrementar el lockout (verify es el único dueño del contador).
     const passed = session.livenessPassed && session.matchPassed && session.score >= this.minScore;
