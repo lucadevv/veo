@@ -96,6 +96,14 @@ export interface DraggableSheetProps {
   /** Notifica (en JS) la altura VISIBLE del peek en px, para compensar la cámara del mapa (paddingBottom). */
   onPeekHeightChange?: (px: number) => void;
   /**
+   * Notifica (en JS) la altura VISIBLE del anclaje ACTUAL en px cada vez que el sheet se ASIENTA en un
+   * snap (o el anclaje fijado re-mide su contenido). A diferencia de `onPeekHeightChange` (que solo
+   * reporta el anclaje MÁS BAJO), esto sigue expandir/contraer/colapsar → el mapa puede RE-ENCUADRAR su
+   * cámara al área realmente visible. NO emite por frame de drag (depende del índice asentado, no del
+   * translateY): re-encuadrar al asentarse es suficiente y más sereno que seguir el dedo.
+   */
+  onSettledHeightChange?: (px: number) => void;
+  /**
    * Capa de FONDO decorativa (p. ej. el gradiente de vidrio del Home, pen P/Home · HomeContent),
    * renderizada absoluteFill DEBAJO del grabber/header/contenido y recortada por las esquinas
    * redondeadas del sheet. No intercepta gestos.
@@ -184,6 +192,7 @@ export const DraggableSheet = forwardRef<
     renderScroll,
     renderHeader,
     onPeekHeightChange,
+    onSettledHeightChange,
     renderBackground,
     bottomOffset = 0,
     style,
@@ -330,6 +339,27 @@ export const DraggableSheet = forwardRef<
   const dragging = useSharedValue(false);
   // True mientras el usuario arrastra: inhibe el re-acomodo automático de altura (no pelear el dedo).
   const interacting = useSharedValue(false);
+
+  // Altura VISIBLE del anclaje ACTUAL (al que apunta `snapIndex`): cambia al ASENTARSE en otro snap o
+  // cuando el anclaje fijado re-mide (contenido nuevo) — nunca por frame de drag. Reportada a JS para
+  // que el consumidor (mapa) re-encuadre su cámara al área visible real.
+  const settledVisible = useDerivedValue<number>(
+    () => Math.round(sheetHeight - (offsets.value[snapIndex.value] ?? 0)),
+    [sheetHeight],
+  );
+  const emitSettledHeight = useCallback(
+    (px: number) => {
+      onSettledHeightChange?.(px);
+    },
+    [onSettledHeightChange],
+  );
+  useAnimatedReaction(
+    () => settledVisible.value,
+    (px, prev) => {
+      if (px !== prev && px > 0) runOnJS(emitSettledHeight)(px);
+    },
+    [emitSettledHeight],
+  );
 
   // Siembra translateY con el offset inicial una vez que el derivado tiene un valor utilizable, y
   // re-acomoda suave cuando el offset del índice fijado cambia (contenido nuevo) si no se interactúa.
