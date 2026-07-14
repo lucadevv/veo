@@ -877,6 +877,12 @@
     "pendingPayoutLabel": "Por liquidar",
     "autoSettleChip": "Automático",
     "autoSettleInfo": "Se liquida automáticamente cada semana",
+    "pendingDebtLabel": "Debés a VEO",
+    "pendingDebtInfo": "Comisión de tus viajes en efectivo — se descuenta de tu próxima liquidación.",
+    "cashInHand": "En mano (efectivo)",
+    "digitalToSettle": "A liquidar (digital)",
+    "debtApplied": "Deuda aplicada: −{{amount}}",
+    "creditApplied": "Crédito aplicado: +{{amount}}",
     "weekdayInitials": {
       "mon": "L",
       "tue": "M",

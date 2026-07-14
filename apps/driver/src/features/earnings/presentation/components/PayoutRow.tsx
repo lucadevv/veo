@@ -11,6 +11,8 @@ export interface PayoutRowProps {
   /** Etiqueta de estado (traducida) y su tono semántico — el mapeo vive en la pantalla. */
   statusLabel: string;
   statusTone: StatusTone;
+  /** Línea del neteo (ej. "Deuda aplicada: −S/ 8.04") — explica por qué bruto − comisión ≠ monto. */
+  nettingLabel?: string;
   /** Oculta el divisor superior en la primera fila. */
   showDivider?: boolean;
 }
@@ -25,6 +27,7 @@ export function PayoutRow({
   periodLabel,
   statusLabel,
   statusTone,
+  nettingLabel,
   showDivider = true,
 }: PayoutRowProps): React.JSX.Element {
   const theme = useTheme();
@@ -53,6 +56,11 @@ export function PayoutRow({
           <Text variant="footnote" color="inkMuted" numberOfLines={1}>
             {periodLabel}
           </Text>
+          {nettingLabel ? (
+            <Text variant="footnote" color="warn" tabular numberOfLines={1}>
+              {nettingLabel}
+            </Text>
+          ) : null}
         </View>
         <StatusPill label={statusLabel} tone={statusTone} dot />
       </View>

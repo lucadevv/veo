@@ -194,6 +194,10 @@ export interface DriverEarningsBreakdown {
   commissionCents: number;
   tipCents: number;
   netCents: number;
+  /** Neto de cobros CASH: lo que el conductor ya tiene EN MANO (su comisión queda como deuda a netear). */
+  cashNetCents: number;
+  /** Neto de cobros DIGITALES (+ propinas, siempre digitales): lo que le cae por liquidación (payout). */
+  digitalNetCents: number;
   tripCount: number;
 }
 
@@ -1100,6 +1104,7 @@ export class PaymentsService {
     let grossCents = 0;
     let commissionCents = 0;
     let tipCents = 0;
+    let cashNetCents = 0;
     let tripCount = 0;
     for (const r of rows) {
       // Bruto/comisión/propina se suman de TODOS los cobros (un tip-Payment aporta 0 bruto/comisión + su
@@ -1107,13 +1112,20 @@ export class PaymentsService {
       grossCents += r.grossCents;
       commissionCents += r.commissionCents;
       tipCents += r.tipCents;
+      // Split por método: el neto de un cobro CASH ya está EN MANO del conductor (cobró el bruto; su
+      // comisión queda como DriverDebt a netear en la liquidación). El resto (digital) le cae por payout.
+      if (r.method === 'CASH') cashNetCents += r.grossCents - r.commissionCents + r.tipCents;
       if (r.kind === 'FARE') tripCount += 1;
     }
+    const netCents = grossCents - commissionCents + tipCents;
     return {
       grossCents,
       commissionCents,
       tipCents,
-      netCents: grossCents - commissionCents + tipCents,
+      netCents,
+      cashNetCents,
+      // Complemento exacto: cash + digital = neto total (invariante del split, sin re-sumar filas).
+      digitalNetCents: netCents - cashNetCents,
       tripCount,
     };
   }

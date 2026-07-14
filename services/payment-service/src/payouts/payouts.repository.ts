@@ -253,6 +253,62 @@ export class PayoutsRepository {
     return this.prisma.read.payout.findMany({ where, orderBy: { id: 'desc' } });
   }
 
+  // ── Balance pendiente del conductor (riel driver · lecturas del período ABIERTO) ────────────────────
+
+  /** Fin del ÚLTIMO período ya agregado en un Payout del conductor (cualquier estado: la fila existe ⇒ el
+   *  período se agregó). Null si nunca tuvo payout → su período abierto arranca desde siempre. Réplica. */
+  async findLatestPayoutPeriodEnd(driverId: string): Promise<Date | null> {
+    const row = await this.prisma.read.payout.findFirst({
+      where: { driverId },
+      orderBy: { periodEnd: 'desc' },
+      select: { periodEnd: true },
+    });
+    return row?.periodEnd ?? null;
+  }
+
+  /** Devengado DIGITAL del conductor desde `from` (o desde siempre si null): agrega gross/commission/tip de
+   *  sus cobros NON-CASH liquidados (CAPTURED/PARTIALLY_REFUNDED) SIN materializar filas. MISMA condición
+   *  positiva que el run de liquidación (findCapturedNonCashPayments), acotada al conductor y con borde
+   *  inferior abierto — es "lo que el próximo run le va a agregar". Réplica. */
+  async aggregateDriverCapturedNonCashSince(
+    driverId: string,
+    from: Date | null,
+  ): Promise<{ grossCents: number; commissionCents: number; tipCents: number }> {
+    const agg = await this.prisma.read.payment.aggregate({
+      where: {
+        driverId,
+        method: { in: [...NON_CASH_METHODS] },
+        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
+        ...(from ? { capturedAt: { gte: from } } : {}),
+      },
+      _sum: { grossCents: true, commissionCents: true, tipCents: true },
+    });
+    return {
+      grossCents: agg._sum.grossCents ?? 0,
+      commissionCents: agg._sum.commissionCents ?? 0,
+      tipCents: agg._sum.tipCents ?? 0,
+    };
+  }
+
+  /** Deuda CASH PENDING total de UN conductor (comisión de viajes en efectivo cobrados en mano). Es lo que el
+   *  netting del próximo run le va a descontar (applyDebtNetting lee estas MISMAS filas PENDING). Réplica. */
+  async sumPendingDebtCentsForDriver(driverId: string): Promise<number> {
+    const agg = await this.prisma.read.driverDebt.aggregate({
+      where: { driverId, status: 'PENDING' },
+      _sum: { amountCents: true },
+    });
+    return agg._sum.amountCents ?? 0;
+  }
+
+  /** Crédito PENDING total de UN conductor (credit-back de comisión CASH revertida — a su favor). Réplica. */
+  async sumPendingCreditCentsForDriver(driverId: string): Promise<number> {
+    const agg = await this.prisma.read.driverCredit.aggregate({
+      where: { driverId, status: 'PENDING' },
+      _sum: { amountCents: true },
+    });
+    return agg._sum.amountCents ?? 0;
+  }
+
   // ── Escrituras no transaccionales (primary) ─────────────────────────────────────────────────────────
 
   /** BACKSTOP del gate de review en el DESEMBOLSO: retiene (→HELD) los PENDING flaggeados por id. CAS

@@ -6,8 +6,10 @@ import { IconClock } from '../../../../shared/presentation/icons';
 import { formatPEN } from '../../../../shared/presentation/format';
 
 export interface PayoutInfoCardProps {
-  /** Neto pendiente de liquidar (céntimos PEN). */
+  /** Neto pendiente de liquidar (céntimos PEN): devengado abierto + payouts no pagados − deuda. */
   pendingNetCents: number;
+  /** Deuda CASH pendiente con VEO (céntimos PEN). La fila solo se muestra si es > 0. */
+  pendingDebtCents?: number;
   t: TFunction;
 }
 
@@ -16,8 +18,15 @@ export interface PayoutInfoCardProps {
  * un botón "Liquidar", pero la liquidación es admin-only y automática (proceso LNS semanal, rol FINANCE)
  * — el conductor no puede auto-liquidar. Por eso el botón se reemplaza por un chip "Automático" + la nota
  * "Se liquida automáticamente cada semana": informa sin ofrecer una acción que no existe.
+ * Si el conductor debe comisión de viajes en efectivo (deuda CASH pendiente), se muestra la fila
+ * "Debés a VEO" con su explicación — antes esa deuda era invisible y el descuento en la liquidación
+ * aparecía sin explicación.
  */
-export function PayoutInfoCard({ pendingNetCents, t }: PayoutInfoCardProps): React.JSX.Element {
+export function PayoutInfoCard({
+  pendingNetCents,
+  pendingDebtCents = 0,
+  t,
+}: PayoutInfoCardProps): React.JSX.Element {
   const theme = useTheme();
 
   return (
@@ -50,6 +59,22 @@ export function PayoutInfoCard({ pendingNetCents, t }: PayoutInfoCardProps): Rea
       <Text variant="caption" color="inkMuted">
         {t('earnings.autoSettleInfo')}
       </Text>
+
+      {pendingDebtCents > 0 ? (
+        <View style={[styles.debtBlock, { borderTopColor: theme.colors.accent + '4D' }]}>
+          <View style={styles.row}>
+            <Text variant="footnote" color="inkMuted">
+              {t('earnings.pendingDebtLabel')}
+            </Text>
+            <Text variant="bodyStrong" color="warn" tabular>
+              −{formatPEN(pendingDebtCents)}
+            </Text>
+          </View>
+          <Text variant="caption" color="inkMuted">
+            {t('earnings.pendingDebtInfo')}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -66,4 +91,5 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
   },
+  debtBlock: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10, gap: 4 },
 });

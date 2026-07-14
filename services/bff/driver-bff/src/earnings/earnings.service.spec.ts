@@ -25,11 +25,20 @@ function payout(over: Partial<DriverPayoutView>): DriverPayoutView {
   };
 }
 
-function makeService(payouts: DriverPayoutView[]) {
+/** Balance pendiente que payment-service serviría por el riel driver (todo en 0 por defecto). */
+const ZERO_BALANCE = { openNetCents: 0, pendingDebtCents: 0, pendingCreditCents: 0 };
+
+function makeService(
+  payouts: DriverPayoutView[],
+  balance: typeof ZERO_BALANCE = ZERO_BALANCE,
+) {
   const grpc = {
     call: vi.fn(() => Promise.resolve({ id: 'drv-1', userId: 'usr-1', found: true })),
   };
-  const get = vi.fn(() => Promise.resolve(payouts));
+  // El summary pega a DOS lecturas: /payouts (filas agregadas) y el balance pendiente driver-rail.
+  const get = vi.fn((path: string) =>
+    path === '/payouts' ? Promise.resolve(payouts) : Promise.resolve(balance),
+  );
   const rest = { client: vi.fn(() => ({ get })) };
   const service = new EarningsService(grpc as never, rest as never);
   return { service, grpc, get };
@@ -185,6 +194,71 @@ describe('EarningsService.summary', () => {
     expect(summary.totalNetCents).toBe(0);
     expect(summary.pendingNetCents).toBe(0);
     expect(summary.currency).toBe('PEN');
+  });
+
+  // ── "Por liquidar" honesto: pendingNet = max(0, abierto + payouts no pagados + crédito − deuda) ──
+
+  it('SIN payouts pero con devengado digital abierto → pendiente > 0 (ya no S/0 toda la semana)', async () => {
+    const { service, get } = makeService([], {
+      openNetCents: 18_700, // S/187 digitales de la semana abierta (aún sin fila Payout)
+      pendingDebtCents: 0,
+      pendingCreditCents: 0,
+    });
+    const summary = await service.summary(identity);
+    expect(summary.pendingNetCents).toBe(18_700);
+    expect(summary.openNetCents).toBe(18_700);
+    expect(summary.pendingDebtCents).toBe(0);
+    // El balance se pidió al endpoint mínimo driver-rail, con la identidad firmada (anti-IDOR aguas abajo).
+    expect(get).toHaveBeenCalledWith('/internal/finance/driver-balance/pending', {
+      identity: { ...identity, driverId: 'drv-1' },
+      query: { driverId: 'drv-1' },
+    });
+  });
+
+  it('la deuda CASH PENDING resta del pendiente (y se expone en pendingDebtCents)', async () => {
+    const { service } = makeService([], {
+      openNetCents: 18_700,
+      pendingDebtCents: 804, // S/8.04 de comisión de viajes en efectivo
+      pendingCreditCents: 0,
+    });
+    const summary = await service.summary(identity);
+    expect(summary.pendingNetCents).toBe(18_700 - 804);
+    expect(summary.pendingDebtCents).toBe(804);
+  });
+
+  it('el crédito PENDING suma; los payouts NO pagados (PENDING) también entran a la fórmula', async () => {
+    const { service } = makeService(
+      [payout({ id: 'b', status: 'PENDING', amountCents: 4000 })],
+      { openNetCents: 1000, pendingDebtCents: 300, pendingCreditCents: 200 },
+    );
+    const summary = await service.summary(identity);
+    // 1000 (abierto) + 4000 (payout PENDING) + 200 (crédito) − 300 (deuda) = 4900.
+    expect(summary.pendingNetCents).toBe(4900);
+  });
+
+  it('piso 0: si la deuda supera todo, el pendiente NO es negativo (carry-forward, no se le cobra)', async () => {
+    const { service } = makeService([], {
+      openNetCents: 500,
+      pendingDebtCents: 804,
+      pendingCreditCents: 0,
+    });
+    const summary = await service.summary(identity);
+    expect(summary.pendingNetCents).toBe(0);
+    expect(summary.pendingDebtCents).toBe(804); // la deuda sigue visible aparte (fila "Debés a VEO")
+  });
+
+  it('los payouts pasan tal cual con su debtAppliedCents (el neteo que explica gross − comisión ≠ monto)', async () => {
+    const netted = payout({
+      id: 'n',
+      status: 'PROCESSED',
+      grossCents: 10_000,
+      commissionCents: 2000,
+      amountCents: 7196, // 8000 − 804 de deuda neteada
+      debtAppliedCents: 804,
+    });
+    const { service } = makeService([netted]);
+    const summary = await service.summary(identity);
+    expect(summary.payouts[0]?.debtAppliedCents).toBe(804);
   });
 });
 

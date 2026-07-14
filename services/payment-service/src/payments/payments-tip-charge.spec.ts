@@ -261,8 +261,8 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
 
   it('earningsForDriver: la propina suma en tipCents pero NO cuenta como viaje (tripCount solo FARE)', async () => {
     const rows = [
-      { grossCents: 2000, commissionCents: 400, tipCents: 0, kind: 'FARE' },
-      { grossCents: 0, commissionCents: 0, tipCents: 300, kind: 'TIP' }, // propina digital capturada
+      { grossCents: 2000, commissionCents: 400, tipCents: 0, kind: 'FARE', method: 'YAPE' },
+      { grossCents: 0, commissionCents: 0, tipCents: 300, kind: 'TIP', method: 'YAPE' }, // propina digital capturada
     ];
     const repo = { findDriverCapturedPayments: vi.fn(async () => rows) };
     const svc = new PaymentsService(
@@ -276,6 +276,31 @@ describe('A1 · el tip-Payment NO contamina los lookups de la tarifa', () => {
     expect(out.tipCents).toBe(300); // la propina SÍ cuenta como ganancia
     expect(out.netCents).toBe(2000 - 400 + 300);
     expect(out.tripCount).toBe(1); // pero NO como un viaje extra
+  });
+
+  it('earningsForDriver: split por método — CASH = "en mano", digital = "a liquidar", cash + digital = neto', async () => {
+    const rows = [
+      // Viaje en EFECTIVO: el conductor ya cobró el bruto en mano; su comisión queda como deuda.
+      { grossCents: 3000, commissionCents: 600, tipCents: 0, kind: 'FARE', method: 'CASH' },
+      // Viaje DIGITAL: le cae por la liquidación semanal (payout).
+      { grossCents: 2000, commissionCents: 400, tipCents: 0, kind: 'FARE', method: 'YAPE' },
+      // Propina (siempre digital, aun sobre un viaje cash) → bucket digital.
+      { grossCents: 0, commissionCents: 0, tipCents: 300, kind: 'TIP', method: 'YAPE' },
+    ];
+    const repo = { findDriverCapturedPayments: vi.fn(async () => rows) };
+    const svc = new PaymentsService(
+      repo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { getOrThrow: () => 0 } as never,
+    );
+    const out = await svc.earningsForDriver('drv-1', new Date(0), new Date(1e13));
+    expect(out.cashNetCents).toBe(3000 - 600);
+    expect(out.digitalNetCents).toBe(2000 - 400 + 300);
+    // Invariante del split: los buckets particionan el neto total exacto.
+    expect(out.cashNetCents + out.digitalNetCents).toBe(out.netCents);
+    expect(out.tripCount).toBe(2);
   });
 });
 

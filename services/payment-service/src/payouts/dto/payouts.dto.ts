@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEnum,
   IsIn,
@@ -34,6 +34,13 @@ export class ListPayoutsQueryDto {
   @IsOptional()
   @IsUUID()
   driverId?: string;
+}
+
+/** Balance pendiente del conductor (riel driver): el driverId es OBLIGATORIO (recurso por-dueño, anti-IDOR). */
+export class DriverBalanceQueryDto {
+  @ApiProperty({ format: 'uuid', description: 'Conductor dueño del balance' })
+  @IsUUID()
+  driverId!: string;
 }
 
 /** Listado admin de TODOS los payouts: filtro por estado + paginación cursor. */

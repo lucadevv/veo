@@ -34,6 +34,17 @@ function payoutTone(status: PayoutStatusValue): StatusTone {
   }
 }
 
+/**
+ * Línea del NETEO de una liquidación: explica por qué bruto − comisión ≠ monto. `debtAppliedCents` es el
+ * NETO firmado que payment-service persiste: > 0 = deuda CASH descontada; < 0 = crédito a favor sumado.
+ */
+function nettingLabel(payout: DriverPayoutView, t: TFunction): string | undefined {
+  const netted = payout.debtAppliedCents ?? 0;
+  if (netted > 0) return t('earnings.debtApplied', { amount: formatPEN(netted) });
+  if (netted < 0) return t('earnings.creditApplied', { amount: formatPEN(-netted) });
+  return undefined;
+}
+
 function payoutLabel(status: PayoutStatusValue, t: TFunction): string {
   switch (status) {
     case 'PROCESSED':
@@ -141,7 +152,11 @@ function PayoutsBlock({ t }: { t: TFunction }): React.JSX.Element {
   return (
     <View style={[styles.section, { gap: theme.spacing.xl }]}>
       <Reveal>
-        <PayoutInfoCard pendingNetCents={data.pendingNetCents} t={t} />
+        <PayoutInfoCard
+          pendingNetCents={data.pendingNetCents}
+          pendingDebtCents={data.pendingDebtCents ?? 0}
+          t={t}
+        />
       </Reveal>
 
       <View style={[styles.payoutsBlock, { gap: theme.spacing.sm }]}>
@@ -184,6 +199,7 @@ function PayoutsBlock({ t }: { t: TFunction }): React.JSX.Element {
                   })}
                   statusLabel={payoutLabel(payout.status, t)}
                   statusTone={payoutTone(payout.status)}
+                  nettingLabel={nettingLabel(payout, t)}
                   showDivider={index > 0}
                 />
               </Reveal>

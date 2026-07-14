@@ -407,7 +407,9 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const ActiveVehIcon = activeVeh ? vehicleClassGlyph(activeVeh.vehicleType) : null;
 
   // KPIs del dock (frame C/Dashboard): "Neto de hoy" | "Por liquidar" (naranja) con divisor central.
-  // "Neto de hoy" = breakdown.today (cobros del día de Lima); "Por liquidar" = resumen de payouts.
+  // "Neto de hoy" = breakdown.today (cobros del día de Lima); "Por liquidar" = pendingNetCents HONESTO
+  // del summary: devengado digital del período ABIERTO + payouts no pagados + crédito − deuda PENDING
+  // (ya no queda en S/0 toda la semana hasta que el cron del lunes agregue el payout).
   const dockKpis = earnings.isLoading || breakdown.isLoading ? (
     <Skeleton height={44} />
   ) : earnings.isError || !earnings.data || breakdown.isError || !breakdown.data ? (

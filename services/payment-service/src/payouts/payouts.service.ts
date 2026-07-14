@@ -128,6 +128,22 @@ export interface PayoutTripsResult {
 const PAYOUT_TRIPS_CAP = 50;
 
 /**
+ * Balance PENDIENTE del conductor para el RIEL DRIVER (vista mínima, sin filas): lo que el próximo run de
+ * liquidación le va a agregar (`openNetCents`), lo que le va a descontar (`pendingDebtCents`) y lo que le va
+ * a sumar a favor (`pendingCreditCents`). El driver-bff lo compone con sus payouts PENDING para el
+ * "Por liquidar" honesto del app — sin esto el conductor veía S/0 toda la semana abierta.
+ */
+export interface DriverPendingBalanceView {
+  /** Devengado DIGITAL neto (gross − commission + tips) del período ABIERTO: cobros NON-CASH liquidados
+   *  posteriores al último período agregado en Payout (o desde siempre si nunca hubo payout). */
+  openNetCents: number;
+  /** Deuda CASH PENDING total (comisión de sus viajes en efectivo — se netea en la próxima liquidación). */
+  pendingDebtCents: number;
+  /** Crédito PENDING total a favor (credit-back de comisión CASH revertida — se suma en la próxima). */
+  pendingCreditCents: number;
+}
+
+/**
  * KPIs agregados de payouts para el panel FINANCE (GET /payouts/stats). `totalCents` = volumen total liquidado
  * (suma de `amountCents` de TODOS los estados, Int céntimos); `paidCents`/`heldCents`/`failedCents` abren ese
  * volumen por bucket (PROCESSED/HELD/FAILED) del MISMO groupBy que ya suma `amountCents` por status; el resto son
@@ -761,6 +777,30 @@ export class PayoutsService {
 
   listByDriver(driverId: string): Promise<unknown[]> {
     return this.repo.findPayoutsByDriver(driverId);
+  }
+
+  /**
+   * Balance pendiente del conductor (riel driver · GET /internal/finance/driver-balance/pending). READ puro
+   * sobre réplica, tres agregados acotados al conductor (sin materializar filas):
+   *  - `openNetCents` = neto digital devengado DESDE el fin del último período agregado en Payout (cualquier
+   *    estado: la fila existe ⇒ ese período ya se agregó) — o desde siempre si nunca hubo payout. MISMA
+   *    condición positiva que collectEarnings (NON-CASH + CAPTURED/PARTIALLY_REFUNDED) para que lo mostrado
+   *    coincida con lo que el próximo run efectivamente agregue.
+   *  - `pendingDebtCents` / `pendingCreditCents` = las MISMAS filas PENDING que applyDebtNetting va a
+   *    settlear/aplicar en ese run (deuda resta, crédito suma).
+   */
+  async getDriverPendingBalance(driverId: string): Promise<DriverPendingBalanceView> {
+    const lastPeriodEnd = await this.repo.findLatestPayoutPeriodEnd(driverId);
+    const [earned, pendingDebtCents, pendingCreditCents] = await Promise.all([
+      this.repo.aggregateDriverCapturedNonCashSince(driverId, lastPeriodEnd),
+      this.repo.sumPendingDebtCentsForDriver(driverId),
+      this.repo.sumPendingCreditCentsForDriver(driverId),
+    ]);
+    return {
+      openNetCents: earned.grossCents - earned.commissionCents + earned.tipCents,
+      pendingDebtCents,
+      pendingCreditCents,
+    };
   }
 
   /**

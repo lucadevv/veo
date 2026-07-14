@@ -41,6 +41,20 @@ export interface DriverCommissionRateView {
  */
 const COMMISSION_RATE_CACHE_TTL_MS = 60_000;
 
+/**
+ * Balance pendiente del conductor (payment-service, endpoint mínimo driver-rail
+ * GET /internal/finance/driver-balance/pending): devengado digital del período ABIERTO + deuda/crédito
+ * PENDING. Es el insumo del `pendingNetCents` honesto del summary.
+ */
+export interface DriverPendingBalanceView {
+  /** Neto digital (gross − commission + tips) devengado después del último período agregado en Payout. */
+  openNetCents: number;
+  /** Deuda CASH PENDING (comisión de viajes en efectivo cobrados en mano). */
+  pendingDebtCents: number;
+  /** Crédito PENDING a favor (credit-back de comisión CASH revertida). */
+  pendingCreditCents: number;
+}
+
 @Injectable()
 export class EarningsService {
   /** Cache de UN slot COMPARTIDO entre conductores a propósito: la tasa es config GLOBAL, sin dato per-driver. */
@@ -78,12 +92,34 @@ export class EarningsService {
       .get<DriverPayoutView[]>('/payouts', { identity: signedIdentity, query: { driverId } });
   }
 
-  /** Resumen agregado de ganancias del conductor autenticado. */
+  /**
+   * Resumen agregado de ganancias del conductor autenticado. "Por liquidar" HONESTO:
+   *
+   *   pendingNetCents = max(0, openNetCents                      — devengado digital del período ABIERTO
+   *                          + Σ amountCents de payouts NO pagados — agregados que aún no salieron (≠ PROCESSED)
+   *                          + pendingCreditCents                 — crédito PENDING a favor (se suma al netear)
+   *                          − pendingDebtCents)                  — deuda CASH PENDING (se descuenta al netear)
+   *
+   * Es "la plata que te va a caer". Antes era solo `totalNet − paid` sobre filas Payout, que nacen recién
+   * con el cron del lunes → el conductor veía S/0 toda la semana abierta aunque hubiera devengado digital.
+   * Sin doble conteo: los payouts ya agregados netearon SU deuda al crearse (esas filas quedaron SETTLED);
+   * acá solo se resta la deuda aún PENDING, que el próximo run neteará contra el devengado abierto. Piso 0:
+   * si la deuda supera todo, al conductor no se le cobra (carry-forward al próximo período), no debe ver
+   * un "por liquidar" negativo.
+   */
   async summary(identity: AuthenticatedUser): Promise<EarningsSummary> {
     const { identity: signedIdentity, driverId } = await this.resolveDriver(identity);
-    const payouts = await this.rest
-      .client('payouts')
-      .get<DriverPayoutView[]>('/payouts', { identity: signedIdentity, query: { driverId } });
+    const [payouts, balance] = await Promise.all([
+      this.rest
+        .client('payouts')
+        .get<DriverPayoutView[]>('/payouts', { identity: signedIdentity, query: { driverId } }),
+      this.rest
+        .client('payment')
+        .get<DriverPendingBalanceView>('/internal/finance/driver-balance/pending', {
+          identity: signedIdentity,
+          query: { driverId },
+        }),
+    ]);
 
     let totalGrossCents = 0;
     let totalCommissionCents = 0;
@@ -95,6 +131,15 @@ export class EarningsService {
       totalNetCents += p.amountCents;
       if (p.status === PAID_STATUS) paidNetCents += p.amountCents;
     }
+    // Payouts agregados y aún no pagados (PENDING/PROCESSING/HELD/FAILED): siguen adeudados al conductor.
+    const unpaidPayoutNetCents = totalNetCents - paidNetCents;
+    const pendingNetCents = Math.max(
+      0,
+      balance.openNetCents +
+        unpaidPayoutNetCents +
+        balance.pendingCreditCents -
+        balance.pendingDebtCents,
+    );
 
     return {
       driverId,
@@ -104,7 +149,9 @@ export class EarningsService {
       totalCommissionCents,
       totalNetCents,
       paidNetCents,
-      pendingNetCents: totalNetCents - paidNetCents,
+      pendingNetCents,
+      openNetCents: balance.openNetCents,
+      pendingDebtCents: balance.pendingDebtCents,
       payouts,
     };
   }

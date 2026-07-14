@@ -146,14 +146,15 @@ export class PaymentsRepository {
     driverId: string,
     from: Date,
     to: Date,
-  ): Promise<Pick<Payment, 'grossCents' | 'commissionCents' | 'tipCents' | 'kind'>[]> {
+  ): Promise<Pick<Payment, 'grossCents' | 'commissionCents' | 'tipCents' | 'kind' | 'method'>[]> {
     return this.prisma.read.payment.findMany({
       where: {
         driverId,
         status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
         capturedAt: { gte: from, lt: to },
       },
-      select: { grossCents: true, commissionCents: true, tipCents: true, kind: true },
+      // `method` para el split honesto CASH/digital del desglose (en mano vs a liquidar por payout).
+      select: { grossCents: true, commissionCents: true, tipCents: true, kind: true, method: true },
     });
   }
 

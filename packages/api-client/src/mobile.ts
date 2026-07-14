@@ -2731,6 +2731,12 @@ export const driverPayoutView = z.object({
   grossCents: z.number().int(),
   commissionCents: z.number().int(),
   amountCents: z.number().int(),
+  /**
+   * Neteo aplicado en ESTE payout (NETO firmado: deuda CASH settleada − credit-back aplicado). Explica por
+   * qué `gross − commission ≠ amount`: `amountCents = (gross − commission + tips) − debtAppliedCents`.
+   * Opcional (additive): un BFF viejo puede no enviarlo aún.
+   */
+  debtAppliedCents: z.number().int().optional(),
   currency: z.string(),
   status: payoutStatus,
   processedAt: z.string().nullable(),
@@ -2752,7 +2758,16 @@ export const earningsSummary = z.object({
   totalCommissionCents: z.number().int(),
   totalNetCents: z.number().int(),
   paidNetCents: z.number().int(),
+  /**
+   * "La plata que te va a caer": devengado digital del período ABIERTO + payouts aún no pagados + crédito
+   * PENDING − deuda PENDING (piso 0: la deuda nunca genera cobro, se arrastra a la próxima liquidación).
+   * Antes era solo Σ payouts no pagados → S/0 toda la semana abierta.
+   */
   pendingNetCents: z.number().int(),
+  /** Devengado digital NO liquidado del período abierto (posterior al último payout agregado). Additive. */
+  openNetCents: z.number().int().optional(),
+  /** Deuda CASH PENDING (comisión de viajes en efectivo — se descuenta de la próxima liquidación). Additive. */
+  pendingDebtCents: z.number().int().optional(),
   payouts: z.array(driverPayoutView),
 });
 export type EarningsSummary = z.infer<typeof earningsSummary>;
@@ -2768,6 +2783,10 @@ export const driverEarningsBreakdown = z.object({
   /** Propinas del período (100% al conductor, fuera de comisión). */
   tipCents: z.number().int(),
   netCents: z.number().int(),
+  /** Neto de cobros CASH: ya EN MANO del conductor (su comisión queda como deuda a netear). Additive. */
+  cashNetCents: z.number().int().optional(),
+  /** Neto de cobros DIGITALES (+ propinas): le cae por liquidación (payout). cash + digital = neto. Additive. */
+  digitalNetCents: z.number().int().optional(),
   tripCount: z.number().int(),
 });
 export type DriverEarningsBreakdown = z.infer<typeof driverEarningsBreakdown>;
