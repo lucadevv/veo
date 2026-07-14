@@ -29,6 +29,12 @@ const routesDir = join(scriptsDir, '..', 'dev', 'routes');
 const OSRM_URL =
   process.argv.find((a) => a.startsWith('--osrm='))?.slice('--osrm='.length) ??
   'http://localhost:5005';
+// Motor de la geometria. INVARIANTE del docstring: el sim debe manejar por el MISMO camino que la
+// ruta que ven las apps. En dev los BFF rutean con 'mapbox' (trafico real) -> default mapbox si hay
+// token; si el stack vuelve a OSRM soberano, regenerar con --engine=osrm.
+const ENGINE =
+  process.argv.find((a) => a.startsWith('--engine='))?.slice('--engine='.length) ??
+  (process.env.MAPBOX_ACCESS_TOKEN ? 'mapbox' : 'osrm');
 
 /** Los TRES puntos de la demo (lat, lon) — NO cambiarlos sin actualizar la búsqueda del pasajero. */
 const A = { lat: -12.008193, lon: -77.059937 }; // base del conductor
@@ -36,11 +42,14 @@ const B = { lat: -12.003281, lon: -77.063166 }; // ubicación del pasajero (reco
 const C = { lat: -12.105309, lon: -77.059134 }; // destino buscado (Av. General Salaverry, San Isidro)
 
 async function routeOf(from, to) {
-  const url = `${OSRM_URL}/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+  const url =
+    ENGINE === 'mapbox'
+      ? `https://api.mapbox.com/directions/v5/mapbox/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson&access_token=${process.env.MAPBOX_ACCESS_TOKEN}`
+      : `${OSRM_URL}/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`OSRM ${res.status} en ${url}`);
+  if (!res.ok) throw new Error(`${ENGINE} ${res.status}`);
   const body = await res.json();
-  if (body.code !== 'Ok' || !body.routes?.[0]) throw new Error(`OSRM sin ruta: ${body.code}`);
+  if (body.code !== 'Ok' || !body.routes?.[0]) throw new Error(`${ENGINE} sin ruta: ${body.code}`);
   const route = body.routes[0];
   // GeoJSON viene [lon, lat]; el GPX quiere lat/lon.
   const points = route.geometry.coordinates.map(([lon, lat]) => ({ lat, lon }));
@@ -52,7 +61,7 @@ function toGpx(name, points) {
     .map((p) => `      <trkpt lat="${p.lat.toFixed(6)}" lon="${p.lon.toFixed(6)}"></trkpt>`)
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx creator="veo gen-gpx-from-service (OSRM self-hosted)" version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+<gpx creator="veo gen-gpx-from-service (${ENGINE})" version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata>
     <name>${name}</name>
   </metadata>
@@ -75,6 +84,6 @@ for (const leg of legs) {
   const { points, distanceMeters } = await routeOf(leg.from, leg.to);
   writeFileSync(join(routesDir, leg.file), toGpx(leg.name, points));
   console.log(
-    `ok · ${leg.file}: ${points.length} puntos, ${(distanceMeters / 1000).toFixed(1)} km (geometría de OSRM ${OSRM_URL})`,
+    `ok · ${leg.file}: ${points.length} puntos, ${(distanceMeters / 1000).toFixed(1)} km (geometría de ${ENGINE})`,
   );
 }
