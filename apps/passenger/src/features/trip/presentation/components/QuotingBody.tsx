@@ -44,6 +44,7 @@ import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymen
 import {
   PaymentMethodRow,
   PaymentMethodSheet,
+  YapeLinkSheet,
 } from '../../../payments/presentation';
 import {useIsYapeAutoActive} from '../../../../shared/presentation/hooks/useIsYapeAutoActive';
 import {PromoField, type AppliedPromo} from '../../../promos/presentation';
@@ -149,9 +150,15 @@ export function QuotingBody({
   const [tripPaymentMethod, setTripPaymentMethod] =
     useState<MobilePaymentMethod>(() => defaultMethod);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
+  // Sheet de afiliación Yape On-File (el enabler del pre-pago): se abre desde el nudge del primer viaje.
+  const [yapeLinkOpen, setYapeLinkOpen] = useState(false);
   // ¿El cobro automático con Yape está activo? Solo para REFLEJAR una señal sutil en la fila (la app no
   // decide el cobro: es server-side). El query comparte caché con la card del perfil (sin doble fetch).
   const yapeAutoActive = useIsYapeAutoActive();
+  // Nudge afiliación-first: método YAPE sin On-File activo → ofrecemos vincular UNA VEZ (cobros siguientes
+  // automáticos). No bloquea el viaje. Al vincular, `yapeAutoActive` se vuelve true (query-key compartida)
+  // → esta condición se apaga sola y la fila pasa a "Yape · automático".
+  const showYapeAffiliateNudge = tripPaymentMethod === 'YAPE' && !yapeAutoActive;
 
   const ready = Boolean(origin && destination);
 
@@ -656,6 +663,35 @@ export function QuotingBody({
         />
       ) : null}
 
+      {/* Nudge afiliación-first (primer viaje con Yape sin On-File): vincular UNA VEZ → cobros siguientes
+          automáticos. Sutil y NO bloqueante — el viaje sigue con Yape one-shot si no vincula. */}
+      {ready && showYapeAffiliateNudge ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('payments.affiliateNudge')}
+          accessibilityHint={t('payments.affiliateNudgeCta')}
+          disabled={createMutation.isPending}
+          onPress={() => setYapeLinkOpen(true)}
+          style={({pressed}) => [
+            styles.affiliateNudge,
+            {
+              gap: theme.spacing.xs,
+              paddingHorizontal: theme.spacing.sm,
+              paddingVertical: theme.spacing.xs,
+              opacity: createMutation.isPending ? 0.45 : pressed ? 0.6 : 1,
+            },
+          ]}>
+          <IconBolt size={14} color={theme.colors.accent} />
+          <Text variant="footnote" color="inkMuted" style={styles.affiliateNudgeText}>
+            {t('payments.affiliateNudge')}
+          </Text>
+          <Text variant="footnote" color="accent">
+            {t('payments.affiliateNudgeCta')}
+          </Text>
+          <IconArrowRight size={14} color={theme.colors.accent} />
+        </Pressable>
+      ) : null}
+
       {/* CTA de pedido (ADR-018): sin muro de KYC. El pasajero `unverified` pide directo; el botón sigue
           gateado solo por `canConfirm` (ruta lista + oferta/puja válida). */}
       <Button
@@ -691,6 +727,11 @@ export function QuotingBody({
           setScheduledAt(epochMs);
           setScheduleOpen(false);
         }}
+      />
+
+      <YapeLinkSheet
+        visible={yapeLinkOpen}
+        onClose={() => setYapeLinkOpen(false)}
       />
     </View>
   );
@@ -759,6 +800,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  // Nudge afiliación-first bajo la fila de pago: fila sutil (bolt + copy + CTA + flecha), sin fondo de
+  // relleno para no competir con el CTA primario. El texto flexea; el CTA y la flecha quedan a la derecha.
+  affiliateNudge: {flexDirection: 'row', alignItems: 'center'},
+  affiliateNudgeText: {flex: 1},
   pujaCard: {flexDirection: 'row', alignItems: 'center', borderWidth: 1},
   pujaGlyph: {
     width: 40,

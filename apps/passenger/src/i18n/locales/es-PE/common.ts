@@ -1290,6 +1290,15 @@ export const common = {
      *  - el nombre a secas (`method.YAPE` = "Yape") cubre el one-shot (QR/deepLink una vez).
      */
     nameYapeAuto: 'Yape · automático',
+    /**
+     * Nudge del PRIMER viaje con Yape (afiliación-first): cuando el método es YAPE y NO hay afiliación
+     * On-File activa, ofrecemos vincular UNA VEZ para que los cobros siguientes sean automáticos
+     * (server-initiated, sin QR). NO bloquea el viaje: quien no afilia paga con Yape one-shot igual.
+     * Al afiliar, `useIsYapeAutoActive` refetchea (query-key compartida) → el nudge desaparece solo y
+     * la fila pasa a "Yape · automático".
+     */
+    affiliateNudge: 'Vincula tu Yape una vez y págalo automático',
+    affiliateNudgeCta: 'Vincular',
     /** Selector de método PARA ESTE VIAJE (al pedir): la elección no pisa el default del perfil. */
     rowLabel: 'Método de pago',
     selectTitle: 'Método de pago',
