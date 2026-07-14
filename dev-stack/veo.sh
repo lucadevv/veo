@@ -61,6 +61,10 @@ LOGS_DIR="$SCRIPT_DIR/logs"
 # boot-extra-services.sh (dev-stack/.pids). No inventamos un directorio nuevo
 # para no fragmentar el registro y poder matar TODO lo que arrancó cualquiera.
 PIDS_DIR="$SCRIPT_DIR/.pids"
+# Marcador del TIER con el que se levantó el stack (single source of truth): 'local' | 'development'.
+# `veo.sh local`/`dev` lo escriben; `veo.sh restart` lo LEE para reiniciar en el MISMO entorno (nunca
+# caer a development por default). Así, si levantaste local, TODO reinicio es local — responsabilidad única.
+TIER_FILE="$PIDS_DIR/.tier"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 BIO_VENV="$ROOT_DIR/services/biometric-service/.venv"
 PG_CONT="veo-postgres"   # contenedor de infra postgres (fijo en dev) — lo consume `veo.sh otp`.
@@ -1218,7 +1222,12 @@ cmd_restart() {
   local s port dir kind health
   IFS='|' read -r s port dir kind health <<<"$line"
 
-  hdr "RESTART · $svc"
+  # TIER: reinicia en el MISMO entorno con el que se levantó el stack (marcador _current_tier), NUNCA
+  # cae a development por default. Un APP_ENV explícito en el shell (ej. `APP_ENV=dev veo.sh restart x`)
+  # sigue mandando. Así `veo.sh restart <svc>` sobre un stack local reinicia LOCAL (sandbox + bypass).
+  export APP_ENV="${APP_ENV:-$(_current_tier)}"
+
+  hdr "RESTART · $svc  (tier: $APP_ENV)"
   # 1) down de ESE servicio.
   local pidf="$PIDS_DIR/$svc.pid"
   if [[ -f "$pidf" ]]; then
@@ -2020,6 +2029,17 @@ _set_env_kv() {
   printf '%s=%s\n' "$k" "$v" >> "$f"
 }
 
+# Persiste el TIER del stack (lo escribe `veo.sh local`/`dev` al levantar).
+_write_tier() {
+  mkdir -p "$PIDS_DIR" 2>/dev/null || true
+  printf '%s\n' "$1" > "$TIER_FILE"
+}
+# Lee el TIER vigente del stack. Default 'development' solo si NUNCA se levantó (sin marcador).
+_current_tier() {
+  local t; t="$(cat "$TIER_FILE" 2>/dev/null | tr -d '[:space:]')"
+  printf '%s' "${t:-development}"
+}
+
 # Modo LOCAL: deriva env/local.env de env/development.env (por servicio + apps) y PRENDE el bypass de
 # verificación (VEO_BYPASS_VERIFICATION=true) + el tier (VEO_DEPLOY_TIER=local) + biométrico sandbox.
 # El local.env es gitignoreado (config local del dev). Idempotente: re-corre sin duplicar.
@@ -2058,8 +2078,8 @@ _prepare_local_env() {
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 case "${1:-}" in
   up)      cmd_up ;;
-  dev)     shift; cmd_dev "$@" ;;
-  local)   shift; export APP_ENV=local; _prepare_local_env; cmd_dev "$@" ;;
+  dev)     shift; _write_tier development; export APP_ENV=development; cmd_dev "$@" ;;
+  local)   shift; _write_tier local; export APP_ENV=local; _prepare_local_env; cmd_dev "$@" ;;
   down)    shift; cmd_down "${1:-}" ;;
   status)  cmd_status ;;
   monitor) cmd_monitor ;;
