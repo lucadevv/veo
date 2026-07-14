@@ -28,6 +28,8 @@ import { IncentivesController } from '../incentives/incentives.controller';
 import { PayoutsController } from '../payouts/payouts.controller';
 import { AnalyticsController } from '../analytics/analytics.controller';
 import { DriverPaymentsController } from '../drivers/driver-payments.controller';
+import { CommissionController } from '../commission/commission.controller';
+import { CommissionRateController } from '../commission/commission-rate.controller';
 import { PaymentGrpcController, GRPC_METHOD_AUDIENCES } from '../grpc/payment.grpc.controller';
 
 type AnyCtor = new (...args: never[]) => object;
@@ -89,6 +91,8 @@ const HTTP_CONTROLLERS: AnyCtor[] = [
   PayoutsController,
   AnalyticsController,
   DriverPaymentsController,
+  CommissionController,
+  CommissionRateController,
 ];
 
 describe('Cobertura de riel · payment-service (sin huecos fail-open)', () => {

@@ -6,6 +6,7 @@
 import { Module } from '@nestjs/common';
 import { CommissionService } from './commission.service';
 import { CommissionController } from './commission.controller';
+import { CommissionRateController } from './commission-rate.controller';
 import { CommissionCacheConsumer } from './commission-cache.consumer';
 import { COMMISSION_REPO, PrismaCommissionRepository } from './commission.repository';
 
@@ -15,7 +16,8 @@ import { COMMISSION_REPO, PrismaCommissionRepository } from './commission.reposi
     CommissionCacheConsumer,
     { provide: COMMISSION_REPO, useClass: PrismaCommissionRepository },
   ],
-  controllers: [CommissionController],
+  // CommissionRateController: lectura mínima driver-rail (la tasa on-demand para el app del conductor).
+  controllers: [CommissionController, CommissionRateController],
   exports: [CommissionService],
 })
 export class CommissionModule {}
