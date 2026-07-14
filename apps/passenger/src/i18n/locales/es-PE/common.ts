@@ -1262,10 +1262,12 @@ export const common = {
      * UNA línea de experiencia por método en la pantalla de métodos (patrón instrumentos). Cuenta CÓMO
      * se paga, no qué es. NEUTRAL en el momento del cobro (el pre-pago lo mueve al INICIAR, no al
      * terminar): describimos el MEDIO, no el "cuándo". El efectivo sí conserva su momento real ("al
-     * conductor", que sigue siendo al bajar).
+     * conductor", que sigue siendo al bajar). YAPE acá es la fila SIN VINCULAR: es una INVITACIÓN (va con
+     * el botón "Vincular"), NO una afirmación en presente — decir "se cobra automático" al lado de
+     * "Vincular" se contradice. El estado VINCULADO usa `auto.linkedLine` (con teléfono), no esta línea.
      */
     line: {
-      YAPE: 'Se cobra automático con tu Yape',
+      YAPE: 'Vincúlalo para pago automático',
       PLIN: 'Escaneas el QR para pagar',
       CASH: 'Le pagas al conductor',
       CARD: 'Pagas con link seguro',
