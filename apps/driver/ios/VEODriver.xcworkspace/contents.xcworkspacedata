@@ -2,6 +2,12 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:../../../../../../../../maps/driver-a-b.gpx">
+   </FileRef>
+   <FileRef
+      location = "group:../../../../../../../../maps/driver-b-c.gpx">
+   </FileRef>
+   <FileRef
       location = "group:VEODriver.xcodeproj">
    </FileRef>
    <FileRef

@@ -1,10 +1,16 @@
 import type { GeoPoint } from '@veo/api-client';
 import { Camera, CircleLayer, LineLayer, MapView, MarkerView, ShapeSource } from '@rnmapbox/maps';
 import { driverMapRoute, RoutePin, useTheme } from '@veo/ui-kit';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { env } from '../../../core/config/env';
-import { boundsOf, LIMA_CENTER_LNGLAT, LIMA_ZOOM, toLngLat } from '../../utils/geo';
+import {
+  boundsOf,
+  distanceMeters,
+  LIMA_CENTER_LNGLAT,
+  LIMA_ZOOM,
+  toLngLat,
+} from '../../utils/geo';
 import { veoLightMapboxStyleJSON } from './mapbox/veoLightStyle';
 import { NavPuck } from './NavPuck';
 
@@ -66,6 +72,52 @@ const NAV_ANIM_MS = 700;
 const isValidPoint = (p: GeoPoint | null | undefined): p is GeoPoint =>
   p != null && Number.isFinite(p.lat) && Number.isFinite(p.lon);
 
+/* ── Suavizado del puck (gemelo del pasajero — misma técnica, mismos umbrales) ─────────────────── */
+/** Duración del deslizamiento entre dos muestras de GPS (~cadencia del ping). */
+const DRIVER_LERP_MS = 900;
+/** Paso de la interpolación (~30 fps: el puck se DESLIZA en vez de saltar de celda en celda). */
+const DRIVER_LERP_STEP_MS = 33;
+/** Salto mayor a esto = teletransporte deliberado (primer fix / reset del sim), sin deslizar. */
+const DRIVER_TELEPORT_METERS = 300;
+
+/**
+ * Suaviza la posición del conductor entre muestras del GPS: en vez de SALTAR a la coord cruda de
+ * cada ping (1-3 s entre muestras → brincos visibles con el zoom de navegación), DESLIZA linealmente
+ * hacia el nuevo punto. SOLO alimenta el MarkerView del puck: la Camera sigue el ping CRUDO (su
+ * easeTo de NAV_ANIM_MS ya interpola solo; dárselo suavizado reiniciaría la animación cada 33 ms).
+ * Un salto grande (> 300 m: primer fix, vuelta a base del sim) se aplica directo.
+ */
+function useSmoothedPoint(target: GeoPoint | null): GeoPoint | null {
+  const [smoothed, setSmoothed] = useState<GeoPoint | null>(target);
+  const shownRef = useRef<GeoPoint | null>(target);
+  useEffect(() => {
+    const from = shownRef.current;
+    if (!target) {
+      shownRef.current = null;
+      setSmoothed(null);
+      return;
+    }
+    if (!from || distanceMeters(from, target) > DRIVER_TELEPORT_METERS) {
+      shownRef.current = target;
+      setSmoothed(target);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(() => {
+      const t = Math.min(1, (Date.now() - start) / DRIVER_LERP_MS);
+      const next = {
+        lat: from.lat + (target.lat - from.lat) * t,
+        lon: from.lon + (target.lon - from.lon) * t,
+      };
+      shownRef.current = next;
+      setSmoothed(next);
+      if (t >= 1) clearInterval(id);
+    }, DRIVER_LERP_STEP_MS);
+    return () => clearInterval(id);
+  }, [target?.lat, target?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  return smoothed;
+}
+
 /**
  * Lienzo de mapa del conductor sobre **`@rnmapbox/maps`** (Lote 0+1: migración a Mapbox). El estilo
  * veo-light "Daylight Trust" (Theme de Confianza) se inyecta vía `styleJSON` (Mapbox Streets v8, paleta
@@ -94,6 +146,8 @@ function AppMapComponent({
   // Navegación activa SOLO si se pidió `navMode` Y hay una ubicación de conductor válida que seguir
   // (sin ubicación no hay a quién seguir → degrada al encuadre normal, degradación honesta).
   const navigating = navMode && isValidPoint(driver);
+  // Puck DESLIZADO entre pings (solo el marker; la cámara y los bounds siguen el ping crudo).
+  const smoothedDriver = useSmoothedPoint(isValidPoint(driver) ? driver : null);
   // GeoJSON de la ruta (LineString). Vacío si no hay suficientes puntos.
   const routeShape = useMemo<GeoJSON.Feature<GeoJSON.LineString> | null>(() => {
     if (!routeCoordinates || routeCoordinates.length < 2) {
@@ -263,8 +317,8 @@ function AppMapComponent({
         </ShapeSource>
       ) : null}
 
-      {isValidPoint(driver) ? (
-        <MarkerView coordinate={toLngLat(driver)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
+      {isValidPoint(smoothedDriver) ? (
+        <MarkerView coordinate={toLngLat(smoothedDriver)} anchor={{ x: 0.5, y: 0.5 }} allowOverlap>
           {/* En navegación: puck direccional (la cámara heading-up hace que apunte al rumbo de viaje).
               Fuera de navegación: anillo pulsante de presencia. */}
           {navigating ? <NavPuck /> : <RoutePin variant="user" pulse />}

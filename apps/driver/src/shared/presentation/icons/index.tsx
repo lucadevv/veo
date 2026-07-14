@@ -670,6 +670,24 @@ export function IconArrowLeft(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Flecha derecha (enviar mensaje del chat — espejo de IconArrowLeft). */
+export function IconArrowRight(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Polyline
+        points="12,5 19,12 12,19"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
 /** Imagen / galería: marco + un círculo (sol) + una línea mínima de "montaña". */
 export function IconImage(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);

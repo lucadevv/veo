@@ -5,8 +5,10 @@ import { IconManeuver, type ManeuverGlyphName } from '../../../../shared/present
 import { formatManeuverDistance, maneuverGlyph, type TripRouteStep } from '../../domain';
 
 export interface ManeuverBannerProps {
-  /** Próxima maniobra a ejecutar (primer paso restante de la ruta). */
+  /** Próxima maniobra a anunciar (derivada por `upcomingManeuver` del dominio). */
   step: TripRouteStep;
+  /** Distancia a la maniobra — VIVA (conductor→punto de maniobra por GPS), no el largo del tramo. */
+  distanceMeters: number;
   /** Cuántos pasos quedan en total (para el contador "1 de N"). Opcional. */
   remaining?: number;
 }
@@ -18,14 +20,18 @@ export interface ManeuverBannerProps {
  * sobre superficie elevada, una sola línea de instrucción truncada. Sin animación de entrada para
  * no parpadear al recalcular la ruta (respeta reduce-motion por defecto).
  */
-export function ManeuverBanner({ step, remaining }: ManeuverBannerProps): React.JSX.Element {
+export function ManeuverBanner({
+  step,
+  distanceMeters,
+  remaining,
+}: ManeuverBannerProps): React.JSX.Element {
   const theme = useTheme();
   const glyph: ManeuverGlyphName = maneuverGlyph(step.maneuver);
 
   return (
     <View
       accessibilityRole="header"
-      accessibilityLabel={`${formatManeuverDistance(step.distanceMeters)}. ${step.instruction}`}
+      accessibilityLabel={`${formatManeuverDistance(distanceMeters)}. ${step.instruction}`}
       style={[
         styles.card,
         {
@@ -48,7 +54,7 @@ export function ManeuverBanner({ step, remaining }: ManeuverBannerProps): React.
       </View>
       <View style={styles.body}>
         <Text variant="title2" color="accent" tabular numberOfLines={1}>
-          {formatManeuverDistance(step.distanceMeters)}
+          {formatManeuverDistance(distanceMeters)}
         </Text>
         <Text variant="callout" numberOfLines={2}>
           {step.instruction}
