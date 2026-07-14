@@ -183,6 +183,35 @@ describe('TripsService.route — FALLBACK por fase (viaje SIN ruta persistida)',
   });
 });
 
+describe('TripsService.route — leg=dropoff (tramo RESTANTE del viaje en curso)', () => {
+  it('con ubicación viva: computa conductor → paradas → destino, IGNORANDO la canónica persistida', async () => {
+    const { svc, routeWithSteps } = makeService({
+      status: 'IN_PROGRESS',
+      driverAt: DRIVER_AT,
+      waypoints: [WAYPOINT],
+      routePolyline: 'canonica_persistida',
+    });
+    const view = await svc.route(user, 'trip-1', 'dropoff');
+    // El restante SÍ lleva las paradas pendientes del viaje (mismo tramo que navega el conductor).
+    expect(routeWithSteps).toHaveBeenCalledWith(DRIVER_AT, DESTINATION, [WAYPOINT]);
+    expect(view.polyline).toBe('poly');
+    expect(view.steps).toEqual([]);
+    expect(view.origin).toEqual(ORIGIN);
+    expect(view.destination).toEqual(DESTINATION);
+  });
+
+  it('SIN ubicación del conductor: ruta VACÍA honesta (mismo criterio que leg=pickup)', async () => {
+    const { svc, routeWithSteps } = makeService({
+      status: 'IN_PROGRESS',
+      routePolyline: 'canonica_persistida',
+    });
+    const view = await svc.route(user, 'trip-1', 'dropoff');
+    expect(routeWithSteps).not.toHaveBeenCalled();
+    expect(view.polyline).toBe('');
+    expect(view.distanceMeters).toBe(0);
+  });
+});
+
 describe('TripsService.route — leg=pickup (tramo de acercamiento conductor→recojo)', () => {
   it('con ubicación viva: computa conductor → recojo (sin paradas), IGNORANDO la canónica persistida', async () => {
     const { svc, routeWithSteps } = makeService({

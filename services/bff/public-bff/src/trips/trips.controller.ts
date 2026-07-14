@@ -134,6 +134,7 @@ export class TripsController {
       '(origen→paradas→destino, con su distancia/duración; steps vacíos); si el viaje no la tiene ' +
       '(viajes viejos), fallback al cómputo por fase desde la última ubicación del conductor. ' +
       '`?leg=pickup`: el TRAMO DE ACERCAMIENTO vivo (conductor→recojo) para las fases pre-recojo; ' +
+      '`?leg=dropoff`: el tramo RESTANTE del viaje en curso (conductor→paradas→destino); ' +
       'sin ubicación del conductor aún → ruta VACÍA honesta (el app no dibuja). ' +
       'Mismo contrato tripRoute (polyline + steps + markers).',
   })

@@ -233,14 +233,15 @@ export class TripHistoryQueryDto {
  */
 export class TripRouteQueryDto {
   @ApiPropertyOptional({
-    enum: ['pickup'],
+    enum: ['pickup', 'dropoff'],
     description:
       'Tramo pedido. `pickup` = conductor→recojo desde la última ubicación viva (fases pre-recojo); ' +
+      '`dropoff` = tramo RESTANTE del viaje en curso (conductor→paradas→destino, se recorta al avanzar); ' +
       'omitir = ruta canónica persistida del viaje.',
   })
   @IsOptional()
-  @IsIn(['pickup'])
-  leg?: 'pickup';
+  @IsIn(['pickup', 'dropoff'])
+  leg?: 'pickup' | 'dropoff';
 }
 
 /** Recurso de viaje tal como lo devuelve trip-service en los comandos REST. */

@@ -286,7 +286,11 @@ export class TripsService {
    * ANTI-IDOR: la ruta expone ubicaciones EXACTAS (PII, Ley 29733) → se verifica la pertenencia del
    * viaje al pasajero autenticado ANTES de servir/calcular nada (mismo patrón que getTripDetail).
    */
-  async route(user: AuthenticatedUser, tripId: string, leg?: 'pickup'): Promise<TripRouteView> {
+  async route(
+    user: AuthenticatedUser,
+    tripId: string,
+    leg?: 'pickup' | 'dropoff',
+  ): Promise<TripRouteView> {
     const trip = await this.tripRest.get<TripResource>(`/trips/${tripId}`, { identity: user });
     if (trip.passengerId !== user.userId) {
       throw new ForbiddenError('El viaje no pertenece al pasajero');
@@ -305,6 +309,25 @@ export class TripsService {
         distanceMeters: pickupRoute.distanceMeters,
         durationSeconds: pickupRoute.durationSeconds,
         // Overview del pasajero: sin navegación turn-by-turn (misma decisión que la canónica).
+        steps: [],
+        origin: trip.origin,
+        destination: trip.destination,
+        waypoints,
+      };
+    }
+    if (leg === 'dropoff') {
+      // Tramo RESTANTE del viaje en curso (2026-07-14, pedido del dueño): la canónica estática dejaba
+      // pintada la parte YA RECORRIDA detrás del vehículo y su punta podía no calzar exacto con la del
+      // conductor (que recomputa vivo). Igual que el conductor onboard: conductor → paradas → destino,
+      // recortándose sola a medida que avanza. Sin ping aún → vacía honesta (mismo criterio que pickup).
+      const dropoffFrom = this.liveState.getLocation(tripId)?.point;
+      const dropoffRoute = dropoffFrom
+        ? await this.maps.routeWithSteps(dropoffFrom, trip.destination, waypoints)
+        : { polyline: '', distanceMeters: 0, durationSeconds: 0 };
+      return {
+        polyline: dropoffRoute.polyline,
+        distanceMeters: dropoffRoute.distanceMeters,
+        durationSeconds: dropoffRoute.durationSeconds,
         steps: [],
         origin: trip.origin,
         destination: trip.destination,
