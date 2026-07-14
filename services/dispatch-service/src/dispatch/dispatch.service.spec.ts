@@ -36,6 +36,7 @@ function makeService(
     row?: ReturnType<typeof matchRow> | null;
     claimCount?: number;
     suspended?: boolean;
+    emergency?: boolean;
   } = {},
 ) {
   const row = opts.row === undefined ? matchRow() : opts.row;
@@ -72,6 +73,8 @@ function makeService(
   const matching = {
     markMatched: vi.fn(async () => undefined),
     offerNext: vi.fn(async () => undefined),
+    // Copy honesto del 409: solo el riel EMERGENCY (broadcast) habilita "la emergencia ya fue tomada".
+    isEmergencyTrip: vi.fn(async () => opts.emergency ?? false),
   };
   // Gate de elegibilidad (simetría con PUJA): por default ELEGIBLE; con `suspended` lanza 403 como
   // lo haría EligibilityGate.assertActiveDriver al leer suspendedAt!=null en identity (fail-closed).
@@ -126,6 +129,53 @@ describe('DispatchService (dispatch-service) — ownership-check anti-IDOR #9', 
       // El dueño PASA el ownership-check (404 no aplica) pero el CAS no matchea OFFERED → count 0 → 409.
       const { service } = makeService({ claimCount: 0 });
       await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({ httpStatus: 409 });
+    });
+
+    it('oferta VENCIDA (TIMEOUT por el sweep) → 409 con el copy de vencida, NO el de emergencia', async () => {
+      // Bug visto en vivo (2026-07-14): un FIJO cuya oferta venció devolvía "La emergencia ya fue
+      // tomada por otro conductor". El outcome REAL (releído tras el CAS fallido) manda el copy.
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.TIMEOUT }),
+        claimCount: 0,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'La oferta ya venció',
+      });
+    });
+
+    it('oferta ya ACCEPTED en viaje NO-emergencia (doble-tap) → 409 con copy neutro "El viaje ya fue tomado"', async () => {
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.ACCEPTED }),
+        claimCount: 0,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'El viaje ya fue tomado',
+      });
+    });
+
+    it('oferta ya ACCEPTED en viaje EMERGENCY (carrera del broadcast) → 409 con el copy de emergencia', async () => {
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.ACCEPTED }),
+        claimCount: 0,
+        emergency: true,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'La emergencia ya fue tomada por otro conductor',
+      });
+    });
+
+    it('oferta ya REJECTED → 409 con copy genérico honesto', async () => {
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.REJECTED }),
+        claimCount: 0,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'La oferta ya fue respondida',
+      });
     });
 
     it('conductor SUSPENDIDO (gate de identidad) → 403 y NO toca el CAS (cierra la asimetría con PUJA)', async () => {

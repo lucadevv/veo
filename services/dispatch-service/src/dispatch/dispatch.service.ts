@@ -111,16 +111,26 @@ export class DispatchService {
         // Lo traducimos a 409 limpio (no un 500). Helper ESTRUCTURAL (@veo/database): el `instanceof` del
         // cliente generado por servicio no matchearía cross-cliente. En el secuencial este path no se da.
         if (isUniqueViolation(err, 'trip_id')) {
-          throw new ConflictError('La emergencia ya fue tomada por otro conductor', {
-            tripId: match.tripId,
-          });
+          // El unique parcial = OTRO match del viaje ya quedó ACCEPTED. El copy de "emergencia" solo si
+          // el viaje despacha por ese riel; el read extra va solo en este path de error (la tx se aborta).
+          throw new ConflictError(
+            await this.acceptConflictMessage(DispatchOutcome.ACCEPTED, match.tripId),
+            { tripId: match.tripId },
+          );
         }
         throw err;
       }
       if (claimed.count === 0) {
         // count===0 acá = el DUEÑO ya validado llega tarde sobre un match ya respondido/expirado → 409.
         // NO se confunde con el 404-no-dueño de arriba: ese ya cortó antes del CAS.
-        throw new ConflictError('La oferta ya fue respondida o expiró', { outcome: match.outcome });
+        // Releemos el outcome REAL tras el CAS fallido: el `match` leído arriba puede ser pre-carrera
+        // (otro tx lo cerró entre el read y el updateMany) y el copy debe ser honesto — una oferta FIJO
+        // vencida por el sweep NO es "la emergencia ya fue tomada" (bug visto en vivo 2026-07-14).
+        const fresh = await tx.dispatchMatch.findUnique({ where: { id: matchId } });
+        const outcome = fresh?.outcome ?? match.outcome;
+        throw new ConflictError(await this.acceptConflictMessage(outcome, match.tripId), {
+          outcome,
+        });
       }
       const scoreMs = respondedAt.getTime() - match.offeredAt.getTime();
       const envelope = createEnvelope({
@@ -153,6 +163,25 @@ export class DispatchService {
     // a los perdedores. En el flujo STANDARD no hay hermanas (1 OFFERED/viaje) ⇒ no-op. Idempotente.
     await this.retractSiblingOffers(view.tripId, view.id);
     return view;
+  }
+
+  /**
+   * Copy HONESTO del 409 del accept según el outcome REAL del match. El copy "la emergencia ya fue
+   * tomada" (riel EMERGENCY: broadcast donde el primero gana) SOLO aplica si el viaje despacha por ese
+   * riel — antes se reusaba para cualquier fallo del CAS y un FIJO vencido lo mostraba. El driver app
+   * decide por status (409 tipado, isConflictError), no por el texto: cambiar el mensaje no rompe nada.
+   */
+  private async acceptConflictMessage(
+    outcome: DispatchOutcome,
+    tripId: string,
+  ): Promise<string> {
+    if (outcome === DispatchOutcome.TIMEOUT) return 'La oferta ya venció';
+    if (outcome === DispatchOutcome.ACCEPTED) {
+      return (await this.matching.isEmergencyTrip(tripId))
+        ? 'La emergencia ya fue tomada por otro conductor'
+        : 'El viaje ya fue tomado';
+    }
+    return 'La oferta ya fue respondida';
   }
 
   /**

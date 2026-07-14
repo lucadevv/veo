@@ -255,6 +255,16 @@ export class MatchingService {
   }
 
   /**
+   * ¿El viaje despacha por el riel EMERGENCY (broadcast donde el primero gana)? Lo usa el copy del 409
+   * del accept: "la emergencia ya fue tomada" SOLO es honesto en ese riel — un FIJO vencido NO puede
+   * recibir ese mensaje. Sin sesión o category desconocida ⇒ false (STANDARD).
+   */
+  async isEmergencyTrip(tripId: string): Promise<boolean> {
+    const session = await this.sessions.get(tripId);
+    return this.offeringFlow(session?.category ?? null) === OfferingFlow.EMERGENCY;
+  }
+
+  /**
    * Despacho de EMERGENCIA (ambulancia · OfferingFlow.EMERGENCY): oferta SIMULTÁNEA a TODOS los conductores
    * elegibles del radio (no uno a la vez). El primero que acepta gana — la carrera la zanjan el CAS del
    * accept + el índice UNIQUE PARCIAL (un solo ACCEPTED por viaje) + el CAS de cierre de sesión; los
