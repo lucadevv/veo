@@ -21,6 +21,12 @@ const MIN_INTERVAL_MS = 2_500;
 const MOVE_THRESHOLD_M = 40;
 /** Tras un gesto manual, la cámara queda "libre" este tiempo (ms) antes de retomar el seguimiento. */
 const FREE_MODE_MS = 8_000;
+/**
+ * Umbral (px) de cambio del inset inferior (sheet) que dispara un RE-ENCUADRE inmediato: el snap del
+ * sheet cambió el área visible del mapa → el foco debe volver a quedar centrado en ella. Por debajo
+ * (re-medidas sub-píxel del contenido) no vale la pena re-animar.
+ */
+const INSET_REFRAME_THRESHOLD_PX = 8;
 
 /** Firma estable de un target para detectar cambios de FASE/INTENCIÓN (no de cada coordenada). */
 function targetSignature(t: CameraTarget): string {
@@ -62,6 +68,12 @@ export function useDirectedCamera(
   const freeUntil = useRef(0);
   const bottomInsetRef = useRef(bottomInset);
   bottomInsetRef.current = bottomInset;
+  // ÚLTIMO rumbo VÁLIDO aplicado en `follow` (course-up). Un ping sin heading (`null`) NO vuelve la
+  // cámara al Norte de golpe: se mantiene este valor hasta la próxima muestra válida.
+  const lastHeading = useRef<number | null>(null);
+  // Target VIGENTE (para re-aplicarlo cuando cambia el inset del sheet, sin esperar otro tick).
+  const currentTarget = useRef<CameraTarget>(target);
+  currentTarget.current = target;
 
   const apply = useCallback(
     (t: CameraTarget): void => {
@@ -79,21 +91,44 @@ export function useDirectedCamera(
         // el box [conductor+recogida] (enRoute) y el box casi-puntual sobre la recogida (arrived) cierran más,
         // dejando menos aire alrededor. En 'arrived' el conductor ya está sobre el origen → box mínimo → con
         // 40/36 el encuadre se siente BIEN cerrado (casi nivel calle sobre el punto de recogida) sin maxZoom
-        // (fitBounds no lo aplica acá → se cierra por geometría). Con un solo punto, fitBounds centra y el
-        // padding chico fija un zoom cerrado.
-        cam.fitBounds(
-          bounds.ne,
-          bounds.sw,
-          [40, 36, 40 + padBottom, 36], // [top, right, bottom, left]
-          ANIM_MS,
-        );
+        // (el fit no lo aplica acá → se cierra por geometría). Con un solo punto, el bounds centra y el
+        // padding chico fija un zoom cerrado. `setCamera` con bounds (no `fitBounds`) para RESETEAR
+        // heading/pitch: al venir del follow course-up del viaje en curso, el overview vuelve norte-arriba
+        // y cenital (un fit con la cámara girada/inclinada desconcierta).
+        lastHeading.current = null;
+        cam.setCamera({
+          bounds: {ne: bounds.ne, sw: bounds.sw},
+          padding: {
+            paddingTop: 40,
+            paddingRight: 36,
+            paddingBottom: 40 + padBottom,
+            paddingLeft: 36,
+          },
+          heading: 0,
+          pitch: 0,
+          animationDuration: ANIM_MS,
+          animationMode: 'easeTo',
+        });
         return;
       }
 
       if (!t.followPoint) return;
+      // Course-up del viaje en curso: heading de la ÚLTIMA muestra válida (ping sin heading → se mantiene
+      // el anterior; sin muestra previa → no se manda heading, la cámara conserva el que tenga). El easeTo
+      // de ANIM_MS interpola el giro solo — no hace falta re-animar por ping (más sereno, sin mareo).
+      const sample =
+        typeof t.followHeading === 'number' && Number.isFinite(t.followHeading)
+          ? t.followHeading
+          : null;
+      if (sample != null) lastHeading.current = sample;
+      const heading = sample ?? lastHeading.current;
       cam.setCamera({
         centerCoordinate: toLngLat(t.followPoint),
         ...(t.followZoom != null ? {zoomLevel: t.followZoom} : {}),
+        ...(heading != null ? {heading} : {}),
+        // Pitch declarado por el target (viaje en curso ~FOLLOW_PITCH); sin él, cenital explícito (0)
+        // para que un follow "plano" (compat) no herede la inclinación de una fase anterior.
+        pitch: t.followPitch ?? 0,
         padding: {
           paddingTop: 0,
           paddingBottom: padBottom,
@@ -137,6 +172,26 @@ export function useDirectedCamera(
     lastAppliedAt.current = now;
     apply(target);
   }, [target, apply]);
+
+  // RE-ENCUADRE POR SNAP DEL SHEET: cuando el inset inferior cambia (el sheet se asentó en otro anclaje:
+  // expandir/contraer/colapsar), el área visible del mapa cambió → re-aplicamos el target VIGENTE ya,
+  // sin throttle (es un cambio de viewport, no un tick del socket) e ignorando el modo libre (colapsar
+  // el sheet es intención explícita de ver el mapa re-encuadrado). Umbral chico para no re-animar por
+  // re-medidas sub-píxel del contenido del sheet.
+  const lastInsetApplied = useRef(bottomInset);
+  useEffect(() => {
+    if (
+      Math.abs(bottomInset - lastInsetApplied.current) <
+      INSET_REFRAME_THRESHOLD_PX
+    ) {
+      return;
+    }
+    lastInsetApplied.current = bottomInset;
+    const t = currentTarget.current;
+    lastLead.current = leadPoint(t);
+    lastAppliedAt.current = Date.now();
+    apply(t);
+  }, [bottomInset, apply]);
 
   // Gesto manual del usuario: entra en modo libre (el seguimiento se reanuda solo a los FREE_MODE_MS).
   const onGesture = useCallback(() => {

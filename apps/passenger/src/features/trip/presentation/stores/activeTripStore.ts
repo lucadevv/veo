@@ -1,5 +1,5 @@
 import {create} from 'zustand';
-import type {PricingMode} from '@veo/api-client';
+import type {MobileVehicleType, PricingMode} from '@veo/api-client';
 
 export interface ActiveTripState {
   /**
@@ -19,6 +19,14 @@ export interface ActiveTripState {
    */
   activeTripMode: PricingMode | null;
   /**
+   * Tipo de vehículo SOLICITADO del viaje activo (CAR | MOTO), congelado al crear (`tripResource.vehicleType`).
+   * Alimenta el GLYPH del marker del conductor asignado en el mapa (moto ≠ auto). `null` = desconocido →
+   * el mapa degrada al glyph de auto (fallback histórico). `TripActiveView` NO trae el tipo, por eso se
+   * co-loca acá: al crear viene del POST /trips; al REHIDRATAR tras un relaunch se recupera del snapshot
+   * MMKV local (`tripHistoryRepository`, que guardó el `tripResource` al crear) — best-effort.
+   */
+  activeTripVehicleType: MobileVehicleType | null;
+  /**
    * Id del enlace de seguimiento ACTIVO de la sesión actual (o `null` si no se compartió, o ya se
    * revocó). Se retiene al crear el enlace para poder REVOCARLO (kill-switch): antes la app lo
    * descartaba y el endpoint de revoke quedaba inalcanzable (auditoría R3).
@@ -36,6 +44,8 @@ export interface ActiveTripState {
   setActiveTripId: (tripId: string) => void;
   /** Fija el modo de despacho del viaje activo (PUJA | FIXED); se conoce al crear/rehidratar. */
   setActiveTripMode: (mode: PricingMode) => void;
+  /** Fija el tipo de vehículo del viaje activo (CAR | MOTO); se conoce al crear/rehidratar (snapshot). */
+  setActiveTripVehicleType: (vehicleType: MobileVehicleType) => void;
   /** Retiene el enlace recién creado (shareId + caducidad + URL) para revocar/reusar/countdown. */
   setActiveShare: (shareId: string, expiresAt: string, url?: string) => void;
   /** Olvida el enlace activo (tras revocar o al terminar el viaje). NO toca el viaje en sí. */
@@ -53,11 +63,14 @@ export interface ActiveTripState {
 export const useActiveTripStore = create<ActiveTripState>(set => ({
   activeTripId: null,
   activeTripMode: null,
+  activeTripVehicleType: null,
   activeShareId: null,
   shareExpiresAt: null,
   shareUrl: null,
   setActiveTripId: activeTripId => set({activeTripId}),
   setActiveTripMode: activeTripMode => set({activeTripMode}),
+  setActiveTripVehicleType: activeTripVehicleType =>
+    set({activeTripVehicleType}),
   setActiveShare: (activeShareId, shareExpiresAt, url) =>
     set({activeShareId, shareExpiresAt, shareUrl: url ?? null}),
   clearShare: () =>
@@ -68,6 +81,7 @@ export const useActiveTripStore = create<ActiveTripState>(set => ({
     set({
       activeTripId: null,
       activeTripMode: null,
+      activeTripVehicleType: null,
       activeShareId: null,
       shareExpiresAt: null,
       shareUrl: null,

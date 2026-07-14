@@ -37,6 +37,14 @@ export interface CameraTarget {
   followPoint: GeoPoint | null;
   /** Zoom para `follow`/`center` (en `fit` lo decide el bounds). */
   followZoom?: number;
+  /**
+   * Rumbo (grados, 0=N horario) para el `follow` "como si manejara": la cámara se orienta al heading
+   * del conductor (course-up). `null`/ausente → el aplicador MANTIENE el último rumbo válido (jamás
+   * salta a 0°/Norte por un ping sin heading). Solo el viaje EN CURSO lo emite.
+   */
+  followHeading?: number | null;
+  /** Inclinación de cámara (grados desde el cenital) para el `follow`. Ausente → cenital (0). */
+  followPitch?: number;
 }
 
 /** Resultado del director: props simples y declarativas para el `AppMap`. */
@@ -65,11 +73,25 @@ export interface MapDirective {
  */
 export const FOLLOW_ZOOM = 16.3;
 
+/**
+ * Inclinación de la cámara en el viaje EN CURSO ("como si manejara"). PARÁMETRO DE GUSTO: el conductor
+ * navega con 55° (nav agresivo, heading-up con re-animación por ping); el pasajero VA ADENTRO mirando el
+ * teléfono — 42° da la sensación de profundidad/ciudad en volumen (con los edificios 3D del estilo) sin
+ * el mareo del nav. Rango razonable a iterar: 40–45.
+ */
+export const FOLLOW_PITCH = 42;
+
 /** Entrada del director (todos los puntos que conoce la pantalla en el frame actual). */
 export interface MapDirectorInput {
   phase: TripPhase;
   /** Ubicación en vivo del conductor (socket). `null` mientras no llega el primer fix. */
   driver: GeoPoint | null;
+  /**
+   * Rumbo en vivo del conductor (socket `driver:location`, grados 0=N). `null` si el ping no lo trae.
+   * Solo alimenta el `follow` del viaje en curso (course-up); el aplicador retiene la última muestra
+   * válida ante `null`.
+   */
+  driverHeading?: number | null;
   origin: GeoPoint | null;
   destination: GeoPoint | null;
   userPoint: GeoPoint | null;
@@ -95,9 +117,15 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
   // necesitaban (fallbacks/center) ahora devuelven `cameraTarget: null` y delegan el encuadre a la Camera
   // declarativa del AppMap (que lee la ruta/markers/userPoint por su cuenta). Se conservan en el input
   // (el caller los pasa) pero no se desestructuran acá.
-  const {phase, driver, origin} = input;
+  const {phase, driver, driverHeading, origin} = input;
   const driverPt = isValidPoint(driver) ? driver : null;
   const originPt = isValidPoint(origin) ? origin : null;
+  // Rumbo saneado: solo un número finito cuenta como muestra; lo demás degrada a `null` (el aplicador
+  // mantiene el último válido — jamás un salto a 0°).
+  const headingSample =
+    typeof driverHeading === 'number' && Number.isFinite(driverHeading)
+      ? driverHeading
+      : null;
 
   switch (phase) {
     case 'enRoute':
@@ -126,8 +154,11 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
 
     case 'inProgress': {
       // SOLO el taxi: ocultamos MI ubicación (ruido, voy adentro). DIRIGE sólo si hay conductor: sigo al
-      // vehículo con zoom estable (la ruta al destino sigue dibujada). SIN conductor → `null` → la Camera
-      // declarativa encuadra la ruta.
+      // vehículo "como si manejara" — course-up (bearing = heading del conductor) + pitch suave + zoom
+      // estable (la ruta al destino sigue dibujada). El pasajero ve el viaje AVANZANDO hacia adelante,
+      // no "yendo hacia abajo" en un mapa norte-arriba. SIN conductor → `null` → la Camera declarativa
+      // encuadra la ruta. (enRoute se queda en fit norte-arriba a propósito: ahí lo que importa es VER
+      // conductor+recogida juntos, no la sensación de manejo.)
       return {
         showUserPoint: false,
         showNearby: false,
@@ -138,6 +169,8 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
               fitPoints: [],
               followPoint: driverPt,
               followZoom: FOLLOW_ZOOM,
+              followHeading: headingSample,
+              followPitch: FOLLOW_PITCH,
             }
           : null,
       };

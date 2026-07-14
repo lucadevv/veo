@@ -1,5 +1,6 @@
 import type {GeoPoint} from '@veo/api-client';
 import {
+  FOLLOW_PITCH,
   FOLLOW_ZOOM,
   resolveMapDirective,
   type MapDirectorInput,
@@ -65,6 +66,46 @@ describe('resolveMapDirective', () => {
       expect(d.cameraTarget?.mode).toBe('follow');
       expect(d.cameraTarget?.followPoint).toEqual(driver);
       expect(d.cameraTarget?.followZoom).toBe(FOLLOW_ZOOM);
+    });
+
+    it('vista "como si manejara": follow con pitch suave + bearing = heading del conductor', () => {
+      const d = resolveMapDirective({
+        ...base,
+        phase: 'inProgress',
+        driver,
+        driverHeading: 137,
+      });
+      expect(d.cameraTarget?.followPitch).toBe(FOLLOW_PITCH);
+      expect(d.cameraTarget?.followHeading).toBe(137);
+    });
+
+    it('heading null/no finito → followHeading null (el aplicador retiene el último válido; jamás 0°)', () => {
+      const withoutHeading = resolveMapDirective({
+        ...base,
+        phase: 'inProgress',
+        driver,
+        driverHeading: null,
+      });
+      expect(withoutHeading.cameraTarget?.followHeading).toBeNull();
+      const nanHeading = resolveMapDirective({
+        ...base,
+        phase: 'inProgress',
+        driver,
+        driverHeading: NaN,
+      });
+      expect(nanHeading.cameraTarget?.followHeading).toBeNull();
+    });
+
+    it('pre-pickup (enRoute) NO usa la vista de manejo: fit norte-arriba sin pitch/heading', () => {
+      const d = resolveMapDirective({
+        ...base,
+        phase: 'enRoute',
+        driver,
+        driverHeading: 90,
+      });
+      expect(d.cameraTarget?.mode).toBe('fit');
+      expect(d.cameraTarget?.followPitch).toBeUndefined();
+      expect(d.cameraTarget?.followHeading).toBeUndefined();
     });
 
     it('SIN conductor → cameraTarget NULL (la Camera declarativa encuadra la ruta), taxi aún flagueado', () => {

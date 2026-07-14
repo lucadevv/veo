@@ -130,6 +130,15 @@ const FIT_PADDING = 64;
  */
 const FIT_BOTTOM_INSET_FRACTION = 0.32;
 /**
+ * CAP del inset inferior para las cámaras de CENTRO/FOLLOW (no-fit). El `bottomInset` ahora sigue la
+ * altura del snap ACTUAL del sheet (no solo el peek): expandido a ~94%, reservar TODO eso como padding
+ * empujaría el punto centrado fuera de pantalla. Tope al 50%: el foco queda centrado en la franja
+ * visible mientras haya franja razonable; con el sheet casi a pantalla completa, el sheet TAPA el mapa
+ * (igual que el fit — misma filosofía Uber/Lyft del CAP de arriba, con más margen porque centrar un
+ * punto tolera más padding que encuadrar un bounds).
+ */
+const CENTER_BOTTOM_INSET_FRACTION = 0.5;
+/**
  * Red de zoom para el `fitBounds` declarativo: si la ruta es geográficamente chica (origen y destino
  * muy cerca), Mapbox acercaría demasiado; este tope evita un zoom-calle agresivo. NO impide el alejado
  * correcto de una ruta larga (eso es `minZoomLevel`, que dejamos libre para encuadrar bien). Es una red,
@@ -327,6 +336,16 @@ function AppMapComponent({
       ),
     [bottomInset, windowHeight],
   );
+  // CAP (más laxo) para las cámaras de CENTRO: ver CENTER_BOTTOM_INSET_FRACTION. Aplica al center
+  // declarativo y al idle imperativo; el follow dirigido usa el CAP de fit (comparten viewport útil).
+  const centerBottomInset = useMemo(
+    () =>
+      Math.min(
+        bottomInset,
+        Math.round(windowHeight * CENTER_BOTTOM_INSET_FRACTION),
+      ),
+    [bottomInset, windowHeight],
+  );
 
   const {onGesture} = useDirectedCamera(
     cameraRef,
@@ -346,7 +365,7 @@ function AppMapComponent({
   const {recenter} = useIdleCamera(
     cameraRef,
     freeBrowse ? idlePoint : null,
-    bottomInset,
+    centerBottomInset,
   );
 
   // Gesto manual del usuario → modo libre (solo si la cámara está dirigida). `isGestureActive` lo
@@ -512,6 +531,10 @@ function AppMapComponent({
           // Red de zoom: si la ruta es chica, no acercamos a zoom-calle agresivo. NO limita el alejado
           // de rutas largas (encuadre correcto manda). Ver FIT_MAX_ZOOM.
           maxZoomLevel={FIT_MAX_ZOOM}
+          // Overview de ruta SIEMPRE norte-arriba y cenital: al montar viniendo de una fase con follow
+          // course-up/pitch (viaje en curso), sin esto la cámara heredaría el giro/inclinación previos.
+          heading={0}
+          pitch={0}
           animationDuration={500}
         />
       ) : freeBrowse ? (
@@ -529,13 +552,19 @@ function AppMapComponent({
           centerCoordinate={centerCoordinate}
           zoomLevel={LIMA_ZOOM}
           // Reserva el alto del sheet abajo → el centro real sube y el userPoint queda en la franja
-          // visible (no tapado por el bottomsheet). Sin sheet (bottomInset=0) centra como siempre.
+          // visible (no tapado por el bottomsheet). CAPADO (CENTER_BOTTOM_INSET_FRACTION): el inset
+          // ahora sigue el snap ACTUAL del sheet y expandido casi-full empujaría el centro fuera de
+          // pantalla. Sin sheet (bottomInset=0) centra como siempre.
           padding={{
             paddingTop: 0,
-            paddingBottom: bottomInset,
+            paddingBottom: centerBottomInset,
             paddingLeft: 0,
             paddingRight: 0,
           }}
+          // Norte-arriba y cenital explícitos (mismo motivo que el fit de arriba: no heredar el
+          // course-up/pitch del follow del viaje en curso al volver a una fase de centro).
+          heading={0}
+          pitch={0}
           animationDuration={500}
         />
       )}

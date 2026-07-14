@@ -176,6 +176,13 @@ export function RequestFlowScreen(): React.JSX.Element {
   // Alto visible del peek (lo reporta el sheet): se lo pasamos al mapa como paddingBottom para que el
   // pin del usuario quede en la franja visible por encima del sheet, no tapado por él.
   const [peekHeight, setPeekHeight] = useState(0);
+  // Alto visible del snap ACTUAL del sheet (expandir/contraer/colapsar): la cámara del mapa RE-ENCUADRA
+  // su foco al área visible real en cada asentamiento (regla: el foco vive en viewport − sheet, no en la
+  // pantalla completa). El AppMap CAPA este valor por modo de cámara (fit 32% / center 50%) para que un
+  // sheet casi-full no aplaste el viewport. 0 = aún sin primer reporte → cae al peek.
+  const [sheetVisibleHeight, setSheetVisibleHeight] = useState(0);
+  // Inset que el mapa reserva para el sheet: el snap actual si ya se reportó; si no, el peek.
+  const sheetMapInset = sheetVisibleHeight > 0 ? sheetVisibleHeight : peekHeight;
   const sheetRef = useRef<DraggableSheetHandle>(null);
   // Eje LOCAL del sheet (idle ↔ searching, la 2ª máquina) + texto de búsqueda. flowRef evita closures
   // rancios en handleSnap.
@@ -189,8 +196,12 @@ export function RequestFlowScreen(): React.JSX.Element {
   // (detachInactiveScreens): al volver, el sheet re-entra al viaje. La fuente de verdad es el server.
   const activeTripId = useActiveTripStore(s => s.activeTripId);
   const activeTripMode = useActiveTripStore(s => s.activeTripMode);
+  const activeTripVehicleType = useActiveTripStore(s => s.activeTripVehicleType);
   const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
   const setActiveTripMode = useActiveTripStore(s => s.setActiveTripMode);
+  const setActiveTripVehicleType = useActiveTripStore(
+    s => s.setActiveTripVehicleType,
+  );
   const clearActiveTrip = useActiveTripStore(s => s.clear);
 
   // Re-entrada: al enfocar (montaje + volver al tab), rehidrata el viaje activo desde el server.
@@ -314,10 +325,10 @@ export function RequestFlowScreen(): React.JSX.Element {
   }, [addStop.phase, activeTripId, queryClient]);
 
   // COREOGRAFÍA DEL MAPA POR FASE (helper puro). Decide qué markers muestra y cómo encuadra la cámara
-  // (fit conductor+recogida / follow taxi / center). El AppMap solo recibe props simples (showUserPoint,
-  // cameraTarget, …). El vehicleType del conductor NO viene en TripActiveView (solo make/model/plate) →
-  // CAR por defecto (decisión del dueño: "si no hay tipo, CAR"). Memoizado por las coords que driftean
-  // para no reconstruir el target en cada render del padre.
+  // (fit conductor+recogida / follow "como si manejara" / center). El AppMap solo recibe props simples
+  // (showUserPoint, cameraTarget, …). El vehicleType REAL del viaje vive en el activeTripStore (congelado
+  // al crear; TripActiveView no lo trae) → sin dato, CAR (decisión del dueño: "si no hay tipo, CAR").
+  // Memoizado por las coords que driftean para no reconstruir el target en cada render del padre.
   // Memoizados por el RoutePlace del store (referencia estable salvo que cambien). Se pasan al AppMap
   // (React.memo): sin memo, un objeto nuevo por render rompía el memo y empujaba props nuevas al GL thread
   // del mapa en cada keystroke del buscador / cambio de peekHeight. Un solo origen para route y trip mode.
@@ -341,15 +352,19 @@ export function RequestFlowScreen(): React.JSX.Element {
     () => tripDetailQuery.data?.waypoints ?? [],
     [tripDetailQuery.data?.waypoints],
   );
+  const driverVehicleType = activeTripVehicleType ?? 'CAR';
   const mapDirective = useMemo(
     () =>
       resolveMapDirective({
         phase,
         driver: live.driverLocation ?? null,
+        // Rumbo del socket para el follow course-up del viaje en curso. Va en deps: llega junto con la
+        // coord en el mismo mensaje, así el target siempre carga la muestra fresca.
+        driverHeading: live.driverHeading,
         origin: originGeo,
         destination: destinationGeo,
         userPoint: myLocation,
-        vehicleType: 'CAR',
+        vehicleType: driverVehicleType,
         hasRoute: routeCoords.length > 1,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,12 +372,14 @@ export function RequestFlowScreen(): React.JSX.Element {
       phase,
       live.driverLocation?.lat,
       live.driverLocation?.lon,
+      live.driverHeading,
       originGeo?.lat,
       originGeo?.lon,
       destinationGeo?.lat,
       destinationGeo?.lon,
       myLocation?.lat,
       myLocation?.lon,
+      driverVehicleType,
       routeCoords.length,
     ],
   );
@@ -585,8 +602,11 @@ export function RequestFlowScreen(): React.JSX.Element {
       setActiveTripId(trip.id);
       // Modo congelado por el server → la fase EXPIRED distingue FIXED (sin conductor) de PUJA (sin ofertas).
       setActiveTripMode(trip.dispatchMode);
+      // Tipo de vehículo solicitado (CAR | MOTO) → el marker del conductor asignado usa el glyph correcto
+      // (la moto NO se pinta como auto). `TripActiveView` no lo trae; acá el POST /trips sí.
+      setActiveTripVehicleType(trip.vehicleType);
     },
-    [history, setActiveTripId, setActiveTripMode],
+    [history, setActiveTripId, setActiveTripMode, setActiveTripVehicleType],
   );
 
   // Elegir una oferta del board: ACCEPT_PRICE → aceptar (match); COUNTER → contraoferta (INTERINO Lote 3).
@@ -681,15 +701,17 @@ export function RequestFlowScreen(): React.JSX.Element {
   );
 
   // Encuadre del mapa memoizado (mismo objeto para route y trip mode): un literal inline se recreaba en
-  // cada render y rompía el React.memo del AppMap. Solo cambia con el safe-area top o el alto del peek.
+  // cada render y rompía el React.memo del AppMap. Cambia con el safe-area top (chrome superior) o el
+  // alto del snap ACTUAL del sheet → el fit de ruta RE-ENCUADRA al asentarse el sheet en otro anclaje
+  // (regla: la ruta vive en el área visible, no bajo el sheet). El AppMap topa el bottom con su CAP.
   const fitEdgePadding = useMemo(
     () => ({
       top: insets.top + 40,
-      bottom: peekHeight + 16,
+      bottom: sheetMapInset + 16,
       left: 40,
       right: 40,
     }),
-    [insets.top, peekHeight],
+    [insets.top, sheetMapInset],
   );
 
   // Anclajes del sheet POR MODO. En idle Y en búsqueda: [COLAPSADO, HOJA-DEL-PEN] — la hoja se
@@ -832,7 +854,8 @@ export function RequestFlowScreen(): React.JSX.Element {
             onPress={addStop.picking ? addStop.pickPoint : undefined}
             driver={live.driverLocation ?? null}
             driverHeading={live.driverHeading}
-            driverVehicleType="CAR"
+            // Tipo REAL del viaje (store, congelado al crear): la moto se pinta moto. Sin dato → CAR.
+            driverVehicleType={driverVehicleType}
             showDriverVehicle={mapDirective.showDriverVehicle}
             showUserPoint={mapDirective.showUserPoint}
             userPoint={mapDirective.showUserPoint ? myLocation : null}
@@ -863,8 +886,9 @@ export function RequestFlowScreen(): React.JSX.Element {
             }
             fitEdgePadding={fitEdgePadding}
             // El encuadre lo gobierna el cameraTarget (director) cuando dirige; si no, el fit declarativo.
-            // El AppMap TOPA el bottomInset al CAP para el fit dirigido (enRoute conductor+recogida).
-            bottomInset={peekHeight + 16}
+            // Sigue el snap ACTUAL del sheet (no solo el peek): el director RE-ENCUADRA al asentarse el
+            // sheet en otro anclaje. El AppMap TOPA el valor a sus CAPs (fit/center) por seguridad.
+            bottomInset={sheetMapInset + 16}
             interactive
           />
         ) : // `idle`: SIN mapa. El home es content-first (fondo sólido del root); el mapa aparece recién al
@@ -889,6 +913,9 @@ export function RequestFlowScreen(): React.JSX.Element {
                 nearbyVehicles={
                   descriptor.showNearby ? nearbyVehicles : undefined
                 }
+                // También en búsqueda el foco (mi ubicación) queda centrado en la franja VISIBLE por
+                // encima del sheet, y re-encuadra al colapsarlo/expandirlo. El AppMap capa el valor.
+                bottomInset={sheetMapInset}
                 interactive={false}
               />
             </View>
@@ -1000,6 +1027,9 @@ export function RequestFlowScreen(): React.JSX.Element {
         initialIndex={restingIndex}
         onSnap={handleSnap}
         onPeekHeightChange={setPeekHeight}
+        // Altura del snap ACTUAL (se asienta/re-mide, nunca por frame de drag): alimenta el re-encuadre
+        // de la cámara del mapa al área visible (punto focal por encima del sheet en TODAS las fases).
+        onSettledHeightChange={setSheetVisibleHeight}
         bottomOffset={bottomInset}
         renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
         renderScroll={ScrollComponent => (

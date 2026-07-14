@@ -64,6 +64,18 @@ const palette = {
 /** Fuente vectorial oficial de Mapbox (reemplaza la `source` OpenMapTiles del tileserver propio). */
 const MAPBOX_STREETS = 'mapbox://mapbox.mapbox-streets-v8';
 
+/* ── Edificios 3D (fill-extrusion) — PARÁMETROS DE GUSTO, iterables ──────────────────────────────
+ * En @rnmapbox 10.3.1 no existe Mapbox Standard (v11), pero fill-extrusion sí: volumen sutil que se
+ * siente con el pitch del follow del viaje en curso (FOLLOW_PITCH del mapDirector). RENDIMIENTO
+ * (regla "Map a 60fps"): la capa recién EXISTE desde BUILDINGS_3D_MINZOOM (z<15 no se evalúa) y la
+ * altura crece 0→real entre z15→16 (fade de aparición por geometría, no por opacidad). Sin pitch la
+ * extrusión se ve prácticamente igual al fill plano (solo la cara superior) → costo marginal. Si en
+ * el sim se sintiera pesada: subir el minzoom a 15.5/16 o bajar la opacidad. */
+/** Zoom desde el que se montan las extrusiones (nivel barrio-cercano; antes, fill plano solamente). */
+const BUILDINGS_3D_MINZOOM = 15;
+/** Opacidad de las extrusiones: sutil, la ciudad en volumen sin tapar calles/labels. */
+const BUILDINGS_3D_OPACITY = 0.6;
+
 /** Stack de glyphs estándar disponible en cualquier cuenta Mapbox (no requiere subir fuentes). */
 const FONT_REGULAR = ['DIN Pro Regular', 'Arial Unicode MS Regular'];
 
@@ -214,6 +226,43 @@ export const veoLightMapboxStyle: Record<string, unknown> = {
         'fill-color': palette.building,
         'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.7],
         'fill-outline-color': palette.buildingOutline,
+      },
+    },
+    {
+      // Edificios 3D SUTILES sobre el fill plano: volumen que se percibe con el pitch del viaje en
+      // curso ("como si manejara"). Color = el MISMO token `building` de la paleta Trust; el
+      // vertical-gradient del motor oscurece las caras laterales solo (profundidad sin ensuciar el
+      // lienzo claro). Solo polígonos con `extrude` (Streets v8 marca los que traen altura); la altura
+      // real (`height`/`min_height` del composite) entra en rampa z15→16 para que la ciudad "crezca"
+      // suave al acercarse, en vez de aparecer de golpe.
+      id: 'building-3d',
+      type: 'fill-extrusion',
+      source: 'composite',
+      'source-layer': 'building',
+      minzoom: BUILDINGS_3D_MINZOOM,
+      filter: ['==', ['get', 'extrude'], 'true'],
+      paint: {
+        'fill-extrusion-color': palette.building,
+        'fill-extrusion-opacity': BUILDINGS_3D_OPACITY,
+        'fill-extrusion-height': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          BUILDINGS_3D_MINZOOM,
+          0,
+          BUILDINGS_3D_MINZOOM + 1,
+          ['get', 'height'],
+        ],
+        'fill-extrusion-base': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          BUILDINGS_3D_MINZOOM,
+          0,
+          BUILDINGS_3D_MINZOOM + 1,
+          ['get', 'min_height'],
+        ],
+        'fill-extrusion-vertical-gradient': true,
       },
     },
     {

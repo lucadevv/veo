@@ -27,8 +27,12 @@ export function useHydrateActiveTrip(): void {
   const getPendingSettlement = useDependency(
     TOKENS.getPendingSettlementUseCase,
   );
+  const history = useDependency(TOKENS.tripHistoryRepository);
   const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
   const setActiveTripMode = useActiveTripStore(s => s.setActiveTripMode);
+  const setActiveTripVehicleType = useActiveTripStore(
+    s => s.setActiveTripVehicleType,
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -51,6 +55,14 @@ export function useHydrateActiveTrip(): void {
             if (trip.dispatchMode) {
               setActiveTripMode(trip.dispatchMode);
             }
+            // Tipo de vehículo del viaje: `TripActiveView` NO lo trae, pero el snapshot MMKV local
+            // (grabado al CREAR el viaje con el `tripResource` completo) sí. Best-effort: si el viaje
+            // se creó en otro device / el snapshot no está, queda null y el mapa degrada al glyph de
+            // auto (mismo comportamiento histórico, nunca peor).
+            const snapshot = history.list().find(t => t.id === trip.id);
+            if (snapshot?.vehicleType) {
+              setActiveTripVehicleType(snapshot.vehicleType);
+            }
           }
         })
         .catch(() => {
@@ -59,6 +71,13 @@ export function useHydrateActiveTrip(): void {
       return () => {
         cancelled = true;
       };
-    }, [getMyActiveTrip, getPendingSettlement, setActiveTripId, setActiveTripMode]),
+    }, [
+      getMyActiveTrip,
+      getPendingSettlement,
+      history,
+      setActiveTripId,
+      setActiveTripMode,
+      setActiveTripVehicleType,
+    ]),
   );
 }
