@@ -868,6 +868,13 @@ export const common = {
     eta: 'Llegada estimada',
     etaMinutes: '{{minutes}} min',
     etaUnknown: 'Calculando…',
+    /**
+     * Indicador IN-APP del cobro automático durante el viaje EN CURSO (pre-pago digital: se cobra al
+     * INICIAR con Yape On-File). Da la confirmación DENTRO de la app sin depender del push (que no llega
+     * al simulador iOS). `paymentAutoConfirmed`: cobro capturado. `paymentAutoProcessing`: en curso.
+     */
+    paymentAutoConfirmed: 'Pago confirmado · {{amount}}',
+    paymentAutoProcessing: 'Procesando tu pago…',
     searchingTitle: 'Buscando tu conductor',
     searchingBody:
       'Estamos contactando a los conductores cercanos. Te avisaremos al asignar uno.',

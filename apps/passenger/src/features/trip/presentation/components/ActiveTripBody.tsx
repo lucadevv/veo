@@ -23,6 +23,7 @@ import {formatInt, formatPEN} from '../../../../shared/utils/format';
 import type {WaypointProposalController} from '../hooks/useWaypointProposal';
 import {IconCamera, IconChat, IconClose, IconRoute, IconShare} from './icons';
 import {EnterView} from './motion';
+import {TripPaymentConfirmation} from './TripPaymentConfirmation';
 
 export interface ActiveTripBodyProps {
   tripId: string;
@@ -160,6 +161,11 @@ export function ActiveTripBody({
           </Text>
         </View>
       </Card>
+
+      {/* Confirmación IN-APP del cobro automático (pre-pago digital, se cobra al INICIAR con Yape On-File):
+          da la certeza DENTRO de la app sin depender del push (que no llega al sim iOS). Auto-gateado:
+          solo EN CURSO y solo si hay un cobro digital capturado/en curso (efectivo/deuda → null). */}
+      <TripPaymentConfirmation tripId={tripId} visible={isInProgress} />
 
       {/* Cámara del habitáculo: durante el viaje en curso, un botón que abre la cámara en vivo a
           pantalla completa (más limpio que embeber el viewer WebRTC dentro del sheet). */}
