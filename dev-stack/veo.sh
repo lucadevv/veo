@@ -604,11 +604,15 @@ boot_admin_web() {
   fi
 
   if [[ "${VEO_WATCH:-0}" == "1" ]]; then
-    # WATCH (dev): next dev → HMR nativo. ENVFILE=env/development.env (== package.json `dev`).
-    blue "  ▶ admin-web (next dev :$port · HMR nativo) → log: $logf"
+    # WATCH (dev/local): next dev → HMR nativo. ENVFILE SIGUE EL TIER (APP_ENV): `veo.sh local` →
+    # env/local.env, `veo.sh dev` → env/development.env. Responsabilidad única por entorno: la web usa SU
+    # env del tier igual que los microservicios (antes estaba hardcodeado a development.env → la web
+    # quedaba en dev tier aun bajo `veo.sh local`). Los NEXT_PUBLIC_* se inlinean del ENVFILE al arrancar.
+    local webenv="env/${APP_ENV:-development}.env"
+    blue "  ▶ admin-web (next dev :$port · HMR nativo · ENVFILE=$webenv) → log: $logf"
     (
       cd "$svc_dir" || exit 1
-      exec env ENVFILE="env/development.env" pnpm exec next dev -p "$port"
+      exec env ENVFILE="$webenv" pnpm exec next dev -p "$port"
     ) >"$logf" 2>&1 &
     echo $! > "$pidf"
   else
