@@ -910,6 +910,13 @@ export const tripActiveView = z.object({
    * origen→destino. NO confundir con la polyline en vivo del socket (`trip:update`), que es para el viaje activo.
    */
   routePolyline: z.string().nullable(),
+  /**
+   * Modo de despacho CONGELADO del viaje (ADR-011): PUJA | FIXED. OPTIONAL + nullable por compat N-2:
+   * un BFF que aún no lo emite no rompe el parseo (la app degrada al comportamiento PUJA histórico).
+   * Permite REHIDRATAR `activeTripMode` tras relanzar la app a mitad de una búsqueda (un FIXED EXPIRED
+   * debe caer en 'noDriver', no en la re-puja).
+   */
+  dispatchMode: pricingMode.nullable().optional(),
   driver: tripDriverView.nullable(),
   vehicle: tripVehicleView.nullable(),
   /**
@@ -1428,26 +1435,39 @@ export type PaymentByTripView = z.infer<typeof paymentByTripView>;
  *    complete el pago (deepLink Yape / urlPay / QR / CIP). NO es deuda y NO bloquea: es un "pago por
  *    completar" que, si el usuario cerró el sheet, quedaba sin camino de vuelta → la franja dice
  *    "Tienes un pago por completar — Continuar" y abre DIRECTO el checkout del payment.
+ *  - `CANCELLATION_PENALTY`: una penalidad de cancelación PENDING (F2.3). NO es un Payment: es una
+ *    obligación aparte que BLOQUEA el gate igual que la deuda (cuenta en `hasDebt`/`totalCents`). Se
+ *    salda por su endpoint PROPIO `POST /payments/penalties/:id/settle` (no por retry-charge).
  */
-export const debtItemKind = z.enum(['DEBT', 'PENDING_ACTION']);
+export const debtItemKind = z.enum(['DEBT', 'PENDING_ACTION', 'CANCELLATION_PENALTY']);
 export type DebtItemKind = z.infer<typeof debtItemKind>;
 
 /**
- * Un ítem accionable del pasajero (un cobro en DEBT o un PENDING con checkout vivo). Para la franja del
- * home y el sheet. `reason` es la razón del fallo del cobro (saldo insuficiente, declinado…) en DEBT, y
- * cadena vacía en PENDING_ACTION; montos en céntimos PEN.
+ * Un ítem accionable del pasajero (un cobro en DEBT/PENDING con checkout vivo, o una penalidad de
+ * cancelación). Para la franja del home y el sheet. `reason` es la razón del fallo del cobro (saldo
+ * insuficiente, declinado…) en DEBT, el motivo de la cancelación en CANCELLATION_PENALTY, y cadena
+ * vacía en PENDING_ACTION; montos en céntimos PEN.
+ *
+ * INVARIANTE de identificador por `kind` (el backend OMITE el campo que no aplica, no manda null):
+ *  - DEBT / PENDING_ACTION → traen `paymentId` (id del Payment); `penaltyId` ausente.
+ *  - CANCELLATION_PENALTY → trae `penaltyId` (id de la CancellationPenalty); `paymentId` ausente.
+ * Ambos opcionales en el schema porque NINGUNO está presente en todos los kinds; el consumidor
+ * discrimina por `kind` y rutea el saldar: paymentId → retry-charge/método, penaltyId → settle.
  */
 export const debtItemView = z.object({
-  paymentId: z.string(),
+  paymentId: z.string().optional(),
+  /** id de la CancellationPenalty (SOLO kind=CANCELLATION_PENALTY). */
+  penaltyId: z.string().optional(),
   tripId: z.string(),
   amountCents: z.number().int(),
   reason: z.string(),
   /** Fecha de creación del cobro (ISO-8601). */
   createdAt: z.string(),
   /**
-   * DEBT (deuda, bloquea) o PENDING_ACTION (pago por completar, no bloquea). REQUERIDO en el contrato:
-   * el BFF SIEMPRE lo emite (default DEBT para un payment-service viejo se resuelve allá, no acá), así el
-   * tipo de salida no diverge del de entrada (evita el desajuste input/output de un `.default()` en zod).
+   * DEBT y CANCELLATION_PENALTY bloquean; PENDING_ACTION (pago por completar) NO. REQUERIDO en el
+   * contrato: el BFF SIEMPRE lo emite (default DEBT para un payment-service viejo se resuelve allá, no
+   * acá), así el tipo de salida no diverge del de entrada (evita el desajuste input/output de un
+   * `.default()` en zod).
    */
   kind: debtItemKind,
 });
@@ -1455,12 +1475,14 @@ export type DebtItemView = z.infer<typeof debtItemView>;
 
 /**
  * GET /payments/debts → ítems accionables del pasajero autenticado (franja del home). `hasDebt` y
- * `totalCents` resumen SOLO las DEUDAS reales (kind=DEBT): mientras `hasDebt=true`, el gate del BFF
- * bloquea pedir un viaje nuevo (403 `DEBT_PENDING`). `debts` incluye ADEMÁS los PENDING_ACTION (pagos
- * por completar), que NO bloquean ni suman. Para SALDAR una deuda, la app hace
- * `POST /payments/:paymentId/retry-charge` (`retryCharge`) → `paymentView` (ProntoPaga vuelve PENDING
- * con checkout nuevo; sandbox/live vuelve CAPTURED o de vuelta a DEBT). Para CONTINUAR un PENDING_ACTION
- * la app lee el cobro fresco con `GET /payments/:id` y muestra su checkout.
+ * `totalCents` resumen lo BLOQUEANTE (kind=DEBT + kind=CANCELLATION_PENALTY): mientras `hasDebt=true`,
+ * el gate del BFF bloquea pedir un viaje nuevo (403 `DEBT_PENDING`). `debts` incluye ADEMÁS los
+ * PENDING_ACTION (pagos por completar), que NO bloquean ni suman. Para SALDAR, la app rutea por ítem:
+ * paymentId → `POST /payments/:paymentId/retry-charge` (`retryCharge`); penaltyId →
+ * `POST /payments/penalties/:penaltyId/settle` (`settlePenaltyRequest`/`settlePenaltyView`). Ambos
+ * devuelven `paymentView` (ProntoPaga vuelve PENDING con checkout nuevo; sandbox/live vuelve CAPTURED o
+ * de vuelta a DEBT). Para CONTINUAR un PENDING_ACTION la app lee el cobro fresco con `GET /payments/:id`
+ * y muestra su checkout.
  */
 export const debtView = z.object({
   hasDebt: z.boolean(),
@@ -1517,6 +1539,27 @@ export type ChangePaymentMethodRequest = z.infer<typeof changePaymentMethodReque
  */
 export const changePaymentMethodView = paymentView;
 export type ChangePaymentMethodView = z.infer<typeof changePaymentMethodView>;
+
+/**
+ * POST /payments/penalties/:id/settle → body. Paga una penalidad de cancelación PENDING del pasajero
+ * (kind=CANCELLATION_PENALTY en `GET /payments/debts`) por un método DIGITAL — CASH → 400 (BFF) / 422
+ * (servicio): no hay conductor presente para la confirmación bilateral. `payerRef` es la referencia del
+ * pagador en el riel (teléfono/token Yape/Plin), opcional.
+ */
+export const settlePenaltyRequest = z.object({
+  method: mobileDigitalPaymentMethod,
+  payerRef: z.string().optional(),
+});
+export type SettlePenaltyRequest = z.infer<typeof settlePenaltyRequest>;
+
+/**
+ * POST /payments/penalties/:id/settle → respuesta: el `paymentView` del cobro de LIQUIDACIÓN de la
+ * penalidad (sandbox/live → CAPTURED o DEBT; ProntoPaga → PENDING con checkout a completar + poll).
+ * Anti-IDOR en la fuente: payment-service resuelve la penalidad por el passengerId FIRMADO y responde
+ * 404 si es ajena/inexistente; 409 si ya fue perdonada/cobrada (ya no hay nada que saldar).
+ */
+export const settlePenaltyView = paymentView;
+export type SettlePenaltyView = z.infer<typeof settlePenaltyView>;
 
 /** POST /payments/:id/cash/confirm → body. */
 export const cashConfirmRequest = z.object({ confirmed: z.boolean().optional() });
