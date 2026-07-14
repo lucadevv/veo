@@ -1266,12 +1266,15 @@ export const common = {
       PAGOEFECTIVO: 'Código para pagar en bancos y agentes',
     },
     /**
-     * Subtítulo corto por método (selector al pedir · handoff Payment). Para YAPE distinguimos
-     * LÉXICAMENTE (TASK 4): sin afiliación es "pago una vez con QR"; con afiliación activa la fila
-     * muestra `hintYapeAuto` ("se cobra solo al terminar"). NUNCA "automático" en el one-shot.
+     * Subtítulo corto por método (selector al pedir · handoff Payment · resolver deuda). Se reusa en
+     * DOS contextos (quoting `full` y resolución de deuda `compact`), así que es NEUTRAL respecto al
+     * MOMENTO del cobro: antes decía "al terminar", pero (a) el pre-pago mueve el cobro digital al
+     * INICIAR el viaje (no al terminar) y (b) en el sheet de deuda es un cobro INMEDIATO (no hay viaje).
+     * "Pagas con QR" es preciso en ambos. Para YAPE distinguimos LÉXICAMENTE (TASK 4): sin afiliación
+     * es "pago una vez con QR"; con afiliación activa la fila muestra `hintYapeAuto`.
      */
     hint: {
-      YAPE: 'Pagas con QR al terminar',
+      YAPE: 'Pagas con QR',
       PLIN: 'Pago con QR',
       CASH: 'Paga al bajar',
       CARD: 'Visa · Mastercard',
