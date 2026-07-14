@@ -29,7 +29,7 @@ import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
-import { useEarningsSummary } from '../hooks/useEarnings';
+import { useEarningsBreakdown, useEarningsSummary } from '../hooks/useEarnings';
 import { useProfileData } from '../hooks/useProfileData';
 import { isBlocking } from '../../../documents/domain';
 import { useDocuments } from '../hooks/useDocuments';
@@ -76,6 +76,10 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const insets = useSafeAreaInsets();
   const shift = useShiftState();
   const earnings = useEarningsSummary();
+  // "Neto de hoy"/"Ganado hoy" sale del DESGLOSE (cobros CAPTURED del día de Lima, payment-service),
+  // NO del resumen de payouts: summary.totalNetCents es el neto LIQUIDADO histórico y quedaba
+  // congelado en el último payout semanal aunque el conductor completara viajes durante el día.
+  const breakdown = useEarningsBreakdown();
   // Nombre del conductor para el saludo (perfil server-authoritative). Mientras carga → cae al rol genérico.
   const profile = useProfileData();
   const driverName = formatPersonName(profile.data?.fullName);
@@ -335,17 +339,21 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   // Pin pulsante solo cuando está en línea y hay un fix real de GPS.
   const mapDriver = online ? driverPoint : null;
 
-  // Métricas en vivo (reutiliza los campos reales del resumen: hoy/acumulado y por liquidar). Parametrizada
-  // porque el dock offline ("Neto acumulado" / Por liquidar en ink) y el dock en pausa ("Ganado hoy" /
-  // Por liquidar en ámbar) comparten estructura pero difieren en la etiqueta y el color de cada valor.
+  // Métricas en vivo. Parametrizada porque el dock offline ("Neto acumulado" / Por liquidar en ink) y el
+  // dock en pausa ("Ganado hoy" / Por liquidar en ámbar) comparten estructura pero difieren en etiqueta,
+  // color y FUENTE del primer KPI: 'today' = desglose de HOY (cobros del día, se mueve viaje a viaje);
+  // 'lifetime' = neto liquidado acumulado del resumen de payouts. "Por liquidar" siempre sale del resumen.
   const renderEarningsMetrics = (
     firstLabel: string,
+    firstSource: 'today' | 'lifetime',
     firstColor: React.ComponentProps<typeof Text>['color'],
     secondColor: React.ComponentProps<typeof Text>['color'],
   ): React.ReactNode =>
-    earnings.isLoading ? (
+    earnings.isLoading || (firstSource === 'today' && breakdown.isLoading) ? (
       <Skeleton height={56} />
-    ) : earnings.isError || !earnings.data ? (
+    ) : earnings.isError ||
+      !earnings.data ||
+      (firstSource === 'today' && (breakdown.isError || !breakdown.data)) ? (
       <Banner tone="warn" title={t('shift.kpisUnavailable')} />
     ) : (
       <View style={styles.kpisRow}>
@@ -354,7 +362,11 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           delay={40}
         >
           <Text variant="title3" color={firstColor} tabular>
-            {formatPEN(earnings.data.totalNetCents ?? 0)}
+            {formatPEN(
+              (firstSource === 'today'
+                ? breakdown.data?.today.netCents
+                : earnings.data.totalNetCents) ?? 0,
+            )}
           </Text>
           <Text variant="caption" color="inkSubtle">
             {firstLabel}
@@ -379,9 +391,10 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const ActiveVehIcon = activeVeh ? vehicleClassGlyph(activeVeh.vehicleType) : null;
 
   // KPIs del dock (frame C/Dashboard): "Neto de hoy" | "Por liquidar" (naranja) con divisor central.
-  const dockKpis = earnings.isLoading ? (
+  // "Neto de hoy" = breakdown.today (cobros del día de Lima); "Por liquidar" = resumen de payouts.
+  const dockKpis = earnings.isLoading || breakdown.isLoading ? (
     <Skeleton height={44} />
-  ) : earnings.isError || !earnings.data ? (
+  ) : earnings.isError || !earnings.data || breakdown.isError || !breakdown.data ? (
     <Banner tone="warn" title={t('shift.kpisUnavailable')} />
   ) : (
     <View style={styles.kpiRow}>
@@ -390,7 +403,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
           {t('shift.netToday')}
         </Text>
         <Text variant="title3" color="ink" tabular>
-          {formatPEN(earnings.data.totalNetCents ?? 0)}
+          {formatPEN(breakdown.data.today.netCents ?? 0)}
         </Text>
       </View>
       <View style={[styles.kpiDivider, { backgroundColor: theme.colors.border }]} />
@@ -589,7 +602,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             {t('shift.pausedBody')}
           </Text>
           <View style={styles.spaced}>
-            {renderEarningsMetrics(t('shift.earnedToday'), 'accentStrong', 'warn')}
+            {renderEarningsMetrics(t('shift.earnedToday'), 'today', 'accentStrong', 'warn')}
           </View>
           {/* CTA azul: reanudar pasa por los mismos gates de iniciar turno (docs + ubicación → ShiftStart). */}
           <Button
@@ -664,7 +677,7 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             <Banner tone="warn" title={t('shift.vehicleType.none')} />
           )}
           <View style={styles.spaced}>
-            {renderEarningsMetrics(t('shift.netTotal'), 'accentStrong', 'ink')}
+            {renderEarningsMetrics(t('shift.netTotal'), 'lifetime', 'accentStrong', 'ink')}
           </View>
           {/* SUSPENDED se atiende ANTES con un layout dedicado a pantalla completa (early return), así que
             este dock offline solo cubre: conectable (CTA "Conéctate") o estado no reconocido (aviso). */}
