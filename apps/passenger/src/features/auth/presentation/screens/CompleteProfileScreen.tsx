@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   hexAlpha,
-  IconButton,
   SafeScreen,
   spacing,
   Text,
@@ -15,7 +14,13 @@ import {
 } from '@veo/ui-kit';
 import React, {useCallback, useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {ActivityIndicator, Image, StyleSheet, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -288,12 +293,15 @@ export function CompleteProfileScreen(): React.JSX.Element {
         />
       }>
       <View style={styles.backRow}>
-        <IconButton
-          icon={<IconChevronLeft color={theme.colors.ink} />}
+        {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+            TODA la app — espeja a ScreenHeader/HeaderBackChevron). */}
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('auth.back')}
-          variant="surface"
-          onPress={() => clearSession()}
-        />
+          hitSlop={12}
+          onPress={() => clearSession()}>
+          <IconChevronLeft color={theme.colors.ink} size={28} />
+        </Pressable>
       </View>
 
       <FadeInView index={1} style={styles.copy}>

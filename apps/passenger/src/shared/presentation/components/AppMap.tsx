@@ -8,7 +8,13 @@ import {
   ShapeSource,
 } from '@rnmapbox/maps';
 import {passengerMapRoute, RoutePin} from '@veo/ui-kit';
-import React, {useCallback, useEffect, useMemo, useRef} from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {StyleSheet, useWindowDimensions, View} from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -20,6 +26,7 @@ import {VehicleIcon} from '../../../features/dispatch/presentation/components/Ve
 import type {CameraTarget} from '../../../features/trip/presentation/hooks/mapDirector';
 import {
   boundsOf,
+  distanceMeters,
   LIMA_CENTER_LNGLAT,
   LIMA_ZOOM,
   toLngLat,
@@ -214,6 +221,51 @@ function DriverVehicleMarkerComponent({
 
 const DriverVehicleMarker = React.memo(DriverVehicleMarkerComponent);
 
+/** Duración del deslizamiento entre dos ticks del socket (~cadencia del ping GPS). */
+const DRIVER_LERP_MS = 900;
+/** Paso de la interpolación (~30 fps: el auto se DESLIZA en vez de avanzar en pasitos; con la New
+ * Architecture (Fabric) el único prop que cambia es la coordenada del MarkerView — barato). */
+const DRIVER_LERP_STEP_MS = 33;
+/** Salto mayor a esto = teletransporte deliberado (primer fix / reasignación), sin deslizar. */
+const DRIVER_TELEPORT_METERS = 300;
+
+/**
+ * Suaviza la posición del conductor entre ticks del socket: en vez de SALTAR a la coord cruda de
+ * cada `driver:location` (2-5 s entre pings → brincos visibles, sobre todo en `follow` con zoom
+ * alto), DESLIZA linealmente hacia el nuevo punto en ~0.9 s a 10 fps. Un salto grande (> 300 m:
+ * primer fix, reasignación de conductor) se aplica directo — deslizar medio distrito sería mentir.
+ */
+function useSmoothedPoint(target: GeoPoint | null): GeoPoint | null {
+  const [smoothed, setSmoothed] = useState<GeoPoint | null>(target);
+  const shownRef = useRef<GeoPoint | null>(target);
+  useEffect(() => {
+    const from = shownRef.current;
+    if (!target) {
+      shownRef.current = null;
+      setSmoothed(null);
+      return;
+    }
+    if (!from || distanceMeters(from, target) > DRIVER_TELEPORT_METERS) {
+      shownRef.current = target;
+      setSmoothed(target);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(() => {
+      const t = Math.min(1, (Date.now() - start) / DRIVER_LERP_MS);
+      const next = {
+        lat: from.lat + (target.lat - from.lat) * t,
+        lon: from.lon + (target.lon - from.lon) * t,
+      };
+      shownRef.current = next;
+      setSmoothed(next);
+      if (t >= 1) clearInterval(id);
+    }, DRIVER_LERP_STEP_MS);
+    return () => clearInterval(id);
+  }, [target?.lat, target?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  return smoothed;
+}
+
 /**
  * Lienzo de mapa del pasajero sobre **`@rnmapbox/maps`** (Lote 4: migración a Mapbox, gemelo del
  * conductor). El estilo veo-dark "Midnight Motion" se inyecta vía `styleJSON` (Mapbox Streets v8,
@@ -250,6 +302,8 @@ function AppMapComponent({
   bottomInset = 0,
   showRecenter = false,
 }: AppMapProps): React.JSX.Element {
+  // Posición del conductor SUAVIZADA (lerp entre ticks del socket): el marker desliza, no salta.
+  const smoothedDriver = useSmoothedPoint(isValidPoint(driver) ? driver : null);
   // Cámara DIRIGIDA por el `mapDirector` (encuadre conductor+recogida / follow taxi). Cuando hay
   // `cameraTarget`, el encuadre lo maneja `useDirectedCamera` imperativamente (throttle + modo libre);
   // si no, la `Camera` declarativa de abajo gobierna como siempre (bounds de ruta / center).
@@ -564,16 +618,16 @@ function AppMapComponent({
       {/* CONDUCTOR ASIGNADO en vivo (socket `/passenger`). Con `showDriverVehicle` (fases de viaje), el
           taxi del trip (VehicleIcon CAR/MOTO, rotado por heading). Si no, el pin pulsante genérico
           (compat: "taxi en vivo en tu zona" del ambiente previo). */}
-      {isValidPoint(driver) ? (
+      {smoothedDriver ? (
         showDriverVehicle ? (
           <DriverVehicleMarker
-            point={driver}
+            point={smoothedDriver}
             heading={driverHeading}
             vehicleType={driverVehicleType}
           />
         ) : (
           <MarkerView
-            coordinate={toLngLat(driver)}
+            coordinate={toLngLat(smoothedDriver)}
             anchor={{x: 0.5, y: 0.5}}
             allowOverlap>
             <RoutePin variant="user" pulse />

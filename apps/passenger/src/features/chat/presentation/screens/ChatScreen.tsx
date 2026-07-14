@@ -4,17 +4,21 @@ import {
   useRoute,
   type RouteProp,
 } from '@react-navigation/native';
-import {useHeaderHeight} from '@react-navigation/elements';
 import {useMutation, useQuery} from '@tanstack/react-query';
-import {Banner, SafeScreen, Text, TextField, useTheme} from '@veo/ui-kit';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {
+  Banner,
+  SafeScreen,
+  Text,
+  useKeyboardHeight,
+  useTheme,
+} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -29,12 +33,13 @@ import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTrip
 import {isChatActive, mergeMessages} from '../../domain/entities';
 import {withDayDividers, type ChatListItem} from '../dayDividers';
 import {MessageBubble} from '../components/MessageBubble';
-import {IconArrowRight} from '../../../trip/presentation/components/icons';
+import {IconArrowRightLong} from '../../../trip/presentation/components/icons';
 
 type Params = RouteProp<RootStackParamList, 'Chat'>;
 
-/** Plantillas rápidas (claves i18n) para coordinar el recojo con un toque. */
-const QUICK_REPLY_KEYS = ['leaving', 'atDoor', 'onMyWay', 'waiting'] as const;
+/** Plantillas rápidas (claves i18n) para coordinar el recojo con un toque. SOLO 2 (regla del
+ *  dueño): las más coherentes para el pasajero — "ya salgo" y "estoy en la puerta". */
+const QUICK_REPLY_KEYS = ['leaving', 'atDoor'] as const;
 
 /**
  * Conversación con el conductor (Ola 2A). Historial inicial por REST (`GET /trips/:id/messages`),
@@ -46,13 +51,10 @@ export function ChatScreen(): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const {params} = useRoute<Params>();
   const {tripId, driverName} = params;
   const navigation = useNavigation();
-  // Alto REAL del header de navegación → el `KeyboardAvoidingView` levanta el composer justo lo necesario
-  // para que quede LIMPIO sobre el teclado (antes un aproximado `insets.top + xl` lo dejaba pegado/tapado
-  // por el teclado, y el botón enviar se veía "desvanecido").
-  const headerHeight = useHeaderHeight();
 
   // Título = primer nombre del conductor (simétrico al conductor, que muestra el del pasajero); genérico
   // si aún no se resolvió. El header lo centra (RN iOS). Unifica el título de chat entre ambas apps.
@@ -79,7 +81,6 @@ export function ChatScreen(): React.JSX.Element {
   // que salir y re-entrar para que el historial REST lo trajera). Ahora persisten en la pantalla en vivo.
   const [receivedMessages, setReceivedMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
-  const listRef = useRef<FlatList<ChatListItem>>(null);
 
   const sendMutation = useMutation({
     mutationFn: (body: string) => sendMessage.execute(tripId, body),
@@ -113,6 +114,13 @@ export function ChatScreen(): React.JSX.Element {
       }),
     [messages, t],
   );
+
+  // Lista INVERTIDA (patrón chat): el offset 0 es el PIE de la conversación, así el último mensaje
+  // (enviado o entrante) queda SIEMPRE a la vista — al llegar uno nuevo, al abrir el teclado (la
+  // lista se encoge anclada abajo) y al entrar. Reemplaza al scrollToEnd imperativo, que corría a
+  // destiempo del layout. `inverted` pinta los ítems al revés → se le da la data REVERSA (el orden
+  // visual queda idéntico: viejo arriba, nuevo abajo).
+  const invertedItems = useMemo(() => [...listItems].reverse(), [listItems]);
 
   // Copia los entrantes a un estado ESTABLE y DESPUÉS drena el buffer transitorio del socket (para no
   // reprocesarlos ni ensuciar el badge). El orden importa: primero acumular, luego acknowledge — así el
@@ -176,24 +184,19 @@ export function ChatScreen(): React.JSX.Element {
 
   return (
     <SafeScreen padded={false}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={headerHeight}>
+      {/* El padding inferior = alto EXACTO del teclado (ventana): composer siempre COMPLETO encima. */}
+      <View style={[styles.flex, {paddingBottom: keyboardHeight}]}>
         <FlatList
-          ref={listRef}
           style={styles.flex}
-          data={listItems}
+          data={invertedItems}
           keyExtractor={item =>
             item.kind === 'divider' ? item.id : item.message.id
           }
           renderItem={renderItem}
-          // Autoscroll al final por CADA mensaje que llega/sale: se dispara al cambiar el ALTO del
-          // contenido (después del layout, no antes → confiable). El composer con los chips fijos es un
-          // hermano DEBAJO de la lista, así que el último mensaje queda visible sobre él, nunca tapado.
-          onContentSizeChange={() =>
-            listRef.current?.scrollToEnd({animated: true})
-          }
+          // Anclada al pie SOLO con mensajes: invertida, el vacío quedaría patas arriba (los hijos
+          // de una lista `inverted` se pintan espejados) — sin ítems se pinta normal.
+          inverted={listItems.length > 0}
+          keyboardDismissMode="interactive"
           contentContainerStyle={{
             padding: theme.spacing.xl,
             gap: theme.spacing.md,
@@ -229,7 +232,10 @@ export function ChatScreen(): React.JSX.Element {
                 borderTopColor: theme.colors.border,
                 paddingHorizontal: theme.spacing.xl,
                 paddingTop: theme.spacing.md,
-                paddingBottom: insets.bottom + theme.spacing.md,
+                // Con el teclado abierto el home indicator queda tapado → su inset sobraría como
+                // hueco muerto entre composer y teclado; se paga solo con el teclado cerrado.
+                paddingBottom:
+                  (keyboardHeight > 0 ? 0 : insets.bottom) + theme.spacing.md,
                 gap: theme.spacing.sm,
               },
             ]}>
@@ -241,78 +247,93 @@ export function ChatScreen(): React.JSX.Element {
               </Text>
             ) : null}
 
-            {/* Plantillas rápidas: chips horizontales discretos. */}
-            <View style={[styles.quickRow, {gap: theme.spacing.xs}]}>
-              {QUICK_REPLY_KEYS.map(key => (
-                <Pressable
-                  key={key}
-                  onPress={() => onSend(t(`chat.quick.${key}`))}
-                  disabled={sendMutation.isPending}
-                  accessibilityRole="button"
-                  style={({pressed}) => [
-                    styles.chip,
-                    {
-                      backgroundColor: theme.colors.surface,
-                      borderColor: theme.colors.border,
-                      borderRadius: theme.radii.pill,
-                      paddingVertical: theme.spacing.xs,
-                      paddingHorizontal: theme.spacing.md,
-                      opacity: pressed ? 0.7 : 1,
-                    },
-                  ]}>
-                  <Text variant="footnote" color="inkMuted">
-                    {t(`chat.quick.${key}`)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
             {sendMutation.isError ? (
               <Banner tone="danger" title={t('chat.sendError')} />
             ) : null}
 
-            <View style={[styles.inputRow, {gap: theme.spacing.sm}]}>
-              <View style={styles.flex}>
-                <TextField
-                  label={t('chat.title')}
-                  hideLabel
+            {/* UN solo contenedor (regla del dueño): las plantillas rápidas + el input + enviar viven
+                dentro de la MISMA card — antes los chips flotaban sueltos arriba del input. */}
+            <View
+              style={[
+                styles.composerCard,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  borderRadius: theme.radii.xl,
+                  padding: theme.spacing.md,
+                  gap: theme.spacing.sm,
+                },
+              ]}>
+              <View style={[styles.quickRow, {gap: theme.spacing.xs}]}>
+                {QUICK_REPLY_KEYS.map(key => (
+                  <Pressable
+                    key={key}
+                    onPress={() => onSend(t(`chat.quick.${key}`))}
+                    disabled={sendMutation.isPending}
+                    accessibilityRole="button"
+                    style={({pressed}) => [
+                      {
+                        // Sobre la card `surface`, el chip se recesa con `surfaceMuted` (sin borde):
+                        // un contenedor bordeado dentro de otro se leía como dos cajas sueltas.
+                        backgroundColor: theme.colors.surfaceMuted,
+                        borderRadius: theme.radii.pill,
+                        paddingVertical: theme.spacing.xs,
+                        paddingHorizontal: theme.spacing.md,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}>
+                    <Text variant="footnote" color="inkMuted">
+                      {t(`chat.quick.${key}`)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={[styles.inputRow, {gap: theme.spacing.sm}]}>
+                {/* Input DESNUDO (sin su propia caja): la card ya es el contenedor visual. */}
+                <TextInput
+                  style={[styles.input, {color: theme.colors.ink}]}
                   placeholder={t('chat.inputPlaceholder')}
+                  placeholderTextColor={theme.colors.inkSubtle}
                   value={draft}
                   onChangeText={setDraft}
                   multiline
                   returnKeyType="send"
                   blurOnSubmit={false}
+                  // Sin autofill: la barra "Autorrellenar" de iOS se sumaba ARRIBA del teclado y comía el
+                  // espacio del composer (el input quedaba tapado). No aplica a un chat.
+                  autoComplete="off"
+                  textContentType="none"
                   onSubmitEditing={() => onSend(draft)}
+                  accessibilityLabel={t('chat.inputPlaceholder')}
                 />
+                {/* Botón enviar: círculo VERDE (accentStrong) + flecha → COMPLETA (asta + punta), se
+                    ACTIVA solo cuando hay texto; deshabilitado queda gris (recesado). */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('chat.send')}
+                  accessibilityState={{disabled: !canSend}}
+                  disabled={!canSend}
+                  onPress={() => onSend(draft)}
+                  style={({pressed}) => [
+                    styles.sendBtn,
+                    {
+                      backgroundColor: canSend
+                        ? theme.colors.accentStrong
+                        : theme.colors.surfaceMuted,
+                      opacity: pressed && canSend ? 0.85 : 1,
+                    },
+                  ]}>
+                  <IconArrowRightLong
+                    color={canSend ? theme.colors.onBrand : theme.colors.inkSubtle}
+                    size={22}
+                  />
+                </Pressable>
               </View>
-              {/* Botón enviar: círculo VERDE (success) que se ACTIVA solo cuando hay texto; deshabilitado
-                  queda gris (recesado) — señal clara de "escribí algo para enviar" (mejor feedback). */}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('chat.send')}
-                accessibilityState={{disabled: !canSend}}
-                disabled={!canSend}
-                onPress={() => onSend(draft)}
-                style={({pressed}) => [
-                  styles.sendBtn,
-                  {
-                    // Verde PROFUNDO (`accentStrong`) + flecha BLANCA: el jade `success` con flecha oscura
-                    // se veía "desvanecido"; este verde saturado con el ícono blanco lee claro como CTA.
-                    backgroundColor: canSend
-                      ? theme.colors.accentStrong
-                      : theme.colors.surfaceMuted,
-                    opacity: pressed && canSend ? 0.85 : 1,
-                  },
-                ]}>
-                <IconArrowRight
-                  color={canSend ? theme.colors.onBrand : theme.colors.inkSubtle}
-                  size={22}
-                />
-              </Pressable>
             </View>
           </View>
         )}
-      </KeyboardAvoidingView>
+      </View>
     </SafeScreen>
   );
 }
@@ -323,9 +344,10 @@ const styles = StyleSheet.create({
   // Separador de fecha entre días distintos (pen hPrJt DayDivider): centrado, con un respiro extra.
   dayDivider: {alignItems: 'center', paddingVertical: 2},
   composer: {borderTopWidth: StyleSheet.hairlineWidth},
+  composerCard: {borderWidth: StyleSheet.hairlineWidth},
   quickRow: {flexDirection: 'row', flexWrap: 'wrap'},
-  chip: {borderWidth: StyleSheet.hairlineWidth},
   inputRow: {flexDirection: 'row', alignItems: 'flex-end'},
+  input: {flex: 1, fontSize: 16, maxHeight: 120, minHeight: 44, paddingTop: 12, paddingBottom: 12},
   sendBtn: {
     width: 48,
     height: 48,

@@ -9,7 +9,6 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery} from '@tanstack/react-query';
 import {
   Banner,
-  IconButton,
   ListItem,
   OriginDestinationField,
   SafeScreen,
@@ -20,7 +19,7 @@ import {
 } from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {FlatList, StyleSheet, View} from 'react-native';
+import {FlatList, Pressable, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
@@ -240,12 +239,15 @@ export function SearchScreen(): React.JSX.Element {
         {/* Header per pen P/Search: botón VOLVER (flecha) a la IZQUIERDA + título "Buscar destino".
             El placeholder "¿A dónde vamos?" del home no se toca (vive en maps.searchTitle). */}
         <View style={styles.titleRow}>
-          <IconButton
+          {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+              TODA la app — espeja a ScreenHeader/HeaderBackChevron). */}
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel={t('actions.back')}
-            onPress={() => navigation.goBack()}
-            variant="surface"
-            icon={<IconArrowLeft color={theme.colors.ink} size={20} />}
-          />
+            hitSlop={12}
+            onPress={() => navigation.goBack()}>
+            <IconArrowLeft color={theme.colors.ink} size={28} />
+          </Pressable>
           {/* Fiel a design/veo.pen P/Search (Title aXWyE): 20px (title3), no 24 (title2). */}
           <Text variant="title3">{t('maps.searchScreenTitle')}</Text>
         </View>

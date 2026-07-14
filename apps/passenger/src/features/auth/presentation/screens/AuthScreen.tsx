@@ -1,7 +1,6 @@
 import {
   Banner,
   Button,
-  IconButton,
   SafeScreen,
   spacing,
   Text,
@@ -12,6 +11,7 @@ import {useTranslation} from 'react-i18next';
 import {
   ActivityIndicator,
   Platform,
+  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -269,12 +269,15 @@ export function AuthScreen(): React.JSX.Element {
       }>
       {/* Atrás → vuelve al onboarding (fiel al .pen). */}
       <View style={styles.backRow}>
-        <IconButton
-          icon={<IconChevronLeft color={theme.colors.ink} />}
+        {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+            TODA la app — espeja a ScreenHeader/HeaderBackChevron). */}
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('auth.back')}
-          variant="surface"
-          onPress={resetOnboarding}
-        />
+          hitSlop={12}
+          onPress={resetOnboarding}>
+          <IconChevronLeft color={theme.colors.ink} size={28} />
+        </Pressable>
       </View>
 
       <FadeInView style={styles.header} offsetY={12}>

@@ -1,7 +1,7 @@
 import {useNavigation} from '@react-navigation/native';
-import {IconButton, Text, useTheme} from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
 import {useTranslation} from 'react-i18next';
 import {IconArrowLeft} from '../../../features/trip/presentation/components/icons';
 
@@ -32,12 +32,15 @@ export function ScreenHeader({
   return (
     <View style={{gap: theme.spacing.md}}>
       <View style={styles.topRow}>
-        <IconButton
+        {/* Back = SOLO el chevron ‹ de iOS (IconArrowLeft ya es un chevron), sin círculo/container: mismo
+            back en TODA la app (regla del dueño). Antes iba dentro de un IconButton surface (píldora). */}
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('actions.back')}
-          variant="surface"
-          onPress={() => navigation.goBack()}
-          icon={<IconArrowLeft color={theme.colors.ink} size={20} />}
-        />
+          hitSlop={12}
+          onPress={() => navigation.goBack()}>
+          <IconArrowLeft color={theme.colors.ink} size={28} />
+        </Pressable>
         {trailing ?? null}
       </View>
       <View style={{gap: theme.spacing.xs}}>
