@@ -1235,8 +1235,12 @@ export const common = {
   payments: {
     /** Subtítulo de la pantalla (design/veo.pen Ofbr6, voseo del pen traducido a tuteo). */
     subtitle: 'Elige cómo pagas tus viajes.',
-    /** Nota al pie que conserva la aclaración del modelo de cobro (antes vivía en el subtítulo). */
-    chargeNote: 'El cobro se hace al terminar el viaje.',
+    /**
+     * Nota al pie que aclara el modelo de cobro. NEUTRAL en el momento: el pre-pago cobra lo digital al
+     * INICIAR el viaje (no al terminar), y el efectivo se paga al conductor — no fijamos un "cuándo"
+     * que sería falso para alguno de los dos.
+     */
+    chargeNote: 'El pago digital se cobra automático; el efectivo lo pagas al conductor.',
     /**
      * Error de RED al leer la afiliación Yape (no es "sin Yape": la consulta FALLÓ). Degradación honesta:
      * nunca mostramos "Vincular" cuando en realidad no pudimos saber tu estado. Reintentable.
@@ -1256,13 +1260,15 @@ export const common = {
     },
     /**
      * UNA línea de experiencia por método en la pantalla de métodos (patrón instrumentos). Cuenta CÓMO
-     * se paga, no qué es. Yape sin vincular invita; los demás describen el momento del cobro.
+     * se paga, no qué es. NEUTRAL en el momento del cobro (el pre-pago lo mueve al INICIAR, no al
+     * terminar): describimos el MEDIO, no el "cuándo". El efectivo sí conserva su momento real ("al
+     * conductor", que sigue siendo al bajar).
      */
     line: {
-      YAPE: 'Se cobra solo al terminar el viaje',
-      PLIN: 'Escaneas el QR al terminar',
+      YAPE: 'Se cobra automático con tu Yape',
+      PLIN: 'Escaneas el QR para pagar',
       CASH: 'Le pagas al conductor',
-      CARD: 'Pagas con link seguro al terminar',
+      CARD: 'Pagas con link seguro',
       PAGOEFECTIVO: 'Código para pagar en bancos y agentes',
     },
     /**
@@ -1280,8 +1286,8 @@ export const common = {
       CARD: 'Visa · Mastercard',
       PAGOEFECTIVO: 'Código para pagar en bancos y agentes',
     },
-    /** Subtítulo de la fila YAPE cuando la afiliación está ACTIVA: cobro On-File (se cobra solo). */
-    hintYapeAuto: 'Se cobra solo al terminar el viaje',
+    /** Subtítulo de la fila YAPE cuando la afiliación está ACTIVA: cobro On-File (se cobra solo, sin QR). */
+    hintYapeAuto: 'Se cobra solo, sin abrir la app',
     /**
      * Señal sutil en la fila del quoting cuando el cobro automático con Yape está activo (afiliación
      * On-File). SOLO para el Yape VINCULADO; jamás para "pagar con Yape una vez" (QR/deepLink al final).
@@ -1351,8 +1357,9 @@ export const common = {
     rateTrip: 'Calificar viaje',
 
     /**
-     * Pago automático con Yape (afiliación Yape On File). El cobro se hace SOLO al terminar cada viaje
-     * (cargo automático). Copy explícito de seguridad: qué significa y cómo desactivarlo siempre visible.
+     * Pago automático con Yape (afiliación Yape On File). El cobro es AUTOMÁTICO en cada viaje (server-
+     * initiated, sin QR). Copy NEUTRAL en el momento (el pre-pago cobra al iniciar, no al terminar) +
+     * explícito de seguridad: qué significa y cómo desactivarlo siempre visible.
      */
     auto: {
       /** Acción en la fila Yape (sin vincular). */
@@ -1366,7 +1373,7 @@ export const common = {
       /** Sheet de vinculación (la joya): título + 2 líneas con el consent integrado al copy. */
       linkTitle: 'Vincula tu Yape',
       linkIntro1:
-        'Se cobra solo al terminar cada viaje, sin abrir la app de pago.',
+        'Se cobra solo en cada viaje, sin abrir la app de pago.',
       linkIntro2: 'Lo desactivas cuando quieras desde aquí mismo.',
       /** Único campo del sheet: documento + selector de tipo discreto. */
       docTypeDN: 'DNI',
@@ -1400,7 +1407,7 @@ export const common = {
       openFailedBody: 'Abre tu app de Yape y aprueba la vinculación desde ahí.',
       /** Vinculación lista (ACTIVE) → cierre del sheet con feedback sutil. */
       linkedTitle: 'Yape vinculado',
-      linkedBody: 'Listo. Tus viajes se cobran solos al terminar con tu Yape.',
+      linkedBody: 'Listo. Tus viajes se cobran solos con tu Yape.',
 
       /**
        * TASK 1 · Al quedar ACTIVE NO seteamos el predeterminado solos: PREGUNTAMOS. Paso de confirmación
@@ -1429,7 +1436,7 @@ export const common = {
       /** Confirmación destructiva de la baja. */
       unlinkConfirmTitle: '¿Desvincular tu Yape?',
       unlinkConfirmBody:
-        'Dejaremos de cobrar tus viajes automáticamente. Seguirás pagando con Yape escaneando el QR al terminar cada viaje.',
+        'Dejaremos de cobrar tus viajes automáticamente. Seguirás pagando con Yape escaneando el QR en cada viaje.',
       unlinkConfirm: 'Sí, desvincular',
       unlinking: 'Desvinculando…',
 
@@ -1454,7 +1461,7 @@ export const common = {
        */
       unsupportedTitle: 'La vinculación de Yape todavía no está disponible',
       unsupportedBody:
-        'La estamos activando. Mientras tanto, paga con Yape, Plin o efectivo al terminar cada viaje.',
+        'La estamos activando. Mientras tanto, paga con Yape, Plin o efectivo en cada viaje.',
       /** Error genérico de red (no el 409/422 del entorno). */
       error: 'No pudimos completar la operación. Inténtalo de nuevo.',
     },
