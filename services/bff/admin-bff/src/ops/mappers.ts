@@ -190,3 +190,24 @@ export function mapTripStatus(raw: string): AdminTripStatus {
   const normalized = normalizeTripStatus(raw);
   return normalized === null ? 'UNKNOWN' : ADMIN_TRIP_STATUS[normalized];
 }
+
+/**
+ * Estados TERMINALES/estancados de la vista OPS. Gemelo server-side de `isActiveTrip` de admin-web
+ * (components/trips/status-badge.tsx) — misma lista, misma semántica: REASSIGNING sigue VIVO (busca
+ * otro conductor) y UNKNOWN cuenta como vivo a propósito (si no sabemos el estado, ops debe operar el
+ * viaje, no perderlo). Si esta lista cambia, cambiar TAMBIÉN la de admin-web (no comparten paquete).
+ */
+const TERMINAL_ADMIN_TRIP_STATUSES: ReadonlySet<AdminTripStatus> = new Set<AdminTripStatus>([
+  'COMPLETED',
+  'CANCELLED',
+  'FAILED',
+  'EXPIRED',
+]);
+
+/**
+ * ¿El viaje está VIVO para ops? Decide si el detalle computa ruta planeada + ETA en vivo: para un
+ * viaje terminal NO se fabrica una ruta on-the-fly (se leería como el recorrido REAL del conductor).
+ */
+export function isLiveAdminTrip(status: AdminTripStatus): boolean {
+  return !TERMINAL_ADMIN_TRIP_STATUSES.has(status);
+}

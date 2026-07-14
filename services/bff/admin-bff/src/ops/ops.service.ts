@@ -80,6 +80,7 @@ import {
   tripRecordToSummary,
   driverRecordToApproval,
   mapTripStatus,
+  isLiveAdminTrip,
   type DriverListEnrichment,
 } from './mappers';
 import {
@@ -594,9 +595,10 @@ export class OpsService {
 
   /**
    * Detalle de viaje al contrato PLANO `tripDetail` (@veo/api-client). Enriquece con datos REALES del
-   * fan-out gRPC: createdAt←requestedAt, origin/destination de coords, nombres de identity. Lo que GetTrip
-   * NO provee (ubicación EN VIVO del conductor, ETA, polilínea de ruta, placa del vehículo, timeline de
-   * eventos) va `null`/`[]` honesto — su enriquecimiento (tracking/fleet/trip-events) es follow-up.
+   * fan-out gRPC: createdAt←requestedAt, origin/destination de coords, nombres de identity, placa de
+   * fleet, y ruta planeada + ETA (viaje VIVO) vía la facade soberana @veo/maps (ver plannedRoute). Lo
+   * que sigue sin fuente (ubicación EN VIVO del conductor — tracking-service —, timeline de eventos)
+   * va `null`/`[]` honesto — su enriquecimiento es follow-up.
    */
   async tripDetail(identity: AuthUser, tripId: string): Promise<TripDetail> {
     const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
@@ -633,6 +635,26 @@ export class OpsService {
     const driverName = driver?.found ? driver.name || null : null;
     const origin = toGeo(trip.originLat, trip.originLng);
     const destination = toGeo(trip.destinationLat, trip.destinationLng);
+    const status = mapTripStatus(trip.status);
+
+    // Ruta del viaje. GetTrip YA expone la polyline PERSISTIDA (Trip.routePolyline, congelada al crear)
+    // — pero hoy nace null: trip-service rutea con el motor local (VEO_MAPS_MODE=local, sin calles).
+    // Boundary elegido: trip-service es dueño de los PUNTOS del viaje (origin/destination/waypoints, ya
+    // en GetTrip); el TRAZADO es derivable y lo resuelve ESTE bff con su facade soberana @veo/maps
+    // (mismo patrón que driver-bff trips.route()), cacheado en el facade (las rutas son estables).
+    // Solo para viaje VIVO: la persistida (dato propio del viaje) manda si existe; la computada es el
+    // fallback. Para un TERMINAL solo se expone la persistida — fabricar una ruta on-the-fly ahí se
+    // leería como el recorrido REAL que hizo el conductor, y eso es inventar (criterio de ops/audit).
+    // Sin posición viva del conductor (tracking-service es follow-up): ruta y ETA son de la ruta
+    // PLANEADA origen→paradas→destino, no del tramo restante.
+    const persistedPolyline = trip.routePolyline || null;
+    const planned =
+      isLiveAdminTrip(status) && origin && destination
+        ? await this.plannedRoute(origin, destination, trip.waypoints)
+        : null;
+    const routePolyline = persistedPolyline ?? planned?.polyline ?? null;
+    // ETA estimada al destino (duración de la ruta planeada; null en terminales — la UI ya lo gatea).
+    const etaSeconds = planned?.durationSeconds ?? null;
 
     // Reverse-geocode SOBERANO (@veo/maps · self-hosted, jamás Google) origin/destino → dirección legible.
     // MISMA gate de redacción que la geo: solo los roles que ven la geo EXACTA (canSeeExactTripGeo) reciben el
@@ -644,7 +666,7 @@ export class OpsService {
 
     return {
       id: trip.id,
-      status: mapTripStatus(trip.status),
+      status,
       passengerId: trip.passengerId,
       driverId: trip.driverId || null,
       fareCents: trip.fareCents,
@@ -657,8 +679,10 @@ export class OpsService {
       originLabel,
       destinationLabel,
       driverLocation: null, // dato EN VIVO (tracking-service), no en GetTrip
-      routePolyline: null, // follow-up: ruta no expuesta por GetTrip
-      etaSeconds: null, // dato EN VIVO (ETA al destino), no en GetTrip
+      // REDACCIÓN: la polyline revela el RECORRIDO exacto → misma gate que la geo precisa (un rol con
+      // geo coarse la reconstruiría decodificándola). La ETA es un escalar (no geo) → sin gate.
+      routePolyline: canSeeExactTripGeo(roles) ? routePolyline : null,
+      etaSeconds,
       // Duración REAL del viaje (Trip.durationSeconds persistido) → KPI "Duración" del detalle. 0 → null honesto.
       durationSeconds: trip.durationSeconds || null,
       distanceMeters: trip.distanceMeters || null,
@@ -670,6 +694,24 @@ export class OpsService {
       paymentMethod: trip.paymentMethod || null,
       timeline: [], // follow-up: timeline de eventos no expuesta por GetTrip
     };
+  }
+
+  /**
+   * Ruta PLANEADA del viaje (origen→paradas→destino) por la facade soberana @veo/maps. Best-effort:
+   * router caído / sin ruta → null (degradación HONESTA: el detalle cae a los markers sin trazado,
+   * nunca tumba el fan-out). polyline ''/duración 0 (motor local sin calles) → null, no dato falso.
+   */
+  private async plannedRoute(
+    origin: { lat: number; lon: number },
+    destination: { lat: number; lon: number },
+    waypoints: readonly { lat: number; lon: number }[],
+  ): Promise<{ polyline: string | null; durationSeconds: number | null } | null> {
+    try {
+      const r = await this.maps.route(origin, destination, waypoints);
+      return { polyline: r.polyline || null, durationSeconds: r.durationSeconds || null };
+    } catch {
+      return null;
+    }
   }
 
   /**

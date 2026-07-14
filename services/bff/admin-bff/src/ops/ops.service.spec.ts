@@ -140,6 +140,9 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
     // Datos EN VIVO / no expuestos por GetTrip → null/[] honesto (no data falsa).
     expect(view.driverLocation).toBeNull();
     expect(view.etaSeconds).toBeNull();
+    // COMPLETED (terminal) sin polyline persistida → null honesto: NO se fabrica una ruta on-the-fly
+    // que se leería como el recorrido real del conductor.
+    expect(view.routePolyline).toBeNull();
     // vehiclePlate AHORA se enriquece desde fleet (GetDriverVehicles): el ACTIVO.
     expect(view.vehiclePlate).toBe('ABC-123');
     expect(view.timeline).toEqual([]);
@@ -275,6 +278,126 @@ describe('OpsService.tripDetail (agregador gRPC → contrato PLANO tripDetail)',
       config,
     );
     await expect(svc.tripDetail(identity, 'missing')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('OpsService.tripDetail · ruta planeada + ETA (facade soberana @veo/maps)', () => {
+  // Viaje base con coords válidas y SIN polyline persistida (trip-service corre el motor local →
+  // Trip.routePolyline nace null y GetTrip la entrega '' por proto3). waypoints presentes para
+  // verificar el pass-through origen→paradas→destino.
+  const baseTrip = {
+    id: 't1',
+    passengerId: 'p1',
+    driverId: '',
+    vehicleId: '',
+    fareCents: 1500,
+    currency: 'PEN',
+    distanceMeters: 8000,
+    durationSeconds: 0,
+    paymentMethod: 'CASH',
+    childMode: false,
+    penaltyCents: 0,
+    requestedAt: '2026-06-01T10:00:00.000Z',
+    originLat: -12.05,
+    originLng: -77.04,
+    destinationLat: -12.1,
+    destinationLng: -77.0,
+    waypoints: [{ lat: -12.07, lon: -77.02 }],
+    routePolyline: '',
+    found: true,
+  };
+
+  const routeMock = vi.fn().mockResolvedValue({
+    distanceMeters: 9000,
+    durationSeconds: 1234,
+    polyline: 'osrm_encoded_abc',
+    geometry: { type: 'LineString', coordinates: [] },
+  });
+  // El facade del test necesita AMBOS métodos que usa tripDetail: reverse (labels) + route (trazado).
+  const mapsWithRoute = { ...(noopMaps as object), route: routeMock } as unknown as MapsClient;
+
+  afterEach(() => {
+    routeMock.mockClear();
+  });
+
+  function build(trip: Record<string, unknown>, maps: MapsClient): OpsService {
+    const tripGrpc = grpc((m) => (m === 'GetTrip' ? trip : {}));
+    return new OpsService(
+      tripGrpc,
+      grpc(() => ({})),
+      noopFleet,
+      noopRest,
+      noopMedia,
+      noopTripRest,
+      noopFleetRest,
+      noopPaymentRest,
+      InternalAudience.ADMIN_RAIL,
+      maps,
+      noopReadModel,
+      noopAudit,
+      config,
+    );
+  }
+
+  it('viaje VIVO sin persistida → traza con el facade (origen→paradas→destino): polyline + ETA', async () => {
+    const svc = build({ ...baseTrip, status: 'IN_PROGRESS' }, mapsWithRoute);
+    const view = await svc.tripDetail(identity, 't1');
+    expect(view.routePolyline).toBe('osrm_encoded_abc');
+    expect(view.etaSeconds).toBe(1234);
+    // Las paradas del viaje (GetTrip.waypoints) viajan al facade — la ruta pasa por ellas en orden.
+    expect(routeMock).toHaveBeenCalledWith(
+      { lat: -12.05, lon: -77.04 },
+      { lat: -12.1, lon: -77.0 },
+      [{ lat: -12.07, lon: -77.02 }],
+    );
+  });
+
+  it('viaje TERMINAL sin persistida → null/null y el facade NO se llama (no inventar recorridos)', async () => {
+    const svc = build({ ...baseTrip, status: 'COMPLETED' }, mapsWithRoute);
+    const view = await svc.tripDetail(identity, 't1');
+    expect(view.routePolyline).toBeNull();
+    expect(view.etaSeconds).toBeNull();
+    expect(routeMock).not.toHaveBeenCalled();
+  });
+
+  it('polyline PERSISTIDA (dato propio del viaje) MANDA sobre la computada; el facade solo aporta la ETA', async () => {
+    const svc = build(
+      { ...baseTrip, status: 'IN_PROGRESS', routePolyline: 'persisted_xyz' },
+      mapsWithRoute,
+    );
+    const view = await svc.tripDetail(identity, 't1');
+    expect(view.routePolyline).toBe('persisted_xyz');
+    expect(view.etaSeconds).toBe(1234);
+  });
+
+  it('viaje TERMINAL con persistida → se expone la persistida (ruta congelada del viaje), ETA null', async () => {
+    const svc = build(
+      { ...baseTrip, status: 'COMPLETED', routePolyline: 'persisted_xyz' },
+      mapsWithRoute,
+    );
+    const view = await svc.tripDetail(identity, 't1');
+    expect(view.routePolyline).toBe('persisted_xyz');
+    expect(view.etaSeconds).toBeNull();
+    expect(routeMock).not.toHaveBeenCalled();
+  });
+
+  it('facade caído → degradación HONESTA: polyline/ETA null, el detalle NO revienta', async () => {
+    const broken = {
+      ...(noopMaps as object),
+      route: vi.fn().mockRejectedValue(new Error('osrm down')),
+    } as unknown as MapsClient;
+    const svc = build({ ...baseTrip, status: 'IN_PROGRESS' }, broken);
+    const view = await svc.tripDetail(identity, 't1');
+    expect(view.routePolyline).toBeNull();
+    expect(view.etaSeconds).toBeNull();
+  });
+
+  it('SUPPORT_L1 (geo coarse) → polyline REDACTADA a null (revela el recorrido exacto); ETA visible', async () => {
+    const support: AuthenticatedUser = { ...identity, roles: ['SUPPORT_L1'] };
+    const svc = build({ ...baseTrip, status: 'IN_PROGRESS' }, mapsWithRoute);
+    const view = await svc.tripDetail(support, 't1');
+    expect(view.routePolyline).toBeNull();
+    expect(view.etaSeconds).toBe(1234);
   });
 });
 
