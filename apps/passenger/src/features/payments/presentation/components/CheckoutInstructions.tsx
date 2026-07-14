@@ -32,6 +32,14 @@ export interface CheckoutInstructionsProps {
    * de deuda. Si se omite, usa el copy canónico del recibo (`settlement.checkout.*`).
    */
   header?: React.ReactNode;
+  /**
+   * Pisa el hint de espera del pie (default: `settlement.checkout.waitingHint`, "se actualiza sola").
+   * El recibo del viaje lo usa para CIP (PagoEfectivo): el CIP se paga en banco/agente HORAS o DÍAS
+   * después — prometer que la pantalla se actualiza sola retiene al pasajero. NO es un default del
+   * componente sobre `payment.cip` porque el reemplazo ("te lo recordamos en el inicio") solo es verdad
+   * para el cobro del VIAJE: las propinas NO entran a `GET /payments/debts` (no son "pago por completar").
+   */
+  waitingHint?: string;
 }
 
 /**
@@ -49,6 +57,7 @@ export function CheckoutInstructions({
   onRetry,
   retrying,
   header,
+  waitingHint,
 }: CheckoutInstructionsProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
@@ -241,7 +250,7 @@ export function CheckoutInstructions({
         </Text>
       ) : null}
       <Text variant="footnote" color="inkMuted" align="center">
-        {t('settlement.checkout.waitingHint')}
+        {waitingHint ?? t('settlement.checkout.waitingHint')}
       </Text>
     </View>
   );

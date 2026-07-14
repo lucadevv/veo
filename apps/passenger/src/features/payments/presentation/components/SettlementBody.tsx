@@ -59,10 +59,11 @@ export interface SettlementBodyProps {
    */
   onDeferred: () => void;
   /**
-   * Cierre TERMINAL directo desde el recibo ya resuelto: calificar es OPCIONAL, así que cada estado
+   * Cierre TERMINAL directo (closeTrip → passengerClosedAt): calificar es OPCIONAL, así que cada estado
    * final ofrece una salida "Volver al inicio" que cierra el viaje sin pasar por el rating (mismo
-   * camino que el cierre final). NO se ofrece en efectivo PENDING sin confirmar (es plata: solo
-   * "Confirmar después", que NO cierra).
+   * camino que el cierre final). También es la salida "Pagar después" del checkout pendiente: el
+   * Payment PENDING sigue vivo server-side y la franja PENDING_ACTION del home toma el relevo. NO se
+   * ofrece en efectivo PENDING sin confirmar (es plata: solo "Confirmar después", que NO cierra).
    */
   onFinish: () => void;
   /**
@@ -271,11 +272,27 @@ export function SettlementBody({
   // Tiene prioridad sobre el timeout del poll: mientras no venza, mostramos cómo pagar (no un error).
   if (outcome.kind === 'checkoutPending') {
     return (
-      <CheckoutBody
-        payment={payment}
-        onRetry={retryPoll}
-        retrying={paymentQuery.isFetching}
-      />
+      <View style={{gap: theme.spacing.md}}>
+        <CheckoutBody
+          payment={payment}
+          onRetry={retryPoll}
+          retrying={paymentQuery.isFetching}
+        />
+        {/* Salida "Pagar después": nadie queda preso del checkout — un CIP (PagoEfectivo) se paga en
+            banco/agente HORAS o DÍAS después de terminado el viaje. Camino VERIFICADO: tiene que ser
+            `onFinish` (cierra el post-viaje: closeTrip → passengerClosedAt → el trip sale de
+            /trips/pending-settlement). Con `onDeferred` NO habría salida real: sin passengerClosedAt,
+            useHydrateActiveTrip re-adopta el settlement en cada foco del home y re-abre este mismo
+            sheet. El Payment PENDING con checkout vivo sigue en el server: GET /payments/debts lo
+            expone como PENDING_ACTION (NO bloquea pedir viajes) y la franja del home "Tienes un pago
+            por completar → Continuar" reabre ESTE mismo checkout (DebtSheet en modo pending-action). */}
+        <Button
+          label={t('settlement.checkout.payLater')}
+          variant="ghost"
+          fullWidth
+          onPress={onFinish}
+        />
+      </View>
     );
   }
 
@@ -407,6 +424,20 @@ export function SettlementBody({
     );
   }
 
+  // Resultado del COBRO de la propina, clasificado por el DOMINIO (mismo criterio que `TipCard`): un
+  // tip PENDING con checkout (Yape one-shot deepLink/QR — el caso común sin afiliación on-file — o CIP)
+  // NO está "enviado": si se descarta el PaymentView, el checkout nunca se muestra, el tip muere FAILED
+  // y el pasajero cree que la dejó mientras el conductor no la cobra.
+  const tipPayment = tipMutation.data ?? null;
+  const tipOutcome = tipPayment ? interpretPaymentOutcome(tipPayment) : null;
+  const tipNeedsCheckout = tipOutcome?.kind === 'checkoutPending';
+  const tipFailed = tipOutcome?.kind === 'failed' || tipOutcome?.kind === 'debt';
+  // Candado anti doble-propina (ver el comentario de los chips). Si el cobro devuelto FALLÓ terminal,
+  // se DESTRABA: el pasajero puede elegir de nuevo (la idempotencia por dedupKey hace que repetir el
+  // MISMO monto devuelva el FAILED sin cobrar; un monto distinto se cobra normal — igual que TipCard).
+  const tipLocked =
+    tipMutation.isPending || (tipMutation.isSuccess && !tipFailed);
+
   // ── CAPTURED (o efectivo ya capturado por ambos) → RECIBO canónico ───────────────────────────
   // SELLO de exhaustividad: a esta altura todas las ramas anteriores RETORNARON, así que el único
   // kind posible es 'settled'. Si `PaymentOutcome` suma un kind nuevo, este guard deja de narrowear
@@ -432,8 +463,33 @@ export function SettlementBody({
         <ReceiptCard payment={payment} />
       </EnterView>
 
-      {/* Propina post-viaje: solo si aún no dejó (tipCents === 0). Chips [Sin, S/2, S/3, S/5]. */}
-      {payment.tipCents === 0 ? (
+      {/* El COBRO de la propina exige completar un checkout (Yape one-shot / QR / CIP): lo mostramos
+          con el componente CANÓNICO (el mismo del recibo/deuda/TipCard) en vez de descartarlo — antes
+          el PaymentView se tiraba y el tip quedaba PENDING hasta morir FAILED en silencio. `onRetry`
+          re-corre el cobro, IDEMPOTENTE por dedupKey: al confirmar, el webhook devuelve el mismo cobro
+          ya CAPTURED y el refetch del recibo trae tipCents > 0 (el "gracias" actual del desglose). */}
+      {tipNeedsCheckout && tipPayment ? (
+        <EnterView delay={260}>
+          <Card variant="outlined" padding="lg">
+            <CheckoutInstructions
+              payment={tipPayment}
+              retrying={tipMutation.isPending}
+              onRetry={() => tipMutation.mutate(tipPayment.tipCents)}
+              header={
+                <>
+                  <Text variant="title3">{t('tips.checkoutTitle')}</Text>
+                  <Text variant="callout" color="inkMuted">
+                    {t('tips.checkoutBody', {
+                      amount: formatPEN(tipPayment.tipCents),
+                    })}
+                  </Text>
+                </>
+              }
+            />
+          </Card>
+        </EnterView>
+      ) : /* Propina post-viaje: solo si aún no dejó (tipCents === 0). Chips [Sin, S/2, S/5] + "Otro". */
+      payment.tipCents === 0 ? (
         <EnterView delay={260}>
           <View style={{gap: theme.spacing.sm}}>
             {/* Coherencia propina-efectivo: en un viaje CASH la tarifa va en mano, pero estos chips cobran
@@ -444,6 +500,23 @@ export function SettlementBody({
             </Text>
             {tipMutation.isError ? (
               <Banner tone="danger" title={t('tips.error')} />
+            ) : null}
+            {/* El cobro devuelto FALLÓ terminal (declive/expiró): honesto — sin esto el pasajero creía
+                que la propina salió. Los chips quedan destrabados para elegir de nuevo (ver tipLocked). */}
+            {tipFailed ? (
+              <Banner
+                tone="danger"
+                title={t('tips.failedTitle')}
+                description={t('tips.failedBody')}
+              />
+            ) : null}
+            {/* On-file (Yape vinculado): cobrándose server-initiated, se confirma por webhook. */}
+            {tipOutcome?.kind === 'processing' ? (
+              <Banner
+                tone="info"
+                title={t('tips.processingTitle')}
+                description={t('tips.processingBody')}
+              />
             ) : null}
             <View style={[styles.chips, {gap: theme.spacing.sm}]}>
               {QUICK_TIPS_CENTS.map(cents => (
@@ -459,7 +532,8 @@ export function SettlementBody({
                   // Anti doble-propina: una vez que la propina se envió OK, los chips quedan deshabilitados
                   // hasta que el refetch traiga tipCents>0 y oculte el bloque. Sin esto, entre el onSuccess y
                   // el re-render del refetch el pasajero podía tocar otro chip y mandar una segunda propina.
-                  disabled={tipMutation.isPending || tipMutation.isSuccess}
+                  // Se destraba SOLO si el cobro devuelto falló terminal (tipFailed): elegir de nuevo.
+                  disabled={tipLocked}
                   // "Sin propina" no llama al backend (tipCents mínimo es 1): solo avanza.
                   onPress={() =>
                     cents === 0 ? undefined : tipMutation.mutate(cents)
@@ -469,7 +543,7 @@ export function SettlementBody({
               {/* "Otro" (pen I7ahU): monto libre en un sheet chico, misma mutación anti-doble. */}
               <TipChip
                 label={t('settlement.tipOther')}
-                disabled={tipMutation.isPending || tipMutation.isSuccess}
+                disabled={tipLocked}
                 onPress={() => setCustomTipOpen(true)}
               />
             </View>
@@ -641,6 +715,12 @@ function CheckoutBody({
       payment={payment}
       onRetry={onRetry}
       retrying={retrying}
+      // CIP (PagoEfectivo): hint HONESTO — se paga en banco/agente horas/días después; "esta pantalla
+      // se actualiza sola" retiene a alguien que tiene que salir. Yape/Plin/tarjeta resuelven en
+      // minutos → conservan el hint genérico.
+      waitingHint={
+        payment.cip ? t('settlement.checkout.waitingHintCip') : undefined
+      }
       header={
         <View style={{gap: theme.spacing.md}}>
           <Text variant="title3">{t('settlement.checkout.title')}</Text>

@@ -1469,8 +1469,8 @@ export const common = {
     /** Efectivo. */
     cashTitle: 'Paga en efectivo',
     cashBody: 'Entrega {{amount}} al conductor. Él confirma al recibir.',
-    cashBanner:
-      '¿Sin cambio exacto? Avísale al conductor; también puedes pagar la diferencia con Yape.',
+    /** HONESTO: no existe pago mixto (efectivo + digital) — no prometer "la diferencia con Yape". */
+    cashBanner: '¿Sin cambio exacto? Coordínalo con el conductor.',
     confirmCash: 'Confirmar efectivo',
     confirmingCash: 'Confirmando…',
     /** Efectivo confirmado por el pasajero pero el conductor aún no confirma (confirmación bilateral). */
@@ -1483,8 +1483,9 @@ export const common = {
     failedBody:
       'Lo intentaremos de nuevo automáticamente. No se te cobró dos veces.',
     debtTitle: 'Pago pendiente',
+    /** HONESTO: la deuda BLOQUEA pedir un viaje nuevo (BR-P02) — no prometer que "se regulariza sola". */
     debtBody:
-      'El cobro quedó pendiente. Lo regularizaremos en tu próximo viaje.',
+      'El cobro quedó pendiente. Sáldalo para poder pedir tu próximo viaje.',
     /** Cobro reembolsado TOTAL — estado honesto, neutral: ni "pagado" ni propina. */
     refundedTitle: 'Este viaje fue reembolsado',
     refundedBody:
@@ -1537,10 +1538,20 @@ export const common = {
       /** Vencimiento del checkout. */
       expiresAt: 'Vence el {{date}}',
       expiredTitle: 'El código venció',
-      expiredBody:
-        'Este pago caducó. Reintenta para generar uno nuevo o paga tu viaje en efectivo.',
+      /** HONESTO: pasar un pago digital a efectivo NO está permitido (el backend responde 422). */
+      expiredBody: 'Este pago caducó. Reintenta para generar uno nuevo.',
       /** Hint común mientras esperamos la confirmación. */
       waitingHint: 'Cuando completes el pago, esta pantalla se actualiza sola.',
+      /**
+       * Hint HONESTO para CIP (PagoEfectivo) en el recibo del viaje: el CIP se paga en banco/agente
+       * HORAS o DÍAS después — prometer "se actualiza sola" retiene a alguien que tiene que salir a
+       * la calle. "Te lo recordamos en el inicio" es verdad SOLO para el cobro del viaje (la franja
+       * PENDING_ACTION del home), por eso no reemplaza al `waitingHint` genérico.
+       */
+      waitingHintCip:
+        'Puedes pagarlo cuando quieras. Te lo recordamos en el inicio.',
+      /** Salida secundaria del recibo con checkout pendiente: cerrar e irse; la franja del home retoma. */
+      payLater: 'Pagar después',
       /**
        * No se pudo ABRIR Yape automáticamente (openURL rechazó el deepLink). Copy HONESTO: NO culpamos al
        * usuario con "¿la tienes instalada?" (puede tenerla; en sandbox el esquema del deepLink no está
