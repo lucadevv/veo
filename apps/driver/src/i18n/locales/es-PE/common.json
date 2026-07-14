@@ -829,7 +829,9 @@
     "stepsEmpty": "El servidor aún no entrega los pasos de esta ruta.",
     "routeUnavailable": "No pudimos cargar la ruta. Usa Waze o Google Maps para guiarte.",
     "openWaze": "Abrir en Waze",
-    "openGoogleMaps": "Google Maps"
+    "openGoogleMaps": "Google Maps",
+    "mapView2d": "Ver el mapa plano (2D)",
+    "mapView3d": "Ver el mapa en 3D"
   },
   "chat": {
     "title": "Chat con el pasajero",

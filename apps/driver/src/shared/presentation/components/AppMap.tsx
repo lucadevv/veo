@@ -12,7 +12,8 @@ import {
   toLngLat,
 } from '../../utils/geo';
 import { fitVerticalPadding, focusPadding } from '../../utils/mapCamera';
-import { veoLightMapboxStyleJSON } from './mapbox/veoLightStyle';
+import { useMapViewModeStore } from '../stores/mapViewModeStore';
+import { veoLightMapboxStyleJSON, veoLightMapboxStyleJSON2D } from './mapbox/veoLightStyle';
 import { NavPuck } from './NavPuck';
 
 /** Celda de demanda a pintar sobre el mapa (centroide + estilo ya derivado de la intensidad). */
@@ -77,6 +78,8 @@ const FIT_PADDING = 64;
  * y transición `easeTo` corta para que el seguimiento se sienta fluido sin marearse. */
 /** Inclinación de la cámara en navegación (grados desde el cenital). */
 const NAV_PITCH = 55;
+/** Inclinación en modo 2D: cenital puro — la navegación queda heading-up pero PLANA. */
+const NAV_PITCH_FLAT = 0;
 /** Zoom de navegación (calle/maniobra). */
 const NAV_ZOOM = 17;
 /** Duración de la transición de seguimiento entre muestras de GPS (ms). */
@@ -167,6 +170,10 @@ function AppMapComponent({
 }: AppMapProps): React.JSX.Element {
   const theme = useTheme();
   const { height: windowHeight } = useWindowDimensions();
+  // MODO DE VISTA 2D/3D (preferencia persistida del usuario, espejo del pasajero). En 2D: estilo sin
+  // extrusiones (`building-3d` oculto) + pitch de navegación CLAMPEADO a 0 — el heading-up sigue
+  // rotando el rumbo, pero plano. En 3D: comportamiento vigente intacto.
+  const viewMode = useMapViewModeStore((s) => s.mode);
   // Navegación activa SOLO si se pidió `navMode` Y hay una ubicación de conductor válida que seguir
   // (sin ubicación no hay a quién seguir → degrada al encuadre normal, degradación honesta).
   const navigating = navMode && isValidPoint(driver);
@@ -247,6 +254,10 @@ function AppMapComponent({
   // nuevo por render re-animaría la Camera en bucle. Solo cambian cuando el snap del sheet se asienta
   // o el banner (re)aparece — cuantizado aguas arriba — y ahí SÍ queremos el re-encuadre animado.
   // En navegación el puck va al TERCIO INFERIOR del área visible (más carretera adelante).
+  // VERIFICADO en runtime (2026-07-14, iOS new-arch + @rnmapbox 10.3.1, GPS congelado): un cambio de
+  // SOLO `padding` con el MISMO centerCoordinate SÍ re-anima la Camera declarativa — el `stop` se
+  // deep-compara en Fabric (folly::dynamic) y el nativo aplica cada set sin dedup. No hace falta
+  // setCamera imperativo para re-encuadrar al cambiar el inset del sheet.
   const navPadding = useMemo(() => {
     const v = focusPadding(windowHeight, topInset, bottomInset, NAV_PUCK_VIEWPORT_FRACTION);
     return { paddingTop: v.top, paddingBottom: v.bottom, paddingLeft: 0, paddingRight: 0 };
@@ -279,7 +290,9 @@ function AppMapComponent({
   return (
     <MapView
       style={StyleSheet.absoluteFill}
-      styleJSON={veoLightMapboxStyleJSON}
+      // Variante del estilo por preferencia 2D/3D: alternar recarga el estilo — aceptable, es un
+      // gesto deliberado y esporádico del usuario, no un hot-path.
+      styleJSON={viewMode === '2d' ? veoLightMapboxStyleJSON2D : veoLightMapboxStyleJSON}
       logoEnabled={false}
       attributionEnabled={false}
       compassEnabled={false}
@@ -295,7 +308,7 @@ function AppMapComponent({
         <Camera
           centerCoordinate={centerCoordinate}
           heading={heading ?? 0}
-          pitch={NAV_PITCH}
+          pitch={viewMode === '2d' ? NAV_PITCH_FLAT : NAV_PITCH}
           zoomLevel={NAV_ZOOM}
           padding={navPadding}
           animationMode="easeTo"

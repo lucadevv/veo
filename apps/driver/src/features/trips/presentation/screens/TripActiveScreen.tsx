@@ -22,6 +22,7 @@ import {
 import { mobilePaymentMethod } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
+import { MapViewModeButton } from '../../../../shared/presentation/components/MapViewModeButton';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';
@@ -133,6 +134,8 @@ const MAPSHELL_TOP_OFFSET_PX = 12;
 const MANEUVER_BANNER_TOP_MARGIN_PX = 8;
 /** Cuantización del inset superior: jitter de ±px del banner no re-anima la cámara. */
 const TOP_INSET_QUANTUM_PX = 8;
+/** Aire entre el banner de maniobras (o el notch, sin banner) y el toggle 2D/3D flotante. */
+const VIEW_MODE_BUTTON_GAP_PX = 12;
 
 export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Element => {
   const { t } = useTranslation();
@@ -469,6 +472,9 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             interactive={false}
           />
         </MapShell>
+        {/* Toggle 2D/3D flotante (arriba-derecha): debajo del banner de maniobras cuando hay ruta —
+            usa el MISMO inset medido que la cámara — o bajo el notch cuando no. */}
+        <MapViewModeButton topInset={mapTopInset + VIEW_MODE_BUTTON_GAP_PX} />
       </View>
 
       {/* Sheet ARRASTRABLE dinámico al contenido (DraggableSheet · grabber en color primario/accent). Abraza
