@@ -1,4 +1,5 @@
 import {
+  arriveRoadName,
   formatManeuverDistance,
   greatCircleMeters,
   isArrival,
@@ -66,6 +67,27 @@ describe('maneuver', () => {
       expect(isArrival('arrive')).toBe(true);
       expect(isArrival('turn-left')).toBe(false);
       expect(isArrival('depart')).toBe(false);
+    });
+  });
+
+  describe('arriveRoadName — vía del arrive del contrato (copy por fase del banner)', () => {
+    it('recupera la vía del sufijo " por " de la instrucción armada por el BFF', () => {
+      expect(arriveRoadName('Has llegado a tu destino por Av. Larco')).toBe('Av. Larco');
+    });
+
+    it('sin conector → null (instrucción sin vía)', () => {
+      expect(arriveRoadName('Has llegado a tu destino')).toBeNull();
+    });
+
+    it('conector con sufijo vacío → null', () => {
+      expect(arriveRoadName('Has llegado a tu destino por ')).toBeNull();
+      expect(arriveRoadName('Has llegado a tu destino por   ')).toBeNull();
+    });
+
+    it('la vía puede contener " por " (se corta en el PRIMER conector)', () => {
+      expect(arriveRoadName('Has llegado a tu destino por Paseo por la Costa')).toBe(
+        'Paseo por la Costa',
+      );
     });
   });
 

@@ -706,6 +706,12 @@
       "complete": "Completar viaje",
       "cancel": "Cancelar viaje"
     },
+    "maneuver": {
+      "arrivePickup": "Llegás al punto de recojo",
+      "arrivePickupRoad": "Llegás al punto de recojo por {{road}}",
+      "arriveDropoff": "Llegás al destino",
+      "arriveDropoffRoad": "Llegás al destino por {{road}}"
+    },
     "waypoint": {
       "proposedTitle": "El pasajero quiere agregar una parada",
       "proposedBody": "Si aceptas, se suma la parada a tu ruta y la tarifa se actualiza.",

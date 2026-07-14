@@ -1,8 +1,14 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { Text, useTheme } from '@veo/ui-kit';
 import { IconManeuver, type ManeuverGlyphName } from '../../../../shared/presentation/icons';
-import { formatManeuverDistance, maneuverGlyph, type TripRouteStep } from '../../domain';
+import {
+  arriveRoadName,
+  formatManeuverDistance,
+  maneuverGlyph,
+  type TripRouteStep,
+} from '../../domain';
 
 export interface ManeuverBannerProps {
   /** Próxima maniobra a anunciar (derivada por `upcomingManeuver` del dominio). */
@@ -11,6 +17,12 @@ export interface ManeuverBannerProps {
   distanceMeters: number;
   /** Cuántos pasos quedan en total (para el contador "1 de N"). Opcional. */
   remaining?: number;
+  /**
+   * `true` con el pasajero a bordo (IN_PROGRESS): el `arrive` del tramo es el destino REAL. Antes
+   * (ACCEPTED/ARRIVING), el "destino" de la ruta es el punto de RECOJO — el copy genérico del
+   * contrato ("Has llegado a tu destino") confunde, así que el banner lo reemplaza por fase.
+   */
+  onboard?: boolean;
 }
 
 /**
@@ -24,14 +36,25 @@ export function ManeuverBanner({
   step,
   distanceMeters,
   remaining,
+  onboard = false,
 }: ManeuverBannerProps): React.JSX.Element {
   const theme = useTheme();
+  const { t } = useTranslation();
   const glyph: ManeuverGlyphName = maneuverGlyph(step.maneuver);
+
+  // El `arrive` lleva copy PROPIO por fase (la instrucción del contrato dice "destino" también
+  // yendo al recojo); la vía se rescata de la instrucción armada porque el contrato no la trae suelta.
+  let instruction = step.instruction;
+  if (step.maneuver === 'arrive') {
+    const road = arriveRoadName(step.instruction);
+    const base = onboard ? 'trips.maneuver.arriveDropoff' : 'trips.maneuver.arrivePickup';
+    instruction = road ? t(`${base}Road`, { road }) : t(base);
+  }
 
   return (
     <View
       accessibilityRole="header"
-      accessibilityLabel={`${formatManeuverDistance(distanceMeters)}. ${step.instruction}`}
+      accessibilityLabel={`${formatManeuverDistance(distanceMeters)}. ${instruction}`}
       style={[
         styles.card,
         {
@@ -57,7 +80,7 @@ export function ManeuverBanner({
           {formatManeuverDistance(distanceMeters)}
         </Text>
         <Text variant="callout" numberOfLines={2}>
-          {step.instruction}
+          {instruction}
         </Text>
       </View>
       {remaining && remaining > 0 ? (

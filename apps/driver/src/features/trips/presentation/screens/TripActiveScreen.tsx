@@ -390,6 +390,7 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
                   step={maneuver.step}
                   distanceMeters={maneuver.distanceMeters}
                   remaining={tripRoute?.steps.length}
+                  onboard={status === 'IN_PROGRESS'}
                 />
               </View>
             ) : undefined

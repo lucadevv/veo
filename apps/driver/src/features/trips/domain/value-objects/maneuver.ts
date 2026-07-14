@@ -65,6 +65,22 @@ export function isArrival(maneuver: TripManeuver): boolean {
 }
 
 /**
+ * Extrae el nombre de la vía de la instrucción `arrive` del contrato. El BFF entrega la instrucción
+ * ya ARMADA (buildInstruction de @veo/maps: "Has llegado a tu destino" ± " por {vía}"), no el
+ * roadName crudo — por eso el cliente lo recupera del sufijo tras el conector " por ". Lo necesita
+ * el banner para reemplazar el copy del arrive POR FASE (yendo al recojo el "destino" del tramo es
+ * el punto de RECOJO, no el destino real) sin perder la calle cuando el contrato la trae.
+ * Sin conector o con sufijo vacío → null (instrucción sin vía).
+ */
+export function arriveRoadName(instruction: string): string | null {
+  const connector = ' por ';
+  const at = instruction.indexOf(connector);
+  if (at < 0) return null;
+  const road = instruction.slice(at + connector.length).trim();
+  return road.length > 0 ? road : null;
+}
+
+/**
  * Formatea la distancia de un paso para el banner de la próxima maniobra, en es-PE y pensado para
  * leerse de un vistazo mientras se maneja:
  *  - < 10 m → "Ahora" (estás encima de la maniobra)
