@@ -131,6 +131,30 @@ export class AffiliationsService {
     this.logger.log(
       `Afiliación creada user=${userId} aff=${saved.id} origin=${origin} estado=PROCESS`,
     );
+
+    // RESOLUCIÓN SÍNCRONA si el gateway ya APROBÓ la afiliación al crearla (status ACTIVE/ACCEPTED/…):
+    // la activamos + emitimos EN EL ACTO y devolvemos ACTIVE, sin que el cliente dependa de su poll `/show`
+    // para verla vinculada. Es el caso del sandbox determinista (auto-aprueba). ProntoPaga REAL devuelve
+    // 'created' → NO entra acá: sigue PROCESS y resuelve por webhook/refresh como siempre. Comparamos el
+    // status CRUDO del gateway contra el contrato tipado (no literales).
+    const subStatus = (sub.status ?? '').toUpperCase();
+    const gatewayApproved =
+      subStatus === ProntoPagaAffiliationStatus.ACTIVE ||
+      subStatus === ProntoPagaAffiliationStatus.ACCEPTED ||
+      subStatus === ProntoPagaAffiliationStatus.SUCCESS ||
+      subStatus === ProntoPagaAffiliationStatus.AFFILIATED;
+    if (gatewayApproved) {
+      const activated = await this.activateAndEmit(saved, {
+        phoneMasked,
+        walletUid: sub.uid ?? saved.walletUid,
+        source: 'refresh',
+      });
+      this.logger.log(
+        `Afiliación ${saved.id} ACTIVADA en el acto (gateway aprobó al crear, status=${subStatus})`,
+      );
+      return { affiliationId: activated.id, status: activated.status, deepLink: sub.deepLink };
+    }
+
     if (!sub.deepLink) {
       this.logger.warn(
         `Afiliación ${saved.id} sin deepLink del proveedor (revisar respuesta de ProntoPaga)`,

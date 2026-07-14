@@ -64,7 +64,7 @@ describe('SandboxPaymentGateway · charge', () => {
     expect(r.checkout).toBeUndefined();
   });
 
-  it('YapeSubscriber: createYapeSubscription → uid + deepLink (PROCESS); showYapeSubscription → ACCEPTED', async () => {
+  it('YapeSubscriber: createYapeSubscription AUTO-APRUEBA (ACTIVE, sin deepLink); showYapeSubscription → ACCEPTED', async () => {
     const { supportsYapeSubscription } = await import('./payment-gateway.port');
     const g = gw({ pendingExternal: true });
     expect(supportsYapeSubscription(g)).toBe(true);
@@ -76,10 +76,12 @@ describe('SandboxPaymentGateway · charge', () => {
       type: 'RECURRENT',
     });
     expect(sub.uid).toBeTruthy();
-    // SIN deepLink a propósito: el sandbox no tiene app Yape que aprobar (el /show auto-acepta).
+    // SIN deepLink a propósito (no hay app Yape que aprobar) + status ACTIVE → el dominio la resuelve
+    // vinculada EN EL MISMO POST, sin depender del poll /show del cliente.
     expect(sub.deepLink).toBeUndefined();
-    expect(sub.status).toBe('PROCESS');
-    // El /show resuelve ACCEPTED → el dominio pasa la afiliación a ACTIVE sin webhook real.
+    expect(sub.status).toBe('ACTIVE');
+    expect(sub.phoneNumber).toBeTruthy();
+    // /show sigue disponible como fallback del poll (afiliaciones PROCESS legacy) → ACCEPTED.
     const detail = await g.showYapeSubscription(sub.uid!);
     expect(detail.status).toBe('ACCEPTED');
     expect(detail.phoneNumber).toBeTruthy();

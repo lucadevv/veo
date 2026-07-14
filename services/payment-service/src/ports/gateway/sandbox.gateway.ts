@@ -161,10 +161,10 @@ export class SandboxPaymentGateway
 
   /**
    * Alta de afiliación Yape (espeja `POST /api/payment/yape/subscription`). Genera un walletUID
-   * DETERMINISTA por documento (re-afiliar el mismo documento da el mismo uid). SIN deepLink a propósito:
-   * en el sandbox no hay una app Yape real que aprobar, y devolver una URL (sandbox.local) haría que el
-   * cliente intente abrir el navegador y se vaya de la app. El dominio resuelve ACTIVE por el `/show`
-   * (`showYapeSubscription` devuelve ACCEPTED) en su poll defensivo. `phoneNumber` null en MOBILE.
+   * DETERMINISTA por documento (re-afiliar el mismo documento da el mismo uid). AUTO-APRUEBA al instante:
+   * devuelve status ACTIVE (no hay app Yape real que aprobar) → el dominio la resuelve ACTIVE EN EL MISMO
+   * POST, sin depender del poll `/show` del cliente (que era frágil). SIN deepLink a propósito (no hay
+   * navegador que abrir). `phoneNumber` de prueba para que la fila vinculada muestre el enmascarado.
    */
   async createYapeSubscription(input: {
     origin: 'WEB' | 'MOBILE';
@@ -176,13 +176,13 @@ export class SandboxPaymentGateway
   }): Promise<YapeSubscriptionResult> {
     const uid = `sbx_wallet_${input.clientDocumentType.toLowerCase()}_${input.document}`;
     this.logger.log(
-      `[SANDBOX] afiliación Yape creada uid=${uid} origin=${input.origin} tipo=${input.type} (PROCESS, sin deepLink → el poll /show resuelve ACTIVE)`,
+      `[SANDBOX] afiliación Yape creada uid=${uid} origin=${input.origin} tipo=${input.type} → ACTIVE (auto-aprobada, sin deepLink)`,
     );
     return {
       uid,
-      status: 'PROCESS',
-      // WEB manda phone; MOBILE lo descubre al aceptar (lo eco-devuelve el /show).
-      phoneNumber: input.origin === 'WEB' ? (input.phoneNumber ?? null) : null,
+      status: 'ACTIVE',
+      // Teléfono de prueba (el dominio lo enmascara). En WEB respeta el enviado; en MOBILE uno fijo de sandbox.
+      phoneNumber: input.origin === 'WEB' ? (input.phoneNumber ?? null) : '+51999888777',
     };
   }
 
