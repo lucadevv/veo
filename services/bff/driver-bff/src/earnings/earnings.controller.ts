@@ -11,7 +11,7 @@ import type {
   EarningsSummary,
 } from '@veo/api-client';
 import { DriverApi } from '../common/driver-api.decorator';
-import { EarningsService } from './earnings.service';
+import { EarningsService, type DriverCommissionRateView } from './earnings.service';
 
 @ApiTags('earnings')
 @DriverApi()
@@ -47,5 +47,15 @@ export class EarningsController {
   @ApiOperation({ summary: 'Lista de payouts (liquidaciones) del conductor autenticado' })
   payouts(@CurrentUser() user: AuthenticatedUser): Promise<DriverPayoutView[]> {
     return this.earnings.listPayouts(user);
+  }
+
+  @Get('commission-rate')
+  @ApiOperation({
+    summary:
+      'Tasa de comisión ON-DEMAND VIGENTE (bps + version, panel admin). El app la usa en el desglose ' +
+      'bruto − comisión; cacheada 60 s en el BFF',
+  })
+  commissionRate(@CurrentUser() user: AuthenticatedUser): Promise<DriverCommissionRateView> {
+    return this.earnings.commissionRate(user);
   }
 }

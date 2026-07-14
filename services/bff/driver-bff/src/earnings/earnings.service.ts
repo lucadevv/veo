@@ -23,12 +23,52 @@ import { dayWindow, monthWindow, weekDailyWindows, weekWindow } from './earnings
 /** Estado de un payout liquidado (pagado al conductor). El resto se considera pendiente. */
 const PAID_STATUS = 'PROCESSED';
 
+/**
+ * Tasa de comisión ON-DEMAND VIGENTE (panel admin, payment-service `commission_config`). El app la usa
+ * para el desglose bruto − comisión de TripComplete/TripDetail — nunca un hardcode local.
+ */
+export interface DriverCommissionRateView {
+  /** Tasa en basis points Int (2000 = 20%). */
+  onDemandRateBps: number;
+  /** Version del CAS del panel (trazabilidad de qué config estaba vigente). */
+  version: number;
+}
+
+/**
+ * TTL del cache in-proc de la tasa de comisión. Corto: un cambio del panel se ve en ≤60 s en el app
+ * (payment-service ya cachea server-side con COMMISSION_CACHE_TTL_MS; esto solo evita un round-trip por
+ * cada cierre de viaje de cada conductor).
+ */
+const COMMISSION_RATE_CACHE_TTL_MS = 60_000;
+
 @Injectable()
 export class EarningsService {
+  /** Cache de UN slot COMPARTIDO entre conductores a propósito: la tasa es config GLOBAL, sin dato per-driver. */
+  private commissionRateCache: { value: DriverCommissionRateView; expiresAt: number } | null = null;
+
   constructor(
     private readonly grpc: GrpcGateway,
     private readonly rest: RestGateway,
   ) {}
+
+  /**
+   * Tasa de comisión ON-DEMAND vigente, leída del endpoint mínimo driver-rail de payment-service.
+   * NO resuelve driverId (no hace falta: es config global, no un recurso del conductor); la identidad
+   * solo viaja firmada para el HMAC interno. `nowMs` parametrizable para tests del TTL.
+   */
+  async commissionRate(
+    identity: AuthenticatedUser,
+    nowMs = Date.now(),
+  ): Promise<DriverCommissionRateView> {
+    if (this.commissionRateCache && this.commissionRateCache.expiresAt > nowMs) {
+      return this.commissionRateCache.value;
+    }
+    const value = await this.rest
+      .client('payment')
+      .get<DriverCommissionRateView>('/internal/finance/commission/on-demand-rate', { identity });
+    this.commissionRateCache = { value, expiresAt: nowMs + COMMISSION_RATE_CACHE_TTL_MS };
+    return value;
+  }
 
   /** Lista cruda de payouts del conductor autenticado. */
   async listPayouts(identity: AuthenticatedUser): Promise<DriverPayoutView[]> {

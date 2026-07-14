@@ -187,3 +187,33 @@ describe('EarningsService.summary', () => {
     expect(summary.currency).toBe('PEN');
   });
 });
+
+describe('EarningsService.commissionRate', () => {
+  const rate = { onDemandRateBps: 2000, version: 3 };
+
+  function makeRateService() {
+    const grpc = { call: vi.fn() };
+    const get = vi.fn(() => Promise.resolve(rate));
+    const rest = { client: vi.fn(() => ({ get })) };
+    const service = new EarningsService(grpc as never, rest as never);
+    return { service, grpc, get };
+  }
+
+  it('lee la tasa vigente del endpoint mínimo driver-rail de payment (sin resolver driverId)', async () => {
+    const { service, grpc, get } = makeRateService();
+    const view = await service.commissionRate(identity, 1_000);
+    expect(view).toEqual({ onDemandRateBps: 2000, version: 3 });
+    expect(get).toHaveBeenCalledWith('/internal/finance/commission/on-demand-rate', { identity });
+    // Config global: NO se resuelve el driverId por gRPC (no es un recurso del conductor).
+    expect(grpc.call).not.toHaveBeenCalled();
+  });
+
+  it('cachea 60 s: dentro del TTL no re-consulta; vencido, refetchea', async () => {
+    const { service, get } = makeRateService();
+    await service.commissionRate(identity, 1_000);
+    await service.commissionRate(identity, 60_000); // < 1_000 + 60_000 → cache
+    expect(get).toHaveBeenCalledTimes(1);
+    await service.commissionRate(identity, 61_001); // TTL vencido → refetch
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+});
