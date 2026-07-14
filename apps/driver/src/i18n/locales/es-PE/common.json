@@ -548,6 +548,12 @@
     "suspendedBody": "No podés recibir viajes hasta resolverlo. Regularizá tus documentos o contactá a soporte.",
     "suspendedUpdateDocs": "Actualizar documentos",
     "contactSupport": "Contactar a soporte",
+    "debtBlock": {
+      "title": "Tu cuenta está en pausa por deuda pendiente",
+      "body": "Acumulaste comisiones de tus viajes en efectivo por encima del tope. Saldá tu deuda para volver a recibir viajes.",
+      "bodyWithAmount": "Debés {{amount}} en comisiones de tus viajes en efectivo. Saldá tu deuda para volver a recibir viajes.",
+      "settleCta": "Saldar ahora"
+    },
     "contactCentral": "Contactar a la central",
     "unknownStateTitle": "No pudimos leer tu estado",
     "unknownStateBody": "Tu estado de turno no se reconoce ahora mismo. Reintentá; si sigue, comunicate con soporte.",
@@ -879,6 +885,7 @@
     "autoSettleInfo": "Se liquida automáticamente cada semana",
     "pendingDebtLabel": "Debés a VEO",
     "pendingDebtInfo": "Comisión de tus viajes en efectivo — se descuenta de tu próxima liquidación.",
+    "settleDebtCta": "Saldar ahora",
     "cashInHand": "En mano (efectivo)",
     "digitalToSettle": "A liquidar (digital)",
     "debtApplied": "Deuda aplicada: −{{amount}}",
@@ -903,6 +910,49 @@
       "held": "Retenido",
       "processing": "Procesando",
       "failed": "Fallido"
+    }
+  },
+  "debt": {
+    "title": "Saldar deuda",
+    "summaryLabel": "Deuda pendiente",
+    "explain": "Es la comisión de tus viajes cobrados en efectivo. Saldala con un medio digital para volver a recibir viajes.",
+    "methodTitle": "¿Con qué querés pagar?",
+    "method": {
+      "YAPE": "Yape",
+      "PLIN": "Plin",
+      "CARD": "Tarjeta"
+    },
+    "payCta": "Saldar {{amount}}",
+    "paying": "Procesando…",
+    "settleErrorTitle": "No pudimos iniciar el pago",
+    "settledTitle": "¡Listo!",
+    "settledBody": "Saldaste tu deuda. Ya podés recibir viajes.",
+    "backToStart": "Volver",
+    "noDebtTitle": "No tenés deuda pendiente",
+    "noDebtBody": "No hay comisiones en efectivo por saldar. ¡A darle!",
+    "checkout": {
+      "title": "Completá tu pago",
+      "body": "Terminá el pago con el medio que elegiste. Esta pantalla se actualiza sola cuando se confirme.",
+      "payWithYape": "Pagar con Yape",
+      "payNow": "Pagar ahora",
+      "payInBrowser": "Pagar desde el navegador",
+      "openYapeFailedTitle": "No se abrió Yape",
+      "openYapeFailedBody": "Si no tenés Yape instalada, pagá desde el navegador con el botón de abajo.",
+      "openYapeFailedBodyNoWeb": "Si no tenés Yape instalada, copiá el enlace y abrilo en la app.",
+      "copyPayLink": "Copiar enlace de pago",
+      "payLinkCopied": "Enlace copiado",
+      "openWebFailedTitle": "No se abrió el navegador",
+      "openWebFailedBody": "Volvé a intentarlo en un momento.",
+      "qrInstruction": "Escaneá este código desde tu app de pago.",
+      "qrAccessibility": "Código QR para pagar tu deuda",
+      "cipLabel": "Código de pago (CIP)",
+      "cipInstruction": "Pagá este código en el banco o agente autorizado.",
+      "copy": "Copiar código",
+      "cipCopied": "Código copiado",
+      "expiresAt": "Vence el {{date}}",
+      "waitingHint": "Se actualiza sola cuando confirmemos tu pago.",
+      "expiredTitle": "El código venció",
+      "expiredBody": "Generá uno nuevo para completar el pago."
     }
   },
   "profile": {

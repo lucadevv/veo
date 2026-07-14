@@ -215,6 +215,49 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   // BACKEND: el "motivo" de la suspensión (el pill "Motivo: documento vencido" del frame) NO viene del
   // servidor; se OMITE el pill en vez de inventar la causa. GLYPH: el frame usa `octagon-alert`, que no
   // existe en el set propio — usamos `IconAlert` (triángulo de alerta, el glifo de peligro ya en uso).
+  // ADR-022 §P-A · BLOQUEO por DEUDA de comisiones (frame de cuenta en pausa). Prioridad SOBRE la suspensión
+  // genérica: el conductor debe saber que la salida es SALDAR (no "actualizar documentos"). El bloqueo NO se
+  // materializa como currentStatus=SUSPENDED (bloqueo tipo A: el viaje en curso termina normal), así que se
+  // detecta con el flag `debtBlocked` que identity expone en el perfil — no con `isSuspended(status)`. Es
+  // imposible de ignorar: reemplaza el mapa/dock a pantalla completa, el conductor no puede operar. El monto
+  // sale del resumen de ganancias (pendingDebtCents); si aún carga, se omite el subtítulo del monto (no se
+  // inventa). Colocado tras TODOS los hooks (reglas de hooks), antes de la suspensión genérica.
+  const debtBlocked = profile.data?.debtBlocked === true;
+  const pendingDebtCents = earnings.data?.pendingDebtCents ?? 0;
+  if (debtBlocked) {
+    return (
+      <SafeScreen
+        footer={
+          <View style={styles.suspendedFooter}>
+            <Button
+              label={t('shift.debtBlock.settleCta')}
+              variant="primary"
+              fullWidth
+              onPress={() => navigation.navigate('SettleDebt')}
+            />
+            <Button
+              label={t('shift.contactSupport')}
+              variant="ghost"
+              fullWidth
+              onPress={() => navigation.navigate('Support')}
+            />
+          </View>
+        }
+      >
+        <NoticeHero
+          tone="danger"
+          icon={({ size, color }) => <IconAlert size={size} color={color} strokeWidth={2} />}
+          title={t('shift.debtBlock.title')}
+          description={
+            pendingDebtCents > 0
+              ? t('shift.debtBlock.bodyWithAmount', { amount: formatPEN(pendingDebtCents) })
+              : t('shift.debtBlock.body')
+          }
+        />
+      </SafeScreen>
+    );
+  }
+
   if (isSuspended(status)) {
     return (
       <SafeScreen

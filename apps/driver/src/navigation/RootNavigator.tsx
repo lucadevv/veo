@@ -39,6 +39,7 @@ import {
 } from '../features/trips/presentation';
 import { BidsScreen } from '../features/bidding/presentation';
 import { EarningsScreen } from '../features/earnings/presentation';
+import { SettleDebtScreen } from '../features/debt/presentation';
 import { EditProfileScreen, ProfileScreen } from '../features/profile/presentation';
 import { DocumentsScreen } from '../features/documents/presentation';
 import { IncentivesScreen } from '../features/ops/presentation';
@@ -258,6 +259,13 @@ export const RootNavigator = (): React.JSX.Element => {
         <Stack.Screen name="Documents" component={DocumentsScreen} />
         <Stack.Screen name="Vehicles" component={VehiclesScreen} />
         <Stack.Screen name="Incentives" component={IncentivesScreen} />
+        {/* Saldar deuda de comisiones (ADR-022): se presenta sobre las tabs desde el banner de bloqueo
+            del dashboard y desde la fila "Debés a VEO" de Ganancias. */}
+        <Stack.Screen
+          name="SettleDebt"
+          component={SettleDebtScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
         <Stack.Screen
           name="Notifications"
           component={NotificationsScreen}

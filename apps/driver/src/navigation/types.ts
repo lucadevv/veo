@@ -78,6 +78,12 @@ export type RootStackParamList = {
   /** Pujas abiertas (marketplace conductor): lista de bids cercanos a los que ofertar/contraofertar. */
   Bids: undefined;
   Chat: { tripId: string };
+  /**
+   * ADR-022 §P-A · Saldar la deuda de comisiones (viajes en efectivo sobre el tope): total pendiente +
+   * elegir medio digital → cobro de liquidación → checkout → desbloqueo. Se llega desde el banner de bloqueo
+   * del dashboard y desde la fila "Debés a VEO" de Ganancias. Es la ÚNICA forma de desbloquearse.
+   */
+  SettleDebt: undefined;
   /** Carpooling: publicar un viaje compartido (ruta + fecha + asientos + precio con tope anti-lucro). */
   CarpoolPublish: undefined;
   /** Carpooling: gestionar las solicitudes de un viaje publicado (aprobar/rechazar). */

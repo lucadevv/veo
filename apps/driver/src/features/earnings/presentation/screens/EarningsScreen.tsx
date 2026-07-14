@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Banner, SafeScreen, Skeleton, Text, useTheme, type StatusTone } from '@veo/ui-kit';
+import type { RootStackParamList } from '../../../../navigation/types';
 import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import type { DriverPayoutView } from '@veo/api-client';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
@@ -125,6 +128,7 @@ function EarningsBlock({ period, t }: { period: Period; t: TFunction }): React.J
 /** Bloque "por liquidar" + historial de liquidaciones (GET /earnings/summary). */
 function PayoutsBlock({ t }: { t: TFunction }): React.JSX.Element {
   const theme = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { data, isLoading, isError, error, refetch } = useEarningsSummary();
 
   if (isLoading) {
@@ -155,6 +159,13 @@ function PayoutsBlock({ t }: { t: TFunction }): React.JSX.Element {
         <PayoutInfoCard
           pendingNetCents={data.pendingNetCents}
           pendingDebtCents={data.pendingDebtCents ?? 0}
+          // ADR-022 §P-A · la fila "Debés a VEO" es ACCIONABLE: lleva a Saldar deuda (la única forma de
+          // desbloquearse si se cruzó el tope). Solo se ofrece con deuda pendiente > 0.
+          onSettle={
+            (data.pendingDebtCents ?? 0) > 0
+              ? () => navigation.navigate('SettleDebt')
+              : undefined
+          }
           t={t}
         />
       </Reveal>

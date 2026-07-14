@@ -8,7 +8,7 @@ import { Button, SafeScreen } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { NoticeHero } from '../../../../shared/presentation/components/NoticeHero';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
-import { IconFace, IconLock } from '../../../../shared/presentation/icons';
+import { IconAlert, IconFace, IconLock } from '../../../../shared/presentation/icons';
 import {
   BIOMETRIC_CAPTURE_UNAVAILABLE,
   BIOMETRIC_BACKEND_UNAVAILABLE,
@@ -18,6 +18,7 @@ import {
 } from '../../domain';
 import { BiometricGate, type BiometricGateBanner } from '../components/BiometricGate';
 import { useShiftStartFlow } from '../hooks/useShiftStartFlow';
+import { useProfileData } from '../hooks/useProfileData';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ShiftStart'>;
 
@@ -41,10 +42,29 @@ export const ShiftStartScreen = ({ navigation }: Props): React.JSX.Element => {
   );
 
   const errorCode = error instanceof Error ? (error as { code?: string }).code : undefined;
+
+  // ADR-022 §P-A · BLOQUEO por DEUDA: startShift también responde 403 cuando el conductor cruzó el tope de
+  // deuda (mensaje del backend distinto del bloqueo biométrico). Normalmente el dashboard ya bloquea el
+  // acceso a esta pantalla con el flag `debtBlocked`, pero puede haber una CARRERA (la deuda cruzó con la
+  // pantalla ya abierta). Distinguimos por la VERDAD del backend (identity `debtBlocked`), no por el texto:
+  // ante un 403 refetcheamos el perfil; si es bloqueo por deuda, mostramos el mensaje del backend + "Saldar"
+  // (nunca el genérico "verificación bloqueada"). Preferimos el flag de identity; si aún no refrescó, cae al
+  // bloqueo biométrico y el refetch re-renderiza a esta rama.
+  const profile = useProfileData();
+  const is403 = error instanceof ApiError && error.status === 403;
+  React.useEffect(() => {
+    if (is403) {
+      void profile.refetch();
+    }
+    // Solo re-disparar cuando cambia la identidad del error 403 (no en cada render).
+  }, [is403, error]); // eslint-disable-line react-hooks/exhaustive-deps
+  const debtBlock = is403 && profile.data?.debtBlocked === true;
+
   // Bloqueo biométrico (regla #1: 3 fallos → 1h, solo la central destraba). Es un callejón sin salida
-  // por diseño: NO se reintenta, la única acción es contactar a la central.
+  // por diseño: NO se reintenta, la única acción es contactar a la central. El 403 por DEUDA queda EXCLUIDO
+  // (tiene su propia rama con el mensaje del backend + "Saldar").
   const locked =
-    errorCode === BIOMETRIC_LOCKED || (error instanceof ApiError && error.status === 403);
+    !debtBlock && (errorCode === BIOMETRIC_LOCKED || (error instanceof ApiError && error.status === 403));
   // Rechazo de liveness/match (sin bloqueo): el conductor puede reintentar. Solo cuando el flujo ya
   // volvió a reposo (`idle`) con el error puesto — mientras captura no mostramos la pantalla de error.
   const rejected = !locked && errorCode === BIOMETRIC_REJECTED && phase === 'idle';
@@ -60,6 +80,41 @@ export const ShiftStartScreen = ({ navigation }: Props): React.JSX.Element => {
   // UNA sola acción real (contactar a la central) — reemplaza el ex "botón verificar deshabilitado"
   // que era un callejón sin salida. BACKEND: el countdown de reintento (`lockedUntil`) no viene del
   // servidor; por eso el cuerpo lo OMITE en vez de inventar minutos.
+  // ADR-022 §P-A · el backend rechazó el turno por DEUDA (carrera contra el gate del dashboard). Mostramos el
+  // MENSAJE DEL BACKEND (no un genérico) + la única salida real: Saldar la deuda. El monto se ve en la pantalla
+  // de saldar (fuente única: pendingDebtCents), acá no lo inventamos.
+  if (debtBlock) {
+    const backendMessage = error instanceof ApiError ? error.message : '';
+    return (
+      <SafeScreen
+        header={<TopBar title={t('shift.startTitle')} onBack={() => navigation.goBack()} />}
+        footer={
+          <View style={styles.footer}>
+            <Button
+              label={t('shift.debtBlock.settleCta')}
+              variant="primary"
+              fullWidth
+              onPress={() => navigation.navigate('SettleDebt')}
+            />
+            <Button
+              label={t('shift.contactSupport')}
+              variant="ghost"
+              fullWidth
+              onPress={contactCentral}
+            />
+          </View>
+        }
+      >
+        <NoticeHero
+          tone="danger"
+          icon={({ size, color }) => <IconAlert size={size} color={color} strokeWidth={2} />}
+          title={t('shift.debtBlock.title')}
+          description={backendMessage || t('shift.debtBlock.body')}
+        />
+      </SafeScreen>
+    );
+  }
+
   if (locked) {
     return (
       <SafeScreen

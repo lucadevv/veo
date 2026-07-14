@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { TFunction } from 'i18next';
-import { Text, useTheme } from '@veo/ui-kit';
+import { Button, Text, useTheme } from '@veo/ui-kit';
 import { IconClock } from '../../../../shared/presentation/icons';
 import { formatPEN } from '../../../../shared/presentation/format';
 
@@ -10,6 +10,11 @@ export interface PayoutInfoCardProps {
   pendingNetCents: number;
   /** Deuda CASH pendiente con VEO (céntimos PEN). La fila solo se muestra si es > 0. */
   pendingDebtCents?: number;
+  /**
+   * ADR-022 §P-A · acción "Saldar ahora" de la fila de deuda: la deuda es ACCIONABLE (lleva a Saldar deuda),
+   * no solo informativa. Solo se ofrece con deuda pendiente (> 0). Si se omite, la fila queda informativa.
+   */
+  onSettle?: () => void;
   t: TFunction;
 }
 
@@ -25,6 +30,7 @@ export interface PayoutInfoCardProps {
 export function PayoutInfoCard({
   pendingNetCents,
   pendingDebtCents = 0,
+  onSettle,
   t,
 }: PayoutInfoCardProps): React.JSX.Element {
   const theme = useTheme();
@@ -73,6 +79,15 @@ export function PayoutInfoCard({
           <Text variant="caption" color="inkMuted">
             {t('earnings.pendingDebtInfo')}
           </Text>
+          {onSettle ? (
+            <Button
+              label={t('earnings.settleDebtCta')}
+              variant="primary"
+              fullWidth
+              onPress={onSettle}
+              style={styles.settleBtn}
+            />
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -92,4 +107,5 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   debtBlock: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10, gap: 4 },
+  settleBtn: { marginTop: 8 },
 });
