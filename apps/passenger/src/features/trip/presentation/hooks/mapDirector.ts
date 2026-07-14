@@ -81,6 +81,15 @@ export const FOLLOW_ZOOM = 16.3;
  */
 export const FOLLOW_PITCH = 42;
 
+/**
+ * Zoom del momento "TU CONDUCTOR LLEGÓ" (arrived): conductor y recogida casi coinciden — encuadre
+ * CERRADO sobre el punto de encuentro, sin ruta (ya no hay tramo que mostrar). PARÁMETRO DE GUSTO:
+ * 17.0 = el techo que ya usa FIT_MAX_ZOOM ("nivel puerta sin perder la cuadra de contexto"); por
+ * encima el pin llena la pantalla y desorienta. Norte-arriba y cenital: el pasajero está PARADO
+ * buscando el auto, no manejando.
+ */
+export const ARRIVED_ZOOM = 17.0;
+
 /** Entrada del director (todos los puntos que conoce la pantalla en el frame actual). */
 export interface MapDirectorInput {
   phase: TripPhase;
@@ -95,7 +104,7 @@ export interface MapDirectorInput {
   origin: GeoPoint | null;
   destination: GeoPoint | null;
   userPoint: GeoPoint | null;
-  /** Tipo de vehículo del trip si se conoce (hoy NO viene en TripActiveView → CAR por defecto). */
+  /** Tipo de vehículo del trip si se conoce (del activeTripStore, alimentado por el server → CAR por defecto). */
   vehicleType?: NearbyVehicleType;
   /** Hay geometría de ruta dibujada (para el `fit` normal de la fase route). */
   hasRoute: boolean;
@@ -104,12 +113,16 @@ export interface MapDirectorInput {
 /**
  * Decide la coreografía del mapa para la fase actual. PURA.
  *
- *  PRE-PICKUP (enRoute/arrived): encuadre [conductor live + recogida]. Al acercarse el vehículo al
- *    origen, el bounding box se achica solo → la cámara "se cierra" sin lógica extra (es geometría). Si
- *    aún no hay ubicación del conductor → fallback al fit de ruta/origen (comportamiento previo).
+ *  EN ROUTE (conductor viniendo): encuadre [conductor live + recogida] — el destino NO entra al frame:
+ *    lo que importa es POR DÓNDE VIENE el conductor (la pantalla dibuja la ruta `leg=pickup` del server).
+ *    Al acercarse el vehículo al origen, el bounding box se achica solo → la cámara "se cierra" sin
+ *    lógica extra (es geometría). Sin ubicación del conductor → fallback al fit de ruta/origen.
+ *  ARRIVED: conductor y recogida casi coinciden → zoom CERRADO sobre el punto de encuentro
+ *    (ARRIVED_ZOOM), sin ruta — un fit de dos puntos casi idénticos degeneraba y el nivel de zoom
+ *    quedaba a merced del padding; el center con zoom nombrado es determinista.
  *  IN PROGRESS: SOLO el taxi (sin userPoint). Cámara en modo `follow` sobre el conductor con zoom
- *    estable; la ruta al destino sigue dibujada. (Se eligió follow sobre fit[veh+dest] para que el zoom
- *    no "respire" en cada update y se sienta calmo a 60fps — ver REPORTE.)
+ *    estable; la ruta CANÓNICA al destino vuelve a dibujarse. (Se eligió follow sobre fit[veh+dest] para
+ *    que el zoom no "respire" en cada update y se sienta calmo a 60fps — ver REPORTE.)
  *  COMPLETED: vuelven userPoint + nearbyVehicles (ambiente); cámara vuelve al encuadre del cierre.
  */
 export function resolveMapDirective(input: MapDirectorInput): MapDirective {
@@ -128,12 +141,11 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
       : null;
 
   switch (phase) {
-    case 'enRoute':
-    case 'arrived': {
-      // DIRIGE sólo si hay conductor: encuadre [conductor + recogida]. En 'arrived' el conductor ya está
-      // sobre el origen → el box es chico → encuadre cerrado sobre la recogida con el vehículo,
-      // naturalmente. SIN conductor no hay nada concreto que dirigir → `null` → la Camera DECLARATIVA del
-      // AppMap encuadra la ruta/markers (el fallback de antes lo hacía la dirigida con un fit que, si
+    case 'enRoute': {
+      // DIRIGE sólo si hay conductor: encuadre [conductor + recogida] — NUNCA el destino (la fase es
+      // "ver venir al conductor"; la ruta de acercamiento la dibuja la pantalla con el leg pickup).
+      // SIN conductor no hay nada concreto que dirigir → `null` → la Camera DECLARATIVA del AppMap
+      // encuadra la ruta/markers (el fallback de antes lo hacía la dirigida con un fit que, si
       // origin/dest faltaban, quedaba vacío y derivaba a zoom-ciudad).
       if (driverPt) {
         const fitPoints = originPt ? [driverPt, originPt] : [driverPt];
@@ -149,6 +161,29 @@ export function resolveMapDirective(input: MapDirectorInput): MapDirective {
         showNearby: false,
         showDriverVehicle: false,
         cameraTarget: null,
+      };
+    }
+
+    case 'arrived': {
+      // TU CONDUCTOR LLEGÓ: conductor y recogida casi coinciden → center CERRADO y determinista sobre
+      // el punto de encuentro (preferimos la RECOGIDA: es donde el pasajero está parado; el vehículo,
+      // a metros, entra igual al frame), zoom nombrado ARRIVED_ZOOM, norte-arriba y cenital (pitch 0
+      // implícito: el aplicador resetea a cenital cuando el target no declara followPitch). Sin ruta:
+      // eso lo decide la pantalla (no dibuja polyline en esta fase). Sin NINGÚN punto → `null` →
+      // Camera declarativa.
+      const meetPoint = originPt ?? driverPt;
+      return {
+        showUserPoint: false,
+        showNearby: false,
+        showDriverVehicle: driverPt != null,
+        cameraTarget: meetPoint
+          ? {
+              mode: 'follow',
+              fitPoints: [],
+              followPoint: meetPoint,
+              followZoom: ARRIVED_ZOOM,
+            }
+          : null,
       };
     }
 

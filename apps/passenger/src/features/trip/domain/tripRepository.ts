@@ -57,11 +57,13 @@ export interface TripRepository {
   /** GET /trips/:id/state → estado ligero (polling de respaldo del socket). */
   getTripState(tripId: string): Promise<TripStateView>;
   /**
-   * GET /trips/:id/route → ruta POR FASE del viaje activo para el mapa (espejo del conductor,
-   * mismo contrato `tripRoute`): pre-recojo traza conductor→recojo→destino desde la última
-   * ubicación conocida del conductor; onboard, conductor→destino. Polyline + steps + markers.
+   * GET /trips/:id/route[?leg=pickup] → ruta del viaje para el mapa (mismo contrato `tripRoute`).
+   * Sin `leg`: la CANÓNICA persistida del viaje (origen→paradas→destino). `leg: 'pickup'`: el TRAMO
+   * DE ACERCAMIENTO vivo (conductor→recojo) para las fases pre-recojo — el pasajero ve POR DÓNDE
+   * VIENE el conductor; sin ubicación aún, el server responde ruta VACÍA (polyline '') y el mapa no
+   * dibuja nada (solo markers). Polyline + steps + markers.
    */
-  getTripRoute(tripId: string): Promise<TripRoute>;
+  getTripRoute(tripId: string, leg?: 'pickup'): Promise<TripRoute>;
   /** POST /trips/:id/cancel → cancela el viaje. */
   cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource>;
   /**

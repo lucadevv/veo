@@ -5,13 +5,7 @@ import type {
   TripResource,
 } from '@veo/api-client';
 import {tripStatus} from '@veo/api-client';
-import {
-  IconButton,
-  SearchField,
-  Skeleton,
-  Text,
-  useTheme,
-} from '@veo/ui-kit';
+import {IconButton, SearchField, Skeleton, Text, useTheme} from '@veo/ui-kit';
 import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Pressable, StyleSheet, TextInput, View} from 'react-native';
@@ -46,6 +40,7 @@ import type {OfferBoard} from './useOfferBoard';
 import type {UsePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import type {WaypointProposalController} from './useWaypointProposal';
 import type {TripPhase} from './tripFlowPhase';
+import type {NearbyVehicleType} from '../../../dispatch/domain/dispatchRepository';
 
 /** Modo LOCAL del sheet en el home: `idle` (atajos) o `searching` (búsqueda plegada DENTRO del sheet). */
 export type SheetFlowState = 'idle' | 'searching';
@@ -72,6 +67,11 @@ export interface RequestFlowContext {
   onRetryTripDetail: () => void;
   /** Controlador de la PARADA negociada mid-trip (Lote C3). */
   addStop: WaypointProposalController;
+  /**
+   * Tipo REAL del viaje (CAR|MOTO, del activeTripStore con fallback CAR): la franja de estado anima la
+   * silueta del vehículo PEDIDO — la moto no se anima como auto (misma fuente que el marker del mapa).
+   */
+  tripVehicleType: NearbyVehicleType;
   // ── Cotización (fase quoting) ──
   requestAgainToken: number;
   onTripCreated: (trip: TripResource) => void;
@@ -254,6 +254,7 @@ export function ActiveTripSheetHeader({ctx}: SlotProps): React.JSX.Element {
             ? t('trip.etaMinutes', {minutes: etaMinutes})
             : null
         }
+        vehicleType={ctx.tripVehicleType}
       />
     </View>
   );

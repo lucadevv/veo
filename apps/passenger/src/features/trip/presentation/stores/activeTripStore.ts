@@ -20,10 +20,11 @@ export interface ActiveTripState {
   activeTripMode: PricingMode | null;
   /**
    * Tipo de vehículo SOLICITADO del viaje activo (CAR | MOTO), congelado al crear (`tripResource.vehicleType`).
-   * Alimenta el GLYPH del marker del conductor asignado en el mapa (moto ≠ auto). `null` = desconocido →
-   * el mapa degrada al glyph de auto (fallback histórico). `TripActiveView` NO trae el tipo, por eso se
-   * co-loca acá: al crear viene del POST /trips; al REHIDRATAR tras un relaunch se recupera del snapshot
-   * MMKV local (`tripHistoryRepository`, que guardó el `tripResource` al crear) — best-effort.
+   * Alimenta el GLYPH del marker del conductor asignado en el mapa Y la animación del sheet (moto ≠ auto).
+   * `null` = desconocido → degrada al glyph de auto (fallback histórico). Fuentes, en orden: el POST /trips
+   * al crear; `tripActiveView.vehicleType` del server en la rehidratación Y en el poll del detalle (cubre
+   * la adopción por 409 y cross-device — antes el snapshot MMKV local era la ÚNICA fuente de rehidratación
+   * y esos caminos caían al auto); el snapshot MMKV como fallback de compat (BFF viejo sin el campo).
    */
   activeTripVehicleType: MobileVehicleType | null;
   /**

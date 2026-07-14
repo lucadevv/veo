@@ -33,7 +33,9 @@ function targetSignature(t: CameraTarget): string {
   if (t.mode === 'fit') {
     return `fit:${t.fitPoints.length}`;
   }
-  return `${t.mode}:${t.followZoom ?? ''}`;
+  // El pitch entra en la firma: el toggle 2D/3D del usuario clampea followPitch (AppMap) y debe
+  // re-aplicar la cámara YA (es intención explícita), no esperar al próximo umbral de movimiento.
+  return `${t.mode}:${t.followZoom ?? ''}:${t.followPitch ?? ''}`;
 }
 
 /** Punto "principal" del target (el que driftea con el conductor) para medir el umbral de movimiento. */

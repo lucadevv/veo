@@ -38,6 +38,7 @@ import type {
   RootStackParamList,
 } from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
+import {MapViewModeButton} from '../../../../shared/presentation/components/MapViewModeButton';
 import {decodePolylineToCoordinates} from '../../../../shared/utils/polyline';
 // Renombrado de home-map.jpg: Metro cacheaba el asset VIEJO por hash (el sim mostraba solo nubes,
 // sin la ruta azul de la imagen real) — nombre nuevo = URL nueva = caché bypasseada.
@@ -119,6 +120,21 @@ const HOME_SHEET_COLLAPSED_FRACTION = 0.45;
  * del layout (el aspect ya respeta la proporción, así que `stretch` no deforma).
  */
 const HOME_BACKDROP_ASPECT = 1200 / 1800;
+/**
+ * Cadencia del poll de la ruta de ACERCAMIENTO (`leg=pickup`, fase "conductor viniendo"): la ruta
+ * CAMBIA mientras el conductor avanza, así que se refresca más seguido que la canónica. 10 s es el
+ * balance pedido por el dueño: la traza se actualiza visiblemente sin castigar al facade de mapas
+ * (el re-fit de cámara entre polls lo cubre el throttle 2.5 s/40 m del useDirectedCamera).
+ */
+const PICKUP_ROUTE_REFRESH_MS = 10_000;
+/** Cadencia del poll de la ruta CANÓNICA onboard (no cambia salvo parada aceptada — 15 s alcanza). */
+const ONBOARD_ROUTE_REFRESH_MS = 15_000;
+/**
+ * Separación del toggle 2D/3D respecto del borde superior (bajo el chrome flotante): despeja el SOS
+ * (56 px) del viaje activo y el avatar del Home — MISMA posición en todas las fases con mapa, así el
+ * botón no salta al cambiar de fase.
+ */
+const MAP_TOGGLE_TOP_CLEARANCE = 56;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -182,7 +198,8 @@ export function RequestFlowScreen(): React.JSX.Element {
   // sheet casi-full no aplaste el viewport. 0 = aún sin primer reporte → cae al peek.
   const [sheetVisibleHeight, setSheetVisibleHeight] = useState(0);
   // Inset que el mapa reserva para el sheet: el snap actual si ya se reportó; si no, el peek.
-  const sheetMapInset = sheetVisibleHeight > 0 ? sheetVisibleHeight : peekHeight;
+  const sheetMapInset =
+    sheetVisibleHeight > 0 ? sheetVisibleHeight : peekHeight;
   const sheetRef = useRef<DraggableSheetHandle>(null);
   // Eje LOCAL del sheet (idle ↔ searching, la 2ª máquina) + texto de búsqueda. flowRef evita closures
   // rancios en handleSnap.
@@ -196,7 +213,9 @@ export function RequestFlowScreen(): React.JSX.Element {
   // (detachInactiveScreens): al volver, el sheet re-entra al viaje. La fuente de verdad es el server.
   const activeTripId = useActiveTripStore(s => s.activeTripId);
   const activeTripMode = useActiveTripStore(s => s.activeTripMode);
-  const activeTripVehicleType = useActiveTripStore(s => s.activeTripVehicleType);
+  const activeTripVehicleType = useActiveTripStore(
+    s => s.activeTripVehicleType,
+  );
   const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
   const setActiveTripMode = useActiveTripStore(s => s.setActiveTripMode);
   const setActiveTripVehicleType = useActiveTripStore(
@@ -273,20 +292,35 @@ export function RequestFlowScreen(): React.JSX.Element {
     refetchInterval: terminalPhase || live.ended ? false : 15_000,
   });
 
-  // RUTA POR FASE del viaje activo (GET /trips/:id/route — el ESPEJO del conductor, mismo contrato):
-  // pre-recojo el server traza conductor→recojo→destino desde la última ubicación del conductor
-  // (el pasajero VE por dónde viene el taxi); onboard, conductor→destino. Reemplaza a la polyline
-  // CONGELADA del quote en las fases del viaje. La FASE entra en la queryKey → al pasar de
-  // approach→onboard se re-pide YA (sin esperar el poll), simétrico a la invalidación del conductor.
-  const isRoutePhase =
-    phase === 'enRoute' || phase === 'arrived' || phase === 'inProgress';
-  const routeLeg = phase === 'inProgress' ? 'onboard' : 'approach';
+  // RUTA POR FASE del viaje activo (GET /trips/:id/route[?leg=pickup]):
+  //  · enRoute → leg PICKUP: la ruta de ACERCAMIENTO viva (conductor→recojo) — el pasajero ve POR
+  //    DÓNDE VIENE el conductor, no la canónica al destino. Poll a 10 s: esa traza cambia mientras
+  //    el conductor avanza. Sin ubicación aún, el server responde polyline '' → no se dibuja nada.
+  //  · arrived → SIN ruta (query apagada): conductor y recojo casi coinciden; el director cierra el
+  //    zoom sobre el punto de encuentro y una traza residual solo ensuciaría.
+  //  · inProgress → la CANÓNICA persistida (overview origen→paradas→destino), poll lento.
+  // La FASE entra en la queryKey → al pasar de pickup→onboard se re-pide YA (sin esperar el poll),
+  // simétrico a la invalidación del conductor.
+  const routeLeg =
+    phase === 'enRoute' ? 'pickup' : phase === 'inProgress' ? 'onboard' : null;
   const tripRouteQuery = useQuery({
     queryKey: ['trip', activeTripId, 'route', routeLeg],
-    queryFn: () => tripRepository.getTripRoute(activeTripId as string),
-    enabled: Boolean(activeTripId) && isRoutePhase,
-    refetchInterval: isRoutePhase ? 15_000 : false,
-    staleTime: 15_000,
+    queryFn: () =>
+      tripRepository.getTripRoute(
+        activeTripId as string,
+        routeLeg === 'pickup' ? 'pickup' : undefined,
+      ),
+    enabled: Boolean(activeTripId) && routeLeg !== null,
+    refetchInterval:
+      routeLeg === 'pickup'
+        ? PICKUP_ROUTE_REFRESH_MS
+        : routeLeg === 'onboard'
+          ? ONBOARD_ROUTE_REFRESH_MS
+          : false,
+    staleTime:
+      routeLeg === 'pickup'
+        ? PICKUP_ROUTE_REFRESH_MS
+        : ONBOARD_ROUTE_REFRESH_MS,
   });
   const liveRouteCoords = useMemo(
     () =>
@@ -326,8 +360,9 @@ export function RequestFlowScreen(): React.JSX.Element {
 
   // COREOGRAFÍA DEL MAPA POR FASE (helper puro). Decide qué markers muestra y cómo encuadra la cámara
   // (fit conductor+recogida / follow "como si manejara" / center). El AppMap solo recibe props simples
-  // (showUserPoint, cameraTarget, …). El vehicleType REAL del viaje vive en el activeTripStore (congelado
-  // al crear; TripActiveView no lo trae) → sin dato, CAR (decisión del dueño: "si no hay tipo, CAR").
+  // (showUserPoint, cameraTarget, …). El vehicleType REAL del viaje vive en el activeTripStore
+  // (alimentado por el server — POST /trips + tripActiveView del poll) → sin dato, CAR (decisión del
+  // dueño: "si no hay tipo, CAR").
   // Memoizado por las coords que driftean para no reconstruir el target en cada render del padre.
   // Memoizados por el RoutePlace del store (referencia estable salvo que cambien). Se pasan al AppMap
   // (React.memo): sin memo, un objeto nuevo por render rompía el memo y empujaba props nuevas al GL thread
@@ -352,6 +387,20 @@ export function RequestFlowScreen(): React.JSX.Element {
     () => tripDetailQuery.data?.waypoints ?? [],
     [tripDetailQuery.data?.waypoints],
   );
+  // FUENTE DE VERDAD del tipo de vehículo: el SERVER (`tripActiveView.vehicleType`, en cada poll del
+  // detalle). Cubre los caminos donde el POST /trips no pasó por `onTripCreated` — adopción por 409
+  // (ACTIVE_TRIP_EXISTS) y rehidratación cross-device — donde el store quedaba null y la moto se
+  // pintaba como auto. Solo pisa cuando difiere (sin sets redundantes por poll).
+  useEffect(() => {
+    const serverType = tripDetailQuery.data?.vehicleType;
+    if (serverType && serverType !== activeTripVehicleType) {
+      setActiveTripVehicleType(serverType);
+    }
+  }, [
+    tripDetailQuery.data?.vehicleType,
+    activeTripVehicleType,
+    setActiveTripVehicleType,
+  ]);
   const driverVehicleType = activeTripVehicleType ?? 'CAR';
   const mapDirective = useMemo(
     () =>
@@ -393,7 +442,9 @@ export function RequestFlowScreen(): React.JSX.Element {
     live.acknowledgeMessages(live.incomingMessages.map(m => m.id));
     // El primer nombre del conductor para el título del chat (simétrico al conductor, que muestra el del
     // pasajero). `undefined` si aún no se resolvió → el chat cae al título genérico.
-    const driverName = tripDetailQuery.data?.driver?.name?.trim().split(/\s+/)[0];
+    const driverName = tripDetailQuery.data?.driver?.name
+      ?.trim()
+      .split(/\s+/)[0];
     navigation.navigate('Chat', {
       tripId: activeTripId as string,
       driverName: driverName || undefined,
@@ -763,6 +814,8 @@ export function RequestFlowScreen(): React.JSX.Element {
     tripDetailError: tripDetailQuery.isError && !tripDetailQuery.data,
     onRetryTripDetail: retryTripDetail,
     addStop,
+    // Misma fuente que el marker del mapa: la franja de estado anima la silueta del vehículo PEDIDO.
+    tripVehicleType: driverVehicleType,
     requestAgainToken: debtGate.requestAgainToken,
     onTripCreated,
     onScheduled,
@@ -864,18 +917,21 @@ export function RequestFlowScreen(): React.JSX.Element {
               mapDirective.showNearby ? nearbyVehicles : undefined
             }
             cameraTarget={mapDirective.cameraTarget ?? undefined}
-            // Polyline VIVA por fase (conductor→recojo en el acercamiento; conductor→destino onboard),
-            // recalculada por el server cada 15 s. En el ACERCAMIENTO la congelada del quote (recojo→destino)
-            // NO es fallback válido: mostraría la ruta a destino cuando el conductor recién viene — mejor
-            // nada hasta que cargue la viva. El quote solo respalda al tramo onboard (es la MISMA ruta B→C).
+            // Polyline por fase: enRoute dibuja el leg PICKUP vivo (conductor→recojo, poll 10 s);
+            // arrived NO dibuja ruta (query apagada + guard: zoom cerrado al punto de encuentro);
+            // onboard dibuja la canónica. En el ACERCAMIENTO la congelada del quote (recojo→destino)
+            // NO es fallback válido: mostraría la ruta a destino cuando el conductor recién viene —
+            // mejor nada hasta que cargue la viva. El quote solo respalda al tramo onboard (misma B→C).
             routeCoordinates={
-              liveRouteCoords && liveRouteCoords.length > 1
-                ? liveRouteCoords
-                : phase === 'enRoute' || phase === 'arrived'
-                  ? undefined
-                  : routeCoords.length > 1
-                    ? routeCoords
-                    : undefined
+              phase === 'arrived'
+                ? undefined
+                : liveRouteCoords && liveRouteCoords.length > 1
+                  ? liveRouteCoords
+                  : phase === 'enRoute'
+                    ? undefined
+                    : routeCoords.length > 1
+                      ? routeCoords
+                      : undefined
             }
             // F3 · cuando el director NO dirige (cameraTarget null: aún sin conductor en pre-pickup/curso),
             // la Camera DECLARATIVA encuadra la ruta+markers (fitToRoute) en vez de quedar muda y derivar al
@@ -1012,6 +1068,17 @@ export function RequestFlowScreen(): React.JSX.Element {
           }
         />
       )}
+
+      {/* Toggle 2D/3D flotante: solo con MAPA vivo de fondo (route/trip). Arriba-derecha BAJO el
+          chrome (despeja el SOS del viaje y el avatar del Home — misma posición en todas las fases,
+          el botón no salta). La preferencia la consume el AppMap (estilo sin extrusiones + pitch 0). */}
+      {mapMode !== 'idle' && isFocused ? (
+        <MapViewModeButton
+          topInset={
+            insets.top + theme.spacing.sm * 2 + MAP_TOGGLE_TOP_CLEARANCE
+          }
+        />
+      ) : null}
 
       {/* CONTENIDO del flujo: UN solo BOTTOMSHEET ARRASTRABLE anclado abajo, para TODAS las fases.
           - idle: peek FIJO a la altura del pen (P/Home: HomeContent en y=190/844 ≈ 22.5% desde arriba) con

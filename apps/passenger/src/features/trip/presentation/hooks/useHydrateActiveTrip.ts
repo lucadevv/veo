@@ -55,13 +55,17 @@ export function useHydrateActiveTrip(): void {
             if (trip.dispatchMode) {
               setActiveTripMode(trip.dispatchMode);
             }
-            // Tipo de vehículo del viaje: `TripActiveView` NO lo trae, pero el snapshot MMKV local
-            // (grabado al CREAR el viaje con el `tripResource` completo) sí. Best-effort: si el viaje
-            // se creó en otro device / el snapshot no está, queda null y el mapa degrada al glyph de
-            // auto (mismo comportamiento histórico, nunca peor).
-            const snapshot = history.list().find(t => t.id === trip.id);
-            if (snapshot?.vehicleType) {
-              setActiveTripVehicleType(snapshot.vehicleType);
+            // Tipo de vehículo del viaje: la fuente de verdad es el SERVER (`tripActiveView.vehicleType`,
+            // el trip conoce su oferta) — cubre relaunch, adopción por 409 y cross-device. El snapshot
+            // MMKV local (grabado al crear con el `tripResource`) queda como FALLBACK para un BFF viejo
+            // que aún no emite el campo (compat N-2). Sin ninguno de los dos, queda null y el mapa
+            // degrada al glyph de auto (comportamiento histórico, nunca peor).
+            const snapshotType = history
+              .list()
+              .find(t => t.id === trip.id)?.vehicleType;
+            const vehicleType = trip.vehicleType ?? snapshotType;
+            if (vehicleType) {
+              setActiveTripVehicleType(vehicleType);
             }
           }
         })

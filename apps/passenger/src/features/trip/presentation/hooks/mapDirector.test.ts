@@ -1,5 +1,6 @@
 import type {GeoPoint} from '@veo/api-client';
 import {
+  ARRIVED_ZOOM,
   FOLLOW_PITCH,
   FOLLOW_ZOOM,
   resolveMapDirective,
@@ -28,16 +29,14 @@ const base: MapDirectorInput = {
  * encuadra, en vez de montar una Camera dirigida que no hace nada y deja la cámara derivar al zoom-ciudad.
  */
 describe('resolveMapDirective', () => {
-  describe('pre-pickup (enRoute/arrived)', () => {
-    it('CON conductor → fit [conductor + recogida], taxi visible, sin userPoint', () => {
-      for (const phase of ['enRoute', 'arrived'] as const) {
-        const d = resolveMapDirective({...base, phase, driver});
-        expect(d.showDriverVehicle).toBe(true);
-        expect(d.showUserPoint).toBe(false);
-        expect(d.cameraTarget).not.toBeNull();
-        expect(d.cameraTarget?.mode).toBe('fit');
-        expect(d.cameraTarget?.fitPoints).toEqual([driver, origin]);
-      }
+  describe('conductor viniendo (enRoute)', () => {
+    it('CON conductor → fit [conductor + recogida] (JAMÁS el destino), taxi visible, sin userPoint', () => {
+      const d = resolveMapDirective({...base, phase: 'enRoute', driver});
+      expect(d.showDriverVehicle).toBe(true);
+      expect(d.showUserPoint).toBe(false);
+      expect(d.cameraTarget).not.toBeNull();
+      expect(d.cameraTarget?.mode).toBe('fit');
+      expect(d.cameraTarget?.fitPoints).toEqual([driver, origin]);
     });
 
     it('SIN conductor → cameraTarget NULL (la Camera declarativa encuadra ruta/markers), sin taxi', () => {
@@ -45,15 +44,41 @@ describe('resolveMapDirective', () => {
       expect(d.showDriverVehicle).toBe(false);
       expect(d.cameraTarget).toBeNull();
     });
+  });
 
-    it("'arrived' encuadra solo el conductor si no hay origen (box cerrado sobre el vehículo)", () => {
+  describe('tu conductor llegó (arrived)', () => {
+    it('zoom CERRADO sobre la recogida (center determinista ARRIVED_ZOOM, norte-arriba, sin pitch)', () => {
+      const d = resolveMapDirective({...base, phase: 'arrived', driver});
+      expect(d.showDriverVehicle).toBe(true);
+      expect(d.showUserPoint).toBe(false);
+      expect(d.cameraTarget?.mode).toBe('follow');
+      expect(d.cameraTarget?.followPoint).toEqual(origin);
+      expect(d.cameraTarget?.followZoom).toBe(ARRIVED_ZOOM);
+      // Parado esperando el auto: nada de vista de manejo (el aplicador resetea a cenital/norte).
+      expect(d.cameraTarget?.followPitch).toBeUndefined();
+      expect(d.cameraTarget?.followHeading).toBeUndefined();
+    });
+
+    it('sin origen cae al conductor como punto de encuentro (mismo zoom cerrado)', () => {
       const d = resolveMapDirective({
         ...base,
         phase: 'arrived',
         driver,
         origin: null,
       });
-      expect(d.cameraTarget?.fitPoints).toEqual([driver]);
+      expect(d.cameraTarget?.followPoint).toEqual(driver);
+      expect(d.cameraTarget?.followZoom).toBe(ARRIVED_ZOOM);
+    });
+
+    it('sin origen NI conductor → cameraTarget NULL (Camera declarativa), sin taxi', () => {
+      const d = resolveMapDirective({
+        ...base,
+        phase: 'arrived',
+        driver: null,
+        origin: null,
+      });
+      expect(d.showDriverVehicle).toBe(false);
+      expect(d.cameraTarget).toBeNull();
     });
   });
 

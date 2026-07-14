@@ -92,8 +92,12 @@ export class HttpTripRepository implements TripRepository {
     return this.http.get(`/trips/${tripId}/state`, {schema: tripStateView});
   }
 
-  getTripRoute(tripId: string): Promise<TripRoute> {
-    return this.http.get(`/trips/${tripId}/route`, {schema: tripRoute});
+  getTripRoute(tripId: string, leg?: 'pickup'): Promise<TripRoute> {
+    // `leg=pickup` pide el tramo de acercamiento vivo (conductor→recojo); sin leg, la canónica.
+    return this.http.get(`/trips/${tripId}/route`, {
+      ...(leg ? {query: {leg}} : {}),
+      schema: tripRoute,
+    });
   }
 
   cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource> {
@@ -102,7 +106,6 @@ export class HttpTripRepository implements TripRepository {
       schema: tripResource,
     });
   }
-
 
   proposeWaypoint(
     tripId: string,

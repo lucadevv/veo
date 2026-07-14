@@ -8,13 +8,7 @@ import {
   ShapeSource,
 } from '@rnmapbox/maps';
 import {passengerMapRoute, RoutePin} from '@veo/ui-kit';
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {StyleSheet, useWindowDimensions, View} from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -34,7 +28,11 @@ import {
 import {type DirectedCameraRef, useDirectedCamera} from './useDirectedCamera';
 import {useIdleCamera} from './useIdleCamera';
 import {RecenterButton} from './RecenterButton';
-import {veoLightMapboxStyleJSON} from './mapbox/veoLightStyle';
+import {
+  veoLightMapboxStyleJSON,
+  veoLightMapboxStyleJSON2D,
+} from './mapbox/veoLightStyle';
+import {useMapViewModeStore} from '../stores/mapViewModeStore';
 
 export interface AppMapProps {
   /** Centro inicial del mapa (cuando no se ajusta a la ruta). */
@@ -313,10 +311,23 @@ function AppMapComponent({
 }: AppMapProps): React.JSX.Element {
   // Posición del conductor SUAVIZADA (lerp entre ticks del socket): el marker desliza, no salta.
   const smoothedDriver = useSmoothedPoint(isValidPoint(driver) ? driver : null);
+  // MODO DE VISTA 2D/3D (preferencia persistida del usuario). En 2D: estilo sin extrusiones
+  // (building-3d oculto) + pitch CLAMPEADO a 0 — el course-up del viaje en curso sigue rotando el
+  // bearing, pero plano. En 3D: comportamiento vigente intacto.
+  const viewMode = useMapViewModeStore(s => s.mode);
+  const effectiveCameraTarget = useMemo<CameraTarget | undefined>(() => {
+    if (!cameraTarget) return undefined;
+    // Solo el follow declara pitch; clampearlo acá (y no en el director) mantiene al director PURO de
+    // preferencias de vista — la fase decide la coreografía, el usuario decide la perspectiva.
+    if (viewMode === '2d' && (cameraTarget.followPitch ?? 0) !== 0) {
+      return {...cameraTarget, followPitch: 0};
+    }
+    return cameraTarget;
+  }, [cameraTarget, viewMode]);
   // Cámara DIRIGIDA por el `mapDirector` (encuadre conductor+recogida / follow taxi). Cuando hay
   // `cameraTarget`, el encuadre lo maneja `useDirectedCamera` imperativamente (throttle + modo libre);
   // si no, la `Camera` declarativa de abajo gobierna como siempre (bounds de ruta / center).
-  const directedCamera = cameraTarget != null;
+  const directedCamera = effectiveCameraTarget != null;
   const cameraRef = useRef<DirectedCameraRef | null>(null);
   const noopTarget = useMemo<CameraTarget>(
     () => ({mode: 'center', fitPoints: [], followPoint: null}),
@@ -349,7 +360,7 @@ function AppMapComponent({
 
   const {onGesture} = useDirectedCamera(
     cameraRef,
-    cameraTarget ?? noopTarget,
+    effectiveCameraTarget ?? noopTarget,
     fitBottomInset,
   );
 
@@ -478,7 +489,11 @@ function AppMapComponent({
   const mapView = (
     <MapView
       style={StyleSheet.absoluteFill}
-      styleJSON={veoLightMapboxStyleJSON}
+      // Variante del estilo por preferencia 2D/3D: alternar recarga el estilo — aceptable, es un
+      // gesto deliberado y esporádico (no un hot-path del render).
+      styleJSON={
+        viewMode === '2d' ? veoLightMapboxStyleJSON2D : veoLightMapboxStyleJSON
+      }
       logoEnabled={false}
       attributionEnabled={false}
       compassEnabled={false}

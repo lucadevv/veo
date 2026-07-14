@@ -1,12 +1,12 @@
 /**
  * Estilo veo-light ("Daylight Trust") sobre **Mapbox Streets v8**.
  *
- * Migración dark→light Trust (Theme de Confianza): el mapa del pasajero adopta la MISMA paleta clara
- * que ya usa el admin-web (`apps/admin-web/src/lib/map/veo-map-style.ts`, `lightPalette`). La estructura
- * de capas (filtros, minzooms, anchos de línea, símbolos) es IDÉNTICA a la variante oscura anterior
- * (`veoDarkStyle.ts`, eliminado): solo cambian las constantes de color de la `palette`. El lienzo del
- * mapa (`bg #F5F7FA`) matchea el token `bg` del tema (themes.ts), así que mapa y chrome (sheets)
- * comparten el MISMO canvas sin costura visible.
+ * Migración dark→light Trust (Theme de Confianza): la estructura de capas (filtros, minzooms, anchos
+ * de línea, símbolos) es IDÉNTICA a la variante oscura anterior (`veoDarkStyle.ts`, eliminado) + los
+ * casings de minor/street que exigió la calibración clara. La paleta nació del `lightPalette` del
+ * admin-web y HOY diverge a propósito (primera calibración del dueño, ver doc de `palette`): el
+ * lienzo #EEF1F4 ya NO matchea el token `bg` del tema — el mapa se separa del chrome, decisión
+ * deliberada del feedback "muy blanco".
  *
  * El objeto Style JSON se pasa a `MapView` vía `styleJSON` (string). El token público de Mapbox lo
  * resuelve `Mapbox.setAccessToken` en el bootstrap nativo, así que las fuentes/glyphs usan las URLs
@@ -34,24 +34,40 @@
  *  place country         → place_label (type=country; filtro worldview="all")
  */
 
-/** Paleta veo-light "Daylight Trust" (idéntica al `lightPalette` del admin-web). */
+/**
+ * Paleta veo-light "Daylight Trust" — PRIMERA CALIBRACIÓN DEL DUEÑO (2026-07-14, feedback "muy
+ * blanco"): baja el canvas un paso (#EEF1F4 — ya NO el token `bg` #F5F7FA del tema; divergencia
+ * DELIBERADA para que el mapa deje de fundirse con los sheets), sube el verde de parques/cobertura,
+ * empuja el agua a un celeste más presente y da JERARQUÍA REAL a la malla vial: minor/street en
+ * blanco puro sobre el lienzo gris (patrón de mapa claro clásico), secondary casi-blanco,
+ * primary/motorway en grises azulados francos. Los halos de labels quedan como estaban. Son
+ * PARÁMETROS DE GUSTO: el dueño itera sobre esta base. (Ya no es idéntica al lightPalette del
+ * admin-web: la calibración es del mapa del pasajero.)
+ *
+ * CONSTRAINT DE IDENTIDAD COMPARTIDA: esta paleta es la MISMA que la del conductor
+ * (`apps/driver/src/shared/presentation/components/mapbox/veoLightStyle.ts`) — el mapa es una sola
+ * identidad visual VEO en ambas apps. Si el dueño recalibra un valor, cambia EN AMBOS archivos.
+ */
 const palette = {
-  // Canvas claro = token `bg` del tema (themes.ts #F5F7FA): mapa y sheets comparten el mismo lienzo.
-  bg: '#F5F7FA',
-  landcover: '#E9F3EC',
-  park: '#E2F3E9',
-  landuseResidential: '#F0F3F7',
-  landuseOther: '#EDF1F5',
-  water: '#D4E6F2',
-  building: '#E6EBF1',
-  buildingOutline: '#DCE3EB',
-  roadMinor: '#E6EBF1',
-  roadStreet: '#DCE3EB',
-  roadSecondary: '#CBD3DD',
-  roadPrimary: '#BAC4CF',
-  roadMotorway: '#A7B3C1',
-  boundary: '#C5CDD6',
-  labelWater: '#7E9BB5',
+  bg: '#EEF1F4',
+  landcover: '#DFEFE5',
+  park: '#D5EBDE',
+  landuseResidential: '#E7EBF0',
+  landuseOther: '#E4E9EF',
+  water: '#BBD8EA',
+  building: '#DFE5EC',
+  buildingOutline: '#D2DAE3',
+  roadMinor: '#FFFFFF',
+  roadStreet: '#FFFFFF',
+  // ANOTADO (calibración): con calles blancas, minor/street necesitan un CASING sutil para no
+  // desaparecer sobre el residential (#E7EBF0) — ver las capas *-casing de abajo. Solo minor/street:
+  // secondary+ ya contrastan por color propio.
+  roadCasing: '#D5DCE4',
+  roadSecondary: '#F4F8FB',
+  roadPrimary: '#AEBAC7',
+  roadMotorway: '#9AA8B8',
+  boundary: '#C0C9D3',
+  labelWater: '#6E93B3',
   labelWaterHalo: '#FFFFFF',
   labelStreet: '#8A929E',
   labelStreetHalo: '#FFFFFF',
@@ -263,6 +279,48 @@ export const veoLightMapboxStyle: Record<string, unknown> = {
           ['get', 'min_height'],
         ],
         'fill-extrusion-vertical-gradient': true,
+      },
+    },
+    {
+      // CASING de minor (calibración "muy blanco"): con la calle en blanco puro, sin este borde la
+      // malla se fundía con el residential. Misma geometría que transportation-minor, ~1.4px más
+      // ancha por lado del zoom alto → queda un filete #D5DCE4 sutil alrededor del blanco.
+      id: 'transportation-minor-casing',
+      type: 'line',
+      source: 'composite',
+      'source-layer': 'road',
+      minzoom: 12,
+      filter: [
+        'match',
+        ['get', 'class'],
+        ['service', 'track', 'path', 'pedestrian'],
+        true,
+        false,
+      ],
+      layout: {'line-cap': 'round', 'line-join': 'round'},
+      paint: {
+        'line-color': palette.roadCasing,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.8, 16, 4.4],
+      },
+    },
+    {
+      // CASING de street: mismo motivo que el de minor (calles blancas necesitan borde sutil).
+      id: 'transportation-street-casing',
+      type: 'line',
+      source: 'composite',
+      'source-layer': 'road',
+      minzoom: 11,
+      filter: [
+        'match',
+        ['get', 'class'],
+        ['tertiary', 'tertiary_link', 'street', 'street_limited'],
+        true,
+        false,
+      ],
+      layout: {'line-cap': 'round', 'line-join': 'round'},
+      paint: {
+        'line-color': palette.roadCasing,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.0, 16, 6.6],
       },
     },
     {
@@ -528,3 +586,27 @@ export const veoLightMapboxStyle: Record<string, unknown> = {
  */
 export const veoLightMapboxStyleJSON: string =
   JSON.stringify(veoLightMapboxStyle);
+
+/** Id de la capa de extrusiones (la ÚNICA diferencia entre la variante 3D y la 2D del estilo). */
+const BUILDINGS_3D_LAYER_ID = 'building-3d';
+
+/**
+ * VARIANTE 2D del estilo (toggle 2D/3D del pasajero): idéntica salvo la capa `building-3d`, oculta
+ * por `layout.visibility: none`. Se materializa una sola vez a nivel de módulo (mismo criterio que la
+ * 3D); alternar el toggle intercambia el string completo de `styleJSON` — el reload del estilo es
+ * aceptable porque es un gesto deliberado y esporádico del usuario, no un hot-path.
+ */
+const veoLightMapboxStyle2D: Record<string, unknown> = {
+  ...veoLightMapboxStyle,
+  layers: (veoLightMapboxStyle.layers as Record<string, unknown>[]).map(
+    layer =>
+      layer.id === BUILDINGS_3D_LAYER_ID
+        ? {...layer, layout: {visibility: 'none'}}
+        : layer,
+  ),
+};
+
+/** Style 2D serializado (edificios planos) para el prop `styleJSON` de `MapView`. */
+export const veoLightMapboxStyleJSON2D: string = JSON.stringify(
+  veoLightMapboxStyle2D,
+);

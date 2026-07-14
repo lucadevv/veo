@@ -14,6 +14,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import {VehicleIcon} from '../../../dispatch/presentation/components/VehicleIcon';
+import type {NearbyVehicleType} from '../../../dispatch/domain/dispatchRepository';
 
 /**
  * FRANJA DE ESTADO DEL VIAJE (canónica) — una línea sutil de extremo a extremo con el VehicleIcon del
@@ -47,6 +48,11 @@ export interface TripStatusStripProps {
   driverName?: string | null;
   /** ETA en vivo ya formateada ("3 min") como pill a la derecha (pen StatusRow). `null` = sin pill. */
   etaLabel?: string | null;
+  /**
+   * Tipo REAL del viaje (CAR|MOTO, del activeTripStore): la silueta que se desliza es la del vehículo
+   * pedido — una moto NO se anima como auto (feedback del dueño). Ausente → fallback del registro (auto).
+   */
+  vehicleType?: NearbyVehicleType;
 }
 
 /** Tamaño del vehículo en la franja (px). Chico y legible, no compite con la DriverCard. */
@@ -103,6 +109,7 @@ export function TripStatusStrip({
   status,
   driverName = null,
   etaLabel = null,
+  vehicleType,
 }: TripStatusStripProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
@@ -227,7 +234,7 @@ export function TripStatusStrip({
             ]}
           />
           <View style={styles.iconRotate}>
-            <VehicleIcon size={ICON_SIZE} />
+            <VehicleIcon vehicleType={vehicleType} size={ICON_SIZE} />
           </View>
         </Animated.View>
       </View>

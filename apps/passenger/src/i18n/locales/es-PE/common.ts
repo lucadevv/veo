@@ -315,6 +315,9 @@ export const common = {
     locationActionRetry: 'Reintentar',
     /** Botón flotante del mapa para volver la cámara a mi ubicación tras panear libremente. */
     recenter: 'Centrar en mi ubicación',
+    /** Toggle flotante 2D/3D del mapa: el label describe el modo DESTINO al que lleva el toque. */
+    mapView2d: 'Ver el mapa plano (2D)',
+    mapView3d: 'Ver el mapa en 3D',
     quote: 'Cotizar viaje',
     quoting: 'Cotizando…',
     fare: 'Tarifa',
