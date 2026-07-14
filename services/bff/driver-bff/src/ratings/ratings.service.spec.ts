@@ -12,7 +12,10 @@ import { DownstreamError, type InternalRestClient } from '@veo/rpc';
 import { RatingsService } from './ratings.service';
 import type { RestGateway } from '../infra/rest.gateway';
 
-const user: AuthenticatedUser = { userId: 'drv-1', type: 'driver', roles: [], sessionId: 's1' };
+// El userId de SESIÓN del conductor ≠ su id de PERFIL (trip.driverId): el service lo resuelve por
+// gRPC (GetDriverByUser) y lo firma en la identidad — el fix del 403 "No participaste de este viaje".
+const user: AuthenticatedUser = { userId: 'usr-drv-1', type: 'driver', roles: [], sessionId: 's1' };
+const identityWithDriver: AuthenticatedUser = { ...user, driverId: 'drv-1' };
 
 const RATING = {
   id: 'rat-1',
@@ -26,7 +29,9 @@ const RATING = {
 
 function makeService(client: Partial<InternalRestClient>) {
   const gateway = { client: () => client as InternalRestClient } as unknown as RestGateway;
-  return new RatingsService(gateway);
+  // GetDriverByUser resuelve usr-drv-1 → perfil drv-1 (el driverId que exige el gate del rating-service).
+  const grpc = { call: vi.fn().mockResolvedValue({ found: true, id: 'drv-1' }) } as never;
+  return new RatingsService(gateway, grpc);
 }
 
 describe('RatingsService.create · el conductor califica al pasajero', () => {
@@ -44,7 +49,8 @@ describe('RatingsService.create · el conductor califica al pasajero', () => {
     const result = await svc.create(user, dto);
 
     expect(result).toEqual(RATING);
-    expect(post).toHaveBeenCalledWith('/ratings', { identity: user, body: dto });
+    // La identidad firmada lleva el driverId RESUELTO (no el crudo del JWT).
+    expect(post).toHaveBeenCalledWith('/ratings', { identity: identityWithDriver, body: dto });
     // El body NO lleva raterId: lo deriva el rating-service de la identidad firmada.
     const [, opts] = post.mock.calls[0] as [string, { body: Record<string, unknown> }];
     expect(opts.body).not.toHaveProperty('raterId');
@@ -74,7 +80,7 @@ describe('RatingsService.getMyRatingForTrip', () => {
 
     await svc.getMyRatingForTrip(user, 'trip-1');
 
-    expect(get).toHaveBeenCalledWith('/ratings', { identity: user, query: { tripId: 'trip-1' } });
+    expect(get).toHaveBeenCalledWith('/ratings', { identity: identityWithDriver, query: { tripId: 'trip-1' } });
     const [, opts] = get.mock.calls[0] as [string, { query: Record<string, unknown> }];
     expect(opts.query).not.toHaveProperty('raterId');
     expect(opts.query).not.toHaveProperty('userId');

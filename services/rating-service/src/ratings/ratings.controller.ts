@@ -25,6 +25,18 @@ import {
   RatingResponseDto,
 } from './dto/rating.dto';
 
+/**
+ * Identidad del RATER: para un CONDUCTOR, el sujeto que participa del viaje es su PERFIL de conductor
+ * (`trip.driverId` = identity.drivers.id), NO su userId de sesión — el driver-bff lo resuelve
+ * (GetDriverByUser) y lo FIRMA en la identidad interna (`driverId`, anti-IDOR by construction).
+ * Sin esta derivación, el gate de participación rechazaba al conductor real con "No participaste de
+ * este viaje" (visto en vivo) y la calificación bidireccional quedaba rota del lado conductor.
+ * Pasajeros/admin no llevan `driverId` → cae a `userId`, el comportamiento de siempre.
+ */
+function raterIdOf(user: AuthenticatedUser): string {
+  return user.type === 'driver' && user.driverId ? user.driverId : user.userId;
+}
+
 @ApiTags('ratings')
 @ApiBearerAuth()
 @UseGuards(InternalIdentityGuard)
@@ -38,7 +50,7 @@ export class RatingsController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateRatingDto,
   ): Promise<RatingResponseDto> {
-    return this.ratings.create(user.userId, dto);
+    return this.ratings.create(raterIdOf(user), dto);
   }
 
   @Get()
@@ -51,7 +63,7 @@ export class RatingsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: FindRatingsQueryDto,
   ): Promise<RatingResponseDto> {
-    const rating = await this.ratings.findByTripForRater(query.tripId, user.userId);
+    const rating = await this.ratings.findByTripForRater(query.tripId, raterIdOf(user));
     if (!rating) throw new NotFoundException('No hay calificación tuya para este viaje');
     return rating;
   }
