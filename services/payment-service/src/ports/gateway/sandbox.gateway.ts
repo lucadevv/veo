@@ -9,6 +9,12 @@
  *   Para tests sin red, expone `verifyWebhook` con el MISMO firmador/secret de ProntoPaga y un helper
  *   `buildSignedWebhook` que arma un body firmado (lo usan e2e y el smoke del boot-real).
  *
+ * - Afiliación Yape On File (`YapeSubscriber`): DETERMINISTA en proceso (espeja
+ *   `/api/payment/yape/subscription`). `createYapeSubscription` genera un walletUID + deepLink de
+ *   sandbox; `showYapeSubscription` resuelve SIEMPRE ACCEPTED → el poll defensivo del dominio la pasa a
+ *   ACTIVE sin webhook real. Permite probar el PAGO AUTOMÁTICO (on-file) sin depender de que ProntoPaga
+ *   habilite el producto en el comercio (el sandbox real devuelve "not enabled for commerce").
+ *
  * No es un mock de test: es un adapter real, seleccionable por VEO_PAYMENT_MODE=sandbox.
  */
 import { Logger } from '@nestjs/common';
@@ -25,6 +31,9 @@ import type {
   Refundable,
   RefundResult,
   RefundMeta,
+  YapeSubscriber,
+  YapeSubscriptionResult,
+  YapeSubscriptionDetail,
 } from './payment-gateway.port';
 import { signPayload, verifySignature, type SignablePayload } from './prontopaga.signer';
 import { mapProntoPagaStatus, normalizeWebhook } from './prontopaga.mapping';
@@ -57,7 +66,9 @@ export interface SandboxGatewayOptions {
   webhookSecret?: string;
 }
 
-export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, Refundable {
+export class SandboxPaymentGateway
+  implements PaymentGateway, WebhookVerifier, Refundable, YapeSubscriber
+{
   private readonly logger = new Logger('SandboxPaymentGateway');
   private readonly ledger: LedgerEntry[] = [];
   /** Reversos aceptados, por id determinista (idempotencia: re-llamar con la misma key no duplica). */
@@ -93,18 +104,30 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, R
     // Referencia determinista por pago (re-cobrar el mismo pago no duplica el extracto).
     const externalRef = `sbx_${req.method.toLowerCase()}_${req.paymentId}`;
 
-    // Modo asíncrono: el cobro queda PENDIENTE y se completa por webhook (espeja ProntoPaga).
+    // ON-FILE (Yape afiliado, `walletUid` presente): cobro SERVER-INITIATED → captura SÍNCRONA, aun en
+    // modo `pendingExternal`. Es lo REALISTA: on-file no requiere aprobación del usuario (a diferencia del
+    // one-shot con QR/deepLink), así que ProntoPaga lo captura al instante. Esto hace testeable el PAGO
+    // AUTOMÁTICO end-to-end (afiliación ACTIVE → cobro on-file → CAPTURED) sin webhook ni red.
+    if (req.walletUid) {
+      if (!this.ledger.some((e) => e.externalRef === externalRef)) {
+        this.ledger.push({ externalRef, amountCents: req.amountCents, at: new Date() });
+      }
+      this.logger.log(
+        `[SANDBOX ${req.method}] cobro ON-FILE confirmado SÍNCRONO tx=${externalRef} monto=${req.amountCents}`,
+      );
+      return { status: 'CONFIRMED', externalRef };
+    }
+
+    // Modo asíncrono (one-shot, SIN walletUid): el cobro queda PENDIENTE con checkout (QR/urlPay) y se
+    // completa por webhook (espeja el flujo asíncrono de ProntoPaga para el Yape one-shot).
     if (this.opts.pendingExternal) {
       this.logger.log(
         `[SANDBOX ${req.method}] cobro PENDIENTE externo tx=${externalRef} (espera webhook)`,
       );
-      const checkout = req.walletUid
-        ? // On-file: sin checkout (el usuario aprueba en su app, confirma por webhook).
-          undefined
-        : {
-            qrCodeBase64: `data:image/png;base64,${Buffer.from(externalRef).toString('base64')}`,
-            urlPay: `https://sandbox.local/pay/${externalRef}`,
-          };
+      const checkout = {
+        qrCodeBase64: `data:image/png;base64,${Buffer.from(externalRef).toString('base64')}`,
+        urlPay: `https://sandbox.local/pay/${externalRef}`,
+      };
       return { status: 'PENDING_EXTERNAL', externalRef, checkout };
     }
 
@@ -132,6 +155,50 @@ export class SandboxPaymentGateway implements PaymentGateway, WebhookVerifier, R
       );
     }
     return { status: 'ACCEPTED', externalRefundId };
+  }
+
+  // ── Afiliación Yape On File (YapeSubscriber) · determinista en proceso ─────────────────────────────
+
+  /**
+   * Alta de afiliación Yape (espeja `POST /api/payment/yape/subscription`). Genera un walletUID
+   * DETERMINISTA por documento (re-afiliar el mismo documento da el mismo uid). SIN deepLink a propósito:
+   * en el sandbox no hay una app Yape real que aprobar, y devolver una URL (sandbox.local) haría que el
+   * cliente intente abrir el navegador y se vaya de la app. El dominio resuelve ACTIVE por el `/show`
+   * (`showYapeSubscription` devuelve ACCEPTED) en su poll defensivo. `phoneNumber` null en MOBILE.
+   */
+  async createYapeSubscription(input: {
+    origin: 'WEB' | 'MOBILE';
+    document: string;
+    clientDocumentType: 'DN' | 'CE' | 'PP';
+    phoneNumber?: string;
+    clientName: string;
+    type: 'RECURRENT' | 'ON_DEMAND';
+  }): Promise<YapeSubscriptionResult> {
+    const uid = `sbx_wallet_${input.clientDocumentType.toLowerCase()}_${input.document}`;
+    this.logger.log(
+      `[SANDBOX] afiliación Yape creada uid=${uid} origin=${input.origin} tipo=${input.type} (PROCESS, sin deepLink → el poll /show resuelve ACTIVE)`,
+    );
+    return {
+      uid,
+      status: 'PROCESS',
+      // WEB manda phone; MOBILE lo descubre al aceptar (lo eco-devuelve el /show).
+      phoneNumber: input.origin === 'WEB' ? (input.phoneNumber ?? null) : null,
+    };
+  }
+
+  /**
+   * `/show` de una afiliación (espeja `GET .../subscription/{walletUID}`). Resuelve SIEMPRE ACCEPTED: la
+   * afiliación de sandbox se "aprueba" al instante, así el refresh defensivo del dominio la pasa a ACTIVE
+   * sin depender de un webhook real. Devuelve un phoneNumber de prueba (el dominio lo enmascara).
+   */
+  async showYapeSubscription(walletUid: string): Promise<YapeSubscriptionDetail> {
+    this.logger.log(`[SANDBOX] /show afiliación uid=${walletUid} → ACCEPTED`);
+    return { uid: walletUid, status: 'ACCEPTED', phoneNumber: '+51999888777' };
+  }
+
+  /** Baja de la afiliación (espeja `POST .../subscription/cancel/{walletUID}`). No-op determinista. */
+  async cancelYapeSubscription(walletUid: string): Promise<void> {
+    this.logger.log(`[SANDBOX] afiliación Yape cancelada uid=${walletUid} (no-op)`);
   }
 
   async getStatement(periodStart: Date, periodEnd: Date): Promise<GatewayStatementEntry[]> {
