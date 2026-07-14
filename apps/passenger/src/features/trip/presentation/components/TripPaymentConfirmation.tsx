@@ -1,6 +1,6 @@
 import type {PaymentView} from '@veo/api-client';
 import {useQuery} from '@tanstack/react-query';
-import {hexAlpha, Text, useTheme} from '@veo/ui-kit';
+import {Card, Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, View} from 'react-native';
@@ -11,7 +11,8 @@ import {
   interpretPaymentOutcome,
   isCashPayment,
 } from '../../../payments/domain/paymentOutcome';
-import {IconCheck} from './icons';
+import {SuccessCheck} from '../../../payments/presentation/components/motion';
+import {EnterView} from './motion';
 
 interface TripPaymentConfirmationProps {
   tripId: string;
@@ -23,15 +24,13 @@ interface TripPaymentConfirmationProps {
 }
 
 /**
- * Indicador IN-APP del cobro automático durante el viaje EN CURSO. El pre-pago cobra lo DIGITAL al INICIAR
- * (Yape On-File server-initiated), pero el push del cobro NO llega al simulador iOS (Apple no entrega push
- * remoto al sim) — y aun en device es una señal que se pierde fácil. Este badge le da al pasajero la
- * confirmación DENTRO de la app, sin depender del push: pollea `GET /payments/by-trip` y refleja el estado
- * REAL del cobro. Auto-gateado (renderiza null si no aplica):
- *  - EFECTIVO → null (se paga al bajar, no hay cobro automático que confirmar).
- *  - digital CAPTURED → "Pago confirmado · S/X" (check verde sutil).
- *  - digital PENDING/checkout → "Procesando tu pago…" (mientras el consumer/webhook resuelve).
- *  - debt/failed/refunded → null (lo maneja la pantalla de CIERRE, no el viaje en curso).
+ * Confirmación IN-APP del cobro automático durante el viaje EN CURSO. El pre-pago cobra lo DIGITAL al
+ * INICIAR (Yape On-File server-initiated), pero el push del cobro NO llega al simulador iOS (Apple no
+ * entrega push remoto al sim) — y aun en device se pierde fácil. Esta card le da al pasajero la certeza
+ * DENTRO de la app, con la MISMA estética de éxito del cierre (el check animado `SuccessCheck`), sin
+ * depender del push. Pollea `GET /payments/by-trip` y refleja el estado REAL. Auto-gateado (null si no
+ * aplica): EFECTIVO → null (paga al bajar); digital CAPTURED → card de éxito; PENDING/checkout →
+ * "Procesando tu pago…"; deuda/failed/refund → null (lo maneja la pantalla de CIERRE).
  */
 export function TripPaymentConfirmation({
   tripId,
@@ -63,36 +62,39 @@ export function TripPaymentConfirmation({
   const processing = kind === 'processing' || kind === 'checkoutPending';
   if (!settled && !processing) return null;
 
+  // PROCESANDO: cobro en vuelo (consumer/webhook). Nota sobria, sin el check todavía.
+  if (processing) {
+    return (
+      <Card variant="outlined" padding="md">
+        <Text variant="footnote" color="inkMuted">
+          {t('trip.paymentAutoProcessing')}
+        </Text>
+      </Card>
+    );
+  }
+
+  // CAPTURADO: la MISMA estética de éxito del cierre — check animado + título + monto·método.
   return (
-    <View
-      style={[
-        styles.row,
-        {
-          gap: theme.spacing.xs,
-          paddingVertical: theme.spacing.xs,
-          paddingHorizontal: theme.spacing.sm,
-          borderRadius: theme.radii.md,
-          backgroundColor: hexAlpha(
-            settled ? theme.colors.success : theme.colors.inkMuted,
-            0.1,
-          ),
-        },
-      ]}>
-      {settled ? <IconCheck color={theme.colors.success} size={16} /> : null}
-      <Text
-        variant="footnote"
-        color={settled ? 'successText' : 'inkMuted'}
-        style={styles.label}
-        numberOfLines={1}>
-        {settled
-          ? t('trip.paymentAutoConfirmed', {amount: formatPEN(payment.amountCents)})
-          : t('trip.paymentAutoProcessing')}
-      </Text>
-    </View>
+    <EnterView>
+      <Card variant="outlined" padding="md">
+        <View style={[styles.row, {gap: theme.spacing.md}]}>
+          <SuccessCheck size={40} />
+          <View style={styles.body}>
+            <Text variant="bodyStrong">{t('trip.paymentAutoTitle')}</Text>
+            <Text variant="footnote" color="inkMuted" numberOfLines={1}>
+              {t('trip.paymentAutoBody', {
+                amount: formatPEN(payment.amountCents),
+                method: t(`payments.method.${payment.method.toUpperCase()}`),
+              })}
+            </Text>
+          </View>
+        </View>
+      </Card>
+    </EnterView>
   );
 }
 
 const styles = StyleSheet.create({
   row: {flexDirection: 'row', alignItems: 'center'},
-  label: {flex: 1},
+  body: {flex: 1, gap: 2},
 });

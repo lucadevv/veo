@@ -873,7 +873,8 @@ export const common = {
      * INICIAR con Yape On-File). Da la confirmación DENTRO de la app sin depender del push (que no llega
      * al simulador iOS). `paymentAutoConfirmed`: cobro capturado. `paymentAutoProcessing`: en curso.
      */
-    paymentAutoConfirmed: 'Pago confirmado · {{amount}}',
+    paymentAutoTitle: '¡Pago confirmado!',
+    paymentAutoBody: 'Se cobró {{amount}} · {{method}}',
     paymentAutoProcessing: 'Procesando tu pago…',
     searchingTitle: 'Buscando tu conductor',
     searchingBody:
