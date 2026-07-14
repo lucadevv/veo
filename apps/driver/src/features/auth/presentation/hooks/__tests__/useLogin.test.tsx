@@ -1,6 +1,6 @@
 import React, { type ReactElement } from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError } from '@veo/api-client';
 import { DiProvider } from '../../../../../core/di/useDi';
 import type { AppContainer } from '../../../../../core/di/container';
@@ -25,6 +25,12 @@ jest.mock('../../../../../core/storage/mmkv', () => ({
     remove: () => undefined,
   },
 }));
+
+// react-query difiere las notificaciones de estado a un setTimeout(0) (notifyManager). En Jest ese
+// timer queda pendiente al cerrar el test y dispara post-teardown ("Cannot log after tests are done"),
+// haciendo salir el run non-zero con todos los tests verdes. Notificar en SINCRÓNICO mantiene los
+// re-renders dentro del act() de cada test y no deja timers colgando.
+notifyManager.setScheduler((cb) => cb());
 
 const TOKENS = { accessToken: 'acc-123', refreshToken: 'ref-456' };
 
@@ -69,6 +75,9 @@ function withProviders(node: ReactElement, client: QueryClient, container: AppCo
 }
 
 describe('useLogin · no fetchea el perfil (el gate maneja el 404 → wizard)', () => {
+  let renderer: TestRenderer.ReactTestRenderer | undefined;
+  let client: QueryClient;
+
   beforeEach(() => {
     useSessionStore.setState({
       status: 'unauthenticated',
@@ -79,14 +88,25 @@ describe('useLogin · no fetchea el perfil (el gate maneja el 404 → wizard)', 
     });
   });
 
+  afterEach(() => {
+    // Desmontar el probe al cerrar cada test: sin esto los observers de la mutación quedan vivos
+    // entre tests del mismo worker. El GC de la mutación que agenda el unmount expira al toque
+    // gracias al gcTime: 0 del client (ver abajo).
+    act(() => renderer?.unmount());
+    renderer = undefined;
+    client.clear();
+  });
+
   it('tras verificar el OTP: setea tokens + authenticated y NO llama a GetProfileUseCase', async () => {
     const profileSpy = makeProfileSpy();
     const container = makeContainer(profileSpy);
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    // gcTime 0: al desmontar, el GC de la mutación se agenda con setTimeout(gcTime); el default de
+    // 5 min queda como timer vivo que impide salir a Jest (MutationCache.clear() NO lo cancela).
+    client = new QueryClient({ defaultOptions: { mutations: { retry: false, gcTime: 0 } } });
     let login!: ReturnType<typeof useLogin>;
 
     await act(async () => {
-      TestRenderer.create(
+      renderer = TestRenderer.create(
         withProviders(<LoginProbe onReady={(l) => (login = l)} />, client, container),
       );
     });
@@ -110,11 +130,13 @@ describe('useLogin · no fetchea el perfil (el gate maneja el 404 → wizard)', 
   it('preserva el guardado best-effort del refresh token bajo biometría', async () => {
     const profileSpy = makeProfileSpy();
     const container = makeContainer(profileSpy);
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    // gcTime 0: al desmontar, el GC de la mutación se agenda con setTimeout(gcTime); el default de
+    // 5 min queda como timer vivo que impide salir a Jest (MutationCache.clear() NO lo cancela).
+    client = new QueryClient({ defaultOptions: { mutations: { retry: false, gcTime: 0 } } });
     let login!: ReturnType<typeof useLogin>;
 
     await act(async () => {
-      TestRenderer.create(
+      renderer = TestRenderer.create(
         withProviders(<LoginProbe onReady={(l) => (login = l)} />, client, container),
       );
     });

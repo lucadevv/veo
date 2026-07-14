@@ -4,15 +4,16 @@ import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import TestRenderer, { act } from 'react-test-renderer';
 import '../../../../../i18n';
-import { Button, IconButton, TextField } from '@veo/ui-kit';
+import { Button, TextField } from '@veo/ui-kit';
 import { LoginScreen } from '../LoginScreen';
 
 /**
  * U2 · dedup (DUP #1): en el paso CÓDIGO del login, "cambiar número" tiene UNA sola affordance — el chevron
- * back de arriba (IconButton, gesto idiomático del OTP). El Button ghost "Cambiar número" del bloque inferior
- * (que ejecutaba el MISMO handler: `setStep('phone'); setCode('')`) fue ELIMINADO. Este test verifica que en
- * el paso código NO existe ningún Button con label "Cambiar número", y que el chevron conserva su
- * `accessibilityLabel` "Cambiar número" (la affordance accesible de volver).
+ * back de arriba (hoy un Pressable pelado con el chevron ‹ de iOS, sin círculo/container — 42aab8c0; gesto
+ * idiomático del OTP). El Button ghost "Cambiar número" del bloque inferior (que ejecutaba el MISMO handler:
+ * `setStep('phone'); setCode('')`) fue ELIMINADO. Este test verifica que en el paso código NO existe ningún
+ * Button con label "Cambiar número", que el chevron conserva su `accessibilityLabel` "Cambiar número" (la
+ * affordance accesible de volver) y que al presionarlo VUELVE al paso teléfono.
  */
 
 // `useRequestOtp` mockeado: `mutate(phone, { onSuccess })` invoca `onSuccess` de inmediato → la pantalla
@@ -83,7 +84,7 @@ describe('LoginScreen · U2 dedup (DUP #1): "cambiar número" tiene una sola aff
     queryClient.clear();
   });
 
-  it('en el paso CÓDIGO: NO hay Button "Cambiar número"; el chevron conserva su accessibilityLabel', () => {
+  it('en el paso CÓDIGO: NO hay Button "Cambiar número"; el chevron back (Pressable) vuelve al paso teléfono', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(withProviders(<LoginScreen />, queryClient));
@@ -91,18 +92,31 @@ describe('LoginScreen · U2 dedup (DUP #1): "cambiar número" tiene una sola aff
 
     goToCodeStep(renderer);
 
+    // En el paso código el campo de teléfono ya no está (estamos efectivamente en el paso OTP).
+    expect(renderer.root.findAllByType(TextField)).toHaveLength(0);
+
     // El Button ghost "Cambiar número" fue eliminado: 0 Buttons con ese label en el paso código.
     const changeNumberButtons = renderer.root
       .findAllByType(Button)
       .filter((b) => b.props.label === 'Cambiar número');
     expect(changeNumberButtons).toHaveLength(0);
 
-    // El chevron back (IconButton) sigue siendo la affordance de volver, con su a11y label intacto.
+    // El chevron back es hoy un Pressable pelado (no IconButton): se lo ubica por su a11y label,
+    // que sigue siendo la affordance accesible de volver, con onPress presionable.
     const chevron = renderer.root
-      .findAllByType(IconButton)
-      .find((b) => b.props.accessibilityLabel === 'Cambiar número');
+      .findAll(
+        (node) =>
+          node.props.accessibilityLabel === 'Cambiar número' &&
+          typeof node.props.onPress === 'function',
+      )
+      .at(0);
     expect(chevron).toBeDefined();
-    expect(typeof chevron?.props.onPress).toBe('function');
+
+    // Presionarlo VUELVE al paso teléfono (regla de negocio: cambiar número).
+    act(() => {
+      (chevron!.props.onPress as () => void)();
+    });
+    expect(renderer.root.findAllByType(TextField)).toHaveLength(1);
 
     act(() => {
       renderer.unmount();
