@@ -201,12 +201,13 @@ export interface DebtItemView {
 }
 
 /**
- * Resumen accionable del pasajero autenticado (GET /payments/debts). `hasDebt`/`totalCents` resumen
- * SOLO las DEUDAS reales (kind=DEBT) — el gate intacto. `debts` incluye además los PENDING_ACTION.
+ * Resumen accionable del pasajero autenticado (GET /payments/debts). `hasDebt`/`totalCents` resumen lo
+ * BLOQUEANTE (kind=DEBT + kind=CANCELLATION_PENALTY, tal cual lo suma payment-service). `debts` incluye
+ * además los PENDING_ACTION (no bloquean ni suman).
  */
 export interface DebtView {
   hasDebt: boolean;
-  /** Suma de las DEUDAS reales (kind=DEBT) en céntimos PEN. 0 si no hay deuda. */
+  /** Suma de lo BLOQUEANTE (DEBT + CANCELLATION_PENALTY) en céntimos PEN. 0 si no hay deuda. */
   totalCents: number;
   debts: DebtItemView[];
 }

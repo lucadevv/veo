@@ -255,3 +255,25 @@ export interface TripResource {
   completedAt: string | null;
   cancelledAt: string | null;
 }
+
+/** Un paso de navegación turn-by-turn. Espeja `routeStep` de @veo/api-client (MISMO contrato que el
+ *  driver-bff — la costura es simétrica entre ambas apps). */
+export interface RouteStepView {
+  instruction: string;
+  distanceMeters: number;
+  maneuver: string;
+  geometryPolyline: string;
+}
+
+/** Ruta del viaje activo POR FASE para el mapa del pasajero. Espeja `tripRoute` de @veo/api-client
+ *  (mismo shape que devuelve el driver-bff al conductor). */
+export interface TripRouteView {
+  polyline: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  steps: RouteStepView[];
+  /** Recojo, destino y paradas intermedias para los markers del mapa. */
+  origin: { lat: number; lon: number };
+  destination: { lat: number; lon: number };
+  waypoints: { lat: number; lon: number }[];
+}

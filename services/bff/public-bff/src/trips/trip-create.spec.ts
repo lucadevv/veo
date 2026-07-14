@@ -100,9 +100,11 @@ function makeService(
     SECRET,
     InternalAudience.PUBLIC_RAIL,
     redis as unknown as Redis, // REDIS (cache KYC + deuda)
+    { routeWithSteps: async () => ({ polyline: '', distanceMeters: 0, durationSeconds: 0, steps: [] }) } as never, // MAPS (@veo/maps) — no ejercitado acá
     {} as unknown as DriverEnrichmentService,
     // ADR-021 Fase C — dispatch.getSurge re-cotiza el surge AUTORITATIVO server-side (default mock 1.5x).
     { getSurge } as unknown as DispatchService,
+    { getLocation: () => undefined } as never, // RealtimeStateService — no ejercitado acá
   );
   return { svc, post, debtGet, redis, identityGrpcCall, getSurge };
 }

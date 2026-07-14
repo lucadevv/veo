@@ -17,10 +17,13 @@ import {
 import { ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
 import {
   canAccessLiveCabin,
+  isOnboard,
   normalizeTripStatus,
   type TripVideoGrant,
   type WaypointProposalView,
 } from '@veo/api-client';
+import type { MapsClient } from '@veo/maps';
+import { RealtimeStateService } from '../realtime/realtime-state.service';
 import {
   GRPC_FLEET,
   GRPC_IDENTITY,
@@ -28,6 +31,7 @@ import {
   GRPC_RATING,
   GRPC_TRIP,
   LIVEKIT,
+  MAPS,
   REST_DISPATCH,
   REST_PAYMENT,
   REST_RATING,
@@ -68,6 +72,7 @@ import {
   type CreateTripDto,
   type RebidTripDto,
   type TripResource,
+  type TripRouteView,
 } from './dto/trip.dto';
 import { type OfferView, type OffersResponse } from './dto/offers.dto';
 
@@ -90,8 +95,10 @@ export class TripsService {
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
     @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     @Inject(REDIS) private readonly redis: Redis,
+    @Inject(MAPS) private readonly maps: MapsClient,
     private readonly enrichment: DriverEnrichmentService,
     private readonly dispatch: DispatchService,
+    private readonly liveState: RealtimeStateService,
   ) {}
 
   private readonly logger = new Logger(TripsService.name);
@@ -241,6 +248,70 @@ export class TripsService {
       identity: user,
       body: { passengerId: user.userId },
     });
+  }
+
+  /**
+   * Ruta del viaje activo POR FASE para el MAPA del pasajero — el espejo del `GET /trips/:id/route`
+   * del driver-bff (misma fachada @veo/maps, mismo contrato `tripRoute`; costura simétrica).
+   *
+   * El `from` acá NO es el GPS del cliente: es la ÚLTIMA ubicación conocida del CONDUCTOR, que este
+   * BFF ya mantiene en memoria (RealtimeStateService, poblada por el consumer de
+   * `driver.location_updated`). Con ella:
+   *  - PRE-RECOJO (ACCEPTED/ARRIVING/ARRIVED): SOLO `driver → recojo` — el pasajero ve el trazo REAL
+   *    por el que viene el taxi, espejo EXACTO del mapa del conductor. La ruta al destino NO se
+   *    muestra en este estado (regla del dueño: ambas apps pintan solo el tramo de la fase).
+   *  - ONBOARD (IN_PROGRESS): `driver → paradas → destino` (el recojo quedó atrás).
+   * SIN ubicación del conductor (aún sin ping / socket frío): onboard degrada a la ruta del viaje
+   * (`recojo → paradas → destino`, es el MISMO tramo B→C); pre-recojo devuelve ruta VACÍA — no hay
+   * tramo de acercamiento trazable y pintar B→C acá sería el tramo equivocado.
+   *
+   * Los MARKERS (origin/destination/waypoints) son SIEMPRE los del viaje, intactos: la ubicación viva
+   * solo mueve el punto de partida de la polyline, no qué puntos se pintan.
+   *
+   * ANTI-IDOR: la ruta expone ubicaciones EXACTAS (PII, Ley 29733) → se verifica la pertenencia del
+   * viaje al pasajero autenticado ANTES de calcular nada (mismo patrón que getTripDetail/videoGrant).
+   */
+  async route(user: AuthenticatedUser, tripId: string): Promise<TripRouteView> {
+    const trip = await this.tripRest.get<TripResource>(`/trips/${tripId}`, { identity: user });
+    if (trip.passengerId !== user.userId) {
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
+    }
+
+    const waypoints = trip.waypoints ?? [];
+    const driverAt = this.liveState.getLocation(tripId)?.point;
+    // Status desconocido/no-normalizable → tratamos como PRE-RECOJO: fail-safe hacia el tramo de
+    // acercamiento (lo que el pasajero necesita ver mientras espera).
+    const status = normalizeTripStatus(trip.status);
+    const onboard = status !== null && isOnboard(status);
+    let route;
+    if (driverAt) {
+      route = onboard
+        ? // ONBOARD: el viaje en curso — conductor → paradas → destino (AMBAS apps siguen B→C).
+          await this.maps.routeWithSteps(driverAt, trip.destination, waypoints)
+        : // PRE-RECOJO: SOLO el tramo conductor → recojo, espejo EXACTO del mapa del conductor
+          // (regla del dueño: la ruta B→C al destino NO se muestra en NINGUNA app en este estado).
+          await this.maps.routeWithSteps(driverAt, trip.origin, []);
+    } else if (onboard) {
+      route = await this.maps.routeWithSteps(trip.origin, trip.destination, waypoints);
+    } else {
+      // PRE-RECOJO sin ping del conductor: ruta VACÍA (el cliente no dibuja nada) — pintar B→C acá
+      // sería el tramo equivocado, y el tramo A→B no existe sin la ubicación del conductor.
+      route = { polyline: '', distanceMeters: 0, durationSeconds: 0, steps: [] };
+    }
+    return {
+      polyline: route.polyline,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      steps: route.steps.map((s) => ({
+        instruction: s.instruction,
+        distanceMeters: s.distanceMeters,
+        maneuver: s.maneuver,
+        geometryPolyline: s.geometryPolyline,
+      })),
+      origin: trip.origin,
+      destination: trip.destination,
+      waypoints,
+    };
   }
 
   /** Detalle agregado del viaje: trip + conductor (identity) + rating + vehículo (fleet). */

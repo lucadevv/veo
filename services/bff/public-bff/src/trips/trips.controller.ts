@@ -23,6 +23,7 @@ import {
   RebidTripDto,
   TripHistoryQueryDto,
   type TripResource,
+  type TripRouteView,
 } from './dto/trip.dto';
 import { type PaymentView } from '../payments/dto/payments.dto';
 import { type TripDetailView, type TripHistoryPageView, type TripStateView } from './trip-views';
@@ -123,6 +124,17 @@ export class TripsController {
   @ApiOperation({ summary: 'Estado del viaje (BR-T02)' })
   state(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripStateView> {
     return this.trips.getTripState(user, id);
+  }
+
+  @Get(':id/route')
+  @ApiOperation({
+    summary:
+      'Ruta POR FASE del viaje activo para el mapa del pasajero (espejo del driver-bff): pre-recojo ' +
+      'traza conductor→recojo→destino desde la última ubicación conocida del conductor; con el ' +
+      'pasajero a bordo, conductor→destino. Mismo contrato tripRoute (polyline + steps es-PE + markers).',
+  })
+  route(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripRouteView> {
+    return this.trips.route(user, id);
   }
 
   @Get(':id/video')

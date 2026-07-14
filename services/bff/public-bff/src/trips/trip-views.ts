@@ -81,6 +81,13 @@ export interface TripDetailView {
    * no la tiene. La app la pinta en el mapa del detalle; si es null degrada a línea recta origen→destino.
    */
   routePolyline: string | null;
+  /**
+   * Modo de despacho CONGELADO del viaje (ADR-011, resolve-once-persist): 'PUJA' | 'FIXED'. La app lo
+   * necesita para REHIDRATAR `activeTripMode` tras un relanzamiento a mitad de la búsqueda (sin él, un
+   * FIXED EXPIRED caía a la fase de re-puja). `null` solo ante un valor fuera de contrato del downstream
+   * (fail-safe: la app degrada al comportamiento PUJA histórico, nunca rompe el parseo).
+   */
+  dispatchMode: 'PUJA' | 'FIXED' | null;
   driver: TripDriverView | null;
   vehicle: TripVehicleView | null;
   /**
@@ -223,6 +230,9 @@ export function buildTripDetail(
     // Paradas intermedias del trip del servidor (passthrough gRPC); [] si directo (proto3 nunca null).
     waypoints: trip.waypoints ?? [],
     routePolyline: trip.routePolyline || null,
+    // Modo congelado (ADR-011). Fuera de contrato ('' del EMPTY_TRIP u otro drift) → null, nunca lanza.
+    dispatchMode:
+      trip.dispatchMode === 'PUJA' || trip.dispatchMode === 'FIXED' ? trip.dispatchMode : null,
     driver: buildDriverView(driver, aggregate, tripStats),
     vehicle: buildVehicleView(vehicle),
     myRatingStars,

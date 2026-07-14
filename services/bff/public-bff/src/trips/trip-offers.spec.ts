@@ -53,8 +53,10 @@ function makeService(trip: { found: boolean; passengerId: string }, dispatchResu
     SECRET,
     InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never, // REDIS (cache KYC, no usado acá)
+    { routeWithSteps: async () => ({ polyline: '', distanceMeters: 0, durationSeconds: 0, steps: [] }) } as never, // MAPS (@veo/maps) — no ejercitado acá
     enrichment,
     {} as unknown as DispatchService,
+    { getLocation: () => undefined } as never, // RealtimeStateService — no ejercitado acá
   );
   return { svc, get, post, tripPost, enrich };
 }

@@ -144,6 +144,13 @@ describe('buildTripDetail', () => {
     expect(view.passengerClosedAt).toBeNull();
     // myRatingStars por defecto null (no enriquecido): la app aún no califica este viaje.
     expect(view.myRatingStars).toBeNull();
+    // Modo congelado (ADR-011): pasa a la vista para que la app rehidrate `activeTripMode`.
+    expect(view.dispatchMode).toBe('FIXED');
+  });
+
+  it('dispatchMode fuera de contrato → null (fail-safe: la app degrada a PUJA histórico)', () => {
+    const view = buildTripDetail({ ...trip, dispatchMode: '' }, null, null, null);
+    expect(view.dispatchMode).toBeNull();
   });
 
   it('incluye myRatingStars cuando el pasajero ya calificó (enriquecido)', () => {

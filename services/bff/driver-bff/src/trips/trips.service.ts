@@ -284,8 +284,16 @@ export class TripsService {
       // El status (normalizado al contrato mobile) decide si el recojo ya quedó atrás. Lo pedimos por
       // gRPC (GetTripState) SOLO cuando hay `from`: sin posición la rama histórica no necesita el status.
       const { status } = await this.getTripState(id, identity);
-      const intermediate = isOnboard(status) ? waypoints : [resource.origin, ...waypoints];
-      route = await this.maps.routeWithSteps(from, resource.destination, intermediate);
+      if (isOnboard(status)) {
+        // ONBOARD: navegación al destino (con las paradas).
+        route = await this.maps.routeWithSteps(from, resource.destination, waypoints);
+      } else {
+        // PRE-RECOJO: navegación SOLO hasta el recojo, como un nav real. Antes se trazaba
+        // from→recojo→destino y la cola B→C (26 km) tapaba el tramo A→B en el mapa del conductor y
+        // las "Indicaciones" mostraban la distancia del viaje ENTERO yendo a recoger (visto en la
+        // demo del dueño). La ruta del viaje completo es la VISTA DEL PASAJERO, no la del conductor.
+        route = await this.maps.routeWithSteps(from, resource.origin, []);
+      }
     } else {
       route = await this.maps.routeWithSteps(resource.origin, resource.destination, waypoints);
     }
@@ -307,32 +315,47 @@ export class TripsService {
     };
   }
 
+  /**
+   * Las TRANSICIONES devuelven el recurso del viaje CONFORME AL CONTRATO `driverTripView` del app: el
+   * schema exige la clave `passengerFirstName` (nullable — el contrato documenta "el BFF lo resuelve
+   * SOLO en el detalle; el resto de endpoints lo devuelven null"). El recurso CRUDO de trip-service NO
+   * trae esa clave → la validación zod del cliente REVENTABA en CADA tap (accept/arriving/arrived/
+   * start/complete mostraban "Algo salió mal" aunque el POST fuera 200 y la máquina avanzara — la UI
+   * se recuperaba por el socket, enmascarando el bug). Visto en vivo en la demo.
+   */
+  private asDriverTripView(raw: unknown): Record<string, unknown> {
+    return { passengerFirstName: null, ...(raw as Record<string, unknown>) };
+  }
+
   // A1 · ownership server-side (anti-IDOR): las transiciones pre-recojo del conductor verifican que el
   // viaje es de ESTE conductor ANTES de avanzar la máquina de estados (deriva el driverId del perfil y lo
   // pasa al trip-service como 2da capa). Sin esto, un conductor con un tripId ajeno podía dispararle
   // accept/arriving/arrived. Mismo patrón que start/complete/cancel.
   async accept(id: string, dto: AcceptTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/accept`, {
+    const trip = await this.trip().post(`/trips/${id}/accept`, {
       identity: { ...identity, driverId },
       body: { ...dto, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   async arriving(id: string, dto: ArrivingTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arriving`, {
+    const trip = await this.trip().post(`/trips/${id}/arriving`, {
       identity: { ...identity, driverId },
       body: { ...dto, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   async arrived(id: string, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arrived`, {
+    const trip = await this.trip().post(`/trips/${id}/arrived`, {
       identity: { ...identity, driverId },
       body: { driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   /**
@@ -343,10 +366,11 @@ export class TripsService {
    */
   async start(id: string, dto: StartTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/start`, {
+    const trip = await this.trip().post(`/trips/${id}/start`, {
       identity: { ...identity, driverId },
       body: { ...dto, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   /**
@@ -399,10 +423,11 @@ export class TripsService {
    */
   async complete(id: string, dto: CompleteTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/complete`, {
+    const trip = await this.trip().post(`/trips/${id}/complete`, {
       identity: { ...identity, driverId },
       body: { cashCollected: dto.cashCollected, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   /**
@@ -415,10 +440,11 @@ export class TripsService {
    */
   async cancel(id: string, dto: CancelTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/cancel`, {
+    const trip = await this.trip().post(`/trips/${id}/cancel`, {
       identity: { ...identity, driverId },
       body: { by: 'DRIVER', reason: dto.reason, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   private trip() {

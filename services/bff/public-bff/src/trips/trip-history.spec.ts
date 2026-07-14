@@ -66,8 +66,10 @@ function makeService(reply: PassengerTripsReply) {
     SECRET,
     InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never,
+    { routeWithSteps: async () => ({ polyline: '', distanceMeters: 0, durationSeconds: 0, steps: [] }) } as never, // MAPS (@veo/maps) — no ejercitado acá
     {} as unknown as DriverEnrichmentService,
     {} as unknown as DispatchService,
+    { getLocation: () => undefined } as never, // RealtimeStateService — no ejercitado acá
   );
   return { svc, call };
 }

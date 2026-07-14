@@ -14,6 +14,12 @@ export interface LiveLocation {
   at: string;
 }
 
+/** Recojo y destino del viaje (para el ETA fresco por fase: pre-recojo → origin; onboard → destination). */
+export interface TripPoints {
+  origin: GeoPoint;
+  destination: GeoPoint;
+}
+
 @Injectable()
 export class RealtimeStateService {
   private readonly driverToTrip = new Map<string, string>();
@@ -31,6 +37,7 @@ export class RealtimeStateService {
   private readonly passengerSubscribers = new Map<string, number>();
   private readonly passengerSocketToTrip = new Map<string, string>();
   private readonly lastEta = new Map<string, number | null>();
+  private readonly tripPoints = new Map<string, TripPoints>();
 
   setDriverTrip(driverId: string, tripId: string): void {
     if (driverId) this.driverToTrip.set(driverId, tripId);
@@ -125,6 +132,21 @@ export class RealtimeStateService {
     return this.lastEta.get(tripId) ?? null;
   }
 
+  /** Guarda recojo/destino del viaje (los publica `trip.requested`; el destino puede reescribirse). */
+  setTripPoints(tripId: string, points: TripPoints): void {
+    this.tripPoints.set(tripId, points);
+  }
+
+  /** RC5 (ADR-022) · el destino se reescribió mid-trip: el ETA fresco debe apuntar al NUEVO. */
+  setDestination(tripId: string, destination: GeoPoint): void {
+    const points = this.tripPoints.get(tripId);
+    if (points) this.tripPoints.set(tripId, { ...points, destination });
+  }
+
+  getTripPoints(tripId: string): TripPoints | undefined {
+    return this.tripPoints.get(tripId);
+  }
+
   /** Registra una suscripción viva de un pasajero (socket /passenger) a su viaje activo. */
   addPassenger(socketId: string, tripId: string): void {
     this.passengerSocketToTrip.set(socketId, tripId);
@@ -152,6 +174,7 @@ export class RealtimeStateService {
     this.lastStatus.delete(tripId);
     this.lastLocation.delete(tripId);
     this.lastEta.delete(tripId);
+    this.tripPoints.delete(tripId);
     this.panickedTrips.delete(tripId);
     for (const [driverId, mapped] of this.driverToTrip) {
       if (mapped === tripId) this.driverToTrip.delete(driverId);

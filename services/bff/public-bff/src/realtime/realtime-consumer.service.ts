@@ -25,6 +25,7 @@ import {
   tripBidPosted,
   tripCancelled,
   tripCompleted,
+  tripDestinationChanged,
   tripExpired,
   tripFailed,
   tripReassigning,
@@ -38,9 +39,18 @@ import {
   type EventHandler,
 } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
+import { Inject } from '@nestjs/common';
 import { createLogger, type Logger } from '@veo/observability';
 import { PanicStatus } from '@veo/shared-types';
-import { WaypointProposalStatus, type ChatMessage, type TripStatus } from '@veo/api-client';
+import {
+  isOnboard,
+  WaypointProposalStatus,
+  type ChatMessage,
+  type GeoPoint,
+  type TripStatus,
+} from '@veo/api-client';
+import type { MapsClient } from '@veo/maps';
+import { MAPS } from '../infra/downstream.tokens';
 import { FamilyGateway } from './family.gateway';
 import { PassengerGateway } from './passenger.gateway';
 import { RealtimeStateService } from './realtime-state.service';
@@ -52,15 +62,29 @@ const KAFKA_CLIENT_ID = 'public-bff';
 /** Group del tiempo real de public-bff. */
 const REALTIME_GROUP_ID = 'public-bff-realtime';
 
+/** Cadencia mínima del recompute de ETA por viaje (misma que el poll de ruta del conductor). */
+const ETA_REFRESH_MS = 15_000;
+
+/** Fases con ETA vivo: pre-recojo (→ recojo) y onboard (→ destino). Fuera de ellas, no se recomputa. */
+const ETA_PHASES: ReadonlySet<TripStatus> = new Set([
+  'ACCEPTED',
+  'ARRIVING',
+  'ARRIVED',
+  'IN_PROGRESS',
+]);
+
 @Injectable()
 export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   private readonly log: Logger = createLogger('public-bff:realtime');
+  /** Último recompute de ETA por viaje (throttle in-memory; se poda junto al estado del viaje). */
+  private readonly lastEtaComputeAt = new Map<string, number>();
 
   constructor(
     config: ConfigService<Env, true>,
     private readonly gateway: FamilyGateway,
     private readonly passenger: PassengerGateway,
     private readonly state: RealtimeStateService,
+    @Inject(MAPS) private readonly maps: MapsClient,
   ) {
     super({
       clientId: KAFKA_CLIENT_ID,
@@ -88,7 +112,9 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   /** TODOS los eventos del group, en un solo record (cada uno se suscribe a su topic). */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return {
-      'trip.requested': (env) => this.onTripStatus(env, tripRequested, 'REQUESTED'),
+      'trip.requested': (env) => this.onTripRequested(env),
+      // RC5 (ADR-022) · el destino se reescribió pre-start: el ETA fresco debe apuntar al NUEVO destino.
+      'trip.destination_changed': (env) => this.onDestinationChanged(env),
       // ADR-020 Lote 1 · la puja (re)abrió (PUJA inicial o re-bid). Antes ORPHAN (ningún BFF lo consumía)
       // → el pasajero no recibía push al re-pujar y el timer/fase dependían 100% del poll de 5s. El topic
       // 'trip' YA está suscrito (registrar el handler basta; kafka.ts añade el topic vía topicForEvent).
@@ -125,6 +151,32 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   }
 
   // ── Handlers ──
+
+  /**
+   * `trip.requested` además de propagar el status GUARDA recojo/destino en el estado vivo: son el
+   * objetivo del ETA FRESCO por fase (pre-recojo → recojo; onboard → destino) que se recomputa con
+   * cada ping GPS del conductor (ver `maybeRefreshEta`).
+   */
+  private onTripRequested(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = tripRequested.safeParse(env.payload);
+    if (parsed.success) {
+      this.state.setTripPoints(parsed.data.tripId, {
+        origin: parsed.data.origin,
+        destination: parsed.data.destination,
+      });
+      this.pushTripUpdate(parsed.data.tripId, 'REQUESTED', null);
+    }
+    return Promise.resolve();
+  }
+
+  /** RC5 (ADR-022) · destino reescrito pre-start → el ETA fresco apunta al destino NUEVO. */
+  private onDestinationChanged(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = tripDestinationChanged.safeParse(env.payload);
+    if (parsed.success) {
+      this.state.setDestination(parsed.data.tripId, parsed.data.destination);
+    }
+    return Promise.resolve();
+  }
 
   private onTripStatus(
     env: EventEnvelope<unknown>,
@@ -188,6 +240,7 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
       this.gateway.emitTripEnded(parsed.data.tripId, status, at);
       this.passenger.emitTripEnded(parsed.data.tripId, status, at);
       this.state.clearTrip(parsed.data.tripId);
+      this.lastEtaComputeAt.delete(parsed.data.tripId);
     }
     return Promise.resolve();
   }
@@ -215,6 +268,7 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
       this.gateway.emitTripEnded(parsed.data.tripId, 'FAILED', at);
       this.passenger.emitTripEnded(parsed.data.tripId, 'FAILED', at);
       this.state.clearTrip(parsed.data.tripId);
+      this.lastEtaComputeAt.delete(parsed.data.tripId);
     }
     return Promise.resolve();
   }
@@ -312,7 +366,39 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
     };
     this.gateway.emitDriverLocation(tripId, locationMsg);
     this.passenger.emitDriverLocation(tripId, locationMsg);
+    // ETA FRESCO por fase (A2 del flujo de mapa): fire-and-forget para no bloquear el fan-out del pin.
+    void this.maybeRefreshEta(tripId, point);
     return Promise.resolve();
+  }
+
+  /**
+   * Recomputa el ETA del pasajero desde la posición VIVA del conductor (antes el ETA se fijaba UNA
+   * vez en accept/arriving — con defaults del cliente — y quedaba stale todo el viaje). Por fase:
+   *  - pre-recojo (ACCEPTED/ARRIVING/ARRIVED): conductor → recojo ("tu conductor llega en X").
+   *  - onboard (IN_PROGRESS): conductor → destino ("llegás en X").
+   * THROTTLE de 15s por viaje (misma cadencia que el poll de ruta del conductor): un ping cada 2-3s
+   * NO dispara un OSRM por ping. Fail-soft: si maps no responde, se conserva el último ETA (mejor
+   * stale que romper el fan-out). Si el BFF (re)arrancó mid-trip y no tiene los puntos del viaje,
+   * degrada honesto (sin recompute) hasta el próximo viaje.
+   */
+  private async maybeRefreshEta(tripId: string, driverAt: GeoPoint): Promise<void> {
+    const status = this.state.getStatus(tripId);
+    if (!status || !ETA_PHASES.has(status)) return;
+    const points = this.state.getTripPoints(tripId);
+    if (!points) return;
+    const now = Date.now();
+    const last = this.lastEtaComputeAt.get(tripId) ?? 0;
+    if (now - last < ETA_REFRESH_MS) return;
+    this.lastEtaComputeAt.set(tripId, now);
+    try {
+      const target = isOnboard(status) ? points.destination : points.origin;
+      const etaSeconds = await this.maps.eta(driverAt, target);
+      this.state.setEta(tripId, etaSeconds);
+      this.passenger.emitEta(tripId, { tripId, etaSeconds, at: new Date().toISOString() });
+    } catch (err: unknown) {
+      // Fail-soft: el último ETA emitido sigue vigente; el próximo ping (post-throttle) reintenta.
+      this.log.warn({ err, tripId }, 'no se pudo recomputar el ETA en vivo');
+    }
   }
 
   /**
