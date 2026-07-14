@@ -2020,25 +2020,34 @@ _set_env_kv() {
 # verificación (VEO_BYPASS_VERIFICATION=true) + el tier (VEO_DEPLOY_TIER=local) + biométrico sandbox.
 # El local.env es gitignoreado (config local del dev). Idempotente: re-corre sin duplicar.
 _prepare_local_env() {
-  local entry dir src dst
+  # RESPONSABILIDAD ÚNICA POR ENTORNO: cada servicio usa su PROPIO env/local.env, autocontenido para el
+  # tier local (sandbox de pagos + VEO_BYPASS_VERIFICATION=true + VEO_BIOMETRIC_MODE=sandbox +
+  # VEO_DEPLOY_TIER=local). NO se DERIVA ni se PISA desde development.env: `veo.sh local` lee local.env tal
+  # cual, `veo.sh dev` lee development.env — cero mezcla entre entornos. Antes esto copiaba development.env
+  # sobre local.env en cada boot (local = dev + overrides), lo que pisaba cambios propios y mezclaba
+  # concerns (fue la causa del bug: development.env=sandbox pero local.env quedaba prontopaga stale).
+  local entry dir dst tmpl
   local dirs=()
   for entry in "${SERVICES[@]}"; do
     dir="$(printf '%s' "$entry" | cut -d'|' -f3)"
     [[ -n "$dir" ]] && dirs+=("$dir")
   done
   dirs+=("apps/driver" "apps/passenger")
+  local scaffolded=()
   for dir in "${dirs[@]}"; do
-    src="$ROOT_DIR/$dir/env/development.env"
     dst="$ROOT_DIR/$dir/env/local.env"
-    [[ -f "$src" ]] || continue
-    # SIEMPRE refresca local.env desde development.env (local = dev + bypass). Copiar solo-si-falta dejaba
-    # los local.env HUÉRFANOS/stale sin vars nuevas (ej. ADMIN_WEB_URL) → el servicio no arrancaba.
-    cp "$src" "$dst"
-    _set_env_kv "$dst" VEO_DEPLOY_TIER local
-    _set_env_kv "$dst" VEO_BYPASS_VERIFICATION true
-    _set_env_kv "$dst" VEO_BIOMETRIC_MODE sandbox
+    [[ -f "$dst" ]] && continue   # EXISTE → NO se toca (autocontenido, sin regenerar ni pisar).
+    # FALTA (fresh clone): scaffold UNA vez desde example.env (plantilla tracked). Nunca clobber.
+    tmpl="$ROOT_DIR/$dir/env/example.env"
+    [[ -f "$tmpl" ]] || continue
+    cp "$tmpl" "$dst"
+    scaffolded+=("$dir")
   done
-  yel "  🔓 modo LOCAL: env/local.env derivado + bypass de verificación PRENDIDO (VEO_BYPASS_VERIFICATION=true)."
+  if [[ ${#scaffolded[@]} -gt 0 ]]; then
+    yel "  🆕 local.env scaffoldeado (solo-si-faltaba) desde example.env: ${scaffolded[*]}"
+    yel "     Completá esos env/local.env con los valores del tier local (sandbox de pagos + bypass + secretos) antes de usarlos."
+  fi
+  yel "  🔓 modo LOCAL: cada servicio usa su propio env/local.env (autocontenido; sandbox de pagos + bypass KYC + biométrico sandbox)."
   yel "     Para las apps RN, buildeá con: ENVFILE=env/local.env pnpm --filter veo-driver-app ios (idem passenger)."
 }
 
