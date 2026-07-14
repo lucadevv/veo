@@ -26,6 +26,33 @@ import type { SettleDebtDto } from './dto/settle-debt.dto';
 const PAID_STATUS = 'PROCESSED';
 
 /**
+ * Shape CRUDO del Payment de liquidación que devuelve payment-service por REST interno
+ * (`POST /internal/finance/driver-debt/settle`) — es la fila Prisma serializada: los campos opcionales
+ * llegan como `null` (no `""`) y `externalRef` es `null` hasta capturar. Solo declaramos los campos que
+ * el app necesita (subconjunto del contrato `PaymentView`); el resto de la fila (driverId, dedupKey…) se
+ * descarta al mapear.
+ */
+interface SettlementPaymentReply {
+  id: string;
+  tripId: string;
+  method: string;
+  status: PaymentView['status'];
+  amountCents: number;
+  grossCents: number;
+  tipCents: number;
+  commissionCents: number;
+  feeCents: number;
+  externalRef: string | null;
+  externalUid?: string | null;
+  checkoutUrl?: string | null;
+  qrCode?: string | null;
+  deepLink?: string | null;
+  cip?: string | null;
+  checkoutExpiresAt?: string | null;
+  failureReason?: string | null;
+}
+
+/**
  * Tasa de comisión ON-DEMAND VIGENTE (panel admin, payment-service `commission_config`). El app la usa
  * para el desglose bruto − comisión de TripComplete/TripDetail — nunca un hardcode local.
  */
@@ -170,10 +197,48 @@ export class EarningsService {
    */
   async settleDebt(identity: AuthenticatedUser, dto: SettleDebtDto): Promise<PaymentView> {
     const { identity: signedIdentity, driverId } = await this.resolveDriver(identity);
-    return this.rest.client('payment').post<PaymentView>('/internal/finance/driver-debt/settle', {
-      identity: signedIdentity,
-      body: { driverId, method: dto.method, payerRef: dto.payerRef },
-    });
+    const reply = await this.rest
+      .client('payment')
+      .post<SettlementPaymentReply>('/internal/finance/driver-debt/settle', {
+        identity: signedIdentity,
+        body: { driverId, method: dto.method, payerRef: dto.payerRef },
+      });
+    // NORMALIZAR al contrato del app (espeja `toPaymentView` del public-bff): la fila Prisma cruda trae
+    // `externalRef: null` mientras el checkout está PENDING (el capture ref recién existe al capturar),
+    // pero el schema soberano `paymentView` exige `externalRef: string` NO-nullable. Sin este mapeo el
+    // `paymentView.parse()` del app LANZA sobre el 200 → el conductor ve "No pudimos iniciar el pago"
+    // AUNQUE el cobro arrancó y trae checkout (deepLink/QR/urlPay). Los campos de checkout se conservan
+    // tal cual (null si no hay) para que el app renderice el deepLink/QR de Yape y pollee la captura.
+    return this.toPaymentView(reply);
+  }
+
+  /**
+   * Mapea el Payment CRUDO de payment-service (fila Prisma serializada) al `PaymentView` del contrato del
+   * app, garantizando `externalRef: string` (no-null) y preservando el checkout asíncrono. Idéntico
+   * criterio que `PaymentsService.toPaymentView` del public-bff, adaptado al shape REST (null, no "").
+   */
+  private toPaymentView(reply: SettlementPaymentReply): PaymentView {
+    return {
+      id: reply.id,
+      tripId: reply.tripId,
+      method: reply.method,
+      status: reply.status,
+      amountCents: reply.amountCents,
+      grossCents: reply.grossCents,
+      tipCents: reply.tipCents,
+      commissionCents: reply.commissionCents,
+      feeCents: reply.feeCents,
+      // El capture ref no existe hasta que el webhook/poll captura → "" mientras PENDING (nunca null).
+      externalRef: reply.externalRef ?? '',
+      // Checkout asíncrono (ProntoPaga/sandbox): se conserva para que el app abra el deepLink/QR y pollee.
+      externalUid: reply.externalUid ?? null,
+      checkoutUrl: reply.checkoutUrl ?? null,
+      qrCode: reply.qrCode ?? null,
+      deepLink: reply.deepLink ?? null,
+      cip: reply.cip ?? null,
+      checkoutExpiresAt: reply.checkoutExpiresAt ?? null,
+      failureReason: reply.failureReason ?? null,
+    };
   }
 
   /**

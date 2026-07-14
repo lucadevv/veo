@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { AuthenticatedUser } from '@veo/auth';
 import type { DriverPayoutView } from '@veo/api-client';
+import { settleDriverDebtView } from '@veo/api-client';
 import { EarningsService } from './earnings.service';
 
 const identity: AuthenticatedUser = { userId: 'usr-1', type: 'driver', roles: [], sessionId: 's1' };
@@ -293,20 +294,29 @@ describe('EarningsService.commissionRate', () => {
 });
 
 describe('EarningsService.settleDebt', () => {
-  it('proxya a payment /internal/finance/driver-debt/settle con el driverId resuelto+firmado y el método', async () => {
+  it('normaliza el Payment CRUDO de payment (externalRef null → "") y conserva el checkout de Yape', async () => {
+    // Shape REAL de payment-service: la fila Prisma serializada trae `externalRef: null` mientras el
+    // checkout está PENDING (el capture ref recién existe al capturar) y los campos opcionales como null,
+    // no "". Sin normalizar, el `paymentView.parse()` del app LANZA sobre `externalRef` (z.string()
+    // no-nullable) → el conductor ve "No pudimos iniciar el pago" aunque el cobro trae checkout.
     const settlementPayment = {
       id: 'pay-settle-1',
       tripId: 'trip-9',
       method: 'YAPE',
-      status: 'PENDING',
+      status: 'PENDING' as const,
       amountCents: 10000,
       grossCents: 10000,
       tipCents: 0,
       commissionCents: 0,
       feeCents: 0,
-      externalRef: '',
-      deepLink: 'yape://pay/abc',
+      externalRef: null,
+      externalUid: 'sbx_yape_pay-settle-1',
+      checkoutUrl: 'https://sandbox.local/pay/sbx_yape_pay-settle-1',
+      qrCode: 'data:image/png;base64,c2J4X3lhcGU=',
+      deepLink: null,
+      cip: null,
       checkoutExpiresAt: '2026-05-27T15:00:00.000Z',
+      failureReason: null,
     };
     const grpc = {
       call: vi.fn(() => Promise.resolve({ id: 'drv-1', userId: 'usr-1', found: true })),
@@ -317,7 +327,29 @@ describe('EarningsService.settleDebt', () => {
 
     const result = await service.settleDebt(identity, { method: 'YAPE', payerRef: '999888777' });
 
-    expect(result).toEqual(settlementPayment);
+    // externalRef nulo → "" (contrato del app: string no-nullable). El checkout se conserva de punta a
+    // punta (externalUid/checkoutUrl/qrCode) para que el app abra el QR/urlPay de Yape y pollee la captura.
+    expect(result).toEqual({
+      id: 'pay-settle-1',
+      tripId: 'trip-9',
+      method: 'YAPE',
+      status: 'PENDING',
+      amountCents: 10000,
+      grossCents: 10000,
+      tipCents: 0,
+      commissionCents: 0,
+      feeCents: 0,
+      externalRef: '',
+      externalUid: 'sbx_yape_pay-settle-1',
+      checkoutUrl: 'https://sandbox.local/pay/sbx_yape_pay-settle-1',
+      qrCode: 'data:image/png;base64,c2J4X3lhcGU=',
+      deepLink: null,
+      cip: null,
+      checkoutExpiresAt: '2026-05-27T15:00:00.000Z',
+      failureReason: null,
+    });
+    // El resultado DEBE parsear contra el contrato soberano del app (lo que el HttpClient hace en el device).
+    expect(() => settleDriverDebtView.parse(result)).not.toThrow();
     // El driverId NO viene del cliente: se resuelve por gRPC y se FIRMA en la identidad + viaja en el body
     // (payment lo revalida contra la identidad firmada → anti-IDOR).
     expect(post).toHaveBeenCalledWith('/internal/finance/driver-debt/settle', {
