@@ -29,12 +29,14 @@ interface PaymentPrefsState {
 
 function loadDefault(): MobilePaymentMethod {
   const stored = prefsStore.getString(KEY);
+  // PAGOEFECTIVO se retiró del selector (2026-07-14): un CIP es cobro DIFERIDO (se paga en un agente/
+  // banco días después) → limbo de "pago pendiente". El enum del wire lo conserva para los pagos
+  // HISTÓRICOS y sus webhooks/CIP; acá, un default guardado en PAGOEFECTIVO cae a YAPE.
   if (
     stored === 'YAPE' ||
     stored === 'PLIN' ||
     stored === 'CASH' ||
-    stored === 'CARD' ||
-    stored === 'PAGOEFECTIVO'
+    stored === 'CARD'
   ) {
     return stored;
   }
@@ -71,12 +73,15 @@ export const usePaymentPrefsStore = create<PaymentPrefsState>(set => ({
  * `mobilePaymentMethod` (`@veo/api-client`); acá fijamos el ORDEN de presentación de la app. TODA
  * superficie (perfil, al pedir, cambiar método) deriva su lista de acá — cero listas paralelas.
  */
+// PAGOEFECTIVO NO está en la lista SELECCIONABLE (2026-07-14, decisión del dueño): el CIP es cobro
+// DIFERIDO (pago en agente/banco horas o días después → limbo de "pago pendiente"). El enum del wire
+// (`@veo/api-client`) lo conserva para los pagos HISTÓRICOS, sus webhooks y el render del CIP de un
+// pendiente ya existente — solo se retira de las superficies de ELECCIÓN de método.
 export const PAYMENT_METHODS: readonly MobilePaymentMethod[] = [
   'YAPE',
   'PLIN',
   'CASH',
   'CARD',
-  'PAGOEFECTIVO',
 ];
 
 /**

@@ -95,7 +95,7 @@ describe('PaymentMethodRow', () => {
 });
 
 describe('PaymentMethodSheet', () => {
-  it('lista los 5 métodos en es-PE (incluye PagoEfectivo) cuando está visible', () => {
+  it('lista los 4 métodos en es-PE (SIN PagoEfectivo, retirado 2026-07-14) cuando está visible', () => {
     const renderer = render(
       <PaymentMethodSheet
         visible
@@ -107,51 +107,29 @@ describe('PaymentMethodSheet', () => {
     );
     const all = texts(renderer);
     expect(all).toEqual(
-      expect.arrayContaining([
-        'Yape',
-        'Plin',
-        'Efectivo',
-        'Tarjeta',
-        'PagoEfectivo',
-      ]),
+      expect.arrayContaining(['Yape', 'Plin', 'Efectivo', 'Tarjeta']),
     );
   });
 
-  it('PagoEfectivo trae el subtítulo (el leadcircle ya no usa glifo textual sino el logo oficial)', () => {
-    const renderer = render(
-      <PaymentMethodSheet
-        visible
-        selected="PAGOEFECTIVO"
-        defaultMethod="YAPE"
-        onClose={() => {}}
-        onSelect={() => {}}
-      />,
-    );
-    const all = texts(renderer);
-    expect(all).toContain('Código para pagar en bancos y agentes');
-    // El glifo textual 'PE' fue reemplazado por el logo oficial (asset PNG) → ya no hay texto de glifo.
-    expect(all).not.toContain('PE');
-  });
-
-  it('al tocar PagoEfectivo llama onSelect con PAGOEFECTIVO (sin recordar por defecto)', () => {
-    const onSelect = jest.fn<void, [MobilePaymentMethod, boolean]>();
+  it('PagoEfectivo NO se ofrece en el sheet (retirado del selector 2026-07-14) — blinda la decisión', () => {
     const renderer = render(
       <PaymentMethodSheet
         visible
         selected="CASH"
         defaultMethod="YAPE"
         onClose={() => {}}
-        onSelect={onSelect}
+        onSelect={() => {}}
       />,
     );
+    const all = texts(renderer);
+    // Ni el nombre ni su subtítulo aparecen: un CIP es cobro DIFERIDO, ya no es método de ELECCIÓN.
+    expect(all).not.toContain('PagoEfectivo');
+    expect(all).not.toContain('Código para pagar en bancos y agentes');
+    // Y no hay ninguna fila radio con ese label.
     const pe = renderer.root
       .findAllByProps({accessibilityRole: 'radio'})
       .find(r => r.props.accessibilityLabel === 'PagoEfectivo');
-    act(() => {
-      pe?.props.onPress();
-    });
-    // El toggle "recordar" arranca apagado: la elección aplica SOLO a este viaje (remember=false).
-    expect(onSelect).toHaveBeenCalledWith('PAGOEFECTIVO', false);
+    expect(pe).toBeUndefined();
   });
 
   it('marca como seleccionada (radio) solo la fila del método actual', () => {
@@ -173,9 +151,7 @@ describe('PaymentMethodSheet', () => {
         .filter(r => r.props.accessibilityState?.selected === true)
         .map(r => r.props.accessibilityLabel),
     );
-    expect(labels).toEqual(
-      new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']),
-    );
+    expect(labels).toEqual(new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta']));
     expect([...selectedLabels]).toEqual(['Plin']);
   });
 

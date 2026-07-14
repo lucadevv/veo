@@ -63,9 +63,8 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
     );
     const rows = renderer.root.findAllByProps({accessibilityRole: 'radio'});
     const labels = new Set(rows.map(r => r.props.accessibilityLabel));
-    expect(labels).toEqual(
-      new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // PagoEfectivo se retiró del selector (2026-07-14): 4 métodos elegibles (Yape/Plin/Efectivo/Tarjeta).
+    expect(labels).toEqual(new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta']));
   });
 
   it('marca como seleccionada SOLO la fila del método actual', () => {
@@ -194,11 +193,12 @@ describe('PaymentMethodPicker · variante compact (cambiar método de un cobro)'
       />,
     );
     const out = texts(renderer);
-    expect(out).toEqual(
-      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // Digitales seleccionables (sin Efectivo Y sin PagoEfectivo, retirado 2026-07-14).
+    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta']));
     // Efectivo NUNCA en el set digital.
     expect(out).not.toContain('Efectivo');
+    // PagoEfectivo tampoco: ya no es un método elegible.
+    expect(out).not.toContain('PagoEfectivo');
     // Sin radio (filas de acción), sin checkbox de recordar, sin pill de predeterminado.
     expect(
       renderer.root.findAllByProps({accessibilityRole: 'radio'}),

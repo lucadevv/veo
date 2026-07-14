@@ -284,12 +284,11 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
 
     const out = texts(renderer);
     expect(out).toContain('Elige otro método');
-    // Digitales presentes…
-    expect(out).toEqual(
-      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // Digitales presentes (PagoEfectivo se retiró del selector 2026-07-14)…
+    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta']));
     // …y Efectivo NUNCA (no se puede cambiar a efectivo un cobro digital pendiente).
     expect(out).not.toContain('Efectivo');
+    expect(out).not.toContain('PagoEfectivo');
     act(() => renderer.unmount());
   });
 
@@ -373,7 +372,7 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
     );
     await flush();
     await pressByLabel(renderer, 'Pagar con otro método');
-    await pressByLabel(renderer, 'PagoEfectivo');
+    await pressByLabel(renderer, 'Tarjeta');
 
     const out = texts(renderer);
     expect(out).toContain('Ese método no aplica');
@@ -406,10 +405,10 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
     expect(out).toContain('Resuelve el pago de tu viaje');
     expect(out).toContain('S/ 42.00');
     // El selector canónico con TODOS los digitales y SIN Efectivo (no aplica a un pago ya hecho).
-    expect(out).toEqual(
-      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // PagoEfectivo se retiró del selector (2026-07-14): quedan 3 digitales.
+    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta']));
     expect(out).not.toContain('Efectivo');
+    expect(out).not.toContain('PagoEfectivo');
     // El SUGERIDO es el predeterminado del perfil (YAPE) → pill "Sugerido" + el CTA lo refleja.
     expect(out).toContain('Sugerido');
     expect(out).toContain('Pagar con Yape');
@@ -543,14 +542,12 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
     );
     await flush();
 
-    // Prueba los 4 digitales (YAPE sugerido + PLIN/CARD/PAGOEFECTIVO), cada uno falla.
+    // Prueba los 3 digitales (YAPE sugerido + PLIN/CARD), cada uno falla (PagoEfectivo se retiró 2026-07-14).
     await pressByLabel(renderer, 'Pagar con Yape');
     await pressByLabel(renderer, 'Plin');
     await pressByLabel(renderer, 'Pagar con Plin');
     await pressByLabel(renderer, 'Tarjeta');
     await pressByLabel(renderer, 'Pagar con Tarjeta');
-    await pressByLabel(renderer, 'PagoEfectivo');
-    await pressByLabel(renderer, 'Pagar con PagoEfectivo');
 
     const out = texts(renderer);
     expect(out).toContain('Ningún método pudo procesar tu pago');
