@@ -282,16 +282,22 @@ function buildProposal(over: Partial<TripWaypointProposal> = {}): TripWaypointPr
  */
 function makeAcceptService(trip: Trip, proposal: TripWaypointProposal, live: Partial<Trip> = {}) {
   const liveTrip = { ...trip, ...live };
+  // Captura los `data` que el CAS escribe sobre el viaje (ruta canónica: polyline + distancia +
+  // duración + tarifa deben viajar en la MISMA operación).
+  const tripUpdates: Partial<Trip>[] = [];
   const tx = {
     tripWaypointProposal: { updateMany: async () => ({ count: 1 }) }, // la propuesta sigue PROPOSED
     trip: {
       updateMany: async ({
         where,
+        data,
       }: {
         where: { status: { in: TripStatus[] }; fareCents?: number };
+        data: Partial<Trip>;
       }) => {
         const statusOk = where.status.in.includes(liveTrip.status);
         const fareOk = where.fareCents === undefined || where.fareCents === liveTrip.fareCents;
+        if (statusOk && fareOk) tripUpdates.push(data);
         return { count: statusOk && fareOk ? 1 : 0 };
       },
       findUnique: async () => ({ status: liveTrip.status, fareCents: liveTrip.fareCents }),
@@ -312,7 +318,7 @@ function makeAcceptService(trip: Trip, proposal: TripWaypointProposal, live: Par
     new WaypointProposalRepository(prisma as unknown as PrismaService),
     makeMaps(5500, 660),
   );
-  return { service };
+  return { service, tripUpdates };
 }
 
 describe('respondWaypoint · accept · RC7 · CAS de tarifa contra re-bid concurrente', () => {
@@ -324,6 +330,25 @@ describe('respondWaypoint · accept · RC7 · CAS de tarifa contra re-bid concur
     const res = await service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true });
     expect(res.status).toBe(WaypointProposalStatus.ACCEPTED);
     expect(res.fareCents).toBe(1800);
+  });
+
+  it('ruta canónica: el accept RE-PERSISTE routePolyline + distancia/duración en la MISMA operación que la tarifa', async () => {
+    // La parada aceptada CAMBIA la geometría del viaje: la ruta canónica persistida se actualiza
+    // junto con waypoints/fareCents (una sola escritura CAS) — los BFF sirven ESTA ruta, no recomputan.
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 }); // base 1500
+    const { service, tripUpdates } = makeAcceptService(trip, proposal);
+
+    await service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true });
+
+    expect(tripUpdates).toHaveLength(1);
+    // makeMaps(5500, 660) es la ruta NUEVA (con la parada); su polyline es 'xyz'.
+    expect(tripUpdates[0]).toMatchObject({
+      routePolyline: 'xyz',
+      distanceMeters: 5500,
+      durationSeconds: 660,
+      fareCents: 1800,
+    });
   });
 
   it('re-bid concurrente movió la tarifa (1500→2000) entre propose y accept → 409, NO pisa el re-bid', async () => {

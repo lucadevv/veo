@@ -129,9 +129,10 @@ export class TripsController {
   @Get(':id/route')
   @ApiOperation({
     summary:
-      'Ruta POR FASE del viaje activo para el mapa del pasajero (espejo del driver-bff): pre-recojo ' +
-      'traza conductor→recojo→destino desde la última ubicación conocida del conductor; con el ' +
-      'pasajero a bordo, conductor→destino. Mismo contrato tripRoute (polyline + steps es-PE + markers).',
+      'Ruta CANÓNICA del viaje para el mapa del pasajero: la persistida por trip-service ' +
+      '(origen→paradas→destino, con su distancia/duración; steps vacíos). Si el viaje no la tiene ' +
+      '(viajes viejos), fallback al cómputo por fase desde la última ubicación del conductor. ' +
+      'Mismo contrato tripRoute (polyline + steps + markers).',
   })
   route(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripRouteView> {
     return this.trips.route(user, id);

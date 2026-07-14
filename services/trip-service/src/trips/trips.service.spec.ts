@@ -326,6 +326,36 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     expect(prisma._store?.dispatchMode).toBe('FIXED');
   });
 
+  it('ruta canónica: el create PERSISTE la routePolyline REAL del facade (con su distancia/duración)', async () => {
+    // La ruta canónica del viaje (origen→paradas→destino) se computa UNA vez acá y se persiste:
+    // los BFF la SIRVEN (no recomputan) — pasajero y conductor ven la MISMA ruta del mismo viaje.
+    const prisma = makePrisma(null);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    await svc.createTrip({ ...baseCreateDto });
+    expect(prisma._store?.routePolyline).toBe('xyz');
+    expect(prisma._store?.distanceMeters).toBe(5000);
+    expect(prisma._store?.durationSeconds).toBe(600);
+  });
+
+  it('ruta canónica: facade degradado (polyline vacía — modo local o proveedor caído) → routePolyline NULL sin romper el create', async () => {
+    // El FallbackMapsClient del puerto convierte el proveedor caído en la estimación local (polyline '').
+    // El create NO rompe: persiste routePolyline null (jamás inventada) y la tarifa sigue calculándose.
+    const degraded = {
+      ...maps,
+      route: async () => ({
+        distanceMeters: 5000,
+        durationSeconds: 600,
+        polyline: '',
+        geometry: { type: 'LineString' as const, coordinates: [] },
+      }),
+    };
+    const prisma = makePrisma(null);
+    const svc = new TripsService(new TripsRepository(prisma as never), degraded);
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(prisma._store?.routePolyline).toBeNull();
+    expect(view.fareCents).toBe(1500); // la degradación no toca la tarifa (BR-T05 sobre la estimación)
+  });
+
   it('es idempotente por Idempotency-Key (no duplica)', async () => {
     const existing = buildTrip({ idempotencyKey: 'key-123', fareCents: 999 });
     const prisma = makePrisma(existing);
@@ -1067,6 +1097,11 @@ describe('TripsService.changeDestination · BR-T01 tarifa inmutable salvo cambio
     // 600 + 120*10 + 30*20 = 600 + 1200 + 600 = 2400
     expect(view.fareCents).toBe(2400);
     expect(prisma._tripEvents.some((e) => e.eventType === 'trip.destination_changed')).toBe(true);
+    // Ruta canónica: el cambio de destino RE-PERSISTE polyline + distancia/duración en la MISMA
+    // operación que la tarifa (la ruta persistida nunca queda desincronizada del destino nuevo).
+    expect(prisma._store?.routePolyline).toBe('new');
+    expect(prisma._store?.distanceMeters).toBe(10000);
+    expect(prisma._store?.durationSeconds).toBe(1200);
   });
 
   it('no permite cambiar destino una vez IN_PROGRESS (tarifa inmutable)', async () => {

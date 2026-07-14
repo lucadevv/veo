@@ -251,25 +251,32 @@ export class TripsService {
   }
 
   /**
-   * Ruta del viaje activo POR FASE para el MAPA del pasajero — el espejo del `GET /trips/:id/route`
-   * del driver-bff (misma fachada @veo/maps, mismo contrato `tripRoute`; costura simétrica).
+   * Ruta CANÓNICA del viaje para el MAPA del pasajero (`GET /trips/:id/route`).
    *
-   * El `from` acá NO es el GPS del cliente: es la ÚLTIMA ubicación conocida del CONDUCTOR, que este
-   * BFF ya mantiene en memoria (RealtimeStateService, poblada por el consumer de
-   * `driver.location_updated`). Con ella:
-   *  - PRE-RECOJO (ACCEPTED/ARRIVING/ARRIVED): SOLO `driver → recojo` — el pasajero ve el trazo REAL
-   *    por el que viene el taxi, espejo EXACTO del mapa del conductor. La ruta al destino NO se
-   *    muestra en este estado (regla del dueño: ambas apps pintan solo el tramo de la fase).
-   *  - ONBOARD (IN_PROGRESS): `driver → paradas → destino` (el recojo quedó atrás).
-   * SIN ubicación del conductor (aún sin ping / socket frío): onboard degrada a la ruta del viaje
-   * (`recojo → paradas → destino`, es el MISMO tramo B→C); pre-recojo devuelve ruta VACÍA — no hay
-   * tramo de acercamiento trazable y pintar B→C acá sería el tramo equivocado.
+   * Decisión de arquitectura (ruta canónica del viaje, 2026-07-13): hay UNA sola ruta por viaje —
+   * la que trip-service (dueño del dato) computó y PERSISTIÓ (`Trip.routePolyline`, con su
+   * distancia/duración) al crear el viaje, cambiar el destino o aceptar una parada:
+   * `origen → paradas → destino`, NUNCA desde la posición viva del conductor. Este endpoint la
+   * SIRVE tal cual (steps vacíos: la navegación turn-by-turn es del conductor, no del overview del
+   * pasajero). Antes cada BFF recomputaba con SU motor en cada request y pasajero y conductor veían
+   * rutas DISTINTAS para el MISMO viaje. El recálculo VIVO desde la posición del conductor sigue
+   * siendo del driver-bff (eso es navegación, no la ruta del viaje).
    *
-   * Los MARKERS (origin/destination/waypoints) son SIEMPRE los del viaje, intactos: la ubicación viva
-   * solo mueve el punto de partida de la polyline, no qué puntos se pintan.
+   * CAMBIO DE SEMÁNTICA (documentado): este endpoint ya NO computa por fase (pre-recojo
+   * `driver → recojo` / onboard `driver → destino`) cuando la ruta persistida existe — el pasajero
+   * muestra el OVERVIEW del viaje y la canónica es lo correcto. El tramo de acercamiento del taxi
+   * lo cuenta la posición viva del conductor (socket), no esta polyline.
+   *
+   * FALLBACK (degradación honesta) — SOLO si el viaje NO tiene ruta persistida (viajes viejos, o el
+   * facade de mapas estaba caído al crear): se conserva el cómputo por fase previo con la última
+   * ubicación del conductor (RealtimeStateService):
+   *  - PRE-RECOJO (ACCEPTED/ARRIVING/ARRIVED): SOLO `driver → recojo`; sin ubicación → ruta VACÍA.
+   *  - ONBOARD (IN_PROGRESS): `driver → paradas → destino`; sin ubicación → `recojo → destino`.
+   *
+   * Los MARKERS (origin/destination/waypoints) son SIEMPRE los del viaje, intactos.
    *
    * ANTI-IDOR: la ruta expone ubicaciones EXACTAS (PII, Ley 29733) → se verifica la pertenencia del
-   * viaje al pasajero autenticado ANTES de calcular nada (mismo patrón que getTripDetail/videoGrant).
+   * viaje al pasajero autenticado ANTES de servir/calcular nada (mismo patrón que getTripDetail).
    */
   async route(user: AuthenticatedUser, tripId: string): Promise<TripRouteView> {
     const trip = await this.tripRest.get<TripResource>(`/trips/${tripId}`, { identity: user });
@@ -278,6 +285,19 @@ export class TripsService {
     }
 
     const waypoints = trip.waypoints ?? [];
+    // Ruta canónica persistida por trip-service: se sirve TAL CUAL, con su distancia/duración
+    // persistidas (cero recomputo → una sola verdad para todos los consumidores del viaje).
+    if (trip.routePolyline) {
+      return {
+        polyline: trip.routePolyline,
+        distanceMeters: trip.distanceMeters,
+        durationSeconds: trip.durationSeconds,
+        steps: [],
+        origin: trip.origin,
+        destination: trip.destination,
+        waypoints,
+      };
+    }
     const driverAt = this.liveState.getLocation(tripId)?.point;
     // Status desconocido/no-normalizable → tratamos como PRE-RECOJO: fail-safe hacia el tramo de
     // acercamiento (lo que el pasajero necesita ver mientras espera).

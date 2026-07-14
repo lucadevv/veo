@@ -265,8 +265,9 @@ export interface RouteStepView {
   geometryPolyline: string;
 }
 
-/** Ruta del viaje activo POR FASE para el mapa del pasajero. Espeja `tripRoute` de @veo/api-client
- *  (mismo shape que devuelve el driver-bff al conductor). */
+/** Ruta CANÓNICA del viaje para el mapa del pasajero: la persistida por trip-service
+ *  (origen→paradas→destino; steps vacíos — la navegación es del conductor). Si el viaje no la tiene,
+ *  fallback al cómputo por fase. Espeja `tripRoute` de @veo/api-client (mismo shape que el driver-bff). */
 export interface TripRouteView {
   polyline: string;
   distanceMeters: number;
