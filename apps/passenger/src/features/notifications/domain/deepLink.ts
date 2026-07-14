@@ -4,24 +4,23 @@
  * (navigationRef/getInitialNotification) la hace testeable sin emulador.
  *
  * Contrato del backend (notification-service): el push lleva `data: { tripId, screen? }`.
- *  - `screen` explícito (#1 PUJA programada → 'OffersBoard') gana, si está en la whitelist.
- *  - `screen: 'NoOffers'` (puja EXPIRED) → NO va a la pantalla legacy; aterriza en el HOME (ruta directa
- *    `Home`), donde el sheet unificado (RequestFlowScreen) rehidrata el viaje y la fase `noOffers` muestra
- *    `NoOffersBody`. El flujo normal vive ENTERO en el sheet (ver gap de hidratación EXPIRED abajo).
- *  - sin `screen` pero con `tripId` (assigned/expired) → cae a 'TripActive' (el detalle refleja cualquier estado).
+ *  - `screen: 'OffersBoard'` (#1 PUJA programada) es la ÚNICA pantalla legacy que sigue siendo destino
+ *    directo (whitelist), con params `{ tripId }`.
+ *  - CUALQUIER otro push con `tripId` (assigned/expired/NoOffers/el viejo 'TripActive') aterriza en el
+ *    HOME con `adoptTripId`: quien navega ADOPTA el viaje en el `activeTripStore` y el flujo UNIFICADO
+ *    (RequestFlowScreen + resolveTripPhase) re-deriva la fase real — viaje vivo, EXPIRED ('noOffers'),
+ *    o COMPLETED (re-entrada al cierre). La pantalla legacy `TripActive` se ELIMINÓ: duplicaba la UI del
+ *    viaje, abría el socket sin gate (loop de handshakes rechazados en un viaje COMPLETED) y dependía de
+ *    un snapshot MMKV local que un push sin historial no tiene (mapa sin ruta ni markers).
  *  - sin `tripId` → null (no navegamos a ciegas).
  *
- * GAP HONESTO (hidratación EXPIRED): `useHydrateActiveTrip` consulta `/trips/active` (+ pending-settlement
- * COMPLETED), que NO incluye un viaje EXPIRED. Hoy la fase `noOffers` se alcanza EN VIVO dentro del sheet:
- * el `useOfferBoard`/socket del viaje en curso reporta `status: EXPIRED` mientras la app está abierta y la
- * puja sigue en memoria (`activeTripId`). Si la app se MATA y luego se toca el push de NoOffers, el sheet
- * aterriza en el Home pero NO re-hidrata el viaje EXPIRED (active devuelve null), así que la fase `noOffers`
- * NO se reconstruye desde frío. Cerrar ese caso requiere un endpoint de "puja rehidratable" (REBIDDABLE) en
- * `useHydrateActiveTrip` — queda como follow-up, no está resuelto.
+ * Nota (hidratación EXPIRED): adoptar el `tripId` del push cierra el gap de arranque en frío — el poll
+ * de estado del sheet (`GET /trips/:id/state`) reporta EXPIRED y la fase `noOffers` se reconstruye sin
+ * depender de `GET /trips/active` (que no incluye un viaje EXPIRED).
  */
 
 /** Pantallas LEGACY a las que un push aún hace deep-link directo. Reciben EXACTAMENTE `{ tripId }`. */
-const TRIP_SCREENS = ['OffersBoard', 'TripActive'] as const;
+const TRIP_SCREENS = ['OffersBoard'] as const;
 type TripScreen = (typeof TRIP_SCREENS)[number];
 
 /** Deep-link a una pantalla de viaje legacy (params `{ tripId }`). */
@@ -31,13 +30,13 @@ interface TripScreenTarget {
 }
 
 /**
- * Deep-link al HOME (sheet unificado). La puja EXPIRED (NoOffers) ya NO es una pantalla aparte: vive como
- * fase `noOffers` del sheet. El tripId NO viaja por navegación (el sheet hidrata desde el server); navegar
- * al Home alcanza para que el sheet re-entre al viaje en curso. Tras quitar los tabs, `Home` es una ruta
- * DIRECTA del stack (antes era `Main` con params `{ screen: 'Home' }`), así que el target ya no anida params.
+ * Deep-link al HOME (sheet unificado). `adoptTripId` es el viaje del push: quien navega lo ADOPTA en el
+ * `activeTripStore` ANTES de aterrizar, y la máquina de fases del sheet hace el resto (el estado real
+ * viene del server por poll/socket; el tripId NO viaja por params de navegación).
  */
 interface HomeTarget {
   screen: 'Home';
+  adoptTripId?: string;
 }
 
 export type DeepLinkTarget = TripScreenTarget | HomeTarget;
@@ -57,12 +56,11 @@ export function resolveDeepLink(
 
   const screen = typeof data.screen === 'string' ? data.screen : undefined;
 
-  // Puja EXPIRED: el flujo normal vive en el sheet → aterriza en el Home, no en la pantalla legacy.
-  if (screen === 'NoOffers') {
-    return {screen: 'Home'};
+  if (isTripScreen(screen)) {
+    return {screen, params: {tripId}};
   }
 
-  // `Counter` necesita driverId además de tripId; un push no lo lleva, así que no es destino directo.
-  const target: TripScreen = isTripScreen(screen) ? screen : 'TripActive';
-  return {screen: target, params: {tripId}};
+  // Todo lo demás (NoOffers, el viejo 'TripActive', sin screen): el flujo unificado del Home adopta el
+  // viaje y su fase real. `Counter` necesita driverId además de tripId; un push no lo lleva.
+  return {screen: 'Home', adoptTripId: tripId};
 }

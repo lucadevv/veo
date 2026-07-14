@@ -125,9 +125,11 @@ export function classifyResolveFailure(
 
 /**
  * Sheet de DEUDA / PAGO POR COMPLETAR (BR-P02). Dos orígenes:
- *  - DEUDA (kind=DEBT): el pasajero intentó pedir con una deuda (403 `DEBT_PENDING`) o tocó la franja
- *    "Resolver". Resumen honesto + "Pagar ahora" → `retry-charge`; si vuelve PENDING con checkout, reusa
- *    `CheckoutInstructions` + poll a CAPTURED.
+ *  - DEUDA (kind=DEBT o kind=CANCELLATION_PENALTY): el pasajero intentó pedir bloqueado (403
+ *    `DEBT_PENDING`) o tocó la franja "Resolver". Resumen honesto + pagar con el método elegido,
+ *    ruteado por ítem: paymentId → cambio de método / `retry-charge`; penaltyId →
+ *    `POST /payments/penalties/:id/settle` (una penalidad NO es un Payment). Si el cobro vuelve
+ *    PENDING con checkout, reusa `CheckoutInstructions` + poll a CAPTURED.
  *  - PAGO POR COMPLETAR (kind=PENDING_ACTION, via `pendingActionPaymentId`): un Payment PENDING con un
  *    checkout VIVO esperando acción. El sheet abre DIRECTO el checkout del cobro FRESCO (`GET /payments/:id`)
  *    — sin retry-charge, porque el cobro ya está en curso — con el mismo poll a CAPTURED. Resuelve el
@@ -148,6 +150,7 @@ export function DebtSheet({
   const retryCharge = useDependency(TOKENS.retryChargeUseCase);
   const getPaymentById = useDependency(TOKENS.getPaymentUseCase);
   const changePaymentMethod = useDependency(TOKENS.changePaymentMethodUseCase);
+  const settlePenalty = useDependency(TOKENS.settlePenaltyUseCase);
 
   const isPendingAction = Boolean(pendingActionPaymentId);
 
@@ -181,10 +184,14 @@ export function DebtSheet({
     React.useState<ResolveFailure | null>(null);
 
   const debts = debt?.debts ?? [];
-  // Saldamos SIEMPRE la más antigua (el backend lista de más antigua a más nueva). El gate se libera
-  // cuando NO queda deuda; empezar por la más vieja es el orden natural de regularización.
-  const target: DebtItemView | null = debts[0] ?? null;
+  // Saldamos SIEMPRE el primer ítem BLOQUEANTE (DEBT o CANCELLATION_PENALTY; el backend los lista
+  // primero, de más antiguo a más nuevo). El gate se libera cuando NO queda nada bloqueante; empezar
+  // por lo más viejo es el orden natural de regularización. Los PENDING_ACTION NO son objetivo acá
+  // (tienen su propio modo del sheet, `pendingActionPaymentId`).
+  const target: DebtItemView | null =
+    debts.find(d => d.kind !== 'PENDING_ACTION') ?? null;
   const totalCents = debt?.totalCents ?? 0;
+  const targetIsPenalty = target?.kind === 'CANCELLATION_PENALTY';
 
   /** Invalida la franja del home (deudas + pagos por completar) para que refleje el estado real. */
   const invalidateDebts = React.useCallback(() => {
@@ -360,14 +367,27 @@ export function DebtSheet({
   const resolveMutation = useMutation<
     PaymentView,
     Error,
-    {paymentId: string; method: MobileDigitalPaymentMethod}
+    {item: DebtItemView; method: MobileDigitalPaymentMethod}
   >({
-    mutationFn: async ({paymentId, method}) => {
+    mutationFn: async ({item, method}) => {
+      // RUTEO POR KIND (invariante del contrato: DEBT/PENDING_ACTION traen paymentId; CANCELLATION_PENALTY
+      // trae penaltyId). Una penalidad NO es un Payment: se salda por su endpoint propio con el método
+      // elegido — retry-charge/cambio de método no aplican.
+      if (item.kind === 'CANCELLATION_PENALTY') {
+        if (!item.penaltyId) {
+          // Contrato roto (penalidad sin id): error honesto → banner transitorio, nunca un crash.
+          throw new Error('Penalidad sin penaltyId');
+        }
+        return settlePenalty.execute(item.penaltyId, method);
+      }
+      if (!item.paymentId) {
+        throw new Error('Deuda sin paymentId');
+      }
       // Cambia al método ELEGIDO (re-cobra). Si el backend hace no-op (método == original → sigue DEBT),
       // disparamos retry-charge para re-intentar ese mismo método (no quedarnos sin re-cobro).
-      const changed = await changePaymentMethod.execute(paymentId, method);
+      const changed = await changePaymentMethod.execute(item.paymentId, method);
       if (interpretPaymentOutcome(changed).kind === 'debt') {
-        return retryCharge.execute(paymentId);
+        return retryCharge.execute(item.paymentId);
       }
       return changed;
     },
@@ -560,8 +580,9 @@ export function DebtSheet({
           <Text variant="display" tabular>
             {formatPEN(totalCents)}
           </Text>
+          {/* Porqué HONESTO según lo que se salda: cobro fallido vs cargo por cancelación. */}
           <Text variant="callout" color="inkMuted">
-            {t('debt.reason')}
+            {t(targetIsPenalty ? 'debt.penaltyReason' : 'debt.reason')}
           </Text>
         </View>
 
@@ -575,7 +596,9 @@ export function DebtSheet({
               <View style={{gap: theme.spacing.sm}}>
                 {debts.map((item, index) => (
                   <View
-                    key={item.paymentId}
+                    // Invariante del contrato: cada ítem trae paymentId (DEBT/PENDING_ACTION) o
+                    // penaltyId (CANCELLATION_PENALTY); el índice es solo red de seguridad.
+                    key={item.paymentId ?? item.penaltyId ?? `debt-${index}`}
                     style={[
                       styles.itemRow,
                       index > 0
@@ -590,9 +613,12 @@ export function DebtSheet({
                       variant="subhead"
                       numberOfLines={1}
                       style={styles.itemLabel}>
-                      {t('debt.itemLabel', {
-                        date: formatDateTime(item.createdAt),
-                      })}
+                      {t(
+                        item.kind === 'CANCELLATION_PENALTY'
+                          ? 'debt.penaltyItemLabel'
+                          : 'debt.itemLabel',
+                        {date: formatDateTime(item.createdAt)},
+                      )}
                     </Text>
                     <Text variant="bodyStrong" tabular>
                       {formatPEN(item.amountCents)}
@@ -685,7 +711,7 @@ export function DebtSheet({
                 onPress={() =>
                   target
                     ? resolveMutation.mutate({
-                        paymentId: target.paymentId,
+                        item: target,
                         method: selectedMethod,
                       })
                     : undefined

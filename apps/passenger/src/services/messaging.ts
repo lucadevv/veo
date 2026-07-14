@@ -28,6 +28,7 @@ import {TOKENS} from '../core/di/tokens';
 import {container} from '../core/di/registry';
 import {resolveDeepLink} from '../features/notifications/domain/deepLink';
 import type {PushPlatform} from '../features/notifications/domain/pushTokenRegistrar';
+import {useActiveTripStore} from '../features/trip/presentation/stores/activeTripStore';
 import {navigationRef} from '../navigation/navigationRef';
 
 /**
@@ -135,8 +136,8 @@ export async function registerBackgroundMessageHandler(): Promise<void> {
 }
 
 /**
- * Deep-link pendiente. Se mantiene hasta que la navegación REALMENTE pueda aterrizar: las pantallas de
- * viaje (OffersBoard/TripActive/NoOffers) SOLO existen en el stack autenticado+perfil-completo
+ * Deep-link pendiente. Se mantiene hasta que la navegación REALMENTE pueda aterrizar: las rutas destino
+ * (OffersBoard legacy / el Home del sheet unificado) SOLO existen en el stack autenticado+perfil-completo
  * (RootNavigator). Si el push se toca con el perfil incompleto, navegar sería un no-op silencioso y el
  * deep-link se perdería. Por eso no lo navegamos
  * a ciegas: lo dejamos pendiente y `flushPendingDeepLink` reintenta en cada cambio de estado de navegación
@@ -185,13 +186,20 @@ export function flushPendingDeepLink(): void {
   }
   if (!navigationRef.isReady()) return;
   // La ruta destino solo existe en el stack autenticado: si el navegador montado es Splash/Auth/
-  // CompleteProfile, esperá (no la consumas) hasta que conmute al stack de viaje.
+  // CompleteProfile, esperá (no la consumas) hasta que conmute al stack de viaje. `Home` vive ANIDADO
+  // en las tabs de `Main` (no aparece en los routeNames del root): su presencia se verifica por `Main`.
   const routeNames = navigationRef.getRootState()?.routeNames ?? [];
-  if (!routeNames.includes(target.screen)) return;
+  const mountedRoute = target.screen === 'Home' ? 'Main' : target.screen;
+  if (!routeNames.includes(mountedRoute)) return;
   clearPendingDeepLink();
   // Estrechamos el union del target (TS no co-estrecha screen+params en una sola llamada): el HOME del
-  // sheet (ruta directa `Home`, sin params, puja EXPIRED) vs. las pantallas de viaje legacy (`{ tripId }`).
+  // sheet unificado vs. la pantalla legacy de la puja (`OffersBoard`, params `{ tripId }`).
   if (target.screen === 'Home') {
+    // ADOPTA el viaje del push ANTES de aterrizar: el sheet unificado deriva la fase real del server
+    // (vivo / EXPIRED / COMPLETED→cierre) a partir del `activeTripId`; el id no viaja por navegación.
+    if (target.adoptTripId) {
+      useActiveTripStore.getState().setActiveTripId(target.adoptTripId);
+    }
     navigationRef.navigate(target.screen);
   } else {
     navigationRef.navigate(target.screen, target.params as {tripId: string});

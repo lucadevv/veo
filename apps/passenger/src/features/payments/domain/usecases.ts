@@ -140,6 +140,24 @@ export class RetryChargeUseCase {
 }
 
 /**
+ * Paga una PENALIDAD DE CANCELACIÓN pendiente (`POST /payments/penalties/:id/settle`, F2.3). Es el
+ * camino de saldar de los ítems kind=CANCELLATION_PENALTY de `GET /payments/debts` (una penalidad NO es
+ * un Payment: retry-charge no aplica). Devuelve el `PaymentView` del cobro de liquidación: CAPTURED si
+ * saldó directo, o PENDING con checkout (ProntoPaga) a completar. Sin lógica extra: el anti-IDOR (404
+ * ajena) y el 409 (perdonada/cobrada) los resuelve el server.
+ */
+export class SettlePenaltyUseCase {
+  constructor(private readonly repository: PaymentsRepository) {}
+
+  execute(
+    penaltyId: string,
+    method: ChangeablePaymentMethod,
+  ): Promise<PaymentView> {
+    return this.repository.settlePenalty(penaltyId, method);
+  }
+}
+
+/**
  * El método pedido no aplica para cambiar un pago pendiente (422). En la práctica: CASH — un cobro
  * digital pendiente no se "cambia a efectivo". La UI ni siquiera ofrece efectivo en el selector de
  * cambio, así que este error es la red de seguridad de contrato (no un camino esperado del usuario).

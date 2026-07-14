@@ -37,6 +37,7 @@ import {mergeOffers} from '../../domain/offers';
 import {IconStarFilled} from '../components/icons';
 import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
+import {useActiveTripStore} from '../stores/activeTripStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -111,9 +112,18 @@ export function OffersBoardScreen(): React.JSX.Element {
     fn();
   }, []);
 
+  // SALIDA al flujo UNIFICADO (la pantalla legacy `TripActive` se eliminó): adopta el viaje en el
+  // `activeTripStore` y aterriza en el Home — el sheet unificado deriva la fase real (match → viaje
+  // activo; terminal → cierre/limpieza) del server. El id no viaja por params de navegación.
+  const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
+  const exitToUnifiedFlow = useCallback((): void => {
+    setActiveTripId(tripId);
+    navigation.navigate('Home');
+  }, [setActiveTripId, tripId, navigation]);
+
   const acceptMutation = useMutation({
     mutationFn: (driverId: string) => acceptOffer.execute(tripId, driverId),
-    onSuccess: () => goOnce(() => navigation.replace('TripActive', {tripId})),
+    onSuccess: () => goOnce(exitToUnifiedFlow),
   });
 
   const cancelMutation = useMutation({
@@ -129,7 +139,7 @@ export function OffersBoardScreen(): React.JSX.Element {
     // Reacciona al estado EFECTIVO (socket o, si cayó, poll REST): así un EXPIRED/REASSIGNING/match que
     // llega solo por REST (socket caído) igual navega y no deja al pasajero colgado.
     if (status === 'ASSIGNED' || status === 'ACCEPTED') {
-      goOnce(() => navigation.replace('TripActive', {tripId}));
+      goOnce(exitToUnifiedFlow);
     } else if (status === 'EXPIRED') {
       goOnce(() => navigation.replace('NoOffers', {tripId}));
     } else if (
@@ -138,10 +148,11 @@ export function OffersBoardScreen(): React.JSX.Element {
       status === 'COMPLETED'
     ) {
       // Estados TERMINALES con el board abierto (watchdog/cancelación): no dejar al pasajero colgado en
-      // un board que ya no recibe ofertas → al detalle del viaje, que muestra el estado final.
-      goOnce(() => navigation.replace('TripActive', {tripId}));
+      // un board que ya no recibe ofertas → al flujo unificado, que refleja el estado final (COMPLETED
+      // re-entra al cierre; CANCELLED/FAILED limpian y vuelven al home).
+      goOnce(exitToUnifiedFlow);
     }
-  }, [status, isFocused, navigation, tripId, goOnce]);
+  }, [status, isFocused, navigation, tripId, goOnce, exitToUnifiedFlow]);
 
   const onChoose = (offer: OfferView): void => {
     // No permitir elegir mientras un accept está en curso (evita aceptar 2 ofertas distintas).

@@ -59,7 +59,8 @@ export type RootStackParamList = {
   Counter: {tripId: string; driverId: string};
   /** PUJA · puja sin ofertas (EXPIRED): re-pujar más alto para reabrir el board. */
   NoOffers: {tripId: string};
-  TripActive: {tripId: string};
+  // La pantalla legacy `TripActive` se ELIMINÓ: el viaje activo vive en el flujo unificado del Home
+  // (RequestFlowScreen); re-entrar a un viaje = adoptar el id en `activeTripStore` + navegar a `Home`.
   /** "Comparte tu viaje" (design/veo.pen zKyic): enlace de seguimiento + canales + contactos. */
   FamilyShare: {tripId: string};
   /** Cámara del viaje a pantalla completa (Ola 2A · seguridad). */

@@ -12,6 +12,8 @@ import {
   type PaymentView,
   paymentView,
   retryChargeView,
+  settlePenaltyRequest,
+  settlePenaltyView,
   type UserCreditView,
   userCreditView,
 } from '@veo/api-client';
@@ -59,6 +61,19 @@ export class HttpPaymentsRepository implements PaymentsRepository {
     // El bff deriva la idempotencia del cobro (un Payment por viaje): NO mandamos dedupKey propia.
     return this.http.post(`/payments/${paymentId}/retry-charge`, {
       schema: retryChargeView,
+    });
+  }
+
+  settlePenalty(
+    penaltyId: string,
+    method: ChangeablePaymentMethod,
+  ): Promise<PaymentView> {
+    // Validamos el body con el contrato SOBERANO (`settlePenaltyRequest`) antes de salir a la red: SOLO
+    // métodos digitales (CASH → 400 en el BFF; no hay conductor presente para confirmar efectivo).
+    const body = settlePenaltyRequest.parse({method});
+    return this.http.post(`/payments/penalties/${penaltyId}/settle`, {
+      body,
+      schema: settlePenaltyView,
     });
   }
 

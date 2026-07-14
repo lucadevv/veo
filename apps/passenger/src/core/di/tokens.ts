@@ -80,6 +80,7 @@ import type {
   GetPaymentUseCase,
   GetUserCreditUseCase,
   RetryChargeUseCase,
+  SettlePenaltyUseCase,
 } from '../../features/payments/domain/usecases';
 import type {ProfileRepository} from '../../features/profile/domain/profileRepository';
 import type {PromosRepository} from '../../features/promos/domain/promosRepository';
@@ -120,7 +121,6 @@ import type {
   CancelBidUseCase,
   CancelScheduledTripUseCase,
   CancelTripUseCase,
-  ChangeDestinationUseCase,
   CloseTripUseCase,
   CreateTripUseCase,
   GetCabinVideoUseCase,
@@ -262,9 +262,6 @@ export const TOKENS = {
   closeTripUseCase: createToken<CloseTripUseCase>('CloseTripUseCase'),
   createTripUseCase: createToken<CreateTripUseCase>('CreateTripUseCase'),
   cancelTripUseCase: createToken<CancelTripUseCase>('CancelTripUseCase'),
-  changeDestinationUseCase: createToken<ChangeDestinationUseCase>(
-    'ChangeDestinationUseCase',
-  ),
   getCabinVideoUseCase: createToken<GetCabinVideoUseCase>(
     'GetCabinVideoUseCase',
   ),
@@ -366,6 +363,10 @@ export const TOKENS = {
     'GetUserCreditUseCase',
   ),
   retryChargeUseCase: createToken<RetryChargeUseCase>('RetryChargeUseCase'),
+  // Caso de uso · Payments · Pagar una penalidad de cancelación (kind=CANCELLATION_PENALTY · F2.3)
+  settlePenaltyUseCase: createToken<SettlePenaltyUseCase>(
+    'SettlePenaltyUseCase',
+  ),
   // Caso de uso · Payments · Cambiar el método de un pago PENDIENTE a otro DIGITAL (TASK 3)
   changePaymentMethodUseCase: createToken<ChangePaymentMethodUseCase>(
     'ChangePaymentMethodUseCase',

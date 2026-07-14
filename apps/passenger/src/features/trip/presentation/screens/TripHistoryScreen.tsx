@@ -58,7 +58,7 @@ type HistoryTab = 'upcoming' | 'history';
  *               dueño eliminó `TripDetailScreen`). La lista queda debajo; el sheet sube arrastrable y
  *               cierra con gesto/backdrop. Estado fresco del server (item del historial + `GET /trips/:id`).
  *  - VIVO      → adopta el id en `activeTripStore` y vuelve al Home → el sheet unificado rehidrata el
- *               viaje activo. NUNCA navega a `TripActive` (legacy).
+ *               viaje activo. (la pantalla legacy `TripActive` se eliminó).
  */
 export function TripHistoryScreen(): React.JSX.Element {
   const theme = useTheme();

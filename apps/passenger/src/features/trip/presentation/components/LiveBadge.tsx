@@ -1,8 +1,8 @@
-import {Text, useReducedMotion, useTheme} from '@veo/ui-kit';
+import {fontFamily, Text, useReducedMotion, useTheme} from '@veo/ui-kit';
 import React, {useEffect} from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, View} from 'react-native';
-import {IconCamera} from './icons';
+import {IconVideo} from './icons';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -15,22 +15,19 @@ import Animated, {
 } from 'react-native-reanimated';
 
 /**
- * Pill "EN VIVO" sobre el mapa del viaje activo. Pieza PREMIUM dedicada (no el StatusPill genérico): es
- * la señal del diferenciador de seguridad de VEO ("tu viaje se transmite/graba en vivo"), así que merece
- * su propio tratamiento — fondo GLASS oscuro del DS (`overlay`), borde sutil, tipografía chica en
- * VERSALITAS con tracking (variante `label`) y un punto ROJO que PULSA suave (~2s, opacidad + halo en
- * escala) en el UI thread (reanimated, sin timers JS → pausa solo en background).
+ * Pill "EN VIVO" sobre el mapa del viaje activo — FIEL al frame `RecPill` del design/veo.pen (ed6D3):
+ * card BLANCA (`surface`) con borde `border` 1px y radio pill, dot 8 + glifo de VIDEO 15 (lucide
+ * `video`) ambos en `danger`, label "EN VIVO" Outfit SemiBold 12 en `ink`, gap 7 y padding 13×9.
+ * La sombra del frame (0/4/12/-4) se rinde con el token `level2` del DS (RN `shadow*` no soporta
+ * spread; equivalencia documentada). El punto PULSA suave (~2s, opacidad + halo en escala) en el UI
+ * thread (reanimated, sin timers JS) — decorativo, el frame es estático.
  *
- * COLOR — deliberado, NO tocar a verde: el punto es `danger` (ROJO) porque su semántica es REC/grabación
- * (la cámara del habitáculo está transmitiendo), el código universal de "estás siendo grabado". No es un
- * indicador de conexión (eso sí sería verde, como el "En vivo" del conductor). Cambiarlo a `success`
- * rompería la señal de seguridad. Cero hex inline: sale de `theme.colors.danger`.
+ * COLOR — deliberado, NO tocar a verde: dot y videocámara son `danger` (ROJO) porque su semántica es
+ * REC/grabación (la cámara del habitáculo transmite), el código universal de "estás siendo grabado".
+ * Cambiarlo a `success` rompería la señal de seguridad. Cero hex inline: todo sale del theme.
  *
- * Por qué dedicada y no el StatusPill: el StatusPill se reusa para muchos estados (su fondo es un tinte
- * del tono); para el overlay del mapa queríamos un cristal oscuro legible sobre cualquier punto del mapa
- * y un dot vivo, sin mutar el componente compartido.
- *
- * Accesibilidad: expone el label como texto ("EN VIVO"); el pulso es decorativo. Respeta reduce-motion.
+ * Accesibilidad: expone el label como texto ("EN VIVO"); dot e ícono son decorativos. Respeta
+ * reduce-motion.
  */
 export function LiveBadge(): React.JSX.Element {
   const theme = useTheme();
@@ -73,7 +70,7 @@ export function LiveBadge(): React.JSX.Element {
       style={[
         styles.pill,
         {
-          backgroundColor: theme.colors.overlay,
+          backgroundColor: theme.colors.surface,
           borderColor: theme.colors.border,
           borderRadius: theme.radii.pill,
           ...theme.elevation.level2,
@@ -98,14 +95,16 @@ export function LiveBadge(): React.JSX.Element {
           ]}
         />
       </View>
-      {/* Glifo de cámara (design/veo.pen fLKdk RecPill): la pill dice QUÉ está en vivo — el video del
-          habitáculo. El punto pasa a `danger` (semántica REC), no `success`. Decorativo (el label habla). */}
+      {/* Videocámara ROJA 15 (pen ed6D3 `Cam`, lucide video): dice QUÉ está en vivo — el video del
+          habitáculo. Decorativa (el label habla). */}
       <View
         importantForAccessibility="no-hide-descendants"
         accessibilityElementsHidden>
-        <IconCamera color={theme.colors.ink} size={12} />
+        <IconVideo color={theme.colors.danger} size={15} />
       </View>
-      <Text variant="label" color="ink">
+      {/* Label del frame: Outfit SemiBold 12 (el rol `caption` con la cara semibold — el frame pide
+          Outfit 600, no la Clash del rol `label`). */}
+      <Text variant="caption" color="ink" style={styles.label}>
         {t('trip.live')}
       </Text>
     </View>
@@ -113,15 +112,17 @@ export function LiveBadge(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  // Números EXACTOS del frame RecPill (ed6D3): gap 7, padding [9,13], stroke 1.
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'center',
     gap: 7,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderWidth: 1,
   },
+  label: {fontFamily: fontFamily.textSemibold, fontWeight: '600'},
   dotWrap: {
     width: 8,
     height: 8,

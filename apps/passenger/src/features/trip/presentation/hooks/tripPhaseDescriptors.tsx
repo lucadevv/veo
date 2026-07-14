@@ -386,12 +386,15 @@ export function QuotingSheetHeader({ctx}: SlotProps): React.JSX.Element {
         {paddingHorizontal: theme.spacing.xl, gap: theme.spacing.sm},
       ]}>
       <View style={styles.searchHeader}>
-        <IconButton
+        {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+            TODA la app — espeja a ScreenHeader/HeaderBackChevron). */}
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('actions.back')}
-          variant="surface"
-          onPress={ctx.onCancelQuoting}
-          icon={<IconArrowLeft color={theme.colors.ink} size={22} />}
-        />
+          hitSlop={12}
+          onPress={ctx.onCancelQuoting}>
+          <IconArrowLeft color={theme.colors.ink} size={28} />
+        </Pressable>
         <Text variant="bodyStrong" numberOfLines={1} style={styles.searchInput}>
           {ctx.destinationTitle ?? t('home.destination')}
         </Text>

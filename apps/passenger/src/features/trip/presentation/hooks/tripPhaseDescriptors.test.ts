@@ -1,6 +1,7 @@
 import type {TripPhase} from './tripFlowPhase';
 import {
   ActiveTripPhaseBody,
+  ActiveTripSheetHeader,
   BiddingPhaseBody,
   CompletionPhaseBody,
   HomeIdleFlowBody,
@@ -46,7 +47,7 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
     }
   });
 
-  it('WHITELIST de header: solo home y cotización tienen chrome fijo (el resto, cuerpo autocontenido)', () => {
+  it('WHITELIST de header: home, cotización y viaje vivo (franja colapsable); el resto, cuerpo autocontenido', () => {
     const expected: Record<TripPhase, PhaseDescriptor['Header']> = {
       idle: HomeSheetHeader,
       quoting: QuotingSheetHeader,
@@ -55,9 +56,11 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
       noOffers: null,
       noDriver: null,
       reassigning: null,
-      enRoute: null,
-      arrived: null,
-      inProgress: null,
+      // Viaje VIVO: la franja de estado (conductor + ETA) es el header COLAPSABLE del sheet — lo único
+      // visible con el sheet plegado al snap 'header' (mapa al máximo, espejo del conductor).
+      enRoute: ActiveTripSheetHeader,
+      arrived: ActiveTripSheetHeader,
+      inProgress: ActiveTripSheetHeader,
       completed: null,
       ended: null,
     };

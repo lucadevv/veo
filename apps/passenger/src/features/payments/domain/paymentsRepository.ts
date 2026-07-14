@@ -40,6 +40,17 @@ export interface PaymentsRepository {
    */
   retryCharge(paymentId: string): Promise<PaymentView>;
   /**
+   * POST /payments/penalties/:id/settle → paga una penalidad de cancelación PENDING
+   * (kind=CANCELLATION_PENALTY en `GET /payments/debts`) por un método DIGITAL. Devuelve el
+   * `PaymentView` del cobro de liquidación: CAPTURED si saldó directo, o PENDING con checkout
+   * (ProntoPaga) a completar. El BFF/servicio responde 404 si la penalidad es ajena
+   * (anti-IDOR/enumeración) y 409 si ya fue perdonada/cobrada.
+   */
+  settlePenalty(
+    penaltyId: string,
+    method: ChangeablePaymentMethod,
+  ): Promise<PaymentView>;
+  /**
    * GET /payments/by-trip/:tripId → cobro CANÓNICO del viaje (auto-cobrado al completar). Devuelve
    * `null` si aún no existe (404: el consumer puede demorar) para que la presentación reintente sin
    * tratarlo como error duro. El BFF también responde 404 ante un viaje ajeno (anti-IDOR).

@@ -46,7 +46,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  * M1 · NAVEGACIÓN DELEGADA: Counter NUNCA hace `replace` — TODAS las salidas son `goBack()` al board, que
  * (re-enfocado, con socket vivo y el mismo status) es la ÚNICA autoridad de ruteo. Si Counter reemplazara,
  * el board quedaría montado debajo con su socket + polls durante todo el viaje (leak) y un "back" desde
- * TripActive aterrizaría en un board muerto. Al ACEPTAR, se siembra el query compartido de estado con
+ * el viaje activo aterrizaría en un board muerto. Al ACEPTAR, se siembra el query compartido de estado con
  * ASSIGNED (optimista; el server lo confirma por socket/poll) para que el board rutee al instante, sin gap.
  */
 export function CounterScreen(): React.JSX.Element {
@@ -97,7 +97,7 @@ export function CounterScreen(): React.JSX.Element {
     onSuccess: () =>
       goOnce(() => {
         // Siembra el estado compartido como ASSIGNED (el accept ⇒ match): el board re-enfocado rutea a
-        // TripActive AL INSTANTE, sin esperar el próximo poll/evento. El server lo confirma enseguida.
+        // el viaje activo AL INSTANTE, sin esperar el próximo poll/evento. El server lo confirma enseguida.
         queryClient.setQueryData(['trip', tripId, 'state'], {
           id: tripId,
           status: 'ASSIGNED',
@@ -108,8 +108,8 @@ export function CounterScreen(): React.JSX.Element {
 
   useEffect(() => {
     // M1 · cualquier estado que invalide la contraoferta → volver al board (única autoridad de ruteo): él
-    // ve el MISMO status (socket en vivo + su propio poll) y decide (match→TripActive, EXPIRED→NoOffers,
-    // REASSIGNING→se queda re-abierto, terminal→TripActive). Counter no replica ese mapa: solo se corre.
+    // ve el MISMO status (socket en vivo + su propio poll) y decide (match→flujo unificado, EXPIRED→NoOffers,
+    // REASSIGNING→se queda re-abierto, terminal→flujo unificado). Counter no replica ese mapa: solo se corre.
     if (
       status === 'ASSIGNED' ||
       status === 'ACCEPTED' ||

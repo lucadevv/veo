@@ -68,6 +68,15 @@ function resolveStrip(status: string): {
   namedKey: string;
 } {
   switch (status) {
+    // ASSIGNED / ACCEPTED: el conductor CONFIRMÓ el viaje pero aún no reporta ir en camino. Copy propio:
+    // colapsarlo en "en camino" mentía la fase (el pasajero no distinguía "aceptó" de "ya viene").
+    case tripStatus.enum.ASSIGNED:
+    case tripStatus.enum.ACCEPTED:
+      return {
+        mode: 'moving',
+        labelKey: 'tripStrip.confirmed',
+        namedKey: 'tripStrip.confirmedNamed',
+      };
     case tripStatus.enum.ARRIVED:
       return {
         mode: 'arrived',
@@ -80,7 +89,7 @@ function resolveStrip(status: string): {
         labelKey: 'tripStrip.inProgress',
         namedKey: 'tripStrip.inProgressNamed',
       };
-    // ASSIGNED / ACCEPTED / ARRIVING y cualquier otro estado del viaje activo: conductor en camino.
+    // ARRIVING y cualquier otro estado del viaje activo: conductor en camino.
     default:
       return {
         mode: 'moving',

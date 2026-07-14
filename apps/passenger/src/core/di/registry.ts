@@ -85,6 +85,7 @@ import {
   GetPaymentByTripUseCase,
   GetPaymentUseCase,
   RetryChargeUseCase,
+  SettlePenaltyUseCase,
 } from '../../features/payments/domain/usecases';
 import {
   CreateYapeAffiliationUseCase,
@@ -135,7 +136,6 @@ import {
   CancelBidUseCase,
   CancelScheduledTripUseCase,
   CancelTripUseCase,
-  ChangeDestinationUseCase,
   CloseTripUseCase,
   CreateTripUseCase,
   GetCabinVideoUseCase,
@@ -421,10 +421,6 @@ export function buildContainer(): Container {
     c => new CancelTripUseCase(c.resolve(TOKENS.tripRepository)),
   );
   container.register(
-    TOKENS.changeDestinationUseCase,
-    c => new ChangeDestinationUseCase(c.resolve(TOKENS.tripRepository)),
-  );
-  container.register(
     TOKENS.getCabinVideoUseCase,
     c => new GetCabinVideoUseCase(c.resolve(TOKENS.tripRepository)),
   );
@@ -619,6 +615,11 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.retryChargeUseCase,
     c => new RetryChargeUseCase(c.resolve(TOKENS.paymentsRepository)),
+  );
+  // Caso de uso · Pagar una penalidad de cancelación (kind=CANCELLATION_PENALTY · F2.3)
+  container.register(
+    TOKENS.settlePenaltyUseCase,
+    c => new SettlePenaltyUseCase(c.resolve(TOKENS.paymentsRepository)),
   );
   // Caso de uso · Cambiar el método de un pago PENDIENTE a otro DIGITAL (TASK 3)
   container.register(

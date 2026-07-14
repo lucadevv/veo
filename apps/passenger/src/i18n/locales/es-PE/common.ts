@@ -54,7 +54,6 @@ export const common = {
     offersBoard: 'Ofertas',
     counter: 'Contraoferta',
     noOffers: 'Sin ofertas',
-    tripActive: 'Viaje en curso',
     cameraControl: 'Control de cámara',
     panic: 'Emergencia',
     trustedContacts: 'Contactos de confianza',
@@ -404,6 +403,8 @@ export const common = {
     bodyNoPrice:
       'No te preocupes: estamos buscando otro conductor al mismo precio. Sin cargo para ti.',
     note: 'Tu viaje vuelve al tablero de ofertas. Elige al nuevo conductor que mejor te convenga.',
+    noteAuto:
+      'La búsqueda es automática: te avisamos apenas un conductor acepte tu viaje.',
     continue: 'Ver conductores disponibles',
     cancel: 'Cancelar y volver al inicio',
   },
@@ -869,12 +870,7 @@ export const common = {
       'Estamos contactando a los conductores cercanos. Te avisaremos al asignar uno.',
     plate: 'Placa',
     rating: '{{stars}} ★',
-    cancel: 'Cancelar viaje',
     cancelTitle: '¿Cancelar el viaje?',
-    cancelBody:
-      'Si cancelas podría aplicarse una penalidad según el estado del viaje.',
-    cancelReasonLabel: 'Motivo (opcional)',
-    keepTrip: 'Mantener viaje',
     // Sheet de cancelación per design/veo.pen AULzA (tuteo del "Contános por qué"): 5 motivos en
     // radio + detalle opcional. NO hay enum de motivos en el contrato (cancelTripRequest.reason es
     // string libre): el motivo elegido viaja como texto "{motivo} — {detalle}".
@@ -893,18 +889,7 @@ export const common = {
     cancelWarnNote: 'Cancelar ahora puede tener un cargo por cancelación',
     cancelConfirm: 'Sí, cancelar viaje',
     keepInTrip: 'No, seguir en el viaje',
-    changeDestination: 'Cambiar destino',
-    changeDestinationTitle: 'Nuevo destino',
-    changeDestinationBody: 'Toca el mapa para elegir el nuevo destino.',
-    // Cambio de destino falló (mutation en error): banner honesto como sus hermanas cancelar/compartir.
-    changeDestinationError:
-      'No pudimos cambiar tu destino. Inténtalo de nuevo.',
     panicButton: 'Emergencia',
-    recording: 'GRABANDO',
-    cabinVideoTitle: 'Cámara del habitáculo',
-    cabinVideoUnavailable: 'La cámara no está disponible en este momento.',
-    cabinVideoNative: 'El visor en vivo se habilita en la app instalada.',
-    reconnecting: 'Reconectando…',
     live: 'EN VIVO',
     /** Chrome del viaje activo (design/veo.pen fLKdk): minimizar el sheet + fila de 3 acciones con icono. */
     minimize: 'Minimizar',
@@ -924,11 +909,6 @@ export const common = {
     waitingDriver: 'Buscando un conductor para ti…',
     arrived: 'Tu conductor llegó',
     completedTitle: 'Viaje completado',
-    failedBody:
-      'El viaje se interrumpió y no pudo completarse. No se te cobró.',
-    payNow: 'Pagar viaje',
-    rateNow: 'Calificar conductor',
-    share: 'Compartir viaje',
     shareTitle: 'Sigue mi viaje en VEO',
     shareMessage:
       'Estoy en un viaje con VEO. Sigue mi recorrido en vivo aquí: {{url}}',
@@ -936,15 +916,8 @@ export const common = {
       'No pudimos generar el enlace para compartir. Inténtalo de nuevo.',
     // Enlace de seguimiento ACTIVO (kill-switch): mientras el enlace vive, el pasajero puede dejar de
     // compartir su ubicación al instante. Honesto: el efecto lo aplica el server (revoca el enlace).
-    sharingActive: 'Compartiendo ubicación',
-    shareExpiresIn: 'Expira en {{countdown}}',
     revokeShare: 'Dejar de compartir',
-    revokeShareTitle: '¿Dejar de compartir tu ubicación?',
-    revokeShareConfirm: 'Dejar de compartir',
-    revokeShareBody:
-      'Cualquiera con el enlace dejará de ver tu ubicación al instante. Esto revoca el enlace que compartiste en este viaje.',
     revokeShareError: 'No pudimos revocar el enlace. Inténtalo de nuevo.',
-    revokeShareKeep: 'Seguir compartiendo',
     shareRevokedBanner: 'Dejaste de compartir tu ubicación.',
 
     // Parada negociada en viaje (Lote C3): el pasajero propone una parada durante el viaje en curso; el
@@ -979,7 +952,9 @@ export const common = {
    * del vehículo es decorativa). Una etiqueta por fase del viaje activo.
    */
   tripStrip: {
-    /** Conductor en camino al recojo (enRoute/arriving). Vehículo deslizándose →. */
+    /** El conductor CONFIRMÓ el viaje (ASSIGNED/ACCEPTED) pero aún no reporta ir en camino. */
+    confirmed: 'Tu conductor confirmó el viaje',
+    /** Conductor en camino al recojo (ARRIVING). Vehículo deslizándose →. */
     enRoute: 'En camino',
     /** Conductor llegó al punto de recogida (arrived). Vehículo quieto al inicio, con pulso. */
     arrived: 'Tu conductor llegó',
@@ -987,6 +962,7 @@ export const common = {
     inProgress: 'En viaje',
     /** Variantes PERSONALIZADAS con el nombre del conductor (design/veo.pen fLKdk "Carlos está en camino").
         Solo cuando el backend trae el nombre; sin nombre caen a las genéricas de arriba. */
+    confirmedNamed: '{{name}} confirmó el viaje',
     enRouteNamed: '{{name}} está en camino',
     arrivedNamed: '{{name}} llegó',
     inProgressNamed: 'En viaje con {{name}}',
@@ -1592,12 +1568,16 @@ export const common = {
     title: 'Tienes un pago pendiente',
     /** Línea honesta del porqué (sin culpar, sin tecnicismos). */
     reason: 'Un cobro de un viaje anterior no se pudo completar.',
+    /** Porqué cuando lo que se salda es una PENALIDAD de cancelación (kind=CANCELLATION_PENALTY). */
+    penaltyReason: 'Es un cargo por la cancelación de un viaje ya aceptado.',
     /** Antesala del monto grande. */
     amountLabel: 'Pendiente por pagar',
     /** Encabezado de la lista cuando hay más de una deuda. */
     itemsTitle: 'Detalle',
     /** Una fila de la lista compacta de deudas (varias). */
     itemLabel: 'Viaje del {{date}}',
+    /** Fila de la lista cuando el ítem es una penalidad de cancelación. */
+    penaltyItemLabel: 'Cargo por cancelación · {{date}}',
     /** CTA primario: saldar la deuda más antigua. */
     payNow: 'Pagar ahora',
     /** CTA primario en vuelo (esperando la respuesta del re-cobro). */
@@ -2044,7 +2024,6 @@ export const common = {
   chat: {
     title: 'Chat',
     headerSubtitle: 'Conversa con tu conductor',
-    open: 'Abrir chat',
     inputPlaceholder: 'Escribe un mensaje…',
     send: 'Enviar mensaje',
     empty: 'Aún no hay mensajes',

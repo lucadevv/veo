@@ -241,6 +241,31 @@ export function IconArrowRight({
   );
 }
 
+/** Flecha derecha COMPLETA (asta + punta, →): enviar mensaje del chat. Distinta del chevron
+ *  IconArrowRight (solo punta) que usan las filas de lista; simétrica al IconArrowRight del driver. */
+export function IconArrowRightLong({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 12h14"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M12 5l7 7-7 7"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** Chevron hacia abajo (minimizar el sheet del viaje activo, pen fLKdk MinBtn). */
 export function IconChevronDown({
   color,
@@ -410,6 +435,31 @@ export function IconChild({color, size = 18}: GlyphProps): React.JSX.Element {
 }
 
 /** Cámara (cámara del habitáculo / compartir cámara). Espejo de `I.cam` del diseño. */
+/** Videocámara (lucide `video`, geometría oficial): el glifo del RecPill "EN VIVO" (pen ed6D3) —
+ *  dice QUÉ está en vivo: el VIDEO del habitáculo (distinto de IconCamera, que es cámara de fotos). */
+export function IconVideo({color, size = 15}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Rect
+        x={2}
+        y={6}
+        width={14}
+        height={12}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+      />
+    </Svg>
+  );
+}
+
 export function IconCamera({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

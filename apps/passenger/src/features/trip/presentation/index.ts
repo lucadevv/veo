@@ -3,7 +3,6 @@ export {RequestFlowScreen} from './screens/RequestFlowScreen';
 export {OffersBoardScreen} from './screens/OffersBoardScreen';
 export {CounterScreen} from './screens/CounterScreen';
 export {NoOffersScreen} from './screens/NoOffersScreen';
-export {TripActiveScreen} from './screens/TripActiveScreen';
 export {CameraLiveScreen} from './screens/CameraLiveScreen';
 export {CameraControlScreen} from './screens/CameraControlScreen';
 export {TripHistoryScreen} from './screens/TripHistoryScreen';

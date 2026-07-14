@@ -11,9 +11,8 @@ describe('buildContainer · cableado de la oleada de features', () => {
     expect(typeof container.resolve(TOKENS.cancelTripUseCase).execute).toBe(
       'function',
     );
-    expect(
-      typeof container.resolve(TOKENS.changeDestinationUseCase).execute,
-    ).toBe('function');
+    // "Cambiar destino" se RETIRÓ con la pantalla legacy TripActive (decisión de producto: el flujo
+    // unificado ofrece "Agregar parada" en su lugar) — ya no existe el use case ni su token.
     expect(typeof container.resolve(TOKENS.getCabinVideoUseCase).execute).toBe(
       'function',
     );

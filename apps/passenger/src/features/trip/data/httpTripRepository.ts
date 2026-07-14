@@ -25,6 +25,8 @@ import {
   type TripHistoryQuery,
   type TripResource,
   tripResource,
+  type TripRoute,
+  tripRoute,
   type TripStateView,
   tripStateView,
   type TripVideoGrant,
@@ -90,6 +92,10 @@ export class HttpTripRepository implements TripRepository {
     return this.http.get(`/trips/${tripId}/state`, {schema: tripStateView});
   }
 
+  getTripRoute(tripId: string): Promise<TripRoute> {
+    return this.http.get(`/trips/${tripId}/route`, {schema: tripRoute});
+  }
+
   cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource> {
     return this.http.post(`/trips/${tripId}/cancel`, {
       body: input,
@@ -97,15 +103,6 @@ export class HttpTripRepository implements TripRepository {
     });
   }
 
-  changeDestination(
-    tripId: string,
-    destination: GeoPoint,
-  ): Promise<TripResource> {
-    return this.http.post(`/trips/${tripId}/destination`, {
-      body: {destination},
-      schema: tripResource,
-    });
-  }
 
   proposeWaypoint(
     tripId: string,

@@ -38,6 +38,7 @@ import type {
   RootStackParamList,
 } from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
+import {decodePolylineToCoordinates} from '../../../../shared/utils/polyline';
 // Renombrado de home-map.jpg: Metro cacheaba el asset VIEJO por hash (el sim mostraba solo nubes,
 // sin la ruta azul de la imagen real) — nombre nuevo = URL nueva = caché bypasseada.
 import homeMapBackdrop from '../../../../shared/assets/brand/home-map-light.jpg';
@@ -250,12 +251,39 @@ export function RequestFlowScreen(): React.JSX.Element {
   );
 
   // Detalle del viaje (conductor/vehículo/tarifa) para el cuerpo del viaje activo Y el cierre (pago/rating).
+  // El poll se corta por FASE terminal (completed/ended), no por `live.ended`: en el cierre el socket está
+  // APAGADO (isLiveSocketPhase) → `live.ended` jamás llega a true y el detalle quedaba refetcheando cada
+  // 15 s PARA SIEMPRE en la pantalla del recibo. El detalle de un viaje terminal ya no cambia.
+  const terminalPhase = phase === 'completed' || phase === 'ended';
   const tripDetailQuery = useQuery({
     queryKey: ['trip', activeTripId, 'active'],
     queryFn: () => tripRepository.getActiveTrip(activeTripId as string),
     enabled: Boolean(activeTripId) && descriptor.needsTripDetail,
-    refetchInterval: live.ended ? false : 15_000,
+    refetchInterval: terminalPhase || live.ended ? false : 15_000,
   });
+
+  // RUTA POR FASE del viaje activo (GET /trips/:id/route — el ESPEJO del conductor, mismo contrato):
+  // pre-recojo el server traza conductor→recojo→destino desde la última ubicación del conductor
+  // (el pasajero VE por dónde viene el taxi); onboard, conductor→destino. Reemplaza a la polyline
+  // CONGELADA del quote en las fases del viaje. La FASE entra en la queryKey → al pasar de
+  // approach→onboard se re-pide YA (sin esperar el poll), simétrico a la invalidación del conductor.
+  const isRoutePhase =
+    phase === 'enRoute' || phase === 'arrived' || phase === 'inProgress';
+  const routeLeg = phase === 'inProgress' ? 'onboard' : 'approach';
+  const tripRouteQuery = useQuery({
+    queryKey: ['trip', activeTripId, 'route', routeLeg],
+    queryFn: () => tripRepository.getTripRoute(activeTripId as string),
+    enabled: Boolean(activeTripId) && isRoutePhase,
+    refetchInterval: isRoutePhase ? 15_000 : false,
+    staleTime: 15_000,
+  });
+  const liveRouteCoords = useMemo(
+    () =>
+      tripRouteQuery.data
+        ? decodePolylineToCoordinates(tripRouteQuery.data.polyline)
+        : null,
+    [tripRouteQuery.data],
+  );
 
   // PARADA negociada mid-trip (Lote C3): el pasajero propone una parada durante el viaje EN CURSO. El
   // hook posee el picking (el tap del mapa → `addStop.pickPoint`), el POST y la máquina de la propuesta.
@@ -277,6 +305,10 @@ export function RequestFlowScreen(): React.JSX.Element {
     if (addStop.phase === 'accepted' && activeTripId) {
       void queryClient.invalidateQueries({
         queryKey: ['trip', activeTripId, 'active'],
+      });
+      // La parada aceptada CAMBIÓ la geometría del viaje: la ruta viva se re-pide YA (todas las fases).
+      void queryClient.invalidateQueries({
+        queryKey: ['trip', activeTripId, 'route'],
       });
     }
   }, [addStop.phase, activeTripId, queryClient]);
@@ -809,8 +841,19 @@ export function RequestFlowScreen(): React.JSX.Element {
               mapDirective.showNearby ? nearbyVehicles : undefined
             }
             cameraTarget={mapDirective.cameraTarget ?? undefined}
-            // La ruta al destino sigue dibujada también en curso (la baja el director como contexto).
-            routeCoordinates={routeCoords.length > 1 ? routeCoords : undefined}
+            // Polyline VIVA por fase (conductor→recojo en el acercamiento; conductor→destino onboard),
+            // recalculada por el server cada 15 s. En el ACERCAMIENTO la congelada del quote (recojo→destino)
+            // NO es fallback válido: mostraría la ruta a destino cuando el conductor recién viene — mejor
+            // nada hasta que cargue la viva. El quote solo respalda al tramo onboard (es la MISMA ruta B→C).
+            routeCoordinates={
+              liveRouteCoords && liveRouteCoords.length > 1
+                ? liveRouteCoords
+                : phase === 'enRoute' || phase === 'arrived'
+                  ? undefined
+                  : routeCoords.length > 1
+                    ? routeCoords
+                    : undefined
+            }
             // F3 · cuando el director NO dirige (cameraTarget null: aún sin conductor en pre-pickup/curso),
             // la Camera DECLARATIVA encuadra la ruta+markers (fitToRoute) en vez de quedar muda y derivar al
             // zoom-ciudad. Con conductor, manda el cameraTarget (director) y este fit se ignora. En

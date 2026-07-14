@@ -1,6 +1,7 @@
 import {
   ApiError,
   type DebtView,
+  debtView,
   type HttpClient,
   type PaymentView,
 } from '@veo/api-client';
@@ -114,6 +115,56 @@ describe('HttpPaymentsRepository · deuda (BR-P02)', () => {
     );
 
     await expect(repo.retryCharge('pay-ajeno')).rejects.toBe(boom);
+  });
+
+  it('el contrato parsea un ítem CANCELLATION_PENALTY SIN paymentId (viene con penaltyId)', () => {
+    // Regresión del soft-lock: el backend emite penalidades de cancelación con `penaltyId` y SIN
+    // `paymentId`. El schema viejo (paymentId requerido + kind sin CANCELLATION_PENALTY) reventaba el
+    // parse → DebtSheet en "S/ 0.00" sin ítems con el gate server-side bloqueando viajes nuevos.
+    const parsed = debtView.parse({
+      hasDebt: true,
+      totalCents: 300,
+      debts: [
+        {
+          penaltyId: 'pen-1',
+          tripId: 'trip-9',
+          amountCents: 300,
+          reason: 'cancellation',
+          createdAt: '2026-07-10T15:00:00.000Z',
+          kind: 'CANCELLATION_PENALTY',
+        },
+      ],
+    });
+    expect(parsed.debts[0]).toMatchObject({
+      penaltyId: 'pen-1',
+      kind: 'CANCELLATION_PENALTY',
+    });
+    expect(parsed.debts[0]?.paymentId).toBeUndefined();
+  });
+
+  it('settlePenalty pega a POST /payments/penalties/:id/settle con body { method }', async () => {
+    const post = jest.fn().mockResolvedValue(CAPTURED_PAYMENT);
+    const repo = new HttpPaymentsRepository(makeHttp({post}));
+
+    await expect(repo.settlePenalty('pen-1', 'YAPE')).resolves.toMatchObject({
+      status: 'CAPTURED',
+    });
+    expect(post).toHaveBeenCalledWith(
+      '/payments/penalties/pen-1/settle',
+      expect.objectContaining({
+        body: {method: 'YAPE'},
+        schema: expect.anything(),
+      }),
+    );
+  });
+
+  it('settlePenalty propaga el 404 anti-IDOR sin envolverlo (penalidad ajena/inexistente)', async () => {
+    const boom = new ApiError(404, 'NOT_FOUND', 'no es tuya');
+    const repo = new HttpPaymentsRepository(
+      makeHttp({post: jest.fn().mockRejectedValue(boom)}),
+    );
+
+    await expect(repo.settlePenalty('pen-ajena', 'PLIN')).rejects.toBe(boom);
   });
 
   it('getPayment (poll del checkout) pega a GET /payments/:id', async () => {

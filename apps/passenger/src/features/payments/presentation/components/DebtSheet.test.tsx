@@ -13,6 +13,7 @@ import type {
   ChangePaymentMethodUseCase,
   GetPaymentUseCase,
   RetryChargeUseCase,
+  SettlePenaltyUseCase,
 } from '../../domain/usecases';
 import {
   PaymentMethodNotApplicableError,
@@ -82,6 +83,7 @@ function registerDeps(opts: {
   getPayment: jest.Mock;
   retryCharge?: jest.Mock;
   changeMethod?: jest.Mock;
+  settlePenalty?: jest.Mock;
 }): void {
   container.register(
     TOKENS.getPaymentUseCase,
@@ -100,6 +102,13 @@ function registerDeps(opts: {
       ({
         execute: opts.changeMethod ?? jest.fn(),
       }) as unknown as ChangePaymentMethodUseCase,
+  );
+  container.register(
+    TOKENS.settlePenaltyUseCase,
+    () =>
+      ({
+        execute: opts.settlePenalty ?? jest.fn(),
+      }) as unknown as SettlePenaltyUseCase,
   );
 }
 
@@ -548,6 +557,111 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
     // Escape claro presente; el selector ya no se ofrece (no hay bucle).
     expect(out).toContain('Volver más tarde');
     expect(out).not.toContain('Sugerido');
+    act(() => renderer.unmount());
+  });
+});
+
+describe('DebtSheet · CANCELLATION_PENALTY (penalidad de cancelación)', () => {
+  beforeEach(() => {
+    usePaymentPrefsStore.getState().setDefault('YAPE');
+  });
+
+  /** Deuda con SOLO una penalidad de cancelación: penaltyId presente, paymentId AUSENTE (contrato). */
+  function penaltyDebtView(): DebtView {
+    return {
+      hasDebt: true,
+      totalCents: 300,
+      debts: [
+        {
+          penaltyId: 'pen-1',
+          tripId: 'trip-pen',
+          amountCents: 300,
+          reason: 'cancellation',
+          createdAt: '2026-07-10T15:00:00.000Z',
+          kind: 'CANCELLATION_PENALTY',
+        },
+      ],
+    } as DebtView;
+  }
+
+  it('muestra el monto REAL y el porqué honesto del cargo (no "S/ 0.00" ni el copy de cobro fallido)', async () => {
+    registerDeps({getPayment: jest.fn()});
+    const renderer = render(
+      <DebtSheet
+        visible
+        debt={penaltyDebtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
+    );
+    await flush();
+
+    const out = texts(renderer);
+    expect(out).toContain('S/ 3.00');
+    expect(out).toContain('Es un cargo por la cancelación de un viaje ya aceptado.');
+    // El CTA de pagar está habilitado (hay un objetivo bloqueante aunque no tenga paymentId).
+    expect(out).toContain('Pagar con Yape');
+    act(() => renderer.unmount());
+  });
+
+  it('pagar → rutea por penaltyId a settlePenalty (NO retry-charge/cambio de método) y salda', async () => {
+    const settlePenalty = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'CAPTURED'}));
+    const retryCharge = jest.fn();
+    const changeMethod = jest.fn();
+    registerDeps({
+      getPayment: jest.fn(),
+      retryCharge,
+      changeMethod,
+      settlePenalty,
+    });
+    const renderer = render(
+      <DebtSheet
+        visible
+        debt={penaltyDebtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
+    );
+    await flush();
+
+    await pressByLabel(renderer, 'Pagar con Yape');
+
+    // Una penalidad NO es un Payment: va por su endpoint propio con el método elegido.
+    expect(settlePenalty).toHaveBeenCalledWith('pen-1', 'YAPE');
+    expect(retryCharge).not.toHaveBeenCalled();
+    expect(changeMethod).not.toHaveBeenCalled();
+    expect(texts(renderer)).toContain('¡Listo!');
+    act(() => renderer.unmount());
+  });
+
+  it('si la liquidación vuelve PENDING con checkout → muestra el checkout + poll (mismo camino que DEBT)', async () => {
+    const settlementPending = paymentView({
+      status: 'PENDING',
+      deepLink: null,
+      checkoutUrl: 'https://pay.veo.pe/plin/pen',
+    });
+    const settlePenalty = jest.fn().mockResolvedValue(settlementPending);
+    // El poll del checkout lee el cobro de liquidación por id: devolvemos el mismo PENDING.
+    registerDeps({
+      getPayment: jest.fn().mockResolvedValue(settlementPending),
+      settlePenalty,
+    });
+    const renderer = render(
+      <DebtSheet
+        visible
+        debt={penaltyDebtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
+    );
+    await flush();
+
+    await pressByLabel(renderer, 'Pagar con Yape');
+
+    // Checkout web → "Pagar ahora" (reusa CheckoutInstructions, igual que saldar un DEBT).
+    expect(texts(renderer)).toContain('Pagar ahora');
     act(() => renderer.unmount());
   });
 });

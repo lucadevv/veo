@@ -1,7 +1,10 @@
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {useTheme} from '@veo/ui-kit';
+import {useNavigation} from '@react-navigation/native';
+import {typography, useTheme} from '@veo/ui-kit';
 import React from 'react';
+import {Pressable} from 'react-native';
 import {useTranslation} from 'react-i18next';
+import {IconArrowLeft} from '../features/trip/presentation/components/icons';
 import {
   AuthScreen,
   CompleteProfileScreen,
@@ -39,7 +42,6 @@ import {
   ReassignScreen,
   ScheduledTripsScreen,
   ScheduleNewScreen,
-  TripActiveScreen,
 } from '../features/trip/presentation';
 import {
   CarpoolBookingReviewScreen,
@@ -70,6 +72,27 @@ import type {RootStackParamList} from './types';
 import {MainTabs} from './MainTabs';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+/**
+ * Back CANÓNICO del header NATIVO de React Navigation: SOLO el chevron ‹ de iOS (`IconArrowLeft` ya es un
+ * chevron), sin el back de sistema — en iOS 26 el back nativo viene envuelto en una PÍLDORA de vidrio
+ * (Liquid Glass). Al reemplazar `headerLeft` por este Pressable plano, TODA la app queda con el mismo back
+ * (regla del dueño): chevron pelado, sin círculo/container. Espeja al back in-body de `ScreenHeader`.
+ */
+function HeaderBackChevron(): React.JSX.Element {
+  const navigation = useNavigation();
+  const theme = useTheme();
+  const {t} = useTranslation();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t('actions.back')}
+      hitSlop={12}
+      onPress={() => navigation.goBack()}>
+      <IconArrowLeft color={theme.colors.ink} size={28} />
+    </Pressable>
+  );
+}
 
 export function RootNavigator(): React.JSX.Element {
   const {t} = useTranslation();
@@ -178,11 +201,22 @@ export function RootNavigator(): React.JSX.Element {
         headerShown: true,
         headerStyle: {backgroundColor: theme.colors.bg},
         headerTintColor: theme.colors.ink,
-        headerTitleStyle: {color: theme.colors.ink},
+        // Título del header NATIVO con la fuente de la IDENTIDAD (rol `headline` = Outfit-SemiBold,
+        // el mismo que usa el TopBar del conductor) — antes salía en la SF del sistema y desentonaba
+        // con el resto de la app (regla del dueño: una sola familia tipográfica en toda la app).
+        headerTitleStyle: {
+          color: theme.colors.ink,
+          fontFamily: typography.text.headline.fontFamily,
+          fontSize: typography.text.headline.fontSize,
+        },
         headerShadowVisible: false,
         // Sin label junto al chevron de volver: iOS mostraba el NOMBRE DE RUTA interno ("Main")
         // al lado de la flecha — jerga de código filtrada al usuario (visto en el barrido pen↔sim).
         headerBackTitleVisible: false,
+        // Back CANÓNICO en TODA la app: SOLO el chevron ‹ de iOS, sin el círculo/glass del back nativo
+        // (iOS 26 lo envuelve en una píldora de vidrio). Un headerLeft propio lo deja como chevron plano.
+        headerLeft: ({canGoBack}) =>
+          canGoBack ? <HeaderBackChevron /> : null,
         contentStyle: {backgroundColor: theme.colors.bg},
       }}>
       {/* MAIN = bottom nav (Inicio·Viajes·Seguridad·Cuenta), reintroducido del design/veo.pen. Va
@@ -216,11 +250,6 @@ export function RootNavigator(): React.JSX.Element {
         name="NoOffers"
         component={NoOffersScreen}
         options={{title: t('screens.noOffers')}}
-      />
-      <Stack.Screen
-        name="TripActive"
-        component={TripActiveScreen}
-        options={{title: t('screens.tripActive')}}
       />
       {/* "Comparte tu viaje" (design/veo.pen zKyic): entra desde la acción Compartir del viaje activo. */}
       <Stack.Screen

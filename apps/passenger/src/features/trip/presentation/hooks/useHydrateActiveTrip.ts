@@ -28,6 +28,7 @@ export function useHydrateActiveTrip(): void {
     TOKENS.getPendingSettlementUseCase,
   );
   const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
+  const setActiveTripMode = useActiveTripStore(s => s.setActiveTripMode);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,9 +44,13 @@ export function useHydrateActiveTrip(): void {
         .then(trip => {
           if (!cancelled && trip) {
             setActiveTripId(trip.id);
-            // NOTA: la vista de `/trips/active` no trae `dispatchMode` → el modo NO se adopta acá; lo setea
-            // `onTripCreated` (POST /trips SÍ lo trae). En el borde de relanzar la app A MITAD de una búsqueda
-            // FIXED, el modo queda null y un EXPIRED degrada al flujo PUJA histórico (no peor que hoy).
+            // Modo CONGELADO por el server (mismo mapeo que `onTripCreated`): con él, relanzar la app a
+            // mitad de una búsqueda FIXED preserva la fase correcta (EXPIRED → 'noDriver', no la re-puja).
+            // OPTIONAL/nullable en el contrato (compat N-2): sin el campo, el modo queda null y la fase
+            // degrada al comportamiento PUJA histórico (no peor que antes).
+            if (trip.dispatchMode) {
+              setActiveTripMode(trip.dispatchMode);
+            }
           }
         })
         .catch(() => {
@@ -54,6 +59,6 @@ export function useHydrateActiveTrip(): void {
       return () => {
         cancelled = true;
       };
-    }, [getMyActiveTrip, getPendingSettlement, setActiveTripId]),
+    }, [getMyActiveTrip, getPendingSettlement, setActiveTripId, setActiveTripMode]),
   );
 }

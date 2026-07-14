@@ -32,8 +32,18 @@ const MAX_CUSTOM_TIP_CENTS = 50_000;
 
 /** Cadencia del poll del recibo mientras el cobro "procesa" (consumer Kafka puede demorar). */
 const POLL_INTERVAL_MS = 2500;
-/** Tope del poll: tras esto mostramos un error honesto con botón Reintentar. */
+/**
+ * Ventana del poll RÁPIDO: tras esto mostramos el aviso honesto ("está tardando") con Reintentar, pero
+ * el poll NO muere — degrada a la cadencia lenta de abajo.
+ */
 const POLL_TIMEOUT_MS = 30_000;
+/**
+ * Cadencia LENTA indefinida tras agotar la ventana rápida. La pantalla PROMETE "se actualiza sola"
+ * (`settlement.processingHint`): cortar el poll a los 30 s la dejaba clavada si el webhook/consumer
+ * resolvía después (reproducido en el sim) — el pasajero tenía que relanzar la app. Es UNA row por
+ * tripId cada 30 s solo mientras el recibo esté montado: barato y honesto.
+ */
+const SLOW_POLL_INTERVAL_MS = 30_000;
 
 export interface SettlementBodyProps {
   /** Viaje COMPLETED a liquidar (`GET /payments/by-trip/:tripId`). */
@@ -80,8 +90,9 @@ function methodLabelKey(method: string): string {
  *
  * Estados (derivados de `GET /payments/by-trip/:tripId`):
  *  - cargando → skeleton.
- *  - 404 transitorio (el consumer puede demorar) → "Procesando tu pago…" con poll suave (~2.5s, ~30s
- *    de tope) → si agota, error honesto con Reintentar.
+ *  - 404 transitorio (el consumer puede demorar) → "Procesando tu pago…" con poll suave (~2.5s). A los
+ *    ~30s: aviso honesto con Reintentar, pero el poll DEGRADA a cadencia lenta (no muere): si el cobro
+ *    resuelve tarde, la pantalla igual se actualiza sola (lo que promete el copy).
  *  - PENDING + CASH → "Paga en efectivo" + banner del cash + "Confirmar efectivo" (POST cash/confirm).
  *    Si el pasajero confirma pero el conductor aún no (confirmación bilateral): "esperando al conductor".
  *  - PENDING + digital → "Procesando pago…" + poll.
@@ -131,22 +142,24 @@ export function SettlementBody({
   const paymentQuery = useQuery<PaymentView | null, Error>({
     queryKey: ['payment', tripId, 'by-trip'],
     queryFn: () => getPaymentByTrip.execute(tripId),
-    // Poll suave MIENTRAS el cobro no existe (404→null) o sigue PENDING-digital, hasta el tope.
+    // Poll MIENTRAS el cobro no existe (404→null) o sigue PENDING-digital: rápido dentro de la ventana,
+    // LENTO indefinido después (mientras el recibo esté montado). Resuelto el outcome → se apaga.
     refetchInterval: query => {
       const data = query.state.data;
-      const elapsed = Date.now() - startedAtRef.current;
-      if (elapsed > POLL_TIMEOUT_MS) {
+      // Sigue pendiente si aún no hay recibo o el outcome puede moverse (webhook/consumer tardío).
+      const stillPending =
+        data == null ||
+        (() => {
+          const outcome = interpretPaymentOutcome(data);
+          return (
+            outcome.kind === 'checkoutPending' || outcome.kind === 'processing'
+          );
+        })();
+      if (!stillPending) {
         return false;
       }
-      if (data == null) {
-        return POLL_INTERVAL_MS;
-      }
-      // Sigue PENDING-digital (con o sin checkout): el webhook/consumer aún puede moverlo.
-      const outcome = interpretPaymentOutcome(data);
-      if (outcome.kind === 'checkoutPending' || outcome.kind === 'processing') {
-        return POLL_INTERVAL_MS;
-      }
-      return false;
+      const elapsed = Date.now() - startedAtRef.current;
+      return elapsed > POLL_TIMEOUT_MS ? SLOW_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
     },
   });
 

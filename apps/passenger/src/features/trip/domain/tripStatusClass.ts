@@ -8,7 +8,7 @@ import type {TripStatus} from '@veo/api-client';
  *
  * TERMINAL = el viaje acabó (de cualquier forma): solo cabe el detalle de solo-lectura, que se abre en un
  *            `DraggableSheet` SOBRE "Mis Viajes" (ver TripDetailSheet) — ya no es una pantalla aparte.
- * VIVO     = sigue en curso: se re-entra por el flujo unificado (sheet del Home), NUNCA por `TripActive`.
+ * VIVO     = sigue en curso: se re-entra por el flujo unificado (sheet del Home), (la pantalla legacy `TripActive` se eliminó).
  */
 export const TERMINAL_TRIP_STATUSES: ReadonlySet<TripStatus> =
   new Set<TripStatus>(['COMPLETED', 'CANCELLED', 'EXPIRED', 'FAILED']);

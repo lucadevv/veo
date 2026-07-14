@@ -59,8 +59,12 @@ export function useDebtGate(enabled: boolean): DebtGateController {
   // PAGO POR COMPLETAR (PENDING_ACTION): el primer cobro PENDING con checkout vivo (no es deuda). Solo lo
   // ofrecemos en la franja si NO hay deuda (la deuda es lo accionable urgente y tiene prioridad). Es el
   // dead-end que resolvemos: un pago a medias al que ahora se puede VOLVER desde el home.
+  // Invariante del contrato: los PENDING_ACTION traen `paymentId` (solo las penalidades traen
+  // `penaltyId`); lo exigimos acá para que el sheet reciba un id real (defensa ante un item malformado).
   const firstPendingAction =
-    debtView?.debts.find(d => d.kind === 'PENDING_ACTION') ?? null;
+    debtView?.debts.find(
+      d => d.kind === 'PENDING_ACTION' && d.paymentId != null,
+    ) ?? null;
   const hasPendingAction = !hasDebt && firstPendingAction != null;
 
   const onDebtPending = useCallback(() => {
@@ -78,7 +82,7 @@ export function useDebtGate(enabled: boolean): DebtGateController {
   }, []);
 
   const openPendingFromHome = useCallback(() => {
-    if (!firstPendingAction) {
+    if (!firstPendingAction?.paymentId) {
       return;
     }
     setPendingActionPaymentId(firstPendingAction.paymentId);

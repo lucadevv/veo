@@ -18,7 +18,7 @@ export interface CabinVideoViewerProps {
 /**
  * Puerto del VISOR de video del habitáculo (WebRTC/LiveKit). El visor REAL (react-native-webrtc /
  * LiveKit) lo implementa la OLEADA NATIVA y se registra con `registerCabinVideoViewer`. Mientras no
- * exista, `CabinVideoPanel` muestra el contenedor con el indicador REC y un aviso de "sin video".
+ * exista, `CameraLiveScreen` muestra el aviso honesto de "sin video" (nunca un panel en blanco).
  *
  * Firma exacta para la oleada nativa:
  *   const Viewer: CabinVideoViewer = ({ grant }) => <LiveKitRoom url={grant.url} token={grant.token} .../>;
