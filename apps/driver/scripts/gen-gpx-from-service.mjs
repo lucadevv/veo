@@ -75,10 +75,28 @@ ${trkpts}
 `;
 }
 
-const legs = [
-  { file: 'driver-a-b.gpx', name: 'driver-a-b (conductor → recojo)', from: A, to: B },
-  { file: 'driver-b-c.gpx', name: 'driver-b-c (recojo → destino)', from: B, to: C },
-];
+/** Punto `lat,lon` de un flag (`--from=-12.0,-77.0`) o null si no está. */
+function pointArg(name) {
+  const raw = process.argv.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
+  if (!raw) return null;
+  const [lat, lon] = raw.split(',').map(Number);
+  return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+}
+
+// MODO DINÁMICO (usado por el demo-director): con --from/--to/--file se regenera UN solo tramo hacia el
+// destino REAL del viaje (leído de la DB), en vez de los puntos fijos A/B/C. Así el conductor maneja
+// SIEMPRE hacia donde el pasajero pidió, coordinado con el trip — cualquier destino, cero descoordinación.
+const fromArg = pointArg('--from');
+const toArg = pointArg('--to');
+const fileArg = process.argv.find((a) => a.startsWith('--file='))?.slice('--file='.length);
+
+const legs =
+  fromArg && toArg && fileArg
+    ? [{ file: fileArg, name: `${fileArg} (dinámico · destino real del viaje)`, from: fromArg, to: toArg }]
+    : [
+        { file: 'driver-a-b.gpx', name: 'driver-a-b (conductor → recojo)', from: A, to: B },
+        { file: 'driver-b-c.gpx', name: 'driver-b-c (recojo → destino)', from: B, to: C },
+      ];
 
 for (const leg of legs) {
   const { points, distanceMeters } = await routeOf(leg.from, leg.to);
