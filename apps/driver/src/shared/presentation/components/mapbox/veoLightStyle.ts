@@ -64,6 +64,16 @@ const palette = {
 /** Fuente vectorial oficial de Mapbox (reemplaza la `source` OpenMapTiles del tileserver propio). */
 const MAPBOX_STREETS = 'mapbox://mapbox.mapbox-streets-v8';
 
+/* ── Edificios 3D (fill-extrusion) — parámetros de gusto ─────────────────────────────────────────
+ * En @rnmapbox 10.3.1 no existe Mapbox Standard (v11), pero fill-extrusion sí: con el NAV_PITCH de
+ * la cámara de navegación la ciudad gana volumen. GATE de performance: `minzoom 15` — en el overview
+ * del dashboard (z12) la capa ni se evalúa; solo pesa cerca de calle (nav z17), donde el tile ya está
+ * cargado. Si en hardware de flota pesara, subir el minzoom antes que tocar la opacidad. */
+/** Zoom mínimo de la extrusión (gate de performance: por debajo no se renderiza nada). */
+const BUILDING_3D_MINZOOM = 15;
+/** Opacidad de la extrusión: sutil, los edificios acompañan sin competir con la ruta. */
+const BUILDING_3D_OPACITY = 0.6;
+
 /** Stack de glyphs estándar disponible en cualquier cuenta Mapbox (no requiere subir fuentes). */
 const FONT_REGULAR = ['DIN Pro Regular', 'Arial Unicode MS Regular'];
 
@@ -309,6 +319,53 @@ export const veoLightMapboxStyle: Record<string, unknown> = {
       paint: {
         'line-color': palette.roadMotorway,
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 16, 10],
+      },
+    },
+    {
+      // Edificios 3D sutiles: color derivado de la paleta Trust (base `building`, coronando hacia
+      // `buildingOutline` en los más altos para que el volumen lea sin sombras duras). Va DESPUÉS de
+      // las capas de ruta viales (a pitch la extrusión debe verse "parada" sobre ellas) y ANTES de
+      // los símbolos (las etiquetas siempre legibles encima). La transición minzoom→+1 hace crecer
+      // la altura desde 0 (aparición suave, sin pop). `underground=false`: no extruir sótanos.
+      id: 'building-3d',
+      type: 'fill-extrusion',
+      source: 'composite',
+      'source-layer': 'building',
+      minzoom: BUILDING_3D_MINZOOM,
+      filter: [
+        'all',
+        ['==', ['get', 'extrude'], 'true'],
+        ['==', ['get', 'underground'], 'false'],
+      ],
+      paint: {
+        'fill-extrusion-color': [
+          'interpolate',
+          ['linear'],
+          ['get', 'height'],
+          0,
+          palette.building,
+          60,
+          palette.buildingOutline,
+        ],
+        'fill-extrusion-height': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          BUILDING_3D_MINZOOM,
+          0,
+          BUILDING_3D_MINZOOM + 1,
+          ['get', 'height'],
+        ],
+        'fill-extrusion-base': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          BUILDING_3D_MINZOOM,
+          0,
+          BUILDING_3D_MINZOOM + 1,
+          ['get', 'min_height'],
+        ],
+        'fill-extrusion-opacity': BUILDING_3D_OPACITY,
       },
     },
     {

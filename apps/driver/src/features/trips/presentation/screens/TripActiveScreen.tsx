@@ -33,7 +33,9 @@ import {
   secondsToMinutes,
 } from '../../../../shared/presentation/format';
 import { IconChevronLeft } from '../../../../shared/presentation/icons';
+import { useSheetCameraInset } from '../../../../shared/presentation/hooks/useSheetCameraInset';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
+import { quantizePx, type SheetSnapSpec } from '../../../../shared/utils/mapCamera';
 import { decodePolyline, decodePolylineToCoordinates } from '../../../../shared/utils/polyline';
 import {
   EARNINGS_BREAKDOWN_QUERY_KEY,
@@ -48,6 +50,7 @@ import {
   upcomingManeuver,
   type DriverTripStatus,
 } from '../../domain';
+import { useActiveVehicle } from '../../../shift/presentation/hooks/useVehicleCatalog';
 import { useEnsureTripAccepted, useTrip, useTripActions, useTripRoute } from '../hooks/useTrips';
 import { useDriverWaypointProposal } from '../hooks/useDriverWaypointProposal';
 import { useTripPublisher } from '../hooks/useTripPublisher';
@@ -107,6 +110,30 @@ const REMOTE_END_COPY: Record<RemoteEndStatus, { title: string; body: string }> 
 const isRemoteEndStatus = (s: DriverTripStatus): s is RemoteEndStatus =>
   (REMOTE_END_STATUSES as readonly DriverTripStatus[]).includes(s);
 
+/* ── Cámara consciente del sheet/banner (área visible del mapa) ─────────────────────────────────
+ * El foco de la cámara (puck en nav, ruta en fit) se centra en el área VISIBLE (viewport − sheet −
+ * banner de maniobras) y se re-encuadra al asentarse cada snap. */
+
+/**
+ * Espejo 1:1 (mismo orden ascendente) de los `snapPoints` del DraggableSheet de esta pantalla
+ * (`['header', 'content', { content: 0.94 }]` con `maxContentFraction` 0.74). CONSTRAINT: si cambian
+ * los snapPoints/maxContentFraction del sheet, este espejo cambia con ellos.
+ */
+const TRIP_SHEET_SNAPS: ReadonlyArray<SheetSnapSpec> = [
+  { kind: 'header' },
+  { kind: 'content', capFraction: 0.74 },
+  { kind: 'content', capFraction: 0.94 },
+];
+/** Índice inicial del sheet (= `initialIndex` del DraggableSheet). */
+const TRIP_SHEET_INITIAL_INDEX = 1;
+
+/** Offset del slot `topOverlay` del MapShell (ui-kit `styles.top` → `top: 12`), espejo. */
+const MAPSHELL_TOP_OFFSET_PX = 12;
+/** Margen entre el notch y el banner de maniobras (el `marginTop: insets.top + 8` del wrap). */
+const MANEUVER_BANNER_TOP_MARGIN_PX = 8;
+/** Cuantización del inset superior: jitter de ±px del banner no re-anima la cámara. */
+const TOP_INSET_QUANTUM_PX = 8;
+
 export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -126,6 +153,16 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
   // Degrada a null sin GPS nativo → sin pin y la cámara cae al encuadre normal (degradación honesta).
   const driverPose = useDriverPose();
   const driverLocation = driverPose?.point ?? null;
+
+  // Vehículo activo (server-authoritative, cache compartido con el dashboard): el puck de navegación
+  // lleva el glyph moto/auto. Sin dato aún → flecha genérica (el puck nunca espera a esta query).
+  const activeVehicle = useActiveVehicle();
+
+  // Cámara consciente del sheet: el DraggableSheet notifica el snap asentado (`onSnap`) y esta
+  // pantalla mide header/contenido → `bottomInset` = alto visible del sheet (espejo de su math).
+  const sheetInset = useSheetCameraInset(TRIP_SHEET_SNAPS, TRIP_SHEET_INITIAL_INDEX);
+  // Alto medido del banner de maniobras (topOverlay del MapShell): define el inset superior.
+  const [maneuverBannerPx, setManeuverBannerPx] = useState(0);
 
   // GAP 2: tras aceptar la oferta el viaje queda ASSIGNED; la máquina de estados exige ACCEPTED
   // antes de ARRIVING. Confirmamos la asignación (ASSIGNED→ACCEPTED) en cuanto llegamos a un viaje
@@ -373,6 +410,16 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
   // Resumen métrico real del contrato (no hay turn-by-turn ni ETA): distancia + duración del viaje.
   const tripMetrics = `${t('trips.kilometers', { value: metersToKm(data.distanceMeters) })} · ${t('trips.minutes', { value: secondsToMinutes(data.durationSeconds) })}`;
 
+  // Inset SUPERIOR del área visible del mapa: con banner de maniobras, el offset del MapShell + el
+  // notch + el margen + el alto medido del banner; sin banner, solo el notch. Cuantizado: el jitter
+  // de layout no re-anima la cámara.
+  const mapTopInset = quantizePx(
+    maneuver
+      ? MAPSHELL_TOP_OFFSET_PX + insets.top + MANEUVER_BANNER_TOP_MARGIN_PX + maneuverBannerPx
+      : insets.top,
+    TOP_INSET_QUANTUM_PX,
+  );
+
   return (
     <SafeScreen padded={false} topInset={false}>
       {/* Área de mapa en vivo (hero). Cuando hay ruta del contrato se pinta la polyline y, sobre el
@@ -385,7 +432,14 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             // Solo el banner de la PRÓXIMA maniobra (cuando hay ruta). El estado/fase + métricas ahora
             // viven en el sheet (sin duplicar), y NO hay appbar: el mapa es el hero, full-bleed.
             maneuver ? (
-              <View style={[styles.maneuverWrap, { marginTop: insets.top + 8 }]}>
+              <View
+                style={[
+                  styles.maneuverWrap,
+                  { marginTop: insets.top + MANEUVER_BANNER_TOP_MARGIN_PX },
+                ]}
+                // Mide el alto del banner: define el inset superior del área visible de la cámara.
+                onLayout={(e) => setManeuverBannerPx(Math.round(e.nativeEvent.layout.height))}
+              >
                 <ManeuverBanner
                   step={maneuver.step}
                   distanceMeters={maneuver.distanceMeters}
@@ -408,6 +462,10 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
             fitToRoute={Boolean(routeCoordinates && routeCoordinates.length >= 2)}
             navMode
             heading={driverPose?.heading ?? null}
+            // Área visible: la cámara descuenta el banner (arriba) y el sheet en su snap (abajo).
+            topInset={mapTopInset}
+            bottomInset={sheetInset.bottomInset}
+            vehicleType={activeVehicle.data?.vehicleType ?? null}
             interactive={false}
           />
         </MapShell>
@@ -416,14 +474,18 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
       {/* Sheet ARRASTRABLE dinámico al contenido (DraggableSheet · grabber en color primario/accent). Abraza
           su contenido y crece al expandir las indicaciones. SIN appbar: el back + chat viven en su header. */}
       <DraggableSheet
+        // CONSTRAINT: snapPoints/maxContentFraction/initialIndex tienen su espejo en TRIP_SHEET_SNAPS
+        // (cámara consciente del sheet) — cambiarlos acá exige cambiar el espejo.
         snapPoints={['header', 'content', { content: 0.94 }]}
         maxContentFraction={0.74}
-        initialIndex={1}
+        initialIndex={TRIP_SHEET_INITIAL_INDEX}
+        // Al asentarse cada snap, la cámara re-encuadra el área visible (no persigue el drag).
+        onSnap={sheetInset.onSnap}
         renderHeader={() => (
           // Header FIJO (visible en TODOS los estados, incluido el COLAPSADO): back (chevron iOS) + chat.
           // Arrastrando el grabber hacia abajo, el sheet COLAPSA a solo este header (con rebote) → el mapa
           // queda máximo, viéndose únicamente el chevron ‹ y el ícono de mensaje.
-          <View style={styles.sheetHeader}>
+          <View style={styles.sheetHeader} onLayout={sheetInset.onHeaderLayout}>
             <Pressable
               onPress={navigation.goBack}
               hitSlop={10}
@@ -437,13 +499,13 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           </View>
         )}
         renderScroll={(Scroll) => (
-          <Scroll
-            contentContainerStyle={[
-              styles.sheetContent,
-              { paddingBottom: insets.bottom + theme.spacing.xl },
-            ]}
-            showsVerticalScrollIndicator={false}
-          >
+          <Scroll showsVerticalScrollIndicator={false}>
+            {/* Wrapper MEDIDO del contenido (mismo layout que el contentContainerStyle previo — el
+                sheet de ui-kit mide idéntico): su alto alimenta la cámara consciente del sheet. */}
+            <View
+              onLayout={sheetInset.onContentLayout}
+              style={[styles.sheetContent, { paddingBottom: insets.bottom + theme.spacing.xl }]}
+            >
             {/* Card del pasajero: avatar (iniciales) + primer nombre (PII mínima post-aceptación) + tarifa. */}
             <View style={styles.passengerRow}>
               <Avatar
@@ -636,6 +698,7 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
                 <ExternalNavButtons destination={externalDestination} />
               </>
             ) : null}
+            </View>
           </Scroll>
         )}
       />

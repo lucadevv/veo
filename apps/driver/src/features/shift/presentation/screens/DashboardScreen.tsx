@@ -29,6 +29,7 @@ import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
+import { quantizePx } from '../../../../shared/utils/mapCamera';
 import { useEarningsBreakdown, useEarningsSummary } from '../hooks/useEarnings';
 import { useProfileData } from '../hooks/useProfileData';
 import { isBlocking } from '../../../documents/domain';
@@ -70,6 +71,11 @@ function vehicleTypeLabel(type: VehicleType, t: TFunction): string {
   return t(vehicleClassLabelKey(type));
 }
 
+/** Offset de los slots overlay del MapShell (ui-kit `styles.top`/`styles.bottom` → 12), espejo. */
+const MAPSHELL_OVERLAY_OFFSET_PX = 12;
+/** Cuantización de los insets de cámara: jitter de layout no re-anima la cámara. */
+const MAP_INSET_QUANTUM_PX = 8;
+
 export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -103,6 +109,11 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const [endConfirm, setEndConfirm] = useState(false);
   // Toggle "Zonas de demanda": pinta el mapa de calor sobre el mapa para orientar al conductor.
   const [demandOn, setDemandOn] = useState(false);
+  // Altos medidos del chrome flotante (header arriba, dock abajo): la cámara centra el puck en el
+  // área VISIBLE entre ambos, no en la pantalla completa. La columna de pujas es transitoria y se
+  // ignora adrede (re-encuadrar por cada puja entrante marearía).
+  const [headerPx, setHeaderPx] = useState(0);
+  const [dockPx, setDockPx] = useState(0);
 
   // Ubicación del conductor: se suscribe a la fuente de GPS nativa ya existente
   // (`LocationSource` / background-geolocation). Si la oleada nativa aún no instaló una fuente
@@ -236,7 +247,12 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
 
   // Cabecera flotante: avatar (→ perfil) + saludo a la izquierda; pill de estado a la derecha.
   const topOverlay = (
-    <View style={[styles.topRow, { paddingTop: insets.top }]} pointerEvents="box-none">
+    <View
+      style={[styles.topRow, { paddingTop: insets.top }]}
+      pointerEvents="box-none"
+      // Mide el header flotante (incluye el paddingTop del notch): inset superior de la cámara.
+      onLayout={(e) => setHeaderPx(Math.round(e.nativeEvent.layout.height))}
+    >
       <PressableScale
         accessibilityRole="button"
         accessibilityLabel={t('shift.viewProfile')}
@@ -713,13 +729,28 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
     );
   }
 
+  // Dock MEDIDO (el alto incluye el lift sobre el tab bar — margen del hijo empuja al wrapper):
+  // inset inferior de la cámara. Los overlays del MapShell arrancan a 12 px del borde (espejo).
+  const measuredBottomOverlay = (
+    <View onLayout={(e) => setDockPx(Math.round(e.nativeEvent.layout.height))}>{bottomOverlay}</View>
+  );
+  const mapTopInset = quantizePx(MAPSHELL_OVERLAY_OFFSET_PX + headerPx, MAP_INSET_QUANTUM_PX);
+  const mapBottomInset = quantizePx(MAPSHELL_OVERLAY_OFFSET_PX + dockPx, MAP_INSET_QUANTUM_PX);
+
   return (
     <SafeScreen padded={false} topInset={false}>
-      <MapShell topOverlay={topOverlay} bottomOverlay={bottomOverlay} loading={shift.isLoading}>
+      <MapShell
+        topOverlay={topOverlay}
+        bottomOverlay={measuredBottomOverlay}
+        loading={shift.isLoading}
+      >
         <AppMap
           center={driverPoint ?? LIMA_CENTER}
           driver={mapDriver}
           heatCells={demandOn ? heatCells : undefined}
+          // Área visible: la cámara centra entre el header flotante (arriba) y el dock (abajo).
+          topInset={mapTopInset}
+          bottomInset={mapBottomInset}
           interactive={online}
         />
         {/* Velo superior (frame `Dim`): asegura la legibilidad del saludo/pill sobre el mapa. */}
