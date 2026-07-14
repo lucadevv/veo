@@ -79,23 +79,24 @@ describe('EarningsService.breakdown', () => {
     expect(summary.week.tripCount).toBe(12);
     expect(summary.month.netCents).toBe(70000);
     expect(summary.month.tripCount).toBe(48);
-    // Las ventanas se pasaron como [from,to) ISO al endpoint de payment.
-    // La identidad propagada lleva el driverId resuelto y firmado (anti-IDOR aguas abajo).
+    // Las ventanas se pasaron como [from,to) ISO al endpoint de payment, con bordes de día LIMA
+    // (medianoche Lima = 05:00Z). La identidad propagada lleva el driverId resuelto y firmado
+    // (anti-IDOR aguas abajo).
     expect(get).toHaveBeenCalledWith('/payments/earnings', {
       identity: { ...identity, driverId: 'drv-1' },
       query: {
         driverId: 'drv-1',
-        from: '2026-05-27T00:00:00.000Z',
-        to: '2026-05-28T00:00:00.000Z',
+        from: '2026-05-27T05:00:00.000Z',
+        to: '2026-05-28T05:00:00.000Z',
       },
     });
-    // La ventana del mes se pasó como [día 1, día 1 del mes siguiente) UTC.
+    // La ventana del mes se pasó como [día 1, día 1 del mes siguiente) en hora de Lima.
     expect(get).toHaveBeenCalledWith('/payments/earnings', {
       identity: { ...identity, driverId: 'drv-1' },
       query: {
         driverId: 'drv-1',
-        from: '2026-05-01T00:00:00.000Z',
-        to: '2026-06-01T00:00:00.000Z',
+        from: '2026-05-01T05:00:00.000Z',
+        to: '2026-06-01T05:00:00.000Z',
       },
     });
   });

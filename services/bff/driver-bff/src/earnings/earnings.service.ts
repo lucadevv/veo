@@ -116,7 +116,8 @@ export class EarningsService {
           query: { driverId, from: start.toISOString(), to: end.toISOString() },
         });
         return {
-          date: start.toISOString().slice(0, 10), // YYYY-MM-DD (UTC)
+          // YYYY-MM-DD del día de LIMA: start es medianoche Lima = 05:00Z del MISMO día calendario.
+          date: start.toISOString().slice(0, 10),
           netCents: breakdown.netCents,
           tripCount: breakdown.tripCount,
         };
