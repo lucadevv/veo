@@ -13,3 +13,6 @@ export const tripQueryKey = (tripId: string) => ['trip', tripId] as const;
 
 /** Clave de caché del viaje ACTIVO del conductor (rehidratación tras reinicio). */
 export const ACTIVE_TRIP_QUERY_KEY = ['trip', 'active'] as const;
+
+/** Clave de caché de la tasa de comisión ON-DEMAND vigente (config global, no depende del viaje). */
+export const COMMISSION_RATE_QUERY_KEY = ['commission', 'rate'] as const;

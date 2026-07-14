@@ -8,6 +8,7 @@ import type {
   AcceptTripInput,
   ArrivingTripInput,
   CancelTripInput,
+  CommissionRateView,
   CompleteTripInput,
   StartTripInput,
   Trip,
@@ -76,4 +77,10 @@ export interface TripsRepository {
     proposalId: string,
     accept: boolean,
   ): Promise<RespondWaypointView>;
+  /**
+   * GET /earnings/commission-rate — tasa de comisión ON-DEMAND VIGENTE (bps + version). Fuente: el panel
+   * admin (payment-service `commission_config`), cacheada 60 s en el BFF. El desglose bruto − comisión de
+   * TripComplete/TripDetail usa ESTA tasa; el hardcode local quedó solo como fallback offline.
+   */
+  getCommissionRate(): Promise<CommissionRateView>;
 }

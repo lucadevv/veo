@@ -3,6 +3,7 @@ import type {
   AcceptTripInput,
   ArrivingTripInput,
   CancelTripInput,
+  CommissionRateView,
   StartTripInput,
   Trip,
   TripOffer,
@@ -98,6 +99,9 @@ class FakeTripsRepository implements TripsRepository {
       status: accept ? 'ACCEPTED' : 'REJECTED',
       fareCents: 0,
     });
+  }
+  getCommissionRate(): Promise<CommissionRateView> {
+    return Promise.resolve({ onDemandRateBps: 2000, version: 1 });
   }
 }
 

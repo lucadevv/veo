@@ -18,7 +18,8 @@ import {
   secondsToMinutes,
 } from '../../../../shared/presentation/format';
 import { useMyTripRating } from '../hooks/usePassengerRating';
-import { commissionPercent, computeTripEarnings } from '../../domain';
+import { useCommissionRate } from '../hooks/useTrips';
+import { commissionPercent, commissionRateFromBps, computeTripEarnings } from '../../domain';
 import { Appear } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripDetail'>;
@@ -46,8 +47,15 @@ export const TripDetailScreen = ({ navigation, route }: Props): React.JSX.Elemen
   const theme = useTheme();
   const { trip } = route.params;
 
-  // Desglose de la ganancia desde la tarifa (mismo modelo bruto − comisión que el cierre y Ganancias).
-  const earnings = computeTripEarnings(trip.fareCents);
+  // Desglose de la ganancia desde la tarifa (mismo modelo bruto − comisión que el cierre y Ganancias),
+  // con la tasa VIGENTE del panel (no hardcode). DEGRADACIÓN HONESTA declarada: el contrato del historial
+  // no trae la comisión aplicada en su momento — si el panel cambió la tasa después, este recibo muestra
+  // la vigente (mejor aproximación disponible), no la histórica.
+  const commissionRate = useCommissionRate();
+  const earnings = computeTripEarnings(
+    trip.fareCents,
+    commissionRateFromBps(commissionRate.data?.onDemandRateBps),
+  );
 
   // Coords del contrato del historial (`{lat,lng}`) → `GeoPoint` (`{lat,lon}`) que consume `AppMap`.
   const origin: GeoPoint = { lat: trip.origin.lat, lon: trip.origin.lng };

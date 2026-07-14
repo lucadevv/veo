@@ -19,6 +19,7 @@ import type {
   AcceptTripInput,
   ArrivingTripInput,
   CancelTripInput,
+  CommissionRateView,
   CompleteTripInput,
   StartTripInput,
   Trip,
@@ -36,6 +37,15 @@ import type {
  * solo bloqueamos cuando el server DICE explícitamente que no quedó aceptada.
  */
 const acceptOfferReply = z.object({ outcome: z.string().optional() });
+
+/**
+ * Validación LOCAL de la tasa de comisión vigente del driver-bff (`DriverCommissionRateView`; contrato
+ * chico y propio del bff, sin schema en `@veo/api-client`). bps entero — el server jamás manda floats.
+ */
+const commissionRateView = z.object({
+  onDemandRateBps: z.number().int(),
+  version: z.number().int(),
+});
 
 /** Implementación HTTP del `TripsRepository` contra el driver-bff. */
 export class HttpTripsRepository implements TripsRepository {
@@ -136,5 +146,9 @@ export class HttpTripsRepository implements TripsRepository {
       body: { accept },
       schema: respondWaypointView,
     });
+  }
+
+  getCommissionRate(): Promise<CommissionRateView> {
+    return this.http.get('/earnings/commission-rate', { schema: commissionRateView });
   }
 }

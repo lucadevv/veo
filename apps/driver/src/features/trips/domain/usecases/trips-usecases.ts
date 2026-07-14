@@ -1,6 +1,13 @@
 import type { GeoPoint, TripHistoryPage, TripHistoryQuery } from '@veo/api-client';
 import type { TripsRepository } from '../repositories/trips-repository';
-import type { CompleteTripInput, Trip, TripOffer, TripRouteView, TripState } from '../entities';
+import type {
+  CommissionRateView,
+  CompleteTripInput,
+  Trip,
+  TripOffer,
+  TripRouteView,
+  TripState,
+} from '../entities';
 import { parseTripStatus } from '../value-objects/trip-status';
 
 /** Error de validación del código del modo niño (4 a 6 dígitos). */
@@ -189,5 +196,13 @@ export class CancelTripUseCase {
   constructor(private readonly trips: TripsRepository) {}
   execute(tripId: string, reason?: string): Promise<Trip> {
     return this.trips.cancel(tripId, { reason });
+  }
+}
+
+/** Caso de uso: tasa de comisión ON-DEMAND vigente (panel admin, vía driver-bff). */
+export class GetCommissionRateUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(): Promise<CommissionRateView> {
+    return this.trips.getCommissionRate();
   }
 }

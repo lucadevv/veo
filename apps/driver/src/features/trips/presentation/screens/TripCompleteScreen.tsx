@@ -12,7 +12,8 @@ import type { DriverProfile } from '../../../profile/domain';
 import { PROFILE_QUERY_KEY } from '../../../profile/domain';
 import { StarRating } from '../../../ratings/presentation';
 import { useMyTripRating, useRatePassenger } from '../hooks/usePassengerRating';
-import { commissionPercent, computeTripEarnings } from '../../domain';
+import { useCommissionRate } from '../hooks/useTrips';
+import { commissionPercent, commissionRateFromBps, computeTripEarnings } from '../../domain';
 import { Appear } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripComplete'>;
@@ -25,7 +26,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'TripComplete'>;
  *
  * El monto sale del `fareCents` del viaje (`driverTripView`) descompuesto por `computeTripEarnings`
  * (mismo modelo bruto − comisión de la pantalla de Ganancias) porque el agregado del período aún no se
- * recompuso al cerrar. El nombre del conductor se LEE de la caché del perfil (sin disparar un fetch); si
+ * recompuso al cerrar. La TASA es la VIGENTE del panel admin (`useCommissionRate`, vía driver-bff) —
+ * nunca un hardcode; sin red degrada al fallback offline (20 %, el default del backend). El nombre del
+ * conductor se LEE de la caché del perfil (sin disparar un fetch); si
  * no está, el saludo degrada a genérico. El nombre del pasajero no viaja en el contrato del viaje
  * (regla #5, PII) → la pregunta degrada a "¿Cómo estuvo tu pasajero?".
  */
@@ -35,7 +38,12 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
   const queryClient = useQueryClient();
   const { tripId, passengerId, fareCents, passengerName } = route.params;
 
-  const earnings = computeTripEarnings(fareCents);
+  // Tasa VIGENTE del panel (query cacheada); `undefined` (cargando/offline) pliega al fallback 20 %.
+  const commissionRate = useCommissionRate();
+  const earnings = computeTripEarnings(
+    fareCents,
+    commissionRateFromBps(commissionRate.data?.onDemandRateBps),
+  );
 
   // Nombre del conductor desde la caché del perfil (no fuerza red). Solo el primer nombre para el saludo.
   const cachedName = queryClient.getQueryData<DriverProfile>(PROFILE_QUERY_KEY)?.fullName ?? null;

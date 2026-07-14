@@ -16,6 +16,7 @@ import {
 } from '../../../earnings/domain';
 import {
   ACTIVE_TRIP_QUERY_KEY,
+  COMMISSION_RATE_QUERY_KEY,
   TRIP_QUERY_PREFIX,
   tripQueryKey,
   AcceptOfferUseCase,
@@ -26,6 +27,7 @@ import {
   CompleteTripUseCase,
   EnsureTripAcceptedUseCase,
   GetActiveTripUseCase,
+  GetCommissionRateUseCase,
   GetOfferUseCase,
   GetTripHistoryUseCase,
   GetTripRouteUseCase,
@@ -237,6 +239,21 @@ export function useTripRoute(tripId: string, enabled: boolean, from?: GeoPoint) 
     // banner de maniobra se caía). Con keepPreviousData la ruta anterior queda pintada hasta que llega
     // la recalculada — el mapa nunca se queda sin ruta mientras navega.
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Query: tasa de comisión ON-DEMAND VIGENTE (panel admin → payment-service → driver-bff). La consumen
+ * los desgloses bruto − comisión (TripComplete/TripDetail). staleTime generoso: la config cambia poco y
+ * el BFF ya la cachea 60 s; mientras la primera carga no resuelve (o sin red), el desglose degrada al
+ * fallback offline (`FALLBACK_COMMISSION_RATE`) vía `commissionRateFromBps(undefined)`.
+ */
+export function useCommissionRate() {
+  const { trips } = useRepositories();
+  return useQuery({
+    queryKey: COMMISSION_RATE_QUERY_KEY,
+    queryFn: () => new GetCommissionRateUseCase(trips).execute(),
+    staleTime: 5 * 60_000,
   });
 }
 
