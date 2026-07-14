@@ -81,7 +81,9 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
    */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return {
+      'trip.started': (env) => this.onTripStarted(env),
       'trip.completed': (env) => this.onTripCompleted(env),
+      'trip.failed': (env) => this.onTripFailed(env),
       'trip.cancelled': (env) => this.onTripCancelled(env),
       'driver.flagged': (env) => this.onDriverFlagged(env),
       'referral.rewarded': (env) => this.onReferralRewarded(env),
@@ -91,6 +93,88 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
 
   protected override subscriptionLog(eventTypes: readonly string[]): string {
     return `Consumidores Kafka iniciados (${eventTypes.join(', ')})`;
+  }
+
+  /**
+   * PREPAGO (ADR-024 · "cobrar al iniciar") · trip.started → dispara el COBRO DIGITAL de la tarifa CONGELADA
+   * cuando el conductor toca "Iniciar viaje" (el pasajero ya está a bordo, comprometido). Antes el cobro nacía
+   * en trip.completed; ahora nace acá, y trip.completed reusa la MISMA dedupKey → nunca duplica.
+   *
+   * EFECTIVO: NO se cobra al iniciar (el conductor cobra en mano al terminar, bilateral BR-P03) → no-op acá.
+   * Sin `fareCents` (trip.started viejo pre-prepago): tampoco se cobra acá → trip.completed cobra la tarifa
+   * completa (fallback honesto en settleTripFareOnCompletion). El resto del hardening (POISON UUID, permanente
+   * vs transitorio) es idéntico a onTripCompleted: el cobro es idempotente, reintentar no duplica.
+   *
+   * FASE 1: el cobro es asíncrono y NO bloquea el start. El gate SÍNCRONO ("si el pago falla, el viaje no
+   * avanza") + la UX de "esperando pago" + la afiliación Yape on-file son FASE 2 (ver chargeTripFareAtStart).
+   */
+  private async onTripStarted(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = EVENT_SCHEMAS['trip.started'].safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn('trip.started con payload inválido; descartado');
+      return;
+    }
+    const {
+      tripId,
+      fareCents,
+      driverId,
+      passengerId,
+      promoCode,
+      paymentMethod,
+      dispatchMode,
+      originLat,
+      originLng,
+    } = parsed.data;
+    // POISON (idéntico a trip.completed): tripId no-UUID toca la columna @db.Uuid → P2023 → loop infinito si
+    // se relanza. Descartar sin reintento (el offset avanza).
+    if (!isUuid(tripId)) {
+      this.logger.error(
+        `POISON trip.started: tripId no-UUID "${String(tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
+      );
+      return;
+    }
+    // Sin tarifa (trip.started viejo pre-prepago, o evento sin el campo): NO cobramos al iniciar → el cobro
+    // caerá completo en trip.completed (fallback). Compat N-2 honesta, no un error.
+    if (fareCents === undefined) {
+      this.logger.log(
+        `trip.started ${tripId} sin fareCents (pre-prepago); el cobro se hará al completar`,
+      );
+      return;
+    }
+    try {
+      const payment = await this.payments.chargeTripFareAtStart({
+        tripId,
+        grossCents: fareCents,
+        dedupKey: deriveTripChargeDedupKey(tripId),
+        driverId,
+        // Método del VIAJE: CASH ⇒ chargeTripFareAtStart es no-op (se cobra bilateral en completed); digital
+        // ⇒ cobra contra el riel. Ausente ⇒ default del env (nunca cash por omisión).
+        method: paymentMethod,
+        promoCode,
+        userId: passengerId,
+        // MÉTRICAS · denorm para los cortes por modo/distrito del panel (igual que en completed).
+        dispatchMode,
+        originLat,
+        originLng,
+      });
+      this.logger.log(
+        payment
+          ? `PREPAGO cobro al iniciar viaje ${tripId}: pago ${payment.id} estado ${payment.status}`
+          : `PREPAGO viaje ${tripId} EFECTIVO: no se cobra al iniciar (bilateral al completar)`,
+      );
+    } catch (err) {
+      // Misma red de seguridad que onTripCompleted: permanente (P2023/P2009…) → log + saltar (no relanzar);
+      // transitorio (DB caída/deadlock/timeout) → relanzar para reintentar (el cobro es idempotente).
+      if (isPermanentDataError(err)) {
+        this.logger.error(
+          { err },
+          `POISON trip.started: error permanente de datos al cobrar viaje ${tripId} (eventId=${env.eventId}); descartado sin reintento`,
+        );
+        return;
+      }
+      this.logger.error({ err }, `Falló el cobro al iniciar del viaje ${tripId}`);
+      throw err; // transitorio → Kafka reintenta; el cobro es idempotente.
+    }
   }
 
   private async onTripCompleted(env: EventEnvelope<unknown>): Promise<void> {
@@ -123,13 +207,17 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
       return;
     }
     try {
-      const payment = await this.payments.chargeFromTripCompleted({
+      // PREPAGO (ADR-024 · "cobrar al iniciar"): el cobro DIGITAL de la tarifa ya ocurrió en trip.started →
+      // acá NO se re-cobra (misma dedupKey ⇒ idempotente). settleTripFareOnCompletion resuelve los DOS caminos
+      // que SÍ quedan en completed: (a) EFECTIVO bilateral (se cobra/confirma en mano al terminar, sin cambio);
+      // (b) RECONCILIACIÓN del delta digital (si un waypoint subió la tarifa, cobra SOLO la diferencia).
+      const payment = await this.payments.settleTripFareOnCompletion({
         tripId,
         grossCents: fareCents,
         dedupKey: deriveTripChargeDedupKey(tripId),
         driverId,
         // Método del VIAJE (CASH/YAPE/PLIN/CARD): el cobro respeta lo que eligió el pasajero.
-        // Si el evento es viejo y no lo trae, chargeFromTripCompleted cae al default del env.
+        // Si el evento es viejo y no lo trae, settleTripFareOnCompletion cae al default del env.
         method: paymentMethod,
         promoCode,
         userId: passengerId,
@@ -139,11 +227,15 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
         originLat,
         originLng,
         // EFECTIVO (decisión del dueño): el conductor cobró en mano al terminar (driverConfirmed). Solo
-        // significativo si method=CASH; chargeFromTripCompleted crea la CashConfirmation driverConfirmed=true
+        // significativo si method=CASH; settleTripFareOnCompletion crea la CashConfirmation driverConfirmed=true
         // y emite payment.cash_pending (push al pasajero para que confirme). Ausente/false ⇒ bilateral normal.
         cashCollected,
       });
-      this.logger.log(`Cobro de viaje ${tripId}: pago ${payment.id} estado ${payment.status}`);
+      this.logger.log(
+        payment
+          ? `Liquidación de viaje ${tripId}: pago ${payment.id} estado ${payment.status}`
+          : `Liquidación de viaje ${tripId}: sin cobro adicional al completar (tarifa ya cobrada al iniciar)`,
+      );
     } catch (err) {
       // Red de seguridad: distinguir VENENO de TRANSITORIO. Un error permanente de datos
       // (P2023/P2009/P2000…) NUNCA va a procesar → log ERROR + saltar (NO relanzar). Lo transitorio
@@ -183,6 +275,54 @@ export class PaymentEventConsumers extends KafkaConsumerBootstrap {
           throw err;
         }
       }
+    }
+  }
+
+  /**
+   * PREPAGO (ADR-024) · trip.failed → REEMBOLSA la tarifa digital ya cobrada al INICIAR cuando el viaje falla
+   * (watchdog IN_PROGRESS → FAILED: app del conductor muerta / viaje abandonado). CIERRA el gap que introdujo
+   * cobrar al iniciar: sin esto quedaría "pasajero cobrado, viaje fallido, sin refund" (regresión de plata).
+   *
+   * Reusa el flujo de refund existente (`refundTripFareOnFailure` → executeRefundClaim → reverso real del
+   * proveedor), idempotente por `trip-failed-refund:{paymentId}` y NUNCA reporta éxito sin confirmación del
+   * proveedor (timeout ≠ falla). Un cobro no capturado (PENDING/DEBT) se CANCELA en vez de reembolsar. CASH no
+   * aplica (nunca pasó por el rail). El hardening (POISON UUID, permanente vs transitorio) es el de siempre.
+   */
+  private async onTripFailed(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = EVENT_SCHEMAS['trip.failed'].safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn('trip.failed con payload inválido; descartado');
+      return;
+    }
+    const { tripId } = parsed.data;
+    // POISON (idéntico a trip.completed): tripId no-UUID toca la columna @db.Uuid → P2023 → loop infinito si
+    // se relanza. Descartar sin reintento.
+    if (!isUuid(tripId)) {
+      this.logger.error(
+        `POISON trip.failed: tripId no-UUID "${String(tripId)}" (eventId=${env.eventId}); descartado sin reintento`,
+      );
+      return;
+    }
+    try {
+      const { refunded, cancelled } = await this.payments.refundTripFareOnFailure(
+        tripId,
+        `trip-failed: ${parsed.data.fromStatus}`,
+      );
+      this.logger.log(
+        `PREPAGO viaje fallido ${tripId}: ${refunded} cobro(s) reembolsado(s), ${cancelled} cobro(s) cancelado(s)`,
+      );
+    } catch (err) {
+      // Misma red de seguridad que onTripCompleted: permanente (P2023/P2009…) → log + saltar (no relanzar);
+      // transitorio (DB caída/deadlock/timeout/reverso 5xx) → relanzar (el refund es idempotente por dedupKey).
+      if (isPermanentDataError(err)) {
+        this.logger.error(
+          { err },
+          `POISON trip.failed: error permanente al reembolsar el viaje ${tripId} (eventId=${env.eventId}); descartado sin reintento`,
+        );
+        return;
+      }
+      this.logger.error({ err }, `Falló el reembolso del viaje fallido ${tripId}`);
+      throw err; // transitorio → Kafka reintenta; el refund es idempotente.
     }
   }
 

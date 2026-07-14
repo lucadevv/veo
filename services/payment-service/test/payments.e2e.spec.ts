@@ -24,7 +24,10 @@ import { PayoutsService } from '../src/payouts/payouts.service';
 import { PayoutsRepository } from '../src/payouts/payouts.repository';
 import { PromotionsService } from '../src/promotions/promotions.service';
 import { PromotionsRepository } from '../src/promotions/promotions.repository';
-import { deriveTripChargeDedupKey } from '../src/payments/payment.policy';
+import {
+  deriveTripChargeDedupKey,
+  deriveTripFareDeltaDedupKey,
+} from '../src/payments/payment.policy';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import { SandboxPayoutGateway } from '../src/ports/gateway/sandbox-payout.gateway';
 import type { PrismaService } from '../src/infra/prisma.service';
@@ -169,12 +172,12 @@ describe('Cobro idempotente con Postgres real (BR-P01/P04 + idempotencia)', () =
   });
 });
 
-describe('chargeFromTripCompleted respeta el método del VIAJE (fix bug PLATA)', () => {
+describe('chargeTripFare respeta el método del VIAJE (fix bug PLATA)', () => {
   it('viaje CASH → Payment method=CASH y status=PENDING (espera confirmación bilateral, NO captura)', async () => {
     const tripId = uuidv7();
     const dedupKey = deriveTripChargeDedupKey(tripId);
 
-    const payment = await service.chargeFromTripCompleted({
+    const payment = await service.chargeTripFare({
       tripId,
       grossCents: 2000,
       dedupKey,
@@ -197,7 +200,7 @@ describe('chargeFromTripCompleted respeta el método del VIAJE (fix bug PLATA)',
     const tripId = uuidv7();
     const dedupKey = deriveTripChargeDedupKey(tripId);
 
-    const payment = await service.chargeFromTripCompleted({
+    const payment = await service.chargeTripFare({
       tripId,
       grossCents: 2000,
       dedupKey,
@@ -214,7 +217,7 @@ describe('chargeFromTripCompleted respeta el método del VIAJE (fix bug PLATA)',
     const tripId = uuidv7();
     const dedupKey = deriveTripChargeDedupKey(tripId);
 
-    const payment = await service.chargeFromTripCompleted({
+    const payment = await service.chargeTripFare({
       tripId,
       grossCents: 2000,
       dedupKey,
@@ -224,6 +227,234 @@ describe('chargeFromTripCompleted respeta el método del VIAJE (fix bug PLATA)',
     // Fallback: DEFAULT_PAYMENT_METHOD=YAPE en el ConfigService del test.
     expect(payment.method).toBe('YAPE');
     expect(payment.status).toBe('CAPTURED');
+  });
+});
+
+describe('PREPAGO · "cobrar al iniciar" (ADR-024): started cobra, completed reconcilia (idempotencia de la tarifa)', () => {
+  it('DIGITAL: started cobra UNA vez; completed con la misma tarifa NO re-cobra (mismo dedupKey)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+
+    // Al INICIAR: se cobra la tarifa digital (YAPE sin payerRef → sandbox confirma → CAPTURED).
+    const atStart = await service.chargeTripFareAtStart({
+      tripId,
+      grossCents: 2000,
+      dedupKey,
+      method: 'YAPE',
+    });
+    expect(atStart).not.toBeNull();
+    expect(atStart!.status).toBe('CAPTURED');
+    expect(atStart!.grossCents).toBe(2000);
+
+    // Al COMPLETAR con la MISMA tarifa: NO nace un segundo cobro de la tarifa (delta=0 → devuelve el base).
+    const atComplete = await service.settleTripFareOnCompletion({
+      tripId,
+      grossCents: 2000,
+      dedupKey,
+      method: 'YAPE',
+    });
+    expect(atComplete!.id).toBe(atStart!.id); // el MISMO Payment, no uno nuevo
+
+    // Invariante financiero: UN solo Payment de tarifa para el viaje (started + completed → una sola plata).
+    const rows = await prisma.payment.findMany({ where: { tripId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.dedupKey).toBe(dedupKey);
+  });
+
+  it('EFECTIVO: started es no-op (NO cobra); completed crea el Payment CASH PENDING (bilateral, sin cambio)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+
+    // Al INICIAR con CASH: no se cobra (el conductor cobra en mano al terminar). Cero Payment.
+    const atStart = await service.chargeTripFareAtStart({
+      tripId,
+      grossCents: 1500,
+      dedupKey,
+      method: 'CASH',
+    });
+    expect(atStart).toBeNull();
+    expect(await prisma.payment.findMany({ where: { tripId } })).toHaveLength(0);
+
+    // Al COMPLETAR: el efectivo se cobra acá como siempre → Payment CASH PENDING (confirmación bilateral).
+    const atComplete = await service.settleTripFareOnCompletion({
+      tripId,
+      grossCents: 1500,
+      dedupKey,
+      method: 'CASH',
+    });
+    expect(atComplete!.method).toBe('CASH');
+    expect(atComplete!.status).toBe('PENDING');
+    const rows = await prisma.payment.findMany({ where: { tripId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.dedupKey).toBe(dedupKey);
+  });
+
+  it('DELTA: un waypoint sube la tarifa → completed cobra SOLO la diferencia (Payment separado idempotente)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+
+    // started cobró 2000. Un waypoint aceptado mid-viaje subió la tarifa a 2600 al completar.
+    await service.chargeTripFareAtStart({ tripId, grossCents: 2000, dedupKey, method: 'YAPE' });
+    const delta = await service.settleTripFareOnCompletion({
+      tripId,
+      grossCents: 2600,
+      dedupKey,
+      method: 'YAPE',
+    });
+
+    // El cobro adicional es SOLO la diferencia (600), con su propia dedupKey (tripId + monto ya cobrado).
+    const deltaDedupKey = deriveTripFareDeltaDedupKey(tripId, 2000);
+    expect(delta!.dedupKey).toBe(deltaDedupKey);
+    expect(delta!.grossCents).toBe(600);
+    expect(delta!.status).toBe('CAPTURED');
+
+    // Dos Payments del viaje: el base (2000) + el delta (600). La suma cobrada = 2600, sin doble-cobrar la base.
+    const rows = await prisma.payment.findMany({ where: { tripId }, orderBy: { grossCents: 'asc' } });
+    expect(rows.map((r) => r.grossCents)).toEqual([600, 2000]);
+
+    // IDEMPOTENTE: reprocesar trip.completed no crea un segundo delta (misma dedupKey → devuelve el existente).
+    const again = await service.settleTripFareOnCompletion({
+      tripId,
+      grossCents: 2600,
+      dedupKey,
+      method: 'YAPE',
+    });
+    expect(again!.id).toBe(delta!.id);
+    expect(await prisma.payment.findMany({ where: { tripId } })).toHaveLength(2);
+  });
+
+  it('DELTA cero: tarifa estable → completed NO crea ningún cobro adicional', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    await service.chargeTripFareAtStart({ tripId, grossCents: 1800, dedupKey, method: 'YAPE' });
+    await service.settleTripFareOnCompletion({ tripId, grossCents: 1800, dedupKey, method: 'YAPE' });
+    // Solo el cobro base: el delta 0 no materializa un Payment.
+    expect(await prisma.payment.findMany({ where: { tripId } })).toHaveLength(1);
+  });
+
+  it('FALLBACK: sin cobro al iniciar (started perdido) → completed cobra la tarifa COMPLETA (modelo previo)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    // Nunca se llamó chargeTripFareAtStart (evento started perdido). completed cobra todo con la dedupKey base.
+    const charged = await service.settleTripFareOnCompletion({
+      tripId,
+      grossCents: 2200,
+      dedupKey,
+      method: 'YAPE',
+    });
+    expect(charged!.dedupKey).toBe(dedupKey);
+    expect(charged!.grossCents).toBe(2200);
+    expect(charged!.status).toBe('CAPTURED');
+    const rows = await prisma.payment.findMany({ where: { tripId } });
+    expect(rows).toHaveLength(1);
+  });
+});
+
+describe('PREPAGO · trip.failed REEMBOLSA la tarifa cobrada al iniciar (cierra el gap de plata, ADR-024)', () => {
+  it('cobro CAPTURED al iniciar → trip.failed lo REEMBOLSA; doble trip.failed = UN solo refund (idempotente)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    const charged = await service.chargeTripFareAtStart({
+      tripId,
+      grossCents: 2000,
+      dedupKey,
+      method: 'YAPE',
+    });
+    expect(charged!.status).toBe('CAPTURED');
+
+    const first = await service.refundTripFareOnFailure(tripId, 'trip-failed: IN_PROGRESS');
+    expect(first).toEqual({ refunded: 1, cancelled: 0 });
+    expect((await service.getPayment(charged!.id)).status).toBe('REFUNDED');
+
+    const refunds = await prisma.refund.findMany({ where: { paymentId: charged!.id } });
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]!.dedupKey).toBe(`trip-failed-refund:${charged!.id}`);
+
+    // Doble trip.failed (reentrega Kafka): el cobro ya está REFUNDED → 0 nuevos refunds, 1 sola devolución.
+    const second = await service.refundTripFareOnFailure(tripId, 'trip-failed: IN_PROGRESS');
+    expect(second).toEqual({ refunded: 0, cancelled: 0 });
+    expect(await prisma.refund.findMany({ where: { paymentId: charged!.id } })).toHaveLength(1);
+  });
+
+  it('base + delta capturados → trip.failed reembolsa AMBOS cobros (cada uno con su propia dedupKey)', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    const base = await service.chargeTripFareAtStart({
+      tripId,
+      grossCents: 2000,
+      dedupKey,
+      method: 'YAPE',
+    });
+    const delta = await service.settleTripFareOnCompletion({
+      tripId,
+      grossCents: 2600,
+      dedupKey,
+      method: 'YAPE',
+    });
+    expect(delta!.grossCents).toBe(600);
+
+    const res = await service.refundTripFareOnFailure(tripId, 'trip-failed: IN_PROGRESS');
+    expect(res).toEqual({ refunded: 2, cancelled: 0 });
+    expect((await service.getPayment(base!.id)).status).toBe('REFUNDED');
+    expect((await service.getPayment(delta!.id)).status).toBe('REFUNDED');
+    const refunds = await prisma.refund.findMany({
+      where: { paymentId: { in: [base!.id, delta!.id] } },
+    });
+    expect(refunds).toHaveLength(2);
+    expect(new Set(refunds.map((r) => r.dedupKey))).toEqual(
+      new Set([`trip-failed-refund:${base!.id}`, `trip-failed-refund:${delta!.id}`]),
+    );
+  });
+
+  it('cobro NO capturado (DEBT: declinó al iniciar) → trip.failed lo CANCELA (→FAILED), NO reembolsa negativo', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    // El cobro al iniciar declinó a DEBT (payerRef de prueba termina en 0000 → el sandbox declina).
+    const debt = await service.charge({
+      tripId,
+      grossCents: 2000,
+      method: 'PLIN',
+      payerRef: '51900000000',
+      dedupKey,
+    });
+    expect(debt.status).toBe('DEBT');
+
+    const res = await service.refundTripFareOnFailure(tripId, 'trip-failed: IN_PROGRESS');
+    // Nada que reembolsar (no capturó) → se cancela, NUNCA un refund negativo.
+    expect(res).toEqual({ refunded: 0, cancelled: 1 });
+    expect((await service.getPayment(debt.id)).status).toBe('FAILED');
+    expect(await prisma.refund.findMany({ where: { paymentId: debt.id } })).toHaveLength(0);
+  });
+
+  it('cobro PENDING (checkout abierto) → trip.failed lo CANCELA: un webhook TARDÍO no captura un viaje fallido', async () => {
+    const tripId = uuidv7();
+    const dedupKey = deriveTripChargeDedupKey(tripId);
+    // Cobro digital que quedó PENDING (aggregator: checkout emitido, sin completar por el pasajero).
+    const pending = await prisma.payment.create({
+      data: {
+        id: uuidv7(),
+        tripId,
+        dedupKey,
+        amountCents: 1500,
+        grossCents: 1500,
+        commissionCents: 300,
+        feeCents: 300,
+        method: 'YAPE',
+        status: 'PENDING',
+      },
+    });
+
+    const res = await service.refundTripFareOnFailure(tripId, 'trip-failed: IN_PROGRESS');
+    expect(res).toEqual({ refunded: 0, cancelled: 1 });
+    // Cancelado → un webhook CONFIRMED tardío ya no puede capturar (el CAS applyWebhookResult no matchea FAILED).
+    expect((await service.getPayment(pending.id)).status).toBe('FAILED');
+    expect(await prisma.refund.findMany({ where: { paymentId: pending.id } })).toHaveLength(0);
+  });
+
+  it('viaje EFECTIVO fallido → no hay cobro digital que tocar (no-op, el efectivo nunca pasó por el rail)', async () => {
+    const tripId = uuidv7();
+    const res = await service.refundTripFareOnFailure(tripId, 'trip-failed: IN_PROGRESS');
+    expect(res).toEqual({ refunded: 0, cancelled: 0 });
   });
 });
 

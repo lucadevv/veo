@@ -158,6 +158,22 @@ export class PaymentsRepository {
     });
   }
 
+  /**
+   * ADR-024 (PREPAGO) · TODOS los cobros de TARIFA de un viaje que fallo (base `trip-completed:` + delta
+   * `trip-fare-delta:`), en cualquier estado VIVO: PENDING/DEBT (uncaptured → cancelar) y CAPTURED/
+   * PARTIALLY_REFUNDED (capturado → reembolsar). Los REFUNDED/FAILED ya están resueltos y se excluyen.
+   * Réplica.
+   */
+  findTripFarePayments(tripId: string): Promise<Payment[]> {
+    return this.prisma.read.payment.findMany({
+      where: {
+        tripId,
+        kind: 'FARE',
+        status: { in: ['PENDING', 'DEBT', 'CAPTURED', 'PARTIALLY_REFUNDED'] },
+      },
+    });
+  }
+
   /** Propinas de un viaje a reembolsar/cancelar cuando el viaje se revierte (A1). Réplica. */
   findTripTips(tripId: string): Promise<Payment[]> {
     return this.prisma.read.payment.findMany({
@@ -244,6 +260,20 @@ export class PaymentsRepository {
   cancelPendingTips(ids: string[], failureReason: string): Promise<{ count: number }> {
     return this.prisma.write.payment.updateMany({
       where: { id: { in: ids }, status: 'PENDING' },
+      data: { status: 'FAILED', failureReason },
+    });
+  }
+
+  /**
+   * ADR-024 (PREPAGO) · Cancela en batch los cobros de tarifa NO capturados (PENDING/DEBT) de un viaje que
+   * falló, para que un webhook/poll TARDÍO no capture un viaje fallido (PENDING) y para que un DEBT no siga
+   * bloqueando el gate del pasajero por un viaje que nunca se completó. CAS por-fila `status IN (PENDING,DEBT)`:
+   * un cobro que capturó concurrentemente NO matchea (queda CAPTURED → lo agarra el reembolso). DEBT→FAILED y
+   * PENDING→FAILED son transiciones válidas de la máquina. FAILED no cuenta en el gate de deuda (solo DEBT).
+   */
+  cancelUncapturedFares(ids: string[], failureReason: string): Promise<{ count: number }> {
+    return this.prisma.write.payment.updateMany({
+      where: { id: { in: ids }, status: { in: ['PENDING', 'DEBT'] } },
       data: { status: 'FAILED', failureReason },
     });
   }

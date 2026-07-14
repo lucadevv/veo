@@ -1,7 +1,7 @@
 /**
  * HARDENING (incidente dev 2026-06): poison messages se LOGUEAN y SALTAN; errores transitorios
  * SIGUEN reintentando. Un `trip.completed` con `tripId` NO-UUID envenenaba el topic `trip`:
- * zod pasa (tripId es z.string()) → chargeFromTripCompleted toca columna `trip_id @db.Uuid` →
+ * zod pasa (tripId es z.string()) → settleTripFareOnCompletion toca columna `trip_id @db.Uuid` →
  * Prisma P2023 → el catch RELANZABA SIEMPRE → kafkajs reintenta 5 → crash → restart → MISMO
  * offset → loop infinito, partición bloqueada.
  *
@@ -9,7 +9,7 @@
  * con start/stop anulados — los handlers los registra el bootstrap promovido de @veo/events/nest
  * en onModuleInit):
  *  1. tripId no-UUID  → NO relanza (poison: log & skip), NO intenta cobrar.
- *  2. tripId válido   → cobra normalmente (chargeFromTripCompleted).
+ *  2. tripId válido   → cobra normalmente (settleTripFareOnCompletion).
  *  3. error transitorio (DB caída) → SÍ relanza (reintento de Kafka).
  *  4. error permanente (P2023 desde DB, defensa en profundidad) → NO relanza.
  */
@@ -45,7 +45,7 @@ function build(charge: ReturnType<typeof vi.fn>): {
   svc: PaymentEventConsumers;
   creditTrip: ReturnType<typeof vi.fn>;
 } {
-  const payments = { chargeFromTripCompleted: charge } as unknown as PaymentsService;
+  const payments = { settleTripFareOnCompletion: charge } as unknown as PaymentsService;
   const payouts = { holdDriver: vi.fn(async () => {}) } as unknown as PayoutsService;
   const creditTrip = vi.fn(async () => {});
   const incentives = { creditTrip } as unknown as IncentivesService;
@@ -94,7 +94,7 @@ describe('PaymentEventConsumers · trip.completed hardening (poison vs transitor
     await svc.onModuleDestroy();
   });
 
-  it('tripId válido → cobra normalmente (chargeFromTripCompleted)', async () => {
+  it('tripId válido → cobra normalmente (settleTripFareOnCompletion)', async () => {
     const charge = vi.fn(async () => ({ id: 'pay-1', status: 'PENDING' }));
     const { svc } = build(charge);
     await svc.onModuleInit();

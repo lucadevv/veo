@@ -834,6 +834,16 @@ export class TripsService {
             startedAt: startedAt.toISOString(),
             // passengerId ENRIQUECIDO: push "tu viaje empezó" (dispara el dominó de compartir/familia).
             passengerId: trip.passengerId,
+            // PREPAGO (ADR-024 · "cobrar al iniciar"): el cobro DIGITAL de la tarifa congelada nace ACÁ, no
+            // en trip.completed. Enriquecemos el evento con lo que payment-service necesita para cobrar sin
+            // join cross-servicio (PARIDAD con trip.completed). CASH ⇒ payment NO cobra al iniciar (bilateral
+            // en completed). El origen se persiste como originLat/originLon; el evento lo expone como originLng.
+            fareCents: trip.fareCents,
+            paymentMethod: trip.paymentMethod,
+            promoCode: trip.promoCode ?? undefined,
+            dispatchMode: trip.dispatchMode,
+            originLat: trip.originLat,
+            originLng: trip.originLon,
           },
         }),
         id,

@@ -66,7 +66,7 @@ async function balance(userId: string): Promise<number> {
   return (await prisma.userCredit.findUnique({ where: { userId } }))?.balanceCents ?? 0;
 }
 function chargeCashTrip(tripId: string) {
-  return svc.chargeFromTripCompleted({
+  return svc.chargeTripFare({
     tripId,
     grossCents: 2000,
     dedupKey: deriveTripChargeDedupKey(tripId),

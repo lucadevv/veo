@@ -54,6 +54,8 @@ import {
   deriveRefundIdempotencyKey,
   deriveTipChargeDedupKey,
   deriveTipRefundDedupKey,
+  deriveTripFareDeltaDedupKey,
+  deriveTripFailedRefundDedupKey,
   isCashMethod,
   isSettledPayment,
   retryDelayMs,
@@ -1876,6 +1878,89 @@ export class PaymentsService {
   }
 
   /**
+   * ADR-024 (PREPAGO) · REEMBOLSO SYSTEM-INITIATED por FALLO del viaje (`trip.failed`, watchdog IN_PROGRESS →
+   * FAILED: app del conductor muerta / viaje abandonado). CIERRA el gap que introdujo cobrar al INICIAR: antes
+   * un viaje fallido NUNCA se cobraba (el cobro vivía en completed); ahora la tarifa digital ya capturó al
+   * iniciar → sin esto quedaría "pasajero cobrado, viaje fallido, sin refund" (regresión de plata).
+   *
+   * Cubre AMBOS cobros de tarifa del viaje (base `trip-completed:` + delta `trip-fare-delta:` si hubo waypoint):
+   *  - CAPTURED / PARTIALLY_REFUNDED → REEMBOLSO por el reverso REAL del proveedor (reusa `executeRefundClaim`,
+   *    el MISMO core que el refund admin y el de booking-cancel): la plata salió del pasajero → se le devuelve.
+   *    Idempotente por `trip-failed-refund:{paymentId}` (UNIQUE en Refund) → un `trip.failed` duplicado no
+   *    doble-reembolsa. NUNCA reporta éxito sin confirmación del proveedor (async → Refund PENDING, timeout ≠
+   *    falla — herencia de refundViaGateway).
+   *  - PENDING / DEBT (nunca capturó) → NO hay nada que devolver, pero se CANCELA el cobro (→FAILED): un
+   *    webhook/poll TARDÍO no debe capturar un viaje fallido (PENDING), y un DEBT no debe seguir bloqueando el
+   *    gate del pasajero por un viaje que nunca se completó.
+   *  - CASH → no aplica (el efectivo nunca pasó por el rail; además un viaje fallido nunca llegó a cobrar CASH,
+   *    que se cobra al completar). Se filtra defensivamente.
+   *
+   * DECISIÓN Fase 1 (clawbackDriver=false): la plataforma ABSORBE el reverso, NO se le cobra al conductor —
+   * igual que el refund de booking-cancel. Si el fallo fuera atribuible al conductor (RC18), un clawback es una
+   * decisión de negocio aparte (Fase 2), no se resuelve acá.
+   *
+   * Devuelve el conteo de cobros reembolsados y cancelados (para el log del consumer). Idempotente y seguro
+   * ante reentrega: un segundo `trip.failed` reembolsa 0 (todos ya REFUNDED) y cancela 0 (todos ya FAILED).
+   */
+  async refundTripFareOnFailure(
+    tripId: string,
+    reason: string,
+  ): Promise<{ refunded: number; cancelled: number }> {
+    const fares = await this.repo.findTripFarePayments(tripId);
+
+    // 1) CANCELAR los cobros digitales NO capturados (PENDING/DEBT) → un webhook tardío no captura un viaje
+    //    fallido, y un DEBT deja de gatear al pasajero. CASH nunca entra (no pasó por el rail). CAS por-fila.
+    const uncapturedIds = fares
+      .filter((f) => f.method !== 'CASH' && (f.status === 'PENDING' || f.status === 'DEBT'))
+      .map((f) => f.id);
+    let cancelled = 0;
+    if (uncapturedIds.length > 0) {
+      cancelled = (await this.repo.cancelUncapturedFares(uncapturedIds, `trip-failed: ${reason}`))
+        .count;
+    }
+
+    // 2) REEMBOLSAR los cobros CAPTURADOS (base + delta) por el reverso real del proveedor. Per-payment
+    //    (idempotente por su propia dedupKey): un delta se devuelve con su propia key, sin colisionar con la base.
+    let refunded = 0;
+    for (const fare of fares) {
+      if (fare.method === 'CASH') continue; // el efectivo no pasó por el gateway
+      if (fare.status !== 'CAPTURED' && fare.status !== 'PARTIALLY_REFUNDED') continue;
+      const remainingCents = fare.amountCents - fare.refundedCents;
+      if (remainingCents <= 0) continue; // ya totalmente reembolsado (un trip.failed previo lo cubrió)
+      assertPaymentTransition(fare.status, 'REFUNDED');
+      const claim: RefundClaim = {
+        amountCents: remainingCents,
+        reason,
+        requestedBy: SYSTEM_OPERATOR,
+        approvedBy: SYSTEM_OPERATOR,
+        // Barrera DURA: un `trip.failed` duplicado choca contra el UNIQUE de Refund.dedupKey → no-op graceful.
+        dedupKey: deriveTripFailedRefundDedupKey(fare.id),
+        newStatus: 'REFUNDED',
+        newRefundedCents: fare.refundedCents + remainingCents,
+        isFullyRefunded: true,
+        // Fase 1: la plataforma absorbe (no es un clawback al conductor). Ver docstring.
+        clawbackDriver: false,
+      };
+      try {
+        await this.executeRefundClaim(fare, claim);
+        refunded += 1;
+      } catch (err) {
+        // Idempotencia: el refund de ESTE cobro ya existe (otra entrega del mismo trip.failed) → la plata ya
+        // volvió, seguimos con el resto. Cualquier otro error se relanza (transitorio → Kafka reintenta).
+        if (isUniqueViolation(err, 'dedupKey')) {
+          this.logger.log(
+            `Refund por fallo ya existente para el cobro ${fare.id} (viaje ${tripId}); no-op idempotente`,
+          );
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return { refunded, cancelled };
+  }
+
+  /**
    * CORE COMPARTIDO del refund (admin y system-initiated): branch TIPADO por método. El efectivo nunca pasó
    * por el gateway → devolución local explícita; lo digital va por el reverso real del proveedor. NO valida
    * (la validación —saldo, ventana, rol, monto— ya la hizo el caller y la cristalizó en el `RefundClaim`).
@@ -2690,8 +2775,140 @@ export class PaymentsService {
     });
   }
 
-  /** Cobro disparado por el evento trip.completed (BR-P01). dedupKey determinista por viaje. */
-  async chargeFromTripCompleted(input: {
+  /**
+   * ADR-024 (PREPAGO · "cobrar al iniciar") · Cobro de la tarifa CONGELADA disparado al INICIAR el viaje
+   * (`trip.started`), NO al completarlo. Es la MISMA operación de cobro que antes nacía en trip.completed:
+   * mismo core (`chargeTripFare`), misma dedupKey determinista por viaje — solo cambió el DISPARADOR (el
+   * pasajero ya está a bordo, más comprometido). EFECTIVO: NO se cobra al iniciar (el conductor lo cobra en
+   * mano al terminar, confirmación bilateral BR-P03) → devuelve `null` (no-op). Digital: se cobra contra el
+   * riel. Reprocesar started, o un trip.completed posterior, encuentran ESTE Payment por la dedupKey y NO
+   * duplican (garantía de idempotencia: una sola tarifa).
+   *
+   * FASE 1 (backend, sin gate síncrono): el cobro es ASÍNCRONO (evento). Si declina (tarjeta sin fondo),
+   * HOY cae a DEBT igual que antes — el modelo no empeora, solo adelanta el momento del cobro. El GATE
+   * síncrono del start ("si el pago falla, el viaje no avanza"), la UX de "esperando pago" y la afiliación
+   * Yape on-file son FASE 2 (requieren esperar la aprobación del riel antes de dejar arrancar el viaje).
+   */
+  async chargeTripFareAtStart(input: {
+    tripId: string;
+    grossCents: number;
+    dedupKey: string;
+    driverId?: string;
+    method?: PaymentMethod;
+    promoCode?: string;
+    userId?: string;
+    dispatchMode?: string;
+    originLat?: number;
+    originLng?: number;
+  }): Promise<Payment | null> {
+    // EFECTIVO: no se cobra al iniciar (sigue bilateral en completed). Resolvemos el método contra el default
+    // del env SOLO para decidir cash/digital (paridad con chargeTripFare) — un started viejo sin método cae
+    // al default y se trata como digital (nunca cash por omisión), consistente con el cobro histórico.
+    if (isCashMethod(input.method ?? this.defaultMethod)) return null;
+    // Digital: mismo cobro que en completed, sin cashCollected (irrelevante al iniciar). La dedupKey compartida
+    // hace que el trip.completed posterior NO re-cobre (encuentra este Payment por dedupKey).
+    return this.chargeTripFare(input);
+  }
+
+  /**
+   * ADR-024 (PREPAGO) · Liquidación de la tarifa al COMPLETAR el viaje. El cobro DIGITAL de la tarifa ya
+   * ocurrió al iniciar (`chargeTripFareAtStart`) → acá NO se re-cobra. Dos caminos:
+   *  - EFECTIVO: se cobra/confirma acá (bilateral, BR-P03), como SIEMPRE — el efectivo nunca se cobra al iniciar.
+   *  - DIGITAL: RECONCILIACIÓN del delta. Si `fareCents` al completar > lo cobrado al iniciar (un waypoint
+   *    aceptado subió la tarifa), se cobra SOLO la diferencia (Payment separado, idempotente por su propia
+   *    dedupKey). Igual ⇒ nada. Menor (no debería) ⇒ NO se cobra negativo, se loguea.
+   */
+  async settleTripFareOnCompletion(input: {
+    tripId: string;
+    grossCents: number;
+    dedupKey: string;
+    driverId?: string;
+    method?: PaymentMethod;
+    promoCode?: string;
+    userId?: string;
+    cashCollected?: boolean;
+    dispatchMode?: string;
+    originLat?: number;
+    originLng?: number;
+  }): Promise<Payment | null> {
+    // EFECTIVO: el cobro NO ocurrió al iniciar → se realiza acá (bilateral). Camino sin cambios respecto al
+    // modelo previo: crea el Payment CASH PENDING + aplica la confirmación del conductor (cashCollected).
+    if (isCashMethod(input.method ?? this.defaultMethod)) {
+      return this.chargeTripFare(input);
+    }
+    // DIGITAL: la tarifa base ya se cobró al iniciar. Solo reconciliamos el delta del waypoint (si creció).
+    return this.reconcileDigitalFareDelta(input);
+  }
+
+  /**
+   * ADR-024 (PREPAGO) · Reconcilia el DELTA de tarifa digital al completar. Busca el cobro base (por la
+   * dedupKey compartida `trip-completed:{tripId}`, creado al iniciar) y cobra solo lo que la tarifa CRECIÓ:
+   *  - Sin cobro base (started perdido / viaje digital sin cobro al iniciar): FALLBACK honesto → cobra la
+   *    tarifa COMPLETA acá (comportamiento del modelo previo; no deja plata sin cobrar, cero deuda extra).
+   *  - delta = 0 → nada que cobrar (tarifa estable, el caso común).
+   *  - delta > 0 → cobra la diferencia (Payment separado, dedupKey propia por (tripId, monto previo)).
+   *  - delta < 0 → NO se cobra negativo (no debería pasar: la tarifa solo crece por waypoint); se loguea.
+   * La promo NO se re-aplica en el delta: ya se canjeó en el cobro base. El delta es tarifa PURA.
+   */
+  private async reconcileDigitalFareDelta(input: {
+    tripId: string;
+    grossCents: number;
+    dedupKey: string;
+    driverId?: string;
+    method?: PaymentMethod;
+    promoCode?: string;
+    userId?: string;
+    dispatchMode?: string;
+    originLat?: number;
+    originLng?: number;
+  }): Promise<Payment | null> {
+    const baseCharge = await this.repo.findPaymentByDedupKey(input.dedupKey);
+    if (!baseCharge) {
+      // El cobro al iniciar NUNCA ocurrió (evento started perdido, o viaje que completó sin haber cobrado al
+      // start). Cobramos la tarifa COMPLETA acá: es exactamente el modelo previo (cobro en completed) → no
+      // empeora nada y no deja plata sin cobrar. Idempotente por la MISMA dedupKey.
+      this.logger.warn(
+        `PREPAGO trip ${input.tripId}: sin cobro al iniciar; se cobra la tarifa completa al completar (fallback)`,
+      );
+      return this.chargeTripFare(input);
+    }
+    const deltaCents = input.grossCents - baseCharge.grossCents;
+    if (deltaCents === 0) return baseCharge; // tarifa estable → nada que reconciliar (caso común).
+    if (deltaCents < 0) {
+      // La tarifa solo debería CRECER (waypoint). Una baja no se cobra negativo; se surfacea para revisión.
+      this.logger.warn(
+        `PREPAGO trip ${input.tripId}: tarifa al completar (${input.grossCents}c) < cobrada al iniciar ` +
+          `(${baseCharge.grossCents}c); no se cobra un delta negativo`,
+      );
+      return baseCharge;
+    }
+    // Waypoint aceptado subió la tarifa → cobramos SOLO la diferencia, como un Payment separado idempotente
+    // por su propia dedupKey (tripId + monto ya cobrado). ON_DEMAND, sin promo (ya canjeada en el cobro base).
+    this.logger.log(
+      `PREPAGO trip ${input.tripId}: delta de tarifa ${deltaCents}c (completó ${input.grossCents}c, ` +
+        `cobrado al iniciar ${baseCharge.grossCents}c) → cobro adicional`,
+    );
+    return this.charge({
+      tripId: input.tripId,
+      grossCents: deltaCents,
+      tipCents: 0,
+      method: input.method ?? this.defaultMethod,
+      mode: ChargeMode.ON_DEMAND,
+      driverId: input.driverId,
+      dedupKey: deriveTripFareDeltaDedupKey(input.tripId, baseCharge.grossCents),
+      userId: input.userId,
+      dispatchMode: input.dispatchMode,
+      originLat: input.originLat,
+      originLng: input.originLng,
+    });
+  }
+
+  /**
+   * Core de cobro de la tarifa de un viaje (BR-P01). dedupKey determinista por viaje. Lo comparten el
+   * disparador al INICIAR (`chargeTripFareAtStart`, digital) y al COMPLETAR (`settleTripFareOnCompletion`,
+   * efectivo bilateral). `cashCollected` solo aplica al camino EFECTIVO en completed (al iniciar no viaja).
+   */
+  async chargeTripFare(input: {
     tripId: string;
     grossCents: number;
     dedupKey: string;

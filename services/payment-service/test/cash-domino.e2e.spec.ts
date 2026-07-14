@@ -2,7 +2,7 @@
  * EFECTIVO · cierre del dominó · E2E con Postgres REAL (testcontainers) — NO se mockea la DB en un
  * crítico de dinero (CLAUDE). Reemplaza al antiguo cash-domino.spec.ts (fake Prisma en memoria).
  *
- * chargeFromTripCompleted con cashCollected (el efectivo se confirma AL TERMINAR el viaje):
+ * chargeTripFare con cashCollected (el efectivo se confirma AL TERMINAR el viaje):
  *   - CASH + cashCollected=true → Payment CASH PENDING + CashConfirmation driverConfirmed=true +
  *     payment.cash_pending (push). NO captura (falta el pasajero).
  *   - luego confirmCash('passenger') → ambos true → CAPTURED + payment.captured.
@@ -63,7 +63,7 @@ function makeConfig(): ConfigService {
 }
 
 function chargeCash(opts: { cashCollected?: boolean } = {}) {
-  return svc.chargeFromTripCompleted({
+  return svc.chargeTripFare({
     tripId: TRIP,
     grossCents: 2000,
     dedupKey: deriveTripChargeDedupKey(TRIP),
@@ -103,7 +103,7 @@ beforeEach(async () => {
   await prisma.payment.deleteMany({});
 });
 
-describe('chargeFromTripCompleted · EFECTIVO con cashCollected (driver confirma al terminar)', () => {
+describe('chargeTripFare · EFECTIVO con cashCollected (driver confirma al terminar)', () => {
   it('CASH + cashCollected=true → PENDING + CashConfirmation driverConfirmed=true + emite cash_pending', async () => {
     const payment = await chargeCash({ cashCollected: true });
 
@@ -154,7 +154,7 @@ describe('chargeFromTripCompleted · EFECTIVO con cashCollected (driver confirma
   });
 
   it('DIGITAL (YAPE) con cashCollected=true → se IGNORA: no toca CashConfirmation ni emite cash_pending', async () => {
-    await svc.chargeFromTripCompleted({
+    await svc.chargeTripFare({
       tripId: TRIP,
       grossCents: 2000,
       dedupKey: deriveTripChargeDedupKey(TRIP),

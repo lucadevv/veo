@@ -351,11 +351,53 @@ export function retryDelayMs(attempt: number, baseMs: number): number {
 }
 
 /**
- * Clave de idempotencia determinista para el cobro que nace del evento trip.completed.
- * Reprocesar el evento no genera un segundo cobro (mismo dedupKey → choca contra el UNIQUE).
+ * Clave de idempotencia determinista del cobro de la TARIFA de un viaje. UNA sola por viaje: el disparador
+ * cambió (ADR-024 · modelo PREPAGO "cobrar al iniciar") pero la clave NO — el cobro DIGITAL nace en
+ * `trip.started` y `trip.completed` reusa esta MISMA clave, así el `findPaymentByDedupKey` del segundo
+ * encuentra el cobro del primero y NUNCA duplica (una sola tarifa, un solo Payment). El literal
+ * `trip-completed:` se MANTIENE intacto a propósito: es una clave de idempotencia PERSISTIDA en
+ * `Payment.dedupKey`; renombrarla partiría en dos la idempotencia de los cobros en vuelo. EFECTIVO: el
+ * cobro NO ocurre al iniciar (sigue bilateral en completed), pero cuando ocurre usa esta misma clave.
  */
 export function deriveTripChargeDedupKey(tripId: string): string {
   return `trip-completed:${tripId}`;
+}
+
+/**
+ * ADR-024 (PREPAGO) · PREFIJO TIPADO de la dedupKey del cobro del DELTA de tarifa: cuando la tarifa CRECE
+ * mid-viaje (un waypoint aceptado sube `fareCents`), la diferencia se cobra al COMPLETAR como un Payment
+ * SEPARADO (el cobro base ya capturó al iniciar). Cero strings mágicos. Distinto namespace del cobro base
+ * (`trip-completed:`) para que NUNCA colisionen en `Payment.dedupKey`.
+ */
+export const TRIP_FARE_DELTA_DEDUP_PREFIX = 'trip-fare-delta:' as const;
+
+/**
+ * ADR-024 (PREPAGO) · PREFIJO TIPADO de la dedupKey del REEMBOLSO SYSTEM-INITIATED cuando un viaje ya cobrado
+ * al iniciar FALLA (IN_PROGRESS → FAILED por watchdog: app del conductor muerta / viaje abandonado). El cobro
+ * capturó pero el viaje no se completó → se devuelve. Se namespacea POR PAYMENT (no por trip) porque un viaje
+ * puede tener DOS cobros de tarifa (base `trip-completed:` + delta `trip-fare-delta:`) y AMBOS se reembolsan,
+ * cada uno idempotente por su propia key. Distinto del refund de booking-cancel (`booking-cancel-refund:`).
+ */
+export const TRIP_FAILED_REFUND_DEDUP_PREFIX = 'trip-failed-refund:' as const;
+
+/**
+ * ADR-024 (PREPAGO) · Clave de idempotencia DETERMINISTA del reembolso por FALLO del viaje, POR el id del
+ * Payment reembolsado (base o delta). Mismo Payment → misma key → un `trip.failed` duplicado choca contra el
+ * UNIQUE de `Refund.dedupKey` → no-op graceful (una sola devolución por cobro).
+ */
+export function deriveTripFailedRefundDedupKey(paymentId: string): string {
+  return `${TRIP_FAILED_REFUND_DEDUP_PREFIX}${paymentId}`;
+}
+
+/**
+ * ADR-024 (PREPAGO) · Clave de idempotencia DETERMINISTA del cobro del delta de tarifa (waypoint). Incluye el
+ * monto YA cobrado al iniciar (`previousChargedCents`) para que:
+ *  - reprocesar `trip.completed` con el mismo cobro base → misma clave → un solo cobro del delta (idempotente).
+ *  - si la tarifa creciera en DOS tramos distintos, cada delta tenga su propia clave (previousCharged distinto).
+ * Mismo viaje + mismo monto previo → misma clave → choca contra el UNIQUE de `Payment.dedupKey` (no doble plata).
+ */
+export function deriveTripFareDeltaDedupKey(tripId: string, previousChargedCents: number): string {
+  return `${TRIP_FARE_DELTA_DEDUP_PREFIX}${tripId}:${previousChargedCents}`;
 }
 
 /**

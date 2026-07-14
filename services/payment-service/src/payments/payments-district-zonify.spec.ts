@@ -1,5 +1,5 @@
 /**
- * MÉTRICAS · "Ingresos por distrito" — la captura del cobro (`chargeFromTripCompleted`, la entrada que
+ * MÉTRICAS · "Ingresos por distrito" — la captura del cobro (`chargeTripFare`, la entrada que
  * dispara el consumer trip.completed) ZONIFICA el origen del viaje (originLat/originLng threadeados desde el
  * evento) a un distrito de Lima y lo persiste DENORMALIZADO en `Payment.district`. Ese es el seam que hace
  * poblar el panel admin. Degradación HONESTA: sin coordenadas (evento legacy N-2) o fuera de cobertura →
@@ -40,7 +40,7 @@ const MIRAFLORES = { lat: -12.121, lng: -77.03 };
 describe('captura · zonificación del origen → Payment.district (corte por distrito del panel)', () => {
   it('CON coordenadas en cobertura → district = distrito zonificado (Miraflores) + origen persistido', async () => {
     const { service, created } = buildService();
-    await service.chargeFromTripCompleted({
+    await service.chargeTripFare({
       tripId: '00000000-0000-0000-0000-000000000001',
       grossCents: 1500,
       dedupKey: 'trip-charge:trip-1',
@@ -57,7 +57,7 @@ describe('captura · zonificación del origen → Payment.district (corte por di
 
   it('SIN coordenadas (evento legacy N-2) → district null (degradación honesta, no se inventa distrito)', async () => {
     const { service, created } = buildService();
-    await service.chargeFromTripCompleted({
+    await service.chargeTripFare({
       tripId: '00000000-0000-0000-0000-000000000002',
       grossCents: 1500,
       dedupKey: 'trip-charge:trip-2',
@@ -72,7 +72,7 @@ describe('captura · zonificación del origen → Payment.district (corte por di
 
   it('coordenadas FUERA de cobertura (mar afuera 0,0) → district null (no se asigna un distrito lejano)', async () => {
     const { service, created } = buildService();
-    await service.chargeFromTripCompleted({
+    await service.chargeTripFare({
       tripId: '00000000-0000-0000-0000-000000000003',
       grossCents: 1500,
       dedupKey: 'trip-charge:trip-3',

@@ -320,11 +320,27 @@ export const tripArrived = z.object({
   passengerId: z.string().optional(),
   waitWindowSeconds: z.number().int().optional(),
 });
+/// PREPAGO (ADR-024 · modelo "cobrar al iniciar") · trip.started dispara el COBRO DIGITAL de la tarifa
+/// CONGELADA (antes el cobro nacía en trip.completed). Por eso el evento se ENRIQUECE con lo que
+/// payment-service necesita para cobrar SIN join cross-servicio (paridad con trip.completed):
+///  - `fareCents`     : tarifa congelada al iniciar (FIJO al crear · PUJA al aceptar). Es el bruto a cobrar.
+///  - `paymentMethod` : método elegido por el pasajero. CASH ⇒ payment NO cobra al iniciar (sigue bilateral
+///                      en completed); digital ⇒ se cobra acá contra el riel.
+///  - `promoCode`     : canje de promoción al cobrar (Ola 2A), idempotente por la dedupKey del cobro.
+///  - `dispatchMode` / `originLat` / `originLng` : DENORM para los cortes de ingresos por modo/distrito.
+/// TODOS opcionales (compat N-2): un trip.started viejo sin estos campos ⇒ el cobro NO ocurre al iniciar y
+/// trip.completed lo cobra completo (fallback honesto, cero deuda extra · ver PaymentsService).
 export const tripStarted = z.object({
   tripId: z.string(),
   driverId: z.string(),
   startedAt: z.string(),
   passengerId: z.string().optional(),
+  fareCents: z.number().int().optional(),
+  paymentMethod: z.enum(['YAPE', 'PLIN', 'CASH', 'CARD', 'PAGOEFECTIVO']).optional(),
+  promoCode: z.string().optional(),
+  dispatchMode: pricingMode.optional(),
+  originLat: z.number().optional(),
+  originLng: z.number().optional(),
 });
 /// RC5 (ADR-022) · el pasajero (dueño) REESCRIBIÓ el destino de un viaje PRE-start (changeDestination),
 /// emitido en la MISMA tx que persiste el nuevo destino/tarifa. Antes changeDestination solo grababa el
