@@ -650,12 +650,8 @@
   },
   "trips": {
     "incomingTitle": "Nuevo viaje",
-    "secondsShort": "seg",
     "scheduledBadge": "Reservado",
-    "passengerVerified": "Pasajero verificado",
     "incomingExpires": "Vence en {{seconds}} s",
-    "incomingExpired": "La oferta venció",
-    "incomingDismiss": "Volver al inicio",
     "estimatedFare": "Tarifa estimada",
     "distance": "Distancia",
     "duration": "Duración",
@@ -673,6 +669,16 @@
     "passengerRatingTrips": "{{rating}} · {{trips}} viajes",
     "passengerNew": "Pasajero nuevo",
     "confirmingAssignment": "Confirmando asignación…",
+    "offerGoneTitle": "La oferta ya no está disponible",
+    "offerGoneBody": "Otro conductor la tomó o venció. Vuelve al inicio para recibir nuevos viajes.",
+    "endedRemotely": {
+      "cancelledTitle": "El pasajero canceló el viaje",
+      "cancelledBody": "Ya no tenés que seguir hacia el recojo. Volvé al panel para recibir nuevos viajes.",
+      "expiredTitle": "El viaje venció",
+      "expiredBody": "El pedido se cerró sin confirmarse a tiempo. Volvé al panel para recibir nuevos viajes.",
+      "failedTitle": "El viaje no pudo continuar",
+      "failedBody": "Hubo un problema con el viaje y se cerró. Volvé al panel para recibir nuevos viajes."
+    },
     "connection": {
       "live": "En vivo",
       "reconnecting": "Reconectando…"

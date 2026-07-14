@@ -27,7 +27,7 @@ pnpm android
 | Login          | Cuenta específica de conductor                                                                                                        |
 | ShiftStart     | **Verificación facial obligatoria** (liveness + match facial vía biometric-service propio, ONNX self-hosted). Bloquea turno si falla. |
 | ShiftDashboard | Online/offline toggle + ganancias en tiempo real                                                                                      |
-| TripIncoming   | Aceptar/rechazar con timeout 12s                                                                                                      |
+| Oferta entrante | Card en el dashboard (FixedOfferCard): aceptar/rechazar inline con timeout corto                                                     |
 | TripActive     | Navegación + cámara automática + **UI engañosa si pánico**                                                                            |
 | Earnings       | Diario / semanal / mensual con desglose                                                                                               |
 | Documents      | SOAT, licencia, tarjeta propiedad — alertas de vencimiento                                                                            |

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -24,7 +25,7 @@ import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { RadioOptionCard } from '../../../../shared/presentation/components/RadioOptionCard';
-import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { isNotFoundError, toErrorMessage } from '../../../../shared/presentation/errors';
 import {
   formatInt,
   formatPEN,
@@ -34,9 +35,19 @@ import {
 import { IconChevronLeft } from '../../../../shared/presentation/icons';
 import { LIMA_CENTER } from '../../../../shared/utils/geo';
 import { decodePolyline, decodePolylineToCoordinates } from '../../../../shared/utils/polyline';
+import {
+  EARNINGS_BREAKDOWN_QUERY_KEY,
+  EARNINGS_DAILY_QUERY_KEY,
+  EARNINGS_SUMMARY_QUERY_KEY,
+} from '../../../earnings/domain';
 import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import { ChatButton, useChatStore } from '../../../chat/presentation';
-import { isTripActive, parseTripStatus, type DriverTripStatus } from '../../domain';
+import {
+  isTripActive,
+  parseTripStatus,
+  upcomingManeuver,
+  type DriverTripStatus,
+} from '../../domain';
 import { useEnsureTripAccepted, useTrip, useTripActions, useTripRoute } from '../hooks/useTrips';
 import { useDriverWaypointProposal } from '../hooks/useDriverWaypointProposal';
 import { useTripPublisher } from '../hooks/useTripPublisher';
@@ -61,6 +72,40 @@ const CANCEL_REASON_KEYS = [
   'other',
 ] as const;
 type CancelReasonKey = (typeof CANCEL_REASON_KEYS)[number];
+
+/**
+ * Reintentos MANUALES de la confirmación ASSIGNED→ACCEPTED antes de declarar la oferta perdida.
+ * Cada intento ya sondea el estado 8 veces (EnsureTripAcceptedUseCase): si tras el intento inicial
+ * + 2 reintentos el viaje sigue sin ASSIGNED, la oferta murió — insistir es un bucle sin salida.
+ */
+const MAX_CONFIRM_RETRIES = 2;
+
+/**
+ * Terminales que pueden llegar ASINCRÓNICOS (socket `trip:update` o el poll de respaldo) mientras el
+ * conductor maneja: el viaje muere bajo sus pies sin que él haya tocado nada. COMPLETED queda afuera
+ * (tiene su propio cierre: botón al resumen TripComplete).
+ */
+const REMOTE_END_STATUSES = ['CANCELLED', 'EXPIRED', 'FAILED'] as const;
+type RemoteEndStatus = (typeof REMOTE_END_STATUSES)[number];
+
+/** Copy honesto por terminal remoto (claves i18n del banner "qué pasó" junto al botón Panel). */
+const REMOTE_END_COPY: Record<RemoteEndStatus, { title: string; body: string }> = {
+  CANCELLED: {
+    title: 'trips.endedRemotely.cancelledTitle',
+    body: 'trips.endedRemotely.cancelledBody',
+  },
+  EXPIRED: {
+    title: 'trips.endedRemotely.expiredTitle',
+    body: 'trips.endedRemotely.expiredBody',
+  },
+  FAILED: {
+    title: 'trips.endedRemotely.failedTitle',
+    body: 'trips.endedRemotely.failedBody',
+  },
+};
+
+const isRemoteEndStatus = (s: DriverTripStatus): s is RemoteEndStatus =>
+  (REMOTE_END_STATUSES as readonly DriverTripStatus[]).includes(s);
 
 export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Element => {
   const { t } = useTranslation();
@@ -104,8 +149,52 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
   const [childOpen, setChildOpen] = useState(false);
   const [childCode, setChildCode] = useState('');
   const [cashOpen, setCashOpen] = useState(false);
+  // Reintentos manuales de `ensureAccepted` ya consumidos (gatea la salida limpia de `offerGone`).
+  const [confirmRetries, setConfirmRetries] = useState(0);
 
   const status = trip.data ? parseTripStatus(trip.data.status) : 'UNKNOWN';
+
+  // Un error de acción pertenece a SU intento: si la máquina AVANZÓ (una transición posterior tuvo
+  // éxito), el banner viejo es ruido — se limpia. Sin esto, un 409 transitorio (p. ej. doble-tap del
+  // accept) dejaba "Algo salió mal" pegado durante TODO el viaje aunque todo siguiera andando.
+  useEffect(() => {
+    actions.arriving.reset();
+    actions.arrived.reset();
+    actions.start.reset();
+    actions.complete.reset();
+    actions.cancel.reset();
+    // Solo el STATUS dispara la limpieza (los objetos de mutación cambian de identidad por render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  // Terminal que llega ASINCRÓNICO (el pasajero canceló, venció, falló): el status cacheado cambia
+  // por socket/poll SIN mutación propia y la UI solo cambiaba el botón a "Panel" — el conductor que
+  // va manejando no se enteraba de que ya no tiene viaje. Se latchea el motivo para el banner. Los
+  // cierres INICIADOS ACÁ (cancel/complete del conductor) navegan afuera en su onSuccess y se filtran
+  // por la mutación local en vuelo/resuelta (leída en el render de la transición: el reset de arriba
+  // recién impacta en el render siguiente, no corrompe esta lectura).
+  const [remoteEnd, setRemoteEnd] = useState<RemoteEndStatus | null>(null);
+  const queryClient = useQueryClient();
+  const selfEnded =
+    actions.cancel.isPending ||
+    actions.cancel.isSuccess ||
+    actions.complete.isPending ||
+    actions.complete.isSuccess;
+  useEffect(() => {
+    if (isRemoteEndStatus(status) && !selfEnded) {
+      setRemoteEnd(status);
+      // Espejo del cierre PROPIO (`onTrip` de useTripActions): un terminal REMOTO también puede mover
+      // la plata (una cancelación post-accept genera compensación al conductor) y este camino no pasa
+      // por ninguna mutación → sin esto el "Neto de hoy" del dashboard quedaba stale tras una
+      // cancelación del pasajero (cero GET /earnings/* en el driver-bff, confirmado en log).
+      queryClient.invalidateQueries({ queryKey: EARNINGS_SUMMARY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: EARNINGS_BREAKDOWN_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: EARNINGS_DAILY_QUERY_KEY });
+    }
+    // Solo el STATUS dispara el latch: si dependiera de `selfEnded`, el reset de mutaciones de arriba
+    // re-correría el efecto con el guard ya en false y marcaría como remoto un cierre propio.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   // Parada propuesta por el pasajero (Lote C4): la propuesta entrante (socket) + el respond (POST). Solo
   // se ofrece en el viaje en curso (IN_PROGRESS), que es cuando el contrato permite proponer una parada.
@@ -135,8 +224,20 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
     [tripRoute],
   );
 
-  // Próxima maniobra = primer paso de la ruta (el server devuelve los pasos pendientes ordenados).
-  const nextStep = tripRoute?.steps[0];
+  // Próxima maniobra con distancia VIVA (contador GPS→punto de maniobra en cada tick, no el largo
+  // del tramo congelado entre polls). Semántica OSRM: la que viene es la de steps[1], ubicada al
+  // final de la geometría del paso actual (steps[0]). Derivación pura en el dominio (testeada).
+  const maneuver = useMemo(
+    () =>
+      tripRoute
+        ? upcomingManeuver(tripRoute.steps, driverPose?.point ?? null, (geometry) => {
+            const points = decodePolyline(geometry);
+            const end = points[points.length - 1];
+            return end ? { lat: end.latitude, lon: end.longitude } : null;
+          })
+        : null,
+    [tripRoute, driverPose?.point],
+  );
 
   // Destino para el fallback de navegación externa: último punto de la geometría completa.
   const externalDestination = useMemo(() => {
@@ -256,7 +357,14 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
   const isPreAccepted = status === 'REQUESTED' || status === 'MATCHING' || status === 'ASSIGNED';
   const confirming = isPreAccepted && (ensureAccepted.isPending || ensureAccepted.isIdle);
   const confirmFailed = isPreAccepted && (ensureAccepted.isError || ensureAccepted.isSuccess);
+  // La oferta ya murió: el viaje da 404 (no es suyo / no existe) o los reintentos manuales se
+  // agotaron sin ver ASSIGNED. Reintentar más es un bucle ciego sin salida — se ofrece volver al
+  // dashboard con el motivo honesto en vez del "Reintentar" infinito.
+  const offerGone =
+    confirmFailed &&
+    (isNotFoundError(ensureAccepted.error) || confirmRetries >= MAX_CONFIRM_RETRIES);
   const retryConfirm = () => {
+    setConfirmRetries((n) => n + 1);
     ensureAccepted.reset();
     triggeredRef.current = true;
     ensureMutate();
@@ -276,9 +384,13 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           topOverlay={
             // Solo el banner de la PRÓXIMA maniobra (cuando hay ruta). El estado/fase + métricas ahora
             // viven en el sheet (sin duplicar), y NO hay appbar: el mapa es el hero, full-bleed.
-            nextStep ? (
+            maneuver ? (
               <View style={[styles.maneuverWrap, { marginTop: insets.top + 8 }]}>
-                <ManeuverBanner step={nextStep} remaining={tripRoute?.steps.length} />
+                <ManeuverBanner
+                  step={maneuver.step}
+                  distanceMeters={maneuver.distanceMeters}
+                  remaining={tripRoute?.steps.length}
+                />
               </View>
             ) : undefined
           }
@@ -286,7 +398,9 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           <AppMap
             center={driverLocation ?? LIMA_CENTER}
             driver={driverLocation}
-            origin={tripRoute?.origin}
+            // Con el pasajero A BORDO el recojo ya quedó atrás: su pin se APAGA (el mapa comunica la
+            // fase — antes quedaba pintado todo el viaje aunque la polyline ya no pasara por ahí).
+            origin={status === 'IN_PROGRESS' ? undefined : tripRoute?.origin}
             destination={tripRoute?.destination}
             waypoints={tripRoute?.waypoints}
             routeCoordinates={routeCoordinates}
@@ -425,7 +539,19 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           {confirming ? (
             <Button label={t('trips.confirmingAssignment')} fullWidth loading disabled />
           ) : null}
-          {confirmFailed ? (
+          {/* Oferta perdida (404 o reintentos agotados): motivo honesto + salida limpia al dashboard
+              (mismo patrón Banner + Button del resto de la pantalla), en vez del reintento infinito. */}
+          {confirmFailed && offerGone ? (
+            <>
+              <Banner
+                tone="warn"
+                title={t('trips.offerGoneTitle')}
+                description={t('trips.offerGoneBody')}
+              />
+              <Button label={t('shift.dashboardTitle')} fullWidth onPress={finishToDashboard} />
+            </>
+          ) : null}
+          {confirmFailed && !offerGone ? (
             <Button label={t('common.retry')} fullWidth onPress={retryConfirm} />
           ) : null}
           {status === 'ACCEPTED' ? (
@@ -471,6 +597,15 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           {/* Cierre no accionable: si el viaje se COMPLETÓ (p. ej. estado llegado por socket), el botón
               lleva al resumen + rating (TripComplete); para otros cierres (cancelado/vencido/fallido) o
               UNKNOWN, vuelve directo al dashboard — nunca trabado. */}
+          {/* Cierre REMOTO (asincrónico, no iniciado por el conductor): decir QUÉ pasó junto al botón
+              "Panel" (mismo patrón Banner que offerGone), no solo cambiar el botón en silencio. */}
+          {remoteEnd ? (
+            <Banner
+              tone="warn"
+              title={t(REMOTE_END_COPY[remoteEnd].title)}
+              description={t(REMOTE_END_COPY[remoteEnd].body)}
+            />
+          ) : null}
           {!isTripActive(status) ? (
             <Button
               label={t('shift.dashboardTitle')}

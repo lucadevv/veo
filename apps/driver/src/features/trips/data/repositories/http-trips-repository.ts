@@ -1,5 +1,7 @@
+import { z } from 'zod';
 import type { HttpClient } from '@veo/api-client';
 import {
+  ApiError,
   driverOfferView,
   driverTripStateView,
   driverTripView,
@@ -26,6 +28,15 @@ import type {
   TripState,
 } from '../../domain';
 
+/**
+ * Validación LOCAL de la respuesta del accept de dispatch (passthrough sin contrato en
+ * `@veo/api-client`; el DTO real es `MatchResponseDto` del dispatch-service). Solo importa `outcome`:
+ * un 200 con outcome ≠ ACCEPTED (TIMEOUT/REJECTED de una oferta que ya murió) NO es un accept.
+ * `outcome` opcional a propósito: si el upstream cambia de forma, no rompemos el camino feliz —
+ * solo bloqueamos cuando el server DICE explícitamente que no quedó aceptada.
+ */
+const acceptOfferReply = z.object({ outcome: z.string().optional() });
+
 /** Implementación HTTP del `TripsRepository` contra el driver-bff. */
 export class HttpTripsRepository implements TripsRepository {
   constructor(private readonly http: HttpClient) {}
@@ -34,12 +45,20 @@ export class HttpTripsRepository implements TripsRepository {
     return this.http.get(`/dispatch/offers/${matchId}`, { schema: driverOfferView });
   }
 
-  // Las respuestas de aceptar/rechazar oferta son passthrough del dispatch-service (forma no
-  // contractualizada); no se validan ni se usan: basta con el 200 OK.
+  // Antes era passthrough ciego ("basta con el 200 OK"): con la oferta ya muerta, el 200 con
+  // outcome ≠ ACCEPTED navegaba igual al viaje y dejaba al conductor en el bucle de "reintentar"
+  // sin salida (ensureAccepted nunca ve ASSIGNED). Ahora ese caso es un error honesto: la card
+  // muestra su banner y NO navega.
   async acceptOffer(matchId: string): Promise<void> {
-    await this.http.post(`/dispatch/offers/${matchId}/accept`);
+    const reply = await this.http.post(`/dispatch/offers/${matchId}/accept`, {
+      schema: acceptOfferReply,
+    });
+    if (reply.outcome !== undefined && reply.outcome !== 'ACCEPTED') {
+      throw new ApiError(409, 'OFFER_NOT_AVAILABLE', 'La oferta ya no está disponible');
+    }
   }
 
+  // El reject sigue passthrough: su resultado no gatea ninguna navegación (basta el 200 OK).
   async rejectOffer(matchId: string): Promise<void> {
     await this.http.post(`/dispatch/offers/${matchId}/reject`);
   }

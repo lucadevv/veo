@@ -60,7 +60,6 @@ export type RootStackParamList = {
   /** Mis vehículos: lista + selección del activo (server) + alta de un vehículo nuevo (2do, moto). */
   Vehicles: undefined;
   Support: { tripId?: string } | undefined;
-  TripIncoming: { matchId: string; tripId: string };
   TripActive: { tripId: string };
   /**
    * Cierre del viaje: resumen de ganancia (tarifa − comisión = neto) + calificar al pasajero. Se llega

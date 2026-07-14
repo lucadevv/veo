@@ -27,6 +27,15 @@ export function isNetworkError(error: unknown): boolean {
 }
 
 /**
+ * true si el recurso no existe o no le pertenece al actor (404; el gate anti-IDOR de trips responde
+ * 404 —no 403— para un viaje ajeno). En el viaje recién aceptado significa que la oferta ya murió:
+ * reintentar la confirmación es un bucle ciego, corresponde la salida limpia al dashboard.
+ */
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
+/**
  * true si el error es un conflicto del servidor (409 `CONFLICT`). En el alta de vehículo lo emite fleet
  * cuando la placa ya existe ("Ya existe un vehículo con esa placa"). Como el backend es idempotente para
  * la placa PROPIA del conductor (un re-submit del mismo vehículo avanza), un 409 que llega a la app es

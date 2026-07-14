@@ -36,7 +36,6 @@ import {
   TripCompleteScreen,
   TripDetailScreen,
   TripHistoryScreen,
-  TripIncomingScreen,
 } from '../features/trips/presentation';
 import { BidsScreen } from '../features/bidding/presentation';
 import { EarningsScreen } from '../features/earnings/presentation';
@@ -265,11 +264,6 @@ export const RootNavigator = (): React.JSX.Element => {
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen name="Support" component={SupportScreen} />
-        <Stack.Screen
-          name="TripIncoming"
-          component={TripIncomingScreen}
-          options={{ gestureEnabled: false, animation: 'fade' }}
-        />
         <Stack.Screen
           name="TripActive"
           component={TripActiveScreen}

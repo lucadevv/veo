@@ -1,4 +1,3 @@
-export { TripIncomingScreen } from './screens/TripIncomingScreen';
 export { TripActiveScreen } from './screens/TripActiveScreen';
 export { TripCompleteScreen } from './screens/TripCompleteScreen';
 export { TripHistoryScreen } from './screens/TripHistoryScreen';

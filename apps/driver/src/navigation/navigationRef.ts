@@ -7,13 +7,6 @@ import type { RootStackParamList } from './types';
  */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-/** Navega a la pantalla de oferta entrante si el contenedor ya está montado. */
-export function navigateToIncoming(params: RootStackParamList['TripIncoming']): void {
-  if (navigationRef.isReady()) {
-    navigationRef.navigate('TripIncoming', params);
-  }
-}
-
 /** Navega al board de pujas abiertas (ping de PUJA por el socket) si el contenedor ya está montado. */
 export function navigateToBids(): void {
   if (navigationRef.isReady()) {

@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 
 /**
  * ADR-021 Fase J (J2) · Hook CANÓNICO de cuenta atrás del conductor — ÚNICO en toda la app (antes había
- * dos: `useCountdownMs` en bidding para epoch ms + un `useCountdown` local en TripIncomingScreen para ISO
- * string → "cerebro dividido", dos encodings, dos implementaciones espejo). Ahora TODOS los countdowns del
+ * dos: `useCountdownMs` en bidding para epoch ms + un `useCountdown` local para ISO string en la extinta
+ * TripIncomingScreen → "cerebro dividido", dos encodings, dos implementaciones espejo). Ahora TODOS los countdowns del
  * conductor (oferta FIXED "Viaje entrante", puja abierta, sheet de contraoferta) pasan por acá.
  *
  * Contrato ÚNICO: `targetMs` en epoch ms. El caller que tenga un ISO string (p.ej. el push FIXED) lo

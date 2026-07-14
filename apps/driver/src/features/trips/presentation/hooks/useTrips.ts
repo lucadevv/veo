@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -7,6 +9,11 @@ import {
 import type { GeoPoint, TripHistoryItem } from '@veo/api-client';
 import { useRepositories } from '../../../../core/di/useDi';
 import { SHIFT_STATE_QUERY_KEY } from '../../../shift/domain';
+import {
+  EARNINGS_BREAKDOWN_QUERY_KEY,
+  EARNINGS_DAILY_QUERY_KEY,
+  EARNINGS_SUMMARY_QUERY_KEY,
+} from '../../../earnings/domain';
 import {
   ACTIVE_TRIP_QUERY_KEY,
   TRIP_QUERY_PREFIX,
@@ -22,7 +29,10 @@ import {
   GetOfferUseCase,
   GetTripHistoryUseCase,
   GetTripRouteUseCase,
+  GetTripStateUseCase,
   GetTripUseCase,
+  isTripTerminal,
+  parseTripStatus,
   RejectOfferUseCase,
   StartTripUseCase,
   type CompleteTripInput,
@@ -73,14 +83,57 @@ export function useActiveTrip() {
   });
 }
 
-/** Query: viaje activo (lado conductor). Inactiva con `tripId` vacío (p. ej. sin viaje activo). */
+/**
+ * Query: viaje activo (lado conductor). Inactiva con `tripId` vacío (p. ej. sin viaje activo).
+ *
+ * `retry: 3` cubre la CARRERA post-accept: el gate anti-IDOR del BFF responde 404 si `GetTrip` corre
+ * ANTES de que el commit de la asignación fije el driverId — un tick después ya es 200. Sin retry, esa
+ * ventana de milisegundos tiraba la pantalla del viaje recién aceptado a "Algo salió mal" (visto en
+ * vivo). Tres reintentos con el backoff default (~1-4 s) la absorben; un 404 REAL (viaje ajeno) solo
+ * paga ese mismo backoff antes del error honesto.
+ */
+/** Clave de caché del estado ligero del viaje (poll de respaldo; mismo patrón que el pasajero). */
+export const tripStateQueryKey = (tripId: string) => ['trip', tripId, 'state'] as const;
+
+/** Cadencia del poll de respaldo de estado (espeja los 5 s del `useOfferBoard` del pasajero). */
+const TRIP_STATE_POLL_MS = 5_000;
+
 export function useTrip(tripId: string) {
   const { trips } = useRepositories();
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: tripQueryKey(tripId),
     queryFn: () => new GetTripUseCase(trips).execute(tripId),
     enabled: tripId.length > 0,
+    retry: 3,
   });
+
+  // Poll de RESPALDO del estado mientras el viaje sigue VIVO. El socket `/driver` es la vía primaria,
+  // pero si se pierde UN `trip:update` (zona muerta, túnel caído) nada re-sincroniza: el namespace no
+  // reemite snapshot y esta query no refetchea sola → el conductor quedaba congelado en ACCEPTED/ARRIVED
+  // stale para siempre (p. ej. ante una cancelación del pasajero). `GET /trips/:id/state` es barato y
+  // el poll se apaga solo al llegar a un estado terminal.
+  const cachedStatus = query.data ? parseTripStatus(query.data.status) : null;
+  const pollEnabled =
+    tripId.length > 0 && cachedStatus !== null && !isTripTerminal(cachedStatus);
+  const stateQuery = useQuery({
+    queryKey: tripStateQueryKey(tripId),
+    queryFn: () => new GetTripStateUseCase(trips).execute(tripId),
+    enabled: pollEnabled,
+    refetchInterval: pollEnabled ? TRIP_STATE_POLL_MS : false,
+  });
+
+  // Divergencia detectada (el poll vio un status que el detalle cacheado no tiene) → invalidar el
+  // detalle del viaje: la pantalla reacciona por el refetch igual que hoy ante un `trip:update`
+  // (incluida la salida al dashboard si el nuevo estado es terminal).
+  const polledStatus = stateQuery.data ? parseTripStatus(stateQuery.data.status) : null;
+  useEffect(() => {
+    if (polledStatus !== null && cachedStatus !== null && polledStatus !== cachedStatus) {
+      queryClient.invalidateQueries({ queryKey: tripQueryKey(tripId) });
+    }
+  }, [polledStatus, cachedStatus, tripId, queryClient]);
+
+  return query;
 }
 
 /** Clave de caché del historial paginado del conductor (una sola "lista infinita"). */
@@ -178,6 +231,12 @@ export function useTripRoute(tripId: string, enabled: boolean, from?: GeoPoint) 
     enabled,
     staleTime: 15_000,
     refetchInterval: enabled ? 15_000 : false,
+    // El `from` cuantizado vive EN la queryKey: manejando a velocidad normal la key cambia cada ~1 s
+    // (celda de ~11 m) y react-query la trata como query NUEVA → sin esto `data` era undefined durante
+    // CADA refetch y la ruta PARPADEABA en el mapa (desaparecía la polyline, el fit re-encuadraba, el
+    // banner de maniobra se caía). Con keepPreviousData la ruta anterior queda pintada hasta que llega
+    // la recalculada — el mapa nunca se queda sin ruta mientras navega.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -229,6 +288,20 @@ export function useTripActions(tripId: string) {
   const onTrip = (trip: Trip) => {
     queryClient.setQueryData(tripQueryKey(tripId), trip);
     queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
+    // La RUTA depende de la FASE (onboard ⇒ el recojo se cae de la geometría): cada transición la
+    // re-pide YA. Sin esto, tras "Iniciar viaje" el mapa seguía mostrando el tramo al recojo hasta el
+    // próximo poll de 15 s (o >11 m de movimiento). Prefijo sin posición: invalida TODAS las celdas.
+    queryClient.invalidateQueries({ queryKey: ['trip', tripId, 'route'] });
+    // La PLATA impacta recién al CERRARSE el viaje (completado; el cancelado puede generar cargo): el
+    // "Neto de hoy" del dashboard sale de earnings/summary y NADIE lo invalidaba tras completar → el
+    // conductor volvía al panel con el neto viejo hasta un remount. Se invalidan las TRES vistas de
+    // ganancias (resumen + desglose + serie diaria; mismo criterio que `onTipAdded`), solo en terminal
+    // para no refetchear ganancias en cada transición intermedia (el dashboard sigue montado bajo el stack).
+    if (isTripTerminal(parseTripStatus(trip.status))) {
+      queryClient.invalidateQueries({ queryKey: EARNINGS_SUMMARY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: EARNINGS_BREAKDOWN_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: EARNINGS_DAILY_QUERY_KEY });
+    }
   };
 
   const accept = useMutation({
