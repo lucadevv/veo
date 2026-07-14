@@ -4,8 +4,10 @@
  * `scheduled` de trip.scheduledFor (una reserva activada lo trae seteado), así que ctx.scheduled no aplica.
  */
 import type { LatLon } from '@veo/utils';
+import { createEnvelope } from '@veo/events';
+import { enqueueOutbox } from '@veo/database';
 import { PricingMode, TripStatus } from '@veo/shared-types';
-import { emitTripRequested } from '../trip-events';
+import { emitTripRequested, recordTripEvent, PRODUCER } from '../trip-events';
 import { calculateFirmFare } from '../domain/fare';
 import type { Prisma, Trip } from '../../generated/prisma';
 import type {
@@ -61,9 +63,16 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
   }
 
   /**
-   * FIXED · re-despacha tras el cancel del conductor: REASSIGNING + libera al conductor + re-emite
-   * trip.requested (mismo evento que la creación FIXED) para re-arrancar el matching secuencial. La tarifa
-   * fija NO cambia (BR-T01 inmutable). NO toca negotiationSeq/agreedFareCents (dominio puja, irrelevantes).
+   * FIXED · re-despacha tras el cancel del conductor: REASSIGNING + LIBERA al conductor cancelador +
+   * re-emite trip.requested (mismo evento que la creación FIXED) para re-arrancar el matching secuencial.
+   * La tarifa fija NO cambia (BR-T01 inmutable). NO toca negotiationSeq/agreedFareCents (dominio puja).
+   *
+   * La liberación va por `trip.reassigning` con `dispatchMode: 'FIXED'` — el MISMO evento que emite la
+   * PUJA, porque sus consumidores son transversales al modo: identity lo consume para ON_TRIP→AVAILABLE
+   * y dispatch para el hot-index release + conteo de la cancelación post-accept. Sin él (el seam roto
+   * original) el conductor quedaba ON_TRIP para SIEMPRE tras cancelar un FIJO → "turno inactivo" en loop.
+   * `dispatchMode: 'FIXED'` le dice a dispatch que NO re-abra el OfferBoard (el re-match acá es el
+   * trip.requested secuencial; un board de puja fantasma sería doble oferta al conductor).
    */
   async reassign(
     tx: TxClient,
@@ -73,6 +82,7 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
   ): Promise<Trip> {
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
     const destination: LatLon = { lat: trip.destLat, lon: trip.destLon };
+    const cancelledDriverId = trip.driverId;
     const next = await tx.trip.update({
       where: { id: trip.id },
       data: {
@@ -82,6 +92,39 @@ export class FixedDispatchStrategy implements DispatchModeStrategy {
         cancellationReason: reason ?? 'driver_cancelled',
       },
     });
+    await recordTripEvent(tx, trip.id, 'trip.reassigning', {
+      from: trip.status,
+      previousDriverId: cancelledDriverId,
+      reassignCount: nextReassignCount,
+      reason: 'driver_cancelled',
+    });
+    await enqueueOutbox(
+      tx,
+      createEnvelope({
+        eventType: 'trip.reassigning',
+        producer: PRODUCER,
+        payload: {
+          tripId: trip.id,
+          // El conductor que canceló: identity lo devuelve a AVAILABLE y dispatch lo libera del hot-index.
+          driverId: cancelledDriverId ?? '',
+          passengerId: trip.passengerId,
+          vehicleType: trip.vehicleType,
+          category: trip.category ?? undefined,
+          origin,
+          destination,
+          distanceMeters: trip.distanceMeters,
+          durationSeconds: trip.durationSeconds,
+          // FIXED no puja: la "oferta" es la tarifa firme (el schema exige bidCents; dispatch no lo usa
+          // porque con dispatchMode FIXED no re-abre board).
+          bidCents: trip.fareCents,
+          reason: 'driver_cancelled',
+          // FIXED no negocia (el row queda en 0); el schema exige un ciclo POSITIVO — valor de forma.
+          negotiationSeq: trip.negotiationSeq + 1,
+          dispatchMode: 'FIXED',
+        },
+      }),
+      trip.id,
+    );
     await emitTripRequested(tx, next, origin, destination);
     return next;
   }

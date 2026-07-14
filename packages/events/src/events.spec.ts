@@ -432,6 +432,16 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
         reason: 'driver_cancelled',
       }).success,
     ).toBe(false);
+    // dispatchMode (seam FIXED): opcional (ausente ⇒ PUJA legacy), acepta ambos modos, rechaza otros.
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'FIXED' }).success,
+    ).toBe(true);
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'PUJA' }).success,
+    ).toBe(true);
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'CARPOOL' }).success,
+    ).toBe(false);
   });
 
   it('pricing.mode_schedule_updated: acepta snapshot válido, rechaza mode/dayMask/minuto fuera de rango (ADR 011)', () => {

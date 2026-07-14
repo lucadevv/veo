@@ -628,6 +628,13 @@ export const tripReassigning = z.object({
   /// incrementó al pasar a REASSIGNING). dispatch la guarda en el board re-abierto y la estampa en el
   /// `dispatch.offer_accepted` del re-match, cerrando la ventana a redeliveries del ciclo anterior.
   negotiationSeq: z.number().int().positive(),
+  /// Modo de despacho del viaje (ADR 011). dispatch SOLO re-abre el OfferBoard para PUJA: en FIXED el
+  /// re-match lo re-arranca el `trip.requested` que la estrategia emite junto a este evento (un board de
+  /// puja fantasma sería doble oferta al conductor). La liberación del conductor cancelador (hot-index +
+  /// identity ON_TRIP→AVAILABLE) y el conteo de la cancelación aplican a AMBOS modos — ese era el seam
+  /// roto: FIXED no emitía reassigning y el conductor quedaba ON_TRIP para siempre.
+  /// Opcional/compat N-2: ausente ⇒ PUJA (comportamiento histórico).
+  dispatchMode: pricingMode.optional(),
 });
 
 /* ── pricing ── (ADR 011 · switch PUJA↔FIJO controlado por admin) */

@@ -124,6 +124,8 @@ export class PujaDispatchStrategy implements DispatchModeStrategy {
           reason: 'driver_cancelled',
           // H13 — dispatch persiste este seq en el board re-abierto y lo estampa en offer_accepted.
           negotiationSeq: nextNegotiationSeq,
+          // PUJA explícito (= el default legacy): dispatch re-abre el OfferBoard con este evento.
+          dispatchMode: 'PUJA',
         },
       }),
       trip.id,

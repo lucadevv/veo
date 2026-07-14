@@ -1702,7 +1702,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
   });
 
   // ADR 011 §1.2/§4 · la reasignación respeta el dispatchMode CONGELADO del viaje (no re-resuelve).
-  it('FIXED · driver cancela post-accept → REASSIGNING + emite trip.requested (NO trip.reassigning)', async () => {
+  it('FIXED · driver cancela post-accept → REASSIGNING + trip.requested + trip.reassigning (dispatchMode FIXED, libera al conductor)', async () => {
     const prisma = makePrisma(
       buildTrip({
         status: TripStatus.ACCEPTED,
@@ -1714,9 +1714,17 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
     const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
-    // FIXED re-despacha el flujo de tarifa fija: trip.requested, NO la puja (trip.reassigning).
+    // FIXED re-despacha por trip.requested (matching secuencial) Y emite trip.reassigning con
+    // dispatchMode FIXED — el evento transversal que LIBERA al conductor cancelador (identity
+    // ON_TRIP→AVAILABLE + hot-index) SIN que dispatch re-abra un board de puja (lo gatea el modo).
+    // Sin él (seam roto original) el conductor quedaba ON_TRIP para siempre tras cancelar un FIJO.
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.reassigning')).toBe(false);
+    const reassigning = prisma._outbox.find((e) => e.eventType === 'trip.reassigning');
+    expect(reassigning?.envelope.payload).toMatchObject({
+      driverId: 'drv-1',
+      dispatchMode: 'FIXED',
+      reason: 'driver_cancelled',
+    });
     // El conductor que canceló se desvincula para el re-match.
     expect(prisma._store?.driverId).toBeNull();
     // La tarifa fija NO cambia (BR-T01 inmutable).
