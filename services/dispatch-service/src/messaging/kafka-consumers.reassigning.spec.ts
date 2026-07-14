@@ -85,16 +85,26 @@ function build(opts?: { countThrows?: Error }) {
 const VALID_TRIP_ID = '22222222-2222-2222-2222-222222222222';
 const CANCEL_DRIVER_ID = '33333333-3333-3333-3333-333333333333';
 
-function reassigningEnvelope(overrides?: { tripId?: string; driverId?: string }) {
+function reassigningEnvelope(overrides?: {
+  tripId?: string;
+  driverId?: string;
+  dispatchMode?: 'FIXED' | 'PUJA';
+}) {
   return createEnvelope({
     eventType: 'trip.reassigning',
     producer: 'trip-service',
     payload: {
       tripId: overrides?.tripId ?? VALID_TRIP_ID,
       driverId: overrides?.driverId ?? CANCEL_DRIVER_ID,
+      ...(overrides?.dispatchMode ? { dispatchMode: overrides.dispatchMode } : {}),
       passengerId: 'pax-1',
       vehicleType: VehicleType.CAR,
       origin: { lat: -12.0464, lon: -77.0428 },
+      // Destino + distancia/duración: obligatorios desde el enriquecimiento del evento (el board
+      // re-abierto los conserva). El spec viejo pasaba solo porque el dist de @veo/events estaba stale.
+      destination: { lat: -12.1211, lon: -77.0301 },
+      distanceMeters: 4200,
+      durationSeconds: 900,
       bidCents: 900,
       reason: 'driver_cancelled' as const,
       negotiationSeq: 2,
@@ -124,6 +134,24 @@ describe('KafkaConsumersService · trip.reassigning (robustez #4)', () => {
       // H13 — el consumidor propaga el ciclo de negociación del evento al board re-abierto.
       negotiationSeq: 2,
     });
+
+    await svc.onModuleDestroy();
+  });
+
+  it('dispatchMode FIXED: libera al conductor y CUENTA la cancelación, pero NO re-abre board de puja', async () => {
+    // El re-match FIXED lo re-arranca el trip.requested que la estrategia emite junto a este evento;
+    // re-abrir el OfferBoard acá sería doble oferta al conductor (board de puja fantasma). La liberación
+    // (identity/hot-index) y el conteo post-accept SÍ son transversales al modo — ese era el seam roto:
+    // FIXED no emitía reassigning y el conductor cancelador quedaba ON_TRIP para siempre.
+    const { svc, released, reopened, windowCalls } = build();
+    await svc.onModuleInit();
+
+    await handlers.get('trip.reassigning')?.(reassigningEnvelope({ dispatchMode: 'FIXED' }));
+
+    expect(released).toEqual([CANCEL_DRIVER_ID]); // liberado (vuelve al pool elegible)
+    expect(reopened).toHaveLength(0); // SIN board de puja para un viaje FIJO
+    expect(windowCalls).toHaveLength(1); // la cancelación post-accept cuenta igual
+    expect(windowCalls[0]).toMatchObject({ driverId: CANCEL_DRIVER_ID, tripId: VALID_TRIP_ID });
 
     await svc.onModuleDestroy();
   });

@@ -188,23 +188,28 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
     // el board YA se re-abrió; el retry de Kafka re-corre AMBOS (reopen idempotente; conteo idempotente por
     // (driverId, tripId), no re-cuenta). Operan sobre Redis (key string, tolera cualquier id).
     if (p.driverId) await this.dispatch.releaseDriver(p.driverId);
-    await this.offerBoard.reopenBoard({
-      tripId: p.tripId,
-      driverId: p.driverId,
-      passengerId: p.passengerId,
-      vehicleType: p.vehicleType,
-      // B5-3 — re-persiste el tier en el board re-abierto para enforcar el TIER en el re-match.
-      category: p.category,
-      origin: p.origin,
-      // Destino + distancia/duración: el board re-abierto los conserva para que el conductor del re-match
-      // vea pickup→destino + distancia igual que la puja original (trip.reassigning ya los transporta).
-      destination: p.destination,
-      distanceMeters: p.distanceMeters,
-      durationSeconds: p.durationSeconds,
-      bidCents: p.bidCents,
-      // H13 — el seq del NUEVO ciclo de la reasignación: el board re-abierto lo estampa en offer_accepted.
-      negotiationSeq: p.negotiationSeq,
-    });
+    // El OfferBoard es dominio PUJA: en FIXED el re-match lo re-arranca el trip.requested que la estrategia
+    // emite junto a este evento — re-abrir un board acá sería DOBLE oferta al conductor (board fantasma).
+    // La liberación (arriba) y el conteo (abajo) sí son transversales al modo. Ausente ⇒ PUJA (compat N-2).
+    if (p.dispatchMode !== 'FIXED') {
+      await this.offerBoard.reopenBoard({
+        tripId: p.tripId,
+        driverId: p.driverId,
+        passengerId: p.passengerId,
+        vehicleType: p.vehicleType,
+        // B5-3 — re-persiste el tier en el board re-abierto para enforcar el TIER en el re-match.
+        category: p.category,
+        origin: p.origin,
+        // Destino + distancia/duración: el board re-abierto los conserva para que el conductor del re-match
+        // vea pickup→destino + distancia igual que la puja original (trip.reassigning ya los transporta).
+        destination: p.destination,
+        distanceMeters: p.distanceMeters,
+        durationSeconds: p.durationSeconds,
+        bidCents: p.bidCents,
+        // H13 — el seq del NUEVO ciclo de la reasignación: el board re-abierto lo estampa en offer_accepted.
+        negotiationSeq: p.negotiationSeq,
+      });
+    }
     // Recién AHORA, con el board ya re-abierto, suma esta cancelación POST-accept a la MISMA ventana rolling 24h
     // de la auto-suspensión. El guard `p.driverId` cubre el borde del emisor (manda '' si no había conductor
     // asignado — imposible POST-accept, pero defensa en profundidad: sin id de perfil no se puede atribuir).
