@@ -5,7 +5,8 @@
  * conducía. Un viaje atascado en REQUESTED (sin conductor), ASSIGNED/ACCEPTED/ARRIVING/ARRIVED (el
  * conductor no aceptó o nunca recogió) o IN_PROGRESS (app del conductor caída) se quedaba ahí PARA
  * SIEMPRE (agujero negro). Este cron barre periódicamente y los lleva a su terminal:
- *   - Pre-recojo vencido → EXPIRED.
+ *   - Pre-recojo SIN aceptación (REQUESTED/ASSIGNED/REASSIGNING) vencido → EXPIRED.
+ *   - Post-accept (ACCEPTED/ARRIVING/ARRIVED) vencido → FAILED (la máquina no permite EXPIRED ahí).
  *   - IN_PROGRESS vencido (holgura generosa) → FAILED (viaje abandonado).
  *
  * Espeja el patrón de `scheduled-trips.scheduler.ts` (mismo idiom @Cron, mismo wiring de módulo, la

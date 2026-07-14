@@ -8,7 +8,10 @@
  * Este módulo decide, dado un estado no-terminal y la antigüedad de su última actividad, a qué
  * terminal de fallo debe llevarse (o ninguno si aún no vence). Es model-agnóstico a propósito: no
  * conoce dispatch ni puja; solo umbrales temporales por familia de estado. La transición real la
- * valida `assertTransition` (que ya permite estos → EXPIRED/FAILED).
+ * valida `assertTransition` — y la máquina NO permite EXPIRED desde los post-accept
+ * (ACCEPTED/ARRIVING/ARRIVED: su único terminal de fallo es FAILED), así que cada target de este
+ * módulo DEBE ser una transición válida o el sweeper lanzaría y el viaje quedaría estancado para
+ * siempre (el spec de dominio lo asegura con canTransition sobre la máquina real).
  */
 import { TripStatus } from '@veo/shared-types';
 
@@ -19,26 +22,34 @@ export type StalledTarget = typeof TripStatus.EXPIRED | typeof TripStatus.FAILED
 export interface WatchdogThresholds {
   /** REQUESTED sin conductor: vence a EXPIRED. */
   requestedMs: number;
-  /** Pre-recojo ya asignado (ASSIGNED/ACCEPTED/ARRIVING/ARRIVED): vence a EXPIRED. */
+  /** Pre-recojo (ASSIGNED/REASSIGNING → EXPIRED; ACCEPTED/ARRIVING/ARRIVED → FAILED). */
   prePickupMs: number;
   /** IN_PROGRESS abandonado: vence a FAILED. */
   inProgressMs: number;
 }
 
 /**
- * Estados pre-recojo (ya asignado un conductor pero el viaje aún no inició). Estancarse aquí
- * significa que el conductor no aceptó o nunca llegó al recojo → EXPIRED.
- *
- * REASSIGNING se trata como pre-recojo (robustez #4): tras una cancelación del conductor el viaje re-abre
- * la puja; si NADIE oferta tras la re-apertura, queda atascado igual que un REQUESTED sin match. El
- * watchdog lo barre con el umbral pre-recojo → EXPIRED (el pasajero recibe la notificación y re-puja).
+ * Pre-recojo SIN compromiso del conductor: ASSIGNED (oferta enviada, nadie aceptó) y REASSIGNING
+ * (re-puja abierta sin ofertas, robustez #4 — igual que un REQUESTED sin match). Estancarse aquí es
+ * "expiró sin aceptación" → EXPIRED (la máquina solo permite EXPIRED desde estos dos pre-recojo; el
+ * pasajero recibe la notificación y puede re-pujar).
  */
-const PRE_PICKUP_ASSIGNED: ReadonlySet<TripStatus> = new Set([
+const PRE_PICKUP_UNACCEPTED: ReadonlySet<TripStatus> = new Set([
   TripStatus.ASSIGNED,
+  TripStatus.REASSIGNING,
+]);
+
+/**
+ * Pre-recojo CON conductor comprometido (ya aceptó): ACCEPTED/ARRIVING/ARRIVED. Estancarse aquí NO es
+ * "expiró sin oferta" — hubo un conductor comprometido que nunca concretó el recojo → FAILED. Además
+ * la máquina de estados NO permite EXPIRED desde estos tres (su único terminal de fallo es FAILED):
+ * proponer EXPIRED hacía que assertTransition lanzara en cada barrido y el viaje quedara estancado
+ * para siempre.
+ */
+const PRE_PICKUP_COMMITTED: ReadonlySet<TripStatus> = new Set([
   TripStatus.ACCEPTED,
   TripStatus.ARRIVING,
   TripStatus.ARRIVED,
-  TripStatus.REASSIGNING,
 ]);
 
 /**
@@ -62,14 +73,15 @@ export const WATCHED_STATES: readonly TripStatus[] = [
 /** Umbral aplicable a un estado vigilado (ms). */
 function thresholdFor(status: TripStatus, t: WatchdogThresholds): number | null {
   if (status === TripStatus.REQUESTED) return t.requestedMs;
-  if (PRE_PICKUP_ASSIGNED.has(status)) return t.prePickupMs;
+  if (PRE_PICKUP_UNACCEPTED.has(status) || PRE_PICKUP_COMMITTED.has(status)) return t.prePickupMs;
   if (status === TripStatus.IN_PROGRESS) return t.inProgressMs;
   return null; // no vigilado
 }
 
 /**
  * Decide a qué terminal de fallo debe transicionar un viaje estancado, o `null` si todavía no vence
- * (o el estado no se vigila). Pre-recojo → EXPIRED; en curso → FAILED.
+ * (o el estado no se vigila). Sin conductor comprometido (REQUESTED/ASSIGNED/REASSIGNING) → EXPIRED;
+ * con conductor comprometido (ACCEPTED/ARRIVING/ARRIVED) o en curso → FAILED.
  *
  * @param status    estado actual del viaje.
  * @param lastActivity  última actividad (updatedAt): marca del último cambio del viaje.
@@ -86,5 +98,7 @@ export function resolveStalledTarget(
   if (threshold === null) return null;
   const ageMs = now.getTime() - lastActivity.getTime();
   if (ageMs < threshold) return null; // aún fresco
-  return status === TripStatus.IN_PROGRESS ? TripStatus.FAILED : TripStatus.EXPIRED;
+  return status === TripStatus.IN_PROGRESS || PRE_PICKUP_COMMITTED.has(status)
+    ? TripStatus.FAILED
+    : TripStatus.EXPIRED;
 }

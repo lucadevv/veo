@@ -38,7 +38,8 @@ export class TripWatchdogService {
   }
 
   /**
-   * Lleva UN viaje estancado a su terminal de fallo (EXPIRED pre-recojo / FAILED en curso) en UNA
+   * Lleva UN viaje estancado a su terminal de fallo (EXPIRED sin conductor comprometido / FAILED
+   * post-accept y en curso) en UNA
    * transacción: status + trip_event + outbox (trip.expired | trip.failed) para que downstream
    * reaccione (notificar al pasajero; payment anula/omite cobro). La invoca el TripWatchdogScheduler.
    *
@@ -55,7 +56,9 @@ export class TripWatchdogService {
     if (!trip) return null;
     const target = resolveStalledTarget(trip.status, trip.updatedAt, now, thresholds);
     if (target === null) return null; // ya no estancado / ya terminal / aún fresco
-    assertTransition(trip.status, target); // la guarda ya permite estos → EXPIRED/FAILED
+    // Cinturón: el dominio SOLO propone targets que la máquina permite (candado en el spec de
+    // dominio vía canTransition); si esto lanza, resolveStalledTarget y la máquina divergieron.
+    assertTransition(trip.status, target);
 
     const staleMinutes = Math.floor((now.getTime() - trip.updatedAt.getTime()) / 60000);
     const eventType = target === TripStatus.EXPIRED ? 'trip.expired' : 'trip.failed';
