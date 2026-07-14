@@ -917,6 +917,14 @@ export const tripActiveView = z.object({
    * debe caer en 'noDriver', no en la re-puja).
    */
   dispatchMode: pricingMode.nullable().optional(),
+  /**
+   * Tier SOLICITADO del viaje (CAR | MOTO), derivado de la oferta al crear (ADR 013). OPTIONAL +
+   * nullable por compat N-2 (BFF/trip-service viejos no lo emiten). Es la fuente de verdad del
+   * `activeTripVehicleType` en la CREACIÓN Y la REHIDRATACIÓN: mata la dependencia del snapshot MMKV
+   * local (que fallaba en la adopción por 409 y cross-device → la moto se pintaba como auto). Sin el
+   * campo, la app degrada al glyph de auto (comportamiento histórico).
+   */
+  vehicleType: mobileVehicleType.nullable().optional(),
   driver: tripDriverView.nullable(),
   vehicle: tripVehicleView.nullable(),
   /**
@@ -1102,9 +1110,9 @@ export function markNotificationRead(
 }
 
 /** PATCH /notifications/read-all → marca TODAS mis notificaciones como leídas. Devuelve el conteo. */
-export function markAllNotificationsRead(
-  http: { patch<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T> },
-): Promise<MarkAllReadResult> {
+export function markAllNotificationsRead(http: {
+  patch<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T>;
+}): Promise<MarkAllReadResult> {
   return http.patch<MarkAllReadResult>('/notifications/read-all', { schema: markAllReadResult });
 }
 
@@ -1128,9 +1136,9 @@ export const notificationPrefs = z.object({
 export type NotificationPrefs = z.infer<typeof notificationPrefs>;
 
 /** GET /notification-prefs → mis preferencias (el server devuelve defaults si nunca guardé). */
-export function getNotificationPrefs(
-  http: { get<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T> },
-): Promise<NotificationPrefs> {
+export function getNotificationPrefs(http: {
+  get<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T>;
+}): Promise<NotificationPrefs> {
   return http.get<NotificationPrefs>('/notification-prefs', { schema: notificationPrefs });
 }
 

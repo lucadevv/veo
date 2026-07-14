@@ -275,16 +275,42 @@ export class TripsService {
    *
    * Los MARKERS (origin/destination/waypoints) son SIEMPRE los del viaje, intactos.
    *
+   * `leg=pickup` (fase "conductor viniendo", 2026-07-14): el pasajero quiere ver POR DÓNDE VIENE el
+   * conductor, no el overview del viaje. Computa el tramo VIVO `conductor → recojo` con el facade
+   * @veo/maps desde la última ubicación proyectada por RealtimeStateService (driver.location_updated).
+   * Sin ubicación todavía → ruta VACÍA honesta (polyline '', misma degradación que el fallback
+   * pre-recojo: el app no dibuja nada y el próximo poll la trae; un 404 acá haría ciclar el poll del
+   * cliente por estados de error espurios). Steps vacíos: es un overview del pasajero, no navegación.
+   * El leg DEFAULT (sin query) sigue sirviendo la canónica persistida — comportamiento previo intacto.
+   *
    * ANTI-IDOR: la ruta expone ubicaciones EXACTAS (PII, Ley 29733) → se verifica la pertenencia del
    * viaje al pasajero autenticado ANTES de servir/calcular nada (mismo patrón que getTripDetail).
    */
-  async route(user: AuthenticatedUser, tripId: string): Promise<TripRouteView> {
+  async route(user: AuthenticatedUser, tripId: string, leg?: 'pickup'): Promise<TripRouteView> {
     const trip = await this.tripRest.get<TripResource>(`/trips/${tripId}`, { identity: user });
     if (trip.passengerId !== user.userId) {
       throw new ForbiddenError('El viaje no pertenece al pasajero');
     }
 
     const waypoints = trip.waypoints ?? [];
+    if (leg === 'pickup') {
+      const pickupFrom = this.liveState.getLocation(tripId)?.point;
+      const pickupRoute = pickupFrom
+        ? // Tramo de acercamiento VIVO: conductor → recojo (sin paradas ni destino — eso es la canónica).
+          await this.maps.routeWithSteps(pickupFrom, trip.origin, [])
+        : // Sin ping del conductor aún: ruta VACÍA honesta (el app dibuja solo marker + pin de recojo).
+          { polyline: '', distanceMeters: 0, durationSeconds: 0 };
+      return {
+        polyline: pickupRoute.polyline,
+        distanceMeters: pickupRoute.distanceMeters,
+        durationSeconds: pickupRoute.durationSeconds,
+        // Overview del pasajero: sin navegación turn-by-turn (misma decisión que la canónica).
+        steps: [],
+        origin: trip.origin,
+        destination: trip.destination,
+        waypoints,
+      };
+    }
     // Ruta canónica persistida por trip-service: se sirve TAL CUAL, con su distancia/duración
     // persistidas (cero recomputo → una sola verdad para todos los consumidores del viaje).
     if (trip.routePolyline) {

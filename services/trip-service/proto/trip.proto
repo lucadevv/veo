@@ -198,6 +198,11 @@ message TripReply {
   // Modo de despacho CONGELADO del viaje (FIXED|PUJA · enum PricingMode como string). resolve-once-persist
   // (ADR-011): se fija en la creación y solo flipea a PUJA en un re-bid. '' solo en el EMPTY_TRIP (no hallado).
   string dispatch_mode = 25;
+  // Tier SOLICITADO del viaje (CAR|MOTO · enum VehicleType como string), derivado de la oferta al crear
+  // (ADR 013). El controller de trip-service YA lo emitía (toReply), pero sin este campo declarado el
+  // wire lo DESCARTABA (unknown field) → el BFF nunca lo veía y el pasajero pintaba una moto como auto
+  // al rehidratar. '' solo en el EMPTY_TRIP (el BFF lo re-mapea a null).
+  string vehicle_type = 26;
 }
 
 // Punto geográfico del viaje (lat/lon). Reusado por las paradas intermedias del TripReply.

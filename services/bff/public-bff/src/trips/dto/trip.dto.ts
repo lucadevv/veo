@@ -5,6 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsLatitude,
@@ -223,6 +224,23 @@ export class TripHistoryQueryDto {
   @IsInt()
   @Min(1)
   limit?: number;
+}
+
+/**
+ * Query de la ruta del viaje (GET /trips/:id/route?leg=). Sin `leg` (default) se sirve la ruta CANÓNICA
+ * persistida (origen→paradas→destino) — comportamiento previo intacto. `leg=pickup` pide el TRAMO DE
+ * ACERCAMIENTO vivo (conductor→recojo) para el mapa del pasajero en las fases pre-recojo.
+ */
+export class TripRouteQueryDto {
+  @ApiPropertyOptional({
+    enum: ['pickup'],
+    description:
+      'Tramo pedido. `pickup` = conductor→recojo desde la última ubicación viva (fases pre-recojo); ' +
+      'omitir = ruta canónica persistida del viaje.',
+  })
+  @IsOptional()
+  @IsIn(['pickup'])
+  leg?: 'pickup';
 }
 
 /** Recurso de viaje tal como lo devuelve trip-service en los comandos REST. */

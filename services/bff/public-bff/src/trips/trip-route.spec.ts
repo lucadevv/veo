@@ -55,7 +55,12 @@ function makeService(opts: {
     distanceMeters: 1200,
     durationSeconds: 300,
     steps: [
-      { instruction: 'Inicia el recorrido', distanceMeters: 1200, maneuver: 'depart', geometryPolyline: 'p1' },
+      {
+        instruction: 'Inicia el recorrido',
+        distanceMeters: 1200,
+        maneuver: 'depart',
+        geometryPolyline: 'p1',
+      },
     ],
   });
   const stub = {} as unknown as GrpcServiceClient;
@@ -78,7 +83,8 @@ function makeService(opts: {
     {} as unknown as DriverEnrichmentService,
     {} as unknown as DispatchService,
     {
-      getLocation: () => (opts.driverAt ? { point: opts.driverAt, at: '2026-07-13T00:00:00Z' } : undefined),
+      getLocation: () =>
+        opts.driverAt ? { point: opts.driverAt, at: '2026-07-13T00:00:00Z' } : undefined,
     } as never, // RealtimeStateService
   );
   return { svc, routeWithSteps, get };
@@ -174,5 +180,61 @@ describe('TripsService.route — FALLBACK por fase (viaje SIN ruta persistida)',
     });
     await expect(svc.route(user, 'trip-1')).rejects.toMatchObject({ name: 'ForbiddenError' });
     expect(routeWithSteps).not.toHaveBeenCalled();
+  });
+});
+
+describe('TripsService.route — leg=pickup (tramo de acercamiento conductor→recojo)', () => {
+  it('con ubicación viva: computa conductor → recojo (sin paradas), IGNORANDO la canónica persistida', async () => {
+    const { svc, routeWithSteps } = makeService({
+      status: 'ACCEPTED',
+      driverAt: DRIVER_AT,
+      waypoints: [WAYPOINT],
+      routePolyline: 'canonica_persistida',
+    });
+    const view = await svc.route(user, 'trip-1', 'pickup');
+    // El tramo pickup NO lleva las paradas del viaje: es solo el acercamiento al recojo.
+    expect(routeWithSteps).toHaveBeenCalledWith(DRIVER_AT, ORIGIN, []);
+    expect(view.polyline).toBe('poly');
+    // Overview del pasajero: sin navegación turn-by-turn aunque el facade la devuelva.
+    expect(view.steps).toEqual([]);
+    // Los markers son SIEMPRE los del viaje.
+    expect(view.origin).toEqual(ORIGIN);
+    expect(view.destination).toEqual(DESTINATION);
+    expect(view.waypoints).toEqual([WAYPOINT]);
+  });
+
+  it('SIN ubicación del conductor: ruta VACÍA honesta (el app no dibuja; el próximo poll la trae)', async () => {
+    const { svc, routeWithSteps } = makeService({
+      status: 'ACCEPTED',
+      routePolyline: 'canonica_persistida',
+    });
+    const view = await svc.route(user, 'trip-1', 'pickup');
+    expect(routeWithSteps).not.toHaveBeenCalled();
+    expect(view.polyline).toBe('');
+    expect(view.distanceMeters).toBe(0);
+    expect(view.steps).toEqual([]);
+  });
+
+  it('anti-IDOR: leg=pickup de un viaje ajeno → Forbidden sin calcular nada', async () => {
+    const { svc, routeWithSteps } = makeService({
+      status: 'ACCEPTED',
+      passengerId: 'usr-OTRO',
+      driverAt: DRIVER_AT,
+    });
+    await expect(svc.route(user, 'trip-1', 'pickup')).rejects.toMatchObject({
+      name: 'ForbiddenError',
+    });
+    expect(routeWithSteps).not.toHaveBeenCalled();
+  });
+
+  it('el leg default (sin query) sigue sirviendo la canónica persistida — sin regresión', async () => {
+    const { svc, routeWithSteps } = makeService({
+      status: 'ACCEPTED',
+      driverAt: DRIVER_AT,
+      routePolyline: 'canonica_persistida',
+    });
+    const view = await svc.route(user, 'trip-1');
+    expect(routeWithSteps).not.toHaveBeenCalled();
+    expect(view.polyline).toBe('canonica_persistida');
   });
 });

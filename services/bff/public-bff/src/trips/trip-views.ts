@@ -88,6 +88,14 @@ export interface TripDetailView {
    * (fail-safe: la app degrada al comportamiento PUJA histórico, nunca rompe el parseo).
    */
   dispatchMode: 'PUJA' | 'FIXED' | null;
+  /**
+   * Tier SOLICITADO del viaje (CAR|MOTO), derivado de la oferta al crear (ADR 013). La app lo usa para
+   * pintar el vehículo CORRECTO (marker del mapa + animación del sheet) también al REHIDRATAR un viaje
+   * (antes solo lo traía el POST /trips → un relaunch o la adopción por 409 caían al glyph de auto).
+   * `null` ante un valor fuera de contrato o un trip-service con proto viejo (fail-safe: la app degrada
+   * al auto, comportamiento histórico).
+   */
+  vehicleType: 'CAR' | 'MOTO' | null;
   driver: TripDriverView | null;
   vehicle: TripVehicleView | null;
   /**
@@ -233,6 +241,9 @@ export function buildTripDetail(
     // Modo congelado (ADR-011). Fuera de contrato ('' del EMPTY_TRIP u otro drift) → null, nunca lanza.
     dispatchMode:
       trip.dispatchMode === 'PUJA' || trip.dispatchMode === 'FIXED' ? trip.dispatchMode : null,
+    // Tier solicitado (ADR 013). Fuera de contrato ('' / proto viejo sin el campo) → null, nunca lanza.
+    vehicleType:
+      trip.vehicleType === 'CAR' || trip.vehicleType === 'MOTO' ? trip.vehicleType : null,
     driver: buildDriverView(driver, aggregate, tripStats),
     vehicle: buildVehicleView(vehicle),
     myRatingStars,

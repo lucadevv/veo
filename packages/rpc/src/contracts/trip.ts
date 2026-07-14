@@ -50,6 +50,12 @@ export interface TripReply {
    * (ADR-011). '' solo en el EMPTY_TRIP (viaje no hallado); el BFF lo re-mapea a null.
    */
   dispatchMode: string;
+  /**
+   * Tier SOLICITADO del viaje (CAR|MOTO · enum VehicleType como string), derivado de la oferta al crear
+   * (ADR 013). OPTIONAL en el tipo (compat: un trip-service con el proto viejo no lo emite y los fixtures
+   * existentes no lo construyen); con el proto nuevo llega SIEMPRE ('' en EMPTY_TRIP → null en el BFF).
+   */
+  vehicleType?: string;
 }
 
 /**

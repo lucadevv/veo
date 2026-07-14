@@ -153,6 +153,16 @@ describe('buildTripDetail', () => {
     expect(view.dispatchMode).toBeNull();
   });
 
+  it('vehicleType del trip (tier solicitado) pasa a la vista — la app pinta la moto como moto al rehidratar', () => {
+    const view = buildTripDetail({ ...trip, vehicleType: 'MOTO' }, null, null, null);
+    expect(view.vehicleType).toBe('MOTO');
+  });
+
+  it('vehicleType fuera de contrato o ausente (proto viejo) → null (fail-safe: la app degrada al auto)', () => {
+    expect(buildTripDetail({ ...trip, vehicleType: '' }, null, null, null).vehicleType).toBeNull();
+    expect(buildTripDetail(trip, null, null, null).vehicleType).toBeNull();
+  });
+
   it('incluye myRatingStars cuando el pasajero ya calificó (enriquecido)', () => {
     const view = buildTripDetail(trip, driver, aggregate, vehicle, 0, 5);
     expect(view.myRatingStars).toBe(5);
