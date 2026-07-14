@@ -292,29 +292,28 @@ export function RequestFlowScreen(): React.JSX.Element {
     refetchInterval: terminalPhase || live.ended ? false : 15_000,
   });
 
-  // RUTA POR FASE del viaje activo (GET /trips/:id/route[?leg=pickup]):
+  // RUTA POR FASE del viaje activo (GET /trips/:id/route[?leg=]):
   //  · enRoute → leg PICKUP: la ruta de ACERCAMIENTO viva (conductor→recojo) — el pasajero ve POR
   //    DÓNDE VIENE el conductor, no la canónica al destino. Poll a 10 s: esa traza cambia mientras
   //    el conductor avanza. Sin ubicación aún, el server responde polyline '' → no se dibuja nada.
   //  · arrived → SIN ruta (query apagada): conductor y recojo casi coinciden; el director cierra el
   //    zoom sobre el punto de encuentro y una traza residual solo ensuciaría.
-  //  · inProgress → la CANÓNICA persistida (overview origen→paradas→destino), poll lento.
-  // La FASE entra en la queryKey → al pasar de pickup→onboard se re-pide YA (sin esperar el poll),
+  //  · inProgress → leg DROPOFF (2026-07-14, pedido del dueño): el tramo RESTANTE vivo
+  //    (conductor→paradas→destino) — la canónica estática dejaba pintada la parte YA recorrida
+  //    detrás del vehículo y su punta podía no calzar con la del conductor. Se recorta sola.
+  // La FASE entra en la queryKey → al pasar de pickup→dropoff se re-pide YA (sin esperar el poll),
   // simétrico a la invalidación del conductor.
   const routeLeg =
-    phase === 'enRoute' ? 'pickup' : phase === 'inProgress' ? 'onboard' : null;
+    phase === 'enRoute' ? 'pickup' : phase === 'inProgress' ? 'dropoff' : null;
   const tripRouteQuery = useQuery({
     queryKey: ['trip', activeTripId, 'route', routeLeg],
     queryFn: () =>
-      tripRepository.getTripRoute(
-        activeTripId as string,
-        routeLeg === 'pickup' ? 'pickup' : undefined,
-      ),
+      tripRepository.getTripRoute(activeTripId as string, routeLeg ?? undefined),
     enabled: Boolean(activeTripId) && routeLeg !== null,
     refetchInterval:
       routeLeg === 'pickup'
         ? PICKUP_ROUTE_REFRESH_MS
-        : routeLeg === 'onboard'
+        : routeLeg === 'dropoff'
           ? ONBOARD_ROUTE_REFRESH_MS
           : false,
     staleTime:
@@ -436,8 +435,13 @@ export function RequestFlowScreen(): React.JSX.Element {
   // Pánico nativo (triple volumen): armado SOLO durante el viaje activo (se desarma fuera).
   usePanicAutoTrigger(activeTripId ?? '', descriptor.activeTrip);
 
-  // Chat con el conductor: drena los no leídos y abre la pantalla de chat.
-  const unreadCount = live.incomingMessages.length;
+  // Chat con el conductor: drena los no leídos y abre la pantalla de chat. El badge cuenta SOLO los
+  // mensajes DEL CONDUCTOR: `incomingMessages` también trae el ECO de los propios (el ChatScreen lo
+  // necesita para confirmar el envío), pero tu propio mensaje no es un "no leído" (espejo del guard
+  // isOwnMessage del conductor).
+  const unreadCount = live.incomingMessages.filter(
+    m => m.senderRole === 'DRIVER',
+  ).length;
   const openChat = useCallback(() => {
     live.acknowledgeMessages(live.incomingMessages.map(m => m.id));
     // El primer nombre del conductor para el título del chat (simétrico al conductor, que muestra el del
@@ -755,12 +759,14 @@ export function RequestFlowScreen(): React.JSX.Element {
   // cada render y rompía el React.memo del AppMap. Cambia con el safe-area top (chrome superior) o el
   // alto del snap ACTUAL del sheet → el fit de ruta RE-ENCUADRA al asentarse el sheet en otro anclaje
   // (regla: la ruta vive en el área visible, no bajo el sheet). El AppMap topa el bottom con su CAP.
+  // Márgenes de RESPIRO dentro de la ventana visible (gusto del dueño 2026-07-14: la ruta encaja
+  // centrada entre el sheet y el chrome, con aire — el top despeja el chip de ubicación).
   const fitEdgePadding = useMemo(
     () => ({
-      top: insets.top + 40,
-      bottom: sheetMapInset + 16,
-      left: 40,
-      right: 40,
+      top: insets.top + 56,
+      bottom: sheetMapInset + 24,
+      left: 44,
+      right: 44,
     }),
     [insets.top, sheetMapInset],
   );

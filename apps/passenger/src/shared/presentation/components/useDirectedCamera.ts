@@ -17,8 +17,21 @@ export type DirectedCameraRef = ElementRef<typeof Camera>;
 const ANIM_MS = 900;
 /** Mínimo entre re-encuadres por TIEMPO (ms): no peleamos con cada tick del socket. */
 const MIN_INTERVAL_MS = 2_500;
-/** Umbral de MOVIMIENTO (m): por debajo no re-encuadramos aunque pase el tiempo (evita micro-jitter). */
-const MOVE_THRESHOLD_M = 40;
+/**
+ * Umbral de MOVIMIENTO (m): por debajo no re-encuadramos aunque pase el tiempo (evita micro-jitter).
+ * Calibración del dueño (2026-07-14): 40→20 — cerca del recojo el zoom es alto y 40 m de deriva sin
+ * re-encuadre eran ~100 px: el conductor se deslizaba debajo del sheet.
+ */
+const MOVE_THRESHOLD_M = 20;
+/**
+ * Span MÍNIMO (m) del box del fit dirigido. Cuando el conductor está llegando, el box
+ * [conductor, recogida] degenera (metros) → zoom nivel-puerta y cualquier deriva lo saca del marco.
+ * Inflamos el bounds a este span alrededor de su centro: el encuadre queda estable mientras se
+ * acerca y el conductor SIEMPRE vive dentro de la ventana visible.
+ */
+const MIN_FIT_SPAN_M = 240;
+/** Metros por grado de latitud (esférico, suficiente para inflar un box urbano). */
+const METERS_PER_DEG_LAT = 111_320;
 /** Tras un gesto manual, la cámara queda "libre" este tiempo (ms) antes de retomar el seguimiento. */
 const FREE_MODE_MS = 8_000;
 /**
@@ -59,10 +72,36 @@ function leadPoint(t: CameraTarget): GeoPoint | null {
  * No re-renderiza: todo vive en refs y se aplica vía la API imperativa del Camera. El `AppMap` solo le
  * pasa el ref, el target y el bottomInset.
  */
+/** Infla un bounds [ne, sw] (lng,lat) hasta un span mínimo en metros, alrededor de su centro. */
+function ensureMinSpan(
+  bounds: {ne: [number, number]; sw: [number, number]},
+  minSpanM: number,
+): {ne: [number, number]; sw: [number, number]} {
+  const [neLng, neLat] = bounds.ne;
+  const [swLng, swLat] = bounds.sw;
+  const centerLat = (neLat + swLat) / 2;
+  const centerLng = (neLng + swLng) / 2;
+  const metersPerDegLng =
+    METERS_PER_DEG_LAT * Math.max(0.2, Math.cos((centerLat * Math.PI) / 180));
+  const halfLatDeg = Math.max(
+    (neLat - swLat) / 2,
+    minSpanM / 2 / METERS_PER_DEG_LAT,
+  );
+  const halfLngDeg = Math.max(
+    (neLng - swLng) / 2,
+    minSpanM / 2 / metersPerDegLng,
+  );
+  return {
+    ne: [centerLng + halfLngDeg, centerLat + halfLatDeg],
+    sw: [centerLng - halfLngDeg, centerLat - halfLatDeg],
+  };
+}
+
 export function useDirectedCamera(
   cameraRef: RefObject<DirectedCameraRef | null>,
   target: CameraTarget,
   bottomInset: number,
+  topInset = 0,
 ): {onGesture: () => void} {
   const lastAppliedAt = useRef(0);
   const lastLead = useRef<GeoPoint | null>(null);
@@ -70,6 +109,8 @@ export function useDirectedCamera(
   const freeUntil = useRef(0);
   const bottomInsetRef = useRef(bottomInset);
   bottomInsetRef.current = bottomInset;
+  const topInsetRef = useRef(topInset);
+  topInsetRef.current = topInset;
   // ÚLTIMO rumbo VÁLIDO aplicado en `follow` (course-up). Un ping sin heading (`null`) NO vuelve la
   // cámara al Norte de golpe: se mantiene este valor hasta la próxima muestra válida.
   const lastHeading = useRef<number | null>(null);
@@ -86,8 +127,11 @@ export function useDirectedCamera(
       if (t.mode === 'fit') {
         if (t.fitPoints.length === 0) return; // el fit de ruta lo maneja la Camera declarativa del AppMap.
         const positions = t.fitPoints.map(toLngLat);
-        const bounds = boundsOf(positions);
-        if (!bounds) return;
+        const rawBounds = boundsOf(positions);
+        if (!rawBounds) return;
+        // Box con span MÍNIMO: llegando al recojo el bounds degenera y el conductor se salía del
+        // marco entre re-encuadres (lo tapaba el sheet). Ver MIN_FIT_SPAN_M.
+        const bounds = ensureMinSpan(rawBounds, MIN_FIT_SPAN_M);
         // Padding APRETADO + reserva del sheet abajo (ya CAPADA por el AppMap: `padBottom` nunca aplasta el
         // viewport). Calibración de GUSTO del dueño ("más encima de la acción"): bajamos de 56/48 a 40/36 →
         // el box [conductor+recogida] (enRoute) y el box casi-puntual sobre la recogida (arrived) cierran más,
@@ -101,7 +145,9 @@ export function useDirectedCamera(
         cam.setCamera({
           bounds: {ne: bounds.ne, sw: bounds.sw},
           padding: {
-            paddingTop: 40,
+            // Top = chrome superior REAL (chip de ubicación/EN VIVO) que baja el AppMap; fallback al
+            // margen histórico si nadie lo pasa.
+            paddingTop: topInsetRef.current > 0 ? topInsetRef.current : 40,
             paddingRight: 36,
             paddingBottom: 40 + padBottom,
             paddingLeft: 36,

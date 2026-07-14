@@ -92,8 +92,9 @@ export class HttpTripRepository implements TripRepository {
     return this.http.get(`/trips/${tripId}/state`, {schema: tripStateView});
   }
 
-  getTripRoute(tripId: string, leg?: 'pickup'): Promise<TripRoute> {
-    // `leg=pickup` pide el tramo de acercamiento vivo (conductor→recojo); sin leg, la canónica.
+  getTripRoute(tripId: string, leg?: 'pickup' | 'dropoff'): Promise<TripRoute> {
+    // `leg=pickup` = acercamiento vivo (conductor→recojo); `leg=dropoff` = restante del viaje en
+    // curso (conductor→paradas→destino, se recorta al avanzar); sin leg, la canónica.
     return this.http.get(`/trips/${tripId}/route`, {
       ...(leg ? {query: {leg}} : {}),
       schema: tripRoute,

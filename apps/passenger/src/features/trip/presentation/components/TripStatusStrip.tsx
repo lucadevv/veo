@@ -13,7 +13,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import {VehicleIcon} from '../../../dispatch/presentation/components/VehicleIcon';
+import {offeringGlyph} from '../../../../shared/presentation/components/offeringGlyphs';
 import type {NearbyVehicleType} from '../../../dispatch/domain/dispatchRepository';
 
 /**
@@ -37,6 +37,18 @@ import type {NearbyVehicleType} from '../../../dispatch/domain/dispatchRepositor
 
 /** Modo visual de la franja, derivado del estado del viaje. */
 type StripMode = 'moving' | 'arrived';
+
+/** Glyph del vehículo del strip: ícono de línea del registro (no la silueta top-down ilegible). */
+function StripVehicleGlyph({
+  vehicleType,
+  color,
+}: {
+  vehicleType?: NearbyVehicleType;
+  color: string;
+}): React.JSX.Element {
+  const {LineIcon} = offeringGlyph({vehicleType});
+  return <LineIcon color={color} size={ICON_SIZE} />;
+}
 
 export interface TripStatusStripProps {
   /** Estado efectivo del viaje (socket o REST). Puede llegar como string crudo (EXPIRED/FAILED/…). */
@@ -223,8 +235,9 @@ export function TripStatusStrip({
             },
           ]}
         />
-        {/* Vehículo animado. Rotado 90° (el glyph es top-down apuntando ↑) para que apunte → (sentido
-            de avance). Decorativo: el track entero ya está oculto a accesibilidad. */}
+        {/* Vehículo animado: ícono de LÍNEA del registro (moto/auto inconfundible — la silueta
+            top-down se leía como autito; calibración del dueño 2026-07-14). Decorativo: el track
+            entero ya está oculto a accesibilidad. */}
         <Animated.View style={[styles.icon, iconStyle]} pointerEvents="none">
           <Animated.View
             style={[
@@ -233,9 +246,7 @@ export function TripStatusStrip({
               haloStyle,
             ]}
           />
-          <View style={styles.iconRotate}>
-            <VehicleIcon vehicleType={vehicleType} size={ICON_SIZE} />
-          </View>
+          <StripVehicleGlyph vehicleType={vehicleType} color={theme.colors.brand} />
         </Animated.View>
       </View>
       {/* El estado del viaje es la info MÁS importante de este momento (esperás al conductor) → legible,

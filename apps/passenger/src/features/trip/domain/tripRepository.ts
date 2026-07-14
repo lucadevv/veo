@@ -63,7 +63,7 @@ export interface TripRepository {
    * VIENE el conductor; sin ubicación aún, el server responde ruta VACÍA (polyline '') y el mapa no
    * dibuja nada (solo markers). Polyline + steps + markers.
    */
-  getTripRoute(tripId: string, leg?: 'pickup'): Promise<TripRoute>;
+  getTripRoute(tripId: string, leg?: 'pickup' | 'dropoff'): Promise<TripRoute>;
   /** POST /trips/:id/cancel → cancela el viaje. */
   cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource>;
   /**

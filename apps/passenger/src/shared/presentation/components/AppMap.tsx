@@ -17,6 +17,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import type {NearbyVehicleType} from '../../../features/dispatch/domain/dispatchRepository';
 import {VehicleIcon} from '../../../features/dispatch/presentation/components/VehicleIcon';
+import {offeringGlyph} from './offeringGlyphs';
 import type {CameraTarget} from '../../../features/trip/presentation/hooks/mapDirector';
 import {
   boundsOf,
@@ -119,14 +120,13 @@ export interface AppMapProps {
 const ROUTE_SOURCE = 'veo-route';
 const FIT_PADDING = 64;
 /**
- * CAP DURO del inset inferior que se reserva para el sheet en el `fitBounds`. El sheet de búsqueda/
- * ofertas puede medir hasta el 50% de la pantalla (su `maxContentFraction`); reservar TODO ese alto como
- * padding inferior comprimía el viewport útil del fit a ~43% y Mapbox bajaba el zoom brutalmente (la ruta
- * "se alejaba demasiado"). El encuadre debe reservar SIEMPRE como mucho la altura del PEEK colapsado:
- * topeamos el inset a este % de la pantalla. El sheet expandido TAPA el mapa (no lo comprime), igual que
- * Uber/Lyft. Por encima de este tope, el fit ignora el resto del sheet.
+ * Red de CORDURA del inset inferior del `fitBounds`. Calibración de GUSTO del dueño (2026-07-14,
+ * reemplaza el cap 0.32 anterior): la ruta COMPLETA debe encajar CENTRADA en la ventana visible
+ * entre el tope del sheet y el chrome superior — la cámara se aleja lo que haga falta; la ruta
+ * jamás queda debajo del sheet. El cap solo protege el caso degenerado (sheet a ~94%, donde el
+ * sheet TAPA el mapa y encuadrar ya no tiene sentido).
  */
-const FIT_BOTTOM_INSET_FRACTION = 0.32;
+const FIT_BOTTOM_INSET_FRACTION = 0.6;
 /**
  * CAP del inset inferior para las cámaras de CENTRO/FOLLOW (no-fit). El `bottomInset` ahora sigue la
  * altura del snap ACTUAL del sheet (no solo el peek): expandido a ~94%, reservar TODO eso como padding
@@ -196,31 +196,28 @@ interface DriverVehicleMarkerProps {
 }
 
 /**
- * Marker del CONDUCTOR ASIGNADO: `VehicleIcon` (CAR/MOTO del trip) más grande que el ambiente para
- * jerarquía. Si llega `heading` se rota con `transform: rotate` (barato, GPU); sin heading NO se rota
- * (mejor que clavarlo en 0°/Norte y que pegue saltos). Memoizado por valor → el stream del socket no
- * re-monta el SVG, solo actualiza la coord del `MarkerView`.
+ * Marker del CONDUCTOR ASIGNADO: BADGE circular con el ícono de LÍNEA del vehículo (CAR/MOTO del
+ * registro `offeringGlyphs`) — mismo tratamiento que el puck del conductor. Calibración del dueño
+ * (2026-07-14): la silueta top-down de la moto era ilegible a este tamaño (se leía como autito);
+ * el ícono de línea es inconfundible. Sin rotación por heading: un badge circular no comunica rumbo
+ * (el desplazamiento del marker ya lo cuenta) y rotar el glyph de línea lo volvería ilegible.
+ * Memoizado por valor → el stream del socket solo actualiza la coord del `MarkerView`.
  */
 function DriverVehicleMarkerComponent({
   point,
-  heading,
   vehicleType,
 }: DriverVehicleMarkerProps): React.JSX.Element {
-  const rotation =
-    typeof heading === 'number' && Number.isFinite(heading) ? heading : null;
+  const {LineIcon} = offeringGlyph({vehicleType});
   return (
     <MarkerView
       coordinate={toLngLat(point)}
       anchor={{x: 0.5, y: 0.5}}
       allowOverlap>
-      <View
-        pointerEvents="none"
-        style={
-          rotation != null
-            ? {transform: [{rotate: `${rotation}deg`}]}
-            : undefined
-        }>
-        <VehicleIcon vehicleType={vehicleType} size={DRIVER_VEHICLE_SIZE} />
+      <View pointerEvents="none" style={styles.assignedBadge}>
+        <LineIcon
+          color={passengerMapRoute.routeColor}
+          size={DRIVER_VEHICLE_SIZE - 14}
+        />
       </View>
     </MarkerView>
   );
@@ -362,6 +359,8 @@ function AppMapComponent({
     cameraRef,
     effectiveCameraTarget ?? noopTarget,
     fitBottomInset,
+    // El fit dirigido comparte el chrome superior del fit declarativo (chip de ubicación/EN VIVO).
+    fitEdgePadding?.top ?? 0,
   );
 
   // Mapa "mi ubicación" libre: solo cuando se pide recentrar Y la cámara NO está dirigida (la dirigida la
@@ -702,4 +701,24 @@ function AppMapComponent({
  * re-ejecutaba el componente y, junto con un centro inestable, mantenía al contexto GL en churn
  * → mapa negro. Con memo + centro estable, el GL se asienta y el mapa renderiza.
  */
+// Badge circular del conductor ASIGNADO (espejo del puck del driver): fondo blanco + borde sutil
+// para que el ícono de línea del vehículo (moto/auto) sea inconfundible sobre cualquier mapa.
+const styles = StyleSheet.create({
+  assignedBadge: {
+    width: DRIVER_VEHICLE_SIZE,
+    height: DRIVER_VEHICLE_SIZE,
+    borderRadius: DRIVER_VEHICLE_SIZE / 2,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D5DCE4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#1A2332',
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: {width: 0, height: 2},
+    elevation: 4,
+  },
+});
+
 export const AppMap = React.memo(AppMapComponent);
