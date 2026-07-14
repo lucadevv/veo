@@ -22,7 +22,6 @@ import {
   Banner,
   Button,
   Card,
-  IconButton,
   Text,
   TextField,
   useTheme,
@@ -451,15 +450,20 @@ export const LoginScreen = (): React.JSX.Element => {
             gap: theme.spacing['2xl'],
           }}
         >
-          <IconButton
-            icon={<IconChevronLeft color={theme.colors.ink} />}
+          {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+              TODA la app — espeja al TopBar). */}
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel={t('auth.changeNumber')}
-            variant="surface"
+            hitSlop={12}
+            style={styles.backChevron}
             onPress={() => {
               setStep('phone');
               setCode('');
             }}
-          />
+          >
+            <IconChevronLeft color={theme.colors.ink} size={28} strokeWidth={2.25} />
+          </Pressable>
 
           <View style={{ gap: theme.spacing.sm }}>
             <Text variant="title1">{t('auth.codeLabel')}</Text>
@@ -549,6 +553,8 @@ export const LoginScreen = (): React.JSX.Element => {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  // El chevron de volver no se estira al ancho de la columna (touch target acotado al glifo + hitSlop).
+  backChevron: { alignSelf: 'flex-start' },
   // Banda hero como FONDO ABSOLUTO fijo (top de la pantalla): marco definido → `cover` calza la foto
   // sin el zoom/recorte raro que daba estar dentro del ScrollView. El alto va inline (aspecto de la foto).
   heroBg: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden' },

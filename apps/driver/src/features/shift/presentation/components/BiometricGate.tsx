@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { Banner, Button, IconButton, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
 import { IconCheck, IconChevronLeft, IconShield } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { Pulse } from './motion';
@@ -130,13 +130,16 @@ export const BiometricGate = ({
       scroll
       header={
         <View style={styles.header}>
-          <IconButton
+          {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+              TODA la app — espeja al TopBar). */}
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel={topTitle}
-            variant="surface"
-            size="md"
-            icon={<IconChevronLeft size={22} color={theme.colors.ink} />}
+            hitSlop={12}
             onPress={onBack}
-          />
+          >
+            <IconChevronLeft size={28} color={theme.colors.ink} strokeWidth={2.25} />
+          </Pressable>
           <Text variant="title3" numberOfLines={1} style={styles.headerTitle}>
             {topTitle}
           </Text>
