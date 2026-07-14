@@ -1254,6 +1254,18 @@ cmd_restart() {
     mjs) boot_otp_viewer ;;  # otp-viewer: cero build — arranca directo.
   esac
   reconcile_pids
+  # Los Metros RN vivos se RECARGAN tras el restart: el paso 2 reescribió dist/ de los packages →
+  # Metro dispara un Fast Refresh masivo sobre apps CORRIENDO y el estado puede quedar roto (visto
+  # 2026-07-13: overlay "Sin conexión" pegado en el driver con el socket YA reconectado — stores
+  # duplicados por el hot-swap). El reload de bundle es el reset determinista; si no hay Metro en
+  # ese puerto, no hace nada.
+  local mport
+  for mport in 8081 8084; do
+    if port_in_use "$mport"; then
+      curl -s -m 2 -X POST "http://localhost:$mport/reload" >/dev/null 2>&1 \
+        && blue "  ↻ Metro :$mport → reload del bundle RN (estado fresco tras el restart)" || true
+    fi
+  done
   echo
   cmd_status
 }
