@@ -20,10 +20,11 @@ import { useRequestAccess } from '@/lib/use-request-access';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 
+// Leyenda HONESTA: solo lo que el mapa dibuja (markers de conductor en accent + pánico en danger —
+// mismos colores que PIN_VAR del MapView). No prometer capas que no existen (pasajeros/rutas).
 const LEGEND = [
   { label: 'Conductores', className: 'bg-accent' },
-  { label: 'Pasajeros', className: 'bg-success' },
-  { label: 'Rutas activas', className: 'bg-accent/55' },
+  { label: 'Pánicos', className: 'bg-danger' },
 ] as const;
 
 export default function OpsPage() {

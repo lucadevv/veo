@@ -43,6 +43,8 @@ export interface MapViewProps {
   circles?: RadiusCircle[];
   /** Ruta a dibujar como línea (secuencia de puntos lon/lat). Ej: el trayecto del viaje hasta el punto de pánico. */
   route?: { lon: number; lat: number }[];
+  /** Color de la línea de ruta. HEX literal (maplibre no parsea oklch). Default: danger (trayecto de pánico). */
+  routeColor?: string;
   /** Deshabilita la interacción (zoom/drag) — para el radar de preview (mapa estático). */
   interactive?: boolean;
   /** Se dispara al terminar de mover/zoomear el mapa, con el nuevo centro (para re-consultar la densidad). */
@@ -182,6 +184,7 @@ export function MapView({
   onMarkerClick,
   circles,
   route,
+  routeColor,
   interactive,
   onMoveEnd,
 }: MapViewProps) {
@@ -324,10 +327,12 @@ export function MapView({
             ]
           : [],
     });
+    const color = routeColor ?? '#E5484D';
     const install = () => {
       const src = map.getSource('trip-route') as GeoJSONSource | undefined;
       if (src) {
         src.setData(lineData());
+        map.setPaintProperty('trip-route-line', 'line-color', color);
       } else {
         map.addSource('trip-route', { type: 'geojson', data: lineData() });
         map.addLayer({
@@ -335,13 +340,13 @@ export function MapView({
           type: 'line',
           source: 'trip-route',
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': '#E5484D', 'line-width': 3.5, 'line-opacity': 0.85 },
+          paint: { 'line-color': color, 'line-width': 3.5, 'line-opacity': 0.85 },
         });
       }
     };
     if (map.isStyleLoaded()) install();
     else map.once('load', install);
-  }, [route]);
+  }, [route, routeColor]);
 
   // Anillos de radio como capas GeoJSON alrededor del CENTRO VIVO del mapa → quedan CENTRADOS en pantalla
   // mientras las calles se mueven debajo (comportamiento de radar). Al terminar de mover, `onMoveEnd` re-consulta

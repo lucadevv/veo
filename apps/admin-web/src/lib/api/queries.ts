@@ -87,6 +87,7 @@ import {
   type TripStatus,
   type RevenueRangeValue,
 } from './schemas';
+import { isActiveTrip } from '@/components/trips/status-badge';
 
 /** Llaves de caché centralizadas para invalidaciones consistentes. */
 export const qk = {
@@ -220,6 +221,10 @@ export function useTrip(id: string) {
     queryKey: qk.trip(id),
     queryFn: ({ signal }) => apiClient().get(`/ops/trips/${id}`, { schema: tripDetail, signal }),
     enabled: id.length > 0,
+    // Mismo criterio que la lista (isTerminalView): viaje VIVO → refetch para que el detalle respire
+    // (fase/ETA/posición); terminal → snapshot histórico, sin re-consultar en vano.
+    refetchInterval: (query) =>
+      query.state.data && isActiveTrip(query.state.data.status) ? REALTIME_REFETCH : false,
   });
 }
 

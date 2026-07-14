@@ -14,9 +14,10 @@ import { AdminTopbar } from '@/components/layout/admin-topbar';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
-import { TripStatusBadge } from '@/components/trips/status-badge';
+import { TripStatusBadge, isActiveTrip } from '@/components/trips/status-badge';
 import { dispatchModeLabel } from '@/components/trips/mode-pill';
 import { MapView, type MapMarker } from '@/components/map/lazy-map';
+import { decodePolyline } from '@/lib/map/polyline';
 
 /** Detalle de viaje fiel al frame UNyIW: Ruta + Línea de tiempo (izq) · Tarifa + personas + acciones (der). */
 export default function TripDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -30,6 +31,14 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
   const trip = query.data;
 
   const markers = useMemo<MapMarker[]>(() => buildMarkers(trip), [trip]);
+  // Trazado real de la ruta (routePolyline del bff, codificada OSRM) → puntos lon/lat del MapView.
+  const route = useMemo(
+    () =>
+      trip?.routePolyline
+        ? decodePolyline(trip.routePolyline).map(([lon, lat]) => ({ lon, lat }))
+        : undefined,
+    [trip?.routePolyline],
+  );
 
   const topbar = (
     <AdminTopbar
@@ -100,7 +109,14 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
           <div className="flex flex-col gap-[18px]">
             <Card title="Ruta">
               <div className="h-[260px] overflow-hidden rounded-[14px] border border-border">
-                <MapView markers={markers} center={mapCenter(trip)} zoom={13} />
+                {/* Ruta en brand (no el danger default del MapView: rojo = trayecto de pánico). */}
+                <MapView
+                  markers={markers}
+                  route={route}
+                  routeColor="#0075A9"
+                  center={mapCenter(trip)}
+                  zoom={13}
+                />
               </div>
               <div className="flex items-center gap-3">
                 <Endpoint eyebrow="ORIGEN" point={trip.origin} label={trip.originLabel} />
@@ -112,6 +128,15 @@ export default function TripDetailPage(props: { params: Promise<{ id: string }> 
                   align="right"
                 />
               </div>
+              {/* ETA EN VIVO al destino: solo viaje activo y con dato (null en terminados — no inventar). */}
+              {isActiveTrip(trip.status) && trip.etaSeconds != null ? (
+                <div className="flex items-center justify-between border-t border-divider pt-3">
+                  <span className="text-[13px] text-ink-muted">ETA al destino</span>
+                  <span className="font-mono text-[13px] font-semibold text-ink tabular">
+                    {duration(trip.etaSeconds)}
+                  </span>
+                </div>
+              ) : null}
             </Card>
 
             <Card title="Línea de tiempo">

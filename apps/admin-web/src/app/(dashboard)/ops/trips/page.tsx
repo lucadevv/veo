@@ -4,7 +4,9 @@ import { Suspense, useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronRight, Download, Search } from 'lucide-react';
 import { useTrips, type TripFilters } from '@/lib/api/queries';
-import type { TripStatus, TripSummary } from '@/lib/api/schemas';
+import { normalizeTripStatus } from '@/lib/api/schemas';
+import type { AdminTripStatus, TripStatus, TripUpdateMsg } from '@/lib/api/schemas';
+import { useOpsStore } from '@/lib/realtime/ops-store';
 import { money } from '@/lib/formatters';
 import { FILTER_ALL } from '@/lib/filters';
 import { AdminTopbar } from '@/components/layout/admin-topbar';
@@ -15,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useRequestAccess } from '@/lib/use-request-access';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
-import { TripStatusBadge } from '@/components/trips/status-badge';
+import { TripStatusBadge, isActiveTrip } from '@/components/trips/status-badge';
 import { TripModePill } from '@/components/trips/mode-pill';
 
 /** Estados FILTRABLES por el backend (subset del DTO ListTripsQueryDto — no todos los estados se pueden filtrar). */
@@ -28,6 +30,18 @@ const STATUS_OPTIONS: { value: TripStatus | 'ALL'; label: string }[] = [
   { value: 'COMPLETED', label: 'Completado' },
   { value: 'CANCELLED', label: 'Cancelado' },
 ];
+
+/**
+ * Overlay del estado VIVO (`trip:update` del ops-socket) sobre el row del REST (poll de 15s).
+ * Reglas de no-mentira:
+ *  - REST terminal es autoritativo y FINAL: el socket deja de emitir al cerrar el viaje — un msg
+ *    viejo del store no debe "revivir" un viaje ya terminado.
+ *  - status del socket fuera del contrato (drift de versión) → NO pisar el REST (normalize = null).
+ */
+function overlayLiveStatus(rest: AdminTripStatus, live: TripUpdateMsg | undefined): AdminTripStatus {
+  if (!live || !isActiveTrip(rest)) return rest;
+  return normalizeTripStatus(live.status) ?? rest;
+}
 
 /** Iniciales (2) de un nombre para el avatar. Sin nombre → "•". */
 function initials(name: string | null): string {
@@ -57,6 +71,8 @@ function TripsInner() {
   const user = useSession();
   const requestAccess = useRequestAccess();
   const [search, setSearch] = useState('');
+  // Updates en vivo del ops-socket: el badge de estado se adelanta al próximo poll del REST.
+  const liveTrips = useOpsStore((s) => s.trips);
 
   const filters = useMemo<TripFilters>(
     () => ({ status: (params.get('status') as TripStatus | 'ALL' | null) ?? 'ALL' }),
@@ -244,7 +260,7 @@ function TripsInner() {
                       </span>
 
                       <span className="w-[120px] shrink-0">
-                        <TripStatusBadge status={t.status} />
+                        <TripStatusBadge status={overlayLiveStatus(t.status, liveTrips[t.id])} />
                       </span>
 
                       <ChevronRight className="size-[17px] shrink-0 text-ink-subtle" aria-hidden />
