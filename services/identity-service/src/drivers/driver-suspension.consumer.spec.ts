@@ -566,3 +566,52 @@ describe('DriverSuspensionConsumer · driver.suspended → BACKSTOP durable del 
     ).rejects.toThrow('redis down');
   });
 });
+
+describe('DriverSuspensionConsumer · ADR-022 §P-A bloqueo/desbloqueo por DEUDA', () => {
+  beforeEach(() => {
+    captured.byEvent = {};
+  });
+
+  it('driver.debt_exceeded → DriversService.blockForDebt(driverId, total, threshold)', async () => {
+    const drivers = { blockForDebt: vi.fn(async () => true), clearDebtBlock: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.debt_exceeded']?.(
+      envelope({ driverId: 'd1', totalDebtCents: 10200, thresholdCents: 10000, at: '2026-07-14T00:00:00.000Z' }),
+    );
+    expect(drivers.blockForDebt).toHaveBeenCalledWith('d1', 10200, 10000);
+    expect(drivers.clearDebtBlock).not.toHaveBeenCalled();
+  });
+
+  it('driver.debt_cleared → DriversService.clearDebtBlock(driverId)', async () => {
+    const drivers = { blockForDebt: vi.fn(async () => true), clearDebtBlock: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.debt_cleared']?.(
+      envelope({ driverId: 'd1', at: '2026-07-14T00:00:00.000Z' }),
+    );
+    expect(drivers.clearDebtBlock).toHaveBeenCalledWith('d1');
+    expect(drivers.blockForDebt).not.toHaveBeenCalled();
+  });
+
+  it('descarta un driver.debt_exceeded inválido (monto negativo) sin tocar la DB', async () => {
+    const drivers = { blockForDebt: vi.fn(async () => true) };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await captured.byEvent['driver.debt_exceeded']?.(
+      envelope({ driverId: 'd1', totalDebtCents: -1, thresholdCents: 10000, at: '2026-07-14T00:00:00.000Z' }),
+    );
+    expect(drivers.blockForDebt).not.toHaveBeenCalled();
+  });
+
+  it('propaga el error para que Kafka reintente (blockForDebt es idempotente)', async () => {
+    const drivers = {
+      blockForDebt: vi.fn(async () => {
+        throw new Error('db down');
+      }),
+    };
+    await new DriverSuspensionConsumer(drivers as never, config).onModuleInit();
+    await expect(
+      captured.byEvent['driver.debt_exceeded']?.(
+        envelope({ driverId: 'd1', totalDebtCents: 10200, thresholdCents: 10000, at: '2026-07-14T00:00:00.000Z' }),
+      ),
+    ).rejects.toThrow('db down');
+  });
+});

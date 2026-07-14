@@ -214,6 +214,8 @@ export class PaymentsService {
   private readonly refundHighValueThresholdCents: number;
   private readonly refundIdempotencyWindowMs: number;
   private readonly cancellationDriverShare: number;
+  /// ADR-022 §P-A · tope de deuda por comisiones CASH (céntimos). Al CRUZARLO, el conductor queda bloqueado.
+  private readonly driverDebtCapCents: number;
 
   constructor(
     private readonly repo: PaymentsRepository,
@@ -245,6 +247,7 @@ export class PaymentsService {
     this.refundIdempotencyWindowMs =
       config.getOrThrow<number>('REFUND_IDEMPOTENCY_WINDOW_MINUTES') * 60_000;
     this.cancellationDriverShare = config.getOrThrow<number>('CANCELLATION_DRIVER_SHARE');
+    this.driverDebtCapCents = config.getOrThrow<number>('DRIVER_DEBT_CAP_CENTS');
   }
 
   /**
@@ -569,6 +572,14 @@ export class PaymentsService {
       });
       const updated = await this.repo.findPaymentByIdInTx(tx, payment.id);
       if (count === 0) return updated; // otra entrega ya capturó: no re-emitir ni re-colectar
+      // ADR-022 §P-A · un Payment de LIQUIDACIÓN de deuda (kind=DEBT_SETTLEMENT) que captura NO es un pago de viaje:
+      // marca las driver_debts PENDING del conductor → PAID y emite `driver.debt_cleared` (desbloqueo), en la MISMA
+      // tx de captura. Rama análoga a TIP (que emite tip_added en vez de payment.captured). El CAS de arriba
+      // (count>0) garantiza una sola ejecución → una sola limpieza + un solo driver.debt_cleared.
+      if (updated.kind === 'DEBT_SETTLEMENT') {
+        await this.settleDebtsOnCapture(tx, updated);
+        return updated;
+      }
       // A1 · un tip-Payment (kind=TIP) que captura NO es un "pago del viaje": emite `payment.tip_added` (el
       // conductor cobra la propina SOLO cuando se cobró de verdad + entra al payout), no `payment.captured`.
       const envelope =
@@ -1221,6 +1232,12 @@ export class PaymentsService {
           reason: 'CASH_COMMISSION',
           status: 'PENDING',
         });
+        // ADR-022 §P-A · TOPE de deuda: tras acumular la deuda de ESTE viaje, ¿el total PENDING CRUZÓ el tope?
+        // Emitimos `driver.debt_exceeded` SOLO en el cruce (previo ≤ tope < nuevo) → bloqueo del conductor. En la
+        // MISMA tx de captura (outbox-in-tx): captura ⇔ deuda ⇔ (si cruza) bloqueo, atómico. Idempotente: el CAS
+        // de captura (count>0) garantiza una sola ejecución + el UNIQUE(paymentId) de la deuda; una redelivery no
+        // re-cruza. Si YA estaba por encima (previo > tope) NO re-emite (el cruce ya ocurrió en un viaje anterior).
+        await this.maybeEmitDebtExceeded(tx, payment.driverId);
       }
       const envelope = createEnvelope({
         eventType: 'payment.captured',
@@ -1238,6 +1255,177 @@ export class PaymentsService {
       });
       await this.repo.enqueueOutbox(tx, envelope, payment.id);
     });
+  }
+
+  /**
+   * ADR-022 §P-A · Emite `driver.debt_exceeded` (outbox-in-tx) SOLO si la deuda PENDING del conductor acaba de
+   * CRUZAR `driverDebtCapCents` con la deuda recién acumulada en ESTA tx. El total NUEVO ya incluye la deuda de
+   * este viaje (se creó antes de llamar acá); el PREVIO = nuevo − la última deuda (la más nueva). Emite ⟺
+   * `previo ≤ tope < nuevo` — el cruce es un evento ÚNICO (el viaje cash cuya comisión empuja por encima del tope),
+   * así que no hay re-emisión aunque siga acumulando deuda por encima. Sin deudas (imposible acá) → no-op.
+   */
+  private async maybeEmitDebtExceeded(tx: PaymentTx, driverId: string): Promise<void> {
+    const pending = await this.repo.findPendingDebtsByDriverInTx(tx, driverId);
+    if (pending.length === 0) return;
+    const newTotal = pending.reduce((sum, d) => sum + d.amountCents, 0);
+    // La deuda MÁS NUEVA (createdAt desc) es la que acabamos de acumular en esta tx; el previo la excluye.
+    const newest = pending.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b));
+    const previousTotal = newTotal - newest.amountCents;
+    // Cruce EXACTO: estaba en/bajo el tope y ahora está por encima. Si ya estaba por encima → no re-emitir.
+    if (previousTotal > this.driverDebtCapCents || newTotal <= this.driverDebtCapCents) return;
+    await this.repo.enqueueOutbox(
+      tx,
+      createEnvelope({
+        eventType: 'driver.debt_exceeded',
+        producer: 'payment-service',
+        payload: {
+          driverId,
+          totalDebtCents: newTotal,
+          thresholdCents: this.driverDebtCapCents,
+          at: new Date().toISOString(),
+        },
+      }),
+      driverId,
+    );
+    this.logger.warn(
+      `Conductor ${driverId} cruzó el tope de deuda CASH (${newTotal}c > ${this.driverDebtCapCents}c): bloqueado hasta saldar`,
+    );
+  }
+
+  /**
+   * ADR-022 §P-A · SALDAR la deuda de comisiones del conductor por el rail (la ÚNICA forma de desbloquearse tras
+   * cruzar el tope). Crea un Payment de LIQUIDACIÓN (kind=DEBT_SETTLEMENT, driverId=NULL para NO entrar al payout,
+   * commission=0) por el TOTAL PENDING y lo cobra por el MISMO camino digital que un viaje (aggregator asíncrono /
+   * direct con reintentos). Al capturarse (sync o webhook), `captureSuccess` marca sus driver_debts PENDING→PAID y
+   * emite `driver.debt_cleared`. Idempotente por la dedupKey `debt-settle:{driverId}:{deudaMásVieja}` (estable
+   * mientras esa deuda siga PENDING): un doble-tap devuelve el mismo Payment; si el cobro previo declinó (DEBT),
+   * lo RE-COBRA (como la recuperación de deuda del pasajero). CASH no aplica (no hay confirmación bilateral).
+   */
+  async settleDriverDebt(input: {
+    driverId: string;
+    method: PaymentMethod;
+    payerRef?: string;
+    client?: ChargeInput['client'];
+  }): Promise<Payment> {
+    if (input.method === 'CASH') {
+      throw new InvalidStateError('La deuda se salda por un medio DIGITAL, no en efectivo');
+    }
+    // MISMO guard de capacidad que charge/settleCancellationPenalty: el adapter declara su catálogo.
+    this.assertGatewaySupportsMethod(input.method);
+
+    const pending = await this.repo.findPendingDebtsByDriver(input.driverId);
+    // La deuda MÁS VIEJA (el orden del repo es createdAt asc) ancla la dedupKey (estable mientras esa deuda siga
+    // PENDING) y aporta el `tripId` de correlación del Payment (la columna exige un UUID no-nulo). El MONTO cubre
+    // TODAS las deudas PENDING (no solo la de ese viaje). Los lookups by-trip de la TARIFA filtran kind=FARE → no
+    // colisiona con el cobro del viaje que comparte tripId. Sin deuda PENDING → nada que saldar (409).
+    const oldest = pending[0];
+    if (!oldest) {
+      throw new InvalidStateError('No tenés deuda de comisiones pendiente por saldar');
+    }
+    const totalCents = pending.reduce((sum, d) => sum + d.amountCents, 0);
+
+    const dedupKey = `debt-settle:${input.driverId}:${oldest.id}`;
+    const existing = await this.repo.findPaymentByDedupKey(dedupKey);
+    if (existing) {
+      // DEBT (el cobro previo declinó) → re-cobra idempotentemente (nuevo checkout / reintentos), como recoverDebt.
+      // PENDING (esperando webhook) o CAPTURED (ya saldó) → devolver el estado vigente sin re-cobrar.
+      if (existing.status === 'DEBT') return this.retryCharge(existing.id);
+      return existing;
+    }
+
+    let payment: Payment;
+    try {
+      payment = await this.repo.createPayment({
+        id: uuidv7(),
+        tripId: oldest.tripId,
+        // driverId NULL a propósito (espeja la liquidación de penalidad): NO entra al payout como ganancia. El
+        // conductor dueño viaja en debtSettlementDriverId (a quién desbloquear al capturar).
+        driverId: null,
+        passengerId: null,
+        dedupKey,
+        amountCents: totalCents,
+        grossCents: totalCents,
+        // Una liquidación de deuda NO lleva comisión ni fee de plataforma: solo mueve el dinero del conductor por el rail.
+        commissionCents: 0,
+        feeCents: 0,
+        tipCents: 0,
+        method: input.method,
+        kind: 'DEBT_SETTLEMENT',
+        debtSettlementDriverId: input.driverId,
+        // Sin MODO de despacho: no es cobro de viaje → no contamina los cortes por modo/distrito del panel.
+        mode: null,
+        payerRef: input.payerRef ?? null,
+        status: 'PENDING',
+      });
+    } catch (err) {
+      // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola liquidación por deuda-más-vieja.
+      if (isUniqueViolation(err, 'dedupKey')) {
+        const dup = await this.repo.findPaymentByDedupKey(dedupKey);
+        if (dup) return dup;
+        throw new ConflictError('Liquidación de deuda duplicada para el mismo conductor');
+      }
+      throw err;
+    }
+
+    // Cobro por el rail (espejo de charge/settleCancellationPenalty), según el flujo que DECLARA el adapter:
+    // aggregator → checkout asíncrono (el webhook/poll cierra → captureSuccess marca PAID + emite debt_cleared);
+    // direct → reintentos → CAPTURED (mismo desenlace) o DEBT (el conductor reintenta).
+    return this.dispatchDigitalCharge(payment, {
+      tripId: oldest.tripId,
+      grossCents: totalCents,
+      method: input.method,
+      dedupKey,
+      payerRef: input.payerRef,
+      client: input.client,
+    });
+  }
+
+  /**
+   * ADR-022 §P-A · Al CAPTURAR el Payment de liquidación, marca las driver_debts PENDING del conductor → PAID
+   * (FIFO, CAS por status+monto — espeja `applyDebtNetting`) hasta cubrir el monto pagado, y emite
+   * `driver.debt_cleared` (desbloqueo) en la MISMA tx de captura. El monto pagado = snapshot del total al crear la
+   * liquidación → normalmente cubre EXACTO las deudas que existían al pedirla. Bordes tolerados: una deuda REVERSADA
+   * en el ínterin (refund del viaje cash) ya no está PENDING → se salta y sobra monto (over-collection, se loguea
+   * para conciliación); una deuda NUEVA acumulada tras la creación tiene `createdAt` posterior → el FIFO se corta
+   * antes de tocarla (queda PENDING y re-bloquea en el próximo cruce). NO emite payment.captured (no es cobro de viaje).
+   */
+  private async settleDebtsOnCapture(tx: PaymentTx, payment: Payment): Promise<void> {
+    const driverId = payment.debtSettlementDriverId;
+    if (!driverId) {
+      this.logger.error(
+        `Liquidación ${payment.id} capturada SIN debtSettlementDriverId: no se pudo desbloquear al conductor`,
+      );
+      return;
+    }
+    const debts = await this.repo.findPendingDebtsByDriverInTx(tx, driverId);
+    let remaining = payment.amountCents;
+    for (const debt of debts) {
+      // FIFO por monto EXACTO de la fila (no partimos una deuda, respeta el UNIQUE(paymentId) del ledger). Si el
+      // remanente no cubre la fila entera, cortamos (deuda nueva acumulada tras la creación → sigue PENDING).
+      if (remaining < debt.amountCents) break;
+      const marked = await this.repo.markDriverDebtPaidInTx(tx, debt.id, debt.amountCents, payment.id);
+      // CAS por status+monto: un refund concurrente (reverseCashDebtInTx) pudo revertir/reducir la deuda entre el
+      // findMany y este update → count=0 → la SALTAMOS (no la contamos como saldada), sin lost-update.
+      if (marked.count === 0) continue;
+      remaining -= debt.amountCents;
+    }
+    if (remaining > 0) {
+      // Over-collection: alguna deuda se revirtió entre la creación de la liquidación y su captura. La plataforma
+      // cobró de más; se registra para conciliación manual (raro: el checkout tiene TTL corto). NO corta el desbloqueo.
+      this.logger.warn(
+        `Liquidación ${payment.id} del conductor ${driverId}: sobraron ${remaining}c (una deuda se revirtió en el ínterin)`,
+      );
+    }
+    await this.repo.enqueueOutbox(
+      tx,
+      createEnvelope({
+        eventType: 'driver.debt_cleared',
+        producer: 'payment-service',
+        payload: { driverId, at: new Date().toISOString() },
+      }),
+      driverId,
+    );
+    this.logger.log(`Conductor ${driverId} saldó su deuda de comisiones (liquidación ${payment.id}): desbloqueado`);
   }
 
   private async emitCashDiscrepancy(paymentId: string, tripId: string): Promise<void> {

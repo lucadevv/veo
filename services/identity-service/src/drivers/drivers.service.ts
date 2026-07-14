@@ -135,10 +135,14 @@ const SHIFT_ENTRY_STATES: readonly DriverStatus[] = [DriverStatus.OFFLINE, Drive
  *    oferta). Dejar que el operador la quite a mano mientras la categoría sigue APAGADA reabriría el hueco que este
  *    hold cierra (el conductor volvería a operar una clase no ofertada). Su ciclo de vida lo gobierna el catálogo,
  *    no el operador. El resto (DOCUMENT_EXPIRED/INSPECTION_EXPIRED/RATING_LOW/EXCESSIVE_CANCELLATIONS) sí se barren.
+ *  - DEBT_BLOCKED (ADR-022 §P-A): la levanta SOLO `driver.debt_cleared` (el conductor SALDÓ por el rail). Saldar es
+ *    la ÚNICA forma de reactivarse (decisión del dueño); que el operador la quitara a mano dejaría al conductor
+ *    operando con la deuda impaga → reabriría el hueco. Igual que CATEGORY_DISABLED: su ciclo lo gobierna el pago.
  */
 const COMPLIANCE_REACTIVATION_EXCLUDED_CAUSES: readonly SuspensionCause[] = [
   SuspensionCause.DISCIPLINARY,
   SuspensionCause.CATEGORY_DISABLED,
+  SuspensionCause.DEBT_BLOCKED,
 ];
 
 /**
@@ -957,6 +961,60 @@ export class DriversService {
         }),
         driver.id,
       );
+    });
+  }
+
+  /**
+   * ADR-022 §P-A · BLOQUEO por DEUDA (consumidor de `driver.debt_exceeded`, emitido por payment-service al cruzar el
+   * tope de deuda CASH). Agrega un hold PERMANENTE DEBT_BLOCKED y recomputa `Driver.suspendedAt` — el MISMO campo que
+   * el gate biométrico de startShift (BR-I02) y el eligibility gate de dispatch/booking (gRPC `suspendedAt`) leen para
+   * BLOQUEAR (enforcement ya existente, fail-closed): el conductor no puede iniciar turno ni aceptar/ofertar.
+   *
+   * DIFERENCIA CLAVE con la suspensión DISCIPLINARIA (`suspend()`): NO emite `driver.suspended` NI revoca la sesión.
+   * Emitir `driver.suspended` dispararía el cierre del socket (driver-bff) + el reseal de `revoked:before` (el propio
+   * backstop de identity) → MATARÍA el viaje EN CURSO. La decisión del dueño es bloqueo TIPO A: el viaje en curso se
+   * termina normal, solo NO se dan viajes NUEVOS. Por eso el bloqueo por deuda se enforce con el HOLD (suspendedAt) +
+   * la exclusión del pool que hace DISPATCH consumiendo el MISMO `driver.debt_exceeded` (reusa DriverSuspensionService).
+   *
+   * IDEMPOTENTE por el @@unique del hold (una redelivery de Kafka NO re-agrega ni cuenta "nuevo"). No-op honesto si el
+   * conductor no existe (purgado por derecho al olvido / evento que llegó antes del alta). `@returns created` = true
+   * SOLO si el hold no existía (para logging aguas arriba).
+   */
+  async blockForDebt(
+    driverId: string,
+    totalDebtCents: number,
+    thresholdCents: number,
+  ): Promise<boolean> {
+    const reason = `Deuda de comisiones sobre el tope (${totalDebtCents}c > ${thresholdCents}c)`;
+    return this.repo.runInTransaction(async (tx) => {
+      const driver = await this.repo.findDriverByIdTx(tx, driverId);
+      if (!driver) return false; // no-op honesto: no hay a quién bloquear.
+      const { created } = await this.addHold(
+        tx,
+        driverId,
+        SuspensionCause.DEBT_BLOCKED,
+        '',
+        reason,
+      );
+      return created;
+    });
+  }
+
+  /**
+   * ADR-022 §P-A · DESBLOQUEO por DEUDA (consumidor de `driver.debt_cleared`, emitido por payment-service al capturar
+   * la liquidación). QUITA SOLO el hold DEBT_BLOCKED y recomputa `Driver.suspendedAt`. NUNCA toca holds de OTRA causa
+   * (disciplinaria, doc/ITV): si quedan, el conductor SIGUE suspendido por esas (separación de causas). NO emite
+   * `driver.reactivated`: dispatch reincorpora al pool consumiendo el MISMO `driver.debt_cleared` (holds-aware). El
+   * conductor vuelve a operar reabriendo turno por el gate biométrico (el desbloqueo NO lo devuelve a AVAILABLE
+   * saltando el gate, igual que las otras reactivaciones). IDEMPOTENTE (borrar 0 holds = no-op → una redelivery no
+   * re-hace nada). `@returns` true SOLO si se quitó el hold (para logging).
+   */
+  async clearDebtBlock(driverId: string): Promise<boolean> {
+    return this.repo.runInTransaction(async (tx) => {
+      const { removed } = await this.removeHolds(tx, driverId, {
+        cause: SuspensionCause.DEBT_BLOCKED,
+      });
+      return removed > 0;
     });
   }
 
@@ -1852,7 +1910,16 @@ export class DriversService {
     if (!d) throw new NotFoundError('Conductor no encontrado');
     // Gates baratos de fail-fast sobre la réplica (no autoridad final): el gate de suspensión REAL se
     // re-evalúa sobre el dato fresco dentro del CAS (#10). Aquí solo evita trabajo si ya viene suspendido.
-    if (d.suspendedAt) throw new ForbiddenError('Conductor suspendido');
+    if (d.suspendedAt) {
+      // ADR-022 §P-A · MOTIVO CLARO si el bloqueo es por DEUDA: el conductor debe saber que tiene que SALDAR (no un
+      // genérico "suspendido"). Solo se consulta el hold cuando ya está suspendido (rara vez) → costo despreciable.
+      if (await this.repo.hasDebtBlockHold(d.id)) {
+        throw new ForbiddenError(
+          'Tenés una deuda de comisiones sobre el tope; saldala para volver a operar',
+        );
+      }
+      throw new ForbiddenError('Conductor suspendido');
+    }
     // Gate de alta/background — se SALTEA solo con VEO_BYPASS_VERIFICATION en local (nunca en prod: el helper
     // fuerza false bajo NODE_ENV=production + el env.schema hace fail-fast al boot). La suspensión NO se saltea.
     if (!bypassVerification() && !isBackgroundCleared(d.backgroundCheckStatus)) {

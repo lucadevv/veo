@@ -108,6 +108,21 @@ export class DriversRepository {
     });
   }
 
+  /**
+   * ADR-022 §P-A · ¿el conductor tiene un hold DEBT_BLOCKED activo? Réplica (gate barato de fail-fast en startShift:
+   * solo se consulta cuando `suspendedAt` ya está seteado, para dar un mensaje HONESTO "saldá tu deuda" en vez del
+   * genérico "suspendido"). No es la autoridad del bloqueo (esa es `suspendedAt`, derivado del conjunto de holds).
+   */
+  async hasDebtBlockHold(driverId: string): Promise<boolean> {
+    const hold = await this.prisma.read.driverSuspensionHold.findUnique({
+      where: {
+        driverId_cause_causeRef: { driverId, cause: SuspensionCause.DEBT_BLOCKED, causeRef: '' },
+      },
+      select: { driverId: true },
+    });
+    return hold !== null;
+  }
+
   /** Conductor por `userId` (@unique). Réplica. Gates baratos de fail-fast; la autoridad final es el CAS en tx. */
   findDriverByUserId(userId: string): Promise<Driver | null> {
     return this.prisma.read.driver.findUnique({ where: { userId } });

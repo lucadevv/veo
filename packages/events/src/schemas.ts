@@ -116,6 +116,43 @@ export const driverReactivated = z.object({
   driverId: z.string(),
   reactivatedAt: z.string(),
 });
+/// El conductor CRUZÓ el tope de deuda por comisiones de viajes en EFECTIVO (ADR-022 · decisión del dueño).
+/// payment-service lo emite por OUTBOX en la MISMA tx que acumula la última deuda CASH_COMMISSION que empujó el
+/// total PENDING por encima de `DRIVER_DEBT_CAP_CENTS`. Se emite EXACTAMENTE en el CRUCE (total previo ≤ tope <
+/// total nuevo): no se re-emite si ya estaba por encima (idempotente por construcción — el cobro que lo cruza es
+/// único, con UNIQUE(paymentId) de la deuda + el CAS de captura como backstops). Es un `driver.*` producido por
+/// payment (dueño de la DEUDA), no por identity: viaja por el topic 'driver' (ciclo de vida) y lo consumen DOS:
+///   - identity-service (dueño del ESTADO): materializa un hold DEBT_BLOCKED → `Driver.suspendedAt` derivado se
+///     setea → el conductor NO puede iniciar turno ni aceptar/ofertar (el eligibility gate de dispatch/booking y
+///     el gate biométrico de startShift ya honran `suspendedAt`, sin tocar código). El viaje EN CURSO NO se corta
+///     (bloqueo tipo A): a diferencia de una suspensión DISCIPLINARIA, NO se emite `driver.suspended` — ese evento
+///     dispararía la revocación de sesión (driver-bff cierra el socket + identity resella `revoked:before`), que
+///     mataría el viaje en curso. El bloqueo por deuda se enforce por el hold + la exclusión del pool de abajo.
+///   - dispatch-service: reusa el MISMO riel de exclusión del pool que `driver.suspended` (DriverSuspensionService.
+///     onSuspended) para sacar al conductor del hot-index de matching — no le ofrece viajes nuevos.
+/// SIN PII: solo el id de perfil + montos + marca temporal. `totalDebtCents` = deuda PENDING total tras el cruce;
+/// `thresholdCents` = el tope vigente (para la UX/audit). `at` ISO-8601.
+export const driverDebtExceeded = z.object({
+  driverId: z.string(),
+  totalDebtCents: z.number().int().nonnegative(),
+  thresholdCents: z.number().int().nonnegative(),
+  at: z.string(),
+});
+/// El conductor SALDÓ su deuda de comisiones (la ÚNICA forma de reactivarse · decisión del dueño). payment-service
+/// lo emite por OUTBOX en la MISMA tx que CAPTURA el Payment de liquidación (kind DEBT_SETTLEMENT) y marca sus
+/// driver_debts PENDING → PAID (CAS). Es el INVERSO de `driver.debt_exceeded` y viaja por el mismo topic 'driver'.
+/// Lo consumen los MISMOS dos:
+///   - identity-service: quita el hold DEBT_BLOCKED y recomputa `Driver.suspendedAt` — si no quedan otros holds, el
+///     conductor queda LIBRE (podrá reabrir turno por el gate biométrico; la reactivación NO lo devuelve a AVAILABLE
+///     saltando el gate, igual que las otras vías de reactivación).
+///   - dispatch-service: reusa el riel de reincorporación holds-aware (DriverSuspensionService.onReactivated → re-
+///     valida `suspendedAt` en identity antes de re-admitir al pool; el TTL de auto-cura respalda la carrera).
+/// Idempotente: una redelivery tras la captura ya-consumada es no-op (el CAS de captura corta antes de re-emitir).
+/// SIN PII: solo el id de perfil + marca temporal. `at` ISO-8601.
+export const driverDebtCleared = z.object({
+  driverId: z.string(),
+  at: z.string(),
+});
 /// Señal REACTIVA de que un conductor pasó a OFFLINE (Fase B · ADR-021 · finding B1). La emiten DOS
 /// productores por el MISMO contrato, distinguidos por `reason`:
 ///  - `shift_end`  — identity-service: el conductor cerró turno / se puso offline por autoservicio
@@ -1592,6 +1629,8 @@ export const EVENT_SCHEMAS = {
   'driver.went_offline': driverWentOffline,
   'driver.went_online': driverWentOnline,
   'driver.excessive_cancellations': driverExcessiveCancellations,
+  'driver.debt_exceeded': driverDebtExceeded,
+  'driver.debt_cleared': driverDebtCleared,
   'biometric.failed': biometricFailed,
   'biometric.enrolled': biometricEnrolled,
   'biometric.enroll_rejected': biometricEnrollRejected,

@@ -95,6 +95,37 @@ describe('KafkaConsumersService · wiring de suspensión', () => {
     await svc.onModuleDestroy();
   });
 
+  it('[ADR-022 §P-A · DEUDA] driver.debt_exceeded → onSuspended(driverId) (reusa el riel de exclusión del pool)', async () => {
+    const { svc, onSuspended } = build();
+    await svc.onModuleInit();
+    const env = createEnvelope({
+      eventType: 'driver.debt_exceeded',
+      producer: 'payment-service',
+      payload: {
+        driverId: DRIVER_ID,
+        totalDebtCents: 10200,
+        thresholdCents: 10000,
+        at: new Date().toISOString(),
+      },
+    });
+    await handlers.get('driver.debt_exceeded')?.(env);
+    expect(onSuspended).toHaveBeenCalledWith(DRIVER_ID);
+    await svc.onModuleDestroy();
+  });
+
+  it('[ADR-022 §P-A · DEUDA] driver.debt_cleared → onReactivated(driverId) (reincorpora holds-aware)', async () => {
+    const { svc, onReactivated } = build();
+    await svc.onModuleInit();
+    const env = createEnvelope({
+      eventType: 'driver.debt_cleared',
+      producer: 'payment-service',
+      payload: { driverId: DRIVER_ID, at: new Date().toISOString() },
+    });
+    await handlers.get('driver.debt_cleared')?.(env);
+    expect(onReactivated).toHaveBeenCalledWith(DRIVER_ID);
+    await svc.onModuleDestroy();
+  });
+
   it('[eje FLEET · vía DOCUMENTO] fleet.driver_suspended con driverId → onFleetSuspended({driverId})', async () => {
     const { svc, onFleetSuspended } = build();
     await svc.onModuleInit();

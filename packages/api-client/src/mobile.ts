@@ -1569,6 +1569,28 @@ export type SettlePenaltyRequest = z.infer<typeof settlePenaltyRequest>;
 export const settlePenaltyView = paymentView;
 export type SettlePenaltyView = z.infer<typeof settlePenaltyView>;
 
+/**
+ * ADR-022 §P-A · POST /earnings/debt/settle (driver-bff) → body. SALDAR la deuda de comisiones del
+ * conductor por sus viajes en EFECTIVO — la ÚNICA forma de desbloquearse tras cruzar el tope. Solo
+ * métodos DIGITALES (Yape/Plin/Tarjeta/PagoEfectivo): CASH → 400 (BFF) / 422 (servicio), no hay
+ * confirmación bilateral. El `driverId` NO viaja en el body: el BFF lo resuelve de la identidad firmada
+ * (anti-IDOR). `payerRef` es la referencia del pagador en el riel (teléfono/token Yape/Plin), opcional.
+ */
+export const settleDriverDebtRequest = z.object({
+  method: mobileDigitalPaymentMethod,
+  payerRef: z.string().optional(),
+});
+export type SettleDriverDebtRequest = z.infer<typeof settleDriverDebtRequest>;
+
+/**
+ * ADR-022 §P-A · POST /earnings/debt/settle → respuesta: el `paymentView` del cobro de LIQUIDACIÓN de la
+ * deuda (kind=DEBT_SETTLEMENT). `amountCents` = deuda total pendiente; ProntoPaga → PENDING con checkout
+ * a completar (deepLink/QR/urlPay/CIP) + poll; sandbox/live → CAPTURED. Idempotente: re-llamar devuelve el
+ * mismo Payment. Al capturarse, el backend marca las deudas PAID y desbloquea al conductor (async).
+ */
+export const settleDriverDebtView = paymentView;
+export type SettleDriverDebtView = z.infer<typeof settleDriverDebtView>;
+
 /** POST /payments/:id/cash/confirm → body. */
 export const cashConfirmRequest = z.object({ confirmed: z.boolean().optional() });
 export type CashConfirmRequest = z.infer<typeof cashConfirmRequest>;
@@ -2205,6 +2227,14 @@ export const driverProfileView = z.object({
    */
   rejectionReason: z.string().nullable(),
   averageRating: z.number(),
+  /**
+   * ADR-022 §P-A · el conductor está BLOQUEADO por DEUDA de comisiones (cruzó el tope, hold DEBT_BLOCKED en
+   * identity). Derivado en el BFF de `DriverReply.suspensionCauses` (contiene DEBT_BLOCKED). true = no puede
+   * iniciar turno ni recibir viajes hasta SALDAR (POST /earnings/debt/settle); el viaje en curso termina
+   * normal (bloqueo tipo A). Additive/opcional (backward-compat: un BFF viejo lo omite → la app degrada a
+   * derivarlo de `pendingDebtCents >= tope`). El monto a saldar sale de `EarningsSummary.pendingDebtCents`.
+   */
+  debtBlocked: z.boolean().optional(),
   rating: z
     .object({
       rollingAvg30d: z.number(),

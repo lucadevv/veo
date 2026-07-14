@@ -66,6 +66,10 @@ export const envSchema = z.object({
   /// Fracción de la penalidad de cancelación que va al CONDUCTOR como compensación (F2 · BR-T03). El
   /// resto lo retiene la plataforma. Default 0.5 (50/50).
   CANCELLATION_DRIVER_SHARE: z.coerce.number().min(0).max(1).default(0.5),
+  /// ADR-022 §P-A · TOPE de deuda por comisiones de viajes en EFECTIVO (céntimos PEN). Cuando el total PENDING de
+  /// driver_debts de un conductor CRUZA este tope, payment-service emite `driver.debt_exceeded` → identity lo
+  /// bloquea (hold DEBT_BLOCKED) → no recibe viajes nuevos hasta saldar. Default 10000 (S/100). Configurable por env.
+  DRIVER_DEBT_CAP_CENTS: z.coerce.number().int().min(0).default(10000),
   /// Umbral de discrepancia de conciliación que dispara alerta a finanzas (BR-P07). Default 1%.
   RECONCILIATION_ALERT_PCT: z.coerce.number().min(0).max(1).default(0.01),
   /// Red de seguridad del lazo de reembolsos (S5 · BR-P06): un Refund PENDING más viejo que este umbral

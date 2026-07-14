@@ -396,6 +396,51 @@ export class PaymentsRepository {
     return tx.driverDebt.findUnique({ where: { paymentId } });
   }
 
+  // Tope de deuda CASH + liquidación por el rail (ADR-022 §P-A) -----------------------------------------
+
+  /**
+   * Deudas PENDING de un conductor, MÁS VIEJAS primero (FIFO). Réplica (read-heavy: lo consume el settle para el
+   * total + la deuda más vieja que ancla la dedupKey; el índice [driverId, status] lo empuja). El ORDEN por
+   * createdAt asc es determinista (empate por id como desempate estable).
+   */
+  findPendingDebtsByDriver(driverId: string): Promise<DriverDebt[]> {
+    return this.prisma.read.driverDebt.findMany({
+      where: { driverId, status: 'PENDING' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  /**
+   * Igual que `findPendingDebtsByDriver` pero DENTRO de la tx (dato fresco): lo usa (a) el cruce del tope al
+   * acumular la deuda CASH (suma el total PENDING recién creado en la misma tx) y (b) la captura de la
+   * liquidación (marca PAID FIFO). Ordenado createdAt asc para el FIFO.
+   */
+  findPendingDebtsByDriverInTx(tx: PaymentTx, driverId: string): Promise<DriverDebt[]> {
+    return tx.driverDebt.findMany({
+      where: { driverId, status: 'PENDING' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  /**
+   * CAS de saldado DIRECTO de una deuda: PENDING → PAID SOLO si sigue PENDING y con el MISMO monto (`amountCents`).
+   * El monto en el WHERE cierra el lost-update contra un refund concurrente (reverseCashDebtInTx redujo/revirtió la
+   * deuda entre el findMany y este update): si no matchea, count=0 → el caller la SALTA (no la cuenta como saldada,
+   * no cobra de más). Liga el Payment de liquidación (`settledPaymentId`) para conciliación. Idempotente (una
+   * redelivery sobre una deuda ya PAID no matchea PENDING → count=0).
+   */
+  markDriverDebtPaidInTx(
+    tx: PaymentTx,
+    id: string,
+    amountCents: number,
+    settlementPaymentId: string,
+  ): Promise<{ count: number }> {
+    return tx.driverDebt.updateMany({
+      where: { id, status: 'PENDING', amountCents },
+      data: { status: 'PAID', settledPaymentId: settlementPaymentId, settledAt: new Date() },
+    });
+  }
+
   /** Actualiza una deuda de conductor dentro de la tx (reducir / REVERSED / SETTLED→REVERSED). */
   updateDriverDebtInTx(
     tx: PaymentTx,

@@ -573,3 +573,58 @@ describe('IdentityGrpcController · GetDriversByIds (BATCH) expone las CAUSAS de
     expect(reply.drivers.every((d) => d.documentId === '')).toBe(true);
   });
 });
+
+/**
+ * ADR-022 §P-A · GetDriverByUser (driver-rail · el conductor lee SU propio perfil) DEBE proyectar el hold
+ * DEBT_BLOCKED en `suspensionCauses` — el app deriva `debtBlocked` de ahí (driver-bff drivers.mapper). Antes el
+ * include del driver-rail NO traía holds → suspensionCauses SIEMPRE [] → el banner de bloqueo por deuda JAMÁS
+ * aparecía aunque el hold existiera. Estos tests ejercitan el READ REAL (repo real + include real vía buildController),
+ * NO un mock de suspensionCauses — es la clase de bug que un mock de suspensionCauses no caza.
+ */
+describe('IdentityGrpcController · GetDriverByUser proyecta el hold DEBT_BLOCKED (ADR-022 §P-A · fix del read path)', () => {
+  beforeEach(() => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+
+  it('el query del driver-rail INCLUYE los holds ACOTADOS a DEBT_BLOCKED (include real, no todos los holds)', async () => {
+    const { ctrl, driverFindUnique } = buildController({
+      findUnique: () => ({ ...baseDriverRow, suspensionHolds: [] }),
+    });
+
+    await ctrl.getDriverByUser({ id: 'u1' }, signedMetaAs(InternalAudience.DRIVER_RAIL));
+
+    // La FORMA de la query: trae SOLO el hold DEBT_BLOCKED (where acotado), no todos los holds del conductor.
+    expect(driverFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          suspensionHolds: { where: { cause: 'DEBT_BLOCKED' }, select: { cause: true } },
+        }),
+      }),
+    );
+  });
+
+  it('conductor bloqueado por deuda → suspensionCauses = ["DEBT_BLOCKED"] (el banner del app se enciende)', async () => {
+    const ctrl = makeController({
+      findUnique: () => ({
+        ...baseDriverRow,
+        suspendedAt: new Date('2026-07-14T00:00:00.000Z'),
+        suspensionHolds: [{ cause: 'DEBT_BLOCKED' }],
+      }),
+    });
+
+    const reply = await ctrl.getDriverByUser({ id: 'u1' }, signedMetaAs(InternalAudience.DRIVER_RAIL));
+
+    expect(reply.suspensionCauses).toEqual(['DEBT_BLOCKED']);
+    expect(reply.suspendedAt).not.toBe('');
+  });
+
+  it('conductor SIN deuda (0 holds DEBT_BLOCKED) → suspensionCauses = [] (sin banner)', async () => {
+    const ctrl = makeController({
+      findUnique: () => ({ ...baseDriverRow, suspensionHolds: [] }),
+    });
+
+    const reply = await ctrl.getDriverByUser({ id: 'u1' }, signedMetaAs(InternalAudience.DRIVER_RAIL));
+
+    expect(reply.suspensionCauses).toEqual([]);
+  });
+});

@@ -12,7 +12,13 @@
  */
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../infra/prisma.service';
-import { Prisma, BackgroundCheckStatus, DriverStatus, type User } from '../generated/prisma';
+import {
+  Prisma,
+  BackgroundCheckStatus,
+  DriverStatus,
+  SuspensionCause,
+  type User,
+} from '../generated/prisma';
 
 /** Token DI del puerto (inyección por interfaz, no por clase concreta). */
 export const IDENTITY_GRPC_REPO = Symbol('IDENTITY_GRPC_REPO');
@@ -23,9 +29,17 @@ const DRIVER_DETAIL_INCLUDE = {
   suspensionHolds: { select: { cause: true } },
 } satisfies Prisma.DriverInclude;
 
-/** Include del conductor por userId: user (name/kyc/phone), SIN holds (el driver-rail no los consume). */
+/**
+ * Include del conductor por userId (driver-rail · el conductor lee SU propio perfil): user (name/kyc/phone) +
+ * SOLO el hold DEBT_BLOCKED (ADR-022 §P-A). El app deriva `debtBlocked` de `suspensionCauses` (driver-bff
+ * drivers.mapper): sin este include, el driver-rail lo veía SIEMPRE [] → el banner de bloqueo por deuda NUNCA
+ * aparecía aunque el hold existiera. Traemos SOLO DEBT_BLOCKED (no todos los holds — el riel del conductor NO
+ * consume las otras causas: doc/ITV/disciplinaria las gobierna el admin; el badge `suspendedAt` basta para el
+ * bloqueo genérico), minimizando lo que cruza el riel. `where` acotado → 0..1 fila.
+ */
 const DRIVER_WITH_USER_INCLUDE = {
   user: { select: { name: true, kycStatus: true, phone: true } },
+  suspensionHolds: { where: { cause: SuspensionCause.DEBT_BLOCKED }, select: { cause: true } },
 } satisfies Prisma.DriverInclude;
 
 /** Fila de conductor con user + holds vigentes (GetDriver single / GetDriversByIds batch). */

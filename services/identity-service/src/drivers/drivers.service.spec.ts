@@ -79,7 +79,7 @@ const SHIFT_ENTRY_SOURCES = new Set(['OFFLINE', 'ON_BREAK']);
  * CAS. Ambos sumideros empujan al MISMO array `bioChecks`, así la aserción "la auditoría persiste" (#13) es
  * agnóstica al camino: el intento queda registrado venga por la escritura suelta o por la tx de evidencia.
  */
-function makePrisma(driver: unknown, txDriver: unknown = driver) {
+function makePrisma(driver: unknown, txDriver: unknown = driver, opts: { debtHold?: boolean } = {}) {
   const bioChecks: unknown[] = [];
   const recordBioCheck = async (args: unknown) => {
     bioChecks.push(args);
@@ -97,7 +97,14 @@ function makePrisma(driver: unknown, txDriver: unknown = driver) {
     !tx?.suspendedAt && SHIFT_ENTRY_SOURCES.has(tx?.currentStatus ?? '') && txHasEmbedding;
   return {
     bioChecks,
-    read: { driver: { findUnique: async () => driver } },
+    read: {
+      driver: { findUnique: async () => driver },
+      // ADR-022 §P-A · startShift consulta hasDebtBlockHold cuando el conductor viene suspendido, para dar el
+      // mensaje "saldá tu deuda" en vez del genérico. Default null (sin hold de deuda); `debtHold:true` lo simula.
+      driverSuspensionHold: {
+        findUnique: async () => (opts.debtHold ? { driverId: 'd1' } : null),
+      },
+    },
     write: {
       driver: { update: async () => ({}) },
       biometricCheck: { create: recordBioCheck },
@@ -1028,7 +1035,12 @@ function makeHoldPrisma(
     outbox,
     deriveSuspendedAt,
     prisma: {
-      read: { driver: { findUnique: async () => driverRow() } },
+      read: {
+        driver: { findUnique: async () => driverRow() },
+        // ADR-022 §P-A · hasDebtBlockHold (startShift) lee el hold por natural key desde la réplica → reusa el
+        // holdClient (refleja el array `holds`), así el mensaje "saldá tu deuda" es fiel al estado real de holds.
+        driverSuspensionHold: holdClient,
+      },
       write: {
         driver: { findUnique: tx.driver.findUnique },
         driverSuspensionHold: holdClient,
@@ -3003,5 +3015,95 @@ describe('DriversService · techo de abuso del enrol + destrabe de central (F3)'
       policies,
     );
     await expect(svc.clearBiometricLockout('d1')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('ADR-022 §P-A · bloqueo/desbloqueo por DEUDA (hold DEBT_BLOCKED)', () => {
+  it('blockForDebt agrega un hold DEBT_BLOCKED (causeRef vacío), deriva suspendedAt y reporta created', async () => {
+    const { prisma, holds } = makeHoldPrisma();
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    const applied = await svc.blockForDebt('d1', 10200, 10000);
+    expect(applied).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]).toMatchObject({ driverId: 'd1', cause: 'DEBT_BLOCKED', causeRef: '' });
+  });
+
+  it('blockForDebt es IDEMPOTENTE: si YA tiene el hold DEBT_BLOCKED → no crea otro NI reporta created', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('DEBT_BLOCKED', '', '2026-07-10T00:00:00.000Z')],
+    });
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    const applied = await svc.blockForDebt('d1', 20000, 10000);
+    expect(applied).toBe(false);
+    expect(holds).toHaveLength(1);
+  });
+
+  it('blockForDebt NO emite driver.suspended (bloqueo tipo A: no revoca la sesión)', async () => {
+    const { prisma, outbox } = makeHoldPrisma();
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    await svc.blockForDebt('d1', 10200, 10000);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it('blockForDebt conductor inexistente → no-op false, sin holds', async () => {
+    const { prisma, holds } = makeHoldPrisma({ driverExists: false });
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    const applied = await svc.blockForDebt('d1', 10200, 10000);
+    expect(applied).toBe(false);
+    expect(holds).toHaveLength(0);
+  });
+
+  it('clearDebtBlock quita SOLO el hold DEBT_BLOCKED y deriva suspendedAt=null (sin otros holds)', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [hold('DEBT_BLOCKED', '', '2026-07-10T00:00:00.000Z')],
+    });
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    const applied = await svc.clearDebtBlock('d1');
+    expect(applied).toBe(true);
+    expect(holds).toHaveLength(0);
+  });
+
+  it('clearDebtBlock NUNCA toca otras causas: con DEBT_BLOCKED + DISCIPLINARY, quita solo el de deuda (sigue suspendido)', async () => {
+    const { prisma, holds } = makeHoldPrisma({
+      initialHolds: [
+        hold('DEBT_BLOCKED', '', '2026-07-10T00:00:00.000Z'),
+        hold('DISCIPLINARY', '', '2026-07-11T00:00:00.000Z'),
+      ],
+    });
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    const applied = await svc.clearDebtBlock('d1');
+    expect(applied).toBe(true);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]?.cause).toBe('DISCIPLINARY');
+  });
+
+  it('clearDebtBlock es IDEMPOTENTE: sin hold de deuda → no-op false', async () => {
+    const { prisma } = makeHoldPrisma();
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    const applied = await svc.clearDebtBlock('d1');
+    expect(applied).toBe(false);
+  });
+
+  it('clearDebtBlock NO emite driver.reactivated (dispatch reincorpora con el mismo debt_cleared)', async () => {
+    const { prisma, outbox } = makeHoldPrisma({
+      initialHolds: [hold('DEBT_BLOCKED', '', '2026-07-10T00:00:00.000Z')],
+    });
+    const svc = new DriversService(new DriversRepository(prisma as never), makeRedis() as never, bio, sessions, config, policies);
+    await svc.clearDebtBlock('d1');
+    expect(outbox).toHaveLength(0);
+  });
+
+  it('startShift bloqueado por DEUDA → ForbiddenError con motivo claro (saldá tu deuda)', async () => {
+    const svc = new DriversService(
+      new DriversRepository(
+        makePrisma({ ...okDriver, suspendedAt: new Date() }, undefined, { debtHold: true }) as never,
+      ),
+      makeRedis({ sessions: session('ok') }) as never,
+      bio,
+      sessions,
+      config,
+      policies,
+    );
+    await expect(svc.startShift('u1', { sessionRef: 'ok' })).rejects.toThrow(/deuda/i);
   });
 });

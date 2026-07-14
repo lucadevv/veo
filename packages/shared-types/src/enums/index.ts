@@ -448,5 +448,12 @@ export const SuspensionCause = {
   RATING_LOW: 'RATING_LOW',
   EXCESSIVE_CANCELLATIONS: 'EXCESSIVE_CANCELLATIONS',
   CATEGORY_DISABLED: 'CATEGORY_DISABLED',
+  /// DEBT_BLOCKED (ADR-022 §P-A): el conductor cruzó el TOPE de deuda por comisiones de viajes en EFECTIVO. La
+  /// DECIDE payment-service (`driver.debt_exceeded`) e identity la materializa como hold PERMANENTE. Reactivación
+  /// AUTOMÁTICA y EXCLUSIVA: SOLO la levanta `driver.debt_cleared` (el conductor saldó por el rail) — NO el override
+  /// de compliance del operador (saldar es la única forma; reactivar sin cobrar reabriría el hueco), NI el sweeper
+  /// de expiración (es permanente). Distinto de DISCIPLINARY: NO revoca la sesión (el viaje EN CURSO se termina
+  /// normal · bloqueo tipo A), solo saca del pool + bloquea el próximo turno.
+  DEBT_BLOCKED: 'DEBT_BLOCKED',
 } as const;
 export type SuspensionCause = (typeof SuspensionCause)[keyof typeof SuspensionCause];

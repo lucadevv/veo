@@ -76,6 +76,11 @@ enum SuspensionCause {
   // (p.ej. "VEO Moto" off → un MOTO ya no tiene oferta operable). Hold PERMANENTE (sin expiresAt); se levanta
   // SOLO cuando la clase vuelve a ser operable (evento de fleet), NUNCA por el override de compliance ni el sweeper.
   CATEGORY_DISABLED
+  // ADR-022 §P-A · el conductor cruzó el TOPE de deuda por comisiones de viajes en EFECTIVO (lo decide
+  // payment-service · `driver.debt_exceeded`). Hold PERMANENTE (sin expiresAt); se levanta SOLO cuando salda por el
+  // rail (`driver.debt_cleared`), NUNCA por el override de compliance del operador ni el sweeper. NO revoca la
+  // sesión (el viaje EN CURSO se termina normal · bloqueo tipo A), a diferencia de DISCIPLINARY.
+  DEBT_BLOCKED
 
   @@schema("identity")
 }

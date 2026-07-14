@@ -28,6 +28,8 @@ import {
   driverFlagged,
   driverExcessiveCancellations,
   driverSuspended,
+  driverDebtExceeded,
+  driverDebtCleared,
   FLAG_REASON,
   type EventEnvelope,
   type EventHandler,
@@ -62,6 +64,15 @@ const DRIVER_EXCESSIVE_CANCELLATIONS = 'driver.excessive_cancellations';
  * Distinto de `DRIVER_SUSPENDED` ('fleet.driver_suspended', suspensión AUTOMÁTICA de fleet, otra vía/otro topic).
  */
 const DRIVER_SUSPENDED_SELF = 'driver.suspended';
+/**
+ * ADR-022 §P-A · eventos que emite PAYMENT-service (dueño de la DEUDA) cuando un conductor cruza / salda el tope de
+ * deuda por comisiones CASH. `topicForEvent` los mapea al topic 'driver' (cortan antes del punto) — el MISMO al que
+ * este consumer ya está suscrito por driver.flagged/suspended → solo agregan sus handlers. identity es el dueño del
+ * ESTADO: materializa/quita el hold DEBT_BLOCKED (→ `Driver.suspendedAt` derivado) que el gate de startShift y el
+ * eligibility gate de dispatch/booking ya honran. dispatch consume los MISMOS eventos para la exclusión del pool.
+ */
+const DRIVER_DEBT_EXCEEDED = 'driver.debt_exceeded';
+const DRIVER_DEBT_CLEARED = 'driver.debt_cleared';
 
 /**
  * Mapea el desenlace de dominio del reseal a su label de negocio de `domain_events_total` (cero strings mágicos;
@@ -112,11 +123,13 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
       [DRIVER_FLAGGED]: (env) => this.onDriverFlagged(env),
       [DRIVER_EXCESSIVE_CANCELLATIONS]: (env) => this.onDriverExcessiveCancellations(env),
       [DRIVER_SUSPENDED_SELF]: (env) => this.onDriverSuspendedReseal(env),
+      [DRIVER_DEBT_EXCEEDED]: (env) => this.onDriverDebtExceeded(env),
+      [DRIVER_DEBT_CLEARED]: (env) => this.onDriverDebtCleared(env),
     };
   }
 
   protected override subscriptionLog(): string {
-    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED}, ${DRIVER_FLAGGED}, ${DRIVER_EXCESSIVE_CANCELLATIONS}, ${DRIVER_SUSPENDED_SELF})`;
+    return `Consumidor de ciclo de cumplimiento del conductor iniciado (${DRIVER_SUSPENDED}, ${DRIVER_REACTIVATED}, ${DRIVER_FLAGGED}, ${DRIVER_EXCESSIVE_CANCELLATIONS}, ${DRIVER_SUSPENDED_SELF}, ${DRIVER_DEBT_EXCEEDED}, ${DRIVER_DEBT_CLEARED})`;
   }
 
   private async onDriverSuspended(env: EventEnvelope<unknown>): Promise<void> {
@@ -351,6 +364,56 @@ export class DriverSuspensionConsumer extends KafkaConsumerBootstrap {
         `Falló el reseal de revocación (backstop) del conductor ${driverId}`,
       );
       throw err; // que Kafka reintente; el reseal es idempotente y monotónico (no corrompe al reprocesar).
+    }
+  }
+
+  /**
+   * ADR-022 §P-A · BLOQUEO por DEUDA: payment-service reportó que el conductor cruzó el tope de deuda CASH. identity
+   * materializa el hold DEBT_BLOCKED (→ `Driver.suspendedAt`) que bloquea el próximo turno + el accept/oferta. NO
+   * revoca la sesión (bloqueo tipo A: el viaje en curso se termina normal); la exclusión del pool la hace dispatch
+   * con el MISMO evento. Idempotente (el @@unique del hold). Un error de DB es transitorio → relanza → Kafka reintenta.
+   */
+  private async onDriverDebtExceeded(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = driverDebtExceeded.safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn(`${DRIVER_DEBT_EXCEEDED} con payload inválido; descartado`);
+      return;
+    }
+    const { driverId, totalDebtCents, thresholdCents } = parsed.data;
+    try {
+      const applied = await this.drivers.blockForDebt(driverId, totalDebtCents, thresholdCents);
+      if (applied) {
+        this.logger.log(
+          `Conductor ${driverId} bloqueado por deuda de comisiones (${totalDebtCents}c > ${thresholdCents}c)`,
+        );
+      }
+    } catch (err) {
+      this.logger.error({ err }, `Falló el bloqueo por deuda del conductor ${driverId}`);
+      throw err; // que Kafka reintente; blockForDebt es idempotente (@@unique del hold).
+    }
+  }
+
+  /**
+   * ADR-022 §P-A · DESBLOQUEO por DEUDA: el conductor SALDÓ por el rail (payment capturó la liquidación). identity
+   * quita el hold DEBT_BLOCKED y recomputa `suspendedAt` (si quedan otros holds, sigue suspendido). NO emite
+   * `driver.reactivated`: dispatch reincorpora al pool con el MISMO evento (holds-aware). Idempotente (borrar 0 =
+   * no-op). Un error de DB es transitorio → relanza → Kafka reintenta.
+   */
+  private async onDriverDebtCleared(env: EventEnvelope<unknown>): Promise<void> {
+    const parsed = driverDebtCleared.safeParse(env.payload);
+    if (!parsed.success) {
+      this.logger.warn(`${DRIVER_DEBT_CLEARED} con payload inválido; descartado`);
+      return;
+    }
+    const { driverId } = parsed.data;
+    try {
+      const applied = await this.drivers.clearDebtBlock(driverId);
+      if (applied) {
+        this.logger.log(`Conductor ${driverId} desbloqueado: saldó su deuda de comisiones`);
+      }
+    } catch (err) {
+      this.logger.error({ err }, `Falló el desbloqueo por deuda del conductor ${driverId}`);
+      throw err; // que Kafka reintente; clearDebtBlock es idempotente (borrar 0 holds = no-op).
     }
   }
 }

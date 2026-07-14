@@ -168,6 +168,9 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'driver.suspended': ['driverId', 'suspendedAt'], // reason z.string LIBRE → FUERA
   'driver.resubmitted': ['driverId', 'userId', 'resubmittedAt'],
   'driver.reactivated': ['driverId', 'reactivatedAt'],
+  // ADR-022 §P-A · bloqueo/desbloqueo por deuda CASH: montos + tope + marca temporal (todo NUMÉRICO/id, cero PII).
+  'driver.debt_exceeded': ['driverId', 'totalDebtCents', 'thresholdCents', 'at'],
+  'driver.debt_cleared': ['driverId', 'at'],
   'driver.excessive_cancellations': ['driverId', 'count', 'windowStart', 'occurredAt'],
   'biometric.failed': ['driverId', 'score', 'attempt', 'at'],
   'biometric.enrolled': ['driverId', 'userId', 'livenessChecked', 'score', 'at'],
@@ -197,6 +200,15 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   ],
   // `by` es z.enum (PASSENGER/DRIVER/SYSTEM) → SEGURO; `reason` es z.string().optional() LIBRE → FUERA
   'trip.cancelled': ['tripId', 'by', 'penaltyCents', 'driverId', 'passengerId'],
+  // RC5 · el destino (geo) queda FUERA (PII de ubicación); solo ids + childMode + tarifas numéricas para la traza.
+  'trip.destination_changed': [
+    'tripId',
+    'passengerId',
+    'driverId',
+    'previousFareCents',
+    'fareCents',
+    'childMode',
+  ],
   'trip.child_code_failed': ['tripId', 'driverId', 'passengerId', 'attempt', 'at'],
   // `fromStatus` es z.string LIBRE → FUERA (el estado del watchdog se infiere de la action/recurso)
   'trip.expired': ['tripId', 'passengerId', 'driverId', 'staleMinutes', 'at'],
@@ -331,6 +343,8 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   // ── pánico — geo se descarta (lo aporta la columna/forense vía resourceId); contactIds NO (PII de terceros) ──
   'panic.triggered': ['panicId', 'tripId', 'passengerId', 'triggeredAt'], // dedupKey z.string LIBRE → FUERA
   'panic.acknowledged': ['panicId', 'tripId', 'passengerId', 'operatorId', 'ackAt'],
+  'panic.dispatched': ['panicId', 'tripId', 'passengerId', 'operatorId', 'at'],
+  'panic.escalated': ['panicId', 'tripId', 'passengerId', 'operatorId', 'at'],
   // `status` es z.enum (RESOLVED/FALSE_ALARM) → SEGURO
   'panic.resolved': ['panicId', 'tripId', 'passengerId', 'status', 'resolvedBy', 'at'],
   'panic.fanout_requested': ['panicId', 'tripId', 'passengerId'], // geo/contactIds/shareLink NO

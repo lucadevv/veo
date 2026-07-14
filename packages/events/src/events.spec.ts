@@ -686,3 +686,24 @@ describe('booking.cancelled · contrato aditivo (oferta + booking individual)', 
     expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);
   });
 });
+
+describe('ADR-022 §P-A · driver.debt_exceeded / driver.debt_cleared (tope de deuda CASH)', () => {
+  it('driver.debt_exceeded válido → parsea; ambos eventos caen en el topic "driver" (ciclo de vida)', () => {
+    const ok = { driverId: 'd1', totalDebtCents: 10200, thresholdCents: 10000, at: '2026-07-14T00:00:00.000Z' };
+    expect(EVENT_SCHEMAS['driver.debt_exceeded'].safeParse(ok).success).toBe(true);
+    expect(topicForEvent('driver.debt_exceeded')).toBe('driver');
+    expect(topicForEvent('driver.debt_cleared')).toBe('driver');
+  });
+
+  it('driver.debt_exceeded rechaza montos negativos o campos faltantes (fail-closed)', () => {
+    const base = { driverId: 'd1', totalDebtCents: 10200, thresholdCents: 10000, at: '2026-07-14T00:00:00.000Z' };
+    expect(EVENT_SCHEMAS['driver.debt_exceeded'].safeParse({ ...base, totalDebtCents: -1 }).success).toBe(false);
+    const { thresholdCents: _omit, ...sinThreshold } = base;
+    expect(EVENT_SCHEMAS['driver.debt_exceeded'].safeParse(sinThreshold).success).toBe(false);
+  });
+
+  it('driver.debt_cleared válido → parsea; rechaza sin driverId', () => {
+    expect(EVENT_SCHEMAS['driver.debt_cleared'].safeParse({ driverId: 'd1', at: '2026-07-14T00:00:00.000Z' }).success).toBe(true);
+    expect(EVENT_SCHEMAS['driver.debt_cleared'].safeParse({ at: '2026-07-14T00:00:00.000Z' }).success).toBe(false);
+  });
+});

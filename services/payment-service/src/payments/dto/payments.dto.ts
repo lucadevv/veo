@@ -166,6 +166,32 @@ export class SettlePenaltyDto {
   payerRef?: string;
 }
 
+/**
+ * ADR-022 §P-A · Saldar la deuda de comisiones del conductor por el rail (la ÚNICA forma de desbloquearse tras
+ * cruzar el tope). Solo métodos DIGITALES; CASH → 422 en el servicio (no hay confirmación bilateral). El `driverId`
+ * es de PERFIL y se VALIDA contra la identidad firmada del riel (assertDriverOwnsResource) → un conductor solo
+ * salda SU deuda (anti-IDOR).
+ */
+export class SettleDriverDebtDto {
+  @ApiProperty({ description: 'Id de PERFIL del conductor que salda su deuda (debe coincidir con la identidad firmada)' })
+  @IsUUID()
+  driverId!: string;
+
+  @ApiProperty({
+    enum: PaymentMethod,
+    description: 'Método DIGITAL de pago de la deuda (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.',
+  })
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
+
+  @ApiPropertyOptional({
+    description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)',
+  })
+  @IsOptional()
+  @IsString()
+  payerRef?: string;
+}
+
 export class RefundDto {
   @ApiProperty({ description: 'Monto a reembolsar en céntimos PEN' })
   @IsInt()

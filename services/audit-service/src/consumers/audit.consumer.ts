@@ -113,6 +113,20 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'driver',
         resourceId: p.driverId,
       })),
+      // ADR-022 §P-A · BLOQUEO por DEUDA (tope de comisiones CASH): mutación de negocio con impacto financiero →
+      // traza inmutable al WORM (Ley 29733). Lo decide payment-service; actor=recurso=driverId (el sujeto del
+      // bloqueo, igual que driver.suspended — el payload no porta operador porque NO lo hay: es automático).
+      'driver.debt_exceeded': this.audited('driver.debt_exceeded', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'driver',
+        resourceId: p.driverId,
+      })),
+      // ADR-022 §P-A · DESBLOQUEO por DEUDA (el conductor saldó por el rail): inversa del anterior, mismo patrón.
+      'driver.debt_cleared': this.audited('driver.debt_cleared', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'driver',
+        resourceId: p.driverId,
+      })),
       // APERTURA de la sesión de turno (OFFLINE→AVAILABLE, ya pasado el gate biométrico): mutación deliberada
       // → WORM. Par de apertura del ciclo de sesión. actor=recurso=driverId (el sujeto que abrió su turno).
       'driver.went_online': this.audited('driver.went_online', (p) => ({
@@ -185,6 +199,18 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       // acknowledged) y sobre QUÉ panic. Cierra la cadena triggered→acknowledged→resolved en el WORM.
       'panic.resolved': this.audited('panic.resolved', (p) => ({
         actorId: p.resolvedBy,
+        resourceType: 'panic',
+        resourceId: p.panicId,
+      })),
+      // Respuesta operativa del operador sobre una alerta ACTIVA (despachó unidad / escaló a autoridades): traza
+      // de QUIÉN respondió (operatorId) sobre QUÉ panic. Completan la línea de tiempo del incidente en el WORM.
+      'panic.dispatched': this.audited('panic.dispatched', (p) => ({
+        actorId: p.operatorId,
+        resourceType: 'panic',
+        resourceId: p.panicId,
+      })),
+      'panic.escalated': this.audited('panic.escalated', (p) => ({
+        actorId: p.operatorId,
         resourceType: 'panic',
         resourceId: p.panicId,
       })),
@@ -344,6 +370,14 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       })),
       'trip.completed': this.audited('trip.completed', (p) => ({
         actorId: p.driverId ?? 'system',
+        resourceType: 'trip',
+        resourceId: p.tripId,
+      })),
+      // RC5 (ADR-022) · el pasajero REESCRIBIÓ el destino pre-start (seguridad del menor en modo niño): mutación
+      // deliberada del viaje → WORM. actor=passengerId (el dueño que cambió), recurso=trip/tripId. El destino (geo)
+      // y las tarifas free-numeric quedan FUERA del allowlist (solo tripId + childMode + ids para la traza).
+      'trip.destination_changed': this.audited('trip.destination_changed', (p) => ({
+        actorId: p.passengerId ?? 'system',
         resourceType: 'trip',
         resourceId: p.tripId,
       })),

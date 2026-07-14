@@ -74,6 +74,12 @@ enum PaymentMode {
 enum PaymentKind {
   FARE
   TIP
+  /// DEBT_SETTLEMENT (ADR-022 §P-A · tope de deuda CASH): cobro DIGITAL con el que el CONDUCTOR salda su deuda de
+  /// comisiones de viajes en efectivo (driver_debts PENDING) para desbloquearse. driverId=NULL a propósito (NO es
+  /// ganancia de viaje → no entra al payout por `findCapturedNonCashPayments`, que no filtra por kind); el conductor
+  /// dueño viaja en `debtSettlementDriverId`. Al CAPTURAR marca sus driver_debts PENDING→PAID y emite
+  /// `driver.debt_cleared`. Los lookups by-trip de la TARIFA filtran `kind=FARE`, así que este cobro no los contamina.
+  DEBT_SETTLEMENT
 
   @@schema("payment")
 }
@@ -208,9 +214,15 @@ model Payment {
   failureReason   String?       @map("failure_reason")
   /// Referencia del pagador en el riel (teléfono/token Yape-Plin). PII mínima.
   payerRef        String?       @map("payer_ref")
-  /// A1 (ADR-022) · Clase del cobro (FARE tarifa | TIP propina digital dedicada). Ver `enum PaymentKind`.
-  /// Los lookups by-trip de la TARIFA (refund, recibo) filtran `kind = FARE` para no agarrar un cobro de propina.
+  /// A1 (ADR-022) · Clase del cobro (FARE tarifa | TIP propina digital dedicada | DEBT_SETTLEMENT liquidación de
+  /// deuda del conductor). Ver `enum PaymentKind`. Los lookups by-trip de la TARIFA (refund, recibo) filtran
+  /// `kind = FARE` para no agarrar un cobro de propina ni de liquidación de deuda.
   kind            PaymentKind   @default(FARE)
+  /// DEBT_SETTLEMENT (ADR-022 §P-A) · id de PERFIL del conductor cuya deuda de comisiones salda este cobro. Solo
+  /// seteado en cobros kind=DEBT_SETTLEMENT (NULL en FARE/TIP). El `driverId` de la fila va NULL a propósito (para
+  /// que la liquidación NO entre al payout como ganancia); este campo preserva a QUIÉN desbloquear al capturar
+  /// (marcar sus driver_debts PENDING→PAID + emitir `driver.debt_cleared`), sin cruzar la identidad por el driverId.
+  debtSettlementDriverId String? @map("debt_settlement_driver_id") @db.Uuid
   /// F2.3 · Si este Payment SALDA una penalidad de cancelación, su id (sino null). Un Payment de
   /// liquidación lleva `driverId=NULL` (no es ganancia de viaje → no entra al payout por aquí; la
   /// compensación del conductor entra vía `collectEarnings` sumando la penalidad COLLECTED). Al
@@ -343,11 +355,16 @@ enum DriverDebtReason {
 }
 
 /// A2 · Estado de una deuda del conductor. PENDING = por netear del payout digital; SETTLED = ya descontada de un
-/// payout; REVERSED = anulada porque el viaje CASH se reembolsó/canceló (el conductor ya no debe esa comisión).
+/// payout; REVERSED = anulada porque el viaje CASH se reembolsó/canceló (el conductor ya no debe esa comisión);
+/// PAID = el conductor la SALDÓ directamente por el rail (Payment kind=DEBT_SETTLEMENT capturado, ADR-022 §P-A tope
+/// de deuda). PAID es distinto de SETTLED a propósito: SETTLED se descontó de un payout digital, PAID lo pagó el
+/// conductor de su bolsillo para desbloquearse. El netting del payout (`findPendingDebtsInTx`) SOLO mira PENDING →
+/// una deuda PAID (o SETTLED/REVERSED) queda fuera del neteo → CERO doble cobro.
 enum DriverDebtStatus {
   PENDING
   SETTLED
   REVERSED
+  PAID
 
   @@schema("payment")
 }
@@ -369,6 +386,8 @@ model DriverDebt {
   status      DriverDebtStatus @default(PENDING)
   /// El Payout donde esta deuda se NETEÓ (SETTLED). Null mientras PENDING. Para conciliación/auditoría.
   settledInPayoutId String?    @map("settled_in_payout_id") @db.Uuid
+  /// El Payment kind=DEBT_SETTLEMENT que SALDÓ esta deuda directamente (status=PAID). Null salvo PAID. Conciliación.
+  settledPaymentId  String?    @map("settled_payment_id") @db.Uuid
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
   settledAt   DateTime?        @map("settled_at") @db.Timestamptz
 

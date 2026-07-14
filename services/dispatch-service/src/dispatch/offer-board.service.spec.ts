@@ -635,6 +635,12 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       vehicleType: VehicleType.CAR,
       originLat: -12.046,
       originLon: -77.043,
+      // El board conserva destino + distancia/duración (del tripBidPosted enriquecido): el conductor pinta
+      // pickup→destino + distancia en la tarjeta de puja sin refetch. El destino también viaja ENGROSADO a ~111m.
+      destLat: -12.093,
+      destLon: -77.046,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
       specialRequests: [SpecialRequest.PET],
     });
   });

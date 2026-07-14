@@ -19,6 +19,10 @@ function buildService() {
       created.push(data);
       return { ...data };
     },
+    // ADR-022 §P-A · captureCash ahora consulta el total PENDING tras acumular la deuda para evaluar el cruce del
+    // tope (maybeEmitDebtExceeded). Con cap=0 (config mock) devolver solo la deuda recién creada basta: el cruce lo
+    // absorbe enqueueOutbox (no-op); acá probamos SOLO que se acumula la DEUDA.
+    findPendingDebtsByDriverInTx: async () => created,
     enqueueOutbox: async () => {},
   };
   const svc = new PaymentsService(

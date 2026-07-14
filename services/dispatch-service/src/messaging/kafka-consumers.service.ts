@@ -85,6 +85,13 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       // frena fail-closed; esto cierra la MEMBRESÍA (no ofertarle a un suspendido que sigue pingeando GPS).
       'driver.suspended': (env) => this.onDriverSuspended(env),
       'driver.reactivated': (env) => this.onDriverReactivated(env),
+      // ADR-022 §P-A · BLOQUEO POR DEUDA (tope de comisiones CASH): payment-service emite `driver.debt_exceeded`/
+      // `driver.debt_cleared` (topic 'driver', ya suscrito). REUSAN el MISMO riel de exclusión del pool que
+      // driver.suspended/reactivated (DriverSuspensionService.onSuspended/onReactivated) — NO es un gate nuevo, es
+      // el mismo con otro disparador. El bloqueo NO reusa `driver.suspended` a propósito: ese evento revoca la
+      // sesión (driver-bff cierra el socket) y mataría el viaje EN CURSO (bloqueo tipo A = el viaje se termina normal).
+      'driver.debt_exceeded': (env) => this.onDriverDebtExceeded(env),
+      'driver.debt_cleared': (env) => this.onDriverDebtCleared(env),
       // Fase B (ADR-021 · B-react) — el conductor pasó a OFFLINE (fin de turno o caída de socket): retira sus
       // ofertas OPEN de los boards (card muere reactiva en el board del pasajero) + lo EVICTA del pool. La
       // REASIGNACIÓN de su viaje pre-recojo la hace trip-service (consume el MISMO evento → trip.reassigning →
@@ -294,6 +301,31 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
   private async onDriverReactivated(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['driver.reactivated'].parse(env.payload);
     await this.withPoisonGuard('driver.reactivated', env.eventId, isPermanentGrpcError, () =>
+      this.suspensionService.onReactivated(p.driverId),
+    );
+  }
+
+  /**
+   * ADR-022 §P-A · BLOQUEO POR DEUDA: el conductor cruzó el tope de comisiones CASH → sale del pool de matching
+   * (misma exclusión que una suspensión: identity ya le seteó `suspendedAt` con el hold DEBT_BLOCKED, así que el
+   * accept/oferta lo frena fail-closed; esto cierra la MEMBRESÍA para no ofertarle de gusto). `driverId` viaja como
+   * member de un SET de Redis (no toca `@db.Uuid`) → sin veneno de tipo; SADD idempotente. Un fallo de Redis es
+   * transitorio → relanza → kafkajs reintenta. El viaje EN CURSO NO se toca (bloqueo tipo A).
+   */
+  private async onDriverDebtExceeded(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['driver.debt_exceeded'].parse(env.payload);
+    await this.suspensionService.onSuspended(p.driverId);
+  }
+
+  /**
+   * ADR-022 §P-A · DESBLOQUEO POR DEUDA: el conductor saldó → reincorpora al pool HOLDS-AWARE (re-valida
+   * `suspendedAt` en identity: si quedó sin holds, limpia la exclusión; si sigue suspendido por otra causa,
+   * permanece excluido). Mismo riel que `driver.reactivated`. Error gRPC transitorio relanza (kafkajs reintenta);
+   * permanente → poison guard (no crash-loop). El TTL de auto-cura respalda la carrera identity↔dispatch.
+   */
+  private async onDriverDebtCleared(env: EventEnvelope<unknown>): Promise<void> {
+    const p = EVENT_SCHEMAS['driver.debt_cleared'].parse(env.payload);
+    await this.withPoisonGuard('driver.debt_cleared', env.eventId, isPermanentGrpcError, () =>
       this.suspensionService.onReactivated(p.driverId),
     );
   }
