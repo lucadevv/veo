@@ -291,3 +291,50 @@ describe('EarningsService.commissionRate', () => {
     expect(get).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('EarningsService.settleDebt', () => {
+  it('proxya a payment /internal/finance/driver-debt/settle con el driverId resuelto+firmado y el método', async () => {
+    const settlementPayment = {
+      id: 'pay-settle-1',
+      tripId: 'trip-9',
+      method: 'YAPE',
+      status: 'PENDING',
+      amountCents: 10000,
+      grossCents: 10000,
+      tipCents: 0,
+      commissionCents: 0,
+      feeCents: 0,
+      externalRef: '',
+      deepLink: 'yape://pay/abc',
+      checkoutExpiresAt: '2026-05-27T15:00:00.000Z',
+    };
+    const grpc = {
+      call: vi.fn(() => Promise.resolve({ id: 'drv-1', userId: 'usr-1', found: true })),
+    };
+    const post = vi.fn(() => Promise.resolve(settlementPayment));
+    const rest = { client: vi.fn(() => ({ post })) };
+    const service = new EarningsService(grpc as never, rest as never);
+
+    const result = await service.settleDebt(identity, { method: 'YAPE', payerRef: '999888777' });
+
+    expect(result).toEqual(settlementPayment);
+    // El driverId NO viene del cliente: se resuelve por gRPC y se FIRMA en la identidad + viaja en el body
+    // (payment lo revalida contra la identidad firmada → anti-IDOR).
+    expect(post).toHaveBeenCalledWith('/internal/finance/driver-debt/settle', {
+      identity: { ...identity, driverId: 'drv-1' },
+      body: { driverId: 'drv-1', method: 'YAPE', payerRef: '999888777' },
+    });
+  });
+
+  it('propaga el error de payment (409 sin deuda / 422 CASH) sin envolverlo', async () => {
+    const boom = new Error('No tenés deuda de comisiones pendiente por saldar');
+    const grpc = {
+      call: vi.fn(() => Promise.resolve({ id: 'drv-1', userId: 'usr-1', found: true })),
+    };
+    const post = vi.fn(() => Promise.reject(boom));
+    const rest = { client: vi.fn(() => ({ post })) };
+    const service = new EarningsService(grpc as never, rest as never);
+
+    await expect(service.settleDebt(identity, { method: 'PLIN' })).rejects.toBe(boom);
+  });
+});

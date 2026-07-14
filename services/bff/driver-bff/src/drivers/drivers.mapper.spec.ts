@@ -102,6 +102,49 @@ describe('buildDriverProfile', () => {
     expect(buildDriverProfile(driver, user, aggregate, docsWith([])).photoUrl).toBeNull();
   });
 
+  it('ADR-022 · debtBlocked=true SOLO si suspensionCauses trae DEBT_BLOCKED', () => {
+    // Sin suspensión (undefined / []) → no bloqueado por deuda.
+    expect(buildDriverProfile(driver, user, aggregate, docsWith([])).debtBlocked).toBe(false);
+    expect(
+      buildDriverProfile(
+        { ...driver, suspensionCauses: [] },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(false);
+    // Suspendido por OTRA causa (documento vencido) → NO es bloqueo por deuda.
+    expect(
+      buildDriverProfile(
+        { ...driver, suspendedAt: '2026-05-01T00:00:00.000Z', suspensionCauses: ['DOCUMENT_EXPIRED'] },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(false);
+    // Hold DEBT_BLOCKED presente (aun coexistiendo con otra causa) → bloqueado por deuda.
+    expect(
+      buildDriverProfile(
+        { ...driver, suspendedAt: '2026-05-01T00:00:00.000Z', suspensionCauses: ['DEBT_BLOCKED'] },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(true);
+    expect(
+      buildDriverProfile(
+        {
+          ...driver,
+          suspendedAt: '2026-05-01T00:00:00.000Z',
+          suspensionCauses: ['DISCIPLINARY', 'DEBT_BLOCKED'],
+        },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(true);
+  });
+
   it('REQUIRED_DRIVER_DOCS = solo los docs que sube el conductor (licencia, SOAT, tarjeta)', () => {
     // BACKGROUND_CHECK (eje identity) e ITV (doc del vehículo) NO son docs del alta del conductor.
     expect(REQUIRED_DRIVER_DOCS).toEqual([

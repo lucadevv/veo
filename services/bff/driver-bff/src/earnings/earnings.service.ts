@@ -14,11 +14,13 @@ import type {
   DriverEarningsSummary,
   DriverPayoutView,
   EarningsSummary,
+  PaymentView,
 } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import type { DriverReply } from '../common/grpc-replies';
 import { dayWindow, monthWindow, weekDailyWindows, weekWindow } from './earnings.windows';
+import type { SettleDebtDto } from './dto/settle-debt.dto';
 
 /** Estado de un payout liquidado (pagado al conductor). El resto se considera pendiente. */
 const PAID_STATUS = 'PROCESSED';
@@ -154,6 +156,24 @@ export class EarningsService {
       pendingDebtCents: balance.pendingDebtCents,
       payouts,
     };
+  }
+
+  /**
+   * ADR-022 §P-A · SALDAR la deuda de comisiones del conductor por sus viajes en EFECTIVO — la ÚNICA forma
+   * de desbloquearse tras cruzar el tope. PROXY del riel del conductor hacia payment-service
+   * (`POST /internal/finance/driver-debt/settle`): resuelve el driverId del conductor autenticado y lo FIRMA
+   * en la identidad interna (HMAC) + lo pone en el body (payment lo revalida contra la identidad firmada →
+   * anti-IDOR: un conductor solo salda SU deuda). Devuelve el Payment de LIQUIDACIÓN con el checkout
+   * (deepLink/QR/urlPay/CIP) igual que un cobro del pasajero; PENDING hasta que el webhook/poll capture.
+   * Idempotente aguas abajo (re-llamar devuelve el mismo Payment). CASH ya lo bloqueó el DTO (400); sin
+   * deuda pendiente → 409 desde payment.
+   */
+  async settleDebt(identity: AuthenticatedUser, dto: SettleDebtDto): Promise<PaymentView> {
+    const { identity: signedIdentity, driverId } = await this.resolveDriver(identity);
+    return this.rest.client('payment').post<PaymentView>('/internal/finance/driver-debt/settle', {
+      identity: signedIdentity,
+      body: { driverId, method: dto.method, payerRef: dto.payerRef },
+    });
   }
 
   /**

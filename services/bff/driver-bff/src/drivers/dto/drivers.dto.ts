@@ -563,6 +563,13 @@ export interface DriverProfileView {
   /** Motivo del último rechazo de antecedentes; null si no está rechazado o no se dio motivo. */
   rejectionReason: string | null;
   averageRating: number;
+  /**
+   * ADR-022 §P-A · true si el conductor está BLOQUEADO por DEUDA de comisiones (hold DEBT_BLOCKED en
+   * identity, derivado de `DriverReply.suspensionCauses`). No puede iniciar turno ni recibir viajes hasta
+   * SALDAR; el viaje en curso termina normal. La app lo usa para el banner de deuda + "Saldar ahora"; el
+   * monto sale de `EarningsSummary.pendingDebtCents`.
+   */
+  debtBlocked: boolean;
   rating: {
     rollingAvg30d: number;
     count30d: number;

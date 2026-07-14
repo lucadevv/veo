@@ -8,6 +8,7 @@ import {
   DriverStatus,
   FleetDocumentStatus,
   FleetDocumentType,
+  SuspensionCause,
 } from '@veo/shared-types';
 import type {
   AggregateReply,
@@ -330,9 +331,17 @@ export function buildDriverProfile(
   // espeja `Driver.faceEnrolledAt`/`faceEmbedding` que identity exige en el gate de aprobación.
   const biometricEnrolled = driver.faceEnrolledAt.length > 0;
 
+  // ADR-022 §P-A · BLOQUEO por DEUDA: identity materializa un hold DEBT_BLOCKED (→ `suspendedAt`) cuando el
+  // conductor cruza el tope de deuda por comisiones CASH. El PORQUÉ viaja en `suspensionCauses` (proto3 →
+  // [] si no está suspendido; opcional en el wire). Lo exponemos como flag propio para que la app muestre
+  // el banner de deuda + "Saldar ahora" en vez del genérico "Cuenta suspendida". FUENTE ÚNICA: identity (el
+  // backend es la verdad); si un día no viajara, la app degrada a derivarlo de `pendingDebtCents >= tope`.
+  const debtBlocked = (driver.suspensionCauses ?? []).includes(SuspensionCause.DEBT_BLOCKED);
+
   return {
     driverId: driver.id,
     userId: driver.userId,
+    debtBlocked,
     // Nombre legal del onboarding (plaintext, NO cifrado — a diferencia del DNI). Misma fuente que el
     // admin (`DriverReply.name` = `legalName`). Es el dato PROPIO del conductor (su saludo), no PII de terceros.
     fullName: emptyToNull(driver.name),
