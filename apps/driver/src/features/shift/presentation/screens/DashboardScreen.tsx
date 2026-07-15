@@ -950,9 +950,15 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         }
       >
         {confirmPendingCash.isSuccess ? (
-          // Feedback EXPLÍCITO de éxito (no depende solo de que el banner desaparezca): "Sí, recibí" →
-          // "¡Cobro registrado! ✓"; "No cobré" → "Reporte enviado".
-          <Text variant="bodyStrong" style={{ color: theme.colors.success }}>
+          // Feedback EXPLÍCITO (no depende solo de que el banner desaparezca): "Sí, recibí" → verde
+          // "¡Cobro registrado! ✓"; "No cobré" NO es un éxito de cobro sino deuda del pasajero → tono
+          // neutro, mensaje que aclara que se le cobrará al pasajero (no perjudica al conductor).
+          <Text
+            variant="bodyStrong"
+            style={{
+              color: confirmPendingCash.variables ? theme.colors.success : theme.colors.ink,
+            }}
+          >
             {confirmPendingCash.variables
               ? t('shift.cashPending.registered')
               : t('shift.cashPending.reported')}

@@ -690,6 +690,10 @@ export class PaymentsService {
           reason,
           // willRetry=false: agotamos reintentos. Señal para bloquear nuevos viajes + alerta central.
           willRetry: false,
+          // passengerId ENRIQUECIDO (opcional en el schema): sin él, notification-service resuelve targets=[]
+          // y el push "tu pago quedó pendiente" (BR-P02) nunca sale. Necesario para el "No cobré" del efectivo
+          // y correcto también para los DEBT digitales (el deudor debe enterarse). El almacén resuelve el token.
+          ...(updated.passengerId ? { passengerId: updated.passengerId } : {}),
         },
       });
       await this.repo.enqueueOutbox(tx, envelope, updated.id);
@@ -1179,8 +1183,23 @@ export class PaymentsService {
       : { passengerConfirmed: confirmed };
     const confirmation = await this.repo.upsertCashConfirmation(tripId, data);
 
-    // Disputa explícita → discrepancia (BR-P03): dispara ticket de soporte vía evento.
+    // "No cobré" del CONDUCTOR (decisión del dueño 2026-07-14): NO es una disputa a soporte — es DEUDA DEL
+    // PASAJERO. El viaje ocurrió y no se pagó → el Payment pasa a DEBT vía `markDebt` (CAS PENDING→DEBT +
+    // emite `payment.failed` con willRetry=false), que lo hace visible al debt gate (`getDebtForPassenger`):
+    // el pasajero no puede pedir otro viaje hasta regularizar, y se netea en su próximo cobro digital. El
+    // conductor no se perjudica (no había plata en mano que repartir). Reason dedicado para distinguirlo de
+    // un cobro digital agotado. El caso `!isDriver` (pasajero disputando) es legacy/no-op: queda como
+    // discrepancia a soporte, sin marcar deuda por dicho del propio deudor.
     if (!confirmed) {
+      if (isDriver) {
+        const debited = await this.markDebt(payment, 'CASH_NOT_COLLECTED');
+        return {
+          tripId,
+          driverConfirmed: confirmation.driverConfirmed,
+          passengerConfirmed: confirmation.passengerConfirmed,
+          status: debited.status,
+        };
+      }
       await this.emitCashDiscrepancy(payment.id, tripId);
       return {
         tripId,

@@ -33,6 +33,7 @@ import type { PromotionsService } from '../src/promotions/promotions.service';
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
 const TRIP = '0192f8a0-0000-7000-8000-0000000000c1';
 const PAX = '0192f8a0-0000-7000-8000-0000000000aa';
+const DRV = '0192f8a0-0000-7000-8000-0000000000bb';
 
 let db: TestDatabase;
 let prisma: PrismaClient;
@@ -63,13 +64,16 @@ function makeConfig(): ConfigService {
   } as unknown as ConfigService;
 }
 
-function chargeCash(opts: { cashCollected?: boolean } = {}) {
+function chargeCash(opts: { cashCollected?: boolean; driverId?: string } = {}) {
   return svc.chargeTripFare({
     tripId: TRIP,
     grossCents: 2000,
     dedupKey: deriveTripChargeDedupKey(TRIP),
     method: 'CASH',
     userId: PAX,
+    // driverId solo cuando el test lo necesita (confirmCash anti-IDOR). Omitirlo por default evita acumular
+    // deuda de comisión del conductor en los tests de captura, que no la testean.
+    driverId: opts.driverId,
     cashCollected: opts.cashCollected,
   });
 }
@@ -181,20 +185,51 @@ describe('chargeTripFare · EFECTIVO con cashCollected (driver confirma al termi
   });
 });
 
-describe('REGLA DE BORDE · un CASH PENDING con driverConfirmed (sin confirmar el pasajero) NO bloquea ni es accionable', () => {
-  it('queda PENDING pero NO es DEBT (no bloquea pedir viajes) y NO es PENDING_ACTION (sin checkout)', async () => {
-    // El conductor cobró y confirmó al terminar; el pasajero NUNCA confirma → el Payment queda PENDING.
-    const payment = await chargeCash({ cashCollected: true });
+describe('REGLA DE BORDE · un CASH PENDING SIN resolver (el conductor aún no confirmó) NO bloquea ni es accionable', () => {
+  it('queda PENDING (driverConfirmed=false) y NO es DEBT ni PENDING_ACTION (sin checkout)', async () => {
+    // Cash creado pero el conductor todavía no tocó "Sí, recibí" ni "No cobré" → driverConfirmed=false.
+    // Mientras esté sin resolver NO debe bloquear al pasajero (no es deuda todavía) ni ser accionable por
+    // él (no tiene checkout: el efectivo se salda en mano, no por un rail). Lo resuelve el conductor.
+    const payment = await chargeCash({});
     expect(payment.status).toBe('PENDING');
     expect(
-      (await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } }))?.driverConfirmed,
-    ).toBe(true);
+      (await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } }))?.driverConfirmed ??
+        false,
+    ).toBe(false);
 
-    // El gate de DEBT y la query de PENDING_ACTION NO lo agarran: un CASH sin external_uid no es accionable
-    // (no tiene checkout) y no es deuda (el conductor ya cobró en mano; no es deuda del pasajero).
     const debt = await svc.getDebtForPassenger(PAX);
     expect(debt.hasDebt).toBe(false); // NO bloquea POST /trips
     expect(debt.totalCents).toBe(0);
     expect(debt.debts).toEqual([]); // ni DEBT ni PENDING_ACTION
+  });
+});
+
+describe('"No cobré" del conductor (confirmed=false) → DEUDA DEL PASAJERO (decisión del dueño 2026-07-14)', () => {
+  it('CASH PENDING + confirmCash(driver,false) → status DEBT + entra al debt gate + emite payment.failed', async () => {
+    // El conductor reporta que el pasajero no pagó. El viaje ocurrió → es deuda del pasajero, no una disputa
+    // a soporte ni una pérdida del conductor. El Payment pasa a DEBT (reusa markDebt) → lo agarra el debt gate.
+    const payment = await chargeCash({ driverId: DRV }); // PENDING sin resolver, con conductor asignado
+    await prisma.outboxEvent.deleteMany({}); // aislar el evento de la falla del ruido de la creación
+
+    const result = await svc.confirmCash(payment.id, DRV, 'driver', false);
+    expect(result.status).toBe('DEBT');
+
+    const after = await svc.getPayment(payment.id);
+    expect(after.status).toBe('DEBT');
+    expect(after.failureReason).toBe('CASH_NOT_COLLECTED');
+
+    // El gate del pasajero AHORA lo bloquea: no puede pedir otro viaje hasta regularizar.
+    const debt = await svc.getDebtForPassenger(PAX);
+    expect(debt.hasDebt).toBe(true);
+    expect(debt.totalCents).toBe(2000);
+    expect(debt.debts.some((d) => d.tripId === TRIP && d.kind === 'DEBT')).toBe(true);
+
+    // Emite payment.failed (willRetry=false) con passengerId → notification puede empujar el push al pasajero.
+    const failed = await prisma.outboxEvent.findFirst({ where: { eventType: 'payment.failed' } });
+    expect(failed).not.toBeNull();
+    const envelope = failed?.envelope as { payload: Record<string, unknown> };
+    expect(envelope.payload.reason).toBe('CASH_NOT_COLLECTED');
+    expect(envelope.payload.willRetry).toBe(false);
+    expect(envelope.payload.passengerId).toBe(PAX);
   });
 });

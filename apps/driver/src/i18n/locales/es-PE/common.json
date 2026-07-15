@@ -572,7 +572,7 @@
       "collected": "Sí, recibí",
       "notCollected": "No cobré",
       "registered": "¡Cobro registrado! ✓",
-      "reported": "Reporte enviado. Ops lo revisa."
+      "reported": "Registrado. El pasajero deberá pagarlo antes de su próximo viaje."
     },
     "goOnline": "Iniciar turno",
     "endShift": "Finalizar turno",
@@ -778,7 +778,7 @@
       "cashReceived": "Sí, recibí",
       "cashNotCollected": "No cobré",
       "cashRegistered": "Cobro registrado ✓",
-      "cashReported": "Reporte enviado",
+      "cashReported": "Registrado. Se le cobrará al pasajero antes de su próximo viaje.",
       "cashError": "No pudimos registrar el cobro. Inténtalo de nuevo.",
       "done": "Listo"
     },

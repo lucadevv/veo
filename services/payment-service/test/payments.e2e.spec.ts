@@ -61,6 +61,7 @@ beforeAll(async () => {
     CANCELLATION_DRIVER_SHARE: 0.5,
     PAYOUT_MIN_CENTS: 1000,
     PAYOUT_STEPUP_CENTS: 500000,
+    DRIVER_DEBT_CAP_CENTS: 10000, // default del env.schema; el ConfigService in-memory no lo auto-aplica
   });
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
   // prisma real (NO mock): read y write apuntan al mismo cliente del contenedor.
