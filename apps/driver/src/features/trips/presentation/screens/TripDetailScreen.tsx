@@ -147,7 +147,7 @@ export const TripDetailScreen = ({ navigation, route }: Props): React.JSX.Elemen
                 <Text variant="footnote" color="inkSubtle">
                   {t('trips.detail.youRated')}
                 </Text>
-                <IconStar size={13} color={theme.colors.inkSubtle} filled />
+                <IconStar size={13} color={theme.colors.warn} filled />
                 <Text variant="footnote" color="inkSubtle" tabular>
                   {myStars.toFixed(1)}
                 </Text>

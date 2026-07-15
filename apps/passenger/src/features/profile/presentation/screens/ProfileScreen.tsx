@@ -407,7 +407,7 @@ export function ProfileScreen(): React.JSX.Element {
                           : t('profile.ratingCountMany', {count: aggregate!.count30d})
                       }`}
                       style={styles.ratingRow}>
-                      <IconStarFilled color={accent} size={16} />
+                      <IconStarFilled color={theme.colors.warn} size={16} />
                       <Text variant="bodyStrong" color="ink" tabular>
                         {ratingScore}
                       </Text>

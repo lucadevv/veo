@@ -7,7 +7,7 @@ import {
   MarkerView,
   ShapeSource,
 } from '@rnmapbox/maps';
-import {passengerMapRoute, RoutePin} from '@veo/ui-kit';
+import { ELEVATION_SHADOW_COLOR,passengerMapRoute, RoutePin} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {StyleSheet, useWindowDimensions, View} from 'react-native';
 import Animated, {
@@ -713,7 +713,7 @@ const styles = StyleSheet.create({
     borderColor: '#D5DCE4',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOpacity: 0.18,
     shadowRadius: 6,
     shadowOffset: {width: 0, height: 2},

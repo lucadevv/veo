@@ -287,6 +287,13 @@ export const driverDarkColors: ThemeColors = {
   divider: '#1C1F27',
 };
 
+/**
+ * Color CANÓNICO de la sombra tintada de la identidad Trust (azul-gris ink): las sombras nunca son
+ * negras puras. Exportado para las sombras custom de las apps (tab bars, sheets, chips de mapa) que
+ * no pasan por `theme.elevation` — una sola fuente, cero hex sueltos.
+ */
+export const ELEVATION_SHADOW_COLOR = '#1A2332';
+
 // Theme de Confianza (día): la elevación se expresa con sombra SUAVE teñida de azul-gris (#1A2332)
 // + borde, no sombras negras pesadas. Opacidades bajas para no ensuciar el lienzo claro.
 const passengerElevation: Elevation = {
@@ -298,21 +305,21 @@ const passengerElevation: Elevation = {
     elevation: 0,
   },
   level1: {
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 3,
     elevation: 2,
   },
   level2: {
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.1,
     shadowRadius: 16,
     elevation: 8,
   },
   level3: {
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOffset: { width: 0, height: 14 },
     shadowOpacity: 0.14,
     shadowRadius: 30,
@@ -331,21 +338,21 @@ const driverElevation: Elevation = {
     elevation: 0,
   },
   level1: {
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 3,
     elevation: 2,
   },
   level2: {
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.1,
     shadowRadius: 16,
     elevation: 8,
   },
   level3: {
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOffset: { width: 0, height: 14 },
     shadowOpacity: 0.14,
     shadowRadius: 30,

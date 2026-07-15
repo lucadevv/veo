@@ -14,7 +14,7 @@ import {
 import { dateTime } from '@/lib/formatters';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
-import { ROLE_LABELS, ROLE_TONE, PERMISSION_LABELS } from '@/lib/roles';
+import { ROLE_LABELS, ROLE_PILL_CLS, ROLE_TONE, type RoleTone, PERMISSION_LABELS } from '@/lib/roles';
 import { AdminTopbar } from '@/components/layout/admin-topbar';
 import { StatusPill } from '@/components/ui/status-pill';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -289,20 +289,12 @@ function Pill({
   tone,
   label,
 }: {
-  tone: 'brand' | 'purple' | 'success' | 'warn' | 'info' | 'neutral';
+  tone: RoleTone;
   label: string;
 }) {
-  const CLS: Record<string, string> = {
-    brand: 'bg-accent/10 text-accent',
-    purple: 'bg-[#7C3AED]/10 text-[#7C3AED]',
-    success: 'bg-success/10 text-success',
-    warn: 'bg-warn/10 text-warn',
-    info: 'bg-[#0097CE]/10 text-[#0097CE]',
-    neutral: 'bg-bg text-ink-muted',
-  };
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${CLS[tone]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${ROLE_PILL_CLS[tone]}`}
     >
       {label}
     </span>

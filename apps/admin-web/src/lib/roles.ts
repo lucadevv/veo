@@ -13,16 +13,31 @@ export const ROLE_LABELS: Record<string, string> = {
 };
 
 /** Tono del chip por rol (color semántico, fiel al board). */
-export const ROLE_TONE: Record<string, 'brand' | 'purple' | 'success' | 'warn' | 'info' | 'neutral'> =
-  {
-    SUPERADMIN: 'brand',
-    ADMIN: 'info',
-    COMPLIANCE_SUPERVISOR: 'purple',
-    FINANCE: 'success',
-    DISPATCHER: 'warn',
-    SUPPORT_L1: 'neutral',
-    SUPPORT_L2: 'neutral',
-  };
+export type RoleTone = 'brand' | 'purple' | 'success' | 'warn' | 'info' | 'neutral';
+
+export const ROLE_TONE: Record<string, RoleTone> = {
+  SUPERADMIN: 'brand',
+  ADMIN: 'info',
+  COMPLIANCE_SUPERVISOR: 'purple',
+  FINANCE: 'success',
+  DISPATCHER: 'warn',
+  SUPPORT_L1: 'neutral',
+  SUPPORT_L2: 'neutral',
+};
+
+/**
+ * Clases del chip por tono — FUENTE ÚNICA (antes copiada en operators/page y operators/[id]).
+ * `info` usa su token (--info); `purple` es el ÚNICO hex sancionado por el board (rol Cumplimiento,
+ * sin token global a propósito: no es parte de la paleta semántica, es el distintivo de ese rol).
+ */
+export const ROLE_PILL_CLS: Record<RoleTone, string> = {
+  brand: 'bg-accent/10 text-accent',
+  purple: 'bg-[#7C3AED]/10 text-[#7C3AED]',
+  success: 'bg-success/10 text-success',
+  warn: 'bg-warn/10 text-warn',
+  info: 'bg-info/10 text-info',
+  neutral: 'bg-bg text-ink-muted',
+};
 
 /** Descripción humana por permiso (columna derecha de "Permisos efectivos"). Slug desconocido → sin desc. */
 export const PERMISSION_LABELS: Record<string, string> = {

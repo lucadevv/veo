@@ -233,7 +233,7 @@ export function SavedPlacesScreen(): React.JSX.Element {
                   key={place.id}
                   title={place.label}
                   subtitle={place.subtitle}
-                  leading={<IconStar color={theme.colors.accent} size={20} />}
+                  leading={<IconStar color={theme.colors.warn} size={20} />}
                   chevron
                   onPress={() =>
                     openEditor({

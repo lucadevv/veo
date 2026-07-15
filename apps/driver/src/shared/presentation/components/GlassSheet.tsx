@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import { ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { useTheme } from '@veo/ui-kit';
+import { ELEVATION_SHADOW_COLOR, useTheme } from '@veo/ui-kit';
 
 export interface GlassSheetProps {
   children?: ReactNode;
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 24,
     borderWidth: 1,
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOpacity: 0.14,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: -12 },

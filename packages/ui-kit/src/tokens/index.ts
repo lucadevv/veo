@@ -16,6 +16,7 @@ export {
   type TextStyleToken,
 } from './typography';
 export {
+  ELEVATION_SHADOW_COLOR,
   passengerTheme,
   driverTheme,
   themes,

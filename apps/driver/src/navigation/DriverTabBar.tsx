@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { hexAlpha, Text, useTheme } from '@veo/ui-kit';
+import { ELEVATION_SHADOW_COLOR, hexAlpha, Text, useTheme } from '@veo/ui-kit';
 
 /** Alto del pill flotante (fila del item + padding del pill), sin el inset inferior. */
 const PILL_HEIGHT = 66;
@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     padding: 6,
-    shadowColor: '#1A2332',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOpacity: 0.14,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 8 },

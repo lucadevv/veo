@@ -22,6 +22,7 @@ const CAUSE_LABEL: Record<SuspensionCause, string> = {
   [SuspensionCause.RATING_LOW]: 'rating bajo',
   [SuspensionCause.EXCESSIVE_CANCELLATIONS]: 'exceso de cancelaciones',
   [SuspensionCause.CATEGORY_DISABLED]: 'clase de servicio desactivada del catálogo',
+  [SuspensionCause.DEBT_BLOCKED]: 'deuda pendiente con VEO',
 };
 
 /**
