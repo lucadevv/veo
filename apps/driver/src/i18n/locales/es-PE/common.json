@@ -1007,7 +1007,40 @@
       "emailEmpty": "No registrado",
       "lockedHint": "Tu nombre proviene de tu verificación de identidad y no se edita aquí.",
       "save": "Guardar cambios",
-      "unavailable": "Por ahora tus datos de contacto no se editan desde la app. Escríbenos a soporte para actualizarlos."
+      "unavailable": "Por ahora tu correo no se edita desde la app. Escríbenos a soporte para actualizarlo."
+    },
+    "phoneChange": {
+      "action": "Cambiar",
+      "title": "Cambiar tu número",
+      "intro": "Te mandamos un código por SMS al número NUEVO para confirmar que es tuyo.",
+      "fieldLabel": "Nuevo número de celular",
+      "fieldPrefix": "+51",
+      "fieldPlaceholder": "9XX XXX XXX",
+      "invalid": "Ingresa un celular peruano válido (9 dígitos, empieza con 9).",
+      "sendCode": "Enviar código",
+      "sending": "Enviando…",
+      "codeIntro": "Te lo enviamos por SMS al {{phone}}.",
+      "codeLabel": "Código de 6 dígitos",
+      "verify": "Confirmar",
+      "verifying": "Confirmando…",
+      "codeInvalid": "Ese código no coincide. Revísalo e inténtalo de nuevo.",
+      "resend": "Reenviar código",
+      "editNumber": "Corregir número",
+      "taken": "Ese número ya está registrado en otra cuenta.",
+      "unavailable": "Por ahora no pudimos procesar el cambio. Inténtalo en un ratito.",
+      "doneTitle": "¡Número actualizado!",
+      "doneBody": "Desde ahora ingresas a VEO con este número."
+    },
+    "deletion": {
+      "entry": "Eliminar mi cuenta",
+      "title": "Derecho al olvido",
+      "body": "Solicitaremos el borrado de tu cuenta y datos personales (Ley N.° 29733). Tienes 30 días de gracia para cancelar la solicitud si cambias de opinión; después, la eliminación es definitiva.",
+      "confirm": "Solicitar eliminación",
+      "keep": "Mantener mi cuenta",
+      "requested": "Solicitud registrada",
+      "graceUntil": "Puedes cancelar la solicitud hasta el {{date}}. Cerraremos tu sesión ahora.",
+      "error": "No pudimos registrar tu solicitud. Inténtalo de nuevo.",
+      "logoutCta": "Cerrar sesión"
     },
     "driverStatus": {
       "OFFLINE": "Desconectado",

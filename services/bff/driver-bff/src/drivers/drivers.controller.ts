@@ -1,7 +1,7 @@
 /**
  * Sesión/onboarding del conductor. Todos los endpoints exigen JWT de tipo 'driver'.
  */
-import { Body, Controller, Get, HttpCode, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import type {
@@ -43,6 +43,14 @@ import {
   type AvatarUploadConfirmed,
   type AvatarUploadTicket,
 } from './dto/presign-avatar.dto';
+import {
+  RequestPhoneChangeDto,
+  VerifyPhoneChangeDto,
+  type DeletionRequested,
+  type PhoneChangeRequested,
+  type PhoneChangeResult,
+} from './dto/phone-link.dto';
+import { RateLimit } from '../common/guards/rate-limit.decorator';
 
 /** Mínimo del response para fijar el status (204) sin acoplar a express/fastify. */
 interface HttpResponseLike {
@@ -275,5 +283,48 @@ export class DriversController {
   @ApiOperation({ summary: 'Pausar turno (ON_BREAK)' })
   pauseShift(@CurrentUser() user: AuthenticatedUser): Promise<DriverShiftStatusResult> {
     return this.drivers.pauseShift(user);
+  }
+
+  // ── Cuenta: cambio de teléfono (phone-link) + derecho al olvido (Ley 29733) ──
+  // Proxies firmados al motor de identity (`/users/me/*`, abierto al riel DRIVER por método).
+  // El userId viaja SIEMPRE en la identidad interna firmada — jamás en el body (anti-IDOR).
+
+  @Post('me/phone/request')
+  @HttpCode(200)
+  // Borde anti-flood SMS del cambio de número: 5 cada 10min por usuario+teléfono+IP (espejo del
+  // public-bff `users.controller`). Capa de borde ADICIONAL al cooldown/lockout propio de identity.
+  @RateLimit({ max: 5, windowMs: 10 * 60_000, by: ['user', 'phone', 'ip'] })
+  @ApiOperation({ summary: 'Solicitar OTP al número NUEVO para cambiar el teléfono del conductor' })
+  requestPhoneChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RequestPhoneChangeDto,
+  ): Promise<PhoneChangeRequested> {
+    return this.drivers.requestPhoneChange(user, dto);
+  }
+
+  @Post('me/phone/verify')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Verificar el OTP y vincular el número NUEVO (pasa a ser el teléfono de login)',
+  })
+  verifyPhoneChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: VerifyPhoneChangeDto,
+  ): Promise<PhoneChangeResult> {
+    return this.drivers.verifyPhoneChange(user, dto);
+  }
+
+  @Post('me/deletion')
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Solicitar borrado de cuenta (derecho al olvido, gracia de 30 días)' })
+  requestDeletion(@CurrentUser() user: AuthenticatedUser): Promise<DeletionRequested> {
+    return this.drivers.requestAccountDeletion(user);
+  }
+
+  @Delete('me/deletion')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Cancelar la solicitud de borrado (dentro de la gracia)' })
+  async cancelDeletion(@CurrentUser() user: AuthenticatedUser): Promise<void> {
+    await this.drivers.cancelAccountDeletion(user);
   }
 }

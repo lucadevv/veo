@@ -4,8 +4,11 @@ import { useSessionStore } from '../../../../core/session/sessionStore';
 import {
   GetProfileUseCase,
   PROFILE_QUERY_KEY,
+  RequestAccountDeletionUseCase,
+  RequestPhoneChangeUseCase,
   UpdateProfileUseCase,
   UploadAvatarUseCase,
+  VerifyPhoneChangeUseCase,
   profileToSessionUser,
   type UpdatePersonalInput,
 } from '../../domain';
@@ -48,5 +51,42 @@ export function useUploadAvatar() {
   return useMutation({
     mutationFn: (file: PickedImage) => new UploadAvatarUseCase(uploader).execute(file),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: PROFILE_QUERY_KEY }),
+  });
+}
+
+/**
+ * Mutación: pide el OTP del CAMBIO de número (`POST /drivers/me/phone/request`). El código va por
+ * SMS al número NUEVO (semántica del dueño); la validación local del formato vive en el use case.
+ */
+export function useRequestPhoneChange() {
+  const { profile } = useRepositories();
+  return useMutation({
+    mutationFn: (phone: string) => new RequestPhoneChangeUseCase(profile).execute(phone),
+  });
+}
+
+/**
+ * Mutación: verifica el OTP y vincula el número NUEVO (`POST /drivers/me/phone/verify`), que pasa a
+ * ser el teléfono de LOGIN. Invalida el perfil para que la pantalla muestre el dato persistido.
+ */
+export function useVerifyPhoneChange() {
+  const { profile } = useRepositories();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ phone, code }: { phone: string; code: string }) =>
+      new VerifyPhoneChangeUseCase(profile).execute(phone, code),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: PROFILE_QUERY_KEY }),
+  });
+}
+
+/**
+ * Mutación: solicita el borrado de cuenta (derecho al olvido, Ley N.° 29733) vía
+ * `POST /drivers/me/deletion`. Devuelve `graceUntil`; el flujo de la pantalla informa la gracia y
+ * cierra la sesión (espejo del pasajero).
+ */
+export function useRequestAccountDeletion() {
+  const { profile } = useRepositories();
+  return useMutation({
+    mutationFn: () => new RequestAccountDeletionUseCase(profile).execute(),
   });
 }

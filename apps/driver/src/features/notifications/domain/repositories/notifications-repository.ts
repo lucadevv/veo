@@ -11,4 +11,8 @@ export interface NotificationsRepository {
    * página (el servidor lo re-estrecha).
    */
   getNotifications(limit?: number): Promise<AppNotification[]>;
+  /** PATCH /notifications/:id/read — marca UN aviso como leído (owner del JWT; ajeno → 404). */
+  markRead(id: string): Promise<void>;
+  /** PATCH /notifications/read-all — marca TODOS mis avisos como leídos. */
+  markAllRead(): Promise<void>;
 }

@@ -22,3 +22,19 @@ export type OnboardResult = DriverOnboardResult;
 export type UpdatePersonalInput = DriverPersonalDataRequest;
 /** Vista de datos personales que devuelve `PATCH /drivers/me/personal` (campos nullables). */
 export type PersonalData = DriverPersonalData;
+
+/**
+ * Respuesta 202 de `POST /drivers/me/deletion` (derecho al olvido, Ley 29733): identity registró la
+ * solicitud y arranca la gracia; `graceUntil` es la fecha ISO hasta la que se puede cancelar.
+ */
+export interface DeletionRequested {
+  graceUntil: string;
+}
+
+/**
+ * Respuesta de `POST /drivers/me/phone/verify`: el número NUEVO quedó vinculado y desde ahora es el
+ * teléfono de LOGIN del conductor (semántica del dueño; el BFF proyecta el perfil de identity a esto).
+ */
+export interface PhoneChanged {
+  phone: string | null;
+}

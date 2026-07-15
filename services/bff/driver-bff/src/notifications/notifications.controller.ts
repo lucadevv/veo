@@ -1,11 +1,11 @@
 /**
  * Notificaciones del conductor. JWT de tipo 'driver'. Siempre filtradas al usuario autenticado.
  */
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import { DriverApi } from '../common/driver-api.decorator';
-import { NotificationsService } from './notifications.service';
+import { NotificationsService, type MarkAllReadResultView } from './notifications.service';
 import { RegisterDeviceTokenDto } from './dto/device-token.dto';
 
 @ApiTags('notifications')
@@ -20,6 +20,22 @@ export class NotificationsController {
   list(@CurrentUser() user: AuthenticatedUser, @Query('limit') limit?: string): Promise<unknown> {
     const parsed = limit ? Number(limit) : undefined;
     return this.notifications.listMine(user, Number.isFinite(parsed) ? parsed : undefined);
+  }
+
+  // 'read-all' se declara ANTES de ':id/read' por higiene de rutas (mismo criterio que
+  // notification-service). El dueño lo deriva el downstream de la identidad firmada, nunca del path.
+  @Patch('read-all')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Marcar TODOS mis avisos como leídos (owner del JWT)' })
+  markAllRead(@CurrentUser() user: AuthenticatedUser): Promise<MarkAllReadResultView> {
+    return this.notifications.markAllRead(user);
+  }
+
+  @Patch(':id/read')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Marcar UN aviso como leído (owner del JWT; anti-IDOR)' })
+  markRead(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
+    return this.notifications.markRead(user, id);
   }
 
   @Post('device-token')

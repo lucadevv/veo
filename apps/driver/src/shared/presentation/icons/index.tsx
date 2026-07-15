@@ -1069,6 +1069,28 @@ export function IconLogout(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Eliminar cuenta / borrar: tacho con tapa (mismo glifo que el pasajero, `IconTrash`). */
+export function IconTrash(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 7h16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M9.5 7V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** Reto / objetivo: diana (círculos concéntricos). */
 export function IconTarget(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);

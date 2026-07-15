@@ -21,7 +21,7 @@ import type { MainTabParamList, RootStackParamList } from '../../../../navigatio
 import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { formatPersonName } from '../../../../shared/presentation/format';
+import { formatPersonName, formatShortDate } from '../../../../shared/presentation/format';
 import {
   IconAccount,
   IconBell,
@@ -32,8 +32,9 @@ import {
   IconLifebuoy,
   IconLogout,
   IconReceipt,
+  IconTrash,
 } from '../../../../shared/presentation/icons';
-import { useProfile } from '../hooks/useProfile';
+import { useProfile, useRequestAccountDeletion } from '../hooks/useProfile';
 import { useLogout } from '../../../../core/session/useLogout';
 import { BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel } from '../labels';
 import { ProfileIdentityCard } from '../components/ProfileIdentityCard';
@@ -57,6 +58,10 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
   const logout = useLogout();
   const tabBarHeight = useDriverTabBarHeight();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Derecho al olvido (Ley 29733): sheet de confirmación → POST /drivers/me/deletion → banner de
+  // gracia + cierre de sesión (espejo del pasajero; el motor y la gracia viven en identity).
+  const [deletionOpen, setDeletionOpen] = useState(false);
+  const deletion = useRequestAccountDeletion();
 
   return (
     <SafeScreen scroll contentContainerStyle={{ paddingBottom: tabBarHeight }}>
@@ -177,6 +182,14 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                 chevron
                 onPress={() => navigation.navigate('Notifications')}
               />
+              {/* Derecho al olvido (Ley 29733): SIEMPRE al final de la sección Cuenta, con el mismo
+                  lenguaje que el pasajero (ícono danger + sheet de confirmación con la gracia). */}
+              <ListItem
+                title={t('profile.deletion.entry')}
+                leading={<IconTrash size={20} color={theme.colors.danger} />}
+                chevron
+                onPress={() => setDeletionOpen(true)}
+              />
             </ListGroup>
           </Reveal>
 
@@ -293,6 +306,62 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           {t('profile.logoutConfirmBody')}
         </Text>
       </BottomSheet>
+
+      {/* Derecho al olvido (Ley 29733). Confirmación → 202 con la gracia → banner de estado y cierre
+          de sesión (la cuenta queda en gracia; se puede cancelar volviendo a ingresar antes de la fecha). */}
+      <BottomSheet
+        visible={deletionOpen}
+        onClose={() => {
+          setDeletionOpen(false);
+          // Si la solicitud ya quedó registrada, cerrar el sheet también cierra la sesión: la app no
+          // debe seguir operando como si nada sobre una cuenta camino al tombstone.
+          if (deletion.isSuccess && !logout.isPending) {
+            logout.mutate();
+          }
+        }}
+        title={t('profile.deletion.title')}
+        footer={
+          deletion.isSuccess ? (
+            <Button
+              label={t('profile.deletion.logoutCta')}
+              variant="primary"
+              loading={logout.isPending}
+              onPress={() => logout.mutate()}
+            />
+          ) : (
+            <View style={styles.sheetFooter}>
+              <Button
+                label={t('profile.deletion.keep')}
+                variant="secondary"
+                onPress={() => setDeletionOpen(false)}
+              />
+              <Button
+                label={t('profile.deletion.confirm')}
+                variant="danger"
+                loading={deletion.isPending}
+                onPress={() => deletion.mutate()}
+              />
+            </View>
+          )
+        }
+      >
+        <View style={styles.deletionBody}>
+          {deletion.isSuccess ? (
+            <Banner
+              tone="success"
+              title={t('profile.deletion.requested')}
+              description={t('profile.deletion.graceUntil', {
+                date: formatShortDate(deletion.data.graceUntil),
+              })}
+            />
+          ) : (
+            <Text variant="callout" color="inkMuted">
+              {t('profile.deletion.body')}
+            </Text>
+          )}
+          {deletion.isError ? <Banner tone="danger" title={t('profile.deletion.error')} /> : null}
+        </View>
+      </BottomSheet>
     </SafeScreen>
   );
 };
@@ -301,6 +370,7 @@ const styles = StyleSheet.create({
   section: { gap: 16, paddingTop: 8 },
   sectionLabel: { marginBottom: 8 },
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  deletionBody: { gap: 12 },
   logout: {
     flexDirection: 'row',
     alignItems: 'center',

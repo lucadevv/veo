@@ -744,6 +744,59 @@ export class DriversService {
     return `drivers/${driverId}/documents/${type}/${uuidv7()}.${ext}`;
   }
 
+  // ── Cuenta: cambio de teléfono (phone-link) + derecho al olvido (Ley 29733) ──
+  // identity abrió estas rutas `/users/me/*` al riel DRIVER por método (users.controller): son
+  // operaciones a nivel USER con semántica idéntica para pasajero y conductor. El userId lo resuelve
+  // identity de la identidad interna FIRMADA que propaga este BFF — nunca del body (anti-IDOR).
+
+  /**
+   * Solicita el OTP del cambio de número (semántica del dueño: el OTP va al número NUEVO, que al
+   * verificar pasa a ser el de login). identity aplica el cooldown/lockout propio del OTP y rechaza
+   * con PHONE_TAKEN (409) si el número pertenece a otro usuario.
+   */
+  requestPhoneChange(
+    identity: AuthenticatedUser,
+    dto: { phone: string },
+  ): Promise<{ sent: true }> {
+    return this.identity().post<{ sent: true }>('/users/me/phone/request', {
+      identity,
+      body: { phone: dto.phone },
+    });
+  }
+
+  /**
+   * Verifica el OTP y vincula el número NUEVO (reemplaza el anterior; el AuthMethod PHONE_OTP queda
+   * sobre la identidad → el próximo login es con este número). identity devuelve su ProfileView
+   * completo (shape del pasajero); acá se PROYECTA a lo único que la app del conductor consume.
+   */
+  async verifyPhoneChange(
+    identity: AuthenticatedUser,
+    dto: { phone: string; code: string },
+  ): Promise<{ phone: string | null }> {
+    const profile = await this.identity().post<{ phone: string | null }>(
+      '/users/me/phone/verify',
+      { identity, body: { phone: dto.phone, code: dto.code } },
+    );
+    return { phone: profile.phone };
+  }
+
+  /**
+   * Solicita el borrado de cuenta (derecho al olvido, BR-S06 · Ley 29733). identity marca
+   * `deletionRequestedAt`, emite `user.deletion_requested` y devuelve el fin de la gracia; vencida la
+   * gracia, el DeletionSweeper aplica el tombstone (anonimiza, borra biometría, revoca sesiones).
+   */
+  requestAccountDeletion(identity: AuthenticatedUser): Promise<{ graceUntil: string }> {
+    return this.identity().post<{ graceUntil: string }>('/users/me/deletion', {
+      identity,
+      body: {},
+    });
+  }
+
+  /** Cancela la solicitud de borrado dentro de la gracia (limpia `deletionRequestedAt`). */
+  cancelAccountDeletion(identity: AuthenticatedUser): Promise<void> {
+    return this.identity().delete<void>('/users/me/deletion', { identity });
+  }
+
   private identity() {
     return this.rest.client('identity');
   }

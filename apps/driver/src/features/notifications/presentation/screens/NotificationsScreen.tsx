@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,7 +8,7 @@ import { StateView } from '../../../../shared/presentation/components/StateView'
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { useNotifications } from '../hooks/useNotifications';
+import { useMarkAllNotificationsRead, useNotifications } from '../hooks/useNotifications';
 import { NotificationRow } from '../components/NotificationRow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Notifications'>;
@@ -31,15 +31,32 @@ function SkeletonRow(): React.JSX.Element {
 }
 
 /**
- * Centro de avisos del CONDUCTOR (feed in-app). Cierra el seam huérfano: el `driver-bff` ya exponía
- * `GET /notifications` y ninguna pantalla lo consumía (el conductor solo tenía push/FCM). Cubre los
- * cuatro estados —carga (skeleton) / error (reintentable) / vacío / lista— sobre `GetNotificationsUseCase`.
- * Vacío HONESTO: el feed está conectado al backend; lista vacía = aún no hay avisos (sin "próximamente").
+ * Centro de avisos del CONDUCTOR (feed in-app). Cubre los cuatro estados —carga (skeleton) / error
+ * (reintentable) / vacío / lista— sobre `GetNotificationsUseCase`. Vacío HONESTO: el feed está
+ * conectado al backend; lista vacía = aún no hay avisos (sin "próximamente").
+ *
+ * LEÍDOS: al ENTRAR con no-leídos se dispara read-all (una vez por visita) — entrar a la bandeja ES
+ * leerla (patrón del pasajero, condensado: allí el gesto es explícito). El borde de acento de las
+ * filas y el punto de la campana del Dashboard se apagan con el estado REAL: la caché solo se marca
+ * leída cuando el server confirma (si el PATCH falla, los no-leídos persisten — honesto).
  */
 export const NotificationsScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const { data, isLoading, isError, error, refetch } = useNotifications();
+  const markAllRead = useMarkAllNotificationsRead();
+
+  // Una sola pasada por visita: cuando el feed llega con no-leídos, se marcan todos como leídos.
+  const markedOnEnter = useRef(false);
+  useEffect(() => {
+    if (markedOnEnter.current || !data) {
+      return;
+    }
+    if (data.some((n) => !n.read)) {
+      markedOnEnter.current = true;
+      markAllRead.mutate();
+    }
+  }, [data, markAllRead]);
 
   const header = <TopBar title={t('notifications.title')} onBack={navigation.goBack} />;
 

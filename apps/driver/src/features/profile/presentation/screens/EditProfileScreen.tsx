@@ -27,6 +27,7 @@ import {
 import { AvatarUploadError } from '../../domain';
 import { useProfile, useUpdateProfile, useUploadAvatar } from '../hooks/useProfile';
 import { ProfileField } from '../components/ProfileField';
+import { PhoneChangeSheet } from '../components/PhoneChangeSheet';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EditProfile'>;
 
@@ -61,9 +62,13 @@ function toPhotoErrorKey(err: unknown): string {
  * foto en el perfil (identity `User.photoUrl`), así que basta con invalidar el query del perfil para
  * refrescar la vista — no hay PATCH aparte (a diferencia del pasajero).
  *
- * DEGRADACIÓN HONESTA del RESTO de campos: `PATCH /drivers/me/personal` es la única mutación de datos
- * personales y exige legalName+dni+birthDate (que `GET /drivers/me` no devuelve), y no hay endpoint para
- * teléfono ni correo → Nombre/Teléfono/Correo quedan en LECTURA y el guardado deshabilitado con una nota.
+ * TELÉFONO: fila ACTIVA con el número actual + acción "Cambiar" → `PhoneChangeSheet` (2 pasos:
+ * número nuevo → OTP de 6 dígitos, `POST /drivers/me/phone/request|verify`). El OTP va al número
+ * NUEVO y, al verificar, ese número pasa a ser el de LOGIN (semántica del dueño).
+ *
+ * DEGRADACIÓN HONESTA del resto: `PATCH /drivers/me/personal` exige legalName+dni+birthDate (que
+ * `GET /drivers/me` no devuelve) y no hay endpoint de correo → Nombre queda bloqueado (KYC), Correo
+ * en lectura, y el guardado deshabilitado con una nota.
  */
 export const EditProfileScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
@@ -76,6 +81,7 @@ export const EditProfileScreen = ({ navigation }: Props): React.JSX.Element => {
   const imagePicker = useImagePicker();
   const uploadAvatar = useUploadAvatar();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [phoneSheetOpen, setPhoneSheetOpen] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
 
   const pickAndUpload = async (source: ImageSource): Promise<void> => {
@@ -195,7 +201,14 @@ export const EditProfileScreen = ({ navigation }: Props): React.JSX.Element => {
         <Reveal delay={90}>
           <View style={styles.fields}>
             <ProfileField label={t('profile.edit.fullName')} value={fullName ?? '—'} locked />
-            <ProfileField label={t('profile.edit.phone')} value={data.phone} />
+            {/* Teléfono ACTIVO: valor actual + "Cambiar" → sheet de 2 pasos (número nuevo → OTP).
+                El número verificado pasa a ser el de LOGIN (semántica del dueño). */}
+            <ProfileField
+              label={t('profile.edit.phone')}
+              value={data.phone}
+              actionLabel={t('profile.phoneChange.action')}
+              onPress={() => setPhoneSheetOpen(true)}
+            />
             <ProfileField
               label={t('profile.edit.email')}
               value={t('profile.edit.emailEmpty')}
@@ -204,6 +217,9 @@ export const EditProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           </View>
         </Reveal>
       </View>
+
+      {/* Cambio de número (2 pasos: número nuevo → OTP). Invalida el perfil al verificar. */}
+      <PhoneChangeSheet visible={phoneSheetOpen} onClose={() => setPhoneSheetOpen(false)} />
 
       <BottomSheet
         visible={sheetOpen}

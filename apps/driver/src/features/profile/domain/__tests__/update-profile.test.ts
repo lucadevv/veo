@@ -1,8 +1,10 @@
 import type {
+  DeletionRequested,
   DriverProfile,
   OnboardInput,
   OnboardResult,
   PersonalData,
+  PhoneChanged,
   ProfileRepository,
   UpdatePersonalInput,
 } from '..';
@@ -35,6 +37,18 @@ class FakeProfileRepository implements ProfileRepository {
   updatePersonal(input: UpdatePersonalInput): Promise<PersonalData> {
     this.calledWith = input;
     return Promise.resolve(RESULT);
+  }
+
+  requestPhoneChange(_phone: string): Promise<void> {
+    throw new Error('no usado');
+  }
+
+  verifyPhoneChange(_phone: string, _code: string): Promise<PhoneChanged> {
+    throw new Error('no usado');
+  }
+
+  requestDeletion(): Promise<DeletionRequested> {
+    throw new Error('no usado');
   }
 }
 

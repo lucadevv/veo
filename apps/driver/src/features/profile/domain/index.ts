@@ -6,3 +6,5 @@ export * from './mappers/session-user';
 export * from './usecases/get-profile';
 export * from './usecases/update-profile';
 export * from './usecases/upload-avatar';
+export * from './usecases/request-account-deletion';
+export * from './usecases/change-phone';

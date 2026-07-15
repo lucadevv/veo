@@ -93,6 +93,15 @@ export class UsersController {
     return this.users.updateProfile(user.userId, dto);
   }
 
+  // ── Operaciones a nivel USER compartidas por AMBOS rieles de cliente (PUBLIC + DRIVER) ──
+  // phone-link y derecho al olvido operan sobre la fila `User` con semántica IDÉNTICA para pasajero y
+  // conductor (el motor ya soporta drivers: el sweeper tombstonea Driver.faceEmbedding/BiometricCheck).
+  // En vez de duplicar rutas espejo en DriversController (el patrón de `me/photo`, que existe porque
+  // PATCH /users/me arrastra campos passenger-only), se abre el riel DRIVER POR MÉTODO: `@Audiences`
+  // es vararg y AudienceGuard acepta cualquiera de la lista; la metadata de handler PISA la de clase
+  // (getAllAndOverride), así el resto del controller sigue siendo PUBLIC_RAIL puro. Anti-IDOR intacto:
+  // el userId sale SIEMPRE de la identidad interna firmada, jamás del body.
+  @Audiences(InternalAudience.PUBLIC_RAIL, InternalAudience.DRIVER_RAIL)
   @Post('me/phone/request')
   @HttpCode(200)
   @ApiOperation({
@@ -105,6 +114,7 @@ export class UsersController {
     return this.phoneLink.request(user.userId, dto.phone);
   }
 
+  @Audiences(InternalAudience.PUBLIC_RAIL, InternalAudience.DRIVER_RAIL)
   @Post('me/phone/verify')
   @HttpCode(200)
   @ApiOperation({
@@ -117,6 +127,7 @@ export class UsersController {
     return this.phoneLink.verify(user.userId, dto.phone, dto.code);
   }
 
+  @Audiences(InternalAudience.PUBLIC_RAIL, InternalAudience.DRIVER_RAIL)
   @Post('me/deletion')
   @HttpCode(202)
   @ApiOperation({ summary: 'Solicitar borrado de cuenta (derecho al olvido, gracia 30 días)' })
@@ -124,6 +135,7 @@ export class UsersController {
     return this.users.requestDeletion(user.userId);
   }
 
+  @Audiences(InternalAudience.PUBLIC_RAIL, InternalAudience.DRIVER_RAIL)
   @Delete('me/deletion')
   @HttpCode(204)
   @ApiOperation({ summary: 'Cancelar la solicitud de borrado (dentro de la gracia)' })
