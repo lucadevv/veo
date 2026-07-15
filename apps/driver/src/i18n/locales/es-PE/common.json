@@ -563,6 +563,17 @@
     "gpsServicesBody": "Estás en turno pero la ubicación del dispositivo está apagada. Sin esto el sistema no te asigna viajes. Activá la ubicación (GPS).",
     "tipReceivedTitle": "¡Recibiste una propina de {{amount}}!",
     "tipReceivedBody": "El 100% es para vos. Ya se sumó a tus ganancias.",
+    "cashPending": {
+      "bannerTitle": "Tienes un cobro en efectivo por confirmar",
+      "bannerBody": "Confirma el cobro de {{amount}} de tu último viaje.",
+      "bannerAction": "Confirmar",
+      "sheetTitle": "Confirmar cobro en efectivo",
+      "sheetBody": "¿Cobraste {{amount}} en efectivo?",
+      "collected": "Sí, recibí",
+      "notCollected": "No cobré",
+      "registered": "¡Cobro registrado! ✓",
+      "reported": "Reporte enviado. Ops lo revisa."
+    },
     "goOnline": "Iniciar turno",
     "endShift": "Finalizar turno",
     "pause": "Pausar",

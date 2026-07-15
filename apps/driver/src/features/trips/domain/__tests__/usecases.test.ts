@@ -95,6 +95,9 @@ class FakeTripsRepository implements TripsRepository {
     this.confirmCashCalls.push({ tripId, collected });
     return Promise.resolve();
   }
+  getPendingCash(): Promise<null> {
+    return Promise.resolve(null);
+  }
   respondWaypoint(
     _tripId: string,
     proposalId: string,

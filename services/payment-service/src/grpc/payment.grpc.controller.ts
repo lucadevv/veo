@@ -28,6 +28,18 @@ interface UserCreditReply {
   balanceCents: number;
 }
 
+interface GetPendingCashByDriverRequest {
+  driverId: string;
+}
+
+interface PendingCashReply {
+  found: boolean;
+  tripId: string;
+  amountCents: number;
+}
+
+const EMPTY_PENDING_CASH: PendingCashReply = { found: false, tripId: '', amountCents: 0 };
+
 interface PaymentReply {
   id: string;
   tripId: string;
@@ -108,6 +120,9 @@ export const GRPC_METHOD_AUDIENCES = {
     InternalAudience.DRIVER_RAIL,
     InternalAudience.ADMIN_RAIL,
   ],
+  // GetPendingCashByDriver: cobro CASH PENDING por confirmar del conductor (banner del dashboard). SOLO el
+  // driver-bff lo consume → mínimo privilegio: driver-rail únicamente (no public/admin/service).
+  GetPendingCashByDriver: [InternalAudience.DRIVER_RAIL],
 } as const satisfies Record<string, readonly Rail[]>;
 
 type GrpcMethodName = keyof typeof GRPC_METHOD_AUDIENCES;
@@ -197,6 +212,24 @@ export class PaymentGrpcController {
     this.requireIdentity('GetUserCredit', metadata);
     const credit = await this.repo.findUserCreditByUser(userId);
     return { balanceCents: credit?.balanceCents ?? 0 };
+  }
+
+  /**
+   * EFECTIVO · cobro CASH PENDING (kind=FARE) MÁS RECIENTE del conductor que quedó SIN confirmar (force-close
+   * post-viaje). Sirve al banner "cobro por confirmar" que persigue al conductor al reabrir la app. `found=false`
+   * si no tiene ninguno. El anti-IDOR (que el driverId sea el del perfil del JWT) vive en el driver-bff, igual
+   * que GetPaymentByTrip. Emitimos `grossCents` como monto a cobrar (bruto del viaje, lo que el pasajero paga en
+   * mano — el descuento de comisión es deuda posterior del conductor, no afecta el efectivo recibido).
+   */
+  @GrpcMethod('PaymentService', 'GetPendingCashByDriver')
+  async getPendingCashByDriver(
+    { driverId }: GetPendingCashByDriverRequest,
+    metadata: Metadata,
+  ): Promise<PendingCashReply> {
+    this.requireIdentity('GetPendingCashByDriver', metadata);
+    const p = await this.repo.findPendingCashByDriver(driverId);
+    if (!p) return EMPTY_PENDING_CASH;
+    return { found: true, tripId: p.tripId, amountCents: p.grossCents };
   }
 
   /** Mapea la fila Payment al contrato gRPC PaymentReply (found=true). */

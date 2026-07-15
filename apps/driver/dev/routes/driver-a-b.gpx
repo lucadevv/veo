@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gpx creator="veo gen-gpx-from-service (mapbox)" version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata>
-    <name>driver-a-b (conductor → recojo)</name>
+    <name>driver-a-b.gpx (dinámico · destino real del viaje)</name>
   </metadata>
   <trk>
-    <name>driver-a-b (conductor → recojo)</name>
+    <name>driver-a-b.gpx (dinámico · destino real del viaje)</name>
     <trkseg>
       <trkpt lat="-12.008193" lon="-77.059937"></trkpt>
       <trkpt lat="-12.008217" lon="-77.060101"></trkpt>
@@ -77,8 +77,7 @@
       <trkpt lat="-12.004510" lon="-77.063477"></trkpt>
       <trkpt lat="-12.004402" lon="-77.063493"></trkpt>
       <trkpt lat="-12.003060" lon="-77.063697"></trkpt>
-      <trkpt lat="-12.002994" lon="-77.063214"></trkpt>
-      <trkpt lat="-12.003281" lon="-77.063166"></trkpt>
+      <trkpt lat="-12.003015" lon="-77.063366"></trkpt>
     </trkseg>
   </trk>
 </gpx>

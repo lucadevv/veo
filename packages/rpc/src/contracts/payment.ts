@@ -34,3 +34,14 @@ export interface PaymentReply {
 export interface UserCreditReply {
   balanceCents: number;
 }
+
+/**
+ * payment.GetPendingCashByDriver / mensaje PendingCashReply — cobro CASH PENDING (kind=FARE) más reciente
+ * del conductor que quedó sin confirmar (force-close post-viaje). `found=false` ⇒ no tiene ninguno
+ * (proto3 sin presence: tripId="" / amountCents=0 cuando found=false).
+ */
+export interface PendingCashReply {
+  found: boolean;
+  tripId: string;
+  amountCents: number;
+}

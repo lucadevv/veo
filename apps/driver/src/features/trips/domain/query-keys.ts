@@ -16,3 +16,6 @@ export const ACTIVE_TRIP_QUERY_KEY = ['trip', 'active'] as const;
 
 /** Clave de caché de la tasa de comisión ON-DEMAND vigente (config global, no depende del viaje). */
 export const COMMISSION_RATE_QUERY_KEY = ['commission', 'rate'] as const;
+
+/** Clave de caché del cobro en EFECTIVO pendiente de confirmar del conductor (banner del dashboard). */
+export const PENDING_CASH_QUERY_KEY = ['trip', 'pending-cash'] as const;

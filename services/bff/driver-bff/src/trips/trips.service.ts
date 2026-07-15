@@ -24,6 +24,7 @@ import type {
   PassengerTripsReply,
   PassengerTripStatsReply,
   PaymentReply,
+  PendingCashReply,
   TripHistoryItem,
   TripReply,
   TripStateReply,
@@ -35,6 +36,7 @@ import type {
   CancelTripDto,
   CashConfirmDto,
   CompleteTripDto,
+  PendingCashView,
   StartTripDto,
   TripHistoryItemView,
   TripHistoryPageView,
@@ -242,6 +244,33 @@ export class TripsService {
       identity,
     );
     return buildTripHistoryPage(page);
+  }
+
+  /**
+   * EFECTIVO (resiliencia del force-close) · cobro CASH PENDING que ESTE conductor dejó sin confirmar. Si el
+   * conductor cerró la app sin confirmar el cobro post-viaje, el Payment quedó PENDING para siempre; este GET
+   * alimenta el banner del dashboard que PERSIGUE la confirmación al reabrir. `null` si no tiene ninguno.
+   *
+   * ANTI-IDOR by construction: el driverId NO viene del cliente — se DERIVA del perfil (GetDriverByUser con el
+   * userId del JWT), igual que getActiveTrip/getTripHistory. `Payment.driverId` es el id de PERFIL del conductor
+   * (viene de Trip.driverId, NO el userId), así que payment resuelve el cobro por ESE id. Sin perfil → null.
+   */
+  async getPendingCash(identity: AuthenticatedUser): Promise<PendingCashView | null> {
+    const driver = await this.grpc.call<DriverReply>(
+      'identity',
+      'GetDriverByUser',
+      { id: identity.userId },
+      identity,
+    );
+    if (!driver.found) return null;
+    const pending = await this.grpc.call<PendingCashReply>(
+      'payment',
+      'GetPendingCashByDriver',
+      { driverId: driver.id },
+      identity,
+    );
+    if (!pending.found) return null;
+    return { tripId: pending.tripId, amountCents: pending.amountCents };
   }
 
   async getTripState(id: string, identity: AuthenticatedUser): Promise<TripStateView> {

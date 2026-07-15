@@ -203,6 +203,15 @@ export interface TripStateView {
   status: TripStatus;
 }
 
+/**
+ * EFECTIVO · cobro CASH PENDING que el conductor dejó SIN confirmar (force-close post-viaje). El dashboard lo
+ * usa para el banner "cobro por confirmar" que persigue al conductor al reabrir. `null` cuando no tiene ninguno.
+ */
+export interface PendingCashView {
+  tripId: string;
+  amountCents: number;
+}
+
 /** Un paso de navegación turn-by-turn (Ola 2C). Espeja `routeStep` de @veo/api-client. */
 export interface RouteStepView {
   instruction: string;

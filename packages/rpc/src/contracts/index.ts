@@ -26,7 +26,7 @@ export type {
   TripModesReply,
 } from './trip.js';
 export type { MatchReply, SurgeReply, NearbyDriver, NearbyDriversReply } from './dispatch.js';
-export type { PaymentReply, UserCreditReply } from './payment.js';
+export type { PaymentReply, UserCreditReply, PendingCashReply } from './payment.js';
 export type { PanicReply } from './panic.js';
 export type { Segment, SegmentsReply } from './media.js';
 export type { RecordReply, VerifyReply } from './audit.js';

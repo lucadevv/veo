@@ -21,6 +21,7 @@ import type {
   CancelTripInput,
   CommissionRateView,
   CompleteTripInput,
+  PendingCash,
   StartTripInput,
   Trip,
   TripOffer,
@@ -45,6 +46,16 @@ const acceptOfferReply = z.object({ outcome: z.string().optional() });
 const commissionRateView = z.object({
   onDemandRateBps: z.number().int(),
   version: z.number().int(),
+});
+
+/**
+ * Validación LOCAL del cobro EFECTIVO pendiente de confirmar (`PendingCashView` del driver-bff; contrato chico
+ * y propio del bff, sin schema en `@veo/api-client`). amountCents entero (céntimos PEN). El 204 (sin cobro
+ * pendiente) lo mapea el HttpClient a `undefined` ANTES de validar — este schema solo corre con body.
+ */
+const pendingCashView = z.object({
+  tripId: z.string(),
+  amountCents: z.number().int(),
 });
 
 /** Implementación HTTP del `TripsRepository` contra el driver-bff. */
@@ -139,6 +150,16 @@ export class HttpTripsRepository implements TripsRepository {
     // El BFF resuelve el paymentId del viaje server-side y captura/reporta el cobro CASH. La respuesta
     // (estado del pago) no se consume en el app: basta el 200 (mismo patrón que rejectOffer). Sin schema.
     await this.http.post(`/trips/${tripId}/cash-confirm`, { body: { collected } });
+  }
+
+  async getPendingCash(): Promise<PendingCash | null> {
+    // El BFF responde 204 (sin body) cuando no hay cobro en efectivo pendiente de confirmar; el HttpClient
+    // lo mapea a `undefined`. "Sin cobro pendiente" NO es error: es el caso normal. Mismo patrón que
+    // `/trips/active`. El driverId lo deriva el BFF del JWT (no viaja acá, anti-IDOR).
+    const pending = (await this.http.get(`/trips/pending-cash`, { schema: pendingCashView })) as
+      | PendingCash
+      | undefined;
+    return pending ?? null;
   }
 
   respondWaypoint(

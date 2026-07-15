@@ -3,6 +3,7 @@ import type { TripsRepository } from '../repositories/trips-repository';
 import type {
   CommissionRateView,
   CompleteTripInput,
+  PendingCash,
   Trip,
   TripOffer,
   TripRouteView,
@@ -199,6 +200,17 @@ export class ConfirmTripCashUseCase {
   constructor(private readonly trips: TripsRepository) {}
   execute(tripId: string, collected: boolean): Promise<void> {
     return this.trips.confirmCash(tripId, collected);
+  }
+}
+
+/**
+ * Caso de uso: cobro en EFECTIVO que el conductor dejó SIN confirmar (force-close post-viaje). Alimenta el
+ * banner del dashboard que persigue la confirmación al reabrir. `null` si no tiene ninguno pendiente.
+ */
+export class GetPendingCashUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(): Promise<PendingCash | null> {
+    return this.trips.getPendingCash();
   }
 }
 

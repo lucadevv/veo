@@ -31,6 +31,12 @@ export interface PaymentGrpcRepository {
   sumCapturedTipCentsByTrip(tripId: string): Promise<number>;
   /** Saldo de crédito gastable del usuario (réplica). `null` si no tiene fila de saldo (GetUserCredit). */
   findUserCreditByUser(userId: string): Promise<UserCredit | null>;
+  /**
+   * EFECTIVO · el cobro CASH PENDING (kind=FARE) MÁS RECIENTE de un conductor, o `null` si no tiene ninguno
+   * (réplica · DISPLAY, no gate de dinero). Sirve al banner "cobro por confirmar" que persigue al conductor si
+   * force-cerró la app sin confirmar el cobro post-viaje. Ordena por createdAt desc, take 1.
+   */
+  findPendingCashByDriver(driverId: string): Promise<Payment | null>;
 }
 
 @Injectable()
@@ -55,5 +61,12 @@ export class PrismaPaymentGrpcRepository implements PaymentGrpcRepository {
 
   findUserCreditByUser(userId: string): Promise<UserCredit | null> {
     return this.prisma.read.userCredit.findUnique({ where: { userId } });
+  }
+
+  findPendingCashByDriver(driverId: string): Promise<Payment | null> {
+    return this.prisma.read.payment.findFirst({
+      where: { driverId, method: 'CASH', status: 'PENDING', kind: 'FARE' },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 }

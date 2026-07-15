@@ -37,3 +37,13 @@ export interface CommissionRateView {
   onDemandRateBps: number;
   version: number;
 }
+
+/**
+ * EFECTIVO · cobro en efectivo que el conductor dejó SIN confirmar tras completar un viaje (force-close antes
+ * de tocar "Sí, recibí"). Alimenta el banner del dashboard que PERSIGUE la confirmación al reabrir la app.
+ * `tripId` para resolver el paymentId server-side al confirmar; `amountCents` (bruto del viaje) para el copy.
+ */
+export interface PendingCash {
+  tripId: string;
+  amountCents: number;
+}

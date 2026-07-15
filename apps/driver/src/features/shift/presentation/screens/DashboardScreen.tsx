@@ -55,6 +55,7 @@ import { BidCard } from '../../../bidding/presentation/components/BidCard';
 import { CounterOfferSheet } from '../../../bidding/presentation/components/CounterOfferSheet';
 import type { OpenBid } from '../../../bidding/domain';
 import { FixedOfferCard } from '../../../trips/presentation/components/FixedOfferCard';
+import { useConfirmCash, usePendingCashConfirm } from '../../../trips/presentation/hooks/useTrips';
 
 /**
  * "Inicio" es una tab dentro del stack `Main`. Tipamos la navegación de forma compuesta para poder
@@ -107,6 +108,15 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
   const { height: screenH } = useWindowDimensions();
   const dockLift = { marginBottom: tabBarHeight - 4 };
   const [endConfirm, setEndConfirm] = useState(false);
+  // EFECTIVO (resiliencia del force-close) · cobro CASH que el conductor dejó SIN confirmar tras completar un
+  // viaje (cerró la app antes de tocar "Sí, recibí"): el Payment quedaba PENDING para siempre. Esta query lo
+  // PERSIGUE al reabrir → banner sobre el mapa + sheet de confirmación. `data` = null si no hay ninguno.
+  const pendingCash = usePendingCashConfirm();
+  const pendingCashData = pendingCash.data ?? null;
+  const [cashSheetOpen, setCashSheetOpen] = useState(false);
+  // Mutación de confirmar el cobro pendiente (tripId del pendiente; '' cuando no hay → la mutation no se
+  // dispara). Su onSuccess invalida PENDING_CASH_QUERY_KEY → el banner desaparece solo al confirmar.
+  const confirmPendingCash = useConfirmCash(pendingCashData?.tripId ?? '');
   // Toggle "Zonas de demanda": pinta el mapa de calor sobre el mapa para orientar al conductor.
   const [demandOn, setDemandOn] = useState(false);
   // Altos medidos del chrome flotante (header arriba, dock abajo): la cámara centra el puck en el
@@ -196,6 +206,23 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
       return;
     }
     navigation.navigate('ShiftStart');
+  };
+
+  // Confirma (o reporta la discrepancia de) el cobro EFECTIVO pendiente. `useConfirmCash` resuelve el paymentId
+  // server-side por el tripId y captura/reporta; al terminar OK cierra el sheet (su onSuccess ya invalida la
+  // query del pendiente → el banner desaparece solo). Si falla, el sheet queda abierto y muestra el error.
+  const handleConfirmCash = (collected: boolean) => {
+    // Al OK: mostramos el feedback de éxito EN el sheet (~1.4s) y RECIÉN ahí cerramos — así el conductor
+    // VE que se registró (no depende solo de que el banner desaparezca, que confundía). El banner igual
+    // se va por la invalidación del onSuccess de la mutation.
+    confirmPendingCash.mutate(collected, {
+      onSuccess: () => setTimeout(() => setCashSheetOpen(false), 2500),
+    });
+  };
+  // Abre el sheet FRESCO (resetea el estado de la mutación previa → no arrastra un "éxito" viejo).
+  const openCashSheet = () => {
+    confirmPendingCash.reset();
+    setCashSheetOpen(true);
   };
 
   // Mapa de calor de demanda: solo cuando el conductor está en línea, sin viaje, con el toggle
@@ -819,6 +846,24 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             />
           </View>
         ) : null}
+        {/* EFECTIVO · cobro pendiente de confirmar (resiliencia del force-close): banner PERSISTENTE (no
+            descartable) bajo el header — sigue al conductor hasta que confirme. Toca "Confirmar" → sheet. Vive
+            en el flujo NORMAL del dashboard (el bloqueo por deuda es un early return, nunca coexisten). */}
+        {pendingCashData ? (
+          <View style={[styles.cashBannerWrap, { top: insets.top + 64 }]}>
+            <Banner
+              tone="warn"
+              title={t('shift.cashPending.bannerTitle')}
+              description={t('shift.cashPending.bannerBody', {
+                amount: formatPEN(pendingCashData.amountCents),
+              })}
+              action={{
+                label: t('shift.cashPending.bannerAction'),
+                onPress: openCashSheet,
+              }}
+            />
+          </View>
+        ) : null}
         {/* Leyenda / estado del mapa de calor cuando el toggle está activo. */}
         {demandOn && showDemandToggle ? (
           <View style={styles.legendWrap} pointerEvents="none">
@@ -875,6 +920,59 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         gone={selectedBidGone}
         onClose={() => setSelectedBid(null)}
       />
+      {/* EFECTIVO · sheet de confirmación del cobro pendiente. "Sí, recibí" (accent) captura; "No cobré" (ghost)
+          reporta la discrepancia. Ambos cierran el sheet al OK; el banner desaparece por la invalidación. */}
+      <BottomSheet
+        // Visible por `cashSheetOpen` SOLO (no `&& pendingCashData`): al confirmar, el onSuccess invalida
+        // la query → pendingCashData pasa a null; si atáramos `visible` a eso, el sheet cerraría AL INSTANTE
+        // y el feedback de "¡Cobro registrado!" nunca se vería. Lo cierra nuestro setTimeout (~2.5s).
+        visible={cashSheetOpen}
+        onClose={() => setCashSheetOpen(false)}
+        title={t('shift.cashPending.sheetTitle')}
+        footer={
+          // En ÉXITO ocultamos los botones (queda solo el feedback ~2.5s antes de cerrar solo).
+          confirmPendingCash.isSuccess ? undefined : (
+            <View style={styles.sheetFooter}>
+              <Button
+                label={t('shift.cashPending.notCollected')}
+                variant="ghost"
+                loading={confirmPendingCash.isPending}
+                onPress={() => handleConfirmCash(false)}
+              />
+              <Button
+                label={t('shift.cashPending.collected')}
+                variant="accent"
+                loading={confirmPendingCash.isPending}
+                onPress={() => handleConfirmCash(true)}
+              />
+            </View>
+          )
+        }
+      >
+        {confirmPendingCash.isSuccess ? (
+          // Feedback EXPLÍCITO de éxito (no depende solo de que el banner desaparezca): "Sí, recibí" →
+          // "¡Cobro registrado! ✓"; "No cobré" → "Reporte enviado".
+          <Text variant="bodyStrong" style={{ color: theme.colors.success }}>
+            {confirmPendingCash.variables
+              ? t('shift.cashPending.registered')
+              : t('shift.cashPending.reported')}
+          </Text>
+        ) : (
+          <Text variant="callout" color="inkMuted">
+            {pendingCashData
+              ? t('shift.cashPending.sheetBody', { amount: formatPEN(pendingCashData.amountCents) })
+              : ''}
+          </Text>
+        )}
+        {confirmPendingCash.isError ? (
+          <Banner
+            tone="danger"
+            title={t('errors.generic')}
+            description={toErrorMessage(confirmPendingCash.error, t)}
+            style={styles.spaced}
+          />
+        ) : null}
+      </BottomSheet>
     </SafeScreen>
   );
 };
@@ -933,6 +1031,9 @@ const styles = StyleSheet.create({
   },
   legendWrap: { position: 'absolute', left: 16, right: 16, bottom: 16 },
   tipWrap: { position: 'absolute', left: 16, right: 16, top: 96 },
+  // Banner de cobro EFECTIVO pendiente: flotante bajo el header (el `top` real se inyecta inline con el
+  // safe-area inset). Mismo tratamiento horizontal que el resto de overlays del mapa.
+  cashBannerWrap: { position: 'absolute', left: 16, right: 16 },
   vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   vehicleTile: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   vehicleInfo: { flex: 1, gap: 1 },

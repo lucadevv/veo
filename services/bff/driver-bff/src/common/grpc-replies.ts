@@ -14,6 +14,7 @@ export type {
   MatchReply,
   SurgeReply,
   PaymentReply,
+  PendingCashReply,
   AggregateReply,
   VehicleReply,
   DriverVehiclesReply,

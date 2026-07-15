@@ -10,6 +10,7 @@ import type {
   CancelTripInput,
   CommissionRateView,
   CompleteTripInput,
+  PendingCash,
   StartTripInput,
   Trip,
   TripOffer,
@@ -72,6 +73,12 @@ export interface TripsRepository {
    * reporta que NO cobró (discrepancia). El paymentId lo resuelve el BFF server-side (anti-IDOR). Solo CASH.
    */
   confirmCash(tripId: string, collected: boolean): Promise<void>;
+  /**
+   * GET /trips/pending-cash — EFECTIVO · cobro CASH PENDING que ESTE conductor dejó sin confirmar (force-close
+   * post-viaje). `null` si no tiene ninguno (el BFF responde 204). El driverId lo DERIVA el BFF del JWT
+   * (anti-IDOR). Alimenta el banner del dashboard que persigue la confirmación al reabrir la app.
+   */
+  getPendingCash(): Promise<PendingCash | null>;
   /**
    * POST /trips/:id/waypoints/:proposalId/respond — el conductor ACEPTA/RECHAZA una parada propuesta
    * por el pasajero durante el viaje en curso (Lote C4). El driverId lo DERIVA el BFF (anti-IDOR);

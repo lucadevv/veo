@@ -27,6 +27,7 @@ import {
   RouteQueryDto,
   StartTripDto,
   TripHistoryQueryDto,
+  type PendingCashView,
   type TripHistoryPageView,
   type TripRouteView,
   type TripStateView,
@@ -80,6 +81,27 @@ export class TripsController {
     // driverId DERIVADO del perfil del JWT (user), NUNCA del query: el historial solo puede ser el del
     // conductor autenticado.
     return this.trips.getTripHistory(user, query.cursor, query.limit);
+  }
+
+  // IMPORTANTE: `pending-cash` va ANTES de `:id` — si no, `@Get(':id')` con ParseUUIDPipe captura
+  // "pending-cash" como id y responde 400 (mismo motivo que `active`/`history`).
+  @Get('pending-cash')
+  @ApiOperation({
+    summary:
+      'EFECTIVO · cobro CASH PENDING que el conductor dejó SIN confirmar (force-close post-viaje). 200 + ' +
+      '{ tripId, amountCents } si tiene uno por confirmar; 204 No Content si no (la app mapea 204 → null). ' +
+      'El driverId se DERIVA del perfil del JWT (anti-IDOR). Alimenta el banner "cobro por confirmar".',
+  })
+  async pendingCash(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<PendingCashView | undefined> {
+    const pending = await this.trips.getPendingCash(user);
+    if (!pending) {
+      res.status(204);
+      return undefined;
+    }
+    return pending;
   }
 
   @Get(':id')

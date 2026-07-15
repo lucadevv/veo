@@ -17,6 +17,7 @@ import {
 import {
   ACTIVE_TRIP_QUERY_KEY,
   COMMISSION_RATE_QUERY_KEY,
+  PENDING_CASH_QUERY_KEY,
   TRIP_QUERY_PREFIX,
   tripQueryKey,
   AcceptOfferUseCase,
@@ -30,6 +31,7 @@ import {
   GetActiveTripUseCase,
   GetCommissionRateUseCase,
   GetOfferUseCase,
+  GetPendingCashUseCase,
   GetTripHistoryUseCase,
   GetTripRouteUseCase,
   GetTripStateUseCase,
@@ -306,6 +308,9 @@ export function useConfirmCash(tripId: string) {
   return useMutation({
     mutationFn: (collected: boolean) => new ConfirmTripCashUseCase(trips).execute(tripId, collected),
     onSuccess: (_data, collected) => {
+      // Resolver el cobro (cobrado O discrepancia) lo saca de PENDING → el banner "cobro por confirmar" del
+      // dashboard debe desaparecer. Invalidamos la query del pendiente en AMBOS casos (ya no persigue).
+      queryClient.invalidateQueries({ queryKey: PENDING_CASH_QUERY_KEY });
       // Solo el cobro EFECTIVO (collected=true) captura y devenga ganancia; la discrepancia no mueve plata.
       if (collected) {
         queryClient.invalidateQueries({ queryKey: EARNINGS_SUMMARY_QUERY_KEY });
@@ -313,6 +318,19 @@ export function useConfirmCash(tripId: string) {
         queryClient.invalidateQueries({ queryKey: EARNINGS_DAILY_QUERY_KEY });
       }
     },
+  });
+}
+
+/**
+ * Query: cobro en EFECTIVO que el conductor dejó SIN confirmar tras completar un viaje (force-close antes de
+ * tocar "Sí, recibí"). `null` si no tiene ninguno pendiente. Alimenta el banner del dashboard que PERSIGUE la
+ * confirmación al reabrir la app — la resiliencia del force-close (el Payment quedaba PENDING para siempre).
+ */
+export function usePendingCashConfirm() {
+  const { trips } = useRepositories();
+  return useQuery({
+    queryKey: PENDING_CASH_QUERY_KEY,
+    queryFn: () => new GetPendingCashUseCase(trips).execute(),
   });
 }
 
