@@ -24,7 +24,13 @@ import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { GlassSheet } from '../../../../shared/presentation/components/GlassSheet';
 import { MapTopScrim } from '../../../../shared/presentation/components/MapTopScrim';
 import { NoticeHero } from '../../../../shared/presentation/components/NoticeHero';
-import { IconAlert, IconFlame, IconChevronRight, IconPause } from '../../../../shared/presentation/icons';
+import {
+  IconAlert,
+  IconFlame,
+  IconChevronRight,
+  IconPause,
+  IconCoins,
+} from '../../../../shared/presentation/icons';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
 import { abbreviateGreetingName, formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { vehicleClassGlyph, vehicleClassLabelKey } from '../../../../shared/presentation/vehicle-class';
@@ -619,16 +625,53 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             onPress={() => navigation.navigate('Vehicles')}
             style={[styles.vehicleSel, { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md }]}
           >
-            <View style={styles.vehicleSelLeft}>
-              {ActiveVehIcon ? <ActiveVehIcon size={18} color={theme.colors.inkMuted} /> : null}
-              <Text variant="bodyStrong" numberOfLines={1}>
-                {activeVeh
-                  ? `${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`
-                  : t('shift.vehicleType.none')}
-              </Text>
+            {/* Fila HORIZONTAL en un View plano interno (el flexDirection del PressableScale no se aplica
+                fiable → el chevron caía debajo). Mismo patrón que la fila de cobro. */}
+            <View style={styles.vehicleSelInner}>
+              <View style={styles.vehicleSelLeft}>
+                {ActiveVehIcon ? <ActiveVehIcon size={18} color={theme.colors.inkMuted} /> : null}
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {activeVeh
+                    ? `${vehicleTypeLabel(activeVeh.vehicleType, t)} · ${activeVeh.plate}`
+                    : t('shift.vehicleType.none')}
+                </Text>
+              </View>
+              <IconChevronRight size={18} color={theme.colors.inkSubtle} />
             </View>
-            <IconChevronRight size={18} color={theme.colors.inkSubtle} />
           </PressableScale>
+          {/* EFECTIVO · cobro por confirmar — vive DENTRO del dock (zona de plata), NO como banner flotante
+              arriba: no es urgente como una oferta (esa tiene countdown y es plata por ganar) sino una tarea
+              de cierre. Así no tapa la columna de ofertas. Toca → sheet de confirmación. Solo si hay pendiente. */}
+          {pendingCashData ? (
+            // El margen/divisor van en un View plano EXTERNO, NO en el PressableScale: el AnimatedPressable
+            // (reanimated) se come props de layout (flexDirection Y margin) → el marginTop del pressable no
+            // se aplicaba y moto+cobro quedaban pegados. Un View plano respeta margin/border sin falla.
+            <View style={[styles.cashSection, { borderTopColor: theme.colors.border }]}>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={t('shift.cashPending.bannerTitle')}
+                onPress={openCashSheet}
+                style={[styles.cashRow, { backgroundColor: theme.colors.bg, borderRadius: theme.radii.md }]}
+              >
+                {/* La fila HORIZONTAL vive en un View plano interno, NO en el PressableScale (mismo motivo:
+                    el flexDirection del pressable no se aplica → el chevron caía debajo). */}
+                <View style={styles.cashRowInner}>
+                  <View style={[styles.cashRowTile, { backgroundColor: theme.colors.warnDim }]}>
+                    <IconCoins size={18} color={theme.colors.warnText} />
+                  </View>
+                  <View style={styles.cashRowText}>
+                    <Text variant="footnote" color="inkMuted">
+                      {t('shift.cashPending.rowLabel')}
+                    </Text>
+                    <Text variant="bodyStrong" numberOfLines={1}>
+                      {formatPEN(pendingCashData.amountCents)}
+                    </Text>
+                  </View>
+                  <IconChevronRight size={18} color={theme.colors.inkSubtle} />
+                </View>
+              </PressableScale>
+            </View>
+          ) : null}
           {dockKpis}
           {/* Actions: Pausar (outlined, ocupa el ancho) + Desconectarme (ghost gris, fit-content). */}
           <View style={styles.actionsRow}>
@@ -846,24 +889,6 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
             />
           </View>
         ) : null}
-        {/* EFECTIVO · cobro pendiente de confirmar (resiliencia del force-close): banner PERSISTENTE (no
-            descartable) bajo el header — sigue al conductor hasta que confirme. Toca "Confirmar" → sheet. Vive
-            en el flujo NORMAL del dashboard (el bloqueo por deuda es un early return, nunca coexisten). */}
-        {pendingCashData ? (
-          <View style={[styles.cashBannerWrap, { top: insets.top + 64 }]}>
-            <Banner
-              tone="warn"
-              title={t('shift.cashPending.bannerTitle')}
-              description={t('shift.cashPending.bannerBody', {
-                amount: formatPEN(pendingCashData.amountCents),
-              })}
-              action={{
-                label: t('shift.cashPending.bannerAction'),
-                onPress: openCashSheet,
-              }}
-            />
-          </View>
-        ) : null}
         {/* Leyenda / estado del mapa de calor cuando el toggle está activo. */}
         {demandOn && showDemandToggle ? (
           <View style={styles.legendWrap} pointerEvents="none">
@@ -1018,13 +1043,11 @@ const styles = StyleSheet.create({
   bidsColumn: { position: 'absolute', left: 12, right: 12 },
   bidsScrollContent: { gap: 10 },
   vehicleSel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     paddingVertical: 12,
     paddingHorizontal: 14,
     marginTop: 12,
   },
+  vehicleSelInner: { flexDirection: 'row', alignItems: 'center' },
   vehicleSelLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   kpiRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
   kpiCell: { flex: 1, gap: 2 },
@@ -1037,9 +1060,22 @@ const styles = StyleSheet.create({
   },
   legendWrap: { position: 'absolute', left: 16, right: 16, bottom: 16 },
   tipWrap: { position: 'absolute', left: 16, right: 16, top: 96 },
-  // Banner de cobro EFECTIVO pendiente: flotante bajo el header (el `top` real se inyecta inline con el
-  // safe-area inset). Mismo tratamiento horizontal que el resto de overlays del mapa.
-  cashBannerWrap: { position: 'absolute', left: 16, right: 16 },
+  // Fila de cobro EFECTIVO por confirmar: vive DENTRO del dock (mismo tratamiento que vehicleSel). El tile
+  // ámbar suave (warnDim) da el toque cálido de "pendiente" sin el banner amarillo estridente de antes.
+  // Corte de sección entre el bloque de ESTADO (Listo + vehículo) y el bloque de PLATA (cobro + KPIs):
+  // aire + un divisor hairline. Va en el View EXTERNO (no en el PressableScale, que se come el margin).
+  cashSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  cashRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  cashRowInner: { flexDirection: 'row', alignItems: 'center' },
+  cashRowTile: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  cashRowText: { flex: 1, gap: 1, marginLeft: 10 },
   vehicleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   vehicleTile: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   vehicleInfo: { flex: 1, gap: 1 },

@@ -567,6 +567,7 @@
       "bannerTitle": "Tienes un cobro en efectivo por confirmar",
       "bannerBody": "Confirma el cobro de {{amount}} de tu último viaje.",
       "bannerAction": "Confirmar",
+      "rowLabel": "Cobro por confirmar",
       "sheetTitle": "Confirmar cobro en efectivo",
       "sheetBody": "¿Cobraste {{amount}} en efectivo?",
       "collected": "Sí, recibí",
