@@ -519,6 +519,11 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
   private async onTripExpired(env: EventEnvelope<unknown>): Promise<void> {
     const p = EVENT_SCHEMAS['trip.expired'].parse(env.payload);
     if (this.isPoisonNonUuid('trip.expired', env.eventId, p.tripId)) return;
+    // GAP #2 (2026-07-15) — el viaje murió por watchdog: si un board PUJA seguía OPEN con ofertas PENDING
+    // (carrera con el sweep del board), cerralo SIEMPRE y notificá a los bidders. cancelBoard(system) hace
+    // cancelIfOpen + clearOffers + `offer_withdrawn(cancelled)` por conductor (GAP #1) → sus cards mueren
+    // reactivas en vez de esperar el poll de 12s. Espeja onTripCancelled. Idempotente (no-op si ya cerró).
+    await this.offerBoard.cancelBoard(p.tripId, { system: true });
     await this.releaseAssignedDriver('trip.expired', env.eventId, p.tripId);
   }
 

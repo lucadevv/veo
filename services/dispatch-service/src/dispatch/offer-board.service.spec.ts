@@ -1093,6 +1093,33 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     expect(ev[0]?.dedupKey).toBe(`bid_cancelled:${tripId}`);
   });
 
+  it('GAP #1 cancel-puja: NOTIFICA a los conductores que ofertaron con offer_withdrawn(cancelled)', async () => {
+    const c = await ctx();
+    const tripId = await openBoard(c);
+    await c.svc.submitOffer({ tripId, driverId: 'd1', kind: 'ACCEPT_PRICE', priceCents: 700 });
+    await c.svc.submitOffer({ tripId, driverId: 'd2', kind: 'ACCEPT_PRICE', priceCents: 700 });
+
+    await c.svc.cancelBoard(tripId, PASSENGER, { emitClosure: true });
+
+    // Un offer_withdrawn(cancelled) POR conductor con oferta viva → driver-bff lo empuja como bid:closed →
+    // la BidCard muere reactiva (sin esperar el poll de 12s). Sin esto la card quedaba "abierta".
+    const withdrawn = c.outbox.byType('dispatch.offer_withdrawn');
+    expect(withdrawn).toHaveLength(2);
+    expect(withdrawn.every((e) => (e.payload as { reason: string }).reason === 'cancelled')).toBe(
+      true,
+    );
+    expect(
+      new Set(withdrawn.map((e) => (e.payload as { driverId: string }).driverId)),
+    ).toEqual(new Set(['d1', 'd2']));
+  });
+
+  it('GAP #1 cancel-puja: board SIN ofertas → no emite offer_withdrawn (nadie que notificar)', async () => {
+    const c = await ctx();
+    const tripId = await openBoard(c);
+    await c.svc.cancelBoard(tripId, PASSENGER, { emitClosure: true });
+    expect(c.outbox.byType('dispatch.offer_withdrawn')).toHaveLength(0);
+  });
+
   it('FIX cancel-puja: SIN emitClosure (camino trip.cancelled) NO emite bid_cancelled (anti-bucle)', async () => {
     const c = await ctx();
     const tripId = await openBoard(c);

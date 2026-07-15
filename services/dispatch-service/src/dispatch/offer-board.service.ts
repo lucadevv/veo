@@ -1019,13 +1019,41 @@ export class OfferBoardService {
     }
     const cancelled = await this.store.cancelIfOpen(tripId);
     if (cancelled) {
+      // GAP #1 (2026-07-15) — NOTIFICAR a los conductores que ofertaron que la puja se canceló. Capturamos
+      // las ofertas PENDING ANTES de limpiarlas: sin esto, `cancelBoard` solo hacía `clearOffers` (server-
+      // side) y NINGÚN evento llegaba al conductor → su BidCard/"Esperando al pasajero…" sobrevivía hasta el
+      // poll de 12s y un tap tardío daba 409. Emitimos un `dispatch.offer_withdrawn` (reason=cancelled) por
+      // conductor → driver-bff lo empuja como `bid:closed` → la app quita la card AL INSTANTE. Es el MISMO
+      // patrón de sweepExpired (stale)/acceptOffer (not_selected)/withdrawDriverOffers (offline).
+      const pending = (await this.store.listOffers(tripId)).filter(
+        (o) => o.status === OfferStatus.PENDING,
+      );
       // Higiene: el board se canceló → ninguna oferta de esta ventana debe sobrevivir en el HASH.
       await this.store
         .clearOffers(tripId)
         .catch((err) =>
           this.logger.warn(`clearOffers (cancel) trip=${tripId} falló: ${String(err)}`),
         );
-      this.logger.log(`board trip=${tripId} CANCELLED por el pasajero`);
+      // dedup por (trip,driver,'cancelled'): el HTTP-cancel del pasajero y el system-cancel (trip.cancelled)
+      // corren para el MISMO viaje → el 2º no encuentra ofertas (ya limpias) y `cancelIfOpen` da false, pero
+      // el dedup lo blinda igual ante re-entregas concurrentes. Sin PII (solo ids); best-effort (poll respalda).
+      await Promise.all(
+        pending.map((offer) =>
+          this.emit(
+            'dispatch.offer_withdrawn',
+            tripId,
+            { tripId, driverId: offer.driverId, reason: OFFER_WITHDRAWN_REASON.CANCELLED },
+            dedupOfferWithdrawn(tripId, offer.driverId, 'cancelled'),
+          ).catch((err: unknown) =>
+            this.logger.warn(
+              `offer_withdrawn (cancelled) trip=${tripId} driver=${offer.driverId}: ${String(err)}`,
+            ),
+          ),
+        ),
+      );
+      this.logger.log(
+        `board trip=${tripId} CANCELLED por el pasajero (${pending.length} ofertas retiradas)`,
+      );
     }
     // Cierre del VIAJE (no solo del board): SIEMPRE que el llamador sea el cancel de la PUJA del pasajero,
     // aunque el board ya no exista (TTL) o ya estuviera cerrado — el trip puede seguir REQUESTED. El evento
