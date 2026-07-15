@@ -750,9 +750,9 @@ export const common = {
    */
   carpool: {
     /** Punto de entrada (ScheduleNew / Mis viajes programados). */
-    entryTitle: 'Viajes compartidos entre ciudades',
+    entryTitle: 'Viajes compartidos',
     entryBody:
-      'Busca asientos publicados por conductores verificados y reserva el tuyo.',
+      'Busca asientos publicados por conductores verificados y reserva el tuyo. En tu ciudad o entre ciudades.',
     entryCta: 'Buscar asientos',
     /** Re-entrada al seguimiento de una solicitud viva (bookingId activo en el store). */
     activeBookingEntry: 'Tienes una solicitud de asiento en curso',
@@ -760,11 +760,11 @@ export const common = {
 
     /** Buscador (P/ProgSearch). */
     searchSubtitle:
-      'Viajes entre ciudades, asientos compartidos con conductores verificados',
+      'Comparte un viaje, en tu ciudad o entre ciudades, con conductores verificados',
     fromLabel: 'Desde',
     toLabel: 'Hasta',
     fromPlaceholder: 'Elige tu punto de partida',
-    toPlaceholder: '¿A qué ciudad vas?',
+    toPlaceholder: '¿A dónde vas?',
     dateLabel: 'Fecha',
     seatsLabel: 'Asientos',
     seatsOne: '1 asiento',
