@@ -6,10 +6,9 @@ import {
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
-  Avatar,
   Banner,
   Button,
-  Card,
+  DriverCard,
   hexAlpha,
   SafeScreen,
   Text,
@@ -27,7 +26,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
-import {IconArrowRight, IconStarFilled} from '../components/icons';
+import {IconArrowRight} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -184,35 +183,23 @@ export function CounterScreen(): React.JSX.Element {
           </Text>
         </View>
 
-        <Card variant="outlined" padding="md">
-          <View style={styles.row}>
-            {/* Iniciales reales del conductor (pen DriverCard JR), no un avatar genérico. */}
-            <Avatar size="md" name={offer.driverName ?? undefined} />
-            <View style={{flex: 1, gap: 2}}>
-              <View style={styles.nameRow}>
-                <Text variant="bodyStrong">
-                  {offer.driverName ?? t('offers.driver')}
-                </Text>
-                {offer.rating != null ? (
-                  <View style={styles.ratingRow}>
-                    <IconStarFilled color={theme.colors.warn} size={16} />
-                    <Text variant="callout" color="warn" tabular>
-                      {offer.rating.toFixed(2)}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-              {offer.vehicle ? (
-                <Text variant="footnote" color="inkMuted">
-                  {`${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`}
-                </Text>
-              ) : null}
-              <Text variant="footnote" color="inkMuted">
-                {t('counter.proposedOther')}
-              </Text>
-            </View>
-          </View>
-        </Card>
+        {/* MISMA identidad canónica que FIXED/OffersBody (DriverCard: avatar gradiente, 5 estrellas, placa
+            mono). El "propone otro" va en el footer; el precio comparado vive en los tiles de abajo. */}
+        <DriverCard
+          name={offer.driverName ?? t('offers.driver')}
+          rating={offer.rating ?? undefined}
+          vehicle={
+            offer.vehicle
+              ? `${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`
+              : undefined
+          }
+          plate={offer.vehicle?.plate}
+          footer={
+            <Text variant="footnote" color="inkMuted">
+              {t('counter.proposedOther')}
+            </Text>
+          }
+        />
 
         {/* Comparación HORIZONTAL per pen u1306: tile "Tu oferta" (tachada) → flecha → tile "Su
             precio" en warn (propone otro). El mismo dato de antes, en la disposición del diseño. */}
@@ -285,9 +272,6 @@ export function CounterScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
   compareTiles: {flexDirection: 'row', alignItems: 'center'},
   compareTile: {flex: 1, gap: 4, borderWidth: 1},
   strike: {textDecorationLine: 'line-through'},

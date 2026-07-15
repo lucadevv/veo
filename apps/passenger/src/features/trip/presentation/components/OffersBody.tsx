@@ -1,10 +1,9 @@
 import type {OfferView} from '@veo/api-client';
 import {useQuery} from '@tanstack/react-query';
 import {
-  Avatar,
   Banner,
   Button,
-  Card,
+  DriverCard,
   hexAlpha,
   StatusPill,
   Text,
@@ -24,7 +23,6 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
-import {IconStarFilled} from './icons';
 
 /**
  * ADR-021 Fase J (J1) · Ventana de búsqueda AUTORITATIVA, sin número inventado. El countdown es
@@ -265,7 +263,13 @@ export function OffersBody({
   );
 }
 
-/** Tarjeta de una oferta (rating + vehículo reales, enriquecidos por el BFF; degradación honesta). */
+/**
+ * Tarjeta de una oferta: la MISMA identidad canónica que FIXED (`DriverCard` de @veo/ui-kit — avatar con
+ * gradiente de confianza, escala de 5 estrellas, placa monoespaciada) + un `footer` con el precio y el CTA.
+ * Antes reimplementaba una card ad-hoc (Avatar+filas) que divergía de la identidad de la app. `verified` no
+ * viene enriquecido en la oferta (el BFF no lo manda) → sin sello, degradación honesta. Tono del precio per
+ * pen C/BidCard: verde (`safe`) si acepta TU precio, ámbar (`warn`) si propone otro.
+ */
 function OfferCard({
   offer,
   onChoose,
@@ -275,52 +279,31 @@ function OfferCard({
   onChoose: () => void;
   choosing: boolean;
 }): React.JSX.Element {
-  const theme = useTheme();
   const {t} = useTranslation();
   const acceptsPrice = offer.kind === 'ACCEPT_PRICE';
+  const vehicle = offer.vehicle
+    ? `${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`
+    : undefined;
 
   return (
-    <Card
-      variant="outlined"
-      padding="md"
-      style={acceptsPrice ? {borderColor: theme.colors.accent} : undefined}>
-      <View style={styles.row}>
-        {/* Iniciales del conductor (pen C/BidCard: JR/MT/LF), derivadas del nombre real. */}
-        <Avatar size="md" name={offer.driverName ?? undefined} />
-        <View style={{flex: 1, gap: theme.spacing.xxs}}>
-          <View style={styles.nameRow}>
-            <Text variant="bodyStrong">
-              {offer.driverName ?? t('offers.driver')}
+    <DriverCard
+      name={offer.driverName ?? t('offers.driver')}
+      rating={offer.rating ?? undefined}
+      vehicle={vehicle}
+      plate={offer.vehicle?.plate}
+      footer={
+        <View style={styles.offerFooter}>
+          <View style={styles.offerFooterInfo}>
+            <Text variant="footnote" color={acceptsPrice ? 'safe' : 'warn'}>
+              {`${acceptsPrice ? t('offers.acceptsPrice') : t('offers.proposesOther')} · ${t(
+                'offers.etaMin',
+                {minutes: formatDurationMinutes(offer.etaSeconds)},
+              )}`}
             </Text>
-            {offer.rating != null ? (
-              <View style={styles.ratingRow}>
-                <IconStarFilled color={theme.colors.warn} size={13} />
-                <Text variant="footnote" color="warn" tabular>
-                  {offer.rating.toFixed(2)}
-                </Text>
-              </View>
-            ) : null}
+            <Text variant="title3" color={acceptsPrice ? 'safe' : 'warn'} tabular>
+              {formatPEN(offer.priceCents)}
+            </Text>
           </View>
-          {offer.vehicle ? (
-            <Text variant="footnote" color="inkMuted">
-              {`${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`}
-            </Text>
-          ) : null}
-          <Text variant="footnote" color={acceptsPrice ? 'safe' : 'inkMuted'}>
-            {acceptsPrice
-              ? t('offers.acceptsPrice')
-              : t('offers.proposesOther')}{' '}
-            ·{' '}
-            {t('offers.etaMin', {
-              minutes: formatDurationMinutes(offer.etaSeconds),
-            })}
-          </Text>
-        </View>
-        <View style={{alignItems: 'flex-end', gap: theme.spacing.xs}}>
-          {/* Tono del precio per pen C/BidCard: verde si acepta TU precio, warn si propone otro. */}
-          <Text variant="title3" color={acceptsPrice ? 'safe' : 'warn'} tabular>
-            {formatPEN(offer.priceCents)}
-          </Text>
           <Button
             label={acceptsPrice ? t('offers.accept') : t('offers.respond')}
             variant="primary"
@@ -330,8 +313,8 @@ function OfferCard({
             onPress={onChoose}
           />
         </View>
-      </View>
-    </Card>
+      }
+    />
   );
 }
 
@@ -343,7 +326,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   takingLong: {alignItems: 'center', gap: 8},
-  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
+  // Footer de la oferta dentro de la DriverCard: info de precio/eta (izq) ↔ CTA (der).
+  offerFooter: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  offerFooterInfo: {flex: 1, gap: 2},
 });

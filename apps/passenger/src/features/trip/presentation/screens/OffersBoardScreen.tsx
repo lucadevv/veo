@@ -8,10 +8,9 @@ import {
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useMutation, useQuery} from '@tanstack/react-query';
 import {
-  Avatar,
   Banner,
   Button,
-  Card,
+  DriverCard,
   StatusPill,
   Text,
   useTheme,
@@ -34,7 +33,6 @@ import {
 } from '../../../../shared/presentation/components/ScreenStates';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {mergeOffers} from '../../domain/offers';
-import {IconStarFilled} from '../components/icons';
 import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
 import {useActiveTripStore} from '../stores/activeTripStore';
@@ -303,55 +301,35 @@ function OfferCard({
   onChoose: () => void;
   choosing: boolean;
 }): React.JSX.Element {
-  const theme = useTheme();
   const {t} = useTranslation();
   const acceptsPrice = offer.kind === 'ACCEPT_PRICE';
+  const vehicle = offer.vehicle
+    ? `${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`
+    : undefined;
 
+  // MISMA identidad canónica que OffersBody/FIXED (DriverCard) + footer de precio/CTA. Antes esta pantalla
+  // legacy tenía una copia divergente (accent/ink · Elegir/Ver); se alinea a la versión viva (safe/warn).
   return (
-    <Card
-      variant="outlined"
-      padding="md"
-      style={acceptsPrice ? {borderColor: theme.colors.accent} : undefined}>
-      <View style={styles.row}>
-        <Avatar size="md" />
-        <View style={{flex: 1, gap: theme.spacing.xxs}}>
-          <View style={styles.nameRow}>
-            <Text variant="bodyStrong">
-              {offer.driverName ?? t('offers.driver')}
+    <DriverCard
+      name={offer.driverName ?? t('offers.driver')}
+      rating={offer.rating ?? undefined}
+      vehicle={vehicle}
+      plate={offer.vehicle?.plate}
+      footer={
+        <View style={styles.offerFooter}>
+          <View style={styles.offerFooterInfo}>
+            <Text variant="footnote" color={acceptsPrice ? 'safe' : 'warn'}>
+              {`${acceptsPrice ? t('offers.acceptsPrice') : t('offers.proposesOther')} · ${t(
+                'offers.etaMin',
+                {minutes: formatDurationMinutes(offer.etaSeconds)},
+              )}`}
             </Text>
-            {offer.rating != null ? (
-              <View style={styles.ratingRow}>
-                <IconStarFilled color={theme.colors.warn} size={13} />
-                <Text variant="footnote" color="warn" tabular>
-                  {offer.rating.toFixed(2)}
-                </Text>
-              </View>
-            ) : null}
+            <Text variant="title3" color={acceptsPrice ? 'safe' : 'warn'} tabular>
+              {formatPEN(offer.priceCents)}
+            </Text>
           </View>
-          {offer.vehicle ? (
-            <Text variant="footnote" color="inkMuted">
-              {`${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`}
-            </Text>
-          ) : null}
-          <Text variant="footnote" color={acceptsPrice ? 'safe' : 'inkMuted'}>
-            {acceptsPrice
-              ? t('offers.acceptsPrice')
-              : t('offers.proposesOther')}{' '}
-            ·{' '}
-            {t('offers.etaMin', {
-              minutes: formatDurationMinutes(offer.etaSeconds),
-            })}
-          </Text>
-        </View>
-        <View style={{alignItems: 'flex-end', gap: theme.spacing.xs}}>
-          <Text
-            variant="title3"
-            color={acceptsPrice ? 'accent' : 'ink'}
-            tabular>
-            {formatPEN(offer.priceCents)}
-          </Text>
           <Button
-            label={acceptsPrice ? t('offers.choose') : t('offers.view')}
+            label={acceptsPrice ? t('offers.accept') : t('offers.respond')}
             variant="primary"
             size="sm"
             loading={choosing && acceptsPrice}
@@ -359,8 +337,8 @@ function OfferCard({
             onPress={onChoose}
           />
         </View>
-      </View>
-    </Card>
+      }
+    />
   );
 }
 
@@ -385,7 +363,6 @@ const styles = StyleSheet.create({
   },
   bodyScroll: {flexGrow: 0},
   header: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
-  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
+  offerFooter: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  offerFooterInfo: {flex: 1, gap: 2},
 });

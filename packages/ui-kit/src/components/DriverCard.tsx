@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useTheme } from '../theme/ThemeProvider';
@@ -36,6 +36,12 @@ export interface DriverCardProps {
   plate?: string;
   /** Foto del conductor; sin ella, el avatar es el gradiente verde con iniciales. */
   avatarUri?: string;
+  /**
+   * Slot inferior OPCIONAL (bajo la placa, con su divisor): para componer la MISMA identidad canónica con
+   * un bloque de precio + acción — el caso de la OFERTA de PUJA (el pasajero ve la card del conductor que
+   * ofertó y su precio/CTA). FIXED no lo pasa → la card queda idéntica a antes (backward-compatible).
+   */
+  footer?: ReactNode;
   onPress?: () => void;
   style?: ViewStyle;
 }
@@ -65,6 +71,7 @@ export function DriverCard({
   vehicle,
   plate,
   avatarUri,
+  footer,
   onPress,
   style,
 }: DriverCardProps) {
@@ -198,6 +205,12 @@ export function DriverCard({
               </View>
             ) : null}
           </View>
+        </>
+      ) : null}
+      {footer ? (
+        <>
+          <View style={[styles.divider, { backgroundColor: theme.colors.divider }]} />
+          {footer}
         </>
       ) : null}
     </>
