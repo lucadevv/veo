@@ -1,7 +1,7 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { Text, useTheme } from '@veo/ui-kit';
+import { PressableScale, Text, useTheme } from '@veo/ui-kit';
 import {
   formatPEN,
   metersToKm,
@@ -43,19 +43,18 @@ export const BidCard = ({ bid, onPress }: Props): React.JSX.Element => {
   const countdownColor = expired ? 'danger' : 'warn';
 
   return (
-    <Pressable
+    <PressableScale
       accessible
       accessibilityRole="button"
       accessibilityLabel={t('trips.bid.open')}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={[
         styles.card,
         {
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radii.lg,
           padding: theme.spacing.lg,
           ...theme.elevation.level1,
-          opacity: pressed ? 0.9 : 1,
         },
       ]}
     >
@@ -107,7 +106,7 @@ export const BidCard = ({ bid, onPress }: Props): React.JSX.Element => {
           {pending ? t('trips.bid.waiting') : `${t('trips.bid.open')} →`}
         </Text>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 };
 

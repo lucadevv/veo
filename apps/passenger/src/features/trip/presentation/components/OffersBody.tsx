@@ -23,6 +23,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {EnterView} from './motion';
 
 /**
  * ADR-021 Fase J (J1) · Ventana de búsqueda AUTORITATIVA, sin número inventado. El countdown es
@@ -181,13 +182,12 @@ export function OffersBody({
     )
   ) : (
     <View style={{gap: theme.spacing.sm}}>
-      {offers.map(offer => (
-        <OfferCard
-          key={offer.driverId}
-          offer={offer}
-          onChoose={() => onChoose(offer)}
-          choosing={choosing}
-        />
+      {offers.map((offer, i) => (
+        // Stagger de entrada: cada oferta aparece con fade+desplazamiento escalonado (~40ms/índice) en vez
+        // de golpe. Una oferta nueva que llega en vivo (key por driverId) monta y anima sola.
+        <EnterView key={offer.driverId} index={i}>
+          <OfferCard offer={offer} onChoose={() => onChoose(offer)} choosing={choosing} />
+        </EnterView>
       ))}
     </View>
   );

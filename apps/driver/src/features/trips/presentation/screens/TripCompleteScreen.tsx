@@ -10,6 +10,7 @@ import { formatPEN, formatPersonName } from '../../../../shared/presentation/for
 import type { DriverProfile } from '../../../profile/domain';
 import { PROFILE_QUERY_KEY } from '../../../profile/domain';
 import { StarRating } from '../../../ratings/presentation';
+import { useCountUp } from '../../../earnings/presentation/components/motion';
 import { useMyTripRating, useRatePassenger } from '../hooks/usePassengerRating';
 import { useCommissionRate, useConfirmCash } from '../hooks/useTrips';
 import { commissionPercent, commissionRateFromBps, computeTripEarnings } from '../../domain';
@@ -61,6 +62,8 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
     fareCents,
     commissionRateFromBps(commissionRate.data?.onDemandRateBps),
   );
+  // Count-up del NETO ganado (el payoff de plata): sube de 0 al monto al montar, como en Ganancias.
+  const animatedNet = useCountUp(earnings.netCents);
 
   // Nombre del conductor desde la caché del perfil (no fuerza red). Solo el primer nombre para el saludo.
   const cachedName = queryClient.getQueryData<DriverProfile>(PROFILE_QUERY_KEY)?.fullName ?? null;
@@ -200,7 +203,7 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
             {t('trips.complete.earningsLabel')}
           </Text>
           <Text variant="display" tabular style={{ color: theme.colors.accentStrong }}>
-            {formatPEN(earnings.netCents)}
+            {formatPEN(animatedNet)}
           </Text>
         </View>
 
