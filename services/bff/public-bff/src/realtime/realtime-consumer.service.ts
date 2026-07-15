@@ -309,10 +309,17 @@ export class RealtimeConsumerService extends KafkaConsumerBootstrap {
   private onOfferMade(env: EventEnvelope<unknown>): Promise<void> {
     const parsed = dispatchOfferMade.safeParse(env.payload);
     if (parsed.success) {
-      // ADR-020 Lote 1 · una oferta entrando implica board ABIERTO: fijamos el status a REQUESTED para que
-      // la reconexión (emitSnapshot) NO re-empuje un EXPIRED stale de un ciclo previo sin ofertas sobre un
-      // board sano. No emitimos trip:update aquí (la oferta ya viaja por `offer:made`); solo memorizamos.
-      this.state.setStatus(parsed.data.tripId, 'REQUESTED');
+      // ADR-020 Lote 1 · una oferta entrando implica board ABIERTO: corregimos un EXPIRED stale (de un ciclo
+      // previo sin ofertas) → REQUESTED, para que la reconexión (emitSnapshot) NO re-empuje ese EXPIRED sobre
+      // un board sano. No emitimos trip:update aquí (la oferta ya viaja por `offer:made`); solo memorizamos.
+      // GUARD (2026-07-15): NO degradar un status VIVO superior. Una oferta durante REASSIGNING (board
+      // re-abierto tras la cancelación del conductor post-accept) debe CONSERVAR REASSIGNING — pisarlo con
+      // REQUESTED hacía que el socket (REQUESTED) contradijera al REST (REASSIGNING) → la fase del pasajero
+      // oscilaba offers⇄reassigning (loop infinito). Solo re-pineamos si el previo era EXPIRED o ausente.
+      const prev = this.state.getStatus(parsed.data.tripId);
+      if (prev == null || prev === 'EXPIRED') {
+        this.state.setStatus(parsed.data.tripId, 'REQUESTED');
+      }
       this.passenger.emitOfferMade(parsed.data.tripId, {
         tripId: parsed.data.tripId,
         driverId: parsed.data.driverId,
