@@ -32,7 +32,7 @@ export function EarningsHeroCard({ summary, t }: EarningsHeroCardProps): React.J
       <Text variant="display" color="success" tabular>
         {formatPEN(animatedNet)}
       </Text>
-      <Text variant="footnote" color="inkSubtle" tabular>
+      <Text variant="footnote" color="inkSubtle" tabular numberOfLines={1}>
         {t('earnings.grossTotal')} · {formatPEN(summary.totalGrossCents)} · {summary.currency}
       </Text>
 
@@ -70,7 +70,15 @@ function Stat({ label, value, valueColor }: StatProps): React.JSX.Element {
       <Text variant="caption" color="inkSubtle" numberOfLines={1}>
         {label}
       </Text>
-      <Text variant="bodyStrong" color={valueColor} tabular numberOfLines={1}>
+      {/* adjustsFontSizeToFit: un monto grande (S/ 12,345.67) en ~1/3 del ancho ENCOGE en vez de recortarse. */}
+      <Text
+        variant="bodyStrong"
+        color={valueColor}
+        tabular
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
         {value}
       </Text>
     </View>

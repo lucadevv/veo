@@ -52,7 +52,12 @@ export function CarpoolTripCard({
               <Text variant="headline" tabular>
                 {formatTimeOfDay(trip.fechaHoraSalida)}
               </Text>
-              <Text variant="callout" color="inkMuted" numberOfLines={1}>
+              {/* flexShrink: un distrito de origen largo ELIPSA en vez de empujar/recortar contra la hora. */}
+              <Text
+                variant="callout"
+                color="inkMuted"
+                numberOfLines={1}
+                style={{flexShrink: 1}}>
                 {originLabel}
               </Text>
             </View>
