@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -531,15 +532,25 @@ export const DashboardScreen = ({ navigation }: Props): React.JSX.Element => {
         contentContainerStyle={styles.bidsScrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* FIXED "Nuevo viaje" primero (la más nueva empuja a las pujas hacia abajo). */}
+        {/* FIXED "Nuevo viaje" primero (la más nueva empuja a las pujas hacia abajo). Cada card ENTRA con
+            fade+desplazamiento y el reflow (cuando entra una puja nueva y empuja a las demás) es ANIMADO
+            (LinearTransition) en vez de un salto brusco. */}
         {incomingOffer ? (
-          <FixedOfferCard
-            offer={incomingOffer}
-            onAccepted={(tripId) => navigation.navigate('TripActive', { tripId })}
-          />
+          <Animated.View entering={FadeInDown.springify()} layout={LinearTransition.springify()}>
+            <FixedOfferCard
+              offer={incomingOffer}
+              onAccepted={(tripId) => navigation.navigate('TripActive', { tripId })}
+            />
+          </Animated.View>
         ) : null}
         {openBidsList.map((bid) => (
-          <BidCard key={bid.tripId} bid={bid} onPress={() => setSelectedBid(bid)} />
+          <Animated.View
+            key={bid.tripId}
+            entering={FadeInDown.springify()}
+            layout={LinearTransition.springify()}
+          >
+            <BidCard bid={bid} onPress={() => setSelectedBid(bid)} />
+          </Animated.View>
         ))}
       </ScrollView>
     </View>
