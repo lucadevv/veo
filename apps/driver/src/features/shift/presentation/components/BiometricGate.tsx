@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import { IconCheck, IconChevronLeft, IconShield } from '../../../../shared/presentation/icons';
+import { Banner, Button, SafeScreen, SuccessCheck, Text, useTheme } from '@veo/ui-kit';
+import { IconChevronLeft, IconShield } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { Pulse } from './motion';
 // Cross-feature (pragmático): la cámara frontal en vivo vive hoy en las components del registro. El
@@ -170,9 +170,8 @@ export const BiometricGate = ({
         {/* Zona del círculo: cambia por fase, sin perder el centro. */}
         <Reveal delay={120} spring style={styles.ringArea}>
           {success ? (
-            <View style={[styles.circle, styles.centered, { borderColor: theme.colors.success }]}>
-              <IconCheck size={64} color={theme.colors.success} strokeWidth={2.4} />
-            </View>
+            // Sello de éxito CANÓNICO (@veo/ui-kit). animate=false: la entrada la da el Reveal de arriba.
+            <SuccessCheck size={120} animate={false} />
           ) : showPreview && cameraReady ? (
             // Cara EN VIVO recortada en círculo (espejada, selfie natural). Se desmonta al capturar.
             <View

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { Banner, Button, SafeScreen, SuccessCheck, Text, useTheme } from '@veo/ui-kit';
 import { IconCheck, IconShield } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
@@ -42,26 +42,6 @@ type CameraState = 'starting' | 'ready' | 'permission' | 'device';
 const PERMISSION_ERROR_CODE: BiometricCameraErrorCode = 'E_CAMERA_PERMISSION';
 
 const PREVIEW = 240;
-
-/** Marca de éxito (check) con micro-interacción de aparición. Reemplaza la preview de la cámara. */
-function SuccessCheck(): React.JSX.Element {
-  const theme = useTheme();
-  return (
-    <View style={styles.previewWrap}>
-      <View
-        style={[
-          styles.disc,
-          {
-            backgroundColor: hexAlpha(theme.colors.success, 0.16),
-            borderColor: theme.colors.success,
-          },
-        ]}
-      >
-        <IconCheck size={64} color={theme.colors.success} strokeWidth={2.4} />
-      </View>
-    </View>
-  );
-}
 
 /**
  * Cámara frontal EN VIVO (vista nativa `BiometricCameraPreview`) recortada en círculo. La preview se
@@ -241,8 +221,9 @@ export const IdentityVerificationScreen = (_props: Props = {}): React.JSX.Elemen
 
       {/* Zona del círculo: cambia por fase, sin perder el centro. */}
       {isSuccess ? (
+        // Sello de éxito CANÓNICO (@veo/ui-kit). animate=false: la entrada la da el Reveal.
         <Reveal spring style={styles.ringArea}>
-          <SuccessCheck />
+          <SuccessCheck size={120} animate={false} />
         </Reveal>
       ) : isSubmitting ? (
         <Reveal spring style={styles.ringArea}>
