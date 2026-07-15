@@ -174,7 +174,8 @@ function WizardFooter({
 
 const styles = StyleSheet.create({
   progressWrap: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
-  footerWrap: { gap: 10, paddingHorizontal: 20 },
+  // Sin paddingHorizontal propio: la barra del footer de SafeScreen ya trae el estándar (xl=20).
+  footerWrap: { gap: 10 },
   footerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   hint: {},
   backBtn: { minWidth: 110 },

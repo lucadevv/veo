@@ -54,6 +54,8 @@ export const UnderReviewScreen = (): React.JSX.Element => {
   return (
     <>
       <SafeScreen
+        // El footer también maneja su gutter 2xl a mano (wrapper propio): sin el estándar xl encima.
+        footerPadded={false}
         scroll
         // `padded={false}`: el gutter (24 = `2xl`) lo controla ESTA pantalla, alineado con el footer.
         padded={false}

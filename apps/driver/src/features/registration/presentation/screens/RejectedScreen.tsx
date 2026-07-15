@@ -81,6 +81,8 @@ export const RejectedScreen = (): React.JSX.Element => {
         scroll
         // `padded={false}`: el gutter (24 = `2xl`) lo controla la pantalla, alineado con el footer.
         padded={false}
+        // El footer también maneja su gutter 2xl a mano (wrapper propio): sin el estándar xl encima.
+        footerPadded={false}
         footer={
           <View style={{ paddingHorizontal: theme.spacing['2xl'], gap: theme.spacing.md }}>
             {/* Corregir mis datos — botón PRIMARY (frame: gradiente azul + glow; usamos el primary canónico). */}
