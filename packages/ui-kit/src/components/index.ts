@@ -34,6 +34,8 @@ export {
 export { RideOptionRow, type RideOptionRowProps } from './RideOptionRow';
 export { DriverCard, type DriverCardProps } from './DriverCard';
 export { SosButton, type SosButtonProps } from './SosButton';
+// "EN VIVO" (cámara del habitáculo) — MISMA identidad en passenger + driver (viaje activo).
+export { LiveBadge, type LiveBadgeProps } from './LiveBadge';
 export { RoutePin, type RoutePinProps, type RoutePinVariant } from './RoutePin';
 // Estrella de rating compartida (mismo glifo en passenger + driver: DriverCard y la card del pasajero).
 export { StarGlyph } from './internal/StarGlyph';

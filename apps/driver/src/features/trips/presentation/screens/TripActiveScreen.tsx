@@ -10,6 +10,7 @@ import {
   BottomSheet,
   Button,
   DraggableSheet,
+  LiveBadge,
   MapShell,
   SafeScreen,
   Skeleton,
@@ -419,10 +420,12 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           vistazo). Sin ruta aún, cae al banner de estado del viaje. */}
       <View style={styles.mapArea}>
         <MapShell
-          live={status === 'ARRIVING' || status === 'IN_PROGRESS'}
+          // El "EN VIVO" ya NO es el StatusPill accent top-left de MapShell: es el LiveBadge (card blanca
+          // cámara, MISMA identidad que el pasajero) ENCIMADO sobre la card de maniobra (abajo).
+          live={false}
           topOverlay={
-            // Solo el banner de la PRÓXIMA maniobra (cuando hay ruta). El estado/fase + métricas ahora
-            // viven en el sheet (sin duplicar), y NO hay appbar: el mapa es el hero, full-bleed.
+            // Banner de la PRÓXIMA maniobra (cuando hay ruta) con el LiveBadge encimado en su borde superior.
+            // El estado/fase + métricas viven en el sheet (sin duplicar); el mapa es el hero, full-bleed.
             maneuver ? (
               <View
                 style={[
@@ -438,6 +441,13 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
                   remaining={tripRoute?.steps.length}
                   onboard={status === 'IN_PROGRESS'}
                 />
+                {/* LiveBadge centrado, PISANDO el borde superior de la maniobra (encimado). Absolute → no
+                    afecta el alto medido para el inset de la cámara. */}
+                {status === 'ARRIVING' || status === 'IN_PROGRESS' ? (
+                  <View style={styles.liveBadgeStraddle} pointerEvents="none">
+                    <LiveBadge label={t('trips.live')} />
+                  </View>
+                ) : null}
               </View>
             ) : undefined
           }
@@ -810,6 +820,16 @@ const styles = StyleSheet.create({
   mapArea: { flex: 1 },
   // Banner de la próxima maniobra sobre el mapa (marginTop dinámico en el JSX para respetar el notch).
   maneuverWrap: {},
+  // LiveBadge centrado, encimado en el borde superior de la maniobra (~mitad arriba, mitad sobre la card).
+  // top ≈ -(alto del pill/2). Absolute → fuera del flujo (no altera el alto medido para el inset de cámara).
+  liveBadgeStraddle: {
+    position: 'absolute',
+    top: -18,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 10,
+  },
   flex: { flex: 1 },
   // Header FIJO del sheet (renderHeader, fuera del scroll): back + chat. Lleva su propio padding porque no
   // está dentro del contenedor padded del scroll. Visible en el estado colapsado ('header').

@@ -1,10 +1,9 @@
-import {IconButton, SosButton, useTheme} from '@veo/ui-kit';
+import {IconButton, LiveBadge, SosButton, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {IconChevronDown} from './icons';
-import {LiveBadge} from './LiveBadge';
 
 export interface TripTopBarProps {
   /** Colapsa el sheet del viaje al peek (design/veo.pen fLKdk MinBtn): despeja el mapa sin cerrar nada. */
@@ -36,7 +35,7 @@ export function TripTopBar({
       <View
         style={[styles.tripPill, {top: insets.top + theme.spacing.sm}]}
         pointerEvents="none">
-        <LiveBadge />
+        <LiveBadge label={t('trip.live')} />
       </View>
       <View
         style={[

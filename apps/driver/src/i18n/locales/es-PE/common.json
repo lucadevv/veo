@@ -741,6 +741,7 @@
     },
     "payment": "Pago",
     "fare": "Tarifa",
+    "live": "EN VIVO",
     "cancelConfirmTitle": "¿Cancelar el viaje?",
     "cancelConfirmBody": "Puede aplicar una penalización según las reglas de la operación.",
     "cancelReasonLabel": "Motivo (opcional)",
