@@ -140,11 +140,15 @@ export const CarpoolScreen = ({ navigation }: Props): React.JSX.Element => {
           onPress={() => navigation.navigate('CarpoolPublish')}
           style={({ pressed }) => [
             styles.publish,
-            { borderColor: theme.colors.accent, backgroundColor: theme.colors.accent + '26' },
+            {
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radii.lg,
+              ...theme.elevation.level1,
+            },
             pressed && styles.publishPressed,
           ]}
         >
-          <View style={[styles.publishIcon, { backgroundColor: theme.colors.accent + '26' }]}>
+          <View style={[styles.publishIcon, { backgroundColor: theme.colors.brandDim }]}>
             <IconPlus size={22} color={theme.colors.accent} strokeWidth={2.2} />
           </View>
           <View style={styles.publishText}>
@@ -210,8 +214,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
   },
   publishPressed: { opacity: 0.85 },
   publishIcon: {

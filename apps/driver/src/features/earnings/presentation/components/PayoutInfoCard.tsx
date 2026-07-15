@@ -40,9 +40,9 @@ export function PayoutInfoCard({
       style={[
         styles.card,
         {
-          backgroundColor: theme.colors.accent + '26',
-          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.surface,
           borderRadius: theme.radii.lg,
+          ...theme.elevation.level1,
         },
       ]}
     >
@@ -55,7 +55,7 @@ export function PayoutInfoCard({
             {formatPEN(pendingNetCents)}
           </Text>
         </View>
-        <View style={[styles.chip, { backgroundColor: theme.colors.accent + '26' }]}>
+        <View style={[styles.chip, { backgroundColor: theme.colors.brandDim }]}>
           <IconClock size={14} color={theme.colors.accent} strokeWidth={2} />
           <Text variant="caption" color="accent">
             {t('earnings.autoSettleChip')}
@@ -67,7 +67,7 @@ export function PayoutInfoCard({
       </Text>
 
       {pendingDebtCents > 0 ? (
-        <View style={[styles.debtBlock, { borderTopColor: theme.colors.accent + '4D' }]}>
+        <View style={[styles.debtBlock, { borderTopColor: theme.colors.border }]}>
           <View style={styles.row}>
             <Text variant="footnote" color="inkMuted">
               {t('earnings.pendingDebtLabel')}
@@ -95,7 +95,7 @@ export function PayoutInfoCard({
 }
 
 const styles = StyleSheet.create({
-  card: { alignSelf: 'stretch', borderWidth: StyleSheet.hairlineWidth, padding: 16, gap: 10 },
+  card: { alignSelf: 'stretch', padding: 16, gap: 10 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   amountCol: { gap: 2 },
   chip: {

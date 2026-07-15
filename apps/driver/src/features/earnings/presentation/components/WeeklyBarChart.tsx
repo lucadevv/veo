@@ -61,7 +61,7 @@ export function WeeklyBarChart({ days, t }: WeeklyBarChartProps): React.JSX.Elem
                   {
                     height,
                     // Pico sólido en acento; el resto una tinta de marca sutil (surfaceElevated === surface === #FFFFFF sería invisible en la card blanca).
-                    backgroundColor: isPeak ? theme.colors.accent : theme.colors.accent + '16',
+                    backgroundColor: isPeak ? theme.colors.accent : theme.colors.brandDim,
                   },
                 ]}
               />
