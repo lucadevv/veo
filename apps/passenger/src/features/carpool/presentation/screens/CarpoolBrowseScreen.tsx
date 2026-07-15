@@ -232,15 +232,12 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
         </Card>
       ) : null}
 
-      {/* Conteo honesto de lo CARGADO (pen Count). */}
+      {/* Conteo honesto de lo CARGADO (pen Count) — sin repetir la región: el chip de arriba ya
+          delimita el ámbito (dos portadoras del mismo dato en el mismo header; audit de copy). */}
       <Text variant="footnote" color="inkSubtle">
-        {region
-          ? items.length === 1
-            ? t('carpool.feedCountOne', {region: region.nombre})
-            : t('carpool.feedCountMany', {count: items.length, region: region.nombre})
-          : items.length === 1
-            ? t('carpool.feedCountAllOne')
-            : t('carpool.feedCountAllMany', {count: items.length})}
+        {items.length === 1
+          ? t('carpool.feedCountAllOne')
+          : t('carpool.feedCountAllMany', {count: items.length})}
       </Text>
 
       {/* RUTAS POPULARES (pen PopularRoutes): pares región→región con oferta viva. La sección se

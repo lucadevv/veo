@@ -215,7 +215,9 @@ describe('PaymentMethodSheet', () => {
     expect(onSelect).toHaveBeenCalledWith('PLIN', true);
   });
 
-  it('TASK 4 · YAPE con afiliación activa se rotula "Yape · automático"; sin afiliación, "Yape" a secas', () => {
+  it('TASK 4 · YAPE vinculado: badge "Automático" + nombre canónico; one-shot sin badge', () => {
+    // Contrato post-feedback del dueño (2026-07-15): el nombre NUNCA lleva "· automático" — la
+    // pastilla es la única portadora del estado del Yape vinculado.
     const withAuto = render(
       <PaymentMethodSheet
         visible
@@ -226,7 +228,8 @@ describe('PaymentMethodSheet', () => {
         onSelect={() => {}}
       />,
     );
-    expect(texts(withAuto)).toContain('Yape · automático');
+    expect(texts(withAuto)).not.toContain('Yape · automático');
+    expect(texts(withAuto)).toContain('Automático');
 
     const oneShot = render(
       <PaymentMethodSheet
@@ -237,8 +240,8 @@ describe('PaymentMethodSheet', () => {
         onSelect={() => {}}
       />,
     );
-    // One-shot: el nombre es "Yape" a secas y NUNCA "Yape · automático".
+    // One-shot: el nombre es "Yape" a secas y sin badge (la señal es exclusiva del vinculado).
     expect(texts(oneShot)).toContain('Yape');
-    expect(texts(oneShot)).not.toContain('Yape · automático');
+    expect(texts(oneShot)).not.toContain('Automático');
   });
 });

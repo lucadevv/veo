@@ -137,7 +137,8 @@ export function CarpoolBookingStatusScreen(): React.JSX.Element {
             ? t('carpool.waitingBodyNamed', {name: driverName})
             : t('carpool.waitingBody')
         }
-        pill={<StatusPill label={t('carpool.waitingPill')} tone="warn" dot />}
+        // Sin pill "Pendiente": el título ("Esperando aprobación") ya porta el estado — dos
+        // portadoras del mismo dato en la misma cabecera (audit de copy).
         summary={
           <SummaryCard booking={booking} trip={trip} totalCents={totalCents} />
         }

@@ -179,10 +179,9 @@ function PaymentMethodPickerRow({
   // enciende el SUGERIDO (`isSuggested`). Unifica el realce visual sin mezclar las dos semánticas.
   const accented = selected || isSuggested;
   const isYapeAuto = method === 'YAPE' && yapeAutoActive;
-  // Nombre distinguido LÉXICAMENTE: Yape vinculado ("Yape · automático") vs one-shot ("Yape" a secas).
-  const name = isYapeAuto
-    ? t('payments.nameYapeAuto')
-    : t(`payments.method.${method}`);
+  // La PASTILLA "Automático" porta el estado y el hint explica el cómo; el nombre queda canónico
+  // ("Yape") — el sufijo léxico "· automático" al lado de la pastilla se leía doble (feedback del dueño).
+  const name = t(`payments.method.${method}`);
   // Subtítulo: Yape vinculado describe el cobro automático; el resto su hint canónico es-PE.
   const hint = isYapeAuto
     ? t('payments.hintYapeAuto')

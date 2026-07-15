@@ -143,7 +143,10 @@ export function PaymentMethodsScreen(): React.JSX.Element {
                   ) : undefined
                 }
                 trailing={
-                  isLinked && defaultMethod !== 'YAPE' ? (
+                  // La pastilla es la ÚNICA portadora del estado del cobro automático → se muestra
+                  // SIEMPRE que esté vinculado (antes se ocultaba si Yape era el default y el estado
+                  // quedaba solo en la línea de texto — la redundancia que se limpió de linkedLine).
+                  isLinked ? (
                     <StatusPill
                       label={t('payments.autoBadge')}
                       tone="success"

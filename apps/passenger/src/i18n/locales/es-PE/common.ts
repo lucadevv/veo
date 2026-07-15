@@ -220,8 +220,8 @@ export const common = {
     changeNumber: 'Cambiar número',
     /** Pantalla de sesión expirada (refresh JWT vencido/revocado). */
     expiredTitle: 'Tu sesión expiró',
-    expiredSubtitle:
-      'Por tu seguridad cerramos la sesión. Vuelve a iniciar sesión para verificar tu identidad y continuar.',
+    // Subtítulo = solo el PORQUÉ; la instrucción la porta el CTA (antes la dictaba dos veces).
+    expiredSubtitle: 'Por tu seguridad cerramos la sesión.',
     expiredAction: 'Volver a iniciar sesión',
   },
 
@@ -266,7 +266,9 @@ export const common = {
     title: '¿A dónde vamos?',
     greeting: 'Hola',
     /** Sub del saludo del Home (design/veo.pen SearchSheet). */
-    greetingSub: '¿A dónde vas seguro hoy?',
+    // Afirmación (no pregunta): el buscador de dos bloques abajo ya pregunta "¿A dónde vamos?" —
+    // dos preguntas casi iguales apiladas en el mismo header (audit de copy).
+    greetingSub: 'Viaja seguro hoy',
     /** Toggle modo del pedido (design/veo.pen ModeToggle). */
     modeNow: 'Ahora',
     modeScheduled: 'Programado',
@@ -343,7 +345,8 @@ export const common = {
    */
   notifications: {
     // Pre-prompt contextual de permiso de push (al buscar conductor). Tuteo peruano.
-    prePromptTitle: 'Activa las notificaciones',
+    // Título = BENEFICIO; la acción la porta solo el CTA (antes título y botón decían lo mismo).
+    prePromptTitle: 'Entérate de tu viaje al instante',
     prePromptBody:
       'Te avisamos cuando un conductor acepte tu viaje y cuando esté llegando, aunque tengas la app cerrada.',
     prePromptEnable: 'Activar notificaciones',
@@ -423,8 +426,8 @@ export const common = {
    */
   lostItem: {
     entry: 'Olvidé algo',
-    intro:
-      'Cuéntanos qué olvidaste en el viaje. VEO avisa al conductor y media el contacto por ti.',
+    // La mediación la porta SOLO `privacyNote` — acá "media el contacto" se decía dos veces.
+    intro: 'Cuéntanos qué olvidaste en el viaje.',
     whatLabel: '¿Qué olvidaste?',
     items: {
       phone: 'Celular',
@@ -553,14 +556,17 @@ export const common = {
     offerYourFare: 'OFRECE TU TARIFA',
     /** Header propio del panel de puja (design/veo.pen P/PujaPrice: título + sub). El pen vosea; acá tuteo. */
     panelTitle: 'Pon tu precio',
-    panelSubtitle: 'Ofrece lo que quieres pagar por este viaje',
+    // Sub con dato NUEVO (qué pasa después) — antes parafraseaba el título sin agregar nada.
+    panelSubtitle: 'Los conductores responden a tu oferta',
     /** Pill de sugerido con check (pen RangeHint): rango REAL del server (min–sugerido). */
     suggestedRange: 'Sugerido {{min}} – {{suggested}}',
     /** Nota con rayo (pen Note): una oferta más alta acelera el match. */
     betterOfferNote: 'Una mejor oferta encuentra conductor más rápido',
     /** Card affordance "Poné tu precio" del selector (pen qAT2P): invita a la oferta PUJA no seleccionada. */
     affordanceTitle: 'Pon tu precio',
-    affordanceSub: 'Ofrece lo que quieras y negocia',
+    // Sub con lo NUEVO (negociación directa) — "ofrece lo que quieras" repetía el título; y la
+    // acción "Ofrecer" era la TERCERA portadora del mismo verbo en la card.
+    affordanceSub: 'Negocia directo con los conductores',
     affordanceAction: 'Ofrecer',
     decrease: 'Bajar la oferta',
     increase: 'Subir la oferta',
@@ -587,7 +593,7 @@ export const common = {
     searchingTitle: 'Buscando conductores',
     // Honesto (ADR-020 Lote 3): las ofertas vienen ORDENADAS (mejor precio primero); el rating y la
     // llegada se ven en cada card para COMPARAR — no es un sort que el pasajero elige (no prometemos eso).
-    chooseHint: 'Ordenadas por precio · compará rating y llegada.',
+    chooseHint: 'Ordenadas por precio · compara rating y llegada.',
     live: 'En vivo',
     driver: 'Conductor',
     acceptsPrice: 'Acepta tu precio',
@@ -597,9 +603,10 @@ export const common = {
     view: 'Ver',
     /** Chip echo de la puja del pasajero en el header del board (design/veo.pen L7OMER "TU OFERTA S/ X"). */
     yourOffer: 'TU OFERTA',
-    /** Subtítulo del board con ofertas (pen: "N ofertas cerca tuyo" → tuteo peruano). Plural v3 (ver `title`). */
-    nearYou: '{{count}} oferta cerca de ti',
-    nearYou_plural: '{{count}} ofertas cerca de ti',
+    /** Subtítulo del board con ofertas — SIN el número: el título ("N conductores respondieron")
+     * ya lo porta y se leía dos veces apilado. */
+    nearYou: 'Ofertas cerca de ti',
+    nearYou_plural: 'Ofertas cerca de ti',
     /** Labels de acción por tipo de oferta (pen C/BidCard): aceptar el precio vs responder la contraoferta. */
     accept: 'Aceptar',
     respond: 'Responder',
@@ -704,7 +711,9 @@ export const common = {
     fare: 'Tarifa estimada',
     cancel: 'Cancelar viaje',
     cancelTitle: '¿Cancelar viaje programado?',
-    cancelBody: 'Si cancelas con antelación no se aplica penalidad.',
+    // MISMA fórmula que footNote (regla real: gratis mientras siga SCHEDULED) — antes el diálogo
+    // reintroducía la promesa temporal ("con antelación") que el footNote evita a propósito.
+    cancelBody: 'Cancelar no tiene costo mientras el viaje siga programado.',
     cancelConfirm: 'Sí, cancelar',
     keep: 'Mantener',
     cancelError: 'No pudimos cancelar el viaje. Inténtalo de nuevo.',
@@ -725,8 +734,7 @@ export const common = {
     /** FEED del marketplace (tab Compartir, browse-first · pen P/CarpoolFeed). */
     feedRegionAll: 'Todas las regiones',
     feedRegionSheetTitle: '¿Dónde buscas viajes?',
-    feedCountOne: '1 viaje en {{region}}',
-    feedCountMany: '{{count}} viajes en {{region}}',
+    // El conteo NO repite la región (el chip de región ya delimita el ámbito en el mismo header).
     feedCountAllOne: '1 viaje publicado',
     feedCountAllMany: '{{count}} viajes publicados',
     feedEmpty: 'Aún no hay viajes en {{region}}',
@@ -850,8 +858,8 @@ export const common = {
       'Estamos procesando el cobro de {{amount}} a tu método de pago',
     chargeDone: 'Se cobró {{amount}} a tu método de pago',
     rejectedTitle: 'Reserva no confirmada',
-    rejectedBody:
-      'El conductor no pudo tomar tu solicitud esta vez. No se te cobró nada.',
+    // El dato del cobro lo porta SOLO el Banner (`noChargeNote`) — acá se leía dos veces seguidas.
+    rejectedBody: 'El conductor no pudo tomar tu solicitud esta vez.',
     noChargeNote: 'No se realizó ningún cobro',
     fieldRoute: 'Ruta',
     fieldDate: 'Fecha',
@@ -1159,10 +1167,9 @@ export const common = {
   },
 
   childMode: {
-    // Subtítulo per pen RSNDK, AJUSTADO a la regla real del backend (BR-T07): el código se valida al
-    // INICIAR el viaje (recojo), no al cambiar el destino — el pen decía "para cambiar el destino".
-    subtitle:
-      'Protege a un menor: se exige un código para iniciar el viaje, nunca visible para el conductor.',
+    // Subtítulo CORTO: las reglas (código al iniciar / invisible al conductor / BR-T07) las porta el
+    // CHECKLIST de la misma pantalla — el subtítulo las enumeraba y se leían dos veces.
+    subtitle: 'Protege a un menor durante su viaje.',
     enable: 'Activar modo niño',
     /** Hint bajo el label del toggle cuando está ON (pen RSNDK). */
     hintActive: 'Protección activada para este viaje',
@@ -1311,18 +1318,15 @@ export const common = {
       PAGOEFECTIVO: 'Código para pagar en bancos y agentes',
     },
     /** Subtítulo de la fila YAPE cuando la afiliación está ACTIVA: cobro On-File (se cobra solo, sin QR). */
-    hintYapeAuto: 'Se cobra solo, sin abrir la app',
+    // pill=ESTADO ("Automático"), hint=CÓMO — "se cobra solo" repetía la pastilla de al lado.
+    hintYapeAuto: 'Sin QR ni abrir la app',
     /**
      * Señal sutil en la fila del quoting cuando el cobro automático con Yape está activo (afiliación
      * On-File). SOLO para el Yape VINCULADO; jamás para "pagar con Yape una vez" (QR/deepLink al final).
+     * La PASTILLA es la ÚNICA portadora del estado: el nombre queda "Yape" canónico (el sufijo
+     * "· automático" al lado de la pastilla se leía DOBLE — feedback del dueño 2026-07-15).
      */
     autoBadge: 'Automático',
-    /**
-     * Nombre del método YAPE en las superficies, distinguido por estado (TASK 4):
-     *  - `nameYapeAuto`: afiliación ACTIVA → "Yape · automático" (On-File, se cobra solo).
-     *  - el nombre a secas (`method.YAPE` = "Yape") cubre el one-shot (QR/deepLink una vez).
-     */
-    nameYapeAuto: 'Yape · automático',
     /**
      * Nudge del PRIMER viaje con Yape (afiliación-first): cuando el método es YAPE y NO hay afiliación
      * On-File activa, ofrecemos vincular UNA VEZ para que los cobros siguientes sean automáticos
@@ -1388,9 +1392,10 @@ export const common = {
     auto: {
       /** Acción en la fila Yape (sin vincular). */
       link: 'Vincular',
-      /** Fila Yape vinculado: línea de experiencia con teléfono enmascarado y "pago automático". */
-      linkedLine: 'Tu Yape · {{phone}} · pago automático',
-      linkedLineNoPhone: 'Tu Yape vinculado · pago automático',
+      /** Fila Yape vinculado: SOLO el dato (teléfono enmascarado) — el estado lo porta la pastilla
+       * "Automático" (una sola portadora; "pago automático" acá se leía doble con la pill al lado). */
+      linkedLine: '{{phone}} · vinculado',
+      linkedLineNoPhone: 'Vinculado a tu Yape',
       /** Fila Yape en proceso (tras el deepLink, esperando confirmación). */
       processLine: 'Esperando confirmación en Yape…',
 
@@ -1673,9 +1678,9 @@ export const common = {
      * su método predeterminado del perfil (si es digital). El CTA primario refleja el método elegido.
      */
     resolveTitle: 'Resuelve el pago de tu viaje',
-    /** Subtítulo del selector de resolución: invita a elegir, sin culpar por el cobro fallido. */
-    resolveSubtitle:
-      'Elige cómo quieres pagarlo. Te sugerimos tu método de siempre.',
+    /** Subtítulo del selector de resolución: invita a elegir, sin culpar por el cobro fallido.
+     * La sugerencia la porta la pastilla "Sugerido" del picker (una sola portadora). */
+    resolveSubtitle: 'Elige cómo quieres pagarlo.',
     /** CTA primario del selector de resolución, parametrizado con el método elegido. */
     payWith: 'Pagar con {{method}}',
     /** CTA primario en vuelo (esperando la respuesta del cobro con el método elegido). */
@@ -1965,7 +1970,10 @@ export const common = {
     trustedContacts: 'Contactos de confianza',
     trustedContactsSub: 'Quiénes ven tus viajes en vivo',
     childMode: 'Modo niño',
-    childModeSub: 'Código para cambiar el destino',
+    // Alineado a la regla REAL (BR-T07): el código se valida al INICIAR el viaje — la fila del
+    // Perfil seguía diciendo "para cambiar el destino" (formulación FALSA del pen, ya corregida
+    // en childMode.subtitle pero esta quedó stale).
+    childModeSub: 'Código para iniciar el viaje',
     activePill: 'Activo',
     cameraControl: 'Control de cámara',
     cameraControlSub: 'Quién ve tu cámara',
@@ -2119,8 +2127,9 @@ export const common = {
    * pánico): por eso cada contacto lleva "Enviar SMS" (compositor del teléfono), no un switch.
    */
   familyShare: {
-    intro:
-      'Tu familia sigue tu viaje en vivo con un enlace seguro que caduca al llegar',
+    // La caducidad la porta SOLO el Banner (`expiryNote`) — acá se decía dos veces y con otra
+    // fórmula ("al llegar" vs "al terminar"), lo que parecía dos reglas distintas.
+    intro: 'Tu familia sigue tu viaje en vivo con un enlace seguro',
     linkLabel: 'Enlace del viaje',
     copy: 'Copiar',
     copied: '¡Copiado!',

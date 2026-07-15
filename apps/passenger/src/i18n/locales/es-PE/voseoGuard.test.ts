@@ -59,6 +59,13 @@ const IMPERATIVE_STEMS = [
   'sigu',
   'qued',
   'arm',
+  // "compará" se escapó del board de ofertas (2026-07-15): la raíz no estaba en la lista.
+  'compar',
+  'orden',
+  'cambi',
+  'public',
+  'reserv',
+  'salud',
 ];
 
 /** Raíces -er/-ir cuyo imperativo voseo termina en -é. */

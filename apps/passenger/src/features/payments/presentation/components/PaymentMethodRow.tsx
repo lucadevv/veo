@@ -36,13 +36,10 @@ export function PaymentMethodRow({
 
   // Señal sutil solo cuando el método es YAPE y el cobro automático está activo (reflejo, no decisión).
   // Es el Yape VINCULADO (On-File). El one-shot (Yape sin afiliación) NO lleva esta señal (TASK 4).
-  const isYapeAuto = autoActive && method === 'YAPE';
-  const showAutoBadge = isYapeAuto;
-  // Nombre distinguido LÉXICAMENTE (TASK 4): "Yape · automático" cuando hay afiliación; "Yape" a secas
-  // (one-shot, QR al final) cuando no. El resto de métodos usan su nombre canónico.
-  const methodName = isYapeAuto
-    ? t('payments.nameYapeAuto')
-    : t(`payments.method.${method}`);
+  // La PASTILLA "Automático" es la ÚNICA portadora del estado: el nombre queda canónico ("Yape") —
+  // antes el nombre decía "Yape · automático" AL LADO de la pastilla y se leía doble (feedback del dueño).
+  const showAutoBadge = autoActive && method === 'YAPE';
+  const methodName = t(`payments.method.${method}`);
 
   return (
     <Pressable

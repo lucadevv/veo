@@ -194,11 +194,8 @@ export function CounterScreen(): React.JSX.Element {
               : undefined
           }
           plate={offer.vehicle?.plate}
-          footer={
-            <Text variant="footnote" color="inkMuted">
-              {t('counter.proposedOther')}
-            </Text>
-          }
+          // Sin footer "Propone otro precio": el título ("X te contraofertó") y el tile "Su precio"
+          // ya portan el evento y el dato — la tercera mención no agregaba nada (audit de copy).
         />
 
         {/* Comparación HORIZONTAL per pen u1306: tile "Tu oferta" (tachada) → flecha → tile "Su

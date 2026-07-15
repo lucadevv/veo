@@ -139,7 +139,9 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
     expect(texts(renderer)).toContain('Tu predeterminado');
   });
 
-  it('YAPE con afiliación activa se rotula "Yape · automático" + badge; sin afiliación, "Yape" a secas', () => {
+  it('YAPE con afiliación activa: badge "Automático" + nombre canónico (la pastilla es la única señal)', () => {
+    // Contrato post-feedback del dueño (2026-07-15): el nombre NUNCA lleva "· automático" — al lado
+    // de la pastilla se leía doble. El estado lo porta SOLO el badge (y el hint explica el cómo).
     const withAuto = render(
       <PaymentMethodPicker
         variant="full"
@@ -151,7 +153,8 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
       />,
     );
     const autoTexts = texts(withAuto);
-    expect(autoTexts).toContain('Yape · automático');
+    expect(autoTexts).not.toContain('Yape · automático');
+    expect(autoTexts).toContain('Yape');
     expect(autoTexts).toContain('Automático');
 
     const oneShot = render(
@@ -163,7 +166,8 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
         onSelect={() => {}}
       />,
     );
-    expect(texts(oneShot)).not.toContain('Yape · automático');
+    // One-shot: sin badge (la señal es EXCLUSIVA del Yape vinculado).
+    expect(texts(oneShot)).not.toContain('Automático');
   });
 
   it('sin rememberToggle NO renderiza el checkbox', () => {
