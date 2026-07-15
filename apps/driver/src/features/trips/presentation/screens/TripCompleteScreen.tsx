@@ -117,6 +117,10 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
           label={t('trips.complete.done')}
           fullWidth
           loading={rate.isPending}
+          // EFECTIVO: no se puede salir con "Listo" hasta RESOLVER el cobro (confirmar "Sí, recibí" o
+          // "No cobré") — el efectivo es plata que el conductor DEBE registrar antes de cerrar. En digital
+          // (o una vez resuelto el cash) el botón queda habilitado normal.
+          disabled={isCash && !cashSettled}
           onPress={onDone}
         />
       }
