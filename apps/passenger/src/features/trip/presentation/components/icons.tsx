@@ -681,3 +681,52 @@ export function IconBolt({color, size = 16}: GlyphProps): React.JSX.Element {
     </Svg>
   );
 }
+
+/** Billete (lucide banknote): chip "Precio" de los filtros del marketplace (pen P/ProgResults). */
+export function IconBanknote({color, size = 16}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect
+        x={2}
+        y={6}
+        width={20}
+        height={12}
+        rx={2}
+        stroke={color}
+        strokeWidth={2}
+      />
+      <Circle cx={12} cy={12} r={2} stroke={color} strokeWidth={2} />
+      <Path
+        d="M6 12h.01M18 12h.01"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Insignia verificada (lucide badge-check): chip "Verificado" de los filtros (pen P/ProgResults). */
+export function IconBadgeCheck({
+  color,
+  size = 16,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="m9 12 2 2 4-4"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}

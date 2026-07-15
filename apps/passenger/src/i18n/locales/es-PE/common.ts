@@ -743,6 +743,32 @@ export const common = {
     pickerEmpty: 'Sin resultados para tu búsqueda',
     pickerError: 'No pudimos buscar direcciones. Inténtalo de nuevo.',
 
+    /** Filtros del marketplace (pen P/ProgResults · chips Ordenar/Verificado/Precio/Salida). */
+    filterSort: 'Ordenar',
+    filterVerified: 'Verificado',
+    filterPrice: 'Precio',
+    filterDeparture: 'Salida',
+    sortSheetTitle: '¿Cómo ordenamos?',
+    sortSalida: 'Salida más temprana',
+    sortPrecio: 'Precio más bajo',
+    priceSheetTitle: 'Precio máximo por asiento',
+    priceNoLimit: 'Sin límite',
+    priceMaxChip: '{{max}} máx',
+    departureSheetTitle: '¿A qué hora quieres salir?',
+    departureAll: 'Todo el día',
+    departureMadrugada: 'Madrugada · 00:00–05:59',
+    departureManana: 'Mañana · 06:00–11:59',
+    departureTarde: 'Tarde · 12:00–17:59',
+    departureNoche: 'Noche · 18:00–23:59',
+    /** Franja elegida, versión corta para el chip. */
+    departureMadrugadaChip: 'Madrugada',
+    departureMananaChip: 'Mañana',
+    departureTardeChip: 'Tarde',
+    departureNocheChip: 'Noche',
+    clearFilters: 'Quitar filtros',
+    filteredEmpty: 'Ningún viaje pasa tus filtros',
+    filteredEmptySubtitle: 'Afloja el precio o la franja horaria y vuelve a intentar.',
+
     /** Resultados (P/ProgResults · C/TripCard). */
     route: '{{origin}} → {{destination}}',
     resultsCountOne: '1 viaje disponible',

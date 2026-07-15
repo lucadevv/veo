@@ -31,6 +31,10 @@ export class HttpCarpoolRepository implements CarpoolRepository {
         fecha: params.fecha,
         asientos: params.asientos,
         // undefined se omite del query string (lo resuelve el HttpClient), sin ramas acá.
+        orden: params.orden,
+        precioMaxCents: params.precioMaxCents,
+        salidaDesde: params.salidaDesde,
+        salidaHasta: params.salidaHasta,
         limit: params.limit,
         cursor: params.cursor,
       },

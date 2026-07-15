@@ -19,6 +19,18 @@ export interface CarpoolSearchParams {
   fecha: string;
   /** Asientos que el pasajero necesita (1..8). */
   asientos: number;
+  /**
+   * Orden del marketplace (pen P/ProgResults · chips): `salida` (más temprana primero, el default
+   * del server) o `precio` (más barato primero). El keyset del server es sort-aware: cambiar el
+   * orden invalida el cursor (la UI re-consulta desde la página 1 al cambiarlo).
+   */
+  orden?: 'salida' | 'precio';
+  /** Filtro: precio máximo por asiento, en céntimos (`precioAsientoCents <= valor`). */
+  precioMaxCents?: number;
+  /** Filtro: hora mínima de salida dentro del día, `HH:mm` hora Lima (franja del chip "Salida"). */
+  salidaDesde?: string;
+  /** Filtro: hora máxima de salida dentro del día, `HH:mm` hora Lima (inclusiva al minuto). */
+  salidaHasta?: string;
   /** Tamaño de página (keyset). */
   limit?: number;
   /** Cursor opaco de la página anterior (`nextCursor`); undefined = primera página. */
