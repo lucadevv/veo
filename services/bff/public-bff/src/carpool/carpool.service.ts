@@ -42,6 +42,11 @@ export class CarpoolService {
         destLon: dto.destLon,
         fecha: dto.fecha,
         asientos: dto.asientos,
+        // Orden + filtros opcionales (F2b): el downstream aplica defaults/semántica (Lima, tope, keyset).
+        orden: dto.orden,
+        precioMaxCents: dto.precioMaxCents,
+        salidaDesde: dto.salidaDesde,
+        salidaHasta: dto.salidaHasta,
         limit: dto.limit,
         cursor: dto.cursor,
       },

@@ -59,6 +59,7 @@ import {
   type CreatePublishedTripData,
   type UpdatePublishedTripData,
   type SearchPublishedTripsCriteria,
+  type SearchKeysetCursor,
 } from './published-trips.repository';
 import {
   CostCapService,
@@ -91,7 +92,7 @@ import {
 import type { CreatePublishedTripDto } from './dto/create-published-trip.dto';
 import type { UpdatePublishedTripDto } from './dto/update-published-trip.dto';
 import type { ListMinePageDto } from './dto/list-mine-page.dto';
-import type { SearchPublishedTripsDto } from './dto/search-published-trips.dto';
+import type { SearchOrder, SearchPublishedTripsDto } from './dto/search-published-trips.dto';
 
 /**
  * Prefijo de la dedupKey de REQUEST (idempotencia del POST /published-trips, FIX 2). Aísla este espacio de
@@ -569,6 +570,9 @@ export class PublishedTripsService {
    *  1. Celdas H3 (res 9) del origen y del destino buscados → sus ANILLOS (neighbors(celda, k)) con k=kRing.
    *  2. WHERE en el repo: `origin_h3 IN originRing AND dest_h3 IN destRing` (RUTA A→B → AND) + asientos +
    *     estado IN SEARCHABLE_STATES + salida dentro del DÍA pedido Y futura. Orden fechaHoraSalida ASC, keyset.
+   *     FILTROS OPCIONALES: `precioMaxCents` (tope de precio por asiento) y `salidaDesde`/`salidaHasta`
+   *     (ventana horaria HH:mm de pared Lima dentro del día; hasta INCLUSIVE a nivel minuto). ORDEN OPCIONAL
+   *     `orden=precio` (precioBase ASC, id ASC) — el keyset sigue al orden activo (cursor sort-aware con tag).
    *  3. EXPANSIÓN k: si k=kRing da CERO resultados (y kRingExpand > kRing y NO es una página de continuación),
    *     se reintenta UNA vez con k=kRingExpand (anillo más grande). Tunable por env.
    *  4. ENRIQUECIMIENTO ANTI-N+1: se juntan los driverId ÚNICOS de la página → UNA sola GetDriversByIds →
@@ -588,8 +592,36 @@ export class PublishedTripsService {
       throw new ValidationError('fecha inválida', { fecha: dto.fecha });
     }
     const { desde, hasta } = limaDayRange(fecha);
+
+    // ORDEN activo de la página (default `salida` = comportamiento histórico). El cursor se decodifica
+    // CONTRA este orden: un cursor emitido bajo OTRO orden se descarta (página 1) — ver decodeSearchCursor.
+    const orden: SearchOrder = dto.orden ?? 'salida';
+
+    // VENTANA HORARIA opcional DENTRO del día pedido, en hora-de-pared LIMA (UTC-5 fijo, sin DST): cada
+    // `HH:mm` se ancla a la medianoche Lima (`desde` de limaDayRange) + hh*3600000 + mm*60000. El regex del
+    // DTO garantiza HH:mm ∈ [00:00, 23:59] → ambos instantes caen dentro del día; el max/min documenta el
+    // invariante (la ventana NUNCA se expande más allá del día). `salidaHasta` es INCLUSIVE a nivel minuto:
+    // la cota se expresa como `lt desde+salidaHasta+1min` (una salida a las 10:00:30 entra con hasta=10:00).
+    const desdeEfectivo =
+      dto.salidaDesde === undefined
+        ? desde
+        : maxDate(desde, limaWallTimeInstant(desde, dto.salidaDesde));
+    const hastaEfectivo =
+      dto.salidaHasta === undefined
+        ? hasta
+        : minDate(
+            hasta,
+            new Date(limaWallTimeInstant(desde, dto.salidaHasta).getTime() + MINUTE_MS),
+          );
+
+    // Ventana VACÍA (salidaDesde > salidaHasta): página vacía HONESTA sin pegarle a la DB — ninguna fila
+    // puede satisfacer `gte desde' AND lt hasta'` con desde' >= hasta', no hay nada que consultar.
+    if (desdeEfectivo.getTime() >= hastaEfectivo.getTime()) {
+      return { items: [], nextCursor: null };
+    }
+
     const take = dto.limit ?? DEFAULT_SEARCH_PAGE_SIZE;
-    const cursor = decodeSearchCursor(dto.cursor);
+    const cursor = decodeSearchCursor(dto.cursor, orden);
 
     // Radio de búsqueda VIGENTE (editable por el admin en caliente, sin redeploy): el radio km de la config
     // mapeado a k-rings H3. Un cambio del admin surte efecto en la siguiente búsqueda (cache invalidado al PUT).
@@ -602,9 +634,11 @@ export class PublishedTripsService {
     const baseCriteria = {
       asientos: dto.asientos,
       estados: SEARCHABLE_STATES,
-      desde,
-      hasta,
+      desde: desdeEfectivo,
+      hasta: hastaEfectivo,
       ahora: new Date(),
+      orden,
+      ...(dto.precioMaxCents !== undefined ? { precioMaxCents: dto.precioMaxCents } : {}),
       take,
       ...(cursor ? { cursor } : {}),
     } satisfies Omit<SearchPublishedTripsCriteria, 'originRing' | 'destRing'>;
@@ -633,9 +667,9 @@ export class PublishedTripsService {
     // (y que `take`): una página puede venir con menos resultados tras el filtro de elegibilidad. Es aceptable
     // —el keyset avanza igual por `trips` (la última fila CRUDA), así no se saltan ni repiten filas entre páginas—.
     // nextCursor: si la página CRUDA vino LLENA (== take), probablemente hay más → codificá la última fila CRUDA.
-    // Si vino corta, no hay más (null). Keyset opaco (fechaHoraSalida, id) de la última fila en el orden ASC.
+    // Si vino corta, no hay más (null). Keyset opaco de la tupla del ORDEN ACTIVO (tag `s`/`p` + valor + id).
     const last = trips.length === take ? trips[trips.length - 1] : undefined;
-    const nextCursor = last ? encodeSearchCursor(last.fechaHoraSalida, last.id) : null;
+    const nextCursor = last ? encodeSearchCursor(orden, last) : null;
 
     return { items, nextCursor };
   }
@@ -1452,27 +1486,65 @@ function limaDayRange(fecha: Date): { desde: Date; hasta: Date } {
   return { desde, hasta };
 }
 
-/** Separador del cursor keyset de búsqueda. `|` no aparece en un ISO-8601 ni en un UUID → parseo sin ambigüedad. */
+const HOUR_MS = 3_600_000;
+
+/**
+ * `HH:mm` de PARED Lima → instante UTC, anclado a la medianoche Lima del día pedido (el `desde` que devuelve
+ * `limaDayRange`). Lima es UTC-5 FIJO (sin DST) → sumar hh*3600000 + mm*60000 a esa medianoche ES la hora de
+ * pared exacta, sin lib de TZ. El formato lo garantiza el DTO (regex estricta 00:00–23:59, cero-padded):
+ * acá solo se parsea posicionalmente.
+ */
+function limaWallTimeInstant(medianocheLima: Date, hhmm: string): Date {
+  const hh = Number(hhmm.slice(0, 2));
+  const mm = Number(hhmm.slice(3, 5));
+  return new Date(medianocheLima.getTime() + hh * HOUR_MS + mm * MINUTE_MS);
+}
+
+/** Máximo/mínimo de dos instantes (el recorte de la ventana horaria contra el día [desde, hasta)). */
+function maxDate(a: Date, b: Date): Date {
+  return a.getTime() >= b.getTime() ? a : b;
+}
+function minDate(a: Date, b: Date): Date {
+  return a.getTime() <= b.getTime() ? a : b;
+}
+
+/** Separador del cursor keyset de búsqueda. `|` no aparece en un ISO-8601, un entero ni un UUID → parseo sin ambigüedad. */
 const SEARCH_CURSOR_SEP = '|';
 
 /**
- * Codifica el cursor keyset OPACO de la búsqueda: base64 de `${fechaHoraSalidaISO}|${id}` de la última fila
- * de la página. Opaco = el cliente lo trata como token, no lo construye a mano.
+ * Tag del ORDEN embebido en el cursor (`s` = salida, `p` = precio). El cursor es SORT-AWARE: la tupla keyset
+ * solo tiene sentido bajo el orden que la generó (con `orden=precio` el "reloj" es precioBase, no la fecha).
+ * Si el cliente cambia el orden a mitad de paginación, el universo del keyset cambia con él: reutilizar el
+ * cursor viejo saltearía o duplicaría filas → un tag que no matchea el orden pedido se trata como cursor
+ * AUSENTE (página 1), en el mismo espíritu tolerante del codec.
  */
-function encodeSearchCursor(fechaHoraSalida: Date, id: string): string {
-  return Buffer.from(`${fechaHoraSalida.toISOString()}${SEARCH_CURSOR_SEP}${id}`, 'utf8').toString(
-    'base64url',
-  );
+const SEARCH_CURSOR_TAG: Record<SearchOrder, string> = { salida: 's', precio: 'p' };
+
+/**
+ * Codifica el cursor keyset OPACO de la búsqueda: base64 de `<tag>|<valor>|<id>` de la última fila de la
+ * página, donde `<tag>|<valor>` depende del orden activo (`s|<fechaHoraSalidaISO>` o `p|<precioBaseCents>`).
+ * Opaco = el cliente lo trata como token, no lo construye a mano.
+ */
+function encodeSearchCursor(orden: SearchOrder, last: PublishedTrip): string {
+  const valor = orden === 'precio' ? String(last.precioBase) : last.fechaHoraSalida.toISOString();
+  return Buffer.from(
+    `${SEARCH_CURSOR_TAG[orden]}${SEARCH_CURSOR_SEP}${valor}${SEARCH_CURSOR_SEP}${last.id}`,
+    'utf8',
+  ).toString('base64url');
 }
 
 /**
- * Decodifica el cursor keyset de la búsqueda. TOLERANTE: un cursor ausente → undefined (primera página); un
- * cursor mal formado (no decodifica, fecha inválida, sin id) → undefined también (degrada a primera página
- * en vez de 500 por un token corrupto del cliente). Devuelve la tupla (fechaHoraSalida, id) del keyset.
+ * Decodifica el cursor keyset de la búsqueda CONTRA el orden pedido. TOLERANTE: un cursor ausente →
+ * undefined (primera página); un cursor mal formado (no decodifica, valor inválido, sin id) → undefined
+ * también (degrada a primera página en vez de 500 por un token corrupto del cliente); y un cursor cuyo TAG
+ * no matchea `orden` → undefined TAMBIÉN (ver SEARCH_CURSOR_TAG: cambiar el orden a mitad de paginación
+ * invalida el keyset — se rearranca honesto en página 1 del orden nuevo). El cursor pre-tag legado
+ * (`<iso>|<id>`, 2 segmentos) cae en la misma rama: página 1, sin 500.
  */
 function decodeSearchCursor(
   cursor: string | undefined,
-): { fechaHoraSalida: Date; id: string } | undefined {
+  orden: SearchOrder,
+): SearchKeysetCursor | undefined {
   if (cursor === undefined || cursor === '') return undefined;
   let decoded: string;
   try {
@@ -1480,11 +1552,17 @@ function decodeSearchCursor(
   } catch {
     return undefined;
   }
-  const sep = decoded.indexOf(SEARCH_CURSOR_SEP);
-  if (sep < 0) return undefined;
-  const iso = decoded.slice(0, sep);
-  const id = decoded.slice(sep + 1);
-  const fechaHoraSalida = new Date(iso);
-  if (id === '' || Number.isNaN(fechaHoraSalida.getTime())) return undefined;
-  return { fechaHoraSalida, id };
+  const parts = decoded.split(SEARCH_CURSOR_SEP);
+  if (parts.length !== 3) return undefined;
+  const [tag, valor, id] = parts as [string, string, string];
+  if (tag !== SEARCH_CURSOR_TAG[orden] || valor === '' || id === '') return undefined;
+  if (orden === 'precio') {
+    const precioBase = Number(valor);
+    // El precio del keyset es un Int en céntimos ≥ 0: cualquier otra cosa es un token corrupto.
+    if (!Number.isInteger(precioBase) || precioBase < 0) return undefined;
+    return { orden, precioBase, id };
+  }
+  const fechaHoraSalida = new Date(valor);
+  if (Number.isNaN(fechaHoraSalida.getTime())) return undefined;
+  return { orden, fechaHoraSalida, id };
 }

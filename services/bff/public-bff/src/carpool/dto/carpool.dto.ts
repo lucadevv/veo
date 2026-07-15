@@ -7,6 +7,7 @@
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsLatitude,
@@ -23,6 +24,13 @@ import { PaymentMethod } from '@veo/shared-types';
 
 /** Fecha-calendario PURA `YYYY-MM-DD` (sin hora ni offset) — booking-service la interpreta en hora Lima. */
 const CALENDAR_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Órdenes de la búsqueda (espejo del downstream): `salida` (default) o `precio`. */
+const SEARCH_ORDER_VALUES = ['salida', 'precio'] as const;
+type SearchOrder = (typeof SEARCH_ORDER_VALUES)[number];
+
+/** Hora-de-pared `HH:mm` (24h, cero-padded) — el downstream la interpreta en hora Lima dentro del día. */
+const LIMA_WALL_TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class SearchCarpoolTripsDto {
   // ── Ruta A→B que busca el pasajero. ──
@@ -62,7 +70,32 @@ export class SearchCarpoolTripsDto {
   @Max(50)
   limit?: number;
 
-  /** Cursor keyset OPACO de la página previa (su forma interna la valida el downstream). */
+  // Orden de la página: `salida` (default) o `precio` (más barato primero). Opcional — contrato intacto.
+  @IsOptional()
+  @IsIn(SEARCH_ORDER_VALUES)
+  orden?: SearchOrder;
+
+  // Precio máximo por asiento en céntimos PEN (el downstream filtra precioBase <= tope). Int ≥ 1.
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  precioMaxCents?: number;
+
+  // Ventana horaria de salida dentro del día pedido, hora-de-pared Lima HH:mm (hasta INCLUSIVE al minuto).
+  @IsOptional()
+  @Matches(LIMA_WALL_TIME_REGEX, {
+    message: 'salidaDesde debe ser una hora-de-pared HH:mm (24h, sin segundos ni offset)',
+  })
+  salidaDesde?: string;
+
+  @IsOptional()
+  @Matches(LIMA_WALL_TIME_REGEX, {
+    message: 'salidaHasta debe ser una hora-de-pared HH:mm (24h, sin segundos ni offset)',
+  })
+  salidaHasta?: string;
+
+  /** Cursor keyset OPACO de la página previa (su forma interna la valida el downstream; es sort-aware). */
   @IsOptional()
   @IsString()
   cursor?: string;

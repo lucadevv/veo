@@ -21,12 +21,23 @@ import { ConflictError } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, PublishedTripState, type PublishedTrip } from '../generated/prisma';
 import { BOOKING_PRODUCER, type BookingEventType } from '../events/booking-events';
+import type { SearchOrder } from './dto/search-published-trips.dto';
 
 /** Datos ya validados/derivados por el service para materializar la fila PublishedTrip. */
 export type CreatePublishedTripData = Prisma.PublishedTripUncheckedCreateInput;
 
 /** Patch ya validado/derivado por el service para editar una oferta (F1a). Solo los campos que cambian. */
 export type UpdatePublishedTripData = Prisma.PublishedTripUncheckedUpdateInput;
+
+/**
+ * Tupla keyset decodificada del cursor de búsqueda, DISCRIMINADA por el orden que la generó: el "reloj" del
+ * keyset ES el campo del orden activo (salida → fechaHoraSalida; precio → precioBase), + id como desempate.
+ * El SERVICE garantiza el invariante `cursor.orden === criteria.orden` (un cursor de otro orden se descarta
+ * al decodificar): mezclar el reloj de un orden con el orderBy de otro saltearía/duplicaría filas.
+ */
+export type SearchKeysetCursor =
+  | { orden: 'salida'; fechaHoraSalida: Date; id: string }
+  | { orden: 'precio'; precioBase: number; id: string };
 
 /**
  * Criterio de la BÚSQUEDA geo de viajes (F2, §6.2). Lo arma el SERVICE (resuelve los anillos H3, el rango
@@ -48,10 +59,14 @@ export interface SearchPublishedTripsCriteria {
   hasta: Date;
   /** "Ahora": la salida debe ser > now() (no se ofertan viajes ya partidos). */
   ahora: Date;
+  /** Orden activo de la página: `salida` (fechaHoraSalida ASC) o `precio` (precioBase ASC); id ASC desempata. */
+  orden: SearchOrder;
+  /** Filtro OPCIONAL de precio máximo por asiento (céntimos PEN): `precioBase <= precioMaxCents`. */
+  precioMaxCents?: number;
   /** Tamaño de página. */
   take: number;
-  /** Cursor keyset (fechaHoraSalida, id) de la última fila de la página previa; sin él → primera página. */
-  cursor?: { fechaHoraSalida: Date; id: string };
+  /** Cursor keyset de la última fila de la página previa (tupla del orden activo); sin él → primera página. */
+  cursor?: SearchKeysetCursor;
 }
 
 /** Evento de dominio a emitir en la misma tx que la mutación (outbox). */
@@ -245,22 +260,40 @@ export class PublishedTripsRepository {
    * asientosDisponibles >= asientos + estado IN estados + la salida dentro del día pedido Y futura.
    *
    * Respaldada por los índices F2 `(origin_h3, estado, fecha_hora_salida)` / `(dest_h3, ...)`: NO es full
-   * scan. PAGINADO por KEYSET sobre la tupla (fecha_hora_salida ASC, id ASC) — orden estable aun con varias
-   * salidas a la misma hora: el cursor codifica AMBAS columnas y la condición OR del keyset evita saltos/
-   * duplicados (fecha > cursor.fecha, O misma fecha con id > cursor.id). Un solo "reloj" compuesto.
+   * scan. PAGINADO por KEYSET sobre la tupla del ORDEN ACTIVO — `orden=salida` (default): (fecha_hora_salida
+   * ASC, id ASC); `orden=precio`: (precio_base ASC, id ASC). Orden estable aun con valores repetidos: el
+   * cursor codifica AMBAS columnas y la condición OR del keyset evita saltos/duplicados (valor > cursor.valor,
+   * O mismo valor con id > cursor.id). Un solo "reloj" compuesto POR ORDEN: el cursor viene discriminado
+   * (`SearchKeysetCursor`) y el service garantiza que matchea `c.orden`.
+   *
+   * Filtro opcional `precioMaxCents` (precio_base <= tope): entra al WHERE con cualquiera de los dos órdenes.
    */
   searchByRoute(c: SearchPublishedTripsCriteria): Promise<PublishedTrip[]> {
-    // Keyset: la página arranca DESPUÉS de (cursor.fechaHoraSalida, cursor.id) en orden ASC. Tupla expresada
-    // como OR para respetar el orden compuesto (no se puede usar `cursor`/`skip` de Prisma sobre una columna
-    // no-única como fechaHoraSalida sin perder filas con la misma hora).
-    const keyset: Prisma.PublishedTripWhereInput | undefined = c.cursor
-      ? {
-          OR: [
-            { fechaHoraSalida: { gt: c.cursor.fechaHoraSalida } },
-            { fechaHoraSalida: c.cursor.fechaHoraSalida, id: { gt: c.cursor.id } },
-          ],
-        }
-      : undefined;
+    // Keyset: la página arranca DESPUÉS de la tupla (valorDelOrden, id) en ASC. Tupla expresada como OR para
+    // respetar el orden compuesto (no se puede usar `cursor`/`skip` de Prisma sobre una columna no-única como
+    // fechaHoraSalida/precioBase sin perder filas con el mismo valor). La rama la decide el TAG del cursor.
+    const keyset: Prisma.PublishedTripWhereInput | undefined =
+      c.cursor === undefined
+        ? undefined
+        : c.cursor.orden === 'precio'
+          ? {
+              OR: [
+                { precioBase: { gt: c.cursor.precioBase } },
+                { precioBase: c.cursor.precioBase, id: { gt: c.cursor.id } },
+              ],
+            }
+          : {
+              OR: [
+                { fechaHoraSalida: { gt: c.cursor.fechaHoraSalida } },
+                { fechaHoraSalida: c.cursor.fechaHoraSalida, id: { gt: c.cursor.id } },
+              ],
+            };
+
+    // orderBy espejo del keyset: el MISMO campo que cursorea es el que ordena (keyset consistente, FIX 2).
+    const orderBy: Prisma.PublishedTripOrderByWithRelationInput[] =
+      c.orden === 'precio'
+        ? [{ precioBase: 'asc' }, { id: 'asc' }]
+        : [{ fechaHoraSalida: 'asc' }, { id: 'asc' }];
 
     return this.prisma.read.publishedTrip.findMany({
       where: {
@@ -270,10 +303,13 @@ export class PublishedTripsRepository {
         estado: { in: [...c.estados] },
         // Dentro del día pedido [desde, hasta) Y estrictamente futura (no se ofertan viajes ya partidos).
         fechaHoraSalida: { gte: c.desde, lt: c.hasta, gt: c.ahora },
+        // Tope de precio opcional (céntimos PEN). No colisiona con el keyset de precio: este vive top-level
+        // (AND) y el keyset dentro del OR.
+        ...(c.precioMaxCents !== undefined ? { precioBase: { lte: c.precioMaxCents } } : {}),
         ...(keyset ?? {}),
       },
-      // Orden de la spec §6.2: salida más próxima primero. id ASC desempata (keyset estable).
-      orderBy: [{ fechaHoraSalida: 'asc' }, { id: 'asc' }],
+      // Orden de la spec §6.2 (salida más próxima primero) o por precio si el cliente lo pidió.
+      orderBy,
       take: c.take,
     });
   }

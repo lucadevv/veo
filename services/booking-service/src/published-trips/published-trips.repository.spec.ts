@@ -260,6 +260,7 @@ describe('PublishedTripsRepository · searchByRoute (F2 · geo H3 + keyset)', ()
       desde,
       hasta,
       ahora,
+      orden: 'salida',
       take: 20,
     });
 
@@ -290,8 +291,9 @@ describe('PublishedTripsRepository · searchByRoute (F2 · geo H3 + keyset)', ()
       desde,
       hasta,
       ahora,
+      orden: 'salida',
       take: 10,
-      cursor: { fechaHoraSalida: cursorFecha, id: 't5' },
+      cursor: { orden: 'salida', fechaHoraSalida: cursorFecha, id: 't5' },
     });
 
     // El keyset es la condición OR: fecha > cursor.fecha, O misma fecha con id > cursor.id (orden ASC).
@@ -305,5 +307,108 @@ describe('PublishedTripsRepository · searchByRoute (F2 · geo H3 + keyset)', ()
         }),
       }),
     );
+  });
+
+  it('orden=precio → ORDER precioBase ASC, id ASC (el orderBy espeja el campo del keyset)', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+
+    await repo.searchByRoute({
+      originRing: ORIGIN_RING,
+      destRing: DEST_RING,
+      asientos: 1,
+      estados: [PublishedTripState.PUBLICADO],
+      desde,
+      hasta,
+      ahora,
+      orden: 'precio',
+      take: 20,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ precioBase: 'asc' }, { id: 'asc' }],
+      }),
+    );
+  });
+
+  it('orden=precio con cursor → keyset por tupla (precioBase, id) como OR (sin saltos con precios repetidos)', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+
+    await repo.searchByRoute({
+      originRing: ORIGIN_RING,
+      destRing: DEST_RING,
+      asientos: 1,
+      estados: [PublishedTripState.PUBLICADO],
+      desde,
+      hasta,
+      ahora,
+      orden: 'precio',
+      take: 10,
+      cursor: { orden: 'precio', precioBase: 4500, id: 't5' },
+    });
+
+    // El "reloj" del keyset ES el campo del orden activo: precio > cursor.precio, O mismo precio con id mayor.
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ precioBase: { gt: 4500 } }, { precioBase: 4500, id: { gt: 't5' } }],
+        }),
+        orderBy: [{ precioBase: 'asc' }, { id: 'asc' }],
+      }),
+    );
+  });
+
+  it('precioMaxCents → filtro precioBase lte en el WHERE (top-level AND, no colisiona con el keyset del OR)', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+
+    await repo.searchByRoute({
+      originRing: ORIGIN_RING,
+      destRing: DEST_RING,
+      asientos: 1,
+      estados: [PublishedTripState.PUBLICADO],
+      desde,
+      hasta,
+      ahora,
+      orden: 'precio',
+      precioMaxCents: 6000,
+      take: 10,
+      cursor: { orden: 'precio', precioBase: 4500, id: 't5' },
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          precioBase: { lte: 6000 }, // tope top-level (AND)…
+          OR: [{ precioBase: { gt: 4500 } }, { precioBase: 4500, id: { gt: 't5' } }], // …keyset aparte en el OR
+        }),
+      }),
+    );
+  });
+
+  it('sin precioMaxCents → el WHERE NO trae el tope (contrato previo intacto)', async () => {
+    const findMany = vi.fn(async (_args: { where: Record<string, unknown> }) => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+
+    await repo.searchByRoute({
+      originRing: ORIGIN_RING,
+      destRing: DEST_RING,
+      asientos: 1,
+      estados: [PublishedTripState.PUBLICADO],
+      desde,
+      hasta,
+      ahora,
+      orden: 'salida',
+      take: 10,
+    });
+
+    const arg = findMany.mock.calls[0]![0];
+    expect(arg.where).not.toHaveProperty('precioBase');
   });
 });

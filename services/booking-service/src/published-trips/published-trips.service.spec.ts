@@ -1166,13 +1166,16 @@ function makeSearchDto(over: Partial<SearchPublishedTripsDto> = {}): SearchPubli
   };
 }
 
-/** Fila PublishedTrip mínima para los resultados de búsqueda (solo los campos que el enriquecimiento toca). */
-function makeTripRow(over: Partial<{ id: string; driverId: string; fechaHoraSalida: Date }> = {}) {
+/** Fila PublishedTrip mínima para los resultados de búsqueda (solo los campos que el enriquecimiento/cursor toca). */
+function makeTripRow(
+  over: Partial<{ id: string; driverId: string; fechaHoraSalida: Date; precioBase: number }> = {},
+) {
   return {
     id: over.id ?? 't1',
     driverId: over.driverId ?? DRIVER_ID,
     vehicleId: VEHICLE_ID,
     fechaHoraSalida: over.fechaHoraSalida ?? new Date(Date.now() + 90_000_000),
+    precioBase: over.precioBase ?? 4500,
     estado: PublishedTripState.PUBLICADO,
   };
 }
@@ -1239,8 +1242,8 @@ describe('PublishedTripsService · BÚSQUEDA (F2 · H3 ring AND + filtros + orde
     spy.mockResolvedValueOnce([]); // vacío, pero hay cursor → no expande
     const service = makeService({ repo });
 
-    // cursor opaco válido (lo genera el service; acá uno bien formado).
-    const cursor = Buffer.from(`${TOMORROW_ISO}|t9`, 'utf8').toString('base64url');
+    // cursor opaco válido (lo genera el service; acá uno bien formado con el tag `s` del orden salida).
+    const cursor = Buffer.from(`s|${TOMORROW_ISO}|t9`, 'utf8').toString('base64url');
     await service.search(makeSearchDto({ cursor }));
 
     expect(spy).toHaveBeenCalledTimes(1); // con cursor NO expande
@@ -1280,6 +1283,128 @@ describe('PublishedTripsService · BÚSQUEDA (F2 · H3 ring AND + filtros + orde
       ValidationError,
     );
     expect(searchByRoute).not.toHaveBeenCalled();
+  });
+});
+
+describe('PublishedTripsService · BÚSQUEDA · orden por precio + filtros (F2b)', () => {
+  // Medianoche Lima del día pedido (2099-01-01): 00:00 -05:00 = 05:00 UTC (limaDayRange).
+  const MIDNIGHT_LIMA_UTC = Date.UTC(2099, 0, 1, 5, 0, 0);
+
+  it('default: sin orden → criteria.orden=salida y el día completo [desde, hasta) (contrato previo intacto)', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.search(makeSearchDto());
+
+    const criteria = (searchByRoute as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.orden).toBe('salida');
+    expect(criteria.precioMaxCents).toBeUndefined();
+    expect(criteria.desde.getTime()).toBe(MIDNIGHT_LIMA_UTC);
+    expect(criteria.hasta.getTime()).toBe(MIDNIGHT_LIMA_UTC + 86_400_000);
+  });
+
+  it('orden=precio + precioMaxCents → llegan al criterio del repo tal cual', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.search(makeSearchDto({ orden: 'precio', precioMaxCents: 6000 }));
+
+    const criteria = (searchByRoute as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.orden).toBe('precio');
+    expect(criteria.precioMaxCents).toBe(6000);
+  });
+
+  it('VENTANA HORARIA (math Lima UTC-5): salidaDesde 08:30 / salidaHasta 10:00 → [medianoche+8h30, medianoche+10h01) — hasta INCLUSIVE al minuto', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.search(makeSearchDto({ salidaDesde: '08:30', salidaHasta: '10:00' }));
+
+    const criteria = (searchByRoute as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    // 08:30 de pared Lima = medianoche Lima + 8h30 (UTC-5 fijo, sin lib de TZ).
+    expect(criteria.desde.getTime()).toBe(MIDNIGHT_LIMA_UTC + 8 * 3_600_000 + 30 * 60_000);
+    // salidaHasta INCLUSIVE a nivel minuto: la cota `lt` es 10:00 + 1 minuto (una salida 10:00:30 entra).
+    expect(criteria.hasta.getTime()).toBe(MIDNIGHT_LIMA_UTC + 10 * 3_600_000 + 60_000);
+  });
+
+  it('solo salidaHasta → desde queda en la medianoche del día; solo salidaDesde → hasta queda en el fin del día', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    const spy = searchByRoute as ReturnType<typeof vi.fn>;
+    spy.mockResolvedValueOnce([makeTripRow()]);
+    spy.mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.search(makeSearchDto({ salidaHasta: '10:00' }));
+    await service.search(makeSearchDto({ salidaDesde: '22:00' }));
+
+    expect(spy.mock.calls[0]![0].desde.getTime()).toBe(MIDNIGHT_LIMA_UTC);
+    expect(spy.mock.calls[0]![0].hasta.getTime()).toBe(MIDNIGHT_LIMA_UTC + 10 * 3_600_000 + 60_000);
+    expect(spy.mock.calls[1]![0].desde.getTime()).toBe(MIDNIGHT_LIMA_UTC + 22 * 3_600_000);
+    expect(spy.mock.calls[1]![0].hasta.getTime()).toBe(MIDNIGHT_LIMA_UTC + 86_400_000);
+  });
+
+  it('VENTANA VACÍA (salidaDesde > salidaHasta) → página vacía honesta {items:[], nextCursor:null} SIN pegarle a la DB', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    const service = makeService({ repo });
+
+    const page = await service.search(makeSearchDto({ salidaDesde: '15:00', salidaHasta: '09:00' }));
+
+    expect(page).toEqual({ items: [], nextCursor: null });
+    expect(searchByRoute).not.toHaveBeenCalled();
+  });
+
+  it('orden=precio: nextCursor codifica la tupla (precioBase, id) con tag `p` cuando la página vino llena', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      makeTripRow({ id: 't7', precioBase: 3200 }),
+    ]);
+    const service = makeService({ repo });
+
+    const page = await service.search(makeSearchDto({ orden: 'precio', limit: 1 }));
+
+    expect(page.nextCursor).toBeTypeOf('string');
+    const decoded = Buffer.from(page.nextCursor as string, 'base64url').toString('utf8');
+    expect(decoded).toBe('p|3200|t7');
+  });
+
+  it('CURSOR SORT-AWARE: un cursor de OTRO orden (tag `s` con orden=precio) se IGNORA → página 1 (keyset de otro universo)', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    const cursorDeSalida = Buffer.from(`s|${TOMORROW_ISO}|t9`, 'utf8').toString('base64url');
+    await service.search(makeSearchDto({ orden: 'precio', cursor: cursorDeSalida }));
+
+    const criteria = (searchByRoute as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.cursor).toBeUndefined(); // degrada a primera página, no mezcla relojes
+  });
+
+  it('cursor PRE-TAG legado (`iso|id`, 2 segmentos) → se ignora tolerante (página 1, sin 500)', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    (searchByRoute as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    const cursorLegado = Buffer.from(`${TOMORROW_ISO}|t9`, 'utf8').toString('base64url');
+    await service.search(makeSearchDto({ cursor: cursorLegado }));
+
+    const criteria = (searchByRoute as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.cursor).toBeUndefined();
+  });
+
+  it('roundtrip: el cursor `p` que emite una página entra como keyset (precioBase, id) en la siguiente', async () => {
+    const { repo, searchByRoute } = makeRepo();
+    const spy = searchByRoute as ReturnType<typeof vi.fn>;
+    spy.mockResolvedValueOnce([makeTripRow({ id: 't7', precioBase: 3200 })]);
+    spy.mockResolvedValueOnce([]);
+    const service = makeService({ repo });
+
+    const page1 = await service.search(makeSearchDto({ orden: 'precio', limit: 1 }));
+    await service.search(makeSearchDto({ orden: 'precio', limit: 1, cursor: page1.nextCursor as string }));
+
+    expect(spy.mock.calls[1]![0].cursor).toEqual({ orden: 'precio', precioBase: 3200, id: 't7' });
   });
 });
 

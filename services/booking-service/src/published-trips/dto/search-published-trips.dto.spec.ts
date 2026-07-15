@@ -85,3 +85,50 @@ describe('SearchPublishedTripsDto · borde', () => {
     expect(errors.some((e) => e.property === 'originLat')).toBe(true);
   });
 });
+
+describe('SearchPublishedTripsDto · orden + filtros (F2b)', () => {
+  it('orden es OPCIONAL (default en el service) y acepta los dos valores soportados', () => {
+    expect(validate(VALID_BASE)).toHaveLength(0); // sin orden → válido (contrato intacto)
+    expect(validate({ ...VALID_BASE, orden: 'salida' })).toHaveLength(0);
+    expect(validate({ ...VALID_BASE, orden: 'precio' })).toHaveLength(0);
+  });
+
+  it('rechaza un orden fuera de la unión (@IsIn: sin strings sueltos)', () => {
+    const errors = validate({ ...VALID_BASE, orden: 'rating' });
+    expect(errors.some((e) => e.property === 'orden')).toBe(true);
+  });
+
+  it('precioMaxCents: coacciona el string de query a Int (céntimos PEN)', () => {
+    const payload = { ...VALID_BASE, precioMaxCents: '4500' };
+    const dto = plainToInstance(SearchPublishedTripsDto, payload);
+    expect(validate(payload)).toHaveLength(0);
+    expect(dto.precioMaxCents).toBe(4500);
+  });
+
+  it('precioMaxCents: rechaza < 1 (un tope de 0 no tiene sentido) y no-enteros', () => {
+    expect(validate({ ...VALID_BASE, precioMaxCents: '0' }).some((e) => e.property === 'precioMaxCents')).toBe(true);
+    expect(validate({ ...VALID_BASE, precioMaxCents: '45.5' }).some((e) => e.property === 'precioMaxCents')).toBe(true);
+  });
+
+  it('salidaDesde/salidaHasta: aceptan HH:mm de pared válidos (bordes 00:00 y 23:59 incluidos)', () => {
+    expect(validate({ ...VALID_BASE, salidaDesde: '08:30', salidaHasta: '18:00' })).toHaveLength(0);
+    expect(validate({ ...VALID_BASE, salidaDesde: '00:00', salidaHasta: '23:59' })).toHaveLength(0);
+  });
+
+  it('salidaDesde: RECHAZA hora inexistente 25:00 (regex estricta 00–23)', () => {
+    const errors = validate({ ...VALID_BASE, salidaDesde: '25:00' });
+    expect(errors.some((e) => e.property === 'salidaDesde')).toBe(true);
+  });
+
+  it('salidaDesde: RECHAZA 9:5 sin cero-padding (formato ambiguo)', () => {
+    const errors = validate({ ...VALID_BASE, salidaDesde: '9:5' });
+    expect(errors.some((e) => e.property === 'salidaDesde')).toBe(true);
+  });
+
+  it('salidaHasta: RECHAZA datetime/segundos/offset (la zona la pone el service, no el cliente)', () => {
+    for (const invalida of ['2026-06-25T10:30:00-05:00', '10:30:00', '10:30Z']) {
+      const errors = validate({ ...VALID_BASE, salidaHasta: invalida });
+      expect(errors.some((e) => e.property === 'salidaHasta')).toBe(true);
+    }
+  });
+});
