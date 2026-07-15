@@ -76,6 +76,23 @@ export class CompleteTripDto {
 }
 
 /**
+ * POST /trips/:id/cash-confirm (lado conductor). EFECTIVO (decisión del dueño 2026-07-14): el conductor
+ * confirma el cobro en mano DESPUÉS de completar el viaje, desde el resumen — confirmación ÚNICA que captura
+ * directo (el conductor tiene la plata). `collected=true` ⇒ cobrado (captura); `collected=false` ⇒ reporta
+ * que NO cobró (discrepancia). El driverId y el paymentId NO se aceptan del cliente: el BFF los DERIVA
+ * server-side (anti-IDOR). Solo aplica a viajes CASH; si el pago no existe o no es CASH, el payment-service
+ * responde el error y el BFF lo propaga.
+ */
+export class CashConfirmDto {
+  @ApiProperty({
+    description:
+      'true = el conductor cobró el efectivo en mano (captura); false = reporta que NO cobró (discrepancia).',
+  })
+  @IsBoolean()
+  collected!: boolean;
+}
+
+/**
  * Query opcional de GET /trips/:id/route: la POSICIÓN ACTUAL del conductor para calcular la ruta desde
  * donde está (ETA vivo + re-ruteo por desvío). Ambos opcionales y validados como lat/lon; el controller
  * exige AMBOS para usarlos (si falta uno, degrada a ruta desde el origen del viaje). `@Type(Number)`

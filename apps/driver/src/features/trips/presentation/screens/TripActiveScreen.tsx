@@ -19,7 +19,6 @@ import {
   TextField,
   useTheme,
 } from '@veo/ui-kit';
-import { mobilePaymentMethod } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { AppMap } from '../../../../shared/presentation/components/AppMap';
 import { MapViewModeButton } from '../../../../shared/presentation/components/MapViewModeButton';
@@ -188,7 +187,6 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
   const [cancelReasonKey, setCancelReasonKey] = useState<CancelReasonKey | null>(null);
   const [childOpen, setChildOpen] = useState(false);
   const [childCode, setChildCode] = useState('');
-  const [cashOpen, setCashOpen] = useState(false);
   // Reintentos manuales de `ensureAccepted` ya consumidos (gatea la salida limpia de `offerGone`).
   const [confirmRetries, setConfirmRetries] = useState(0);
 
@@ -311,6 +309,8 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
       tripId,
       passengerId: active.passengerId,
       fareCents: active.fareCents,
+      // El método viaja al resumen: si es CASH, el cierre muestra la card de confirmación de cobro.
+      paymentMethod: active.paymentMethod,
     });
   };
 
@@ -322,22 +322,11 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
     actions.start.mutate(undefined);
   };
 
-  // EFECTIVO (BR-P03): en un viaje CASH, terminar abre la confirmación de cobro (el conductor marca
-  // que recibió el efectivo en mano → driverConfirmed). En digital, completa directo (sin sheet).
-  const isCashTrip = trip.data?.paymentMethod === mobilePaymentMethod.enum.CASH;
+  // EFECTIVO (decisión del dueño 2026-07-14): completar YA NO bloquea con el modal de cobro. TODOS los
+  // métodos (efectivo o digital) completan al toque → ambas apps reaccionan al instante y navegamos al
+  // resumen. En CASH, la confirmación de cobro se movió al resumen (TripComplete), POST-completado.
   const onComplete = () => {
-    if (isCashTrip) {
-      setCashOpen(true);
-      return;
-    }
     actions.complete.mutate(undefined, { onSuccess: goToComplete });
-  };
-
-  // Cierra el viaje declarando si se cobró el efectivo. `collected=false` lo termina igual (flujo
-  // bilateral: el cobro queda a la espera de la confirmación del pasajero), nunca data falsa.
-  const completeCash = (collected: boolean) => {
-    setCashOpen(false);
-    actions.complete.mutate({ cashCollected: collected }, { onSuccess: goToComplete });
   };
 
   // Entrada al chat con el pasajero (con badge de no leídos). Solo tiene sentido mientras el viaje
@@ -813,39 +802,6 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
           maxLength={6}
         />
       </BottomSheet>
-
-      {/* EFECTIVO (BR-P03): confirmación de cobro al terminar un viaje CASH. El monto se muestra para que
-          el conductor coteje lo que cobró en mano; ambas opciones cierran el viaje (cobrado o pendiente). */}
-      <BottomSheet
-        visible={cashOpen}
-        onClose={() => setCashOpen(false)}
-        title={t('trips.cashCollectTitle')}
-        footer={
-          <View style={styles.sheetFooter}>
-            <Button
-              label={t('trips.cashCollectSkip')}
-              variant="secondary"
-              disabled={actions.complete.isPending}
-              onPress={() => completeCash(false)}
-            />
-            <Button
-              label={t('trips.cashCollectConfirm', {
-                amount: formatPEN(trip.data?.fareCents ?? 0),
-              })}
-              variant="safe"
-              loading={actions.complete.isPending}
-              onPress={() => completeCash(true)}
-            />
-          </View>
-        }
-      >
-        <Text variant="title3" color="success" style={styles.cashAmount}>
-          {formatPEN(trip.data?.fareCents ?? 0)}
-        </Text>
-        <Text variant="callout" color="inkMuted" style={styles.spacer}>
-          {t('trips.cashCollectBody')}
-        </Text>
-      </BottomSheet>
     </SafeScreen>
   );
 };
@@ -878,5 +834,4 @@ const styles = StyleSheet.create({
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
   spacer: { marginTop: 12 },
   cancelReasons: { gap: 8 },
-  cashAmount: { textAlign: 'center', marginTop: 4 },
 });

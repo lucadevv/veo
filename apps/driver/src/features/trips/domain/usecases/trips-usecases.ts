@@ -191,6 +191,17 @@ export class CompleteTripUseCase {
   }
 }
 
+/**
+ * Caso de uso: confirmar el cobro en EFECTIVO tras completar el viaje (decisión del dueño). `collected=true`
+ * captura el cobro CASH; `false` reporta que no se cobró (discrepancia). El paymentId lo resuelve el BFF.
+ */
+export class ConfirmTripCashUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(tripId: string, collected: boolean): Promise<void> {
+    return this.trips.confirmCash(tripId, collected);
+  }
+}
+
 /** Caso de uso: cancelar el viaje (actor DRIVER fijado en el BFF). */
 export class CancelTripUseCase {
   constructor(private readonly trips: TripsRepository) {}

@@ -63,10 +63,17 @@ export type RootStackParamList = {
   TripActive: { tripId: string };
   /**
    * Cierre del viaje: resumen de ganancia (tarifa − comisión = neto) + calificar al pasajero. Se llega
-   * al COMPLETAR (reemplaza a TripActive). `fareCents`/`passengerId` vienen del viaje ya cargado en
-   * TripActive; `passengerName` es opcional (el contrato del viaje no lo trae — pregunta genérica si falta).
+   * al COMPLETAR (reemplaza a TripActive). `fareCents`/`passengerId`/`paymentMethod` vienen del viaje ya
+   * cargado en TripActive; `passengerName` es opcional (el contrato del viaje no lo trae — pregunta genérica
+   * si falta). `paymentMethod` decide si el cierre muestra la card de confirmación de cobro en efectivo.
    */
-  TripComplete: { tripId: string; passengerId: string; fareCents: number; passengerName?: string };
+  TripComplete: {
+    tripId: string;
+    passengerId: string;
+    fareCents: number;
+    paymentMethod: string;
+    passengerName?: string;
+  };
   /**
    * Detalle/recibo de un viaje del HISTORIAL (frame C/Historial-Detalle). Recibe el `TripHistoryItem`
    * COMPLETO que la fila ya cargó (origen/destino, distancia, duración, fecha, tarifa, tier) — la fuente

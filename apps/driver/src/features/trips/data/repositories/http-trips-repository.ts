@@ -135,6 +135,12 @@ export class HttpTripsRepository implements TripsRepository {
     return this.http.post(`/trips/${tripId}/cancel`, { body: input, schema: driverTripView });
   }
 
+  async confirmCash(tripId: string, collected: boolean): Promise<void> {
+    // El BFF resuelve el paymentId del viaje server-side y captura/reporta el cobro CASH. La respuesta
+    // (estado del pago) no se consume en el app: basta el 200 (mismo patrón que rejectOffer). Sin schema.
+    await this.http.post(`/trips/${tripId}/cash-confirm`, { body: { collected } });
+  }
+
   respondWaypoint(
     tripId: string,
     proposalId: string,

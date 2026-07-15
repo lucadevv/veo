@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, TextField, useTheme } from '@veo/ui-kit';
-import { ApiError } from '@veo/api-client';
+import { ApiError, mobilePaymentMethod } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
 import { IconCheck } from '../../../../shared/presentation/icons';
@@ -12,7 +12,7 @@ import type { DriverProfile } from '../../../profile/domain';
 import { PROFILE_QUERY_KEY } from '../../../profile/domain';
 import { StarRating } from '../../../ratings/presentation';
 import { useMyTripRating, useRatePassenger } from '../hooks/usePassengerRating';
-import { useCommissionRate } from '../hooks/useTrips';
+import { useCommissionRate, useConfirmCash } from '../hooks/useTrips';
 import { commissionPercent, commissionRateFromBps, computeTripEarnings } from '../../domain';
 import { Appear } from '../components/motion';
 
@@ -44,7 +44,17 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
   const { t } = useTranslation();
   const theme = useTheme();
   const queryClient = useQueryClient();
-  const { tripId, passengerId, fareCents, passengerName } = route.params;
+  const { tripId, passengerId, fareCents, paymentMethod, passengerName } = route.params;
+
+  // EFECTIVO (decisión del dueño 2026-07-14): en un viaje CASH, el conductor confirma el cobro en mano
+  // ACÁ, en el resumen (POST-completado) — su confirmación ÚNICA captura el pago directo. En digital no
+  // hay nada que confirmar (ya se cobró al riel). La card solo aplica a efectivo.
+  const isCash = paymentMethod === mobilePaymentMethod.enum.CASH;
+  const confirmCash = useConfirmCash(tripId);
+  // Tras confirmar OK, `variables` retiene el último `collected` enviado: distingue "Cobro registrado"
+  // (true) de "Reporte enviado" (false) sin estado extra.
+  const cashSettled = confirmCash.isSuccess;
+  const cashCollected = confirmCash.variables ?? null;
 
   // Tasa VIGENTE del panel (query cacheada); `undefined` (cargando/offline) pliega al fallback 20 %.
   const commissionRate = useCommissionRate();
@@ -136,6 +146,60 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
             {subtitle}
           </Text>
         </Appear>
+
+        {/* EFECTIVO · confirmación de cobro en mano (POST-completado). Debajo del check de éxito, con la
+            estética de la pantalla (Card + Button del ui-kit). Al confirmar, la card se reemplaza por una
+            nota sutil. Solo en viajes CASH. */}
+        {isCash ? (
+          <View
+            style={[
+              styles.card,
+              styles.cashCard,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: cashSettled ? theme.colors.border : SUCCESS_CHECK_GREEN,
+                borderRadius: theme.radii.lg,
+                padding: theme.spacing.lg,
+                gap: theme.spacing.md,
+              },
+            ]}
+          >
+            {cashSettled ? (
+              <Text variant="bodyStrong" align="center" style={{ color: SUCCESS_CHECK_GREEN }}>
+                {cashCollected
+                  ? t('trips.complete.cashRegistered')
+                  : t('trips.complete.cashReported')}
+              </Text>
+            ) : (
+              <>
+                <Text variant="bodyStrong" align="center">
+                  {t('trips.complete.cashPrompt', { amount: formatPEN(fareCents) })}
+                </Text>
+                <View style={styles.cashActions}>
+                  <Button
+                    label={t('trips.complete.cashReceived')}
+                    variant="safe"
+                    fullWidth
+                    loading={confirmCash.isPending && confirmCash.variables === true}
+                    disabled={confirmCash.isPending}
+                    onPress={() => confirmCash.mutate(true)}
+                  />
+                  <Button
+                    label={t('trips.complete.cashNotCollected')}
+                    variant="ghost"
+                    fullWidth
+                    loading={confirmCash.isPending && confirmCash.variables === false}
+                    disabled={confirmCash.isPending}
+                    onPress={() => confirmCash.mutate(false)}
+                  />
+                </View>
+                {confirmCash.isError ? (
+                  <Banner tone="danger" title={t('trips.complete.cashError')} />
+                ) : null}
+              </>
+            )}
+          </View>
+        ) : null}
 
         <View style={styles.earn}>
           <Text variant="label" color="inkSubtle">
@@ -262,6 +326,10 @@ const styles = StyleSheet.create({
   },
   earn: { gap: 2, alignItems: 'center' },
   card: { alignSelf: 'stretch', borderWidth: StyleSheet.hairlineWidth },
+  // La card de cobro lleva su propio borde (jade sin confirmar → gris tras confirmar): borde algo más
+  // marcado que el hairline del resto para destacar la acción pendiente.
+  cashCard: { borderWidth: 1 },
+  cashActions: { gap: 10 },
   rateCard: { alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   flex: { flex: 1 },

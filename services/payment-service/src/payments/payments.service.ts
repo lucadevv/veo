@@ -1171,7 +1171,12 @@ export class PaymentsService {
     }
     const tripId = payment.tripId;
 
-    const data = isDriver ? { driverConfirmed: confirmed } : { passengerConfirmed: confirmed };
+    // UNA sola confirmación (decisión del dueño 2026-07-14): el CONDUCTOR confirma por AMBOS (tiene la
+    // plata en mano). Así su confirmación en el resumen post-viaje captura directo, sin un segundo paso del
+    // pasajero. El pasajero ya no confirma (solo ve el recibo); su rama se conserva por compat/no-op.
+    const data = isDriver
+      ? { driverConfirmed: confirmed, passengerConfirmed: confirmed }
+      : { passengerConfirmed: confirmed };
     const confirmation = await this.repo.upsertCashConfirmation(tripId, data);
 
     // Disputa explícita → discrepancia (BR-P03): dispara ticket de soporte vía evento.
@@ -1185,13 +1190,16 @@ export class PaymentsService {
       };
     }
 
-    if (
-      confirmation.driverConfirmed &&
-      confirmation.passengerConfirmed &&
-      payment.status === 'PENDING'
-    ) {
+    // Captura con la confirmación del CONDUCTOR (single confirmation): en cuanto driverConfirmed y el pago
+    // sigue PENDING, se captura. La confirmación del pasajero sola NO captura (el conductor tiene la plata).
+    if (confirmation.driverConfirmed && payment.status === 'PENDING') {
       await this.captureCash(payment);
-      return { tripId, driverConfirmed: true, passengerConfirmed: true, status: 'CAPTURED' };
+      return {
+        tripId,
+        driverConfirmed: true,
+        passengerConfirmed: confirmation.passengerConfirmed,
+        status: 'CAPTURED',
+      };
     }
 
     return {

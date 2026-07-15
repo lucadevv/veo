@@ -23,6 +23,7 @@ import type {
   DriverReply,
   PassengerTripsReply,
   PassengerTripStatsReply,
+  PaymentReply,
   TripHistoryItem,
   TripReply,
   TripStateReply,
@@ -32,6 +33,7 @@ import type {
   AcceptTripDto,
   ArrivingTripDto,
   CancelTripDto,
+  CashConfirmDto,
   CompleteTripDto,
   StartTripDto,
   TripHistoryItemView,
@@ -428,6 +430,44 @@ export class TripsService {
       body: { cashCollected: dto.cashCollected, driverId },
     });
     return this.asDriverTripView(trip);
+  }
+
+  /**
+   * EFECTIVO (decisión del dueño 2026-07-14) · el conductor confirma el cobro en mano DESPUÉS de completar
+   * el viaje, desde el resumen — confirmación ÚNICA que captura directo (tiene la plata). El `complete` SIN
+   * `cashCollected` dejó el Payment CASH en PENDING; esta confirmación (`collected=true`) lo CAPTURA;
+   * `collected=false` reporta que NO cobró (discrepancia).
+   *
+   * Anti-IDOR (dos capas):
+   *  1. `assertDriverTrip` deriva el driverId del PERFIL (GetDriverByUser → driver.id) y verifica que el
+   *     viaje es de ESTE conductor. El paymentId NUNCA viaja del cliente.
+   *  2. El paymentId se RESUELVE server-side por el cobro canónico del viaje. Se usa el gRPC
+   *     `GetPaymentByTrip` (resuelve por la dedupKey determinista `trip-completed:{tripId}`) y NO el REST
+   *     `GET /payments/by-trip/:tripId`, porque ese endpoint SOLO devuelve cobros CAPTURED/PARTIALLY_REFUNDED
+   *     (payments.repository.ts:findRefundablePaymentByTrip) — nuestro pago está PENDING hasta esta
+   *     confirmación, así que by-trip daría 404. `found=false` ⇒ el viaje no tiene cobro (404 honesto).
+   *
+   * El payment-service revalida (defensa en profundidad): confirmCash exige que el caller (identidad firmada)
+   * sea el `driver` del pago (compara `callerUserId` contra `payment.driverId`). Como `payment.driverId` es el
+   * id de PERFIL del conductor (viene de `Trip.driverId`, NO del userId), forwardeamos la identidad con
+   * `userId` = el driverId DERIVADO para que el check pase. Si el pago no existe o no es CASH, payment-service
+   * responde el error y se propaga.
+   */
+  async cashConfirm(id: string, dto: CashConfirmDto, identity: AuthenticatedUser): Promise<unknown> {
+    const driverId = await this.assertDriverTrip(id, identity);
+    const payment = await this.grpc.call<PaymentReply>(
+      'payment',
+      'GetPaymentByTrip',
+      { tripId: id },
+      identity,
+    );
+    if (!payment.found) throw new NotFoundError('El viaje no tiene un cobro registrado');
+    return this.rest.client('payment').post(`/payments/${payment.id}/cash/confirm`, {
+      // `userId` = driverId de PERFIL: el anti-IDOR de payment-service compara el caller contra
+      // `payment.driverId` (id de perfil, no userId). El paymentId lo resolvimos nosotros (nunca del cliente).
+      identity: { ...identity, userId: driverId },
+      body: { party: 'driver', confirmed: dto.collected },
+    });
   }
 
   /**

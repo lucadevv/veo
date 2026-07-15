@@ -12,6 +12,7 @@ import type {
   TripState,
 } from '../index';
 import {
+  ConfirmTripCashUseCase,
   EnsureTripAcceptedUseCase,
   GetActiveTripUseCase,
   InvalidChildCodeError,
@@ -37,6 +38,7 @@ const TRIP: Trip = {
 /** Doble de prueba del repositorio de viajes (no es un mock de producción). */
 class FakeTripsRepository implements TripsRepository {
   startCalls: Array<{ tripId: string; input: StartTripInput }> = [];
+  confirmCashCalls: Array<{ tripId: string; collected: boolean }> = [];
 
   getOffer(): Promise<TripOffer> {
     throw new Error('no usado');
@@ -89,6 +91,10 @@ class FakeTripsRepository implements TripsRepository {
   cancel(_tripId: string, _input: CancelTripInput): Promise<Trip> {
     return Promise.resolve(TRIP);
   }
+  confirmCash(tripId: string, collected: boolean): Promise<void> {
+    this.confirmCashCalls.push({ tripId, collected });
+    return Promise.resolve();
+  }
   respondWaypoint(
     _tripId: string,
     proposalId: string,
@@ -127,6 +133,20 @@ describe('StartTripUseCase (modo niño)', () => {
     const repo = new FakeTripsRepository();
     await new StartTripUseCase(repo).execute('t1');
     expect(repo.startCalls[0]).toEqual({ tripId: 't1', input: { childCode: undefined } });
+  });
+});
+
+describe('ConfirmTripCashUseCase (cobro en efectivo)', () => {
+  it('reenvía collected=true al repositorio (cobro confirmado)', async () => {
+    const repo = new FakeTripsRepository();
+    await new ConfirmTripCashUseCase(repo).execute('t1', true);
+    expect(repo.confirmCashCalls).toEqual([{ tripId: 't1', collected: true }]);
+  });
+
+  it('reenvía collected=false al repositorio (reporta que no cobró)', async () => {
+    const repo = new FakeTripsRepository();
+    await new ConfirmTripCashUseCase(repo).execute('t1', false);
+    expect(repo.confirmCashCalls).toEqual([{ tripId: 't1', collected: false }]);
   });
 });
 

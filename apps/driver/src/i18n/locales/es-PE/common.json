@@ -763,6 +763,12 @@
       "commentPlaceholder": "Contanos cómo fue el viaje",
       "rateError": "No pudimos guardar tu calificación. Probá de nuevo.",
       "thanks": "¡Gracias por calificar!",
+      "cashPrompt": "¿Cobraste {{amount}} en efectivo?",
+      "cashReceived": "Sí, recibí",
+      "cashNotCollected": "No cobré",
+      "cashRegistered": "Cobro registrado ✓",
+      "cashReported": "Reporte enviado",
+      "cashError": "No pudimos registrar el cobro. Inténtalo de nuevo.",
       "done": "Listo"
     },
     "geoUnavailable": "El servidor del conductor aún no entrega las coordenadas de recojo/destino.",

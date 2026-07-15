@@ -67,6 +67,12 @@ export interface TripsRepository {
   /** POST /trips/:id/cancel — cancela (actor DRIVER fijado en el BFF). */
   cancel(tripId: string, input: CancelTripInput): Promise<Trip>;
   /**
+   * POST /trips/:id/cash-confirm — EFECTIVO (decisión del dueño): el conductor confirma el cobro en mano
+   * DESPUÉS de completar, desde el resumen. `collected=true` captura el cobro CASH PENDING; `collected=false`
+   * reporta que NO cobró (discrepancia). El paymentId lo resuelve el BFF server-side (anti-IDOR). Solo CASH.
+   */
+  confirmCash(tripId: string, collected: boolean): Promise<void>;
+  /**
    * POST /trips/:id/waypoints/:proposalId/respond — el conductor ACEPTA/RECHAZA una parada propuesta
    * por el pasajero durante el viaje en curso (Lote C4). El driverId lo DERIVA el BFF (anti-IDOR);
    * aceptar agrega la parada y recalcula la tarifa+ruta server-side. Devuelve el estado terminal de la

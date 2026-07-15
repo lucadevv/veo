@@ -21,6 +21,7 @@ import {
   AcceptTripDto,
   ArrivingTripDto,
   CancelTripDto,
+  CashConfirmDto,
   CompleteTripDto,
   RespondWaypointDto,
   RouteQueryDto,
@@ -176,6 +177,22 @@ export class TripsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<unknown> {
     return this.trips.complete(id, dto, user);
+  }
+
+  @Post(':id/cash-confirm')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'EFECTIVO · el conductor confirma el cobro en mano DESPUÉS de completar (decisión del dueño). ' +
+      'collected=true captura el cobro CASH PENDING; collected=false reporta discrepancia. Ownership ' +
+      'server-side (anti-IDOR); paymentId resuelto server-side. Solo viajes CASH.',
+  })
+  cashConfirm(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CashConfirmDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<unknown> {
+    return this.trips.cashConfirm(id, dto, user);
   }
 
   @Post(':id/cancel')

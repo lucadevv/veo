@@ -25,6 +25,7 @@ import {
   ArrivingTripUseCase,
   CancelTripUseCase,
   CompleteTripUseCase,
+  ConfirmTripCashUseCase,
   EnsureTripAcceptedUseCase,
   GetActiveTripUseCase,
   GetCommissionRateUseCase,
@@ -290,6 +291,27 @@ export function useEnsureTripAccepted(tripId: string) {
         queryClient.invalidateQueries({ queryKey: tripQueryKey(tripId) });
       }
       queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
+    },
+  });
+}
+
+/**
+ * Mutación: confirmar el cobro en EFECTIVO tras completar el viaje (decisión del dueño). Se usa en el
+ * resumen (TripComplete): `collected=true` captura el cobro CASH PENDING; `false` reporta la discrepancia.
+ * Al capturar, la plata del conductor cambió → invalida las vistas de ganancias del dashboard.
+ */
+export function useConfirmCash(tripId: string) {
+  const { trips } = useRepositories();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (collected: boolean) => new ConfirmTripCashUseCase(trips).execute(tripId, collected),
+    onSuccess: (_data, collected) => {
+      // Solo el cobro EFECTIVO (collected=true) captura y devenga ganancia; la discrepancia no mueve plata.
+      if (collected) {
+        queryClient.invalidateQueries({ queryKey: EARNINGS_SUMMARY_QUERY_KEY });
+        queryClient.invalidateQueries({ queryKey: EARNINGS_BREAKDOWN_QUERY_KEY });
+        queryClient.invalidateQueries({ queryKey: EARNINGS_DAILY_QUERY_KEY });
+      }
     },
   });
 }
