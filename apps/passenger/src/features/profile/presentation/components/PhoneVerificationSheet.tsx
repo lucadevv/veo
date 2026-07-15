@@ -211,7 +211,13 @@ export function PhoneVerificationSheet({
           onChangeText={next =>
             setPhone(next.replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH))
           }
-          helperText={t('profile.phoneFieldPrefix')}
+          // Prefijo del país DENTRO del campo (feedback del dueño: como helper quedaba una
+          // línea suelta debajo — el patrón correcto es el del AuthScreen, prefijo inline).
+          leftIcon={
+            <Text variant="body" color="inkMuted">
+              {t('profile.phoneFieldPrefix')}
+            </Text>
+          }
           error={
             requestFieldError ??
             (phoneTouched && !phoneValid

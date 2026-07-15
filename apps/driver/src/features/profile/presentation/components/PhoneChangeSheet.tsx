@@ -184,7 +184,13 @@ export function PhoneChangeSheet({ visible, onClose }: PhoneChangeSheetProps): R
           onChangeText={(next: string) =>
             setPhone(next.replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH))
           }
-          helperText={t('profile.phoneChange.fieldPrefix')}
+          // Prefijo del país DENTRO del campo (feedback del dueño: como helper quedaba una
+          // línea suelta debajo; mismo patrón inline que el AuthScreen y el sheet del passenger).
+          leftIcon={
+            <Text variant="body" color="inkMuted">
+              {t('profile.phoneChange.fieldPrefix')}
+            </Text>
+          }
           error={
             requestFieldError ??
             (phoneTouched && !phoneValid ? t('profile.phoneChange.invalid') : undefined)
