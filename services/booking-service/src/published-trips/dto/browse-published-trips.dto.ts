@@ -28,11 +28,20 @@ const REGION_IDS = REGIONS_PE.map((r) => r.id);
 
 export class BrowsePublishedTripsDto {
   // Región del feed (id kebab-case del catálogo @veo/utils). Opcional: sin ella el feed es nacional.
+  // Filtra por el ORIGEN del viaje. Independiente de `destRegion` (puede venir cualquiera de los dos, o ambos).
   @IsOptional()
   @IsIn(REGION_IDS, {
     message: `region debe ser una del catálogo: ${REGION_IDS.join(', ')}`,
   })
   region?: string;
+
+  // Región DESTINO del feed (mismo catálogo). Opcional e INDEPENDIENTE de `region`: filtra por el DESTINO
+  // del viaje (destino_lat/destino_lon dentro del bbox). Juntas arman "de X a Y" sin exigir ruta exacta.
+  @IsOptional()
+  @IsIn(REGION_IDS, {
+    message: `destRegion debe ser una del catálogo: ${REGION_IDS.join(', ')}`,
+  })
+  destRegion?: string;
 
   // Orden de la página: `salida` (default — salida más próxima primero) o `precio` (más barato primero).
   @IsOptional()

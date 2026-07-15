@@ -112,12 +112,20 @@ const REGION_IDS = REGIONS_PE.map((r) => r.id);
  * la franja fina se resuelve pasando al search del día elegido.
  */
 export class BrowseCarpoolTripsDto {
-  // Región del feed (id kebab-case del catálogo). Opcional: sin ella el feed es nacional.
+  // Región del feed (id kebab-case del catálogo). Opcional: sin ella el feed es nacional. Filtra por el
+  // ORIGEN del viaje; independiente de `destRegion` (puede venir solo uno, el otro, o ambos).
   @IsOptional()
   @IsIn(REGION_IDS, {
     message: `region debe ser una del catálogo: ${REGION_IDS.join(', ')}`,
   })
   region?: string;
+
+  // Región DESTINO (mismo catálogo). Opcional e independiente de `region`: filtra por el DESTINO del viaje.
+  @IsOptional()
+  @IsIn(REGION_IDS, {
+    message: `destRegion debe ser una del catálogo: ${REGION_IDS.join(', ')}`,
+  })
+  destRegion?: string;
 
   // Orden de la página: `salida` (default) o `precio` (más barato primero).
   @IsOptional()

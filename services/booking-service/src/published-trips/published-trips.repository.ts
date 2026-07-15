@@ -83,12 +83,31 @@ export interface BrowsePublishedTripsCriteria {
   orden: SearchOrder;
   /** Filtro OPCIONAL de región: el ORIGEN del viaje (origen_lat/origen_lon) debe caer dentro del bbox. */
   bbox?: GeoBBox;
+  /**
+   * Filtro OPCIONAL de región DESTINO: el DESTINO del viaje (destino_lat/destino_lon) debe caer dentro de
+   * este bbox. INDEPENDIENTE de `bbox` (origen): puede venir solo uno, el otro, o ambos (AND).
+   */
+  destBbox?: GeoBBox;
   /** Filtro OPCIONAL de precio máximo por asiento (céntimos PEN): `precioBase <= precioMaxCents`. */
   precioMaxCents?: number;
   /** Tamaño de página. */
   take: number;
   /** Cursor keyset de la última fila de la página previa (tupla del orden activo); sin él → primera página. */
   cursor?: SearchKeysetCursor;
+}
+
+/**
+ * Fila CRUDA para el agregado de RUTAS POPULARES (GET /published-trips/popular-routes): solo los extremos
+ * (lat/lon) + el precio por asiento. La clasificación por región es del SERVICE (regionForPoint del catálogo
+ * compartido) — el repo no conoce regiones, solo materializa las columnas mínimas (sin PII, sin driverId).
+ */
+export interface PopularRouteSourceRow {
+  origenLat: number;
+  origenLon: number;
+  destinoLat: number;
+  destinoLon: number;
+  /** Precio del asiento full-route (céntimos PEN). */
+  precioBase: number;
 }
 
 /**
@@ -365,11 +384,51 @@ export class PublishedTripsRepository {
               origenLon: { gte: c.bbox.minLon, lte: c.bbox.maxLon },
             }
           : {}),
+        // Región DESTINO opcional (independiente del origen): el DESTINO del viaje dentro de su bbox.
+        ...(c.destBbox !== undefined
+          ? {
+              destinoLat: { gte: c.destBbox.minLat, lte: c.destBbox.maxLat },
+              destinoLon: { gte: c.destBbox.minLon, lte: c.destBbox.maxLon },
+            }
+          : {}),
         ...(c.precioMaxCents !== undefined ? { precioBase: { lte: c.precioMaxCents } } : {}),
         ...(keysetWhere(c.cursor) ?? {}),
       },
       orderBy: keysetOrderBy(c.orden),
       take: c.take,
+    });
+  }
+
+  /**
+   * FILAS CRUDAS para el agregado de RUTAS POPULARES: los extremos + precio de las ofertas OFERTABLES
+   * (estado SEARCHABLE + salida futura — MISMO universo que el browse), capadas a `cap` ordenando por salida
+   * ASC (las más próximas primero, determinístico). Lectura ANÓNIMA no crítica → réplica; select mínimo
+   * (sin PII, sin driverId — es un agregado de display, no expone conductores).
+   *
+   * CAP HONESTO de lectura: se leen hasta `cap` filas crudas y se agrega EN MEMORIA en el service. Con el
+   * volumen v1 del marketplace el cap cubre el universo completo; si el volumen crece más allá del cap, el
+   * agregado pasa a ser PARCIAL (sesgado a las salidas más próximas) — el siguiente paso NO es subir el cap,
+   * es materializar la región por fila (columna region_id al publicar) o una vista materializada del par.
+   */
+  async listUpcomingForPopularRoutes(
+    estados: readonly PublishedTripState[],
+    ahora: Date,
+    cap: number,
+  ): Promise<PopularRouteSourceRow[]> {
+    return this.prisma.read.publishedTrip.findMany({
+      where: {
+        estado: { in: [...estados] },
+        fechaHoraSalida: { gt: ahora },
+      },
+      select: {
+        origenLat: true,
+        origenLon: true,
+        destinoLat: true,
+        destinoLon: true,
+        precioBase: true,
+      },
+      orderBy: [{ fechaHoraSalida: 'asc' }, { id: 'asc' }],
+      take: cap,
     });
   }
 

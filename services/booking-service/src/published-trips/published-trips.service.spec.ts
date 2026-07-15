@@ -90,6 +90,17 @@ function makeRepo() {
   const findByDriverId = vi.fn(async () => []);
   const searchByRoute = vi.fn(async () => []);
   const browseAll = vi.fn(async () => []);
+  const listUpcomingForPopularRoutes = vi.fn(
+    async (): Promise<
+      {
+        origenLat: number;
+        origenLon: number;
+        destinoLat: number;
+        destinoLon: number;
+        precioBase: number;
+      }[]
+    > => [],
+  );
   const countAvailableByOriginRing = vi.fn(async () => 0);
   const sampleAvailableOriginsByRing = vi.fn(async () => [] as { lat: number; lon: number }[]);
   const listActiveCarpools = vi.fn(async (): Promise<unknown[]> => []);
@@ -109,6 +120,7 @@ function makeRepo() {
     findByDriverId,
     searchByRoute,
     browseAll,
+    listUpcomingForPopularRoutes,
     countAvailableByOriginRing,
     sampleAvailableOriginsByRing,
     listActiveCarpools,
@@ -126,6 +138,7 @@ function makeRepo() {
     findByDriverId,
     searchByRoute,
     browseAll,
+    listUpcomingForPopularRoutes,
     countAvailableByOriginRing,
     sampleAvailableOriginsByRing,
     listActiveCarpools,
@@ -1455,6 +1468,38 @@ describe('PublishedTripsService · BROWSE del marketplace (feed público · regi
     expect(browseAll).not.toHaveBeenCalled();
   });
 
+  it('destRegion del catálogo → su bbox entra como destBbox (filtro por DESTINO), sin tocar el bbox de origen', async () => {
+    const { repo, browseAll } = makeRepo();
+    (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.browse({ destRegion: 'cusco' });
+
+    const criteria = (browseAll as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.destBbox).toEqual({ minLat: -15.45, maxLat: -11.1, minLon: -73.98, maxLon: -70.35 });
+    expect(criteria.bbox).toBeUndefined(); // destino solo NO implica filtro de origen (independientes)
+  });
+
+  it('region + destRegion JUNTAS → ambos bbox al criterio ("de Lima a Cusco" sin exigir ruta exacta)', async () => {
+    const { repo, browseAll } = makeRepo();
+    (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.browse({ region: 'lima-metropolitana', destRegion: 'cusco' });
+
+    const criteria = (browseAll as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.bbox).toEqual({ minLat: -12.52, maxLat: -11.57, minLon: -77.2, maxLon: -76.7 });
+    expect(criteria.destBbox).toEqual({ minLat: -15.45, maxLat: -11.1, minLon: -73.98, maxLon: -70.35 });
+  });
+
+  it('destRegion DESCONOCIDA → ValidationError accionable (misma defensa que region), NO pega al repo', async () => {
+    const { repo, browseAll } = makeRepo();
+    const service = makeService({ repo });
+
+    await expect(service.browse({ destRegion: 'mordor' })).rejects.toBeInstanceOf(ValidationError);
+    expect(browseAll).not.toHaveBeenCalled();
+  });
+
   it('orden=precio + precioMaxCents → llegan al criterio tal cual (mismos filtros que search)', async () => {
     const { repo, browseAll } = makeRepo();
     (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
@@ -1525,6 +1570,169 @@ describe('PublishedTripsService · BROWSE del marketplace (feed público · regi
     expect(batch.getDriversByIds).toHaveBeenCalledWith(['d1', 'd2']); // ids ÚNICOS
     expect(page.items).toHaveLength(3);
     expect(page.items[0]!.driver).toMatchObject({ id: 'd1' });
+  });
+});
+
+describe('PublishedTripsService · RUTAS POPULARES (agregado región→región del marketplace)', () => {
+  // Puntos ancla DENTRO de los bbox del catálogo @veo/utils (verificados contra REGIONS_PE) + uno fuera.
+  const LIMA = { lat: -12.05, lon: -77.04 };
+  const CUSCO = { lat: -13.52, lon: -71.97 };
+  const AREQUIPA = { lat: -16.4, lon: -71.53 };
+  const ICA = { lat: -14.07, lon: -75.73 };
+  const IQUITOS = { lat: -3.75, lon: -73.25 }; // Loreto NO está en el catálogo → sin región
+
+  function makeRouteRow(
+    origen: { lat: number; lon: number },
+    destino: { lat: number; lon: number },
+    precioBase: number,
+  ) {
+    return {
+      origenLat: origen.lat,
+      origenLon: origen.lon,
+      destinoLat: destino.lat,
+      destinoLon: destino.lon,
+      precioBase,
+    };
+  }
+
+  it('lee el universo OFERTABLE (SEARCHABLE + ahora) con el cap de 500 y clasifica cada extremo con regionForPoint', async () => {
+    const { repo, listUpcomingForPopularRoutes } = makeRepo();
+    listUpcomingForPopularRoutes.mockResolvedValueOnce([
+      makeRouteRow(LIMA, CUSCO, 8000),
+      makeRouteRow(AREQUIPA, LIMA, 9500),
+    ]);
+    const service = makeService({ repo });
+
+    const view = await service.popularRoutes();
+
+    expect(listUpcomingForPopularRoutes).toHaveBeenCalledOnce();
+    const [estados, ahora, cap] = listUpcomingForPopularRoutes.mock.calls[0]! as unknown as [
+      readonly PublishedTripState[],
+      Date,
+      number,
+    ];
+    expect(estados).toEqual([
+      PublishedTripState.PUBLICADO,
+      PublishedTripState.PARCIALMENTE_RESERVADO,
+    ]);
+    expect(ahora).toBeInstanceOf(Date);
+    expect(cap).toBe(500); // cap honesto documentado (a mayor volumen → región materializada)
+
+    // Clasificación por región del catálogo compartido: ids + nombres reales, no strings inventados.
+    expect(view.routes).toEqual([
+      {
+        origenRegionId: 'lima-metropolitana',
+        origenNombre: 'Lima Metropolitana',
+        destinoRegionId: 'cusco',
+        destinoNombre: 'Cusco',
+        viajes: 1,
+        precioDesdeCents: 8000,
+      },
+      {
+        origenRegionId: 'arequipa',
+        origenNombre: 'Arequipa',
+        destinoRegionId: 'lima-metropolitana',
+        destinoNombre: 'Lima Metropolitana',
+        viajes: 1,
+        precioDesdeCents: 9500,
+      },
+    ]);
+  });
+
+  it('EXCLUYE el viaje con un extremo fuera de todo bbox (sin inventar "Otros"); todos excluidos → routes []', async () => {
+    const { repo, listUpcomingForPopularRoutes } = makeRepo();
+    listUpcomingForPopularRoutes.mockResolvedValueOnce([
+      makeRouteRow(IQUITOS, LIMA, 5000), // origen sin región → fuera
+      makeRouteRow(LIMA, IQUITOS, 6000), // destino sin región → fuera
+    ]);
+    const service = makeService({ repo });
+
+    const view = await service.popularRoutes();
+
+    expect(view.routes).toEqual([]); // vacío honesto: nada clasificable, cero buckets fantasma
+  });
+
+  it('INCLUYE el par intra-región (origen == destino, "Lima → Lima"): misma-ciudad es un caso real', async () => {
+    const { repo, listUpcomingForPopularRoutes } = makeRepo();
+    listUpcomingForPopularRoutes.mockResolvedValueOnce([
+      makeRouteRow(LIMA, { lat: -12.2, lon: -76.95 }, 1500), // Lima → Lima (otro punto del mismo bbox)
+    ]);
+    const service = makeService({ repo });
+
+    const view = await service.popularRoutes();
+
+    expect(view.routes).toEqual([
+      {
+        origenRegionId: 'lima-metropolitana',
+        origenNombre: 'Lima Metropolitana',
+        destinoRegionId: 'lima-metropolitana',
+        destinoNombre: 'Lima Metropolitana',
+        viajes: 1,
+        precioDesdeCents: 1500,
+      },
+    ]);
+  });
+
+  it('AGRUPA por par: count = viajes del par y precioDesdeCents = MIN(precioBase) del par', async () => {
+    const { repo, listUpcomingForPopularRoutes } = makeRepo();
+    listUpcomingForPopularRoutes.mockResolvedValueOnce([
+      makeRouteRow(LIMA, CUSCO, 9000),
+      makeRouteRow(LIMA, CUSCO, 7500), // más barato → el "desde" del par
+      makeRouteRow(LIMA, CUSCO, 8200),
+    ]);
+    const service = makeService({ repo });
+
+    const view = await service.popularRoutes();
+
+    expect(view.routes).toHaveLength(1);
+    expect(view.routes[0]).toMatchObject({ viajes: 3, precioDesdeCents: 7500 });
+  });
+
+  it('ORDENA viajes DESC con desempate precioDesde ASC y CAPA al top 6', async () => {
+    const { repo, listUpcomingForPopularRoutes } = makeRepo();
+    // 7 pares distintos: Lima→Cusco ×3 (top), Lima→Arequipa ×2 y Arequipa→Lima ×2 (empatados en count,
+    // desempata el precioDesde), + 4 pares de 1 viaje — el 7º par debe quedar FUERA del top 6.
+    listUpcomingForPopularRoutes.mockResolvedValueOnce([
+      makeRouteRow(LIMA, CUSCO, 8000),
+      makeRouteRow(LIMA, CUSCO, 8500),
+      makeRouteRow(LIMA, CUSCO, 9000),
+      makeRouteRow(LIMA, AREQUIPA, 7000),
+      makeRouteRow(LIMA, AREQUIPA, 7200),
+      makeRouteRow(AREQUIPA, LIMA, 6000),
+      makeRouteRow(AREQUIPA, LIMA, 9900),
+      makeRouteRow(LIMA, ICA, 3000),
+      makeRouteRow(ICA, LIMA, 3500),
+      makeRouteRow(CUSCO, LIMA, 4000),
+      makeRouteRow(CUSCO, AREQUIPA, 4500), // 7º par (1 viaje, precioDesde más alto de los de count 1)
+    ]);
+    const service = makeService({ repo });
+
+    const view = await service.popularRoutes();
+
+    expect(view.routes).toHaveLength(6); // top-N capado
+    const pares = view.routes.map((r) => `${r.origenRegionId}→${r.destinoRegionId}`);
+    expect(pares).toEqual([
+      'lima-metropolitana→cusco', // 3 viajes
+      'arequipa→lima-metropolitana', // 2 viajes, desde 6000 (gana el desempate…
+      'lima-metropolitana→arequipa', // …contra 2 viajes desde 7000)
+      'lima-metropolitana→ica', // 1 viaje, desde 3000
+      'ica→lima-metropolitana', // 1 viaje, desde 3500
+      'cusco→lima-metropolitana', // 1 viaje, desde 4000
+    ]);
+    // cusco→arequipa (1 viaje, desde 4500) quedó fuera del top 6.
+    expect(pares).not.toContain('cusco→arequipa');
+    expect(view.routes[1]).toMatchObject({ viajes: 2, precioDesdeCents: 6000 });
+  });
+
+  it('SIN enrich: el agregado NO llama a identity (no expone conductores — es display puro)', async () => {
+    const { repo, listUpcomingForPopularRoutes } = makeRepo();
+    listUpcomingForPopularRoutes.mockResolvedValueOnce([makeRouteRow(LIMA, CUSCO, 8000)]);
+    const batch = makeIdentityBatch();
+    const service = makeService({ repo, identityBatch: batch.client });
+
+    await service.popularRoutes();
+
+    expect(batch.getDriversByIds).not.toHaveBeenCalled();
   });
 });
 

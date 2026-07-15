@@ -7,7 +7,8 @@
  *  - PATCH /published-trips/:id         → driver-rail (el CONDUCTOR edita su oferta; ownership server-truth).
  *  - POST  /published-trips/:id/cancel  → driver-rail (el CONDUCTOR cancela su oferta; ownership server-truth).
  *  - GET   /published-trips/search      → public-rail (el PASAJERO busca por ruta+fecha+asientos · geo H3).
- *  - GET   /published-trips/browse      → public-rail (FEED del marketplace: todo lo futuro, filtro por región).
+ *  - GET   /published-trips/browse      → public-rail (FEED del marketplace: todo lo futuro, filtro por región origen/destino).
+ *  - GET   /published-trips/popular-routes → public-rail (top-N de pares región→región ofertables, agregado de display).
  *  - GET   /published-trips/:id         → public-rail (el PASAJERO ve el detalle de un viaje publicado).
  *
  * El gate es server-side: InternalIdentityGuard valida la identidad firmada que el BFF propaga +
@@ -117,6 +118,18 @@ export class PublishedTripsController {
   })
   browse(@Query() dto: BrowsePublishedTripsDto) {
     return this.trips.browse(dto);
+  }
+
+  // GET /popular-routes ANTES de GET /:id (ruta estática precede a la paramétrica). MISMO riel público
+  // ANÓNIMO que /browse: agregado de DISPLAY (top-N pares región→región), sin params ni cursor (es top-N).
+  @Audiences(InternalAudience.PUBLIC_RAIL)
+  @Get('popular-routes')
+  @ApiOperation({
+    summary:
+      'Rutas populares del marketplace: top-N de pares región→región con viajes ofertables (count + precio desde) · public-rail anónimo',
+  })
+  popularRoutes() {
+    return this.trips.popularRoutes();
   }
 
   @Audiences(InternalAudience.DRIVER_RAIL)

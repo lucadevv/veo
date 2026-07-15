@@ -41,6 +41,25 @@ describe('BrowsePublishedTripsDto · borde', () => {
     );
   });
 
+  it('destRegion acepta una región del catálogo, SOLA (independiente de region) o junto a region', () => {
+    expect(validate({ destRegion: 'cusco' })).toHaveLength(0);
+    expect(validate({ region: 'lima-metropolitana', destRegion: 'ica' })).toHaveLength(0);
+  });
+
+  it('RECHAZA una destRegion fuera del catálogo → 400 con mensaje que enumera los ids válidos', () => {
+    const errors = validate({ destRegion: 'mordor' });
+    const destError = errors.find((e) => e.property === 'destRegion');
+    expect(destError).toBeDefined();
+    // Mismo criterio que `region`: el mensaje enumera el catálogo real (derivado de REGIONS_PE).
+    expect(JSON.stringify(destError?.constraints)).toContain('lima-metropolitana');
+  });
+
+  it('destRegion inválida NO invalida una region válida (errores por campo, independientes)', () => {
+    const errors = validate({ region: 'arequipa', destRegion: 'narnia' });
+    expect(errors.some((e) => e.property === 'destRegion')).toBe(true);
+    expect(errors.some((e) => e.property === 'region')).toBe(false);
+  });
+
   it('orden acepta los dos valores soportados y rechaza uno fuera de la unión', () => {
     expect(validate({ orden: 'salida' })).toHaveLength(0);
     expect(validate({ orden: 'precio' })).toHaveLength(0);

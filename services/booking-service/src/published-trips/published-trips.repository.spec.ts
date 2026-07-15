@@ -462,6 +462,57 @@ describe('PublishedTripsRepository · browseAll (marketplace BROWSE · sin rings
     );
   });
 
+  it('BROWSE con region + destRegion → AMBOS bbox entran al WHERE (origen Y destino, AND independiente)', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+    const bbox = { minLat: -12.52, maxLat: -11.57, minLon: -77.2, maxLon: -76.7 }; // origen: Lima
+    const destBbox = { minLat: -15.45, maxLat: -11.1, minLon: -73.98, maxLon: -70.35 }; // destino: Cusco
+
+    await repo.browseAll({
+      estados: [PublishedTripState.PUBLICADO],
+      ahora,
+      orden: 'salida',
+      bbox,
+      destBbox,
+      take: 20,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          origenLat: { gte: bbox.minLat, lte: bbox.maxLat },
+          origenLon: { gte: bbox.minLon, lte: bbox.maxLon },
+          destinoLat: { gte: destBbox.minLat, lte: destBbox.maxLat },
+          destinoLon: { gte: destBbox.minLon, lte: destBbox.maxLon },
+        }),
+      }),
+    );
+  });
+
+  it('BROWSE con SOLO destRegion → bbox del DESTINO sin tocar el origen (son independientes)', async () => {
+    const findMany = vi.fn(async (_args: { where: Record<string, unknown> }) => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+    const destBbox = { minLat: -17.3, maxLat: -14.6, minLon: -75.1, maxLon: -70.8 }; // Arequipa
+
+    await repo.browseAll({
+      estados: [PublishedTripState.PUBLICADO],
+      ahora,
+      orden: 'salida',
+      destBbox,
+      take: 20,
+    });
+
+    const arg = findMany.mock.calls[0]![0];
+    expect(arg.where).toMatchObject({
+      destinoLat: { gte: destBbox.minLat, lte: destBbox.maxLat },
+      destinoLon: { gte: destBbox.minLon, lte: destBbox.maxLon },
+    });
+    expect(arg.where).not.toHaveProperty('origenLat');
+    expect(arg.where).not.toHaveProperty('origenLon');
+  });
+
   it('BROWSE orden=precio con cursor → MISMO keyset OR-tupla (precioBase, id) + orderBy espejo que search', async () => {
     const findMany = vi.fn(async () => []);
     const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
@@ -485,5 +536,38 @@ describe('PublishedTripsRepository · browseAll (marketplace BROWSE · sin rings
         orderBy: [{ precioBase: 'asc' }, { id: 'asc' }],
       }),
     );
+  });
+});
+
+describe('PublishedTripsRepository · listUpcomingForPopularRoutes (agregado de rutas populares)', () => {
+  const ahora = new Date('2026-07-01T08:00:00.000Z');
+
+  it('lee el MISMO universo del browse (SEARCHABLE + salida futura), select mínimo SIN PII, cap por take, salida ASC', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+
+    await repo.listUpcomingForPopularRoutes(
+      [PublishedTripState.PUBLICADO, PublishedTripState.PARCIALMENTE_RESERVADO],
+      ahora,
+      500,
+    );
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        estado: { in: [PublishedTripState.PUBLICADO, PublishedTripState.PARCIALMENTE_RESERVADO] },
+        fechaHoraSalida: { gt: ahora },
+      },
+      // Solo extremos + precio: sin driverId, sin vehicleId, sin H3 (agregado de display, no expone nada).
+      select: {
+        origenLat: true,
+        origenLon: true,
+        destinoLat: true,
+        destinoLon: true,
+        precioBase: true,
+      },
+      orderBy: [{ fechaHoraSalida: 'asc' }, { id: 'asc' }],
+      take: 500, // cap honesto de lectura (a mayor volumen → región materializada, no subir el cap)
+    });
   });
 });

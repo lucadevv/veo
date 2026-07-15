@@ -21,6 +21,7 @@ import type { AuthenticatedUser } from '@veo/auth';
 import type {
   CarpoolBookingCreateRequest,
   CarpoolBookingView,
+  CarpoolPopularRoutes,
   CarpoolSearchPage,
   CarpoolTripDetail,
 } from '@veo/api-client';
@@ -55,18 +56,30 @@ export class CarpoolService {
 
   /**
    * GET /published-trips/browse — FEED del marketplace (todos los viajes publicados futuros, sin ruta ni
-   * fecha), filtro opcional por región del catálogo compartido. Misma página keyset que search.
+   * fecha), filtros opcionales por región ORIGEN (`region`) y región DESTINO (`destRegion`) del catálogo
+   * compartido — independientes entre sí. Misma página keyset que search.
    */
   browse(user: AuthenticatedUser, dto: BrowseCarpoolTripsDto): Promise<CarpoolSearchPage> {
     return this.bookingRest.get<CarpoolSearchPage>('/published-trips/browse', {
       identity: user,
       query: {
         region: dto.region,
+        destRegion: dto.destRegion,
         orden: dto.orden,
         precioMaxCents: dto.precioMaxCents,
         limit: dto.limit,
         cursor: dto.cursor,
       },
+    });
+  }
+
+  /**
+   * GET /published-trips/popular-routes — top-N de pares región→región con viajes ofertables (agregado de
+   * DISPLAY del downstream: sin conductores, sin cursor). Sin params: el downstream decide cap y orden.
+   */
+  popularRoutes(user: AuthenticatedUser): Promise<CarpoolPopularRoutes> {
+    return this.bookingRest.get<CarpoolPopularRoutes>('/published-trips/popular-routes', {
+      identity: user,
     });
   }
 

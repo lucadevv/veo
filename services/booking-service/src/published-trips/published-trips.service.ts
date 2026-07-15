@@ -34,6 +34,8 @@ import {
   DISPATCH_H3_RESOLUTION,
   REGIONS_PE,
   regionById,
+  regionForPoint,
+  type RegionPE,
 } from '@veo/utils';
 import { DriverStatus, KycStatus, FleetDocumentStatus } from '@veo/shared-types';
 import { PublishedTripState, PricingMode, type PublishedTrip } from '../generated/prisma';
@@ -124,6 +126,17 @@ const RADAR_DRIVER_SAMPLE = 100;
 const ACTIVE_CARPOOL_MONITOR_LIMIT = 50;
 
 /**
+ * CAP HONESTO de lectura del agregado de RUTAS POPULARES: hasta N filas crudas (salida ASC) se clasifican
+ * en memoria. Con el volumen v1 cubre el universo ofertable completo; si el marketplace lo excede, el
+ * agregado degrada a PARCIAL (sesgado a salidas próximas) y el paso siguiente es materializar la región
+ * por fila (columna region_id al publicar) o una vista materializada del par — NO subir este número.
+ */
+const POPULAR_ROUTES_READ_CAP = 500;
+
+/** Top-N de pares región→región que devuelve el agregado (es una vitrina de display, no un listado paginado). */
+const POPULAR_ROUTES_TOP_N = 6;
+
+/**
  * Config TIPADA de la búsqueda geo H3 (F2): k base + k expandido si la primera pasada da CERO resultados.
  * Ya NO viene de un env estático: la RESUELVE en runtime `CarpoolSearchConfigService` (radio km → k), editable
  * por el admin sin redeploy. Este alias mantiene el shape { kRing, kRingExpand } que consume `search()`.
@@ -144,6 +157,28 @@ export interface SearchResultItem {
 export interface SearchPage {
   items: SearchResultItem[];
   nextCursor: string | null;
+}
+
+/**
+ * Un par región→región del agregado de RUTAS POPULARES (GET /published-trips/popular-routes): ids + nombres
+ * del catálogo compartido (@veo/utils REGIONS_PE), cuántos viajes OFERTABLES lo cubren y el precio por
+ * asiento más barato del par. Puede ser INTRA-región (origen == destino, "Lima → Lima"): misma-ciudad es un
+ * caso real del producto — el front decide el copy.
+ */
+export interface PopularRoute {
+  origenRegionId: string;
+  origenNombre: string;
+  destinoRegionId: string;
+  destinoNombre: string;
+  /** Viajes ofertables (SEARCHABLE + salida futura) clasificados en este par, dentro del cap de lectura. */
+  viajes: number;
+  /** Precio por asiento MÁS BARATO del par (min precioBase, céntimos PEN). */
+  precioDesdeCents: number;
+}
+
+/** Respuesta del agregado de rutas populares: top-N pares, viajes DESC y precioDesde ASC de desempate. */
+export interface PopularRoutesView {
+  routes: PopularRoute[];
 }
 
 /**
@@ -681,8 +716,9 @@ export class PublishedTripsService {
   /**
    * BROWSE del marketplace de carpool (GET /published-trips/browse · public-rail ANÓNIMO): el FEED de TODOS
    * los viajes publicados FUTUROS — sin ruta ni fecha requeridas (a diferencia de `search`, que exige A→B +
-   * día). Filtro OPCIONAL por REGIÓN del catálogo compartido (@veo/utils REGIONS_PE): el bbox de la región
-   * recorta por el ORIGEN del viaje. Orden `salida` (default) o `precio`, tope de precio opcional.
+   * día). Filtros OPCIONALES por REGIÓN del catálogo compartido (@veo/utils REGIONS_PE): `region` recorta
+   * por el ORIGEN del viaje y `destRegion` por su DESTINO — independientes entre sí (solo uno, el otro, o
+   * ambos en AND). Orden `salida` (default) o `precio`, tope de precio opcional.
    *
    * REUSA la maquinaria del search (fuente única): estados SEARCHABLE + salida futura, el MISMO codec de
    * cursor keyset tagueado (`encodeSearchCursor`/`decodeSearchCursor` — sort-aware: un cursor de otro orden
@@ -696,21 +732,17 @@ export class PublishedTripsService {
   async browse(dto: BrowsePublishedTripsDto): Promise<SearchPage> {
     const orden: SearchOrder = dto.orden ?? 'salida';
 
-    // Región contra el CATÁLOGO compartido. El DTO ya la valida en el borde (@IsIn con los ids reales);
+    // Regiones contra el CATÁLOGO compartido. El DTO ya las valida en el borde (@IsIn con los ids reales);
     // esta re-verificación es defensa en profundidad para callers internos que no pasan por el pipe — y la
-    // que resuelve el bbox. Id desconocido → ValidationError accionable (enumera el catálogo), nunca un
-    // filtro silenciosamente vacío ni un feed nacional "por accidente".
-    let bbox: BrowsePublishedTripsCriteria['bbox'];
-    if (dto.region !== undefined) {
-      const region = regionById(dto.region);
-      if (region === undefined) {
-        throw new ValidationError('región desconocida (no está en el catálogo)', {
-          region: dto.region,
-          regionesValidas: REGIONS_PE.map((r) => r.id),
-        });
-      }
-      bbox = region.bbox;
-    }
+    // que resuelve cada bbox. Id desconocido → ValidationError accionable (enumera el catálogo), nunca un
+    // filtro silenciosamente vacío ni un feed nacional "por accidente". `region` (ORIGEN) y `destRegion`
+    // (DESTINO) son INDEPENDIENTES: puede venir solo uno, el otro, o ambos (AND en el repo).
+    const bbox =
+      dto.region !== undefined ? this.requireRegionBbox(dto.region, 'region') : undefined;
+    const destBbox =
+      dto.destRegion !== undefined
+        ? this.requireRegionBbox(dto.destRegion, 'destRegion')
+        : undefined;
 
     const take = dto.limit ?? DEFAULT_SEARCH_PAGE_SIZE;
     // MISMO codec sort-aware del search: tag `s`/`p` contra el orden activo; mismatch/corrupto → página 1.
@@ -721,6 +753,7 @@ export class PublishedTripsService {
       ahora: new Date(),
       orden,
       ...(bbox !== undefined ? { bbox } : {}),
+      ...(destBbox !== undefined ? { destBbox } : {}),
       ...(dto.precioMaxCents !== undefined ? { precioMaxCents: dto.precioMaxCents } : {}),
       take,
       ...(cursor ? { cursor } : {}),
@@ -733,6 +766,83 @@ export class PublishedTripsService {
     const nextCursor = last ? encodeSearchCursor(orden, last) : null;
 
     return { items, nextCursor };
+  }
+
+  /**
+   * Resuelve un id de región del catálogo compartido a su bbox. Id desconocido → ValidationError accionable
+   * (nombra el CAMPO que vino mal y enumera el catálogo) — defensa en profundidad detrás del @IsIn del DTO,
+   * nunca un filtro silenciosamente vacío. Fuente única para `region` (origen) y `destRegion` (destino).
+   */
+  private requireRegionBbox(
+    regionId: string,
+    campo: 'region' | 'destRegion',
+  ): BrowsePublishedTripsCriteria['bbox'] {
+    const region = regionById(regionId);
+    if (region === undefined) {
+      throw new ValidationError(`${campo} desconocida (no está en el catálogo)`, {
+        [campo]: regionId,
+        regionesValidas: REGIONS_PE.map((r) => r.id),
+      });
+    }
+    return region.bbox;
+  }
+
+  /**
+   * RUTAS POPULARES del marketplace (GET /published-trips/popular-routes · public-rail ANÓNIMO): agregado de
+   * pares región→región sobre los viajes OFERTABLES (SEARCHABLE + salida futura — MISMO universo que el
+   * browse). SIN enrich (es un agregado de display, no expone conductores) y SIN cursor (es un top-N).
+   *
+   * CLASIFICACIÓN: `regionForPoint` del catálogo compartido sobre AMBOS extremos. Un extremo fuera de todo
+   * bbox (mar, región no catalogada) → el viaje NO entra al agregado (honesto: no se inventa un bucket
+   * "Otros"). Los pares INTRA-región (origen == destino, "Lima → Lima") SÍ entran: misma-ciudad es un caso
+   * real del producto — el front decide el copy.
+   *
+   * CAP HONESTO: se leen hasta POPULAR_ROUTES_READ_CAP filas crudas (salida ASC) y se agrega en memoria —
+   * ver la nota del cap en la constante y en el repo (a mayor volumen: región materializada por fila o vista
+   * materializada, no subir el cap). Orden: viajes DESC, desempate precioDesde ASC; top POPULAR_ROUTES_TOP_N.
+   */
+  async popularRoutes(): Promise<PopularRoutesView> {
+    const rows = await this.repo.listUpcomingForPopularRoutes(
+      SEARCHABLE_STATES,
+      new Date(),
+      POPULAR_ROUTES_READ_CAP,
+    );
+
+    // Un bucket por par (origenRegionId, destinoRegionId): count + min precioBase. La clave compuesta usa
+    // '→' (no aparece en los ids kebab-case del catálogo → sin colisiones de concatenación).
+    const buckets = new Map<
+      string,
+      { origen: RegionPE; destino: RegionPE; viajes: number; precioDesdeCents: number }
+    >();
+    for (const row of rows) {
+      const origen = regionForPoint(row.origenLat, row.origenLon);
+      const destino = regionForPoint(row.destinoLat, row.destinoLon);
+      // Extremo sin región catalogada → el viaje queda FUERA del agregado (honesto, sin inventar "Otros").
+      if (origen === undefined || destino === undefined) continue;
+
+      const key = `${origen.id}→${destino.id}`;
+      const bucket = buckets.get(key);
+      if (bucket === undefined) {
+        buckets.set(key, { origen, destino, viajes: 1, precioDesdeCents: row.precioBase });
+      } else {
+        bucket.viajes += 1;
+        if (row.precioBase < bucket.precioDesdeCents) bucket.precioDesdeCents = row.precioBase;
+      }
+    }
+
+    const routes: PopularRoute[] = [...buckets.values()]
+      .sort((a, b) => b.viajes - a.viajes || a.precioDesdeCents - b.precioDesdeCents)
+      .slice(0, POPULAR_ROUTES_TOP_N)
+      .map((b) => ({
+        origenRegionId: b.origen.id,
+        origenNombre: b.origen.nombre,
+        destinoRegionId: b.destino.id,
+        destinoNombre: b.destino.nombre,
+        viajes: b.viajes,
+        precioDesdeCents: b.precioDesdeCents,
+      }));
+
+    return { routes };
   }
 
   /**

@@ -3250,6 +3250,34 @@ export const carpoolTripDetail = z.object({
 export type CarpoolTripDetail = z.infer<typeof carpoolTripDetail>;
 
 /**
+ * Un par región→región del agregado de RUTAS POPULARES (ids + nombres del catálogo compartido REGIONS_PE de
+ * @veo/utils). Puede ser INTRA-región (origen == destino, "Lima → Lima"): misma-ciudad es un caso real del
+ * producto — el front decide el copy.
+ */
+export const carpoolPopularRoute = z.object({
+  /** Id kebab-case estable del catálogo (viaja por el wire, sirve para pre-armar el browse del par). */
+  origenRegionId: z.string(),
+  origenNombre: z.string(),
+  destinoRegionId: z.string(),
+  destinoNombre: z.string(),
+  /** Viajes ofertables clasificados en el par (dentro del cap de lectura del agregado). */
+  viajes: z.number().int(),
+  /** Precio por asiento MÁS BARATO del par (min precioBase, céntimos PEN). */
+  precioDesdeCents: z.number().int(),
+});
+export type CarpoolPopularRoute = z.infer<typeof carpoolPopularRoute>;
+
+/**
+ * GET /carpool/trips/popular-routes → top-N de pares región→región con viajes ofertables (viajes DESC,
+ * desempate precioDesde ASC). Agregado de DISPLAY: sin conductores, sin cursor. `routes: []` honesto si
+ * ningún viaje ofertable clasifica en el catálogo.
+ */
+export const carpoolPopularRoutes = z.object({
+  routes: z.array(carpoolPopularRoute),
+});
+export type CarpoolPopularRoutes = z.infer<typeof carpoolPopularRoutes>;
+
+/**
  * POST /carpool/bookings → body (solicitar la reserva · `CreateBookingDto` de booking-service). El
  * `passengerId` NO va: lo deriva el BFF de la sesión (server-truth). `Idempotency-Key` (header, UUID por
  * intento de submit) deduplica el reintento del MISMO submit sin bloquear una reserva nueva.

@@ -16,7 +16,12 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
-import type { CarpoolBookingView, CarpoolSearchPage, CarpoolTripDetail } from '@veo/api-client';
+import type {
+  CarpoolBookingView,
+  CarpoolPopularRoutes,
+  CarpoolSearchPage,
+  CarpoolTripDetail,
+} from '@veo/api-client';
 import { CarpoolService } from './carpool.service';
 import {
   BrowseCarpoolTripsDto,
@@ -53,6 +58,16 @@ export class CarpoolController {
     @Query() dto: BrowseCarpoolTripsDto,
   ): Promise<CarpoolSearchPage> {
     return this.carpool.browse(user, dto);
+  }
+
+  // GET /trips/popular-routes ANTES de GET /trips/:id (ruta estática precede a la paramétrica).
+  @Get('trips/popular-routes')
+  @ApiOperation({
+    summary:
+      'Rutas populares del marketplace: top-N de pares región→región con viajes ofertables (count + precio desde)',
+  })
+  popularRoutes(@CurrentUser() user: AuthenticatedUser): Promise<CarpoolPopularRoutes> {
+    return this.carpool.popularRoutes(user);
   }
 
   @Get('trips/:id')
