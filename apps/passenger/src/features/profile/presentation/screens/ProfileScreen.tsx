@@ -797,6 +797,23 @@ export function ProfileScreen(): React.JSX.Element {
             }
             note={t('profile.documentNote')}
           />
+
+          {/* CAMBIAR NÚMERO (regla del dueño: el cambio re-verifica con OTP al número NUEVO, que
+              pasa a ser el de ingreso). El backend phone-link ya cumplía esa semántica; faltaba la
+              ENTRADA con teléfono existente (antes solo aparecía vía chip de completitud al faltar). */}
+          {profile.phone ? (
+            <ListItem
+              title={t('profile.changePhone')}
+              subtitle={profile.phone}
+              chevron
+              onPress={() => {
+                setEditOpen(false);
+                // iOS no presenta un Modal mientras otro se está DESCARTANDO: abrir el sheet de
+                // teléfono recién cuando el editor terminó su animación de cierre (~300ms).
+                setTimeout(() => setPhoneOpen(true), 350);
+              }}
+            />
+          ) : null}
         </View>
       </BottomSheet>
 

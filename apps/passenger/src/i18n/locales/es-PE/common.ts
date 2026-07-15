@@ -182,8 +182,10 @@ export const common = {
     orContinueWith: 'o continúa con',
     emailLink: 'Ingresa con correo',
     phoneTitle: 'Ingresa tu número',
-    // DEUDA: (backend) el copy dice "por WhatsApp" pero el envío real de auth/otp/request es SMS (notification-service SMPP). Pedir al backend entregar el OTP por WhatsApp Business API como canal PRIMARIO (no swap de proveedor tras el puerto SMS) para que el texto sea veraz; hasta entonces la app promete un canal que no usa. En DEV el OTP se lee del visor :5190 (dev-stack/otp-viewer) sin importar el canal, así que el mismatch NO bloquea el testing de dev.
-    phoneSubtitle: 'Te enviamos un código por WhatsApp.',
+    // El canal REAL del OTP es SMS (notification-service SMPP) — el copy anterior prometía
+    // WhatsApp, un canal que no existe (mentira visible a todo usuario nuevo; audit 2026-07-15).
+    // Si producto agrega WhatsApp Business API como canal, actualizar acá.
+    phoneSubtitle: 'Te enviamos un código por SMS.',
     phoneLabel: 'Número de celular',
     phoneHelper: 'Usaremos tu número solo para verificar tu cuenta.',
     phonePlaceholder: '987 654 321',
@@ -1921,7 +1923,11 @@ export const common = {
     completionChipPhone: 'Tu celular',
     completionChipDocument: 'Tu documento',
 
-    /** SHEET de celular (altas por correo/Google/Apple sin teléfono). */
+    /** Fila "cambiar mi número" del editor (con teléfono existente): re-verifica con OTP al
+     * número NUEVO, que pasa a ser el de ingreso (regla del dueño; el backend ya lo cumplía). */
+    changePhone: 'Cambiar mi número',
+
+    /** SHEET de celular (altas por correo/Google/Apple sin teléfono, y cambio de número). */
     phoneSheetTitle: 'Agrega tu celular',
     phoneSheetIntro:
       'Te mandamos un código por SMS para confirmar que es tuyo.',

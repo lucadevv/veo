@@ -46,9 +46,11 @@ const WEEKDAY_LABELS = [
  * tab Compartir (el feed es la raíz browse-first; buscar es intención concreta). Origen/Destino con
  * el autocompletado real (picker propio, SIN tocar el rideDraftStore del flujo on-demand), FECHA
  * como día calendario (chips, sin hora: se busca por día) y stepper de ASIENTOS (1..8). El CTA
- * navega a los resultados con la query completa en params. La sección "Rutas populares" del pen NO
- * tiene backend (no existe endpoint de rutas populares) → se omite a propósito, sin datos inventados.
- * DEUDA: (backend) falta endpoint de rutas populares carpool (p.ej. GET /carpool/popular-routes → [{desde, hasta, precioDesde}]). Sin él, la sección "Rutas populares" del .pen se omite.
+ * navega a los resultados con la query completa en params. La sección "Rutas populares" del pen se
+ * omite ACÁ a propósito — pero ya NO por falta de backend: el endpoint existe
+ * (GET /carpool/trips/popular-routes) y su casa es el FEED del tab Compartir (la raíz browse-first
+ * que precede a esta pantalla), donde la sección vive y filtra al tap. Repetirla en el buscador
+ * sería redundante: quien llega acá ya pasó por ella y viene con intención de ruta concreta.
  */
 export function CarpoolSearchScreen(): React.JSX.Element {
   const theme = useTheme();
