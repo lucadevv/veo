@@ -101,7 +101,7 @@ export function PaymentScreen(): React.JSX.Element {
             />
           </EnterView>
           <EnterView delay={200}>
-            <Card variant="outlined" padding="lg">
+            <Card variant="elevated" padding="lg">
               {/* Desglose real del pago (datos del PaymentView): tarifa acordada (grossCents),
                   propina (tipCents) y total (amountCents). La propina solo se muestra si la hubo. */}
               <View style={styles.breakdownRow}>
@@ -205,7 +205,7 @@ export function PaymentScreen(): React.JSX.Element {
         style={{marginTop: theme.spacing.xl, marginBottom: theme.spacing.sm}}>
         {t('payments.methodsTitle')}
       </Text>
-      <Card variant="outlined" padding="sm">
+      <Card variant="elevated" padding="sm">
         {PAYMENT_METHODS.map(item => (
           <ListItem
             key={item}

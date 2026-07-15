@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   hexAlpha,
+  ListGroup,
   ListItem,
   SafeScreen,
   Skeleton,
@@ -223,7 +224,7 @@ export function SavedPlacesScreen(): React.JSX.Element {
             {t('places.favorites')}
           </Text>
           {favorites.length > 0 ? (
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               {/* El pen dibuja íconos por favorito (dumbbell/heart), pero el modelo `SavedPlace` NO
                   tiene campo de ícono → IconStar homogéneo (gap de modelo reportado). El chevron
                   abre el editor (el borrado vive dentro del editor, per pen sin X en la fila). */}
@@ -245,9 +246,9 @@ export function SavedPlacesScreen(): React.JSX.Element {
                   }
                 />
               ))}
-            </Card>
+            </ListGroup>
           ) : (
-            <Card variant="outlined" padding="lg">
+            <View style={{paddingVertical: theme.spacing.lg}}>
               <Text variant="body" color="inkMuted" align="center">
                 {t('places.empty')}
               </Text>
@@ -258,7 +259,7 @@ export function SavedPlacesScreen(): React.JSX.Element {
                 style={{marginTop: theme.spacing.xs}}>
                 {t('places.emptySubtitle')}
               </Text>
-            </Card>
+            </View>
           )}
         </View>
 
@@ -453,7 +454,7 @@ function PrimaryPlaceCard({
 
   return (
     <Card
-      variant="outlined"
+      variant="elevated"
       padding="lg"
       onPress={onPress}
       accessibilityLabel={`${title}. ${subtitle}`}>

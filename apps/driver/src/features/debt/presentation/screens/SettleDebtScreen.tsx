@@ -21,7 +21,6 @@ import { formatPEN } from '../../../../shared/presentation/format';
 import { useRepositories } from '../../../../core/di/useDi';
 import { EARNINGS_SUMMARY_QUERY_KEY, GetEarningsSummaryUseCase } from '../../../earnings/domain';
 import { PROFILE_QUERY_KEY } from '../../../profile/domain';
-import { IconCheck } from '../../../../shared/presentation/icons';
 import type { DebtSettleMethod } from '../../domain';
 import { DebtCheckoutInstructions } from '../components/DebtCheckoutInstructions';
 
@@ -264,7 +263,7 @@ function DebtAmountCard({
 }): React.JSX.Element {
   const theme = useTheme();
   return (
-    <Card variant="outlined" padding="lg">
+    <Card variant="elevated" padding="lg">
       <View style={{ gap: theme.spacing.xs }}>
         <Text variant="footnote" color="inkMuted">
           {label}

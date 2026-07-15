@@ -26,7 +26,7 @@ export function NotificationRow({ notification }: NotificationRowProps): React.J
 
   return (
     <Card
-      variant="outlined"
+      variant="elevated"
       padding="lg"
       style={unread ? { borderColor: theme.colors.accent } : undefined}
     >

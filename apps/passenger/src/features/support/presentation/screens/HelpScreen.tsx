@@ -9,6 +9,7 @@ import {
   BottomSheet,
   Button,
   Card,
+  ListGroup,
   ListItem,
   SafeScreen,
   StatusPill,
@@ -260,17 +261,15 @@ export function HelpScreen(): React.JSX.Element {
               {t('support.searchResultsTitle')}
             </Text>
             {matchingFaqKeys.length > 0 ? (
-              <Card variant="outlined" padding="md">
+              <Card variant="elevated" padding="md">
                 {matchingFaqKeys.map(renderFaqItem)}
               </Card>
             ) : (
-              /* Sin resultados: texto honesto, con el camino real (reportar el problema). */
-              <Card variant="outlined" padding="md">
-                <EmptyState
-                  title={t('support.searchNoResults', {query: query.trim()})}
-                  subtitle={t('support.searchNoResultsHint')}
-                />
-              </Card>
+              /* Sin resultados: texto honesto SIN caja (el vacío no necesita marco). */
+              <EmptyState
+                title={t('support.searchNoResults', {query: query.trim()})}
+                subtitle={t('support.searchNoResultsHint')}
+              />
             )}
           </View>
         ) : (
@@ -282,7 +281,7 @@ export function HelpScreen(): React.JSX.Element {
               style={{marginBottom: theme.spacing.sm}}>
               {t('support.topicsTitle')}
             </Text>
-            <Card variant="outlined" padding="none">
+            <Card variant="elevated" padding="none">
               {TOPICS.map((topic, index) => {
                 const expanded = expandedTopic === topic.key;
                 return (
@@ -333,30 +332,28 @@ export function HelpScreen(): React.JSX.Element {
           ) : ticketsQuery.isError ? (
             <ErrorState onRetry={() => ticketsQuery.refetch()} />
           ) : tickets.length === 0 ? (
-            <Card variant="outlined" padding="md">
-              <EmptyState
-                title={t('support.empty')}
-                subtitle={t('support.emptySubtitle')}
-              />
-            </Card>
+            /* Vacío SIN caja: un estado no necesita marco (des-encajonado 2026-07-15). */
+            <EmptyState
+              title={t('support.empty')}
+              subtitle={t('support.emptySubtitle')}
+            />
           ) : (
-            <View style={{gap: theme.spacing.sm}}>
+            <ListGroup>
               {tickets.map(ticket => (
-                <Card key={ticket.id} variant="outlined" padding="md">
-                  <ListItem
-                    title={ticket.subject}
-                    subtitle={`${t(`support.category.${ticket.category}` as const)} · ${formatShortDate(ticket.createdAt)}`}
-                    trailing={
-                      <StatusPill
-                        label={t(`support.status.${ticket.status}` as const)}
-                        tone={ticketStatusTone(ticket.status)}
-                        dot
-                      />
-                    }
-                  />
-                </Card>
+                <ListItem
+                  key={ticket.id}
+                  title={ticket.subject}
+                  subtitle={`${t(`support.category.${ticket.category}` as const)} · ${formatShortDate(ticket.createdAt)}`}
+                  trailing={
+                    <StatusPill
+                      label={t(`support.status.${ticket.status}` as const)}
+                      tone={ticketStatusTone(ticket.status)}
+                      dot
+                    />
+                  }
+                />
               ))}
-            </View>
+            </ListGroup>
           )}
         </View>
       </ScrollView>

@@ -155,7 +155,7 @@ export function ReferralsScreen(): React.JSX.Element {
       </View>
 
       {/* Card del código per pen: MONO grande a la izquierda + pill "Copiar" adentro. */}
-      <Card variant="outlined" padding="lg">
+      <Card variant="elevated" padding="lg">
         <View style={[styles.codeRow, {gap: theme.spacing.md}]}>
           <Text
             variant="title2"
@@ -221,7 +221,7 @@ export function ReferralsScreen(): React.JSX.Element {
       ) : null}
 
       {/* Métricas per pen: UNA card partida en 2 (Invitados / Ganado) con divisor central. */}
-      <Card variant="outlined" padding="none">
+      <Card variant="elevated" padding="none">
         <View style={styles.metricsRow}>
           <View style={[styles.metricCell, {gap: theme.spacing.xs}]}>
             <Text variant="title1" tabular>
@@ -249,7 +249,7 @@ export function ReferralsScreen(): React.JSX.Element {
       </Card>
 
       {/* Canjear un código per pen: fila navegable que abre el sheet con el canje existente. */}
-      <Card variant="outlined" padding="none">
+      <Card variant="elevated" padding="none">
         <ListItem
           title={t('referrals.redeemEntry')}
           leading={<IconGift color={theme.colors.inkMuted} size={20} />}

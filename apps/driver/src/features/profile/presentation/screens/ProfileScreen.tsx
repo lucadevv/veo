@@ -8,7 +8,7 @@ import {
   Banner,
   BottomSheet,
   Button,
-  Card,
+  ListGroup,
   ListItem,
   SafeScreen,
   Skeleton,
@@ -37,7 +37,6 @@ import { useProfile } from '../hooks/useProfile';
 import { useLogout } from '../../../../core/session/useLogout';
 import { BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel } from '../labels';
 import { ProfileIdentityCard } from '../components/ProfileIdentityCard';
-import { ProfileLinkRow } from '../components/ProfileLinkRow';
 import { ScreenHero } from '../../../../shared/presentation/components/ScreenHero';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 
@@ -110,12 +109,14 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
             </Reveal>
           ) : null}
 
-          {/* Estados de verificación (KYC / antecedentes / estado actual) con StatusPill real. */}
+          {/* Estados de verificación (KYC / antecedentes / estado actual) con StatusPill real,
+              en grupo EDITORIAL (superficie + hairlines, sin cajón — mismo idioma que el
+              "Tu cuenta" del passenger; des-encajonado 2026-07-15). */}
           <Reveal delay={120}>
             <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.kyc')}
             </Text>
-            <Card>
+            <ListGroup>
               <ListItem
                 title={t('profile.currentStatus')}
                 trailing={
@@ -148,65 +149,95 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                   />
                 }
               />
-            </Card>
+            </ListGroup>
           </Reveal>
 
           {/* La LISTA de documentos vive en su pantalla dedicada (row "Documentos" abajo), fiel al frame
               C/Perfil: acá NO se expande inline. Eliminar la lista inline además cerró el bug de keys
               duplicadas (dos docs con el mismo `type`, p. ej. dos SOAT, colisionaban en `key={doc.type}`). */}
 
-          {/* Accesos rápidos: documentos + biometría (stack) + tabs Ganancias/Viajes. */}
+          {/* Accesos en SECCIONES con label (espejo del "Tu cuenta" del passenger, que es el patrón
+              aprobado): antes era UN bloque monolítico de 8 filas sin jerarquía. Íconos en accent
+              (mismo tratamiento que el passenger), filas ListItem canónicas del ui-kit. */}
           <Reveal delay={160}>
-            <Card padding="sm">
-              <ProfileLinkRow
-                icon={<IconAccount size={20} color={theme.colors.inkMuted} />}
-                label={t('profile.edit.entry')}
+            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionAccount')}
+            </Text>
+            <ListGroup>
+              <ListItem
+                title={t('profile.edit.entry')}
+                leading={<IconAccount size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('EditProfile')}
-                showDivider
               />
               {/* Avisos: el acceso vive acá (el header del Inicio ya no tiene campana, fiel al frame). */}
-              <ProfileLinkRow
-                icon={<IconBell size={20} color={theme.colors.inkMuted} />}
-                label={t('notifications.title')}
+              <ListItem
+                title={t('notifications.title')}
+                leading={<IconBell size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Notifications')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconDocument size={20} color={theme.colors.inkMuted} />}
-                label={t('documents.title')}
+            </ListGroup>
+          </Reveal>
+
+          <Reveal delay={200}>
+            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionVerification')}
+            </Text>
+            <ListGroup>
+              <ListItem
+                title={t('documents.title')}
+                leading={<IconDocument size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Documents')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconFace size={20} color={theme.colors.inkMuted} />}
-                label={t('shift.enrollAction')}
+              <ListItem
+                title={t('shift.enrollAction')}
+                leading={<IconFace size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('BiometricEnroll')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconReceipt size={20} color={theme.colors.inkMuted} />}
-                label={t('earnings.title')}
+            </ListGroup>
+          </Reveal>
+
+          <Reveal delay={240}>
+            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionActivity')}
+            </Text>
+            <ListGroup>
+              <ListItem
+                title={t('earnings.title')}
+                leading={<IconReceipt size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Ganancias')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconGift size={20} color={theme.colors.inkMuted} />}
-                label={t('ops.incentives.title')}
+              <ListItem
+                title={t('ops.incentives.title')}
+                leading={<IconGift size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Incentives')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconClock size={20} color={theme.colors.inkMuted} />}
-                label={t('trips.historyTitle')}
+              <ListItem
+                title={t('trips.historyTitle')}
+                leading={<IconClock size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Viajes')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconLifebuoy size={20} color={theme.colors.inkMuted} />}
-                label={t('support.title')}
+            </ListGroup>
+          </Reveal>
+
+          <Reveal delay={280}>
+            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionSupport')}
+            </Text>
+            <ListGroup>
+              <ListItem
+                title={t('support.title')}
+                leading={<IconLifebuoy size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Support')}
               />
-            </Card>
+            </ListGroup>
           </Reveal>
 
           {/* Cerrar sesión: pill de ancho completo con TINTE danger (no un botón rojo sólido) — presencia

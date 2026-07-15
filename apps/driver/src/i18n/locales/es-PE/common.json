@@ -1044,7 +1044,11 @@
       "EXPIRING_SOON": "Por vencer",
       "EXPIRED": "Vencido",
       "REJECTED": "Rechazado"
-    }
+    },
+    "sectionAccount": "Cuenta",
+    "sectionVerification": "Documentos y verificación",
+    "sectionActivity": "Actividad",
+    "sectionSupport": "Soporte"
   },
   "documents": {
     "title": "Documentos",

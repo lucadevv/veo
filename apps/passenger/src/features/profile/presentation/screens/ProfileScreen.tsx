@@ -8,6 +8,7 @@ import {
   BottomSheet,
   Button,
   Card,
+  ListGroup,
   ListItem,
   SafeScreen,
   StatusPill,
@@ -457,7 +458,7 @@ export function ProfileScreen(): React.JSX.Element {
         {/* FRANJA DE COMPLETITUD · solo si falta algo (completo = silencio). Guía, no castigo. */}
         {missingSteps.length > 0 ? (
           <EnterView index={1}>
-            <Card variant="outlined" padding="md">
+            <Card variant="elevated" padding="md">
               <View style={{gap: theme.spacing.sm}}>
                 <View style={{gap: 2}}>
                   <Text variant="headline">{t('profile.completionTitle')}</Text>
@@ -497,7 +498,7 @@ export function ProfileScreen(): React.JSX.Element {
             no es un error: es un momento diseñado ("Confirmá que sos vos"). */}
         {!verified ? (
           <EnterView index={2}>
-            <Card variant="outlined" padding="md">
+            <Card variant="elevated" padding="md">
               <View style={styles.verifyCard}>
                 <View
                   style={[
@@ -529,7 +530,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={3}>
           <View>
             {sectionLabel(t('profile.sectionSecurity'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               <ListItem
                 title={t('profile.faceVerification')}
                 subtitle={t('profile.faceVerificationSub')}
@@ -579,7 +580,7 @@ export function ProfileScreen(): React.JSX.Element {
                 subtitle={t('profile.shareTripSub')}
                 leading={<IconShare color={accent} size={glyph} />}
               />
-            </Card>
+            </ListGroup>
           </View>
         </EnterView>
 
@@ -587,7 +588,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={4}>
           <View>
             {sectionLabel(t('profile.sectionPreferences'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               {/* "Mis viajes": tras quitar el bottom tab, el historial se alcanza desde acá (decisión de
                   producto). Navega a la pantalla `TripHistory` del stack. */}
               <ListItem
@@ -655,7 +656,7 @@ export function ProfileScreen(): React.JSX.Element {
                 }
                 onPress={() => setComingSoon('language')}
               />
-            </Card>
+            </ListGroup>
           </View>
         </EnterView>
 
@@ -663,7 +664,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={5}>
           <View>
             {sectionLabel(t('profile.sectionPromotions'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               <ListItem
                 title={t('profile.promotions')}
                 subtitle={t('profile.promotionsSub')}
@@ -679,7 +680,7 @@ export function ProfileScreen(): React.JSX.Element {
                   />
                 }
               />
-            </Card>
+            </ListGroup>
           </View>
         </EnterView>
 
@@ -687,7 +688,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={6}>
           <View>
             {sectionLabel(t('profile.sectionAccount'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               <ListItem
                 title={t('profile.accessibility')}
                 leading={<IconAccessibility color={accent} size={glyph} />}
@@ -730,7 +731,7 @@ export function ProfileScreen(): React.JSX.Element {
                 leading={<IconPower color={danger} size={glyph} />}
                 onPress={() => setLogoutOpen(true)}
               />
-            </Card>
+            </ListGroup>
           </View>
         </EnterView>
       </ScrollView>

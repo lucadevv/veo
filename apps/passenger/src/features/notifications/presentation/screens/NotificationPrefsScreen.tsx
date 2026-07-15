@@ -112,7 +112,7 @@ export function NotificationPrefsScreen(): React.JSX.Element {
         {/* Viajes */}
         <View>
           {sectionLabel(t('notifications.prefs.groupTrips'))}
-          <Card variant="outlined" padding="none">
+          <Card variant="elevated" padding="none">
             <PrefToggleRow
               Icon={IconCarFront}
               title={t('notifications.prefs.tripStatus')}
@@ -145,7 +145,7 @@ export function NotificationPrefsScreen(): React.JSX.Element {
         {/* Seguridad: SIEMPRE activas (no negociable). ON + deshabilitado, con subtítulo honesto. */}
         <View>
           {sectionLabel(t('notifications.prefs.groupSafety'))}
-          <Card variant="outlined" padding="none">
+          <Card variant="elevated" padding="none">
             <LockedRow
               Icon={IconShield}
               title={t('notifications.prefs.panicAlerts')}
@@ -163,7 +163,7 @@ export function NotificationPrefsScreen(): React.JSX.Element {
         {/* Promociones */}
         <View>
           {sectionLabel(t('notifications.prefs.groupPromos'))}
-          <Card variant="outlined" padding="none">
+          <Card variant="elevated" padding="none">
             <PrefToggleRow
               Icon={IconGift}
               title={t('notifications.prefs.offers')}

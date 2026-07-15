@@ -150,7 +150,7 @@ export function DebtCheckoutInstructions({
 
       {/* qrCode → imagen (data-URI base64) con instrucción y accessibilityLabel (Plin). */}
       {payment.qrCode ? (
-        <Card variant="outlined" padding="lg">
+        <Card variant="elevated" padding="lg">
           <View style={{ gap: theme.spacing.md, alignItems: 'center' }}>
             <Image
               source={{ uri: payment.qrCode }}
@@ -168,7 +168,7 @@ export function DebtCheckoutInstructions({
 
       {/* cip → código CIP grande, copiable + dónde pagarlo (PagoEfectivo). */}
       {payment.cip ? (
-        <Card variant="outlined" padding="lg">
+        <Card variant="elevated" padding="lg">
           <View style={{ gap: theme.spacing.sm }}>
             <Text variant="footnote" color="inkMuted">
               {t('debt.checkout.cipLabel')}

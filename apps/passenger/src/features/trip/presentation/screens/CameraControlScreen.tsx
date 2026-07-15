@@ -152,7 +152,7 @@ export function CameraControlScreen(): React.JSX.Element {
         <Banner tone="info" title={t('cameraControl.backendNotice')} />
 
         {/* Master toggle: compartir cámara con la familia. */}
-        <Card variant="outlined" padding="lg">
+        <Card variant="elevated" padding="lg">
           <View style={styles.row}>
             <View
               style={[
@@ -190,7 +190,7 @@ export function CameraControlScreen(): React.JSX.Element {
           {t('cameraControl.whoCanView')}
         </Text>
         <Card
-          variant="outlined"
+          variant="elevated"
           padding="md"
           style={{opacity: shareWithFamily ? 1 : 0.4}}>
           {verifiedContacts.length === 0 ? (

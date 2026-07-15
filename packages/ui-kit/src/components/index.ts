@@ -17,6 +17,7 @@ export {
 } from './DraggableSheet';
 export { Avatar, type AvatarProps, type AvatarSize } from './Avatar';
 export { Banner, type BannerProps, type BannerTone } from './Banner';
+export { ListGroup, type ListGroupProps } from './ListGroup';
 export { ListItem, type ListItemProps } from './ListItem';
 export { Switch, type SwitchProps } from './Switch';
 export { Skeleton, type SkeletonProps, type SkeletonVariant } from './Skeleton';

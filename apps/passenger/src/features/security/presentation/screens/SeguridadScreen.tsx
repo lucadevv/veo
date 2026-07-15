@@ -2,8 +2,8 @@ import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery} from '@tanstack/react-query';
 import {
-  Card,
   hexAlpha,
+  ListGroup,
   ListItem,
   SafeScreen,
   Text,
@@ -150,7 +150,8 @@ export function SeguridadScreen(): React.JSX.Element {
           </View>
         </View>
 
-        {/* HERRAMIENTAS: filas navegables con estado real (patrón Card+ListItem del Profile). */}
+        {/* HERRAMIENTAS: filas navegables con estado real, en grupo EDITORIAL (superficie +
+            elevación, divisores hairline — sin el cajón con borde del patrón viejo). */}
         <View>
           <Text
             variant="label"
@@ -161,7 +162,7 @@ export function SeguridadScreen(): React.JSX.Element {
             }}>
             {t('security.toolsLabel')}
           </Text>
-          <Card variant="outlined" padding="sm">
+          <ListGroup>
             <ListItem
               title={t('security.contactsTitle')}
               subtitle={contactsSubtitle}
@@ -201,7 +202,7 @@ export function SeguridadScreen(): React.JSX.Element {
               disabled={!hasActiveTrip}
               onPress={() => navigation.navigate('Home')}
             />
-          </Card>
+          </ListGroup>
         </View>
       </ScrollView>
     </SafeScreen>

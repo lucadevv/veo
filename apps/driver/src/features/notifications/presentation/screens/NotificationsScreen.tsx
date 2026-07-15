@@ -17,7 +17,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Notifications'>;
 function SkeletonRow(): React.JSX.Element {
   const theme = useTheme();
   return (
-    <Card variant="outlined" padding="lg">
+    <Card variant="elevated" padding="lg">
       <View style={styles.skeletonRow}>
         <Skeleton variant="circle" height={40} />
         <View style={styles.skeletonLines}>
