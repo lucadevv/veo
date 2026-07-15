@@ -32,6 +32,8 @@ import {
   toH3,
   neighbors,
   DISPATCH_H3_RESOLUTION,
+  REGIONS_PE,
+  regionById,
 } from '@veo/utils';
 import { DriverStatus, KycStatus, FleetDocumentStatus } from '@veo/shared-types';
 import { PublishedTripState, PricingMode, type PublishedTrip } from '../generated/prisma';
@@ -59,6 +61,7 @@ import {
   type CreatePublishedTripData,
   type UpdatePublishedTripData,
   type SearchPublishedTripsCriteria,
+  type BrowsePublishedTripsCriteria,
   type SearchKeysetCursor,
 } from './published-trips.repository';
 import {
@@ -93,6 +96,7 @@ import type { CreatePublishedTripDto } from './dto/create-published-trip.dto';
 import type { UpdatePublishedTripDto } from './dto/update-published-trip.dto';
 import type { ListMinePageDto } from './dto/list-mine-page.dto';
 import type { SearchOrder, SearchPublishedTripsDto } from './dto/search-published-trips.dto';
+import type { BrowsePublishedTripsDto } from './dto/browse-published-trips.dto';
 
 /**
  * Prefijo de la dedupKey de REQUEST (idempotencia del POST /published-trips, FIX 2). Aísla este espacio de
@@ -668,6 +672,63 @@ export class PublishedTripsService {
     // —el keyset avanza igual por `trips` (la última fila CRUDA), así no se saltan ni repiten filas entre páginas—.
     // nextCursor: si la página CRUDA vino LLENA (== take), probablemente hay más → codificá la última fila CRUDA.
     // Si vino corta, no hay más (null). Keyset opaco de la tupla del ORDEN ACTIVO (tag `s`/`p` + valor + id).
+    const last = trips.length === take ? trips[trips.length - 1] : undefined;
+    const nextCursor = last ? encodeSearchCursor(orden, last) : null;
+
+    return { items, nextCursor };
+  }
+
+  /**
+   * BROWSE del marketplace de carpool (GET /published-trips/browse · public-rail ANÓNIMO): el FEED de TODOS
+   * los viajes publicados FUTUROS — sin ruta ni fecha requeridas (a diferencia de `search`, que exige A→B +
+   * día). Filtro OPCIONAL por REGIÓN del catálogo compartido (@veo/utils REGIONS_PE): el bbox de la región
+   * recorta por el ORIGEN del viaje. Orden `salida` (default) o `precio`, tope de precio opcional.
+   *
+   * REUSA la maquinaria del search (fuente única): estados SEARCHABLE + salida futura, el MISMO codec de
+   * cursor keyset tagueado (`encodeSearchCursor`/`decodeSearchCursor` — sort-aware: un cursor de otro orden
+   * degrada a página 1) y `enrichWithDrivers` (batch anti-N+1 + descartes de elegibilidad + degradación
+   * honesta si identity/fleet caen). `nextCursor` con la MISMA regla: página CRUDA llena → hay más.
+   *
+   * ALCANCE v1 (decisión documentada en el DTO): SIN ventana horaria `salidaDesde`/`salidaHasta` — en el
+   * feed "todo lo futuro" la franja sería hora-del-día por viaje (EXTRACT no indexado + keyset en SQL crudo);
+   * la franja fina se resuelve pasando al `search` del día elegido.
+   */
+  async browse(dto: BrowsePublishedTripsDto): Promise<SearchPage> {
+    const orden: SearchOrder = dto.orden ?? 'salida';
+
+    // Región contra el CATÁLOGO compartido. El DTO ya la valida en el borde (@IsIn con los ids reales);
+    // esta re-verificación es defensa en profundidad para callers internos que no pasan por el pipe — y la
+    // que resuelve el bbox. Id desconocido → ValidationError accionable (enumera el catálogo), nunca un
+    // filtro silenciosamente vacío ni un feed nacional "por accidente".
+    let bbox: BrowsePublishedTripsCriteria['bbox'];
+    if (dto.region !== undefined) {
+      const region = regionById(dto.region);
+      if (region === undefined) {
+        throw new ValidationError('región desconocida (no está en el catálogo)', {
+          region: dto.region,
+          regionesValidas: REGIONS_PE.map((r) => r.id),
+        });
+      }
+      bbox = region.bbox;
+    }
+
+    const take = dto.limit ?? DEFAULT_SEARCH_PAGE_SIZE;
+    // MISMO codec sort-aware del search: tag `s`/`p` contra el orden activo; mismatch/corrupto → página 1.
+    const cursor = decodeSearchCursor(dto.cursor, orden);
+
+    const trips = await this.repo.browseAll({
+      estados: SEARCHABLE_STATES,
+      ahora: new Date(),
+      orden,
+      ...(bbox !== undefined ? { bbox } : {}),
+      ...(dto.precioMaxCents !== undefined ? { precioMaxCents: dto.precioMaxCents } : {}),
+      take,
+      ...(cursor ? { cursor } : {}),
+    });
+
+    // MISMO enriquecimiento + misma paginación post-filtro que search (ver nota en `search()`): los descartes
+    // de elegibilidad pueden achicar `items` vs la página cruda; el keyset avanza por la última fila CRUDA.
+    const items = await this.enrichWithDrivers(trips);
     const last = trips.length === take ? trips[trips.length - 1] : undefined;
     const nextCursor = last ? encodeSearchCursor(orden, last) : null;
 

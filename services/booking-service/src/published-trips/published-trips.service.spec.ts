@@ -89,6 +89,7 @@ function makeRepo() {
   const findByIdFromPrimary = vi.fn();
   const findByDriverId = vi.fn(async () => []);
   const searchByRoute = vi.fn(async () => []);
+  const browseAll = vi.fn(async () => []);
   const countAvailableByOriginRing = vi.fn(async () => 0);
   const sampleAvailableOriginsByRing = vi.fn(async () => [] as { lat: number; lon: number }[]);
   const listActiveCarpools = vi.fn(async (): Promise<unknown[]> => []);
@@ -107,6 +108,7 @@ function makeRepo() {
     findByIdFromPrimary,
     findByDriverId,
     searchByRoute,
+    browseAll,
     countAvailableByOriginRing,
     sampleAvailableOriginsByRing,
     listActiveCarpools,
@@ -123,6 +125,7 @@ function makeRepo() {
     findByIdFromPrimary,
     findByDriverId,
     searchByRoute,
+    browseAll,
     countAvailableByOriginRing,
     sampleAvailableOriginsByRing,
     listActiveCarpools,
@@ -1405,6 +1408,123 @@ describe('PublishedTripsService · BÚSQUEDA · orden por precio + filtros (F2b)
     await service.search(makeSearchDto({ orden: 'precio', limit: 1, cursor: page1.nextCursor as string }));
 
     expect(spy.mock.calls[1]![0].cursor).toEqual({ orden: 'precio', precioBase: 3200, id: 't7' });
+  });
+});
+
+describe('PublishedTripsService · BROWSE del marketplace (feed público · región + orden + keyset compartido)', () => {
+  it('arma el criterio: SEARCHABLE_STATES + ahora (todo lo futuro), SIN bbox por default, take default 20, orden salida', async () => {
+    const { repo, browseAll } = makeRepo();
+    (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.browse({});
+
+    expect(browseAll).toHaveBeenCalledOnce();
+    const criteria = (browseAll as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.estados).toEqual([
+      PublishedTripState.PUBLICADO,
+      PublishedTripState.PARCIALMENTE_RESERVADO,
+    ]);
+    expect(criteria.ahora).toBeInstanceOf(Date);
+    expect(criteria.orden).toBe('salida');
+    expect(criteria.take).toBe(20); // default compartido con search
+    expect(criteria.bbox).toBeUndefined(); // sin región → feed nacional
+    expect(criteria.precioMaxCents).toBeUndefined();
+    // El feed NO es un día concreto: el criterio no lleva ventana [desde, hasta) ni asientos ni rings.
+    expect(criteria).not.toHaveProperty('desde');
+    expect(criteria).not.toHaveProperty('originRing');
+  });
+
+  it('region del catálogo → el bbox de @veo/utils entra al criterio (filtro por ORIGEN del viaje)', async () => {
+    const { repo, browseAll } = makeRepo();
+    (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.browse({ region: 'lima-metropolitana' });
+
+    const criteria = (browseAll as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    // LIMA_BBOX del catálogo compartido (misma envolvente que BR-D03).
+    expect(criteria.bbox).toEqual({ minLat: -12.52, maxLat: -11.57, minLon: -77.2, maxLon: -76.7 });
+  });
+
+  it('región DESCONOCIDA → ValidationError accionable (enumera el catálogo), NO pega al repo', async () => {
+    const { repo, browseAll } = makeRepo();
+    const service = makeService({ repo });
+
+    await expect(service.browse({ region: 'narnia' })).rejects.toBeInstanceOf(ValidationError);
+    expect(browseAll).not.toHaveBeenCalled();
+  });
+
+  it('orden=precio + precioMaxCents → llegan al criterio tal cual (mismos filtros que search)', async () => {
+    const { repo, browseAll } = makeRepo();
+    (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    await service.browse({ orden: 'precio', precioMaxCents: 6000, limit: 10 });
+
+    const criteria = (browseAll as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.orden).toBe('precio');
+    expect(criteria.precioMaxCents).toBe(6000);
+    expect(criteria.take).toBe(10);
+  });
+
+  it('CURSOR TAGUEADO REUSADO: un cursor de OTRO orden (tag `s` con orden=precio) se IGNORA → página 1', async () => {
+    const { repo, browseAll } = makeRepo();
+    (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([makeTripRow()]);
+    const service = makeService({ repo });
+
+    const cursorDeSalida = Buffer.from(`s|${TOMORROW_ISO}|t9`, 'utf8').toString('base64url');
+    await service.browse({ orden: 'precio', cursor: cursorDeSalida });
+
+    const criteria = (browseAll as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(criteria.cursor).toBeUndefined(); // mismo codec sort-aware del search: no mezcla relojes
+  });
+
+  it('roundtrip del cursor: el `p` que emite una página del browse entra como keyset (precioBase, id) en la siguiente', async () => {
+    const { repo, browseAll } = makeRepo();
+    const spy = browseAll as ReturnType<typeof vi.fn>;
+    spy.mockResolvedValueOnce([makeTripRow({ id: 't7', precioBase: 3200 })]);
+    spy.mockResolvedValueOnce([]);
+    const service = makeService({ repo });
+
+    const page1 = await service.browse({ orden: 'precio', limit: 1 });
+    expect(page1.nextCursor).toBeTypeOf('string');
+    expect(Buffer.from(page1.nextCursor!, 'base64url').toString('utf8')).toBe('p|3200|t7');
+
+    await service.browse({ orden: 'precio', limit: 1, cursor: page1.nextCursor! });
+    expect(spy.mock.calls[1]![0].cursor).toEqual({ orden: 'precio', precioBase: 3200, id: 't7' });
+  });
+
+  it('nextCursor: null si la página CRUDA vino corta (< take); presente si vino llena (== take)', async () => {
+    const { repo, browseAll } = makeRepo();
+    const spy = browseAll as ReturnType<typeof vi.fn>;
+    const service = makeService({ repo });
+
+    spy.mockResolvedValueOnce([makeTripRow({ id: 't1' })]);
+    const short = await service.browse({ limit: 5 });
+    expect(short.nextCursor).toBeNull();
+
+    spy.mockResolvedValueOnce([makeTripRow({ id: 't2' })]);
+    const full = await service.browse({ limit: 1 });
+    expect(full.nextCursor).toBeTypeOf('string');
+  });
+
+  it('REUSA enrichWithDrivers: UNA sola llamada batch para N viajes (anti-N+1) y las cards salen enriquecidas', async () => {
+    const { repo, browseAll } = makeRepo();
+    (browseAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      makeTripRow({ id: 't1', driverId: 'd1' }),
+      makeTripRow({ id: 't2', driverId: 'd2' }),
+      makeTripRow({ id: 't3', driverId: 'd1' }),
+    ]);
+    const batch = makeIdentityBatch();
+    const service = makeService({ repo, identityBatch: batch.client });
+
+    const page = await service.browse({});
+
+    expect(batch.getDriversByIds).toHaveBeenCalledTimes(1); // batch único (mismo camino que search)
+    expect(batch.getDriversByIds).toHaveBeenCalledWith(['d1', 'd2']); // ids ÚNICOS
+    expect(page.items).toHaveLength(3);
+    expect(page.items[0]!.driver).toMatchObject({ id: 'd1' });
   });
 });
 

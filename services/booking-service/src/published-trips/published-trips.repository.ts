@@ -17,7 +17,7 @@
 import { Injectable } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
 import { isUniqueViolation, isRecordNotFound } from '@veo/database';
-import { ConflictError } from '@veo/utils';
+import { ConflictError, type GeoBBox } from '@veo/utils';
 import { PrismaService } from '../infra/prisma.service';
 import { Prisma, PublishedTripState, type PublishedTrip } from '../generated/prisma';
 import { BOOKING_PRODUCER, type BookingEventType } from '../events/booking-events';
@@ -67,6 +67,58 @@ export interface SearchPublishedTripsCriteria {
   take: number;
   /** Cursor keyset de la última fila de la página previa (tupla del orden activo); sin él → primera página. */
   cursor?: SearchKeysetCursor;
+}
+
+/**
+ * Criterio del BROWSE del marketplace (feed público · GET /published-trips/browse). Hermano del criterio de
+ * búsqueda SIN los anillos H3 ni asientos/día: el feed lista TODO lo futuro searchable, opcionalmente acotado
+ * a una REGIÓN por bbox del ORIGEN del viaje (catálogo @veo/utils). Mismo orden + keyset tagueado que search.
+ */
+export interface BrowsePublishedTripsCriteria {
+  /** Estados ELEGIBLES de la oferta (PUBLICADO | PARCIALMENTE_RESERVADO). Enum tipado, sin strings sueltos. */
+  estados: readonly PublishedTripState[];
+  /** "Ahora": la salida debe ser > now() — TODO lo futuro entra (sin tope de día, a diferencia del search). */
+  ahora: Date;
+  /** Orden activo de la página: `salida` (fechaHoraSalida ASC) o `precio` (precioBase ASC); id ASC desempata. */
+  orden: SearchOrder;
+  /** Filtro OPCIONAL de región: el ORIGEN del viaje (origen_lat/origen_lon) debe caer dentro del bbox. */
+  bbox?: GeoBBox;
+  /** Filtro OPCIONAL de precio máximo por asiento (céntimos PEN): `precioBase <= precioMaxCents`. */
+  precioMaxCents?: number;
+  /** Tamaño de página. */
+  take: number;
+  /** Cursor keyset de la última fila de la página previa (tupla del orden activo); sin él → primera página. */
+  cursor?: SearchKeysetCursor;
+}
+
+/**
+ * Keyset COMPARTIDO search/browse: la página arranca DESPUÉS de la tupla (valorDelOrden, id) en ASC. Tupla
+ * expresada como OR para respetar el orden compuesto (no se puede usar `cursor`/`skip` de Prisma sobre una
+ * columna no-única como fechaHoraSalida/precioBase sin perder filas con el mismo valor). La rama la decide
+ * el TAG del cursor. Una sola definición: search y browse paginan con el MISMO reloj.
+ */
+function keysetWhere(cursor: SearchKeysetCursor | undefined): Prisma.PublishedTripWhereInput | undefined {
+  if (cursor === undefined) return undefined;
+  return cursor.orden === 'precio'
+    ? {
+        OR: [
+          { precioBase: { gt: cursor.precioBase } },
+          { precioBase: cursor.precioBase, id: { gt: cursor.id } },
+        ],
+      }
+    : {
+        OR: [
+          { fechaHoraSalida: { gt: cursor.fechaHoraSalida } },
+          { fechaHoraSalida: cursor.fechaHoraSalida, id: { gt: cursor.id } },
+        ],
+      };
+}
+
+/** orderBy espejo del keyset: el MISMO campo que cursorea es el que ordena (keyset consistente, FIX 2). */
+function keysetOrderBy(orden: SearchOrder): Prisma.PublishedTripOrderByWithRelationInput[] {
+  return orden === 'precio'
+    ? [{ precioBase: 'asc' }, { id: 'asc' }]
+    : [{ fechaHoraSalida: 'asc' }, { id: 'asc' }];
 }
 
 /** Evento de dominio a emitir en la misma tx que la mutación (outbox). */
@@ -269,32 +321,6 @@ export class PublishedTripsRepository {
    * Filtro opcional `precioMaxCents` (precio_base <= tope): entra al WHERE con cualquiera de los dos órdenes.
    */
   searchByRoute(c: SearchPublishedTripsCriteria): Promise<PublishedTrip[]> {
-    // Keyset: la página arranca DESPUÉS de la tupla (valorDelOrden, id) en ASC. Tupla expresada como OR para
-    // respetar el orden compuesto (no se puede usar `cursor`/`skip` de Prisma sobre una columna no-única como
-    // fechaHoraSalida/precioBase sin perder filas con el mismo valor). La rama la decide el TAG del cursor.
-    const keyset: Prisma.PublishedTripWhereInput | undefined =
-      c.cursor === undefined
-        ? undefined
-        : c.cursor.orden === 'precio'
-          ? {
-              OR: [
-                { precioBase: { gt: c.cursor.precioBase } },
-                { precioBase: c.cursor.precioBase, id: { gt: c.cursor.id } },
-              ],
-            }
-          : {
-              OR: [
-                { fechaHoraSalida: { gt: c.cursor.fechaHoraSalida } },
-                { fechaHoraSalida: c.cursor.fechaHoraSalida, id: { gt: c.cursor.id } },
-              ],
-            };
-
-    // orderBy espejo del keyset: el MISMO campo que cursorea es el que ordena (keyset consistente, FIX 2).
-    const orderBy: Prisma.PublishedTripOrderByWithRelationInput[] =
-      c.orden === 'precio'
-        ? [{ precioBase: 'asc' }, { id: 'asc' }]
-        : [{ fechaHoraSalida: 'asc' }, { id: 'asc' }];
-
     return this.prisma.read.publishedTrip.findMany({
       where: {
         originH3: { in: c.originRing },
@@ -306,10 +332,43 @@ export class PublishedTripsRepository {
         // Tope de precio opcional (céntimos PEN). No colisiona con el keyset de precio: este vive top-level
         // (AND) y el keyset dentro del OR.
         ...(c.precioMaxCents !== undefined ? { precioBase: { lte: c.precioMaxCents } } : {}),
-        ...(keyset ?? {}),
+        ...(keysetWhere(c.cursor) ?? {}),
       },
       // Orden de la spec §6.2 (salida más próxima primero) o por precio si el cliente lo pidió.
-      orderBy,
+      orderBy: keysetOrderBy(c.orden),
+      take: c.take,
+    });
+  }
+
+  /**
+   * BROWSE del marketplace (feed público · GET /published-trips/browse). Hermano de `searchByRoute` SIN los
+   * anillos H3 / asientos / ventana de día: lista TODO lo futuro searchable (fecha_hora_salida > now), con
+   * filtro OPCIONAL de REGIÓN por bbox del ORIGEN (`origen_lat BETWEEN … AND origen_lon BETWEEN …`) y tope
+   * de precio. Lectura ANÓNIMA no crítica → réplica. MISMO keyset tagueado + orderBy espejo que la búsqueda
+   * (helpers compartidos `keysetWhere`/`keysetOrderBy`: una sola definición de la tupla OR).
+   *
+   * ÍNDICES (honesto): con `orden=salida` el WHERE por estado+fecha camina el índice existente de
+   * fecha_hora_salida; el filtro por bbox (origen_lat/origen_lon) NO tiene índice espacial dedicado — es un
+   * refinamiento sobre el recorte por estado/fecha, aceptado para el volumen v1 del feed (si la tabla crece,
+   * el siguiente paso es un índice compuesto o filtrar por region_id materializado, no PostGIS).
+   */
+  browseAll(c: BrowsePublishedTripsCriteria): Promise<PublishedTrip[]> {
+    return this.prisma.read.publishedTrip.findMany({
+      where: {
+        estado: { in: [...c.estados] },
+        // TODO lo futuro (sin tope de día): el feed es el marketplace completo, no un día concreto.
+        fechaHoraSalida: { gt: c.ahora },
+        // Región opcional: el ORIGEN del viaje debe caer dentro del bbox del catálogo (bordes inclusive).
+        ...(c.bbox !== undefined
+          ? {
+              origenLat: { gte: c.bbox.minLat, lte: c.bbox.maxLat },
+              origenLon: { gte: c.bbox.minLon, lte: c.bbox.maxLon },
+            }
+          : {}),
+        ...(c.precioMaxCents !== undefined ? { precioBase: { lte: c.precioMaxCents } } : {}),
+        ...(keysetWhere(c.cursor) ?? {}),
+      },
+      orderBy: keysetOrderBy(c.orden),
       take: c.take,
     });
   }

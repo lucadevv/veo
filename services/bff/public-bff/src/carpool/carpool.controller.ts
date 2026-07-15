@@ -18,7 +18,11 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import type { CarpoolBookingView, CarpoolSearchPage, CarpoolTripDetail } from '@veo/api-client';
 import { CarpoolService } from './carpool.service';
-import { CreateCarpoolBookingDto, SearchCarpoolTripsDto } from './dto/carpool.dto';
+import {
+  BrowseCarpoolTripsDto,
+  CreateCarpoolBookingDto,
+  SearchCarpoolTripsDto,
+} from './dto/carpool.dto';
 
 @ApiTags('carpool')
 @ApiBearerAuth()
@@ -36,6 +40,19 @@ export class CarpoolController {
     @Query() dto: SearchCarpoolTripsDto,
   ): Promise<CarpoolSearchPage> {
     return this.carpool.search(user, dto);
+  }
+
+  // GET /trips/browse ANTES de GET /trips/:id (ruta estática precede a la paramétrica).
+  @Get('trips/browse')
+  @ApiOperation({
+    summary:
+      'FEED del marketplace de carpool: todos los viajes publicados futuros, filtrable por región (keyset)',
+  })
+  browse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() dto: BrowseCarpoolTripsDto,
+  ): Promise<CarpoolSearchPage> {
+    return this.carpool.browse(user, dto);
   }
 
   @Get('trips/:id')

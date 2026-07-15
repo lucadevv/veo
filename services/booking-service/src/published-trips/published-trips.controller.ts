@@ -7,6 +7,7 @@
  *  - PATCH /published-trips/:id         → driver-rail (el CONDUCTOR edita su oferta; ownership server-truth).
  *  - POST  /published-trips/:id/cancel  → driver-rail (el CONDUCTOR cancela su oferta; ownership server-truth).
  *  - GET   /published-trips/search      → public-rail (el PASAJERO busca por ruta+fecha+asientos · geo H3).
+ *  - GET   /published-trips/browse      → public-rail (FEED del marketplace: todo lo futuro, filtro por región).
  *  - GET   /published-trips/:id         → public-rail (el PASAJERO ve el detalle de un viaje publicado).
  *
  * El gate es server-side: InternalIdentityGuard valida la identidad firmada que el BFF propaga +
@@ -47,6 +48,7 @@ import { CreatePublishedTripDto } from './dto/create-published-trip.dto';
 import { UpdatePublishedTripDto } from './dto/update-published-trip.dto';
 import { ListMinePageDto } from './dto/list-mine-page.dto';
 import { SearchPublishedTripsDto } from './dto/search-published-trips.dto';
+import { BrowsePublishedTripsDto } from './dto/browse-published-trips.dto';
 import { BookingsService } from '../bookings/bookings.service';
 import { ListTripBookingsPageDto } from '../bookings/dto/list-trip-bookings-page.dto';
 
@@ -103,6 +105,18 @@ export class PublishedTripsController {
   })
   search(@Query() dto: SearchPublishedTripsDto) {
     return this.trips.search(dto);
+  }
+
+  // GET /browse ANTES de GET /:id (ruta estática precede a la paramétrica). MISMO riel público ANÓNIMO que
+  // /search: el FEED del marketplace (tab Compartir) no exige sesión — todos los params son opcionales.
+  @Audiences(InternalAudience.PUBLIC_RAIL)
+  @Get('browse')
+  @ApiOperation({
+    summary:
+      'FEED del marketplace de carpool: todos los viajes publicados futuros, filtrable por región (keyset) · public-rail anónimo',
+  })
+  browse(@Query() dto: BrowsePublishedTripsDto) {
+    return this.trips.browse(dto);
   }
 
   @Audiences(InternalAudience.DRIVER_RAIL)

@@ -21,6 +21,7 @@ import {
   Min,
 } from 'class-validator';
 import { PaymentMethod } from '@veo/shared-types';
+import { REGIONS_PE } from '@veo/utils';
 
 /** Fecha-calendario PURA `YYYY-MM-DD` (sin hora ni offset) — booking-service la interpreta en hora Lima. */
 const CALENDAR_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -96,6 +97,48 @@ export class SearchCarpoolTripsDto {
   salidaHasta?: string;
 
   /** Cursor keyset OPACO de la página previa (su forma interna la valida el downstream; es sort-aware). */
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+}
+
+/** Ids de región válidos del catálogo compartido (@veo/utils) — misma fuente que el downstream, cero listas paralelas. */
+const REGION_IDS = REGIONS_PE.map((r) => r.id);
+
+/**
+ * BROWSE del marketplace (GET /carpool/trips/browse · espejo de BrowsePublishedTripsDto del downstream): el
+ * FEED de todos los viajes publicados futuros — sin ruta ni fecha, TODOS los params opcionales. Filtro por
+ * REGIÓN del catálogo compartido. SIN ventana horaria en v1 (decisión del downstream, documentada allá):
+ * la franja fina se resuelve pasando al search del día elegido.
+ */
+export class BrowseCarpoolTripsDto {
+  // Región del feed (id kebab-case del catálogo). Opcional: sin ella el feed es nacional.
+  @IsOptional()
+  @IsIn(REGION_IDS, {
+    message: `region debe ser una del catálogo: ${REGION_IDS.join(', ')}`,
+  })
+  region?: string;
+
+  // Orden de la página: `salida` (default) o `precio` (más barato primero).
+  @IsOptional()
+  @IsIn(SEARCH_ORDER_VALUES)
+  orden?: SearchOrder;
+
+  // Precio máximo por asiento en céntimos PEN (el downstream filtra precioBase <= tope). Int ≥ 1.
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  precioMaxCents?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
+
+  /** Cursor keyset OPACO de la página previa (mismo codec sort-aware del search; lo valida el downstream). */
   @IsOptional()
   @IsString()
   cursor?: string;

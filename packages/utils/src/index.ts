@@ -12,6 +12,7 @@ export * from './errors.js';
 export * from './ids.js';
 export * from './money.js';
 export * from './geo.js';
+export * from './regions.js';
 export * from './crypto.js';
 export * from './result.js';
 export * from './validation.js';

@@ -25,7 +25,7 @@ import type {
   CarpoolTripDetail,
 } from '@veo/api-client';
 import { REST_BOOKING } from '../infra/downstream.tokens';
-import type { SearchCarpoolTripsDto } from './dto/carpool.dto';
+import type { BrowseCarpoolTripsDto, SearchCarpoolTripsDto } from './dto/carpool.dto';
 
 @Injectable()
 export class CarpoolService {
@@ -47,6 +47,23 @@ export class CarpoolService {
         precioMaxCents: dto.precioMaxCents,
         salidaDesde: dto.salidaDesde,
         salidaHasta: dto.salidaHasta,
+        limit: dto.limit,
+        cursor: dto.cursor,
+      },
+    });
+  }
+
+  /**
+   * GET /published-trips/browse — FEED del marketplace (todos los viajes publicados futuros, sin ruta ni
+   * fecha), filtro opcional por región del catálogo compartido. Misma página keyset que search.
+   */
+  browse(user: AuthenticatedUser, dto: BrowseCarpoolTripsDto): Promise<CarpoolSearchPage> {
+    return this.bookingRest.get<CarpoolSearchPage>('/published-trips/browse', {
+      identity: user,
+      query: {
+        region: dto.region,
+        orden: dto.orden,
+        precioMaxCents: dto.precioMaxCents,
         limit: dto.limit,
         cursor: dto.cursor,
       },

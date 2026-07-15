@@ -412,3 +412,78 @@ describe('PublishedTripsRepository · searchByRoute (F2 · geo H3 + keyset)', ()
     expect(arg.where).not.toHaveProperty('precioBase');
   });
 });
+
+describe('PublishedTripsRepository · browseAll (marketplace BROWSE · sin rings, keyset compartido)', () => {
+  const ahora = new Date('2026-07-01T08:00:00.000Z');
+
+  it('BROWSE sin región → WHERE solo estado + salida futura (SIN bbox, SIN ventana de día, SIN asientos): TODO lo futuro', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+
+    await repo.browseAll({
+      estados: [PublishedTripState.PUBLICADO, PublishedTripState.PARCIALMENTE_RESERVADO],
+      ahora,
+      orden: 'salida',
+      take: 20,
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        estado: { in: [PublishedTripState.PUBLICADO, PublishedTripState.PARCIALMENTE_RESERVADO] },
+        fechaHoraSalida: { gt: ahora }, // solo futuro — sin gte/lt de día (el feed no es un día concreto)
+      },
+      orderBy: [{ fechaHoraSalida: 'asc' }, { id: 'asc' }],
+      take: 20,
+    });
+  });
+
+  it('BROWSE con región → bbox del ORIGEN entra como BETWEEN de lat/lon (bordes inclusive)', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+    const bbox = { minLat: -12.52, maxLat: -11.57, minLon: -77.2, maxLon: -76.7 };
+
+    await repo.browseAll({
+      estados: [PublishedTripState.PUBLICADO],
+      ahora,
+      orden: 'salida',
+      bbox,
+      take: 20,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          origenLat: { gte: bbox.minLat, lte: bbox.maxLat },
+          origenLon: { gte: bbox.minLon, lte: bbox.maxLon },
+        }),
+      }),
+    );
+  });
+
+  it('BROWSE orden=precio con cursor → MISMO keyset OR-tupla (precioBase, id) + orderBy espejo que search', async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = { read: { publishedTrip: { findMany } } } as unknown as PrismaService;
+    const repo = new PublishedTripsRepository(prisma);
+
+    await repo.browseAll({
+      estados: [PublishedTripState.PUBLICADO],
+      ahora,
+      orden: 'precio',
+      precioMaxCents: 6000,
+      take: 10,
+      cursor: { orden: 'precio', precioBase: 4500, id: 't5' },
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          precioBase: { lte: 6000 }, // tope top-level (AND)…
+          OR: [{ precioBase: { gt: 4500 } }, { precioBase: 4500, id: { gt: 't5' } }], // …keyset en el OR
+        }),
+        orderBy: [{ precioBase: 'asc' }, { id: 'asc' }],
+      }),
+    );
+  });
+});
