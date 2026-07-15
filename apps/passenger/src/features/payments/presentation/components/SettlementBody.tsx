@@ -134,7 +134,6 @@ export function SettlementBody({
   );
 
   const getPaymentByTrip = useDependency(TOKENS.getPaymentByTripUseCase);
-  const confirmCash = useDependency(TOKENS.confirmCashUseCase);
   const addTip = useDependency(TOKENS.addTipUseCase);
 
   // Ancla del poll: cuándo empezamos a esperar el cobro (para cortar a los ~30s).
@@ -153,7 +152,11 @@ export function SettlementBody({
         (() => {
           const outcome = interpretPaymentOutcome(data);
           return (
-            outcome.kind === 'checkoutPending' || outcome.kind === 'processing'
+            outcome.kind === 'checkoutPending' ||
+            outcome.kind === 'processing' ||
+            // EFECTIVO: transitorio mientras el consumer captura tras la confirmación del conductor
+            // (el pasajero ya no confirma) → poll hasta el recibo CAPTURED.
+            outcome.kind === 'cashPending'
           );
         })();
       if (!stillPending) {
@@ -164,13 +167,6 @@ export function SettlementBody({
     },
   });
 
-  const confirmMutation = useMutation<PaymentView, Error, string>({
-    mutationFn: (paymentId: string) => confirmCash.execute(paymentId),
-    onSuccess: () => {
-      // Re-sincroniza el recibo: si el conductor ya confirmó, el cobro pasa a CAPTURED.
-      void paymentQuery.refetch();
-    },
-  });
 
   const tipMutation = useMutation<PaymentView, Error, number>({
     mutationFn: (tipCents: number) => addTip.execute(tripId, tipCents),
@@ -196,7 +192,7 @@ export function SettlementBody({
   };
 
   // Fuente de verdad: la confirmación de efectivo recién hecha pisa al fetch (trae el estado bilateral).
-  const payment = confirmMutation.data ?? paymentQuery.data ?? null;
+  const payment = paymentQuery.data ?? null;
 
   // Reintenta el poll del recibo (reinicia la ventana de ~30s). Compartido por los estados de timeout
   // y por el checkout (tras pagar, el webhook pasa a CAPTURED y el refetch lo refleja).
@@ -266,7 +262,6 @@ export function SettlementBody({
   // recibo final sella la exhaustividad en compile-time (un `PaymentOutcome.kind` nuevo obliga acá).
   const outcome = interpretPaymentOutcome(payment);
   const isCash = isCashPayment(payment);
-  const passengerConfirmedCash = confirmMutation.isSuccess;
 
   // ── PENDING digital con CHECKOUT (ProntoPaga): el usuario DEBE completarlo (deepLink/web/QR/CIP).
   // Tiene prioridad sobre el timeout del poll: mientras no venza, mostramos cómo pagar (no un error).
@@ -325,54 +320,16 @@ export function SettlementBody({
   }
 
   // ── PENDING + CASH ───────────────────────────────────────────────────────────────────────────
+  // El pasajero YA NO confirma el efectivo (decisión del dueño 2026-07-14): el CONDUCTOR lo captura al
+  // confirmar que cobró (tiene la plata en mano). Esta rama es TRANSITORIA (mientras el consumer captura
+  // tras la confirmación del conductor) → nota sobria + poll hasta el recibo CAPTURED ("Pago en efectivo
+  // confirmado" con el check verde). SIN botón de confirmar ni doble paso bilateral.
   if (outcome.kind === 'cashPending') {
-    // El pasajero ya confirmó su lado pero el cobro sigue PENDING → falta el conductor (bilateral).
-    if (passengerConfirmedCash) {
-      return (
-        <View style={{gap: theme.spacing.md}}>
-          <Banner
-            tone="info"
-            title={t('settlement.cashAwaitingDriverTitle')}
-            description={t('settlement.cashAwaitingDriverBody')}
-          />
-          <ReceiptCard payment={payment} cash />
-          {/* El pasajero ya hizo su parte (su lado del efectivo está confirmado): el cobro se cierra
-              cuando el conductor confirma. Doble salida: calificar (opcional) o volver al inicio. */}
-          {resolvedActions}
-        </View>
-      );
-    }
-
     return (
-      <View style={{gap: theme.spacing.md}}>
-        <Text variant="title3">{t('settlement.cashTitle')}</Text>
-        <Text variant="callout" color="inkMuted">
-          {t('settlement.cashBody', {amount: formatPEN(payment.amountCents)})}
-        </Text>
-        <ReceiptCard payment={payment} cash />
-        <Banner tone="info" title={t('settlement.cashBanner')} />
-        {confirmMutation.isError ? (
-          <Banner tone="danger" title={t('payments.payError')} />
-        ) : null}
-        <Button
-          label={
-            confirmMutation.isPending
-              ? t('settlement.confirmingCash')
-              : t('settlement.confirmCash')
-          }
-          variant="accent"
-          fullWidth
-          loading={confirmMutation.isPending}
-          onPress={() => confirmMutation.mutate(payment.id)}
-        />
-        {/* Escape sin cerrar: el settlement re-aparece al volver (es plata, no la perdemos). */}
-        <Button
-          label={t('settlement.confirmLater')}
-          variant="ghost"
-          fullWidth
-          onPress={onDeferred}
-        />
-      </View>
+      <ProcessingBody
+        title={t('settlement.cashProcessing')}
+        hint={t('settlement.processingHint')}
+      />
     );
   }
 

@@ -1488,6 +1488,9 @@ export const common = {
     /** El cobro aún no existe en el server (el consumer puede demorar): poll suave. */
     processing: 'Procesando tu pago…',
     processingDigital: 'Procesando pago…',
+    /** EFECTIVO: transitorio mientras el conductor confirma el cobro y el consumer captura (el pasajero ya
+     *  no confirma). Resuelve al recibo "Pago en efectivo confirmado". */
+    cashProcessing: 'Registrando tu pago en efectivo…',
     processingHint: 'Esto puede tardar unos segundos.',
     /** El poll agotó el tiempo y el recibo sigue sin aparecer. */
     timeoutTitle: 'No pudimos cargar tu recibo',

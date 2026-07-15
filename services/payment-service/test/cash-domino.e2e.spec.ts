@@ -3,10 +3,11 @@
  * crítico de dinero (CLAUDE). Reemplaza al antiguo cash-domino.spec.ts (fake Prisma en memoria).
  *
  * chargeTripFare con cashCollected (el efectivo se confirma AL TERMINAR el viaje):
- *   - CASH + cashCollected=true → Payment CASH PENDING + CashConfirmation driverConfirmed=true +
- *     payment.cash_pending (push). NO captura (falta el pasajero).
- *   - luego confirmCash('passenger') → ambos true → CAPTURED + payment.captured.
- *   - CASH SIN cashCollected → bilateral normal (driverConfirmed=false, sin cash_pending).
+ *   DECISIÓN DEL DUEÑO (2026-07-14): UNA sola confirmación (el conductor tiene la plata en mano). El
+ *   pasajero YA NO confirma — solo ve un recibo informativo. Sin doble paso bilateral ni cash_pending.
+ *   - CASH + cashCollected=true → CAPTURA directo + CashConfirmation ambos true + payment.captured
+ *     (NO cash_pending, NO espera al pasajero).
+ *   - CASH SIN cashCollected → NO captura (driverConfirmed=false, sin cash_pending).
  *   - pasajero confirmó ANTES de existir el Payment → al crear → CAPTURA directo.
  *   - DIGITAL (YAPE) con cashCollected → se ignora (va por el riel).
  *   - idempotencia: reprocesar el mismo trip.completed no duplica la confirmación ni recaptura.
@@ -104,28 +105,25 @@ beforeEach(async () => {
 });
 
 describe('chargeTripFare · EFECTIVO con cashCollected (driver confirma al terminar)', () => {
-  it('CASH + cashCollected=true → PENDING + CashConfirmation driverConfirmed=true + emite cash_pending', async () => {
+  it('CASH + cashCollected=true → CAPTURED directo (conductor captura, sin doble confirmación) + payment.captured', async () => {
+    // DECISIÓN DEL DUEÑO (2026-07-14): una sola confirmación (el conductor tiene la plata en mano). El
+    // pasajero YA NO confirma → el efectivo se captura al toque, sin cash_pending ni espera bilateral.
     const payment = await chargeCash({ cashCollected: true });
 
     expect(payment.method).toBe('CASH');
-    expect(payment.status).toBe('PENDING'); // NO captura: falta el pasajero
+    expect(payment.status).toBe('CAPTURED'); // captura directo con la confirmación del conductor
     const conf = await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } });
     expect(conf?.driverConfirmed).toBe(true);
-    expect(conf?.passengerConfirmed).toBe(false);
+    expect(conf?.passengerConfirmed).toBe(true); // el conductor confirma por ambos
     const types = await outboxTypes();
-    expect(types).toContain('payment.cash_pending'); // push al pasajero
-    expect(types).not.toContain('payment.captured'); // NO se capturó todavía
+    expect(types).toContain('payment.captured');
+    expect(types).not.toContain('payment.cash_pending'); // el pasajero ya NO confirma → sin push de confirmación
   });
 
-  it('luego el PASAJERO confirma → ambos true → CAPTURED + payment.captured', async () => {
+  it('el pago queda CAPTURED con la SOLA confirmación del conductor (el pasajero ya no necesita confirmar)', async () => {
     const payment = await chargeCash({ cashCollected: true });
-    const out = await svc.confirmCash(payment.id, PAX, 'passenger', true);
-
-    expect(out.status).toBe('CAPTURED');
-    expect(out.driverConfirmed).toBe(true);
-    expect(out.passengerConfirmed).toBe(true);
     const final = await svc.getPayment(payment.id);
-    expect(final.status).toBe('CAPTURED');
+    expect(final.status).toBe('CAPTURED'); // sin un segundo paso del pasajero
     expect(await outboxTypes()).toContain('payment.captured');
   });
 

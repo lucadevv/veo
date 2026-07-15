@@ -2980,44 +2980,26 @@ export class PaymentsService {
 
   /**
    * EFECTIVO · aplica la confirmación del CONDUCTOR a un Payment CASH recién creado (driverConfirmed=true),
-   * derivada de `cashCollected` en trip.completed. IDEMPOTENTE (upsert por tripId + status-guard):
-   *  - Si el PASAJERO ya había confirmado (caso raro: confirmó antes de existir el Payment, vía el upsert
-   *    de confirmCash) → ambos true → CAPTURA directo (payment.captured).
-   *  - Si solo el conductor confirmó → el Payment queda PENDING y se emite payment.cash_pending para que
-   *    notification-service empuje al PASAJERO "confirma tu pago en efectivo". El conductor NO necesita
-   *    push (ya confirmó al terminar). Reprocesar el mismo trip.completed no duplica (upsert + dedup outbox).
+   * derivada de `cashCollected` en trip.completed.
+   *
+   * DECISIÓN DEL DUEÑO (2026-07-14): el efectivo se captura con la SOLA confirmación del CONDUCTOR (tiene la
+   * plata EN MANO). Se elimina la doble confirmación bilateral: el PASAJERO ya NO confirma — solo ve un
+   * recibo informativo ("Pagaste S/X en efectivo"). Por eso acá capturamos directo (payment.captured +
+   * acumula la deuda de comisión cash del conductor) y NO emitimos `payment.cash_pending` (no hay push
+   * "confirma tu efectivo" ni espera). Idempotente: la captura es CAS PENDING→CAPTURED (una sola gana).
    */
   private async applyDriverCashConfirmation(payment: Payment): Promise<Payment> {
-    const confirmation = await this.repo.upsertCashConfirmation(payment.tripId, {
+    // Registramos AMBOS lados como confirmados: el conductor confirma por los dos (la plata cambió de mano
+    // en el acto). Mantiene coherente la tabla de confirmaciones sin exigir un segundo paso del pasajero.
+    await this.repo.upsertCashConfirmation(payment.tripId, {
       driverConfirmed: true,
+      passengerConfirmed: true,
     });
-
-    // El pasajero ya había confirmado (caso raro) → ambos true → captura inmediata.
-    if (confirmation.passengerConfirmed) {
-      await this.captureCash(payment);
-      return this.getPayment(payment.id);
-    }
-
-    // Solo el conductor confirmó → PENDING esperando al pasajero. Emitimos cash_pending (push) por
-    // OUTBOX (idempotencia financiera): aggregateId = paymentId, dedup natural del relay.
-    await this.repo.runInTransaction(async (tx) => {
-      const envelope = createEnvelope({
-        eventType: 'payment.cash_pending',
-        producer: 'payment-service',
-        payload: {
-          paymentId: payment.id,
-          tripId: payment.tripId,
-          grossCents: payment.grossCents,
-          // ENRIQUECIDO: destino del push del pasajero (sin join cross-servicio).
-          passengerId: payment.passengerId ?? undefined,
-        },
-      });
-      await this.repo.enqueueOutbox(tx, envelope, payment.id);
-    });
+    await this.captureCash(payment);
     this.logger.log(
-      `Efectivo ${payment.id} (viaje ${payment.tripId}): conductor confirmó, falta el pasajero → cash_pending`,
+      `Efectivo ${payment.id} (viaje ${payment.tripId}): conductor confirmó → CAPTURADO (sin doble confirmación)`,
     );
-    return payment;
+    return this.getPayment(payment.id);
   }
 
   /**
