@@ -38,11 +38,31 @@ export interface CarpoolSearchParams {
 }
 
 /**
- * Puerto del marketplace de carpooling para el PASAJERO (public-bff `/carpool/*`). Buscar viajes
- * publicados, ver el detalle enriquecido, solicitar la reserva y seguir el estado de la solicitud.
- * El `passengerId` NUNCA viaja en los cuerpos: lo deriva el BFF de la sesión (anti-IDOR).
+ * Parámetros del FEED del marketplace (browse-first, tab Compartir): TODOS los viajes publicados
+ * futuros, sin ruta requerida. `region` filtra por bounding box del catálogo compartido
+ * (`REGIONS_PE` de @veo/utils); ausente = todas las regiones.
+ */
+export interface CarpoolBrowseParams {
+  /** Id del catálogo de regiones (`lima-metropolitana`, `ancash`, …); undefined = todas. */
+  region?: string;
+  /** Orden del feed (`salida` default | `precio`). */
+  orden?: 'salida' | 'precio';
+  /** Tamaño de página (keyset). */
+  limit?: number;
+  /** Cursor opaco de la página anterior; undefined = primera página. */
+  cursor?: string;
+}
+
+/**
+ * Puerto del marketplace de carpooling para el PASAJERO (public-bff `/carpool/*`). Browsear el
+ * feed, buscar viajes publicados, ver el detalle enriquecido, solicitar la reserva y seguir el
+ * estado de la solicitud. El `passengerId` NUNCA viaja en los cuerpos: lo deriva el BFF de la
+ * sesión (anti-IDOR).
  */
 export interface CarpoolRepository {
+  /** GET /carpool/trips/browse — FEED keyset de TODOS los viajes futuros (filtro región opcional). */
+  browseTrips(params: CarpoolBrowseParams): Promise<CarpoolSearchPage>;
+
   /** GET /carpool/trips/search — página keyset de viajes que calzan ruta + fecha + asientos. */
   searchTrips(params: CarpoolSearchParams): Promise<CarpoolSearchPage>;
 

@@ -31,6 +31,7 @@ import {
 } from '../../features/kyc/domain/usecases';
 import {HttpCarpoolRepository} from '../../features/carpool/data/httpCarpoolRepository';
 import {
+  BrowseCarpoolTripsUseCase,
   CancelCarpoolBookingUseCase,
   GetCarpoolBookingUseCase,
   GetCarpoolTripDetailUseCase,
@@ -478,6 +479,10 @@ export function buildContainer(): Container {
   );
 
   // Casos de uso · Carpooling (marketplace programado · ADR-014)
+  container.register(
+    TOKENS.browseCarpoolTripsUseCase,
+    c => new BrowseCarpoolTripsUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
   container.register(
     TOKENS.searchCarpoolTripsUseCase,
     c => new SearchCarpoolTripsUseCase(c.resolve(TOKENS.carpoolRepository)),

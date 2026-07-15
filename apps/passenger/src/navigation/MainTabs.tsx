@@ -1,6 +1,6 @@
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import React from 'react';
-import {CarpoolSearchScreen} from '../features/carpool/presentation';
+import {CarpoolBrowseScreen} from '../features/carpool/presentation';
 import {ProfileScreen} from '../features/profile/presentation';
 import {SeguridadScreen} from '../features/security/presentation/screens/SeguridadScreen';
 import {
@@ -24,7 +24,7 @@ export function MainTabs(): React.JSX.Element {
       tabBar={props => <AppTabBar {...props} />}
       screenOptions={{headerShown: false}}>
       <Tab.Screen name="Home" component={RequestFlowScreen} />
-      <Tab.Screen name="Compartir" component={CarpoolSearchScreen} />
+      <Tab.Screen name="Compartir" component={CarpoolBrowseScreen} />
       <Tab.Screen name="TripHistory" component={TripHistoryScreen} />
       <Tab.Screen name="Seguridad" component={SeguridadScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />

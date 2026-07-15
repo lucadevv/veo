@@ -4,7 +4,20 @@ import type {
   CarpoolSearchPage,
   CarpoolTripDetail,
 } from '@veo/api-client';
-import type {CarpoolRepository, CarpoolSearchParams} from './carpoolRepository';
+import type {
+  CarpoolBrowseParams,
+  CarpoolRepository,
+  CarpoolSearchParams,
+} from './carpoolRepository';
+
+/** FEED del marketplace: todos los viajes futuros (filtro región opcional, página keyset). */
+export class BrowseCarpoolTripsUseCase {
+  constructor(private readonly repository: CarpoolRepository) {}
+
+  execute(params: CarpoolBrowseParams): Promise<CarpoolSearchPage> {
+    return this.repository.browseTrips(params);
+  }
+}
 
 /** Busca viajes publicados que calcen ruta + fecha + asientos (página keyset). */
 export class SearchCarpoolTripsUseCase {

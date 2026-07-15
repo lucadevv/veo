@@ -9,6 +9,7 @@ import {
   type HttpClient,
 } from '@veo/api-client';
 import type {
+  CarpoolBrowseParams,
   CarpoolRepository,
   CarpoolSearchParams,
 } from '../domain/carpoolRepository';
@@ -20,6 +21,19 @@ import type {
  */
 export class HttpCarpoolRepository implements CarpoolRepository {
   constructor(private readonly http: HttpClient) {}
+
+  browseTrips(params: CarpoolBrowseParams): Promise<CarpoolSearchPage> {
+    return this.http.get('/carpool/trips/browse', {
+      query: {
+        // undefined se omite del query string (lo resuelve el HttpClient), sin ramas acá.
+        region: params.region,
+        orden: params.orden,
+        limit: params.limit,
+        cursor: params.cursor,
+      },
+      schema: carpoolSearchPage,
+    });
+  }
 
   searchTrips(params: CarpoolSearchParams): Promise<CarpoolSearchPage> {
     return this.http.get('/carpool/trips/search', {

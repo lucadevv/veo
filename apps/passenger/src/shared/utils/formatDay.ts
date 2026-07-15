@@ -27,6 +27,11 @@ export function formatDayShort(date: Date): string {
   return `${WEEKDAYS[date.getDay()]} ${date.getDate()} ${MONTHS[date.getMonth()]}`;
 }
 
+/** "Vie 17" (día de semana + número, sin mes) — micro-label de la card del feed de carpool. */
+export function formatWeekdayDay(date: Date): string {
+  return `${WEEKDAYS[date.getDay()]} ${date.getDate()}`;
+}
+
 /**
  * "4 jul" (sin día de semana ni año) de un ISO datetime — para lomos angostos como la card de
  * Próximos: "15/07/2026" desbordaba el ancho fijo y truncaba con "…". El programado vive a ≤7 días,

@@ -45,6 +45,7 @@ import {
   CarpoolBookingReviewScreen,
   CarpoolBookingStatusScreen,
   CarpoolResultsScreen,
+  CarpoolSearchScreen,
   CarpoolTripDetailScreen,
 } from '../features/carpool/presentation';
 import {MapPickScreen, SearchScreen} from '../features/maps/presentation';
@@ -261,8 +262,14 @@ export function RootNavigator(): React.JSX.Element {
         // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
         options={{headerShown: false}}
       />
-      {/* Carpooling (ADR-014 · pen sección 5): el BUSCADOR es la raíz del tab `Compartir` (en Main);
-          acá viven las pantallas del funnel: resultados → detalle → reserva → estado. */}
+      {/* Carpooling (ADR-014 · pen sección 5): el FEED es la raíz del tab `Compartir` (en Main);
+          acá vive el funnel: buscador → resultados → detalle → reserva → estado. */}
+      <Stack.Screen
+        name="CarpoolSearch"
+        component={CarpoolSearchScreen}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
+      />
       <Stack.Screen
         name="CarpoolResults"
         component={CarpoolResultsScreen}

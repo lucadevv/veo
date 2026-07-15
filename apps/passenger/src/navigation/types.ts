@@ -37,7 +37,7 @@ export type RootStackParamList = {
   Main: undefined;
   /** Tab Seguridad (hub). Renderiza dentro de `Main`; acá para tipar navigate('Seguridad'). */
   Seguridad: undefined;
-  /** Tab Compartir (marketplace carpool). Renderiza dentro de `Main`; acá para tipar navigate('Compartir'). */
+  /** Tab Compartir (FEED del marketplace carpool, browse-first). Renderiza dentro de `Main`. */
   Compartir: undefined;
   /** Sesión expirada por inactividad: re-verificar identidad (el trigger es follow-up). */
   SessionExpired: undefined;
@@ -74,13 +74,15 @@ export type RootStackParamList = {
   // `DraggableSheet` SOBRE "Mis Viajes" (ver TripDetailSheet). No hay ruta ni params que tipar.
   // `ScheduledTrips`/`ScheduleNew` se ELIMINARON (consolidación): los programados viven en el tab
   // Viajes>Próximos y programar se hace INLINE desde el toggle del Home (scheduleIntent del draft).
-  // `CarpoolSearch` ya no es ruta del stack: es la RAÍZ del tab `Compartir` (marketplace aparte).
+  /** Carpooling: BUSCADOR por ruta (se abre desde la pill del feed del tab Compartir). */
+  CarpoolSearch: undefined;
   /** Carpooling: resultados keyset de la búsqueda (la query viaja completa en params). */
   CarpoolResults: {search: CarpoolSearchQuery};
-  /** Carpooling: detalle enriquecido de un viaje publicado (driver/vehicle pueden venir null). */
-  CarpoolTripDetail: {tripId: string; search: CarpoolSearchQuery};
+  /** Carpooling: detalle de un viaje publicado. `search` viene del funnel de BÚSQUEDA; desde el
+   * FEED no hay búsqueda (recojo/bajada caen al meeting point del propio viaje). */
+  CarpoolTripDetail: {tripId: string; search?: CarpoolSearchQuery};
   /** Carpooling: revisión de la reserva (asientos, mensaje, método de pago) antes del POST. */
-  CarpoolBookingReview: {tripId: string; search: CarpoolSearchQuery};
+  CarpoolBookingReview: {tripId: string; search?: CarpoolSearchQuery};
   /** Carpooling: estado REAL de MI solicitud (poll hasta que el conductor decida). */
   CarpoolBookingStatus: {bookingId: string};
   /** Centro de avisos del pasajero (campana del Home). Título "Avisos" (el FEED). */

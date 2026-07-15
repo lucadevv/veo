@@ -136,6 +136,7 @@ import type {
 } from '../../features/trip/domain/usecases';
 import type {CarpoolRepository} from '../../features/carpool/domain/carpoolRepository';
 import type {
+  BrowseCarpoolTripsUseCase,
   CancelCarpoolBookingUseCase,
   GetCarpoolBookingUseCase,
   GetCarpoolTripDetailUseCase,
@@ -291,6 +292,9 @@ export const TOKENS = {
   rebidUseCase: createToken<RebidUseCase>('RebidUseCase'),
 
   // Casos de uso · Carpooling (marketplace programado · ADR-014)
+  browseCarpoolTripsUseCase: createToken<BrowseCarpoolTripsUseCase>(
+    'BrowseCarpoolTripsUseCase',
+  ),
   searchCarpoolTripsUseCase: createToken<SearchCarpoolTripsUseCase>(
     'SearchCarpoolTripsUseCase',
   ),

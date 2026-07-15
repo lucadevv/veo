@@ -65,8 +65,9 @@ export const common = {
     tripHistory: 'Mis viajes',
     // Pantalla dedicada de compartir con la familia (design/veo.pen zKyic, tuteo del "Compartí").
     familyShare: 'Comparte tu viaje',
-    // Raíz del tab Compartir: presenta el producto (marketplace), no una orden de búsqueda.
-    carpoolSearch: 'Viajes compartidos',
+    // Raíz del tab Compartir: el FEED presenta el producto (marketplace browse-first).
+    carpoolFeed: 'Viajes compartidos',
+    carpoolSearch: 'Busca tu viaje',
     carpoolResults: 'Viajes disponibles',
     carpoolTripDetail: 'Detalle del viaje',
     carpoolBookingReview: 'Revisa tu reserva',
@@ -721,6 +722,20 @@ export const common = {
    * `formatPEN` desde céntimos; acá solo viven los textos.
    */
   carpool: {
+    /** FEED del marketplace (tab Compartir, browse-first · pen P/CarpoolFeed). */
+    feedRegionAll: 'Todas las regiones',
+    feedRegionSheetTitle: '¿Dónde buscas viajes?',
+    feedCountOne: '1 viaje en {{region}}',
+    feedCountMany: '{{count}} viajes en {{region}}',
+    feedCountAllOne: '1 viaje publicado',
+    feedCountAllMany: '{{count}} viajes publicados',
+    feedEmpty: 'Aún no hay viajes en {{region}}',
+    feedEmptyAll: 'Aún no hay viajes publicados',
+    feedEmptySubtitle: 'Prueba con otra región o vuelve más tarde.',
+    feedLoadError: 'No pudimos cargar los viajes.',
+    seatsLeftOne: 'Queda 1',
+    seatsLeftMany: 'Quedan {{count}}',
+
     /** Re-entrada al seguimiento de una solicitud viva (banner del tab Compartir). */
     activeBookingEntry: 'Tienes una solicitud de asiento en curso',
     viewBooking: 'Ver estado',

@@ -23,7 +23,6 @@ import {EnterView} from '../../../trip/presentation/components/motion';
 import {
   IconBadgeCheck,
   IconBanknote,
-  IconCheck,
   IconClock,
   IconSwapVertical,
 } from '../../../trip/presentation/components/icons';
@@ -31,6 +30,7 @@ import type {GlyphProps} from '../../../trip/presentation/components/icons';
 import {formatPEN} from '../../../../shared/utils/format';
 import {formatIsoDayShort} from '../../../../shared/utils/formatDay';
 import {CarpoolTripCard} from '../components/CarpoolTripCard';
+import {OptionRow} from '../components/OptionRow';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -467,38 +467,6 @@ function FilterChip({
   );
 }
 
-interface OptionRowProps {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}
-
-/** Fila de opción de los sheets de filtro: label + check accent cuando está elegida (target 44pt). */
-function OptionRow({label, selected, onPress}: OptionRowProps): React.JSX.Element {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{selected}}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.optionRow,
-        {
-          borderRadius: theme.radii.md,
-          backgroundColor: selected ? theme.colors.brandDim : 'transparent',
-          opacity: pressed ? 0.7 : 1,
-        },
-      ]}>
-      <Text
-        variant="body"
-        style={selected ? {color: theme.colors.brand, fontWeight: '600'} : null}>
-        {label}
-      </Text>
-      {selected ? <IconCheck color={theme.colors.brand} size={18} /> : null}
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   filtersRow: {flexDirection: 'row', flexWrap: 'wrap'},
   chip: {
@@ -508,14 +476,5 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
-  },
-  optionRow: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
 });

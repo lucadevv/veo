@@ -19,6 +19,7 @@ import {
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {formatPEN} from '../../../../shared/utils/format';
 import {uuidv4} from '../../../../shared/utils/uuid';
+import {usePlaceLabel} from '../usePlaceLabel';
 import type {RootStackParamList} from '../../../../navigation/types';
 import {
   PaymentMethodRow,
@@ -81,16 +82,33 @@ export function CarpoolBookingReviewScreen(): React.JSX.Element {
   const reserveMutation = useMutation({
     mutationFn: () => {
       idempotencyKeyRef.current ??= uuidv4();
+      // Recojo/bajada = lo que el pasajero BUSCÓ (su origen/destino). Desde el FEED no hay búsqueda
+      // → caen al MEETING POINT del propio viaje (el pasajero va al punto del conductor). El CTA
+      // solo se renderiza con el detalle cargado, así que el fallback siempre resuelve.
+      const meetingPoints = detailQuery.data?.trip;
+      const pickupLat = search?.originLat ?? meetingPoints?.origenLat;
+      const pickupLon = search?.originLon ?? meetingPoints?.origenLon;
+      const dropoffLat = search?.destLat ?? meetingPoints?.destinoLat;
+      const dropoffLon = search?.destLon ?? meetingPoints?.destinoLon;
+      if (
+        pickupLat === undefined ||
+        pickupLon === undefined ||
+        dropoffLat === undefined ||
+        dropoffLon === undefined
+      ) {
+        return Promise.reject(
+          new Error('detalle del viaje aún no cargado para reservar'),
+        );
+      }
       return reserveSeat.execute(
         {
           publishedTripId: tripId,
           asientos,
           paymentMethod: method,
-          // Recojo/bajada = lo que el pasajero BUSCÓ (su origen/destino), no los del conductor.
-          pickupLat: search.originLat,
-          pickupLon: search.originLon,
-          dropoffLat: search.destLat,
-          dropoffLon: search.destLon,
+          pickupLat,
+          pickupLon,
+          dropoffLat,
+          dropoffLon,
           mensajeIntro: mensaje.trim() === '' ? undefined : mensaje.trim(),
         },
         idempotencyKeyRef.current,
@@ -156,15 +174,25 @@ export function CarpoolBookingReviewScreen(): React.JSX.Element {
         keyboardShouldPersistTaps="handled">
         {/* Header in-body (patrón ScreenHeader del pen): back pill + título display. */}
         <ScreenHeader title={t('screens.carpoolBookingReview')} />
-        {/* Resumen del viaje (ruta buscada + salida real del viaje publicado). */}
+        {/* Resumen del viaje: ruta BUSCADA (funnel de búsqueda) o el meeting point del propio
+            viaje geocodificado (llegada desde el FEED, sin búsqueda) + salida real. */}
         <Card variant="outlined" padding="lg">
           <View style={{gap: theme.spacing.xs}}>
-            <Text variant="bodyStrong">
-              {t('carpool.route', {
-                origin: search.originLabel,
-                destination: search.destLabel,
-              })}
-            </Text>
+            {search ? (
+              <Text variant="bodyStrong">
+                {t('carpool.route', {
+                  origin: search.originLabel,
+                  destination: search.destLabel,
+                })}
+              </Text>
+            ) : (
+              <TripRouteLine
+                origenLat={trip.origenLat}
+                origenLon={trip.origenLon}
+                destinoLat={trip.destinoLat}
+                destinoLon={trip.destinoLon}
+              />
+            )}
             <Text variant="footnote" color="inkMuted" tabular>
               {formatDayTimeShort(trip.fechaHoraSalida)}
             </Text>
@@ -338,6 +366,32 @@ function StepperButton({
       ]}>
       {icon}
     </Pressable>
+  );
+}
+
+interface TripRouteLineProps {
+  origenLat: number;
+  origenLon: number;
+  destinoLat: number;
+  destinoLon: number;
+}
+
+/**
+ * Ruta del MEETING POINT del viaje geocodificada (llegada desde el FEED, sin búsqueda propia).
+ * Componente aparte para poder usar el hook `usePlaceLabel` solo cuando aplica (los hooks no
+ * pueden ser condicionales en el cuerpo de la pantalla).
+ */
+function TripRouteLine({
+  origenLat,
+  origenLon,
+  destinoLat,
+  destinoLon,
+}: TripRouteLineProps): React.JSX.Element {
+  const {t} = useTranslation();
+  const origin = usePlaceLabel(origenLat, origenLon);
+  const destination = usePlaceLabel(destinoLat, destinoLon);
+  return (
+    <Text variant="bodyStrong">{t('carpool.route', {origin, destination})}</Text>
   );
 }
 
