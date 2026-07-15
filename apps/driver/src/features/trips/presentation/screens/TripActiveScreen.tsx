@@ -562,13 +562,13 @@ export const TripActiveScreen = ({ navigation, route }: Props): React.JSX.Elemen
               </View>
             </View>
 
-            {/* En vivo + métricas del trayecto (distancia · duración). */}
+            {/* Métricas del trayecto (distancia · duración). U2 · dedup: el "En vivo" ya lo porta el
+                LiveBadge del mapa — la pill del sheet SOLO aparece en degradación ("Reconectando…"
+                cuando el socket está caído); en verde no renderiza nada. */}
             <View style={styles.statusPillRow}>
-              <StatusPill
-                label={connected ? t('trips.connection.live') : t('trips.connection.reconnecting')}
-                tone={connected ? 'success' : 'neutral'}
-                live={connected}
-              />
+              {connected ? null : (
+                <StatusPill label={t('trips.connection.reconnecting')} tone="neutral" />
+              )}
               <Text variant="footnote" color="inkMuted" tabular>
                 {tripMetrics}
               </Text>

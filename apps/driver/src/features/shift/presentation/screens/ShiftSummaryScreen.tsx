@@ -14,11 +14,7 @@ import {
   type IconProps,
 } from '../../../../shared/presentation/icons';
 import { useEarningsBreakdown } from '../hooks/useEarnings';
-import {
-  formatShiftDurationLong,
-  formatShiftDurationShort,
-  shiftElapsedMinutes,
-} from '../../domain';
+import { formatShiftDurationShort, shiftElapsedMinutes } from '../../domain';
 import { Appear, PressableScale } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ShiftSummary'>;
@@ -53,10 +49,9 @@ export const ShiftSummaryScreen = ({ navigation, route }: Props): React.JSX.Elem
     [shiftStartedAt],
   );
 
-  const subtitle =
-    durationMinutes != null
-      ? t('shift.summary.subtitle', { duration: formatShiftDurationLong(durationMinutes) })
-      : t('shift.summary.subtitleNoDuration');
+  // U2 · dedup: la DURACIÓN la porta la stat "En turno" de la grilla — el subtítulo queda como cierre
+  // cálido, sin repetir el dato.
+  const subtitle = t('shift.summary.subtitle');
 
   const earnedText = today ? formatPEN(today.netCents) : null;
   const tripsText = today ? String(today.tripCount) : NO_DATA;

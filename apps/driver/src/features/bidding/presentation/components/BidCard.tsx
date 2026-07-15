@@ -97,14 +97,17 @@ export const BidCard = ({ bid, onPress }: Props): React.JSX.Element => {
         </View>
       </View>
 
-      {/* PIE: hairline + monto ofrecido (payoff) + CTA (tomar/ofertar) o "esperando". */}
+      {/* PIE: hairline + monto ofrecido (payoff) + CTA (tomar/ofertar). U2 · dedup: en pendiente el estado
+          ya lo porta la pill "Enviada" de la cabecera — el pie NO repite "Esperando al pasajero…". */}
       <View style={[styles.footer, { borderTopColor: theme.colors.border, marginTop: theme.spacing.md, paddingTop: theme.spacing.md }]}>
         <Text variant="title2" tabular>
           {formatPEN(bid.bidCents)}
         </Text>
-        <Text variant="bodyStrong" color={pending ? 'inkMuted' : 'accent'}>
-          {pending ? t('trips.bid.waiting') : `${t('trips.bid.open')} →`}
-        </Text>
+        {pending ? null : (
+          <Text variant="bodyStrong" color="accent">
+            {`${t('trips.bid.open')} →`}
+          </Text>
+        )}
       </View>
     </PressableScale>
   );

@@ -47,11 +47,11 @@ export type EnrollFailReason = (typeof EnrollFailReason)[keyof typeof EnrollFail
  * Defense-in-depth — el enroll de la biometría es OBLIGATORIO antes de cerrar el alta, así que sin
  * foto real NO se llama a `submit`. Se enruta por el MISMO surface tipado de errores de enroll
  * (`classifyKycEnrollError` lo mapea a `'missing-capture'`) para que la pantalla muestre un banner
- * accionable ("Necesitás completar la verificación facial") en vez de un dead-end silencioso.
+ * accionable ("Necesitas completar la verificación facial") en vez de un dead-end silencioso.
  */
 export class MissingFaceCaptureError extends Error {
   constructor() {
-    super('Necesitás completar la verificación facial');
+    super('Necesitas completar la verificación facial');
     this.name = 'MissingFaceCaptureError';
   }
 }

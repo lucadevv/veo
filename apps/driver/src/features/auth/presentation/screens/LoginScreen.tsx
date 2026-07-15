@@ -357,10 +357,10 @@ export const LoginScreen = (): React.JSX.Element => {
                         <FaceIdGlyph color={theme.colors.accent} />
                       </View>
                       <View style={styles.biometricCopy}>
-                        <Text variant="bodyStrong">{t('auth.faceIdTitle')}</Text>
-                        <Text variant="footnote" color="inkMuted">
-                          {t('auth.faceIdBody')}
-                        </Text>
+                        {/* U2 · dedup: el label "Ingresar con Face ID" vive UNA vez (el botón de abajo);
+                            la card lo describe con el body ("Accede de forma rápida y segura") en vez de
+                            duplicar el título del botón. */}
+                        <Text variant="bodyStrong">{t('auth.faceIdBody')}</Text>
                       </View>
                     </View>
                     <Button

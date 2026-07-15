@@ -49,7 +49,7 @@ describe('ManeuverBanner — copy del arrive por fase', () => {
       step: step({ maneuver: 'arrive', instruction: 'Has llegado a tu destino' }),
       onboard: false,
     });
-    expect(label).toContain('Llegás al punto de recojo');
+    expect(label).toContain('Llegas al punto de recojo');
     expect(label).not.toContain('destino');
   });
 
@@ -58,7 +58,7 @@ describe('ManeuverBanner — copy del arrive por fase', () => {
       step: step({ maneuver: 'arrive', instruction: 'Has llegado a tu destino por Av. Larco' }),
       onboard: false,
     });
-    expect(label).toContain('Llegás al punto de recojo por Av. Larco');
+    expect(label).toContain('Llegas al punto de recojo por Av. Larco');
   });
 
   it('a bordo (onboard=true): el arrive anuncia el destino real', () => {
@@ -66,7 +66,7 @@ describe('ManeuverBanner — copy del arrive por fase', () => {
       step: step({ maneuver: 'arrive', instruction: 'Has llegado a tu destino' }),
       onboard: true,
     });
-    expect(label).toContain('Llegás al destino');
+    expect(label).toContain('Llegas al destino');
   });
 
   it('a bordo con vía del contrato: destino + calle', () => {
@@ -74,6 +74,6 @@ describe('ManeuverBanner — copy del arrive por fase', () => {
       step: step({ maneuver: 'arrive', instruction: 'Has llegado a tu destino por Av. Brasil' }),
       onboard: true,
     });
-    expect(label).toContain('Llegás al destino por Av. Brasil');
+    expect(label).toContain('Llegas al destino por Av. Brasil');
   });
 });

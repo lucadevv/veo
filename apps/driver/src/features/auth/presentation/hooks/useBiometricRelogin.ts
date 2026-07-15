@@ -53,7 +53,7 @@ export function useBiometricRelogin(): BiometricReloginState {
       }
       if (unlock.status === 'failed') {
         throw new Error(
-          'No pudimos verificar tu identidad. Intentá de nuevo o ingresá con tu número.',
+          'No pudimos verificar tu identidad. Inténtalo de nuevo o ingresa con tu número.',
         );
       }
       const refreshToken = unlock.token;
