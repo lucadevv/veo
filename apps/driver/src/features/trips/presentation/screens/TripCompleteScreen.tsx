@@ -18,6 +18,14 @@ import { Appear } from '../components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripComplete'>;
 
+/**
+ * Verde del CHECK de "viaje completado" — jade `#17C08A`, UNIFICADO con el check del pasajero
+ * (`SuccessCheck` del cierre, `success` del tema passenger) por pedido del dueño: el momento celebratorio
+ * de éxito se ve IGUAL en ambas apps. Excepción DOCUMENTADA al token `success` del driver light (#00C853,
+ * board-exact): acá prima la consistencia cross-app del check sobre la fidelidad al board del conductor.
+ */
+const SUCCESS_CHECK_GREEN = '#17C08A';
+
 
 /**
  * Cierre del viaje del conductor (frame C/TripComplete): resumen de ganancia (tarifa − comisión = neto)
@@ -113,13 +121,13 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
             style={[
               styles.badge,
               {
-                backgroundColor: `${theme.colors.success}26`,
-                borderColor: theme.colors.success,
-                shadowColor: theme.colors.success,
+                backgroundColor: `${SUCCESS_CHECK_GREEN}26`,
+                borderColor: SUCCESS_CHECK_GREEN,
+                shadowColor: SUCCESS_CHECK_GREEN,
               },
             ]}
           >
-            <IconCheck size={40} color={theme.colors.success} strokeWidth={3} />
+            <IconCheck size={40} color={SUCCESS_CHECK_GREEN} strokeWidth={3} />
           </View>
           <Text variant="titleEditorial" align="center">
             {t('trips.complete.title')}
