@@ -36,6 +36,8 @@ export { DriverCard, type DriverCardProps } from './DriverCard';
 export { SosButton, type SosButtonProps } from './SosButton';
 // "EN VIVO" (cámara del habitáculo) — MISMA identidad en passenger + driver (viaje activo).
 export { LiveBadge, type LiveBadgeProps } from './LiveBadge';
+// Sello de éxito canónico (círculo verde + check negro + pop) — MISMO momento de éxito en toda la app.
+export { SuccessCheck, type SuccessCheckProps } from './SuccessCheck';
 export { RoutePin, type RoutePinProps, type RoutePinVariant } from './RoutePin';
 // Estrella de rating compartida (mismo glifo en passenger + driver: DriverCard y la card del pasajero).
 export { StarGlyph } from './internal/StarGlyph';

@@ -3,11 +3,10 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Banner, Button, SafeScreen, Text, TextField, useTheme } from '@veo/ui-kit';
+import { Banner, Button, SafeScreen, SuccessCheck, Text, TextField, useTheme } from '@veo/ui-kit';
 import { ApiError, mobilePaymentMethod } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { formatPEN, formatPersonName } from '../../../../shared/presentation/format';
-import { IconCheck } from '../../../../shared/presentation/icons';
 import type { DriverProfile } from '../../../profile/domain';
 import { PROFILE_QUERY_KEY } from '../../../profile/domain';
 import { StarRating } from '../../../ratings/presentation';
@@ -131,18 +130,9 @@ export const TripCompleteScreen = ({ navigation, route }: Props): React.JSX.Elem
         keyboardShouldPersistTaps="handled"
       >
         <Appear style={styles.hero}>
-          <View
-            style={[
-              styles.badge,
-              {
-                backgroundColor: `${SUCCESS_CHECK_GREEN}26`,
-                borderColor: SUCCESS_CHECK_GREEN,
-                shadowColor: SUCCESS_CHECK_GREEN,
-              },
-            ]}
-          >
-            <IconCheck size={40} color={SUCCESS_CHECK_GREEN} strokeWidth={3} />
-          </View>
+          {/* Sello de éxito CANÓNICO (@veo/ui-kit): círculo jade + check negro + pop. Antes era un badge
+              translúcido local con IconCheck verde — ahora idéntico al del pasajero (simetría). */}
+          <SuccessCheck size={84} />
           <Text variant="titleEditorial" align="center">
             {t('trips.complete.title')}
           </Text>
@@ -315,19 +305,6 @@ function BreakdownRow({ label, value, valueColor = 'ink' }: BreakdownRowProps): 
 const styles = StyleSheet.create({
   body: { gap: 24, paddingTop: 8, paddingBottom: 24 },
   hero: { gap: 16, alignItems: 'center', paddingTop: 24, paddingBottom: 8 },
-  badge: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    // Glow verde simétrico (halo, sin offset) — el "success glow" del frame.
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 12,
-  },
   earn: { gap: 2, alignItems: 'center' },
   card: { alignSelf: 'stretch', borderWidth: StyleSheet.hairlineWidth },
   // La card de cobro lleva su propio borde (jade sin confirmar → gris tras confirmar): borde algo más

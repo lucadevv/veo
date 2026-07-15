@@ -4,7 +4,16 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { PaymentView } from '@veo/api-client';
-import { Banner, Button, Card, SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-kit';
+import {
+  Banner,
+  Button,
+  Card,
+  SafeScreen,
+  Skeleton,
+  SuccessCheck,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { ScreenHero } from '../../../../shared/presentation/components/ScreenHero';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
@@ -111,9 +120,8 @@ export const SettleDebtScreen = ({ navigation }: Props): React.JSX.Element => {
   if (phase === 'settled') {
     body = (
       <View style={styles.centered}>
-        <View style={[styles.successRing, { backgroundColor: theme.colors.success + '26' }]}>
-          <IconCheck size={34} color={theme.colors.success} strokeWidth={2.5} />
-        </View>
+        {/* Sello de éxito CANÓNICO (antes: ring translúcido + IconCheck SIN animación). Ahora trae el pop. */}
+        <SuccessCheck size={72} />
         <Text variant="title2" align="center">
           {t('debt.settledTitle')}
         </Text>
