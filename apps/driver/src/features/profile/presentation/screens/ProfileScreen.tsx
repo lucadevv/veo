@@ -113,7 +113,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
               en grupo EDITORIAL (superficie + hairlines, sin cajón — mismo idioma que el
               "Tu cuenta" del passenger; des-encajonado 2026-07-15). */}
           <Reveal delay={120}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.kyc')}
             </Text>
             <ListGroup>
@@ -160,7 +160,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
               aprobado): antes era UN bloque monolítico de 8 filas sin jerarquía. Íconos en accent
               (mismo tratamiento que el passenger), filas ListItem canónicas del ui-kit. */}
           <Reveal delay={160}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.sectionAccount')}
             </Text>
             <ListGroup>
@@ -181,7 +181,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           </Reveal>
 
           <Reveal delay={200}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.sectionVerification')}
             </Text>
             <ListGroup>
@@ -201,7 +201,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           </Reveal>
 
           <Reveal delay={240}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.sectionActivity')}
             </Text>
             <ListGroup>
@@ -227,7 +227,7 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           </Reveal>
 
           <Reveal delay={280}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.sectionSupport')}
             </Text>
             <ListGroup>

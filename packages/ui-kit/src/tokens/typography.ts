@@ -207,6 +207,19 @@ export const textStyles = {
     fontWeight: fontWeight.medium,
     letterSpacing: 0.6,
   },
+  /**
+   * MICRO-eyebrow (10pt): el lomo temporal/de estado de las cards densas ("HOY", "PROGRAMADO",
+   * "Quedan 2") — SIEMPRE en MAYÚSCULAS con tracking ancho (0.8): a este cuerpo la caja alta +
+   * espacio es lo que lo hace legible e intencional. Antes cada card lo hand-rolleaba
+   * (fontSize:10 suelto); token = una sola definición del gesto.
+   */
+  micro: {
+    fontFamily: fontFamily.textSemibold,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: fontWeight.semibold,
+    letterSpacing: 0.8,
+  },
 } satisfies Record<string, TextToken>;
 
 export type TextStyleToken = keyof typeof textStyles;

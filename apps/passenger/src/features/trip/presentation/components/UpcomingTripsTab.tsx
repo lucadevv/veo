@@ -228,7 +228,7 @@ function UpcomingTripCard({
         <View style={styles.statusGroup}>
           <View style={[styles.dot, {backgroundColor: theme.colors.brand}]} />
           <Text
-            variant="caption"
+            variant="micro"
             style={[styles.statusLabel, {color: theme.colors.inkSubtle}]}
             numberOfLines={1}>
             {t('tripStatus.SCHEDULED')}
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   },
   statusGroup: {flexDirection: 'row', alignItems: 'center', gap: 7, flex: 1},
   dot: {width: 8, height: 8, borderRadius: 4},
-  statusLabel: {textTransform: 'uppercase', letterSpacing: 0.8, flexShrink: 1},
+  statusLabel: {textTransform: 'uppercase', flexShrink: 1},
   body: {flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginTop: 14},
   dateSpine: {width: 84, gap: 2},
   journey: {flex: 1, flexDirection: 'row', gap: 12},

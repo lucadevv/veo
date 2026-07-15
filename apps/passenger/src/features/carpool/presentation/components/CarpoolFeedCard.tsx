@@ -72,7 +72,7 @@ export function CarpoolFeedCard({
         },
       ]}>
       <Text
-        variant="caption"
+        variant="micro"
         style={[styles.dia, {color: theme.colors.inkSubtle}]}>
         {dia}
       </Text>
@@ -102,8 +102,8 @@ export function CarpoolFeedCard({
             },
           ]}>
           <Text
-            variant="caption"
-            style={[styles.quedanLabel, {color: theme.colors.successText}]}>
+            variant="micro"
+            style={{color: theme.colors.successText}}>
             {quedan}
           </Text>
         </View>
@@ -132,7 +132,7 @@ export function CarpoolFeedCard({
 
 const styles = StyleSheet.create({
   card: {flex: 1, gap: 6, borderWidth: 1, minHeight: 44},
-  dia: {fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase'},
+  dia: {textTransform: 'uppercase'},
   div: {height: StyleSheet.hairlineWidth, alignSelf: 'stretch'},
   row: {
     flexDirection: 'row',
@@ -141,7 +141,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   quedanPill: {paddingVertical: 3, paddingHorizontal: 8},
-  quedanLabel: {fontSize: 10, fontWeight: '600'},
   rating: {flexDirection: 'row', alignItems: 'center', gap: 4},
   nombre: {flexShrink: 1},
 });
