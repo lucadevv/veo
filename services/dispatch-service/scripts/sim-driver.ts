@@ -18,15 +18,18 @@
 import {
   INTERNAL_IDENTITY_HEADER,
   INTERNAL_IDENTITY_SIG_HEADER,
+  InternalAudience,
   signInternalIdentity,
   type AuthenticatedUser,
 } from '@veo/auth';
-import { createEnvelope, createKafka, KafkaEventProducer } from '@veo/events';
+import { createEnvelope, createKafka, KafkaEventProducer, topicForEvent } from '@veo/events';
 
-// ── Conductor dev (coincide con dev-stack/seed-dev-driver.sql) ──
-const USER_ID = 'd0000000-0000-4000-8000-000000000001';
-const DRIVER_ID = 'd0000000-0000-4000-8000-0000000000a1'; // Driver.id (perfil) — lo que usa el hot-index y la oferta
-const VEHICLE_ID = 'd0000000-0000-4000-8000-0000000000b1';
+// ── Conductor dev (default = el de dev-stack/seed-dev-driver.sql). Override por env para correr VARIOS
+// sims a la vez (uno por conductor) — cada conductor solo puede estar EN UN viaje, así que N viajes
+// IN_PROGRESS simultáneos exigen N conductores/sims. `veo.sh seed trips N` los siembra y arranca. ──
+const USER_ID = process.env.SIM_USER_ID ?? 'd0000000-0000-4000-8000-000000000001';
+const DRIVER_ID = process.env.SIM_DRIVER_ID ?? 'd0000000-0000-4000-8000-0000000000a1'; // Driver.id (perfil) — lo que usa el hot-index y la oferta
+const VEHICLE_ID = process.env.SIM_VEHICLE_ID ?? 'd0000000-0000-4000-8000-0000000000b1';
 // Carlos DEBE estar cerca del pickup del pasajero (si no, queda fuera del k-ring del matching y no ve
 // la puja). Configurable por env SIM_LAT/SIM_LON; default = pickup de prueba del pasajero.
 const POINT = {
@@ -44,6 +47,14 @@ if (!SECRET) {
   );
 }
 
+// SIM_STOP_AT: hasta dónde progresa el sim el viaje. `IN_PROGRESS` lo deja EN CURSO (no llama complete) —
+// lo usa `veo.sh seed trips` para dejar viajes clavados en IN_PROGRESS. `COMPLETED` (default) = flujo
+// completo de punta a punta (uso histórico intacto). Cualquier otro valor cae a COMPLETED.
+const STOP_AT: 'IN_PROGRESS' | 'COMPLETED' =
+  (process.env.SIM_STOP_AT ?? 'COMPLETED').toUpperCase() === 'IN_PROGRESS'
+    ? 'IN_PROGRESS'
+    : 'COMPLETED';
+
 // Identidad interna del conductor (lo que el driver-bff firmaría: type driver + driverId resuelto).
 const driverIdentity: AuthenticatedUser = {
   userId: USER_ID,
@@ -54,7 +65,14 @@ const driverIdentity: AuthenticatedUser = {
 };
 
 function authHeaders(): Record<string, string> {
-  const { header, signature } = signInternalIdentity(driverIdentity, SECRET as string);
+  // Riel driver-rail (ADR-025): el guard de los servicios verifica la AUDIENCIA firmada (fail-closed).
+  // dispatch acota /bids y /dispatch/offers a DRIVER_RAIL; trip acepta cualquier riel permitido. Sin este
+  // 3er argumento la identidad viaja SIN `aud` → los guards la RECHAZAN (401) y el sim no puede operar.
+  const { header, signature } = signInternalIdentity(
+    driverIdentity,
+    SECRET as string,
+    InternalAudience.DRIVER_RAIL,
+  );
   return {
     [INTERNAL_IDENTITY_HEADER]: header,
     [INTERNAL_IDENTITY_SIG_HEADER]: signature,
@@ -85,12 +103,70 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const log = (...a: unknown[]): void =>
   console.log(`[sim ${new Date().toISOString().slice(11, 19)}]`, ...a);
 
-const producer = new KafkaEventProducer(
-  createKafka({
-    clientId: 'sim-driver',
-    brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9094').split(','),
-  }),
-);
+const kafka = createKafka({
+  clientId: `sim-driver-${DRIVER_ID}`,
+  brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9094').split(','),
+});
+const producer = new KafkaEventProducer(kafka);
+
+// ── Consumer de ofertas FIXED ────────────────────────────────────────────────────────────────────────
+// En FIXED (modo por defecto del catálogo, p.ej. veo_economico) dispatch NO abre board de puja: OFERTA UN
+// viaje concreto a un conductor publicando `dispatch.offered` (topic `dispatch`) y el conductor debe ACEPTAR
+// el match (POST /dispatch/offers/:matchId/accept → dispatch.match_found → trip ASSIGNED). El poll de
+// /bids/open SOLO cubre PUJA (que además necesita el accept del pasajero). Sin este consumer el sim NO puede
+// llevar un viaje FIXED a IN_PROGRESS de forma headless.
+// groupId ÚNICO por conductor: con varios sims un grupo compartido repartiría particiones y un sim en la
+// partición equivocada DESCARTARÍA la oferta de otro conductor (filtra por su driverId) → el conductor real
+// nunca la vería. Grupo propio ⇒ cada sim recibe TODOS los `dispatch.offered` del topic y filtra el suyo.
+const offerConsumer = kafka.consumer({
+  groupId: `sim-driver-offers-${DRIVER_ID}`,
+  sessionTimeout: 30_000,
+});
+let consumerReady = false;
+offerConsumer.on(offerConsumer.events.GROUP_JOIN, () => {
+  if (consumerReady) return;
+  consumerReady = true;
+  // Marcador que `veo.sh seed trips` espera ANTES de crear viajes: una oferta FIXED perdida durante el
+  // rebalance NO se re-oferta al mismo conductor (queda como único candidato ya intentado → el viaje EXPIRA).
+  log('SIM_CONSUMER_READY (grupo unido; escuchando dispatch.offered para ofertas FIXED)');
+});
+
+const acceptedMatches = new Set<string>();
+async function startOfferConsumer(): Promise<void> {
+  await offerConsumer.connect();
+  await offerConsumer.subscribe({
+    topic: topicForEvent('dispatch.offered'),
+    fromBeginning: false,
+  });
+  await offerConsumer.run({
+    eachMessage: async ({ message }) => {
+      if (!message.value) return;
+      let env: { eventType?: string; payload?: Record<string, unknown> };
+      try {
+        env = JSON.parse(message.value.toString()) as {
+          eventType?: string;
+          payload?: Record<string, unknown>;
+        };
+      } catch {
+        return; // body no-JSON: ignorar (poison-safe)
+      }
+      if (env.eventType !== 'dispatch.offered') return;
+      const p = env.payload ?? {};
+      if (p.driverId !== DRIVER_ID) return; // la oferta no es para este conductor
+      // `bidCents` presente ⇒ broadcast de PUJA (lo maneja pollAndOffer + el accept del pasajero). Ausente ⇒
+      // oferta directa FIXED: ESTE sim la acepta para materializar el match.
+      if (p.bidCents !== undefined) return;
+      const matchId = String(p.matchId ?? '');
+      const tripId = String(p.tripId ?? '');
+      if (!matchId || !tripId || acceptedMatches.has(matchId)) return;
+      acceptedMatches.add(matchId);
+      log(`oferta FIXED ${matchId} (trip ${tripId}) → acepto el match`);
+      const r = await api('POST', `${DISPATCH}/dispatch/offers/${matchId}/accept`);
+      log(`  accept match → ${r.status}`, r.status >= 400 ? r.json : '');
+      if (r.status < 400) void watchTrip(tripId);
+    },
+  });
+}
 
 async function pingLocation(): Promise<void> {
   await producer.publish(
@@ -128,6 +204,10 @@ async function progressTrip(tripId: string): Promise<void> {
   await sleep(5000);
   await api('POST', `${TRIP}/trips/${tripId}/start`, { driverId: DRIVER_ID });
   log('  → IN_PROGRESS (viaje iniciado)');
+  if (STOP_AT === 'IN_PROGRESS') {
+    log('  ⏸ SIM_STOP_AT=IN_PROGRESS → dejo el viaje EN CURSO (no lo completo)');
+    return;
+  }
   await sleep(15000);
   // EFECTIVO (decisión del dueño): el conductor, al dar por terminado, marca que COBRÓ el efectivo en
   // mano (cashCollected=true = su lado de la confirmación bilateral, driverConfirmed). Lo mandamos
@@ -188,11 +268,12 @@ async function pollAndOffer(): Promise<void> {
 
 async function main(): Promise<void> {
   await producer.connect();
+  await startOfferConsumer();
   log(
-    `conductor "Carlos" online · driverId=${DRIVER_ID} · vehicleId=${VEHICLE_ID} · ${POINT.lat},${POINT.lon}`,
+    `conductor "Carlos" online · driverId=${DRIVER_ID} · vehicleId=${VEHICLE_ID} · ${POINT.lat},${POINT.lon} · stopAt=${STOP_AT}`,
   );
   await pingLocation();
-  log('ubicación publicada. Pedí un viaje desde la app — ofertaré y completaré el viaje.');
+  log('ubicación publicada. Ofertas FIXED por Kafka (dispatch.offered) · PUJA por /bids/open.');
   setInterval(() => void pingLocation(), 15000);
   setInterval(() => void pollAndOffer(), 4000);
 }

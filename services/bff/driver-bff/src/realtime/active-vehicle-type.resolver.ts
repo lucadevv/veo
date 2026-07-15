@@ -18,6 +18,8 @@ import { RestGateway } from '../infra/rest.gateway';
 
 /** Subconjunto del response de fleet (`/drivers/vehicles/active`) que necesitamos para el ping. */
 interface ActiveVehicleReply {
+  /** Id del vehículo activo (DriverVehicleResponse.id) — se sella en el ping como key del carry de dispatch. */
+  id?: string;
   vehicleType: VehicleClass;
   year?: number;
   seats?: number;
@@ -28,6 +30,8 @@ interface ActiveVehicleReply {
 /** Vehículo activo resuelto: tipo (siempre) + attrs de eligibilidad (si el modelo del catálogo los aporta). */
 export interface ResolvedActiveVehicle {
   vehicleType: VehicleClass;
+  /** Identidad del vehículo activo: dispatch keysea el carry anti-clobber por ESTO, no por vehicleType. */
+  vehicleId?: string;
   seats?: number;
   segment?: VehicleSegment;
   vehicleYear?: number;
@@ -38,6 +42,15 @@ export interface ResolvedActiveVehicle {
 @Injectable()
 export class ActiveVehicleTypeResolver {
   private readonly cache = new Map<string, { value: ResolvedActiveVehicle; expiresAt: number }>();
+  /**
+   * Generación (epoch) por conductor: la incrementa `invalidate`. Sirve de marca anti-TOCTOU para los
+   * `resolve` EN VUELO: un resolve captura la generación ANTES del await a fleet y, al volver, solo escribe
+   * la cache si la generación NO cambió. Si cambió, hubo un swap mientras la respuesta de fleet estaba en
+   * vuelo → ese valor es potencialmente STALE y NO debe re-envenenar la cache (ADR-017 §5(d) landmine d.2).
+   * Es un entero por conductor invalidado (footprint despreciable); NO se podan ni se resetean en
+   * `invalidate` (resetear a 0 reabriría la race para un resolve que ya capturó gen≥1).
+   */
+  private readonly generation = new Map<string, number>();
   private static readonly TTL_MS = 20_000;
 
   constructor(private readonly rest: RestGateway) {}
@@ -46,6 +59,14 @@ export class ActiveVehicleTypeResolver {
    * Vehículo activo del conductor para el ping. `fallback` (tipo) se usa si fleet no responde o no hay
    * vehículo operable (204): en ese caso devolvemos solo el tipo, SIN attrs (degradación honesta). La
    * clave de cache es el `userId` (lo que fleet usa como `driver_id`).
+   *
+   * INVARIANTE EPOCH (anti-TOCTOU): el GET a fleet es un punto de yield. Capturamos la generación de la key
+   * ANTES del await; al volver, solo cacheamos si la generación SIGUE igual. Si un `invalidate` corrió
+   * mientras la respuesta estaba en vuelo (swap de vehículo concurrente), la generación cambió y NO
+   * escribimos la cache: este `value` puede reflejar el vehículo VIEJO (fleet leyó antes de que el swap
+   * commiteara), y cachearlo re-envenenaría la entrada por todo el TTL. En ese caso devolvemos el `value`
+   * recién resuelto a ESTE caller (es lo mejor que tenemos para este ping puntual) pero sin persistirlo, así
+   * el próximo ping hace cache-miss y re-resuelve fresco (post-swap).
    */
   async resolve(
     identity: AuthenticatedUser,
@@ -55,6 +76,7 @@ export class ActiveVehicleTypeResolver {
     const now = Date.now();
     const cached = this.cache.get(key);
     if (cached && cached.expiresAt > now) return cached.value;
+    const gen = this.generation.get(key) ?? 0;
     try {
       const active = await this.rest
         .client('fleet')
@@ -62,16 +84,39 @@ export class ActiveVehicleTypeResolver {
       const value: ResolvedActiveVehicle = active
         ? {
             vehicleType: active.vehicleType,
+            vehicleId: active.id,
             seats: active.seats,
             segment: active.segment,
             vehicleYear: active.year,
             certifications: active.certifications,
           }
         : { vehicleType: fallback };
-      this.cache.set(key, { value, expiresAt: now + ActiveVehicleTypeResolver.TTL_MS });
+      // Guard epoch: solo cacheamos si NO hubo un invalidate mientras el GET estaba en vuelo. Si lo hubo
+      // (generación cambió), devolvemos el valor a este caller pero NO lo persistimos (anti re-envenenamiento).
+      if ((this.generation.get(key) ?? 0) === gen) {
+        this.cache.set(key, { value, expiresAt: now + ActiveVehicleTypeResolver.TTL_MS });
+      }
       return value;
     } catch {
       return { vehicleType: fallback };
     }
+  }
+
+  /**
+   * Invalida explícitamente la entrada cacheada de un conductor. La llama el comando que CAMBIA el vehículo
+   * activo (drivers.service.setActiveVehicle) tras un PATCH exitoso a fleet: sin esto el swap recién se
+   * reflejaría en el ping al vencer el TTL (ventana stale de ≤ TTL_MS, ADR-017 §5(d) landmine d.2). El
+   * próximo `resolve` ve cache-miss y re-lee fleet (server-authoritative). Operación local idempotente: si
+   * la key no estaba (TTL ya vencido o nunca resuelta), `delete` es no-op. La clave es el `userId` (lo que
+   * fleet usa como `driver_id`), igual que en `resolve`.
+   *
+   * Además de borrar la cache, INCREMENTA la generación (epoch) de la key: esto neutraliza los `resolve` EN
+   * VUELO. Sin esto, un `resolve` que disparó su GET a fleet ANTES del swap puede volver DESPUÉS del delete y
+   * re-escribir la cache con el vehículo VIEJO (TOCTOU read-then-invalidate), dejándola envenenada por todo
+   * el TTL. La generación NO se resetea a 0 (eso reabriría la race para un resolve que capturó gen≥1).
+   */
+  invalidate(userId: string): void {
+    this.cache.delete(userId);
+    this.generation.set(userId, (this.generation.get(userId) ?? 0) + 1);
   }
 }

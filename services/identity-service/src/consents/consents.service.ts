@@ -8,7 +8,7 @@ import { Injectable } from '@nestjs/common';
 import { isUniqueViolation } from '@veo/database';
 import { ValidationError, isUuidV7 } from '@veo/utils';
 import type { Consent } from '../generated/prisma';
-import { PrismaService } from '../infra/prisma.service';
+import { ConsentsRepository } from './consents.repository';
 
 /** Datos de un evento de aceptación de consentimiento (provienen del pasajero vía el BFF). */
 export interface RecordConsentInput {
@@ -41,7 +41,7 @@ export interface ConsentView {
 
 @Injectable()
 export class ConsentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: ConsentsRepository) {}
 
   /**
    * Inserta un nuevo consentimiento para `userId`. Operación APPEND-ONLY: solo `create`,
@@ -57,26 +57,22 @@ export class ConsentsService {
       throw new ValidationError('dedupKey debe ser un UUIDv7', { dedupKey: input.dedupKey });
     }
     try {
-      const consent = await this.prisma.write.consent.create({
-        data: {
-          userId,
-          dataProcessing: input.dataProcessing,
-          inCabinCamera: input.inCabinCamera,
-          location: input.location,
-          marketing: input.marketing,
-          policyVersion: input.policyVersion,
-          ip: input.ip,
-          dedupKey: input.dedupKey ?? null,
-        },
+      const consent = await this.repo.createConsent({
+        userId,
+        dataProcessing: input.dataProcessing,
+        inCabinCamera: input.inCabinCamera,
+        location: input.location,
+        marketing: input.marketing,
+        policyVersion: input.policyVersion,
+        ip: input.ip,
+        dedupKey: input.dedupKey ?? null,
       });
       return this.toView(consent);
     } catch (err) {
       // Doble-submit con la MISMA dedupKey → no-op idempotente: devolvemos el row existente.
       // El P2002 se valida CONTRA la columna del dedup (no cualquier UNIQUE): @veo/database.
       if (input.dedupKey !== undefined && isUniqueViolation(err, 'dedupKey')) {
-        const existing = await this.prisma.write.consent.findUnique({
-          where: { dedupKey: input.dedupKey },
-        });
+        const existing = await this.repo.findConsentByDedupKey(input.dedupKey);
         if (existing) return this.toView(existing);
       }
       throw err;
@@ -89,10 +85,7 @@ export class ConsentsService {
    * re-registrar el snapshot completo (append-only).
    */
   async getCurrent(userId: string): Promise<ConsentView | null> {
-    const consent = await this.prisma.read.consent.findFirst({
-      where: { userId },
-      orderBy: { acceptedAt: 'desc' },
-    });
+    const consent = await this.repo.findLatestConsent(userId);
     return consent ? this.toView(consent) : null;
   }
 

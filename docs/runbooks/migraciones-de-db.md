@@ -1,5 +1,12 @@
 # Runbook · Migraciones de base de datos
 
+> **SUPERSEDED (2026-06-24) por el modelo VPS self-hosted (FOUNDATION §0.7(c)).** En el carril VPS las
+> migraciones Prisma las corre **`infra/deploy/migrate-preview.sh`** en el host (no un Job K8s con hook
+> PreSync de ArgoCD). El `DATABASE_URL` sale de `.env`/docker-secrets/SOPS en el host (NO AWS Secrets
+> Manager/ESO) y apunta al **Postgres self-hosted** del VPS (NO RDS); las imágenes viven en **GHCR** (NO ECR).
+> El patrón expand/contract y las reglas de migraciones destructivas siguen vigentes. El cuerpo de abajo
+> (ArgoCD/ECR/RDS/ASM) se conserva como **registro histórico** del carril AWS reemplazado.
+
 > Riel automático de migraciones Prisma (Lote I-B) + procedimiento manual de emergencia.
 
 ## Responsable

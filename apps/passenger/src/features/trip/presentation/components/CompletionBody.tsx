@@ -74,6 +74,12 @@ export function CompletionBody({
         <RatingBody
           tripId={tripId}
           driverId={driverId}
+          // Identidad para el héroe del rating (design/veo.pen fTtR5): datos REALES del viaje.
+          driverName={trip.driver?.name ?? null}
+          vehicleLabel={
+            trip.vehicle ? `${trip.vehicle.make} ${trip.vehicle.model}` : null
+          }
+          plate={trip.vehicle?.plate ?? null}
           onDone={finishAndClose}
         />
       ) : null}

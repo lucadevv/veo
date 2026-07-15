@@ -12,11 +12,19 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { RolesGuard, type AuthenticatedUser } from '@veo/auth';
 import { ForbiddenError } from '@veo/utils';
-import { AdminRole, OfferingId, PricingMode, resolveCatalog } from '@veo/shared-types';
+import {
+  AdminRole,
+  OfferingId,
+  PricingMode,
+  ServiceType,
+  VehicleClass,
+  resolveCatalog,
+  type ResolvedOffering,
+} from '@veo/shared-types';
 import type { InternalRestClient } from '@veo/rpc';
 import { CatalogService, type CatalogView } from './catalog.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
-import { ReplaceCatalogDto } from './dto/catalog.dto';
+import { CreateOfferingDto, ReplaceCatalogDto } from './dto/catalog.dto';
 
 const admin: AuthenticatedUser = {
   userId: 'a1',
@@ -89,6 +97,55 @@ describe('CatalogService · proxy a trip-service', () => {
       'audit down',
     );
   });
+
+  it('POST /catalog/offerings → proxya el alta con createdBy de la identidad y AUDITA', async () => {
+    const created = { id: 'custom_abc', name: 'VEO Playa' } as unknown as ResolvedOffering;
+    const rest = { get: vi.fn(), put: vi.fn(), post: vi.fn().mockResolvedValue(created) };
+    const audit = { record: vi.fn().mockResolvedValue({ id: 'x', seq: '1', hash: 'h' }) };
+    const svc = new CatalogService(
+      rest as unknown as InternalRestClient,
+      audit as unknown as AuditRecorder,
+    );
+
+    const dto: CreateOfferingDto = {
+      name: 'VEO Playa',
+      vehicleClass: VehicleClass.CAR,
+      serviceType: ServiceType.RIDE,
+      mode: PricingMode.FIXED,
+      multiplier: 1.3,
+      minFareCents: 600,
+      enabled: true,
+    };
+    const out = await svc.createOffering(admin, dto);
+
+    expect(out).toBe(created);
+    // createdBy = el userId de la identidad firmada (no lo manda el cliente).
+    expect(rest.post).toHaveBeenCalledWith('/internal/catalog/offerings', {
+      identity: admin,
+      body: {
+        name: 'VEO Playa',
+        vehicleClass: 'CAR',
+        serviceType: 'RIDE',
+        mode: 'FIXED',
+        multiplier: 1.3,
+        minFareCents: 600,
+        enabled: true,
+        createdBy: 'a1',
+      },
+    });
+    expect(audit.record).toHaveBeenCalledWith(admin, {
+      action: 'catalog.offering_create',
+      resourceType: 'offering_catalog',
+      resourceId: 'custom_abc',
+      payload: {
+        id: 'custom_abc',
+        name: 'VEO Playa',
+        vehicleClass: 'CAR',
+        serviceType: 'RIDE',
+        mode: 'FIXED',
+      },
+    });
+  });
 });
 
 // ── RBAC (catalog:manage = ADMIN/SUPERADMIN/FINANCE) ──
@@ -117,6 +174,27 @@ describe('Catalog RBAC · catalog:manage (PUT /catalog)', () => {
   });
 });
 
+describe('Catalog RBAC · catalog:create (POST /catalog/offerings) — EXCLUSIVO SUPERADMIN', () => {
+  const CREATE = [AdminRole.SUPERADMIN]; // @Roles(SUPERADMIN) del método REEMPLAZA los de la clase.
+
+  it('SUPERADMIN → permitido', () => {
+    const guard = new RolesGuard(reflectorReturning(CREATE));
+    const su: AuthenticatedUser = { ...admin, roles: [AdminRole.SUPERADMIN] };
+    expect(guard.canActivate(ctxWithUser(su))).toBe(true);
+  });
+
+  it('ADMIN → 403 (crear una oferta es exclusivo SUPERADMIN, más que catalog:manage)', () => {
+    const guard = new RolesGuard(reflectorReturning(CREATE));
+    expect(() => guard.canActivate(ctxWithUser(admin))).toThrow(ForbiddenError);
+  });
+
+  it('FINANCE → 403', () => {
+    const guard = new RolesGuard(reflectorReturning(CREATE));
+    const fin: AuthenticatedUser = { ...admin, roles: [AdminRole.FINANCE] };
+    expect(() => guard.canActivate(ctxWithUser(fin))).toThrow(ForbiddenError);
+  });
+});
+
 // ── DTO validation (defensa en profundidad) ──
 async function errorsOf<T extends object>(cls: new () => T, payload: unknown): Promise<string[]> {
   const instance = plainToInstance(cls, payload);
@@ -136,10 +214,19 @@ describe('Catalog DTO · validación', () => {
     expect(await errorsOf(ReplaceCatalogDto, ok)).toEqual([]);
   });
 
-  it('rechaza un id fuera del catálogo', async () => {
+  it('rechaza un id fuera del catálogo (ni built-in ni custom_*)', async () => {
     expect(
       await errorsOf(ReplaceCatalogDto, { overrides: [{ id: 'veo_fantasma', enabled: true }] }),
     ).toContain('overrides');
+  });
+
+  it('ADR 013 · ACEPTA un id custom (custom_*) en el overlay (configurar una oferta custom)', async () => {
+    expect(
+      await errorsOf(ReplaceCatalogDto, {
+        overrides: [{ id: 'custom_abc123', enabled: true, multiplier: 1.5 }],
+        expectedVersion: 0,
+      }),
+    ).toEqual([]);
   });
 
   it('rechaza enabled no-boolean', async () => {
@@ -176,6 +263,23 @@ describe('Catalog DTO · validación', () => {
     expect(await errorsOf(ReplaceCatalogDto, ok)).toEqual([]);
   });
 
+  it('ADR 023 §3 · acepta los params por-servicio válidos (base/km/min, incl. 0)', async () => {
+    const ok = {
+      overrides: [
+        {
+          id: OfferingId.VEO_MECHANIC,
+          enabled: true,
+          baseFareCents: 2500,
+          // 0 es válido (call-out plano no cobra distancia/tiempo): @Min(0) lo acepta.
+          perKmCents: 0,
+          perMinCents: 0,
+        },
+      ],
+      expectedVersion: 0,
+    };
+    expect(await errorsOf(ReplaceCatalogDto, ok)).toEqual([]);
+  });
+
   it('B2 · rechaza mode inválido / multiplier ≤ 0 / minFareCents negativo', async () => {
     const badMode = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, mode: 'REGATEO' }] };
     expect(await errorsOf(ReplaceCatalogDto, badMode)).toContain('overrides');
@@ -189,5 +293,55 @@ describe('Catalog DTO · validación', () => {
       expectedVersion: 0,
     };
     expect(await errorsOf(ReplaceCatalogDto, tooHighMin)).toContain('overrides');
+  });
+
+  it('ADR 023 §3 · rechaza params por-servicio negativos o sobre el techo de cordura', async () => {
+    const badBase = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, baseFareCents: -1 }] };
+    expect(await errorsOf(ReplaceCatalogDto, badBase)).toContain('overrides');
+    const badKm = { overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, perKmCents: -1 }] };
+    expect(await errorsOf(ReplaceCatalogDto, badKm)).toContain('overrides');
+    // per-min por encima del techo (S/20 = 2000 céntimos) → rechazado (dedazo del admin).
+    const tooHighMin = {
+      overrides: [{ id: OfferingId.VEO_MOTO, enabled: true, perMinCents: 9_999 }],
+      expectedVersion: 0,
+    };
+    expect(await errorsOf(ReplaceCatalogDto, tooHighMin)).toContain('overrides');
+  });
+});
+
+describe('CreateOfferingDto · validación (ADR 013)', () => {
+  const valid = {
+    name: 'VEO Playa',
+    vehicleClass: 'CAR',
+    serviceType: 'RIDE',
+    mode: 'FIXED',
+    multiplier: 1.3,
+    minFareCents: 600,
+  };
+
+  it('válido → sin errores', async () => {
+    expect(await errorsOf(CreateOfferingDto, valid)).toEqual([]);
+  });
+
+  it('rechaza name corto + vehicleClass/serviceType/mode fuera de los enums', async () => {
+    const errs = await errorsOf(CreateOfferingDto, {
+      ...valid,
+      name: 'X',
+      vehicleClass: 'PLANE',
+      serviceType: 'BOAT',
+      mode: 'BARTER',
+    });
+    expect(errs).toEqual(
+      expect.arrayContaining(['name', 'vehicleClass', 'serviceType', 'mode']),
+    );
+  });
+
+  it('rechaza multiplier > 10 y minFareCents sobre el techo de cordura', async () => {
+    const errs = await errorsOf(CreateOfferingDto, {
+      ...valid,
+      multiplier: 50,
+      minFareCents: 200_000,
+    });
+    expect(errs).toEqual(expect.arrayContaining(['multiplier', 'minFareCents']));
   });
 });

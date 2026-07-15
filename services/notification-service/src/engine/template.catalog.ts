@@ -13,6 +13,7 @@ export const TEMPLATE_KEYS = {
   TRIP_ASSIGNED: 'trip.assigned',
   TRIP_ACCEPTED: 'trip.accepted',
   TRIP_STARTED: 'trip.started',
+  TRIP_DESTINATION_CHANGED: 'trip.destination_changed',
   TRIP_ARRIVING: 'trip.arriving',
   TRIP_ARRIVED: 'trip.arrived',
   TRIP_ARRIVED_WAIT: 'trip.arrived_wait',
@@ -33,11 +34,16 @@ export const TEMPLATE_KEYS = {
   PAYMENT_PENALTY_RECORDED: 'payment.penalty_recorded',
   PAYMENT_PENALTY_COLLECTED: 'payment.penalty_collected',
   PAYMENT_PENALTY_DRIVER_COMP: 'payment.penalty_driver_comp',
+  PAYOUT_PROCESSED: 'payout.processed',
+  PAYOUT_FAILED_CENTRAL_ALERT: 'payout.failed_central_alert',
   PAYMENT_CENTRAL_ALERT: 'payment.central_alert',
   CHAT_MESSAGE: 'chat.message',
   CONTACT_OTP: 'contact.otp',
   VEHICLE_MODEL_APPROVED: 'fleet.vehicle_model_approved',
   VEHICLE_MODEL_REJECTED: 'fleet.vehicle_model_rejected',
+  DRIVER_APPROVED: 'driver.approved',
+  DRIVER_REJECTED: 'driver.rejected',
+  DOCUMENT_REJECTED: 'fleet.document_rejected',
 } as const;
 
 /** Key TIPADA del catálogo: referenciar un template inexistente no compila. */
@@ -61,7 +67,7 @@ export type InboxCategory = 'trip' | 'safety' | 'payment' | 'promo' | 'general';
 export function categoryForTemplate(key: string): InboxCategory {
   if (key.startsWith('trip.') || key.startsWith('chat.')) return 'trip';
   if (key.startsWith('panic.') || key.startsWith('contact.')) return 'safety';
-  if (key.startsWith('payment.')) return 'payment';
+  if (key.startsWith('payment.') || key.startsWith('payout.')) return 'payment';
   if (key.startsWith('promo.')) return 'promo';
   return 'general';
 }
@@ -130,6 +136,15 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Tu viaje empezo',
     body: 'Tu viaje empezo. Comparte tu trayecto en vivo con tu familia desde la app.',
+  },
+  {
+    // RC5 · alerta de seguridad del menor: el destino de un viaje en modo nino cambio. Va al guardian (dueno
+    // de la cuenta) para que confirme o reaccione ante una posible redireccion del nino.
+    key: TEMPLATE_KEYS.TRIP_DESTINATION_CHANGED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Cambio de destino del viaje',
+    body: 'El destino del viaje en modo nino cambio. Si no fuiste tu, abre la app y revisa el viaje ahora.',
   },
   {
     key: TEMPLATE_KEYS.TRIP_ARRIVING,
@@ -281,6 +296,26 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     body: 'Tu conductor te escribio: {{preview}}',
   },
   {
+    // Push al CONDUCTOR cuando su liquidación se DESEMBOLSÓ de verdad (ADR-015 D7: PROCESSED confirmado =
+    // la plata salió). Monto NETO en soles desde amountCents. Sin PII en el payload del evento (§0.7); el
+    // copy lo compone notification-service. La app abre su billetera (deep-link Wallet).
+    key: TEMPLATE_KEYS.PAYOUT_PROCESSED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Tu liquidacion se proceso',
+    body: 'Tu liquidacion se proceso · S/{{amount}} en camino a tu billetera.',
+  },
+  {
+    // Aviso al OPERADOR/central (ADR-015 D7 opcional) cuando el desembolso FALLA (PROCESSING → FAILED): la
+    // plata NO salió, el operador puede reintentar. Reusa el riel webhook a la central (CENTRAL_ALERT_WEBHOOK_URL),
+    // mismo carril que PAYMENT_CENTRAL_ALERT — NO es un canal nuevo. Sin PII: solo IDs + monto + período.
+    key: TEMPLATE_KEYS.PAYOUT_FAILED_CENTRAL_ALERT,
+    channel: NotificationChannel.WEBHOOK,
+    locale: LOCALE,
+    subject: null,
+    body: 'PAYOUT_FALLIDO payout={{payoutId}} conductor={{driverId}} periodo={{period}}',
+  },
+  {
     key: TEMPLATE_KEYS.PAYMENT_CENTRAL_ALERT,
     channel: NotificationChannel.WEBHOOK,
     locale: LOCALE,
@@ -309,5 +344,33 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     locale: LOCALE,
     subject: 'Modelo rechazado',
     body: 'Tu solicitud de {{make}} {{model}} no fue aprobada. Contacta a soporte.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador APRUEBA sus antecedentes: ya puede operar (cierra el loop, el
+    // conductor sale de "En revisión"). Sin PII en el payload (§0.7); la app abre su gate de registro.
+    key: TEMPLATE_KEYS.DRIVER_APPROVED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: '¡Ya puedes manejar!',
+    body: 'Tu cuenta de conductor fue aprobada. Abre VEO y empieza tu primer turno.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador RECHAZA sus antecedentes: debe corregir y reenviar. El MOTIVO
+    // NO viaja en el push (es PII) — la app lo resuelve en la pantalla de rechazo vía GET /drivers/me.
+    key: TEMPLATE_KEYS.DRIVER_REJECTED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Revisá tu solicitud',
+    body: 'Tu solicitud de conductor necesita correcciones. Abre VEO para ver el motivo y reenviar.',
+  },
+  {
+    // Push al CONDUCTOR cuando el operador RECHAZA UNO de sus documentos (reviewDocument). Copy GENÉRICO: no
+    // nombra el documento (evita leak/complejidad de i18n del enum); la app resuelve CUÁL doc + su motivo vía
+    // GET /drivers/me/documents. Cierra la asimetría con DRIVER_REJECTED (rechazo del alta), que sí avisaba.
+    key: TEMPLATE_KEYS.DOCUMENT_REJECTED,
+    channel: NotificationChannel.PUSH,
+    locale: LOCALE,
+    subject: 'Revisá tu documento',
+    body: 'Uno de tus documentos necesita correcciones. Abre VEO para ver cuál y volver a enviarlo.',
   },
 ];

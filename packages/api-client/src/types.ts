@@ -83,6 +83,12 @@ export const sessionUser = z.object({
   type: z.enum(['passenger', 'driver', 'admin']),
   roles: z.array(z.string()),
   mfaFresh: z.boolean(),
+  /**
+   * OVERLAY de visibilidad (ADR-025 §3 · Fase 2): los permisos que el superadmin le RESTÓ al actor según su(s)
+   * rol(es). El front compone `base ∧ ¬oculto` en `can()` → nav/botones/páginas de esos permisos se OCULTAN.
+   * Opcional (fail-safe): ausente/vacío = sin overrides = rige la base pura. La AUTORIDAD sigue siendo el server.
+   */
+  hiddenPermissions: z.array(z.string()).optional(),
 });
 export type SessionUser = z.infer<typeof sessionUser>;
 
@@ -137,8 +143,19 @@ export const tripSummary = z.object({
   status: adminTripStatus,
   passengerId: z.string(),
   driverId: z.string().nullable(),
+  /** Nombre del pasajero (enriquecido on-read por el bff · PII gateada a Compliance+ → null para sub-Compliance). */
+  passengerName: z.string().nullable(),
+  /** Nombre del conductor (enriquecido on-read · PII gateada → null sub-Compliance; null si aún sin asignar). */
+  driverName: z.string().nullable(),
   fareCents: z.number().int(),
   createdAt: z.string(),
+  /**
+   * Modo de despacho del viaje (FIXED|PUJA): enriquecido on-read desde trip-service (valor CONGELADO
+   * Trip.dispatchMode, resolve-once-persist ADR-011), NO del read-model event-proyectado (que pierde el
+   * flip FIXED→PUJA del re-bid). `null` si trip-service no lo resolvió (degradación honesta → "—"). No es
+   * PII (mecanismo de precio del viaje) → para todos los roles.
+   */
+  dispatchMode: z.enum(['FIXED', 'PUJA']).nullable(),
 });
 export type TripSummary = z.infer<typeof tripSummary>;
 
@@ -175,6 +192,22 @@ export const fleetDocumentStatus = z.enum([
   'REJECTED',
 ]);
 
+/**
+ * MOTIVO por el que un vehículo NO opera (Lote 4). Espeja `VehicleOperabilityReason` de @veo/shared-types
+ * (fuente de verdad cross-service) y `deriveVehicleOperability` de fleet-service. DOCS = docs SOAT/ITV no
+ * operables o vencidos; NO_SPEC = falta la ficha (modelSpec). Tiparlo (no `z.string()`) ata el label del panel
+ * al set real — comparar contra un literal fuera de él es error de compilación, no un magic string mudo.
+ */
+export const vehicleOperabilityReason = z.enum(['DOCS', 'NO_SPEC']);
+
+/**
+ * Sub-lote 3A · cara/lado de una IMAGEN de documento (múltiples imágenes por documento). Espeja el enum
+ * `DocumentSide` de fleet-service (Prisma) y @veo/shared-types. SINGLE = una sola cara/foto; FRONT/BACK =
+ * anverso/reverso (DNI). Definido acá (base compartida) para que admin.ts y mobile.ts lo reusen sin colisión.
+ */
+export const documentSide = z.enum(['FRONT', 'BACK', 'SINGLE']);
+export type DocumentSideValue = z.infer<typeof documentSide>;
+
 export const fleetDocumentView = z.object({
   id: z.string(),
   ownerType: z.enum(['DRIVER', 'VEHICLE']),
@@ -182,6 +215,16 @@ export const fleetDocumentView = z.object({
   type: z.string(),
   status: fleetDocumentStatus,
   expiresAt: z.string().nullable(),
+  /** ISO-8601 de creación del documento (encolado para el SLA de la cola de Revisiones); null si sin dato. */
+  createdAt: z.string().nullable(),
+  /**
+   * Imágenes del documento con su presigned GET URL (visor "Ver" del detalle de vehículo · sub-lote 3A). El
+   * admin-bff las firma on-read contra media-service (TTL corto). `[]` si no se subió ninguna (degradación
+   * honesta: la UI no muestra "Ver"); `url` null si la firma falló (fail-soft, no bloquea la revisión).
+   */
+  images: z.array(
+    z.object({ url: z.string().nullable(), side: documentSide, order: z.number().int() }),
+  ),
 });
 export type FleetDocumentView = z.infer<typeof fleetDocumentView>;
 
@@ -194,19 +237,128 @@ export type FleetDocumentView = z.infer<typeof fleetDocumentView>;
 export const payoutStatus = z.enum(['PENDING', 'PROCESSING', 'PROCESSED', 'HELD', 'FAILED']);
 export type PayoutStatus = z.infer<typeof payoutStatus>;
 
+/**
+ * Desglose de la liquidación (ADR-015 D6). El conductor ya ve gross/commission/neto en su app; el panel
+ * FINANCE debe tener PARIDAD para auditar. Dinero SIEMPRE Int céntimos (formatear a S/ SOLO en la UI).
+ *  - `grossCents`: ticket bruto del período (base de la comisión).
+ *  - `commissionCents`: retención de la plataforma (commission(gross, rate)).
+ *  - `amountCents`: NETO desembolsado al conductor (= gross − commission + propinas/bonos netos).
+ *  - `processedAt`: instante en que el riel confirmó la salida (PROCESSED); null mientras no se procesó.
+ *  - `heldReason`: motivo de retención (solo poblado en HELD); null en el resto de estados.
+ * Ampliación ADDITIVE sobre el contrato previo (amountCents queda = NETO): no rompe consumidores.
+ */
 export const payoutView = z.object({
   id: z.string(),
   driverId: z.string(),
+  // Nombre del conductor resuelto en el admin-bff (identity, batch anti-N+1). NULLABLE por DOS motivos honestos:
+  //  (1) PII de IDENTIDAD (Ley 29733): solo Compliance+ la ve — un operador FINANCE puro recibe null (usar driverId).
+  //  (2) degradación: identity no resolvió el id (id fuera de espacio / conductor purgado) → null, nunca inventado.
+  driverName: z.string().nullable(),
+  grossCents: z.number().int(),
+  commissionCents: z.number().int(),
   amountCents: z.number().int(),
   status: payoutStatus,
   period: z.string(),
+  processedAt: z.string().nullable(),
+  heldReason: z.string().nullable(),
 });
 export type PayoutView = z.infer<typeof payoutView>;
+
+/**
+ * Detalle de un payout (GET /finance/payouts/:id) para el panel FINANCE — el breakdown de AUDITORÍA que la lista
+ * no trae. Abre el NETO firmado `debtAppliedCents` en sus dos componentes por FK: `debtSettledCents` (deuda CASH
+ * deducida en ESTE payout, DriverDebt.settledInPayoutId) y `creditBackCents` (credit-back acreditado,
+ * DriverCredit.appliedInPayoutId). Suma la traza del desembolso (`dedupKey`, `externalRef`) y `createdAt`.
+ * Dinero SIEMPRE Int céntimos. Invariante: `debtAppliedCents = debtSettledCents − creditBackCents`.
+ */
+export const payoutDetailView = payoutView.extend({
+  debtSettledCents: z.number().int().nonnegative(),
+  creditBackCents: z.number().int().nonnegative(),
+  debtAppliedCents: z.number().int(),
+  // Bono de incentivo pagado en ESTE payout (suma de IncentiveProgress.rewardGrantedCents ligados por
+  // paidInPayoutId). Componente NETO del monto (entra directo, sin comisión). 0 si el payout no llevó bono.
+  bonusCents: z.number().int().nonnegative(),
+  dedupKey: z.string().nullable(),
+  externalRef: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type PayoutDetailView = z.infer<typeof payoutDetailView>;
+
+/**
+ * Un viaje incluido en un payout (GET /finance/payouts/:id/trips). El payout NO persiste sus líneas de viaje:
+ * la lista se RECONSTRUYE por período (los Payment del conductor capturados en [periodStart, periodEnd) con la
+ * MISMA condición que usó el run de liquidación). `amountCents` = BRUTO del viaje (grossCents del cobro).
+ * `method` = riel del cobro (YAPE/PLIN/CARD/…) si está. Dinero SIEMPRE Int céntimos.
+ */
+export const payoutTripView = z.object({
+  tripId: z.string(),
+  amountCents: z.number().int(),
+  capturedAt: z.string().nullable(),
+  method: z.string().nullable(),
+});
+export type PayoutTripView = z.infer<typeof payoutTripView>;
+
+/**
+ * Resultado de "viajes incluidos" de un payout: la lista (capada a los primeros N, ver `trips`) + el conteo
+ * TOTAL de viajes del período (`totalCount`) para el "+N más" del panel. Reconstrucción por período — si el
+ * período del payout se solapa con otro run, la lista podría diferir de lo efectivamente agregado.
+ */
+export const payoutTripsResult = z.object({
+  trips: z.array(payoutTripView),
+  totalCount: z.number().int().nonnegative(),
+});
+export type PayoutTripsResult = z.infer<typeof payoutTripsResult>;
+
+/**
+ * KPIs de la pantalla de Liquidaciones (GET /finance/payouts/stats) — agregado del panel FINANCE.
+ * `totalCents` = volumen TOTAL liquidado (suma de `amountCents` de TODOS los payouts, Int céntimos, cualquier
+ * estado); el resto son CONTEOS por estado del enum `PayoutStatus` (no montos). Un solo `groupBy` en
+ * payment-service, sin materializar filas. Dinero SIEMPRE Int céntimos.
+ */
+export const payoutStatsView = z.object({
+  totalCents: z.number().int(),
+  // Desglose de VOLUMEN (Int céntimos) por bucket, del MISMO groupBy que los conteos (la query ya suma
+  // amountCents por status; antes se colapsaba en totalCents y se descartaba). `paidCents` = PROCESSED
+  // (plata que ya salió), `heldCents` = HELD (retenida en review), `failedCents` = FAILED (rechazada).
+  paidCents: z.number().int().nonnegative(),
+  heldCents: z.number().int().nonnegative(),
+  failedCents: z.number().int().nonnegative(),
+  pendingCount: z.number().int().nonnegative(),
+  processingCount: z.number().int().nonnegative(),
+  processedCount: z.number().int().nonnegative(),
+  heldCount: z.number().int().nonnegative(),
+  failedCount: z.number().int().nonnegative(),
+});
+export type PayoutStatsView = z.infer<typeof payoutStatsView>;
+
+/**
+ * Corrida de conciliación diaria (GET /finance/reconciliation · BR-P07) — compara lo capturado en DB (Yape/Plin)
+ * contra el extracto del gateway. `discrepancyPct` (0..1) + `alerted` (true = sobre umbral) resumen el resultado;
+ * el detalle (montos DB vs extracto + conteos) se aplana desde el `details` Json de la corrida. Corridas viejas
+ * sin `details` exponen period null + montos/conteos en 0. Dinero SIEMPRE Int céntimos.
+ */
+export const reconciliationRunView = z.object({
+  id: z.string(),
+  ranAt: z.string(),
+  discrepancyPct: z.number(),
+  alerted: z.boolean(),
+  periodStart: z.string().nullable(),
+  periodEnd: z.string().nullable(),
+  dbTotalCents: z.number().int(),
+  statementTotalCents: z.number().int(),
+  dbCount: z.number().int().nonnegative(),
+  statementCount: z.number().int().nonnegative(),
+});
+export type ReconciliationRunView = z.infer<typeof reconciliationRunView>;
 
 export const auditEntryView = z.object({
   id: z.string(),
   seq: z.string(),
   actorId: z.string().nullable(),
+  // Actor enriquecido on-read (roster de operadores): nombre + rol del staff que ejecutó la acción. null si el
+  // actor no es un operador (evento de dominio: conductor/pasajero/sistema) o no resolvió → la UI cae al actorId.
+  actorName: z.string().nullable().optional(),
+  actorRole: z.string().nullable().optional(),
   action: z.string(),
   resourceType: z.string(),
   resourceId: z.string(),

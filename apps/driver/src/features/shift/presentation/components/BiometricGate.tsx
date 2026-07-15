@@ -1,8 +1,17 @@
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Banner, Button, IconButton, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Banner, Button, SafeScreen, SuccessCheck, Text, useTheme } from '@veo/ui-kit';
 import { IconChevronLeft, IconShield } from '../../../../shared/presentation/icons';
-import { Appear, Pulse } from './motion';
+import { Reveal } from '../../../../shared/presentation/components/motion';
+import { Pulse } from './motion';
+// Cross-feature (pragmático): la cámara frontal en vivo vive hoy en las components del registro. El
+// biométrico de turno reusa el MISMO lenguaje que el KYC del alta (cara en vivo en círculo) para no
+// divergir. DEUDA: promover BiometricCameraPreview a `shared/` para no acoplar shift→registro.
+import {
+  BiometricCameraPreview,
+  type BiometricCameraErrorPayload,
+} from '../../../registration/presentation/components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 /** Aviso de resultado del flujo biométrico (mismo contrato que `Banner`). */
 export interface BiometricGateBanner {
@@ -14,7 +23,7 @@ export interface BiometricGateBanner {
 export interface BiometricGateProps {
   /** Título de la barra superior. */
   topTitle: string;
-  /** Titular grande centrado (qué se va a hacer). */
+  /** Titular grande (qué se va a hacer). Estándar Tesla: alineado a la izquierda, `display`. */
   heading: string;
   /** Texto explicativo del proceso. */
   body: string;
@@ -22,20 +31,32 @@ export interface BiometricGateProps {
   banner: BiometricGateBanner | null;
   /** Texto del botón de captura (lo decide el flujo según su fase). */
   ctaLabel: string;
-  /** Estado de carga del flujo: deshabilita y muestra spinner. */
+  /** Estado de carga del flujo (captura de liveness en curso): deshabilita y muestra spinner. */
   loading: boolean;
   /** Deshabilita el CTA sin spinner (p. ej. bloqueo biométrico de 1h: no se puede reintentar todavía). */
   disabled?: boolean;
-  /** Dispara la captura biométrica (cableado al hook del flujo). */
+  /** Dispara la captura biométrica (cableado al hook del flujo). El gate ORQUESTA el handoff de cámara. */
   onCapture: () => void;
   /** Retroceso de navegación. */
   onBack: () => void;
 }
 
+/** Estado HONESTO de la cámara frontal (mismo criterio que el KYC del registro). */
+type CameraState = 'starting' | 'ready' | 'error';
+
+/** Milisegundos que esperamos tras DESMONTAR la preview antes de disparar la captura nativa: el módulo
+ *  nativo es el ÚNICO dueño de la cámara durante el liveness, así que la preview debe LIBERARLA primero. */
+const CAMERA_HANDOFF_MS = 400;
+
+const RING = 240;
+
 /**
- * Scaffold premium compartido para el gate biométrico (inicio de turno y enrolamiento).
- * Es puramente presentacional: la lógica/hooks viven en cada pantalla. Mantiene ambas vistas
- * visualmente coherentes (escudo con halo cian, titular, explicación, aviso y CTA fija inferior).
+ * Gate biométrico premium compartido (inicio de turno y re-enrolamiento). Habla el MISMO lenguaje que el
+ * KYC del alta (`IdentityVerificationScreen`): hero editorial a la izquierda (`display`), cara EN VIVO en
+ * círculo mientras encuadrás, banda de estado y CTA fija inferior. Puramente presentacional salvo el
+ * HANDOFF de cámara que orquesta: muestra la preview (te ves), y al capturar la desmonta y libera el sensor
+ * ANTES de llamar al grabber nativo de liveness (que abre/cierra la cámara él mismo). Degradación honesta:
+ * si la cámara falla, cae al flujo sin preview (el liveness sigue funcionando).
  */
 export const BiometricGate = ({
   topTitle,
@@ -50,18 +71,75 @@ export const BiometricGate = ({
 }: BiometricGateProps): React.JSX.Element => {
   const theme = useTheme();
 
+  const [cameraState, setCameraState] = useState<CameraState>('starting');
+  // `capturePending`: el conductor tocó verificar → desmontamos la preview para liberar la cámara y, tras el
+  // handoff, disparamos la captura nativa. Mantiene el sensor sin conflicto (preview ↔ grabber de liveness).
+  const [capturePending, setCapturePending] = useState(false);
+
+  const success = banner?.tone === 'success';
+  const capturing = loading || capturePending;
+  // Encuadrando: ni capturando ni con éxito ni bloqueado. Solo acá vive la preview en vivo.
+  const framing = !capturing && !success && !disabled;
+  const showPreview = framing && cameraState !== 'error';
+  const cameraReady = cameraState === 'ready';
+
+  const handleCameraReady = useCallback(() => setCameraState('ready'), []);
+  const handleCameraError = useCallback(
+    (_payload: BiometricCameraErrorPayload) => setCameraState('error'),
+    [],
+  );
+
+  // Al volver a encuadrar (tras un fallo/reintento) reseteamos la cámara para re-montar la preview.
+  useEffect(() => {
+    if (framing && !capturePending) {
+      setCameraState((prev) => (prev === 'error' ? prev : 'starting'));
+    }
+    // solo al entrar/salir de framing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [framing]);
+
+  // Handoff: tras desmontar la preview (capturePending oculta la cámara), esperamos a que el sensor se
+  // libere y recién ahí disparamos la captura nativa. Ref para no re-registrar el timer.
+  const captureRef = useRef(onCapture);
+  captureRef.current = onCapture;
+  useEffect(() => {
+    if (!capturePending) {
+      return;
+    }
+    const id = setTimeout(() => {
+      captureRef.current();
+      setCapturePending(false);
+    }, CAMERA_HANDOFF_MS);
+    return () => clearTimeout(id);
+  }, [capturePending]);
+
+  // CTA: con cámara lista → handoff (desmontar preview → capturar). Con cámara caída → captura directa
+  // (degradación honesta, el liveness no necesita la preview). Iniciando → el botón está deshabilitado.
+  const onCta = useCallback(() => {
+    if (cameraReady) {
+      setCapturePending(true);
+    } else if (cameraState === 'error') {
+      captureRef.current();
+    }
+  }, [cameraReady, cameraState]);
+
+  const ctaDisabled = disabled || (framing && cameraState === 'starting');
+
   return (
     <SafeScreen
       scroll
       header={
         <View style={styles.header}>
-          <IconButton
+          {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+              TODA la app — espeja al TopBar). */}
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel={topTitle}
-            variant="surface"
-            size="md"
-            icon={<IconChevronLeft size={22} color={theme.colors.ink} />}
+            hitSlop={12}
             onPress={onBack}
-          />
+          >
+            <IconChevronLeft size={28} color={theme.colors.ink} strokeWidth={2.25} />
+          </Pressable>
           <Text variant="title3" numberOfLines={1} style={styles.headerTitle}>
             {topTitle}
           </Text>
@@ -73,78 +151,123 @@ export const BiometricGate = ({
           variant="primary"
           size="lg"
           fullWidth
-          loading={loading}
-          disabled={disabled}
-          onPress={onCapture}
+          loading={capturing}
+          disabled={ctaDisabled}
+          onPress={onCta}
         />
       }
     >
-      <View style={[styles.body, { paddingTop: theme.spacing['3xl'] }]}>
-        {/* Escudo en círculo de superficie con halo cian que respira (lenguaje Midnight Motion).
-            El halo se acelera/intensifica durante la captura y el escudo late solo en ese momento;
-            la lógica biométrica no cambia. */}
-        <View style={styles.haloWrap}>
-          <Pulse
-            active
-            period={loading ? 900 : 2200}
-            minOpacity={0.06}
-            maxOpacity={loading ? 0.26 : 0.16}
-            maxScale={loading ? 1.18 : 1.1}
-            style={[styles.haloGlow, { backgroundColor: theme.colors.accent }]}
-          >
-            {null}
-          </Pulse>
-          <Pulse active={loading} period={1100} minOpacity={1} maxScale={1.04}>
-            <View
-              style={[
-                styles.iconCircle,
-                { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.accent },
-              ]}
-            >
-              <IconShield size={52} color={theme.colors.accent} strokeWidth={1.8} />
-            </View>
-          </Pulse>
-        </View>
-
-        <Appear
-          delay={80}
-          style={[styles.copy, { marginTop: theme.spacing['2xl'], gap: theme.spacing.sm }]}
-        >
-          <Text variant="title2" align="center">
-            {heading}
-          </Text>
-          <Text variant="callout" color="inkMuted" align="center" style={styles.bodyText}>
+      <View style={styles.body}>
+        {/* Hero editorial a la IZQUIERDA (estándar Tesla, igual que el KYC del alta): título `display`
+            + subtítulo muted. El círculo de la cara va centrado aparte (es el foco visual). */}
+        <Reveal delay={40} style={styles.intro}>
+          <Text variant="display">{heading}</Text>
+          <Text variant="callout" color="inkMuted">
             {body}
           </Text>
-        </Appear>
+        </Reveal>
+
+        {/* Zona del círculo: cambia por fase, sin perder el centro. */}
+        <Reveal delay={120} spring style={styles.ringArea}>
+          {success ? (
+            // Sello de éxito CANÓNICO (@veo/ui-kit). animate=false: la entrada la da el Reveal de arriba.
+            <SuccessCheck size={120} animate={false} />
+          ) : showPreview && cameraReady ? (
+            // Cara EN VIVO recortada en círculo (espejada, selfie natural). Se desmonta al capturar.
+            <View
+              style={[
+                styles.circle,
+                {
+                  borderColor: hexAlpha(theme.colors.accent, 0.6),
+                  backgroundColor: theme.colors.bg,
+                },
+              ]}
+            >
+              <BiometricCameraPreview
+                style={StyleSheet.absoluteFill}
+                mirrored
+                onCameraReady={handleCameraReady}
+                onCameraError={(event) => handleCameraError(event.nativeEvent)}
+              />
+            </View>
+          ) : showPreview ? (
+            // La cámara arranca: montamos el nativo (dispara onCameraReady/Error) detrás de un spinner.
+            <View style={[styles.circle, styles.centered, { borderColor: theme.colors.border }]}>
+              <BiometricCameraPreview
+                style={StyleSheet.absoluteFill}
+                mirrored
+                onCameraReady={handleCameraReady}
+                onCameraError={(event) => handleCameraError(event.nativeEvent)}
+              />
+              <ActivityIndicator size="large" color={theme.colors.accent} />
+            </View>
+          ) : (
+            // Capturando (la cámara la tiene el grabber nativo) o degradado (cámara caída): escudo con halo
+            // que respira — se acelera durante la captura. Sin data falsa: no fingimos una preview.
+            <View style={styles.centered}>
+              <Pulse
+                active
+                period={capturing ? 900 : 2200}
+                minOpacity={0.06}
+                maxOpacity={capturing ? 0.26 : 0.14}
+                maxScale={capturing ? 1.18 : 1.08}
+                style={[styles.halo, { backgroundColor: theme.colors.accent }]}
+              >
+                {null}
+              </Pulse>
+              <View
+                style={[
+                  styles.iconCircle,
+                  {
+                    backgroundColor: theme.colors.surfaceElevated,
+                    borderColor: theme.colors.accent,
+                  },
+                ]}
+              >
+                <IconShield size={52} color={theme.colors.accent} strokeWidth={1.8} />
+              </View>
+            </View>
+          )}
+        </Reveal>
 
         {banner ? (
-          <Appear style={{ marginTop: theme.spacing['2xl'] }}>
+          <Reveal spring style={styles.bannerWrap}>
             <Banner tone={banner.tone} title={banner.title} description={banner.description} />
-          </Appear>
+          </Reveal>
         ) : null}
       </View>
     </SafeScreen>
   );
 };
 
-const HALO = 132;
 const ICON_CIRCLE = 104;
+const HALO = 160;
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   headerTitle: { flexShrink: 1 },
-  body: { flex: 1, alignItems: 'center' },
-  haloWrap: {
-    width: HALO,
-    height: HALO,
+  body: { flex: 1, paddingTop: 12, gap: 24 },
+  intro: { gap: 10, marginTop: 12 },
+  ringArea: {
+    height: RING + 20,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'center',
+    width: '100%',
   },
-  haloGlow: {
-    ...StyleSheet.absoluteFill,
+  centered: { alignItems: 'center', justifyContent: 'center' },
+  circle: {
+    width: RING,
+    height: RING,
+    borderRadius: RING / 2,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  halo: {
+    position: 'absolute',
+    width: HALO,
+    height: HALO,
     borderRadius: HALO / 2,
-    // Opacidad baja: tiñe el lienzo oscuro como un resplandor cian sin lavar el fondo.
     opacity: 0.12,
   },
   iconCircle: {
@@ -155,6 +278,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  copy: { alignItems: 'center' },
-  bodyText: { maxWidth: 320 },
+  bannerWrap: { marginTop: 4 },
 });

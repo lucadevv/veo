@@ -5,33 +5,62 @@ import type {
   TripResource,
 } from '@veo/api-client';
 import {useIsFocused, useNavigation} from '@react-navigation/native';
+import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
-import {RoutePin, TOUCH_TARGET, useTheme} from '@veo/ui-kit';
+import {RoutePin, useTheme} from '@veo/ui-kit';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {ScrollView, StyleSheet, View} from 'react-native';
+import {
+  Image,
+  Keyboard,
+  Platform,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import Svg, {
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
-import type {RootStackParamList} from '../../../../navigation/types';
+import type {
+  MainTabsParamList,
+  RootStackParamList,
+} from '../../../../navigation/types';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
+import {MapViewModeButton} from '../../../../shared/presentation/components/MapViewModeButton';
+import {decodePolylineToCoordinates} from '../../../../shared/utils/polyline';
+// Renombrado de home-map.jpg: Metro cacheaba el asset VIEJO por hash (el sim mostraba solo nubes,
+// sin la ruta azul de la imagen real) — nombre nuevo = URL nueva = caché bypasseada.
+import homeMapBackdrop from '../../../../shared/assets/brand/home-map-light.jpg';
 import {
   DraggableSheet,
   type DraggableSheetHandle,
-} from '../../../../shared/presentation/components/DraggableSheet';
+  type SnapPoint,
+} from '@veo/ui-kit';
 import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
-import {useNearbyVehicles} from '../../../dispatch/presentation/hooks/useNearbyVehicles';
-import {useAutocomplete} from '../../../maps/presentation/hooks/useAutocomplete';
+import {useNearbyVehicles} from '../../../../core/query/useNearbyVehicles';
+import {useAutocomplete} from '../../../../shared/presentation/hooks/useAutocomplete';
 import {useRideDraftStore} from '../../../maps/presentation/stores/rideDraftStore';
 import {useSavedPlacesStore} from '../../../places/presentation/stores/savedPlacesStore';
 import {DebtSheet} from '../../../payments/presentation';
-import {usePushPermission} from '../../../notifications/presentation/hooks/usePushPermission';
+import {usePushPermission} from '../../../../core/notifications/usePushPermission';
 import {PushPrePrompt} from '../../../notifications/presentation/components/PushPrePrompt';
-import {usePanicAutoTrigger} from '../../../panic/presentation';
+import {usePanicAutoTrigger} from '../../../../core/panic/usePanicAutoTrigger';
 import {HomeTopBar} from '../components/HomeTopBar';
 import {TripTopBar} from '../components/TripTopBar';
-import {useCurrentLocation} from '../hooks/useCurrentLocation';
-import {usePassengerTripSocket} from '../hooks/usePassengerTripSocket';
+import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
+import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import {useWaypointProposal} from '../hooks/useWaypointProposal';
 import {useOfferBoard} from '../hooks/useOfferBoard';
 import {useHydrateActiveTrip} from '../hooks/useHydrateActiveTrip';
@@ -67,10 +96,45 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
  *  - `0.92` (expandido): casi pantalla completa; la lista entera, scrolleable.
  * La BÚSQUEDA es una pantalla aparte (`Search`), abierta al tocar el buscador.
  */
-const SNAP_POINTS = ['content', 0.92] as const;
+const SNAP_POINTS = ['content', {content: 0.94}] as const;
 const PEEK_MAX_FRACTION = 0.5;
 const PEEK_INDEX = 0;
 const FULL_INDEX = SNAP_POINTS.length - 1;
+/** Alto de la TabBar flotante (pill + margen) para que el sheet del Home idle NO quede debajo. */
+const HOME_TABBAR_CLEARANCE = 88;
+/**
+ * Dónde ARRANCA la hoja del Home idle, como fracción de la pantalla (pen P/Home: HomeContent en
+ * y=190 de 844). Fija la "ventana" de imagen visible arriba en ~22.5%: más abajo la imagen se
+ * derrama y el backdrop se siente gigante/zoomeado (la queja que motivó este layout).
+ */
+const HOME_SHEET_TOP_FRACTION = 190 / 844;
+/**
+ * Anclaje COLAPSADO del Home (fracción del área útil visible): arrastrando la hoja hacia abajo
+ * queda lo esencial (hero + buscador) y respira la imagen de fondo. Pedido del dueño: "el tope
+ * inferior más abajo" — antes ambos anclajes vivían arriba (0.88/0.92) y colapsar no existía.
+ */
+const HOME_SHEET_COLLAPSED_FRACTION = 0.45;
+/**
+ * Dimensiones REALES del arte del backdrop (home-map-light.jpg · aérea de día 1200×1800, Theme de
+ * Confianza light). Alto = pantalla, ancho = alto × aspect, centrado horizontal — sin cover ni zoom
+ * del layout (el aspect ya respeta la proporción, así que `stretch` no deforma).
+ */
+const HOME_BACKDROP_ASPECT = 1200 / 1800;
+/**
+ * Cadencia del poll de la ruta de ACERCAMIENTO (`leg=pickup`, fase "conductor viniendo"): la ruta
+ * CAMBIA mientras el conductor avanza, así que se refresca más seguido que la canónica. 10 s es el
+ * balance pedido por el dueño: la traza se actualiza visiblemente sin castigar al facade de mapas
+ * (el re-fit de cámara entre polls lo cubre el throttle 2.5 s/40 m del useDirectedCamera).
+ */
+const PICKUP_ROUTE_REFRESH_MS = 10_000;
+/** Cadencia del poll de la ruta CANÓNICA onboard (no cambia salvo parada aceptada — 15 s alcanza). */
+const ONBOARD_ROUTE_REFRESH_MS = 15_000;
+/**
+ * Separación del toggle 2D/3D respecto del borde superior (bajo el chrome flotante): despeja el SOS
+ * (56 px) del viaje activo y el avatar del Home — MISMA posición en todas las fases con mapa, así el
+ * botón no salta al cambiar de fase.
+ */
+const MAP_TOGGLE_TOP_CLEARANCE = 56;
 
 /**
  * Pantalla del tab "Pedir viaje" — el CONTENEDOR del flujo unificado. El mapa es PERSISTENTE de fondo y
@@ -96,6 +160,11 @@ export function RequestFlowScreen(): React.JSX.Element {
   // `isFocused`, de modo que al perder foco el mapa se desmonta (libera el contexto) y al volver remonta.
   // Sin esto: tras N navegaciones/reloads se acumulan contextos GL huérfanos → mapa negro.
   const isFocused = useIsFocused();
+  const {height: windowHeight, width: windowWidth} = useWindowDimensions();
+  // Vista TIPADA del MISMO navigator más cercano (el tab navigator de MainTabs) para setear
+  // opciones de la TabBar; `navigation` (Nav) queda para los push del stack padre.
+  const tabNavigation =
+    useNavigation<BottomTabNavigationProp<MainTabsParamList>>();
   // Sin tab bar, el sheet ancla contra el inset inferior del safe-area (home indicator), no contra el
   // alto del tab bar (que ya no existe). Mantiene la matemática de fracciones del sheet correcta.
   const bottomInset = insets.bottom;
@@ -118,11 +187,20 @@ export function RequestFlowScreen(): React.JSX.Element {
   const setEditing = useRideDraftStore(s => s.setEditing);
   const swapRoute = useRideDraftStore(s => s.swap);
   const resetDraft = useRideDraftStore(s => s.reset);
+  const setScheduleIntent = useRideDraftStore(s => s.setScheduleIntent);
   const savedPlaces = useSavedPlacesStore(s => s.places);
 
   // Alto visible del peek (lo reporta el sheet): se lo pasamos al mapa como paddingBottom para que el
   // pin del usuario quede en la franja visible por encima del sheet, no tapado por él.
   const [peekHeight, setPeekHeight] = useState(0);
+  // Alto visible del snap ACTUAL del sheet (expandir/contraer/colapsar): la cámara del mapa RE-ENCUADRA
+  // su foco al área visible real en cada asentamiento (regla: el foco vive en viewport − sheet, no en la
+  // pantalla completa). El AppMap CAPA este valor por modo de cámara (fit 32% / center 50%) para que un
+  // sheet casi-full no aplaste el viewport. 0 = aún sin primer reporte → cae al peek.
+  const [sheetVisibleHeight, setSheetVisibleHeight] = useState(0);
+  // Inset que el mapa reserva para el sheet: el snap actual si ya se reportó; si no, el peek.
+  const sheetMapInset =
+    sheetVisibleHeight > 0 ? sheetVisibleHeight : peekHeight;
   const sheetRef = useRef<DraggableSheetHandle>(null);
   // Eje LOCAL del sheet (idle ↔ searching, la 2ª máquina) + texto de búsqueda. flowRef evita closures
   // rancios en handleSnap.
@@ -135,7 +213,15 @@ export function RequestFlowScreen(): React.JSX.Element {
   // Viaje VIVO del pasajero. Vive en un store (no useState) para SOBREVIVIR al desmontaje del tab Home
   // (detachInactiveScreens): al volver, el sheet re-entra al viaje. La fuente de verdad es el server.
   const activeTripId = useActiveTripStore(s => s.activeTripId);
+  const activeTripMode = useActiveTripStore(s => s.activeTripMode);
+  const activeTripVehicleType = useActiveTripStore(
+    s => s.activeTripVehicleType,
+  );
   const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
+  const setActiveTripMode = useActiveTripStore(s => s.setActiveTripMode);
+  const setActiveTripVehicleType = useActiveTripStore(
+    s => s.setActiveTripVehicleType,
+  );
   const clearActiveTrip = useActiveTripStore(s => s.clear);
 
   // Re-entrada: al enfocar (montaje + volver al tab), rehidrata el viaje activo desde el server.
@@ -176,6 +262,7 @@ export function RequestFlowScreen(): React.JSX.Element {
     activeTripId,
     status: board.status,
     offerCount: board.offers.length,
+    mode: activeTripMode,
   });
   const descriptor = TRIP_PHASE_DESCRIPTORS[phase];
 
@@ -195,12 +282,53 @@ export function RequestFlowScreen(): React.JSX.Element {
   );
 
   // Detalle del viaje (conductor/vehículo/tarifa) para el cuerpo del viaje activo Y el cierre (pago/rating).
+  // El poll se corta por FASE terminal (completed/ended), no por `live.ended`: en el cierre el socket está
+  // APAGADO (isLiveSocketPhase) → `live.ended` jamás llega a true y el detalle quedaba refetcheando cada
+  // 15 s PARA SIEMPRE en la pantalla del recibo. El detalle de un viaje terminal ya no cambia.
+  const terminalPhase = phase === 'completed' || phase === 'ended';
   const tripDetailQuery = useQuery({
     queryKey: ['trip', activeTripId, 'active'],
     queryFn: () => tripRepository.getActiveTrip(activeTripId as string),
     enabled: Boolean(activeTripId) && descriptor.needsTripDetail,
-    refetchInterval: live.ended ? false : 15_000,
+    refetchInterval: terminalPhase || live.ended ? false : 15_000,
   });
+
+  // RUTA POR FASE del viaje activo (GET /trips/:id/route[?leg=]):
+  //  · enRoute → leg PICKUP: la ruta de ACERCAMIENTO viva (conductor→recojo) — el pasajero ve POR
+  //    DÓNDE VIENE el conductor, no la canónica al destino. Poll a 10 s: esa traza cambia mientras
+  //    el conductor avanza. Sin ubicación aún, el server responde polyline '' → no se dibuja nada.
+  //  · arrived → SIN ruta (query apagada): conductor y recojo casi coinciden; el director cierra el
+  //    zoom sobre el punto de encuentro y una traza residual solo ensuciaría.
+  //  · inProgress → leg DROPOFF (2026-07-14, pedido del dueño): el tramo RESTANTE vivo
+  //    (conductor→paradas→destino) — la canónica estática dejaba pintada la parte YA recorrida
+  //    detrás del vehículo y su punta podía no calzar con la del conductor. Se recorta sola.
+  // La FASE entra en la queryKey → al pasar de pickup→dropoff se re-pide YA (sin esperar el poll),
+  // simétrico a la invalidación del conductor.
+  const routeLeg =
+    phase === 'enRoute' ? 'pickup' : phase === 'inProgress' ? 'dropoff' : null;
+  const tripRouteQuery = useQuery({
+    queryKey: ['trip', activeTripId, 'route', routeLeg],
+    queryFn: () =>
+      tripRepository.getTripRoute(activeTripId as string, routeLeg ?? undefined),
+    enabled: Boolean(activeTripId) && routeLeg !== null,
+    refetchInterval:
+      routeLeg === 'pickup'
+        ? PICKUP_ROUTE_REFRESH_MS
+        : routeLeg === 'dropoff'
+          ? ONBOARD_ROUTE_REFRESH_MS
+          : false,
+    staleTime:
+      routeLeg === 'pickup'
+        ? PICKUP_ROUTE_REFRESH_MS
+        : ONBOARD_ROUTE_REFRESH_MS,
+  });
+  const liveRouteCoords = useMemo(
+    () =>
+      tripRouteQuery.data
+        ? decodePolylineToCoordinates(tripRouteQuery.data.polyline)
+        : null,
+    [tripRouteQuery.data],
+  );
 
   // PARADA negociada mid-trip (Lote C3): el pasajero propone una parada durante el viaje EN CURSO. El
   // hook posee el picking (el tap del mapa → `addStop.pickPoint`), el POST y la máquina de la propuesta.
@@ -209,6 +337,13 @@ export function RequestFlowScreen(): React.JSX.Element {
   const queryClient = useQueryClient();
   const addStop = useWaypointProposal(activeTripId ?? '', live.waypointOutcome);
 
+  // Reintento del detalle del viaje (pago/cierre): sin esto, un fallo del fetch dejaba el body en Skeleton
+  // infinito. `refetch` de react-query es referencialmente estable, así que el callback no cambia por render.
+  const retryTripDetail = useCallback(() => {
+    void tripDetailQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Al ACEPTARSE la parada, el viaje cambió server-side (ruta + paradas + tarifa): refrescamos el detalle
   // para que el mapa y la tarifa reflejen lo nuevo sin esperar al poll de 15 s.
   useEffect(() => {
@@ -216,21 +351,26 @@ export function RequestFlowScreen(): React.JSX.Element {
       void queryClient.invalidateQueries({
         queryKey: ['trip', activeTripId, 'active'],
       });
+      // La parada aceptada CAMBIÓ la geometría del viaje: la ruta viva se re-pide YA (todas las fases).
+      void queryClient.invalidateQueries({
+        queryKey: ['trip', activeTripId, 'route'],
+      });
     }
   }, [addStop.phase, activeTripId, queryClient]);
 
   // COREOGRAFÍA DEL MAPA POR FASE (helper puro). Decide qué markers muestra y cómo encuadra la cámara
-  // (fit conductor+recogida / follow taxi / center). El AppMap solo recibe props simples (showUserPoint,
-  // cameraTarget, …). El vehicleType del conductor NO viene en TripActiveView (solo make/model/plate) →
-  // CAR por defecto (decisión del dueño: "si no hay tipo, CAR"). Memoizado por las coords que driftean
-  // para no reconstruir el target en cada render del padre.
+  // (fit conductor+recogida / follow "como si manejara" / center). El AppMap solo recibe props simples
+  // (showUserPoint, cameraTarget, …). El vehicleType REAL del viaje vive en el activeTripStore
+  // (alimentado por el server — POST /trips + tripActiveView del poll) → sin dato, CAR (decisión del
+  // dueño: "si no hay tipo, CAR").
+  // Memoizado por las coords que driftean para no reconstruir el target en cada render del padre.
   // Memoizados por el RoutePlace del store (referencia estable salvo que cambien). Se pasan al AppMap
   // (React.memo): sin memo, un objeto nuevo por render rompía el memo y empujaba props nuevas al GL thread
   // del mapa en cada keystroke del buscador / cambio de peekHeight. Un solo origen para route y trip mode.
   const originGeo = useMemo(() => draftToGeo(origin), [origin]);
   const destinationGeo = useMemo(() => draftToGeo(destination), [destination]);
-  // Paradas intermedias (Ola 2B) para pintarlas en el MAPA del flujo principal (antes solo iban al
-  // RouteQuoteScreen legacy). Filtramos los placeholders vacíos y convertimos lng→lon.
+  // Paradas intermedias (Ola 2B) para pintarlas en el MAPA del flujo principal.
+  // Filtramos los placeholders vacíos y convertimos lng→lon.
   const waypointsGeo = useMemo(
     () =>
       waypoints
@@ -247,15 +387,33 @@ export function RequestFlowScreen(): React.JSX.Element {
     () => tripDetailQuery.data?.waypoints ?? [],
     [tripDetailQuery.data?.waypoints],
   );
+  // FUENTE DE VERDAD del tipo de vehículo: el SERVER (`tripActiveView.vehicleType`, en cada poll del
+  // detalle). Cubre los caminos donde el POST /trips no pasó por `onTripCreated` — adopción por 409
+  // (ACTIVE_TRIP_EXISTS) y rehidratación cross-device — donde el store quedaba null y la moto se
+  // pintaba como auto. Solo pisa cuando difiere (sin sets redundantes por poll).
+  useEffect(() => {
+    const serverType = tripDetailQuery.data?.vehicleType;
+    if (serverType && serverType !== activeTripVehicleType) {
+      setActiveTripVehicleType(serverType);
+    }
+  }, [
+    tripDetailQuery.data?.vehicleType,
+    activeTripVehicleType,
+    setActiveTripVehicleType,
+  ]);
+  const driverVehicleType = activeTripVehicleType ?? 'CAR';
   const mapDirective = useMemo(
     () =>
       resolveMapDirective({
         phase,
         driver: live.driverLocation ?? null,
+        // Rumbo del socket para el follow course-up del viaje en curso. Va en deps: llega junto con la
+        // coord en el mismo mensaje, así el target siempre carga la muestra fresca.
+        driverHeading: live.driverHeading,
         origin: originGeo,
         destination: destinationGeo,
         userPoint: myLocation,
-        vehicleType: 'CAR',
+        vehicleType: driverVehicleType,
         hasRoute: routeCoords.length > 1,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -263,12 +421,14 @@ export function RequestFlowScreen(): React.JSX.Element {
       phase,
       live.driverLocation?.lat,
       live.driverLocation?.lon,
+      live.driverHeading,
       originGeo?.lat,
       originGeo?.lon,
       destinationGeo?.lat,
       destinationGeo?.lon,
       myLocation?.lat,
       myLocation?.lon,
+      driverVehicleType,
       routeCoords.length,
     ],
   );
@@ -276,12 +436,31 @@ export function RequestFlowScreen(): React.JSX.Element {
   // Pánico nativo (triple volumen): armado SOLO durante el viaje activo (se desarma fuera).
   usePanicAutoTrigger(activeTripId ?? '', descriptor.activeTrip);
 
-  // Chat con el conductor: drena los no leídos y abre la pantalla de chat.
-  const unreadCount = live.incomingMessages.length;
+  // Chat con el conductor: drena los no leídos y abre la pantalla de chat. El badge cuenta SOLO los
+  // mensajes DEL CONDUCTOR: `incomingMessages` también trae el ECO de los propios (el ChatScreen lo
+  // necesita para confirmar el envío), pero tu propio mensaje no es un "no leído" (espejo del guard
+  // isOwnMessage del conductor).
+  const unreadCount = live.incomingMessages.filter(
+    m => m.senderRole === 'DRIVER',
+  ).length;
   const openChat = useCallback(() => {
     live.acknowledgeMessages(live.incomingMessages.map(m => m.id));
-    navigation.navigate('Chat', {tripId: activeTripId as string});
-  }, [live, navigation, activeTripId]);
+    // El primer nombre del conductor para el título del chat (simétrico al conductor, que muestra el del
+    // pasajero). `undefined` si aún no se resolvió → el chat cae al título genérico.
+    const driverName = tripDetailQuery.data?.driver?.name
+      ?.trim()
+      .split(/\s+/)[0];
+    navigation.navigate('Chat', {
+      tripId: activeTripId as string,
+      driverName: driverName || undefined,
+    });
+  }, [live, navigation, activeTripId, tripDetailQuery.data]);
+
+  // Compartir con la familia: pantalla dedicada (pen zKyic) — mismo patrón que openChat. La acción
+  // "Compartir" del sheet ya no dispara el Share nativo directo.
+  const openFamilyShare = useCallback(() => {
+    navigation.navigate('FamilyShare', {tripId: activeTripId as string});
+  }, [navigation, activeTripId]);
 
   const myPoint = useMemo<MapPoint | null>(
     () => (myLocation ? {lat: myLocation.lat, lng: myLocation.lon} : null),
@@ -325,6 +504,41 @@ export function RequestFlowScreen(): React.JSX.Element {
   // el del contenido idle full-screen vs el bottom-sheet.
   const mapMode = mapModeForPhase(phase);
 
+  // TABBAR por fase: fuera de idle (cotización/puja/viaje) la píldora flotante se ESCONDE — el pen
+  // no la dibuja en esas fases (estás en un flujo, no navegando tabs) y tapaba el CTA del sheet
+  // ("Confirmar VEO" bajo la TabBar). AppTabBar honra `tabBarStyle {display:'none'}` del descriptor.
+  useEffect(() => {
+    tabNavigation.setOptions({
+      tabBarStyle: mapMode === 'idle' ? undefined : {display: 'none'},
+    });
+  }, [tabNavigation, mapMode]);
+
+  // FONDO del Home por flow (pedido del dueño): en idle manda la IMAGEN 3D; al entrar a BÚSQUEDA
+  // el fondo CRUZA SUAVE al mapa REAL de Mapbox centrado en mi ubicación, y al salir vuelve a la
+  // imagen. Mecánica: el mapa se monta DEBAJO y la imagen (encima) anima su opacidad 1→0 — el
+  // crossfade es un solo valor. El mapa se desmonta recién al TERMINAR el fade de vuelta (libera
+  // el contexto GL sin flash).
+  const searchBg = useSharedValue(0);
+  const [searchMapMounted, setSearchMapMounted] = useState(false);
+  useEffect(() => {
+    if (mapMode !== 'idle') {
+      return;
+    }
+    if (flow === 'searching') {
+      setSearchMapMounted(true);
+      searchBg.value = withTiming(1, {duration: 450});
+    } else {
+      searchBg.value = withTiming(0, {duration: 450}, finished => {
+        if (finished) {
+          runOnJS(setSearchMapMounted)(false);
+        }
+      });
+    }
+  }, [flow, mapMode, searchBg]);
+  const idleImageStyle = useAnimatedStyle(() => ({
+    opacity: 1 - searchBg.value,
+  }));
+
   // MODELO CABIFY · recojo con PIN: el descriptor declara la elegibilidad por fase+flow (`resolvePickupMode`),
   // PERO el pin solo tiene sentido CON un mapa interactivo de fondo (arrastrás el mapa y el origen sigue al
   // centro). En el home CONTENT-FIRST ya NO hay mapa idle (única fase elegible), así que el pin nunca aplica:
@@ -352,6 +566,14 @@ export function RequestFlowScreen(): React.JSX.Element {
     sheetRef.current?.snapToIndex(FULL_INDEX);
   }, [setEditing]);
 
+  // Elegir el DESTINO arrastrando el mapa (pen P/Home: ícono mapa del buscador): marca el destino
+  // en edición y abre MapPick — el pin fijo al centro fija el punto (mismo mecanismo que usa la
+  // búsqueda por texto con su fila "Elegir en el mapa").
+  const pickOnMap = useCallback(() => {
+    setEditing({kind: 'destination'});
+    navigation.navigate('MapPick');
+  }, [setEditing, navigation]);
+
   // Editar el ORIGEN desde el Home idle: marca el origen en edición y abre la búsqueda DEDICADA
   // (`Search`, flow 'sheet' → al fijar vuelve acá con el borrador actualizado). Es el MISMO gesto que
   // usa la cotización (`QuotingBody.editOrigin`): el origen deja de ser un display de solo lectura.
@@ -360,20 +582,55 @@ export function RequestFlowScreen(): React.JSX.Element {
     navigation.navigate('Search', {flow: 'sheet'});
   }, [setEditing, navigation]);
 
-  // Sale de búsqueda y vuelve al peek (X o arrastrar hasta abajo).
+  // Sale de búsqueda (solo la X): limpia el flow/texto. El snap al reposo NO va acá — al cambiar
+  // el flow cambian los ANCLAJES (búsqueda=1, idle=2) y snapear antes del re-render usaría el
+  // array viejo (clamp al índice equivocado → caía al colapsado); lo maneja el efecto de abajo.
   const exitSearch = useCallback(() => {
     setFlow('idle');
     setQuery('');
-    sheetRef.current?.snapToIndex(PEEK_INDEX);
   }, []);
 
-  // El DRAG no entra a búsqueda (eso es solo por tap): arrastrar mueve la lista idle entre peek y
-  // expandido. ÚNICA transición por drag: si estás buscando y arrastrás hasta el peek, sale de búsqueda.
+  // Reposo tras cerrar la búsqueda: con los anclajes YA re-renderizados (idle = [colapsado, hoja]),
+  // asienta la hoja en su posición del pen (índice 1).
+  useEffect(() => {
+    if (mapMode === 'idle' && flow === 'idle') {
+      sheetRef.current?.snapToIndex(FULL_INDEX);
+    }
+  }, [mapMode, flow]);
+
+  // El DRAG no entra NI sale de la búsqueda (entrar = tap en el buscador; salir = la X). Colapsar
+  // el sheet BUSCANDO solo despeja la vista (cierra el teclado para ver el mapa con la ubicación);
+  // la búsqueda sigue viva y el input queda arriba del sheet colapsado.
   const handleSnap = useCallback((index: number) => {
     if (flowRef.current === 'searching' && index <= PEEK_INDEX) {
-      setFlow('idle');
-      setQuery('');
+      Keyboard.dismiss();
     }
+  }, []);
+
+  // KEYBOARD-AVOIDANCE del buscador in-sheet. El sheet es `position:absolute · bottom:0`, así que en iOS
+  // (donde el teclado FLOTA sobre la ventana, sin redimensionarla) el teclado tapa la parte baja del sheet:
+  // el input y las sugerencias quedaban ocultos detrás. Fix en DOS partes, SIN tocar el DraggableSheet
+  // (que ya corre su drag/snap en el hilo de UI y no queremos pelear):
+  //   1) el flow `searching` ancla el sheet a un alto FIJO (ver `sheetSnapPoints`), no content-hug → el
+  //      header FIJO (origen + input) queda SIEMPRE arriba, sobre el teclado, aunque haya pocas sugerencias.
+  //   2) acá medimos el alto del teclado y lo sumamos al `paddingBottom` del scroll → la lista scrollea
+  //      por ENCIMA del teclado (la última sugerencia se alcanza). Android usa `adjustResize` (la ventana
+  //      ya se achica sola), por eso solo compensamos en iOS.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'ios') {
+      return;
+    }
+    const show = Keyboard.addListener('keyboardWillShow', e =>
+      setKeyboardHeight(e.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener('keyboardWillHide', () =>
+      setKeyboardHeight(0),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
   }, []);
 
   // Atajo de 1 toque (chips/guardados/recientes) o elegir una sugerencia: fija el destino y la fase
@@ -399,8 +656,13 @@ export function RequestFlowScreen(): React.JSX.Element {
     (trip: TripResource) => {
       history.record(trip);
       setActiveTripId(trip.id);
+      // Modo congelado por el server → la fase EXPIRED distingue FIXED (sin conductor) de PUJA (sin ofertas).
+      setActiveTripMode(trip.dispatchMode);
+      // Tipo de vehículo solicitado (CAR | MOTO) → el marker del conductor asignado usa el glyph correcto
+      // (la moto NO se pinta como auto). `TripActiveView` no lo trae; acá el POST /trips sí.
+      setActiveTripVehicleType(trip.vehicleType);
     },
-    [history, setActiveTripId],
+    [history, setActiveTripId, setActiveTripMode, setActiveTripVehicleType],
   );
 
   // Elegir una oferta del board: ACCEPT_PRICE → aceptar (match); COUNTER → contraoferta (INTERINO Lote 3).
@@ -419,11 +681,21 @@ export function RequestFlowScreen(): React.JSX.Element {
     [board.acceptMutation, navigation, activeTripId],
   );
 
+  // El PROGRAMADO se creó: cierra el borrador y aterriza en Viajes>Próximos (la única lista de
+  // programados tras la consolidación — la pantalla `ScheduledTrips` aparte se eliminó).
   const onScheduled = useCallback(() => {
     resetDraft();
     setRouteCoords([]);
-    navigation.navigate('ScheduledTrips');
+    navigation.navigate('TripHistory', {tab: 'upcoming'});
   }, [resetDraft, navigation]);
+
+  // Toggle "Programado" del Home: programar es el flujo inmediato + la marca de intención en el
+  // borrador (QuotingBody la consume abriendo el selector de día/hora). Antes navegaba a la LISTA
+  // de programados — no agendaba nada (la confusión de IA que motivó este arreglo).
+  const onStartSchedule = useCallback(() => {
+    setScheduleIntent(true);
+    enterSearch();
+  }, [setScheduleIntent, enterSearch]);
 
   const onKycRequired = useCallback(
     () => navigation.navigate('KycCamera'),
@@ -439,12 +711,18 @@ export function RequestFlowScreen(): React.JSX.Element {
   // (pedido bloqueado 403 / franja) + re-intento del pedido tras saldar. Consulta SOLO en el home idle.
   const debtGate = useDebtGate(descriptor.pollsDebts);
 
-  // Snap por fase: lo declara el descriptor (`expanded`: cotización y cierre a full; el resto, peek
-  // content-hug — el sheet ABRAZA su contenido y el mapa SIEMPRE queda visible arriba).
+  // Snap por fase: lo declara el descriptor (`expanded`: cotización y cierre a full; el resto, su
+  // REPOSO). El reposo del Home idle es la HOJA del pen (índice 1) — el índice 0 es el anclaje
+  // colapsado, al que solo se llega arrastrando. El VIAJE VIVO también reposa expandido (índice 1 =
+  // content-hug de la tarjeta+tarifa+acciones): el índice 0 es la franja de estado sola, a la que solo
+  // se llega arrastrando el grabber hacia abajo para maximizar el mapa (misma personalidad que el
+  // conductor). En route/trip por peek content-hug quedó atrás.
   const expandedPhase = descriptor.expanded;
+  const restingIndex =
+    mapMode === 'idle' || descriptor.activeTrip ? FULL_INDEX : PEEK_INDEX;
   useEffect(() => {
-    sheetRef.current?.snapToIndex(expandedPhase ? FULL_INDEX : PEEK_INDEX);
-  }, [expandedPhase]);
+    sheetRef.current?.snapToIndex(expandedPhase ? FULL_INDEX : restingIndex);
+  }, [expandedPhase, restingIndex]);
 
   // PUENTE INTERINO (Lote 4 pendiente): SOLO la reasignación AÚN navega a su pantalla y resetea el
   // screen a idle; CANCELLED/FAILED (ended) limpian y vuelven al home. Las demás fases viven en el sheet
@@ -489,16 +767,57 @@ export function RequestFlowScreen(): React.JSX.Element {
   );
 
   // Encuadre del mapa memoizado (mismo objeto para route y trip mode): un literal inline se recreaba en
-  // cada render y rompía el React.memo del AppMap. Solo cambia con el safe-area top o el alto del peek.
+  // cada render y rompía el React.memo del AppMap. Cambia con el safe-area top (chrome superior) o el
+  // alto del snap ACTUAL del sheet → el fit de ruta RE-ENCUADRA al asentarse el sheet en otro anclaje
+  // (regla: la ruta vive en el área visible, no bajo el sheet). El AppMap topa el bottom con su CAP.
+  // Márgenes de RESPIRO dentro de la ventana visible (gusto del dueño 2026-07-14: la ruta encaja
+  // centrada entre el sheet y el chrome, con aire — el top despeja el chip de ubicación).
   const fitEdgePadding = useMemo(
     () => ({
-      top: insets.top + 40,
-      bottom: peekHeight + 16,
-      left: 40,
-      right: 40,
+      top: insets.top + 56,
+      bottom: sheetMapInset + 24,
+      left: 44,
+      right: 44,
     }),
-    [insets.top, peekHeight],
+    [insets.top, sheetMapInset],
   );
+
+  // Anclajes del sheet POR MODO. En idle Y en búsqueda: [COLAPSADO, HOJA-DEL-PEN] — la hoja se
+  // arrastra en ambos flows (pedido del dueño). En BÚSQUEDA, colapsarla NO cierra la búsqueda
+  // (eso se sentía como tocar la X sin querer): solo baja el sheet para ver el mapa con la
+  // ubicación (y cierra el teclado — ver handleSnap); el único cierre es la X. En route/trip,
+  // content-hug + full.
+  const sheetSnapPoints = useMemo<ReadonlyArray<SnapPoint>>(() => {
+    // VIAJE VIVO (enRoute/arrived/inProgress): colapsable a la SOLA franja de estado (snap 'header') → el
+    // pasajero baja el grabber y el mapa queda al máximo; el reposo abraza el contenido (tarjeta del
+    // conductor + tarifa + acciones) capado a la hoja del pen (0.94). Es el gesto del conductor, espejado.
+    if (descriptor.activeTrip) {
+      return ['header', {content: 0.94}];
+    }
+    if (mapMode !== 'idle') {
+      return SNAP_POINTS;
+    }
+    const available = Math.max(windowHeight - insets.top - bottomInset, 1);
+    const visible = windowHeight * (1 - HOME_SHEET_TOP_FRACTION);
+    const sheetFraction = Math.min(visible / available, 0.94);
+    // BÚSQUEDA: alto FIJO (no content-hug). Con content-hug, pocas sugerencias dejaban el sheet corto y
+    // el input (header fijo) caía detrás del teclado; con alto fijo el sheet siempre es alto (la hoja del
+    // .pen P/HomeSearch, con el mapa asomando arriba) → el input queda sobre el teclado y la lista
+    // scrollea debajo. El resto de idle sigue en content-hug (abraza la hoja del Home).
+    if (flow === 'searching') {
+      return [HOME_SHEET_COLLAPSED_FRACTION, sheetFraction];
+    }
+    // Máximo CONTENT-HUG (crece al contenido) capado a la hoja del .pen: si el contenido es corto,
+    // el sheet lo abraza; si es alto, se queda en la hoja del pen y scrollea adentro.
+    return [HOME_SHEET_COLLAPSED_FRACTION, {content: sheetFraction}];
+  }, [
+    descriptor.activeTrip,
+    mapMode,
+    flow,
+    windowHeight,
+    insets.top,
+    bottomInset,
+  ]);
 
   // CONTEXTO para los slots del descriptor (Body/Header): el wiring del contenedor, explícito y en UN
   // solo lugar. Cada fase toma de acá exactamente lo que su body/header necesita.
@@ -508,11 +827,16 @@ export function RequestFlowScreen(): React.JSX.Element {
     board,
     live,
     tripDetail: tripDetailQuery.data ?? null,
+    // Solo es "error de detalle" cuando ESTA fase pide el detalle y aún no hay dato; si no, el body no lo mira.
+    tripDetailError: tripDetailQuery.isError && !tripDetailQuery.data,
+    onRetryTripDetail: retryTripDetail,
     addStop,
-    kycStatus: profileQuery.data?.kycStatus ?? null,
+    // Misma fuente que el marker del mapa: la franja de estado anima la silueta del vehículo PEDIDO.
+    tripVehicleType: driverVehicleType,
     requestAgainToken: debtGate.requestAgainToken,
     onTripCreated,
     onScheduled,
+    onStartSchedule,
     onKycRequired,
     onDebtPending: debtGate.onDebtPending,
     onActiveTripExists: setActiveTripId,
@@ -521,17 +845,24 @@ export function RequestFlowScreen(): React.JSX.Element {
     destinationTitle: destination?.title ?? null,
     onChooseOffer,
     onOpenCamera,
+    onOpenChat: openChat,
+    onOpenFamilyShare: openFamilyShare,
+    unreadChatCount: unreadCount,
     clearTrip,
+    // Reintentar FIJO sin conductor: limpia SOLO el viaje (store.clear) → conserva el borrador → 'quoting'.
+    onRetryRequest: clearActiveTrip,
     hasDebt: debtGate.hasDebt,
     debtTotalCents: debtGate.debtTotalCents,
     hasPendingAction: debtGate.hasPendingAction,
     onOpenDebtFromHome: debtGate.openDebtFromHome,
     onOpenPendingFromHome: debtGate.openPendingFromHome,
     savedPlaces,
+    greetingName: profileQuery.data?.name?.trim().split(/\s+/)[0] ?? null,
     onSelectDestination: selectDestination,
     onSeeAllSaved: goSavedPlaces,
     onSeeAllRecents: goTripHistory,
     onEnterSearch: enterSearch,
+    onPickOnMap: pickOnMap,
     onEditOrigin: editOrigin,
     onSwapRoute: swapRoute,
     currentLocationTitle: origin?.title ?? reverseQuery.data?.title,
@@ -594,7 +925,8 @@ export function RequestFlowScreen(): React.JSX.Element {
             onPress={addStop.picking ? addStop.pickPoint : undefined}
             driver={live.driverLocation ?? null}
             driverHeading={live.driverHeading}
-            driverVehicleType="CAR"
+            // Tipo REAL del viaje (store, congelado al crear): la moto se pinta moto. Sin dato → CAR.
+            driverVehicleType={driverVehicleType}
             showDriverVehicle={mapDirective.showDriverVehicle}
             showUserPoint={mapDirective.showUserPoint}
             userPoint={mapDirective.showUserPoint ? myLocation : null}
@@ -603,8 +935,22 @@ export function RequestFlowScreen(): React.JSX.Element {
               mapDirective.showNearby ? nearbyVehicles : undefined
             }
             cameraTarget={mapDirective.cameraTarget ?? undefined}
-            // La ruta al destino sigue dibujada también en curso (la baja el director como contexto).
-            routeCoordinates={routeCoords.length > 1 ? routeCoords : undefined}
+            // Polyline por fase: enRoute dibuja el leg PICKUP vivo (conductor→recojo, poll 10 s);
+            // arrived NO dibuja ruta (query apagada + guard: zoom cerrado al punto de encuentro);
+            // onboard dibuja la canónica. En el ACERCAMIENTO la congelada del quote (recojo→destino)
+            // NO es fallback válido: mostraría la ruta a destino cuando el conductor recién viene —
+            // mejor nada hasta que cargue la viva. El quote solo respalda al tramo onboard (misma B→C).
+            routeCoordinates={
+              phase === 'arrived'
+                ? undefined
+                : liveRouteCoords && liveRouteCoords.length > 1
+                  ? liveRouteCoords
+                  : phase === 'enRoute'
+                    ? undefined
+                    : routeCoords.length > 1
+                      ? routeCoords
+                      : undefined
+            }
             // F3 · cuando el director NO dirige (cameraTarget null: aún sin conductor en pre-pickup/curso),
             // la Camera DECLARATIVA encuadra la ruta+markers (fitToRoute) en vez de quedar muda y derivar al
             // zoom-ciudad. Con conductor, manda el cameraTarget (director) y este fit se ignora. En
@@ -614,8 +960,9 @@ export function RequestFlowScreen(): React.JSX.Element {
             }
             fitEdgePadding={fitEdgePadding}
             // El encuadre lo gobierna el cameraTarget (director) cuando dirige; si no, el fit declarativo.
-            // El AppMap TOPA el bottomInset al CAP para el fit dirigido (enRoute conductor+recogida).
-            bottomInset={peekHeight + 16}
+            // Sigue el snap ACTUAL del sheet (no solo el peek): el director RE-ENCUADRA al asentarse el
+            // sheet en otro anclaje. El AppMap TOPA el valor a sus CAPs (fit/center) por seguridad.
+            bottomInset={sheetMapInset + 16}
             interactive
           />
         ) : // `idle`: SIN mapa. El home es content-first (fondo sólido del root); el mapa aparece recién al
@@ -623,42 +970,88 @@ export function RequestFlowScreen(): React.JSX.Element {
         null}
       </View>
 
-      {/* CONTENIDO IDLE · CONTENT-FIRST (sin mapa): ocupa la PANTALLA COMPLETA bajo el HomeTopBar, NO un
-          bottom-sheet peek (que flotaría sobre el fondo sólido). Header FIJO (buscador "¿A dónde vamos?" +
-          chips) + Body scrollable (favoritos/recientes) — los MISMOS slots del descriptor que usa el sheet en
-          route/trip; solo cambia el CONTENEDOR. Va ANTES del HomeTopBar para que ese overlay absoluto quede
-          ENCIMA y siga siendo tappable (campana/avatar/pill); el contenido arranca debajo vía paddingTop. */}
+      {/* FONDO IDLE (sin mapa): imagen 3D de ciudad + scrim (pen P/Home). El CONTENIDO idle ya no vive
+          acá: va en el MISMO DraggableSheet de abajo (con la piel de vidrio del pen y peek fijo a ~22.5%),
+          para que el Home sea arrastrable y su lista scrollee cableada al gesto — un contenedor estático
+          rompía ambas cosas. Va ANTES del HomeTopBar para que ese overlay absoluto siga tappable. */}
       {mapMode === 'idle' ? (
-        <View
-          style={[
-            styles.idleScreen,
-            {
-              // El HomeTopBar es un overlay absoluto anclado en `insets.top + spacing.sm`, alto ≈ TOUCH_TARGET
-              // (pill/avatar). El contenido idle arranca debajo de él, con un respiro (spacing.md), y deja el
-              // home indicator abajo (bottomInset).
-              paddingTop:
-                insets.top + theme.spacing.sm + TOUCH_TARGET + theme.spacing.md,
-              paddingBottom: bottomInset,
-            },
-          ]}>
-          {SheetHeader ? (
-            <View style={{paddingHorizontal: theme.spacing.xl}}>
-              <SheetHeader ctx={ctx} />
+        <View style={styles.idleScreen}>
+          {/* MAPA REAL debajo de la imagen, montado solo durante la BÚSQUEDA (+ su fade de salida):
+              Mapbox centrado en mi ubicación con los autitos de ambiente. La imagen encima se
+              desvanece y lo revela (crossfade del dueño: buscar = mapa vivo; volver = imagen). */}
+          {searchMapMounted && isFocused ? (
+            <View style={StyleSheet.absoluteFill}>
+              <AppMap
+                userPoint={myLocation}
+                showUserPoint
+                nearbyVehicles={
+                  descriptor.showNearby ? nearbyVehicles : undefined
+                }
+                // También en búsqueda el foco (mi ubicación) queda centrado en la franja VISIBLE por
+                // encima del sheet, y re-encuadra al colapsarlo/expandirlo. El AppMap capa el valor.
+                bottomInset={sheetMapInset}
+                interactive={false}
+              />
             </View>
           ) : null}
-          <ScrollView
-            style={styles.sheetScroll}
-            contentContainerStyle={[
-              styles.sheetContent,
-              {
-                paddingHorizontal: theme.spacing.xl,
-                paddingBottom: theme.spacing.xl,
-                gap: theme.spacing.md,
-              },
-            ]}
-            showsVerticalScrollIndicator={false}>
-            <SheetBody ctx={ctx} />
-          </ScrollView>
+          {/* Fondo del Home fiel a design/veo.pen P/Home (rect "Map"): la imagen COMPLETA mapeada a
+              la altura de la pantalla — la MISMA matemática del pen (rect 390×844 con el arte de
+              aspect idéntico). Tamaño EXPLÍCITO por aspect real del arte + "stretch" (no deforma:
+              las medidas ya respetan la proporción): elimina cualquier zoom/crop del cover. */}
+          <Animated.View
+            style={[StyleSheet.absoluteFill, idleImageStyle]}
+            pointerEvents="none">
+            <Image
+              source={homeMapBackdrop}
+              style={[
+                styles.idleBackdrop,
+                {
+                  height: windowHeight,
+                  width: Math.round(windowHeight * HOME_BACKDROP_ASPECT),
+                  left: Math.round(
+                    (windowWidth - windowHeight * HOME_BACKDROP_ASPECT) / 2,
+                  ),
+                },
+              ]}
+              resizeMode="stretch"
+            />
+          </Animated.View>
+          <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Defs>
+              {/* Scrim para imagen CLARA (Theme de Confianza): tope suave (deja ver la aérea + lifta la
+                  legibilidad de la pill de ubicación), casi nada en el medio, y fade fuerte a `bg`
+                  abajo para fundir sin costura en el sheet claro. */}
+              <SvgLinearGradient id="homeScrim" x1="0" y1="0" x2="0" y2="1">
+                <Stop
+                  offset="0"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.3}
+                />
+                <Stop
+                  offset="0.34"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.04}
+                />
+                <Stop
+                  offset="0.6"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.72}
+                />
+                <Stop
+                  offset="1"
+                  stopColor={theme.colors.bg}
+                  stopOpacity={0.98}
+                />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect
+              x="0"
+              y="0"
+              width="100%"
+              height="100%"
+              fill="url(#homeScrim)"
+            />
+          </Svg>
         </View>
       ) : null}
 
@@ -685,45 +1078,72 @@ export function RequestFlowScreen(): React.JSX.Element {
         />
       ) : (
         <TripTopBar
-          unreadCount={unreadCount}
-          onOpenChat={openChat}
+          // Minimizar (pen fLKdk MinBtn): colapsa el sheet al peek para despejar el mapa. El chat vive
+          // ahora como acción "Mensaje" DENTRO del sheet (va por ctx a ActiveTripBody).
+          onMinimize={() => sheetRef.current?.snapToIndex(PEEK_INDEX)}
           onSos={() =>
             navigation.navigate('Panic', {tripId: activeTripId as string})
           }
         />
       )}
 
-      {/* CONTENIDO route/trip: BOTTOMSHEET ARRASTRABLE anclado abajo (sobre el mapa). El contenido idle NO
-          vive acá (es content-first full-screen, se renderiza ANTES del HomeTopBar; ver arriba). HEADER FIJO
-          y BODY SCROLLABLE: ambos los declara el descriptor (Header null = cuerpo autocontenido). */}
-      {mapMode !== 'idle' ? (
-        <DraggableSheet
-          ref={sheetRef}
-          snapPoints={SNAP_POINTS}
-          maxContentFraction={PEEK_MAX_FRACTION}
-          onSnap={handleSnap}
-          onPeekHeightChange={setPeekHeight}
-          bottomOffset={bottomInset}
-          renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
-          renderScroll={ScrollComponent => (
-            <ScrollComponent
-              style={styles.sheetScroll}
-              contentContainerStyle={[
-                styles.sheetContent,
-                {
-                  paddingHorizontal: theme.spacing.xl,
-                  // Respiro al final del scroll (el sheet ancla en bottom:0 y el área útil ya descuenta el
-                  // tab bar vía bottomOffset, así que no hace falta sumar su alto acá).
-                  paddingBottom: theme.spacing.xl,
-                  gap: theme.spacing.md,
-                },
-              ]}
-              showsVerticalScrollIndicator={false}>
-              <SheetBody ctx={ctx} />
-            </ScrollComponent>
-          )}
+      {/* Toggle 2D/3D flotante: solo con MAPA vivo de fondo (route/trip). Arriba-derecha BAJO el
+          chrome (despeja el SOS del viaje y el avatar del Home — misma posición en todas las fases,
+          el botón no salta). La preferencia la consume el AppMap (estilo sin extrusiones + pitch 0). */}
+      {mapMode !== 'idle' && isFocused ? (
+        <MapViewModeButton
+          topInset={
+            insets.top + theme.spacing.sm * 2 + MAP_TOGGLE_TOP_CLEARANCE
+          }
         />
       ) : null}
+
+      {/* CONTENIDO del flujo: UN solo BOTTOMSHEET ARRASTRABLE anclado abajo, para TODAS las fases.
+          - idle: peek FIJO a la altura del pen (P/Home: HomeContent en y=190/844 ≈ 22.5% desde arriba) con
+            la piel de vidrio del pen (gradiente + borde #4C5468); arrastrable a full y con la lista
+            (favoritos/recientes) scrolleando cableada al gesto.
+          - route/trip: peek content-hug sobre el mapa (igual que siempre).
+          HEADER FIJO y BODY SCROLLABLE: ambos los declara el descriptor (Header null = autocontenido). */}
+      <DraggableSheet
+        ref={sheetRef}
+        snapPoints={sheetSnapPoints}
+        maxContentFraction={PEEK_MAX_FRACTION}
+        // El Home MONTA en su reposo (la hoja del pen, índice 1); el colapsado (0) es solo por drag.
+        initialIndex={restingIndex}
+        onSnap={handleSnap}
+        onPeekHeightChange={setPeekHeight}
+        // Altura del snap ACTUAL (se asienta/re-mide, nunca por frame de drag): alimenta el re-encuadre
+        // de la cámara del mapa al área visible (punto focal por encima del sheet en TODAS las fases).
+        onSettledHeightChange={setSheetVisibleHeight}
+        bottomOffset={bottomInset}
+        renderHeader={() => (SheetHeader ? <SheetHeader ctx={ctx} /> : null)}
+        renderScroll={ScrollComponent => (
+          <ScrollComponent
+            style={styles.sheetScroll}
+            contentContainerStyle={[
+              styles.sheetContent,
+              {
+                paddingHorizontal: theme.spacing.xl,
+                // idle: el sheet llega al borde inferior y la TabBar flota ENCIMA → el final del scroll
+                // la esquiva (inset + clearance). route/trip: respiro simple (el área útil ya descuenta
+                // el chrome inferior vía bottomOffset).
+                paddingBottom:
+                  (mapMode === 'idle'
+                    ? bottomInset + HOME_TABBAR_CLEARANCE
+                    : theme.spacing.xl) +
+                  // Buscando: clearance del teclado (iOS) para que la última sugerencia scrollee por
+                  // encima de él (ver keyboard-avoidance arriba). Fuera de búsqueda es 0.
+                  (flow === 'searching' ? keyboardHeight : 0),
+                // Ritmo vertical del pen en el Home (HomeContent gap $s-lg = 16, con aire); el
+                // resto de fases conserva md.
+                gap: mapMode === 'idle' ? theme.spacing.lg : theme.spacing.md,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}>
+            <SheetBody ctx={ctx} />
+          </ScrollComponent>
+        )}
+      />
 
       {/* DEUDA (BR-P02): un único sheet para los dos orígenes (pedido bloqueado 403 / franja del home).
           Saldar → CAPTURED reabre el camino: si vino de un pedido, re-intentamos solo (requestAgainToken). */}
@@ -767,6 +1187,9 @@ const styles = StyleSheet.create({
   // (favoritos/recientes) scrollea debajo. flex:1 (no absoluteFill) para no interceptar los toques del
   // HomeTopBar absoluto que flota encima.
   idleScreen: {flex: 1},
+  // Backdrop del Home: absoluto anclado al top; alto/ancho/left EXPLÍCITOS (se inyectan por el
+  // aspect real del arte) para replicar el mapeo imagen→frame del pen sin cover.
+  idleBackdrop: {position: 'absolute', top: 0},
   sheetScroll: {flex: 1},
   sheetContent: {paddingTop: 4},
 });

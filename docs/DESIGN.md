@@ -23,33 +23,36 @@
 
 ## 1. Color (OKLCH, tokens semánticos)
 
-Marca VEO: **lienzo NEGRO** (`#000000`) + **VEO Cyan** (`#00E5FF`) de acento (igual que las apps móviles,
-coherencia total con el Brand Book). **Estrategia de color: Restrained** para producto (neutros tintados +
-1 acento cian ≤10% de la superficie). El cyan nunca rellena áreas grandes; cuando lo hace (botón primario)
-el texto encima es **NEGRO** (`--on-brand`/`--on-accent` = `#000`).
+Marca VEO: **lienzo oscuro azulado** (`--bg` = `#0A0B0F`) + **azul de marca `#2D7FF9`** de acento (igual que
+las apps móviles, coherencia total con el Brand Book). **Estrategia de color: Restrained** para producto
+(neutros tintados hacia el azul + 1 acento ≤10% de la superficie). El azul nunca rellena áreas grandes;
+cuando lo hace (botón primario) el texto encima es **BLANCO** (`--on-brand`/`--on-accent` = `#FFFFFF`).
 
-> **Por qué el lienzo es oscuro:** VEO Cyan `#00E5FF` sobre claro da ~1.5:1 (ilegible, falla WCAG); sobre
-> negro da ~13.6:1. El acento solo es legible sobre lienzo oscuro, así que la marca web es negra.
+> **Por qué el lienzo es oscuro:** el azul de marca `#2D7FF9` rinde con alto contraste sobre el lienzo
+> casi-negro azulado (texto `ink` ~17:1) y funciona como botón sólido con **texto blanco** encima
+> (a diferencia del cyan anterior, deprecado, que sobre claro daba ~1.5:1 y exigía texto negro).
+> El lienzo es **casi-negro azulado `#0A0B0F`**, no negro puro `#000`.
 
-Tokens semánticos (definidos como CSS vars OKLCH en `tokens.css`, derivados del Brand Book):
+Tokens semánticos (definidos como CSS vars OKLCH en `tokens.css`, derivados del Brand Book — los hex de
+referencia son los del `themes.ts`; ver `./VEO_BRIEF_DISENO.md` §3):
 
-| Token                                               | Rol                                                                         |
-| --------------------------------------------------- | --------------------------------------------------------------------------- |
-| `--bg` / `--surface` / `--surface-2`                | lienzo negro / tarjetas / capas elevadas (`#000` · `#0E0E11` · `#1C1C22`)   |
-| `--ink` / `--ink-muted` / `--ink-subtle`            | texto primario / secundario / terciario (`#F4F6F8` · `#CFD3DA` · `#8A909C`) |
-| `--border` / `--border-strong`                      | divisores y bordes (`#17171B` · `#2A2A30`)                                  |
-| `--brand` / `--on-brand`                            | VEO Cyan de marca + texto NEGRO sobre marca                                 |
-| `--accent` / `--on-accent`                          | VEO Cyan de acción + texto NEGRO sobre acento                               |
-| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado (texto NEGRO encima)                                   |
-| `--focus`                                           | anillo de foco VEO Cyan (3px, offset 2px)                                   |
+| Token                                               | Rol                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `--bg` / `--surface` / `--surface-2`                | lienzo azulado / tarjetas / capas elevadas (`#0A0B0F` · `#14161C` · `#1E212A`) |
+| `--ink` / `--ink-muted` / `--ink-subtle`            | texto primario / secundario / terciario (`#F5F7FA` · `#C4CBD6` · `#8A929E`)    |
+| `--border` / `--border-strong`                      | divisores y bordes (`#1C1F27` · `#2B2F3A`)                                     |
+| `--brand` / `--on-brand`                            | azul de marca `#2D7FF9` + texto BLANCO sobre marca                             |
+| `--accent` / `--on-accent`                          | azul de acción `#2D7FF9` + texto BLANCO sobre acento                           |
+| `--success` / `--warn` / `--danger` / `--on-danger` | semánticos de estado (`#34D399` · `#F2AF48` · `#FF4D6A`)                       |
+| `--focus`                                           | anillo de foco azul `#2D7FF9` (3px, offset 2px)                                |
 
 En Tailwind se consumen como `bg-surface`, `text-ink`, `text-ink-muted`, `border-border`, `bg-brand`, `text-accent`, etc.
-**Prohibido** `text-gray-400` sobre el lienzo negro; usar `text-ink-muted` (calibrado para contraste ≥4.5:1).
+**Prohibido** `text-gray-400` sobre el lienzo oscuro; usar `text-ink-muted` (calibrado para contraste ≥4.5:1).
 
-- El lienzo es **negro puro** de marca (`#000`), no navy ni gris. Las superficies se separan por elevación
-  (`surface` → `surface-2`) y sombras negras tenues, no por color.
+- El lienzo es **casi-negro azulado** de marca (`#0A0B0F`), no negro puro `#000`, ni navy, ni gris. Las
+  superficies se separan por elevación (`surface` → `surface-2`) y sombras negras tenues, no por color.
 - La marca ES oscura: la clase `.dark` existe como alias de coherencia (admin puede alternarla) pero hereda
-  el mismo sistema negro+cyan; no reintroduce navy. Contraste verificado AA sobre `#000`.
+  el mismo sistema azulado + azul de marca; no reintroduce navy ni cyan. Contraste verificado AA.
 
 ---
 
@@ -116,7 +119,7 @@ Curvas custom (en `tokens.css`):
 ### admin-web — Dashboard de operación/seguridad (sobrio, data-first)
 
 - Densidad de información alta pero ordenada: sidebar de navegación (≥1024px), top bar con contexto + búsqueda + estado de sesión.
-- Jerarquía por tipografía/peso/espaciado, no por color. Acento cian solo en estados activos, acciones primarias y alertas.
+- Jerarquía por tipografía/peso/espaciado, no por color. Acento azul de marca solo en estados activos, acciones primarias y alertas.
 - Tablas densas con tabular-nums, filtros persistentes, drill-down con breadcrumb. Gráficas `recharts` con leyenda, tooltip, estado vacío, colores accesibles (no solo rojo/verde).
 - Mapa de operación en vivo (MapLibre) con conductores/viajes/pánicos; el **pánico** debe destacar (color danger + icono + texto, nunca solo color).
 - Modo oscuro de primera clase (centro de control). Sobriedad: cero gradientes decorativos, cero glassmorphism.
@@ -125,7 +128,7 @@ Curvas custom (en `tokens.css`):
 
 - Acceso por **link firmado** (`/t/[token]`), sin login, sin app. Mobile-first (la familia abre desde el móvil).
 - Foco emocional: "tu familiar está seguro y en camino". Mapa en vivo grande + estado del viaje claro + datos del conductor/vehículo + botón de ayuda/llamar visible.
-- Paleta cálida en acentos (no en el body), tono calmado, tipografía generosa y legible, mucho aire. Indicador "EN VIVO" sutil pero presente.
+- Acento azul de marca reservado a **lo vivo y lo accionable** (ETA, ruta, marcador del conductor, botón de ayuda), no en el body; tono calmado, tipografía generosa y legible, mucho aire. Indicador "EN VIVO" sutil pero presente.
 - Estados explícitos: link expirado/revocado, viaje finalizado, sin conexión. Nada de jerga; copy humano y directo.
 
 ---

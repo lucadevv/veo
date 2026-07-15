@@ -11,8 +11,8 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
   {
     key: 'pasajero',
     name: 'Pasajero',
-    theme: 'Midnight Motion · lima/negro',
-    accent: 'lime',
+    theme: 'App nativa · iOS + Android',
+    accent: 'brand',
     solid: true,
     description:
       'Pide con tu precio (estilo regateo), viaja con cámara y SOS, y comparte el viaje con tu familia.',
@@ -32,8 +32,8 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
   {
     key: 'conductor',
     name: 'Conductor',
-    theme: 'Noche · cian/azul',
-    accent: 'cyan',
+    theme: 'App nativa · Android',
+    accent: 'brand',
     solid: true,
     description:
       'Registro con documentos y selfie, gate biométrico por turno, ofertas con contraoferta y ganancias.',
@@ -53,8 +53,8 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
   {
     key: 'familia',
     name: 'Familia',
-    theme: 'Web pública · navy/cian',
-    accent: 'warm',
+    theme: 'Web pública · sin instalar',
+    accent: 'brand',
     solid: false,
     description:
       'Sin instalar nada: abre el link y acompaña el viaje en vivo — mapa, conductor, cámara y llegada.',
@@ -74,8 +74,8 @@ export const ECOSYSTEM_APPS: readonly EcosystemApp[] = [
   {
     key: 'admin',
     name: 'Admin',
-    theme: 'El cerebro · RBAC',
-    accent: 'neutral',
+    theme: 'Consola web · RBAC',
+    accent: 'brand',
     solid: false,
     description:
       'Operación en vivo, cola de pánicos, conductores, flota, finanzas, video con doble auth y auditoría.',

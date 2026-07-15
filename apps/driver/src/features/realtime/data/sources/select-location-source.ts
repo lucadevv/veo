@@ -1,4 +1,4 @@
-import type { LocationSource } from '../../domain/location-source';
+import type { LocationSource } from '../../../../core/location/location-source';
 import { backgroundGeolocationSource } from './background-geolocation-source';
 import { stubLocationSource } from './stub-location-source';
 import { DevFallbackLocationSource } from './dev-fallback-location-source';

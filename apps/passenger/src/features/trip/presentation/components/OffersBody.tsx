@@ -1,16 +1,19 @@
 import type {OfferView} from '@veo/api-client';
+import {useQuery} from '@tanstack/react-query';
 import {
-  Avatar,
   Banner,
   Button,
-  Card,
+  DriverCard,
+  hexAlpha,
   StatusPill,
   Text,
   useTheme,
 } from '@veo/ui-kit';
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {ActivityIndicator, StyleSheet, View} from 'react-native';
+import {TOKENS} from '../../../../core/di/tokens';
+import {useDependency} from '../../../../core/di/useDependency';
 import {
   formatDurationMinutes,
   formatPEN,
@@ -20,21 +23,19 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
-import {IconStarFilled} from './icons';
+import {EnterView} from './motion';
 
 /**
- * F1/F2 · Ventana de búsqueda (default ratificado §9 = 60s, usado SÓLO de fallback). El countdown es
- * VISUAL/HONESTO: NO decide la fase. La fase `noOffers` la activa SOLO el backend cuando el trip pasa a
- * EXPIRED (el sweeper de dispatch marca el board y trip-service emite `trip.expired` → socket
- * `trip:update`/poll REST → resolveTripPhase). Cuando el countdown llega a 0, NO mostramos un botón roto
- * ni nos adelantamos al server (ese fue el bug del reloj local): mostramos un spinner honesto ("esto está
- * tardando…") y ESPERAMOS la verdad del backend (el siguiente poll trae EXPIRED/GONE).
+ * ADR-021 Fase J (J1) · Ventana de búsqueda AUTORITATIVA, sin número inventado. El countdown es
+ * VISUAL/HONESTO: NO decide la fase (la fase `noOffers` la activa SOLO el backend al EXPIRAR el board →
+ * trip.expired → resolveTripPhase). Cuando llega a 0 NO mostramos botón roto: spinner honesto + esperamos.
  *
- * F2 · AUTORITATIVO: cuando el board ya nos dio `expiresAt` (epoch ms), el countdown se deriva de ESE
- * vencimiento, no del reloj local — así no adivina ni se desincroniza del server. El fallback al estimado
- * local (60s desde el montaje) sólo aplica mientras el board todavía no llegó.
+ * CLAVE (J1 — mató el bug de los "3 tiempos"): el countdown se deriva ÚNICAMENTE de `board.expiresAt`
+ * (epoch ms, autoritativo del server). Ya NO hay fallback local de 60s: en PUJA el board manda; en FIXED
+ * (o mientras el board todavía no llegó) NO hay UN deadline honesto que mostrar (las ofertas son
+ * secuenciales), así que `hasWindow=false` → la UI muestra "Buscando conductor…" INDETERMINADO, sin número
+ * y sin el salto que se veía cuando el reloj local (arrancado en otro instante) era reemplazado por el real.
  */
-const SEARCH_WINDOW_SECONDS = 60;
 
 /** mm:ss para el countdown visual (clamp a 0, nunca negativo). */
 function formatCountdown(secondsLeft: number): string {
@@ -45,46 +46,38 @@ function formatCountdown(secondsLeft: number): string {
 }
 
 /**
- * Countdown de la ventana de búsqueda. F2: si llega `expiresAt` (epoch ms del board), el restante se
- * deriva de ESE vencimiento autoritativo; si no (board aún no llegó), cae al estimado local de 60s desde
- * el montaje. Tickea cada segundo hasta 0. Es UI pura: el caller lo usa solo para el copy. Devuelve los
- * segundos restantes (>= 0) y si la ventana ya se agotó visualmente.
+ * Countdown de la ventana de búsqueda, derivado SOLO del `board.expiresAt` autoritativo (epoch ms).
+ * `hasWindow=false` cuando NO hay board (FIXED, o aún no llegó) → el caller muestra el estado indeterminado
+ * en vez de un número inventado. Tickea cada segundo hasta 0. UI pura: el caller lo usa solo para el copy.
  */
 function useSearchCountdown(
   active: boolean,
   expiresAt: number | null,
-): {secondsLeft: number; elapsed: boolean} {
-  // Ancla del fallback local: el instante de montaje en fase searching, sembrado una sola vez. Sólo se
-  // usa mientras el board todavía no entregó su `expiresAt` autoritativo.
-  const startRef = useRef<number | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(SEARCH_WINDOW_SECONDS);
+): {secondsLeft: number; elapsed: boolean; hasWindow: boolean} {
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const hasWindow = expiresAt != null;
 
   useEffect(() => {
-    if (!active) {
-      startRef.current = null;
-      setSecondsLeft(SEARCH_WINDOW_SECONDS);
+    if (!active || expiresAt == null) {
+      setSecondsLeft(0);
       return;
     }
-    startRef.current ??= Date.now();
     const tick = (): void => {
-      const remainingMs =
-        expiresAt != null
-          ? // AUTORITATIVO: cuánto falta para el vencimiento real del board.
-            expiresAt - Date.now()
-          : // FALLBACK local: 60s desde el montaje (sólo hasta que el board entregue su expiresAt).
-            SEARCH_WINDOW_SECONDS * 1000 -
-            (Date.now() - (startRef.current as number));
-      setSecondsLeft(Math.max(0, remainingMs / 1000));
+      // AUTORITATIVO y ÚNICO: cuánto falta para el vencimiento REAL del board. Sin fallback local.
+      setSecondsLeft(Math.max(0, (expiresAt - Date.now()) / 1000));
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [active, expiresAt]);
 
-  return {secondsLeft, elapsed: secondsLeft <= 0};
+  // `elapsed` solo tiene sentido cuando HAY ventana; sin board nunca está "agotado", está indeterminado.
+  return {secondsLeft, elapsed: hasWindow && secondsLeft <= 0, hasWindow};
 }
 
 export interface OffersBodyProps {
+  /** Viaje de la puja: para el chip echo "TU OFERTA S/ X" (best-effort, cache compartida del flujo). */
+  tripId: string;
   offers: OfferView[];
   connected: boolean;
   /** La puja expiró (cambia el copy del estado vacío "nadie aceptó" vs "buscando"). */
@@ -110,6 +103,7 @@ export interface OffersBodyProps {
  * (los aporta la pantalla unificada; las acciones suben por callbacks). Misma UI/diseño que el board.
  */
 export function OffersBody({
+  tripId,
   offers,
   connected,
   expired,
@@ -125,12 +119,26 @@ export function OffersBody({
 }: OffersBodyProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
+  const tripRepository = useDependency(TOKENS.tripRepository);
+
+  // Chip echo "TU OFERTA S/ X" (design/veo.pen L7OMER): el monto REAL de la puja del pasajero
+  // (fareCents del trip = su bid). Best-effort sobre la MISMA cache del flujo (['trip', id, 'active']):
+  // si aún no llegó, el chip no se pinta — nunca un monto inventado.
+  const tripQuery = useQuery({
+    queryKey: ['trip', tripId, 'active'],
+    queryFn: () => tripRepository.getActiveTrip(tripId),
+    staleTime: 30_000,
+  });
+  const yourOfferCents = tripQuery.data?.fareCents ?? null;
 
   // F1 · countdown VISUAL de la búsqueda, activo solo mientras buscamos de verdad (sin ofertas, no
   // expirado, sin error/carga). No decide la fase: cuando el backend confirma EXPIRED, el screen pasa
   // a `noOffers` y desmonta este cuerpo.
   const searching = !isError && !isLoading && !expired && offers.length === 0;
-  const {secondsLeft, elapsed} = useSearchCountdown(searching, expiresAt);
+  const {secondsLeft, elapsed, hasWindow} = useSearchCountdown(
+    searching,
+    expiresAt,
+  );
 
   const body = isError ? (
     <ErrorState onRetry={onRetry} />
@@ -142,9 +150,21 @@ export function OffersBody({
         title={t('offers.noneTitle')}
         subtitle={t('offers.noneBody')}
       />
+    ) : !hasWindow ? (
+      // J1 · SIN board autoritativo (FIXED, o el board aún no llegó): estado INDETERMINADO, sin número
+      // inventado. En FIXED las ofertas son secuenciales → no hay UN deadline honesto que mostrarle al
+      // pasajero; mostramos "Buscando conductor…" con spinner. Cuando el board PUJA llegue con su
+      // `expiresAt`, recién ahí aparece el countdown real (sin el salto del viejo reloj local de 60s).
+      <View style={styles.takingLong}>
+        <ActivityIndicator color={theme.colors.accent} />
+        <EmptyState
+          title={t('offers.searchingTitle')}
+          subtitle={t('offers.waitingBody')}
+        />
+      </View>
     ) : elapsed ? (
       // Countdown agotado pero el backend aún no confirmó EXPIRED: spinner HONESTO, sin botón roto.
-      // Esperamos la verdad del server (el sweeper expira a los 60s + margen) → luego fase noOffers.
+      // Esperamos la verdad del server (el sweeper expira el board + margen) → luego fase noOffers.
       <View style={styles.takingLong}>
         <ActivityIndicator color={theme.colors.accent} />
         <EmptyState
@@ -162,13 +182,12 @@ export function OffersBody({
     )
   ) : (
     <View style={{gap: theme.spacing.sm}}>
-      {offers.map(offer => (
-        <OfferCard
-          key={offer.driverId}
-          offer={offer}
-          onChoose={() => onChoose(offer)}
-          choosing={choosing}
-        />
+      {offers.map((offer, i) => (
+        // Stagger de entrada: cada oferta aparece con fade+desplazamiento escalonado (~40ms/índice) en vez
+        // de golpe. Una oferta nueva que llega en vivo (key por driverId) monta y anima sola.
+        <EnterView key={offer.driverId} index={i}>
+          <OfferCard offer={offer} onChoose={() => onChoose(offer)} choosing={choosing} />
+        </EnterView>
       ))}
     </View>
   );
@@ -177,12 +196,23 @@ export function OffersBody({
     <View style={{gap: theme.spacing.md}}>
       <View style={styles.header}>
         <View style={{flex: 1}}>
-          <Text variant="title3">
-            {t('offers.title', {count: offers.length})}
-          </Text>
-          <Text variant="footnote" color="inkMuted">
-            {t('offers.chooseHint')}
-          </Text>
+          {/* ADR-020 Lote 3: el título "N conductores respondieron" + el hint de comparación SOLO cuando
+              YA hay ofertas. Buscando (0 ofertas) mostraba "0 conductores respondieron" sobre el
+              "Buscando conductores…" del body → redundante y confuso; ahí el pill "En vivo" alcanza. */}
+          {offers.length > 0 ? (
+            <>
+              <Text variant="title3">
+                {t('offers.title', {count: offers.length})}
+              </Text>
+              {/* Subtítulo per design/veo.pen L7OMER: cuántas ofertas hay cerca (reemplaza al hint
+                  de ordenamiento; el orden por precio sigue siendo el del server). */}
+              <Text variant="footnote" color="inkMuted">
+                {t('offers.nearYou', {count: offers.length})}
+              </Text>
+            </>
+          ) : (
+            <Text variant="title3">{t('offers.searchingTitle')}</Text>
+          )}
         </View>
         <StatusPill
           label={connected ? t('offers.live') : t('offers.reconnecting')}
@@ -191,6 +221,29 @@ export function OffersBody({
           live={connected && !expired}
         />
       </View>
+
+      {/* Chip echo de TU puja (pen L7OMER "TU OFERTA S/ 12"): el pasajero compara cada oferta contra
+          SU monto sin memorizarlo. Solo con el monto real del trip (best-effort). */}
+      {yourOfferCents != null ? (
+        <View
+          style={[
+            styles.yourOffer,
+            {
+              backgroundColor: hexAlpha(theme.colors.brand, 0.15),
+              borderRadius: theme.radii.pill,
+              paddingHorizontal: theme.spacing.md,
+              paddingVertical: theme.spacing.xs,
+              gap: theme.spacing.xs,
+            },
+          ]}>
+          <Text variant="caption" color="brand">
+            {t('offers.yourOffer')}
+          </Text>
+          <Text variant="footnote" color="brand" tabular>
+            {formatPEN(yourOfferCents)}
+          </Text>
+        </View>
+      ) : null}
 
       {body}
 
@@ -210,7 +263,13 @@ export function OffersBody({
   );
 }
 
-/** Tarjeta de una oferta (rating + vehículo reales, enriquecidos por el BFF; degradación honesta). */
+/**
+ * Tarjeta de una oferta: la MISMA identidad canónica que FIXED (`DriverCard` de @veo/ui-kit — avatar con
+ * gradiente de confianza, escala de 5 estrellas, placa monoespaciada) + un `footer` con el precio y el CTA.
+ * Antes reimplementaba una card ad-hoc (Avatar+filas) que divergía de la identidad de la app. `verified` no
+ * viene enriquecido en la oferta (el BFF no lo manda) → sin sello, degradación honesta. Tono del precio per
+ * pen C/BidCard: verde (`safe`) si acepta TU precio, ámbar (`warn`) si propone otro.
+ */
 function OfferCard({
   offer,
   onChoose,
@@ -220,55 +279,33 @@ function OfferCard({
   onChoose: () => void;
   choosing: boolean;
 }): React.JSX.Element {
-  const theme = useTheme();
   const {t} = useTranslation();
   const acceptsPrice = offer.kind === 'ACCEPT_PRICE';
+  const vehicle = offer.vehicle
+    ? `${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`
+    : undefined;
 
   return (
-    <Card
-      variant="outlined"
-      padding="md"
-      style={acceptsPrice ? {borderColor: theme.colors.accent} : undefined}>
-      <View style={styles.row}>
-        <Avatar size="md" />
-        <View style={{flex: 1, gap: theme.spacing.xxs}}>
-          <View style={styles.nameRow}>
-            <Text variant="bodyStrong">
-              {offer.driverName ?? t('offers.driver')}
+    <DriverCard
+      name={offer.driverName ?? t('offers.driver')}
+      rating={offer.rating ?? undefined}
+      vehicle={vehicle}
+      plate={offer.vehicle?.plate}
+      footer={
+        <View style={styles.offerFooter}>
+          <View style={styles.offerFooterInfo}>
+            <Text variant="footnote" color={acceptsPrice ? 'safe' : 'warn'}>
+              {`${acceptsPrice ? t('offers.acceptsPrice') : t('offers.proposesOther')} · ${t(
+                'offers.etaMin',
+                {minutes: formatDurationMinutes(offer.etaSeconds)},
+              )}`}
             </Text>
-            {offer.rating != null ? (
-              <View style={styles.ratingRow}>
-                <IconStarFilled color={theme.colors.warn} size={13} />
-                <Text variant="footnote" color="warn" tabular>
-                  {offer.rating.toFixed(2)}
-                </Text>
-              </View>
-            ) : null}
+            <Text variant="title3" color={acceptsPrice ? 'safe' : 'warn'} tabular>
+              {formatPEN(offer.priceCents)}
+            </Text>
           </View>
-          {offer.vehicle ? (
-            <Text variant="footnote" color="inkMuted">
-              {`${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`}
-            </Text>
-          ) : null}
-          <Text variant="footnote" color={acceptsPrice ? 'safe' : 'inkMuted'}>
-            {acceptsPrice
-              ? t('offers.acceptsPrice')
-              : t('offers.proposesOther')}{' '}
-            ·{' '}
-            {t('offers.etaMin', {
-              minutes: formatDurationMinutes(offer.etaSeconds),
-            })}
-          </Text>
-        </View>
-        <View style={{alignItems: 'flex-end', gap: theme.spacing.xs}}>
-          <Text
-            variant="title3"
-            color={acceptsPrice ? 'accent' : 'ink'}
-            tabular>
-            {formatPEN(offer.priceCents)}
-          </Text>
           <Button
-            label={acceptsPrice ? t('offers.choose') : t('offers.view')}
+            label={acceptsPrice ? t('offers.accept') : t('offers.respond')}
             variant="primary"
             size="sm"
             loading={choosing && acceptsPrice}
@@ -276,15 +313,20 @@ function OfferCard({
             onPress={onChoose}
           />
         </View>
-      </View>
-    </Card>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
   header: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
+  yourOffer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
   takingLong: {alignItems: 'center', gap: 8},
-  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
+  // Footer de la oferta dentro de la DriverCard: info de precio/eta (izq) ↔ CTA (der).
+  offerFooter: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  offerFooterInfo: {flex: 1, gap: 2},
 });

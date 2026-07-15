@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  effectiveOfferingMode,
   findOffering,
   OFFERING_LIST,
   OFFERINGS,
-  OfferingFlow,
-  OfferingIcon,
   OfferingId,
-  resolveOfferingMode,
   VehicleClass,
-  type OfferingSpec,
 } from '../src/catalog/index.js';
 import { PricingMode } from '../src/enums/index.js';
 
@@ -19,15 +16,16 @@ describe('OFFERINGS · catálogo (ADR 013)', () => {
    * apps en la calle y con los datos ya guardados. Si este test rompe, NO "ajustes el assert":
    * estás rompiendo el contrato. Agregar una oferta nueva = AGREGAR un id acá.
    */
-  it('los ids del catálogo son el contrato (4 RIDE visibles + 4 verticales ocultas · B5-4)', () => {
-    // Las 4 RIDE son INMUTABLES (contrato con apps en la calle + Trip.category persistido). Las 4
-    // verticales (EV/ambulancia/grúa/mecánico) se AGREGARON codeadas pero ocultas (defaultEnabled:false).
+  it('los ids del catálogo son el contrato (5 RIDE visibles + 3 verticales ocultas · B5-4/F2.3)', () => {
+    // Las RIDE son INMUTABLES (contrato con apps en la calle + Trip.category persistido). F2.3: se
+    // AGREGÓ veo_premium (visible) y se DEPRECÓ veo_economico_ev (el eléctrico es un tipo de energía,
+    // no una oferta). Las 3 verticales (ambulancia/grúa/mecánico) siguen codeadas pero ocultas.
     const expected = [
       'veo_moto',
       'veo_economico',
       'veo_confort',
       'veo_xl',
-      'veo_economico_ev',
+      'veo_premium',
       'veo_ambulance',
       'veo_tow',
       'veo_mechanic',
@@ -70,13 +68,21 @@ describe('OFFERINGS · catálogo (ADR 013)', () => {
     }
   });
 
-  it('toda entrada tiene allowedModes NO vacío y solo con modos conocidos', () => {
+  it('toda entrada tiene un `mode` conocido y `modeLocked` booleano (ADR 023)', () => {
     const knownModes = Object.values(PricingMode);
     for (const spec of Object.values(OFFERINGS)) {
-      expect(spec.allowedModes.length).toBeGreaterThan(0);
-      for (const mode of spec.allowedModes) {
-        expect(knownModes).toContain(mode);
-      }
+      expect(knownModes).toContain(spec.mode);
+      expect(typeof spec.modeLocked).toBe('boolean');
+    }
+  });
+
+  it('las verticales especiales van LOCKEADAS en FIXED (no negocian); las rides NO lockeadas', () => {
+    for (const id of [OfferingId.VEO_AMBULANCE, OfferingId.VEO_TOW, OfferingId.VEO_MECHANIC]) {
+      expect(OFFERINGS[id].modeLocked).toBe(true);
+      expect(OFFERINGS[id].mode).toBe(PricingMode.FIXED);
+    }
+    for (const id of [OfferingId.VEO_ECONOMICO, OfferingId.VEO_CONFORT, OfferingId.VEO_XL]) {
+      expect(OFFERINGS[id].modeLocked).toBe(false);
     }
   });
 
@@ -86,9 +92,10 @@ describe('OFFERINGS · catálogo (ADR 013)', () => {
       OfferingId.VEO_MOTO,
       OfferingId.VEO_ECONOMICO,
       OfferingId.VEO_CONFORT,
+      // F2.3 · premium (sortOrder 3) entra ANTES de xl (sortOrder 4): económico → normal → premium → xl.
+      OfferingId.VEO_PREMIUM,
       OfferingId.VEO_XL,
       // B5-4 · verticales por sortOrder (ocultas: defaultEnabled:false, no aparecen en el quote).
-      OfferingId.VEO_ECONOMICO_EV,
       OfferingId.VEO_AMBULANCE,
       OfferingId.VEO_TOW,
       OfferingId.VEO_MECHANIC,
@@ -119,48 +126,17 @@ describe('findOffering · lookup tolerante en el borde de input', () => {
   });
 });
 
-describe('resolveOfferingMode · oferta ∩ schedule (ADR 013 §1.3)', () => {
-  /** Oferta restringida de prueba (estilo ambulancia): SOLO permite FIXED. */
-  const fixedOnly: OfferingSpec = {
-    id: OfferingId.VEO_ECONOMICO,
-    labelKey: 'offering.veo_economico.name',
-    icon: OfferingIcon.CAR,
-    vehicleClass: VehicleClass.CAR,
-    pricing: { multiplier: 1.0, minFareCents: 500 },
-    allowedModes: [PricingMode.FIXED],
-    flow: OfferingFlow.STANDARD,
-    sortOrder: 1,
-  };
-
-  it('schedule ∈ allowedModes → gana el schedule, sin override', () => {
-    const offering = OFFERINGS[OfferingId.VEO_ECONOMICO]; // permite [PUJA, FIXED]
-    expect(resolveOfferingMode(offering, PricingMode.PUJA)).toEqual({
-      mode: PricingMode.PUJA,
-      overridden: false,
-    });
-    expect(resolveOfferingMode(offering, PricingMode.FIXED)).toEqual({
-      mode: PricingMode.FIXED,
-      overridden: false,
-    });
+describe('effectiveOfferingMode · palanca manual del admin (ADR 023, sin schedule)', () => {
+  it('ride NO lockeada: el pin del admin GANA; sin pin → el modo de código', () => {
+    const eco = OFFERINGS[OfferingId.VEO_ECONOMICO]; // modeLocked:false
+    expect(effectiveOfferingMode(eco, PricingMode.PUJA)).toBe(PricingMode.PUJA);
+    expect(effectiveOfferingMode(eco, PricingMode.FIXED)).toBe(PricingMode.FIXED);
+    expect(effectiveOfferingMode(eco, undefined)).toBe(eco.mode);
   });
 
-  it('schedule ∉ allowedModes → gana la oferta con su modo PREFERIDO (allowedModes[0]) + override', () => {
-    expect(resolveOfferingMode(fixedOnly, PricingMode.PUJA)).toEqual({
-      mode: PricingMode.FIXED,
-      overridden: true,
-    });
-  });
-
-  it('oferta de UN solo modo: lo devuelve siempre (con o sin conflicto)', () => {
-    // Sin conflicto: el schedule pide el único modo permitido.
-    expect(resolveOfferingMode(fixedOnly, PricingMode.FIXED)).toEqual({
-      mode: PricingMode.FIXED,
-      overridden: false,
-    });
-    // Con conflicto: cae al único modo, marcado como override.
-    expect(resolveOfferingMode(fixedOnly, PricingMode.PUJA)).toEqual({
-      mode: PricingMode.FIXED,
-      overridden: true,
-    });
+  it('vertical LOCKEADA (ambulancia): IGNORA el pin, siempre su modo FIXED (no negocia)', () => {
+    const amb = OFFERINGS[OfferingId.VEO_AMBULANCE]; // modeLocked:true, mode FIXED
+    expect(effectiveOfferingMode(amb, PricingMode.PUJA)).toBe(PricingMode.FIXED);
+    expect(effectiveOfferingMode(amb, undefined)).toBe(PricingMode.FIXED);
   });
 });

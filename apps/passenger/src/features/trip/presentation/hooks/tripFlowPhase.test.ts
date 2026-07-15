@@ -63,6 +63,30 @@ describe('resolveTripPhase', () => {
     ).toBe('ended');
   });
 
+  it('EXPIRED ramifica por MODO: PUJA → noOffers (re-pujar), FIXED → noDriver (sin conductor)', () => {
+    // Sin modo (null/undefined) degrada al histórico PUJA: sigue siendo noOffers (no regresión).
+    expect(
+      resolveTripPhase({...base, activeTripId: 't1', status: 'EXPIRED'}),
+    ).toBe('noOffers');
+    expect(
+      resolveTripPhase({
+        ...base,
+        activeTripId: 't1',
+        status: 'EXPIRED',
+        mode: 'PUJA',
+      }),
+    ).toBe('noOffers');
+    // Un FIJO que expira NO va a "pon tu precio / re-pujar" (eso es puja) → su propio estado sin conductor.
+    expect(
+      resolveTripPhase({
+        ...base,
+        activeTripId: 't1',
+        status: 'EXPIRED',
+        mode: 'FIXED',
+      }),
+    ).toBe('noDriver');
+  });
+
   it('viaje activo: asignado/en camino → enRoute; llegó → arrived; en curso → inProgress', () => {
     for (const s of ['ASSIGNED', 'ACCEPTED', 'ARRIVING'] as const) {
       expect(resolveTripPhase({...base, activeTripId: 't1', status: s})).toBe(
@@ -100,6 +124,7 @@ describe('mapModeForPhase', () => {
     searching: 'route',
     offers: 'route',
     noOffers: 'route',
+    noDriver: 'route',
     reassigning: 'route',
     enRoute: 'trip',
     arrived: 'trip',
@@ -120,6 +145,9 @@ describe('isLiveSocketPhase', () => {
       'searching',
       'offers',
       'noOffers',
+      // noDriver (FIXED EXPIRED) mantiene el socket como noOffers: cerrarlo resetea live.status y la fase
+      // oscila noDriver↔searching (parpadeo). El socket abierto en EXPIRED mantiene el status estable.
+      'noDriver',
       'reassigning',
       'enRoute',
       'arrived',

@@ -50,3 +50,11 @@ export async function stepUp(code: string): Promise<void> {
 export async function logout(): Promise<void> {
   await postJson('/api/auth/logout', {});
 }
+
+/**
+ * Cierra la sesión en TODOS los dispositivos (revoca todas las sesiones + sella el denylist epoch en identity,
+ * ADR-012 §2). El Route Handler adjunta el refresh token de la cookie httpOnly; el navegador nunca lo ve.
+ */
+export async function logoutAll(): Promise<void> {
+  await postJson('/api/auth/logout-all', {});
+}

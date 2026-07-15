@@ -14,6 +14,10 @@ const BID: OpenBid = {
   expiresAt: 1_700_000_000_000,
   originLat: -12.0464,
   originLon: -77.0428,
+  destLat: -12.0931,
+  destLon: -77.0465,
+  distanceMeters: 8400,
+  durationSeconds: 1080,
   specialRequests: [],
 };
 

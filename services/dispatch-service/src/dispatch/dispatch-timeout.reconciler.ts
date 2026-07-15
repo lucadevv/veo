@@ -28,6 +28,10 @@ export class DispatchTimeoutReconciler {
       const advanced = await this.matching.sweepExpiredOffers();
       if (advanced > 0)
         this.logger.debug(`barrido: ${advanced} ofertas vencidas → TIMEOUT + advance`);
+      // v2 (feature-flag) — expansión TEMPORAL del ring del matcher FIXED, desacoplada del timeout de la
+      // oferta. No-op en v1 (devuelve 0). Va DESPUÉS del sweep de ofertas: primero resolvemos vencidas.
+      const expanded = await this.matching.sweepExpandableSessions();
+      if (expanded > 0) this.logger.debug(`barrido v2: ${expanded} sesiones expandieron el ring por tiempo`);
     } catch (err) {
       this.logger.error(`barrido de ofertas vencidas falló: ${String(err)}`);
     } finally {

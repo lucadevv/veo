@@ -6,12 +6,12 @@
  * reutilizando su infraestructura Socket.IO existente (no se crea una capa WS nueva). El BFF llama a
  * este servicio por REST interno firmado tras verificar la membresía vía gRPC GetTrip.
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { ValidationError, uuidv7 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { CHAT_REPO, type ChatRepository } from './chat.repository';
 import type { Message, SenderRole } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
@@ -42,7 +42,7 @@ export class ChatService {
   private readonly maxPageSize: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(CHAT_REPO) private readonly repo: ChatRepository,
     config: ConfigService<Env, true>,
   ) {
     this.maxBodyLength = config.getOrThrow<number>('CHAT_MAX_BODY_LENGTH');
@@ -52,11 +52,7 @@ export class ChatService {
   /** Historial de un viaje en orden cronológico ascendente (más antiguos primero). */
   async listMessages(tripId: string, limit?: number): Promise<ChatMessageView[]> {
     const take = Math.min(Math.max(1, limit ?? this.maxPageSize), this.maxPageSize);
-    const rows = await this.prisma.read.message.findMany({
-      where: { tripId },
-      orderBy: { createdAt: 'asc' },
-      take,
-    });
+    const rows = await this.repo.findByTrip(tripId, take);
     return rows.map((m) => this.view(m));
   }
 
@@ -69,7 +65,7 @@ export class ChatService {
     }
     // Mensaje + evento chat.message_sent en la MISMA transacción (outbox). El relay lo publica a
     // Kafka; ambos BFFs lo consumen y lo emiten por Socket.IO a la sala del viaje (entrega RT).
-    const created = await this.prisma.write.$transaction(async (tx) => {
+    const created = await this.repo.runInTx(async (tx) => {
       const message = await tx.message.create({
         data: {
           id: uuidv7(),
@@ -110,9 +106,7 @@ export class ChatService {
    */
   async eraseUser(userId: string, driverId?: string): Promise<{ deletedMessages: number }> {
     const senderIds = driverId ? [userId, driverId] : [userId];
-    const { count } = await this.prisma.write.message.deleteMany({
-      where: { senderId: { in: senderIds } },
-    });
+    const count = await this.repo.deleteBySenders(senderIds);
     return { deletedMessages: count };
   }
 
@@ -125,7 +119,7 @@ export class ChatService {
    * Idempotente: `deleteMany` es no-op si el viaje ya no tiene mensajes.
    */
   async eraseTrip(tripId: string): Promise<{ deletedMessages: number }> {
-    const { count } = await this.prisma.write.message.deleteMany({ where: { tripId } });
+    const count = await this.repo.deleteByTrip(tripId);
     return { deletedMessages: count };
   }
 

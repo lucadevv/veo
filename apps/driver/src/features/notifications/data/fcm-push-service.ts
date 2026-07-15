@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
+import { env } from '../../../core/config/env';
 import type {
   DevicePlatform,
+  OnPushDataMessage,
   PushMessage,
   PushRegistrationPort,
   PushService,
@@ -34,6 +36,12 @@ interface MessagingModule {
  * está configurado, devuelve `null` sin romper el arranque (modo dev sandbox/log).
  */
 function loadMessaging(): MessagingModule | null {
+  // GATE: sin FIREBASE_ENABLED no se toca el SDK nativo. En iOS, requestPermission()/getToken() disparan
+  // el registro APNs, y SIN el entitlement `aps-environment` eso es un CRASH NATIVO (no atrapable por el
+  // try/catch de JS). En dev no hay APNs → push OFF y la app degrada por el path NOOP de `start()`.
+  if (!env.FIREBASE_ENABLED) {
+    return null;
+  }
   try {
     // require lazy/opcional: el módulo nativo puede no estar presente (degradación honesta). Va dentro
     // del try/catch a propósito; un import estático tiraría al CARGAR el módulo si el nativo falta.
@@ -70,7 +78,10 @@ export class FcmPushService implements PushService {
   /** Último token FCM/APNs conocido; permite darlo de baja en el logout (mientras el JWT vive). */
   private currentToken: string | null = null;
 
-  async start(register: PushRegistrationPort): Promise<() => void> {
+  async start(
+    register: PushRegistrationPort,
+    onDataMessage?: OnPushDataMessage,
+  ): Promise<() => void> {
     const messaging = loadMessaging();
     if (!messaging) {
       if (__DEV__) {
@@ -78,6 +89,20 @@ export class FcmPushService implements PushService {
       }
       return NOOP;
     }
+
+    /**
+     * Procesa un push NO sensible (pánico filtrado): loguea en dev y delega el `data` a la presentación
+     * (refetch). NO muestra UI (regla #2). Único punto de manejo para foreground/abierto/quit.
+     */
+    const handleRelevant = (message: PushMessage): void => {
+      if (isPanicMessage(message)) {
+        return;
+      }
+      if (__DEV__) {
+        console.warn('[VEO] Push:', message?.data);
+      }
+      onDataMessage?.(message.data);
+    };
 
     try {
       const authStatus = await messaging().requestPermission();
@@ -108,23 +133,13 @@ export class FcmPushService implements PushService {
 
       // Foreground: solo procesamos mensajes inocuos; los de pánico se ignoran (sin UI).
       const unsubscribeForeground = messaging().onMessage(async (remoteMessage: PushMessage) => {
-        if (isPanicMessage(remoteMessage)) {
-          return;
-        }
-        if (__DEV__) {
-          console.warn('[VEO] Push en foreground:', remoteMessage?.data);
-        }
+        handleRelevant(remoteMessage);
       });
 
       // App abierta desde la notificación (quita/background→foreground): mismo filtro de pánico.
       const unsubscribeOpened = messaging().onNotificationOpenedApp(
         (remoteMessage: PushMessage) => {
-          if (isPanicMessage(remoteMessage)) {
-            return;
-          }
-          if (__DEV__) {
-            console.warn('[VEO] Push abrió la app:', remoteMessage?.data);
-          }
+          handleRelevant(remoteMessage);
         },
       );
 
@@ -132,8 +147,8 @@ export class FcmPushService implements PushService {
       messaging()
         .getInitialNotification()
         .then((remoteMessage: PushMessage | null) => {
-          if (remoteMessage && !isPanicMessage(remoteMessage) && __DEV__) {
-            console.warn('[VEO] Push arrancó la app:', remoteMessage.data);
+          if (remoteMessage) {
+            handleRelevant(remoteMessage);
           }
         })
         .catch(() => undefined);

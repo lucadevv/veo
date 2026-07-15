@@ -20,14 +20,14 @@ import {
   ValidationError,
 } from '@veo/utils';
 import argon2 from 'argon2';
-import { PrismaService } from '../infra/prisma.service';
+import { EmailAuthRepository } from './email-auth.repository';
 import { REDIS } from '../infra/redis';
 import { EmailCodeService } from './email-code.service';
 import { TokenIssuerService } from './token-issuer.service';
 import { resolveUserForVerifiedEmail } from './account-linking';
 import { registerUser } from './user-registration';
 import { EMAIL_SENDER, type EmailSender } from '../ports/email/email.port';
-import { Prisma, type UserType } from '../generated/prisma';
+import { type UserType } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 import type { AuthTokens } from './dto/auth.dto';
 
@@ -51,7 +51,7 @@ export class EmailAuthService {
   private readonly loginLockSeconds: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: EmailAuthRepository,
     private readonly sessions: RedisRefreshTokenStore,
     private readonly codes: EmailCodeService,
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
@@ -77,9 +77,7 @@ export class EmailAuthService {
     const email = this.normalizeEmail(rawEmail);
     this.assertStrongPassword(password);
 
-    const existing = await this.prisma.read.authMethod.findUnique({
-      where: { type_email: { type: 'EMAIL_PASSWORD', email } },
-    });
+    const existing = await this.repo.findEmailAuthMethod(email);
 
     if (existing?.emailVerified) {
       throw new ConflictError('Ese correo ya está registrado, iniciá sesión.');
@@ -93,11 +91,9 @@ export class EmailAuthService {
 
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       // Re-chequeo dentro de la tx (anti-carrera): si otro registro ganó, no duplicamos.
-      const dup = await tx.authMethod.findUnique({
-        where: { type_email: { type: 'EMAIL_PASSWORD', email } },
-      });
+      const dup = await this.repo.findEmailAuthMethodTx(tx, email);
       if (dup) return;
 
       // Account-linking: si ese correo YA pertenece a un User vía otro método verificado
@@ -108,15 +104,13 @@ export class EmailAuthService {
       // Sin vínculo previo → User nuevo + outbox user.registered (caso normal de hoy).
       // Con vínculo → solo colgamos la credencial EMAIL_PASSWORD del User existente (sin outbox).
       if (linkedUserId) {
-        await tx.authMethod.create({
-          data: {
-            userId: linkedUserId,
-            type: 'EMAIL_PASSWORD',
-            email,
-            passwordHash,
-            emailVerified: false,
-            verified: false,
-          },
+        await this.repo.createEmailAuthMethodTx(tx, {
+          userId: linkedUserId,
+          type: 'EMAIL_PASSWORD',
+          email,
+          passwordHash,
+          emailVerified: false,
+          verified: false,
         });
         return;
       }
@@ -148,9 +142,7 @@ export class EmailAuthService {
    */
   async resendVerification(rawEmail: string): Promise<{ sent: true }> {
     const email = this.normalizeEmail(rawEmail);
-    const method = await this.prisma.read.authMethod.findUnique({
-      where: { type_email: { type: 'EMAIL_PASSWORD', email } },
-    });
+    const method = await this.repo.findEmailAuthMethod(email);
 
     // Solo reenvía a una cuenta existente y SIN verificar. En cualquier otro caso, respuesta uniforme.
     if (method && !method.emailVerified) {
@@ -167,35 +159,26 @@ export class EmailAuthService {
     const email = this.normalizeEmail(rawEmail);
     await this.codes.verify('email-verify', email, code);
 
-    const method = await this.prisma.write.authMethod.findUnique({
-      where: { type_email: { type: 'EMAIL_PASSWORD', email } },
-      include: { user: true },
-    });
+    const method = await this.repo.findEmailAuthMethodWithUserOnPrimary(email);
     if (!method) throw new UnauthorizedError('Método de correo no encontrado.');
 
     // Marca emailVerified + emite outbox user.email_verified en la MISMA tx (mismo patrón que register
     // con user.registered): o se confirma el correo y se publica el evento, o nada (atomicidad outbox).
-    await this.prisma.write.$transaction(async (tx) => {
-      await tx.authMethod.update({
-        where: { id: method.id },
-        data: { emailVerified: true, verified: true },
-      });
-      const envelope = createEnvelope({
-        eventType: 'user.email_verified',
-        producer: 'identity-service',
-        payload: {
-          userId: method.user.id,
-          email,
-          verifiedAt: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: method.user.id,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+    await this.repo.runInTransaction(async (tx) => {
+      await this.repo.markEmailVerifiedTx(tx, method.id);
+      await this.repo.enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'user.email_verified',
+          producer: 'identity-service',
+          payload: {
+            userId: method.user.id,
+            email,
+            verifiedAt: new Date().toISOString(),
+          },
+        }),
+        method.user.id,
+      );
     });
 
     return this.tokenIssuer.issue(method.user.id, this.subjectType(method.user.type), {
@@ -221,10 +204,7 @@ export class EmailAuthService {
       throw new RateLimitError('Demasiados intentos, esperá unos minutos.');
     }
 
-    const method = await this.prisma.read.authMethod.findUnique({
-      where: { type_email: { type: 'EMAIL_PASSWORD', email } },
-      include: { user: true },
-    });
+    const method = await this.repo.findEmailAuthMethodWithUser(email);
 
     if (!method?.passwordHash) {
       throw new UnauthorizedError('Correo o contraseña incorrectos.');
@@ -271,9 +251,7 @@ export class EmailAuthService {
    */
   async forgotPassword(rawEmail: string): Promise<{ sent: true }> {
     const email = this.normalizeEmail(rawEmail);
-    const method = await this.prisma.read.authMethod.findUnique({
-      where: { type_email: { type: 'EMAIL_PASSWORD', email } },
-    });
+    const method = await this.repo.findEmailAuthMethod(email);
 
     if (method) {
       // silent: si hay cooldown, no lanzamos (mantiene la respuesta uniforme).
@@ -298,16 +276,11 @@ export class EmailAuthService {
     this.assertStrongPassword(newPassword);
     await this.codes.verify('pwd-reset', email, code);
 
-    const method = await this.prisma.write.authMethod.findUnique({
-      where: { type_email: { type: 'EMAIL_PASSWORD', email } },
-    });
+    const method = await this.repo.findEmailAuthMethodOnPrimary(email);
     if (!method) throw new UnauthorizedError('Método de correo no encontrado.');
 
     const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
-    await this.prisma.write.authMethod.update({
-      where: { id: method.id },
-      data: { passwordHash },
-    });
+    await this.repo.updateAuthMethodPassword(method.id, passwordHash);
 
     await this.sessions.revokeAllForUser(method.userId);
     return { ok: true };

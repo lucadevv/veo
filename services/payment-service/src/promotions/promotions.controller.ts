@@ -6,7 +6,7 @@
  */
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { InternalIdentityGuard } from '@veo/auth';
+import { Audiences, InternalIdentityGuard, AudienceGuard, InternalAudience } from '@veo/auth';
 import { PromotionsService } from './promotions.service';
 import {
   RedeemPromoDto,
@@ -15,9 +15,19 @@ import {
   type PromoValidationView,
 } from './dto/promotions.dto';
 
+// Riel del pasajero (NO service-rail · mínimo privilegio ADR-014 §5.5): declara explícito el set previo a
+// F3a para que el AudienceGuard rechace fail-closed a un service-rail (la membresía global ahora admite
+// service-rail solo por charge/debt/GetPayment).
+const PASSENGER_RAILS = [
+  InternalAudience.PUBLIC_RAIL,
+  InternalAudience.DRIVER_RAIL,
+  InternalAudience.ADMIN_RAIL,
+] as const;
+
 @ApiTags('promotions')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(...PASSENGER_RAILS)
 @Controller('promotions')
 export class PromotionsController {
   constructor(private readonly promos: PromotionsService) {}

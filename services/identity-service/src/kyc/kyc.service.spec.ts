@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { ForbiddenError } from '@veo/utils';
 import { KycService } from './kyc.service';
+import { KycRepository } from './kyc.repository';
 import type { Env } from '../config/env.schema';
 
 const config = new ConfigService<Env, true>({ BIOMETRIC_MIN_SCORE: 90 });
@@ -41,9 +42,17 @@ const bioPass = {
   async createChallenge() {
     return {
       challengeId: 'c1',
-      action: 'TURN_LEFT',
+      action: 'TURN_LEFT' as const,
       instructions: 'Gira la cabeza',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+  },
+  async enrollWithLiveness() {
+    return {
+      livenessPassed: true,
+      embedding: [0.4, 0.5, 0.6],
+      reason: null,
+      takenAt: new Date().toISOString(),
     };
   },
   async embed() {
@@ -51,6 +60,18 @@ const bioPass = {
   },
   async verify() {
     return { score: 96, livenessPassed: true, matchPassed: true };
+  },
+  async matchDniFace() {
+    return { matched: true, score: 96, reason: null };
+  },
+  async enrollPassive() {
+    return {
+      embedding: [0.4, 0.5, 0.6] as number[] | null,
+      live: true,
+      livenessChecked: true,
+      score: 0.95,
+      reason: null as string | null,
+    };
   },
 };
 
@@ -64,7 +85,7 @@ const bioLivenessFail = {
 describe('KycService.verify · KYC del pasajero (liveness OK → VERIFIED)', () => {
   it('verifica al pasajero, marca VERIFIED y emite user.kyc_verified al outbox', async () => {
     const captured: { update?: unknown; outbox?: unknown } = {};
-    const svc = new KycService(makePrisma(passenger, captured) as never, bioPass, config);
+    const svc = new KycService(new KycRepository(makePrisma(passenger, captured) as never), bioPass, config);
     const out = await svc.verify('u1', { challengeId: 'c1', frames: ['f1', 'f2'] });
 
     expect(out.status).toBe('VERIFIED');
@@ -79,7 +100,7 @@ describe('KycService.verify · KYC del pasajero (liveness OK → VERIFIED)', () 
 
   it('rechaza sin cambiar kycStatus cuando el liveness falla', async () => {
     const captured: { update?: unknown; outbox?: unknown } = {};
-    const svc = new KycService(makePrisma(passenger, captured) as never, bioLivenessFail, config);
+    const svc = new KycService(new KycRepository(makePrisma(passenger, captured) as never), bioLivenessFail, config);
     const out = await svc.verify('u1', { challengeId: 'c1', frames: ['f1'] });
 
     expect(out.status).toBe('REJECTED');
@@ -91,8 +112,7 @@ describe('KycService.verify · KYC del pasajero (liveness OK → VERIFIED)', () 
   });
 
   it('rechaza si el usuario no es pasajero (es conductor)', async () => {
-    const svc = new KycService(
-      makePrisma({ ...passenger, type: 'DRIVER' }) as never,
+    const svc = new KycService(new KycRepository(makePrisma({ ...passenger, type: 'DRIVER' }) as never),
       bioPass,
       config,
     );
@@ -104,14 +124,13 @@ describe('KycService.verify · KYC del pasajero (liveness OK → VERIFIED)', () 
 
 describe('KycService.createChallenge', () => {
   it('emite un reto de liveness para el pasajero', async () => {
-    const svc = new KycService(makePrisma(passenger) as never, bioPass, config);
+    const svc = new KycService(new KycRepository(makePrisma(passenger) as never), bioPass, config);
     const challenge = await svc.createChallenge('u1');
     expect(challenge.challengeId).toBe('c1');
   });
 
   it('rechaza el reto si el usuario no es pasajero', async () => {
-    const svc = new KycService(
-      makePrisma({ ...passenger, type: 'DRIVER' }) as never,
+    const svc = new KycService(new KycRepository(makePrisma({ ...passenger, type: 'DRIVER' }) as never),
       bioPass,
       config,
     );

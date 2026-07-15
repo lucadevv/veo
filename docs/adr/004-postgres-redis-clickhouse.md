@@ -10,7 +10,7 @@ Necesitamos transaccional (trips, payments), hot index (dispatch, presence), y a
 
 - **Postgres 16 + PostGIS**: núcleo transaccional + reportería geoespacial
 - **Redis 7 cluster**: cache, pub/sub, dispatch hot index, Socket.IO adapter
-- **ClickHouse** (managed Altinity): analytics + GPS history + producto events
+- **ClickHouse** (self-hosted en el VPS — está en el dev-stack; NO Altinity managed, §0.7(c)): analytics + GPS history + producto events
 
 ## Alternativas
 
@@ -24,4 +24,4 @@ Necesitamos transaccional (trips, payments), hot index (dispatch, presence), y a
 - Postgres + JSONB cubre flexibilidad sin perder joins
 - ClickHouse 10× compresión y 100× query OLAP
 
-* 3 sistemas que operar (mitigado con managed: RDS, ElastiCache, Altinity)
+* 3 sistemas que operar — se operan **self-hosted en el VPS** (los 3 están en el dev-stack: Postgres, Redis, ClickHouse; NO RDS/ElastiCache/Altinity, §0.7(c))

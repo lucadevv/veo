@@ -2,11 +2,16 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { BID_MAX_CENTS, secret } from '@veo/utils';
+import { BID_MAX_CENTS, requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
+import { DRIVER_LOC_TTL_SECONDS_DEFAULT } from '@veo/shared-types';
 import { MAPS_MODES } from '@veo/maps';
+import { outboxEnvSchema } from '@veo/database';
 
 export const envSchema = z
   .object({
+    // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+    // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+    ...grpcTlsEnvSchema.shape,
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().default(3003),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -16,10 +21,22 @@ export const envSchema = z
     DATABASE_URL_REPLICA: z.string().url().optional(),
 
     // Redis (hot index de ubicación + exclusión de pánico + contadores de demanda surge)
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
 
     // Kafka (outbox relay + consumidores)
-    KAFKA_BROKERS: z.string().default('localhost:9094'),
+    KAFKA_BROKERS: requiredInProd('localhost:9094'),
+    /// ESCALA (firehose GPS): Nº de particiones que el consumer procesa EN PARALELO (kafkajs
+    /// `partitionsConsumedConcurrently`). El topic `driver-location` está keyed por driverId → un mismo
+    /// conductor cae SIEMPRE en la misma partición y se procesa SERIAL (invariante RMW del hot-index
+    /// intacto); solo corren en paralelo conductores de particiones DISTINTAS. Default 12 = alineado con
+    /// `KAFKA_NUM_PARTITIONS` del broker (dev-stack/preview compose): con 1 instancia de dispatch todas las
+    /// particiones le tocan a este consumer, así que 12 lo paraleliza 12×. Debe ser <= particiones del topic.
+    KAFKA_CONSUMER_CONCURRENCY: z.coerce.number().int().positive().default(12),
+
+    // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+    // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+    // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+    ...outboxEnvSchema.shape,
 
     // Secreto para verificar la identidad interna firmada que el BFF propaga a servicios.
     INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
@@ -28,10 +45,16 @@ export const envSchema = z
     GRPC_URL: z.string().default('0.0.0.0:50053'),
     // gRPC CLIENT a identity-service: re-valida la elegibilidad del conductor en el submit de la PUJA
     // (ADR 010 §6, cierre estructural del catastrófico #9). Default = dev-stack.
-    IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
+    IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
     // gRPC CLIENT a fleet-service: resuelve el vehículo activo del conductor al ACEPTAR (awarding) para
     // adjuntar vehicleId al match → el viaje queda con su vehículo (trazabilidad). Default = dev-stack.
-    FLEET_GRPC_URL: z.string().default('localhost:50062'),
+    FLEET_GRPC_URL: requiredInProd('localhost:50062'),
+    // REST CLIENT a trip-service (dueño del catálogo): lee `/internal/catalog` para el FILTRO DEFENSIVO del pool
+    // (excluir conductores cuya clase de vehículo no esté operable · seam catálogo↔operabilidad, ADR 013). Es
+    // defensa en profundidad (secundaria: el mecanismo primario son los holds de identity); cache corto +
+    // degradación conservadora en el provider. Default = dev-stack (mismo baseUrl que consume el public-bff).
+    TRIP_URL: requiredInProd('http://localhost:3002/api/v1'),
+    REST_TIMEOUT_MS: z.coerce.number().default(8000),
 
     // OpenTelemetry
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
@@ -47,13 +70,33 @@ export const envSchema = z
 
     // ── Hot index ──
     /// TTL del registro de ubicación de un conductor; si no pinguea, deja de ser candidato (BR-T06).
-    DRIVER_LOC_TTL_SECONDS: z.coerce.number().default(60),
+    /// Default = FUENTE ÚNICA compartida con admin-web (poda de markers stale del mapa /ops).
+    DRIVER_LOC_TTL_SECONDS: z.coerce.number().default(DRIVER_LOC_TTL_SECONDS_DEFAULT),
 
     // ── Algoritmo de matching (BR-T06) ──
-    /// Milisegundos de espera de respuesta del conductor por oferta antes de marcarla TIMEOUT y avanzar.
-    DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(12_000),
+    /// SEED del default de la DB de la ventana de la oferta directa FIXED (ms). Autoridad VIVA = la fila
+    /// dispatch_radius_config (editable por el admin, cacheada); este env solo SIEMBRA el default cuando no
+    /// hay fila (DISPATCH_WINDOW_DEFAULTS). Ya NO se lee por-llamada en matching.service (ADR-019 Lote A).
+    // ADR-021 Fase F (F2) — default subido 12s→20s: 12s no alcanzaba una vez descontados relay Kafka→
+    // socket→app→navegación + el 2do GET del fare. Sigue siendo admin-configurable (ADR-019).
+    DISPATCH_OFFER_TIMEOUT_MS: z.coerce.number().default(20_000),
+    /// SEED del default de la DB de la ventana del board de PUJA (s). dispatch es la AUTORIDAD de la
+    /// ventana; el BID_WINDOW_SEC del trip-service (productor de bid_posted) es ADVISORY. Autoridad viva =
+    /// la fila dispatch_radius_config; este env solo SIEMBRA el default sin fila (ADR-019 Lote A / D1).
+    BID_WINDOW_SEC: z.coerce.number().int().positive().default(60),
     /// Radio máximo del k-ring al expandir la búsqueda. El advance agota cada anillo antes de expandir.
     DISPATCH_MAX_K_RING: z.coerce.number().default(2),
+    /// PRESUPUESTO de avance por tick del sweep durable (sweepExpiredOffers). El barrido es SECUENCIAL
+    /// (no paraleliza offerNext: el pool es read-only al ofertar y el conductor sale recién en markBusy al
+    /// ACEPTAR → paralelizar entre tripIds distintos podría double-offerear al mismo conductor). Sin tope,
+    /// un tick podía marcar+avanzar hasta 100 ofertas vencidas, encadenando 100 ciclos de matching en un
+    /// cron de 2s. K acota cuántas ofertas vencidas se reclaman+avanzan por tick (las no tomadas siguen
+    /// OFFERED y las toma el próximo tick). Marcado (CAS) y avance van ACOPLADOS por fila → sin huérfanas.
+    DISPATCH_SWEEP_ADVANCE_BUDGET: z.coerce.number().int().positive().default(25),
+    /// DEADLINE (ms) por tick del sweep: backstop ante un offerNext patológicamente lento. Si el tick supera
+    /// este presupuesto temporal, corta el for ANTES de marcar la próxima fila (marcado y avance van juntos
+    /// por fila, así un corte por deadline NO deja huérfanas). Debe ser < 2000 (el @Interval del reconciler).
+    DISPATCH_SWEEP_DEADLINE_MS: z.coerce.number().int().positive().max(1_999).default(1_500),
 
     // Config de RADIOS (k-rings) editable en runtime por el admin: TTL (ms) del cache in-proc de UN slot
     // que sirve los k-rings al hot-path (feed de mapa + broadcast de pujas). La config cambia en el orden
@@ -87,6 +130,24 @@ export const envSchema = z
     // ── Mapa de calor de demanda (Ola 2C) ──
     /// Ventana DESLIZANTE (s) de intensidad por celda H3; cada solicitud refresca el TTL de la celda.
     HEATMAP_WINDOW_SECONDS: z.coerce.number().default(900),
+
+    // ── Auto-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad) ──
+    /// Ventana ROLLING (horas) sobre la que se cuentan las cancelaciones POR conductor. Las cancelaciones
+    /// más viejas que esto se podan y no cuentan. Default 24h. (Tabla `driver_cancellation_events`, SEPARADA
+    /// del contador lifelong del scoring.)
+    CANCELLATION_WINDOW_HOURS: z.coerce.number().int().positive().default(24),
+    /// Nº de cancelaciones en la ventana que DISPARA la auto-suspensión. Al cruzar exactamente este umbral
+    /// (count pasa de THRESHOLD-1 → THRESHOLD) dispatch emite `driver.excessive_cancellations` UNA vez. Default 5.
+    CANCELLATION_THRESHOLD: z.coerce.number().int().positive().default(5),
+
+    // ── Exclusión por SUSPENSIÓN del pool de matching (RedisTtlExclusionRegistry) ──
+    /// TTL (s) de AUTO-CURA de la exclusión por suspensión. La exclusión es una OPTIMIZACIÓN (no ofertarle
+    /// al suspendido); la AUTORIDAD de seguridad es el accept-gate fail-closed. El TTL acota la ventana de
+    /// OVER-exclusion: si la señal de reactivación nunca llega (p.ej. la vía fleet-auto doc/ITV NO emite
+    /// `driver.reactivated`), la exclusión EXPIRA y el conductor re-entra al pool en vez de quedar pegado
+    /// para siempre. Re-suspender refresca el TTL. Default 1h (corto = auto-cura rápida del lado peligroso;
+    /// el caso normal limpia al instante por evento). Subir cuando Lote 2b consuma los eventos fleet.
+    SUSPENSION_EXCLUSION_TTL_SECONDS: z.coerce.number().int().positive().default(3_600),
   })
   .superRefine((env, ctx) => {
     // Mapbox sin token reventaría al construir el cliente (createMapsClient). Falla temprano y claro.

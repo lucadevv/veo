@@ -2,8 +2,12 @@
  * Watchdog de estado — tests del SWEEPER temporal (reglas de negocio críticas, FOUNDATION §7).
  *
  * Cubre el gap del agujero negro: viajes no terminales estancados deben caer a EXPIRED/FAILED.
- *  - REQUESTED estancado → EXPIRED + outbox trip.expired.
+ *  - REQUESTED/ASSIGNED/REASSIGNING estancados (sin conductor comprometido) → EXPIRED + trip.expired.
+ *  - ACCEPTED/ARRIVING/ARRIVED estancados (conductor comprometido) → FAILED + trip.failed (la máquina
+ *    NO permite EXPIRED desde post-accept; proponerlo dejaba el viaje estancado para siempre).
  *  - IN_PROGRESS estancado → FAILED + outbox trip.failed.
+ *  - CANDADO: todo target que proponga resolveStalledTarget es una transición VÁLIDA de la máquina
+ *    real (canTransition) — el watchdog jamás vuelve a proponer una transición prohibida.
  *  - Viaje fresco → intacto (no se transiciona ni se emite evento).
  *  - Viaje ya terminal → ignorado (ni siquiera es candidato; idempotente).
  *
@@ -13,8 +17,10 @@
 import { describe, it, expect } from 'vitest';
 import { TripStatus, PaymentMethod } from '@veo/shared-types';
 import { TripWatchdogService } from './trip-watchdog.service';
+import { TripWatchdogRepository } from './trip-watchdog.repository';
 import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
 import { resolveStalledTarget, WATCHED_STATES, type WatchdogThresholds } from './domain/watchdog';
+import { canTransition } from './domain/trip-state-machine';
 import { Prisma, type Trip } from '../generated/prisma';
 
 const NOW = new Date('2026-06-04T12:00:00.000Z');
@@ -185,15 +191,32 @@ describe('watchdog · resolveStalledTarget (dominio puro)', () => {
     expect(resolveStalledTarget(TripStatus.REQUESTED, mins(9), NOW, THRESHOLDS)).toBeNull();
   });
 
-  it('pre-recojo asignado (ASSIGNED/ACCEPTED/ARRIVING/ARRIVED) vencido → EXPIRED', () => {
-    for (const s of [
-      TripStatus.ASSIGNED,
-      TripStatus.ACCEPTED,
-      TripStatus.ARRIVING,
-      TripStatus.ARRIVED,
-    ]) {
-      expect(resolveStalledTarget(s, mins(16), NOW, THRESHOLDS)).toBe(TripStatus.EXPIRED);
+  it('ASSIGNED vencido (nadie aceptó) → EXPIRED; fresco → null', () => {
+    expect(resolveStalledTarget(TripStatus.ASSIGNED, mins(16), NOW, THRESHOLDS)).toBe(
+      TripStatus.EXPIRED,
+    );
+    expect(resolveStalledTarget(TripStatus.ASSIGNED, mins(14), NOW, THRESHOLDS)).toBeNull();
+  });
+
+  it('post-accept (ACCEPTED/ARRIVING/ARRIVED) vencido → FAILED (la máquina no permite EXPIRED ahí)', () => {
+    for (const s of [TripStatus.ACCEPTED, TripStatus.ARRIVING, TripStatus.ARRIVED]) {
+      expect(resolveStalledTarget(s, mins(16), NOW, THRESHOLDS)).toBe(TripStatus.FAILED);
       expect(resolveStalledTarget(s, mins(14), NOW, THRESHOLDS)).toBeNull();
+    }
+  });
+
+  it('CANDADO: todo target propuesto es una transición VÁLIDA de la máquina real (canTransition)', () => {
+    // El bug original: el watchdog proponía ACCEPTED/ARRIVING/ARRIVED → EXPIRED, que la máquina
+    // prohíbe → assertTransition lanzaba en cada barrido y el viaje quedaba estancado PARA SIEMPRE.
+    // Este candado recorre TODOS los estados vigilados con antigüedad vencida contra la máquina real.
+    for (const s of WATCHED_STATES) {
+      const target = resolveStalledTarget(s, mins(9999), NOW, THRESHOLDS);
+      expect(target, `estado vigilado ${s} debe vencer a un target`).not.toBeNull();
+      if (target === null) continue; // narrowing para TS: el expect de arriba ya falló
+      expect(
+        canTransition(s, target),
+        `watchdog propone ${s} → ${target}, transición PROHIBIDA por la máquina`,
+      ).toBe(true);
     }
   });
 
@@ -229,7 +252,7 @@ describe('watchdog · resolveStalledTarget (dominio puro)', () => {
 
 function makeScheduler(trips: Trip[]) {
   const prisma = makePrisma(trips);
-  const svc = new TripWatchdogService(prisma as never);
+  const svc = new TripWatchdogService(new TripWatchdogRepository(prisma as never));
   const scheduler = new TripWatchdogScheduler(svc, fakeConfig as never);
   return { prisma, svc, scheduler };
 }
@@ -248,6 +271,37 @@ describe('TripWatchdogScheduler.tick · barrido temporal', () => {
     expect(ev?.payload.fromStatus).toBe(TripStatus.REQUESTED);
     expect(ev?.payload.staleMinutes).toBe(30);
     expect(prisma._tripEvents.some((e) => e.eventType === 'trip.expired')).toBe(true);
+  });
+
+  it('ASSIGNED estancado (nadie aceptó) → EXPIRED y encola trip.expired', async () => {
+    const trip = buildTrip({ id: 't-asg', status: TripStatus.ASSIGNED, updatedAt: mins(30) });
+    const { prisma, scheduler } = makeScheduler([trip]);
+
+    await scheduler.tick(NOW);
+
+    expect(prisma.statusOf('t-asg')).toBe(TripStatus.EXPIRED);
+    const ev = prisma._outbox.find((e) => e.eventType === 'trip.expired');
+    expect(ev).toBeTruthy();
+    expect(ev?.payload.tripId).toBe('t-asg');
+    expect(ev?.payload.fromStatus).toBe(TripStatus.ASSIGNED);
+  });
+
+  it('post-accept estancado (ACCEPTED/ARRIVING/ARRIVED) → FAILED y encola trip.failed', async () => {
+    // Regresión del bug: antes el watchdog proponía EXPIRED (prohibido desde post-accept) →
+    // InvalidTripTransition en cada tick → el viaje quedaba estancado para siempre.
+    for (const status of [TripStatus.ACCEPTED, TripStatus.ARRIVING, TripStatus.ARRIVED]) {
+      const trip = buildTrip({ id: 't-post', status, driverId: 'drv-1', updatedAt: mins(30) });
+      const { prisma, scheduler } = makeScheduler([trip]);
+
+      await scheduler.tick(NOW);
+
+      expect(prisma.statusOf('t-post'), `desde ${status}`).toBe(TripStatus.FAILED);
+      const ev = prisma._outbox.find((e) => e.eventType === 'trip.failed');
+      expect(ev, `trip.failed desde ${status}`).toBeTruthy();
+      expect(ev?.payload.tripId).toBe('t-post');
+      expect(ev?.payload.fromStatus).toBe(status);
+      expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(false);
+    }
   });
 
   it('IN_PROGRESS estancado → FAILED y encola trip.failed', async () => {
@@ -307,7 +361,7 @@ describe('TripWatchdogScheduler.tick · barrido temporal', () => {
     expect(prisma._outbox).toHaveLength(0);
   });
 
-  it('barrido mixto: expira pre-recojo, falla en curso, respeta el fresco', async () => {
+  it('barrido mixto: expira sin-aceptación, falla post-accept y en curso, respeta el fresco', async () => {
     const trips = [
       buildTrip({ id: 'a', status: TripStatus.ASSIGNED, driverId: 'd', updatedAt: mins(20) }),
       buildTrip({
@@ -317,6 +371,7 @@ describe('TripWatchdogScheduler.tick · barrido temporal', () => {
         updatedAt: mins(7 * 60),
       }),
       buildTrip({ id: 'c', status: TripStatus.ARRIVED, driverId: 'd', updatedAt: mins(5) }), // fresco
+      buildTrip({ id: 'e', status: TripStatus.ACCEPTED, driverId: 'd', updatedAt: mins(20) }),
     ];
     const { prisma, scheduler } = makeScheduler(trips);
 
@@ -325,6 +380,11 @@ describe('TripWatchdogScheduler.tick · barrido temporal', () => {
     expect(prisma.statusOf('a')).toBe(TripStatus.EXPIRED);
     expect(prisma.statusOf('b')).toBe(TripStatus.FAILED);
     expect(prisma.statusOf('c')).toBe(TripStatus.ARRIVED);
-    expect(prisma._outbox.map((e) => e.eventType).sort()).toEqual(['trip.expired', 'trip.failed']);
+    expect(prisma.statusOf('e')).toBe(TripStatus.FAILED);
+    expect(prisma._outbox.map((e) => e.eventType).sort()).toEqual([
+      'trip.expired',
+      'trip.failed',
+      'trip.failed',
+    ]);
   });
 });

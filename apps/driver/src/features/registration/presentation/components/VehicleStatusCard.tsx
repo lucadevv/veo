@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { StatusPill, Text, useTheme, type StatusTone } from '@veo/ui-kit';
 import { vehicleClassGlyph } from '../../../../shared/presentation/vehicle-class';
 import type { VehicleView } from '../../domain';
-import { hexAlpha } from './color';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
 interface VehicleStatusCardProps {
   vehicle: VehicleView;

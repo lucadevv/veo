@@ -1,129 +1,44 @@
 import React from 'react';
-import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { useQueryClient } from '@tanstack/react-query';
-import { Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
-import { REGISTRATION_GATE_QUERY_KEY } from '../hooks/useRegistrationGate';
-import {
-  IconAccount,
-  IconCar,
-  IconCheck,
-  IconDocument,
-  IconLifebuoy,
-} from '../../../../shared/presentation/icons';
+import Svg, { Defs, RadialGradient, Stop, Rect } from 'react-native-svg';
+import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { useRegistrationGate } from '../hooks/useRegistrationGate';
+import { IconLifebuoy, IconShield } from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
 import { env } from '../../../../core/config/env';
-import { VeoWordmark, hexAlpha } from '../components';
+import { useRegistrationExit } from '../hooks/useRegistrationExit';
+import { useRegistrationExitGuard } from '../hooks/useRegistrationExitGuard';
+import { RegistrationExitSheet } from '../components';
+import { hexAlpha } from '../../../../shared/presentation/color';
 
-/** Ícono de KYC (rostro escaneado) para la fila de verificación facial. */
-function ScanFaceGlyph({ color, size = 22 }: { color: string; size?: number }): React.JSX.Element {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinecap="round"
-      />
-      <Circle cx={12} cy={11} r={2.5} stroke={color} strokeWidth={2} />
-      <Path d="M8.5 16a4 4 0 0 1 7 0" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-/** Ilustración de portapapeles con checks + reloj (line art cian) de la pantalla de revisión. */
-function ReviewClipboard({ color }: { color: string }): React.JSX.Element {
-  return (
-    <Svg width={132} height={132} viewBox="0 0 132 132" fill="none">
-      <Rect x={26} y={20} width={70} height={92} rx={8} stroke={color} strokeWidth={2.4} />
-      <Rect x={48} y={12} width={26} height={16} rx={5} stroke={color} strokeWidth={2.4} />
-      <Circle cx={61} cy={46} r={9} stroke={color} strokeWidth={2.4} />
-      <Path d="M40 70h26M40 82h20" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
-      <Path
-        d="M38 70l3 3 5-6M38 82l3 3 5-6"
-        stroke={color}
-        strokeWidth={2.4}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <Circle cx={96} cy={92} r={20} stroke={color} strokeWidth={2.4} fill="none" />
-      <Path
-        d="M96 82v10l6 4"
-        stroke={color}
-        strokeWidth={2.4}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
-
-interface ChecklistRowProps {
-  icon: React.ReactNode;
-  label: string;
-  done: boolean;
-  pendingLabel?: string;
-  isLast?: boolean;
-}
-
-/** Fila del checklist de revisión con marcador de timeline a la izquierda. */
-function ChecklistRow({
-  icon,
-  label,
-  done,
-  pendingLabel,
-  isLast,
-}: ChecklistRowProps): React.JSX.Element {
-  const theme = useTheme();
-  return (
-    <View style={styles.checkRow}>
-      <View style={styles.timeline}>
-        {done ? (
-          <View style={[styles.marker, { backgroundColor: theme.colors.success }]}>
-            <IconCheck size={13} color={theme.colors.onSuccess} strokeWidth={3} />
-          </View>
-        ) : (
-          <View style={[styles.marker, { backgroundColor: hexAlpha(theme.colors.accent, 0.18) }]}>
-            <ActivityIndicator size="small" color={theme.colors.accent} />
-          </View>
-        )}
-        {!isLast ? (
-          <View style={[styles.connector, { backgroundColor: theme.colors.border }]} />
-        ) : null}
-      </View>
-      <View style={styles.checkIcon}>{icon}</View>
-      <Text variant="bodyStrong" style={styles.checkLabel} numberOfLines={1}>
-        {label}
-      </Text>
-      {done ? (
-        <IconCheck size={20} color={theme.colors.success} strokeWidth={2.6} />
-      ) : (
-        <Text variant="subhead" color="accent">
-          {pendingLabel}
-        </Text>
-      )}
-    </View>
-  );
-}
+/** Diámetro del glow radial ambiente detrás del badge (frame `C/UnderReview`: rect 320 con gradiente radial). */
+const GLOW = 320;
+/** Diámetro del badge del escudo (frame: 88, círculo pleno). */
+const BADGE = 88;
 
 /**
- * Pantalla "Estamos revisando tus datos" (drv-08). El conductor llega aquí tras enviar el alta
- * (estado `in_review`). "Entendido" es solo un acuse de recibo: NO aprueba el alta localmente. La
- * transición a `approved` la decide EXCLUSIVAMENTE el backend, vía
- * `applyBackendStatus(mapProfileToRegistrationStatus(GET /drivers/me))` en `useRegistrationGate`;
- * mientras tanto el conductor permanece en `in_review` y el `RootNavigator` lo mantiene aquí.
+ * Pantalla "Estamos revisando tus datos" (drv-08), a imagen del frame `C/UnderReview` (dirección Tesla:
+ * CALMA y ESPACIO, composición CENTRADA). El conductor llega tras enviar el alta (`in_review`). En vez del
+ * timeline de checks (que se sentía "hecho por AI"), una composición espartana y SIMÉTRICA: wordmark +
+ * badge de escudo con glow radial azul + título grande `display` centrado + una línea que tranquiliza + el
+ * tiempo estimado en una card destacada. "Actualizar estado" re-consulta `GET /drivers/me`; la transición
+ * a `approved`/`rejected` la decide EXCLUSIVAMENTE el backend (`useRegistrationGate`). Sin pulsos animados.
  */
 export const UnderReviewScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
-  const queryClient = useQueryClient();
+  const { isRefreshing, refreshError, refresh } = useRegistrationGate();
+
+  // Pantalla RAÍZ del estado `in_review`: sin esta salida, el conductor queda atrapado esperando la
+  // aprobación sin poder cerrar sesión. Reusa el mismo logout/clearSession + guard del back de hardware.
+  const exit = useRegistrationExit();
+  useRegistrationExitGuard(exit.handleHardwareBack);
 
   const onCheckStatus = () => {
-    // RE-CHEQUEA el estado del alta contra el backend (la aprobación NUNCA se hace localmente). Si ya
-    // está aprobado, el `useRegistrationGate` re-resuelve y el `RootNavigator` saca al conductor de acá.
-    // Antes "Entendido" no hacía NADA al tap (se veía roto); ahora el botón sí tiene efecto.
-    queryClient.invalidateQueries({ queryKey: REGISTRATION_GATE_QUERY_KEY });
+    // RE-CHEQUEA contra el backend (la aprobación NUNCA se hace localmente). Si ya está aprobado, el
+    // `useRegistrationGate` re-resuelve y el `RootNavigator` saca al conductor de acá.
+    refresh();
   };
 
   const onContactSupport = () => {
@@ -131,103 +46,208 @@ export const UnderReviewScreen = (): React.JSX.Element => {
     Linking.openURL(`mailto:${env.SUPPORT_EMAIL}`).catch(() => undefined);
   };
 
+  // Etiqueta con feedback de carga: en vuelo → "Actualizando…"; resto → "Actualizar estado".
+  const checkStatusLabel = isRefreshing
+    ? t('registration.review.updating')
+    : t('registration.actions.refreshStatus');
+
   return (
-    <SafeScreen
-      scroll
-      footer={
-        <View style={{ gap: theme.spacing.sm }}>
-          <Button
-            label={t('registration.review.checkStatus')}
-            variant="secondary"
-            fullWidth
-            onPress={onCheckStatus}
-          />
-          <Button
-            label={t('registration.review.contactSupport')}
-            variant="ghost"
-            fullWidth
-            leftIcon={<IconLifebuoy size={18} color={theme.colors.accent} strokeWidth={2} />}
-            onPress={onContactSupport}
-          />
-        </View>
-      }
-    >
-      <View style={[styles.body, { gap: theme.spacing.xl }]}>
-        <Reveal style={styles.brand}>
-          <VeoWordmark size="sm" peru />
-        </Reveal>
-
-        <Reveal delay={60} spring style={styles.illustration}>
-          <ReviewClipboard color={theme.colors.accent} />
-        </Reveal>
-
-        <Reveal delay={120} style={styles.intro}>
-          <Text variant="title1" align="center">
-            {t('registration.review.title')}
-          </Text>
-          <Text variant="callout" color="inkMuted" align="center">
-            {t('registration.review.subtitle')}
-          </Text>
-        </Reveal>
-
-        <Reveal delay={180}>
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.colors.surface,
-                borderColor: theme.colors.border,
-                borderRadius: theme.radii.lg,
-                padding: theme.spacing.lg,
-                gap: theme.spacing.lg,
-              },
-            ]}
-          >
-            <ChecklistRow
-              icon={<IconAccount size={22} color={theme.colors.accent} strokeWidth={1.8} />}
-              label={t('registration.review.personal')}
-              done
+    <>
+      <SafeScreen
+        // El footer también maneja su gutter 2xl a mano (wrapper propio): sin el estándar xl encima.
+        footerPadded={false}
+        scroll
+        // `padded={false}`: el gutter (24 = `2xl`) lo controla ESTA pantalla, alineado con el footer.
+        padded={false}
+        footer={
+          <View style={{ paddingHorizontal: theme.spacing['2xl'], gap: theme.spacing.md }}>
+            {/* 1) Actualizar estado — ÚNICO botón (frame: surface `$surface` + borde `$border-strong`, pill). */}
+            <Button
+              label={checkStatusLabel}
+              variant="secondary"
+              fullWidth
+              loading={isRefreshing}
+              disabled={isRefreshing}
+              onPress={onCheckStatus}
             />
-            <ChecklistRow
-              icon={<IconCar size={22} color={theme.colors.accent} strokeWidth={1.8} />}
-              label={t('registration.review.vehicle')}
-              done
-            />
-            <ChecklistRow
-              icon={<IconDocument size={22} color={theme.colors.accent} strokeWidth={1.8} />}
-              label={t('registration.review.documents')}
-              done
-            />
-            <ChecklistRow
-              icon={<ScanFaceGlyph color={theme.colors.accent} />}
-              label={t('registration.review.facial')}
-              done={false}
-              pendingLabel={t('registration.review.inReview')}
-              isLast
-            />
+            {/* 2) Contactar a soporte — FILA text-link (frame: icon + texto en `$ink-muted`, SIN chrome de
+                botón). No es un Button: en el diseño es un link discreto. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('registration.support.contact')}
+              onPress={onContactSupport}
+              style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
+            >
+              <IconLifebuoy size={16} color={theme.colors.inkMuted} strokeWidth={2} />
+              <Text variant="subhead" color="inkMuted">
+                {t('registration.support.contact')}
+              </Text>
+            </Pressable>
+            {/* 3) Cerrar sesión — link QUIETO en `$ink-subtle` (menor peso, para no tocarlo por error). */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('registration.exit')}
+              disabled={exit.isLoggingOut}
+              onPress={exit.requestExit}
+              style={({ pressed }) => [styles.logoutRow, pressed && styles.pressed]}
+            >
+              {exit.isLoggingOut ? (
+                <ActivityIndicator size="small" color={theme.colors.inkSubtle} />
+              ) : (
+                <Text variant="footnote" color="inkSubtle">
+                  {t('registration.exit')}
+                </Text>
+              )}
+            </Pressable>
           </View>
-        </Reveal>
-      </View>
-    </SafeScreen>
+        }
+      >
+        <View
+          style={[
+            styles.body,
+            { gap: theme.spacing['2xl'], paddingHorizontal: theme.spacing['2xl'] },
+          ]}
+        >
+          {/* Wordmark CENTRADO arriba — "VEO" PELADO (frame `Brand`: display 18/700, letterSpacing 1.5).
+              NO el lockup completo `VeoWordmark` (VEO/CONDUCTORES/PERÚ), que carga de más esta pantalla. */}
+          <Reveal style={styles.brand}>
+            <Text variant="title2" style={styles.wordmark}>
+              VEO
+            </Text>
+          </Reveal>
+
+          {/* Badge del escudo con GLOW radial azul detrás (frame `rnaFy`: rect 320 gradiente `$accent` #0075A9
+              0.15→0 + círculo 88 tint `$info` #0097CE con shield-check 40 `$info`). El glow ambiente sigue
+              siendo brand/accent; el ESCUDO y su disco son info-cyan (no brand). El glow es un rect SVG con
+              RadialGradient real, no un shadow. */}
+          <Reveal delay={60} style={styles.badgeSection}>
+            <View style={styles.glow} pointerEvents="none">
+              <Svg width={GLOW} height={GLOW}>
+                <Defs>
+                  <RadialGradient
+                    id="badgeGlow"
+                    cx={GLOW / 2}
+                    cy={GLOW / 2}
+                    r={GLOW / 2}
+                    gradientUnits="userSpaceOnUse"
+                  >
+                    <Stop offset="0" stopColor={theme.colors.accent} stopOpacity={0.16} />
+                    <Stop offset="1" stopColor={theme.colors.accent} stopOpacity={0} />
+                  </RadialGradient>
+                </Defs>
+                <Rect width={GLOW} height={GLOW} fill="url(#badgeGlow)" />
+              </Svg>
+            </View>
+            <View style={[styles.badge, { backgroundColor: hexAlpha(theme.colors.info, 0.14) }]}>
+              <IconShield size={40} color={theme.colors.info} strokeWidth={2} />
+            </View>
+          </Reveal>
+
+          {/* Bloque héroe CENTRADO (frame): título `display` 30/700 en 2 líneas + subtítulo muted. */}
+          <Reveal delay={100} style={styles.intro}>
+            <Text variant="title1" align="center">
+              {t('registration.review.title')}
+            </Text>
+            <Text variant="callout" color="inkMuted" align="center">
+              {t('registration.review.subtitle')}
+            </Text>
+          </Reveal>
+
+          {/* Banner NO bloqueante: un refresh falló pero seguimos mostrando el último estado bueno. */}
+          {refreshError ? (
+            <Reveal delay={140}>
+              <Banner
+                tone="warn"
+                title={t('registration.review.refreshErrorTitle')}
+                description={t('registration.review.refreshErrorBody')}
+              />
+            </Reveal>
+          ) : null}
+
+          {/* Card del tiempo estimado (frame `rnaFy` EtaCard: fill `$warn` #FFA000 tint + stroke `#FFA0004D`,
+              r-lg, padding 16/18, gap 6). Texto interno a la IZQUIERDA: label warn 12/600, valor display
+              20/700, nota muted 13. Ámbar (no brand): "espera" comunica paciencia, no acción. */}
+          <Reveal delay={180}>
+            <View
+              style={[
+                styles.etaCard,
+                {
+                  backgroundColor: hexAlpha(theme.colors.warn, 0.14),
+                  borderColor: hexAlpha(theme.colors.warn, 0.3),
+                  borderRadius: theme.radii.lg,
+                },
+              ]}
+            >
+              <Text variant="caption" color="warn" style={styles.etaLabel}>
+                {t('registration.review.etaLabel')}
+              </Text>
+              <Text variant="title2" style={styles.etaValue}>
+                {t('registration.review.eta')}
+              </Text>
+              <Text variant="footnote" color="inkMuted">
+                {t('registration.review.etaDetail')}
+              </Text>
+            </View>
+          </Reveal>
+        </View>
+      </SafeScreen>
+      <RegistrationExitSheet exit={exit} />
+    </>
   );
 };
 
 const styles = StyleSheet.create({
-  body: { paddingTop: 16, alignItems: 'stretch' },
-  brand: { alignItems: 'center', gap: 6 },
-  illustration: { alignItems: 'center' },
-  intro: { gap: 8 },
-  card: { alignSelf: 'stretch' },
-  checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  timeline: { width: 24, alignItems: 'center' },
-  marker: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+  body: { paddingTop: 24, alignItems: 'stretch' },
+  // Wordmark centrado (frame).
+  brand: { alignSelf: 'center' },
+  // "VEO" pelado: display a 18 con tracking (title2 es 24 → override a 18/1.5).
+  wordmark: { fontSize: 18, letterSpacing: 1.5 },
+  // Sección del badge: centrada; el glow (320) desborda por absoluto detrás del círculo (88).
+  badgeSection: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: BADGE,
+  },
+  glow: {
+    position: 'absolute',
+    width: GLOW,
+    height: GLOW,
+    top: '50%',
+    left: '50%',
+    marginTop: -GLOW / 2,
+    marginLeft: -GLOW / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  connector: { position: 'absolute', top: 24, width: 2, height: 26 },
-  checkIcon: { width: 26, alignItems: 'center' },
-  checkLabel: { flex: 1 },
+  badge: {
+    width: BADGE,
+    height: BADGE,
+    borderRadius: BADGE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Bloque héroe CENTRADO.
+  intro: { gap: 10, alignSelf: 'stretch', alignItems: 'center' },
+  // Card ETA: stroke 1px + padding vertical 16 / horizontal 18 + gap 6 (frame).
+  etaCard: {
+    alignSelf: 'stretch',
+    borderWidth: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    gap: 6,
+  },
+  etaLabel: { letterSpacing: 0.5 },
+  // El valor del frame es 20 (title2 es 24) → override a 20/26.
+  etaValue: { fontSize: 20, lineHeight: 26 },
+  // Filas text-link del footer (frame: Support icon+texto centrado, Logout texto quieto).
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  logoutRow: { alignItems: 'center', justifyContent: 'center', paddingTop: 4, paddingVertical: 8 },
+  pressed: { opacity: 0.6 },
 });

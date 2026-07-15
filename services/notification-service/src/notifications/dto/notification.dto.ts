@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { NotificationChannel, NotificationStatus } from '@veo/shared-types';
 import type { InboxCategory } from '../../engine/template.catalog';
+import { NotificationPriority } from '../../engine/types';
 
 export class CreateNotificationDto {
   @ApiProperty({ description: 'Id del destinatario (usuario, operador o "central").' })
@@ -63,6 +64,16 @@ export class CreateNotificationDto {
   @Min(1)
   @Max(20)
   maxAttempts?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Prioridad de drenado del worker (mayor = más urgente). Critical=100 salta la cola (OTP, ' +
+      'pánico), Normal=0 (transaccional, default), Bulk=-100 (broadcast). Default Normal.',
+    enum: Object.values(NotificationPriority),
+  })
+  @IsOptional()
+  @IsEnum(NotificationPriority)
+  priority?: NotificationPriority;
 }
 
 export class NotificationView {
@@ -86,7 +97,7 @@ export class NotificationView {
 /**
  * Vista de BANDEJA in-app: la notificación PUSH ya RENDERIZADA (título + cuerpo del template i18n)
  * y categorizada. A diferencia de NotificationView (operacional: status/attempts/template-key), esta
- * es la que ve el USUARIO. Sin estado leído/no-leído por ahora (MVP cronológico).
+ * es la que ve el USUARIO. `read` se DERIVA de `read_at` server-side (el cliente ya no lo inventa).
  */
 export class InboxNotificationView {
   @ApiProperty() id!: string;
@@ -98,4 +109,12 @@ export class InboxNotificationView {
   body!: string;
   @ApiProperty({ description: 'ISO-8601 de emisión.' })
   createdAt!: string;
+  @ApiProperty({ description: 'true si el destinatario ya la leyó (read_at != null).' })
+  read!: boolean;
+}
+
+/** Resultado de PATCH /notifications/read-all: cuántas se marcaron como leídas. */
+export class MarkAllReadResultView {
+  @ApiProperty({ description: 'Cantidad de notificaciones que pasaron a leídas.' })
+  updated!: number;
 }

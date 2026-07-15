@@ -1,5 +1,5 @@
 import {ApiError} from '@veo/api-client';
-import {useMutation, useQuery} from '@tanstack/react-query';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {Banner, Button, Text, useTheme} from '@veo/ui-kit';
 import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
@@ -72,6 +72,7 @@ export function NoOffersBody({
 
   const tripRepository = useDependency(TOKENS.tripRepository);
   const rebid = useDependency(TOKENS.rebidUseCase);
+  const queryClient = useQueryClient();
 
   // Oferta actual = piso de la re-puja. Best-effort y NO bloqueante: si falla/tarda, el body igual
   // muestra título + explicación + Salir; el "Re-pujar" se habilita cuando llega el piso. La cache la
@@ -114,7 +115,24 @@ export function NoOffersBody({
       }
       throw lastConflict; // se agotaron los reintentos: el board sigue sin expirar.
     },
-    onSuccess: () => onRebid(),
+    onSuccess: () => {
+      // El re-bid reabrió el board (EXPIRED → REQUESTED) con un `expiresAt` FRESCO en el server, pero
+      // la cache de ['trip', id, 'offers'] todavía tiene el board VIEJO con el expiresAt YA VENCIDO. Sin
+      // esto, al volver la fase a 'searching' el OffersBody calcula secondsLeft=0 → pinta el spinner
+      // "tardando" en vez del countdown, hasta que el poll de 5s traiga el board nuevo (el bug del
+      // "timer ausente al re-pujar"). Fix en dos pasos:
+      //  1) LIMPIAR el board de la cache (expiresAt → null): el countdown cae al fallback local de 60s
+      //     al instante (useSearchCountdown), así el timer aparece SIN esperar al refetch.
+      //  2) INVALIDAR las queries del trip (offers + state) → refetch inmediato: trae el board fresco
+      //     (expiresAt autoritativo) y el status REQUESTED → la fase pasa a 'searching' sin lag de 5s.
+      queryClient.setQueryData(
+        ['trip', tripId, 'offers'],
+        (old: {board: unknown; offers: unknown} | undefined) =>
+          old ? {...old, board: null} : old,
+      );
+      void queryClient.invalidateQueries({queryKey: ['trip', tripId]});
+      onRebid();
+    },
   });
 
   // Distingue el mensaje: 409 persistente (cerrando la búsqueda anterior) vs error genuino (red/server).

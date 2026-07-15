@@ -14,6 +14,36 @@ export interface UserReply {
   found: boolean;
   /** Nombre visible del usuario; "" si no fue registrado. */
   name: string;
+  /**
+   * Foto de perfil (avatar) del usuario · `publicUrl` del media-service; "" si no tiene. OPCIONAL en el
+   * contrato (additivo · backward-compat): un `UserReply` construido a mano por un consumidor que aún no
+   * lo setea sigue compilando; en el wire proto3 (defaults:true) llega SIEMPRE ("" si no hay foto).
+   */
+  photoUrl?: string;
+}
+
+/** identity.GetDriversByIds / mensaje DriverIdsRequest (lectura batch para listados del admin). */
+export interface DriverIdsRequest {
+  ids: string[];
+}
+
+/** identity.GetDriversByIds / mensaje DriversByIdsReply. Orden libre; el consumidor mapea por id. */
+export interface DriversByIdsReply {
+  drivers: DriverReply[];
+}
+
+/** identity.GetDriverCounts / conteos de conductores por backgroundCheckStatus (stat cards del admin). */
+export interface DriverCountsReply {
+  pending: number;
+  cleared: number;
+  rejected: number;
+  /** Conductores EN LÍNEA (presencia operativa: current_status NO OFFLINE ni SUSPENDED) → KPI "En línea". */
+  online: number;
+}
+
+/** identity.GetUsersByIds / mensaje UsersByIdsReply. Orden libre; el consumidor mapea por id (User.id → name). */
+export interface UsersByIdsReply {
+  users: UserReply[];
 }
 
 /** identity.GetDriver / GetDriverByUser / mensaje DriverReply. */
@@ -36,4 +66,56 @@ export interface DriverReply {
    * el driver-bff (GET /drivers/me) para que la app muestre el motivo en la pantalla de rechazo.
    */
   rejectionReason: string;
+  // ── Campos de REVISIÓN del operador (admin-bff GET /ops/drivers/:id). Todos opcionales: "" cuando
+  // no hay dato (proto3 defaults:true → nunca null). Backward-compatible (campos 10-15 del proto). ──
+  /** Licencia/DNI del conductor (IDENTIDAD personal · Compliance+); "" si no registrada. */
+  licenseNumber: string;
+  /** Estado KYC del usuario asociado (driver→user); "" si no se incluyó / no registrado. */
+  kycStatus: string;
+  /** ISO-8601 de alta del conductor; "" si no disponible. */
+  createdAt: string;
+  /** ISO-8601 del enrolamiento biométrico facial; "" si aún no enroló. */
+  faceEnrolledAt: string;
+  /** ISO-8601 de la última verificación biométrica en vivo; "" si nunca verificó. */
+  lastVerifiedAt: string;
+  /** Teléfono del usuario asociado (driver→user); "" si no registrado. */
+  phone: string;
+  /** DNI del conductor (documento de identidad · Compliance+); "" si no registrado. */
+  documentId: string;
+  /** Fecha de nacimiento del conductor en `yyyy-mm-dd`; "" si no registrada. */
+  birthDate: string;
+  // ── Sub-lote 3C · BINDING DNI↔selfie (campos 18-20 del proto). Resultado GUARDADO del face-match. ──
+  /**
+   * Estado del binding DNI↔selfie tipado: 'NOT_RUN' (aún no se corrió), 'MATCHED' (coincide), 'NO_MATCH'
+   * (no coincide). String de estado explícito para evitar la ambigüedad del bool proto3 (false = no
+   * coincide vs no corrido). proto3 default → 'NOT_RUN' (el grpc controller lo materializa, nunca "").
+   */
+  dniFaceMatchStatus: string;
+  /** Score del face-match en 0..100; 0 si no se corrió. Solo significativo si dniFaceMatchStatus != NOT_RUN. */
+  dniFaceMatchScore: number;
+  /** ISO-8601 de cuándo se corrió el face-match; "" si no se corrió. */
+  dniFaceMatchedAt: string;
+  /**
+   * Lote C · BINDING licencia↔selfie (gemelo del DNI · campos 22-24 del proto). Estado tipado
+   * NOT_RUN/MATCHED/NO_MATCH (proto3 default → 'NOT_RUN', materializado en el grpc controller).
+   */
+  licenseFaceMatchStatus: string;
+  /** Score del face-match del brevete en 0..100; 0 si no se corrió. El brevete es low-res → suele ser más bajo. */
+  licenseFaceMatchScore: number;
+  /** ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió. */
+  licenseFaceMatchedAt: string;
+  /** F5 · key S3/MinIO de la selfie del enrol (ayuda visual del operador · ADMIN-ONLY). "" si no hay/no-admin. */
+  faceSelfieKey: string;
+  /** Estado del liveness PASIVO del enrol (NOT_RUN/PASSED/DEGRADED · ADMIN-ONLY). NOT_RUN en no-admin. */
+  livenessStatus: string;
+  /** Score de la clase viva del PAD en 0..1; 0 si no se corrió o no-admin. */
+  livenessScore: number;
+  /**
+   * CAUSAS ACTIVAS de la suspensión (modelo de HOLDS · campo 21 del proto): las `cause` DISTINTAS de los holds
+   * vigentes (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). [] si NO está suspendido. Lo consume el
+   * admin-bff (GET /ops/drivers/:id) para saber POR QUÉ está suspendido y llamar el endpoint de reactivación
+   * correcto (DISCIPLINARY → /reactivate; documento/ITV → /reactivate-compliance). NO es PII. Opcional en el
+   * wire: un repeated proto3 puede llegar `undefined` (productor viejo / read sin holds) → degradar a [].
+   */
+  suspensionCauses?: string[];
 }

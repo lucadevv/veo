@@ -56,6 +56,10 @@ services/**/env/*.env
 .DS_Store
 Thumbs.db
 
+# Tooling local (Claude Code, mjolnir index, git worktrees) — nunca al repo
+.claude/
+mcp/
+
 # Terraform
 **/.terraform/
 *.tfstate
@@ -135,3 +139,13 @@ infra/cloudflare/env/*.env
 # apps: tier files con valores (incl. Mapbox pk) gitignored; example.env es el contrato
 apps/**/env/*.env
 !apps/**/env/example.env
+
+# Media binaria de assets (login hero, etc.): NO va en git → se provisiona aparte (MinIO/deploy).
+# El README de cada carpeta documenta qué archivo poner.
+apps/admin-web/public/*.mp4
+apps/admin-web/public/*.webm
+
+# mjolnir: índice derivado del grafo de data-flow (se regenera con `mjolnir index .`)
+**/.mjolnir/*
+# ...pero la CONSTITUCIÓN de arquitectura SÍ se versiona (es la fuente, no cache)
+!**/.mjolnir/architecture.yaml

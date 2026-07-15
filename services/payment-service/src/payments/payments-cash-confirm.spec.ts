@@ -16,14 +16,15 @@ const PAYMENT = {
 };
 
 function buildService(payment: unknown) {
-  const prisma = {
-    read: { payment: { findUnique: vi.fn(async () => payment) } },
-    write: { cashConfirmation: { upsert: vi.fn() } },
+  // Mock del SEAM de acceso a datos (PaymentsRepository), no de Prisma: el gate de rechazo solo lee el pago.
+  const repo = {
+    findPaymentById: vi.fn(async () => payment),
+    upsertCashConfirmation: vi.fn(),
   };
   // El constructor solo lee números/strings de config; el gate de rechazo no usa gateway/affiliations.
   const config = { getOrThrow: () => 0 };
   return new PaymentsService(
-    prisma as never,
+    repo as never,
     {} as never,
     {} as never,
     {} as never,

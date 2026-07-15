@@ -2,11 +2,12 @@
  * EFECTIVO · cierre del dominó · E2E con Postgres REAL (testcontainers) — NO se mockea la DB en un
  * crítico de dinero (CLAUDE). Reemplaza al antiguo cash-domino.spec.ts (fake Prisma en memoria).
  *
- * chargeFromTripCompleted con cashCollected (el efectivo se confirma AL TERMINAR el viaje):
- *   - CASH + cashCollected=true → Payment CASH PENDING + CashConfirmation driverConfirmed=true +
- *     payment.cash_pending (push). NO captura (falta el pasajero).
- *   - luego confirmCash('passenger') → ambos true → CAPTURED + payment.captured.
- *   - CASH SIN cashCollected → bilateral normal (driverConfirmed=false, sin cash_pending).
+ * chargeTripFare con cashCollected (el efectivo se confirma AL TERMINAR el viaje):
+ *   DECISIÓN DEL DUEÑO (2026-07-14): UNA sola confirmación (el conductor tiene la plata en mano). El
+ *   pasajero YA NO confirma — solo ve un recibo informativo. Sin doble paso bilateral ni cash_pending.
+ *   - CASH + cashCollected=true → CAPTURA directo + CashConfirmation ambos true + payment.captured
+ *     (NO cash_pending, NO espera al pasajero).
+ *   - CASH SIN cashCollected → NO captura (driverConfirmed=false, sin cash_pending).
  *   - pasajero confirmó ANTES de existir el Payment → al crear → CAPTURA directo.
  *   - DIGITAL (YAPE) con cashCollected → se ignora (va por el riel).
  *   - idempotencia: reprocesar el mismo trip.completed no duplica la confirmación ni recaptura.
@@ -22,6 +23,7 @@ import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import { deriveTripChargeDedupKey } from '../src/payments/payment.policy';
 import type { PrismaService } from '../src/infra/prisma.service';
@@ -31,6 +33,7 @@ import type { PromotionsService } from '../src/promotions/promotions.service';
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
 const TRIP = '0192f8a0-0000-7000-8000-0000000000c1';
 const PAX = '0192f8a0-0000-7000-8000-0000000000aa';
+const DRV = '0192f8a0-0000-7000-8000-0000000000bb';
 
 let db: TestDatabase;
 let prisma: PrismaClient;
@@ -52,6 +55,7 @@ function makeConfig(): ConfigService {
     DEFAULT_PAYMENT_METHOD: 'YAPE',
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
+    REFUND_IDEMPOTENCY_WINDOW_MINUTES: 15,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
   return {
@@ -60,13 +64,16 @@ function makeConfig(): ConfigService {
   } as unknown as ConfigService;
 }
 
-function chargeCash(opts: { cashCollected?: boolean } = {}) {
-  return svc.chargeFromTripCompleted({
+function chargeCash(opts: { cashCollected?: boolean; driverId?: string } = {}) {
+  return svc.chargeTripFare({
     tripId: TRIP,
     grossCents: 2000,
     dedupKey: deriveTripChargeDedupKey(TRIP),
     method: 'CASH',
     userId: PAX,
+    // driverId solo cuando el test lo necesita (confirmCash anti-IDOR). Omitirlo por default evita acumular
+    // deuda de comisión del conductor en los tests de captura, que no la testean.
+    driverId: opts.driverId,
     cashCollected: opts.cashCollected,
   });
 }
@@ -86,7 +93,7 @@ beforeAll(async () => {
   // prisma real (NO mock): read y write apuntan al mismo cliente del contenedor.
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
   const gateway = new SandboxPaymentGateway({ confirmDelayMs: 0, declineSuffix: '0000' });
-  svc = new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never);
+  svc = new PaymentsService(new PaymentsRepository(prismaService), gateway, noAffiliation, noPromos, makeConfig() as never);
 }, 180_000);
 
 afterAll(async () => {
@@ -101,29 +108,26 @@ beforeEach(async () => {
   await prisma.payment.deleteMany({});
 });
 
-describe('chargeFromTripCompleted · EFECTIVO con cashCollected (driver confirma al terminar)', () => {
-  it('CASH + cashCollected=true → PENDING + CashConfirmation driverConfirmed=true + emite cash_pending', async () => {
+describe('chargeTripFare · EFECTIVO con cashCollected (driver confirma al terminar)', () => {
+  it('CASH + cashCollected=true → CAPTURED directo (conductor captura, sin doble confirmación) + payment.captured', async () => {
+    // DECISIÓN DEL DUEÑO (2026-07-14): una sola confirmación (el conductor tiene la plata en mano). El
+    // pasajero YA NO confirma → el efectivo se captura al toque, sin cash_pending ni espera bilateral.
     const payment = await chargeCash({ cashCollected: true });
 
     expect(payment.method).toBe('CASH');
-    expect(payment.status).toBe('PENDING'); // NO captura: falta el pasajero
+    expect(payment.status).toBe('CAPTURED'); // captura directo con la confirmación del conductor
     const conf = await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } });
     expect(conf?.driverConfirmed).toBe(true);
-    expect(conf?.passengerConfirmed).toBe(false);
+    expect(conf?.passengerConfirmed).toBe(true); // el conductor confirma por ambos
     const types = await outboxTypes();
-    expect(types).toContain('payment.cash_pending'); // push al pasajero
-    expect(types).not.toContain('payment.captured'); // NO se capturó todavía
+    expect(types).toContain('payment.captured');
+    expect(types).not.toContain('payment.cash_pending'); // el pasajero ya NO confirma → sin push de confirmación
   });
 
-  it('luego el PASAJERO confirma → ambos true → CAPTURED + payment.captured', async () => {
+  it('el pago queda CAPTURED con la SOLA confirmación del conductor (el pasajero ya no necesita confirmar)', async () => {
     const payment = await chargeCash({ cashCollected: true });
-    const out = await svc.confirmCash(payment.id, PAX, 'passenger', true);
-
-    expect(out.status).toBe('CAPTURED');
-    expect(out.driverConfirmed).toBe(true);
-    expect(out.passengerConfirmed).toBe(true);
     const final = await svc.getPayment(payment.id);
-    expect(final.status).toBe('CAPTURED');
+    expect(final.status).toBe('CAPTURED'); // sin un segundo paso del pasajero
     expect(await outboxTypes()).toContain('payment.captured');
   });
 
@@ -152,7 +156,7 @@ describe('chargeFromTripCompleted · EFECTIVO con cashCollected (driver confirma
   });
 
   it('DIGITAL (YAPE) con cashCollected=true → se IGNORA: no toca CashConfirmation ni emite cash_pending', async () => {
-    await svc.chargeFromTripCompleted({
+    await svc.chargeTripFare({
       tripId: TRIP,
       grossCents: 2000,
       dedupKey: deriveTripChargeDedupKey(TRIP),
@@ -181,20 +185,51 @@ describe('chargeFromTripCompleted · EFECTIVO con cashCollected (driver confirma
   });
 });
 
-describe('REGLA DE BORDE · un CASH PENDING con driverConfirmed (sin confirmar el pasajero) NO bloquea ni es accionable', () => {
-  it('queda PENDING pero NO es DEBT (no bloquea pedir viajes) y NO es PENDING_ACTION (sin checkout)', async () => {
-    // El conductor cobró y confirmó al terminar; el pasajero NUNCA confirma → el Payment queda PENDING.
-    const payment = await chargeCash({ cashCollected: true });
+describe('REGLA DE BORDE · un CASH PENDING SIN resolver (el conductor aún no confirmó) NO bloquea ni es accionable', () => {
+  it('queda PENDING (driverConfirmed=false) y NO es DEBT ni PENDING_ACTION (sin checkout)', async () => {
+    // Cash creado pero el conductor todavía no tocó "Sí, recibí" ni "No cobré" → driverConfirmed=false.
+    // Mientras esté sin resolver NO debe bloquear al pasajero (no es deuda todavía) ni ser accionable por
+    // él (no tiene checkout: el efectivo se salda en mano, no por un rail). Lo resuelve el conductor.
+    const payment = await chargeCash({});
     expect(payment.status).toBe('PENDING');
     expect(
-      (await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } }))?.driverConfirmed,
-    ).toBe(true);
+      (await prisma.cashConfirmation.findUnique({ where: { tripId: TRIP } }))?.driverConfirmed ??
+        false,
+    ).toBe(false);
 
-    // El gate de DEBT y la query de PENDING_ACTION NO lo agarran: un CASH sin external_uid no es accionable
-    // (no tiene checkout) y no es deuda (el conductor ya cobró en mano; no es deuda del pasajero).
     const debt = await svc.getDebtForPassenger(PAX);
     expect(debt.hasDebt).toBe(false); // NO bloquea POST /trips
     expect(debt.totalCents).toBe(0);
     expect(debt.debts).toEqual([]); // ni DEBT ni PENDING_ACTION
+  });
+});
+
+describe('"No cobré" del conductor (confirmed=false) → DEUDA DEL PASAJERO (decisión del dueño 2026-07-14)', () => {
+  it('CASH PENDING + confirmCash(driver,false) → status DEBT + entra al debt gate + emite payment.failed', async () => {
+    // El conductor reporta que el pasajero no pagó. El viaje ocurrió → es deuda del pasajero, no una disputa
+    // a soporte ni una pérdida del conductor. El Payment pasa a DEBT (reusa markDebt) → lo agarra el debt gate.
+    const payment = await chargeCash({ driverId: DRV }); // PENDING sin resolver, con conductor asignado
+    await prisma.outboxEvent.deleteMany({}); // aislar el evento de la falla del ruido de la creación
+
+    const result = await svc.confirmCash(payment.id, DRV, 'driver', false);
+    expect(result.status).toBe('DEBT');
+
+    const after = await svc.getPayment(payment.id);
+    expect(after.status).toBe('DEBT');
+    expect(after.failureReason).toBe('CASH_NOT_COLLECTED');
+
+    // El gate del pasajero AHORA lo bloquea: no puede pedir otro viaje hasta regularizar.
+    const debt = await svc.getDebtForPassenger(PAX);
+    expect(debt.hasDebt).toBe(true);
+    expect(debt.totalCents).toBe(2000);
+    expect(debt.debts.some((d) => d.tripId === TRIP && d.kind === 'DEBT')).toBe(true);
+
+    // Emite payment.failed (willRetry=false) con passengerId → notification puede empujar el push al pasajero.
+    const failed = await prisma.outboxEvent.findFirst({ where: { eventType: 'payment.failed' } });
+    expect(failed).not.toBeNull();
+    const envelope = failed?.envelope as { payload: Record<string, unknown> };
+    expect(envelope.payload.reason).toBe('CASH_NOT_COLLECTED');
+    expect(envelope.payload.willRetry).toBe(false);
+    expect(envelope.payload.passengerId).toBe(PAX);
   });
 });

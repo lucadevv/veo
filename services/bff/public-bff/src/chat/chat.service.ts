@@ -6,7 +6,13 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { ForbiddenError, NotFoundError } from '@veo/utils';
 import type { ChatMessage } from '@veo/api-client';
 import { GRPC_TRIP, REST_CHAT } from '../infra/downstream.tokens';
@@ -27,6 +33,7 @@ export class ChatService {
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     @Inject(REST_CHAT) private readonly chatRest: InternalRestClient,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
   ) {}
 
   /** Historial del viaje del pasajero (solo si es suyo). */
@@ -55,7 +62,7 @@ export class ChatService {
     tripId: string,
     requireActive: boolean,
   ): Promise<void> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {

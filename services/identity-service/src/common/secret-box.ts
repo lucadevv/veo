@@ -1,6 +1,8 @@
 /**
  * Cifrado de secretos en reposo (AES-256-GCM). Usado para el secreto TOTP de operadores.
- * En producción la clave viene de KMS; aquí se deriva de un secreto de config.
+ * La clave se deriva de un secreto de CONFIG PROPIO (env / SOPS+age), NUNCA de un KMS gestionado de un
+ * tercero — soberanía del dato (FOUNDATION §0.7(c): AWS KMS managed PROHIBIDO). Mismo criterio en prod:
+ * el secreto vive en el vault self-hosted / secret store propio, no en un SaaS de secretos.
  */
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 

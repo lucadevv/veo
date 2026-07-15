@@ -6,11 +6,13 @@
  * Esta fase entrega solo LECTURA del catálogo APROBADO: el alta de modelos nuevos (PENDING_REVIEW) y la
  * aprobación por el operador son B5-2.c. La elección por el conductor (Vehicle.modelSpecId) es B5-2.b.
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { uuidv7, ConflictError, NotFoundError, ValidationError } from '@veo/utils';
 import { isUniqueViolation } from '@veo/database';
 import { VehicleSegment, EnergySource } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { VEHICLE_MODELS_REPO, type VehicleModelsRepository } from './vehicle-models.repository';
+import type { Env } from '../config/env.schema';
 import {
   buildFleetEvent,
   FleetEventType,
@@ -18,11 +20,13 @@ import {
 } from '../events/fleet-events';
 import {
   Prisma,
+  VehicleModelSource,
   VehicleModelStatus,
   VehicleType,
   type VehicleModelSpec,
 } from '../generated/prisma';
 import { clampLimit, toPage, type Page } from '../infra/pagination';
+import { normalizeModelTerm } from './vehicle-model-normalize';
 import type {
   ApproveVehicleModelDto,
   RequestVehicleModelDto,
@@ -30,9 +34,66 @@ import type {
   VehicleModelSpecView,
 } from './dto/vehicle-model.dto';
 
+/** Resultado del fuzzy-match: el modelo APROBADO más parecido y su score [0,1]. */
+export interface VehicleModelMatch {
+  spec: VehicleModelSpec;
+  score: number;
+}
+
 @Injectable()
 export class VehicleModelsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(VehicleModelsService.name);
+  private readonly matchThreshold: number;
+
+  constructor(
+    @Inject(VEHICLE_MODELS_REPO) private readonly repo: VehicleModelsRepository,
+    config: ConfigService<Env, true>,
+  ) {
+    this.matchThreshold = config.getOrThrow<number>('VEHICLE_MODEL_MATCH_THRESHOLD');
+  }
+
+  /**
+   * LOTE 3 · FUZZY-MATCH del catálogo: dado make/model a TEXTO LIBRE (del OCR) y el tipo de vehículo, busca
+   * el modelo APROBADO más parecido usando pg_trgm (`similarity()` sobre las columnas normalizadas con índice
+   * GIN trigram). Devuelve `{spec, score}` si el score combinado >= umbral (VEHICLE_MODEL_MATCH_THRESHOLD), o
+   * `null` si nada supera el umbral (→ el caller encola con requestModel(source: OCR) y el catálogo crece).
+   *
+   * Score combinado = MÍNIMO de similarity(make) y similarity(model): conservador a propósito — AMBOS deben
+   * parecerse para reusar el modelo curado. Evita que "TOYOTA loquesea" matchee un "Toyota Yaris" solo por la
+   * marca (linkearía modelos distintos). El normalizado TS (`normalizeModelTerm`) espeja exactamente las
+   * columnas generadas make_norm/model_norm, así parametriza el query contra lo que el índice GIN contiene.
+   *
+   * SEGURIDAD: $queryRaw 100% PARAMETRIZADO (placeholders Prisma `${...}`), NO concatena strings → no inyectable.
+   * El enum vehicleType y los términos normalizados viajan como parámetros bindeados, no interpolados.
+   */
+  async findBestApprovedMatch(
+    make: string,
+    model: string,
+    vehicleType: VehicleType,
+  ): Promise<VehicleModelMatch | null> {
+    const makeNorm = normalizeModelTerm(make);
+    const modelNorm = normalizeModelTerm(model);
+    // Sin términos normalizados no hay nada con qué comparar (degradación honesta: el caller encolará).
+    if (!makeNorm || !modelNorm) return null;
+
+    // $queryRaw PARAMETRIZADO (dentro del repo): cada `${...}` es un placeholder bindeado por el driver (no
+    // interpolación de string) → NO inyectable. `fleet.similarity()` usa el índice GIN trigram de make_norm/
+    // model_norm. La función se CALIFICA con el schema `fleet` porque pg_trgm se instaló ahí (no en public):
+    // así el match es independiente del search_path de la conexión (gotcha verificado contra la DB). Los enums
+    // status/vehicleType viajan como parámetros bindeados y se castean al tipo del schema en el borde.
+    const rows = await this.repo.fuzzyMatch(makeNorm, modelNorm, vehicleType);
+
+    const best = rows[0];
+    // El score puede llegar como string desde el driver (float8). Number() lo normaliza; sin fila → null.
+    if (!best) return null;
+    const score = Number(best.score);
+    if (!Number.isFinite(score) || score < this.matchThreshold) return null;
+
+    // Rehidrata el spec completo (el query trajo solo id+score para no acoplar el SELECT al shape del modelo).
+    const spec = await this.repo.findById(best.id);
+    if (!spec) return null;
+    return { spec, score };
+  }
 
   /**
    * Catálogo APROBADO, paginado por cursor. El keyset es por `id` (mismo campo que el `orderBy`, para que
@@ -48,20 +109,10 @@ export class VehicleModelsService {
     limit?: number;
   }): Promise<Page<VehicleModelSpecView>> {
     const limit = clampLimit(opts.limit);
-    const where: Prisma.VehicleModelSpecWhereInput = { status: VehicleModelStatus.APPROVED };
-    if (opts.vehicleType) where.vehicleType = opts.vehicleType;
-    if (opts.q) {
-      const q = opts.q.trim();
-      where.OR = [
-        { make: { contains: q, mode: 'insensitive' } },
-        { model: { contains: q, mode: 'insensitive' } },
-      ];
-    }
-    if (opts.cursor) where.id = { gt: opts.cursor };
-
-    const rows = await this.prisma.read.vehicleModelSpec.findMany({
-      where,
-      orderBy: { id: 'asc' },
+    const rows = await this.repo.listApprovedPage({
+      vehicleType: opts.vehicleType,
+      q: opts.q,
+      cursor: opts.cursor,
       take: limit + 1,
     });
     const page = toPage(rows, limit);
@@ -75,9 +126,7 @@ export class VehicleModelsService {
    * o no está aprobado (no se filtra la existencia de un modelo no-aprobado).
    */
   async getById(id: string): Promise<VehicleModelSpecView> {
-    const spec = await this.prisma.read.vehicleModelSpec.findFirst({
-      where: { id, status: VehicleModelStatus.APPROVED },
-    });
+    const spec = await this.repo.findApprovedById(id);
     if (!spec) throw new NotFoundError('Modelo de vehículo no encontrado', { id });
     return toView(spec);
   }
@@ -86,10 +135,16 @@ export class VehicleModelsService {
    * B5-2.c · el conductor SOLICITA un modelo que no está en el catálogo. Entra PENDING_REVIEW con lo que
    * conoce (make/model/años/tipo/asientos); el operador completa la ficha técnica al aprobar. Dedup por
    * (make, model, yearFrom): si ya existe, no se crea un duplicado — se informa según su estado.
+   *
+   * LOTE 3 · `source` distingue el ORIGEN del alta (tipado fuerte, sin string mágico): DRIVER_REQUEST cuando
+   * el conductor elige "mi modelo no está" en el onboarding (default); OCR cuando nace de un alta a texto
+   * libre que el fuzzy-match NO logró linkear a un aprobado (el catálogo crece de registros reales, el gate
+   * del operador garantiza calidad). Reusado por VehiclesService — NO se duplica la lógica de alta.
    */
   async requestModel(
     requestedBy: string,
     input: RequestVehicleModelDto,
+    source: VehicleModelSource = VehicleModelSource.DRIVER_REQUEST,
   ): Promise<VehicleModelReviewView> {
     if (input.yearTo < input.yearFrom) {
       throw new ValidationError('El año "hasta" no puede ser menor que el año "desde"', {
@@ -102,32 +157,25 @@ export class VehicleModelsService {
 
     // Dedup case-insensitive (el unique de DB es case-sensitive: "Toyota" vs "toyota" no chocarían;
     // este pre-check atrapa la variación de mayúsculas en el caso secuencial).
-    const existing = await this.prisma.read.vehicleModelSpec.findFirst({
-      where: {
-        make: { equals: make, mode: 'insensitive' },
-        model: { equals: model, mode: 'insensitive' },
-        yearFrom: input.yearFrom,
-      },
-    });
+    const existing = await this.repo.findByNaturalKey(make, model, input.yearFrom);
     if (existing) throw this.duplicateModelError(make, model, input.yearFrom, existing.status);
 
     try {
-      const created = await this.prisma.write.vehicleModelSpec.create({
-        data: {
-          id: uuidv7(),
-          make,
-          model,
-          yearFrom: input.yearFrom,
-          yearTo: input.yearTo,
-          vehicleType: input.vehicleType,
-          seats: input.seats,
-          // Ficha técnica vacía: la completa el operador al aprobar (no inventamos datos).
-          segment: null,
-          energySource: null,
-          efficiency: null,
-          status: VehicleModelStatus.PENDING_REVIEW,
-          requestedBy,
-        },
+      const created = await this.repo.create({
+        id: uuidv7(),
+        make,
+        model,
+        yearFrom: input.yearFrom,
+        yearTo: input.yearTo,
+        vehicleType: input.vehicleType,
+        seats: input.seats,
+        // Ficha técnica vacía: la completa el operador al aprobar (no inventamos datos).
+        segment: null,
+        energySource: null,
+        efficiency: null,
+        status: VehicleModelStatus.PENDING_REVIEW,
+        source,
+        requestedBy,
       });
       return toReviewView(created);
     } catch (err) {
@@ -164,14 +212,9 @@ export class VehicleModelsService {
     limit?: number;
   }): Promise<Page<VehicleModelReviewView>> {
     const limit = clampLimit(opts.limit);
-    const where: Prisma.VehicleModelSpecWhereInput = {
+    const rows = await this.repo.listForReviewPage({
       status: opts.status ?? VehicleModelStatus.PENDING_REVIEW,
-    };
-    if (opts.cursor) where.id = { gt: opts.cursor };
-
-    const rows = await this.prisma.read.vehicleModelSpec.findMany({
-      where,
-      orderBy: { id: 'asc' },
+      cursor: opts.cursor,
       take: limit + 1,
     });
     const page = toPage(rows, limit);
@@ -204,6 +247,35 @@ export class VehicleModelsService {
   }
 
   /**
+   * REABRE un modelo APROBADO para corregir su ficha técnica mal cargada (F2): transición
+   * APPROVED → PENDING_REVIEW (única válida desde APPROVED). El modelo vuelve a la cola de revisión y el
+   * operador lo re-aprueba con la ficha corregida pasando por el MISMO formulario. CAS por `status: APPROVED`
+   * en el WHERE: solo un operador gana en concurrencia (count===1); reabrir algo no-APROBADO → 409 (distingue
+   * NotFound vs Conflict). NO borra la ficha vigente A PROPÓSITO: mientras se corrige, los vehículos del
+   * modelo siguen clasificando con el dato viejo (el menor mal) en vez de quedar sin ficha de golpe; la
+   * corrección la re-aprueba el operador. `verifiedBy` se limpia (ya no está verificado). No notifica al
+   * conductor: reabrir no es un veredicto (verdictForStatus(PENDING_REVIEW) = null).
+   */
+  async reopen(id: string): Promise<VehicleModelReviewView> {
+    const updated = await this.repo.runInTx(async (tx) => {
+      const res = await tx.vehicleModelSpec.updateMany({
+        where: { id, status: VehicleModelStatus.APPROVED },
+        data: { status: VehicleModelStatus.PENDING_REVIEW, verifiedBy: null },
+      });
+      if (res.count === 0) {
+        const spec = await tx.vehicleModelSpec.findUnique({ where: { id } });
+        if (!spec) throw new NotFoundError('Modelo de vehículo no encontrado', { id });
+        throw new ConflictError('Solo se puede reabrir un modelo APROBADO', {
+          id,
+          status: spec.status,
+        });
+      }
+      return tx.vehicleModelSpec.findUniqueOrThrow({ where: { id } });
+    });
+    return toReviewView(updated);
+  }
+
+  /**
    * Aplica una transición desde PENDING_REVIEW de forma ATÓMICA (CAS): el `updateMany` con
    * `status: PENDING_REVIEW` en el WHERE garantiza que solo gana UN operador en concurrencia (count===1);
    * si otro ya resolvió el modelo (o no existe), count===0 y se distingue NotFound vs Conflict.
@@ -213,7 +285,7 @@ export class VehicleModelsService {
     id: string,
     data: Prisma.VehicleModelSpecUpdateManyMutationInput,
   ): Promise<VehicleModelReviewView> {
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTx(async (tx) => {
       const res = await tx.vehicleModelSpec.updateMany({
         where: { id, status: VehicleModelStatus.PENDING_REVIEW },
         data,
@@ -228,6 +300,19 @@ export class VehicleModelsService {
       }
 
       const row = await tx.vehicleModelSpec.findUniqueOrThrow({ where: { id } });
+
+      // HEAL del eslabón vehículo↔config: al APROBAR, re-linkeamos los vehículos que se registraron a texto
+      // libre (OCR) y quedaron esperando este modelo (modelSpecId=null). Sin esto, aprobar el modelo NO cerraba
+      // la cadena de match: el vehículo quedaba sin ficha y su ping iba sin seats/segment → fail-open en
+      // dispatch. ATÓMICO con la aprobación (misma tx; fleet es dueño de ambas tablas). Solo en APPROVED.
+      if (row.status === VehicleModelStatus.APPROVED) {
+        const relinked = await this.relinkPendingVehicles(tx, row);
+        if (relinked > 0) {
+          this.logger.log(
+            `Modelo aprobado ${row.id} (${row.make} ${row.model}): re-linkeados ${relinked} vehículo(s) que esperaban su ficha`,
+          );
+        }
+      }
 
       // El operador resolvió la solicitud (APPROVED/REJECTED): el conductor que la pidió debe enterarse
       // del veredicto. El `verdict` se deriva del status FINAL ya tipado (`VehicleModelStatus`, no string
@@ -259,6 +344,49 @@ export class VehicleModelsService {
       return row;
     });
     return toReviewView(updated);
+  }
+
+  /**
+   * Re-linkea los vehículos que esperaban este modelo recién APROBADO. Un vehículo registrado a TEXTO LIBRE
+   * (OCR) que no logró fuzzy-match nace con `modelSpecId=null` y encola su modelo para revisión
+   * (`enqueueOcrModel`, que copia su PROPIO make/model/vehicleType/year). Cuando el operador aprueba ese
+   * modelo, este método cierra el eslabón: linkea esos vehículos al spec así heredan la ficha (seats/segment)
+   * que el ping necesita para ser elegible en dispatch — sin esto quedaban sin ficha PARA SIEMPRE. Además
+   * SNAPSHOTEA make/model curados del spec (server-authoritative, igual que el fuzzy-match del alta en
+   * `resolveModelSnapshot`): dos vehículos del mismo modelo se muestran idénticos, no con el casing crudo del OCR.
+   *
+   * Un solo UPDATE BOUNDED-POR-LA-DB (NO carga vehículos a RAM ni filtra en JS — el set `modelSpecId IS NULL`
+   * crece sin límite con altas freetext legacy y OCR rechazados): el predicado del canon normalizado se evalúa
+   * en SQL con la MISMA expresión IMMUTABLE de las columnas generadas make_norm/model_norm (migración
+   * 20260620140000) — `normalizeModelTerm` la espeja para el lado spec. Match DETERMINISTA (no fuzzy, a
+   * diferencia del alta): mismo canon make+model + mismo `vehicleType` + año en [yearFrom, yearTo] linkea
+   * EXACTAMENTE a los que esperaban, sin sobre-linkear. El `model_spec_id IS NULL` del WHERE lo hace idempotente
+   * (no re-toca ni pisa vehículos ya linkeados) y cierra la carrera con un alta concurrente bajo READ COMMITTED.
+   * Devuelve cuántos linkeó. La cadena `translate(...)` de plegado de tildes es literal estático (no inyectable);
+   * los valores del spec viajan como parámetros bindeados.
+   */
+  private async relinkPendingVehicles(
+    tx: Prisma.TransactionClient,
+    spec: VehicleModelSpec,
+  ): Promise<number> {
+    // Canon del lado spec (espeja la columna generada); el lado vehículo se normaliza en SQL con la misma expr.
+    const specMakeNorm = normalizeModelTerm(spec.make);
+    const specModelNorm = normalizeModelTerm(spec.model);
+    return tx.$executeRaw`
+      UPDATE "fleet"."vehicles"
+      SET "model_spec_id" = ${spec.id}::uuid,
+          "make" = ${spec.make},
+          "model" = ${spec.model}
+      WHERE "model_spec_id" IS NULL
+        AND "vehicle_type" = ${spec.vehicleType}::"fleet"."VehicleType"
+        AND "year" BETWEEN ${spec.yearFrom} AND ${spec.yearTo}
+        AND upper(regexp_replace(trim(translate("make",
+              'áéíóúàèìòùäëïöüâêîôûñçÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÑÇ',
+              'aeiouaeiouaeiouaeiouncAEIOUAEIOUAEIOUAEIOUNC')), '\s+', ' ', 'g')) = ${specMakeNorm}
+        AND upper(regexp_replace(trim(translate("model",
+              'áéíóúàèìòùäëïöüâêîôûñçÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÑÇ',
+              'aeiouaeiouaeiouaeiouncAEIOUAEIOUAEIOUAEIOUNC')), '\s+', ' ', 'g')) = ${specModelNorm}
+    `;
   }
 }
 

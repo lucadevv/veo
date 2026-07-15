@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtAuthGuard, type JwtService } from '@veo/auth';
+import { JwtAuthGuard, type JwtService, type SubjectType } from '@veo/auth';
 import { UnauthorizedError } from '@veo/utils';
 
 function ctxWith(
@@ -48,5 +48,44 @@ describe('JwtAuthGuard', () => {
     const { ctx, req } = ctxWith({ authorization: 'Bearer abc.def.ghi' });
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
     expect(req.user).toMatchObject({ userId: 'u1', type: 'passenger', sessionId: 'sess-1' });
+  });
+});
+
+/**
+ * Escopado del subject-type 'passenger' tal como lo monta public-bff (EXPECTED_SUBJECT_TYPE).
+ * Un token de conductor/admin (misma firma/aud/iss válidos) NO debe entrar a rutas de pasajero.
+ */
+describe('JwtAuthGuard · public-bff escopa typ=passenger', () => {
+  const EXPECTED: SubjectType = 'passenger';
+
+  function guardFor(tokenTyp: SubjectType) {
+    const reflector = new Reflector();
+    vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(false);
+    const jwtForTyp = {
+      verifyAccess: vi
+        .fn()
+        .mockResolvedValue({ sub: 'u1', typ: tokenTyp, roles: [], sid: 'sess-1' }),
+    } as unknown as JwtService;
+    // 4º arg = expectedType, igual que el provider EXPECTED_SUBJECT_TYPE='passenger' en app.module.
+    return new JwtAuthGuard(reflector, jwtForTyp, EXPECTED);
+  }
+
+  it('rechaza un token de conductor (typ=driver) en rutas de pasajero', async () => {
+    const guard = guardFor('driver');
+    const { ctx } = ctxWith({ authorization: 'Bearer driver.tok' });
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('rechaza un token de admin (typ=admin) en rutas de pasajero', async () => {
+    const guard = guardFor('admin');
+    const { ctx } = ctxWith({ authorization: 'Bearer admin.tok' });
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('acepta un token de pasajero (typ=passenger)', async () => {
+    const guard = guardFor('passenger');
+    const { ctx, req } = ctxWith({ authorization: 'Bearer pax.tok' });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(req.user).toMatchObject({ type: 'passenger' });
   });
 });

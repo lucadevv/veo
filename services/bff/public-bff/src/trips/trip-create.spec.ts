@@ -1,16 +1,18 @@
 /**
  * Test de la creación de viaje (TripsService.createTrip):
- *  - GATE de verificación facial (KYC): si el pasajero no está VERIFIED → 403 KYC_REQUIRED y NO se
- *    crea el viaje (diferenciador de seguridad VEO, server-side).
+ *  - ADR-018: el KYC del pasajero YA NO gatea la creación del viaje (dejó de ser muro pre-viaje). Un
+ *    pasajero UNVERIFIED puede pedir; la verificación es un badge de confianza OPCIONAL. Por eso NO hay
+ *    test de gate de KYC acá: el único gate pre-viaje que queda es el de DEUDA (BR-P02).
  *  - PUJA (GAP #4): con `bidCents` lo reenvía a trip-service (→ puja); sin él, undefined (tarifa fija).
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { InternalRestClient } from '@veo/rpc';
 import { PaymentMethod } from '@veo/shared-types';
-import { KycRequiredError, TripsService } from './trips.service';
+import { TripsService } from './trips.service';
 import { DebtPendingError } from '../payments/dto/payments.dto';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
+import type { DispatchService } from '../dispatch/dispatch.service';
 import type { CreateTripDto } from './dto/trip.dto';
 import type { LiveKitConfig } from '../share/livekit-token';
 import type Redis from 'ioredis';
@@ -63,8 +65,10 @@ function makeService(
     .fn()
     .mockResolvedValue({ id: 'trip-1', passengerId: 'usr-1', status: 'REQUESTED' });
   const tripRest = { post } as unknown as InternalRestClient;
-  // identityGrpc.call('GetUser', …) → estado de verificación del pasajero.
-  const identityGrpc = { call: vi.fn().mockResolvedValue({ found: true, kycStatus }) } as never;
+  // identityGrpc.call('GetUser', …) → estado de verificación del pasajero. ADR-018: la creación del viaje
+  // YA NO lo consulta (se retiró el gate de KYC); el mock queda para ASERTAR que no se llama.
+  const identityGrpcCall = vi.fn().mockResolvedValue({ found: true, kycStatus });
+  const identityGrpc = { call: identityGrpcCall } as never;
   const grpcStub = {} as never;
   const restStub = {} as unknown as InternalRestClient;
   // paymentRest.get('/payments/debt') → resumen de deuda que consulta assertNoDebt.
@@ -80,6 +84,8 @@ function makeService(
     set: vi.fn().mockResolvedValue('OK'),
     del: vi.fn().mockResolvedValue(1),
   };
+  // Fase C: getSurge autoritativo (mock 1.5x) — createTrip lo re-cotiza en vez de confiar el DTO del cliente.
+  const getSurge = vi.fn().mockResolvedValue({ multiplier: 1.5, zoneId: 'z1', active: true });
   const svc = new TripsService(
     grpcStub, // tripGrpc
     identityGrpc, // identityGrpc
@@ -92,34 +98,34 @@ function makeService(
     restStub, // ratingRest (REST_RATING) — MI rating del enrich, no usado en createTrip
     livekit,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     redis as unknown as Redis, // REDIS (cache KYC + deuda)
+    { routeWithSteps: async () => ({ polyline: '', distanceMeters: 0, durationSeconds: 0, steps: [] }) } as never, // MAPS (@veo/maps) — no ejercitado acá
     {} as unknown as DriverEnrichmentService,
+    // ADR-021 Fase C — dispatch.getSurge re-cotiza el surge AUTORITATIVO server-side (default mock 1.5x).
+    { getSurge } as unknown as DispatchService,
+    { getLocation: () => undefined } as never, // RealtimeStateService — no ejercitado acá
   );
-  return { svc, post, debtGet, redis };
+  return { svc, post, debtGet, redis, identityGrpcCall, getSurge };
 }
 
-describe('TripsService.createTrip — gate de verificación facial (KYC)', () => {
-  it('kycStatus VERIFIED → crea el viaje', async () => {
-    const { svc, post } = makeService('VERIFIED');
-    await svc.createTrip(user, baseDto(), 'idem-kyc-ok');
+describe('TripsService.createTrip — ADR-018: sin gate de KYC (verificación OPCIONAL)', () => {
+  it('pasajero UNVERIFIED → crea el viaje igual (el KYC ya no es muro pre-viaje)', async () => {
+    const { svc, post } = makeService('UNVERIFIED');
+    await svc.createTrip(user, baseDto(), 'idem-unverified-ok');
     expect(post).toHaveBeenCalledOnce();
   });
 
-  it('kycStatus PENDING → lanza KYC_REQUIRED (403) y NO crea el viaje', async () => {
-    const { svc, post } = makeService('PENDING');
-    await expect(svc.createTrip(user, baseDto(), 'idem-kyc-block')).rejects.toBeInstanceOf(
-      KycRequiredError,
-    );
-    expect(post).not.toHaveBeenCalled();
+  it('pasajero VERIFIED → crea el viaje (badge de confianza, no cambia el poder pedir)', async () => {
+    const { svc, post } = makeService('VERIFIED');
+    await svc.createTrip(user, baseDto(), 'idem-verified-ok');
+    expect(post).toHaveBeenCalledOnce();
   });
 
-  it('kycStatus REJECTED → también bloquea', async () => {
-    const { svc, post } = makeService('REJECTED');
-    await expect(svc.createTrip(user, baseDto(), 'idem-kyc-rej')).rejects.toMatchObject({
-      code: 'KYC_REQUIRED',
-      httpStatus: 403,
-    });
-    expect(post).not.toHaveBeenCalled();
+  it('la creación NO consulta identity para el KYC (el gate se retiró)', async () => {
+    const { svc, identityGrpcCall } = makeService('UNVERIFIED');
+    await svc.createTrip(user, baseDto(), 'idem-no-identity-call');
+    expect(identityGrpcCall).not.toHaveBeenCalled();
   });
 });
 
@@ -267,5 +273,32 @@ describe('TripsService.createTrip — entrada de la PUJA (GAP #4)', () => {
     expect(body.bidCents).toBeUndefined();
     expect(body.passengerId).toBe('usr-1');
     expect(body.paymentMethod).toBe(PaymentMethod.CASH);
+  });
+});
+
+describe('TripsService.createTrip — ADR-021 Fase C: surge AUTORITATIVO server-side', () => {
+  it('FIXED → re-cotiza surge del server (1.5x) e IGNORA el surgeMultiplier tampereado del cliente', async () => {
+    const { svc, post, getSurge } = makeService();
+    // El cliente MIENTE: manda 1.0 para esquivar el surge. Debe ganar el valor server-side (1.5).
+    await svc.createTrip(user, baseDto({ surgeMultiplier: 1.0 }), 'idem-surge');
+    expect(getSurge).toHaveBeenCalledWith(user, ORIGIN.lat, ORIGIN.lon);
+    const body = post.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    expect(body.surgeMultiplier).toBe(1.5);
+  });
+
+  it('PUJA (con bidCents) → NO consulta surge (el bid es el precio) y lo reenvía undefined', async () => {
+    const { svc, post, getSurge } = makeService();
+    await svc.createTrip(user, baseDto({ bidCents: 900, surgeMultiplier: 1.0 }), 'idem-surge-puja');
+    expect(getSurge).not.toHaveBeenCalled();
+    const body = post.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    expect(body.surgeMultiplier).toBeUndefined();
+  });
+
+  it('dispatch caído → degrada a 1.0 (nunca confía el valor del cliente ni sobre-cobra)', async () => {
+    const { svc, post, getSurge } = makeService();
+    getSurge.mockRejectedValueOnce(new Error('dispatch down'));
+    await svc.createTrip(user, baseDto({ surgeMultiplier: 1.8 }), 'idem-surge-fail');
+    const body = post.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    expect(body.surgeMultiplier).toBe(1.0);
   });
 });

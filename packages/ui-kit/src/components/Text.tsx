@@ -42,6 +42,10 @@ export function Text({
           color: theme.colors[color],
           textAlign: align,
           fontVariant: tabular ? ['tabular-nums'] : undefined,
+          // Android agrega padding vertical FANTASMA a cada Text (ascent/descent de la fuente):
+          // rompe el ritmo vertical de todo lo que apila texto (cards, filas, héroes). Apagarlo
+          // app-wide es el detalle que hace que Android se vea tan intencional como iOS.
+          includeFontPadding: false,
         },
         style,
       ]}

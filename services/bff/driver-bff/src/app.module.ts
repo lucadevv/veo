@@ -1,7 +1,7 @@
 import { Controller, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { JwtAuthGuard, Public } from '@veo/auth';
+import { JwtAuthGuard, SessionRevocationGuard, Public } from '@veo/auth';
 import { HealthController, MetricsController } from '@veo/observability';
 import { validateEnv } from './config/env.schema';
 import { CoreModule } from './infra/core.module';
@@ -20,6 +20,9 @@ import { HeatmapModule } from './heatmap/heatmap.module';
 import { IncentivesModule } from './incentives/incentives.module';
 import { SupportModule } from './support/support.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { CarpoolModule } from './carpool/carpool.module';
+import { MapsModule } from './maps/maps.module';
+import { RatingsModule } from './ratings/ratings.module';
 
 // Probes de orquestación / scraping de Prometheus: deben quedar ABIERTAS pese al JwtAuthGuard global.
 // Se subclasean los controllers compartidos de @veo/observability SOLO para marcarlos @Public a nivel
@@ -50,6 +53,9 @@ class PublicMetricsController extends MetricsController {}
     IncentivesModule,
     SupportModule,
     RealtimeModule,
+    CarpoolModule,
+    MapsModule,
+    RatingsModule,
   ],
   controllers: [PublicHealthController, PublicMetricsController],
   providers: [
@@ -58,9 +64,12 @@ class PublicMetricsController extends MetricsController {}
     // controller recordara @DriverApi(); el próximo que lo olvidara quedaba 100% abierto. Ahora el
     // default del BFF es cerrado a nivel global, espejando admin-bff/public-bff.
     //
-    // Orden: JwtAuthGuard (valida Bearer + puebla req.user) → DriverTypeGuard (exige typ 'driver').
-    // Ambos respetan @Public (IS_PUBLIC_KEY vía Reflector), así que las rutas públicas de auth
-    // (otp/request, otp/verify, refresh, logout) y los probes (health/metrics) siguen abiertas.
+    // Orden: JwtAuthGuard (valida Bearer + puebla req.user) → DriverTypeGuard (exige typ 'driver') →
+    // SessionRevocationGuard (consulta el denylist en Redis: enforcement server-side de la revocación,
+    // porque el access token es stateless y su firma sigue válida hasta 15m tras un revoke). Los tres
+    // respetan @Public (SessionRevocationGuard lo hace vía la ausencia de req.user), así que las rutas
+    // públicas de auth (otp/request, otp/verify, refresh, logout) y los probes (health/metrics) siguen
+    // abiertas. El guard de revocación es idempotente (solo lee) y fail-open ante Redis caído.
     //
     // El RateLimitGuard NO se monta global a propósito: NO es idempotente (hace INCR en Redis), y como
     // @DriverApi() y AuthController ya lo aplican por-ruta, montarlo global duplicaría el conteo de la
@@ -68,6 +77,7 @@ class PublicMetricsController extends MetricsController {}
     // doble aplicación (global + @DriverApi redundante) es segura. @DriverApi() se conserva como refuerzo.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: DriverTypeGuard },
+    { provide: APP_GUARD, useClass: SessionRevocationGuard },
   ],
 })
 export class AppModule {}

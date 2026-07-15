@@ -1,10 +1,14 @@
 import type { HttpClient } from '@veo/api-client';
 import {
+  ApiError,
   addDocumentRequest,
   driverBiometricEnrollRequest,
   driverBiometricEnrollResult,
+  driverCheckDniRequest,
+  driverCheckDniResult,
   driverDocument,
   driverOnboardRequest,
+  driverOnboardResult,
   driverPersonalData,
   driverPersonalDataRequest,
   driverProfileView,
@@ -21,6 +25,8 @@ import { mapProfileToRegistrationStatus } from '../../domain';
 import type {
   BiometricEnrollInput,
   BiometricEnrollResult,
+  CheckDniInput,
+  CheckDniResult,
   LicenseOnboardInput,
   PersonalDataInput,
   PersonalDataView,
@@ -65,6 +71,12 @@ export class HttpRegistrationRepository implements RegistrationRepository {
     return this.http.patch('/drivers/me/personal', { body, schema: driverPersonalData });
   }
 
+  checkDni(input: CheckDniInput): Promise<CheckDniResult> {
+    // Valida el body con el contrato (DNI 8 dígitos) antes de enviarlo; parsea la respuesta `{ exists }`.
+    const body = driverCheckDniRequest.parse(input);
+    return this.http.post('/drivers/me/check-dni', { body, schema: driverCheckDniResult });
+  }
+
   registerVehicle(input: VehicleRegisterInput): Promise<VehicleView> {
     const body = registerVehicleRequest.parse(input);
     return this.http.post('/drivers/vehicles', { body, schema: driverVehicleView });
@@ -101,8 +113,21 @@ export class HttpRegistrationRepository implements RegistrationRepository {
     });
   }
 
-  listDocuments(): Promise<RegistrationDocumentView[]> {
-    return this.http.get('/drivers/me/documents', { schema: driverDocumentList });
+  async listDocuments(): Promise<RegistrationDocumentView[]> {
+    // Un conductor NUEVO (recién pasó OTP) aún NO tiene perfil en el backend hasta el
+    // `PATCH /drivers/me/personal`, así que este endpoint responde 404 "No existe un perfil de
+    // conductor para este usuario". Eso NO es un error de la app: es la MISMA filosofía con la que el
+    // gate trata el 404 de `GET /drivers/me` (conductor nuevo ⇒ wizard, no error). Conductor sin perfil
+    // = sin documentos ⇒ lista VACÍA. Se detecta por status 404 TIPADO (`ApiError`), no por el texto.
+    // Cualquier otro error (red/5xx/401) se PROPAGA: no lo tragamos (no fingimos "sin documentos").
+    try {
+      return await this.http.get('/drivers/me/documents', { schema: driverDocumentList });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        return [];
+      }
+      throw e;
+    }
   }
 
   submitDocument(input: RegistrationDocumentRequest): Promise<RegistrationDocumentView> {
@@ -113,11 +138,14 @@ export class HttpRegistrationRepository implements RegistrationRepository {
 
   async onboardLicense(input: LicenseOnboardInput): Promise<void> {
     const body = driverOnboardRequest.parse(input);
-    // El backend responde el perfil agregado; lo validamos pero no necesitamos su valor aquí.
-    await this.http.post('/drivers/onboard', { body, schema: driverProfileView });
+    // `POST /drivers/onboard` responde el perfil FINO (`{ driverId, backgroundCheckStatus }`), NO el
+    // perfil agregado de `GET /drivers/me`. Validamos con el schema que matchea esa forma real; el
+    // valor no se usa aquí (la app deriva el estado del gate con `GET /drivers/me`).
+    await this.http.post('/drivers/onboard', { body, schema: driverOnboardResult });
   }
 
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
+    // Body NUEVO (Lote 2): una sola foto base64 (`{ photo }`), sin challengeId/frames.
     const body = driverBiometricEnrollRequest.parse(input);
     return this.http.post('/drivers/biometric/enroll', {
       body,

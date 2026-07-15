@@ -18,6 +18,7 @@ import { EVENT_SCHEMAS } from '@veo/events';
 import type { MapsClient } from '@veo/maps';
 import { PrismaClient } from '../src/generated/prisma';
 import { TripsService } from '../src/trips/trips.service';
+import { TripsRepository } from '../src/trips/trips.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
@@ -37,7 +38,7 @@ beforeAll(async () => {
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
   // assign()/assignFromDispatch NO tocan maps/config/redis (opcionales) → un stub alcanza.
   const maps = {} as unknown as MapsClient;
-  service = new TripsService(prismaService, maps);
+  service = new TripsService(new TripsRepository(prismaService), maps);
 }, 180_000);
 
 afterAll(async () => {

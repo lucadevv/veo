@@ -9,7 +9,6 @@ import {useMutation} from '@tanstack/react-query';
 import {
   Banner,
   Button,
-  Card,
   hexAlpha,
   SafeScreen,
   Text,
@@ -17,12 +16,21 @@ import {
 } from '@veo/ui-kit';
 import React from 'react';
 import {useTranslation} from 'react-i18next';
-import {StyleSheet, View} from 'react-native';
+import {Linking, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {NotImplementedError} from '../../../../core/errors/notImplemented';
 import type {RootStackParamList} from '../../../../navigation/types';
-import {IconCheck, IconShield} from '../components/icons';
+import {
+  IconCheck,
+  IconHash,
+  IconMapPin,
+  IconPhone,
+  IconRadioTower,
+  IconShield,
+  IconShieldCheck,
+  IconUsers,
+} from '../components/icons';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Params = RouteProp<RootStackParamList, 'Panic'>;
@@ -62,50 +70,123 @@ export function PanicScreen(): React.JSX.Element {
       : t('panic.errorGeneric');
 
   if (mutation.isSuccess) {
+    // Confirmaciones del estado ENVIADO (pen EZSxZ). El 202 del panic-service garantiza persistencia
+    // + outbox; el fan-out DOCUMENTADO (BR-S05: SMS+link a los contactos, push a la central) lo
+    // ejecuta notification-service consumiendo `panic.triggered`. La respuesta no distingue por ítem,
+    // así que la lista refleja ese fan-out estándar, no acks individuales.
+    const confirmations = [
+      {key: 'location', label: t('panic.statusLocation'), Icon: IconMapPin},
+      {key: 'contacts', label: t('panic.statusContacts'), Icon: IconUsers},
+      {key: 'central', label: t('panic.statusCentral'), Icon: IconRadioTower},
+    ] as const;
+
     return (
       <SafeScreen
         footer={
-          <Button
-            label={t('panic.back')}
-            fullWidth
-            size="lg"
-            onPress={() => navigation.goBack()}
-          />
+          <View style={{gap: theme.spacing.sm}}>
+            {/* CTA de emergencia per pen: llamada directa al 105 (PNP). Prominente y danger porque
+                es el siguiente paso crítico si la situación escala más allá de la alerta. */}
+            <Button
+              label={t('panic.call105')}
+              variant="danger"
+              fullWidth
+              size="lg"
+              leftIcon={<IconPhone color={theme.colors.onDanger} size={20} />}
+              onPress={() => void Linking.openURL('tel:105')}
+            />
+            <Button
+              label={t('panic.back')}
+              variant="ghost"
+              fullWidth
+              onPress={() => navigation.goBack()}
+            />
+          </View>
         }>
         <View style={[styles.center, {gap: theme.spacing.lg}]}>
+          {/* Emblema shield-check (pen): halo success suave + disco success sólido, no un check pelado. */}
           <View
             style={[
-              styles.badge,
+              styles.emblemHalo,
               {
                 backgroundColor: hexAlpha(theme.colors.success, 0.14),
-                borderColor: hexAlpha(theme.colors.success, 0.4),
                 borderRadius: theme.radii.pill,
               },
             ]}>
-            <IconCheck color={theme.colors.success} size={40} />
+            <View
+              style={[
+                styles.emblem,
+                {
+                  backgroundColor: theme.colors.success,
+                  borderRadius: theme.radii.pill,
+                },
+              ]}>
+              <IconShieldCheck color={theme.colors.onSuccess} size={40} />
+            </View>
           </View>
-          <Text variant="display" color="success" align="center">
+          <Text variant="display" align="center">
             {t('panic.sentTitle')}
           </Text>
           <Text variant="body" color="inkMuted" align="center">
             {t('panic.sentBody')}
           </Text>
-          <Card variant="outlined" padding="lg">
-            <Text variant="subhead" color="inkMuted">
-              {t('panic.alertId')}
-            </Text>
-            <Text variant="bodyStrong" tabular selectable>
+
+          {/* Chip compacto del ID de alerta (hash + id en mono), no una Card grande. */}
+          <View
+            style={[
+              styles.idChip,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.borderStrong,
+                borderRadius: theme.radii.pill,
+                paddingVertical: theme.spacing.sm,
+                paddingHorizontal: theme.spacing.md,
+                gap: theme.spacing.sm,
+              },
+            ]}
+            accessible
+            accessibilityLabel={`${t('panic.alertId')}: ${mutation.data.panicId}`}>
+            <IconHash color={theme.colors.inkSubtle} size={15} />
+            <Text variant="footnote" color="inkMuted" tabular selectable>
               {mutation.data.panicId}
             </Text>
-            {mutation.data.deduplicated ? (
-              <Text
-                variant="footnote"
-                color="inkMuted"
-                style={{marginTop: theme.spacing.sm}}>
-                {t('panic.deduplicated')}
-              </Text>
-            ) : null}
-          </Card>
+          </View>
+          {mutation.data.deduplicated ? (
+            <Text variant="footnote" color="inkMuted" align="center">
+              {t('panic.deduplicated')}
+            </Text>
+          ) : null}
+
+          {/* StatusList del fan-out (pen): ubicación · contactos · central, con check success. */}
+          <View style={[styles.statusList, {gap: theme.spacing.sm}]}>
+            {confirmations.map(({key, label, Icon}) => (
+              <View
+                key={key}
+                style={[
+                  styles.statusRow,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderRadius: theme.radii.md,
+                    padding: theme.spacing.md,
+                    gap: theme.spacing.md,
+                  },
+                ]}>
+                <View
+                  style={[
+                    styles.statusIconWrap,
+                    {
+                      backgroundColor: hexAlpha(theme.colors.success, 0.14),
+                      borderRadius: theme.radii.pill,
+                    },
+                  ]}>
+                  <Icon color={theme.colors.success} size={16} />
+                </View>
+                <Text variant="callout" style={styles.statusLabel}>
+                  {label}
+                </Text>
+                <IconCheck color={theme.colors.success} size={18} />
+              </View>
+            ))}
+          </View>
         </View>
       </SafeScreen>
     );
@@ -182,4 +263,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
+  // Emblema del estado enviado (pen EZSxZ): halo 112 + disco sólido 80.
+  emblemHalo: {
+    width: 112,
+    height: 112,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emblem: {
+    width: 80,
+    height: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  idChip: {flexDirection: 'row', alignItems: 'center', borderWidth: 1},
+  statusList: {alignSelf: 'stretch'},
+  statusRow: {flexDirection: 'row', alignItems: 'center'},
+  statusIconWrap: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusLabel: {flex: 1},
 });

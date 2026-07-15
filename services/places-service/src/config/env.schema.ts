@@ -2,9 +2,12 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
 
 export const envSchema = z.object({
+  // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+  // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+  ...grpcTlsEnvSchema.shape,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3013),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -14,7 +17,7 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (readiness + rate-limit; compartido con el dev-stack)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // ── Reglas de negocio (server-side) ──
   /// Tope de favoritos por usuario (Casa/Trabajo no cuentan). Espeja MAX_FAVORITES de la app.

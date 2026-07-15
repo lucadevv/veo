@@ -2,9 +2,13 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
+import { outboxEnvSchema } from '@veo/database';
 
 export const envSchema = z.object({
+  // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+  // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+  ...grpcTlsEnvSchema.shape,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3005),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -14,13 +18,24 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (locks de cron / idempotencia auxiliar)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay + consumidores)
-  KAFKA_BROKERS: z.string().default('localhost:9094'),
+  KAFKA_BROKERS: requiredInProd('localhost:9094'),
 
-  // Secreto para verificar la identidad interna propagada por el BFF (HMAC)
+  // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+  // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+  // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+  ...outboxEnvSchema.shape,
+
+  // Secreto para verificar la identidad interna propagada por el BFF (HMAC). También firma la identidad de
+  // SISTEMA con la que el cliente de @veo/policy consulta el registro central (GET /internal/policies).
   INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
+
+  // Base del API interno de identity-service (registro central de políticas PBAC · ADR-024 Fase 1). El
+  // cliente de @veo/policy hace GET /internal/policies (firmado admin-rail) al boot para poblar su cache;
+  // si es inalcanzable, cae al DEFAULT del catálogo (fail-safe, nunca tumba el arranque). Incluye /api/v1.
+  IDENTITY_INTERNAL_URL: requiredInProd('http://localhost:3001/api/v1', { url: true }),
 
   // ── Dominio de pagos ──
   /// Take rate de plataforma 0..1 (BR-P04). Default 20%.
@@ -37,11 +52,24 @@ export const envSchema = z.object({
   PAYOUT_STEPUP_CENTS: z.coerce.number().int().min(0).default(500_000),
   /// Ventana para solicitar reembolso (BR-P06). Default 7 días.
   REFUND_WINDOW_DAYS: z.coerce.number().int().min(0).default(7),
-  /// Monto sobre el cual un reembolso requiere aprobación L2 (BR-P06). Default S/30 = 3000 céntimos.
-  REFUND_L2_THRESHOLD_CENTS: z.coerce.number().int().min(0).default(3000),
+  /// Monto sobre el cual un reembolso exige AUTORIDAD ELEVADA (BR-P06 · dual-control). Bajo el modelo finanzas-only
+  /// (refund = FINANCE/ADMIN/SUPERADMIN), un reembolso > este umbral lo puede emitir SOLO ADMIN o SUPERADMIN; un
+  /// FINANCE queda topado acá. Recalibrado a S/300 = 30000 céntimos (antes S/30, calibrado para el tier SUPPORT_L1
+  /// ya retirado). Nombre del env conservado por compat de config. Tuneable por entorno.
+  REFUND_L2_THRESHOLD_CENTS: z.coerce.number().int().min(0).default(30000),
+  /// Ventana del BACKSTOP de idempotencia del refund admin (minutos): dos reembolsos del MISMO (paymentId,
+  /// céntimos) dentro de esta ventana se tratan como la MISMA operación (devuelve el existente), independiente
+  /// del Idempotency-Key del cliente. Cierra el residual del nonce de browser divergente (storage bloqueado,
+  /// cross-tab, cross-device). El operador habilita un 2do parcial idéntico legítimo con el gesto `forceNew`.
+  /// Default 15 min; tuneable por entorno como sus hermanas REFUND_WINDOW_DAYS / REFUND_L2_THRESHOLD_CENTS.
+  REFUND_IDEMPOTENCY_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
   /// Fracción de la penalidad de cancelación que va al CONDUCTOR como compensación (F2 · BR-T03). El
   /// resto lo retiene la plataforma. Default 0.5 (50/50).
   CANCELLATION_DRIVER_SHARE: z.coerce.number().min(0).max(1).default(0.5),
+  /// ADR-022 §P-A · TOPE de deuda por comisiones de viajes en EFECTIVO (céntimos PEN). Cuando el total PENDING de
+  /// driver_debts de un conductor CRUZA este tope, payment-service emite `driver.debt_exceeded` → identity lo
+  /// bloquea (hold DEBT_BLOCKED) → no recibe viajes nuevos hasta saldar. Default 10000 (S/100). Configurable por env.
+  DRIVER_DEBT_CAP_CENTS: z.coerce.number().int().min(0).default(10000),
   /// Umbral de discrepancia de conciliación que dispara alerta a finanzas (BR-P07). Default 1%.
   RECONCILIATION_ALERT_PCT: z.coerce.number().min(0).max(1).default(0.01),
   /// Red de seguridad del lazo de reembolsos (S5 · BR-P06): un Refund PENDING más viejo que este umbral
@@ -72,6 +100,38 @@ export const envSchema = z.object({
     .default(false),
   /// Secret HMAC para firmar/verificar webhooks SIMULADOS del adapter sandbox (e2e/smoke).
   SANDBOX_WEBHOOK_SECRET: z.string().default('dev-sandbox-webhook-secret'),
+
+  // ── Riel de DESEMBOLSO tras el puerto PayoutGateway (money-OUT · ADR-015 D2) ──
+  /// Selección de adapter money-OUT: `sandbox` (determinista, AHORA) | `live` (Yape/Plin, DIFERIDO PSP).
+  /// Default sandbox: en dev el desembolso e2e corre sin PSP real; en prod sin convenio el live falla-rápido.
+  PAYOUT_GATEWAY_MODE: z.enum(['sandbox', 'live']).default('sandbox'),
+  /// Endpoint + credenciales del riel de desembolso real (solo modo live · DIFERIDO).
+  PAYOUT_GATEWAY_URL: z.string().optional(),
+  PAYOUT_GATEWAY_API_KEY: z.string().optional(),
+  PAYOUT_GATEWAY_MERCHANT_ID: z.string().optional(),
+  /// Semilla del rechazo determinista del sandbox de desembolso: un amountCents múltiplo de esto se rechaza
+  /// permanente (prueba el camino PROCESSING→FAILED sin cuentas reales). 0 ⇒ nunca rechaza por monto.
+  SANDBOX_PAYOUT_REJECT_SEED: z.coerce.number().int().min(0).default(13),
+  /// Si `true`, el sandbox de desembolso confirma SÍNCRONO (CONFIRMED) en vez de async (SUBMITTED). Default
+  /// false (camino normal: el desembolso queda SUBMITTED y confirma por webhook/poll).
+  SANDBOX_PAYOUT_CONFIRM_SYNC: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => v === true || v === 'true' || v === '1')
+    .default(false),
+  /// Poll fallback del DESEMBOLSO (ADR-015 §4.2 · espejo del poll del money-IN): consulta el estado de los
+  /// payouts PROCESSING al riel (PayoutStatusQuery) cuando el webhook no llega (dev sin túnel) y aplica la
+  /// confirmación por el camino idempotente (applyPayoutDisbursementResult). Activable; cierra el ciclo async
+  /// money-OUT en dev/e2e. Solo corre si el adapter soporta la consulta (sandbox la implementa; live, al PSP).
+  PAYOUT_POLL_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => v === true || v === 'true' || v === '1')
+    .default(true),
+  /// Cada cuántos ms corre el barrido del poll de desembolso (default 25s).
+  PAYOUT_POLL_INTERVAL_MS: z.coerce.number().int().min(5_000).default(25_000),
+  /// Solo se consultan payouts PROCESSING actualizados dentro de esta ventana (minutos).
+  PAYOUT_POLL_MAX_AGE_MIN: z.coerce.number().int().min(1).default(60),
+  /// Máximo de payouts consultados por tick (cota de carga al riel).
+  PAYOUT_POLL_BATCH: z.coerce.number().int().min(1).max(200).default(25),
 
   // ── ProntoPaga (VEO_PAYMENT_MODE=prontopaga) · agregador de pagos Perú ──
   /// Base de la API (tracked). Default sandbox público de ProntoPaga.

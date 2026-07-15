@@ -47,6 +47,7 @@ describe('earnings breakdown value-object', () => {
       currency: 'PEN',
       today: period({ netCents: 8500 }),
       week: period({ grossCents: 50000, commissionCents: 10000, tipCents: 2500, netCents: 42500 }),
+      month: period({ grossCents: 200000, commissionCents: 40000, tipCents: 9000, netCents: 169000 }),
     };
     expect(weekNetCents(summary)).toBe(42500);
   });

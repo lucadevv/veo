@@ -1,37 +1,76 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Banner, SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-kit';
+import {
+  BottomSheet,
+  hexAlpha,
+  IconButton,
+  SafeScreen,
+  Skeleton,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { IconMore } from '../../../../shared/presentation/icons';
+import { formatPEN } from '../../../../shared/presentation/format';
+import { incentiveState, isMultiplierIncentive } from '../../domain';
 import { useIncentives } from '../hooks/useOps';
 import { IncentiveCard } from '../components/IncentiveCard';
-import { Appear } from '../components/motion';
+import { Reveal } from '../../../../shared/presentation/components/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Incentives'>;
 
 /**
- * Pantalla de Incentivos: lista los incentivos activos del conductor (ya ordenados activo →
- * completado → vencido en el caso de uso) con su progreso/recompensa/vigencia. Diseño motivador
- * pero sobrio (modo noche). Accesible desde Perfil y desde el Dashboard.
+ * Pantalla de Incentivos (frame `C/Incentivos`): hero con el total extra por completar los retos +
+ * la lista de incentivos activos (cards compactas). El ⋯ abre "¿Cómo funcionan?". Cuatro estados
+ * (carga/error/vacío/lista). Datos server-authoritative de `/incentives` (seam del driver-bff).
  */
 export const IncentivesScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const { data, isLoading, isError, error, refetch } = useIncentives();
+  const [howOpen, setHowOpen] = useState(false);
 
-  const header = <TopBar title={t('ops.incentives.title')} onBack={navigation.goBack} />;
+  const header = (
+    <TopBar
+      title={t('ops.incentives.title')}
+      onBack={navigation.goBack}
+      trailing={
+        <IconButton
+          accessibilityLabel={t('ops.incentives.howTitle')}
+          variant="surface"
+          icon={<IconMore size={20} color={theme.colors.ink} />}
+          onPress={() => setHowOpen(true)}
+        />
+      }
+    />
+  );
+
+  const howSheet = (
+    <BottomSheet
+      visible={howOpen}
+      onClose={() => setHowOpen(false)}
+      title={t('ops.incentives.howTitle')}
+    >
+      <Text variant="callout" color="inkMuted">
+        {t('ops.incentives.howBody')}
+      </Text>
+    </BottomSheet>
+  );
 
   if (isLoading) {
     return (
       <SafeScreen header={header}>
         <View style={[styles.list, { gap: theme.spacing.lg }]}>
-          <Skeleton height={180} radius={theme.radii.xl} />
-          <Skeleton height={180} radius={theme.radii.xl} />
+          <Skeleton height={72} radius={theme.radii.lg} />
+          <Skeleton height={110} radius={theme.radii.lg} />
+          <Skeleton height={110} radius={theme.radii.lg} />
         </View>
+        {howSheet}
       </SafeScreen>
     );
   }
@@ -44,6 +83,7 @@ export const IncentivesScreen = ({ navigation }: Props): React.JSX.Element => {
           description={toErrorMessage(error, t)}
           action={{ label: t('common.retry'), onPress: () => refetch() }}
         />
+        {howSheet}
       </SafeScreen>
     );
   }
@@ -55,27 +95,53 @@ export const IncentivesScreen = ({ navigation }: Props): React.JSX.Element => {
           title={t('ops.incentives.emptyTitle')}
           description={t('ops.incentives.emptyBody')}
         />
+        {howSheet}
       </SafeScreen>
     );
   }
 
+  // Total potencial: suma de bonos en soles de los META_VIAJES no vencidos (el multiplicador no es
+  // un monto fijo, así que no entra al total).
+  const totalCents = data
+    .filter((incentive) => !isMultiplierIncentive(incentive.type) && incentiveState(incentive) !== 'expired')
+    .reduce((sum, incentive) => sum + incentive.rewardCents, 0);
+
   return (
     <SafeScreen scroll header={header}>
       <View style={[styles.list, { gap: theme.spacing.lg, paddingBottom: theme.spacing['3xl'] }]}>
-        <Banner tone="info" title={t('ops.incentives.intro')} />
-        <Text variant="footnote" color="inkSubtle">
-          {t('ops.incentives.activeCount', { count: data.length })}
-        </Text>
+        {/* Hero: total extra por completar los retos activos (frame C/Incentivos). */}
+        <Reveal
+          style={[
+            styles.hero,
+            {
+              backgroundColor: hexAlpha(theme.colors.accent, 0.12),
+              borderColor: hexAlpha(theme.colors.accent, 0.4),
+              borderRadius: theme.radii.xl,
+              padding: theme.spacing.xl,
+              gap: theme.spacing.xs,
+            },
+          ]}
+        >
+          <Text variant="title3">
+            {t('ops.incentives.heroTitle', { amount: formatPEN(totalCents) })}
+          </Text>
+          <Text variant="footnote" color="inkMuted">
+            {t('ops.incentives.heroBody')}
+          </Text>
+        </Reveal>
+
         {data.map((incentive, index) => (
-          <Appear key={incentive.id} delay={index * 70}>
+          <Reveal key={incentive.id} delay={index * 70}>
             <IncentiveCard incentive={incentive} />
-          </Appear>
+          </Reveal>
         ))}
       </View>
+      {howSheet}
     </SafeScreen>
   );
 };
 
 const styles = StyleSheet.create({
   list: { paddingTop: 8 },
+  hero: { alignSelf: 'stretch', borderWidth: StyleSheet.hairlineWidth },
 });

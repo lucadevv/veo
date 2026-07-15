@@ -43,6 +43,7 @@ import {
   SHARE_CONTACTS_RESOLVER,
   type TrustedContactsResolver,
 } from '../ports/share/share-contacts.port';
+import { IDENTITY_CLIENT, type IdentityClient } from '../ports/identity/identity-client.port';
 import type { Env } from '../config/env.schema';
 import {
   PUSH_NOTIFICATION_SPECS,
@@ -68,6 +69,7 @@ export const DEDICATED_EVENT_TYPES = [
   'panic.fanout_requested',
   'payment.failed',
   'payment.cancellation_penalty_collected',
+  'payout.failed',
 ] as const satisfies readonly EventType[];
 
 /* ── enrichments de los handlers dedicados (campos FUERA del contrato del registro central) ── */
@@ -91,10 +93,11 @@ const GROUP_ID = 'notification-service';
 export class EventConsumerService extends KafkaConsumerBootstrap {
   private readonly centralWebhookUrl?: string;
 
-  /** Cableado DI del motor del registro: resolución poison-guarded + engine real + logger real. */
+  /** Cableado DI del motor del registro: resolución poison-guarded + engine real + logger + identity. */
   private readonly specContext: PushSpecContext = {
     resolveTargets: (eventType, userId, token, platform) =>
       this.safeResolveTargets(eventType, userId, token, platform),
+    resolveUserIdFromDriver: (driverId) => this.resolveUserIdFromDriver(driverId),
     enqueue: (input) => this.engine.enqueue(input),
     warn: (message) => this.logger.warn(message),
   };
@@ -103,6 +106,7 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
     private readonly engine: NotificationEngine,
     private readonly devices: DeviceTokenRepository,
     @Inject(SHARE_CONTACTS_RESOLVER) private readonly shareContacts: TrustedContactsResolver,
+    @Inject(IDENTITY_CLIENT) private readonly identity: IdentityClient,
     config: ConfigService<Env, true>,
   ) {
     super({
@@ -151,6 +155,30 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
     }
   }
 
+  /**
+   * Resuelve `Driver.id → userId` por gRPC a identity (ADR-015 D7), para los pushes que targetean al
+   * conductor por su `Driver.id` (payout.processed). El device-token store se consulta por `userId`;
+   * sin esta resolución el lookup NO matchea jamás (Driver.id ≠ userId, dos columnas UUID distintas).
+   *
+   * SIMETRÍA DE DURABILIDAD con el device-store (safeResolveTargets) — distinguir TRANSITORIO de RESULTADO:
+   *  - RESULTADO permanente (gRPC respondió `found:false` / sin userId → el driver no existe): el evento
+   *    NO se puede entregar y reintentar NO ayuda → devuelve undefined; el motor omite el push limpio.
+   *  - ERROR TRANSITORIO (el gRPC LANZA: timeout/unavailable/unknown → identity caído o un blip): NO se
+   *    traga. Se RELANZA para que el camino de error del consumer relance y Kafka redelivere el evento
+   *    (at-least-once, con su backoff; NO es retry-storm: el push se entrega cuando identity se recupera).
+   *    Igual que el device-store transitorio en este mismo flujo. El dedup del engine evita duplicar.
+   *
+   * Tragar el throw aquí perdería la notificación de PLATA en un blip (Kafka no reintenta lo ya ack-eado):
+   * esa asimetría — device-store relanza pero identity no — era el bug que cierra este método.
+   */
+  private async resolveUserIdFromDriver(driverId: string): Promise<string | undefined> {
+    // El throw del gRPC (transitorio) NO se captura: propaga al manejo de error del consumer → Kafka
+    // redelivere. Solo el RESULTADO (found:false / sin userId) es una omisión limpia.
+    const driver = await this.identity.getDriver(driverId);
+    if (!driver.found || driver.userId.length === 0) return undefined;
+    return driver.userId;
+  }
+
   /** TODOS los eventos del group, en un solo record (único punto de registro). */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     // Handlers dedicados (multi-canal / multi-destinatario): explícitos, no forzados al registro.
@@ -159,6 +187,7 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
       'panic.fanout_requested': (e) => this.onPanicFanout(e),
       'payment.failed': (e) => this.onPaymentFailed(e),
       'payment.cancellation_penalty_collected': (e) => this.onCancellationPenaltyCollected(e),
+      'payout.failed': (e) => this.onPayoutFailed(e),
     };
     // El caso común: cada fila del registro declarativo pasa por el MISMO motor (runPushSpec).
     for (const spec of Object.values(PUSH_NOTIFICATION_SPECS)) {
@@ -385,5 +414,46 @@ export class EventConsumerService extends KafkaConsumerBootstrap {
         });
       }
     }
+  }
+
+  /**
+   * payout.failed (ADR-015 §1 D7 opcional · §4.1) → aviso al OPERADOR/central de que un desembolso FALLÓ
+   * (PROCESSING → FAILED): la plata NO salió, el operador puede reintentar (idempotente por dedupKey en el
+   * payment-service). DEDICADO porque NO es un push a un usuario: reusa el MISMO riel webhook a la central
+   * que `onPaymentFailed` (CENTRAL_ALERT_WEBHOOK_URL) — no es un canal nuevo.
+   *
+   * Degradación honesta: si NO hay URL de central configurada, NO se finge un aviso (warn + omito). SIN PII:
+   * solo IDs + período viajan al webhook (el contrato .strict() del evento ya lo garantiza).
+   * dedup `payout:{payoutId}:failed`: una redelivery del mismo fallo no duplica el aviso.
+   */
+  private async onPayoutFailed(envelope: EventEnvelope<unknown>): Promise<void> {
+    const parsed = EVENT_SCHEMAS['payout.failed'].safeParse(envelope.payload);
+    if (!parsed.success) {
+      this.logger.warn('payout.failed: payload inválido (descarto sin reintento)');
+      return;
+    }
+    const p = parsed.data;
+
+    const centralUrl = this.centralWebhookUrl;
+    if (!centralUrl) {
+      this.logger.warn(
+        `payout ${p.payoutId}: desembolso fallido sin URL de central → aviso al operador omitido`,
+      );
+      return;
+    }
+    await this.engine.enqueue({
+      recipientId: 'central',
+      channel: NotificationChannel.WEBHOOK,
+      template: TEMPLATE_KEYS.PAYOUT_FAILED_CENTRAL_ALERT,
+      dedupKey: `payout:${p.payoutId}:failed`,
+      payload: {
+        to: centralUrl,
+        vars: { payoutId: p.payoutId, driverId: p.driverId, period: p.period },
+        payoutId: p.payoutId,
+        driverId: p.driverId,
+        amountCents: p.amountCents,
+        period: p.period,
+      },
+    });
   }
 }

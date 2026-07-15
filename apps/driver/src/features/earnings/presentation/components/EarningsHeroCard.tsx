@@ -3,7 +3,6 @@ import { StyleSheet, View } from 'react-native';
 import type { TFunction } from 'i18next';
 import type { EarningsSummary } from '@veo/api-client';
 import { Text, useTheme } from '@veo/ui-kit';
-import { IconClock, IconEarnings, IconReceipt } from '../../../../shared/presentation/icons';
 import { formatPEN } from '../../../../shared/presentation/format';
 import { useCountUp } from './motion';
 
@@ -14,13 +13,11 @@ export interface EarningsHeroCardProps {
 }
 
 /**
- * Tarjeta "hero" de ganancias (lenguaje Midnight Motion).
- *
- * Muestra el neto total como métrica protagonista con tinte cian y, debajo, una fila de
- * estadísticas compactas con íconos. SOLO usa campos presentes en `EarningsSummary`:
- * `totalNetCents`, `totalGrossCents`, `paidNetCents`, `pendingNetCents`, `totalCommissionCents`
- * y `currency`. No hay serie temporal en el contrato, por eso no se dibuja ninguna gráfica:
- * la única línea cian es un detalle ornamental, nunca un dato.
+ * Hero EDITORIAL de ganancias. NO es la "card con número gigante + sub-tiles": ese hero-metric template
+ * es el cliché SaaS que `impeccable` prohíbe (lo que se sentía "hecho por AI"). Acá el neto es la métrica
+ * protagonista como número `display` a la IZQUIERDA, en JADE (dinero ganado = positivo, el acento premium
+ * de la marca — no el azul, que se reserva a lo interactivo), SIN encajonar. Debajo, una fila de stats
+ * limpia (label + monto) separada por una línea sutil. Solo campos reales del `EarningsSummary`.
  */
 export function EarningsHeroCard({ summary, t }: EarningsHeroCardProps): React.JSX.Element {
   const theme = useTheme();
@@ -28,109 +25,60 @@ export function EarningsHeroCard({ summary, t }: EarningsHeroCardProps): React.J
   const animatedNet = useCountUp(summary.totalNetCents);
 
   return (
-    <View
-      style={[
-        styles.card,
-        {
-          backgroundColor: theme.colors.surfaceElevated,
-          borderRadius: theme.radii.xl,
-          padding: theme.spacing['2xl'],
-          gap: theme.spacing.lg,
-        },
-      ]}
-    >
-      {/* Encabezado: ícono de acento + etiqueta + chip de moneda real del summary. */}
-      <View style={[styles.heroHead, { gap: theme.spacing.md }]}>
-        <View
-          style={[
-            styles.iconBadge,
-            {
-              backgroundColor: theme.colors.bg,
-              borderRadius: theme.radii.md,
-              borderColor: theme.colors.border,
-            },
-          ]}
-        >
-          <IconEarnings size={20} color={theme.colors.accent} strokeWidth={2} />
-        </View>
-        <Text variant="subhead" color="inkMuted" style={styles.flex}>
-          {t('earnings.netTotal')}
-        </Text>
-        <View
-          style={[
-            styles.currencyChip,
-            { backgroundColor: theme.colors.bg, borderRadius: theme.radii.pill },
-          ]}
-        >
-          <Text variant="label" color="inkSubtle">
-            {summary.currency}
-          </Text>
-        </View>
-      </View>
+    <View style={styles.hero}>
+      <Text variant="caption" color="inkMuted">
+        {t('earnings.netTotal')}
+      </Text>
+      <Text variant="display" color="success" tabular>
+        {formatPEN(animatedNet)}
+      </Text>
+      <Text variant="footnote" color="inkSubtle" tabular numberOfLines={1}>
+        {t('earnings.grossTotal')} · {formatPEN(summary.totalGrossCents)} · {summary.currency}
+      </Text>
 
-      {/* Métrica protagonista: neto total con tinte cian y numerales tabulares. */}
-      <View style={styles.amountBlock}>
-        {/* Detalle ornamental (no es un dato): subraya el acento Midnight Motion. */}
-        <View style={[styles.accentRule, { backgroundColor: theme.colors.accent }]} />
-        <Text variant="display" color="accent" tabular>
-          {formatPEN(animatedNet)}
-        </Text>
-        <Text variant="footnote" color="inkSubtle" tabular>
-          {t('earnings.grossTotal')} · {formatPEN(summary.totalGrossCents)}
-        </Text>
-      </View>
-
-      <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
-
-      {/* Fila de estadísticas compactas: solo campos reales del summary. */}
-      <View style={[styles.statsRow, { gap: theme.spacing.md }]}>
-        <StatTile
-          icon={<IconReceipt size={18} color={theme.colors.success} strokeWidth={2} />}
+      <View style={[styles.stats, { borderTopColor: theme.colors.border }]}>
+        <Stat
           label={t('earnings.paidNet')}
           value={formatPEN(summary.paidNetCents)}
-          valueColor="success"
+          valueColor="ink"
         />
-        <StatTile
-          icon={<IconClock size={18} color={theme.colors.warn} strokeWidth={2} />}
+        <Stat
           label={t('earnings.pendingNet')}
           value={formatPEN(summary.pendingNetCents)}
-          valueColor="warn"
+          valueColor="inkMuted"
         />
-        <StatTile
-          icon={<IconEarnings size={18} color={theme.colors.inkMuted} strokeWidth={2} />}
+        <Stat
           label={t('earnings.commission')}
           value={formatPEN(summary.totalCommissionCents)}
-          valueColor="ink"
+          valueColor="inkMuted"
         />
       </View>
     </View>
   );
 }
 
-interface StatTileProps {
-  icon: React.ReactNode;
+interface StatProps {
   label: string;
   value: string;
-  valueColor: 'ink' | 'success' | 'warn';
+  valueColor: 'ink' | 'inkMuted';
 }
 
-/** Celda de estadística compacta (ícono + etiqueta + monto). Privada de la tarjeta hero. */
-function StatTile({ icon, label, value, valueColor }: StatTileProps): React.JSX.Element {
-  const theme = useTheme();
+/** Celda de estadística: etiqueta muted + monto. Sin ícono ni caja (evita el "grid de cards" cliché). */
+function Stat({ label, value, valueColor }: StatProps): React.JSX.Element {
   return (
-    <View style={styles.statTile}>
-      <View
-        style={[
-          styles.statIcon,
-          { backgroundColor: theme.colors.bg, borderRadius: theme.radii.sm },
-        ]}
-      >
-        {icon}
-      </View>
+    <View style={styles.stat}>
       <Text variant="caption" color="inkSubtle" numberOfLines={1}>
         {label}
       </Text>
-      <Text variant="bodyStrong" color={valueColor} tabular numberOfLines={1}>
+      {/* adjustsFontSizeToFit: un monto grande (S/ 12,345.67) en ~1/3 del ancho ENCOGE en vez de recortarse. */}
+      <Text
+        variant="bodyStrong"
+        color={valueColor}
+        tabular
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+      >
         {value}
       </Text>
     </View>
@@ -138,21 +86,13 @@ function StatTile({ icon, label, value, valueColor }: StatTileProps): React.JSX.
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  card: { alignSelf: 'stretch' },
-  heroHead: { flexDirection: 'row', alignItems: 'center' },
-  iconBadge: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
+  hero: { gap: 6 },
+  stats: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  currencyChip: { paddingHorizontal: 10, paddingVertical: 4 },
-  amountBlock: { gap: 6 },
-  accentRule: { width: 36, height: 3, borderRadius: 999, marginBottom: 4 },
-  divider: { height: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
-  statsRow: { flexDirection: 'row' },
-  statTile: { flex: 1, gap: 6 },
-  statIcon: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  stat: { flex: 1, gap: 4 },
 });

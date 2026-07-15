@@ -11,7 +11,12 @@ import {
   type UserReply,
   type DriverReply,
 } from '@veo/rpc';
-import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import type { PanicSummary, PanicDetail } from '@veo/api-client';
 import { GRPC_IDENTITY, GRPC_TRIP, REST_PANIC } from '../infra/tokens';
 import { canSeeIdentity } from '../redaction/redaction.policy';
@@ -37,6 +42,11 @@ interface PanicEntity {
   acknowledgedAt?: string;
   ackBy?: string;
   resolvedAt?: string;
+  resolutionNotes?: string;
+  dispatchedAt?: string;
+  dispatchedBy?: string;
+  escalatedAt?: string;
+  escalatedBy?: string;
 }
 @Injectable()
 export class SecurityService {
@@ -46,6 +56,7 @@ export class SecurityService {
     @Inject(REST_PANIC) private readonly rest: InternalRestClient,
     @Inject(GRPC_IDENTITY) private readonly identityGrpc: GrpcServiceClient,
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly audit: AuditRecorder,
     config: ConfigService<Env, true>,
   ) {
@@ -89,7 +100,7 @@ export class SecurityService {
     p: PanicEntity,
   ): Promise<PanicDetail> {
     const base = toPanicDetail(p);
-    const meta = grpcIdentityMetadata(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const trip = await this.tripGrpc
       .call<TripReply>('GetTrip', { id: p.tripId }, meta)
       .catch(() => null);
@@ -107,9 +118,25 @@ export class SecurityService {
     return {
       ...base,
       passengerName: identityVisible ? (passenger?.found ? passenger.name || null : null) : null,
+      // Teléfono del pasajero (PII · Compliance+) para "Contactar pasajera"; sub-Compliance → null.
+      passengerPhone: identityVisible ? (passenger?.found ? passenger.phone || null : null) : null,
       driverId,
       driverName: identityVisible ? (driver?.found ? driver.name || null : null) : null,
     };
+  }
+
+  /** Despachar unidad de respuesta (acción lateral · audit + panic.dispatched vía panic-service). */
+  async dispatch(identity: AuthenticatedUser, id: string): Promise<PanicDetail> {
+    const p = await this.rest.post<PanicEntity>(`/panic/${id}/dispatch`, { identity });
+    await this.audit.record(identity, { action: 'panic.dispatch', resourceType: 'panic', resourceId: id });
+    return this.enrichPanicDetail(identity, p);
+  }
+
+  /** Escalar a autoridades (acción lateral · audit + panic.escalated vía panic-service). */
+  async escalate(identity: AuthenticatedUser, id: string): Promise<PanicDetail> {
+    const p = await this.rest.post<PanicEntity>(`/panic/${id}/escalate`, { identity });
+    await this.audit.record(identity, { action: 'panic.escalate', resourceType: 'panic', resourceId: id });
+    return this.enrichPanicDetail(identity, p);
   }
 
   async resolve(
@@ -119,13 +146,16 @@ export class SecurityService {
   ): Promise<PanicDetail> {
     const p = await this.rest.post<PanicEntity>(`/panic/${id}/resolve`, {
       identity,
-      body: { resolution: dto.resolution },
+      // DOBLE registro del motivo: panic-service lo persiste en la entidad (resolution_notes) para
+      // consulta/display del detalle; el AUDIT inmutable de abajo sigue siendo la fuente de verdad para
+      // rendición de cuentas (Ley 29733). `notes` opcional → solo viaja si el operador lo escribió.
+      body: { resolution: dto.resolution, ...(dto.notes ? { notes: dto.notes } : {}) },
     });
     await this.audit.record(identity, {
       action: 'panic.resolve',
       resourceType: 'panic',
       resourceId: id,
-      payload: { resolution: dto.resolution },
+      payload: { resolution: dto.resolution, ...(dto.notes ? { notes: dto.notes } : {}) },
     });
     return this.enrichPanicDetail(identity, p);
   }
@@ -161,15 +191,17 @@ function toPanicSummary(p: PanicEntity): PanicSummary {
   };
 }
 
-/** Detalle del pánico al contrato. Los nombres (passenger/driver) y notes no los provee panic-service →
- *  null honesto (no data falsa); el enriquecimiento por identity/trip es follow-up. evidence: se mapean
- *  los S3 keys a objetos mostrables (kind por extensión, label = nombre de archivo, at = inicio del incidente). */
+/** Detalle del pánico al contrato. Los nombres (passenger/driver) no los provee panic-service → null
+ *  honesto (no data falsa); el enriquecimiento por identity/trip es follow-up. `notes` = el motivo del
+ *  cierre que panic-service ahora SÍ persiste (resolution_notes); null hasta que el operador lo escriba.
+ *  evidence: se mapean los S3 keys a objetos mostrables (kind por extensión, label = nombre de archivo). */
 function toPanicDetail(p: PanicEntity): PanicDetail {
   return {
     id: p.id,
     tripId: p.tripId,
     passengerId: p.passengerId,
     passengerName: null,
+    passengerPhone: null,
     driverId: null,
     driverName: null,
     status: p.status,
@@ -178,7 +210,9 @@ function toPanicDetail(p: PanicEntity): PanicDetail {
     acknowledgedAt: p.acknowledgedAt ?? null,
     resolvedAt: p.resolvedAt ?? null,
     acknowledgedBy: p.ackBy ?? null,
-    notes: null,
+    dispatchedAt: p.dispatchedAt ?? null,
+    escalatedAt: p.escalatedAt ?? null,
+    notes: p.resolutionNotes ?? null,
     evidence: (p.evidenceS3Keys ?? []).map((key) => ({
       id: key,
       kind: evidenceKind(key),

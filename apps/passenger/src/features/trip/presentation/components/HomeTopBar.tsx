@@ -1,10 +1,10 @@
-import {Avatar, IconButton, Text, useTheme} from '@veo/ui-kit';
+import {Avatar, Text, useTheme} from '@veo/ui-kit';
 import React, {useCallback} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Linking, Pressable, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import type {LocationStatus} from '../hooks/useCurrentLocation';
-import {IconBell} from './icons';
+import type {LocationStatus} from '../../../../core/location/useCurrentLocation';
+import {IconPin} from './icons';
 
 export interface HomeTopBarProps {
   /** Estado del fix de ubicación: cada estado no-feliz da un mensaje + CTA accionable. */
@@ -17,14 +17,17 @@ export interface HomeTopBarProps {
   reverseTitle: string | null;
   profileName: string | null;
   profilePhotoUrl: string | null;
+  /** Reservado: el design/veo.pen NO muestra campana en el TopRow — notificaciones se re-aloja (follow-up). */
   onOpenNotifications: () => void;
   onOpenProfile: () => void;
 }
 
 /**
- * Chrome superior del HOME sobre el mapa: pill de ubicación (con CTA accionable si el fix no es feliz:
- * Ajustes para permiso/GPS apagado, Reintentar para fix fallido) + campana de notificaciones + avatar.
- * Oculto durante el viaje activo (ahí manda el `TripTopBar`).
+ * Chrome superior del HOME sobre el mapa, fiel a `design/veo.pen` P/Home (TopRow): pill de ubicación
+ * (pin de marca + "Ubicación actual" + la dirección real; CTA accionable si el fix no es feliz:
+ * Ajustes para permiso/GPS, Reintentar para fix fallido) + avatar. SIN campana (el .pen no la tiene
+ * en el TopRow; el acceso a notificaciones se re-aloja en un lote posterior). Oculto durante el viaje
+ * activo (ahí manda el `TripTopBar`).
  */
 export function HomeTopBar({
   locationStatus,
@@ -33,15 +36,12 @@ export function HomeTopBar({
   reverseTitle,
   profileName,
   profilePhotoUrl,
-  onOpenNotifications,
   onOpenProfile,
 }: HomeTopBarProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   const insets = useSafeAreaInsets();
 
-  // Estado de la pastilla de ubicación: cada estado no-feliz da un mensaje + CTA accionable
-  // (Ajustes para permiso/GPS, Reintentar para fix fallido), en vez de un genérico mudo.
   const locationActionable =
     locationStatus === 'denied' ||
     locationStatus === 'servicesOff' ||
@@ -58,7 +58,6 @@ export function HomeTopBar({
             (locationStatus === 'locating'
               ? t('home.locating')
               : t('home.yourLocation')));
-  // La acción del pill: permiso/GPS → abrir Ajustes del sistema; fix fallido → reintentar en el acto.
   const locationActionLabel =
     locationStatus === 'error'
       ? t('home.locationActionRetry')
@@ -76,6 +75,8 @@ export function HomeTopBar({
     }
   }, [locationStatus, onRetryLocation]);
 
+  const pinColor = locationActionable ? theme.colors.warn : theme.colors.accent;
+
   return (
     <View
       style={[styles.topRow, {top: insets.top + theme.spacing.sm}]}
@@ -92,7 +93,7 @@ export function HomeTopBar({
         style={[
           styles.locationPill,
           {
-            backgroundColor: theme.colors.surface,
+            backgroundColor: theme.colors.surfaceElevated,
             borderColor: locationActionable
               ? theme.colors.warn
               : theme.colors.border,
@@ -100,48 +101,37 @@ export function HomeTopBar({
             ...theme.elevation.level2,
           },
         ]}>
-        <View
-          style={[
-            styles.locationDot,
-            {
-              backgroundColor: locationActionable
-                ? theme.colors.warn
-                : theme.colors.accent,
-            },
-          ]}
-        />
-        <Text variant="subhead" numberOfLines={1} style={styles.locationLabel}>
-          {userLabel}
-        </Text>
-        {locationActionLabel ? (
+        <IconPin color={pinColor} size={16} />
+        <View style={styles.pillTexts}>
+          <Text variant="caption" color="inkSubtle" style={styles.kicker}>
+            {t('home.locationKicker')}
+          </Text>
           <Text
             variant="subhead"
-            color="accent"
             numberOfLines={1}
-            style={styles.locationAction}>
-            {locationActionLabel}
+            style={styles.locationValue}>
+            {userLabel}
           </Text>
-        ) : null}
+          {locationActionLabel ? (
+            <Text variant="footnote" color="accent" numberOfLines={1}>
+              {locationActionLabel}
+            </Text>
+          ) : null}
+        </View>
       </Pressable>
-      <View style={styles.topActions} pointerEvents="box-none">
-        <IconButton
-          accessibilityLabel={t('home.notifications')}
-          variant="surface"
-          onPress={onOpenNotifications}
-          icon={<IconBell color={theme.colors.ink} size={20} />}
-          style={{...theme.elevation.level2}}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('screens.profile')}
+        onPress={onOpenProfile}>
+        {/* Tono NEUTRAL del pen (P/Home · TopRow): superficie elevada + borde + iniciales ink —
+            el tinte de marca queda para las cards de conductor, no para el chrome del Home. */}
+        <Avatar
+          uri={profilePhotoUrl ?? undefined}
+          name={profileName ?? t('appName')}
+          size="md"
+          tone="neutral"
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('screens.profile')}
-          onPress={onOpenProfile}>
-          <Avatar
-            uri={profilePhotoUrl ?? undefined}
-            name={profileName ?? t('appName')}
-            size="md"
-          />
-        </Pressable>
-      </View>
+      </Pressable>
     </View>
   );
 }
@@ -149,16 +139,15 @@ export function HomeTopBar({
 const styles = StyleSheet.create({
   topRow: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 20,
+    right: 20,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
   },
-  topActions: {flexDirection: 'row', alignItems: 'center', gap: 10},
   locationPill: {
-    flex: 1,
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -166,7 +155,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
   },
-  locationDot: {width: 7, height: 7, borderRadius: 999},
-  locationLabel: {flexShrink: 1},
-  locationAction: {fontWeight: '600', flexShrink: 0},
+  pillTexts: {flexShrink: 1, gap: 1},
+  kicker: {
+    fontSize: 10,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  locationValue: {fontWeight: '600'},
 });

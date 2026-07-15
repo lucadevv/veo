@@ -12,7 +12,15 @@ const PROFILE: DriverProfile = {
   averageRating: 4.8,
   rating: null,
   documents: [],
-  compliance: { compliant: true, requiredTypes: [], missing: [] },
+  compliance: {
+    compliant: true,
+    requiredTypes: [],
+    missing: [],
+    rejected: [],
+    submittedAllRequired: true,
+    allApproved: true,
+    biometricEnrolled: true,
+  },
 };
 
 describe('profileToSessionUser', () => {

@@ -1,0 +1,314 @@
+import React, { type ReactElement } from 'react';
+import { AccessibilityInfo } from 'react-native';
+import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import TestRenderer, { act } from 'react-test-renderer';
+import '../../../../../i18n';
+import { PersonalDataScreen } from '../PersonalDataScreen';
+import { useRegistrationStore } from '../../state/registrationStore';
+import { DriverExistence } from '../../hooks/useDriverExists';
+import type {
+  PersonalDataContinueParams,
+  PersonalDataContinueResult,
+} from '../../hooks/usePersonalDataContinue';
+
+/**
+ * LOTE A · El "Continuar" del paso CONDUCTOR unifica la FUENTE DE VERDAD con `driverExists`. Tres ramas:
+ *  (a) RESUME (driver existe, `personal` vacío): NAVEGA sin re-PATCHear → sin field-errors ni "datos no
+ *      válidos" (mata el dead-end). Se verifica que el `driverExists` que recibe el continue es `true`.
+ *  (b) FRESCO (driver no existe, `personal` poblado por escaneo): pasa `driverExists=false` al continue
+ *      (el PATCH crea el driver). Espejo del alta nueva.
+ *
+ * Gating (Lote 4): Continuar se habilita SOLO con ambas cards en CHECK (`sent` de esta sesión o el server
+ * ya tiene el doc), no con la captura — por eso el setup marca las caras `sent`.
+ *
+ * Estrategia: aislamos la PANTALLA. Mockeamos `usePersonalDataContinue` (capturamos el `submit` y
+ * controlamos su resultado), `useDriverExists` (la señal server) y `useRegistrationDocuments` (listado del
+ * server vacío). El navigation se stubea. No se re-testea el pipeline del continue (ya cubierto en su hook).
+ */
+
+/** Resultado que devuelve el `submit` mockeado (cada test lo fija). */
+let mockSubmitResult: PersonalDataContinueResult = { status: 'ok' };
+/** Captura el último `params` con que la pantalla llamó al continue (para verificar `driverExists`). */
+const mockSubmit = jest.fn(
+  async (_params: PersonalDataContinueParams): Promise<PersonalDataContinueResult> =>
+    mockSubmitResult,
+);
+/** Señal de existencia del driver que el mock de `useDriverExists` devuelve (cada test la fija). */
+let mockDriverExistence: DriverExistence = DriverExistence.NotFound;
+
+jest.mock('../../hooks/usePersonalDataContinue', () => {
+  const actual = jest.requireActual('../../hooks/usePersonalDataContinue');
+  return {
+    ...actual,
+    usePersonalDataContinue: () => ({ submit: mockSubmit, isPending: false }),
+  };
+});
+
+jest.mock('../../hooks/useDriverExists', () => {
+  const actual = jest.requireActual('../../hooks/useDriverExists');
+  return {
+    ...actual,
+    useDriverExists: () => mockDriverExistence,
+  };
+});
+
+jest.mock('../../hooks/useRegistrationDocuments', () => {
+  const actual = jest.requireActual('../../hooks/useRegistrationDocuments');
+  return {
+    ...actual,
+    // Listado del servidor vacío: aislamos el screen (la existencia del driver la da `useDriverExists`).
+    useRegistrationDocuments: () => ({ data: [], isError: false, error: null }),
+  };
+});
+
+// `useRegistrationExitGuard` engancha el botón físico de Android vía @react-navigation; stub mínimo.
+jest.mock('@react-navigation/native', () => {
+  const actual = jest.requireActual('@react-navigation/native');
+  return {
+    ...actual,
+    useNavigation: () => ({
+      navigate: jest.fn(),
+      goBack: jest.fn(),
+      dispatch: jest.fn(),
+      addListener: () => () => undefined,
+      canGoBack: () => false,
+      reset: jest.fn(),
+      getState: () => ({ routes: [], index: 0 }),
+    }),
+    useFocusEffect: (effect: () => void | (() => void)) => {
+      const ReactLib = require('react');
+      ReactLib.useEffect(() => effect(), [effect]);
+    },
+  };
+});
+
+jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
+jest
+  .spyOn(AccessibilityInfo, 'addEventListener')
+  .mockReturnValue({ remove: () => undefined } as ReturnType<
+    typeof AccessibilityInfo.addEventListener
+  >);
+
+const SAFE_AREA_METRICS: Metrics = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+};
+
+/** `navigation` mínima que el screen consume (`navigate` para avanzar a Vehicle). */
+function fakeNavigation() {
+  return { navigate: jest.fn() } as never;
+}
+
+/**
+ * Captura LOCAL del DNI (anverso, sin reverso) — la fuente HONESTA de "DNI listo para avanzar" del nuevo
+ * gating `dniDocReady` (`pendingDni != null || serverHasDni`). Antes el gating se conformaba con
+ * `personal.dni` persistido (número), que sobrevive al reload sin su imagen → DNI fantasma; ahora se exige
+ * la imagen (captura viva) o el server. Estos tests representan ESA precondición real.
+ */
+const DNI_CAPTURE = {
+  front: {
+    uri: 'data:image/jpeg;base64,/9j/dnifront',
+    mimeType: 'image/jpeg',
+    fileName: 'dni-front.jpg',
+    width: null,
+    height: null,
+    fileSize: null,
+  },
+  back: null,
+  extractedData: null,
+};
+
+function withProviders(node: ReactElement, client: QueryClient): React.JSX.Element {
+  return (
+    <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
+      <QueryClientProvider client={client}>{node}</QueryClientProvider>
+    </SafeAreaProvider>
+  );
+}
+
+/** Encuentra el botón "Continuar" del footer por su label y dispara su `onPress`. */
+function pressContinue(renderer: TestRenderer.ReactTestRenderer): void {
+  const button = renderer.root
+    .findAll((node) => typeof node.props?.label === 'string' && node.props.label === 'Continuar')
+    .find((node) => typeof node.props.onPress === 'function');
+  if (!button) {
+    throw new Error('No se encontró el botón Continuar');
+  }
+  act(() => {
+    (button.props.onPress as () => void)();
+  });
+}
+
+/** Devuelve el nodo del botón "Continuar" del footer (para inspeccionar `disabled`). */
+function continueButton(
+  renderer: TestRenderer.ReactTestRenderer,
+): TestRenderer.ReactTestInstance | undefined {
+  return renderer.root
+    .findAll((node) => typeof node.props?.label === 'string' && node.props.label === 'Continuar')
+    .find((node) => typeof node.props.onPress === 'function');
+}
+
+describe('PersonalDataScreen · Continuar unifica la fuente de verdad (driverExists)', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    mockSubmit.mockClear();
+    mockSubmitResult = { status: 'ok' };
+    mockDriverExistence = DriverExistence.NotFound;
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    act(() => {
+      useRegistrationStore.getState().reset();
+    });
+  });
+
+  afterEach(() => {
+    queryClient.clear();
+  });
+
+  it('(a) RESUME (driverExists): Continuar llama al submit con driverExists=true → navega (sin re-PATCH)', async () => {
+    mockDriverExistence = DriverExistence.Exists;
+    // Estado de RESUME con docs CAPTURADOS (fuente HONESTA del gating: imagen del DNI + licencia presentes).
+    // Lo que se testea es que `driverExists=true` (de useDriverExists) hace que el continue SALTE el PATCH —
+    // independiente de la captura. (Antes el botón se habilitaba con flags locales sin captura: ese era el bug.)
+    act(() => {
+      useRegistrationStore.getState().setPersonal({ dni: '70123456' });
+      useRegistrationStore.getState().setPendingDni(DNI_CAPTURE);
+      useRegistrationStore.getState().setPendingLicense({
+        file: {
+          uri: 'data:image/jpeg;base64,/9j/license',
+          mimeType: 'image/jpeg',
+          fileName: 'lic.jpg',
+          width: null,
+          height: null,
+          fileSize: null,
+        },
+        back: null,
+        documentNumber: 'Q12345678',
+        expiresAt: '2030-12-31',
+        extractedData: null,
+      });
+      // Lote 4 · el gating exige el CHECK (`sent`), no la captura: el envío EAGER de esta sesión dejó ambas
+      // caras enviadas → las dos cards en check habilitan Continuar.
+      useRegistrationStore.getState().setSendPhase('dni', 'front', 'sent');
+      useRegistrationStore.getState().setSendPhase('license', 'front', 'sent');
+    });
+
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        withProviders(
+          <PersonalDataScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
+      );
+    });
+
+    await act(async () => {
+      pressContinue(renderer);
+    });
+
+    expect(mockSubmit).toHaveBeenCalledTimes(1);
+    const params = mockSubmit.mock.calls[0]?.[0];
+    // La pantalla derivó `driverExists=true` del `DriverExistence.Exists` → el continue salta el PATCH.
+    expect(params?.driverExists).toBe(true);
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('(b) FRESCO (driver no existe): Continuar llama al submit con driverExists=false (PATCH crea el driver)', async () => {
+    mockDriverExistence = DriverExistence.NotFound;
+    // Alta fresca: el escaneo pobló el DNI y dejó la licencia capturada (pendiente) → gating habilitado.
+    act(() => {
+      useRegistrationStore.getState().setPersonal({
+        fullName: 'QUISPE MAMANI CARLOS',
+        dni: '70123456',
+        birthdate: '1990-03-15',
+      });
+      useRegistrationStore.getState().setPendingDni(DNI_CAPTURE);
+      useRegistrationStore.getState().setPendingLicense({
+        file: {
+          uri: 'data:image/jpeg;base64,/9j/license',
+          mimeType: 'image/jpeg',
+          fileName: 'lic.jpg',
+          width: null,
+          height: null,
+          fileSize: null,
+        },
+        back: null,
+        documentNumber: 'Q12345678',
+        expiresAt: '2030-12-31',
+        extractedData: null,
+      });
+    });
+
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        withProviders(
+          <PersonalDataScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
+      );
+    });
+
+    await act(async () => {
+      pressContinue(renderer);
+    });
+
+    // LOTE B (subida inmediata): además del Continuar explícito, el efecto EAGER dispara `submit` al montar
+    // (sube DNI/licencia apenas hay datos completos + captura). En alta fresca AMBAS llamadas derivan
+    // `driverExists=false` (PATCH idempotente crea el driver); verificamos ese invariante en TODAS las
+    // llamadas en vez del conteo exacto (que ahora incluye la eager). Reusan el MISMO submit testeado.
+    expect(mockSubmit).toHaveBeenCalled();
+    expect(mockSubmit.mock.calls.every((c) => c[0]?.driverExists === false)).toBe(true);
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
+
+  it('(d) Lote 4: docs CAPTURADOS pero sin check (`sent`) → Continuar deshabilitado', () => {
+    mockDriverExistence = DriverExistence.NotFound;
+    // Captura viva de ambos docs, pero la subida NO llegó a `sent` (recién capturado / subiendo / error):
+    // las cards no están en check → Continuar bloqueado. Antes la sola captura habilitaba el avance (bug).
+    act(() => {
+      useRegistrationStore.getState().setPersonal({ dni: '70123456' });
+      useRegistrationStore.getState().setPendingDni(DNI_CAPTURE);
+      useRegistrationStore.getState().setPendingLicense({
+        file: {
+          uri: 'data:image/jpeg;base64,/9j/license',
+          mimeType: 'image/jpeg',
+          fileName: 'lic.jpg',
+          width: null,
+          height: null,
+          fileSize: null,
+        },
+        back: null,
+        documentNumber: 'Q12345678',
+        expiresAt: '2030-12-31',
+        extractedData: null,
+      });
+    });
+
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        withProviders(
+          <PersonalDataScreen navigation={fakeNavigation()} route={{} as never} />,
+          queryClient,
+        ),
+      );
+    });
+
+    expect(continueButton(renderer)?.props.disabled).toBe(true);
+
+    act(() => {
+      renderer.unmount();
+    });
+  });
+});

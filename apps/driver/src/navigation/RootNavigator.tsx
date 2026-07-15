@@ -1,19 +1,21 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { driverTheme, useTheme } from '@veo/ui-kit';
+import { DriverTabBar } from './DriverTabBar';
+import { driverTheme } from '@veo/ui-kit';
 import type { MainTabParamList, RootStackParamList } from './types';
 import { useSessionStore } from '../core/session/sessionStore';
+import { useSessionClosedStore } from '../core/session/sessionClosedStore';
 import {
   LoginScreen,
   OnboardingScreen,
+  SessionClosedScreen,
   SplashScreen,
   useOnboardingStore,
 } from '../features/auth/presentation';
 import {
+  RegistrationGateRetryScreen,
   RejectedScreen,
   UnderReviewScreen,
   VehiclesScreen,
@@ -24,23 +26,39 @@ import { RegistrationNavigator } from './RegistrationNavigator';
 import {
   BiometricEnrollScreen,
   DashboardScreen,
+  LocationPermissionScreen,
+  ShiftBlockedScreen,
   ShiftStartScreen,
+  ShiftSummaryScreen,
 } from '../features/shift/presentation';
 import {
   TripActiveScreen,
+  TripCompleteScreen,
+  TripDetailScreen,
   TripHistoryScreen,
-  TripIncomingScreen,
 } from '../features/trips/presentation';
 import { BidsScreen } from '../features/bidding/presentation';
 import { EarningsScreen } from '../features/earnings/presentation';
-import { ProfileScreen } from '../features/profile/presentation';
+import { SettleDebtScreen } from '../features/debt/presentation';
+import { EditProfileScreen, ProfileScreen } from '../features/profile/presentation';
 import { DocumentsScreen } from '../features/documents/presentation';
 import { IncentivesScreen } from '../features/ops/presentation';
 import { SupportScreen } from '../features/support/presentation';
 import { ChatScreen } from '../features/chat/presentation';
-import { RealtimeManager } from '../features/realtime/presentation';
-import { PushManager } from '../features/notifications/presentation';
-import { IconAccount, IconEarnings, IconMap, IconTrips } from '../shared/presentation/icons';
+import {
+  CarpoolPublishScreen,
+  CarpoolScreen,
+  CarpoolTripBookingsScreen,
+} from '../features/carpool/presentation';
+import { OfflineOverlay, RealtimeManager } from '../features/realtime/presentation';
+import { NotificationsScreen, PushManager } from '../features/notifications/presentation';
+import {
+  TabGlyphAccount,
+  TabGlyphCarpool,
+  TabGlyphEarnings,
+  TabGlyphHome,
+  TabGlyphTrips,
+} from '@veo/ui-kit';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -55,41 +73,27 @@ const screenOptions = {
  * El acento activo es el cian del `driverTheme`; el inactivo, `inkSubtle`. Fondo `surface`.
  */
 function MainTabs(): React.JSX.Element {
-  const theme = useTheme();
   const { t } = useTranslation();
-  // El home-indicator (iPhone) y la barra de gestos (Android) viven en `insets.bottom`. Un `height`
-  // fijo en `tabBarStyle` PISA el inset que React Navigation añade solo, dejando el tab bar pegado al
-  // borde. Sumamos el inset al alto y al padding inferior: mantenemos el look compacto de 64px de
-  // CONTENIDO y reservamos la zona segura debajo (igual criterio que el footer de `SafeScreen`).
-  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       detachInactiveScreens={false}
+      tabBar={(props) => <DriverTabBar {...props} />}
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.inkSubtle,
-        tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.border,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          height: 64 + insets.bottom,
-          paddingTop: 8,
-          paddingBottom: 10 + insets.bottom,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         tabBarIcon: ({ color, focused }) => {
-          const size = 24;
-          const sw = focused ? 2.4 : 2;
+          // Glifos compartidos con el passenger (fill-on-active): misma identidad en ambas apps.
+          const size = 22;
           switch (route.name) {
             case 'Inicio':
-              return <IconMap size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphHome size={size} color={color} active={focused} />;
+            case 'Compartir':
+              return <TabGlyphCarpool size={size} color={color} active={focused} />;
             case 'Ganancias':
-              return <IconEarnings size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphEarnings size={size} color={color} active={focused} />;
             case 'Viajes':
-              return <IconTrips size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphTrips size={size} color={color} active={focused} />;
             case 'Cuenta':
-              return <IconAccount size={size} color={color} strokeWidth={sw} />;
+              return <TabGlyphAccount size={size} color={color} active={focused} />;
             default:
               return null;
           }
@@ -102,6 +106,11 @@ function MainTabs(): React.JSX.Element {
         name="Inicio"
         component={DashboardScreen}
         options={{ tabBarLabel: t('nav.home') }}
+      />
+      <Tab.Screen
+        name="Compartir"
+        component={CarpoolScreen}
+        options={{ tabBarLabel: t('nav.carpool') }}
       />
       <Tab.Screen
         name="Ganancias"
@@ -137,16 +146,24 @@ function MainTabs(): React.JSX.Element {
  */
 export const RootNavigator = (): React.JSX.Element => {
   const status = useSessionStore((s) => s.status);
+  // Cierre REMOTO de sesión (single-active-session / revocación): se muestra un aviso explícito antes de
+  // volver al login (frame C/Sesion-Cerrada), en vez de mandar a login en silencio.
+  const sessionClosedReason = useSessionClosedStore((s) => s.reason);
   const onboardingCompleted = useOnboardingStore((s) => s.completed);
   const registrationStatus = useRegistrationStore((s) => s.status);
   // Resuelve el estado del alta desde el backend tras autenticar (no parpadea hacia el wizard).
-  const { resolving } = useRegistrationGate();
+  const { resolving, needsRetry, retry } = useRegistrationGate();
 
   if (status === 'bootstrapping') {
     return <SplashScreen />;
   }
 
   if (status === 'unauthenticated') {
+    // Aviso de cierre remoto (superseded/revoked): pantalla terminal con "Volver a ingresar" que limpia
+    // la señal y deja pasar al login. Va ANTES del stack de login para no parpadear el login debajo.
+    if (sessionClosedReason) {
+      return <SessionClosedScreen />;
+    }
     return (
       <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
         {onboardingCompleted ? (
@@ -164,21 +181,45 @@ export const RootNavigator = (): React.JSX.Element => {
     return <SplashScreen />;
   }
 
-  // Conductor autenticado pero con el alta sin aprobar: wizard, revisión o rechazo.
-  if (registrationStatus === 'in_review') {
+  // El backend no respondió `GET /drivers/me` (error NO definitivo: red / 5xx) y nunca resolvió
+  // antes: pantalla de reintento. NO limpiamos la sesión (tokens válidos) ni mostramos un error de
+  // login confuso; ofrecemos recuperar el flujo con un reintento explícito. El 404 no llega acá
+  // (ese fuerza el wizard arriba, en el gate).
+  if (needsRetry) {
     return (
       <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
-        <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+        <Stack.Screen name="RegistrationGateRetry">
+          {() => <RegistrationGateRetryScreen onRetry={retry} />}
+        </Stack.Screen>
       </Stack.Navigator>
+    );
+  }
+
+  // Conductor autenticado pero con el alta sin aprobar: wizard, revisión o rechazo.
+  // En `in_review` y `rejected` el conductor YA está autenticado (userId/token válidos): montamos el
+  // `PushManager` igual que en la rama aprobada para que el push de aprobación/rechazo invalide el gate
+  // al instante y la pantalla conmute SIN esperar el sondeo de 60s. No se monta en `resolving`/
+  // `needsRetry`/`unauthenticated` (sesión aún no resuelta / no hay sesión).
+  if (registrationStatus === 'in_review') {
+    return (
+      <>
+        <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
+          <Stack.Screen name="UnderReview" component={UnderReviewScreen} />
+        </Stack.Navigator>
+        <PushManager />
+      </>
     );
   }
 
   // Alta RECHAZADA: pantalla propia con el motivo + corregir-y-reenviar (NO cae al wizard mudo).
   if (registrationStatus === 'rejected') {
     return (
-      <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
-        <Stack.Screen name="Rejected" component={RejectedScreen} />
-      </Stack.Navigator>
+      <>
+        <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'fade' }}>
+          <Stack.Screen name="Rejected" component={RejectedScreen} />
+        </Stack.Navigator>
+        <PushManager />
+      </>
     );
   }
 
@@ -195,20 +236,58 @@ export const RootNavigator = (): React.JSX.Element => {
       <Stack.Navigator initialRouteName="Main" screenOptions={screenOptions}>
         <Stack.Screen name="Main" component={MainTabs} />
         <Stack.Screen name="ShiftStart" component={ShiftStartScreen} />
+        {/* Gate de docs vencidos al iniciar turno (C/Turno-DocsVencidos). */}
+        <Stack.Screen name="ShiftBlocked" component={ShiftBlockedScreen} />
+        {/* Permiso de ubicación denegado al conectarse (C/Permiso-Ubicacion). */}
+        <Stack.Screen
+          name="LocationPermission"
+          component={LocationPermissionScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+        {/* Cierre de turno (resumen + ganancias del día). Terminal: sin gesto atrás — se sale con los CTA. */}
+        <Stack.Screen
+          name="ShiftSummary"
+          component={ShiftSummaryScreen}
+          options={{ gestureEnabled: false, animation: 'fade' }}
+        />
         <Stack.Screen name="BiometricEnroll" component={BiometricEnrollScreen} />
+        <Stack.Screen
+          name="EditProfile"
+          component={EditProfileScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
         <Stack.Screen name="Documents" component={DocumentsScreen} />
         <Stack.Screen name="Vehicles" component={VehiclesScreen} />
         <Stack.Screen name="Incentives" component={IncentivesScreen} />
-        <Stack.Screen name="Support" component={SupportScreen} />
+        {/* Saldar deuda de comisiones (ADR-022): se presenta sobre las tabs desde el banner de bloqueo
+            del dashboard y desde la fila "Debés a VEO" de Ganancias. */}
         <Stack.Screen
-          name="TripIncoming"
-          component={TripIncomingScreen}
-          options={{ gestureEnabled: false, animation: 'fade' }}
+          name="SettleDebt"
+          component={SettleDebtScreen}
+          options={{ animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen
+          name="Notifications"
+          component={NotificationsScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen name="Support" component={SupportScreen} />
         <Stack.Screen
           name="TripActive"
           component={TripActiveScreen}
           options={{ gestureEnabled: false }}
+        />
+        {/* Cierre del viaje (resumen + rating). Terminal: sin gesto atrás — se sale con "Listo". */}
+        <Stack.Screen
+          name="TripComplete"
+          component={TripCompleteScreen}
+          options={{ gestureEnabled: false, animation: 'fade' }}
+        />
+        {/* Detalle/recibo de un viaje del historial (se llega desde la fila del historial). */}
+        <Stack.Screen
+          name="TripDetail"
+          component={TripDetailScreen}
+          options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen
           name="Bids"
@@ -220,8 +299,20 @@ export const RootNavigator = (): React.JSX.Element => {
           component={ChatScreen}
           options={{ animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="CarpoolPublish"
+          component={CarpoolPublishScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="CarpoolTripBookings"
+          component={CarpoolTripBookingsScreen}
+          options={{ animation: 'slide_from_right' }}
+        />
       </Stack.Navigator>
       <RealtimeManager />
+      {/* Overlay global "Sin conexión" (C/SinConexion): por encima de todo el árbol de navegación. */}
+      <OfflineOverlay />
       <PushManager />
     </>
   );

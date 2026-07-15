@@ -1,9 +1,21 @@
 import {
+  arriveRoadName,
   formatManeuverDistance,
+  greatCircleMeters,
   isArrival,
   maneuverGlyph,
+  upcomingManeuver,
   type TripManeuver,
 } from '../value-objects/maneuver';
+import type { TripRouteStep } from '../entities';
+
+const step = (overrides: Partial<TripRouteStep>): TripRouteStep => ({
+  instruction: 'Inicia el recorrido',
+  distanceMeters: 7000,
+  maneuver: 'depart',
+  geometryPolyline: 'geom-0',
+  ...overrides,
+});
 
 describe('maneuver', () => {
   describe('maneuverGlyph', () => {
@@ -58,6 +70,27 @@ describe('maneuver', () => {
     });
   });
 
+  describe('arriveRoadName — vía del arrive del contrato (copy por fase del banner)', () => {
+    it('recupera la vía del sufijo " por " de la instrucción armada por el BFF', () => {
+      expect(arriveRoadName('Has llegado a tu destino por Av. Larco')).toBe('Av. Larco');
+    });
+
+    it('sin conector → null (instrucción sin vía)', () => {
+      expect(arriveRoadName('Has llegado a tu destino')).toBeNull();
+    });
+
+    it('conector con sufijo vacío → null', () => {
+      expect(arriveRoadName('Has llegado a tu destino por ')).toBeNull();
+      expect(arriveRoadName('Has llegado a tu destino por   ')).toBeNull();
+    });
+
+    it('la vía puede contener " por " (se corta en el PRIMER conector)', () => {
+      expect(arriveRoadName('Has llegado a tu destino por Paseo por la Costa')).toBe(
+        'Paseo por la Costa',
+      );
+    });
+  });
+
   describe('formatManeuverDistance', () => {
     it('muy cerca (< 10 m) → "Ahora"', () => {
       expect(formatManeuverDistance(0)).toBe('Ahora');
@@ -76,6 +109,63 @@ describe('maneuver', () => {
       expect(formatManeuverDistance(1000)).toBe('En 1.0 km');
       expect(formatManeuverDistance(1240)).toBe('En 1.2 km');
       expect(formatManeuverDistance(12500)).toBe('En 12.5 km');
+    });
+  });
+
+  describe('upcomingManeuver — banner con distancia VIVA', () => {
+    const DRIVER = { lat: -12.05, lon: -77.05 };
+    // ~1113 m al este del conductor (0.01° de longitud a esta latitud).
+    const MANEUVER_POINT = { lat: -12.05, lon: -77.0398 };
+    const decodeEnd = (geometry: string) => (geometry === 'geom-0' ? MANEUVER_POINT : null);
+
+    it('anuncia la maniobra de steps[1] con la distancia GPS→fin del paso actual', () => {
+      const steps = [
+        step({ maneuver: 'depart', geometryPolyline: 'geom-0', distanceMeters: 7000 }),
+        step({ maneuver: 'turn-left', instruction: 'Gira a la izquierda', geometryPolyline: 'geom-1' }),
+      ];
+      const result = upcomingManeuver(steps, DRIVER, decodeEnd);
+      expect(result?.step.maneuver).toBe('turn-left');
+      // Distancia VIVA (~1.1 km), NO el largo del tramo entero (7 km).
+      expect(result?.distanceMeters).toBeGreaterThan(1000);
+      expect(result?.distanceMeters).toBeLessThan(1250);
+    });
+
+    it('con UN solo paso (arrive retrimado) anuncia ese paso', () => {
+      const steps = [step({ maneuver: 'arrive', instruction: 'Has llegado', geometryPolyline: 'geom-0' })];
+      const result = upcomingManeuver(steps, DRIVER, decodeEnd);
+      expect(result?.step.maneuver).toBe('arrive');
+      expect(result?.distanceMeters).toBeLessThan(1250);
+    });
+
+    it('sin GPS degrada honesto a la distancia del contrato (largo del tramo actual)', () => {
+      const steps = [
+        step({ distanceMeters: 7000 }),
+        step({ maneuver: 'turn-right', instruction: 'Gira a la derecha' }),
+      ];
+      const result = upcomingManeuver(steps, null, decodeEnd);
+      expect(result?.step.maneuver).toBe('turn-right');
+      expect(result?.distanceMeters).toBe(7000);
+    });
+
+    it('sin geometría decodificable degrada a la distancia del contrato', () => {
+      const steps = [
+        step({ geometryPolyline: 'geom-rota', distanceMeters: 500 }),
+        step({ maneuver: 'turn-left' }),
+      ];
+      const result = upcomingManeuver(steps, DRIVER, decodeEnd);
+      expect(result?.distanceMeters).toBe(500);
+    });
+
+    it('sin pasos → null (el banner no se pinta)', () => {
+      expect(upcomingManeuver([], DRIVER, decodeEnd)).toBeNull();
+    });
+  });
+
+  describe('greatCircleMeters', () => {
+    it('distancia plausible en Lima (~1.1 km por 0.01° de longitud)', () => {
+      const d = greatCircleMeters({ lat: -12.05, lon: -77.05 }, { lat: -12.05, lon: -77.04 });
+      expect(d).toBeGreaterThan(1000);
+      expect(d).toBeLessThan(1150);
     });
   });
 });

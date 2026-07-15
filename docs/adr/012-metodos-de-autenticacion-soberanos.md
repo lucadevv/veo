@@ -60,6 +60,7 @@ APNs de Apple) desde un puerto, con cliente propio (`fcm-client.ts`, `apns-clien
 | **Teléfono + OTP**                    | ✅ Soberano                         | SMPP 3.4 directo al operador (`SmsSmppSender`). Riel: operador SMS.                                                                                                                                                                                                         | `SMPP_*`                                | **construido** (falta cablear live)            |
 | **Correo + contraseña**               | ✅ 100% soberano                    | SMTP propio (`EmailSmtpSender`, nodemailer) + hash **argon2id** (patrón `AdminUser`). Sin terceros.                                                                                                                                                                         | `SMTP_*`                                | a construir                                    |
 | **Google (OAuth2/OIDC)**              | ✅ Soberano (tras puerto)           | Implementamos el cliente OAuth y **verificamos el `id_token` contra el JWKS público de Google** (`jose`). Sin Auth0/Firebase. Riel: IdP de Google (= FCM).                                                                                                                  | `GOOGLE_CLIENT_ID/SECRET`               | a construir                                    |
+| **Sign in with Apple (pasajero iOS)** | ✅ Soberano (tras puerto)           | OIDC: verificamos el `id_token` contra el **JWKS público de Apple** (`jose`), mismo patrón que Google. **Solo pasajero en iOS** (App Store Review Guideline 4.8 — ver Enmienda 2026-06-21). El driver-bff NO lo expone. Riel: IdP de Apple (= APNs).                        | `APPLE_CLIENT_ID` + key Sign-in         | a construir (enmienda 2026-06-21)              |
 | **WhatsApp (entrega OTP, PRINCIPAL)** | ⚠️ **Excepción §0.7** (no soberano) | Canal **principal** de entrega del OTP (no es método de login): Meta Cloud API tras un puerto `WhatsAppSender`, **mismo trato que FCM/APNs**. Se manda por WhatsApp primero; **si falla → cae a SMS automático**. NO usar emuladores Evolution/OpenWA (violan ToS, banean). | `WHATSAPP_*` (Meta) + template aprobado | a construir (puerto; live necesita creds Meta) |
 | **SMS (entrega OTP, FALLBACK)**       | ✅ Soberano                         | Red de respaldo del OTP: SMPP 3.4 directo al operador (`SmsSmppSender`). Solo entra si WhatsApp no entrega.                                                                                                                                                                 | `SMPP_*` del operador                   | **construido** (falta cablear live)            |
 | ~~Facebook (OAuth2)~~                 | —                                   | **Fuera de scope** (a futuro). Su uso viene cayendo; se prioriza Google.                                                                                                                                                                                                    | —                                       | diferido                                       |
@@ -127,8 +128,10 @@ model AuthMethod {
 ## 4. Flujo soberano por método (resumen — detalle en tasks)
 
 - **Teléfono+OTP** (hecho): `request → SMPP → verify → JWT`. Falta `VEO_SMS_MODE=live` + creds del operador.
-- **Correo+contraseña**: `register(email,password)` → argon2id + email de verificación (token Redis TTL 24h) →
-  `verify-email` → `login` (argon2.verify) → JWT. + `forgot-password`/`reset` (token Redis TTL 1h). SMTP propio.
+- **Correo+contraseña**: `register(email,password)` → argon2id + email de verificación (**código OTP emailado,
+  Redis TTL 10min** — coherente con §8.5 "código OTP, no magic-link"; el "24h" del borrador era de la era
+  magic-link y se descartó: un código OTP de 6 dígitos válido 24h es brute-forceable) → `verify-email` →
+  `login` (argon2.verify) → JWT. + `forgot-password`/`reset` (token Redis TTL 1h). SMTP propio.
 - **Google**: app abre el IdP (Custom Tab/ASWebAuthenticationSession) → `code` por deep-link → backend
   `POST /auth/oauth/google/exchange` → verifica `id_token` (JWKS Google) → `AuthMethod{GOOGLE_OAUTH, sub, email}` →
   link-or-create → JWT.
@@ -208,7 +211,30 @@ Cada lote: puerto+sandbox primero (anda en dev sin secretos), luego adapter live
 
 ---
 
-_Decisión RATIFICADA: multi-método (Google + correo + teléfono) vía `puerto+sandbox+adapter` (§0.7). OTP por SMS
+## Enmienda 2026-06-21 — Sign in with Apple (pasajero iOS)
+
+> No reescribe la historia del ADR (§8 sigue ratificada como estaba el 2026-06-05). Esta enmienda **agrega** un
+> método al alcance, por una restricción de plataforma descubierta después.
+
+- **Qué se agrega:** **Sign in with Apple** como método de login del **pasajero en iOS**.
+- **Por qué (no es opcional):** **App Store Review Guideline 4.8** — si la app ofrece login con un servicio social de
+  terceros (en nuestro caso, **Google OAuth**), Apple **obliga** a ofrecer también Sign in with Apple como
+  alternativa equivalente. Sin esto, Apple rechaza la app en review. No es una preferencia de producto: es un gate
+  de publicación en la App Store.
+- **Alcance acotado:** **solo pasajero, solo iOS**. El **driver-bff NO lo expone**; el **conductor sigue
+  teléfono+OTP + Face ID** (su login no ofrece social de terceros, así que la 4.8 no aplica). En Android tampoco
+  aplica (no hay tienda de Apple).
+- **Soberanía:** Apple es un **IdP OIDC**, misma categoría §0.7 que Google (riel inevitable tras puerto). Verificamos
+  el `id_token` contra el **JWKS público de Apple** con `jose`, server-side — sin SaaS de auth. Mismo trato que
+  APNs en `PushSender`.
+- **Datos / Ley 29733:** Apple puede entregar email (real o relay `@privaterelay.appleid.com`) y nombre **solo en el
+  primer login** → persistir en ese momento; consentimiento explícito antes de crear el `User`, igual que Google.
+- **Account-linking:** un login Apple cuyo email ya existe verificado en otro `AuthMethod` se **vincula** al `User`
+  (no duplica), con las mismas reglas anti-takeover de §5. Nuevo valor de enum sugerido: `AuthMethodType.APPLE_OAUTH`.
+
+---
+
+_Decisión RATIFICADA: multi-método (Google + Apple [iOS, enmienda 2026-06-21] + correo + teléfono) vía `puerto+sandbox+adapter` (§0.7). OTP por SMS
 (soberano) + WhatsApp (única excepción §0.7, acotada a entrega, tras puerto). Facebook y llamada diferidos. La UI ya
 está (Lote A); falta el backend por método + la tabla `AuthMethod`. Próximo: tasks → apply, lote por lote, empezando
 por `AuthMethod` + correo (100% soberano, infra SMTP lista)._

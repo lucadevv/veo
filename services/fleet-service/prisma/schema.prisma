@@ -23,12 +23,31 @@ enum FleetDocumentType {
   BACKGROUND_CHECK
   ITV
 
+  // Foto del vehículo (Ola 1): foto del auto capturada en el alta del conductor. Sin número ni
+  // vencimiento. Espejo del FleetDocumentType de @veo/shared-types. Requerida para aprobar (admin-bff).
+  VEHICLE_PHOTO
+
+  // DNI = documento de identidad del conductor, 2 caras (FRONT+BACK vía DocumentImage del 3A). Espejo del
+  // FleetDocumentType de @veo/shared-types. La cara FRONT la usará el face-match (sub-lote 3C).
+  DNI
+
   // B5-3.2 · certificaciones de operador de las verticales especiales (conductor). Misma maquinaria
   // FleetDocument (vencimiento + review). NO críticas: su vencimiento NO suspende, solo deshabilita la
   // vertical (que además está oculta). Espejo del FleetDocumentType de @veo/shared-types.
   AMBULANCE_OPERATOR
   TOW_OPERATOR
   MECHANIC_CERT
+
+  @@schema("fleet")
+}
+
+/// Cara/lado de una imagen de documento (sub-lote 3A · múltiples imágenes por documento).
+/// SINGLE = documento de una sola cara/foto (licencia, SOAT, tarjeta, foto de vehículo).
+/// FRONT/BACK = anverso/reverso (DNI). Tipado fuerte: NO se compara contra strings sueltos.
+enum DocumentSide {
+  FRONT
+  BACK
+  SINGLE
 
   @@schema("fleet")
 }
@@ -83,6 +102,20 @@ enum VehicleModelStatus {
   @@schema("fleet")
 }
 
+/// LOTE 3 · ORIGEN del alta de un modelo del catálogo (de dónde vino la fila). Tipado fuerte (sin string
+/// mágico). SEED = curado/seedeado por el operador; DRIVER_REQUEST = el conductor lo solicitó eligiendo
+/// "mi modelo no está" en el onboarding; OCR = nació de un alta self-service a TEXTO LIBRE (marca/modelo del
+/// OCR) que NO matcheó ningún aprobado → el fuzzy-match lo encoló como PENDING_REVIEW (así el catálogo crece
+/// de registros reales, pero el gate del operador garantiza calidad). El default coherente para filas viejas
+/// es DRIVER_REQUEST (la migración re-marca los seeds históricos a SEED).
+enum VehicleModelSource {
+  SEED
+  DRIVER_REQUEST
+  OCR
+
+  @@schema("fleet")
+}
+
 /// Vehículo de la flota (BR-D04: año >= 2017; SOAT e ITV vigentes; inspección trimestral).
 model Vehicle {
   id                 String           @id @db.Uuid
@@ -92,7 +125,13 @@ model Vehicle {
   year               Int
   color              String
   /// Ola 2B · tier moto-taxi: tipo de vehículo. Default CAR (compatibilidad con la flota existente).
+  /// LOTE 1: el `vehicleType` lo DERIVA el servidor de `mtcCategory` (la tarjeta es la fuente de verdad);
+  /// el del body es solo un HINT/fallback cuando la categoría no es derivable (ver VehiclesService).
   vehicleType        VehicleType      @default(CAR) @map("vehicle_type")
+  /// LOTE 1 · categoría MTC CRUDA leída de la tarjeta de propiedad / TIVe (`M1`, `L3`, `N1`, `M1SC`…). Es la
+  /// FUENTE DE VERDAD del tipo: `vehicleType` se deriva de acá (M1→CAR, L*→MOTO; resto→hint del body). Se
+  /// persiste cruda para auditoría/re-derivación si el enum se amplía. Null = alta sin categoría (manual/legacy).
+  mtcCategory        String?          @map("mtc_category")
   fleetId            String?          @map("fleet_id")
   /// Conductor que registró el vehículo en el onboarding self-service.
   /// IMPORTANTE: `driver_id` es el **User.id** de identity-service (el `userId` del token propagado),
@@ -144,16 +183,26 @@ model VehicleModelSpec {
   /// VehicleSegment (@veo/shared-types): ECONOMY|MID|PREMIUM. NULL en una solicitud PENDING (el operador
   /// lo completa al aprobar). Invariante (B5-2.c): status=APPROVED ⇒ no-null (forzado en la transición).
   segment      String?
-  /// EnergySource (@veo/shared-types): GASOLINE_95|DIESEL|ELECTRIC|GNV|GASOLINE_84. NULL en PENDING.
+  /// EnergySource (@veo/shared-types): GASOLINE_90|DIESEL|ELECTRIC. NULL en PENDING.
   energySource String?            @map("energy_source")
   /// Rendimiento en km por unidad de energía (km/L o km/kWh). Lo pone el operador al aprobar. NULL en PENDING.
   efficiency   Int?
   status       VehicleModelStatus @default(PENDING_REVIEW)
+  /// LOTE 3 · ORIGEN del alta (SEED|DRIVER_REQUEST|OCR). Distingue las altas que nacieron de un OCR a texto
+  /// libre (fuzzy sin match → encolado) de las solicitadas por el conductor o seedeadas. Default coherente
+  /// para filas existentes: DRIVER_REQUEST (la migración re-marca los seeds históricos a SEED).
+  source       VehicleModelSource @default(DRIVER_REQUEST)
   /// User.id (identity) del conductor que solicitó el alta (null para los seedeados/curados por operador).
   requestedBy  String?            @map("requested_by") @db.Uuid
   verifiedBy   String?            @map("verified_by") @db.Uuid
   createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  /// LOTE 3 · columnas NORMALIZADAS (uppercase + trim + colapso de espacios + sin tildes) y sus índices GIN
+  /// trigram (pg_trgm) viven SOLO en la migración raw (20260620140000_fleet_vehicle_model_spec_fuzzy_match):
+  /// son `GENERATED ALWAYS ... STORED` (auto-mantenidas por Postgres) y el fuzzy-match las lee por $queryRaw,
+  /// no por el client. No se declaran acá porque Prisma no modela generated-stored columns declarativamente;
+  /// `prisma migrate diff` no las toca (la columna física existe, fuera del modelo) — invariante a vigilar.
 
   /// Un modelo es único por make+model+añoDesde (evita duplicados al curar/solicitar).
   @@unique([make, model, yearFrom])
@@ -171,18 +220,64 @@ model FleetDocument {
   documentNumber  String              @map("document_number")
   issuedAt        DateTime?           @map("issued_at") @db.Timestamptz
   expiresAt       DateTime?           @map("expires_at") @db.Timestamptz
+  /// DEPRECADO (sub-lote 3A): el archivo singular migró a `images` (DocumentImage, 1-a-N). Se conserva
+  /// por backward-compat (NO se borra en esta migración): el código nuevo lee/escribe `images`; el legacy
+  /// que aún toque `fileS3Key` sigue andando (espejo de la primera imagen al crear). Eliminar en un lote futuro.
   fileS3Key       String?             @map("file_s3_key")
   status          FleetDocumentStatus @default(PENDING_REVIEW)
   /// Último hito de alerta (en días) ya emitido para no duplicar (30/15/7/1). BR-I04.
   lastAlertedDays Int?                @map("last_alerted_days")
   verifiedAt      DateTime?           @map("verified_at") @db.Timestamptz
   verifiedBy      String?             @map("verified_by") @db.Uuid
+  /// Motivo del rechazo que escribe el operador (M5): el conductor lo VE para saber qué corregir.
+  /// null si no está rechazado o no se dio motivo (degradación honesta, nunca un motivo falso).
+  rejectionReason String?             @map("rejection_reason")
+  /// Onboarding sin-formularios (Lote 0): data extraída por OCR on-device del documento (DNI/SOAT/
+  /// tarjeta/licencia). Contrato tipado `ExtractedDocumentData` de @veo/shared-types (unión discriminada
+  /// por `type`). NULLABLE: un documento registrado SIN OCR (camino legacy) sigue siendo válido — la data
+  /// es una conveniencia de pre-llenado, NO dato crítico (el operador la re-verifica al aprobar).
+  extractedData   Json?               @map("extracted_data")
+  /// Motor de OCR que produjo `extractedData` (ej. "mlkit-android"). Trazabilidad. Null si no hubo OCR.
+  ocrEngine       String?             @map("ocr_engine")
+  /// Momento en que el cliente extrajo la data por OCR. Null si no hubo OCR.
+  ocrAt           DateTime?           @map("ocr_at") @db.Timestamptz
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
+  /// Imágenes del documento (sub-lote 3A · 1-a-N). DNI → FRONT+BACK; foto de vehículo → N SINGLE; el
+  /// resto (licencia/SOAT/…) → 1 SINGLE. onDelete Cascade: borrar el documento borra sus imágenes.
+  images          DocumentImage[]
+
   @@index([ownerType, ownerId])
-  @@index([status, expiresAt])
+  /// Cubre el orderBy compuesto de listExpirations `(expiresAt, id)` con `status IN (...)`: el `id` final
+  /// evita el Sort del keyset. Por leftmost-prefix también cubre los queries que filtran solo (status, expiresAt).
+  @@index([status, expiresAt, id])
+  /// TOCTOU-guard: existe un índice PARCIAL UNIQUE `(owner_type, owner_id, type) WHERE status IN
+  /// (PENDING_REVIEW, VALID, EXPIRING_SOON)` que Prisma NO puede expresar acá (no soporta índices parciales).
+  /// Lo crea la migración 20260712120000_fleet_document_active_unique por SQL crudo y cierra la carrera de dos
+  /// altas concurrentes (ver documents.service.ts · resolveActiveUpsert). NO borrar en un `migrate dev`.
   @@map("fleet_documents")
+  @@schema("fleet")
+}
+
+/// Imagen de un documento de flota (sub-lote 3A · múltiples imágenes por documento). Habilita DNI
+/// anverso+reverso (FRONT+BACK) y N fotos de vehículo (SINGLE con order). Cada fila guarda UNA clave S3
+/// driver/vehicle-scoped (la frontera de seguridad sigue siendo el prefijo de la key). El conjunto se
+/// ordena por `order` (estable). Reemplaza el `FleetDocument.fileS3Key` singular (deprecado).
+model DocumentImage {
+  id         String        @id @db.Uuid
+  documentId String        @map("document_id") @db.Uuid
+  document   FleetDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  /// Clave del binario en S3 (gestionado por media-service). Driver/vehicle-scoped (frontera de seguridad).
+  s3Key      String        @map("s3_key")
+  /// Cara del documento (FRONT|BACK|SINGLE). Tipado fuerte — sin string suelto.
+  side       DocumentSide
+  /// Orden estable dentro del documento (0-based). DNI: FRONT=0, BACK=1; foto de vehículo: 0..N-1.
+  order      Int           @default(0)
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([documentId, order])
+  @@map("document_images")
   @@schema("fleet")
 }
 
@@ -195,24 +290,55 @@ model Inspection {
   inspectedAt DateTime @map("inspected_at") @db.Timestamptz
   passed      Boolean
   notes       String?
+  // Centro de Inspección Técnica Vehicular (CITV) donde se realizó. Texto libre, opcional: las inspecciones
+  // auto-registradas al aprobar el documento ITV no lo traen (el doc no lo captura hoy); el alta manual sí.
+  center      String?  @map("center")
   nextDueAt   DateTime @map("next_due_at") @db.Timestamptz
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  @@index([vehicleId, inspectedAt])
+  // IDEMPOTENCIA (FOUNDATION §0.4): natural key que colapsa un re-POST (doble click / retry de red) a una
+  // sola fila. Una inspección del MISMO vehículo, en el MISMO instante, por el MISMO inspector ES la misma.
+  // Dos inspecciones REALES distintas difieren en `inspectedAt` → no colisionan. El prefijo
+  // [vehicleId, inspectedAt] sirve además el `orderBy inspectedAt desc` del gate de ITV, así que el índice
+  // standalone previo es redundante y se reemplaza por este UNIQUE.
+  @@unique([vehicleId, inspectedAt, inspectorId])
   @@map("inspections")
   @@schema("fleet")
 }
 
 /// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
+/// SEAM catálogo↔operabilidad (ADR 013) · estado DELTA del consumidor de `catalog.updated`. Singleton
+/// (`id = 'GLOBAL'`) que recuerda la ÚLTIMA versión del catálogo procesada y el set de CLASES de vehículo
+/// operables en ESE momento. El consumidor computa el delta (nuevo set del payload − este set previo) para
+/// suspender/reincorporar SOLO a los conductores de la clase que EFECTIVAMENTE cambió — un `catalog.updated`
+/// que no altera ninguna clase (p.ej. un ajuste de precio) NO toca holds. `version` MONOTÓNICA: un evento con
+/// version ≤ a la guardada se descarta (idempotencia + tolerancia al reordenamiento at-least-once). Sin fila →
+/// baseline = las clases operables por DEFAULT de código (lo que el sistema shippeó): un cold-start reconcilia
+/// contra el default estático, no contra "nada". `operableClasses` guarda los valores del enum VehicleClass (wire).
+model CatalogOperableState {
+  id              String   @id
+  /// Última versión del catálogo (trip-service) aplicada por este consumidor. Monotónica.
+  version         Int
+  /// Clases de vehículo operables (valores de VehicleClass: 'CAR'/'MOTO') en la versión aplicada.
+  operableClasses String[] @map("operable_classes")
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("catalog_operable_state")
+  @@schema("fleet")
+}
+
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
 
-  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
   @@schema("fleet")
 }

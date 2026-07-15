@@ -15,8 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { isUniqueViolation } from '@veo/database';
 import { ConflictError, NotFoundError, ValidationError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
-import { Prisma } from '../generated/prisma';
+import { ReferralsRepository } from './referrals.repository';
 import type { Env } from '../config/env.schema';
 import { generateReferralCode, normalizeReferralCode } from './referral-code';
 
@@ -38,7 +37,7 @@ export class ReferralsService {
   private readonly rewardCents: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: ReferralsRepository,
     config: ConfigService<Env, true>,
   ) {
     this.rewardCents = config.getOrThrow<number>('REFERRAL_REWARD_CENTS');
@@ -48,11 +47,8 @@ export class ReferralsService {
   async summary(userId: string): Promise<ReferralSummary> {
     const code = await this.ensureCode(userId);
     const [referredCount, user] = await Promise.all([
-      this.prisma.read.referral.count({ where: { referrerUserId: userId } }),
-      this.prisma.read.user.findUnique({
-        where: { id: userId },
-        select: { referralRewardCents: true },
-      }),
+      this.repo.countReferralsByReferrer(userId),
+      this.repo.findUserRewardCents(userId),
     ]);
     return {
       code,
@@ -63,10 +59,7 @@ export class ReferralsService {
 
   /** Devuelve el referralCode del usuario, generándolo (único) si aún no tiene uno. */
   async ensureCode(userId: string): Promise<string> {
-    const user = await this.prisma.read.user.findUnique({
-      where: { id: userId },
-      select: { referralCode: true, deletedAt: true },
-    });
+    const user = await this.repo.findUserReferralCodeState(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     if (user.referralCode) return user.referralCode;
 
@@ -87,19 +80,12 @@ export class ReferralsService {
   private async tryAssignCode(userId: string): Promise<string | null> {
     const candidate = generateReferralCode();
     try {
-      await this.prisma.write.user.update({
-        where: { id: userId },
-        data: { referralCode: candidate },
-        select: { id: true },
-      });
+      await this.repo.assignReferralCode(userId, candidate);
       return candidate;
     } catch (err) {
       if (isUniqueViolation(err, 'referralCode')) {
         // Colisión: si otro proceso lo fijó en paralelo, devolvemos ESE; si no, null → el caller reintenta.
-        const fresh = await this.prisma.read.user.findUnique({
-          where: { id: userId },
-          select: { referralCode: true },
-        });
+        const fresh = await this.repo.findUserReferralCode(userId);
         return fresh?.referralCode ?? null;
       }
       throw err;
@@ -115,48 +101,38 @@ export class ReferralsService {
    */
   async applyReferral(newUserId: string, rawCode: string): Promise<ReferralSummary> {
     const code = normalizeReferralCode(rawCode);
-    const referrer = await this.prisma.read.user.findUnique({
-      where: { referralCode: code },
-      select: { id: true, deletedAt: true },
-    });
+    const referrer = await this.repo.findReferrerByCode(code);
     if (!referrer || referrer.deletedAt)
       throw new NotFoundError('Código de referido inválido', { code });
     if (referrer.id === newUserId) {
       throw new ValidationError('No puedes usar tu propio código de referido');
     }
 
-    const existing = await this.prisma.read.referral.findUnique({
-      where: { referredUserId: newUserId },
-    });
+    const existing = await this.repo.findReferralByReferred(newUserId);
     if (existing) throw new ConflictError('Este usuario ya fue referido');
 
     try {
-      await this.prisma.write.$transaction(async (tx) => {
-        await tx.referral.create({
-          data: {
-            referrerUserId: referrer.id,
-            referredUserId: newUserId,
-            code,
-            status: 'PENDING',
-          },
+      await this.repo.runInTransaction(async (tx) => {
+        await this.repo.createReferral(tx, {
+          referrerUserId: referrer.id,
+          referredUserId: newUserId,
+          code,
+          status: 'PENDING',
         });
-        const envelope = createEnvelope({
-          eventType: 'user.referred',
-          producer: 'identity-service',
-          payload: {
-            referrerUserId: referrer.id,
-            referredUserId: newUserId,
-            code,
-            at: new Date().toISOString(),
-          },
-        });
-        await tx.outboxEvent.create({
-          data: {
-            aggregateId: referrer.id,
-            eventType: envelope.eventType,
-            envelope: envelope as unknown as Prisma.InputJsonValue,
-          },
-        });
+        await this.repo.enqueueOutbox(
+          tx,
+          createEnvelope({
+            eventType: 'user.referred',
+            producer: 'identity-service',
+            payload: {
+              referrerUserId: referrer.id,
+              referredUserId: newUserId,
+              code,
+              at: new Date().toISOString(),
+            },
+          }),
+          referrer.id,
+        );
       });
     } catch (err) {
       if (isUniqueViolation(err, 'referredUserId')) {
@@ -175,42 +151,32 @@ export class ReferralsService {
    * Lo invoca el consumidor de `trip.completed` con el passengerId del viaje.
    */
   async rewardReferralForTrip(referredUserId: string, tripId: string): Promise<void> {
-    const referral = await this.prisma.read.referral.findUnique({
-      where: { referredUserId },
-    });
+    const referral = await this.repo.findReferralByReferred(referredUserId);
     if (!referral || referral.status === 'REWARDED') return;
 
-    await this.prisma.write.$transaction(async (tx) => {
-      // Reclamo idempotente: solo el primer trip.completed que encuentre PENDING gana el reward.
-      const claimed = await tx.referral.updateMany({
-        where: { id: referral.id, status: 'PENDING' },
-        data: { status: 'REWARDED', rewardCents: this.rewardCents, rewardedAt: new Date() },
-      });
+    await this.repo.runInTransaction(async (tx) => {
+      // Reclamo idempotente: solo el primer trip.completed que encuentre PENDING gana el reward (CAS
+      // `status=PENDING` HARDCODEADO en el repo). Acá aportamos solo el monto computado.
+      const claimed = await this.repo.casClaimReferralReward(tx, referral.id, this.rewardCents);
       if (claimed.count === 0) return; // otro proceso ya lo otorgó
 
-      await tx.user.update({
-        where: { id: referral.referrerUserId },
-        data: { referralRewardCents: { increment: this.rewardCents } },
-      });
+      await this.repo.incrementUserReward(tx, referral.referrerUserId, this.rewardCents);
 
-      const envelope = createEnvelope({
-        eventType: 'referral.rewarded',
-        producer: 'identity-service',
-        payload: {
-          referrerUserId: referral.referrerUserId,
-          referredUserId,
-          rewardCents: this.rewardCents,
-          tripId,
-          at: new Date().toISOString(),
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: referral.referrerUserId,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await this.repo.enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'referral.rewarded',
+          producer: 'identity-service',
+          payload: {
+            referrerUserId: referral.referrerUserId,
+            referredUserId,
+            rewardCents: this.rewardCents,
+            tripId,
+            at: new Date().toISOString(),
+          },
+        }),
+        referral.referrerUserId,
+      );
     });
     this.logger.log(
       `Recompensa de referido otorgada a ${referral.referrerUserId} por viaje ${tripId}`,

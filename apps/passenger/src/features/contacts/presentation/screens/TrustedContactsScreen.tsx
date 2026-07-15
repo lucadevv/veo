@@ -21,6 +21,7 @@ import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
+import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
 import {ContactValidationError} from '../../domain/usecases';
 import {MAX_TRUSTED_CONTACTS, type TrustedContact} from '../../domain/entities';
 import {ContactLeadCircle} from '../components/ContactLeadCircle';
@@ -125,12 +126,11 @@ export function TrustedContactsScreen(): React.JSX.Element {
           }}
         />
       }>
-      <Text
-        variant="callout"
-        color="inkMuted"
-        style={{marginBottom: theme.spacing.lg}}>
-        {t('contacts.subtitle')}
-      </Text>
+      {/* Header in-body — sin subtítulo descriptivo: el límite lo surface el banner `atMax` + el botón
+          deshabilitado, y el empty state guía; el propósito ya viene del hub Seguridad. */}
+      <View style={{marginBottom: theme.spacing.lg}}>
+        <ScreenHeader title={t('screens.trustedContacts')} />
+      </View>
 
       {atMax ? (
         <Banner
@@ -204,6 +204,26 @@ export function TrustedContactsScreen(): React.JSX.Element {
                   onPress={() => setRemoveTarget(contact)}
                 />
               </View>
+              {/* Feedback del reenvío SOLO en la card del contacto reenviado (mutation compartida →
+                  la discriminamos por `variables` = id). Antes el toque quedaba mudo (éxito y error). */}
+              {resendMutation.variables === contact.id &&
+              !resendMutation.isPending &&
+              resendMutation.isSuccess ? (
+                <Banner
+                  tone="success"
+                  title={t('contacts.resent')}
+                  style={{marginTop: theme.spacing.sm}}
+                />
+              ) : null}
+              {resendMutation.variables === contact.id &&
+              !resendMutation.isPending &&
+              resendMutation.isError ? (
+                <Banner
+                  tone="danger"
+                  title={t('contacts.resendError')}
+                  style={{marginTop: theme.spacing.sm}}
+                />
+              ) : null}
             </Card>
           ))}
         </ScrollView>

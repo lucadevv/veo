@@ -12,9 +12,14 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
   Roles,
+  Audiences,
   CurrentUser,
   InternalIdentityGuard,
+  AudienceGuard,
   RolesGuard,
+  RequireStepUpMfa,
+  StepUpMfaGuard,
+  InternalAudience,
   type AuthenticatedUser,
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
@@ -24,13 +29,34 @@ import {
   PayoutsService,
   previousWeek,
   type PayoutPage,
+  type PayoutDetail,
+  type PayoutStats,
+  type PayoutTripsResult,
+  type PayoutDisburseSummary,
   type ReleaseHeldPayoutsResult,
 } from './payouts.service';
-import { RunPayoutsDto, ListPayoutsQueryDto, ListAllPayoutsQueryDto } from './dto/payouts.dto';
+import type { Payout } from '../generated/prisma';
+import {
+  RunPayoutsDto,
+  ListPayoutsQueryDto,
+  ListAllPayoutsQueryDto,
+  ExportPayoutsQueryDto,
+  EXPORT_STATUS_ALL,
+} from './dto/payouts.dto';
+
+// Riel del conductor/operador (NO service-rail · mínimo privilegio ADR-014 §5.5): declara explícito el set
+// previo a F3a para que el AudienceGuard rechace fail-closed a un service-rail (la membresía global ahora
+// admite service-rail solo por charge/debt/GetPayment).
+const PASSENGER_RAILS = [
+  InternalAudience.PUBLIC_RAIL,
+  InternalAudience.DRIVER_RAIL,
+  InternalAudience.ADMIN_RAIL,
+] as const;
 
 @ApiTags('payouts')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(...PASSENGER_RAILS)
 @Controller('payouts')
 export class PayoutsController {
   constructor(private readonly payouts: PayoutsService) {}
@@ -57,31 +83,123 @@ export class PayoutsController {
     return this.payouts.listAll({ status: query.status, cursor: query.cursor, limit: query.limit });
   }
 
-  // ── Disparo manual (BR-P05): rol FINANCE. Step-up MFA si el total supera S/5000 (validado en el servicio). ──
+  // ── KPIs agregados de payouts (stat cards del panel · FINANCE/ADMIN). Ruta ESTÁTICA `stats` declarada ANTES de
+  // la paramétrica `:id` para que `:id` no capture "stats". MISMO gate que `all` (RBAC finanzas/admin, no por-dueño).
+  // Lectura de agregado (sin step-up, sin PII de persona): solo conteos y un total. ──
   @UseGuards(RolesGuard)
   @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get('stats')
+  @ApiOperation({
+    summary: 'KPIs de payouts: total liquidado + conteos por estado — FINANCE/ADMIN',
+  })
+  stats(): Promise<PayoutStats> {
+    return this.payouts.getStats();
+  }
+
+  // ── Export del SET COMPLETO del filtro (sin paginar) para el CSV server-side (FINANCE/ADMIN). Ruta ESTÁTICA
+  // `export` ANTES de la paramétrica `:id` (que no capture "export"). Devuelve las filas Payout crudas: el CSV lo
+  // arma el admin-bff (resuelve nombre gateado por PII, formatea a soles, audita). `status=ALL`|omitido = todo. ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get('export')
+  @ApiOperation({
+    summary: 'Todas las filas del filtro (sin paginar) para el export CSV — FINANCE/ADMIN',
+  })
+  exportAll(@Query() query: ExportPayoutsQueryDto): Promise<Payout[]> {
+    const status = !query.status || query.status === EXPORT_STATUS_ALL ? undefined : query.status;
+    return this.payouts.listAllForExport(status);
+  }
+
+  // ── Detalle de UN payout con breakdown de auditoría (FINANCE/ADMIN). Segmento `:id` DESPUÉS de `all`/`stats`
+  // (estáticos) para que la paramétrica no los capture. Lectura (sin step-up): el desglose es de los montos del conductor. ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get(':id')
+  @ApiOperation({
+    summary:
+      'Detalle de un payout con breakdown (deuda CASH y credit-back neteados por FK) — FINANCE/ADMIN',
+  })
+  getOne(@Param('id', ParseUUIDPipe) id: string): Promise<PayoutDetail> {
+    return this.payouts.getPayout(id);
+  }
+
+  // ── "Viajes incluidos" del payout (FINANCE/ADMIN): reconstrucción por período de los Payment del conductor
+  // (el payout no persiste sus líneas). Lista capada + totalCount para el "+N más". Lectura de agregado del
+  // propio conductor (sin step-up, mismo gate que el detalle). Ruta `:id/trips` (2 segmentos) no colisiona con `:id`. ──
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Get(':id/trips')
+  @ApiOperation({
+    summary: 'Viajes incluidos en un payout (reconstrucción por período) — FINANCE/ADMIN',
+  })
+  getTrips(@Param('id', ParseUUIDPipe) id: string): Promise<PayoutTripsResult> {
+    return this.payouts.getPayoutTrips(id);
+  }
+
+  // ── Disparo manual (BR-P05): mutación de PLATA → finance:payout es EXCLUSIVO de FINANCE (VEO_SPEC_ADMIN
+  // L98/L246: "ni ADMIN ni SUPERADMIN lo ven; el servidor los negaría"). El servidor es la última línea:
+  // aunque el admin-bff ya restringe a FINANCE en su borde, este servicio NO confía en el caller y exige
+  // FINANCE por sí mismo (defensa en profundidad, mínimo privilegio). Step-up MFA en DOS capas: el guard de
+  // BORDE @RequireStepUpMfa rechaza ANTES de entrar al service (en entornos hardened); el service vuelve a
+  // exigir step-up FRESCO cuando el total supera S/5000 (BR-S07) — el borde es por-acción, el service es
+  // por-monto. Ninguna sustituye a la otra. ──
+  @UseGuards(RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
   @Post('run')
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Correr la liquidación de payouts (FINANCE). >S/5000 requiere step-up MFA',
+    summary:
+      'Disparar la liquidación del período (EXCLUSIVO FINANCE): agrega los PENDING faltantes y DESEMBOLSA (PENDING→PROCESSING+disburse). Step-up MFA; >S/5000 re-valida en el servicio',
   })
-  run(@Body() dto: RunPayoutsDto, @CurrentUser() user: AuthenticatedUser) {
+  async run(
+    @Body() dto: RunPayoutsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ periodStart: string; periodEnd: string } & PayoutDisburseSummary> {
     const fallback = previousWeek(new Date());
     const start = dto.periodStart ? new Date(dto.periodStart) : fallback.start;
     const end = dto.periodEnd ? new Date(dto.periodEnd) : fallback.end;
-    return this.payouts.runPayouts(start, end, user);
+    // ADR-015 §5 `POST /payouts/run`: el operador dispara la liquidación = AGREGAR (idempotente, crea los
+    // PENDING que el cron aún no creó) + DESEMBOLSAR (PENDING→PROCESSING+disburse). El cron solo agrega; el
+    // acto de mover plata es siempre humano + auditado + con step-up MFA. El MFA por-monto se valida en el
+    // servicio sobre el total a desembolsar (BR-S07), no sobre el total agregado.
+    await this.payouts.runPayouts(start, end, user);
+    const summary = await this.payouts.disbursePendingForPeriod(start, end, user);
+    return { periodStart: start.toISOString(), periodEnd: end.toISOString(), ...summary };
+  }
+
+  // ── Reintento de un payout FALLIDO (ADR-015 §5 `POST /payouts/:id/retry`): FAILED→PROCESSING, idempotente
+  // por la MISMA dedupKey (el riel no duplica). Mutación de PLATA: EXCLUSIVO FINANCE + step-up MFA (borde +
+  // re-validación por-monto en el servicio). ──
+  @UseGuards(RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
+  @Post(':id/retry')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Reintentar un payout FALLIDO (FAILED→PROCESSING) — EXCLUSIVO FINANCE. Idempotente por dedupKey (el riel no duplica)',
+  })
+  retry(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PayoutDisburseSummary> {
+    return this.payouts.retryPayout(id, user);
   }
 
   // ── Camino de VUELTA de driver.flagged (S4): el review del conductor se resolvió → liberar sus
   // payouts HELD (HELD→PROCESSED + payout.processed por outbox) y levantar la retención (srem).
-  // Mutación de PLATA: mismos roles que /run; >S/5000 exige step-up MFA (validado en el servicio). ──
-  @UseGuards(RolesGuard)
-  @Roles(AdminRole.FINANCE, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  // Mutación de PLATA: EXCLUSIVO de FINANCE igual que /run (VEO_SPEC_ADMIN L102/L254 — ni ADMIN ni
+  // SUPERADMIN). Step-up MFA en el borde (@RequireStepUpMfa) + re-validación por-monto >S/5000 en el
+  // servicio (BR-S07). ──
+  @UseGuards(RolesGuard, StepUpMfaGuard)
+  @Roles(AdminRole.FINANCE)
+  @RequireStepUpMfa()
   @Post('drivers/:driverId/release')
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Libera los payouts HELD de un conductor y levanta su retención (review resuelto) — FINANCE/ADMIN. Idempotente',
+      'Libera los payouts HELD de un conductor y levanta su retención (review resuelto) — EXCLUSIVO FINANCE. Idempotente',
   })
   release(
     @Param('driverId', ParseUUIDPipe) driverId: string,

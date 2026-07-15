@@ -2,6 +2,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
 #import <UIKit/UIKit.h>
+#import "VeoBiometricCameraController.h"
 
 /**
  * Módulo nativo de captura biométrica (frame-grabber REAL) sobre AVFoundation.
@@ -18,6 +19,9 @@
   AVCaptureSession *_session;
   dispatch_queue_t _sampleQueue;
   CIContext *_ciContext;
+  // iOS 17+: provee el ángulo de captura del sensor para orientar el buffer (coherente con Path A).
+  // Tipado `id` para que el ivar sea seguro en el target 13.4 (la clase es API_AVAILABLE 17).
+  id _rotationCoordinator;
   NSMutableArray<NSString *> *_frames;
   NSInteger _targetCount;
   NSTimeInterval _intervalSeconds;
@@ -42,9 +46,28 @@ RCT_EXPORT_METHOD(captureFrames:(nonnull NSNumber *)frameCount
   [self startCaptureWithCount:count intervalMs:intervalMs.doubleValue resolver:resolve rejecter:reject];
 }
 
-/** Captura una sola foto JPEG (base64) para el enrolamiento. */
+/**
+ * Captura una sola foto JPEG (base64) para el enrolamiento.
+ *
+ * COORDINACIÓN con la preview (paridad con Android `capturePhoto`): si hay una vista
+ * `BiometricCameraPreview` montada y lista, REUSA su sesión abierta (still sobre la sesión compartida del
+ * `VeoBiometricCameraController`, manteniendo la preview viva) — así el conductor SE VE antes de
+ * capturar y NO se abre una segunda cámara. Si no hay preview activa (flujo de alta sin preview), cae a
+ * la captura autónoma de abajo, preservando el contrato del módulo.
+ */
 RCT_EXPORT_METHOD(capturePhoto:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject) {
+  VeoBiometricCameraController *controller = [VeoBiometricCameraController sharedController];
+  if ([controller isPreviewReady]) {
+    [controller capturePhotoBase64:^(NSString *base64, NSString *code, NSString *message) {
+      if (base64 != nil) {
+        resolve(base64);
+      } else {
+        reject(code ?: @"E_BIOMETRIC_CAPTURE", message ?: @"Fallo de captura sobre la preview", nil);
+      }
+    }];
+    return;
+  }
   [self startCaptureWithCount:1 intervalMs:0 resolver:resolve rejecter:reject];
 }
 
@@ -108,6 +131,27 @@ RCT_EXPORT_METHOD(capturePhoto:(RCTPromiseResolveBlock)resolve
       [session addOutput:output];
     }
 
+    // CONSISTENCIA con Path A (sesión compartida): orientamos el BUFFER en la conexión usando el ángulo
+    // REAL del sensor — el MISMO mecanismo que el still del controller — en vez del tag EXIF
+    // `UIImageOrientationRight` que se usaba antes (mecanismo distinto e inconsistente). Así enroll
+    // (preview/Path A) y este fallback autónomo (Path B) producen imágenes con la MISMA orientación y
+    // "mano". El `UIImage` resultante se marca como `Up` porque el buffer ya viene derecho.
+    AVCaptureConnection *videoConnection = [output connectionWithMediaType:AVMediaTypeVideo];
+    if (videoConnection != nil) {
+      if (@available(iOS 17.0, *)) {
+        // Coordinator sin preview layer (nil): solo necesitamos el ángulo de captura del sensor.
+        AVCaptureDeviceRotationCoordinator *coordinator =
+            [[AVCaptureDeviceRotationCoordinator alloc] initWithDevice:device previewLayer:nil];
+        CGFloat captureAngle = coordinator.videoRotationAngleForHorizonLevelCapture;
+        if ([videoConnection isVideoRotationAngleSupported:captureAngle]) {
+          videoConnection.videoRotationAngle = captureAngle;
+        }
+        _rotationCoordinator = coordinator;  // retenido hasta teardown (KVO no necesario: captura puntual)
+      } else if (videoConnection.isVideoOrientationSupported) {
+        videoConnection.videoOrientation = AVCaptureVideoOrientationPortrait;
+      }
+    }
+
     _ciContext = [CIContext contextWithOptions:nil];
     _session = session;
     [session startRunning];
@@ -163,7 +207,13 @@ RCT_EXPORT_METHOD(capturePhoto:(RCTPromiseResolveBlock)resolve
   if (cgImage == NULL) {
     return nil;
   }
-  UIImage *image = [UIImage imageWithCGImage:cgImage];
+  // El buffer YA viene DERECHO: la conexión del video output fue orientada con el ángulo REAL del
+  // sensor (coordinator iOS 17+ / `videoOrientation` en <17), igual que el still de Path A. Por eso el
+  // `UIImage` se marca `Up` (sin re-rotar). Antes acá se forzaba `UIImageOrientationRight`, un
+  // mecanismo EXIF distinto e inconsistente con Path A — eliminado para unificar la orientación.
+  UIImage *image = [UIImage imageWithCGImage:cgImage
+                                       scale:1.0
+                                 orientation:UIImageOrientationUp];
   CGImageRelease(cgImage);
   NSData *jpeg = UIImageJPEGRepresentation(image, 0.8);
   if (jpeg == nil) {
@@ -209,6 +259,7 @@ RCT_EXPORT_METHOD(capturePhoto:(RCTPromiseResolveBlock)resolve
     [_session stopRunning];
     _session = nil;
   }
+  _rotationCoordinator = nil;  // sin observers KVO acá: basta soltar la referencia.
   _resolve = nil;
   _reject = nil;
   _frames = nil;

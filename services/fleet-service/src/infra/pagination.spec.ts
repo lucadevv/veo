@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { clampLimit, toPage } from './pagination';
+import {
+  clampLimit,
+  toPage,
+  toExpiryPage,
+  encodeExpiryCursor,
+  decodeExpiryCursor,
+} from './pagination';
 
 describe('clampLimit', () => {
   it('default 25 si no se pasa o NaN', () => {
@@ -38,6 +44,43 @@ describe('toPage', () => {
   it('vacío → sin items ni cursor', () => {
     const page = toPage([], 5);
     expect(page.items).toEqual([]);
+    expect(page.nextCursor).toBeNull();
+  });
+});
+
+describe('cursor compuesto (expiresAt, id) · cola de vencimientos', () => {
+  const at = new Date('2026-07-10T00:00:00.000Z');
+
+  it('encode → ISO|id; decode lo invierte (round-trip)', () => {
+    const cursor = encodeExpiryCursor({ expiresAt: at, id: 'doc-1' });
+    expect(cursor).toBe('2026-07-10T00:00:00.000Z|doc-1');
+    const decoded = decodeExpiryCursor(cursor);
+    expect(decoded?.id).toBe('doc-1');
+    expect(decoded?.expiresAt.toISOString()).toBe(at.toISOString());
+  });
+
+  it('decode rechaza formatos inválidos → null', () => {
+    expect(decodeExpiryCursor('')).toBeNull();
+    expect(decodeExpiryCursor('sin-separador')).toBeNull();
+    expect(decodeExpiryCursor('|doc-1')).toBeNull(); // sin fecha
+    expect(decodeExpiryCursor('2026-07-10T00:00:00.000Z|')).toBeNull(); // sin id
+    expect(decodeExpiryCursor('no-es-fecha|doc-1')).toBeNull(); // fecha inválida
+  });
+
+  it('toExpiryPage: con más filas que el límite → nextCursor = tupla de la última devuelta', () => {
+    const rows = Array.from({ length: 6 }, (_, i) => ({
+      id: `doc-${i}`,
+      expiresAt: new Date(at.getTime() + i * 86_400_000),
+    }));
+    const page = toExpiryPage(rows, 5);
+    expect(page.items).toHaveLength(5);
+    expect(page.nextCursor).toBe(`${rows[4]!.expiresAt.toISOString()}|doc-4`);
+  });
+
+  it('toExpiryPage: sin más filas → nextCursor null', () => {
+    const rows = [{ id: 'doc-0', expiresAt: at }];
+    const page = toExpiryPage(rows, 5);
+    expect(page.items).toHaveLength(1);
     expect(page.nextCursor).toBeNull();
   });
 });

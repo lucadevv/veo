@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AuthService } from './auth.service';
+import { AuthRepository } from './auth.repository';
 
 /**
  * Verifica que verifyOtp engancha el AuthMethod{PHONE_OTP} (ADR-012 Lote 1):
@@ -32,8 +33,13 @@ const otp = { issue: vi.fn(async () => '123456'), verify: vi.fn(async () => unde
 const jwt = {
   signAccessToken: vi.fn(async () => 'at'),
   signRefreshToken: vi.fn(async () => 'rt'),
+  verifyRefresh: vi.fn(async () => ({ sub: 'u-1', sid: 's-1', jti: 'j-1' })),
 };
-const sessions = { createSession: vi.fn(async () => ({ sessionId: 's', newJti: 'j' })) };
+const sessions = {
+  createSession: vi.fn(async () => ({ sessionId: 's', newJti: 'j' })),
+  revoke: vi.fn(async () => undefined),
+  revokeAllForUser: vi.fn(async () => 3),
+};
 const sms = { send: vi.fn(async () => undefined) };
 const tokenIssuer = {
   issue: vi.fn(async (_userId: string, _typ: string, user: unknown) => ({
@@ -46,8 +52,7 @@ const tokenIssuer = {
 describe('AuthService.verifyOtp · AuthMethod{PHONE_OTP}', () => {
   it('usuario nuevo: crea User + AuthMethod{PHONE_OTP, verified} + outbox', async () => {
     const prisma = makePrisma({});
-    const svc = new AuthService(
-      prisma as never,
+    const svc = new AuthService(new AuthRepository(prisma as never),
       otp as never,
       jwt as never,
       sessions as never,
@@ -70,8 +75,7 @@ describe('AuthService.verifyOtp · AuthMethod{PHONE_OTP}', () => {
     const prisma = makePrisma({
       existing: { id: 'u-1', phone: '+51987654321', type: 'PASSENGER', kycStatus: 'PENDING' },
     });
-    const svc = new AuthService(
-      prisma as never,
+    const svc = new AuthService(new AuthRepository(prisma as never),
       otp as never,
       jwt as never,
       sessions as never,
@@ -88,5 +92,46 @@ describe('AuthService.verifyOtp · AuthMethod{PHONE_OTP}', () => {
       update: {},
     });
     expect(prisma._m.outboxEvent.create).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * logoutAll ("cerrar sesión en todos los dispositivos", ADR-012 §2): verifica el refreshToken (mismo
+ * mecanismo que logout), revoca TODAS las sesiones del user vía revokeAllForUser, y es idempotente ante
+ * un token inválido.
+ */
+describe('AuthService.logoutAll · cerrar sesión en todos los dispositivos', () => {
+  function makeSvc() {
+    const prisma = makePrisma({});
+    const svc = new AuthService(new AuthRepository(prisma as never),
+      otp as never,
+      jwt as never,
+      sessions as never,
+      sms,
+      tokenIssuer as never,
+    );
+    return svc;
+  }
+
+  it('token válido: revoca TODAS las sesiones del user y devuelve { ok, userId }', async () => {
+    jwt.verifyRefresh.mockResolvedValueOnce({ sub: 'u-42', sid: 's-1', jti: 'j-1' });
+    sessions.revokeAllForUser.mockClear();
+
+    const out = await makeSvc().logoutAll('rt-valido');
+
+    expect(out).toEqual({ ok: true, userId: 'u-42' });
+    expect(sessions.revokeAllForUser).toHaveBeenCalledTimes(1);
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith('u-42');
+  });
+
+  it('token inválido: idempotente → { ok: true } sin userId y sin revocar', async () => {
+    jwt.verifyRefresh.mockRejectedValueOnce(new Error('refresh inválido'));
+    sessions.revokeAllForUser.mockClear();
+
+    const out = await makeSvc().logoutAll('rt-basura');
+
+    expect(out).toEqual({ ok: true });
+    expect(out.userId).toBeUndefined();
+    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 });

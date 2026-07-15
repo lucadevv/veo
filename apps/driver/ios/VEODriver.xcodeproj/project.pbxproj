@@ -11,6 +11,15 @@
 		13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB01A68108700A75B9A /* AppDelegate.mm */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		13B07FC11A68108700A75B9A /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB71A68108700A75B9A /* main.m */; };
+		54AE89A12FE7C24800EACED4 /* ClashDisplay-Bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE898D2FE7C24800EACED4 /* ClashDisplay-Bold.otf */; };
+		54AE89A22FE7C24800EACED4 /* ClashDisplay-Medium.otf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE898E2FE7C24800EACED4 /* ClashDisplay-Medium.otf */; };
+		54AE89A32FE7C24800EACED4 /* ClashDisplay-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE898F2FE7C24800EACED4 /* ClashDisplay-Regular.otf */; };
+		54AE89A42FE7C24800EACED4 /* ClashDisplay-Semibold.otf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE89902FE7C24800EACED4 /* ClashDisplay-Semibold.otf */; };
+		54AE89A52FE7C24800EACED4 /* Fraunces72pt-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE89912FE7C24800EACED4 /* Fraunces72pt-SemiBold.ttf */; };
+		54AE89A62FE7C24800EACED4 /* Outfit-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE89922FE7C24800EACED4 /* Outfit-Bold.ttf */; };
+		54AE89A72FE7C24800EACED4 /* Outfit-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE89932FE7C24800EACED4 /* Outfit-Medium.ttf */; };
+		54AE89A82FE7C24800EACED4 /* Outfit-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE89942FE7C24800EACED4 /* Outfit-Regular.ttf */; };
+		54AE89A92FE7C24800EACED4 /* Outfit-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 54AE89952FE7C24800EACED4 /* Outfit-SemiBold.ttf */; };
 		65094572BE63A0B6E54C04C7 /* Pods_VEODriver.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2AB0DF9D3E9AC3E658DF6744 /* Pods_VEODriver.framework */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		884F90BD2FCBDF28005110D9 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = DC305B3664A1E0F36A61FFC8 /* MapLibre */; };
@@ -18,6 +27,9 @@
 		A628EABBD7494F12A17026BF /* Pods_VEODriver_VEODriverTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4790518CFCB7B3EC2599236D /* Pods_VEODriver_VEODriverTests.framework */; };
 		A6411F38EA0EADC82EEA4214 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 502D03952042AE7292E8E18D /* PrivacyInfo.xcprivacy */; };
 		AABB010000000000000000F2 /* VeoBiometricFrameGrabber.m in Sources */ = {isa = PBXBuildFile; fileRef = AABB010000000000000000F1 /* VeoBiometricFrameGrabber.m */; };
+		AABB010000000000000000F4 /* VeoBiometricCameraController.m in Sources */ = {isa = PBXBuildFile; fileRef = AABB010000000000000000F3 /* VeoBiometricCameraController.m */; };
+		AABB010000000000000000F6 /* BiometricCameraPreviewManager.m in Sources */ = {isa = PBXBuildFile; fileRef = AABB010000000000000000F5 /* BiometricCameraPreviewManager.m */; };
+		AABB010000000000000000F9 /* VeoDocumentScanner.m in Sources */ = {isa = PBXBuildFile; fileRef = AABB010000000000000000F8 /* VeoDocumentScanner.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,11 +57,25 @@
 		3B4392A12AC88292D35C810B /* Pods-VEODriver.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VEODriver.debug.xcconfig"; path = "Target Support Files/Pods-VEODriver/Pods-VEODriver.debug.xcconfig"; sourceTree = "<group>"; };
 		4790518CFCB7B3EC2599236D /* Pods_VEODriver_VEODriverTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_VEODriver_VEODriverTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		502D03952042AE7292E8E18D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = VEODriver/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		54AE898D2FE7C24800EACED4 /* ClashDisplay-Bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ClashDisplay-Bold.otf"; sourceTree = "<group>"; };
+		54AE898E2FE7C24800EACED4 /* ClashDisplay-Medium.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ClashDisplay-Medium.otf"; sourceTree = "<group>"; };
+		54AE898F2FE7C24800EACED4 /* ClashDisplay-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ClashDisplay-Regular.otf"; sourceTree = "<group>"; };
+		54AE89902FE7C24800EACED4 /* ClashDisplay-Semibold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ClashDisplay-Semibold.otf"; sourceTree = "<group>"; };
+		54AE89912FE7C24800EACED4 /* Fraunces72pt-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Fraunces72pt-SemiBold.ttf"; sourceTree = "<group>"; };
+		54AE89922FE7C24800EACED4 /* Outfit-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Outfit-Bold.ttf"; sourceTree = "<group>"; };
+		54AE89932FE7C24800EACED4 /* Outfit-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Outfit-Medium.ttf"; sourceTree = "<group>"; };
+		54AE89942FE7C24800EACED4 /* Outfit-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Outfit-Regular.ttf"; sourceTree = "<group>"; };
+		54AE89952FE7C24800EACED4 /* Outfit-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Outfit-SemiBold.ttf"; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-VEODriver.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VEODriver.release.xcconfig"; path = "Target Support Files/Pods-VEODriver/Pods-VEODriver.release.xcconfig"; sourceTree = "<group>"; };
 		5B7EB9410499542E8C5724F5 /* Pods-VEODriver-VEODriverTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VEODriver-VEODriverTests.debug.xcconfig"; path = "Target Support Files/Pods-VEODriver-VEODriverTests/Pods-VEODriver-VEODriverTests.debug.xcconfig"; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = VEODriver/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		89C6BE57DB24E9ADA2F236DE /* Pods-VEODriver-VEODriverTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VEODriver-VEODriverTests.release.xcconfig"; path = "Target Support Files/Pods-VEODriver-VEODriverTests/Pods-VEODriver-VEODriverTests.release.xcconfig"; sourceTree = "<group>"; };
 		AABB010000000000000000F1 /* VeoBiometricFrameGrabber.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = VeoBiometricFrameGrabber.m; path = VEODriver/VeoBiometricFrameGrabber.m; sourceTree = "<group>"; };
+		AABB010000000000000000F3 /* VeoBiometricCameraController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = VeoBiometricCameraController.m; path = VEODriver/VeoBiometricCameraController.m; sourceTree = "<group>"; };
+		AABB010000000000000000F5 /* BiometricCameraPreviewManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = BiometricCameraPreviewManager.m; path = VEODriver/BiometricCameraPreviewManager.m; sourceTree = "<group>"; };
+		AABB010000000000000000F7 /* VeoBiometricCameraController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = VeoBiometricCameraController.h; path = VEODriver/VeoBiometricCameraController.h; sourceTree = "<group>"; };
+		AABB010000000000000000F8 /* VeoDocumentScanner.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = VeoDocumentScanner.m; path = VEODriver/VeoDocumentScanner.m; sourceTree = "<group>"; };
+		AABB010000000000000000FA /* VeoDocumentScanner.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = VeoDocumentScanner.h; path = VEODriver/VeoDocumentScanner.h; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -98,6 +124,11 @@
 				13B07FAF1A68108700A75B9A /* AppDelegate.h */,
 				13B07FB01A68108700A75B9A /* AppDelegate.mm */,
 				AABB010000000000000000F1 /* VeoBiometricFrameGrabber.m */,
+				AABB010000000000000000F7 /* VeoBiometricCameraController.h */,
+				AABB010000000000000000F3 /* VeoBiometricCameraController.m */,
+				AABB010000000000000000F5 /* BiometricCameraPreviewManager.m */,
+				AABB010000000000000000FA /* VeoDocumentScanner.h */,
+				AABB010000000000000000F8 /* VeoDocumentScanner.m */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
@@ -118,6 +149,22 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		54AE89962FE7C24800EACED4 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				54AE898D2FE7C24800EACED4 /* ClashDisplay-Bold.otf */,
+				54AE898E2FE7C24800EACED4 /* ClashDisplay-Medium.otf */,
+				54AE898F2FE7C24800EACED4 /* ClashDisplay-Regular.otf */,
+				54AE89902FE7C24800EACED4 /* ClashDisplay-Semibold.otf */,
+				54AE89912FE7C24800EACED4 /* Fraunces72pt-SemiBold.ttf */,
+				54AE89922FE7C24800EACED4 /* Outfit-Bold.ttf */,
+				54AE89932FE7C24800EACED4 /* Outfit-Medium.ttf */,
+				54AE89942FE7C24800EACED4 /* Outfit-Regular.ttf */,
+				54AE89952FE7C24800EACED4 /* Outfit-SemiBold.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
 			isa = PBXGroup;
 			children = (
@@ -128,6 +175,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
+				54AE89962FE7C24800EACED4 /* Fonts */,
 				13B07FAE1A68108700A75B9A /* VEODriver */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				00E356EF1AD99517003FC87E /* VEODriverTests */,
@@ -218,7 +266,8 @@
 		83CBB9F71A601CBA00E9B192 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 1210;
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					00E356ED1AD99517003FC87E = {
 						CreatedOnToolsVersion = 6.2;
@@ -266,6 +315,15 @@
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				A6411F38EA0EADC82EEA4214 /* PrivacyInfo.xcprivacy in Resources */,
+				54AE89A12FE7C24800EACED4 /* ClashDisplay-Bold.otf in Resources */,
+				54AE89A22FE7C24800EACED4 /* ClashDisplay-Medium.otf in Resources */,
+				54AE89A32FE7C24800EACED4 /* ClashDisplay-Regular.otf in Resources */,
+				54AE89A42FE7C24800EACED4 /* ClashDisplay-Semibold.otf in Resources */,
+				54AE89A52FE7C24800EACED4 /* Fraunces72pt-SemiBold.ttf in Resources */,
+				54AE89A62FE7C24800EACED4 /* Outfit-Bold.ttf in Resources */,
+				54AE89A72FE7C24800EACED4 /* Outfit-Medium.ttf in Resources */,
+				54AE89A82FE7C24800EACED4 /* Outfit-Regular.ttf in Resources */,
+				54AE89A92FE7C24800EACED4 /* Outfit-SemiBold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -430,6 +488,9 @@
 			files = (
 				13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */,
 				AABB010000000000000000F2 /* VeoBiometricFrameGrabber.m in Sources */,
+				AABB010000000000000000F4 /* VeoBiometricCameraController.m in Sources */,
+				AABB010000000000000000F6 /* BiometricCameraPreviewManager.m in Sources */,
+				AABB010000000000000000F9 /* VeoDocumentScanner.m in Sources */,
 				13B07FC11A68108700A75B9A /* main.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -585,6 +646,7 @@
 				CXX = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_DYNAMIC_NO_PIC = NO;
@@ -649,6 +711,7 @@
 				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				USE_HERMES = true;
@@ -690,6 +753,7 @@
 				CXX = "";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -746,6 +810,7 @@
 				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				USE_HERMES = true;
 				VALIDATE_PRODUCT = YES;
@@ -762,7 +827,7 @@
 				00E356F71AD99517003FC87E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
 		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "VEODriver" */ = {
 			isa = XCConfigurationList;
@@ -771,7 +836,7 @@
 				13B07F951A680F5B00A75B9A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
 		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "VEODriver" */ = {
 			isa = XCConfigurationList;
@@ -780,7 +845,7 @@
 				83CBBA211A601CBA00E9B192 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 

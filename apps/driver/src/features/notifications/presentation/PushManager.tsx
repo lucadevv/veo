@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useDi } from '../../../core/di/useDi';
 import { HttpPushRegistrationPort } from '../data/http-push-registration';
 import { fcmPushService } from '../data/fcm-push-service';
+import { REGISTRATION_GATE_QUERY_KEY } from '../../registration/presentation';
 
 /**
  * Inicializa el push del conductor mientras la sesión está activa: pide permisos, obtiene el token,
@@ -13,12 +15,20 @@ import { fcmPushService } from '../data/fcm-push-service';
  */
 export const PushManager = (): null => {
   const { httpClient } = useDi();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let active = true;
     fcmPushService
-      .start(new HttpPushRegistrationPort(httpClient))
+      .start(new HttpPushRegistrationPort(httpClient), (data) => {
+        // Push de ciclo de vida del conductor (aprobación/rechazo) → lleva `driverId`. Invalida el gate de
+        // registro para que la pantalla pase de "En revisión" a aprobado/rechazado SIN pull manual (cierra
+        // el loop visible). Otros pushes (trip/pago) no traen driverId → no refetchea de más.
+        if (data?.driverId) {
+          void queryClient.invalidateQueries({ queryKey: REGISTRATION_GATE_QUERY_KEY });
+        }
+      })
       .then((unsubscribe) => {
         if (active) {
           cleanup = unsubscribe;
@@ -31,7 +41,7 @@ export const PushManager = (): null => {
       active = false;
       cleanup?.();
     };
-  }, [httpClient]);
+  }, [httpClient, queryClient]);
 
   return null;
 };

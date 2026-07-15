@@ -1,8 +1,9 @@
 import type {MobilePaymentMethod} from '@veo/api-client';
-import {StatusPill, Text, useTheme} from '@veo/ui-kit';
+import {Text, useTheme} from '@veo/ui-kit';
 import React from 'react';
 import {Pressable, StyleSheet, View} from 'react-native';
 import {PaymentMethodLogo} from '../../../../shared/assets/payment-methods';
+import {IconCheck} from '../../../trip/presentation/components/icons';
 
 export interface PaymentInstrumentRowProps {
   method: MobilePaymentMethod;
@@ -10,26 +11,31 @@ export interface PaymentInstrumentRowProps {
   name: string;
   /** UNA línea de experiencia (cómo se paga). */
   line: string;
-  /** Es el método predeterminado del perfil → pill `defaultLabel`. */
+  /** Es el método predeterminado del perfil → card seleccionada (borde brand + check circular). */
   isDefault?: boolean;
-  /** Texto de la pill de "predeterminado" (es-PE, lo provee el caller). */
-  defaultLabel?: string;
+  /**
+   * Dibuja el radio vacío a la derecha cuando NO es el predeterminado (metáfora de selección del
+   * pen Ofbr6). `false` para filas que no participan de la selección (p. ej. estados transitorios).
+   */
+  selectable?: boolean;
   /** Tap en la fila (setear default o abrir gestión). */
   onPress?: () => void;
-  /** Acción a la derecha (CTA "Vincular") en lugar de la pill. */
+  /** Acción a la derecha (CTA "Vincular"), antes del indicador de selección. */
   action?: React.ReactNode;
-  /** Slot a la derecha (estado: check, spinner, etc.) cuando no hay action ni default-pill. */
+  /** Slot extra a la derecha (estado: pill, spinner, etc.), antes del indicador de selección. */
   trailing?: React.ReactNode;
-  /** Resalta el leadcircle/borde (instrumento principal vinculado). */
+  /** Resalta el anillo del logo (instrumento principal vinculado). Ya NO toca el borde de la card:
+   *  el borde brand quedó reservado para la SELECCIÓN (per pen), y mezclarlos mentiría. */
   emphasized?: boolean;
   accessibilityLabel?: string;
   accessibilityHint?: string;
 }
 
 /**
- * Fila de INSTRUMENTO de pago (patrón PedidosYa / instrumentos). Glifo + nombre + UNA línea de
- * experiencia + estado/acción a la derecha. Es la unidad de la lista única de "Métodos de pago": una
- * sola experiencia, sin secciones separadas. Tap = setear default (o abrir gestión, según el caller).
+ * CARD de instrumento de pago (design/veo.pen Ofbr6): cada método es una card separada con glifo +
+ * nombre + UNA línea de experiencia. La metáfora de selección es la del pen: el método PREDETERMINADO
+ * lleva borde brand de 2px + check circular brand a la derecha; los demás, borde normal + radio vacío
+ * (reemplaza a la pill "Predeterminado"). Tap = setear default (o abrir gestión, según el caller).
  * Target ≥56pt, feedback de press por opacidad (filas frecuentes → sin scale, criterio emil).
  */
 export function PaymentInstrumentRow({
@@ -37,7 +43,7 @@ export function PaymentInstrumentRow({
   name,
   line,
   isDefault = false,
-  defaultLabel,
+  selectable = true,
   onPress,
   action,
   trailing,
@@ -71,22 +77,33 @@ export function PaymentInstrumentRow({
       </View>
 
       <View style={[styles.trailing, {gap: theme.spacing.xs}]}>
-        {isDefault && defaultLabel ? (
-          <StatusPill label={defaultLabel} tone="accent" dot />
-        ) : null}
         {action ?? trailing ?? null}
+        {/* Indicador de selección per pen: check circular brand (predeterminado) o radio vacío. */}
+        {isDefault ? (
+          <View
+            style={[styles.check, {backgroundColor: theme.colors.accent}]}
+            accessibilityElementsHidden>
+            <IconCheck color={theme.colors.onAccent} size={14} />
+          </View>
+        ) : selectable ? (
+          <View
+            style={[styles.radio, {borderColor: theme.colors.borderStrong}]}
+            accessibilityElementsHidden
+          />
+        ) : null}
       </View>
     </>
   );
 
+  // Card por método (pen): seleccionada = borde brand 2px; el resto, borde normal de 1px.
   const containerStyle = {
     minHeight: 56,
     gap: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.radii.md,
-    borderWidth: emphasized ? 2 : 1,
-    borderColor: emphasized ? theme.colors.accent : theme.colors.border,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.radii.lg,
+    borderWidth: isDefault ? 2 : 1,
+    borderColor: isDefault ? theme.colors.accent : theme.colors.border,
     backgroundColor: emphasized
       ? theme.colors.surfaceElevated
       : theme.colors.surface,
@@ -97,6 +114,7 @@ export function PaymentInstrumentRow({
       <View
         accessible
         accessibilityLabel={accessibilityLabel ?? `${name}. ${line}`}
+        accessibilityState={{selected: isDefault}}
         style={[styles.row, containerStyle]}>
         {content}
       </View>
@@ -127,4 +145,14 @@ const styles = StyleSheet.create({
   leadRing: {borderRadius: 22, alignItems: 'center', justifyContent: 'center'},
   body: {flex: 1, gap: 2},
   trailing: {flexDirection: 'row', alignItems: 'center'},
+  // Check circular de 24 (pen: fondo brand, check onAccent) del método predeterminado.
+  check: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Radio vacío de 22 (pen: anillo borderStrong de 2px) de los métodos no elegidos.
+  radio: {width: 22, height: 22, borderRadius: 11, borderWidth: 2},
 });

@@ -22,6 +22,7 @@ enum UserType {
 }
 
 enum KycStatus {
+  UNVERIFIED
   PENDING
   VERIFIED
   REJECTED
@@ -45,6 +46,41 @@ enum BackgroundCheckStatus {
   PENDING
   CLEARED
   REJECTED
+
+  @@schema("identity")
+}
+
+/// CAUSA de un HOLD de suspensión del conductor (modelo de HOLDS · decisión del dueño · fail-closed). La
+/// suspensión del conductor ya NO es UN flag colapsado: es el CONJUNTO de holds activos (`DriverSuspensionHold`).
+/// Un conductor está suspendido ⟺ tiene ≥1 hold; vuelve a estar libre SOLO con 0 holds. Cada hold lleva su
+/// CAUSA distinta para que regularizar UNA (ej. SOAT) NUNCA quite las otras (ej. ITV vencida) — la causa raíz
+/// de la CRÍTICA que el flag único `suspensionSource` provocaba (colapsaba SOAT e ITV a DOCUMENT_EXPIRED, así
+/// que reactivar una reactivaba al conductor con la otra aún vigente → bypass del gate de turno).
+///   - DISCIPLINARY: suspensión MANUAL del operador (suspend()). La levanta SOLO reactivate() (override manual).
+///   - DOCUMENT_EXPIRED: documento crítico DRIVER-scoped vencido (SOAT/LICENSE_A1/PROPERTY_CARD). El `causeRef`
+///     del hold guarda el documentType → un hold POR documento distinto (regularizar el SOAT no quita la licencia).
+///   - INSPECTION_EXPIRED: inspección técnica (ITV) vencida del vehículo operado. `causeRef` vacío (una sola ITV).
+///   - RATING_LOW: AUTO-suspensión por rating bajo (< 4.0 con ≥ mínimo de reseñas, BR-D01). La decide rating-service
+///     (evento `driver.flagged` reason='suspension'); identity la materializa como hold. `causeRef` vacío (un solo
+///     hold de rating). Reactivación MANUAL del operador (override de compliance) — NO se auto-levanta al recuperar.
+/// Todas las causas NO-DISCIPLINARY (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW) se levantan por la vía de
+/// compliance (reactivateForCompliance / fleet); una DISCIPLINARY NUNCA se toca por esas vías (y viceversa) — la
+/// separación de causas se respeta extremo-a-extremo.
+enum SuspensionCause {
+  DISCIPLINARY
+  DOCUMENT_EXPIRED
+  INSPECTION_EXPIRED
+  RATING_LOW
+  EXCESSIVE_CANCELLATIONS
+  // ADR 013 · seam catálogo↔operabilidad: fleet apagó del catálogo la última oferta de la CLASE del conductor
+  // (p.ej. "VEO Moto" off → un MOTO ya no tiene oferta operable). Hold PERMANENTE (sin expiresAt); se levanta
+  // SOLO cuando la clase vuelve a ser operable (evento de fleet), NUNCA por el override de compliance ni el sweeper.
+  CATEGORY_DISABLED
+  // ADR-022 §P-A · el conductor cruzó el TOPE de deuda por comisiones de viajes en EFECTIVO (lo decide
+  // payment-service · `driver.debt_exceeded`). Hold PERMANENTE (sin expiresAt); se levanta SOLO cuando salda por el
+  // rail (`driver.debt_cleared`), NUNCA por el override de compliance del operador ni el sweeper. NO revoca la
+  // sesión (el viaje EN CURSO se termina normal · bloqueo tipo A), a diferencia de DISCIPLINARY.
+  DEBT_BLOCKED
 
   @@schema("identity")
 }
@@ -121,7 +157,12 @@ model User {
   /// al pedir viaje. String (validado contra el enum PaymentMethod de @veo/shared-types en el borde DTO,
   /// no enum de DB para no acoplar el schema). Nullable = nunca lo eligió → la app cae a su default local.
   defaultPaymentMethod String? @map("default_payment_method")
-  kycStatus KycStatus  @default(PENDING) @map("kyc_status")
+  /// Estado inicial = UNVERIFIED (ADR-018): un usuario recién onboardeado NO arrancó ningún KYC. El
+  /// pasajero se auto-verifica opcionalmente (liveness → VERIFIED, badge de confianza), NO es muro
+  /// pre-viaje. PENDING queda SOLO para un futuro verify asíncrono (hoy el verify es síncrono): ningún
+  /// usuario NACE ahí. El conductor también nace UNVERIFIED y su KYC pasa a VERIFIED cuando el OPERADOR
+  /// humano aprueba (approve setea kycStatus→VERIFIED), desacoplada de backgroundCheckStatus — UNVERIFIED→VERIFIED es legal.
+  kycStatus KycStatus  @default(UNVERIFIED) @map("kyc_status")
   /// Embedding facial de referencia (ArcFace, 512-d) capturado al verificar KYC del pasajero.
   /// Vacío = pasajero NO verificado biométricamente.
   faceEmbedding Float[] @default([]) @map("face_embedding")
@@ -181,8 +222,16 @@ model Driver {
   licenseExpiresAt      DateTime?             @map("license_expires_at") @db.Timestamptz
   /// Datos personales del conductor (BR-I04 cumplimiento). Opcionales hasta que el conductor los registra.
   legalName             String?               @map("legal_name")
-  /// DNI peruano (8 dígitos). Se valida en el borde (DTO). Nota: se persiste para cumplimiento del conductor.
-  documentId            String?               @map("document_id")
+  /// DNI peruano (8 dígitos). PII Ley 29733: se persiste CIFRADO en reposo (AES-256-GCM, secret-box,
+  /// formato `iv.tag.enc` base64) — NUNCA en claro. Compliance lo MUESTRA al operador para verificación
+  /// manual contra el documento, por eso es cifrado REVERSIBLE (no hash): identity descifra en el borde
+  /// gRPC con `open()` antes de mandarlo al admin-bff (ya gateado Compliance+). El `User.dniHash` es OTRO
+  /// caso (matching interno irreversible) — no se mezcla con este. Nullable hasta que el conductor lo registra.
+  documentIdEnc         String?               @map("document_id_enc")
+  /// Blind index del DNI (hashPii determinista con DNI_HASH_SALT): permite CHEQUEAR unicidad sin exponer
+  /// la PII (Ley 29733), ya que `documentIdEnc` es cifrado con IV aleatorio (no indexable). @unique = un DNI
+  /// registra UN solo conductor; nullable hasta que el conductor registra su DNI (NULL no colisiona en Postgres).
+  dniHash               String?               @unique @map("dni_hash")
   birthDate             DateTime?             @map("birth_date") @db.Date
   currentStatus         DriverStatus          @default(OFFLINE) @map("current_status")
   averageRating         Decimal               @default(5.0) @map("average_rating") @db.Decimal(3, 2)
@@ -195,7 +244,45 @@ model Driver {
   faceEmbedding         Float[]               @map("face_embedding")
   /// Momento del enrolamiento facial. Null = no enrolado.
   faceEnrolledAt        DateTime?             @map("face_enrolled_at") @db.Timestamptz
+  /// F5 · key S3/MinIO de la SELFIE del enrol (cifrada en reposo · Ley 29733). ADICIONAL al embedding: ayuda
+  /// VISUAL para el operador en casos dudosos (NO es la verificación — esa la hace el match contra DNI/licencia).
+  /// Best-effort: si la subida falla, el enrol igual cierra con el embedding y esto queda null. Se purga por
+  /// derecho al olvido (prefijo `drivers/{id}/` en user.deleted). Solo Compliance+ la VE vía presigned GET.
+  faceSelfieKey         String?               @map("face_selfie_key")
+  /// VEREDICTO del LIVENESS PASIVO (anti-spoofing PAD single-frame) del enrol. El operador lo VE antes de
+  /// aprobar y `approve()` exige que el PAD HAYA CORRIDO (gate de ejecución). `livenessChecked` = ¿corrió el
+  /// PAD? (true = anti-spoofing real; false = modelo ausente → enrolado DEGRADADO sin liveness; null = aún no
+  /// enrolado). `livenessScore` = score de la clase viva 0..1 del PAD. Un spoof NUNCA llega acá: se rechaza en
+  /// el enrol (422), no se persiste. El status tipado (NOT_RUN/PASSED/DEGRADED) se DERIVA en el borde gRPC.
+  livenessChecked       Boolean?              @map("liveness_checked")
+  livenessScore         Float?                @map("liveness_score")
+  /// Sub-lote 3C · BINDING DNI↔selfie. Resultado del face-match entre la foto FRONT del DNI (de S3, que el
+  /// admin-bff baja) y el `faceEmbedding` de referencia GUARDADO del conductor. El operador lo VE antes de
+  /// aprobar (no aprueba a ciegas). Nullable = aún no se corrió el match. `dniFaceMatched` = veredicto
+  /// (true coincide / false no coincide); `dniFaceMatchScore` = 0..100; `dniFaceMatchedAt` = cuándo se corrió.
+  dniFaceMatched        Boolean?              @map("dni_face_matched")
+  dniFaceMatchScore     Float?                @map("dni_face_match_score")
+  dniFaceMatchedAt      DateTime?             @map("dni_face_matched_at") @db.Timestamptz
+  /// Lote C · BINDING licencia↔selfie (gemelo del DNI, binding MÁS FUERTE). Face-match entre la foto del
+  /// brevete (LICENSE_A1, de S3) y el `faceEmbedding` de referencia GUARDADO. Mismo contrato que el DNI:
+  /// el operador lo VE antes de aprobar; nullable = aún no se corrió. `approve()` exige que AMBOS bindings
+  /// (DNI y licencia) se HAYAN EJECUTADO (`*FaceMatchedAt != null`) — gate de ejecución, NO de veredicto.
+  /// OJO: el brevete trae una foto de menor resolución que el DNI → el score puede ser más bajo legítimamente;
+  /// el VEREDICTO lo decide el operador (no la máquina). Se resetea junto al DNI al re-enrolar/resubmit.
+  licenseFaceMatched    Boolean?              @map("license_face_matched")
+  licenseFaceMatchScore Float?                @map("license_face_match_score")
+  licenseFaceMatchedAt  DateTime?             @map("license_face_matched_at") @db.Timestamptz
+  /// Suspensión DERIVADA del conjunto de holds (modelo de HOLDS). INVARIANTE: `suspendedAt != null` ⟺ el
+  /// conductor tiene ≥1 `DriverSuspensionHold` activo; `null` ⟺ 0 holds. Es un campo MANTENIDO, no la fuente:
+  /// se recomputa TRANSACCIONALMENTE junto a cada add/remove de hold (helper `recomputeSuspendedAt`). Se
+  /// conserva como campo porque TODOS los lectores externos (startShift, eligibility gate de dispatch/booking
+  /// vía gRPC `toDriverReply.suspendedAt`, badge admin-bff) leen ESTE campo — ninguno lee los holds. Así el
+  /// refactor a holds NO cambia ningún lector externo: solo cambia la lógica de ESCRITURA interna. El CAS de
+  /// startShift (`where suspendedAt: null`) sigue válido (refleja "0 holds"). Valor = createdAt del primer hold.
   suspendedAt           DateTime?             @map("suspended_at") @db.Timestamptz
+  /// Holds de suspensión activos (modelo de HOLDS). El conductor está suspendido ⟺ tiene ≥1. Cada causa
+  /// distinta es un hold separado (`@@unique([driverId, cause, causeRef])`): regularizar UNA no quita las otras.
+  suspensionHolds       DriverSuspensionHold[]
   /// Motivo del último rechazo de antecedentes (texto del operador). Null si nunca fue rechazado o si se
   /// re-aprobó / reenvió. Lo expone el driver-bff (GET /drivers/me) para la pantalla de rechazo de la app.
   rejectionReason       String?               @map("rejection_reason")
@@ -205,7 +292,51 @@ model Driver {
   updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz
 
   @@index([currentStatus])
+  // #24 — cubre la cola de aprobación: `listPendingApproval` filtra por backgroundCheckStatus=PENDING y ordena
+  // por createdAt asc. Sin este índice era un seq scan + sort sobre `drivers` (crece sin techo). El índice
+  // compuesto (filtro + orden) sirve el WHERE y el ORDER BY de una.
+  @@index([backgroundCheckStatus, createdAt])
   @@map("drivers")
+  @@schema("identity")
+}
+
+/// HOLD de suspensión de un conductor (modelo de HOLDS · decisión del dueño · compliance/seguridad). Una
+/// suspensión es el CONJUNTO de holds activos de un conductor: está suspendido ⟺ tiene ≥1 hold; libre SOLO
+/// con 0. Cada hold representa UNA causa distinta (cause + causeRef), así regularizar UNA (ej. el SOAT) quita
+/// SOLO ESE hold y NUNCA las otras (ej. ITV vencida, o una suspensión disciplinaria) — la causa raíz de la
+/// CRÍTICA que el flag único `suspensionSource` provocaba (colapsaba SOAT e ITV → reactivar una liberaba con la
+/// otra vigente). `Driver.suspendedAt` es DERIVADO de la existencia de holds (recomputado en la misma tx).
+model DriverSuspensionHold {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driverId  String          @map("driver_id") @db.Uuid
+  driver    Driver          @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  /// POR QUÉ está el hold (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). Discrimina qué vía de
+  /// reactivación puede levantarlo (separación de causas extremo-a-extremo, fail-closed).
+  cause     SuspensionCause
+  /// Referencia que SUBDIVIDE una causa para que coexistan varios holds de la misma causa. Para DOCUMENT_EXPIRED
+  /// es el documentType (SOAT/LICENSE_A1/PROPERTY_CARD): un hold POR documento → regularizar el SOAT no quita la
+  /// licencia. Para DISCIPLINARY e INSPECTION_EXPIRED es `''` (vacío, una sola instancia por causa). NO nullable
+  /// con default `''`: Postgres trata NULL como DISTINTO en un UNIQUE, lo que ROMPERÍA la idempotencia del upsert
+  /// (`@@unique([driverId, cause, causeRef])`) — con `''` el natural key es estable y el re-suspender es no-op.
+  causeRef  String          @default("") @map("cause_ref")
+  /// Motivo legible (texto del operador o de fleet). Viaja al audit/evento; no participa del natural key.
+  reason    String
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  /// VENCIMIENTO del hold (primer hold TEMPORAL del sistema). `null` = PERMANENTE (DISCIPLINARY/DOCUMENT_EXPIRED/
+  /// INSPECTION_EXPIRED/RATING_LOW): solo lo levanta una vía explícita (operador/fleet/compliance). SETEADO =
+  /// COOLDOWN auto-expirable (hoy EXCESSIVE_CANCELLATIONS): un sweeper (@Cron) quita el hold cuando `expiresAt < now`
+  /// y recomputa `Driver.suspendedAt`. NO se hace expiración LAZY porque `suspendedAt` es la columna derivada ÚNICA
+  /// que leen startShift/dispatch/booking/admin: lazy la dejaría STALE; el sweeper mantiene la verdad derivada.
+  expiresAt DateTime?       @map("expires_at") @db.Timestamptz
+
+  /// Natural key: UN hold por (conductor, causa, causeRef). El re-suspender la MISMA causa es un upsert no-op
+  /// (idempotencia por DB, sin check-then-act). Postgres exige causeRef NOT NULL para que el UNIQUE colapse.
+  @@unique([driverId, cause, causeRef])
+  @@index([driverId])
+  /// Hot-path del sweeper de holds temporales: filtra `expiresAt < now` (rango sobre NOT NULL). Los permanentes
+  /// (expiresAt null) quedan fuera del índice parcial implícito de Postgres → barrido barato sobre los temporales.
+  @@index([expiresAt])
+  @@map("driver_suspension_holds")
   @@schema("identity")
 }
 
@@ -213,6 +344,9 @@ model Driver {
 model AdminUser {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email        String   @unique
+  /// Nombre legible del operador (columna "Nombre" del panel de staff). Nullable: el alta por invitación NO
+  /// lo pide todavía (queda null hasta que se agregue al flujo de invitación). Se EXPONE en la lista/detalle.
+  name         String?
   /// Hash argon2id de la contraseña. Null mientras el operador está INVITED (aún no la fijó).
   passwordHash String?  @map("password_hash")
   /// Roles RBAC (AdminRole[] de @veo/shared-types) serializados.
@@ -228,6 +362,8 @@ model AdminUser {
   inviteExpiresAt DateTime? @map("invite_expires_at") @db.Timestamptz
   /// Auto-registro → PENDING; un ADMIN aprueba y asigna roles → ACTIVE.
   status       AdminStatus @default(PENDING)
+  /// Último login EXITOSO (tokens emitidos). Columna "Último acceso" del panel. Null hasta el primer login.
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
@@ -309,13 +445,104 @@ model Consent {
 /// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
 
-  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
+  @@schema("identity")
+}
+
+/// Registro PBAC (ADR-024 §3) — ESTADO VIGENTE de cada política de gobierno (Gobierno → Políticas del admin).
+/// El CONTRATO (schema Zod de `params`, defaults fail-safe, flag `mandatory`, textos UI) vive en `@veo/policy`
+/// (fuente única de forma); esta tabla guarda lo que el runtime aplica. El seed idempotente (PoliciesSeeder,
+/// OnModuleInit) inserta las 16 keys del catálogo que FALTEN (createMany skipDuplicates) SIN pisar los cambios
+/// del admin. Cada mutación bumpea `version` (cache-busting) + emite `policy.updated` por outbox EN LA MISMA tx
+/// (audit WORM + invalidación de cache de `@veo/policy`), molde radius-config. `key` = id canónico ('auth.stepup').
+model Policy {
+  /// Key canónica de la política (id del catálogo `@veo/policy`, ej. 'auth.stepup', 'media.dual-auth').
+  key       String   @id
+  /// Familia funcional ('auth' | 'data' | 'access' | 'ops'). Denormalizada del catálogo para agrupar en la UI.
+  family    String
+  /// Estado vigente on/off. Default true = comportamiento seguro de hoy (las mandatory/hardcoded arrancan on).
+  enabled   Boolean  @default(true)
+  /// Parámetros tipados por política (jsonb). Validados contra el schema Zod de la key en `@veo/policy`.
+  params    Json     @default("{}")
+  /// Candado Ley 29733 (ADR §3): si true, `enabled` NO se puede poner en false (pii.mask, privacy.erasure, auth.mfa).
+  mandatory Boolean  @default(false)
+  /// Versión MONOTÓNICA: bump en cada cambio (cache-busting de `@veo/policy`). Arranca en 1 (seed).
+  version   Int      @default(1)
+  /// actorId del último que la mutó (operador admin) o 'system' (seed). Accountability; el WORM es la verdad.
+  updatedBy String   @map("updated_by")
+  /// Momento del último cambio (auto). Ordena el historial junto con `version`.
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  versions  PolicyVersion[]
+
+  @@map("policies")
+  @@schema("identity")
+}
+
+/// HISTORIAL de cambios de una política (ADR-024 · timeline del detalle de Gobierno → Políticas). APPEND-ONLY:
+/// un row por cada VERSIÓN materializada de una política. La tabla `Policy` guarda SOLO el estado VIGENTE
+/// (updatedBy/updatedAt únicos, sin historia); esta tabla acumula el snapshot de cada transición para que el
+/// detalle liste "v1 · creada → v2 · … → v3 · …". Se escribe en la MISMA tx del PUT (`PoliciesService.update`),
+/// junto al bump de `version` + el outbox `policy.updated`: estado ↔ historial ↔ auditoría, atómicos. Las
+/// políticas EXISTENTES arrancan SIN historial (la historia empieza desde el 1er PUT): el update siembra el
+/// baseline (la versión vigente pre-edit) la primera vez, así el timeline queda completo desde v1. Es un espejo
+/// LEGIBLE del libro WORM (audit-service es la verdad inmutable); esta tabla es la proyección de UI, read-only.
+model PolicyVersion {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Key de la política (FK lógica a `Policy.key`). Denormalizada para consultar el historial por key sin join.
+  policyKey String   @map("policy_key")
+  policy    Policy   @relation(fields: [policyKey], references: [key], onDelete: Cascade)
+  /// Número de versión materializado (monotónico, espeja `Policy.version` en el momento del cambio).
+  version   Int
+  /// Snapshot del `enabled` vigente en esta versión.
+  enabled   Boolean
+  /// Snapshot de los `params` vigentes en esta versión (jsonb, validado en su momento contra @veo/policy).
+  params    Json     @default("{}")
+  /// actorId que produjo esta versión (operador admin) o 'system' (baseline sembrado / seed). Accountability.
+  changedBy String   @map("changed_by")
+  /// Momento del cambio. En el baseline sembrado = el `updatedAt` histórico de la fila; en un PUT = ahora.
+  changedAt DateTime @default(now()) @map("changed_at") @db.Timestamptz
+
+  /// UNA fila por (política, versión): la re-siembra del baseline es idempotente (createMany skipDuplicates).
+  @@unique([policyKey, version])
+  /// Hot-path del timeline: historial de UNA política, más reciente primero.
+  @@index([policyKey, version(sort: Desc)])
+  @@map("policy_versions")
+  @@schema("identity")
+}
+
+/// Overlay de VISIBILIDAD de permisos (ADR-025 §3) — la CAPA 2 del gobierno unificado, en el MISMO módulo que
+/// las Políticas. Registro SUBTRACT-ONLY: guarda SOLO los pares (rol, permiso) que el superadmin RESTÓ a un rol.
+/// El permiso EFECTIVO = `base(rol, permiso)` AND NOT `override.hidden` (la base vive en CÓDIGO · `@veo/policy`
+/// `PERMISSION_ROLES`; este registro solo la mitad editable). AUSENCIA de fila = rige la base (fail-safe). El
+/// invariante (solo se resta lo que la base concede; nunca un candado legal · Ley 29733) lo enforcea el service.
+/// Arranca VACÍO (sin seed) = sin restricciones = base pura. Cada mutación bumpea `version` + emite
+/// `permission_override.updated` por outbox EN LA MISMA tx (audit WORM + invalidación de cache de `@veo/policy`).
+model PermissionOverride {
+  /// Rol afectado (un `AdminRole` de `@veo/shared-types`, guardado como String — el eje FILA del overlay).
+  role       String
+  /// Permiso restado ('drivers:approve', 'ops:view', …) — el eje COLUMNA. Validado contra `PERMISSION_ROLES`.
+  permission String
+  /// subtract-only: true = RESTADO a ese rol; false = des-restaurado explícito (equivale a ausencia → base).
+  hidden     Boolean  @default(true)
+  /// actorId del superadmin que lo mutó (accountability; el WORM es la verdad). Nunca 'system' (no hay seed).
+  updatedBy  String   @map("updated_by")
+  /// Momento del último cambio (auto). Ordena el historial junto con `version`.
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  /// Versión MONOTÓNICA: bump en cada cambio (cache-busting / orden ante reentrega). Arranca en 1.
+  version    Int      @default(1)
+
+  @@id([role, permission])
+  @@map("permission_overrides")
   @@schema("identity")
 }

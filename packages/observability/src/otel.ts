@@ -7,6 +7,11 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import {
+  CompositePropagator,
+  W3CTraceContextPropagator,
+  W3CBaggagePropagator,
+} from '@opentelemetry/core';
 
 let sdk: NodeSDK | undefined;
 
@@ -27,6 +32,14 @@ export function bootstrapOtel(opts: OtelOptions): () => Promise<void> {
       [ATTR_SERVICE_VERSION]: opts.serviceVersion ?? '0.1.0',
     }),
     traceExporter: new OTLPTraceExporter(endpoint ? { url: `${endpoint}/v1/traces` } : {}),
+    // Propagador W3C EXPLÍCITO (no dependemos del default de OTEL_PROPAGATORS): si esa env queda vacía o
+    // inválida, el SDK degrada a un NoopTextMapPropagator → captureTraceparent()/runWithExtractedTraceparent()
+    // (trace-propagation.ts) producirían no-op SILENCIOSO y la correlación de traza por el outbox moriría sin
+    // error. Registrarlo acá hace el linkage DETERMINISTA en cualquier entorno. tracecontext = el traceparent
+    // que persiste el outbox; baggage acompaña para no perder correlación de equipaje en el resto de la traza.
+    textMapPropagator: new CompositePropagator({
+      propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
+    }),
     instrumentations: [
       getNodeAutoInstrumentations({
         '@opentelemetry/instrumentation-fs': { enabled: false },

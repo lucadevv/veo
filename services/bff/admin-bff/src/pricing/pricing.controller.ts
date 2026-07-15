@@ -11,15 +11,9 @@ import { Body, Controller, Get, HttpCode, Put } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, Roles, RequireStepUpMfa, type AuthenticatedUser } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import {
-  PricingService,
-  type ModeScheduleView,
-  type FuelSurchargeView,
-  type EnergyCatalogView,
-  type BidFloorView,
-} from './pricing.service';
-import { ReplaceScheduleDto, ReplaceFuelSurchargeDto, ReplaceBidFloorDto } from './dto/pricing.dto';
-import { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
+import { PricingService, type BidFloorView, type BaseFareView } from './pricing.service';
+import { ReplaceBidFloorDto, ReplaceBaseFareDto } from './dto/pricing.dto';
+import { Permission } from '../policies/permission.decorator';
 
 @ApiTags('pricing')
 @Controller('pricing')
@@ -27,71 +21,34 @@ import { ReplaceEnergyCatalogDto } from './dto/energy-catalog.dto';
 export class PricingController {
   constructor(private readonly pricing: PricingService) {}
 
-  @Get('mode-schedule')
+  @Get('base-fare')
+  @Permission('pricing:view')
   @ApiOperation({
-    summary: 'Schedule de modo de pricing vigente (o el default PUJA). pricing:view. ADR 011',
+    summary:
+      'Tarifa base vigente (banderazo + per-km + per-min, o los defaults). pricing:view. F2.4',
   })
-  getSchedule(@CurrentUser() user: AuthenticatedUser): Promise<ModeScheduleView> {
-    return this.pricing.getSchedule(user);
+  getBaseFare(@CurrentUser() user: AuthenticatedUser): Promise<BaseFareView> {
+    return this.pricing.getBaseFare(user);
   }
 
-  @Put('mode-schedule')
+  @Put('base-fare')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
-  @RequireStepUpMfa()
-  @ApiOperation({
-    summary: 'REEMPLAZA wholesale el schedule de modo. pricing:manage (ADMIN/SUPERADMIN/FINANCE).',
-  })
-  replaceSchedule(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ReplaceScheduleDto,
-  ): Promise<ModeScheduleView> {
-    return this.pricing.replaceSchedule(user, dto);
-  }
-
-  @Get('fuel-surcharge')
-  @ApiOperation({ summary: 'Recargo de combustible por km vigente (o 0). pricing:view. B3' })
-  getFuelSurcharge(@CurrentUser() user: AuthenticatedUser): Promise<FuelSurchargeView> {
-    return this.pricing.getFuelSurcharge(user);
-  }
-
-  @Put('fuel-surcharge')
-  @HttpCode(200)
-  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
+  @Permission('pricing:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:
-      'REEMPLAZA el recargo de combustible por km. pricing:manage (ADMIN/SUPERADMIN/FINANCE).',
+      'REEMPLAZA la tarifa base (banderazo + per-km + per-min). pricing:manage (ADMIN/SUPERADMIN/FINANCE). F2.4',
   })
-  replaceFuelSurcharge(
+  replaceBaseFare(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ReplaceFuelSurchargeDto,
-  ): Promise<FuelSurchargeView> {
-    return this.pricing.replaceFuelSurcharge(user, dto);
-  }
-
-  @Get('energy-catalog')
-  @ApiOperation({ summary: 'Catálogo de precios de energía por fuente vigente. pricing:view. B5' })
-  getEnergyCatalog(@CurrentUser() user: AuthenticatedUser): Promise<EnergyCatalogView> {
-    return this.pricing.getEnergyCatalog(user);
-  }
-
-  @Put('energy-catalog')
-  @HttpCode(200)
-  @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
-  @RequireStepUpMfa()
-  @ApiOperation({
-    summary:
-      'REEMPLAZA wholesale los precios de energía. pricing:manage (ADMIN/SUPERADMIN/FINANCE). B5',
-  })
-  replaceEnergyCatalog(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ReplaceEnergyCatalogDto,
-  ): Promise<EnergyCatalogView> {
-    return this.pricing.replaceEnergyCatalog(user, dto);
+    @Body() dto: ReplaceBaseFareDto,
+  ): Promise<BaseFareView> {
+    return this.pricing.replaceBaseFare(user, dto);
   }
 
   @Get('bid-floor')
+  @Permission('pricing:view')
   @ApiOperation({
     summary:
       'Piso de la PUJA vigente (default + overrides por oferta, o el default S/7). pricing:view. ADR 010 §9.3',
@@ -103,6 +60,7 @@ export class PricingController {
   @Put('bid-floor')
   @HttpCode(200)
   @Roles(AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE)
+  @Permission('pricing:manage')
   @RequireStepUpMfa()
   @ApiOperation({
     summary:

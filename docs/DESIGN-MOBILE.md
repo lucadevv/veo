@@ -12,11 +12,12 @@
 
 ## 0. Principios (no negociables)
 
-1. **Misma marca, un sistema.** VEO es un **lienzo NEGRO** (`#000`) + **VEO Cyan** (`#00E5FF`) de acento
-   disciplinado, igual en passenger y driver (Brand Book). Las dos apps comparten la identidad y el mismo
-   sistema de color; el conductor NO se diferencia por el tema sino por el app icon y el lockup
-   "VEO | Conductores". El cyan sobre claro es ilegible (~1.5:1) y sobre negro ~13.6:1: por eso el lienzo
-   es oscuro y el texto sobre cyan es NEGRO.
+1. **Misma marca, un sistema.** VEO es un **lienzo oscuro azulado** (`bg #0A0B0F`) + **azul de marca**
+   (`#2D7FF9`) de acento disciplinado, igual en passenger y driver (Brand Book). Las dos apps comparten la
+   identidad y el mismo sistema de color; el conductor **NO se diferencia por el color** sino por el app icon y
+   el lockup "VEO | Conductores". El azul tiene profundidad suficiente para **texto BLANCO** encima
+   (`onAccent`/`onBrand` = `#FFFFFF`) y rinde con alto contraste sobre el lienzo oscuro: por eso el lienzo es
+   casi-negro azulado y el texto sobre el azul es **BLANCO**.
 2. **Tokens, no hex.** La FUENTE única de marca es `packages/ui-kit/src/tokens/themes.ts` (hex sRGB del
    Brand Book); la web DERIVA esos valores a **OKLCH** en `tokens.css` (RN no parsea `oklch()`, la web sí).
    El script `packages/ui-kit/scripts/oklch-to-hex.mjs` ayuda a verificar la equivalencia OKLCH↔hex.
@@ -75,23 +76,26 @@ app. Se eligen con `<ThemeProvider name="passenger" | "driver">` o pasando `them
 > Book viven ahí; `packages/shared-config/tailwind/tokens.css` DERIVA esos valores a OKLCH para la web. No
 > se duplican los hex en este doc (evita drift): describe la intención, el token vive en el código.
 
-### 2.1 Passenger — marca VEO: noche, VEO Cyan
+### 2.1 Passenger — marca VEO: noche, azul de marca
 
-App de seguridad personal sobre **lienzo NEGRO puro de marca** (`bg #000000`), acento **VEO Cyan**
-(`#00E5FF`) de uso disciplinado para acciones/ruta/CTA/estados activos, verde de confianza para seguridad
-(compartir viaje). Cuando el cyan rellena (botón primario), el texto encima es **NEGRO**. `scheme: 'dark'`,
-status bar `light-content`. Valores canónicos en `themes.ts` → `passengerTheme`.
+App de seguridad personal sobre **lienzo oscuro azulado de marca** (`bg #0A0B0F`), acento **azul de marca**
+(`#2D7FF9`) de uso disciplinado para acciones/ruta/CTA/estados activos, verde de confianza para seguridad
+(compartir viaje). Cuando el azul rellena (botón primario), el texto encima es **BLANCO** (`onAccent` =
+`#FFFFFF`). `scheme: 'dark'`, status bar `light-content`. Valores canónicos en `themes.ts` → `passengerTheme`.
 
-### 2.2 Driver — mismo sistema de marca (negro + VEO Cyan)
+### 2.2 Driver — mismo sistema de marca (azul `#2D7FF9`, no se diferencia por color)
 
-El conductor usa el **mismo sistema de color que el pasajero** (no se diferencia por el tema sino por el app
-icon y el lockup "VEO | Conductores"). Lienzo NEGRO puro (`#000000`, ideal OLED para turnos largos), acento
-VEO Cyan `#00E5FF`, alto contraste y números tabulares (ganancias, ETAs) legibles al volante.
-`scheme: 'dark'`, status bar `light-content`. Valores canónicos en `themes.ts` → `driverTheme`.
+El conductor usa el **mismo sistema de color que el pasajero**: misma marca azul `#2D7FF9`, mismo lienzo
+oscuro. **No se diferencia por el color** sino por el app icon y el lockup "VEO | Conductores". Lienzo
+casi-negro azulado (`#0A0B0F`, ideal OLED para turnos largos), acento azul `#2D7FF9` con texto **BLANCO**
+encima, alto contraste y números tabulares (ganancias, ETAs) legibles al volante. `scheme: 'dark'`, status
+bar `light-content`. Valores canónicos en `themes.ts` → `driverTheme` (el **ejemplo canónico** de la paleta).
 
-> Antes el driver usaba un navy `#121824` + cyan lavado `#39BCDF` que DIVERGÍA del Brand Book; se corrigió
-> en el pase de marca para unificar con el pasajero. En dark, la elevación se expresa con la **superficie**
-> (`surface` → `surfaceElevated`) y sombras negras tenues, no con sombras fuertes ni color.
+> **Migración 2026-06:** antes pasajero y driver describían un acento **cyan** (`#00E5FF` / cian lavado
+> `#39BCDF`) y un lienzo "negro puro"; el driver llegó a usar un navy `#121824`. Todo eso queda **DEPRECADO**.
+> Hoy ambas apps comparten el **azul de marca `#2D7FF9`** sobre lienzo `#0A0B0F`, con texto blanco sobre el
+> azul. En dark, la elevación se expresa con la **superficie** (`surface` → `surfaceElevated`) y sombras
+> negras tenues, no con sombras fuertes ni color.
 
 ---
 

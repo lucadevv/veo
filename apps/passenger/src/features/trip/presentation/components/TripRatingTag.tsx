@@ -43,7 +43,7 @@ export function TripRatingTag({
         ]}
         accessibilityRole="text"
         accessibilityLabel={t('history.rateNudge')}>
-        <IconStarFilled color={theme.colors.brand} size={12} />
+        <IconStarFilled color={theme.colors.warn} size={12} />
         <Text variant="label" color="brand" numberOfLines={1}>
           {t('history.rateNudge')}
         </Text>

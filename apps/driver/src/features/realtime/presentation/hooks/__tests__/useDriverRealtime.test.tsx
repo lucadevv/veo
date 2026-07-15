@@ -51,12 +51,15 @@ function makeHandlers(overrides: Partial<DriverRealtimeHandlers> = {}): DriverRe
   return {
     onOffer: jest.fn(),
     onMatch: jest.fn(),
+    onBidClosed: jest.fn(),
     onTripUpdate: jest.fn(),
     onChatMessage: jest.fn(),
     onTipAdded: jest.fn(),
     onWaypointProposed: jest.fn(),
     onConnectionChange: jest.fn(),
     onResync: jest.fn(),
+    onSessionSuperseded: jest.fn(),
+    onSessionRevoked: jest.fn(),
     ...overrides,
   };
 }

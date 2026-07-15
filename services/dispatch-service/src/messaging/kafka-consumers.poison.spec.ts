@@ -65,6 +65,7 @@ function build(over: Partial<Spies> = {}): { svc: KafkaConsumersService; spies: 
     noop, // matching
     { recordDemand: async () => {} } as never, // surge
     projection,
+    noop, // suspensionService
     noop, // offerBoard
     { recordDemand: async () => {} } as never, // heatmap
   );

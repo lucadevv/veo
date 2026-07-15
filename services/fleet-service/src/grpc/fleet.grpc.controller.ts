@@ -3,18 +3,82 @@
  * Lectura síncrona de vehículos y documentos para otros servicios (identity/admin).
  * Devuelve `found=false` en vez de lanzar, para que el llamante decida.
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
-import { deriveVehicleReviewStatus } from '../vehicles/vehicle-rules';
-import { FleetOwnerType, type Vehicle } from '../generated/prisma';
+import {
+  verifyGrpcIdentity,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
+} from '@veo/auth';
+import { FLEET_GRPC_REPO, type FleetGrpcRepository } from './fleet-grpc.repository';
+import {
+  deriveVehicleReviewStatus,
+  hasRequiredVehicleDocsOperable,
+  pickActiveVehicle,
+  VehicleReviewStatus,
+} from '../vehicles/vehicle-rules';
+import {
+  inspectionInvalidReason,
+  isInspectionCurrent,
+  InspectionInvalidReason,
+} from '../inspections/inspection-rules';
+import {
+  FleetDocumentStatus,
+  FleetDocumentType,
+  FleetOwnerType,
+  VehicleDocStatus,
+  VehicleModelStatus,
+  type Vehicle,
+} from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
 interface GetByIdRequest {
   id: string;
+}
+
+/** fleet.GetVehicleCounts — conteo de vehículos por docStatus (stat cards del admin). */
+interface VehicleCountsReply {
+  valid: number;
+  expiringSoon: number;
+  expired: number;
+}
+
+/** fleet.GetReviewQueueCounts — conteo de las colas de revisión de flota (cola unificada del admin). */
+interface ReviewQueueCountsReply {
+  docsPendingReview: number;
+  docsExpiringSoon: number;
+  modelsPendingReview: number;
+}
+
+/** fleet.GetDriverDocsCompleteness — completitud documental por conductor (REQUERIDOS en VALID / total). */
+interface DriverDocsCompletenessReply {
+  items: { driverId: string; validRequired: number; requiredTotal: number }[];
+}
+
+/** fleet.GetVehiclesInspectionStatus — estado de ITV (última inspección) por vehículo. */
+interface VehiclesInspectionStatusReply {
+  items: {
+    vehicleId: string;
+    hasInspection: boolean;
+    current: boolean;
+    passed: boolean;
+    nextDueAt: string;
+    invalidReason: string;
+  }[];
+}
+
+/** Documentos DRIVER-scoped OBLIGATORIOS para operar (espeja REQUIRED_DRIVER_DOC_TYPES del admin-bff). */
+const REQUIRED_DRIVER_DOC_TYPES = [
+  FleetDocumentType.LICENSE_A1,
+  FleetDocumentType.SOAT,
+  FleetDocumentType.PROPERTY_CARD,
+  FleetDocumentType.VEHICLE_PHOTO,
+] as const;
+
+interface GetByIdsRequest {
+  ids: string[];
 }
 
 interface VehicleReply {
@@ -38,6 +102,17 @@ interface DriverVehiclesReply {
   vehicles: VehicleReply[];
 }
 
+interface VehiclesReply {
+  vehicles: VehicleReply[];
+}
+
+/// Imagen de un documento (sub-lote 3A): clave S3 + cara (FRONT|BACK|SINGLE) + orden.
+interface DocumentImageReply {
+  s3Key: string;
+  side: string;
+  order: number;
+}
+
 interface FleetDocumentReply {
   id: string;
   ownerType: string;
@@ -46,12 +121,32 @@ interface FleetDocumentReply {
   documentNumber: string;
   status: string;
   expiresAt: string;
+  /// DEPRECADO (sub-lote 3A): primera imagen (backward-compat). El driver-bff NO lo proyecta al conductor.
+  fileS3Key: string;
+  rejectionReason: string;
+  /// Imágenes del documento (1..N caras). Admin review las firma; el driver-bff mapea un subconjunto.
+  images: DocumentImageReply[];
 }
 
 interface DriverDocumentsReply {
   driverId: string;
   documents: FleetDocumentReply[];
 }
+
+/// Vigencia de la ITV del vehículo OPERADO del conductor (gate de aprobación · compliance).
+interface DriverInspectionStatusReply {
+  current: boolean;
+  hasVehicle: boolean;
+  vehicleId: string;
+  plate: string;
+  nextDueAt: string;
+  passed: boolean;
+  /// NONE|NOT_PASSED|OVERDUE|NO_VEHICLE; "" cuando current=true.
+  invalidReason: string;
+}
+
+/// Motivo extra (fuera del enum de inspección): el conductor no tiene NINGÚN vehículo operable.
+const NO_VEHICLE_REASON = 'NO_VEHICLE';
 
 const EMPTY_VEHICLE: VehicleReply = {
   id: '',
@@ -67,8 +162,17 @@ const EMPTY_VEHICLE: VehicleReply = {
   status: '',
 };
 
-/** Mapea un Vehicle de Prisma al reply gRPC (found=true). */
-function toVehicleReply(v: Vehicle): VehicleReply {
+/**
+ * Mapea un Vehicle de Prisma al reply gRPC (found=true). `docsOperable` lo PRECOMPUTA el handler desde los
+ * documentos REQUERIDOS del vehículo (SOAT+ITV presentes+aprobados+vigentes, ownerType=VEHICLE) — no se deriva
+ * acá porque cargarlos es I/O y los handlers de lista los batchean (anti-N+1).
+ */
+function toVehicleReply(v: Vehicle, docsOperable: boolean): VehicleReply {
+  // Operabilidad DERIVADA de señales reales (docs requeridos SOAT+ITV operables + ficha linkeada), no del flag
+  // `active` stored que nunca se flipeaba. `active` y `status` del reply reflejan la MISMA señal derivada — el
+  // gate de carpool (que chequea ambos por defensa en profundidad) queda coherente y deja de bloquear por un
+  // flag muerto, SIN sobre-desbloquear (un vehículo sin SOAT/ITV operables jamás deriva a ACTIVE).
+  const reviewStatus = deriveVehicleReviewStatus({ docsOperable, modelSpecId: v.modelSpecId });
   return {
     id: v.id,
     plate: v.plate,
@@ -78,9 +182,9 @@ function toVehicleReply(v: Vehicle): VehicleReply {
     color: v.color,
     vehicleType: v.vehicleType,
     docStatus: v.docStatus,
-    active: v.active,
+    active: reviewStatus === VehicleReviewStatus.ACTIVE,
     found: true,
-    status: deriveVehicleReviewStatus(v),
+    status: reviewStatus,
   };
 }
 
@@ -89,15 +193,19 @@ export class FleetGrpcController {
   private readonly secret: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(FLEET_GRPC_REPO) private readonly repo: FleetGrpcRepository,
     config: ConfigService<Env, true>,
+    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
+    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
   /** Rechaza la RPC si la metadata no trae una identidad interna firmada (HMAC) válida. */
   private requireIdentity(metadata: Metadata): void {
-    const identity = verifyGrpcIdentity(metadata, this.secret);
+    const identity = verifyGrpcIdentity(metadata, this.secret, {
+      allowedAudiences: this.allowedAudiences,
+    });
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,
@@ -106,38 +214,185 @@ export class FleetGrpcController {
     }
   }
 
+  /**
+   * Operabilidad documental (SOAT+ITV) de un set de vehículos, BATCHED en UNA query (anti-N+1): los docs
+   * REQUERIDOS del vehículo son FleetDocument ownerType=VEHICLE, ownerId=vehicle.id (NO ownerType=DRIVER —
+   * esos son las certificaciones de operador del conductor, otra cosa). Devuelve un mapa vehicleId→docsOperable
+   * (false para un vehículo sin docs requeridos operables). Espeja el batch de `purgeForDriver`/`enrichWithSpec`.
+   *
+   * El `fresh` lo ELIGE el caller según freshness: el gate de DINERO (GetVehicle, que alimenta reserve/approve
+   * del carpooling) pasa `true` (PRIMARY) — un doc REVOCADO por el admin debe verse al instante, no tras el lag
+   * de réplica (read-write §: nunca leer de réplica en un flujo crítico). Los caminos de display/refinamiento
+   * (batch de búsqueda, rehidratación) pasan `false` (RÉPLICA).
+   */
+  private async vehicleDocsOperableMap(
+    fresh: boolean,
+    vehicleIds: readonly string[],
+  ): Promise<Map<string, boolean>> {
+    const operable = new Map<string, boolean>();
+    if (vehicleIds.length === 0) return operable;
+    const docs = await this.repo.findVehicleDocs(vehicleIds, fresh);
+    const byOwner = new Map<string, typeof docs>();
+    for (const d of docs) {
+      const list = byOwner.get(d.ownerId);
+      if (list) list.push(d);
+      else byOwner.set(d.ownerId, [d]);
+    }
+    for (const vehicleId of vehicleIds) {
+      operable.set(vehicleId, hasRequiredVehicleDocsOperable(byOwner.get(vehicleId) ?? []));
+    }
+    return operable;
+  }
+
+  /**
+   * Vehículo por id — GATE DE DINERO. Lo consume el carpooling (booking) en `getDetail` (fail-closed),
+   * `reserve` (INSTANT_BOOKING cobra al instante) y `approve` (REVISION cobra al aprobar): los tres son
+   * AUTORITATIVOS sobre operabilidad, así que leen del PRIMARY (`prisma.write`), NO de la réplica — un doc
+   * REVOCADO por el admin (write a primary) debe verse en el mismo instante, sin la ventana de lag de la
+   * réplica eventualmente consistente (read-write §: nunca leer de réplica en un flujo crítico).
+   */
   @GrpcMethod('FleetService', 'GetVehicle')
   async getVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
     this.requireIdentity(metadata);
-    const v = await this.prisma.read.vehicle.findUnique({ where: { id } });
+    const v = await this.repo.findVehicleById(id, true);
     if (!v) return EMPTY_VEHICLE;
-    return toVehicleReply(v);
+    const operableById = await this.vehicleDocsOperableMap(true, [v.id]);
+    return toVehicleReply(v, operableById.get(v.id) ?? false);
   }
 
-  /** Rehidratación: vehículos registrados por el conductor (id = driverId de identity). */
-  @GrpcMethod('FleetService', 'GetDriverVehicles')
-  async getDriverVehicles(
-    { id }: GetByIdRequest,
-    metadata: Metadata,
-  ): Promise<DriverVehiclesReply> {
+  /**
+   * Conteo de vehículos por estado documental (docStatus · stat cards del panel admin). groupBy AGREGADO en la
+   * réplica de lectura (no trae filas), servido por el índice sobre doc_status; un estado sin filas no aparece →
+   * default 0. Sin PII: solo enteros. El gate de identidad interna (requireIdentity) acota a los rieles permitidos.
+   */
+  @GrpcMethod('FleetService', 'GetVehicleCounts')
+  async getVehicleCounts(_request: unknown, metadata: Metadata): Promise<VehicleCountsReply> {
     this.requireIdentity(metadata);
-    const vehicles = await this.prisma.read.vehicle.findMany({
-      where: { driverId: id },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { driverId: id, vehicles: vehicles.map(toVehicleReply) };
+    const groups = await this.repo.countVehiclesByDocStatus();
+    const countOf = (docStatus: VehicleDocStatus): number =>
+      groups.find((g) => g.docStatus === docStatus)?.count ?? 0;
+    return {
+      valid: countOf(VehicleDocStatus.VALID),
+      expiringSoon: countOf(VehicleDocStatus.EXPIRING_SOON),
+      expired: countOf(VehicleDocStatus.EXPIRED),
+    };
   }
 
-  @GrpcMethod('FleetService', 'GetDriverDocuments')
-  async getDriverDocuments(
+  /**
+   * Conteo de las COLAS DE REVISIÓN de flota para la cola unificada del panel: documentos por revisar
+   * (PENDING_REVIEW), documentos por vencer (EXPIRING_SOON) y modelos de vehículo por curar (PENDING_REVIEW).
+   * Tres counts en PARALELO sobre la réplica de lectura (servidos por los índices de status); sin PII, solo
+   * enteros. El gate de identidad interna (requireIdentity) acota a los rieles permitidos.
+   */
+  @GrpcMethod('FleetService', 'GetReviewQueueCounts')
+  async getReviewQueueCounts(
+    _request: unknown,
+    metadata: Metadata,
+  ): Promise<ReviewQueueCountsReply> {
+    this.requireIdentity(metadata);
+    const [docsPendingReview, docsExpiringSoon, modelsPendingReview] = await Promise.all([
+      // "Documentos reenviados a revisión" = SOLO docs de conductor (los de vehículo viven en el eje Vehículos
+      // de la cola; contarlos acá los doble-representaba: KPI "Documentos" + fila "Vehículo · revisión de aptitud").
+      this.repo.countDocuments(FleetDocumentStatus.PENDING_REVIEW, FleetOwnerType.DRIVER),
+      this.repo.countDocuments(FleetDocumentStatus.EXPIRING_SOON),
+      this.repo.countModels(VehicleModelStatus.PENDING_REVIEW),
+    ]);
+    return { docsPendingReview, docsExpiringSoon, modelsPendingReview };
+  }
+
+  /**
+   * Completitud documental de VARIOS conductores en UNA query (anti-N+1), para la columna "Documentos X/Y" +
+   * el embudo (sin docs / listos) del panel. `ids` = Driver.id (los docs DRIVER-scoped se indexan por
+   * ownerId=Driver.id, servido por @@index([ownerType, ownerId])). Cuenta los REQUERIDOS DISTINTOS en estado
+   * VALID por conductor. Sin PII: solo enteros. Un id sin docs devuelve validRequired=0 (no se omite).
+   */
+  @GrpcMethod('FleetService', 'GetDriverDocsCompleteness')
+  async getDriverDocsCompleteness(
+    { ids }: GetByIdsRequest,
+    metadata: Metadata,
+  ): Promise<DriverDocsCompletenessReply> {
+    this.requireIdentity(metadata);
+    if (!ids || ids.length === 0) return { items: [] };
+    const required = REQUIRED_DRIVER_DOC_TYPES;
+    const docs = await this.repo.findDriverValidRequiredDocs(ids, required);
+    // Conjunto de REQUERIDOS-en-VALID por conductor (dedup por tipo → cuenta distinct, no filas repetidas).
+    const byOwner = new Map<string, Set<FleetDocumentType>>();
+    for (const d of docs) {
+      let set = byOwner.get(d.ownerId);
+      if (!set) {
+        set = new Set();
+        byOwner.set(d.ownerId, set);
+      }
+      set.add(d.type);
+    }
+    return {
+      items: ids.map((id) => ({
+        driverId: id,
+        validRequired: byOwner.get(id)?.size ?? 0,
+        requiredTotal: required.length,
+      })),
+    };
+  }
+
+  /**
+   * Estado de ITV de VARIOS vehículos en UNA query (anti-N+1), para la columna "ITV" de la lista. `ids` =
+   * Vehicle.id. Trae TODAS las inspecciones de esos vehículos ordenadas y se queda con la ÚLTIMA por vehículo
+   * (dedup en JS; Prisma no tiene DISTINCT ON — el orderBy [vehicleId, inspectedAt desc] lo sirve el índice
+   * único [vehicleId, inspectedAt, inspectorId]). Reusa las reglas puras isInspectionCurrent/invalidReason.
+   */
+  @GrpcMethod('FleetService', 'GetVehiclesInspectionStatus')
+  async getVehiclesInspectionStatus(
+    { ids }: GetByIdsRequest,
+    metadata: Metadata,
+  ): Promise<VehiclesInspectionStatusReply> {
+    this.requireIdentity(metadata);
+    if (!ids || ids.length === 0) return { items: [] };
+    const now = new Date();
+    const inspections = await this.repo.findInspectionsForVehicles(ids);
+    const latestByVehicle = new Map<string, { passed: boolean; nextDueAt: Date }>();
+    for (const insp of inspections) {
+      if (!latestByVehicle.has(insp.vehicleId)) latestByVehicle.set(insp.vehicleId, insp);
+    }
+    return {
+      items: ids.map((id) => {
+        const latest = latestByVehicle.get(id);
+        if (!latest) {
+          return {
+            vehicleId: id,
+            hasInspection: false,
+            current: false,
+            passed: false,
+            nextDueAt: '',
+            invalidReason: '',
+          };
+        }
+        const current = isInspectionCurrent(latest, now);
+        return {
+          vehicleId: id,
+          hasInspection: true,
+          current,
+          passed: latest.passed,
+          nextDueAt: latest.nextDueAt.toISOString(),
+          invalidReason: current
+            ? ''
+            : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE),
+        };
+      }),
+    };
+  }
+
+  /**
+   * Documentos de UN vehículo (ownerType=VEHICLE) con imágenes, para el detalle. `id` = Vehicle.id. Espejo EXACTO
+   * de GetDriverDocuments pero con owner=VEHICLE (SOAT, tarjeta de propiedad, foto). El `driverId` del reply
+   * lleva el vehicleId (reuso del contrato DriverDocumentsReply). Riel ADMIN (el detalle es Compliance+).
+   */
+  @GrpcMethod('FleetService', 'GetVehicleDocuments')
+  async getVehicleDocuments(
     { id }: GetByIdRequest,
     metadata: Metadata,
   ): Promise<DriverDocumentsReply> {
     this.requireIdentity(metadata);
-    const docs = await this.prisma.read.fleetDocument.findMany({
-      where: { ownerType: FleetOwnerType.DRIVER, ownerId: id },
-      orderBy: { createdAt: 'desc' },
-    });
+    const docs = await this.repo.findDocsWithImagesByOwner(FleetOwnerType.VEHICLE, id);
     return {
       driverId: id,
       documents: docs.map((d) => ({
@@ -148,7 +403,145 @@ export class FleetGrpcController {
         documentNumber: d.documentNumber,
         status: d.status,
         expiresAt: d.expiresAt ? d.expiresAt.toISOString() : '',
+        fileS3Key: d.fileS3Key ?? '',
+        rejectionReason: d.rejectionReason ?? '',
+        images: d.images.map((img) => ({ s3Key: img.s3Key, side: img.side, order: img.order })),
       })),
+    };
+  }
+
+  /**
+   * Lote 3b — lectura BATCH de vehículos por id (anti-N+1). La consume la BÚSQUEDA de carpooling (booking) para
+   * filtrar las ofertas cuyo vehículo dejó de ser operable. Trae un VehicleReply por cada id ENCONTRADO; los ids
+   * inexistentes se OMITEN (el caller trata "ausente del map" como no-operable). DOS queries fijas (vehicles +
+   * docs batched), nunca N. El `status`/`active` derivados son la MISMA señal que GetVehicle (toVehicleReply).
+   */
+  @GrpcMethod('FleetService', 'GetVehiclesByIds')
+  async getVehiclesByIds({ ids }: GetByIdsRequest, metadata: Metadata): Promise<VehiclesReply> {
+    this.requireIdentity(metadata);
+    const uniqueIds = [...new Set(ids ?? [])];
+    if (uniqueIds.length === 0) return { vehicles: [] };
+    const vehicles = await this.repo.findVehiclesByIds(uniqueIds);
+    // ANTI-N+1: los docs de TODOS los vehículos en UNA query (la 2da), agrupados por vehicleId.
+    // Réplica: la búsqueda es un REFINAMIENTO best-effort de display, no el gate autoritativo (ese es GetVehicle).
+    const operableById = await this.vehicleDocsOperableMap(
+      false,
+      vehicles.map((v) => v.id),
+    );
+    return {
+      vehicles: vehicles.map((v) => toVehicleReply(v, operableById.get(v.id) ?? false)),
+    };
+  }
+
+  /** Rehidratación: vehículos registrados por el conductor (id = driverId de identity). */
+  @GrpcMethod('FleetService', 'GetDriverVehicles')
+  async getDriverVehicles(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverVehiclesReply> {
+    this.requireIdentity(metadata);
+    const vehicles = await this.repo.findVehiclesByDriverRecent(id);
+    // ANTI-N+1: los docs de TODOS los vehículos en UNA query, agrupados por vehicleId (no una por vehículo).
+    const operableById = await this.vehicleDocsOperableMap(
+      false,
+      vehicles.map((v) => v.id),
+    );
+    return {
+      driverId: id,
+      vehicles: vehicles.map((v) => toVehicleReply(v, operableById.get(v.id) ?? false)),
+    };
+  }
+
+  /**
+   * Vehículo OPERADO del conductor — FUENTE ÚNICA del "vehículo que el conductor maneja". Resuelve con
+   * `pickActiveVehicle` (selector AUTORITATIVO: selectedAt más reciente con docs vigentes), el MISMO que
+   * usan el gate de ITV (getDriverInspectionStatus), el ping del driver-bff (`/drivers/vehicles/active`)
+   * y el alta self-service. `id` = User.id (Vehicle.driverId). `found=false` si no tiene ninguno operable.
+   * Dispatch lo consume al adjudicar para que el vehicleId del viaje NO diverja de lo que opera el conductor.
+   */
+  @GrpcMethod('FleetService', 'GetDriverActiveVehicle')
+  async getDriverActiveVehicle({ id }: GetByIdRequest, metadata: Metadata): Promise<VehicleReply> {
+    this.requireIdentity(metadata);
+    const vehicles = await this.repo.findVehiclesByDriver(id);
+    const active = pickActiveVehicle(vehicles);
+    if (!active) return EMPTY_VEHICLE;
+    const operableById = await this.vehicleDocsOperableMap(false, [active.id]);
+    return toVehicleReply(active, operableById.get(active.id) ?? false);
+  }
+
+  @GrpcMethod('FleetService', 'GetDriverDocuments')
+  async getDriverDocuments(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverDocumentsReply> {
+    this.requireIdentity(metadata);
+    const docs = await this.repo.findDocsWithImagesByOwner(FleetOwnerType.DRIVER, id);
+    return {
+      driverId: id,
+      documents: docs.map((d) => ({
+        id: d.id,
+        ownerType: d.ownerType,
+        ownerId: d.ownerId,
+        type: d.type,
+        documentNumber: d.documentNumber,
+        status: d.status,
+        expiresAt: d.expiresAt ? d.expiresAt.toISOString() : '',
+        // DEPRECADO: primera imagen (backward-compat). proto3 default "" si no hay archivo aún.
+        fileS3Key: d.fileS3Key ?? '',
+        // M5: motivo del rechazo que escribe el operador (proto3 default "" si no hay). El conductor lo ve.
+        rejectionReason: d.rejectionReason ?? '',
+        // Sub-lote 3A: las N imágenes (ordenadas). Admin las firma; el conductor recibe un subconjunto.
+        images: d.images.map((img) => ({ s3Key: img.s3Key, side: img.side, order: img.order })),
+      })),
+    };
+  }
+
+  /**
+   * Vigencia de la inspección técnica (ITV) del vehículo OPERADO del conductor — gate de aprobación.
+   * `id` = User.id (Vehicle.driverId, NO el driverId de perfil). Regla: el vehículo OPERADO del conductor
+   * (`pickActiveVehicle`: selector AUTORITATIVO ÚNICO — el MISMO que expone GetDriverActiveVehicle, que
+   * dispatch consume al adjudicar, y que el driver-bff sella en el ping vía `/drivers/vehicles/active`)
+   * debe tener una inspección VIGENTE (última `passed && nextDueAt > now`). Sin vehículo operable → no
+   * vigente (NO_VEHICLE). Devuelve datos útiles (vehicleId, plate, nextDueAt, motivo) para un error claro
+   * en admin-bff. Solo LEE (read replica).
+   */
+  @GrpcMethod('FleetService', 'GetDriverInspectionStatus')
+  async getDriverInspectionStatus(
+    { id }: GetByIdRequest,
+    metadata: Metadata,
+  ): Promise<DriverInspectionStatusReply> {
+    this.requireIdentity(metadata);
+    const now = new Date();
+    const vehicles = await this.repo.findVehiclesByDriver(id);
+    const active = pickActiveVehicle(vehicles);
+    if (!active) {
+      // Sin vehículo operable (ninguno registrado, o todos con docs vencidos): no puede operar.
+      return {
+        current: false,
+        hasVehicle: false,
+        vehicleId: '',
+        plate: '',
+        nextDueAt: '',
+        passed: false,
+        invalidReason: NO_VEHICLE_REASON,
+      };
+    }
+
+    // Última inspección del vehículo operado (orderBy inspectedAt desc, take 1 = la VIGENTE candidata).
+    const latest = await this.repo.findLatestInspection(active.id);
+    const current = isInspectionCurrent(latest, now);
+    const reason = current
+      ? null
+      : (inspectionInvalidReason(latest, now) ?? InspectionInvalidReason.NONE);
+
+    return {
+      current,
+      hasVehicle: true,
+      vehicleId: active.id,
+      plate: active.plate,
+      nextDueAt: latest ? latest.nextDueAt.toISOString() : '',
+      passed: latest?.passed ?? false,
+      invalidReason: reason ?? '',
     };
   }
 }

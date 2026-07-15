@@ -17,7 +17,12 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
-const [, , filePath, ...pairs] = process.argv;
+// `--force` (primer arg, opcional): reemplaza la clave SIEMPRE, aun con valor no-vacío. Para secretos de los
+// que el dev-stack es DUEÑO y debe IMPONER por consistencia (HMAC del rail interno); sin esto un placeholder
+// viejo no-vacío sobrevive y desincroniza el rail → 401 silencioso. Solo para valores single-line.
+const rawArgs = process.argv.slice(2);
+const force = rawArgs[0] === '--force';
+const [filePath, ...pairs] = force ? rawArgs.slice(1) : rawArgs;
 if (!filePath) {
   console.error('upsert-env: falta la ruta del env file');
   process.exit(1);
@@ -70,11 +75,16 @@ for (const pair of pairs) {
   const key = pair.slice(0, idx);
   const value = pair.slice(idx + 1);
 
+  const current = existing.get(key)?.value;
+  // En modo --force reemplazamos aunque el valor actual sea no-vacío (el dev-stack IMPONE el valor canónico);
+  // sin force, solo se reemplaza el valor VACÍO (idempotente, no pisa la config del dev).
+  const shouldReplace = existing.has(key) && value !== '' && (force || current === '') && current !== value;
+
   if (!existing.has(key)) {
     toAppend.push([key, value]);
     appended++;
-  } else if (existing.get(key).value === '' && value !== '') {
-    // reemplazar la línea single-line vacía `KEY=` en su sitio
+  } else if (shouldReplace) {
+    // reemplazar la línea single-line `KEY=...` en su sitio
     const re = new RegExp(`^${key}=.*$`, 'm');
     if (re.test(text)) {
       text = text.replace(re, renderKV(key, value));

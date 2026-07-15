@@ -8,13 +8,15 @@ Eventos de dominio (`trip.requested`, `payment.captured`, `panic.triggered`) deb
 
 ## Decisión
 
-**Kafka (AWS MSK)** para eventos de dominio. **SNS/SQS** para fan-out simple (notifs, webhooks). **Redis Streams** descartado.
+**Kafka self-hosted en el VPS** para eventos de dominio (§0.7(c)). El fan-out simple (notifs, webhooks) se resuelve con **Kafka/Redis self-hosted**. **Redis Streams** (como bus primario) descartado.
+
+> **OBSOLETO (SaaS AWS, §0.7(c)):** ~~AWS MSK~~ (Kafka es self-hosted), ~~SNS/SQS para fan-out~~ (se hace con Kafka/Redis), ~~AWS EventBridge~~. La decisión de **Kafka** sobrevive; lo que muere es el managed de AWS.
 
 ## Alternativas
 
 - **Redis Streams**: pierde mensajes si cluster falla parcialmente
 - **RabbitMQ**: menos retención y replay menos sólido
-- **AWS EventBridge**: throughput limitado para nuestros volúmenes
+- **AWS EventBridge**: throughput limitado para nuestros volúmenes (además SaaS AWS — OBSOLETO por §0.7(c))
 
 ## Consecuencias
 
@@ -22,5 +24,5 @@ Eventos de dominio (`trip.requested`, `payment.captured`, `panic.triggered`) deb
 - Múltiples consumidores independientes
 - Retención de eventos (audit puede reconstruir 30 días)
 
-* MSK cuesta $480/mes a 50K MAU
+* ~~MSK cuesta $480/mes a 50K MAU~~ (OBSOLETO: Kafka se corre self-hosted en el VPS, sin costo MSK — §0.7(c))
 * Curva de aprendizaje (consumer groups, partitions, exactly-once)

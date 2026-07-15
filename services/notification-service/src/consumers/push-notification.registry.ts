@@ -51,14 +51,29 @@ export const pushTargetHintSchema = z.object({
 /** Payload que ven los callbacks de una fila: contrato del registro + enrichment de la fila. */
 type SpecPayload<T extends EventType, E extends z.ZodTypeAny> = EventPayload<T> & z.infer<E>;
 
+/**
+ * Naturaleza del id que devuelve `recipient` (ADR-015 D7):
+ *  - `'userId'` (DEFAULT): es la cuenta `userId` — clave directa del device-token store. La inmensa mayoría.
+ *  - `'driverId'`: es el `Driver.id` del agregado del conductor (≠ userId). DEBE resolverse a `userId` por
+ *    gRPC a identity ANTES del lookup de device-token, o el push NO matchea jamás (dos columnas UUID
+ *    distintas). El caso vivo: `payout.processed` (el evento de payments targetea por Driver.id).
+ */
+export type RecipientKind = 'userId' | 'driverId';
+
 /** Autoría TIPADA de una fila (lo que se escribe en `defineSpec`). */
 interface PushSpecDefinition<T extends EventType, E extends z.ZodTypeAny> {
   /** Campos ENRIQUECIDOS por el producer fuera del contrato del registro (display/destinatario). */
   enrichment?: E;
   /** Gate de PRODUCTO: `false` ⇒ el evento se ignora sin warn (decisión deliberada, no gap). */
   when?: (p: SpecPayload<T, E>) => boolean;
-  /** userId destinatario: resuelve tokens del device-store y es el recipientId del enqueue. */
+  /**
+   * Id destinatario: resuelve tokens del device-store y es el recipientId del enqueue. Por DEFAULT es el
+   * `userId` (clave del store); si la fila declara `recipientKind: 'driverId'` el motor lo resuelve a
+   * userId por gRPC a identity antes del lookup (ver `RecipientKind`).
+   */
   recipient: (p: SpecPayload<T, E>) => string | undefined;
+  /** Naturaleza del id que devuelve `recipient`. Omitir ⇒ `'userId'` (comportamiento de TODAS las filas previas). */
+  recipientKind?: RecipientKind;
   /**
    * recipientId de REGISTRO cuando el push sale por token enriquecido sin userId (comportamiento
    * histórico `passengerId ?? tripId`). Sin fallback y sin userId ⇒ se omite con warn.
@@ -86,6 +101,7 @@ export interface PushNotificationSpec<T extends EventType = EventType> {
   enrichment?: z.ZodType;
   when?: (p: UnknownPayload) => boolean;
   recipient: (p: UnknownPayload) => string | undefined;
+  recipientKind?: RecipientKind;
   recipientFallback?: (p: UnknownPayload) => string;
   template: TemplateKey | ((p: UnknownPayload) => TemplateKey);
   priority?: NotificationPriority;
@@ -192,6 +208,24 @@ export const PUSH_NOTIFICATION_SPECS = {
     recipientFallback: (p) => p.tripId,
     template: TEMPLATE_KEYS.TRIP_STARTED,
     dedup: (p) => `trip:${p.tripId}:started`,
+    data: (p) => ({ tripId: p.tripId, screen: PUSH_SCREEN.TripActive }),
+  }),
+
+  /**
+   * RC5 (ADR-022) · trip.destination_changed → push CRÍTICO al PASAJERO dueño de la cuenta (padre/madre) SOLO en
+   * modo niño: alguien reescribió el destino del viaje del menor y hasta ahora era invisible (changeDestination no
+   * publicaba al outbox). `when: childMode` evita spamear los viajes normales (un pasajero que cambia SU propio
+   * destino ya sabe que lo hizo). Priority Critical: seguridad infantil, drena antes que los transaccionales (misma
+   * política que child_code_failed). dedup por `eventId`: cada cambio de destino (evento distinto) vuelve a alertar,
+   * pero una redelivery del MISMO cambio dedup. Sin passengerId enriquecido no hay destinatario (gate de producto).
+   */
+  'trip.destination_changed': defineSpec('trip.destination_changed', {
+    when: (p) => p.childMode === true,
+    recipient: (p) => p.passengerId,
+    recipientFallback: (p) => p.tripId,
+    template: TEMPLATE_KEYS.TRIP_DESTINATION_CHANGED,
+    priority: NotificationPriority.Critical,
+    dedup: (p, envelope) => `trip:${p.tripId}:destination_changed:${envelope.eventId}`,
     data: (p) => ({ tripId: p.tripId, screen: PUSH_SCREEN.TripActive }),
   }),
 
@@ -371,6 +405,29 @@ export const PUSH_NOTIFICATION_SPECS = {
     }),
   }),
 
+  /**
+   * payout.processed (ADR-015 §1 D7 · §4.1) → push al CONDUCTOR: "tu liquidación se procesó, S/X en camino a
+   * tu billetera". `PROCESSED` confirmado = la plata SALIÓ del riel (semántica corregida del evento).
+   *
+   * BUG ARREGLADO (gate Lote 4 · D7): el evento targetea por `Driver.id` (el id propio del agregado del
+   * conductor que viene de payments → trip/booking → driver-bff), NO por la cuenta `userId`. El device-token
+   * store se consulta por `userId` → con `recipient: (p) => p.driverId` el lookup NO matchea jamás (Driver.id
+   * ≠ userId, dos columnas UUID distintas) y el push se omitía SIEMPRE. Por eso `recipientKind: 'driverId'`:
+   * el motor resuelve `driverId → userId` por gRPC a identity (GetDriver) ANTES del lookup de device-token.
+   *
+   * El monto NETO se formatea desde `amountCents` (es-PE: "S/" lo pone el template). SIN PII en el payload del
+   * push (solo payoutId + deep-link a la billetera; NADA de driverId/userId/nombre). dedup
+   * `payout:{payoutId}:processed`: un desembolso confirma UNA vez, redeliveries no duplican.
+   */
+  'payout.processed': defineSpec('payout.processed', {
+    recipient: (p) => p.driverId,
+    recipientKind: 'driverId',
+    template: TEMPLATE_KEYS.PAYOUT_PROCESSED,
+    dedup: (p) => `payout:${p.payoutId}:processed`,
+    vars: (p) => ({ amount: formatSoles(p.amountCents) }),
+    data: (p) => ({ payoutId: p.payoutId, screen: PUSH_SCREEN.Wallet }),
+  }),
+
   /** payment.affiliation_activated → "Yape quedó vinculado". El destinatario (userId) viaja directo. */
   'payment.affiliation_activated': defineSpec('payment.affiliation_activated', {
     recipient: (p) => p.userId,
@@ -455,13 +512,57 @@ export const PUSH_NOTIFICATION_SPECS = {
     vars: (p) => ({ make: p.make, model: p.model }),
     data: (p) => ({ modelId: p.modelId }),
   }),
+
+  /**
+   * driver.verified → push al CONDUCTOR: el operador aprobó sus antecedentes, ya puede operar (cierra el
+   * loop del onboarding: sale de "En revisión"). recipient = userId (device-store). dedup
+   * `driver:{driverId}:verified` (un alta se aprueba UNA vez; redeliveries no duplican). Sin PII: data solo
+   * lleva driverId; la app abre su gate de registro (sin PUSH_SCREEN de onboarding todavía → sin deep-link).
+   */
+  'driver.verified': defineSpec('driver.verified', {
+    recipient: (p) => p.userId,
+    template: TEMPLATE_KEYS.DRIVER_APPROVED,
+    dedup: (p) => `driver:${p.driverId}:verified`,
+    data: (p) => ({ driverId: p.driverId }),
+  }),
+
+  /**
+   * driver.rejected → push al CONDUCTOR: el operador rechazó sus antecedentes, debe corregir y reenviar.
+   * El MOTIVO (p.reason) NO viaja en el push (es PII, §0.7) — la app lo resuelve en la pantalla de rechazo
+   * vía GET /drivers/me. dedup `driver:{driverId}:rejected`. data solo driverId.
+   */
+  'driver.rejected': defineSpec('driver.rejected', {
+    recipient: (p) => p.userId,
+    template: TEMPLATE_KEYS.DRIVER_REJECTED,
+    dedup: (p) => `driver:${p.driverId}:rejected`,
+    data: (p) => ({ driverId: p.driverId }),
+  }),
+
+  /**
+   * fleet.document_rejected → push al CONDUCTOR: el operador rechazó UNO de sus documentos, debe corregirlo y
+   * reenviarlo. Cierra la ASIMETRÍA: antes solo el rechazo del ALTA (driver.rejected) avisaba; el rechazo
+   * POR-DOCUMENTO era silencioso. Gate `when: ownerType==='DRIVER'` (un doc VEHICLE-scoped tiene vehicleId como
+   * owner, no un conductor). `ownerId` es el Driver.id de PERFIL → `recipientKind:'driverId'` lo resuelve a
+   * userId por gRPC a identity ANTES del lookup de device-token (igual que payout.processed). El MOTIVO NO viaja
+   * en el push (PII §0.7): la app lo resuelve en la pantalla de rechazo vía GET /drivers/me/documents; el push
+   * solo lleva documentType (categoría, no PII) para que la app resalte el doc. dedup por (documentId, rejectedAt):
+   * una re-revisión posterior (re-subida → nuevo rechazo) SÍ vuelve a avisar; las redeliveries del mismo evento no.
+   */
+  'fleet.document_rejected': defineSpec('fleet.document_rejected', {
+    when: (p) => p.ownerType === 'DRIVER',
+    recipient: (p) => p.ownerId,
+    recipientKind: 'driverId',
+    template: TEMPLATE_KEYS.DOCUMENT_REJECTED,
+    dedup: (p) => `document:${p.documentId}:rejected:${p.rejectedAt}`,
+    data: (p) => ({ documentType: p.documentType }),
+  }),
 } satisfies { readonly [K in EventType]?: PushNotificationSpec<K> };
 
 export type RegistryEventType = keyof typeof PUSH_NOTIFICATION_SPECS;
 
 /* ────────────────────────────── el motor ────────────────────────────── */
 
-/** Dependencias del motor (DI: el servicio cablea engine/devices/logger; los tests, dobles). */
+/** Dependencias del motor (DI: el servicio cablea engine/devices/logger/identity; los tests, dobles). */
 export interface PushSpecContext {
   /** Resolución de tokens con poison-guard (prioriza el hint del evento; si no, device-store). */
   resolveTargets(
@@ -470,6 +571,13 @@ export interface PushSpecContext {
     token?: string,
     platform?: PushPlatform,
   ): Promise<DeviceTarget[]>;
+  /**
+   * Resuelve `Driver.id → userId` por gRPC a identity (solo para filas `recipientKind: 'driverId'`).
+   * Devuelve `undefined` cuando identity RESPONDE que el driver no existe / sin userId (omito limpio).
+   * LANZA ante fallo TRANSITORIO de transporte (gRPC caído/timeout) → el motor deja PROPAGAR el throw
+   * para que Kafka redelivere el evento (simetría de durabilidad con el device-store), NO lo traga.
+   */
+  resolveUserIdFromDriver(driverId: string): Promise<string | undefined>;
   enqueue(input: EnqueueInput): Promise<unknown>;
   warn(message: string): void;
 }
@@ -500,8 +608,28 @@ export async function runPushSpec(
   };
   if (spec.when && !spec.when(payload)) return;
 
-  const userId = spec.recipient(payload);
+  const rawRecipient = spec.recipient(payload);
   const dedupSegment = spec.dedup(payload, envelope);
+
+  // El device-token store SIEMPRE se consulta por `userId`. Si la fila targetea por `Driver.id`
+  // (recipientKind: 'driverId'), resolvemos `driverId → userId` por gRPC a identity ANTES del lookup,
+  // o el push NO matchearía jamás (ADR-015 D7). El `userId` resuelto es también el recipientId del
+  // enqueue (la notificación se keya a la cuenta, no al Driver.id).
+  //
+  // SIMETRÍA DE DURABILIDAD: un fallo TRANSITORIO de identity (resolver LANZA) PROPAGA — Kafka redelivere
+  // el evento (igual que el device-store transitorio), no se traga ⇒ la notificación de plata no se pierde
+  // en un blip. Un RESULTADO permanente (resolver → undefined: driver inexistente/sin userId) se omite
+  // limpio (reintentar no ayuda). El dedup del engine evita duplicar en el redelivery.
+  let userId = rawRecipient;
+  if (spec.recipientKind === 'driverId' && rawRecipient !== undefined) {
+    userId = await ctx.resolveUserIdFromDriver(rawRecipient);
+    if (!userId) {
+      ctx.warn(
+        `${spec.eventType} (${dedupSegment}): driver sin userId resoluble en identity → push omitido`,
+      );
+      return;
+    }
+  }
 
   const targets = await ctx.resolveTargets(
     spec.eventType,

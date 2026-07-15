@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { NotFoundError } from '@veo/utils';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import type Redis from 'ioredis';
 import { PaymentsService } from './payments.service';
@@ -22,6 +22,7 @@ function makeService(rest: Partial<InternalRestClient>) {
     grpcStub,
     rest as InternalRestClient,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     redis as unknown as Redis,
   );
   return { svc, redis };

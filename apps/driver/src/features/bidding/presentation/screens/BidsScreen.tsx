@@ -1,18 +1,22 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SafeScreen, Skeleton, useTheme } from '@veo/ui-kit';
+import { Banner, SafeScreen, Skeleton, useTheme } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { useDispatchStore } from '../../../realtime/presentation/state/dispatchStore';
 import { isOnShift } from '../../../shift/domain';
-import { useShiftState } from '../../../shift/presentation/hooks/useShift';
+import { useShiftState } from '../hooks/useShiftState';
 import type { OpenBid } from '../../domain';
 import { useOpenBids } from '../hooks/useBids';
 import { BidCard } from '../components/BidCard';
 import { CounterOfferSheet } from '../components/CounterOfferSheet';
+
+/** J4 · cuántos ms queda visible el aviso "nueva ronda · ahora es puja" antes de auto-desaparecer. */
+const REBID_NOTICE_MS = 6000;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Bids'>;
 
@@ -29,6 +33,28 @@ export const BidsScreen = ({ navigation }: Props): React.JSX.Element => {
   const onShift = shift.data ? isOnShift(shift.data.status) : false;
   const bids = useOpenBids(onShift);
   const [selected, setSelected] = useState<OpenBid | null>(null);
+
+  // Bug del boot-real: al GANAR una puja (onMatch → setActiveTripId + navigateToTripActive) el BidsScreen
+  // queda MONTADO debajo del TripActive con su `selected` seteado → el CounterOfferSheet (modal) quedaba
+  // OVERLAID encima del viaje activo ("La puja venció", sin forma de cerrarlo salvo tapear el backdrop). Un
+  // conductor con viaje activo NO puede estar pujando: cuando aparece `activeTripId`, cerramos el sheet.
+  const activeTripId = useDispatchStore((s) => s.activeTripId);
+  useEffect(() => {
+    if (activeTripId) {
+      setSelected(null);
+    }
+  }, [activeTripId]);
+
+  // J4 · aviso "nueva ronda · ahora es puja" cuando un viaje saltó de FIXED (Viaje entrante) a PUJA.
+  const pujaRebidNotice = useDispatchStore((s) => s.pujaRebidNotice);
+  const setPujaRebidNotice = useDispatchStore((s) => s.setPujaRebidNotice);
+  useEffect(() => {
+    if (!pujaRebidNotice) {
+      return;
+    }
+    const id = setTimeout(() => setPujaRebidNotice(null), REBID_NOTICE_MS);
+    return () => clearTimeout(id);
+  }, [pujaRebidNotice, setPujaRebidNotice]);
 
   // La puja abierta en el sheet desapareció de la lista viva (otro conductor la tomó / venció / se canceló):
   // el board ya no está OPEN-cercano. Se lo pasamos al sheet para mostrar "ya no disponible" sin yank abrupto.
@@ -79,13 +105,32 @@ export const BidsScreen = ({ navigation }: Props): React.JSX.Element => {
             tintColor={theme.colors.accent}
           />
         }
-        renderItem={({ item }) => <BidCard bid={item} onPress={() => setSelected(item)} />}
+        renderItem={({ item }) => (
+          <BidCard
+            bid={item}
+            onPress={() => {
+              // El conductor ya entendió que es puja (tapeó una) → el aviso J4 sobra.
+              setPujaRebidNotice(null);
+              setSelected(item);
+            }}
+          />
+        )}
       />
     );
   }
 
   return (
     <SafeScreen padded header={header}>
+      {/* J4 · aviso "nueva ronda · ahora es puja" — el mismo viaje que llegó como FIXED ahora es puja. */}
+      {onShift && pujaRebidNotice ? (
+        <View style={styles.notice}>
+          <Banner
+            tone="info"
+            title={t('trips.bid.rebidNoticeTitle')}
+            description={t('trips.bid.rebidNoticeBody')}
+          />
+        </View>
+      ) : null}
       {content}
       <CounterOfferSheet bid={selected} gone={selectedGone} onClose={() => setSelected(null)} />
     </SafeScreen>
@@ -94,4 +139,5 @@ export const BidsScreen = ({ navigation }: Props): React.JSX.Element => {
 
 const styles = StyleSheet.create({
   list: { gap: 12, paddingVertical: 16 },
+  notice: { paddingTop: 12 },
 });

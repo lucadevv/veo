@@ -20,5 +20,17 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>ClashDisplay-Medium.otf</string>
+		<string>ClashDisplay-Semibold.otf</string>
+		<string>ClashDisplay-Bold.otf</string>
+		<string>ClashDisplay-Regular.otf</string>
+		<string>Outfit-Bold.ttf</string>
+		<string>Outfit-Regular.ttf</string>
+		<string>Outfit-SemiBold.ttf</string>
+		<string>Fraunces72pt-SemiBold.ttf</string>
+		<string>Outfit-Medium.ttf</string>
+	</array>
 </dict>
 </plist>

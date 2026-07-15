@@ -6,10 +6,12 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
 
 /**
- * Package que registra el módulo nativo del frame-grabber biométrico.
+ * Package que registra el módulo nativo del frame-grabber biométrico y la vista de preview en vivo.
  *
  * Como es un módulo propio dentro de la app (no una librería autoenlazada), se añade manualmente en
- * `MainApplication.getPackages()`.
+ * `MainApplication.getPackages()`. La vista `BiometricCameraPreview` es la primera ViewManager custom
+ * del proyecto: se registra como ViewManager LEGACY y RN la puentea a Fabric vía interop (mismo patrón
+ * de interop que los módulos legacy del proyecto).
  */
 class BiometricFrameGrabberPackage : ReactPackage {
   override fun createNativeModules(
@@ -18,5 +20,5 @@ class BiometricFrameGrabberPackage : ReactPackage {
 
   override fun createViewManagers(
     reactContext: ReactApplicationContext,
-  ): List<ViewManager<*, *>> = emptyList()
+  ): List<ViewManager<*, *>> = listOf(BiometricCameraPreviewViewManager(reactContext))
 }

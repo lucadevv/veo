@@ -2,47 +2,50 @@
  * VEO · Design tokens (OKLCH). Importar UNA vez en el globals.css de cada app web
  * antes de las capas de Tailwind:  @import "@veo/shared-config/tailwind/tokens.css";
  *
- * Fuente ÚNICA de marca: `packages/ui-kit/src/tokens/themes.ts` (hex sRGB del VEO Brand Book).
- * Este archivo DERIVA esos valores a OKLCH para la web. Marca = lienzo NEGRO (#000) + VEO Cyan
- * (#00E5FF) de acento DISCIPLINADO. El cyan sobre claro es ilegible (1.5:1) y sobre negro es
- * 13.6:1, por eso el lienzo es oscuro y `on-brand`/`on-accent` = NEGRO. Estrategia de color:
- * Restrained (neutros tintados + 1 acento cian ≤10%). Contraste verificado AA sobre bg negro.
+ * Fuente ÚNICA de marca: `packages/ui-kit/src/tokens/themes.ts` (hex sRGB del driverTheme,
+ * el sistema canónico). Este archivo DERIVA esos valores a OKLCH para la web. Marca = lienzo
+ * near-black AZULADO (#0A0B0F) + azul VEO (#2D7FF9) de acento DISCIPLINADO. Sobre el azul el
+ * texto es BLANCO (onAccent #FFFFFF → 3.81:1, pasa AA-large para texto semibold/grande).
+ * Estrategia de color: Restrained (neutros tintados hacia azul/frío + 1 acento azul ≤10%).
+ * Contraste verificado AA sobre bg azul-oscuro (ink 18.33:1, inkMuted 12.05:1).
  */
 
 :root {
-  /* Superficies — lienzo NEGRO de marca (Brand Book: #000 / #0E0E11 / #1C1C22) */
-  --bg: oklch(0 0 0);
-  --surface: oklch(0.16 0.004 274);
-  --surface-2: oklch(0.21 0.004 285);
+  /* Superficies — lienzo near-black AZULADO de marca (driverTheme: #0A0B0F / #14161C / #1E212A) */
+  --bg: oklch(0.1504 0.0088 274.27);
+  --surface: oklch(0.2008 0.0124 270.73);
+  --surface-2: oklch(0.2487 0.0177 270.61);
 
-  /* Tinta / texto (Brand Book: #F4F6F8 / #CFD3DA / #8A909C) */
-  --ink: oklch(0.965 0.004 247);
-  --ink-muted: oklch(0.86 0.008 263);
-  --ink-subtle: oklch(0.65 0.018 268);
+  /* Tinta / texto (driverTheme: #F5F7FA / #C4CBD6 / #8A929E) */
+  --ink: oklch(0.9755 0.0045 258.32);
+  --ink-muted: oklch(0.84 0.0171 259.42);
+  --ink-subtle: oklch(0.6573 0.0201 258.37);
 
-  /* Bordes (Brand Book: #17171B / #2A2A30) */
-  --border: oklch(0.20 0.003 286);
-  --border-strong: oklch(0.27 0.004 286);
+  /* Bordes (driverTheme: #1C1F27 / #2B2F3A) */
+  --border: oklch(0.2398 0.016 269);
+  --border-strong: oklch(0.3059 0.0206 269.44);
 
-  /* Marca + acento = VEO Cyan #00E5FF · texto encima = NEGRO (#000E5FF ilegible sobre claro) */
-  --brand: oklch(0.823 0.135 207);
-  --brand-hover: oklch(0.69 0.115 207);
-  --on-brand: oklch(0 0 0);
-  --accent: oklch(0.823 0.135 207);
-  --accent-hover: oklch(0.69 0.115 207);
-  --on-accent: oklch(0 0 0);
+  /* Marca + acento = azul VEO #2D7FF9 · texto encima = BLANCO */
+  --brand: oklch(0.6149 0.1987 258.84);
+  --brand-hover: oklch(0.5497 0.1943 259.65);
+  --on-brand: oklch(1 0 0);
+  --accent: oklch(0.6149 0.1987 258.84);
+  --accent-hover: oklch(0.5497 0.1943 259.65);
+  --on-accent: oklch(1 0 0);
 
-  /* Estado (Brand Book: success #34D399 · warn #F2AF48 · danger #FF3B5C, texto NEGRO encima) */
-  --success: oklch(0.78 0.14 162);
+  /* Estado (driverTheme/ui-kit: success #17C08A jade · warn #F2AF48 · danger #FF4D6A). El success
+   * ERA #34D399 (mint) por un comentario stale que creía que el conductor usaba mint; el ui-kit
+   * elige jade a propósito (NO el mint "de app hecha por AI") → un solo verde de marca en RN + admin. */
+  --success: oklch(0.717 0.149 163.9);
   --on-success: oklch(0 0 0);
   --warn: oklch(0.80 0.13 75);
   --on-warn: oklch(0 0 0);
-  --danger: oklch(0.65 0.21 17);
-  --danger-hover: oklch(0.59 0.21 17);
+  --danger: oklch(0.6779 0.213 15.77);
+  --danger-hover: oklch(0.6158 0.2067 17.06);
   --on-danger: oklch(0 0 0);
 
-  /* Foco = VEO Cyan */
-  --focus: oklch(0.823 0.135 207);
+  /* Foco = azul VEO */
+  --focus: oklch(0.6149 0.1987 258.84);
 
   /* Radios y sombras (sombras negras tenues, modo noche; sin navy translúcido) */
   --radius-sm: 0.5rem;
@@ -58,37 +61,37 @@
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* La marca VEO ES oscura: el lienzo base ya es negro. La clase .dark se mantiene como
- * alias de coherencia (admin puede alternarla) PERO no reintroduce navy: hereda el mismo
- * sistema negro+cyan del :root para que activar/desactivar el toggle no parta la marca. */
+/* La marca VEO ES oscura: el lienzo base ya es near-black azulado. La clase .dark se mantiene
+ * como alias de coherencia (admin puede alternarla) PERO no reintroduce navy: hereda el mismo
+ * sistema azul del :root para que activar/desactivar el toggle no parta la marca. */
 .dark {
-  --bg: oklch(0 0 0);
-  --surface: oklch(0.16 0.004 274);
-  --surface-2: oklch(0.21 0.004 285);
+  --bg: oklch(0.1504 0.0088 274.27);
+  --surface: oklch(0.2008 0.0124 270.73);
+  --surface-2: oklch(0.2487 0.0177 270.61);
 
-  --ink: oklch(0.965 0.004 247);
-  --ink-muted: oklch(0.86 0.008 263);
-  --ink-subtle: oklch(0.65 0.018 268);
+  --ink: oklch(0.9755 0.0045 258.32);
+  --ink-muted: oklch(0.84 0.0171 259.42);
+  --ink-subtle: oklch(0.6573 0.0201 258.37);
 
-  --border: oklch(0.20 0.003 286);
-  --border-strong: oklch(0.27 0.004 286);
+  --border: oklch(0.2398 0.016 269);
+  --border-strong: oklch(0.3059 0.0206 269.44);
 
-  --brand: oklch(0.823 0.135 207);
-  --brand-hover: oklch(0.69 0.115 207);
-  --on-brand: oklch(0 0 0);
-  --accent: oklch(0.823 0.135 207);
-  --accent-hover: oklch(0.69 0.115 207);
-  --on-accent: oklch(0 0 0);
+  --brand: oklch(0.6149 0.1987 258.84);
+  --brand-hover: oklch(0.5497 0.1943 259.65);
+  --on-brand: oklch(1 0 0);
+  --accent: oklch(0.6149 0.1987 258.84);
+  --accent-hover: oklch(0.5497 0.1943 259.65);
+  --on-accent: oklch(1 0 0);
 
-  --success: oklch(0.78 0.14 162);
+  --success: oklch(0.717 0.149 163.9);
   --on-success: oklch(0 0 0);
   --warn: oklch(0.80 0.13 75);
   --on-warn: oklch(0 0 0);
-  --danger: oklch(0.65 0.21 17);
-  --danger-hover: oklch(0.59 0.21 17);
+  --danger: oklch(0.6779 0.213 15.77);
+  --danger-hover: oklch(0.6158 0.2067 17.06);
   --on-danger: oklch(0 0 0);
 
-  --focus: oklch(0.823 0.135 207);
+  --focus: oklch(0.6149 0.1987 258.84);
 
   --shadow-1: 0 1px 2px oklch(0 0 0 / 0.5), 0 1px 1px oklch(0 0 0 / 0.4);
   --shadow-2: 0 4px 8px oklch(0 0 0 / 0.55);

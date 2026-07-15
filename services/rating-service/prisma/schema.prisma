@@ -27,13 +27,17 @@ enum SubjectRole {
 /// `raterId` califica a `ratedId`; `stars` 1..5 (CHECK en migración).
 model Rating {
   id        String   @id @db.Uuid
-  tripId    String   @unique @map("trip_id") @db.Uuid
+  tripId    String   @map("trip_id") @db.Uuid
   raterId   String   @map("rater_id") @db.Uuid
   ratedId   String   @map("rated_id") @db.Uuid
   stars     Int
   comment   String?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
+  // BIDIRECCIONAL: conductor y pasajero pueden calificar el MISMO viaje (cada uno a su contraparte).
+  // Antes era `tripId @unique` → SOLO una calificación por viaje (el que calificaba primero ganaba; el
+  // otro recibía 409). El unique correcto es (trip, rater): una por viaje POR rater.
+  @@unique([tripId, raterId])
   @@index([ratedId, createdAt])
   @@map("ratings")
   @@schema("rating")
@@ -48,6 +52,13 @@ model RatingAggregate {
   count30d       Int         @default(0) @map("count_30d")
   flagged        Boolean     @default(false)
   flagReason     String?     @map("flag_reason")
+  /// PERÍODO DE GRACIA post-override (auto-suspensión por rating). Cuando el operador reactiva al conductor
+  /// (`driver.reactivated` → clearRatingFlag), se SETEA en true junto con limpiar el sticky. Mientras esté
+  /// activo, el CRON diario (recomputeAll) NO re-escala a 'suspension' aunque el avg siga < 4.0 con las MISMAS
+  /// reseñas viejas — si no, al próximo tick el override del operador sería inútil. SOLO una RESEÑA NUEVA
+  /// (camino create → recomputeWithinTx source='review') lo LIMPIA y re-habilita la escalada. Así la gracia
+  /// dura "hasta la próxima reseña" (decisión del dueño), no inmunidad eterna ni re-suspensión por cron.
+  suspensionSuppressed Boolean @default(false) @map("suspension_suppressed")
   lastComputedAt DateTime    @default(now()) @map("last_computed_at") @db.Timestamptz
 
   @@index([role, flagged])
@@ -58,13 +69,16 @@ model RatingAggregate {
 /// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
 
-  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
   @@schema("rating")
 }

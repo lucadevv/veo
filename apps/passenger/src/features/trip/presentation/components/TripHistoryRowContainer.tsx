@@ -1,6 +1,6 @@
 import type {TripHistoryItem, TripStatus} from '@veo/api-client';
 import React from 'react';
-import {useMyTripRating} from '../../../ratings/presentation/useMyTripRating';
+import {useMyTripRating} from '../hooks/useMyTripRating';
 import {TripHistoryRow} from './TripHistoryRow';
 
 export interface TripHistoryRowContainerProps {

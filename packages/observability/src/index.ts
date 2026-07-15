@@ -6,6 +6,7 @@
 export * from './logger.js';
 export * from './logger.module.js';
 export * from './otel.js';
+export * from './trace-propagation.js';
 export * from './metrics.js';
 export * from './exception-filter.js';
 export * from './logging.interceptor.js';

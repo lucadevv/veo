@@ -2,16 +2,22 @@
  * Controlador gRPC de share (paquete veo.share.v1.ShareService).
  * Lectura síncrona de contactos de confianza para notification/panic.
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
+import {
+  verifyGrpcIdentity,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
+} from '@veo/auth';
 import { ContactsService } from '../contacts/contacts.service';
 import type { Env } from '../config/env.schema';
 
 interface GetTrustedContactsRequest {
   userId: string;
+  /** Vista del DUEÑO (pantalla de contactos): incluye pendientes de OTP. Fan-out de pánico lo omite. */
+  includeUnverified?: boolean;
 }
 interface TrustedContactReply {
   id: string;
@@ -32,23 +38,32 @@ export class ShareGrpcController {
   constructor(
     private readonly contacts: ContactsService,
     config: ConfigService<Env, true>,
+    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
+    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
   }
 
   @GrpcMethod('ShareService', 'GetTrustedContacts')
   async getTrustedContacts(
-    { userId }: GetTrustedContactsRequest,
+    { userId, includeUnverified }: GetTrustedContactsRequest,
     metadata: Metadata,
   ): Promise<TrustedContactsReply> {
-    const identity = verifyGrpcIdentity(metadata, this.secret);
+    const identity = verifyGrpcIdentity(metadata, this.secret, {
+      allowedAudiences: this.allowedAudiences,
+    });
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,
         message: 'Identidad interna inválida o ausente',
       });
     }
-    const verified = await this.contacts.listVerified(userId);
+    // Vista del DUEÑO (includeUnverified): TODOS sus contactos — sin esto, un contacto recién
+    // creado (OTP pendiente) era INVISIBLE en la app y el flujo de verificación no tenía cierre
+    // (bug cazado en sim 2026-07-15). El fan-out de pánico omite el flag → solo verificados.
+    const verified = includeUnverified
+      ? await this.contacts.list(userId)
+      : await this.contacts.listVerified(userId);
     return {
       contacts: verified.map((c) => ({
         id: c.id,

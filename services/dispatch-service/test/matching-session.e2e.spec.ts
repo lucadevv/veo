@@ -6,6 +6,7 @@
  * publica dispatch.no_offers. "Una oferta a la vez" y los cierres CAS se verifican contra la DB de verdad.
  * (Vive en test/ — excluido de tsc — porque usa testcontainers/import.meta, igual que los e2e de payment/trip.)
  */
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigService } from '@nestjs/config';
@@ -19,8 +20,12 @@ import { VehicleType, OfferingId, FleetDocumentType } from '@veo/shared-types';
 import { PrismaClient, DispatchOutcome, DispatchSessionStatus } from '../src/generated/prisma';
 import { MatchingService } from '../src/dispatch/matching.service';
 import { DispatchService } from '../src/dispatch/dispatch.service';
+import { EligibilityGate } from '../src/dispatch/eligibility.gate';
 import type { DispatchOffer } from '../src/dispatch/offer-delivery.port';
 import { MatchingSessionStore } from '../src/dispatch/matching-session.store';
+import { PrismaMatchingRepository } from '../src/dispatch/matching.repository';
+import { PrismaMatchingSessionRepository } from '../src/dispatch/matching-session.repository';
+import { PrismaDispatchRepository } from '../src/dispatch/dispatch.repository';
 import { DriverPool } from '../src/dispatch/driver-pool';
 import { DispatchScorer } from '../src/dispatch/scoring';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../src/hot-index/in-memory-hot-index';
@@ -49,8 +54,10 @@ beforeAll(async () => {
 
   hotIndex = new InMemoryHotIndex();
   const exclusion = new InMemoryExclusionRegistry();
-  const driverPool = new DriverPool(hotIndex, exclusion);
-  const sessions = new MatchingSessionStore(prismaService);
+  const driverPool = new DriverPool(hotIndex, exclusion, new InMemoryExclusionRegistry());
+  const sessions = new MatchingSessionStore(
+    new PrismaMatchingSessionRepository(prismaService),
+  );
   const scorer = new DispatchScorer({ distance: 5000, rating: 1, idle: 10, cancel: 5 });
   const projection = {
     getStats: async (ids: string[]) =>
@@ -82,10 +89,12 @@ beforeAll(async () => {
   const config = new ConfigService<Env, true>({
     DISPATCH_OFFER_TIMEOUT_MS: 12_000,
     DISPATCH_MAX_K_RING: 2,
+    DISPATCH_SWEEP_ADVANCE_BUDGET: 25,
+    DISPATCH_SWEEP_DEADLINE_MS: 1_500,
   } as Partial<Env> as Env);
 
   matching = new MatchingService(
-    prismaService,
+    new PrismaMatchingRepository(prismaService),
     driverPool,
     sessions,
     scorer,
@@ -93,6 +102,8 @@ beforeAll(async () => {
     surge as never,
     maps as never,
     offerDelivery,
+    // Config de ventanas fake: getWindows() devuelve la misma ventana que el env de este test (12s).
+    { getWindows: async () => ({ offerTimeoutMs: 12_000, bidWindowSec: 60 }), getPolicy: async () => ({ policyVersion: 'v1', v2: null }) } as never,
     config,
   );
   // DispatchService (accept/reject del conductor) comparte el mismo matching + hot-index reales.
@@ -107,7 +118,19 @@ beforeAll(async () => {
       found: true,
     }),
   };
-  dispatch = new DispatchService(prismaService, hotIndex, exclusion, fleet, identity, matching);
+  // EligibilityGate REAL (igual que producción): el accept de FIXED re-valida estado contra identity.
+  // El fake de identity de arriba devuelve AVAILABLE/!suspendido ⇒ el gate PASA en el camino feliz; los
+  // casos de suspensión se cubren en el unit (dispatch.service.spec / eligibility.gate.spec). TTL 0 = sin cache.
+  const eligibility = new EligibilityGate(identity as never, hotIndex, 0);
+  dispatch = new DispatchService(
+    new PrismaDispatchRepository(prismaService),
+    hotIndex,
+    exclusion,
+    fleet,
+    identity,
+    matching,
+    eligibility,
+  );
 }, 180_000);
 
 afterAll(async () => {
@@ -375,6 +398,173 @@ describe('Reconciler de timeout durable (D2.3: sweepExpiredOffers, reemplaza el 
       matching.sweepExpiredOffers(),
     ]);
     expect(a + b).toBe(1); // exactamente una réplica reclamó la oferta vencida
+  });
+
+  it('idempotencia: re-correr el sweep sin ofertas vencidas nuevas no re-marca ni re-oferta', async () => {
+    const tripId = uuidv7();
+    const d1 = uuidv7();
+    const d2 = uuidv7();
+    await hotIndex.seed(d1, ORIGIN.lat, ORIGIN.lon, CENTER);
+    await hotIndex.seed(d2, ORIGIN.lat, ORIGIN.lon, CENTER);
+    await matching.startSession({ tripId, origin: ORIGIN, requiredVehicleType: VehicleType.CAR });
+    await expireInFlight(tripId);
+
+    expect(await matching.sweepExpiredOffers()).toBe(1); // 1er sweep: marca + avanza
+    // 2do sweep inmediato: la nueva oferta es FRESCA (no vencida) y la vieja ya está TIMEOUT (CAS count=0).
+    expect(await matching.sweepExpiredOffers()).toBe(0); // no re-marca ni re-oferta
+    expect(
+      await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.OFFERED } }),
+    ).toBe(1); // sigue habiendo UNA sola oferta viva (no se encimó otra)
+    expect(
+      await prisma.dispatchMatch.count({ where: { tripId, outcome: DispatchOutcome.TIMEOUT } }),
+    ).toBe(1); // y UNA sola TIMEOUT (no se re-marcó)
+  });
+});
+
+describe('Sweep ACOTADO por presupuesto K (escalabilidad: corte por tick, sin huérfanas, sin paralelizar)', () => {
+  /** Backdatea ronda + oferta de un trip para que su OFFERED quede vencido (>12s) sin salir de la ronda. */
+  async function expire(tripId: string): Promise<void> {
+    await prisma.dispatchSession.update({
+      where: { tripId },
+      data: { createdAt: new Date(Date.now() - 60_000) },
+    });
+    await prisma.dispatchMatch.updateMany({
+      where: { tripId, outcome: DispatchOutcome.OFFERED },
+      data: { offeredAt: new Date(Date.now() - 30_000) },
+    });
+  }
+
+  it('con N>K ofertas vencidas, UN tick avanza a-lo-sumo-K y el resto sigue OFFERED (lo toma el próximo tick)', async () => {
+    const K = 3;
+    const N = 5; // N > K: deben sobrar (N-K) sin tocar
+    const trips: string[] = [];
+    // Cada viaje en su PROPIA celda con 2 conductores propios: tras el TIMEOUT del 1ro, offerNext avanza al 2do.
+    for (let i = 0; i < N; i++) {
+      const tripId = uuidv7();
+      // Origen ligeramente distinto por viaje → su propia celda H3 → pools disjuntos (sin candidato compartido).
+      const origin = { lat: ORIGIN.lat + i * 0.5, lon: ORIGIN.lon + i * 0.5 };
+      const cell = toH3(origin, DISPATCH_H3_RESOLUTION);
+      await hotIndex.seed(uuidv7(), origin.lat, origin.lon, cell); // candidato 1 (el que se oferta y vence)
+      await hotIndex.seed(uuidv7(), origin.lat, origin.lon, cell); // candidato 2 (al que avanza el sweep)
+      await matching.startSession({ tripId, origin, requiredVehicleType: VehicleType.CAR });
+      await expire(tripId);
+      trips.push(tripId);
+    }
+
+    // Tick 1: acotado a K. Avanza exactamente K (crea K ofertas nuevas); el resto NO se toca.
+    const advanced1 = await matching.sweepExpiredOffers(K);
+    expect(advanced1).toBe(K);
+
+    // INVARIANTE anti-huérfana: nº de TIMEOUT == nº de avances. Nadie quedó TIMEOUT sin oferta nueva.
+    const timeoutCount1 = await prisma.dispatchMatch.count({
+      where: { tripId: { in: trips }, outcome: DispatchOutcome.TIMEOUT },
+    });
+    expect(timeoutCount1).toBe(K);
+    // Las (N-K) no tomadas SIGUEN OFFERED y vencidas → su 1ra oferta aún viva (no huérfana, no avanzada).
+    const stillExpiredOffered = await prisma.dispatchMatch.count({
+      where: {
+        tripId: { in: trips },
+        outcome: DispatchOutcome.OFFERED,
+        offeredAt: { lt: new Date(Date.now() - 12_000) },
+      },
+    });
+    expect(stillExpiredOffered).toBe(N - K);
+
+    // Tick 2: toma las (N-K) restantes (las nuevas ofertas del tick 1 son frescas, no se tocan).
+    const advanced2 = await matching.sweepExpiredOffers(K);
+    expect(advanced2).toBe(N - K);
+    expect(
+      await prisma.dispatchMatch.count({
+        where: {
+          tripId: { in: trips },
+          outcome: DispatchOutcome.OFFERED,
+          offeredAt: { lt: new Date(Date.now() - 12_000) },
+        },
+      }),
+    ).toBe(0); // ya no quedan vencidas sin avanzar → cero huérfanas
+  });
+
+  it('REGRESIÓN anti-paralelización: el sweep es SECUENCIAL (for+await), nunca Promise.all sobre offerNext', () => {
+    // GUARDA ESTRUCTURAL (matching es business-critical). El sweep NO puede paralelizar offerNext entre tripIds:
+    // no hay claim atómico del conductor — el pool es read-only al ofertar y el conductor sale recién en markBusy
+    // al ACEPTAR, así que dos offerNext concurrentes para viajes con candidato compartido lo double-offerearían
+    // (la anti-doble-oferta es per-trip, vía el Set `attempted` en memoria; no coordina entre viajes). Por eso el
+    // barrido recorre las ofertas vencidas con un `for ... of` + `await offerNext` (una a la vez), JAMÁS con
+    // Promise.all/allSettled. Este test lee el código fuente y FALLA si alguien mete paralelización en el sweep.
+    const src = readFileSync(
+      new URL('../src/dispatch/matching.service.ts', import.meta.url),
+      'utf8',
+    );
+    const sweepBody = src.slice(
+      src.indexOf('async sweepExpiredOffers'),
+      src.indexOf('private async createAndDeliverOffer'),
+    );
+    expect(sweepBody).toContain('for (const m of expired)');
+    expect(sweepBody).toContain('await this.offerNext(');
+    expect(sweepBody).not.toMatch(/Promise\.(all|allSettled)/); // sin paralelización en el sweep
+  });
+
+  it('DEADLINE: agotado el presupuesto temporal, el for corta SIN dejar huérfanas (no marca lo que no avanza)', async () => {
+    // sweepDeadlineMs efectivo = 0 vía un sweep con deadline ya superado: como tickStart se captura al entrar
+    // y el chequeo es `> deadline`, un deadline 0 corta tras 0..1 iteraciones. Verificamos que lo NO procesado
+    // sigue OFFERED (no TIMEOUT huérfano). Usamos una instancia con deadline 0 para forzar el corte temprano.
+    const tightConfig = new ConfigService<Env, true>({
+      DISPATCH_OFFER_TIMEOUT_MS: 12_000,
+      DISPATCH_MAX_K_RING: 2,
+      DISPATCH_SWEEP_ADVANCE_BUDGET: 25,
+      DISPATCH_SWEEP_DEADLINE_MS: 1, // deadline diminuto → corta tras pocas iteraciones
+    } as Partial<Env> as Env);
+    const tightMatching = new MatchingService(
+      new PrismaMatchingRepository({ read: prisma, write: prisma } as unknown as PrismaService),
+      new DriverPool(hotIndex, new InMemoryExclusionRegistry(), new InMemoryExclusionRegistry()),
+      new MatchingSessionStore(
+        new PrismaMatchingSessionRepository(
+          { read: prisma, write: prisma } as unknown as PrismaService,
+        ),
+      ),
+      new DispatchScorer({ distance: 5000, rating: 1, idle: 10, cancel: 5 }),
+      {
+        getStats: async (ids: string[]) =>
+          new Map(
+            ids.map((id) => [id, { avgRating: 5, secondsSinceLastTrip: 1e9, cancellationRate: 0 }]),
+          ),
+      } as never,
+      {
+        quote: async () => ({
+          multiplier: 1,
+          zoneId: null,
+          zoneName: null,
+          active: false,
+          demand: 0,
+          supply: 0,
+          ratio: 0,
+        }),
+      } as never,
+      { eta: async () => 60 } as never,
+      { deliver: (): void => {} },
+      { getWindows: async () => ({ offerTimeoutMs: 12_000, bidWindowSec: 60 }), getPolicy: async () => ({ policyVersion: 'v1', v2: null }) } as never,
+      tightConfig,
+    );
+
+    const trips: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const tripId = uuidv7();
+      const origin = { lat: ORIGIN.lat + 10 + i, lon: ORIGIN.lon + 10 + i };
+      const cell = toH3(origin, DISPATCH_H3_RESOLUTION);
+      await hotIndex.seed(uuidv7(), origin.lat, origin.lon, cell);
+      await hotIndex.seed(uuidv7(), origin.lat, origin.lon, cell);
+      await tightMatching.startSession({ tripId, origin, requiredVehicleType: VehicleType.CAR });
+      await expire(tripId);
+      trips.push(tripId);
+    }
+
+    const advanced = await tightMatching.sweepExpiredOffers();
+    // INVARIANTE: nº TIMEOUT == nº avances (marcado y avance acoplados por fila). El deadline corta entre filas,
+    // nunca a mitad de un (marcar→avanzar), así que jamás hay un TIMEOUT sin su oferta nueva (cero huérfanas).
+    const timeoutCount = await prisma.dispatchMatch.count({
+      where: { tripId: { in: trips }, outcome: DispatchOutcome.TIMEOUT },
+    });
+    expect(timeoutCount).toBe(advanced);
   });
 });
 

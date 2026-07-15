@@ -110,11 +110,22 @@ export class PujaDispatchStrategy implements DispatchModeStrategy {
           driverId: cancelledDriverId ?? '',
           passengerId: trip.passengerId,
           vehicleType: trip.vehicleType,
+          // B5-3: oferta del viaje — dispatch la re-persiste en el board re-abierto para enforcar el TIER
+          // en el re-match igual que en la puja original (sin esto el board re-abierto perdería los requires).
+          category: trip.category ?? undefined,
           origin: { lat: trip.originLat, lon: trip.originLon },
+          // Destino + distancia/duración del viaje: el board re-abierto los conserva para que el conductor del
+          // re-match VEA pickup→destino + distancia igual que en la puja original (cierra el gap que tenía
+          // specialRequests, que se degradaba a [] al reconstruir el board desde el evento). Del row Trip.
+          destination: { lat: trip.destLat, lon: trip.destLon },
+          distanceMeters: trip.distanceMeters,
+          durationSeconds: trip.durationSeconds,
           bidCents,
           reason: 'driver_cancelled',
           // H13 — dispatch persiste este seq en el board re-abierto y lo estampa en offer_accepted.
           negotiationSeq: nextNegotiationSeq,
+          // PUJA explícito (= el default legacy): dispatch re-abre el OfferBoard con este evento.
+          dispatchMode: 'PUJA',
         },
       }),
       trip.id,

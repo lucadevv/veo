@@ -82,25 +82,22 @@ export const ServiceType = {
 export type ServiceType = (typeof ServiceType)[keyof typeof ServiceType];
 
 /**
- * Fuente de energía del vehículo (B5). El costo de energía por km se UNIFICA como precio_por_unidad ÷
- * rendimiento (km por unidad): líquido (S/litro ÷ km/L) y eléctrico (S/kWh ÷ km/kWh) usan la MISMA
- * fórmula, solo cambia la `EnergyUnit`. Los precios viven en EnergyCatalog (hot-config, admin-editable).
+ * Fuente de energía del vehículo (B5). Es un atributo de la FICHA del vehículo (fleet/OCR/modelo), no del
+ * pricing: el modelo de precio por energía se retiró de los contratos compartidos.
+ *
+ * 3 TIPOS de plataforma (ADR-017): GASOLINE_90, DIESEL, ELECTRIC. Hay UNA sola gasolina — la referencia 90,
+ * la octanaje común. Se ELIMINA la granularidad de octanaje (antes 84/95): el octanaje real del vehículo del
+ * conductor NO importa para el precio del pasajero (eso es su economía privada, §1.1).
+ *
+ * GNV/GLP NO son tipos de energía de la plataforma: el combustible REAL del vehículo (si el dueño convirtió
+ * a GNV o usa GLP para ahorrar) es su margen PRIVADO — la plataforma no lo trackea como tipo de energía.
  */
 export const EnergySource = {
-  GASOLINE_95: 'GASOLINE_95',
-  GASOLINE_84: 'GASOLINE_84',
+  GASOLINE_90: 'GASOLINE_90',
   DIESEL: 'DIESEL',
-  GNV: 'GNV',
   ELECTRIC: 'ELECTRIC',
 } as const;
 export type EnergySource = (typeof EnergySource)[keyof typeof EnergySource];
-
-/** Unidad de la fuente de energía: litro (combustibles líquidos/GNV) o kWh (eléctrico). B5. */
-export const EnergyUnit = {
-  LITER: 'LITER',
-  KWH: 'KWH',
-} as const;
-export type EnergyUnit = (typeof EnergyUnit)[keyof typeof EnergyUnit];
 
 /**
  * Segmento del vehículo (B5) — eje de calidad/confort del modelo, derivado de su ficha (no del precio).
@@ -121,28 +118,6 @@ export const VEHICLE_SEGMENT_RANK: Record<VehicleSegment, number> = {
   [VehicleSegment.PREMIUM]: 2,
 };
 
-/** Unidad canónica de cada fuente de energía (evita que el admin la elija mal). B5. */
-export const ENERGY_SOURCE_UNIT: Record<EnergySource, EnergyUnit> = {
-  [EnergySource.GASOLINE_95]: EnergyUnit.LITER,
-  [EnergySource.GASOLINE_84]: EnergyUnit.LITER,
-  [EnergySource.DIESEL]: EnergyUnit.LITER,
-  [EnergySource.GNV]: EnergyUnit.LITER,
-  [EnergySource.ELECTRIC]: EnergyUnit.KWH,
-};
-
-/**
- * Precio de UNA fuente de energía (céntimos PEN por unidad: litro o kWh). B5.
- *
- * CONTRATO COMPARTIDO productor(trip-service · EnergyCatalog) ↔ consumidor(admin-bff · pricing proxy):
- * vive ACÁ, junto a EnergySource/EnergyUnit, para que NO diverja entre el servicio que lo produce y el
- * BFF que lo re-expone. El quote/economía derivan el costo/km = pricePerUnitCents ÷ rendimiento.
- */
-export interface EnergySourcePrice {
-  sourceId: EnergySource;
-  unit: EnergyUnit;
-  pricePerUnitCents: number;
-}
-
 /**
  * Un bucket horario del histograma de viajes creados del dashboard: hora UTC truncada (`bucket`,
  * ISO UTC vía toStartOfHour / date_trunc) + conteo (`trips`).
@@ -158,7 +133,7 @@ export interface TripsPerHourBucket {
  *
  * CONTRATO COMPARTIDO productor(trip-service · AnalyticsService) ↔ consumidor(admin-bff · overview proxy)
  * del endpoint interno GET /internal/analytics/trip-stats: vive ACÁ (junto a TripsPerHourBucket) para que
- * NO diverja entre el servicio que lo produce y el BFF que lo agrega. Mismo patrón que EnergySourcePrice.
+ * NO diverja entre el servicio que lo produce y el BFF que lo agrega. Mismo patrón que TripsPerHourBucket.
  */
 export interface TripStatsView {
   /** Viajes en vuelo AHORA (estados activos). */
@@ -218,6 +193,28 @@ export const KycStatus = {
   EXPIRED: 'EXPIRED',
 } as const;
 export type KycStatus = (typeof KycStatus)[keyof typeof KycStatus];
+
+/**
+ * Acción del reto de liveness ACTIVO (diferenciador no negociable VEO). FUENTE ÚNICA del contrato:
+ * el biometric-service (Python/ONNX) EMITE uno de estos valores en POST /v1/liveness/challenge, y la
+ * app debe guiar al conductor a ejecutarlo (girar la cabeza, asentir, sonreír) para que el motor
+ * confirme que hay una persona viva frente a la cámara (anti-spoofing de foto/video). Reemplaza el
+ * `action: string` suelto que estaba desparramado por el puerto biométrico, el reto del enroll y el del
+ * turno: tiparlo hace que cualquier comparación contra un valor fuera del set rompa el typecheck.
+ */
+export const LivenessAction = {
+  TURN_LEFT: 'TURN_LEFT',
+  TURN_RIGHT: 'TURN_RIGHT',
+  NOD: 'NOD',
+  SMILE: 'SMILE',
+} as const;
+export type LivenessAction = (typeof LivenessAction)[keyof typeof LivenessAction];
+
+/** Valores de `LivenessAction` para validadores de borde (`@IsIn`) y `z.enum`. Derivado del const, no re-tipeado. */
+export const LIVENESS_ACTIONS = Object.values(LivenessAction) as [
+  LivenessAction,
+  ...LivenessAction[],
+];
 
 /**
  * Tipo de actor humano de la plataforma: PASSENGER (pasajero) · DRIVER (conductor). Es la FUENTE ÚNICA
@@ -323,6 +320,7 @@ export const DispatchOutcome = {
   ACCEPTED: 'ACCEPTED',
   REJECTED: 'REJECTED',
   TIMEOUT: 'TIMEOUT',
+  WITHDRAWN: 'WITHDRAWN',
 } as const;
 export type DispatchOutcome = (typeof DispatchOutcome)[keyof typeof DispatchOutcome];
 
@@ -332,6 +330,14 @@ export const FleetDocumentType = {
   PROPERTY_CARD: 'PROPERTY_CARD',
   BACKGROUND_CHECK: 'BACKGROUND_CHECK',
   ITV: 'ITV',
+  // Foto del vehículo (Ola 1): captura del auto en el alta del conductor. NO tiene número ni vencimiento
+  // (es una foto, no un documento numerado) — la validación del número es contextual por tipo. El operador
+  // la revisa en el panel antes de aprobar (es requerida para la aprobación).
+  VEHICLE_PHOTO: 'VEHICLE_PHOTO',
+  // DNI = documento de identidad del conductor (anverso+reverso vía DocumentImage FRONT/BACK del 3A).
+  // La imagen FRONT es la que el face-match (sub-lote 3C) usará para el match contra la biometría.
+  // Documento de 2 caras.
+  DNI: 'DNI',
   // B5-3.2 · CERTIFICACIONES de las verticales especiales (conductor): credencial de operador con la MISMA
   // maquinaria FleetDocument (vencimiento + review del operador). NO son críticas (su vencimiento NO suspende
   // al conductor — solo lo vuelve inelegible para ESA vertical, que además está oculta). Una oferta vertical
@@ -342,6 +348,51 @@ export const FleetDocumentType = {
 } as const;
 export type FleetDocumentType = (typeof FleetDocumentType)[keyof typeof FleetDocumentType];
 
+/**
+ * Sub-lote 3A · cara/lado de una IMAGEN de documento (múltiples imágenes por documento). Espejo del
+ * enum Prisma `DocumentSide` de fleet-service. SINGLE = una sola cara/foto (licencia/SOAT/tarjeta/foto
+ * de vehículo); FRONT/BACK = anverso/reverso (DNI). Fuente de verdad tipada (cero string suelto).
+ */
+export const DocumentSide = {
+  FRONT: 'FRONT',
+  BACK: 'BACK',
+  SINGLE: 'SINGLE',
+} as const;
+export type DocumentSide = (typeof DocumentSide)[keyof typeof DocumentSide];
+
+/**
+ * Sub-lote 3C · estado del BINDING face-match DNI↔selfie. El operador VE este resultado en la ficha del
+ * conductor antes de aprobar (no aprueba a ciegas). Estado tipado explícito (cero magic string) que evita
+ * la ambigüedad de un bool: NOT_RUN (el match aún no se corrió) ≠ NO_MATCH (se corrió y NO coincide).
+ *  - NOT_RUN: aún no se cotejó el DNI contra la biometría enrolada.
+ *  - MATCHED: la cara del DNI coincide con la biometría de referencia del conductor.
+ *  - NO_MATCH: se cotejó y NO coincide (revisar manualmente · posible suplantación).
+ */
+export const DniFaceMatchStatus = {
+  NOT_RUN: 'NOT_RUN',
+  MATCHED: 'MATCHED',
+  NO_MATCH: 'NO_MATCH',
+} as const;
+export type DniFaceMatchStatus = (typeof DniFaceMatchStatus)[keyof typeof DniFaceMatchStatus];
+
+/**
+ * Estado del LIVENESS PASIVO (anti-spoofing PAD single-frame) evaluado en el enrol del registro. El operador
+ * lo VE en la ficha del conductor antes de aprobar. Estado tipado explícito (cero magic string) que distingue
+ * "el PAD corrió y la selfie es real" de "el PAD no corrió" — un ataque de presentación (spoof) NUNCA llega a
+ * este estado: se RECHAZA en el enrol (422), nunca se persiste un conductor spoof.
+ *  - NOT_RUN: el conductor aún no enroló biometría (o enroló antes de que existiera el campo).
+ *  - PASSED: el PAD corrió sobre la selfie y la dio por viva (no es impresa/pantalla).
+ *  - DEGRADED: enroló PERO el PAD no corrió (modelo ausente → sin anti-spoofing · degradación honesta). En prod
+ *    no debería ocurrir (fail-closed por /health/ready del biometric-service); es señal de degradación si pasa.
+ */
+export const PassiveLivenessStatus = {
+  NOT_RUN: 'NOT_RUN',
+  PASSED: 'PASSED',
+  DEGRADED: 'DEGRADED',
+} as const;
+export type PassiveLivenessStatus =
+  (typeof PassiveLivenessStatus)[keyof typeof PassiveLivenessStatus];
+
 export const FleetDocumentStatus = {
   PENDING_REVIEW: 'PENDING_REVIEW',
   VALID: 'VALID',
@@ -350,3 +401,60 @@ export const FleetDocumentStatus = {
   REJECTED: 'REJECTED',
 } as const;
 export type FleetDocumentStatus = (typeof FleetDocumentStatus)[keyof typeof FleetDocumentStatus];
+
+/**
+ * MOTIVO por el que un vehículo NO opera — fuente de verdad TIPADA cross-service para que el panel admin
+ * diga el PORQUÉ sin magic strings. La operabilidad es DERIVADA (`deriveVehicleOperability` en fleet-service,
+ * espejo del gate de booking); cuando es false, este enum dice qué falta:
+ *  - DOCS: los documentos requeridos (SOAT + ITV) no están operables, o el agregado documental venció (EXPIRED).
+ *  - NO_SPEC: falta la ficha técnica (modelSpec sin linkear) → el dispatch no puede matchear segmento/asientos.
+ * Prioridad DOCS (eje legal/seguridad) antes que NO_SPEC. `null` ⟺ el vehículo SÍ opera.
+ */
+export const VehicleOperabilityReason = {
+  DOCS: 'DOCS',
+  NO_SPEC: 'NO_SPEC',
+} as const;
+export type VehicleOperabilityReason =
+  (typeof VehicleOperabilityReason)[keyof typeof VehicleOperabilityReason];
+
+/**
+ * CAUSA de un hold de suspensión del conductor (modelo de HOLDS · `DriverSuspensionHold`). Espejo TIPADO
+ * del enum Prisma `SuspensionCause` de identity-service (los valores DEBEN coincidir 1:1 con la columna
+ * `cause`). Discrimina QUÉ vía de reactivación corresponde — fuente de verdad para que backend Y panel
+ * decidan la acción sin magic strings:
+ *  - DISCIPLINARY: suspensión MANUAL del operador. La levanta SOLO la reactivación manual (→ /reactivate).
+ *  - DOCUMENT_EXPIRED: documento crítico DRIVER-scoped vencido (SOAT/LICENSE_A1/PROPERTY_CARD).
+ *  - INSPECTION_EXPIRED: inspección técnica (ITV) del vehículo operado vencida.
+ *  - RATING_LOW: AUTO-suspensión por rating bajo (< 4.0 con ≥ mínimo de reseñas, BR-D01). La decide rating-service
+ *    (`driver.flagged` reason='suspension'); identity la materializa como hold. Reactivación MANUAL del operador.
+ *  - EXCESSIVE_CANCELLATIONS: AUTO-suspensión por exceso de cancelaciones (≥ umbral en ventana rolling de 24h).
+ *    La decide dispatch-service (`driver.excessive_cancellations`); identity la materializa como hold TEMPORAL
+ *    (con `expiresAt`): un sweeper la auto-levanta al vencer el cooldown, o el operador antes vía compliance.
+ *  - CATEGORY_DISABLED: el admin DESACTIVÓ del catálogo (ADR 013) la última oferta de la CLASE de vehículo del
+ *    conductor (p.ej. apagó "VEO Moto" → un conductor MOTO ya no tiene ninguna oferta operable). La DECIDE
+ *    fleet-service (consume `catalog.updated`, deriva las clases operables y computa el delta) e identity la
+ *    materializa como hold — así el conductor NO puede iniciar turno ni quedar en línea mientras su clase esté
+ *    apagada. Reactivación AUTOMÁTICA y EXCLUSIVA: se levanta SOLO cuando fleet reporta que la clase volvió a ser
+ *    operable (`fleet.driver_reactivated` holdCause=CATEGORY_DISABLED); a diferencia de las otras causas
+ *    automáticas, NO la levanta el override de compliance del operador (lo haría con la categoría aún apagada →
+ *    reabriría el hueco que este hold cierra). El sweeper de expiración tampoco la toca (es un hold PERMANENTE).
+ * Las causas NO-DISCIPLINARY salvo CATEGORY_DISABLED (DOCUMENT_EXPIRED + INSPECTION_EXPIRED + RATING_LOW +
+ * EXCESSIVE_CANCELLATIONS) se levantan por la vía de compliance (→ /reactivate-compliance); una DISCIPLINARY —y
+ * una CATEGORY_DISABLED— NUNCA se tocan por esa vía — la separación de causas es extremo-a-extremo.
+ */
+export const SuspensionCause = {
+  DISCIPLINARY: 'DISCIPLINARY',
+  DOCUMENT_EXPIRED: 'DOCUMENT_EXPIRED',
+  INSPECTION_EXPIRED: 'INSPECTION_EXPIRED',
+  RATING_LOW: 'RATING_LOW',
+  EXCESSIVE_CANCELLATIONS: 'EXCESSIVE_CANCELLATIONS',
+  CATEGORY_DISABLED: 'CATEGORY_DISABLED',
+  /// DEBT_BLOCKED (ADR-022 §P-A): el conductor cruzó el TOPE de deuda por comisiones de viajes en EFECTIVO. La
+  /// DECIDE payment-service (`driver.debt_exceeded`) e identity la materializa como hold PERMANENTE. Reactivación
+  /// AUTOMÁTICA y EXCLUSIVA: SOLO la levanta `driver.debt_cleared` (el conductor saldó por el rail) — NO el override
+  /// de compliance del operador (saldar es la única forma; reactivar sin cobrar reabriría el hueco), NI el sweeper
+  /// de expiración (es permanente). Distinto de DISCIPLINARY: NO revoca la sesión (el viaje EN CURSO se termina
+  /// normal · bloqueo tipo A), solo saca del pool + bloquea el próximo turno.
+  DEBT_BLOCKED: 'DEBT_BLOCKED',
+} as const;
+export type SuspensionCause = (typeof SuspensionCause)[keyof typeof SuspensionCause];

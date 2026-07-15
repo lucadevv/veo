@@ -5,33 +5,42 @@ import type {
   TripResource,
 } from '@veo/api-client';
 import {tripStatus} from '@veo/api-client';
-import {IconButton, Skeleton, Text, TextField, useTheme} from '@veo/ui-kit';
-import React from 'react';
+import {IconButton, SearchField, Skeleton, Text, useTheme} from '@veo/ui-kit';
+import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, TextInput, View} from 'react-native';
 import type {RoutePlace} from '../../../maps/domain/entities';
 import type {SavedPlace} from '../../../places/domain/entities';
+import {ErrorState} from '../../../../shared/presentation/components/ScreenStates';
 import {ActiveTripBody} from '../components/ActiveTripBody';
+import {TripStatusStrip} from '../components/TripStatusStrip';
+import {formatDurationMinutes} from '../../../../shared/utils/format';
 import {CompletionBody} from '../components/CompletionBody';
 import {DebtStrip} from '../components/DebtStrip';
 import {HomeHero} from '../components/HomeHero';
 import {HomeShortcutChips} from '../components/HomeShortcutChips';
-import {IconArrowLeft, IconClose} from '../components/icons';
+import {ModeToggle, TripTimeMode} from '../components/ModeToggle';
+import {
+  IconArrowLeft,
+  IconClose,
+  IconMap,
+  IconSearch,
+} from '../components/icons';
 import {IdleBody} from '../components/IdleBody';
 import {LastDriverCard} from '../components/LastDriverCard';
 import {EnterView} from '../components/motion';
 import {NoOffersBody} from '../components/NoOffersBody';
-import {OfferingsTeaser} from '../components/OfferingsTeaser';
+import {NoDriverBody} from '../components/NoDriverBody';
 import {OffersBody} from '../components/OffersBody';
-import {OriginDestinationCard} from '../components/OriginDestinationCard';
 import {QuotingBody} from '../components/QuotingBody';
 import {placeToRoute, suggestionToRoute} from '../components/routePlace';
 import {SearchingBody} from '../components/SearchingBody';
 import type {LastDriver} from './useLastDriver';
 import type {OfferBoard} from './useOfferBoard';
-import type {UsePassengerTripSocket} from './usePassengerTripSocket';
+import type {UsePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
 import type {WaypointProposalController} from './useWaypointProposal';
 import type {TripPhase} from './tripFlowPhase';
+import type {NearbyVehicleType} from '../../../dispatch/domain/dispatchRepository';
 
 /** Modo LOCAL del sheet en el home: `idle` (atajos) o `searching` (búsqueda plegada DENTRO del sheet). */
 export type SheetFlowState = 'idle' | 'searching';
@@ -52,13 +61,27 @@ export interface RequestFlowContext {
   live: UsePassengerTripSocket;
   /** Detalle del viaje activo/cierre (`null` mientras carga → Skeleton). */
   tripDetail: TripActiveView | null;
+  /** El detalle del viaje FALLÓ (query en error) y aún no hay dato: sin esto el body cae a Skeleton infinito. */
+  tripDetailError: boolean;
+  /** Reintenta la carga del detalle del viaje (refetch de la query). */
+  onRetryTripDetail: () => void;
   /** Controlador de la PARADA negociada mid-trip (Lote C3). */
   addStop: WaypointProposalController;
+  /**
+   * Tipo REAL del viaje (CAR|MOTO, del activeTripStore con fallback CAR): la franja de estado anima la
+   * silueta del vehículo PEDIDO — la moto no se anima como auto (misma fuente que el marker del mapa).
+   */
+  tripVehicleType: NearbyVehicleType;
   // ── Cotización (fase quoting) ──
-  kycStatus: string | null;
   requestAgainToken: number;
   onTripCreated: (trip: TripResource) => void;
+  /** El viaje PROGRAMADO se creó: cierra el borrador y aterriza en Viajes>Próximos. */
   onScheduled: () => void;
+  /**
+   * Toggle "Programado" del Home: arranca el flujo de programación INLINE (marca `scheduleIntent`
+   * en el borrador + abre la búsqueda de destino). No navega a ninguna lista.
+   */
+  onStartSchedule: () => void;
   onKycRequired: () => void;
   onDebtPending: () => void;
   onActiveTripExists: (tripId: string) => void;
@@ -69,8 +92,20 @@ export interface RequestFlowContext {
   onChooseOffer: (offer: OfferView) => void;
   // ── Viaje activo / cierre ──
   onOpenCamera: () => void;
+  /** Abre el chat con el conductor (acción "Mensaje" del sheet — design/veo.pen fLKdk Actions). */
+  onOpenChat: () => void;
+  /** Abre la pantalla "Comparte tu viaje" (design/veo.pen zKyic) — acción "Compartir" del sheet. */
+  onOpenFamilyShare: () => void;
+  /** Mensajes del conductor sin leer (badge de la acción "Mensaje"). */
+  unreadChatCount: number;
   /** Vuelve al home LIMPIO (cierre canónico del ciclo). */
   clearTrip: () => void;
+  /**
+   * REINTENTAR un FIJO sin conductor (fase noDriver): limpia el viaje EXPIRED pero CONSERVA el borrador
+   * (origen/destino) → la fase vuelve a 'quoting' con el destino intacto (re-confirmar a un tap). A
+   * diferencia de `clearTrip`, NO resetea el borrador.
+   */
+  onRetryRequest: () => void;
   // ── Home idle (franja de deuda + atajos) ──
   hasDebt: boolean;
   debtTotalCents: number;
@@ -78,10 +113,14 @@ export interface RequestFlowContext {
   onOpenDebtFromHome: () => void;
   onOpenPendingFromHome: () => void;
   savedPlaces: SavedPlace[];
+  /** Primer nombre del pasajero para el saludo del Home (design/veo.pen SearchSheet). */
+  greetingName: string | null;
   onSelectDestination: (place: RoutePlace) => void;
   onSeeAllSaved: () => void;
   onSeeAllRecents: () => void;
   onEnterSearch: () => void;
+  /** Elegir el DESTINO arrastrando el mapa (pen P/Home: ícono mapa a la derecha del buscador). */
+  onPickOnMap: () => void;
   /** Editar el ORIGEN desde el Home idle: búsqueda con `editing = origin` (igual que la cotización). */
   onEditOrigin: () => void;
   /** Permuta origen ↔ destino del borrador (`rideDraftStore.swap`). */
@@ -131,7 +170,6 @@ export function QuotingPhaseBody({ctx}: SlotProps): React.JSX.Element {
       onActiveTripExists={ctx.onActiveTripExists}
       onRouteChange={ctx.onRouteChange}
       requestAgainToken={ctx.requestAgainToken}
-      kycStatus={ctx.kycStatus}
     />
   );
 }
@@ -141,6 +179,7 @@ export function BiddingPhaseBody({ctx}: SlotProps): React.JSX.Element {
   const {board} = ctx;
   return (
     <OffersBody
+      tripId={ctx.activeTripId as string}
       offers={board.offers}
       connected={board.connected}
       expired={board.status === tripStatus.enum.EXPIRED}
@@ -160,7 +199,17 @@ export function BiddingPhaseBody({ctx}: SlotProps): React.JSX.Element {
 
 /** Fases `enRoute`/`arrived`/`inProgress`: el viaje VIVO (conductor real, ETA, cámara, cancelar). */
 export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  const {t} = useTranslation();
   if (!ctx.tripDetail) {
+    // Sin dato Y con error → banner + reintento (antes: Skeleton infinito). Sin error todavía → carga.
+    if (ctx.tripDetailError) {
+      return (
+        <ErrorState
+          message={t('trip.detailLoadError')}
+          onRetry={ctx.onRetryTripDetail}
+        />
+      );
+    }
     return <Skeleton variant="rect" height={140} />;
   }
   return (
@@ -168,17 +217,68 @@ export function ActiveTripPhaseBody({ctx}: SlotProps): React.JSX.Element {
       tripId={ctx.activeTripId as string}
       trip={ctx.tripDetail}
       status={ctx.board.status ?? ctx.tripDetail.status}
-      etaSeconds={ctx.live.etaSeconds}
       onOpenCamera={ctx.onOpenCamera}
+      onOpenChat={ctx.onOpenChat}
+      onOpenFamilyShare={ctx.onOpenFamilyShare}
+      unreadCount={ctx.unreadChatCount}
       onCancelled={ctx.clearTrip}
       addStop={ctx.addStop}
     />
   );
 }
 
+/**
+ * Header COLAPSABLE del viaje vivo: la franja de estado (conductor + ETA) es lo ÚNICO que sigue visible
+ * cuando el pasajero arrastra el grabber hacia abajo (snap 'header' → mapa al máximo). Es el gesto del
+ * conductor, espejado: la info esencial persiste, el detalle (tarjeta/tarifa/acciones) se pliega. Sin
+ * `tripDetail` todavía (ventana breve de carga) el header queda vacío; el cuerpo muestra el skeleton.
+ */
+export function ActiveTripSheetHeader({ctx}: SlotProps): React.JSX.Element {
+  const theme = useTheme();
+  const {t} = useTranslation();
+  // El header va FUERA del scroll padded del sheet → lleva su propio padding (mismo criterio que el header
+  // del conductor). El `paddingBottom` da aire a la franja cuando el sheet está COLAPSADO en 'header' (es
+  // lo único visible sobre el borde inferior); el `paddingHorizontal` la alinea con las cards del cuerpo.
+  const headerPad = {
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: theme.spacing.xs,
+    paddingBottom: theme.spacing.sm,
+  };
+  if (!ctx.tripDetail) {
+    return <View style={headerPad} />;
+  }
+  const {etaSeconds} = ctx.live;
+  const etaMinutes =
+    etaSeconds != null ? formatDurationMinutes(etaSeconds) : null;
+  return (
+    <View style={headerPad}>
+      <TripStatusStrip
+        status={ctx.board.status ?? ctx.tripDetail.status}
+        driverName={ctx.tripDetail.driver?.name ?? null}
+        etaLabel={
+          etaMinutes != null
+            ? t('trip.etaMinutes', {minutes: etaMinutes})
+            : null
+        }
+        vehicleType={ctx.tripVehicleType}
+      />
+    </View>
+  );
+}
+
 /** Fase `completed`: el CIERRE (pago + rating) in-sheet. */
 export function CompletionPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  const {t} = useTranslation();
   if (!ctx.tripDetail) {
+    // El CIERRE (pago/rating) también caía a Skeleton infinito ante error del detalle: banner + reintento.
+    if (ctx.tripDetailError) {
+      return (
+        <ErrorState
+          message={t('trip.detailLoadError')}
+          onRetry={ctx.onRetryTripDetail}
+        />
+      );
+    }
     return <Skeleton variant="rect" height={140} />;
   }
   return (
@@ -202,6 +302,14 @@ export function NoOffersPhaseBody({ctx}: SlotProps): React.JSX.Element {
       onExit={ctx.clearTrip}
     />
   );
+}
+
+/**
+ * Fase `noDriver` · FIJO SIN CONDUCTOR (EXPIRED en modo FIXED): in-sheet, sin navegar. Reintentar re-pide
+ * el mismo viaje (conserva el borrador → vuelve a 'quoting'); Salir vuelve al home limpio.
+ */
+export function NoDriverPhaseBody({ctx}: SlotProps): React.JSX.Element {
+  return <NoDriverBody onRetry={ctx.onRetryRequest} onExit={ctx.clearTrip} />;
 }
 
 /** Home · flow `idle`: franja pasiva de deuda/pago por completar + favoritos y recientes. */
@@ -241,19 +349,23 @@ export function HomeIdleFlowBody({ctx}: SlotProps): React.JSX.Element {
   );
 }
 
-/** Home · flow `searching`: "usar mi ubicación" + guardados + sugerencias del autocompletado. */
+/**
+ * Home · flow `searching` (design/veo.pen P/HomeSearch): chips Casa/Trabajo/Favoritos + encabezado
+ * "Sugerencias"/"Ver mapa" + lista de resultados del autocompletado. La fila de ORIGEN y el input de
+ * destino viven en el header FIJO (`HomeSearchFlowHeader`), sobre el teclado.
+ */
 export function HomeSearchFlowBody({ctx}: SlotProps): React.JSX.Element {
   return (
     <SearchingBody
-      showCurrentLocation={ctx.hasCurrentLocation && !ctx.searchActive}
-      currentLocationSubtitle={ctx.currentLocationSubtitle}
-      onUseCurrentLocation={ctx.onUseCurrentLocation}
+      savedPlaces={ctx.savedPlaces}
+      onSelectSaved={p => ctx.onSelectDestination(placeToRoute(p))}
+      onOpenSavedPlaces={ctx.onSeeAllSaved}
+      onViewMap={ctx.onPickOnMap}
       suggestions={ctx.suggestions}
       loading={ctx.searchLoading}
       error={ctx.searchError}
       active={ctx.searchActive}
       onSelectSuggestion={s => ctx.onSelectDestination(suggestionToRoute(s))}
-      onSelectSaved={p => ctx.onSelectDestination(placeToRoute(p))}
     />
   );
 }
@@ -281,12 +393,15 @@ export function QuotingSheetHeader({ctx}: SlotProps): React.JSX.Element {
         {paddingHorizontal: theme.spacing.xl, gap: theme.spacing.sm},
       ]}>
       <View style={styles.searchHeader}>
-        <IconButton
+        {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+            TODA la app — espeja a ScreenHeader/HeaderBackChevron). */}
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('actions.back')}
-          variant="surface"
-          onPress={ctx.onCancelQuoting}
-          icon={<IconArrowLeft color={theme.colors.ink} size={22} />}
-        />
+          hitSlop={12}
+          onPress={ctx.onCancelQuoting}>
+          <IconArrowLeft color={theme.colors.ink} size={28} />
+        </Pressable>
         <Text variant="bodyStrong" numberOfLines={1} style={styles.searchInput}>
           {ctx.destinationTitle ?? t('home.destination')}
         </Text>
@@ -305,13 +420,28 @@ export function QuotingSheetHeader({ctx}: SlotProps): React.JSX.Element {
  */
 export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
+  const {t} = useTranslation();
   // ENTRADA ESCALONADA del Home idle: cada bloque entra con fade + leve subida, en cascada por `index`
   // (~40ms entre bloques, ease-out, <300ms, reduce-motion safe via EnterView). Da "vida" al Home sin
   // pelear con el scroll (solo opacity/transform). Los índices continúan en el body (debt/secciones).
   return (
+    // Ritmo vertical del pen (P/Home · HomeContent gap $s-lg): aire entre bloques — el gap 8
+    // anterior quedaba apretado (feedback del dueño) y el pen se actualizó a 16.
     <View style={{gap: theme.spacing.lg}}>
       <EnterView index={0}>
-        <HomeHero />
+        <HomeHero name={ctx.greetingName} />
+      </EnterView>
+      <EnterView index={1}>
+        <ModeToggle
+          value={TripTimeMode.Now}
+          onChange={mode => {
+            if (mode === TripTimeMode.Scheduled) {
+              // Programar es el MISMO flujo inmediato + la marca de intención: abre la búsqueda de
+              // destino y la cotización llega con el selector de día/hora abierto (no navega a listas).
+              ctx.onStartSchedule();
+            }
+          }}
+        />
       </EnterView>
       {ctx.lastDriver ? (
         <EnterView index={1}>
@@ -319,13 +449,23 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
         </EnterView>
       ) : null}
       <EnterView index={2}>
-        <OriginDestinationCard
-          originTitle={ctx.currentLocationTitle}
-          originSubtitle={ctx.currentLocationSubtitle}
-          destinationValue={ctx.destinationValue}
-          onEditOrigin={ctx.onEditOrigin}
-          onSwapRoute={ctx.onSwapRoute}
-          onEnterSearch={ctx.onEnterSearch}
+        <SearchField
+          leftIcon={<IconSearch color={theme.colors.accent} size={20} />}
+          placeholder={t('home.whereTo')}
+          value={ctx.destinationValue}
+          onPress={ctx.onEnterSearch}
+          // Atajo del pen (P/Home · SearchField): mapa a la derecha → elegir el destino ARRASTRANDO
+          // el mapa (MapPick), la vía natural cuando el texto no alcanza. Pressable anidado: captura
+          // su tap sin robarle el resto del campo a la búsqueda.
+          trailing={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('maps.pickOnMap')}
+              hitSlop={8}
+              onPress={ctx.onPickOnMap}>
+              <IconMap color={theme.colors.inkSubtle} size={20} />
+            </Pressable>
+          }
         />
       </EnterView>
       <EnterView index={3}>
@@ -335,37 +475,113 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
           onAdd={ctx.onSeeAllSaved}
         />
       </EnterView>
-      {/* Teaser del catálogo (informativo, sin precio): llena la mitad inferior antes vacía del Home. */}
-      <EnterView index={4}>
-        <OfferingsTeaser />
-      </EnterView>
     </View>
   );
 }
 
-/** Home · flow `searching`: input con autofocus + cerrar (la búsqueda vive DENTRO del mismo sheet). */
+/**
+ * Input de destino EDITABLE del buscador in-sheet (design/veo.pen P/HomeSearch · InputRow · T/SearchInput):
+ * píldora con lupa a la izquierda, placeholder "¿A dónde vas?" y borde de foco TEAL (accent). El ui-kit no
+ * tiene un search-input editable (SearchField es solo-presión; TextField fuerza label), por eso se arma
+ * con tokens del tema.
+ */
+function DestinationSearchInput({
+  value,
+  onChangeText,
+}: {
+  value: string;
+  onChangeText: (query: string) => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const {t} = useTranslation();
+  const [focused, setFocused] = useState(false);
+  return (
+    <View
+      style={[
+        styles.searchInputBox,
+        {
+          backgroundColor: theme.colors.surfaceElevated,
+          borderColor: focused ? theme.colors.focus : theme.colors.border,
+          borderWidth: focused ? 1.5 : 1,
+          borderRadius: theme.radii.lg,
+        },
+      ]}>
+      <IconSearch color={theme.colors.inkSubtle} size={18} />
+      <TextInput
+        style={[
+          styles.searchTextInput,
+          {
+            color: theme.colors.ink,
+            fontFamily: theme.typography.fontFamily.text,
+            fontSize: theme.typography.fontSize.base,
+          },
+        ]}
+        placeholder={t('maps.searchPlaceholder')}
+        placeholderTextColor={theme.colors.inkSubtle}
+        accessibilityLabel={t('maps.searchPlaceholder')}
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        autoFocus
+        autoCorrect={false}
+        returnKeyType="search"
+      />
+    </View>
+  );
+}
+
+/**
+ * Home · flow `searching` (design/veo.pen P/HomeSearch · SearchHeader): fila de ORIGEN ("Mi ubicación
+ * actual" con dot verde de confianza) arriba del INPUT de destino (editable + botón cerrar). Todo vive en
+ * el header FIJO del sheet, así queda SIEMPRE sobre el teclado.
+ */
 export function HomeSearchFlowHeader({ctx}: SlotProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   return (
-    <View style={styles.searchHeader}>
-      <View style={styles.searchInput}>
-        <TextField
-          label={t('home.destination')}
-          placeholder={t('maps.inputPlaceholder')}
-          value={ctx.query}
-          onChangeText={ctx.onQueryChange}
-          autoFocus
-          autoCorrect={false}
-          returnKeyType="search"
+    <View style={styles.searchStack}>
+      {/* ORIGEN = ubicación actual (pen OriginRow): dot verde (success/jade, único verde del tema —
+          el .pen usa #00C853 pero el passenger canoniza el positivo en jade) + etiqueta. Tocarlo abre
+          la edición del origen (misma vía que la cotización). */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('maps.originCurrent')}
+        onPress={ctx.onEditOrigin}
+        style={[
+          styles.originRow,
+          {
+            backgroundColor: theme.colors.bg,
+            borderColor: theme.colors.border,
+            borderRadius: theme.radii.lg,
+          },
+        ]}>
+        <View
+          style={[styles.originDot, {backgroundColor: theme.colors.success}]}
+        />
+        <Text
+          variant="subhead"
+          color="ink"
+          numberOfLines={1}
+          style={styles.searchInput}>
+          {ctx.currentLocationTitle ?? t('maps.originCurrent')}
+        </Text>
+      </Pressable>
+      {/* DESTINO = input de búsqueda editable + cerrar (pen InputRow). */}
+      <View style={styles.searchHeader}>
+        <View style={styles.searchInput}>
+          <DestinationSearchInput
+            value={ctx.query}
+            onChangeText={ctx.onQueryChange}
+          />
+        </View>
+        <IconButton
+          accessibilityLabel={t('actions.close')}
+          onPress={ctx.onExitSearch}
+          variant="surface"
+          icon={<IconClose color={theme.colors.inkMuted} size={20} />}
         />
       </View>
-      <IconButton
-        accessibilityLabel={t('actions.close')}
-        onPress={ctx.onExitSearch}
-        variant="surface"
-        icon={<IconClose color={theme.colors.inkMuted} size={20} />}
-      />
     </View>
   );
 }
@@ -504,7 +720,11 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   offers: {
     Body: BiddingPhaseBody,
     Header: null,
-    expanded: false,
+    // ADR-020 Lote 3: al llegar ≥1 oferta (fase searching→offers) el sheet CRECE solo a full para que el
+    // pasajero VEA la lista y pueda elegir (antes quedaba en peek 50% → 1-2 cards sobre el fold, sin
+    // affordance de arrastrar → "no veo las ofertas / cómo elijo"). searching sigue en peek (solo el
+    // countdown); el salto expanded false→true al aparecer la 1ra oferta dispara el snapToIndex(FULL).
+    expanded: true,
     showNearby: false,
     activeTrip: false,
     needsTripDetail: false,
@@ -517,7 +737,25 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   noOffers: {
     Body: NoOffersPhaseBody,
     Header: null,
-    expanded: false,
+    // La PUJA sin ofertas (re-pujar) trae el stepper + mínimo + hints + nota de peajes: NO entra en el
+    // peek (content-hug capado a 0.5) y se cortaba. `expanded` → snap a FULL (content-hug 0.94) → el
+    // sheet crece al alto de su contenido (max/min) y se ve completo.
+    expanded: true,
+    showNearby: false,
+    activeTrip: false,
+    needsTripDetail: false,
+    pickupEligible: false,
+    pollsDebts: false,
+    showsPushPrePrompt: false,
+    tripMapShowsOrigin: true,
+    handoff: null,
+  },
+  // FIJO sin conductor (EXPIRED en modo FIXED): mensaje honesto + Reintentar/Salir. `expanded` para que el
+  // sheet crezca a su contenido (mismo criterio que noOffers). Terminal: sin viaje vivo, sin socket.
+  noDriver: {
+    Body: NoDriverPhaseBody,
+    Header: null,
+    expanded: true,
     showNearby: false,
     activeTrip: false,
     needsTripDetail: false,
@@ -543,7 +781,7 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   },
   enRoute: {
     Body: ActiveTripPhaseBody,
-    Header: null,
+    Header: ActiveTripSheetHeader,
     expanded: false,
     showNearby: false,
     activeTrip: true,
@@ -556,7 +794,7 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   },
   arrived: {
     Body: ActiveTripPhaseBody,
-    Header: null,
+    Header: ActiveTripSheetHeader,
     expanded: false,
     showNearby: false,
     activeTrip: true,
@@ -569,7 +807,7 @@ export const TRIP_PHASE_DESCRIPTORS: Record<TripPhase, PhaseDescriptor> = {
   },
   inProgress: {
     Body: ActiveTripPhaseBody,
-    Header: null,
+    Header: ActiveTripSheetHeader,
     expanded: false,
     showNearby: false,
     activeTrip: true,
@@ -627,7 +865,28 @@ export function resolvePickupMode(
 const styles = StyleSheet.create({
   // Header FIJO del sheet (no scrollea): buscador + chips Casa/Trabajo (home) o volver + destino (quoting).
   header: {paddingBottom: 8},
-  // Header del modo búsqueda (input + cerrar), también fijo. Mismo layout para el header de cotización.
-  searchHeader: {flexDirection: 'row', alignItems: 'flex-end', gap: 10},
+  // Stack del header de búsqueda: fila de ORIGEN sobre la fila del INPUT (pen SearchHeader · gap 8).
+  searchStack: {gap: 8},
+  // Fila input + cerrar (búsqueda) o volver + destino (cotización), fija. Centrada verticalmente.
+  searchHeader: {flexDirection: 'row', alignItems: 'center', gap: 8},
   searchInput: {flex: 1},
+  // Fila de ORIGEN (pen OriginRow): dot verde + etiqueta, píldora con borde.
+  originRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+  },
+  originDot: {width: 10, height: 10, borderRadius: 999},
+  // Input de destino EDITABLE (pen InputRow · T/SearchInput): lupa + campo, borde de foco.
+  searchInputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    minHeight: 48,
+  },
+  searchTextInput: {flex: 1, paddingVertical: 12},
 });

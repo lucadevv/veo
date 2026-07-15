@@ -1,5 +1,6 @@
 /** DTOs de los endpoints OPS. */
 import {
+  ArrayNotEmpty,
   IsArray,
   IsEmail,
   IsIn,
@@ -89,6 +90,14 @@ export class CreateOperatorDto {
   email!: string;
 
   @IsArray()
+  @IsIn(Object.values(AdminRole), { each: true })
+  roles!: AdminRole[];
+}
+
+/** POST /ops/operators/:id/roles → body. Reemplaza los roles RBAC del operador (≥1, todos AdminRole válidos). */
+export class ChangeOperatorRolesDto {
+  @IsArray()
+  @ArrayNotEmpty()
   @IsIn(Object.values(AdminRole), { each: true })
   roles!: AdminRole[];
 }

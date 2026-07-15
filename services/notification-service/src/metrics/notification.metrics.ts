@@ -93,3 +93,25 @@ export function priorityLabel(priority: number): string {
 export function bumpNotificationFailed(labels: NotificationFailedLabels): void {
   notificationFailedTotal.inc(labels);
 }
+
+/** Alcance de un marcado de leído (bounded: una sola o toda la bandeja). */
+export const InboxReadScope = { Single: 'single', All: 'all' } as const;
+export type InboxReadScope = (typeof InboxReadScope)[keyof typeof InboxReadScope];
+
+export const NOTIFICATION_INBOX_READ_METRIC = 'notification_inbox_read_total';
+
+/**
+ * Counter de notificaciones marcadas como leídas por el usuario (observabilidad §6 de los endpoints
+ * PATCH /read y /read-all). Label `scope` BOUNDED (single|all). El valor `.inc(count)` de read-all
+ * refleja cuántas se marcaron de una.
+ */
+export const notificationInboxReadTotal: CounterLike = getOrCreateCounter(
+  NOTIFICATION_INBOX_READ_METRIC,
+  'Notificaciones in-app marcadas como leídas por el destinatario (scope=single|all)',
+  ['scope'],
+);
+
+/** Suma al counter de leídas. `count` = cuántas (1 para single; N para read-all). */
+export function bumpInboxRead(scope: InboxReadScope, count = 1): void {
+  if (count > 0) notificationInboxReadTotal.inc({ scope }, count);
+}

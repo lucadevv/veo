@@ -3,14 +3,13 @@ import { OFFERING_LIST } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 import {
   categoryFareCents,
-  categoryFareCentsV2,
-  shadowCompareCategoryFare,
   minFareForCategory,
   BASE_FARE_CENTS,
   PER_KM_CENTS,
   PER_MIN_CENTS,
   MIN_FARE_CENTS,
   MOTO_MIN_FARE_CENTS,
+  DEFAULT_FARE_BASE,
 } from './fare';
 
 describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
@@ -26,12 +25,6 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
     expect(categoryFareCents(5000, 600, 1.0)).toBe(1500);
   });
 
-  it('B3 · el recargo de combustible se pliega al per-km (5 km, +40 céntimos/km = +200 → 1700)', () => {
-    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 40)).toBe(1700);
-    // default 0 = sin recargo (no cambia el comportamiento previo).
-    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, 0)).toBe(1500);
-  });
-
   it('aplica el multiplicador de categoría y redondea a S/0.10', () => {
     // base 1500 * 1.25 = 1875 → redondeo a 10 → 1880.
     expect(categoryFareCents(5000, 600, 1.25)).toBe(1880);
@@ -45,15 +38,15 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
   });
 
   // ADR 013 (Lote C): el catálogo ya NO se define en fare.ts — es OFFERING_LIST de @veo/shared-types.
-  it('el catálogo (OFFERING_LIST) incluye el tier MOTO y las ofertas de auto (moto→económico→premium)', () => {
-    // B5-4: OFFERING_LIST es el catálogo COMPLETO (4 RIDE visibles + 4 verticales ocultas por
-    // defaultEnabled:false). El quote filtra las ocultas; acá verificamos el catálogo base entero.
+  it('el catálogo (OFFERING_LIST) incluye el tier MOTO y las ofertas de auto (moto→económico→normal→premium→xl)', () => {
+    // B5-4/F2.3: OFFERING_LIST es el catálogo COMPLETO (5 RIDE visibles +premium, 3 verticales ocultas
+    // por defaultEnabled:false). El quote filtra las ocultas; acá verificamos el catálogo base entero.
     expect(OFFERING_LIST.map((o) => o.id)).toEqual([
       'veo_moto',
       'veo_economico',
       'veo_confort',
+      'veo_premium',
       'veo_xl',
-      'veo_economico_ev',
       'veo_ambulance',
       'veo_tow',
       'veo_mechanic',
@@ -92,40 +85,31 @@ describe('cálculo de tarifa de previsualización (/maps/quote)', () => {
   });
 });
 
-describe('B5-1 · categoryFareCentsV2 (quote · energía pass-through · multiplier solo posición)', () => {
-  it('económico (×1.0) sin energía → 1500; energía +40/km es pass-through (+200) → 1700', () => {
-    expect(categoryFareCentsV2(5000, 600, 1.0, MIN_FARE_CENTS, 0)).toBe(1500);
-    expect(categoryFareCentsV2(5000, 600, 1.0, MIN_FARE_CENTS, 40)).toBe(1700);
+describe('ADR-021 Fase C · surge autoritativo en el QUOTE (cierra el sobrecobro silencioso quote↔create)', () => {
+  it('surge escala la tarifa igual que el cobro firme (1500 × 1.5 = 2250)', () => {
+    // base 1500 (5km,10min,×1.0), surge 1.5 → 2250 (múltiplo de 10).
+    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, DEFAULT_FARE_BASE, 1.5)).toBe(2250);
   });
 
-  it('XL (×1.6): el multiplier escala el servicio, NO la energía → 2600 (no 2720)', () => {
-    expect(categoryFareCentsV2(5000, 600, 1.6, MIN_FARE_CENTS, 40)).toBe(2600);
+  it('el surge compone con el multiplier de la oferta (1500 × 1.25 × 1.2 = 2250)', () => {
+    // 1500 × 1.25 = 1875; × 1.2 = 2250 (múltiplo de 10).
+    expect(categoryFareCents(5000, 600, 1.25, MIN_FARE_CENTS, DEFAULT_FARE_BASE, 1.2)).toBe(2250);
   });
 
-  it('respeta la mínima y redondea a S/0.10', () => {
-    expect(categoryFareCentsV2(0, 0, 1.0, 500, 0)).toBe(600); // BASE 600 > 500
-    expect(categoryFareCentsV2(0, 0, 0.55, 300, 0)).toBe(330); // 600×0.55=330 > 300
+  it('surge default = 1.0 → sin recargo (back-compat: las llamadas sin el arg no cambian)', () => {
+    expect(categoryFareCents(5000, 600, 1.0)).toBe(1500);
+    expect(categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, DEFAULT_FARE_BASE, 1.0)).toBe(1500);
   });
 
-  it('rechaza insumos inválidos', () => {
-    expect(() => categoryFareCentsV2(5000, 600, 1.0, 500, -1)).toThrow(ValidationError);
-    expect(() => categoryFareCentsV2(-1, 600, 1.0)).toThrow(ValidationError);
-  });
-});
-
-describe('B5-1 · shadowCompareCategoryFare (quote: viejo vs nuevo)', () => {
-  it('económico (×1.0): delta 0', () => {
-    expect(shadowCompareCategoryFare(5000, 600, 1.0, 500, 40, 40)).toEqual({
-      oldCents: 1700,
-      newCents: 1700,
-      deltaCents: 0,
-    });
-  });
-
-  it('XL (×1.6): el nuevo es MENOR (energía ya no inflada por el multiplier) → delta -120', () => {
-    const d = shadowCompareCategoryFare(5000, 600, 1.6, 500, 40, 40);
-    expect(d.oldCents).toBe(2720);
-    expect(d.newCents).toBe(2600);
-    expect(d.deltaCents).toBe(-120);
+  it('rechaza surge fuera de [1.0, 2.0] (defensa: dispatch ya clampa, pero la fórmula no confía)', () => {
+    expect(() => categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, DEFAULT_FARE_BASE, 0.5)).toThrow(
+      ValidationError,
+    );
+    expect(() => categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, DEFAULT_FARE_BASE, 2.5)).toThrow(
+      ValidationError,
+    );
+    expect(() =>
+      categoryFareCents(5000, 600, 1.0, MIN_FARE_CENTS, DEFAULT_FARE_BASE, Number.NaN),
+    ).toThrow(ValidationError);
   });
 });

@@ -47,6 +47,10 @@ const isDev = process.env.NODE_ENV !== 'production';
 
 const bffOrigin = originOf(process.env.NEXT_PUBLIC_BFF_URL);
 const wsOrigin = originOf(process.env.NEXT_PUBLIC_BFF_WS_URL);
+// Origen del storage de media (imágenes de documentos firmadas/presigned). Env-driven para soportar
+// AMBOS entornos sin hardcodear: dev = http://localhost:9002 (MinIO local), prod/VPS = el dominio S3/CDN.
+// Sin esto en img-src, el browser BLOQUEA la imagen del documento aunque la URL responda 200.
+const mediaOrigin = originOf(process.env.NEXT_PUBLIC_MEDIA_URL);
 
 const connectSrc = [
   "'self'",
@@ -57,7 +61,7 @@ const connectSrc = [
   wsOriginOf(bffOrigin),
 ].filter(Boolean);
 
-const imgSrc = ["'self'", 'data:', 'blob:', ...MAPBOX_ORIGINS].filter(Boolean);
+const imgSrc = ["'self'", 'data:', 'blob:', ...MAPBOX_ORIGINS, mediaOrigin].filter(Boolean);
 const mediaSrc = ["'self'", 'blob:', bffOrigin].filter(Boolean);
 
 // En dev Next requiere 'unsafe-eval'; en prod se omite. 'unsafe-inline' es necesario para
@@ -83,7 +87,7 @@ const csp = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ['@veo/shared-types', '@veo/api-client', '@veo/utils'],
+  transpilePackages: ['@veo/shared-types', '@veo/api-client', '@veo/utils', '@veo/policy'],
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns'],
   },

@@ -1,15 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, X } from 'lucide-react';
-import { useModelReviewAction } from '@/lib/api/queries';
-import type { ApproveVehicleModelRequest, VehicleModelReviewView } from '@/lib/api/schemas';
-import { useSession } from '@/lib/session-context';
-import { can } from '@/lib/rbac';
+import { Check, RotateCcw } from 'lucide-react';
+import { useModelReviewAction, useReopenModel } from '@/lib/api/queries';
+import type { VehicleModelReviewView } from '@/lib/api/schemas';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Field } from '@/components/ui/field';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Dialog,
@@ -22,52 +21,40 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 
-/** Estilo del <select> nativo, espejo del Input (admin-web no tiene primitive Select aún). */
-const selectClass =
-  'h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-ink ' +
-  'hover:border-border-strong focus-visible:outline-none';
-
-/** Opciones de la ficha técnica que completa el operador. Los valores espejan los enums del contrato. */
-const SEGMENT_OPTIONS = [
-  { value: 'ECONOMY', label: 'Económico' },
-  { value: 'MID', label: 'Intermedio' },
-  { value: 'PREMIUM', label: 'Premium' },
-] as const;
-const ENERGY_OPTIONS = [
-  { value: 'GASOLINE_95', label: 'Gasolina 95' },
-  { value: 'GASOLINE_84', label: 'Gasolina 84' },
-  { value: 'DIESEL', label: 'Diésel' },
-  { value: 'GNV', label: 'GNV' },
-  { value: 'ELECTRIC', label: 'Eléctrico' },
-] as const;
+const SEGMENTS = ['ECONOMY', 'MID', 'PREMIUM'] as const;
+const ENERGY_SOURCES = ['GASOLINE_90', 'DIESEL', 'ELECTRIC'] as const;
 
 /**
- * Acciones de revisión de un modelo solicitado (B5-2.c), gated por `fleet:review`. Solo se revisa lo que
- * está PENDING_REVIEW. Aprobar abre un formulario para completar la ficha técnica (segmento/energía/
- * rendimiento) que el conductor no conoce; rechazar es un confirm. La acción queda auditada server-side.
+ * Aprobar / rechazar una solicitud de modelo (B5-2.c).
+ * - Aprobar abre un form: el operador completa la ficha técnica (segment/energySource/efficiency) que el
+ *   conductor no conoce, y opcionalmente corrige los asientos (prellenados con los del request).
+ * - Rechazar pide confirmación (sin body). Ambas invalidan la cola vía el hook.
  */
 export function ModelReviewActions({ model }: { model: VehicleModelReviewView }) {
-  const user = useSession();
-  const { toast } = useToast();
   const action = useModelReviewAction();
-
+  const reopen = useReopenModel();
+  const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
-    segment: '',
-    energySource: '',
+    segment: SEGMENTS[0] as (typeof SEGMENTS)[number],
+    energySource: ENERGY_SOURCES[0] as (typeof ENERGY_SOURCES)[number],
     efficiency: '',
     seats: String(model.seats),
   });
 
-  // `model.status` es el enum tipado del contrato; el literal se chequea contra el union (typo = error TS).
-  if (!can(user, 'fleet:review') || model.status !== 'PENDING_REVIEW') {
-    return <span className="text-xs text-ink-subtle">—</span>;
-  }
-
-  const valid =
-    form.segment && form.energySource && Number(form.efficiency) > 0 && Number(form.seats) > 0;
+  const efficiencyNum = Number(form.efficiency);
+  const efficiencyValid =
+    form.efficiency.trim().length > 0 &&
+    Number.isInteger(efficiencyNum) &&
+    efficiencyNum >= 1 &&
+    efficiencyNum <= 1000;
+  const seatsNum = Number(form.seats);
+  const seatsValid =
+    form.seats.trim().length === 0 ||
+    (Number.isInteger(seatsNum) && seatsNum >= 1 && seatsNum <= 20);
+  const valid = efficiencyValid && seatsValid;
 
   async function approve() {
     setError(null);
@@ -76,17 +63,12 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
       await action.mutateAsync({
         id: model.id,
         decision: 'approve',
-        // El <select> solo ofrece valores válidos del enum; el contrato (Zod) y el fleet revalidan.
-        segment: form.segment as ApproveVehicleModelRequest['segment'],
-        energySource: form.energySource as ApproveVehicleModelRequest['energySource'],
-        efficiency: Number(form.efficiency),
-        seats: Number(form.seats),
+        segment: form.segment,
+        energySource: form.energySource,
+        efficiency: efficiencyNum,
+        ...(form.seats.trim().length > 0 ? { seats: seatsNum } : {}),
       });
-      toast({
-        tone: 'success',
-        title: 'Modelo aprobado',
-        description: `${model.make} ${model.model}`,
-      });
+      toast({ tone: 'success', title: 'Modelo aprobado' });
       setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo aprobar el modelo.');
@@ -95,123 +77,147 @@ export function ModelReviewActions({ model }: { model: VehicleModelReviewView })
     }
   }
 
+  async function reject() {
+    await action.mutateAsync({ id: model.id, decision: 'reject' });
+    toast({ tone: 'success', title: 'Solicitud rechazada' });
+  }
+
+  async function reopenModel() {
+    await reopen.mutateAsync({ id: model.id });
+    toast({ tone: 'success', title: 'Modelo reabierto para revisión' });
+  }
+
+  // Un modelo YA APROBADO no se aprueba/rechaza: se REABRE (APPROVED→PENDING_REVIEW) para corregir su ficha.
+  if (model.status === 'APPROVED') {
+    return (
+      <div className="inline-flex items-center gap-2 justify-self-end">
+        <ConfirmDialog
+          trigger={
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-3.5 py-2 text-[13px] font-semibold text-ink-muted transition-colors hover:bg-surface-2"
+            >
+              <RotateCcw className="size-[13px]" aria-hidden />
+              Reabrir
+            </button>
+          }
+          title="Reabrir modelo aprobado"
+          description={`Se reabrirá ${model.make} ${model.model} para corregir su ficha técnica. Volverá a la cola de revisión (pendiente) hasta que se apruebe de nuevo.`}
+          confirmLabel="Reabrir"
+          onConfirm={reopenModel}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-2">
+    <div className="inline-flex items-center gap-2 justify-self-end">
+      <ConfirmDialog
+        trigger={
+          <button
+            type="button"
+            className="inline-flex items-center rounded-full border border-border-strong bg-surface px-3.5 py-2 text-[13px] font-semibold text-ink-muted transition-colors hover:bg-surface-2"
+          >
+            Rechazar
+          </button>
+        }
+        title="Rechazar solicitud de modelo"
+        description={`Se descartará la solicitud de ${model.make} ${model.model}. El conductor deberá volver a solicitarlo.`}
+        confirmLabel="Rechazar"
+        variant="danger"
+        onConfirm={reject}
+      />
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
-          <Button size="sm" variant="primary">
-            <Check className="size-4" aria-hidden />
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent/15 px-3.5 py-2 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/20"
+          >
+            <Check className="size-[13px]" aria-hidden />
             Aprobar
-          </Button>
+          </button>
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              Aprobar {model.make} {model.model}
-            </DialogTitle>
+            <DialogTitle>Aprobar modelo</DialogTitle>
             <DialogDescription>
-              Completá la ficha técnica de fábrica. El conductor solo indicó marca, modelo, años y
-              asientos.
+              Completá la ficha técnica de {model.make} {model.model} ({model.yearFrom}–
+              {model.yearTo}). El servidor valida los enums de dominio y mueve la solicitud a
+              APROBADO.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="flex flex-col gap-4 py-2">
-            <Field label="Segmento">
-              <select
-                className={selectClass}
-                value={form.segment}
-                onChange={(e) => setForm((f) => ({ ...f, segment: e.target.value }))}
-              >
-                <option value="" disabled>
-                  Elegí el segmento
-                </option>
-                {SEGMENT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Fuente de energía">
-              <select
-                className={selectClass}
-                value={form.energySource}
-                onChange={(e) => setForm((f) => ({ ...f, energySource: e.target.value }))}
-              >
-                <option value="" disabled>
-                  Elegí la energía
-                </option>
-                {ENERGY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Rendimiento (km por unidad: km/L o km/kWh)">
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={1000}
-                value={form.efficiency}
-                onChange={(e) => setForm((f) => ({ ...f, efficiency: e.target.value }))}
-                placeholder="17"
-              />
-            </Field>
-
-            <Field label="Asientos (corregí si el conductor se equivocó)">
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={20}
-                value={form.seats}
-                onChange={(e) => setForm((f) => ({ ...f, seats: e.target.value }))}
-              />
-            </Field>
-
-            {error ? <p className="text-sm text-danger">{error}</p> : null}
+          <div className="grid gap-3 py-1">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Segmento">
+                <Select
+                  value={form.segment}
+                  onChange={(e) =>
+                    setForm({ ...form, segment: e.target.value as (typeof SEGMENTS)[number] })
+                  }
+                >
+                  {SEGMENTS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Energía">
+                <Select
+                  value={form.energySource}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      energySource: e.target.value as (typeof ENERGY_SOURCES)[number],
+                    })
+                  }
+                >
+                  {ENERGY_SOURCES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Eficiencia (1–1000)">
+                <Input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={form.efficiency}
+                  onChange={(e) => setForm({ ...form, efficiency: e.target.value })}
+                  placeholder="Ej. 45"
+                />
+              </Field>
+              <Field label="Asientos (opcional)">
+                <Input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={form.seats}
+                  onChange={(e) => setForm({ ...form, seats: e.target.value })}
+                />
+              </Field>
+            </div>
           </div>
-
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="secondary">Cancelar</Button>
+              <Button variant="ghost">Cancelar</Button>
             </DialogClose>
-            <Button variant="primary" disabled={!valid || pending} onClick={() => void approve()}>
-              {pending ? 'Aprobando…' : 'Aprobar modelo'}
+            <Button
+              variant="primary"
+              loading={pending}
+              disabled={!valid}
+              onClick={() => void approve()}
+            >
+              Aprobar modelo
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <ConfirmDialog
-        trigger={
-          <Button size="sm" variant="secondary">
-            <X className="size-4" aria-hidden />
-            Rechazar
-          </Button>
-        }
-        title="Rechazar modelo"
-        description="La solicitud quedará rechazada. La acción queda auditada."
-        confirmLabel="Rechazar"
-        variant="danger"
-        onConfirm={async () => {
-          // El reject es un CAS server-side: puede 409 si otro operador ya lo resolvió. Feedback honesto.
-          try {
-            await action.mutateAsync({ id: model.id, decision: 'reject' });
-            toast({ tone: 'success', title: 'Modelo rechazado' });
-          } catch (e) {
-            toast({
-              tone: 'danger',
-              title: 'No se pudo rechazar',
-              description: e instanceof Error ? e.message : undefined,
-            });
-          }
-        }}
-      />
     </div>
   );
 }

@@ -11,6 +11,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PanicStatus } from '@veo/shared-types';
 import { TripSnapshotService } from './trip-snapshot.service';
+import { PrismaTripSnapshotRepository } from './trip-snapshot.repository';
 import type { PrismaService } from '../infra/prisma.service';
 
 interface SnapshotRow {
@@ -98,7 +99,7 @@ describe('TripSnapshotService.onPanic · preserva el estado previo antes de enma
       lastLon: null,
       lastLocationAt: null,
     });
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
 
     await svc.onPanic('trip-1', 'pax-1', GEO, AT);
 
@@ -117,7 +118,7 @@ describe('TripSnapshotService.onPanic · preserva el estado previo antes de enma
       lastLon: null,
       lastLocationAt: null,
     });
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
 
     await svc.onPanic('trip-1', 'pax-1', GEO, AT);
 
@@ -128,7 +129,7 @@ describe('TripSnapshotService.onPanic · preserva el estado previo antes de enma
 
   it('pánico ANTES de trip.started (sin fila previa): prePanicStatus queda null, status=PANIC', async () => {
     const { prisma, store } = buildPrisma();
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
 
     await svc.onPanic('trip-1', 'pax-1', GEO, AT);
 
@@ -149,7 +150,7 @@ describe('TripSnapshotService.onPanicResolved · DESENMASCARADO CONDICIONAL (seg
       lastLon: GEO.lon,
       lastLocationAt: AT,
     });
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
 
     await svc.onPanicResolved('trip-1', PanicStatus.FALSE_ALARM);
 
@@ -168,7 +169,7 @@ describe('TripSnapshotService.onPanicResolved · DESENMASCARADO CONDICIONAL (seg
       lastLon: GEO.lon,
       lastLocationAt: AT,
     });
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
 
     await svc.onPanicResolved('trip-1', PanicStatus.RESOLVED);
 
@@ -191,7 +192,7 @@ describe('TripSnapshotService.onPanicResolved · DESENMASCARADO CONDICIONAL (seg
         lastLon: null,
         lastLocationAt: null,
       });
-      const svc = new TripSnapshotService(prisma);
+      const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
       await svc.onPanicResolved('trip-1', status);
       expect(store.get('trip-1')!.status, `status ${status} no debe desenmascarar`).toBe('PANIC');
     }
@@ -207,7 +208,7 @@ describe('TripSnapshotService.onPanicResolved · DESENMASCARADO CONDICIONAL (seg
       lastLon: null,
       lastLocationAt: null,
     });
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
 
     await svc.onPanicResolved('trip-1', PanicStatus.FALSE_ALARM);
 
@@ -226,7 +227,7 @@ describe('TripSnapshotService.onPanicResolved · DESENMASCARADO CONDICIONAL (seg
       lastLon: null,
       lastLocationAt: null,
     });
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
 
     await svc.onPanicResolved('trip-1', PanicStatus.FALSE_ALARM);
 
@@ -236,7 +237,7 @@ describe('TripSnapshotService.onPanicResolved · DESENMASCARADO CONDICIONAL (seg
 
   it('snapshot inexistente → FALSE_ALARM no rompe (no-op)', async () => {
     const { prisma, tx } = buildPrisma();
-    const svc = new TripSnapshotService(prisma);
+    const svc = new TripSnapshotService(new PrismaTripSnapshotRepository(prisma));
     await expect(svc.onPanicResolved('trip-x', PanicStatus.FALSE_ALARM)).resolves.toBeUndefined();
     expect(tx.tripSnapshot.update).not.toHaveBeenCalled();
   });

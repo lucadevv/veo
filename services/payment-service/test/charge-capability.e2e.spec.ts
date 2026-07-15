@@ -18,6 +18,7 @@ import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import type {
   PaymentGateway,
   GatewayChargeRequest,
@@ -48,6 +49,7 @@ function makeConfig(): ConfigService {
     DEFAULT_PAYMENT_METHOD: 'YAPE',
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
+    REFUND_IDEMPOTENCY_WINDOW_MINUTES: 15,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
   return {
@@ -73,8 +75,7 @@ function fixedGateway(result: GatewayChargeResult): PaymentGateway {
 
 function makeService(gateway: PaymentGateway): PaymentsService {
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  return new PaymentsService(
-    prismaService,
+  return new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     noAffiliation,
     noPromos,

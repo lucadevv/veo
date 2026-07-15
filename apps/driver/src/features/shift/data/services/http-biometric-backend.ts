@@ -14,6 +14,7 @@ import {
   BiometricRejectedError,
   type BiometricBackendPort,
   type BiometricChallenge,
+  type BiometricEnrollInput,
   type BiometricEnrollResult,
   type BiometricVerificationInput,
   type BiometricVerifyOutcome,
@@ -64,9 +65,11 @@ export class HttpBiometricBackendPort implements BiometricBackendPort {
     return result;
   }
 
-  async enroll(photoBase64: string): Promise<BiometricEnrollResult> {
+  async enroll(input: BiometricEnrollInput): Promise<BiometricEnrollResult> {
     try {
-      const body = driverBiometricEnrollRequest.parse({ photo: photoBase64 });
+      // RE-enrolamiento con UNA SELFIE: el contrato del alta acepta `{ photo }` (base64 de una foto
+      // frontal). El cuerpo se valida con el esquema del contrato antes de enviarlo.
+      const body = driverBiometricEnrollRequest.parse({ photo: input.photo });
       const result = await this.http.post('/drivers/biometric/enroll', {
         body,
         schema: driverBiometricEnrollResult,

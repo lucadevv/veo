@@ -1,8 +1,8 @@
 /**
  * PricingCacheConsumer — invalidación INSTANTÁNEA cross-réplica del cache de config de pricing.
  *
- * El problema (cerrado por este consumer): los 4 servicios de config editable en caliente
- * (PricingScheduleService, FuelSurchargeService, EnergyCatalogService, CatalogService) cachean
+ * El problema (cerrado por este consumer): los servicios de config editable en caliente
+ * (BidFloorService, BaseFareService, CatalogService) cachean
  * en-proceso con TTL corto y, en el PUT, EMITEN un evento por outbox + invalidan SU cache local.
  * Pero el evento NO lo consumía nadie → en multi-réplica el PUT solo refresca la réplica que lo
  * atendió; las DEMÁS servían config STALE hasta que venciera su TTL (≤ cacheTtlMs).
@@ -13,9 +13,9 @@
  * añade el disparador de invalidación que faltaba.
  *
  * REGLA DE ORO (@veo/events/nest): un groupId = UN consumer con TODOS sus eventos en `handlers()`.
- * Los 4 eventos viven en topics distintos (pricing / fuel / energy / catalog, derivados por
- * `topicForEvent` del dominio antes del punto); todos entran en este único record → el bug de
- * particiones sin asignar (dos consumers, mismo groupId, topics distintos) es imposible.
+ * Los eventos viven en topics distintos (pricing / catalog, derivados por `topicForEvent` del dominio
+ * antes del punto); todos entran en este único record → el bug de particiones sin asignar (dos
+ * consumers, mismo groupId, topics distintos) es imposible.
  *
  * groupId DEDICADO `trip-service.pricing-cache`: independiente del de puja/dispatch/erasure para
  * que su offset y su rebalanceo no se acoplen a esos flujos.
@@ -26,10 +26,8 @@ import type { EventEnvelope, EventHandler } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
 import type { Env } from '../config/env.schema';
 import { CatalogService } from '../catalog/catalog.service';
-import { EnergyCatalogService } from './energy-catalog.service';
-import { FuelSurchargeService } from './fuel-surcharge.service';
-import { PricingScheduleService } from './pricing-schedule.service';
 import { BidFloorService } from './bid-floor.service';
+import { BaseFareService } from './base-fare.service';
 
 /** clientId kafkajs de este servicio. */
 const KAFKA_CLIENT_ID = 'trip-service';
@@ -38,16 +36,13 @@ const KAFKA_CLIENT_ID = 'trip-service';
 const PRICING_CACHE_GROUP_ID = 'trip-service.pricing-cache';
 
 /**
- * Los eventType que invalidan cada cache. Son las CLAVES del registro central de @veo/events
- * (`pricing.mode_schedule_updated` está tipado en EVENT_SCHEMAS; los otros tres son eventos de
- * outbox del dominio de pricing, mismas claves que emite cada `replace*`). Tabla declarativa para
- * que añadir un evento sea una fila (sin tocar el bootstrap).
+ * Los eventType que invalidan cada cache. Son las CLAVES del registro central de @veo/events (eventos de
+ * outbox del dominio de pricing, mismas claves que emite cada `replace*`). Tabla declarativa para que
+ * añadir un evento sea una fila (sin tocar el bootstrap).
  */
 const PRICING_CACHE_EVENTS = {
-  'pricing.mode_schedule_updated': 'schedule',
   'pricing.bid_floor_updated': 'bid_floor',
-  'fuel.surcharge_updated': 'fuel',
-  'energy.catalog_updated': 'energy',
+  'pricing.base_fare_updated': 'base_fare',
   'catalog.updated': 'catalog',
 } as const;
 
@@ -56,11 +51,9 @@ type PricingCacheEvent = keyof typeof PRICING_CACHE_EVENTS;
 @Injectable()
 export class PricingCacheConsumer extends KafkaConsumerBootstrap {
   constructor(
-    private readonly schedule: PricingScheduleService,
-    private readonly fuel: FuelSurchargeService,
-    private readonly energy: EnergyCatalogService,
     private readonly catalog: CatalogService,
     private readonly bidFloor: BidFloorService,
+    private readonly baseFare: BaseFareService,
     config: ConfigService<Env, true>,
   ) {
     super({
@@ -73,14 +66,10 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
   /** TODOS los eventos del group, en un solo record (único punto de registro · regla de oro). */
   protected override handlers(): Readonly<Record<string, EventHandler>> {
     return {
-      'pricing.mode_schedule_updated': (envelope) =>
-        this.onConfigUpdated('pricing.mode_schedule_updated', envelope),
       'pricing.bid_floor_updated': (envelope) =>
         this.onConfigUpdated('pricing.bid_floor_updated', envelope),
-      'fuel.surcharge_updated': (envelope) =>
-        this.onConfigUpdated('fuel.surcharge_updated', envelope),
-      'energy.catalog_updated': (envelope) =>
-        this.onConfigUpdated('energy.catalog_updated', envelope),
+      'pricing.base_fare_updated': (envelope) =>
+        this.onConfigUpdated('pricing.base_fare_updated', envelope),
       'catalog.updated': (envelope) => this.onConfigUpdated('catalog.updated', envelope),
     };
   }
@@ -100,17 +89,11 @@ export class PricingCacheConsumer extends KafkaConsumerBootstrap {
     envelope: EventEnvelope<unknown>,
   ): Promise<void> {
     switch (eventType) {
-      case 'pricing.mode_schedule_updated':
-        this.schedule.invalidateCache();
-        break;
       case 'pricing.bid_floor_updated':
         this.bidFloor.invalidateCache();
         break;
-      case 'fuel.surcharge_updated':
-        this.fuel.invalidateCache();
-        break;
-      case 'energy.catalog_updated':
-        this.energy.invalidateCache();
+      case 'pricing.base_fare_updated':
+        this.baseFare.invalidateCache();
         break;
       case 'catalog.updated':
         this.catalog.invalidateCache();

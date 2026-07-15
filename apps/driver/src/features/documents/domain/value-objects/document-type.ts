@@ -1,17 +1,23 @@
+import { FleetDocumentType } from '@veo/shared-types';
+
 /**
  * Catálogo de tipos de documento que el conductor debe mantener vigentes para operar en Lima.
- * El `key` es el valor estable que viaja al backend (`AddDocumentRequest.type` y `DriverDocument.type`);
- * la etiqueta humana se resuelve por i18n en la capa de presentación con `documents.type.<key>`.
+ * El `key` es el valor CANÓNICO que viaja al backend (`AddDocumentRequest.type`, `DriverDocument.type`
+ * y el `type` del presign, validado con `@IsEnum(FleetDocumentType)`); por eso se toma directo del
+ * enum `FleetDocumentType` de `@veo/shared-types` (sin strings mágicos: una deriva es error de
+ * compilación, no un 400). La etiqueta humana se resuelve por i18n con `documents.type.<key>`.
  *
  * El contrato declara `type` como string libre, así que toleramos tipos desconocidos (se muestran
  * con su valor crudo) sin romper la lista.
  */
 export const DOCUMENT_TYPES = [
-  'LICENSE_A1',
-  'SOAT',
-  'VEHICLE_REGISTRATION',
-  'ITV',
-  'CRIMINAL_RECORD',
+  FleetDocumentType.DNI,
+  FleetDocumentType.LICENSE_A1,
+  FleetDocumentType.SOAT,
+  FleetDocumentType.PROPERTY_CARD,
+  FleetDocumentType.ITV,
+  FleetDocumentType.VEHICLE_PHOTO,
+  FleetDocumentType.BACKGROUND_CHECK,
 ] as const;
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];

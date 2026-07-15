@@ -1,6 +1,7 @@
 /**
  * Cobertura de la resolución de URLs del driver-bff (:4002): defaults, auto-derive del host de Metro
- * (`metroDevHost`, vía getDevServer en new-arch + scriptURL en arq vieja) y self-heal de IP LAN stale.
+ * (`metroDevHost`, vía getDevServer en new-arch + scriptURL en arq vieja) y auto-sanado de overrides
+ * stale en dev (IP LAN rotada, dominio bakeado de túnel muerto) con escape `DEV_FORCE_ENV_URLS`.
  * Mismo patrón que la passenger app. `env.ts` ejecuta su lógica al importarse, por eso cada escenario
  * usa `jest.isolateModules` + `jest.doMock` para controlar `Config`/`scriptURL` antes de re-importar.
  */
@@ -112,16 +113,45 @@ describe('env (driver) · resolución de URLs', () => {
     expect(env.DRIVER_BFF_WS_URL).toBe('http://192.168.18.238:4002');
   });
 
-  it('Config dominio (staging/prod) GANA aunque haya host de Metro', () => {
+  it('REGRESIÓN dominio bakeado (túnel muerto): con Metro vivo, el dominio del .env se ignora', () => {
+    // El bug real (2026-07-03): el build nativo quedó con el dominio del túnel Cloudflare muerto
+    // bakeado por react-native-config y NI UN request llegaba al driver-bff local.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { env } = loadEnv({
       scriptURL: null,
       devServerUrl: 'http://192.168.18.238:8081/',
       config: {
+        DRIVER_BFF_URL: 'https://driver-dev.yoveoapp.com/api/v1',
+        DRIVER_BFF_WS_URL: 'https://driver-dev.yoveoapp.com',
+      },
+    });
+    expect(env.DRIVER_BFF_URL).toBe('http://192.168.18.238:4002/api/v1');
+    expect(env.DRIVER_BFF_WS_URL).toBe('http://192.168.18.238:4002');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('DEV_FORCE_ENV_URLS=true: el override (dominio/IP fija) se honra tal cual en dev', () => {
+    const { env } = loadEnv({
+      scriptURL: null,
+      devServerUrl: 'http://192.168.18.238:8081/',
+      config: {
+        DEV_FORCE_ENV_URLS: 'true',
         DRIVER_BFF_URL: 'https://api.veo.pe/driver/api/v1',
         DRIVER_BFF_WS_URL: 'https://api.veo.pe',
       },
     });
     expect(env.DRIVER_BFF_URL).toBe('https://api.veo.pe/driver/api/v1');
+    expect(env.DRIVER_BFF_WS_URL).toBe('https://api.veo.pe');
+  });
+
+  it('override con el MISMO host que Metro (puerto/path custom) → se respeta tal cual', () => {
+    const { env } = loadEnv({
+      scriptURL: null,
+      devServerUrl: 'http://192.168.18.238:8081/',
+      config: { DRIVER_BFF_URL: 'http://192.168.18.238:9999/custom/api' },
+    });
+    expect(env.DRIVER_BFF_URL).toBe('http://192.168.18.238:9999/custom/api');
   });
 
   it('REGRESIÓN new-arch (el bug): scriptURL=null + getDevServer + .env IP LAN stale → host de Metro', () => {

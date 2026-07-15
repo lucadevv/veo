@@ -7,8 +7,8 @@ import {
   MarkerView,
   ShapeSource,
 } from '@rnmapbox/maps';
-import {passengerMapRoute, RoutePin} from '@veo/ui-kit';
-import React, {useCallback, useEffect, useMemo, useRef} from 'react';
+import { ELEVATION_SHADOW_COLOR,passengerMapRoute, RoutePin} from '@veo/ui-kit';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {StyleSheet, useWindowDimensions, View} from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -17,9 +17,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import type {NearbyVehicleType} from '../../../features/dispatch/domain/dispatchRepository';
 import {VehicleIcon} from '../../../features/dispatch/presentation/components/VehicleIcon';
+import {offeringGlyph} from './offeringGlyphs';
 import type {CameraTarget} from '../../../features/trip/presentation/hooks/mapDirector';
 import {
   boundsOf,
+  distanceMeters,
   LIMA_CENTER_LNGLAT,
   LIMA_ZOOM,
   toLngLat,
@@ -27,7 +29,11 @@ import {
 import {type DirectedCameraRef, useDirectedCamera} from './useDirectedCamera';
 import {useIdleCamera} from './useIdleCamera';
 import {RecenterButton} from './RecenterButton';
-import {veoDarkMapboxStyleJSON} from './mapbox/veoDarkStyle';
+import {
+  veoLightMapboxStyleJSON,
+  veoLightMapboxStyleJSON2D,
+} from './mapbox/veoLightStyle';
+import {useMapViewModeStore} from '../stores/mapViewModeStore';
 
 export interface AppMapProps {
   /** Centro inicial del mapa (cuando no se ajusta a la ruta). */
@@ -114,14 +120,22 @@ export interface AppMapProps {
 const ROUTE_SOURCE = 'veo-route';
 const FIT_PADDING = 64;
 /**
- * CAP DURO del inset inferior que se reserva para el sheet en el `fitBounds`. El sheet de búsqueda/
- * ofertas puede medir hasta el 50% de la pantalla (su `maxContentFraction`); reservar TODO ese alto como
- * padding inferior comprimía el viewport útil del fit a ~43% y Mapbox bajaba el zoom brutalmente (la ruta
- * "se alejaba demasiado"). El encuadre debe reservar SIEMPRE como mucho la altura del PEEK colapsado:
- * topeamos el inset a este % de la pantalla. El sheet expandido TAPA el mapa (no lo comprime), igual que
- * Uber/Lyft. Por encima de este tope, el fit ignora el resto del sheet.
+ * Red de CORDURA del inset inferior del `fitBounds`. Calibración de GUSTO del dueño (2026-07-14,
+ * reemplaza el cap 0.32 anterior): la ruta COMPLETA debe encajar CENTRADA en la ventana visible
+ * entre el tope del sheet y el chrome superior — la cámara se aleja lo que haga falta; la ruta
+ * jamás queda debajo del sheet. El cap solo protege el caso degenerado (sheet a ~94%, donde el
+ * sheet TAPA el mapa y encuadrar ya no tiene sentido).
  */
-const FIT_BOTTOM_INSET_FRACTION = 0.32;
+const FIT_BOTTOM_INSET_FRACTION = 0.6;
+/**
+ * CAP del inset inferior para las cámaras de CENTRO/FOLLOW (no-fit). El `bottomInset` ahora sigue la
+ * altura del snap ACTUAL del sheet (no solo el peek): expandido a ~94%, reservar TODO eso como padding
+ * empujaría el punto centrado fuera de pantalla. Tope al 50%: el foco queda centrado en la franja
+ * visible mientras haya franja razonable; con el sheet casi a pantalla completa, el sheet TAPA el mapa
+ * (igual que el fit — misma filosofía Uber/Lyft del CAP de arriba, con más margen porque centrar un
+ * punto tolera más padding que encuadrar un bounds).
+ */
+const CENTER_BOTTOM_INSET_FRACTION = 0.5;
 /**
  * Red de zoom para el `fitBounds` declarativo: si la ruta es geográficamente chica (origen y destino
  * muy cerca), Mapbox acercaría demasiado; este tope evita un zoom-calle agresivo. NO impide el alejado
@@ -182,37 +196,79 @@ interface DriverVehicleMarkerProps {
 }
 
 /**
- * Marker del CONDUCTOR ASIGNADO: `VehicleIcon` (CAR/MOTO del trip) más grande que el ambiente para
- * jerarquía. Si llega `heading` se rota con `transform: rotate` (barato, GPU); sin heading NO se rota
- * (mejor que clavarlo en 0°/Norte y que pegue saltos). Memoizado por valor → el stream del socket no
- * re-monta el SVG, solo actualiza la coord del `MarkerView`.
+ * Marker del CONDUCTOR ASIGNADO: BADGE circular con el ícono de LÍNEA del vehículo (CAR/MOTO del
+ * registro `offeringGlyphs`) — mismo tratamiento que el puck del conductor. Calibración del dueño
+ * (2026-07-14): la silueta top-down de la moto era ilegible a este tamaño (se leía como autito);
+ * el ícono de línea es inconfundible. Sin rotación por heading: un badge circular no comunica rumbo
+ * (el desplazamiento del marker ya lo cuenta) y rotar el glyph de línea lo volvería ilegible.
+ * Memoizado por valor → el stream del socket solo actualiza la coord del `MarkerView`.
  */
 function DriverVehicleMarkerComponent({
   point,
-  heading,
   vehicleType,
 }: DriverVehicleMarkerProps): React.JSX.Element {
-  const rotation =
-    typeof heading === 'number' && Number.isFinite(heading) ? heading : null;
+  const {LineIcon} = offeringGlyph({vehicleType});
   return (
     <MarkerView
       coordinate={toLngLat(point)}
       anchor={{x: 0.5, y: 0.5}}
       allowOverlap>
-      <View
-        pointerEvents="none"
-        style={
-          rotation != null
-            ? {transform: [{rotate: `${rotation}deg`}]}
-            : undefined
-        }>
-        <VehicleIcon vehicleType={vehicleType} size={DRIVER_VEHICLE_SIZE} />
+      <View pointerEvents="none" style={styles.assignedBadge}>
+        <LineIcon
+          color={passengerMapRoute.routeColor}
+          size={DRIVER_VEHICLE_SIZE - 14}
+        />
       </View>
     </MarkerView>
   );
 }
 
 const DriverVehicleMarker = React.memo(DriverVehicleMarkerComponent);
+
+/** Duración del deslizamiento entre dos ticks del socket (~cadencia del ping GPS). */
+const DRIVER_LERP_MS = 900;
+/** Paso de la interpolación (~30 fps: el auto se DESLIZA en vez de avanzar en pasitos; con la New
+ * Architecture (Fabric) el único prop que cambia es la coordenada del MarkerView — barato). */
+const DRIVER_LERP_STEP_MS = 33;
+/** Salto mayor a esto = teletransporte deliberado (primer fix / reasignación), sin deslizar. */
+const DRIVER_TELEPORT_METERS = 300;
+
+/**
+ * Suaviza la posición del conductor entre ticks del socket: en vez de SALTAR a la coord cruda de
+ * cada `driver:location` (2-5 s entre pings → brincos visibles, sobre todo en `follow` con zoom
+ * alto), DESLIZA linealmente hacia el nuevo punto en ~0.9 s a 10 fps. Un salto grande (> 300 m:
+ * primer fix, reasignación de conductor) se aplica directo — deslizar medio distrito sería mentir.
+ */
+function useSmoothedPoint(target: GeoPoint | null): GeoPoint | null {
+  const [smoothed, setSmoothed] = useState<GeoPoint | null>(target);
+  const shownRef = useRef<GeoPoint | null>(target);
+  useEffect(() => {
+    const from = shownRef.current;
+    if (!target) {
+      shownRef.current = null;
+      setSmoothed(null);
+      return;
+    }
+    if (!from || distanceMeters(from, target) > DRIVER_TELEPORT_METERS) {
+      shownRef.current = target;
+      setSmoothed(target);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(() => {
+      const t = Math.min(1, (Date.now() - start) / DRIVER_LERP_MS);
+      const next = {
+        lat: from.lat + (target.lat - from.lat) * t,
+        lon: from.lon + (target.lon - from.lon) * t,
+      };
+      shownRef.current = next;
+      setSmoothed(next);
+      if (t >= 1) clearInterval(id);
+    }, DRIVER_LERP_STEP_MS);
+    return () => clearInterval(id);
+  }, [target?.lat, target?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  return smoothed;
+}
 
 /**
  * Lienzo de mapa del pasajero sobre **`@rnmapbox/maps`** (Lote 4: migración a Mapbox, gemelo del
@@ -250,10 +306,25 @@ function AppMapComponent({
   bottomInset = 0,
   showRecenter = false,
 }: AppMapProps): React.JSX.Element {
+  // Posición del conductor SUAVIZADA (lerp entre ticks del socket): el marker desliza, no salta.
+  const smoothedDriver = useSmoothedPoint(isValidPoint(driver) ? driver : null);
+  // MODO DE VISTA 2D/3D (preferencia persistida del usuario). En 2D: estilo sin extrusiones
+  // (building-3d oculto) + pitch CLAMPEADO a 0 — el course-up del viaje en curso sigue rotando el
+  // bearing, pero plano. En 3D: comportamiento vigente intacto.
+  const viewMode = useMapViewModeStore(s => s.mode);
+  const effectiveCameraTarget = useMemo<CameraTarget | undefined>(() => {
+    if (!cameraTarget) return undefined;
+    // Solo el follow declara pitch; clampearlo acá (y no en el director) mantiene al director PURO de
+    // preferencias de vista — la fase decide la coreografía, el usuario decide la perspectiva.
+    if (viewMode === '2d' && (cameraTarget.followPitch ?? 0) !== 0) {
+      return {...cameraTarget, followPitch: 0};
+    }
+    return cameraTarget;
+  }, [cameraTarget, viewMode]);
   // Cámara DIRIGIDA por el `mapDirector` (encuadre conductor+recogida / follow taxi). Cuando hay
   // `cameraTarget`, el encuadre lo maneja `useDirectedCamera` imperativamente (throttle + modo libre);
   // si no, la `Camera` declarativa de abajo gobierna como siempre (bounds de ruta / center).
-  const directedCamera = cameraTarget != null;
+  const directedCamera = effectiveCameraTarget != null;
   const cameraRef = useRef<DirectedCameraRef | null>(null);
   const noopTarget = useMemo<CameraTarget>(
     () => ({mode: 'center', fitPoints: [], followPoint: null}),
@@ -273,11 +344,23 @@ function AppMapComponent({
       ),
     [bottomInset, windowHeight],
   );
+  // CAP (más laxo) para las cámaras de CENTRO: ver CENTER_BOTTOM_INSET_FRACTION. Aplica al center
+  // declarativo y al idle imperativo; el follow dirigido usa el CAP de fit (comparten viewport útil).
+  const centerBottomInset = useMemo(
+    () =>
+      Math.min(
+        bottomInset,
+        Math.round(windowHeight * CENTER_BOTTOM_INSET_FRACTION),
+      ),
+    [bottomInset, windowHeight],
+  );
 
   const {onGesture} = useDirectedCamera(
     cameraRef,
-    cameraTarget ?? noopTarget,
+    effectiveCameraTarget ?? noopTarget,
     fitBottomInset,
+    // El fit dirigido comparte el chrome superior del fit declarativo (chip de ubicación/EN VIVO).
+    fitEdgePadding?.top ?? 0,
   );
 
   // Mapa "mi ubicación" libre: solo cuando se pide recentrar Y la cámara NO está dirigida (la dirigida la
@@ -292,7 +375,7 @@ function AppMapComponent({
   const {recenter} = useIdleCamera(
     cameraRef,
     freeBrowse ? idlePoint : null,
-    bottomInset,
+    centerBottomInset,
   );
 
   // Gesto manual del usuario → modo libre (solo si la cámara está dirigida). `isGestureActive` lo
@@ -405,7 +488,11 @@ function AppMapComponent({
   const mapView = (
     <MapView
       style={StyleSheet.absoluteFill}
-      styleJSON={veoDarkMapboxStyleJSON}
+      // Variante del estilo por preferencia 2D/3D: alternar recarga el estilo — aceptable, es un
+      // gesto deliberado y esporádico (no un hot-path del render).
+      styleJSON={
+        viewMode === '2d' ? veoLightMapboxStyleJSON2D : veoLightMapboxStyleJSON
+      }
       logoEnabled={false}
       attributionEnabled={false}
       compassEnabled={false}
@@ -458,6 +545,10 @@ function AppMapComponent({
           // Red de zoom: si la ruta es chica, no acercamos a zoom-calle agresivo. NO limita el alejado
           // de rutas largas (encuadre correcto manda). Ver FIT_MAX_ZOOM.
           maxZoomLevel={FIT_MAX_ZOOM}
+          // Overview de ruta SIEMPRE norte-arriba y cenital: al montar viniendo de una fase con follow
+          // course-up/pitch (viaje en curso), sin esto la cámara heredaría el giro/inclinación previos.
+          heading={0}
+          pitch={0}
           animationDuration={500}
         />
       ) : freeBrowse ? (
@@ -475,13 +566,19 @@ function AppMapComponent({
           centerCoordinate={centerCoordinate}
           zoomLevel={LIMA_ZOOM}
           // Reserva el alto del sheet abajo → el centro real sube y el userPoint queda en la franja
-          // visible (no tapado por el bottomsheet). Sin sheet (bottomInset=0) centra como siempre.
+          // visible (no tapado por el bottomsheet). CAPADO (CENTER_BOTTOM_INSET_FRACTION): el inset
+          // ahora sigue el snap ACTUAL del sheet y expandido casi-full empujaría el centro fuera de
+          // pantalla. Sin sheet (bottomInset=0) centra como siempre.
           padding={{
             paddingTop: 0,
-            paddingBottom: bottomInset,
+            paddingBottom: centerBottomInset,
             paddingLeft: 0,
             paddingRight: 0,
           }}
+          // Norte-arriba y cenital explícitos (mismo motivo que el fit de arriba: no heredar el
+          // course-up/pitch del follow del viaje en curso al volver a una fase de centro).
+          heading={0}
+          pitch={0}
           animationDuration={500}
         />
       )}
@@ -564,16 +661,16 @@ function AppMapComponent({
       {/* CONDUCTOR ASIGNADO en vivo (socket `/passenger`). Con `showDriverVehicle` (fases de viaje), el
           taxi del trip (VehicleIcon CAR/MOTO, rotado por heading). Si no, el pin pulsante genérico
           (compat: "taxi en vivo en tu zona" del ambiente previo). */}
-      {isValidPoint(driver) ? (
+      {smoothedDriver ? (
         showDriverVehicle ? (
           <DriverVehicleMarker
-            point={driver}
+            point={smoothedDriver}
             heading={driverHeading}
             vehicleType={driverVehicleType}
           />
         ) : (
           <MarkerView
-            coordinate={toLngLat(driver)}
+            coordinate={toLngLat(smoothedDriver)}
             anchor={{x: 0.5, y: 0.5}}
             allowOverlap>
             <RoutePin variant="user" pulse />
@@ -604,4 +701,24 @@ function AppMapComponent({
  * re-ejecutaba el componente y, junto con un centro inestable, mantenía al contexto GL en churn
  * → mapa negro. Con memo + centro estable, el GL se asienta y el mapa renderiza.
  */
+// Badge circular del conductor ASIGNADO (espejo del puck del driver): fondo blanco + borde sutil
+// para que el ícono de línea del vehículo (moto/auto) sea inconfundible sobre cualquier mapa.
+const styles = StyleSheet.create({
+  assignedBadge: {
+    width: DRIVER_VEHICLE_SIZE,
+    height: DRIVER_VEHICLE_SIZE,
+    borderRadius: DRIVER_VEHICLE_SIZE / 2,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D5DCE4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: ELEVATION_SHADOW_COLOR,
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: {width: 0, height: 2},
+    elevation: 4,
+  },
+});
+
 export const AppMap = React.memo(AppMapComponent);

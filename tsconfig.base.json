@@ -58,7 +58,9 @@
       "@veo/rpc": ["packages/rpc/src"],
       "@veo/rpc/*": ["packages/rpc/src/*"],
       "@veo/redis": ["packages/redis/src"],
-      "@veo/redis/*": ["packages/redis/src/*"]
+      "@veo/redis/*": ["packages/redis/src/*"],
+      "@veo/policy": ["packages/policy/src"],
+      "@veo/policy/*": ["packages/policy/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "build", ".next", "coverage"]

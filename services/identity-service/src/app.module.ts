@@ -19,7 +19,9 @@ import { DriversModule } from './drivers/drivers.module';
 import { KycModule } from './kyc/kyc.module';
 import { ConsentsModule } from './consents/consents.module';
 import { ReferralsModule } from './referrals/referrals.module';
+import { PoliciesModule } from './policies/policies.module';
 import { IdentityGrpcController } from './grpc/identity.grpc.controller';
+import { IDENTITY_GRPC_REPO, PrismaIdentityGrpcRepository } from './grpc/identity-grpc.repository';
 
 const readinessProvider: Provider = {
   provide: READINESS_CHECKS,
@@ -51,8 +53,13 @@ const readinessProvider: Provider = {
     KycModule,
     ConsentsModule,
     ReferralsModule,
+    PoliciesModule,
   ],
   controllers: [HealthController, MetricsController, IdentityGrpcController],
-  providers: [readinessProvider],
+  // §10: IDENTITY_GRPC_REPO es el dueño del acceso Prisma del IdentityGrpcController (lector cross-feature).
+  providers: [
+    readinessProvider,
+    { provide: IDENTITY_GRPC_REPO, useClass: PrismaIdentityGrpcRepository },
+  ],
 })
 export class AppModule {}

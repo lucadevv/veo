@@ -25,7 +25,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  AudienceGuard,
+  Audiences,
+  CurrentUser,
+  InternalAudience,
+  InternalIdentityGuard,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { OfferBoardService } from './offer-board.service';
 import { requireDriverId } from './require-driver-id';
 import {
@@ -68,6 +75,8 @@ export class OfferBoardController {
 
   // ── Lado conductor ──────────────────────────────────────────────────────────────────────────
 
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Get('open')
   @ApiOperation({ summary: 'Pujas OPEN cercanas que el conductor ELEGIBLE puede ofertar' })
   async listOpen(@CurrentUser() user: AuthenticatedUser): Promise<OpenBidDto[]> {
@@ -77,6 +86,8 @@ export class OfferBoardController {
     return boards.map(toOpenBidDto);
   }
 
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post(':tripId/offers')
   @HttpCode(201)
   @ApiOperation({ summary: 'El conductor oferta/contraoferta (gate de elegibilidad re-validado)' })
@@ -98,39 +109,56 @@ export class OfferBoardController {
 
   // ── Lado pasajero ───────────────────────────────────────────────────────────────────────────
 
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.PUBLIC_RAIL)
   @Get(':tripId/offers')
   @ApiOperation({
     summary: 'Estado del board + ofertas del board (el pasajero las ve para elegir)',
   })
-  async listOffers(@Param('tripId', ParseUUIDPipe) tripId: string): Promise<OffersViewDto> {
-    const view: OffersView = await this.board.getOffersView(tripId);
+  async listOffers(
+    @Param('tripId', ParseUUIDPipe) tripId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<OffersViewDto> {
+    // CAPA 2 — el userId es el passengerId (identidad FIRMADA): el service valida que el board sea suyo.
+    const view: OffersView = await this.board.getOffersView(tripId, user.userId);
     return {
       board: { status: view.board.status, expiresAt: view.board.expiresAt },
       offers: view.offers.map(toOfferDto),
     };
   }
 
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.PUBLIC_RAIL)
   @Post(':tripId/accept')
   @HttpCode(200)
   @ApiOperation({ summary: 'El pasajero elige UNA oferta → match (idempotente)' })
   async accept(
     @Param('tripId', ParseUUIDPipe) tripId: string,
     @Body() dto: AcceptOfferDto,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<OfferDto> {
-    const offer = await this.board.acceptOffer(tripId, dto.driverId);
+    // El driverId del body SE QUEDA: el pasajero ELIGE conductor. El passengerId sale de la identidad
+    // FIRMADA (user.userId) — el service valida que el board sea de ESTE pasajero (anti-IDOR, CAPA 2).
+    const offer = await this.board.acceptOffer(tripId, dto.driverId, user.userId);
     return toOfferDto(offer);
   }
 
+  @UseGuards(AudienceGuard)
+  @Audiences(InternalAudience.PUBLIC_RAIL)
   @Post(':tripId/cancel')
   @HttpCode(200)
   @ApiOperation({
     summary: 'El pasajero cancela la puja → board CANCELLED + cierra el VIAJE (idempotente)',
   })
-  async cancel(@Param('tripId', ParseUUIDPipe) tripId: string): Promise<{ ok: true }> {
+  async cancel(
+    @Param('tripId', ParseUUIDPipe) tripId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ ok: true }> {
     // emitClosure: este es el cancel de la PUJA del pasajero → además de cerrar el board efímero, emite
     // dispatch.bid_cancelled por outbox para que trip cierre el VIAJE (REQUESTED → CANCELLED_BY_PASSENGER),
-    // no solo el board. El ownership ya lo gateó el public-bff (assertOwnsTrip) antes de llamar acá.
-    await this.board.cancelBoard(tripId, { emitClosure: true });
+    // no solo el board. CAPA 2: el passengerId sale de la identidad FIRMADA (user.userId) — el service
+    // valida que el board sea de ESTE pasajero (un board ya evaporado por TTL sigue cerrando el viaje).
+    await this.board.cancelBoard(tripId, user.userId, { emitClosure: true });
     return { ok: true };
   }
 }

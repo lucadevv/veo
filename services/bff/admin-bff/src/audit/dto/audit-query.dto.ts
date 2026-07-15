@@ -1,5 +1,5 @@
 /** Filtros del listado de auditoría. */
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsISO8601, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AuditQueryDto {
@@ -19,6 +19,25 @@ export class AuditQueryDto {
   @IsString()
   action?: string;
 
+  /** Categoría = prefijo de dominio de la acción (payment/driver/media…). Lo traduce audit-service a startsWith. */
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  /** Búsqueda libre (el buscador del panel) sobre acción/recurso/actor. */
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  /** Rango de fecha (inclusive) sobre occurredAt. */
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -26,10 +45,32 @@ export class AuditQueryDto {
   @Max(500)
   limit?: number;
 
-  /** Cursor: devuelve entradas con seq < beforeSeq (orden descendente). */
+  /**
+   * Cursor de paginación del panel: seq de la última fila cargada → devuelve entradas con seq < cursor. Es el
+   * mismo cursor que emite `list` como `nextCursor`; el bff lo mapea a `beforeSeq` de audit-service.
+   */
   @IsOptional()
   @IsString()
-  beforeSeq?: string;
+  cursor?: string;
+}
+
+/** Filtros del export (GET /audit/export): los MISMOS estructurados del listado, sin cursor/limit (set completo). */
+export class AuditExportQueryDto {
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
 }
 
 export class AuditVerifyDto {

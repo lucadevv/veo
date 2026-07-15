@@ -10,7 +10,7 @@
  *  - Conductor → driver-bff  REST `/api/v1/*` + Socket.IO namespace `/driver`    (Bearer JWT, type driver).
  */
 import { z } from 'zod';
-import { geoPoint, payoutStatus, tripStatus } from './types.js';
+import { documentSide, geoPoint, payoutStatus, tripStatus } from './types.js';
 import type { TripStatus } from './types.js';
 import type { DriverLocationMsg, TripUpdateMsg } from './socket.js';
 
@@ -508,9 +508,10 @@ export const quoteOption = z.object({
   creditAppliedCents: z.number().int().nonnegative().optional(),
   currency: z.literal('PEN'),
   /**
-   * ADR 013 §1.3 (additive) · modo de pricing RESUELTO POR OFERTA (`offering.allowedModes` ∩ schedule
-   * del admin): pinta la pantalla de puja o de precio firme POR opción. Opcional: un server viejo no
-   * lo manda — fallback: el `mode` top-level del quote (ancla VEO Económico).
+   * ADR 023 (additive) · modo de pricing RESUELTO POR OFERTA (`offering.mode` con la palanca manual del
+   * admin encima; ya NO hay schedule/franjas — ADR 011 superseded): pinta la pantalla de puja o de precio
+   * firme POR opción. Opcional: un server viejo no lo manda — fallback: el `mode` top-level del quote
+   * (ancla VEO Económico).
    */
   mode: pricingMode.optional(),
   /**
@@ -844,6 +845,12 @@ export const tripDriverView = z.object({
   backgroundCheckStatus: z.string(),
   rating: z.number().nullable(),
   ratingCount: z.number().int(),
+  /**
+   * Conteo de viajes COMPLETED de por vida del conductor (señal de confianza "N viajes", pen z2MKq).
+   * OPTIONAL por compat N-2: un backend que aún no lo emite (BFF sin desplegar) no rompe el parseo del
+   * viaje activo — la app degrada a ocultar el conteo. El BFF nuevo siempre lo manda (0 si no resuelve).
+   */
+  tripCount: z.number().int().optional(),
 });
 export type TripDriverView = z.infer<typeof tripDriverView>;
 
@@ -903,6 +910,21 @@ export const tripActiveView = z.object({
    * origen→destino. NO confundir con la polyline en vivo del socket (`trip:update`), que es para el viaje activo.
    */
   routePolyline: z.string().nullable(),
+  /**
+   * Modo de despacho CONGELADO del viaje (ADR-011): PUJA | FIXED. OPTIONAL + nullable por compat N-2:
+   * un BFF que aún no lo emite no rompe el parseo (la app degrada al comportamiento PUJA histórico).
+   * Permite REHIDRATAR `activeTripMode` tras relanzar la app a mitad de una búsqueda (un FIXED EXPIRED
+   * debe caer en 'noDriver', no en la re-puja).
+   */
+  dispatchMode: pricingMode.nullable().optional(),
+  /**
+   * Tier SOLICITADO del viaje (CAR | MOTO), derivado de la oferta al crear (ADR 013). OPTIONAL +
+   * nullable por compat N-2 (BFF/trip-service viejos no lo emiten). Es la fuente de verdad del
+   * `activeTripVehicleType` en la CREACIÓN Y la REHIDRATACIÓN: mata la dependencia del snapshot MMKV
+   * local (que fallaba en la adopción por 409 y cross-device → la moto se pintaba como auto). Sin el
+   * campo, la app degrada al glyph de auto (comportamiento histórico).
+   */
+  vehicleType: mobileVehicleType.nullable().optional(),
   driver: tripDriverView.nullable(),
   vehicle: tripVehicleView.nullable(),
   /**
@@ -1023,8 +1045,8 @@ export function getTripHistory(
 /**
  * Bandeja de notificaciones in-app del pasajero. La notificación llega YA RENDERIZADA por el
  * notification-service (título + cuerpo interpolados desde la plantilla i18n) y categorizada: el
- * cliente NUNCA ve la key interna del template, solo su `category` (para ícono/tono). Sin estado
- * leído/no-leído por ahora (MVP cronológico — el `read_at` real es un follow-up).
+ * cliente NUNCA ve la key interna del template, solo su `category` (para ícono/tono). El estado
+ * `read` lo DERIVA el backend de `read_at` (el cliente ya no lo inventa).
  */
 export const notificationCategory = z.enum(['trip', 'safety', 'payment', 'promo', 'general']);
 export type NotificationCategory = z.infer<typeof notificationCategory>;
@@ -1039,6 +1061,8 @@ export const appNotification = z.object({
   body: z.string(),
   /** ISO-8601 de emisión (orden DESC por este campo). */
   createdAt: z.string(),
+  /** true si el pasajero ya la leyó (derivado de read_at server-side). */
+  read: z.boolean(),
 });
 export type AppNotification = z.infer<typeof appNotification>;
 
@@ -1067,6 +1091,67 @@ export function getNotifications(
   return http.get<AppNotification[]>('/notifications', {
     query: { limit: query.limit },
     schema: z.array(appNotification),
+  });
+}
+
+/** Resultado de `markAllNotificationsRead`: cuántas pasaron a leídas. */
+export const markAllReadResult = z.object({ updated: z.number().int() });
+export type MarkAllReadResult = z.infer<typeof markAllReadResult>;
+
+/**
+ * PATCH /notifications/:id/read → marca UNA como leída. El dueño lo deriva el BFF del JWT (anti-IDOR):
+ * marcar una notificación ajena da 404. Respuesta 204 sin body.
+ */
+export function markNotificationRead(
+  http: { patch<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T> },
+  id: string,
+): Promise<void> {
+  return http.patch<void>(`/notifications/${id}/read`);
+}
+
+/** PATCH /notifications/read-all → marca TODAS mis notificaciones como leídas. Devuelve el conteo. */
+export function markAllNotificationsRead(http: {
+  patch<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T>;
+}): Promise<MarkAllReadResult> {
+  return http.patch<MarkAllReadResult>('/notifications/read-all', { schema: markAllReadResult });
+}
+
+/**
+ * Preferencias in-app de notificaciones del pasajero. FUENTE DE VERDAD server-side (notification-service):
+ * sincroniza entre dispositivos y sobrevive reinstalación. Espeja el shape del store local del passenger
+ * (5 booleans por categoría). Las de SEGURIDAD (pánico/biométrica) NO viven acá (no-desactivables).
+ */
+export const notificationPrefs = z.object({
+  /** Viajes · confirmación/cancelación del conductor. */
+  tripStatus: z.boolean(),
+  /** Viajes · llegada y demoras del conductor. */
+  driverEnRoute: z.boolean(),
+  /** Viajes · recordatorios de viajes programados. */
+  scheduledReminders: z.boolean(),
+  /** Promociones · ofertas y cupones (opt-in). */
+  offers: z.boolean(),
+  /** Promociones · novedades de VEO (opt-in). */
+  news: z.boolean(),
+});
+export type NotificationPrefs = z.infer<typeof notificationPrefs>;
+
+/** GET /notification-prefs → mis preferencias (el server devuelve defaults si nunca guardé). */
+export function getNotificationPrefs(http: {
+  get<T>(path: string, opts?: { schema?: z.ZodType<T> }): Promise<T>;
+}): Promise<NotificationPrefs> {
+  return http.get<NotificationPrefs>('/notification-prefs', { schema: notificationPrefs });
+}
+
+/** PUT /notification-prefs → reemplaza el objeto COMPLETO de preferencias (idempotente). */
+export function updateNotificationPrefs(
+  http: {
+    put<T>(path: string, opts?: { body?: unknown; schema?: z.ZodType<T> }): Promise<T>;
+  },
+  prefs: NotificationPrefs,
+): Promise<NotificationPrefs> {
+  return http.put<NotificationPrefs>('/notification-prefs', {
+    body: prefs,
+    schema: notificationPrefs,
   });
 }
 
@@ -1358,26 +1443,39 @@ export type PaymentByTripView = z.infer<typeof paymentByTripView>;
  *    complete el pago (deepLink Yape / urlPay / QR / CIP). NO es deuda y NO bloquea: es un "pago por
  *    completar" que, si el usuario cerró el sheet, quedaba sin camino de vuelta → la franja dice
  *    "Tienes un pago por completar — Continuar" y abre DIRECTO el checkout del payment.
+ *  - `CANCELLATION_PENALTY`: una penalidad de cancelación PENDING (F2.3). NO es un Payment: es una
+ *    obligación aparte que BLOQUEA el gate igual que la deuda (cuenta en `hasDebt`/`totalCents`). Se
+ *    salda por su endpoint PROPIO `POST /payments/penalties/:id/settle` (no por retry-charge).
  */
-export const debtItemKind = z.enum(['DEBT', 'PENDING_ACTION']);
+export const debtItemKind = z.enum(['DEBT', 'PENDING_ACTION', 'CANCELLATION_PENALTY']);
 export type DebtItemKind = z.infer<typeof debtItemKind>;
 
 /**
- * Un ítem accionable del pasajero (un cobro en DEBT o un PENDING con checkout vivo). Para la franja del
- * home y el sheet. `reason` es la razón del fallo del cobro (saldo insuficiente, declinado…) en DEBT, y
- * cadena vacía en PENDING_ACTION; montos en céntimos PEN.
+ * Un ítem accionable del pasajero (un cobro en DEBT/PENDING con checkout vivo, o una penalidad de
+ * cancelación). Para la franja del home y el sheet. `reason` es la razón del fallo del cobro (saldo
+ * insuficiente, declinado…) en DEBT, el motivo de la cancelación en CANCELLATION_PENALTY, y cadena
+ * vacía en PENDING_ACTION; montos en céntimos PEN.
+ *
+ * INVARIANTE de identificador por `kind` (el backend OMITE el campo que no aplica, no manda null):
+ *  - DEBT / PENDING_ACTION → traen `paymentId` (id del Payment); `penaltyId` ausente.
+ *  - CANCELLATION_PENALTY → trae `penaltyId` (id de la CancellationPenalty); `paymentId` ausente.
+ * Ambos opcionales en el schema porque NINGUNO está presente en todos los kinds; el consumidor
+ * discrimina por `kind` y rutea el saldar: paymentId → retry-charge/método, penaltyId → settle.
  */
 export const debtItemView = z.object({
-  paymentId: z.string(),
+  paymentId: z.string().optional(),
+  /** id de la CancellationPenalty (SOLO kind=CANCELLATION_PENALTY). */
+  penaltyId: z.string().optional(),
   tripId: z.string(),
   amountCents: z.number().int(),
   reason: z.string(),
   /** Fecha de creación del cobro (ISO-8601). */
   createdAt: z.string(),
   /**
-   * DEBT (deuda, bloquea) o PENDING_ACTION (pago por completar, no bloquea). REQUERIDO en el contrato:
-   * el BFF SIEMPRE lo emite (default DEBT para un payment-service viejo se resuelve allá, no acá), así el
-   * tipo de salida no diverge del de entrada (evita el desajuste input/output de un `.default()` en zod).
+   * DEBT y CANCELLATION_PENALTY bloquean; PENDING_ACTION (pago por completar) NO. REQUERIDO en el
+   * contrato: el BFF SIEMPRE lo emite (default DEBT para un payment-service viejo se resuelve allá, no
+   * acá), así el tipo de salida no diverge del de entrada (evita el desajuste input/output de un
+   * `.default()` en zod).
    */
   kind: debtItemKind,
 });
@@ -1385,12 +1483,14 @@ export type DebtItemView = z.infer<typeof debtItemView>;
 
 /**
  * GET /payments/debts → ítems accionables del pasajero autenticado (franja del home). `hasDebt` y
- * `totalCents` resumen SOLO las DEUDAS reales (kind=DEBT): mientras `hasDebt=true`, el gate del BFF
- * bloquea pedir un viaje nuevo (403 `DEBT_PENDING`). `debts` incluye ADEMÁS los PENDING_ACTION (pagos
- * por completar), que NO bloquean ni suman. Para SALDAR una deuda, la app hace
- * `POST /payments/:paymentId/retry-charge` (`retryCharge`) → `paymentView` (ProntoPaga vuelve PENDING
- * con checkout nuevo; sandbox/live vuelve CAPTURED o de vuelta a DEBT). Para CONTINUAR un PENDING_ACTION
- * la app lee el cobro fresco con `GET /payments/:id` y muestra su checkout.
+ * `totalCents` resumen lo BLOQUEANTE (kind=DEBT + kind=CANCELLATION_PENALTY): mientras `hasDebt=true`,
+ * el gate del BFF bloquea pedir un viaje nuevo (403 `DEBT_PENDING`). `debts` incluye ADEMÁS los
+ * PENDING_ACTION (pagos por completar), que NO bloquean ni suman. Para SALDAR, la app rutea por ítem:
+ * paymentId → `POST /payments/:paymentId/retry-charge` (`retryCharge`); penaltyId →
+ * `POST /payments/penalties/:penaltyId/settle` (`settlePenaltyRequest`/`settlePenaltyView`). Ambos
+ * devuelven `paymentView` (ProntoPaga vuelve PENDING con checkout nuevo; sandbox/live vuelve CAPTURED o
+ * de vuelta a DEBT). Para CONTINUAR un PENDING_ACTION la app lee el cobro fresco con `GET /payments/:id`
+ * y muestra su checkout.
  */
 export const debtView = z.object({
   hasDebt: z.boolean(),
@@ -1447,6 +1547,49 @@ export type ChangePaymentMethodRequest = z.infer<typeof changePaymentMethodReque
  */
 export const changePaymentMethodView = paymentView;
 export type ChangePaymentMethodView = z.infer<typeof changePaymentMethodView>;
+
+/**
+ * POST /payments/penalties/:id/settle → body. Paga una penalidad de cancelación PENDING del pasajero
+ * (kind=CANCELLATION_PENALTY en `GET /payments/debts`) por un método DIGITAL — CASH → 400 (BFF) / 422
+ * (servicio): no hay conductor presente para la confirmación bilateral. `payerRef` es la referencia del
+ * pagador en el riel (teléfono/token Yape/Plin), opcional.
+ */
+export const settlePenaltyRequest = z.object({
+  method: mobileDigitalPaymentMethod,
+  payerRef: z.string().optional(),
+});
+export type SettlePenaltyRequest = z.infer<typeof settlePenaltyRequest>;
+
+/**
+ * POST /payments/penalties/:id/settle → respuesta: el `paymentView` del cobro de LIQUIDACIÓN de la
+ * penalidad (sandbox/live → CAPTURED o DEBT; ProntoPaga → PENDING con checkout a completar + poll).
+ * Anti-IDOR en la fuente: payment-service resuelve la penalidad por el passengerId FIRMADO y responde
+ * 404 si es ajena/inexistente; 409 si ya fue perdonada/cobrada (ya no hay nada que saldar).
+ */
+export const settlePenaltyView = paymentView;
+export type SettlePenaltyView = z.infer<typeof settlePenaltyView>;
+
+/**
+ * ADR-022 §P-A · POST /earnings/debt/settle (driver-bff) → body. SALDAR la deuda de comisiones del
+ * conductor por sus viajes en EFECTIVO — la ÚNICA forma de desbloquearse tras cruzar el tope. Solo
+ * métodos DIGITALES (Yape/Plin/Tarjeta/PagoEfectivo): CASH → 400 (BFF) / 422 (servicio), no hay
+ * confirmación bilateral. El `driverId` NO viaja en el body: el BFF lo resuelve de la identidad firmada
+ * (anti-IDOR). `payerRef` es la referencia del pagador en el riel (teléfono/token Yape/Plin), opcional.
+ */
+export const settleDriverDebtRequest = z.object({
+  method: mobileDigitalPaymentMethod,
+  payerRef: z.string().optional(),
+});
+export type SettleDriverDebtRequest = z.infer<typeof settleDriverDebtRequest>;
+
+/**
+ * ADR-022 §P-A · POST /earnings/debt/settle → respuesta: el `paymentView` del cobro de LIQUIDACIÓN de la
+ * deuda (kind=DEBT_SETTLEMENT). `amountCents` = deuda total pendiente; ProntoPaga → PENDING con checkout
+ * a completar (deepLink/QR/urlPay/CIP) + poll; sandbox/live → CAPTURED. Idempotente: re-llamar devuelve el
+ * mismo Payment. Al capturarse, el backend marca las deudas PAID y desbloquea al conductor (async).
+ */
+export const settleDriverDebtView = paymentView;
+export type SettleDriverDebtView = z.infer<typeof settleDriverDebtView>;
 
 /** POST /payments/:id/cash/confirm → body. */
 export const cashConfirmRequest = z.object({ confirmed: z.boolean().optional() });
@@ -1535,14 +1678,21 @@ export const myRatingView = z.object({
 });
 export type MyRatingView = z.infer<typeof myRatingView>;
 
-/** GET /ratings/aggregate/:subjectId → agregado rolling 30d. */
+/**
+ * GET /ratings/aggregate/:subjectId → agregado rolling 30d que ve el PASAJERO (public-rail).
+ *
+ * Solo reputación pública (promedio rolling 30d + conteo). NO lleva campos de MODERACIÓN
+ * (`flagged`/`flagReason`): el estado de revisión/suspensión del conductor es interno y exponerlo al
+ * pasajero sería una fuga de moderación (IDOR · enumeración). El public-bff los strippeó del
+ * `AggregateView` server-side — este contrato soberano DEBE espejar esa respuesta (sin flags), o el
+ * `parse()` estricto del HttpClient lanza ZodError. El flag self-view del CONDUCTOR vive en
+ * `driverProfileView.rating` (DRIVER_RAIL, /drivers/me), que NO se toca.
+ */
 export const ratingAggregateView = z.object({
   subjectId: z.string(),
   role: z.string(),
   rollingAvg30d: z.number(),
   count30d: z.number().int(),
-  flagged: z.boolean(),
-  flagReason: z.string().nullable(),
   lastComputedAt: z.string().nullable(),
 });
 export type RatingAggregateView = z.infer<typeof ratingAggregateView>;
@@ -1724,10 +1874,44 @@ export const driverShiftStateView = z.object({
 });
 export type DriverShiftStateView = z.infer<typeof driverShiftStateView>;
 
-/* ── Gate biométrico de turno (BR-I02) ── */
+/* ── Gate biométrico de turno + enrolamiento con liveness (BR-I02) ── */
 
-/** POST /drivers/biometric/enroll → body. Foto de referencia del rostro en base64. */
-export const driverBiometricEnrollRequest = z.object({ photo: z.string().min(1) });
+/**
+ * Acción del reto de liveness ACTIVO. Espeja `LivenessAction` de @veo/shared-types: el biometric-service
+ * emite uno de estos valores y la app guía al conductor a ejecutarlo. Tiparlo como `z.enum` (no
+ * `z.string()`) hace que comparar contra un literal fuera del set rompa el typecheck en la app.
+ */
+export const livenessAction = z.enum(['TURN_LEFT', 'TURN_RIGHT', 'NOD', 'SMILE']);
+export type LivenessAction = z.infer<typeof livenessAction>;
+
+/**
+ * Reto de liveness ACTIVO del gate de inicio de turno. Lo emite:
+ *  - POST /drivers/shift/biometric/challenge (gate de inicio de turno)
+ *
+ * (El enrolamiento del alta ya NO usa reto: pasó a UNA selfie PASIVA vía POST /drivers/biometric/enroll.
+ * El GET /drivers/me/biometric/liveness/challenge se retiró — 0 callers. Este schema se conserva para el turno.)
+ */
+export const driverLivenessChallengeResponse = z.object({
+  challengeId: z.string(),
+  action: livenessAction,
+  instructions: z.string(),
+  expiresAt: z.string(),
+});
+export type DriverLivenessChallengeResponse = z.infer<typeof driverLivenessChallengeResponse>;
+
+/**
+ * POST /drivers/biometric/enroll → body. Enrolamiento KYC con UNA selfie (SIN prueba de vida): el conductor
+ * manda una sola foto en base64 (`photo`, sin prefijo data:) → biometric-service deriva el embedding ArcFace
+ * de referencia (1 rostro detectado). El match contra el DNI lo resuelve después el face-match del binding.
+ * Reemplaza el contrato de liveness `{ challengeId, frames }` (el alta ya no ejecuta el reto girar/asentir).
+ *
+ * Cota de tamaño base64 (chars), alineada con FRAME_BASE64_MIN/MAX del borde server: una selfie JPEG real
+ * son decenas de KB → decenas de miles de chars base64; el piso descarta trivialidades, el techo acota el
+ * body parser. NO valida `data:` prefix: el cliente manda el base64 crudo.
+ */
+export const driverBiometricEnrollRequest = z.object({
+  photo: z.string().min(2_000).max(1_500_000),
+});
 export type DriverBiometricEnrollRequest = z.infer<typeof driverBiometricEnrollRequest>;
 
 /** POST /drivers/biometric/enroll → respuesta. */
@@ -1737,13 +1921,11 @@ export const driverBiometricEnrollResult = z.object({
 });
 export type DriverBiometricEnrollResult = z.infer<typeof driverBiometricEnrollResult>;
 
-/** POST /drivers/shift/biometric/challenge → reto de liveness activo. */
-export const biometricChallenge = z.object({
-  challengeId: z.string(),
-  action: z.string(),
-  instructions: z.string(),
-  expiresAt: z.string(),
-});
+/**
+ * Reto de liveness del TURNO (POST /drivers/shift/biometric/challenge). Mismo shape que
+ * `driverLivenessChallengeResponse` (alias retro-compatible para los consumidores existentes).
+ */
+export const biometricChallenge = driverLivenessChallengeResponse;
 export type DriverBiometricChallenge = z.infer<typeof biometricChallenge>;
 
 /** POST /drivers/shift/biometric/verify → body. Reto + frames del liveness en base64. */
@@ -1784,6 +1966,13 @@ export const driverOnboardRequest = z.object({
 });
 export type DriverOnboardRequest = z.infer<typeof driverOnboardRequest>;
 
+/** Forma que devuelve `POST /drivers/onboard`: perfil FINO (driverId + estado de antecedentes), NO el perfil agregado de `GET /drivers/me`. */
+export const driverOnboardResult = z.object({
+  driverId: z.string(),
+  backgroundCheckStatus: z.string(),
+});
+export type DriverOnboardResult = z.infer<typeof driverOnboardResult>;
+
 export const driverDocumentView = z.object({
   type: z.string(),
   status: z.string(),
@@ -1807,6 +1996,20 @@ export type DriverDocumentSimpleStatus = z.infer<typeof driverDocumentSimpleStat
  * `status` es el crudo de fleet (VALID/EXPIRING_SOON/EXPIRED/PENDING_REVIEW/REJECTED);
  * `simpleStatus` es el estado en español para la UI. POST /drivers/me/documents devuelve el creado.
  */
+/**
+ * Cara del documento proyectada al conductor (sub-lote 3A · SIN la key S3 interna). La app la usa para
+ * saber qué caras ya subió (p.ej. DNI: FRONT y/o BACK) y, en el resume del onboarding, para RE-RENDERIZAR
+ * la cara desde el servidor sin cachear PII en local: `url` es una presigned GET de vida corta para la
+ * imagen. `url` es nullable porque la firma es FAIL-SOFT — si media falla, la lista de docs igual responde
+ * (url: null) y la app degrada (no muestra el preview de esa cara). El binario solo lo firma el backend.
+ */
+export const driverDocumentImage = z.object({
+  side: documentSide,
+  order: z.number().int(),
+  url: z.string().nullable(),
+});
+export type DriverDocumentImage = z.infer<typeof driverDocumentImage>;
+
 export const driverDocument = z.object({
   type: z.string(),
   documentNumber: z.string(),
@@ -1814,25 +2017,207 @@ export const driverDocument = z.object({
   simpleStatus: driverDocumentSimpleStatus,
   expiresAt: z.string().nullable(),
   ok: z.boolean(),
+  // M5: motivo del rechazo que escribió el operador; el conductor lo VE para saber qué corregir. null
+  // si el documento no está rechazado o el operador no dio motivo (degradación honesta, nunca falso).
+  rejectionReason: z.string().nullable(),
+  // Sub-lote 3A: las caras del documento (side + order). [] si todavía no se subió ninguna imagen.
+  images: z.array(driverDocumentImage),
 });
 export type DriverDocument = z.infer<typeof driverDocument>;
 
-/** POST /drivers/me/documents → body. Registra/actualiza un documento (queda en revisión manual). */
-export const addDocumentRequest = z.object({
-  type: z.string().min(1),
-  documentNumber: z.string().min(1),
-  issuedAt: z.string().optional(),
-  expiresAt: z.string().optional(),
-  fileS3Key: z.string().optional(),
+/** Espeja `FleetDocumentType.VEHICLE_PHOTO` de @veo/shared-types: el único tipo SIN número (es una foto). */
+const FLEET_DOC_VEHICLE_PHOTO = 'VEHICLE_PHOTO';
+
+/**
+ * Onboarding sin-formularios (Lote 1 · cliente) · DATA EXTRAÍDA por OCR on-device que el cliente ENVÍA al
+ * borde. Espeja el contrato `ExtractedDocumentData` de @veo/shared-types (unión discriminada por `type`) y
+ * sus cotas EXACTAS del DTO del driver-bff/fleet-service. Se ESPEJA (no se importa shared-types) por la
+ * misma convención que `fleetDocumentType`/`FLEET_DOC_VEHICLE_PHOTO`: el contrato móvil declara sus formas
+ * con zod para que las apps RN no arrastren shared-types al bundle de Metro. Si el backend cambia las
+ * cotas, este espejo debe seguirlo (igual que el DTO espeja shared-types server-side).
+ *
+ * Cotas (deben coincidir con `extracted-data.dto.ts`): strings de id 1..40, strings de texto 1..120,
+ * fechas calendario `YYYY-MM-DD`. TODOS los campos opcionales (el OCR degrada campo a campo). El
+ * discriminante `type` usa los valores canónicos de `FleetDocumentType` (mismos strings que el enum).
+ */
+const OCR_ID_MAX = 40;
+const OCR_TEXT_MAX = 120;
+/** Fecha calendario ISO `YYYY-MM-DD` (sin hora). Espeja `ISO_DATE_PATTERN` del DTO del backend. */
+const ocrIsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha debe tener formato YYYY-MM-DD');
+const ocrId = z.string().min(1).max(OCR_ID_MAX);
+const ocrText = z.string().min(1).max(OCR_TEXT_MAX);
+
+/** DNI: data extraída del documento de identidad (espeja `ExtractedDniData`). */
+export const extractedDniData = z.object({
+  type: z.literal('DNI'),
+  fullName: ocrText.optional(),
+  documentNumber: ocrId.optional(),
+  birthdate: ocrIsoDate.optional(),
 });
+export type ExtractedDniData = z.infer<typeof extractedDniData>;
+
+/** SOAT: data extraída de la póliza (espeja `ExtractedSoatData`). */
+export const extractedSoatData = z.object({
+  type: z.literal('SOAT'),
+  policyNumber: ocrId.optional(),
+  expiresAt: ocrIsoDate.optional(),
+});
+export type ExtractedSoatData = z.infer<typeof extractedSoatData>;
+
+/** Tarjeta de propiedad: paridad con el backend (el cliente NO la PRODUCE hasta el Lote 2). */
+export const extractedPropertyCardData = z.object({
+  type: z.literal('PROPERTY_CARD'),
+  plate: ocrId.optional(),
+  make: ocrText.optional(),
+  model: ocrText.optional(),
+  year: z.number().int().optional(),
+  mtcCategory: ocrId.optional(),
+  /**
+   * Combustible REAL de la TIVe (`Combustible:`) mapeado a la fuente de energía (ADR-017 §1.8). Para la
+   * economía/referencia del operador, NO para el precio. El `z.enum` es el BORDE legítimo del contrato:
+   * debe coincidir 1:1 con `EnergySource` de @veo/shared-types y con el `@IsEnum(EnergySource)` del backend.
+   */
+  energySource: z.enum(['GASOLINE_90', 'DIESEL', 'ELECTRIC']).optional(),
+});
+export type ExtractedPropertyCardData = z.infer<typeof extractedPropertyCardData>;
+
+/** Licencia A1: data extraída de la licencia (espeja `ExtractedLicenseA1Data`). */
+export const extractedLicenseA1Data = z.object({
+  type: z.literal('LICENSE_A1'),
+  documentNumber: ocrId.optional(),
+  expiresAt: ocrIsoDate.optional(),
+  /** Categoría canónica leída por OCR (`A-I`/`B-IIb`/…): clase + categoría del documento real, combinadas. */
+  category: ocrId.optional(),
+});
+export type ExtractedLicenseA1Data = z.infer<typeof extractedLicenseA1Data>;
+
+/** ITV: data extraída del certificado de inspección técnica (espeja `ExtractedItvData`). */
+export const extractedItvData = z.object({
+  type: z.literal('ITV'),
+  /** Centro de Inspección Técnica Vehicular (CITV) donde se realizó. */
+  center: ocrText.optional(),
+  documentNumber: ocrId.optional(),
+  issuedAt: ocrIsoDate.optional(),
+  expiresAt: ocrIsoDate.optional(),
+});
+export type ExtractedItvData = z.infer<typeof extractedItvData>;
+
+/**
+ * Data extraída por OCR, UNIÓN DISCRIMINADA por `type` (espeja `ExtractedDocumentData`). Paridad COMPLETA
+ * con el backend (5 variantes) aunque el cliente hoy solo PRODUCE DNI/SOAT/LICENSE_A1. `forbidNonWhitelisted`
+ * del backend rechaza claves extra, así que el cliente debe enviar EXACTO la forma de la variante.
+ */
+export const extractedDocumentData = z.discriminatedUnion('type', [
+  extractedDniData,
+  extractedSoatData,
+  extractedPropertyCardData,
+  extractedLicenseA1Data,
+  extractedItvData,
+]);
+export type ExtractedDocumentData = z.infer<typeof extractedDocumentData>;
+
+/**
+ * Motor de OCR que produjo la `extractedData` (espeja el enum CERRADO `OcrEngine` de @veo/shared-types).
+ * `@IsIn(OCR_ENGINES)` del backend rechaza cualquier otro valor: este `z.enum` debe coincidir 1:1.
+ */
+export const ocrEngine = z.enum(['ios-visionkit', 'android-mlkit', 'paddleocr-server']);
+export type OcrEngineValue = z.infer<typeof ocrEngine>;
+
+/**
+ * POST /drivers/me/documents → body. Registra/actualiza un documento (queda en revisión manual).
+ * `documentNumber` es requerido POR TIPO: la foto del vehículo (`VEHICLE_PHOTO`) no tiene número; el
+ * resto de los documentos (licencia/SOAT/tarjeta/…) SÍ lo exigen. El `refine` lo valida contextual.
+ */
+/** Una imagen del documento en el alta (sub-lote 3A): clave S3 ya subida (vía presign) + cara tipada. */
+export const addDocumentImage = z.object({
+  s3Key: z.string().min(1),
+  side: documentSide,
+});
+export type AddDocumentImage = z.infer<typeof addDocumentImage>;
+
+export const addDocumentRequest = z
+  .object({
+    type: z.string().min(1),
+    documentNumber: z.string().optional(),
+    issuedAt: z.string().optional(),
+    expiresAt: z.string().optional(),
+    // DEPRECADO (sub-lote 3A): clave singular. El camino nuevo es `images` (1..N caras).
+    fileS3Key: z.string().optional(),
+    // Imágenes del documento (1..N caras). DNI → [FRONT, BACK]; foto de vehículo → N SINGLE; resto → [SINGLE].
+    images: z.array(addDocumentImage).min(1).optional(),
+    // Onboarding sin-formularios (Lote 1): data extraída por OCR on-device + trazabilidad del motor. El
+    // backend valida la forma (unión discriminada acotada) y la persiste como `FleetDocument.extractedData`.
+    // Opcional → backward-compatible (registrar SIN OCR sigue OK). El `type` del documento NO tiene por qué
+    // coincidir con el `extractedData.type` aquí (el backend revalida); el cliente envía coherente por DI.
+    extractedData: extractedDocumentData.optional(),
+    /** Motor de OCR que extrajo la data (enum cerrado, anti-spoof). Trazabilidad. */
+    ocrEngine: ocrEngine.optional(),
+    /** Instante de la extracción OCR (ISO-8601). Espeja la cota del backend (`@IsISO8601()`): valida el formato. */
+    ocrAt: z.string().datetime({ offset: true }).optional(),
+  })
+  .refine((d) => d.type === FLEET_DOC_VEHICLE_PHOTO || (d.documentNumber?.length ?? 0) >= 1, {
+    message: 'documentNumber requerido para este tipo de documento',
+    path: ['documentNumber'],
+  });
 export type AddDocumentRequest = z.infer<typeof addDocumentRequest>;
+
+/**
+ * Content-Types permitidos para subir el binario de un documento (foto JPEG/PNG o PDF). Allowlist
+ * ÚNICA del contrato (Ley 29733: el binario es PII). Debe coincidir con la del driver-bff/media: el
+ * `contentType` viaja firmado en la URL prefirmada y el cliente lo reenvía exacto en el PUT.
+ */
+export const documentUploadContentType = z.enum(['image/jpeg', 'image/png', 'application/pdf']);
+export type DocumentUploadContentType = z.infer<typeof documentUploadContentType>;
+
+/**
+ * POST /drivers/me/documents/presign → body (sub-lote 3A · N imágenes). La app pide N tickets (uno POR
+ * CARA) para subir los binarios de un documento. `type` es el tipo (LICENSE_A1 | SOAT | ...);
+ * `contentType` el del archivo; `sides` las caras (FRONT|BACK|SINGLE). El driver-bff resuelve el driverId.
+ *
+ * Backward-compat: `sides` es OPCIONAL. Omitido → [SINGLE] (1 imagen, comportamiento histórico). DNI →
+ * [FRONT, BACK]; foto de vehículo → N [SINGLE, ...].
+ */
+export const documentUploadTicketRequest = z.object({
+  type: z.string().min(1),
+  contentType: documentUploadContentType,
+  sides: z.array(documentSide).min(1).optional(),
+});
+export type DocumentUploadTicketRequest = z.infer<typeof documentUploadTicketRequest>;
+
+/** Un ticket de subida por CARA (sub-lote 3A): la cara + la URL PUT prefirmada + la key S3 + headers. */
+export const documentUploadSideTicket = z.object({
+  side: documentSide,
+  uploadUrl: z.string(),
+  fileS3Key: z.string(),
+  requiredHeaders: z.record(z.string(), z.string()),
+});
+export type DocumentUploadSideTicket = z.infer<typeof documentUploadSideTicket>;
+
+/**
+ * POST /drivers/me/documents/presign → respuesta (sub-lote 3A · N imágenes). Ticket(s) de subida directa
+ * al storage soberano (el binario NO pasa por la API):
+ *  - `tickets`: uno POR CARA (side + uploadUrl + fileS3Key + requiredHeaders). Para 1 imagen, un solo SINGLE.
+ *  - `expiresAt`: vencimiento común de los tickets (ISO-8601).
+ * La app sube cada binario con un PUT a su `uploadUrl`, luego llama POST /drivers/me/documents con
+ * `images: [{ s3Key, side }]` (una por cara).
+ */
+export const documentUploadTicket = z.object({
+  tickets: z.array(documentUploadSideTicket).min(1),
+  expiresAt: z.string(),
+});
+export type DocumentUploadTicket = z.infer<typeof documentUploadTicket>;
 
 /** GET /drivers/me → perfil agregado (identity + rating + fleet). */
 export const driverProfileView = z.object({
   driverId: z.string(),
   userId: z.string(),
+  /** Nombre legal del conductor (onboarding); `null` si no se capturó, ausente si el bff es viejo (backward-compat
+   *  en deploy rolling → el saludo degrada al rol genérico). Su propio dato — se usa en el saludo. */
+  fullName: z.string().nullable().optional(),
   phone: z.string(),
   kycStatus: z.string(),
+  /** Foto de perfil (avatar); `null` si no tiene, ausente si el bff es viejo (backward-compat → fallback a iniciales). */
+  photoUrl: z.string().url().nullable().optional(),
   currentStatus: z.string(),
   backgroundCheckStatus: z.string(),
   /**
@@ -1842,6 +2227,14 @@ export const driverProfileView = z.object({
    */
   rejectionReason: z.string().nullable(),
   averageRating: z.number(),
+  /**
+   * ADR-022 §P-A · el conductor está BLOQUEADO por DEUDA de comisiones (cruzó el tope, hold DEBT_BLOCKED en
+   * identity). Derivado en el BFF de `DriverReply.suspensionCauses` (contiene DEBT_BLOCKED). true = no puede
+   * iniciar turno ni recibir viajes hasta SALDAR (POST /earnings/debt/settle); el viaje en curso termina
+   * normal (bloqueo tipo A). Additive/opcional (backward-compat: un BFF viejo lo omite → la app degrada a
+   * derivarlo de `pendingDebtCents >= tope`). El monto a saldar sale de `EarningsSummary.pendingDebtCents`.
+   */
+  debtBlocked: z.boolean().optional(),
   rating: z
     .object({
       rollingAvg30d: z.number(),
@@ -1851,10 +2244,38 @@ export const driverProfileView = z.object({
     })
     .nullable(),
   documents: z.array(driverDocumentView),
+  /**
+   * Cumplimiento documental del CONDUCTOR (solo los docs del alta: licencia, SOAT, tarjeta). Modela el
+   * ciclo de vida real de cada tipo requerido y NO lo confunde con antecedentes/KYC (ejes aparte):
+   *  - `missing`: tipos SIN ningún documento subido (presencia → wizard).
+   *  - `rejected`: tipos cuyo documento fue rechazado (corregir-y-reenviar).
+   *  - `submittedAllRequired`: ya subió TODOS los requeridos (a revisión o aprobados).
+   *  - `biometricEnrolled`: enroló su biometría facial (diferenciador no negociable VEO).
+   *  - `allApproved`/`compliant`: TODOS los requeridos aprobados (VALID/EXPIRING_SOON).
+   *
+   * CONDICIÓN DE `in_review` (server-truth): el conductor está LISTO PARA REVISIÓN cuando
+   * `submittedAllRequired && biometricEnrolled`. La biometría es un eje SEPARADO de los documentos a
+   * propósito (no se mezcla dentro de `submittedAllRequired`). El gate FUERTE curl-proof vive en la
+   * APROBACIÓN del operador (identity rechaza con 409 si falta el embedding); estos flags son el reflejo.
+   */
   compliance: z.object({
+    /** TODOS los requeridos aprobados (alias de `allApproved`; mantiene compat con ProfileScreen). */
     compliant: z.boolean(),
+    /** Tipos requeridos (los que el conductor sube en el alta). */
     requiredTypes: z.array(z.string()),
+    /** Tipos requeridos SIN ningún documento subido (genuinamente faltantes). */
     missing: z.array(z.string()),
+    /** Tipos requeridos cuyo documento fue RECHAZADO por el operador. */
+    rejected: z.array(z.string()),
+    /** true si el conductor ya subió TODOS los requeridos (a cualquier estado). */
+    submittedAllRequired: z.boolean(),
+    /** true si TODOS los requeridos están aprobados (VALID/EXPIRING_SOON). */
+    allApproved: z.boolean(),
+    /**
+     * true si el conductor enroló su biometría facial de referencia (diferenciador no negociable VEO).
+     * Eje SEPARADO de los documentos: in_review requiere (submittedAllRequired && biometricEnrolled).
+     */
+    biometricEnrolled: z.boolean(),
   }),
 });
 export type DriverProfileView = z.infer<typeof driverProfileView>;
@@ -1900,6 +2321,24 @@ export const driverPersonalData = z.object({
 });
 export type DriverPersonalData = z.infer<typeof driverPersonalData>;
 
+/* ── Chequeo de unicidad del DNI (blind index · POST /drivers/me/check-dni) ── */
+
+/**
+ * POST /drivers/me/check-dni → body. Chequea si el DNI escaneado ya está registrado en OTRA cuenta de
+ * conductor (blind index `dni_hash`: `documentIdEnc` es cifrado con IV aleatorio, no indexable) ANTES
+ * de completar el alta. El driver-bff lo proxya a identity-service por REST interno firmado.
+ */
+export const driverCheckDniRequest = z.object({
+  dni: z.string().regex(dniPattern, 'El DNI debe tener exactamente 8 dígitos'),
+});
+export type DriverCheckDniRequest = z.infer<typeof driverCheckDniRequest>;
+
+/** POST /drivers/me/check-dni → respuesta: `exists` = true si el DNI YA pertenece a OTRA cuenta. */
+export const driverCheckDniResult = z.object({
+  exists: z.boolean(),
+});
+export type DriverCheckDniResult = z.infer<typeof driverCheckDniResult>;
+
 /* ── Vehículo del conductor (onboarding self-service · /drivers/vehicles) ── */
 
 /**
@@ -1928,6 +2367,14 @@ export const registerVehicleRequest = z
       .min(2005)
       .max(new Date().getUTCFullYear() + 1),
     color: z.string().min(1).max(30).optional(),
+    /**
+     * LOTE 1 · categoría MTC CRUDA leída de la tarjeta de propiedad (`M1`, `L3`, `N1`…). Es la FUENTE DE
+     * VERDAD del tipo: fleet DERIVA `vehicleType` de acá (M1→CAR, L*→MOTO; resto→hint del body). Ausente en
+     * la carga manual del tipo (sin tarjeta leída). Cap de 16 chars ALINEADO con el DTO de fleet
+     * (`RegisterDriverVehicleDto.mtcCategory` @Length(1,16)): un OCR ruidoso más largo se corta en el wire
+     * con un error de campo accionable, en vez de pasar y reventar con un 400 sin campo aguas abajo.
+     */
+    mtcCategory: z.string().min(1).max(16).optional(),
   })
   .refine((v) => Boolean(v.modelSpecId) || (Boolean(v.make) && Boolean(v.model)), {
     message: 'Elegí un modelo del catálogo (modelSpecId) o indicá marca y modelo',
@@ -2018,7 +2465,15 @@ export const driverSurgeView = z.object({
 });
 export type DriverSurgeView = z.infer<typeof driverSurgeView>;
 
-/** GET /dispatch/offers/:matchId → oferta/match (se acepta/rechaza por REST y llega por WS). */
+/**
+ * GET /dispatch/offers/:matchId → oferta/match (se acepta/rechaza por REST y llega por WS). El WS solo
+ * trae matchId/tripId/expiresAt; ESTE endpoint ENRIQUECE con el resumen de DECISIÓN del viaje (tarifa,
+ * distancia, duración, modo niño, origen/destino para el mapa) + el badge de confianza, para que la
+ * pantalla de oferta entrante lo pinte SIN pegarle a `GET /trips/:id` (que exige conductor asignado —
+ * el ofertado aún no lo es). La oferta ES la autorización: el driver-bff lee el viaje UNSCOPED al servir.
+ * Regla #5 (CLAUDE.md driver): cero PII de identidad del pasajero (sin nombre, sin childCode) — solo
+ * datos operativos del viaje + un booleano de verificación.
+ */
 export const driverOfferView = z.object({
   id: z.string(),
   tripId: z.string(),
@@ -2029,6 +2484,26 @@ export const driverOfferView = z.object({
   outcome: z.string(),
   offeredAt: z.string().nullable(),
   respondedAt: z.string().nullable(),
+  // ── Resumen de DECISIÓN del viaje (enriquecido por el driver-bff desde trip-service) ──
+  /** Origen/recojo para el mapa de la oferta. */
+  originLat: z.number(),
+  originLon: z.number(),
+  /** Destino para el mapa de la oferta. */
+  destLat: z.number(),
+  destLon: z.number(),
+  /** Tarifa estimada (céntimos PEN) — el foco de la decisión. */
+  fareCents: z.number().int(),
+  distanceMeters: z.number(),
+  durationSeconds: z.number(),
+  /** Modo niño (booleano PURO; el código NUNCA viaja pre-aceptación). */
+  childMode: z.boolean(),
+  /** BE-2 · solicitudes especiales del pasajero (PET|LUGGAGE|CHILD_SEAT); [] si ninguna. */
+  specialRequests: z.array(z.string()),
+  /**
+   * ADR-018 §1(3) · badge de confianza: `true` sii el pasajero está KYC-VERIFIED. Booleano PURO — cero
+   * PII. Degradación honesta: si identity no responde, `false` (la oferta se sirve igual).
+   */
+  passengerVerified: z.boolean(),
 });
 export type DriverOfferView = z.infer<typeof driverOfferView>;
 
@@ -2050,6 +2525,11 @@ export const openBidView = z.object({
   expiresAt: z.number(),
   originLat: z.number(),
   originLon: z.number(),
+  /** Destino ENGROSADO a ~111m (privacidad pre-aceptación) + distancia/duración: la app pinta pickup→destino + distancia. */
+  destLat: z.number(),
+  destLon: z.number(),
+  distanceMeters: z.number(),
+  durationSeconds: z.number(),
   /** BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla). */
   specialRequests: z.array(z.string()),
 });
@@ -2092,6 +2572,18 @@ export const driverTripView = z.object({
   paymentMethod: z.string(),
   childMode: z.boolean(),
   penaltyCents: z.number().int(),
+  /**
+   * PRIMER nombre del pasajero (solo el primer token, PII mínima · Ley 29733), para el header del chat
+   * del conductor. `null` si no se resolvió o el pasajero no tiene nombre. El BFF lo resuelve SOLO en el
+   * detalle (`GET /trips/:id`), post-aceptación; el resto de endpoints lo devuelven `null`.
+   */
+  passengerFirstName: z.string().nullable(),
+  /** Rating del pasajero (0–5), null si aún no tiene calificaciones (señal de confianza, PII mínima OK — es agregado, no identifica). OPTIONAL por compat N-2. */
+  passengerRating: z.number().nullable().optional(),
+  /** Nº de calificaciones del pasajero (count30d de rating-service) (señal de confianza, PII mínima OK — es agregado, no identifica). OPTIONAL por compat N-2. */
+  passengerRatingCount: z.number().int().optional(),
+  /** Viajes COMPLETED de por vida del pasajero (señal de confianza, PII mínima OK — es agregado, no identifica). OPTIONAL por compat N-2. */
+  passengerTripCount: z.number().int().optional(),
 });
 export type DriverTripView = z.infer<typeof driverTripView>;
 
@@ -2269,6 +2761,12 @@ export const driverPayoutView = z.object({
   grossCents: z.number().int(),
   commissionCents: z.number().int(),
   amountCents: z.number().int(),
+  /**
+   * Neteo aplicado en ESTE payout (NETO firmado: deuda CASH settleada − credit-back aplicado). Explica por
+   * qué `gross − commission ≠ amount`: `amountCents = (gross − commission + tips) − debtAppliedCents`.
+   * Opcional (additive): un BFF viejo puede no enviarlo aún.
+   */
+  debtAppliedCents: z.number().int().optional(),
   currency: z.string(),
   status: payoutStatus,
   processedAt: z.string().nullable(),
@@ -2290,7 +2788,16 @@ export const earningsSummary = z.object({
   totalCommissionCents: z.number().int(),
   totalNetCents: z.number().int(),
   paidNetCents: z.number().int(),
+  /**
+   * "La plata que te va a caer": devengado digital del período ABIERTO + payouts aún no pagados + crédito
+   * PENDING − deuda PENDING (piso 0: la deuda nunca genera cobro, se arrastra a la próxima liquidación).
+   * Antes era solo Σ payouts no pagados → S/0 toda la semana abierta.
+   */
   pendingNetCents: z.number().int(),
+  /** Devengado digital NO liquidado del período abierto (posterior al último payout agregado). Additive. */
+  openNetCents: z.number().int().optional(),
+  /** Deuda CASH PENDING (comisión de viajes en efectivo — se descuenta de la próxima liquidación). Additive. */
+  pendingDebtCents: z.number().int().optional(),
   payouts: z.array(driverPayoutView),
 });
 export type EarningsSummary = z.infer<typeof earningsSummary>;
@@ -2306,21 +2813,48 @@ export const driverEarningsBreakdown = z.object({
   /** Propinas del período (100% al conductor, fuera de comisión). */
   tipCents: z.number().int(),
   netCents: z.number().int(),
+  /** Neto de cobros CASH: ya EN MANO del conductor (su comisión queda como deuda a netear). Additive. */
+  cashNetCents: z.number().int().optional(),
+  /** Neto de cobros DIGITALES (+ propinas): le cae por liquidación (payout). cash + digital = neto. Additive. */
+  digitalNetCents: z.number().int().optional(),
   tripCount: z.number().int(),
 });
 export type DriverEarningsBreakdown = z.infer<typeof driverEarningsBreakdown>;
 
 /**
- * GET /earnings/breakdown → desglose de ganancias HOY y de la SEMANA del conductor autenticado,
- * agregado sobre cobros CAPTURED reales de payment-service (sin mocks). Incluye las propinas.
+ * GET /earnings/breakdown → desglose de ganancias HOY, de la SEMANA y del MES del conductor
+ * autenticado, agregado sobre cobros CAPTURED reales de payment-service (sin mocks). Incluye
+ * las propinas. `month` = mes calendario UTC en curso (día 1 → fin de mes).
  */
 export const driverEarningsSummary = z.object({
   driverId: z.string(),
   currency: z.string(),
   today: driverEarningsBreakdown,
   week: driverEarningsBreakdown,
+  month: driverEarningsBreakdown,
 });
 export type DriverEarningsSummary = z.infer<typeof driverEarningsSummary>;
+
+/** Ganancia neta y nº de viajes de UN día natural (UTC). Punto de la serie diaria del bar chart. */
+export const driverDailyEarnings = z.object({
+  /** Fecha del día en formato ISO YYYY-MM-DD (UTC). */
+  date: z.string(),
+  netCents: z.number().int(),
+  tripCount: z.number().int(),
+});
+export type DriverDailyEarnings = z.infer<typeof driverDailyEarnings>;
+
+/**
+ * GET /earnings/daily → serie diaria de ganancias de la SEMANA en curso del conductor autenticado
+ * (lunes→domingo, EXACTAMENTE 7 puntos), agregada por día sobre payment-service. Alimenta el bar
+ * chart de la pantalla de ingresos. Días sin viajes vienen en cero (nunca se omiten).
+ */
+export const driverEarningsDailySeries = z.object({
+  driverId: z.string(),
+  currency: z.string(),
+  days: z.array(driverDailyEarnings),
+});
+export type DriverEarningsDailySeries = z.infer<typeof driverEarningsDailySeries>;
 
 /* ═══════════════════════ CHAT IN-APP (conductor↔pasajero) ═══════════════════════ */
 
@@ -2407,6 +2941,371 @@ export type SupportTicket = z.infer<typeof supportTicket>;
 /** GET /support/tickets → lista de tickets del usuario autenticado. */
 export const supportTicketList = z.array(supportTicket);
 export type SupportTicketList = z.infer<typeof supportTicketList>;
+
+/* ═══════════════════════ CARPOOLING · CONDUCTOR (driver-bff → booking-service) ═══════════════════════ */
+
+/*
+ * Marketplace de carpooling PROGRAMADO (ADR-014). El CONDUCTOR publica una oferta (PublishedTrip), lista las
+ * suyas, la edita/cancela, ve las solicitudes entrantes (Booking) y las aprueba/rechaza. Todo pasa por el
+ * driver-bff (`/api/v1/carpool/*`), que resuelve el driverId server-side (anti-IDOR) y proxya a booking-service.
+ * El `driverId`/`passengerId` NUNCA viajan en el body: los deriva el servidor de la identidad firmada.
+ * Montos SIEMPRE en céntimos PEN (enteros). Geo en grados decimales. Fechas ISO-8601 string.
+ */
+
+/**
+ * Modo de RESERVA de la oferta (ADR-014 §3 · enum Prisma `ModoReserva`). Sin string mágico: la app compara
+ * contra `carpoolModoReserva.enum.*`.
+ *  - INSTANT_BOOKING: la reserva nace APROBADA (el pasajero confirma sin esperar al conductor).
+ *  - REVISION_CADA_SOLICITUD: el conductor aprueba/rechaza CADA solicitud antes del cobro.
+ */
+export const carpoolModoReserva = z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']);
+export type CarpoolModoReserva = z.infer<typeof carpoolModoReserva>;
+
+/**
+ * Modo de PRICING de la oferta (ADR-014 §3 · enum Prisma `PricingMode`). Hoy SOLO FIJO; PUJA queda fuera de
+ * este ADR (F6). Se expone como enum de un valor para que la app no hardcodee el literal.
+ */
+export const carpoolPricingMode = z.enum(['FIJO']);
+export type CarpoolPricingMode = z.infer<typeof carpoolPricingMode>;
+
+/**
+ * Estado del PublishedTrip (la OFERTA) — ADR-014 §3/§4.1 · enum Prisma `PublishedTripState`. La app pinta la
+ * card según el estado (borrador/publicado/parcial/lleno/en_ruta/completado/cancelado).
+ */
+export const publishedTripState = z.enum([
+  'BORRADOR',
+  'PUBLICADO',
+  'PARCIALMENTE_RESERVADO',
+  'LLENO',
+  'EN_RUTA',
+  'COMPLETADO',
+  'CANCELADO',
+]);
+export type PublishedTripState = z.infer<typeof publishedTripState>;
+
+/**
+ * Estado del Booking (la SOLICITUD/RESERVA del pasajero) — ADR-014 §3/§4.2 · enum Prisma `BookingState`.
+ * COBRO_PENDIENTE = aprobado pero el dinero aún no capturó (CHARGE async en vuelo).
+ */
+export const bookingState = z.enum([
+  'SOLICITADO',
+  'PENDIENTE_APROBACION',
+  'APROBADO',
+  'COBRO_PENDIENTE',
+  'RECHAZADO',
+  'EXPIRADO',
+  'CONFIRMADO',
+  'EN_RUTA',
+  'COMPLETADO',
+  'CANCELADO',
+]);
+export type BookingState = z.infer<typeof bookingState>;
+
+/**
+ * Una parada intermedia de la ruta (ADR-014 §2.1). `orden` ≥ 1 (el 0 es el origen, reservado). Dos stopovers
+ * no pueden compartir `orden` (se pisarían) — el borde lo revalida el servidor.
+ */
+export const carpoolStopover = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  orden: z.number().int().min(1),
+});
+export type CarpoolStopover = z.infer<typeof carpoolStopover>;
+
+/** Precio de un tramo de la ruta (ADR-014 §2.1). Dinero en céntimos PEN (Int). */
+export const carpoolTramoPrecio = z.object({
+  desdeOrden: z.number().int().min(0),
+  hastaOrden: z.number().int().min(0),
+  precioCentimos: z.number().int().min(0),
+});
+export type CarpoolTramoPrecio = z.infer<typeof carpoolTramoPrecio>;
+
+/** Techo de cordura del peaje declarado (céntimos PEN) — espeja `MAX_TOLLS_CENTS` de booking-service. */
+export const CARPOOL_MAX_TOLLS_CENTS = 50000;
+
+/**
+ * POST /carpool/trips → body (publicar una oferta · ADR-014 §2.1 · CreatePublishedTripDto). El `driverId` NO
+ * va acá: lo deriva el driver-bff de la identidad firmada (server-truth). Se puede mandar `Idempotency-Key`
+ * (header) para deduplicar el submit. Montos en céntimos PEN.
+ */
+export const publishTripRequest = z.object({
+  /** Vehículo con el que se publica (ref a fleet por id). */
+  vehicleId: z.string().uuid(),
+  origenLat: z.number().min(-90).max(90),
+  origenLon: z.number().min(-180).max(180),
+  destinoLat: z.number().min(-90).max(90),
+  destinoLon: z.number().min(-180).max(180),
+  /** Paradas intermedias (opcional, ≤20). `orden` único ≥1; el servidor revalida contigüidad. */
+  stopovers: z.array(carpoolStopover).max(20).optional(),
+  /** Salida PROGRAMADA en el FUTURO (ISO-8601). La validación temporal fina la hace el servidor. */
+  fechaHoraSalida: z.string().datetime(),
+  /** Asientos ofrecidos (1..8). */
+  asientosTotales: z.number().int().min(1).max(8),
+  /** Precio del asiento full-route en céntimos PEN (Int). */
+  precioBase: z.number().int().min(0),
+  /** Pricing por tramo (opcional, ≤40) — F1 en la UI; el servidor lo acepta desde F0. */
+  precioPorTramo: z.array(carpoolTramoPrecio).max(40).optional(),
+  /** Peaje del viaje en céntimos PEN (Int). Se SUMA al costo y se divide entre asientos en el tope. */
+  tollsCents: z.number().int().min(0).max(CARPOOL_MAX_TOLLS_CENTS).optional(),
+  modoReserva: carpoolModoReserva,
+  /** Reglas del viaje (equipaje, mascotas, etc.), ≤1000 chars. */
+  reglas: z.string().max(1000).optional(),
+});
+export type PublishTripRequest = z.infer<typeof publishTripRequest>;
+
+/**
+ * PATCH /carpool/trips/:id → body (editar una oferta · ADR-014 §8 F1a · UpdatePublishedTripDto). Patch PARCIAL:
+ * TODOS los campos opcionales, el conductor edita solo lo que cambia. NO editable: `vehicleId` (re-publicar con
+ * otro vehículo es otra oferta), país/moneda/pricingMode. Editable SOLO mientras la oferta está PUBLICADO (lo
+ * impone el servidor contra la máquina de estados). El `driverId`/`id` NO van en el body.
+ */
+export const updateTripRequest = z.object({
+  origenLat: z.number().min(-90).max(90).optional(),
+  origenLon: z.number().min(-180).max(180).optional(),
+  destinoLat: z.number().min(-90).max(90).optional(),
+  destinoLon: z.number().min(-180).max(180).optional(),
+  stopovers: z.array(carpoolStopover).max(20).optional(),
+  fechaHoraSalida: z.string().datetime().optional(),
+  asientosTotales: z.number().int().min(1).max(8).optional(),
+  precioBase: z.number().int().min(0).optional(),
+  precioPorTramo: z.array(carpoolTramoPrecio).max(40).optional(),
+  tollsCents: z.number().int().min(0).max(CARPOOL_MAX_TOLLS_CENTS).optional(),
+  modoReserva: carpoolModoReserva.optional(),
+  reglas: z.string().max(1000).optional(),
+});
+export type UpdateTripRequest = z.infer<typeof updateTripRequest>;
+
+/**
+ * La OFERTA del conductor tal como el servidor la devuelve (PublishedTrip serializado · ADR-014 §2.1). La
+ * devuelven POST /carpool/trips (creada), PATCH /carpool/trips/:id (editada), POST /carpool/trips/:id/cancel
+ * (cancelada) y cada item de GET /carpool/trips (mine). `asientosDisponibles` decrementa al CONFIRMAR una
+ * reserva (nace == asientosTotales). Los campos H3 son internos del índice geo (pueden venir null).
+ */
+export const publishedTripView = z.object({
+  id: z.string().uuid(),
+  driverId: z.string().uuid(),
+  vehicleId: z.string().uuid(),
+  origenLat: z.number(),
+  origenLon: z.number(),
+  originH3: z.string().nullable(),
+  destinoLat: z.number(),
+  destinoLon: z.number(),
+  destH3: z.string().nullable(),
+  stopovers: z.array(carpoolStopover),
+  /** ISO-8601 (salida programada). */
+  fechaHoraSalida: z.string(),
+  asientosTotales: z.number().int(),
+  /** Asientos aún libres (decrementa al CONFIRMAR · §6). */
+  asientosDisponibles: z.number().int(),
+  pricingMode: carpoolPricingMode,
+  precioBase: z.number().int(),
+  precioPorTramo: z.array(carpoolTramoPrecio),
+  tollsCents: z.number().int(),
+  modoReserva: carpoolModoReserva,
+  reglas: z.string().nullable(),
+  pais: z.string(),
+  moneda: z.string(),
+  estado: publishedTripState,
+  /** ISO-8601. */
+  createdAt: z.string(),
+  /** ISO-8601. */
+  updatedAt: z.string(),
+});
+export type PublishedTripView = z.infer<typeof publishedTripView>;
+
+/**
+ * GET /carpool/trips (mine) → página de las ofertas del conductor. BARE ARRAY paginado por KEYSET: el cliente
+ * pasa `?limit=&cursor=` y, para la siguiente página, usa el `id` del ÚLTIMO item como `cursor` (no hay
+ * envelope con nextCursor; se agotó cuando la página vuelve más corta que `limit`). Scoped server-truth al
+ * conductor autenticado (anti-IDOR).
+ */
+export const publishedTripList = z.array(publishedTripView);
+export type PublishedTripList = z.infer<typeof publishedTripList>;
+
+/**
+ * La SOLICITUD (reserva) entrante que el conductor VE sobre uno de sus viajes (Booking serializado · ADR-014
+ * §2.2). La devuelven cada item de GET /carpool/trips/:id/bookings y POST /carpool/bookings/:id/{approve,reject}
+ * (la reserva tras la transición). `precioAcordado` = precioBase + specialRequest (céntimos PEN). `specialRequest`
+ * = top-up en céntimos (null si no hubo). `paymentId` se setea al disparar el CHARGE.
+ */
+export const bookingRequestView = z.object({
+  id: z.string().uuid(),
+  publishedTripId: z.string().uuid(),
+  passengerId: z.string().uuid(),
+  asientos: z.number().int(),
+  pickupLat: z.number(),
+  pickupLon: z.number(),
+  dropoffLat: z.number(),
+  dropoffLon: z.number(),
+  /** Céntimos PEN = precioBase + specialRequest. */
+  precioAcordado: z.number().int(),
+  /** Mensaje de presentación del pasajero (null si no puso). */
+  mensajeIntro: z.string().nullable(),
+  /** Top-up en céntimos sobre la base por solicitud especial (null si no hubo). */
+  specialRequest: z.number().int().nullable(),
+  /** Método de pago que ELIGIÓ el pasajero al reservar. */
+  paymentMethod: mobilePaymentMethod,
+  /** Se setea al disparar el CHARGE (null antes). */
+  paymentId: z.string().uuid().nullable(),
+  estado: bookingState,
+  /** ISO-8601. */
+  createdAt: z.string(),
+  /** ISO-8601. */
+  updatedAt: z.string(),
+});
+export type BookingRequestView = z.infer<typeof bookingRequestView>;
+
+/**
+ * GET /carpool/trips/:id/bookings (tripBookings) → página de las solicitudes de un viaje PROPIO. BARE ARRAY
+ * paginado por KEYSET (mismo patrón que `mine`: `?limit=&cursor=`, el cursor de la próxima página es el `id`
+ * del último item). Ownership server-truth: viaje ajeno/inexistente → 404 (anti-IDOR, no filtra existencia).
+ */
+export const bookingRequestList = z.array(bookingRequestView);
+export type BookingRequestList = z.infer<typeof bookingRequestList>;
+
+/* ═══════════════════════ CARPOOLING · PASAJERO (public-bff → booking-service) ═══════════════════════ */
+
+/**
+ * Lado PASAJERO del marketplace (ADR-014 · design/veo.pen sección 5): busca viajes publicados, ve el detalle
+ * enriquecido, solicita la reserva de asiento(s) y sigue el estado de SU solicitud (aprobación del conductor).
+ * Todo pasa por el public-bff (`/api/v1/carpool/*`), que propaga la identidad firmada public-rail y proxya a
+ * booking-service. El `passengerId` NUNCA viaja en el body (server-truth, anti-IDOR).
+ */
+
+/**
+ * VISTA PÚBLICA de un viaje publicado tal como la ve el pasajero (allow-list de booking-service ·
+ * `PublishedTripPublicView`). SIN driverId/vehicleId internos, SIN celdas H3, SIN dedupKey: el conductor y
+ * el vehículo llegan por sus vistas públicas aparte (enriquecimiento del detalle/búsqueda).
+ */
+export const carpoolTripPublicView = z.object({
+  id: z.string().uuid(),
+  origenLat: z.number(),
+  origenLon: z.number(),
+  destinoLat: z.number(),
+  destinoLon: z.number(),
+  /** Paradas intermedias (meeting points públicos). */
+  stopovers: z.array(carpoolStopover),
+  /** ISO-8601 (salida programada). */
+  fechaHoraSalida: z.string(),
+  asientosTotales: z.number().int(),
+  asientosDisponibles: z.number().int(),
+  pricingMode: carpoolPricingMode,
+  /** Precio del asiento full-route en céntimos PEN (Int). */
+  precioBase: z.number().int(),
+  precioPorTramo: z.array(carpoolTramoPrecio),
+  modoReserva: carpoolModoReserva,
+  /** Reglas del viaje (texto libre del conductor); null si no puso ninguna. */
+  reglas: z.string().nullable(),
+  pais: z.string(),
+  moneda: z.string(),
+  estado: publishedTripState,
+});
+export type CarpoolTripPublicView = z.infer<typeof carpoolTripPublicView>;
+
+/** Conductor PÚBLICO (display-only: nombre + rating). Nullable en los envelopes: degradación honesta. */
+export const carpoolDriverDisplay = z.object({
+  id: z.string(),
+  name: z.string(),
+  averageRating: z.number(),
+});
+export type CarpoolDriverDisplay = z.infer<typeof carpoolDriverDisplay>;
+
+/** Vehículo PÚBLICO del detalle (modelo/placa/color; lo que el pasajero necesita para reconocer el auto). */
+export const carpoolVehicleDisplay = z.object({
+  id: z.string(),
+  make: z.string(),
+  model: z.string(),
+  color: z.string(),
+  plate: z.string(),
+  vehicleType: z.string(),
+});
+export type CarpoolVehicleDisplay = z.infer<typeof carpoolVehicleDisplay>;
+
+/** Item de la búsqueda: el viaje público + su conductor público (null si identity no respondió). */
+export const carpoolSearchItem = z.object({
+  trip: carpoolTripPublicView,
+  driver: carpoolDriverDisplay.nullable(),
+});
+export type CarpoolSearchItem = z.infer<typeof carpoolSearchItem>;
+
+/**
+ * GET /carpool/trips/search → página keyset de la búsqueda por ruta (origen→destino) + fecha + asientos.
+ * `nextCursor` OPACO (null = no hay más). La búsqueda es pública (no exige sesión en el downstream).
+ */
+export const carpoolSearchPage = z.object({
+  items: z.array(carpoolSearchItem),
+  nextCursor: z.string().nullable(),
+});
+export type CarpoolSearchPage = z.infer<typeof carpoolSearchPage>;
+
+/**
+ * GET /carpool/trips/:id → detalle ENRIQUECIDO: viaje público + conductor público + vehículo público.
+ * `driver`/`vehicle` nullable: si identity/fleet no respondieron el detalle igual llega (degradación honesta).
+ */
+export const carpoolTripDetail = z.object({
+  trip: carpoolTripPublicView,
+  driver: carpoolDriverDisplay.nullable(),
+  vehicle: carpoolVehicleDisplay.nullable(),
+});
+export type CarpoolTripDetail = z.infer<typeof carpoolTripDetail>;
+
+/**
+ * Un par región→región del agregado de RUTAS POPULARES (ids + nombres del catálogo compartido REGIONS_PE de
+ * @veo/utils). Puede ser INTRA-región (origen == destino, "Lima → Lima"): misma-ciudad es un caso real del
+ * producto — el front decide el copy.
+ */
+export const carpoolPopularRoute = z.object({
+  /** Id kebab-case estable del catálogo (viaja por el wire, sirve para pre-armar el browse del par). */
+  origenRegionId: z.string(),
+  origenNombre: z.string(),
+  destinoRegionId: z.string(),
+  destinoNombre: z.string(),
+  /** Viajes ofertables clasificados en el par (dentro del cap de lectura del agregado). */
+  viajes: z.number().int(),
+  /** Precio por asiento MÁS BARATO del par (min precioBase, céntimos PEN). */
+  precioDesdeCents: z.number().int(),
+});
+export type CarpoolPopularRoute = z.infer<typeof carpoolPopularRoute>;
+
+/**
+ * GET /carpool/trips/popular-routes → top-N de pares región→región con viajes ofertables (viajes DESC,
+ * desempate precioDesde ASC). Agregado de DISPLAY: sin conductores, sin cursor. `routes: []` honesto si
+ * ningún viaje ofertable clasifica en el catálogo.
+ */
+export const carpoolPopularRoutes = z.object({
+  routes: z.array(carpoolPopularRoute),
+});
+export type CarpoolPopularRoutes = z.infer<typeof carpoolPopularRoutes>;
+
+/**
+ * POST /carpool/bookings → body (solicitar la reserva · `CreateBookingDto` de booking-service). El
+ * `passengerId` NO va: lo deriva el BFF de la sesión (server-truth). `Idempotency-Key` (header, UUID por
+ * intento de submit) deduplica el reintento del MISMO submit sin bloquear una reserva nueva.
+ */
+export const carpoolBookingCreateRequest = z.object({
+  publishedTripId: z.string().uuid(),
+  /** Asientos a reservar (1..8; el server revalida contra los disponibles). */
+  asientos: z.number().int().min(1).max(8),
+  /** Método de pago elegido al reservar (el CHARGE al aprobar lo usa). */
+  paymentMethod: mobilePaymentMethod,
+  pickupLat: z.number().min(-90).max(90),
+  pickupLon: z.number().min(-180).max(180),
+  dropoffLat: z.number().min(-90).max(90),
+  dropoffLon: z.number().min(-180).max(180),
+  /** Mensaje de presentación al conductor (modo REVISION), ≤500 chars. */
+  mensajeIntro: z.string().max(500).optional(),
+  /** Top-up en céntimos sobre la base por solicitud especial (equipaje grande, etc.). */
+  specialRequest: z.number().int().min(0).max(100_000_00).optional(),
+});
+export type CarpoolBookingCreateRequest = z.infer<typeof carpoolBookingCreateRequest>;
+
+/**
+ * MI reserva tal como la devuelven POST /carpool/bookings (creada) y GET /carpool/bookings/:id (seguimiento
+ * del estado: PENDIENTE_APROBACION → APROBADO/RECHAZADO/EXPIRADO → …). Mismo Booking serializado que ve el
+ * conductor (`bookingRequestView`): acá el dueño es el propio pasajero (scoped server-truth, ajeno → 404).
+ */
+export const carpoolBookingView = bookingRequestView;
+export type CarpoolBookingView = BookingRequestView;
 
 /* ═══════════════════════ SOCKET.IO MÓVIL ═══════════════════════ */
 
@@ -2544,7 +3443,14 @@ export interface DispatchOfferedPayload {
   vehicleType?: string;
   originLat?: number;
   originLon?: number;
+  /** Destino ENGROSADO a ~111m (privacidad pre-aceptación) + distancia/duración del viaje: el ping pinta la tarjeta de puja (pickup→destino + distancia) sin refetch. Ausentes en la oferta FIXED. */
+  destLat?: number;
+  destLon?: number;
+  distanceMeters?: number;
+  durationSeconds?: number;
   specialRequests?: string[];
+  /** ETA conductor→recojo en segundos (efímero, solo oferta FIXED): la app lo muestra como el stat "A recojo". Ausente si el broadcast de PUJA no lo trae o si maps.eta no estuvo disponible. */
+  pickupEtaSeconds?: number;
 }
 
 /** Match encontrado (dispatch.match_found). */
@@ -2553,6 +3459,18 @@ export interface DispatchMatchPayload {
   driverId: string;
   vehicleId?: string;
   scoreMs: number;
+}
+
+/**
+ * ADR-020 Lote 2 (2a) · una oferta del board dejó de valer con el board cerrando (dispatch.offer_withdrawn
+ * → `bid:closed`). El driver-bff lo empuja al conductor destino para que su card de puja muera al instante
+ * (sin esperar el poll). `reason`: `not_selected` (el pasajero eligió a otro), `stale` (quedó inelegible),
+ * `taken` (ganó la emergencia hermana). Sin PII: solo `tripId`/`driverId`.
+ */
+export interface DispatchOfferWithdrawnPayload {
+  tripId: string;
+  driverId: string;
+  reason: 'stale' | 'taken' | 'not_selected';
 }
 
 /**
@@ -2569,6 +3487,12 @@ export interface TipAddedPayload {
 export interface DriverServerToClient {
   'dispatch:offer': (msg: DriverEventEnvelope<DispatchOfferedPayload>) => void;
   'dispatch:match': (msg: DriverEventEnvelope<DispatchMatchPayload>) => void;
+  /**
+   * ADR-020 Lote 2 (2a) · una puja del conductor se CERRÓ (el pasajero eligió a otro / quedó inelegible):
+   * el driver-bff lo empuja al consumir `dispatch.offer_withdrawn` para que la app remueva la card al
+   * instante (backstop: el poll de 12s). Sin PII (solo tripId/driverId/reason).
+   */
+  'bid:closed': (msg: DriverEventEnvelope<DispatchOfferWithdrawnPayload>) => void;
   'trip:update': (msg: DriverEventEnvelope<unknown>) => void;
   /**
    * Mensaje de chat entrante del pasajero (Ola 2A). El driver-bff lo emite a la sala del viaje
@@ -2583,6 +3507,20 @@ export interface DriverServerToClient {
    * responde (acepta/rechaza) antes de `expiresAt`. No usa el sobre genérico: shape tipada y validada.
    */
   'waypoint:proposed': (msg: WaypointProposedMsg) => void;
+  /**
+   * SINGLE ACTIVE SESSION: el conductor inició sesión en OTRO dispositivo (login más nuevo) → ESTA sesión
+   * quedó superada. El gateway `/driver` lo emite y desconecta el socket; la app cierra la sesión local y
+   * vuelve al login con el aviso "sesión cerrada en otro dispositivo". Sin payload (es una señal).
+   */
+  'session:superseded': () => void;
+  /**
+   * SUSPENSIÓN EN VIVO: un operador suspendió al conductor mid-turno (identity emite `driver.suspended` →
+   * el driver-bff fuerza el cierre del socket). El gateway `/driver` lo emite y desconecta el socket; la
+   * app cierra la sesión local y vuelve al login con el aviso "cuenta suspendida". Sin payload (es una
+   * señal, igual que `session:superseded`). Cierra la ventana ≤15m en la que la sesión abierta seguía viva
+   * (emitiendo GPS + presencia fantasma en /ops + recibiendo pushes) hasta vencer el access token.
+   */
+  'session:suspended': () => void;
 }
 
 export interface DriverClientToServer {
@@ -2596,3 +3534,11 @@ export interface DriverHandshakeAuth {
 }
 
 export const DRIVER_NAMESPACE = '/driver';
+
+/**
+ * Motivo EXPLÍCITO que el gateway `/driver` pone en el `Error` con que rechaza el handshake cuando la
+ * sesión está revocada (middleware del namespace → `connect_error` con `err.message === este valor`).
+ * Fuente ÚNICA compartida server↔app: el server lo emite, la app SOLO se desloguea ante ESTE motivo
+ * (un `connect_error` transitorio de transporte —timeout, red— NO desloguea; reconecta). Cero strings mágicos.
+ */
+export const HANDSHAKE_SESSION_REVOKED = 'session-revoked' as const;

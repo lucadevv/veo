@@ -48,7 +48,8 @@ function build() {
   const state = new RealtimeStateService();
   const gateway = { cutFamilyForPanic: vi.fn() } as unknown as FamilyGateway;
   const passenger = {} as unknown as PassengerGateway;
-  const consumer = new RealtimeConsumerService(config, gateway, passenger, state);
+  const maps = { eta: vi.fn().mockResolvedValue(180) } as never; // MAPS — no ejercitado acá
+  const consumer = new RealtimeConsumerService(config, gateway, passenger, state, maps);
   return { consumer, state };
 }
 

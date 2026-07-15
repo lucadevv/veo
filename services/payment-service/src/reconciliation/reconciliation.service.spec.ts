@@ -6,42 +6,28 @@
  *  - Con refunds viejos → alerted=true, una alerta accionable por refund (id/pago/monto/uid/edad) +
  *    resumen con el TOTAL real (no acotado por el límite de detalle).
  *  - uid NULL (timeout de /reverse/new) → la alerta lo distingue (SIN_UID) del callback perdido.
- *  - El umbral (REFUND_PENDING_ALERT_MIN) define el corte de `createdAt` consultado.
- *  - NUNCA escribe: solo lectura + alerta (sin consulta de reverso en el puerto no hay cierre honesto).
- * Hermético: prisma/redis/gateway fakes (el barrido solo LEE y loguea; no es mutación de dinero).
+ *  - El umbral (REFUND_PENDING_ALERT_MIN) define el corte de `createdAt` (el `threshold` pasado al repo).
+ *  - NUNCA escribe: solo lecturas del repo + alerta (sin consulta de reverso en el puerto no hay cierre honesto).
+ * Hermético: se MOCKEA EL REPO (seam de acceso a datos), no Prisma — el predicado `status=PENDING` es un
+ * invariante del repo; el service solo decide el `threshold`. redis/gateway fakes (el barrido solo LEE y loguea).
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { ReconciliationService } from './reconciliation.service';
-import type { PrismaService } from '../infra/prisma.service';
+import type {
+  ReconciliationRepository,
+  StaleRefundDetail,
+  StaleCashDetail,
+} from './reconciliation.repository';
 import type { PaymentGateway } from '../ports/gateway/payment-gateway.port';
 
-interface FakeRefundRow {
-  id: string;
-  paymentId: string;
-  amountCents: number;
-  externalRefundId: string | null;
-  requestedBy: string;
-  createdAt: Date;
-}
-
-interface RefundWhere {
-  status: string;
-  createdAt: { lt: Date };
-}
-
-function makeFakePrisma(rows: FakeRefundRow[]) {
-  const refund = {
-    count: vi.fn(async (_args: { where: RefundWhere }) => rows.length),
-    findMany: vi.fn(async ({ take }: { where: RefundWhere; take: number }) => rows.slice(0, take)),
+function makeRefundRepo(rows: StaleRefundDetail[]) {
+  const repo = {
+    countStalePendingRefunds: vi.fn(async (_threshold: Date) => rows.length),
+    findStalePendingRefunds: vi.fn(async (_threshold: Date, take: number) => rows.slice(0, take)),
   };
-  const client = {
-    refund,
-    payment: { findMany: vi.fn(async () => []) },
-    reconciliationRun: { create: vi.fn() },
-  };
-  return { prisma: { read: client, write: client } as unknown as PrismaService, refund };
+  return repo;
 }
 
 const fakeRedis = { set: vi.fn(), del: vi.fn() } as unknown as Redis;
@@ -61,15 +47,20 @@ const fakeConfig = (over: Record<string, unknown> = {}) =>
       })[k],
   }) as unknown as ConfigService<Record<string, unknown>, true>;
 
-function build(rows: FakeRefundRow[], configOver: Record<string, unknown> = {}) {
-  const { prisma, refund } = makeFakePrisma(rows);
-  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver));
-  return { svc, refund };
+function build(rows: StaleRefundDetail[], configOver: Record<string, unknown> = {}) {
+  const repo = makeRefundRepo(rows);
+  const svc = new ReconciliationService(
+    repo as unknown as ReconciliationRepository,
+    fakeRedis,
+    fakeGateway,
+    fakeConfig(configOver),
+  );
+  return { svc, repo };
 }
 
 const NOW = new Date('2026-06-11T12:00:00.000Z');
 
-function staleRow(over: Partial<FakeRefundRow> = {}): FakeRefundRow {
+function staleRow(over: Partial<StaleRefundDetail> = {}): StaleRefundDetail {
   return {
     id: 'ref-1',
     paymentId: 'pay-1',
@@ -88,14 +79,11 @@ describe('ReconciliationService.sweepStalePendingRefunds · red de seguridad S5'
     expect(res).toMatchObject({ staleCount: 0, alerted: false });
   });
 
-  it('consulta SOLO PENDING más viejos que el umbral (createdAt < now − REFUND_PENDING_ALERT_MIN)', async () => {
-    const { svc, refund } = build([], { REFUND_PENDING_ALERT_MIN: 30 });
+  it('consulta con el umbral correcto (threshold = now − REFUND_PENDING_ALERT_MIN)', async () => {
+    const { svc, repo } = build([], { REFUND_PENDING_ALERT_MIN: 30 });
     await svc.sweepStalePendingRefunds(NOW);
-    const where = refund.count.mock.calls[0]![0].where;
-    expect(where.status).toBe('PENDING');
-    expect(where.createdAt.lt.toISOString()).toBe(
-      new Date(NOW.getTime() - 30 * 60_000).toISOString(),
-    );
+    const threshold = repo.countStalePendingRefunds.mock.calls[0]![0];
+    expect(threshold.toISOString()).toBe(new Date(NOW.getTime() - 30 * 60_000).toISOString());
   });
 
   it('con refunds viejos → alerted=true + alerta accionable por refund (id/pago/monto/uid/edad) + resumen', async () => {
@@ -122,52 +110,37 @@ describe('ReconciliationService.sweepStalePendingRefunds · red de seguridad S5'
     expect(errorSpy.mock.calls[0]?.[0]).toContain('SIN_UID');
   });
 
-  it('NUNCA escribe: solo count+findMany de lectura (sin updates silenciosos al Refund/Payment)', async () => {
-    const { svc, refund } = build([staleRow()]);
+  it('NUNCA escribe: solo count+findMany del repo (sin updates silenciosos al Refund/Payment)', async () => {
+    const { svc, repo } = build([staleRow()]);
     vi.spyOn(svc['logger'], 'error').mockImplementation(() => undefined);
     await svc.sweepStalePendingRefunds(NOW);
-    expect(refund.count).toHaveBeenCalledTimes(1);
-    expect(refund.findMany).toHaveBeenCalledTimes(1);
-    // El fake no define update/updateMany: si el barrido intentara escribir, explotaría acá.
+    expect(repo.countStalePendingRefunds).toHaveBeenCalledTimes(1);
+    expect(repo.findStalePendingRefunds).toHaveBeenCalledTimes(1);
+    // El fake del repo no define ningún método de escritura: si el barrido intentara escribir, explotaría acá.
   });
 });
 
 // ── Barrido de EFECTIVO PENDING (sweepStaleCashPending) — gemelo del de refunds ──
-interface FakeCashRow {
-  id: string;
-  tripId: string;
-  driverId: string | null;
-  passengerId: string | null;
-  amountCents: number;
-  createdAt: Date;
-}
-
-interface CashWhere {
-  status: string;
-  method: string;
-  createdAt: { lt: Date };
-}
-
-function makeFakeCashPrisma(rows: FakeCashRow[]) {
-  const payment = {
-    count: vi.fn(async (_args: { where: CashWhere }) => rows.length),
-    findMany: vi.fn(async ({ take }: { where: CashWhere; take: number }) => rows.slice(0, take)),
+function makeCashRepo(rows: StaleCashDetail[]) {
+  const repo = {
+    countStaleCashPending: vi.fn(async (_threshold: Date) => rows.length),
+    findStaleCashPending: vi.fn(async (_threshold: Date, take: number) => rows.slice(0, take)),
   };
-  const client = {
-    payment,
-    refund: { count: vi.fn(async () => 0) },
-    reconciliationRun: { create: vi.fn() },
-  };
-  return { prisma: { read: client, write: client } as unknown as PrismaService, payment };
+  return repo;
 }
 
-function buildCash(rows: FakeCashRow[], configOver: Record<string, unknown> = {}) {
-  const { prisma, payment } = makeFakeCashPrisma(rows);
-  const svc = new ReconciliationService(prisma, fakeRedis, fakeGateway, fakeConfig(configOver));
-  return { svc, payment };
+function buildCash(rows: StaleCashDetail[], configOver: Record<string, unknown> = {}) {
+  const repo = makeCashRepo(rows);
+  const svc = new ReconciliationService(
+    repo as unknown as ReconciliationRepository,
+    fakeRedis,
+    fakeGateway,
+    fakeConfig(configOver),
+  );
+  return { svc, repo };
 }
 
-function staleCashRow(over: Partial<FakeCashRow> = {}): FakeCashRow {
+function staleCashRow(over: Partial<StaleCashDetail> = {}): StaleCashDetail {
   return {
     id: 'pay-cash-1',
     tripId: 'trip-1',
@@ -186,15 +159,11 @@ describe('ReconciliationService.sweepStaleCashPending · red de seguridad del ef
     expect(res).toMatchObject({ staleCount: 0, alerted: false });
   });
 
-  it('consulta SOLO PENDING+CASH más viejos que el umbral (createdAt < now − CASH_PENDING_ALERT_MIN)', async () => {
-    const { svc, payment } = buildCash([], { CASH_PENDING_ALERT_MIN: 120 });
+  it('consulta con el umbral correcto (threshold = now − CASH_PENDING_ALERT_MIN)', async () => {
+    const { svc, repo } = buildCash([], { CASH_PENDING_ALERT_MIN: 120 });
     await svc.sweepStaleCashPending(NOW);
-    const where = payment.count.mock.calls[0]![0].where;
-    expect(where.status).toBe('PENDING');
-    expect(where.method).toBe('CASH');
-    expect(where.createdAt.lt.toISOString()).toBe(
-      new Date(NOW.getTime() - 120 * 60_000).toISOString(),
-    );
+    const threshold = repo.countStaleCashPending.mock.calls[0]![0];
+    expect(threshold.toISOString()).toBe(new Date(NOW.getTime() - 120 * 60_000).toISOString());
   });
 
   it('con efectivo viejo → alerted=true + alerta accionable (pago/viaje/monto/conductor/pasajero/edad) + resumen', async () => {
@@ -213,12 +182,67 @@ describe('ReconciliationService.sweepStaleCashPending · red de seguridad del ef
     expect(detail).toContain('edad=1800min');
   });
 
-  it('NUNCA captura: solo count+findMany de lectura (sin auto-capture del efectivo sin OK del pasajero)', async () => {
-    const { svc, payment } = buildCash([staleCashRow()]);
+  it('NUNCA captura: solo count+findMany del repo (sin auto-capture del efectivo sin OK del pasajero)', async () => {
+    const { svc, repo } = buildCash([staleCashRow()]);
     vi.spyOn(svc['logger'], 'error').mockImplementation(() => undefined);
     await svc.sweepStaleCashPending(NOW);
-    expect(payment.count).toHaveBeenCalledTimes(1);
-    expect(payment.findMany).toHaveBeenCalledTimes(1);
-    // El fake de payment no define update/updateMany: cualquier intento de escritura explotaría acá.
+    expect(repo.countStaleCashPending).toHaveBeenCalledTimes(1);
+    expect(repo.findStaleCashPending).toHaveBeenCalledTimes(1);
+    // El fake del repo no define ningún método de escritura: cualquier intento de captura explotaría acá.
+  });
+});
+
+describe('ReconciliationService.listRuns · historial paginado (hueco #3 · solo lectura)', () => {
+  function makeRun(id: string) {
+    return {
+      id,
+      ranAt: new Date('2026-06-11T04:00:00.000Z'),
+      discrepancyPct: 0.002,
+      alerted: false,
+      details: {
+        periodStart: '2026-06-10T00:00:00.000Z',
+        periodEnd: '2026-06-11T00:00:00.000Z',
+        dbTotalCents: 100_000,
+        statementTotalCents: 100_200,
+        dbCount: 40,
+        statementCount: 40,
+      },
+      createdAt: new Date('2026-06-11T04:00:00.000Z'),
+    };
+  }
+  function buildWithRuns(runs: ReturnType<typeof makeRun>[]) {
+    const listReconciliationRuns = vi.fn(
+      async ({ take }: { cursor?: string; take: number }) => runs.slice(0, take),
+    );
+    const repo = { listReconciliationRuns };
+    const svc = new ReconciliationService(
+      repo as unknown as ReconciliationRepository,
+      fakeRedis,
+      fakeGateway,
+      fakeConfig(),
+    );
+    return { svc, listReconciliationRuns };
+  }
+
+  it('pide limit+1 al repo (orden id desc es invariante del repo) y recorta a limit, devolviendo nextCursor cuando hay más', async () => {
+    const runs = ['r5', 'r4', 'r3', 'r2', 'r1'].map(makeRun); // 5 corridas, id desc
+    const { svc, listReconciliationRuns } = buildWithRuns(runs);
+    const page = await svc.listRuns({ limit: 3 });
+    expect(listReconciliationRuns).toHaveBeenCalledWith(expect.objectContaining({ take: 4 }));
+    expect(page.items.map((r) => r.id)).toEqual(['r5', 'r4', 'r3']);
+    expect(page.nextCursor).toBe('r3'); // id de la última fila de la página
+  });
+
+  it('sin más páginas → nextCursor null', async () => {
+    const { svc } = buildWithRuns(['r2', 'r1'].map(makeRun));
+    const page = await svc.listRuns({ limit: 30 });
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('pasa el cursor al repo (filtro id < cursor · paginación estable)', async () => {
+    const { svc, listReconciliationRuns } = buildWithRuns(['r1'].map(makeRun));
+    await svc.listRuns({ cursor: 'r9', limit: 10 });
+    expect(listReconciliationRuns).toHaveBeenCalledWith(expect.objectContaining({ cursor: 'r9' }));
   });
 });

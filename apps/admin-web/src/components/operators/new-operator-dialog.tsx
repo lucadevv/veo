@@ -129,7 +129,7 @@ export function NewOperatorDialog() {
       <DialogTrigger asChild>
         <Button size="sm" variant="primary">
           <UserPlus className="size-4" aria-hidden />
-          Nuevo operador
+          Invitar operador
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -141,8 +141,8 @@ export function NewOperatorDialog() {
                 Invitación creada
               </DialogTitle>
               <DialogDescription>
-                Comparte este enlace con el operador para que fije su contraseña. También se envió por
-                email.
+                Comparte este enlace con el operador para que fije su contraseña. También se envió
+                por email.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-1">
@@ -175,11 +175,11 @@ export function NewOperatorDialog() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <UserPlus className="size-5 text-accent" aria-hidden />
-                Nuevo operador
+                Invitar operador
               </DialogTitle>
               <DialogDescription>
-                Se enviará una invitación al correo para que el operador fije su contraseña. Asigna los
-                roles que definen qué puede ver y operar.
+                Se enviará una invitación al correo para que el operador fije su contraseña. Asigna
+                los roles que definen qué puede ver y operar.
               </DialogDescription>
             </DialogHeader>
 

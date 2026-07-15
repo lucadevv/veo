@@ -27,7 +27,7 @@ import { PassengerSocket } from '../lib/passenger-socket.js';
 import { BffClient } from '../lib/http.js';
 import { BASE_URLS } from '../lib/config.js';
 import { approveDriverByUserId, clearDispatchHotIndex, injectOtp } from '../lib/fixtures.js';
-import { putModeSchedule, ruleCoveringNow } from '../lib/pricing-admin.js';
+import { setOfferingMode } from '../lib/pricing-admin.js';
 import { pollUntil } from '../lib/wait.js';
 
 interface AuthTokens {
@@ -97,7 +97,15 @@ const gate = heldStack
       reason:
         'VEO_E2E_HELD_STACK!=1 — corré `pnpm run e2e:waypoint` contra un stack sostenido (e2e:serve)',
     };
-const collector = new EventCollector(['trip', 'dispatch', 'payment', 'driver', 'user']);
+// 'driver-location' = topic propio del firehose driver.location_updated (TOPIC_OVERRIDES en @veo/events).
+const collector = new EventCollector([
+  'trip',
+  'dispatch',
+  'payment',
+  'driver',
+  'driver-location',
+  'user',
+]);
 
 (heldStack && gate.ready ? describe : describe.skip)(
   'VEO · parada negociada mid-trip E2E (C1-C4)',
@@ -119,9 +127,10 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'driver', '
 
     beforeAll(async () => {
       // Sin orquestador: el stack ya está levantado. Solo preparamos dispatch (limpia fantasmas + FIXED-ahora)
-      // y arrancamos el colector de eventos Kafka.
+      // y arrancamos el colector de eventos Kafka. ADR 023: FIXED-ahora = fijar la oferta ancla en FIXED por
+      // la palanca del catálogo (no un schedule).
       await clearDispatchHotIndex();
-      await putModeSchedule({ defaultMode: 'PUJA', rules: [ruleCoveringNow('FIXED')] });
+      await setOfferingMode('veo_economico', 'FIXED');
       await collector.start();
     }, 120_000);
 

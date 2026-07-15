@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
-  KeyboardAvoidingView,
   type ListRenderItemInfo,
-  Platform,
+  Pressable,
   StyleSheet,
   TextInput,
   View,
@@ -12,14 +11,14 @@ import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Banner, IconButton, SafeScreen, Skeleton, useTheme } from '@veo/ui-kit';
+import { Banner, SafeScreen, Skeleton, useKeyboardHeight, useTheme } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { TopBar } from '../../../../shared/presentation/components/TopBar';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { IconNavigation } from '../../../../shared/presentation/icons';
+import { IconArrowRight } from '../../../../shared/presentation/icons';
 import { isTripActive, parseTripStatus } from '../../../trips/domain';
-import { useTrip } from '../../../trips/presentation/hooks/useTrips';
+import { useTrip } from '../hooks/useTrip';
 import type { Message } from '../../domain';
 import { MessageBubble } from '../components/MessageBubble';
 import { QuickReplies } from '../components/QuickReplies';
@@ -44,7 +43,7 @@ export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
   const markRead = useMarkChatRead(tripId);
 
   const [draft, setDraft] = useState('');
-  const listRef = useRef<FlatList<Message>>(null);
+  const keyboardHeight = useKeyboardHeight();
 
   const status = trip.data ? parseTripStatus(trip.data.status) : 'UNKNOWN';
   // Solo se conversa con el pasajero mientras el viaje sigue vivo (no completado/cancelado).
@@ -58,15 +57,15 @@ export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
     }, [markRead]),
   );
 
-  // Cada mensaje nuevo nos lleva al pie de la conversación (lo más reciente, abajo).
-  useEffect(() => {
-    if (messages.length > 0) {
-      listRef.current?.scrollToEnd({ animated: true });
-    }
-  }, [messages.length]);
+  // Lista INVERTIDA (patrón chat, espejo del pasajero): el offset 0 es el PIE de la conversación,
+  // así el último mensaje (enviado o entrante) queda SIEMPRE a la vista — al llegar uno nuevo, al
+  // abrir el teclado y al entrar. Reemplaza al scrollToEnd imperativo, que corría a destiempo del
+  // layout. `inverted` pinta al revés → se le da la data REVERSA (el orden visual queda idéntico).
+  const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
+  // SOLO 2 plantillas (regla del dueño): las más coherentes para el conductor — llegando / llegué.
   const quickReplies = useMemo(
-    () => [t('chat.templates.arriving'), t('chat.templates.arrived'), t('chat.templates.waiting')],
+    () => [t('chat.templates.arriving'), t('chat.templates.arrived')],
     [t],
   );
 
@@ -86,9 +85,14 @@ export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
     [],
   );
 
+  // Header fiel al frame C/Chat: el PRIMER nombre del pasajero (server-authoritative, PII mínima) o el
+  // título genérico mientras carga / si el backend no lo resolvió.
   const header = (
     <View style={styles.headerPad}>
-      <TopBar title={t('chat.title')} onBack={navigation.goBack} />
+      <TopBar
+        title={trip.data?.passengerFirstName ?? t('chat.title')}
+        onBack={navigation.goBack}
+      />
     </View>
   );
 
@@ -118,11 +122,9 @@ export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
 
   return (
     <SafeScreen padded={false} header={header}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + 8}
-      >
+      {/* Padding inferior = alto EXACTO del teclado en coordenadas de ventana (useKeyboardHeight,
+          compartido con el pasajero): composer siempre COMPLETO encima, en cualquier dispositivo. */}
+      <View style={[styles.flex, { paddingBottom: keyboardHeight }]}>
         {history.isLoading && messages.length === 0 ? (
           <View style={styles.loading}>
             <Skeleton height={44} />
@@ -133,14 +135,13 @@ export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
           <StateView title={t('chat.emptyTitle')} description={t('chat.emptyBody')} />
         ) : (
           <FlatList
-            ref={listRef}
-            data={messages}
+            data={invertedMessages}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
+            inverted
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
             keyboardDismissMode="interactive"
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           />
         )}
 
@@ -164,60 +165,79 @@ export const ChatScreen = ({ navigation, route }: Props): React.JSX.Element => {
           </View>
         ) : null}
 
-        {active ? (
-          <QuickReplies replies={quickReplies} onSelect={submit} disabled={send.isPending} />
-        ) : null}
-
         <View
           style={[
             styles.composer,
             {
               backgroundColor: theme.colors.bg,
               borderTopColor: theme.colors.border,
-              paddingBottom: insets.bottom + 8,
+              // Con el teclado abierto el home indicator queda tapado → su inset sobraría como
+              // hueco muerto entre composer y teclado; se paga solo con el teclado cerrado.
+              paddingBottom: (keyboardHeight > 0 ? 0 : insets.bottom) + 8,
             },
           ]}
         >
+          {/* UN solo contenedor (regla del dueño): respuestas rápidas + input + enviar en la MISMA
+              card — antes los chips flotaban sueltos arriba del composer. Mismo diseño que el chat
+              del pasajero (simetría entre apps). */}
           <View
             style={[
-              styles.inputWrap,
+              styles.composerCard,
               {
                 backgroundColor: theme.colors.surface,
                 borderColor: theme.colors.border,
                 borderRadius: theme.radii.xl,
+                padding: theme.spacing.md,
+                gap: theme.spacing.sm,
               },
             ]}
           >
-            <TextInput
-              style={[styles.input, { color: theme.colors.ink }]}
-              value={draft}
-              onChangeText={setDraft}
-              editable={active && !send.isPending}
-              placeholder={active ? t('chat.inputPlaceholder') : t('chat.inputDisabled')}
-              placeholderTextColor={theme.colors.inkSubtle}
-              multiline
-              maxLength={MAX_BODY}
-              returnKeyType="send"
-              blurOnSubmit={false}
-              onSubmitEditing={() => submit(draft)}
-              accessibilityLabel={t('chat.inputPlaceholder')}
-            />
-          </View>
-          <IconButton
-            icon={
-              <IconNavigation
-                size={22}
-                color={canSend ? theme.colors.onAccent : theme.colors.inkSubtle}
+            {active ? (
+              <QuickReplies replies={quickReplies} onSelect={submit} disabled={send.isPending} />
+            ) : null}
+            <View style={[styles.inputRow, { gap: theme.spacing.sm }]}>
+              {/* Input DESNUDO (sin su propia caja): la card ya es el contenedor visual. */}
+              <TextInput
+                style={[styles.input, { color: theme.colors.ink }]}
+                value={draft}
+                onChangeText={setDraft}
+                editable={active && !send.isPending}
+                placeholder={active ? t('chat.inputPlaceholder') : t('chat.inputDisabled')}
+                placeholderTextColor={theme.colors.inkSubtle}
+                multiline
+                maxLength={MAX_BODY}
+                returnKeyType="send"
+                blurOnSubmit={false}
+                onSubmitEditing={() => submit(draft)}
+                accessibilityLabel={t('chat.inputPlaceholder')}
               />
-            }
-            accessibilityLabel={t('chat.send')}
-            variant={canSend ? 'tinted' : 'surface'}
-            size="lg"
-            disabled={!canSend}
-            onPress={() => submit(draft)}
-          />
+              {/* Botón enviar: círculo VERDE (accentStrong) + flecha → COMPLETA, activo solo con
+                  texto; deshabilitado queda gris (recesado). Espejo exacto del pasajero. */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.send')}
+                accessibilityState={{ disabled: !canSend }}
+                disabled={!canSend}
+                onPress={() => submit(draft)}
+                style={({ pressed }) => [
+                  styles.sendBtn,
+                  {
+                    backgroundColor: canSend
+                      ? theme.colors.accentStrong
+                      : theme.colors.surfaceMuted,
+                    opacity: pressed && canSend ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <IconArrowRight
+                  size={22}
+                  color={canSend ? theme.colors.onBrand : theme.colors.inkSubtle}
+                />
+              </Pressable>
+            </View>
+          </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeScreen>
   );
 };
@@ -227,26 +247,26 @@ const styles = StyleSheet.create({
   headerPad: { paddingHorizontal: 20 },
   skeletonGap: { height: 12 },
   loading: { flex: 1, gap: 10, paddingHorizontal: 16, paddingTop: 16 },
+  // OJO: lista `inverted` — su flex-start YA es el pie visual; un justifyContent flex-end acá la
+  // anclaría al TOPE (espejado).
   listContent: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    flexGrow: 1,
-    justifyContent: 'flex-end',
   },
   bannerPad: { paddingHorizontal: 16, paddingTop: 8 },
   composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 10,
     paddingHorizontal: 16,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  inputWrap: {
-    flex: 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+  composerCard: { borderWidth: StyleSheet.hairlineWidth },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  input: { flex: 1, fontSize: 16, maxHeight: 120, minHeight: 44, paddingTop: 12, paddingBottom: 12 },
+  sendBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  input: { fontSize: 16, maxHeight: 120, minHeight: 36, paddingTop: 6, paddingBottom: 6 },
 });

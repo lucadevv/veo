@@ -13,7 +13,8 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import {VehicleIcon} from '../../../dispatch/presentation/components/VehicleIcon';
+import {offeringGlyph} from '../../../../shared/presentation/components/offeringGlyphs';
+import type {NearbyVehicleType} from '../../../dispatch/domain/dispatchRepository';
 
 /**
  * FRANJA DE ESTADO DEL VIAJE (canónica) — una línea sutil de extremo a extremo con el VehicleIcon del
@@ -37,9 +38,33 @@ import {VehicleIcon} from '../../../dispatch/presentation/components/VehicleIcon
 /** Modo visual de la franja, derivado del estado del viaje. */
 type StripMode = 'moving' | 'arrived';
 
+/** Glyph del vehículo del strip: ícono de línea del registro (no la silueta top-down ilegible). */
+function StripVehicleGlyph({
+  vehicleType,
+  color,
+}: {
+  vehicleType?: NearbyVehicleType;
+  color: string;
+}): React.JSX.Element {
+  const {LineIcon} = offeringGlyph({vehicleType});
+  return <LineIcon color={color} size={ICON_SIZE} />;
+}
+
 export interface TripStatusStripProps {
   /** Estado efectivo del viaje (socket o REST). Puede llegar como string crudo (EXPIRED/FAILED/…). */
   status: TripStatus | string;
+  /**
+   * Nombre del conductor para la etiqueta PERSONALIZADA (design/veo.pen fLKdk StatusRow: "Carlos está
+   * en camino"). `null`/vacío → cae a la etiqueta genérica; nunca se inventa un nombre.
+   */
+  driverName?: string | null;
+  /** ETA en vivo ya formateada ("3 min") como pill a la derecha (pen StatusRow). `null` = sin pill. */
+  etaLabel?: string | null;
+  /**
+   * Tipo REAL del viaje (CAR|MOTO, del activeTripStore): la silueta que se desliza es la del vehículo
+   * pedido — una moto NO se anima como auto (feedback del dueño). Ausente → fallback del registro (auto).
+   */
+  vehicleType?: NearbyVehicleType;
 }
 
 /** Tamaño del vehículo en la franja (px). Chico y legible, no compite con la DriverCard. */
@@ -51,26 +76,59 @@ const PULSE_MS = 900;
 /** Alto del track (línea sutil). */
 const TRACK_HEIGHT = 2;
 
-/** Mapea el estado del viaje al modo de la franja + su etiqueta i18n. */
-function resolveStrip(status: string): {mode: StripMode; labelKey: string} {
+/**
+ * Mapea el estado del viaje al modo de la franja + sus etiquetas i18n (genérica y personalizada con
+ * nombre). La variante `namedKey` solo se usa cuando el backend trae el nombre real del conductor.
+ */
+function resolveStrip(status: string): {
+  mode: StripMode;
+  labelKey: string;
+  namedKey: string;
+} {
   switch (status) {
+    // ASSIGNED / ACCEPTED: el conductor CONFIRMÓ el viaje pero aún no reporta ir en camino. Copy propio:
+    // colapsarlo en "en camino" mentía la fase (el pasajero no distinguía "aceptó" de "ya viene").
+    case tripStatus.enum.ASSIGNED:
+    case tripStatus.enum.ACCEPTED:
+      return {
+        mode: 'moving',
+        labelKey: 'tripStrip.confirmed',
+        namedKey: 'tripStrip.confirmedNamed',
+      };
     case tripStatus.enum.ARRIVED:
-      return {mode: 'arrived', labelKey: 'tripStrip.arrived'};
+      return {
+        mode: 'arrived',
+        labelKey: 'tripStrip.arrived',
+        namedKey: 'tripStrip.arrivedNamed',
+      };
     case tripStatus.enum.IN_PROGRESS:
-      return {mode: 'moving', labelKey: 'tripStrip.inProgress'};
-    // ASSIGNED / ACCEPTED / ARRIVING y cualquier otro estado del viaje activo: conductor en camino.
+      return {
+        mode: 'moving',
+        labelKey: 'tripStrip.inProgress',
+        namedKey: 'tripStrip.inProgressNamed',
+      };
+    // ARRIVING y cualquier otro estado del viaje activo: conductor en camino.
     default:
-      return {mode: 'moving', labelKey: 'tripStrip.enRoute'};
+      return {
+        mode: 'moving',
+        labelKey: 'tripStrip.enRoute',
+        namedKey: 'tripStrip.enRouteNamed',
+      };
   }
 }
 
 export function TripStatusStrip({
   status,
+  driverName = null,
+  etaLabel = null,
+  vehicleType,
 }: TripStatusStripProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   const reduced = useReducedMotion();
-  const {mode, labelKey} = resolveStrip(status);
+  const {mode, labelKey, namedKey} = resolveStrip(status);
+  // Nombre de pila para el saludo del estado (pen: "Carlos está en camino", no el nombre completo).
+  const firstName = driverName?.trim().split(/\s+/)[0] ?? null;
 
   // Ancho REAL del track (lo mide el layout) → el recorrido del vehículo es [0, width - icon].
   const [trackWidth, setTrackWidth] = useState(0);
@@ -177,8 +235,9 @@ export function TripStatusStrip({
             },
           ]}
         />
-        {/* Vehículo animado. Rotado 90° (el glyph es top-down apuntando ↑) para que apunte → (sentido
-            de avance). Decorativo: el track entero ya está oculto a accesibilidad. */}
+        {/* Vehículo animado: ícono de LÍNEA del registro (moto/auto inconfundible — la silueta
+            top-down se leía como autito; calibración del dueño 2026-07-14). Decorativo: el track
+            entero ya está oculto a accesibilidad. */}
         <Animated.View style={[styles.icon, iconStyle]} pointerEvents="none">
           <Animated.View
             style={[
@@ -187,16 +246,36 @@ export function TripStatusStrip({
               haloStyle,
             ]}
           />
-          <View style={styles.iconRotate}>
-            <VehicleIcon size={ICON_SIZE} />
-          </View>
+          <StripVehicleGlyph vehicleType={vehicleType} color={theme.colors.brand} />
         </Animated.View>
       </View>
       {/* El estado del viaje es la info MÁS importante de este momento (esperás al conductor) → legible,
-          no en el tamaño/color más apagado. */}
-      <Text variant="subhead" color="ink">
-        {t(labelKey)}
-      </Text>
+          no en el tamaño/color más apagado. Personalizado con el nombre real cuando existe + ETA como
+          pill a la derecha (design/veo.pen fLKdk StatusRow). */}
+      <View style={styles.labelRow}>
+        <Text
+          variant="subhead"
+          color="ink"
+          style={styles.label}
+          numberOfLines={1}>
+          {firstName ? t(namedKey, {name: firstName}) : t(labelKey)}
+        </Text>
+        {etaLabel ? (
+          <View
+            style={[
+              styles.etaPill,
+              {
+                backgroundColor: theme.colors.surfaceElevated,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.pill,
+              },
+            ]}>
+            <Text variant="footnote" color="brand" tabular>
+              {etaLabel}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -216,4 +295,16 @@ const styles = StyleSheet.create({
   },
   iconRotate: {transform: [{rotate: '90deg'}]},
   halo: {position: 'absolute', width: ICON_SIZE, height: ICON_SIZE},
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  label: {flexShrink: 1},
+  etaPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
 });

@@ -35,6 +35,15 @@ export const CANCELLED_TRIP_STATUSES: readonly TripStatus[] = [
   TripStatus.CANCELLED_BY_DRIVER,
 ] as const;
 
+/**
+ * Métricas de UNA oferta del catálogo en una ventana: cuántos viajes COMPLETADOS y cuánto se FACTURÓ
+ * (Σ fareCents, bruto). Ambos del MISMO cohorte (COMPLETED + completedAt en ventana + `category` = offering id).
+ */
+export interface OfferingWindowMetrics {
+  tripCount: number;
+  grossFareCents: number;
+}
+
 /** Puerto: el servicio depende de esto, no de Prisma. */
 export interface TripStatsRepository {
   /** Cantidad de viajes en un estado "en vuelo" AHORA. */
@@ -47,6 +56,12 @@ export interface TripStatsRepository {
   avgActiveDurationSeconds(): Promise<number | null>;
   /** Viajes creados por hora (created_at truncado a la hora UTC) desde `since`, orden asc. */
   tripsPerHourSince(since: Date): Promise<TripsPerHourBucket[]>;
+  /**
+   * Métricas de UNA oferta desde `since`: nº de viajes COMPLETADOS + Σ `fareCents` (bruto facturado), del
+   * MISMO cohorte (status=COMPLETED, completedAt >= since, category = `category`). Agregación del motor
+   * (count + sum en una query), sin N+1.
+   */
+  offeringMetricsSince(category: string, since: Date): Promise<OfferingWindowMetrics>;
 }
 
 @Injectable()
@@ -77,6 +92,24 @@ export class PrismaTripStatsRepository implements TripStatsRepository {
       _avg: { durationSeconds: true },
     });
     return agg._avg.durationSeconds;
+  }
+
+  async offeringMetricsSince(category: string, since: Date): Promise<OfferingWindowMetrics> {
+    // count + Σ fareCents en UNA sola agregación del motor (mismo cohorte, sin N+1 ni sumar en memoria).
+    const agg = await this.prisma.read.trip.aggregate({
+      _count: { _all: true },
+      _sum: { fareCents: true },
+      where: {
+        category,
+        status: TripStatus.COMPLETED,
+        completedAt: { gte: since },
+      },
+    });
+    return {
+      tripCount: agg._count._all,
+      // Sin viajes → _sum.fareCents es null → 0 (dinero SIEMPRE Int, degradación honesta).
+      grossFareCents: agg._sum.fareCents ?? 0,
+    };
   }
 
   async tripsPerHourSince(since: Date): Promise<TripsPerHourBucket[]> {

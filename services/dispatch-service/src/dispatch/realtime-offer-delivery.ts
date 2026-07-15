@@ -12,7 +12,6 @@
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { domainEventsTotal } from '@veo/observability';
 import { type DispatchOffer, type OfferDelivery } from './offer-delivery.port';
 import { EPHEMERAL_EVENT_PUBLISHER, type EphemeralEventPublisher } from './ephemeral-event.port';
 
@@ -37,6 +36,11 @@ export class RealtimeOfferDelivery implements OfferDelivery {
         // specials) para que el conductor pinte la tarjeta sin refetch. En FIXED, `offer.bid` es undefined
         // → no se agrega ninguna key (los campos son opcionales en el schema `dispatch.offered`).
         ...(offer.bid ?? {}),
+        // ETA conductor→recojo (segundos) que el conductor ve como stat "A recojo" en la oferta FIXED.
+        // Efímero: es del momento-de-oferta (como `expiresAt`), NO se persiste. Se OMITE cuando es 0
+        // (maps.eta cayó al catch → cálculo no disponible) para que la app degrade el stat en vez de
+        // pintar un engañoso "0 min".
+        ...(offer.etaSeconds > 0 ? { pickupEtaSeconds: offer.etaSeconds } : {}),
       },
       dedupKey: offer.matchId,
     });
@@ -48,6 +52,5 @@ export class RealtimeOfferDelivery implements OfferDelivery {
     this.logger.debug(
       `oferta ${offer.matchId} → driver ${offer.driverId} (trip ${offer.tripId}, intento ${offer.attempt}, eta ${offer.etaSeconds}s) publicada (Kafka directo)`,
     );
-    domainEventsTotal.inc({ event: 'dispatch.offered', result: 'published' });
   }
 }

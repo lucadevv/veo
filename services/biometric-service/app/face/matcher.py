@@ -1,7 +1,8 @@
 """Matching facial por similitud coseno contra un embedding de referencia.
 
 Matemática REAL (numpy puro): no depende de ONNX, por lo que es testeable con
-vectores controlados. BR-I02: el match aprueba si la similitud coseno >= umbral (0.90).
+vectores controlados. BR-I02: el match aprueba si la similitud coseno >= umbral. El umbral
+es responsabilidad del caller (config: match_threshold para turno, doc_match_threshold para DNI).
 """
 from __future__ import annotations
 
@@ -66,7 +67,7 @@ def match_score(a: Vector, b: Vector) -> float:
 
 
 def is_match(score: float, threshold: float) -> bool:
-    """True si el score alcanza el umbral (>=). BR-I02: umbral 0.90."""
+    """True si el score alcanza el umbral (>=). El umbral lo fija el caller por config (BR-I02)."""
     return score >= threshold
 
 

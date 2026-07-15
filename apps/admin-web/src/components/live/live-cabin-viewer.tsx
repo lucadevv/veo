@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Room, RoomEvent, Track, type RemoteTrack } from 'livekit-client';
-import { Video, VideoOff, X } from 'lucide-react';
+import { Clock, Loader2, Video, VideoOff, X } from 'lucide-react';
 import type { LiveViewerToken } from '@/lib/api/schemas';
 import { Card } from '@/components/ui/card';
 
-type VideoState = 'connecting' | 'live' | 'waiting' | 'error';
+type VideoState = 'connecting' | 'live' | 'waiting' | 'reconnecting' | 'expired' | 'error';
 
 /**
  * Viewer SOLO-RECEPCIÓN de la cabina en vivo vía LiveKit self-hosted (muro del admin). Usa exclusivamente
@@ -28,6 +28,16 @@ export function LiveCabinViewer({
   useEffect(() => {
     const room = new Room({ adaptiveStream: true, dynacast: false });
     let disposed = false;
+    // El token es solo-suscripción y VENCE (grant.expiresInSeconds). Al vencer, LiveKit desconecta y antes esto
+    // caía en 'waiting' ("esperando al conductor") — mentira: el ACCESO expiró. Marcamos el vencimiento explícito
+    // para mostrar el estado honesto y ofrecer re-solicitar (nueva doble-auth), no un mensaje engañoso.
+    let expired = false;
+    const expiryMs = Math.max(0, grant.expiresInSeconds * 1000);
+    const expiryTimer = setTimeout(() => {
+      expired = true;
+      if (!disposed) setState('expired');
+      void room.disconnect();
+    }, expiryMs);
 
     const attach = (track: RemoteTrack) => {
       if (track.kind === Track.Kind.Video && videoRef.current) {
@@ -36,27 +46,39 @@ export function LiveCabinViewer({
       }
     };
 
+    const hasLiveVideo = () => {
+      let has = false;
+      room.remoteParticipants.forEach((p) =>
+        p.trackPublications.forEach((pub) => {
+          if (pub.track && pub.kind === Track.Kind.Video) {
+            attach(pub.track);
+            has = true;
+          }
+        }),
+      );
+      return has;
+    };
+
     room
       .on(RoomEvent.TrackSubscribed, attach)
       .on(RoomEvent.TrackUnsubscribed, (track) => track.detach())
+      // Corte transitorio de red: LiveKit reintenta solo → estado propio (no colapsar a 'waiting').
+      .on(RoomEvent.Reconnecting, () => {
+        if (!disposed && !expired) setState('reconnecting');
+      })
+      .on(RoomEvent.Reconnected, () => {
+        if (!disposed && !expired) setState(hasLiveVideo() ? 'live' : 'waiting');
+      })
       .on(RoomEvent.Disconnected, () => {
-        if (!disposed) setState('waiting');
+        // Desconexión terminal: si ya venció el token es 'expired' (honesto); si no, el conductor dejó de publicar.
+        if (!disposed) setState(expired ? 'expired' : 'waiting');
       });
 
     void (async () => {
       try {
         await room.connect(grant.url, grant.token);
         if (disposed) return;
-        let hasVideo = false;
-        room.remoteParticipants.forEach((participant) => {
-          participant.trackPublications.forEach((pub) => {
-            if (pub.track && pub.kind === Track.Kind.Video) {
-              attach(pub.track);
-              hasVideo = true;
-            }
-          });
-        });
-        if (!hasVideo) setState('waiting');
+        if (!hasLiveVideo()) setState('waiting');
       } catch {
         if (!disposed) setState('error');
       }
@@ -64,9 +86,10 @@ export function LiveCabinViewer({
 
     return () => {
       disposed = true;
+      clearTimeout(expiryTimer);
       void room.disconnect();
     };
-  }, [grant.url, grant.token]);
+  }, [grant.url, grant.token, grant.expiresInSeconds]);
 
   return (
     <Card className="overflow-hidden">
@@ -102,8 +125,28 @@ export function LiveCabinViewer({
           <div className="absolute inset-0 grid place-items-center p-6 text-center">
             <div className="max-w-xs text-sm text-ink-muted">
               {state === 'connecting' ? <p>Conectando con la cámara…</p> : null}
+              {state === 'reconnecting' ? (
+                <p className="flex flex-col items-center gap-2">
+                  <Loader2 className="size-6 animate-spin text-ink-subtle" aria-hidden />
+                  Reconectando con la cámara…
+                </p>
+              ) : null}
               {state === 'waiting' ? (
                 <p>La cámara aparecerá cuando el conductor publique.</p>
+              ) : null}
+              {state === 'expired' ? (
+                <span className="flex flex-col items-center gap-2">
+                  <Clock className="size-6 text-warn" aria-hidden />
+                  <span className="text-ink">La sesión de video expiró.</span>
+                  <span className="text-xs">Cerrá y volvé a solicitar acceso (nueva doble-auth).</span>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="mt-1 rounded-control border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink transition-colors hover:bg-surface-2"
+                  >
+                    Cerrar
+                  </button>
+                </span>
               ) : null}
               {state === 'error' ? (
                 <p className="flex flex-col items-center gap-2">

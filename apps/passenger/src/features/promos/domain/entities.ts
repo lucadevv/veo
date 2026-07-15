@@ -1,9 +1,11 @@
 // Entidades de dominio de Promociones/Cupones (Ola 2A). Contrato soberano en `@veo/api-client`.
+import {normalizeCode} from '../../../shared/utils/normalizeCode';
+
 export type {PromoKind, PromoValidationView} from '@veo/api-client';
 
 /** Normaliza un código de cupón para enviarlo/compararlo: sin espacios y en MAYÚSCULAS. */
 export function normalizePromoCode(raw: string): string {
-  return raw.trim().toUpperCase().replace(/\s+/g, '');
+  return normalizeCode(raw);
 }
 
 /**

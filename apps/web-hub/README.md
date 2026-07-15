@@ -4,9 +4,9 @@ Landing del **ecosistema VEO**: una sola página que presenta las 4 experiencias
 (Pasajero, Conductor, Familia, Admin) y enlaza a cada una. Es la cara pública del
 proyecto — implementa el diseño `VEO - Inicio.html` del handoff de Claude Design.
 
-> Tema **"Midnight Motion"** (lima `#C8F230` sobre negro `#0E1014`), igual que la app
-> Pasajero. No usa el preset OKLCH navy/cian de `admin-web`/`family-web`: esos tokens
-> son para las consolas internas, no para esta landing de marca.
+> Marca VEO = azul `#2D7FF9` sobre lienzo oscuro `#0E1014` (token `--lime`, nombre heredado
+> del tema viejo "Midnight Motion"; el valor ya es el azul de marca). Comparte el azul de marca
+> con `admin-web`/`family-web`, que derivan el mismo `#2D7FF9` a OKLCH en `@veo/shared-config`.
 
 ## Stack
 

@@ -80,6 +80,8 @@ export class PrismaOfferingCatalogRepository implements OfferingCatalogRepositor
  * escribir y `resolveCatalog` ignora ids que no estén en el catálogo de código (cinturón y tirantes).
  * B2: los campos opcionales (mode/multiplier/minFareCents) se estrechan uno a uno; un valor inválido se
  * OMITE (no rompe la fila) — el override queda como si no lo trajera, y `resolveCatalog` cae al de código.
+ * ADR 023 §3: ídem para los params por-servicio (baseFareCents/perKmCents/perMinCents). Ojo: `0` es un valor
+ * VÁLIDO de perKmCents/perMinCents (Mecánico/Grúa) — el guard es `>= 0`, no truthy, para no perder el `0`.
  */
 function parseOverrides(raw: Prisma.JsonValue): OfferingOverride[] {
   if (!Array.isArray(raw)) return [];
@@ -87,7 +89,8 @@ function parseOverrides(raw: Prisma.JsonValue): OfferingOverride[] {
   for (const item of raw) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
     const rec = item as Record<string, unknown>;
-    const { id, enabled, mode, multiplier, minFareCents } = rec;
+    const { id, enabled, mode, multiplier, minFareCents, baseFareCents, perKmCents, perMinCents } =
+      rec;
     if (typeof id === 'string' && typeof enabled === 'boolean') {
       const ov: OfferingOverride = { id: id as OfferingOverride['id'], enabled };
       if (mode === PricingMode.PUJA || mode === PricingMode.FIXED) ov.mode = mode;
@@ -96,6 +99,15 @@ function parseOverrides(raw: Prisma.JsonValue): OfferingOverride[] {
       }
       if (typeof minFareCents === 'number' && Number.isInteger(minFareCents) && minFareCents >= 0) {
         ov.minFareCents = minFareCents;
+      }
+      if (typeof baseFareCents === 'number' && Number.isInteger(baseFareCents) && baseFareCents >= 0) {
+        ov.baseFareCents = baseFareCents;
+      }
+      if (typeof perKmCents === 'number' && Number.isInteger(perKmCents) && perKmCents >= 0) {
+        ov.perKmCents = perKmCents;
+      }
+      if (typeof perMinCents === 'number' && Number.isInteger(perMinCents) && perMinCents >= 0) {
+        ov.perMinCents = perMinCents;
       }
       out.push(ov);
     }

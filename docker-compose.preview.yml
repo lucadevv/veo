@@ -84,6 +84,14 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # ESCALA (Lote 3 · firehose GPS): particiones por defecto de los topics AUTO-creados (num.partitions).
+      # El topic `driver-location` (key=driverId) se reparte en 12 particiones → el consumer de dispatch las
+      # procesa en paralelo (KAFKA_CONSUMER_CONCURRENCY / partitionsConsumedConcurrently). 12 = múltiplo
+      # alto-divisible (2,3,4,6,12): permite escalar instancias de dispatch sin re-particionar. Un mismo driver
+      # cae SIEMPRE en la misma partición (keyed) → la serialización per-driver del hot-index se preserva.
+      # OJO: aplica a TODOS los topics auto-creados; subir particiones de un topic YA existente RE-HASHEA las
+      # keys (reorder transitorio) — el firehose es idempotente/self-heal, lo tolera (ver STATUS/ADR).
+      KAFKA_NUM_PARTITIONS: 12
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -117,6 +125,10 @@ services:
     environment:
       MINIO_ROOT_USER: veo_dev
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defini MINIO_ROOT_PASSWORD en /opt/veo/.env}
+      # Cifrado at-rest SOBERANO (Ley 29733 · FOUNDATION §0.7c): clave maestra propia self-hosted para
+      # SSE-S3 (envelope). NO es KMS managed — es el KMS interno de MinIO con NUESTRA clave, provista por
+      # SOPS+age en el host. Fail-fast: prod NO arranca sin ella. Formato `nombre:base64(32 bytes)`.
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY:?defini MINIO_KMS_SECRET_KEY en /opt/veo/.env (SOPS+age) — formato nombre:base64-de-32-bytes}
     volumes:
       - minio-data:/data
     healthcheck:
@@ -189,6 +201,16 @@ services:
     <<: *svc-defaults
     image: ghcr.io/lucadevv/veo/payment-service:latest
     env_file: services/payment-service/env/preview.env
+    depends_on: [postgres, redis, kafka]
+    mem_limit: 256m
+
+  # --- booking-service · HTTP 3016 / gRPC 50054 (carpooling marketplace · ADR-014) ---
+  # OJO: su env/preview.env (en el VPS) DEBE setear VEO_MAPS_MODE=osrm + OSRM_BASE_URL: el
+  # superRefine del schema exige routing soberano en prod (NODE_ENV=production), si no NO arranca.
+  booking-service:
+    <<: *svc-defaults
+    image: ghcr.io/lucadevv/veo/booking-service:latest
+    env_file: services/booking-service/env/preview.env
     depends_on: [postgres, redis, kafka]
     mem_limit: 256m
 

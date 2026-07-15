@@ -4,6 +4,25 @@
 > Hace que agregar una oferta de servicio nueva (mototaxi, mecánico, ambulancia, confort, lo-que-venga)
 > o un modo de precio nuevo sea **AGREGAR una entrada/clase**, no editar N archivos testeados.
 > Refina (no reemplaza) ADR 010 (puja) y ADR 011 (switch PUJA↔FIJO por horario).
+>
+> ⚠️ **EXTENDIDO por [ADR-017](./017-modelo-pricing-energia-tiers.md) (2026-06-26):** el modelo de energía
+> (un precio por tipo, sin octanaje, class-reference), el **tier PREMIUM** (que este catálogo aún NO tiene) +
+> verificación por foto, la separación calidad(segmento)/capacidad(XL), la **tarifa base y comisión
+> configurables por país**, el **costo/km unificado** y el **orden de configuración del admin** se definen en
+> ADR-017. Donde este ADR y el 017 difieran (p.ej. el set de ofertas sin Premium, energía por octanaje), MANDA
+> el 017.
+>
+> 📛 **Naming (mapping canónico de 3 capas — para no reintroducir la colisión de "Catálogo"):**
+> · **código/servicio** = `ServiceOffering` / `OfferingId` (el término técnico, inmutable, este ADR)
+> · **UI admin** = **"Ofertas de servicio"** (ruta `/finance/catalog`) — antes rotulada "Catálogo de ofertas"
+> · **Flota** = **"Modelos"** (`VehicleModelSpec`) — es OTRO catálogo, no confundir.
+> El label de producto es **"Ofertas de servicio"**; "Catálogo" queda solo como término técnico interno. Fuente única: `specs/VEO_MODELO_HIBRIDO.md §1.5` + `specs/VEO_SPEC_ADMIN.md §3.0`. (Divergencia specs↔docs #3, reconciliada 2026-07-02.)
+>
+> 🔵 **ALINEADO por [ADR-023](./023-modelo-pricing-coexistencia.md) (2026-07-07):** el `allowedModes` (+ la
+> intersección `allowedModes ∩ schedule` de §1.3) se REEMPLAZA por **un solo `mode` por oferta** (`FIXED`|`PUJA`|
+> `COST_SHARE`), asignado a mano por el admin (sin schedule). `OfferingPricingPolicy` gana overrides opcionales
+> `{baseFareCents?, perKmCents?, perMinCents?}` (params por servicio: Mecánico perKm=0 **Y** perMin=0 = call-out
+> plano; Grúa perMin=0). Los especiales (ambulancia/grúa/mecánico) son ofertas FIXED con sus params. Ver 023 §3.
 
 ---
 
@@ -152,7 +171,16 @@ export interface OfferingSpec {
   /** Orden de presentación en el quote (hoy: orden del array RIDE_CATEGORIES). */
   sortOrder: number;
 }
+```
 
+> **🔗 EXTENSIÓN POSTERIOR (era ADR-017 · trazabilidad):** este `OfferingSpec` se **extendió** después con el campo
+> **`requires`** (elegibilidad del vehículo por atributos: `minSeats` / `minSegment` / `maxAgeYears` / certificaciones) —
+> la base de la **"elegibilidad de oferta / tier"** (`vehicleMeetsRequirements`, `offerings.ts`). El snapshot de arriba es
+> el de ADR-013 (2026-06-11) y NO lo incluye: el `requires` nace con el tier de calidad de **ADR-017 §1.2**. Cierra el
+> hueco de trazabilidad "¿de dónde salió `requires`?". Vocabulario canónico y la distinción **operabilidad vs
+> elegibilidad de oferta**: [`VEO_MODELO_HIBRIDO §1.5`](../../specs/VEO_MODELO_HIBRIDO.md).
+
+```ts
 export const OFFERINGS = {
   [OfferingId.VEO_MOTO]: {
     id: OfferingId.VEO_MOTO,

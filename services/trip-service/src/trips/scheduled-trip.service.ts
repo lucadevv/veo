@@ -10,7 +10,7 @@ import { NotFoundError, ConflictError, type LatLon } from '@veo/utils';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { TripStatus } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { ScheduledTripRepository } from './scheduled-trip.repository';
 import { CatalogService } from '../catalog/catalog.service';
 import { toTripView } from './trip-view.mapper';
 import { PRODUCER, recordTripEvent } from './trip-events';
@@ -32,7 +32,7 @@ export class ScheduledTripService {
   private readonly catalog?: CatalogService;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: ScheduledTripRepository,
     @Optional() config?: ConfigService<Env, true>,
     @Optional() dispatchModes?: DispatchModeRegistry,
     @Optional() catalog?: CatalogService,
@@ -47,7 +47,7 @@ export class ScheduledTripService {
    * Idempotente: si el viaje ya no está SCHEDULED (otro tick lo activó, o fue cancelado), no hace nada.
    */
   async activateScheduledTrip(id: string): Promise<void> {
-    const trip = await this.prisma.read.trip.findUnique({ where: { id } });
+    const trip = await this.repo.findByIdRead(id);
     if (!trip) return;
     if (trip.status !== TripStatus.SCHEDULED) return; // ya activado/cancelado: idempotente
 
@@ -79,11 +79,12 @@ export class ScheduledTripService {
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
     const destination: LatLon = { lat: trip.destLat, lon: trip.destLon };
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       // Guard de carrera: solo activa si SIGUE SCHEDULED (no two-tick double dispatch).
-      const updated = await tx.trip.updateMany({
-        where: { id, status: TripStatus.SCHEDULED },
-        data: { status: TripStatus.REQUESTED, activatedAt: new Date(), requestedAt: new Date() },
+      const updated = await this.repo.casGuardedScheduledUpdate(tx, id, {
+        status: TripStatus.REQUESTED,
+        activatedAt: new Date(),
+        requestedAt: new Date(),
       });
       if (updated.count === 0) return; // otro tick ganó la carrera
       const activated: Trip = { ...trip, status: TripStatus.REQUESTED };
@@ -127,10 +128,9 @@ export class ScheduledTripService {
   private async expireForDisabledOffering(trip: Trip, offeringId: string): Promise<void> {
     assertTransition(trip.status, TripStatus.EXPIRED);
     const at = new Date();
-    await this.prisma.write.$transaction(async (tx) => {
-      const result = await tx.trip.updateMany({
-        where: { id: trip.id, status: TripStatus.SCHEDULED },
-        data: { status: TripStatus.EXPIRED },
+    await this.repo.runInTransaction(async (tx) => {
+      const result = await this.repo.casGuardedScheduledUpdate(tx, trip.id, {
+        status: TripStatus.EXPIRED,
       });
       if (result.count === 0) return; // otro tick ganó la carrera → no-op
       const payload = {
@@ -175,16 +175,13 @@ export class ScheduledTripService {
     }
     assertTransition(trip.status, TripStatus.CANCELLED_BY_PASSENGER);
     const now = new Date();
-    const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
-        where: { id },
-        data: {
-          status: TripStatus.CANCELLED_BY_PASSENGER,
-          cancelledAt: now,
-          cancelledBy: 'PASSENGER',
-          cancellationReason: 'scheduled_cancelled',
-          penaltyCents: 0, // sin penalidad por cancelar una reserva con antelación
-        },
+    const updated = await this.repo.runInTransaction(async (tx) => {
+      const next = await this.repo.updateByIdTx(tx, id, {
+        status: TripStatus.CANCELLED_BY_PASSENGER,
+        cancelledAt: now,
+        cancelledBy: 'PASSENGER',
+        cancellationReason: 'scheduled_cancelled',
+        penaltyCents: 0, // sin penalidad por cancelar una reserva con antelación
       });
       await recordTripEvent(tx, id, 'trip.cancelled', {
         by: 'PASSENGER',
@@ -216,17 +213,11 @@ export class ScheduledTripService {
    * delega aquí para que el scheduler quede fino. `dueBefore` = now + leadMs.
    */
   async findDueScheduled(dueBefore: Date, limit: number): Promise<string[]> {
-    const rows = await this.prisma.read.trip.findMany({
-      where: { status: TripStatus.SCHEDULED, scheduledFor: { lte: dueBefore } },
-      orderBy: { scheduledFor: 'asc' },
-      take: limit,
-      select: { id: true },
-    });
-    return rows.map((r) => r.id);
+    return this.repo.findDueScheduledIds(dueBefore, limit);
   }
 
   private async mustFind(id: string): Promise<Trip> {
-    const trip = await this.prisma.write.trip.findUnique({ where: { id } });
+    const trip = await this.repo.findByIdOnPrimary(id);
     if (!trip) throw new NotFoundError('Viaje no encontrado', { id });
     return trip;
   }

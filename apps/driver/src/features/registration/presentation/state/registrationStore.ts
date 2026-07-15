@@ -1,18 +1,159 @@
 import { create } from 'zustand';
+import type {
+  ExtractedDniData,
+  ExtractedDocumentData,
+  ExtractedPropertyCardData,
+} from '@veo/api-client';
+import type { DocumentSendPhase, PickedImage } from '../../../documents/domain';
 import { prefsStore } from '../../../../core/storage/mmkv';
-import {
+import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
+import { RegistrationStep } from '../../domain';
+import type {
+  FaceCapture,
+  PersonalData,
+  RegistrationDocument,
+  RegistrationDocumentType,
+  RegistrationDraft,
+  RegistrationStatus,
+  VehicleData,
   VehicleType,
-  type FaceCapture,
-  type PersonalData,
-  type RegistrationDocument,
-  type RegistrationDocumentType,
-  type RegistrationDraft,
-  type RegistrationStatus,
-  type VehicleData,
 } from '../../domain';
 
-/** Total de pasos del wizard (Datos · Vehículo · Documentos · KYC). */
-export const REGISTRATION_TOTAL_STEPS = 4;
+/**
+ * Caras del DNI escaneadas en el paso 1 (anverso siempre; reverso si se capturó), a la ESPERA de subir
+ * DESPUÉS de que el `PATCH /drivers/me/personal` cree el perfil del conductor. Hasta entonces el presign
+ * del DNI devuelve 404 (no existe driver), así que la subida NO puede ocurrir en el momento del scan.
+ *
+ * VIVE SOLO EN MEMORIA (NO se persiste en MMKV): son base64 con PII del DNI (Ley 29733) y su único
+ * propósito es el handoff scan→continue dentro de la misma sesión del wizard. Se limpia tras subir.
+ */
+export interface PendingDniCapture {
+  /** Anverso del DNI listo para subir (siempre presente cuando hay captura). */
+  front: PickedImage;
+  /** Reverso si el escáner capturó la 2ª página; `null` si solo vino el anverso. */
+  back: PickedImage | null;
+  /**
+   * Lote 1: data extraída por OCR del DNI (`ExtractedDniData`), ya mapeada del parser al contrato. Se
+   * captura JUNTO a las caras en el momento del scan y se envía al registrar el DNI tras el PATCH. `null`
+   * si el escaneo no extrajo ningún campo con confianza (degradación honesta: se sube sin `extractedData`).
+   */
+  extractedData: ExtractedDniData | null;
+}
+
+/**
+ * Tarjeta de propiedad escaneada en el paso 2 (Vehículo · Lote 2 · scan-first), a la ESPERA de subir
+ * DESPUÉS de que `POST /drivers/vehicles` cree el vehículo. Mismo patrón que `PendingDniCapture`: el
+ * documento NO se sube en el momento del escaneo (se sube DIFERIDO tras crear el vehículo, reusando el
+ * mismo uploader y tratando un 409 como éxito). Es la fuente de verdad de "se capturó una tarjeta"
+ * INDEPENDIENTE del OCR: la imagen viaja aunque el texto no se lea.
+ *
+ * VIVE SOLO EN MEMORIA (NO se persiste en MMKV): es base64 de un documento (peso + dato del vehículo) y
+ * su único propósito es el handoff scan→continue dentro de la misma sesión del wizard. Se limpia tras subir.
+ */
+export interface PendingPropertyCardCapture {
+  /** Imagen de la tarjeta de propiedad lista para subir (siempre presente cuando hay captura). */
+  front: PickedImage;
+  /**
+   * Lote 2: data extraída por OCR de la tarjeta (`ExtractedPropertyCardData`), ya mapeada del parser al
+   * contrato. Se captura JUNTO a la imagen en el momento del scan y se envía al registrar el documento
+   * tras crear el vehículo. `null` si el OCR no extrajo ningún campo (se sube sin `extractedData`).
+   */
+  extractedData: ExtractedPropertyCardData | null;
+}
+
+/**
+ * Licencia de conducir escaneada en el paso 1 (CONDUCTOR · LOTE B), a la ESPERA de subir DESPUÉS de que el
+ * `PATCH /drivers/me/personal` cree el perfil del conductor. MISMO patrón que `PendingDniCapture`: para un
+ * conductor NUEVO el presign de la licencia devuelve 404 (no existe driver) si se intenta subir en el
+ * momento del escaneo, así que la subida + el `POST /drivers/onboard` se DIFIEREN al "Continuar" (tras el
+ * PATCH). Es la fuente de verdad de "se capturó una licencia" INDEPENDIENTE del OCR: la imagen viaja aunque
+ * el texto no se lea, pero el `documentNumber` y el `expiresAt` son CRÍTICOS (el sheet solo entrega la
+ * captura cuando el OCR los leyó), por eso van como string no nulo.
+ *
+ * VIVE SOLO EN MEMORIA (NO se persiste en MMKV): base64 de un documento con PII (Ley 29733); su único
+ * propósito es el handoff scan→continue dentro de la misma sesión del wizard. Se limpia tras subir.
+ */
+export interface PendingLicenseCapture {
+  /** Anverso de la licencia listo para subir (siempre presente cuando hay captura; lleva el OCR crítico). */
+  file: PickedImage;
+  /**
+   * Reverso de la licencia si el escáner capturó la 2ª página; `null` si solo vino el anverso. Reverso SOFT:
+   * con reverso se sube el par FRONT+BACK; sin reverso se sube una sola cara SINGLE (degradación honesta).
+   */
+  back: PickedImage | null;
+  /** Número de licencia leído por OCR (crítico: el sheet solo captura cuando lo leyó). Alimenta el onboarding. */
+  documentNumber: string;
+  /** Vencimiento de la licencia en ISO-8601 (crítico: idem). Alimenta el onboarding (`licenseExpiresAt`). */
+  expiresAt: string;
+  /**
+   * Data extraída por OCR de la licencia (variante `LICENSE_A1` de `ExtractedDocumentData`), ya mapeada del
+   * parser al contrato. Se captura JUNTO a la imagen y viaja al registrar el documento tras el PATCH. `null`
+   * si el escaneo no produjo data OCR (se sube sin `extractedData`, igual que el DNI/tarjeta).
+   */
+  extractedData: ExtractedDocumentData | null;
+}
+
+/**
+ * Fase de ENVÍO de UNA CARA de un documento del paso 1 (DNI/licencia) — la señal que pintan el sheet y la
+ * card ("Subiendo… / Enviado ✓ / Error · Reintentar"). Union TIPADA, sin strings mágicos en comparaciones
+ * sueltas: el mapa de chips es exhaustivo por switch. VIVE SOLO EN MEMORIA (es el estado de la subida de
+ * ESTA sesión; el estado durable es el del servidor vía `GET /drivers/me/documents`).
+ *
+ * RE-EXPORT del tipo canónico del DOMINIO de documentos (`DocumentUploader`): el puerto de subida reporta
+ * la fase POR CARA vía su callback, así que el tipo vive ahí (sin dependencia domain→presentation) y el
+ * store lo re-exporta para que el resto de la app lo siga importando desde acá (compat).
+ */
+export type { DocumentSendPhase } from '../../../documents/domain';
+
+/**
+ * Fases de envío de las DOS caras de un documento (anverso/reverso). Un documento de UNA sola cara deja el
+ * reverso en `idle` (no aplica) — `deriveDocumentPhase` lo trata como "no cuenta", así que un doc de 1 cara
+ * puede llegar a `sent` con `front='sent'` y `back='idle'`.
+ */
+export interface DocumentFacePhases {
+  front: DocumentSendPhase;
+  back: DocumentSendPhase;
+}
+
+/** Documentos del paso 1 cuyo envío se trackea con fase visible POR CARA. */
+export interface Step1SendPhases {
+  dni: DocumentFacePhases;
+  license: DocumentFacePhases;
+}
+
+/** Fase POR CARA inicial (ambas `idle`): documento aún sin empezar a subir. */
+const idleFacePhases = (): DocumentFacePhases => ({ front: 'idle', back: 'idle' });
+
+/**
+ * DERIVA la fase de un DOCUMENTO a partir de las fases de sus caras (helper PURO, testeable fuera del
+ * store). Regla (exhaustiva, sin strings mágicos sueltos):
+ *  1. `error` si ALGUNA cara está en `error` (una cara rota ⇒ el documento falló).
+ *  2. si no, `sending` si ALGUNA cara está en `sending` (aún subiendo).
+ *  3. si no, `sent` si TODAS las caras NO-`idle` están en `sent` Y hay AL MENOS UNA `sent`. Así un doc de
+ *     UNA sola cara (front=`sent`, back=`idle`) llega a `sent` (el `idle` "no aplica"), y uno de dos caras
+ *     necesita AMBAS en `sent`.
+ *  4. si no, `idle` (nada empezó, o todas las caras siguen `idle`).
+ */
+export function deriveDocumentPhase(faces: DocumentFacePhases): DocumentSendPhase {
+  const values: DocumentSendPhase[] = [faces.front, faces.back];
+  if (values.some((phase) => phase === 'error')) {
+    return 'error';
+  }
+  if (values.some((phase) => phase === 'sending')) {
+    return 'sending';
+  }
+  const nonIdle = values.filter((phase) => phase !== 'idle');
+  if (nonIdle.length > 0 && nonIdle.every((phase) => phase === 'sent')) {
+    return 'sent';
+  }
+  return 'idle';
+}
+
+/**
+ * Total de pasos del wizard (LOTE B: Conductor · Vehículo · KYC). DERIVADO de `ORDERED_STEPS` (la fuente
+ * única tipada de la pila) — NUNCA un número mágico: si se agrega/quita un paso, este total lo sigue solo.
+ */
+export const REGISTRATION_TOTAL_STEPS = ORDERED_STEPS.length;
 
 /**
  * Clave de preferencias para persistir el progreso del alta.
@@ -20,6 +161,21 @@ export const REGISTRATION_TOTAL_STEPS = 4;
  * del wizard se persiste localmente para no perderlo entre sesiones.
  */
 const REGISTRATION_PREF_KEY = 'pref.registration.v1';
+
+/**
+ * Versión del esquema del wizard persistido. LOTE B (reagrupación 4→3 pasos) introdujo la `v2`: hasta
+ * `v1` el wizard tenía 4 pasos (1=Datos · 2=Vehículo · 3=Documentos · 4=KYC); en `v2` son 3 (1=Conductor ·
+ * 2=Vehículo · 3=KYC). Un snapshot SIN `schemaVersion` (o `< 2`) se MIGRA al rehidratar (ver
+ * `migratePersisted`): el `currentStep` legacy se remapea al paso nuevo correcto, no se confía a ciegas.
+ */
+const REGISTRATION_SCHEMA_VERSION = 2;
+
+/** Total de pasos del layout legacy (`v1`): 1=Datos · 2=Vehículo · 3=Documentos · 4=KYC. */
+const LEGACY_TOTAL_STEPS_V1 = 4;
+/** Paso legacy "Documentos" (`v1`, paso 3): desapareció en `v2` — se remapea a Vehículo (donde vive el SOAT). */
+const LEGACY_DOCUMENTS_STEP_V1 = 3;
+/** Paso legacy "KYC" (`v1`, paso 4): en `v2` la biometría es el paso 3. */
+const LEGACY_KYC_STEP_V1 = 4;
 
 /** Forma del snapshot persistido en MMKV. */
 interface PersistedRegistration {
@@ -31,21 +187,33 @@ interface PersistedRegistration {
   faceCapture: FaceCapture | null;
   /** Si el `status` ya fue confirmado por el backend al menos una vez (evita parpadeos al arrancar). */
   statusResolvedFromBackend: boolean;
+  /**
+   * Versión del esquema (LOTE B). Ausente en snapshots `v1` (pre-reagrupación): `loadPersisted` los detecta
+   * por la ausencia y los migra. Siempre `REGISTRATION_SCHEMA_VERSION` en los snapshots que escribimos hoy.
+   */
+  schemaVersion?: number;
 }
 
 const emptyPersonal: PersonalData = { fullName: '', dni: '', birthdate: '' };
 const emptyVehicle: VehicleData = {
-  type: VehicleType.MOTO,
+  // LOTE 1: SIN seed "Auto". El tipo arranca en `null` y se DERIVA de la categoría MTC de la tarjeta (fuente
+  // de verdad) o se elige a mano en el fallback. El alta NO asume tipo: nunca se registra "Auto" en silencio.
+  type: null,
   plate: '',
   year: '',
   modelSpecId: '',
   brand: '',
   model: '',
+  mtcCategory: '',
+  color: '',
 };
 const initialDocuments: RegistrationDocument[] = [
   { type: 'LICENSE', status: 'pending' },
   { type: 'SOAT', status: 'pending' },
   { type: 'VEHICLE_REGISTRATION', status: 'pending' },
+  // Foto del vehículo (Ola 1): se captura en el paso 2 (Vehículo) pero se trackea como documento
+  // (reusa el pipeline de subida y aparece en el visor del admin). Requerida para aprobar.
+  { type: 'VEHICLE_PHOTO', status: 'pending' },
 ];
 
 export interface RegistrationState {
@@ -59,19 +227,78 @@ export interface RegistrationState {
    * default local (sin confirmar) del estado real del servidor y evitar parpadeos al arrancar.
    */
   statusResolvedFromBackend: boolean;
-  /** Paso actual del wizard (1..4). */
+  /** Paso actual del wizard (1..3). */
   currentStep: number;
   personal: PersonalData;
   vehicle: VehicleData;
   documents: RegistrationDocument[];
   faceCapture: FaceCapture | null;
+  /**
+   * DNI escaneado en el paso 1, a la espera de subir tras el `PATCH /drivers/me/personal` (que crea el
+   * driver). `null` si el conductor no escaneó (tipeó a mano) o si el DNI ya se subió. NO se persiste.
+   */
+  pendingDni: PendingDniCapture | null;
+  /**
+   * Tarjeta de propiedad escaneada en el paso 2 (Vehículo), a la espera de subir tras `POST
+   * /drivers/vehicles` (que crea el vehículo). `null` si el conductor no escaneó (carga manual) o si ya
+   * se subió. NO se persiste (base64 de un documento; handoff scan→continue efímero).
+   */
+  pendingPropertyCard: PendingPropertyCardCapture | null;
+  /**
+   * Licencia escaneada en el paso 1 (CONDUCTOR), a la espera de subir tras el `PATCH /drivers/me/personal`
+   * (que crea el driver). `null` si el conductor no la escaneó aún o si ya se subió. NO se persiste (base64
+   * de un documento con PII; handoff scan→continue efímero, mismo criterio que `pendingDni`).
+   */
+  pendingLicense: PendingLicenseCapture | null;
+  /**
+   * U4: marca de que el conductor RECHAZADO entró al wizard a CORREGIR algo en ESTA sesión (tocó
+   * "Corregir mis datos" en la pantalla de rechazo). Gobierna "Reenviar a revisión": el reenvío
+   * (REJECTED → PENDING) SOLO se habilita tras una corrección detectable, para no re-mandar a la cola
+   * lo MISMO que ya fue rechazado (loop de reenvío). VIVE SOLO EN MEMORIA: es una señal de sesión, no
+   * un estado del alta — un reinicio de la app vuelve a exigir corregir antes de reenviar (degradación
+   * honesta y conservadora).
+   *
+   * DEUDA: señal server-truth de "hubo corrección" (un doc rechazado que pasó de REJECTED a otro
+   * estado, o un timestamp de última edición del perfil) en vez de un flag de sesión local.
+   */
+  hasCorrectedAfterRejection: boolean;
+  /**
+   * Fase de envío VISIBLE de los documentos del paso 1 (pen: "Subiendo… / Enviado / Error·Reintentar").
+   * La escribe `usePersonalDataContinue` alrededor de cada subida; la leen el sheet y las cards. SOLO en
+   * memoria: al reabrir la app, la verdad del envío es el servidor (chips `serverState`), no esta fase.
+   */
+  sendPhases: Step1SendPhases;
 
+  /** Fija la fase de envío de UNA CARA de un documento del paso 1 (dni/license · front/back). Solo en memoria. */
+  setSendPhase(
+    document: keyof Step1SendPhases,
+    face: keyof DocumentFacePhases,
+    phase: DocumentSendPhase,
+  ): void;
   setPersonal(data: Partial<PersonalData>): void;
-  setVehicleType(type: VehicleType): void;
+  /** Fija el tipo del vehículo (derivado de la tarjeta o elegido a mano). `null` lo deja sin definir. */
+  setVehicleType(type: VehicleType | null): void;
   setVehicle(data: Partial<VehicleData>): void;
   setDocumentStatus(type: RegistrationDocumentType, status: RegistrationDocument['status']): void;
   setFaceCapture(capture: FaceCapture): void;
+  /** Guarda las caras del DNI escaneado para subirlas tras el PATCH /personal (idempotente: reemplaza). */
+  setPendingDni(capture: PendingDniCapture): void;
+  /** Descarta el DNI pendiente (tras subirlo con éxito, o al reiniciar el escaneo). */
+  clearPendingDni(): void;
+  /** Guarda la tarjeta de propiedad escaneada para subirla tras crear el vehículo (idempotente: reemplaza). */
+  setPendingPropertyCard(capture: PendingPropertyCardCapture): void;
+  /** Descarta la tarjeta de propiedad pendiente (tras subirla con éxito, o al reiniciar el escaneo). */
+  clearPendingPropertyCard(): void;
+  /** Guarda la licencia escaneada para subirla tras el PATCH /personal (idempotente: reemplaza). */
+  setPendingLicense(capture: PendingLicenseCapture): void;
+  /** Descarta la licencia pendiente (tras subirla con éxito, o al reiniciar el escaneo). */
+  clearPendingLicense(): void;
   setCurrentStep(step: number): void;
+  /**
+   * U4: marca que el conductor entró al wizard a corregir tras un rechazo (habilita "Reenviar a
+   * revisión"). Lo llama la pantalla de rechazo al tocar "Corregir mis datos".
+   */
+  markCorrectionStarted(): void;
   setStatus(status: RegistrationStatus): void;
   /**
    * Aplica el estado mapeado desde `GET /drivers/me`. Marca `statusResolvedFromBackend`. Para no
@@ -96,16 +323,54 @@ export interface RegistrationState {
   reset(): void;
 }
 
-/** Lee el snapshot persistido (si existe) para rehidratar el store al crearse. */
+/**
+ * Remapea el `currentStep` de un snapshot legacy (`v1`, 4 pasos) al layout `v2` (3 pasos) de LOTE B:
+ *  - paso 3 legacy (Documentos, que YA NO existe) → paso 2 (Vehículo): el conductor re-recorre el paso donde
+ *    ahora vive el SOAT, y el back desde ahí llega al paso 1 (Conductor) donde ahora vive la licencia. Nunca
+ *    salta a KYC con docs a medias.
+ *  - paso 4 legacy (KYC) → paso 3 (la biometría es el último paso en `v2`).
+ *  - pasos 1 y 2 quedan igual (Datos/Conductor y Vehículo no cambiaron de índice).
+ *  - cualquier otro valor fuera de rango → paso 1 (degradación segura, nunca un índice inválido).
+ */
+function migrateLegacyStep(step: number): number {
+  if (step === LEGACY_DOCUMENTS_STEP_V1) {
+    return RegistrationStep.VEHICLE;
+  }
+  if (step === LEGACY_KYC_STEP_V1) {
+    return RegistrationStep.IDENTITY_VERIFICATION;
+  }
+  if (step >= 1 && step <= LEGACY_TOTAL_STEPS_V1) {
+    return step;
+  }
+  return RegistrationStep.PERSONAL_DATA;
+}
+
+/**
+ * Lee el snapshot persistido (si existe) y, si es un esquema viejo (`v1`, sin `schemaVersion`), lo MIGRA al
+ * layout `v2` de LOTE B (4→3 pasos): el `currentStep` legacy se remapea con `migrateLegacyStep`. Así un
+ * conductor que cerró la app en el viejo paso "Documentos" (3) REANUDA en Vehículo (2) en vez de aterrizar
+ * en KYC con el SOAT/licencia sin capturar — degradación limpia, sin crash ni paso huérfano.
+ */
 function loadPersisted(): PersistedRegistration | null {
-  return prefsStore.getObject<PersistedRegistration>(REGISTRATION_PREF_KEY) ?? null;
+  const raw = prefsStore.getObject<PersistedRegistration>(REGISTRATION_PREF_KEY) ?? null;
+  if (!raw) {
+    return null;
+  }
+  if ((raw.schemaVersion ?? 1) >= REGISTRATION_SCHEMA_VERSION) {
+    return raw;
+  }
+  return {
+    ...raw,
+    currentStep: migrateLegacyStep(raw.currentStep),
+    schemaVersion: REGISTRATION_SCHEMA_VERSION,
+  };
 }
 
 const persisted = loadPersisted();
 
 /**
  * Store del wizard de registro (Zustand): única fuente de verdad del alta en la app. El estado del
- * wizard (datos de los 4 pasos + estado global) vive aquí; nunca en `setState` de componentes.
+ * wizard (datos de los 3 pasos + estado global) vive aquí; nunca en `setState` de componentes.
  * El snapshot se persiste en MMKV (preferencias) tras cada cambio para no perder el avance.
  */
 export const useRegistrationStore = create<RegistrationState>((set, get) => {
@@ -128,6 +393,9 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
       vehicle,
       documents,
       faceCapture,
+      // LOTE B: sella el snapshot con la versión actual del esquema (3 pasos) para que un futuro cambio de
+      // layout pueda detectar y migrar este snapshot igual que migramos los `v1` (4 pasos) al rehidratar.
+      schemaVersion: REGISTRATION_SCHEMA_VERSION,
     };
     prefsStore.setObject(REGISTRATION_PREF_KEY, snapshot);
   };
@@ -140,6 +408,27 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     vehicle: persisted?.vehicle ?? emptyVehicle,
     documents: persisted?.documents ?? initialDocuments,
     faceCapture: persisted?.faceCapture ?? null,
+    // En memoria: nunca se rehidrata desde MMKV (base64 con PII del DNI; handoff scan→continue efímero).
+    pendingDni: null,
+    // En memoria: igual que `pendingDni` (base64 de un documento; handoff scan→continue efímero del paso 2).
+    pendingPropertyCard: null,
+    // En memoria: igual que `pendingDni` (base64 con PII de la licencia; handoff scan→continue efímero del paso 1).
+    pendingLicense: null,
+    // U4: señal de sesión (NO se rehidrata de MMKV): arranca en false en cada arranque de la app, así
+    // un conductor rechazado debe tocar "Corregir mis datos" antes de poder reenviar a revisión.
+    hasCorrectedAfterRejection: false,
+    // En memoria: la fase de envío arranca idle (ambas caras); la verdad durable es el server (serverState).
+    sendPhases: { dni: idleFacePhases(), license: idleFacePhases() },
+
+    setSendPhase: (document, face, phase) => {
+      // Solo en memoria: NO persist() (fase efímera de la sesión de subida). Actualiza SOLO la cara dada.
+      set((state) => ({
+        sendPhases: {
+          ...state.sendPhases,
+          [document]: { ...state.sendPhases[document], [face]: phase },
+        },
+      }));
+    },
 
     setPersonal: (data) => {
       set((state) => ({ personal: { ...state.personal, ...data } }));
@@ -157,9 +446,16 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
     },
 
     setDocumentStatus: (type, status) => {
-      set((state) => ({
-        documents: state.documents.map((doc) => (doc.type === type ? { ...doc, status } : doc)),
-      }));
+      // UPSERT: actualiza la entrada si existe, o la agrega. Robusto ante snapshots persistidos viejos
+      // que no incluyen un tipo nuevo (p. ej. VEHICLE_PHOTO en un wizard a medias de una versión previa).
+      set((state) => {
+        const exists = state.documents.some((doc) => doc.type === type);
+        return {
+          documents: exists
+            ? state.documents.map((doc) => (doc.type === type ? { ...doc, status } : doc))
+            : [...state.documents, { type, status }],
+        };
+      });
       persist();
     },
 
@@ -168,12 +464,44 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
       persist();
     },
 
+    setPendingDni: (capture) => {
+      // Solo en memoria: NO se llama a persist() (las caras del DNI no van a MMKV por PII/peso base64).
+      set({ pendingDni: capture });
+    },
+
+    clearPendingDni: () => {
+      set({ pendingDni: null });
+    },
+
+    setPendingPropertyCard: (capture) => {
+      // Solo en memoria: NO se llama a persist() (base64 de un documento; no va a MMKV por peso).
+      set({ pendingPropertyCard: capture });
+    },
+
+    clearPendingPropertyCard: () => {
+      set({ pendingPropertyCard: null });
+    },
+
+    setPendingLicense: (capture) => {
+      // Solo en memoria: NO se llama a persist() (la imagen de la licencia no va a MMKV por PII/peso base64).
+      set({ pendingLicense: capture });
+    },
+
+    clearPendingLicense: () => {
+      set({ pendingLicense: null });
+    },
+
     setCurrentStep: (step) => {
       set({
         currentStep: Math.min(Math.max(step, 1), REGISTRATION_TOTAL_STEPS),
         status: 'in_progress',
       });
       persist();
+    },
+
+    markCorrectionStarted: () => {
+      // Solo en memoria (NO persiste): habilita "Reenviar a revisión" en esta sesión tras corregir.
+      set({ hasCorrectedAfterRejection: true });
     },
 
     setStatus: (status) => {
@@ -226,6 +554,11 @@ export const useRegistrationStore = create<RegistrationState>((set, get) => {
         vehicle: emptyVehicle,
         documents: initialDocuments,
         faceCapture: null,
+        pendingDni: null,
+        pendingPropertyCard: null,
+        pendingLicense: null,
+        hasCorrectedAfterRejection: false,
+        sendPhases: { dni: idleFacePhases(), license: idleFacePhases() },
       });
       prefsStore.remove(REGISTRATION_PREF_KEY);
     },

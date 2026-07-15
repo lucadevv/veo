@@ -7,6 +7,7 @@ function makeGateway(opts: {
   verify?: () => Promise<{ sub: string; typ: string; roles: never[]; sid: string }>;
   driverFound?: boolean;
   driverId?: string;
+  suspendedAt?: string;
   publish?: ReturnType<typeof vi.fn>;
 }) {
   const jwt = {
@@ -20,6 +21,8 @@ function makeGateway(opts: {
         id: opts.driverId ?? 'drv-9',
         userId: 'usr-1',
         found: opts.driverFound ?? true,
+        // "" = NO suspendido (proto3 default); ISO = suspendido. El gate del handshake usa Boolean(...).
+        suspendedAt: opts.suspendedAt ?? '',
       }),
     ),
   };
@@ -35,14 +38,20 @@ function makeGateway(opts: {
     ),
   };
   const config = { getOrThrow: () => '' };
+  // Denylist de revocación: por defecto NO revocado (assertNotRevoked resuelve). Su enforcement en el
+  // handshake corre en el middleware (afterInit), no en handleConnection; acá solo satisface el constructor.
+  const revocation = {
+    assertNotRevoked: vi.fn(() => Promise.resolve()),
+  };
   const gateway = new DriverGateway(
     jwt as never,
     grpc as never,
     publisher as never,
     activeVehicleType as never,
+    revocation as never,
     config as never,
   );
-  return { gateway, grpc, publisher, activeVehicleType };
+  return { gateway, grpc, publisher, activeVehicleType, revocation };
 }
 
 function fakeSocket(token?: string) {
@@ -52,7 +61,40 @@ function fakeSocket(token?: string) {
     data: {} as Record<string, unknown>,
     join: vi.fn(() => Promise.resolve()),
     disconnect: vi.fn(),
+    emit: vi.fn(),
   };
+}
+
+/**
+ * Mock del server socket.io con la superficie CROSS-NODO que usa el gateway multi-réplica: `in(room)` →
+ * BroadcastOperator con `emit`/`disconnectSockets`/`fetchSockets`, `serverSideEmit` (anuncio inter-servidor)
+ * y `to(room)` (fan-out del push). Con el redis-adapter montado, estas ops se propagan a otros pods.
+ */
+function makeServerMock() {
+  const emit = vi.fn();
+  const disconnectSockets = vi.fn();
+  const fetchSockets = vi.fn((): Promise<{ id: string }[]> => Promise.resolve([{ id: 's1' }]));
+  const inOp = { emit, disconnectSockets, fetchSockets };
+  const to = vi.fn(() => ({ emit }));
+  const server = {
+    in: vi.fn(() => inOp),
+    to,
+    serverSideEmit: vi.fn(),
+    on: vi.fn(),
+  };
+  return { server, inOp, emit, disconnectSockets, fetchSockets };
+}
+
+/** Inyecta un server mock en el gateway (el `@WebSocketServer()` que Nest cablea en runtime). */
+function attachServer(gateway: DriverGateway, server: unknown): void {
+  (gateway as unknown as { server: unknown }).server = server;
+}
+
+/** Invoca el handler privado del anuncio inter-servidor (lo registra `afterInit` en runtime). */
+function fireSupersede(gateway: DriverGateway, payload: { driverId: string; sid: string }): void {
+  (
+    gateway as unknown as { onSupersedeBroadcast: (p: { driverId: string; sid: string }) => void }
+  ).onSupersedeBroadcast(payload);
 }
 
 describe('DriverGateway', () => {
@@ -88,6 +130,82 @@ describe('DriverGateway', () => {
     const socket = fakeSocket('tok');
     await gateway.handleConnection(socket as never);
     expect(socket.disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('rechaza (disconnect) a un conductor SUSPENDIDO en el handshake (gate del re-login)', async () => {
+    const { gateway } = makeGateway({
+      driverId: 'drv-42',
+      suspendedAt: '2026-07-01T00:00:00.000Z',
+    });
+    const socket = fakeSocket('Bearer abc.def.ghi');
+    await gateway.handleConnection(socket as never);
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.join).not.toHaveBeenCalled();
+    expect(socket.data.driverId).toBeUndefined();
+  });
+
+  it('disconnectSuspendedDriver emite session:suspended y disconnectSockets en la sala (cross-nodo)', async () => {
+    vi.useFakeTimers();
+    const { gateway } = makeGateway({});
+    const { server, emit, disconnectSockets, fetchSockets } = makeServerMock();
+    fetchSockets.mockReturnValue(Promise.resolve([{ id: 's1' }, { id: 's2' }]));
+    attachServer(gateway, server);
+    const count = await gateway.disconnectSuspendedDriver('drv-42');
+    expect(count).toBe(2); // conteo HONESTO cross-nodo (fetchSockets), no un inventado.
+    expect(server.in).toHaveBeenCalledWith(roomForDriver('drv-42'));
+    expect(emit).toHaveBeenCalledWith('session:suspended');
+    vi.runAllTimers();
+    expect(disconnectSockets).toHaveBeenCalledWith(true);
+    vi.useRealTimers();
+  });
+
+  it('disconnectSuspendedDriver devuelve 0 (NO_DRIVER) y NO cierra si no hay sockets en el cluster', async () => {
+    const { gateway } = makeGateway({});
+    const { server, emit, disconnectSockets, fetchSockets } = makeServerMock();
+    fetchSockets.mockReturnValue(Promise.resolve([]));
+    attachServer(gateway, server);
+    expect(await gateway.disconnectSuspendedDriver('drv-x')).toBe(0);
+    expect(emit).not.toHaveBeenCalled();
+    expect(disconnectSockets).not.toHaveBeenCalled();
+  });
+
+  it('disconnectSuspendedDriver es no-op (0) si el server aún no está listo', async () => {
+    const { gateway } = makeGateway({});
+    expect(await gateway.disconnectSuspendedDriver('drv-x')).toBe(0);
+  });
+
+  it('disconnectSuspendedDriver degrada a -1 (indeterminado) si fetchSockets falla, pero igual emite el cierre', async () => {
+    const { gateway } = makeGateway({});
+    const { server, emit, fetchSockets } = makeServerMock();
+    fetchSockets.mockReturnValue(Promise.reject(new Error('redis down')));
+    attachServer(gateway, server);
+    const count = await gateway.disconnectSuspendedDriver('drv-42');
+    expect(count).toBe(-1);
+    expect(emit).toHaveBeenCalledWith('session:suspended'); // best-effort: emite aunque no pudo contar.
+  });
+
+  it('supersede cross-nodo: echa el socket local si su sid es MÁS VIEJO que el ganador', async () => {
+    vi.useFakeTimers();
+    // makeGateway verifica sid 'sess-1' para la sesión local.
+    const { gateway } = makeGateway({ driverId: 'drv-42' });
+    const socket = fakeSocket('Bearer t');
+    await gateway.handleConnection(socket as never); // Map: drv-42 → sid 'sess-1'
+    fireSupersede(gateway, { driverId: 'drv-42', sid: 'sess-2' }); // ganador más nuevo en otro pod
+    expect(socket.emit).toHaveBeenCalledWith('session:superseded');
+    vi.runAllTimers();
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    vi.useRealTimers();
+  });
+
+  it('supersede cross-nodo: NO echa si el sid local es igual/más nuevo, ni si el driver es desconocido (no-op)', async () => {
+    const { gateway } = makeGateway({ driverId: 'drv-42' }); // sid local 'sess-1'
+    const socket = fakeSocket('Bearer t');
+    await gateway.handleConnection(socket as never);
+    fireSupersede(gateway, { driverId: 'drv-42', sid: 'sess-0' }); // más viejo → el local no pierde
+    fireSupersede(gateway, { driverId: 'drv-42', sid: 'sess-1' }); // igual → no pierde
+    fireSupersede(gateway, { driverId: 'otro', sid: 'sess-9' }); // driver que este pod no tiene → no-op
+    expect(socket.emit).not.toHaveBeenCalled();
+    expect(socket.disconnect).not.toHaveBeenCalled();
   });
 
   it('emitToDriver publica en la sala correcta del servidor', () => {

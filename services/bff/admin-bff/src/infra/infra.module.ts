@@ -16,6 +16,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createRedisClient, type Redis } from '@veo/redis';
 import { createGrpcClient, InternalRestClient, type GrpcServiceClient } from '@veo/rpc';
+import {
+  INTERNAL_IDENTITY_AUDIENCE,
+  SessionRevocationStore,
+  type InternalAudience,
+} from '@veo/auth';
+import { createLogger } from '@veo/observability';
 import type { Env } from '../config/env.schema';
 import {
   REDIS,
@@ -35,6 +41,7 @@ import {
   REST_AUDIT,
   REST_FLEET,
   REST_DISPATCH,
+  REST_BOOKING,
 } from './tokens';
 
 /** Cierra los clientes gRPC y Redis al apagar el proceso. */
@@ -104,12 +111,32 @@ function restProvider(token: symbol, urlKey: keyof Env): Provider {
       new InternalRestClient({
         baseUrl: String(config.get(urlKey, { infer: true })),
         secret: config.get('VEO_INTERNAL_IDENTITY_SECRET', { infer: true }),
+        audience: 'admin-rail' satisfies InternalAudience,
       }),
   };
 }
 
+const internalAudienceProvider: Provider = {
+  provide: INTERNAL_IDENTITY_AUDIENCE,
+  useValue: 'admin-rail' satisfies InternalAudience,
+};
+
+/**
+ * Denylist de revocación (lado LECTURA en el BFF). Comparte el MISMO Redis que identity (cross-instancia):
+ * identity ESCRIBE al revocar (reset anti-takeover del operador, single-session), el admin-bff LEE en el
+ * guard HTTP. Sin TTL de escritura (el BFF nunca escribe): solo `assertNotRevoked`. Espeja driver-bff.
+ */
+const sessionRevocationProvider: Provider = {
+  provide: SessionRevocationStore,
+  inject: [REDIS],
+  useFactory: (redis: Redis): SessionRevocationStore =>
+    new SessionRevocationStore(redis, createLogger('session-revocation')),
+};
+
 const providers: Provider[] = [
   redisProvider,
+  internalAudienceProvider,
+  sessionRevocationProvider,
   grpcProvider(GRPC_IDENTITY, 'identity', 'IDENTITY_GRPC_URL'),
   grpcProvider(GRPC_TRIP, 'trip', 'TRIP_GRPC_URL'),
   grpcProvider(GRPC_PANIC, 'panic', 'PANIC_GRPC_URL'),
@@ -126,6 +153,8 @@ const providers: Provider[] = [
   restProvider(REST_AUDIT, 'AUDIT_URL'),
   restProvider(REST_FLEET, 'FLEET_URL'),
   restProvider(REST_DISPATCH, 'DISPATCH_URL'),
+  // F2.5 · costo/km del carpooling (config financiera del escudo legal) vive en booking-service.
+  restProvider(REST_BOOKING, 'BOOKING_URL'),
   InfraLifecycle,
 ];
 

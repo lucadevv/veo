@@ -1,6 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 import Animated, {
   Easing,
@@ -12,8 +22,6 @@ import {
   Banner,
   Button,
   Card,
-  IconButton,
-  SafeScreen,
   Text,
   TextField,
   useTheme,
@@ -21,9 +29,13 @@ import {
 } from '@veo/ui-kit';
 import { useSessionStore } from '../../../../core/session/sessionStore';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { IconChevronLeft } from '../../../../shared/presentation/icons';
+import {
+  IconAlertCircle,
+  IconCheckCircle,
+  IconChevronLeft,
+  IconSend,
+} from '../../../../shared/presentation/icons';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { VeoWordmark } from '../../../../shared/presentation/components/VeoWordmark';
 import { isValidPeruPhone } from '../../domain';
 import { useLogin, useRequestOtp } from '../hooks/useAuth';
 import { useBiometricRelogin } from '../hooks/useBiometricRelogin';
@@ -32,6 +44,18 @@ type Step = 'phone' | 'code';
 
 // Longitud del OTP (solo presentación: la lógica/validación de `code` no cambia).
 const OTP_LENGTH = 6;
+
+// Cooldown (segundos) entre reenvíos de OTP para no spamear el gateway de SMS.
+const RESEND_COOLDOWN = 30;
+
+/**
+ * Foto POV nocturna del héroe (luces de ciudad + celu con GPS + volante), bundleada por Metro vía
+ * `require`. Va a sangre en la banda superior del paso teléfono. La ruta sube 5 niveles desde
+ * `…/auth/presentation/screens/` hasta la raíz de `apps/driver/` y baja a `assets/images/auth/`.
+ */
+const LOGIN_HERO = require('../../../../../assets/images/auth/login-hero.jpg');
+/** Alto de la banda hero como FRACCIÓN de la pantalla — el frame C/Login del pen usa 320 de 844 = 0.379. */
+const LOGIN_HERO_HEIGHT_RATIO = 320 / 844;
 
 /**
  * Enmascara el teléfono para el subtítulo del paso de código (transformación puramente visual,
@@ -46,36 +70,12 @@ const maskPhone = (value: string): string => {
   return `+51 ··· ··· ${last}`;
 };
 
-/**
- * Motivo decorativo de "línea de ruta" cian para la cabecera (Midnight Motion). Es solo adorno:
- * no captura toques (`pointerEvents="none"`) y usa el acento del tema en baja opacidad.
- */
-const RouteMotif = ({ color }: { color: string }): React.JSX.Element => (
-  <Svg
-    width="100%"
-    height={150}
-    viewBox="0 0 320 150"
-    fill="none"
-    style={styles.motif}
-    pointerEvents="none"
-  >
-    <Path
-      d="M-10 120 C 70 120, 90 44, 170 44 S 290 120, 340 56"
-      stroke={color}
-      strokeWidth={2}
-      strokeLinecap="round"
-      opacity={0.1}
-    />
-    <Path
-      d="M-10 104 C 60 104, 80 28, 160 28 S 280 104, 340 40"
-      stroke={color}
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeDasharray="1 11"
-      opacity={0.5}
-    />
-  </Svg>
-);
+/** Formatea segundos restantes a m:ss para el contador de reenvío ("24" → "0:24", "90" → "1:30"). */
+const formatMmSs = (totalSeconds: number): string => {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
 
 /** Glifo de Face ID: escudo con huella (re-login biométrico). */
 const FaceIdGlyph = ({ color, size = 30 }: { color: string; size?: number }): React.JSX.Element => (
@@ -139,7 +139,7 @@ const OtpBox = ({ char, isActive, hasError }: OtpBoxProps): React.JSX.Element =>
       style={[
         styles.otpBox,
         {
-          backgroundColor: theme.colors.surfaceElevated,
+          backgroundColor: hasError ? theme.colors.dangerDim : theme.colors.surfaceElevated,
           borderColor,
           borderWidth: isActive || hasError ? 2 : 1,
           borderRadius: theme.radii.md,
@@ -210,10 +210,14 @@ const OtpField = ({
 export const LoginScreen = (): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   const expired = useSessionStore((s) => s.expired);
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  // Segundos restantes del cooldown de reenvío de OTP; 0 = habilitado. Arranca al pedir el código.
+  const [resendIn, setResendIn] = useState(0);
   // Permite ocultar la tarjeta de Face ID para ir directo al número ("Usar código en su lugar").
   const [showBiometricCard, setShowBiometricCard] = useState(true);
 
@@ -226,156 +230,279 @@ export const LoginScreen = (): React.JSX.Element => {
 
   const phoneValid = isValidPeruPhone(phone);
   const codeValid = /^\d{6}$/.test(code);
+  // Error de FORMATO local (código incompleto mientras se tipea) vs error de VERIFICACIÓN del servidor.
+  const otpFormatError = code.length > 0 && !codeValid;
+  const otpVerifyError = login.isError;
+
+  // Tick del cooldown de reenvío: baja 1s hasta 0 (setTimeout encadenado, se limpia al desmontar).
+  useEffect(() => {
+    if (resendIn <= 0) {
+      return undefined;
+    }
+    const id = setTimeout(() => setResendIn(resendIn - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendIn]);
 
   const onRequest = () => {
-    requestOtp.mutate(phone, { onSuccess: () => setStep('code') });
+    requestOtp.mutate(phone, {
+      onSuccess: () => {
+        setStep('code');
+        setResendIn(RESEND_COOLDOWN);
+      },
+    });
+  };
+
+  // Reenvío del OTP (frame C/LoginOtp: "¿No llegó? Reenviar código"): reusa el mismo mutation y
+  // reinicia el cooldown. Deshabilitado mientras corre el contador o hay un envío en curso.
+  const onResend = () => {
+    if (resendIn > 0 || requestOtp.isPending) {
+      return;
+    }
+    setCode('');
+    requestOtp.mutate(phone, { onSuccess: () => setResendIn(RESEND_COOLDOWN) });
   };
 
   const onVerify = () => {
     login.mutate({ phone, code });
   };
 
+  // Gutter lateral del contenido (mismo que hoy). Centraliza el padding horizontal del paso teléfono.
+  const sideGutter = theme.spacing['2xl'];
+  // Alto de la banda hero = misma FRACCIÓN de pantalla que el frame C/Login del pen (320/844 = 38%).
+  // Con `cover` centrado en esta banda, la foto vertical muestra su MEDIO (tablero/celular), como el pen.
+  const heroH = Math.round(height * LOGIN_HERO_HEIGHT_RATIO);
+
   return (
-    <SafeScreen scroll>
+    <View style={[styles.root, { backgroundColor: theme.colors.bg }]}>
+      {/* Paso teléfono: foto oscura en la banda superior → íconos claros. Paso código: lienzo claro
+          sin foto → íconos oscuros del tema (si no, quedarían blancos invisibles tras la migración). */}
+      <StatusBar barStyle={step === 'phone' ? 'light-content' : theme.statusBarStyle} />
+
       {step === 'phone' ? (
-        <View style={[styles.section, { gap: theme.spacing['2xl'] }]}>
-          {/* Cabecera: motivo de ruta cian decorativo + wordmark único de marca (variante inline). */}
-          <View style={styles.headerWrap}>
-            <RouteMotif color={theme.colors.accent} />
-            <Reveal from="scale" style={styles.brandRow}>
-              <VeoWordmark variant="inline" size="sm" />
-            </Reveal>
-            <Reveal delay={60} style={[styles.titleBlock, { gap: theme.spacing.xs }]}>
-              <Text variant="title1">{t('auth.loginTitle')}</Text>
-              <Text variant="callout" color="inkMuted">
-                {t('auth.loginSubtitle')}
-              </Text>
-            </Reveal>
+        /* ── Paso TELÉFONO (dirección Tesla "banda foto arriba") ─────────── */
+        <>
+          {/* Foto hero como FONDO ABSOLUTO de la pantalla (FUERA del scroll): banda superior con marco
+              FIJO y alto explícito → `cover` calza la foto en un frame real. Dentro del ScrollView el
+              alto no se constriñe (los hijos absolutos no lo dimensionan) y la foto salía con zoom/mal
+              recorte. La foto va detrás; el contenido scrollea por encima. */}
+          <View style={[styles.heroBg, { height: heroH }]} pointerEvents="none">
+            {/* Alto EXPLÍCITO en la Image (no absoluteFill): así `cover` centra contra los `heroH` reales
+                de la banda y muestra el MEDIO de la foto (tablero). Con absoluteFill la Image se estiraba
+                a más alto y cover mostraba el TOP (techo), y la banda lo recortaba. */}
+            <Image
+              source={LOGIN_HERO}
+              style={{ width: '100%', height: heroH }}
+              resizeMode="cover"
+            />
+            {/* Scrim: transparente casi toda la banda (foto entera), fundiendo SOLO el borde inferior al `bg`. */}
+            <Svg style={StyleSheet.absoluteFill}>
+              <Defs>
+                {/* Stops EXACTOS del scrim del pen (eraaq): funde el borde inferior al `bg`. */}
+                <LinearGradient id="loginHeroScrim" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor={theme.colors.bg} stopOpacity={0} />
+                  <Stop offset="0.35" stopColor={theme.colors.bg} stopOpacity={0.12} />
+                  <Stop offset="0.72" stopColor={theme.colors.bg} stopOpacity={0.72} />
+                  <Stop offset="1" stopColor={theme.colors.bg} stopOpacity={1} />
+                </LinearGradient>
+              </Defs>
+              <Rect x={0} y={0} width="100%" height="100%" fill="url(#loginHeroScrim)" />
+            </Svg>
           </View>
 
-          {expired ? <Banner tone="warn" title={t('auth.sessionExpired')} /> : null}
+          <ScrollView
+            style={styles.scrollFill}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            automaticallyAdjustKeyboardInsets
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: insets.bottom + theme.spacing['2xl'] }}
+          >
+            {/* Spacer transparente: deja ver la banda hero (fija, detrás) y arranca el contenido bajo ella. */}
+            <View style={{ height: heroH - theme.spacing['2xl'] }} pointerEvents="none" />
 
-          {/* Re-login rápido con biometría del dispositivo (solo si hay token guardado; oculto en dev). */}
-          {faceIdEnabled && showBiometricCard ? (
-            <Reveal delay={100}>
-              <Card variant="filled" padding="xl" style={{ gap: theme.spacing.lg }}>
-                <View style={[styles.biometricHead, { gap: theme.spacing.md }]}>
-                  <View
-                    style={[
-                      styles.shieldCircle,
-                      { backgroundColor: theme.colors.surface, borderRadius: theme.radii.pill },
-                    ]}
-                  >
-                    <FaceIdGlyph color={theme.colors.accent} />
-                  </View>
-                  <View style={styles.biometricCopy}>
-                    <Text variant="bodyStrong">{t('auth.faceIdTitle')}</Text>
-                    <Text variant="footnote" color="inkMuted">
-                      {t('auth.faceIdBody')}
-                    </Text>
-                  </View>
-                </View>
-                <Button
-                  label={t('auth.faceIdTitle')}
-                  variant="accent"
-                  fullWidth
-                  loading={biometric.isPending}
-                  onPress={() => {
-                    biometric.relogin().catch(() => undefined);
-                  }}
+            {/* Contenido sobre `bg` sólido (tapa la foto al scrollear), alineado a la izquierda con el gutter. */}
+            <View
+              style={[
+                styles.body,
+                {
+                  backgroundColor: theme.colors.bg,
+                  paddingHorizontal: sideGutter,
+                  gap: theme.spacing['2xl'],
+                },
+              ]}
+            >
+              {/* Título directo bajo la banda hero: la foto ya lleva la marca, así que NO repetimos el
+                wordmark "VEO CONDUCTORES" (el `loginTitle` ya dice "Ingresa a VEO Conductores") — espeja
+                el frame C/Login del pen, que quitó ese lockup redundante. */}
+              <Reveal style={{ gap: theme.spacing.xs }}>
+                <Text variant="title1">{t('auth.loginTitle')}</Text>
+                <Text variant="callout" color="inkMuted">
+                  {t('auth.loginSubtitle')}
+                </Text>
+              </Reveal>
+
+              {expired ? <Banner tone="warn" title={t('auth.sessionExpired')} /> : null}
+
+              {/* Re-login rápido con biometría del dispositivo (solo si hay token guardado; oculto en dev). */}
+              {faceIdEnabled && showBiometricCard ? (
+                <Reveal delay={100}>
+                  <Card variant="filled" padding="xl" style={{ gap: theme.spacing.lg }}>
+                    <View style={[styles.biometricHead, { gap: theme.spacing.md }]}>
+                      <View
+                        style={[
+                          styles.shieldCircle,
+                          { backgroundColor: theme.colors.surface, borderRadius: theme.radii.pill },
+                        ]}
+                      >
+                        <FaceIdGlyph color={theme.colors.accent} />
+                      </View>
+                      <View style={styles.biometricCopy}>
+                        {/* U2 · dedup: el label "Ingresar con Face ID" vive UNA vez (el botón de abajo);
+                            la card lo describe con el body ("Accede de forma rápida y segura") en vez de
+                            duplicar el título del botón. */}
+                        <Text variant="bodyStrong">{t('auth.faceIdBody')}</Text>
+                      </View>
+                    </View>
+                    <Button
+                      label={t('auth.faceIdTitle')}
+                      variant="accent"
+                      fullWidth
+                      loading={biometric.isPending}
+                      onPress={() => {
+                        biometric.relogin().catch(() => undefined);
+                      }}
+                    />
+                    <Button
+                      label={t('auth.useCodeInstead')}
+                      variant="secondary"
+                      size="sm"
+                      fullWidth
+                      onPress={() => setShowBiometricCard(false)}
+                    />
+                    {biometric.error ? (
+                      <Banner
+                        tone="danger"
+                        title={t('errors.generic')}
+                        description={toErrorMessage(biometric.error, t)}
+                      />
+                    ) : null}
+                  </Card>
+                </Reveal>
+              ) : null}
+
+              {/* Formulario de teléfono con prefijo +51 visible y CTA cian full-width. */}
+              <Reveal delay={140} style={{ gap: theme.spacing.lg }}>
+                {faceIdEnabled ? (
+                  <Text variant="footnote" color="inkSubtle" align="center">
+                    {t('auth.phoneDivider')}
+                  </Text>
+                ) : null}
+                <TextField
+                  label={t('auth.phoneLabel')}
+                  placeholder={t('auth.phonePlaceholder')}
+                  helperText={t('auth.loginHelper')}
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                  autoComplete="tel"
+                  textContentType="telephoneNumber"
+                  error={phone.length > 0 && !phoneValid ? t('auth.invalidPhone') : undefined}
+                  leftIcon={
+                    <View style={[styles.prefix, { borderRightColor: theme.colors.border }]}>
+                      <Text variant="bodyStrong" color="inkMuted">
+                        +51
+                      </Text>
+                    </View>
+                  }
                 />
-                <Button
-                  label={t('auth.useCodeInstead')}
-                  variant="secondary"
-                  size="sm"
-                  fullWidth
-                  onPress={() => setShowBiometricCard(false)}
-                />
-                {biometric.error ? (
+                {requestOtp.isError ? (
                   <Banner
                     tone="danger"
                     title={t('errors.generic')}
-                    description={toErrorMessage(biometric.error, t)}
+                    description={toErrorMessage(requestOtp.error, t)}
                   />
                 ) : null}
-              </Card>
-            </Reveal>
-          ) : null}
-
-          {/* Formulario de teléfono con prefijo +51 visible y CTA cian full-width. */}
-          <Reveal delay={140} style={[styles.form, { gap: theme.spacing.lg }]}>
-            {faceIdEnabled ? (
-              <Text variant="footnote" color="inkSubtle" align="center">
-                {t('auth.phoneDivider')}
-              </Text>
-            ) : null}
-            <TextField
-              label={t('auth.phoneLabel')}
-              placeholder={t('auth.phonePlaceholder')}
-              helperText={t('auth.loginHelper')}
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              textContentType="telephoneNumber"
-              error={phone.length > 0 && !phoneValid ? t('auth.invalidPhone') : undefined}
-              leftIcon={
-                <View style={[styles.prefix, { borderRightColor: theme.colors.border }]}>
-                  <Text variant="bodyStrong" color="inkMuted">
-                    +51
-                  </Text>
-                </View>
-              }
-            />
-            {requestOtp.isError ? (
-              <Banner
-                tone="danger"
-                title={t('errors.generic')}
-                description={toErrorMessage(requestOtp.error, t)}
-              />
-            ) : null}
-            <Button
-              label={t('auth.requestOtp')}
-              variant="accent"
-              size="lg"
-              fullWidth
-              disabled={!phoneValid}
-              loading={requestOtp.isPending}
-              onPress={onRequest}
-            />
-          </Reveal>
-        </View>
+                <Button
+                  label={t('auth.requestOtp')}
+                  variant="accent"
+                  size="lg"
+                  fullWidth
+                  leftIcon={<IconSend size={20} color={theme.colors.onAccent} />}
+                  disabled={!phoneValid}
+                  loading={requestOtp.isPending}
+                  onPress={onRequest}
+                />
+              </Reveal>
+            </View>
+          </ScrollView>
+        </>
       ) : (
-        /* ── Paso CÓDIGO ────────────────────────────────────────────────── */
-        <View style={[styles.section, { gap: theme.spacing['2xl'] }]}>
-          <IconButton
-            icon={<IconChevronLeft color={theme.colors.ink} />}
+        /* ── Paso CÓDIGO (limpio, SIN banda; respeta la status bar con padding top manual) ── */
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: sideGutter,
+            paddingTop: insets.top + theme.spacing.lg,
+            paddingBottom: insets.bottom + theme.spacing['2xl'],
+            gap: theme.spacing['2xl'],
+          }}
+        >
+          {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+              TODA la app — espeja al TopBar). */}
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel={t('auth.changeNumber')}
-            variant="surface"
+            hitSlop={12}
+            style={styles.backChevron}
             onPress={() => {
               setStep('phone');
               setCode('');
             }}
-          />
+          >
+            <IconChevronLeft color={theme.colors.ink} size={28} strokeWidth={2.25} />
+          </Pressable>
 
-          <View style={[styles.titleBlock, { gap: theme.spacing.sm }]}>
+          <View style={{ gap: theme.spacing.sm }}>
             <Text variant="title1">{t('auth.codeLabel')}</Text>
             <Text variant="callout" color="inkMuted">
               {t('auth.otpSent', { phone: maskPhone(phone) })}
             </Text>
           </View>
 
-          <View style={[styles.form, { gap: theme.spacing.sm }]}>
+          <View style={{ gap: theme.spacing.sm }}>
             <OtpField
               value={code}
-              onChangeText={setCode}
-              hasError={code.length > 0 && !codeValid}
+              onChangeText={(next) => {
+                // Al reeditar el código, limpia el error de verificación previo (evita cajas rojas stale).
+                if (login.isError) {
+                  login.reset();
+                }
+                setCode(next);
+              }}
+              hasError={otpFormatError || otpVerifyError}
               accessibilityLabel={t('auth.codeLabel')}
             />
-            {code.length > 0 && !codeValid ? (
-              <Text variant="footnote" color="danger" accessibilityRole="alert">
-                {t('auth.invalidCode')}
-              </Text>
+            {otpFormatError ? (
+              /* Error de FORMATO local (código incompleto): fila inline con circle-alert + mensaje. */
+              <View style={styles.otpErrorRow} accessibilityRole="alert">
+                <IconAlertCircle size={16} color={theme.colors.danger} />
+                <Text variant="footnote" color="danger">
+                  {t('auth.invalidCode')}
+                </Text>
+              </View>
+            ) : otpVerifyError ? (
+              /* Error de VERIFICACIÓN del servidor (frame C/LoginOtp-Error): circle-alert + mensaje real
+                 del BFF (para el código errado es "Código incorrecto"; para lockout/red, su mensaje). El
+                 BFF NO expone "intentos restantes", así que NO se fabrica ese conteo. */
+              <View style={styles.otpErrorRow} accessibilityRole="alert">
+                <IconAlertCircle size={16} color={theme.colors.danger} />
+                <Text variant="footnote" color="danger">
+                  {toErrorMessage(login.error, t)}
+                </Text>
+              </View>
             ) : (
               <Text variant="footnote" color="inkSubtle">
                 {t('auth.codeHelper')}
@@ -383,50 +510,64 @@ export const LoginScreen = (): React.JSX.Element => {
             )}
           </View>
 
-          {login.isError ? (
-            <Banner
-              tone="danger"
-              title={t('errors.generic')}
-              description={toErrorMessage(login.error, t)}
-            />
-          ) : null}
+          {/* Reenvío de OTP con cooldown (frame C/LoginOtp): "¿No llegó? Reenviar código". */}
+          <View style={styles.resendRow}>
+            <Text variant="footnote" color="inkSubtle">
+              {t('auth.otpResendPrompt')}
+            </Text>
+            <Pressable
+              onPress={onResend}
+              disabled={resendIn > 0 || requestOtp.isPending}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: resendIn > 0 || requestOtp.isPending }}
+            >
+              <Text variant="footnote" color={resendIn > 0 ? 'inkSubtle' : 'accent'}>
+                {resendIn > 0
+                  ? t('auth.otpResendIn', { time: formatMmSs(resendIn) })
+                  : t('auth.otpResend')}
+              </Text>
+            </Pressable>
+          </View>
 
-          <View style={[styles.form, { gap: theme.spacing.md }]}>
+          {/* UNA sola acción por intención (U2 · dedup): verificar el código. Para CAMBIAR el número, la
+              única affordance es el chevron back de arriba (gesto idiomático del paso OTP); se quitó el
+              Button ghost "Cambiar número" que ejecutaba el MISMO handler que el chevron. El error de
+              verificación se muestra inline bajo las cajas (no en Banner). */}
+          <View style={{ gap: theme.spacing.md }}>
             <Button
               label={t('auth.verify')}
               variant="accent"
               fullWidth
+              leftIcon={<IconCheckCircle size={20} color={theme.colors.onAccent} />}
               disabled={!codeValid}
               loading={login.isPending}
               onPress={onVerify}
             />
-            <Button
-              label={t('auth.changeNumber')}
-              variant="ghost"
-              fullWidth
-              onPress={() => {
-                setStep('phone');
-                setCode('');
-              }}
-            />
           </View>
-        </View>
+        </ScrollView>
       )}
-    </SafeScreen>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  section: { paddingTop: 24 },
-  headerWrap: { position: 'relative', paddingTop: 12, gap: 20 },
-  motif: { position: 'absolute', top: -8, left: -20, right: -20 },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  titleBlock: {},
-  form: {},
+  root: { flex: 1 },
+  // El chevron de volver no se estira al ancho de la columna (touch target acotado al glifo + hitSlop).
+  backChevron: { alignSelf: 'flex-start' },
+  // Banda hero como FONDO ABSOLUTO fijo (top de la pantalla): marco definido → `cover` calza la foto
+  // sin el zoom/recorte raro que daba estar dentro del ScrollView. El alto va inline (aspecto de la foto).
+  heroBg: { position: 'absolute', top: 0, left: 0, right: 0, overflow: 'hidden' },
+  // ScrollView transparente por encima del fondo hero (deja ver la banda en el tope vía el spacer).
+  scrollFill: { flex: 1, backgroundColor: 'transparent' },
+  // Contenido: el spacer del tope ya lo baja bajo la banda; sin paddingTop propio.
+  body: {},
   biometricHead: { flexDirection: 'row', alignItems: 'center' },
   biometricCopy: { flex: 1, gap: 2 },
   shieldCircle: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   prefix: { paddingRight: 10, borderRightWidth: StyleSheet.hairlineWidth },
+  resendRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  otpErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   otpRow: { flexDirection: 'row', justifyContent: 'space-between', position: 'relative' },
   otpBox: {
     flex: 1,

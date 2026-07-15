@@ -36,6 +36,18 @@ Las reglas de negocio se referencian por ID: **BR-T0x** (viaje), **BR-I0x** (ide
    biometría propia (NO FaceTec/Onfido), mapas/routing OSM propios (NO Google Maps para el dato), WebRTC
    LiveKit **self-hosted** (el video NUNCA sale de nuestra infra).
 
+   **(c) El SUSTRATO DE DEPLOY también es self-hosted — en VPS propio (decisión del dueño, 2026-06-24).**
+   Producción corre en un **VPS nuestro con Docker Compose + CI/CD GitHub Actions**, NO en una nube managed.
+   Los data stores y el cómputo (**Postgres, Redis, Kafka, almacenamiento de objetos MinIO, secretos**) se
+   self-hostean en ese VPS. Los equivalentes **MANAGED de AWS quedan PROHIBIDOS** (EKS, RDS, MSK, ElastiCache,
+   S3, CloudFront, KMS, Secrets Manager): son self-hosteables, así que usarlos VIOLA soberanía. **Regla de
+   decisión, sin ambigüedad:** _¿se puede self-hostear? → se self-hostea_ (Postgres **no** RDS · Kafka **no**
+   MSK · MinIO **no** S3 · Redis **no** ElastiCache · cifrado at-rest con clave propia/SOPS — app-level (pii/biometric) **o** MinIO SSE-S3 con nuestra clave maestra (video) — **no** AWS KMS managed · `.env`/docker-secrets
+   **no** Secrets Manager · Docker Compose **no** EKS). _¿Es físicamente imposible self-hostear el riel?_ (la
+   red de push de Apple/Google, la red de pagos Yape/Plin, el SMS del operador) → **recién ahí** es riel externo
+   inevitable tras puerto, por la regla (a). Esto **deja obsoleto** todo lo que asumía AWS managed: EKS/Terraform/
+   ArgoCD, RDS, MSK, ElastiCache, S3, Secrets Manager, KMS, AWS IoT Core (ver ADR-007 reemplazado; STATUS Ola 5).
+
 ---
 
 ## 1. Layout del monorepo
@@ -52,9 +64,18 @@ packages/        librerías compartidas (publicadas como @veo/* vía workspace:*
   api-client/    SDK TS generado desde OpenAPI (Ola 3, frontends)
   ui-kit/        componentes RN compartidos (Ola 4)
   maps/          @veo/maps — cliente OSM propio (OSRM/Valhalla routing + Nominatim geocoding), cache Redis
-services/        14 microservicios (12 NestJS + tracking en Go + biometric en Python) + bff/{admin,driver,public}-bff
-apps/            admin-web (Next.js), family-web (Next.js)
+services/        16 microservicios:
+  · 14 NestJS: audit, booking, chat, dispatch, fleet, identity, media,
+    notification, panic, payment, places, rating, share, trip
+  · tracking-service  → Go               (alta frecuencia de posición)
+  · biometric-service → Python/FastAPI   (embeddings, liveness, match — motor propio)
+  services/bff/    admin-bff · driver-bff · public-bff   (los BFF viven ACÁ, no en la raíz)
+apps/            web (Next.js): admin-web · family-web · web-hub
+                 mobile (React Native/Expo): driver · passenger
 ```
+
+> **Sincronizar esta lista al agregar/quitar un servicio.** Conteo actual: **16** microservicios (14 NestJS +
+> Go + Python) + 3 BFF. `audit-service` y `booking-service` (marketplace de carpooling, ADR-014) son recientes.
 
 > **Servicios añadidos por las decisiones del 2026-05-28** (ver §14): `fleet-service` (vehículos, documentos,
 > vencimientos, inspecciones — separado de identity), `biometric-service` (Python/FastAPI + ONNX: detección,
@@ -247,8 +268,8 @@ Eventos mínimos por servicio (publicar exactamente estos, ampliar si el dominio
 
 ## 7. Auth & RBAC (`@veo/auth`)
 
-- JWT con **jose** (no `jsonwebtoken`). Access **15m**, refresh **30d** (BR/CLAUDE regla 5). Firma EdDSA/RS256 con
-  claves de `JWT_*` env. Claims: `sub` (userId), `typ` ('passenger'|'driver'|'admin'), `roles` (AdminRole[]), `sid` (sessionId).
+- JWT con **jose** (no `jsonwebtoken`). Access **15m**, refresh **30d** (BR/CLAUDE regla 5). Firma **ES256** (ECDSA
+  P-256, `JWT_ALG` en `@veo/auth`) con claves de `JWT_*` env. Claims: `sub` (userId), `typ` ('passenger'|'driver'|'admin'), `roles` (AdminRole[]), `sid` (sessionId).
 - Exporta: `signAccessToken`, `signRefreshToken`, `verifyToken`, `JwtAuthGuard`, `RolesGuard`,
   `@CurrentUser()`, `@Roles(...AdminRole[])`, `@Public()`, `StepUpMfaGuard` (BR-S07: video/RBAC/payout>S/5K exigen MFA fresca).
 - `@CurrentUser()` inyecta `{ userId, type, roles, sessionId }`.
@@ -261,8 +282,9 @@ Eventos mínimos por servicio (publicar exactamente estos, ampliar si el dominio
 
 - **Dev:** Postgres único, schema lógico por servicio (dev-stack crea: identity, trip, payment, panic,
   notification, audit, rating, share, media; **falta agregar `fleet`** al `init-postgres.sql`).
-  **Prod (decisión 2026-05-28):** instancia RDS dedicada por servicio crítico (identity, payment, panic, audit);
-  el resto comparte una instancia. El código no cambia (cada servicio usa su `DATABASE_URL`).
+  **Prod (decisión 2026-05-28; sustrato actualizado 2026-06-24, §0.7(c)):** **Postgres self-hosted** por servicio
+  crítico en el VPS (contenedor/instancia dedicada vía Docker Compose; el resto comparte un Postgres con DB/usuario
+  por servicio). El `DATABASE_URL` por servicio NO cambia — solo el sustrato deja de ser RDS.
 - Cada servicio tiene **su propio** `prisma/schema.prisma` con:
   ```prisma
   generator client { provider = "prisma-client-js"; output = "../src/generated/prisma" }
@@ -276,7 +298,8 @@ Eventos mínimos por servicio (publicar exactamente estos, ampliar si el dominio
   - `PrismaOutboxStore` + `OUTBOX_PRISMA_MODEL` (modelo Prisma a incluir en cada schema), `tombstone()` + `deletedPlaceholder()`
     (BR-S06 derecho al olvido = **tombstone + anulación de PII**), y en `@veo/database/testing`: `createTestDatabase()`
     (testcontainers — **no mockear DB en payments/panic/audit**, CLAUDE).
-- Tipos `Date`→`timestamptz`; dinero en **enteros de céntimos** (`fareCents`), nunca float. Moneda siempre `PEN`.
+- Tipos `Date`→`timestamptz`; dinero en **enteros de céntimos**, nunca float. **Contrato de dinero = value-object
+  `Money { amountCents, currency }`** — `currency` es **OBLIGATORIA en TODO campo de dinero del dominio**, no solo los nuevos (decisión 2026-07-02, reconciliación specs↔docs #2 · opción A). Hoy la única moneda operada es **`PEN`**; la activación de otras (USD para Ecuador) es F8, pero el CONTRATO ya lleva el tag para **no migrar el dominio dos veces**. El literal `currency: 'PEN'` hardcodeado en `@veo/shared-types` se reemplaza por el value-object (la migración de campos existentes = ADR-022 §P-B, ampliada a todo el dominio).
 - IDs: UUIDv7 (`@veo/utils` provee `uuidv7()`).
 
 ---
@@ -286,16 +309,16 @@ Eventos mínimos por servicio (publicar exactamente estos, ampliar si el dominio
 VEO **construye propio / self-hosted todo lo posible**. Solo los rieles físicamente externos se conectan,
 y siempre tras un puerto propio. Mapa de capacidades:
 
-| Capacidad                    | Cómo en VEO                                                                                       | Tipo                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------ |
-| Biometría (liveness + match) | **`biometric-service` PROPIO** (Python/FastAPI + ONNX open-source). identity orquesta vía puerto. | self-hosted              |
-| Video en vivo (WebRTC)       | **LiveKit self-hosted** en EKS (open-source). El video nunca sale de nuestra infra.               | self-hosted              |
-| Mapas/routing/geocoding      | **OSM propio**: OSRM/Valhalla + Nominatim self-hosted, vía `@veo/maps`.                           | self-hosted              |
-| Validación DNI (RENIEC)      | Fase 4. Ahora revisión manual del operador. Puerto `IdentityValidator` + sandbox.                 | externo (F4) tras puerto |
-| Antecedentes (PJ)            | Fase 4. Ahora subida + revisión manual. Puerto `BackgroundCheckProvider`.                         | externo (F4) tras puerto |
-| Pagos Yape/Plin              | Riel bancario inevitable. Conector mínimo tras puerto `PaymentGateway` + sandbox.                 | externo tras puerto      |
-| Push móvil FCM/APNs          | Lo exige el OS (Google/Apple). Conector tras puerto `PushSender` + sandbox.                       | externo tras puerto      |
-| SMS (OTP, alerta familia)    | Operador celular. Conector tras puerto `SmsSender` + sandbox (consola en dev).                    | externo tras puerto      |
+| Capacidad                    | Cómo en VEO                                                                                            | Tipo                     |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------ |
+| Biometría (liveness + match) | **`biometric-service` PROPIO** (Python/FastAPI + ONNX open-source). identity orquesta vía puerto.      | self-hosted              |
+| Video en vivo (WebRTC)       | **LiveKit self-hosted** en el VPS (Docker Compose, open-source). El video nunca sale de nuestra infra. | self-hosted              |
+| Mapas/routing/geocoding      | **OSM propio**: OSRM/Valhalla + Nominatim self-hosted, vía `@veo/maps`.                                | self-hosted              |
+| Validación DNI (RENIEC)      | Fase 4. Ahora revisión manual del operador. Puerto `IdentityValidator` + sandbox.                      | externo (F4) tras puerto |
+| Antecedentes (PJ)            | Fase 4. Ahora subida + revisión manual. Puerto `BackgroundCheckProvider`.                              | externo (F4) tras puerto |
+| Pagos Yape/Plin              | Riel bancario inevitable. Conector mínimo tras puerto `PaymentGateway` + sandbox.                      | externo tras puerto      |
+| Push móvil FCM/APNs          | Lo exige el OS (Google/Apple). Conector tras puerto `PushSender` + sandbox.                            | externo tras puerto      |
+| SMS (OTP, alerta familia)    | Operador celular. Conector tras puerto `SmsSender` + sandbox (consola en dev).                         | externo tras puerto      |
 
 Patrón de puerto para **toda** capacidad externa (incluido el sandbox para las propias en dev):
 
@@ -308,7 +331,7 @@ adapters/sandbox.adapter.ts    implementación determinista para dev/CI (sin cue
 
 - El sandbox **no es un mock de tests**: es un adapter de primera clase, seleccionable por env, con comportamiento
   determinista y realista (ej. `SmsSandboxSender` imprime el OTP en consola; `PaymentSandboxGateway` confirma tras delay).
-- Credenciales **solo** por env / AWS Secrets Manager. Nunca en git. `.env.example` documenta cada var (ya está).
+- Credenciales **solo** por env del host + secret store self-hosted (`.env`/docker-secrets/SOPS+age); **NUNCA un SaaS de secretos** (ni AWS Secrets Manager). Nunca en git. `.env.example` documenta cada var (ya está).
 - Default local: `*_MODE=sandbox`. Prod: `live`. El código de dominio no sabe cuál corre.
 - **Prohibido** entregar a un tercero el **dato/cómputo sensible** que se pueda self-hostear (biometría, video,
   pánico, audit, PII) (§0.7). Los **rieles de transporte externos inevitables** (push FCM/APNs, pagos, SMS) SÍ se
@@ -342,6 +365,26 @@ services/<svc>/
 - **Services** contienen las reglas. Lanzan `DomainError`. Publican eventos vía outbox.
 - **Repositories** son el único lugar con Prisma. Devuelven entidades de dominio, no modelos Prisma crudos en la API pública.
 - gRPC entre servicios: protos en `protos/` (ya existe la carpeta). mTLS en prod (CLAUDE regla compliance).
+
+> **Capa `repository.ts` — PAGADA en TODA la flota (gatillo (c): lote de refactor propio).**
+> La capa `<feature>.repository.ts` (único lugar que toca Prisma) está extraída en **los 12 servicios**: cada feature
+> con acceso a datos delega en su repository (token DI + puerto interfaz + adaptador `Prisma<X>Repository`, cliente dual
+> `read`/`write`). **`0 this.prisma` en TODOS los `*.service.ts`** (`rg 'this\.prisma\.' services --glob '*.service.ts'`
+> → cero), verificado con typecheck + suites reales (payment/trip con testcontainers). **61 `*.repository.ts`** en la flota.
+> **Patrón canónico** (uniforme en la flota): repo dueño de la query para acceso simple; **seam unit-of-work**
+> `runInTransaction(work: (tx) => Promise<T>)` + métodos tx-scoped cuando la tx envuelve lógica de dominio — el
+> service orquesta y forwardea el `tx` opaco, nunca dereferencia Prisma; los CAS/predicados de seguridad se
+> cristalizan HARDCODED en el `WHERE` del repo (no aflojables desde afuera); read/write split preservado con
+> métodos `…OnPrimary`.
+>
+> **Adyacentes migrados (single-owner real):** los sweepers, workers y `*.grpc.controller.ts` que tocaban Prisma
+> directo también delegan ahora en el repository de su feature (no sólo los `*.service.ts`) — ej. `media` y `fleet`
+> absorbieron su sweeper/grpc; el gRPC de `fleet` cambió el eje read/write de `db: PrismaService['read']` a un booleano
+> `fresh`. El cierre de la deuda incluyó `dispatch` (6 repos por feature/store), `fleet` (7: 5 features + sweeper + grpc),
+> `share` (share + contacts + trip-snapshot), `media` (feature + worker + sweeper + grpc), `notification`
+> (`TemplateRepository`), `places`, `chat` y `panic`.
+> **Excepción explícita fuera del alcance de §10** (mantienen `PrismaService` directo — es infra compartida, no feature):
+> `infra/outbox.relay.ts`, `infra/prisma.service.ts` y el readiness probe de `app.module.ts`.
 
 ---
 
@@ -396,9 +439,10 @@ Ola 2 BFFs → Ola 3 webs → Ola 4 apps RN → Ola 5 infra+e2e. Fundación hech
 - **Biometría local** del dispositivo (Face ID/huella) opcional para re-login (refresh en Secure Enclave/Keystore).
 
 **Datos (`@veo/database`, construido):** read/write split desde el inicio; derecho al olvido = **tombstone + anulación de PII**;
-prod = instancia RDS por servicio crítico (identity/payment/panic/audit); DNI = **solo hash** (nunca en claro); testcontainers para tests críticos.
+prod = **Postgres self-hosted** por servicio crítico en el VPS (identity/payment/panic/audit; contenedor dedicado vía Docker Compose, NO RDS — §0.7(c)); testcontainers para tests críticos.
+**DNI (distinción por entidad — decisión del dueño, ver VEO_SPEC_CONDUCTOR):** DNI del **`User`** = **hash** (matching interno irreversible, nunca se muestra); DNI del **`Driver`** = **cifrado reversible AES-256-GCM en reposo** (nunca en claro persistido), **descifrado en el borde solo para Compliance+** (admin-rail) — compliance debe MOSTRARLO para verificar manualmente contra el documento, y un hash rompería esa verificación.
 
-**Capacidades propias (§9):** biometría = **`biometric-service` Python/ONNX propio** (liveness activo por reto + match ≥90%,
+**Capacidades propias (§9):** biometría = **`biometric-service` Python/ONNX propio** (liveness **ACTIVO** por reto en el gate de turno **+ liveness PASIVO** (anti-spoofing single-frame · PAD) en el **enrolamiento del alta** — una sola selfie, sin frames extra ni lag · `/v1/enroll-passive`; **DEUDA:** índice/umbral del PAD son DEFAULTS, calibrar con set real/spoof antes de prod) + match **≥ umbral calibrado** (`BIOMETRIC_MIN_SCORE`, default **40**, alineado a la franja oficial InsightFace **0.30–0.45** para mismo-rostro; el código es la fuente de verdad — el viejo "≥90%" rechazaba conductores legítimos) + **face-match documento↔selfie** (la selfie enrolada vs **DNI Y licencia/brevete**; `approve()` exige AMBOS bindings ejecutados — binding más fuerte, veredicto del operador),
 embeddings); video = **LiveKit self-hosted**; mapas = **OSM propio** (OSRM/Valhalla + Nominatim) vía **`@veo/maps`** (lib directa, con cache).
 
 **Servicios nuevos vs blueprint:** `fleet-service` (vehículos/documentos/vencimientos/inspecciones) y `biometric-service`.
@@ -410,3 +454,202 @@ Re-verificación biométrica periódica = gancho (ahora solo al inicio de turno)
 
 **API & operación:** prefijo **`/api/v1`** en BFFs; **rate limiting en BFFs** (Redis, por IP+usuario; **POST /panic jamás se limita**);
 **CI por repo** (GitHub Actions: lint+typecheck+test+build); **seeds mínimos** (sin datos demo); **git aún NO inicializado** (a pedido).
+
+---
+
+## 15. Contratos de dominio reconciliados desde specs/ADRs (2026-07-10)
+
+> Estos contratos vivían SOLO en specs de producto y ADRs; se transcriben acá para que el plano TÉCNICO los
+> cubra. Cada subsección **cita su fuente canónica** — si la fuente y este resumen difieren, manda la fuente.
+> Reconciliación de plano (decisiones del dueño ya tomadas, Opción A). No introducen decisiones nuevas.
+
+### 15.1 Motor de pricing — la fórmula única, el enum de 3 modos, el value-object `ServiceOffering`
+
+> **Fuente canónica: [ADR-023](adr/023-modelo-pricing-coexistencia.md)** (modelo de coexistencia) + **[ADR-013](adr/013-catalogo-service-offerings.md)** (lo que es código no-editable). Plan: `specs/changes/pricing-taxonomy/`.
+
+**Una sola fórmula de distancia, money-critical, que NO se reinventa** (`calculateFirmFare` en
+`services/trip-service/src/trips/domain/fare.ts`):
+
+```
+tarifa = ( base + perKm·km + perMin·min ) × multiplier      [piso: minFareCents]
+```
+
+- **`surgeMultiplier` = `1.0` fijo** (surge está AFUERA del modelo, ADR-023 §5 — no es config del admin).
+- El resultado se congela en `Trip.dispatchMode`/tarifa firme al crear el viaje (**resolve-once-persist-forever**).
+
+**Los 3 modos PUROS** son la **taxonomía conceptual de ADR-023** — el modo decide **qué SIGNIFICA** ese número.
+**En código NO viven en un solo enum** (y así se quedan): `FIXED`/`PUJA` son el `PricingMode` de `@veo/shared-types`
+(on-demand, `trip-service`); `COST_SHARE` es el modo del carpooling y se implementa como el valor **`FIJO`** del enum
+**Prisma** de `booking-service` (`carpoolPricingMode = z.enum(['FIJO'])` en el api-client) — bounded context aparte.
+
+| Modo (taxonomía ADR-023) | En código          | Referente  | La fórmula es…    | Quién fija el precio                                        |
+| ------------------------ | ------------------ | ---------- | ----------------- | ---------------------------------------------------------- |
+| `FIXED`                  | `shared-types`     | Uber       | **el precio**     | la plataforma computa; el pasajero toma/deja               |
+| `PUJA`                   | `shared-types`     | inDrive    | **piso/sugerido** | el pasajero ofrece ≥ piso; el conductor acepta/contra-oferta |
+| `COST_SHARE`             | `FIJO` (booking)   | BlaBlaCar  | **tope (cap)**    | el conductor pone ≤ cap, ÷ asientos + service fee (no-comercial) |
+
+El modo es **per-service y MANUAL** (palanca del admin): cada oferta tiene UN `mode` fijo; **el sistema NUNCA lo
+flipea solo** (ni por horario ni por demanda). Esto supersede el motor de franjas de ADR-011.
+
+**El value-object `ServiceOffering`** (`OfferingSpec` en `packages/shared-types/src/catalog/offerings.ts`) —
+fuente única de los ejes de servicio:
+
+```ts
+interface OfferingSpec {
+  id: OfferingId;              // 'veo_moto' | 'veo_economico' | … — INMUTABLE (contrato con la app)
+  mode: PricingMode;           // uno por oferta (reemplaza allowedModes, ADR-023 §6)
+  vehicleClass: VehicleClass;  // enum CERRADO — key del pool de matching, certificable por fleet
+  pricing: {                   // params por servicio; algunos en CERO (bordes)
+    multiplier: number;
+    minFareCents: number;
+    baseFareCents?: number; perKmCents?: number; perMinCents?: number;  // overrides opcionales
+  };
+  category: 'RIDE' | 'SPECIAL' | 'CARPOOL';  // ORTOGONAL al precio: es el MENÚ, no la economía
+  requires?: VehicleRequirements;  // minSeats/minSegment/maxAgeYears/certs — elegibilidad de oferta (ADR-017)
+  flow: OfferingFlow; sortOrder: number;
+}
+```
+
+- **`category` (RIDE/SPECIAL/CARPOOL) es ortogonal al precio** — clasifica el menú del pasajero, no cambia la fórmula.
+- **`OfferingId`, `VehicleClass` y `requires` son CÓDIGO no-editable** (ADR-013): agregar una oferta o una clase es
+  cambio de código (enum cerrado + entrada de catálogo), jamás string abierto ni edición en caliente.
+
+**Los DOS bordes honestos — la fórmula NO estira a todo** (asume `km` y `min` conocidos al cotizar):
+
+- **Mecánico = call-out plano** (categoría SPECIAL, `FIXED`): `perKm = 0` **Y** `perMin = 0`; se cotiza un **fee de
+  visita** (`base`, ej. S/50) upfront y la labor/repuestos se cobran **aparte** tras el diagnóstico. **NO es "la
+  fórmula con ceros"** — es otra economía (una VISITA no es un VIAJE).
+- **Carpooling = producto propio** (categoría CARPOOL, `COST_SHARE`): comparte la **cuenta de distancia** (costo/km)
+  pero su **flujo** (publicado/programado + reservar asientos), sus **params** y su **economía** (no-comercial:
+  conductor 100 %, fee al pasajero) son suyos. Vive en **`booking-service`** (ADR-014, ver §15.3), no en el catálogo on-demand.
+
+**Por qué en el contrato técnico** (reglas no-negociables #3 idempotencia financiera + #7 tests de state machine):
+la fórmula + el value-object + el enum viven acá como **fuente única** para que `trip`/`payment`/`booking` **no
+reinventen "precio"** cada uno por su lado. `FIXED` y `PUJA` son estrategias en `trip-service` (`DispatchModeRegistry`);
+`COST_SHARE` — el valor `FIJO` del enum Prisma de `booking-service` — es su bounded context. Frontera por **dominio**,
+modo por **estrategia** — jamás un microservicio por modo.
+
+> **El código es la verdad — no se renombra lo que funciona.** El carpooling opera hoy con el valor `FIJO` (enum
+> Prisma + `carpoolPricingMode` del api-client) y **funciona**: `COST_SHARE` es su nombre en la **taxonomía**, no un
+> rename pendiente. Renombrar el enum Prisma sería una **migración de BD en un path financiero por una etiqueta** — se
+> **difiere** (la sugerencia de rótulo de ADR-023 §6 es **opcional, no deuda**). El doc registra la equivalencia
+> `FIJO ≡ COST_SHARE`; el código manda.
+
+### 15.2 Mapa config-pricing: superficie de edición → servicio dueño (orquestación del BFF, no un join)
+
+> **Fuente: [`VEO_SPEC_ADMIN.md`](../specs/VEO_SPEC_ADMIN.md) §3.0 + Finanzas** · **[`VEO_MODELO_HIBRIDO.md`](../specs/VEO_MODELO_HIBRIDO.md) §1.5** · **[ADR-013](adr/013-catalogo-service-offerings.md)**.
+
+**NO es una contradicción con la regla #3 (DB-per-service) — es aclarar OWNERSHIP.** El admin edita el pricing
+desde DOS pantallas, pero el DATO tiene dueño por servicio:
+
+| Pantalla del admin                            | Qué edita                                                                   | Servicio DUEÑO del dato     |
+| --------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- |
+| **Precios y tarifas** (`/finance/pricing`)    | fórmula **GLOBAL**: base all-in, comisión, **costo/km carpooling**, **modo por defecto** + franjas | on-demand → **trip + payment**; costo/km carpooling → **booking** |
+| **Ofertas de servicio** (`/finance/catalog`)  | **TODO lo por-oferta**: on/off, modo override, multiplicador, tarifa mínima, piso de puja | **trip + payment**          |
+
+- **El `admin-bff` ORQUESTA la escritura multi-dueño** (bloques que tocan a más de un servicio) con
+  **`Idempotency-Key`** por operación. Una pantalla que escribe a varios dueños = **orquestación del BFF**, NO un
+  join cross-servicio ni una tabla compartida.
+- Se **mantiene la regla de ownership-por-servicio**: **NO se consolida en un `pricing-service`**. El pricing es una
+  responsabilidad transversal editada desde el admin, cuyo dato reside en el servicio que lo ejecuta.
+- El **SET de ofertas / `VehicleClass` / `requires`** viven **en código** (ADR-013, §15.1): estas pantallas curan
+  solo **visibilidad + economía** (toggle, modo, multiplicador, mínimo, piso), nunca el set ni la elegibilidad.
+
+### 15.3 Cobro carpooling — charge-on-approval SIN hold + estado DEBT + máquinas de estado
+
+> **Fuente: [ADR-014](adr/014-modelo-carpooling-booking-service.md)** (que se corrige en paralelo respecto del "hold→charge" del spec) · PUJA on-demand: [ADR-010].
+
+**Yape/Plin y `payment-service` NO tienen HOLD.** Máquina real de payment: **`PENDING → [CAPTURED, FAILED, DEBT]`**
+(sin `HOLD`), y la captura es **ASÍNCRONA** (webhook/poll). Por eso el cobro del carpooling es
+**charge-on-approval SIN pre-autorización**, con la garantía perdida mitigada así:
+
+1. **Validar el método al RESERVAR** (`getDebtForPassenger(passengerId)` — REST `GET /payments/debt`) antes de aceptar.
+2. **Reintento BR-P02** (máx 3) al consumir `payment.failed`.
+3. **Estado `DEBT` DERIVADO de `payment-service`** — `booking-service` **NO crea un flag DEBT propio** (sería 2ª
+   fuente de verdad): deriva el gate consultando `PaymentStatus.DEBT`.
+
+**Idempotencia financiera (regla #3):** el CHARGE lleva **`dedupKey = booking-charge:{bookingId}`** (distinta del
+`trip-completed:{tripId}` canónico del on-demand). El **monto es server-authoritative** (`precioAcordado × asientos`
+computado por el servicio, con re-cap anti-lucro), **jamás dictado por el cliente**.
+
+**Las máquinas de estado son CONTRATO** (enums tipados + `assertTransition`, cero strings mágicos; la mutación de
+estado y el evento van en la MISMA transacción vía outbox):
+
+- **Viaje publicado** (`PublishedTripState`):
+  `BORRADOR → PUBLICADO → PARCIALMENTE_RESERVADO → LLENO → EN_RUTA → COMPLETADO` · `* (pre-EN_RUTA) → CANCELADO`.
+- **Booking** (`BookingState`):
+  `SOLICITADO → PENDIENTE_APROBACION → APROBADO → COBRO_PENDIENTE → CONFIRMADO → EN_RUTA → COMPLETADO`;
+  terminales `RECHAZADO` / `EXPIRADO` (sin cobro) y `CANCELADO` (+Refund por tier).
+  - **INSTANT_BOOKING salta la aprobación** (nace `APROBADO`); REVISION pasa por `PENDIENTE_APROBACION`.
+  - `APROBADO` dispara el CHARGE (async) → `COBRO_PENDIENTE`; se confirma al consumir **`payment.captured`**.
+  - **Concurrencia de asiento** (invariante crítico): `SELECT … FOR UPDATE` + decremento de `asientosDisponibles`
+    corre **dentro del handler de `payment.captured`**; camino infeliz "cobré pero el asiento se llenó" →
+    **Refund automático** (`booking.cancelled` reason=`asiento-lleno`). Nunca oversold.
+- **PUJA (on-demand, ADR-010):** `OFERTA → [CONTRAOFERTA]* → ACEPTADA / RECHAZADA / EXPIRADA` (**gana la
+  contra-oferta del conductor** — inDrive real).
+
+### 15.4 KYC asimétrico — enforcement por tipo de actor (invariante)
+
+> **Fuente: [ADR-018](adr/018-verificacion-pasajero-progresiva.md)** (pasajero progresivo) · gate conductor: §14 (biometría) + `VEO_SPEC_CONDUCTOR` §3.
+
+El enforcement de KYC es **deliberadamente ASIMÉTRICO** por tipo de actor — es un invariante, no un descuido:
+
+- **CONDUCTOR = fail-closed (gate DURO).** No inicia turno sin **liveness + match facial ≥ umbral**
+  (`BIOMETRIC_MIN_SCORE`). **Sin bypass, sin override de UI, sin "modo demo"**; 3 fallos = bloqueo 1h (solo la
+  central destraba). Binding **face↔DNI↔licencia** en el alta. La re-validación FULL fail-closed se repite **donde
+  mueve plata** (booking approve/reservar, ADR-014 §8).
+- **PASAJERO = fail-open on-demand (badge PROGRESIVO, NO muro).** El pasajero nace **`UNVERIFIED`** y **PUEDE pedir
+  viaje** con el piso teléfono + nombre. La verificación es **opcional** (liveness liviano desde Perfil) y solo
+  otorga un **badge de confianza** visible al conductor. Se **retiró conscientemente** el `assertKycVerified()`
+  pre-viaje (`public-bff/trips.service.ts` + re-check de `trip-service`) — es el **modelo de baja fricción de
+  adquisición** (no hay requisito legal de identificar al pasajero; Ley 29733 protege el DATO, no obliga a identificar).
+
+> **INVARIANTE — no re-agregar el gate KYC del pasajero pre-viaje "por las dudas".** Volver a poner
+> `assertKycVerified()` en `POST /trips` frenaría la demanda y revierte una decisión del dueño (ADR-018). El
+> endurecimiento selectivo futuro (nocturno / efectivo / N cancelaciones) es una palanca **que NO vuelve al muro**.
+
+### 15.5 Consentimiento Ley 29733 — evento de dominio VERSIONADO (no un flag best-effort)
+
+> **Fuente: [`VEO_SPEC_PASAJERO.md`](../specs/VEO_SPEC_PASAJERO.md) §Onboarding** (3 consentimientos) · regla no-negociable #1 (audit inmutable). Reconciliación Opción A (eleva el "best-effort" del spec).
+
+El pasajero acepta **3 consentimientos OBLIGATORIOS** en el onboarding: **(1) tratamiento de datos, (2) cámara en
+cabina durante el viaje, (3) compartir ubicación** (Ley N.° 29733). El **gate legal de UI** (los 3 son condición
+dura para avanzar) vive en el spec.
+
+**Contrato técnico (lo que el spec dejaba como "best-effort, no bloquea" se ELEVA):** el consentimiento **NO es un
+flag best-effort** — es un **evento de dominio VERSIONADO** con audit inmutable:
+
+```ts
+// evento consent.granted (schemaVersion en el envelope §6)
+{ subjectId, policyId, policyVersion, consents: ['DATA_PROCESSING','CABIN_CAMERA','LOCATION'],
+  acceptedAt /* timestamp inmutable */ }
+```
+
+- **Versionado explícito:** QUÉ política + QUÉ versión aceptada + timestamp inmutable — para poder probar, ante la
+  autoridad, qué texto exacto aceptó cada titular y cuándo.
+- **Encadenado inmutable:** se archiva en el **audit WORM** (MinIO object-lock + retención, regla #1), no un simple
+  `boolean` mutable en una fila.
+- **Dueño recomendado:** **`identity-service` emite** `consent.granted` (es dueño del `User`/onboarding y ya emite
+  `user.registered`) y **`audit-service` lo persiste en la cadena inmutable WORM**. Coherente con el resto de
+  FOUNDATION: identity dueño del acto, audit dueño de la inmutabilidad.
+
+### 15.6 Invariante de fan-out del pánico invisible (contrato de SEGURIDAD, no solo de UI)
+
+> **Fuente: [`VEO_SPEC_CONDUCTOR.md`](../specs/VEO_SPEC_CONDUCTOR.md) §Regla 2/§5** · **[`VEO_SPEC_FAMILIA.md`](../specs/VEO_SPEC_FAMILIA.md) §1** · **[`VEO_SPEC_PASAJERO.md`](../specs/VEO_SPEC_PASAJERO.md) §1.6** · CLAUDE (pair-review pánico).
+
+**Safety-critical.** Cuando el pasajero dispara pánico, el fan-out del backend es **asimétrico por audiencia**:
+
+- **Al CONDUCTOR:** el backend (`panic-service`/`trip-service`) emite **SOLO un `trip:update` con estado
+  `CANCELLED` normal**, indistinguible de una cancelación común. El backend **NO le manda el evento de pánico**.
+- **A la FAMILIA:** el viaje transiciona a **`ended-cancelled`** (una cancelación normal). La familia **no se entera**.
+- **La señal REAL de pánico va SOLO por el canal de la CENTRAL:** `panic.triggered` firmado HMAC (BR-S04) →
+  **audit inmutable + operadores/dispatch de la central**.
+
+> **PROHIBIDO** en el payload al conductor/familia **cualquier marca distintiva** de que fue pánico: tipo de evento
+> especial, `reason: panic` visible, flag, campo extra, vibración/tono distinto, cambio de estado no-estándar. La UI
+> podría filtrarlo y **delatar a la víctima** aunque "se vea igual". Una cancelación por pánico y una cancelación
+> normal deben ser **byte-a-byte indistinguibles** en lo que llega al conductor y a la familia.
+
+**Es un invariante del BACKEND, no solo una regla de UI:** el mensaje al conductor/familia se **construye idéntico**
+a una cancelación cualquiera; la diferenciación existe **exclusivamente** en el canal de la central. Todo cambio que
+toque pánico requiere **pair-review con security** (CLAUDE) + tests adversariales (§11) + p99 < 3s.

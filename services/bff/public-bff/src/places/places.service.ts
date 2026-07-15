@@ -16,7 +16,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import { status as GrpcStatus } from '@grpc/grpc-js';
 import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '@veo/utils';
 import { GrpcServiceClient } from '@veo/rpc';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { GRPC_PLACES } from '../infra/downstream.tokens';
 import type {
   PlaceReply,
@@ -37,6 +43,7 @@ export class PlacesService {
   constructor(
     @Inject(GRPC_PLACES) private readonly placesGrpc: GrpcServiceClient,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
   ) {}
 
   /** Lista los lugares guardados del usuario autenticado (ordenados server-side). */
@@ -68,7 +75,7 @@ export class PlacesService {
     request: Record<string, unknown>,
     user: AuthenticatedUser,
   ): Promise<T> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     try {
       return await this.placesGrpc.call<T>(method, request, meta);
     } catch (err) {

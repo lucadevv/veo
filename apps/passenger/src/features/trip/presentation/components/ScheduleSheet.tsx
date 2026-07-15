@@ -1,8 +1,9 @@
 import {BottomSheet, Button, Text, useTheme} from '@veo/ui-kit';
 import React, {useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {ScrollView, StyleSheet, View} from 'react-native';
 import {formatClock} from '../../../../shared/utils/format';
+import {SelectableChip} from '../../../../shared/presentation/components/SelectableChip';
 import {
   type DayOption,
   scheduleDayOptions,
@@ -112,7 +113,7 @@ export function ScheduleSheet({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{gap: theme.spacing.sm}}>
             {days.map((day, index) => (
-              <Chip
+              <SelectableChip
                 key={day.startOfDay}
                 label={dayLabel(day, index)}
                 selected={day.startOfDay === activeDayStart}
@@ -131,7 +132,7 @@ export function ScheduleSheet({
           </Text>
           <View style={styles.slotGrid}>
             {slots.map(ts => (
-              <Chip
+              <SelectableChip
                 key={ts}
                 label={formatClock(ts)}
                 selected={ts === slot}
@@ -146,52 +147,6 @@ export function ScheduleSheet({
   );
 }
 
-interface ChipProps {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  tabular?: boolean;
-}
-
-/** Chip seleccionable (día/hora): borde lima + fondo elevado cuando está activo (estado por borde, no solo color). */
-function Chip({
-  label,
-  selected,
-  onPress,
-  tabular,
-}: ChipProps): React.JSX.Element {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{selected}}
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.chip,
-        {
-          borderRadius: theme.radii.pill,
-          paddingHorizontal: theme.spacing.lg,
-          paddingVertical: theme.spacing.sm,
-          borderWidth: selected ? 2 : 1,
-          borderColor: selected ? theme.colors.accent : theme.colors.border,
-          backgroundColor: selected
-            ? theme.colors.surfaceElevated
-            : theme.colors.surface,
-          opacity: pressed ? 0.7 : 1,
-        },
-      ]}>
-      <Text
-        variant="subhead"
-        color={selected ? 'ink' : 'inkMuted'}
-        tabular={tabular}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   slotGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
-  chip: {alignItems: 'center', justifyContent: 'center'},
 });

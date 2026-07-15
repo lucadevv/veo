@@ -55,8 +55,16 @@ function startedEnvelope(payload: Record<string, unknown>): EventEnvelope<unknow
   });
 }
 
-/** Contexto doble: captura enqueues/warns y resuelve targets desde un mapa en memoria. */
-function fakeCtx(targetsByUser: Record<string, DeviceTarget[]>) {
+/**
+ * Contexto doble: captura enqueues/warns y resuelve targets desde un mapa en memoria.
+ * `identity` (opcional) configura el resolver driverId→userId (ADR-015 D7):
+ *  - `userByDriver`: mapa de resolución; un driver no mapeado → undefined (omito limpio).
+ *  - `throws`: simula gRPC caído (el resolver LANZA).
+ */
+function fakeCtx(
+  targetsByUser: Record<string, DeviceTarget[]>,
+  identity: { userByDriver?: Record<string, string>; throws?: boolean } = {},
+) {
   const enqueued: EnqueueInput[] = [];
   const warns: string[] = [];
   const resolveTargets = vi.fn(
@@ -71,8 +79,13 @@ function fakeCtx(targetsByUser: Record<string, DeviceTarget[]>) {
       return targetsByUser[userId] ?? [];
     },
   );
+  const resolveUserIdFromDriver = vi.fn(async (driverId: string) => {
+    if (identity.throws) throw new Error('identity gRPC unavailable');
+    return identity.userByDriver?.[driverId];
+  });
   const ctx: PushSpecContext = {
     resolveTargets,
+    resolveUserIdFromDriver,
     enqueue: async (input) => {
       enqueued.push(input);
     },
@@ -80,7 +93,7 @@ function fakeCtx(targetsByUser: Record<string, DeviceTarget[]>) {
       warns.push(message);
     },
   };
-  return { ctx, enqueued, warns, resolveTargets };
+  return { ctx, enqueued, warns, resolveTargets, resolveUserIdFromDriver };
 }
 
 describe('runPushSpec · esqueleto común del registro', () => {
@@ -203,6 +216,73 @@ describe('runPushSpec · esqueleto común del registro', () => {
     const spec = syntheticSpec({ enrichment: z.object({ driverName: z.string().optional() }) });
     await runPushSpec(ctx, spec, startedEnvelope({ driverName: 42 }));
     expect(enqueued).toHaveLength(0);
+  });
+});
+
+/* ────────── 1b · recipientKind: 'driverId' → resolución driverId→userId (ADR-015 D7) ────────── */
+
+describe('runPushSpec · recipientKind driverId (resuelve por identity antes del device-store)', () => {
+  const DRV = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const USER = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+  /** Fila sintética que targetea por Driver.id (espeja payout.processed) sobre el contrato trip.started. */
+  function driverSpec() {
+    return syntheticSpec({
+      recipient: (p) => p.driverId as string,
+      recipientKind: 'driverId',
+    });
+  }
+
+  it('resuelve driverId→userId y el device-store se consulta con el userId resuelto (no el driverId)', async () => {
+    const { ctx, enqueued, resolveTargets, resolveUserIdFromDriver } = fakeCtx(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      { userByDriver: { [DRV]: USER } },
+    );
+    await runPushSpec(ctx, driverSpec(), startedEnvelope({ driverId: DRV }));
+
+    // ASSERT CLAVE: resolveTargets recibe el USER resuelto, JAMÁS el driverId.
+    expect(resolveUserIdFromDriver).toHaveBeenCalledWith(DRV);
+    expect(resolveTargets).toHaveBeenCalledWith('trip.started', USER, undefined, undefined);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]!.recipientId).toBe(USER); // se keya a la cuenta, no al Driver.id
+    expect(enqueued[0]!.payload.to).toBe('tok-PO');
+  });
+
+  it('identity caído (TRANSITORIO, resolver LANZA) → PROPAGA el throw (Kafka redelivere, no traga la plata)', async () => {
+    const { ctx, enqueued, resolveTargets } = fakeCtx(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      { throws: true },
+    );
+    // ASSERT CLAVE: el motor NO traga el throw transitorio → propaga al manejo de error del consumer
+    // (que relanza para Kafka). Simetría de durabilidad con el device-store transitorio.
+    await expect(
+      runPushSpec(ctx, driverSpec(), startedEnvelope({ driverId: DRV })),
+    ).rejects.toThrow('identity gRPC unavailable');
+    expect(enqueued).toHaveLength(0);
+    expect(resolveTargets).not.toHaveBeenCalled(); // se entregará en el redelivery (cuando identity vuelva)
+  });
+
+  it('driver sin userId resoluble (RESULTADO permanente, resolver → undefined) → warn y omite limpio (no relanza)', async () => {
+    const { ctx, enqueued, warns, resolveTargets } = fakeCtx(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      { userByDriver: {} }, // DRV no mapea
+    );
+    await runPushSpec(ctx, driverSpec(), startedEnvelope({ driverId: DRV }));
+    expect(enqueued).toHaveLength(0);
+    expect(resolveTargets).not.toHaveBeenCalled();
+    expect(warns).toHaveLength(1);
+  });
+
+  it('REGRESIÓN: una fila por userId (sin recipientKind) NO pasa por la resolución de identity', async () => {
+    const { ctx, enqueued, resolveUserIdFromDriver, resolveTargets } = fakeCtx({
+      [PAX]: [{ token: 'tok-1', platform: 'android' }],
+    });
+    // syntheticSpec() default = recipient userId, sin recipientKind.
+    await runPushSpec(ctx, syntheticSpec(), startedEnvelope({}));
+    expect(resolveUserIdFromDriver).not.toHaveBeenCalled(); // jamás toca identity
+    expect(resolveTargets).toHaveBeenCalledWith('trip.started', PAX, undefined, undefined);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]!.recipientId).toBe(PAX);
   });
 });
 

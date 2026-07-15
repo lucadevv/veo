@@ -3,7 +3,6 @@ import type {AuthRepository} from '../../features/auth/domain/authRepository';
 import type {ConsentRepository} from '../../features/auth/domain/consentRepository';
 import type {PendingConsentStore} from '../../features/auth/domain/pendingConsent';
 import type {SyncPendingConsentUseCase} from '../../features/auth/domain/syncPendingConsentUseCase';
-import type {LocalAuthService} from '../../features/auth/domain/localAuthService';
 import type {
   ForgotPasswordUseCase,
   LoginEmailUseCase,
@@ -30,7 +29,16 @@ import type {
   SubmitKycUseCase,
 } from '../../features/kyc/domain/usecases';
 import type {NotificationsRepository} from '../../features/notifications/domain/notificationsRepository';
-import type {ListNotificationsUseCase} from '../../features/notifications/domain/usecases';
+import type {NotificationPrefsRepository} from '../../features/notifications/domain/notificationPrefsRepository';
+import type {
+  ListNotificationsUseCase,
+  MarkAllNotificationsReadUseCase,
+  MarkNotificationReadUseCase,
+} from '../../features/notifications/domain/usecases';
+import type {
+  GetNotificationPrefsUseCase,
+  UpdateNotificationPrefsUseCase,
+} from '../../features/notifications/domain/prefsUsecases';
 import type {PushTokenRegistrar} from '../../features/notifications/domain/pushTokenRegistrar';
 import type {PanicSecretStore} from '../../features/panic/domain/panicSecretStore';
 import type {
@@ -72,6 +80,7 @@ import type {
   GetPaymentUseCase,
   GetUserCreditUseCase,
   RetryChargeUseCase,
+  SettlePenaltyUseCase,
 } from '../../features/payments/domain/usecases';
 import type {ProfileRepository} from '../../features/profile/domain/profileRepository';
 import type {PromosRepository} from '../../features/promos/domain/promosRepository';
@@ -112,7 +121,6 @@ import type {
   CancelBidUseCase,
   CancelScheduledTripUseCase,
   CancelTripUseCase,
-  ChangeDestinationUseCase,
   CloseTripUseCase,
   CreateTripUseCase,
   GetCabinVideoUseCase,
@@ -126,6 +134,16 @@ import type {
   RevokeShareUseCase,
   ShareTripUseCase,
 } from '../../features/trip/domain/usecases';
+import type {CarpoolRepository} from '../../features/carpool/domain/carpoolRepository';
+import type {
+  BrowseCarpoolTripsUseCase,
+  CancelCarpoolBookingUseCase,
+  GetCarpoolBookingUseCase,
+  GetCarpoolPopularRoutesUseCase,
+  GetCarpoolTripDetailUseCase,
+  ReserveCarpoolSeatUseCase,
+  SearchCarpoolTripsUseCase,
+} from '../../features/carpool/domain/usecases';
 import type {MapsRepository} from '../../features/maps/domain/mapsRepository';
 import type {
   AutocompletePlacesUseCase,
@@ -161,6 +179,8 @@ export const TOKENS = {
     'CameraSharePreferenceRepository',
   ),
   mapsRepository: createToken<MapsRepository>('MapsRepository'),
+  // Marketplace de carpooling (ADR-014, lado pasajero): búsqueda/detalle/reserva vía public-bff.
+  carpoolRepository: createToken<CarpoolRepository>('CarpoolRepository'),
   // Dispatch: vehículos cercanos anónimos (ambiente del mapa en idle/searching).
   dispatchRepository: createToken<DispatchRepository>('DispatchRepository'),
   panicRepository: createToken<PanicRepository>('PanicRepository'),
@@ -176,10 +196,13 @@ export const TOKENS = {
   referralsRepository: createToken<ReferralsRepository>('ReferralsRepository'),
   contactsRepository: createToken<ContactsRepository>('ContactsRepository'),
   chatRepository: createToken<ChatRepository>('ChatRepository'),
-  // Centro de avisos (LOCAL · hueco de backend: no hay listado en el bff, ver
-  // notificationsRepository.ts). Impl actual: feed vacío honesto.
+  // Centro de avisos: HTTP REAL contra el public-bff (GET /notifications + PATCH read/read-all).
   notificationsRepository: createToken<NotificationsRepository>(
     'NotificationsRepository',
+  ),
+  // Preferencias de notificación: HTTP REAL contra el public-bff (GET/PUT /notification-prefs).
+  notificationPrefsRepository: createToken<NotificationPrefsRepository>(
+    'NotificationPrefsRepository',
   ),
   kycRepository: createToken<KycRepository>('KycRepository'),
 
@@ -187,7 +210,6 @@ export const TOKENS = {
   locationProvider: createToken<LocationProvider>('LocationProvider'),
   imagePickerService: createToken<ImagePickerService>('ImagePickerService'),
   avatarUploader: createToken<AvatarUploader>('AvatarUploader'),
-  localAuthService: createToken<LocalAuthService>('LocalAuthService'),
   panicSigner: createToken<PanicSigner>('PanicSigner'),
   panicTrigger: createToken<PanicTrigger>('PanicTrigger'),
   panicSecretStore: createToken<PanicSecretStore>('PanicSecretStore'),
@@ -242,9 +264,6 @@ export const TOKENS = {
   closeTripUseCase: createToken<CloseTripUseCase>('CloseTripUseCase'),
   createTripUseCase: createToken<CreateTripUseCase>('CreateTripUseCase'),
   cancelTripUseCase: createToken<CancelTripUseCase>('CancelTripUseCase'),
-  changeDestinationUseCase: createToken<ChangeDestinationUseCase>(
-    'ChangeDestinationUseCase',
-  ),
   getCabinVideoUseCase: createToken<GetCabinVideoUseCase>(
     'GetCabinVideoUseCase',
   ),
@@ -272,6 +291,29 @@ export const TOKENS = {
   acceptOfferUseCase: createToken<AcceptOfferUseCase>('AcceptOfferUseCase'),
   cancelBidUseCase: createToken<CancelBidUseCase>('CancelBidUseCase'),
   rebidUseCase: createToken<RebidUseCase>('RebidUseCase'),
+
+  // Casos de uso · Carpooling (marketplace programado · ADR-014)
+  browseCarpoolTripsUseCase: createToken<BrowseCarpoolTripsUseCase>(
+    'BrowseCarpoolTripsUseCase',
+  ),
+  getCarpoolPopularRoutesUseCase: createToken<GetCarpoolPopularRoutesUseCase>(
+    'GetCarpoolPopularRoutesUseCase',
+  ),
+  searchCarpoolTripsUseCase: createToken<SearchCarpoolTripsUseCase>(
+    'SearchCarpoolTripsUseCase',
+  ),
+  getCarpoolTripDetailUseCase: createToken<GetCarpoolTripDetailUseCase>(
+    'GetCarpoolTripDetailUseCase',
+  ),
+  reserveCarpoolSeatUseCase: createToken<ReserveCarpoolSeatUseCase>(
+    'ReserveCarpoolSeatUseCase',
+  ),
+  getCarpoolBookingUseCase: createToken<GetCarpoolBookingUseCase>(
+    'GetCarpoolBookingUseCase',
+  ),
+  cancelCarpoolBookingUseCase: createToken<CancelCarpoolBookingUseCase>(
+    'CancelCarpoolBookingUseCase',
+  ),
 
   // Casos de uso · Maps
   autocompletePlacesUseCase: createToken<AutocompletePlacesUseCase>(
@@ -329,6 +371,10 @@ export const TOKENS = {
     'GetUserCreditUseCase',
   ),
   retryChargeUseCase: createToken<RetryChargeUseCase>('RetryChargeUseCase'),
+  // Caso de uso · Payments · Pagar una penalidad de cancelación (kind=CANCELLATION_PENALTY · F2.3)
+  settlePenaltyUseCase: createToken<SettlePenaltyUseCase>(
+    'SettlePenaltyUseCase',
+  ),
   // Caso de uso · Payments · Cambiar el método de un pago PENDIENTE a otro DIGITAL (TASK 3)
   changePaymentMethodUseCase: createToken<ChangePaymentMethodUseCase>(
     'ChangePaymentMethodUseCase',
@@ -364,6 +410,19 @@ export const TOKENS = {
   // Casos de uso · Notificaciones (centro de avisos)
   listNotificationsUseCase: createToken<ListNotificationsUseCase>(
     'ListNotificationsUseCase',
+  ),
+  markNotificationReadUseCase: createToken<MarkNotificationReadUseCase>(
+    'MarkNotificationReadUseCase',
+  ),
+  markAllNotificationsReadUseCase: createToken<MarkAllNotificationsReadUseCase>(
+    'MarkAllNotificationsReadUseCase',
+  ),
+  // Casos de uso · Preferencias de notificación (sync backend)
+  getNotificationPrefsUseCase: createToken<GetNotificationPrefsUseCase>(
+    'GetNotificationPrefsUseCase',
+  ),
+  updateNotificationPrefsUseCase: createToken<UpdateNotificationPrefsUseCase>(
+    'UpdateNotificationPrefsUseCase',
   ),
 
   // Casos de uso · Promos

@@ -48,7 +48,10 @@ describe('SandboxPaymentGateway · charge', () => {
     expect(r.checkout?.qrCodeBase64).toContain('data:image/png;base64,');
   });
 
-  it('modo pendingExternal + walletUid → on-file sin checkout', async () => {
+  it('modo pendingExternal + walletUid → on-file CONFIRMED síncrono (sin checkout)', async () => {
+    // On-file (Yape afiliado) es server-initiated: NO requiere aprobación del usuario, así que se captura
+    // al instante aun en modo pendingExternal (que solo aplica al one-shot con QR). Hace testeable el pago
+    // AUTOMÁTICO end-to-end sin webhook.
     const r = await gw({ pendingExternal: true }).charge({
       paymentId: 'p4',
       tripId: 't1',
@@ -56,8 +59,32 @@ describe('SandboxPaymentGateway · charge', () => {
       method: 'YAPE',
       walletUid: 'W1',
     });
-    expect(r.status).toBe('PENDING_EXTERNAL');
+    expect(r.status).toBe('CONFIRMED');
+    expect(r.externalRef).toBeTruthy();
     expect(r.checkout).toBeUndefined();
+  });
+
+  it('YapeSubscriber: createYapeSubscription AUTO-APRUEBA (ACTIVE, sin deepLink); showYapeSubscription → ACCEPTED', async () => {
+    const { supportsYapeSubscription } = await import('./payment-gateway.port');
+    const g = gw({ pendingExternal: true });
+    expect(supportsYapeSubscription(g)).toBe(true);
+    const sub = await g.createYapeSubscription({
+      origin: 'MOBILE',
+      document: '12345678',
+      clientDocumentType: 'DN',
+      clientName: 'Test',
+      type: 'RECURRENT',
+    });
+    expect(sub.uid).toBeTruthy();
+    // SIN deepLink a propósito (no hay app Yape que aprobar) + status ACTIVE → el dominio la resuelve
+    // vinculada EN EL MISMO POST, sin depender del poll /show del cliente.
+    expect(sub.deepLink).toBeUndefined();
+    expect(sub.status).toBe('ACTIVE');
+    expect(sub.phoneNumber).toBeTruthy();
+    // /show sigue disponible como fallback del poll (afiliaciones PROCESS legacy) → ACCEPTED.
+    const detail = await g.showYapeSubscription(sub.uid!);
+    expect(detail.status).toBe('ACCEPTED');
+    expect(detail.phoneNumber).toBeTruthy();
   });
 });
 

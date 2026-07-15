@@ -10,6 +10,7 @@ import { REST_IDENTITY } from '../infra/downstream.tokens';
 import { ANONYMOUS_IDENTITY } from '../common/identities';
 import type { Env } from '../config/env.schema';
 import {
+  OTP_ACTOR_TYPE,
   PANIC_SIGNATURE_VERSION,
   type AuthTokens,
   type EmailOkResult,
@@ -48,17 +49,19 @@ export class AuthService {
     };
   }
 
+  // El `type` del OTP se FIJA server-side a passenger (este es el BFF del pasajero; nunca emite OTP de
+  // conductor). No se acepta del cliente: aunque alguien inyecte `type=DRIVER`, lo sobrescribimos.
   requestOtp(dto: RequestOtpDto): Promise<{ sent: true }> {
     return this.identity.post<{ sent: true }>('/auth/otp/request', {
       identity: ANONYMOUS_IDENTITY,
-      body: dto,
+      body: { ...dto, type: OTP_ACTOR_TYPE },
     });
   }
 
   verifyOtp(dto: VerifyOtpDto): Promise<AuthTokens> {
     return this.identity.post<AuthTokens>('/auth/otp/verify', {
       identity: ANONYMOUS_IDENTITY,
-      body: dto,
+      body: { ...dto, type: OTP_ACTOR_TYPE },
     });
   }
 
@@ -133,6 +136,13 @@ export class AuthService {
 
   logout(dto: LogoutDto): Promise<{ ok: true }> {
     return this.identity.post<{ ok: true }>('/auth/logout', {
+      identity: ANONYMOUS_IDENTITY,
+      body: dto,
+    });
+  }
+
+  logoutAll(dto: LogoutDto): Promise<{ ok: true }> {
+    return this.identity.post<{ ok: true }>('/auth/logout-all', {
       identity: ANONYMOUS_IDENTITY,
       body: dto,
     });

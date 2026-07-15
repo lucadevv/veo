@@ -34,6 +34,11 @@ function makeSpyStorage(): { storage: StoragePort; deletes: { key: string; bucke
       deletes.push({ key, bucket });
     },
     getObjectSize: async () => 0,
+    deletePrefix: async () => 0,
+    getObjectStream: async () => {
+      throw new Error('getObjectStream no usado en este test');
+    },
+    uploadObject: async () => {},
   };
   return { storage, deletes };
 }

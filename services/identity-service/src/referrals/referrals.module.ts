@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ReferralsService } from './referrals.service';
+import { ReferralsRepository } from './referrals.repository';
 import { ReferralsController } from './referrals.controller';
 import { ReferralsConsumer } from './referrals.consumer';
 
@@ -8,7 +9,7 @@ import { ReferralsConsumer } from './referrals.consumer';
  * trip.completed otorga la recompensa al referidor cuando el referido completa su 1er viaje.
  */
 @Module({
-  providers: [ReferralsService, ReferralsConsumer],
+  providers: [ReferralsService, ReferralsRepository, ReferralsConsumer],
   controllers: [ReferralsController],
   exports: [ReferralsService],
 })

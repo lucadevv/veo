@@ -23,7 +23,7 @@ interface ZoneSeed {
 
 function makeService(opts: { zones: ZoneSeed[]; demand: string | null }) {
   const hotIndex = new InMemoryHotIndex();
-  const prisma = { read: { surgeZone: { findMany: async () => opts.zones } } };
+  const repo = { findActiveZones: async () => opts.zones };
   const redis = {
     get: async () => opts.demand,
     incr: async () => 1,
@@ -32,7 +32,7 @@ function makeService(opts: { zones: ZoneSeed[]; demand: string | null }) {
   const config = new ConfigService<Env, true>({
     SURGE_DEMAND_WINDOW_SECONDS: 300,
   } as Partial<Env> as Env);
-  const service = new SurgeService(prisma as never, redis, hotIndex, config);
+  const service = new SurgeService(repo as never, redis, hotIndex, config);
   return { service, hotIndex };
 }
 

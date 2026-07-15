@@ -1,4 +1,5 @@
 import {create} from 'zustand';
+import type {MobileVehicleType, PricingMode} from '@veo/api-client';
 
 export interface ActiveTripState {
   /**
@@ -10,6 +11,23 @@ export interface ActiveTripState {
    */
   activeTripId: string | null;
   /**
+   * Modo de despacho AUTORITATIVO del viaje activo (PUJA | FIXED), CONGELADO por el server al crear
+   * (ADR 011). Se co-loca acá con el id porque es un atributo estable y decisivo para la MÁQUINA DE FASES:
+   * un FIXED EXPIRED (sin conductor) NO va a la pantalla de "re-pujar" (esa es de PUJA) sino a su propio
+   * estado terminal. `null` = desconocido (sin viaje o modo no adoptado) → la fase degrada al comportamiento
+   * PUJA histórico (no hay regresión). Se setea al crear (`onTripCreated`) y al rehidratar.
+   */
+  activeTripMode: PricingMode | null;
+  /**
+   * Tipo de vehículo SOLICITADO del viaje activo (CAR | MOTO), congelado al crear (`tripResource.vehicleType`).
+   * Alimenta el GLYPH del marker del conductor asignado en el mapa Y la animación del sheet (moto ≠ auto).
+   * `null` = desconocido → degrada al glyph de auto (fallback histórico). Fuentes, en orden: el POST /trips
+   * al crear; `tripActiveView.vehicleType` del server en la rehidratación Y en el poll del detalle (cubre
+   * la adopción por 409 y cross-device — antes el snapshot MMKV local era la ÚNICA fuente de rehidratación
+   * y esos caminos caían al auto); el snapshot MMKV como fallback de compat (BFF viejo sin el campo).
+   */
+  activeTripVehicleType: MobileVehicleType | null;
+  /**
    * Id del enlace de seguimiento ACTIVO de la sesión actual (o `null` si no se compartió, o ya se
    * revocó). Se retiene al crear el enlace para poder REVOCARLO (kill-switch): antes la app lo
    * descartaba y el endpoint de revoke quedaba inalcanzable (auditoría R3).
@@ -17,10 +35,20 @@ export interface ActiveTripState {
   activeShareId: string | null;
   /** Caducidad ISO-8601 del enlace activo (para el countdown "Expira en …"). `null` sin enlace. */
   shareExpiresAt: string | null;
+  /**
+   * URL pública del enlace activo de la sesión. Se RETIENE porque el backend no tiene GET del share
+   * activo y el POST no dedupea sin dedupKey: sin esto, re-entrar a "Comparte tu viaje" crearía un
+   * enlace nuevo cada vez. `null` si el enlace se creó por un camino que no la retuvo (legacy).
+   */
+  shareUrl: string | null;
   /** Adopta un viaje activo (creación local o rehidratación desde el server). */
   setActiveTripId: (tripId: string) => void;
-  /** Retiene el enlace recién creado (shareId + caducidad) para poder revocarlo y mostrar el countdown. */
-  setActiveShare: (shareId: string, expiresAt: string) => void;
+  /** Fija el modo de despacho del viaje activo (PUJA | FIXED); se conoce al crear/rehidratar. */
+  setActiveTripMode: (mode: PricingMode) => void;
+  /** Fija el tipo de vehículo del viaje activo (CAR | MOTO); se conoce al crear/rehidratar (snapshot). */
+  setActiveTripVehicleType: (vehicleType: MobileVehicleType) => void;
+  /** Retiene el enlace recién creado (shareId + caducidad + URL) para revocar/reusar/countdown. */
+  setActiveShare: (shareId: string, expiresAt: string, url?: string) => void;
   /** Olvida el enlace activo (tras revocar o al terminar el viaje). NO toca el viaje en sí. */
   clearShare: () => void;
   /** Limpia el viaje (terminal/cancelado → vuelve al home idle). Limpia también el enlace compartido. */
@@ -35,14 +63,28 @@ export interface ActiveTripState {
  */
 export const useActiveTripStore = create<ActiveTripState>(set => ({
   activeTripId: null,
+  activeTripMode: null,
+  activeTripVehicleType: null,
   activeShareId: null,
   shareExpiresAt: null,
+  shareUrl: null,
   setActiveTripId: activeTripId => set({activeTripId}),
-  setActiveShare: (activeShareId, shareExpiresAt) =>
-    set({activeShareId, shareExpiresAt}),
-  clearShare: () => set({activeShareId: null, shareExpiresAt: null}),
+  setActiveTripMode: activeTripMode => set({activeTripMode}),
+  setActiveTripVehicleType: activeTripVehicleType =>
+    set({activeTripVehicleType}),
+  setActiveShare: (activeShareId, shareExpiresAt, url) =>
+    set({activeShareId, shareExpiresAt, shareUrl: url ?? null}),
+  clearShare: () =>
+    set({activeShareId: null, shareExpiresAt: null, shareUrl: null}),
   // El `clear` del viaje DEBE arrastrar el enlace: si no, un share viejo quedaría colgado al
   // arrancar un viaje nuevo (regresión del lifecycle → botón de revoke apuntando a un link ajeno).
   clear: () =>
-    set({activeTripId: null, activeShareId: null, shareExpiresAt: null}),
+    set({
+      activeTripId: null,
+      activeTripMode: null,
+      activeTripVehicleType: null,
+      activeShareId: null,
+      shareExpiresAt: null,
+      shareUrl: null,
+    }),
 }));

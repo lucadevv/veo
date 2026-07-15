@@ -9,9 +9,8 @@ import {
   type TripStatus,
   type TripSummary,
 } from '@veo/api-client';
-import type { AdminRole } from '@veo/shared-types';
+import type { AdminRole, SuspensionCause } from '@veo/shared-types';
 import type { TripRecord, DriverRecord } from '../read-model/read-model.service';
-import { canSeeIdentity } from '../redaction/redaction.policy';
 
 /**
  * `fareCents` es `number` NO-nullable en el contrato (`tripSummary`/`tripDetail` de @veo/api-client).
@@ -20,14 +19,33 @@ import { canSeeIdentity } from '../redaction/redaction.policy';
  * /ops/trips queda DIFERIDA (identidad es la prioridad de este lote); ver reporte. `roles` se acepta
  * ya en la firma para no re-tocar call-sites cuando el contrato se haga nullable.
  */
-export function tripRecordToSummary(r: TripRecord, _roles: readonly AdminRole[]): TripSummary {
+/**
+ * Enriquecimiento on-read por viaje. `passengerName`/`driverName`: PII (identity gRPC batch), ya redactados
+ * en el service (null si no visible). `dispatchMode`: modo CONGELADO del viaje (trip-service gRPC batch), NO
+ * es PII → para todos los roles; null si trip-service no lo resolvió (degradación honesta → "—").
+ */
+export interface TripSummaryEnrichment {
+  passengerName: string | null;
+  driverName: string | null;
+  dispatchMode: 'FIXED' | 'PUJA' | null;
+}
+
+export function tripRecordToSummary(
+  r: TripRecord,
+  _roles: readonly AdminRole[],
+  enrichment?: TripSummaryEnrichment,
+): TripSummary {
   return {
     id: r.id,
     status: r.status,
     passengerId: r.passengerId,
     driverId: r.driverId,
+    passengerName: enrichment?.passengerName ?? null,
+    driverName: enrichment?.driverName ?? null,
     fareCents: r.fareCents,
     createdAt: r.createdAt,
+    // Modo de despacho (FIXED|PUJA) enriquecido on-read desde trip-service; null → "—" honesto.
+    dispatchMode: enrichment?.dispatchMode ?? null,
   };
 }
 
@@ -41,24 +59,102 @@ export function driverRecordToSummary(r: DriverRecord): DriverSummary {
   };
 }
 
+/** Estado de suspensión proyectado en el badge de la lista (reconciliado contra la autoridad de identity). */
+const DRIVER_STATUS_SUSPENDED = 'SUSPENDED';
+const DRIVER_STATUS_ACTIVE = 'ACTIVE';
+
 /**
- * Registro del read-model → vista de APROBACIÓN del contrato. fullName/phone no viven en el read-model
- * (vienen de identity) → null honesto; el enriquecimiento por identity es follow-up. `submittedAt` se
- * aproxima con `updatedAt` (última señal del registro). El contrato exige las claves presentes (nullable).
+ * Enriquecimiento por-conductor que el admin-bff resuelve on-read contra identity (lectura batch, sin N+1):
+ *  - `fullName`/`phone`: PII (Compliance+); null para sub-Compliance o sin dato.
+ *  - `suspendedAt`: estado AUTORITATIVO de suspensión derivado de los holds ("" → null acá ⇒ libre; ISO ⇒
+ *    suspendido). NO es PII: se usa para reconciliar el badge de la lista para TODOS los roles.
+ *  - `suspensionCauses`: las `cause` DISTINTAS de los holds vigentes (DISCIPLINARY/DOCUMENT_EXPIRED/
+ *    INSPECTION_EXPIRED · modelo de HOLDS, derivado en identity). El panel las usa para ofrecer la acción de
+ *    reactivación correcta por fila (cause-aware), igual que el detalle. NO es PII (es un enum de motivo);
+ *    se proyecta para TODOS los roles. [] cuando el conductor no tiene holds.
  */
-export function driverRecordToApproval(r: DriverRecord, roles: readonly AdminRole[]): DriverApproval {
-  // IDENTIDAD (fullName/phone) = Compliance+. Hoy el read-model no los provee (null honesto), pero
-  // la redacción ya está cableada: cuando el enriquecimiento por identity aterrice, sub-Compliance
-  // seguirá viendo `null`. NUNCA se inventa data.
-  const identityVisible = canSeeIdentity(roles);
+export interface DriverListEnrichment {
+  fullName: string | null;
+  phone: string | null;
+  suspendedAt: string | null;
+  suspensionCauses: SuspensionCause[];
+  /** Completitud documental (docs REQUERIDOS en VALID / total · fleet batch). No es PII → para todos los roles. */
+  docsComplete: number;
+  docsTotal: number;
+  /** Estado combinado de verificación biométrica (VERIFICADO/REVISAR/PENDIENTE); null si sub-Compliance (redactado). */
+  verificationStatus: string | null;
+  /**
+   * Presencia OPERATIVA autoritativa del conductor (identity.currentStatus: OFFLINE/AVAILABLE/ON_TRIP/…), para
+   * la columna ESTADO. Es un EJE DISTINTO del `status` de ciclo de vida del read-model (PENDING/ACTIVE/…), que
+   * NO es presencia — por eso la lista mostraba a los postulantes "En línea". No es PII (el detalle ya lo expone
+   * por gRPC) → para todos los roles. null si identity no la trae.
+   */
+  operationalStatus: string | null;
+}
+
+/**
+ * Registro del read-model → vista de APROBACIÓN del contrato. `submittedAt` se aproxima con `updatedAt`
+ * (última señal del registro). El contrato exige las claves presentes (nullable).
+ *
+ * RECONCILIACIÓN DEL BADGE DE SUSPENSIÓN (autoridad: identity · modelo de HOLDS): el `status` del read-model
+ * es event-driven y queda STALE en dos casos que reconciliamos contra el `suspendedAt` autoritativo de identity
+ * (cuando vino en el enriquecimiento, que es siempre que la página no es vacía):
+ *   - identity dice SUSPENDIDO (`suspendedAt != null`) pero el read-model NO lo refleja → forzamos SUSPENDED.
+ *     Cubre la suspensión por ITV (llega keyeada por User.id; el consumer del read-model no la proyecta).
+ *   - identity dice LIBRE (`suspendedAt == null`) pero el read-model dice SUSPENDED → forzamos ACTIVE. Cubre la
+ *     AUTO-reactivación (el conductor regularizó un documento/ITV; identity quitó el hold SIN emitir
+ *     `driver.reactivated` — ese evento solo lo emite la reactivación del OPERADOR).
+ * Solo se reconcilia el eje SUSPENDED↔ACTIVE: PENDING/REJECTED (antecedentes) NO se tocan — un conductor
+ * PENDIENTE con `suspendedAt` null NO debe volverse ACTIVE por esta vía. Sin enriquecimiento (no debería pasar
+ * con página no vacía) → se conserva el status del read-model (degradación honesta, nunca se inventa).
+ */
+export function driverRecordToApproval(
+  r: DriverRecord,
+  // La redacción de PII (fullName/phone) ya se aplicó al construir el `enrichment` (en ops.service.listDrivers,
+  // donde vive el rol); acá solo se proyecta. `_roles` se mantiene en la firma para no re-tocar el call-site.
+  _roles: readonly AdminRole[],
+  enrichment?: DriverListEnrichment,
+): DriverApproval {
+  // IDENTIDAD (fullName/phone) = Compliance+ (el enrichment ya viene redactado a null para sub-Compliance).
+  // Los eventos driver.* NO llevan PII (Ley 29733) → la identidad se resuelve on-read contra identity.
+  const summary = driverRecordToSummary(r);
   return {
-    ...driverRecordToSummary(r),
-    fullName: identityVisible ? null : null,
-    phone: identityVisible ? null : null,
+    ...summary,
+    status: reconcileSuspensionBadge(summary.status, enrichment),
+    fullName: enrichment?.fullName ?? null,
+    phone: enrichment?.phone ?? null,
     submittedAt: r.updatedAt,
     // Motivo del último rechazo (proyectado del evento driver.rejected); null si no está rechazado.
     rejectionReason: r.rejectionReason,
+    // CAUSAS de suspensión (autoridad: identity · modelo de HOLDS) para la UI cause-aware de reactivación.
+    // Sin enriquecimiento (página vacía no debería darse) → [] honesto, nunca se inventa.
+    suspensionCauses: enrichment?.suspensionCauses ?? [],
+    // Completitud documental (fleet batch) + verificación (identity batch). Sin enriquecimiento → 0/0 y null
+    // (degradación honesta, nunca se inventa). verificationStatus ya viene redactado a null para sub-Compliance.
+    docsComplete: enrichment?.docsComplete ?? 0,
+    docsTotal: enrichment?.docsTotal ?? 0,
+    verificationStatus: enrichment?.verificationStatus ?? null,
+    // Presencia OPERATIVA autoritativa (identity.currentStatus) para la columna ESTADO. Sin enriquecimiento
+    // (página vacía no debería darse) → null honesto: la columna cae a "—", nunca inventa "En línea".
+    operationalStatus: enrichment?.operationalStatus ?? null,
   };
+}
+
+/**
+ * Reconcilia el eje SUSPENDED↔ACTIVE del badge contra el estado autoritativo de identity. Sin enriquecimiento
+ * (`suspendedAt` indefinido) → se conserva el status del read-model. Solo cruza entre SUSPENDED y ACTIVE: los
+ * demás estados (PENDING/REJECTED) se conservan tal cual (no son sobre suspensión).
+ */
+function reconcileSuspensionBadge(
+  readModelStatus: string,
+  enrichment?: DriverListEnrichment,
+): string {
+  if (!enrichment) return readModelStatus;
+  const suspendedByIdentity = enrichment.suspendedAt !== null;
+  if (suspendedByIdentity) return DRIVER_STATUS_SUSPENDED;
+  // identity dice LIBRE: solo bajamos de SUSPENDED a ACTIVE (no tocamos PENDING/REJECTED).
+  if (readModelStatus === DRIVER_STATUS_SUSPENDED) return DRIVER_STATUS_ACTIVE;
+  return readModelStatus;
 }
 
 /**
@@ -93,4 +189,25 @@ const ADMIN_TRIP_STATUS: Record<TripStatus, AdminTripStatus> = {
 export function mapTripStatus(raw: string): AdminTripStatus {
   const normalized = normalizeTripStatus(raw);
   return normalized === null ? 'UNKNOWN' : ADMIN_TRIP_STATUS[normalized];
+}
+
+/**
+ * Estados TERMINALES/estancados de la vista OPS. Gemelo server-side de `isActiveTrip` de admin-web
+ * (components/trips/status-badge.tsx) — misma lista, misma semántica: REASSIGNING sigue VIVO (busca
+ * otro conductor) y UNKNOWN cuenta como vivo a propósito (si no sabemos el estado, ops debe operar el
+ * viaje, no perderlo). Si esta lista cambia, cambiar TAMBIÉN la de admin-web (no comparten paquete).
+ */
+const TERMINAL_ADMIN_TRIP_STATUSES: ReadonlySet<AdminTripStatus> = new Set<AdminTripStatus>([
+  'COMPLETED',
+  'CANCELLED',
+  'FAILED',
+  'EXPIRED',
+]);
+
+/**
+ * ¿El viaje está VIVO para ops? Decide si el detalle computa ruta planeada + ETA en vivo: para un
+ * viaje terminal NO se fabrica una ruta on-the-fly (se leería como el recorrido REAL del conductor).
+ */
+export function isLiveAdminTrip(status: AdminTripStatus): boolean {
+  return !TERMINAL_ADMIN_TRIP_STATUSES.has(status);
 }

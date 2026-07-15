@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { isVerificationBypassed } from '../../../../core/config/env';
 import { BIOMETRIC_NOT_ENROLLED } from '../../domain';
 import { useBiometricCapture } from '../providers/BiometricCaptureProvider';
 import { useStartShift } from './useShift';
@@ -24,7 +25,11 @@ export function useShiftStartFlow(onSuccess: () => void, onNeedEnrollment?: () =
     setScore(null);
     try {
       setPhase('capturing');
-      const { sessionRef } = await capture.captureForShiftStart();
+      // BYPASS local (solo dev, ver `isVerificationBypassed`): saltea la captura biométrica y arranca turno
+      // directo con un sessionRef placeholder (el backend con VEO_BYPASS_VERIFICATION no consume la sesión).
+      const { sessionRef } = isVerificationBypassed
+        ? { sessionRef: 'bypass-dev' }
+        : await capture.captureForShiftStart();
       setPhase('starting');
       const result = await start.mutateAsync({ sessionRef });
       setScore(result.score);

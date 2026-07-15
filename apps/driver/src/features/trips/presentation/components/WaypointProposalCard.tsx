@@ -28,7 +28,7 @@ export const WaypointProposalCard = ({
   const { t } = useTranslation();
 
   return (
-    <Card variant="outlined" padding="lg">
+    <Card variant="elevated" padding="lg">
       <View style={{ gap: theme.spacing.sm }}>
         <Text variant="bodyStrong">{t('trips.waypoint.proposedTitle')}</Text>
         <Text variant="footnote" color="inkMuted">

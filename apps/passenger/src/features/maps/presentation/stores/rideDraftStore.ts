@@ -20,10 +20,17 @@ export interface RideDraftState {
   waypoints: RoutePlace[];
   /** Punto en edición en la pantalla de búsqueda. */
   editing: RouteEndpointKind;
+  /**
+   * Intención de PROGRAMAR (toggle "Programado" del Home / CTA del tab Próximos): al llegar a la
+   * cotización con esta marca, `QuotingBody` abre el selector de día/hora solo (y la consume).
+   * El flujo programado no navega a ninguna pantalla aparte: es el flujo inmediato + esta marca.
+   */
+  scheduleIntent: boolean;
 
   setOrigin: (place: RoutePlace | null) => void;
   setDestination: (place: RoutePlace | null) => void;
   setEditing: (target: RouteEndpointKind) => void;
+  setScheduleIntent: (intent: boolean) => void;
   /** Inserta una parada vacía al final (si no se alcanzó el máximo) y la deja en edición. */
   addWaypoint: () => void;
   /** Fija el lugar de la parada en `index`. */
@@ -47,10 +54,12 @@ export const useRideDraftStore = create<RideDraftState>(set => ({
   destination: null,
   waypoints: [],
   editing: {kind: 'destination'},
+  scheduleIntent: false,
 
   setOrigin: origin => set({origin}),
   setDestination: destination => set({destination}),
   setEditing: editing => set({editing}),
+  setScheduleIntent: scheduleIntent => set({scheduleIntent}),
 
   addWaypoint: () =>
     set(state => {
@@ -89,5 +98,6 @@ export const useRideDraftStore = create<RideDraftState>(set => ({
       destination: null,
       waypoints: [],
       editing: {kind: 'destination'},
+      scheduleIntent: false,
     }),
 }));

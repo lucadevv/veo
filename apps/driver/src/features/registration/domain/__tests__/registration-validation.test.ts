@@ -16,6 +16,10 @@ const baseVehicle: VehicleData = {
   modelSpecId: 'spec-123',
   brand: 'Honda',
   model: 'CB 190R',
+  // LOTE 1: sin categoría MTC leída (carga manual del tipo) → se omite del body (el `vehicleType` es hint).
+  mtcCategory: '',
+  // Sin color leído (carga manual) → se omite del body.
+  color: '',
 };
 
 describe('validatePersonalData', () => {
@@ -52,6 +56,44 @@ describe('validatePersonalData', () => {
     }
   });
 
+  it('acepta la fecha de nacimiento ya en ISO yyyy-mm-dd (la que emite el DateField nativo)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: '1990-08-15' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.birthDate).toBe('1990-08-15');
+    }
+  });
+
+  it('rechaza una fecha ISO anterior al año mínimo (1920)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: '1919-12-31' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_invalid');
+    }
+  });
+
+  it('rechaza una fecha ISO inexistente (29 feb de año no bisiesto)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: '2021-02-29' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_invalid');
+    }
+  });
+
+  it('rechaza una fecha ISO futura', () => {
+    const future = new Date();
+    future.setUTCFullYear(future.getUTCFullYear() + 1);
+    const iso = `${future.getUTCFullYear()}-${String(future.getUTCMonth() + 1).padStart(
+      2,
+      '0',
+    )}-${String(future.getUTCDate()).padStart(2, '0')}`;
+    const result = validatePersonalData({ ...basePersonal, birthdate: iso });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_future');
+    }
+  });
+
   it('rechaza fecha de nacimiento futura', () => {
     const future = new Date();
     future.setUTCFullYear(future.getUTCFullYear() + 1);
@@ -61,6 +103,64 @@ describe('validatePersonalData', () => {
       ...basePersonal,
       birthdate: `${dd}/${mm}/${future.getUTCFullYear()}`,
     });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_future');
+    }
+  });
+});
+
+describe('validatePersonalData · regla de edad (BR-I04, espejo del backend)', () => {
+  // Construye un ISO yyyy-mm-dd a partir de "hoy" (UTC) desplazado por años/días, para tests
+  // deterministas que dependen de la fecha actual (igual criterio que el backend: comparación UTC).
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const isoFromTodayUtc = (deltaYears: number, deltaDays = 0): string => {
+    const today = new Date();
+    const d = new Date(
+      Date.UTC(today.getUTCFullYear() + deltaYears, today.getUTCMonth(), today.getUTCDate()),
+    );
+    if (deltaDays !== 0) {
+      d.setUTCDate(d.getUTCDate() + deltaDays);
+    }
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+  };
+
+  it('acepta exactamente 18 años cumplidos hoy (cumple 18 hoy)', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-18) });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.birthDate).toBe(isoFromTodayUtc(-18));
+    }
+  });
+
+  it('rechaza 17 años y 364 días (cumple 18 mañana) como underage', () => {
+    // Hoy menos 18 años, más 1 día → aún no cumplió 18.
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-18, 1) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_underage');
+    }
+  });
+
+  it('acepta exactamente 100 años cumplidos hoy', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-100) });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.birthDate).toBe(isoFromTodayUtc(-100));
+    }
+  });
+
+  it('rechaza 101 años (un día antes de cumplir 100 sería válido; 101 no) como invalid_age', () => {
+    // Hoy menos 100 años, menos 1 día → ya tiene 100 años + 1 día... usamos -101 para >100 claro.
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(-101) });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.birthdate).toBe('birthdate_invalid_age');
+    }
+  });
+
+  it('rechaza una fecha futura antes de evaluar la edad', () => {
+    const result = validatePersonalData({ ...basePersonal, birthdate: isoFromTodayUtc(1) });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.birthdate).toBe('birthdate_future');
@@ -90,6 +190,14 @@ describe('validateVehicle', () => {
     }
   });
 
+  it('acepta placa de MOTO (7351-NB · categoría L)', () => {
+    const result = validateVehicle({ ...baseVehicle, plate: '7351-NB' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.plate).toBe('7351-NB');
+    }
+  });
+
   it('rechaza año fuera de rango', () => {
     const result = validateVehicle({ ...baseVehicle, year: '1990' });
     expect(result.ok).toBe(false);
@@ -98,11 +206,65 @@ describe('validateVehicle', () => {
     }
   });
 
-  it('rechaza si no se eligió un modelo del catálogo (modelSpecId vacío)', () => {
+  it('RAMA TEXTO LIBRE (Lote 2 · scan-first): sin modelSpecId pero con make+model → envía make/model', () => {
+    // Tarjeta escaneada: el OCR dejó marca/modelo a texto libre y NO hay modelSpecId (catálogo no tocado).
+    // El contrato (`registerVehicleRequest.refine`) acepta esta rama; el body lleva make+model, no modelSpecId.
     const result = validateVehicle({ ...baseVehicle, modelSpecId: '   ' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request).toEqual({
+        vehicleType: 'MOTO',
+        plate: 'ABC-123',
+        year: 2021,
+        make: 'Honda',
+        model: 'CB 190R',
+      });
+    }
+  });
+
+  it('rechaza si no hay NI modelo del catálogo NI marca/modelo a texto libre', () => {
+    const result = validateVehicle({ ...baseVehicle, modelSpecId: '', brand: '', model: '' });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.model).toBe('model_not_selected');
+    }
+  });
+
+  it('LOTE 1: rechaza con type=null (sin tipo derivado ni elegido) → type_required (sin "Auto" mudo)', () => {
+    const result = validateVehicle({ ...baseVehicle, type: null });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.type).toBe('type_required');
+    }
+  });
+
+  it('LOTE 1: la categoría MTC cruda de la tarjeta viaja al body (fuente de verdad del tipo)', () => {
+    const result = validateVehicle({ ...baseVehicle, mtcCategory: 'L3' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request).toEqual({
+        vehicleType: 'MOTO',
+        plate: 'ABC-123',
+        modelSpecId: 'spec-123',
+        year: 2021,
+        mtcCategory: 'L3',
+      });
+    }
+  });
+
+  it('el color leído por OCR viaja opcional al body (registerVehicleRequest.color)', () => {
+    const result = validateVehicle({ ...baseVehicle, color: 'NEGRO' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.request.color).toBe('NEGRO');
+    }
+  });
+
+  it('sin color (carga manual) → el campo color se OMITE del body', () => {
+    const result = validateVehicle({ ...baseVehicle, color: '' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect('color' in result.request).toBe(false);
     }
   });
 });

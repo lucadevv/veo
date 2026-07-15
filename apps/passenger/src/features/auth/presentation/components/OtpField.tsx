@@ -19,6 +19,8 @@ export interface OtpFieldProps {
   hasError: boolean;
   /** Cambia su valor para disparar el "shake" (p. ej. contador de errores de verificación). */
   errorNonce?: number;
+  /** Editable/enfocable. Por defecto true. En false no roba foco ni abre teclado (dim). */
+  editable?: boolean;
   accessibilityLabel: string;
 }
 
@@ -98,6 +100,7 @@ export function OtpField({
   length = 6,
   hasError,
   errorNonce = 0,
+  editable = true,
   accessibilityLabel,
 }: OtpFieldProps): React.JSX.Element {
   const {t} = useTranslation();
@@ -126,8 +129,13 @@ export function OtpField({
   }));
 
   return (
-    <Pressable onPress={() => inputRef.current?.focus()}>
-      <Animated.View style={[styles.row, {gap: theme.spacing.sm}, rowStyle]}>
+    <Pressable onPress={() => editable && inputRef.current?.focus()}>
+      <Animated.View
+        style={[
+          styles.row,
+          {gap: theme.spacing.sm, opacity: editable ? 1 : 0.55},
+          rowStyle,
+        ]}>
         {Array.from({length}).map((_, index) => {
           const char = value[index] ?? '';
           const active =
@@ -149,9 +157,11 @@ export function OtpField({
           onChangeText={onChangeText}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
+          // Teclado del SO en modo numérico: da los dígitos + BORRAR (backspace), que es lo que el usuario
+          // necesita para corregir un dígito mal tecleado. NO usamos `textContentType`/`autoComplete` de OTP
+          // a propósito: disparaban la barra de autofill del SO con códigos SMS recientes ("otros códigos"
+          // que confunden). Entrada + corrección con el teclado nativo, sin sugerencias de código.
           keyboardType="number-pad"
-          autoComplete="sms-otp"
-          textContentType="oneTimeCode"
           maxLength={length}
           autoFocus
           caretHidden

@@ -8,7 +8,6 @@ import {
   isValidPeruPhone,
   normalizePeruPhone,
 } from '../../../../shared/utils/phone';
-import {useBiometricGateStore} from '../stores/biometricGateStore';
 
 /** Normaliza el teléfono ingresado al formato que espera el bff (con prefijo 51). */
 export function normalizePhone(raw: string): string {
@@ -32,7 +31,6 @@ export function useAuthFlow() {
   const panicSecretProvisioner = useDependency(TOKENS.panicSecretProvisioner);
   const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
   const setSession = useSessionStore(state => state.setSession);
-  const unlockBiometricGate = useBiometricGateStore(state => state.unlock);
 
   const requestMutation = useMutation<OtpRequestResult, Error, string>({
     mutationFn: (phone: string) =>
@@ -58,8 +56,6 @@ export function useAuthFlow() {
         refreshToken: tokens.refreshToken,
         user: tokens.user,
       });
-      // Login fresco: el usuario acaba de autenticarse, no exigir biometría en esta sesión.
-      unlockBiometricGate();
       // Drena la cola durable de consentimiento (best-effort): el onboarding capturó la aceptación
       // ANTES del login (sin sesión → quedó Pending). Ahora que hay JWT, el POST puede confirmar.
       void syncPendingConsent.flush();

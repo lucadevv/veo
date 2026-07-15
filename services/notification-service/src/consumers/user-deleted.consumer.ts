@@ -10,6 +10,7 @@
  *  - `outbox_events` derivados de esas notificaciones (envelopes notification.sent/failed con `to`).
  *  - `support_tickets`: `subject`/`body` son texto libre del usuario (PII en sí mismo) → borrado duro,
  *    mismo criterio que los mensajes de chat (chat-service · ErasureConsumer).
+ *  - `notification_preferences`: la fila de preferencias in-app del usuario (ligada a su `userId`).
  *
  * El ESQUELETO (bootstrap kafka + validar payload contra el registro central + dedup por eventId
  * con la marca DESPUÉS del éxito + logs + relanzar para que kafkajs reintente) vive promovido en
@@ -25,6 +26,7 @@ import { REDIS } from '../infra/redis';
 import { DeviceTokenRepository } from '../devices/device-token.repository';
 import { NotificationRepository } from '../engine/notification.repository';
 import { SupportTicketRepository } from '../support/support.repository';
+import { NotificationPreferenceRepository } from '../notification-prefs/notification-prefs.repository';
 import type { Env } from '../config/env.schema';
 
 /** clientId kafkajs de este servicio. */
@@ -42,6 +44,7 @@ export class UserDeletedConsumer extends ErasureConsumerBase {
     private readonly devices: DeviceTokenRepository,
     private readonly notifications: NotificationRepository,
     private readonly tickets: SupportTicketRepository,
+    private readonly prefs: NotificationPreferenceRepository,
     @Inject(REDIS) redis: Redis,
     config: ConfigService<Env, true>,
   ) {
@@ -64,10 +67,11 @@ export class UserDeletedConsumer extends ErasureConsumerBase {
           const deletedTokens = await this.devices.deleteByUser(userId);
           const deletedNotifications = await this.notifications.eraseByRecipients(recipients);
           const deletedTickets = await this.tickets.deleteByUser(userId);
+          const deletedPrefs = await this.prefs.deleteByUser(userId);
           return (
             `Derecho al olvido: usuario ${userId} purgado — ${deletedTokens} token(s) push, ` +
             `${deletedNotifications} notificación(es) (historial + cola pendiente + outbox derivado), ` +
-            `${deletedTickets} ticket(s) de soporte.`
+            `${deletedTickets} ticket(s) de soporte, ${deletedPrefs} preferencia(s) de notificación.`
           );
         },
         logError: ({ userId }) => ({

@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { ChatService } from '../chat/chat.service';
 import { ErasureConsumer } from './erasure.consumer';
-import type { PrismaService } from '../infra/prisma.service';
+import type { ChatRepository } from '../chat/chat.repository';
 import type { Env } from '../config/env.schema';
 import type { EventEnvelope } from '@veo/events';
 
@@ -21,18 +21,23 @@ const config = new ConfigService<Env, true>({
   KAFKA_BROKERS: 'localhost:9094',
 } as Partial<Env> as Env);
 
-/** Prisma espía que registra cada deleteMany sobre messages (where + count devuelto). */
-function makeSpyPrisma(count = 3): {
-  prisma: PrismaService;
+/** ChatRepository espía que registra cada borrado sobre messages (where + count devuelto). */
+function makeSpyRepo(count = 3): {
+  repo: ChatRepository;
   deletes: { where: Record<string, unknown> }[];
 } {
   const deletes: { where: Record<string, unknown> }[] = [];
-  const deleteMany = vi.fn(async (args: { where: Record<string, unknown> }) => {
-    deletes.push(args);
-    return { count };
-  });
-  const prisma = { write: { message: { deleteMany } } } as unknown as PrismaService;
-  return { prisma, deletes };
+  const repo = {
+    deleteBySenders: vi.fn(async (senderIds: string[]) => {
+      deletes.push({ where: { senderId: { in: senderIds } } });
+      return count;
+    }),
+    deleteByTrip: vi.fn(async (tripId: string) => {
+      deletes.push({ where: { tripId } });
+      return count;
+    }),
+  } as unknown as ChatRepository;
+  return { repo, deletes };
 }
 
 /** Redis en memoria (solo get/set) para deduplicación. */
@@ -86,8 +91,8 @@ function makeConsumer(chat: ChatService) {
 
 describe('ChatService.eraseUser (derecho al olvido)', () => {
   it('borra los mensajes cuyo senderId es el usuario borrado', async () => {
-    const { prisma, deletes } = makeSpyPrisma(2);
-    const svc = new ChatService(prisma, config);
+    const { repo, deletes } = makeSpyRepo(2);
+    const svc = new ChatService(repo, config);
 
     const res = await svc.eraseUser('usr-1');
 
@@ -96,8 +101,8 @@ describe('ChatService.eraseUser (derecho al olvido)', () => {
   });
 
   it('si la identidad era conductor, borra AMBOS lados (userId y driverId)', async () => {
-    const { prisma, deletes } = makeSpyPrisma(5);
-    const svc = new ChatService(prisma, config);
+    const { repo, deletes } = makeSpyRepo(5);
+    const svc = new ChatService(repo, config);
 
     await svc.eraseUser('usr-1', 'drv-9');
 
@@ -107,8 +112,8 @@ describe('ChatService.eraseUser (derecho al olvido)', () => {
 
 describe('ChatService.eraseTrip (derecho al olvido)', () => {
   it('purga TODOS los mensajes del viaje (ambos participantes)', async () => {
-    const { prisma, deletes } = makeSpyPrisma(4);
-    const svc = new ChatService(prisma, config);
+    const { repo, deletes } = makeSpyRepo(4);
+    const svc = new ChatService(repo, config);
 
     const res = await svc.eraseTrip('trip-1');
 
@@ -119,8 +124,8 @@ describe('ChatService.eraseTrip (derecho al olvido)', () => {
 
 describe('ErasureConsumer · user.deleted', () => {
   function setup() {
-    const { prisma, deletes } = makeSpyPrisma();
-    const chat = new ChatService(prisma, config);
+    const { repo, deletes } = makeSpyRepo();
+    const chat = new ChatService(repo, config);
     const eraseSpy = vi.spyOn(chat, 'eraseUser');
     const { invokeUserDeleted: invoke } = makeConsumer(chat);
     return { chat, deletes, eraseSpy, invoke };
@@ -165,8 +170,8 @@ describe('ErasureConsumer · user.deleted', () => {
   });
 
   it('NO marca el dedup si el borrado falla (permite reintento de kafkajs)', async () => {
-    const { prisma } = makeSpyPrisma();
-    const chat = new ChatService(prisma, config);
+    const { repo } = makeSpyRepo();
+    const chat = new ChatService(repo, config);
     let calls = 0;
     vi.spyOn(chat, 'eraseUser').mockImplementation(async () => {
       calls++;
@@ -186,8 +191,8 @@ describe('ErasureConsumer · user.deleted', () => {
 
 describe('ErasureConsumer · trip.pii_erased', () => {
   function setup() {
-    const { prisma, deletes } = makeSpyPrisma(4);
-    const chat = new ChatService(prisma, config);
+    const { repo, deletes } = makeSpyRepo(4);
+    const chat = new ChatService(repo, config);
     const eraseSpy = vi.spyOn(chat, 'eraseTrip');
     const { invokeTripErased: invoke } = makeConsumer(chat);
     return { chat, deletes, eraseSpy, invoke };
@@ -232,8 +237,8 @@ describe('ErasureConsumer · trip.pii_erased', () => {
   });
 
   it('NO marca el dedup si la purga falla (permite reintento de kafkajs)', async () => {
-    const { prisma } = makeSpyPrisma();
-    const chat = new ChatService(prisma, config);
+    const { repo } = makeSpyRepo();
+    const chat = new ChatService(repo, config);
     let calls = 0;
     vi.spyOn(chat, 'eraseTrip').mockImplementation(async () => {
       calls++;
@@ -255,8 +260,8 @@ describe('ErasureConsumer · trip.pii_erased', () => {
   });
 
   it('los DOS eventos comparten el dedup del group: eventIds DISTINTOS no se pisan', async () => {
-    const { prisma } = makeSpyPrisma();
-    const chat = new ChatService(prisma, config);
+    const { repo } = makeSpyRepo();
+    const chat = new ChatService(repo, config);
     const eraseUserSpy = vi.spyOn(chat, 'eraseUser');
     const eraseTripSpy = vi.spyOn(chat, 'eraseTrip');
     const { invokeUserDeleted, invokeTripErased } = makeConsumer(chat);

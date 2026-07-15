@@ -5,24 +5,24 @@
  *  - PENDING   → no aplica (sigue en curso).
  *  - found=false (uid no reconocido) → no aplica, no rompe.
  *  - errores de consulta de un pago no abortan el barrido.
- * Hermético: prisma/gateway/payments fake; el flag `running` se fuerza para permitir el barrido.
+ * Hermético: se MOCKEA EL REPO (seam de acceso a datos), no Prisma; gateway/payments fake; el flag `running`
+ * se fuerza para permitir el barrido.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PaymentPollService } from './payment-poll.service';
-import type { PrismaService } from '../infra/prisma.service';
+import type { ReconciliationRepository } from './reconciliation.repository';
 import type { PaymentsService } from '../payments/payments.service';
 import type { PaymentGateway, PaymentStatusDetail } from '../ports/gateway/payment-gateway.port';
 import type { SchedulerRegistry } from '@nestjs/schedule';
 import type { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 
-function makeFakePrisma(rows: { id: string; externalUid: string | null }[]) {
-  const client = {
-    payment: {
-      findMany: vi.fn(async ({ take }: { take: number }) => rows.slice(0, take)),
-    },
+function makeFakeRepo(rows: { id: string; externalUid: string | null; createdAt?: Date }[]) {
+  const repo = {
+    // Espeja el contrato del repo: cobros PENDING con uid, oldest-first, acotados a `batch`.
+    findPendingPaymentsWithExternalUid: vi.fn(async (batch: number) => rows.slice(0, batch)),
   };
-  return { read: client, write: client } as unknown as PrismaService;
+  return repo as unknown as ReconciliationRepository;
 }
 
 /** Gateway fake con consulta de estado configurable por uid. */
@@ -64,7 +64,7 @@ const fakeScheduler = {
 const fakeRedis = { set: vi.fn(), del: vi.fn() } as unknown as Redis;
 
 function build(
-  rows: { id: string; externalUid: string | null }[],
+  rows: { id: string; externalUid: string | null; createdAt?: Date }[],
   byUid: Record<string, PaymentStatusDetail>,
   applyImpl?: PaymentsService['applyWebhookResult'],
 ) {
@@ -73,7 +73,7 @@ function build(
   );
   const payments = { applyWebhookResult } as unknown as PaymentsService;
   const svc = new PaymentPollService(
-    makeFakePrisma(rows),
+    makeFakeRepo(rows),
     fakeRedis,
     makeGateway(byUid),
     payments,
@@ -110,13 +110,32 @@ describe('PaymentPollService.pollOnce · poll fallback', () => {
     expect(res).toEqual({ scanned: 1, applied: 0 });
   });
 
-  it('found=false (uid no reconocido) → NO aplica y no rompe', async () => {
-    const { svc, applyWebhookResult } = build([{ id: 'pay-1', externalUid: 'U1' }], {
-      U1: { found: false, status: 'PENDING' },
-    });
+  it('found=false RECIENTE (posible lag de registro) → NO aplica, espera (se reintenta luego)', async () => {
+    const { svc, applyWebhookResult } = build(
+      [{ id: 'pay-1', externalUid: 'U1', createdAt: new Date() }], // recién creado
+      { U1: { found: false, status: 'PENDING' } },
+    );
     const res = await svc.pollOnce();
     expect(applyWebhookResult).not.toHaveBeenCalled();
     expect(res.applied).toBe(0);
+  });
+
+  // #24 · huérfano viejo: el proveedor nunca registró el cobro y ya pasó la ventana → se EXPIRA (no queda PENDING).
+  it('found=false VIEJO (> maxAgeMin, checkout abandonado) → EXPIRA por applyWebhookResult(EXPIRED)', async () => {
+    const old = new Date(Date.now() - 120 * 60_000); // 120min > maxAgeMin (60)
+    const { svc, applyWebhookResult } = build(
+      [{ id: 'pay-old', externalUid: 'U1', createdAt: old }],
+      {
+        U1: { found: false, status: 'PENDING' },
+      },
+    );
+    const res = await svc.pollOnce();
+    expect(applyWebhookResult).toHaveBeenCalledWith({
+      paymentId: 'pay-old',
+      externalUid: 'U1',
+      status: 'EXPIRED',
+    });
+    expect(res.applied).toBe(1);
   });
 
   it('un error de consulta en un pago NO aborta el barrido del resto', async () => {
@@ -149,7 +168,7 @@ describe('PaymentPollService · activación', () => {
   it('en modo sandbox NO registra el intervalo (nada que consultar)', () => {
     const addInterval = vi.fn();
     const svc = new PaymentPollService(
-      makeFakePrisma([]),
+      makeFakeRepo([]),
       fakeRedis,
       makeGateway({}),
       {} as unknown as PaymentsService,
@@ -173,7 +192,7 @@ describe('PaymentPollService · activación', () => {
       return h;
     });
     const svc = new PaymentPollService(
-      makeFakePrisma([]),
+      makeFakeRepo([]),
       fakeRedis,
       makeGateway({}),
       {} as unknown as PaymentsService,

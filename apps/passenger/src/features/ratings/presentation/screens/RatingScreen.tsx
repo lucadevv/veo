@@ -58,6 +58,7 @@ export function RatingScreen(): React.JSX.Element {
     mutationFn: () => {
       // Hueco de backend: ratingSubmitRequest solo acepta `comment` (sin tags estructurados). Para no
       // perder los motivos elegidos, los anteponemos al comentario libre — viajan al backend de forma honesta.
+      // DEUDA: (backend) el POST de ratings solo acepta 'comment'; los motivos (chips) se anteponen al texto libre en vez de ir como tags[] estructurados. Pedir al backend aceptar tags[] para analítica real de motivos.
       const tags = reasonLabels(reasons, t);
       const tagLine = tags.length > 0 ? tags.join(' · ') : '';
       const body = [tagLine, comment.trim()].filter(Boolean).join('\n');

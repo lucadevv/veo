@@ -73,13 +73,7 @@ const FONT_REGULAR = ['DIN Pro Regular', 'Arial Unicode MS Regular'];
 const NAME_FIELD: unknown = ['coalesce', ['get', 'name_es'], ['get', 'name']];
 
 /** Filtro de mundo requerido por las capas `admin` y `place_label` (class=country) de Streets v8. */
-const WORLDVIEW_ALL: unknown = [
-  'match',
-  ['get', 'worldview'],
-  ['all'],
-  true,
-  false,
-];
+const WORLDVIEW_ALL: unknown = ['match', ['get', 'worldview'], ['all'], true, false];
 
 /**
  * Style JSON de Mapbox (spec v8). Tipado laxo a `Record<string, unknown>` porque el spec de estilo
@@ -112,13 +106,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       type: 'fill',
       source: 'composite',
       'source-layer': 'landuse',
-      filter: [
-        'match',
-        ['get', 'class'],
-        ['wood', 'scrub', 'grass', 'glacier'],
-        true,
-        false,
-      ],
+      filter: ['match', ['get', 'class'], ['wood', 'scrub', 'grass', 'glacier'], true, false],
       paint: {
         'fill-color': palette.landcover,
         'fill-opacity': 0.6,
@@ -172,15 +160,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       filter: [
         'match',
         ['get', 'class'],
-        [
-          'industrial',
-          'commercial_area',
-          'cemetery',
-          'hospital',
-          'school',
-          'parking',
-          'airport',
-        ],
+        ['industrial', 'commercial_area', 'cemetery', 'hospital', 'school', 'parking', 'airport'],
         true,
         false,
       ],
@@ -227,13 +207,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       source: 'composite',
       'source-layer': 'road',
       minzoom: 12,
-      filter: [
-        'match',
-        ['get', 'class'],
-        ['service', 'track', 'path', 'pedestrian'],
-        true,
-        false,
-      ],
+      filter: ['match', ['get', 'class'], ['service', 'track', 'path', 'pedestrian'], true, false],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': palette.roadMinor,
@@ -265,13 +239,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       source: 'composite',
       'source-layer': 'road',
       minzoom: 9,
-      filter: [
-        'match',
-        ['get', 'class'],
-        ['secondary', 'secondary_link'],
-        true,
-        false,
-      ],
+      filter: ['match', ['get', 'class'], ['secondary', 'secondary_link'], true, false],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': palette.roadSecondary,
@@ -303,13 +271,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       source: 'composite',
       'source-layer': 'road',
       minzoom: 5,
-      filter: [
-        'match',
-        ['get', 'class'],
-        ['motorway', 'motorway_link'],
-        true,
-        false,
-      ],
+      filter: ['match', ['get', 'class'], ['motorway', 'motorway_link'], true, false],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': palette.roadMotorway,
@@ -342,17 +304,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
       filter: [
         'match',
         ['get', 'class'],
-        [
-          'sea',
-          'ocean',
-          'lake',
-          'water',
-          'river',
-          'bay',
-          'reservoir',
-          'canal',
-          'stream',
-        ],
+        ['sea', 'ocean', 'lake', 'water', 'river', 'bay', 'reservoir', 'canal', 'stream'],
         true,
         false,
       ],
@@ -418,17 +370,7 @@ export const veoDarkMapboxStyle: Record<string, unknown> = {
         'text-color': palette.labelPlaceOther,
         'text-halo-color': palette.labelStreetHalo,
         'text-halo-width': 1.4,
-        'text-opacity': [
-          'interpolate',
-          ['linear'],
-          ['zoom'],
-          13,
-          0,
-          14,
-          0.5,
-          17,
-          0.65,
-        ],
+        'text-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, 0.5, 17, 0.65],
       },
     },
     {

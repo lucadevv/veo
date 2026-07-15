@@ -31,7 +31,7 @@ import { BffClient } from '../lib/http.js';
 import { BASE_URLS } from '../lib/config.js';
 import { signPanic, uuidv7 } from '../lib/panic.js';
 import { approveDriverByUserId, clearDispatchHotIndex, injectOtp } from '../lib/fixtures.js';
-import { putModeSchedule, ruleCoveringNow } from '../lib/pricing-admin.js';
+import { setOfferingMode } from '../lib/pricing-admin.js';
 import { pollUntil } from '../lib/wait.js';
 
 // ── Tipos mínimos de las respuestas que consumimos de los BFFs ──
@@ -79,8 +79,18 @@ const OTP_CODE = '424242';
 const gate = await checkStack();
 const orchestrator = new Orchestrator();
 
-// El stack mínimo emite/consume estos topics de dominio.
-const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'driver', 'user']);
+// El stack mínimo emite/consume estos topics de dominio. 'driver-location' es el topic propio del
+// firehose de ubicación (driver.location_updated), aislado del 'driver' de ciclo de vida (ver
+// TOPIC_OVERRIDES / topicForEvent en @veo/events).
+const collector = new EventCollector([
+  'trip',
+  'dispatch',
+  'payment',
+  'panic',
+  'driver',
+  'driver-location',
+  'user',
+]);
 
 (gate.ready ? describe : describe.skip)('VEO · golden path E2E (cross-servicio orquestado)', () => {
   const passenger = new BffClient(BASE_URLS.publicBff);
@@ -96,10 +106,10 @@ const collector = new EventCollector(['trip', 'dispatch', 'payment', 'panic', 'd
     await orchestrator.start();
     // Limpia conductores fantasma de corridas previas del hot index de dispatch (anti-flaky).
     await clearDispatchHotIndex();
-    // El default del sistema evolucionó a PUJA (marketplace "proponé tu precio"): sin schedule, una
-    // creación de viaje SIN bid se rechaza con "falta tu oferta {mode: PUJA}". El golden path valida el
-    // flujo FIXED (oferta directa → accept), así que congelamos FIXED-ahora vía el PUT admin firmado.
-    await putModeSchedule({ defaultMode: 'PUJA', rules: [ruleCoveringNow('FIXED')] });
+    // ADR 023: el modo es una palanca POR OFERTA (no un schedule). El golden path valida el flujo FIXED
+    // (oferta directa → accept), así que fijamos la oferta ancla (veo_economico) en FIXED por el PUT del
+    // catálogo admin firmado — determinista aunque una corrida previa la haya dejado en PUJA.
+    await setOfferingMode('veo_economico', 'FIXED');
     await collector.start();
   }, 600_000);
 

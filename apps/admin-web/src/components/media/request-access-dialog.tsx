@@ -11,19 +11,21 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
 
-/** Solicita acceso a la grabación de un viaje (queda PENDING hasta doble aprobación). */
-export function RequestAccessDialog() {
+/**
+ * Solicita acceso a la grabación de un viaje (queda PENDING hasta doble aprobación). `defaultTripId` pre-carga el
+ * viaje — lo usa el deep-link de pánico (`/media?trip=`) cuando aún no hay solicitud para ese viaje.
+ */
+export function RequestAccessDialog({ defaultTripId = '' }: { defaultTripId?: string } = {}) {
   const { toast } = useToast();
   const request = useRequestMedia();
   const [open, setOpen] = useState(false);
-  const [tripId, setTripId] = useState('');
+  const [tripId, setTripId] = useState(defaultTripId);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +41,7 @@ export function RequestAccessDialog() {
         description: 'Requiere doble aprobación.',
       });
       setOpen(false);
-      setTripId('');
+      setTripId(defaultTripId);
       setReason('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo enviar la solicitud.');
@@ -57,9 +59,6 @@ export function RequestAccessDialog() {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Solicitar acceso a video</DialogTitle>
-          <DialogDescription>
-            El acceso a grabaciones queda registrado y requiere aprobación de seguridad.
-          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <Field label="ID de viaje">

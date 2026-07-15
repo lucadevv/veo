@@ -43,6 +43,17 @@ model PanicEvent {
   /// Operador (admin userId) que reconoció la alerta.
   ackBy          String?     @map("ack_by") @db.Uuid
   resolvedAt     DateTime?   @map("resolved_at") @db.Timestamptz
+  /// Respuesta operativa (acciones LATERALES sobre una alerta ACTIVA, no cambian el status): el operador
+  /// despachó una unidad de respuesta y/o escaló a autoridades. Timestamps + operador (admin userId) para el
+  /// display del detalle y la línea de tiempo; el audit inmutable (admin-bff) sigue siendo la fuente de verdad.
+  dispatchedAt   DateTime?   @map("dispatched_at") @db.Timestamptz
+  dispatchedBy   String?     @map("dispatched_by") @db.Uuid
+  escalatedAt    DateTime?   @map("escalated_at") @db.Timestamptz
+  escalatedBy    String?     @map("escalated_by") @db.Uuid
+  /// Motivo OPCIONAL del cierre (RESOLVED/FALSE_ALARM) que el operador escribe al resolver la alerta.
+  /// Se persiste en la MISMA tx/CAS que la transición. El audit inmutable (admin-bff) sigue siendo la
+  /// fuente de verdad para accountability (Ley 29733); esta columna es para consulta/display del detalle.
+  resolutionNotes String?    @map("resolution_notes")
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([status, triggeredAt])
@@ -55,13 +66,16 @@ model PanicEvent {
 /// de dominio; el relay lo publica a Kafka. Garantiza la publicación confiable de panic.triggered.
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
 
-  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
   @@schema("panic")
 }

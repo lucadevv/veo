@@ -16,9 +16,8 @@
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createEnvelope } from '@veo/events';
-import { enqueueOutbox } from '@veo/database';
 import { InvalidStateError, NotFoundError, uuidv7 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { AffiliationsRepository } from './affiliations.repository';
 import {
   PAYMENT_GATEWAY,
   supportsYapeSubscription,
@@ -40,6 +39,8 @@ export interface CreateAffiliationInput {
 
 /** Ventana mínima entre re-consultas al proveedor por usuario (throttle del refresh defensivo). */
 const REFRESH_THROTTLE_MS = 10_000;
+/** Cota del Map de throttle in-memory: al superarla se podan las entradas más viejas que la ventana (ver uso). */
+const REFRESH_THROTTLE_MAX_ENTRIES = 10_000;
 
 /** Vista pública SIN walletUid ni PII completa. Es lo ÚNICO que sale al BFF/cliente. */
 export interface AffiliationView {
@@ -58,7 +59,7 @@ export class AffiliationsService {
   private readonly lastRefreshAt = new Map<string, number>();
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: AffiliationsRepository,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
   ) {}
 
@@ -77,8 +78,10 @@ export class AffiliationsService {
       );
     }
 
-    const existing = await this.prisma.read.walletAffiliation.findUnique({
-      where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
+    const existing = await this.repo.findByKey({
+      userId,
+      provider: this.provider,
+      wallet: this.wallet,
     });
     if (existing?.status === AffiliationStatus.ACTIVE) {
       // Ya afiliado: no re-afiliamos (no hay deepLink que abrir).
@@ -108,10 +111,10 @@ export class AffiliationsService {
     const documentMasked = maskDocument(input.document);
     const id = existing?.id ?? uuidv7();
 
-    const saved = await this.prisma.write.walletAffiliation.upsert({
-      where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
-      update: { status: 'PROCESS', walletUid: sub.uid ?? null, phoneMasked, documentMasked },
-      create: {
+    const saved = await this.repo.upsertByKey(
+      { userId, provider: this.provider, wallet: this.wallet },
+      { status: 'PROCESS', walletUid: sub.uid ?? null, phoneMasked, documentMasked },
+      {
         id,
         userId,
         provider: this.provider,
@@ -122,12 +125,36 @@ export class AffiliationsService {
         phoneMasked,
         documentMasked,
       },
-    });
+    );
 
     // AUDIT sin PII completa (phone/document enmascarados; walletUid jamás logueado).
     this.logger.log(
       `Afiliación creada user=${userId} aff=${saved.id} origin=${origin} estado=PROCESS`,
     );
+
+    // RESOLUCIÓN SÍNCRONA si el gateway ya APROBÓ la afiliación al crearla (status ACTIVE/ACCEPTED/…):
+    // la activamos + emitimos EN EL ACTO y devolvemos ACTIVE, sin que el cliente dependa de su poll `/show`
+    // para verla vinculada. Es el caso del sandbox determinista (auto-aprueba). ProntoPaga REAL devuelve
+    // 'created' → NO entra acá: sigue PROCESS y resuelve por webhook/refresh como siempre. Comparamos el
+    // status CRUDO del gateway contra el contrato tipado (no literales).
+    const subStatus = (sub.status ?? '').toUpperCase();
+    const gatewayApproved =
+      subStatus === ProntoPagaAffiliationStatus.ACTIVE ||
+      subStatus === ProntoPagaAffiliationStatus.ACCEPTED ||
+      subStatus === ProntoPagaAffiliationStatus.SUCCESS ||
+      subStatus === ProntoPagaAffiliationStatus.AFFILIATED;
+    if (gatewayApproved) {
+      const activated = await this.activateAndEmit(saved, {
+        phoneMasked,
+        walletUid: sub.uid ?? saved.walletUid,
+        source: 'refresh',
+      });
+      this.logger.log(
+        `Afiliación ${saved.id} ACTIVADA en el acto (gateway aprobó al crear, status=${subStatus})`,
+      );
+      return { affiliationId: activated.id, status: activated.status, deepLink: sub.deepLink };
+    }
+
     if (!sub.deepLink) {
       this.logger.warn(
         `Afiliación ${saved.id} sin deepLink del proveedor (revisar respuesta de ProntoPaga)`,
@@ -142,8 +169,10 @@ export class AffiliationsService {
    * ACTIVE sin depender del webhook (cuyo payload no está documentado), con throttle por usuario.
    */
   async getAffiliationStatus(userId: string): Promise<AffiliationView | null> {
-    let aff = await this.prisma.read.walletAffiliation.findUnique({
-      where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
+    let aff = await this.repo.findByKey({
+      userId,
+      provider: this.provider,
+      wallet: this.wallet,
     });
     if (!aff) return null;
     if (aff.status === AffiliationStatus.PROCESS) {
@@ -159,8 +188,10 @@ export class AffiliationsService {
    * al desafiliar; no bloqueamos su baja por un fallo del riel). Idempotente.
    */
   async revokeAffiliation(userId: string): Promise<AffiliationView> {
-    const aff = await this.prisma.read.walletAffiliation.findUnique({
-      where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
+    const aff = await this.repo.findByKey({
+      userId,
+      provider: this.provider,
+      wallet: this.wallet,
     });
     if (!aff) throw new NotFoundError('No hay afiliación para revocar');
     if (aff.status === AffiliationStatus.REVOKED) return this.toView(aff);
@@ -178,10 +209,7 @@ export class AffiliationsService {
       }
     }
 
-    const updated = await this.prisma.write.walletAffiliation.update({
-      where: { id: aff.id },
-      data: { status: 'REVOKED', walletUid: null },
-    });
+    const updated = await this.repo.updateById(aff.id, { status: 'REVOKED', walletUid: null });
     this.logger.log(`Afiliación revocada user=${userId} aff=${aff.id}`);
     return this.toView(updated);
   }
@@ -202,6 +230,14 @@ export class AffiliationsService {
     const last = this.lastRefreshAt.get(userId) ?? 0;
     if (now - last < REFRESH_THROTTLE_MS) return null; // throttle: no martillamos al proveedor
     this.lastRefreshAt.set(userId, now);
+    // Poda del Map (evita el memory-leak por-pod): las entradas más viejas que la ventana ya no sirven (el
+    // throttle solo mira los últimos REFRESH_THROTTLE_MS). Se barre SOLO al superar el cap (amortizado O(n)
+    // ocasional, no en cada refresh) → el Map queda acotado a los usuarios activos en la ventana.
+    if (this.lastRefreshAt.size > REFRESH_THROTTLE_MAX_ENTRIES) {
+      for (const [uid, ts] of this.lastRefreshAt) {
+        if (now - ts >= REFRESH_THROTTLE_MS) this.lastRefreshAt.delete(uid);
+      }
+    }
 
     let detail: { status?: string; phoneNumber?: string | null };
     try {
@@ -224,10 +260,7 @@ export class AffiliationsService {
       return this.activateAndEmit(aff, { phoneMasked, source: 'refresh' });
     }
     if (status === ProntoPagaAffiliationStatus.EXPIRED) {
-      const updated = await this.prisma.write.walletAffiliation.update({
-        where: { id: aff.id },
-        data: { status: AffiliationStatus.EXPIRED },
-      });
+      const updated = await this.repo.updateById(aff.id, { status: AffiliationStatus.EXPIRED });
       this.logger.log(`Afiliación ${aff.id} → EXPIRED (por refresh /show)`);
       return updated;
     }
@@ -245,15 +278,20 @@ export class AffiliationsService {
   ): Promise<WalletAffiliation> {
     if (aff.status === AffiliationStatus.ACTIVE || aff.status === AffiliationStatus.REVOKED)
       return aff; // idempotente / no pisar
-    return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.walletAffiliation.update({
-        where: { id: aff.id },
-        data: {
-          status: 'ACTIVE',
-          phoneMasked: opts.phoneMasked,
-          walletUid: opts.walletUid ?? aff.walletUid,
-        },
-      });
+    return this.repo.runInTransaction(async (tx) => {
+      // CAS por status (no `update where {id}`): el guard de arriba es un READ-then-check (TOCTOU) — dos caminos
+      // concurrentes (webhook + refresh /show) que leyeron PROCESS ambos lo pasan y emitirían
+      // payment.affiliation_activated DOS veces. Con el CAS `where {id, status: <lo leído>}` solo UNO gana
+      // (count=1) y emite; el perdedor ve count=0 → no-op (devuelve la fila ya ACTIVE sin re-emitir).
+      const { count } = await this.repo.casActivateInTx(
+        tx,
+        aff.id,
+        aff.status,
+        opts.phoneMasked,
+        opts.walletUid ?? aff.walletUid,
+      );
+      const updated = await this.repo.findByIdInTx(tx, aff.id);
+      if (count === 0) return updated; // otra corrida concurrente ya activó: NO re-emitir
       const envelope = createEnvelope({
         eventType: 'payment.affiliation_activated',
         producer: 'payment-service',
@@ -265,7 +303,7 @@ export class AffiliationsService {
           at: new Date().toISOString(),
         },
       });
-      await enqueueOutbox(tx, envelope, updated.id);
+      await this.repo.enqueueOutbox(tx, envelope, updated.id);
       this.logger.log(`Afiliación ${updated.id} → ACTIVE (por ${opts.source})`);
       return updated;
     });
@@ -308,11 +346,17 @@ export class AffiliationsService {
       aff.status === AffiliationStatus.REVOKED
     )
       return;
-    await this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.walletAffiliation.update({
-        where: { id: aff.id },
-        data: { status: AffiliationStatus.EXPIRED, walletUid: input.walletUid ?? aff.walletUid },
-      });
+    const emitted = await this.repo.runInTransaction(async (tx) => {
+      // CAS por status (mismo motivo que activateAndEmit): dos webhooks EXPIRED/DECLINED concurrentes que leyeron
+      // el mismo estado fuente NO deben emitir payment.affiliation_expired dos veces. Solo el que matchea emite.
+      const { count } = await this.repo.casExpireInTx(
+        tx,
+        aff.id,
+        aff.status,
+        input.walletUid ?? aff.walletUid,
+      );
+      if (count === 0) return false; // otra corrida ya transicionó: NO re-emitir
+      const updated = await this.repo.findByIdInTx(tx, aff.id);
       const envelope = createEnvelope({
         eventType: 'payment.affiliation_expired',
         producer: 'payment-service',
@@ -323,9 +367,10 @@ export class AffiliationsService {
           at: new Date().toISOString(),
         },
       });
-      await enqueueOutbox(tx, envelope, updated.id);
+      await this.repo.enqueueOutbox(tx, envelope, updated.id);
+      return true;
     });
-    this.logger.log(`Afiliación ${aff.id} → EXPIRED (por webhook)`);
+    if (emitted) this.logger.log(`Afiliación ${aff.id} → EXPIRED (por webhook)`);
   }
 
   /**
@@ -336,8 +381,10 @@ export class AffiliationsService {
    * (integridad referencial), sin PII. Idempotente: re-aplicar deja el mismo estado.
    */
   async eraseUser(userId: string): Promise<{ erased: boolean }> {
-    const aff = await this.prisma.read.walletAffiliation.findUnique({
-      where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
+    const aff = await this.repo.findByKey({
+      userId,
+      provider: this.provider,
+      wallet: this.wallet,
     });
     if (!aff) return { erased: false };
 
@@ -355,9 +402,11 @@ export class AffiliationsService {
       }
     }
 
-    await this.prisma.write.walletAffiliation.update({
-      where: { id: aff.id },
-      data: { status: 'REVOKED', walletUid: null, phoneMasked: null, documentMasked: null },
+    await this.repo.updateById(aff.id, {
+      status: 'REVOKED',
+      walletUid: null,
+      phoneMasked: null,
+      documentMasked: null,
     });
     this.logger.log(`Derecho al olvido: PII de la afiliación ${aff.id} purgada (user=${userId})`);
     return { erased: true };
@@ -368,8 +417,10 @@ export class AffiliationsService {
    * Devuelve null si no hay afiliación activa. NUNCA exponer este valor fuera del servidor.
    */
   async resolveActiveWalletUid(userId: string): Promise<string | null> {
-    const aff = await this.prisma.read.walletAffiliation.findUnique({
-      where: { userId_provider_wallet: { userId, provider: this.provider, wallet: this.wallet } },
+    const aff = await this.repo.findByKey({
+      userId,
+      provider: this.provider,
+      wallet: this.wallet,
     });
     if (aff?.status !== 'ACTIVE' || !aff.walletUid) return null;
     return aff.walletUid;
@@ -380,13 +431,11 @@ export class AffiliationsService {
     walletUid?: string,
   ): Promise<WalletAffiliation | null> {
     if (affiliationId) {
-      const byId = await this.prisma.read.walletAffiliation.findUnique({
-        where: { id: affiliationId },
-      });
+      const byId = await this.repo.findById(affiliationId);
       if (byId) return byId;
     }
     if (walletUid) {
-      return this.prisma.read.walletAffiliation.findFirst({ where: { walletUid } });
+      return this.repo.findByWalletUid(walletUid);
     }
     return null;
   }

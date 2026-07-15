@@ -13,21 +13,18 @@ function errorsOf<T extends object>(cls: new () => T, payload: unknown): string[
 }
 
 describe('RequestOtpDto', () => {
-  it('acepta un teléfono peruano y tipo válidos', () => {
-    expect(errorsOf(RequestOtpDto, { phone: '+51987654321', type: 'PASSENGER' })).toHaveLength(0);
+  it('acepta un teléfono peruano (el type ya no se acepta del cliente, se fija server-side)', () => {
+    expect(errorsOf(RequestOtpDto, { phone: '+51987654321' })).toHaveLength(0);
   });
-  it('rechaza teléfono inválido y tipo no permitido', () => {
-    const errs = errorsOf(RequestOtpDto, { phone: '123', type: 'ADMIN' });
+  it('rechaza teléfono inválido', () => {
+    const errs = errorsOf(RequestOtpDto, { phone: '123' });
     expect(errs).toContain('matches');
-    expect(errs).toContain('isIn');
   });
 });
 
 describe('VerifyOtpDto', () => {
   it('exige OTP de 6 dígitos', () => {
-    expect(errorsOf(VerifyOtpDto, { phone: '987654321', code: '12', type: 'PASSENGER' })).toContain(
-      'isLength',
-    );
+    expect(errorsOf(VerifyOtpDto, { phone: '987654321', code: '12' })).toContain('isLength');
   });
 });
 

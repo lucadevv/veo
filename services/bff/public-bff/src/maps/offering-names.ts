@@ -11,11 +11,12 @@ import { OfferingId } from '@veo/shared-types';
 export const OFFERING_DISPLAY_NAMES: Record<OfferingId, string> = {
   [OfferingId.VEO_MOTO]: 'VEO Moto',
   [OfferingId.VEO_ECONOMICO]: 'VEO Económico',
-  [OfferingId.VEO_CONFORT]: 'VEO Confort',
+  // F2.3 (ADR-017 §1.2) · Confort renombrado a "Normal" (solo el nombre; el id veo_confort es contrato).
+  [OfferingId.VEO_CONFORT]: 'VEO Normal',
   [OfferingId.VEO_XL]: 'VEO XL',
-  // B5-4 · verticales especiales + EV: codeadas pero ocultas (defaultEnabled:false). El nombre existe
+  [OfferingId.VEO_PREMIUM]: 'VEO Premium',
+  // B5-4 · verticales especiales: codeadas pero ocultas (defaultEnabled:false). El nombre existe
   // para cuando el admin las habilite (el quote no las cotiza mientras estén deshabilitadas).
-  [OfferingId.VEO_ECONOMICO_EV]: 'VEO Económico Eléctrico',
   [OfferingId.VEO_AMBULANCE]: 'VEO Ambulancia',
   [OfferingId.VEO_TOW]: 'VEO Grúa',
   [OfferingId.VEO_MECHANIC]: 'VEO Mecánico',

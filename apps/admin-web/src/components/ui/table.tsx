@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { type KeyboardEvent, useState } from 'react';
 import {
   type ColumnDef,
   type SortingState,
@@ -21,6 +21,12 @@ interface DataTableProps<TData> {
   emptyTitle?: string;
   emptyDescription?: string;
   onRowClick?: (row: TData) => void;
+  /**
+   * Etiqueta accesible por fila clickeable (a11y por teclado/lector). El DataTable es genérico y no
+   * conoce el dominio, así que el caller describe la fila (ej. `Ver detalle del viaje #${row.id}`).
+   * Solo aplica cuando hay `onRowClick`; sin ella la fila clickeable cae a un label genérico.
+   */
+  rowLabel?: (row: TData) => string;
   /** Etiqueta accesible de la tabla. */
   caption: string;
 }
@@ -33,6 +39,7 @@ export function DataTable<TData>({
   emptyTitle = 'Sin resultados',
   emptyDescription,
   onRowClick,
+  rowLabel,
   caption,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -51,7 +58,7 @@ export function DataTable<TData>({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-lg border border-black/[0.05] bg-surface shadow-3">
       <table className="w-full border-collapse text-sm tabular">
         <caption className="sr-only">{caption}</caption>
         <thead className="sticky top-0 z-sticky bg-surface-2">
@@ -66,7 +73,7 @@ export function DataTable<TData>({
                     aria-sort={
                       sortDir === 'asc' ? 'ascending' : sortDir === 'desc' ? 'descending' : 'none'
                     }
-                    className="px-4 py-2.5 text-left font-medium text-ink-muted"
+                    className="px-4 py-3 text-left font-display text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-subtle"
                   >
                     {header.isPlaceholder ? null : canSort ? (
                       <button
@@ -93,22 +100,42 @@ export function DataTable<TData>({
           ))}
         </thead>
         <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <tr
-              key={row.id}
-              onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-              className={cn(
-                'border-b border-border/60 transition-colors',
-                onRowClick && 'cursor-pointer hover:bg-surface-2',
-              )}
-            >
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="px-4 py-2.5 text-ink">
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {table.getRowModel().rows.map((row) => {
+            const activate = onRowClick ? () => onRowClick(row.original) : undefined;
+            return (
+              <tr
+                key={row.id}
+                onClick={activate}
+                // A11y por teclado: una fila con drill-down imperativo (router.push) no es activable de
+                // forma nativa. La hacemos focusable (tabIndex hereda el ring focus-visible del tema) y
+                // activable con Enter/Space; `role="link"` declara que navega (espeja el destino-ruta del
+                // caller). Solo cuando hay onRowClick: sin él la fila conserva su semántica de fila nativa.
+                {...(activate
+                  ? {
+                      role: 'link',
+                      tabIndex: 0,
+                      'aria-label': rowLabel?.(row.original),
+                      onKeyDown: (e: KeyboardEvent<HTMLTableRowElement>) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          activate();
+                        }
+                      },
+                    }
+                  : {})}
+                className={cn(
+                  'border-b border-border/40 transition-colors',
+                  onRowClick && 'cursor-pointer hover:bg-surface-2/60',
+                )}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-4 py-3.5 text-ink">
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

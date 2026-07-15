@@ -1,0 +1,41 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "assets/fonts/ClashDisplay-Bold.otf",
+      "sha1": "bd717ab64fc380747bc734a097d6379c6cca24e3"
+    },
+    {
+      "path": "assets/fonts/ClashDisplay-Medium.otf",
+      "sha1": "fdc4f408b5117fd85166b198dfe4d0fac52c34c2"
+    },
+    {
+      "path": "assets/fonts/ClashDisplay-Regular.otf",
+      "sha1": "67d49fed960a230e12c212d5312dc3cf3ed1d73b"
+    },
+    {
+      "path": "assets/fonts/ClashDisplay-Semibold.otf",
+      "sha1": "64e9b35c59ea054e2aa2ac545d1692b61c8fc4bc"
+    },
+    {
+      "path": "assets/fonts/Fraunces72pt-SemiBold.ttf",
+      "sha1": "1e168772b0fcabfa6a9bd43e2f13f27920bca84a"
+    },
+    {
+      "path": "assets/fonts/Outfit-Bold.ttf",
+      "sha1": "d548c1c659685ea3cd288e59123ed5c9387cf16a"
+    },
+    {
+      "path": "assets/fonts/Outfit-Medium.ttf",
+      "sha1": "f3e766ace3ae2720815a5cafe2555f9535c88a30"
+    },
+    {
+      "path": "assets/fonts/Outfit-Regular.ttf",
+      "sha1": "18e1d7561674ff796815cec4419f8b6b1f12fbab"
+    },
+    {
+      "path": "assets/fonts/Outfit-SemiBold.ttf",
+      "sha1": "8e0395f4c66db4b1544856d41959136f255a3c10"
+    }
+  ]
+}

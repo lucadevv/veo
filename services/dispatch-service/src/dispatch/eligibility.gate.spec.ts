@@ -1,9 +1,22 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isDomainError } from '@veo/utils';
-import { VehicleType } from '@veo/shared-types';
+import { VehicleType, VehicleSegment, OfferingId } from '@veo/shared-types';
 import { EligibilityGate } from './eligibility.gate';
 import { InMemoryHotIndex } from '../hot-index/in-memory-hot-index';
 import type { IdentityClient, IdentityDriver } from '../identity/identity-client.port';
+import { bumpEligibilityFailOpen, bumpEligibilityTierUnknown } from './dispatch.metrics';
+
+// Espiamos los bumps de observabilidad (fail-open source=gate + tier-irresoluble) para asertar la
+// instrumentación; `classifyMissingAttr`/`findOffering` se mantienen REALES (importActual).
+vi.mock('./dispatch.metrics', async (importActual) => ({
+  ...(await importActual<typeof import('./dispatch.metrics')>()),
+  bumpEligibilityFailOpen: vi.fn(),
+  bumpEligibilityTierUnknown: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const H3_CELL = 'cell-1';
 const DRIVER = 'driver-1';
@@ -17,7 +30,7 @@ function identityFake(driver: Partial<IdentityDriver> & { found?: boolean }): Id
     found: true,
     ...driver,
   };
-  return { getDriver: async () => full };
+  return { getDriver: async () => full, getDriverByUser: async () => full };
 }
 
 async function gateWith(opts: {
@@ -53,6 +66,12 @@ function spyIdentity(initial?: Partial<IdentityDriver> & { found?: boolean }): {
     calls: 0,
     client: {
       getDriver: async (): Promise<IdentityDriver> => {
+        state.calls += 1;
+        if (failing) throw new Error('UNAVAILABLE');
+        return current;
+      },
+      // El gate no usa getDriverByUser; lo espejamos para cumplir el contrato del puerto.
+      getDriverByUser: async (): Promise<IdentityDriver> => {
         state.calls += 1;
         if (failing) throw new Error('UNAVAILABLE');
         return current;
@@ -127,6 +146,9 @@ describe('EligibilityGate (cierre #9)', () => {
       getDriver: async () => {
         throw new Error('UNAVAILABLE');
       },
+      getDriverByUser: async () => {
+        throw new Error('UNAVAILABLE');
+      },
     };
     const gate = await gateWith({ identity: broken, seedVehicle: VehicleType.CAR });
     await expectForbidden(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR));
@@ -135,6 +157,141 @@ describe('EligibilityGate (cierre #9)', () => {
   it('online+no suspendido pero sin ubicación activa (vehículo desconocido) → 403', async () => {
     const gate = await gateWith({ identity: identityFake({}), seedVehicle: null });
     await expectForbidden(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR));
+  });
+});
+
+describe('EligibilityGate · B5-3 — elegibilidad por TIER en PUJA (paridad con FIXED)', () => {
+  /** Construye el gate con un conductor elegible (AVAILABLE, no suspendido) y los attrs de vehículo dados. */
+  async function gateWithAttrs(attrs?: {
+    seats?: number;
+    segment?: VehicleSegment;
+    vehicleYear?: number;
+    certifications?: import('@veo/shared-types').FleetDocumentType[];
+  }): Promise<EligibilityGate> {
+    const hotIndex = new InMemoryHotIndex();
+    await hotIndex.seed(DRIVER, -12, -77, H3_CELL, VehicleType.CAR, attrs);
+    return new EligibilityGate(identityFake({}), hotIndex, 0);
+  }
+
+  // VEO_XL requires { minSeats: 6 } (catálogo). Un CAR económico de 4 asientos NO lo cumple.
+  const XL = OfferingId.VEO_XL;
+
+  it('(a) tier INFERIOR (CAR 4 asientos, attrs presentes) RECHAZADO en un board XL (minSeats:6) → 403', async () => {
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expectForbidden(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL));
+  });
+
+  it('(b) conductor que SÍ cumple (van 7 asientos) es ACEPTADO en un board XL', async () => {
+    const gate = await gateWithAttrs({
+      seats: 7,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
+    ).resolves.toBeUndefined();
+  });
+
+  it('(c) conductor LEGACY sin attrs (seats/segment/year undefined) NO se excluye (fail-open preservado) e INSTRUMENTA source=gate', async () => {
+    const gate = await gateWithAttrs(); // sin attrs → faltan los 3 → 'multiple'
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
+    ).resolves.toBeUndefined();
+    // El gate autoritativo de PUJA mide su PROPIO fail-open (blast-radius del submit/accept), distinto del pool.
+    expect(bumpEligibilityFailOpen).toHaveBeenCalledWith('gate', 'multiple');
+  });
+
+  it('(c-bis) con attrs PRESENTES y válidos NO instrumenta el fail-open (no hay bypass)', async () => {
+    const gate = await gateWithAttrs({
+      seats: 7,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, XL),
+    ).resolves.toBeUndefined();
+    expect(bumpEligibilityFailOpen).not.toHaveBeenCalled();
+  });
+
+  it('(d) board SIN category (compat N-2) → sin requires → comportamiento previo (solo vehicleType)', async () => {
+    // Un CAR de 4 asientos que XL rechazaría: sin category NO hay requires que enforcar → pasa.
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expect(gate.assertEligibleToOffer(DRIVER, VehicleType.CAR)).resolves.toBeUndefined();
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, undefined),
+    ).resolves.toBeUndefined();
+  });
+
+  it('category DESCONOCIDA (no está en el catálogo) → sin requires → no excluye', async () => {
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expect(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, 'no_existe'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('tier-irresoluble: el POLL (measureTier=false) NO mide; submit/accept (true) SÍ → des-contamina absent', async () => {
+    const gate = await gateWithAttrs({
+      seats: 4,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    const bump = vi.mocked(bumpEligibilityTierUnknown);
+
+    // Path del POLL (listOpenBidsNear): sin category, measureTier por DEFAULT false → NO mide 'absent'
+    // (si midiera, el volumen del poll dominaría la serie y nunca tendería a 0 → engañaría el flip).
+    await gate.assertEligibleToOffer(DRIVER, VehicleType.CAR);
+    expect(bump).not.toHaveBeenCalled();
+
+    // Path de SUBMIT con board N-2 sin category (measureTier=true) → SÍ mide 'absent' (señal de rollout real).
+    await gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, undefined, true);
+    expect(bump).toHaveBeenCalledWith('absent');
+
+    // Path de SUBMIT con category fuera del catálogo (measureTier=true) → mide 'unknown' (gap de catálogo).
+    bump.mockClear();
+    await gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, 'no_existe', true);
+    expect(bump).toHaveBeenCalledWith('unknown');
+  });
+
+  it('vertical con cert (ambulancia) FAIL-CLOSED: sin certs → 403 aunque los attrs basten', async () => {
+    const gate = await gateWithAttrs({
+      seats: 5,
+      segment: VehicleSegment.MID,
+      vehicleYear: 2022,
+    }); // sin certs
+    await expectForbidden(
+      gate.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, OfferingId.VEO_AMBULANCE),
+    );
+  });
+
+  it('confort (minSegment MID): un ECONOMY es RECHAZADO, un PREMIUM es aceptado', async () => {
+    const eco = await gateWithAttrs({
+      seats: 5,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2022,
+    });
+    await expectForbidden(
+      eco.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, OfferingId.VEO_CONFORT),
+    );
+    const prem = await gateWithAttrs({
+      seats: 5,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2022,
+    });
+    await expect(
+      prem.assertEligibleToOffer(DRIVER, VehicleType.CAR, false, OfferingId.VEO_CONFORT),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -258,5 +415,54 @@ describe('EligibilityGate · H11 — cota del cache in-proc (lazy-evict de venci
     // El Map quedó acotado en el cap (no en 10_050): la cota dura evictó las entradas más viejas.
     expect(cacheSize(gate)).toBeLessThanOrEqual(10_000);
     expect(cacheSize(gate)).toBeGreaterThan(9_000); // sigue cacheando: no se vació
+  });
+});
+
+// assertActiveDriver — el gate de ESTADO que reusa el accept de FIXED (cierra la asimetría con PUJA).
+// No mira vehículo/tier: solo existe + online + !suspendido contra identity, fail-closed.
+describe('EligibilityGate.assertActiveDriver (gate de estado del accept FIXED)', () => {
+  it('AVAILABLE + !suspendido → OK (no lanza), SIN mirar el hot-index (no seedea vehículo)', async () => {
+    const gate = await gateWith({ identity: identityFake({}), seedVehicle: null });
+    await expect(gate.assertActiveDriver(DRIVER)).resolves.toBeUndefined();
+  });
+
+  it('suspendido → 403', async () => {
+    const gate = await gateWith({
+      identity: identityFake({ suspendedAt: new Date().toISOString() }),
+      seedVehicle: null,
+    });
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('no online (ON_TRIP) → 403 (la presencia GPS no basta)', async () => {
+    const gate = await gateWith({
+      identity: identityFake({ currentStatus: 'ON_TRIP' }),
+      seedVehicle: null,
+    });
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('desconocido en identity (found=false) → 403', async () => {
+    const gate = await gateWith({ identity: identityFake({ found: false }), seedVehicle: null });
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('identity caído → 403 (falla-cerrado, nunca un suspendido colándose por error de red)', async () => {
+    const spy = spyIdentity();
+    spy.fail();
+    const gate = new EligibilityGate(spy.client, new InMemoryHotIndex(), 0);
+    await expectForbidden(gate.assertActiveDriver(DRIVER));
+  });
+
+  it('fresh=true BYPASEA el cache: una suspensión en caliente se caza al instante (decisión de plata)', async () => {
+    const spy = spyIdentity();
+    const gate = new EligibilityGate(spy.client, new InMemoryHotIndex(), 60_000); // TTL largo
+    // 1ra: elegible, cachea el snapshot bueno.
+    await expect(gate.assertActiveDriver(DRIVER, false)).resolves.toBeUndefined();
+    // El conductor se SUSPENDE en identity mientras el cache sigue caliente.
+    spy.set({ suspendedAt: new Date().toISOString() });
+    // Con cache (fresh=false) NO lo vería (snapshot stale) — pero el accept usa fresh=true:
+    await expectForbidden(gate.assertActiveDriver(DRIVER, true));
+    expect(spy.calls).toBe(2); // pegó a identity de nuevo pese al cache caliente
   });
 });

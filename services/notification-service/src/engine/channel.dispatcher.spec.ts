@@ -63,6 +63,7 @@ function record(
     nextAttemptAt: new Date(),
     sentAt: null,
     deliveredAt: null,
+    readAt: null,
     failedReason: null,
     createdAt: new Date(),
   };

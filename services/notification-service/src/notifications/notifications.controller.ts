@@ -1,10 +1,21 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
-import { InternalIdentityGuard } from '@veo/auth';
+import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
 import { NotificationsService } from './notifications.service';
 import {
   CreateNotificationDto,
   InboxNotificationView,
+  MarkAllReadResultView,
   NotificationView,
 } from './dto/notification.dto';
 
@@ -32,6 +43,25 @@ export class NotificationsController {
     @Query('limit') limit?: string,
   ): Promise<InboxNotificationView[]> {
     return this.notifications.listInbox(recipientId, limit ? Number(limit) : undefined);
+  }
+
+  // 'read-all' ANTES de ':id/read': aunque son distinto conteo de segmentos, se declara primero por
+  // higiene de rutas. Ambos derivan el dueño de la identidad de sesión (@CurrentUser), NUNCA del path.
+  @Patch('read-all')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Marcar TODAS mis notificaciones de la bandeja como leídas' })
+  markAllRead(@CurrentUser() user: AuthenticatedUser): Promise<MarkAllReadResultView> {
+    return this.notifications.markAllRead(user.userId);
+  }
+
+  @Patch(':id/read')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Marcar UNA notificación como leída (owner de sesión; anti-IDOR)' })
+  markRead(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.notifications.markRead(user.userId, id);
   }
 
   @Get(':id')

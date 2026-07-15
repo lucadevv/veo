@@ -11,14 +11,21 @@ import { ConfigService } from '@nestjs/config';
 import {
   JwtService,
   JwtAuthGuard,
+  SessionRevocationStore,
+  SessionRevocationGuard,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
   generateDevKeyPairPem,
   type JwtKeys,
+  type InternalAudience,
 } from '@veo/auth';
+import { createLogger } from '@veo/observability';
+import type { Redis } from '@veo/redis';
 import { redisProvider, RedisLifecycle, REDIS } from './redis';
 import { GrpcGateway } from './grpc.gateway';
 import { RestGateway } from './rest.gateway';
+import { PassengerVerificationService } from '../common/passenger-verification.service';
 import { MAPS, buildMapsClient } from './maps.client';
 import type { Env } from '../config/env.schema';
 
@@ -67,6 +74,29 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('VEO_INTERNAL_IDENTITY_SECRET'),
 };
 
+/**
+ * Denylist de revocación (lado LECTURA en el BFF). Comparte el MISMO Redis que identity (cross-instancia):
+ * identity escribe al revocar, el BFF lee en el guard HTTP y en el handshake del socket `/driver`. Sin TTL
+ * de escritura (el BFF nunca escribe): solo `assertNotRevoked`.
+ */
+const sessionRevocationProvider: Provider = {
+  provide: SessionRevocationStore,
+  inject: [REDIS],
+  useFactory: (redis: Redis) =>
+    new SessionRevocationStore(redis, createLogger('session-revocation')),
+};
+
+/**
+ * Audiencia de riel del emisor: el driver-bff firma SIEMPRE como 'driver-rail'.
+ * Es una constante de compilación (no env): el riel es fijo por servicio.
+ */
+const DRIVER_RAIL: InternalAudience = 'driver-rail';
+
+const internalAudienceProvider: Provider = {
+  provide: INTERNAL_IDENTITY_AUDIENCE,
+  useValue: DRIVER_RAIL,
+};
+
 /** Fachada de mapas OSM (Ola 2C · navegación turn-by-turn): OSRM con fallback al motor local. */
 const mapsProvider: Provider = {
   provide: MAPS,
@@ -88,20 +118,28 @@ const mapsProvider: Provider = {
     jwtProvider,
     { provide: JWT_SERVICE, useExisting: JwtService },
     internalSecretProvider,
+    internalAudienceProvider,
+    sessionRevocationProvider,
     mapsProvider,
     JwtAuthGuard,
+    SessionRevocationGuard,
     GrpcGateway,
     RestGateway,
+    PassengerVerificationService,
   ],
   exports: [
     REDIS,
     JwtService,
     JWT_SERVICE,
     INTERNAL_IDENTITY_SECRET,
+    INTERNAL_IDENTITY_AUDIENCE,
+    SessionRevocationStore,
     MAPS,
     JwtAuthGuard,
+    SessionRevocationGuard,
     GrpcGateway,
     RestGateway,
+    PassengerVerificationService,
   ],
 })
 export class CoreModule {}

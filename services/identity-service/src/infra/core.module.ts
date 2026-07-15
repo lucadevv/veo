@@ -6,17 +6,23 @@
 import { Global, Module, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { CLOCK, SystemClock } from '@veo/utils';
 import {
   JwtService,
   RedisRefreshTokenStore,
+  SessionRevocationStore,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  INTERNAL_AUDIENCES,
   InternalIdentityGuard,
   RolesGuard,
   StepUpMfaGuard,
   generateDevKeyPairPem,
   type JwtKeys,
+  type InternalAudience,
 } from '@veo/auth';
+import { createLogger } from '@veo/observability';
 import { PrismaService } from './prisma.service';
 import { REDIS, redisProvider } from './redis';
 import { outboxRelayProvider } from './outbox.relay';
@@ -50,11 +56,27 @@ const jwtProvider: Provider = {
     new JwtService(await resolveJwtKeys(config)),
 };
 
+/**
+ * Denylist de revocación (enforcement server-side del access token stateless). identity ESCRIBE acá cuando
+ * revoca (single-session del conductor, logout, suspensión); los BFFs LEEN en el camino de auth. Comparte
+ * el MISMO Redis que el refresh-store → cross-instancia por diseño.
+ */
+const sessionRevocationProvider: Provider = {
+  provide: SessionRevocationStore,
+  inject: [REDIS],
+  useFactory: (redis: Redis) =>
+    new SessionRevocationStore(redis, createLogger('session-revocation')),
+};
+
 const refreshStoreProvider: Provider = {
   provide: RedisRefreshTokenStore,
-  inject: [REDIS, ConfigService],
-  useFactory: (redis: Redis, config: ConfigService<Env, true>) =>
-    new RedisRefreshTokenStore(redis, config.getOrThrow<number>('REFRESH_TTL_SECONDS')),
+  inject: [REDIS, ConfigService, SessionRevocationStore],
+  useFactory: (
+    redis: Redis,
+    config: ConfigService<Env, true>,
+    revocation: SessionRevocationStore,
+  ) =>
+    new RedisRefreshTokenStore(redis, config.getOrThrow<number>('REFRESH_TTL_SECONDS'), revocation),
 };
 
 const internalSecretProvider: Provider = {
@@ -64,6 +86,17 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
 };
 
+/**
+ * Base de MEMBRESÍA del HMAC para `InternalIdentityGuard` (HTTP) — ya NO es la fuente de AUTORIZACIÓN por
+ * riel. Antes este set global dejaba que cualquiera de los 4 rieles entrara a cualquier endpoint
+ * (confused-deputy H7). Ahora la AUTORIZACIÓN por-endpoint la hace `@Audiences(...)` + `AudienceGuard`
+ * (fail-closed, por handler) y el gRPC scopea por-método (`GRPC_METHOD_AUDIENCES`). Este token se conserva
+ * SOLO porque `InternalIdentityGuard` exige una lista para validar que el `aud` firmado sea un riel CONOCIDO
+ * (que la firma porte una audiencia válida del set cerrado); el QUÉ-puede-pedir-QUÉ vive en @Audiences.
+ * Se usa la constante tipada `INTERNAL_AUDIENCES` (fuente única) en vez de literales sueltos.
+ */
+const ALLOWED_AUDIENCES: readonly InternalAudience[] = INTERNAL_AUDIENCES;
+
 @Global()
 @Module({
   providers: [
@@ -71,9 +104,12 @@ const internalSecretProvider: Provider = {
     redisProvider,
     jwtProvider,
     { provide: JWT_SERVICE, useExisting: JwtService },
+    sessionRevocationProvider,
     refreshStoreProvider,
     internalSecretProvider,
+    { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },
     outboxRelayProvider,
+    { provide: CLOCK, useValue: new SystemClock() },
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,
@@ -85,6 +121,8 @@ const internalSecretProvider: Provider = {
     JWT_SERVICE,
     RedisRefreshTokenStore,
     INTERNAL_IDENTITY_SECRET,
+    INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+    CLOCK,
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,

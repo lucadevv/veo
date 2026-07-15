@@ -7,7 +7,7 @@ import { cn } from '@/lib/cn';
 
 const buttonVariants = cva(
   // Base: target ≥44px (vía altura), foco visible, press scale 0.97 (emil-design-eng).
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium ' +
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-semibold ' +
     'transition-[transform,background-color,color,border-color] duration-150 ease-out ' +
     'cursor-pointer select-none active:scale-[0.97] ' +
     'disabled:pointer-events-none disabled:opacity-50 ' +
@@ -15,7 +15,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: 'bg-accent text-accent-on hover:bg-accent-hover',
+        primary: 'bg-brand text-brand-on hover:bg-brand-hover',
         secondary: 'bg-surface-2 text-ink border border-border hover:border-border-strong',
         ghost: 'bg-transparent text-ink hover:bg-surface-2',
         danger: 'bg-danger text-danger-on hover:bg-danger-hover',
@@ -44,7 +44,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type={type ?? 'button'}
       className={cn(buttonVariants({ variant, size }), className)}
-      disabled={disabled ?? loading}
+      // `disabled || loading` (no `??`): un botón en `loading` NUNCA debe quedar clickeable, AUNQUE el
+      // consumidor pase un `disabled` definido. Con `??`, un `disabled={false}` cortocircuitaba el auto-disable
+      // por loading → ventana de doble-submit (mordió en refund-dialog y en el botón Verificar del step-up).
+      disabled={disabled || loading}
       aria-busy={loading}
       {...props}
     >

@@ -1,5 +1,14 @@
 # Runbook · Deploy a producción
 
+> **SUPERSEDED (2026-06-24) por el modelo VPS self-hosted (FOUNDATION §0.7(c)).** Producción es
+> **VPS único + Docker Compose + GitHub Actions**, NO AWS EKS/GitOps. El deploy real es:
+> `docker-compose.preview.yml` (stack production-grade) + `.github/workflows/images.yml` (build de
+> imágenes a **GHCR** + deploy por **SSH al VPS**) + `infra/deploy/migrate-preview.sh` (migraciones
+> Prisma en el host) + **Cloudflare Tunnel** como edge. Los secretos viven en `.env`/docker-secrets/SOPS+age
+> en el host (NO AWS Secrets Manager/ESO). Postgres/Redis/Kafka/MinIO/ClickHouse se self-hostean en el VPS
+> (NO RDS/ElastiCache/MSK/S3). El cuerpo de abajo (ECR/ArgoCD/EKS/Terraform/ESO) se conserva como
+> **registro histórico** del carril AWS reemplazado — NO seguir como procedimiento. Ver STATUS Ola 5.
+
 > Flujo GitOps completo post-Lote I-B (secrets reales + riel de migraciones).
 > Honesto sobre lo que aún NO existe — ver "Qué falta" al final.
 

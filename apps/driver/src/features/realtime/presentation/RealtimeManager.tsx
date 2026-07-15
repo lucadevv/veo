@@ -2,21 +2,22 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   navigateToBids,
-  navigateToIncoming,
   navigateToTripActive,
 } from '../../../navigation/navigationRef';
 import { useDi } from '../../../core/di/useDi';
-import { SHIFT_STATE_QUERY_KEY } from '../../shift/presentation/hooks/useShift';
-import { useShiftState } from '../../shift/presentation/hooks/useShift';
-import { isOnShift } from '../../shift/domain';
-import { isTripTerminal, parseTripStatus } from '../../trips/domain';
-import { TRIP_QUERY_PREFIX, useActiveTrip, useTrip } from '../../trips/presentation/hooks/useTrips';
-import { BIDS_QUERY_KEY } from '../../bidding/presentation';
-import { useChatStore } from '../../chat/presentation';
+import { useSessionStore } from '../../../core/session/sessionStore';
 import {
-  EARNINGS_BREAKDOWN_QUERY_KEY,
-  EARNINGS_SUMMARY_QUERY_KEY,
-} from '../../earnings/presentation/hooks/useEarnings';
+  useSessionClosedStore,
+  type SessionClosedReason,
+} from '../../../core/session/sessionClosedStore';
+import { SHIFT_STATE_QUERY_KEY, isOnShift } from '../../shift/domain';
+import { useShiftState } from './hooks/useShiftState';
+import { TRIP_QUERY_PREFIX, isTripTerminal, parseTripStatus } from '../../trips/domain';
+import { useActiveTrip, useTrip } from './hooks/useTripQueries';
+import { BIDS_QUERY_KEY } from '../../bidding/presentation';
+import type { OpenBid } from '../../bidding/domain';
+import { useChatStore } from '../../chat/presentation';
+import { EARNINGS_BREAKDOWN_QUERY_KEY, EARNINGS_SUMMARY_QUERY_KEY } from '../../earnings/domain';
 import { useDriverRealtime } from './hooks/useDriverRealtime';
 import { useLocationPublisher } from './hooks/useLocationPublisher';
 import { useDispatchStore } from './state/dispatchStore';
@@ -30,8 +31,28 @@ import { useWaypointProposalStore } from './state/waypointProposalStore';
  */
 export const RealtimeManager = (): null => {
   const queryClient = useQueryClient();
-  const { foregroundService } = useDi();
+  const { foregroundService, localAuth } = useDi();
+  // DRIFT-2 — expiración por REVOCACIÓN REMOTA (definitiva): limpia el refresh token biométrico del Keychain
+  // ANTES de expirar el estado local. Una sesión superseded/revocada ya está muerta server-side (identity), así
+  // que el material sensible NO debe sobrevivir localmente. Best-effort + observable (no bloquea el expire; si el
+  // clear falla, el relogin igual fallaría contra el server). NO se usa en la expiración TRANSITORIA del
+  // HTTP-refresh (que puede ser un blip de red): ahí conservar el Keychain permite un relogin cuando la red vuelve.
+  const expireOnRemoteRevocation = (reason: SessionClosedReason) => {
+    localAuth.clear().catch((err) => {
+      console.warn(
+        '[realtime] no se pudo limpiar el Keychain biométrico tras revocación remota:',
+        err,
+      );
+    });
+    // Aviso explícito ANTES de expirar: el RootNavigator muestra `SessionClosedScreen` con el motivo
+    // (frame C/Sesion-Cerrada) en vez de mandar a login en silencio.
+    useSessionClosedStore.getState().setReason(reason);
+    useSessionStore.getState().expireSession();
+  };
   const setIncomingOffer = useDispatchStore((s) => s.setIncomingOffer);
+  const clearOffer = useDispatchStore((s) => s.clearOffer);
+  const clearPendingBid = useDispatchStore((s) => s.clearPendingBid);
+  const setPujaRebidNotice = useDispatchStore((s) => s.setPujaRebidNotice);
   const setActiveTripId = useDispatchStore((s) => s.setActiveTripId);
   const setConnected = useDispatchStore((s) => s.setConnected);
   const activeTripId = useDispatchStore((s) => s.activeTripId);
@@ -98,28 +119,73 @@ export const RealtimeManager = (): null => {
       // aceptar/rechazar, es una puja abierta a la que el conductor contraoferta. Refrescamos el board y,
       // si no está en un viaje, lo llevamos a las pujas. NO usamos el flujo FIXED (TripIncoming/incomingOffer).
       if (payload.bidCents != null) {
+        // ADR-020 Lote 2: el MISMO viaje pudo llegar antes como oferta FIXED (TripIncoming) y ahora
+        // re-abre como PUJA (schedule flip / rebid FIXED→PUJA). Sin este clearOffer quedaba un "Viaje
+        // entrante" FANTASMA en el store + en el back-stack: el conductor volvía a esa pantalla, tapeaba
+        // Aceptar sobre un match ya superado → 404 "la oferta venció / viaje no encontrado". Limpiamos la
+        // oferta FIXED colgada al pasar el viaje a modo puja.
+        // J4 · si el MISMO viaje estaba como oferta FIXED ("Viaje entrante") y ahora re-abre como PUJA,
+        // avisamos "nueva ronda · ahora es puja" (BidsScreen lo muestra) para que el conductor entienda que
+        // es el mismo viaje con otra mecánica, no una oferta random. `getState()` lee el valor actual sin
+        // suscribir. Va ANTES del clearOffer (que borra el incomingOffer que estamos comparando).
+        const flippedFromFixed =
+          useDispatchStore.getState().incomingOffer?.tripId === payload.tripId;
+        clearOffer();
+        if (flippedFromFixed) {
+          setPujaRebidNotice(payload.tripId);
+        }
         queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
         if (!activeTripId) {
           navigateToBids();
         }
         return;
       }
-      // Oferta FIXED (por defecto): el conductor debe aceptar/rechazar antes de `expiresAt`.
+      // Oferta FIXED (por defecto): el conductor debe aceptar/rechazar antes de `expiresAt`. YA NO abre un
+      // full-screen (TripIncoming): la oferta entra como CARD editorial en la MISMA columna flotante del
+      // dashboard que las pujas (newest-first, arriba de todo), con Aceptar/Rechazar inline. Solo se
+      // persiste en el store; el DashboardScreen la surfacea. Si el conductor está en otra pantalla, la ve
+      // al volver al dashboard (mientras no venza) — mismo criterio que las pujas.
       setIncomingOffer({
         matchId: payload.matchId,
         tripId: payload.tripId,
         expiresAt: payload.expiresAt,
         scheduled,
+        // ETA conductor→recojo (efímero, momento de oferta): alimenta el stat "A recojo" de la card.
+        // Puede venir `undefined` (dispatch lo omite si maps.eta no estuvo disponible) → el stat degrada.
+        pickupEtaSeconds: payload.pickupEtaSeconds,
       });
-      navigateToIncoming({ matchId: payload.matchId, tripId: payload.tripId });
     },
     onMatch: (payload) => {
+      // Match confirmado: cualquier oferta FIXED entrante colgada en el store ya no aplica (o ganamos por
+      // puja, sin pasar por TripIncoming). La limpiamos para no dejar un "Viaje entrante" fantasma tras el match.
+      clearOffer();
+      // ADR-020 Lote 2 (2b) — GANAMOS esta puja: el "esperando al pasajero…" ya cumplió su función; lo
+      // limpiamos (navegamos a TripActive abajo). Idempotente si el tripId no estaba pendiente (flujo FIXED).
+      clearPendingBid(payload.tripId);
       setActiveTripId(payload.tripId);
       queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
       // Match confirmado → llevamos al conductor a su viaje. Clave en PUJA (ganó la puja, no pasó por
       // TripIncoming) y si el match llega estando en otra pantalla. En FIXED ya está en TripActive (el
       // accept navega): navegar a la misma ruta+params es no-op, así que es seguro en ambos flujos.
       navigateToTripActive(payload.tripId);
+    },
+    // ADR-020 Lote 2 (2a) — la puja se cerró para este conductor (el pasajero eligió a otro, o quedó
+    // inelegible): removemos la card de la cache al INSTANTE (sin esperar el poll de 12s) y limpiamos el
+    // "esperando al pasajero" (2b). El invalidate confirma la lista contra el servidor. Así el conductor
+    // nunca tapea una card muerta (que daría 409); la puja simplemente desaparece.
+    onBidClosed: (payload) => {
+      clearPendingBid(payload.tripId);
+      queryClient.setQueryData<OpenBid[]>(BIDS_QUERY_KEY, (old) =>
+        old ? old.filter((b) => b.tripId !== payload.tripId) : old,
+      );
+      queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
+      // El driver-bff reenvía `dispatch.offer_withdrawn` como `bid:closed` para AMBOS rieles. Si el viaje
+      // retirado era una oferta FIXED colgada (reason=cancelled cuando el pasajero canceló en búsqueda), la
+      // card FIXED vive en `incomingOffer`, NO en la cache de pujas — hay que limpiarla acá o sobrevive hasta
+      // vencer su countdown y un accept tardío navegaría a un viaje muerto. Mismo patrón que el flip FIXED→PUJA.
+      if (useDispatchStore.getState().incomingOffer?.tripId === payload.tripId) {
+        clearOffer();
+      }
     },
     onTripUpdate: () => {
       queryClient.invalidateQueries({ queryKey: TRIP_QUERY_PREFIX });
@@ -160,6 +226,19 @@ export const RealtimeManager = (): null => {
       queryClient.invalidateQueries({ queryKey: TRIP_QUERY_PREFIX });
       queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: SHIFT_STATE_QUERY_KEY });
+    },
+    // SINGLE ACTIVE SESSION: el conductor inició sesión en OTRO dispositivo → cerramos la sesión local.
+    // `expireSession` (no `logout`): la sesión remota YA la revocó el login nuevo (identity); acá solo
+    // limpiamos el estado local y volvemos al login. No re-suscribimos el socket (el server rechaza este
+    // `sid` viejo, así que no hay guerra de reconexión).
+    onSessionSuperseded: () => {
+      expireOnRemoteRevocation('superseded');
+    },
+    // ENFORCEMENT DE REVOCACIÓN: el gateway rechazó el handshake porque la sesión está revocada (logout
+    // remoto, suspensión, o superada). Mismo destino que `superseded`: `expireSession` limpia el estado
+    // local y vuelve al login. La revocación server-side ya la aplicó identity (el refresh también fallará).
+    onSessionRevoked: () => {
+      expireOnRemoteRevocation('revoked');
     },
   });
 

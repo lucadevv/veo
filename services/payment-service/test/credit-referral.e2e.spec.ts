@@ -15,6 +15,7 @@ import {
 import { uuidv7 } from '@veo/utils';
 import { PrismaClient } from '../src/generated/prisma';
 import { CreditService } from '../src/credit/credit.service';
+import { CreditRepository } from '../src/credit/credit.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 
 const serviceDir = fileURLToPath(new URL('..', import.meta.url));
@@ -32,7 +33,7 @@ beforeAll(async () => {
   await prisma.$connect();
   // prisma real (NO mock): read y write apuntan al mismo cliente del contenedor.
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  credit = new CreditService(prismaService);
+  credit = new CreditService(new CreditRepository(prismaService));
 }, 180_000);
 
 afterAll(async () => {

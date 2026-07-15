@@ -1,12 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useDi, useRepositories } from '../../../../core/di/useDi';
+import { useAvatarUploader, useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
-import { GetProfileUseCase, profileToSessionUser } from '../../domain';
-import { LogoutUseCase } from '../../../auth/domain';
-import { HttpPushRegistrationPort, fcmPushService } from '../../../notifications/data';
-
-/** Clave de caché del perfil del conductor. */
-export const PROFILE_QUERY_KEY = ['profile', 'me'] as const;
+import {
+  GetProfileUseCase,
+  PROFILE_QUERY_KEY,
+  RequestAccountDeletionUseCase,
+  RequestPhoneChangeUseCase,
+  UpdateProfileUseCase,
+  UploadAvatarUseCase,
+  VerifyPhoneChangeUseCase,
+  profileToSessionUser,
+  type UpdatePersonalInput,
+} from '../../domain';
+import type { PickedImage } from '../../../documents/domain/ports/image-picker-service';
 
 /** Query: perfil agregado del conductor (identity + rating + fleet + compliance). */
 export function useProfile() {
@@ -23,33 +29,64 @@ export function useProfile() {
 }
 
 /**
- * Mutación de logout: revoca el refresh token en el servidor y limpia el estado local + caché.
- * Si la revocación remota falla (p. ej. sin red), igual se cierra la sesión localmente.
+ * Mutación: actualiza los datos personales (PII) del conductor (`PATCH /drivers/me/personal`) e
+ * invalida el query del perfil para refrescar la vista con el dato persistido.
  */
-export function useLogout() {
-  const { auth } = useRepositories();
-  const { localAuth, httpClient } = useDi();
+export function useUpdateProfile() {
+  const { profile } = useRepositories();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      // Baja del device token con el JWT aún vigente (antes de revocar/limpiar la sesión).
-      await fcmPushService
-        .unregisterCurrentToken(new HttpPushRegistrationPort(httpClient))
-        .catch(() => undefined);
-      const refreshToken = useSessionStore.getState().refreshToken;
-      if (refreshToken) {
-        try {
-          await new LogoutUseCase(auth).execute(refreshToken);
-        } catch {
-          // El logout local es la prioridad; ignoramos el fallo remoto.
-        }
-      }
-    },
-    onSettled: async () => {
-      // Elimina el refresh token biométrico para que no quede disponible el re-login.
-      await localAuth.clear().catch(() => undefined);
-      useSessionStore.getState().clearSession();
-      queryClient.clear();
-    },
+    mutationFn: (input: UpdatePersonalInput) => new UpdateProfileUseCase(profile).execute(input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: PROFILE_QUERY_KEY }),
+  });
+}
+
+/**
+ * Mutación: sube la foto de perfil (avatar) elegida (presign → PUT → confirm; el confirm del driver-bff
+ * persiste la foto en el perfil) e invalida el query del perfil para refrescar la vista con la foto nueva.
+ */
+export function useUploadAvatar() {
+  const uploader = useAvatarUploader();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: PickedImage) => new UploadAvatarUseCase(uploader).execute(file),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: PROFILE_QUERY_KEY }),
+  });
+}
+
+/**
+ * Mutación: pide el OTP del CAMBIO de número (`POST /drivers/me/phone/request`). El código va por
+ * SMS al número NUEVO (semántica del dueño); la validación local del formato vive en el use case.
+ */
+export function useRequestPhoneChange() {
+  const { profile } = useRepositories();
+  return useMutation({
+    mutationFn: (phone: string) => new RequestPhoneChangeUseCase(profile).execute(phone),
+  });
+}
+
+/**
+ * Mutación: verifica el OTP y vincula el número NUEVO (`POST /drivers/me/phone/verify`), que pasa a
+ * ser el teléfono de LOGIN. Invalida el perfil para que la pantalla muestre el dato persistido.
+ */
+export function useVerifyPhoneChange() {
+  const { profile } = useRepositories();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ phone, code }: { phone: string; code: string }) =>
+      new VerifyPhoneChangeUseCase(profile).execute(phone, code),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: PROFILE_QUERY_KEY }),
+  });
+}
+
+/**
+ * Mutación: solicita el borrado de cuenta (derecho al olvido, Ley N.° 29733) vía
+ * `POST /drivers/me/deletion`. Devuelve `graceUntil`; el flujo de la pantalla informa la gracia y
+ * cierra la sesión (espejo del pasajero).
+ */
+export function useRequestAccountDeletion() {
+  const { profile } = useRepositories();
+  return useMutation({
+    mutationFn: () => new RequestAccountDeletionUseCase(profile).execute(),
   });
 }

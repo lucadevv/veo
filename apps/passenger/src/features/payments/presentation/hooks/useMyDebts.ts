@@ -8,9 +8,11 @@ import {useFocusEffect} from '@react-navigation/native';
 import React from 'react';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
+import {MY_DEBTS_QUERY_KEY} from '../../domain/queryKeys';
 
-/** Clave de caché de las deudas del pasajero (`GET /payments/debts`). Compartida home + sheet de deuda. */
-export const MY_DEBTS_QUERY_KEY = ['payments', 'debts'] as const;
+// La clave vive en `payments/domain` (compartida con el gate de deuda de Trip → caché coherente).
+// La re-exportamos para no romper a los consumidores internos (barrel, `DebtSheet`).
+export {MY_DEBTS_QUERY_KEY};
 
 /**
  * Cuánto se considera "fresca" la deuda antes de re-consultar. Antes era 60s, y eso causaba que la

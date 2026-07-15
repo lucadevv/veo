@@ -302,6 +302,69 @@ export function IconEye({color, size = 22}: GlyphProps): React.JSX.Element {
   );
 }
 
+/**
+ * Rostro dentro de un marco de escaneo (Face ID). Espejo del `scan-face` de lucide: esquinas del
+ * marco + dos ojos + boca. viewBox 24×24, trazo por prop. Usado en la verificación facial (KYC).
+ */
+export function IconFaceScan({
+  color,
+  size = 44,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3 7V5a2 2 0 0 1 2-2h2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M17 3h2a2 2 0 0 1 2 2v2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M21 17v2a2 2 0 0 1-2 2h-2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M7 21H5a2 2 0 0 1-2-2v-2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M8 14s1.5 2 4 2 4-2 4-2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M9 9h.01"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M15 9h.01"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** Candado (pantalla de sesión expirada). */
 export function IconLock({color, size = 24}: GlyphProps): React.JSX.Element {
   return (

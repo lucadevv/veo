@@ -1,7 +1,6 @@
 // Entidades de dominio de Trip (contrato soberano en @veo/api-client).
 export type {
   CancelTripRequest,
-  ChangeDestinationRequest,
   CreateTripRequest,
   GeoPoint,
   MobileVehicleType,

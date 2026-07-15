@@ -9,11 +9,12 @@
 import { Injectable } from '@nestjs/common';
 import { NotFoundError } from '@veo/utils';
 import { TripStatus } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { TripQueryRepository } from './trip-query.repository';
 import { toTripView } from './trip-view.mapper';
 import {
   clampLimit,
   decodeCursor,
+  driverHistoryWhere,
   encodeCursor,
   historyWhere,
   tripToHistoryItem,
@@ -23,19 +24,16 @@ import type { TripView } from './dto/trip.dto';
 
 @Injectable()
 export class TripQueryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly repo: TripQueryRepository) {}
 
   async getTrip(id: string): Promise<TripView> {
-    const trip = await this.prisma.write.trip.findUnique({ where: { id } });
+    const trip = await this.repo.findByIdOnPrimary(id);
     if (!trip) throw new NotFoundError('Viaje no encontrado', { id });
     return toTripView(trip);
   }
 
   async getTripState(id: string): Promise<{ id: string; status: TripStatus }> {
-    const trip = await this.prisma.read.trip.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    });
+    const trip = await this.repo.findStatusById(id);
     if (!trip) throw new NotFoundError('Viaje no encontrado', { id });
     return { id: trip.id, status: trip.status };
   }
@@ -45,10 +43,7 @@ export class TripQueryService {
    * Orden ascendente por hora programada (los más próximos primero).
    */
   async listScheduled(passengerId: string): Promise<TripView[]> {
-    const trips = await this.prisma.read.trip.findMany({
-      where: { passengerId, status: TripStatus.SCHEDULED },
-      orderBy: { scheduledFor: 'asc' },
-    });
+    const trips = await this.repo.findScheduledByPassenger(passengerId);
     return trips.map((t) => toTripView(t));
   }
 
@@ -72,11 +67,36 @@ export class TripQueryService {
   ): Promise<TripHistoryPage> {
     const limit = clampLimit(rawLimit);
     const cursor = decodeCursor(rawCursor);
-    const rows = await this.prisma.read.trip.findMany({
-      where: historyWhere(passengerId, cursor),
-      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1, // peek: 1 fila extra para saber si hay siguiente página sin COUNT
-    });
+    // peek: 1 fila extra (limit + 1) para saber si hay siguiente página sin COUNT
+    const rows = await this.repo.findHistoryPage(historyWhere(passengerId, cursor), limit + 1);
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const last = page[page.length - 1];
+    const nextCursor =
+      hasMore && last
+        ? encodeCursor({ requestedAt: last.requestedAt.toISOString(), id: last.id })
+        : null;
+    return { items: page.map((t) => tripToHistoryItem(t)), nextCursor };
+  }
+
+  /**
+   * Historial REAL del CONDUCTOR (servidor, no MMKV local): SUS viajes ordenados por requestedAt DESC,
+   * id DESC, paginados por CURSOR (keyset). ESPEJO EXACTO de listPassengerTrips pero filtrando por
+   * `driverId` (id de PERFIL Driver de identity, NO userId — ver el invariante en driver-trips.service).
+   * El driverId lo fija el BFF desde el JWT (anti-IDOR): este método NUNCA recibe el id del cliente.
+   *
+   * Mismo keyset (take = limit + 1 para el "peek" sin COUNT), mismo clamp del limit, mismo orden y mismo
+   * anti-N+1 (el item NO trae el nombre del pasajero: la card muestra tier+ruta+monto+estado+fecha).
+   */
+  async listDriverTrips(
+    driverId: string,
+    rawCursor?: string,
+    rawLimit?: number,
+  ): Promise<TripHistoryPage> {
+    const limit = clampLimit(rawLimit);
+    const cursor = decodeCursor(rawCursor);
+    // peek: 1 fila extra (limit + 1) para saber si hay siguiente página sin COUNT
+    const rows = await this.repo.findHistoryPage(driverHistoryWhere(driverId, cursor), limit + 1);
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
@@ -92,10 +112,7 @@ export class TripQueryService {
    * cola de "cierres pendientes" del post-viaje; `closeByPassenger` (TripsService) la va vaciando.
    */
   async getPendingSettlement(passengerId: string): Promise<TripView | null> {
-    const trip = await this.prisma.read.trip.findFirst({
-      where: { passengerId, status: TripStatus.COMPLETED, passengerClosedAt: null },
-      orderBy: { completedAt: 'asc' },
-    });
+    const trip = await this.repo.findOldestPendingSettlement(passengerId);
     return trip ? toTripView(trip) : null;
   }
 }

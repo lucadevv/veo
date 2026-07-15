@@ -36,3 +36,82 @@ export const loginResult = z.object({
   enrollment: loginEnrollment.nullish(),
 });
 export type LoginResult = z.infer<typeof loginResult>;
+
+/* ── Gobierno → Políticas (PBAC · ADR-024) ── */
+
+/**
+ * Vista de una política de gobierno que devuelve el admin-bff (GET/PUT /gobierno/policies[/:key]).
+ * Espejo EXACTO del `PolicyView` del wire del bff (`GobiernoService.PolicyView`): el ESTADO vigente de la
+ * fila `Policy` (identity-service). El CONTRATO de forma (schema Zod de `params`, defaults, `mandatory`,
+ * textos UI) vive en `@veo/policy` (POLICY_CATALOG) — la UI cruza este estado con esa metadata. `params`
+ * se valida acá como objeto plano; la validación PROFUNDA por-política la hace identity con @veo/policy.
+ * (admin-web define este contrato local porque @veo/api-client aún no lo expone.)
+ */
+export const policyView = z.object({
+  key: z.string(),
+  family: z.string(),
+  enabled: z.boolean(),
+  params: z.record(z.unknown()),
+  mandatory: z.boolean(),
+  version: z.number(),
+  updatedBy: z.string(),
+  updatedAt: z.string(),
+});
+export type PolicyView = z.infer<typeof policyView>;
+
+/** Body del PUT /gobierno/policies/:key (parche PARCIAL: `enabled` y/o `params`). Espeja UpdatePolicyDto del bff. */
+export interface UpdatePolicyRequest {
+  enabled?: boolean;
+  params?: Record<string, unknown>;
+  /** CAS optimista: la `version` que se tenía a la vista. El bff/identity abortan con 409 si la fila ya avanzó. */
+  expectedVersion?: number;
+}
+
+/**
+ * Una entrada del HISTORIAL de una política (timeline del detalle · GET /gobierno/policies/:key/history). Espejo
+ * del `PolicyVersionView` del wire del bff: snapshot de una versión materializada. Backend REAL nuevo (tabla
+ * `PolicyVersion` de identity, escrita en la tx del PUT); NO derivado. `[]` si la política aún no tuvo cambios.
+ * (admin-web lo define local, igual que `policyView`: @veo/api-client aún no expone el contrato de gobierno.)
+ */
+export const policyVersionView = z.object({
+  version: z.number(),
+  enabled: z.boolean(),
+  params: z.record(z.unknown()),
+  changedBy: z.string(),
+  changedAt: z.string(),
+});
+export type PolicyVersionView = z.infer<typeof policyVersionView>;
+
+/* ── Gobierno → Permisos y visibilidad (OVERLAY subtract-only · ADR-025 §3) ── */
+
+/**
+ * Vista de un override de visibilidad que devuelve el admin-bff (GET/PUT /gobierno/permission-overrides).
+ * Espejo EXACTO del `PermissionOverrideView` del wire del bff: un par (role, permission) del overlay
+ * subtract-only. `hidden:true` = el par está RESTADO (oculto) para ese rol; ausencia de fila (o `hidden:false`)
+ * = rige la BASE (`baseGrants`). La UI cruza este estado con la matriz base de `@veo/policy` (fuente única) para
+ * componer el efectivo `base ∧ ¬override`. `role`/`permission` viajan como strings del wire; identity los valida
+ * como canónicos. (admin-web define este contrato local porque @veo/api-client aún no lo expone · igual criterio
+ * que policyView.)
+ */
+export const permissionOverrideView = z.object({
+  role: z.string(),
+  permission: z.string(),
+  hidden: z.boolean(),
+  version: z.number(),
+  updatedBy: z.string(),
+  updatedAt: z.string(),
+});
+export type PermissionOverrideView = z.infer<typeof permissionOverrideView>;
+
+/**
+ * Body del PUT /gobierno/permission-overrides (espeja SetPermissionOverrideDto del bff). Override subtract-only:
+ * `hidden:true` RESTA el par (role, permission); `hidden:false` lo des-resta (vuelve a regir la base). identity
+ * valida el invariante subtract-only contra la base + el candado legal-mandatory (fuente única @veo/policy).
+ */
+export interface SetPermissionOverrideRequest {
+  role: string;
+  permission: string;
+  hidden: boolean;
+  /** CAS optimista: la `version` del par a la vista. El bff/identity abortan con 409 si ya avanzó. Ausente = create. */
+  expectedVersion?: number;
+}

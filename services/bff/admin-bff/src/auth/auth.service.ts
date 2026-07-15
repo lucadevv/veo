@@ -3,11 +3,20 @@
  * El BFF NO emite tokens: devuelve al caller (admin-web) los tokens que produce identity, para que
  * admin-web los guarde en su cookie httpOnly en su propio origen.
  */
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { InternalRestClient } from '@veo/rpc';
-import { isMfaFresh, type AuthenticatedUser } from '@veo/auth';
+import { isHardenedEnv } from '@veo/utils';
+import {
+  isMfaFresh,
+  POLICY_READER_PORT,
+  type AuthenticatedUser,
+  type PolicyReaderPort,
+} from '@veo/auth';
+import { computeHiddenPermissions } from '@veo/policy';
+import type { AdminRole } from '@veo/shared-types';
 import type { SessionUser } from '@veo/api-client';
 import { IdentityAuthClient } from './identity-auth.client';
+import { AuditRecorder } from '../audit/audit-recorder.service';
 import { REST_IDENTITY } from '../infra/tokens';
 import type {
   LoginDto,
@@ -33,36 +42,148 @@ export interface TotpEnrollChallenge {
 
 export type LoginResult = AdminTokens | TotpEnrollChallenge;
 
+/** Discrimina el resultado del login: tokens emitidos (acceso real) vs challenge de enrolamiento TOTP. */
+function isAdminTokens(result: LoginResult): result is AdminTokens {
+  return (result as TotpEnrollChallenge).mustEnrollTotp !== true;
+}
+
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly identityAuth: IdentityAuthClient,
+    private readonly audit: AuditRecorder,
     @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
+    // Puerto síncrono del overlay (misma instancia/token que lee el PermissionOverlayGuard). OPCIONAL: sin
+    // `PolicyModule` (o antes de la Ola B) no se resta nada → `hiddenPermissions` cae a `[]` (fail-safe: el
+    // front ve TODA la base). Se lee del cache en memoria, así que `session()` sigue síncrono.
+    @Optional() @Inject(POLICY_READER_PORT) private readonly policy?: PolicyReaderPort,
   ) {}
 
   acceptInvite(dto: AcceptInviteDto): Promise<{ email: string }> {
     return this.identityAuth.post('/admin/invite/accept', dto);
   }
 
-  login(dto: LoginDto): Promise<LoginResult> {
-    return this.identityAuth.post('/admin/login', dto);
+  async login(dto: LoginDto): Promise<LoginResult> {
+    const result = await this.identityAuth.post<LoginResult>('/admin/login', dto);
+    // Solo auditamos un login REAL (tokens emitidos). El challenge de enrolamiento TOTP no es un
+    // acceso a la consola todavía, así que se omite.
+    if (isAdminTokens(result)) {
+      await this.auditSessionEvent(result.admin, 'auth.login', { email: result.admin.email });
+    }
+    return result;
   }
 
-  totpConfirm(dto: TotpConfirmDto): Promise<AdminTokens> {
-    return this.identityAuth.post('/admin/totp/confirm', dto);
+  async totpConfirm(dto: TotpConfirmDto): Promise<AdminTokens> {
+    const tokens = await this.identityAuth.post<AdminTokens>('/admin/totp/confirm', dto);
+    await this.auditSessionEvent(tokens.admin, 'auth.totp-enrolled', { email: tokens.admin.email });
+    return tokens;
   }
 
   refresh(dto: RefreshDto): Promise<{ accessToken: string; refreshToken: string }> {
+    // refresh: rotación silenciosa de tokens — no es un evento de sesión auditable (no hay decisión
+    // humana de acceso), por diseño no se audita.
     return this.identityAuth.post('/auth/refresh', dto);
   }
 
-  logout(dto: LogoutDto): Promise<{ ok: true }> {
-    return this.identityAuth.post('/auth/logout', dto);
+  async logout(dto: LogoutDto): Promise<{ ok: true }> {
+    // identity devuelve `userId` (el `sub` del refresh) SOLO si el token era válido. Si viene, auditamos
+    // el cierre de sesión del operador en el WORM. El refresh NO porta roles (`roles: []`): la firma gRPC
+    // del WRITE de audit solo exige el header internal-identity + audiencia (InternalIdentityGuard NO valida
+    // roles — eso se chequea en la LECTURA), así que el actor mínimo escribe bien. fail-OPEN (recordSession).
+    const res = await this.identityAuth.post<{ ok: true; userId?: string }>('/auth/logout', dto);
+    if (res.userId) {
+      const actor: AuthenticatedUser = {
+        userId: res.userId,
+        type: 'admin',
+        roles: [],
+        sessionId: '',
+        email: '',
+      };
+      await this.recordSession(actor, 'auth.logout', res.userId);
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Cierra la sesión del operador en TODOS los dispositivos (ADR-012 §2). Espejo de `logout` salvo el
+   * endpoint (`/auth/logout-all`, que revoca TODAS las sesiones + sella el denylist epoch) y el `action`
+   * auditado (`auth.logout-all`, honesto: es un evento distinto). Mismo actor mínimo desde `userId` y
+   * misma auditoría fail-OPEN (recordSession).
+   */
+  async logoutAll(dto: LogoutDto): Promise<{ ok: true }> {
+    const res = await this.identityAuth.post<{ ok: true; userId?: string }>(
+      '/auth/logout-all',
+      dto,
+    );
+    if (res.userId) {
+      const actor: AuthenticatedUser = {
+        userId: res.userId,
+        type: 'admin',
+        roles: [],
+        sessionId: '',
+        email: '',
+      };
+      await this.recordSession(actor, 'auth.logout-all', res.userId);
+    }
+    return { ok: true };
   }
 
   /** Step-up TOTP: requiere Bearer válido; identity re-emite un access con mfaAt fresco. */
-  stepUp(identity: AuthenticatedUser, totp: string): Promise<{ accessToken: string }> {
-    return this.identityRest.post('/admin/step-up', { identity, body: { totp } });
+  async stepUp(identity: AuthenticatedUser, totp: string): Promise<{ accessToken: string }> {
+    const res = await this.identityRest.post<{ accessToken: string }>('/admin/step-up', {
+      identity,
+      body: { totp },
+    });
+    // Acá ya tenemos el AuthenticatedUser real (Bearer validado por el guard): lo usamos directo.
+    await this.recordSession(identity, 'auth.step-up', identity.userId);
+    return res;
+  }
+
+  /**
+   * Audita un evento de sesión de operador armando un AuthenticatedUser mínimo desde `result.admin`
+   * (login/totpConfirm son @Public, pre-auth: no hay identidad firmada por el guard). El actor debe ser
+   * válido para que la llamada gRPC firmada (grpcIdentityMetadata → HMAC + aud admin-rail) la acepte el
+   * audit-service: por eso `type: 'admin'` + `userId` + `roles` reales; `sessionId: ''` señala honestamente
+   * que la sesión recién nace (igual que anonymousIdentity).
+   */
+  private auditSessionEvent(
+    admin: AdminTokens['admin'],
+    action: string,
+    payload?: Record<string, unknown>,
+  ): Promise<void> {
+    const actor: AuthenticatedUser = {
+      userId: admin.id,
+      type: 'admin',
+      roles: admin.roles as AdminRole[],
+      sessionId: '',
+      email: admin.email,
+    };
+    return this.recordSession(actor, action, admin.id, payload);
+  }
+
+  /**
+   * fail-OPEN (a propósito, distinto del patrón normal fail-CLOSED de las mutaciones de negocio): si el
+   * audit-service está caído, NO bloqueamos el acceso/elevación del operador a la consola — un fail-closed
+   * acá sería un lockout TOTAL de operadores ante una caída del WORM. Logueamos a nivel ERROR (severidad
+   * alta: hueco de traza que debe alertar) pero seguimos. Las mutaciones de negocio (ops.service) siguen
+   * fail-closed; esto es exclusivo para los eventos de SESIÓN.
+   */
+  private async recordSession(
+    actor: AuthenticatedUser,
+    action: string,
+    resourceId: string,
+    payload?: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.audit.record(actor, { action, resourceType: 'admin', resourceId, payload });
+    } catch (err) {
+      this.logger.error(
+        `audit fail-open: no se registró el evento de sesión '${action}' del operador ${resourceId} (audit-service caído?)`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 
   /** Vista de sesión derivada del Bearer ya validado por JwtAuthGuard. */
@@ -71,7 +192,18 @@ export class AuthService {
       userId: user.userId,
       type: user.type,
       roles: user.roles,
-      mfaFresh: isMfaFresh(user.mfaVerifiedAt, MFA_FRESH_MAX_AGE_SEC),
+      // DEV: el StepUpMfaGuard bypassea la doble-auth en local/dev (!isHardenedEnv) → el indicador del
+      // header debe reflejar ESO (siempre "MFA fresco"), si no muestra "inactivo" mintiendo sobre un gate
+      // que el server NO aplica. Prod (endurecido) usa la frescura real de 5min.
+      mfaFresh: !isHardenedEnv() || isMfaFresh(user.mfaVerifiedAt, MFA_FRESH_MAX_AGE_SEC),
+      // OVERLAY de visibilidad (ADR-025 §3 · Fase 2): los permisos que el overlay le RESTA al actor. MISMA
+      // fórmula del efectivo que enforcea el PermissionOverlayGuard (`computeHiddenPermissions` de @veo/policy),
+      // leída del cache síncrono. El front los usa para OCULTAR nav/botones/páginas (compone base ∧ ¬oculto).
+      // Reader ausente → `[]` (fail-safe: rige la base pura).
+      hiddenPermissions: computeHiddenPermissions(
+        user.roles,
+        (role, permission) => this.policy?.isPermissionHiddenSync(role, permission) ?? false,
+      ),
     };
   }
 }

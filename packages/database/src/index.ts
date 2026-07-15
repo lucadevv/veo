@@ -9,5 +9,6 @@
 export * from './read-write.js';
 export * from './outbox.js';
 export * from './outbox-relay.js';
+export * from './outbox-env.js';
 export * from './tombstone.js';
 export * from './prisma-errors.js';

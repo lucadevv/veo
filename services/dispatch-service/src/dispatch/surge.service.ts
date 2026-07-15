@@ -11,9 +11,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { toH3, DISPATCH_H3_RESOLUTION, type LatLon } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
 import { REDIS } from '../infra/redis';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
+import { SURGE_REPO, type SurgeRepository } from './surge.repository';
 import type { Env } from '../config/env.schema';
 
 const DEMAND_PREFIX = 'surge:demand:';
@@ -47,7 +47,7 @@ export class SurgeService {
   private readonly demandWindow: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(SURGE_REPO) private readonly repo: SurgeRepository,
     @Inject(REDIS) private readonly redis: Pick<Redis, 'get' | 'incr' | 'expire'>,
     @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
     config: ConfigService<Env, true>,
@@ -74,9 +74,7 @@ export class SurgeService {
   }
 
   private async findActiveZone(point: LatLon, cell: string): Promise<ZoneRow | null> {
-    const zones = (await this.prisma.read.surgeZone.findMany({
-      where: { active: true },
-    })) as ZoneRow[];
+    const zones = (await this.repo.findActiveZones()) as ZoneRow[];
     return zones.find((z) => SurgeService.contains(z, point, cell)) ?? null;
   }
 

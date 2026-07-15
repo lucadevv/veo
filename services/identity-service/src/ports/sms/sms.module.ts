@@ -1,7 +1,7 @@
 import { Module, Logger, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ExternalServiceError } from '@veo/utils';
 import { SMS_SENDER, type SmsSender } from './sms.port';
+import { NotificationSmsSender } from './notification-sms-sender';
 import type { Env } from '../../config/env.schema';
 
 /**
@@ -31,15 +31,18 @@ class SmsSandboxSender implements SmsSender {
 }
 
 /**
- * Live: conector mínimo al operador celular (placeholder hasta tener convenio/gateway propio).
- * Implementar el POST al gateway del operador aquí. Lanza hasta entonces para no fallar en silencio.
+ * Live: delega la entrega del OTP a notification-service (su motor propio: dedup + retry + routing
+ * por canal, con los proveedores reales SMS/WhatsApp del LOTE 1) vía el cliente REST interno FIRMADO.
+ * Reusa la plantilla `contact.otp` y pasa el código estructurado en `payload.code`. Ver
+ * NotificationSmsSender. El throw del placeholder de operador quedó atrás.
  */
-class SmsOperatorSender implements SmsSender {
-  async send(_to: string, _message: string): Promise<void> {
-    throw new ExternalServiceError(
-      'SMS en modo live aún no configurado (falta gateway de operador)',
-    );
-  }
+function buildLiveSender(config: ConfigService<Env, true>): SmsSender {
+  // Fail-fast: si está en modo live pero falta la URL de notification, el servicio NO arranca
+  // (mejor que descubrirlo en el primer OTP). getOrThrow ya valida presencia vía el schema.
+  const baseUrl = config.getOrThrow<string>('NOTIFICATION_INTERNAL_URL');
+  const secret = config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET');
+  const timeoutMs = config.getOrThrow<number>('NOTIFICATION_TIMEOUT_MS');
+  return new NotificationSmsSender(baseUrl, secret, timeoutMs);
 }
 
 const smsProvider: Provider = {
@@ -47,7 +50,7 @@ const smsProvider: Provider = {
   inject: [ConfigService],
   useFactory: (config: ConfigService<Env, true>): SmsSender =>
     config.getOrThrow<string>('VEO_SMS_MODE') === 'live'
-      ? new SmsOperatorSender()
+      ? buildLiveSender(config)
       : new SmsSandboxSender(),
 };
 

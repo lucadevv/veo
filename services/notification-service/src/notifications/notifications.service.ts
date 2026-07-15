@@ -2,16 +2,18 @@
  * NotificationsService — capa de aplicación sobre el motor: encola y consulta notificaciones.
  * No contiene lógica de entrega (vive en el motor); solo orquesta y mapea a vistas seguras.
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NotFoundError } from '@veo/utils';
 import { NotificationEngine } from '../engine/notification.engine';
 import { NotificationRepository } from '../engine/notification.repository';
 import { TemplateService } from '../engine/template.service';
 import { categoryForTemplate } from '../engine/template.catalog';
+import { InboxReadScope, bumpInboxRead } from '../metrics/notification.metrics';
 import type { NotificationRecord } from '../engine/types';
 import type {
   CreateNotificationDto,
   InboxNotificationView,
+  MarkAllReadResultView,
   NotificationView,
 } from './dto/notification.dto';
 
@@ -36,6 +38,8 @@ function toView(rec: NotificationRecord, deduped?: boolean): NotificationView {
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     private readonly engine: NotificationEngine,
     private readonly repo: NotificationRepository,
@@ -51,6 +55,7 @@ export class NotificationsService {
       payload,
       dedupKey: dto.dedupKey,
       maxAttempts: dto.maxAttempts,
+      priority: dto.priority,
     });
     return toView(notification, deduped);
   }
@@ -84,7 +89,30 @@ export class NotificationsService {
         title,
         body,
         createdAt: rec.createdAt.toISOString(),
+        // read DERIVADO server-side: el cliente ya no lo inventa (antes hardcodeaba true).
+        read: rec.readAt != null,
       };
     });
+  }
+
+  /**
+   * Marca UNA notificación como leída. `recipientId` viene de la identidad de sesión (anti-IDOR): el
+   * caller nunca elige de quién es. Si no existe o no es del usuario → NotFound (no revela ajenas).
+   */
+  async markRead(recipientId: string, id: string): Promise<void> {
+    const outcome = await this.repo.markRead(id, recipientId);
+    if (outcome === 'notFound') {
+      throw new NotFoundError(`Notificación '${id}' no encontrada`);
+    }
+    bumpInboxRead(InboxReadScope.Single);
+    this.logger.log(`Notificación ${id} marcada como leída (recipient=${recipientId})`);
+  }
+
+  /** Marca TODAS las no leídas de la bandeja (PUSH) del usuario. Devuelve cuántas marcó. */
+  async markAllRead(recipientId: string): Promise<MarkAllReadResultView> {
+    const updated = await this.repo.markAllRead(recipientId);
+    bumpInboxRead(InboxReadScope.All, updated);
+    this.logger.log(`read-all: ${updated} notificación(es) marcadas (recipient=${recipientId})`);
+    return { updated };
   }
 }

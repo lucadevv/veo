@@ -1,18 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Plus } from 'lucide-react';
-import { FleetDocumentType } from '@veo/shared-types';
-import {
-  useCatalog,
-  useCreateDocument,
-  useCreateInspection,
-  useCreateVehicle,
-} from '@/lib/api/queries';
-import { certificationTypesForEnabledOfferings, documentTypeLabel } from '@/lib/certifications';
+import { useCreateInspection } from '@/lib/api/queries';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Field } from '@/components/ui/field';
 import {
   Dialog,
@@ -25,13 +19,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 
-/** Estilo del <select> nativo, espejo del Input (admin-web no tiene primitive Select aún). */
-const selectClass =
-  'h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-ink ' +
-  'hover:border-border-strong focus-visible:outline-none';
-
-const DOCUMENT_TYPES = ['LICENSE_A1', 'SOAT', 'PROPERTY_CARD', 'BACKGROUND_CHECK', 'ITV'] as const;
-
 /** Botón "Crear" estándar para los encabezados de pestaña. */
 function CreateTrigger({ label }: { label: string }) {
   return (
@@ -42,282 +29,35 @@ function CreateTrigger({ label }: { label: string }) {
   );
 }
 
-/* ── Alta de vehículo ── */
-export function CreateVehicleDialog() {
-  const create = useCreateVehicle();
-  const { toast } = useToast();
-  const [open, setOpen] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    plate: '',
-    make: '',
-    model: '',
-    year: '',
-    color: '',
-    insuranceExpiresAt: '',
-  });
-
-  const valid =
-    form.plate.trim() && form.make.trim() && form.model.trim() && form.color.trim() && form.year;
-
-  async function submit() {
-    setError(null);
-    setPending(true);
-    try {
-      await create.mutateAsync({
-        plate: form.plate.trim().toUpperCase(),
-        make: form.make.trim(),
-        model: form.model.trim(),
-        year: Number(form.year),
-        color: form.color.trim(),
-        insuranceExpiresAt: form.insuranceExpiresAt || undefined,
-      });
-      toast({ tone: 'success', title: 'Vehículo registrado' });
-      setOpen(false);
-      setForm({ plate: '', make: '', model: '', year: '', color: '', insuranceExpiresAt: '' });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo registrar el vehículo.');
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <span>
-          <CreateTrigger label="Registrar vehículo" />
-        </span>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Registrar vehículo</DialogTitle>
-          <DialogDescription>
-            El año mínimo y la placa los revalida el servidor (BR-D04).
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 py-1">
-          <Field label="Placa">
-            <Input
-              value={form.plate}
-              onChange={(e) => setForm({ ...form, plate: e.target.value })}
-              placeholder="ABC-123"
-            />
-          </Field>
-          <Field label="Año">
-            <Input
-              type="number"
-              inputMode="numeric"
-              value={form.year}
-              onChange={(e) => setForm({ ...form, year: e.target.value })}
-              placeholder="2020"
-            />
-          </Field>
-          <Field label="Marca">
-            <Input
-              value={form.make}
-              onChange={(e) => setForm({ ...form, make: e.target.value })}
-              placeholder="Toyota"
-            />
-          </Field>
-          <Field label="Modelo">
-            <Input
-              value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value })}
-              placeholder="Yaris"
-            />
-          </Field>
-          <Field label="Color">
-            <Input
-              value={form.color}
-              onChange={(e) => setForm({ ...form, color: e.target.value })}
-              placeholder="Gris"
-            />
-          </Field>
-          <Field label="Vence seguro (opcional)">
-            <Input
-              type="date"
-              value={form.insuranceExpiresAt}
-              onChange={(e) => setForm({ ...form, insuranceExpiresAt: e.target.value })}
-            />
-          </Field>
-        </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="ghost">Cancelar</Button>
-          </DialogClose>
-          <Button
-            variant="primary"
-            loading={pending}
-            disabled={!valid}
-            onClick={() => void submit()}
-          >
-            Registrar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/* ── Alta de documento ── */
-export function CreateDocumentDialog() {
-  const create = useCreateDocument();
-  const catalog = useCatalog();
-  const { toast } = useToast();
-  const [open, setOpen] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    ownerType: 'DRIVER' as 'DRIVER' | 'VEHICLE',
-    ownerId: '',
-    type: FleetDocumentType.LICENSE_A1 as FleetDocumentType,
-    documentNumber: '',
-    issuedAt: '',
-    expiresAt: '',
-  });
-
-  // B5-vert · GATE "oculto hasta vender": al catálogo base le sumamos SOLO las certificaciones que exige
-  // una vertical HABILITADA (ambulancia apagada ⇒ su credencial no aparece). Reflejo de UX, no autorización:
-  // el backend acepta cualquier FleetDocumentType. Mientras las verticales estén ocultas, el dropdown queda
-  // EXACTAMENTE como hoy (solo los 5 docs base).
-  const documentTypes = useMemo<FleetDocumentType[]>(
-    () => [
-      ...DOCUMENT_TYPES,
-      ...certificationTypesForEnabledOfferings(catalog.data?.offerings ?? []),
-    ],
-    [catalog.data],
-  );
-
-  const valid = form.ownerId.trim() && form.documentNumber.trim();
-
-  async function submit() {
-    setError(null);
-    setPending(true);
-    try {
-      await create.mutateAsync({
-        ownerType: form.ownerType,
-        ownerId: form.ownerId.trim(),
-        type: form.type,
-        documentNumber: form.documentNumber.trim(),
-        issuedAt: form.issuedAt || undefined,
-        expiresAt: form.expiresAt || undefined,
-      });
-      toast({ tone: 'success', title: 'Documento registrado (pendiente de revisión)' });
-      setOpen(false);
-      setForm({
-        ownerType: 'DRIVER',
-        ownerId: '',
-        type: FleetDocumentType.LICENSE_A1,
-        documentNumber: '',
-        issuedAt: '',
-        expiresAt: '',
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo registrar el documento.');
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <span>
-          <CreateTrigger label="Registrar documento" />
-        </span>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Registrar documento</DialogTitle>
-          <DialogDescription>
-            Entra como pendiente de revisión hasta que un operador lo valide.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 py-1">
-          <Field label="Titular">
-            <select
-              className={selectClass}
-              value={form.ownerType}
-              onChange={(e) =>
-                setForm({ ...form, ownerType: e.target.value as 'DRIVER' | 'VEHICLE' })
-              }
-            >
-              <option value="DRIVER">Conductor</option>
-              <option value="VEHICLE">Vehículo</option>
-            </select>
-          </Field>
-          <Field label="Tipo">
-            <select
-              className={selectClass}
-              value={form.type}
-              onChange={(e) => setForm({ ...form, type: e.target.value as FleetDocumentType })}
-            >
-              {documentTypes.map((t) => (
-                <option key={t} value={t}>
-                  {documentTypeLabel(t)}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="ID del titular">
-            <Input
-              value={form.ownerId}
-              onChange={(e) => setForm({ ...form, ownerId: e.target.value })}
-              placeholder="uuid del conductor/vehículo"
-            />
-          </Field>
-          <Field label="N° de documento">
-            <Input
-              value={form.documentNumber}
-              onChange={(e) => setForm({ ...form, documentNumber: e.target.value })}
-            />
-          </Field>
-          <Field label="Emitido (opcional)">
-            <Input
-              type="date"
-              value={form.issuedAt}
-              onChange={(e) => setForm({ ...form, issuedAt: e.target.value })}
-            />
-          </Field>
-          <Field label="Vence (opcional)">
-            <Input
-              type="date"
-              value={form.expiresAt}
-              onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
-            />
-          </Field>
-        </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="ghost">Cancelar</Button>
-          </DialogClose>
-          <Button
-            variant="primary"
-            loading={pending}
-            disabled={!valid}
-            onClick={() => void submit()}
-          >
-            Registrar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/* ── Alta de inspección ── */
-export function CreateInspectionDialog() {
+/* ── Alta de inspección ──
+ * Reusable: sin props es el alta genérica de Flota (el operador tipea el uuid). Con `vehicleId` precargado
+ * (p.ej. desde la barra de aprobación del conductor) el vehículo viene FIJO y se muestra su placa — el
+ * operador no pega uuids ni se equivoca de vehículo. `onCreated` deja refrescar el contexto llamador. */
+export function CreateInspectionDialog({
+  vehicleId: presetVehicleId,
+  vehicleLabel,
+  trigger,
+  onCreated,
+}: {
+  vehicleId?: string;
+  vehicleLabel?: string;
+  trigger?: ReactNode;
+  onCreated?: () => void;
+} = {}) {
   const create = useCreateInspection();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ vehicleId: '', passed: 'true', inspectedAt: '', notes: '' });
+  const [form, setForm] = useState({
+    vehicleId: presetVehicleId ?? '',
+    passed: 'true',
+    inspectedAt: '',
+    center: '',
+    notes: '',
+  });
 
+  const locked = Boolean(presetVehicleId);
   const valid = form.vehicleId.trim().length > 0;
 
   async function submit() {
@@ -328,11 +68,19 @@ export function CreateInspectionDialog() {
         vehicleId: form.vehicleId.trim(),
         passed: form.passed === 'true',
         inspectedAt: form.inspectedAt || undefined,
+        center: form.center.trim() || undefined,
         notes: form.notes.trim() || undefined,
       });
       toast({ tone: 'success', title: 'Inspección registrada' });
       setOpen(false);
-      setForm({ vehicleId: '', passed: 'true', inspectedAt: '', notes: '' });
+      setForm({
+        vehicleId: presetVehicleId ?? '',
+        passed: 'true',
+        inspectedAt: '',
+        center: '',
+        notes: '',
+      });
+      onCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo registrar la inspección.');
     } finally {
@@ -343,9 +91,7 @@ export function CreateInspectionDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <span>
-          <CreateTrigger label="Registrar inspección" />
-        </span>
+        <span>{trigger ?? <CreateTrigger label="Registrar inspección" />}</span>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -355,23 +101,28 @@ export function CreateInspectionDialog() {
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-1">
-          <Field label="ID del vehículo">
-            <Input
-              value={form.vehicleId}
-              onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
-              placeholder="uuid del vehículo"
-            />
+          <Field label="Vehículo">
+            {locked ? (
+              <div className="flex h-11 items-center rounded-md border border-border bg-surface-2 px-3 text-sm text-ink">
+                {vehicleLabel ?? form.vehicleId}
+              </div>
+            ) : (
+              <Input
+                value={form.vehicleId}
+                onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
+                placeholder="uuid del vehículo"
+              />
+            )}
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Resultado">
-              <select
-                className={selectClass}
+              <Select
                 value={form.passed}
                 onChange={(e) => setForm({ ...form, passed: e.target.value })}
               >
                 <option value="true">Aprobada</option>
                 <option value="false">Rechazada</option>
-              </select>
+              </Select>
             </Field>
             <Field label="Fecha (opcional)">
               <Input
@@ -381,6 +132,13 @@ export function CreateInspectionDialog() {
               />
             </Field>
           </div>
+          <Field label="Centro (CITV) (opcional)">
+            <Input
+              value={form.center}
+              onChange={(e) => setForm({ ...form, center: e.target.value })}
+              placeholder="Ej. CITV Lima Norte"
+            />
+          </Field>
           <Field label="Notas (opcional)">
             <Input
               value={form.notes}

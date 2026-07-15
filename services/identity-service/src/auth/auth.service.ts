@@ -4,9 +4,9 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { JwtService, RedisRefreshTokenStore, RefreshError, type SubjectType } from '@veo/auth';
-import { parseOrThrow, peruPhoneSchema, UnauthorizedError } from '@veo/utils';
+import { ForbiddenError, parseOrThrow, peruPhoneSchema, UnauthorizedError } from '@veo/utils';
 import { type AdminRole } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
+import { AuthRepository } from './auth.repository';
 import { OtpService } from './otp.service';
 import { TokenIssuerService } from './token-issuer.service';
 import { registerUser } from './user-registration';
@@ -18,7 +18,7 @@ import type { AuthTokens } from './dto/auth.dto';
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: AuthRepository,
     private readonly otp: OtpService,
     private readonly jwt: JwtService,
     private readonly sessions: RedisRefreshTokenStore,
@@ -39,15 +39,11 @@ export class AuthService {
     const phone = parseOrThrow(peruPhoneSchema, rawPhone, 'phone');
     await this.otp.verify(phone, code);
 
-    const user = await this.prisma.write.$transaction(async (tx) => {
-      const existing = await tx.user.findUnique({ where: { phone } });
+    const user = await this.repo.runInTransaction(async (tx) => {
+      const existing = await this.repo.findUserByPhoneTx(tx, phone);
       if (existing) {
         // Asegurar el AuthMethod{PHONE_OTP} de usuarios previos (idempotente, ADR-012 Lote 1).
-        await tx.authMethod.upsert({
-          where: { userId_type: { userId: existing.id, type: 'PHONE_OTP' } },
-          create: { userId: existing.id, type: 'PHONE_OTP', verified: true },
-          update: {},
-        });
+        await this.repo.ensurePhoneOtpAuthMethodTx(tx, existing.id);
         return existing;
       }
       // Alta nueva: User + credencial PHONE_OTP (ADR-012 §2) + outbox user.registered, vía el
@@ -58,7 +54,28 @@ export class AuthService {
       });
     });
 
-    return this.tokenIssuer.issue(user.id, this.subjectType(user.type), {
+    // M7 — GATE DE TIPO DE CUENTA (fail-closed): el `type` pedido (que el BFF fuerza: 'DRIVER' desde driver-bff)
+    // se ignoraba para un user EXISTENTE → un teléfono registrado como PASAJERO que entraba por driver-bff recibía
+    // un token typ=passenger y la app de conductor quedaba rota (DriverTypeGuard 403 en todo). Un User tiene UN
+    // solo tipo; si el existente NO coincide con el pedido, se RECHAZA con error tipado (403) — no se emite un
+    // token del tipo equivocado. La conversión de cuenta (pasajero↔conductor) es un flujo aparte, no un login.
+    // Para un alta nueva `user.type === type` (recién creado), así que este gate solo muerde el mismatch real.
+    if (user.type !== type) {
+      throw new ForbiddenError(
+        'Este teléfono está registrado con otro tipo de cuenta. Ingresá desde la app correspondiente.',
+      );
+    }
+
+    const subject = this.subjectType(user.type);
+    // SINGLE ACTIVE SESSION para el CONDUCTOR (el último login gana): revocamos las sesiones previas ANTES de
+    // emitir la nueva. Seguridad — el diferenciador biométrico POR TURNO se rompe si el MISMO login publica GPS
+    // y recibe ofertas desde 2 teléfonos a la vez (dispatch/admin lo veían saltando entre 2 posiciones). El
+    // pasajero conserva multi-device (no publica GPS continuo → menos disruptivo); el admin ya es single-session
+    // (email-auth). El gate DURO en tiempo real (kickear el socket viejo) lo aplica el gateway `/driver`.
+    if (subject === 'driver') {
+      await this.sessions.revokeAllForUser(user.id);
+    }
+    return this.tokenIssuer.issue(user.id, subject, {
       id: user.id,
       phone: user.phone,
       type: user.type,
@@ -121,7 +138,7 @@ export class AuthService {
       return this.reissueUserAccess(sub, sid);
     }
     // Backward-compat (refresh sin `typ`): User primero, AdminUser después.
-    const user = await this.prisma.read.user.findUnique({ where: { id: sub } });
+    const user = await this.repo.findUserById(sub);
     if (user && !user.deletedAt) {
       return this.reissueUserAccess(sub, sid);
     }
@@ -132,7 +149,7 @@ export class AuthService {
     sub: string,
     sid: string,
   ): Promise<{ accessToken: string; typ: SubjectType }> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: sub } });
+    const user = await this.repo.findUserById(sub);
     if (!user || user.deletedAt) throw new UnauthorizedError('Usuario no disponible');
     const resolvedTyp = this.subjectType(user.type);
     const accessToken = await this.jwt.signAccessToken({
@@ -148,7 +165,7 @@ export class AuthService {
     sub: string,
     sid: string,
   ): Promise<{ accessToken: string; typ: SubjectType }> {
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { id: sub } });
+    const admin = await this.repo.findAdminById(sub);
     if (!admin || admin.deletedAt || !isOperationalAdmin(admin)) {
       throw new UnauthorizedError('Operador no disponible');
     }
@@ -162,14 +179,42 @@ export class AuthService {
     return { accessToken, typ: 'admin' };
   }
 
-  async logout(refreshToken: string): Promise<{ ok: true }> {
+  /**
+   * Revoca la sesión del refresh token. Endpoint COMPARTIDO (passenger/driver/admin).
+   * Devuelve `userId` (el `sub` del refresh) SOLO cuando el token era válido, para que el caller que lo
+   * necesite (admin-bff: auditoría WORM del logout del operador) pueda armar el actor. El campo es OPCIONAL
+   * y ADITIVO: passenger/driver-bff lo ignoran. En el catch (token inválido / logout idempotente) NO hay
+   * sesión que auditar → se omite `userId`.
+   */
+  async logout(refreshToken: string): Promise<{ ok: true; userId?: string }> {
     try {
       const claims = await this.jwt.verifyRefresh(refreshToken);
       await this.sessions.revoke(claims.sid);
+      return { ok: true, userId: claims.sub };
     } catch {
-      // logout idempotente: token inválido = ya no hay sesión que revocar
+      // logout idempotente: token inválido = ya no hay sesión que revocar (ni que auditar)
+      return { ok: true };
     }
-    return { ok: true };
+  }
+
+  /**
+   * Cierra la sesión en TODOS los dispositivos (ADR-012 §2). Espejo EXACTO de `logout` salvo el alcance:
+   * en vez de `revoke(claims.sid)` (una sesión) llama `revokeAllForUser(claims.sub)`, que borra TODAS las
+   * sesiones del user Y sella el denylist epoch `revoked:before:{userId}` → mata al instante los access
+   * tokens vivos de todas ellas (no espera a su exp de 15m). Decisión: refreshToken-based como `logout`
+   * (poseer un refresh válido = sesión activa = derecho a cerrar todas); NO exige un guard de access token.
+   * Devuelve el `userId` (el `sub`) SOLO cuando el token era válido, para que el caller que lo necesite
+   * (admin-bff: auditoría WORM) arme el actor. Idempotente: token inválido → { ok: true } sin userId.
+   */
+  async logoutAll(refreshToken: string): Promise<{ ok: true; userId?: string }> {
+    try {
+      const claims = await this.jwt.verifyRefresh(refreshToken);
+      await this.sessions.revokeAllForUser(claims.sub);
+      return { ok: true, userId: claims.sub };
+    } catch {
+      // logout-all idempotente: token inválido = ya no hay sesiones que revocar (ni que auditar)
+      return { ok: true };
+    }
   }
 
   private subjectType(type: UserType): SubjectType {

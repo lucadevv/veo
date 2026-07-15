@@ -11,6 +11,10 @@ service ShareService {
 
 message GetTrustedContactsRequest {
   string user_id = 1;
+  // Incluir contactos PENDIENTES de OTP (vista del DUEÑO en su pantalla de contactos: necesita
+  // verlos para reenviar/verificar). El fan-out de pánico OMITE el campo (false) → solo verificados,
+  // semántica original intacta (backward-compatible).
+  bool include_unverified = 2;
 }
 
 message TrustedContact {

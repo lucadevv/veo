@@ -8,8 +8,11 @@
  */
 import { describe, it, expect } from 'vitest';
 import { TripStatus } from '@veo/shared-types';
+import { ConflictError, InvalidStateError } from '@veo/utils';
 import type { MapsClient } from '@veo/maps';
+import type { CatalogService } from '../catalog/catalog.service';
 import { WaypointProposalService } from './waypoint-proposal.service';
+import { WaypointProposalRepository } from './waypoint-proposal.repository';
 import { WaypointProposalStatus } from './domain/waypoint-proposal';
 import type { PrismaService } from '../infra/prisma.service';
 import { Prisma, type Trip, type TripWaypointProposal } from '../generated/prisma';
@@ -110,7 +113,7 @@ function makeMaps(distanceMeters: number, durationSeconds: number): MapsClient {
 function makeService(trip: Trip, newRoute: { distanceMeters: number; durationSeconds: number }) {
   const prisma = makePrisma(trip);
   const service = new WaypointProposalService(
-    prisma as unknown as PrismaService,
+    new WaypointProposalRepository(prisma as unknown as PrismaService),
     makeMaps(newRoute.distanceMeters, newRoute.durationSeconds),
   );
   return { service, prisma };
@@ -214,5 +217,158 @@ describe('proposeWaypoint · re-quote con la política de la OFERTA (ADR 013 §1
     expect(proposal?.newFareCents).toBe(1988);
     expect(proposal?.deltaFareCents).toBe(113);
     expect(proposal?.status).toBe(WaypointProposalStatus.PROPOSED);
+  });
+});
+
+// ── RC4-waypoint · el re-quote usa el pricing EFECTIVO (overlay admin), no el catálogo de código ──
+
+/** CatalogService falso: devuelve un overlay del admin con el pricing que se le pida (enabled). */
+function fakeCatalog(pricing: { multiplier: number; minFareCents: number }): CatalogService {
+  return {
+    resolveOffering: async () => ({ enabled: true, pricing, modePin: undefined }),
+  } as unknown as CatalogService;
+}
+
+describe('proposeWaypoint · RC4-waypoint · pricing efectivo del overlay del admin', () => {
+  it('con overlay (minFare admin ALTO) el re-quote cotiza contra el pricing EFECTIVO, no el de código', async () => {
+    const trip = buildTrip({ category: 'veo_confort', fareCents: 1875 });
+    const prisma = makePrisma(trip);
+    // Overlay del admin: minFare 90000 (muy por encima de la tarifa por ruta y del piso monótono 1875).
+    // Sin el fix, waypoint usaba offering.pricing de código (minFare bajo) → newFare ~1988. Con el fix,
+    // aplica el minFare del overlay → 90000. La diferencia PRUEBA que se usó el pricing efectivo.
+    const service = new WaypointProposalService(
+      new WaypointProposalRepository(prisma as unknown as PrismaService),
+      makeMaps(5500, 660),
+      undefined, // config
+      undefined, // baseFare
+      fakeCatalog({ multiplier: 1.25, minFareCents: 90000 }),
+    );
+
+    const res = await service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' });
+    expect(res.newFareCents).toBe(90000); // piso del overlay del admin, no el minFare de código
+    expect(res.deltaFareCents).toBe(90000 - 1875);
+  });
+
+  it('SIN catálogo inyectado → degradación honesta: cotiza con el pricing de código (comportamiento previo intacto)', async () => {
+    const trip = buildTrip({ category: 'veo_confort', fareCents: 1875 });
+    const { service } = makeService(trip, { distanceMeters: 5500, durationSeconds: 660 });
+    const res = await service.proposeWaypoint(trip.id, { point: POINT, passengerId: 'pax-1' });
+    expect(res.newFareCents).toBe(1988); // igual que antes del refactor (pricing de código)
+  });
+});
+
+// ── RC7-waypoint · el accept guarda la tarifa contra un re-bid concurrente (CAS por fareCents) ──
+
+/** Propuesta PROPOSED viva, cotizada contra `baseFare` (newFareCents − deltaFareCents = baseFare). */
+function buildProposal(over: Partial<TripWaypointProposal> = {}): TripWaypointProposal {
+  return {
+    id: 'wp-1',
+    tripId: 'trip-1',
+    lat: -12.05,
+    lon: -77.04,
+    deltaFareCents: 300,
+    newFareCents: 1800, // base = 1800 − 300 = 1500
+    status: WaypointProposalStatus.PROPOSED,
+    proposedAt: new Date('2026-06-10T12:00:00.000Z'),
+    expiresAt: new Date('2999-12-31T00:00:00.000Z'), // no vencida
+    respondedAt: null,
+    ...over,
+  } as TripWaypointProposal;
+}
+
+/**
+ * Fake para el ACCEPT: el `tx.trip.updateMany` HONRA el CAS (status ∈ proposable ∧ fareCents === where.fareCents).
+ * `liveTrip` es lo que ve el tx (con el re-bid ya aplicado, si lo hay) → reproduce la carrera propose↔re-bid.
+ */
+function makeAcceptService(trip: Trip, proposal: TripWaypointProposal, live: Partial<Trip> = {}) {
+  const liveTrip = { ...trip, ...live };
+  // Captura los `data` que el CAS escribe sobre el viaje (ruta canónica: polyline + distancia +
+  // duración + tarifa deben viajar en la MISMA operación).
+  const tripUpdates: Partial<Trip>[] = [];
+  const tx = {
+    tripWaypointProposal: { updateMany: async () => ({ count: 1 }) }, // la propuesta sigue PROPOSED
+    trip: {
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { status: { in: TripStatus[] }; fareCents?: number };
+        data: Partial<Trip>;
+      }) => {
+        const statusOk = where.status.in.includes(liveTrip.status);
+        const fareOk = where.fareCents === undefined || where.fareCents === liveTrip.fareCents;
+        if (statusOk && fareOk) tripUpdates.push(data);
+        return { count: statusOk && fareOk ? 1 : 0 };
+      },
+      findUnique: async () => ({ status: liveTrip.status, fareCents: liveTrip.fareCents }),
+    },
+    outboxEvent: { create: async () => ({}) },
+    tripEvent: { create: async () => ({}) },
+  };
+  const prisma = {
+    read: {
+      tripWaypointProposal: { findUnique: async () => proposal, findFirst: async () => null },
+    },
+    write: {
+      trip: { findUnique: async () => trip },
+      $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
+    },
+  };
+  const service = new WaypointProposalService(
+    new WaypointProposalRepository(prisma as unknown as PrismaService),
+    makeMaps(5500, 660),
+  );
+  return { service, tripUpdates };
+}
+
+describe('respondWaypoint · accept · RC7 · CAS de tarifa contra re-bid concurrente', () => {
+  it('sin re-bid (fareCents intacto) → aceptada, aplica proposal.newFareCents', async () => {
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 }); // base 1500
+    const { service } = makeAcceptService(trip, proposal);
+
+    const res = await service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true });
+    expect(res.status).toBe(WaypointProposalStatus.ACCEPTED);
+    expect(res.fareCents).toBe(1800);
+  });
+
+  it('ruta canónica: el accept RE-PERSISTE routePolyline + distancia/duración en la MISMA operación que la tarifa', async () => {
+    // La parada aceptada CAMBIA la geometría del viaje: la ruta canónica persistida se actualiza
+    // junto con waypoints/fareCents (una sola escritura CAS) — los BFF sirven ESTA ruta, no recomputan.
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 }); // base 1500
+    const { service, tripUpdates } = makeAcceptService(trip, proposal);
+
+    await service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true });
+
+    expect(tripUpdates).toHaveLength(1);
+    // makeMaps(5500, 660) es la ruta NUEVA (con la parada); su polyline es 'xyz'.
+    expect(tripUpdates[0]).toMatchObject({
+      routePolyline: 'xyz',
+      distanceMeters: 5500,
+      durationSeconds: 660,
+      fareCents: 1800,
+    });
+  });
+
+  it('re-bid concurrente movió la tarifa (1500→2000) entre propose y accept → 409, NO pisa el re-bid', async () => {
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 }); // base 1500
+    // El tx ve la tarifa YA re-pujada (2000): el CAS `fareCents:1500` no matchea → count 0 → 409 tarifa cambió.
+    const { service } = makeAcceptService(trip, proposal, { fareCents: 2000 });
+
+    await expect(
+      service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('el viaje se completó entre propose y accept → 409 (ya no está en curso), no muta la tarifa', async () => {
+    const trip = buildTrip({ fareCents: 1500 });
+    const proposal = buildProposal({ newFareCents: 1800, deltaFareCents: 300 });
+    const { service } = makeAcceptService(trip, proposal, { status: TripStatus.COMPLETED });
+
+    await expect(
+      service.respondWaypoint(trip.id, proposal.id, { driverId: 'drv-1', accept: true }),
+    ).rejects.toBeInstanceOf(ConflictError);
   });
 });

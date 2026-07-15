@@ -13,15 +13,19 @@ import { CreateInspectionDto } from './dto/inspection.dto';
 import type { Inspection } from '../generated/prisma';
 import type { Page } from '../infra/pagination';
 
+// CONTROLADOR DE OPERADOR (compliance). El RolesGuard va a NIVEL DE CLASE: TODOS los endpoints —POST y
+// GET— exigen un rol de operador (COMPLIANCE_SUPERVISOR/ADMIN/SUPERADMIN). Antes el GET quedaba solo bajo
+// InternalIdentityGuard → cualquier identidad interna firmada (driver-rail/service-rail) listaba TODAS las
+// inspecciones. El único caller legítimo es el admin-bff (FleetService.listInspections), que ya corre
+// detrás de esos mismos roles y propaga la identidad del operador (admin-rail).
 @ApiTags('inspections')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, RolesGuard)
+@Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
 @Controller('inspections')
 export class InspectionsController {
   constructor(private readonly inspections: InspectionsService) {}
 
-  @UseGuards(RolesGuard)
-  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post()
   @ApiOperation({ summary: 'Registrar inspección técnica (BR-D04: trimestral)' })
   create(

@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
   ArrayMaxSize,
   ArrayNotEmpty,
@@ -77,6 +78,17 @@ export class ResolvePanicDto {
   })
   @IsEnum(PanicStatus)
   resolution!: typeof PanicStatus.RESOLVED | typeof PanicStatus.FALSE_ALARM;
+
+  @ApiPropertyOptional({
+    maxLength: 2000,
+    description:
+      'Motivo OPCIONAL del cierre. Se persiste en la columna resolution_notes (display) DENTRO de la ' +
+      'misma tx/CAS de la transición. El audit inmutable del admin-bff sigue siendo la fuente de verdad.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
 }
 
 export class ListPanicQueryDto {

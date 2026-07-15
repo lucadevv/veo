@@ -5,7 +5,7 @@
   "description": "VEO · Plataforma de movilidad segura · Monorepo (apps móviles + web + services + packages + infra)",
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=20.11.0",
+    "node": ">=22.0.0",
     "pnpm": ">=9.0.0"
   },
   "scripts": {
@@ -25,6 +25,13 @@
     "dev-stack:down": "docker compose -f dev-stack/docker-compose.yml down",
     "dev-stack:logs": "docker compose -f dev-stack/docker-compose.yml logs -f",
     "dev-stack:reset": "docker compose -f dev-stack/docker-compose.yml down -v",
+    "veo:up": "bash dev-stack/veo.sh up",
+    "veo:down": "bash dev-stack/veo.sh down",
+    "veo:status": "bash dev-stack/veo.sh status",
+    "veo:monitor": "bash dev-stack/veo.sh monitor",
+    "veo:logs": "bash dev-stack/veo.sh logs",
+    "veo:restart": "bash dev-stack/veo.sh restart",
+    "veo:migrate": "bash dev-stack/veo.sh migrate",
     "otp:viewer": "node dev-stack/otp-viewer/server.mjs",
     "db:migrate": "turbo run db:migrate",
     "db:seed": "turbo run db:seed",
@@ -63,7 +70,9 @@
   },
   "pnpm": {
     "patchedDependencies": {
-      "@react-native/gradle-plugin@0.85.3": "patches/@react-native__gradle-plugin@0.85.3.patch"
+      "@react-native/gradle-plugin@0.85.3": "patches/@react-native__gradle-plugin@0.85.3.patch",
+      "react-native-vision-camera-face-detector@2.0.1": "patches/react-native-vision-camera-face-detector@2.0.1.patch",
+      "@react-navigation/native-stack@6.11.0": "patches/@react-navigation__native-stack@6.11.0.patch"
     },
     "overrides": {
       "multer": "^2.1.0",

@@ -30,16 +30,16 @@ proto/payment.proto            veo.payment.v1
 
 ## Reglas de negocio
 
-| Regla        | Descripción                                                                                                                       |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| BR-P01       | El cobro ocurre al COMPLETED (consume `trip.completed`). Pre-auth de tarjeta es fase 4 (deshabilitado).                           |
-| Idempotencia | Cada cobro lleva `dedupKey` (UNIQUE). El segundo intento devuelve el mismo pago, sin recobrar.                                    |
-| BR-P02       | Yape/Plin: 3 reintentos con backoff exponencial; si fallan → `DEBT` + `payment.failed (willRetry=false)`.                         |
-| BR-P03       | Efectivo: confirmación bilateral (driver + pasajero). Disputa → evento de discrepancia (soporte).                                 |
-| BR-P04       | Comisión (take rate `COMMISSION_RATE`, default 20%) sobre el **bruto** (incluye surge, **excluye** propinas). `feeCents` visible. |
-| BR-P05       | Payouts semanales (lunes), mínimo S/50; retención `HELD` si el conductor está en review (`driver.flagged`).                       |
-| BR-P06       | Reembolsos: ventana 7 días; aprobación L1/L2; >S/30 requiere rol L2.                                                              |
-| BR-P07       | Conciliación diaria 04:00 contra el extracto del riel; discrepancia > 1% → alerta a finanzas.                                     |
+| Regla        | Descripción                                                                                                                                                                                                            |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BR-P01       | El cobro ocurre al COMPLETED (consume `trip.completed`). Pre-auth de tarjeta es fase 4 (deshabilitado).                                                                                                                |
+| Idempotencia | Cada cobro lleva `dedupKey` (UNIQUE). El segundo intento devuelve el mismo pago, sin recobrar.                                                                                                                         |
+| BR-P02       | Yape/Plin: 3 reintentos con backoff exponencial; si fallan → `DEBT` + `payment.failed (willRetry=false)`.                                                                                                              |
+| BR-P03       | Efectivo: confirmación bilateral (driver + pasajero). Disputa → evento de discrepancia (soporte).                                                                                                                      |
+| BR-P04       | Comisión (take rate `COMMISSION_RATE`, default 20%) sobre el **bruto** (incluye surge, **excluye** propinas). `feeCents` visible.                                                                                      |
+| BR-P05       | Payouts semanales (lunes), mínimo S/50; retención `HELD` si el conductor está en review (`driver.flagged`).                                                                                                            |
+| BR-P06       | Reembolsos (finance:refund): ventana 7 días; FINANCE/ADMIN/SUPERADMIN; monto alto (>umbral, default S/300) requiere ADMIN/SUPERADMIN (dual-control). Idempotente: dedupKey + backstop por ventana sobre (pago, monto). |
+| BR-P07       | Conciliación diaria 04:00 contra el extracto del riel; discrepancia > 1% → alerta a finanzas.                                                                                                                          |
 
 ## El riel externo tras un puerto propio
 
@@ -58,7 +58,7 @@ Yape/Plin es el único componente externo inevitable. Se encapsula tras el puert
 | POST   | `/payments/charge`           | Internal                                         | Cobro idempotente (body `dedupKey`).                            |
 | GET    | `/payments/:id`              | Internal                                         | Obtener un pago.                                                |
 | POST   | `/payments/:id/cash/confirm` | Internal                                         | Confirmación bilateral de efectivo (`party=driver\|passenger`). |
-| POST   | `/payments/:tripId/refund`   | Internal + RBAC (L1/L2)                          | Reembolso (>S/30 requiere L2).                                  |
+| POST   | `/payments/:tripId/refund`   | Internal + RBAC (FINANCE/ADMIN/SUPERADMIN)       | Reembolso (monto alto >umbral requiere ADMIN/SUPERADMIN).       |
 | GET    | `/payouts?driverId=`         | Internal                                         | Listar payouts de un conductor.                                 |
 | POST   | `/payouts/run`               | Internal + RBAC FINANCE + step-up MFA si >S/5000 | Correr la liquidación.                                          |
 

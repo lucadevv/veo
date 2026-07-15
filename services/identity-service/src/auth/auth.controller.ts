@@ -125,7 +125,15 @@ export class AuthController {
   @Post('logout')
   @HttpCode(200)
   @ApiOperation({ summary: 'Revocar la sesión (logout)' })
-  logout(@Body() dto: LogoutDto): Promise<{ ok: true }> {
+  logout(@Body() dto: LogoutDto): Promise<{ ok: true; userId?: string }> {
     return this.auth.logout(dto.refreshToken);
+  }
+
+  @Public()
+  @Post('logout-all')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Cerrar sesión en todos los dispositivos' })
+  logoutAll(@Body() dto: LogoutDto): Promise<{ ok: true; userId?: string }> {
+    return this.auth.logoutAll(dto.refreshToken);
   }
 }

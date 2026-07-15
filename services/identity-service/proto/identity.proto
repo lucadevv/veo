@@ -8,10 +8,47 @@ service IdentityService {
   rpc GetUser (GetByIdRequest) returns (UserReply);
   rpc GetDriver (GetByIdRequest) returns (DriverReply);
   rpc GetDriverByUser (GetByIdRequest) returns (DriverReply);
+  // Lectura BATCH para enriquecer listados del admin (nombre/teléfono por página, sin N+1). El admin-bff
+  // la llama UNA vez por página con los driverId visibles; devuelve los DriverReply hallados (orden libre).
+  rpc GetDriversByIds (DriverIdsRequest) returns (DriversByIdsReply);
+  // Lectura BATCH de USERS por User.id, para resolver el NOMBRE del conductor en listados del admin donde solo
+  // se tiene el User.id (ej. la lista de vehículos: Vehicle.driver_id = User.id). Espejo de GetDriversByIds.
+  rpc GetUsersByIds (UserIdsRequest) returns (UsersByIdsReply);
+  // Conteo de conductores por estado de antecedentes (backgroundCheckStatus), para los stat cards del panel
+  // admin (embudo de aprobación). Agregado con groupBy en la réplica de lectura; sin PII, solo enteros.
+  rpc GetDriverCounts (DriverCountsRequest) returns (DriverCountsReply);
 }
 
 message GetByIdRequest {
   string id = 1;
+}
+
+message DriverIdsRequest {
+  repeated string ids = 1;
+}
+
+message DriversByIdsReply {
+  repeated DriverReply drivers = 1;
+}
+
+message UserIdsRequest {
+  repeated string ids = 1;
+}
+
+message UsersByIdsReply {
+  repeated UserReply users = 1;
+}
+
+// Request vacío del conteo global de conductores (sin filtros; el scoping lo da el riel ADMIN del gRPC).
+message DriverCountsRequest {}
+
+// Conteo de conductores por backgroundCheckStatus. proto3 default 0 cuando no hay filas de ese estado.
+message DriverCountsReply {
+  int32 pending = 1;
+  int32 cleared = 2;
+  int32 rejected = 3;
+  // Conductores EN LÍNEA (presencia operativa: current_status NO OFFLINE ni SUSPENDED) → KPI "En línea".
+  int32 online = 4;
 }
 
 message UserReply {
@@ -23,6 +60,9 @@ message UserReply {
   bool found = 6;
   // Nombre visible del usuario. Opcional ("" si no fue registrado). Añadido sin romper compatibilidad.
   string name = 7;
+  // Foto de perfil (avatar) del usuario · publicUrl del media-service. "" si no tiene. Añadido sin romper
+  // compatibilidad (el conductor lee su avatar por GetUser en el driver-bff getMe, espejo del pasajero).
+  string photo_url = 8;
 }
 
 message DriverReply {
@@ -43,4 +83,58 @@ message DriverReply {
   // Añadido sin romper compatibilidad (campo 9). Lo consume el driver-bff (GET /drivers/me) para que la
   // app del conductor muestre el motivo en la pantalla de RECHAZO y ofrezca corregir-y-reenviar.
   string rejection_reason = 9;
+  // ── Campos de REVISIÓN del operador (admin-bff GET /ops/drivers/:id). Añadidos sin romper
+  // compatibilidad (campos 10-15). Todos opcionales: "" / proto3-default cuando no hay dato. ──
+  // Licencia/DNI del conductor (IDENTIDAD personal · Compliance+); "" si no registrada.
+  string license_number = 10;
+  // Estado KYC del usuario asociado (driver→user). "" si no se incluyó / no registrado.
+  string kyc_status = 11;
+  // ISO-8601 de alta del conductor; "" si no disponible.
+  string created_at = 12;
+  // ISO-8601 del enrolamiento biométrico facial; "" si aún no enroló.
+  string face_enrolled_at = 13;
+  // ISO-8601 de la última verificación biométrica en vivo; "" si nunca verificó.
+  string last_verified_at = 14;
+  // Teléfono del usuario asociado (driver→user); "" si no registrado.
+  string phone = 15;
+  // DNI del conductor (documento de identidad · Compliance+); "" si no registrado. Backward-compatible.
+  string document_id = 16;
+  // Fecha de nacimiento del conductor en yyyy-mm-dd; "" si no registrada. Backward-compatible.
+  string birth_date = 17;
+  // ── Sub-lote 3C · BINDING DNI↔selfie (admin-bff GET /ops/drivers/:id). Resultado GUARDADO del face-match
+  // entre la foto FRONT del DNI y la biometría de referencia del conductor. El operador lo VE antes de
+  // aprobar. Campos 18-20. Backward-compatible (proto3 defaults: "" / 0 / false cuando no se corrió). ──
+  // Estado del binding tipado: NOT_RUN (aún no se corrió), MATCHED (coincide), NO_MATCH (no coincide). Evita
+  // ambigüedad del bool proto3 (false = no coincide vs no corrido): usamos un string de estado explícito.
+  string dni_face_match_status = 18;
+  // Score del face-match en 0..100; 0 si no se corrió. Solo significativo si dni_face_match_status != NOT_RUN.
+  double dni_face_match_score = 19;
+  // ISO-8601 de cuándo se corrió el face-match; "" si no se corrió.
+  string dni_face_matched_at = 20;
+  // CAUSAS ACTIVAS de la suspensión (modelo de HOLDS): el conjunto de `cause` DISTINTAS de los holds vigentes
+  // del conductor (DISCIPLINARY / DOCUMENT_EXPIRED / INSPECTION_EXPIRED). Vacío si NO está suspendido. Campo
+  // 21, backward-compatible. Lo consume el admin-bff (GET /ops/drivers/:id) para que el panel sepa POR QUÉ
+  // está suspendido y llame el endpoint correcto de reactivación: DISCIPLINARY → /reactivate;
+  // DOCUMENT_EXPIRED/INSPECTION_EXPIRED → /reactivate-compliance. NO es PII. `suspended_at` (campo 7) sigue
+  // siendo el flag derivado de "está suspendido"; esto añade el PORQUÉ. Un conductor puede tener VARIAS causas.
+  repeated string suspension_causes = 21;
+  // ── Lote C · BINDING licencia↔selfie (gemelo del DNI, binding MÁS FUERTE). Resultado GUARDADO del face-match
+  // entre la foto del brevete (LICENSE_A1) y la biometría de referencia. El operador lo VE antes de aprobar;
+  // approve() exige AMBOS bindings ejecutados. Campos 22-24, backward-compatible (proto3 defaults). ──
+  string license_face_match_status = 22;
+  // Score del face-match del brevete en 0..100; 0 si no se corrió. El brevete es low-res → score típicamente
+  // más bajo que el DNI; el veredicto lo decide el operador. Solo significativo si status != NOT_RUN.
+  double license_face_match_score = 23;
+  // ISO-8601 de cuándo se corrió el face-match del brevete; "" si no se corrió.
+  string license_face_matched_at = 24;
+  // F5 · key S3/MinIO de la SELFIE del enrol (ayuda visual del operador). ADMIN-ONLY (PII · Ley 29733): solo
+  // viaja por el riel admin; "" en rieles no-admin o si no hay selfie. Campo 25, backward-compatible.
+  string face_selfie_key = 25;
+  // ── LIVENESS PASIVO (anti-spoofing PAD del enrol). El operador lo VE antes de aprobar; approve() exige que el
+  // PAD haya CORRIDO. Status DERIVADO (NOT_RUN/PASSED/DEGRADED): NOT_RUN = sin enrol; PASSED = PAD corrió y dio
+  // viva; DEGRADED = enroló sin PAD (modelo ausente). ADMIN-ONLY; "" / 0 en rieles no-admin. Campos 26-27. ──
+  string liveness_status = 26;
+  // Score de la clase viva del PAD en 0..1 (NO 0..100 como los face-match); 0 si no se corrió. Solo
+  // significativo si status == PASSED o DEGRADED.
+  double liveness_score = 27;
 }

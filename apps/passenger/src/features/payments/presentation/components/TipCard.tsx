@@ -7,7 +7,9 @@ import {Pressable, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {parseTipToCents} from '../../domain/usecases';
+import {interpretPaymentOutcome} from '../../domain/paymentOutcome';
 import {formatPEN} from '../../../../shared/utils/format';
+import {CheckoutInstructions} from './CheckoutInstructions';
 import {Animated, usePressScale} from './motion';
 
 /** Propinas rápidas sugeridas (céntimos PEN). */
@@ -50,18 +52,88 @@ export function TipCard({
     onSuccess: payment => onTipped?.(payment),
   });
 
-  // Propina ya enviada (en esta sesión o acumulada del viaje): estado de confirmación.
-  const sentCents =
-    mutation.data?.tipCents ??
-    (initialTipCents > 0 ? initialTipCents : undefined);
+  // La propina es un COBRO digital dedicado (Model B): interpretamos su resultado con el clasificador de
+  // dominio canónico (mismo que el recibo/deuda), NUNCA asumimos "enviada" por el solo hecho de tener monto.
+  const outcome = mutation.data ? interpretPaymentOutcome(mutation.data) : null;
 
-  if (sentCents) {
+  // (1) YA dada: acumulada del viaje (persistida — sobrevive al re-montaje) o recién CAPTURED en esta sesión.
+  const settledCents =
+    initialTipCents > 0
+      ? initialTipCents
+      : outcome?.kind === 'settled'
+        ? (mutation.data?.tipCents ?? 0)
+        : 0;
+  if (settledCents > 0) {
     return (
       <Card variant="outlined" padding="lg">
         <Banner
           tone="success"
           title={t('tips.sentTitle')}
-          description={t('tips.sentBody', {amount: formatPEN(sentCents)})}
+          description={t('tips.sentBody', {amount: formatPEN(settledCents)})}
+        />
+      </Card>
+    );
+  }
+
+  // (2) Se está COBRANDO fuera de banda (viaje en efectivo / sin Yape vinculado): el pasajero DEBE completar
+  // el checkout (Yape/QR/CIP). Reusamos el componente CANÓNICO de checkout; `onRetry` re-corre el cobro, que es
+  // IDEMPOTENTE por dedupKey → al confirmar el webhook devuelve el mismo cobro ya CAPTURED. Antes acá se decía
+  // "propina enviada" sobre un PENDING sin abrir el checkout → la propina se perdía.
+  if (outcome?.kind === 'checkoutPending' && mutation.data) {
+    const chargedCents = mutation.data.tipCents;
+    return (
+      <Card variant="outlined" padding="lg">
+        <CheckoutInstructions
+          payment={mutation.data}
+          retrying={mutation.isPending}
+          onRetry={() => mutation.mutate(chargedCents)}
+          header={
+            <>
+              <Text variant="title3">{t('tips.checkoutTitle')}</Text>
+              <Text variant="callout" color="inkMuted">
+                {t('tips.checkoutBody', {amount: formatPEN(chargedCents)})}
+              </Text>
+            </>
+          }
+        />
+      </Card>
+    );
+  }
+
+  // (3) On-file (Yape vinculado): cobrándose server-initiated, se confirma por webhook. Estado honesto.
+  if (outcome?.kind === 'processing') {
+    return (
+      <Card variant="outlined" padding="lg">
+        <Banner
+          tone="info"
+          title={t('tips.processingTitle')}
+          description={t('tips.processingBody')}
+        />
+      </Card>
+    );
+  }
+
+  // (4) El cobro de la propina falló terminal (declive/expiró): honesto + volver a elegir. El reintento REINICIA
+  // el selector (no re-cobra el MISMO tip: la idempotencia por dedupKey devuelve el FAILED sin cobrar — el
+  // pasajero elige de nuevo, un monto distinto se cobra normal). El botón NO es un no-op: limpia el estado.
+  if (outcome?.kind === 'failed' || outcome?.kind === 'debt') {
+    return (
+      <Card variant="outlined" padding="lg">
+        <Banner
+          tone="danger"
+          title={t('tips.failedTitle')}
+          description={t('tips.failedBody')}
+        />
+        <Button
+          label={t('actions.retry')}
+          variant="secondary"
+          fullWidth
+          onPress={() => {
+            mutation.reset();
+            setSelected(null);
+            setCustom('');
+          }}
+          style={{marginTop: theme.spacing.md}}
         />
       </Card>
     );

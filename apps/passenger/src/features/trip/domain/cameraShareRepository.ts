@@ -6,6 +6,7 @@
  * (`GET /trips/:id/video` → `TripVideoGrant`) es solo del PASAJERO (token `canSubscribe`); no hay
  * un contrato para autorizar a contactos a suscribirse al room del viaje.
  *
+ * DEUDA: (backend) falta endpoint para persistir la preferencia "quién ve mi cámara" (p.ej. PUT /camera-share-prefs con contactos habilitados) y que media-service la aplique al autorizar viewers. Hoy la pref vive solo en MMKV local, no llega al backend.
  * DEGRADACIÓN HONESTA: la preferencia se persiste LOCALMENTE (MMKV, almacén `prefs`, no sensible).
  * La UI deja explícito que se aplicará cuando exista el servicio de compartir cámara (no simula que
  * ya se comparte). Cuando el backend exista, se reemplaza `LocalCameraSharePreferenceRepository` por

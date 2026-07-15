@@ -38,7 +38,12 @@ async function proxy(req: Request, ctx: Ctx): Promise<Response> {
   const outHeaders = new Headers();
   const resContentType = res.headers.get('content-type');
   outHeaders.set('content-type', resContentType ?? 'application/json');
-  return new NextResponse(text, { status: res.status, headers: outHeaders });
+  // 204/205/304 son "null body status" (fetch spec): construir un Response con body —AUNQUE sea ""— lanza
+  // TypeError ("Response with null body status cannot have body") y el route handler devuelve 500. Todo endpoint
+  // del bff con @HttpCode(204) (suspender/remover/revocar/reject de operador y conductor) caía por acá. Pasamos
+  // null para esos estados; el resto relaya el texto tal cual.
+  const nullBody = res.status === 204 || res.status === 205 || res.status === 304;
+  return new NextResponse(nullBody ? null : text, { status: res.status, headers: outHeaders });
 }
 
 export const GET = proxy;

@@ -40,6 +40,13 @@ export class AuthService {
     });
   }
 
+  logoutAll(refreshToken: string): Promise<{ ok: true }> {
+    return this.identity().post<{ ok: true }>('/auth/logout-all', {
+      identity: ANONYMOUS_DRIVER_IDENTITY,
+      body: { refreshToken },
+    });
+  }
+
   private identity() {
     return this.rest.client('identity');
   }

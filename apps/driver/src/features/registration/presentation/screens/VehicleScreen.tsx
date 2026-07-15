@@ -1,33 +1,98 @@
-import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Banner, Button, SafeScreen, Text, useTheme } from '@veo/ui-kit';
+import { VehicleType } from '@veo/shared-types';
 import { Reveal } from '../../../../shared/presentation/components/motion';
-import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { IconCheck } from '../../../../shared/presentation/icons';
+import { isConflictError, toErrorMessage } from '../../../../shared/presentation/errors';
 import type { RegistrationStackParamList } from '../../../../navigation/types';
-import { VehicleValidationError, type VehicleErrors } from '../../domain';
+import { RegistrationStep, type VehicleErrors } from '../../domain';
 import { useRegistrationStore } from '../state/registrationStore';
+import { useRegistrationStepBack } from '../hooks/useRegistrationStepBack';
+import { REGISTRATION_VEHICLES_QUERY_KEY, useDriverVehicles } from '../hooks/useRegistrationWizard';
+import { useVehicleContinue } from '../hooks/useVehicleContinue';
+import type { PropertyCardScanOutcome } from '../hooks/useScanPropertyCard';
 import {
-  REGISTRATION_VEHICLES_QUERY_KEY,
-  useDriverVehicles,
-  useRegisterVehicle,
-} from '../hooks/useRegistrationWizard';
+  REGISTRATION_DOCUMENTS_QUERY_KEY,
+  useRegistrationDocuments,
+  useUploadAndRegisterDocument,
+} from '../hooks/useRegistrationDocuments';
+import { useDocumentScanner, useImagePicker } from '../../../../core/di/useDi';
+import { ocrEngineForPlatform, ocrTimestampNow } from '../../../../core/scanning/ocr-engine';
+import { DOCUMENT_CARD_ASPECT_RATIO } from '../../../documents/domain';
+import { ORDERED_STEPS } from '../../../../navigation/registrationStackRoutes';
+import { useRegistrationWizardPageOptional } from './RegistrationWizardContext';
 import {
+  DocumentPreviewCard,
+  DocumentUploadCard,
+  firstMissingRequirement,
+  RegistrationDocumentSheet,
+  RegistrationExitSheet,
   RegistrationField,
   RegistrationHeader,
   RegistrationProgress,
-  VehicleModelSelector,
+  ScanPropertyCardSheet,
   VehicleStatusCard,
   VehicleTypeSelector,
+  type DocumentCardTone,
+  type StepRequirement,
 } from '../components';
-import type { VehicleModelOption } from '../../domain';
+import { hexAlpha } from '../../../../shared/presentation/color';
+import type {
+  DocumentUploadState,
+  RegistrationDocumentInput,
+} from '../components/RegistrationDocumentSheet';
+import { IconCar, IconShield } from '../../../../shared/presentation/icons';
+import {
+  DocumentUploadStatus,
+  registrationDocTypeToBackend,
+  serverHasAcceptableDoc,
+  type RegistrationDocumentServerStatus,
+} from '../../domain';
 
-type Props = NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>;
+// `Partial`: en modo EMBEBIDO (wizard) la pantalla se renderiza SIN `navigation`/`route`. Standalone (tests):
+// llegan normales. La navegación solo se usa standalone (embebido avanza por el pager con `goNext`).
+type Props = Partial<NativeStackScreenProps<RegistrationStackParamList, 'Vehicle'>>;
 
-/** Paso 2 del alta: tipo de vehículo y datos del mismo (drv-05). POST/GET /drivers/vehicles. */
-export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
+/** Tono del chip del SOAT según el `simpleStatus` real del documento (espeja el dominio de documentos). */
+function soatStatusTone(status: RegistrationDocumentServerStatus): DocumentCardTone {
+  switch (status) {
+    case 'vigente':
+      return 'success';
+    case 'por_vencer':
+      return 'warn';
+    case 'vencido':
+    case 'rechazado':
+      return 'danger';
+    case 'en_revision':
+    default:
+      return 'neutral';
+  }
+}
+
+/**
+ * Paso 2 del alta · SCAN-FIRST (Lote 2 · onboarding sin formularios). La acción PRINCIPAL es ESCANEAR la
+ * tarjeta de propiedad: el OCR lee placa/marca/modelo/año y DERIVA el tipo de vehículo de la categoría MTC
+ * (M1→auto, L*→moto). Lo leído se muestra en una tarjeta "Tarjeta capturada ✓" READ-ONLY. modelSpecId es
+ * OPCIONAL en el contrato → la marca/modelo del OCR viajan a TEXTO LIBRE (el fuzzy-match a catálogo es
+ * Lote 3). El formulario manual (tipo/placa/año/marca/modelo) queda como FALLBACK accesible: se ofrece si
+ * el escaneo falla, no está disponible, o la categoría no es soportada — NUNCA es el camino por defecto.
+ *
+ * Degradación HONESTA: si el OCR NO leyó la PLACA (campo crítico) se ofrece reescanear o un input mínimo
+ * SOLO para la placa (nunca se inventa). Categoría no soportada (N1 furgón / M2·M3 buses / *SC ambulancia)
+ * → selector manual de tipo (ampliar el enum `VehicleType` para esas categorías es un lote futuro). La FOTO
+ * del vehículo se mantiene EXACTAMENTE igual (cámara normal, sin OCR). POST /drivers/vehicles + GET.
+ *
+ * LOTE B (reagrupación por DUEÑO del documento): este paso reúne la documentación del VEHÍCULO. Además de la
+ * tarjeta de propiedad (scan-first) y la foto, AHORA captura el SOAT (bajado del viejo paso "Documentos"),
+ * reusando el componente CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. El SOAT es un
+ * documento DRIVER-scoped (igual que la foto): se sube/registra al capturarlo (mismo pipeline que la foto).
+ * El gating de "Registrar vehículo"/"Continuar" exige tarjeta (datos del vehículo) + foto + SOAT.
+ */
+export const VehicleScreen = ({ navigation }: Props = {}): React.JSX.Element => {
   const { t } = useTranslation();
   const theme = useTheme();
   const queryClient = useQueryClient();
@@ -35,19 +100,151 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
   const setVehicle = useRegistrationStore((s) => s.setVehicle);
   const setVehicleType = useRegistrationStore((s) => s.setVehicleType);
   const setCurrentStep = useRegistrationStore((s) => s.setCurrentStep);
+  // La tarjeta escaneada (imagen) es la fuente de verdad de "se capturó una tarjeta" INDEPENDIENTE del OCR.
+  const pendingPropertyCard = useRegistrationStore((s) => s.pendingPropertyCard);
+
+  // Modo dual: embebido en el pager (publica footer + avanza con `goNext`) o standalone (chrome propio).
+  const wizard = useRegistrationWizardPageOptional();
+  const pageIndex = ORDERED_STEPS.indexOf(RegistrationStep.VEHICLE);
+
+  // Back robusto del paso (solo standalone): reconstruye la pila al reanudar y nunca dispara un GO_BACK muerto.
+  // Embebido: deshabilitado — el back/exit/hardware-back los maneja el host del wizard.
+  const back = useRegistrationStepBack(!wizard);
 
   // Rehidrata el vehículo ya registrado (si existe) para mostrar su estado y bloquear el re-alta.
   const vehiclesQuery = useDriverVehicles();
-  const registerVehicle = useRegisterVehicle();
   const existingVehicle = vehiclesQuery.data?.[0] ?? null;
+
+  // Orquesta el continue: POST /drivers/vehicles (crea el vehículo) → subida DIFERIDA de la tarjeta de
+  // propiedad escaneada (con su `extractedData`), 409-como-éxito. Mismo patrón que el DNI del paso 1.
+  const vehicleContinue = useVehicleContinue();
 
   const [errors, setErrors] = useState<VehicleErrors>({});
   const [serverError, setServerError] = useState<unknown>(null);
+  // LOTE A: la subida INMEDIATA de la tarjeta (efecto `uploadPropertyCardNow`) falló por red/5xx. NO
+  // perdemos la imagen (sigue en `pendingPropertyCard`): banner + botón de reintento. Bloquea el alta
+  // hasta que la tarjeta aterrice en el server (vía `cardImageReady`).
+  const [cardUploadFailed, setCardUploadFailed] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+  // El conductor pidió cargar a mano (fallback accesible): muestra el formulario completo (placa/año/
+  // marca/modelo + el selector de tipo). NO es el camino por defecto: el scan-first manda.
+  const [manualMode, setManualMode] = useState(false);
 
-  const canContinue =
-    vehicle.plate.trim().length > 0 &&
-    vehicle.year.trim().length > 0 &&
-    vehicle.modelSpecId.trim().length > 0;
+  // Foto del vehículo (Ola 1): se captura ACÁ reusando el pipeline de documentos. Se registra como doc
+  // DRIVER-scoped (VEHICLE_PHOTO) y es REQUERIDA para aprobar. NO SE TOCA (cámara normal, sin OCR).
+  const documents = useRegistrationStore((s) => s.documents);
+  const setDocumentStatus = useRegistrationStore((s) => s.setDocumentStatus);
+  const serverDocs = useRegistrationDocuments();
+  const uploadDocument = useUploadAndRegisterDocument();
+  const imagePicker = useImagePicker();
+  const documentScanner = useDocumentScanner();
+  const photoBackendType = registrationDocTypeToBackend('VEHICLE_PHOTO');
+  // Tipo backend de la tarjeta de propiedad (la etiqueta del wizard 'VEHICLE_REGISTRATION' mapea a PROPERTY_CARD).
+  const propertyCardBackendType = registrationDocTypeToBackend('VEHICLE_REGISTRATION');
+
+  const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
+  const [photoUploadState, setPhotoUploadState] = useState<DocumentUploadState>('idle');
+  const [photoError, setPhotoError] = useState<unknown>(null);
+
+  // Subida confirmada: local (recién capturada) o ya presente en el servidor en estado ACEPTABLE
+  // (conductor que vuelve). Mismo criterio server-aware que la licencia/SOAT/DNI vía el helper canónico.
+  const photoUploaded =
+    documents.find((d) => d.type === 'VEHICLE_PHOTO')?.status === DocumentUploadStatus.UPLOADED ||
+    serverHasAcceptableDoc(serverDocs.data, 'VEHICLE_PHOTO');
+
+  // SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos): documento numerado que VENCE. Se
+  // captura con el componente CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. Es DRIVER-scoped
+  // (como la foto): se sube/registra al capturarlo (NO necesita el vehículo creado; solo el driver, que ya
+  // existe tras el paso 1). Requerido para avanzar.
+  const soatBackendType = registrationDocTypeToBackend('SOAT');
+  const [soatSheetOpen, setSoatSheetOpen] = useState(false);
+  const [soatUploadState, setSoatUploadState] = useState<DocumentUploadState>('idle');
+  const [soatError, setSoatError] = useState<unknown>(null);
+
+  /** ¿El servidor YA tiene el SOAT en un estado aceptable? (conductor que vuelve/reinstala). */
+  const serverHasSoat = serverHasAcceptableDoc(serverDocs.data, 'SOAT');
+  const soatUploaded =
+    documents.find((d) => d.type === 'SOAT')?.status === DocumentUploadStatus.UPLOADED ||
+    serverHasSoat;
+
+  /** Estado de SERVIDOR del SOAT para el chip (si existe en `GET /drivers/me/documents`). */
+  const soatServerState = (() => {
+    const match = serverDocs.data?.find((doc) => doc.type === soatBackendType);
+    if (!match) {
+      return undefined;
+    }
+    return {
+      label: t(`documents.status.${match.simpleStatus}`),
+      tone: soatStatusTone(match.simpleStatus),
+    };
+  })();
+
+  /** Estado de SERVIDOR de la FOTO del vehículo para el chip (MISMO patrón server-aware que el SOAT). */
+  const photoServerState = (() => {
+    const match = serverDocs.data?.find((doc) => doc.type === photoBackendType);
+    if (!match) {
+      return undefined;
+    }
+    return {
+      label: t(`documents.status.${match.simpleStatus}`),
+      tone: soatStatusTone(match.simpleStatus),
+    };
+  })();
+
+  /**
+   * Estado de SERVIDOR de la TARJETA DE PROPIEDAD para el chip del Paso 1 (MISMO patrón server-aware que la
+   * foto/SOAT). LOTE A: la tarjeta ahora SUBE al escanear, así que su chip debe reflejar el estado REAL del
+   * server ("En revisión", etc.) — NO el label estático "Listo para enviar" heredado del modelo diferido,
+   * que MENTÍA (decía "listo para enviar" cuando la tarjeta YA estaba enviada y en revisión).
+   */
+  const cardServerState = (() => {
+    const match = serverDocs.data?.find((doc) => doc.type === propertyCardBackendType);
+    if (!match) {
+      return undefined;
+    }
+    return {
+      label: t(`documents.status.${match.simpleStatus}`),
+      tone: soatStatusTone(match.simpleStatus),
+    };
+  })();
+
+  // Opción A · preview desde el SERVER de los docs ya subidos: la foto + el SOAT se suben al capturarlos
+  // (DRIVER-scoped), así que su preview viene de la URL prefirmada del server (1ª imagen), no de captura local.
+  const photoServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === photoBackendType)?.images[0]?.url ?? null;
+  const soatServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === soatBackendType)?.images[0]?.url ?? null;
+  // LOTE A: la TARJETA ahora también se sube al escanear → su preview viene del server al reanudar (cuando
+  // `pendingPropertyCard` ya no está, porque vive SOLO en memoria por Ley 29733). Sin esto, tras recargar la
+  // tarjeta enviada quedaba SIN preview y el flujo re-ofrecía "cargar a mano" (la captura local desaparecida).
+  const cardServerImageUri =
+    serverDocs.data?.find((doc) => doc.type === propertyCardBackendType)?.images[0]?.url ?? null;
+
+  // LOTE A · honestidad de estado: la IMAGEN de la tarjeta está "lista" solo si REALMENTE se subió — flag
+  // local UPLOADED (lo setea `uploadPropertyCardNow` SOLO tras una subida exitosa, NO la captura local) o
+  // el server ya la tiene (conductor que vuelve). MISMO patrón server-aware que la foto/SOAT. Ya NO basta
+  // `pendingPropertyCard` (captura local sin subir): el gate ESPERA a que la tarjeta aterrice en el server
+  // antes de habilitar el alta, así nunca se crea un vehículo con la tarjeta a medio subir.
+  const cardImageReady =
+    documents.find((d) => d.type === 'VEHICLE_REGISTRATION')?.status ===
+      DocumentUploadStatus.UPLOADED ||
+    serverHasAcceptableDoc(serverDocs.data, 'VEHICLE_REGISTRATION');
+
+  // ¿Se capturó una tarjeta? (señal = imagen, NO los campos OCR). ¿El OCR leyó la PLACA (campo crítico)?
+  const hasCapture = pendingPropertyCard != null;
+  const hasReadPlate = vehicle.plate.trim().length > 0;
+  // ¿El AÑO está presente? El scan SOLO prellena el año si cae en el rango VÁLIDO del contrato (ver
+  // `useScanPropertyCard`): un año fuera de rango/no leído deja el campo VACÍO → corregible en el scan. (FIX 4)
+  const hasReadYear = vehicle.year.trim().length > 0;
+  // Datos mínimos para registrar: placa + año + (modelo del catálogo o marca+modelo a texto libre).
+  const hasModel =
+    vehicle.modelSpecId.trim().length > 0 ||
+    (vehicle.brand.trim().length > 0 && vehicle.model.trim().length > 0);
+  // Para registrar: placa + año + modelo Y un TIPO definido (LOTE 1: sin seed "Auto"). El tipo viene
+  // DERIVADO de la categoría MTC de la tarjeta, o elegido a mano en el fallback. Si `vehicle.type` sigue en
+  // `null` (no se derivó ni se eligió) NO se puede registrar: nunca un "Auto" silencioso.
+  const hasType = vehicle.type !== null;
+  const hasVehicleData = hasReadPlate && hasReadYear && hasModel && hasType;
 
   /** Actualiza un campo del vehículo y limpia su error inline. */
   const update = (patch: Partial<typeof vehicle>, field: keyof VehicleErrors) => {
@@ -57,27 +254,182 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
     }
   };
 
-  /** El conductor eligió un modelo del catálogo: guarda id + etiqueta y limpia el error de modelo. */
-  const onPickModel = (model: VehicleModelOption) => {
-    setVehicle({ modelSpecId: model.id, brand: model.make, model: model.model });
-    if (errors.model) {
-      setErrors((prev) => ({ ...prev, model: undefined }));
+  // LOTE A · subida INMEDIATA de la tarjeta de propiedad (unifica el flujo con la foto/SOAT). Marca QUÉ
+  // captura (por su uri) ya se intentó subir, para no re-disparar el efecto en cada render ni duplicar la
+  // subida. Una captura NUEVA (re-escaneo → uri distinta) rearma el intento.
+  const uploadedCardUri = useRef<string | null>(null);
+
+  /**
+   * Sube+registra la IMAGEN de la tarjeta de propiedad AL SERVER (DRIVER-scoped, igual que la foto/SOAT).
+   * El backend EXIGE `documentNumber` para todo doc ≠ foto: la PLACA es el identificador natural de la
+   * tarjeta (no tiene número propio), normalizada IGUAL que en `validateVehicle` (mayúsculas, sin espacios)
+   * para coincidir con el alta. La data OCR + su trazabilidad viajan solo si el escaneo extrajo algo. 409
+   * (tarjeta ya registrada) es ÉXITO, no error (mismo patrón que la foto/SOAT/DNI). Si falla por red/5xx, NO
+   * se pierde la imagen (sigue en `pendingPropertyCard`) → aviso + reintento manual.
+   */
+  const uploadPropertyCardNow = async (): Promise<void> => {
+    if (!pendingPropertyCard) {
+      return;
+    }
+    setCardUploadFailed(false);
+    const plate = vehicle.plate.trim().toUpperCase().replace(/\s+/g, '');
+    const markUploaded = (): void => {
+      setDocumentStatus('VEHICLE_REGISTRATION', DocumentUploadStatus.UPLOADED);
+      void queryClient.invalidateQueries({ queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY });
+    };
+    try {
+      await uploadDocument.mutateAsync({
+        type: propertyCardBackendType,
+        file: pendingPropertyCard.front,
+        documentNumber: plate,
+        ...(pendingPropertyCard.extractedData
+          ? {
+              extractedData: pendingPropertyCard.extractedData,
+              ocrEngine: ocrEngineForPlatform(),
+              ocrAt: ocrTimestampNow(),
+            }
+          : {}),
+      });
+      markUploaded();
+    } catch (e) {
+      // 409 = la tarjeta YA está registrada → ÉXITO (mismo patrón que la foto/SOAT/DNI).
+      if (isConflictError(e)) {
+        markUploaded();
+        return;
+      }
+      setCardUploadFailed(true);
     }
   };
 
-  /**
-   * Cambiar el tipo de vehículo invalida el modelo elegido (el catálogo se filtra por tipo: un modelo
-   * de auto no aplica a una moto). Limpia la elección para forzar re-seleccionar del catálogo correcto.
-   */
-  const onChangeType = (type: typeof vehicle.type) => {
-    setVehicleType(type);
-    setVehicle({ modelSpecId: '', brand: '', model: '' });
+  // Dispara la subida apenas la tarjeta tiene TODO lo que el backend exige: imagen (`pendingPropertyCard`)
+  // + placa (`hasReadPlate`, venga del OCR o del tipeo manual). Si la placa aún no se leyó, el efecto
+  // re-corre cuando aparezca. Si la tarjeta ya está lista (`cardImageReady`), no hace nada.
+  useEffect(() => {
+    if (cardImageReady || !pendingPropertyCard || !hasReadPlate) {
+      return;
+    }
+    const uri = pendingPropertyCard.front.uri;
+    if (uploadedCardUri.current === uri) {
+      return;
+    }
+    uploadedCardUri.current = uri;
+    void uploadPropertyCardNow();
+    // `uploadPropertyCardNow` captura el estado actual en cada corrida del efecto (deps abajo lo regobiernan).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardImageReady, pendingPropertyCard, hasReadPlate]);
+
+  /** Sube+registra la foto del vehículo (reusa el pipeline de documentos; sin número ni vencimiento). */
+  const onSubmitPhoto = async (input: RegistrationDocumentInput) => {
+    setPhotoError(null);
+    setPhotoUploadState('uploading');
+    try {
+      await uploadDocument.mutateAsync({ type: photoBackendType, file: input.file });
+      setDocumentStatus('VEHICLE_PHOTO', 'uploaded');
+      setPhotoUploadState('success');
+      setTimeout(() => {
+        setPhotoSheetOpen(false);
+        setPhotoUploadState('idle');
+      }, 900);
+    } catch (e) {
+      // Retry legítimo del "subí y listo": la foto YA fue registrada en un intento previo y el backend
+      // responde 409 ConflictError (un VEHICLE_PHOTO activo ya existe para el conductor). La foto YA está
+      // → es ÉXITO, no error: marcamos el doc como `uploaded` (mismo mecanismo que el éxito normal, que
+      // habilita "Registrar vehículo" vía `photoUploaded`), cerramos el sheet y NO mostramos error.
+      // Detectado por status 409 tipado (`isConflictError`), no por el texto del mensaje. MISMO patrón que
+      // `useVehicleContinue.uploadPendingCard` (tarjeta) y el DNI (usePersonalDataContinue).
+      if (isConflictError(e)) {
+        setDocumentStatus('VEHICLE_PHOTO', 'uploaded');
+        // Reconcilia el estado de SERVIDOR: el 409 prueba que el doc YA existe del lado del servidor, pero
+        // `serverDocs` puede estar stale (no se hizo el `onSuccess` que invalida). Invalidamos la MISMA key
+        // que el `onSuccess` de `useUploadAndRegisterDocument`/`useRegistrationDocuments` → el listado se
+        // refetchea y `photoUploaded` queda respaldado por el servidor, no solo por el flag local.
+        void queryClient.invalidateQueries({ queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY });
+        setPhotoUploadState('success');
+        setTimeout(() => {
+          setPhotoSheetOpen(false);
+          setPhotoUploadState('idle');
+        }, 900);
+        return;
+      }
+      setPhotoError(e);
+      setPhotoUploadState('error');
+    }
   };
 
-  const goNext = () => {
-    setCurrentStep(3);
-    navigation.navigate('Documents');
+  /** Sube+registra el SOAT (reusa el componente CANÓNICO + el parser `parseSoat`). DRIVER-scoped, inmediato. */
+  const onSubmitSoat = async (input: RegistrationDocumentInput) => {
+    setSoatError(null);
+    setSoatUploadState('uploading');
+    try {
+      await uploadDocument.mutateAsync({
+        type: soatBackendType,
+        file: input.file,
+        ...(input.documentNumber ? { documentNumber: input.documentNumber } : {}),
+        ...(input.expiresAtIso ? { expiresAt: input.expiresAtIso } : {}),
+        ...(input.extractedData ? { extractedData: input.extractedData } : {}),
+        ...(input.ocrEngine ? { ocrEngine: input.ocrEngine } : {}),
+        ...(input.ocrAt ? { ocrAt: input.ocrAt } : {}),
+      });
+      markSoatCaptured();
+    } catch (e) {
+      // 409 = el SOAT YA fue registrado en un intento previo → ÉXITO, no error (mismo patrón que la foto/
+      // tarjeta/DNI). Reconcilia el estado de servidor invalidando el listado y marca el doc subido.
+      if (isConflictError(e)) {
+        void queryClient.invalidateQueries({ queryKey: REGISTRATION_DOCUMENTS_QUERY_KEY });
+        markSoatCaptured();
+        return;
+      }
+      setSoatError(e);
+      setSoatUploadState('error');
+    }
   };
+
+  /** Marca el SOAT como capturado (subido) y cierra el sheet tras mostrar el check de éxito. */
+  function markSoatCaptured(): void {
+    setDocumentStatus('SOAT', DocumentUploadStatus.UPLOADED);
+    setSoatUploadState('success');
+    setTimeout(() => {
+      setSoatSheetOpen(false);
+      setSoatUploadState('idle');
+    }, 900);
+  }
+
+  const goNext = () => {
+    // Embebido: avanza el pager (el host fija el `currentStep`). Standalone: navega a la ruta del paso 3.
+    if (wizard) {
+      wizard.goNext();
+      return;
+    }
+    setCurrentStep(RegistrationStep.IDENTITY_VERIFICATION);
+    navigation?.navigate('IdentityVerification');
+  };
+
+  /**
+   * Resuelve el camino tras un escaneo CAPTURADO (LOTE 1 · la tarjeta es la fuente de verdad del tipo):
+   *  - Tipo DERIVADO (`derivedType != null`: Moto si L*, Auto si M1): el hook YA fijó `vehicle.type` en el
+   *    store. La pantalla lo muestra como FILA READ-ONLY ("Tipo de vehículo: Moto"), igual que las otras
+   *    filas de la tarjeta capturada — SIN selector (no es editable: la tarjeta manda).
+   *  - Tipo NO derivado (`derivedType == null`: categoría no leída o no soportada N1/M2/M3/*SC): el tipo
+   *    del store queda en `null` (sin seed "Auto"). Cae al VehicleTypeSelector de FALLBACK, que ofrece AMBOS
+   *    tipos (CAR|MOTO) y bloquea Registrar hasta que el conductor elija (vía `hasType`). Nunca "Auto" mudo.
+   *  - Año NO leído o fuera de rango: el año quedó vacío → input de año corregible en el camino scan.
+   */
+  const onCaptured = (_outcome: PropertyCardScanOutcome) => {
+    setScanOpen(false);
+    // No hace falta estado extra: el tipo derivado (o su ausencia) vive en `vehicle.type` (store, reactivo).
+    // La pantalla deriva read-only vs selector-fallback de `vehicle.type !== null`.
+  };
+
+  /** El conductor eligió el tipo a mano en el FALLBACK (categoría no derivable). */
+  const onChangeVehicleType = (type: VehicleType) => {
+    setVehicleType(type);
+  };
+
+  /** Etiqueta i18n del tipo de vehículo (para la fila read-only de la tarjeta capturada). */
+  const vehicleTypeLabel = (type: VehicleType): string =>
+    type === VehicleType.MOTO
+      ? t('registration.vehicle.typeMoto')
+      : t('registration.vehicle.typeCar');
 
   const onContinue = async () => {
     // Si ya hay un vehículo registrado (en revisión), solo avanzamos: no se vuelve a registrar.
@@ -85,21 +437,30 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
       goNext();
       return;
     }
-    if (registerVehicle.isPending) {
+    if (vehicleContinue.isPending) {
       return;
     }
     setErrors({});
     setServerError(null);
-    try {
-      await registerVehicle.mutateAsync(vehicle);
-      queryClient.invalidateQueries({ queryKey: REGISTRATION_VEHICLES_QUERY_KEY });
-      goNext();
-    } catch (e) {
-      if (e instanceof VehicleValidationError) {
-        setErrors(e.errors);
-      } else {
-        setServerError(e);
-      }
+
+    // LOTE A: el hook solo CREA el vehículo (la imagen de la tarjeta YA se subió al escanear, gateada por
+    // `cardImageReady`). El resultado discriminado dice exactamente qué pintar (sin strings mágicos).
+    const result = await vehicleContinue.submit(vehicle);
+    switch (result.status) {
+      case 'ok':
+        queryClient.invalidateQueries({ queryKey: REGISTRATION_VEHICLES_QUERY_KEY });
+        goNext();
+        return;
+      case 'field-errors':
+        setErrors(result.errors);
+        return;
+      case 'plate-taken':
+        // 409 del alta = la placa pertenece a OTRO conductor → error INLINE del campo placa (accionable).
+        setErrors({ plate: 'plate_taken' });
+        return;
+      case 'server-error':
+        setServerError(result.error);
+        return;
     }
   };
 
@@ -109,72 +470,333 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
     return code ? t(`registration.vehicle.errors.${code}`) : undefined;
   };
 
-  return (
-    <SafeScreen
-      scroll
-      header={<RegistrationHeader showLogo={false} onBack={navigation.goBack} />}
-      footer={
-        <Button
-          label={existingVehicle ? t('common.continue') : t('registration.vehicle.register')}
-          variant="accent"
-          fullWidth
-          loading={registerVehicle.isPending}
-          disabled={!existingVehicle && !canContinue}
-          onPress={onContinue}
-        />
-      }
-    >
-      <View style={[styles.body, { gap: theme.spacing.xl }]}>
+  // ¿La captura del scan rindió una tarjeta usable (con placa)? Entonces mostramos la tarjeta "capturada".
+  const derivedFromScan = hasCapture && hasReadPlate;
+  const showManualForm = manualMode;
+  // U2 · dedup (DUP #4): el toggle "cargar a mano" es un FALLBACK SUBORDINADO. Se OCULTA cuando el scan ya
+  // rindió una captura VÁLIDA (placa + año + tipo leídos): ahí el camino es escanear/reescanear, no cargar a
+  // mano (cumple la promesa del comentario que prometía ocultarlo tras un scan exitoso). Tampoco se muestra
+  // si ya estás en modo manual (el form está abierto).
+  const scanCaptureComplete = hasCapture && hasReadPlate && hasReadYear && hasType;
+  // LOTE A: también se oculta si la tarjeta YA está en el server (`cardImageReady`). Al REANUDAR, la captura
+  // local (`pendingPropertyCard`) se fue (memoria, Ley 29733) → `scanCaptureComplete` quedaba false y el toggle
+  // re-ofrecía "cargar a mano" una tarjeta YA ENVIADA. La fuente de verdad es la subida real, no la captura local.
+  const showManualToggle = !manualMode && !scanCaptureComplete && !cardImageReady;
+
+  // U3 · CTA que dice QUÉ falta: derivado del MISMO gating del footer (datos del vehículo vía tarjeta/manual +
+  // foto + SOAT). El orden refleja la SECUENCIA de pasos (1 · Tarjeta, 2 · Foto, 3 · SOAT): se muestra el
+  // PRIMER requisito incumplido, pegado al CTA. En vehículo YA registrado el botón solo avanza (sin gating de
+  // alta): no hay nada que falte, por eso el hint solo aplica al alta NUEVA.
+  const vehicleRequirements: readonly StepRequirement[] = [
+    { satisfied: hasVehicleData, missingKey: 'registration.vehicle.missing.card' },
+    { satisfied: photoUploaded, missingKey: 'registration.vehicle.missing.photo' },
+    { satisfied: soatUploaded, missingKey: 'registration.vehicle.missing.soat' },
+  ];
+  const missingKey = existingVehicle ? null : firstMissingRequirement(vehicleRequirements);
+
+  // EMBEBIDO (wizard): publica el footer del paso al host — "Registrar vehículo"/"Continuar" + el hint
+  // "Te falta: …". `onContinueRef` evita re-registrar en cada render (solo cambia con el gating).
+  const onContinueRef = useRef(onContinue);
+  onContinueRef.current = onContinue;
+  const vehiclePrimaryDisabled =
+    (!existingVehicle && !hasVehicleData) || !cardImageReady || !photoUploaded || !soatUploaded;
+  useEffect(() => {
+    if (!wizard) {
+      return;
+    }
+    wizard.registerFooter(pageIndex, {
+      primaryLabel: existingVehicle ? t('common.continue') : t('registration.vehicle.register'),
+      onPrimary: () => void onContinueRef.current(),
+      primaryDisabled: vehiclePrimaryDisabled,
+      primaryLoading: vehicleContinue.isPending,
+      hint: missingKey
+        ? t('registration.vehicle.missing.label', { detail: t(missingKey) })
+        : undefined,
+    });
+    return () => wizard.registerFooter(pageIndex, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    wizard,
+    pageIndex,
+    existingVehicle,
+    vehiclePrimaryDisabled,
+    vehicleContinue.isPending,
+    missingKey,
+  ]);
+
+  // El CUERPO del paso (compartido por ambos modos). El chrome cambia según el modo (embebido vs standalone).
+  const stepBody = (
+    <View style={[styles.body, { gap: theme.spacing['2xl'] }]}>
+      {/* La BARRA de progreso (animada) es la única señal del avance: el caption "Paso N de M"
+              (`registration.stepOf`) se ELIMINÓ — redundante con la barra. El título display manda. */}
+      {wizard ? null : (
         <Reveal>
           <RegistrationProgress current={2} />
         </Reveal>
+      )}
 
-        <Reveal delay={40} style={styles.intro}>
-          <Text variant="caption" color="inkMuted" align="center">
-            {t('registration.stepOf', { current: 2, total: 4 })}
-          </Text>
-          <Text variant="title1" align="center">
-            {t('registration.vehicle.title')}
-          </Text>
-          <Text variant="callout" color="inkMuted" align="center">
-            {existingVehicle
-              ? t('registration.vehicle.registeredSubtitle')
-              : t('registration.vehicle.subtitle')}
-          </Text>
+      {/* Bloque héroe a la IZQUIERDA con aire (estándar Tesla): título `display` + subtítulo muted. */}
+      <Reveal delay={40} style={styles.intro}>
+        <Text variant="title1">{t('registration.vehicle.title')}</Text>
+        <Text variant="callout" color="inkMuted">
+          {existingVehicle
+            ? t('registration.vehicle.registeredSubtitle')
+            : t('registration.vehicle.subtitle')}
+        </Text>
+      </Reveal>
+
+      {serverError ? (
+        <Reveal>
+          <Banner
+            tone="danger"
+            title={t('errors.generic')}
+            description={toErrorMessage(serverError, t)}
+          />
         </Reveal>
+      ) : null}
 
-        {serverError ? (
-          <Reveal>
-            <Banner
-              tone="danger"
-              title={t('errors.generic')}
-              description={toErrorMessage(serverError, t)}
+      {cardUploadFailed ? (
+        <Reveal>
+          <Banner
+            tone="danger"
+            title={t('registration.vehicle.scanCard.uploadFailed')}
+            description={t('registration.vehicle.scanCard.uploadRetryHint')}
+            action={{ label: t('common.retry'), onPress: () => void uploadPropertyCardNow() }}
+          />
+        </Reveal>
+      ) : null}
+
+      {existingVehicle ? (
+        <Reveal delay={100} spring>
+          <VehicleStatusCard vehicle={existingVehicle} />
+        </Reveal>
+      ) : (
+        <>
+          {/* PASO 1 · Tarjeta de propiedad (U3 · jerarquía 1-2-3). El "Escanear tarjeta" YA NO es un Button
+                  accent que compite con el CTA del footer ni con la foto/SOAT: es la CARD DE PASO NUMERADA
+                  "1 · Tarjeta de propiedad" — MISMO patrón visual que la foto (2) y el SOAT (3) —, presionable,
+                  que abre el sheet de escaneo. El chip refleja la verdad: "Listo para enviar" cuando la placa
+                  crítica ya se leyó (captura usable), si no "Pendiente". El selector se mantiene la captura
+                  read-only debajo (verificación). */}
+          <Reveal delay={100} from="scale">
+            <DocumentUploadCard
+              icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+              stepNumber={1}
+              label={t('registration.vehicle.scanCard.preview')}
+              status={cardImageReady ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+              uploadedLabel={t('registration.documents.state.ready')}
+              pendingLabel={t('registration.documents.pending')}
+              serverState={cardServerState}
+              accessibilityLabel={
+                hasCapture
+                  ? t('registration.actions.rescan')
+                  : t('registration.vehicle.scanCard.cta')
+              }
+              onPress={() => setScanOpen(true)}
             />
           </Reveal>
-        ) : null}
 
-        {existingVehicle ? (
-          <Reveal delay={100} spring>
-            <VehicleStatusCard vehicle={existingVehicle} />
-          </Reveal>
-        ) : (
-          <>
-            <Reveal delay={100}>
-              <VehicleTypeSelector value={vehicle.type} onChange={onChangeType} />
+          {/* TARJETA "Tarjeta capturada ✓" MINIMALISTA: miniatura + tilde + datos leídos (read-only). Se
+                  muestra cuando hay captura Y la placa crítica se leyó: parece OK SOLO cuando lo está. */}
+          {derivedFromScan && pendingPropertyCard ? (
+            <Reveal delay={140} from="scale">
+              <View
+                style={[
+                  styles.capturedCard,
+                  {
+                    // Estética Tesla (negro premium): superficie oscura + borde sutil + elevación, NO la
+                    // "caja verde de AI". El éxito es un ACENTO mínimo (check chico), no el fondo.
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    borderRadius: theme.radii.lg,
+                    padding: theme.spacing.md,
+                    gap: theme.spacing.md,
+                    ...theme.elevation.level2,
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri: pendingPropertyCard.front.uri }}
+                  style={[styles.capturedThumb, { borderRadius: theme.radii.md }]}
+                  resizeMode="contain"
+                  accessibilityIgnoresInvertColors
+                />
+                <View style={[styles.capturedBody, { gap: theme.spacing.sm }]}>
+                  <View style={[styles.capturedHeader, { gap: theme.spacing.xs }]}>
+                    <IconCheck size={16} color={theme.colors.success} strokeWidth={2.6} />
+                    <Text variant="headline" color="ink">
+                      {t('registration.vehicle.scanCard.capturedTitle')}
+                    </Text>
+                  </View>
+                  <ReadRow
+                    label={t('registration.vehicle.scanCard.readPlate')}
+                    value={vehicle.plate}
+                  />
+                  {/* LOTE 1: el TIPO DERIVADO de la categoría MTC es una fila READ-ONLY (la tarjeta es la
+                          fuente de verdad), igual que placa/marca/año — SIN selector. Solo cuando la tarjeta
+                          NO lo derivó (`vehicle.type === null`) cae al VehicleTypeSelector de fallback (abajo). */}
+                  {vehicle.type !== null ? (
+                    <ReadRow
+                      label={t('registration.vehicle.scanCard.readType')}
+                      value={vehicleTypeLabel(vehicle.type)}
+                    />
+                  ) : null}
+                  {`${vehicle.brand} ${vehicle.model}`.trim().length > 0 ? (
+                    <ReadRow
+                      label={t('registration.vehicle.scanCard.readVehicle')}
+                      value={`${vehicle.brand} ${vehicle.model}`.trim()}
+                    />
+                  ) : null}
+                  {vehicle.year.trim().length > 0 ? (
+                    <ReadRow
+                      label={t('registration.vehicle.scanCard.readYear')}
+                      value={vehicle.year}
+                    />
+                  ) : null}
+                </View>
+              </View>
             </Reveal>
+          ) : null}
 
+          {/* Preview de la TARJETA ya subida, desde el SERVER (Opción A · URL prefirmada). Al REANUDAR
+                  no hay captura local viva (`pendingPropertyCard` es efímero), así que el preview viene del
+                  server — mismo patrón que la foto/SOAT. Solo cuando NO se está mostrando la captura local. */}
+          {!derivedFromScan && cardServerImageUri ? (
+            <Reveal delay={150} from="scale">
+              <DocumentPreviewCard
+                imageUri={cardServerImageUri}
+                title={t('registration.vehicle.scanCard.preview')}
+                caption={cardServerState?.label ?? t('registration.documents.state.ready')}
+              />
+            </Reveal>
+          ) : null}
+
+          {/* Fallback HONESTO del campo CRÍTICO: se capturó la foto pero el OCR NO leyó la placa →
+                  reescaneo O un input mínimo SOLO para la placa (NUNCA se inventa). Se gatilla por la
+                  captura, no por los campos OCR. U2 · dedup (DUP #4): `!manualMode` para que este input-parche
+                  del scan NUNCA coexista con el campo placa del formulario manual (un solo set visible). */}
+          {hasCapture && !hasReadPlate && !manualMode ? (
+            <Reveal delay={120}>
+              <View style={{ gap: theme.spacing.md }}>
+                <Banner
+                  tone="warn"
+                  title={t('registration.vehicle.scanCard.criticalMissingTitle')}
+                  description={t('registration.vehicle.scanCard.criticalMissingBody')}
+                />
+                <RegistrationField
+                  label={t('registration.vehicle.scanCard.plateOnlyLabel')}
+                  placeholder={t('registration.vehicle.platePlaceholder')}
+                  value={vehicle.plate}
+                  onChangeText={(text) => update({ plate: text.toUpperCase() }, 'plate')}
+                  autoCapitalize="characters"
+                  maxLength={8}
+                  error={fieldError('plate')}
+                />
+              </View>
+            </Reveal>
+          ) : null}
+
+          {/* Fallback HONESTO del AÑO: la tarjeta se capturó CON placa, pero el OCR no leyó un año VÁLIDO
+                  (no se leyó, o cayó fuera del rango del contrato y por eso NO se prellenó). En vez de fingir
+                  "capturada ✓" y reventar con `year_invalid` al Registrar, ofrecemos un input de año
+                  CORREGIBLE acá mismo (sin obligar a descubrir el toggle manual). Solo en el camino scan: el
+                  formulario manual ya trae su propio campo de año. (FIX 4) */}
+          {hasCapture && hasReadPlate && !hasReadYear && !manualMode ? (
+            <Reveal delay={130}>
+              <View style={{ gap: theme.spacing.md }}>
+                <Banner
+                  tone="warn"
+                  title={t('registration.vehicle.scanCard.yearMissingTitle')}
+                  description={t('registration.vehicle.scanCard.yearMissingBody')}
+                />
+                <RegistrationField
+                  label={t('registration.vehicle.yearLabel')}
+                  placeholder={t('registration.vehicle.yearPlaceholder')}
+                  value={vehicle.year}
+                  onChangeText={(text) => update({ year: text }, 'year')}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  error={fieldError('year')}
+                />
+              </View>
+            </Reveal>
+          ) : null}
+
+          {/* SELECTOR DE TIPO de FALLBACK en el camino SCAN (LOTE 1): SOLO aparece cuando la tarjeta NO
+                  derivó el tipo (`vehicle.type === null`: categoría no leída o no soportada N1/M2/M3/*SC). Si
+                  la derivó, el tipo es una FILA READ-ONLY en la tarjeta capturada (arriba) y este selector NO
+                  se muestra (la tarjeta manda). Ofrece AMBOS tipos (CAR|MOTO) y un banner pide elegirlo;
+                  Registrar queda BLOQUEADO hasta que el conductor toque una opción (vía `hasType`, reactivo
+                  por Zustand). Nunca un "Auto" por omisión. El formulario manual trae su propio selector. */}
+          {derivedFromScan && !manualMode && vehicle.type === null ? (
+            <Reveal delay={150} from="scale">
+              <View style={{ gap: theme.spacing.md }}>
+                <Banner
+                  tone="warn"
+                  title={t('registration.vehicle.scanCard.typeNeedsConfirmTitle')}
+                  description={t('registration.vehicle.scanCard.typeNeedsConfirmBody')}
+                />
+                <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
+              </View>
+            </Reveal>
+          ) : null}
+
+          {/* Toggle del fallback manual SUBORDINADO (U2 · dedup · DUP #4): NO es un Button full-width del
+                  mismo peso que "Escanear" — es un link de texto discreto, para que el escaneo siga siendo el
+                  ÚNICO camino primario. Oculto cuando el scan ya rindió una captura válida (placa+año+tipo) o
+                  cuando ya estás en modo manual (`showManualToggle`). */}
+          {showManualToggle ? (
+            <Reveal delay={160}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('registration.vehicle.manualToggle')}
+                onPress={() => setManualMode(true)}
+                style={styles.manualLink}
+                hitSlop={8}
+              >
+                <Text variant="footnote" color="accent" align="center">
+                  {t('registration.vehicle.manualToggle')}
+                </Text>
+              </Pressable>
+            </Reveal>
+          ) : null}
+
+          {/* FORMULARIO MANUAL (fallback): tipo + placa + año + marca/modelo a texto libre. Solo aparece
+                  cuando el conductor lo pide (toggle) o cae acá por categoría no soportada / escáner ausente.
+                  Marca/modelo van a TEXTO LIBRE (sin catálogo) — coherente con la rama del contrato. */}
+          {showManualForm ? (
             <View style={[styles.form, { gap: theme.spacing.lg }]}>
-              {/* B5-2: el modelo se ELIGE del catálogo curado (no texto libre), filtrado por tipo. */}
+              {/* Carga a mano (fallback): el selector de tipo ofrece AMBOS tipos (CAR|MOTO). Arranca sin
+                      selección (`null`) — Registrar queda bloqueado hasta elegir (sin "Auto" por omisión). */}
+              <Reveal delay={100}>
+                <VehicleTypeSelector value={vehicle.type} onChange={onChangeVehicleType} />
+              </Reveal>
+              {vehicle.type === null ? (
+                <Reveal delay={110}>
+                  <Text variant="footnote" color="inkMuted">
+                    {t('registration.vehicle.scanCard.typePrompt')}
+                  </Text>
+                </Reveal>
+              ) : null}
+
               <Reveal delay={150} from="scale">
-                <VehicleModelSelector
-                  vehicleType={vehicle.type}
-                  value={{
-                    modelSpecId: vehicle.modelSpecId,
-                    brand: vehicle.brand,
-                    model: vehicle.model,
-                  }}
-                  onChange={onPickModel}
+                <RegistrationField
+                  label={t('registration.vehicle.modelRequestMake')}
+                  placeholder={t('registration.vehicle.modelRequestMake')}
+                  value={vehicle.brand}
+                  onChangeText={(text) => update({ brand: text, modelSpecId: '' }, 'model')}
+                  maxLength={60}
                   error={fieldError('model')}
+                />
+              </Reveal>
+
+              <Reveal delay={170} from="scale">
+                <RegistrationField
+                  label={t('registration.vehicle.modelRequestModel')}
+                  placeholder={t('registration.vehicle.modelRequestModel')}
+                  value={vehicle.model}
+                  onChangeText={(text) => update({ model: text, modelSpecId: '' }, 'model')}
+                  maxLength={60}
                 />
               </Reveal>
 
@@ -202,15 +824,215 @@ export const VehicleScreen = ({ navigation }: Props): React.JSX.Element => {
                 />
               </Reveal>
             </View>
-          </>
-        )}
-      </View>
-    </SafeScreen>
+          ) : null}
+        </>
+      )}
+
+      {/* Foto del vehículo (Ola 1): se captura ACÁ, es REQUERIDA para aprobar. Cámara normal (sin OCR).
+              NO SE TOCA: reusa el sheet de captura + el pipeline de subida de documentos (foto sin número). */}
+      <Reveal delay={250}>
+        <DocumentUploadCard
+          icon={<IconCar size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+          stepNumber={2}
+          label={t('registration.vehicle.photoLabel')}
+          status={photoUploaded ? 'uploaded' : 'pending'}
+          uploadedLabel={t('registration.documents.state.ready')}
+          pendingLabel={t('registration.documents.pending')}
+          serverState={photoServerState}
+          busy={uploadDocument.isPending}
+          accessibilityLabel={t('registration.documents.uploadAccessibility', {
+            document: t('registration.vehicle.photoLabel'),
+          })}
+          onPress={() => {
+            setPhotoError(null);
+            setPhotoUploadState('idle');
+            setPhotoSheetOpen(true);
+          }}
+        />
+      </Reveal>
+
+      {/* Preview de la FOTO ya subida, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
+      {photoServerImageUri ? (
+        <Reveal delay={255} from="scale">
+          <DocumentPreviewCard
+            imageUri={photoServerImageUri}
+            title={t('registration.vehicle.photoLabel')}
+            caption={photoServerState?.label ?? t('registration.documents.state.ready')}
+          />
+        </Reveal>
+      ) : null}
+
+      {/* SOAT (LOTE B · doc del VEHÍCULO, bajado del viejo paso Documentos). Reusa el componente
+              CANÓNICO `RegistrationDocumentSheet` + el parser `parseSoat`. Documento numerado que vence;
+              DRIVER-scoped, se sube/registra al capturarlo. REQUERIDO para avanzar. */}
+      <Reveal delay={270}>
+        <DocumentUploadCard
+          icon={<IconShield size={26} color={theme.colors.accent} strokeWidth={1.8} />}
+          stepNumber={3}
+          label={t('registration.documents.soat')}
+          status={soatUploaded ? DocumentUploadStatus.UPLOADED : DocumentUploadStatus.PENDING}
+          uploadedLabel={t('registration.documents.state.ready')}
+          pendingLabel={t('registration.documents.pending')}
+          serverState={soatServerState}
+          busy={uploadDocument.isPending}
+          accessibilityLabel={t('registration.documents.uploadAccessibility', {
+            document: t('registration.documents.soat'),
+          })}
+          onPress={() => {
+            setSoatError(null);
+            setSoatUploadState('idle');
+            setSoatSheetOpen(true);
+          }}
+        />
+      </Reveal>
+
+      {/* Preview del SOAT ya subido, desde el SERVER (Opción A · URL prefirmada). Solo si hay imagen. */}
+      {soatServerImageUri ? (
+        <Reveal delay={295} from="scale">
+          <DocumentPreviewCard
+            imageUri={soatServerImageUri}
+            title={t('registration.documents.soat')}
+            caption={soatServerState?.label ?? t('registration.documents.state.ready')}
+          />
+        </Reveal>
+      ) : null}
+    </View>
+  );
+
+  const photoSheet = photoSheetOpen ? (
+    <RegistrationDocumentSheet
+      visible
+      onClose={() => {
+        if (photoUploadState !== 'uploading') {
+          setPhotoSheetOpen(false);
+        }
+      }}
+      documentLabel={t('registration.vehicle.photoLabel')}
+      documentType={photoBackendType}
+      uploadState={photoUploadState}
+      errorMessage={photoError ? toErrorMessage(photoError, t) : undefined}
+      // La foto del vehículo es una FOTO LIBRE: el sheet entra en modo `'photo'` y su acción principal es
+      // la cámara normal vía `onPick`, SIN escáner de bordes ni OCR. El pipeline de subida es el mismo.
+      onPick={(source) => imagePicker.pick(source)}
+      onSubmit={onSubmitPhoto}
+    />
+  ) : null;
+
+  const soatSheet = soatSheetOpen ? (
+    <RegistrationDocumentSheet
+      visible
+      onClose={() => {
+        if (soatUploadState !== 'uploading') {
+          setSoatSheetOpen(false);
+        }
+      }}
+      documentLabel={t('registration.documents.soat')}
+      // El tipo CANÓNICO selecciona la config contextual del formulario (número + que vence) y el parser
+      // de OCR (`parseSoat`). El mapeo es el mismo que viaja al backend.
+      documentType={soatBackendType}
+      uploadState={soatUploadState}
+      errorMessage={soatError ? toErrorMessage(soatError, t) : undefined}
+      onPick={(source) => imagePicker.pick(source)}
+      onScan={() => documentScanner.scan()}
+      onSubmit={onSubmitSoat}
+    />
+  ) : null;
+
+  const scanCardSheet = (
+    <ScanPropertyCardSheet
+      visible={scanOpen}
+      onClose={() => setScanOpen(false)}
+      onCaptured={onCaptured}
+    />
+  );
+
+  // Modo EMBEBIDO (wizard): solo el cuerpo en un scroll propio + los sheets. El host pone el chrome
+  // (header/footer/progress/exit) y pinta el CTA unificado (publicado vía `registerFooter`).
+  if (wizard) {
+    return (
+      <>
+        <ScrollView
+          contentContainerStyle={styles.embeddedScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {stepBody}
+        </ScrollView>
+        {photoSheet}
+        {soatSheet}
+        {scanCardSheet}
+      </>
+    );
+  }
+
+  // Modo STANDALONE (fuera del wizard, p. ej. tests): chrome propio + el CTA "Registrar" en el footer.
+  return (
+    <>
+      <SafeScreen
+        scroll
+        header={<RegistrationHeader showLogo={false} onBack={back.onBack} />}
+        footer={
+          <View style={styles.footer}>
+            {/* U3 · feedback PEGADO al CTA: el primer requisito incumplido (tarjeta → foto → SOAT). */}
+            {missingKey ? (
+              <Text variant="footnote" color="inkMuted" align="center" style={styles.missingHint}>
+                {t('registration.vehicle.missing.label', { detail: t(missingKey) })}
+              </Text>
+            ) : null}
+            <Button
+              label={existingVehicle ? t('common.continue') : t('registration.vehicle.register')}
+              variant="accent"
+              fullWidth
+              loading={vehicleContinue.isPending}
+              disabled={vehiclePrimaryDisabled}
+              onPress={() => {
+                void onContinue();
+              }}
+            />
+          </View>
+        }
+      >
+        {stepBody}
+        {photoSheet}
+        {soatSheet}
+      </SafeScreen>
+      {scanCardSheet}
+      <RegistrationExitSheet exit={back.exit} />
+    </>
   );
 };
 
+/** Fila read-only "etiqueta · valor" de lo leído por el OCR (mismo estilo minimalista que el DNI). */
+function ReadRow({ label, value }: { label: string; value: string }): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <View style={[styles.readRow, { gap: theme.spacing.sm }]}>
+      <Text variant="footnote" color="inkMuted">
+        {label}
+      </Text>
+      {value.length > 0 ? (
+        <Text variant="footnote" color="ink" style={styles.readValue}>
+          {value}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  body: { paddingTop: 12 },
-  intro: { gap: 6 },
+  // Embebido: el host del wizard es `padded={false}`, así que el scroll de la página pone su propio padding.
+  embeddedScroll: { paddingHorizontal: 20, paddingBottom: 32 },
+  body: { paddingTop: 20 },
+  // Aire Tesla bajo la barra: el bloque héroe respira; título+subtítulo juntos por su gap.
+  intro: { gap: 10, marginTop: 12 },
+  footer: { gap: 10 },
+  missingHint: {},
   form: {},
+  manualLink: { alignSelf: 'center', paddingVertical: 8 },
+  capturedCard: { borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+  // Thumb apaisado en proporción de tarjeta ID-1 (era 96×96 cuadrado → recortaba ~37% de los lados).
+  capturedThumb: { width: 96, aspectRatio: DOCUMENT_CARD_ASPECT_RATIO },
+  capturedBody: { flex: 1 },
+  capturedHeader: { flexDirection: 'row', alignItems: 'center' },
+  readRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  readValue: { flexShrink: 1, textAlign: 'right' },
 });

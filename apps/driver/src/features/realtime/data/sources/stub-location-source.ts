@@ -2,7 +2,7 @@ import type {
   LocationAvailability,
   LocationSample,
   LocationSource,
-} from '../../domain/location-source';
+} from '../../../../core/location/location-source';
 
 /**
  * Fuente de ubicación STUB — SOLO dev (simulador sin GPS nativo).

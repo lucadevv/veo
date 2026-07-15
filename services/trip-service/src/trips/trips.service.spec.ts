@@ -9,16 +9,17 @@ import {
   OFFERINGS,
   OfferingId,
   VehicleClass,
-  type OfferingSpec,
 } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
 import { TripsService } from './trips.service';
-import { OfferingUnavailableError } from './trips.errors';
+import { TripsRepository } from './trips.repository';
+import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { emitTripRequested, emitBidPosted } from './trip-events';
-import { offeringModeOverriddenTotal, catalogDegradedTotal } from './trip-metrics';
-import type { TripOfferingResolution } from './domain/offering';
+import { catalogDegradedTotal } from './trip-metrics';
 import { TripQueryService } from './trip-query.service';
+import { TripQueryRepository } from './trip-query.repository';
 import { ScheduledTripService } from './scheduled-trip.service';
+import { ScheduledTripRepository } from './scheduled-trip.repository';
 import { InvalidTripTransition } from './domain/trip-state-machine';
 import { Prisma, type Trip } from '../generated/prisma';
 
@@ -29,15 +30,16 @@ async function readCatalogDegraded(site: string): Promise<number> {
 }
 
 /**
- * Doble de CatalogService.resolveOffering (B2): devuelve una oferta EFECTIVA a medida (enabled + pricing
- * efectivo + modePin), o lanza para simular el catálogo caído. `as never` porque createTrip solo usa
- * resolveOffering del puerto.
+ * Doble de CatalogService.resolveOffering (ADR 013 · ADR 023): devuelve una oferta EFECTIVA a medida
+ * (enabled + pricing efectivo + `mode` efectivo), o lanza para simular el catálogo caído. `mode` modela la
+ * palanca manual del admin sobre el modo de la oferta (default = el de código). `as never` porque createTrip
+ * solo usa resolveOffering del puerto.
  */
 function fakeCatalog(opts: {
   enabled?: boolean;
   multiplier?: number;
   minFareCents?: number;
-  modePin?: PricingMode;
+  mode?: PricingMode;
   throws?: boolean;
 }) {
   return {
@@ -51,7 +53,7 @@ function fakeCatalog(opts: {
           multiplier: opts.multiplier ?? base.pricing.multiplier,
           minFareCents: opts.minFareCents ?? base.pricing.minFareCents,
         },
-        modePin: opts.modePin,
+        mode: opts.mode ?? base.mode,
       };
     },
   } as never;
@@ -127,13 +129,28 @@ interface PublishedEvent {
 }
 
 /** Prisma falso con un único viaje en memoria. Captura los eventos encolados en el outbox. */
-function makePrisma(initial: Trip | null) {
+function makePrisma(
+  initial: Trip | null,
+  // Simula una carrera concurrente: en el PRÓXIMO updateMany del CAS de changeDestination (el que lleva
+  // `fareCents` en el WHERE), muta el store con estos valores y devuelve count 0 — como si otro escritor
+  // hubiese ganado entre el re-read in-tx y el write. Cubre la atribución de causa (status vs fare_changed).
+  raceOnDestinationCas?: { status?: TripStatus; fareCents?: number },
+  // RC23 · simula que, tras tomar el advisory lock in-tx, el re-check `tx.trip.findFirst` encuentra un viaje
+  // vivo (otra tx concurrente lo creó y committeó primero) → createTrip debe lanzar ActiveTripExistsError.
+  liveInTx: { id: string } | null = null,
+) {
   let store = initial;
   const outbox: PublishedEvent[] = [];
   const tripEvents: { eventType: string; payload: unknown }[] = [];
 
   const tx = {
+    // RC23 · re-check in-tx del invariante "un solo viaje vivo" bajo advisory lock. En estos dobles no hay
+    // concurrencia real ni viaje vivo previo → el lock es no-op y findFirst devuelve null (no bloquea el create).
+    $executeRaw: async () => 0,
     trip: {
+      // RC23 · guard in-tx (post-lock): sin viaje vivo previo en el doble → null. El test dedicado del 409
+      // in-tx sobreescribe esta rama para simular que otra tx creó un viaje vivo entre el check y el create.
+      findFirst: async () => liveInTx,
       create: async ({ data }: { data: Partial<Trip> }) => {
         store = buildTrip(data);
         return store;
@@ -150,9 +167,19 @@ function makePrisma(initial: Trip | null) {
           status?: TripStatus | { in: readonly TripStatus[] };
           agreedFareCents?: number | null;
           negotiationSeq?: number;
+          fareCents?: number;
         };
         data: Partial<Trip>;
       }) => {
+        // CAS de changeDestination (ADR-022 A3): el WHERE lleva `fareCents`. Modo carrera: mutamos el store
+        // (otro escritor ganó) y devolvemos count 0. Si no, honramos el CAS optimista (fareCents debe coincidir).
+        if (where?.fareCents !== undefined) {
+          if (raceOnDestinationCas) {
+            store = buildTrip({ ...(store ?? {}), ...raceOnDestinationCas });
+            return { count: 0 };
+          }
+          if (store?.fareCents !== where.fareCents) return { count: 0 };
+        }
         // Guard de carrera (activateScheduledTrip, expireFromNoOffers, rebid): si el where exige un
         // status concreto y el store YA no está en él (otro tap ganó), no toca fila → count 0 (idempotente).
         // N9: applyAgreedFare usa `status: { in: [...] }` (no-terminal) — soportamos ambas formas.
@@ -285,18 +312,10 @@ const baseCreateDto = {
   paymentMethod: PaymentMethod.YAPE,
 };
 
-/**
- * ADR 011 · doble del ModeResolver (PricingScheduleService) que FUERZA un modo fijo, para testear la
- * resolución server-side de createTrip independientemente de la presencia de bidCents del cliente.
- */
-function fakeResolver(mode: 'PUJA' | 'FIXED') {
-  return { resolve: async () => mode } as never;
-}
-
 describe('TripsService.createTrip · BR-T05 + outbox', () => {
   it('crea en REQUESTED, calcula tarifa real y encola trip.requested', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.createTrip({ ...baseCreateDto });
     expect(view.status).toBe(TripStatus.REQUESTED);
     // 600 + 120*5 + 30*10 = 1500
@@ -307,19 +326,71 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     expect(prisma._store?.dispatchMode).toBe('FIXED');
   });
 
+  it('ruta canónica: el create PERSISTE la routePolyline REAL del facade (con su distancia/duración)', async () => {
+    // La ruta canónica del viaje (origen→paradas→destino) se computa UNA vez acá y se persiste:
+    // los BFF la SIRVEN (no recomputan) — pasajero y conductor ven la MISMA ruta del mismo viaje.
+    const prisma = makePrisma(null);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    await svc.createTrip({ ...baseCreateDto });
+    expect(prisma._store?.routePolyline).toBe('xyz');
+    expect(prisma._store?.distanceMeters).toBe(5000);
+    expect(prisma._store?.durationSeconds).toBe(600);
+  });
+
+  it('ruta canónica: facade degradado (polyline vacía — modo local o proveedor caído) → routePolyline NULL sin romper el create', async () => {
+    // El FallbackMapsClient del puerto convierte el proveedor caído en la estimación local (polyline '').
+    // El create NO rompe: persiste routePolyline null (jamás inventada) y la tarifa sigue calculándose.
+    const degraded = {
+      ...maps,
+      route: async () => ({
+        distanceMeters: 5000,
+        durationSeconds: 600,
+        polyline: '',
+        geometry: { type: 'LineString' as const, coordinates: [] },
+      }),
+    };
+    const prisma = makePrisma(null);
+    const svc = new TripsService(new TripsRepository(prisma as never), degraded);
+    const view = await svc.createTrip({ ...baseCreateDto });
+    expect(prisma._store?.routePolyline).toBeNull();
+    expect(view.fareCents).toBe(1500); // la degradación no toca la tarifa (BR-T05 sobre la estimación)
+  });
+
   it('es idempotente por Idempotency-Key (no duplica)', async () => {
     const existing = buildTrip({ idempotencyKey: 'key-123', fareCents: 999 });
     const prisma = makePrisma(existing);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.createTrip({ ...baseCreateDto }, 'key-123');
     expect(view.fareCents).toBe(999);
     // No se encoló ningún evento nuevo (devolvió el existente).
     expect(prisma._outbox).toHaveLength(0);
   });
 
+  it('RC23 · un viaje vivo que aparece ENTRE el fast-fail y el create (carrera) → 409 in-tx, NO doble viaje', async () => {
+    // El gate de arriba (fuera de la tx) devuelve null (no había viaje vivo al chequear), pero para cuando la tx
+    // toma el advisory lock otra tx concurrente YA creó y committeó un viaje vivo del mismo pasajero. El re-check
+    // in-tx (post-lock) lo encuentra → ActiveTripExistsError con el activeTripId. Sin este re-check nacerían DOS.
+    const prisma = makePrisma(null, undefined, { id: 'trip-vivo-concurrente' });
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    await expect(svc.createTrip({ ...baseCreateDto })).rejects.toBeInstanceOf(ActiveTripExistsError);
+    // No se creó ni encoló nada: la tx abortó antes del create (el store sigue vacío).
+    expect(prisma._store).toBeNull();
+    expect(prisma._outbox).toHaveLength(0);
+  });
+
+  it('RC23 · una RESERVA (scheduledFor) NO toma el lock ni el re-check in-tx (varias reservas conviven)', async () => {
+    // SCHEDULED no es "vivo" → el invariante de un-solo-viaje-vivo no aplica; aunque el fake tenga un liveInTx,
+    // la rama scheduled NO entra al guard (if !scheduledFor) → la reserva se crea igual.
+    const prisma = makePrisma(null, undefined, { id: 'otro-vivo' });
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    const scheduledFor = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // +1h
+    const view = await svc.createTrip({ ...baseCreateDto, scheduledFor });
+    expect(view.status).toBe(TripStatus.SCHEDULED);
+  });
+
   it('modo niño sin código → ValidationError', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.createTrip({ ...baseCreateDto, childMode: true })).rejects.toBeInstanceOf(
       ValidationError,
     );
@@ -327,7 +398,7 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
 
   it('Ola 2B · scheduledFor futuro → SCHEDULED, registra trip.scheduled y NO emite trip.requested', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const scheduledFor = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // +1h
     const view = await svc.createTrip({ ...baseCreateDto, scheduledFor });
     expect(view.status).toBe(TripStatus.SCHEDULED);
@@ -338,7 +409,7 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
 
   it('Ola 2B · scheduledFor demasiado pronto (<15min) → ValidationError', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const soon = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // +5min
     await expect(svc.createTrip({ ...baseCreateDto, scheduledFor: soon })).rejects.toBeInstanceOf(
       ValidationError,
@@ -347,7 +418,7 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
 
   it('Ola 2B · MOTO se propaga al evento trip.requested', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.createTrip({ ...baseCreateDto, vehicleType: 'MOTO' });
     const requested = prisma._outbox.find((e) => e.eventType === 'trip.requested');
     expect((requested?.envelope.payload as { vehicleType?: string }).vehicleType).toBe('MOTO');
@@ -355,7 +426,7 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
 
   it('Ola 2B · las paradas (waypoints) viajan en trip.requested (dispatch ya no queda ciego)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const stops = [
       { lat: -12.05, lon: -77.04 },
       { lat: -12.06, lon: -77.05 },
@@ -367,7 +438,15 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
 
   it('Ola 2B · las paradas (waypoints) viajan en trip.bid_posted', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    // ADR 023: la PUJA la determina la oferta → catálogo con la oferta pineada a PUJA.
+    const svc = new TripsService(
+      new TripsRepository(prisma as never),
+      maps,
+      undefined,
+      undefined,
+      undefined,
+      fakeCatalog({ mode: PricingMode.PUJA }),
+    );
     const stops = [{ lat: -12.07, lon: -77.06 }];
     await svc.createTrip({ ...baseCreateDto, bidCents: 900, waypoints: stops });
     const bid = prisma._outbox.find((e) => e.eventType === 'trip.bid_posted');
@@ -379,9 +458,8 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     // Catálogo que reporta la oferta como apagada (admin la deshabilitó entre el quote y el create).
     const disabledCatalog = fakeCatalog({ enabled: false });
     const svc = new TripsService(
-      prisma as never,
+      new TripsRepository(prisma as never),
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -398,9 +476,8 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     const prisma = makePrisma(null);
     const enabledCatalog = fakeCatalog({ enabled: true });
     const svc = new TripsService(
-      prisma as never,
+      new TripsRepository(prisma as never),
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -414,9 +491,8 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     const prisma = makePrisma(null);
     const brokenCatalog = fakeCatalog({ throws: true });
     const svc = new TripsService(
-      prisma as never,
+      new TripsRepository(prisma as never),
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -433,9 +509,8 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     const prisma = makePrisma(null);
     const brokenCatalog = fakeCatalog({ throws: true });
     const svc = new TripsService(
-      prisma as never,
+      new TripsRepository(prisma as never),
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -449,31 +524,30 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     expect(prisma._store).toBeNull();
   });
 
-  it('B2 · el admin PINEA el modo de la oferta → GANA sobre el schedule (pin FIXED vs schedule PUJA)', async () => {
+  it('ADR 023 · el admin PINEA el modo PUJA de la oferta → el viaje es PUJA (palanca manual)', async () => {
     const prisma = makePrisma(null);
-    // schedule pide PUJA; el admin pineó FIXED para esta oferta → gana FIXED (sin bid, NO lanza).
+    // La oferta nace FIXED en código; el admin la pineó a PUJA (overlay) → el modo EFECTIVO es PUJA. Con
+    // bid válido, el viaje abre OfferBoard (trip.bid_posted), no el matching secuencial (trip.requested).
     const svc = new TripsService(
-      prisma as never,
+      new TripsRepository(prisma as never),
       maps,
       undefined,
-      fakeResolver('PUJA'),
       undefined,
       undefined,
-      fakeCatalog({ modePin: PricingMode.FIXED }),
+      fakeCatalog({ mode: PricingMode.PUJA }),
     );
-    const view = await svc.createTrip({ ...baseCreateDto });
-    expect(view.status).toBe(TripStatus.REQUESTED);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true); // FIXED
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false); // no PUJA
+    const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
+    expect(view.dispatchMode).toBe('PUJA');
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true); // PUJA
+    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false); // no FIXED
   });
 
   it('B2 · el override de multiplier del admin sube la tarifa FIXED (×2.0 → fareCents 3000)', async () => {
     const prisma = makePrisma(null);
-    // FIXED por default (sin resolver, sin bid). calculateFare(5000m,600s)=1500; ×2.0=3000 (> minFare 500).
+    // FIXED por default (oferta FIXED, sin bid). calculateFare(5000m,600s)=1500; ×2.0=3000 (> minFare 500).
     const svc = new TripsService(
-      prisma as never,
+      new TripsRepository(prisma as never),
       maps,
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -482,45 +556,6 @@ describe('TripsService.createTrip · BR-T05 + outbox', () => {
     const view = await svc.createTrip({ ...baseCreateDto });
     expect(view.fareCents).toBe(3000);
   });
-
-  it('B3 · el recargo de combustible (admin) sube la tarifa FIXED (+40 céntimos/km → fareCents 1700)', async () => {
-    const prisma = makePrisma(null);
-    // FIXED por default. calculateFare(5000m,600s, fuel 40) = 600 + (120+40)*5 + 30*10 = 1700; ×1.0 económico.
-    const fuel = { getPerKmCents: async () => 40 } as never;
-    const svc = new TripsService(
-      prisma as never,
-      maps,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      fuel,
-    );
-    const view = await svc.createTrip({ ...baseCreateDto });
-    expect(view.fareCents).toBe(1700);
-  });
-
-  it('B3 · degradación honesta: si el servicio de combustible FALLA, createTrip cobra sin recargo (1500)', async () => {
-    const prisma = makePrisma(null);
-    const fuel = {
-      getPerKmCents: async () => {
-        throw new Error('fuel config caído');
-      },
-    } as never;
-    const svc = new TripsService(
-      prisma as never,
-      maps,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      fuel,
-    );
-    const view = await svc.createTrip({ ...baseCreateDto });
-    expect(view.fareCents).toBe(1500); // sin recargo, no aborta
-  });
 });
 
 describe('ScheduledTripService · Ola 2B viajes programados (activación / cancelación)', () => {
@@ -528,7 +563,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'FIXED' }),
     );
-    const svc = new ScheduledTripService(prisma as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never));
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false);
@@ -539,7 +574,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'PUJA' }),
     );
-    const svc = new ScheduledTripService(prisma as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never));
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false);
@@ -548,7 +583,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
 
   it('activateScheduledTrip es idempotente si ya no está SCHEDULED', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED }));
-    const svc = new ScheduledTripService(prisma as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never));
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._outbox).toHaveLength(0);
   });
@@ -557,7 +592,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), passengerId: 'pax-1' }),
     );
-    const svc = new ScheduledTripService(prisma as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never));
     const view = await svc.cancelScheduledTrip('trip-1', 'pax-1');
     expect(view.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
     expect(view.penaltyCents).toBe(0);
@@ -566,7 +601,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
 
   it('cancelScheduledTrip sobre un viaje ya activado → ConflictError', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED, passengerId: 'pax-1' }));
-    const svc = new ScheduledTripService(prisma as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never));
     await expect(svc.cancelScheduledTrip('trip-1', 'pax-1')).rejects.toBeInstanceOf(ConflictError);
   });
 
@@ -581,7 +616,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
       }),
     );
     const catalog = { isEnabled: async () => false };
-    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never), undefined, undefined, catalog as never);
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._store?.status).toBe(TripStatus.EXPIRED);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(true);
@@ -598,7 +633,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
         throw new Error('catalog down');
       },
     };
-    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never), undefined, undefined, catalog as never);
     const before = await readCatalogDegraded('activate');
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._store?.status).toBe(TripStatus.REQUESTED);
@@ -618,7 +653,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
       }),
     );
     const catalog = { isEnabled: async () => true };
-    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never), undefined, undefined, catalog as never);
     await svc.activateScheduledTrip('trip-1'); // no debe lanzar
     expect(prisma._store?.status).toBe(TripStatus.EXPIRED);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(true);
@@ -630,7 +665,7 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
       buildTrip({ status: TripStatus.SCHEDULED, scheduledFor: new Date(), dispatchMode: 'FIXED' }),
     );
     const catalog = { isEnabled: async () => true };
-    const svc = new ScheduledTripService(prisma as never, undefined, undefined, catalog as never);
+    const svc = new ScheduledTripService(new ScheduledTripRepository(prisma as never), undefined, undefined, catalog as never);
     await svc.activateScheduledTrip('trip-1');
     expect(prisma._store?.status).toBe(TripStatus.REQUESTED);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
@@ -639,31 +674,9 @@ describe('ScheduledTripService · Ola 2B viajes programados (activación / cance
 });
 
 describe('TripsService · BR-T02 guardas de transición', () => {
-  it('assign sobre un viaje COMPLETED lanza InvalidTripTransition', async () => {
-    const prisma = makePrisma(buildTrip({ status: TripStatus.COMPLETED }));
-    const svc = new TripsService(prisma as never, maps);
-    await expect(
-      svc.assignDriver('trip-1', {
-        driverId: '22222222-2222-2222-2222-222222222222',
-        vehicleId: '33333333-3333-3333-3333-333333333333',
-      }),
-    ).rejects.toBeInstanceOf(InvalidTripTransition);
-  });
-
-  it('assign en REQUESTED → ASSIGNED y emite trip.assigned', async () => {
-    const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED }));
-    const svc = new TripsService(prisma as never, maps);
-    const view = await svc.assignDriver('trip-1', {
-      driverId: '22222222-2222-2222-2222-222222222222',
-      vehicleId: '33333333-3333-3333-3333-333333333333',
-    });
-    expect(view.status).toBe(TripStatus.ASSIGNED);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.assigned')).toBe(true);
-  });
-
   it('assignFromDispatch es idempotente si ya está ASSIGNED con el mismo conductor', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-9' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.assignFromDispatch('trip-1', 'drv-9');
     expect(prisma._outbox).toHaveLength(0); // no reprocesa
   });
@@ -680,7 +693,7 @@ describe('TripsService · BR-T02 guardas de transición', () => {
       TripStatus.COMPLETED,
     ]) {
       const prisma = makePrisma(buildTrip({ status, driverId: null }));
-      const svc = new TripsService(prisma as never, maps);
+      const svc = new TripsService(new TripsRepository(prisma as never), maps);
       // La prueba del no-poison: NO debe lanzar (resolves), de lo contrario kafkajs reintentaría infinito.
       await expect(svc.assignFromDispatch('trip-1', 'drv-9')).resolves.toBeUndefined();
       expect(prisma._store?.status).toBe(status); // el viaje muerto NO cambió de estado
@@ -690,7 +703,7 @@ describe('TripsService · BR-T02 guardas de transición', () => {
 
   it('N10: assignFromDispatch sobre un viaje ACTIVO (REQUESTED) → SÍ asigna — contraste', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.assignFromDispatch('trip-1', 'drv-9');
     expect(prisma._store?.status).toBe(TripStatus.ASSIGNED);
     expect(prisma._store?.driverId).toBe('drv-9');
@@ -699,7 +712,7 @@ describe('TripsService · BR-T02 guardas de transición', () => {
 
   it('getTrip inexistente → NotFoundError', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripQueryService(prisma as never);
+    const svc = new TripQueryService(new TripQueryRepository(prisma as never));
     await expect(svc.getTrip('nope')).rejects.toBeInstanceOf(NotFoundError);
   });
 });
@@ -718,7 +731,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.acceptTrip('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(
       InvalidTripTransition,
     );
@@ -730,7 +743,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.arriving('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(
       InvalidTripTransition,
     );
@@ -741,7 +754,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.arrived('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(
       InvalidTripTransition,
     );
@@ -752,7 +765,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.start('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(
       InvalidTripTransition,
     );
@@ -763,7 +776,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.complete('trip-1', { driverId: DRV })).rejects.toBeInstanceOf(
       InvalidTripTransition,
     );
@@ -775,7 +788,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.COMPLETED, passengerId: 'pax-1', driverId: DRV }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.cancel('trip-1', { by: 'PASSENGER' }, userOf('pax-1'))).rejects.toBeInstanceOf(
       InvalidTripTransition,
     );
@@ -795,7 +808,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ACCEPTED, driverId: DRV, reassignCount: 3 }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel(
       'trip-1',
       { by: 'DRIVER', driverId: DRV, reason: 'x' },
@@ -815,7 +828,7 @@ describe('TripsService · BR-T02 CAS atómico — las 7 transiciones de usuario 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER, driverId: DRV, reassignCount: 3 }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(
       svc.cancel('trip-1', { by: 'DRIVER', driverId: DRV, reason: 'x' }, DRIVER_USER),
     ).rejects.toBeInstanceOf(InvalidTripTransition);
@@ -834,7 +847,7 @@ describe('TripsService.start · BR-T07 modo niño', () => {
         driverId: 'drv-1',
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.start('trip-1', { childCode: '1234' });
     expect(view.status).toBe(TripStatus.IN_PROGRESS);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.started')).toBe(true);
@@ -850,7 +863,7 @@ describe('TripsService.start · BR-T07 modo niño', () => {
         driverId: 'drv-1',
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.start('trip-1', { childCode: '9999' })).rejects.toBeInstanceOf(
       ValidationError,
     );
@@ -875,7 +888,7 @@ describe('TripsService.start · BR-T07 modo niño', () => {
         driverId: 'drv-1',
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(
       svc.start('trip-1', { childCode: '9999', driverId: 'drv-1' }),
     ).rejects.toBeInstanceOf(ValidationError);
@@ -909,7 +922,7 @@ describe('TripsService.start · BR-T07 modo niño', () => {
         driverId: 'd',
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.start('trip-1', {})).rejects.toBeInstanceOf(ValidationError);
   });
 
@@ -923,7 +936,7 @@ describe('TripsService.start · BR-T07 modo niño', () => {
         driverId: 'drv-1',
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(
       svc.start('trip-1', { childCode: '1234', driverId: 'drv-OTRO' }),
     ).rejects.toBeInstanceOf(NotFoundError);
@@ -941,7 +954,7 @@ describe('TripsService.start · BR-T07 modo niño', () => {
         driverId: 'drv-1',
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.start('trip-1', { childCode: '1234', driverId: 'drv-1' });
     expect(view.status).toBe(TripStatus.IN_PROGRESS);
   });
@@ -953,7 +966,7 @@ describe('TripsService.start · BR-T07 modo niño', () => {
 describe('TripsService · A1 anti-IDOR pre-recojo (accept/arriving/arrived)', () => {
   it('acceptTrip con driverId AJENO → 404 (no avanza el viaje de otro conductor)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.acceptTrip('trip-1', { driverId: 'drv-OTRO' })).rejects.toBeInstanceOf(
       NotFoundError,
     );
@@ -963,14 +976,14 @@ describe('TripsService · A1 anti-IDOR pre-recojo (accept/arriving/arrived)', ()
 
   it('acceptTrip con driverId PROPIO → ACCEPTED ok (contraste)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.acceptTrip('trip-1', { driverId: 'drv-1' });
     expect(view.status).toBe(TripStatus.ACCEPTED);
   });
 
   it('arriving con driverId AJENO → 404', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.arriving('trip-1', { driverId: 'drv-OTRO' })).rejects.toBeInstanceOf(
       NotFoundError,
     );
@@ -979,7 +992,7 @@ describe('TripsService · A1 anti-IDOR pre-recojo (accept/arriving/arrived)', ()
 
   it('arrived con driverId AJENO → 404', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ARRIVING, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.arrived('trip-1', { driverId: 'drv-OTRO' })).rejects.toBeInstanceOf(
       NotFoundError,
     );
@@ -997,8 +1010,8 @@ describe('TripsService.start · B · lockout anti-brute-force del código de mod
         driverId: 'drv-1',
       }),
     );
-    // constructor: (prisma, maps, config?, modeResolver?, redis?) — redis va 5º.
-    const svc = new TripsService(prisma as never, maps, undefined, undefined, redis as never);
+    // constructor (ADR 023): (prisma, maps, config?, redis?, dispatchModes?, catalog?, …) — redis va 4º.
+    const svc = new TripsService(new TripsRepository(prisma as never), maps, undefined, redis as never);
     return { prisma, svc };
   }
 
@@ -1079,19 +1092,166 @@ describe('TripsService.changeDestination · BR-T01 tarifa inmutable salvo cambio
       reverse: async () => null,
     };
     const prisma = makePrisma(buildTrip({ status: TripStatus.ACCEPTED, fareCents: 1500 }));
-    const svc = new TripsService(prisma as never, longRoute);
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute);
     const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
     // 600 + 120*10 + 30*20 = 600 + 1200 + 600 = 2400
     expect(view.fareCents).toBe(2400);
     expect(prisma._tripEvents.some((e) => e.eventType === 'trip.destination_changed')).toBe(true);
+    // Ruta canónica: el cambio de destino RE-PERSISTE polyline + distancia/duración en la MISMA
+    // operación que la tarifa (la ruta persistida nunca queda desincronizada del destino nuevo).
+    expect(prisma._store?.routePolyline).toBe('new');
+    expect(prisma._store?.distanceMeters).toBe(10000);
+    expect(prisma._store?.durationSeconds).toBe(1200);
   });
 
   it('no permite cambiar destino una vez IN_PROGRESS (tarifa inmutable)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.IN_PROGRESS }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(
       svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
     ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  // El re-quote del destino aplica la política de la oferta del viaje (multiplier + mínima).
+  const longRoute10k = {
+    route: async () => ({
+      distanceMeters: 10000,
+      durationSeconds: 1200,
+      polyline: 'new',
+      geometry: { type: 'LineString' as const, coordinates: [] },
+    }),
+  };
+
+  it('FIXED: re-cotiza con la política de la oferta, no resetea a la fórmula base (confort ×1.25 → 3000)', async () => {
+    // Confort (×1.25), ruta 10 km/20 min: servicio 2400 × 1.25 = 3000. SIN política, calculateFare base daba 2400.
+    const prisma = makePrisma(
+      buildTrip({
+        status: TripStatus.ACCEPTED,
+        dispatchMode: 'FIXED',
+        category: 'veo_confort',
+        fareCents: 3000,
+      }),
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(3000);
+  });
+
+  it('ADR-022 A3 · PUJA: cambiar destino NO cobra por DEBAJO del bid acordado (piso al fareCents)', async () => {
+    // PUJA con bid acordado 2600. Ruta 10 km/Económico ×1.0 → fórmula = 600 + 120·10 + 30·20 = 2400 (< bid).
+    // SIN el piso, changeDestination bajaba el cobro a 2400 (el pasajero pagaba menos que lo NEGOCIADO); con el
+    // piso A3 se mantiene 2600 (el conductor aceptó ese precio, no se regala plata reseteando hacia abajo).
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(2600);
+  });
+
+  it('ADR-022 changeDest · el audit trip.destination_changed graba el fareCents FLOOREADO (lo cobrado), no el recompute crudo', async () => {
+    // PUJA bid 2600, recompute 2400 (< bid) → se persiste/cobra 2600 (piso A3). El log append-only (Ley 29733)
+    // DEBE registrar 2600 y previousFareCents 2600 — antes grababa fare.cents crudo (2400) → el audit mentía
+    // ±S/2.00 en el caso que el piso protege.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    const event = prisma._tripEvents.find((e) => e.eventType === 'trip.destination_changed');
+    expect(event?.payload).toMatchObject({ fareCents: 2600, previousFareCents: 2600 });
+  });
+
+  it('RC5 · changeDestination PUBLICA trip.destination_changed al OUTBOX (antes solo grababa audit interno)', async () => {
+    // El bug: era el ÚNICO mutador significativo que NO emitía al outbox → la familia (share-service) nunca se
+    // enteraba y el destino de un menor se cambiaba en silencio. Ahora publica: notification alerta al guardián.
+    const prisma = makePrisma(
+      buildTrip({
+        status: TripStatus.ACCEPTED,
+        dispatchMode: 'FIXED',
+        fareCents: 2400,
+        childMode: true,
+        passengerId: 'guardian-1',
+      }),
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+
+    const emitted = prisma._outbox.find((e) => e.eventType === 'trip.destination_changed');
+    expect(emitted).toBeTruthy(); // se publicó al outbox (no solo el trip_event interno)
+    expect(emitted!.envelope.payload).toMatchObject({
+      tripId: 'trip-1',
+      passengerId: 'guardian-1',
+      childMode: true, // viaja para que notification priorice la alerta al guardián (seguridad del menor)
+    });
+  });
+
+  it('ADR-022 changeDest · re-cotiza con el pricing EFECTIVO del admin (overlay), no el catálogo de código', async () => {
+    // Económico base ×1.0 → 2400 (ruta 10km/20min). El admin subió el multiplier a ×1.5 por overlay →
+    // 2400 × 1.5 = 3600. SIN el fix, changeDestination usaba offering.pricing de código (×1.0) → 2400,
+    // incoherente con el create (que sí usa el overlay). El fix lo alinea vía resolveEffectiveOffering.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', fareCents: 2400 }),
+    );
+    const catalog = {
+      resolveOffering: async () => ({ enabled: true, pricing: { multiplier: 1.5, minFareCents: 500 } }),
+    } as never;
+    const svc = new TripsService(
+      new TripsRepository(prisma as never),
+      longRoute10k as never,
+      undefined, // config
+      undefined, // redis
+      undefined, // dispatchModes
+      catalog, // CatalogService (posición 6)
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(3600);
+  });
+
+  it('ADR-022 changeDest · una oferta DESHABILITADA por el admin NO rompe el cambio de destino (mid-viaje, enforceEnabled:false)', async () => {
+    // El create tira 409 si el admin deshabilitó la oferta; mid-viaje el viaje YA existe → el cambio de destino
+    // debe seguir andando con el pricing del overlay, sin gate de enabled.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'FIXED', fareCents: 2400 }),
+    );
+    const catalog = {
+      resolveOffering: async () => ({ enabled: false, pricing: { multiplier: 1.0, minFareCents: 500 } }),
+    } as never;
+    const svc = new TripsService(
+      new TripsRepository(prisma as never),
+      longRoute10k as never,
+      undefined, // config
+      undefined, // redis
+      undefined, // dispatchModes
+      catalog, // CatalogService (posición 6)
+    );
+    const view = await svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } });
+    expect(view.fareCents).toBe(2400); // no lanza; usa el pricing del overlay (×1.0 acá)
+  });
+
+  it('ADR-022 A3 · CAS: carrera que sacó el viaje de un estado editable → ConflictError reason=status_not_editable', async () => {
+    // El viaje era editable al leerse, pero entre el re-read in-tx y el write un start/cancel lo movió.
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+      { status: TripStatus.IN_PROGRESS },
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await expect(
+      svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
+    ).rejects.toMatchObject({ details: { reason: 'status_not_editable' } });
+  });
+
+  it('ADR-022 A3 · CAS: carrera de re-puja (fareCents cambió) → ConflictError reason=fare_changed (retryable), NO "estado actual"', async () => {
+    // El bid subió (re-puja aceptada) entre el re-read y el write: el CAS sobre fareCents falla. El caller debe
+    // poder distinguir esto (reintentar con el bid nuevo) de un estado no-editable (rendirse).
+    const prisma = makePrisma(
+      buildTrip({ status: TripStatus.ACCEPTED, dispatchMode: 'PUJA', fareCents: 2600 }),
+      { fareCents: 3000 }, // otro escritor subió el bid; el estado sigue editable
+    );
+    const svc = new TripsService(new TripsRepository(prisma as never), longRoute10k as never);
+    await expect(
+      svc.changeDestination('trip-1', { destination: { lat: -12.2, lon: -77.0 } }),
+    ).rejects.toMatchObject({ details: { reason: 'fare_changed', currentFareCents: 3000 } });
   });
 });
 
@@ -1106,7 +1266,7 @@ describe('TripsService.cancel · BR-T03', () => {
         durationSeconds: 3600,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel(
       'trip-1',
       { by: 'PASSENGER', reason: 'cambié de planes' },
@@ -1122,7 +1282,7 @@ describe('TripsService.cancel · BR-T03', () => {
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, assignedAt, driverId: 'drv-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'PASSENGER' }, userOf('pax-1'));
     expect(view.penaltyCents).toBe(0);
   });
@@ -1132,7 +1292,7 @@ describe('TripsService.cancel · BR-T03', () => {
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, passengerId: 'pax-1', driverId: 'drv-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(
       svc.cancel('trip-1', { by: 'PASSENGER', passengerId: 'pax-OTRO' }, userOf('pax-OTRO')),
     ).rejects.toBeInstanceOf(NotFoundError);
@@ -1143,7 +1303,7 @@ describe('TripsService.cancel · BR-T03', () => {
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, passengerId: 'pax-1', driverId: 'drv-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel(
       'trip-1',
       { by: 'PASSENGER', passengerId: 'pax-1' },
@@ -1156,7 +1316,7 @@ describe('TripsService.cancel · BR-T03', () => {
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, passengerId: 'pax-1', driverId: 'drv-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     // Antes, sin dto.passengerId el check se SALTEABA; ahora el dueño es la identidad firmada.
     await expect(
       svc.cancel('trip-1', { by: 'PASSENGER' }, userOf('pax-OTRO')),
@@ -1167,10 +1327,16 @@ describe('TripsService.cancel · BR-T03', () => {
 
 // ──────────────────────────── PUJA (ADR 010 · Lote C) ────────────────────────────
 
-describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2)', () => {
+describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2 · ADR 023)', () => {
+  // ADR 023: el modo vive POR OFERTA. Para probar la mecánica de la PUJA el catálogo pinea la oferta a PUJA
+  // (palanca manual del admin); sin catálogo la oferta nace FIXED y el bid se IGNORA.
+  const pujaCatalog = () => fakeCatalog({ mode: PricingMode.PUJA });
+  const pujaSvc = (prisma: unknown) =>
+    new TripsService(new TripsRepository(prisma as never), maps, undefined, undefined, undefined, pujaCatalog());
+
   it('rechaza un bid por debajo del piso global (ValidationError)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     // piso default S/7 = 700; bid 500 < 700 → rechazo
     await expect(svc.createTrip({ ...baseCreateDto, bidCents: 500 })).rejects.toBeInstanceOf(
       ValidationError,
@@ -1180,7 +1346,7 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
 
   it('acepta un bid válido (≥ piso): fareCents = bid y emite trip.bid_posted (NO trip.requested)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900, vehicleType: 'MOTO' });
     expect(view.status).toBe(TripStatus.REQUESTED);
     expect(view.fareCents).toBe(900); // el bid manda, NO la tarifa por ruta (1500)
@@ -1196,13 +1362,13 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
     expect(payload.windowSec).toBe(60); // default §9.1
     // El camino de puja NO emite el legacy trip.requested (no doble-dispatch).
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(false);
-    // ADR 011 M1: con bid ⇒ dispatchMode PUJA persistido en la fila.
+    // ADR 023: oferta PUJA ⇒ dispatchMode PUJA persistido en la fila.
     expect(prisma._store?.dispatchMode).toBe('PUJA');
   });
 
   it('bid exactamente en el piso (700) es válido', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 700 });
     expect(view.fareCents).toBe(700);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
@@ -1210,7 +1376,7 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
 
   it('rechaza un bid por encima del techo (ValidationError, gate AUTORITATIVO anti-overflow int4)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     // techo default BID_MAX_CENTS = 999_900; un bid desbocado overflowearía el int4 de fareCents.
     await expect(
       svc.createTrip({ ...baseCreateDto, bidCents: 9_999_999_999 }),
@@ -1220,15 +1386,15 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
 
   it('bid exactamente en el techo (999_900) es válido', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = pujaSvc(prisma);
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 999_900 });
     expect(view.fareCents).toBe(999_900);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
   });
 
-  it('sin bid → flujo legacy (tarifa por ruta) emite trip.requested', async () => {
+  it('oferta FIXED (default de código) → tarifa por ruta y emite trip.requested (ignora el bid)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.createTrip({ ...baseCreateDto });
     expect(view.fareCents).toBe(1500);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
@@ -1236,13 +1402,15 @@ describe('TripsService.createTrip · PUJA · el bid es el fareCents (ADR 010 §2
   });
 });
 
-// ──────────────────────── ADR 011 · createTrip server-resolved (ModeResolver) ────────────────────────
+// ──────────────── ADR 023 · createTrip · el modo lo resuelve la OFERTA (no el cliente) ────────────────
 
-describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no el cliente)', () => {
-  it('mode=PUJA REQUIERE bidCents: si falta → 400 "falta tu oferta"', async () => {
+describe('TripsService.createTrip · ADR 023 · el modo lo resuelve la OFERTA (no el cliente)', () => {
+  const pujaCatalog = () => fakeCatalog({ mode: PricingMode.PUJA });
+
+  it('oferta PUJA REQUIERE bidCents: si falta → 400 "falta tu oferta"', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
-    // El resolver fuerza PUJA pero el cliente NO mandó bid → ValidationError (HTTP 400).
+    const svc = new TripsService(new TripsRepository(prisma as never), maps, undefined, undefined, undefined, pujaCatalog());
+    // La oferta es PUJA pero el cliente NO mandó bid → ValidationError (HTTP 400).
     await expect(svc.createTrip({ ...baseCreateDto })).rejects.toMatchObject({
       httpStatus: 400,
       message: 'falta tu oferta',
@@ -1250,9 +1418,9 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
     expect(prisma._outbox).toHaveLength(0); // no se creó nada
   });
 
-  it('mode=PUJA con bidCents → emite trip.bid_posted y persiste dispatchMode PUJA', async () => {
+  it('oferta PUJA con bidCents → emite trip.bid_posted y persiste dispatchMode PUJA', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    const svc = new TripsService(new TripsRepository(prisma as never), maps, undefined, undefined, undefined, pujaCatalog());
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
     expect(view.fareCents).toBe(900);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
@@ -1260,10 +1428,10 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
     expect(prisma._store?.dispatchMode).toBe('PUJA');
   });
 
-  it('mode=FIXED IGNORA bidCents, usa calculateFare y emite trip.requested (dispatchMode FIXED)', async () => {
+  it('oferta FIXED IGNORA bidCents, usa calculateFare y emite trip.requested (dispatchMode FIXED)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
-    // El cliente manda un bid, pero el SERVIDOR resolvió FIXED → se IGNORA el bid; tarifa por ruta (1500).
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    // El cliente manda un bid, pero la oferta es FIXED → se IGNORA el bid; tarifa por ruta (1500).
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
     expect(view.fareCents).toBe(1500); // calculateFare, NO el bid de 900
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
@@ -1272,75 +1440,25 @@ describe('TripsService.createTrip · ADR 011 · el SERVIDOR resuelve el modo (no
   });
 
   // S1 (M5) — el modo CONGELADO viaja en la TripView (createTrip + getTrip) para que la app reconcilie.
-  it('S1: la vista de createTrip expone dispatchMode = PUJA (server-resolved)', async () => {
+  it('S1: la vista de createTrip expone dispatchMode = PUJA (oferta PUJA)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    const svc = new TripsService(new TripsRepository(prisma as never), maps, undefined, undefined, undefined, pujaCatalog());
     const view = await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
     expect(view.dispatchMode).toBe('PUJA');
   });
 
-  it('S1: la vista de createTrip expone dispatchMode = FIXED (server-resolved)', async () => {
+  it('S1: la vista de createTrip expone dispatchMode = FIXED (oferta FIXED)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.createTrip({ ...baseCreateDto });
     expect(view.dispatchMode).toBe('FIXED');
   });
 
   it('S1: getTrip también expone el dispatchMode congelado del viaje', async () => {
     const prisma = makePrisma(buildTrip({ dispatchMode: 'FIXED' }));
-    const svc = new TripQueryService(prisma as never);
+    const svc = new TripQueryService(new TripQueryRepository(prisma as never));
     const view = await svc.getTrip('trip-1');
     expect(view.dispatchMode).toBe('FIXED');
-  });
-});
-
-describe('TripsService.createTrip · ADR 011 · S2 · resuelve para la hora de RECOJO (lock-at-booking)', () => {
-  /**
-   * S2 — doble del ModeResolver que CAPTURA el instante `at` con el que createTrip lo invoca, y que puede
-   * devolver modos distintos según la hora (now vs pickup) para probar que se usa la hora de RECOJO.
-   */
-  function capturingResolver(modeByAt: (at: Date) => 'PUJA' | 'FIXED') {
-    const calls: Date[] = [];
-    const resolver = {
-      resolve: async (_zone: 'GLOBAL', at: Date) => {
-        calls.push(at);
-        return modeByAt(at);
-      },
-    } as never;
-    return { resolver, calls };
-  }
-
-  it('un viaje programado resuelve con scheduledFor (pickup), NO con now', async () => {
-    // Schedule simulado: a las 14:00 (now) sería PUJA, pero a las 22:00 (recojo) es FIXED. El viaje debe
-    // congelarse FIXED (la política de la HORA de recojo, lo que el pasajero vio en el quote).
-    const PICKUP = new Date(Date.now() + 6 * 60 * 60 * 1000); // +6h, dentro de la ventana de reserva
-    const { resolver, calls } = capturingResolver((at) =>
-      at.getTime() >= PICKUP.getTime() - 60_000 ? 'FIXED' : 'PUJA',
-    );
-    const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, resolver);
-
-    const view = await svc.createTrip({ ...baseCreateDto, scheduledFor: PICKUP.toISOString() });
-
-    // Se resolvió con la hora de RECOJO (no now): el resolver recibió ~PICKUP.
-    expect(calls).toHaveLength(1);
-    expect(Math.abs(calls[0]!.getTime() - PICKUP.getTime())).toBeLessThan(2000);
-    // Y el modo congelado refleja la política del recojo (FIXED), no la de now (PUJA).
-    expect(view.dispatchMode).toBe('FIXED');
-    expect(prisma._store?.dispatchMode).toBe('FIXED');
-    expect(view.status).toBe(TripStatus.SCHEDULED);
-  });
-
-  it('un viaje INMEDIATO (sin scheduledFor) resuelve con now (sin cambio de comportamiento)', async () => {
-    const { resolver, calls } = capturingResolver(() => 'PUJA');
-    const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, resolver);
-    const before = Date.now();
-    await svc.createTrip({ ...baseCreateDto, bidCents: 900 });
-    expect(calls).toHaveLength(1);
-    // Sin reserva → at ≈ now.
-    expect(calls[0]!.getTime()).toBeGreaterThanOrEqual(before - 1000);
-    expect(calls[0]!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
   });
 });
 
@@ -1349,7 +1467,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, fareCents: 900, driverId: 'drv-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.applyAgreedFare('trip-1', 1100, 1); // COUNTER aceptado
     expect(prisma._store?.fareCents).toBe(1100);
     // El agreed-fare queda registrado para el guard idempotente-por-evento (N7).
@@ -1362,7 +1480,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, fareCents: 900, agreedFareCents: 900 }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.applyAgreedFare('trip-1', 900, 1);
     expect(prisma._tripEvents).toHaveLength(0);
     expect(prisma._store?.fareCents).toBe(900);
@@ -1380,7 +1498,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
         driverId: 'drv-1',
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.applyAgreedFare('trip-1', 900, 1); // redelivery del precio viejo
     // La tarifa recalculada por changeDestination se mantiene; NO se revierte ni se emite fare_agreed.
     expect(prisma._store?.fareCents).toBe(1200);
@@ -1393,7 +1511,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, fareCents: 900, agreedFareCents: null }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.applyAgreedFare('trip-1', 900, 1);
     expect(prisma._store?.agreedFareCents).toBe(900);
     expect(prisma._tripEvents.some((e) => e.eventType === 'trip.fare_agreed')).toBe(true);
@@ -1403,7 +1521,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ASSIGNED, fareCents: 900, driverId: 'drv-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.applyAgreedFare('trip-1', 9_999_999_999, 1)).rejects.toBeInstanceOf(
       ValidationError,
     );
@@ -1423,7 +1541,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
       TripStatus.COMPLETED,
     ]) {
       const prisma = makePrisma(buildTrip({ status, fareCents: 1500, agreedFareCents: null }));
-      const svc = new TripsService(prisma as never, maps);
+      const svc = new TripsService(new TripsRepository(prisma as never), maps);
       await svc.applyAgreedFare('trip-1', 900, 1);
       expect(prisma._store?.fareCents).toBe(1500); // NO se escribió la tarifa acordada
       expect(prisma._store?.agreedFareCents).toBeNull(); // NO se marcó el agreed-fare
@@ -1435,7 +1553,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ACCEPTED, fareCents: 1500, agreedFareCents: null }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.applyAgreedFare('trip-1', 900, 1);
     expect(prisma._store?.fareCents).toBe(900);
     expect(prisma._store?.agreedFareCents).toBe(900);
@@ -1446,7 +1564,7 @@ describe('TripsService.applyAgreedFare · dispatch.offer_accepted (ADR 010 §4)'
 describe('TripsService.expireFromNoOffers · dispatch.no_offers → EXPIRED (ADR 010 §4/§5)', () => {
   it('transiciona REQUESTED → EXPIRED y emite trip.expired', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.expireFromNoOffers('trip-1', 'window_expired');
     expect(prisma._store?.status).toBe(TripStatus.EXPIRED);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(true);
@@ -1454,7 +1572,7 @@ describe('TripsService.expireFromNoOffers · dispatch.no_offers → EXPIRED (ADR
 
   it('transiciona REASSIGNING → EXPIRED (re-puja sin ofertas)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REASSIGNING }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.expireFromNoOffers('trip-1', 'all_lapsed');
     expect(prisma._store?.status).toBe(TripStatus.EXPIRED);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.expired')).toBe(true);
@@ -1462,7 +1580,7 @@ describe('TripsService.expireFromNoOffers · dispatch.no_offers → EXPIRED (ADR
 
   it('no-op idempotente si la puja ya cerró (p.ej. ya ASSIGNED)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.expireFromNoOffers('trip-1', 'window_expired');
     expect(prisma._store?.status).toBe(TripStatus.ASSIGNED);
     expect(prisma._outbox).toHaveLength(0);
@@ -1472,7 +1590,7 @@ describe('TripsService.expireFromNoOffers · dispatch.no_offers → EXPIRED (ADR
 describe('TripsService.cancelFromBid · dispatch.bid_cancelled → CANCELLED_BY_PASSENGER (FIX cancel-puja)', () => {
   it('transiciona REQUESTED → CANCELLED_BY_PASSENGER + emite trip.cancelled (by PASSENGER, sin penalidad)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REQUESTED }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.cancelFromBid('trip-1');
     expect(prisma._store?.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
     expect(prisma._store?.penaltyCents).toBe(0);
@@ -1490,7 +1608,7 @@ describe('TripsService.cancelFromBid · dispatch.bid_cancelled → CANCELLED_BY_
 
   it('transiciona REASSIGNING → CANCELLED_BY_PASSENGER (el pasajero se rinde durante el re-match)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.REASSIGNING, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.cancelFromBid('trip-1');
     expect(prisma._store?.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(true);
@@ -1498,7 +1616,7 @@ describe('TripsService.cancelFromBid · dispatch.bid_cancelled → CANCELLED_BY_
 
   it('no-op idempotente si el viaje ya está terminal (ya CANCELLED_BY_PASSENGER) — cancel repetido', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.CANCELLED_BY_PASSENGER }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.cancelFromBid('trip-1');
     expect(prisma._store?.status).toBe(TripStatus.CANCELLED_BY_PASSENGER);
     expect(prisma._outbox).toHaveLength(0);
@@ -1506,7 +1624,7 @@ describe('TripsService.cancelFromBid · dispatch.bid_cancelled → CANCELLED_BY_
 
   it('no-op idempotente si la puja ya avanzó a match (ASSIGNED): no pisa el viaje', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.cancelFromBid('trip-1');
     expect(prisma._store?.status).toBe(TripStatus.ASSIGNED);
     expect(prisma._outbox).toHaveLength(0);
@@ -1514,7 +1632,7 @@ describe('TripsService.cancelFromBid · dispatch.bid_cancelled → CANCELLED_BY_
 
   it('no-op si el viaje no existe (board evaporado de un trip inexistente)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.cancelFromBid('trip-x');
     expect(prisma._outbox).toHaveLength(0);
   });
@@ -1533,7 +1651,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
         fareCents: 900,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel(
       'trip-1',
       { by: 'DRIVER', reason: 'se me pinchó la llanta' },
@@ -1570,7 +1688,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ARRIVING, driverId: 'drv-2', reassignCount: 1 }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
     expect(prisma._store?.reassignCount).toBe(2);
@@ -1585,7 +1703,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
         reassignCount: 3,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     // 4 > 3 → NO re-puja: cae a terminal honesto FAILED.
     expect(view.status).toBe(TripStatus.FAILED);
@@ -1604,14 +1722,14 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
 
   it('cancel del CONDUCTOR desde ARRIVED → REASSIGNING', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ARRIVED, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
   });
 
   it('cancel del CONDUCTOR desde ASSIGNED (pre-accept) sigue siendo terminal CANCELLED_BY_DRIVER', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.ASSIGNED, driverId: 'drv-1' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.CANCELLED_BY_DRIVER);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.cancelled')).toBe(true);
@@ -1619,7 +1737,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
   });
 
   // ADR 011 §1.2/§4 · la reasignación respeta el dispatchMode CONGELADO del viaje (no re-resuelve).
-  it('FIXED · driver cancela post-accept → REASSIGNING + emite trip.requested (NO trip.reassigning)', async () => {
+  it('FIXED · driver cancela post-accept → REASSIGNING + trip.requested + trip.reassigning (dispatchMode FIXED, libera al conductor)', async () => {
     const prisma = makePrisma(
       buildTrip({
         status: TripStatus.ACCEPTED,
@@ -1628,12 +1746,20 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
         fareCents: 1500,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
-    // FIXED re-despacha el flujo de tarifa fija: trip.requested, NO la puja (trip.reassigning).
+    // FIXED re-despacha por trip.requested (matching secuencial) Y emite trip.reassigning con
+    // dispatchMode FIXED — el evento transversal que LIBERA al conductor cancelador (identity
+    // ON_TRIP→AVAILABLE + hot-index) SIN que dispatch re-abra un board de puja (lo gatea el modo).
+    // Sin él (seam roto original) el conductor quedaba ON_TRIP para siempre tras cancelar un FIJO.
     expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.reassigning')).toBe(false);
+    const reassigning = prisma._outbox.find((e) => e.eventType === 'trip.reassigning');
+    expect(reassigning?.envelope.payload).toMatchObject({
+      driverId: 'drv-1',
+      dispatchMode: 'FIXED',
+      reason: 'driver_cancelled',
+    });
     // El conductor que canceló se desvincula para el re-match.
     expect(prisma._store?.driverId).toBeNull();
     // La tarifa fija NO cambia (BR-T01 inmutable).
@@ -1650,7 +1776,7 @@ describe('TripsService.cancel · PUJA · conductor cancela post-accept → REASS
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-1', dispatchMode: 'PUJA' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
     expect(view.status).toBe(TripStatus.REASSIGNING);
     expect(prisma._outbox.some((e) => e.eventType === 'trip.reassigning')).toBe(true);
@@ -1671,7 +1797,7 @@ describe('TripsService.rebid · RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4)', 
         reassignCount: 2,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.rebid('trip-1', PAX, 1500);
     expect(view.status).toBe(TripStatus.REQUESTED);
     expect(view.fareCents).toBe(1500);
@@ -1692,7 +1818,7 @@ describe('TripsService.rebid · RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4)', 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.EXPIRED, passengerId: PAX, fareCents: 800 }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.rebid('trip-1', PAX, 1100);
     expect(view.status).toBe(TripStatus.REQUESTED);
     expect(view.fareCents).toBe(1100);
@@ -1703,7 +1829,7 @@ describe('TripsService.rebid · RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4)', 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.EXPIRED, passengerId: PAX, fareCents: 2000 }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     // bid MENOR al anterior pero ≥ piso (700 default): se acepta.
     const view = await svc.rebid('trip-1', PAX, 750);
     expect(view.status).toBe(TripStatus.REQUESTED);
@@ -1714,7 +1840,7 @@ describe('TripsService.rebid · RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4)', 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.IN_PROGRESS, passengerId: PAX, driverId: 'drv-1' }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.rebid('trip-1', PAX, 1500)).rejects.toBeInstanceOf(ConflictError);
     expect(prisma._outbox).toHaveLength(0);
     expect(prisma._store?.status).toBe(TripStatus.IN_PROGRESS);
@@ -1722,33 +1848,33 @@ describe('TripsService.rebid · RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4)', 
 
   it('rebid desde un estado terminal (COMPLETED) → ConflictError', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.COMPLETED, passengerId: PAX }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.rebid('trip-1', PAX, 1500)).rejects.toBeInstanceOf(ConflictError);
   });
 
   it('rebid por DEBAJO del piso → ValidationError (no emite eventos)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.EXPIRED, passengerId: PAX }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.rebid('trip-1', PAX, 100)).rejects.toBeInstanceOf(ValidationError);
     expect(prisma._outbox).toHaveLength(0);
   });
 
   it('rebid por ENCIMA del techo (BID_MAX_CENTS) → ValidationError', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.EXPIRED, passengerId: PAX }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.rebid('trip-1', PAX, 999_999_999)).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('rebid de un viaje AJENO → NotFoundError (no se filtra existencia ajena, ownership server-side)', async () => {
     const prisma = makePrisma(buildTrip({ status: TripStatus.EXPIRED, passengerId: 'otro-pax' }));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.rebid('trip-1', PAX, 1500)).rejects.toBeInstanceOf(NotFoundError);
     expect(prisma._outbox).toHaveLength(0);
   });
 
   it('rebid de un viaje inexistente → NotFoundError', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(svc.rebid('trip-1', PAX, 1500)).rejects.toBeInstanceOf(NotFoundError);
   });
 
@@ -1758,7 +1884,7 @@ describe('TripsService.rebid · RE-PUJA del pasajero (ADR 010 #4/#12 · H6.4)', 
     const prisma = makePrisma(
       buildTrip({ status: TripStatus.EXPIRED, passengerId: PAX, fareCents: 1500 }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
 
     // 1er tap: gana, abre board fresco.
     const first = await svc.rebid('trip-1', PAX, 1500);
@@ -1790,7 +1916,7 @@ describe('TripsService · H12 · re-negociación NO descarta la tarifa recién a
         reassignCount: 0,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
 
     // Driver cancela post-accept → REASSIGNING. La re-negociación RESETEA el guard once-ever Y bumpea el ciclo.
     const view = await svc.cancel(
@@ -1836,7 +1962,7 @@ describe('TripsService · H12 · re-negociación NO descarta la tarifa recién a
         reassignCount: 0,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
 
     // 1) driver cancela → REASSIGNING (guard reseteado + ciclo 1 → 2 por la reasignación automática).
     await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
@@ -1878,7 +2004,7 @@ describe('TripsService · H12 · re-negociación NO descarta la tarifa recién a
         agreedFareCents: null,
       }),
     );
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
 
     await svc.applyAgreedFare('trip-1', 900, 1); // 1ª aplicación: marca agreedFareCents=900
     expect(prisma._store?.agreedFareCents).toBe(900);
@@ -1912,7 +2038,7 @@ describe('TripsService.complete · EFECTIVO (cashCollected propaga al evento)', 
 
   it('viaje CASH + cashCollected=true → el flag viaja en trip.completed (driver cobró en mano)', async () => {
     const prisma = makePrisma(inProgressCash());
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.complete('trip-1', { cashCollected: true });
     expect(view.status).toBe(TripStatus.COMPLETED);
     const payload = completedPayload(prisma);
@@ -1922,7 +2048,7 @@ describe('TripsService.complete · EFECTIVO (cashCollected propaga al evento)', 
 
   it('viaje CASH sin cashCollected → cashCollected ausente (undefined): flujo bilateral normal', async () => {
     const prisma = makePrisma(inProgressCash());
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.complete('trip-1'); // sin dto (default {})
     const payload = completedPayload(prisma);
     expect(payload?.paymentMethod).toBe('CASH');
@@ -1931,7 +2057,7 @@ describe('TripsService.complete · EFECTIVO (cashCollected propaga al evento)', 
 
   it('viaje DIGITAL (YAPE) ignora el flag: cashCollected NO viaja aunque se mande true', async () => {
     const prisma = makePrisma(inProgressCash(PaymentMethod.YAPE));
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await svc.complete('trip-1', { cashCollected: true });
     const payload = completedPayload(prisma);
     expect(payload?.paymentMethod).toBe('YAPE');
@@ -1940,11 +2066,34 @@ describe('TripsService.complete · EFECTIVO (cashCollected propaga al evento)', 
 
   it('anti-IDOR: un driverId que no es el del viaje → 404 (NotFoundError), no completa', async () => {
     const prisma = makePrisma(inProgressCash());
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(
       svc.complete('trip-1', { driverId: 'drv-OTRO', cashCollected: true }),
     ).rejects.toBeInstanceOf(NotFoundError);
     expect(prisma._store?.status).toBe(TripStatus.IN_PROGRESS); // sin transición
+  });
+});
+
+describe('TripsService.complete · MÉTRICAS (origen viaja en trip.completed → corte "Ingresos por distrito")', () => {
+  function inProgress() {
+    return buildTrip({ status: TripStatus.IN_PROGRESS, driverId: 'drv-1' });
+  }
+
+  /** Extrae el origen del payload trip.completed encolado (lat = originLat, lon = originLng en el evento). */
+  function completedGeo(prisma: ReturnType<typeof makePrisma>) {
+    const ev = prisma._outbox.find((e) => e.eventType === 'trip.completed');
+    return ev?.envelope.payload as { originLat?: number; originLng?: number } | undefined;
+  }
+
+  it('el ORIGEN del viaje (originLat + originLon→originLng) viaja en trip.completed → payment lo zonifica a distrito', async () => {
+    const prisma = makePrisma(inProgress());
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    await svc.complete('trip-1');
+    const payload = completedGeo(prisma);
+    // el trip persiste el origen como originLat/originLon; el evento expone la lat como originLat y la lon
+    // como originLng (buildTrip default: -12.0464 / -77.0428). SIN esto el corte por distrito queda vacío.
+    expect(payload?.originLat).toBe(-12.0464);
+    expect(payload?.originLng).toBe(-77.0428);
   });
 });
 
@@ -1953,7 +2102,7 @@ describe('TripsService.complete · EFECTIVO (cashCollected propaga al evento)', 
 describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedencia + pool + pricing)', () => {
   it('(a) category DESCONOCIDA → 400 UNKNOWN_OFFERING tipado; NO se crea nada (jamás default económico)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     await expect(
       svc.createTrip({ ...baseCreateDto, category: 'veo_fantasma' }),
     ).rejects.toMatchObject({
@@ -1966,7 +2115,7 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(b) category AUSENTE + vehicleType MOTO (cliente viejo) → resuelve veo_moto y SU pricing (825)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps); // sin resolver, sin bid ⇒ FIXED legacy
+    const svc = new TripsService(new TripsRepository(prisma as never), maps); // sin resolver, sin bid ⇒ FIXED legacy
     const view = await svc.createTrip({ ...baseCreateDto, vehicleType: 'MOTO' });
     // Pool del catálogo (no del dto suelto, aunque acá coinciden) + política REAL de moto:
     // base 1500 (5000m/600s) × 0.55 = 825 ≥ minFare 300. ANTES del fix cobraba 1500 (más que el quote).
@@ -1977,7 +2126,7 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(c) INCONSISTENCIA category veo_moto + vehicleType CAR → gana la OFERTA (pool MOTO) + warn', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const warnSpy = vi.spyOn(svc['logger'], 'warn');
     const view = await svc.createTrip({
       ...baseCreateDto,
@@ -1994,7 +2143,7 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(e) FIXED + veo_confort: la tarifa FIRME es ×1.25 → 1875 (= round(1500 × 1.25), mínima 500 no muerde)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_CONFORT });
     expect(view.fareCents).toBe(1875); // ANTES del fix: 1500 (cobraba la tarifa de económico)
     expect(prisma._store?.dispatchMode).toBe('FIXED');
@@ -2003,7 +2152,7 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(e) FIXED + veo_moto: ×0.55 con minFare 300 → 825 (moto DEJA de cobrar de más que su preview)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_MOTO });
     expect(view.fareCents).toBe(825); // max(round(1500 × 0.55), 300) — ANTES del fix: 1500
     expect(view.fareCents).toBeLessThan(1500);
@@ -2012,14 +2161,22 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
 
   it('(e) FIXED + veo_economico: ×1.0 → 1500 INVARIANTE (golden-path/pricing-switch no cambian de montos)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('FIXED'));
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
     const view = await svc.createTrip({ ...baseCreateDto, category: OfferingId.VEO_ECONOMICO });
     expect(view.fareCents).toBe(1500); // max(round(1500 × 1.0), 500) = 1500: cero regresión
   });
 
   it('PUJA + category premium: el bid sigue siendo la tarifa (la política NO toca el bid)', async () => {
     const prisma = makePrisma(null);
-    const svc = new TripsService(prisma as never, maps, undefined, fakeResolver('PUJA'));
+    // ADR 023: la oferta confort está pineada a PUJA (palanca del admin) → el bid ES la tarifa.
+    const svc = new TripsService(
+      new TripsRepository(prisma as never),
+      maps,
+      undefined,
+      undefined,
+      undefined,
+      fakeCatalog({ mode: PricingMode.PUJA }),
+    );
     const view = await svc.createTrip({
       ...baseCreateDto,
       category: OfferingId.VEO_CONFORT,
@@ -2027,71 +2184,6 @@ describe('TripsService.createTrip · ADR 013 · oferta del catálogo (precedenci
     });
     expect(view.fareCents).toBe(900); // el bid ES la tarifa; el multiplier solo afecta el quote
     expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(true);
-  });
-});
-
-describe('TripsService.createTrip · ADR 013 §1.3.3 · conflicto de modo: la oferta veta al schedule', () => {
-  /**
-   * El catálogo REAL aún no tiene ofertas restringidas (las 4 permiten [PUJA, FIXED] → intersección
-   * no-op), así que el conflicto se testea por el SEAM protected `resolveOffering` (subclase del spec
-   * inyecta una oferta solo-FIXED). NO se mockea el módulo del catálogo (vi.mock contaminaría TODOS los
-   * specs del archivo) ni se inventa una entrada fantasma en producción. La precedencia pura ya está
-   * cubierta por resolveOfferingMode (shared-types); acá se verifica el CABLEADO: modo efectivo
-   * persistido + warn + counter.
-   */
-  const SOLO_FIXED_OFFERING: OfferingSpec = {
-    ...OFFERINGS[OfferingId.VEO_ECONOMICO],
-    allowedModes: [PricingMode.FIXED], // fixture de oferta que NO negocia (estilo ambulancia futura)
-  };
-
-  class SoloFixedOfferingTripsService extends TripsService {
-    protected override resolveOffering(): TripOfferingResolution {
-      return { offering: SOLO_FIXED_OFFERING, mismatch: false };
-    }
-  }
-
-  /** Suma total del counter pricing_offering_mode_overridden_total (todas las labels). */
-  async function readOverriddenTotal(): Promise<number> {
-    const { values } = await offeringModeOverriddenTotal.get();
-    return values.reduce((sum, v) => sum + v.value, 0);
-  }
-
-  it('(d) schedule pide PUJA pero la oferta solo permite FIXED → gana la oferta + warn + counter', async () => {
-    const prisma = makePrisma(null);
-    const svc = new SoloFixedOfferingTripsService(
-      prisma as never,
-      maps,
-      undefined,
-      fakeResolver('PUJA'),
-    );
-    const warnSpy = vi.spyOn(svc['logger'], 'warn');
-    const before = await readOverriddenTotal();
-
-    // Sin bid: el modo EFECTIVO es FIXED (preferido de la oferta) y FIXED no exige bid.
-    const view = await svc.createTrip({ ...baseCreateDto });
-
-    expect(view.dispatchMode).toBe('FIXED'); // allowedModes[0]: la oferta vetó el PUJA del schedule
-    expect(prisma._store?.dispatchMode).toBe('FIXED'); // persist-once intacto (Trip.dispatchMode)
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.requested')).toBe(true);
-    expect(prisma._outbox.some((e) => e.eventType === 'trip.bid_posted')).toBe(false);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('gana la oferta'));
-    expect(await readOverriddenTotal()).toBe(before + 1); // pricing_offering_mode_overridden_total++
-  });
-
-  it('sin conflicto (schedule FIXED ∈ allowedModes) → NO hay warn ni counter (no-op de la intersección)', async () => {
-    const prisma = makePrisma(null);
-    const svc = new SoloFixedOfferingTripsService(
-      prisma as never,
-      maps,
-      undefined,
-      fakeResolver('FIXED'),
-    );
-    const warnSpy = vi.spyOn(svc['logger'], 'warn');
-    const before = await readOverriddenTotal();
-    const view = await svc.createTrip({ ...baseCreateDto });
-    expect(view.dispatchMode).toBe('FIXED');
-    expect(warnSpy).not.toHaveBeenCalled();
-    expect(await readOverriddenTotal()).toBe(before); // sin override no se bumpea
   });
 });
 
@@ -2167,7 +2259,7 @@ describe('CONTRATO producer↔schema · parametrizado POR CLASE (gap 3 de la pru
       const prisma = makePrisma(
         buildTrip({ status: TripStatus.ACCEPTED, driverId: 'drv-1', vehicleType: vehicleClass }),
       );
-      const svc = new TripsService(prisma as never, maps);
+      const svc = new TripsService(new TripsRepository(prisma as never), maps);
       await svc.cancel('trip-1', { by: 'DRIVER' }, DRIVER_USER);
       const event = prisma._outbox.find((e) => e.eventType === 'trip.reassigning');
       expect(event).toBeTruthy();
@@ -2177,4 +2269,58 @@ describe('CONTRATO producer↔schema · parametrizado POR CLASE (gap 3 de la pru
       expect((event!.envelope.payload as { vehicleType?: string }).vehicleType).toBe(vehicleClass);
     },
   );
+});
+
+describe('TripsService.reassignForDriverOffline · Fase B (ADR-021 B1)', () => {
+  /** Prisma mínimo que expone read.trip.findFirst (capturando el where) + los stubs que toca la reasignación. */
+  function makeOfflinePrisma(found: Trip | null) {
+    const calls: { where?: unknown }[] = [];
+    const outbox: { eventType: string }[] = [];
+    const tx = {
+      trip: {
+        update: async ({ data }: { data: Record<string, unknown> }) => ({
+          ...(found as Trip),
+          ...data,
+        }),
+        findUniqueOrThrow: async () => found,
+      },
+      tripEvent: { create: async () => ({}) },
+      outboxEvent: {
+        create: async ({ data }: { data: { eventType: string } }) => {
+          outbox.push({ eventType: data.eventType });
+          return {};
+        },
+      },
+    };
+    const prisma = {
+      read: {
+        trip: {
+          findFirst: async (args: { where?: unknown }) => {
+            calls.push({ where: args?.where });
+            return found;
+          },
+        },
+      },
+      write: {
+        $transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
+      },
+      _calls: calls,
+      _outbox: outbox,
+    };
+    return prisma;
+  }
+
+  it('sin viaje pre-recojo del conductor (findFirst null) → NO-OP, no emite trip.reassigning', async () => {
+    const prisma = makeOfflinePrisma(null);
+    const svc = new TripsService(new TripsRepository(prisma as never), maps);
+    await expect(svc.reassignForDriverOffline('drv-9')).resolves.toBeUndefined();
+    // Consulta por driverId + estados POST-accept (ACCEPTED/ARRIVING/ARRIVED).
+    const where = prisma._calls[0]?.where as { driverId?: string; status?: { in?: string[] } };
+    expect(where.driverId).toBe('drv-9');
+    expect(where.status?.in).toEqual(
+      expect.arrayContaining([TripStatus.ACCEPTED, TripStatus.ARRIVING, TripStatus.ARRIVED]),
+    );
+    expect(where.status?.in).not.toContain(TripStatus.ASSIGNED); // ASSIGNED es Fase G, fuera de scope
+    expect(prisma._outbox).toHaveLength(0);
+  });
 });

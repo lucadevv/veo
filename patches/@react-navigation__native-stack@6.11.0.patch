@@ -1,0 +1,39 @@
+diff --git a/lib/commonjs/views/HeaderConfig.js b/lib/commonjs/views/HeaderConfig.js
+index b40820e880199045d5c022cb701647967a638dba..1c01527532a7c3755ef287da7e02de606e046825 100644
+--- a/lib/commonjs/views/HeaderConfig.js
++++ b/lib/commonjs/views/HeaderConfig.js
+@@ -131,7 +131,7 @@ function HeaderConfig(_ref) {
+     translucent:
+     // This defaults to `true`, so we can't pass `undefined`
+     translucent === true
+-  }, _reactNative.Platform.OS === 'ios' ? /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null ? /*#__PURE__*/React.createElement(_reactNativeScreens.ScreenStackHeaderLeftView, null, headerLeftElement) : null, headerTitleElement != null ? /*#__PURE__*/React.createElement(_reactNativeScreens.ScreenStackHeaderCenterView, null, headerTitleElement) : null) : /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null || typeof headerTitle === 'function' ? /*#__PURE__*/React.createElement(_reactNativeScreens.ScreenStackHeaderLeftView, null, /*#__PURE__*/React.createElement(_reactNative.View, {
++  }, _reactNative.Platform.OS === 'ios' ? /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null ? /*#__PURE__*/React.createElement(_reactNativeScreens.ScreenStackHeaderLeftView, { hidesSharedBackground: true }, headerLeftElement) : null, headerTitleElement != null ? /*#__PURE__*/React.createElement(_reactNativeScreens.ScreenStackHeaderCenterView, null, headerTitleElement) : null) : /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null || typeof headerTitle === 'function' ? /*#__PURE__*/React.createElement(_reactNativeScreens.ScreenStackHeaderLeftView, null, /*#__PURE__*/React.createElement(_reactNative.View, {
+     style: styles.row
+   }, headerLeftElement, headerTitleAlign !== 'center' ? typeof headerTitle === 'function' ? headerTitleElement : /*#__PURE__*/React.createElement(_elements.HeaderTitle, {
+     tintColor: tintColor,
+diff --git a/lib/module/views/HeaderConfig.js b/lib/module/views/HeaderConfig.js
+index 2e6f73467e59344a55b1729d7bcf6f40b167d699..2cbba320134531a82901e0e7174b4effc715b678 100644
+--- a/lib/module/views/HeaderConfig.js
++++ b/lib/module/views/HeaderConfig.js
+@@ -123,7 +123,7 @@ export default function HeaderConfig(_ref) {
+     translucent:
+     // This defaults to `true`, so we can't pass `undefined`
+     translucent === true
+-  }, Platform.OS === 'ios' ? /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null ? /*#__PURE__*/React.createElement(ScreenStackHeaderLeftView, null, headerLeftElement) : null, headerTitleElement != null ? /*#__PURE__*/React.createElement(ScreenStackHeaderCenterView, null, headerTitleElement) : null) : /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null || typeof headerTitle === 'function' ? /*#__PURE__*/React.createElement(ScreenStackHeaderLeftView, null, /*#__PURE__*/React.createElement(View, {
++  }, Platform.OS === 'ios' ? /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null ? /*#__PURE__*/React.createElement(ScreenStackHeaderLeftView, { hidesSharedBackground: true }, headerLeftElement) : null, headerTitleElement != null ? /*#__PURE__*/React.createElement(ScreenStackHeaderCenterView, null, headerTitleElement) : null) : /*#__PURE__*/React.createElement(React.Fragment, null, headerLeftElement != null || typeof headerTitle === 'function' ? /*#__PURE__*/React.createElement(ScreenStackHeaderLeftView, null, /*#__PURE__*/React.createElement(View, {
+     style: styles.row
+   }, headerLeftElement, headerTitleAlign !== 'center' ? typeof headerTitle === 'function' ? headerTitleElement : /*#__PURE__*/React.createElement(HeaderTitle, {
+     tintColor: tintColor,
+diff --git a/src/views/HeaderConfig.tsx b/src/views/HeaderConfig.tsx
+index b868cc90230827ee04160100f25fe36e303d0bfa..1e2bfdddeb886b9983ed26775050bef2ae1382ff 100644
+--- a/src/views/HeaderConfig.tsx
++++ b/src/views/HeaderConfig.tsx
+@@ -196,7 +196,7 @@ export default function HeaderConfig({
+       {Platform.OS === 'ios' ? (
+         <>
+           {headerLeftElement != null ? (
+-            <ScreenStackHeaderLeftView>
++            <ScreenStackHeaderLeftView hidesSharedBackground>
+               {headerLeftElement}
+             </ScreenStackHeaderLeftView>
+           ) : null}

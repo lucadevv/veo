@@ -35,7 +35,14 @@ export interface RateLimitOptions {
  *  - identity: cooldown de reenvío 30s + maxAttempts por teléfono sobre el OTP en Redis (recurso).
  *  - BFF (acá): límite por IP+teléfono en el borde, antes de tocar identity (frena floods baratos).
  *
+ * Acepta UN límite o un ARREGLO de límites. Con varios, el guard los aplica TODOS en la misma request
+ * (cada uno su cubo independiente) y bloquea si CUALQUIERA excede (AND lógico). Esto permite limitar
+ * por dos dimensiones a la vez — ej. OTP: un cap fino por IP+teléfono Y un cap AGREGADO por-IP sobre
+ * el total de teléfonos (anti SMS-bombing fan-out, FIX A).
+ *
  * Ej: `@RateLimit({ max: 5, windowMs: 600_000, by: ['ip', 'phone'] })` → 5 cada 10min por IP+teléfono.
+ * Ej: `@RateLimit([{ max: 5, ..., by: ['ip','phone'] }, { max: 20, ..., by: ['ip'] }])` → ambos a la vez.
  */
-export const RateLimit = (options: RateLimitOptions): MethodDecorator & ClassDecorator =>
-  SetMetadata(RATE_LIMIT_KEY, options);
+export const RateLimit = (
+  options: RateLimitOptions | RateLimitOptions[],
+): MethodDecorator & ClassDecorator => SetMetadata(RATE_LIMIT_KEY, options);

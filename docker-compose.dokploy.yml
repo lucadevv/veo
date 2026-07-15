@@ -1,0 +1,156 @@
+# =============================================================
+# VEO · Compose para DOKPLOY (provider: Git) — SIN SECRETOS.
+# -------------------------------------------------------------
+# Dokploy clona este repo (rama develop) y levanta este archivo. Los secretos
+# NO viven acá: se definen en la pestaña Environment del servicio Compose en
+# Dokploy y entran por interpolación ${VAR} (fail-fast con :? si faltan).
+#
+# JWT ES256 (PEM multilínea): los editores de env tipo dotenv no soportan
+# multilínea → se pasan en BASE64 (una línea) y el contenedor los decodifica
+# al arrancar (wrapper sh en el command). Generarlos:
+#   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 | base64
+#
+# Alcance actual: identity-service (prueba vertical). Se irá ampliando
+# servicio por servicio hasta cubrir los 18 (misma receta: build desde su
+# Dockerfile + migrate one-shot + env por ${VARS}).
+#
+# Local (Mac): Dokploy corre en la VM colima `dokploy`; el deploy se dispara
+# con el botón Deploy (GitHub no puede webhookear a localhost). En el VPS
+# (staging/prod) el webhook de GitHub lo hace automático en cada push.
+# =============================================================
+name: veo-dokploy
+
+x-net: &net
+  networks: [veo-net]
+
+configs:
+  pg_init:
+    content: |
+      CREATE EXTENSION IF NOT EXISTS postgis;
+      CREATE EXTENSION IF NOT EXISTS pgcrypto;
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+      CREATE SCHEMA IF NOT EXISTS identity;
+      GRANT ALL ON SCHEMA identity TO veo;
+
+services:
+  # ── INFRA ──
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: veo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definir en Environment de Dokploy}
+      POSTGRES_DB: veo
+    configs:
+      - source: pg_init
+        target: /docker-entrypoint-initdb.d/init.sql
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+    <<: *net
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 192mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    restart: unless-stopped
+    <<: *net
+
+  kafka:
+    image: apache/kafka:3.9.0
+    environment:
+      KAFKA_NODE_ID: 0
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    mem_limit: 1g
+    restart: unless-stopped
+    <<: *net
+
+  # ── IDENTITY ──
+  # Migraciones one-shot con retry (postgres da P1001 durante su primer init:
+  # el healthcheck pasa en localhost antes de que el listener de red acepte).
+  identity-migrate:
+    build:
+      context: .
+      dockerfile: services/identity-service/Dockerfile
+    entrypoint:
+      [
+        "sh",
+        "-c",
+        "for i in $$(seq 1 40); do npx prisma migrate deploy && exit 0; echo waiting-for-db $$i; sleep 2; done; exit 1",
+      ]
+    environment:
+      DATABASE_URL: postgresql://veo:${POSTGRES_PASSWORD:?}@postgres:5432/veo?schema=identity
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+    <<: *net
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: services/identity-service/Dockerfile
+    # Wrapper: decodifica los PEM base64 → env real y arranca. $$ = escape de
+    # compose para que el $ le llegue al shell del contenedor.
+    command:
+      [
+        "sh",
+        "-c",
+        'export JWT_PRIVATE_KEY_PEM="$$(printf %s "$$JWT_PRIVATE_KEY_PEM_B64" | base64 -d)" JWT_PUBLIC_KEY_PEM="$$(printf %s "$$JWT_PUBLIC_KEY_PEM_B64" | base64 -d)"; exec node dist/main.js',
+      ]
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: postgresql://veo:${POSTGRES_PASSWORD:?}@postgres:5432/veo?schema=identity
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      ADMIN_WEB_URL: ${ADMIN_WEB_URL:-http://localhost:5001}
+      INTERNAL_IDENTITY_SECRET: ${INTERNAL_IDENTITY_SECRET:?}
+      DNI_HASH_SALT: ${DNI_HASH_SALT:?}
+      TOTP_ENC_KEY: ${TOTP_ENC_KEY:?}
+      DRIVER_DNI_ENC_KEY: ${DRIVER_DNI_ENC_KEY:?}
+      JWT_PRIVATE_KEY_PEM_B64: ${JWT_PRIVATE_KEY_PEM_B64:?}
+      JWT_PUBLIC_KEY_PEM_B64: ${JWT_PUBLIC_KEY_PEM_B64:?}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_started }
+      identity-migrate: { condition: service_completed_successfully }
+    ports:
+      - "3091:3001"
+    mem_limit: 384m
+    restart: unless-stopped
+    <<: *net
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+
+networks:
+  veo-net:
+    driver: bridge

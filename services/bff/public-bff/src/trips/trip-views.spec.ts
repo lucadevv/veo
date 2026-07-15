@@ -14,6 +14,24 @@ const driver: DriverReply = {
   suspendedAt: '',
   name: 'Khalid Ríos',
   rejectionReason: '',
+  licenseNumber: '',
+  kycStatus: '',
+  createdAt: '',
+  faceEnrolledAt: '',
+  lastVerifiedAt: '',
+  phone: '',
+  documentId: '12345678',
+  birthDate: '1990-01-15',
+  // Binding DNI↔selfie + licencia↔selfie + liveness PASIVO: defaults proto3 ('NOT_RUN'/0/"") = no corrido.
+  dniFaceMatchStatus: 'NOT_RUN',
+  dniFaceMatchScore: 0,
+  dniFaceMatchedAt: '',
+  licenseFaceMatchStatus: 'NOT_RUN',
+  licenseFaceMatchScore: 0,
+  licenseFaceMatchedAt: '',
+  faceSelfieKey: '',
+  livenessStatus: 'NOT_RUN',
+  livenessScore: 0,
 };
 
 const aggregate: AggregateReply = {
@@ -67,6 +85,9 @@ const trip: TripReply = {
     { lat: -12.048, lon: -77.043 },
     { lat: -12.049, lon: -77.046 },
   ],
+  specialRequests: [],
+  // Modo de despacho CONGELADO (resolve-once-persist, ADR-011); FIXED = tarifa fija, coherente con paymentMethod CASH.
+  dispatchMode: 'FIXED',
   found: true,
 };
 
@@ -123,6 +144,23 @@ describe('buildTripDetail', () => {
     expect(view.passengerClosedAt).toBeNull();
     // myRatingStars por defecto null (no enriquecido): la app aún no califica este viaje.
     expect(view.myRatingStars).toBeNull();
+    // Modo congelado (ADR-011): pasa a la vista para que la app rehidrate `activeTripMode`.
+    expect(view.dispatchMode).toBe('FIXED');
+  });
+
+  it('dispatchMode fuera de contrato → null (fail-safe: la app degrada a PUJA histórico)', () => {
+    const view = buildTripDetail({ ...trip, dispatchMode: '' }, null, null, null);
+    expect(view.dispatchMode).toBeNull();
+  });
+
+  it('vehicleType del trip (tier solicitado) pasa a la vista — la app pinta la moto como moto al rehidratar', () => {
+    const view = buildTripDetail({ ...trip, vehicleType: 'MOTO' }, null, null, null);
+    expect(view.vehicleType).toBe('MOTO');
+  });
+
+  it('vehicleType fuera de contrato o ausente (proto viejo) → null (fail-safe: la app degrada al auto)', () => {
+    expect(buildTripDetail({ ...trip, vehicleType: '' }, null, null, null).vehicleType).toBeNull();
+    expect(buildTripDetail(trip, null, null, null).vehicleType).toBeNull();
   });
 
   it('incluye myRatingStars cuando el pasajero ya calificó (enriquecido)', () => {

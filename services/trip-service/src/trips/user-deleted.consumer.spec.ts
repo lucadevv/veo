@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { Prisma } from '../generated/prisma';
 import { TripsService } from './trips.service';
+import { TripsRepository } from './trips.repository';
 import { UserDeletedConsumer } from './user-deleted.consumer';
 import type { EventEnvelope } from '@veo/events';
 
@@ -94,7 +95,7 @@ function makePrisma(rows: TripRow[]) {
 function makeService(rows: TripRow[]) {
   const { prisma, updateManyCalls, outbox } = makePrisma(rows);
   // El ctor real recibe (PrismaService, MapsClient); aquí solo ejercitamos la purga.
-  const service = new TripsService(prisma as never, {} as never);
+  const service = new TripsService(new TripsRepository(prisma as never), {} as never);
   return { service, updateManyCalls, outbox };
 }
 

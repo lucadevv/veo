@@ -3,11 +3,13 @@
  * capa de datos: describen el borrador del registro, el estado de cada documento y el estado
  * global de la solicitud que conmuta la navegación.
  */
-import { VehicleClass } from '@veo/shared-types';
+import { FleetDocumentStatus, FleetDocumentType, VehicleClass } from '@veo/shared-types';
 import type {
   AddDocumentRequest,
   DriverBiometricEnrollRequest,
   DriverBiometricEnrollResult,
+  DriverCheckDniRequest,
+  DriverCheckDniResult,
   DriverDocument,
   DriverDocumentSimpleStatus,
   DriverOnboardRequest,
@@ -39,6 +41,14 @@ export type BiometricEnrollInput = DriverBiometricEnrollRequest;
 export type BiometricEnrollResult = DriverBiometricEnrollResult;
 export type PersonalDataInput = DriverPersonalDataRequest;
 export type PersonalDataView = DriverPersonalData;
+/**
+ * Chequeo de unicidad del DNI (= driverCheckDniRequest / driverCheckDniResult · `POST /drivers/me/check-dni`).
+ * `CheckDniInput` lleva el `{ dni }` a chequear; `CheckDniResult` responde `{ exists }` = `true` si el DNI
+ * YA pertenece a OTRA cuenta de conductor (blind index `dni_hash`). El alta lo consulta ANTES de crear el
+ * driver + subir el DNI (Lote 1 · subida eager): si `exists`, corta con "DNI ya registrado" sin subir nada.
+ */
+export type CheckDniInput = DriverCheckDniRequest;
+export type CheckDniResult = DriverCheckDniResult;
 export type VehicleRegisterInput = RegisterVehicleRequest;
 export type VehicleView = DriverVehicleView;
 /** Modelo del catálogo curado que el conductor elige en el alta (= driverVehicleModelView · B5-2). */
@@ -74,7 +84,12 @@ export interface PersonalData {
  * etiqueta de presentación de ese modelo (para mostrar la elección y rehidratar). Vacíos hasta elegir.
  */
 export interface VehicleData {
-  type: VehicleType;
+  /**
+   * LOTE 1: el tipo se DERIVA de la categoría MTC de la tarjeta (fuente de verdad) o se elige a mano en el
+   * fallback. Arranca en `null` (NO hay "Auto" por omisión): el alta no asume tipo. Read-only en la pantalla
+   * cuando la tarjeta lo derivó; selector manual SOLO como fallback cuando no se pudo derivar.
+   */
+  type: VehicleType | null;
   plate: string;
   year: string;
   /** Id del VehicleModelSpec elegido del catálogo (lo que se envía en `POST /drivers/vehicles`). */
@@ -83,30 +98,201 @@ export interface VehicleData {
   brand: string;
   /** Modelo elegido — solo presentación. */
   model: string;
+  /**
+   * LOTE 1 · categoría MTC CRUDA leída de la tarjeta de propiedad (`M1`, `L3`, `N1`…). Viaja al backend como
+   * FUENTE DE VERDAD del tipo (el servidor deriva `vehicleType` de acá). Vacía en la carga manual (sin tarjeta).
+   */
+  mtcCategory: string;
+  /**
+   * Color de carrocería del vehículo (`NEGRO`, `BLANCO`…). Lo PRELLENA el OCR de la tarjeta de propiedad
+   * (`Color:`) de forma no destructiva; viaja opcional al backend (`registerVehicleRequest.color`). Vacío si
+   * el OCR no lo leyó o no hubo tarjeta — el alta no lo exige.
+   */
+  color: string;
 }
 
-/** Documentos requeridos en el alta (paso 3). */
-export type RegistrationDocumentType = 'LICENSE' | 'SOAT' | 'VEHICLE_REGISTRATION';
+/**
+ * Documentos requeridos en el alta. Es una etiqueta INTERNA, app-friendly, del wizard
+ * (`VEHICLE_REGISTRATION` = "tarjeta de propiedad" en la UI); el valor que viaja al backend NO es
+ * este label sino el `FleetDocumentType` canónico que devuelve `registrationDocTypeToBackend`.
+ * LOTE B: la LICENSE se captura en el paso 1 (Conductor); SOAT/tarjeta/foto en el paso 2 (Vehículo).
+ */
+export type RegistrationDocumentType =
+  | 'LICENSE'
+  | 'SOAT'
+  | 'VEHICLE_REGISTRATION'
+  | 'VEHICLE_PHOTO'
+  | 'DNI';
 
 /**
- * Mapea el tipo del wizard al `type` que espera el backend (`addDocumentRequest.type` /
- * `driverDocument.type`, catálogo de fleet). La licencia se registra como `LICENSE_A1`.
+ * Subconjunto CANÓNICO de `FleetDocumentType` que el alta exige (licencia A1, SOAT, tarjeta de propiedad,
+ * foto del vehículo y DNI). Es el rango EXACTO de `registrationDocTypeToBackend`
+ * — tiparlo así (en vez del enum completo) deja que la presentación derive su config contextual del
+ * formulario sin castear, y que un tipo nuevo del alta sea un error de compilación.
  */
-export function registrationDocTypeToBackend(type: RegistrationDocumentType): string {
+export type RegistrationFleetDocumentType =
+  | typeof FleetDocumentType.LICENSE_A1
+  | typeof FleetDocumentType.SOAT
+  | typeof FleetDocumentType.PROPERTY_CARD
+  | typeof FleetDocumentType.VEHICLE_PHOTO
+  | typeof FleetDocumentType.DNI;
+
+/**
+ * Mapea la etiqueta del wizard al `FleetDocumentType` CANÓNICO de `@veo/shared-types` que validan
+ * el `addDocumentRequest.type` / `documentUploadTicketRequest.type` (el presign del driver-bff hace
+ * `@IsEnum(FleetDocumentType)`). El retorno está tipado al subconjunto del alta y el `switch` es
+ * exhaustivo (sin `default`), así que cualquier futura deriva del label es un ERROR DE COMPILACIÓN, no
+ * un 400 en runtime. La "tarjeta de propiedad" es `PROPERTY_CARD` (NO el string mágico
+ * `VEHICLE_REGISTRATION`, que no existe en el enum). La licencia se registra como `LICENSE_A1`.
+ */
+export function registrationDocTypeToBackend(
+  type: RegistrationDocumentType,
+): RegistrationFleetDocumentType {
   switch (type) {
     case 'LICENSE':
-      return 'LICENSE_A1';
+      return FleetDocumentType.LICENSE_A1;
     case 'SOAT':
-      return 'SOAT';
+      return FleetDocumentType.SOAT;
     case 'VEHICLE_REGISTRATION':
-      return 'VEHICLE_REGISTRATION';
-    default:
-      return type;
+      return FleetDocumentType.PROPERTY_CARD;
+    case 'VEHICLE_PHOTO':
+      return FleetDocumentType.VEHICLE_PHOTO;
+    // El DNI se sube como documento de 2 caras (FRONT+BACK vía el presign múltiple del 3A); su cara
+    // FRONT la usará el face-match (3C).
+    case 'DNI':
+      return FleetDocumentType.DNI;
   }
 }
 
-/** Estado de carga de un documento del alta. */
+/**
+ * Deriva el PRIMER paso del wizard a corregir a partir de los tipos de documento rechazados por el
+ * operador (los `type` crudos de `GET /drivers/me/documents`, que son `FleetDocumentType`). LOTE B
+ * (reagrupación por DUEÑO del documento): la documentación del CONDUCTOR (DNI + LICENSE_A1) se captura en
+ * el paso 1 (Conductor); la documentación del VEHÍCULO (PROPERTY_CARD + SOAT + VEHICLE_PHOTO) en el paso 2
+ * (Vehículo). Se prioriza el paso MÁS TEMPRANO presente para que el conductor re-recorra en orden. Si
+ * NINGÚN tipo rechazado es derivable a un paso (rechazo de antecedentes/KYC, que no expone documento),
+ * devuelve `null`: el llamador decide el fallback.
+ */
+export function correctionStepForRejectedDocTypes(
+  rejectedTypes: readonly string[],
+): RegistrationStep | null {
+  // Docs del CONDUCTOR (paso 1 · Conductor): DNI + licencia de conducir.
+  const driverDocs: readonly string[] = [FleetDocumentType.DNI, FleetDocumentType.LICENSE_A1];
+  // Docs del VEHÍCULO (paso 2 · Vehículo): tarjeta de propiedad + SOAT + foto del vehículo.
+  const vehicleDocs: readonly string[] = [
+    FleetDocumentType.PROPERTY_CARD,
+    FleetDocumentType.SOAT,
+    FleetDocumentType.VEHICLE_PHOTO,
+  ];
+  if (rejectedTypes.some((type) => driverDocs.includes(type))) {
+    return RegistrationStep.PERSONAL_DATA;
+  }
+  if (rejectedTypes.some((type) => vehicleDocs.includes(type))) {
+    return RegistrationStep.VEHICLE;
+  }
+  return null;
+}
+
+/**
+ * EJES del rechazo de un alta. El backend rechaza por TRES vías independientes (espejo de
+ * `mapProfileToRegistrationStatus`): documentos del operador, KYC/identidad, antecedentes. La
+ * navegación de corrección debe llevar al conductor al paso del eje REAL del rechazo — no al paso 1
+ * por omisión cuando le rechazaron la selfie/antecedentes (y sus datos/vehículo/docs estaban BIEN).
+ *
+ *  - `rejectedDocTypes`: `FleetDocumentType` crudos de los documentos REJECTED (eje del operador).
+ *  - `kycRejected`: la identidad/biometría (KYC) fue rechazada (eje de identidad → paso KYC).
+ *  - `backgroundCheckRejected`: los antecedentes fueron rechazados (eje de identidad → paso KYC).
+ */
+export interface RejectionAxes {
+  readonly rejectedDocTypes: readonly string[];
+  readonly kycRejected: boolean;
+  readonly backgroundCheckRejected: boolean;
+}
+
+/**
+ * Deriva el PRIMER paso del wizard a corregir a partir del EJE REAL del rechazo (no del último paso
+ * persistido ni del paso 1 por omisión). Prioridad por proximidad al inicio del wizard:
+ *
+ *  1. Si hay documentos rechazados derivables a un paso (Conductor/Vehículo), va a ESE paso — es lo
+ *     más temprano y concreto que el conductor puede arreglar (comportamiento previo correcto).
+ *  2. Si NO hay documento derivable pero la BIOMETRÍA/identidad (KYC) o los ANTECEDENTES fueron
+ *     rechazados, va al paso KYC (`IDENTITY_VERIFICATION`) — NO al paso 1: re-recorrer datos
+ *     personales + vehículo + documentos que estaban bien solo porque la selfie/antecedentes fallaron
+ *     es exactamente el dead-end que cerramos.
+ *  3. Si no se puede derivar ningún eje (degradación honesta), devuelve `null`: el llamador decide el
+ *     fallback (hoy, el paso 1, para re-recorrer en orden).
+ *
+ * Los ejes se distinguen por TIPO (`RejectionAxes`), no por strings mágicos: el llamador traduce los
+ * estados crudos del perfil (`kycStatus`/`backgroundCheckStatus`/doc statuses) a estos flags.
+ */
+export function correctionStepForRejection(axes: RejectionAxes): RegistrationStep | null {
+  const docStep = correctionStepForRejectedDocTypes(axes.rejectedDocTypes);
+  if (docStep !== null) {
+    return docStep;
+  }
+  if (axes.kycRejected || axes.backgroundCheckRejected) {
+    return RegistrationStep.IDENTITY_VERIFICATION;
+  }
+  return null;
+}
+
+/**
+ * Deriva el paso del wizard al que un conductor EXISTENTE (`GET /drivers/me`) debe REANUDAR cuando el
+ * backend lo dejó `in_progress`. Hoy el único caso "docs-completos-pero-falta-algo" del cliente es la
+ * BIOMETRÍA: el conductor subió todos los documentos (`submittedAllRequired`) pero NO enroló su rostro
+ * (`biometricEnrolled === false`), así que `mapProfileToRegistrationStatus` lo devuelve a `in_progress`.
+ * Ese conductor debe caer en el paso 4 (IdentityVerification / KYC) para completar la biometría, NO en
+ * el paso 1. Si no aplica (faltan documentos, o ya tiene biometría), devuelve `null`: el llamador
+ * conserva el avance local persistido del wizard (no fuerza ningún salto).
+ */
+export function resumeStepForProfile(compliance: {
+  submittedAllRequired: boolean;
+  biometricEnrolled: boolean;
+}): RegistrationStep | null {
+  if (compliance.submittedAllRequired && !compliance.biometricEnrolled) {
+    return RegistrationStep.IDENTITY_VERIFICATION;
+  }
+  return null;
+}
+
+/**
+ * Estados CRUDOS de `FleetDocumentStatus` que cuentan como "documento presente y aceptable para
+ * avanzar el onboarding": el server YA tiene el doc y NO hay que re-subirlo.
+ *  - `PENDING_REVIEW`: subido, en revisión del operador (avanza; el operador decidirá).
+ *  - `VALID`: aprobado y vigente.
+ *  - `EXPIRING_SOON`: aprobado y AÚN vigente (todavía no venció).
+ * Quedan FUERA (no cuentan → re-subir): `EXPIRED` (venció) y `REJECTED` (rechazado). Derivar el set
+ * de los miembros del enum (no strings crudos) hace que un estado nuevo de fleet sea una decisión
+ * EXPLÍCITA aquí, no un bug mudo que se cuela por el lado equivocado del gate.
+ */
+const ACCEPTABLE_SERVER_DOC_STATUSES: ReadonlySet<string> = new Set<FleetDocumentStatus>([
+  FleetDocumentStatus.PENDING_REVIEW,
+  FleetDocumentStatus.VALID,
+  FleetDocumentStatus.EXPIRING_SOON,
+]);
+
+/**
+ * ¿El estado CRUDO del documento del server (el `status` de `DriverDocument`, tipado como `string`,
+ * no como el enum) cuenta como "presente y aceptable" para avanzar el alta? Default seguro: un estado
+ * desconocido (que el backend pudiera introducir) NO cuenta → el conductor re-sube. Así `EXPIRED` y
+ * `REJECTED` (vencido/rechazado) bloquean el avance igual que un doc faltante, coherente con que el
+ * chip los pinta en rojo.
+ */
+export function isAcceptableServerDocStatus(status: string): boolean {
+  return ACCEPTABLE_SERVER_DOC_STATUSES.has(status);
+}
+
+/** Estado de carga LOCAL de un documento del alta (avance del wizard, no el estado del servidor). */
 export type DocumentUploadStatus = 'pending' | 'uploaded';
+
+/**
+ * Valores CANÓNICOS del estado de carga local (mismo patrón que `RegistrationStatus`): evita los
+ * strings mágicos `'uploaded'`/`'pending'` al gatear el avance y al pintar los chips del wizard.
+ */
+export const DocumentUploadStatus = {
+  PENDING: 'pending',
+  UPLOADED: 'uploaded',
+} as const satisfies Record<string, DocumentUploadStatus>;
 
 export interface RegistrationDocument {
   type: RegistrationDocumentType;
@@ -133,7 +319,7 @@ export interface FaceCapture {
 
 /**
  * Estado global del registro del conductor. Conmuta la navegación raíz:
- *  - `not_started` / `in_progress` → wizard de 4 pasos
+ *  - `not_started` / `in_progress` → wizard de 3 pasos
  *  - `in_review` → pantalla "Estamos revisando tus datos"
  *  - `approved` → app operativa (tabs)
  *  - `rejected` → wizard para corregir (reservado; el backend definirá el detalle)
@@ -144,6 +330,37 @@ export type RegistrationStatus =
   | 'in_review'
   | 'approved'
   | 'rejected';
+
+/**
+ * Valores CANÓNICOS del estado global del alta. Espeja el union `RegistrationStatus` como objeto de
+ * constantes (mismo patrón que `VehicleType`) para que la presentación y los hooks conmuten estado
+ * SIN strings mágicos (`RegistrationStatus.IN_PROGRESS` en vez de `'in_progress'`). El `satisfies`
+ * garantiza que cada valor pertenece al union: un typo es un ERROR DE COMPILACIÓN, no un bug mudo.
+ */
+export const RegistrationStatus = {
+  NOT_STARTED: 'not_started',
+  IN_PROGRESS: 'in_progress',
+  IN_REVIEW: 'in_review',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+} as const satisfies Record<string, RegistrationStatus>;
+
+/**
+ * Pasos del wizard de alta (1..3) como constantes tipadas. Espeja el orden de `STEP_ROUTES` del
+ * `RegistrationNavigator` (1=Conductor · 2=Vehículo · 3=KYC). Tiparlos evita los números mágicos en
+ * `setCurrentStep(...)` y deja que la corrección post-rechazo derive el paso por nombre.
+ *
+ * LOTE B (reagrupación por DUEÑO del documento): el paso DOCUMENTS desapareció. Los documentos se agrupan
+ * por su dueño: la LICENCIA (doc del conductor) baja al paso 1 (Conductor, junto al DNI) y el SOAT (doc del
+ * vehículo) baja al paso 2 (Vehículo, junto a la tarjeta de propiedad y la foto). La biometría es el paso 3.
+ */
+export const RegistrationStep = {
+  PERSONAL_DATA: 1,
+  VEHICLE: 2,
+  IDENTITY_VERIFICATION: 3,
+} as const;
+
+export type RegistrationStep = (typeof RegistrationStep)[keyof typeof RegistrationStep];
 
 /** Borrador completo del registro que se envía al backend al finalizar el wizard. */
 export interface RegistrationDraft {

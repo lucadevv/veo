@@ -46,7 +46,9 @@ export function TripFareCard({
           {t('home.fare')}
         </Text>
         <Text variant="title2" tabular>
-          {formatPEN(fareCents)}
+          {/* Guard de tarifa 0: un viaje sin tarifa conocida (aún sin liquidar / cancelado sin cargo)
+              mostraba "S/ 0.00" como si fuera un cobro real → em-dash honesto (dato no disponible). */}
+          {fareCents > 0 ? formatPEN(fareCents) : '—'}
         </Text>
       </View>
       <View

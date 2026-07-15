@@ -7,11 +7,12 @@ import type {
 } from '@veo/api-client';
 
 /**
- * Arma el input de `createTrip` — FUENTE ÚNICA compartida por las DOS superficies de cotización: el
- * `QuotingBody` del sheet unificado y el `RouteQuoteScreen` del flujo programado (legacy). Vive acá, y
- * no duplicado en cada pantalla, para que NO vuelva a divergir: el bug de "el flujo programado no manda
+ * Arma el input de `createTrip` — FUENTE ÚNICA de la cotización del sheet unificado (`QuotingBody`),
+ * que cubre TANTO el viaje inmediato como el PROGRAMADO (mismo body, con `scheduledAt`). Vive acá, y no
+ * inline en la pantalla, para que NO vuelva a divergir: el bug de "el flujo programado no manda
  * `vehicleType` en PUJA → no podías pujar una Moto" nació JUSTO de tener este armado copiado en dos
- * lados que se desincronizaron (ARQUITECTURA §5-bis: cero duplicación; el copy-paste es deuda).
+ * lados que se desincronizaron (cuando el programado era una pantalla aparte, ya retirada — ARQUITECTURA
+ * §5-bis: cero duplicación; el copy-paste es deuda).
  *
  * Regla de dominio (ADR 013): la oferta se elige SIEMPRE → `category` + `vehicleType` viajan en AMBOS
  * modos. El server resuelve la oferta y DERIVA el pool de matching; el board de puja filtra por

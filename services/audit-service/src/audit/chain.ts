@@ -71,12 +71,28 @@ export interface VerifyChainOptions {
    * la entrada anterior se confía, pero el contenido se recomputa igual.
    */
   expectGenesis?: boolean;
+  /**
+   * Hash de la ÚLTIMA fila del LOTE ANTERIOR (verificación por STREAMING · anti-OOM).
+   *
+   * Cuando se provee, la PRIMERA fila de `rows` ya NO es un borde de rango "confiado": su enlace se valida
+   * (`row.prevHash === startingPrevHash`) EXACTAMENTE como el de una fila interior. Así un tampering en el
+   * BORDE de lote (la última fila del lote previo, o la primera de éste) se detecta IGUAL que en el medio —
+   * un streaming naïf que verificara cada lote en aislamiento (con `expectGenesis:false`) lo dejaría pasar.
+   *
+   * `undefined` (default) = PRIMER lote (o verificación no-paginada): se respeta `expectGenesis` (génesis)
+   * o el borde-confiado de un sub-rango, sin cambios respecto al comportamiento de siempre.
+   */
+  startingPrevHash?: string | null;
 }
 
 /**
  * Recorre la cadena (ordenada por seq asc) y detecta tampering:
  *  1) recomputa el hash de cada fila a partir de su contenido → detecta alteración de campos.
  *  2) verifica el enlace: prevHash de la fila i == hash de la fila i-1.
+ *
+ * STREAMING: con `startingPrevHash` la verificación es continuable lote-a-lote — la primera fila enlaza
+ * contra el hash arrastrado del lote previo. El resultado de verificar la cadena por lotes es IDÉNTICO al
+ * de verificarla entera de una vez (mismo `valid`/`reason`/`brokenAtSeq`).
  */
 export function verifyChain(
   rows: ChainRow[],
@@ -89,7 +105,12 @@ export function verifyChain(
     if (!row) continue;
 
     if (i === 0) {
-      if (options.expectGenesis && row.prevHash !== null) {
+      if (options.startingPrevHash !== undefined) {
+        // Lote ≥2 del streaming: el enlace cruzado con el lote anterior se valida como uno interior.
+        if (row.prevHash !== options.startingPrevHash) {
+          return { valid: false, checked: i, brokenAtSeq: String(row.seq), reason: 'BROKEN_LINK' };
+        }
+      } else if (options.expectGenesis && row.prevHash !== null) {
         return {
           valid: false,
           checked: i,

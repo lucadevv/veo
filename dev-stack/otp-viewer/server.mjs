@@ -12,10 +12,12 @@
  *   node dev-stack/otp-viewer/server.mjs        # usa PORT o 5190
  */
 import { createServer } from 'node:http';
-import { createHmac } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { totp } from '../lib/totp.mjs'; // TOTP compartido (antes duplicado acá) — misma fuente que login.mjs
 
 const PORT = Number(process.env.OTP_VIEWER_PORT ?? process.env.PORT ?? 5190);
 const MAX_ENTRIES = 100; // anillo acotado: solo los últimos N (es un visor de dev, no un historial)
+const PG_CONT = process.env.DEV_PG_CONTAINER ?? 'veo-postgres'; // mismo contenedor que usa veo.sh
 
 // ─── Admin panel (solo dev) ──────────────────────────────────────────────────────────────────
 // Credenciales del SUPERADMIN de dev (seed: services/identity-service/scripts/seed.ts) + secreto TOTP
@@ -26,33 +28,6 @@ const ADMIN = {
   password: process.env.DEV_ADMIN_PASSWORD ?? 'ChangeMe_VEO_2026!',
   totpSecret: process.env.DEV_ADMIN_TOTP_SECRET ?? 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
 };
-
-/** Decodifica base32 (RFC 4648, sin padding) a Buffer. */
-function base32Decode(input) {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  let bits = '';
-  for (const ch of input.replace(/=+$/, '').toUpperCase()) {
-    const idx = alphabet.indexOf(ch);
-    if (idx !== -1) bits += idx.toString(2).padStart(5, '0');
-  }
-  const bytes = [];
-  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
-  return Buffer.from(bytes);
-}
-
-/** Código TOTP RFC 6238 (SHA1, 6 dígitos, ventana 30s) — mismos defaults que otplib. */
-function totp(secretBase32, atMs = Date.now(), period = 30, digits = 6) {
-  const key = base32Decode(secretBase32);
-  let counter = Math.floor(atMs / 1000 / period);
-  const buf = Buffer.alloc(8);
-  for (let i = 7; i >= 0; i--) { buf[i] = counter & 0xff; counter = Math.floor(counter / 256); }
-  const hmac = createHmac('sha1', key).update(buf).digest();
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const bin =
-    ((hmac[offset] & 0x7f) << 24) | ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) | (hmac[offset + 3] & 0xff);
-  return String(bin % 10 ** digits).padStart(digits, '0');
-}
 
 /** Estado del panel admin: credenciales + TOTP vivo + segundos hasta que rota. */
 function adminState() {
@@ -88,6 +63,47 @@ function addEntry(payload) {
   });
   if (entries.length > MAX_ENTRIES) entries.length = MAX_ENTRIES;
 }
+
+// ─── Backfill desde la DB (lo mismo que `veo.sh otp`) ────────────────────────────────────────
+// El ingest en vivo es fire-and-forget a memoria: cualquier OTP emitido con el visor caído se pierde.
+// Pero TODO OTP de driver/pasajero (SMS sandbox o email) queda en notification.notifications
+// (payload->>'code'), que es exactamente lo que lee `veo.sh otp`. Este poller trae esas filas cada
+// POLL_MS vía `docker exec psql` (cero deps npm) y las mergea con dedup, así el visor muestra el
+// historial completo aunque se reinicie. Si docker/psql no está, falla silencioso: el ingest sigue.
+const POLL_MS = 3000;
+const seenDbKeys = new Set(); // "epoch|destino|código" de filas ya mergeadas
+
+const DB_QUERY = `SELECT extract(epoch from created_at)::bigint, channel,
+       COALESCE(payload->>'to', payload->>'email', payload->>'recipient', '?'),
+       payload->>'code', status
+  FROM notification.notifications WHERE payload ? 'code'
+  ORDER BY created_at DESC LIMIT 30;`;
+
+function pollDb() {
+  execFile(
+    'docker',
+    ['exec', PG_CONT, 'psql', '-U', 'veo', '-d', 'veo', '-t', '-A', '-F', '\t', '-c', DB_QUERY],
+    { timeout: 5000 },
+    (err, stdout) => {
+      if (err) return; // infra abajo o docker ausente — el visor sigue con el ingest en vivo
+      for (const line of stdout.split('\n')) {
+        const [epoch, channel, to, code, status] = line.split('\t');
+        if (!epoch || !code) continue;
+        const key = `${epoch}|${to}|${code}`;
+        if (seenDbKeys.has(key)) continue;
+        seenDbKeys.add(key);
+        const at = Number(epoch) * 1000;
+        // El sender ya lo pudo haber ingestado en vivo: mismo código+destino cerca en el tiempo → skip.
+        if (entries.some((e) => e.code === code && e.to === to && Math.abs(e.at - at) < 90_000)) continue;
+        addEntry({ service: 'driver/pasajero (db)', channel, to, message: `estado: ${status}`, code, at });
+      }
+      entries.sort((a, b) => b.at - a.at);
+      if (seenDbKeys.size > 500) seenDbKeys.clear(); // acotado; el dedup contra `entries` sigue cubriendo
+    },
+  );
+}
+pollDb();
+setInterval(pollDb, POLL_MS).unref();
 
 function send(res, status, body, contentType = 'application/json') {
   res.writeHead(status, {

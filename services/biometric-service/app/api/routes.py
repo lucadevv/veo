@@ -17,6 +17,11 @@ from app.api.schemas import (
     ChallengeResponse,
     EmbedRequest,
     EmbedResponse,
+    EnrollPassiveResponse,
+    EnrollRequest,
+    EnrollResponse,
+    FaceMatchRequest,
+    FaceMatchResponse,
     HealthResponse,
     ReadyResponse,
     VerifyRequest,
@@ -30,8 +35,12 @@ from app.face.pipeline import BiometricPipeline
 from app.security.internal_identity import require_internal_identity
 from app.telemetry import (
     CHALLENGE_ISSUED_TOTAL,
+    ENROLL_PASSIVE_TOTAL,
+    FACE_MATCH_LATENCY,
+    FACE_MATCH_TOTAL,
     LIVENESS_TOTAL,
     MATCH_SCORE,
+    SPOOF_SCORE,
     VERIFY_LATENCY,
     VERIFY_TOTAL,
     metrics_payload,
@@ -59,13 +68,21 @@ def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
 def ready(
     response: Response,
     pipeline: BiometricPipeline = Depends(get_pipeline),
+    settings: Settings = Depends(get_settings),
 ) -> ReadyResponse:
     pipeline.load()
-    if not pipeline.ready:
+    pad_loaded = pipeline.passive_liveness_loaded
+    # Readiness HONESTO: refleja detector+embedder (`pipeline.ready`) Y el PAD anti-spoofing. Fail-closed en
+    # prod (`require_passive_liveness`): un pod sin PAD NO se reporta listo → no entra al balanceador → el
+    # registro nunca enrola sin anti-spoofing. En dev (require=False) queda listo igual, pero el flag
+    # `passiveLivenessLoaded` deja el modo degradado VISIBLE (no más "ready" engañoso).
+    ready_ok = pipeline.ready and (pad_loaded or not settings.require_passive_liveness)
+    if not ready_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return ReadyResponse(
-        ready=pipeline.ready,
+        ready=ready_ok,
         modelsLoaded=pipeline.ready,
+        passiveLivenessLoaded=pad_loaded,
         detail=pipeline.load_error,
     )
 
@@ -196,6 +213,132 @@ def embed_reference(
     return EmbedResponse(embedding=embedding, dimensions=len(embedding))
 
 
+# --- Enroll del REGISTRO con liveness PASIVO (PAD single-frame, anti-spoofing) ---
+@router.post(
+    "/v1/enroll-passive",
+    response_model=EnrollPassiveResponse,
+    tags=["enroll"],
+    dependencies=[Depends(require_internal_identity)],
+)
+def enroll_passive(
+    payload: EmbedRequest,
+    pipeline: BiometricPipeline = Depends(get_pipeline),
+    settings: Settings = Depends(get_settings),
+) -> EnrollPassiveResponse:
+    """Enrolamiento del REGISTRO del conductor: liveness PASIVO sobre 1 foto + embedding (SIN frames extra).
+
+    Corre el PAD anti-spoofing ANTES del embedding: si la foto es un ataque de presentación (impresa/pantalla)
+    → NO se enrola (embedding null, reason 'spoof'). Si es persona real → embedding. Si el PAD no está cargado
+    → degrada honesto a enrolar SIN liveness (`livenessChecked=false`). El `/v1/embed` genérico (DNI/pasajero)
+    NO pasa por acá: el PAD solo aplica a la selfie del registro. Sync (`def`): corre en el threadpool.
+    """
+    _require_models_ready(pipeline)
+    _check_b64_image_size(payload.photo, settings)
+    try:
+        image = decode_base64_image(payload.photo)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Foto inválida: {exc}") from exc
+    count, detection = pipeline.best_detection(image)
+    if count != 1 or detection is None:
+        ENROLL_PASSIVE_TOTAL.labels(result="no_face").inc()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="La imagen debe contener exactamente un rostro claro",
+        )
+    verdict = pipeline.classify_liveness(image, detection)
+    if verdict is not None and not verdict.live:
+        # Spoof detectado: NO se enrola (no se gasta embedding sobre un ataque de presentación).
+        ENROLL_PASSIVE_TOTAL.labels(result="spoof").inc()
+        SPOOF_SCORE.observe(verdict.score)
+        return EnrollPassiveResponse(
+            embedding=None,
+            dimensions=0,
+            live=False,
+            liveness_checked=True,
+            spoof_score=verdict.score,
+            reason="spoof",
+        )
+    embedding = pipeline.embed(image, detection).tolist()
+    # `degraded` = el PAD no corrió (modelo ausente) → enrolado SIN liveness. Etiqueta DISTINTA de `enrolled`
+    # para que el dashboard distinga el modo degradado (gap "PAD off en prod") de un enrol con anti-spoofing real.
+    ENROLL_PASSIVE_TOTAL.labels(result="enrolled" if verdict is not None else "degraded").inc()
+    if verdict is not None:
+        SPOOF_SCORE.observe(verdict.score)
+    return EnrollPassiveResponse(
+        embedding=embedding,
+        dimensions=len(embedding),
+        live=True,
+        liveness_checked=verdict is not None,
+        spoof_score=0.0 if verdict is None else verdict.score,
+        reason=None,
+    )
+
+
+@router.post(
+    "/v1/enroll",
+    response_model=EnrollResponse,
+    response_model_exclude_none=False,
+    tags=["enroll"],
+    dependencies=[Depends(require_internal_identity)],
+)
+def enroll_with_liveness(
+    payload: EnrollRequest,
+    pipeline: BiometricPipeline = Depends(get_pipeline),
+    store: ChallengeStore = Depends(get_store),
+    settings: Settings = Depends(get_settings),
+) -> EnrollResponse:
+    """Enrolamiento del rostro CON prueba de vida (challenge-response).
+
+    A diferencia de /v1/embed (1 foto suelta, sin liveness), exige que la secuencia de frames
+    supere el reto de liveness del `challengeId` ANTES de calcular el embedding de referencia.
+    Reusa el MISMO motor que /v1/verify: store.consume (anti-replay one-shot), extract_signals +
+    evaluate_liveness, y best_detection + embed (ArcFace). Endpoint sync (`def`) → threadpool de
+    FastAPI, así la inferencia ONNX (CPU-bound) no bloquea el event loop.
+
+    Caminos infelices (sin crashear):
+      - challenge inválido/vencido → livenessPassed=false, embedding=null, reason="Reto ...".
+      - liveness no superado / sin rostro → livenessPassed=false, embedding=null, reason=<motivo>.
+      - frames mal formados o demasiados/grandes → 422 (mismo gate anti-DoS que /v1/verify).
+    """
+    _require_models_ready(pipeline)
+    _check_frame_count(len(payload.frames), settings)
+    for f in payload.frames:
+        _check_b64_image_size(f, settings)
+    try:
+        frames = [decode_base64_image(f) for f in payload.frames]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Frame inválido: {exc}") from exc
+
+    # One-shot: consumimos el reto (anti-replay), igual que /v1/verify.
+    challenge = store.consume(payload.challenge_id)
+    action = challenge.action if challenge is not None else ChallengeAction.TURN_LEFT
+
+    with _domain_errors_as_422():
+        out = pipeline.enroll(
+            action=action,
+            challenge_valid=challenge is not None,
+            frames_bgr=frames,
+        )
+
+    LIVENESS_TOTAL.labels(passed=str(out.liveness.passed).lower()).inc()
+    embedding = out.embedding.tolist() if out.embedding is not None else None
+    # Audit trail (Ley 29733): atribuye el enrolamiento al conductor. SIN PII biométrica
+    # (nunca el embedding ni imágenes), solo el ID + veredicto de liveness.
+    logger.info(
+        "biometric.enroll",
+        extra={
+            "driverId": payload.driver_id,
+            "livenessPassed": out.liveness.passed,
+            "reason": out.liveness.reason,
+        },
+    )
+    return EnrollResponse(
+        livenessPassed=out.liveness.passed,
+        embedding=embedding,
+        reason=None if out.liveness.passed else out.liveness.reason,
+    )
+
+
 def _resolve_reference(
     pipeline: BiometricPipeline,
     reference_embedding: Optional[List[float]],
@@ -292,6 +435,87 @@ def verify_json(
             frames_bgr=frames,
             reference_embedding=reference,
         )
+
+
+@router.post(
+    "/v1/face-match",
+    response_model=FaceMatchResponse,
+    tags=["verify"],
+    dependencies=[Depends(require_internal_identity)],
+)
+def face_match(
+    payload: FaceMatchRequest,
+    pipeline: BiometricPipeline = Depends(get_pipeline),
+    settings: Settings = Depends(get_settings),
+) -> FaceMatchResponse:
+    """Compara el ROSTRO de la foto del DNI contra el embedding de la selfie enrolada.
+
+    Cierra el hueco de seguridad: confirma que la persona enrolada ES la del documento.
+    NO hay liveness (el DNI es una foto estática); reusa el MISMO motor que /v1/verify:
+    decode (EXIF) → SCRFD (best_detection, exige 1 rostro claro) → ArcFace (embed) →
+    match coseno (match_score) contra `referenceEmbedding` con el umbral SEPARADO del doc-match
+    (settings.doc_match_threshold, default 0.30, NO el de turno match_threshold). El DNI es foto
+    vieja/baja-res → la misma persona cae más bajo que un live selfie-vs-selfie. Endpoint sync
+    (`def`) → threadpool de FastAPI, así la inferencia ONNX (CPU-bound) no bloquea el event loop.
+
+    Degradación honesta (nunca un PASS inventado):
+      - modelos ausentes → 503.
+      - imagen mal formada / base64 inválido / demasiado grande → 422.
+      - referenceEmbedding mal formado (dim≠512/NaN/vacío) → 422.
+      - rostro del DNI no detectable o varios rostros → matched=false + reason explícito.
+    """
+    _require_models_ready(pipeline)
+    _check_b64_image_size(payload.image, settings)
+    try:
+        image = decode_base64_image(payload.image)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Imagen inválida: {exc}") from exc
+
+    from app.face.matcher import match_score, to_vector
+
+    started = time.perf_counter()
+    with _domain_errors_as_422():
+        # Valida el embedding de referencia ANTES de gastar inferencia (dim/NaN/vacío → 422).
+        reference = to_vector(payload.reference_embedding)
+        count, detection = pipeline.best_detection(image)
+
+    if count != 1 or detection is None:
+        # Sin rostro o varios en el DNI: degradación honesta, NUNCA un match inventado.
+        reason = (
+            "No se detectó un rostro en la imagen del DNI"
+            if count == 0
+            else f"Se detectaron {count} rostros en la imagen del DNI (se requiere exactamente uno)"
+        )
+        FACE_MATCH_TOTAL.labels(matched="false").inc()
+        FACE_MATCH_LATENCY.observe(time.perf_counter() - started)
+        logger.info("biometric.face_match", extra={"matched": False, "reason": reason})
+        return FaceMatchResponse(matched=False, score=0.0, reason=reason)
+
+    with _domain_errors_as_422():
+        probe = pipeline.embed(image, detection)
+        # Mismo motor de match que /v1/verify: similitud coseno mapeada a [0,1].
+        score = match_score(probe, reference)
+
+    # Doc-match usa su PROPIO umbral (settings.doc_match_threshold, default 0.30), NO el de turno
+    # (match_threshold, 0.40). El DNI es foto vieja/baja-res → la misma persona cae más bajo; el umbral
+    # de turno la rechazaría. Ver config.py:doc_match_threshold.
+    threshold = settings.doc_match_threshold
+    matched = score >= threshold
+    reason = None if matched else f"Similitud {score:.4f} por debajo del umbral {threshold:.2f}"
+
+    FACE_MATCH_TOTAL.labels(matched=str(matched).lower()).inc()
+    MATCH_SCORE.observe(score)
+    FACE_MATCH_LATENCY.observe(time.perf_counter() - started)
+    # Audit trail (Ley 29733): SIN PII biométrica (nunca embeddings ni imágenes), solo veredicto.
+    logger.info(
+        "biometric.face_match",
+        extra={"matched": matched, "score": round(score, 6)},
+    )
+    return FaceMatchResponse(
+        matched=matched,
+        score=round(score, 6),
+        reason=reason,
+    )
 
 
 def _process_multipart_verify(

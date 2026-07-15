@@ -19,7 +19,7 @@ import type {
   LocationAvailability,
   LocationSample,
   LocationSource,
-} from '../../domain/location-source';
+} from '../../../../core/location/location-source';
 
 /**
  * Fuente de GPS nativa real sobre `react-native-background-geolocation` (Transistor Software, OSS,
@@ -201,9 +201,14 @@ export class BackgroundGeolocationSource implements LocationSource {
     const sample: LocationSample = {
       lat: coords.latitude,
       lon: coords.longitude,
-      heading: coords.heading ?? null,
-      speed: coords.speed ?? null,
-      accuracy: coords.accuracy ?? null,
+      // iOS/CoreLocation devuelve el CENTINELA -1 en heading/speed/accuracy cuando el dato NO está
+      // disponible (curso/velocidad desconocidos estando estacionario, o sin fix de precisión). El
+      // contrato del ping (`driverLocationReport`) exige `>= 0` o `null`, así que un `?? null` NO alcanza
+      // (−1 no es null). Sin esta normalización el gateway DESCARTA el ping ("invalid_report") y el
+      // conductor nunca aparece en el mapa del admin ni en el pool de dispatch.
+      heading: nonNegativeOrNull(coords.heading),
+      speed: nonNegativeOrNull(coords.speed),
+      accuracy: nonNegativeOrNull(coords.accuracy),
       // v5 tipa timestamp como `string | number`; el dominio (y el backend) esperan ISO-8601.
       ts: toIso(location.timestamp),
     };
@@ -223,6 +228,15 @@ export class BackgroundGeolocationSource implements LocationSource {
 /** Normaliza el timestamp del SDK (v5: `string | number`) a ISO-8601, que es lo que el dominio expone. */
 function toIso(timestamp: string | number): string {
   return typeof timestamp === 'string' ? timestamp : new Date(timestamp).toISOString();
+}
+
+/**
+ * Normaliza los campos que CoreLocation/CLLocation reportan con el CENTINELA `-1` cuando el dato NO está
+ * disponible (heading/speed/accuracy): el contrato del ping exige `>= 0` o `null`, así que convertimos el
+ * centinela negativo (y cualquier valor no numérico) a `null`. Sin esto el gateway descarta el ping.
+ */
+function nonNegativeOrNull(value: number | null | undefined): number | null {
+  return typeof value === 'number' && value >= 0 ? value : null;
 }
 
 /**

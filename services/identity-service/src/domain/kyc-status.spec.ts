@@ -7,6 +7,11 @@ const ALL_STATES = Object.values(KycStatus);
 
 /** Transiciones válidas esperadas, independientes de la tabla de producción (no tautologizar). */
 const EXPECTED_VALID = new Set<string>([
+  // ADR-018 · estado inicial UNVERIFIED ("no arrancó"): se verifica (pasajero liveness / conductor
+  // binding biométrico) → VERIFIED, o un intento fallido → REJECTED. NUNCA a PENDING (no "reenvía a
+  // revisión" sin haber sido rechazado antes; resubmit es SOLO REJECTED→PENDING).
+  `${KycStatus.UNVERIFIED}->${KycStatus.VERIFIED}`,
+  `${KycStatus.UNVERIFIED}->${KycStatus.REJECTED}`,
   // resultado de la verificación (biométrica u operador)
   `${KycStatus.PENDING}->${KycStatus.VERIFIED}`,
   `${KycStatus.PENDING}->${KycStatus.REJECTED}`,

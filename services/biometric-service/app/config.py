@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # Si es False, /verify devuelve 503 (degradado) pero el servicio arranca igual.
     require_models: bool = False
 
+    # Si es True, /health/ready falla (503) cuando el PAD anti-spoofing NO está cargado: en PROD un pod sin
+    # liveness pasivo NO se reporta listo → no entra al balanceador → el registro NUNCA enrola sin anti-spoofing
+    # (fail-closed, sin degradación SILENCIOSA). En dev/local va False: el servicio degrada honesto (enrola con
+    # livenessChecked=false) sin trabar el arranque, pero /health/ready expone `passiveLivenessLoaded=false`
+    # para que el estado degradado sea VISIBLE (ya no entra al balanceador como "sano" engañando).
+    require_passive_liveness: bool = False
+
     # --- Límites de entrada (anti-DoS: el caller manda N frames + foto de referencia) ---
     # Cantidad máxima de frames por /verify (suficiente para liveness; corta amplificación de cómputo).
     max_frames: int = Field(default=30, ge=1)
@@ -63,6 +70,15 @@ class Settings(BaseSettings):
     # etiquetado de la población real (recomputar EER/FMR). Configurable por VEO_BIO_MATCH_THRESHOLD.
     match_threshold: float = Field(default=0.40, ge=0.0, le=1.0)
 
+    # Umbral coseno SEPARADO para el doc-match (DNI↔selfie, /v1/face-match), distinto del de turno
+    # (selfie-vs-selfie, /v1/verify). El match doc-vs-selfie cae naturalmente más bajo: la foto del DNI es
+    # vieja/baja-res/con holograma → la misma persona da coseno ~0.30–0.40, no el ~0.40–0.60 de un live
+    # selfie-vs-selfie. Reusar 0.40 (umbral de turno) rechaza a la persona legítima. Default 0.30: borde
+    # inferior de la franja oficial InsightFace (buffalo_l/w600k_r50). Configurable por
+    # VEO_BIO_DOC_MATCH_THRESHOLD. NO toca el umbral de turno.
+    # DEUDA: umbral doc-match 0.30 heuristica de dominio · techo: FMR no calibrado a poblacion real · gatillo: calibrar con validation set etiquetado (EER/FMR) antes de prod
+    doc_match_threshold: float = Field(default=0.30, ge=0.0, le=1.0)
+
     # Consistencia de identidad intra-secuencia (anti-spoofing/splicing): el frame de match debe ser la
     # MISMA persona que hizo el gesto de liveness. Umbral coseno bajo (de la franja oficial 0.30–0.45):
     # intra-sesión la misma persona da coseno alto (>0.6), una persona distinta cae bajo (<0.3) → separa
@@ -70,6 +86,34 @@ class Settings(BaseSettings):
     liveness_consistency_threshold: float = Field(default=0.35, ge=-1.0, le=1.0)
     # Tope de frames embebidos para match/consistencia (acota el costo de inferencia: p99 < 3s del SLA).
     max_match_frames: int = Field(default=8, ge=1)
+
+    # --- Liveness PASIVO (PAD anti-spoofing single-frame · registro) ---
+    # Modelo MiniFASNetV2 (Silent-Face, Apache-2.0). PAD sobre 1 sola foto (sin frames extra → sin lag), usado
+    # en el ENROLL del REGISTRO (NO en el doc-match DNI ni en el gate de turno). Si está OFF o el modelo no
+    # está presente, el enroll degrada al comportamiento actual (solo detección de rostro), sin liveness.
+    passive_liveness_enabled: bool = True
+    spoof_model: str = "minifasnet_v2.onnx"
+    # Preprocessing del MiniFASNet (export ONNX garciafido): crop a `spoof_scale` centrado + resize a
+    # `spoof_input_size`, BGR, RANGO CRUDO 0-255 (el ONNX hornea la normalización; ver spoof.py), NCHW.
+    spoof_scale: float = Field(default=2.7, gt=0.0)
+    spoof_input_size: int = Field(default=80, ge=16)
+    # Índice de la clase REAL/viva en la salida softmax 3-clases. VERIFICADO determinísticamente contra el
+    # export ONNX de garciafido con caras reales de cámara (Obama/Biden → idx1≈1.00) + el `.pth` canónico
+    # (`label==1 = real`): el vivo es el ÍNDICE 1 (el "0 por HF model card" era incorrecto). VEO_BIO_SPOOF_LIVE_INDEX.
+    spoof_live_index: int = Field(default=1, ge=0)
+    # Umbral de la prob de la clase viva. Default conservador 0.60 (MiniFASNet ~98% acc); calibrar a la
+    # población real (igual que match_threshold). Configurable por VEO_BIO_SPOOF_THRESHOLD.
+    spoof_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+    # DEUDA (acotada): el índice (1) y el preprocessing (0-255) quedaron VERIFICADOS contra el modelo real; resta
+    # afinar `spoof_threshold` (0.60 heurístico) con un set etiquetado real/impreso/pantalla de la población real.
+
+    # --- Liveness del GATE DE TURNO (/v1/verify): pasivo (PAD single-frame) vs activo (reto de acción) ---
+    # Decisión del dueño (2026-07-01): el turno usa liveness PASIVO — el MISMO PAD (MiniFASNet) que el enroll
+    # del registro, corrido sobre el MEJOR frame capturado — en vez del reto geométrico (sonreír/girar 18°).
+    # Coherente con la dirección "KYC pasivo sin lag": el conductor NO ejecuta un gesto guiado (el app nunca lo
+    # guiaba → el reto activo rechazaba a conductores reales); el anti-spoof lo da el PAD y la identidad el match
+    # ArcFace. "active" mantiene el reto geométrico. Config por VEO_BIO_VERIFY_LIVENESS_MODE.
+    verify_liveness_mode: Literal["active", "passive"] = "passive"
 
     # --- Liveness activo (por reto) ---
     challenge_ttl_seconds: int = 60

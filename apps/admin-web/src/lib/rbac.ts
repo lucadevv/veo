@@ -1,110 +1,34 @@
 import type { SessionUser } from '@veo/api-client';
 import { AdminRole } from '@veo/shared-types';
+import { PERMISSION_ROLES, type Permission } from '@veo/policy';
 
 /**
  * RBAC de presentación. Oculta/deshabilita acciones sensibles en la UI según los roles del
  * sessionUser. La AUTORIDAD real es el admin-bff (que vuelve a verificar permisos con sus guards);
  * esto es defensa en profundidad para la experiencia, no el control de seguridad final.
  *
- * El mapa `PERMISSION_ROLES` es un ESPEJO EXACTO de los `@Roles` declarados en cada controller del
- * admin-bff. Roles canónicos = `AdminRole` de @veo/shared-types (SUPPORT_L1, SUPPORT_L2,
- * COMPLIANCE_SUPERVISOR, DISPATCHER, FINANCE, ADMIN, SUPERADMIN). Si el servidor lo negaría, la UI lo oculta.
+ * La matriz base `PERMISSION_ROLES` (capa 1 del gobierno unificado · ADR-025 §0/§1) ahora vive en
+ * `@veo/policy` — FUENTE ÚNICA front+backend: el mismo mapa que la UI usa para ocultar es el que
+ * identity-service usa para enforcear el invariante subtract-only del Overlay. Acá se re-exporta para
+ * no romper los imports existentes (`import { Permission, PERMISSION_ROLES } from '@/lib/rbac'`).
  */
-export type Permission =
-  | 'ops:view'
-  | 'trips:view'
-  | 'drivers:view'
-  | 'drivers:approve'
-  | 'drivers:suspend'
-  | 'operators:view'
-  | 'operators:create'
-  | 'panics:view'
-  | 'panics:ack'
-  | 'panics:resolve'
-  | 'fleet:view'
-  | 'fleet:review'
-  | 'fleet:manage'
-  | 'finance:view'
-  | 'finance:payout'
-  | 'finance:refund'
-  | 'media:view'
-  | 'media:request'
-  | 'media:approve'
-  | 'live:view'
-  | 'pricing:view'
-  | 'pricing:manage'
-  | 'catalog:view'
-  | 'catalog:manage'
-  | 'dispatch:view'
-  | 'dispatch:manage'
-  | 'audit:view'
-  | 'audit:verify';
-
-const { SUPPORT_L1, SUPPORT_L2, COMPLIANCE_SUPERVISOR, DISPATCHER, FINANCE, ADMIN, SUPERADMIN } =
-  AdminRole;
+export type { Permission };
+export { PERMISSION_ROLES };
 
 /**
- * Permiso → roles permitidos por el servidor. Cada entrada cita el controller/@Roles de admin-bff
- * que refleja. Cuando un método no declara @Roles propio, hereda los @Roles de su controller (clase).
+ * ¿El usuario puede ver/usar `permission`? Compone las DOS capas del gobierno unificado (ADR-025):
+ *   base ∧ ¬oculto
+ * donde `base` = la matriz `PERMISSION_ROLES` (capa 1) le concede el permiso a alguno de sus roles, y `¬oculto`
+ * = el OVERLAY (capa 2) NO se lo RESTÓ (`hiddenPermissions`, computado server-side con la MISMA fórmula que el
+ * `PermissionOverlayGuard`). Así un permiso restado desaparece de la UI (nav/botones/páginas), no solo lo bloquea
+ * el server. `hiddenPermissions` ausente (sesión vieja / sin overrides) → rige la base pura (fail-safe).
+ * Todos los helpers de abajo (`permissionsOf`, `nav`, gates de página) heredan esta composición vía `can()`.
  */
-const PERMISSION_ROLES: Record<Permission, readonly AdminRole[]> = {
-  // analytics.controller (clase): overview que alimenta el dashboard "En vivo".
-  'ops:view': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, FINANCE, ADMIN, SUPERADMIN],
-  // ops.controller (clase): listados de viajes/conductores.
-  'trips:view': [SUPPORT_L1, SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'drivers:view': [SUPPORT_L1, SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // ops.controller drivers/:id/approve|reject.
-  'drivers:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // ops.controller drivers/:id/suspend: suspensión manual (SAFETY). Mismos roles que approve/reject.
-  'drivers:suspend': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // ops.controller GET operators + operators/:id/reinvite|reject: SOLO ADMIN/SUPERADMIN (gestión de staff).
-  'operators:view': [ADMIN, SUPERADMIN],
-  // ops.controller POST operators (crear operador con roles → INVITED + link de invitación; step-up MFA).
-  'operators:create': [ADMIN, SUPERADMIN],
-  // security.controller (clase): listar/ver/acusar pánicos (ack hereda los roles de la clase).
-  'panics:view': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'panics:ack': [SUPPORT_L2, DISPATCHER, COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // security.controller panics/:id/resolve.
-  'panics:resolve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // fleet.controller (clase): vehículos/documentos/inspecciones/vencimientos (review hereda la clase).
-  'fleet:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'fleet:review': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // fleet.controller (clase) POST vehicles/documents/inspections: alta de flota. Mismos roles que review.
-  'fleet:manage': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // finance.controller (clase): listado de payouts y reembolsos (refund hereda la clase).
-  'finance:view': [FINANCE, ADMIN, SUPERADMIN],
-  'finance:refund': [FINANCE, ADMIN, SUPERADMIN],
-  // finance.controller payouts/run: SOLO FINANCE (ni ADMIN ni SUPERADMIN; el servidor los negaría).
-  'finance:payout': [FINANCE],
-  // media.controller (clase): solicitar/ver/aprobar acceso a video (approve además exige step-up MFA).
-  'media:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'media:request': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'media:approve': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // media.controller POST live/token: muro de cámaras EN VIVO. Doble-auth (rol + step-up MFA fresca).
-  // Mismos roles que el acceso a grabaciones; la MFA fresca la exige el StepUpDialog + el guard del bff.
-  'live:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  // pricing.controller (clase): ver el schedule de modo PUJA↔FIJO. Decisión comercial/financiera.
-  'pricing:view': [FINANCE, ADMIN, SUPERADMIN],
-  // pricing.controller PUT mode-schedule: reemplazar el schedule (mutación global). Mismos roles.
-  'pricing:manage': [FINANCE, ADMIN, SUPERADMIN],
-  // catalog.controller (clase): ver el catálogo de ofertas (enabled por oferta). Decisión comercial/operativa.
-  'catalog:view': [FINANCE, ADMIN, SUPERADMIN],
-  // catalog.controller PUT /catalog: reemplazar el overlay (prender/apagar ofertas). Mismos roles.
-  'catalog:manage': [FINANCE, ADMIN, SUPERADMIN],
-  // dispatch-config.controller (clase): ver la config de RADIOS (k-rings) de dispatch. DISPATCHER es el
-  // rol operativo natural del despacho; ADMIN/SUPERADMIN mantienen control.
-  'dispatch:view': [DISPATCHER, ADMIN, SUPERADMIN],
-  // dispatch-config.controller PUT radius-config: reemplazar los k-rings (mutación global). Mismos roles.
-  'dispatch:manage': [DISPATCHER, ADMIN, SUPERADMIN],
-  // audit.controller (clase): listado y verificación de la hash-chain.
-  'audit:view': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-  'audit:verify': [COMPLIANCE_SUPERVISOR, ADMIN, SUPERADMIN],
-};
-
 export function can(user: SessionUser | null | undefined, permission: Permission): boolean {
   if (!user) return false;
   const allowed = PERMISSION_ROLES[permission] as readonly string[];
-  return user.roles.some((role) => allowed.includes(role));
+  const grantedByBase = user.roles.some((role) => allowed.includes(role));
+  return grantedByBase && !user.hiddenPermissions?.includes(permission);
 }
 
 /** Conjunto de permisos efectivos del usuario (unión de los permisos que conceden sus roles). */

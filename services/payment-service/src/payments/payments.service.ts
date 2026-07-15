@@ -5,9 +5,10 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
-import { deletedPlaceholder, enqueueOutbox, isUniqueViolation } from '@veo/database';
+import { deletedPlaceholder, isUniqueViolation } from '@veo/database';
 import {
   assertNever,
+  ConcurrencyConflictError,
   ConflictError,
   ForbiddenError,
   InvalidStateError,
@@ -18,7 +19,11 @@ import {
 import type { PaymentMethod } from '@veo/shared-types';
 import { AdminRole } from '@veo/shared-types';
 import type { AuthenticatedUser } from '@veo/auth';
-import { PrismaService } from '../infra/prisma.service';
+import {
+  PaymentsRepository,
+  type PaymentTx,
+  type RefundWithPayment,
+} from './payments.repository';
 import { CreditService } from '../credit/credit.service';
 import {
   PAYMENT_GATEWAY,
@@ -33,14 +38,31 @@ import {
 } from '../ports/gateway/payment-gateway.port';
 import { AffiliationsService } from '../affiliations/affiliations.service';
 import { PromotionsService } from '../promotions/promotions.service';
-import { Prisma, RefundStatus, type Payment, type Refund } from '../generated/prisma';
+import { RefundStatus, type Payment, type Refund } from '../generated/prisma';
 import {
   assertCanAddTip,
   assertPaymentTransition,
+  assertRefundTransition,
+  BOOKING_CANCEL_REFUND_DEDUP_PREFIX,
+  bpsToRate,
+  ChargeMode,
   computeChargeAmounts,
+  computePspSettlement,
+  DEFAULT_DIGITAL_TIP_METHOD,
+  deriveAdminRefundDedupKey,
+  deriveBookingCancellationRefundDedupKey,
   deriveRefundIdempotencyKey,
+  deriveTipChargeDedupKey,
+  deriveTipRefundDedupKey,
+  deriveTripFareDeltaDedupKey,
+  deriveTripFailedRefundDedupKey,
+  isCashMethod,
+  isSettledPayment,
   retryDelayMs,
 } from './payment.policy';
+import { CommissionService } from '../commission/commission.service';
+import { PaymentMetrics } from '../metrics/payment.metrics';
+import { zonifyLima } from '../analytics/zonify';
 import type { Env } from '../config/env.schema';
 import type { DebtItem, DebtSummary } from './dto/payments.dto';
 
@@ -58,6 +80,15 @@ function methodUnavailableReason(method: PaymentMethod): string {
   return `${METHOD_UNAVAILABLE_PREFIX}:${method}`;
 }
 
+/**
+ * Prefijo de la razón ESTRUCTURADA del MARCADOR DURABLE de un refund system-initiated IRRECUPERABLE:
+ * el refund automático abortó ANTES de mover plata (gateway sin reembolsos / cobro sin railRef) → NO hay
+ * Refund row. Persistimos un Refund REJECTED de marca (cero strings mágicos: `unrecoverable:<causa>`) para
+ * que el INVARIANTE SAGRADO se cumpla — el pasajero NUNCA queda sin refund Y sin traza durable: el admin lo
+ * ve en la lista de Refunds REJECTED (status=REJECTED + failureReason con este prefijo) y lo resuelve a mano.
+ */
+export const UNRECOVERABLE_REFUND_FAILURE_PREFIX = 'unrecoverable:';
+
 export interface ChargeInput {
   tripId: string;
   grossCents: number;
@@ -66,10 +97,24 @@ export interface ChargeInput {
   payerRef?: string;
   driverId?: string;
   dedupKey: string;
+  /**
+   * MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2): determina la TASA y el MODELO de comisión. ON_DEMAND →
+   * comisión DESCONTADA al conductor (tasa configurable, `grossCents` = la tarifa); CARPOOLING → service fee
+   * SUMADO al pasajero (fee configurable, `grossCents` = la CONTRIBUCIÓN del conductor → el bruto cobrado = contribución
+   * + fee). Lo SETEA el caller en el PUNTO DE ENTRADA del cobro (el consumer trip.completed → ON_DEMAND; el
+   * controller charge service-rail → CARPOOLING). Opcional por compat: ausente ⇒ ON_DEMAND, NUNCA CARPOOLING por defecto.
+   */
+  mode?: ChargeMode;
   /** Código de promoción opcional (Ola 2A). Se canjea y descuenta del total del pasajero. */
   promoCode?: string;
   /** Id del pasajero que paga (necesario para canjear la promo y resolver afiliación on-file). */
   userId?: string;
+  /** MÉTRICAS · modo de despacho del viaje (FIXED/PUJA) denormalizado del evento — divide el ON_DEMAND en
+   *  Fijo/Puja para el corte "Ingresos por modo". Ausente ⇒ null. */
+  dispatchMode?: string;
+  /** MÉTRICAS · origen del viaje (lat/lng) denormalizado del evento — se zonifica a distrito en la captura. */
+  originLat?: number;
+  originLng?: number;
   /**
    * Datos del cliente exigidos por el agregador (ProntoPaga: nombre/email/doc en /payment/new).
    * Opcional: solo lo usa el modo prontopaga; el resto lo ignora. PII mínima, no se persiste acá.
@@ -83,14 +128,66 @@ export interface ChargeInput {
   };
 }
 
-/** Reserva de reembolso ya VALIDADA en refund(): montos + transición destino del Payment (S5). */
+/**
+ * Marcador TIPADO del actor de un refund SYSTEM-INITIATED (F3c-payment): el refund automático por
+ * `booking.cancelled` NO lo dispara un humano — lo dispara el sistema con autoridad total (no discrecional),
+ * así que NO valida rol L2 ni ventana. Se persiste como `requestedBy`/`approvedBy` del Refund y viaja como
+ * `approvedBy` en `payment.refunded`. Const tipado, NO un string mágico suelto regado por el código.
+ */
+export const SYSTEM_OPERATOR = 'system' as const;
+
+/**
+ * Reserva de reembolso ya VALIDADA por el caller: montos + transición destino del Payment (S5). El actor se
+ * desacopla del `AuthenticatedUser` humano (`requestedBy`/`approvedBy` ya resueltos a string) para que el
+ * MISMO core de refund sirva al refund ADMIN (operador humano) y al SYSTEM-INITIATED (F3c, sin operador).
+ * `dedupKey` (opcional) es la barrera DURA de idempotencia del refund automático (UNIQUE en `Refund.dedupKey`);
+ * NULL en los refunds admin discrecionales.
+ */
 interface RefundClaim {
   amountCents: number;
   reason: string;
-  operator: AuthenticatedUser;
+  /** Quién PIDIÓ el refund (userId del operador humano, o SYSTEM_OPERATOR para el automático). */
+  requestedBy: string;
+  /** Quién lo APROBÓ (igual al requestedBy salvo flujos con aprobador distinto). Va en payment.refunded. */
+  approvedBy: string;
+  /** Idempotencia DURA del refund system-initiated (UNIQUE). NULL en refunds admin discrecionales. */
+  dedupKey: string | null;
   newStatus: 'REFUNDED' | 'PARTIALLY_REFUNDED';
   newRefundedCents: number;
   isFullyRefunded: boolean;
+  /**
+   * RC18 (ADR-022) · Causa ATRIBUIBLE al conductor (viaje no realizado / fraude del conductor). Solo entonces un
+   * refund TOTAL de una tarifa digital genera el clawback del neto del conductor (DriverDebt REFUND_CLAWBACK). El
+   * default (false) = lo absorbe la plataforma (dispute/fraude del pasajero). El system-initiated (booking cancel)
+   * es SIEMPRE false (no es culpa del conductor). Se persiste en el Refund y lo lee `completeRefund` al confirmar.
+   */
+  clawbackDriver: boolean;
+  /**
+   * Aplica el backstop server-side de idempotencia por VENTANA TEMPORAL sobre (paymentId, céntimos) ANTES de
+   * crear el refund (solo el camino ADMIN discrecional). El system-initiated NO lo lleva (tiene su `dedupKey`
+   * determinista por bookingId). `false`/undefined = sin backstop de ventana (el operador pidió `forceNew`, o es
+   * system-initiated).
+   */
+  enforceWindowDedup?: boolean;
+  /**
+   * Cola de aprobación (money-OUT · frame HZ8uz): id de una solicitud de reembolso YA existente en estado PENDING
+   * que este desembolso MATERIALIZA (aprobación del operador). Con él, el core NO crea una fila nueva: transiciona
+   * la solicitud PENDING → APPROVED/COMPLETED por CAS. AUSENTE ⇒ refund AUTO (system-initiated / propina revertida):
+   * el core CREA la fila directamente en APPROVED/COMPLETED (auto-aprobado, sin pasar por la cola).
+   */
+  existingRefundId?: string;
+}
+
+/**
+ * Señal de control INTERNA (nunca cruza el borde del servicio): el backstop de ventana encontró un reembolso
+ * reciente del MISMO dinero (paymentId, céntimos) → `refund()` la atrapa y devuelve el existente idempotentemente,
+ * sin doble-pagar. Lleva el refund ya creado para el retorno.
+ */
+class DuplicateRefundInWindowError extends Error {
+  constructor(readonly existing: { refundId: string; paymentId: string; status: string }) {
+    super('Ya existe un reembolso reciente para este pago y monto (ventana de idempotencia)');
+    this.name = 'DuplicateRefundInWindowError';
+  }
 }
 
 /** Desglose real de ganancias de un conductor en una ventana temporal (BR-P05). Céntimos PEN. */
@@ -99,6 +196,10 @@ export interface DriverEarningsBreakdown {
   commissionCents: number;
   tipCents: number;
   netCents: number;
+  /** Neto de cobros CASH: lo que el conductor ya tiene EN MANO (su comisión queda como deuda a netear). */
+  cashNetCents: number;
+  /** Neto de cobros DIGITALES (+ propinas, siempre digitales): lo que le cae por liquidación (payout). */
+  digitalNetCents: number;
   tripCount: number;
 }
 
@@ -112,11 +213,14 @@ export class PaymentsService {
   private readonly retryBaseMs: number;
   private readonly defaultMethod: PaymentMethod;
   private readonly refundWindowDays: number;
-  private readonly refundL2ThresholdCents: number;
+  private readonly refundHighValueThresholdCents: number;
+  private readonly refundIdempotencyWindowMs: number;
   private readonly cancellationDriverShare: number;
+  /// ADR-022 §P-A · tope de deuda por comisiones CASH (céntimos). Al CRUZARLO, el conductor queda bloqueado.
+  private readonly driverDebtCapCents: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: PaymentsRepository,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
     private readonly affiliations: AffiliationsService,
     private readonly promotions: PromotionsService,
@@ -125,14 +229,27 @@ export class PaymentsService {
     // Trailing + @Optional para no romper los call-sites de test que construyen el service con 5 args;
     // si no está inyectado, el cobro simplemente no aplica crédito (saldo intacto).
     @Optional() private readonly credit?: CreditService,
+    // Métricas Prometheus (CoreModule @Global → SIEMPRE inyectable en runtime). @Optional + trailing por la
+    // MISMA razón que `credit`: los specs construyen el service a mano con menos args. La métrica de backstop de
+    // refunds (`payment_refund_backstop_total`) se emite acá (riel común de rechazo de refund), no solo en el
+    // consumer Kafka — así cubre TAMBIÉN el rechazo ASÍNCRONO por callback del proveedor (applyRefundWebhookResult).
+    @Optional() private readonly metrics?: PaymentMetrics,
+    // F2.7 · resuelve la tasa de comisión por MODO (ON_DEMAND configurable · CARPOOLING 0 legal-gated). @Optional
+    // + trailing por la MISMA razón que credit/metrics: los specs construyen el service a mano con menos args. Si
+    // NO está inyectado, el cobro cae a `this.commissionRate` del env (degradación honesta) y trata todo como
+    // ON_DEMAND — JAMÁS rompe el cobro por falta de la config.
+    @Optional() private readonly commission?: CommissionService,
   ) {
     this.commissionRate = config.getOrThrow<number>('COMMISSION_RATE');
     this.maxRetries = config.getOrThrow<number>('PAYMENT_MAX_RETRIES');
     this.retryBaseMs = config.getOrThrow<number>('PAYMENT_RETRY_BASE_MS');
     this.defaultMethod = config.getOrThrow<PaymentMethod>('DEFAULT_PAYMENT_METHOD');
     this.refundWindowDays = config.getOrThrow<number>('REFUND_WINDOW_DAYS');
-    this.refundL2ThresholdCents = config.getOrThrow<number>('REFUND_L2_THRESHOLD_CENTS');
+    this.refundHighValueThresholdCents = config.getOrThrow<number>('REFUND_L2_THRESHOLD_CENTS');
+    this.refundIdempotencyWindowMs =
+      config.getOrThrow<number>('REFUND_IDEMPOTENCY_WINDOW_MINUTES') * 60_000;
     this.cancellationDriverShare = config.getOrThrow<number>('CANCELLATION_DRIVER_SHARE');
+    this.driverDebtCapCents = config.getOrThrow<number>('DRIVER_DEBT_CAP_CENTS');
   }
 
   /**
@@ -149,6 +266,30 @@ export class PaymentsService {
         `El cobro con ${method} no está habilitado en el gateway de pagos activo; elegí otro método`,
       );
     }
+  }
+
+  /**
+   * F2.7 · Resuelve la TASA de comisión (fracción 0..1 que consume `commission()`) para un MODO de cobro.
+   * ON_DEMAND → `onDemandRateBps` (comisión descontada al conductor); CARPOOLING → `carpoolingFeeBps` (service
+   * fee sumado al pasajero) — ambas de CommissionConfig (bps Int → fracción al aplicar). DEGRADACIÓN HONESTA: sin
+   * CommissionService inyectado (DI ausente en tests) el on-demand cae a `this.commissionRate` del env y el
+   * carpooling cae a 0 (sin fee) — NUNCA rompe el cobro por falta de la config. La tasa SIEMPRE nace como bps Int;
+   * el float solo aparece acá, al APLICARLA (redondeo a céntimo Int en `commission()`).
+   */
+  // DEUDA: MEMBRESÍAS (ADR-022 §P-E conductor + §P-F pasajero). Diferidas a propósito — primero que TODO el flujo
+  //   actual funcione end-to-end; las membresías son features de negocio NUEVOS, se construyen sobre base sólida.
+  //   Cuando se retomen, ESTE es el único seam a tocar (lo dice el ADR): threadear `driverId` acá →
+  //   `resolveRateBps(mode, driverId)` → `resolveCommissionBps(mode, config, driverOverrideBps?)`. Diseño cerrado:
+  //   P-E = DriverCommissionPlan { driverId, planTier(FREE|PRO|PRO_PLUS), onDemandDiscountBps, activeUntil },
+  //   tiers % reducido (Free 12% → Pro 8% → Pro+ 6%, relativo a la base ADR-017, piso 0%), GATED a ON_DEMAND,
+  //   billing Yape On-File recurrente. Sin plan activo → cae al CommissionConfig global (cero cambio = FREE).
+  //   P-F (pasajero) = cashback/prioridad/descuento vía CreditService/discountCents; depende de P-H (carpool UI).
+  private async resolveChargeRate(mode: ChargeMode): Promise<number> {
+    if (!this.commission) {
+      // DI ausente (tests/degradación): on-demand → la tasa del env; carpooling → 0 (sin service fee).
+      return mode === ChargeMode.CARPOOLING ? bpsToRate(0) : this.commissionRate;
+    }
+    return bpsToRate(await this.commission.resolveRateBps(mode));
   }
 
   /**
@@ -179,9 +320,7 @@ export class PaymentsService {
     // cobra CARD/PAGOEFECTIVO — eso lo habla el agregador).
     this.assertGatewaySupportsMethod(input.method);
 
-    const existing = await this.prisma.read.payment.findUnique({
-      where: { dedupKey: input.dedupKey },
-    });
+    const existing = await this.repo.findPaymentByDedupKey(input.dedupKey);
     if (existing) return existing;
 
     // Promo (Ola 2A): canje idempotente derivado de la dedupKey del cobro. El descuento reduce SOLO
@@ -214,45 +353,57 @@ export class PaymentsService {
       });
     }
 
+    // F2.7 · la TASA y el MODELO de comisión se resuelven por MODO (NO global): ON_DEMAND → comisión
+    // DESCONTADA al conductor (tasa configurable); CARPOOLING → service fee SUMADO al pasajero (fee configurable).
+    // Para carpooling, `input.grossCents` es la CONTRIBUCIÓN del conductor; `computeChargeAmounts` deriva el bruto
+    // COBRADO al pasajero (= contribución + fee) y lo persiste en `amounts.grossCents`. Ver `computeChargeAmounts`.
+    const mode = input.mode ?? ChargeMode.ON_DEMAND;
+    const rate = await this.resolveChargeRate(mode);
+
     const amounts = computeChargeAmounts(
+      mode,
       input.grossCents,
       input.tipCents ?? 0,
-      this.commissionRate,
+      rate,
       discountCents + creditCents,
     );
 
     let payment: Payment;
     try {
-      payment = await this.prisma.write.payment.create({
-        data: {
-          id: uuidv7(),
-          tripId: input.tripId,
-          driverId: input.driverId ?? null,
-          // Pasajero del viaje (lo trae el trip.completed): se persiste para enriquecer
-          // payment.captured / payment.refunded → push al pasajero (sin join cross-servicio).
-          passengerId: input.userId ?? null,
-          dedupKey: input.dedupKey,
-          amountCents: amounts.amountCents,
-          grossCents: amounts.grossCents,
-          // discountCents = SOLO promo; creditCents = SOLO crédito de referido (reconciliación separada).
-          // amounts.discountCents es la suma (promo+crédito) que se descontó del payable; los guardamos
-          // partidos. amountCents = gross − discountCents − creditCents + tip (invariante del modelo).
-          discountCents,
-          creditCents,
-          tipCents: amounts.tipCents,
-          commissionCents: amounts.commissionCents,
-          feeCents: amounts.feeCents,
-          method: input.method,
-          payerRef: input.payerRef ?? null,
-          status: 'PENDING',
-        },
+      payment = await this.repo.createPayment({
+        id: uuidv7(),
+        tripId: input.tripId,
+        driverId: input.driverId ?? null,
+        // Pasajero del viaje (lo trae el trip.completed): se persiste para enriquecer
+        // payment.captured / payment.refunded → push al pasajero (sin join cross-servicio).
+        passengerId: input.userId ?? null,
+        dedupKey: input.dedupKey,
+        amountCents: amounts.amountCents,
+        grossCents: amounts.grossCents,
+        // discountCents = SOLO promo; creditCents = SOLO crédito de referido (reconciliación separada).
+        // amounts.discountCents es la suma (promo+crédito) que se descontó del payable; los guardamos
+        // partidos. amountCents = gross − discountCents − creditCents + tip (invariante del modelo).
+        discountCents,
+        creditCents,
+        tipCents: amounts.tipCents,
+        commissionCents: amounts.commissionCents,
+        feeCents: amounts.feeCents,
+        method: input.method,
+        mode,
+        // MÉTRICAS · denorm para los cortes por modo/distrito del panel. dispatchMode divide el ON_DEMAND en
+        // Fijo/Puja; el distrito se ZONIFICA del origen ACÁ (una vez, en la captura) y se persiste para agregar
+        // sin re-zonificar. Nullable honesto: cobro sin geo o fuera de cobertura → distrito null (no se inventa).
+        dispatchMode: input.dispatchMode ?? null,
+        originLat: input.originLat ?? null,
+        originLng: input.originLng ?? null,
+        district: zonifyLima(input.originLat, input.originLng),
+        payerRef: input.payerRef ?? null,
+        status: 'PENDING',
       });
     } catch (err) {
       // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza un solo pago.
       if (isUniqueViolation(err, 'dedupKey')) {
-        const dup = await this.prisma.read.payment.findUnique({
-          where: { dedupKey: input.dedupKey },
-        });
+        const dup = await this.repo.findPaymentByDedupKey(input.dedupKey);
         if (dup) return dup;
         throw new ConflictError('Cobro duplicado para la misma dedupKey');
       }
@@ -331,16 +482,13 @@ export class PaymentsService {
     }
 
     // PENDING_EXTERNAL: persistir checkout; el Payment queda PENDING hasta el webhook.
-    const updated = await this.prisma.write.payment.update({
-      where: { id: payment.id },
-      data: {
-        externalUid: result.externalRef ?? null,
-        checkoutUrl: result.checkout?.urlPay ?? null,
-        qrCode: result.checkout?.qrCodeBase64 ?? null,
-        deepLink: result.checkout?.deepLink ?? null,
-        cip: result.checkout?.cip ?? null,
-        checkoutExpiresAt: result.checkout?.expiresAt ? new Date(result.checkout.expiresAt) : null,
-      },
+    const updated = await this.repo.persistAggregatorCheckout(payment.id, {
+      externalUid: result.externalRef ?? null,
+      checkoutUrl: result.checkout?.urlPay ?? null,
+      qrCode: result.checkout?.qrCodeBase64 ?? null,
+      deepLink: result.checkout?.deepLink ?? null,
+      cip: result.checkout?.cip ?? null,
+      checkoutExpiresAt: result.checkout?.expiresAt ? new Date(result.checkout.expiresAt) : null,
     });
     this.logger.log(
       `Cobro agregador PENDIENTE pago=${payment.id} uid=${result.externalRef ?? '-'} (espera webhook)`,
@@ -399,37 +547,69 @@ export class PaymentsService {
     attempts: number,
   ): Promise<Payment> {
     assertPaymentTransition(payment.status, 'CAPTURED');
-    return this.prisma.write.$transaction(async (tx) => {
-      // CAS atómico: el estado va en el WHERE. Dos entregas del webhook procesadas EN PARALELO leen
-      // ambas PENDING (TOCTOU en applyWebhookResult: read en 688 + check en 696); solo la que matchea
-      // PENDING→CAPTURED emite payment.captured y colecta la penalidad. La perdedora ve count=0 →
+    // P-B · el PSP (ProntoPaga) descuenta su fee ANTES de depositar → el bruto (amountCents) NO es lo que la
+    // plataforma recibe. Modelamos el fee al capturar (por método, editable por admin; 0 si no seteado o sin
+    // CommissionService) para persistir el NETO REAL que llega al banco. Se computa fuera de la tx (lectura cacheada).
+    const feeBps = (await this.commission?.resolvePspFeeBps?.(payment.method)) ?? 0;
+    const { pspFeeCents, netSettledCents } = computePspSettlement(payment.amountCents, feeBps);
+    return this.repo.runInTransaction(async (tx) => {
+      // CAS atómico: el estado va en el WHERE (invariante en el repo). Dos entregas del webhook procesadas EN
+      // PARALELO leen ambas PENDING (TOCTOU en applyWebhookResult: read en 688 + check en 696); solo la que
+      // matchea PENDING→CAPTURED emite payment.captured y colecta la penalidad. La perdedora ve count=0 →
       // devuelve el pago ya capturado SIN duplicar el evento (espeja el guard de collectPenaltyInTx).
-      const { count } = await tx.payment.updateMany({
-        where: { id: payment.id, status: 'PENDING' },
-        data: {
-          status: 'CAPTURED',
-          externalRef,
-          retries: attempts,
-          capturedAt: new Date(),
-          failureReason: null,
-        },
+      //
+      // El CAS (en el repo) incluye DEBT y FAILED además de PENDING: un cobro que cayó a DEBT (declive/reintentos
+      // agotados) o a FAILED (checkout expirado/cancelado) y LUEGO el PSP confirma (webhook CONFIRMED tardío) DEBE
+      // capturar — la plata SE MOVIÓ. PENDING/DEBT/FAILED → CAPTURED son todas transiciones válidas (payment.policy).
+      // El guard idempotente (status===CAPTURED/REFUNDED) ya corta antes en el caller; acá el CAS serializa el resto
+      // → CAPTURED (una sola captura gana; el que ve count=0 devuelve el ya-capturado).
+      const { count } = await this.repo.casCapturePayment(tx, payment.id, {
+        status: 'CAPTURED',
+        externalRef,
+        retries: attempts,
+        capturedAt: new Date(),
+        failureReason: null,
+        pspFeeCents,
+        netSettledCents,
       });
-      const updated = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
+      const updated = await this.repo.findPaymentByIdInTx(tx, payment.id);
       if (count === 0) return updated; // otra entrega ya capturó: no re-emitir ni re-colectar
-      const envelope = createEnvelope({
-        eventType: 'payment.captured',
-        producer: 'payment-service',
-        payload: {
-          paymentId: updated.id,
-          tripId: updated.tripId,
-          method: updated.method,
-          grossCents: updated.grossCents,
-          commissionCents: updated.commissionCents,
-          // ENRIQUECIDO: push "pago confirmado · S/X.XX" al pasajero (notification-service).
-          passengerId: updated.passengerId ?? undefined,
-        },
-      });
-      await enqueueOutbox(tx, envelope, updated.id);
+      // ADR-022 §P-A · un Payment de LIQUIDACIÓN de deuda (kind=DEBT_SETTLEMENT) que captura NO es un pago de viaje:
+      // marca las driver_debts PENDING del conductor → PAID y emite `driver.debt_cleared` (desbloqueo), en la MISMA
+      // tx de captura. Rama análoga a TIP (que emite tip_added en vez de payment.captured). El CAS de arriba
+      // (count>0) garantiza una sola ejecución → una sola limpieza + un solo driver.debt_cleared.
+      if (updated.kind === 'DEBT_SETTLEMENT') {
+        await this.settleDebtsOnCapture(tx, updated);
+        return updated;
+      }
+      // A1 · un tip-Payment (kind=TIP) que captura NO es un "pago del viaje": emite `payment.tip_added` (el
+      // conductor cobra la propina SOLO cuando se cobró de verdad + entra al payout), no `payment.captured`.
+      const envelope =
+        updated.kind === 'TIP'
+          ? createEnvelope({
+              eventType: 'payment.tip_added',
+              producer: 'payment-service',
+              payload: {
+                paymentId: updated.id,
+                tripId: updated.tripId,
+                driverId: updated.driverId ?? undefined,
+                tipCents: updated.tipCents,
+              },
+            })
+          : createEnvelope({
+              eventType: 'payment.captured',
+              producer: 'payment-service',
+              payload: {
+                paymentId: updated.id,
+                tripId: updated.tripId,
+                method: updated.method,
+                grossCents: updated.grossCents,
+                commissionCents: updated.commissionCents,
+                // ENRIQUECIDO: push "pago confirmado · S/X.XX" al pasajero (notification-service).
+                passengerId: updated.passengerId ?? undefined,
+              },
+            });
+      await this.repo.enqueueOutbox(tx, envelope, updated.id);
       // F2.3 · si este Payment SALDA una penalidad de cancelación, flippearla → COLLECTED en la MISMA
       // transacción de captura (vale tanto para el camino sync como para el webhook: ambos pasan por acá).
       if (updated.cancellationPenaltyId) {
@@ -447,16 +627,13 @@ export class PaymentsService {
    * del conductor vía collectEarnings). Si la penalidad ya no está PENDING (COLLECTED/WAIVED) → no-op.
    */
   private async collectPenaltyInTx(
-    tx: Prisma.TransactionClient,
+    tx: PaymentTx,
     penaltyId: string,
     settlementPaymentId: string,
   ): Promise<void> {
-    const claimed = await tx.cancellationPenalty.updateMany({
-      where: { id: penaltyId, status: 'PENDING' },
-      data: { status: 'COLLECTED', collectedAt: new Date() },
-    });
+    const claimed = await this.repo.casCollectPenalty(tx, penaltyId);
     if (claimed.count === 0) return; // ya COLLECTED/WAIVED → idempotente, sin segundo evento.
-    const penalty = await tx.cancellationPenalty.findUnique({ where: { id: penaltyId } });
+    const penalty = await this.repo.findPenaltyByIdInTx(tx, penaltyId);
     if (!penalty) return;
     const envelope = createEnvelope({
       eventType: 'payment.cancellation_penalty_collected',
@@ -472,16 +649,38 @@ export class PaymentsService {
         settlementPaymentId,
       },
     });
-    await enqueueOutbox(tx, envelope, penalty.id);
+    await this.repo.enqueueOutbox(tx, envelope, penalty.id);
   }
 
   private async markDebt(payment: Payment, reason: string): Promise<Payment> {
-    assertPaymentTransition(payment.status, 'DEBT');
-    return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'DEBT', retries: this.maxRetries, failureReason: reason },
+    // A1 · una PROPINA (kind=TIP) que declina NO es deuda del viaje ni una falla de cobro que deba escalar:
+    // se marca FAILED (terminal) SIN emitir `payment.failed` — ese evento dispara alerta a la central de
+    // seguridad + push "pago falló" + bloqueo de nuevos viajes, todo INDEBIDO para una propina OPCIONAL. El
+    // pasajero reintenta la propina desde su UI (nueva dedupKey → nuevo tip-Payment).
+    if (payment.kind === 'TIP') {
+      assertPaymentTransition(payment.status, 'FAILED');
+      // RC19 (ADR-022) · el CAS de status vive en el repo: `markTipFailed` ahora es un updateMany
+      // `where status ∈ [PENDING,DEBT]` + re-read. Si un webhook CONFIRMED concurrente ya capturó (CAPTURED),
+      // el updateMany no matchea → NO lo pisamos; devuelve el estado real (la captura gana), sin emitir
+      // `payment.failed`. El desenlace terminal de la propina no cambia (sin evento de falla).
+      return this.repo.markTipFailed(payment.id, {
+        status: 'FAILED',
+        retries: this.maxRetries,
+        failureReason: reason,
       });
+    }
+    assertPaymentTransition(payment.status, 'DEBT');
+    return this.repo.runInTransaction(async (tx) => {
+      // RC19 (ADR-022) · el CAS de status vive en el repo: `markPaymentDebtInTx` es un updateMany `where status=
+      // 'PENDING'` + re-read. Si un CONFIRMED concurrente ya capturó (CAPTURED) en la ventana TOCTOU, el CAS no
+      // matchea → la fila releída NO queda en DEBT → NO emitimos `payment.failed` (sería una "falla" FALSA sobre
+      // plata ya cobrada, que alertaría a seguridad + bloquearía viajes indebidamente). Espeja el CAS de captureSuccess.
+      const updated = await this.repo.markPaymentDebtInTx(tx, payment.id, {
+        status: 'DEBT',
+        retries: this.maxRetries,
+        failureReason: reason,
+      });
+      if (updated.status !== 'DEBT') return updated; // otra transición ganó la carrera: no re-emitir sobre un estado ajeno
       const envelope = createEnvelope({
         eventType: 'payment.failed',
         producer: 'payment-service',
@@ -491,16 +690,42 @@ export class PaymentsService {
           reason,
           // willRetry=false: agotamos reintentos. Señal para bloquear nuevos viajes + alerta central.
           willRetry: false,
+          // passengerId ENRIQUECIDO (opcional en el schema): sin él, notification-service resuelve targets=[]
+          // y el push "tu pago quedó pendiente" (BR-P02) nunca sale. Necesario para el "No cobré" del efectivo
+          // y correcto también para los DEBT digitales (el deudor debe enterarse). El almacén resuelve el token.
+          ...(updated.passengerId ? { passengerId: updated.passengerId } : {}),
         },
       });
-      await enqueueOutbox(tx, envelope, updated.id);
+      await this.repo.enqueueOutbox(tx, envelope, updated.id);
       return updated;
     });
   }
 
   async getPayment(id: string): Promise<Payment> {
-    const payment = await this.prisma.read.payment.findUnique({ where: { id } });
+    const payment = await this.repo.findPaymentById(id);
     if (!payment) throw new NotFoundError('Pago no encontrado');
+    return payment;
+  }
+
+  /**
+   * Lookup canónico del cobro REEMBOLSABLE de un viaje (A1 · `kind=FARE`: la TARIFA, nunca la propina del
+   * mismo viaje). Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular parciales, BR-P06);
+   * el más reciente. Devuelve `null` si no hay — cada caller decide el desenlace (refund lanza, la
+   * cancelación de booking hace skip, el getter del admin lanza NotFound). Único punto que define "el pago
+   * que se reembolsaría", para que la vista del admin == lo que efectivamente se reembolsa.
+   */
+  private findRefundablePaymentByTrip(tripId: string): Promise<Payment | null> {
+    return this.repo.findRefundablePaymentByTrip(tripId);
+  }
+
+  /**
+   * El cobro reembolsable de un viaje, para que el operador de finanzas lo INSPECCIONE antes de reembolsar
+   * (misma cláusula que `refund` → "lo que veo es lo que se reembolsará"). Lanza NotFound si no hay. La
+   * fila cruda se recorta a una view PII-consciente en el admin-bff (el shaping vive en el BFF, no acá).
+   */
+  async getPaymentByTrip(tripId: string): Promise<Payment> {
+    const payment = await this.findRefundablePaymentByTrip(tripId);
+    if (!payment) throw new NotFoundError('No hay un cobro reembolsable para este viaje');
     return payment;
   }
 
@@ -521,11 +746,10 @@ export class PaymentsService {
    * cliente (anti-IDOR). `hasDebt`/`totalCents` resumen lo BLOQUEANTE (DEBT + CANCELLATION_PENALTY).
    */
   async getDebtForPassenger(passengerId: string): Promise<DebtSummary> {
-    const debtRows = await this.prisma.read.payment.findMany({
-      where: { passengerId, status: 'DEBT' },
-      select: { id: true, tripId: true, amountCents: true, failureReason: true, createdAt: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    // A1 · `kind: 'FARE'`: el gate de deuda del pasajero es sobre obligaciones de VIAJE. Una propina (kind=TIP)
+    // es OPCIONAL: si su cobro declina NO es deuda bloqueante ni un "pago por completar" del gate — no puede
+    // impedirle pedir viajes. Su reintento vive en la UI de propina, no acá.
+    const debtRows = await this.repo.findPassengerDebtPayments(passengerId);
     const debtItems: DebtItem[] = debtRows.map((r) => ({
       paymentId: r.id,
       tripId: r.tripId,
@@ -538,21 +762,9 @@ export class PaymentsService {
     // PENDING con checkout VIVO = pagos por completar (accionables). Un PENDING sin externalUid ni
     // medios de checkout es un cobro en curso (efectivo esperando confirmación bilateral, on-file
     // server-initiated sin checkout): NO accionable por el usuario → fuera.
-    const pendingRows = await this.prisma.read.payment.findMany({
-      where: { passengerId, status: 'PENDING' },
-      select: {
-        id: true,
-        tripId: true,
-        amountCents: true,
-        createdAt: true,
-        externalUid: true,
-        checkoutUrl: true,
-        deepLink: true,
-        qrCode: true,
-        cip: true,
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    // A1 · `kind: 'FARE'` (en el repo): idem — un cobro de propina PENDING con checkout NO es un "pago del viaje
+    // por completar" del gate. La propina se completa desde su propia UI, no desde la franja de deuda del viaje.
+    const pendingRows = await this.repo.findPassengerPendingPayments(passengerId);
     const pendingActionItems: DebtItem[] = pendingRows
       .filter(
         (r) =>
@@ -569,11 +781,7 @@ export class PaymentsService {
       }));
 
     // Penalidades de cancelación PENDING (F2): obligaciones cobrables que BLOQUEAN el gate igual que la deuda.
-    const penaltyRows = await this.prisma.read.cancellationPenalty.findMany({
-      where: { passengerId, status: 'PENDING' },
-      select: { id: true, tripId: true, penaltyCents: true, reason: true, createdAt: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    const penaltyRows = await this.repo.findPassengerPendingPenalties(passengerId);
     const penaltyItems: DebtItem[] = penaltyRows.map((r) => ({
       penaltyId: r.id,
       tripId: r.tripId,
@@ -605,7 +813,7 @@ export class PaymentsService {
    * NO valida ownership: el BFF lo hace ANTES (passengerId === user, 404 anti-enumeración).
    */
   async retryCharge(id: string): Promise<Payment> {
-    const payment = await this.prisma.read.payment.findUnique({ where: { id } });
+    const payment = await this.repo.findPaymentById(id);
     if (!payment) throw new NotFoundError('Pago no encontrado');
 
     // Idempotencia: si ya se capturó (p.ej. un webhook entró entre medio), no re-cobramos.
@@ -631,16 +839,13 @@ export class PaymentsService {
     }
 
     // Status-guard transaccional: DEBT→PENDING SOLO si sigue en DEBT (gana un único llamador concurrente).
-    const claimed = await this.prisma.write.payment.updateMany({
-      where: { id, status: 'DEBT' },
-      data: { status: 'PENDING', failureReason: null },
-    });
+    const claimed = await this.repo.claimDebtForRetry(id);
     if (claimed.count === 0) {
       // Otro intento concurrente ya lo movió: devolvemos el estado vigente (no-op idempotente).
       return this.getPayment(id);
     }
 
-    const reclaimed = await this.prisma.read.payment.findUnique({ where: { id } });
+    const reclaimed = await this.repo.findPaymentById(id);
     if (!reclaimed) throw new NotFoundError('Pago no encontrado');
 
     // Re-cobro por el mismo camino que el cobro original, según el flujo que DECLARA el adapter:
@@ -684,7 +889,7 @@ export class PaymentsService {
    * NO valida ownership: el BFF lo hace ANTES (passengerId === user, 404 anti-enumeración).
    */
   async changeMethod(id: string, method: PaymentMethod): Promise<Payment> {
-    const payment = await this.prisma.read.payment.findUnique({ where: { id } });
+    const payment = await this.repo.findPaymentById(id);
     if (!payment) throw new NotFoundError('Pago no encontrado');
 
     // Guard ESTADO: solo un pago NO-capturado se puede cambiar. CAPTURED/REFUNDED/FAILED son terminales
@@ -713,26 +918,13 @@ export class PaymentsService {
     // Status-guard transaccional: aplica el cambio SOLO si sigue en PENDING o DEBT (gana un único
     // llamador concurrente). Setea el método nuevo, LIMPIA el checkout viejo (era del método anterior:
     // un deepLink Yape no sirve para PLIN) y normaliza a PENDING (DEBT→PENDING) para re-cobrar limpio.
-    const claimed = await this.prisma.write.payment.updateMany({
-      where: { id, status: { in: ['PENDING', 'DEBT'] } },
-      data: {
-        method,
-        status: 'PENDING',
-        failureReason: null,
-        externalUid: null,
-        checkoutUrl: null,
-        qrCode: null,
-        deepLink: null,
-        cip: null,
-        checkoutExpiresAt: null,
-      },
-    });
+    const claimed = await this.repo.claimForMethodChange(id, method);
     if (claimed.count === 0) {
       // Otro intento concurrente ya lo movió (o se capturó entre medio): estado vigente (no-op idempotente).
       return this.getPayment(id);
     }
 
-    const reclaimed = await this.prisma.read.payment.findUnique({ where: { id } });
+    const reclaimed = await this.repo.findPaymentById(id);
     if (!reclaimed) throw new NotFoundError('Pago no encontrado');
 
     // Re-cobro con el método NUEVO por el mismo camino que el cobro original, según el flujo que
@@ -764,33 +956,38 @@ export class PaymentsService {
     /** Código de error del proveedor (p.ej. YPTRX002 = saldo insuficiente) para un recibo honesto. */
     errorCode?: string;
   }): Promise<{ applied: boolean; status: string }> {
-    if (!input.paymentId) {
+    let paymentId = input.paymentId;
+    if (!paymentId) {
       // Sin `order` no podemos correlacionar; intentamos por externalUid (defensivo).
-      const byUid = await this.prisma.read.payment.findFirst({
-        where: { externalUid: input.externalUid },
-      });
+      const byUid = await this.repo.findPaymentByExternalUid(input.externalUid);
       if (!byUid) {
         this.logger.warn(`Webhook de pago sin match (uid=${input.externalUid}); no-op`);
         return { applied: false, status: 'NO_MATCH' };
       }
-      input = { ...input, paymentId: byUid.id };
+      paymentId = byUid.id;
     }
 
-    const payment = await this.prisma.read.payment.findUnique({ where: { id: input.paymentId } });
+    const payment = await this.repo.findPaymentById(paymentId);
     if (!payment) {
-      this.logger.warn(`Webhook de pago sin match (paymentId=${input.paymentId}); no-op`);
+      this.logger.warn(`Webhook de pago sin match (paymentId=${paymentId}); no-op`);
       return { applied: false, status: 'NO_MATCH' };
+    }
+
+    // Guard idempotente COMÚN a las 3 ramas: un webhook (CONFIRMED/DECLINED/EXPIRED) que llega sobre un pago YA
+    // LIQUIDADO (CAPTURED/REFUNDED/PARTIALLY_REFUNDED) es TARDÍO/stale — la plata ya se capturó (y quizá se
+    // reembolsó). NO-OP idempotente, NO un error. Antes PARTIALLY_REFUNDED (en las 3) y REFUNDED (en CONFIRMED)
+    // caían a captureSuccess/markDebt y assertPaymentTransition lanzaba InvalidStateError → el proveedor re-
+    // entregaba en loop (no-2xx). PARTIALLY_REFUNDED→X y REFUNDED→X no son transiciones válidas (payment.policy).
+    if (isSettledPayment(payment.status)) {
+      return { applied: false, status: payment.status };
     }
 
     switch (input.status) {
       case 'CONFIRMED': {
-        if (payment.status === 'CAPTURED') return { applied: false, status: 'CAPTURED' }; // idempotente
         await this.captureSuccess(payment, input.externalUid, payment.retries || 1);
         return { applied: true, status: 'CAPTURED' };
       }
       case 'DECLINED': {
-        if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED')
-          return { applied: false, status: payment.status };
         if (payment.status === 'DEBT') return { applied: false, status: 'DEBT' };
         // YPTRX002 = saldo insuficiente (cobro Yape On File): razón honesta para el recibo del pasajero.
         const reason =
@@ -801,109 +998,109 @@ export class PaymentsService {
         return { applied: true, status: 'DEBT' };
       }
       case 'EXPIRED': {
-        if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED')
-          return { applied: false, status: payment.status };
         if (payment.status === 'FAILED') return { applied: false, status: 'FAILED' };
-        await this.markFailed(payment, 'expired');
-        return { applied: true, status: 'FAILED' };
+        if (payment.status === 'DEBT') return { applied: false, status: 'DEBT' }; // idempotente (espejo DECLINED)
+        // Un checkout que EXPIRA para el cobro de un viaje COMPLETADO NO es "no pasó nada": la tarifa se DEBE
+        // igual (el viaje ocurrió). Va a DEBT (gatea al pasajero + reintentable), IGUAL que DECLINED — NO a
+        // FAILED terminal, que dejaba el viaje GRATIS (sin cobro, sin gate, sin reintento → fuga de ingresos).
+        // markDebt rutea por kind: una PROPINA (kind=TIP) que expira SÍ es FAILED terminal (opcional, no se debe).
+        await this.markDebt(payment, 'checkout_expired');
+        return { applied: true, status: payment.kind === 'TIP' ? 'FAILED' : 'DEBT' };
       }
       default:
         return { applied: false, status: payment.status }; // PENDING → sin transición
     }
   }
 
-  /** Marca un pago como FAILED (cobro externo expirado/cancelado). Emite payment.failed willRetry=false. */
-  private async markFailed(payment: Payment, reason: string): Promise<Payment> {
-    assertPaymentTransition(payment.status, 'FAILED');
-    return this.prisma.write.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
-        data: { status: 'FAILED', failureReason: reason },
-      });
-      const envelope = createEnvelope({
-        eventType: 'payment.failed',
-        producer: 'payment-service',
-        payload: { paymentId: updated.id, tripId: updated.tripId, reason, willRetry: false },
-      });
-      await enqueueOutbox(tx, envelope, updated.id);
-      return updated;
-    });
-  }
-
   /**
-   * Añade una propina a un viaje YA cobrado (BR-P04): el 100% va al conductor, fuera de comisión.
-   * Idempotente por `dedupKey` (UNIQUE en TipAddition): reenviar la misma propina no la duplica.
-   * Suma el monto a `payment.tipCents` y a `payment.amountCents` en la MISMA transacción que el
-   * registro del incremento. Solo si existe el pago del viaje y está vivo (PENDING/CAPTURED).
-   *
-   * Efectivo vs digital: el modelo es uniforme — la propina se registra contra el pago del viaje en
-   * ambos casos. La liquidación al conductor (payouts) ya agrega `tipCents` de los pagos CAPTURED,
-   * así que un tip sobre un pago capturado entra en la liquidación de su período sin pasos extra.
+   * Añade una propina a un viaje YA cobrado (BR-P04 · A1 ADR-022 · Model B): el 100% va al conductor, fuera de
+   * comisión. TODA propina iniciada en el app se COBRA DIGITAL (no existe "propina en mano" iniciada por el app):
+   * crea un cobro dedicado (tip-Payment `kind=TIP`, gross 0, comisión 0) que pasa por el gateway. El conductor la
+   * cobra SOLO cuando el cobro CAPTURA (captureSuccess emite `payment.tip_added` + entra al payout por su
+   * `tipCents`). Antes NO se cobraba nada al pasajero y el conductor la recibía igual → la plataforma la subsidiaba.
+   * Idempotente por `Payment.dedupKey` (namespaced `tip-charge:`): reenviar la misma propina no la duplica.
    */
   async addTip(input: { tripId: string; tipCents: number; dedupKey: string }): Promise<Payment> {
     if (!Number.isInteger(input.tipCents) || input.tipCents <= 0) {
       throw new InvalidStateError('tipCents debe ser un entero de céntimos positivo');
     }
 
-    // Idempotencia: si ya aplicamos esta propina, devolvemos el pago como está (sin re-sumar).
-    const existingTip = await this.prisma.read.tipAddition.findUnique({
-      where: { dedupKey: input.dedupKey },
-    });
-    if (existingTip) return this.getPayment(existingTip.paymentId);
+    // Idempotencia: si ya iniciamos el cobro de esta propina (tip-Payment), lo devolvemos sin re-cobrar.
+    const existingTipCharge = await this.repo.findPaymentByDedupKey(
+      deriveTipChargeDedupKey(input.dedupKey),
+    );
+    if (existingTipCharge) return existingTipCharge;
 
-    const payment = await this.prisma.read.payment.findFirst({
-      where: { tripId: input.tripId, status: { in: ['PENDING', 'CAPTURED'] } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!payment)
+    // El cobro de la TARIFA del viaje (kind=FARE): de él tomamos conductor/pasajero/payerRef y el método (si fue
+    // digital). El filtro `kind=FARE` evita agarrar un tip-Payment previo del mismo viaje (matchearía por tripId).
+    const fare = await this.repo.findLiveFareByTrip(input.tripId);
+    if (!fare)
       throw new NotFoundError('No hay un cobro vivo para este viaje al que añadir propina');
-    assertCanAddTip(payment.status);
+    assertCanAddTip(fare.status);
 
+    return this.chargeTipDigital(fare, input.tipCents, input.dedupKey);
+  }
+
+  /**
+   * A1 (Model B) · Propina DIGITAL: cobro dedicado (tip-Payment `kind=TIP`, gross 0, comisión 0, 100% al conductor)
+   * que pasa por el MISMO despacho digital que la tarifa. El MÉTODO de la propina = el de la tarifa si fue digital;
+   * si el viaje se pagó en EFECTIVO cae a YAPE por defecto (on-file resolviendo el walletUid server-side por `userId`,
+   * o un checkout QR). Queda PENDING hasta que el webhook lo CAPTURA; recién ahí `captureSuccess` emite
+   * `payment.tip_added` y el `tipCents` entra al payout (collectEarnings). Idempotente por `Payment.dedupKey`.
+   */
+  private async chargeTipDigital(
+    fare: Payment,
+    tipCents: number,
+    clientDedupKey: string,
+  ): Promise<Payment> {
+    const dedupKey = deriveTipChargeDedupKey(clientDedupKey);
+    // Model B: la propina SIEMPRE se cobra digital. Si el viaje fue en EFECTIVO no puede heredar CASH (el gateway
+    // no cobra efectivo) → cae al método digital por defecto (YAPE); si fue digital, cobra con el MISMO método.
+    const method = (
+      isCashMethod(fare.method) ? DEFAULT_DIGITAL_TIP_METHOD : fare.method
+    ) as Extract<PaymentMethod, 'YAPE' | 'PLIN' | 'CARD' | 'PAGOEFECTIVO'>;
+    let tip: Payment;
     try {
-      return await this.prisma.write.$transaction(async (tx) => {
-        await tx.tipAddition.create({
-          data: {
-            id: uuidv7(),
-            paymentId: payment.id,
-            tripId: payment.tripId,
-            dedupKey: input.dedupKey,
-            tipCents: input.tipCents,
-          },
-        });
-        const updated = await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            tipCents: { increment: input.tipCents },
-            amountCents: { increment: input.tipCents },
-          },
-        });
-        // Outbox (regla CLAUDE.md §3): la propina se publica en la MISMA transacción que su registro,
-        // así el conductor se entera en vivo (driver-bff → push) sin que pueda quedar suma sin evento ni
-        // evento sin suma. `driverId` ENRIQUECIDO para rutear sin join cross-servicio (puede ser null).
-        const envelope = createEnvelope({
-          eventType: 'payment.tip_added',
-          producer: 'payment-service',
-          payload: {
-            paymentId: updated.id,
-            tripId: updated.tripId,
-            driverId: updated.driverId ?? undefined,
-            tipCents: input.tipCents,
-          },
-        });
-        await enqueueOutbox(tx, envelope, updated.id);
-        return updated;
+      tip = await this.repo.createPayment({
+        id: uuidv7(),
+        tripId: fare.tripId,
+        driverId: fare.driverId,
+        passengerId: fare.passengerId,
+        dedupKey,
+        kind: 'TIP',
+        amountCents: tipCents,
+        grossCents: 0,
+        discountCents: 0,
+        creditCents: 0,
+        tipCents,
+        commissionCents: 0,
+        feeCents: 0,
+        method,
+        mode: 'ON_DEMAND',
+        payerRef: fare.payerRef,
+        status: 'PENDING',
       });
     } catch (err) {
-      // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola suma.
       if (isUniqueViolation(err, 'dedupKey')) {
-        const dup = await this.prisma.read.tipAddition.findUnique({
-          where: { dedupKey: input.dedupKey },
-        });
-        if (dup) return this.getPayment(dup.paymentId);
-        throw new ConflictError('Propina duplicada para la misma dedupKey');
+        const dup = await this.repo.findPaymentByDedupKey(dedupKey);
+        if (dup) return dup;
+        throw new ConflictError('Cobro de propina duplicado para la misma dedupKey');
       }
       throw err;
     }
+    // Mismo despacho digital que la tarifa. NO reusamos charge() a propósito: una propina NO canjea promo ni
+    // gasta crédito del pasajero (esos reducen la tarifa, no la propina del conductor).
+    return this.dispatchDigitalCharge(tip, {
+      tripId: fare.tripId,
+      grossCents: 0,
+      tipCents,
+      method,
+      dedupKey,
+      driverId: fare.driverId ?? undefined,
+      userId: fare.passengerId ?? undefined,
+      payerRef: fare.payerRef ?? undefined,
+      mode: ChargeMode.ON_DEMAND,
+    });
   }
 
   /**
@@ -916,24 +1113,37 @@ export class PaymentsService {
     from: Date,
     to: Date,
   ): Promise<DriverEarningsBreakdown> {
-    const rows = await this.prisma.read.payment.findMany({
-      where: { driverId, status: 'CAPTURED', capturedAt: { gte: from, lt: to } },
-      select: { grossCents: true, commissionCents: true, tipCents: true },
-    });
+    // Espeja EXACTO el filtro de collectEarnings (payouts.service:781): incluye PARTIALLY_REFUNDED — un
+    // reembolso PARCIAL al pasajero lo absorbe la plataforma, el conductor cobra la tarifa ENTERA (gross/
+    // comisión completos, sin restar refundedCents). Antes la pantalla filtraba solo CAPTURED → sub-reportaba
+    // lo que el conductor efectivamente cobra por banco (divergía del payout real).
+    const rows = await this.repo.findDriverCapturedPayments(driverId, from, to);
     let grossCents = 0;
     let commissionCents = 0;
     let tipCents = 0;
+    let cashNetCents = 0;
+    let tripCount = 0;
     for (const r of rows) {
+      // Bruto/comisión/propina se suman de TODOS los cobros (un tip-Payment aporta 0 bruto/comisión + su
+      // propina); pero el CONTEO de viajes es solo de las TARIFAS (kind=FARE): una propina NO es un viaje.
       grossCents += r.grossCents;
       commissionCents += r.commissionCents;
       tipCents += r.tipCents;
+      // Split por método: el neto de un cobro CASH ya está EN MANO del conductor (cobró el bruto; su
+      // comisión queda como DriverDebt a netear en la liquidación). El resto (digital) le cae por payout.
+      if (r.method === 'CASH') cashNetCents += r.grossCents - r.commissionCents + r.tipCents;
+      if (r.kind === 'FARE') tripCount += 1;
     }
+    const netCents = grossCents - commissionCents + tipCents;
     return {
       grossCents,
       commissionCents,
       tipCents,
-      netCents: grossCents - commissionCents + tipCents,
-      tripCount: rows.length,
+      netCents,
+      cashNetCents,
+      // Complemento exacto: cash + digital = neto total (invariante del split, sin re-sumar filas).
+      digitalNetCents: netCents - cashNetCents,
+      tripCount,
     };
   }
 
@@ -952,7 +1162,7 @@ export class PaymentsService {
     passengerConfirmed: boolean;
     status: string;
   }> {
-    const payment = await this.prisma.read.payment.findUnique({ where: { id: paymentId } });
+    const payment = await this.repo.findPaymentById(paymentId);
     if (!payment) throw new NotFoundError('Pago no encontrado');
     if (payment.method !== 'CASH') throw new InvalidStateError('El pago no es en efectivo');
 
@@ -965,15 +1175,31 @@ export class PaymentsService {
     }
     const tripId = payment.tripId;
 
-    const data = isDriver ? { driverConfirmed: confirmed } : { passengerConfirmed: confirmed };
-    const confirmation = await this.prisma.write.cashConfirmation.upsert({
-      where: { tripId },
-      update: data,
-      create: { id: uuidv7(), tripId, ...data },
-    });
+    // UNA sola confirmación (decisión del dueño 2026-07-14): el CONDUCTOR confirma por AMBOS (tiene la
+    // plata en mano). Así su confirmación en el resumen post-viaje captura directo, sin un segundo paso del
+    // pasajero. El pasajero ya no confirma (solo ve el recibo); su rama se conserva por compat/no-op.
+    const data = isDriver
+      ? { driverConfirmed: confirmed, passengerConfirmed: confirmed }
+      : { passengerConfirmed: confirmed };
+    const confirmation = await this.repo.upsertCashConfirmation(tripId, data);
 
-    // Disputa explícita → discrepancia (BR-P03): dispara ticket de soporte vía evento.
+    // "No cobré" del CONDUCTOR (decisión del dueño 2026-07-14): NO es una disputa a soporte — es DEUDA DEL
+    // PASAJERO. El viaje ocurrió y no se pagó → el Payment pasa a DEBT vía `markDebt` (CAS PENDING→DEBT +
+    // emite `payment.failed` con willRetry=false), que lo hace visible al debt gate (`getDebtForPassenger`):
+    // el pasajero no puede pedir otro viaje hasta regularizar, y se netea en su próximo cobro digital. El
+    // conductor no se perjudica (no había plata en mano que repartir). Reason dedicado para distinguirlo de
+    // un cobro digital agotado. El caso `!isDriver` (pasajero disputando) es legacy/no-op: queda como
+    // discrepancia a soporte, sin marcar deuda por dicho del propio deudor.
     if (!confirmed) {
+      if (isDriver) {
+        const debited = await this.markDebt(payment, 'CASH_NOT_COLLECTED');
+        return {
+          tripId,
+          driverConfirmed: confirmation.driverConfirmed,
+          passengerConfirmed: confirmation.passengerConfirmed,
+          status: debited.status,
+        };
+      }
       await this.emitCashDiscrepancy(payment.id, tripId);
       return {
         tripId,
@@ -983,13 +1209,16 @@ export class PaymentsService {
       };
     }
 
-    if (
-      confirmation.driverConfirmed &&
-      confirmation.passengerConfirmed &&
-      payment.status === 'PENDING'
-    ) {
+    // Captura con la confirmación del CONDUCTOR (single confirmation): en cuanto driverConfirmed y el pago
+    // sigue PENDING, se captura. La confirmación del pasajero sola NO captura (el conductor tiene la plata).
+    if (confirmation.driverConfirmed && payment.status === 'PENDING') {
       await this.captureCash(payment);
-      return { tripId, driverConfirmed: true, passengerConfirmed: true, status: 'CAPTURED' };
+      return {
+        tripId,
+        driverConfirmed: true,
+        passengerConfirmed: confirmation.passengerConfirmed,
+        status: 'CAPTURED',
+      };
     }
 
     return {
@@ -1002,16 +1231,43 @@ export class PaymentsService {
 
   private async captureCash(payment: Payment): Promise<void> {
     assertPaymentTransition(payment.status, 'CAPTURED');
-    await this.prisma.write.$transaction(async (tx) => {
-      // CAS atómico: el estado va en el WHERE. Dos confirmaciones bilaterales concurrentes
-      // (driver+passenger en la misma ventana de ms) leen ambas PENDING; solo la que matchea
-      // PENDING→CAPTURED gana → un único payment.captured (sin push duplicado). El check en
-      // confirmCash es TOCTOU contra el read stale; este CAS cierra la ventana.
-      const { count } = await tx.payment.updateMany({
-        where: { id: payment.id, status: 'PENDING' },
-        data: { status: 'CAPTURED', capturedAt: new Date(), externalRef: `cash:${payment.tripId}` },
+    await this.repo.runInTransaction(async (tx) => {
+      // CAS atómico: el estado va en el WHERE (invariante en el repo). Dos confirmaciones bilaterales concurrentes
+      // (driver+passenger en la misma ventana de ms) leen ambas PENDING; solo la que matchea PENDING→CAPTURED gana
+      // → un único payment.captured (sin push duplicado). El check en confirmCash es TOCTOU contra el read stale;
+      // este CAS cierra la ventana.
+      const { count } = await this.repo.casCaptureCash(tx, payment.id, {
+        status: 'CAPTURED',
+        capturedAt: new Date(),
+        externalRef: `cash:${payment.tripId}`,
+        // P-B · el efectivo NO pasa por el PSP → fee 0, el neto = el bruto (la plata la recauda el conductor en mano).
+        pspFeeCents: 0,
+        netSettledCents: payment.amountCents,
       });
       if (count === 0) return; // otra captura concurrente ya ganó: no re-emitir
+      // A2 · el conductor cobró la comisión de este viaje EN EFECTIVO → la DEBE a la plataforma (la plata la
+      // recaudó él en mano). Se acumula en el ledger DriverDebt DENTRO de la MISMA tx de captura (atomicidad:
+      // captura ⇔ deuda), para netearla luego contra su payout digital. El CAS count>0 garantiza una sola captura
+      // → una sola deuda (idempotente; el UNIQUE(paymentId) es el backstop). Solo si hay comisión (carpooling
+      // 100% → comisión 0 → no acumula) y conductor.
+      if (payment.driverId && payment.commissionCents > 0) {
+        await this.repo.createDriverDebtInTx(tx, {
+          id: uuidv7(),
+          driverId: payment.driverId,
+          tripId: payment.tripId,
+          paymentId: payment.id,
+          amountCents: payment.commissionCents,
+          currency: payment.currency,
+          reason: 'CASH_COMMISSION',
+          status: 'PENDING',
+        });
+        // ADR-022 §P-A · TOPE de deuda: tras acumular la deuda de ESTE viaje, ¿el total PENDING CRUZÓ el tope?
+        // Emitimos `driver.debt_exceeded` SOLO en el cruce (previo ≤ tope < nuevo) → bloqueo del conductor. En la
+        // MISMA tx de captura (outbox-in-tx): captura ⇔ deuda ⇔ (si cruza) bloqueo, atómico. Idempotente: el CAS
+        // de captura (count>0) garantiza una sola ejecución + el UNIQUE(paymentId) de la deuda; una redelivery no
+        // re-cruza. Si YA estaba por encima (previo > tope) NO re-emite (el cruce ya ocurrió en un viaje anterior).
+        await this.maybeEmitDebtExceeded(tx, payment.driverId);
+      }
       const envelope = createEnvelope({
         eventType: 'payment.captured',
         producer: 'payment-service',
@@ -1026,18 +1282,189 @@ export class PaymentsService {
           passengerId: payment.passengerId ?? undefined,
         },
       });
-      await enqueueOutbox(tx, envelope, payment.id);
+      await this.repo.enqueueOutbox(tx, envelope, payment.id);
     });
   }
 
+  /**
+   * ADR-022 §P-A · Emite `driver.debt_exceeded` (outbox-in-tx) SOLO si la deuda PENDING del conductor acaba de
+   * CRUZAR `driverDebtCapCents` con la deuda recién acumulada en ESTA tx. El total NUEVO ya incluye la deuda de
+   * este viaje (se creó antes de llamar acá); el PREVIO = nuevo − la última deuda (la más nueva). Emite ⟺
+   * `previo ≤ tope < nuevo` — el cruce es un evento ÚNICO (el viaje cash cuya comisión empuja por encima del tope),
+   * así que no hay re-emisión aunque siga acumulando deuda por encima. Sin deudas (imposible acá) → no-op.
+   */
+  private async maybeEmitDebtExceeded(tx: PaymentTx, driverId: string): Promise<void> {
+    const pending = await this.repo.findPendingDebtsByDriverInTx(tx, driverId);
+    if (pending.length === 0) return;
+    const newTotal = pending.reduce((sum, d) => sum + d.amountCents, 0);
+    // La deuda MÁS NUEVA (createdAt desc) es la que acabamos de acumular en esta tx; el previo la excluye.
+    const newest = pending.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b));
+    const previousTotal = newTotal - newest.amountCents;
+    // Cruce EXACTO: estaba en/bajo el tope y ahora está por encima. Si ya estaba por encima → no re-emitir.
+    if (previousTotal > this.driverDebtCapCents || newTotal <= this.driverDebtCapCents) return;
+    await this.repo.enqueueOutbox(
+      tx,
+      createEnvelope({
+        eventType: 'driver.debt_exceeded',
+        producer: 'payment-service',
+        payload: {
+          driverId,
+          totalDebtCents: newTotal,
+          thresholdCents: this.driverDebtCapCents,
+          at: new Date().toISOString(),
+        },
+      }),
+      driverId,
+    );
+    this.logger.warn(
+      `Conductor ${driverId} cruzó el tope de deuda CASH (${newTotal}c > ${this.driverDebtCapCents}c): bloqueado hasta saldar`,
+    );
+  }
+
+  /**
+   * ADR-022 §P-A · SALDAR la deuda de comisiones del conductor por el rail (la ÚNICA forma de desbloquearse tras
+   * cruzar el tope). Crea un Payment de LIQUIDACIÓN (kind=DEBT_SETTLEMENT, driverId=NULL para NO entrar al payout,
+   * commission=0) por el TOTAL PENDING y lo cobra por el MISMO camino digital que un viaje (aggregator asíncrono /
+   * direct con reintentos). Al capturarse (sync o webhook), `captureSuccess` marca sus driver_debts PENDING→PAID y
+   * emite `driver.debt_cleared`. Idempotente por la dedupKey `debt-settle:{driverId}:{deudaMásVieja}` (estable
+   * mientras esa deuda siga PENDING): un doble-tap devuelve el mismo Payment; si el cobro previo declinó (DEBT),
+   * lo RE-COBRA (como la recuperación de deuda del pasajero). CASH no aplica (no hay confirmación bilateral).
+   */
+  async settleDriverDebt(input: {
+    driverId: string;
+    method: PaymentMethod;
+    payerRef?: string;
+    client?: ChargeInput['client'];
+  }): Promise<Payment> {
+    if (input.method === 'CASH') {
+      throw new InvalidStateError('La deuda se salda por un medio DIGITAL, no en efectivo');
+    }
+    // MISMO guard de capacidad que charge/settleCancellationPenalty: el adapter declara su catálogo.
+    this.assertGatewaySupportsMethod(input.method);
+
+    const pending = await this.repo.findPendingDebtsByDriver(input.driverId);
+    // La deuda MÁS VIEJA (el orden del repo es createdAt asc) ancla la dedupKey (estable mientras esa deuda siga
+    // PENDING) y aporta el `tripId` de correlación del Payment (la columna exige un UUID no-nulo). El MONTO cubre
+    // TODAS las deudas PENDING (no solo la de ese viaje). Los lookups by-trip de la TARIFA filtran kind=FARE → no
+    // colisiona con el cobro del viaje que comparte tripId. Sin deuda PENDING → nada que saldar (409).
+    const oldest = pending[0];
+    if (!oldest) {
+      throw new InvalidStateError('No tenés deuda de comisiones pendiente por saldar');
+    }
+    const totalCents = pending.reduce((sum, d) => sum + d.amountCents, 0);
+
+    const dedupKey = `debt-settle:${input.driverId}:${oldest.id}`;
+    const existing = await this.repo.findPaymentByDedupKey(dedupKey);
+    if (existing) {
+      // DEBT (el cobro previo declinó) → re-cobra idempotentemente (nuevo checkout / reintentos), como recoverDebt.
+      // PENDING (esperando webhook) o CAPTURED (ya saldó) → devolver el estado vigente sin re-cobrar.
+      if (existing.status === 'DEBT') return this.retryCharge(existing.id);
+      return existing;
+    }
+
+    let payment: Payment;
+    try {
+      payment = await this.repo.createPayment({
+        id: uuidv7(),
+        tripId: oldest.tripId,
+        // driverId NULL a propósito (espeja la liquidación de penalidad): NO entra al payout como ganancia. El
+        // conductor dueño viaja en debtSettlementDriverId (a quién desbloquear al capturar).
+        driverId: null,
+        passengerId: null,
+        dedupKey,
+        amountCents: totalCents,
+        grossCents: totalCents,
+        // Una liquidación de deuda NO lleva comisión ni fee de plataforma: solo mueve el dinero del conductor por el rail.
+        commissionCents: 0,
+        feeCents: 0,
+        tipCents: 0,
+        method: input.method,
+        kind: 'DEBT_SETTLEMENT',
+        debtSettlementDriverId: input.driverId,
+        // Sin MODO de despacho: no es cobro de viaje → no contamina los cortes por modo/distrito del panel.
+        mode: null,
+        payerRef: input.payerRef ?? null,
+        status: 'PENDING',
+      });
+    } catch (err) {
+      // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola liquidación por deuda-más-vieja.
+      if (isUniqueViolation(err, 'dedupKey')) {
+        const dup = await this.repo.findPaymentByDedupKey(dedupKey);
+        if (dup) return dup;
+        throw new ConflictError('Liquidación de deuda duplicada para el mismo conductor');
+      }
+      throw err;
+    }
+
+    // Cobro por el rail (espejo de charge/settleCancellationPenalty), según el flujo que DECLARA el adapter:
+    // aggregator → checkout asíncrono (el webhook/poll cierra → captureSuccess marca PAID + emite debt_cleared);
+    // direct → reintentos → CAPTURED (mismo desenlace) o DEBT (el conductor reintenta).
+    return this.dispatchDigitalCharge(payment, {
+      tripId: oldest.tripId,
+      grossCents: totalCents,
+      method: input.method,
+      dedupKey,
+      payerRef: input.payerRef,
+      client: input.client,
+    });
+  }
+
+  /**
+   * ADR-022 §P-A · Al CAPTURAR el Payment de liquidación, marca las driver_debts PENDING del conductor → PAID
+   * (FIFO, CAS por status+monto — espeja `applyDebtNetting`) hasta cubrir el monto pagado, y emite
+   * `driver.debt_cleared` (desbloqueo) en la MISMA tx de captura. El monto pagado = snapshot del total al crear la
+   * liquidación → normalmente cubre EXACTO las deudas que existían al pedirla. Bordes tolerados: una deuda REVERSADA
+   * en el ínterin (refund del viaje cash) ya no está PENDING → se salta y sobra monto (over-collection, se loguea
+   * para conciliación); una deuda NUEVA acumulada tras la creación tiene `createdAt` posterior → el FIFO se corta
+   * antes de tocarla (queda PENDING y re-bloquea en el próximo cruce). NO emite payment.captured (no es cobro de viaje).
+   */
+  private async settleDebtsOnCapture(tx: PaymentTx, payment: Payment): Promise<void> {
+    const driverId = payment.debtSettlementDriverId;
+    if (!driverId) {
+      this.logger.error(
+        `Liquidación ${payment.id} capturada SIN debtSettlementDriverId: no se pudo desbloquear al conductor`,
+      );
+      return;
+    }
+    const debts = await this.repo.findPendingDebtsByDriverInTx(tx, driverId);
+    let remaining = payment.amountCents;
+    for (const debt of debts) {
+      // FIFO por monto EXACTO de la fila (no partimos una deuda, respeta el UNIQUE(paymentId) del ledger). Si el
+      // remanente no cubre la fila entera, cortamos (deuda nueva acumulada tras la creación → sigue PENDING).
+      if (remaining < debt.amountCents) break;
+      const marked = await this.repo.markDriverDebtPaidInTx(tx, debt.id, debt.amountCents, payment.id);
+      // CAS por status+monto: un refund concurrente (reverseCashDebtInTx) pudo revertir/reducir la deuda entre el
+      // findMany y este update → count=0 → la SALTAMOS (no la contamos como saldada), sin lost-update.
+      if (marked.count === 0) continue;
+      remaining -= debt.amountCents;
+    }
+    if (remaining > 0) {
+      // Over-collection: alguna deuda se revirtió entre la creación de la liquidación y su captura. La plataforma
+      // cobró de más; se registra para conciliación manual (raro: el checkout tiene TTL corto). NO corta el desbloqueo.
+      this.logger.warn(
+        `Liquidación ${payment.id} del conductor ${driverId}: sobraron ${remaining}c (una deuda se revirtió en el ínterin)`,
+      );
+    }
+    await this.repo.enqueueOutbox(
+      tx,
+      createEnvelope({
+        eventType: 'driver.debt_cleared',
+        producer: 'payment-service',
+        payload: { driverId, at: new Date().toISOString() },
+      }),
+      driverId,
+    );
+    this.logger.log(`Conductor ${driverId} saldó su deuda de comisiones (liquidación ${payment.id}): desbloqueado`);
+  }
+
   private async emitCashDiscrepancy(paymentId: string, tripId: string): Promise<void> {
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       const envelope = createEnvelope({
         eventType: 'payment.failed',
         producer: 'payment-service',
         payload: { paymentId, tripId, reason: 'CASH_DISCREPANCY', willRetry: false },
       });
-      await enqueueOutbox(tx, envelope, paymentId);
+      await this.repo.enqueueOutbox(tx, envelope, paymentId);
     });
   }
 
@@ -1061,17 +1488,35 @@ export class PaymentsService {
    * `status` devuelto = estado del REFUND: 'COMPLETED' (la plata volvió) o 'PENDING' (reverso aceptado
    * o en confirmación). Degradación honesta: nunca se reporta COMPLETED sin confirmación del proveedor.
    */
-  async refund(
+  /**
+   * COLA DE APROBACIÓN — paso 1 (SOLICITAR · money-OUT · frame HZ8uz). El operador CREA una solicitud de reembolso
+   * en estado PENDING que AÚN NO desembolsa: la plata NO se mueve hasta que un operador la APRUEBE (`approveRefund`).
+   * Esto reemplaza el direct-issue (que desembolsaba en el acto) por un flujo con approval-gate + dual-control.
+   *
+   * Valida saldo/ventana/monto>0 (el gate de AUTORIDAD por monto alto se aplica al APROBAR, no acá: un FINANCE puede
+   * FILAR la solicitud; un ADMIN/SUPERADMIN la aprueba si supera el umbral). NO reserva el Payment ni llama al riel.
+   *
+   * IDEMPOTENCIA de la CREACIÓN (no crear DOS solicitudes del mismo dinero por un doble-submit): igual barrera que el
+   * viejo direct-issue — `Idempotency-Key` → `dedupKey` (UNIQUE PARCIAL) + backstop de VENTANA sobre (paymentId,
+   * céntimos) bajo advisory lock. Un reintento devuelve la solicitud existente, no crea otra.
+   */
+  async requestRefund(
     tripId: string,
     amountCents: number,
     reason: string,
     operator: AuthenticatedUser,
-  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    idempotencyKey?: string,
+    // Gesto EXPLÍCITO del operador "es un reembolso NUEVO, no un reintento": salta el backstop de ventana para
+    // permitir una 2da solicitud parcial idéntica legítima (el server no la distingue de un reintento sin esta señal).
+    forceNew = false,
+    // RC18 · el operador marca que el refund es por causa ATRIBUIBLE al conductor (viaje no realizado / fraude
+    // del conductor) → un refund TOTAL clawbackea su neto ya pagado. Default false = lo absorbe la plataforma.
+    driverFault = false,
+    // `deduped=true` ⇒ NO se creó una solicitud nueva: se devolvió una RECIENTE existente (backstop de ventana o
+    // idempotencia por key). El panel lo usa para NO mentir "enviada" y ofrecer "forzar uno nuevo" (forceNew).
+  ): Promise<{ refundId: string; paymentId: string; status: string; deduped: boolean }> {
     // Acepta un cobro CAPTURED o ya PARCIALMENTE reembolsado (para acumular más parciales, BR-P06).
-    const payment = await this.prisma.read.payment.findFirst({
-      where: { tripId, status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] } },
-      orderBy: { capturedAt: 'desc' },
-    });
+    const payment = await this.findRefundablePaymentByTrip(tripId);
     if (!payment) throw new NotFoundError('No hay un cobro reembolsable para este viaje');
     if (amountCents <= 0) throw new InvalidStateError('El reembolso debe ser un monto positivo');
     // Valida contra el SALDO reembolsable (amount − ya reembolsado), no contra el bruto original.
@@ -1090,35 +1535,654 @@ export class PaymentsService {
       );
     }
 
-    const needsL2 = amountCents > this.refundL2ThresholdCents;
+    const dedupKey = idempotencyKey ? deriveAdminRefundDedupKey(idempotencyKey) : null;
+    try {
+      return await this.repo.runInTransaction(async (tx) => {
+        // Backstop de VENTANA (salvo forceNew): bajo advisory lock por paymentId, si ya hay una solicitud/reembolso
+        // reciente NO-RECHAZADO del MISMO (paymentId, céntimos) → devolver esa (no crear otra). Cierra el residual
+        // del nonce de cliente (storage bloqueado, cross-tab, cross-device) que el `dedupKey` solo no cubre.
+        if (!forceNew) {
+          await this.repo.acquirePaymentAdvisoryLock(tx, payment.id);
+          const since = new Date(Date.now() - this.refundIdempotencyWindowMs);
+          const recent = await this.repo.findRecentRefundInWindowInTx(
+            tx,
+            payment.id,
+            amountCents,
+            since,
+          );
+          if (recent) {
+            throw new DuplicateRefundInWindowError({
+              refundId: recent.id,
+              paymentId: recent.paymentId,
+              status: recent.status,
+            });
+          }
+        }
+        const refund = await this.repo.createRefundInTx(tx, {
+          id: uuidv7(),
+          paymentId: payment.id,
+          amountCents,
+          requestedBy: operator.userId,
+          // approvedBy queda NULL hasta que un operador la apruebe (la cola de "Solicitados").
+          dedupKey,
+          status: RefundStatus.PENDING,
+          reason,
+          // RC18 · se persiste al SOLICITAR; `completeRefund` lo lee al confirmar el reverso digital para decidir el
+          // clawback del neto del conductor (la solicitud PENDING → APPROVED/COMPLETED no lo re-escribe).
+          clawbackDriver: driverFault,
+        });
+        return { refundId: refund.id, paymentId: payment.id, status: refund.status, deduped: false };
+      });
+    } catch (err) {
+      // BACKSTOP DE VENTANA: misma operación (reintento con otro key / sin key) → devolver la solicitud existente.
+      if (err instanceof DuplicateRefundInWindowError) {
+        this.logger.log(
+          `Solicitud de reembolso idempotente por VENTANA (mismo pago y monto) trip=${tripId}; ` +
+            `devuelvo la existente ${err.existing.refundId}`,
+        );
+        return { ...err.existing, deduped: true };
+      }
+      // IDEMPOTENCIA por key: el MISMO `Idempotency-Key` ya creó una solicitud ACTIVA (UNIQUE parcial) → P2002.
+      // Leemos del PRIMARIO (read-after-write). Solo devolvemos la existente si coincide en (pago, monto); un key
+      // reusado para OTRO dinero → conflicto explícito (nunca un refund ajeno como éxito falso).
+      if (idempotencyKey && dedupKey && isUniqueViolation(err, 'dedupKey')) {
+        const existing = await this.repo.findRefundByDedupKeyOnPrimary(dedupKey);
+        if (existing && existing.paymentId === payment.id && existing.amountCents === amountCents) {
+          this.logger.log(
+            `Solicitud de reembolso idempotente (mismo key, pago y monto) trip=${tripId}; devuelvo la existente`,
+          );
+          return {
+            refundId: existing.id,
+            paymentId: existing.paymentId,
+            status: existing.status,
+            deduped: true,
+          };
+        }
+        throw new ConflictError(
+          'El Idempotency-Key ya se usó para otro reembolso (distinto pago o monto)',
+          { tripId, paymentId: payment.id, amountCents },
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * COLA DE APROBACIÓN — paso 2 (APROBAR + DESEMBOLSAR · money-OUT). Transiciona la solicitud PENDING → APPROVED y
+   * dispara el desembolso IDEMPOTENTE (reserva CAS + reverso al riel con key derivada del refundId → COMPLETED, o
+   * queda APPROVED esperando el callback async; CASH devuelve local → COMPLETED). Re-VALIDA saldo/ventana/monto-alto
+   * AL MOMENTO de aprobar (el estado pudo cambiar desde la solicitud). Idempotente: aprobar algo que ya salió de
+   * PENDING devuelve su estado vigente sin re-desembolsar.
+   */
+  async approveRefund(
+    refundId: string,
+    operator: AuthenticatedUser,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    const refund = await this.repo.findRefundById(refundId);
+    if (!refund) throw new NotFoundError('Reembolso no encontrado');
+    // Idempotencia: solo una solicitud PENDING se aprueba. Ya APPROVED/COMPLETED/REJECTED → devolver estado vigente
+    // (un doble-submit del operador no re-desembolsa ni error-ea).
+    if (refund.status !== RefundStatus.PENDING) {
+      return { refundId, paymentId: refund.paymentId, status: refund.status };
+    }
+    // SEGREGACIÓN DE FUNCIONES (four-eyes · Ley 29733 money-OUT): el operador que APRUEBA (mueve la plata) NO puede
+    // ser el MISMO que SOLICITÓ. Cierra el hueco documentado de auto-aprobación (antes solo lo mitigaba step-up MFA +
+    // gate por monto + audit, sin dual-PERSON estricto). Se evalúa AL APROBAR (la acción que desembolsa) y ANTES de
+    // tocar el cobro/riel. Los refunds SYSTEM-INITIATED (refundForBookingCancellation / propina revertida) NO pasan
+    // por acá: nacen APPROVED vía executeRefundClaim (nunca quedan PENDING) y su `requestedBy` es SYSTEM_OPERATOR
+    // ('system'), que jamás iguala el userId de un operador humano — doble razón por la que esta regla no los alcanza.
+    if (refund.requestedBy === operator.userId) {
+      throw new ForbiddenError(
+        'Segregación de funciones: el solicitante no puede aprobar su propio reembolso; ' +
+          'debe aprobarlo un operador distinto',
+        { refundId, requestedBy: refund.requestedBy },
+      );
+    }
+    const payment = await this.repo.findPaymentById(refund.paymentId);
+    if (!payment) throw new NotFoundError('Pago no encontrado');
+
+    // Re-validación al aprobar (defensa: el saldo/estado del cobro pudo moverse desde que se filó la solicitud).
+    const remainingCents = payment.amountCents - payment.refundedCents;
+    if (refund.amountCents > remainingCents) {
+      throw new InvalidStateError(
+        `El reembolso (${refund.amountCents}) excede el saldo reembolsable actual (${remainingCents})`,
+      );
+    }
+    const capturedAt = payment.capturedAt ?? payment.createdAt;
+    const ageDays = (Date.now() - capturedAt.getTime()) / 86_400_000;
+    if (ageDays > this.refundWindowDays) {
+      throw new InvalidStateError(
+        `Fuera de la ventana de reembolso (${this.refundWindowDays} días)`,
+      );
+    }
+    // Gate de monto alto (DUAL-CONTROL, decisión del dueño): aprobar un reembolso sobre el umbral exige autoridad
+    // ELEVADA (ADMIN/SUPERADMIN); un FINANCE queda topado al umbral. Se aplica al APROBAR (es la acción que mueve
+    // plata), no al solicitar. Compensa con step-up MFA + audit + tope por saldo.
+    const needsElevatedAuthority = refund.amountCents > this.refundHighValueThresholdCents;
     const roles = operator.roles ?? [];
-    const hasL2 =
-      roles.includes(AdminRole.SUPPORT_L2) ||
-      roles.includes(AdminRole.ADMIN) ||
-      roles.includes(AdminRole.SUPERADMIN);
-    if (needsL2 && !hasL2) {
-      throw new ForbiddenError('Un reembolso mayor a S/30 requiere aprobación de un operador L2');
+    const hasElevatedAuthority =
+      roles.includes(AdminRole.ADMIN) || roles.includes(AdminRole.SUPERADMIN);
+    if (needsElevatedAuthority && !hasElevatedAuthority) {
+      throw new ForbiddenError(
+        'Aprobar un reembolso de monto alto requiere un operador ADMIN o SUPERADMIN',
+      );
     }
 
-    const newRefundedCents = payment.refundedCents + amountCents;
+    const newRefundedCents = payment.refundedCents + refund.amountCents;
     const isFullyRefunded = newRefundedCents === payment.amountCents;
     const newStatus = isFullyRefunded ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
     assertPaymentTransition(payment.status, newStatus);
 
     const claim: RefundClaim = {
-      amountCents,
-      reason,
-      operator,
+      amountCents: refund.amountCents,
+      reason: refund.reason,
+      requestedBy: refund.requestedBy,
+      // El APROBADOR firma la aprobación (dual-control: puede diferir de quien solicitó). Viaja en payment.refunded.
+      approvedBy: operator.userId,
+      dedupKey: refund.dedupKey,
       newStatus,
       newRefundedCents,
       isFullyRefunded,
+      // RC18 · la causa (atribuible al conductor o no) se cristalizó al SOLICITAR y viaja en la fila; la propagamos
+      // al claim por consistencia (la materialización por `existingRefundId` no re-escribe la columna).
+      clawbackDriver: refund.clawbackDriver,
+      // La solicitud ya dedupeó al crearse; aprobar es una acción distinta → sin backstop de ventana.
+      enforceWindowDedup: false,
+      // MATERIALIZA la solicitud PENDING existente (no crea una fila nueva): PENDING → APPROVED/COMPLETED por CAS.
+      existingRefundId: refund.id,
     };
 
-    // Branch TIPADO por método: el efectivo nunca pasó por el gateway → devolución local explícita.
+    try {
+      const result = await this.executeRefundClaim(payment, claim);
+      // A1 · refund TOTAL del viaje → también se devuelven sus propinas digitales ya cobradas (viaje revertido).
+      // SOLO si el reverso de la TARIFA ya CONFIRMÓ (COMPLETED: cash + direct-sync). Si es ASYNC (queda APPROVED),
+      // lo hace el callback CONFIRMED (applyRefundWebhookResult).
+      if (isFullyRefunded && result.status === RefundStatus.COMPLETED) {
+        await this.refundTripTipsFully(payment.tripId, refund.reason);
+      }
+      return result;
+    } catch (err) {
+      // Carrera: otra acción movió la solicitud de PENDING entre el read y el CAS (doble-approve, o un reject
+      // concurrente) → devolver el estado vigente (idempotente, sin re-desembolsar).
+      if (err instanceof ConcurrencyConflictError) {
+        const fresh = await this.repo.findRefundById(refundId);
+        if (fresh && fresh.status !== RefundStatus.PENDING) {
+          return { refundId, paymentId: fresh.paymentId, status: fresh.status };
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * COLA DE APROBACIÓN — RECHAZAR una solicitud PENDING (money-OUT). NO mueve plata (la solicitud nunca reservó el
+   * cobro) → sin compensación. Persiste el `motivo` del operador en `failureReason` (distinto de `reason`, el motivo
+   * del pedido). Idempotente por CAS: un doble-submit ve count=0. SOLO una solicitud PENDING se rechaza — una APPROVED
+   * ya está en el riel (la compensa el callback del proveedor, no el operador); COMPLETED es terminal.
+   */
+  async rejectRefund(
+    refundId: string,
+    operator: AuthenticatedUser,
+    reason: string,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
+    const refund = await this.repo.findRefundById(refundId);
+    if (!refund) throw new NotFoundError('Reembolso no encontrado');
+    if (refund.status === RefundStatus.REJECTED) {
+      return { refundId, paymentId: refund.paymentId, status: refund.status }; // idempotente
+    }
+    if (refund.status !== RefundStatus.PENDING) {
+      throw new InvalidStateError(
+        `Solo una solicitud PENDIENTE puede rechazarse (estado actual: ${refund.status})`,
+      );
+    }
+    assertRefundTransition('PENDING', 'REJECTED');
+    const claimed = await this.repo.rejectPendingRefund(refundId, {
+      status: RefundStatus.REJECTED,
+      failureReason: reason,
+      approvedBy: operator.userId,
+    });
+    if (claimed.count === 0) {
+      // Carrera: otra acción ya la movió de PENDING → devolver el estado vigente (idempotente).
+      const fresh = await this.repo.findRefundById(refundId);
+      return {
+        refundId,
+        paymentId: fresh?.paymentId ?? refund.paymentId,
+        status: fresh?.status ?? RefundStatus.REJECTED,
+      };
+    }
+    return { refundId, paymentId: refund.paymentId, status: RefundStatus.REJECTED };
+  }
+
+  /**
+   * Página de la cola de reembolsos para el admin (filtro por estado opcional + cursor por id DESC). Devuelve la
+   * fila Refund con su Payment (tripId/passengerId/method salen del cobro por FK); el shaping PII-consciente + la
+   * resolución del nombre del pasajero viven en el admin-bff. `limit+1` deriva el `nextCursor` sin COUNT.
+   */
+  async listRefundsForAdmin(params: {
+    status?: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<{ items: RefundWithPayment[]; nextCursor: string | null }> {
+    const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+    const status = this.parseRefundStatusFilter(params.status);
+    const rows = await this.repo.findRefundsForAdmin({ status, cursorId: params.cursor, limit });
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    return { items, nextCursor: hasMore ? (items[items.length - 1]?.id ?? null) : null };
+  }
+
+  /** Detalle admin de un reembolso (con su Payment para el saldo). Lanza NotFound si no existe. */
+  async getRefundForAdmin(id: string): Promise<RefundWithPayment> {
+    const refund = await this.repo.findRefundWithPaymentById(id);
+    if (!refund) throw new NotFoundError('Reembolso no encontrado');
+    return refund;
+  }
+
+  /**
+   * KPIs de la cabecera de la cola (money-OUT). `requestedCount`/`approvedCount` = conteos por estado. `processedTodayCents`
+   * = suma de refunds COMPLETED con `updatedAt` desde el inicio del día (UTC). `refundRatePct` = % de cobros FARE
+   * ever-capturados que terminaron reembolsados (PARTIALLY_REFUNDED|REFUNDED); null si no hay cobros capturados
+   * (degradación honesta — no se inventa una tasa sin denominador).
+   */
+  async getRefundStats(): Promise<{
+    requestedCount: number;
+    approvedCount: number;
+    processedTodayCents: number;
+    refundRatePct: number | null;
+  }> {
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    const [requestedCount, approvedCount, processedTodayCents, capturedCount, refundedCount] =
+      await Promise.all([
+        this.repo.countRefundsByStatus(RefundStatus.PENDING),
+        this.repo.countRefundsByStatus(RefundStatus.APPROVED),
+        this.repo.sumCompletedRefundAmountSince(startOfToday),
+        // Denominador: cobros FARE que SE capturaron alguna vez (capturados + los que luego se reembolsaron).
+        this.repo.countPaymentsInStatuses({
+          in: ['CAPTURED', 'PARTIALLY_REFUNDED', 'REFUNDED'],
+        }),
+        // Numerador: cobros FARE que terminaron (parcial o totalmente) reembolsados.
+        this.repo.countPaymentsInStatuses({ in: ['PARTIALLY_REFUNDED', 'REFUNDED'] }),
+      ]);
+    const refundRatePct =
+      capturedCount > 0 ? Math.round((refundedCount / capturedCount) * 1000) / 10 : null;
+    return { requestedCount, approvedCount, processedTodayCents, refundRatePct };
+  }
+
+  /** Narrowing del filtro de estado de la cola (query string → enum). Un valor inválido se ignora (lista sin filtro). */
+  private parseRefundStatusFilter(status?: string): RefundStatus | undefined {
+    if (!status) return undefined;
+    return (Object.values(RefundStatus) as string[]).includes(status)
+      ? (status as RefundStatus)
+      : undefined;
+  }
+
+  /**
+   * F3c-payment · Refund SYSTEM-INITIATED por `booking.cancelled` (ADR-014 §6 camino infeliz). El consumer lo
+   * llama cuando un booking se canceló POST-captura (razon ASIENTO_LLENO u OFERTA_NO_DISPONIBLE): el cobro SÍ
+   * capturó pero el pasajero NO viajó → hay que devolverle TODO. Diferencias DELIBERADAS con `refund()` admin:
+   *
+   *  - SIN operador → SIN gate L2: lo dispara el SISTEMA, autoridad total, NO es un refund discrecional de
+   *    soporte. El gate >S/30 (RBAC L1/L2) protege la DISCRECIONALIDAD humana; acá no hay discreción que limitar.
+   *  - SIN ventana de 7 días: ese límite es para refunds admin discrecionales (anti-abuso de soporte). El
+   *    asiento-lleno es un refund OBLIGATORIO e INMEDIATO — el pasajero pagó y no viajó, devolverle SIEMPRE,
+   *    sin importar cuándo llegue el `booking.cancelled` (puede llegar reordenado tras un retry de Kafka).
+   *  - Refund SIEMPRE FULL: el monto = saldo reembolsable del Payment (`amountCents − refundedCents`). El
+   *    pasajero no recibió NADA del servicio → se le devuelve TODO lo que quede sin reembolsar.
+   *  - IDEMPOTENCIA DURA: `dedupKey` determinista (`booking-cancel-refund:{bookingId}`, UNIQUE en Refund). Un
+   *    evento duplicado/reordenado → P2002 → no-op graceful. Junto al dedup por eventId del consumer = doble
+   *    barrera contra el doble-refund (plata real, §2 del plan).
+   *
+   * Reusa el MISMO core que el refund admin (`executeRefundClaim`): branch CASH/gateway, intent persistido,
+   * `payment.refunded` en la tx — sin duplicar lógica y sin tocar el camino admin.
+   *
+   * Devuelve `{ skipped: true, motivo }` (no error) en los casos VÁLIDOS bajo at-least-once/reorden:
+   *   · no hay Payment reembolsable (el cobro no capturó, ya está REFUNDED, o el evento llegó antes que la
+   *     captura) → el consumer loguea y avanza el offset (NO relanza: no es una falla).
+   *   · ya existe un refund de ESTA cancelación (dedupKey duplicado) → la plata ya volvió, no-op.
+   */
+  async refundForBookingCancellation(
+    tripId: string,
+    reason: string,
+  ): Promise<
+    { refundId: string; paymentId: string; status: string } | { skipped: true; motivo: string }
+  > {
+    // tripId = bookingId (UUID opaco · §5.5). Mismo lookup que refund(): un cobro CAPTURED o ya parcialmente
+    // reembolsado. Si no hay → el cobro no capturó / ya se reembolsó / el evento se adelantó a la captura.
+    const payment = await this.findRefundablePaymentByTrip(tripId);
+    if (!payment) {
+      return {
+        skipped: true,
+        motivo: 'sin cobro reembolsable (no capturó, ya reembolsado, o evento antes de la captura)',
+      };
+    }
+
+    // Refund FULL: el saldo que quede sin reembolsar. El pasajero no viajó → se le devuelve TODO.
+    const remainingCents = payment.amountCents - payment.refundedCents;
+    if (remainingCents <= 0) {
+      // Ya totalmente reembolsado (un `booking.cancelled` previo ya lo cubrió, o un refund admin) → no-op.
+      return { skipped: true, motivo: 'el cobro ya está totalmente reembolsado' };
+    }
+
+    // FULL refund → el Payment queda REFUNDED (no quedará saldo). SIN gate L2, SIN ventana (system-initiated).
+    const newRefundedCents = payment.refundedCents + remainingCents;
+    assertPaymentTransition(payment.status, 'REFUNDED');
+
+    const claim: RefundClaim = {
+      amountCents: remainingCents,
+      reason,
+      requestedBy: SYSTEM_OPERATOR,
+      approvedBy: SYSTEM_OPERATOR,
+      // Barrera DURA: un `booking.cancelled` duplicado choca contra el UNIQUE → P2002 → no-op graceful.
+      dedupKey: deriveBookingCancellationRefundDedupKey(tripId),
+      newStatus: 'REFUNDED',
+      newRefundedCents,
+      isFullyRefunded: true,
+      // RC18 · una cancelación de reserva NO es culpa del conductor (asiento lleno / oferta no disponible) → sin
+      // clawback: la plataforma absorbe el reverso, no se le cobra al conductor.
+      clawbackDriver: false,
+    };
+
+    try {
+      const result = await this.executeRefundClaim(payment, claim);
+      // A1 · el viaje se revirtió (cancelación) → devolver también sus propinas digitales ya cobradas. SOLO si el
+      // reverso de la tarifa CONFIRMÓ (COMPLETED); si es ASYNC (PENDING) lo hace el callback CONFIRMED (ver arriba).
+      if (result.status === RefundStatus.COMPLETED) {
+        await this.refundTripTipsFully(tripId, reason);
+      }
+      return result;
+    } catch (err) {
+      // IDEMPOTENCIA: el dedupKey ya existe (otra entrega del MISMO `booking.cancelled` ya creó el Refund) →
+      // P2002 → la plata YA volvió, no-op graceful. Cualquier otro error se relanza (transitorio → reintento).
+      if (isUniqueViolation(err, 'dedupKey')) {
+        this.logger.log(
+          `Refund de cancelación ya existente para el booking ${tripId} (dedupKey); no-op idempotente`,
+        );
+        return { skipped: true, motivo: 'refund de esta cancelación ya registrado (idempotente)' };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * ADR-024 (PREPAGO) · REEMBOLSO SYSTEM-INITIATED por FALLO del viaje (`trip.failed`, watchdog IN_PROGRESS →
+   * FAILED: app del conductor muerta / viaje abandonado). CIERRA el gap que introdujo cobrar al INICIAR: antes
+   * un viaje fallido NUNCA se cobraba (el cobro vivía en completed); ahora la tarifa digital ya capturó al
+   * iniciar → sin esto quedaría "pasajero cobrado, viaje fallido, sin refund" (regresión de plata).
+   *
+   * Cubre AMBOS cobros de tarifa del viaje (base `trip-completed:` + delta `trip-fare-delta:` si hubo waypoint):
+   *  - CAPTURED / PARTIALLY_REFUNDED → REEMBOLSO por el reverso REAL del proveedor (reusa `executeRefundClaim`,
+   *    el MISMO core que el refund admin y el de booking-cancel): la plata salió del pasajero → se le devuelve.
+   *    Idempotente por `trip-failed-refund:{paymentId}` (UNIQUE en Refund) → un `trip.failed` duplicado no
+   *    doble-reembolsa. NUNCA reporta éxito sin confirmación del proveedor (async → Refund PENDING, timeout ≠
+   *    falla — herencia de refundViaGateway).
+   *  - PENDING / DEBT (nunca capturó) → NO hay nada que devolver, pero se CANCELA el cobro (→FAILED): un
+   *    webhook/poll TARDÍO no debe capturar un viaje fallido (PENDING), y un DEBT no debe seguir bloqueando el
+   *    gate del pasajero por un viaje que nunca se completó.
+   *  - CASH → no aplica (el efectivo nunca pasó por el rail; además un viaje fallido nunca llegó a cobrar CASH,
+   *    que se cobra al completar). Se filtra defensivamente.
+   *
+   * DECISIÓN Fase 1 (clawbackDriver=false): la plataforma ABSORBE el reverso, NO se le cobra al conductor —
+   * igual que el refund de booking-cancel. Si el fallo fuera atribuible al conductor (RC18), un clawback es una
+   * decisión de negocio aparte (Fase 2), no se resuelve acá.
+   *
+   * Devuelve el conteo de cobros reembolsados y cancelados (para el log del consumer). Idempotente y seguro
+   * ante reentrega: un segundo `trip.failed` reembolsa 0 (todos ya REFUNDED) y cancela 0 (todos ya FAILED).
+   */
+  async refundTripFareOnFailure(
+    tripId: string,
+    reason: string,
+  ): Promise<{ refunded: number; cancelled: number }> {
+    const fares = await this.repo.findTripFarePayments(tripId);
+
+    // 1) CANCELAR los cobros digitales NO capturados (PENDING/DEBT) → un webhook tardío no captura un viaje
+    //    fallido, y un DEBT deja de gatear al pasajero. CASH nunca entra (no pasó por el rail). CAS por-fila.
+    const uncapturedIds = fares
+      .filter((f) => f.method !== 'CASH' && (f.status === 'PENDING' || f.status === 'DEBT'))
+      .map((f) => f.id);
+    let cancelled = 0;
+    if (uncapturedIds.length > 0) {
+      cancelled = (await this.repo.cancelUncapturedFares(uncapturedIds, `trip-failed: ${reason}`))
+        .count;
+    }
+
+    // 2) REEMBOLSAR los cobros CAPTURADOS (base + delta) por el reverso real del proveedor. Per-payment
+    //    (idempotente por su propia dedupKey): un delta se devuelve con su propia key, sin colisionar con la base.
+    let refunded = 0;
+    for (const fare of fares) {
+      if (fare.method === 'CASH') continue; // el efectivo no pasó por el gateway
+      if (fare.status !== 'CAPTURED' && fare.status !== 'PARTIALLY_REFUNDED') continue;
+      const remainingCents = fare.amountCents - fare.refundedCents;
+      if (remainingCents <= 0) continue; // ya totalmente reembolsado (un trip.failed previo lo cubrió)
+      assertPaymentTransition(fare.status, 'REFUNDED');
+      const claim: RefundClaim = {
+        amountCents: remainingCents,
+        reason,
+        requestedBy: SYSTEM_OPERATOR,
+        approvedBy: SYSTEM_OPERATOR,
+        // Barrera DURA: un `trip.failed` duplicado choca contra el UNIQUE de Refund.dedupKey → no-op graceful.
+        dedupKey: deriveTripFailedRefundDedupKey(fare.id),
+        newStatus: 'REFUNDED',
+        newRefundedCents: fare.refundedCents + remainingCents,
+        isFullyRefunded: true,
+        // Fase 1: la plataforma absorbe (no es un clawback al conductor). Ver docstring.
+        clawbackDriver: false,
+      };
+      try {
+        await this.executeRefundClaim(fare, claim);
+        refunded += 1;
+      } catch (err) {
+        // Idempotencia: el refund de ESTE cobro ya existe (otra entrega del mismo trip.failed) → la plata ya
+        // volvió, seguimos con el resto. Cualquier otro error se relanza (transitorio → Kafka reintenta).
+        if (isUniqueViolation(err, 'dedupKey')) {
+          this.logger.log(
+            `Refund por fallo ya existente para el cobro ${fare.id} (viaje ${tripId}); no-op idempotente`,
+          );
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return { refunded, cancelled };
+  }
+
+  /**
+   * CORE COMPARTIDO del refund (admin y system-initiated): branch TIPADO por método. El efectivo nunca pasó
+   * por el gateway → devolución local explícita; lo digital va por el reverso real del proveedor. NO valida
+   * (la validación —saldo, ventana, rol, monto— ya la hizo el caller y la cristalizó en el `RefundClaim`).
+   */
+  private executeRefundClaim(
+    payment: Payment,
+    claim: RefundClaim,
+  ): Promise<{ refundId: string; paymentId: string; status: string }> {
     if (payment.method === 'CASH') {
       return this.refundCashLocally(payment, claim);
     }
     return this.refundViaGateway(payment, claim);
+  }
+
+  /**
+   * A1 · Cuando un viaje se reembolsa TOTAL (revertido), sus propinas DIGITALES ya cobradas también se devuelven:
+   * el pasajero no viajó → no paga la propina. Reembolsa cada tip-Payment CAPTURED del viaje por el reverso real
+   * del proveedor (executeRefundClaim), idempotente por `tip-refund:<tipId>`. Best-effort per-tip: un fallo al
+   * reembolsar UNA propina NO aborta el refund de la tarifa (queda su marcador durable + log para soporte). Un
+   * tip-Payment PENDING (checkout sin completar) no se cobró → no entra (el filtro es CAPTURED/PARTIALLY_REFUNDED).
+   */
+  private async refundTripTipsFully(tripId: string, reason: string): Promise<void> {
+    // El refund de la TARIFA ya se cristalizó ANTES de llamar acá: reembolsar la propina es una operación
+    // SECUNDARIA que NUNCA debe abortar/revertir el refund de la tarifa. Si listar las propinas falla → log
+    // y salimos (soporte reconcilia); no relanzamos (best-effort, degradación honesta).
+    let tips: Payment[];
+    try {
+      tips = await this.repo.findTripTips(tripId);
+    } catch (err) {
+      // ERROR (no warn): sin el listado, NINGUNA propina del viaje revertido se reembolsa → posible sobre-cobro.
+      // Visible para alerta hasta que el backstop de reconciliación (follow-up A1) lo barra.
+      this.logger.error(
+        `No se pudieron listar las propinas del viaje ${tripId} para reembolso: ${
+          err instanceof Error ? err.message : String(err)
+        } (reconciliar)`,
+      );
+      return;
+    }
+    // Propinas PENDING (checkout abierto/en curso) al revertirse el viaje: se CANCELAN para que un webhook/poll
+    // TARDÍO no las capture sobre un viaje ya reembolsado (el conductor cobraría propina de un viaje que no fue).
+    // UN solo updateMany por todas (no N updates uno-por-uno): el `failureReason` es el mismo y el CAS por-fila
+    // `status: 'PENDING'` en el WHERE preserva la semántica — una propina que capturó concurrentemente NO matchea
+    // (queda CAPTURED, borde a reconciliar). No emite `payment.failed` (propina opcional, no una falla del viaje).
+    // Best-effort: un fallo del batch NO aborta el refund de la TARIFA (ya cristalizado antes de entrar acá).
+    const pendingTipIds = tips.filter((t) => t.status === 'PENDING').map((t) => t.id);
+    if (pendingTipIds.length > 0) {
+      try {
+        await this.repo.cancelPendingTips(pendingTipIds, `tip-of-refunded-trip: ${reason}`);
+      } catch (err) {
+        this.logger.warn(
+          `No se pudieron cancelar ${pendingTipIds.length} propina(s) PENDING del viaje ${tripId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    // Propinas ya COBRADAS (CAPTURED/PARTIALLY_REFUNDED) → reembolso per-tip: `executeRefundClaim` llama al
+    // proveedor y es idempotente por dedupKey, así que es inherentemente por-item (no se batchea). Best-effort.
+    for (const tip of tips) {
+      if (tip.status === 'PENDING') continue; // ya canceladas en el batch de arriba
+      const remainingCents = tip.amountCents - tip.refundedCents;
+      if (remainingCents <= 0) continue;
+      const claim: RefundClaim = {
+        amountCents: remainingCents,
+        reason: `tip-of-refunded-trip: ${reason}`,
+        requestedBy: SYSTEM_OPERATOR,
+        approvedBy: SYSTEM_OPERATOR,
+        dedupKey: deriveTipRefundDedupKey(tip.id),
+        newStatus: 'REFUNDED',
+        newRefundedCents: tip.amountCents,
+        isFullyRefunded: true,
+        // RC18 · una propina (kind=TIP) NO se clawbackea (el guard kind=FARE de applyRefundClawbackInTx igual lo excluye).
+        clawbackDriver: false,
+      };
+      try {
+        await this.executeRefundClaim(tip, claim);
+        this.logger.log(`Propina ${tip.id} del viaje ${tripId} reembolsada (viaje revertido)`);
+      } catch (err) {
+        // Idempotente: ya reembolsada (dedupKey P2002) → no-op. Otro error → log y seguir: NO abortar el
+        // refund de la TARIFA por un fallo al devolver una propina (queda para reintento/soporte).
+        if (isUniqueViolation(err, 'dedupKey')) continue;
+        // ERROR (no warn): una propina que quedó SIN reembolsar sobre un viaje revertido = pasajero sobre-cobrado.
+        // Debe ser VISIBLE para alerta/soporte hasta que el backstop de reconciliación (follow-up A1) lo barra.
+        this.logger.error(
+          `PROPINA SIN REEMBOLSAR sobre viaje revertido — tip=${tip.id} viaje=${tripId}: ${
+            err instanceof Error ? err.message : String(err)
+          } (reconciliar: pasajero sobre-cobrado)`,
+        );
+      }
+    }
+  }
+
+  /**
+   * A2 · Al reembolsar un cobro CASH, REVIERTE la deuda de comisión acumulada: el viaje se revirtió → el conductor
+   * NO debe la comisión de un viaje que no ocurrió. Reduce la deuda PENDING por el monto reembolsado (la plataforma
+   * absorbe el refund de su comisión, mismo modelo que el parcial digital); si llega a 0 la marca REVERSED. Va en la
+   * MISMA tx del refund (atomicidad). Si la deuda YA se neteó en un payout (SETTLED), NO se toca acá — sería un
+   * credit-back al conductor (edge, follow-up); PENDING es el caso común (refund antes de la liquidación semanal).
+   */
+  private async reverseCashDebtInTx(
+    tx: PaymentTx,
+    paymentId: string,
+    refundAmountCents: number,
+    grossCents: number,
+  ): Promise<void> {
+    const debt = await this.repo.findDriverDebtByPaymentInTx(tx, paymentId);
+    if (!debt) return;
+
+    // Comisión a REVERTIR = PROPORCIONAL a la fracción de tarifa reembolsada (la comisión CASH es un % del bruto).
+    // Antes se comparaba `deuda − refundAmount` (comisión vs tarifa, unidades DISTINTAS): un refund PARCIAL
+    // reversaba la comisión ENTERA → la plataforma se auto-perdonaba comisión que el conductor SÍ debía sobre la
+    // parte del viaje que se mantuvo. grossCents>0 siempre (un cobro con deuda tuvo bruto); cap a la deuda.
+    const reversedCents =
+      grossCents > 0
+        ? Math.min(
+            debt.amountCents,
+            Math.round((debt.amountCents * refundAmountCents) / grossCents),
+          )
+        : debt.amountCents;
+    if (reversedCents <= 0) return;
+
+    // PENDING (caso común: el refund ocurre ANTES del run de netting): la deuda aún no se cobró → se reduce/anula
+    // en el acto, sin mover plata (nunca entró al payout).
+    if (debt.status === 'PENDING') {
+      const remaining = debt.amountCents - reversedCents;
+      if (remaining <= 0) {
+        await this.repo.updateDriverDebtInTx(tx, debt.id, {
+          status: 'REVERSED',
+          amountCents: 0,
+          settledAt: new Date(),
+        });
+      } else {
+        await this.repo.updateDriverDebtInTx(tx, debt.id, { amountCents: remaining });
+      }
+      return;
+    }
+
+    // SETTLED (edge · gate MEDIA #4): la deuda YA se neteó en un payout PASADO → el conductor ya pagó esa
+    // comisión. Revertir el viaje significa que no la debía → se le ACREDITA lo reversado (PROPORCIONAL) con un
+    // DriverCredit que el próximo payout SUMA al neto (applyDebtNetting). Idempotente por source_payment_id
+    // @unique. La deuda pasa a REVERSED (traza; el crédito lleva el monto). Antes esto era un no-op → sobre-cobro.
+    if (debt.status === 'SETTLED') {
+      await this.repo.createDriverCreditInTx(tx, {
+        id: uuidv7(),
+        driverId: debt.driverId,
+        tripId: debt.tripId,
+        amountCents: reversedCents,
+        sourcePaymentId: paymentId,
+        status: 'PENDING',
+      });
+      await this.repo.updateDriverDebtInTx(tx, debt.id, {
+        status: 'REVERSED',
+        settledAt: new Date(),
+      });
+      return;
+    }
+    // REVERSED → ya revertida (refund re-entregado o 2do refund sobre el mismo cobro) → no-op idempotente.
+  }
+
+  /**
+   * MATERIALIZA el Refund DENTRO de la tx de la reserva: si el claim trae `existingRefundId` (APROBACIÓN de una
+   * solicitud PENDING) la transiciona PENDING → `status` por CAS (count=0 ⇒ carrera → ConcurrencyConflict, la tx
+   * se revierte con la reserva); si NO (refund AUTO system-initiated / propina), CREA la fila directamente en
+   * `status`. Un ÚNICO punto para las dos entradas al desembolso — sin duplicar lógica ni tocar los call-sites.
+   */
+  private async materializeRefundInTx(
+    tx: PaymentTx,
+    payment: Pick<Payment, 'id'>,
+    claim: RefundClaim,
+    status: RefundStatus,
+  ): Promise<Refund> {
+    if (claim.existingRefundId) {
+      const claimed = await this.repo.casApproveRefundFromPending(tx, claim.existingRefundId, {
+        status,
+        approvedBy: claim.approvedBy,
+      });
+      if (claimed.count === 0) {
+        throw new ConcurrencyConflictError(
+          'La solicitud de reembolso ya no está PENDIENTE (aprobada/rechazada en paralelo)',
+        );
+      }
+      return this.repo.findRefundByIdInTx(tx, claim.existingRefundId);
+    }
+    return this.repo.createRefundInTx(tx, {
+      id: uuidv7(),
+      paymentId: payment.id,
+      amountCents: claim.amountCents,
+      requestedBy: claim.requestedBy,
+      approvedBy: claim.approvedBy,
+      dedupKey: claim.dedupKey,
+      status,
+      reason: claim.reason,
+      // RC18 · refund AUTO (system-initiated / propina): persiste la causa; `completeRefund` la evalúa al confirmar.
+      clawbackDriver: claim.clawbackDriver,
+    });
   }
 
   /** Devolución LOCAL de un cobro CASH (la plata nunca pasó por el riel): COMPLETED + evento en una tx. */
@@ -1126,20 +2190,16 @@ export class PaymentsService {
     payment: Payment,
     claim: RefundClaim,
   ): Promise<{ refundId: string; paymentId: string; status: string }> {
-    return this.prisma.write.$transaction(async (tx) => {
+    return this.repo.runInTransaction(async (tx) => {
       await this.claimRefundReservationInTx(tx, payment, claim);
-      // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto.
-      const refund = await tx.refund.create({
-        data: {
-          id: uuidv7(),
-          paymentId: payment.id,
-          amountCents: claim.amountCents,
-          requestedBy: claim.operator.userId,
-          approvedBy: claim.operator.userId,
-          status: RefundStatus.COMPLETED,
-          reason: claim.reason,
-        },
-      });
+      // A2 · revertir la deuda de comisión CASH del conductor, PROPORCIONAL a lo reembolsado (grossCents da la
+      // fracción; un refund parcial revierte solo la comisión de la parte devuelta, no la entera).
+      await this.reverseCashDebtInTx(tx, payment.id, claim.amountCents, payment.grossCents);
+      // CASH: devolución FUERA del riel (soporte la entrega/transfiere) → COMPLETED en el acto (aprobar CASH salta
+      // APPROVED: PENDING → COMPLETED directo cuando es una solicitud aprobada; o nace COMPLETED si es AUTO).
+      // RC18 · el clawback digital NO aplica a CASH (el efectivo tiene su propia reversa de comisión) y este camino
+      // NO pasa por completeRefund; `clawbackDriver` igual se persiste (materializeRefundInTx) por consistencia.
+      const refund = await this.materializeRefundInTx(tx, payment, claim, RefundStatus.COMPLETED);
       await this.enqueueRefundedEventInTx(tx, payment, refund);
       return { refundId: refund.id, paymentId: payment.id, status: refund.status };
     });
@@ -1152,6 +2212,19 @@ export class PaymentsService {
     // Capacidad del adapter (ISP del puerto): sin `Refundable` NO hay riel por donde devolver la plata.
     // Error tipado explícito — JAMÁS marcar REFUNDED sin que el proveedor mueva el dinero (S5).
     if (!supportsRefund(this.gateway)) {
+      // ANTES de lanzar: dejar una TRAZA DURABLE (Refund REJECTED de marca) para que el pasajero no quede
+      // sin refund Y sin rastro en DB. Best-effort: si falla la marca NO tapa el throw original (el consumer
+      // igual clasifica unrecoverable, alerta y mide). Tres trazas: row REJECTED + métrica + log.
+      await this.persistUnrecoverableRefundMarker(
+        payment,
+        claim,
+        `${UNRECOVERABLE_REFUND_FAILURE_PREFIX}gateway-sin-reembolsos`,
+      ).catch((e) =>
+        this.logger.error(
+          { err: e },
+          'no se pudo persistir el marcador durable del refund unrecoverable (gateway sin reembolsos)',
+        ),
+      );
       throw new InvalidStateError(
         'El gateway de pagos activo no soporta reembolsos digitales; no se puede devolver la plata por el riel',
       );
@@ -1159,26 +2232,29 @@ export class PaymentsService {
     // Referencia del cobro en el riel (uid del proveedor): sin ella el reverso no se puede correlacionar.
     const railRef = payment.externalRef ?? payment.externalUid;
     if (!railRef) {
+      await this.persistUnrecoverableRefundMarker(
+        payment,
+        claim,
+        `${UNRECOVERABLE_REFUND_FAILURE_PREFIX}cobro-sin-railRef`,
+      ).catch((e) =>
+        this.logger.error(
+          { err: e },
+          'no se pudo persistir el marcador durable del refund unrecoverable (cobro sin railRef)',
+        ),
+      );
       throw new InvalidStateError(
         'El cobro no tiene referencia del riel; no se puede reembolsar por el gateway',
       );
     }
 
     // 1) RESERVA + INTENT persistidos ANTES de llamar al proveedor (§4): el CAS bloquea refunds
-    //    concurrentes sobre el mismo saldo y el Refund PENDING es el registro durable de la operación.
-    const refund = await this.prisma.write.$transaction(async (tx) => {
+    //    concurrentes sobre el mismo saldo y el Refund APPROVED es el registro durable del desembolso EN VUELO
+    //    (reserva tomada, reverso al riel esperando confirmación). Si es la aprobación de una solicitud, materialize
+    //    transiciona la PENDING → APPROVED por CAS; si es AUTO, crea la fila APPROVED.
+    const refund = await this.repo.runInTransaction(async (tx) => {
       await this.claimRefundReservationInTx(tx, payment, claim);
-      return tx.refund.create({
-        data: {
-          id: uuidv7(),
-          paymentId: payment.id,
-          amountCents: claim.amountCents,
-          requestedBy: claim.operator.userId,
-          approvedBy: claim.operator.userId,
-          status: RefundStatus.PENDING,
-          reason: claim.reason,
-        },
-      });
+      // RC18 · `clawbackDriver` viaja en el claim y lo persiste materializeRefundInTx; completeRefund lo evalúa al confirmar.
+      return this.materializeRefundInTx(tx, payment, claim, RefundStatus.APPROVED);
     });
 
     // 2) Reverso REAL en el proveedor, con la idempotency key derivada de la operación (§4).
@@ -1204,10 +2280,7 @@ export class PaymentsService {
     // el Refund sin uid → NO_MATCH → PENDING para siempre. Si aun así el callback gana esta escritura,
     // applyRefundWebhookResult responde no-2xx (NotFoundError) y el retry del proveedor correlaciona.
     if (result.externalRefundId) {
-      await this.prisma.write.refund.update({
-        where: { id: refund.id },
-        data: { externalRefundId: result.externalRefundId },
-      });
+      await this.repo.setRefundExternalId(refund.id, result.externalRefundId);
     }
 
     switch (result.status) {
@@ -1243,27 +2316,104 @@ export class PaymentsService {
    * (rejectRefundAndCompensate); el evento/push al pasajero NUNCA sale de la reserva, solo de la confirmación.
    */
   private async claimRefundReservationInTx(
-    tx: Prisma.TransactionClient,
+    tx: PaymentTx,
     payment: Payment,
     claim: RefundClaim,
   ): Promise<void> {
-    const claimed = await tx.payment.updateMany({
-      where: {
-        id: payment.id,
-        status: { in: ['CAPTURED', 'PARTIALLY_REFUNDED'] },
-        refundedCents: payment.refundedCents,
-      },
-      data: {
-        status: claim.newStatus,
-        refundedCents: claim.newRefundedCents,
-        refundedAt: claim.isFullyRefunded ? new Date() : null,
-      },
+    // Backstop de idempotencia por VENTANA (solo refund admin discrecional): bajo un advisory lock por paymentId,
+    // si ya hay un refund reciente del MISMO (paymentId, céntimos) → lanza DuplicateRefundInWindowError (refund()
+    // la atrapa y devuelve el existente). El system-initiated NO lo lleva (claim.enforceWindowDedup undefined).
+    if (claim.enforceWindowDedup) {
+      await this.assertNoDuplicateAdminRefundInWindowTx(tx, payment.id, claim.amountCents);
+    }
+    const claimed = await this.repo.casClaimRefundReservation(tx, payment.id, payment.refundedCents, {
+      status: claim.newStatus,
+      refundedCents: claim.newRefundedCents,
+      refundedAt: claim.isFullyRefunded ? new Date() : null,
     });
     if (claimed.count === 0) {
-      throw new InvalidStateError(
-        'El cobro cambió de estado o saldo por otra operación concurrente',
+      // CAS miss (optimistic-lock): otro refund concurrente movió el saldo entre el read y este write.
+      // Es TRANSITORIO (un reintento con el estado fresco tendría éxito), NO una violación PERMANENTE de
+      // la máquina de estados → ConcurrencyConflictError, para que el clasificador lo trate como `transient`
+      // (Kafka reintenta) y NO dispare la falsa alerta de backstop irrecuperable de InvalidStateError.
+      throw new ConcurrencyConflictError(
+        'El cobro cambió de saldo por una operación concurrente (CAS); reintentable',
       );
     }
+  }
+
+  /**
+   * Backstop server-side de idempotencia por VENTANA TEMPORAL (refund admin). Corre DENTRO de la tx del claim,
+   * tras tomar un advisory lock TRANSACCIONAL por paymentId (`pg_advisory_xact_lock`) que SERIALIZA los refunds
+   * concurrentes del mismo pago — sin él, dos submits simultáneos con keys divergentes pasarían ambos el chequeo
+   * (TOCTOU) y doble-pagarían. Con el lock tomado, busca un refund NO-RECHAZADO del MISMO (paymentId, céntimos)
+   * creado dentro de la ventana; si existe, lanza `DuplicateRefundInWindowError` (la atrapa `refund()` → devuelve
+   * el existente). REJECTED NO cuenta (no movió plata; un reintento tras un rechazo debe poder volver a intentar).
+   */
+  private async assertNoDuplicateAdminRefundInWindowTx(
+    tx: PaymentTx,
+    paymentId: string,
+    amountCents: number,
+  ): Promise<void> {
+    // Advisory lock transaccional (se libera SOLO al cerrar la tx): hashtext(paymentId) → clave bigint estable.
+    // `$executeRaw` (no `$queryRaw`): pg_advisory_xact_lock devuelve `void` y $queryRaw fallaría al deserializar
+    // esa columna; $executeRaw ejecuta la sentencia sin deserializar el resultado.
+    await this.repo.acquirePaymentAdvisoryLock(tx, paymentId);
+    const since = new Date(Date.now() - this.refundIdempotencyWindowMs);
+    const recent = await this.repo.findRecentRefundInWindowInTx(tx, paymentId, amountCents, since);
+    if (recent) {
+      throw new DuplicateRefundInWindowError({
+        refundId: recent.id,
+        paymentId: recent.paymentId,
+        status: recent.status,
+      });
+    }
+  }
+
+  /**
+   * MARCADOR DURABLE de un refund system-initiated IRRECUPERABLE (FIX 1 · invariante sagrado). El refund
+   * automático abortó ANTES de mover plata (gateway sin reembolsos / cobro sin railRef) → NO existiría
+   * ningún Refund row → sin esto el pasajero quedaría sin refund Y sin traza en DB (solo un log que nadie
+   * grepea). Persistimos un Refund REJECTED de marca con `failureReason` estructurado (`unrecoverable:<causa>`):
+   *
+   *  - status REJECTED ⇒ NO participa del UNIQUE PARCIAL (índice WHERE status <> REJECTED) → SIEMPRE insertable,
+   *    incluso en un re-delivery/reintento del mismo `booking.cancelled` (jamás choca P2002, no envenena la key).
+   *  - lleva el `dedupKey` system-initiated ⇒ el admin lo CORRELACIONA al booking para disparar el refund admin
+   *    manual sobre el Payment CAPTURED (no hay re-conductor automático: el backstop es humano + alerta).
+   *  - NO reclama/reserva el Payment (no hay movimiento de plata, es un marcador de FALLO) → el Payment queda
+   *    CAPTURED, sigue reembolsable por un admin a mano (que es EXACTAMENTE el backstop). Cero doble-refund.
+   *
+   * El admin lo VE en cualquier listado de Refunds filtrado por status=REJECTED (el `failureReason` con prefijo
+   * `unrecoverable:` lo distingue de un rechazo del proveedor). Best-effort: el caller hace `.catch(log)` y NO
+   * deja que un fallo de la marca tape el throw original.
+   */
+  private async persistUnrecoverableRefundMarker(
+    payment: Pick<Payment, 'id'>,
+    claim: RefundClaim,
+    failureReason: string,
+  ): Promise<void> {
+    // APROBACIÓN de una solicitud existente: NO se crea un marcador aparte — se transiciona la MISMA solicitud
+    // PENDING → REJECTED con el motivo estructurado (no reservó plata → sin compensación). El operador la ve
+    // rechazada con la causa `unrecoverable:` en la cola.
+    if (claim.existingRefundId) {
+      await this.repo.rejectPendingRefund(claim.existingRefundId, {
+        status: RefundStatus.REJECTED,
+        failureReason,
+        approvedBy: claim.approvedBy,
+      });
+      return;
+    }
+    await this.repo.createRefund({
+      id: uuidv7(),
+      paymentId: payment.id,
+      amountCents: claim.amountCents,
+      requestedBy: claim.requestedBy,
+      approvedBy: claim.approvedBy,
+      status: RefundStatus.REJECTED,
+      reason: claim.reason,
+      dedupKey: claim.dedupKey,
+      failureReason,
+    });
   }
 
   /**
@@ -1272,7 +2422,7 @@ export class PaymentsService {
    * (no el bruto). `passengerId` enriquecido (persistido al cobrar) → push "te devolvimos S/X.XX".
    */
   private async enqueueRefundedEventInTx(
-    tx: Prisma.TransactionClient,
+    tx: PaymentTx,
     payment: Pick<Payment, 'id' | 'tripId' | 'passengerId'>,
     refund: Pick<Refund, 'amountCents' | 'reason' | 'approvedBy' | 'requestedBy'>,
   ): Promise<void> {
@@ -1288,7 +2438,7 @@ export class PaymentsService {
         passengerId: payment.passengerId ?? undefined,
       },
     });
-    await enqueueOutbox(tx, envelope, payment.id);
+    await this.repo.enqueueOutbox(tx, envelope, payment.id);
   }
 
   /**
@@ -1300,22 +2450,79 @@ export class PaymentsService {
     refundId: string,
     externalRefundId: string | null,
   ): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const claimed = await tx.refund.updateMany({
-        where: { id: refundId, status: RefundStatus.PENDING },
-        data: {
-          status: RefundStatus.COMPLETED,
-          ...(externalRefundId ? { externalRefundId } : {}),
-        },
+    return this.repo.runInTransaction(async (tx) => {
+      const claimed = await this.repo.casCompleteRefund(tx, refundId, {
+        status: RefundStatus.COMPLETED,
+        ...(externalRefundId ? { externalRefundId } : {}),
       });
       if (claimed.count === 0) return false; // ya resuelto (redelivery) → idempotente, sin segundo evento.
-      const refund = await tx.refund.findUniqueOrThrow({
-        where: { id: refundId },
-        include: { payment: true },
-      });
+      const refund = await this.repo.findRefundWithPaymentInTx(tx, refundId);
       await this.enqueueRefundedEventInTx(tx, refund.payment, refund);
+      await this.applyRefundClawbackInTx(tx, refund.payment, refund.clawbackDriver);
       return true;
     });
+  }
+
+  /**
+   * RC18 (ADR-022) · CLAWBACK CONDICIONAL del neto del conductor. Corre DENTRO de la tx que completa el refund
+   * digital (único punto por donde pasan AMBOS rieles: el síncrono `refundViaGateway` ACCEPTED y el asíncrono
+   * `applyRefundWebhookResult` CONFIRMED) → la deuda nace atómica con el reverso confirmado, nunca antes de que
+   * la plata vuelva.
+   *
+   * Crea una `DriverDebt` PENDING (reason REFUND_CLAWBACK) por el neto que el conductor cobró de la TARIFA
+   * (`gross − commission`), que se netea de su próximo payout (`applyDebtNetting`). SOLO si:
+   *  - `clawbackDriver` (causa atribuible al conductor; un dispute/fraude del pasajero → false → la plataforma lo come);
+   *  - el pago quedó TOTALMENTE reembolsado (status REFUNDED; un parcial lo absorbe la plataforma de su comisión);
+   *  - es una tarifa DIGITAL (method != CASH — el efectivo tiene su propia reversa) con conductor y kind=FARE;
+   *  - el conductor YA fue liquidado por ESE viaje: existe un Payout suyo cuyo período cubre el `capturedAt`. Si el
+   *    refund ocurre ANTES de la liquidación, `collectEarnings` ya excluye el pago REFUNDED (no se paga) → crear la
+   *    deuda ahí sería doble-castigo (deuda por un viaje que el conductor nunca cobró).
+   *
+   * Idempotente por el UNIQUE(paymentId) de DriverDebt: se chequea la existencia ANTES de crear (no se confía en la
+   * violación del UNIQUE, que abortaría la tx del refund en Postgres). El CAS de `completeRefund` ya serializa: un
+   * solo camino completa cada refund, así que el check-then-create acá no compite consigo mismo.
+   */
+  private async applyRefundClawbackInTx(
+    tx: PaymentTx,
+    payment: Payment,
+    clawbackDriver: boolean,
+  ): Promise<void> {
+    if (!clawbackDriver) return;
+    if (payment.status !== 'REFUNDED') return; // solo refund TOTAL
+    if (payment.method === 'CASH') return; // el efectivo tiene su propia reversa (reverseCashDebtInTx)
+    if (payment.kind !== 'FARE') return; // se clawbackea la tarifa, no una propina
+    if (!payment.driverId) return;
+    const netCents = payment.grossCents - payment.commissionCents; // lo que el conductor cobró de la tarifa
+    if (netCents <= 0) return;
+
+    const capturedAt = payment.capturedAt ?? payment.createdAt;
+    const alreadySettled = await tx.payout.findFirst({
+      where: {
+        driverId: payment.driverId,
+        periodStart: { lte: capturedAt },
+        periodEnd: { gt: capturedAt },
+      },
+      select: { id: true },
+    });
+    if (!alreadySettled) return; // aún no liquidado → el sweep ya excluye el pago REFUNDED; sin clawback.
+
+    const existing = await tx.driverDebt.findUnique({ where: { paymentId: payment.id } });
+    if (existing) return; // idempotente: el clawback de este pago ya existe.
+
+    await tx.driverDebt.create({
+      data: {
+        id: uuidv7(),
+        driverId: payment.driverId,
+        tripId: payment.tripId,
+        paymentId: payment.id,
+        amountCents: netCents,
+        reason: 'REFUND_CLAWBACK',
+        status: 'PENDING',
+      },
+    });
+    this.logger.log(
+      `RC18 · clawback ${netCents} céntimos al conductor ${payment.driverId} por refund total del viaje ${payment.tripId} (viaje revertido, causa del conductor)`,
+    );
   }
 
   /**
@@ -1333,38 +2540,61 @@ export class PaymentsService {
    * base sobre la fila ya lockeada por este UPDATE; el row-lock se sostiene hasta el commit de la tx, así
    * que el valor que devuelve es el saldo REAL post-compensación y el segundo update (status/refundedAt
    * derivados de ese saldo) no puede ser interferido por otra transacción.
+   *
+   * BACKSTOP DEL INVARIANTE SAGRADO (riel COMÚN de rechazo · plata real): este es el ÚNICO punto donde un
+   * Refund pasa a REJECTED, y lo alcanzan AMBOS rieles — el SÍNCRONO (refundViaGateway, rechazo inmediato del
+   * proveedor) y el ASÍNCRONO (applyRefundWebhookResult, DECLINED/EXPIRED por callback días después). Por eso la
+   * métrica scrapeable del backstop (`payment_refund_backstop_total{reason="rejected"}`, sobre la que dispara la
+   * alerta de ops) se emite ACÁ y no en el consumer Kafka: si solo viviera en el consumer, el riel async la
+   * evadiría (el consumer ya commiteó el offset al ver PENDING=éxito) → un refund system-initiated REJECTED por
+   * callback quedaría SIN métrica/alerta/rastro accionable. Se emite SOLO para refunds SYSTEM-INITIATED (los
+   * automáticos por `booking.cancelled`, sin operador humano monitoreando) — distinguidos por el prefijo
+   * `BOOKING_CANCEL_REFUND_DEDUP_PREFIX` del `dedupKey`. Un refund ADMIN rechazado (dedupKey NULL / otro prefijo)
+   * el operador YA lo ve en su UI → no necesita esta señal de backstop. Se emite DESPUÉS del commit y SOLO si el
+   * CAS ganó (esta llamada hizo la transición PENDING→REJECTED) → exactamente una vez por refund REJECTED, sin
+   * doble conteo con el consumer (al que se le quitó la emisión de `'rejected'`).
    */
   private async rejectRefundAndCompensate(
     refundId: string,
     failureReason: string,
   ): Promise<boolean> {
-    return this.prisma.write.$transaction(async (tx) => {
-      const claimed = await tx.refund.updateMany({
-        where: { id: refundId, status: RefundStatus.PENDING },
-        data: { status: RefundStatus.REJECTED, failureReason },
+    const outcome = await this.repo.runInTransaction(async (tx) => {
+      const claimed = await this.repo.casRejectRefund(tx, refundId, {
+        status: RefundStatus.REJECTED,
+        failureReason,
       });
-      if (claimed.count === 0) return false; // ya resuelto → idempotente.
-      const refund = await tx.refund.findUniqueOrThrow({ where: { id: refundId } });
+      if (claimed.count === 0) return { applied: false, systemInitiated: false }; // ya resuelto → idempotente.
+      const refund = await this.repo.findRefundByIdInTx(tx, refundId);
       // Decremento ATÓMICO en la DB (no read-compute-write): toma el row-lock del Payment y devuelve la
       // fila con el saldo real ya restado, aun si otra reserva commiteó después de nuestro claim.
-      const restored = await tx.payment.update({
-        where: { id: refund.paymentId },
-        data: { refundedCents: { decrement: refund.amountCents } },
-      });
+      const restored = await this.repo.decrementPaymentRefundedInTx(
+        tx,
+        refund.paymentId,
+        refund.amountCents,
+      );
       // status/refundedAt derivados del saldo REAL post-decremento. Seguro dentro de la misma tx: el
       // row-lock tomado por el decremento bloquea cualquier escritura concurrente hasta nuestro commit.
-      await tx.payment.update({
-        where: { id: restored.id },
-        data: {
-          status: restored.refundedCents > 0 ? 'PARTIALLY_REFUNDED' : 'CAPTURED',
-          refundedAt: null,
-        },
+      await this.repo.restorePaymentAfterRejectInTx(tx, restored.id, {
+        status: restored.refundedCents > 0 ? 'PARTIALLY_REFUNDED' : 'CAPTURED',
+        refundedAt: null,
       });
       this.logger.warn(
         `Reverso ${refundId} RECHAZADO por el proveedor (${failureReason}); reserva compensada en el pago ${restored.id}`,
       );
-      return true;
+      // SYSTEM-INITIATED ⇔ el dedupKey lleva el prefijo del refund automático por booking.cancelled (cero strings
+      // mágicos). Solo esos caen al backstop manual sin humano monitoreando → solo esos emiten la métrica.
+      const systemInitiated =
+        refund.dedupKey?.startsWith(BOOKING_CANCEL_REFUND_DEDUP_PREFIX) ?? false;
+      return { applied: true, systemInitiated };
     });
+
+    // DESPUÉS del commit (el rechazo + compensación ya son durables) y SOLO si ESTA llamada hizo la transición
+    // (CAS ganado): emitir la métrica del backstop para refunds system-initiated. Cubre el riel SÍNCRONO y el
+    // ASÍNCRONO por un único punto, exactamente una vez, sin doble conteo con el consumer Kafka.
+    if (outcome.applied && outcome.systemInitiated) {
+      this.metrics?.incRefundBackstop('rejected');
+    }
+    return outcome.applied;
   }
 
   /**
@@ -1384,9 +2614,7 @@ export class PaymentsService {
     externalRefundId: string;
     status: WebhookStatus;
   }): Promise<{ applied: boolean; status: string }> {
-    const refund = await this.prisma.read.refund.findFirst({
-      where: { externalRefundId: input.externalRefundId },
-    });
+    const refund = await this.repo.findRefundByExternalRefundId(input.externalRefundId);
     if (!refund) {
       this.logger.warn(
         `Callback de reembolso sin match (uid=${input.externalRefundId}); respondemos no-2xx para que el proveedor reintente`,
@@ -1396,6 +2624,16 @@ export class PaymentsService {
     switch (input.status) {
       case 'CONFIRMED': {
         const applied = await this.completeRefund(refund.id, input.externalRefundId);
+        // A1 · el reverso ASYNC de la TARIFA recién CONFIRMÓ acá (no en la reserva) → AHORA se devuelven sus
+        // propinas digitales, si fue un refund TOTAL de una FARE. Cierra el bug: antes se devolvían en la reserva
+        // y un reverso que se RECHAZABA después las dejaba reembolsadas sobre una tarifa no revertida. `applied`
+        // (completeRefund idempotente) → solo el PRIMER callback dispara; refundTripTipsFully ya es idempotente.
+        if (applied) {
+          const p = await this.repo.findPaymentById(refund.paymentId);
+          if (p && p.kind === 'FARE' && p.status === 'REFUNDED') {
+            await this.refundTripTipsFully(p.tripId, refund.reason);
+          }
+        }
         return { applied, status: RefundStatus.COMPLETED };
       }
       case 'DECLINED':
@@ -1431,28 +2669,24 @@ export class PaymentsService {
     const platformCents = input.penaltyCents - driverCompensationCents;
 
     // Idempotencia: una penalidad por viaje (trip_id @unique). Atajo si ya existe.
-    const existing = await this.prisma.read.cancellationPenalty.findUnique({
-      where: { tripId: input.tripId },
-    });
+    const existing = await this.repo.findPenaltyByTripId(input.tripId);
     if (existing) {
       return { penaltyId: existing.id, status: existing.status };
     }
 
     const id = uuidv7();
     try {
-      return await this.prisma.write.$transaction(async (tx) => {
-        const penalty = await tx.cancellationPenalty.create({
-          data: {
-            id,
-            tripId: input.tripId,
-            passengerId: input.passengerId,
-            driverId: input.driverId,
-            penaltyCents: input.penaltyCents,
-            driverCompensationCents,
-            platformCents,
-            status: 'PENDING',
-            reason: input.reason,
-          },
+      return await this.repo.runInTransaction(async (tx) => {
+        const penalty = await this.repo.createPenaltyInTx(tx, {
+          id,
+          tripId: input.tripId,
+          passengerId: input.passengerId,
+          driverId: input.driverId,
+          penaltyCents: input.penaltyCents,
+          driverCompensationCents,
+          platformCents,
+          status: 'PENDING',
+          reason: input.reason,
         });
         // Dominó: notification avisa al pasajero ("te cobramos S/X por cancelar"). Misma tx (outbox).
         const envelope = createEnvelope({
@@ -1468,15 +2702,13 @@ export class PaymentsService {
             platformCents,
           },
         });
-        await enqueueOutbox(tx, envelope, penalty.id);
+        await this.repo.enqueueOutbox(tx, envelope, penalty.id);
         return { penaltyId: penalty.id, status: 'PENDING' };
       });
     } catch (err) {
       // Carrera: otra réplica creó la penalidad entre el findUnique y el create (P2002 sobre trip_id).
       if (isUniqueViolation(err, 'tripId')) {
-        const raced = await this.prisma.read.cancellationPenalty.findUnique({
-          where: { tripId: input.tripId },
-        });
+        const raced = await this.repo.findPenaltyByTripId(input.tripId);
         if (raced) return { penaltyId: raced.id, status: raced.status };
       }
       throw err;
@@ -1508,9 +2740,7 @@ export class PaymentsService {
     // MISMO guard de capacidad que charge() (antes duplicado verbatim): el adapter declara su catálogo.
     this.assertGatewaySupportsMethod(input.method);
 
-    const penalty = await this.prisma.read.cancellationPenalty.findUnique({
-      where: { id: input.penaltyId },
-    });
+    const penalty = await this.repo.findPenaltyById(input.penaltyId);
     // Ajena o inexistente → 404 (no 403): no filtramos que exista para otro pasajero (anti-enumeración).
     // `penalty?.passengerId !== <string>` cubre el null (undefined !== string) y la pertenencia en una.
     if (penalty?.passengerId !== input.passengerId) {
@@ -1523,37 +2753,35 @@ export class PaymentsService {
     // Idempotencia: una sola liquidación por penalidad (dedupKey @unique). Si ya existe el Payment de
     // liquidación, devolverlo (ya se está pagando, o ya se pagó y la penalidad quedó COLLECTED).
     const dedupKey = `cancellation-penalty:${penalty.id}`;
-    const existing = await this.prisma.read.payment.findUnique({ where: { dedupKey } });
+    const existing = await this.repo.findPaymentByDedupKey(dedupKey);
     if (existing) return existing;
 
     let payment: Payment;
     try {
-      payment = await this.prisma.write.payment.create({
-        data: {
-          id: uuidv7(),
-          tripId: penalty.tripId,
-          // driverId NULL a propósito: la compensación del conductor NO entra por esta fila (sería doble
-          // pago), entra vía collectEarnings sumando la penalidad COLLECTED (F2.3b).
-          driverId: null,
-          passengerId: penalty.passengerId,
-          dedupKey,
-          amountCents: penalty.penaltyCents,
-          grossCents: penalty.penaltyCents,
-          // Una penalidad NO lleva comisión de plataforma: el split (driver/plataforma) ya vive en la
-          // penalidad. El Payment de liquidación solo mueve el dinero del pasajero por el rail.
-          commissionCents: 0,
-          feeCents: 0,
-          tipCents: 0,
-          method: input.method,
-          payerRef: input.payerRef ?? null,
-          cancellationPenaltyId: penalty.id,
-          status: 'PENDING',
-        },
+      payment = await this.repo.createPayment({
+        id: uuidv7(),
+        tripId: penalty.tripId,
+        // driverId NULL a propósito: la compensación del conductor NO entra por esta fila (sería doble
+        // pago), entra vía collectEarnings sumando la penalidad COLLECTED (F2.3b).
+        driverId: null,
+        passengerId: penalty.passengerId,
+        dedupKey,
+        amountCents: penalty.penaltyCents,
+        grossCents: penalty.penaltyCents,
+        // Una penalidad NO lleva comisión de plataforma: el split (driver/plataforma) ya vive en la
+        // penalidad. El Payment de liquidación solo mueve el dinero del pasajero por el rail.
+        commissionCents: 0,
+        feeCents: 0,
+        tipCents: 0,
+        method: input.method,
+        payerRef: input.payerRef ?? null,
+        cancellationPenaltyId: penalty.id,
+        status: 'PENDING',
       });
     } catch (err) {
       // Carrera de doble-submit con la misma dedupKey: el UNIQUE garantiza una sola liquidación.
       if (isUniqueViolation(err, 'dedupKey')) {
-        const dup = await this.prisma.read.payment.findUnique({ where: { dedupKey } });
+        const dup = await this.repo.findPaymentByDedupKey(dedupKey);
         if (dup) return dup;
         throw new ConflictError('Liquidación duplicada para la misma penalidad');
       }
@@ -1574,8 +2802,140 @@ export class PaymentsService {
     });
   }
 
-  /** Cobro disparado por el evento trip.completed (BR-P01). dedupKey determinista por viaje. */
-  async chargeFromTripCompleted(input: {
+  /**
+   * ADR-024 (PREPAGO · "cobrar al iniciar") · Cobro de la tarifa CONGELADA disparado al INICIAR el viaje
+   * (`trip.started`), NO al completarlo. Es la MISMA operación de cobro que antes nacía en trip.completed:
+   * mismo core (`chargeTripFare`), misma dedupKey determinista por viaje — solo cambió el DISPARADOR (el
+   * pasajero ya está a bordo, más comprometido). EFECTIVO: NO se cobra al iniciar (el conductor lo cobra en
+   * mano al terminar, confirmación bilateral BR-P03) → devuelve `null` (no-op). Digital: se cobra contra el
+   * riel. Reprocesar started, o un trip.completed posterior, encuentran ESTE Payment por la dedupKey y NO
+   * duplican (garantía de idempotencia: una sola tarifa).
+   *
+   * FASE 1 (backend, sin gate síncrono): el cobro es ASÍNCRONO (evento). Si declina (tarjeta sin fondo),
+   * HOY cae a DEBT igual que antes — el modelo no empeora, solo adelanta el momento del cobro. El GATE
+   * síncrono del start ("si el pago falla, el viaje no avanza"), la UX de "esperando pago" y la afiliación
+   * Yape on-file son FASE 2 (requieren esperar la aprobación del riel antes de dejar arrancar el viaje).
+   */
+  async chargeTripFareAtStart(input: {
+    tripId: string;
+    grossCents: number;
+    dedupKey: string;
+    driverId?: string;
+    method?: PaymentMethod;
+    promoCode?: string;
+    userId?: string;
+    dispatchMode?: string;
+    originLat?: number;
+    originLng?: number;
+  }): Promise<Payment | null> {
+    // EFECTIVO: no se cobra al iniciar (sigue bilateral en completed). Resolvemos el método contra el default
+    // del env SOLO para decidir cash/digital (paridad con chargeTripFare) — un started viejo sin método cae
+    // al default y se trata como digital (nunca cash por omisión), consistente con el cobro histórico.
+    if (isCashMethod(input.method ?? this.defaultMethod)) return null;
+    // Digital: mismo cobro que en completed, sin cashCollected (irrelevante al iniciar). La dedupKey compartida
+    // hace que el trip.completed posterior NO re-cobre (encuentra este Payment por dedupKey).
+    return this.chargeTripFare(input);
+  }
+
+  /**
+   * ADR-024 (PREPAGO) · Liquidación de la tarifa al COMPLETAR el viaje. El cobro DIGITAL de la tarifa ya
+   * ocurrió al iniciar (`chargeTripFareAtStart`) → acá NO se re-cobra. Dos caminos:
+   *  - EFECTIVO: se cobra/confirma acá (bilateral, BR-P03), como SIEMPRE — el efectivo nunca se cobra al iniciar.
+   *  - DIGITAL: RECONCILIACIÓN del delta. Si `fareCents` al completar > lo cobrado al iniciar (un waypoint
+   *    aceptado subió la tarifa), se cobra SOLO la diferencia (Payment separado, idempotente por su propia
+   *    dedupKey). Igual ⇒ nada. Menor (no debería) ⇒ NO se cobra negativo, se loguea.
+   */
+  async settleTripFareOnCompletion(input: {
+    tripId: string;
+    grossCents: number;
+    dedupKey: string;
+    driverId?: string;
+    method?: PaymentMethod;
+    promoCode?: string;
+    userId?: string;
+    cashCollected?: boolean;
+    dispatchMode?: string;
+    originLat?: number;
+    originLng?: number;
+  }): Promise<Payment | null> {
+    // EFECTIVO: el cobro NO ocurrió al iniciar → se realiza acá (bilateral). Camino sin cambios respecto al
+    // modelo previo: crea el Payment CASH PENDING + aplica la confirmación del conductor (cashCollected).
+    if (isCashMethod(input.method ?? this.defaultMethod)) {
+      return this.chargeTripFare(input);
+    }
+    // DIGITAL: la tarifa base ya se cobró al iniciar. Solo reconciliamos el delta del waypoint (si creció).
+    return this.reconcileDigitalFareDelta(input);
+  }
+
+  /**
+   * ADR-024 (PREPAGO) · Reconcilia el DELTA de tarifa digital al completar. Busca el cobro base (por la
+   * dedupKey compartida `trip-completed:{tripId}`, creado al iniciar) y cobra solo lo que la tarifa CRECIÓ:
+   *  - Sin cobro base (started perdido / viaje digital sin cobro al iniciar): FALLBACK honesto → cobra la
+   *    tarifa COMPLETA acá (comportamiento del modelo previo; no deja plata sin cobrar, cero deuda extra).
+   *  - delta = 0 → nada que cobrar (tarifa estable, el caso común).
+   *  - delta > 0 → cobra la diferencia (Payment separado, dedupKey propia por (tripId, monto previo)).
+   *  - delta < 0 → NO se cobra negativo (no debería pasar: la tarifa solo crece por waypoint); se loguea.
+   * La promo NO se re-aplica en el delta: ya se canjeó en el cobro base. El delta es tarifa PURA.
+   */
+  private async reconcileDigitalFareDelta(input: {
+    tripId: string;
+    grossCents: number;
+    dedupKey: string;
+    driverId?: string;
+    method?: PaymentMethod;
+    promoCode?: string;
+    userId?: string;
+    dispatchMode?: string;
+    originLat?: number;
+    originLng?: number;
+  }): Promise<Payment | null> {
+    const baseCharge = await this.repo.findPaymentByDedupKey(input.dedupKey);
+    if (!baseCharge) {
+      // El cobro al iniciar NUNCA ocurrió (evento started perdido, o viaje que completó sin haber cobrado al
+      // start). Cobramos la tarifa COMPLETA acá: es exactamente el modelo previo (cobro en completed) → no
+      // empeora nada y no deja plata sin cobrar. Idempotente por la MISMA dedupKey.
+      this.logger.warn(
+        `PREPAGO trip ${input.tripId}: sin cobro al iniciar; se cobra la tarifa completa al completar (fallback)`,
+      );
+      return this.chargeTripFare(input);
+    }
+    const deltaCents = input.grossCents - baseCharge.grossCents;
+    if (deltaCents === 0) return baseCharge; // tarifa estable → nada que reconciliar (caso común).
+    if (deltaCents < 0) {
+      // La tarifa solo debería CRECER (waypoint). Una baja no se cobra negativo; se surfacea para revisión.
+      this.logger.warn(
+        `PREPAGO trip ${input.tripId}: tarifa al completar (${input.grossCents}c) < cobrada al iniciar ` +
+          `(${baseCharge.grossCents}c); no se cobra un delta negativo`,
+      );
+      return baseCharge;
+    }
+    // Waypoint aceptado subió la tarifa → cobramos SOLO la diferencia, como un Payment separado idempotente
+    // por su propia dedupKey (tripId + monto ya cobrado). ON_DEMAND, sin promo (ya canjeada en el cobro base).
+    this.logger.log(
+      `PREPAGO trip ${input.tripId}: delta de tarifa ${deltaCents}c (completó ${input.grossCents}c, ` +
+        `cobrado al iniciar ${baseCharge.grossCents}c) → cobro adicional`,
+    );
+    return this.charge({
+      tripId: input.tripId,
+      grossCents: deltaCents,
+      tipCents: 0,
+      method: input.method ?? this.defaultMethod,
+      mode: ChargeMode.ON_DEMAND,
+      driverId: input.driverId,
+      dedupKey: deriveTripFareDeltaDedupKey(input.tripId, baseCharge.grossCents),
+      userId: input.userId,
+      dispatchMode: input.dispatchMode,
+      originLat: input.originLat,
+      originLng: input.originLng,
+    });
+  }
+
+  /**
+   * Core de cobro de la tarifa de un viaje (BR-P01). dedupKey determinista por viaje. Lo comparten el
+   * disparador al INICIAR (`chargeTripFareAtStart`, digital) y al COMPLETAR (`settleTripFareOnCompletion`,
+   * efectivo bilateral). `cashCollected` solo aplica al camino EFECTIVO en completed (al iniciar no viaja).
+   */
+  async chargeTripFare(input: {
     tripId: string;
     grossCents: number;
     dedupKey: string;
@@ -1597,6 +2957,13 @@ export class PaymentsService {
      * confirme (push). Ausente/false ⇒ flujo bilateral normal (driverConfirmed queda false).
      */
     cashCollected?: boolean;
+    /** MÉTRICAS · modo de despacho del viaje (FIXED/PUJA) denormalizado del evento — para el corte "Ingresos
+     *  por modo" (divide el ON_DEMAND en Fijo/Puja). Ausente en eventos viejos ⇒ null (sin modo). */
+    dispatchMode?: string;
+    /** MÉTRICAS · origen del viaje (lat/lng) denormalizado del evento — la captura zonifica a distrito para el
+     *  corte "Ingresos por distrito". Ausente ⇒ sin geo/distrito. */
+    originLat?: number;
+    originLng?: number;
   }): Promise<Payment> {
     // Fallback a defaultMethod SOLO para eventos viejos sin el campo (compat. con trip.completed
     // emitidos antes de que trip-service incluyera paymentMethod en el envelope). Para eventos
@@ -1607,10 +2974,17 @@ export class PaymentsService {
       grossCents: input.grossCents,
       tipCents: 0,
       method,
+      // El cobro on-demand entra por el evento trip.completed → modo ON_DEMAND (tasa configurable). El
+      // carpooling NUNCA pasa por acá: entra por POST /charge service-rail (controller), tageado CARPOOLING.
+      mode: ChargeMode.ON_DEMAND,
       driverId: input.driverId,
       dedupKey: input.dedupKey,
       promoCode: input.promoCode,
       userId: input.userId,
+      // MÉTRICAS · denormalización para los cortes por modo/distrito (charge las persiste + zonifica el origen).
+      dispatchMode: input.dispatchMode,
+      originLat: input.originLat,
+      originLng: input.originLng,
     });
 
     // EFECTIVO: el conductor ya confirmó "cobré" al terminar. Aplicamos su lado de la confirmación
@@ -1633,46 +3007,26 @@ export class PaymentsService {
 
   /**
    * EFECTIVO · aplica la confirmación del CONDUCTOR a un Payment CASH recién creado (driverConfirmed=true),
-   * derivada de `cashCollected` en trip.completed. IDEMPOTENTE (upsert por tripId + status-guard):
-   *  - Si el PASAJERO ya había confirmado (caso raro: confirmó antes de existir el Payment, vía el upsert
-   *    de confirmCash) → ambos true → CAPTURA directo (payment.captured).
-   *  - Si solo el conductor confirmó → el Payment queda PENDING y se emite payment.cash_pending para que
-   *    notification-service empuje al PASAJERO "confirma tu pago en efectivo". El conductor NO necesita
-   *    push (ya confirmó al terminar). Reprocesar el mismo trip.completed no duplica (upsert + dedup outbox).
+   * derivada de `cashCollected` en trip.completed.
+   *
+   * DECISIÓN DEL DUEÑO (2026-07-14): el efectivo se captura con la SOLA confirmación del CONDUCTOR (tiene la
+   * plata EN MANO). Se elimina la doble confirmación bilateral: el PASAJERO ya NO confirma — solo ve un
+   * recibo informativo ("Pagaste S/X en efectivo"). Por eso acá capturamos directo (payment.captured +
+   * acumula la deuda de comisión cash del conductor) y NO emitimos `payment.cash_pending` (no hay push
+   * "confirma tu efectivo" ni espera). Idempotente: la captura es CAS PENDING→CAPTURED (una sola gana).
    */
   private async applyDriverCashConfirmation(payment: Payment): Promise<Payment> {
-    const confirmation = await this.prisma.write.cashConfirmation.upsert({
-      where: { tripId: payment.tripId },
-      update: { driverConfirmed: true },
-      create: { id: uuidv7(), tripId: payment.tripId, driverConfirmed: true },
+    // Registramos AMBOS lados como confirmados: el conductor confirma por los dos (la plata cambió de mano
+    // en el acto). Mantiene coherente la tabla de confirmaciones sin exigir un segundo paso del pasajero.
+    await this.repo.upsertCashConfirmation(payment.tripId, {
+      driverConfirmed: true,
+      passengerConfirmed: true,
     });
-
-    // El pasajero ya había confirmado (caso raro) → ambos true → captura inmediata.
-    if (confirmation.passengerConfirmed) {
-      await this.captureCash(payment);
-      return this.getPayment(payment.id);
-    }
-
-    // Solo el conductor confirmó → PENDING esperando al pasajero. Emitimos cash_pending (push) por
-    // OUTBOX (idempotencia financiera): aggregateId = paymentId, dedup natural del relay.
-    await this.prisma.write.$transaction(async (tx) => {
-      const envelope = createEnvelope({
-        eventType: 'payment.cash_pending',
-        producer: 'payment-service',
-        payload: {
-          paymentId: payment.id,
-          tripId: payment.tripId,
-          grossCents: payment.grossCents,
-          // ENRIQUECIDO: destino del push del pasajero (sin join cross-servicio).
-          passengerId: payment.passengerId ?? undefined,
-        },
-      });
-      await enqueueOutbox(tx, envelope, payment.id);
-    });
+    await this.captureCash(payment);
     this.logger.log(
-      `Efectivo ${payment.id} (viaje ${payment.tripId}): conductor confirmó, falta el pasajero → cash_pending`,
+      `Efectivo ${payment.id} (viaje ${payment.tripId}): conductor confirmó → CAPTURADO (sin doble confirmación)`,
     );
-    return payment;
+    return this.getPayment(payment.id);
   }
 
   /**
@@ -1683,10 +3037,10 @@ export class PaymentsService {
    * de @veo/database. Idempotente: la sobre-escritura es determinista, reprocesar es un no-op.
    */
   async eraseUserPii(userId: string): Promise<{ paymentsAnonymized: number }> {
-    const result = await this.prisma.write.payment.updateMany({
-      where: { passengerId: userId, payerRef: { not: null } },
-      data: { payerRef: deletedPlaceholder(userId, 'payerRef') },
-    });
+    const result = await this.repo.anonymizePayerRef(
+      userId,
+      deletedPlaceholder(userId, 'payerRef'),
+    );
     this.logger.log(
       `Derecho al olvido: payerRef anonimizado en ${result.count} pago(s) del usuario ${userId} ` +
         '(registros financieros conservados por obligación contable)',

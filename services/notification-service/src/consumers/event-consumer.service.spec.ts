@@ -66,6 +66,7 @@ class InMemoryStore implements NotificationStore {
       attempts: 0,
       sentAt: null,
       deliveredAt: null,
+      readAt: null,
       failedReason: null,
       createdAt: new Date(),
     };
@@ -124,10 +125,31 @@ function fakeDevices(tokensByUser: Record<string, DeviceTarget[]>): {
 }
 
 /**
+ * Fake del cliente identity gRPC (ADR-015 D7): resuelve `Driver.id → userId` desde un mapa en memoria.
+ * Por DEFAULT un driver no mapeado → `found:false` (omito limpio). Configurable para simular gRPC caído.
+ */
+function fakeIdentity(
+  userByDriver: Record<string, string>,
+  opts: { throws?: boolean } = {},
+): { getDriver: (driverId: string) => Promise<{ userId: string; found: boolean }> } {
+  return {
+    getDriver: async (driverId: string) => {
+      if (opts.throws) throw new Error('identity gRPC unavailable');
+      const userId = userByDriver[driverId];
+      if (userId === undefined) return { userId: '', found: false };
+      return { userId, found: true };
+    },
+  };
+}
+
+/**
  * Construye el EventConsumerService con dependencias reales (motor) y fakes (devices/config) y
  * ejecuta onModuleInit para que el bootstrap registre los handlers en el espía.
  */
-async function buildAndInit(tokensByUser: Record<string, DeviceTarget[]>) {
+async function buildAndInit(
+  tokensByUser: Record<string, DeviceTarget[]>,
+  identity: ReturnType<typeof fakeIdentity> = fakeIdentity({}),
+) {
   registered.clear();
   const store = new InMemoryStore();
   const engine = new NotificationEngine(store, renderer, new NoopDispatcher(), policy);
@@ -137,7 +159,7 @@ async function buildAndInit(tokensByUser: Record<string, DeviceTarget[]>) {
   const config = {
     getOrThrow: (key: string) => (key === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
     get: () => undefined,
-  } as unknown as ConstructorParameters<typeof EventConsumerService>[3];
+  } as unknown as ConstructorParameters<typeof EventConsumerService>[4];
 
   // Resolver de contactos por defecto: vacío (estos tests no ejercen el fan-out de pánico).
   const shareContacts = {
@@ -148,6 +170,7 @@ async function buildAndInit(tokensByUser: Record<string, DeviceTarget[]>) {
     engine,
     devices as unknown as ConstructorParameters<typeof EventConsumerService>[1],
     shareContacts,
+    identity as unknown as ConstructorParameters<typeof EventConsumerService>[3],
     config,
   );
   await service.onModuleInit();
@@ -490,6 +513,34 @@ describe('EventConsumerService · trip.started → "tu viaje empezó"', () => {
     await registered.get('trip.started')!(e);
     await registered.get('trip.started')!(e);
     expect(store.records.size).toBe(1);
+  });
+});
+
+describe('EventConsumerService · RC5 · trip.destination_changed → alerta al guardián SOLO en modo niño', () => {
+  beforeEach(() => registered.clear());
+
+  const destChanged = (childMode: boolean) =>
+    env('trip.destination_changed', {
+      tripId: 'trip-D',
+      passengerId: PAX,
+      destination: { lat: -12.2, lon: -77.0 },
+      previousFareCents: 2400,
+      fareCents: 2600,
+      childMode,
+    });
+
+  it('modo niño → push CRÍTICO TRIP_DESTINATION_CHANGED al pasajero (guardián)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-D', platform: 'ios' }] });
+    await registered.get('trip.destination_changed')!(destChanged(true));
+    const rec = [...store.records.values()][0]!;
+    expect(rec.template).toBe(TEMPLATE_KEYS.TRIP_DESTINATION_CHANGED);
+    expect(rec.payload.data).toMatchObject({ tripId: 'trip-D', screen: 'TripActive' });
+  });
+
+  it('viaje NORMAL (childMode false) → NO pushea (el pasajero cambió su propio destino, no es spam)', async () => {
+    const { store } = await buildAndInit({ [PAX]: [{ token: 'tok-D', platform: 'ios' }] });
+    await registered.get('trip.destination_changed')!(destChanged(false));
+    expect(store.records.size).toBe(0);
   });
 });
 
@@ -886,6 +937,230 @@ describe('EventConsumerService · penalidad de cancelación (F2 recorded / F2.3 
   });
 });
 
+describe('EventConsumerService · payout.processed → push al CONDUCTOR (ADR-015 D7)', () => {
+  // BUG ARREGLADO: el evento targetea por `Driver.id` (DRV), NO por la cuenta `userId` (USER). El
+  // device-token store se consulta por userId → sin resolver driverId→userId por identity el push se
+  // omitía SIEMPRE (Driver.id ≠ userId). Los fakes reflejan esa distinción: identity mapea DRV→USER y
+  // los device-tokens se registran bajo USER (no bajo DRV).
+  const DRV = '44444444-4444-4444-8444-444444444444';
+  const USER = '99999999-9999-4999-8999-999999999999';
+  beforeEach(() => registered.clear());
+
+  it('se suscribe a payout.processed (fila del registro)', async () => {
+    await buildAndInit({});
+    expect(registered.has('payout.processed')).toBe(true);
+  });
+
+  it('resuelve driverId→userId por identity y encola al device-token de ESE userId (no del driverId)', async () => {
+    // device-tokens registrados bajo USER (la cuenta), como en producción. identity mapea DRV→USER.
+    const identity = fakeIdentity({ [DRV]: USER });
+    const devices = fakeDevices({ [USER]: [{ token: 'tok-PO', platform: 'android' }] });
+    // Espía sobre findActiveByUser: la aserción CLAVE del gate D7.
+    const findSpy = vi.spyOn(devices, 'findActiveByUser');
+
+    registered.clear();
+    const store = new InMemoryStore();
+    const engine = new NotificationEngine(store, renderer, new NoopDispatcher(), policy);
+    const { EventConsumerService } = await import('./event-consumer.service');
+    const config = {
+      getOrThrow: (key: string) => (key === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
+      get: () => undefined,
+    } as unknown as ConstructorParameters<typeof EventConsumerService>[4];
+    const shareContacts = {
+      resolveByPassenger: async () => [],
+    } as unknown as ConstructorParameters<typeof EventConsumerService>[2];
+    const service = new EventConsumerService(
+      engine,
+      devices as unknown as ConstructorParameters<typeof EventConsumerService>[1],
+      shareContacts,
+      identity as unknown as ConstructorParameters<typeof EventConsumerService>[3],
+      config,
+    );
+    await service.onModuleInit();
+
+    await registered.get('payout.processed')!(
+      env('payout.processed', {
+        payoutId: 'po-1',
+        driverId: DRV,
+        amountCents: 12500,
+        period: '2026-W25',
+      }),
+    );
+
+    // ASSERT CLAVE: el lookup de device-token va con el USER resuelto, JAMÁS con el driverId.
+    expect(findSpy).toHaveBeenCalledWith(USER);
+    expect(findSpy).not.toHaveBeenCalledWith(DRV);
+
+    const rec = [...store.records.values()][0]!;
+    expect(rec.channel).toBe(NotificationChannel.PUSH);
+    expect(rec.template).toBe(TEMPLATE_KEYS.PAYOUT_PROCESSED);
+    // la notificación se keya a la cuenta (userId), no al Driver.id.
+    expect(rec.recipientId).toBe(USER);
+    expect(rec.payload.to).toBe('tok-PO');
+    expect(rec.payload.vars).toMatchObject({ amount: '125.00' }); // 12500 céntimos → S/125.00
+    expect(rec.payload.data).toMatchObject({ payoutId: 'po-1', screen: 'Wallet' });
+    // SIN PII: ni la billetera ni el driverId/userId viajan al push (solo payoutId + deep-link).
+    expect(rec.payload.data).not.toHaveProperty('driverId');
+    expect(rec.payload.data).not.toHaveProperty('userId');
+  });
+
+  it('identity gRPC caído (TRANSITORIO) → RE-LANZA para que Kafka redelivere (no traga, no pierde el push)', async () => {
+    const identity = fakeIdentity({ [DRV]: USER }, { throws: true });
+    const { store } = await buildAndInit(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      identity,
+    );
+    // ASSERT CLAVE: el handler PROPAGA el throw transitorio → el camino de error del consumer relanza y
+    // Kafka redelivere el evento (simetría con el device-store transitorio). No se traga la plata en un blip.
+    await expect(
+      registered.get('payout.processed')!(
+        env('payout.processed', {
+          payoutId: 'po-down',
+          driverId: DRV,
+          amountCents: 8000,
+          period: '2026-W25',
+        }),
+      ),
+    ).rejects.toThrow('identity gRPC unavailable');
+    // No encoló nada en este intento: el push se entregará en el redelivery (cuando identity se recupere).
+    expect(store.records.size).toBe(0);
+  });
+
+  it('driver no encontrado / sin userId en identity (RESULTADO permanente) → push omitido limpio (no relanza)', async () => {
+    // identity vacío → DRV no mapea → found:false. Aunque haya token bajo USER, no se resuelve el target.
+    const identity = fakeIdentity({});
+    const { store } = await buildAndInit(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      identity,
+    );
+    await registered.get('payout.processed')!(
+      env('payout.processed', {
+        payoutId: 'po-nf',
+        driverId: DRV,
+        amountCents: 8000,
+        period: '2026-W25',
+      }),
+    );
+    expect(store.records.size).toBe(0);
+  });
+
+  it('sin device-token del conductor (resuelto pero sin device) → degrada honesto (no encola, no crashea)', async () => {
+    const identity = fakeIdentity({ [DRV]: USER });
+    const { store } = await buildAndInit({}, identity);
+    await registered.get('payout.processed')!(
+      env('payout.processed', {
+        payoutId: 'po-2',
+        driverId: DRV,
+        amountCents: 8000,
+        period: '2026-W25',
+      }),
+    );
+    expect(store.records.size).toBe(0);
+  });
+
+  it('redelivery del mismo payout.processed → no notifica dos veces (dedup por payoutId)', async () => {
+    const identity = fakeIdentity({ [DRV]: USER });
+    const { store } = await buildAndInit(
+      { [USER]: [{ token: 'tok-PO', platform: 'android' }] },
+      identity,
+    );
+    const e = env('payout.processed', {
+      payoutId: 'po-1',
+      driverId: DRV,
+      amountCents: 12500,
+      period: '2026-W25',
+    });
+    await registered.get('payout.processed')!(e);
+    await registered.get('payout.processed')!(e);
+    expect(store.records.size).toBe(1);
+  });
+});
+
+describe('EventConsumerService · payout.failed → aviso al operador/central (ADR-015 D7 opcional)', () => {
+  const DRV = '44444444-4444-4444-8444-444444444444';
+  beforeEach(() => registered.clear());
+
+  /** buildAndInit pero con CENTRAL_ALERT_WEBHOOK_URL configurada (riel webhook a la central existente). */
+  async function buildWithCentral(url: string | undefined) {
+    registered.clear();
+    const store = new InMemoryStore();
+    const engine = new NotificationEngine(store, renderer, new NoopDispatcher(), policy);
+    const devices = fakeDevices({});
+
+    const { EventConsumerService } = await import('./event-consumer.service');
+    const config = {
+      getOrThrow: (key: string) => (key === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
+      get: (key: string) => (key === 'CENTRAL_ALERT_WEBHOOK_URL' ? url : undefined),
+    } as unknown as ConstructorParameters<typeof EventConsumerService>[4];
+    const shareContacts = {
+      resolveByPassenger: async () => [],
+    } as unknown as ConstructorParameters<typeof EventConsumerService>[2];
+    const identity = fakeIdentity({}) as unknown as ConstructorParameters<
+      typeof EventConsumerService
+    >[3];
+
+    const service = new EventConsumerService(
+      engine,
+      devices as unknown as ConstructorParameters<typeof EventConsumerService>[1],
+      shareContacts,
+      identity,
+      config,
+    );
+    await service.onModuleInit();
+    return { store };
+  }
+
+  it('se suscribe a payout.failed (handler dedicado)', async () => {
+    await buildAndInit({});
+    expect(registered.has('payout.failed')).toBe(true);
+  });
+
+  it('con URL de central → webhook PAYOUT_FAILED_CENTRAL_ALERT (sin PII: solo IDs + período)', async () => {
+    const { store } = await buildWithCentral('https://central.veo.pe/alerts');
+    await registered.get('payout.failed')!(
+      env('payout.failed', {
+        payoutId: 'po-9',
+        driverId: DRV,
+        amountCents: 9000,
+        period: '2026-W25',
+      }),
+    );
+    const rec = [...store.records.values()][0]!;
+    expect(rec.channel).toBe(NotificationChannel.WEBHOOK);
+    expect(rec.template).toBe(TEMPLATE_KEYS.PAYOUT_FAILED_CENTRAL_ALERT);
+    expect(rec.recipientId).toBe('central');
+    expect(rec.payload.to).toBe('https://central.veo.pe/alerts');
+    expect(rec.dedupKey).toBe('payout:po-9:failed');
+    expect(rec.payload.vars).toMatchObject({ payoutId: 'po-9', period: '2026-W25' });
+  });
+
+  it('SIN URL de central → degrada honesto (warn + omite, no finge aviso)', async () => {
+    const { store } = await buildWithCentral(undefined);
+    await registered.get('payout.failed')!(
+      env('payout.failed', {
+        payoutId: 'po-9',
+        driverId: DRV,
+        amountCents: 9000,
+        period: '2026-W25',
+      }),
+    );
+    expect(store.records.size).toBe(0);
+  });
+
+  it('redelivery del mismo payout.failed → no duplica el aviso (dedup por payoutId)', async () => {
+    const { store } = await buildWithCentral('https://central.veo.pe/alerts');
+    const e = env('payout.failed', {
+      payoutId: 'po-9',
+      driverId: DRV,
+      amountCents: 9000,
+      period: '2026-W25',
+    });
+    await registered.get('payout.failed')!(e);
+    await registered.get('payout.failed')!(e);
+    expect(store.records.size).toBe(1);
+  });
+});
+
 describe('EventConsumerService · afiliación Yape (userId directo)', () => {
   beforeEach(() => registered.clear());
 
@@ -1118,12 +1393,16 @@ async function buildWithContacts(resolver: TrustedContactsResolver) {
   const config = {
     getOrThrow: (key: string) => (key === 'KAFKA_BROKERS' ? 'localhost:9094' : ''),
     get: () => undefined,
-  } as unknown as ConstructorParameters<typeof EventConsumerService>[3];
+  } as unknown as ConstructorParameters<typeof EventConsumerService>[4];
+  const identity = fakeIdentity({}) as unknown as ConstructorParameters<
+    typeof EventConsumerService
+  >[3];
 
   const service = new EventConsumerService(
     engine,
     devices as unknown as ConstructorParameters<typeof EventConsumerService>[1],
     resolver,
+    identity,
     config,
   );
   await service.onModuleInit();

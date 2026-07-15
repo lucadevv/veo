@@ -90,13 +90,14 @@ export class QuoteRequestDto {
   waypoints?: MapPointDto[];
 
   /**
-   * S2 (ADR 011) — hora de RECOJO de una reserva (ISO-8601, opcional). Si se envía, el quote resuelve el
-   * modo de pricing para ESA hora (no la actual) → el preview de una reserva muestra la política de la hora
-   * de recojo. Omitir = viaje inmediato (modo de ahora). Es solo un preview; el modo se congela en POST /trips.
+   * S2 — hora de RECOJO de una reserva (ISO-8601, opcional). ADR 023: el MODO de pricing YA NO varía por
+   * horario (schedule/franjas superseded) → lo manda la OFERTA, no la hora, así que el quote lo ignora
+   * para resolver el modo. Se conserva por compat de wire (la app puede seguir enviándolo) y para futuras
+   * necesidades de la reserva; el modo se congela igual en POST /trips.
    */
   @ApiPropertyOptional({
     description:
-      'Hora de recojo de una reserva (ISO-8601). El quote resuelve el modo para esa hora (S2).',
+      'Hora de recojo de una reserva (ISO-8601). ADR 023: no afecta el modo del quote (lo manda la oferta).',
     example: '2026-06-01T22:00:00.000Z',
   })
   @IsOptional()
@@ -141,9 +142,9 @@ export interface QuoteOption {
   creditAppliedCents: number;
   currency: 'PEN';
   /**
-   * ADR 013 §1.3 (additive) · modo RESUELTO POR OFERTA: `offering.allowedModes ∩ schedule`. Le dice a
-   * la app qué pantalla pintar (puja vs precio firme) POR opción; el `mode` top-level se mantiene
-   * (compat, ancla VEO Económico).
+   * ADR 023 · modo EFECTIVO POR OFERTA: el `mode` de la oferta (palanca manual del admin, respetando
+   * `modeLocked`), ya resuelto por trip-service. Le dice a la app qué pantalla pintar (puja vs precio
+   * firme) POR opción; el `mode` top-level se mantiene (compat, ancla VEO Económico).
    */
   mode: PricingMode;
   /** ADR 013 (additive) · token i18n del nombre (`offering.veo_moto.name`); la app lo resuelve. */
@@ -170,8 +171,9 @@ export interface QuoteOption {
 export type PricingMode = 'PUJA' | 'FIXED';
 
 /**
- * Cotización ligera de previsualización: ruta + ETA + opciones de tarifa + modo de pricing (ADR 011 M4).
- * `mode` lo resuelve trip-service (GET /internal/pricing/resolve); la app pinta la pantalla según él:
+ * Cotización ligera de previsualización: ruta + ETA + opciones de tarifa + modo de pricing (ADR 023).
+ * `mode` es el modo EFECTIVO de la oferta ANCLA (catálogo del admin, GET /internal/catalog); la app
+ * pinta la pantalla según él:
  *  - FIXED → usa `options[].priceCents` (precio firme por categoría).
  *  - PUJA  → usa `bidFloorCents` (piso de la zona) + `suggestedCents` (ancla = la tarifa que sería fija).
  * `bidFloorCents`/`suggestedCents` solo se envían en modo PUJA.

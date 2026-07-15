@@ -6,11 +6,12 @@ import {
 } from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useQuery} from '@tanstack/react-query';
-import {Button, IconButton, StatusPill, Text, useTheme} from '@veo/ui-kit';
+import {Button, StatusPill, Text, useTheme} from '@veo/ui-kit';
 import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {
   ActivityIndicator,
+  Pressable,
   StyleSheet,
   View,
   type ViewStyle,
@@ -138,12 +139,15 @@ export function CameraLiveScreen(): React.JSX.Element {
 
       {/* Barra superior: back + pill REC · EN VIVO. */}
       <View style={[styles.topBar, {top: insets.top + theme.spacing.sm}]}>
-        <IconButton
+        {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño). Sobre el video
+            oscuro + scrim el chevron va BLANCO (`onBrand`), no `ink` (invisible en este fondo). */}
+        <Pressable
+          accessibilityRole="button"
           accessibilityLabel={t('actions.back')}
-          variant="surface"
-          onPress={() => navigation.goBack()}
-          icon={<IconArrowLeft color={theme.colors.ink} size={22} />}
-        />
+          hitSlop={12}
+          onPress={() => navigation.goBack()}>
+          <IconArrowLeft color={theme.colors.onBrand} size={28} />
+        </Pressable>
         {/* REC = grabación server-side activa: solo si el bff entregó grant (no inventamos un REC falso). */}
         {hasGrant ? (
           <StatusPill label={t('cameraLive.recLive')} tone="danger" dot live />

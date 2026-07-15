@@ -1,0 +1,85 @@
+'use client';
+
+import { useState } from 'react';
+import type { CommissionView } from '@/lib/api/schemas';
+import { useReplaceCarpoolingFee } from '@/lib/api/queries';
+import { can } from '@/lib/rbac';
+import { useSession } from '@/lib/session-context';
+import { useConfigSave } from '@/lib/use-config-save';
+import { MAX_RATE_PCT, BPS_PER_PERCENT, bpsToPercentLabel, percentToBps } from '@/lib/commission';
+import { SaveAction, ReadOnlyNote } from '@/components/config/save-action';
+import { ConfigCard, RateField, RateInput } from '@/components/config/config-card';
+import { PriceDiffHint } from '@/components/config/price-diff-hint';
+
+/** Formato del hint LIVE-DIFF (fee): bps → "2.00%" (mismo `bpsToPercentLabel` que el sub "Actual"). */
+const pctLabel = (bps: number) => `${bpsToPercentLabel(bps)}%`;
+
+/**
+ * Service fee del CARPOOLING (carril cost-sharing · F2.7 · ADR-015 §11.2 · CAS desacoplada #3) — card del diseño
+ * (veo.pen). El admin edita SOLO el fee que se SUMA al pasajero — el conductor cobra el 100% de su contribución,
+ * así que no hay nudo legal (es un cargo al pasajero, no lucro sobre el conductor). La comisión ON-DEMAND vive en
+ * Precios on-demand con su PROPIA version, así que este save manda SOLO `carpoolingFeeBps` + `expectedVersion =
+ * config.carpoolingFeeVersion` a su propio endpoint: editar acá ya NO 409ea el panel on-demand. CAS: 409 solo si
+ * otro admin movió la version del CARPOOLING. La UI solo refleja `finance:manage`; admin-bff + payment-service
+ * re-autorizan.
+ */
+export function CarpoolingFeePanel({ config }: { config: CommissionView }) {
+  const user = useSession();
+  const canManage = can(user, 'finance:manage');
+  const replace = useReplaceCarpoolingFee();
+  const { save, saving } = useConfigSave({
+    mutation: replace,
+    conflictNoun: 'el service fee del carpooling',
+    error: 'No se pudo guardar el service fee del carpooling',
+    success: (p) =>
+      `Service fee del carpooling actualizado · ${bpsToPercentLabel(p.carpoolingFeeBps)}%`,
+  });
+
+  const [pct, setPct] = useState<string>(bpsToPercentLabel(config.carpoolingFeeBps));
+
+  const bps = percentToBps(pct);
+  const invalid = !Number.isFinite(bps) || bps < 0 || bps > MAX_RATE_PCT * BPS_PER_PERCENT;
+  const dirty = bps !== config.carpoolingFeeBps;
+
+  // Solo el fee de carpooling + su CAS INDEPENDIENTE (`config.carpoolingFeeVersion`): NO toca la comisión on-demand.
+  const onSave = () =>
+    save({ carpoolingFeeBps: bps, expectedVersion: config.carpoolingFeeVersion });
+
+  return (
+    <ConfigCard
+      title="Service fee"
+      tag="fee al pasajero"
+      tagTone="brand"      footer={
+        <SaveAction
+          canManage={canManage}
+          dirty={dirty}
+          invalid={invalid}
+          saving={saving}
+          onSave={onSave}
+          title="Confirmar service fee del carpooling"
+          description="Esta acción cambia el service fee global que se suma al pasajero en el carpooling y queda auditada."
+        />
+      }
+    >
+      <RateField
+        label="Service fee"
+        sub={`Actual: ${bpsToPercentLabel(config.carpoolingFeeBps)}%`}
+        unit="%"
+        error={invalid ? `Entre 0 y ${MAX_RATE_PCT}` : undefined}
+        hint={<PriceDiffHint before={config.carpoolingFeeBps} after={bps} format={pctLabel} />}
+      >
+        <RateInput
+          type="number"
+          inputMode="decimal"
+          step="0.5"
+          min="0"
+          max={MAX_RATE_PCT}
+          value={pct}
+          onChange={(e) => setPct(e.target.value)}
+          disabled={!canManage}
+        />
+      </RateField>
+      <ReadOnlyNote canManage={canManage} noun="el service fee" />
+    </ConfigCard>
+  );
+}

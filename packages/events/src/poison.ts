@@ -48,6 +48,49 @@ export function isPermanentDataError(err: unknown): boolean {
   return code !== undefined && PERMANENT_PRISMA_CODES.has(code);
 }
 
+/**
+ * Clasificación de errores de PUBLICACIÓN (lado producer/outbox-relay), hermana de `isPermanentDataError`
+ * (lado consumer). Cierra el FIX poison-pill del relay:
+ *
+ * CAUSA RAÍZ: el relay (PrismaOutboxStore.publishGrouped) capturaba CUALQUIER error del `publish()` y lo
+ * trataba como TRANSITORIO (reset claimed_at → retry). Pero `KafkaEventProducer.publish` hace
+ * `schema.parse(envelope.payload)` que LANZA un `ZodError` si el payload viola su schema zod — un error
+ * PERMANENTE (reintentar da SIEMPRE el mismo error). Resultado previo: ese evento se reintentaba ∞, y como
+ * el grupo per-aggregate es SERIAL (orden), un poison en la cabeza BLOQUEABA todos los eventos siguientes de
+ * ese aggregate (head-of-line block). Mismo criterio que el poison-safe del consumer base y del
+ * `classifyRefundError`: lo PERMANENTE no se reintenta, se marca terminal y se SURFACEA (métrica + log).
+ *
+ * REGLA:
+ *  - PERMANENTE  → el payload NUNCA va a publicar (validación de schema falla SIEMPRE igual). El relay debe
+ *                  marcar la fila como TERMINAL-fallida (`failed_at`): NO vuelve a la cola de claim y NO
+ *                  bloquea el grupo. El grupo AVANZA al siguiente evento del mismo aggregate.
+ *  - TRANSITORIO → broker caído, timeout, red, conexión cerrada. El relay resetea `claimed_at = NULL` → retry.
+ *
+ * Detección por TIPO, JAMÁS por `err.message`: un `ZodError` (validación de payload) es la señal canónica de
+ * payload malformado. Se reconoce de forma estructural (cross-versión de zod, sin acoplar a la clase): un
+ * objeto-error con `name === 'ZodError'` y un array `issues`. Esto evita el riesgo de dos copias de zod en el
+ * árbol de deps (donde `instanceof ZodError` podría fallar) y replica el criterio "estructural" de
+ * `isUniqueViolation`/`isPermanentDataError` (clasificar por shape, no por identidad de clase).
+ */
+export function isPermanentPublishError(err: unknown): boolean {
+  return isZodError(err);
+}
+
+/**
+ * `true` si `err` es un `ZodError` (reconocido ESTRUCTURALMENTE: `name === 'ZodError'` + `issues: unknown[]`).
+ * No usamos `instanceof` para ser robustos a múltiples instancias de zod en el árbol de dependencias.
+ */
+function isZodError(err: unknown): boolean {
+  return (
+    err !== null &&
+    typeof err === 'object' &&
+    'name' in err &&
+    (err as { name?: unknown }).name === 'ZodError' &&
+    'issues' in err &&
+    Array.isArray((err as { issues?: unknown }).issues)
+  );
+}
+
 /** RFC 4122 (cualquier versión/variante). Usado para guardar el borde del handler antes de tocar
  *  una columna `@db.Uuid`: un id malformado se descarta SIN llegar a Prisma (evita P2023 de raíz). */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

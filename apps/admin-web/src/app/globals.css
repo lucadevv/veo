@@ -3,16 +3,84 @@
 /* Estilos del mapa soberano (MapLibre GL, tiles OSM self-hosted). */
 @import "maplibre-gl/dist/maplibre-gl.css";
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Tema "Trust" (LIGHT) — override SCOPED a admin-web sobre los tokens compartidos.
+ * No toca packages/shared-config (family-web/web-hub siguen dark). Redefine los VALORES
+ * de los tokens semánticos a la paleta trust del veo.pen; toda utilidad existente
+ * (bg-bg, bg-surface, text-ink, bg-accent…) hereda el light sin reescribir componentes.
+ * Paleta (hex del diseño): surface #F5F7FA · elevated #FFFFFF · ink #1A2332 ·
+ * ink-secondary #6B7A8F · ink-hint #B0BEC5 · border #DDE1E7 · primary #0075A9.
+ * ──────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Superficies — página gris claro, tarjetas blancas */
+  --bg: #F5F7FA;
+  --surface: #FFFFFF;
+  --surface-2: #EDF1F5;
+
+  /* Tinta / texto */
+  --ink: #1A2332;
+  --ink-muted: #6B7A8F;
+  --ink-subtle: #B0BEC5;
+
+  /* Bordes / divisores */
+  --border: #DDE1E7;
+  --border-strong: #C5CDD6;
+  --divider: #E8ECF1;
+
+  /* Marca = azul trust #0075A9 (trust-primary) · texto encima = BLANCO */
+  --brand: #0075A9;
+  --brand-hover: #005A82;
+  --on-brand: #FFFFFF;
+  /* Acento del ADMIN = rol PRIMARIO/marca (azul, == brand). En la Identidad Visual `trust-accent` == `trust-success`
+   * (los dos verde #00C853): el rol VERDE del sistema es `success`, no un acento aparte. El admin NUNCA usó un
+   * acento verde distinto — su `accent` siempre fue el azul de marca (logo, toggles, chrome, selección primaria).
+   * Por eso accent = brand acá; lo VERDE del admin sale de `--success`. Jerarquía: primario→brand, verde→success. */
+  --accent: #0075A9;
+  --accent-hover: #005A82;
+  --on-accent: #FFFFFF;
+
+  /* Estado — derivado de los tokens canónicos trust-* del veo.pen (Identidad Visual).
+   * success #00C853 (trust-success) · warn #FFA000 (trust-warning) · danger #D11216 (trust-error)
+   * · info #0097CE (trust-info). Supersede el legacy jade #17C08A / ámbar #F2AF48 / rosa #FF4D6A. */
+  --success: #00C853;
+  --on-success: #FFFFFF;
+  --warn: #FFA000;
+  --on-warn: #1A2332;
+  --danger: #D11216;
+  --danger-hover: #A50E12;
+  --on-danger: #FFFFFF;
+  --info: #0097CE;
+  --on-info: #FFFFFF;
+
+  --focus: #0075A9;
+
+  /* Azul profundo del gradiente de marca (columna del login) — trust-primary-dark */
+  --brand-deep: #00313C;
+
+  /* Radios: escala del veo.pen (sm8/md12/lg16/xl20/2xl28) + control 14 (botones) */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.75rem;
+  --radius-control: 0.875rem;
+
+  /* Sombras recalibradas para light (tinte slate, no negro puro) */
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --shadow-2: 0 4px 12px -2px rgba(15, 23, 42, 0.08);
+  --shadow-3: 0 18px 40px -12px rgba(15, 23, 42, 0.12);
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   html {
-    /* Las fuentes self-hosted (next/font) inyectan --font-sans/--font-mono en <html>. */
+    /* Las fuentes self-hosted (next/font) inyectan --font-sans/--font-display/--font-serif/--font-mono. */
     -webkit-text-size-adjust: 100%;
-    /* Marca VEO = lienzo NEGRO: esquema oscuro por defecto (el toggle puede alternar la clase). */
-    color-scheme: dark;
+    /* Sistema "Trust" = lienzo CLARO por defecto (el toggle puede alternar a .dark). */
+    color-scheme: light;
   }
   html.dark {
     color-scheme: dark;
@@ -40,6 +108,59 @@
 }
 
 @layer utilities {
+  /* Gradiente de marca (columna del login): azul trust → azul profundo, 135°. Basado en tokens.
+   * Usa --brand (no --accent): tras separar accent(verde) de brand(azul), la marca manda acá. */
+  .bg-brand-gradient {
+    background-image: linear-gradient(135deg, var(--brand), var(--brand-deep));
+  }
+  /* Sombra de realce del botón primario (accent al 30%), fiel al veo.pen. Basada en token. */
+  .shadow-brand {
+    box-shadow: 0 8px 20px -4px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  /* Slider de Radios (fiel al frame): track de 6px con fill en accent hasta --fill, knob de 14px accent
+     con anillo blanco. Todo por tokens; el fill se calcula en el componente Slider (% del valor). */
+  .veo-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--accent) 0,
+      var(--accent) var(--fill, 0%),
+      var(--divider) var(--fill, 0%),
+      var(--divider) 100%
+    );
+    outline: none;
+    cursor: pointer;
+  }
+  .veo-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: var(--accent);
+    border: 3px solid var(--surface);
+    box-shadow: 0 1px 4px -1px color-mix(in srgb, var(--accent) 55%, transparent);
+    cursor: pointer;
+  }
+  .veo-range::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    background: var(--accent);
+    border: 3px solid var(--surface);
+    cursor: pointer;
+  }
+  .veo-range:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .veo-range:disabled {
+    cursor: not-allowed;
+  }
   /* Animaciones de entrada reutilizables (transform/opacity, ease-out). */
   @keyframes veo-fade-in {
     from { opacity: 0; }
@@ -57,6 +178,15 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
   }
+  /* Barrido del radar de Radios (gira el cono de accent). Solo con motion permitido. */
+  @keyframes veo-radar-sweep {
+    to { transform: rotate(360deg); }
+  }
+  /* Entrada editorial: sube + aparece. Para revelados escalonados (login, encabezados). */
+  @keyframes veo-rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
   .animate-fade-in {
     animation: veo-fade-in 180ms var(--ease-out) both;
   }
@@ -66,8 +196,71 @@
   .animate-slide-in {
     animation: veo-slide-in-right 220ms var(--ease-out) both;
   }
+  .animate-rise {
+    animation: veo-rise 560ms var(--ease-out) both;
+  }
   .animate-pulse-danger {
     animation: veo-pulse-danger 1.4s ease-in-out infinite;
+  }
+  /* Entrada ESCALONADA de grillas/listas del dashboard (KPIs, cards, filas): cascada sutil (translateY corto,
+     snappy) — nunca todo de golpe. Se pone en el CONTENEDOR (`.stagger`); los hijos directos cascadean por orden. */
+  @keyframes veo-enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .stagger > * {
+    animation: veo-enter 380ms var(--ease-out) both;
+  }
+  .stagger > *:nth-child(2) { animation-delay: 45ms; }
+  .stagger > *:nth-child(3) { animation-delay: 90ms; }
+  .stagger > *:nth-child(4) { animation-delay: 135ms; }
+  .stagger > *:nth-child(5) { animation-delay: 180ms; }
+  .stagger > *:nth-child(6) { animation-delay: 225ms; }
+  .stagger > *:nth-child(7) { animation-delay: 270ms; }
+  .stagger > *:nth-child(n + 8) { animation-delay: 315ms; }
+  /* Card CLICKEABLE: micro-lift al hover (lo interactivo se ve interactivo). Solo transform/opacity/sombra (GPU).
+     NO usar en cards estáticas (KPIs) — un lift sin destino confunde. */
+  .card-interactive {
+    transition:
+      transform 180ms var(--ease-out),
+      box-shadow 180ms var(--ease-out),
+      border-color 180ms var(--ease-out);
+  }
+  .card-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-3);
+    border-color: var(--border-strong);
+  }
+  .card-interactive:active {
+    transform: translateY(0);
+  }
+  /* Legibilidad de texto sobre imagen/video: halo oscuro que rodea cada glifo, así el texto
+     se lee incluso sobre zonas claras del video (cielo, edificios) SIN necesitar una banda
+     oscura de fondo. El anillo tight (0 0 3px) hace el grueso del trabajo; el glow (10px) suaviza. */
+  .text-on-media {
+    text-shadow:
+      0 0 3px oklch(0 0 0 / 0.85),
+      0 1px 2px oklch(0 0 0 / 0.85),
+      0 0 10px oklch(0 0 0 / 0.5);
+  }
+  /* Accesibilidad: sin movimiento, las entradas resuelven al estado final al instante. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in,
+    .animate-scale-in,
+    .animate-slide-in,
+    .animate-rise,
+    .stagger > * {
+      animation: none;
+    }
+    .card-interactive {
+      transition: none;
+    }
+    .card-interactive:hover {
+      transform: none;
+    }
+    .animate-pulse-danger {
+      animation: none;
+    }
   }
 }
 

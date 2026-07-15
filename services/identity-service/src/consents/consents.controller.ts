@@ -1,7 +1,14 @@
 import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  Audiences,
+  AudienceGuard,
+  CurrentUser,
+  InternalAudience,
+  InternalIdentityGuard,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { ConsentsService, type ConsentView } from './consents.service';
 
 /**
@@ -39,7 +46,8 @@ class RecordConsentDto {
 
 @ApiTags('users-consents')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(InternalAudience.PUBLIC_RAIL)
 @Controller('users/consents')
 export class ConsentsController {
   constructor(private readonly consents: ConsentsService) {}

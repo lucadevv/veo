@@ -322,6 +322,75 @@ export function IconShield({color, size = 18}: GlyphProps): React.JSX.Element {
   );
 }
 
+/** Insignia con check (pill "Verificado con KYC" del header · design/veo.pen c4cChO, lucide badge-check). */
+export function IconBadgeCheck({
+  color,
+  size = 14,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 2.5l2.1 1.6 2.6-.3 1 2.4 2.4 1-.3 2.6L21.5 12l-1.7 2.1.3 2.6-2.4 1-1 2.4-2.6-.3L12 21.5l-2.1-1.7-2.6.3-1-2.4-2.4-1 .3-2.6L2.5 12l1.7-2.1-.3-2.6 2.4-1 1-2.4 2.6.3z"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="m9 12 2 2 4-4"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Globo (fila "Idioma y región" · design/veo.pen c4cChO, lucide globe). */
+export function IconGlobe({color, size = 22}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={STROKE} />
+      <Path d="M3 12h18" stroke={color} strokeWidth={STROKE} />
+      <Path
+        d="M12 3a13.5 13.5 0 0 1 3.5 9A13.5 13.5 0 0 1 12 21a13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3Z"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Documento de texto (fila "Términos y privacidad" · design/veo.pen c4cChO, lucide file-text). */
+export function IconFileText({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M14 3v5h5"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M9 13h6M9 17h6"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 /** Recibo/factura (TripDetail). Reutiliza el glyph de tarjeta del set. */
 export function IconReceipt({color, size = 22}: GlyphProps): React.JSX.Element {
   return <IconCard color={color} size={size} />;

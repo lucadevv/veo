@@ -1,7 +1,7 @@
 # STATUS.md · Estado del proyecto y handoff
 
 > **Documento de traspaso para cualquier agente (Claude, Cursor, etc.) o persona que retome VEO.**
-> Última actualización: **2026-05-29**.
+> Última actualización: **2026-07-12**.
 > Lee también, en este orden: `CLAUDE.md` (reglas no negociables) → `docs/FOUNDATION.md` (contrato técnico canónico,
 > incluye §14 "Decisiones registradas") → este archivo (estado actual). El blueprint de negocio es `../VEO_Blueprint.pdf`.
 
@@ -9,13 +9,16 @@
 
 ## 0. TL;DR — ¿dónde estamos?
 
-VEO es una plataforma de movilidad segura (Lima) en construcción desde el scaffold. Multi-repo:
-`veo-platform` (backend+web+packages), `veo-passenger-app`, `veo-driver-app`, `veo-infra`.
+VEO es una plataforma de movilidad segura (Lima) en construcción desde el scaffold. **Monorepo** consolidado:
+`veo-monorepo` (rama `develop`) reúne TODO en un solo repo — `apps/` (passenger, driver, admin-web, family-web, web-hub),
+`services/` (16 microservicios + `bff/`) y `packages/` (`@veo/*`). Los repos viejos (`veo-platform`, `veo-passenger-app`,
+`veo-driver-app`, `veo-infra`) **se consolidaron** acá; el framing multi-repo de versiones anteriores de este doc está obsoleto.
 
 - ✅ **Ola 0 (Fundación)** — paquetes compartidos `@veo/*` construidos, compilados a `dist` y testeados.
-- ✅ **Ola 1 COMPLETA** — los **13 microservicios + `@veo/maps`** implementados para producción (sin mocks):
-  - 11 NestJS (`identity, trip, dispatch, payment, panic, media, notification, audit, rating, share, fleet`),
+- ✅ **Ola 1 COMPLETA** — los microservicios fundacionales + `@veo/maps` implementados para producción (sin mocks):
+  - NestJS (`identity, trip, dispatch, payment, panic, media, notification, audit, rating, share, fleet`),
   - 1 Go (`tracking`), 1 Python/FastAPI+ONNX (`biometric`).
+  - **Hoy hay 16 microservicios** en `services/` (excluyendo `bff/`): a los anteriores se sumaron **`chat-service`** (3014, chat in-app durante el viaje), **`places-service`** (3013, lugares guardados del pasajero) y **`booking-service`** (3016 REST / 50054 gRPC, cimiento del carpooling — ver §Carpooling abajo).
   - **Verificación global verde:** `pnpm typecheck` 33/33 · `pnpm lint` 33/33 · `pnpm test` 33/33.
   - E2E con **infra real (testcontainers Postgres/Redis/Kafka)** en `payment`, `panic` (p99 ack 4.9ms) y `audit`.
   - Go: `go build` + `go test ./...` verde. Python: **44 tests** verde (venv propio).
@@ -49,16 +52,54 @@ VEO es una plataforma de movilidad segura (Lima) en construcción desde el scaff
   - **Soporte** → módulo `support` en **notification-service** (Ticket{category,subject,body,status,tripId?}). public-bff + driver-bff `POST/GET /support/tickets`. Ambas apps: Centro de ayuda (FAQ estático + reportar problema + mis tickets).
   - `@veo/api-client`: `routeStep`/`tripRoute`, `heatmapCell`/`heatmapView`, `driverIncentive`/lista, `supportTicket`/`createTicketRequest`/`supportCategory`. Nuevo evento `incentive.completed`.
   - **Migraciones aplicadas:** payment `incentives`, notification `support_tickets`. **Verde:** passenger **145**, driver **120**, backend.
-  - **Pendiente menor:** el bono de incentivo se emite por Kafka pero el crédito efectivo al payout es gancho futuro (hoy registra progreso, no altera el payout).
-- ✅ **Ola 5 COMPLETA (infra + cierre)** — IaC/CI/observabilidad/mesh/E2E listos y validados estáticamente (sin `apply` a AWS real: sin credenciales y la regla #1 lo prohíbe desde laptop):
-  - **Terraform** (`veo-infra/terraform`): los 11 módulos (vpc 3-AZ + VPC endpoints + flow logs, eks + OIDC/IRSA, rds-postgres multi-AZ + KMS + password→Secrets Manager, elasticache-redis, msk-kafka SASL/IAM, s3 + Object Lock, cloudfront OAC, kms por dominio pii/biometric/video/audit, iam-roles IRSA, iot-core, **secrets-manager nuevo**) **construidos desde esqueleto**; envs dev/staging/prod los cablean (RDS por servicio crítico identity/payment/panic/audit + 1 compartida; prod multi-AZ+deletion_protection+Object Lock 7a). **`terraform validate` Success** en los 11 módulos + 3 envs (terraform 1.15.5, `fmt -check` limpio).
-  - **K8s** (`veo-infra/k8s`): añadidos los 3 manifests faltantes (**biometric/fleet/chat**); **observabilidad self-hosted** (Prometheus + Grafana + OTel Collector + Tempo + Loki/promtail) en `base/observability/`; **mTLS interno** vía Linkerd + cert-manager (trust anchor propio) en `base/mesh/`; NetworkPolicies de scrape/OTLP. **`kubectl kustomize` limpio: 114 objetos** en base y en los 3 overlays.
-  - **CI por repo** (GitHub Actions): apps `veo-passenger-app`/`veo-driver-app` ahora tienen `ci.yml` (pnpm+Node22: lint+typecheck+test, build Android opcional; `@veo/*` resuelto vía GitHub Packages o checkout del hermano, gateado); `veo-infra` ganó `k8s.yml` (kustomize+kubeconform+actionlint) junto a `terraform.yml`; `veo-platform` ci.yml/codeql ya cubrían chat-service por glob.
+  - ✅ **(reconciliado 2026-07-12) El bono de incentivo YA entra al payout** — este bullet decía "gancho futuro" y estaba stale: `PayoutsService.collectEarnings` barre los bonos completados-no-pagados (`findUnpaidCompletedIncentives`, back-pay por arrastre) y los liga al Payout (`linkIncentivesToPayoutInTx`, guard anti doble-pago por `paidInPayoutId`); `paidAt` se marca al confirmar. Ver `payment-service/src/payouts/payouts.service.ts:1013` y suite `test/payouts-incentive.e2e.spec.ts`.
+- ✅ **Ola 5 COMPLETA (infra + cierre)** — el deploy real es **VPS único + Docker Compose + GitHub Actions self-hosted** (§0.7(c)). Lo que está vivo:
+  - **Deploy production-grade (carril VPS)**: `docker-compose.preview.yml` (stack completo production-grade) + `.github/workflows/images.yml` (build de imágenes a **GHCR** + deploy por **SSH al VPS**) + `infra/deploy/migrate-preview.sh` (migraciones Prisma en el host) + **Cloudflare Tunnel como edge** (NO CloudFront/ALB). Data stores self-hosteados en el VPS: **Postgres** (contenedor por servicio crítico identity/payment/panic/audit + 1 compartida) en vez de RDS; **MinIO con object-lock** en vez de S3+ObjectLock; **Kafka self-hosted** en vez de MSK; **Redis** en vez de ElastiCache; **cifrado app-level AES-256-GCM** (ya existe en código) en vez de KMS; **`.env`/docker-secrets/SOPS+age** en vez de Secrets Manager.
+  - **~~Terraform (11 módulos AWS: vpc/eks/rds/msk/elasticache/s3/cloudfront/kms/iam/iot-core/secrets-manager) · EKS · ArgoCD · Linkerd+cert-manager · `kubectl kustomize` (114 objetos) · Atlantis/Spacelift · `terraform apply` · multi-AZ~~** — **SUPERSEDED por el modelo VPS (reemplazado por VPS, ver §0.7(c)).** El trabajo de IaC/K8s se conserva como historial pero **NO es el deploy real**: producción no usa AWS managed ni un cluster Kubernetes. La observabilidad self-hosted (Prometheus + Grafana + OTel Collector + Tempo + Loki/promtail) se opera en el VPS por Docker Compose, no por manifests K8s.
+  - **CI por repo** (GitHub Actions): apps `veo-passenger-app`/`veo-driver-app` ahora tienen `ci.yml` (pnpm+Node22: lint+typecheck+test, build Android opcional; `@veo/*` resuelto vía GitHub Packages o checkout del hermano, gateado); `veo-platform` ci.yml/codeql cubren chat-service por glob. El pipeline de deploy es `images.yml` (build GHCR + deploy SSH al VPS).
   - **E2E cross-servicio orquestado** (`veo-platform/e2e/golden-path`): harness que levanta el stack mínimo (identity/trip/dispatch/payment/panic + public-bff + driver-bff) contra el dev-stack y corre el golden path (login pasajero→turno conductor con gate biométrico→crear viaje→dispatch→aceptar→FSM hasta COMPLETED→cobro+propina→**pánico HMAC con ack <3s**). **Corrido en vivo: 8/8 verde (~21s)**; `pnpm e2e:golden`. Resuelto el gap de build a `dist` (tsbuildinfo viejo + copia del cliente Prisma generado).
 - 🔒 **Bloqueado por terceros (no es código pendiente):** Yape/Plin **live** (convenio+credenciales PSP; sandbox soberano funciona), **boleta/factura SUNAT** (proveedor OSE), **llamada con número enmascarado** (decidir telefonía/SIP — choca con soberanía).
-- ✅ **git inicializado y publicado** — los 4 repos son **privados en GitHub bajo el org `MarketrixPE`**: `veo-platform`, `veo-passenger-app`, `veo-driver-app`, `veo-infra` (rama `main`, commit inicial conventional, `.gitignore` endurecido: sin node_modules/Pods/.cxx/datos de mapas/binarios Prisma/secretos). CI por repo activo.
+- ✅ **git — consolidado a monorepo** — el trabajo vive ahora en **`veo-monorepo`** (rama de trabajo `develop`), que consolidó los repos viejos (`veo-platform`, `veo-passenger-app`, `veo-driver-app`, `veo-infra`) bajo el org `MarketrixPE`. `.gitignore` endurecido (sin node_modules/Pods/.cxx/datos de mapas/binarios Prisma/secretos). CI en GitHub Actions.
 
-**Lo siguiente:** ya no quedan olas de construcción. Para ir a producción real: bootstrap del backend Terraform (S3+DynamoDB), `terraform apply` con credenciales AWS vía PR-driven (Atlantis/Spacelift, NUNCA laptop), instalar control-plane de Linkerd+cert-manager en el cluster, conectar los rieles bloqueados por terceros, y firmar/publicar las apps a las stores.
+- ✅ **Carpooling / modo PROGRAMADO — backend + UI de ambas apps construidos (reconciliado 2026-07-03):**
+  - **`booking-service` EXISTE y es el cimiento** (`services/booking-service`, REST 3016 / gRPC 50054, schema propio, migraciones del 2026-06-22..24). Dueño de **`PublishedTrip`** y **`Booking`** con sus máquinas de estado tipadas en `src/domain/` (`published-trip-state.ts`, `booking-state.ts`, `state-machine.ts` con `assertTransition`). Incluye **`cost-cap`** (tope de cost-sharing del pricing FIJO por país), **`payment-charge`** (cobro **charge-on-approval SIN hold** — corrección consciente al ADR-014: payment-service/Yape/Plin no tienen HOLD; se valida método al reservar + gate de DEUDA + estado DEBT), **`trip-segments`**, índices **H3** de búsqueda, clientes **gRPC** a fleet+identity, y **outbox** (con el relay de 3 fases ya aplicado). ADR canónico: `docs/adr/014-modelo-carpooling-booking-service.md`.
+  - **Mapeo a las fases del plan (`specs/VEO_MODELO_HIBRIDO.md` §11):** **F0** (cimiento `PublishedTrip`/`Booking`) ✅ backend. **F1/F2** (publicar/buscar, server-side) ✅ endpoints en booking-service (`published-trips`, `bookings`). **F3** (reservar→aprobar→cobrar) ✅ **backend completo**: F3a borde de pago + gate de deuda, F3b aprobar/rechazar (driver-rail) + CHARGE al aprobar, F3c seat-lock atómico + consumer `payment.captured/failed` + refund automático con backstop observable.
+  - ✅ **UI de carpooling en las apps — YA EXISTE (reconciliado 2026-07-03; este bullet decía lo contrario y estaba stale):** el pasajero tiene la feature completa (`apps/passenger/src/features/carpool/` + 5 pantallas registradas en `RootNavigator`: `CarpoolSearch`/`CarpoolResults`/`CarpoolTripDetail`/`CarpoolBookingReview`/`CarpoolBookingStatus`, frames del pen `P/ProgSearch`→`P/BookingRejected`) y el conductor puede publicar y gestionar reservas (`apps/driver/src/features/carpool/` + rutas `CarpoolPublish`/`CarpoolTripBookings`). `rg -l PublishedTrip apps/*/src` ya NO da vacío.
+  - ✅ **Cableado en el dev-stack (reconciliado 2026-07-03):** `booking-service` arranca por el orquestador — `dev-stack/veo.sh` lo declara (`booking|3016|services/booking-service`) y `boot-extra-services.sh` lo levanta (`start_node booking … 3016`).
+
+- 🛡️ **Endurecimiento reciente (verificado en el git log de `develop`, no exhaustivo):**
+  - **KYC desacoplado de la aprobación** — el KYC del conductor se auto-verifica con los biométricos; **liveness PASIVO (PAD anti-spoofing single-frame)** en el enrol + binding contra DNI **Y** licencia; panel canónico de face-match en admin (commits `617a752`, `a8c5fbe`, `c3ee16a`, `f39bcd9`, `e7d6df3`, `6d2923e`, `273f9ba`).
+  - **Suspensión del conductor refactorizada a HOLDS multi-causa** — auto-suspensión por ITV vencida, rating bajo y exceso de cancelaciones; reactivación cause-aware en el panel (commits `a353ee4`, `785bedc`, `6b55bad`, `8fbfd3d`); **gate de aprobación ITV** sobre el modelo `Inspection` de fleet (`8674165`).
+  - **Outbox relay desacoplado de la tx/lock de Postgres** (claim-marker de 3 fases) + retención de filas publicadas (`0991cea`, `016e196`); **observabilidad transversal**: `domain_events_total` centralizada + `traceId` propagado a través del outbox (`2646225`, `6f78bb1`).
+  - **Rate-limit / IP-spoofing endurecidos en los BFFs y audit-service** (`011f59c`); **hard gate de face-match** en la aprobación del conductor (`698c9ef`); **IDOR de moderación** cerrado en rating (`269382c`); **fleet consume `user.deleted`** para purgar la flota del conductor borrado (Ley 29733, `d5599d1`).
+  - **Modelo de deploy = VPS** (ver §0.7(c)): se **eliminó** el carril AWS/k8s; prod = VPS único + Docker Compose + GitHub Actions self-hosted; `booking-service` ya cableado al carril VPS (`4e66a06`, `d7e5a10`, `7157d2c`).
+
+- 🆕 **Modelo de pricing — COEXISTENCIA (ADR-023, 2026-07-07):** los 3 modos (**FIJO**=Uber · **PUJA**=inDrive · **COST-SHARE**=BlaBlaCar) COEXISTEN puros, asignados **por servicio a MANO por el admin** (palanca manual, sin franjas horarias — **ADR-011 superseded en su parte de schedule**). Una fórmula de distancia (`calculateFirmFare`, intacta) + params por servicio; **dos bordes honestos**: Mecánico = **call-out plano** (visita, no viaje: perKm=0 Y perMin=0, labor aparte), Carpooling = **producto propio** (`booking-service`, no "un modo del catálogo"). **Surge afuera** del modelo. Modo per-service reemplaza `allowedModes`+schedule (ADR-013 alineado). Plan de código: `specs/changes/pricing-taxonomy/` (Fases A/B, pendientes). Diseño en veo.pen (5 frames admin: On-demand · Viajes · Especiales · Carpooling · Detalle de servicio).
+  - 🆕 **Ofertas CUSTOM (alta de servicio) — admin COMPLETO, consumo del pasajero PENDIENTE (2026-07-12):** el SUPERADMIN puede crear ofertas a medida desde el admin (`/finance/catalog` → "Nuevo servicio"). Vertical real end-to-end **verificado en vivo**: tabla `trip.CustomOffering` (id `custom_*`, mapea a un `vehicleClass`/`serviceType` EXISTENTE) + `@Post /internal/catalog/offerings` (trip-service, MFA+audit+outbox) → admin-bff `@Post /catalog/offerings` (`@Roles(SUPERADMIN)` + `catalog:create` (nuevo en `@veo/policy`) + step-up MFA) → api-client `createOfferingRequest` → `useCreateOffering` → `new-offering-dialog.tsx`. El catálogo (list/config/detalle) **une built-in ∪ custom**; el pricing/overlay/analytics las trata igual (validación extendida a enum∪custom en `OfferingOverrideDto`, `offering-metrics-query.dto`). Commit `14ae3149`/`6a77e204`.
+    - **🔴 DEUDA de BACKEND (trip-service + public-bff) — NO es de la app:** una oferta custom es 100% administrable pero el **pasajero AÚN NO la puede PEDIR**, y el fix es 100% backend (la app-RN no cambia: ya manda cualquier `category`, es el backend el que la rechaza). `resolveTripOffering` (`trip-service/src/domain/offering.ts`) es puro/sync y usa `findOffering` (SOLO el enum) → un `createTrip` con `category: custom_*` da 400 `UNKNOWN_OFFERING`; el quote del public-bff queda gated por ahí. Cerrarlo: threadear el `CatalogService` (async, ya une built-in∪custom) en el seam de create-trip (trip-service) + el quote del public-bff. El MATCHING sí funcionaría (mapea a un `vehicleClass` existente). Secundario: `bid-floor.repository.parseOverrides` (trip-service) filtra por `findOffering` → una custom en PUJA usa el piso DEFAULT (su multiplier/minFare sí aplican).
+
+- 🆕 **Gobierno del admin — modelo unificado de 4 capas (ADR-024 PBAC + ADR-025 Gobierno unificado, 2026-07-10):** el "quién puede qué" del admin ahora es una pila de 4 capas: **Roles** (enum, rango) → **Permisos base** (código, `PERMISSION_ROLES`) → **Overlay** (registro, **subtract-only**: solo RESTA permisos por-rol) → **Políticas/PBAC** (registro, condicional: IP-allowlist, session-idle, step-up MFA por política).
+  - **`@veo/policy` (paquete nuevo) = FUENTE ÚNICA** de la matriz base `PERMISSION_ROLES` (antes vivía duplicada en `apps/admin-web/src/lib/rbac.ts`, que ahora **re-exporta** de `@veo/policy` para no romper imports). El mismo mapa que la UI usa para ocultar es el que el servidor enforcea. Incluye el catálogo `Permission`, el predicado `baseGrants`, el set de **candados legales no-restables** (`LEGAL_MANDATORY`: `audit:view`, `audit:verify`, `finance:payout` — el overlay NO puede ocultarlos en ningún rol, análogo al `mandatory` de una Política, Ley 29733) y la fórmula compartida del efectivo `base ∧ ¬oculto`.
+  - **Registro server-side en `identity-service`** (módulo `policies`/gobierno): modelos Prisma **`Policy`** + **`PermissionOverride`**. Distribución a los BFFs por **Kafka** + **cache fail-safe** (sin dato del reader → no se resta nada; nunca afloja NI endurece de más un candado por un problema de lectura).
+  - **Enforcement server-side** en `admin-bff` (`src/policies/`): `@Permission(...)` + **`PermissionOverlayGuard`** (efectivo `base ∧ ¬override`), **`IpAllowlistGuard`**, **`SessionIdleGuard`**, **`PolicyStepUpMfaGuard`**. Front compone `can()` = `base ∧ ¬hidden` (defensa en profundidad; la UI NO autoriza).
+  - **UI**: sección **GOBIERNO** en admin-web con **Políticas** + **Permisos** (matriz interactiva subtract-only, con los candados legales pintados como no-restables).
+  - **`media:approve` = EXCLUSIVO `[COMPLIANCE_SUPERVISOR, SUPERADMIN]`** (segregación de funciones Ley 29733: ADMIN SOLICITA pero NO APRUEBA). Verificado en `packages/policy/src/permissions.ts:100`, `admin-bff/media.controller.ts` y `media-service`.
+  - **PENDIENTE / gaps honestos:** (1) ~~barrido endpoint→permiso~~ **~cerrado y auto-vigilado** (2026-07-12): el barrido `@Permission` se completó y lo enforcea `permission-overlay.enforcement.spec.ts` (test que falla si un handler admin queda sin mapear); restaban 2 handlers que otra misión de esta ola cierra hoy. (2) La feature de **export** que motiva el permiso net-new de F2 aún no existe. (3) El **wiring de `auth.stepup`** (drift de `maxAgeSec`) — **CERRADO también en `payment`/`trip`/`booking` (2026-07-12)**: los 3 registran `PolicyModule.forRootAsync` (patrón media-service) y `PayoutsService.hasFreshMfa` lee la ventana del mismo reader (fallback `STEP_UP_DEFAULT_MAX_AGE_SEC` de `@veo/auth`, se eliminó el 300 duplicado). (4) ADR-024/025 declaran "diseño sin código" en su header, pero el registro+overlay+`@veo/policy`+UI YA aterrizaron este sprint (los ADR individuales los mantiene otra sesión).
+
+- 🛡️ **Audit de seguridad del admin-web + 9 fixes por severidad (2026-07-10):** revisión adversarial del auth/admin y correcciones: **four-eyes por IDENTIDAD** en media approve (`approverId ≠ requestedBy`), **panic resolve** con contrato `{resolution, notes?}` + persistencia real, **drift de step-up MFA** (el guard lee `auth.stepup.maxAgeSec`, no un literal), **`RolesGuard` ahora fail-CLOSED** (antes fallaba OPEN si un handler autenticado no declaraba `@Roles` → hoy `403 "Ruta sin @Roles declarado (fail-closed)"`, `@auth/guards/roles.guard.ts:30`) con **bypass `@Public` explícito** (login/health/csrf/ws-ticket/refresh), y los 3 guards de política (`IpAllowlistGuard`, `SessionIdleGuard`, `PolicyStepUpMfaGuard`) + `PermissionOverlayGuard`.
+
+- 🧱 **Deuda repository FOUNDATION §10 pagada en toda la flota:** Prisma vive SOLO en `*.repository.ts`, transacciones vía unit-of-work `runInTx`; los servicios de dominio ya no tocan el cliente Prisma directo. Aplicado en `rating`/`payment`/`identity`/`trip` y el resto (ver git log `13fa6098`→`b5d59845`).
+
+- ↩️ **Revertido:** el rename "Ofertas de servicio" → "Catálogo" se **deshizo** — "Catálogo" queda PROHIBIDO como label de UI (upholdea ADR-013).
+
+- 💰 **FINANZAS admin — fidelidad pencil→web de las 3 secciones (2026-07-12):** pasada frame-first (números del `.pen`, medir vs vivo, **gating de seams reales — nada de fingir**, verificar en vivo a 1440). Metodología: cuando el frame es construible → fidelidad total; cuando el frame no tiene seam real → o se construye el seam, o se degrada honesto, o **el diseño se actualiza al código** (Direction B). Verificado en vivo con el harness dev nuevo (`veo.sh seed`/`login`, ver §2).
+  - **Liquidaciones** (`/finance`) — **backend**: `payouts/stats` expone `paidCents`/`heldCents`/`failedCents` (money-por-bucket; la query ya sumaba por status y se descartaba); `getPayout` suma `bonusCents` (IncentiveProgress.paidInPayoutId); `GET /payouts/:id/trips` (viajes-incluidos, reconstruido por driver+período — el payout no persiste líneas); `GET /payouts/export` (CSV del filtro completo). **Frontend**: página-detalle rica `/finance/[id]` (frame `t5eZt`: NETO A PAGAR + breakdown bruto/comisión%/bono/deuda-CASH/neto, viajes incluidos reales, pago, historial derivado — honest-degrade de lo sin seam: método "Yape" fijo, sin "programado", timeline de 2-3 hitos); lista fiel (KPIs money, dropdown Estado, export, Período formateado). **Commiteado limpio**: `2f04d3cd`(payment) + `92d67e7b`(bff) + `0d7e600a`(admin-nuevos).
+  - **Reembolsos** (`/finance/refunds`) — **rebuild a cola de aprobación** (money-OUT sensible). Repunteó de emisión-directa a **request→approve**: máquina de estados `RefundStatus` PENDING(cola, sin desembolsar)→APPROVED(desembolso en vuelo)→COMPLETED / REJECTED, con idempotencia (dedupKey) + step-up MFA + audit + dual-control por monto. Auto-refunds de sistema (`booking.cancelled`) nacen APPROVED (saltan la cola, no bloquean cancelaciones). Endpoints `GET /finance/refunds(+stats,+:id)`, `POST :id/approve|reject`, `POST :tripId`(crea PENDING). Frontend cola fiel al frame `HZ8uz` (KPIs, tabla, modales aprobar/rechazar). **146 tests** payment-service verdes. **LIMITACIÓN documentada**: mismo operador puede aprobar su propia solicitud (control = step-up + gate monto + audit, no dual-person estricto) — follow-up si se quiere segregación estricta.
+  - **Reconciliación** (`/finance/reconciliation`) — **el código manda** (decisión): el frame diseñaba matching PER-TRANSACCIÓN (ref interna↔externa) pero el backend solo soporta AGREGADO per-corrida, y el transaccional está **BLOQUEADO** (ProntoPaga `getStatement()` devuelve `[]` en prod). Se agregó **estado honesto "Sin extracto del proveedor"** (`statementCount===0 && statementTotalCents===0 && dbTotalCents>0`) en vez del "Alerta 100%" engañoso; el path de alerta roja legítima queda para cuando el proveedor exponga el feed. El **`.pen` se actualizó** (frames `HykVT`/`YI0IS`) al modelo agregado real (tabla per-corrida + CompareRow), con el detalle marcado **épica futura** y el matching per-tx documentado como épica condicionada a un feed de extracto.
+  - **UI global (design system)**: `table.tsx` → tabla como card elevado radio 16; `page-header.tsx`/`stat-card.tsx` → título + valor KPI en Space Grotesk (`font-display`) + gap 16 + iconos KPI coloreados por tono. Alinea el admin al `.pen` (los frames eran consistentes; el código había derivado por página) — afecta finance/audit/reconciliation/operators/drivers/trips.
+  - **Commit / working tree**: solo el backend de Liquidaciones (`payouts/*`) se commiteó limpio. Reembolsos (backend+frontend), Reconciliación y el wiring de las listas quedan en el **working tree entreverado** con la migración de tema + trabajo de métricas en vuelo (mismos archivos compartidos: `payments.service.ts`, `finance.service.ts`, `api-client/{admin,types}.ts`, `queries.ts`) → se commitean junto con el tema como una foto coherente de `develop`.
+
+**Lo siguiente:** backend y UI de carpooling están construidos y `booking-service` cableado al dev-stack (ver arriba). Para ir a producción real (carril VPS, §0.7(c)): bootstrap del VPS (Docker Engine + Compose + Cloudflare Tunnel), cargar secretos en el host (`.env`/docker-secrets/SOPS), `docker compose -f docker-compose.preview.yml up` + correr `infra/deploy/migrate-preview.sh`, activar el deploy SSH de `images.yml`, conectar los rieles bloqueados por terceros, y firmar/publicar las apps a las stores.
 
 ---
 
@@ -82,15 +123,27 @@ gRPC proto-first, /api/v1, rate-limit, tombstone+gracia 30d, etc.).
 ## 2. Entorno de desarrollo (cómo levantar)
 
 ```bash
-cd veo-platform
+cd veo-monorepo                                                            # repo único (rama develop)
 pnpm install
 docker compose -f dev-stack/docker-compose.yml up -d postgres redis kafka   # infra mínima
+# Orquestador de dev: dev-stack/veo.sh (levanta infra docker + servicios nativos + BFFs; booking-service YA cableado).
 ```
+
+**Harness de dev (2026-07-12) — arranque + seed + login en un comando:**
+
+```bash
+veo.sh dev [--no-seed] [--seed-trips[=N]]  # levanta TODO + auto-siembra identity/driver/media al final del boot
+veo.sh seed [identity|driver|media|trips]  # seeds dev idempotentes; `seed trips N` deja N viajes IN_PROGRESS por el PATH REAL de eventos (sim conductor + Kafka, no escribe el read-model a mano)
+veo.sh login [--json]                      # auto-login: lee el TOTP vivo (:5190/api/otps), POST a admin-bff, imprime las cookies veo_at/veo_rt (httpOnly) listas para curl/chrome-devtools
+```
+
+- Credenciales dev: `admin@veo.pe` / `ChangeMe_VEO_2026!`; 6 operadores por rol (`admin-role`/`dispatcher`/`support-l1`/`support-l2`/`compliance`/`finance` @veo.pe, misma pass); TOTP fijo dev `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` (visor en `:5190`).
+- El seed barato (identity/driver/media) es idempotente y corre en cada `veo.sh dev`; `seed trips` es opt-in (orquestación viva ~90s). El módulo TOTP compartido vive en `dev-stack/lib/totp.mjs`.
 
 **Quirks ya resueltos en `dev-stack/docker-compose.yml`** (importantes):
 
 - **Postgres en host `5433`** (no 5432 — choca con otro proyecto local). `DATABASE_URL=postgresql://veo:veo_dev@localhost:5433/veo`.
-- **MinIO/S3 en host `9002`** (9000 choca con ClickHouse).
+- **MinIO en host `9002`** (9000 choca con ClickHouse). MinIO self-hosted es el object store en dev y prod (NO S3 — §0.7(c)).
 - **Kafka = `apache/kafka:3.9.0`** (el tag bitnami original fue retirado). Broker externo `localhost:9094`.
 - Schemas Postgres por servicio ya creados (incluye `fleet`). Si recreas el volumen, `init-postgres.sql` los crea.
 
@@ -160,7 +213,7 @@ Cada NestJS: `prisma/schema.prisma` + migración aplicada + dominio (state machi
 - `panic-service` (3006) — fan-out paralelo + idempotencia HMAC (BR-S04/S05). **14 tests** (e2e + SLO ack p99 4.9ms). Schema `panic`.
 - `media-service` (3007) — orquestación **LiveKit self-hosted**, grabaciones cifradas, signed URLs, doble-auth de acceso, retención. **24 tests**. Schema `media`.
 - `notification-service` (3008) — motor propio + plantillas i18n + conectores **push (FCM/APNs propios), SMS, email** tras puerto; retries+dedup. **17 tests**. Schema `notification`.
-- `audit-service` (3009) — append-only + **S3 Object Lock** + **hash chain** verificable. **19 tests** (incl. e2e). Schema `audit`.
+- `audit-service` (3009) — append-only + **MinIO object-lock** (self-hosted, NO S3 — §0.7(c)) + **hash chain** verificable. **19 tests** (incl. e2e). Schema `audit`.
 - `rating-service` (3010) — promedio rolling 30d, flags BR-D01/BR-I05. **29 tests**. Schema `rating`.
 - `share-service` (3011) — links firmados + OTP de contactos de confianza + página familia. **25 tests**. Schema `share`.
 - `fleet-service` (3012) — vehículos, documentos (Licencia/SOAT/Tarjeta/ITV), vencimientos+alertas, inspecciones. **31 tests**. Schema `fleet`.
@@ -210,18 +263,100 @@ Auditoría completa de ambas apps (typecheck/lint/Jest verdes) + correcciones de
 
 ### Ola 5 — Infra & cierre (`veo-infra`)
 
-Terraform (RDS por servicio crítico: identity/payment/panic/audit), EKS, ArgoCD, **CI por repo** (GitHub Actions: lint+typecheck+test+build), e2e, observabilidad prod, mTLS interno.
+Deploy carril VPS (§0.7(c)): `docker-compose.preview.yml` + `images.yml` (build GHCR + deploy SSH) + `migrate-preview.sh` + Cloudflare Tunnel. Postgres self-hosted por servicio crítico (identity/payment/panic/audit), **CI por repo** (GitHub Actions: lint+typecheck+test+build), e2e, observabilidad prod (Prometheus/Grafana/OTel/Tempo/Loki en el VPS). **~~Terraform/EKS/ArgoCD/mTLS-Linkerd~~ SUPERSEDED por el modelo VPS (reemplazado por VPS, ver §0.7(c)).**
 
 ### Deuda técnica / TODOs conocidos
 
 - **git**: inicializar los 4 repos cuando el cliente lo pida (commits Conventional con scope).
 - **E2E cross-servicio orquestado** (viaje→dispatch→pago→pánico con varios servicios arriba a la vez contra el dev-stack): **pendiente**. Hoy cada servicio tiene su e2e individual contra infra real; falta el flujo extremo-a-extremo multi-servicio. Es el siguiente paso de validación recomendado.
 - **E2E en vivo de Olas 2/3**: los tests de **contrato BFF↔gRPC** (`driver-bff`/`public-bff`) se auto-omiten cuando el downstream no responde, y los **Playwright web↔BFF** (`admin-web`/`family-web`, `test:e2e`) requieren el BFF arriba. Falta una corrida con el stack completo levantado (servicios Ola 1 + BFFs + perfil `maps` + livekit). La verificación estática (build/typecheck/lint/test 35/35) ya está verde.
-- **Migraciones Prisma — nombres duplicados en dev**: varios servicios usan el folder `20260528120000_init`. En el dev-stack todos comparten una sola DB Postgres, así que `_prisma_migrations` quedó repartido (público + por schema) pero **todas las tablas existen y verificadas**. En prod cada servicio crítico tiene su **propia RDS** (FOUNDATION), por lo que no hay colisión real. Solo afecta a un `dev-stack:reset` desde cero: renombrar los `_init` a timestamps únicos si se quiere reset limpio.
+- **Migraciones Prisma — nombres duplicados en dev**: varios servicios usan el folder `20260528120000_init`. En el dev-stack todos comparten una sola DB Postgres, así que `_prisma_migrations` quedó repartido (público + por schema) pero **todas las tablas existen y verificadas**. En prod cada servicio crítico tiene su **propio Postgres self-hosted** en el VPS (contenedor dedicado vía Docker Compose, NO RDS — FOUNDATION §0.7(c)), por lo que no hay colisión real. Solo afecta a un `dev-stack:reset` desde cero: renombrar los `_init` a timestamps únicos si se quiere reset limpio.
 - **Lint del workspace (resuelto en Fase 2)**: se añadieron al root `eslint@9`, `@eslint/js`, `typescript-eslint@8`, `eslint-config-prettier`, `globals`. `eslint.config.mjs` ignora ahora tooling (`*.config.*`, `scripts/**`, `test/**`, `shared-config/**`), desactiva `require-await` (interfaces async legítimas) y relaja reglas de tipado sobre dobles de test (`*.spec.ts`). Las apps Next (`admin-web`, `family-web`) y paquetes sin tests usan `eslint src --no-error-on-unmatched-pattern` / `vitest run --passWithNoTests`.
 - Build de servicios a `dist` para producción (Docker): hoy se valida por typecheck; el `nest build` con consumo dist debe verificarse al contenerizar (Ola 5).
 - Adapters "live" de rieles externos (SMS operador, Yape/Plin, push) son placeholders hasta tener credenciales/convenio (sandbox es el default y funciona).
 - **Ola 4 — residuales no bloqueantes:** (1) build iOS **firmado/device** falla por `resource fork/detritus` en `WebRTC.framework` al vivir en carpeta sincronizada (Desktop) — el simulador compila con `CODE_SIGNING_ALLOWED=NO`; para device hacer `xattr -rc` fuera de la carpeta sincronizada. (2) `POST /media/rooms/:tripId/publisher-token` admite `name?` opcional que la app aún no envía (el grant funciona sin él). (3) El overlay visual que guía la `action` de liveness durante la captura facial del conductor aún no se renderiza (la captura es funcional). (4) El gate biométrico ONNX se valida en dev con `VEO_BIOMETRIC_MODE=sandbox` (selección por entorno, no mock); el match real con rostro requiere device/cámara. (5) **`pod install` pendiente** en ambas apps por la nueva dep `react-native-get-random-values` (autolink Android automático). (6) Los módulos nativos nuevos (`VeoKycFrameGrabber` pasajero) están registrados (MainApplication.kt + pbxproj) pero **solo verificados por inspección**; falta compilar nativo en device. (7) **KYC pasajero**: el flujo está E2E y verde estáticamente; el liveness es ACTIVO (el motor ONNX exige acción), así que el match real requiere device/cámara con `VEO_BIOMETRIC_MODE=live`.
+
+#### Driver app — auditoría de fidelidad `.pen`↔RN, completitud de UI y trazabilidad (2026-07-12)
+
+Auditoría módulo×módulo de `apps/driver` contra los frames del `design/veo.pen` (board Conductor `Bqk6u`), verificada en simulador iOS (iPhone 17 Pro Max @ Metro 8084). Muchos fixes ya se aplicaron y committearon (`d56c447c`, `ac500bc4`, `fbd16f58` en `develop`). Lo que sigue es la **deuda pendiente**, agrupada. Detalle vivo en engram/`MEMORY.md`.
+
+- **A · Trazabilidad estática (mjolnir) — deuda de OBSERVABILIDAD, NO bug.** `get_verdict` reporta 1/47 journeys "cierran" (healthScore 2%) con **83/112 seams `untraceable` (BAJA) y 0 dead-ends**. Causa: el driver **auto-deriva la base del BFF del host de Metro** (base dinámica `this.http:/…`, `apps/driver/env/development.env` deja las URLs vacías) → el estático no cose `fetch`↔ruta backend. **Los flujos cierran en runtime** (corrido en vivo); `0 dead-ends` = ningún fetch a ruta inexistente. Para trazabilidad end-to-end en CI: `mjolnir ingest_traces` (runtime) o pinnear una base resoluble. `journey_coverage` queda inconclusa por lo mismo (87 test-refs existen; solo 1 journey evaluable estáticamente).
+
+- **B · Completitud de UI (caminos infelices) — enumerado, parcialmente verificado en runtime.**
+  - **Ganancias-Vacío NO implementado**: con cero ganancias renderiza las cards en `S/0.00` en vez del empty dedicado (`C/Ganancias-Vacio` = EmptyState + CTA "Conectarme"). `features/earnings/.../EarningsScreen.tsx`.
+  - **Estados de turno colapsados en banners inline**, no los layouts dedicados del diseño: `C/ShiftStart-Error`, `C/Biometrico-Bloqueado`, `C/Cuenta-Suspendida` → faltan pill "te quedan N intentos", countdown de bloqueo, motivo de suspensión, CTA "Contactar a la central"/"Actualizar documentos" (varios son dead-ends de UI: CTA deshabilitado en bloqueo). `ShiftStartScreen.tsx`, `BiometricGate.tsx`, `DashboardScreen.tsx`.
+  - **Runtime NO verificado** para los estados **vacío/error** de las tabs (Carlos R. tiene data; con esa cuenta no aparecen). Falta: cuenta aprobada-sin-actividad (vacíos) + inyección de fallo/BFF-down (errores) para fotografiarlos.
+
+- **C · Fundación `@veo/ui-kit` (COMPARTIDO — afecta passenger, decidir con cuidado).**
+  - **Colisión `surfaceElevated`===`surface`===`#FFFFFF`** en el theme light → discos de ícono / tracks / pill activa quedan invisibles (blanco sobre blanco). Tapado LOCAL con `skeleton` (`#E8ECF1`) en ~10 sitios (chart bars, segmented, discos de Cuenta/Documentos/Incentivos/Ayuda/Bookings, CierreTurno). Fix correcto: token **`surfaceMuted` (`#EEF1F5`)** en `ThemeColors` + migrar.
+  - Falta **token de texto legible** para pills/valores de estado: `successText #00873A` / `warnText #B26A00` (hoy usa el brillante `#00C853`/`#FFA000` para el punto Y el texto → bajo contraste en blanco). Rebota en `StatusPill`, "COMPLETADO", montos, "+20%".
+  - **Avatar fallback**: iniciales sobre disco brand-tinted (`#0075A916`) + ring `#DDE1E7`; hoy disco blanco + borderStrong.
+  - **Glyphs faltantes**: `target`, `headset`, `badge-check`, `user-round-search` (se usaron proxies razonables).
+
+- **D · Bloqueada por backend (gaps de contrato — degradación honesta hoy).**
+  - **Contador de intentos**: ni `POST /auth/otp/verify` ni el gate biométrico (`/drivers/shift/biometric/verify`) devuelven `attempts`/`maxAttempts` → no se muestra "te quedan N intentos" (identity los cuenta server-side, no los expone).
+  - **`lockedUntil`** en el 403 del bloqueo biométrico → falta para el countdown de reintento.
+  - **Motivo de suspensión** de cuenta → falta en el status del driver.
+  - **Geocoding**: direcciones reales en `TripDetailScreen`/carpool (el contrato solo trae lat/lng).
+  - **PII del pasajero** (nombre/rating) no está en el contrato de trip/booking (regla #5, correcto) → cards adaptados sin PII.
+  - **Editar Perfil**: no hay campo de contacto editable/persistible en `driver-bff` → email "No registrado" + CTA deshabilitado.
+  - **Notificaciones**: falta tono `danger`/kind para "documento por vencer". **Incentivos**: falta el tipo "Racha de días" (streak) en el modelo de dominio (`ops`).
+
+- **E · Sincronización diseño↔código (`.pen`).**
+  - Los 3 frames **`C/Onboarding` del `veo.pen` siguen dark full-bleed**; el código se migró a **light** (foto arriba fundiéndose al lienzo claro) por decisión del dueño → **sincronizar los frames** para que diseño↔código no queden separados.
+  - **Módulo 2 `UnderReviewScreen`**: restos pre-Trust **dark en el CÓDIGO** (ETA card azul en vez de ámbar `warn`, escudo azul en vez de cyan `info`) — se construyó contra el frame dark viejo. `UnderReviewScreen.tsx:138,166-186`.
+
+- **F · Módulo 4 (Viaje) — auditado code+frame (el gate bloquea el sim).** Token hygiene CLEAN (0 stale dark, copy fiel en happy path); se aplicaron 2 fixes (ManeuverBanner brand-tint, monto efectivo verde). Gaps grandes flagueados, NO construidos:
+  - 🔴 **Falta la feature de SOS del CONDUCTOR entera** — los frames tienen `SosButton` (ref `Szg5o`) en cada frame de viaje activo + `C/SOS-Activado` (pantalla de pánico iniciado por el conductor: sirena, ubicación/cámara/llamada en vivo, cancelar hold-3s). NO existe ninguna feature sos/panic en `src/features`. Es pánico PROPIO del conductor (legítimamente alarmante — distinto de la regla #2 de UI-engañosa al pánico del pasajero). **Requiere pair-review de seguridad** (CLAUDE.md) → no se construyó.
+  - **Puja-Ganada / Puja-Perdida** (`gZGrb`/`R9fgK`) sin pantallas dedicadas (celebración/consuelo) — el realtime va directo a TripActive al ganar y descarta la card al perder.
+  - **Nav-shell tipo Waze** (`C/Navegacion-Recoger`/`EnViaje`): maneuver card flotante + recenter + bottom-bar con ETA reloj + PII pasajero + direcciones turn-by-turn — bloqueado por geocoding + PII backend; el código degrada honesto (MapShell + ManeuverBanner + GlassSheet).
+  - **Confirmar-Asignación** (`McNc4`): el frame es un error-card rico (triangle-alert + Reintentar + Volver al inicio); el código muestra un botón de retry pelado.
+  - Sin diff (budget): `C/Viaje-Reasignado`, `C/TripCancelado`, `C/Oferta-Reserva`.
+
+- **H · Identidad tipográfica — serif editorial DORMIDO.** `Fraunces72pt-SemiBold` (`displaySerif`, variantes `displayEditorial`/`titleEditorial`) está bundleado y en el theme, pero **NO se usa en el driver** — todos los títulos van en Clash Display (`display`). Los frames celebratorios del `.pen` (CierreTurno, TripComplete, Puja-Ganada) TAMPOCO lo usan (van en Space Grotesk/Clash) → Fraunces está dormido en diseño Y código. Es una **decisión de identidad** (¿prender la voz serif en los momentos héroe/celebratorios: "GANASTE HOY", "Viaje completado", "¡Ganaste!", hero de Ganancias?), no un fix de fidelidad — requiere OK del dueño + sincronizar el `.pen`.
+
+> **Resuelto en la ronda 2 (2026-07-12, commits `150166ad` y previos):** el ítem **E · UnderReview dark→light** (escudo → info-cyan, ETA card → warn-ámbar) está **HECHO**; los **edge-states del turno (B)** ahora son **layouts dedicados** (`NoticeHero`) con el dead-end del CTA arreglado (falta solo la data de backend: intentos/countdown/motivo); la **colisión surfaceElevated (C)** se tapó local en ~15 sitios más (RegistrationProgress, scan-sheets, discos). **C · fundación ui-kit HECHA** (commit `516ca654`): tokens `surfaceMuted` (#EEF1F5/dark), `successText` (#00873A) y `warnText` (#B26A00) en `@veo/ui-kit`, `StatusPill` con texto oscuro legible, `Avatar` fallback brand-tinted, ~7 discos del driver migrados — typecheck driver + **passenger** verde. **H · serif editorial** prendido en CierreTurno + TripComplete (`titleEditorial`=Fraunces, commit `e9fc4111`). **`.pen`** sincronizado (onboarding→light + serif en los 2 hero) — **requiere Cmd+S en Pencil para persistir**. **Pendiente:** A (trazabilidad/base dinámica), D (backend: contadores/geocoding/PII/streak), F (🔴 feature SOS del conductor · Puja-Ganada/Perdida · nav-shell), G (limpieza cosmética), y que passenger adopte los tokens nuevos donde le sirvan.
+
+- **G · Reuso/limpieza (mjolnir, baja prioridad).** `clones-estructurales`: boilerplate repetido de hooks React Query (`useTrip`/`useDocuments`/`useEarningsSummary`…) — arquitectural. `valor-hardcodeado`: `#1A2332` (sombra) + `rgba(255,255,255,0.92/0.96)` (tab bar/GlassSheet frosted) — excepciones documentadas (usar `hexAlpha`). `pantalla-huerfana`: `CarpoolScreen` (tab Compartir) — technicality del grafo de nav; reachable y verificada en vivo.
+
+#### Deuda frontend passenger (features sin seam a backend)
+
+Features de UI de `apps/passenger` construidas pero **sin seam a backend**, o data que hoy es estática y debería ser dinámica (server-driven). Cada fila: qué falta + el endpoint/dato a pedirle al backend + el `file:line` del marcador en código.
+
+| # | Deuda | Marcador (file:line) | Qué falta / qué pedirle al backend |
+|---|-------|----------------------|-------------------------------------|
+| 1 | OTP por WhatsApp | `i18n/es-PE/common.ts:188` | El copy dice "por WhatsApp" pero el envío real es SMS (SMPP). Backend debe entregar por **WhatsApp Business API** como canal primario. |
+| 2 | Rutas populares carpool | `carpool/.../CarpoolSearchScreen.tsx:49` | Endpoint `GET /carpool/popular-routes` (hoy hardcodeado). |
+| 3 | Filtros/orden carpool | `carpool/.../CarpoolResultsScreen.tsx:37` | Que `POST /carpool/search` acepte **sort** (precio/salida) + **filtro** (verificado). |
+| 4 | Chat carpool | `carpool/.../CarpoolBookingStatusScreen.tsx:55` | Canal `/carpool/bookings/:id/messages`. |
+| 5 | Control de cámara (preferencia) | `trip/domain/cameraShareRepository.ts:9` | Persistir "quién ve mi cámara" server-side (hoy MMKV local); `media-service` la aplica al autorizar viewers. |
+| 6 | Idioma y región | `profile/.../ProfileScreen.tsx:85` | Multi-locale + persistir preferencia de idioma (hoy solo es-PE). |
+| 7 | Términos y privacidad | `profile/.../ProfileScreen.tsx:88` | URL legal (Ley 29733) en config/env. |
+| 8 | Accesibilidad | `profile/.../ProfileScreen.tsx:83` | Pantalla de ajustes de accesibilidad de la app. |
+| 9 | Fee "Cargo por servicio S/3" carpool | `carpool/.../CarpoolBookingReviewScreen.tsx:48` | El `.pen` lo inventa; **decisión de producto** (backend agrega el fee al desglose) o corregir el `.pen`. |
+| 10 | Email login/register | `auth/data/httpAuthRepository.ts:70` | Cableado en datos+BFF pero **sin pantalla** en passenger (falta `EmailLoginScreen`). |
+| 11 | Modo niño fee | `childMode/.../ChildModeScreen.tsx` (~L204) | `CHILD_MODE_FEE_CENTS` debería ser **server-driven** (p.ej. `GET /maps/catalog` o `GET /pricing/child-mode`) para cambiar la tarifa sin release. |
+
+> Verificado con mjolnir (seams) + audit de código. Los **WIRED** confirmados (NO deuda): OAuth Google/Apple, notif-prefs sync, Promociones. Navegación: **58/58 journeys cierran (0 dead-ends)**.
+
+##### Deuda adicional (barrido completo 2026-07-12)
+
+Segundo barrido de marcadores `// DEUDA:` en `apps/passenger/src`. Con estas 10, el ledger passenger sube a **~21 deudas** registradas en código.
+
+| # | Deuda | Marcador (file:line) | Categoría | Qué falta / qué pedirle al backend |
+|---|-------|----------------------|-----------|-------------------------------------|
+| 12 | Motivos de rating como tags[] | `ratings/.../RatingScreen.tsx:61` | backend | El POST de ratings solo acepta `comment`; los motivos (chips) se anteponen al texto libre. Pedir `tags[]` estructurado para analítica real. |
+| 13 | Agregar método de pago | `payments/.../PaymentMethodsScreen.tsx:42` | backend | "Agregar método/tarjeta" del `.pen` no existe: bff sin instrumentos guardados + enum cerrado. Falta backend de instrumentos (`/cards`) + tarjeta F4. |
+| 14 | Monto de recompensa de referido | `referrals/.../ReferralsScreen.tsx:37` | backend | `REFERRAL_REWARD_CENTS` es local y NO viaja en `GET /referrals/me` → hero sin cifra. Pedir `rewardCents`. |
+| 15 | Horas de paradas carpool | `carpool/.../CarpoolTripDetailScreen.tsx:44` | backend | `GET /carpool/trips/:id` no trae `stopTimes`/ETA de paradas/llegada → se omiten (el `.pen` las muestra). |
+| 16 | Compartir automático con contactos | `trip/.../FamilyShareScreen.tsx:292` | backend | Falta preferencia de auto-share por contacto de confianza (endpoint). Hoy solo SMS manual con enlace real. |
+| 17 | OTP por llamada y correo | `auth/.../OtpHelpSheet.tsx:96` | backend | OTP por LLAMADA (voz) y CORREO son coming-soon: falta el canal en notification-service. |
+| 18 | Modo niño fee en cotización | `trip/.../QuotingBody.tsx:276` | backend | 2da superficie de la deuda de ChildModeScreen: `CHILD_MODE_FEE_CENTS` local se muestra como monto real dentro del cobro. Pedir fee server-driven. |
+| 19 | Cluster de pantallas LEGACY | `maps/.../RouteQuoteScreen.tsx:69` | cleanup | RouteQuote/TripActive/OffersBoard/NoOffers vivas solo por el dispatch FIJO del flujo programado. Migrar RouteQuote al sheet unificado → borrar legacy. |
+| 20 | Claves i18n muertas | `i18n/es-PE/common.ts:173` | cleanup | `comingSoonGoogle` (OAuth Google ya LIVE) + lista plana legacy (~L1073). Podar cuando se confirme que nada las referencia. |
+| 21 | Alcance Lima-only | `i18n/es-PE/common.ts:337` | producto | "Operamos solo en Lima Metropolitana". Expansión geográfica = decisión de producto, no hueco técnico. |
+
+> Reconciliado en el mismo barrido (NO deuda — comentario que mentía): el `read_at` de notificaciones **YA está implementado** (server `read` + badge de no-leídos + `markAllRead`). Se corrigieron los comentarios stale en `NotificationsScreen.tsx` y `core/di/registry.ts` que decían "sin leído/no-leído (MVP)".
 
 ---
 
@@ -234,6 +369,6 @@ Terraform (RDS por servicio crítico: identity/payment/panic/audit), EKS, ArgoCD
 5. Migración: `migrate diff … --script` + `migrate deploy` (§3.3).
 6. Verifica: `pnpm --filter @veo/<svc> typecheck && test`.
 
-> Si retomas como agente con memoria propia, la memoria de Claude Code vive en
-> `~/.claude/projects/-Users-jaxximize-Desktop-ecritrorio-00-Proyectos-VEO/memory/` (build-plan, sovereignty-rule, dev-env).
+> Si retomas como agente con memoria propia, la memoria persistente (engram) y el `MEMORY.md` del proyecto guardan el detalle
+> vivo de las últimas sesiones (carpooling, holds de suspensión, outbox, KYC pasivo, deploy VPS, etc.).
 > Pero **este `STATUS.md` + `FOUNDATION.md` en el repo son la fuente de verdad portable**.

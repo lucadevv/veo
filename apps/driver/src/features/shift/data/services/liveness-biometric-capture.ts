@@ -18,9 +18,10 @@ import {
  * Combina el frame-grabber nativo (cámara frontal) con el backend biométrico del driver-bff:
  *  - Inicio de turno: reto de liveness → captura de la secuencia de frames según `action` →
  *    verificación → `sessionRef` (de un solo uso) que consume `POST /drivers/shift/start`.
- *  - Enrolamiento: foto de rostro → `POST /drivers/biometric/enroll`.
+ *  - RE-enrolamiento: captura de UNA selfie frontal → `POST /drivers/biometric/enroll` con `{ photo }`
+ *    (sin liveness; mismo contrato que el alta). El anti-suplantación vive en el face-match DNI↔selfie.
  *
- * No es un mock: los frames provienen de la cámara real y los veredictos los emite el backend. Los
+ * No es un mock: los frames/foto provienen de la cámara real y los veredictos los emite el backend. Los
  * errores tipados (no enrolado, rechazado, bloqueado, no disponible) los propaga sin alterarlos.
  */
 export class LivenessBiometricCaptureService
@@ -45,7 +46,10 @@ export class LivenessBiometricCaptureService
   }
 
   async enroll(): Promise<BiometricEnrollResult> {
+    // RE-enrolamiento con UNA SELFIE (sin liveness): mismo flujo que el alta. Captura una sola foto
+    // frontal real (módulo nativo) y la enrola con `{ photo }`. El anti-suplantación vive en el
+    // face-match DNI↔selfie del binding, no en un reto girar/asentir. Sin foto real NO se enrola.
     const photo = await this.grabber.capturePhoto();
-    return this.backend.enroll(photo);
+    return this.backend.enroll({ photo });
   }
 }

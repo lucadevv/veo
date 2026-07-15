@@ -14,6 +14,10 @@ service TripService {
   // el viaje en curso tras un reinicio (app matada mid-viaje → reabre → vuelve a la pantalla del viaje y
   // reanuda la cámara de seguridad). Filtra por driver_id + LIVE_STATES; found=false si no tiene ninguno.
   rpc GetActiveTripByDriver (ActiveTripByDriverRequest) returns (TripReply);
+  // Conteo de viajes COMPLETED de un conductor (señal de confianza "N viajes" en la card del pasajero).
+  rpc GetDriverTripStats (DriverTripStatsRequest) returns (DriverTripStatsReply);
+  // Conteo de viajes COMPLETED de un pasajero (señal de confianza "N viajes" en la card del conductor).
+  rpc GetPassengerTripStats (PassengerTripStatsRequest) returns (PassengerTripStatsReply);
   // Pending settlement (re-entrada del cierre): viaje MÁS VIEJO COMPLETED del pasajero sin cerrar
   // (passenger_closed_at = null), orden FIFO (completedAt asc). found=false si no hay ninguno. COMPLETED
   // es terminal (fuera de LIVE_STATES) → GetActiveTrip no lo devuelve y el pasajero perdería el cierre
@@ -30,11 +34,49 @@ service TripService {
   // lo provee. Devuelve los campos que la lista/detalle necesitan; el NOMBRE del conductor NO va acá
   // (evita N+1 en la lista) — la card muestra tier+ruta+monto+estado y el detalle (GetTrip) resuelve el nombre.
   rpc ListPassengerTrips (ListPassengerTripsRequest) returns (PassengerTripsReply);
+  // Historial REAL del CONDUCTOR (servidor, no MMKV local): SUS viajes ordenados por requested_at DESC,
+  // id DESC (mismo tie-break keyset que el pasajero). Paginado por CURSOR opaco (mismo codec). ESPEJO
+  // EXACTO de ListPassengerTrips pero filtrando por driver_id (id de PERFIL Driver de identity, NO userId).
+  // El driver_id lo FIJA el BFF desde el JWT (anti-IDOR): el cliente nunca lo provee. Reusa
+  // PassengerTripsReply — el item del historial es idéntico (tier+ruta+monto+estado+fecha, anti-N+1).
+  rpc ListDriverTrips (ListDriverTripsRequest) returns (PassengerTripsReply);
+  // Modo de despacho (FIXED|PUJA) de un LOTE de viajes por id — enriquecimiento on-read para la lista OPS
+  // del admin (columna MODO), anti-N+1. Lee el valor CONGELADO Trip.dispatch_mode (resolve-once-persist),
+  // así que es SIEMPRE exacto (a diferencia del read-model event-proyectado, que pierde el flip FIXED→PUJA
+  // del re-bid). Solo devuelve id+modo (sin PII): la lista resuelve nombres por el batch de identity aparte.
+  rpc GetTripModesByIds (TripIdsRequest) returns (TripModesReply);
+}
+
+// Lote de ids de viaje para GetTripModesByIds. [] → respuesta vacía (el llamante degrada a "—").
+message TripIdsRequest {
+  repeated string ids = 1;
+}
+
+message TripModesReply {
+  repeated TripModeItem items = 1;
+}
+
+// Modo de despacho de UN viaje. dispatch_mode = FIXED|PUJA (enum PricingMode como string); un id no
+// hallado simplemente no aparece en items (el llamante lo trata como null → "—").
+message TripModeItem {
+  string id = 1;
+  string dispatch_mode = 2;
 }
 
 // Historial paginado del pasajero. cursor='' = primera página. limit lo CLAMPea el servidor (1..MAX).
 message ListPassengerTripsRequest {
   string passenger_id = 1;
+  // Cursor opaco devuelto por la página previa (next_cursor). '' = arrancar desde el más reciente.
+  string cursor = 2;
+  // Tamaño de página pedido; el servidor lo acota a [1, MAX_HISTORY_PAGE]. 0/ausente → default del servidor.
+  int32 limit = 3;
+}
+
+// Historial paginado del CONDUCTOR. Espejo de ListPassengerTripsRequest pero con driver_id (id de PERFIL
+// Driver, NO userId). cursor='' = primera página. limit lo CLAMPea el servidor (1..MAX). Reusa
+// PassengerTripsReply como respuesta (el item del historial es idéntico).
+message ListDriverTripsRequest {
+  string driver_id = 1;
   // Cursor opaco devuelto por la página previa (next_cursor). '' = arrancar desde el más reciente.
   string cursor = 2;
   // Tamaño de página pedido; el servidor lo acota a [1, MAX_HISTORY_PAGE]. 0/ausente → default del servidor.
@@ -87,6 +129,24 @@ message ActiveTripByDriverRequest {
   string driver_id = 1;
 }
 
+// Conteo de viajes COMPLETED de un conductor (señal de confianza "N viajes" en la card del pasajero).
+message DriverTripStatsRequest {
+  string driver_id = 1;
+}
+
+message DriverTripStatsReply {
+  int32 completed_trips = 1;
+}
+
+// Conteo de viajes COMPLETED de un pasajero (señal de confianza "N viajes" en la card del conductor).
+message PassengerTripStatsRequest {
+  string passenger_id = 1;
+}
+
+message PassengerTripStatsReply {
+  int32 completed_trips = 1;
+}
+
 message PendingSettlementRequest {
   string passenger_id = 1;
 }
@@ -131,6 +191,18 @@ message TripReply {
   // VACÍA si el viaje es directo (proto3 → repeated nunca es null). El BFF las pasa al tripActiveView para
   // que el pasajero pinte las MISMAS paradas que ve el conductor (fuente única: el trip del servidor).
   repeated GeoPoint waypoints = 23;
+  // BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla), persistidas en
+  // Trip.special_requests. [] si ninguna (proto3 → repeated nunca es null). El conductor las VE en la
+  // oferta entrante para decidir antes de aceptar (ADR-018); valores del enum SpecialRequest como string.
+  repeated string special_requests = 24;
+  // Modo de despacho CONGELADO del viaje (FIXED|PUJA · enum PricingMode como string). resolve-once-persist
+  // (ADR-011): se fija en la creación y solo flipea a PUJA en un re-bid. '' solo en el EMPTY_TRIP (no hallado).
+  string dispatch_mode = 25;
+  // Tier SOLICITADO del viaje (CAR|MOTO · enum VehicleType como string), derivado de la oferta al crear
+  // (ADR 013). El controller de trip-service YA lo emitía (toReply), pero sin este campo declarado el
+  // wire lo DESCARTABA (unknown field) → el BFF nunca lo veía y el pasajero pintaba una moto como auto
+  // al rehidratar. '' solo en el EMPTY_TRIP (el BFF lo re-mapea a null).
+  string vehicle_type = 26;
 }
 
 // Punto geográfico del viaje (lat/lon). Reusado por las paradas intermedias del TripReply.

@@ -27,7 +27,12 @@ export function useHydrateActiveTrip(): void {
   const getPendingSettlement = useDependency(
     TOKENS.getPendingSettlementUseCase,
   );
+  const history = useDependency(TOKENS.tripHistoryRepository);
   const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
+  const setActiveTripMode = useActiveTripStore(s => s.setActiveTripMode);
+  const setActiveTripVehicleType = useActiveTripStore(
+    s => s.setActiveTripVehicleType,
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -43,6 +48,25 @@ export function useHydrateActiveTrip(): void {
         .then(trip => {
           if (!cancelled && trip) {
             setActiveTripId(trip.id);
+            // Modo CONGELADO por el server (mismo mapeo que `onTripCreated`): con él, relanzar la app a
+            // mitad de una búsqueda FIXED preserva la fase correcta (EXPIRED → 'noDriver', no la re-puja).
+            // OPTIONAL/nullable en el contrato (compat N-2): sin el campo, el modo queda null y la fase
+            // degrada al comportamiento PUJA histórico (no peor que antes).
+            if (trip.dispatchMode) {
+              setActiveTripMode(trip.dispatchMode);
+            }
+            // Tipo de vehículo del viaje: la fuente de verdad es el SERVER (`tripActiveView.vehicleType`,
+            // el trip conoce su oferta) — cubre relaunch, adopción por 409 y cross-device. El snapshot
+            // MMKV local (grabado al crear con el `tripResource`) queda como FALLBACK para un BFF viejo
+            // que aún no emite el campo (compat N-2). Sin ninguno de los dos, queda null y el mapa
+            // degrada al glyph de auto (comportamiento histórico, nunca peor).
+            const snapshotType = history
+              .list()
+              .find(t => t.id === trip.id)?.vehicleType;
+            const vehicleType = trip.vehicleType ?? snapshotType;
+            if (vehicleType) {
+              setActiveTripVehicleType(vehicleType);
+            }
           }
         })
         .catch(() => {
@@ -51,6 +75,13 @@ export function useHydrateActiveTrip(): void {
       return () => {
         cancelled = true;
       };
-    }, [getMyActiveTrip, getPendingSettlement, setActiveTripId]),
+    }, [
+      getMyActiveTrip,
+      getPendingSettlement,
+      history,
+      setActiveTripId,
+      setActiveTripMode,
+      setActiveTripVehicleType,
+    ]),
   );
 }

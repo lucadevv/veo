@@ -1,9 +1,22 @@
-import React, { type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { Text, useTheme } from '@veo/ui-kit';
-import { hexAlpha } from './color';
-import { IconAlert, IconCheck } from '../../../../shared/presentation/icons';
+import React, { type ReactNode, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  type LayoutChangeEvent,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+import { Text, useReducedMotion, useTheme } from '@veo/ui-kit';
+import { hexAlpha } from '../../../../shared/presentation/color';
+import { IconAlert, IconCamera, IconCheck } from '../../../../shared/presentation/icons';
 import type { DocumentUploadStatus } from '../../domain';
 
 /** Tono semántico del chip de estado del documento. */
@@ -13,21 +26,6 @@ export type DocumentCardTone = 'success' | 'warn' | 'danger' | 'neutral' | 'acce
 export interface DocumentServerState {
   label: string;
   tone: DocumentCardTone;
-}
-
-/** Glifo de cámara (chip "Pendiente"). Inline para no depender del set global. */
-function CameraGlyph({ color, size = 14 }: { color: string; size?: number }): React.JSX.Element {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h5L16 6H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinejoin="round"
-      />
-      <Circle cx={12} cy={13} r={3} stroke={color} strokeWidth={2} />
-    </Svg>
-  );
 }
 
 interface StatusChipProps {
@@ -70,14 +68,14 @@ function StatusChip({
 
   if (serverState) {
     const tint = toneColor(serverState.tone, theme);
+    // Aplanado: tinte de fondo suave + texto del color semántico + iconito. SIN borde — el color del
+    // tono ya comunica el estado; el borde solo agregaba ruido (una caja más).
     return (
       <View
         style={[
           styles.chip,
-          styles.chipBordered,
           {
             backgroundColor: hexAlpha(tint, 0.16),
-            borderColor: hexAlpha(tint, 0.55),
             borderRadius: theme.radii.pill,
             gap: theme.spacing.xs,
           },
@@ -91,28 +89,30 @@ function StatusChip({
     );
   }
 
-  const uploaded = status === 'uploaded';
-  const tint = uploaded ? theme.colors.success : theme.colors.accent;
+  // Estado LOCAL "uploaded" = capturado en el dispositivo, PENDIENTE de subir ("Listo para enviar"). NO es
+  // "Verificado": el tono honesto es ámbar (warn), no verde. El verde (success) solo lo pinta el chip de
+  // SERVIDOR (`serverState`) cuando el doc ya está realmente aprobado. Antes pintaba verde + check y decía
+  // "Subido" antes de subir: mentía. Ahora el check ámbar comunica "listo, falta enviarlo".
+  const captured = status === 'uploaded';
+  const tint = captured ? theme.colors.warn : theme.colors.accent;
   return (
     <View
       style={[
         styles.chip,
         {
           backgroundColor: hexAlpha(tint, 0.16),
-          borderColor: uploaded ? 'transparent' : hexAlpha(tint, 0.55),
-          borderWidth: uploaded ? 0 : 1,
           borderRadius: theme.radii.pill,
           gap: theme.spacing.xs,
         },
       ]}
     >
-      {uploaded ? (
+      {captured ? (
         <IconCheck size={14} color={tint} strokeWidth={2.6} />
       ) : (
-        <CameraGlyph color={tint} />
+        <IconCamera size={14} color={tint} strokeWidth={2} />
       )}
-      <Text variant="caption" color={uploaded ? 'success' : 'accent'}>
-        {uploaded ? uploadedLabel : pendingLabel}
+      <Text variant="caption" style={{ color: tint }}>
+        {captured ? uploadedLabel : pendingLabel}
       </Text>
     </View>
   );
@@ -132,7 +132,54 @@ function StatusGlyph({
   if (tone === 'warn' || tone === 'danger') {
     return <IconAlert size={14} color={color} strokeWidth={2.2} />;
   }
-  return <CameraGlyph color={color} />;
+  return <IconCamera size={14} color={color} strokeWidth={2} />;
+}
+
+/**
+ * Barra de progreso INDETERMINADA (sweep): un segmento `accent` que barre el track de izquierda a
+ * derecha en loop mientras el documento se sube. Indeterminada — no fingimos un % (aún no trackeamos
+ * bytes de la subida); comunica "está pasando algo" como el frame C/PersonalData del pen (barra bajo el
+ * label en la card que sube). Respeta reduce-motion: barra parcial estática, sin loop.
+ */
+function SendingBar(): React.JSX.Element {
+  const theme = useTheme();
+  const reduced = useReducedMotion();
+  const [trackW, setTrackW] = useState(0);
+  const progress = useSharedValue(0);
+  const fillW = Math.max(48, trackW * 0.4);
+
+  useEffect(() => {
+    if (trackW === 0 || reduced) return;
+    progress.value = 0;
+    progress.value = withRepeat(
+      withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      false,
+    );
+  }, [trackW, reduced, progress]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: -fillW + progress.value * (trackW + fillW) }],
+  }));
+
+  return (
+    <View
+      onLayout={(e: LayoutChangeEvent) => setTrackW(e.nativeEvent.layout.width)}
+      style={[styles.barTrack, { backgroundColor: theme.colors.surfaceElevated }]}
+    >
+      {reduced ? (
+        <View style={[styles.barFill, { width: fillW, backgroundColor: theme.colors.accent }]} />
+      ) : (
+        <Animated.View
+          style={[
+            styles.barFill,
+            { width: fillW, backgroundColor: theme.colors.accent },
+            fillStyle,
+          ]}
+        />
+      )}
+    </View>
+  );
 }
 
 interface DocumentUploadCardProps {
@@ -147,6 +194,85 @@ interface DocumentUploadCardProps {
   serverState?: DocumentServerState;
   /** Muestra un spinner en el chip mientras se registra/refresca el documento. */
   busy?: boolean;
+  /**
+   * Número de PASO de la secuencia de captura (U3 · jerarquía 1-2-3). Cuando se provee, la card pinta un
+   * badge "N" antes del ícono para comunicar el ORDEN ("primero 1, después 2…"). Reemplaza el ícono-glifo
+   * como ancla visual: así DNI/licencia/tarjeta/foto/SOAT comparten UN patrón de card numerada y el ojo
+   * sabe la secuencia. Sin número (`undefined`) la card mantiene su look clásico (solo ícono).
+   */
+  stepNumber?: number;
+  /**
+   * Documento subiéndose AHORA: pinta una barra de progreso indeterminada bajo el label (como el frame
+   * C/PersonalData del pen). El chip sigue mostrando "Subiendo…" — la barra es el refuerzo visual.
+   */
+  sending?: boolean;
+  /**
+   * Documento ya ENVIADO: cambia la anatomía de la card al estado "enviado" del pen — thumb (mini-preview)
+   * en vez del badge y check verde circular a la derecha en vez del chip.
+   */
+  sent?: boolean;
+  /** URI de la mini-preview para el thumb del estado ENVIADO (imagen local o del servidor). */
+  thumbUri?: string;
+  /** Subtítulo de ESTADO bajo el label ("Subiendo reverso…" / "Enviado ✓"), como el pen. */
+  subtitle?: string;
+  /** Tono del subtítulo: `accent` (subiendo, azul) o `success` (enviado, verde). */
+  subtitleTone?: 'accent' | 'success';
+}
+
+/**
+ * Thumb del documento CAPTURADO/ENVIADO (frame Cards del pen): caja 64×44 `surface-elevated` que
+ * REEMPLAZA al badge numérico cuando el doc ya se envió. Muestra la mini-preview real (`uri`) si la hay,
+ * o el ícono del documento como respaldo. Radio 8 (`$r-sm` del pen).
+ */
+function Thumb({ uri, fallback }: { uri?: string; fallback: ReactNode }): React.JSX.Element {
+  const theme = useTheme();
+  // Ícono de respaldo (cuando aún no hay foto) en GRIS `ink-subtle`, como el thumb del pen — no el
+  // azul de acento de la card. En el flujo real, con captura, el thumb muestra la FOTO, no el ícono.
+  const grayFallback = React.isValidElement<{ color?: string }>(fallback)
+    ? React.cloneElement(fallback, { color: theme.colors.inkSubtle })
+    : fallback;
+  return (
+    <View style={[styles.thumb, { backgroundColor: theme.colors.surfaceElevated }]}>
+      {uri ? <Image source={{ uri }} style={styles.thumbImg} resizeMode="cover" /> : grayFallback}
+    </View>
+  );
+}
+
+/**
+ * Check verde circular (frame Cards del pen): píldora 24×24 `success-dim` con el tilde, a la derecha de
+ * la card en estado ENVIADO — reemplaza al chip.
+ */
+function CheckCircle(): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <View style={[styles.checkCircle, { backgroundColor: hexAlpha(theme.colors.success, 0.16) }]}>
+      <IconCheck size={14} color={theme.colors.success} strokeWidth={2.6} />
+    </View>
+  );
+}
+
+/**
+ * Badge numérico del paso (U3): círculo SUTIL lleno con el número de orden — sin borde (una caja menos).
+ * El relleno tenue (accent al 12%) y el número en accent comunican "paso N" sin encajonar. Tokens del
+ * tema, sin hex suelto. CONSERVA el `value` (los tests de jerarquía U3 dependen de que el número exista).
+ */
+function StepBadge({ value }: { value: number }): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <View
+      style={[
+        styles.stepBadge,
+        {
+          backgroundColor: hexAlpha(theme.colors.accent, 0.12),
+          borderRadius: theme.radii.pill,
+        },
+      ]}
+    >
+      <Text variant="caption" color="accent">
+        {String(value)}
+      </Text>
+    </View>
+  );
 }
 
 /**
@@ -165,8 +291,15 @@ export function DocumentUploadCard({
   onPress,
   serverState,
   busy = false,
+  stepNumber,
+  sending = false,
+  sent = false,
+  thumbUri,
+  subtitle,
+  subtitleTone = 'accent',
 }: DocumentUploadCardProps): React.JSX.Element {
   const theme = useTheme();
+  const subtitleColor = subtitleTone === 'success' ? theme.colors.success : theme.colors.accent;
 
   return (
     <Pressable
@@ -178,28 +311,45 @@ export function DocumentUploadCard({
       style={({ pressed }) => [
         styles.card,
         {
+          // Card como el frame C/PersonalData del pen: `surface` + borde 1px `border`, radio 16
+          // (`radii.md` = $r-lg del pen), padding 14 uniforme, gap 12.
           backgroundColor: theme.colors.surface,
+          borderRadius: theme.radii.md,
+          borderWidth: 1,
           borderColor: theme.colors.border,
-          borderRadius: theme.radii.lg,
-          paddingHorizontal: theme.spacing.lg,
-          paddingVertical: theme.spacing.lg,
+          padding: 14,
           gap: theme.spacing.md,
           opacity: pressed || busy ? 0.9 : 1,
         },
       ]}
     >
-      <View
-        style={[
-          styles.iconBox,
-          { backgroundColor: hexAlpha(theme.colors.accent, 0.14), borderRadius: theme.radii.md },
-        ]}
-      >
-        {icon}
+      {/* Glifo izquierdo (frame Cards del pen): capturado/enviado → thumb (mini-preview real si hay
+          imagen, o el ícono del doc como el pen) · pendiente → un SOLO glifo, el badge numérico (con
+          `stepNumber`) o el ícono. Nunca badge + ícono juntos. */}
+      {thumbUri || sent ? (
+        <Thumb uri={thumbUri} fallback={icon} />
+      ) : stepNumber !== undefined ? (
+        <StepBadge value={stepNumber} />
+      ) : (
+        <View style={styles.icon}>{icon}</View>
+      )}
+      {/* Columna: label 15pt medium (como el pen) + subtítulo de estado ("Subiendo…"/"Enviado ✓") +
+          (subiendo → barra). Labels largos ENVUELVEN hasta 2 líneas en vez de truncar con "…". */}
+      <View style={styles.labelCol}>
+        <Text variant="body" style={styles.label} numberOfLines={2}>
+          {label}
+        </Text>
+        {subtitle ? (
+          <Text variant="caption" style={{ color: subtitleColor }}>
+            {subtitle}
+          </Text>
+        ) : null}
+        {sending ? <SendingBar /> : null}
       </View>
-      <Text variant="bodyStrong" style={styles.label} numberOfLines={1}>
-        {label}
-      </Text>
-      {busy ? (
+      {/* Elemento derecho por ESTADO: ENVIADO → check verde circular · subiendo/pendiente → chip. */}
+      {sent ? (
+        <CheckCircle />
+      ) : busy ? (
         <ActivityIndicator color={theme.colors.accent} />
       ) : (
         <StatusChip
@@ -214,9 +364,40 @@ export function DocumentUploadCard({
 }
 
 const styles = StyleSheet.create({
-  card: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, alignSelf: 'stretch' },
-  iconBox: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  label: { flex: 1 },
+  // Sin `borderWidth`: la card es plana, separada del fondo solo por su `surface`.
+  card: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
+  // Círculo lleno sutil 28×28 (como el badge del pen).
+  stepBadge: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Ícono inline (sin caja 44×44): solo centra el glifo en un ancho fijo para alinear las filas.
+  icon: { width: 28, alignItems: 'center', justifyContent: 'center' },
+  labelCol: { flex: 1, gap: 6 },
+  // Label 15pt Outfit-Medium (cara registrada) — el pen usa `font-text` peso 500 a 15pt.
+  label: { fontFamily: 'Outfit-Medium', fontSize: 15, lineHeight: 20 },
+  // Thumb 64×44 (frame Cards del pen), radio 8 (`$r-sm`), recorta la mini-preview.
+  thumb: {
+    width: 64,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  thumbImg: { width: 64, height: 44 },
+  // Check verde circular 24×24 del estado enviado.
+  checkCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5 },
-  chipBordered: { borderWidth: 1 },
+  // Barra de progreso indeterminada bajo el label mientras sube (4pt, píldora, clip del sweep).
+  barTrack: { height: 4, borderRadius: 999, overflow: 'hidden', width: '100%' },
+  barFill: { height: 4, borderRadius: 999 },
 });

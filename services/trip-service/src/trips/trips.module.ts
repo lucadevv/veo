@@ -9,9 +9,15 @@ import { TripWatchdogService } from './trip-watchdog.service';
 import { WaypointProposalService } from './waypoint-proposal.service';
 import { WaypointProposalScheduler } from './waypoint-proposal.scheduler';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
+import { TripsRepository } from './trips.repository';
+import { TripQueryRepository } from './trip-query.repository';
+import { ScheduledTripRepository } from './scheduled-trip.repository';
+import { TripWatchdogRepository } from './trip-watchdog.repository';
+import { WaypointProposalRepository } from './waypoint-proposal.repository';
 import { TripsController } from './trips.controller';
 import { DispatchConsumer } from './dispatch.consumer';
 import { PujaConsumer } from './puja.consumer';
+import { DriverOfflineConsumer } from './driver-offline.consumer';
 import { UserDeletedConsumer } from './user-deleted.consumer';
 import { ScheduledTripsScheduler } from './scheduled-trips.scheduler';
 import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
@@ -23,9 +29,15 @@ import { TripWatchdogScheduler } from './trip-watchdog.scheduler';
     TripQueryService,
     ScheduledTripService,
     TripWatchdogService,
+    TripsRepository,
+    TripQueryRepository,
+    ScheduledTripRepository,
+    TripWatchdogRepository,
+    WaypointProposalRepository,
     DispatchModeRegistry,
     DispatchConsumer,
     PujaConsumer,
+    DriverOfflineConsumer,
     UserDeletedConsumer,
     ScheduledTripsScheduler,
     TripWatchdogScheduler,

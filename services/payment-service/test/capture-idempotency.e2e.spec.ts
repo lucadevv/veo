@@ -20,6 +20,7 @@ import { uuidv7 } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type { PaymentGateway } from '../src/ports/gateway/payment-gateway.port';
 import type { AffiliationsService } from '../src/affiliations/affiliations.service';
@@ -46,6 +47,7 @@ function makeConfig(): ConfigService {
     DEFAULT_PAYMENT_METHOD: 'YAPE',
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
+    REFUND_IDEMPOTENCY_WINDOW_MINUTES: 15,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
   return {
@@ -67,8 +69,7 @@ beforeAll(async () => {
   const gateway = {} as unknown as PaymentGateway;
   const affiliations = {} as unknown as AffiliationsService;
   const promotions = {} as unknown as PromotionsService;
-  payments = new PaymentsService(
-    prismaService,
+  payments = new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     affiliations,
     promotions,
@@ -141,6 +142,42 @@ describe('Captura de pago · guard atómico CAS (sin payment.captured duplicado)
       payments.confirmCash(id, DRIVER, 'driver', true),
     ]);
 
+    const stored = await prisma.payment.findUniqueOrThrow({ where: { id } });
+    expect(stored.status).toBe('CAPTURED');
+    expect(await capturedEvents(id)).toHaveLength(1);
+  });
+
+  it('webhook CONFIRMED TARDÍO sobre un pago FAILED (checkout expirado) → CAPTURA de verdad, NO reporta CAPTURED en falso', async () => {
+    const id = uuidv7();
+    const tripId = uuidv7();
+    // Pago FAILED (checkout expirado). Luego el PSP CONFIRMA tardío: la plata SE MOVIÓ → debe capturar.
+    await prisma.payment.create({
+      data: {
+        id,
+        tripId,
+        passengerId: PASSENGER,
+        driverId: DRIVER,
+        dedupKey: `trip-${tripId}`,
+        amountCents: 2000,
+        grossCents: 2000,
+        commissionCents: 400,
+        feeCents: 0,
+        method: 'YAPE',
+        externalUid: `uid-${id}`,
+        status: 'FAILED',
+      },
+    });
+
+    const out = await payments.applyWebhookResult({
+      paymentId: id,
+      externalUid: `uid-${id}`,
+      status: 'CONFIRMED',
+    });
+
+    // Antes: FAILED fuera del CAS → count=0, el pago quedaba FAILED PESE a que el PSP cobró y el caller
+    // reportaba CAPTURED EN FALSO (dinero en el PSP, VEO en FAILED, conductor sin cobrar). Ahora el CAS
+    // incluye FAILED → captura real: el estado REPORTADO coincide con el PERSISTIDO + emite payment.captured.
+    expect(out.status).toBe('CAPTURED');
     const stored = await prisma.payment.findUniqueOrThrow({ where: { id } });
     expect(stored.status).toBe('CAPTURED');
     expect(await capturedEvents(id)).toHaveLength(1);

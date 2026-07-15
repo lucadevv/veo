@@ -41,10 +41,10 @@ const REQUIRED_KEYS = [
   'payments.auto.askDefaultDoneBody',
   'payments.auto.askDefaultKeptTitle',
   'payments.auto.askDefaultKeptBody',
-  // TASK 2 · selector al pedir (predeterminado visible + recordar) + TASK 4 (léxico Yape)
+  // TASK 2 · selector al pedir (predeterminado visible + recordar) + TASK 4 (estado Yape vinculado)
   'payments.defaultHere',
   'payments.rememberDefault',
-  'payments.nameYapeAuto',
+  'payments.autoBadge',
   'payments.hintYapeAuto',
   // Sheet de gestión (predeterminado / desvincular)
   'payments.auto.manageTitle',
@@ -117,11 +117,13 @@ describe('Copy-contract · afiliación Yape + PAGOEFECTIVO + checkout (es-PE)', 
     expect(body).toContain('¿quieres');
   });
 
-  it('TASK 4 · "Yape · automático" (vinculado) ≠ "Yape" (one-shot): el léxico los distingue', () => {
-    const auto = i18n.t('payments.nameYapeAuto').toLowerCase();
+  it('TASK 4 · la PASTILLA porta el estado (autoBadge dice "automático"); el nombre queda canónico', () => {
+    // Contrato post-feedback del dueño (2026-07-15): el nombre del método NUNCA lleva "automático"
+    // (antes "Yape · automático" al lado de la pastilla "Automático" se leía doble). La pastilla es
+    // la única portadora del estado del Yape vinculado.
+    const badge = i18n.t('payments.autoBadge').toLowerCase();
     const plain = i18n.t('payments.method.YAPE').toLowerCase();
-    // El vinculado lleva la palabra "automático"; el one-shot (nombre a secas) NO la lleva.
-    expect(auto).toContain('autom');
+    expect(badge).toContain('autom');
     expect(plain).not.toContain('autom');
   });
 

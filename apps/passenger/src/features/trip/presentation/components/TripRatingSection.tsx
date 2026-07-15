@@ -4,10 +4,8 @@ import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {StyleSheet, View} from 'react-native';
 import {RatingBody} from '../../../ratings/presentation/components/RatingBody';
-import {
-  myTripRatingKey,
-  useMyTripRating,
-} from '../../../ratings/presentation/useMyTripRating';
+import {myTripRatingKey} from '../../../ratings/domain/queryKeys';
+import {useMyTripRating} from '../hooks/useMyTripRating';
 import {RatingSheet} from './RatingSheet';
 
 export interface TripRatingSectionProps {

@@ -15,14 +15,19 @@ export class CreateInspectionDto {
   @IsISO8601()
   inspectedAt?: string;
 
-  @ApiPropertyOptional({ description: 'Id del inspector (por defecto, el operador autenticado)' })
-  @IsOptional()
-  @IsUUID()
-  inspectorId?: string;
+  // NO existe `inspectorId` en el body: la identidad del inspector es server-truth (el actor autenticado del
+  // JWT), NUNCA client-supplied. Aceptarla la haría spoofeable y rompería la integridad del audit de
+  // compliance (quién inspeccionó). El service lo fija desde `user.userId` del controller.
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   @Length(1, 500)
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'Centro de Inspección Técnica Vehicular (CITV) donde se realizó' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 200)
+  center?: string;
 }

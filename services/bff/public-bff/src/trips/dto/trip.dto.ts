@@ -5,6 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsLatitude,
@@ -225,6 +226,24 @@ export class TripHistoryQueryDto {
   limit?: number;
 }
 
+/**
+ * Query de la ruta del viaje (GET /trips/:id/route?leg=). Sin `leg` (default) se sirve la ruta CANÓNICA
+ * persistida (origen→paradas→destino) — comportamiento previo intacto. `leg=pickup` pide el TRAMO DE
+ * ACERCAMIENTO vivo (conductor→recojo) para el mapa del pasajero en las fases pre-recojo.
+ */
+export class TripRouteQueryDto {
+  @ApiPropertyOptional({
+    enum: ['pickup', 'dropoff'],
+    description:
+      'Tramo pedido. `pickup` = conductor→recojo desde la última ubicación viva (fases pre-recojo); ' +
+      '`dropoff` = tramo RESTANTE del viaje en curso (conductor→paradas→destino, se recorta al avanzar); ' +
+      'omitir = ruta canónica persistida del viaje.',
+  })
+  @IsOptional()
+  @IsIn(['pickup', 'dropoff'])
+  leg?: 'pickup' | 'dropoff';
+}
+
 /** Recurso de viaje tal como lo devuelve trip-service en los comandos REST. */
 export interface TripResource {
   id: string;
@@ -254,4 +273,27 @@ export interface TripResource {
   requestedAt: string;
   completedAt: string | null;
   cancelledAt: string | null;
+}
+
+/** Un paso de navegación turn-by-turn. Espeja `routeStep` de @veo/api-client (MISMO contrato que el
+ *  driver-bff — la costura es simétrica entre ambas apps). */
+export interface RouteStepView {
+  instruction: string;
+  distanceMeters: number;
+  maneuver: string;
+  geometryPolyline: string;
+}
+
+/** Ruta CANÓNICA del viaje para el mapa del pasajero: la persistida por trip-service
+ *  (origen→paradas→destino; steps vacíos — la navegación es del conductor). Si el viaje no la tiene,
+ *  fallback al cómputo por fase. Espeja `tripRoute` de @veo/api-client (mismo shape que el driver-bff). */
+export interface TripRouteView {
+  polyline: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  steps: RouteStepView[];
+  /** Recojo, destino y paradas intermedias para los markers del mapa. */
+  origin: { lat: number; lon: number };
+  destination: { lat: number; lon: number };
+  waypoints: { lat: number; lon: number }[];
 }

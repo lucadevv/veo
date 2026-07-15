@@ -63,9 +63,8 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
     );
     const rows = renderer.root.findAllByProps({accessibilityRole: 'radio'});
     const labels = new Set(rows.map(r => r.props.accessibilityLabel));
-    expect(labels).toEqual(
-      new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // PagoEfectivo se retiró del selector (2026-07-14): 4 métodos elegibles (Yape/Plin/Efectivo/Tarjeta).
+    expect(labels).toEqual(new Set(['Yape', 'Plin', 'Efectivo', 'Tarjeta']));
   });
 
   it('marca como seleccionada SOLO la fila del método actual', () => {
@@ -140,7 +139,9 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
     expect(texts(renderer)).toContain('Tu predeterminado');
   });
 
-  it('YAPE con afiliación activa se rotula "Yape · automático" + badge; sin afiliación, "Yape" a secas', () => {
+  it('YAPE con afiliación activa: badge "Automático" + nombre canónico (la pastilla es la única señal)', () => {
+    // Contrato post-feedback del dueño (2026-07-15): el nombre NUNCA lleva "· automático" — al lado
+    // de la pastilla se leía doble. El estado lo porta SOLO el badge (y el hint explica el cómo).
     const withAuto = render(
       <PaymentMethodPicker
         variant="full"
@@ -152,7 +153,8 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
       />,
     );
     const autoTexts = texts(withAuto);
-    expect(autoTexts).toContain('Yape · automático');
+    expect(autoTexts).not.toContain('Yape · automático');
+    expect(autoTexts).toContain('Yape');
     expect(autoTexts).toContain('Automático');
 
     const oneShot = render(
@@ -164,7 +166,8 @@ describe('PaymentMethodPicker · variante full (selector al pedir)', () => {
         onSelect={() => {}}
       />,
     );
-    expect(texts(oneShot)).not.toContain('Yape · automático');
+    // One-shot: sin badge (la señal es EXCLUSIVA del Yape vinculado).
+    expect(texts(oneShot)).not.toContain('Automático');
   });
 
   it('sin rememberToggle NO renderiza el checkbox', () => {
@@ -194,11 +197,12 @@ describe('PaymentMethodPicker · variante compact (cambiar método de un cobro)'
       />,
     );
     const out = texts(renderer);
-    expect(out).toEqual(
-      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // Digitales seleccionables (sin Efectivo Y sin PagoEfectivo, retirado 2026-07-14).
+    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta']));
     // Efectivo NUNCA en el set digital.
     expect(out).not.toContain('Efectivo');
+    // PagoEfectivo tampoco: ya no es un método elegible.
+    expect(out).not.toContain('PagoEfectivo');
     // Sin radio (filas de acción), sin checkbox de recordar, sin pill de predeterminado.
     expect(
       renderer.root.findAllByProps({accessibilityRole: 'radio'}),

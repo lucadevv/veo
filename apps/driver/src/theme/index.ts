@@ -4,14 +4,14 @@ import { driverTheme } from '@veo/ui-kit';
 /**
  * Tema de React Navigation derivado del tema de diseño `driverTheme` (`@veo/ui-kit`).
  *
- * La fuente de verdad de color/espaciado/tipografía es el sistema de diseño (modo noche del
- * conductor, regla #6 de CLAUDE.md). Aquí solo proyectamos sus tokens al contrato que exige
- * React Navigation, para no duplicar paletas ni desincronizar la marca.
+ * La fuente de verdad de color/espaciado/tipografía es el sistema de diseño (Theme de Confianza
+ * light del conductor tras la migración Trust 2026-07). Aquí solo proyectamos sus tokens al contrato
+ * que exige React Navigation, para no duplicar paletas ni desincronizar la marca.
  */
 const { colors } = driverTheme;
 
 export const navigationTheme: NavigationTheme = {
-  dark: true,
+  dark: false,
   colors: {
     primary: colors.accent,
     background: colors.bg,

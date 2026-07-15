@@ -73,6 +73,21 @@ export class InvalidStateError extends DomainError {
 }
 
 /**
+ * Conflicto de CONCURRENCIA (optimistic-lock / CAS miss): la operación abortó porque otra operación
+ * concurrente cambió la fila entre el read y el write (p.ej. un `updateMany` con `WHERE refundedCents=<read>`
+ * devolvió `count===0` porque otro refund ya movió el saldo).
+ *
+ * DISTINTO de `InvalidStateError` (409 también, pero PERMANENTE: violación de la máquina de estados —
+ * reintentar NUNCA resuelve). Este error es TRANSITORIO por naturaleza: un reintento con el estado fresco
+ * SÍ tendría éxito. Tiparlo aparte permite clasificar el reintento correcto (transient) y NO disparar una
+ * falsa alerta de backstop "irrecuperable" sobre lo que es una simple carrera optimista.
+ */
+export class ConcurrencyConflictError extends DomainError {
+  readonly code = 'CONCURRENCY_CONFLICT';
+  readonly httpStatus = 409;
+}
+
+/**
  * Entidad sintácticamente válida pero que no puede procesarse por una precondición de negocio
  * (ej. afiliar Yape sin nombre de perfil cargado). Distinto de 400 (sintaxis) y 409 (conflicto de estado).
  */
@@ -107,6 +122,25 @@ export class ExternalServiceError extends DomainError {
 export class GatewayCapabilityUnavailableError extends DomainError {
   readonly code = 'GATEWAY_CAPABILITY_UNAVAILABLE';
   readonly httpStatus = 422;
+}
+
+/**
+ * El riel de DESEMBOLSO (money-OUT · ADR-015) rechazó la transferencia de forma PERMANENTE (4xx
+ * no-reintentable: billetera inválida, cuenta cerrada, KYC del destino fallido). Espejo money-OUT del
+ * rechazo permanente del CHARGE: a diferencia de `ExternalServiceError` (502, transitorio → el operador
+ * reintenta), reintentar el MISMO payout NUNCA va a funcionar — el dominio lo lleva a `FAILED` terminal
+ * (sin re-disparo automático) y el `paidAt` del incentivo NO se marca (la plata no salió). httpStatus 422:
+ * es un rechazo de NEGOCIO del riel, no una caída de infraestructura (distinto del 502 reintentable).
+ */
+export class PayoutPermanentlyRejectedError extends DomainError {
+  readonly code = 'PAYOUT_PERMANENTLY_REJECTED';
+  readonly httpStatus = 422;
+}
+
+/** El DNI escaneado ya está registrado en OTRA cuenta de conductor (blind index `dni_hash` único). */
+export class DniAlreadyRegisteredError extends DomainError {
+  readonly code = 'DNI_ALREADY_REGISTERED';
+  readonly httpStatus = 409;
 }
 
 export function isDomainError(err: unknown): err is DomainError {

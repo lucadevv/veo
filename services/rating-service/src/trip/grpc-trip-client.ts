@@ -8,9 +8,15 @@
  * CERRADO (la llamada PROPAGA el error, no se califica) — nunca una calificación colándose sobre un
  * viaje que no se pudo verificar.
  */
-import { anonymousIdentity, grpcIdentityMetadata } from '@veo/auth';
+import { anonymousIdentity, grpcIdentityMetadata, InternalAudience } from '@veo/auth';
 import { createGrpcClient, type TripReply, type GrpcServiceClient } from '@veo/rpc';
 import type { TripClient, TripView } from './trip-client.port';
+
+/**
+ * Audiencia de RIEL de esta llamada: es de SISTEMA (gate fail-closed de RatingsService.create, sin
+ * usuario final ni BFF detrás) → `service-rail`. Const TIPADA (InternalAudience), nunca string mágico.
+ */
+const SERVICE_RAIL: InternalAudience = InternalAudience.SERVICE_RAIL;
 
 export class GrpcTripClient implements TripClient {
   private readonly client: GrpcServiceClient;
@@ -24,8 +30,9 @@ export class GrpcTripClient implements TripClient {
   async getTrip(tripId: string): Promise<TripView | null> {
     // Validación de viaje: llamada de SISTEMA (no del usuario final). trip.grpc exige la identidad
     // interna firmada en la metadata (verifyGrpcIdentity); firmamos una identidad anónima de tipo
-    // 'passenger' (sin sesión real) — la verificación HMAC pasa sin reusar la identidad del rater.
-    const meta = grpcIdentityMetadata(anonymousIdentity('passenger'), this.secret);
+    // 'passenger' (sin sesión real) con audiencia `service-rail` — la verificación HMAC + aud
+    // fail-closed pasa sin reusar la identidad del rater.
+    const meta = grpcIdentityMetadata(anonymousIdentity('passenger'), this.secret, SERVICE_RAIL);
     const reply = await this.client.call<TripReply>('GetTrip', { id: tripId }, meta);
     // proto3 con defaults:true entrega found=false (nunca null) cuando trip no existe → null honesto.
     if (!reply.found) return null;

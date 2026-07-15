@@ -1,10 +1,10 @@
 /**
- * BidFloorService (ADR 010 §9.3) — piso de la PUJA per-(zona, oferta), editable en caliente. Repo fake en
+ * BidFloorService (ADR 010 §9.3) — piso de la PUJA per-oferta, editable en caliente. Repo fake en
  * memoria (clean arch: el servicio depende del puerto), captura el outbox de la tx. Espeja
  * fuel-surcharge.service.spec; el caso CLAVE es la RESOLUCIÓN per-oferta (override > default).
  */
 import { describe, expect, it } from 'vitest';
-import { OfferingId, GLOBAL_ZONE } from '@veo/shared-types';
+import { OfferingId } from '@veo/shared-types';
 import { BidFloorService } from './bid-floor.service';
 import { pricingConfigChangedTotal } from '../trips/trip-metrics';
 import type { BidFloorRepository, BidFloorTx, PersistedBidFloor } from './bid-floor.repository';
@@ -66,11 +66,11 @@ class FakeRepo implements BidFloorRepository {
   }
 }
 
-describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
+describe('BidFloorService (ADR 010 §9.3 · per-oferta)', () => {
   it('sin fila (DB vacía) → resolve devuelve el DEFAULT (S/7) para cualquier oferta (degradación honesta)', async () => {
     const service = new BidFloorService(new FakeRepo(null), 0);
-    expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_MOTO)).toBe(700);
-    expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_CONFORT)).toBe(700);
+    expect(await service.resolve(OfferingId.VEO_MOTO)).toBe(700);
+    expect(await service.resolve(OfferingId.VEO_CONFORT)).toBe(700);
     const cfg = await service.getConfig();
     expect(cfg).toEqual({
       defaultFloorCents: 700,
@@ -84,16 +84,16 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
     const repo = new FakeRepo({
       defaultFloorCents: 700,
       overrides: [
-        { zone: 'GLOBAL', offeringId: OfferingId.VEO_MOTO, floorCents: 300 },
-        { zone: 'GLOBAL', offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
+        { offeringId: OfferingId.VEO_MOTO, floorCents: 300 },
+        { offeringId: OfferingId.VEO_CONFORT, floorCents: 900 },
       ],
       version: 2,
       updatedAt: new Date(0).toISOString(),
     });
     const service = new BidFloorService(repo, 0);
-    expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_MOTO)).toBe(300); // override
-    expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_CONFORT)).toBe(900); // override
-    expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_XL)).toBe(700); // sin override → default
+    expect(await service.resolve(OfferingId.VEO_MOTO)).toBe(300); // override
+    expect(await service.resolve(OfferingId.VEO_CONFORT)).toBe(900); // override
+    expect(await service.resolve(OfferingId.VEO_XL)).toBe(700); // sin override → default
   });
 
   it('replace (expectedVersion correcta) bumpea version, emite el evento en la misma tx e invalida cache', async () => {
@@ -106,7 +106,7 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
     const service = new BidFloorService(repo, 0);
     const out = await service.replace({
       defaultFloorCents: 700,
-      overrides: [{ zone: 'GLOBAL', offeringId: OfferingId.VEO_MOTO, floorCents: 300 }],
+      overrides: [{ offeringId: OfferingId.VEO_MOTO, floorCents: 300 }],
       expectedVersion: 4,
     });
     expect(out.version).toBe(5);
@@ -114,7 +114,7 @@ describe('BidFloorService (ADR 010 §9.3 · per-oferta, zone-ready)', () => {
       { aggregateId: 'GLOBAL', eventType: 'pricing.bid_floor_updated' },
     ]);
     // El cambio se ve de inmediato (cache invalidado): la moto ahora resuelve a 300.
-    expect(await service.resolve(GLOBAL_ZONE, OfferingId.VEO_MOTO)).toBe(300);
+    expect(await service.resolve(OfferingId.VEO_MOTO)).toBe(300);
   });
 
   it('primera escritura (sin fila previa, expectedVersion 0) arranca en version 1', async () => {

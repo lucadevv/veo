@@ -10,12 +10,13 @@ import {
   signInternalIdentity,
   INTERNAL_IDENTITY_HEADER,
   INTERNAL_IDENTITY_SIG_HEADER,
+  InternalAudience,
   type AuthenticatedUser,
 } from '@veo/auth';
 import type { ConfigService } from '@nestjs/config';
 import { TripGrpcController } from './trip.grpc.controller';
+import type { TripGrpcRepository } from './trip-grpc.repository';
 import { Prisma, type Trip } from '../generated/prisma';
-import type { PrismaService } from '../infra/prisma.service';
 import type { TripsService } from '../trips/trips.service';
 import type { TripQueryService } from '../trips/trip-query.service';
 import type { Env } from '../config/env.schema';
@@ -25,7 +26,7 @@ const config = { get: () => SECRET } as unknown as ConfigService<Env, true>;
 
 /** Metadata gRPC con la identidad interna FIRMADA (lo que el BFF propaga). */
 function signedMeta(user: AuthenticatedUser): Metadata {
-  const { header, signature } = signInternalIdentity(user, SECRET);
+  const { header, signature } = signInternalIdentity(user, SECRET, InternalAudience.PUBLIC_RAIL);
   const map: Record<string, string> = {
     [INTERNAL_IDENTITY_HEADER]: header,
     [INTERNAL_IDENTITY_SIG_HEADER]: signature,
@@ -86,11 +87,19 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
 }
 
 function makeController(trip: Trip | null, trips: Partial<TripsService> = {}): TripGrpcController {
-  const prisma = {
-    read: { trip: { findUnique: async () => trip, findFirst: async () => trip } },
-  } as unknown as PrismaService;
+  const repo: TripGrpcRepository = {
+    findById: async () => trip,
+    findActiveByPassenger: async () => trip,
+    findActiveByDriver: async () => trip,
+    countCompletedByDriver: async () => (trip && trip.status === 'COMPLETED' ? 1 : 0),
+    countCompletedByPassenger: async () => (trip && trip.status === 'COMPLETED' ? 1 : 0),
+    findOldestPendingSettlement: async () => trip,
+    findStateById: async () => (trip ? { id: trip.id, status: trip.status } : null),
+    findModesByIds: async (ids) =>
+      trip && ids.includes(trip.id) ? [{ id: trip.id, dispatchMode: trip.dispatchMode }] : [],
+  };
   const query = {} as unknown as TripQueryService;
-  return new TripGrpcController(prisma, trips as TripsService, query, config);
+  return new TripGrpcController(repo, trips as TripsService, query, config);
 }
 
 describe('TripGrpcController · GetTrip (detalle "Mis Viajes" enriquecido)', () => {

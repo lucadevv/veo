@@ -6,11 +6,7 @@ import {
   vehicleClassGlyph,
   vehicleClassLabelKey,
 } from '../../../../shared/presentation/vehicle-class';
-import {
-  useActiveVehicle,
-  useDriverVehicles,
-  useSetActiveVehicle,
-} from '../../../registration/presentation';
+import { useActiveVehicle, useDriverVehicles, useSetActiveVehicle } from '../hooks/useVehicleCatalog';
 import { PressableScale } from './motion';
 
 export interface VehicleTypeSelectorProps {

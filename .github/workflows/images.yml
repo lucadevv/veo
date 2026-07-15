@@ -3,8 +3,8 @@ name: Images
 # Build de imágenes Docker POR SERVICIO, optimizado:
 #  - detect: calcula SOLO los servicios afectados por el diff (cambio de un servicio → 1 build;
 #    cambio compartido en packages/lock/patches → todos). Matrix dinámica.
-#  - image: en PR es gate (build sin push); en push a main publica a GHCR (siempre) y a ECR (si está
-#    configurado vars.AWS_ECR_PUSH_ROLE_ARN). Cache de capas gha por servicio.
+#  - image: en PR es gate (build sin push); en push a main publica a GHCR (único registro canónico, para el
+#    VPS). Cache de capas gha por servicio. (El camino ECR/AWS se eliminó — el deploy es VPS, ADR-007 reemplazado.)
 #  - deploy: en push a main, hace pull+up del compose en el VPS por SSH (dormido hasta VPS_DEPLOY_ENABLED).
 on:
   pull_request:
@@ -28,10 +28,6 @@ concurrency:
 permissions:
   contents: read
   packages: write # GHCR push con GITHUB_TOKEN
-  id-token: write # OIDC hacia AWS (ECR, si está configurado)
-
-env:
-  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
 
 jobs:
   # ── 1) Detecta SOLO los servicios afectados por el diff ──────────────────────────────────
@@ -57,6 +53,7 @@ jobs:
             {"service":"admin-bff","context":".","dockerfile":"services/bff/admin-bff/Dockerfile","dir":"services/bff/admin-bff/"},
             {"service":"driver-bff","context":".","dockerfile":"services/bff/driver-bff/Dockerfile","dir":"services/bff/driver-bff/"},
             {"service":"public-bff","context":".","dockerfile":"services/bff/public-bff/Dockerfile","dir":"services/bff/public-bff/"},
+            {"service":"booking-service","context":".","dockerfile":"services/booking-service/Dockerfile","dir":"services/booking-service/"},
             {"service":"chat-service","context":".","dockerfile":"services/chat-service/Dockerfile","dir":"services/chat-service/"},
             {"service":"dispatch-service","context":".","dockerfile":"services/dispatch-service/Dockerfile","dir":"services/dispatch-service/"},
             {"service":"fleet-service","context":".","dockerfile":"services/fleet-service/Dockerfile","dir":"services/fleet-service/"},
@@ -117,29 +114,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ECR (opcional, solo si hay rol AWS configurado) — para el camino k8s/AWS
-      - name: AWS creds (OIDC)
-        id: aws
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_ECR_PUSH_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login ECR
-        id: ecr
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_ECR_PUSH_ROLE_ARN != ''
-        uses: aws-actions/amazon-ecr-login@v2
-
       - name: Tags
         id: meta
         run: |
           OWNER="${{ github.repository_owner }}"; OWNER="${OWNER,,}"
           GHCR="ghcr.io/${OWNER}/veo/${{ matrix.service }}"
           TAGS="${GHCR}:${{ github.sha }},${GHCR}:latest"
-          if [ -n "${{ steps.ecr.outputs.registry }}" ]; then
-            ECR="${{ steps.ecr.outputs.registry }}/veo/${{ matrix.service }}"
-            TAGS="${TAGS},${ECR}:${{ github.sha }},${ECR}:latest"
-          fi
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
 
       - name: Build${{ github.event_name == 'push' && ' & Push' || '' }}

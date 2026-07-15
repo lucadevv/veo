@@ -61,6 +61,36 @@ interface NominatimEntry {
   lon: string;
   display_name: string;
   name?: string;
+  /**
+   * Desglose de dirección (solo con `addressdetails=1`). En Lima el DISTRITO llega como `suburb` o
+   * `city_district` según el mapeo OSM de la zona; caemos por prioridad hasta `city`/`county` como red
+   * de seguridad. Todos opcionales (proveedor puede no traerlos).
+   */
+  address?: {
+    suburb?: string;
+    city_district?: string;
+    town?: string;
+    city?: string;
+    municipality?: string;
+    county?: string;
+  };
+}
+
+/**
+ * Extrae el DISTRITO del desglose de dirección de Nominatim. En Lima el distrito suele venir como
+ * `suburb` o `city_district`; probamos por prioridad y caemos a town/city/... como último recurso.
+ * `undefined` si no hay ninguno (el consumidor degrada honesto). No inventa: solo elige el campo presente.
+ */
+function districtOf(address: NominatimEntry['address']): string | undefined {
+  if (!address) return undefined;
+  return (
+    address.suburb ??
+    address.city_district ??
+    address.town ??
+    address.municipality ??
+    address.city ??
+    address.county
+  );
 }
 
 /**
@@ -257,7 +287,7 @@ export class OsrmMapsClient implements MapsClient {
     const cached = await this.opts.cache?.get(cacheKey);
     if (cached) return JSON.parse(cached) as GeocodeResult;
 
-    const url = `${this.opts.nominatimBaseUrl}/reverse?format=jsonv2&lat=${point.lat}&lon=${point.lon}`;
+    const url = `${this.opts.nominatimBaseUrl}/reverse?format=jsonv2&addressdetails=1&lat=${point.lat}&lon=${point.lon}`;
     const entry = await this.getJson<NominatimEntry & { error?: string }>(url, 'Nominatim reverse');
     if (entry.error || !entry.lat) return null;
     const result = this.toGeocode(entry);
@@ -271,6 +301,8 @@ export class OsrmMapsClient implements MapsClient {
       lon: Number(entry.lon),
       displayName: entry.display_name,
       name: entry.name,
+      // Distrito del desglose de dirección (addressdetails); undefined si el proveedor no lo trae.
+      district: districtOf(entry.address),
     };
   }
 

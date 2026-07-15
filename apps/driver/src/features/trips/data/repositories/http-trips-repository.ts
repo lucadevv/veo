@@ -1,17 +1,27 @@
+import { z } from 'zod';
 import type { HttpClient } from '@veo/api-client';
 import {
+  ApiError,
   driverOfferView,
   driverTripStateView,
   driverTripView,
   respondWaypointView,
+  tripHistoryPage,
   tripRoute,
 } from '@veo/api-client';
-import type { GeoPoint, RespondWaypointView } from '@veo/api-client';
+import type {
+  GeoPoint,
+  RespondWaypointView,
+  TripHistoryPage,
+  TripHistoryQuery,
+} from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
   CancelTripInput,
+  CommissionRateView,
   CompleteTripInput,
+  PendingCash,
   StartTripInput,
   Trip,
   TripOffer,
@@ -19,6 +29,34 @@ import type {
   TripsRepository,
   TripState,
 } from '../../domain';
+
+/**
+ * Validación LOCAL de la respuesta del accept de dispatch (passthrough sin contrato en
+ * `@veo/api-client`; el DTO real es `MatchResponseDto` del dispatch-service). Solo importa `outcome`:
+ * un 200 con outcome ≠ ACCEPTED (TIMEOUT/REJECTED de una oferta que ya murió) NO es un accept.
+ * `outcome` opcional a propósito: si el upstream cambia de forma, no rompemos el camino feliz —
+ * solo bloqueamos cuando el server DICE explícitamente que no quedó aceptada.
+ */
+const acceptOfferReply = z.object({ outcome: z.string().optional() });
+
+/**
+ * Validación LOCAL de la tasa de comisión vigente del driver-bff (`DriverCommissionRateView`; contrato
+ * chico y propio del bff, sin schema en `@veo/api-client`). bps entero — el server jamás manda floats.
+ */
+const commissionRateView = z.object({
+  onDemandRateBps: z.number().int(),
+  version: z.number().int(),
+});
+
+/**
+ * Validación LOCAL del cobro EFECTIVO pendiente de confirmar (`PendingCashView` del driver-bff; contrato chico
+ * y propio del bff, sin schema en `@veo/api-client`). amountCents entero (céntimos PEN). El 204 (sin cobro
+ * pendiente) lo mapea el HttpClient a `undefined` ANTES de validar — este schema solo corre con body.
+ */
+const pendingCashView = z.object({
+  tripId: z.string(),
+  amountCents: z.number().int(),
+});
 
 /** Implementación HTTP del `TripsRepository` contra el driver-bff. */
 export class HttpTripsRepository implements TripsRepository {
@@ -28,12 +66,20 @@ export class HttpTripsRepository implements TripsRepository {
     return this.http.get(`/dispatch/offers/${matchId}`, { schema: driverOfferView });
   }
 
-  // Las respuestas de aceptar/rechazar oferta son passthrough del dispatch-service (forma no
-  // contractualizada); no se validan ni se usan: basta con el 200 OK.
+  // Antes era passthrough ciego ("basta con el 200 OK"): con la oferta ya muerta, el 200 con
+  // outcome ≠ ACCEPTED navegaba igual al viaje y dejaba al conductor en el bucle de "reintentar"
+  // sin salida (ensureAccepted nunca ve ASSIGNED). Ahora ese caso es un error honesto: la card
+  // muestra su banner y NO navega.
   async acceptOffer(matchId: string): Promise<void> {
-    await this.http.post(`/dispatch/offers/${matchId}/accept`);
+    const reply = await this.http.post(`/dispatch/offers/${matchId}/accept`, {
+      schema: acceptOfferReply,
+    });
+    if (reply.outcome !== undefined && reply.outcome !== 'ACCEPTED') {
+      throw new ApiError(409, 'OFFER_NOT_AVAILABLE', 'La oferta ya no está disponible');
+    }
   }
 
+  // El reject sigue passthrough: su resultado no gatea ninguna navegación (basta el 200 OK).
   async rejectOffer(matchId: string): Promise<void> {
     await this.http.post(`/dispatch/offers/${matchId}/reject`);
   }
@@ -53,6 +99,15 @@ export class HttpTripsRepository implements TripsRepository {
 
   getTripState(tripId: string): Promise<TripState> {
     return this.http.get(`/trips/${tripId}/state`, { schema: driverTripStateView });
+  }
+
+  getTripHistory(query?: TripHistoryQuery): Promise<TripHistoryPage> {
+    // GET /trips/history?cursor=&limit= — mismo patrón que `/trips/active` (schema-validado). El BFF arma
+    // el query string (RN no tiene URL.searchParams) y deriva el driverId del JWT (no viaja acá, anti-IDOR).
+    return this.http.get(`/trips/history`, {
+      query: { cursor: query?.cursor, limit: query?.limit },
+      schema: tripHistoryPage,
+    });
   }
 
   getRoute(tripId: string, from?: GeoPoint): Promise<TripRouteView> {
@@ -91,6 +146,22 @@ export class HttpTripsRepository implements TripsRepository {
     return this.http.post(`/trips/${tripId}/cancel`, { body: input, schema: driverTripView });
   }
 
+  async confirmCash(tripId: string, collected: boolean): Promise<void> {
+    // El BFF resuelve el paymentId del viaje server-side y captura/reporta el cobro CASH. La respuesta
+    // (estado del pago) no se consume en el app: basta el 200 (mismo patrón que rejectOffer). Sin schema.
+    await this.http.post(`/trips/${tripId}/cash-confirm`, { body: { collected } });
+  }
+
+  async getPendingCash(): Promise<PendingCash | null> {
+    // El BFF responde 204 (sin body) cuando no hay cobro en efectivo pendiente de confirmar; el HttpClient
+    // lo mapea a `undefined`. "Sin cobro pendiente" NO es error: es el caso normal. Mismo patrón que
+    // `/trips/active`. El driverId lo deriva el BFF del JWT (no viaja acá, anti-IDOR).
+    const pending = (await this.http.get(`/trips/pending-cash`, { schema: pendingCashView })) as
+      | PendingCash
+      | undefined;
+    return pending ?? null;
+  }
+
   respondWaypoint(
     tripId: string,
     proposalId: string,
@@ -102,5 +173,9 @@ export class HttpTripsRepository implements TripsRepository {
       body: { accept },
       schema: respondWaypointView,
     });
+  }
+
+  getCommissionRate(): Promise<CommissionRateView> {
+    return this.http.get('/earnings/commission-rate', { schema: commissionRateView });
   }
 }

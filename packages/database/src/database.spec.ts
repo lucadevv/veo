@@ -3,12 +3,11 @@ import { ReadWriteClient, type PrismaLike } from './read-write.js';
 import {
   enqueueOutbox,
   PrismaOutboxStore,
-  outboxAdvisoryLockKey,
   type OutboxDelegate,
   type OutboxPrismaClient,
 } from './outbox.js';
 import { tombstone, deletedPlaceholder, type UpdatableDelegate } from './tombstone.js';
-import { isUniqueViolation } from './prisma-errors.js';
+import { isUniqueViolation, isRecordNotFound } from './prisma-errors.js';
 import { createEnvelope } from '@veo/events';
 
 class FakeClient implements PrismaLike {
@@ -52,8 +51,6 @@ describe('outbox', () => {
         created.push(args.data);
         return null;
       },
-      findMany: async () => [],
-      updateMany: async () => null,
     };
     const env = createEnvelope({
       eventType: 'trip.completed',
@@ -66,61 +63,128 @@ describe('outbox', () => {
     expect((created[0] as { eventType: string }).eventType).toBe('trip.completed');
   });
 
-  it('outboxAdvisoryLockKey es estable y distinto por schema', () => {
-    expect(outboxAdvisoryLockKey('panic')).toBe(outboxAdvisoryLockKey('panic'));
-    expect(outboxAdvisoryLockKey('panic')).not.toBe(outboxAdvisoryLockKey('payment'));
-    expect(outboxAdvisoryLockKey('panic') < 9223372036854775807n).toBe(true); // cabe en int8
+  it('PrismaOutboxStore rechaza un schema que no es identificador Postgres (anti-inyección)', () => {
+    const noop = { outboxEvent: { create: async () => null } } as unknown as OutboxPrismaClient;
+    expect(() => new PrismaOutboxStore(noop, 'rating')).not.toThrow();
+    expect(() => new PrismaOutboxStore(noop, 'rating; DROP TABLE x')).toThrow(/schema inválido/);
+    expect(() => new PrismaOutboxStore(noop, '1bad')).toThrow(/schema inválido/);
+    expect(() => new PrismaOutboxStore(noop, '"quoted"')).toThrow(/schema inválido/);
   });
 
-  it('drainLocked publica los pendientes y los marca (advisory lock adquirido)', async () => {
+  it('drain: CLAIM (parametrizado limit+stale) → PUBLISH → ACK marca published los éxitos', async () => {
     const env = createEnvelope({
       eventType: 'rating.created',
       producer: 'rating-service',
       payload: {},
     });
-    let marked: string[] = [];
+    const claimCalls: { sql: string; values: unknown[] }[] = [];
+    const ackCalls: { sql: string; values: unknown[] }[] = [];
     const published: string[] = [];
-    const fakePrisma = {
-      outboxEvent: {
-        create: async () => null,
-        findMany: async () => [
-          { id: 'o1', aggregateId: 'd1', envelope: env, createdAt: new Date(), publishedAt: null },
-        ],
-        updateMany: async (args: { where: { id: { in: string[] } } }) => {
-          marked = args.where.id.in;
-          return null;
-        },
+    const fakePrisma: OutboxPrismaClient = {
+      outboxEvent: { create: async () => null },
+      $queryRawUnsafe: async <T>(sql: string, ...values: unknown[]): Promise<T> => {
+        claimCalls.push({ sql, values });
+        return [{ id: 'o1', aggregate_id: 'd1', envelope: env, created_at: new Date() }] as T;
       },
-      $queryRaw: async () => [{ locked: true }],
-      $transaction: async <R>(fn: (tx: unknown) => Promise<R>): Promise<R> => fn(fakePrisma),
+      $executeRawUnsafe: async (sql: string, ...values: unknown[]): Promise<number> => {
+        ackCalls.push({ sql, values });
+        return 1;
+      },
     };
-    const store = new PrismaOutboxStore(fakePrisma as unknown as OutboxPrismaClient, 'rating');
-    const n = await store.drainLocked(10, async (r) => {
+    const store = new PrismaOutboxStore(fakePrisma, 'rating');
+    const result = await store.drain(10, 60_000, 8, async (r) => {
       published.push(r.id);
     });
-    expect(n).toBe(1);
+
+    expect(result.published).toBe(1);
+    expect(result.poisoned).toEqual([]);
     expect(published).toEqual(['o1']);
-    expect(marked).toEqual(['o1']);
+    // CLAIM: el SQL referencia el schema validado e interpola limit+stale como parámetros ($1, $2).
+    expect(claimCalls).toHaveLength(1);
+    expect(claimCalls[0]!.sql).toContain('"rating"."outbox_events"');
+    expect(claimCalls[0]!.sql).toContain('FOR UPDATE SKIP LOCKED');
+    expect(claimCalls[0]!.values).toEqual([60_000, 10]); // staleMs, limit — NO interpolados como string
+    // ACK: marca published los éxitos vía array param.
+    expect(ackCalls).toHaveLength(1);
+    expect(ackCalls[0]!.sql).toContain('published_at = now()');
+    expect(ackCalls[0]!.values).toEqual([['o1']]);
   });
 
-  it('drainLocked es no-op (sin leer ni marcar) si otra réplica tiene el advisory lock', async () => {
-    let findManyCalled = false;
-    const fakePrisma = {
-      outboxEvent: {
-        create: async () => null,
-        findMany: async () => {
-          findManyCalled = true;
-          return [];
-        },
-        updateMany: async () => null,
+  it('drain: no-op (sin publish ni ack) si el CLAIM no devuelve filas', async () => {
+    let acked = false;
+    const fakePrisma: OutboxPrismaClient = {
+      outboxEvent: { create: async () => null },
+      $queryRawUnsafe: async <T>(): Promise<T> => [] as T,
+      $executeRawUnsafe: async (): Promise<number> => {
+        acked = true;
+        return 0;
       },
-      $queryRaw: async () => [{ locked: false }], // lock NO adquirido (otra réplica drena)
-      $transaction: async <R>(fn: (tx: unknown) => Promise<R>): Promise<R> => fn(fakePrisma),
     };
-    const store = new PrismaOutboxStore(fakePrisma as unknown as OutboxPrismaClient, 'rating');
-    const n = await store.drainLocked(10, async () => undefined);
-    expect(n).toBe(0);
-    expect(findManyCalled).toBe(false);
+    const store = new PrismaOutboxStore(fakePrisma, 'rating');
+    const published: string[] = [];
+    const result = await store.drain(10, 60_000, 8, async (r) => {
+      published.push(r.id);
+    });
+    expect(result.published).toBe(0);
+    expect(result.poisoned).toEqual([]);
+    expect(published).toEqual([]);
+    expect(acked).toBe(false);
+  });
+
+  it('drain: un publish que falla → ese id va a fallos (ack resetea claimed_at = NULL, no published)', async () => {
+    const env = createEnvelope({
+      eventType: 'rating.created',
+      producer: 'rating-service',
+      payload: {},
+    });
+    const ackCalls: { sql: string; values: unknown[] }[] = [];
+    const fakePrisma: OutboxPrismaClient = {
+      outboxEvent: { create: async () => null },
+      $queryRawUnsafe: async <T>(): Promise<T> =>
+        [{ id: 'o1', aggregate_id: 'd1', envelope: env, created_at: new Date() }] as T,
+      $executeRawUnsafe: async (sql: string, ...values: unknown[]): Promise<number> => {
+        ackCalls.push({ sql, values });
+        return 1;
+      },
+    };
+    const store = new PrismaOutboxStore(fakePrisma, 'rating');
+    const result = await store.drain(10, 60_000, 8, async () => {
+      throw new Error('Kafka caído'); // Error genérico → TRANSITORIO (no poison) → reset claimed_at.
+    });
+    expect(result.published).toBe(0); // nada publicado OK
+    expect(result.poisoned).toEqual([]); // un Error genérico NO es poison permanente
+    expect(ackCalls).toHaveLength(1);
+    expect(ackCalls[0]!.sql).toContain('claimed_at = NULL'); // reset → retry el próximo tick
+    expect(ackCalls[0]!.values).toEqual([['o1']]);
+  });
+
+  it('drain: orden per-aggregate — los 3 eventos del MISMO aggregate se publican en orden createdAt', async () => {
+    const env = createEnvelope({
+      eventType: 'rating.created',
+      producer: 'rating-service',
+      payload: {},
+    });
+    const t = (s: number) => new Date(2026, 0, 1, 0, 0, s);
+    const fakePrisma: OutboxPrismaClient = {
+      outboxEvent: { create: async () => null },
+      // El claim devuelve YA ordenado por createdAt ASC (ORDER BY del SQL); intercalo aggregates.
+      $queryRawUnsafe: async <T>(): Promise<T> =>
+        [
+          { id: 'a-1', aggregate_id: 'A', envelope: env, created_at: t(1) },
+          { id: 'b-1', aggregate_id: 'B', envelope: env, created_at: t(2) },
+          { id: 'a-2', aggregate_id: 'A', envelope: env, created_at: t(3) },
+          { id: 'a-3', aggregate_id: 'A', envelope: env, created_at: t(4) },
+        ] as T,
+      $executeRawUnsafe: async (): Promise<number> => 0,
+    };
+    const store = new PrismaOutboxStore(fakePrisma, 'rating');
+    const orderByAgg: Record<string, string[]> = { A: [], B: [] };
+    await store.drain(10, 60_000, 8, async (r) => {
+      orderByAgg[r.aggregateId]!.push(r.id);
+    });
+    // Dentro del aggregate A, el orden createdAt se preserva pese a la paralelización entre A y B.
+    expect(orderByAgg.A).toEqual(['a-1', 'a-2', 'a-3']);
+    expect(orderByAgg.B).toEqual(['b-1']);
   });
 });
 
@@ -181,5 +245,25 @@ describe('isUniqueViolation (P2002 estructural, cross-cliente-generado)', () => 
 
   it('sin meta.target fiable, asume el unique esperado (no rompe la idempotencia)', () => {
     expect(isUniqueViolation(prismaError('P2002'), 'dedupKey')).toBe(true);
+  });
+});
+
+describe('isRecordNotFound (P2025 estructural, cross-cliente-generado)', () => {
+  function prismaError(code: string): Error {
+    const err = new Error('Record to update not found') as Error & { code: string };
+    err.name = 'PrismaClientKnownRequestError';
+    err.code = code;
+    return err;
+  }
+
+  it('matchea P2025 (update/delete con where que afecta 0 filas — UPDATE atómico condicionado)', () => {
+    expect(isRecordNotFound(prismaError('P2025'))).toBe(true);
+  });
+
+  it('rechaza otros códigos, errores ajenos y no-errores', () => {
+    expect(isRecordNotFound(prismaError('P2002'))).toBe(false);
+    expect(isRecordNotFound(new Error('P2025'))).toBe(false); // name no es PrismaClientKnownRequestError
+    expect(isRecordNotFound(null)).toBe(false);
+    expect(isRecordNotFound('P2025')).toBe(false);
   });
 });

@@ -2,7 +2,6 @@ import {HttpAuthRepository} from '../../features/auth/data/httpAuthRepository';
 import {HttpConsentRepository} from '../../features/auth/data/httpConsentRepository';
 import {MmkvPendingConsentStore} from '../../features/auth/data/mmkvPendingConsentStore';
 import {SyncPendingConsentUseCase} from '../../features/auth/domain/syncPendingConsentUseCase';
-import {KeychainLocalAuthService} from '../../features/auth/data/keychainLocalAuthService';
 import {
   ForgotPasswordUseCase,
   LoginEmailUseCase,
@@ -30,6 +29,16 @@ import {
   RequestKycChallengeUseCase,
   SubmitKycUseCase,
 } from '../../features/kyc/domain/usecases';
+import {HttpCarpoolRepository} from '../../features/carpool/data/httpCarpoolRepository';
+import {
+  BrowseCarpoolTripsUseCase,
+  CancelCarpoolBookingUseCase,
+  GetCarpoolBookingUseCase,
+  GetCarpoolPopularRoutesUseCase,
+  GetCarpoolTripDetailUseCase,
+  ReserveCarpoolSeatUseCase,
+  SearchCarpoolTripsUseCase,
+} from '../../features/carpool/domain/usecases';
 import {HttpMapsRepository} from '../../features/maps/data/httpMapsRepository';
 import {
   AutocompletePlacesUseCase,
@@ -38,7 +47,16 @@ import {
   ReverseGeocodeUseCase,
 } from '../../features/maps/domain/usecases';
 import {HttpNotificationsRepository} from '../../features/notifications/data/httpNotificationsRepository';
-import {ListNotificationsUseCase} from '../../features/notifications/domain/usecases';
+import {
+  ListNotificationsUseCase,
+  MarkNotificationReadUseCase,
+  MarkAllNotificationsReadUseCase,
+} from '../../features/notifications/domain/usecases';
+import {HttpNotificationPrefsRepository} from '../../features/notifications/data/httpNotificationPrefsRepository';
+import {
+  GetNotificationPrefsUseCase,
+  UpdateNotificationPrefsUseCase,
+} from '../../features/notifications/domain/prefsUsecases';
 import {HttpPushTokenRegistrar} from '../../features/notifications/data/httpPushTokenRegistrar';
 import {LogPushTokenRegistrar} from '../../features/notifications/data/logPushTokenRegistrar';
 import {
@@ -69,6 +87,7 @@ import {
   GetPaymentByTripUseCase,
   GetPaymentUseCase,
   RetryChargeUseCase,
+  SettlePenaltyUseCase,
 } from '../../features/payments/domain/usecases';
 import {
   CreateYapeAffiliationUseCase,
@@ -119,7 +138,6 @@ import {
   CancelBidUseCase,
   CancelScheduledTripUseCase,
   CancelTripUseCase,
-  ChangeDestinationUseCase,
   CloseTripUseCase,
   CreateTripUseCase,
   GetCabinVideoUseCase,
@@ -148,6 +166,7 @@ import {TOKENS} from './tokens';
  * Resolución perezosa: nada se instancia hasta el primer `resolve`.
  */
 import {setPaymentPrefsBackendSync} from '../../features/payments/presentation/stores/paymentPrefsStore';
+import {setNotificationPrefsBackendSync} from '../../features/notifications/presentation/stores/notificationPrefsStore';
 
 export function buildContainer(): Container {
   const container = new Container();
@@ -230,6 +249,11 @@ export function buildContainer(): Container {
     TOKENS.dispatchRepository,
     c => new HttpDispatchRepository(c.resolve(TOKENS.httpClient)),
   );
+  // Marketplace de carpooling (ADR-014, lado pasajero): public-bff `/carpool/*`.
+  container.register(
+    TOKENS.carpoolRepository,
+    c => new HttpCarpoolRepository(c.resolve(TOKENS.httpClient)),
+  );
 
   // Snapshot local de viajes en MMKV (prefs). YA NO es la fuente del HISTORIAL — eso ahora lo manda el
   // servidor vía `GET /trips/history` (getTripHistoryUseCase), con los ESTADOS REALES. Este snapshot solo
@@ -244,7 +268,8 @@ export function buildContainer(): Container {
   // Centro de avisos: HTTP REAL contra el public-bff (`GET /notifications`). El aviso llega YA
   // renderizado y categorizado por el notification-service; el repo solo mapea category→kind. El
   // recipientId lo deriva el BFF del JWT (anti-IDOR). Reemplazó al EmptyNotificationsRepository
-  // (HUECO DE BACKEND cerrado) sin tocar dominio ni presentación. Sin leído/no-leído aún (MVP).
+  // (HUECO DE BACKEND cerrado) sin tocar dominio ni presentación. Leído/no-leído YA implementado:
+  // el `read` mapea el `read_at` real del server y markAllRead() los marca (badge de no-leídos incluido).
   container.register(
     TOKENS.notificationsRepository,
     c => new HttpNotificationsRepository(c.resolve(TOKENS.httpClient)),
@@ -273,10 +298,6 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.locationProvider,
     () => new BackgroundGeolocationLocationProvider(),
-  );
-  container.register(
-    TOKENS.localAuthService,
-    () => new KeychainLocalAuthService(),
   );
   // Selector de imágenes nativo (avatar): galería + cámara tras el puerto `ImagePickerService`.
   container.register(
@@ -402,10 +423,6 @@ export function buildContainer(): Container {
     c => new CancelTripUseCase(c.resolve(TOKENS.tripRepository)),
   );
   container.register(
-    TOKENS.changeDestinationUseCase,
-    c => new ChangeDestinationUseCase(c.resolve(TOKENS.tripRepository)),
-  );
-  container.register(
     TOKENS.getCabinVideoUseCase,
     c => new GetCabinVideoUseCase(c.resolve(TOKENS.tripRepository)),
   );
@@ -460,6 +477,37 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.rebidUseCase,
     c => new RebidUseCase(c.resolve(TOKENS.tripRepository)),
+  );
+
+  // Casos de uso · Carpooling (marketplace programado · ADR-014)
+  container.register(
+    TOKENS.browseCarpoolTripsUseCase,
+    c => new BrowseCarpoolTripsUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.getCarpoolPopularRoutesUseCase,
+    c =>
+      new GetCarpoolPopularRoutesUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.searchCarpoolTripsUseCase,
+    c => new SearchCarpoolTripsUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.getCarpoolTripDetailUseCase,
+    c => new GetCarpoolTripDetailUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.reserveCarpoolSeatUseCase,
+    c => new ReserveCarpoolSeatUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.getCarpoolBookingUseCase,
+    c => new GetCarpoolBookingUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.cancelCarpoolBookingUseCase,
+    c => new CancelCarpoolBookingUseCase(c.resolve(TOKENS.carpoolRepository)),
   );
 
   // Casos de uso · Maps
@@ -579,6 +627,11 @@ export function buildContainer(): Container {
     TOKENS.retryChargeUseCase,
     c => new RetryChargeUseCase(c.resolve(TOKENS.paymentsRepository)),
   );
+  // Caso de uso · Pagar una penalidad de cancelación (kind=CANCELLATION_PENALTY · F2.3)
+  container.register(
+    TOKENS.settlePenaltyUseCase,
+    c => new SettlePenaltyUseCase(c.resolve(TOKENS.paymentsRepository)),
+  );
   // Caso de uso · Cambiar el método de un pago PENDIENTE a otro DIGITAL (TASK 3)
   container.register(
     TOKENS.changePaymentMethodUseCase,
@@ -650,6 +703,36 @@ export function buildContainer(): Container {
     c =>
       new ListNotificationsUseCase(c.resolve(TOKENS.notificationsRepository)),
   );
+  container.register(
+    TOKENS.markNotificationReadUseCase,
+    c =>
+      new MarkNotificationReadUseCase(c.resolve(TOKENS.notificationsRepository)),
+  );
+  container.register(
+    TOKENS.markAllNotificationsReadUseCase,
+    c =>
+      new MarkAllNotificationsReadUseCase(
+        c.resolve(TOKENS.notificationsRepository),
+      ),
+  );
+  container.register(
+    TOKENS.notificationPrefsRepository,
+    c => new HttpNotificationPrefsRepository(c.resolve(TOKENS.httpClient)),
+  );
+  container.register(
+    TOKENS.getNotificationPrefsUseCase,
+    c =>
+      new GetNotificationPrefsUseCase(
+        c.resolve(TOKENS.notificationPrefsRepository),
+      ),
+  );
+  container.register(
+    TOKENS.updateNotificationPrefsUseCase,
+    c =>
+      new UpdateNotificationPrefsUseCase(
+        c.resolve(TOKENS.notificationPrefsRepository),
+      ),
+  );
 
   // Casos de uso · Promos
   container.register(
@@ -719,5 +802,14 @@ setPaymentPrefsBackendSync(method => {
   void container
     .resolve(TOKENS.updateProfileUseCase)
     .execute({defaultPaymentMethod: method})
+    .catch(() => {});
+});
+
+// Sincroniza las preferencias de notificaciones al backend (PUT /notification-prefs) en cada cambio.
+// Guarded: si el binding no está, el store degrada a MMKV local (offline honesto).
+setNotificationPrefsBackendSync(prefs => {
+  void container
+    .resolve(TOKENS.updateNotificationPrefsUseCase)
+    .execute(prefs)
     .catch(() => {});
 });

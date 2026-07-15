@@ -3,11 +3,15 @@
  * Lectura síncrona del match y del surge para otros servicios (trip-service).
  * Devuelve `found=false` en vez de lanzar, para que el llamante decida.
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
+import {
+  verifyGrpcIdentity,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
+} from '@veo/auth';
 import { isDomainError } from '@veo/utils';
 import type { VehicleClass } from '@veo/shared-types';
 import type { MatchReply, NearbyDriver, SurgeReply } from '@veo/rpc';
@@ -59,6 +63,8 @@ export class DispatchGrpcController {
     private readonly surge: SurgeService,
     private readonly nearby: NearbyDriversService,
     config: ConfigService<Env, true>,
+    @Inject(INTERNAL_IDENTITY_ALLOWED_AUDIENCES)
+    private readonly allowedAudiences: readonly InternalAudience[],
   ) {
     this.secret = config.get('INTERNAL_IDENTITY_SECRET', { infer: true });
   }
@@ -72,7 +78,9 @@ export class DispatchGrpcController {
    */
   @GrpcMethod('DispatchService', 'GetMatch')
   async getMatch({ matchId }: GetMatchRequest, metadata: Metadata): Promise<MatchReply> {
-    const identity = verifyGrpcIdentity(metadata, this.secret);
+    const identity = verifyGrpcIdentity(metadata, this.secret, {
+      allowedAudiences: this.allowedAudiences,
+    });
     if (!identity) {
       throw new RpcException({
         code: GrpcStatus.UNAUTHENTICATED,

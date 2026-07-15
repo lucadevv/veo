@@ -22,25 +22,34 @@ import {
   neighbors,
   uuidv7,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   ValidationError,
   DISPATCH_H3_RESOLUTION,
   BID_MAX_CENTS,
   type LatLon,
 } from '@veo/utils';
-import { createEnvelope } from '@veo/events';
+import { createEnvelope, OFFER_WITHDRAWN_REASON } from '@veo/events';
 // Finding #4 (§5-bis DRY / §4-ter cero literales sueltos): la detección de violación de UNIQUE vive UNA
 // sola vez en @veo/database (helper tipado + constante PRISMA_UNIQUE_VIOLATION), compartida con
 // payment-service. Reusamos ESE helper en vez de duplicar inline el literal 'P2002' y el `instanceof`
 // (que, además, es FRÁGIL: cada servicio genera su propio cliente Prisma → clases distintas; el helper
 // compartido detecta de forma ESTRUCTURAL por name+code, válido cross-cliente).
 import { isUniqueViolation } from '@veo/database';
-import { DispatchOutcome, type SpecialRequest, type VehicleClass } from '@veo/shared-types';
+import {
+  DispatchOutcome,
+  findOffering,
+  hasRequiredCertifications,
+  isVehicleEligibleForOffering,
+  type OfferingRequirements,
+  type SpecialRequest,
+  type VehicleClass,
+} from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
-import { domainEventsTotal } from '@veo/observability';
-import { PrismaService } from '../infra/prisma.service';
+import { domainEventsTotal, BusinessEventResult } from '@veo/observability';
 import { Prisma } from '../generated/prisma';
-import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
+import { OFFER_BOARD_REPO, type OfferBoardRepository } from './offer-board.repository';
+import { HOT_INDEX, type HotIndex, type DriverLocation } from '../hot-index/hot-index.port';
 import { DriverPool } from './driver-pool';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
@@ -58,6 +67,7 @@ import {
 } from './offer-board.port';
 import { EligibilityGate } from './eligibility.gate';
 import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
+import { radiusKmToKRing } from './dispatch-policy';
 import type { Env } from '../config/env.schema';
 
 export interface BidPosted {
@@ -65,7 +75,20 @@ export interface BidPosted {
   passengerId: string;
   bidCents: number;
   vehicleType: VehicleClass;
+  /// B5-3 — oferta/tier del viaje (offeringId): el board la guarda para derivar `requires` y enforcar la
+  /// eligibilidad por TIER en PUJA igual que FIXED. Opcional por compat N-2 (bid_posted previos sin él).
+  category?: string;
   origin: LatLon;
+  /// Destino + distancia/duración del viaje (del row Trip vía `trip.bid_posted`): el board los guarda para
+  /// que el conductor VEA pickup→destino + distancia en la tarjeta de puja. El destino se ENGROSA a ~111m
+  /// antes de exponerlo a los conductores no asignados (`coarsenPreBid`); distancia/duración pasan directo.
+  destination: LatLon;
+  distanceMeters: number;
+  durationSeconds: number;
+  /// ADVISORY (ADR-019 Lote A). La ventana la decide dispatch (config editable por el admin,
+  /// `getWindows().bidWindowSec`): TANTO openBoard (bid inicial) COMO reopenBoard (re-match) usan ese valor
+  /// de runtime. Este campo lo sigue enviando el productor (trip-service) por compat N-2 del contrato, pero
+  /// dispatch lo IGNORA para la ventana; ripearlo del productor es follow-up.
   windowSec: number;
   /// H13 — ciclo de negociación del viaje (lo guardamos en el board y lo estampamos en offer_accepted).
   negotiationSeq: number;
@@ -80,7 +103,15 @@ export interface Reassigning {
   driverId: string;
   passengerId: string;
   vehicleType: VehicleClass;
+  /// B5-3 — oferta/tier del viaje: el board re-abierto la re-persiste para enforcar el TIER en el re-match.
+  /// Opcional por compat N-2 (reassigning previos sin él).
+  category?: string;
   origin: LatLon;
+  /// Destino + distancia/duración del viaje: el board re-abierto los conserva para que el conductor del
+  /// re-match VEA pickup→destino + distancia igual que en la puja original (trip.reassigning ya los transporta).
+  destination: LatLon;
+  distanceMeters: number;
+  durationSeconds: number;
   bidCents: number;
   /// H13 — ciclo de negociación del NUEVO re-match (seq incrementado por trip al pasar a REASSIGNING).
   negotiationSeq: number;
@@ -120,8 +151,12 @@ const dedupOfferMade = (
 ): string => `${DEDUP_PREFIX.OFFER_MADE}:${tripId}:${driverId}:${kind}:${priceCents}`;
 const dedupNoOffers = (tripId: string, windowEpoch: string): string =>
   `${DEDUP_PREFIX.NO_OFFERS}:${tripId}:${windowEpoch}`;
-const dedupOfferWithdrawn = (tripId: string, driverId: string): string =>
-  `${DEDUP_PREFIX.OFFER_WITHDRAWN}:${tripId}:${driverId}`;
+// Cycle-aware (ADR-020 Lote 2 follow-up): incluye el `negotiationSeq` (H13, monotónico por ciclo, no
+// resetea en re-bid) para que un offer_withdrawn de un CICLO no deduplique el del ciclo SIGUIENTE del
+// MISMO (trip, driver). Sin el seq, un conductor que oferta y ve expirar el board en re-bids sucesivos
+// del mismo viaje solo recibiría el PRIMER bid:closed → su "esperando" quedaría stale del 2º en adelante.
+const dedupOfferWithdrawn = (tripId: string, driverId: string, cycle: string | number): string =>
+  `${DEDUP_PREFIX.OFFER_WITHDRAWN}:${tripId}:${driverId}:${cycle}`;
 const dedupBidCancelled = (tripId: string): string => `${DEDUP_PREFIX.BID_CANCELLED}:${tripId}`;
 
 /**
@@ -139,9 +174,17 @@ export class OfferBoardService {
   private readonly bidMaxCents: number;
   /** Margen (s) sobre la ventana para el TTL de Redis, así el barrido alcanza a marcar EXPIRED. */
   private static readonly TTL_MARGIN_SECONDS = 30;
+  /**
+   * A2 (ADR-021 Fase A) — TTL (s) de la RED DE SEGURIDAD del claim síncrono per-conductor. GEMELO del
+   * BUSY_TTL del hot-index (2h): el claim y el busy-flag se ponen JUNTOS en el accept (`tryClaimDriver` +
+   * `markBusy`) y se sueltan JUNTOS en el terminal (`releaseDriver` → `releaseClaim` + `markAvailable`).
+   * El release explícito es el camino normal; el TTL solo cubre el crash entre el accept y el terminal, y
+   * es largo para no expirar a MITAD de un viaje vivo (dejaría al conductor reclamable durante su viaje).
+   */
+  private static readonly DRIVER_CLAIM_TTL_SECONDS = 7_200;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(OFFER_BOARD_REPO) private readonly repo: OfferBoardRepository,
     @Inject(OFFER_BOARD_STORE) private readonly store: OfferBoardStore,
     @Inject(HOT_INDEX) private readonly hotIndex: HotIndex,
     private readonly driverPool: DriverPool,
@@ -161,13 +204,26 @@ export class OfferBoardService {
 
   /** Abre un board OPEN para el viaje y hace broadcast del bid a los conductores elegibles cercanos. */
   async openBoard(bid: BidPosted): Promise<void> {
-    const expiresAt = Date.now() + bid.windowSec * 1000;
+    // ADR-019 Lote A — la ventana de la puja es AUTORIDAD de dispatch (config editable por el admin,
+    // cacheada), NO la del productor: `bid.windowSec` (trip-service) es ADVISORY. openBoard y reopenBoard
+    // usan el MISMO valor de runtime, así el board inicial y el re-match honran lo que el dueño fija.
+    const { bidWindowSec } = await this.radiusConfig.getWindows();
+    const expiresAt = Date.now() + bidWindowSec * 1000;
     const board: OfferBoard = {
       tripId: bid.tripId,
       passengerId: bid.passengerId,
       bidCents: bid.bidCents,
       vehicleType: bid.vehicleType,
+      // B5-3 — el tier del viaje viaja al board: el gate deriva `requires` de acá para enforcar la
+      // elegibilidad en PUJA (un tier inferior no puede ganar un bid de tier superior).
+      category: bid.category,
       origin: bid.origin,
+      // Destino + distancia/duración del viaje: el board los guarda para que el conductor pinte pickup→destino
+      // + distancia. El destino se engrosa a ~111m recién al DERIVAR los campos de puja (bidFieldsFromBoard);
+      // acá se persiste el exacto (need-to-know del conductor ASIGNADO, que lo obtiene por /route al match).
+      destination: bid.destination,
+      distanceMeters: bid.distanceMeters,
+      durationSeconds: bid.durationSeconds,
       // A3 — celda H3 del origen calculada UNA vez acá: alimenta el índice inverso `board:cell:<cell>`
       // que `listOpenBidsNear` consulta por k-ring (en vez de cargar TODOS los boards y filtrar en Node).
       originCell: toH3(bid.origin, DISPATCH_H3_RESOLUTION),
@@ -184,9 +240,10 @@ export class OfferBoardService {
     // sobreviven en el HASH y el pasajero podría aceptar una oferta rancia barata. Tras el clear, el
     // `bidCents` recién abierto es la ÚNICA referencia de precio.
     await this.store.clearOffers(bid.tripId);
-    await this.store.saveBoard(board, bid.windowSec + OfferBoardService.TTL_MARGIN_SECONDS);
+    await this.store.saveBoard(board, bidWindowSec + OfferBoardService.TTL_MARGIN_SECONDS);
     this.logger.log(
-      `board abierto trip=${bid.tripId} bid=${bid.bidCents} window=${bid.windowSec}s`,
+      `board abierto trip=${bid.tripId} bid=${bid.bidCents} ` +
+        `window=${bidWindowSec}s (autoridad admin; bid.windowSec=${bid.windowSec}s advisory)`,
     );
     await this.broadcast(board);
   }
@@ -202,6 +259,9 @@ export class OfferBoardService {
    * Si existe un board previo, lo sobreescribimos igual (idempotente). SIEMPRE abrimos y difundimos.
    */
   async reopenBoard(reassign: Reassigning): Promise<void> {
+    // D1 (ADR-019) — ventana del re-match leída EN RUNTIME (config editable por el admin, cacheada), NO
+    // hardcodeada a 60s. Así reopenBoard honra el valor que el dueño fija en el panel, sin restart.
+    const { bidWindowSec } = await this.radiusConfig.getWindows();
     // Reconstrucción autosuficiente: si quedaba metadato del board previo lo reusamos, pero el caso
     // canónico (board ya expirado por TTL) se rearma SOLO con el payload del evento.
     const existing = await this.store.getBoard(reassign.tripId);
@@ -210,13 +270,24 @@ export class OfferBoardService {
       tripId: reassign.tripId,
       passengerId: existing?.passengerId ?? reassign.passengerId,
       vehicleType: existing?.vehicleType ?? reassign.vehicleType,
+      // B5-3 — preserva el tier del board previo si sobrevivió (TTL no expiró); si se rearma SOLO desde el
+      // evento (board ya expirado), lo toma del payload ENRIQUECIDO de trip.reassigning. Así el board
+      // re-abierto NUNCA pierde sus `requires` y el re-match enforça el TIER igual que la puja original.
+      category: existing?.category ?? reassign.category,
       origin,
+      // Destino + distancia/duración: se preservan del board previo si sobrevivió (TTL no expiró); si se rearma
+      // SOLO desde el evento (board ya expirado), los toma del payload ENRIQUECIDO de trip.reassigning. Así el
+      // board re-abierto NUNCA pierde el destino y el conductor del re-match ve pickup→destino igual que la puja
+      // original (a diferencia de specialRequests, reassigning SÍ transporta estos campos → sin degradación a []).
+      destination: existing?.destination ?? reassign.destination,
+      distanceMeters: existing?.distanceMeters ?? reassign.distanceMeters,
+      durationSeconds: existing?.durationSeconds ?? reassign.durationSeconds,
       // A3 — re-deriva la celda del origen resuelto (reusa la del board previo si existía, o la del evento).
       originCell: existing?.originCell ?? toH3(origin, DISPATCH_H3_RESOLUTION),
       bidCents: reassign.bidCents,
       status: BoardStatus.OPEN,
-      // Ventana fresca de 60s (default ratificado §9) al MISMO bid (la subida va por rebid → bid_posted).
-      expiresAt: Date.now() + 60_000,
+      // Ventana fresca (config del admin, `bidWindowSec`) al MISMO bid (la subida va por rebid → bid_posted).
+      expiresAt: Date.now() + bidWindowSec * 1000,
       // H13 — el seq SIEMPRE viene del EVENTO (el nuevo ciclo de la reasignación), NUNCA del board previo:
       // re-abrir = ciclo fresco, así el offer_accepted del re-match lleva un seq MAYOR y el offer_accepted
       // STALE del ciclo anterior queda bloqueado en applyAgreedFare (seq menor → where no matchea).
@@ -230,11 +301,26 @@ export class OfferBoardService {
     // pasajero podría aceptar un precio rancio de la ventana cerrada. Tras el clear, el bidCents re-abierto
     // es la ÚNICA referencia de precio y no hay ofertas de la ventana previa que mal-aceptar.
     await this.store.clearOffers(reassign.tripId);
-    await this.store.saveBoard(reopened, 60 + OfferBoardService.TTL_MARGIN_SECONDS);
+    await this.store.saveBoard(reopened, bidWindowSec + OfferBoardService.TTL_MARGIN_SECONDS);
     this.logger.log(
       `board ${existing ? 're-abierto' : 'reconstruido'} trip=${reassign.tripId} bid=${reassign.bidCents}`,
     );
     await this.broadcast(reopened);
+  }
+
+  /**
+   * Radio (k-ring) del broadcast de PUJA vigente. FEATURE-FLAG dispatch-policy-v2: v2 → radiusKmToKRing(
+   * broadcastRadiusKm) de la política (razona en km); v1 (default, o policyV2 malformado) → matchKRing de
+   * la config de radios (comportamiento actual VERBATIM). Lo comparten `broadcast` y `listOpenBidsNear`
+   * para que el conductor VEA en su poll exactamente los boards que se le difunden (paridad de radio).
+   */
+  private async resolveBroadcastKRing(): Promise<number> {
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion === 'v2' && policy.v2) {
+      return radiusKmToKRing(policy.v2.PUJA.broadcastRadiusKm);
+    }
+    const { matchKRing } = await this.radiusConfig.getKRings();
+    return matchKRing;
   }
 
   /**
@@ -245,12 +331,18 @@ export class OfferBoardService {
    */
   private async broadcast(board: OfferBoard): Promise<void> {
     const center = toH3(board.origin, DISPATCH_H3_RESOLUTION);
-    // Radio del broadcast leído en RUNTIME (config editable por el admin, cacheado); sin config → DEFAULT.
-    const { matchKRing } = await this.radiusConfig.getKRings();
-    const cells = neighbors(center, matchKRing);
-    // Candidatos elegibles (disponibles + del tipo del board + no excluidos por pánico). Filtrado
-    // centralizado en DriverPool (misma fuente que el matcher secuencial FIXED).
-    const candidates = await this.driverPool.eligible(cells, board.vehicleType);
+    // Radio del broadcast leído en RUNTIME (config editable por el admin, cacheado). v2 → radiusKmToKRing(
+    // broadcastRadiusKm); v1 → matchKRing (comportamiento actual). Single-shot: sin loop de umbral (PUJA
+    // difunde a TODOS los elegibles del radio de una — a diferencia del matcher FIXED, que oferta a uno).
+    const cells = neighbors(center, await this.resolveBroadcastKRing());
+    // Candidatos elegibles (disponibles + del tipo del board + que SATISFACEN los `requires` de la oferta +
+    // no excluidos por pánico). Filtrado centralizado en DriverPool (misma fuente que el matcher secuencial
+    // FIXED). B5-3 — el board YA lleva `category`: derivamos sus `requires` y se los pasamos a `eligible()`
+    // para que el broadcast no llegue a conductores de un tier que no cumplen (paridad con FIXED). El gate
+    // de submit/accept re-valida igual (defensa en profundidad); esto solo evita el ruido del broadcast.
+    const candidates = await this.driverPool.eligible(cells, board.vehicleType, {
+      requires: findOffering(board.category ?? '')?.requires,
+    });
 
     const expiresAtIso = new Date(board.expiresAt).toISOString();
     // A1 — UNA sola llamada de ETA en LOTE (OSRM `/table` / motor local mapeado) en vez de N×`eta`
@@ -308,8 +400,15 @@ export class OfferBoardService {
       throw new ConflictError('La puja ya no está abierta', { status: board.status });
     }
 
-    // Capa 3 (service): re-valida elegibilidad contra identity + vehículo. NO basta presencia GPS.
-    await this.eligibility.assertEligibleToOffer(input.driverId, board.vehicleType);
+    // Capa 3 (service): re-valida elegibilidad contra identity + vehículo + TIER (board.category). NO basta
+    // presencia GPS. B5-3 — un conductor de tier inferior NO puede ofertar a un bid de tier superior.
+    await this.eligibility.assertEligibleToOffer(
+      input.driverId,
+      board.vehicleType,
+      false,
+      board.category,
+      true, // measureTier: submit ES una decisión de tier por-board → mide absent/unknown (no el poll)
+    );
 
     if (input.kind === OfferKind.ACCEPT_PRICE && input.priceCents !== board.bidCents) {
       throw new ValidationError('ACCEPT_PRICE debe igualar el bid', {
@@ -386,9 +485,17 @@ export class OfferBoardService {
    * ACCEPTED y las demás LAPSED, emite `dispatch.offer_accepted` Y `dispatch.match_found` (para que
    * trip materialice ASSIGNED — se mantiene ese contrato). Idempotente: doble-tap → no-op.
    */
-  async acceptOffer(tripId: string, driverId: string): Promise<Offer> {
+  async acceptOffer(tripId: string, driverId: string, passengerId: string): Promise<Offer> {
     const board = await this.store.getBoard(tripId);
     if (!board) throw new NotFoundError('Puja no encontrada', { tripId });
+
+    // CAPA 2 (defensa en profundidad anti-IDOR/confused-deputy): el board pertenece al pasajero que
+    // abrió la puja. Va ANTES del getOffer y de cualquier corto-circuito idempotente: un pasajero ajeno
+    // (aud public-rail válido pero otro userId) NO puede materializar el match de un viaje que no es suyo.
+    // El driverId del body SE QUEDA intacto (el pasajero ELIGE conductor; lo que se ancla es el dueño).
+    if (board.passengerId !== passengerId) {
+      throw new ForbiddenError('El viaje no pertenece al pasajero', { tripId });
+    }
 
     const chosen = await this.store.getOffer(tripId, driverId);
     if (!chosen) throw new NotFoundError('Oferta no encontrada', { tripId, driverId });
@@ -452,7 +559,15 @@ export class OfferBoardService {
     try {
       // A4 — BYPASS del cache (`fresh=true`): el accept es la decisión de plata. Un conductor recién
       // suspendido NO puede colarse por un snapshot stale de hasta `ELIGIBILITY_CACHE_TTL_MS` al match.
-      await this.eligibility.assertEligibleToOffer(driverId, board.vehicleType, true);
+      // B5-3 — re-valida también el TIER (board.category): un tier inferior no se cuela al match.
+      // accept: decisión de tier por-board (fresh=true bypasea cache) → measureTier=true mide absent/unknown.
+      await this.eligibility.assertEligibleToOffer(
+        driverId,
+        board.vehicleType,
+        true,
+        board.category,
+        true,
+      );
     } catch {
       await this.store.setOfferStatus(tripId, driverId, OfferStatus.STALE);
       // BE-3 — la oferta dejó de ser válida con el board OPEN: avisamos al pasajero para que la QUITE al
@@ -461,8 +576,8 @@ export class OfferBoardService {
       await this.emit(
         'dispatch.offer_withdrawn',
         tripId,
-        { tripId, driverId, reason: 'stale' },
-        dedupOfferWithdrawn(tripId, driverId),
+        { tripId, driverId, reason: OFFER_WITHDRAWN_REASON.STALE },
+        dedupOfferWithdrawn(tripId, driverId, board.negotiationSeq),
       ).catch((err: unknown) =>
         this.logger.warn(
           `offer_withdrawn no emitido trip=${tripId} driver=${driverId}: ${String(err)}`,
@@ -489,7 +604,44 @@ export class OfferBoardService {
       throw new ConflictError('La puja ya no está abierta', { status: claim.status });
     }
 
-    // A partir de acá ganamos el claim atómico: somos los únicos que materializan el match.
+    // A partir de acá ganamos el claim atómico del BOARD: somos los únicos que materializan ESTE match.
+    //
+    // A2 (ADR-021 Fase A) — CINTURÓN SÍNCRONO per-conductor. El CAS del board garantiza un único ganador
+    // POR board, pero NO cubre la carrera de dos accepts de boards DISTINTOS que eligen al MISMO conductor
+    // a la vez: A1 flipea `currentStatus`→ON_TRIP de forma ASÍNCRONA (Kafka), así que en la ventana de ~ms
+    // ambos accepts pasan el `eligibility.gate` (leen AVAILABLE) y ambos ganarían su board → doble-win.
+    // Reclamamos al conductor de forma ATÓMICA (Redis SET NX) DESPUÉS de ganar el board y ANTES de la tx
+    // durable: si el claim falla (el conductor YA ganó en OTRO board) revertimos NUESTRO board (→ OPEN, el
+    // pasajero elige otro) y rechazamos con 409 — así una claim perdida NO deja un match a medio hacer.
+    // Idempotente: si la claim ya es de ESTE mismo tripId (redelivery/retry del mismo accept), es éxito.
+    const driverClaimed = await this.hotIndex.tryClaimDriver(
+      driverId,
+      tripId,
+      OfferBoardService.DRIVER_CLAIM_TTL_SECONDS,
+    );
+    if (!driverClaimed) {
+      // El conductor ya fue reclamado por OTRO viaje → compensamos el board claim (CLOSED_MATCHED → OPEN,
+      // MISMA compensación que la tx-fail) para que el pasajero pueda elegir otro conductor, y rechazamos
+      // con 409 distinguible (`driver_claimed`) para que public-bff lo surface → la UI del pasajero refetch.
+      await this.store
+        .revertClaim(tripId)
+        .catch((revertErr) =>
+          this.logger.error(
+            `A2 trip=${tripId} driver=${driverId}: conductor ya reclamado y el revert del board falló ` +
+              `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
+          ),
+        );
+      this.logger.log(
+        `accept rechazado trip=${tripId} driver=${driverId}: conductor ya reclamado por otro viaje (A2)`,
+      );
+      throw new ConflictError('El conductor ya fue asignado a otro viaje', {
+        tripId,
+        driverId,
+        reason: 'driver_claimed',
+      });
+    }
+
+    // Ganado el board Y el conductor: somos los únicos que materializan este match.
     //
     // N5 — orden DURABLE-PRIMERO: la commit del outbox (la verdad durable del match) ocurre ANTES de
     // tocar el estado EFÍMERO de las ofertas en Redis. Así, si la tx de Postgres FALLA, NINGUNA oferta
@@ -499,7 +651,7 @@ export class OfferBoardService {
     // re-abre la ventana para que el pasajero reintente el accept (las ofertas siguen ahí, ventana vigente).
     try {
       // offer_accepted + match_found en la MISMA transacción de outbox (FOUNDATION §6).
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         const acceptedDedup = dedupOfferAccepted(tripId, driverId);
         const accepted = createEnvelope({
           eventType: 'dispatch.offer_accepted',
@@ -587,6 +739,16 @@ export class OfferBoardService {
               `(board CLOSED_MATCHED sin match — lo rescata el reconciler): ${String(revertErr)}`,
           );
         }
+        // A2 — soltamos también el claim per-conductor: la tx durable falló y el match NO existe, así que el
+        // conductor debe volver a ser reclamable de inmediato (si no, quedaría bloqueado hasta el TTL de 2h).
+        // Best-effort: un fallo del release no debe tapar el txErr que el pasajero necesita ver (el TTL es el backstop).
+        await this.hotIndex
+          .releaseClaim(driverId)
+          .catch((relErr) =>
+            this.logger.warn(
+              `A2 releaseClaim (tx-fail) trip=${tripId} driver=${driverId}: ${String(relErr)}`,
+            ),
+          );
         throw txErr;
       }
     }
@@ -601,6 +763,15 @@ export class OfferBoardService {
         this.logger.warn(`no se pudo marcar matchEmitted trip=${tripId}: ${String(err)}`),
       );
 
+    // ADR-020 Lote 2 (2a) — captura los PERDEDORES (ofertas PENDING de OTROS conductores) ANTES del flip
+    // cosmético a LAPSED, para notificarles reactivamente. `lapseAndAccept` flipea las N-1 ofertas a LAPSED
+    // en Redis SIN emitir evento: sin esto, el conductor perdedor conservaba su card de puja hasta que
+    // caducara localmente y, al tapearla, chocaba con un board ya cerrado → 409. La lista se lee del HASH
+    // (aún PENDING en este punto): el winner se excluye por driverId.
+    const losers = (await this.store.listOffers(tripId)).filter(
+      (o) => o.driverId !== driverId && o.status === OfferStatus.PENDING,
+    );
+
     // Recién AHORA flipeamos el estado efímero de las ofertas (elegida ACCEPTED, resto LAPSED): el match
     // ya es durable, así que estas escrituras son cosméticas (alimentan la vista del pasajero) y un fallo
     // parcial acá NO corrompe el outcome del match. A5 — UN solo round-trip (Lua sobre el HASH) en vez
@@ -611,11 +782,30 @@ export class OfferBoardService {
         this.logger.warn(`lapseAndAccept trip=${tripId} falló (cosmético): ${String(err)}`),
       );
 
+    // ADR-020 Lote 2 (2a) — UN `dispatch.offer_withdrawn` (reason=not_selected) POR perdedor, por OUTBOX
+    // (idempotente por (trip,driver) vía dedupOfferWithdrawn). El driver-bff lo consume y empuja `bid:closed`
+    // al conductor → su card muere al instante, sin esperar el poll de 12s y sin tapear un board cerrado.
+    // Sin PII: SOLO tripId + driverId. Best-effort/cosmético (post-durable): un fallo del emit NO afecta el
+    // match ya materializado; el poll de 12s del conductor es el backstop. Un perdedor que ya recibió un
+    // offer_withdrawn (p.ej. reason=stale en un accept previo fallido) dedupea acá por la MISMA clave.
+    await Promise.all(
+      losers.map((loser) =>
+        this.emit(
+          'dispatch.offer_withdrawn',
+          tripId,
+          { tripId, driverId: loser.driverId, reason: OFFER_WITHDRAWN_REASON.NOT_SELECTED },
+          dedupOfferWithdrawn(tripId, loser.driverId, board.negotiationSeq),
+        ).catch((err: unknown) =>
+          this.logger.warn(
+            `offer_withdrawn (not_selected) trip=${tripId} driver=${loser.driverId}: ${String(err)}`,
+          ),
+        ),
+      ),
+    );
+
     // markBusy se mantiene acá (Lote separado): el claim atómico ya garantiza que solo este camino
     // llega hasta acá, así que no hay carrera de doble-markBusy para este board.
     await this.hotIndex.markBusy(driverId);
-    domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'published' });
-    domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'published' });
     this.logger.log(`board trip=${tripId} CLOSED_MATCHED → driver=${driverId}`);
     return { ...chosen, status: OfferStatus.ACCEPTED };
   }
@@ -643,11 +833,18 @@ export class OfferBoardService {
    *    CLOSED_MATCHED o ausente (GONE), `offers = []` — nunca ofertas zombies de una puja ya muerta (el
    *    pasajero no debe poder aceptar sobre un board cerrado; el accept-guard las rechazaría igual).
    */
-  async getOffersView(tripId: string): Promise<OffersView> {
+  async getOffersView(tripId: string, passengerId: string): Promise<OffersView> {
     const board = await this.store.getBoard(tripId);
     if (!board) {
       // La key del board ya no existe en Redis (TTL): la puja se evaporó. GONE + sin ofertas.
+      // El guard de ownership va DESPUÉS de este check a propósito: un board evaporado no tiene
+      // passengerId que comparar y devolver GONE no leakea NADA (no expone ofertas ni estado ajeno).
       return { board: { status: ClientBoardStatus.GONE, expiresAt: null }, offers: [] };
+    }
+    // CAPA 2 (defensa en profundidad anti-IDOR): solo el dueño de la puja ve sus ofertas. Va tras el
+    // check GONE (ese ya no tiene ancla de ownership) y antes de exponer cualquier oferta del board.
+    if (board.passengerId !== passengerId) {
+      throw new ForbiddenError('El viaje no pertenece al pasajero', { tripId });
     }
     // Solo un board OPEN expone ofertas elegibles; cualquier otro estado → [] (no zombies).
     const offers =
@@ -655,6 +852,38 @@ export class OfferBoardService {
         ? (await this.store.listOffers(tripId)).filter((o) => o.status === OfferStatus.PENDING)
         : [];
     return { board: { status: board.status, expiresAt: board.expiresAt }, offers };
+  }
+
+  /**
+   * Fase B (ADR-021 · B-react) — el conductor pasó a OFFLINE (`driver.went_offline`): RETIRA todas sus
+   * ofertas OPEN vivas de los boards para que su card desaparezca REACTIVA del board del pasajero, sin
+   * esperar el gate de accept (cierre #6) ni el TTL. Recorre los boards OPEN (los únicos que colectan
+   * ofertas) y, por cada uno con una oferta PENDING del conductor, la marca STALE + emite
+   * `dispatch.offer_withdrawn` (reason=stale) — el MISMO camino que la oferta-rancia del accept, reusado.
+   * Idempotente por (trip, driver, ciclo) vía `dedupOfferWithdrawn`; best-effort: un conductor sin ofertas
+   * abiertas es no-op y un fallo de un emit se loguea sin abortar el resto. Devuelve el #ofertas retiradas.
+   */
+  async withdrawDriverOffers(driverId: string): Promise<number> {
+    const boards = await this.store.listOpenBoards(Date.now());
+    let withdrawn = 0;
+    for (const board of boards) {
+      const offer = await this.store.getOffer(board.tripId, driverId);
+      if (!offer || offer.status !== OfferStatus.PENDING) continue;
+      await this.store.setOfferStatus(board.tripId, driverId, OfferStatus.STALE);
+      await this.emit(
+        'dispatch.offer_withdrawn',
+        board.tripId,
+        { tripId: board.tripId, driverId, reason: OFFER_WITHDRAWN_REASON.STALE },
+        dedupOfferWithdrawn(board.tripId, driverId, board.negotiationSeq),
+      ).catch((err: unknown) =>
+        this.logger.warn(
+          `offer_withdrawn (offline) trip=${board.tripId} driver=${driverId}: ${String(err)}`,
+        ),
+      );
+      withdrawn++;
+      this.logger.log(`conductor offline: oferta trip=${board.tripId} driver=${driverId} → STALE`);
+    }
+    return withdrawn;
   }
 
   /**
@@ -672,19 +901,55 @@ export class OfferBoardService {
     await this.eligibility.assertEligibleToOffer(driverId, loc.vehicleType);
 
     const center = toH3({ lat: loc.lat, lon: loc.lon }, DISPATCH_H3_RESOLUTION);
-    // Mismo radio que el broadcast, leído en RUNTIME (config editable por el admin, cacheado).
-    const { matchKRing } = await this.radiusConfig.getKRings();
-    const cells = neighbors(center, matchKRing);
+    // MISMO radio que el broadcast (paridad conductor↔difusión: un conductor debe VER en su poll los boards
+    // que se le difundirían). v2 → broadcastRadiusKm; v1 → matchKRing.
+    const cells = neighbors(center, await this.resolveBroadcastKRing());
     // A3/H11 — índice inverso celda→board: trae SOLO los boards cuyo ORIGEN cae en el k-ring del conductor
     // (ZRANGEBYSCORE `board:cell:<c>` <now>..+inf + MGET de ESOS candidatos), no TODOS los OPEN del
     // platform-wide. El costo del poll pasa de O(total open boards) a O(boards en el k-ring). El ZSET ya
     // pre-excluye los vencidos por score y poda los muertos por TTL; el filtro en Node es belt-and-suspenders
     // sobre ese conjunto ACOTADO: OPEN + ventana viva + vehículo.
     const now = Date.now();
+    const currentYear = new Date().getUTCFullYear();
     const candidates = await this.store.boardsInCells(cells);
     return candidates.filter(
       (b) =>
-        b.status === BoardStatus.OPEN && b.expiresAt > now && b.vehicleType === loc.vehicleType,
+        b.status === BoardStatus.OPEN &&
+        b.expiresAt > now &&
+        b.vehicleType === loc.vehicleType &&
+        // B5-3 — además del vehicleType, el board debe cumplir los `requires` de SU oferta para que el
+        // conductor lo vea/poll-ee: un tier inferior NO debe encontrar boards de tier superior. Misma
+        // semántica del pool/gate (certs fail-closed, attrs fail-open).
+        this.boardMeetsRequires(b.category, loc, currentYear),
+    );
+  }
+
+  /**
+   * B5-3 — ¿el conductor (`loc` del hot-index) satisface los `requires` de la oferta del board? Espeja
+   * `DriverPool.passesEligibility` y la rama de tier del `EligibilityGate`: certs FAIL-CLOSED (una vertical
+   * exige credencial válida), attrs del vehículo (seats/segment/año) FAIL-OPEN (un ping legacy sin attrs NO
+   * se excluye, para no romper el rollout). Category ausente/desconocida ⇒ sin requires ⇒ true (solo filtra
+   * por vehicleType, como antes). Es un filtro de VISIBILIDAD/ruido; el gate de submit/accept re-valida igual.
+   */
+  private boardMeetsRequires(
+    category: string | undefined,
+    loc: DriverLocation,
+    currentYear: number,
+  ): boolean {
+    const requires: OfferingRequirements | undefined = category
+      ? findOffering(category)?.requires
+      : undefined;
+    if (!requires) return true;
+    // Certs: FAIL-CLOSED — se evalúa SIEMPRE (independiente de los attrs del vehículo).
+    if (!hasRequiredCertifications(requires, loc.certifications)) return false;
+    // Attrs del vehículo: FAIL-OPEN — sin el dato (legacy) no se restringe.
+    if (loc.seats === undefined || loc.segment === undefined || loc.vehicleYear === undefined) {
+      return true;
+    }
+    return isVehicleEligibleForOffering(
+      requires,
+      { seats: loc.seats, segment: loc.segment, year: loc.vehicleYear },
+      currentYear,
     );
   }
 
@@ -713,16 +978,82 @@ export class OfferBoardService {
    * LIMPIEZA: al cancelar purgamos también el HASH de ofertas (clearOffers) — hasta hoy solo se limpiaba en
    * openBoard/reopenBoard, dejando ofertas PENDING colgadas en Redis tras un cancel (zombies hasta su TTL).
    */
-  async cancelBoard(tripId: string, opts: { emitClosure?: boolean } = {}): Promise<void> {
+  /**
+   * Camino del PASAJERO (HTTP, public-rail): cancela la puja anclada a SU ownership (anti-IDOR, CAPA 2).
+   * `passengerId` viene de la identidad FIRMADA; el board debe pertenecerle o se rechaza con 403.
+   */
+  async cancelBoard(
+    tripId: string,
+    passengerId: string,
+    opts?: { emitClosure?: boolean },
+  ): Promise<void>;
+  /**
+   * Camino de SISTEMA (autoridad del viaje, p.ej. consumo de `trip.cancelled`): el trip ya murió por otra
+   * vía → el board muere SIEMPRE, sin ancla de ownership (un evento de dominio interno no es forjable).
+   */
+  async cancelBoard(tripId: string, opts: { system: true; emitClosure?: boolean }): Promise<void>;
+  async cancelBoard(
+    tripId: string,
+    ownerOrOpts: string | { system: true; emitClosure?: boolean },
+    maybeOpts: { emitClosure?: boolean } = {},
+  ): Promise<void> {
+    // Discrimina los dos llamadores SIN `any`: un string → camino del pasajero (con guard de ownership);
+    // un objeto `{ system: true }` → camino de sistema (sin guard, el board muere por autoridad del viaje).
+    const system = typeof ownerOrOpts !== 'string';
+    const passengerId = system ? null : ownerOrOpts;
+    const opts = system ? ownerOrOpts : maybeOpts;
+
+    // CAPA 2 (defensa en profundidad anti-IDOR): en el camino del PASAJERO, SI el board existe solo su dueño
+    // puede cancelarlo — un pasajero ajeno NO cancela la puja de otro. SI el board ya se evaporó por TTL
+    // (board null), NO hay ancla de ownership que validar: NO tiramos error y seguimos al cancelIfOpen/
+    // emitClosure tal cual (preserva el caso "cancelo a 95s": cancelIfOpen devuelve false pero con
+    // emitClosure=true el cierre del viaje se emite igual). LÍMITE RESIDUAL: un board efímero sin ancla
+    // tras TTL queda cubierto por CAPA 1 (AudienceGuard public-rail) + la autoridad DURABLE de trip-service
+    // (cancelFromBid guard-ea por estado: solo cierra desde REQUESTED/REASSIGNING). El camino de SISTEMA
+    // (`system:true`) salta el guard a propósito: el trip ya murió y el board debe morir sin importar dueño.
+    if (!system) {
+      const board = await this.store.getBoard(tripId);
+      if (board && board.passengerId !== passengerId) {
+        throw new ForbiddenError('El viaje no pertenece al pasajero', { tripId });
+      }
+    }
     const cancelled = await this.store.cancelIfOpen(tripId);
     if (cancelled) {
+      // GAP #1 (2026-07-15) — NOTIFICAR a los conductores que ofertaron que la puja se canceló. Capturamos
+      // las ofertas PENDING ANTES de limpiarlas: sin esto, `cancelBoard` solo hacía `clearOffers` (server-
+      // side) y NINGÚN evento llegaba al conductor → su BidCard/"Esperando al pasajero…" sobrevivía hasta el
+      // poll de 12s y un tap tardío daba 409. Emitimos un `dispatch.offer_withdrawn` (reason=cancelled) por
+      // conductor → driver-bff lo empuja como `bid:closed` → la app quita la card AL INSTANTE. Es el MISMO
+      // patrón de sweepExpired (stale)/acceptOffer (not_selected)/withdrawDriverOffers (offline).
+      const pending = (await this.store.listOffers(tripId)).filter(
+        (o) => o.status === OfferStatus.PENDING,
+      );
       // Higiene: el board se canceló → ninguna oferta de esta ventana debe sobrevivir en el HASH.
       await this.store
         .clearOffers(tripId)
         .catch((err) =>
           this.logger.warn(`clearOffers (cancel) trip=${tripId} falló: ${String(err)}`),
         );
-      this.logger.log(`board trip=${tripId} CANCELLED por el pasajero`);
+      // dedup por (trip,driver,'cancelled'): el HTTP-cancel del pasajero y el system-cancel (trip.cancelled)
+      // corren para el MISMO viaje → el 2º no encuentra ofertas (ya limpias) y `cancelIfOpen` da false, pero
+      // el dedup lo blinda igual ante re-entregas concurrentes. Sin PII (solo ids); best-effort (poll respalda).
+      await Promise.all(
+        pending.map((offer) =>
+          this.emit(
+            'dispatch.offer_withdrawn',
+            tripId,
+            { tripId, driverId: offer.driverId, reason: OFFER_WITHDRAWN_REASON.CANCELLED },
+            dedupOfferWithdrawn(tripId, offer.driverId, 'cancelled'),
+          ).catch((err: unknown) =>
+            this.logger.warn(
+              `offer_withdrawn (cancelled) trip=${tripId} driver=${offer.driverId}: ${String(err)}`,
+            ),
+          ),
+        ),
+      );
+      this.logger.log(
+        `board trip=${tripId} CANCELLED por el pasajero (${pending.length} ofertas retiradas)`,
+      );
     }
     // Cierre del VIAJE (no solo del board): SIEMPRE que el llamador sea el cancel de la PUJA del pasajero,
     // aunque el board ya no exista (TTL) o ya estuviera cerrado — el trip puede seguir REQUESTED. El evento
@@ -771,6 +1102,14 @@ export class OfferBoardService {
       }
       // Ganamos el CAS: nosotros marcamos EXPIRED → solo nosotros emitimos no_offers.
       const reason = res.offerCount > 0 ? 'all_lapsed' : 'window_expired';
+      // ADR-020 Lote 2 (2a, follow-up del boot-real) — captura las ofertas PENDING ANTES del lapse para
+      // NOTIFICAR a esos conductores que su puja se cerró. Sin esto, un conductor que ofertó y quedó en
+      // "Esperando al pasajero…" NO se enteraba al vencer el board (el offer_withdrawn solo se emitía al
+      // ACEPTAR, no al expirar) → su estado pendiente quedaba STALE y bloqueaba re-ofertar el mismo viaje.
+      const pending =
+        res.offerCount > 0
+          ? (await this.store.listOffers(tripId)).filter((o) => o.status === OfferStatus.PENDING)
+          : [];
       // A5 — caduca TODAS las PENDING en UN solo round-trip (winner=null, sin ganador en el barrido),
       // en vez de N×setOfferStatus. Best-effort/cosmético (H7): no toca el board ni el outbox.
       await this.store
@@ -778,6 +1117,27 @@ export class OfferBoardService {
         .catch((err) =>
           this.logger.warn(`lapseAndAccept (sweep) trip=${tripId} falló: ${String(err)}`),
         );
+      // UN `dispatch.offer_withdrawn` (reason=stale: la ventana cerró sin selección) POR conductor con
+      // oferta pendiente → driver-bff lo empuja como `bid:closed` → la app limpia el "esperando" y la card.
+      // Idempotente por (trip,driver); sin PII (solo tripId+driverId); best-effort (el poll de 12s respalda).
+      await Promise.all(
+        pending.map((offer) =>
+          this.emit(
+            'dispatch.offer_withdrawn',
+            tripId,
+            { tripId, driverId: offer.driverId, reason: OFFER_WITHDRAWN_REASON.STALE },
+            dedupOfferWithdrawn(
+              tripId,
+              offer.driverId,
+              res.windowEpoch !== null ? String(res.windowEpoch) : 'gone',
+            ),
+          ).catch((err: unknown) =>
+            this.logger.warn(
+              `offer_withdrawn (stale/sweep) trip=${tripId} driver=${offer.driverId}: ${String(err)}`,
+            ),
+          ),
+        ),
+      );
       // La dedupKey se ata a la ventana del board (windowEpoch = expiresAt, devuelto por el Lua). Un
       // reopen abre otra ventana → otro epoch → un no_offers legítimo posterior no queda deduplicado.
       await this.expire(
@@ -819,15 +1179,11 @@ export class OfferBoardService {
     // indexada en un Map por `tripId|driverId`. Dentro del loop leemos del Map → CERO queries por iteración.
     // La semántica #11 queda IDÉNTICA: si el Map no tiene precio durable para el (trip,driver) → SKIP
     // (no se fabrica precio, no se marca matchEmitted). El precio NUNCA sale del board/oferta efímeros.
-    const accepted = await this.prisma.read.dispatchMatch.findMany({
-      where: {
-        outcome: DispatchOutcome.ACCEPTED,
-        OR: pending
-          .filter((b) => b.acceptedDriverId)
-          .map((b) => ({ tripId: b.tripId, driverId: b.acceptedDriverId })),
-      },
-      select: { tripId: true, driverId: true, agreedPriceCents: true },
-    });
+    const accepted = await this.repo.findAcceptedMatches(
+      pending
+        .filter((b): b is OfferBoard & { acceptedDriverId: string } => b.acceptedDriverId !== undefined)
+        .map((b) => ({ tripId: b.tripId, driverId: b.acceptedDriverId })),
+    );
     const priceByTripDriver = new Map<string, number | null>(
       accepted.map((m) => [`${m.tripId}|${m.driverId}`, m.agreedPriceCents]),
     );
@@ -854,11 +1210,14 @@ export class OfferBoardService {
           `N5 reconciliador: SKIP trip=${board.tripId} driver=${driverId} — sin DispatchMatch ACCEPTED ` +
             `con agreedPriceCents persistido (no se fabrica precio; se reintenta luego)`,
         );
-        domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'skipped' });
+        domainEventsTotal.inc({
+          event: 'dispatch.offer_accepted',
+          result: BusinessEventResult.SKIPPED,
+        });
         continue;
       }
       try {
-        await this.prisma.write.$transaction(async (tx) => {
+        await this.repo.runInTx(async (tx) => {
           const acceptedDedup = dedupOfferAccepted(board.tripId, driverId);
           const accepted = createEnvelope({
             eventType: 'dispatch.offer_accepted',
@@ -908,8 +1267,14 @@ export class OfferBoardService {
         );
       }
       await this.store.markMatchEmitted(board.tripId);
-      domainEventsTotal.inc({ event: 'dispatch.offer_accepted', result: 'reconciled' });
-      domainEventsTotal.inc({ event: 'dispatch.match_found', result: 'reconciled' });
+      domainEventsTotal.inc({
+        event: 'dispatch.offer_accepted',
+        result: BusinessEventResult.RECONCILED,
+      });
+      domainEventsTotal.inc({
+        event: 'dispatch.match_found',
+        result: BusinessEventResult.RECONCILED,
+      });
       this.logger.warn(
         `N5 reconciliador: re-emitido match_found trip=${board.tripId} driver=${driverId} (residual hard-crash)`,
       );
@@ -957,7 +1322,7 @@ export class OfferBoardService {
       dedupKey,
     });
     try {
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         await tx.outboxEvent.create({
           data: {
             aggregateId,
@@ -978,6 +1343,5 @@ export class OfferBoardService {
       );
       return;
     }
-    domainEventsTotal.inc({ event: eventType, result: 'published' });
   }
 }

@@ -101,7 +101,7 @@ export function PaymentScreen(): React.JSX.Element {
             />
           </EnterView>
           <EnterView delay={200}>
-            <Card variant="outlined" padding="lg">
+            <Card variant="elevated" padding="lg">
               {/* Desglose real del pago (datos del PaymentView): tarifa acordada (grossCents),
                   propina (tipCents) y total (amountCents). La propina solo se muestra si la hubo. */}
               <View style={styles.breakdownRow}>
@@ -190,12 +190,22 @@ export function PaymentScreen(): React.JSX.Element {
         />
       ) : null}
 
+      {/* Confirmación de efectivo fallida (`/payments/:id/cash/confirm`): antes el toque quedaba mudo
+          (spinner que vuelve sin nada). Banner honesto → el mismo botón "Confirmar efectivo" reintenta. */}
+      {confirmMutation.isError ? (
+        <Banner
+          tone="danger"
+          title={t('payments.cashConfirmError')}
+          style={{marginTop: theme.spacing.md}}
+        />
+      ) : null}
+
       <Text
         variant="title3"
         style={{marginTop: theme.spacing.xl, marginBottom: theme.spacing.sm}}>
         {t('payments.methodsTitle')}
       </Text>
-      <Card variant="outlined" padding="sm">
+      <Card variant="elevated" padding="sm">
         {PAYMENT_METHODS.map(item => (
           <ListItem
             key={item}

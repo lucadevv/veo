@@ -211,7 +211,7 @@ export function BottomSheet({
         >
           {showHandle ? (
             <View {...panResponder.panHandlers} style={styles.handleArea}>
-              <View style={[styles.handle, { backgroundColor: theme.colors.borderStrong }]} />
+              <View style={[styles.handle, { backgroundColor: theme.colors.accent }]} />
             </View>
           ) : null}
 
@@ -255,7 +255,8 @@ const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFill },
   sheet: { width: '100%' },
   handleArea: { alignItems: 'center', paddingVertical: 10 },
-  handle: { width: 40, height: 5, borderRadius: 999 },
+  // 36×4 como el handle canónico del pen (C/DraggableSheet): mismo en todos los sheets.
+  handle: { width: 36, height: 4, borderRadius: 999 },
   title: { paddingHorizontal: 20, paddingBottom: 8 },
   // flexShrink permite que el ScrollView ceda altura dentro del `maxHeight` del sheet y scrollee;
   // sin esto el cuerpo intentaría crecer con el contenido y empujaría el sheet fuera de pantalla.

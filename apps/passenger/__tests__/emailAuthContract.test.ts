@@ -7,14 +7,10 @@ import {
   emailVerify,
   mobileAuthTokens,
 } from '@veo/api-client';
-import {
-  isValidEmail,
-  isValidPassword,
-} from '../src/features/auth/presentation/hooks/useEmailAuthFlow';
 
 /**
- * Contrato de auth por correo (ADR-012) + validadores de borde de la UI. El schema es la fuente de
- * verdad: el cliente debe enviar/parsear EXACTAMENTE estas formas contra el public-bff.
+ * Contrato de auth por correo (ADR-012). El schema es la fuente de verdad: el cliente debe
+ * enviar/parsear EXACTAMENTE estas formas contra el public-bff.
  */
 describe('Contrato auth por correo (@veo/api-client)', () => {
   it('emailRegister exige password ≥ 12 y type válido; name es opcional', () => {
@@ -92,19 +88,5 @@ describe('Contrato auth por correo (@veo/api-client)', () => {
       },
     });
     expect(parsed.success).toBe(true);
-  });
-});
-
-describe('Validadores de borde de la UI (useEmailAuthFlow)', () => {
-  it('isValidEmail acepta correos bien formados y rechaza los demás', () => {
-    expect(isValidEmail('ana@veo.pe')).toBe(true);
-    expect(isValidEmail('  ana@veo.pe  ')).toBe(true);
-    expect(isValidEmail('ana@')).toBe(false);
-    expect(isValidEmail('sin-arroba')).toBe(false);
-  });
-
-  it('isValidPassword exige al menos 12 caracteres (ADR-012 §4)', () => {
-    expect(isValidPassword('x'.repeat(12))).toBe(true);
-    expect(isValidPassword('x'.repeat(11))).toBe(false);
   });
 });

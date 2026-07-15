@@ -1,24 +1,12 @@
 import {useQuery} from '@tanstack/react-query';
 import {useEffect, useRef} from 'react';
+import {isVerificationBypassed} from '../../../../core/config/env';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {
-  useBiometricGateStore,
-  useProfileLocalStore,
-} from '../../../auth/presentation';
+import {useProfileLocalStore} from '../../../auth/presentation';
 import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymentPrefsStore';
-
-/**
- * Clave de caché del perfil real del pasajero (`GET /users/me`), AISLADA por `userId`.
- *
- * Incluir el `userId` evita una ventana de staleness entre cuentas: si un usuario cierra sesión y
- * otro entra (o se rehidrata otra sesión), su perfil cacheado NO se confunde con el del usuario
- * anterior. Las invalidaciones amplias (`['profile']`) siguen casando por prefijo.
- */
-export function profileQueryKey(userId: string | null) {
-  return ['profile', 'me', userId] as const;
-}
+import {profileQueryKey} from '../../domain/queryKeys';
 
 /** Estado de completitud del perfil con el que el `RootNavigator` decide el stack. */
 export type ProfileCompletion = 'loading' | 'complete' | 'incomplete';
@@ -52,7 +40,6 @@ function hasRealName(name: string | null | undefined): boolean {
 export function useProfileCompletion(): ProfileCompletion {
   const userId = useSessionStore(state => state.user?.id ?? null);
   const status = useSessionStore(state => state.status);
-  const biometricLocked = useBiometricGateStore(state => state.locked);
 
   const hydrateUser = useProfileLocalStore(state => state.hydrateUser);
   const completedLocally = useProfileLocalStore(state =>
@@ -68,8 +55,7 @@ export function useProfileCompletion(): ProfileCompletion {
 
   const getProfile = useDependency(TOKENS.getProfileUseCase);
 
-  const active =
-    status === 'authenticated' && !biometricLocked && Boolean(userId);
+  const active = status === 'authenticated' && Boolean(userId);
   const query = useQuery({
     queryKey: profileQueryKey(userId),
     queryFn: () => getProfile.execute(),
@@ -102,6 +88,11 @@ export function useProfileCompletion(): ProfileCompletion {
     }
   }, [query.data, userId]);
 
+  // BYPASS local (solo dev, ver `isVerificationBypassed`): saltea CompleteProfile → la app entra directo.
+  // Va DESPUÉS de todos los hooks (arriba) para no romper rules-of-hooks; el flag es constante en runtime.
+  if (isVerificationBypassed) {
+    return 'complete';
+  }
   if (!active) {
     return 'loading';
   }

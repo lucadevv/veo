@@ -40,7 +40,6 @@ export {
 } from './components/CheckoutInstructions';
 export {
   useYapeAffiliation,
-  useIsYapeAutoActive,
   YAPE_AFFILIATION_QUERY_KEY,
 } from './hooks/useYapeAffiliation';
 export {

@@ -54,6 +54,20 @@ export function boundsOf(positions: ReadonlyArray<[number, number]>): LngLatBoun
   return { ne: [acc.maxLng, acc.maxLat], sw: [acc.minLng, acc.minLat] };
 }
 
+/** Radio terrestre medio en metros (esfera WGS-84 aproximada, suficiente a escala urbana). */
+const EARTH_RADIUS_M = 6371000;
+
+/** Distancia gran-círculo (haversine) entre dos puntos, en metros. */
+export function distanceMeters(a: GeoPoint, b: GeoPoint): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}
+
 /** True si el punto está dentro del bounding box de Lima Metropolitana. */
 export function isWithinLima(point: GeoPoint): boolean {
   return (

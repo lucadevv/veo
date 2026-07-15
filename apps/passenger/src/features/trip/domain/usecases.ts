@@ -146,20 +146,6 @@ export class CancelTripUseCase {
   }
 }
 
-/** Cambia el destino del viaje en curso (debe estar dentro de Lima). */
-export class ChangeDestinationUseCase {
-  constructor(private readonly repository: TripRepository) {}
-
-  execute(tripId: string, destination: GeoPoint): Promise<TripResource> {
-    if (!isWithinLima(destination)) {
-      throw new TripValidationError(
-        'Fuera de Lima Metropolitana',
-        'OUTSIDE_LIMA',
-      );
-    }
-    return this.repository.changeDestination(tripId, destination);
-  }
-}
 
 /**
  * Obtiene el token viewer del habitáculo. El bff responde 403/404 cuando no hay video (LiveKit no

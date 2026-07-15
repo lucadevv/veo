@@ -15,17 +15,28 @@ import type { DriverLocation, DriverVehicleAttrs, HotIndex } from './hot-index.p
 const LOC_PREFIX = 'driver:loc:';
 const BUSY_PREFIX = 'driver:busy:';
 const AVAIL_PREFIX = 'h3:available:';
+/// A2 (ADR-021 Fase A) — clave del CLAIM SÍNCRONO per-conductor: `driver:claim:{id}` → tripId que lo posee.
+const CLAIM_PREFIX = 'driver:claim:';
 /// Margen amplio para el flag de ocupado; se limpia explícitamente al completar/cancelar el viaje.
 const BUSY_TTL_SECONDS = 7_200;
-/// Tamaño de página del SCAN para contar locs vivas: lotes grandes ⇒ menos round-trips, sin bloquear Redis.
-const ONLINE_SCAN_COUNT = 1_000;
+/**
+ * ÍNDICE DE PRESENCIA (ZSET) para el KPI "conductores en línea": member = driverId, score = epoch(ms) del
+ * último ping. `countOnline` = ZCOUNT dentro de la ventana TTL → O(log n), en vez del viejo `SCAN MATCH
+ * driver:loc:*` que barría TODO el keyspace por llamada (y el admin lo repollea cada 15s × dashboard).
+ * `driver:loc:{id}` sigue siendo la FUENTE de la posición (con su TTL); este ZSET es SOLO el índice para
+ * contar/listar presencia rápido. Consistencia: si `driver:loc:{id}` expira pero el ZSET aún no se podó, el
+ * score viejo cae FUERA de la ventana → ZCOUNT lo excluye igual (el borde de la ventana === el TTL de la loc).
+ */
+const ONLINE_ZSET_KEY = 'drivers:online';
 
 /**
- * KEYS[1]=set celda vieja, KEYS[2]=set celda nueva, KEYS[3]=loc, KEYS[4]=busy
- * ARGV[1]=driverId, ARGV[2]=locJson, ARGV[3]=ttl(s)
+ * KEYS[1]=set celda vieja, KEYS[2]=set celda nueva, KEYS[3]=loc, KEYS[4]=busy, KEYS[5]=zset presencia
+ * ARGV[1]=driverId, ARGV[2]=locJson, ARGV[3]=ttl(s), ARGV[4]=now(ms) (score de presencia = loc.updatedAt)
  * Devuelve 1 si quedó en el pool disponible, 0 si está ocupado (solo refresca loc).
+ * El ZADD al índice de presencia va SIEMPRE (disponible O ocupado: ambos están EN LÍNEA).
  */
 const MOVE_SCRIPT = `
+redis.call('ZADD', KEYS[5], ARGV[4], ARGV[1])
 local busy = redis.call('EXISTS', KEYS[4])
 if KEYS[1] ~= KEYS[2] then
   redis.call('SREM', KEYS[1], ARGV[1])
@@ -37,6 +48,22 @@ end
 redis.call('SADD', KEYS[2], ARGV[1])
 redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[3])
 return 1
+`;
+
+/**
+ * A2 (ADR-021 Fase A) — CLAIM ATÓMICO per-conductor. KEYS[1]=claim key, ARGV[1]=tripId, ARGV[2]=ttl(s).
+ * SET NX: si la key NO existe, la crea (claim nuevo) → 1. Si existe y es del MISMO tripId (redelivery/
+ * retry del MISMO accept), refresca el TTL y devuelve 1 (idempotente). Si existe de OTRO viaje → 0
+ * (el conductor ya ganó en otro board). Atómico: cierra el TOCTOU entre el SET NX y la lectura del dueño.
+ */
+const CLAIM_SCRIPT = `
+local ok = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2])
+if ok then return 1 end
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0
 `;
 
 export class RedisHotIndex implements HotIndex {
@@ -54,6 +81,9 @@ export class RedisHotIndex implements HotIndex {
   private availKey(cell: string): string {
     return `${AVAIL_PREFIX}${cell}`;
   }
+  private claimKey(id: string): string {
+    return `${CLAIM_PREFIX}${id}`;
+  }
 
   async upsertLocation(
     driverId: string,
@@ -62,32 +92,78 @@ export class RedisHotIndex implements HotIndex {
     attrs?: DriverVehicleAttrs,
   ): Promise<DriverLocation> {
     const h3 = toH3(point, DISPATCH_H3_RESOLUTION);
+    // RMW best-effort: leemos `prev` FUERA del LUA y mergeamos los attrs en Node (abajo). Es seguro porque
+    // los pings de UN conductor se SERIALIZAN aguas arriba: el firehose se particiona por driverId
+    // (location-publisher emite con key=driverId) → un mismo conductor cae SIEMPRE en la misma partición, y
+    // kafkajs procesa CADA partición SERIAL aunque el consumer suba partitionsConsumedConcurrently>1 (Lote 3:
+    // solo corren en paralelo particiones DISTINTAS = conductores DISTINTOS) → no hay dos upsert del mismo
+    // driver concurrentes. Si ese invariante NO-local cambiara (otro productor sin esa key, un caller no-Kafka,
+    // o un particionado que NO fuera por driverId), la lectura podría quedar stale y un ping pisaría
+    // un attr recién llegado — transitorio (fail-open + self-heal al próximo ping), pero ahí habría que mover
+    // el merge DENTRO del LUA (leer la loc viva en el script y mergear los attrs ausentes). Gate `wkege7nth` (BAJA).
     const prev = await this.getLocation(driverId);
     const oldCell = prev?.h3 ?? h3;
+    // ANTI-CLOBBER del gate de tier (B5-3), llaveado ESTRICTO por la IDENTIDAD del vehículo (vehicleId).
+    // Los attrs del modelSpec (seats/segment/año) viajan en el ping, pero un ping puede llegar SIN ellos
+    // (modelo sin attrs en catálogo, o fleet 204/outage). Si solo escribiéramos lo que trae el ping, ese ping
+    // degradado SOBREESCRIBIRÍA (SET total del LUA) los attrs BUENOS ya indexados → el gate de tier se
+    // auto-desarmaría aunque la flota esté desplegada con attrs. Por eso, cuando el ping omite un attr, lo
+    // PRESERVAMOS del ping previo — pero SOLO si es EL MISMO VEHÍCULO, probado por vehicleId. Un ping que SÍ
+    // trae el attr lo pisa (re-resolución del modelo del mismo vehículo).
+    //
+    // POR QUÉ vehicleId y NO vehicleType (gate wkrozhaf6): vehicleType (VehicleClass) es la CLASE, no la
+    // identidad — un van XL 7-asientos y un económico 5-asientos son AMBOS VehicleClass.CAR. Un guard por clase
+    // NO distingue un swap intra-clase (CAR→CAR distinto): bajo fail-closed haría que el económico HEREDE los
+    // attrs STALE del XL y PASE el gate estricto. El carry por identidad lo cierra: id distinto ⇒ no es el mismo
+    // vehículo ⇒ no se arrastra (el swap degrada honesto, sin attrs ⇒ el pool decide por su política, no miente).
+    //
+    // SIN FALLBACK por vehicleType (landmine d.1 · ADR-017 §5(d)): si el ping NO trae vehicleId, NO hay carry.
+    // El viejo fallback `prev.vehicleType === vehicleType` era el landmine — afirmaba "mismo vehículo" sin poder
+    // probarlo. No existe el caso "app legacy": el vehicleId lo sella el driver-bff SERVER-AUTHORITATIVE desde
+    // fleet (no el cliente), y es ausente IFF los attrs también lo son (MISMA rama del resolver: fleet 204/outage
+    // ⇒ ni id ni attrs). Por eso "sin vehicleId" ⇒ el ping tampoco trae attrs ⇒ el único efecto del fallback
+    // sería arrastrar attrs STALE de un vehículo que NO podemos confirmar. Soltarlo da CERO stale: el conductor
+    // degrada honesto (self-heal al próximo ping que reselle la identidad). El anti-clobber SOUND (mismo
+    // vehicleId, ping sin attrs porque el catálogo no los aporta) SOBREVIVE intacto. Espejado en in-memory.
+    const sameVehicle = attrs?.vehicleId !== undefined && prev?.vehicleId === attrs.vehicleId;
+    const carry = sameVehicle ? prev : undefined;
+    const seats = attrs?.seats ?? carry?.seats;
+    const segment = attrs?.segment ?? carry?.segment;
+    const vehicleYear = attrs?.vehicleYear ?? carry?.vehicleYear;
     const loc: DriverLocation = {
       driverId,
       lat: point.lat,
       lon: point.lon,
       h3,
       vehicleType,
-      // B5-3 · attrs de eligibilidad (opcionales): solo se incluyen las claves presentes (un ping sin
-      // ellos no escribe undefined que ensucie el JSON). Si faltan, el pool degrada a "elegible".
-      ...(attrs?.seats !== undefined ? { seats: attrs.seats } : {}),
-      ...(attrs?.segment !== undefined ? { segment: attrs.segment } : {}),
-      ...(attrs?.vehicleYear !== undefined ? { vehicleYear: attrs.vehicleYear } : {}),
+      // IDENTIDAD del vehículo activo: se persiste ESTRICTA del ping (NO se arrastra del carry — afirmar una
+      // identidad que el ping no confirma sería falsearla). Es la key del carry anti-clobber (ver `sameVehicle`).
+      ...(attrs?.vehicleId !== undefined ? { vehicleId: attrs.vehicleId } : {}),
+      // Solo se incluyen las claves PRESENTES (preservadas o del ping) — un attr ausente no escribe
+      // undefined que ensucie el JSON; si nunca hubo valor, el pool degrada a "elegible" (fail-open).
+      ...(seats !== undefined ? { seats } : {}),
+      ...(segment !== undefined ? { segment } : {}),
+      ...(vehicleYear !== undefined ? { vehicleYear } : {}),
+      // CERTS: NO se preservan. Gatean verticales FAIL-CLOSED (ausente = denegado, dirección segura) y su
+      // ciclo de vida es del CONDUCTOR (revocables), no del modelSpec → arrastrar una cert posiblemente
+      // vencida abriría un gate fail-closed. Se toman estrictas del ping; ausente ⇒ inelegible (self-heal
+      // al próximo ping que las traiga). El clobber de certs es la dirección segura, no se corrige.
       ...(attrs?.certifications !== undefined ? { certifications: attrs.certifications } : {}),
       updatedAt: Date.now(),
     };
     await this.redis.eval(
       MOVE_SCRIPT,
-      4,
+      5,
       this.availKey(oldCell),
       this.availKey(h3),
       this.locKey(driverId),
       this.busyKey(driverId),
+      ONLINE_ZSET_KEY,
       driverId,
       JSON.stringify(loc),
       String(this.locTtlSeconds),
+      // score de presencia = el MISMO timestamp de la loc → el borde de la ventana de countOnline === el TTL.
+      String(loc.updatedAt),
     );
     return loc;
   }
@@ -108,12 +184,35 @@ export class RedisHotIndex implements HotIndex {
     await pipeline.exec();
   }
 
+  async tryClaimDriver(driverId: string, tripId: string, ttlSeconds: number): Promise<boolean> {
+    // SET NX atómico (con idempotencia del mismo tripId) vía LUA — ver CLAIM_SCRIPT. 1 keys → la claim key.
+    const res = await this.redis.eval(
+      CLAIM_SCRIPT,
+      1,
+      this.claimKey(driverId),
+      tripId,
+      String(ttlSeconds),
+    );
+    return res === 1;
+  }
+
+  async releaseClaim(driverId: string): Promise<void> {
+    // Idempotente/fail-safe: DEL de una key ausente es no-op (0). Gemelo de markAvailable en el terminal.
+    await this.redis.del(this.claimKey(driverId));
+  }
+
   async remove(driverId: string): Promise<void> {
     const loc = await this.getLocation(driverId);
     const pipeline = this.redis.multi();
     if (loc) pipeline.srem(this.availKey(loc.h3), driverId);
     pipeline.del(this.locKey(driverId));
     pipeline.del(this.busyKey(driverId));
+    // A2 — suelta también el claim per-conductor al salir del índice (fin de turno / offline): sin esto un
+    // claim quedaría colgado hasta el TTL y bloquearía un accept futuro tras reconectar. Fail-safe (no-op si ausente).
+    pipeline.del(this.claimKey(driverId));
+    // Sale del ÍNDICE DE PRESENCIA (fin de turno / offline): sin esto seguiría contando como "en línea"
+    // hasta que su score caiga fuera de la ventana TTL. Espeja el `locations.delete()` de InMemoryHotIndex.
+    pipeline.zrem(ONLINE_ZSET_KEY, driverId);
     await pipeline.exec();
   }
 
@@ -171,24 +270,18 @@ export class RedisHotIndex implements HotIndex {
   }
 
   async countOnline(): Promise<number> {
-    // Conteo por SCAN (cursor, NO `KEYS`/`DBSIZE`): KEYS bloquea el hilo único de Redis en O(N) sobre
-    // TODO el keyspace; SCAN itera en lotes de `ONLINE_SCAN_COUNT` sin bloquear. Contamos las claves
-    // `driver:loc:*` —presencia = "en línea"— en vez de unir los N SETs por celda (esos son solo los
-    // disponibles y dejarían fuera a los ocupados, que siguen online). Un solo barrido, sin N+1.
-    let cursor = '0';
-    let count = 0;
-    do {
-      const [next, keys] = await this.redis.scan(
-        cursor,
-        'MATCH',
-        `${LOC_PREFIX}*`,
-        'COUNT',
-        ONLINE_SCAN_COUNT,
-      );
-      cursor = next;
-      count += keys.length;
-    } while (cursor !== '0');
-    return count;
+    // O(log n) sobre el ÍNDICE DE PRESENCIA (ZSET `drivers:online`), NO un SCAN del keyspace: el viejo
+    // `SCAN MATCH driver:loc:*` era O(keyspace) por llamada (miles de claves loc+busy+h3) y el admin lo
+    // repollea cada 15s × dashboard → M barridos completos. Contamos los que pingaron DENTRO de la ventana
+    // TTL (presencia viva = "en línea", disponible U ocupado — un conductor en viaje sigue online).
+    const cutoff = Date.now() - this.locTtlSeconds * 1_000;
+    // Poda OPORTUNISTA de los muertos (score <= cutoff): acota la memoria del ZSET sin depender de un cron.
+    // La lectura NO depende de esto —el ZCOUNT ya excluye los viejos por ventana—, solo evita el crecimiento
+    // ilimitado por conductores que se fueron offline sin un `remove()` explícito (TTL vencido, no fin de turno).
+    await this.redis.zremrangebyscore(ONLINE_ZSET_KEY, '-inf', cutoff);
+    // Cuenta los vivos: score ESTRICTAMENTE mayor que cutoff (borde exclusivo). Espeja el TTL de la loc:
+    // updatedAt > now - TTL  ⟺  la loc aún no expiró (SET ... 'EX' locTtlSeconds con score = updatedAt).
+    return this.redis.zcount(ONLINE_ZSET_KEY, `(${cutoff}`, '+inf');
   }
 
   /**

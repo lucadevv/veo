@@ -15,8 +15,10 @@ import { REDIS } from './infra/redis';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { VehicleModelsModule } from './vehicle-models/vehicle-models.module';
 import { DocumentsModule } from './documents/documents.module';
+import { EventsModule } from './events/events.module';
 import { InspectionsModule } from './inspections/inspections.module';
 import { FleetGrpcController } from './grpc/fleet.grpc.controller';
+import { FLEET_GRPC_REPO, PrismaFleetGrpcRepository } from './grpc/fleet-grpc.repository';
 
 const readinessProvider: Provider = {
   provide: READINESS_CHECKS,
@@ -45,8 +47,13 @@ const readinessProvider: Provider = {
     VehicleModelsModule,
     DocumentsModule,
     InspectionsModule,
+    EventsModule,
   ],
   controllers: [HealthController, MetricsController, FleetGrpcController],
-  providers: [readinessProvider],
+  // §10: FLEET_GRPC_REPO es el dueño del acceso Prisma del FleetGrpcController (lector cross-feature).
+  providers: [
+    readinessProvider,
+    { provide: FLEET_GRPC_REPO, useClass: PrismaFleetGrpcRepository },
+  ],
 })
 export class AppModule {}

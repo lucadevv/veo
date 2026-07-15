@@ -1,6 +1,14 @@
-import type { GeoPoint } from '@veo/api-client';
+import type { GeoPoint, TripHistoryPage, TripHistoryQuery } from '@veo/api-client';
 import type { TripsRepository } from '../repositories/trips-repository';
-import type { CompleteTripInput, Trip, TripOffer, TripRouteView, TripState } from '../entities';
+import type {
+  CommissionRateView,
+  CompleteTripInput,
+  PendingCash,
+  Trip,
+  TripOffer,
+  TripRouteView,
+  TripState,
+} from '../entities';
 import { parseTripStatus } from '../value-objects/trip-status';
 
 /** Error de validación del código del modo niño (4 a 6 dígitos). */
@@ -58,6 +66,17 @@ export class GetTripStateUseCase {
   constructor(private readonly trips: TripsRepository) {}
   execute(tripId: string): Promise<TripState> {
     return this.trips.getTripState(tripId);
+  }
+}
+
+/**
+ * Caso de uso: una página del HISTORIAL del conductor (cursor keyset). Devuelve `{ items, nextCursor }`;
+ * el llamador re-pide con `nextCursor` hasta que sea `null`. El cursor es opaco (no se parsea).
+ */
+export class GetTripHistoryUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(query?: TripHistoryQuery): Promise<TripHistoryPage> {
+    return this.trips.getTripHistory(query);
   }
 }
 
@@ -173,10 +192,40 @@ export class CompleteTripUseCase {
   }
 }
 
+/**
+ * Caso de uso: confirmar el cobro en EFECTIVO tras completar el viaje (decisión del dueño). `collected=true`
+ * captura el cobro CASH; `false` reporta que no se cobró (discrepancia). El paymentId lo resuelve el BFF.
+ */
+export class ConfirmTripCashUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(tripId: string, collected: boolean): Promise<void> {
+    return this.trips.confirmCash(tripId, collected);
+  }
+}
+
+/**
+ * Caso de uso: cobro en EFECTIVO que el conductor dejó SIN confirmar (force-close post-viaje). Alimenta el
+ * banner del dashboard que persigue la confirmación al reabrir. `null` si no tiene ninguno pendiente.
+ */
+export class GetPendingCashUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(): Promise<PendingCash | null> {
+    return this.trips.getPendingCash();
+  }
+}
+
 /** Caso de uso: cancelar el viaje (actor DRIVER fijado en el BFF). */
 export class CancelTripUseCase {
   constructor(private readonly trips: TripsRepository) {}
   execute(tripId: string, reason?: string): Promise<Trip> {
     return this.trips.cancel(tripId, { reason });
+  }
+}
+
+/** Caso de uso: tasa de comisión ON-DEMAND vigente (panel admin, vía driver-bff). */
+export class GetCommissionRateUseCase {
+  constructor(private readonly trips: TripsRepository) {}
+  execute(): Promise<CommissionRateView> {
+    return this.trips.getCommissionRate();
   }
 }

@@ -30,6 +30,7 @@ module.exports = {
         'family',
         'identity',
         'trip',
+        'booking',
         'dispatch',
         'tracking',
         'media',

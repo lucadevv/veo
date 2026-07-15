@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { UnauthorizedError } from '@veo/utils';
 import { AppleAuthService } from './apple-auth.service';
 import { OAuthLoginService } from './oauth-login.service';
+import { OAuthLoginRepository } from './oauth-login.repository';
 import type { AppleIdentity, GoogleIdentity, OAuthVerifier } from '../ports/oauth/oauth.port';
 
 /**
@@ -180,7 +181,7 @@ function build(identity: AppleIdentity | UnauthorizedError) {
   const verifier = makeVerifier(identity);
   const tokenIssuer = makeTokenIssuer();
   // Flujo OAuth compartido REAL (Lote A2): los dobles quedan solo en los bordes (prisma/verifier/issuer).
-  const oauthLogin = new OAuthLoginService(prisma as never, tokenIssuer as never);
+  const oauthLogin = new OAuthLoginService(new OAuthLoginRepository(prisma as never), tokenIssuer as never);
   const svc = new AppleAuthService(verifier, oauthLogin);
   return { svc, prisma, verifier, tokenIssuer };
 }

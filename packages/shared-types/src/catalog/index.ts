@@ -4,3 +4,5 @@
  */
 export * from './offerings.js';
 export * from './bid-floor.js';
+export * from './vehicle-category.js';
+export * from './vehicle-plate.js';

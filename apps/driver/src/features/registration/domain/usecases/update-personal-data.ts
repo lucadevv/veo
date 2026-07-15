@@ -1,5 +1,6 @@
 import type { RegistrationRepository } from '../repositories/registration-repository';
 import type { PersonalData, PersonalDataInput, PersonalDataView } from '../entities';
+import { MAX_DRIVER_AGE_YEARS, MIN_DRIVER_AGE_YEARS, ageInYears } from './birthdate-age';
 
 /**
  * Código de error de validación por campo de datos personales. El dominio NO conoce i18n: emite
@@ -11,7 +12,9 @@ export type PersonalDataFieldError =
   | 'dni_invalid'
   | 'birthdate_required'
   | 'birthdate_invalid'
-  | 'birthdate_future';
+  | 'birthdate_future'
+  | 'birthdate_underage'
+  | 'birthdate_invalid_age';
 
 /** Errores de validación por campo (los presentes se muestran junto a su campo). */
 export interface PersonalDataErrors {
@@ -63,24 +66,42 @@ export function validatePersonalData(personal: PersonalData): PersonalDataValida
   return { ok: true, request: { legalName, dni, birthDate: birthDate as string } };
 }
 
+/** Coincide con una fecha ya en formato canónico `yyyy-mm-dd` (la que produce el DateField nativo). */
+const ISO_BIRTH_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
 /**
- * Convierte una fecha escrita como DD/MM/AAAA (con o sin separadores) a `yyyy-mm-dd`. Registra el
- * error correspondiente en `errors.birthdate` y devuelve `null` si no es una fecha real o es futura.
+ * Convierte la fecha de nacimiento del wizard a `yyyy-mm-dd`. Acepta DOS formatos de entrada sin
+ * duplicar la validación de reglas (fecha real, >= MIN_BIRTH_YEAR, no futura):
+ *  - `yyyy-mm-dd` (el DateField nativo ya emite el formato canónico) → se valida igual que el resto.
+ *  - DD/MM/AAAA con o sin separadores (compat. con entrada manual previa / tests existentes).
+ * Registra el error correspondiente en `errors.birthdate` y devuelve `null` si no es válida.
  */
 function toIsoBirthDate(raw: string, errors: PersonalDataErrors): string | null {
-  const digits = digitsOnly(raw);
-  if (digits.length === 0) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
     errors.birthdate = 'birthdate_required';
     return null;
   }
-  if (digits.length !== 8) {
-    errors.birthdate = 'birthdate_invalid';
-    return null;
-  }
 
-  const day = Number(digits.slice(0, 2));
-  const month = Number(digits.slice(2, 4));
-  const year = Number(digits.slice(4, 8));
+  let day: number;
+  let month: number;
+  let year: number;
+
+  const isoMatch = ISO_BIRTH_DATE.exec(trimmed);
+  if (isoMatch) {
+    year = Number(isoMatch[1]);
+    month = Number(isoMatch[2]);
+    day = Number(isoMatch[3]);
+  } else {
+    const digits = digitsOnly(trimmed);
+    if (digits.length !== 8) {
+      errors.birthdate = 'birthdate_invalid';
+      return null;
+    }
+    day = Number(digits.slice(0, 2));
+    month = Number(digits.slice(2, 4));
+    year = Number(digits.slice(4, 8));
+  }
 
   const isRealDate =
     year >= MIN_BIRTH_YEAR &&
@@ -101,6 +122,21 @@ function toIsoBirthDate(raw: string, errors: PersonalDataErrors): string | null 
   )}`;
   if (iso > todayIso) {
     errors.birthdate = 'birthdate_future';
+    return null;
+  }
+
+  // Regla de edad del conductor (BR-I04): debe estar en [18, 100] años cumplidos. Replica el
+  // validador del backend (`is-plausible-birth-date.ts`) para no enviar fechas que rechazaría con
+  // 400. Comparamos a medianoche UTC, igual que el backend, usando el mismo criterio mes/día.
+  const birthUtc = new Date(`${iso}T00:00:00.000Z`);
+  const todayUtc = new Date(`${todayIso}T00:00:00.000Z`);
+  const age = ageInYears(birthUtc, todayUtc);
+  if (age < MIN_DRIVER_AGE_YEARS) {
+    errors.birthdate = 'birthdate_underage';
+    return null;
+  }
+  if (age > MAX_DRIVER_AGE_YEARS) {
+    errors.birthdate = 'birthdate_invalid_age';
     return null;
   }
   return iso;

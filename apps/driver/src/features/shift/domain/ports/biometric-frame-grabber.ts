@@ -1,6 +1,8 @@
 /**
  * Puerto del frame-grabber biométrico: captura REAL de frames JPEG desde la cámara frontal del
- * dispositivo para la prueba de vida (liveness) del inicio de turno y para el enrolamiento.
+ * dispositivo para la prueba de vida (liveness), tanto del inicio de turno como del re-enrolamiento
+ * de rostro. Ambos flujos capturan una SECUENCIA de frames guiada por la acción del reto (no una foto
+ * suelta: la foto única era spoofeable y el backend ya no la acepta).
  *
  * La extracción de píxeles no es posible desde un track de `react-native-webrtc` en JS, por lo que la
  * captura la realiza el módulo nativo `VeoBiometricFrameGrabber` (AVFoundation en iOS, Camera2 en
@@ -20,10 +22,13 @@ export interface FrameCapturePlan {
 export interface BiometricFrameGrabber {
   /**
    * Captura una secuencia temporal de frames JPEG (base64, sin encabezado data URI) siguiendo el
-   * plan derivado del reto. Abre y libera la cámara frontal.
+   * plan derivado del reto. Abre y libera la cámara frontal. Es el camino del GATE DE TURNO (liveness).
    */
   captureSequence(plan: FrameCapturePlan): Promise<string[]>;
-  /** Captura una sola foto JPEG (base64) para el enrolamiento de rostro. */
+  /**
+   * Captura UNA sola foto JPEG frontal (base64, sin encabezado data URI). Es el camino del RE-ENROLAMIENTO
+   * con selfie (sin liveness): mismo módulo nativo de cámara, una imagen. Abre y libera la cámara frontal.
+   */
   capturePhoto(): Promise<string>;
 }
 

@@ -15,6 +15,7 @@ import {
 } from '@veo/database/testing';
 import { PrismaClient } from '../src/generated/prisma';
 import { AffiliationsService } from '../src/affiliations/affiliations.service';
+import { AffiliationsRepository } from '../src/affiliations/affiliations.repository';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type { PaymentGateway, YapeSubscriber } from '../src/ports/gateway/payment-gateway.port';
 
@@ -80,7 +81,10 @@ beforeEach(async () => {
   await prisma.walletAffiliation.deleteMany({});
   gateway = new FakeGateway();
   const prismaService = { read: prisma, write: prisma } as unknown as PrismaService;
-  service = new AffiliationsService(prismaService, gateway as unknown as PaymentGateway);
+  service = new AffiliationsService(
+    new AffiliationsRepository(prismaService),
+    gateway as unknown as PaymentGateway,
+  );
 });
 
 describe('AffiliationsService · Yape On File', () => {

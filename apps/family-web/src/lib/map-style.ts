@@ -34,15 +34,15 @@ export function resolveMapStyle(tileUrl: string): string | StyleSpecification | 
         source: 'osm-tiles',
         minzoom: 0,
         maxzoom: 19,
-        // Oscurece y desatura el OSM CLARO para alinearlo con el lienzo negro de marca y que
-        // la ruta cyan #00E5FF + markers RESALTEN encima. NO es un invert: MapLibre raster no
-        // invierte, y un CSS invert sobre el canvas rompería la ruta/markers (se dibujan en el
-        // mismo canvas WebGL). El objetivo es un mapa gris-oscuro atenuado, con calles/labels
-        // aún legibles. Valores ajustados con criterio de diseño (estrategia Restrained: el cyan
+        // Oscurece y desatura el OSM CLARO para alinearlo con el lienzo near-black azulado de
+        // marca y que la ruta azul #2D7FF9 + markers RESALTEN encima. NO es un invert: MapLibre
+        // raster no invierte, y un CSS invert sobre el canvas rompería la ruta/markers (se dibujan
+        // en el mismo canvas WebGL). El objetivo es un mapa gris-oscuro atenuado, con calles/labels
+        // aún legibles. Valores ajustados con criterio de diseño (estrategia Restrained: el azul
         // es el único color protagonista; el tile no compite).
         // - brightness-max 0.45: lleva el blanco del OSM a gris-medio-oscuro sin matar la lectura.
         // - brightness-min 0: hunde texto/bordes oscuros del tile, amplía el rango hacia abajo.
-        // - saturation -0.7: desatura verdes/amarillos del OSM para que ningún color rivalice con el cyan.
+        // - saturation -0.7: desatura verdes/amarillos del OSM para que ningún color rivalice con el azul.
         // - contrast -0.1: suaviza franjas duras blancas para un gris uniforme y atenuado.
         // NOTA DE INFRA (no implementar acá): el dark IDEAL a largo plazo es servir un style.json
         // dark self-hosted desde el tileserver (NEXT_PUBLIC_TILE_URL=.../styles/veo/style.json,

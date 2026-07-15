@@ -66,6 +66,128 @@ export const driverSuspended = z.object({
   driverId: z.string(),
   reason: z.string(),
   suspendedAt: z.string(),
+  /// `userId` (User.id = claim `sub`) del conductor suspendido. OPTIONAL por evolución COMPATIBLE del
+  /// contrato: los eventos en vuelo ANTES de este cambio no lo llevan; identity (único productor) SIEMPRE
+  /// lo popula desde ahora (lo tiene en el momento de emitir). Lo consume EXCLUSIVAMENTE el BACKSTOP durable
+  /// de revocación de identity (consumer de su propio `driver.suspended`), que resella `revoked:before:{userId}`
+  /// al `suspendedAt` del evento por si el revoke post-commit best-effort no corrió (crash entre COMMIT y sello
+  /// en Redis). Los demás consumers (driver-bff/dispatch/admin-bff/audit) keyean por `driverId`: para ellos un
+  /// campo optional extra es no-op (no lo leen; audit proyecta por allowlist). Es PII-neutral (un id opaco).
+  userId: z.string().optional(),
+});
+/// El conductor RECHAZADO corrigió sus datos y REENVIÓ a revisión (BR-I01). identity-service lo emite por
+/// OUTBOX en la MISMA tx que lleva backgroundCheckStatus REJECTED→PENDING + KYC REJECTED→PENDING y limpia el
+/// motivo. Downstream: admin-bff proyecta status=PENDING en el read-model → el conductor reaparece como
+/// PENDIENTE (no stale en REJECTED) cerrando el double-source. `resubmittedAt` ISO-8601 del reenvío.
+export const driverResubmitted = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  resubmittedAt: z.string(),
+});
+/// El conductor MATERIALIZÓ su alta (primer dato del wizard que crea el agregado Driver, quedando PENDING de
+/// revisión). identity-service lo emite por OUTBOX en la MISMA tx que CREA la fila Driver, EXACTAMENTE UNA VEZ:
+/// el alta son dos upserts independientes del orden (datos personales / licencia) y solo el que GANA la creación
+/// (INSERT ... ON CONFLICT DO NOTHING → count=1) emite; el otro ve la fila ya creada y no re-emite. Downstream:
+/// admin-bff lo proyecta como status=PENDING en el read-model de conductores → el conductor aparece en la vista
+/// de FLOTA ("Todos") desde el alta, no recién cuando hay una decisión (verified/rejected). Cierra el hueco de que
+/// el read-model solo se sembraba con eventos de cambio de estado (la cola "Pendientes" ya lo veía vía identity
+/// directo, pero la flota no). SIN PII en el payload (igual que el resto de driver.*): el nombre lo resuelve el
+/// admin-bff por gRPC al listar. `registeredAt` ISO-8601 del momento de materialización.
+export const driverRegistered = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  registeredAt: z.string(),
+});
+/// El OPERADOR levantó una suspensión del conductor desde el panel (la inversa de driver.suspended).
+/// identity-service lo emite por OUTBOX en la MISMA tx que QUITA el/los hold(s) y RECOMPUTA `Driver.suspendedAt`
+/// derivado (modelo de HOLDS; así nunca hay reactivación sin evento ni evento sin reactivación). Lo emiten DOS
+/// vías del operador, según qué hold levantan:
+///   - `reactivate()` → levanta SOLO el hold DISCIPLINARY (la suspensión que el operador originó).
+///   - `reactivateForCompliance()` → override manual: levanta los holds DOCUMENT_EXPIRED + INSPECTION_EXPIRED.
+/// En ambas, si tras quitar su(s) hold(s) QUEDAN otros, el conductor SIGUE suspendido (`suspendedAt` recomputado
+/// sigue seteado): el evento marca que se revirtió ESA causa, no que el conductor quedó libre. (La AUTO-reactivación
+/// disparada por fleet —`reactivateByFleet`/`reactivateByFleetForUser`, cuando el conductor regulariza por su
+/// cuenta— NO emite este evento: solo quita el hold; el badge de la lista se reconcilia on-read contra el
+/// `suspendedAt` autoritativo de identity.) Downstream: audit-service (traza inmutable) y admin-bff (proyecta
+/// status de SUSPENDED de vuelta a ACTIVE en el read-model). La reactivación SOLO levanta la suspensión: NO
+/// devuelve al conductor a AVAILABLE — el gate biométrico de inicio de turno (BR-I02) sigue siendo el que lo
+/// habilita a operar. `reactivatedAt` ISO-8601 del momento efectivo de la reactivación.
+export const driverReactivated = z.object({
+  driverId: z.string(),
+  reactivatedAt: z.string(),
+});
+/// El conductor CRUZÓ el tope de deuda por comisiones de viajes en EFECTIVO (ADR-022 · decisión del dueño).
+/// payment-service lo emite por OUTBOX en la MISMA tx que acumula la última deuda CASH_COMMISSION que empujó el
+/// total PENDING por encima de `DRIVER_DEBT_CAP_CENTS`. Se emite EXACTAMENTE en el CRUCE (total previo ≤ tope <
+/// total nuevo): no se re-emite si ya estaba por encima (idempotente por construcción — el cobro que lo cruza es
+/// único, con UNIQUE(paymentId) de la deuda + el CAS de captura como backstops). Es un `driver.*` producido por
+/// payment (dueño de la DEUDA), no por identity: viaja por el topic 'driver' (ciclo de vida) y lo consumen DOS:
+///   - identity-service (dueño del ESTADO): materializa un hold DEBT_BLOCKED → `Driver.suspendedAt` derivado se
+///     setea → el conductor NO puede iniciar turno ni aceptar/ofertar (el eligibility gate de dispatch/booking y
+///     el gate biométrico de startShift ya honran `suspendedAt`, sin tocar código). El viaje EN CURSO NO se corta
+///     (bloqueo tipo A): a diferencia de una suspensión DISCIPLINARIA, NO se emite `driver.suspended` — ese evento
+///     dispararía la revocación de sesión (driver-bff cierra el socket + identity resella `revoked:before`), que
+///     mataría el viaje en curso. El bloqueo por deuda se enforce por el hold + la exclusión del pool de abajo.
+///   - dispatch-service: reusa el MISMO riel de exclusión del pool que `driver.suspended` (DriverSuspensionService.
+///     onSuspended) para sacar al conductor del hot-index de matching — no le ofrece viajes nuevos.
+/// SIN PII: solo el id de perfil + montos + marca temporal. `totalDebtCents` = deuda PENDING total tras el cruce;
+/// `thresholdCents` = el tope vigente (para la UX/audit). `at` ISO-8601.
+export const driverDebtExceeded = z.object({
+  driverId: z.string(),
+  totalDebtCents: z.number().int().nonnegative(),
+  thresholdCents: z.number().int().nonnegative(),
+  at: z.string(),
+});
+/// El conductor SALDÓ su deuda de comisiones (la ÚNICA forma de reactivarse · decisión del dueño). payment-service
+/// lo emite por OUTBOX en la MISMA tx que CAPTURA el Payment de liquidación (kind DEBT_SETTLEMENT) y marca sus
+/// driver_debts PENDING → PAID (CAS). Es el INVERSO de `driver.debt_exceeded` y viaja por el mismo topic 'driver'.
+/// Lo consumen los MISMOS dos:
+///   - identity-service: quita el hold DEBT_BLOCKED y recomputa `Driver.suspendedAt` — si no quedan otros holds, el
+///     conductor queda LIBRE (podrá reabrir turno por el gate biométrico; la reactivación NO lo devuelve a AVAILABLE
+///     saltando el gate, igual que las otras vías de reactivación).
+///   - dispatch-service: reusa el riel de reincorporación holds-aware (DriverSuspensionService.onReactivated → re-
+///     valida `suspendedAt` en identity antes de re-admitir al pool; el TTL de auto-cura respalda la carrera).
+/// Idempotente: una redelivery tras la captura ya-consumada es no-op (el CAS de captura corta antes de re-emitir).
+/// SIN PII: solo el id de perfil + marca temporal. `at` ISO-8601.
+export const driverDebtCleared = z.object({
+  driverId: z.string(),
+  at: z.string(),
+});
+/// Señal REACTIVA de que un conductor pasó a OFFLINE (Fase B · ADR-021 · finding B1). La emiten DOS
+/// productores por el MISMO contrato, distinguidos por `reason`:
+///  - `shift_end`  — identity-service: el conductor cerró turno / se puso offline por autoservicio
+///    (`setStatus`→OFFLINE), emitido por OUTBOX en la MISMA tx que el CAS de `Driver.currentStatus`.
+///  - `disconnect` — driver-bff: el socket del conductor CAYÓ y NO reconectó dentro de la ventana de gracia
+///    (chequeo de presencia CROSS-NODO vía el redis-adapter). Best-effort (el watchdog pre-recojo de trip es
+///    el backstop si el evento se pierde: es un BFF sin outbox, igual que el firehose `driver.location_updated`).
+/// Downstream (Fase B-react): dispatch RETIRA las ofertas OPEN del conductor de los boards
+/// (`dispatch.offer_withdrawn` reason=stale) y lo EVICTA del pool (hot-index remove); trip-service, si el
+/// conductor tenía un viaje PRE-RECOJO ya aceptado (ACCEPTED/ARRIVING/ARRIVED), lo REASIGNA reusando la
+/// máquina existente (`reassignAfterDriverCancel` → `trip.reassigning` → re-abre el board) en vez de dejar al
+/// pasajero esperando los ~15min del watchdog. `driverId` = id de PERFIL Driver (= `Trip.driverId`, el mismo
+/// espacio de la cadena de suspensión). SIN PII: solo ids + la marca temporal. `at` ISO-8601.
+export const DRIVER_OFFLINE_REASON = {
+  /// Fin de turno / autoservicio (OFFLINE deliberado). Lo emite identity-service.
+  SHIFT_END: 'shift_end',
+  /// Caída del socket sin reconexión dentro de la ventana de gracia. Lo emite driver-bff.
+  DISCONNECT: 'disconnect',
+} as const;
+export type DriverOfflineReason =
+  (typeof DRIVER_OFFLINE_REASON)[keyof typeof DRIVER_OFFLINE_REASON];
+export const driverWentOffline = z.object({
+  driverId: z.string(),
+  at: z.string(),
+  reason: z.enum([DRIVER_OFFLINE_REASON.SHIFT_END, DRIVER_OFFLINE_REASON.DISCONNECT]),
+});
+/// Señal de que un conductor ABRIÓ turno (espejo de `went_offline` rama shift_end). La emite identity-service
+/// en `startShift` — la ÚNICA transición OFFLINE→AVAILABLE, que SIEMPRE pasa por el gate biométrico — por OUTBOX
+/// en la MISMA tx que el CAS de `Driver.currentStatus`→AVAILABLE. A diferencia de `went_offline` NO lleva
+/// `reason`: hay una sola causa (apertura deliberada de turno; no existe un "online" best-effort). Es una
+/// MUTACIÓN de negocio deliberada → se audita al WORM (par de apertura del ciclo de sesión del conductor).
+/// `driverId` = id de PERFIL Driver (mismo espacio que `went_offline`). SIN PII: solo id + marca temporal.
+export const driverWentOnline = z.object({
+  driverId: z.string(),
+  at: z.string(),
 });
 export const userKycVerified = z.object({
   userId: z.string(),
@@ -83,6 +205,29 @@ export const biometricFailed = z.object({
   driverId: z.string(),
   score: z.number(),
   attempt: z.number(),
+  at: z.string(),
+});
+/// El conductor ENROLÓ su biometría facial en el alta (KYC: selfie + liveness PASIVO). identity-service lo
+/// emite por OUTBOX en la MISMA tx que persiste faceEmbedding + faceEnrolledAt → audit (traza inmutable
+/// Ley 29733 de que SE ejecutó una verificación biométrica de alta y su veredicto de vida). `livenessChecked`
+/// = si el PAD corrió (false = modelo ausente → enrolado SIN liveness, degradación honesta); `score` = score
+/// de vida del PAD 0..1. SIN datos biométricos en el payload: solo el veredicto + metadatos. `at` ISO-8601.
+export const biometricEnrolled = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  livenessChecked: z.boolean(),
+  score: z.number(),
+  at: z.string(),
+});
+/// El enrol biométrico del alta fue RECHAZADO por el anti-spoofing PASIVO (PAD): la captura es un ataque de
+/// presentación (foto/pantalla/replay). identity-service lo emite por OUTBOX en una tx PROPIA y forense
+/// (persiste aunque el request termine en 422) → audit (traza inmutable del intento de suplantación, Ley
+/// 29733). `reason` = motivo tipado del rechazo ('spoof'); `score` = score de vida 0..1. SIN biometría. `at`.
+export const biometricEnrollRejected = z.object({
+  driverId: z.string(),
+  userId: z.string(),
+  reason: z.string(),
+  score: z.number(),
   at: z.string(),
 });
 export const userDeletionRequested = z.object({
@@ -175,11 +320,42 @@ export const tripArrived = z.object({
   passengerId: z.string().optional(),
   waitWindowSeconds: z.number().int().optional(),
 });
+/// PREPAGO (ADR-024 · modelo "cobrar al iniciar") · trip.started dispara el COBRO DIGITAL de la tarifa
+/// CONGELADA (antes el cobro nacía en trip.completed). Por eso el evento se ENRIQUECE con lo que
+/// payment-service necesita para cobrar SIN join cross-servicio (paridad con trip.completed):
+///  - `fareCents`     : tarifa congelada al iniciar (FIJO al crear · PUJA al aceptar). Es el bruto a cobrar.
+///  - `paymentMethod` : método elegido por el pasajero. CASH ⇒ payment NO cobra al iniciar (sigue bilateral
+///                      en completed); digital ⇒ se cobra acá contra el riel.
+///  - `promoCode`     : canje de promoción al cobrar (Ola 2A), idempotente por la dedupKey del cobro.
+///  - `dispatchMode` / `originLat` / `originLng` : DENORM para los cortes de ingresos por modo/distrito.
+/// TODOS opcionales (compat N-2): un trip.started viejo sin estos campos ⇒ el cobro NO ocurre al iniciar y
+/// trip.completed lo cobra completo (fallback honesto, cero deuda extra · ver PaymentsService).
 export const tripStarted = z.object({
   tripId: z.string(),
   driverId: z.string(),
   startedAt: z.string(),
   passengerId: z.string().optional(),
+  fareCents: z.number().int().optional(),
+  paymentMethod: z.enum(['YAPE', 'PLIN', 'CASH', 'CARD', 'PAGOEFECTIVO']).optional(),
+  promoCode: z.string().optional(),
+  dispatchMode: pricingMode.optional(),
+  originLat: z.number().optional(),
+  originLng: z.number().optional(),
+});
+/// RC5 (ADR-022) · el pasajero (dueño) REESCRIBIÓ el destino de un viaje PRE-start (changeDestination),
+/// emitido en la MISMA tx que persiste el nuevo destino/tarifa. Antes changeDestination solo grababa el
+/// trip_event interno y NO publicaba → la familia (share-service) NUNCA se enteraba y el destino de un
+/// menor podía cambiarse en silencio. share-service actualiza el read-model público (destino NUEVO, no el
+/// congelado del quote) y notification-service alerta al pasajero/guardián — `childMode` prioriza esa
+/// alerta (seguridad del menor: ningún cambio de destino de un niño debe ser invisible para la familia).
+export const tripDestinationChanged = z.object({
+  tripId: z.string(),
+  passengerId: z.string().optional(),
+  driverId: z.string().optional(),
+  destination: geo,
+  previousFareCents: z.number().int(),
+  fareCents: z.number().int(),
+  childMode: z.boolean(),
 });
 export const tripCompleted = z.object({
   tripId: z.string(),
@@ -198,6 +374,14 @@ export const tripCompleted = z.object({
   /// DIGITALES el flag se ignora (el cobro va por el riel). Ausente/false ⇒ flujo bilateral normal
   /// (el conductor confirmará por separado). Compat N-2: eventos viejos sin el campo ⇒ undefined.
   cashCollected: z.boolean().optional(),
+  /// MÉTRICAS · MODO de despacho del viaje (FIXED/PUJA) para el desglose "Ingresos por modo" del panel
+  /// (Fijo/Puja/Carpooling). Lo tiene el trip-service (Trip.dispatchMode); payment lo DENORMALIZA en el
+  /// Payment para agregar por modo sin join cross-service. Compat N-2: ausente ⇒ undefined (cae a ON_DEMAND).
+  dispatchMode: pricingMode.optional(),
+  /// MÉTRICAS · ORIGEN del viaje (lat/lng) para el corte "Ingresos por distrito" (zonificación lat/lng→distrito
+  /// en payment). Lo tiene el trip-service (Trip.originLat/originLng). Compat N-2: ausente ⇒ undefined (sin distrito).
+  originLat: z.number().optional(),
+  originLng: z.number().optional(),
 });
 export const tripCancelled = z.object({
   tripId: z.string(),
@@ -332,6 +516,10 @@ export const dispatchOffered = z.object({
   originLat: z.number().optional(),
   originLon: z.number().optional(),
   specialRequests: z.array(z.string()).optional(),
+  /// ETA conductor→recojo en segundos (efímero, momento-de-oferta, solo camino FIXED). Opcional porque el
+  /// broadcast de PUJA no lo lleva y una oferta con maps.eta caído lo omite. La app lo muestra como el stat
+  /// "A recojo".
+  pickupEtaSeconds: z.number().int().nonnegative().optional(),
 });
 
 /* ── PUJA / negociación (ADR 010 §4) ── (Lote A: contratos)
@@ -348,7 +536,19 @@ export const tripBidPosted = z.object({
   passengerId: z.string(),
   bidCents: z.number().int().positive(),
   vehicleType: vehicleClassSchema,
+  /// B5-3 · oferta del viaje (offeringId del catálogo, ej. veo_xl). dispatch la persiste en el board y
+  /// deriva sus REQUISITOS (segment/seats/antigüedad/certs) para enforcar la eligibilidad por TIER en la
+  /// PUJA igual que en FIXED. Opcional/compat N-2: ausente o desconocido ⇒ sin requisitos extra (el gate
+  /// solo filtra por vehicleType, como antes).
+  category: z.string().optional(),
   origin: geo,
+  /// Destino del viaje (geo) + distancia/duración estimadas: el conductor las VE en la tarjeta de puja
+  /// (pickup→destino + distancia) ANTES de aceptar, sin un join cross-servicio. dispatch las guarda en el
+  /// board (el destino se ENGROSA a ~111m antes de exponerlo a los N conductores no asignados, igual que el
+  /// origen; distancia/duración no son sensibles). Vienen del row Trip (destLat/destLon/distanceMeters/durationSeconds).
+  destination: geo,
+  distanceMeters: z.number().int().nonnegative(),
+  durationSeconds: z.number().int().nonnegative(),
   windowSec: z.number().int().positive(),
   /// H13 — secuencia MONOTÓNICA de negociación del viaje (NUNCA se resetea, a diferencia de
   /// reassignCount). Sella el ciclo de negociación que abrió este bid: dispatch la persiste en el board
@@ -418,12 +618,38 @@ export const dispatchBidCancelled = z.object({
 /// ABIERTO: el conductor dejó de ser elegible (`stale`, BE-3) entre que ofertó y el pasajero la eligió.
 /// El BFF lo reenvía como `offer:withdrawn` para que la app QUITE esa card al instante (sin esperar el
 /// refetch). NO se emite al cerrar el board (eso ya lo cubren no_offers/match). Idempotente por (trip,driver).
+/// Motivos por los que UNA oferta del board se RETIRA (evento `dispatch.offer_withdrawn`). Fuente ÚNICA
+/// del valor (const + tipo derivado homónimo; cero literales sueltos): el productor (dispatch) importa esta
+/// const para no hardcodear el string en el emit, y el `z.enum` de abajo se deriva de acá.
+export const OFFER_WITHDRAWN_REASON = {
+  /// El conductor quedó INELEGIBLE tras ofertar, con el board aún ABIERTO (BE-3).
+  STALE: 'stale',
+  /// Otro conductor ganó la EMERGENCIA en el broadcast simultáneo de la ambulancia (B5-vert): la oferta
+  /// hermana ya no vale.
+  TAKEN: 'taken',
+  /// ADR-020 Lote 2 — el pasajero ELIGIÓ a OTRO conductor: la oferta de este perdedor ya no vale y su
+  /// card debe morir reactiva (sin esperar el poll de 12s). Se emite UNA por perdedor al cerrar el board.
+  NOT_SELECTED: 'not_selected',
+  /// El VIAJE se canceló durante la búsqueda (pasajero/sistema), con una oferta FIXED aún OFFERED. dispatch
+  /// retira el DispatchMatch (OFFERED→WITHDRAWN) y emite esto para que la card FIXED del conductor muera
+  /// reactiva (sin esperar su countdown local) y un accept tardío falle (el CAS ya no matchea OFFERED).
+  CANCELLED: 'cancelled',
+} as const;
+export type OfferWithdrawnReason =
+  (typeof OFFER_WITHDRAWN_REASON)[keyof typeof OFFER_WITHDRAWN_REASON];
+
 export const dispatchOfferWithdrawn = z.object({
   tripId: z.string(),
   driverId: z.string(),
   /// `stale` = el conductor quedó inelegible tras ofertar (board PUJA). `taken` = otro conductor ganó la
-  /// EMERGENCIA en el broadcast simultáneo de la ambulancia (B5-vert) — esta oferta hermana ya no vale.
-  reason: z.enum(['stale', 'taken']),
+  /// EMERGENCIA del broadcast simultáneo de la ambulancia (B5-vert). `not_selected` (ADR-020 Lote 2) = el
+  /// pasajero eligió a otro y esta oferta perdió — el driver-bff la reenvía al CONDUCTOR (card muere reactiva).
+  reason: z.enum([
+    OFFER_WITHDRAWN_REASON.STALE,
+    OFFER_WITHDRAWN_REASON.TAKEN,
+    OFFER_WITHDRAWN_REASON.NOT_SELECTED,
+    OFFER_WITHDRAWN_REASON.CANCELLED,
+  ]),
 });
 /// trip → dispatch. El conductor canceló DESPUÉS de aceptar (pre-recojo): trip pasa a REASSIGNING y
 /// re-abre el board (cierra el catastrófico #4 — no más pasajero abandonado). `bidCents` = bid con el que
@@ -442,14 +668,31 @@ export const tripReassigning = z.object({
   passengerId: z.string(),
   /// Tipo de vehículo del viaje: dispatch difunde la re-puja solo a conductores de ese tipo.
   vehicleType: vehicleClassSchema,
+  /// B5-3 · oferta del viaje (offeringId): dispatch la re-persiste en el board re-abierto para enforcar la
+  /// eligibilidad por TIER en el re-match igual que en la puja original. Opcional/compat N-2: ausente o
+  /// desconocido ⇒ sin requisitos extra.
+  category: z.string().optional(),
   /// Origen del viaje (geo): centro del broadcast a conductores elegibles cercanos.
   origin: geo,
+  /// Destino + distancia/duración del viaje: el board re-abierto los conserva para que el conductor del
+  /// re-match VEA pickup→destino + distancia igual que en la puja original (cierra el MISMO gap que tenía
+  /// specialRequests, que no viajaba en reassigning y se degradaba a [] al reconstruir el board). Del row Trip.
+  destination: geo,
+  distanceMeters: z.number().int().nonnegative(),
+  durationSeconds: z.number().int().nonnegative(),
   bidCents: z.number().int().positive(),
   reason: z.enum(['driver_cancelled']),
   /// H13 — secuencia MONOTÓNICA del NUEVO ciclo de negociación que abre esta reasignación (trip la
   /// incrementó al pasar a REASSIGNING). dispatch la guarda en el board re-abierto y la estampa en el
   /// `dispatch.offer_accepted` del re-match, cerrando la ventana a redeliveries del ciclo anterior.
   negotiationSeq: z.number().int().positive(),
+  /// Modo de despacho del viaje (ADR 011). dispatch SOLO re-abre el OfferBoard para PUJA: en FIXED el
+  /// re-match lo re-arranca el `trip.requested` que la estrategia emite junto a este evento (un board de
+  /// puja fantasma sería doble oferta al conductor). La liberación del conductor cancelador (hot-index +
+  /// identity ON_TRIP→AVAILABLE) y el conteo de la cancelación aplican a AMBOS modos — ese era el seam
+  /// roto: FIXED no emitía reassigning y el conductor quedaba ON_TRIP para siempre.
+  /// Opcional/compat N-2: ausente ⇒ PUJA (comportamiento histórico).
+  dispatchMode: pricingMode.optional(),
 });
 
 /* ── pricing ── (ADR 011 · switch PUJA↔FIJO controlado por admin) */
@@ -485,19 +728,51 @@ export const pricingModeScheduleUpdated = z.object({
 
 /// Piso de la PUJA (bid floor) reemplazado por el admin (ADR 010 §9.3). Emitido por outbox en la MISMA tx
 /// del PUT; lo consume PricingCacheConsumer para invalidar el cache del piso cross-réplica (NO load-bearing:
-/// trip-service lee la tabla local). `overrides` = piso por (zona, oferta); sin override la combinación cae
+/// trip-service lee la tabla local). `overrides` = piso por oferta; sin override la oferta cae
 /// al `defaultFloorCents`. `version` MONOTÓNICA (la invalidación de cache es idempotente y tolera reorden).
 export const pricingBidFloorUpdated = z.object({
-  /// Piso por defecto en céntimos PEN (cuando no hay override para la (zona, oferta)).
+  /// Piso por defecto en céntimos PEN (cuando no hay override para la oferta).
   defaultFloorCents: z.number().int().nonnegative(),
-  /// Overrides del piso por (zona, oferta). `zone`/`offeringId` son los enums de @veo/shared-types (string en wire).
+  /// Overrides del piso por oferta. `offeringId` es el enum de @veo/shared-types (string en wire).
   overrides: z.array(
     z.object({
-      zone: z.string(),
       offeringId: z.string(),
       floorCents: z.number().int().nonnegative(),
     }),
   ),
+  /// Versión MONOTÓNICA (la invalidación de cache es idempotente; tolera el reordenamiento at-least-once).
+  version: z.number().int().nonnegative(),
+  /// Marca ISO de cuándo el admin guardó el snapshot.
+  updatedAt: z.string(),
+});
+
+/// Tarifa base (banderazo + per-km + per-min) reemplazada por el admin (F2.4). Emitida por outbox en la
+/// MISMA tx del PUT; la consume PricingCacheConsumer para invalidar el cache de la tarifa base cross-réplica
+/// (NO load-bearing: trip-service lee la tabla local). Los tres componentes en céntimos PEN. `version`
+/// MONOTÓNICA (la invalidación de cache es idempotente y tolera el reordenamiento at-least-once de Kafka).
+export const pricingBaseFareUpdated = z.object({
+  /// Banderazo (tarifa fija de arranque) en céntimos PEN.
+  baseFareCents: z.number().int().nonnegative(),
+  /// Costo por kilómetro en céntimos PEN.
+  perKmCents: z.number().int().nonnegative(),
+  /// Costo por minuto en céntimos PEN.
+  perMinCents: z.number().int().nonnegative(),
+  /// Versión MONOTÓNICA (la invalidación de cache es idempotente; tolera el reordenamiento at-least-once).
+  version: z.number().int().nonnegative(),
+  /// Marca ISO de cuándo el admin guardó el snapshot.
+  updatedAt: z.string(),
+});
+
+/// Comisión de plataforma por MODO reemplazada por el admin (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). Emitida
+/// por outbox en la MISMA tx del PUT; la consume CommissionCacheConsumer (payment-service) para invalidar el
+/// cache de la tasa cross-réplica (NO load-bearing: payment-service lee la tabla local). SOLO la tasa ON-DEMAND
+/// es configurable; la del CARPOOLING es 0 FIJO (gated por validación legal, NO viaja en este evento). La tasa
+/// va en BASIS POINTS Int (0..10000) — NUNCA float (dinero/tasa). `version` MONOTÓNICA (invalidación idempotente).
+export const paymentCommissionUpdated = z.object({
+  /// Tasa de comisión ON-DEMAND en basis points (0..10000; 2000 = 20%). Int, jamás float.
+  onDemandRateBps: z.number().int().min(0).max(10_000),
+  /// Service fee CARPOOLING en basis points (0..10000). Int, jamás float. Se SUMA al pasajero (cost-sharing).
+  carpoolingFeeBps: z.number().int().min(0).max(10_000),
   /// Versión MONOTÓNICA (la invalidación de cache es idempotente; tolera el reordenamiento at-least-once).
   version: z.number().int().nonnegative(),
   /// Marca ISO de cuándo el admin guardó el snapshot.
@@ -517,6 +792,14 @@ export const driverLocationUpdated = z.object({
   /// Ola 2B · tier moto-taxi: tipo de vehículo activo del conductor. dispatch lo proyecta en el hot
   /// index para filtrar el matching por tipo. Opcional por compat (pings antiguos) ⇒ default CAR.
   vehicleType: vehicleClassSchema.optional(),
+  /// IDENTIDAD del vehículo activo (del que se resolvieron los attrs de abajo). dispatch lo usa como KEY del
+  /// carry anti-clobber del hot-index: preservar attrs ausentes solo si el ping previo es el MISMO vehículo
+  /// (vehicleType NO distingue dos autos de la misma clase — un XL y un económico son ambos CAR). El bff lo
+  /// sella server-authoritative igual que los attrs. Opcional por compat (pings legacy / fleet 204 sin vehículo
+  /// activo) ⇒ SIN vehicleId NO hay carry (el fallback por vehicleType fue ELIMINADO en el lote d.1: el carry
+  /// es estricto por vehicleId). Degradación honesta: cero stale (no se preservan attrs de otro vehículo) a
+  /// cambio de no rellenar el hueco. Prerequisito del flip a fail-closed.
+  vehicleId: z.string().optional(),
   /// B5-3 · atributos de eligibilidad del vehículo activo (del modelSpec elegido + el año del vehículo).
   /// dispatch los proyecta en el hot-index para filtrar por oferta (confort=segment≥MID, xl=6 asientos)
   /// SIN consultar fleet en el hot-path. Opcionales por compat: un ping sin ellos NO restringe (el pool
@@ -577,6 +860,22 @@ export const mediaAccessViewed = z.object({
   viewedBy: z.string(),
   watermark: z.string(),
   expiresAt: z.string(),
+  at: z.string(),
+});
+/// BR-S02 (Lote 3 · burn-in): el quemado server-side del watermark de la copia derivada TERMINÓ OK. SIN PII:
+/// el operador (quién pidió) ya está en `media.access_granted`; acá solo IDs técnicos de la copia lista.
+export const mediaRenderCompleted = z.object({
+  requestId: z.string(),
+  tripId: z.string(),
+  segmentId: z.string(),
+  at: z.string(),
+});
+/// BR-S02 (Lote 3 · burn-in): el quemado del watermark FALLÓ. SIN PII: `reason` es una CATEGORÍA técnica
+/// (clase de error), nunca texto libre ni datos del operador/video.
+export const mediaRenderFailed = z.object({
+  requestId: z.string(),
+  tripId: z.string(),
+  reason: z.string(),
   at: z.string(),
 });
 
@@ -660,12 +959,51 @@ export const cancellationPenaltyCollected = z.object({
   settlementPaymentId: z.string(),
 });
 
-export const payoutProcessed = z.object({
-  payoutId: z.string(),
-  driverId: z.string(),
-  amountCents: z.number().int(),
-  period: z.string(),
-});
+/**
+ * payout.processed (ADR-015 §4.1 · semántica corregida en 2b): el riel CONFIRMÓ la salida del dinero
+ * (PROCESSING → PROCESSED) — la plata SALIÓ de verdad. audit + notification (push al conductor, D7) lo consumen.
+ * Mismo contrato SIN PII + `.strict()` fail-closed que payout.processing/failed: solo IDs + monto + período;
+ * la billetera destino jamás viaja por Kafka. `.strict()` RECHAZA campos extra → falla-CERRADO contra fugas de PII.
+ */
+export const payoutProcessed = z
+  .object({
+    payoutId: z.string(),
+    driverId: z.string(),
+    amountCents: z.number().int(),
+    period: z.string(),
+  })
+  .strict();
+
+/**
+ * payout.processing (ADR-015 §4.1 · NUEVO): el OPERADOR disparó el desembolso (PENDING/HELD → PROCESSING)
+ * e invocó `PayoutGateway.disburse`. Traza el acto humano. audit lo consume.
+ *
+ * SOBERANÍA (FOUNDATION §0.7 · ADR-015 D2/D7): CERO PII en el payload — solo IDs + monto + período. La
+ * billetera destino NUNCA viaja por Kafka (la resuelve el adapter server-side). `.strict()` RECHAZA cualquier
+ * campo extra (un teléfono/nombre filtrado) → el contrato falla-CERRADO contra fugas de PII, verificado por test.
+ */
+export const payoutProcessing = z
+  .object({
+    payoutId: z.string(),
+    driverId: z.string(),
+    amountCents: z.number().int(),
+    period: z.string(),
+  })
+  .strict();
+
+/**
+ * payout.failed (ADR-015 §4.1 · NUEVO): el riel rechazó/expiró el desembolso (PROCESSING → FAILED). La plata
+ * NO salió; el operador puede reintentar (idempotente por `dedupKey`). audit + notification (avisa al operador)
+ * lo consumen. Mismo contrato SIN PII + `.strict()` fail-closed que payout.processing.
+ */
+export const payoutFailed = z
+  .object({
+    payoutId: z.string(),
+    driverId: z.string(),
+    amountCents: z.number().int(),
+    period: z.string(),
+  })
+  .strict();
 
 /* ── afiliación de wallet / Yape On File (payment) ── (Ola pagos PE)
  * Notificaciones futuras (push "tu Yape quedó afiliado"). SIN PII: solo ids + phone enmascarado. */
@@ -743,6 +1081,24 @@ export const panicResolved = z.object({
   resolvedBy: z.string(),
   at: z.string(),
 });
+/// Respuesta operativa del operador sobre una alerta ACTIVA (NO cambian el status): despachó una unidad de
+/// respuesta y/o escaló a autoridades. panic-service los emite por OUTBOX en la MISMA tx que el set del
+/// timestamp (RolesGuard + PANIC_OPERATORS: no forjable por el agresor). `tripId`+`passengerId` enriquecidos
+/// desde la fila. Para el audit inmutable + el dashboard (línea de tiempo del incidente).
+export const panicDispatched = z.object({
+  panicId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  operatorId: z.string(),
+  at: z.string(),
+});
+export const panicEscalated = z.object({
+  panicId: z.string(),
+  tripId: z.string(),
+  passengerId: z.string(),
+  operatorId: z.string(),
+  at: z.string(),
+});
 /**
  * panic.fanout_requested (BR-S05, fix de durabilidad del SMS de pánico): share-service ya creó el
  * enlace de seguimiento y DELEGA el fan-out durable de SMS a notification-service (engine con
@@ -785,6 +1141,24 @@ export const notificationFailed = z.object({
 });
 
 /* ── rating ── (BR-D01 / BR-I05) */
+/**
+ * Razones de flag de rating — CONTRATO CANÓNICO del wire (cero strings mágicos en el `===` de los consumidores).
+ * rating-service es DUEÑO del dominio pero el VALOR viaja por `driver.flagged`/`passenger.flagged`, así que el
+ * enum vive AQUÍ (paquete leaf `@veo/events`, sin ciclo de dependencias) y rating-service IMPORTA estos valores
+ * para su `FLAG_REASON` de dominio — una sola lista, no dos que se desincronizan. identity discrimina por estos
+ * mismos valores tipados:
+ *   - 'review'         conductor < 4.3 (o < 4.0 sin el mínimo de reseñas): flag de PANEL, NO suspende.
+ *   - 'suspension'     conductor < 4.0 con ≥ mínimo de reseñas: dispara la AUTO-suspensión (hold RATING_LOW).
+ *   - 'reverification' pasajero < 4.0 (BR-I05): requiere re-verificación.
+ */
+export const FLAG_REASON = {
+  REVIEW: 'review',
+  SUSPENSION: 'suspension',
+  REVERIFICATION: 'reverification',
+} as const;
+export type FlagReason = (typeof FLAG_REASON)[keyof typeof FLAG_REASON];
+/** z.enum tipado del contrato: el `parse` del evento RECHAZA un reason fuera de FLAG_REASON (falla-cerrado). */
+const flagReasonSchema = z.enum(Object.values(FLAG_REASON) as [FlagReason, ...FlagReason[]]);
 export const ratingCreated = z.object({
   ratingId: z.string(),
   tripId: z.string(),
@@ -794,12 +1168,34 @@ export const ratingCreated = z.object({
 export const driverFlagged = z.object({
   driverId: z.string(),
   rollingAvg: z.number(),
-  reason: z.string(),
+  reason: flagReasonSchema,
 });
 export const passengerFlagged = z.object({
   passengerId: z.string(),
   rollingAvg: z.number(),
-  reason: z.string(),
+  reason: flagReasonSchema,
+});
+/**
+ * AUTO-suspensión por EXCESO DE CANCELACIONES (decisión del dueño · compliance/seguridad). dispatch-service
+ * mantiene una VENTANA ROLLING de 24h de cancelaciones POR conductor (tabla `driver_cancellation_events`,
+ * SEPARADA del contador LIFELONG `driver_stats.cancelled_trips` que alimenta la tasa de cancelación del
+ * matching) y emite ESTE evento UNA vez cuando el conteo de la ventana CRUZA el umbral (4→5). identity lo
+ * materializa como un hold TEMPORAL EXCESSIVE_CANCELLATIONS con `expiresAt = now + cooldown` (primer hold con
+ * expiración del sistema; un sweeper lo auto-levanta al vencer). Es una causa AUTOMÁTICA (NO-disciplinaria):
+ * la levanta el override de compliance del operador (reactivateForCompliance) ANTES del vencimiento, o el
+ * sweeper al vencer el cooldown.
+ *
+ * `driverId` = id de PERFIL Driver (= `Trip.driverId`, el MISMO que resuelve dispatch vía `driverForTrip` →
+ * `dispatch_matches.driver_id`, que ya es el id de perfil). NUNCA un User.id: la cadena de suspensión exige
+ * el de perfil (como `driver.flagged`). `count` = cancelaciones en la ventana al cruzar (≥ umbral, típico = 5).
+ * `windowStart` ISO-8601 = borde inferior de la ventana de 24h al momento del cruce (trazabilidad). `occurredAt`
+ * ISO-8601 = momento del cruce. El hold downstream es IDEMPOTENTE (re-entregas no extienden el cooldown).
+ */
+export const driverExcessiveCancellations = z.object({
+  driverId: z.string(),
+  count: z.number().int(),
+  windowStart: z.string(),
+  occurredAt: z.string(),
 });
 
 /* ── share ── (pilar 4) */
@@ -826,13 +1222,20 @@ export const chatMessageSent = z.object({
 });
 
 /* ── audit ── (BR-S03 trazabilidad inmutable) */
+/// audit-service grabó un eslabón TAMPER-EVIDENT en el audit log hash-encadenado (Ley 29733). Emitido por
+/// OUTBOX en la MISMA tx que escribe la fila → un consumidor (dashboard de seguridad / verificador de cadena)
+/// puede reaccionar con la prueba criptográfica. `entryId` = id de la fila; `seq` = posición en la cadena;
+/// `hash` = hash del eslabón; `eventId` = evento de dominio que originó la auditoría (correlación); `at` ISO-8601.
 export const auditRecorded = z.object({
   entryId: z.string(),
+  seq: z.string(),
+  eventId: z.string(),
   action: z.string(),
   resourceType: z.string(),
   resourceId: z.string(),
   actorId: z.string().optional(),
   at: z.string(),
+  hash: z.string(),
 });
 
 /* ── fleet ── (gestión de flota / documentos) */
@@ -854,13 +1257,91 @@ export const fleetDocumentExpired = z.object({
   expiresAt: z.string(),
   critical: z.boolean(),
 });
-export const fleetDriverSuspended = z.object({
-  driverId: z.string(),
-  reason: z.string(),
-  documentId: z.string().optional(),
-  documentType: z.string().optional(),
-  suspendedAt: z.string(),
+/// El operador RECHAZÓ un documento del conductor en la revisión manual (`reviewDocument`, decision=REJECTED).
+/// fleet-service lo emite por OUTBOX en la MISMA tx que persiste `FleetDocument.status=REJECTED` + rejectionReason.
+/// Downstream: notification-service (push al conductor: "corregí tu documento") + audit (traza inmutable de la
+/// decisión de compliance, Ley 29733). Cierra la ASIMETRÍA de aviso — antes SOLO el rechazo del ALTA
+/// (driver.rejected) notificaba; el rechazo POR-DOCUMENTO era silencioso. `ownerId` = Driver.id de PERFIL (doc
+/// DRIVER-scoped); el push lo resuelve a userId por gRPC. El `reason` (texto libre del operador) NO viaja en el
+/// evento (data-minimization §0.7: ningún consumer lo necesita — la app lo muestra vía GET /drivers/me/documents,
+/// que lo lee de la fila `FleetDocument`; el audit inmutable excluye free-text por política). `rejectedAt` ISO-8601.
+export const fleetDocumentRejected = z.object({
+  documentId: z.string(),
+  ownerType: z.enum(['DRIVER', 'VEHICLE']),
+  ownerId: z.string(),
+  documentType: z.string(),
+  rejectedAt: z.string(),
 });
+export const fleetDriverSuspended = z
+  .object({
+    // SUJETO de la suspensión: el conductor llega por UNA de dos claves, según el ORIGEN:
+    //  - `driverId` (id de PERFIL Driver de identity) → suspensión por DOCUMENTO crítico vencido. fleet lo
+    //    conoce porque `FleetDocument.ownerId` de un doc DRIVER-scoped ES el id de perfil.
+    //  - `userId` (User.id de identity = `Vehicle.driverId`) → suspensión por INSPECCIÓN técnica (ITV) vencida.
+    //    fleet SOLO tiene el User.id del dueño del vehículo (no traduce a id de perfil): identity resuelve
+    //    User.id → Driver.id en SU consumer (es el dueño del mapeo). Mantiene fleet desacoplado de identity.
+    // El consumer EXIGE exactamente una vía (ver refine); nunca confunde un User.id con un Driver.id de perfil.
+    driverId: z.string().optional(),
+    userId: z.string().optional(),
+    reason: z.string(),
+    documentId: z.string().optional(),
+    documentType: z.string().optional(),
+    // Trazabilidad de la suspensión por ITV (opcionales; ausentes en la suspensión por documento).
+    vehicleId: z.string().optional(),
+    inspectionId: z.string().optional(),
+    nextDueAt: z.string().optional(),
+    // DISCRIMINADOR EXPLÍCITO de la CAUSA del hold (ADR 013 · seam catálogo↔operabilidad). AUSENTE en las vías
+    // históricas: identity mantiene el ruteo IMPLÍCITO por la clave (driverId→DOCUMENT_EXPIRED · userId→
+    // INSPECTION_EXPIRED). PRESENTE con 'CATEGORY_DISABLED' → fleet apagó del catálogo la última oferta de la
+    // CLASE del conductor: el sujeto viaja por `userId` (= `Vehicle.driverId`) y identity lo materializa como
+    // hold CATEGORY_DISABLED (no como INSPECTION_EXPIRED, que es la otra vía por userId). Sin este campo el
+    // ruteo por-clave colisionaría (userId ya significa ITV). Se acota al literal que fleet realmente emite.
+    holdCause: z.enum(['CATEGORY_DISABLED']).optional(),
+    suspendedAt: z.string(),
+  })
+  .refine((p) => Boolean(p.driverId) !== Boolean(p.userId), {
+    message: 'fleetDriverSuspended exige EXACTAMENTE uno de driverId (perfil) o userId (User.id)',
+  });
+/// AUTO-reactivación de un conductor por compliance: el conductor REGULARIZÓ lo que lo tenía suspendido por
+/// `DOCUMENT_EXPIRED`/`INSPECTION_EXPIRED` (la INVERSA AUTOMÁTICA de `fleet.driver_suspended`). fleet-service lo
+/// emite por OUTBOX en la MISMA tx que registra la regularización (escritura + evento atómicos, FOUNDATION §6).
+/// Espeja el XOR de claves de la suspensión, según el ORIGEN de la regularización:
+///   - `userId` (User.id = `Vehicle.driverId`) → se registró una INSPECCIÓN técnica (ITV) NUEVA y VIGENTE para
+///     el vehículo operado: fleet emite por userId (fleet NO traduce a id de perfil; identity resuelve
+///     User.id → Driver.id en SU consumer, igual que en la suspensión). Ya NO hay un latch local de ITV en fleet
+///     (eliminado con el refactor a holds): la idempotencia vive en el `@@unique` del hold en identity.
+///   - `driverId` (id de PERFIL Driver) → un DOCUMENTO crítico DRIVER-scoped vencido volvió a VALID (revisión del
+///     operador): fleet lo conoce porque `FleetDocument.ownerId` de un doc DRIVER-scoped ES el id de perfil.
+/// El consumer de identity EXIGE exactamente una vía (refine, espejo de la suspensión) y QUITA SOLO el hold de
+/// ESA causa (DOCUMENT_EXPIRED de ese documentType por la vía driverId, o INSPECTION_EXPIRED por la vía userId);
+/// las demás causas (otro documento, ITV, DISCIPLINARY) quedan intactas — fail-closed por modelo de HOLDS.
+/// Downstream: identity recomputa `Driver.suspendedAt` derivado del conjunto de holds (idempotente; el difunto
+/// `suspensionSource` fue DROPeado con el refactor a holds). Esta AUTO-reactivación de fleet NO emite el evento de
+/// dominio `driver.reactivated` (ese solo lo emite la reactivación del OPERADOR) → el badge de la lista del panel
+/// se reconcilia on-read contra el `suspendedAt` autoritativo de identity, no por proyección de evento.
+/// La reactivación SOLO levanta el hold: NO devuelve al conductor a AVAILABLE (eso lo decide el gate biométrico
+/// de inicio de turno, BR-I02). `reactivatedAt` ISO-8601 del momento efectivo de la regularización.
+export const fleetDriverReactivated = z
+  .object({
+    driverId: z.string().optional(),
+    userId: z.string().optional(),
+    reason: z.string(),
+    // Trazabilidad de la reactivación por ITV (opcionales; ausentes en la reactivación por documento).
+    vehicleId: z.string().optional(),
+    inspectionId: z.string().optional(),
+    nextDueAt: z.string().optional(),
+    // Trazabilidad de la reactivación por documento (opcionales; ausentes en la reactivación por ITV).
+    documentId: z.string().optional(),
+    documentType: z.string().optional(),
+    // Espejo del discriminador de la suspensión (ver fleetDriverSuspended.holdCause): PRESENTE con
+    // 'CATEGORY_DISABLED' → la clase del conductor volvió a ser operable (el admin re-activó una oferta) →
+    // identity QUITA el hold CATEGORY_DISABLED (por `userId`), NUNCA el INSPECTION_EXPIRED. Ausente = vía histórica.
+    holdCause: z.enum(['CATEGORY_DISABLED']).optional(),
+    reactivatedAt: z.string(),
+  })
+  .refine((p) => Boolean(p.driverId) !== Boolean(p.userId), {
+    message: 'fleetDriverReactivated exige EXACTAMENTE uno de driverId (perfil) o userId (User.id)',
+  });
 export const fleetVehicleSuspended = z.object({
   vehicleId: z.string(),
   reason: z.string(),
@@ -882,7 +1363,277 @@ export const fleetVehicleModelReviewed = z.object({
   reviewedAt: z.string(),
 });
 
+/* ── booking (marketplace de carpooling PROGRAMADO · ADR-014) ── */
+/// Se PUBLICÓ un PublishedTrip (la oferta del conductor pasó a BORRADOR → PUBLICADO). booking-service lo
+/// emite por OUTBOX en la MISMA tx que crea la oferta (FOUNDATION §6 / ADR-014 §7). Topic 'booking'
+/// (el prefijo `booking.` mantiene el topic; `topicForEvent` corta antes del punto), key = publishedTripId.
+/// Downstream núcleo: notification. Dinero en céntimos PEN (Int).
+///
+/// NOMBRE (ADR-014 §7.1, alineado): este evento es la PUBLICACIÓN del PublishedTrip, NO la creación de un
+/// Booking. Antes se llamaba `booking.created` (nombre invertido: §7.1 reserva `booking.created` para "se
+/// crea un Booking"). Se renombra a `booking.published` para que el nombre refleje el agregado real (la
+/// OFERTA), sin cambiar el topic 'booking'.
+export const bookingPublished = z.object({
+  publishedTripId: z.string(),
+  driverId: z.string(),
+  vehicleId: z.string(),
+  asientosTotales: z.number().int(),
+  precioBase: z.number().int(), // céntimos PEN
+  modoReserva: z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']),
+  fechaHoraSalida: z.string(),
+  pais: z.string(),
+  moneda: z.string(),
+});
+/// Se CREÓ un Booking en modo REVISION → PENDIENTE_APROBACION (espera al conductor). ADR-014 §7.1:
+/// `booking.requested` = "Booking → PENDIENTE_APROBACION". SOLO se emite en REVISION_CADA_SOLICITUD; en
+/// INSTANT el Booking NACE APROBADO y emite `booking.approved` (no `booking.requested`). booking-service lo
+/// emite por OUTBOX en la MISMA tx que crea la reserva. Topic 'booking', key = bookingId.
+export const bookingRequested = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  asientos: z.number().int(),
+  precioAcordado: z.number().int(), // céntimos PEN = base + specialRequest
+  modoReserva: z.literal('REVISION_CADA_SOLICITUD'),
+  estado: z.literal('PENDIENTE_APROBACION'),
+});
+/// Origen de un `booking.approved` (ADR-014 §7.1): por qué el Booking quedó APROBADO. FUENTE ÚNICA tipada,
+/// exportada JUNTO al schema para que el PRODUCTOR (booking-service) y el SCHEMA publicado NO puedan divergir
+/// (el bug clásico: el productor emite un literal mágico `'DRIVER_APPROVAL'` que NO está en el enum → el relay
+/// hace schema.parse() → LANZA → poison message reintentado para siempre, nunca llega a Kafka). El productor
+/// importa `BookingApprovedOrigen.X`, NUNCA un string suelto. Los valores son los EXACTOS del `z.enum` de abajo.
+export const BookingApprovedOrigen = {
+  /// INSTANT_BOOKING: el Booking nace APROBADO al reservar (salta PENDIENTE_APROBACION, §4.2).
+  INSTANT_BOOKING: 'INSTANT_BOOKING',
+  /// El conductor aprobó una solicitud en REVISION (PENDIENTE_APROBACION → APROBADO, F1/F3b).
+  APROBACION_CONDUCTOR: 'APROBACION_CONDUCTOR',
+} as const;
+export type BookingApprovedOrigen =
+  (typeof BookingApprovedOrigen)[keyof typeof BookingApprovedOrigen];
+
+/// El Booking quedó APROBADO. ADR-014 §7.1: `booking.approved` = "APROBADO (dispara CHARGE async)". Dos
+/// orígenes: (a) INSTANT_BOOKING, el Booking nace APROBADO al reservar (salta PENDIENTE_APROBACION, §4.2);
+/// (b) REVISION, el conductor aprueba (F1). El campo `origen` distingue ambos para el consumidor. Topic
+/// 'booking', key = bookingId. El enum del `origen` es la fuente única `BookingApprovedOrigen` (arriba): el
+/// `z.enum` toma sus valores de ahí para que productor y schema NO diverjan (cero strings mágicos sueltos).
+export const bookingApproved = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  asientos: z.number().int(),
+  precioAcordado: z.number().int(), // céntimos PEN
+  modoReserva: z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']),
+  estado: z.literal('APROBADO'),
+  origen: z.enum([
+    BookingApprovedOrigen.INSTANT_BOOKING,
+    BookingApprovedOrigen.APROBACION_CONDUCTOR,
+  ]),
+});
+/// El conductor EDITÓ su oferta publicada (F1a). Solo es editable mientras está PUBLICADO (sin reservas
+/// confirmadas / pre-EN_RUTA): itinerario/precio/asientos/modoReserva/reglas. Se emite por OUTBOX en la
+/// MISMA tx que la mutación (espeja booking.published). Topic 'booking', key = publishedTripId. Los campos
+/// son OPCIONALES: el evento lleva solo lo que cambió (patch), más el publishedTripId/driverId de contexto.
+export const bookingUpdated = z.object({
+  publishedTripId: z.string(),
+  driverId: z.string(),
+  vehicleId: z.string().optional(),
+  origenLat: z.number().optional(),
+  origenLon: z.number().optional(),
+  destinoLat: z.number().optional(),
+  destinoLon: z.number().optional(),
+  asientosTotales: z.number().int().optional(),
+  precioBase: z.number().int().optional(), // céntimos PEN
+  modoReserva: z.enum(['INSTANT_BOOKING', 'REVISION_CADA_SOLICITUD']).optional(),
+  fechaHoraSalida: z.string().optional(),
+  reglas: z.string().nullable().optional(),
+});
+/// Razón TIPADA de un `booking.cancelled` de un BOOKING individual (F3b/F3c). FUENTE ÚNICA (espeja
+/// BookingApprovedOrigen): el productor emite `BookingCancelledRazon.X`, NUNCA un literal suelto. F3b dejó un
+/// único valor (el cobro síncrono rechazó al disparar); F3c agrega los DOS caminos del consumer de
+/// payment.captured/failed. El fan-out de Refund por cancelación-de-oferta (forma A) NO lleva razón.
+///
+/// CONSECUENCIA PARA EL REFUND (payment-service · F3c-payment · PENDIENTE): payment refundará los
+/// `booking.cancelled` con razon=ASIENTO_LLENO u OFERTA_NO_DISPONIBLE (hubo CAPTURA: el dinero se movió y hay
+/// que devolverlo). COBRO_RECHAZADO y COBRO_FALLIDO NO se refundan: charge-on-approval sin hold → no se capturó
+/// nada que devolver.
+export const BookingCancelledRazon = {
+  /// (F3b · disparo síncrono) El CHARGE rechazó SÍNCRONAMENTE al dispararlo (decline DEBT/FAILED, o error
+  /// PERMANENTE 4xx de payment · ADR-014 §5.4 "falla permanente → CANCELADO"). El asiento NO se decrementó
+  /// (charge-on-approval sin hold). SIN Refund (no se capturó nada).
+  COBRO_RECHAZADO: 'COBRO_RECHAZADO',
+  /// (F3c · handler de payment.captured · ADR-014 §6 camino infeliz) El cobro SÍ capturó, pero al correr la txn
+  /// atómica del seat-lock el asiento YA estaba lleno (otro booking confirmó el último asiento primero) →
+  /// COBRO_PENDIENTE → CANCELADO. ÚNICO caso con Refund (payment-service devuelve la captura · F3c-payment).
+  ASIENTO_LLENO: 'ASIENTO_LLENO',
+  /// (F3c · handler de payment.failed · ADR-014 §5.4 / BR-P02) El riel agotó sus reintentos internos
+  /// (willRetry=false → DEBT permanente) → COBRO_PENDIENTE → CANCELADO. SIN Refund (nunca se capturó). La deuda
+  /// se DERIVA de PaymentStatus.DEBT de payment-service; booking NO crea un flag DEBT propio.
+  COBRO_FALLIDO: 'COBRO_FALLIDO',
+  /// (F3c · GUARD DEFENSIVO del seat-lock · ADR-014 §6) El cobro SÍ capturó, pero al correr la txn atómica la
+  /// OFERTA ya NO está en un estado RESERVABLE (anómalo / futuro EN_RUTA-COMPLETADO-CANCELADO de F4) → no se
+  /// puede confirmar la reserva sobre ella → COBRO_PENDIENTE → CANCELADO. CON Refund (hubo captura, igual que
+  /// ASIENTO_LLENO: el dinero se movió y hay que devolverlo · F3c-payment). Defensa contra el poison-pill que
+  /// causaría un payment.captured tardío sobre una oferta ya no reservable; el camino EN_RUTA real es F4.
+  OFERTA_NO_DISPONIBLE: 'OFERTA_NO_DISPONIBLE',
+  /// (F3c-passenger · el PASAJERO cancela su propia SOLICITUD aún no resuelta · ADR-014 §4.2) La reserva
+  /// estaba en PENDIENTE_APROBACION (esperando la decisión del conductor) y su DUEÑO la canceló →
+  /// PENDIENTE_APROBACION → CANCELADO. SIN Refund: charge-on-approval, el CHARGE solo se dispara al APROBAR y
+  /// acá nunca se aprobó → no se capturó nada que devolver. estadoAnterior='PENDIENTE_APROBACION'.
+  CANCELADO_PASAJERO: 'CANCELADO_PASAJERO',
+} as const;
+export type BookingCancelledRazon =
+  (typeof BookingCancelledRazon)[keyof typeof BookingCancelledRazon];
+
+/// `booking.cancelled` cubre DOS formas distintas que comparten topic/nombre, resueltas de forma ADITIVA
+/// (los campos nuevos son OPCIONALES → el caso viejo sigue parseando IGUAL):
+///   (A) CANCELACIÓN DE LA OFERTA (PublishedTrip · F1a): el conductor/admin cancela su viaje publicado. Lleva
+///       `publishedTripId` + `driverId` + `estadoAnterior` del PublishedTrip. NO lleva `bookingId` ni `razon`.
+///       key = publishedTripId. El fan-out de Refund a las reservas activas lo gestiona payment-service.
+///   (B) CANCELACIÓN DE UN BOOKING INDIVIDUAL (F3b/F3c · ADR-014 §5.4 / §6): lleva `bookingId` + `razon`
+///       (BookingCancelledRazon) + `estadoAnterior`. key = bookingId. Sub-formas por `razon`:
+///         · COBRO_RECHAZADO (F3b): el cobro síncrono rechazó al disparar el CHARGE → estadoAnterior='APROBADO'.
+///           SIN Refund (no se capturó nada).
+///         · CANCELADO_PASAJERO (F3c-passenger): el pasajero canceló su solicitud PENDIENTE_APROBACION →
+///           estadoAnterior='PENDIENTE_APROBACION'. SIN Refund (charge-on-approval, nunca se aprobó ni capturó).
+///         · COBRO_FALLIDO  (F3c): el riel agotó reintentos (payment.failed willRetry=false) →
+///           estadoAnterior='COBRO_PENDIENTE'. SIN Refund (no se capturó nada).
+///         · ASIENTO_LLENO  (F3c): el cobro CAPTURÓ pero el asiento ya se llenó (§6 camino infeliz) →
+///           estadoAnterior='COBRO_PENDIENTE'. ÚNICO caso CON Refund (payment-service devuelve la captura).
+/// DECISIÓN (aditiva, no romper): se mantiene UN solo schema con `publishedTripId`/`driverId` OPCIONALES y se
+/// AÑADEN `bookingId`/`razon` OPCIONALES. Así el caso (A) existente parsea sin cambios (siempre trae
+/// publishedTripId+driverId+estadoAnterior) y el caso (B) nuevo también valida. Un `z.union` discriminado se
+/// evaluó pero rompería la firma del payload existente (consumers que asumen `publishedTripId` presente); los
+/// campos opcionales son el mínimo cambio que NO toca el camino vivo. `estado` y `estadoAnterior` son comunes.
+export const bookingCancelled = z.object({
+  /// (A) la oferta cancelada. Presente en la cancelación-de-oferta; ausente en la de booking individual.
+  publishedTripId: z.string().optional(),
+  /// (A) dueño de la oferta. Presente en la cancelación-de-oferta; ausente en la de booking individual.
+  driverId: z.string().optional(),
+  /// (B) el booking individual cancelado (F3b · cobro rechazado). Ausente en la cancelación-de-oferta.
+  bookingId: z.string().optional(),
+  /// (B) por qué se canceló el booking individual (TIPADO). Ausente en la cancelación-de-oferta. F3c añadió
+  /// ASIENTO_LLENO (Refund) y COBRO_FALLIDO (sin Refund) a COBRO_RECHAZADO (sin Refund, F3b) — aditivo.
+  razon: z
+    .enum([
+      BookingCancelledRazon.COBRO_RECHAZADO,
+      BookingCancelledRazon.ASIENTO_LLENO,
+      BookingCancelledRazon.COBRO_FALLIDO,
+      BookingCancelledRazon.OFERTA_NO_DISPONIBLE,
+      BookingCancelledRazon.CANCELADO_PASAJERO,
+    ])
+    .optional(),
+  estado: z.literal('CANCELADO'),
+  /// Estado del que se canceló (auditoría / decisión de Refund downstream). (A) estado del PublishedTrip;
+  /// (B) 'APROBADO' (cobro síncrono rechazado, F3b) o 'COBRO_PENDIENTE' (handler de payment.captured/failed, F3c).
+  estadoAnterior: z.string(),
+});
+/// `booking.confirmed` — el cobro CAPTURÓ y el seat-lock atómico (ADR-014 §6) decrementó el asiento:
+/// COBRO_PENDIENTE → CONFIRMADO. Lo emite booking-service por OUTBOX en la MISMA tx que el decremento de
+/// `asientosDisponibles` (atomicidad estado↔asiento↔evento, §6/§7). Topic 'booking', key = bookingId.
+/// Consumidores núcleo (ADR-014 §7.1): notification (recibo), rating (futuro), payout (F5). `paymentId` es la
+/// captura que confirmó (correlación con payment-service). Dinero/asientos en Int (céntimos PEN).
+export const bookingConfirmed = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  asientos: z.number().int(),
+  precioAcordado: z.number().int(), // céntimos PEN
+  paymentId: z.string(),
+  estado: z.literal('CONFIRMADO'),
+});
+// Los demás eventos del topic 'booking' (booking.expired/started/completed · ADR-014 §7.1) se DECLARAN al
+// implementar F4 (su emisión vive en la fase que la gatilla).
+
 /** Registro central: eventType → schema del payload. */
+/* ── catálogo de ofertas (ADR 013 · trip-service, dueño del catálogo) ── */
+/// Un override CRUDO del overlay del catálogo tal como viaja en `catalog.updated` (lo que `normalizeOverride`
+/// de trip-service serializa): `id` + `enabled` SIEMPRE; el resto (modo + params de pricing) SOLO si el admin
+/// los seteó explícitamente. Espeja `OfferingOverride` de @veo/shared-types en el wire. `multiplier` es el único
+/// float (p.ej. 0.55); los céntimos y la version son enteros no-negativos (`perKmCents:0` es VÁLIDO — Mecánico).
+const offeringOverrideWire = z.object({
+  id: z.string(),
+  enabled: z.boolean(),
+  mode: pricingMode.optional(),
+  multiplier: z.number().nonnegative().optional(),
+  minFareCents: z.number().int().nonnegative().optional(),
+  baseFareCents: z.number().int().nonnegative().optional(),
+  perKmCents: z.number().int().nonnegative().optional(),
+  perMinCents: z.number().int().nonnegative().optional(),
+});
+/// El catálogo de ofertas (ADR 013) fue REEMPLAZADO por el admin: trip-service (dueño del catálogo) emite esto
+/// por OUTBOX en la MISMA tx que persiste el overlay + bumpea `version`. Topic 'catalog' (`topicForEvent` corta
+/// antes del punto), key = singleton 'GLOBAL'. Consumidores:
+///   - trip-service (PricingCacheConsumer): invalida su cache de catálogo cross-réplica (ignora el payload).
+///   - fleet-service (CatalogOperabilityConsumer): DERIVA las clases de vehículo operables del payload
+///     (`resolveCatalog({overrides,version})` → `operableVehicleClasses`, PURO sobre la base estática `OFFERINGS`
+///     + el overlay del evento — SIN re-leer a trip: un blip de trip NUNCA dispara holds) y, por DELTA contra el
+///     estado previo, suspende/reincorpora a los conductores de la clase que se apagó/encendió.
+/// El payload lleva el overlay CRUDO (`overrides`) — NO las offerings ya resueltas: el consumidor las resuelve
+/// con la función pura compartida, que aplica `defaultEnabled` a las ofertas sin override (la base es CÓDIGO,
+/// determinista). `version` MONOTÓNICA: el consumidor descarta un snapshot con version ≤ a la ya aplicada
+/// (idempotencia + tolerancia al reordenamiento at-least-once). Antes NO estaba registrado (viajaba SIN validar);
+/// registrarlo valida el contrato en el producer (publish) y en ambos consumidores.
+export const catalogUpdated = z.object({
+  overrides: z.array(offeringOverrideWire),
+  version: z.number().int().nonnegative(),
+  updatedAt: z.string(),
+});
+
+/* ── policies / PBAC (ADR-024 · identity-service, dueño del registro de políticas de gobierno) ── */
+/// Una política de gobierno (ADR-024) fue MUTADA por el admin: identity-service (dueño del registro `Policy`)
+/// lo emite por OUTBOX en la MISMA tx que persiste el estado + bumpea `version` (molde radius-config/pricing).
+/// DOBLE consumidor, como `admin.role_changed`:
+///   - audit-service: traza inmutable al WORM de QUIÉN cambió QUÉ política (actor=`updatedBy`, recurso=`key`).
+///     La proyección allowlist deja key/family/enabled/version/updatedBy/updatedAt; `params` (objeto) se descarta
+///     (el detalle vive en la tabla `Policy`; el WORM guarda el hecho + el actor + el toggle + la versión).
+///   - `@veo/policy` (cliente runtime cacheado · Fase 1): invalida el cache de esa `key` → el cambio del
+///     superadmin surte efecto INMEDIATO, sin esperar TTL. Solo necesita `key`+`version`; el resto es enriquecido.
+/// Topic 'policy' (`topicForEvent` corta antes del punto). `key` = id canónico de la política (ej. 'auth.stepup').
+/// SIN PII: keys de config, flags, números y roles/cidrs — nunca datos personales.
+export const policyUpdated = z.object({
+  /// Key canónica de la política mutada (id del catálogo `@veo/policy`).
+  key: z.string(),
+  /// Familia funcional ('auth' | 'data' | 'access' | 'ops').
+  family: z.string(),
+  /// Estado vigente tras el cambio.
+  enabled: z.boolean(),
+  /// Parámetros vigentes (jsonb tipado por la key en `@veo/policy`). Para el cliente runtime; el WORM lo descarta.
+  params: z.record(z.unknown()),
+  /// Versión MONOTÓNICA tras el bump (cache-busting).
+  version: z.number().int().positive(),
+  /// actorId del operador que la mutó (accountability). 'system' nunca emite esto (el seed no publica).
+  updatedBy: z.string(),
+  /// Marca ISO del cambio.
+  updatedAt: z.string(),
+});
+
+/* ── overlay de visibilidad de permisos (ADR-025 · gobierno unificado, capa 2 · identity-service) ── */
+/// Un OVERRIDE de permiso (overlay subtract-only, ADR-025 §3) fue MUTADO por el superadmin: identity-service
+/// (dueño del registro `PermissionOverride` en el módulo `gobierno`) lo emite por OUTBOX en la MISMA tx que
+/// persiste el par + bumpea `version` (mismo molde que `policy.updated`). DOBLE consumidor:
+///   - audit-service: traza inmutable al WORM de QUIÉN restó/des-restó QUÉ permiso a QUÉ rol
+///     (actor=`updatedBy`, recurso=`role|permission`, `hidden`, `version`).
+///   - `@veo/policy` (cliente runtime cacheado): actualiza el OVERLAY de ese par → la resta del superadmin
+///     surte efecto INMEDIATO, sin TTL. El efectivo lo compone el caller: `base ∧ ¬override`.
+/// Topic 'permission_override' (`topicForEvent` corta antes del punto), aislado del topic 'policy'.
+/// SIN PII: rol, permiso, flag, versión y actorId — nunca datos personales.
+export const permissionOverrideUpdated = z.object({
+  /// Rol al que se le restó/des-restó el permiso (un `AdminRole`, transportado como string).
+  role: z.string(),
+  /// Permiso afectado (ej. 'drivers:approve', 'ops:view').
+  permission: z.string(),
+  /// subtract-only: `true` = RESTADO al rol; `false` = des-restaurado (rige la base).
+  hidden: z.boolean(),
+  /// Versión MONOTÓNICA tras el bump (cache-busting / orden ante reentrega).
+  version: z.number().int().positive(),
+  /// actorId del superadmin que lo mutó (accountability). 'system' nunca emite esto.
+  updatedBy: z.string(),
+  /// Marca ISO del cambio.
+  updatedAt: z.string(),
+});
+
 export const EVENT_SCHEMAS = {
   'user.registered': userRegistered,
   'user.email_verified': userEmailVerified,
@@ -890,10 +1641,20 @@ export const EVENT_SCHEMAS = {
   'user.deletion_requested': userDeletionRequested,
   'user.deleted': userDeleted,
   'admin.role_changed': adminRoleChanged,
+  'driver.registered': driverRegistered,
   'driver.verified': driverVerified,
   'driver.rejected': driverRejected,
   'driver.suspended': driverSuspended,
+  'driver.resubmitted': driverResubmitted,
+  'driver.reactivated': driverReactivated,
+  'driver.went_offline': driverWentOffline,
+  'driver.went_online': driverWentOnline,
+  'driver.excessive_cancellations': driverExcessiveCancellations,
+  'driver.debt_exceeded': driverDebtExceeded,
+  'driver.debt_cleared': driverDebtCleared,
   'biometric.failed': biometricFailed,
+  'biometric.enrolled': biometricEnrolled,
+  'biometric.enroll_rejected': biometricEnrollRejected,
   'user.referred': userReferred,
   'referral.rewarded': referralRewarded,
   'trip.requested': tripRequested,
@@ -902,6 +1663,7 @@ export const EVENT_SCHEMAS = {
   'trip.arriving': tripArriving,
   'trip.arrived': tripArrived,
   'trip.started': tripStarted,
+  'trip.destination_changed': tripDestinationChanged,
   'trip.completed': tripCompleted,
   'trip.cancelled': tripCancelled,
   'trip.child_code_failed': tripChildCodeFailed,
@@ -923,6 +1685,10 @@ export const EVENT_SCHEMAS = {
   'dispatch.offer_withdrawn': dispatchOfferWithdrawn,
   'pricing.mode_schedule_updated': pricingModeScheduleUpdated,
   'pricing.bid_floor_updated': pricingBidFloorUpdated,
+  'pricing.base_fare_updated': pricingBaseFareUpdated,
+  'catalog.updated': catalogUpdated,
+  'policy.updated': policyUpdated,
+  'permission_override.updated': permissionOverrideUpdated,
   'driver.location_updated': driverLocationUpdated,
   'driver.entered_zone': driverEnteredZone,
   'media.recording_started': mediaRecordingStarted,
@@ -930,6 +1696,8 @@ export const EVENT_SCHEMAS = {
   'media.access_granted': mediaAccessGranted,
   'media.access_rejected': mediaAccessRejected,
   'media.access_viewed': mediaAccessViewed,
+  'media.render_completed': mediaRenderCompleted,
+  'media.render_failed': mediaRenderFailed,
   'payment.captured': paymentCaptured,
   'payment.failed': paymentFailed,
   'payment.tip_added': paymentTipAdded,
@@ -939,13 +1707,18 @@ export const EVENT_SCHEMAS = {
   'payment.cancellation_penalty_collected': cancellationPenaltyCollected,
   'payment.affiliation_activated': paymentAffiliationActivated,
   'payment.affiliation_expired': paymentAffiliationExpired,
+  'payment.commission_updated': paymentCommissionUpdated,
+  'payout.processing': payoutProcessing,
   'payout.processed': payoutProcessed,
+  'payout.failed': payoutFailed,
   'promo.redeemed': promoRedeemed,
   'incentive.completed': incentiveCompleted,
   'panic.triggered': panicTriggered,
   'panic.fanout_requested': panicFanoutRequested,
   'panic.acknowledged': panicAcknowledged,
   'panic.resolved': panicResolved,
+  'panic.dispatched': panicDispatched,
+  'panic.escalated': panicEscalated,
   'notification.sent': notificationSent,
   'notification.delivered': notificationDelivered,
   'notification.failed': notificationFailed,
@@ -958,19 +1731,46 @@ export const EVENT_SCHEMAS = {
   'audit.recorded': auditRecorded,
   'fleet.document_expiring': fleetDocumentExpiring,
   'fleet.document_expired': fleetDocumentExpired,
+  'fleet.document_rejected': fleetDocumentRejected,
   'fleet.driver_suspended': fleetDriverSuspended,
+  'fleet.driver_reactivated': fleetDriverReactivated,
   'fleet.vehicle_suspended': fleetVehicleSuspended,
   'fleet.vehicle_registered': fleetVehicleRegistered,
   'fleet.vehicle_model_reviewed': fleetVehicleModelReviewed,
+  'booking.published': bookingPublished,
+  'booking.requested': bookingRequested,
+  'booking.approved': bookingApproved,
+  'booking.updated': bookingUpdated,
+  'booking.confirmed': bookingConfirmed,
+  'booking.cancelled': bookingCancelled,
 } as const satisfies Record<string, z.ZodType>;
 
 export type EventType = keyof typeof EVENT_SCHEMAS;
 export type EventPayload<T extends EventType> = z.infer<(typeof EVENT_SCHEMAS)[T]>;
 
-/** Topic Kafka para un eventType: el dominio antes del punto. */
+/**
+ * OVERRIDES de topic (eventType → topic) que ROMPEN el default "dominio antes del punto".
+ *
+ * `driver.location_updated` es el FIREHOSE de GPS (un ping por conductor activo cada ~15s, todos los conductores
+ * online). Por el default caería en el topic 'driver' JUNTO a los eventos de CICLO DE VIDA de baja frecuencia
+ * (driver.verified/rejected/suspended/resubmitted/reactivated/flagged). Eso obliga a CUALQUIER consumer del ciclo
+ * de vida (rating-service oye `driver.reactivated`; admin-bff oye varios) a suscribirse al topic 'driver' COMPLETO
+ * y, por la REGLA DE ORO (un groupId/consumer = todos sus topics juntos), a DESERIALIZAR el firehose entero solo
+ * para descartarlo (no tiene handler). Aislar el firehose en su PROPIO topic deja 'driver' limpio (solo ciclo de
+ * vida) para esos consumers, sin que el productor (driver-bff) ni los consumers del firehose (dispatch, public-bff,
+ * admin-bff) cambien una línea: TODOS resuelven su topic por esta misma función. Un único punto de routing.
+ */
+const DRIVER_LOCATION_TOPIC = 'driver-location';
+const TOPIC_OVERRIDES: Readonly<Record<string, string>> = {
+  'driver.location_updated': DRIVER_LOCATION_TOPIC,
+};
+
+/** Topic Kafka para un eventType: override explícito si lo hay; si no, el dominio antes del punto. */
 export function topicForEvent(eventType: string): string {
+  const override = TOPIC_OVERRIDES[eventType];
+  if (override) return override;
   const domain = eventType.split('.')[0];
-  // driver.* eventos los emite tracking/identity pero comparten topic 'driver'
+  // driver.* (excepto el firehose de ubicación, aislado arriba) comparten el topic 'driver': ciclo de vida.
   return domain ?? 'misc';
 }
 

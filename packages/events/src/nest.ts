@@ -49,6 +49,13 @@ export interface KafkaConsumerBootstrapOptions {
   groupId: string;
   /** Consumir desde el principio del topic. Default: false (igual que KafkaEventConsumer.start). */
   fromBeginning?: boolean;
+  /**
+   * Concurrencia de particiones del consumer (kafkajs `partitionsConsumedConcurrently`). OPCIONAL,
+   * default 1 (orden estricto: una partición a la vez). Subirla paraleliza SOLO particiones DISTINTAS —
+   * cada partición sigue serial → la serialización per-KEY se preserva. La sube el consumer del firehose
+   * de GPS (dispatch, key=driverId) para escalar el ingest sin romper el RMW per-driver del hot-index.
+   */
+  partitionsConsumedConcurrently?: number;
 }
 
 /**
@@ -67,7 +74,9 @@ export abstract class KafkaConsumerBootstrap implements OnModuleInit, OnModuleDe
   private readonly fromBeginning: boolean;
 
   protected constructor(options: KafkaConsumerBootstrapOptions) {
-    this.consumer = new KafkaEventConsumer(createKafka(options), options.groupId);
+    this.consumer = new KafkaEventConsumer(createKafka(options), options.groupId, {
+      partitionsConsumedConcurrently: options.partitionsConsumedConcurrently,
+    });
     this.fromBeginning = options.fromBeginning ?? false;
   }
 

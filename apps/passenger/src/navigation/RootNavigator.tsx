@@ -1,29 +1,32 @@
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {useTheme} from '@veo/ui-kit';
+import {useNavigation} from '@react-navigation/native';
+import {typography, useTheme} from '@veo/ui-kit';
 import React from 'react';
+import {Pressable} from 'react-native';
 import {useTranslation} from 'react-i18next';
+import {IconArrowLeft} from '../features/trip/presentation/components/icons';
 import {
   AuthScreen,
-  BiometricLockScreen,
   CompleteProfileScreen,
   OnboardingScreen,
   SessionExpiredScreen,
   SplashScreen,
-  useBiometricGateStore,
   useOnboardingStore,
 } from '../features/auth/presentation';
 import {useProfileCompletion} from '../features/profile/presentation';
 import {TrustedContactsScreen} from '../features/contacts/presentation';
 import {ChildModeScreen} from '../features/childMode/presentation';
 import {KycCameraScreen} from '../features/kyc/presentation';
-import {NotificationsScreen} from '../features/notifications/presentation';
+import {
+  NotificationPrefsScreen,
+  NotificationsScreen,
+} from '../features/notifications/presentation';
 import {PanicScreen} from '../features/panic/presentation';
 import {
   PaymentMethodsScreen,
   PaymentScreen,
 } from '../features/payments/presentation';
 import {SavedPlacesScreen} from '../features/places/presentation';
-import {ProfileScreen} from '../features/profile/presentation';
 import {RatingScreen} from '../features/ratings/presentation';
 import {ReferralsScreen} from '../features/referrals/presentation';
 import {ChatScreen} from '../features/chat/presentation';
@@ -32,21 +35,20 @@ import {
   CameraControlScreen,
   CameraLiveScreen,
   CounterScreen,
+  FamilyShareScreen,
   LostItemScreen,
   NoOffersScreen,
   OffersBoardScreen,
   ReassignScreen,
-  RequestFlowScreen,
-  ScheduledTripsScreen,
-  ScheduleNewScreen,
-  TripActiveScreen,
-  TripHistoryScreen,
 } from '../features/trip/presentation';
 import {
-  MapPickScreen,
-  RouteQuoteScreen,
-  SearchScreen,
-} from '../features/maps/presentation';
+  CarpoolBookingReviewScreen,
+  CarpoolBookingStatusScreen,
+  CarpoolResultsScreen,
+  CarpoolSearchScreen,
+  CarpoolTripDetailScreen,
+} from '../features/carpool/presentation';
+import {MapPickScreen, SearchScreen} from '../features/maps/presentation';
 import {useSessionStore} from '../core/session/sessionStore';
 import {syncPushRegistration} from '../services/messaging';
 import {SplashGate} from './components/SplashGate';
@@ -65,33 +67,55 @@ import type {RootStackParamList} from './types';
  * `RequestFlowScreen`, que desmonta el `AppMap` cuando el Home pierde foco (ver allí).
  */
 
+import {MainTabs} from './MainTabs';
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+/**
+ * Back CANÓNICO del header NATIVO de React Navigation: SOLO el chevron ‹ de iOS (`IconArrowLeft` ya es un
+ * chevron), sin el back de sistema — en iOS 26 el back nativo viene envuelto en una PÍLDORA de vidrio
+ * (Liquid Glass). Al reemplazar `headerLeft` por este Pressable plano, TODA la app queda con el mismo back
+ * (regla del dueño): chevron pelado, sin círculo/container. Espeja al back in-body de `ScreenHeader`.
+ */
+function HeaderBackChevron(): React.JSX.Element {
+  const navigation = useNavigation();
+  const theme = useTheme();
+  const {t} = useTranslation();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t('actions.back')}
+      hitSlop={12}
+      onPress={() => navigation.goBack()}>
+      <IconArrowLeft color={theme.colors.ink} size={28} />
+    </Pressable>
+  );
+}
 
 export function RootNavigator(): React.JSX.Element {
   const {t} = useTranslation();
   const theme = useTheme();
   const status = useSessionStore(state => state.status);
   const onboardingCompleted = useOnboardingStore(state => state.completed);
-  const biometricLocked = useBiometricGateStore(state => state.locked);
   // Completitud derivada del perfil REAL (`GET /users/me`) o de la bandera local por usuario; no
   // de un flag global (que atrapaba a sesiones existentes). 'loading' mientras se resuelve.
   const profileCompletion = useProfileCompletion();
 
-  // SINCRONIZACIÓN de push una vez que la sesión está activa y desbloqueada: registra el token SOLO si
+  // SINCRONIZACIÓN de push una vez que la sesión está activa: registra el token SOLO si
   // el permiso YA estaba concedido (NO promptea — el permiso se pide PROGRESIVO: pre-prompt contextual
   // al pedir viaje + toggle del perfil). Cubre login fresco y cold-start. Best-effort, gateado por
   // FIREBASE_ENABLED; no bloquea ni tumba la navegación. Quien ya aceptó sigue recibiendo push.
   const pushRegistered = React.useRef(false);
   React.useEffect(() => {
-    const active = status === 'authenticated' && !biometricLocked;
+    const active = status === 'authenticated';
     if (active && !pushRegistered.current) {
       pushRegistered.current = true;
       void syncPushRegistration();
     } else if (!active) {
-      // Sesión cerrada/bloqueada: permite re-registrar en el próximo login.
+      // Sesión cerrada: permite re-registrar en el próximo login.
       pushRegistered.current = false;
     }
-  }, [status, biometricLocked]);
+  }, [status]);
 
   // Splash de MARCA del cold-start: se muestra con un PISO de duración (~1.9s) aunque la sesión
   // rehidrate al instante (MMKV), así no flashea y se aprecia la marca. `splashDone` mantiene el
@@ -144,16 +168,7 @@ export function RootNavigator(): React.JSX.Element {
     );
   }
 
-  // Autenticado pero con candado biométrico activo (sesión rehidratada en frío): re-login local.
-  if (biometricLocked) {
-    return (
-      <Stack.Navigator screenOptions={{headerShown: false}}>
-        <Stack.Screen name="BiometricLock" component={BiometricLockScreen} />
-      </Stack.Navigator>
-    );
-  }
-
-  // Autenticado y desbloqueado, resolviendo la completitud del perfil (`GET /users/me`): Splash
+  // Autenticado, resolviendo la completitud del perfil (`GET /users/me`): Splash
   // como pantalla de espera para no destellar "Completar perfil" a sesiones ya completas.
   if (profileCompletion === 'loading') {
     return (
@@ -163,7 +178,7 @@ export function RootNavigator(): React.JSX.Element {
     );
   }
 
-  // Autenticado y desbloqueado pero con el perfil incompleto (sin email real ni bandera local):
+  // Autenticado pero con el perfil incompleto (sin email real ni bandera local):
   // completar perfil antes de entrar. Conmutación por estado derivado, no navegación imperativa.
   if (profileCompletion === 'incomplete') {
     return (
@@ -184,39 +199,35 @@ export function RootNavigator(): React.JSX.Element {
         headerShown: true,
         headerStyle: {backgroundColor: theme.colors.bg},
         headerTintColor: theme.colors.ink,
-        headerTitleStyle: {color: theme.colors.ink},
+        // Título del header NATIVO con la fuente de la IDENTIDAD (rol `headline` = Outfit-SemiBold,
+        // el mismo que usa el TopBar del conductor) — antes salía en la SF del sistema y desentonaba
+        // con el resto de la app (regla del dueño: una sola familia tipográfica en toda la app).
+        headerTitleStyle: {
+          color: theme.colors.ink,
+          fontFamily: typography.text.headline.fontFamily,
+          fontSize: typography.text.headline.fontSize,
+        },
         headerShadowVisible: false,
+        // Sin label junto al chevron de volver: iOS mostraba el NOMBRE DE RUTA interno ("Main")
+        // al lado de la flecha — jerga de código filtrada al usuario (visto en el barrido pen↔sim).
+        headerBackTitleVisible: false,
+        // Back CANÓNICO en TODA la app: SOLO el chevron ‹ de iOS, sin el círculo/glass del back nativo
+        // (iOS 26 lo envuelve en una píldora de vidrio). Un headerLeft propio lo deja como chevron plano.
+        headerLeft: ({canGoBack}) =>
+          canGoBack ? <HeaderBackChevron /> : null,
         contentStyle: {backgroundColor: theme.colors.bg},
       }}>
-      {/* HOME = pantalla RAÍZ autenticada (antes el tab Home). Va PRIMERA (initialRoute de facto), sin
-          header del SO (su chrome propio: pill de ubicación + campana + avatar flotan sobre el mapa). */}
+      {/* MAIN = bottom nav (Inicio·Viajes·Seguridad·Cuenta), reintroducido del design/veo.pen. Va
+          PRIMERA (initialRoute de facto). Las pantallas modales/de viaje van ENCIMA en el Stack. */}
       <Stack.Screen
-        name="Home"
-        component={RequestFlowScreen}
+        name="Main"
+        component={MainTabs}
         options={{headerShown: false}}
-      />
-      {/* "Mis viajes" y Perfil dejaron de ser tabs: ahora son pantallas del stack con el header nativo
-          oscuro estándar (la convención del resto del stack autenticado). Profile se abre desde el
-          avatar del Home; TripHistory desde la entrada "Mis viajes" del Perfil. */}
-      <Stack.Screen
-        name="TripHistory"
-        component={TripHistoryScreen}
-        options={{title: t('screens.tripHistory')}}
-      />
-      <Stack.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{title: t('screens.profile')}}
       />
       <Stack.Screen
         name="Search"
         component={SearchScreen}
         options={{headerShown: false, animation: 'slide_from_right'}}
-      />
-      <Stack.Screen
-        name="RouteQuote"
-        component={RouteQuoteScreen}
-        options={{headerShown: false}}
       />
       <Stack.Screen
         name="MapPick"
@@ -238,36 +249,73 @@ export function RootNavigator(): React.JSX.Element {
         component={NoOffersScreen}
         options={{title: t('screens.noOffers')}}
       />
+      {/* "Comparte tu viaje" (design/veo.pen zKyic): entra desde la acción Compartir del viaje activo. */}
       <Stack.Screen
-        name="TripActive"
-        component={TripActiveScreen}
-        options={{title: t('screens.tripActive')}}
+        name="FamilyShare"
+        component={FamilyShareScreen}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
-      {/* Control de cámara: header oscuro estándar, igual que el diseño CameraControl. */}
       <Stack.Screen
         name="CameraControl"
         component={CameraControlScreen}
-        options={{title: t('screens.cameraControl')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
+      />
+      {/* Carpooling (ADR-014 · pen sección 5): el FEED es la raíz del tab `Compartir` (en Main);
+          acá vive el funnel: buscador → resultados → detalle → reserva → estado. */}
+      <Stack.Screen
+        name="CarpoolSearch"
+        component={CarpoolSearchScreen}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
-        name="ScheduledTrips"
-        component={ScheduledTripsScreen}
-        options={{title: t('screens.scheduledTrips')}}
+        name="CarpoolResults"
+        component={CarpoolResultsScreen}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
-        name="ScheduleNew"
-        component={ScheduleNewScreen}
-        options={{title: t('screens.scheduleNew')}}
+        name="CarpoolTripDetail"
+        component={CarpoolTripDetailScreen}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="CarpoolBookingReview"
+        component={CarpoolBookingReviewScreen}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
+      />
+      <Stack.Screen
+        name="CarpoolBookingStatus"
+        component={CarpoolBookingStatusScreen}
+        // Sin gesto de retroceso: se entra por replace tras el POST; volver es por los CTAs
+        // explícitos ("Volver al inicio" / "Buscar otros viajes"), no por swipe accidental.
+        options={{
+          title: t('screens.carpoolBookingStatus'),
+          gestureEnabled: false,
+        }}
       />
       <Stack.Screen
         name="Notifications"
         component={NotificationsScreen}
-        options={{title: t('screens.notifications')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
+      />
+      {/* Preferencias de notificaciones (pen P/NotifPrefs): pantalla propia, distinta del feed. */}
+      <Stack.Screen
+        name="NotificationPrefs"
+        component={NotificationPrefsScreen}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="LostItem"
         component={LostItemScreen}
-        options={{title: t('screens.lostItem')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       {/* Reasignación (REASSIGNING): inmersiva, sin header del SO, sin gesto de retroceso —
           el flujo continúa al board de ofertas o cancela explícitamente. */}
@@ -279,12 +327,14 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="TrustedContacts"
         component={TrustedContactsScreen}
-        options={{title: t('screens.trustedContacts')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="ChildMode"
         component={ChildModeScreen}
-        options={{title: t('screens.childMode')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="KycCamera"
@@ -298,7 +348,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="PaymentMethods"
         component={PaymentMethodsScreen}
-        options={{title: t('screens.paymentMethods')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="Payment"
@@ -313,12 +364,14 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="SavedPlaces"
         component={SavedPlacesScreen}
-        options={{title: t('screens.savedPlaces')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="Referrals"
         component={ReferralsScreen}
-        options={{title: t('screens.referrals')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Screen
         name="Chat"
@@ -328,7 +381,8 @@ export function RootNavigator(): React.JSX.Element {
       <Stack.Screen
         name="Help"
         component={HelpScreen}
-        options={{title: t('screens.help')}}
+        // Header IN-BODY (ScreenHeader, patrón del pen): el nativo duplicaba el título.
+        options={{headerShown: false}}
       />
       <Stack.Group
         screenOptions={{presentation: 'fullScreenModal', headerShown: false}}>

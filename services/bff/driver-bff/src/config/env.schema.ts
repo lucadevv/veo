@@ -3,11 +3,25 @@
  * el proceso no arranca. Sin valores hardcodeados: defaults solo para desarrollo local.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
+
+/**
+ * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Son los rangos de IP
+ * INTERNOS del VPC (loopback 127/8 + ::1, link-local 169.254/16 + fe80::/10, y unique-local:
+ * 10/8 + 172.16/12 + 192.168/16 + fc00::/7). El ALB y el ingress-nginx tienen IP privada → caen
+ * acá; el CLIENTE real tiene IP PÚBLICA → NUNCA está en esta lista. Con esto Express camina el
+ * `X-Forwarded-For` de derecha a izquierda descartando los hops privados y resuelve `req.ip` = la
+ * primera IP pública = el cliente real (un-spoofeable). NO usamos un NÚMERO de hops: es frágil
+ * (un hop falso del atacante o un cambio de topología lo rompe). Configurable vía TRUSTED_PROXY.
+ */
+export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
 
 export const envSchema = z
   .object({
+    // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+    // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+    ...grpcTlsEnvSchema.shape,
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().default(4002),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -26,10 +40,10 @@ export const envSchema = z
     VEO_INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
 
     // Redis (rate limiting por IP+usuario+ruta).
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
 
     // Kafka (consumidor de eventos para empujar a la app del conductor por Socket.IO).
-    KAFKA_BROKERS: z.string().default('localhost:9094'),
+    KAFKA_BROKERS: requiredInProd('localhost:9094'),
     KAFKA_GROUP_ID: z.string().default('driver-bff'),
 
     // ── Mapas (Ola 2C · navegación turn-by-turn). osrm/local self-hosted; 'mapbox' = Directions API
@@ -41,28 +55,47 @@ export const envSchema = z
     MAPBOX_ACCESS_TOKEN: z.string().optional(),
 
     // gRPC (LECTURAS): host:port de cada microservicio.
-    IDENTITY_GRPC_URL: z.string().default('localhost:50051'),
-    TRIP_GRPC_URL: z.string().default('localhost:50052'),
-    DISPATCH_GRPC_URL: z.string().default('localhost:50053'),
-    PAYMENT_GRPC_URL: z.string().default('localhost:50055'),
-    RATING_GRPC_URL: z.string().default('localhost:50060'),
-    FLEET_GRPC_URL: z.string().default('localhost:50062'),
+    IDENTITY_GRPC_URL: requiredInProd('localhost:50051'),
+    TRIP_GRPC_URL: requiredInProd('localhost:50052'),
+    DISPATCH_GRPC_URL: requiredInProd('localhost:50053'),
+    PAYMENT_GRPC_URL: requiredInProd('localhost:50055'),
+    RATING_GRPC_URL: requiredInProd('localhost:50060'),
+    FLEET_GRPC_URL: requiredInProd('localhost:50062'),
 
     // REST interno (COMANDOS): base http de cada microservicio (sin /api/v1, se añade en el cliente).
-    IDENTITY_URL: z.string().url().default('http://localhost:3091'),
-    TRIP_URL: z.string().url().default('http://localhost:3092'),
-    DISPATCH_URL: z.string().url().default('http://localhost:3093'),
-    PAYMENT_URL: z.string().url().default('http://localhost:3005'),
-    PAYOUTS_URL: z.string().url().default('http://localhost:3005'),
-    NOTIFICATION_URL: z.string().url().default('http://localhost:3008'),
-    FLEET_URL: z.string().url().default('http://localhost:3012'),
-    MEDIA_URL: z.string().url().default('http://localhost:3007'),
+    IDENTITY_URL: requiredInProd('http://localhost:3091', { url: true }),
+    TRIP_URL: requiredInProd('http://localhost:3092', { url: true }),
+    DISPATCH_URL: requiredInProd('http://localhost:3093', { url: true }),
+    PAYMENT_URL: requiredInProd('http://localhost:3005', { url: true }),
+    PAYOUTS_URL: requiredInProd('http://localhost:3005', { url: true }),
+    NOTIFICATION_URL: requiredInProd('http://localhost:3008', { url: true }),
+    FLEET_URL: requiredInProd('http://localhost:3012', { url: true }),
+    MEDIA_URL: requiredInProd('http://localhost:3007', { url: true }),
     // chat-service (Ola 2A): historial + persistencia de mensajes del viaje.
-    CHAT_URL: z.string().url().default('http://localhost:3014'),
+    CHAT_URL: requiredInProd('http://localhost:3014', { url: true }),
+    // booking-service (ADR-014 · carpooling PROGRAMADO): publicar/listar/editar/cancelar ofertas + ver y
+    // aprobar/rechazar solicitudes entrantes. REST fijo 3016 (ADR-014 §12).
+    BOOKING_SERVICE_URL: requiredInProd('http://localhost:3016', { url: true }),
+    // rating-service: comandos de calificación post-viaje (el conductor califica al pasajero) + MI rating
+    // de un viaje. REST fijo 3010 (mismo servicio que expone el gRPC RATING_GRPC_URL). Sin /api/v1 (lo
+    // añade el RestGateway), a diferencia del public-bff que lo lleva embebido en su propio provider.
+    RATING_URL: requiredInProd('http://localhost:3010', { url: true }),
+
+    // Bucket S3/MinIO PRIVADO de documentos de flota (PII). Debe coincidir con media-service
+    // (S3_BUCKET_DOCUMENTS). El driver-bff lo pasa explícito al presign-put de media.
+    S3_BUCKET_DOCUMENTS: z.string().default('veo-documents-dev'),
+    // TTL (segundos) de la URL prefirmada de subida de documentos. Corto: la app sube el binario
+    // justo después de pedir el ticket. media-service acota el máximo (15 min) por su cuenta.
+    DOCUMENT_UPLOAD_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 
     // Rate limiting (ventana fija por IP+usuario+ruta).
     RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+
+    // Proxies de confianza para `trust proxy` (Express). CSV de presets/subredes. Default = rangos
+    // privados del VPC (ALB + ingress-nginx) → `req.ip` resuelve la IP pública real del cliente, no un
+    // header inyectado. Un deploy distinto (p.ej. tras Cloudflare) lo ajusta sin tocar código.
+    TRUSTED_PROXY: z.string().default(DEFAULT_TRUSTED_PROXY),
 
     // Timeout de las llamadas REST internas (ms).
     DOWNSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),

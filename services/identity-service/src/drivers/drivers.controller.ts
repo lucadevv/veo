@@ -1,25 +1,42 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsBase64,
   IsISO8601,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
 import {
+  Audiences,
+  AudienceGuard,
   Roles,
   CurrentUser,
+  InternalAudience,
   InternalIdentityGuard,
   RolesGuard,
   type AuthenticatedUser,
 } from '@veo/auth';
 import { AdminRole } from '@veo/shared-types';
-import { DriversService } from './drivers.service';
+import { DriversService, type DriverPurgeResult } from './drivers.service';
 import { DriverStatus } from '../generated/prisma';
 import { IsPlausibleBirthDate } from '../common/is-plausible-birth-date';
 
@@ -44,19 +61,92 @@ class StartShiftDto {
   geoLon?: number;
 }
 
-class EnrollFaceDto {
+/**
+ * Tope de longitud del base64 de la selfie de enrolamiento (chars). Una selfie JPEG real son decenas de KB
+ * → decenas de miles de chars base64; el techo acota el body parser ('json' 5mb) y descarta payloads
+ * desproporcionados. (El mismo orden de magnitud que la imagen del DNI en `DniFaceMatchDto`.)
+ */
+const FRAME_BASE64_MAX = 1_500_000;
+/**
+ * Techo de CANTIDAD de frames del verify de turno (liveness): un challenge real usa unos pocos frames. Acota
+ * el payload junto con el tope por-frame (M4): sin esto un cliente mandaba un array de miles de strings gigantes
+ * → presión de memoria/CPU antes de llegar al motor ONNX. Enum/constante tipada, no literal suelto.
+ */
+const MAX_VERIFY_FRAMES = 10;
+/**
+ * Piso de longitud del base64 de la selfie: 2000 descarta trivialidades (`"x"`, `"AAAA"`) sin rozar el
+ * happy path de una foto real.
+ */
+const FRAME_BASE64_MIN = 2_000;
+
+/**
+ * POST /drivers/biometric/enroll → body. Enrolamiento KYC con UNA selfie, SIN prueba de vida (decisión Lote 1):
+ * el conductor manda una sola foto (`photo`, base64 sin prefijo data:) → identity la deriva a embedding de
+ * referencia vía biometric-service `POST /v1/embed`. ENDURECIMIENTO del payload (borde server): base64 VÁLIDO
+ * y NO trivial (mín/máx). Errores tipados (400) en el borde; la detección de 1 rostro la resuelve el
+ * biometric-service. Reemplaza el contrato de liveness `{ challengeId, frames }` (el alta ya no corre el reto).
+ */
+export class EnrollFaceDto {
   @IsString()
+  @IsNotEmpty()
+  @IsBase64()
+  @MinLength(FRAME_BASE64_MIN)
+  @MaxLength(FRAME_BASE64_MAX)
   photo!: string;
+
+  /**
+   * F5 · key S3/MinIO de la selfie que el driver-bff YA subió (best-effort) para la ayuda visual del operador.
+   * Lo manda el BFF (NO la app), server-to-server. identity la valida (prefijo `drivers/{driverId}/`) y SOLO la
+   * guarda si el enrol resulta VIVO. Opcional: si la subida del BFF falló, no viene y `faceSelfieKey` queda null.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  selfieKey?: string;
 }
 
 class VerifyBiometricDto {
   @IsString()
   challengeId!: string;
 
+  // M4 — techo de cantidad (@ArrayMaxSize) + validación POR-frame (base64 válido, tamaño acotado), simétrico
+  // con EnrollFaceDto/DniFaceMatchDto. Sin esto el array no tenía ni tope de cardinalidad ni de tamaño.
   @IsArray()
   @ArrayNotEmpty()
-  @IsString({ each: true })
+  @ArrayMaxSize(MAX_VERIFY_FRAMES)
+  @IsBase64(undefined, { each: true })
+  @MinLength(FRAME_BASE64_MIN, { each: true })
+  @MaxLength(FRAME_BASE64_MAX, { each: true })
   frames!: string[];
+}
+
+/**
+ * POST /drivers/:id/dni-face-match → body (sub-lote 3C · BINDING). El admin-bff baja la foto FRONT del DNI
+ * de S3 y la pasa como base64 (`image`). El embedding de referencia NO viaja en el body: lo lee el servicio
+ * de la fila GUARDADA del conductor (server-truth · garantía de seguridad). Endurecimiento del payload:
+ * base64 válido y no trivial, con tope alineado al de los frames de enroll (mismo orden de magnitud).
+ */
+class DniFaceMatchDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsBase64()
+  @MinLength(FRAME_BASE64_MIN)
+  @MaxLength(FRAME_BASE64_MAX)
+  image!: string;
+}
+
+/**
+ * POST /drivers/:id/license-face-match → body (Lote C · BINDING licencia↔selfie). Gemelo del DNI: el admin-bff
+ * baja la foto del brevete (LICENSE_A1) de S3 y la pasa como base64 (`image`); el embedding de referencia NO
+ * viaja (server-truth). Mismo endurecimiento de payload que el DNI.
+ */
+class LicenseFaceMatchDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsBase64()
+  @MinLength(FRAME_BASE64_MIN)
+  @MaxLength(FRAME_BASE64_MAX)
+  image!: string;
 }
 
 class RejectDriverDto {
@@ -96,26 +186,57 @@ class UpdatePersonalInfoDto {
   birthDate!: string;
 }
 
+/**
+ * PATCH /drivers/me/photo → body. Foto de perfil (avatar) del conductor. `photoUrl` es la publicUrl
+ * estable que el media-service selló en el confirm (bucket público de avatares). Espeja la validación
+ * del pasajero (`users.controller UpdateProfileDto.photoUrl`: @IsUrl + @IsString).
+ */
+class UpdateDriverPhotoDto {
+  @IsUrl()
+  @IsString()
+  photoUrl!: string;
+}
+
+/**
+ * POST /drivers/check-dni → body. Chequeo de unicidad del DNI (blind index `dni_hash`) ANTES de completar
+ * el alta (F0: escaneo del DNI). Misma validación que `UpdatePersonalInfoDto.dni`.
+ */
+class CheckDniDto {
+  @IsString()
+  @Matches(/^\d{8}$/, { message: 'El DNI debe tener exactamente 8 dígitos' })
+  dni!: string;
+}
+
 @ApiTags('drivers')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+// Riel MIXTO: este controller mezcla operaciones de conductor (driver-rail) y de operador (admin-rail),
+// así que el scoping de riel va POR MÉTODO con @Audiences(...). AudienceGuard se monta a nivel CLASE (corre
+// para TODOS los handlers, fail-closed) pero SIN @Audiences de clase: cada método declara su riel — un
+// handler sin @Audiences quedaría fail-open (AudienceGuard es no-op sin metadata), por eso ninguno se omite.
+@UseGuards(InternalIdentityGuard, AudienceGuard)
 @Controller('drivers')
 export class DriversController {
   constructor(private readonly drivers: DriversService) {}
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('onboard')
   @ApiOperation({ summary: 'Onboarding del conductor (licencia) → PENDING de aprobación' })
   onboard(@CurrentUser() user: AuthenticatedUser, @Body() dto: OnboardDto) {
     return this.drivers.onboard(user.userId, dto);
   }
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('biometric/enroll')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor (BR-I02)' })
+  @ApiOperation({
+    summary:
+      'Enrolar el rostro de referencia del conductor con UNA selfie (KYC selfie-only, sin liveness)',
+  })
   enrollFace(@CurrentUser() user: AuthenticatedUser, @Body() dto: EnrollFaceDto) {
     return this.drivers.enrollFace(user.userId, dto);
   }
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('shift/biometric/challenge')
   @HttpCode(200)
   @ApiOperation({ summary: 'Emitir reto de liveness para iniciar turno (BR-I02)' })
@@ -123,6 +244,7 @@ export class DriversController {
     return this.drivers.createBiometricChallenge(user.userId);
   }
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('shift/biometric/verify')
   @HttpCode(200)
   @ApiOperation({ summary: 'Verificar liveness+match y mintear sessionRef de turno (BR-I02)' })
@@ -130,6 +252,7 @@ export class DriversController {
     return this.drivers.verifyBiometric(user.userId, dto);
   }
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('shift/start')
   @HttpCode(200)
   @ApiOperation({ summary: 'Iniciar turno con verificación biométrica (BR-I02)' })
@@ -137,6 +260,7 @@ export class DriversController {
     return this.drivers.startShift(user.userId, dto);
   }
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('shift/end')
   @HttpCode(200)
   @ApiOperation({ summary: 'Finalizar turno (OFFLINE)' })
@@ -144,6 +268,7 @@ export class DriversController {
     return this.drivers.setStatus(user.userId, DriverStatus.OFFLINE);
   }
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('shift/pause')
   @HttpCode(200)
   @ApiOperation({ summary: 'Pausar turno (ON_BREAK)' })
@@ -151,6 +276,7 @@ export class DriversController {
     return this.drivers.setStatus(user.userId, DriverStatus.ON_BREAK);
   }
 
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Patch('me/personal')
   @HttpCode(200)
   @ApiOperation({ summary: 'Registrar/actualizar datos personales del conductor (BR-I04)' })
@@ -158,7 +284,31 @@ export class DriversController {
     return this.drivers.updatePersonalInfo(user.userId, dto);
   }
 
+  // Foto de perfil (avatar) del conductor · driver-rail. Espejo del pasajero, que la persiste en User.photoUrl
+  // vía PATCH /users/me (public-rail). El conductor NO puede usar ese endpoint (riel PUBLIC_RAIL), así que su
+  // propio riel expone este setter mínimo. Anti-IDOR: el userId sale del JWT propagado, nunca del body.
+  @Audiences(InternalAudience.DRIVER_RAIL)
+  @Patch('me/photo')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Actualizar la foto de perfil (avatar) del conductor' })
+  updatePhoto(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateDriverPhotoDto) {
+    return this.drivers.updatePhoto(user.userId, dto.photoUrl);
+  }
+
+  @Audiences(InternalAudience.DRIVER_RAIL)
+  @Post('check-dni')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
+  })
+  async checkDni(@CurrentUser() user: AuthenticatedUser, @Body() dto: CheckDniDto) {
+    const exists = await this.drivers.dniExists(user.userId, dto.dni);
+    return { exists };
+  }
+
   // ── Operador (RBAC) ──
+  @Audiences(InternalAudience.ADMIN_RAIL)
   @UseGuards(RolesGuard)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Get('pending-approval')
@@ -167,6 +317,7 @@ export class DriversController {
     return this.drivers.listPendingApproval();
   }
 
+  @Audiences(InternalAudience.ADMIN_RAIL)
   @UseGuards(RolesGuard)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post(':id/approve')
@@ -176,6 +327,46 @@ export class DriversController {
     return this.drivers.approve(id);
   }
 
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/dni-face-match')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Face-match DNI↔selfie: cotejar la foto FRONT del DNI vs la biometría enrolada del conductor (BINDING · 3C)',
+  })
+  dniFaceMatch(@Param('id') id: string, @Body() dto: DniFaceMatchDto) {
+    return this.drivers.matchDniFace(id, { image: dto.image });
+  }
+
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/license-face-match')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Face-match licencia↔selfie: cotejar la foto del brevete vs la biometría enrolada del conductor (BINDING · Lote C)',
+  })
+  licenseFaceMatch(@Param('id') id: string, @Body() dto: LicenseFaceMatchDto) {
+    return this.drivers.matchLicenseFace(id, { image: dto.image });
+  }
+
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/biometric/unlock')
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Destrabar la verificación biométrica del conductor (central · regla #1: solo la central destraba). Limpia el lockout de turno + el cooldown de enrol',
+  })
+  async unlockBiometric(@Param('id') id: string): Promise<void> {
+    await this.drivers.clearBiometricLockout(id);
+  }
+
+  @Audiences(InternalAudience.ADMIN_RAIL)
   @UseGuards(RolesGuard)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post(':id/reject')
@@ -185,6 +376,7 @@ export class DriversController {
     await this.drivers.reject(id, dto.reason ?? '');
   }
 
+  @Audiences(InternalAudience.ADMIN_RAIL)
   @UseGuards(RolesGuard)
   @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
   @Post(':id/suspend')
@@ -196,7 +388,56 @@ export class DriversController {
     await this.drivers.suspend(id, dto.reason);
   }
 
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/reactivate')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Reactivar a un conductor suspendido (solo suspensiones disciplinarias)',
+  })
+  async reactivate(@Param('id') id: string): Promise<void> {
+    await this.drivers.reactivate(id);
+  }
+
+  // STEP-UP MFA · DECISIÓN DE BORDE (defensa en profundidad evaluada, NO un olvido): el step-up para este
+  // override lo impone el ADMIN-BFF (`@RequireStepUpMfa()` en su ops.controller), NO este borde. Es el patrón
+  // CONSISTENTE del repo: identity NO aplica step-up en NINGÚN endpoint de conductor — ni siquiera en `purge`
+  // (el hard-delete SUPERADMIN, la acción más destructiva, que SÍ exige step-up en el BFF). La autoridad del
+  // step-up vive donde vive la FRESCURA de la verificación: la sesión/JWT del operador, que el BFF posee y
+  // consume. A identity llega una llamada interna FIRMADA service-to-service (`InternalIdentityGuard` valida la
+  // credencial del BFF) cuyo step-up ya se exigió aguas arriba; replicar el chequeo acá exigiría propagar la
+  // evidencia de frescura del MFA en el call interno (hoy no se propaga) — sería un patrón nuevo, no defensa en
+  // profundidad gratis. El gate de ROL (@Roles Compliance+) SÍ es autoritativo en este borde (curl-proof).
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.ADMIN, AdminRole.SUPERADMIN)
+  @Post(':id/reactivate-compliance')
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Override manual del operador: reactivar a un conductor suspendido por documentos/ITV vencidos (DOCUMENT_EXPIRED + INSPECTION_EXPIRED)',
+  })
+  async reactivateForCompliance(@Param('id') id: string): Promise<void> {
+    await this.drivers.reactivateForCompliance(id);
+  }
+
+  // ── HARD purge (SUPERADMIN) ──
+  @Audiences(InternalAudience.ADMIN_RAIL)
+  @UseGuards(RolesGuard)
+  @Roles(AdminRole.SUPERADMIN)
+  @Delete(':id')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'HARD purge del conductor (re-registro): borra Driver + User + auth/biometría/consents. SUPERADMIN.',
+  })
+  purge(@Param('id') id: string): Promise<DriverPurgeResult> {
+    return this.drivers.purge(id);
+  }
+
   // ── Self-service: reenvío a revisión tras corregir (resubmit) ──
+  @Audiences(InternalAudience.DRIVER_RAIL)
   @Post('me/resubmit')
   @HttpCode(200)
   @ApiOperation({ summary: 'Reenviar a revisión tras un rechazo (REJECTED → PENDING)' })

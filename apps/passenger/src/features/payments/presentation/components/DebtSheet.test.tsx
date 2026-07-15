@@ -13,6 +13,7 @@ import type {
   ChangePaymentMethodUseCase,
   GetPaymentUseCase,
   RetryChargeUseCase,
+  SettlePenaltyUseCase,
 } from '../../domain/usecases';
 import {
   PaymentMethodNotApplicableError,
@@ -82,6 +83,7 @@ function registerDeps(opts: {
   getPayment: jest.Mock;
   retryCharge?: jest.Mock;
   changeMethod?: jest.Mock;
+  settlePenalty?: jest.Mock;
 }): void {
   container.register(
     TOKENS.getPaymentUseCase,
@@ -100,6 +102,13 @@ function registerDeps(opts: {
       ({
         execute: opts.changeMethod ?? jest.fn(),
       }) as unknown as ChangePaymentMethodUseCase,
+  );
+  container.register(
+    TOKENS.settlePenaltyUseCase,
+    () =>
+      ({
+        execute: opts.settlePenalty ?? jest.fn(),
+      }) as unknown as SettlePenaltyUseCase,
   );
 }
 
@@ -275,12 +284,11 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
 
     const out = texts(renderer);
     expect(out).toContain('Elige otro método');
-    // Digitales presentes…
-    expect(out).toEqual(
-      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // Digitales presentes (PagoEfectivo se retiró del selector 2026-07-14)…
+    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta']));
     // …y Efectivo NUNCA (no se puede cambiar a efectivo un cobro digital pendiente).
     expect(out).not.toContain('Efectivo');
+    expect(out).not.toContain('PagoEfectivo');
     act(() => renderer.unmount());
   });
 
@@ -364,7 +372,7 @@ describe('DebtSheet · TASK 3 · cambiar de método (DIGITAL)', () => {
     );
     await flush();
     await pressByLabel(renderer, 'Pagar con otro método');
-    await pressByLabel(renderer, 'PagoEfectivo');
+    await pressByLabel(renderer, 'Tarjeta');
 
     const out = texts(renderer);
     expect(out).toContain('Ese método no aplica');
@@ -397,10 +405,10 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
     expect(out).toContain('Resuelve el pago de tu viaje');
     expect(out).toContain('S/ 42.00');
     // El selector canónico con TODOS los digitales y SIN Efectivo (no aplica a un pago ya hecho).
-    expect(out).toEqual(
-      expect.arrayContaining(['Yape', 'Plin', 'Tarjeta', 'PagoEfectivo']),
-    );
+    // PagoEfectivo se retiró del selector (2026-07-14): quedan 3 digitales.
+    expect(out).toEqual(expect.arrayContaining(['Yape', 'Plin', 'Tarjeta']));
     expect(out).not.toContain('Efectivo');
+    expect(out).not.toContain('PagoEfectivo');
     // El SUGERIDO es el predeterminado del perfil (YAPE) → pill "Sugerido" + el CTA lo refleja.
     expect(out).toContain('Sugerido');
     expect(out).toContain('Pagar con Yape');
@@ -534,20 +542,123 @@ describe('DebtSheet · DEBT idle · RESOLVER CON SELECTOR', () => {
     );
     await flush();
 
-    // Prueba los 4 digitales (YAPE sugerido + PLIN/CARD/PAGOEFECTIVO), cada uno falla.
+    // Prueba los 3 digitales (YAPE sugerido + PLIN/CARD), cada uno falla (PagoEfectivo se retiró 2026-07-14).
     await pressByLabel(renderer, 'Pagar con Yape');
     await pressByLabel(renderer, 'Plin');
     await pressByLabel(renderer, 'Pagar con Plin');
     await pressByLabel(renderer, 'Tarjeta');
     await pressByLabel(renderer, 'Pagar con Tarjeta');
-    await pressByLabel(renderer, 'PagoEfectivo');
-    await pressByLabel(renderer, 'Pagar con PagoEfectivo');
 
     const out = texts(renderer);
     expect(out).toContain('Ningún método pudo procesar tu pago');
     // Escape claro presente; el selector ya no se ofrece (no hay bucle).
     expect(out).toContain('Volver más tarde');
     expect(out).not.toContain('Sugerido');
+    act(() => renderer.unmount());
+  });
+});
+
+describe('DebtSheet · CANCELLATION_PENALTY (penalidad de cancelación)', () => {
+  beforeEach(() => {
+    usePaymentPrefsStore.getState().setDefault('YAPE');
+  });
+
+  /** Deuda con SOLO una penalidad de cancelación: penaltyId presente, paymentId AUSENTE (contrato). */
+  function penaltyDebtView(): DebtView {
+    return {
+      hasDebt: true,
+      totalCents: 300,
+      debts: [
+        {
+          penaltyId: 'pen-1',
+          tripId: 'trip-pen',
+          amountCents: 300,
+          reason: 'cancellation',
+          createdAt: '2026-07-10T15:00:00.000Z',
+          kind: 'CANCELLATION_PENALTY',
+        },
+      ],
+    } as DebtView;
+  }
+
+  it('muestra el monto REAL y el porqué honesto del cargo (no "S/ 0.00" ni el copy de cobro fallido)', async () => {
+    registerDeps({getPayment: jest.fn()});
+    const renderer = render(
+      <DebtSheet
+        visible
+        debt={penaltyDebtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
+    );
+    await flush();
+
+    const out = texts(renderer);
+    expect(out).toContain('S/ 3.00');
+    expect(out).toContain('Es un cargo por la cancelación de un viaje ya aceptado.');
+    // El CTA de pagar está habilitado (hay un objetivo bloqueante aunque no tenga paymentId).
+    expect(out).toContain('Pagar con Yape');
+    act(() => renderer.unmount());
+  });
+
+  it('pagar → rutea por penaltyId a settlePenalty (NO retry-charge/cambio de método) y salda', async () => {
+    const settlePenalty = jest
+      .fn()
+      .mockResolvedValue(paymentView({status: 'CAPTURED'}));
+    const retryCharge = jest.fn();
+    const changeMethod = jest.fn();
+    registerDeps({
+      getPayment: jest.fn(),
+      retryCharge,
+      changeMethod,
+      settlePenalty,
+    });
+    const renderer = render(
+      <DebtSheet
+        visible
+        debt={penaltyDebtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
+    );
+    await flush();
+
+    await pressByLabel(renderer, 'Pagar con Yape');
+
+    // Una penalidad NO es un Payment: va por su endpoint propio con el método elegido.
+    expect(settlePenalty).toHaveBeenCalledWith('pen-1', 'YAPE');
+    expect(retryCharge).not.toHaveBeenCalled();
+    expect(changeMethod).not.toHaveBeenCalled();
+    expect(texts(renderer)).toContain('¡Listo!');
+    act(() => renderer.unmount());
+  });
+
+  it('si la liquidación vuelve PENDING con checkout → muestra el checkout + poll (mismo camino que DEBT)', async () => {
+    const settlementPending = paymentView({
+      status: 'PENDING',
+      deepLink: null,
+      checkoutUrl: 'https://pay.veo.pe/plin/pen',
+    });
+    const settlePenalty = jest.fn().mockResolvedValue(settlementPending);
+    // El poll del checkout lee el cobro de liquidación por id: devolvemos el mismo PENDING.
+    registerDeps({
+      getPayment: jest.fn().mockResolvedValue(settlementPending),
+      settlePenalty,
+    });
+    const renderer = render(
+      <DebtSheet
+        visible
+        debt={penaltyDebtView()}
+        onClose={() => {}}
+        onSettled={() => {}}
+      />,
+    );
+    await flush();
+
+    await pressByLabel(renderer, 'Pagar con Yape');
+
+    // Checkout web → "Pagar ahora" (reusa CheckoutInstructions, igual que saldar un DEBT).
+    expect(texts(renderer)).toContain('Pagar ahora');
     act(() => renderer.unmount());
   });
 });

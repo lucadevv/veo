@@ -73,14 +73,17 @@ export function periodLabel(start: Date, end: Date): string {
 /**
  * Transiciones válidas de la máquina de estados del payout (BR-P05). Mapa TIPADO y exhaustivo
  * (Record<PayoutStatus, ...>): agregar un estado al enum obliga a declarar sus transiciones.
- *  - HELD → PROCESSED es el camino de VUELTA de driver.flagged: la retención se libera cuando el
- *    review del conductor se resuelve (acción admin), nunca en silencio.
+ *  - HELD → PROCESSING es el camino de VUELTA de driver.flagged: al resolver el review (acción admin), el
+ *    payout retenido ENTRA al carril de desembolso (invoca disburse), NO salta al PROCESSED optimista
+ *    (ADR-015 §3/§D5). La plata sale por el MISMO riel que un PENDING disparado; PROCESSED se alcanza solo
+ *    cuando el riel confirma.
  */
 const PAYOUT_TRANSITIONS: Readonly<Record<PayoutStatus, readonly PayoutStatus[]>> = {
   PENDING: ['PROCESSING', 'PROCESSED', 'HELD', 'FAILED'],
   PROCESSING: ['PROCESSED', 'FAILED'],
-  // La retención se LIBERA (review resuelto) → se procesa. No vuelve a PENDING: liberar = pagar.
-  HELD: ['PROCESSED'],
+  // La retención se LIBERA (review resuelto) → entra al desembolso (PROCESSING). No vuelve a PENDING ni
+  // salta a PROCESSED: liberar = desembolsar de verdad por el riel (ADR-015 §3).
+  HELD: ['PROCESSING'],
   // Un payout fallido puede reintentarse (transferencia caída) hasta procesarse.
   FAILED: ['PROCESSING', 'PROCESSED'],
   PROCESSED: [],

@@ -1,6 +1,6 @@
 /** Test del handshake autenticado del gateway /passenger y su gating por suscriptor. */
 import { describe, it, expect, vi } from 'vitest';
-import type { JwtService } from '@veo/auth';
+import { InternalAudience, type JwtService } from '@veo/auth';
 import type { GrpcServiceClient } from '@veo/rpc';
 import { PassengerGateway } from './passenger.gateway';
 import { RealtimeStateService } from './realtime-state.service';
@@ -25,7 +25,7 @@ function makeGateway(opts: {
       .mockResolvedValue(opts.trip ?? { found: true, passengerId: 'usr-1', status: 'IN_PROGRESS' }),
   } as unknown as GrpcServiceClient;
   const state = new RealtimeStateService();
-  const gateway = new PassengerGateway(jwt, tripGrpc, SECRET, state);
+  const gateway = new PassengerGateway(jwt, tripGrpc, SECRET, InternalAudience.PUBLIC_RAIL, state);
   return { gateway, state, jwt, tripGrpc };
 }
 

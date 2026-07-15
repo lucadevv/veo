@@ -50,6 +50,40 @@ enum PaymentStatus {
   @@schema("payment")
 }
 
+/// MODO del cobro (F2.7 · ADR-017 §1.6 / ADR-015 §11.2 · nudo legal). Determina el MODELO de dinero:
+///  ON_DEMAND  → comisión DESCONTADA al conductor; tasa CONFIGURABLE por el admin (CommissionConfig.onDemandRateBps).
+///  CARPOOLING → service fee SUMADO al pasajero (CommissionConfig.carpoolingFeeBps); el conductor cobra el 100%
+///               del cost-sharing. Admin-editable, ARRANCA EN 0 (sin lucro hasta visto bueno legal) y el admin
+///               lo sube. NO se descuenta al conductor (a diferencia de ON_DEMAND). Ver ADR-017 §1.6.
+/// La columna Payment.mode es NULLABLE: las filas legacy (pre-F2.7) se LEEN como ON_DEMAND (su comportamiento
+/// histórico: comisión global de env). El modo se determina en el PUNTO DE ENTRADA del cobro, NO en los
+/// contratos de eventos cross-service.
+enum PaymentMode {
+  ON_DEMAND
+  CARPOOLING
+
+  @@schema("payment")
+}
+
+/// A1 (ADR-022) · CLASE del cobro. Discriminador TIPADO (jamás inferir por gross=0): distingue el cobro de
+/// TARIFA del cobro dedicado de PROPINA digital, para que los lookups by-trip de la tarifa (refund, recibo)
+/// NO confundan el uno con el otro.
+///  - FARE: cobro de la tarifa del viaje (default → todas las filas legacy quedan FARE, cero cambio al desplegar).
+///  - TIP:  cobro dedicado de una propina DIGITAL (gross 0, comisión 0, 100% al conductor). Solo la propina
+///          digital es un Payment; la propina en EFECTIVO se registra como TipAddition "en mano" (sin cobro).
+enum PaymentKind {
+  FARE
+  TIP
+  /// DEBT_SETTLEMENT (ADR-022 §P-A · tope de deuda CASH): cobro DIGITAL con el que el CONDUCTOR salda su deuda de
+  /// comisiones de viajes en efectivo (driver_debts PENDING) para desbloquearse. driverId=NULL a propósito (NO es
+  /// ganancia de viaje → no entra al payout por `findCapturedNonCashPayments`, que no filtra por kind); el conductor
+  /// dueño viaja en `debtSettlementDriverId`. Al CAPTURAR marca sus driver_debts PENDING→PAID y emite
+  /// `driver.debt_cleared`. Los lookups by-trip de la TARIFA filtran `kind=FARE`, así que este cobro no los contamina.
+  DEBT_SETTLEMENT
+
+  @@schema("payment")
+}
+
 enum PayoutStatus {
   PENDING
   PROCESSING
@@ -100,6 +134,8 @@ model CancellationPenalty {
   collectedAt             DateTime?                 @map("collected_at") @db.Timestamptz
 
   @@index([passengerId, status])
+  // Cron semanal de payouts: collectEarnings filtra status=COLLECTED + rango collectedAt para el split del conductor.
+  @@index([status, collectedAt])
   @@map("cancellation_penalties")
   @@schema("payment")
 }
@@ -141,6 +177,13 @@ model Payment {
   tipCents        Int           @default(0) @map("tip_cents")
   commissionCents Int           @map("commission_cents")
   feeCents        Int           @map("fee_cents")
+  /// P-B (ADR-022) · Fee del PSP (ProntoPaga) que se DESCUENTA antes de que la plata llegue al banco de la
+  /// plataforma. Se MODELA en la captura desde `CommissionConfig.<método>FeeBps` (editable por admin). CASH = 0
+  /// (el efectivo no pasa por el PSP). NULL = cobro legacy pre-P-B (fee no modelado → degradación honesta).
+  pspFeeCents     Int?          @map("psp_fee_cents")
+  /// P-B · Neto REAL que la plataforma recibe en el banco = amountCents − pspFeeCents. Es el "money-in real"
+  /// (los KPIs/conciliación usan ESTO, no el bruto). NULL = legacy (cae a amountCents en la degradación honesta).
+  netSettledCents Int?          @map("net_settled_cents")
   /// Acumulado reembolsado (céntimos) sobre amountCents (BR-P06). 0 = sin reembolso. Permite refunds
   /// PARCIALES: status=PARTIALLY_REFUNDED mientras refundedCents < amountCents, REFUNDED al completarse.
   refundedCents   Int           @default(0) @map("refunded_cents")
@@ -149,12 +192,37 @@ model Payment {
   /// Referencia externa del riel de pago (id de transacción Yape/Plin). Null hasta confirmar.
   externalRef     String?       @map("external_ref")
   status          PaymentStatus @default(PENDING)
+  /// MODO del cobro (F2.7): determina el MODELO de dinero (ON_DEMAND = comisión al conductor, configurable ·
+  /// CARPOOLING = service fee al pasajero, editable, arranca en 0). NULLABLE para compat con filas legacy
+  /// (pre-F2.7), que se LEEN como ON_DEMAND. Se setea en el punto de entrada del cobro (consumer trip.completed
+  /// → ON_DEMAND; charge service-rail → CARPOOLING).
+  mode            PaymentMode?  @default(ON_DEMAND)
+  /// MÉTRICAS · desglose de "Ingresos por modo" del panel (Fijo/Puja/Carpooling). `dispatchMode` (FIXED/PUJA) se
+  /// DENORMALIZA desde el evento `trip.completed` (lo congela el trip-service) para agregar SIN join cross-service:
+  /// el ON_DEMAND se divide por este campo; CARPOOLING es el eje `mode`. Nullable: filas legacy / cobros no-viaje
+  /// (propina, liquidación de penalidad) → sin modo de despacho. Valores: 'FIXED' | 'PUJA'.
+  dispatchMode    String?       @map("dispatch_mode")
+  /// MÉTRICAS · ORIGEN del viaje (denormalizado del evento) para el corte "Ingresos por distrito". `district` lo
+  /// resuelve la ZONIFICACIÓN (lat/lng → distrito de Lima) en la captura; se persiste para agregar por distrito
+  /// sin re-zonificar. Todos nullable: cobros sin geo (legacy/no-viaje) o fuera de la cobertura de distritos.
+  originLat       Float?        @map("origin_lat")
+  originLng       Float?        @map("origin_lng")
+  district        String?       @map("district")
   /// Intentos consumidos contra el gateway (BR-P02: máx 3 antes de DEBT).
   retries         Int           @default(0)
   /// Última razón de fallo (para soporte/observabilidad).
   failureReason   String?       @map("failure_reason")
   /// Referencia del pagador en el riel (teléfono/token Yape-Plin). PII mínima.
   payerRef        String?       @map("payer_ref")
+  /// A1 (ADR-022) · Clase del cobro (FARE tarifa | TIP propina digital dedicada | DEBT_SETTLEMENT liquidación de
+  /// deuda del conductor). Ver `enum PaymentKind`. Los lookups by-trip de la TARIFA (refund, recibo) filtran
+  /// `kind = FARE` para no agarrar un cobro de propina ni de liquidación de deuda.
+  kind            PaymentKind   @default(FARE)
+  /// DEBT_SETTLEMENT (ADR-022 §P-A) · id de PERFIL del conductor cuya deuda de comisiones salda este cobro. Solo
+  /// seteado en cobros kind=DEBT_SETTLEMENT (NULL en FARE/TIP). El `driverId` de la fila va NULL a propósito (para
+  /// que la liquidación NO entre al payout como ganancia); este campo preserva a QUIÉN desbloquear al capturar
+  /// (marcar sus driver_debts PENDING→PAID + emitir `driver.debt_cleared`), sin cruzar la identidad por el driverId.
+  debtSettlementDriverId String? @map("debt_settlement_driver_id") @db.Uuid
   /// F2.3 · Si este Payment SALDA una penalidad de cancelación, su id (sino null). Un Payment de
   /// liquidación lleva `driverId=NULL` (no es ganancia de viaje → no entra al payout por aquí; la
   /// compensación del conductor entra vía `collectEarnings` sumando la penalidad COLLECTED). Al
@@ -184,14 +252,53 @@ model Payment {
 
   @@index([status])
   @@index([tripId])
-  @@index([driverId, status])
+  // [driverId, status, capturedAt]: earningsForDriver filtra driverId+status y RANGO capturedAt (el antiguo
+  // [driverId, status] no empujaba el rango). El 3-col subsume al 2-col (mismo prefijo) → reemplaza, no duplica.
+  @@index([driverId, status, capturedAt])
   @@index([method, status, capturedAt])
+  // Polls por antigüedad: payment-poll (status=PENDING + createdAt range/order) y los sweeps de reconciliación.
+  @@index([status, createdAt])
+  // Fallback del webhook de cobro sin paymentId: correlaciona por externalUid (findFirst).
+  @@index([externalUid])
   /// F2.3 · resolver el Payment de liquidación de una penalidad (idempotencia/conciliación).
   @@index([cancellationPenaltyId])
   /// DEBT gate: lista la deuda PENDIENTE de un pasajero (status=DEBT) en O(log n) sin escanear.
   /// Sirve a GET /payments/debt (bloqueo de nuevos viajes) por [passengerId, status].
   @@index([passengerId, status])
   @@map("payments")
+  @@schema("payment")
+}
+
+/// Comisión de plataforma por MODO, editable en caliente (F2.7 · ADR-017 §1.6 / ADR-015 §11.2). SINGLETON
+/// (espejo de base_fare_config de trip-service): un solo registro GLOBAL con DOS tasas, ambas configurables:
+/// la comisión ON-DEMAND (descontada al conductor) y el service fee CARPOOLING (sumado al pasajero en
+/// cost-sharing — el conductor cobra el 100% de su contribución). Las tasas van en BASIS POINTS Int
+/// (0..10000; 2000 = 20%) — NUNCA float persistido. `version` = optimistic locking (CAS) en el reemplazo.
+model CommissionConfig {
+  id               String   @id
+  /// Tasa de comisión ON-DEMAND en basis points (0..10000; 2000 = 20%). Se divide /10000 al APLICAR
+  /// (redondeo a céntimo Int en la fórmula commission()); jamás se persiste ni se opera como float.
+  onDemandRateBps  Int      @default(2000) @map("on_demand_rate_bps")
+  /// Service fee CARPOOLING en basis points (0..10000). Arranca en 0; el admin lo sube. Se SUMA al pasajero
+  /// (no se descuenta al conductor). Mismo tratamiento Int/redondeo que la comisión on-demand.
+  carpoolingFeeBps Int      @default(0) @map("carpooling_fee_bps")
+  /// P-B (ADR-022) · Fee del PSP (ProntoPaga) por MÉTODO digital, en basis points Int (0..10000). EDITABLE por
+  /// admin (arranca en 0 = degradación honesta hasta que el dueño cargue las tarifas del convenio). El fee varía
+  /// por método (los SLAs de ProntoPaga son por método/país). CASH no tiene fee (no pasa por el PSP). Se descuenta
+  /// del bruto en la captura para computar el neto REAL que llega al banco (`Payment.netSettledCents`).
+  yapeFeeBps         Int    @default(0) @map("yape_fee_bps")
+  plinFeeBps         Int    @default(0) @map("plin_fee_bps")
+  cardFeeBps         Int    @default(0) @map("card_fee_bps")
+  pagoefectivoFeeBps Int    @default(0) @map("pagoefectivo_fee_bps")
+  /// CAS de la comisión ON-DEMAND + los fees PSP (yape/plin/card/pagoefectivo). El PUT de on-demand y el de
+  /// PSP fees bumpean ESTA version. NO la toca el PUT del service fee de carpooling (que tiene su propia CAS).
+  version          Int      @default(0)
+  /// CAS INDEPENDIENTE del service fee de CARPOOLING (`carpoolingFeeBps`). El PUT de carpooling bumpea SOLO esta
+  /// version → editar el carpooling y editar la comisión on-demand ya NO se 409ean entre sí (cada panel su CAS).
+  carpoolingFeeVersion Int  @default(0) @map("carpooling_fee_version")
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("commission_config")
   @@schema("payment")
 }
 
@@ -204,18 +311,123 @@ model Payout {
   grossCents      Int          @map("gross_cents")
   commissionCents Int          @map("commission_cents")
   amountCents     Int          @map("amount_cents")
+  /// A2 (ADR-022) · Deuda CASH del conductor NETEADA en este payout (comisión de viajes en efectivo que él
+  /// cobró en mano). `amountCents = ganancia digital − debtAppliedCents`. 0 si el conductor no tenía deuda.
+  /// Auditoría del flujo inverso: cuánto le descontamos por la comisión que recaudó en efectivo.
+  debtAppliedCents Int         @default(0) @map("debt_applied_cents")
   currency        String       @default("PEN")
   status          PayoutStatus @default(PENDING)
   processedAt     DateTime?    @map("processed_at") @db.Timestamptz
   /// Motivo de retención si el conductor está en review (BR-P05, evento driver.flagged).
   heldReason      String?      @map("held_reason")
+  /// ADR-015 §7 · Idempotencia financiera del DESEMBOLSO money-OUT: `dedupKey = payout-disburse:{payoutId}`,
+  /// derivada del payoutId, distinta del `booking-charge:{bookingId}` del CHARGE para no colisionar. Reintentos
+  /// del mismo payout (FAILED→PROCESSING) → la misma key → el riel NO duplica la transferencia. Nullable y additive:
+  /// los payouts existentes (pre-desembolso-real) quedan con dedupKey = NULL hasta que el operador los dispare.
+  dedupKey        String?      @unique @map("dedup_key")
+  /// ADR-015 §2 · Ref de la transferencia en el riel de desembolso (uid externo del PayoutGateway). Correlaciona
+  /// el webhook/poll de confirmación (PROCESSING→PROCESSED|FAILED). Null hasta que el desembolso se dispara.
+  externalRef     String?      @map("external_ref")
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
   /// Un payout por conductor y período (idempotencia del cron semanal).
   @@unique([driverId, periodStart, periodEnd])
   @@index([status])
+  // payout-poll: status=PROCESSING ordenado por updatedAt (el crash-recovery/reconciliación de desembolsos).
+  @@index([status, updatedAt])
   @@map("payouts")
+  @@schema("payment")
+}
+
+/// A2 (ADR-022) · Motivo de una deuda del conductor con la plataforma. Union TIPADA (cero strings mágicos).
+enum DriverDebtReason {
+  /// El conductor cobró la comisión EN EFECTIVO (viaje CASH) → la debe a la plataforma.
+  CASH_COMMISSION
+
+  /// RC18 (ADR-022) · El conductor YA cobró su neto de una TARIFA DIGITAL en un payout, y el viaje se
+  /// revirtió DESPUÉS con un refund TOTAL por causa atribuible a ÉL (viaje no realizado / fraude del
+  /// conductor) → debe devolver ese neto. Se netea de su próximo payout. Un dispute/fraude del PASAJERO
+  /// NO genera esta deuda (la plataforma lo absorbe — decisión de producto, no castigar al conductor honesto).
+  REFUND_CLAWBACK
+
+  @@schema("payment")
+}
+
+/// A2 · Estado de una deuda del conductor. PENDING = por netear del payout digital; SETTLED = ya descontada de un
+/// payout; REVERSED = anulada porque el viaje CASH se reembolsó/canceló (el conductor ya no debe esa comisión);
+/// PAID = el conductor la SALDÓ directamente por el rail (Payment kind=DEBT_SETTLEMENT capturado, ADR-022 §P-A tope
+/// de deuda). PAID es distinto de SETTLED a propósito: SETTLED se descontó de un payout digital, PAID lo pagó el
+/// conductor de su bolsillo para desbloquearse. El netting del payout (`findPendingDebtsInTx`) SOLO mira PENDING →
+/// una deuda PAID (o SETTLED/REVERSED) queda fuera del neteo → CERO doble cobro.
+enum DriverDebtStatus {
+  PENDING
+  SETTLED
+  REVERSED
+  PAID
+
+  @@schema("payment")
+}
+
+/// A2 (ADR-022 §P-A) · Ledger de DEUDAS del conductor con la plataforma (el flujo INVERSO del dinero: la plata va
+/// del conductor a la plataforma). Nace cuando el conductor cobra la comisión EN MANO (viaje CASH): la plataforma
+/// no la recaudó → el conductor la DEBE. Se NETEA contra su payout DIGITAL (liquidación semanal); si la deuda
+/// supera el digital, el resto queda PENDING (carry-forward al próximo período). Modelado explícito, no un signo.
+model DriverDebt {
+  id          String           @id @db.Uuid
+  driverId    String           @map("driver_id") @db.Uuid
+  tripId      String           @map("trip_id") @db.Uuid
+  /// El cobro CASH que originó la deuda. UNIQUE → idempotencia: una deuda por cobro (la captura no la duplica).
+  paymentId   String           @unique @map("payment_id") @db.Uuid
+  /// Monto adeudado = la comisión del viaje (lo que el conductor cobró en mano y le corresponde a la plataforma).
+  amountCents Int              @map("amount_cents")
+  currency    String           @default("PEN")
+  reason      DriverDebtReason @default(CASH_COMMISSION)
+  status      DriverDebtStatus @default(PENDING)
+  /// El Payout donde esta deuda se NETEÓ (SETTLED). Null mientras PENDING. Para conciliación/auditoría.
+  settledInPayoutId String?    @map("settled_in_payout_id") @db.Uuid
+  /// El Payment kind=DEBT_SETTLEMENT que SALDÓ esta deuda directamente (status=PAID). Null salvo PAID. Conciliación.
+  settledPaymentId  String?    @map("settled_payment_id") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  settledAt   DateTime?        @map("settled_at") @db.Timestamptz
+
+  /// Netting: enumerar la deuda PENDIENTE de un conductor en el run de payouts (O(log n)).
+  @@index([driverId, status])
+  @@map("driver_debts")
+  @@schema("payment")
+}
+
+/// Crédito A FAVOR del conductor: la plataforma se lo debe (el inverso de DriverDebt). Hoy solo lo origina el
+/// reverso de una comisión CASH cuya deuda YA se neteó en un payout (SETTLED): al revertir el viaje, el conductor
+/// pagó una comisión que ya no debía → se le acredita y se SUMA al neto del próximo payout (applyDebtNetting).
+/// Modelo separado a propósito (no un DriverDebt con monto negativo): preserva el contrato `DriverDebt.paymentId
+/// @unique` y mantiene una responsabilidad por tabla (deuda vs crédito).
+model DriverCredit {
+  id          String             @id @db.Uuid
+  driverId    String             @map("driver_id") @db.Uuid
+  tripId      String             @map("trip_id") @db.Uuid
+  /// A favor del conductor, en céntimos (>0).
+  amountCents Int                @map("amount_cents")
+  currency    String             @default("PEN")
+  /// El cobro CASH cuyo reverso originó el crédito. UNIQUE → idempotencia: un crédito por reverso de cobro (un
+  /// refund re-entregado NO duplica el crédito).
+  sourcePaymentId String         @unique @map("source_payment_id") @db.Uuid
+  status      DriverCreditStatus @default(PENDING)
+  /// El Payout donde el crédito se APLICÓ (sumado al neto). Null mientras PENDING. Para conciliación/auditoría.
+  appliedInPayoutId String?      @map("applied_in_payout_id") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  appliedAt   DateTime?          @map("applied_at") @db.Timestamptz
+
+  /// Netting: enumerar el crédito PENDIENTE de un conductor en el run de payouts (O(log n)).
+  @@index([driverId, status])
+  @@map("driver_credits")
+  @@schema("payment")
+}
+
+enum DriverCreditStatus {
+  PENDING
+  APPLIED
+
   @@schema("payment")
 }
 
@@ -237,13 +449,38 @@ model Refund {
   externalRefundId String? @map("external_refund_id")
   /// Motivo del RECHAZO del proveedor (status=REJECTED). Distinto de `reason` (motivo del pedido).
   failureReason String?    @map("failure_reason")
+  /// F3c-payment · Clave de idempotencia DETERMINISTA de un refund SYSTEM-INITIATED (refund automático por
+  /// `booking.cancelled`). Derivada del bookingId (`booking-cancel-refund:{bookingId}`), espeja el patrón de
+  /// `TipAddition.dedupKey` y `Payment.dedupKey` (cobro). NULL en los refunds ADMIN discrecionales (esos llevan
+  /// operador humano y su idempotencia es el CAS optimista del Payment).
+  ///
+  /// ⚠️ UNICIDAD = ÍNDICE PARCIAL en SQL (Prisma NO lo modela): el UNIQUE corre SOLO sobre los refunds ACTIVOS
+  /// (status <> REJECTED). Un refund REJECTED por el proveedor NO participa del UNIQUE → el reintento legítimo
+  /// del MISMO `booking.cancelled` puede crear un Refund NUEVO (la plata se devuelve aunque el 1er reverso
+  /// fallara), mientras un PENDING/COMPLETED SÍ bloquea (no doble-refund). Un `@unique` GLOBAL acá envenenaría
+  /// la key: tras un SOLO rechazo del proveedor el reintento chocaría P2002 → `skipped` → el pasajero NUNCA
+  /// recibiría su plata (refund-starvation, viola ADR-014 §6 "refund OBLIGATORIO"). El índice parcial vive en
+  /// la migración `20260622000000_refund_dedup_key` (`WHERE status <> 'REJECTED' AND dedup_key IS NOT NULL`) —
+  /// NO lo "corrijas" a `@unique` ni dejes que un `prisma migrate` lo regenere como total: rompés el reintento.
+  dedupKey      String?    @map("dedup_key")
+  /// RC18 (ADR-022) · Señal PERSISTIDA de que este refund es por causa ATRIBUIBLE al conductor (viaje no
+  /// realizado / fraude del conductor). Solo entonces un refund TOTAL de una tarifa digital genera el
+  /// clawback (DriverDebt REFUND_CLAWBACK) al completar. Default false = lo absorbe la plataforma
+  /// (dispute/fraude del pasajero). Lo setea el operador en el pedido (RefundDto.driverFault).
+  clawbackDriver Boolean   @default(false) @map("clawback_driver")
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
   @@index([paymentId])
   @@index([status])
+  // Barrido horario de refunds PENDING viejos (sweepStalePendingRefunds): status=PENDING + createdAt range/order.
+  @@index([status, createdAt])
   /// Correlación del callback de reembolso del proveedor (uid → Refund).
   @@index([externalRefundId])
+  /// El UNIQUE de `dedupKey` es PARCIAL (status <> REJECTED) y vive SOLO en SQL (ver comentario del campo); acá
+  /// un índice NO-único para correlacionar el dedupKey al booking en el backstop admin de refunds REJECTED
+  /// (marcador durable + métrica + alerta; el cron re-conductor automático fue ELIMINADO por frágil).
+  @@index([dedupKey])
   @@map("refunds")
   @@schema("payment")
 }
@@ -449,6 +686,10 @@ model IncentiveProgress {
   @@index([driverId])
   /// "bonos pendientes de un conductor" (paidAt IS NULL) sin escanear: collectEarnings y back-pay.
   @@index([driverId, paidAt])
+  // Confirmación de desembolso: updateMany where {paidInPayoutId, paidAt:null} marca los bonos de ESE payout.
+  @@index([paidInPayoutId])
+  // Back-pay por arrastre: escanea bonos PENDIENTES (paidAt:null + completedAt en ventana) SIN driverId.
+  @@index([paidAt, completedAt])
   @@map("incentive_progress")
   @@schema("payment")
 }
@@ -472,13 +713,16 @@ model IncentiveTripCredit {
 /// Outbox (FOUNDATION §6). Misma transacción que la mutación de dominio.
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
 
-  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
   @@schema("payment")
 }

@@ -12,12 +12,18 @@ import { ConfigService } from '@nestjs/config';
 import {
   EVENT_SCHEMAS,
   chatMessageSent,
+  driverSuspended,
   tripWaypointProposed,
   type EventEnvelope,
   type EventHandler,
 } from '@veo/events';
 import { KafkaConsumerBootstrap } from '@veo/events/nest';
-import { createLogger, domainEventsTotal, type Logger } from '@veo/observability';
+import {
+  createLogger,
+  domainEventsTotal,
+  BusinessEventResult,
+  type Logger,
+} from '@veo/observability';
 import type { ChatMessage, WaypointProposedMsg } from '@veo/api-client';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import type { TripReply } from '../common/grpc-replies';
@@ -73,6 +79,12 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     const record: Record<string, EventHandler> = {
       'dispatch.offered': (env) => this.handleEvent(env, 'dispatch:offer'),
       'dispatch.match_found': (env) => this.handleEvent(env, 'dispatch:match'),
+      // ADR-020 Lote 2 (2a) · una oferta del conductor dejó de valer con el board cerrando: el pasajero
+      // eligió a OTRO (`not_selected`) o el conductor quedó inelegible (`stale`). Antes NINGÚN handler lo
+      // consumía → el perdedor conservaba su card de puja hasta caducar localmente y, al tapearla, chocaba
+      // con un board cerrado (409). Reusa el relay genérico (resuelve el conductor por `driverId` del
+      // payload) y lo empuja como `bid:closed` → la app remueve la card al instante. Topic `dispatch` ya suscrito.
+      'dispatch.offer_withdrawn': (env) => this.handleEvent(env, 'bid:closed'),
     };
     for (const type of TRIP_EVENTS) {
       record[type] = (env) => this.handleEvent(env, 'trip:update');
@@ -85,11 +97,39 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     // por `driverId` enriquecido o por `tripId`→gRPC) y lo emite como `payment:tip` para que la app lo
     // celebre. Suscribe automáticamente el topic `payment` (topicForEvent).
     record['payment.tip_added'] = (env) => this.handleEvent(env, 'payment:tip');
+    // FIX seguridad ALTA · suspensión en vivo: un operador suspendió al conductor → cerrar su socket YA
+    // (no esperar a que venza el access token, ≤15m). Handler dedicado: no va a una sala, fuerza el cierre.
+    record['driver.suspended'] = (env) => this.handleDriverSuspended(env);
     return record;
   }
 
   protected override subscriptionLog(): string {
-    return 'consumidor Kafka driver-bff iniciado (topics dispatch, trip, chat, payment)';
+    return 'consumidor Kafka driver-bff iniciado (topics dispatch, trip, chat, payment, driver)';
+  }
+
+  /**
+   * SUSPENSIÓN EN VIVO (cierre proactivo del socket): identity emite `driver.suspended` al suspender a un
+   * conductor. Sin esto la sesión de socket YA abierta seguía viva ≤15m (hasta vencer el access token),
+   * emitiendo GPS a Kafka + presencia fantasma en /ops + recibiendo pushes. El evento trae el `driverId` de
+   * PERFIL (misma clave del Map `activeByDriver` del gateway, fijada en el handshake) → NO hay traducción
+   * userId↔driverId acá; el gateway resuelve el socket por esa clave. La entrega es idempotente: un driverId
+   * sin sesión activa (conductor offline / doble evento) es un no-op → se cuenta NO_DRIVER, no error.
+   */
+  private async handleDriverSuspended(envelope: EventEnvelope<unknown>): Promise<void> {
+    const parsed = driverSuspended.safeParse(envelope.payload);
+    if (!parsed.success) return;
+    // Cross-nodo (Lote 4): `disconnectSuspendedDriver` echa el socket en CUALQUIER réplica y devuelve el nº de
+    // sockets del conductor que existían en el cluster: >0 → EMITTED (se cerró al menos uno), 0 → NO_DRIVER
+    // (offline / doble evento), -1 → conteo indeterminado por adapter degradado → DELIVERY_FAILED (best-effort
+    // ya se emitió el cierre). El conteo NO se inventa: sale de `fetchSockets` cross-nodo.
+    const kicked = await this.gateway.disconnectSuspendedDriver(parsed.data.driverId);
+    const result =
+      kicked > 0
+        ? BusinessEventResult.EMITTED
+        : kicked === 0
+          ? BusinessEventResult.NO_DRIVER
+          : BusinessEventResult.DELIVERY_FAILED;
+    domainEventsTotal.inc({ event: 'driver.suspended', result });
   }
 
   /** Valida el payload, resuelve el conductor y emite a su sala. */
@@ -98,7 +138,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     if (!schema) return;
     const parsed = schema.safeParse(envelope.payload);
     if (!parsed.success) {
-      domainEventsTotal.inc({ event: envelope.eventType, result: 'invalid' });
       return;
     }
     const payload = parsed.data as Record<string, unknown>;
@@ -106,7 +145,7 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
     try {
       const driverId = await this.resolveDriverId(payload);
       if (!driverId) {
-        domainEventsTotal.inc({ event: envelope.eventType, result: 'no_driver' });
+        domainEventsTotal.inc({ event: envelope.eventType, result: BusinessEventResult.NO_DRIVER });
         return;
       }
       this.gateway.emitToDriver(driverId, socketEvent, {
@@ -114,13 +153,19 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
         occurredAt: envelope.occurredAt,
         payload: parsed.data,
       });
-      domainEventsTotal.inc({ event: envelope.eventType, result: 'emitted' });
+      domainEventsTotal.inc({ event: envelope.eventType, result: BusinessEventResult.EMITTED });
     } catch (err) {
       this.log.warn(
         { err, eventType: envelope.eventType },
         'no se pudo enrutar el evento al conductor',
       );
-      domainEventsTotal.inc({ event: envelope.eventType, result: 'error' });
+      // NEGOCIO, no transporte: la entrega realtime es best-effort (el conductor re-sincroniza al
+      // reconectar). El error se TRAGA a propósito (handler retorna normal) → el base emite CONSUMED
+      // encima. La métrica dice "falló la entrega al socket", DISJUNTA del EventResult.ERROR del base.
+      domainEventsTotal.inc({
+        event: envelope.eventType,
+        result: BusinessEventResult.DELIVERY_FAILED,
+      });
     }
   }
 
@@ -131,7 +176,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
   private async handleChatMessage(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = chatMessageSent.safeParse(envelope.payload);
     if (!parsed.success) {
-      domainEventsTotal.inc({ event: 'chat.message_sent', result: 'invalid' });
       return;
     }
     try {
@@ -142,7 +186,10 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
         SYSTEM_IDENTITY,
       );
       if (!trip.found || !trip.driverId) {
-        domainEventsTotal.inc({ event: 'chat.message_sent', result: 'no_driver' });
+        domainEventsTotal.inc({
+          event: 'chat.message_sent',
+          result: BusinessEventResult.NO_DRIVER,
+        });
         return;
       }
       const msg: ChatMessage = {
@@ -154,10 +201,14 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
         createdAt: parsed.data.createdAt,
       };
       this.gateway.emitToDriver(trip.driverId, 'chat:message', msg);
-      domainEventsTotal.inc({ event: 'chat.message_sent', result: 'emitted' });
+      domainEventsTotal.inc({ event: 'chat.message_sent', result: BusinessEventResult.EMITTED });
     } catch (err) {
       this.log.warn({ err }, 'no se pudo enrutar el mensaje de chat al conductor');
-      domainEventsTotal.inc({ event: 'chat.message_sent', result: 'error' });
+      // Best-effort realtime (ver handleEvent): el swallow es INTENCIONAL, el base cuenta CONSUMED.
+      domainEventsTotal.inc({
+        event: 'chat.message_sent',
+        result: BusinessEventResult.DELIVERY_FAILED,
+      });
     }
   }
 
@@ -170,7 +221,6 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
   private handleWaypointProposed(envelope: EventEnvelope<unknown>): Promise<void> {
     const parsed = tripWaypointProposed.safeParse(envelope.payload);
     if (!parsed.success) {
-      domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: 'invalid' });
       return Promise.resolve();
     }
     const msg: WaypointProposedMsg = {
@@ -182,7 +232,7 @@ export class KafkaConsumerService extends KafkaConsumerBootstrap {
       expiresAt: parsed.data.expiresAt,
     };
     this.gateway.emitToDriver(parsed.data.driverId, 'waypoint:proposed', msg);
-    domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: 'emitted' });
+    domainEventsTotal.inc({ event: 'trip.waypoint_proposed', result: BusinessEventResult.EMITTED });
     return Promise.resolve();
   }
 

@@ -31,7 +31,6 @@ import {
   TripStatus,
   PaymentMethod,
   ActorType,
-  resolveOfferingModeWithPin,
   findOffering,
   OfferingId,
   type OfferingSpec,
@@ -39,7 +38,7 @@ import {
 } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
 import type Redis from 'ioredis';
-import { PrismaService } from '../infra/prisma.service';
+import { TripsRepository } from './trips.repository';
 import { REDIS } from '../infra/redis';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
 import {
@@ -56,25 +55,21 @@ import {
 } from './domain/trip-state-machine';
 import { ActiveTripExistsError, OfferingUnavailableError } from './trips.errors';
 import { CatalogService } from '../catalog/catalog.service';
-import { calculateFare, shadowCompareFare, deriveFuelPerKmCents } from './domain/fare';
-import { EnergyCatalogService } from '../pricing/energy-catalog.service';
+import { calculateFirmFare } from './domain/fare';
 import { calculateCancellationPenalty } from './domain/cancellation';
 import { assertScheduleWindow } from './domain/scheduling';
-import { toZone, type ZoneKey } from './domain/pricing-mode';
 import { resolveTripOffering, type TripOfferingResolution } from './domain/offering';
-import { bumpOfferingModeOverridden, bumpCatalogDegraded } from './trip-metrics';
+import { bumpCatalogDegraded, type CatalogDegradedSite } from './trip-metrics';
 import { toTripView, readWaypoints } from './trip-view.mapper';
-import { PRODUCER, recordTripEvent, emitBidPosted } from './trip-events';
+import { PRODUCER, recordTripEvent, emitBidPosted, emitDestinationChanged } from './trip-events';
 import { DispatchModeRegistry } from './dispatch-mode/dispatch-mode.registry';
-import { PricingScheduleService } from '../pricing/pricing-schedule.service';
-import { FuelSurchargeService } from '../pricing/fuel-surcharge.service';
+import { BaseFareService } from '../pricing/base-fare.service';
 import { BidFloorService } from '../pricing/bid-floor.service';
 import type { Env } from '../config/env.schema';
 import type {
   AcceptTripDto,
   ArrivedTripDto,
   ArrivingTripDto,
-  AssignTripDto,
   CancelTripDto,
   ChangeDestinationDto,
   CompleteTripDto,
@@ -140,16 +135,6 @@ const FARE_APPLICABLE_STATES: readonly TripStatus[] = [
   TripStatus.IN_PROGRESS,
 ];
 
-/**
- * Puerto del ModeResolver (ADR 011 §1.1) que createTrip consume para CONGELAR el modo del viaje. La
- * implementación real es PricingScheduleService (carga el schedule + delega en el resolver puro). Se
- * tipa como interfaz para que el servicio NO dependa de la clase concreta (clean arch) y para que los
- * tests unitarios inyecten un doble determinista.
- */
-export interface ModeResolverPort {
-  resolve(zone: ZoneKey, now: Date): Promise<PricingMode>;
-}
-
 @Injectable()
 export class TripsService {
   private readonly logger = new Logger(TripsService.name);
@@ -165,15 +150,6 @@ export class TripsService {
   private readonly bidWindowSec: number;
   /** Tope de re-asignaciones tras cancelación del conductor post-accept (PUJA robustez #4). */
   private readonly maxReassign: number;
-
-  /**
-   * ModeResolver (ADR 011 §1.1) que resuelve PUJA|FIXED en createTrip. En producción es
-   * PricingScheduleService (inyectado): carga el schedule admin + delega en el resolver puro. Si no se
-   * inyecta (tests legacy H1-H13 que construyen el servicio con 2 args, que NUNCA conocieron el schedule),
-   * `null` ⇒ createTrip degrada a la derivación M1-compatible bidCents-driven (presencia de bid ⇒ PUJA,
-   * si no ⇒ FIXED), preservando su comportamiento. Los tests NUEVOS de server-resolution inyectan un doble.
-   */
-  private readonly modeResolver: ModeResolverPort | null;
 
   /**
    * Cliente Redis para el lockout anti-brute-force del código de modo niño (B). `@Optional()` para no
@@ -194,195 +170,131 @@ export class TripsService {
    * criterio que el quote, que degrada a "todas las ofertas").
    */
   private readonly catalog: CatalogService | null;
-  /** Recargo de combustible global (B3). `@Optional()`: tests legacy degradan a 0 (sin recargo). */
-  private readonly fuel: FuelSurchargeService | null;
   /**
    * Piso de la PUJA per-(zona, oferta) (ADR 010 §9.3). `@Optional()`: si no se inyecta (tests legacy que
    * construyen el servicio sin él), `null` ⇒ resolveBidFloorCents degrada al piso global de env
    * (`this.bidFloorCents`) — comportamiento previo. En producción PricingModule lo provee.
    */
   private readonly bidFloor: BidFloorService | null;
-  /** B5-1 · catálogo de energía multi-fuente. `@Optional()`: si no está, el shadow-compare se saltea (no rompe). */
-  private readonly energyCatalog: EnergyCatalogService | null;
-  /** B5-1.d · FLIP del modelo de energía (default false). ON = fórmula nueva autoritativa (energía pass-through). */
-  private readonly energyModelEnabled: boolean;
+  /** F2.4 · tarifa base configurable (banderazo/km/min). `@Optional()`: sin él → constantes de código. */
+  private readonly baseFare: BaseFareService | null;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: TripsRepository,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Optional() config?: ConfigService<Env, true>,
-    @Optional() modeResolver?: PricingScheduleService,
     @Optional() @Inject(REDIS) redis?: Pick<Redis, 'get' | 'incr' | 'expire' | 'del' | 'set'>,
     @Optional() dispatchModes?: DispatchModeRegistry,
     @Optional() catalog?: CatalogService,
-    @Optional() fuel?: FuelSurchargeService,
-    @Optional() energyCatalog?: EnergyCatalogService,
     @Optional() bidFloor?: BidFloorService,
+    @Optional() baseFare?: BaseFareService,
   ) {
     this.bidFloorCents = config?.get('BID_FLOOR_CENTS') ?? DEFAULT_BID_FLOOR_CENTS;
     this.bidMaxCents = config?.get('BID_MAX_CENTS') ?? DEFAULT_BID_MAX_CENTS;
     this.bidWindowSec = config?.get('BID_WINDOW_SEC') ?? DEFAULT_BID_WINDOW_SEC;
     this.maxReassign = config?.get('TRIP_MAX_REASSIGN') ?? DEFAULT_MAX_REASSIGN;
-    this.modeResolver = modeResolver ?? null;
     this.redis = redis ?? null;
     this.dispatchModes = dispatchModes ?? new DispatchModeRegistry(config);
     this.catalog = catalog ?? null;
-    this.fuel = fuel ?? null;
-    this.energyCatalog = energyCatalog ?? null;
     this.bidFloor = bidFloor ?? null;
-    this.energyModelEnabled = config?.get('PRICING_ENERGY_MODEL_ENABLED') ?? false;
+    this.baseFare = baseFare ?? null;
   }
 
   /**
-   * ADR 013 · Fase B — resuelve la oferta EFECTIVA para CREAR en UNA lectura del catálogo: valida que esté
-   * HABILITADA (defensa en profundidad de la carrera "el admin la apagó entre el quote y el create"; el
-   * gate primario es que el quote ya no la cotiza) y devuelve el pricing + pin de modo EFECTIVOS (overlay
-   * del admin, B2). DEGRADACIÓN HONESTA: sin catálogo inyectado (tests legacy) o si la lectura FALLA, usa
-   * el pricing de CÓDIGO sin pin y PERMITE el viaje — no se bloquea un pedido por una lectura de config
-   * (mismo criterio que el quote degradando a todas). Oferta deshabilitada → OfferingUnavailableError (409).
+   * ADR 013 · Fase B / ADR 023 — resuelve la oferta EFECTIVA para CREAR en UNA lectura del catálogo: valida
+   * que esté HABILITADA (defensa en profundidad de la carrera "el admin la apagó entre el quote y el create";
+   * el gate primario es que el quote ya no la cotiza) y devuelve el pricing + el MODO EFECTIVOS (base ⟕
+   * overlay del admin: `resolveCatalog` ya aplicó `effectiveOfferingMode` — la palanca manual del admin sobre
+   * el default de código, respetando `modeLocked`). DEGRADACIÓN HONESTA: sin catálogo inyectado (tests legacy)
+   * o si la lectura FALLA, usa el pricing + modo de CÓDIGO y PERMITE el viaje — no se bloquea un pedido por una
+   * lectura de config caída (mismo criterio que el quote degradando a todas). Oferta deshabilitada →
+   * OfferingUnavailableError (409).
+   */
+  /**
+   * Adaptador de instancia sobre la fn COMPARTIDA `resolveEffectiveOffering` (./effective-offering, ÚNICA fuente
+   * de verdad reusada por waypoint-proposal · RC4-waypoint): liga el `catalog` y el `logger` de este servicio. La
+   * lógica (overlay del admin + degradación honesta + gate de enabled) vive en la fn; acá NO se duplica.
    */
   private async resolveEffectiveOffering(
     base: OfferingSpec,
-  ): Promise<{ pricing: OfferingPricingPolicy; modePin?: PricingMode }> {
-    if (!this.catalog) return { pricing: base.pricing };
+    // RC (ADR-022) · MISMO resolver que el create, parametrizable para changeDestination/waypoint: `enforceEnabled:
+    // false` NO bloquea un cambio mid-viaje si el admin deshabilitó la oferta (el gate de enabled es del create);
+    // `site` etiqueta el counter de degradación. Default = comportamiento del create (enforce + site 'create').
+    {
+      enforceEnabled = true,
+      site = 'create',
+    }: { enforceEnabled?: boolean; site?: CatalogDegradedSite } = {},
+  ): Promise<{ pricing: OfferingPricingPolicy; mode: PricingMode }> {
+    if (!this.catalog) return { pricing: base.pricing, mode: base.mode };
     let resolved;
     try {
       resolved = await this.catalog.resolveOffering(base.id);
     } catch (err) {
       // B5-4: las verticales ocultas (defaultEnabled:false) NUNCA se crean, ni en degradación — sin
       // confirmar que el admin las habilitó, permitir una ambulancia/grúa por catálogo caído sería el
-      // leak inverso al de la UI. Las visibles por default SÍ se permiten (degradación honesta previa).
-      if (!base.defaultEnabled) throw new OfferingUnavailableError(base.id);
+      // leak inverso al de la UI. Las visibles por default SÍ se permiten (degradación honesta previa). Solo en el
+      // create (enforceEnabled): mid-viaje el viaje ya existe con esa oferta → no se re-gatea por catálogo caído.
+      if (enforceEnabled && !base.defaultEnabled) throw new OfferingUnavailableError(base.id);
       this.logger.warn(
         `catálogo no disponible al resolver '${base.id}' (${(err as Error).message}); ` +
-          `uso el pricing de código y permito el viaje (degradación honesta · ADR 013)`,
+          `uso el pricing y modo de código y permito el viaje (degradación honesta · ADR 013)`,
       );
-      bumpCatalogDegraded('create');
-      return { pricing: base.pricing };
+      bumpCatalogDegraded(site);
+      return { pricing: base.pricing, mode: base.mode };
     }
-    if (resolved && !resolved.enabled) throw new OfferingUnavailableError(base.id);
-    // Sin entrada en el overlay (no debería pasar: el id sale del catálogo de código) → pricing de código.
-    if (!resolved) return { pricing: base.pricing };
-    return { pricing: resolved.pricing, modePin: resolved.modePin };
+    if (enforceEnabled && resolved && !resolved.enabled) throw new OfferingUnavailableError(base.id);
+    // Sin entrada en el overlay (no debería pasar: el id sale del catálogo de código) → pricing/modo de código.
+    if (!resolved) return { pricing: base.pricing, mode: base.mode };
+    return { pricing: resolved.pricing, mode: resolved.mode };
   }
 
   /**
-   * B3 · recargo de combustible por km vigente (céntimos PEN). DEGRADACIÓN HONESTA: sin servicio inyectado
-   * (tests legacy) o si la lectura FALLA → 0 (sin recargo). NO se bloquea un viaje por una lectura de
-   * config caída; mejor cobrar la tarifa base que rechazar el pedido (mismo criterio que el catálogo).
+   * F2.4 · banderazo/km/min vigentes (config del admin, `BaseFareConfig`). Devuelve el triple o `{}` si el
+   * servicio no está (tests) o la lectura cae → la fórmula usa las constantes de código (degradación honesta;
+   * el seed sembró los valores actuales, así que en prod la fila existe y NO hay cambio de precio).
    */
-  private async resolveFuelPerKmCents(): Promise<number> {
-    if (!this.fuel) return 0;
+  private async resolveBaseFare(): Promise<{
+    baseFareCents?: number;
+    perKmCents?: number;
+    perMinCents?: number;
+  }> {
+    if (!this.baseFare) return {};
     try {
-      return await this.fuel.getPerKmCents();
+      const c = await this.baseFare.getConfig();
+      return {
+        baseFareCents: c.baseFareCents,
+        perKmCents: c.perKmCents,
+        perMinCents: c.perMinCents,
+      };
     } catch (err) {
       this.logger.warn(
-        `recargo de combustible no disponible (${(err as Error).message}); ` +
-          `uso 0 (degradación honesta · B3)`,
+        `tarifa base no disponible (${(err as Error).message}); uso las constantes de código (F2.4)`,
       );
-      return 0;
+      return {};
     }
-  }
-
-  /**
-   * B5-1.b · SHADOW-COMPARE (NO cambia el precio cobrado). Computa el delta entre la tarifa VIEJA
-   * (fuel global plegado y escalado por el multiplier) y la NUEVA (energía PASS-THROUGH, derivada del
-   * EnergyCatalog por la fuente de referencia de la oferta) y lo LOGUEA. Sirve para MEDIR el impacto de
-   * B5-1 en producción-dev ANTES del flip (B5-1.d). Nunca rompe el create: sin EnergyCatalog inyectado,
-   * fuente no cargada o cualquier falla → se saltea (degradación honesta). El precio autoritativo sigue
-   * siendo el viejo.
-   */
-  /**
-   * B5 · costo de energía por km de una oferta = precio(fuente del EnergyCatalog) ÷ rendimiento de la
-   * oferta. 0 si no hay catálogo inyectado / fuente no cargada / falla (degradación honesta). Lo usan el
-   * shadow-compare (flag OFF) y la tarifa autoritativa nueva (flag ON · B5-1.d).
-   */
-  private async resolveEnergyPerKmCents(offering: OfferingSpec): Promise<number> {
-    if (!this.energyCatalog) return 0;
-    try {
-      const price = await this.energyCatalog.getPriceFor(offering.referenceEnergySourceId);
-      if (price === null) return 0; // fuente no cargada → sin recargo (degradación honesta)
-      return deriveFuelPerKmCents(price, offering.referenceEfficiency);
-    } catch (err) {
-      this.logger.warn(
-        `energía no disponible (${(err as Error).message}); uso 0 (degradación honesta · B5)`,
-      );
-      return 0;
-    }
-  }
-
-  private async shadowLogFareDelta(
-    offering: OfferingSpec,
-    route: { distanceMeters: number; durationSeconds: number },
-    surge: number,
-    childMode: boolean,
-    pricing: OfferingPricingPolicy,
-    oldFuelPerKmCents: number,
-    authoritativeFareCents: number,
-  ): Promise<void> {
-    if (!this.energyCatalog) return;
-    try {
-      const energyPerKmCents = await this.resolveEnergyPerKmCents(offering);
-      const delta = shadowCompareFare(
-        {
-          distanceMeters: route.distanceMeters,
-          durationSeconds: route.durationSeconds,
-          surgeMultiplier: surge,
-          childMode,
-        },
-        pricing,
-        oldFuelPerKmCents,
-        energyPerKmCents,
-      );
-      this.logger.log(
-        `B5-1 shadow · oferta=${offering.id} energia=${offering.referenceEnergySourceId} ` +
-          `energyPerKm=${energyPerKmCents} viejo=${delta.oldCents} nuevo=${delta.newCents} ` +
-          `delta=${delta.deltaCents} (autoritativo=viejo=${authoritativeFareCents}, sin flip)`,
-      );
-    } catch (err) {
-      this.logger.warn(`B5-1 shadow-compare falló (${(err as Error).message}); ignorado`);
-    }
-  }
-
-  /**
-   * Resuelve el modo de despacho AUTORITATIVO del viaje (ADR 011 §1.2 · resolve-once). Con resolver
-   * inyectado → server-resolved desde el schedule admin (zona, ahora). Sin resolver (tests legacy) →
-   * derivación M1-compatible bidCents-driven. El resultado se CONGELA en Trip.dispatchMode.
-   */
-  private async resolveDispatchMode(
-    zone: ZoneKey,
-    now: Date,
-    hasBid: boolean,
-  ): Promise<PricingMode> {
-    if (this.modeResolver) return this.modeResolver.resolve(zone, now);
-    return hasBid ? PricingMode.PUJA : PricingMode.FIXED;
   }
 
   /**
    * ADR 013 §2 · seam de resolución de la oferta del create. Delegación PURA en el resolver de dominio
-   * (domain/offering.ts). `protected` a propósito: los specs del conflicto de modo (§1.3.3) subclasean
-   * el servicio para inyectar una oferta restringida (solo-FIXED) — el catálogo real aún no tiene
-   * ofertas con allowedModes ≠ [PUJA, FIXED] y NO se inventa una entrada fantasma en producción.
+   * (domain/offering.ts). `protected` a propósito: los specs subclasean el servicio para inyectar una
+   * oferta a medida (p.ej. una vertical solo-FIXED) sin inventar una entrada fantasma en producción.
    */
   protected resolveOffering(dto: CreateTripDto): TripOfferingResolution {
     return resolveTripOffering(dto.category, dto.vehicleType);
   }
 
   /**
-   * Piso del bid para (zona, oferta) (ADR 010 §9.3). Resuelto por BidFloorService: config versionada que el
+   * Piso del bid por OFERTA (ADR 010 §9.3). Resuelto por BidFloorService: config versionada que el
    * admin maneja en caliente (default + overrides por oferta), vía el resolver PURO `resolveBidFloorCents`
    * (@veo/shared-types) — el MISMO que el public-bff usa para el display del quote (consistencia por
-   * construcción). Per-oferta hoy; per-zona no-breaking (la firma ya transporta la zona vía `toZone`).
-   * DEGRADACIÓN: sin el servicio inyectado (tests legacy) cae al piso global de env (`this.bidFloorCents`).
+   * construcción). DEGRADACIÓN: sin el servicio inyectado (tests legacy) cae al piso global de env
+   * (`this.bidFloorCents`).
    */
-  private async resolveBidFloorCents(
-    origin: LatLon,
-    offeringId: OfferingId | null,
-  ): Promise<number> {
+  private async resolveBidFloorCents(offeringId: OfferingId | null): Promise<number> {
     if (this.bidFloor) {
       // Sin oferta conocida (viaje legacy con `category` null) → la oferta fue la ancla económico (el default
       // de `resolveOffering`); resolvemos su piso (si no tiene override, cae al default igual).
-      return this.bidFloor.resolve(toZone(origin), offeringId ?? OfferingId.VEO_ECONOMICO);
+      return this.bidFloor.resolve(offeringId ?? OfferingId.VEO_ECONOMICO);
     }
     return this.bidFloorCents;
   }
@@ -399,7 +311,7 @@ export class TripsService {
   async createTrip(dto: CreateTripDto, idempotencyKey?: string): Promise<TripView> {
     // Idempotencia de creación: misma clave ⇒ mismo viaje (no se duplica).
     if (idempotencyKey) {
-      const existing = await this.prisma.read.trip.findUnique({ where: { idempotencyKey } });
+      const existing = await this.repo.findByIdempotencyKey(idempotencyKey);
       if (existing) return toTripView(existing);
     }
 
@@ -430,20 +342,16 @@ export class TripsService {
     // primario (write) para no perder un viaje recién creado por lag de réplica (evita la carrera de
     // doble-pedido). La idempotency-key ya cubrió el doble-tap del MISMO pedido más arriba.
     if (!scheduledFor) {
-      const live = await this.prisma.write.trip.findFirst({
-        where: { passengerId: dto.passengerId, status: { in: [...LIVE_STATES] } },
-        select: { id: true },
-        orderBy: { requestedAt: 'desc' },
-      });
+      const live = await this.repo.findLiveTripByPassenger(dto.passengerId, [...LIVE_STATES]);
       if (live) {
         throw new ActiveTripExistsError(live.id);
       }
     }
 
-    // ADR 013 §2 · resuelve la OFERTA del catálogo (fuente única de pool + pricing + modos) con la
+    // ADR 013 §2 · resuelve la OFERTA del catálogo (fuente única de pool + pricing + modo) con la
     // precedencia EXACTA: category > vehicleType > default económico. Categoría desconocida → 400
     // UNKNOWN_OFFERING (jamás default silencioso a económico). El seam protected permite a los specs
-    // inyectar una oferta restringida (el catálogo real aún no tiene allowedModes ≠ [PUJA, FIXED]).
+    // inyectar una oferta a medida (p.ej. una vertical PUJA/FIXED) sin tocar el catálogo de producción.
     const { offering, mismatch } = this.resolveOffering(dto);
     if (mismatch) {
       // category y vehicleType inconsistentes (bug de UI de una app vieja): GANA la oferta —
@@ -453,10 +361,10 @@ export class TripsService {
           `gana la oferta (pool ${offering.vehicleClass}) (ADR 013 §2)`,
       );
     }
-    // ADR 013 · Fase B — resuelve la oferta EFECTIVA (overlay del admin) en UNA lectura: valida que esté
-    // HABILITADA (defensa en profundidad: el quote ya no cotiza las apagadas; cubre la carrera
-    // admin-apaga-entre-quote-y-create) y trae el pricing + pin de modo efectivos (B2). Degrada honesto.
-    const { pricing: effectivePricing, modePin } = await this.resolveEffectiveOffering(offering);
+    // ADR 013 · Fase B / ADR 023 — resuelve la oferta EFECTIVA (base ⟕ overlay del admin) en UNA lectura:
+    // valida que esté HABILITADA (defensa en profundidad: el quote ya no cotiza las apagadas; cubre la
+    // carrera admin-apaga-entre-quote-y-create) y trae el pricing + el MODO efectivos. Degrada honesto.
+    const { pricing: effectivePricing, mode } = await this.resolveEffectiveOffering(offering);
     // ADR 013 · Trip.vehicleType DERIVA de la oferta (no del dto suelto): dispatch filtra por el pool
     // certificable de la oferta elegida.
     const vehicleType: PrismaVehicleType = offering.vehicleClass;
@@ -467,124 +375,101 @@ export class TripsService {
     const route = await this.maps.route(origin, destination, waypoints);
     const surge = dto.surgeMultiplier ?? 1.0;
 
-    // ADR 011 §1.2/§4 · resolve-once-persist-forever: el SERVIDOR resuelve el modo de despacho UNA vez
-    // acá (autoritativo: zona + instante + schedule admin), ignorando lo que mande el cliente. Reemplaza
-    // el viejo fork client-driven por presencia de `dto.bidCents`. El modo se CONGELA en Trip.dispatchMode.
+    // ADR 023 · resolve-once-persist-forever: el modo de despacho del viaje es el MODO EFECTIVO de la
+    // OFERTA (default de código ⟕ palanca manual del admin; una vertical `modeLocked` lo fija). YA NO hay
+    // schedule/franjas (ADR 011 superseded) ni derivación por `dto.bidCents` del cliente: la oferta manda.
+    // `mode` ya viene resuelto de `resolveEffectiveOffering` y se CONGELA en Trip.dispatchMode — la
+    // reasignación / activación de programados lo leen de la fila, NUNCA re-resuelven de la config actual.
     //
-    // S2 (ADR 011) — LOCK-AT-BOOKING: para una RESERVA (scheduledFor futuro) resolvemos con la hora de
-    // RECOJO, no la de creación. Un viaje pedido a las 14:00 para recoger a las 22:00 toma la política de
-    // las 22:00 (la que el pasajero VIO en el quote), no la de las 14:00. El modo SIGUE congelándose una
-    // sola vez al crear (persist-once intacto): si el admin cambia la política de esa hora DESPUÉS de la
-    // reserva, el viaje ya reservado conserva lo que se le prometió — predecible y honesto. Inmediato →
-    // `scheduledFor` es null → resolvemos con `now` (sin cambio de comportamiento).
-    const now = new Date();
-    const resolveAt = scheduledFor ?? now;
-    const scheduledMode = await this.resolveDispatchMode(
-      toZone(origin),
-      resolveAt,
-      dto.bidCents !== undefined,
-    );
-    // ADR 013 §1.3 · la oferta ACOTA al schedule: el admin PROPONE (scheduledMode) y la oferta decide
-    // si lo permite. Conflicto (modo fuera de allowedModes) → gana la oferta con su modo PREFERIDO
-    // (allowedModes[0]) + warn + counter (observabilidad: el flip del admin NUNCA hace negociar a una
-    // oferta que no negocia). Con las 4 ofertas actuales [PUJA, FIXED] la intersección es no-op.
-    // B2: si el admin PINEÓ un modo para esta oferta (overlay, ya validado ∈ allowedModes), GANA sobre el
-    // schedule. Sin pin → intersección schedule ∩ oferta (comportamiento previo). El veto de la oferta
-    // (overridden) sigue siendo observable.
-    const { mode, overridden } = resolveOfferingModeWithPin(offering, modePin, scheduledMode);
-    if (overridden) {
-      this.logger.warn(
-        `createTrip: el schedule pidió ${scheduledMode} pero la oferta ${offering.id} solo permite ` +
-          `[${offering.allowedModes.join(', ')}]; gana la oferta → ${mode} (ADR 013 §1.3.3)`,
-      );
-      bumpOfferingModeOverridden({ offering: offering.id, scheduledMode, mode });
-    }
-    // El modo elegido por el SERVIDOR fija la tarifa + el seq de negociación vía Strategy (open/closed):
+    // El modo fija la tarifa + el seq de negociación vía Strategy (open/closed):
     //  - PUJA (ADR 010 §2): valida el bid (piso ≤ bid ≤ techo) y el bid ES el fareCents; seq=1. Falta el
     //    bid → 400 "falta tu oferta". El surge solo SUGIERE (decisión #5), no se aplica al bid.
     //  - FIXED (BR-T05 + ADR 013 §1.7): IGNORA el bid, calcula la tarifa firme por ruta y le aplica la
     //    política de la oferta — max(round(calculateFare × multiplier), minFareCents); seq=0.
     // Un modo sin strategy falla FUERTE (forMode lanza), no cae silenciosamente en PUJA.
-    // B3 · recargo de combustible por km (admin, hot-editable). Solo FIXED lo aplica (plegado al per-km);
-    // PUJA lo ignora (el bid ES la tarifa). Degradación honesta: catálogo de fuel ausente/caído → 0.
-    const fuelPerKmCents = await this.resolveFuelPerKmCents();
-    // B5-1.d · con el FLIP activo, la energía por oferta (precio fuente ÷ rendimiento) es el insumo
-    // autoritativo; con el flag OFF queda en 0 y manda el fuel viejo. Solo se resuelve si hace falta.
-    const energyPerKmCents = this.energyModelEnabled
-      ? await this.resolveEnergyPerKmCents(offering)
-      : 0;
-    // Piso AUTORITATIVO de la puja para ESTA oferta (ADR 010 §9.3): config del admin per-(zona, oferta).
-    const bidFloorCents = await this.resolveBidFloorCents(origin, offering.id);
+    // Las 2 lecturas de config de pricing son INDEPENDIENTES entre sí → en paralelo (no encadenar awaits en
+    // el hot-path del create). Notas por insumo:
+    //  - bid-floor: piso AUTORITATIVO de la puja per-(zona, oferta) (ADR 010 §9.3).
+    //  - base: banderazo/km/min GLOBALES vigentes (admin, F2.4); solo FIXED; degrada a las constantes de código.
+    const [bidFloorCents, baseFare] = await Promise.all([
+      this.resolveBidFloorCents(offering.id),
+      this.resolveBaseFare(),
+    ]);
+    // ADR 023 §3 · los params POR-SERVICIO de la oferta (banderazo/km/min) PISAN el default global; si la
+    // oferta no los define (`undefined`) → el global (BaseFareService); si el global tampoco → las constantes
+    // de código (en `calculateFare`). Así el Mecánico (call-out plano, perKm/perMin 0) y la Grúa (sin per-min)
+    // cobran su fórmula propia sin tocar el resto del catálogo. Para los rides (params `undefined`) el número
+    // NO cambia: cae al global exactamente como antes.
     const { fareCents, negotiationSeq } = this.dispatchModes.forMode(mode).resolveCreation({
       bidCents: dto.bidCents,
       floorCents: bidFloorCents,
       route: { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
       surge,
       childMode: dto.childMode ?? false,
-      fuelPerKmCents,
-      energyPerKmCents,
-      energyModelEnabled: this.energyModelEnabled,
+      baseFareCents: effectivePricing.baseFareCents ?? baseFare.baseFareCents,
+      perKmCents: effectivePricing.perKmCents ?? baseFare.perKmCents,
+      perMinCents: effectivePricing.perMinCents ?? baseFare.perMinCents,
       pricing: effectivePricing,
     });
-    // B5-1.b · shadow-compare SOLO cuando el flag está OFF (solo FIXED; en PUJA el bid ES el precio).
-    // Con el flag ON la fórmula nueva ya es autoritativa → no hay nada que "shadowear".
-    if (mode === PricingMode.FIXED && !this.energyModelEnabled) {
-      await this.shadowLogFareDelta(
-        offering,
-        { distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds },
-        surge,
-        dto.childMode ?? false,
-        effectivePricing,
-        fuelPerKmCents,
-        fareCents,
-      );
-    }
     const currency = 'PEN';
 
-    // ADR 011 · el modo RESUELTO se CONGELA en la fila del viaje. Reasignación / activación de
-    // programados leen ESTE modo (dispatchMode), NUNCA re-resuelven de la config admin actual (§1.2).
+    // El modo RESUELTO se CONGELA en la fila del viaje (ADR 023 · resolve-once-persist-forever).
     const dispatchMode: PrismaPricingMode = mode;
 
     const id = uuidv7();
-    const trip = await this.prisma.write.$transaction(async (tx) => {
-      const created = await tx.trip.create({
-        data: {
-          id,
-          passengerId: dto.passengerId,
-          originLat: origin.lat,
-          originLon: origin.lon,
-          destLat: destination.lat,
-          destLon: destination.lon,
-          waypoints:
-            waypoints.length > 0 ? (waypoints as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-          scheduledFor,
-          vehicleType,
-          // ADR 011: modo de despacho congelado del viaje (PUJA si hubo bid, FIXED si tarifa por ruta).
-          dispatchMode,
-          fareCents,
-          currency,
-          surgeMultiplier: new Prisma.Decimal(surge),
-          distanceMeters: route.distanceMeters,
-          durationSeconds: route.durationSeconds,
-          paymentMethod: dto.paymentMethod,
-          status: initialStatus,
-          routePolyline: route.polyline || null,
-          // Categoría elegida en la cotización: se PERSISTE tal cual la mandó el cliente
-          // (quoteOption.id, validada contra el catálogo arriba; null = cliente viejo sin el campo —
-          // su oferta default ya alimentó pricing/pool igual). ADR 013 §1.7: la tarifa firme YA aplica
-          // la política de la oferta (multiplier + minFare) vía el Strategy — deuda saldada.
-          category: dto.category ?? null,
-          childMode: dto.childMode ?? false,
-          childCodeHash,
-          promoCode: dto.promoCode ?? null,
-          // BE-2 · solicitudes especiales (mascota/equipaje/silla). El conductor las ve antes de aceptar.
-          specialRequests: dto.specialRequests ?? [],
-          idempotencyKey: idempotencyKey ?? null,
-          // H13 — la puja abre el PRIMER ciclo de negociación (seq=1, lo fija el Strategy); FIXED queda en 0
-          // (nunca emite offer_accepted → applyAgreedFare no aplica). El seq es monotónico: rebid y la
-          // reasignación lo INCREMENTAN (nunca resetean, a diferencia de reassignCount).
-          negotiationSeq,
-        },
+    const trip = await this.repo.runInTransaction(async (tx) => {
+      // Invariante "una sola experiencia de viaje" — cierre de la carrera (RC23 · ADR-022): el gate de arriba
+      // (fuera de la tx, ~L337) es un fast-fail; entre ese check y este create hay un gap async grande
+      // (maps.route + lecturas de config en paralelo), así que dos pedidos INMEDIATOS concurrentes del MISMO
+      // pasajero lo pasan ambos y crearían DOS viajes vivos. Serializamos por pasajero con un advisory lock
+      // TRANSACCIONAL y RE-verificamos el invariante DENTRO de la tx: el segundo request bloquea hasta el commit
+      // del primero, entonces ve su viaje vivo → 409 ActiveTripExists. Sólo INMEDIATOS (SCHEDULED no es vivo →
+      // varias reservas conviven). LIVE_STATES es la ÚNICA fuente del set. `$executeRaw`: el lock devuelve void.
+      if (!scheduledFor) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.passengerId})::bigint)`;
+        const live = await tx.trip.findFirst({
+          where: { passengerId: dto.passengerId, status: { in: [...LIVE_STATES] } },
+          select: { id: true },
+          orderBy: { requestedAt: 'desc' },
+        });
+        if (live) throw new ActiveTripExistsError(live.id);
+      }
+      const created = await this.repo.createTripTx(tx, {
+        id,
+        passengerId: dto.passengerId,
+        originLat: origin.lat,
+        originLon: origin.lon,
+        destLat: destination.lat,
+        destLon: destination.lon,
+        waypoints:
+          waypoints.length > 0 ? (waypoints as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+        scheduledFor,
+        vehicleType,
+        // ADR 023: modo de despacho congelado del viaje = el modo EFECTIVO de la oferta (FIXED/PUJA).
+        dispatchMode,
+        fareCents,
+        currency,
+        surgeMultiplier: new Prisma.Decimal(surge),
+        distanceMeters: route.distanceMeters,
+        durationSeconds: route.durationSeconds,
+        paymentMethod: dto.paymentMethod,
+        status: initialStatus,
+        routePolyline: route.polyline || null,
+        // Categoría elegida en la cotización: se PERSISTE tal cual la mandó el cliente
+        // (quoteOption.id, validada contra el catálogo arriba; null = cliente viejo sin el campo —
+        // su oferta default ya alimentó pricing/pool igual). ADR 013 §1.7: la tarifa firme YA aplica
+        // la política de la oferta (multiplier + minFare) vía el Strategy — deuda saldada.
+        category: dto.category ?? null,
+        childMode: dto.childMode ?? false,
+        childCodeHash,
+        promoCode: dto.promoCode ?? null,
+        // BE-2 · solicitudes especiales (mascota/equipaje/silla). El conductor las ve antes de aceptar.
+        specialRequests: dto.specialRequests ?? [],
+        idempotencyKey: idempotencyKey ?? null,
+        // H13 — la puja abre el PRIMER ciclo de negociación (seq=1, lo fija el Strategy); FIXED queda en 0
+        // (nunca emite offer_accepted → applyAgreedFare no aplica). El seq es monotónico: rebid y la
+        // reasignación lo INCREMENTAN (nunca resetean, a diferencia de reassignCount).
+        negotiationSeq,
       });
 
       if (scheduledFor) {
@@ -635,19 +520,11 @@ export class TripsService {
     if (trip.passengerClosedAt !== null) {
       return toTripView(trip);
     }
-    const updated = await this.prisma.write.trip.update({
-      where: { id: tripId },
-      data: { passengerClosedAt: new Date() },
-    });
+    const updated = await this.repo.updatePassengerClosedAt(tripId, new Date());
     return toTripView(updated);
   }
 
   // ───────────────────────────── Transiciones ─────────────────────────────
-
-  /** POST /trips/:id/assign — asigna conductor/vehículo. Emite trip.assigned. */
-  async assignDriver(id: string, dto: AssignTripDto): Promise<TripView> {
-    return this.assign(id, dto.driverId, dto.vehicleId);
-  }
 
   /**
    * Asignación disparada por dispatch.match_found (consumidor Kafka). dispatch resuelve el vehículo
@@ -656,7 +533,7 @@ export class TripsService {
    * solo el conductor. Idempotente: si el viaje ya está ASSIGNED con ese conductor, no hace nada.
    */
   async assignFromDispatch(id: string, driverId: string, vehicleId?: string): Promise<void> {
-    const trip = await this.prisma.read.trip.findUnique({ where: { id } });
+    const trip = await this.repo.findByIdRead(id);
     if (!trip) {
       this.logger.warn(`dispatch.match_found para viaje inexistente ${id}; ignorado`);
       return;
@@ -708,12 +585,9 @@ export class TripsService {
     to: TripStatus,
     data: Prisma.TripUpdateManyMutationInput,
   ): Promise<void> {
-    const claim = await tx.trip.updateMany({
-      where: { id, status: { in: transitionSources(to) } },
-      data: { status: to, ...data },
-    });
+    const claim = await this.repo.casMoveStatus(tx, id, transitionSources(to), to, data);
     if (claim.count === 0) {
-      const current = await tx.trip.findUnique({ where: { id } });
+      const current = await this.repo.findByIdTx(tx, id);
       if (!current) throw new NotFoundError('Viaje no encontrado', { id });
       throw new InvalidTripTransition(current.status, to);
     }
@@ -727,20 +601,23 @@ export class TripsService {
     // read → assertTransition(status leído) → update({where:{id}}) incondicional: dos asignaciones podían
     // pisarse (last-write-wins = doble conductor a un pasajero). Hoy Kafka serializa por tripId (key del
     // outbox), pero NO dependemos de ese supuesto: el viaje es la autoridad atómica de "quién quedó asignado".
-    const updated = await this.prisma.write.$transaction(async (tx) => {
-      const claim = await tx.trip.updateMany({
-        where: { id, status: { in: transitionSources(TripStatus.ASSIGNED) } },
-        data: { status: TripStatus.ASSIGNED, driverId, vehicleId, assignedAt: new Date() },
-      });
+    const updated = await this.repo.runInTransaction(async (tx) => {
+      const claim = await this.repo.casMoveStatus(
+        tx,
+        id,
+        transitionSources(TripStatus.ASSIGNED),
+        TripStatus.ASSIGNED,
+        { driverId, vehicleId, assignedAt: new Date() },
+      );
       if (claim.count === 0) {
         // No se movió: el viaje no existe, o no estaba en un estado asignable (ya ASSIGNED a otro,
         // cancelado, etc.). Releemos para un error honesto con el `from` real.
-        const current = await tx.trip.findUnique({ where: { id } });
+        const current = await this.repo.findByIdTx(tx, id);
         if (!current) throw new NotFoundError('Viaje no encontrado', { id });
         // Estado no-asignable → InvalidTripTransition (permanente; assignFromDispatch lo trata como moot/ACK).
         throw new InvalidTripTransition(current.status, TripStatus.ASSIGNED);
       }
-      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
       await recordTripEvent(tx, id, 'trip.assigned', { driverId, vehicleId });
       await enqueueOutbox(
         tx,
@@ -769,12 +646,12 @@ export class TripsService {
     assertTransition(trip.status, TripStatus.ACCEPTED);
     const etaSeconds = dto.etaSeconds ?? 300;
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico: el assertTransition de arriba es solo pre-check fail-fast (UX antes de abrir tx); el
       // guard REAL contra la carrera va acá (status en el WHERE). Si el viaje cayó a un terminal entre el
       // mustFind y este claim, casTransition lanza InvalidTripTransition y el evento NO se emite.
       await this.casTransition(tx, id, TripStatus.ACCEPTED, { acceptedAt: new Date() });
-      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
       await recordTripEvent(tx, id, 'trip.accepted', { driverId: trip.driverId, etaSeconds });
       await enqueueOutbox(
         tx,
@@ -808,10 +685,10 @@ export class TripsService {
     const etaSeconds = dto.etaSeconds ?? 120;
     const at = new Date();
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico (ver acceptTrip): assertTransition es pre-check; el guard de carrera va en el WHERE.
       await this.casTransition(tx, id, TripStatus.ARRIVING, { arrivingAt: at });
-      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
       await recordTripEvent(tx, id, 'trip.arriving', { etaSeconds });
       await enqueueOutbox(
         tx,
@@ -844,10 +721,10 @@ export class TripsService {
     assertTransition(trip.status, TripStatus.ARRIVED);
     const at = new Date();
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico (ver acceptTrip): assertTransition es pre-check; el guard de carrera va en el WHERE.
       await this.casTransition(tx, id, TripStatus.ARRIVED, { arrivedAt: at });
-      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
       await recordTripEvent(tx, id, 'trip.arrived', {});
       await enqueueOutbox(
         tx,
@@ -912,7 +789,7 @@ export class TripsService {
         // padre/madre el 3er intento no es lo mismo que el 1ro.
         const attempt = await this.registerChildCodeFailure(id);
         const at = new Date().toISOString();
-        await this.prisma.write.$transaction(async (tx) => {
+        await this.repo.runInTransaction(async (tx) => {
           await recordTripEvent(tx, id, 'trip.child_code_failed', { attempt, at });
           await enqueueOutbox(
             tx,
@@ -941,10 +818,10 @@ export class TripsService {
     }
 
     const startedAt = new Date();
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico (ver acceptTrip): assertTransition es pre-check; el guard de carrera va en el WHERE.
       await this.casTransition(tx, id, TripStatus.IN_PROGRESS, { startedAt });
-      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
       await recordTripEvent(tx, id, 'trip.started', { startedAt: startedAt.toISOString() });
       await enqueueOutbox(
         tx,
@@ -957,6 +834,16 @@ export class TripsService {
             startedAt: startedAt.toISOString(),
             // passengerId ENRIQUECIDO: push "tu viaje empezó" (dispara el dominó de compartir/familia).
             passengerId: trip.passengerId,
+            // PREPAGO (ADR-024 · "cobrar al iniciar"): el cobro DIGITAL de la tarifa congelada nace ACÁ, no
+            // en trip.completed. Enriquecemos el evento con lo que payment-service necesita para cobrar sin
+            // join cross-servicio (PARIDAD con trip.completed). CASH ⇒ payment NO cobra al iniciar (bilateral
+            // en completed). El origen se persiste como originLat/originLon; el evento lo expone como originLng.
+            fareCents: trip.fareCents,
+            paymentMethod: trip.paymentMethod,
+            promoCode: trip.promoCode ?? undefined,
+            dispatchMode: trip.dispatchMode,
+            originLat: trip.originLat,
+            originLng: trip.originLon,
           },
         }),
         id,
@@ -1031,12 +918,12 @@ export class TripsService {
     const cashCollected =
       trip.paymentMethod === PaymentMethod.CASH ? (dto.cashCollected ?? undefined) : undefined;
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico CRÍTICO (cobro): si una carrera ya canceló el viaje (CANCELLED_BY_*), el claim falla y
       // NO se emite trip.completed → payment-service NO cobra un viaje muerto. assertTransition arriba es
       // solo pre-check fail-fast; el guard autoritativo va en el WHERE del updateMany.
       await this.casTransition(tx, id, TripStatus.COMPLETED, { completedAt });
-      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
       await recordTripEvent(tx, id, 'trip.completed', { fareCents: trip.fareCents });
       await enqueueOutbox(
         tx,
@@ -1055,6 +942,13 @@ export class TripsService {
             promoCode: trip.promoCode ?? undefined,
             // EFECTIVO: "el conductor cobró en mano" → payment crea CashConfirmation driverConfirmed=true.
             cashCollected,
+            // MÉTRICAS · modo de despacho (Fijo/Puja) + origen (lat/lng), congelados en el viaje. payment los
+            // DENORMALIZA en el Payment para los cortes de ingresos por MODO y por DISTRITO del panel (sin join
+            // cross-service). El corte Fijo/Puja divide el ON_DEMAND; el distrito zonifica el origen.
+            dispatchMode: trip.dispatchMode,
+            originLat: trip.originLat,
+            // el trip-service persiste el origen como originLat/originLon; el evento lo expone como originLng.
+            originLng: trip.originLon,
           },
         }),
         id,
@@ -1109,7 +1003,7 @@ export class TripsService {
       now,
     });
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico CRÍTICO (split de penalidad): el `target` ya está resuelto (passenger vs driver) ANTES
       // de abrir la tx; el claim valida que el viaje SIGUE en un estado cancelable. Si una carrera ya lo
       // movió a un terminal, el claim falla y NO se emite trip.cancelled → payment-service NO procesa un
@@ -1121,7 +1015,7 @@ export class TripsService {
         cancellationReason: dto.reason ?? null,
         penaltyCents,
       });
-      const next = await tx.trip.findUniqueOrThrow({ where: { id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
       await recordTripEvent(tx, id, 'trip.cancelled', {
         by: dto.by,
         penaltyCents,
@@ -1190,7 +1084,7 @@ export class TripsService {
     // FIXED re-emite trip.requested (sin tocar seq/agreedFare). assertTransition(REASSIGNING) y el guard de
     // tope→FAILED son TRANSVERSALES (no por-modo) → quedan acá. forMode lanza si el modo no tiene strategy.
     assertTransition(trip.status, TripStatus.REASSIGNING);
-    const updated = await this.prisma.write.$transaction((tx) =>
+    const updated = await this.repo.runInTransaction((tx) =>
       this.dispatchModes.forMode(trip.dispatchMode).reassign(tx, trip, nextReassignCount, reason),
     );
     this.logger.log(
@@ -1198,6 +1092,32 @@ export class TripsService {
         `${nextReassignCount}/${this.maxReassign})`,
     );
     return toTripView(updated);
+  }
+
+  /**
+   * Fase B (ADR-021 · finding B1 · B-react) — el conductor pasó a OFFLINE (`driver.went_offline`: fin de
+   * turno o caída de socket sin reconexión). Si tenía un viaje PRE-RECOJO ya ACEPTADO (ACCEPTED/ARRIVING/
+   * ARRIVED) lo REASIGNAMOS: el pasajero consigue otro conductor en vez de esperar los ~15min del watchdog
+   * pre-recojo (que solo EXPIRA, sin re-match). REUSAMOS la máquina existente `reassignAfterDriverCancel`
+   * (la MISMA del cancel EXPLÍCITO del conductor): respeta el modo CONGELADO del viaje + el tope de
+   * re-asignaciones + emite `trip.reassigning` (dispatch re-abre el board y libera al conductor). NO se
+   * duplica lógica de reasignación: solo se enruta el viaje del conductor offline hacia ella.
+   *
+   * ALCANCE (in-scope de Fase B): SOLO POST_ACCEPT_STATES. Un viaje en ASSIGNED (el pasajero eligió pero el
+   * conductor aún no tocó "aceptar") NO se reasigna por esta vía — ASSIGNED→REASSIGNING NO es transición
+   * legal de la máquina (igual que el cancel desde ASSIGNED, terminal); abrir ese camino es Fase G.
+   *
+   * IDEMPOTENTE: sin viaje pre-recojo del conductor (ya reasignado/terminado, o nunca aceptó) es no-op. Los
+   * eventos de UN conductor caen en la MISMA partición del topic 'driver' → se procesan SERIAL, así una
+   * segunda entrega ve el viaje ya en REASSIGNING (fuera de POST_ACCEPT) → no re-reasigna.
+   */
+  async reassignForDriverOffline(driverId: string): Promise<void> {
+    const trip = await this.repo.findPostAcceptTripByDriver(driverId, [...POST_ACCEPT_STATES]);
+    if (!trip) return;
+    this.logger.log(
+      `Conductor ${driverId} offline con viaje ${trip.id} (${trip.status}) pre-recojo → reasignando`,
+    );
+    await this.reassignAfterDriverCancel(trip, 'driver_offline');
   }
 
   /**
@@ -1212,7 +1132,7 @@ export class TripsService {
     const at = new Date();
     const cancelledDriverId = trip.driverId;
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // CAS atómico (ver acceptTrip): assertTransition(FAILED) arriba es pre-check; el guard de carrera va
       // en el WHERE. Si el viaje ya cayó a otro terminal entre el read y este claim, lanza y no emite.
       await this.casTransition(tx, trip.id, TripStatus.FAILED, {
@@ -1221,7 +1141,7 @@ export class TripsService {
         cancelledAt: at,
         cancellationReason: 'max_reassign_exceeded',
       });
-      const next = await tx.trip.findUniqueOrThrow({ where: { id: trip.id } });
+      const next = await this.repo.findByIdOrThrowTx(tx, trip.id);
       const payload = {
         tripId: trip.id,
         passengerId: trip.passengerId,
@@ -1267,7 +1187,7 @@ export class TripsService {
    * y no toca agreedFareCents).
    */
   async applyAgreedFare(tripId: string, priceCents: number, negotiationSeq: number): Promise<void> {
-    const trip = await this.prisma.read.trip.findUnique({ where: { id: tripId } });
+    const trip = await this.repo.findByIdRead(tripId);
     if (!trip) {
       this.logger.warn(`dispatch.offer_accepted para viaje inexistente ${tripId}; ignorado`);
       return;
@@ -1304,26 +1224,24 @@ export class TripsService {
       );
     }
 
-    const applied = await this.prisma.write.$transaction(async (tx) => {
+    const applied = await this.repo.runInTransaction(async (tx) => {
       // Guard de carrera atómico + N9 guard de estado: solo aplica si agreedFareCents SIGUE null (otra
       // redelivery concurrente pudo aplicarlo entre el read y este update) Y el viaje NO está en un
       // terminal. Sin el status-guard, un offer_accepted tardío/duplicado escribiría fareCents +
       // trip.fare_agreed sobre un viaje ya CANCELLED/EXPIRED/FAILED/COMPLETED (espejo de
       // expireFromNoOffers, que también status-guardea su updateMany). count 0 → ya terminal o ya
       // aplicado → no-op idempotente.
-      const result = await tx.trip.updateMany({
-        // H13 — el `negotiationSeq` del CICLO vigente es parte de la condición ATÓMICA: una redelivery
-        // STALE de un ciclo viejo (seq menor) NO matchea esta fila → count 0 → no-op (no escribe la
-        // tarifa rancia del conductor del ciclo anterior). Convive con el guard once-ever (agreedFareCents
-        // null = dedup de redelivery DENTRO del ciclo) y el status-guard (no escribir sobre un terminal).
-        where: {
-          id: tripId,
-          negotiationSeq,
-          agreedFareCents: null,
-          status: { in: [...FARE_APPLICABLE_STATES] },
-        },
-        data: { fareCents: priceCents, agreedFareCents: priceCents },
-      });
+      // H13 — el `negotiationSeq` del CICLO vigente es parte de la condición ATÓMICA: una redelivery
+      // STALE de un ciclo viejo (seq menor) NO matchea la fila → count 0 → no-op (no escribe la tarifa
+      // rancia del conductor del ciclo anterior). Convive con el guard once-ever (agreedFareCents null,
+      // HARDCODEADO en el repo = dedup de redelivery DENTRO del ciclo) y el status-guard (no terminal).
+      const result = await this.repo.casApplyAgreedFare(
+        tx,
+        tripId,
+        negotiationSeq,
+        FARE_APPLICABLE_STATES,
+        priceCents,
+      );
       if (result.count === 0) return false;
       await recordTripEvent(tx, tripId, 'trip.fare_agreed', {
         previousFareCents: trip.fareCents,
@@ -1349,7 +1267,7 @@ export class TripsService {
    * transiciona desde un estado de puja abierta (REQUESTED/REASSIGNING) con guard updateMany.
    */
   async expireFromNoOffers(tripId: string, reason: string): Promise<void> {
-    const trip = await this.prisma.read.trip.findUnique({ where: { id: tripId } });
+    const trip = await this.repo.findByIdRead(tripId);
     if (!trip) {
       this.logger.warn(`dispatch.no_offers para viaje inexistente ${tripId}; ignorado`);
       return;
@@ -1365,11 +1283,10 @@ export class TripsService {
     assertTransition(trip.status, TripStatus.EXPIRED);
     const at = new Date();
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       // Guard de carrera: solo expira si SIGUE en el estado de puja observado.
-      const result = await tx.trip.updateMany({
-        where: { id: tripId, status: trip.status },
-        data: { status: TripStatus.EXPIRED },
+      const result = await this.repo.casGuardedUpdate(tx, tripId, trip.status, {
+        status: TripStatus.EXPIRED,
       });
       if (result.count === 0) return; // otro actor ganó la carrera (match/cancel) → no-op
 
@@ -1412,7 +1329,7 @@ export class TripsService {
    *    para que dispatch libere cualquier residual y payment/downstream reaccionen, igual que el cancel normal.
    */
   async cancelFromBid(tripId: string): Promise<void> {
-    const trip = await this.prisma.read.trip.findUnique({ where: { id: tripId } });
+    const trip = await this.repo.findByIdRead(tripId);
     if (!trip) {
       this.logger.warn(`dispatch.bid_cancelled para viaje inexistente ${tripId}; ignorado`);
       return;
@@ -1426,18 +1343,15 @@ export class TripsService {
     assertTransition(trip.status, TripStatus.CANCELLED_BY_PASSENGER);
     const now = new Date();
 
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTransaction(async (tx) => {
       // Guard de carrera: solo cancela si SIGUE en el estado de puja observado (otro actor —match/expire—
       // pudo ganar la carrera entre el read y este update).
-      const result = await tx.trip.updateMany({
-        where: { id: tripId, status: trip.status },
-        data: {
-          status: TripStatus.CANCELLED_BY_PASSENGER,
-          cancelledAt: now,
-          cancelledBy: 'PASSENGER',
-          cancellationReason: 'bid_cancelled',
-          penaltyCents: 0, // sin penalidad: es una puja en curso, aún no hubo conductor en camino (BR-T03)
-        },
+      const result = await this.repo.casGuardedUpdate(tx, tripId, trip.status, {
+        status: TripStatus.CANCELLED_BY_PASSENGER,
+        cancelledAt: now,
+        cancelledBy: 'PASSENGER',
+        cancellationReason: 'bid_cancelled',
+        penaltyCents: 0, // sin penalidad: es una puja en curso, aún no hubo conductor en camino (BR-T03)
       });
       if (result.count === 0) return; // otro actor ganó la carrera → no-op idempotente
       await recordTripEvent(tx, tripId, 'trip.cancelled', {
@@ -1512,7 +1426,7 @@ export class TripsService {
     // El piso es el de la oferta del viaje (`trip.category`); legacy sin categoría → ancla económico.
     const origin: LatLon = { lat: trip.originLat, lon: trip.originLon };
     const offeringId = findOffering(trip.category ?? '')?.id ?? null;
-    const floor = await this.resolveBidFloorCents(origin, offeringId);
+    const floor = await this.resolveBidFloorCents(offeringId);
     if (bidCents < floor) {
       throw new ValidationError(
         `El bid (${bidCents}) es menor al piso de la oferta (${floor}) (ADR 010 §9.3)`,
@@ -1529,28 +1443,32 @@ export class TripsService {
     const fromStatus = trip.status;
     assertTransition(fromStatus, TripStatus.REQUESTED);
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
+    const updated = await this.repo.runInTransaction(async (tx) => {
       // Guard de carrera/doble-tap: solo reactiva si SIGUE en el estado de puja muerta observado. Un
       // segundo tap (ya REQUESTED por el primero) no toca fila → no re-emite el board fresco.
-      const guard = await tx.trip.updateMany({
-        where: { id: tripId, status: fromStatus },
-        data: {
-          status: TripStatus.REQUESTED,
-          fareCents: bidCents,
-          // El conductor que pudo haber quedado colgado (REASSIGNING) se desvincula: board fresco, re-match limpio.
-          driverId: null,
-          // H12: re-puja explícita = NUEVA decisión de dinero. Reseteamos el guard once-ever de
-          // applyAgreedFare (agreedFareCents) para que el offer_accepted del board fresco aplique el precio
-          // recién acordado en vez de ser bloqueado por el agreed-fare del ciclo anterior (conductor mal pagado).
-          agreedFareCents: null,
-          // Re-puja explícita = ciclo fresco: reinicia el contador de robustez #4 (anti bucle infinito).
-          reassignCount: 0,
-          // H13 — re-puja = NUEVO ciclo de negociación: incrementa el seq MONOTÓNICO (a diferencia de
-          // reassignCount, NUNCA resetea). El offer_accepted del board fresco viajará con este seq+1, y
-          // un offer_accepted STALE del ciclo anterior (seq menor) quedará bloqueado en applyAgreedFare.
-          negotiationSeq: trip.negotiationSeq + 1,
-          requestedAt: new Date(),
-        },
+      const guard = await this.repo.casGuardedUpdate(tx, tripId, fromStatus, {
+        status: TripStatus.REQUESTED,
+        fareCents: bidCents,
+        // ADR-019 Lote B: re-pujar ES una acción de PUJA por definición (el endpoint recibe `bidCents`:
+        // el pasajero ofrece SU precio → subasta). Persistimos dispatchMode=PUJA para que el valor
+        // CONGELADO deje de mentir: antes un viaje FIXED que expiraba, al re-pujar, abría un OfferBoard
+        // (PUJA) pero conservaba dispatchMode=FIXED → un driver-cancel posterior tomaba el path FIXED
+        // (secuencial 12s) mientras su re-bid fue subasta (60s), violando ADR-011 resolve-once-persist.
+        // Ahora el modo persistido coincide con el mecanismo real (emitBidPosted abajo).
+        dispatchMode: PrismaPricingMode.PUJA,
+        // El conductor que pudo haber quedado colgado (REASSIGNING) se desvincula: board fresco, re-match limpio.
+        driverId: null,
+        // H12: re-puja explícita = NUEVA decisión de dinero. Reseteamos el guard once-ever de
+        // applyAgreedFare (agreedFareCents) para que el offer_accepted del board fresco aplique el precio
+        // recién acordado en vez de ser bloqueado por el agreed-fare del ciclo anterior (conductor mal pagado).
+        agreedFareCents: null,
+        // Re-puja explícita = ciclo fresco: reinicia el contador de robustez #4 (anti bucle infinito).
+        reassignCount: 0,
+        // H13 — re-puja = NUEVO ciclo de negociación: incrementa el seq MONOTÓNICO (a diferencia de
+        // reassignCount, NUNCA resetea). El offer_accepted del board fresco viajará con este seq+1, y
+        // un offer_accepted STALE del ciclo anterior (seq menor) quedará bloqueado en applyAgreedFare.
+        negotiationSeq: trip.negotiationSeq + 1,
+        requestedAt: new Date(),
       });
       if (guard.count === 0) {
         // Otro tap ganó la carrera: idempotente, devolvemos el estado ya reactivado sin re-emitir.
@@ -1561,6 +1479,8 @@ export class TripsService {
         ...trip,
         status: TripStatus.REQUESTED,
         fareCents: bidCents,
+        // Espeja el flip persistido (ADR-019 Lote B): el modo del viaje reactivado ES PUJA.
+        dispatchMode: PrismaPricingMode.PUJA,
         driverId: null,
         reassignCount: 0,
         // H13 — espeja el incremento del updateMany para que emitBidPosted estampe el seq del nuevo ciclo.
@@ -1612,29 +1532,96 @@ export class TripsService {
     const waypoints = readWaypoints(trip);
     const route = await this.maps.route(origin, destination, waypoints);
     const surge = Number(trip.surgeMultiplier.toString());
-    const fare = calculateFare({
+    // Re-cotiza con la MISMA fórmula firme del create (`calculateFirmFare`: multiplier + mínima + fee de niño plano).
+    // Sin esto, `calculateFare` base reseteaba la tarifa sin multiplier: un FIXED Premium/XL podía cambiar
+    // de destino (aun al mismo punto) y cobrar de menos. En FIXED SIN piso contra `trip.fareCents` (un
+    // destino MÁS CERCA debe abaratar); en PUJA SÍ hay piso al bid acordado (ver A3, más abajo). El piso de
+    // la mínima de la oferta ya está dentro de la fórmula.
+    const { offering } = resolveTripOffering(trip.category, trip.vehicleType);
+    // changeDestination (ADR-022 · 444881b3) · re-cotiza con el pricing EFECTIVO del admin (overlay), NO el
+    // `offering.pricing` de código crudo — espejo del create (que usa resolveEffectiveOffering). Sin esto, un
+    // multiplier/minFare editado por el admin no aplicaba al cambiar destino: incoherencia create↔changeDest.
+    // `enforceEnabled:false`: mid-viaje el viaje YA existe con esa oferta; que el admin la deshabilite no puede
+    // romper un cambio de destino en curso (el gate de enabled es del create).
+    const { pricing: effectivePricing } = await this.resolveEffectiveOffering(offering, {
+      enforceEnabled: false,
+      site: 'change_destination',
+    });
+    const fareInput = {
       distanceMeters: route.distanceMeters,
       durationSeconds: route.durationSeconds,
       surgeMultiplier: surge,
       childMode: trip.childMode,
-    });
+      // F2.4 · banderazo/km/min configurables (degradan a las constantes de código).
+      ...(await this.resolveBaseFare()),
+    };
+    // changeDestination (ADR-022 · 444881b3) · re-cotiza con la MISMA fórmula firme del create (calculateFirmFare:
+    // multiplier + mínima + fee de niño plano) sobre el pricing EFECTIVO del admin.
+    const fare = calculateFirmFare(fareInput, effectivePricing);
 
-    const updated = await this.prisma.write.$transaction(async (tx) => {
-      const next = await tx.trip.update({
+    const updated = await this.repo.runInTransaction(async (tx) => {
+      // A3 (ADR-022) · el piso de la PUJA se computa DENTRO de la tx contra el `fareCents` FRESCO. El `trip` de
+      // arriba se leyó ANTES de `maps.route` (cientos de ms); en esa ventana un `offer_accepted`/re-puja concurrente
+      // pudo SUBIR el bid acordado. Floorear contra el `trip.fareCents` viejo persistiría una tarifa POR DEBAJO del
+      // bid vigente (fuga). Re-leemos el bid actual y flooreamos contra ÉSE.
+      const current = await tx.trip.findUniqueOrThrow({
         where: { id },
+        select: { status: true, fareCents: true, dispatchMode: true },
+      });
+      // En PUJA el `fareCents` es un BID NEGOCIADO que el conductor ACEPTÓ: cambiar el destino no puede cobrar
+      // por DEBAJO de lo acordado (espejo del piso de waypoint-proposal). En FIXED sí abarata (fórmula de la ruta).
+      const fareCents =
+        current.dispatchMode === PricingMode.FIXED
+          ? fare.cents
+          : Math.max(fare.cents, current.fareCents);
+
+      // CAS: el estado (DESTINATION_EDITABLE) Y el `fareCents` viajan en el WHERE. El estado cierra la carrera
+      // start/complete/cancel (mutación financiera post-completion). El `fareCents` cierra la carrera con la
+      // re-puja: si el bid cambió entre el re-read y el write, count 0 → ConflictError (el caller reintenta con
+      // el bid nuevo). Patrón optimista espejo del CAS de accept()/waypoint.
+      const claim = await tx.trip.updateMany({
+        where: { id, status: { in: [...DESTINATION_EDITABLE] }, fareCents: current.fareCents },
         data: {
           destLat: destination.lat,
           destLon: destination.lon,
           distanceMeters: route.distanceMeters,
           durationSeconds: route.durationSeconds,
           routePolyline: route.polyline || null,
-          fareCents: fare.cents,
+          fareCents,
         },
       });
-      await recordTripEvent(tx, id, 'trip.destination_changed', {
+      if (claim.count === 0) {
+        // El CAS falló por UNO de sus dos predicados. Distinguimos la causa para que el caller sepa si
+        // REINTENTAR (re-puja: el bid cambió, re-cotizar contra el nuevo) o RENDIRSE (estado no-editable:
+        // el viaje arrancó/canceló). Un solo mensaje genérico ocultaba la carrera de precio como si fuera
+        // un cambio de estado. Re-leemos para atribuir la causa real.
+        const after = await tx.trip.findUnique({
+          where: { id },
+          select: { status: true, fareCents: true },
+        });
+        if (after && !DESTINATION_EDITABLE.has(after.status)) {
+          throw new ConflictError('No se puede cambiar el destino en el estado actual', {
+            id,
+            reason: 'status_not_editable',
+            status: after.status,
+          });
+        }
+        throw new ConflictError('El precio del viaje cambió (re-puja concurrente); reintentá', {
+          id,
+          reason: 'fare_changed',
+          currentFareCents: after?.fareCents,
+        });
+      }
+      const next = await this.repo.findByIdOrThrowTx(tx, id);
+      // ADR-022 changeDest (audit fiel + RC5) · el audit graba el `fareCents` REALMENTE persistido/cobrado
+      // (flooreado), no el recompute crudo `fare.cents`; `previousFareCents` = el bid fresco que el CAS confirmó
+      // vigente. RC5: `emitDestinationChanged` PUBLICA `trip.destination_changed` al outbox (misma tx) —
+      // share-service refleja el destino nuevo en la vista de la familia y notification-service alerta (cierra el
+      // "cambio de destino silencioso", crítico en modo niño). `next` trae passengerId/driverId/childMode frescos.
+      await emitDestinationChanged(tx, next, {
         destination,
-        previousFareCents: trip.fareCents,
-        fareCents: fare.cents,
+        previousFareCents: current.fareCents,
+        fareCents,
       });
       return next;
     });
@@ -1666,24 +1653,11 @@ export class TripsService {
   async anonymizePassenger(passengerId: string): Promise<{ anonymized: number }> {
     // Ids afectados ANTES de anonimizar: updateMany no devuelve filas, y los necesitamos para emitir
     // una señal de purga de video por viaje (el video se indexa por tripId en media-service).
-    const affected = await this.prisma.read.trip.findMany({
-      where: { passengerId },
-      select: { id: true },
-    });
+    const affected = await this.repo.findTripIdsByPassenger(passengerId);
 
     const erasedAt = new Date().toISOString();
-    const count = await this.prisma.write.$transaction(async (tx) => {
-      const result = await tx.trip.updateMany({
-        where: { passengerId },
-        data: {
-          originLat: 0,
-          originLon: 0,
-          destLat: 0,
-          destLon: 0,
-          waypoints: Prisma.DbNull,
-          routePolyline: null,
-        },
-      });
+    const count = await this.repo.runInTransaction(async (tx) => {
+      const result = await this.repo.anonymizeTripLocationByPassengerTx(tx, passengerId);
       // Una señal de purga de video por viaje afectado, en la misma transacción (outbox pattern).
       for (const { id } of affected) {
         await enqueueOutbox(
@@ -1709,7 +1683,7 @@ export class TripsService {
   // ───────────────────────────── Helpers ─────────────────────────────
 
   private async mustFind(id: string): Promise<Trip> {
-    const trip = await this.prisma.write.trip.findUnique({ where: { id } });
+    const trip = await this.repo.findByIdOnPrimary(id);
     if (!trip) throw new NotFoundError('Viaje no encontrado', { id });
     return trip;
   }

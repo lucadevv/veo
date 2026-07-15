@@ -35,6 +35,10 @@ PIDS_DIR="$SCRIPT_DIR/.pids"
 JWT_PRIV_PEM="$SECRETS_DIR/jwt-es256-private.pkcs8.pem"
 JWT_PUB_PEM="$SECRETS_DIR/jwt-es256-public.spki.pem"
 INTERNAL_SECRET_FILE="$SECRETS_DIR/internal-identity-secret.txt"
+# Salt del BLIND INDEX del DNI (identity-service, Lote 0): hashPii(dni, salt) para la unicidad del DNI sin
+# guardar el DNI en claro. DEBE ser ESTABLE entre restarts (si cambia, los `dni_hash` ya guardados no matchean)
+# → se genera UNA vez y se reusa. El identity lo exige con getOrThrow('DNI_HASH_SALT') o no bootea.
+DNI_HASH_SALT_FILE="$SECRETS_DIR/dni-hash-salt.txt"
 # Token PÚBLICO de Mapbox (pk) para el modo VEO_MAPS_MODE=mapbox del BFF. Persistente (gitignored).
 MAPBOX_TOKEN_FILE="$SECRETS_DIR/mapbox-access-token.txt"
 # Credenciales ProntoPaga (VEO_PAYMENT_MODE=prontopaga). Persistentes (gitignored). En dev se siembran
@@ -91,6 +95,14 @@ ensure_secrets() {
     chmod 600 "$INTERNAL_SECRET_FILE"
     log "INTERNAL_IDENTITY_SECRET generado"
   fi
+  # Salt del blind index del DNI: estable (no regenerar o los dni_hash guardados dejan de matchear).
+  if [[ -s "$DNI_HASH_SALT_FILE" ]]; then
+    log "DNI_HASH_SALT existente, reuso"
+  else
+    openssl rand -hex 32 > "$DNI_HASH_SALT_FILE"
+    chmod 600 "$DNI_HASH_SALT_FILE"
+    log "DNI_HASH_SALT generado"
+  fi
 
   # Token Mapbox (pk) para VEO_MAPS_MODE=mapbox del BFF. Vive SOLO en este archivo gitignored
   # (NUNCA hardcodeado en el script tracked). Si falta, pegá tu pk en $MAPBOX_TOKEN_FILE;
@@ -145,6 +157,7 @@ ensure_secrets() {
   mapbox_token="$(cat "$MAPBOX_TOKEN_FILE")"
   pp_secret="$(cat "$PRONTOPAGA_SECRET_FILE")"
   pp_token="$(cat "$PRONTOPAGA_TOKEN_FILE")"
+  dni_salt="$(cat "$DNI_HASH_SALT_FILE")"
 
   # Convención env ÚNICA: inyecta los secretos en el env/development.env de cada servicio (config +
   # secretos mergeados, GITIGNORED). Append-if-absent / replace-if-empty por clave (idempotente):
@@ -152,7 +165,8 @@ ensure_secrets() {
   local UPSERT="node $SCRIPT_DIR/lib/upsert-env.mjs"
 
   $UPSERT "$IDENTITY_DIR/env/development.env" \
-    "JWT_PRIVATE_KEY_PEM=$priv" "JWT_PUBLIC_KEY_PEM=$pub" "INTERNAL_IDENTITY_SECRET=$secret"
+    "JWT_PRIVATE_KEY_PEM=$priv" "JWT_PUBLIC_KEY_PEM=$pub" "INTERNAL_IDENTITY_SECRET=$secret" \
+    "DNI_HASH_SALT=$dni_salt"
 
   $UPSERT "$BFF_DIR/env/development.env" \
     "VEO_JWT_PUBLIC_PEM=$pub" "VEO_INTERNAL_IDENTITY_SECRET=$secret" "MAPBOX_ACCESS_TOKEN=$mapbox_token"
@@ -206,12 +220,18 @@ start_service() {
     c_blue "[$name] puerto $http_port YA ocupado (pid $(pid_on_port "$http_port")) — no arranco de nuevo (idempotente)"
     return 0
   fi
-  if [[ ! -f "$dir/dist/main.js" ]]; then
+  # En WATCH (VEO_WATCH=1) NO exigimos dist/main.js: `nest start --watch` compila al vuelo desde src.
+  # En modo normal SÍ — sin dist no hay binario que bootear.
+  if [[ "${VEO_WATCH:-0}" != "1" && ! -f "$dir/dist/main.js" ]]; then
     c_red "[$name] FALTA $dir/dist/main.js — construí el servicio antes de bootear"
     return 1
   fi
 
-  c_blue "[$name] arrancando (HTTP :$http_port) → log: $logf"
+  if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+    c_blue "[$name] arrancando en WATCH (nest start --watch, HTTP :$http_port) → log: $logf"
+  else
+    c_blue "[$name] arrancando (HTTP :$http_port) → log: $logf"
+  fi
   (
     cd "$dir"
     load_env "$dir"
@@ -223,7 +243,13 @@ start_service() {
     if [[ -d prisma/migrations ]]; then
       npx prisma migrate deploy || { c_red "[$name] migrate deploy FALLÓ — NO arranco (revisá $logf)"; exit 1; }
     fi
-    exec node dist/main.js
+    # WATCH: el script `dev` del paquete (= nest start --watch) recompila y reinicia ante cada cambio
+    # de SRC. Normal: el binario ya compilado. El `down` de veo.sh reapea los watchers (pkill 'nest start').
+    if [[ "${VEO_WATCH:-0}" == "1" ]]; then
+      exec pnpm run dev
+    else
+      exec node dist/main.js
+    fi
   ) >"$logf" 2>&1 &
   echo $! > "$pidf"
   log "pid $(cat "$pidf")"

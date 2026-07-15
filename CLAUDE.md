@@ -14,7 +14,7 @@
 | `apps/`                         | `passenger` + `driver` (React Native) · `admin-web` + `family-web` + `web-hub` (Next.js) |
 | `services/`                     | 14 microservicios (NestJS) + BFFs (`public`/`driver`/`admin`)                            |
 | `packages/`                     | código compartido `@veo/*` (tipos, auth, rpc, utils, ui-kit, observability…)             |
-| `infra/`                        | Terraform + K8s (Kustomize) + ArgoCD                                                     |
+| `infra/`                        | deploy en VPS (Docker Compose, Cloudflare Tunnel, migrate script)                        |
 | `dev-stack/` · `docs/` · `e2e/` | orquestación local · documentación · pruebas end-to-end                                  |
 
 Las apps móviles consumen `@veo/*` vía `workspace:*` (pnpm workspace, `node-linker=hoisted`). Build unificado: un solo `pnpm install`. Metro resuelve los packages desde `packages/`.
@@ -35,23 +35,23 @@ Lee `/Users/jaxximize/Desktop/ecritrorio/00_Proyectos/VEO/VEO_Blueprint.pdf` o `
 ## Stack
 
 - Node 20 + pnpm 9 + Turborepo
-- NestJS 10 (backend), Next.js 14 (web), React Native 0.75 (mobile)
-- Postgres 16 + PostGIS, Redis 7, Kafka (MSK), ClickHouse, S3
-- LiveKit (WebRTC), AWS IoT Core (MQTT)
-- EKS multi-AZ, Terraform, ArgoCD
+- NestJS 10 (backend), Next.js 14 (web), React Native 0.85 (mobile)
+- Postgres 16 + PostGIS, Redis 7, Kafka self-hosted, ClickHouse, MinIO self-hosted
+- LiveKit (WebRTC)
+- Docker Compose en VPS único + GitHub Actions (deploy SSH)
 
 ## Reglas no negociables
 
-1. **Compliance Ley 29733 desde el día 1.** Cifrado AES-256 reposo, TLS 1.3 + mTLS interno, audit inmutable en S3 Object Lock, doble auth para acceso a video, derecho al olvido implementado.
+1. **Compliance Ley 29733 desde el día 1.** Cifrado AES-256 reposo, TLS 1.3 + mTLS interno, audit inmutable en MinIO self-hosted con object-lock + retención, doble auth para acceso a video, derecho al olvido implementado.
 2. **Microservicios desacoplados.** Cada servicio tiene su propia base de datos (schema). NO compartir tablas entre servicios. Comunicación por eventos Kafka o gRPC, no por joins cross-servicio.
 3. **Idempotencia financiera obligatoria.** Toda mutación de pago lleva `dedup_key`. Outbox pattern para publicar eventos.
-4. **Native modules para panic, biometría, WebRTC.** No reinventar — usar FaceTec/Onfido SDK oficiales, `react-native-webrtc` oficial.
+4. **Native modules para panic, biometría, WebRTC.** No reinventar — biometría PROPIA (biometric-service ONNX self-hosted), NO FaceTec/Onfido; `react-native-webrtc` oficial.
 5. **JWT corto + refresh largo.** Access 15m, refresh 30d. Firma con jose (no jsonwebtoken).
 6. **Observabilidad antes de features.** Cada nuevo endpoint requiere métrica + log estructurado + tracing.
 7. **Tests obligatorios para reglas de negocio.** No tests para getters/setters, sí para máquina de estados de trip, dispatch matching, panic fan-out, payment idempotencia.
 8. **No `any` en TypeScript.** ESLint lo bloquea. Si necesitas escape, usa `unknown` + narrowing.
 9. **Commits con scope obligatorio.** Conventional Commits, scopes definidos en `commitlint.config.cjs`.
-10. **Secrets en AWS Secrets Manager o `.env` local — nunca en git.** El `.env.example` es la única referencia commitada.
+10. **Secrets en `.env` del host / docker-secrets / SOPS+age (secret store self-hosted), nunca un SaaS de secretos — y nunca en git.** El `.env.example` es la única referencia commitada.
 
 ## Estructura mental
 
@@ -59,7 +59,7 @@ Lee `/Users/jaxximize/Desktop/ecritrorio/00_Proyectos/VEO/VEO_Blueprint.pdf` o `
 apps/        ←  Lo que ven los usuarios (3 frontends)
 services/    ←  Lo que NO ven los usuarios (12 backends + 3 BFFs)
 packages/    ←  Código compartido (tipos, utils, eslint, prisma)
-infra/       ←  Cómo todo corre en AWS (Terraform, K8s, ArgoCD)
+infra/       ←  deploy en VPS (Docker Compose, Cloudflare Tunnel, migrate script)
 docs/        ←  Por qué decidimos lo que decidimos (ADRs, runbooks)
 ```
 
@@ -67,7 +67,7 @@ docs/        ←  Por qué decidimos lo que decidimos (ADRs, runbooks)
 
 1. Crea carpeta en `services/<name>-service/` siguiendo plantilla existente
 2. Asigna puerto en `.env.example` (rango 3001-3099 para microservicios, 4001-4099 BFFs, 5000+ frontends)
-3. Agrega manifest K8s desde `infra/k8s/base/_template-service.yaml`
+3. Agregá el servicio a `docker-compose.preview.yml` (image GHCR, `env_file`, `depends_on` infra, `mem_limit`) + al catálogo `ALL` de `.github/workflows/images.yml` + al array de `infra/deploy/migrate-preview.sh` si tiene Prisma
 4. Si publica eventos, schemas en `packages/events/`
 5. Si toca PII, documentar en `docs/compliance/ley-29733/`
 6. Runbook esqueleto en `docs/runbooks/<name>-service.md`
@@ -86,7 +86,7 @@ docs/        ←  Por qué decidimos lo que decidimos (ADRs, runbooks)
 - **No mockear DB en tests críticos** (payments, panic, audit). Usar testcontainers.
 - **No agregar dependencias sin revisar Snyk.** El CI lo bloquea pero también verificar manualmente packages de pago, biometría y WebRTC.
 - **No deployar a prod un viernes** salvo emergencia. Política humana, no técnica — pero la respetamos.
-- **No commitear binarios.** Imágenes, fuentes, mockups van en S3 referenciados. PRs grandes con binarios se rechazan.
+- **No commitear binarios.** Imágenes, fuentes, mockups van en MinIO self-hosted referenciados. PRs grandes con binarios se rechazan.
 
 ## Comandos que más vas a usar
 
@@ -101,14 +101,19 @@ docker compose -f infra/docker/dev/docker-compose.yml logs -f <svc>
 
 ### Metro / React Native — puertos de dev server
 
-`apps/passenger` y `apps/driver` corren `react-native start` SIN `--port`, así que **ambos defaultean a 8081** (el default universal de Metro). Si corrés una sola app por vez, perfecto. Si necesitás **passenger y driver a la vez**, levantá el driver en otro puerto:
+**Cada app tiene SU puerto fijo** para poder correr ambas (con sus dos Metros) a la vez:
+
+| App              | Puerto Metro | Dónde está configurado                                                                                                                                                                                                                                         |
+| ---------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/passenger` | **8081**     | default de Metro (scripts sin `--port`)                                                                                                                                                                                                                        |
+| `apps/driver`    | **8084**     | `--port 8084` en TODOS los scripts de su package.json (`start`/`dev`/`ios`/`android`) + `RCT_METRO_PORT=8084` en los de iOS + `react_native_dev_server_port=8084` en `android/gradle.properties` (bakea el puerto en el build debug: emulador y device físico) |
 
 ```bash
-# passenger queda en 8081 (default). Para driver en paralelo:
-RCT_METRO_PORT=8084 pnpm --filter @veo/driver dev
+pnpm --filter veo-passenger-app dev   # Metro passenger :8081
+pnpm --filter veo-driver-app dev      # Metro driver    :8084 (ya viene con --port en el script)
 ```
 
-`8084` está libre y fuera de los rangos que veo usa (8082 = tileserver, 8088 = ui-stack — NO usar). En iOS `RCT_METRO_PORT` ya redirige la app; en Android, si conectás un device real al driver, ajustá `react_native_dev_server_port` a 8084. El cruce con `go-frontend` (otro producto RN, también en 8081) es cosmético: son productos distintos que no co-corren.
+`8084` está libre y fuera de los rangos que veo usa (8082 = tileserver, 8088 = ui-stack — NO usar). Si cambiás el puerto del driver, cambialo en los TRES lugares (scripts, RCT_METRO_PORT y gradle.properties) o el app buildeado apuntará a un Metro que no existe. El cruce con `go-frontend` (otro producto RN, también en 8081) es cosmético: son productos distintos que no co-corren.
 
 ## Documentos de referencia
 

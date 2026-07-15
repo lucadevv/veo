@@ -14,7 +14,8 @@ import { IconCar, IconMoto } from '../../../../shared/presentation/icons';
 import type { VehicleType } from '../../domain';
 
 interface VehicleTypeSelectorProps {
-  value: VehicleType;
+  /** Tipo seleccionado, o `null` cuando aún no se eligió (fallback sin "Auto" por omisión · LOTE 1). */
+  value: VehicleType | null;
   onChange: (type: VehicleType) => void;
 }
 
@@ -34,7 +35,13 @@ const VEHICLE_CLASS_OPTIONS: Record<VehicleClass, VehicleClassOption> = {
   [VehicleClass.CAR]: { labelKey: 'registration.vehicle.typeCar', Icon: IconCar, sortOrder: 1 },
 };
 
-/** Clases en orden de presentación del alta (Moto primero, como el flujo histórico). */
+/**
+ * LOTE 1 · clases REGISTRABLES en orden de presentación del alta. El registro está DESACOPLADO de la
+ * operabilidad (el gate de operabilidad/dispatch es de otro lote): el selector de ALTA ofrece TODOS los
+ * tipos registrables (CAR|MOTO), no `OPERABLE_VEHICLE_CLASSES` (que hoy es solo CAR). Itera los valores del
+ * enum canónico `VehicleClass`; el registro `VEHICLE_CLASS_OPTIONS` sigue exhaustivo (no compila sin la
+ * entrada de una clase nueva), así que ampliar el enum surfacea su tarjeta sola.
+ */
 const ORDERED_CLASSES: readonly VehicleClass[] = Object.values(VehicleClass).sort(
   (a, b) => VEHICLE_CLASS_OPTIONS[a].sortOrder - VEHICLE_CLASS_OPTIONS[b].sortOrder,
 );

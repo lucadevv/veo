@@ -1,7 +1,7 @@
 /**
  * Sesión/onboarding del conductor. Todos los endpoints exigen JWT de tipo 'driver'.
  */
-import { Body, Controller, Get, HttpCode, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '@veo/auth';
 import type {
@@ -18,6 +18,8 @@ import { DriverApi } from '../common/driver-api.decorator';
 import { DriversService } from './drivers.service';
 import {
   AddDocumentDto,
+  CheckDniDto,
+  DocumentUploadTicketDto,
   EnrollFaceDto,
   ListVehicleModelsQuery,
   OnboardDto,
@@ -27,12 +29,28 @@ import {
   StartShiftDto,
   UpdateDriverPersonalDto,
   VerifyBiometricDto,
+  type DocumentUploadTicketView,
+  type DriverDniCheckResult,
   type DriverModelRequestView,
   type DriverPersonalData,
   type DriverProfileView,
   type DriverVehicleModelView,
   type DriverVehicleView,
 } from './dto/drivers.dto';
+import {
+  ConfirmAvatarUploadDto,
+  PresignAvatarUploadDto,
+  type AvatarUploadConfirmed,
+  type AvatarUploadTicket,
+} from './dto/presign-avatar.dto';
+import {
+  RequestPhoneChangeDto,
+  VerifyPhoneChangeDto,
+  type DeletionRequested,
+  type PhoneChangeRequested,
+  type PhoneChangeResult,
+} from './dto/phone-link.dto';
+import { RateLimit } from '../common/guards/rate-limit.decorator';
 
 /** Mínimo del response para fijar el status (204) sin acoplar a express/fastify. */
 interface HttpResponseLike {
@@ -69,6 +87,43 @@ export class DriversController {
     return this.drivers.addDocument(user, dto);
   }
 
+  @Post('me/documents/presign')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Emitir ticket de subida (presigned PUT) del binario de un documento. Devuelve uploadUrl + fileS3Key',
+  })
+  presignDocumentUpload(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: DocumentUploadTicketDto,
+  ): Promise<DocumentUploadTicketView> {
+    return this.drivers.presignDocumentUpload(user, dto);
+  }
+
+  @Post('me/avatar/presign')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Presign de subida del avatar del conductor (PUT directo a S3/MinIO vía media-service)',
+  })
+  presignAvatar(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: PresignAvatarUploadDto,
+  ): Promise<AvatarUploadTicket> {
+    return this.drivers.presignAvatarUpload(user, dto);
+  }
+
+  @Post('me/avatar/confirm')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Confirmar la subida del avatar (valida cuota) y persistir la foto en el perfil',
+  })
+  confirmAvatar(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ConfirmAvatarUploadDto,
+  ): Promise<AvatarUploadConfirmed> {
+    return this.drivers.confirmAvatarUpload(user, dto);
+  }
+
   @Post('onboard')
   @ApiOperation({ summary: 'Onboarding del conductor (licencia) → PENDING de aprobación' })
   onboard(@CurrentUser() user: AuthenticatedUser, @Body() dto: OnboardDto): Promise<unknown> {
@@ -91,6 +146,19 @@ export class DriversController {
     @Body() dto: UpdateDriverPersonalDto,
   ): Promise<DriverPersonalData> {
     return this.drivers.updatePersonal(user, dto);
+  }
+
+  @Post('me/check-dni')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Chequear si el DNI escaneado ya está registrado en otra cuenta de conductor (blind index)',
+  })
+  checkDni(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CheckDniDto,
+  ): Promise<DriverDniCheckResult> {
+    return this.drivers.checkDni(user, dto);
   }
 
   @Post('vehicles')
@@ -168,7 +236,7 @@ export class DriversController {
 
   @Post('biometric/enroll')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor (BR-I02)' })
+  @ApiOperation({ summary: 'Enrolar el rostro de referencia del conductor con liveness (BR-I02)' })
   enrollFace(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: EnrollFaceDto,
@@ -215,5 +283,48 @@ export class DriversController {
   @ApiOperation({ summary: 'Pausar turno (ON_BREAK)' })
   pauseShift(@CurrentUser() user: AuthenticatedUser): Promise<DriverShiftStatusResult> {
     return this.drivers.pauseShift(user);
+  }
+
+  // ── Cuenta: cambio de teléfono (phone-link) + derecho al olvido (Ley 29733) ──
+  // Proxies firmados al motor de identity (`/users/me/*`, abierto al riel DRIVER por método).
+  // El userId viaja SIEMPRE en la identidad interna firmada — jamás en el body (anti-IDOR).
+
+  @Post('me/phone/request')
+  @HttpCode(200)
+  // Borde anti-flood SMS del cambio de número: 5 cada 10min por usuario+teléfono+IP (espejo del
+  // public-bff `users.controller`). Capa de borde ADICIONAL al cooldown/lockout propio de identity.
+  @RateLimit({ max: 5, windowMs: 10 * 60_000, by: ['user', 'phone', 'ip'] })
+  @ApiOperation({ summary: 'Solicitar OTP al número NUEVO para cambiar el teléfono del conductor' })
+  requestPhoneChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RequestPhoneChangeDto,
+  ): Promise<PhoneChangeRequested> {
+    return this.drivers.requestPhoneChange(user, dto);
+  }
+
+  @Post('me/phone/verify')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Verificar el OTP y vincular el número NUEVO (pasa a ser el teléfono de login)',
+  })
+  verifyPhoneChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: VerifyPhoneChangeDto,
+  ): Promise<PhoneChangeResult> {
+    return this.drivers.verifyPhoneChange(user, dto);
+  }
+
+  @Post('me/deletion')
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Solicitar borrado de cuenta (derecho al olvido, gracia de 30 días)' })
+  requestDeletion(@CurrentUser() user: AuthenticatedUser): Promise<DeletionRequested> {
+    return this.drivers.requestAccountDeletion(user);
+  }
+
+  @Delete('me/deletion')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Cancelar la solicitud de borrado (dentro de la gracia)' })
+  async cancelDeletion(@CurrentUser() user: AuthenticatedUser): Promise<void> {
+    await this.drivers.cancelAccountDeletion(user);
   }
 }

@@ -2,11 +2,15 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { BID_MAX_CENTS, secret } from '@veo/utils';
+import { BID_MAX_CENTS, requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
 import { MAPS_MODES } from '@veo/maps';
+import { outboxEnvSchema } from '@veo/database';
 
 export const envSchema = z
   .object({
+    // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+    // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+    ...grpcTlsEnvSchema.shape,
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().default(3002),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -16,13 +20,24 @@ export const envSchema = z
     DATABASE_URL_REPLICA: z.string().url().optional(),
 
     // Redis (idempotencia de consumidor + caché de rutas)
-    REDIS_URL: z.string().default('redis://localhost:6379'),
+    REDIS_URL: requiredInProd('redis://localhost:6379'),
 
     // Kafka (outbox relay + consumidor dispatch.match_found)
-    KAFKA_BROKERS: z.string().default('localhost:9094'),
+    KAFKA_BROKERS: requiredInProd('localhost:9094'),
 
-    // Secreto para validar la identidad interna que el BFF propaga a servicios
+    // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+    // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+    // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+    ...outboxEnvSchema.shape,
+
+    // Secreto para validar la identidad interna que el BFF propaga a servicios. También firma la identidad
+    // de SISTEMA con la que el cliente de @veo/policy consulta el registro central (GET /internal/policies).
     INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),
+
+    // Base del API interno de identity-service (registro central de políticas PBAC · ADR-024 Fase 1). El
+    // cliente de @veo/policy hace GET /internal/policies (firmado admin-rail) al boot para poblar su cache;
+    // si es inalcanzable, cae al DEFAULT del catálogo (fail-safe, nunca tumba el arranque). Incluye /api/v1.
+    IDENTITY_INTERNAL_URL: requiredInProd('http://localhost:3001/api/v1', { url: true }),
 
     // Puerto de mapas (@veo/maps). 'local' = motor propio determinista; 'osrm' = infra OSM self-hosted;
     // 'mapbox' = Directions API (token pk, detrás del puerto). Enum derivado de MAPS_MODES (sin drift).
@@ -47,7 +62,9 @@ export const envSchema = z
     // Default = BID_MAX_CENTS canónico de @veo/utils (S/ 9,999); ajustable por entorno. Es el chequeo
     // de dominio AUTORITATIVO en createTrip/applyAgreedFare (los DTOs son la primera barrera).
     BID_MAX_CENTS: z.coerce.number().int().positive().default(BID_MAX_CENTS),
-    // Ventana de la puja en segundos (decisión #9.1: 60s; ajustable por config/zona a futuro).
+    // Ventana de la puja en segundos (decisión #9.1: 60s). ADVISORY desde ADR-019 Lote A: dispatch es la
+    // AUTORIDAD de la ventana (config editable por el admin en dispatch_radius_config). trip-service la
+    // sigue enviando en bid_posted.windowSec por compat, pero openBoard/reopenBoard mandan el valor vigente.
     BID_WINDOW_SEC: z.coerce.number().int().positive().default(60),
     // PUJA robustez #4: tope de re-asignaciones tras cancelación del conductor post-accept. Superado el
     // tope, el viaje NO se re-puja más (anti bucle infinito): cae a FAILED y se notifica al pasajero.
@@ -72,14 +89,6 @@ export const envSchema = z
     // HORAS, así que un cache corto absorbe el read-per-resolve (createTrip + quote). El PUT lo invalida
     // (cambio inmediato), así que el TTL solo acota la staleness ante ediciones desde OTRO proceso. 0 = off.
     PRICING_SCHEDULE_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10_000),
-    // B5-1.d · FLIP del modelo de energía. OFF (default) = fórmula vieja (fuel global plegado al per-km).
-    // ON = fórmula nueva (energía pass-through por oferta desde EnergyCatalog · multiplier solo posición).
-    // Se activa SOLO tras medir los shadow logs. `z.string().transform` robusto: solo 'true' → true (coerce.boolean
-    // trataría "false" como true). Default 'false'.
-    PRICING_ENERGY_MODEL_ENABLED: z
-      .string()
-      .default('false')
-      .transform((v) => v === 'true'),
   })
   .superRefine((env, ctx) => {
     // Mapbox sin token reventaría al construir el cliente (createMapsClient). Falla temprano y claro.

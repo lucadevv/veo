@@ -14,8 +14,10 @@ import 'intl-pluralrules';
 import './src/core/polyfills/dom-exception';
 import 'react-native-gesture-handler';
 import { registerGlobals } from 'react-native-webrtc';
+import * as ReactNative from 'react-native';
 import { AppRegistry } from 'react-native';
 import App from './App';
+import { BIOMETRIC_CAMERA_PREVIEW_NAME } from './src/features/registration/presentation';
 import { name as appName } from './app.json';
 import { registerPushBackgroundHandler } from './src/features/notifications/data';
 import { initSecureStorage } from './src/core/storage/mmkv';
@@ -38,4 +40,41 @@ void initSecureStorage();
 // A nivel de módulo (fuera de React) para que el primer render del mapa ya tenga token.
 initMapbox();
 
+// New Architecture (Fabric) · interop de vistas LEGACY:
+// La preview biométrica (`BiometricCameraPreview`) es un `SimpleViewManager` legacy y el proyecto corre
+// `newArchEnabled=true`. En RN 0.85.3 el interop legacy de Fabric es AUTOMÁTICO (flag `useFabricInterop`
+// por defecto en true) y resuelve la vista por reflexión sobre los ViewManagers registrados: NO existe
+// `unstable_reactLegacyComponentNames` (verificado: cero ocurrencias en node_modules/react-native), ese
+// array fue una clave de `react-native.config.js` previa a RN 0.74, obsoleta desde entonces.
+//
+// Por compatibilidad defensiva (si el día de mañana el RN del proyecto reexpone la API, o se cambia de
+// versión), si EXISTE alguna de las entradas históricas para listar nombres legacy, la invocamos con el
+// nombre del componente. Si no existe (caso de 0.85.3, lo normal), es un no-op silencioso: el interop
+// automático ya monta la vista. Nunca lanza.
+registerLegacyInteropComponent(BIOMETRIC_CAMERA_PREVIEW_NAME);
+
 AppRegistry.registerComponent(appName, () => App);
+
+/**
+ * Registra (best-effort) un nombre de componente nativo legacy en el interop de Fabric, probando las
+ * entradas históricas que RN ha usado para esto. En RN 0.85.3 ninguna existe y la función no hace nada
+ * (el interop es automático). Guardada: cualquier fallo se traga para no romper el arranque.
+ */
+function registerLegacyInteropComponent(name) {
+  try {
+    const candidate =
+      ReactNative.unstable_setLegacyComponentNames ||
+      ReactNative.unstable_reactLegacyComponentNames ||
+      (ReactNative.UIManager && ReactNative.UIManager.unstable_setLegacyComponentNames);
+    if (typeof candidate === 'function') {
+      candidate([name]);
+    } else if (Array.isArray(ReactNative.unstable_reactLegacyComponentNames)) {
+      // Variante histórica como ARRAY mutable expuesto por el módulo.
+      if (!ReactNative.unstable_reactLegacyComponentNames.includes(name)) {
+        ReactNative.unstable_reactLegacyComponentNames.push(name);
+      }
+    }
+  } catch {
+    // No-op: en 0.85.3 el interop legacy es automático; cualquier ausencia/error aquí es esperado.
+  }
+}

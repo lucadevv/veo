@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
+import { DniFaceMatchStatus, FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
 import {
   buildDriverModelRequest,
   buildDriverProfile,
@@ -7,6 +7,7 @@ import {
   buildDriverVehicleModels,
   buildDriverVehicles,
   REQUIRED_DRIVER_DOCS,
+  REQUIRED_DRIVER_DOCS_WITH_IDENTITY,
 } from './drivers.mapper';
 import type {
   AggregateReply,
@@ -26,6 +27,24 @@ const driver: DriverReply = {
   suspendedAt: '',
   name: 'Khalid Ríos',
   rejectionReason: '',
+  licenseNumber: '',
+  kycStatus: '',
+  createdAt: '',
+  faceEnrolledAt: '',
+  lastVerifiedAt: '',
+  phone: '',
+  documentId: '',
+  birthDate: '',
+  dniFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
+  dniFaceMatchScore: 0,
+  dniFaceMatchedAt: '',
+  licenseFaceMatchStatus: DniFaceMatchStatus.NOT_RUN,
+  licenseFaceMatchScore: 0,
+  licenseFaceMatchedAt: '',
+  // Selfie del enrol + liveness PASIVO (ADMIN-ONLY; defaults proto3 ""/'NOT_RUN'/0 = no corrido/no-admin).
+  faceSelfieKey: '',
+  livenessStatus: 'NOT_RUN',
+  livenessScore: 0,
 };
 
 const user: UserReply = {
@@ -51,6 +70,9 @@ function docsWith(
       documentNumber: 'X',
       status: t.status,
       expiresAt: t.expiresAt ?? '',
+      fileS3Key: '',
+      rejectionReason: '',
+      images: [],
     })),
   };
 }
@@ -67,36 +89,196 @@ const aggregate: AggregateReply = {
 };
 
 describe('buildDriverProfile', () => {
-  it('marca compliant cuando todos los documentos requeridos están vigentes', () => {
+  it('proyecta la foto de perfil (avatar) del user; null cuando el user no trae foto', () => {
+    const withPhoto = buildDriverProfile(
+      driver,
+      { ...user, photoUrl: 'https://cdn.veo.pe/veo-avatars/avatars/usr-1/avatar.jpg' },
+      aggregate,
+      docsWith([]),
+    );
+    expect(withPhoto.photoUrl).toBe('https://cdn.veo.pe/veo-avatars/avatars/usr-1/avatar.jpg');
+
+    // proto3 default "" (o user no hallado) → null honesto para el fallback a iniciales.
+    expect(buildDriverProfile(driver, user, aggregate, docsWith([])).photoUrl).toBeNull();
+  });
+
+  it('ADR-022 · debtBlocked=true SOLO si suspensionCauses trae DEBT_BLOCKED', () => {
+    // Sin suspensión (undefined / []) → no bloqueado por deuda.
+    expect(buildDriverProfile(driver, user, aggregate, docsWith([])).debtBlocked).toBe(false);
+    expect(
+      buildDriverProfile(
+        { ...driver, suspensionCauses: [] },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(false);
+    // Suspendido por OTRA causa (documento vencido) → NO es bloqueo por deuda.
+    expect(
+      buildDriverProfile(
+        { ...driver, suspendedAt: '2026-05-01T00:00:00.000Z', suspensionCauses: ['DOCUMENT_EXPIRED'] },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(false);
+    // Hold DEBT_BLOCKED presente (aun coexistiendo con otra causa) → bloqueado por deuda.
+    expect(
+      buildDriverProfile(
+        { ...driver, suspendedAt: '2026-05-01T00:00:00.000Z', suspensionCauses: ['DEBT_BLOCKED'] },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(true);
+    expect(
+      buildDriverProfile(
+        {
+          ...driver,
+          suspendedAt: '2026-05-01T00:00:00.000Z',
+          suspensionCauses: ['DISCIPLINARY', 'DEBT_BLOCKED'],
+        },
+        user,
+        aggregate,
+        docsWith([]),
+      ).debtBlocked,
+    ).toBe(true);
+  });
+
+  it('REQUIRED_DRIVER_DOCS = solo los docs que sube el conductor (licencia, SOAT, tarjeta)', () => {
+    // BACKGROUND_CHECK (eje identity) e ITV (doc del vehículo) NO son docs del alta del conductor.
+    expect(REQUIRED_DRIVER_DOCS).toEqual([
+      FleetDocumentType.LICENSE_A1,
+      FleetDocumentType.SOAT,
+      FleetDocumentType.PROPERTY_CARD,
+    ]);
+  });
+
+  it('REQUIRED_DRIVER_DOCS_WITH_IDENTITY = los 3 legacy + DNI (set del alta NUEVA)', () => {
+    // El alta nueva suma el DNI (documento de identidad); su cara FRONT alimenta el face-match (3C).
+    expect(REQUIRED_DRIVER_DOCS_WITH_IDENTITY).toEqual([
+      FleetDocumentType.LICENSE_A1,
+      FleetDocumentType.SOAT,
+      FleetDocumentType.PROPERTY_CARD,
+      FleetDocumentType.DNI,
+    ]);
+  });
+
+  it('alta NUEVA (OFFLINE, sin biometría, sin docs aprobados) con los 3 legacy PENDING y SIN DNI ⇒ NO submittedAllRequired, DNI en missing + requiredTypes', () => {
+    // Conductor recién creado en onboarding: currentStatus OFFLINE (default identity), face "" y solo los
+    // 3 docs legacy en revisión. Ahora el DNI es requerido → falta el DNI para cerrar el alta.
+    const nuevo: DriverReply = { ...driver, currentStatus: 'OFFLINE', faceEnrolledAt: '' };
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.PENDING_REVIEW })),
+    );
+    const view = buildDriverProfile(nuevo, user, aggregate, docs);
+    expect(view.compliance.submittedAllRequired).toBe(false);
+    expect(view.compliance.missing).toEqual([FleetDocumentType.DNI]);
+    expect(view.compliance.requiredTypes).toContain(FleetDocumentType.DNI);
+  });
+
+  it('alta NUEVA (OFFLINE) con los 4 docs (3 legacy + DNI) PENDING ⇒ submittedAllRequired, missing vacío, requiredTypes incluye DNI', () => {
+    const nuevo: DriverReply = { ...driver, currentStatus: 'OFFLINE', faceEnrolledAt: '' };
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS_WITH_IDENTITY.map((type) => ({
+        type,
+        status: FleetDocumentStatus.PENDING_REVIEW,
+      })),
+    );
+    const view = buildDriverProfile(nuevo, user, aggregate, docs);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.requiredTypes).toContain(FleetDocumentType.DNI);
+  });
+
+  it('conductor OPERATIVO (AVAILABLE) con solo los 3 legacy VALID y SIN DNI ⇒ compliant + submittedAllRequired, DNI NO retroactivo', () => {
+    // Backward-compat: el conductor ya aprobado/operativo conserva la semántica de 3 docs. El DNI no se
+    // le exige retroactivamente; requiredTypes vuelve a ser el set legacy.
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.VALID })),
+    );
+    const view = buildDriverProfile(
+      { ...driver, currentStatus: 'AVAILABLE' },
+      user,
+      aggregate,
+      docs,
+    );
+    expect(view.compliance.compliant).toBe(true);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.requiredTypes).toEqual(REQUIRED_DRIVER_DOCS);
+  });
+
+  it('conductor con los 3 legacy VALID aunque currentStatus sea OFFLINE ⇒ tratado como onboarded, compliant (rama legacyAllApproved)', () => {
+    // Rama (a) del gate: aún con currentStatus OFFLINE, tener los 3 legacy aprobados prueba que ya era
+    // compliant bajo las reglas viejas → el DNI no se exige retroactivamente.
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.VALID })),
+    );
+    const view = buildDriverProfile({ ...driver, currentStatus: 'OFFLINE' }, user, aggregate, docs);
+    expect(view.compliance.compliant).toBe(true);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.requiredTypes).toEqual(REQUIRED_DRIVER_DOCS);
+  });
+
+  it('todos los requeridos VALID ⇒ allApproved + compliant, sin faltantes, submittedAllRequired', () => {
     const docs = docsWith(
       REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.VALID })),
     );
     const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.allApproved).toBe(true);
     expect(view.compliance.compliant).toBe(true);
+    expect(view.compliance.submittedAllRequired).toBe(true);
     expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.rejected).toEqual([]);
     expect(view.documents).toHaveLength(REQUIRED_DRIVER_DOCS.length);
   });
 
-  it('NO es compliant si falta un documento o está vencido', () => {
-    const docs = docsWith([
-      { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.VALID },
-      { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.EXPIRED },
-      { type: FleetDocumentType.PROPERTY_CARD, status: FleetDocumentStatus.VALID },
-      // faltan BACKGROUND_CHECK e ITV
-    ]);
+  it('todos los requeridos PENDING_REVIEW ⇒ submittedAllRequired pero NO allApproved, missing vacío', () => {
+    // El caso del bug P0: 3 docs PENDING_REVIEW. "Enviado todo" pero "no aprobado" → in_review, no wizard.
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.PENDING_REVIEW })),
+    );
     const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    expect(view.compliance.allApproved).toBe(false);
     expect(view.compliance.compliant).toBe(false);
-    expect(view.compliance.missing).toContain(FleetDocumentType.SOAT);
-    expect(view.compliance.missing).toContain(FleetDocumentType.BACKGROUND_CHECK);
-    expect(view.compliance.missing).toContain(FleetDocumentType.ITV);
+    expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.rejected).toEqual([]);
   });
 
-  it('considera EXPIRING_SOON como vigente', () => {
+  it('un tipo requerido genuinamente ausente ⇒ aparece en missing y NO submittedAllRequired', () => {
+    const docs = docsWith([
+      { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.PENDING_REVIEW },
+      { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.PENDING_REVIEW },
+      // falta PROPERTY_CARD
+    ]);
+    const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.submittedAllRequired).toBe(false);
+    expect(view.compliance.missing).toEqual([FleetDocumentType.PROPERTY_CARD]);
+    expect(view.compliance.allApproved).toBe(false);
+  });
+
+  it('un documento requerido REJECTED ⇒ aparece en rejected (sigue presente, no missing)', () => {
+    const docs = docsWith([
+      { type: FleetDocumentType.LICENSE_A1, status: FleetDocumentStatus.VALID },
+      { type: FleetDocumentType.SOAT, status: FleetDocumentStatus.REJECTED },
+      { type: FleetDocumentType.PROPERTY_CARD, status: FleetDocumentStatus.VALID },
+    ]);
+    const view = buildDriverProfile(driver, user, aggregate, docs);
+    expect(view.compliance.rejected).toEqual([FleetDocumentType.SOAT]);
+    expect(view.compliance.missing).toEqual([]);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    expect(view.compliance.allApproved).toBe(false);
+  });
+
+  it('considera EXPIRING_SOON como aprobado (vigente)', () => {
     const docs = docsWith(
       REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.EXPIRING_SOON })),
     );
     const view = buildDriverProfile(driver, user, aggregate, docs);
-    expect(view.compliance.compliant).toBe(true);
+    expect(view.compliance.allApproved).toBe(true);
     expect(view.documents.every((d) => d.ok)).toBe(true);
   });
 
@@ -117,6 +299,33 @@ describe('buildDriverProfile', () => {
     expect(view.kycStatus).toBe('VERIFIED');
     expect(view.averageRating).toBe(4.8);
     expect(view.rating?.count30d).toBe(30);
+  });
+
+  it('biometricEnrolled=false cuando faceEnrolledAt está vacío (no enroló biometría)', () => {
+    // faceEnrolledAt "" (proto3 default) ⇒ el conductor NO enroló su rostro ⇒ NO listo para in_review,
+    // aunque tenga todos los documentos. La biometría es un eje SEPARADO de submittedAllRequired.
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.PENDING_REVIEW })),
+    );
+    const view = buildDriverProfile({ ...driver, faceEnrolledAt: '' }, user, aggregate, docs);
+    expect(view.compliance.biometricEnrolled).toBe(false);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+  });
+
+  it('biometricEnrolled=true cuando faceEnrolledAt tiene timestamp (enroló biometría)', () => {
+    const docs = docsWith(
+      REQUIRED_DRIVER_DOCS.map((type) => ({ type, status: FleetDocumentStatus.PENDING_REVIEW })),
+    );
+    const view = buildDriverProfile(
+      { ...driver, faceEnrolledAt: '2026-06-19T10:00:00.000Z' },
+      user,
+      aggregate,
+      docs,
+    );
+    expect(view.compliance.biometricEnrolled).toBe(true);
+    expect(view.compliance.submittedAllRequired).toBe(true);
+    // in_review = docs completos AND biometría enrolada (condición que el cliente compone con ambos flags).
+    expect(view.compliance.submittedAllRequired && view.compliance.biometricEnrolled).toBe(true);
   });
 
   it('rejectionReason: wire "" → null (no rechazado); un motivo real se propaga tal cual', () => {

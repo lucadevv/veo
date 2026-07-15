@@ -8,7 +8,13 @@ import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import argon2 from 'argon2';
 import { JwtService, RedisRefreshTokenStore, enrollTotp, verifyTotp } from '@veo/auth';
-import { AdminRole as AdminRoles, canGrantRoles, maxRoleRank, type AdminRole } from '@veo/shared-types';
+import {
+  AdminRole as AdminRoles,
+  canGrantRoles,
+  maxRoleRank,
+  type AdminRole,
+} from '@veo/shared-types';
+import { createEnvelope } from '@veo/events';
 import {
   ConflictError,
   ForbiddenError,
@@ -16,16 +22,14 @@ import {
   RateLimitError,
   UnauthorizedError,
   ValidationError,
+  CLOCK,
+  type Clock,
 } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { AdminRepository } from './admin.repository';
 import { REDIS } from '../infra/redis';
 import { AdminStatus } from '../generated/prisma';
 import { adminStatusMachine, isOperationalAdmin } from '../domain/admin-status';
-import {
-  generateInviteToken,
-  hashInviteToken,
-  INVITE_TTL_HOURS,
-} from '../domain/invite-token';
+import { generateInviteToken, hashInviteToken, INVITE_TTL_HOURS } from '../domain/invite-token';
 import { seal, open } from '../common/secret-box';
 import { EMAIL_SENDER, type EmailSender } from '../ports/email/email.port';
 import type { Env } from '../config/env.schema';
@@ -54,9 +58,24 @@ export interface AdminTokens {
 export interface OperatorSummary {
   id: string;
   email: string;
+  name: string | null;
   status: string;
   roles: string[];
+  totpEnrolled: boolean;
+  lastLoginAt: Date | null;
   createdAt: Date;
+}
+
+/** Una sesión activa del operador (id + última actividad ISO). Sin device/UA/geo: no se almacena. */
+export interface OperatorSession {
+  id: string;
+  lastActiveAt: string;
+}
+
+/** Detalle de un operador (GET /admin/operators/:id): la fila de la lista + sus sesiones activas.
+ *  `effectivePermissions` NO se calcula acá — lo DERIVA el admin-bff de los roles (matriz base @veo/policy). */
+export interface OperatorDetail extends OperatorSummary {
+  sessions: OperatorSession[];
 }
 
 @Injectable()
@@ -68,11 +87,12 @@ export class AdminService {
   private readonly loginLockSeconds: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly repo: AdminRepository,
     private readonly jwt: JwtService,
     private readonly sessions: RedisRefreshTokenStore,
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
     @Inject(REDIS) private readonly redis: Redis,
+    @Inject(CLOCK) private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
     this.totpEncKey = config.getOrThrow<string>('TOTP_ENC_KEY');
@@ -87,6 +107,7 @@ export class AdminService {
    */
   async createOperator(
     actorRoles: AdminRole[],
+    actorId: string,
     email: string,
     roles: AdminRole[],
   ): Promise<{ id: string; inviteToken: string; inviteUrl: string; expiresAt: Date }> {
@@ -102,19 +123,23 @@ export class AdminService {
         requested: roles,
       });
     }
-    const existing = await this.prisma.read.adminUser.findUnique({ where: { email } });
+    const existing = await this.repo.findAdminByEmail(email);
     if (existing) throw new ConflictError('Ya existe un operador con ese email');
 
     const { token, tokenHash, expiresAt } = generateInviteToken();
-    const admin = await this.prisma.write.adminUser.create({
-      data: {
+    // El grant inicial de roles ES una mutación de privilegio auditable (Ley 29733, libro WORM).
+    // El write y el evento `admin.role_changed` van en la MISMA transacción: estado↔auditoría atómicos.
+    const admin = await this.repo.runInTransaction(async (tx) => {
+      const created = await this.repo.createAdmin(tx, {
         email,
         roles,
         status: AdminStatus.INVITED,
         passwordHash: null,
         inviteTokenHash: tokenHash,
         inviteExpiresAt: expiresAt,
-      },
+      });
+      await this.repo.enqueueOutbox(tx, this.roleChangedEnvelope(created.id, roles, actorId), created.id);
+      return created;
     });
 
     const inviteUrl = this.buildInviteUrl(token);
@@ -125,31 +150,26 @@ export class AdminService {
   /** El operador abre el link de invitación y fija su contraseña → ACTIVE (TOTP queda sin enrolar). */
   async acceptInvite(token: string, password: string): Promise<{ email: string }> {
     const tokenHash = hashInviteToken(token);
-    const admin = await this.prisma.read.adminUser.findFirst({
-      where: { inviteTokenHash: tokenHash, status: AdminStatus.INVITED },
-    });
+    const admin = await this.repo.findInvitedByTokenHash(tokenHash);
     if (!admin) throw new UnauthorizedError('Invitación inválida o ya usada');
     if (!admin.inviteExpiresAt || admin.inviteExpiresAt < new Date()) {
       throw new UnauthorizedError('La invitación expiró');
     }
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-    await this.prisma.write.$transaction(async (tx) => {
-      const fresh = await tx.adminUser.findUnique({ where: { id: admin.id } });
+    await this.repo.runInTransaction(async (tx) => {
+      const fresh = await this.repo.findAdminByIdTx(tx, admin.id);
       if (!fresh) throw new UnauthorizedError('Invitación inválida o ya usada');
       // Re-asegura un solo uso bajo concurrencia: si otro accept ya limpió el hash, no hay invitación.
       if (fresh.inviteTokenHash !== tokenHash || fresh.status !== AdminStatus.INVITED) {
         throw new UnauthorizedError('Invitación inválida o ya usada');
       }
       adminStatusMachine.assertTransition(fresh.status, AdminStatus.ACTIVE);
-      await tx.adminUser.update({
-        where: { id: admin.id },
-        // Limpiar el hash invalida el token (un solo uso).
-        data: {
-          passwordHash,
-          status: AdminStatus.ACTIVE,
-          inviteTokenHash: null,
-          inviteExpiresAt: null,
-        },
+      // Limpiar el hash invalida el token (un solo uso).
+      await this.repo.updateAdminByIdTx(tx, admin.id, {
+        passwordHash,
+        status: AdminStatus.ACTIVE,
+        inviteTokenHash: null,
+        inviteExpiresAt: null,
       });
     });
     return { email: admin.email };
@@ -158,32 +178,62 @@ export class AdminService {
   /** Re-emite la invitación de un operador que aún no la aceptó (regenera token+expiración). */
   async reinvite(
     actorRoles: AdminRole[],
+    actorId: string,
     id: string,
   ): Promise<{ inviteUrl: string; expiresAt: Date }> {
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { id } });
-    if (!admin) throw new NotFoundError('Operador no encontrado');
-    if (admin.status !== AdminStatus.INVITED) {
-      throw new ConflictError('El operador ya aceptó o no está invitado');
-    }
-    // Anti-escalada: re-invitar es re-otorgar los mismos roles; el actor debe poder otorgarlos.
-    if (!canGrantRoles(actorRoles, admin.roles as AdminRole[])) {
-      throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
-        actorRoles,
-        requested: admin.roles,
-      });
-    }
+    const existing = await this.repo.findAdminById(id);
+    if (!existing) throw new NotFoundError('Operador no encontrado');
     const { token, tokenHash, expiresAt } = generateInviteToken();
-    await this.prisma.write.adminUser.update({
-      where: { id },
-      data: { inviteTokenHash: tokenHash, inviteExpiresAt: expiresAt },
+    // TOCTOU-safe (espejo de reject()): la lectura del status + el check anti-escalada se RE-validan
+    // DENTRO de la tx con el write client. Sin esto, un reject() concurrente entre el read y la tx
+    // dejaría re-emitir el token Y un `admin.role_changed` para una cuenta ya REVOCADA → ruido
+    // forense en el WORM + token inútil. El update + el evento van en la MISMA tx.
+    const email = await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, id);
+      if (!admin) throw new NotFoundError('Operador no encontrado');
+      if (admin.status !== AdminStatus.INVITED) {
+        throw new ConflictError('El operador ya aceptó o no está invitado');
+      }
+      const roles = admin.roles as AdminRole[];
+      // Anti-escalada: re-invitar es re-otorgar los mismos roles; el actor debe poder otorgarlos.
+      if (!canGrantRoles(actorRoles, roles)) {
+        throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
+          actorRoles,
+          requested: roles,
+        });
+      }
+      await this.repo.updateAdminByIdTx(tx, id, {
+        inviteTokenHash: tokenHash,
+        inviteExpiresAt: expiresAt,
+      });
+      await this.repo.enqueueOutbox(tx, this.roleChangedEnvelope(id, roles, actorId), id);
+      return admin.email;
     });
     const inviteUrl = this.buildInviteUrl(token);
-    await this.sendInviteEmail(admin.email, inviteUrl, expiresAt);
+    await this.sendInviteEmail(email, inviteUrl, expiresAt);
     return { inviteUrl, expiresAt };
   }
 
   private buildInviteUrl(token: string): string {
     return `${this.adminWebUrl}/accept-invite?token=${token}`;
+  }
+
+  /**
+   * Envelope del evento de auditoría de privilegio `admin.role_changed` (consumido por audit-service →
+   * libro WORM). Sin PII: solo IDs + roles tipados + timestamp. `changedBy` = actor que muta los roles.
+   * El eventId (uuidv7) lo genera createEnvelope → el audit dedupea por eventId.
+   */
+  private roleChangedEnvelope(adminUserId: string, roles: AdminRole[], changedBy: string) {
+    return createEnvelope({
+      eventType: 'admin.role_changed',
+      producer: 'identity-service',
+      payload: {
+        adminUserId,
+        roles,
+        changedBy,
+        at: new Date(this.clock.now()).toISOString(),
+      },
+    });
   }
 
   /**
@@ -214,8 +264,8 @@ export class AdminService {
   async reject(actorRoles: AdminRole[], actorId: string, adminId: string): Promise<void> {
     // Lectura + assert DENTRO de la tx de escritura: sin lag de réplica ni TOCTOU
     // con un approve concurrente.
-    await this.prisma.write.$transaction(async (tx) => {
-      const admin = await tx.adminUser.findUnique({ where: { id: adminId } });
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
       if (!admin) throw new NotFoundError('Operador no encontrado');
       // Anti-escalada (autoridad final): nadie deshabilita su propia cuenta ni a un operador de rango
       // IGUAL o SUPERIOR. Evita que un ADMIN bloquee a un SUPERADMIN y el lockout entre pares.
@@ -229,21 +279,153 @@ export class AdminService {
         );
       }
       adminStatusMachine.assertTransition(admin.status, AdminStatus.REJECTED);
-      await tx.adminUser.update({
-        where: { id: adminId },
-        data: { status: AdminStatus.REJECTED },
-      });
+      await this.repo.updateAdminByIdTx(tx, adminId, { status: AdminStatus.REJECTED });
     });
   }
 
-  /** Todos los operadores (gestión de staff): id, email, estado, roles, alta. */
+  /** Todos los operadores (gestión de staff): id, email, nombre, estado, roles, 2FA, último acceso, alta. */
   listOperators(): Promise<OperatorSummary[]> {
-    return this.prisma.read.adminUser.findMany({
-      select: { id: true, email: true, status: true, roles: true, createdAt: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.repo.listOperators();
   }
 
+  /**
+   * Detalle de un operador (pantalla "Detalle de operador"): la fila de la lista + sus SESIONES activas
+   * (del refresh-store en Redis). 404 si no existe o está soft-deleted (`deletedAt`). `effectivePermissions`
+   * NO se computa acá: lo DERIVA el admin-bff de los roles (matriz base @veo/policy) — identity solo da el dato.
+   */
+  async getOperatorDetail(adminId: string): Promise<OperatorDetail> {
+    const admin = await this.repo.findAdminById(adminId);
+    if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+    const sessions = await this.sessions.listSessionsForUser(admin.id);
+    return {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      status: admin.status,
+      roles: admin.roles,
+      totpEnrolled: admin.totpEnrolled,
+      lastLoginAt: admin.lastLoginAt,
+      createdAt: admin.createdAt,
+      sessions,
+    };
+  }
+
+  /**
+   * Cambia los ROLES RBAC de un operador (mutación de privilegio auditable · Ley 29733 · libro WORM). Espeja el
+   * guard de createOperator: valida el enum + anti-escalada `canGrantRoles` (el actor solo otorga rangos < al
+   * suyo, salvo SUPERADMIN→SUPERADMIN). SUMA, como reject(), el candado de OBJETIVO: nadie re-rolea su propia
+   * cuenta ni a un operador de rango IGUAL o SUPERIOR (si no, un ADMIN podría despojar a un SUPERADMIN). El write
+   * de roles + el evento `admin.role_changed` van en la MISMA tx (estado↔auditoría atómicos). Tras cambiar, se
+   * REVOCAN las sesiones del operador: su access token (≤15m) porta los roles VIEJOS → forzamos re-login para
+   * que el cambio de autoridad rija ya (no en 15 min).
+   */
+  async changeRoles(
+    actorRoles: AdminRole[],
+    actorId: string,
+    adminId: string,
+    roles: AdminRole[],
+  ): Promise<OperatorDetail> {
+    for (const r of roles) {
+      if (!VALID_ROLES.has(r)) throw new ValidationError(`Rol inválido: ${r}`);
+    }
+    if (!canGrantRoles(actorRoles, roles)) {
+      throw new ForbiddenError('No podés otorgar un rol de rango igual o superior al tuyo', {
+        actorRoles,
+        requested: roles,
+      });
+    }
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
+      if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+      if (actorId === adminId) throw new ForbiddenError('No podés cambiar tus propios roles');
+      if (maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)) {
+        throw new ForbiddenError('No podés modificar a un operador de rango igual o superior al tuyo', {
+          actorRoles,
+          targetRoles: admin.roles,
+        });
+      }
+      await this.repo.updateAdminByIdTx(tx, adminId, { roles });
+      await this.repo.enqueueOutbox(tx, this.roleChangedEnvelope(adminId, roles, actorId), adminId);
+    });
+    // El cambio de roles cambia la AUTORIDAD → matamos las sesiones para que el token nuevo (roles nuevos) rija ya.
+    await this.sessions.revokeAllForUser(adminId);
+    return this.getOperatorDetail(adminId);
+  }
+
+  /**
+   * Suspende un operador ACTIVO (status → SUSPENDED). Anti-escalada como reject (no uno mismo, no a un rango
+   * igual/superior) + máquina de estados DENTRO de la tx (TOCTOU-safe). Revoca sus sesiones: un suspendido no
+   * sigue operando el panel con un token vivo.
+   */
+  async suspend(actorRoles: AdminRole[], actorId: string, adminId: string): Promise<OperatorDetail> {
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
+      if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+      if (actorId === adminId) throw new ForbiddenError('No podés suspender tu propia cuenta');
+      if (maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)) {
+        throw new ForbiddenError('No podés suspender a un operador de rango igual o superior al tuyo', {
+          actorRoles,
+          targetRoles: admin.roles,
+        });
+      }
+      adminStatusMachine.assertTransition(admin.status, AdminStatus.SUSPENDED);
+      await this.repo.updateAdminByIdTx(tx, adminId, { status: AdminStatus.SUSPENDED });
+    });
+    await this.sessions.revokeAllForUser(adminId);
+    return this.getOperatorDetail(adminId);
+  }
+
+  /**
+   * Elimina (soft-delete) un operador: setea `deletedAt`. Queda FUERA de la lista (`listOperators` filtra
+   * `deletedAt = null`) y del detalle (404). Anti-escalada como reject. Revoca sus sesiones (acceso cortado ya).
+   */
+  async remove(actorRoles: AdminRole[], actorId: string, adminId: string): Promise<void> {
+    await this.repo.runInTransaction(async (tx) => {
+      const admin = await this.repo.findAdminByIdTx(tx, adminId);
+      if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+      if (actorId === adminId) throw new ForbiddenError('No podés eliminar tu propia cuenta');
+      if (maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)) {
+        throw new ForbiddenError('No podés eliminar a un operador de rango igual o superior al tuyo', {
+          actorRoles,
+          targetRoles: admin.roles,
+        });
+      }
+      await this.repo.updateAdminByIdTx(tx, adminId, { deletedAt: new Date(this.clock.now()) });
+    });
+    await this.sessions.revokeAllForUser(adminId);
+  }
+
+  /**
+   * Revoca UNA sesión concreta de un operador (gestión de acceso del detalle). Verifica que la sesión PERTENEZCA
+   * al operador nombrado (defensa en profundidad: no se revoca un sid arbitrario) y aplica el candado de objetivo
+   * (nadie echa sesiones de un rango igual/superior, salvo las propias). Delega al refresh-store: borra el record
+   * + sella el denylist por-sid (el access token de esa sesión se rechaza al instante).
+   */
+  async revokeSession(
+    actorRoles: AdminRole[],
+    actorId: string,
+    adminId: string,
+    sessionId: string,
+  ): Promise<void> {
+    const admin = await this.repo.findAdminById(adminId);
+    if (!admin || admin.deletedAt) throw new NotFoundError('Operador no encontrado');
+    if (
+      actorId !== adminId &&
+      maxRoleRank(admin.roles as AdminRole[]) >= maxRoleRank(actorRoles)
+    ) {
+      throw new ForbiddenError(
+        'No podés revocar sesiones de un operador de rango igual o superior al tuyo',
+        { actorRoles, targetRoles: admin.roles },
+      );
+    }
+    const sessions = await this.sessions.listSessionsForUser(adminId);
+    if (!sessions.some((s) => s.id === sessionId)) {
+      throw new NotFoundError('Sesión no encontrada');
+    }
+    await this.sessions.revokeSession(sessionId);
+  }
+
+  // DEUDA: no hay recovery self-service de TOTP admin (un enrolado que pierde su Authenticator solo se recupera con reset manual de totp_enrolled=false en DB) · techo: con 1-2 admins se hace a mano, con más operadores escala mal y tienta a rotar el secreto (lo que desincroniza el teléfono y rompe el login — fue la causa raíz del incidente) · gatillo: si suben los operadores o hay >1 incidente de Authenticator perdido → endpoint de reset de enrolamiento (superadmin resetea a otro operador; jamás rotar el secreto)
   /**
    * Login. Si el operador aún no enroló TOTP, devuelve la URL de enrolamiento (sin tokens).
    * Si ya enroló, exige y verifica el código TOTP, y emite tokens con MFA fresca.
@@ -257,9 +439,8 @@ export class AdminService {
 
     if (!admin.totpEnrolled) {
       const { secret, otpauthUrl } = enrollTotp(admin.email);
-      await this.prisma.write.adminUser.update({
-        where: { id: admin.id },
-        data: { totpSecretEnc: seal(secret, this.totpEncKey) },
+      await this.repo.updateAdminById(admin.id, {
+        totpSecretEnc: seal(secret, this.totpEncKey),
       });
       return { mustEnrollTotp: true, otpauthUrl };
     }
@@ -276,16 +457,13 @@ export class AdminService {
     const admin = await this.requireActiveAndAuthed(email, password);
     if (admin.totpEnrolled) throw new ConflictError('TOTP ya enrolado');
     await this.assertTotp(admin.totpSecretEnc, totp, admin.email);
-    await this.prisma.write.adminUser.update({
-      where: { id: admin.id },
-      data: { totpEnrolled: true },
-    });
+    await this.repo.updateAdminById(admin.id, { totpEnrolled: true });
     return this.issueTokens(admin.id, admin.email, admin.roles);
   }
 
   /** Step-up: re-verifica TOTP y emite un access token con MFA fresca para acciones sensibles (BR-S07). */
   async stepUp(adminId: string, totp: string): Promise<{ accessToken: string }> {
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { id: adminId } });
+    const admin = await this.repo.findAdminById(adminId);
     if (!admin || !isOperationalAdmin(admin)) throw new ForbiddenError('Operador no activo');
     // Lock activo → 429 sin verificar TOTP (corta el brute-force sobre el código en step-up).
     if (await this.isLocked(admin.email)) {
@@ -297,7 +475,7 @@ export class AdminService {
       typ: 'admin',
       roles: admin.roles as AdminRole[],
       sid: 'stepup', // el sid real lo mantiene el refresh; este token solo eleva MFA
-      mfaAt: Math.floor(Date.now() / 1000),
+      mfaAt: Math.floor(this.clock.now() / 1000),
       email: admin.email, // operador staff: email legible para watermark/audit (BR-S02)
     });
     return { accessToken };
@@ -315,7 +493,7 @@ export class AdminService {
     if (await this.isLocked(email)) {
       throw new RateLimitError('Demasiados intentos, esperá unos minutos.');
     }
-    const admin = await this.prisma.read.adminUser.findUnique({ where: { email } });
+    const admin = await this.repo.findAdminByEmail(email);
     if (!admin) throw new UnauthorizedError('Credenciales inválidas');
     if (!isOperationalAdmin(admin)) {
       throw new ForbiddenError('Operador no activo (pendiente de aprobación)');
@@ -335,9 +513,13 @@ export class AdminService {
    * password): un código equivocado tras una password correcta sigue siendo brute-force sobre los
    * 6 dígitos. `email` es opcional para que el caller decida si cuenta el fallo (siempre lo pasa hoy).
    */
-  private async assertTotp(totpSecretEnc: string | null, totp: string, email?: string): Promise<void> {
+  private async assertTotp(
+    totpSecretEnc: string | null,
+    totp: string,
+    email?: string,
+  ): Promise<void> {
     if (!totpSecretEnc) throw new UnauthorizedError('TOTP no configurado');
-    if (!verifyTotp(totp, open(totpSecretEnc, this.totpEncKey))) {
+    if (!verifyTotp(totp, open(totpSecretEnc, this.totpEncKey), this.clock.now())) {
       if (email) await this.registerAdminLoginFailure(email);
       throw new UnauthorizedError('Código TOTP incorrecto');
     }
@@ -348,7 +530,9 @@ export class AdminService {
     try {
       return Boolean(await this.redis.get(`${ADMIN_LOGIN_LOCK_PREFIX}${this.lockKeyEmail(email)}`));
     } catch (err) {
-      this.logger.warn(`Redis no disponible para chequear el lock de login admin: ${asMessage(err)}`);
+      this.logger.warn(
+        `Redis no disponible para chequear el lock de login admin: ${asMessage(err)}`,
+      );
       return false;
     }
   }
@@ -369,7 +553,9 @@ export class AdminService {
         await this.redis.set(`${ADMIN_LOGIN_LOCK_PREFIX}${key}`, '1', 'EX', this.loginLockSeconds);
       }
     } catch (err) {
-      this.logger.warn(`Redis no disponible para registrar fallo de login admin: ${asMessage(err)}`);
+      this.logger.warn(
+        `Redis no disponible para registrar fallo de login admin: ${asMessage(err)}`,
+      );
     }
   }
 
@@ -382,7 +568,9 @@ export class AdminService {
         `${ADMIN_LOGIN_LOCK_PREFIX}${key}`,
       );
     } catch (err) {
-      this.logger.warn(`Redis no disponible para limpiar el lockout de login admin: ${asMessage(err)}`);
+      this.logger.warn(
+        `Redis no disponible para limpiar el lockout de login admin: ${asMessage(err)}`,
+      );
     }
   }
 
@@ -394,13 +582,16 @@ export class AdminService {
   private async issueTokens(id: string, email: string, roles: string[]): Promise<AdminTokens> {
     // Éxito completo (tokens emitidos): limpiamos contador + lock del email.
     await this.clearAdminLoginFailures(email);
+    // Sella el "Último acceso" del operador (columna del panel de staff). Login EXITOSO = tokens emitidos;
+    // por eso va acá (login + confirmTotpEnrollment pasan por issueTokens), no en el chequeo de password.
+    await this.repo.updateAdminById(id, { lastLoginAt: new Date(this.clock.now()) });
     const { sessionId, newJti } = await this.sessions.createSession(id);
     const accessToken = await this.jwt.signAccessToken({
       sub: id,
       typ: 'admin',
       roles: roles as AdminRole[],
       sid: sessionId,
-      mfaAt: Math.floor(Date.now() / 1000),
+      mfaAt: Math.floor(this.clock.now() / 1000),
       email, // operador staff: email legible para watermark/audit (BR-S02)
     });
     const refreshToken = await this.jwt.signRefreshToken({

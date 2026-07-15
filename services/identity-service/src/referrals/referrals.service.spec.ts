@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import { ReferralsService } from './referrals.service';
+import { ReferralsRepository } from './referrals.repository';
 import type { PrismaService } from '../infra/prisma.service';
 import type { Env } from '../config/env.schema';
 
@@ -31,7 +32,7 @@ function buildService(prisma: {
     read: { user: { findUnique: prisma.findUnique } },
     write: { user: { update: prisma.update } },
   } as unknown as PrismaService;
-  return new ReferralsService(prismaService, config);
+  return new ReferralsService(new ReferralsRepository(prismaService), config);
 }
 
 describe('ReferralsService.ensureCode', () => {

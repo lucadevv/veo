@@ -1,102 +1,178 @@
-import { useCallback, useRef, useState } from 'react';
-import type { FaceCapture } from '../../domain';
-import { useRegistrationStore } from '../state/registrationStore';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFaceCapture } from '../providers/FaceCaptureProvider';
+import {
+  classifyKycEnrollError,
+  MissingFaceCaptureError,
+  type KycEnrollErrorKind,
+} from '../kycEnrollError';
 import { useRegistrationSubmit } from './useRegistrationSubmit';
 import { useEnrollBiometric } from './useRegistrationDocuments';
 
 /**
- * Fase del flujo de KYC del alta (estado de PRESENTACIÓN, no de negocio):
- *  - `idle`: guía en pantalla, listo para capturar.
- *  - `capturing`: cámara nativa abierta tomando la foto.
- *  - `preview`: foto capturada en pantalla; el conductor confirma o vuelve a tomar.
- *  - `submitting`: enrolando la foto (`POST /drivers/biometric/enroll`) + cerrando el alta.
+ * Fases del flujo de KYC del alta con UNA SELFIE SIMPLE (estado de PRESENTACIÓN, no de negocio). Reemplaza
+ * la vieja máquina de LIVENESS reactivo (reto → frames → enroll) por la captura de una sola foto frontal:
+ *  - `idle`: cámara lista; la pantalla muestra la preview en vivo y espera el toque de "Tomar foto".
+ *  - `capturing`: disparando la captura nativa de la foto (la cámara entrega UNA foto JPEG base64).
+ *  - `preview`: foto capturada; la pantalla pregunta "¿Se ve bien?" (retomar / confirmar).
+ *  - `submitting`: enrolando `{ photo }` (`POST /drivers/biometric/enroll`) y cerrando el alta (`submit`).
+ *  - `success`: enroló + cerró; el `RootNavigator` conmuta de pantalla (server-driven).
+ *  - `failed`: error (captura / enroll 422 rostro / red / genérico). La pantalla muestra un banner humano y
+ *    el reintento vuelve a `idle` para tomar otra foto.
  */
-export type FaceCapturePhase = 'idle' | 'capturing' | 'preview' | 'submitting';
+export type SelfiePhase = 'idle' | 'capturing' | 'preview' | 'submitting' | 'success' | 'failed';
 
 /**
- * Orquesta la captura facial REAL del alta: captura (cámara nativa) → preview/reintento → confirmar
- * (enrolar la foto + cerrar el alta). La lógica vive en el servicio inyectado (`FaceCaptureService`)
- * y en las mutaciones (`useEnrollBiometric`/`useRegistrationSubmit`); aquí solo se gobierna la fase
- * de UI. Al cerrar el alta, el store pasa a `in_review` y el `RootNavigator` conmuta de pantalla.
+ * Valores CANÓNICOS de la fase de la selfie (mismo patrón que `RegistrationStatus`): conmutar el estado
+ * SIN strings mágicos. El `satisfies` garantiza que cada valor pertenece al union — un typo es un ERROR
+ * DE COMPILACIÓN, no un bug mudo.
+ */
+export const SelfiePhase = {
+  IDLE: 'idle',
+  CAPTURING: 'capturing',
+  PREVIEW: 'preview',
+  SUBMITTING: 'submitting',
+  SUCCESS: 'success',
+  FAILED: 'failed',
+} as const satisfies Record<string, SelfiePhase>;
+
+/**
+ * Origen del último error, para que la presentación elija el mensaje correcto sin re-inspeccionar el error:
+ *  - `capture`: falló capturar la foto (módulo nativo no disponible, permiso, timeout de cámara).
+ *  - `enroll`: falló confirmar (enroll/submit); aquí aplica el mapeo rostro/red/incompleto/genérico.
+ */
+export type SelfieErrorSource = 'capture' | 'enroll';
+
+/**
+ * Orquesta el KYC de UNA SELFIE del alta: la PANTALLA es dueña de la máquina de estados; este hook la
+ * implementa sobre IO inyectado:
+ *  - captura: `useFaceCapture().captureForRegistration()` (cámara frontal nativa → 1 foto base64),
+ *  - enroll + cierre: `useEnrollBiometric` (`POST /drivers/biometric/enroll`, `{ photo }`) → `useRegistrationSubmit`.
+ *
+ * SEGURIDAD (defense-in-depth): el enroll es REQUISITO para cerrar el alta — `submit` solo corre si el
+ * enroll resolvió. Sin una foto real NO se llama al enroll (`MissingFaceCaptureError`). La guarda
+ * anti-reentrada (`runningRef`) garantiza que un doble toque del CTA no dispare la secuencia dos veces.
  */
 export function useRegistrationFaceCapture() {
   const faceCapture = useFaceCapture();
-  const setFaceCapture = useRegistrationStore((s) => s.setFaceCapture);
   const enroll = useEnrollBiometric();
   const submit = useRegistrationSubmit();
 
-  const [phase, setPhase] = useState<FaceCapturePhase>('idle');
-  const [capture, setCapture] = useState<FaceCapture | null>(null);
+  // Fase de UI. Arranca en `idle` (cámara montándose; la pantalla muestra la preview en vivo).
+  const [phase, setPhase] = useState<SelfiePhase>(SelfiePhase.IDLE);
+  // Foto capturada (base64 JPEG sin prefijo `data:`) a la espera de confirmación. `null` fuera de `preview`.
+  const [photo, setPhoto] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
-  // Guarda anti-reentrada de `confirm`: el estado (`phase`) se actualiza de forma asíncrona, así que
-  // un doble toque rápido entraría dos veces antes del re-render. El ref se marca SÍNCRONAMENTE para
-  // garantizar que enroll+submit se ejecuten una sola vez por captura.
-  const submittingRef = useRef(false);
+  const [errorSource, setErrorSource] = useState<SelfieErrorSource | null>(null);
+  // Guarda anti-reentrada: la fase se actualiza async, así que un doble toque rápido entraría dos veces
+  // antes del re-render. El ref se marca SÍNCRONO para garantizar que captura/confirmación corran una vez.
+  const runningRef = useRef(false);
 
-  /** Abre la cámara nativa, captura la foto y pasa a preview (persiste la referencia en el store). */
-  const startCapture = useCallback(async () => {
+  /**
+   * Toma UNA foto frontal con la cámara nativa. No enrola todavía: deja la foto en `preview` para que el
+   * conductor la revise (retomar / confirmar). Un fallo de captura (módulo no disponible, permiso, timeout)
+   * pasa la fase a `failed` con `source: 'capture'`.
+   */
+  const capture = useCallback(async () => {
+    if (runningRef.current) {
+      return;
+    }
+    runningRef.current = true;
     setError(null);
-    setPhase('capturing');
+    setErrorSource(null);
+    setPhase(SelfiePhase.CAPTURING);
     try {
       const result = await faceCapture.captureForRegistration();
-      setCapture(result);
-      setFaceCapture(result);
-      setPhase('preview');
+      if (!result.photoBase64) {
+        // El proveedor no entregó una foto real (p. ej. stub de desarrollo). NO seguimos sin imagen.
+        throw new MissingFaceCaptureError();
+      }
+      setPhoto(result.photoBase64);
+      setPhase(SelfiePhase.PREVIEW);
     } catch (e) {
-      setPhase('idle');
       setError(e);
+      setErrorSource('capture');
+      setPhase(SelfiePhase.FAILED);
+    } finally {
+      runningRef.current = false;
     }
-  }, [faceCapture, setFaceCapture]);
+  }, [faceCapture]);
 
-  /** Descarta la foto y vuelve a la guía para reintentar. */
-  const retake = useCallback(() => {
+  /**
+   * Confirma la foto en preview: enrola `{ photo }` (OBLIGATORIO) y, solo si resolvió, cierra el alta
+   * (server-driven). El enroll es prerequisito del cierre: si falla, `submit` NO corre y la fase pasa a
+   * `failed` con `source: 'enroll'` (mapeo rostro/red/incompleto/genérico).
+   */
+  const confirm = useCallback(async () => {
+    if (runningRef.current || photo == null) {
+      return;
+    }
+    runningRef.current = true;
     setError(null);
-    setCapture(null);
-    submittingRef.current = false;
-    setPhase('idle');
+    setErrorSource(null);
+    setPhase(SelfiePhase.SUBMITTING);
+    try {
+      await enroll.mutateAsync({ photo });
+      await submit.mutateAsync();
+      setPhase(SelfiePhase.SUCCESS);
+    } catch (e) {
+      runningRef.current = false;
+      setError(e);
+      setErrorSource('enroll');
+      setPhase(SelfiePhase.FAILED);
+      return;
+    }
+    runningRef.current = false;
+  }, [photo, enroll, submit]);
+
+  /**
+   * Descarta la foto en preview y vuelve a `idle` para tomar otra (CTA "Volver a tomar"). No toca el
+   * backend: es puramente local.
+   */
+  const retake = useCallback(() => {
+    runningRef.current = false;
+    setPhoto(null);
+    setError(null);
+    setErrorSource(null);
+    setPhase(SelfiePhase.IDLE);
   }, []);
 
   /**
-   * Confirma la foto: la enrola en el backend (si el proveedor entregó base64 real) y cierra el alta
-   * (queda `in_review`). Ante error, vuelve a preview para reintentar sin perder la foto.
-   *
-   * PRODUCTO: este enroll del ALTA captura la FOTO DE REFERENCIA del conductor (sin liveness, por
-   * decisión de producto). El liveness/anti-spoofing NO vive aquí: se exige en el GATE DE TURNO
-   * (verificación biométrica obligatoria al iniciar turno), que compara contra esta referencia. No
-   * cambiar este flujo para añadir liveness en el alta.
-   *
-   * SEGURIDAD/UX: guarda anti-reentrada — un doble toque del botón confirmar NO debe disparar
-   * enroll+submit dos veces. El ref se marca síncrono y se libera solo si el intento falla (para
-   * permitir reintentar desde preview); en éxito el alta avanza y el componente se desmonta.
+   * Reintenta tras un fallo. Descarta la foto consumida y vuelve a `idle` para reiniciar la captura desde
+   * la cámara en vivo (no reusa una foto que pudo fallar el enroll).
    */
-  const confirm = useCallback(async () => {
-    if (submittingRef.current) {
-      return;
-    }
-    submittingRef.current = true;
+  const retry = useCallback(() => {
+    runningRef.current = false;
+    setPhoto(null);
     setError(null);
-    setPhase('submitting');
-    try {
-      if (capture?.photoBase64) {
-        await enroll.mutateAsync({ photo: capture.photoBase64 });
-      }
-      await submit.mutateAsync();
-    } catch (e) {
-      submittingRef.current = false;
-      setPhase('preview');
-      setError(e);
-    }
-  }, [capture, enroll, submit]);
+    setErrorSource(null);
+    setPhase(SelfiePhase.IDLE);
+  }, []);
+
+  /**
+   * Clasificación del error de CONFIRMAR (rostro / red / incompleto / genérico) para que la pantalla muestre
+   * el mensaje específico. Solo aplica cuando el error vino del enroll; ante un error de captura es `null`
+   * (ese caso lo cubre el banner de cámara con su propio reintento).
+   */
+  const enrollErrorKind: KycEnrollErrorKind | null = useMemo(
+    () => (error && errorSource === 'enroll' ? classifyKycEnrollError(error) : null),
+    [error, errorSource],
+  );
 
   return {
     phase,
-    capture,
+    photo,
     error,
-    isCapturing: phase === 'capturing',
-    isSubmitting: phase === 'submitting',
-    startCapture,
-    retake,
+    errorSource,
+    enrollErrorKind,
+    isIdle: phase === SelfiePhase.IDLE,
+    isCapturing: phase === SelfiePhase.CAPTURING,
+    isPreview: phase === SelfiePhase.PREVIEW,
+    isSubmitting: phase === SelfiePhase.SUBMITTING,
+    isSuccess: phase === SelfiePhase.SUCCESS,
+    isFailed: phase === SelfiePhase.FAILED,
+    capture,
     confirm,
+    retake,
+    retry,
   };
 }

@@ -21,10 +21,14 @@ import {
   AcceptTripDto,
   ArrivingTripDto,
   CancelTripDto,
+  CashConfirmDto,
   CompleteTripDto,
   RespondWaypointDto,
   RouteQueryDto,
   StartTripDto,
+  TripHistoryQueryDto,
+  type PendingCashView,
+  type TripHistoryPageView,
   type TripRouteView,
   type TripStateView,
   type TripView,
@@ -59,6 +63,45 @@ export class TripsController {
       return undefined;
     }
     return trip;
+  }
+
+  // IMPORTANTE: `history` va ANTES de `:id` — si no, `@Get(':id')` con ParseUUIDPipe captura "history"
+  // como id y responde 400 (mismo motivo que `active`). El orden de declaración define el matching.
+  @Get('history')
+  @ApiOperation({
+    summary:
+      'Historial REAL de viajes del conductor (servidor, no la lista local): SUS viajes ordenados por ' +
+      'requestedAt DESC, paginados por cursor. Trae los estados REALES (COMPLETED/CANCELLED/EXPIRED). ' +
+      'El driverId se DERIVA del perfil del JWT (anti-IDOR). Ruta literal: declarada antes de :id.',
+  })
+  history(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: TripHistoryQueryDto,
+  ): Promise<TripHistoryPageView> {
+    // driverId DERIVADO del perfil del JWT (user), NUNCA del query: el historial solo puede ser el del
+    // conductor autenticado.
+    return this.trips.getTripHistory(user, query.cursor, query.limit);
+  }
+
+  // IMPORTANTE: `pending-cash` va ANTES de `:id` — si no, `@Get(':id')` con ParseUUIDPipe captura
+  // "pending-cash" como id y responde 400 (mismo motivo que `active`/`history`).
+  @Get('pending-cash')
+  @ApiOperation({
+    summary:
+      'EFECTIVO · cobro CASH PENDING que el conductor dejó SIN confirmar (force-close post-viaje). 200 + ' +
+      '{ tripId, amountCents } si tiene uno por confirmar; 204 No Content si no (la app mapea 204 → null). ' +
+      'El driverId se DERIVA del perfil del JWT (anti-IDOR). Alimenta el banner "cobro por confirmar".',
+  })
+  async pendingCash(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: HttpResponseLike,
+  ): Promise<PendingCashView | undefined> {
+    const pending = await this.trips.getPendingCash(user);
+    if (!pending) {
+      res.status(204);
+      return undefined;
+    }
+    return pending;
   }
 
   @Get(':id')
@@ -156,6 +199,22 @@ export class TripsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<unknown> {
     return this.trips.complete(id, dto, user);
+  }
+
+  @Post(':id/cash-confirm')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'EFECTIVO · el conductor confirma el cobro en mano DESPUÉS de completar (decisión del dueño). ' +
+      'collected=true captura el cobro CASH PENDING; collected=false reporta discrepancia. Ownership ' +
+      'server-side (anti-IDOR); paymentId resuelto server-side. Solo viajes CASH.',
+  })
+  cashConfirm(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CashConfirmDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<unknown> {
+    return this.trips.cashConfirm(id, dto, user);
   }
 
   @Post(':id/cancel')

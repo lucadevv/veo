@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { KeyRound } from 'lucide-react';
+import { cloneElement, isValidElement, useState, type MouseEventHandler } from 'react';
+import { KeyRound, type LucideIcon } from 'lucide-react';
 import { stepUp } from '@/lib/api/auth';
+import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
+import { Textarea } from '@/components/ui/textarea';
+import { OtpInput } from '@/components/ui/otp-input';
 import {
   Dialog,
   DialogClose,
@@ -21,35 +23,88 @@ interface StepUpDialogProps {
   trigger: React.ReactNode;
   title?: string;
   description?: string;
-  /** Se ejecuta tras verificar el TOTP (MFA fresco). */
-  onVerified: () => Promise<void> | void;
+  /** Ícono del encabezado (default KeyRound). Los frames usan shield-check (aprobar) / triangle-alert (rechazar). */
+  icon?: LucideIcon;
+  /** Botón de confirmar (default "Verificar"). El de un rechazo/borrado conviene nombrarlo con el verbo. */
+  confirmLabel?: string;
+  /** Variante del botón de confirmar (danger para rechazos/borrados). */
+  confirmVariant?: 'primary' | 'danger';
+  /** Pide un MOTIVO (textarea) además del TOTP. El motivo se pasa a `onVerified`. Para rechazos que el
+   *  destinatario VE (approve/reject de conductor con MFA · frame AdminConductorDetalle-Rechazar). */
+  withReason?: boolean;
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
+  /** Se ejecuta tras verificar el TOTP (MFA fresco) — con el motivo si `withReason`. El valor que resuelva se
+   *  ignora (algunos `save` devuelven `boolean` para short-circuit) → se acepta cualquier Promise. */
+  onVerified: (reason?: string) => void | Promise<unknown>;
 }
 
 /**
- * Verificación de segundo factor (step-up) para acciones sensibles, p. ej. video.
- * Pide el código TOTP, llama a /api/auth/step-up y solo entonces ejecuta la acción.
+ * Verificación de segundo factor (step-up) para acciones sensibles: video, aprobar/rechazar conductor (BR-S07),
+ * borrar. Pide el TOTP, llama a /api/auth/step-up y solo entonces ejecuta la acción. Con `withReason` captura
+ * además un motivo (el frame de rechazo lleva motivo + MFA en el mismo modal).
  */
 export function StepUpDialog({
   trigger,
   title = 'Verificación adicional requerida',
   description = 'Esta acción accede a datos sensibles. Ingresa tu código TOTP para continuar.',
+  icon: Icon = KeyRound,
+  confirmLabel = 'Verificar',
+  confirmVariant = 'primary',
+  withReason = false,
+  reasonLabel = 'Motivo',
+  reasonPlaceholder,
   onVerified,
 }: StepUpDialogProps) {
+  const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState('');
+  const [reason, setReason] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Espejo EXACTO del `StepUpMfaGuard` del backend (`if (!isHardenedEnv()) return true`): en local/dev el server
+  // NO exige la doble-auth fresca (solo NODE_ENV=production la mantiene). El TOTP se salta en dev.
+  const isProd = process.env.NODE_ENV === 'production';
+
+  // DEV sin motivo: no hay TOTP que capturar → salta el diálogo y corre la acción directo (el superadmin no
+  // re-tipea el código en cada acción sensible). CON motivo NO se salta: el diálogo debe capturar el motivo
+  // igual (dev o prod); solo el TOTP se omite en dev. IMPORTANTE: acá NO hay Field donde mostrar un error, así
+  // que un fallo de la acción (409/403/riel caído) se surfacéa por TOAST — si se descartara la promesa
+  // (`void onVerified()`), las mutaciones de dinero fallarían MUDAS en el entorno donde el equipo trabaja (dev).
+  if (!isProd && !withReason && isValidElement(trigger)) {
+    return cloneElement(trigger as React.ReactElement<{ onClick?: MouseEventHandler }>, {
+      onClick: async () => {
+        try {
+          await onVerified();
+        } catch (e) {
+          toast({
+            tone: 'danger',
+            title: 'No se pudo completar la acción',
+            description: e instanceof Error ? e.message : undefined,
+          });
+        }
+      },
+    });
+  }
+
+  const reasonReady = !withReason || reason.trim().length > 0;
+  const codeReady = !isProd || code.length >= 6;
 
   async function verify() {
     setError(null);
     setPending(true);
     try {
-      await stepUp(code);
+      // Verificamos el TOTP y EJECUTAMOS con el diálogo AÚN abierto: si `onVerified` falla (403 causa-mismatch,
+      // 409 estado), el error queda visible en el Field en vez de perderse tras un diálogo cerrado. En dev se
+      // omite el stepUp (el guard del backend también). Cerramos SOLO en éxito completo.
+      if (isProd) await stepUp(code);
+      await onVerified(withReason ? reason.trim() : undefined);
       setOpen(false);
       setCode('');
-      await onVerified();
+      setReason('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Código incorrecto.');
+      setError(e instanceof Error ? e.message : 'No se pudo completar la acción.');
     } finally {
       setPending(false);
     }
@@ -61,33 +116,40 @@ export function StepUpDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="size-5 text-accent" aria-hidden />
+            <Icon className="size-5 text-accent" aria-hidden />
             {title}
           </DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <Field label="Código TOTP" error={error ?? undefined}>
-          <Input
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={8}
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-            className="text-center font-mono text-lg tracking-[0.4em]"
-            placeholder="••••••"
-          />
-        </Field>
+        {withReason ? (
+          <Field label={reasonLabel}>
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              placeholder={reasonPlaceholder}
+              className="resize-none"
+            />
+          </Field>
+        ) : null}
+        {isProd ? (
+          <Field label="Código de 6 dígitos" error={error ?? undefined}>
+            <OtpInput value={code} onChange={setCode} length={6} autoFocus={!withReason} />
+          </Field>
+        ) : error ? (
+          <p className="text-sm text-danger">{error}</p>
+        ) : null}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="ghost">Cancelar</Button>
           </DialogClose>
           <Button
-            variant="primary"
+            variant={confirmVariant}
             loading={pending}
-            disabled={code.length < 6}
+            disabled={!reasonReady || !codeReady}
             onClick={() => void verify()}
           >
-            Verificar
+            {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

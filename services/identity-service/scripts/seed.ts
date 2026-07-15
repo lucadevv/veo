@@ -20,6 +20,21 @@ const prisma = new PrismaClient();
  */
 const DEV_TOTP_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 
+/**
+ * Operadores de DEV — un usuario ACTIVE por cada rol canónico (además del SUPERADMIN). Solo se crean en
+ * entornos NO endurecidos (local/dev): sirven para probar cada vista por rol y los estados 403 del overlay
+ * (ej. FINANCE no tiene `trips:view` → 403 en Viajes; SUPPORT_L1 no tiene `ops:view` → 403 en En Vivo/Métricas).
+ * Comparten el TOTP fijo de dev → el código del visor :5190 valida para todos. JAMÁS se siembran en producción.
+ */
+const DEV_ROLE_USERS: readonly { email: string; role: string }[] = [
+  { email: 'admin-role@veo.pe', role: 'ADMIN' },
+  { email: 'dispatcher@veo.pe', role: 'DISPATCHER' },
+  { email: 'support-l1@veo.pe', role: 'SUPPORT_L1' },
+  { email: 'support-l2@veo.pe', role: 'SUPPORT_L2' },
+  { email: 'compliance@veo.pe', role: 'COMPLIANCE_SUPERVISOR' },
+  { email: 'finance@veo.pe', role: 'FINANCE' },
+];
+
 async function main(): Promise<void> {
   const email = process.env.SEED_SUPERADMIN_EMAIL ?? 'admin@veo.pe';
   const password = process.env.SEED_SUPERADMIN_PASSWORD ?? 'ChangeMe_VEO_2026!';
@@ -34,12 +49,19 @@ async function main(): Promise<void> {
     ? {}
     : {
         totpEnrolled: true,
-        totpSecretEnc: seal(DEV_TOTP_SECRET, process.env.TOTP_ENC_KEY ?? 'dev-totp-enc-key-change-me'),
+        totpSecretEnc: seal(
+          DEV_TOTP_SECRET,
+          process.env.TOTP_ENC_KEY ?? 'dev-totp-enc-key-change-me',
+        ),
       };
 
   const admin = await prisma.adminUser.upsert({
     where: { email },
-    update: { status: 'ACTIVE', roles: ['SUPERADMIN'], ...totpFields },
+    // El update preserva el TOTP de un admin ENDURECIDO (re-pisarlo desincronizaba el Authenticator real
+    // del operador). Pero en DEV (no endurecido) NO hay Authenticator real: es el secreto FIJO del visor →
+    // lo refrescamos también en el update para que el código del visor (:5190) SIEMPRE valide tras un
+    // re-seed (mata el blocker "Código TOTP incorrecto" por secreto en formato/key viejos). Solo dev.
+    update: { status: 'ACTIVE', roles: ['SUPERADMIN'], ...(isHardened ? {} : totpFields) },
     create: { email, passwordHash, roles: ['SUPERADMIN'], status: 'ACTIVE', ...totpFields },
   });
 
@@ -48,6 +70,21 @@ async function main(): Promise<void> {
       (isHardened
         ? 'Enrola TOTP en el primer login.'
         : 'TOTP pre-enrolado (dev) — código en el visor :5190.'),
+  );
+
+  // Operadores por rol: SOLO en dev (no endurecido). En producción jamás se crean — el superadmin invita
+  // a los operadores reales por el flujo de la app (POST /operators → INVITED → aceptar → enrolar TOTP).
+  if (isHardened) return;
+  for (const u of DEV_ROLE_USERS) {
+    await prisma.adminUser.upsert({
+      where: { email: u.email },
+      update: { status: 'ACTIVE', roles: [u.role], ...totpFields },
+      create: { email: u.email, passwordHash, roles: [u.role], status: 'ACTIVE', ...totpFields },
+    });
+  }
+  console.warn(
+    `Operadores por rol (dev) listos: ${DEV_ROLE_USERS.map((u) => `${u.email}=${u.role}`).join(', ')}. ` +
+      `Contraseña compartida = la del SUPERADMIN; TOTP del visor :5190.`,
   );
 }
 

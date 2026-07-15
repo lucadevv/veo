@@ -60,8 +60,9 @@ export function RouteStepsList({
       style={[
         styles.card,
         {
-          backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
+          // "Pozo" sutil dentro del sheet blanco (mismo criterio editorial que el selector de vehículo del
+          // dashboard): fondo `bg` gris suave, SIN borde duro — no un box recargado.
+          backgroundColor: theme.colors.bg,
           borderRadius: theme.radii.lg,
         },
       ]}
@@ -85,8 +86,16 @@ export function RouteStepsList({
             })}
           </Text>
         </View>
-        <View style={[styles.chevron, open && styles.chevronOpen]}>
-          <IconChevronRight size={18} color={theme.colors.inkSubtle} />
+        {/* Chevron en color de IDENTIDAD (accent), dentro de un círculo brand-dim: apunta abajo (cerrado) /
+            arriba (abierto). Reemplaza el gris `inkSubtle` que no dialogaba con la identidad. */}
+        <View
+          style={[
+            styles.chevron,
+            open && styles.chevronOpen,
+            { backgroundColor: theme.colors.brandDim },
+          ]}
+        >
+          <IconChevronRight size={18} color={theme.colors.accent} strokeWidth={2.25} />
         </View>
       </Pressable>
 
@@ -138,10 +147,17 @@ function StepRow({ step, showDivider }: StepRowProps): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  card: { overflow: 'hidden' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerText: { flex: 1, gap: 2 },
-  chevron: { transform: [{ rotate: '90deg' }] },
+  chevron: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ rotate: '90deg' }],
+  },
   chevronOpen: { transform: [{ rotate: '270deg' }] },
   list: {},
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },

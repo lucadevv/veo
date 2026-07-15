@@ -111,6 +111,17 @@ export class VehicleModelsController {
     return this.models.reject(id, user.userId);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles(...CATALOG_REVIEWERS)
+  @Put(':id/reopen')
+  @ApiOperation({
+    summary:
+      'Reabrir un modelo APROBADO para corregir su ficha (APPROVED→PENDING_REVIEW). Solo operador',
+  })
+  reopen(@Param('id', ParseUUIDPipe) id: string): Promise<VehicleModelReviewView> {
+    return this.models.reopen(id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener un modelo APROBADO del catálogo por id' })
   getById(@Param('id', ParseUUIDPipe) id: string): Promise<VehicleModelSpecView> {

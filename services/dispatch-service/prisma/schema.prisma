@@ -21,6 +21,7 @@ enum DispatchOutcome {
   ACCEPTED
   REJECTED
   TIMEOUT
+  WITHDRAWN /// el viaje se canceló durante la búsqueda: la oferta FIXED se retira (accept tardío ya no matchea OFFERED)
 
   @@schema("dispatch")
 }
@@ -97,11 +98,17 @@ model DispatchSession {
   category     String?               @map("category")
   /// k-ring actual de la búsqueda (1..maxKRing): el advance expande cuando se agotan los cercanos.
   currentKRing Int                   @default(1) @map("current_k_ring")
+  /// Dispatch policy v2 (FIXED) — próximo instante en el que el sweep puede EXPANDIR el ring por TIEMPO
+  /// (cadencia expandIntervalSec), desacoplado del timeout de la oferta. Null = sin expansión pendiente
+  /// (v1, o v2 ya en maxK). El barrido `sweepExpandableSessions` filtra OPEN + nextExpandAt ≤ now.
+  nextExpandAt DateTime?             @map("next_expand_at") @db.Timestamptz
   createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz
 
   /// El reconciler/limpieza lista las sesiones OPEN; los cierres consultan por status.
   @@index([status])
+  /// Hot-path del sweep de expansión temporal v2: filtra status=OPEN (igualdad) + nextExpandAt ≤ now (rango).
+  @@index([status, nextExpandAt])
   @@map("dispatch_sessions")
   @@schema("dispatch")
 }
@@ -148,19 +155,56 @@ model DriverStats {
   @@schema("dispatch")
 }
 
-/// Config SINGLETON de RADIOS de dispatch (k-rings) editable en runtime por el admin (espejo del
+/// VENTANA ROLLING de cancelaciones del conductor (auto-suspensión por exceso, decisión del dueño ·
+/// compliance/seguridad). SEPARADA del contador LIFELONG `driver_stats.cancelled_trips` (ese alimenta la
+/// TASA de cancelación del scoring y NUNCA se poda): acá cada cancelación POR conductor es UNA fila con su
+/// `occurredAt`, y la lógica cuenta solo las de las últimas 24h (poda las viejas). Cuando el conteo de la
+/// ventana CRUZA el umbral (4→5) dispatch emite `driver.excessive_cancellations` (UNA vez por cruce).
+///
+/// IDEMPOTENCIA del at-least-once de Kafka: `@@unique([driverId, tripId])` — una RE-ENTREGA del MISMO
+/// `trip.cancelled` (mismo tripId) es un upsert no-op, NO duplica la fila NI re-cuenta. `driverId` y `tripId`
+/// son ids de PERFIL/viaje (el driverId lo resuelve dispatch vía driverForTrip → dispatch_matches, ya de perfil).
+model DriverCancellationEvent {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  driverId   String   @map("driver_id") @db.Uuid
+  /// Viaje cancelado: natural key de idempotencia (una cancelación por viaje y conductor).
+  tripId     String   @map("trip_id") @db.Uuid
+  /// Momento de la cancelación (define si la fila cae dentro de la ventana de 24h o se poda).
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  /// Natural key: UNA cancelación por (conductor, viaje). Re-entregas de Kafka → upsert no-op (idempotencia DB).
+  @@unique([driverId, tripId])
+  /// Hot-path del conteo de ventana: filtra por driverId (igualdad) + occurredAt (rango ≥ cutoff). Y de la poda.
+  @@index([driverId, occurredAt])
+  @@map("driver_cancellation_events")
+  @@schema("dispatch")
+}
+
+/// Config SINGLETON de RADIOS + VENTANAS de dispatch editable en runtime por el admin (espejo del
 /// pricing_mode_schedule del trip-service). UNA sola fila (id='GLOBAL', Tier 1): `nearbyKRing` = radio
-/// del feed de mapa de "autos cerca"; `matchKRing` = radio de broadcast de pujas/matching. El `version`
-/// se bumpea en cada PUT (auditable + dedupe del evento dispatch.radius_config_updated). Sin fila → el
-/// service degrada al DEFAULT_RADIUS_CONFIG explícito (version 0), no crash.
+/// del feed de mapa de "autos cerca"; `matchKRing` = radio de broadcast de pujas/matching;
+/// `offerTimeoutMs` = ventana de la oferta directa (FIXED secuencial); `bidWindowSec` = ventana del board
+/// de PUJA. El `version` se bumpea en cada PUT (auditable + dedupe del evento
+/// dispatch.radius_config_updated). Sin fila → el service degrada al DEFAULT_RADIUS_CONFIG explícito
+/// (version 0), no crash.
 model DispatchRadiusConfig {
-  id          String   @id
+  id             String   @id
   /// k-ring del feed de mapa (NearbyDriversService): cuántos anillos H3 alrededor del origen se muestrean.
-  nearbyKRing Int      @map("nearby_k_ring")
+  nearbyKRing    Int      @map("nearby_k_ring")
   /// k-ring del broadcast de pujas / matching (OfferBoardService): radio de candidatos elegibles.
-  matchKRing  Int      @map("match_k_ring")
-  version     Int      @default(0)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  matchKRing     Int      @map("match_k_ring")
+  /// Ventana (ms) de espera de respuesta del conductor por oferta directa FIXED antes de TIMEOUT + avanzar.
+  offerTimeoutMs Int      @map("offer_timeout_ms")
+  /// Ventana (s) del board de PUJA (openBoard/reopenBoard): cuánto vive un board OPEN antes de EXPIRED.
+  bidWindowSec   Int      @map("bid_window_sec")
+  /// FEATURE-FLAG de la política de despacho: 'v1' (default = comportamiento actual VERBATIM, razona en
+  /// k-rings crudos) | 'v2' (razona en km via policy_v2, umbral de candidatos + expansión temporal).
+  policyVersion  String   @default("v1") @map("policy_version")
+  /// Snapshot v2 por-modo (FIXED/PUJA) en km/umbrales. Null cuando policy_version='v1'. Aditivo, nullable:
+  /// una fila v1 preexistente sigue funcionando sin reescritura. Malformado → el service degrada a v1.
+  policyV2       Json?    @map("policy_v2")
+  version        Int      @default(0)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("dispatch_radius_config")
   @@schema("dispatch")
@@ -169,6 +213,7 @@ model DispatchRadiusConfig {
 /// Outbox (FOUNDATION §6). Insertado en la MISMA transacción que la mutación de dominio.
 model OutboxEvent {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
   aggregateId String    @map("aggregate_id")
   eventType   String    @map("event_type")
   /// Idempotencia DEL PRODUCTOR (Finding #4a): clave ESTABLE por evento de dominio (p.ej.
@@ -181,8 +226,10 @@ model OutboxEvent {
   envelope    Json
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
 
-  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
   @@map("outbox_events")
   @@schema("dispatch")
 }

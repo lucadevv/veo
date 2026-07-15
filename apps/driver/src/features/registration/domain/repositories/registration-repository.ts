@@ -1,6 +1,8 @@
 import type {
   BiometricEnrollInput,
   BiometricEnrollResult,
+  CheckDniInput,
+  CheckDniResult,
   LicenseOnboardInput,
   PersonalDataInput,
   PersonalDataView,
@@ -34,6 +36,13 @@ export interface RegistrationRepository {
 
   /** PATCH /drivers/me/personal — persiste los datos personales (PII) del conductor. */
   updatePersonalData(input: PersonalDataInput): Promise<PersonalDataView>;
+
+  /**
+   * POST /drivers/me/check-dni — chequea si el DNI escaneado YA está registrado en OTRA cuenta
+   * (blind index `dni_hash`). Se consulta ANTES de crear el driver + subir el DNI (Lote 1 · eager):
+   * `{ exists: true }` ⇒ el alta corta con "DNI ya registrado" sin subir nada.
+   */
+  checkDni(input: CheckDniInput): Promise<CheckDniResult>;
 
   /** POST /drivers/vehicles — alta self-service del vehículo (queda PENDING_REVIEW). */
   registerVehicle(input: VehicleRegisterInput): Promise<VehicleView>;
@@ -71,7 +80,10 @@ export interface RegistrationRepository {
   /** POST /drivers/onboard — alta de licencia del conductor (`driverOnboardRequest`). */
   onboardLicense(input: LicenseOnboardInput): Promise<void>;
 
-  /** POST /drivers/biometric/enroll — enrola el rostro de referencia (foto en base64). */
+  /**
+   * POST /drivers/biometric/enroll — enrola el rostro de referencia con UNA SELFIE: `{ photo }` (JPEG
+   * base64, sin prefijo `data:`). El backend valida que la imagen contenga exactamente un rostro claro.
+   */
   enrollBiometric(input: BiometricEnrollInput): Promise<BiometricEnrollResult>;
 
   /**

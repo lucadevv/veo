@@ -2,19 +2,45 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret, grpcTlsEnvSchema } from '@veo/utils';
+import { outboxEnvSchema } from '@veo/database';
+
+/**
+ * Preset de proxies de CONFIANZA para `trust proxy` (Express/proxy-addr). Rangos de IP INTERNOS de la
+ * red docker (loopback 127/8 + ::1, link-local 169.254/16 + fe80::/10, unique-local 10/8 + 172.16/12 +
+ * 192.168/16 + fc00::/7). Los proxies de ingreso (cloudflared / la red interna) tienen IP privada →
+ * caen acá; el CLIENTE real → NUNCA está en esta lista. Con esto Express resuelve `req.ip` = la IP
+ * real del cliente (un-spoofeable), que es la que se escribe — HASHEADA — en el log inmutable
+ * append-only (Ley 29733). Configurable vía TRUSTED_PROXY. trust-all queda RECHAZADO por
+ * parseTrustedProxy (fail-fast). En el deploy VPS la contención de red la dan: (a) la red interna de
+ * Docker Compose (los BFFs NO publican puertos al host), (b) el firewall del host (default-deny), y
+ * (c) Cloudflare Tunnel como único ingreso (cloudflared alcanza los BFFs por la red docker).
+ */
+export const DEFAULT_TRUSTED_PROXY = 'loopback, linklocal, uniquelocal';
 
 export const envSchema = z.object({
+  // Transporte TLS de gRPC interno (ADR-016). Contrato compartido (FUENTE ÚNICA en @veo/utils): 3 rutas
+  // OPCIONALES — ausentes = insecure (dev); presentes = mTLS. El valor lo lee grpcTlsPathsFromEnv() de process.env.
+  ...grpcTlsEnvSchema.shape,
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3009),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+
+  // Proxies de confianza para `trust proxy` (Express). CSV de presets/subredes. Default = rangos
+  // privados de la red docker. Crítico acá: `req.ip` se escribe en el rastro INMUTABLE (Ley 29733) —
+  // NO debe ser forjable. Un header XFF crudo del cliente NUNCA debe convertirse en la IP auditada.
+  TRUSTED_PROXY: z.string().default(DEFAULT_TRUSTED_PROXY),
 
   // Base de datos (read/write split). Schema lógico "audit".
   DATABASE_URL: z.string().url(),
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Kafka — audit-service CONSUME los eventos auditables del resto del dominio.
-  KAFKA_BROKERS: z.string().default('localhost:9094'),
+  KAFKA_BROKERS: requiredInProd('localhost:9094'),
+  // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+  // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+  // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+  ...outboxEnvSchema.shape,
   KAFKA_GROUP_ID: z.string().default('audit-service'),
   /// Si arranca con la cadena vacía, consumir desde el principio del log de Kafka.
   KAFKA_FROM_BEGINNING: z
@@ -28,13 +54,22 @@ export const envSchema = z.object({
   // gRPC (registro/verificación síncrona desde otros servicios).
   GRPC_URL: z.string().default('0.0.0.0:50059'),
 
+  // Tamaño del LOTE (keyset) con el que `verifyRange` recorre la cadena WORM por streaming (anti-OOM).
+  // La verificación NO materializa la tabla append-only entera (millones de eslabones) en memoria: la
+  // recorre en páginas keyset por `seq` de este tamaño, arrastrando el hash entre lotes (cadena completa,
+  // memoria acotada). Default 2000: cada fila lleva un payload ya PROYECTADO (PII-stripped, a menudo `{}`),
+  // así que ~2k filas son unos pocos MB —muy por debajo del heap— y a la vez mantienen pocas idas a la DB
+  // (1M de eslabones = ~500 queries, cada una sobre el índice único de `seq`, range-scan O(log n), sin
+  // full-scan). Subirlo cambia el trade-off memoria↔round-trips; no afecta el RESULTADO de la verificación.
+  AUDIT_VERIFY_BATCH_SIZE: z.coerce.number().int().positive().default(2000),
+
   // === Réplica inmutable WORM a S3/MinIO (Object Lock, modo COMPLIANCE) ===
   /// Activa la réplica a S3. En dev apunta a MinIO. Desactivar solo en tests aislados.
   AUDIT_S3_ENABLED: z
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  AUDIT_S3_ENDPOINT: z.string().default('http://localhost:9002'),
+  AUDIT_S3_ENDPOINT: requiredInProd('http://localhost:9002'),
   AUDIT_S3_REGION: z.string().default('us-east-1'),
   AUDIT_S3_BUCKET: z.string().default('veo-audit-log'),
   AUDIT_S3_ACCESS_KEY: z.string().default('veo_dev'),

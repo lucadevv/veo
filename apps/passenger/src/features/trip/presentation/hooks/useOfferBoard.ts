@@ -1,5 +1,5 @@
 import type {ClientBoardStatus, OfferView, TripStatus} from '@veo/api-client';
-import {ApiError} from '@veo/api-client';
+import {ApiError, tripStatus} from '@veo/api-client';
 import {
   useMutation,
   useQuery,
@@ -9,7 +9,7 @@ import {useEffect, useRef, useState} from 'react';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {mergeOffers} from '../../domain/offers';
-import type {LiveTripState} from './usePassengerTripSocket';
+import type {LiveTripState} from '../../../../core/realtime/usePassengerTripSocket';
 
 /** Estado del BOARD de la puja (contrato nuevo `{ board, offers }`). `null` hasta el primer snapshot. */
 export interface OfferBoardState {
@@ -70,6 +70,22 @@ export function resolveBoardOverride(
 const ACTION_ERROR_TTL_MS = 5_000;
 
 /**
+ * Estados con MATCH o terminales: el board de la puja ya no cambia → el poll de ofertas se APAGA.
+ * EXPIRED y REASSIGNING quedan FUERA a propósito: la puja puede reabrirse (re-puja / reasignación) y el
+ * board vuelve a importar.
+ */
+const MATCHED_OR_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  tripStatus.enum.ASSIGNED,
+  tripStatus.enum.ACCEPTED,
+  tripStatus.enum.ARRIVING,
+  tripStatus.enum.ARRIVED,
+  tripStatus.enum.IN_PROGRESS,
+  tripStatus.enum.COMPLETED,
+  tripStatus.enum.CANCELLED,
+  tripStatus.enum.FAILED,
+]);
+
+/**
  * Lógica del BOARD de la PUJA (ofertas en vivo + aceptar/cancelar), encapsulada para el flujo unificado
  * (SRP: el screen orquesta la fase, este hook es el board). Fusiona el snapshot REST con el socket y
  * expone el estado efectivo + las mutaciones. NO navega ni decide la fase — eso lo hace el screen con
@@ -97,19 +113,29 @@ export function useOfferBoard(
   const cancelBid = useDependency(TOKENS.cancelBidUseCase);
   const tripRepository = useDependency(TOKENS.tripRepository);
 
-  const offersQuery = useQuery({
-    queryKey: ['trip', tripId, 'offers'],
-    queryFn: () => listOffers.execute(tripId as string),
-    enabled: Boolean(tripId),
-    refetchInterval: 5000,
-  });
-
   // Respaldo de ESTADO: si el socket se cae al expirar/cancelar/matchear, el poll REST lo detecta igual.
+  // Va PRIMERO porque su snapshot alimenta el gate del poll de ofertas de abajo. NO se gatea: es la red
+  // de respaldo del socket durante TODO el viaje (deliberado).
   const stateQuery = useQuery({
     queryKey: ['trip', tripId, 'state'],
     queryFn: () => tripRepository.getTripState(tripId as string),
     enabled: Boolean(tripId),
     refetchInterval: 5000,
+  });
+
+  // El board SOLO importa mientras la puja sigue viva (sin match aún): matcheado (ASSIGNED→IN_PROGRESS)
+  // o terminal, el poll de ofertas era un ZOMBI pegándole a /offers cada 5 s durante todo el viaje. El
+  // gate sale del socket o del poll de estado (NUNCA del propio board: no se auto-gatea); `null`/
+  // desconocido → se asume subasta recién abierta y se pollea (mismo default que la fase 'searching').
+  const auctionOver = MATCHED_OR_TERMINAL_STATUSES.has(
+    String(live.status ?? stateQuery.data?.status ?? ''),
+  );
+
+  const offersQuery = useQuery({
+    queryKey: ['trip', tripId, 'offers'],
+    queryFn: () => listOffers.execute(tripId as string),
+    enabled: Boolean(tripId) && !auctionOver,
+    refetchInterval: auctionOver ? false : 5000,
   });
 
   const board = offersQuery.data?.board ?? null;

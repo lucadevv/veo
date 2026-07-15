@@ -9,6 +9,13 @@ service PaymentService {
   // Cobro canónico de un viaje, por trip_id (re-entrada del recibo). Resuelve el Payment del cobro
   // determinista del viaje (dedup_key 'trip-completed:{tripId}'). found=false si el viaje no tiene cobro.
   rpc GetPaymentByTrip (GetPaymentByTripRequest) returns (PaymentReply);
+  // Saldo de crédito GASTABLE del usuario (céntimos PEN · redención de referidos · Ola 2A). 0 si no tiene
+  // saldo. El BFF lo expone al pasajero (anti-IDOR: usa el userId del JWT, no uno del cliente).
+  rpc GetUserCredit (GetUserCreditRequest) returns (UserCreditReply);
+  // EFECTIVO · cobro CASH PENDING (kind=FARE) MÁS RECIENTE de un conductor: si force-cerró la app sin
+  // confirmar el cobro post-viaje, la confirmación lo PERSIGUE al reabrir (banner en el dashboard). found=false
+  // si no tiene ninguno. El driver-bff DERIVA el driverId del perfil (anti-IDOR: nunca uno del cliente).
+  rpc GetPendingCashByDriver (GetPendingCashByDriverRequest) returns (PendingCashReply);
 }
 
 message GetPaymentRequest {
@@ -17,6 +24,26 @@ message GetPaymentRequest {
 
 message GetPaymentByTripRequest {
   string trip_id = 1;
+}
+
+message GetUserCreditRequest {
+  string user_id = 1;
+}
+
+message UserCreditReply {
+  int32 balance_cents = 1;
+}
+
+message GetPendingCashByDriverRequest {
+  string driver_id = 1;
+}
+
+// Cobro CASH PENDING pendiente de confirmar del conductor. found=false ⇒ no tiene ninguno (proto3 sin
+// presence: trip_id="" / amount_cents=0 cuando found=false).
+message PendingCashReply {
+  bool found = 1;
+  string trip_id = 2;
+  int32 amount_cents = 3;
 }
 
 message PaymentReply {

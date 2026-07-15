@@ -4,12 +4,12 @@
  * La info del viaje proviene del read-model TripSnapshot (alimentado por eventos), nunca de
  * tablas de otros servicios.
  */
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { enqueueOutbox } from '@veo/database';
 import { uuidv7, ForbiddenError, NotFoundError, UnprocessableEntityError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { SHARE_REPO, type ShareRepository } from './share.repository';
 import { signShareToken, tokenHashOf, verifyShareToken, assertShareLinkUsable } from './share-link';
 import type { Env } from '../config/env.schema';
 
@@ -53,7 +53,7 @@ export class ShareService {
   private readonly publicBaseUrl: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(SHARE_REPO) private readonly repo: ShareRepository,
     config: ConfigService<Env, true>,
   ) {
     this.secret = config.getOrThrow<string>('SHARE_LINK_SECRET');
@@ -70,7 +70,7 @@ export class ShareService {
    * Nunca se asume ownership por ausencia de datos.
    */
   private async assertTripOwnership(userId: string, tripId: string): Promise<void> {
-    const snapshot = await this.prisma.read.tripSnapshot.findUnique({ where: { tripId } });
+    const snapshot = await this.repo.findTripSnapshotByTripId(tripId);
     if (!snapshot?.passengerId) {
       throw new UnprocessableEntityError('El viaje aún no está disponible para compartir', {
         tripId,
@@ -94,9 +94,7 @@ export class ShareService {
   ): Promise<CreatedShareLink> {
     await this.assertTripOwnership(userId, tripId);
     if (opts.contactId) {
-      const contact = await this.prisma.read.trustedContact.findUnique({
-        where: { id: opts.contactId },
-      });
+      const contact = await this.repo.findContactById(opts.contactId);
       if (contact?.userId !== userId) throw new NotFoundError('Contacto no encontrado');
     }
     return this.createLinkInternal(tripId, opts);
@@ -114,9 +112,7 @@ export class ShareService {
     // crear otro ni reenviar el SMS. El token solo se expone al CREARLO; un dedup no puede reconstruirlo
     // (en BD vive el hash), por eso el retorno deduped no trae token/url usables.
     if (opts.dedupKey) {
-      const existing = await this.prisma.read.shareLink.findUnique({
-        where: { dedupKey: opts.dedupKey },
-      });
+      const existing = await this.repo.findLinkByDedupKey(opts.dedupKey);
       if (existing) return this.toDedupedLink(existing);
     }
 
@@ -127,7 +123,7 @@ export class ShareService {
     const { token, tokenHash } = signShareToken(shareId, expiresAt.getTime(), this.secret);
 
     try {
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         await tx.shareLink.create({
           data: {
             id: shareId,
@@ -152,9 +148,7 @@ export class ShareService {
       // existe, fue justamente ese dedup (devolvemos el ganador como deduped → no reenvía SMS). Si el fallo NO
       // era por la dedupKey, no hay existente → relanzamos. Mismo patrón que notification.engine (store-agnóstico).
       if (opts.dedupKey) {
-        const raced = await this.prisma.read.shareLink.findUnique({
-          where: { dedupKey: opts.dedupKey },
-        });
+        const raced = await this.repo.findLinkByDedupKey(opts.dedupKey);
         if (raced) return this.toDedupedLink(raced);
       }
       throw err;
@@ -194,7 +188,7 @@ export class ShareService {
   ): Promise<{ shareId: string; url: string; emitted: boolean }> {
     const dedupKey = `panic:${input.panicId}:link`;
 
-    const existing = await this.prisma.read.shareLink.findUnique({ where: { dedupKey } });
+    const existing = await this.repo.findLinkByDedupKey(dedupKey);
     if (existing) {
       // Redelivery: el enlace (y por ende el evento de fan-out) ya se crearon. No re-delegamos.
       return { shareId: existing.id, url: '', emitted: false };
@@ -206,7 +200,7 @@ export class ShareService {
     const url = `${this.publicBaseUrl}/${token}`;
 
     try {
-      await this.prisma.write.$transaction(async (tx) => {
+      await this.repo.runInTx(async (tx) => {
         await tx.shareLink.create({
           data: {
             id: shareId,
@@ -249,7 +243,7 @@ export class ShareService {
       });
     } catch (err) {
       // CARRERA con otra réplica (mismo dedupKey @unique): si ahora existe, la otra réplica ya delegó.
-      const raced = await this.prisma.read.shareLink.findUnique({ where: { dedupKey } });
+      const raced = await this.repo.findLinkByDedupKey(dedupKey);
       if (raced) return { shareId: raced.id, url: '', emitted: false };
       throw err;
     }
@@ -279,14 +273,14 @@ export class ShareService {
 
   /** Revoca un enlace (deja de servir la página pública). Valida pertenencia falla-cerrado vía snapshot. */
   async revoke(userId: string, shareId: string): Promise<{ revokedAt: string }> {
-    const link = await this.prisma.read.shareLink.findUnique({ where: { id: shareId } });
+    const link = await this.repo.findLinkById(shareId);
     if (!link) throw new NotFoundError('Enlace no encontrado');
 
     await this.assertTripOwnership(userId, link.tripId);
     if (link.revokedAt) return { revokedAt: link.revokedAt.toISOString() };
 
     const revokedAt = new Date();
-    await this.prisma.write.shareLink.update({ where: { id: shareId }, data: { revokedAt } });
+    await this.repo.revokeLink(shareId, revokedAt);
     return { revokedAt: revokedAt.toISOString() };
   }
 
@@ -298,11 +292,8 @@ export class ShareService {
    * revocaron (0 = nada que hacer). No emite eventos: revocar es un cambio de estado local del enlace.
    */
   async revokeAllForTrip(tripId: string): Promise<{ revoked: number }> {
-    const result = await this.prisma.write.shareLink.updateMany({
-      where: { tripId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    return { revoked: result.count };
+    const revoked = await this.repo.revokeLiveLinksForTrip(tripId, new Date());
+    return { revoked };
   }
 
   /**
@@ -315,13 +306,13 @@ export class ShareService {
     const claims = verifyShareToken(token, this.secret, now);
     const tokenHash = tokenHashOf(token);
 
-    const link = await this.prisma.read.shareLink.findUnique({ where: { tokenHash } });
+    const link = await this.repo.findLinkByTokenHash(tokenHash);
     if (link?.id !== claims.shareId) throw new NotFoundError('Enlace no encontrado');
 
     assertShareLinkUsable(link, now);
 
     const viewedAt = new Date(now);
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       // Incremento condicional: si el enlace fue revocado/agotado entre la lectura y aquí, no sirve.
       const updated = await tx.shareLink.updateMany({
         where: { id: link.id, revokedAt: null, usedCount: { lt: link.maxUses } },
@@ -341,9 +332,7 @@ export class ShareService {
       await enqueueOutbox(tx, envelope, link.id);
     });
 
-    const snapshot = await this.prisma.read.tripSnapshot.findUnique({
-      where: { tripId: link.tripId },
-    });
+    const snapshot = await this.repo.findTripSnapshotByTripId(link.tripId);
     return {
       shareId: link.id,
       tripId: link.tripId,

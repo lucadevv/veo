@@ -30,3 +30,23 @@ export function useDi(): AppContainer {
 export function useRepositories(): AppRepositories {
   return useDi().repositories;
 }
+
+/** Atajo para el uploader del binario de documentos (presign + PUT crudo al almacén soberano). */
+export function useDocumentUploader(): AppContainer['documentUploader'] {
+  return useDi().documentUploader;
+}
+
+/** Atajo para el picker de imágenes (cámara/galería) del binario de documentos y la foto de perfil. */
+export function useImagePicker(): AppContainer['imagePicker'] {
+  return useDi().imagePicker;
+}
+
+/** Atajo para el uploader de la foto de perfil (avatar): presign + PUT crudo al almacén soberano. */
+export function useAvatarUploader(): AppContainer['avatarUploader'] {
+  return useDi().avatarUploader;
+}
+
+/** Atajo para el escáner nativo de documentos (bordes + auto-captura) del binario de documentos. */
+export function useDocumentScanner(): AppContainer['documentScanner'] {
+  return useDi().documentScanner;
+}

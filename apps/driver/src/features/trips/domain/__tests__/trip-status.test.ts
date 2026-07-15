@@ -11,6 +11,11 @@ describe('trip-status', () => {
     expect(parseTripStatus('FOO')).toBe('UNKNOWN');
   });
 
+  it('normaliza los CANCELLED_BY_* crudos del dominio a CANCELLED (terminal, no UNKNOWN)', () => {
+    expect(parseTripStatus('CANCELLED_BY_PASSENGER')).toBe('CANCELLED');
+    expect(parseTripStatus('CANCELLED_BY_DRIVER')).toBe('CANCELLED');
+  });
+
   it('isTripTerminal cubre TODOS los cierres (incl. watchdog y reasignación)', () => {
     expect(isTripTerminal('COMPLETED')).toBe(true);
     expect(isTripTerminal('CANCELLED')).toBe(true);

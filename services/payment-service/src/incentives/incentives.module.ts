@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { IncentivesController } from './incentives.controller';
 import { IncentivesService } from './incentives.service';
+import { IncentivesRepository } from './incentives.repository';
 
 /**
  * Incentivos al conductor (Ola 2C). Vive en payment-service (mismo bounded context "dinero": el bono
@@ -9,7 +10,7 @@ import { IncentivesService } from './incentives.service';
  */
 @Module({
   controllers: [IncentivesController],
-  providers: [IncentivesService],
+  providers: [IncentivesService, IncentivesRepository],
   exports: [IncentivesService],
 })
 export class IncentivesModule {}

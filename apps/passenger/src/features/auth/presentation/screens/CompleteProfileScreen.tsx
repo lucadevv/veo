@@ -4,6 +4,7 @@ import {
   BottomSheet,
   Button,
   Card,
+  hexAlpha,
   SafeScreen,
   spacing,
   Text,
@@ -13,7 +14,13 @@ import {
 } from '@veo/ui-kit';
 import React, {useCallback, useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {ActivityIndicator, Image, StyleSheet, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -23,7 +30,7 @@ import Animated, {
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {profileQueryKey} from '../../../profile/presentation/hooks/useProfileCompletion';
+import {profileQueryKey} from '../../../profile/domain/queryKeys';
 import {AvatarUploadError} from '../../../../shared/media/domain/avatarUploader';
 import {
   ImagePickError,
@@ -34,13 +41,13 @@ import {
   FadeInView,
   PressableScale,
 } from '../../../../shared/presentation/components/motion';
-import {VeoWordmark} from '../../../../shared/presentation/components/VeoWordmark';
 import {useProfileLocalStore} from '../stores/profileStore';
 import {
   IconCamera,
+  IconChevronLeft,
+  IconLock,
   IconMail,
   IconPerson,
-  IconShieldCheck,
 } from '../components/icons';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -82,6 +89,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
   const removeAvatarUseCase = useDependency(TOKENS.removeAvatarUseCase);
   const imagePicker = useDependency(TOKENS.imagePickerService);
   const userId = useSessionStore(state => state.user?.id ?? null);
+  const clearSession = useSessionStore(state => state.clearSession);
   const markCompleted = useProfileLocalStore(state => state.markCompleted);
 
   // Perfil real (GET /users/me), MISMA queryKey que `useProfileCompletion` → la caché ya está caliente
@@ -105,6 +113,13 @@ export function CompleteProfileScreen(): React.JSX.Element {
   const [pickError, setPickError] = useState<string | null>(null);
 
   const trimmedName = fullName.trim();
+  const initials = trimmedName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase();
   const trimmedEmail = email.trim();
   const nameValid = trimmedName.length >= 2 && trimmedName.length <= 80;
   // El correo editable es OPCIONAL: válido si está vacío o si tiene forma de correo. Si el perfil YA
@@ -277,19 +292,21 @@ export function CompleteProfileScreen(): React.JSX.Element {
           onPress={submit}
         />
       }>
-      <FadeInView index={0} style={styles.brand}>
-        <VeoWordmark size="md" variant="tagline" color="brand" />
-      </FadeInView>
+      <View style={styles.backRow}>
+        {/* Back = SOLO el chevron ‹ de iOS, sin círculo/container (regla del dueño, mismo back en
+            TODA la app — espeja a ScreenHeader/HeaderBackChevron). */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('auth.back')}
+          hitSlop={12}
+          onPress={() => clearSession()}>
+          <IconChevronLeft color={theme.colors.ink} size={28} />
+        </Pressable>
+      </View>
 
       <FadeInView index={1} style={styles.copy}>
-        <Text variant="display" align="center">
-          {t('profileSetup.title')}
-        </Text>
-        <Text
-          variant="body"
-          color="inkMuted"
-          align="center"
-          style={styles.subtitle}>
+        <Text variant="title1">{t('profileSetup.title')}</Text>
+        <Text variant="body" color="inkMuted" style={styles.subtitle}>
           {t('profileSetup.subtitle')}
         </Text>
       </FadeInView>
@@ -309,10 +326,8 @@ export function CompleteProfileScreen(): React.JSX.Element {
         <Animated.View
           style={[
             styles.avatarRing,
-            {
-              borderColor: theme.colors.accent,
-              backgroundColor: theme.colors.surface,
-            },
+            // Círculo con tinte teal 8% (design/veo.pen `p7U1IM`: accent al 8% de alfa), no blanco.
+            {backgroundColor: hexAlpha(theme.colors.accent, 0.08)},
             avatarStyle,
           ]}>
           {previewUri ? (
@@ -321,8 +336,12 @@ export function CompleteProfileScreen(): React.JSX.Element {
               style={styles.avatarImage}
               resizeMode="cover"
             />
+          ) : initials ? (
+            <Text variant="title1" color="accent">
+              {initials}
+            </Text>
           ) : (
-            <IconPerson color={theme.colors.inkSubtle} size={72} />
+            <IconPerson color={theme.colors.inkSubtle} size={56} />
           )}
           {/* Overlay "subiendo": scrim + spinner sobre la foto (solo visible mientras sube). */}
           <Animated.View
@@ -362,7 +381,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
           <IconCamera
             color={theme.colors.onAccent}
             holeColor={theme.colors.accent}
-            size={22}
+            size={18}
           />
         </PressableScale>
       </FadeInView>
@@ -434,7 +453,6 @@ export function CompleteProfileScreen(): React.JSX.Element {
           <TextField
             label={t('profileSetup.emailLabel')}
             placeholder={t('profileSetup.emailPlaceholder')}
-            helperText={t('profileSetup.emailNote')}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -453,11 +471,7 @@ export function CompleteProfileScreen(): React.JSX.Element {
       <FadeInView
         index={4}
         style={[styles.privacyRow, {gap: theme.spacing.sm}]}>
-        <IconShieldCheck
-          color={theme.colors.inkSubtle}
-          onColor={theme.colors.bg}
-          size={16}
-        />
+        <IconLock color={theme.colors.inkSubtle} size={14} />
         <Text variant="footnote" color="inkSubtle" style={styles.privacyText}>
           {t('profileSetup.privacyNote')}
         </Text>
@@ -496,37 +510,31 @@ export function CompleteProfileScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  brand: {
-    alignItems: 'center',
-    gap: spacing.xxs,
-    marginTop: spacing.xs,
-    marginBottom: spacing.lg,
-  },
+  backRow: {marginTop: spacing.xs, marginBottom: spacing.sm},
   copy: {gap: spacing.sm, marginBottom: spacing['2xl']},
-  subtitle: {maxWidth: 320, alignSelf: 'center'},
+  subtitle: {},
   avatarWrap: {alignSelf: 'center', marginBottom: 28},
+  // Avatar 100×100 (design/veo.pen `ZobPo`): círculo teal-tinte + FAB de cámara proporcional.
   avatarRing: {
-    width: 132,
-    height: 132,
-    borderRadius: 66,
-    borderWidth: 2,
-    borderStyle: 'dashed',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarImage: {width: '100%', height: '100%', borderRadius: 64},
+  avatarImage: {width: '100%', height: '100%', borderRadius: 50},
   avatarOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 64,
+    borderRadius: 50,
   },
-  cameraFabAnchor: {position: 'absolute', right: 0, bottom: 4},
+  cameraFabAnchor: {position: 'absolute', right: -2, bottom: 2},
   cameraFab: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',

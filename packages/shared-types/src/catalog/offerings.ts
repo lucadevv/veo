@@ -9,7 +9,6 @@
  * entrada en `OFFERINGS` no compila.
  */
 import {
-  EnergySource,
   FleetDocumentType,
   PricingMode,
   ServiceType,
@@ -32,9 +31,10 @@ export const OfferingId = {
   VEO_ECONOMICO: 'veo_economico',
   VEO_CONFORT: 'veo_confort',
   VEO_XL: 'veo_xl',
-  // B5-4 · verticales especiales + EV: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
+  // F2.3 (ADR-017 §1.2) · tier PREMIUM: alta gama + unidad reciente. Oferta VISIBLE (defaultEnabled:true).
+  VEO_PREMIUM: 'veo_premium',
+  // B5-4 · verticales especiales: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
   // desbloquea por overlay (feature paga). ids = contrato INMUTABLE, igual que los de arriba.
-  VEO_ECONOMICO_EV: 'veo_economico_ev',
   VEO_AMBULANCE: 'veo_ambulance',
   VEO_TOW: 'veo_tow',
   VEO_MECHANIC: 'veo_mechanic',
@@ -54,18 +54,41 @@ export type OfferingIcon = (typeof OfferingIcon)[keyof typeof OfferingIcon];
 
 /**
  * Recargo del Modo Niño (BR-T07): S/ 2.00 en céntimos PEN. FUENTE ÚNICA — aplica SOLO en viajes de
- * precio FIJO (en PUJA el bid ES el precio, no se recarga). trip-service lo suma en `calculateFare`
- * (FIXED) y la app lo muestra en el desglose ANTES de confirmar; ambos consumen ESTA constante para
- * que el número no diverja entre server y cliente. `as const` la fija como literal `200`.
+ * precio FIJO (en PUJA el bid ES el precio, no se recarga). trip-service lo suma PLANO en `calculateFirmFare`
+ * (DESPUÉS del multiplier de la oferta, así el tier NO lo escala) y la app lo muestra en el desglose ANTES
+ * de confirmar; ambos consumen ESTA constante y el número cobrado coincide EXACTO en cualquier tier.
+ * `as const` la fija como literal `200`.
  */
 export const CHILD_MODE_FEE_CENTS = 200 as const;
 
-/** Política de pricing de una oferta. FUENTE ÚNICA (ADR 013): BFF y trip-service la consumen de acá. */
+/**
+ * Límites del multiplicador de surge (BR-T06 · ADR-021 Fase C): [1.0, 2.0]. FUENTE ÚNICA — el surge es
+ * server-authoritative: dispatch lo calcula, trip-service lo aplica al COBRO firme y el QUOTE del BFF lo
+ * aplica al PREVIEW; los tres consumen ESTOS límites para que el rango no diverja. 1.0 = sin recargo (default),
+ * 2.0 = tope. `as const` los fija como literales.
+ */
+export const MIN_SURGE = 1.0 as const;
+export const MAX_SURGE = 2.0 as const;
+
+/**
+ * Política de pricing de una oferta. FUENTE ÚNICA (ADR 013 · ADR 023): BFF y trip-service la consumen de acá.
+ * `multiplier` y `minFareCents` son OBLIGATORIOS. Los params `baseFareCents`/`perKmCents`/`perMinCents` son
+ * OVERRIDES OPCIONALES por servicio (ADR 023 §3): `undefined` → usa el DEFAULT global (`BaseFareConfig`). Un
+ * servicio los pone para diferenciarse de la fórmula base — p.ej. el Mecánico (call-out plano) pone
+ * `perKmCents:0` Y `perMinCents:0` (una visita no cobra por distancia ni por tiempo, la labor se cobra aparte);
+ * la Grúa pone `perMinCents:0` (hook-up + por-km, sin tiempo).
+ */
 export interface OfferingPricingPolicy {
   /** Multiplicador sobre la fórmula base BR-T05 (económico = 1.0). */
   multiplier: number;
   /** Tarifa mínima cobrable, céntimos PEN (moto 300, autos 500). */
   minFareCents: number;
+  /** Override del banderazo (céntimos PEN). `undefined` → default global. */
+  baseFareCents?: number;
+  /** Override del por-km (céntimos PEN). `0` = no cobra distancia (Mecánico). `undefined` → default global. */
+  perKmCents?: number;
+  /** Override del por-minuto (céntimos PEN). `0` = no cobra tiempo (Grúa/Mecánico). `undefined` → default global. */
+  perMinCents?: number;
 }
 
 /** Flujo de despacho. STANDARD = matching secuencial normal. EMERGENCY = ambulancia (prioridad, no negocia). */
@@ -111,22 +134,24 @@ export interface OfferingSpec {
    * (AMBULANCE/TOW/MECHANIC) se shippean OCULTAS hasta desbloquearse. Default RIDE en el backfill.
    */
   serviceType: ServiceType;
-  /**
-   * B5 · Eje energía PARA EL QUOTE: fuente + rendimiento de REFERENCIA de la oferta. El quote cotiza
-   * ANTES de asignar vehículo, así que usa esta referencia por CLASE (no el modelSpec del auto, que es
-   * para la economía del conductor). `referenceEfficiency` = km por unidad de energía (km/L o km/kWh).
-   */
-  referenceEnergySourceId: EnergySource;
-  referenceEfficiency: number;
   pricing: OfferingPricingPolicy;
   /**
    * B5-3 · requisitos de eligibilidad del vehículo (seats/segment/antigüedad). Omitido o `{}` = sin
    * requisitos extra (lo cubre cualquier vehículo de la `vehicleClass`). El dispatch filtra por esto.
    */
   requires?: OfferingRequirements;
-  /** Modos que la oferta PERMITE. NUNCA vacío (spec del catálogo lo verifica). El primero es el
-   *  PREFERIDO: gana cuando el schedule del admin pide un modo que la oferta no permite (§1.3). */
-  allowedModes: readonly [PricingMode, ...PricingMode[]];
+  /**
+   * ADR 023 · El modo de pricing de la oferta (FIXED = Uber · PUJA = inDrive). Es el DEFAULT de código;
+   * si `modeLocked` es false, el admin lo cambia A MANO por overlay (palanca manual, ADR 023 §1.1). NO hay
+   * schedule/franjas (ADR 011 superseded): el sistema nunca lo flipea solo.
+   */
+  mode: PricingMode;
+  /**
+   * ADR 023 · true = el admin NO puede cambiar el modo (invariante de dominio: "la ambulancia NO negocia").
+   * Las verticales especiales (ambulancia/grúa/mecánico) van locked=true en FIXED. Los viajes (rides) van
+   * locked=false → el admin elige Fijo o Puja. Reemplaza el candado que antes daba `allowedModes`.
+   */
+  modeLocked: boolean;
   flow: OfferingFlow;
   /**
    * B5-4 · visibilidad por DEFAULT cuando no hay overlay del admin para esta oferta. Las 3 ofertas RIDE
@@ -143,7 +168,7 @@ export interface OfferingSpec {
  * El catálogo — la FUENTE de multiplicadores y mínimas (Lote C consumado): el preview del
  * public-bff (`maps/fare.ts`) y trip-service (FixedDispatchStrategy + re-quote de paradas) los
  * consumen de acá. Cambiar un número acá cambia el PRECIO en todos lados:
- * moto ×0.55/S\/3.00 · económico ×1.0/S\/5.00 · confort ×1.25/S\/5.00 · xl ×1.6/S\/5.00.
+ * moto ×0.55/S\/3.00 · económico ×1.0/S\/5.00 · normal ×1.25/S\/5.00 · premium ×1.8/S\/8.00 · xl ×1.6/S\/5.00.
  */
 export const OFFERINGS = {
   [OfferingId.VEO_MOTO]: {
@@ -152,12 +177,15 @@ export const OFFERINGS = {
     icon: OfferingIcon.MOTO,
     vehicleClass: VehicleClass.MOTO,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
-    referenceEfficiency: 40, // km/L (mototaxi)
     pricing: { multiplier: 0.55, minFareCents: 300 },
-    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    mode: PricingMode.FIXED,
+    modeLocked: false,
     flow: OfferingFlow.STANDARD,
-    defaultEnabled: true,
+    // Ola 2B · mototaxi DIFERIDA: arrancamos "solo autos". La oferta queda CODEADA (matching/pricing
+    // listos) pero OCULTA por defecto; el admin la habilita por overlay cuando se lance el tier moto.
+    // Esta es la FUENTE ÚNICA de "MOTO no operable": de acá deriva OPERABLE_VEHICLE_CLASSES (abajo),
+    // que a su vez gobierna el selector del alta y la validación server-side de fleet.
+    defaultEnabled: false,
     sortOrder: 0,
   },
   [OfferingId.VEO_ECONOMICO]: {
@@ -166,10 +194,9 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
-    referenceEfficiency: 12, // km/L (auto económico)
     pricing: { multiplier: 1.0, minFareCents: 500 },
-    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    mode: PricingMode.FIXED,
+    modeLocked: false,
     flow: OfferingFlow.STANDARD,
     defaultEnabled: true,
     sortOrder: 1,
@@ -180,12 +207,11 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
-    referenceEfficiency: 11, // km/L (auto confort, motor mayor)
     pricing: { multiplier: 1.25, minFareCents: 500 },
     // Confort = auto de gama media o mejor, no muy viejo (BR-D04 ya exige >=2017; esto es más estricto).
     requires: { minSegment: VehicleSegment.MID, maxAgeYears: 8 },
-    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    mode: PricingMode.FIXED,
+    modeLocked: false,
     flow: OfferingFlow.STANDARD,
     defaultEnabled: true,
     sortOrder: 2,
@@ -196,46 +222,46 @@ export const OFFERINGS = {
     icon: OfferingIcon.CAR,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.RIDE,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
-    referenceEfficiency: 8, // km/L (XL/van, mayor consumo)
     pricing: { multiplier: 1.6, minFareCents: 500 },
     // XL = capacidad: 6 asientos o más (familias/grupos). El segmento no importa, sí el tamaño.
     requires: { minSeats: 6 },
-    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
+    mode: PricingMode.FIXED,
+    modeLocked: false,
+    flow: OfferingFlow.STANDARD,
+    defaultEnabled: true,
+    sortOrder: 4,
+  },
+  [OfferingId.VEO_PREMIUM]: {
+    id: OfferingId.VEO_PREMIUM,
+    labelKey: 'offering.veo_premium.name',
+    icon: OfferingIcon.CAR, // no hay token premium; CAR es seguro. (Glyph premium dedicado = follow-up de UX.)
+    vehicleClass: VehicleClass.CAR,
+    serviceType: ServiceType.RIDE,
+    pricing: { multiplier: 1.8, minFareCents: 800 },
+    // Premium = alta gama (segmento PREMIUM) + unidad nueva (<=5 años). La FOTO del vehículo (REQUERIDA
+    // para aprobar, ya capturada en onboarding) es la evidencia del operador para asignar segmento PREMIUM.
+    // ADR-017 §1.2.
+    requires: { minSegment: VehicleSegment.PREMIUM, maxAgeYears: 5 },
+    mode: PricingMode.FIXED,
+    modeLocked: false,
     flow: OfferingFlow.STANDARD,
     defaultEnabled: true,
     sortOrder: 3,
   },
 
-  // ── B5-4 · verticales especiales + EV: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
+  // ── B5-4 · verticales especiales: CODEADAS pero OCULTAS (defaultEnabled:false). El admin las
   // habilita por overlay cuando se venda la feature. Los pricings/eficiencias son referencias iniciales
   // que el operador afina; lo importante acá es que la LÓGICA exista y el matching las soporte. ──
-  [OfferingId.VEO_ECONOMICO_EV]: {
-    id: OfferingId.VEO_ECONOMICO_EV,
-    labelKey: 'offering.veo_economico_ev.name',
-    icon: OfferingIcon.EV,
-    vehicleClass: VehicleClass.CAR,
-    serviceType: ServiceType.RIDE,
-    // EV = categoría de primera clase con su PROPIA fuente de energía (kWh). cost/km = precio_kWh ÷ efic.
-    referenceEnergySourceId: EnergySource.ELECTRIC,
-    referenceEfficiency: 6, // km/kWh (auto eléctrico típico)
-    pricing: { multiplier: 1.0, minFareCents: 500 },
-    allowedModes: [PricingMode.PUJA, PricingMode.FIXED],
-    flow: OfferingFlow.STANDARD,
-    defaultEnabled: false,
-    sortOrder: 4,
-  },
   [OfferingId.VEO_AMBULANCE]: {
     id: OfferingId.VEO_AMBULANCE,
     labelKey: 'offering.veo_ambulance.name',
     icon: OfferingIcon.AMBULANCE,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.AMBULANCE,
-    referenceEnergySourceId: EnergySource.DIESEL,
-    referenceEfficiency: 9, // km/L (ambulancia/van diésel)
     pricing: { multiplier: 2.5, minFareCents: 3000 },
     // La ambulancia NO negocia (invariante de dominio): solo FIXED.
-    allowedModes: [PricingMode.FIXED],
+    mode: PricingMode.FIXED,
+    modeLocked: true,
     flow: OfferingFlow.EMERGENCY,
     // B5-3.2 · solo conductores con credencial de operador de ambulancia VÁLIDA (fail-closed).
     requires: { certifications: [FleetDocumentType.AMBULANCE_OPERATOR] },
@@ -248,10 +274,10 @@ export const OFFERINGS = {
     icon: OfferingIcon.TOW,
     vehicleClass: VehicleClass.CAR,
     serviceType: ServiceType.TOW,
-    referenceEnergySourceId: EnergySource.DIESEL,
-    referenceEfficiency: 6, // km/L (grúa, alto consumo)
-    pricing: { multiplier: 2.0, minFareCents: 4000 },
-    allowedModes: [PricingMode.FIXED],
+    // Grúa: hook-up (banderazo) + por-km, SIN por-minuto (perMinCents:0) — ADR 023 §3.
+    pricing: { multiplier: 2.0, minFareCents: 4000, perMinCents: 0 },
+    mode: PricingMode.FIXED,
+    modeLocked: true,
     flow: OfferingFlow.STANDARD,
     // B5-3.2 · solo conductores con credencial de operador de grúa VÁLIDA (fail-closed).
     requires: { certifications: [FleetDocumentType.TOW_OPERATOR] },
@@ -265,10 +291,11 @@ export const OFFERINGS = {
     // Mecánico móvil: llega en moto al vehículo varado (no traslada pasajeros).
     vehicleClass: VehicleClass.MOTO,
     serviceType: ServiceType.MECHANIC,
-    referenceEnergySourceId: EnergySource.GASOLINE_95,
-    referenceEfficiency: 35, // km/L (moto del mecánico)
-    pricing: { multiplier: 1.0, minFareCents: 2000 },
-    allowedModes: [PricingMode.FIXED],
+    // Mecánico = CALL-OUT PLANO (ADR 023 §3): una VISITA no es un viaje. perKm=0 (no cobra distancia) Y
+    // perMin=0 (la labor no se cotiza — se cobra aparte tras el diagnóstico). La fórmula colapsa a `base`.
+    pricing: { multiplier: 1.0, minFareCents: 2000, perKmCents: 0, perMinCents: 0 },
+    mode: PricingMode.FIXED,
+    modeLocked: true,
     flow: OfferingFlow.STANDARD,
     // B5-3.2 · solo conductores con certificación de mecánico VÁLIDA (fail-closed).
     requires: { certifications: [FleetDocumentType.MECHANIC_CERT] },
@@ -281,6 +308,37 @@ export const OFFERINGS = {
 export const OFFERING_LIST: readonly OfferingSpec[] = Object.values(OFFERINGS).sort(
   (a, b) => a.sortOrder - b.sortOrder,
 );
+
+/**
+ * Helper PURO: las clases de vehículo con AL MENOS una oferta `enabled` en la lista dada, ordenadas por
+ * el enum `VehicleClass` (mismo criterio/orden que el default estático de abajo). FUENTE ÚNICA del cómputo
+ * "qué clase es operable": la consumen TANTO el default ESTÁTICO de código (`OPERABLE_VEHICLE_CLASSES`,
+ * aplicado a `resolveCatalog(null)` = todas las ofertas con `enabled = defaultEnabled`) COMO el gate
+ * overlay-aware del alta de fleet (aplicado al catálogo EFECTIVO del admin, base ⟕ overlay). Pura y
+ * unit-testeable (sin I/O ni catálogo hardcodeado): recibe las ofertas ya resueltas y deriva el set.
+ */
+export function operableVehicleClasses(
+  offerings: readonly { enabled: boolean; vehicleClass: VehicleClass }[],
+): VehicleClass[] {
+  const enabled = new Set(offerings.filter((o) => o.enabled).map((o) => o.vehicleClass));
+  return Object.values(VehicleClass).filter((c) => enabled.has(c));
+}
+
+/**
+ * Clases de vehículo OPERABLES por DEFAULT de código = aquellas con AL MENOS una oferta habilitada por
+ * defecto (`defaultEnabled`). Es el fallback CONSERVADOR de "qué se puede registrar/operar" cuando el
+ * catálogo EFECTIVO del admin no está disponible (degradación honesta de fleet). Hoy, con VEO_MOTO y
+ * VEO_MECHANIC en `defaultEnabled:false`, el resultado es `[CAR]` → "solo autos". Se deriva con el MISMO
+ * helper que el gate overlay-aware (DRY), aplicado a `resolveCatalog(null)` (que resuelve cada oferta con
+ * `enabled = defaultEnabled`, sin overlay): UNA sola definición de "operable", dos fuentes (estática /
+ * efectiva). El orden sale del enum `VehicleClass`.
+ */
+export const OPERABLE_VEHICLE_CLASSES: readonly VehicleClass[] = operableVehicleClasses(
+  resolveCatalog(null),
+);
+
+/** Clase de vehículo por DEFECTO del alta = la primera operable (hoy `CAR`). */
+export const DEFAULT_VEHICLE_CLASS: VehicleClass = OPERABLE_VEHICLE_CLASSES[0] ?? VehicleClass.CAR;
 
 /**
  * Lookup tolerante para input del cliente (string crudo): `undefined` si no existe — el caller decide.
@@ -362,71 +420,49 @@ export function isEligibleForOffering(
   );
 }
 
-/** Resultado de `resolveOfferingMode`: el modo efectivo + si la oferta vetó al schedule. */
-export interface ResolvedOfferingMode {
-  mode: PricingMode;
-  /** true si el schedule pidió un modo que la oferta NO permite (observabilidad: warn + counter). */
-  overridden: boolean;
-}
-
 /**
- * Intersección oferta ∩ schedule (ADR 013 §1.3) — pura, unit-testeable; trip-service la consume.
- * El schedule del admin PROPONE (`scheduledMode`); la oferta ACOTA: si el modo propuesto está en
- * `allowedModes` gana el schedule; si no, gana la oferta con su modo PREFERIDO (`allowedModes[0]`)
- * y `overridden: true` para que el caller loguee warn + bumpee el counter
- * (`pricing_offering_mode_overridden`). "La ambulancia NO negocia" es invariante de dominio,
- * no esperanza de configuración.
+ * ADR 023 · el modo EFECTIVO de una oferta = el pin del admin (si la oferta no está lockeada) o el modo de
+ * código. Pura, unit-testeable; la consumen `resolveCatalog`, trip-service (`createTrip`) y el quote del
+ * public-bff. Reemplaza `resolveOfferingModeWithPin` (que intersectaba con el schedule/franjas — ADR 011
+ * superseded). YA NO hay schedule: el modo es `offering.mode` con la palanca manual del admin encima.
+ *  - `modeLocked === true` (verticales especiales): SIEMPRE `offering.mode` — el admin no lo puede cambiar
+ *    (invariante: "la ambulancia NO negocia"). Un pin se IGNORA.
+ *  - `modeLocked === false` (rides): el `pinnedMode` del admin GANA; sin pin → `offering.mode` (default).
  */
-export function resolveOfferingMode(
+export function effectiveOfferingMode(
   offering: OfferingSpec,
-  scheduledMode: PricingMode,
-): ResolvedOfferingMode {
-  if (offering.allowedModes.includes(scheduledMode)) {
-    return { mode: scheduledMode, overridden: false };
-  }
-  return { mode: offering.allowedModes[0], overridden: true };
+  pinnedMode?: PricingMode,
+): PricingMode {
+  if (offering.modeLocked) return offering.mode;
+  return pinnedMode ?? offering.mode;
 }
 
-/**
- * Modo efectivo CON el pin por-oferta del admin (B2). Precedencia, de techo a piso:
- *  1. `offering.allowedModes` — invariante de producto (la ambulancia NO negocia): techo inviolable.
- *  2. `modePin` (admin, B2) — si está y ∈ allowedModes → GANA sobre el schedule (elección deliberada,
- *     NO un veto: `overridden` queda false).
- *  3. `scheduledMode` (schedule global, ADR 011) — el fallback cuando no hay pin (o el pin es inválido).
- * Un pin inválido (∉ allowedModes) ya viene descartado por `resolveCatalog` (`modePin: undefined`); aun
- * así esta función lo re-chequea (defensa en profundidad) y cae a la intersección schedule ∩ oferta.
- */
-export function resolveOfferingModeWithPin(
-  offering: OfferingSpec,
-  modePin: PricingMode | undefined,
-  scheduledMode: PricingMode,
-): ResolvedOfferingMode {
-  if (modePin !== undefined && offering.allowedModes.includes(modePin)) {
-    return { mode: modePin, overridden: false };
-  }
-  return resolveOfferingMode(offering, scheduledMode);
-}
-
-// ── Catálogo editable en caliente (ADR 013 §1.2, puerta de escape · Fase B/B1) ─────────────────────
-// El código `OFFERINGS` es la BASE inmutable de producto (ids, clase de vehículo, pricing/allowedModes
-// por defecto). La DB guarda solo el OVERLAY que el admin edita en caliente — replicando el patrón
-// `PricingModeSchedule` (singleton + version + outbox). B1: el overlay lleva `enabled` por oferta;
-// B2 sumará overrides de modo/precio. El catálogo EFECTIVO = base ⟕ overlay.
+// ── Catálogo editable en caliente (ADR 013 §1.2, puerta de escape · ADR 023) ─────────────────────
+// El código `OFFERINGS` es la BASE inmutable de producto (ids, clase de vehículo, modo/pricing por
+// defecto). La DB guarda solo el OVERLAY que el admin edita en caliente (singleton + version + outbox).
+// El overlay lleva `enabled`, el `mode` (la PALANCA MANUAL, ADR 023) y overrides de precio por oferta.
+// El catálogo EFECTIVO = base ⟕ overlay. YA NO hay schedule/franjas (ADR 011 superseded).
 
 /**
- * Override editable por el admin de UNA oferta (caliente). B1: `enabled`. B2 suma modo + precio:
- *  - `mode`: PIN del modo de pricing para ESTA oferta. Si está y ∈ `allowedModes` → gana sobre el
- *    schedule global (ADR 011). Si ∉ `allowedModes` → se IGNORA (la oferta veta, igual que al schedule).
- *    `undefined` → sin pin, manda el schedule.
+ * Override editable por el admin de UNA oferta (caliente):
+ *  - `mode`: la PALANCA MANUAL (ADR 023 §1.1). Cambia el modo de ESTA oferta. Se HONRA solo si la oferta
+ *    NO está lockeada (`modeLocked === false`); en una vertical lockeada se IGNORA (la ambulancia no
+ *    negocia). `undefined` → sin cambio, manda el `mode` de código. NO hay schedule.
  *  - `multiplier` / `minFareCents`: override de `OfferingPricingPolicy`. `undefined` → el valor de código.
- *    La tarifa SIGUE saliendo de la fórmula (distancia/tiempo); estos solo escalan/pisan (ADR 013 §1.7).
+ *  - `baseFareCents` / `perKmCents` / `perMinCents`: overrides de los params por servicio (ADR 023 §3).
+ *    `undefined` → el valor de código (que a su vez, si es `undefined`, cae al default global).
+ *  La tarifa SIGUE saliendo de la fórmula (distancia/tiempo); estos solo escalan/pisan.
  */
 export interface OfferingOverride {
-  id: OfferingId;
+  /** Id de la oferta: un `OfferingId` built-in O un id `custom_*` (el overlay configura ambas · ADR 013). */
+  id: string;
   enabled: boolean;
   mode?: PricingMode;
   multiplier?: number;
   minFareCents?: number;
+  baseFareCents?: number;
+  perKmCents?: number;
+  perMinCents?: number;
 }
 
 /**
@@ -439,43 +475,138 @@ export interface OfferingCatalogOverlay {
 }
 
 /**
- * Una oferta del catálogo EFECTIVO: la spec base + su estado configurable resuelto. `pricing` ya es el
- * EFECTIVO (base ⟕ override del admin). `modePin` es el modo pineado por el admin YA validado contra
- * `allowedModes` (un pin inválido se descarta acá → `undefined`); el consumidor no re-valida.
+ * Una oferta del catálogo EFECTIVO: la spec base + su estado configurable resuelto. `pricing` y `mode` ya
+ * son los EFECTIVOS (base ⟕ override del admin). El `mode` respeta `modeLocked` (un pin sobre una vertical
+ * lockeada se ignora); el consumidor usa `mode` directo, no re-resuelve.
  */
-export interface ResolvedOffering extends OfferingSpec {
+export interface ResolvedOffering extends Omit<OfferingSpec, 'id'> {
+  /** Built-in → un `OfferingId` del enum; custom → un id `custom_*` de la tabla (string ancho). */
+  id: string;
   enabled: boolean;
-  modePin?: PricingMode;
+  /** Nombre display de una oferta CUSTOM (las built-in lo resuelven por `labelKey`). Ausente en built-in. */
+  name?: string;
+  /** true = oferta CUSTOM (alta del admin, tabla). Ausente/false = built-in del enum de código. */
+  isCustom?: boolean;
+}
+
+// ── Ofertas CUSTOM (alta del admin · ADR 013 · tabla CustomOffering) ──────────────────────────────
+// El enum `OfferingId` es el catálogo built-in INMUTABLE (contrato con la app). Una oferta CUSTOM la crea el
+// SUPERADMIN en caliente: vive en la tabla `CustomOffering` de trip-service y EXTIENDE el enum. Restricción
+// honesta: una custom mapea a un `vehicleClass`/`serviceType` que YA EXISTE (el dispatch/matching y los
+// módulos nativos trabajan por `vehicleClass` — NO se inventa un tipo de vehículo nuevo). El catálogo EFECTIVO
+// UNE built-in ∪ custom; el pricing/config per-oferta (overlay del admin) funciona igual para ambas.
+
+/** Prefijo de los ids de oferta CUSTOM. Los built-in son el enum `OfferingId` (jamás llevan este prefijo). */
+export const CUSTOM_OFFERING_ID_PREFIX = 'custom_';
+
+/** ¿`id` es el id de una oferta CUSTOM (alta del admin), no un built-in del enum? (chequeo por prefijo). */
+export function isCustomOfferingId(id: string): boolean {
+  return id.startsWith(CUSTOM_OFFERING_ID_PREFIX);
+}
+
+/**
+ * Registro de una oferta CUSTOM (la fila de la tabla `CustomOffering`). Es el equivalente al `OfferingSpec` de
+ * código para una oferta creada en caliente: guarda su `name`, el `vehicleClass`/`serviceType` existente al que
+ * mapea, y su pricing/modo/enabled INICIALES (que el overlay del admin luego puede pisar, igual que a las built-in).
+ */
+export interface CustomOfferingRecord {
+  id: string;
+  name: string;
+  vehicleClass: VehicleClass;
+  serviceType: ServiceType;
+  mode: PricingMode;
+  multiplier: number;
+  minFareCents: number;
+  enabled: boolean;
+}
+
+/** `sortOrder` base de las ofertas custom: van DESPUÉS de todas las built-in (que llegan hasta ~12). */
+export const CUSTOM_OFFERING_SORT_BASE = 100;
+
+/**
+ * Proyecta una oferta CUSTOM (fila de la tabla) al shape `ResolvedOffering` del catálogo efectivo, aplicando el
+ * overlay del admin con la MISMA mecánica que las built-in (`resolveCatalog`): pricing/mode/enabled = base de la
+ * tabla ⟕ override. Una custom NUNCA está `modeLocked` (el admin la creó y le puede cambiar el modo) y su `flow`
+ * es STANDARD (mapea a un `vehicleClass` existente; las verticales EMERGENCY son built-in). El ícono deriva del
+ * `vehicleClass` (MOTO → moto, CAR → car), nunca del id. `index` fija el desempate del `sortOrder`.
+ */
+export function customOfferingToResolved(
+  record: CustomOfferingRecord,
+  override: OfferingOverride | undefined,
+  index: number,
+): ResolvedOffering {
+  const spec: OfferingSpec = {
+    id: record.id as OfferingId, // custom id: string; `effectiveOfferingMode` solo lee `mode`/`modeLocked`.
+    labelKey: record.name,
+    icon: record.vehicleClass === VehicleClass.MOTO ? OfferingIcon.MOTO : OfferingIcon.CAR,
+    vehicleClass: record.vehicleClass,
+    serviceType: record.serviceType,
+    pricing: { multiplier: record.multiplier, minFareCents: record.minFareCents },
+    mode: record.mode,
+    modeLocked: false,
+    flow: OfferingFlow.STANDARD,
+    defaultEnabled: record.enabled,
+    sortOrder: CUSTOM_OFFERING_SORT_BASE + index,
+  };
+  const pricing: OfferingPricingPolicy = {
+    multiplier: override?.multiplier ?? record.multiplier,
+    minFareCents: override?.minFareCents ?? record.minFareCents,
+    baseFareCents: override?.baseFareCents,
+    perKmCents: override?.perKmCents,
+    perMinCents: override?.perMinCents,
+  };
+  return {
+    ...spec,
+    id: record.id,
+    pricing,
+    mode: effectiveOfferingMode(spec, override?.mode),
+    enabled: override?.enabled ?? record.enabled,
+    name: record.name,
+    isCustom: true,
+  };
 }
 
 /**
  * Catálogo EFECTIVO = `OFFERINGS` (base de código) ⟕ overlay (config DB del admin), en `sortOrder`.
  * Caminos infelices (ADR 013 §2):
- *  - oferta SIN entrada en el overlay → `enabled: true`, pricing de código, sin pin (no esconder lo shippeado).
+ *  - oferta SIN entrada en el overlay → `enabled: true`, pricing/modo de código (no esconder lo shippeado).
  *  - overlay con un id que ya no existe en código → se IGNORA (el código es la fuente de ids válidos).
- *  - overlay `null` (DB vacía/caída) → todas habilitadas, pricing de código (degradación honesta).
- *  - B2: `multiplier`/`minFareCents` del override pisan el pricing de código (campo a campo); un `mode`
- *    pineado FUERA de `allowedModes` se descarta (la oferta veta) → `modePin` queda `undefined`.
+ *  - overlay `null` (DB vacía/caída) → todas a su `defaultEnabled`, pricing/modo de código (degradación honesta).
+ *  - overrides de precio (`multiplier`/`minFareCents`/params) pisan campo a campo; el `mode` pineado se honra
+ *    solo si `!modeLocked` (`effectiveOfferingMode`) — en una vertical lockeada se ignora.
+ *  - `customs` = ofertas CUSTOM (tabla del admin): se UNEN a las built-in, resueltas con el MISMO overlay
+ *    (una custom es configurable igual que una built-in). Ordenadas todas juntas por `sortOrder` (las custom
+ *    caen después, `CUSTOM_OFFERING_SORT_BASE`+). Un override con un id que no matchea NINGUNA (built-in ni
+ *    custom) se IGNORA — el código/tabla son la fuente de ids válidos (cinturón y tirantes con el DTO).
  */
 export function resolveCatalog(
   overlay: OfferingCatalogOverlay | null,
+  customs: readonly CustomOfferingRecord[] = [],
 ): readonly ResolvedOffering[] {
-  const overrideById = new Map((overlay?.overrides ?? []).map((o) => [o.id, o]));
-  return OFFERING_LIST.map((spec) => {
+  const overrideById = new Map<string, OfferingOverride>(
+    (overlay?.overrides ?? []).map((o) => [o.id, o]),
+  );
+  const builtin = OFFERING_LIST.map((spec) => {
     const ov = overrideById.get(spec.id);
     const pricing: OfferingPricingPolicy = {
       multiplier: ov?.multiplier ?? spec.pricing.multiplier,
       minFareCents: ov?.minFareCents ?? spec.pricing.minFareCents,
+      baseFareCents: ov?.baseFareCents ?? spec.pricing.baseFareCents,
+      perKmCents: ov?.perKmCents ?? spec.pricing.perKmCents,
+      perMinCents: ov?.perMinCents ?? spec.pricing.perMinCents,
     };
-    const modePin =
-      ov?.mode !== undefined && spec.allowedModes.includes(ov.mode) ? ov.mode : undefined;
-    return { ...spec, pricing, enabled: ov?.enabled ?? spec.defaultEnabled, modePin };
+    const mode = effectiveOfferingMode(spec, ov?.mode);
+    const resolved: ResolvedOffering = { ...spec, pricing, mode, enabled: ov?.enabled ?? spec.defaultEnabled };
+    return resolved;
   });
+  const custom = customs.map((rec, i) => customOfferingToResolved(rec, overrideById.get(rec.id), i));
+  return [...builtin, ...custom].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-/** Solo las ofertas ACTIVAS (las que el quote cotiza y la teaser del Home muestra). */
+/** Solo las ofertas ACTIVAS (las que el quote cotiza y la teaser del Home muestra). Incluye las custom activas. */
 export function activeOfferings(
   overlay: OfferingCatalogOverlay | null,
+  customs: readonly CustomOfferingRecord[] = [],
 ): readonly ResolvedOffering[] {
-  return resolveCatalog(overlay).filter((offering) => offering.enabled);
+  return resolveCatalog(overlay, customs).filter((offering) => offering.enabled);
 }

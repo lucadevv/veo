@@ -13,7 +13,7 @@ import {
   formatDurationMinutes,
   formatShortDate,
 } from '../../../../shared/utils/format';
-import {IconPin} from './icons';
+import {IconHistory} from './icons';
 import {Animated, usePressScale} from './motion';
 
 export interface RecentTripRowProps {
@@ -98,7 +98,8 @@ export function RecentTripRow({
               borderRadius: theme.radii.md,
             },
           ]}>
-          <IconPin color={theme.colors.inkSubtle} size={18} />
+          {/* Glifo history (pen P/Home): un viaje pasado, no un lugar — el pin es de lugares. */}
+          <IconHistory color={theme.colors.inkSubtle} size={18} />
         </View>
         <View style={styles.labels}>
           <Text variant="bodyStrong" numberOfLines={1}>

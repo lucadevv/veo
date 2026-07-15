@@ -24,7 +24,12 @@ import {
   type LatLon,
 } from '@veo/utils';
 import { VehicleClass } from '@veo/shared-types';
-import { domainEventsTotal, createLogger, type Logger } from '@veo/observability';
+import {
+  domainEventsTotal,
+  BusinessEventResult,
+  createLogger,
+  type Logger,
+} from '@veo/observability';
 import { HOT_INDEX, type HotIndex } from '../hot-index/hot-index.port';
 import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
 
@@ -67,7 +72,12 @@ export class NearbyDriversService {
     // #3 — borde no confiable: coords fuera de Lima / NaN no consultan el índice (isWithinLima ya
     // descarta NaN: toda comparación con NaN es false). Degradación honesta: devolvemos vacío, no crash.
     if (!isWithinLima(origin)) {
-      domainEventsTotal.inc({ event: 'dispatch.nearby_drivers', result: 'invalid' });
+      // NEGOCIO en path gRPC (no-Kafka): entrada inválida del cliente. DISJUNTO del INVALID de
+      // transporte (reservado al consumer Kafka cuando el payload no matchea su schema).
+      domainEventsTotal.inc({
+        event: 'dispatch.nearby_drivers',
+        result: BusinessEventResult.BAD_REQUEST,
+      });
       this.logger.warn(
         { lat: origin.lat, lon: origin.lon },
         'nearby: origen inválido/fuera de Lima → vacío',
@@ -102,7 +112,7 @@ export class NearbyDriversService {
     // #2 — observabilidad del hot-path: métrica de resultado + log estructurado con latencia y señal de
     // densidad (`capped`=la muestra tocó el tope → zona saturada, a vigilar para subir SAMPLE_LIMIT o
     // afinar el k-ring). El tracing del span lo aporta la auto-instrumentación OTEL del servicio.
-    domainEventsTotal.inc({ event: 'dispatch.nearby_drivers', result: 'ok' });
+    domainEventsTotal.inc({ event: 'dispatch.nearby_drivers', result: BusinessEventResult.OK });
     this.logger.debug(
       {
         sampled: sample.length,

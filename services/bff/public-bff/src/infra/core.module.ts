@@ -11,9 +11,14 @@ import {
   JwtService,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  SessionRevocationStore,
   generateDevKeyPairPem,
   type JwtKeys,
+  type InternalAudience,
 } from '@veo/auth';
+import { createLogger } from '@veo/observability';
+import { type Redis } from '@veo/redis';
 import { type MapsMode } from '@veo/maps';
 import { createGrpcClient, InternalRestClient, type ServiceName } from '@veo/rpc';
 import { REDIS, redisProvider } from './redis';
@@ -34,6 +39,7 @@ import {
   REST_NOTIFICATION,
   REST_CHAT,
   REST_MEDIA,
+  REST_BOOKING,
   REST_PANIC,
   REST_PAYMENT,
   REST_RATING,
@@ -85,6 +91,23 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('VEO_INTERNAL_IDENTITY_SECRET'),
 };
 
+const internalAudienceProvider: Provider = {
+  provide: INTERNAL_IDENTITY_AUDIENCE,
+  useValue: 'public-rail' satisfies InternalAudience,
+};
+
+/**
+ * Denylist de revocación (lado LECTURA en el BFF). Comparte el MISMO Redis que identity (cross-instancia):
+ * identity ESCRIBE al revocar (logout del pasajero, reuse detection), el public-bff LEE en el guard HTTP.
+ * Sin TTL de escritura (el BFF nunca escribe): solo `assertNotRevoked`. Espeja driver-bff.
+ */
+const sessionRevocationProvider: Provider = {
+  provide: SessionRevocationStore,
+  inject: [REDIS],
+  useFactory: (redis: Redis): SessionRevocationStore =>
+    new SessionRevocationStore(redis, createLogger('session-revocation')),
+};
+
 /** Crea el provider de un cliente gRPC para un servicio, leyendo su URL de la config. */
 function grpcProvider(token: symbol, service: ServiceName, urlKey: keyof Env): Provider {
   return {
@@ -107,6 +130,7 @@ function restProvider(token: symbol, urlKey: keyof Env): Provider {
       new InternalRestClient({
         baseUrl: config.getOrThrow<string>(urlKey),
         secret: config.getOrThrow<string>('VEO_INTERNAL_IDENTITY_SECRET'),
+        audience: 'public-rail' satisfies InternalAudience,
         timeoutMs: config.getOrThrow<number>('REST_TIMEOUT_MS'),
       }),
   };
@@ -159,6 +183,7 @@ const restProviders: Provider[] = [
   restProvider(REST_NOTIFICATION, 'NOTIFICATION_URL'),
   restProvider(REST_CHAT, 'CHAT_URL'),
   restProvider(REST_MEDIA, 'MEDIA_URL'),
+  restProvider(REST_BOOKING, 'BOOKING_URL'),
 ];
 
 const tokens = [
@@ -166,6 +191,8 @@ const tokens = [
   JwtService,
   JWT_SERVICE,
   INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  SessionRevocationStore,
   MAPS,
   LIVEKIT,
   GRPC_IDENTITY,
@@ -187,6 +214,7 @@ const tokens = [
   REST_NOTIFICATION,
   REST_CHAT,
   REST_MEDIA,
+  REST_BOOKING,
 ];
 
 @Global()
@@ -196,6 +224,8 @@ const tokens = [
     jwtProvider,
     { provide: JWT_SERVICE, useExisting: JwtService },
     internalSecretProvider,
+    internalAudienceProvider,
+    sessionRevocationProvider,
     mapsProvider,
     livekitProvider,
     ...grpcProviders,

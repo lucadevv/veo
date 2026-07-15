@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PlaceKind, type SavedPlace } from '../generated/prisma';
 import { PlacesService } from './places.service';
+import { PrismaPlacesRepository } from './places.repository';
 import { FavoritesLimitError, PlaceNotFoundError, PlaceValidationError } from './places.errors';
 
 const MAX_FAVORITES = 20;
@@ -135,11 +136,14 @@ class FakePrisma {
 
 function makeService(): PlacesService {
   const prisma = new FakePrisma();
+  // El repo real (adaptador Prisma) envuelve el prisma falso: ejercita el mismo unit-of-work que en runtime
+  // (findManyByUser / deleteByUser / runInTx) sin Postgres. El $transaction del fake ignora el isolationLevel.
+  const repo = new PrismaPlacesRepository(prisma as never);
   const config = {
     getOrThrow: (key: string): number => (key === 'MAX_FAVORITES' ? MAX_FAVORITES : MAX_LABEL),
   };
-  // El ctor sólo usa prisma.read/write y config.getOrThrow → los falsos bastan (sin Nest DI).
-  return new PlacesService(prisma as never, config as never);
+  // El ctor sólo usa repo (PLACES_REPO) y config.getOrThrow → los falsos bastan (sin Nest DI).
+  return new PlacesService(repo, config as never);
 }
 
 const USER = '11111111-1111-1111-1111-111111111111';

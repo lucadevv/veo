@@ -6,3 +6,7 @@ ruby ">= 2.6.10"
 # Exclude problematic versions of cocoapods and activesupport that causes build failures.
 gem 'cocoapods', '>= 1.13', '!= 1.15.0', '!= 1.15.1'
 gem 'activesupport', '>= 6.1.7.5', '!= 7.1.0'
+
+# Ruby 3.4+ sacó `kconv` de los default gems; CFPropertyList (dependencia de CocoaPods) lo requiere.
+# `nkf` provee `kconv` → sin esto, `bundle exec pod install` revienta con `LoadError: cannot load such file -- kconv`.
+gem 'nkf'

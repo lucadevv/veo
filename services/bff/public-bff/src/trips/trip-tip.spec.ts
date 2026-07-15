@@ -1,9 +1,10 @@
 /** Test de la propina del pasajero a su viaje (TripsService.tip): ownership + delegación firmada. */
 import { describe, it, expect, vi } from 'vitest';
-import type { AuthenticatedUser } from '@veo/auth';
+import { InternalAudience, type AuthenticatedUser } from '@veo/auth';
 import type { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { TripsService } from './trips.service';
 import type { DriverEnrichmentService } from './driver-enrichment.service';
+import type { DispatchService } from '../dispatch/dispatch.service';
 import type { LiveKitConfig } from '../share/livekit-token';
 
 const SECRET = 'dev-internal-secret-change-me';
@@ -46,8 +47,12 @@ function makeService(trip: { found: boolean; passengerId: string }) {
     restStub, // ratingRest (REST_RATING) — MI rating del enrich, no usado en tip
     livekit,
     SECRET,
+    InternalAudience.PUBLIC_RAIL,
     { get: async () => null, set: async () => 'OK' } as never, // REDIS (cache KYC, no usado acá)
+    { routeWithSteps: async () => ({ polyline: '', distanceMeters: 0, durationSeconds: 0, steps: [] }) } as never, // MAPS (@veo/maps) — no ejercitado acá
     {} as unknown as DriverEnrichmentService,
+    {} as unknown as DispatchService,
+    { getLocation: () => undefined } as never, // RealtimeStateService — no ejercitado acá
   );
   return { svc, post };
 }

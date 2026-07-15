@@ -8,10 +8,9 @@ import {
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useMutation, useQuery} from '@tanstack/react-query';
 import {
-  Avatar,
   Banner,
   Button,
-  Card,
+  DriverCard,
   StatusPill,
   Text,
   useTheme,
@@ -34,16 +33,16 @@ import {
 } from '../../../../shared/presentation/components/ScreenStates';
 import {AppMap} from '../../../../shared/presentation/components/AppMap';
 import {mergeOffers} from '../../domain/offers';
-import {IconStarFilled} from '../components/icons';
-import {usePassengerTripSocket} from '../hooks/usePassengerTripSocket';
-import {useCurrentLocation} from '../hooks/useCurrentLocation';
+import {usePassengerTripSocket} from '../../../../core/realtime/usePassengerTripSocket';
+import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
+import {useActiveTripStore} from '../stores/activeTripStore';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 /**
- * LEGACY: solo flujo PROGRAMADO/reasignación (`Reassign`, `RouteQuote`, `NoOffers` legacy). El flujo
- * NORMAL de la puja vive ENTERO en el sheet de `RequestFlowScreen` (fase `offers` = `OffersBody`); NO
- * debe pasar por esta pantalla. No borrar todavía: Reassign y el camino programado aún la referencian.
+ * LEGACY: alcanzable por DEEP-LINK de push (`data.screen: 'OffersBoard'`, ver deepLink.ts) y por la
+ * reasignación (`Reassign`). El flujo NORMAL de la puja vive ENTERO en el sheet de `RequestFlowScreen`
+ * (fase `offers` = `OffersBody`); NO debe pasar por esta pantalla. No borrar: esos dos caminos la usan.
  *
  * PUJA · board de ofertas EN VIVO (handoff `Offers`). Fusiona el snapshot REST (`GET /trips/:id/offers`)
  * con las ofertas que entran por socket (`offer:made`) y deja al pasajero ELEGIR: "Elegir" acepta el
@@ -111,9 +110,18 @@ export function OffersBoardScreen(): React.JSX.Element {
     fn();
   }, []);
 
+  // SALIDA al flujo UNIFICADO (la pantalla legacy `TripActive` se eliminó): adopta el viaje en el
+  // `activeTripStore` y aterriza en el Home — el sheet unificado deriva la fase real (match → viaje
+  // activo; terminal → cierre/limpieza) del server. El id no viaja por params de navegación.
+  const setActiveTripId = useActiveTripStore(s => s.setActiveTripId);
+  const exitToUnifiedFlow = useCallback((): void => {
+    setActiveTripId(tripId);
+    navigation.navigate('Home');
+  }, [setActiveTripId, tripId, navigation]);
+
   const acceptMutation = useMutation({
     mutationFn: (driverId: string) => acceptOffer.execute(tripId, driverId),
-    onSuccess: () => goOnce(() => navigation.replace('TripActive', {tripId})),
+    onSuccess: () => goOnce(exitToUnifiedFlow),
   });
 
   const cancelMutation = useMutation({
@@ -129,7 +137,7 @@ export function OffersBoardScreen(): React.JSX.Element {
     // Reacciona al estado EFECTIVO (socket o, si cayó, poll REST): así un EXPIRED/REASSIGNING/match que
     // llega solo por REST (socket caído) igual navega y no deja al pasajero colgado.
     if (status === 'ASSIGNED' || status === 'ACCEPTED') {
-      goOnce(() => navigation.replace('TripActive', {tripId}));
+      goOnce(exitToUnifiedFlow);
     } else if (status === 'EXPIRED') {
       goOnce(() => navigation.replace('NoOffers', {tripId}));
     } else if (
@@ -138,10 +146,11 @@ export function OffersBoardScreen(): React.JSX.Element {
       status === 'COMPLETED'
     ) {
       // Estados TERMINALES con el board abierto (watchdog/cancelación): no dejar al pasajero colgado en
-      // un board que ya no recibe ofertas → al detalle del viaje, que muestra el estado final.
-      goOnce(() => navigation.replace('TripActive', {tripId}));
+      // un board que ya no recibe ofertas → al flujo unificado, que refleja el estado final (COMPLETED
+      // re-entra al cierre; CANCELLED/FAILED limpian y vuelven al home).
+      goOnce(exitToUnifiedFlow);
     }
-  }, [status, isFocused, navigation, tripId, goOnce]);
+  }, [status, isFocused, navigation, tripId, goOnce, exitToUnifiedFlow]);
 
   const onChoose = (offer: OfferView): void => {
     // No permitir elegir mientras un accept está en curso (evita aceptar 2 ofertas distintas).
@@ -190,7 +199,7 @@ export function OffersBoardScreen(): React.JSX.Element {
   return (
     <View style={[styles.root, {backgroundColor: theme.colors.bg}]}>
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         backgroundColor="transparent"
         translucent
       />
@@ -292,55 +301,35 @@ function OfferCard({
   onChoose: () => void;
   choosing: boolean;
 }): React.JSX.Element {
-  const theme = useTheme();
   const {t} = useTranslation();
   const acceptsPrice = offer.kind === 'ACCEPT_PRICE';
+  const vehicle = offer.vehicle
+    ? `${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`
+    : undefined;
 
+  // MISMA identidad canónica que OffersBody/FIXED (DriverCard) + footer de precio/CTA. Antes esta pantalla
+  // legacy tenía una copia divergente (accent/ink · Elegir/Ver); se alinea a la versión viva (safe/warn).
   return (
-    <Card
-      variant="outlined"
-      padding="md"
-      style={acceptsPrice ? {borderColor: theme.colors.accent} : undefined}>
-      <View style={styles.row}>
-        <Avatar size="md" />
-        <View style={{flex: 1, gap: theme.spacing.xxs}}>
-          <View style={styles.nameRow}>
-            <Text variant="bodyStrong">
-              {offer.driverName ?? t('offers.driver')}
+    <DriverCard
+      name={offer.driverName ?? t('offers.driver')}
+      rating={offer.rating ?? undefined}
+      vehicle={vehicle}
+      plate={offer.vehicle?.plate}
+      footer={
+        <View style={styles.offerFooter}>
+          <View style={styles.offerFooterInfo}>
+            <Text variant="footnote" color={acceptsPrice ? 'safe' : 'warn'}>
+              {`${acceptsPrice ? t('offers.acceptsPrice') : t('offers.proposesOther')} · ${t(
+                'offers.etaMin',
+                {minutes: formatDurationMinutes(offer.etaSeconds)},
+              )}`}
             </Text>
-            {offer.rating != null ? (
-              <View style={styles.ratingRow}>
-                <IconStarFilled color={theme.colors.warn} size={13} />
-                <Text variant="footnote" color="warn" tabular>
-                  {offer.rating.toFixed(2)}
-                </Text>
-              </View>
-            ) : null}
+            <Text variant="title3" color={acceptsPrice ? 'safe' : 'warn'} tabular>
+              {formatPEN(offer.priceCents)}
+            </Text>
           </View>
-          {offer.vehicle ? (
-            <Text variant="footnote" color="inkMuted">
-              {`${offer.vehicle.make} ${offer.vehicle.model} · ${offer.vehicle.color}`}
-            </Text>
-          ) : null}
-          <Text variant="footnote" color={acceptsPrice ? 'safe' : 'inkMuted'}>
-            {acceptsPrice
-              ? t('offers.acceptsPrice')
-              : t('offers.proposesOther')}{' '}
-            ·{' '}
-            {t('offers.etaMin', {
-              minutes: formatDurationMinutes(offer.etaSeconds),
-            })}
-          </Text>
-        </View>
-        <View style={{alignItems: 'flex-end', gap: theme.spacing.xs}}>
-          <Text
-            variant="title3"
-            color={acceptsPrice ? 'accent' : 'ink'}
-            tabular>
-            {formatPEN(offer.priceCents)}
-          </Text>
           <Button
-            label={acceptsPrice ? t('offers.choose') : t('offers.view')}
+            label={acceptsPrice ? t('offers.accept') : t('offers.respond')}
             variant="primary"
             size="sm"
             loading={choosing && acceptsPrice}
@@ -348,14 +337,14 @@ function OfferCard({
             onPress={onChoose}
           />
         </View>
-      </View>
-    </Card>
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
   root: {flex: 1},
-  // Panel flotante anclado abajo sobre el mapa (mismo lenguaje que RouteQuote).
+  // Panel flotante anclado abajo sobre el mapa (mismo lenguaje que el sheet del flujo unificado).
   sheet: {
     position: 'absolute',
     left: 0,
@@ -374,7 +363,6 @@ const styles = StyleSheet.create({
   },
   bodyScroll: {flexGrow: 0},
   header: {flexDirection: 'row', alignItems: 'flex-start', gap: 12},
-  row: {flexDirection: 'row', alignItems: 'center', gap: 12},
-  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 3},
+  offerFooter: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  offerFooterInfo: {flex: 1, gap: 2},
 });

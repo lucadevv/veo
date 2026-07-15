@@ -7,6 +7,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator';
 
 const PANIC_STATUSES = ['TRIGGERED', 'ACKNOWLEDGED', 'RESOLVED', 'FALSE_ALARM'] as const;
@@ -20,6 +21,15 @@ export class ListPanicsQueryDto {
 export class ResolvePanicDto {
   @IsIn(['RESOLVED', 'FALSE_ALARM'])
   resolution!: 'RESOLVED' | 'FALSE_ALARM';
+
+  /**
+   * Motivo OPCIONAL del cierre. No lo persiste panic-service (su entidad no tiene columna de notas): se
+   * registra en el AUDIT (rendición de cuentas · Ley 29733). `forbidNonWhitelisted` exige declararlo aquí.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notes?: string;
 }
 
 export class PanicEvidenceDto {

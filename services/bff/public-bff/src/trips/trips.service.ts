@@ -3,18 +3,27 @@
  * comandos vía REST interno firmado. El passengerId/actor se derivan SIEMPRE de la identidad
  * autenticada, nunca del cliente.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
 import { DriverEnrichmentService } from './driver-enrichment.service';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
-import { DomainError, ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
+import { DispatchService } from '../dispatch/dispatch.service';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
+import { ForbiddenError, NotFoundError, uuidv7 } from '@veo/utils';
 import {
   canAccessLiveCabin,
+  isOnboard,
   normalizeTripStatus,
   type TripVideoGrant,
   type WaypointProposalView,
 } from '@veo/api-client';
-import { KycStatus } from '@veo/shared-types';
+import type { MapsClient } from '@veo/maps';
+import { RealtimeStateService } from '../realtime/realtime-state.service';
 import {
   GRPC_FLEET,
   GRPC_IDENTITY,
@@ -22,6 +31,7 @@ import {
   GRPC_RATING,
   GRPC_TRIP,
   LIVEKIT,
+  MAPS,
   REST_DISPATCH,
   REST_PAYMENT,
   REST_RATING,
@@ -32,12 +42,12 @@ import { REDIS } from '../infra/redis';
 import type {
   AggregateReply,
   DriverReply,
+  DriverTripStatsReply,
   DriverVehiclesReply,
   PassengerTripsReply,
   PaymentReply,
   TripReply,
   TripStateReply,
-  UserReply,
   VehicleReply,
 } from '../infra/grpc-types';
 import { DebtPendingError, type PaymentView } from '../payments/dto/payments.dto';
@@ -62,24 +72,9 @@ import {
   type CreateTripDto,
   type RebidTripDto,
   type TripResource,
+  type TripRouteView,
 } from './dto/trip.dto';
 import { type OfferView, type OffersResponse } from './dto/offers.dto';
-
-/**
- * El pasajero debe tener la identidad verificada (liveness/KYC) antes de pedir su primer viaje.
- * Gate server-side (la UI nunca autoriza, solo refleja): si `kycStatus ≠ VERIFIED` → 403 KYC_REQUIRED
- * y la app deriva a la verificación facial. Una vez VERIFIED no se vuelve a pedir (salvo EXPIRED).
- */
-export class KycRequiredError extends DomainError {
-  readonly code = 'KYC_REQUIRED';
-  readonly httpStatus = 403;
-  constructor() {
-    super('Verificá tu identidad para pedir tu primer viaje.');
-  }
-}
-
-/** TTL del cache del KYC verificado (positivo). Corto: acota la ventana de un eventual EXPIRED. */
-const KYC_VERIFIED_CACHE_TTL_SECONDS = 300;
 
 /** TTL del cache del resultado SIN deuda (positivo del gate de deuda). Corto: acota una deuda recién creada. */
 const NO_DEBT_CACHE_TTL_SECONDS = 60;
@@ -98,9 +93,15 @@ export class TripsService {
     @Inject(REST_RATING) private readonly ratingRest: InternalRestClient,
     @Inject(LIVEKIT) private readonly livekit: LiveKitConfig,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     @Inject(REDIS) private readonly redis: Redis,
+    @Inject(MAPS) private readonly maps: MapsClient,
     private readonly enrichment: DriverEnrichmentService,
+    private readonly dispatch: DispatchService,
+    private readonly liveState: RealtimeStateService,
   ) {}
+
+  private readonly logger = new Logger(TripsService.name);
 
   /** Crea un viaje. Idempotente: usa la Idempotency-Key del cliente o genera una UUIDv7. */
   async createTrip(
@@ -108,18 +109,34 @@ export class TripsService {
     dto: CreateTripDto,
     idempotencyKey?: string,
   ): Promise<TripResource> {
-    // Gate de seguridad (diferenciador VEO): exige verificación facial antes del primer viaje.
-    // Server-side (la app solo refleja). Cacheado para no pegarle a identity en cada pedido; el
-    // servicio de registro (trip-service) lo RE-exige vía el `kycVerified` firmado (defensa en profundidad).
-    await this.assertKycVerified(user);
+    // ADR-018: el KYC del pasajero dejó de ser un muro pre-viaje. Un pasajero UNVERIFIED PUEDE pedir; la
+    // verificación es OPCIONAL (badge de confianza), se ofrece desde Perfil, no gatea la creación del viaje.
     // Gate de deuda (BR-P02): un pasajero con un cobro en DEBT NO puede pedir un viaje nuevo (decisión
-    // de producto: la deuda bloquea TODO pedido). Server-side, tras el KYC. 403 DEBT_PENDING con el
-    // detalle para el banner. Cacheado SOLO el resultado sin deuda (positivo).
+    // de producto: la deuda bloquea TODO pedido). Server-side. 403 DEBT_PENDING con el detalle para el
+    // banner. Cacheado SOLO el resultado sin deuda (positivo).
     await this.assertNoDebt(user);
+    // ADR-021 Fase C (C1) — el surge es AUTORITATIVO server-side, NUNCA se confía del cliente. Un cliente
+    // modificado podía mandar `surgeMultiplier=1.0` para esquivar el surge (sub-cobro) o un valor arbitrario.
+    // Lo RE-COTIZAMOS acá (trust boundary del BFF) contra dispatch con el ORIGIN del viaje y forwardeamos ESE
+    // valor; `dto.surgeMultiplier` queda display-only (lo que el pasajero vio en la cotización, no autoritativo).
+    // Solo aplica a la TARIFA FIJA: en PUJA (`bidCents` presente) el bid ES el precio → surge irrelevante, se
+    // omite. Fail-safe: si dispatch no responde, degradamos a 1.0 (sin surge) — jamás confiamos el valor del
+    // cliente ni sobre-cobramos. (Follow-up ADR-021: un viaje PROGRAMADO debería re-cotizar surge en la
+    // activación, no en la creación — acá igual queda autoritativo, no tampereable.)
+    const surgeMultiplier =
+      dto.bidCents == null
+        ? await this.dispatch
+            .getSurge(user, dto.origin.lat, dto.origin.lon)
+            .then((s) => s.multiplier)
+            .catch((err: unknown) => {
+              this.logger.warn(
+                `surge no disponible al crear viaje (degradado a 1.0): ${String(err)}`,
+              );
+              return 1.0;
+            })
+        : undefined;
     return this.tripRest.post<TripResource>('/trips', {
-      // Defensa en profundidad: propagamos el KYC verificado FIRMADO por HMAC; trip-service (servicio
-      // de registro) lo EXIGE para crear el viaje, así el gate no depende solo de este BFF.
-      identity: { ...user, kycVerified: true },
+      identity: user,
       idempotencyKey: idempotencyKey ?? uuidv7(),
       body: {
         passengerId: user.userId,
@@ -134,7 +151,8 @@ export class TripsService {
         bidCents: dto.bidCents,
         paymentMethod: dto.paymentMethod,
         category: dto.category,
-        surgeMultiplier: dto.surgeMultiplier,
+        // Autoritativo (Fase C): el surge re-cotizado server-side, NO el `dto.surgeMultiplier` del cliente.
+        surgeMultiplier,
         childMode: dto.childMode,
         childCode: dto.childCode,
         // Ola 2A: el código de promo viaja a trip-service, se persiste y se propaga al cobro.
@@ -143,33 +161,6 @@ export class TripsService {
         specialRequests: dto.specialRequests,
       },
     });
-  }
-
-  /**
-   * Exige que el pasajero esté VERIFIED. Cachea SOLO el positivo (estado terminal salvo EXPIRED) en
-   * Redis con TTL corto, para no consultar identity en CADA pedido (hot-path). El negativo NUNCA se
-   * cachea: un pasajero recién verificado debe poder viajar al instante. Si Redis está caído, se
-   * IGNORA el cache y se consulta la fuente autoritativa (identity) — nunca hace bypass.
-   */
-  private async assertKycVerified(user: AuthenticatedUser): Promise<void> {
-    const cacheKey = `kyc:verified:${user.userId}`;
-    try {
-      if ((await this.redis.get(cacheKey)) === '1') {
-        return;
-      }
-    } catch {
-      // Redis no disponible: caemos a la verificación autoritativa (no bypass).
-    }
-    const meta = grpcIdentityMetadata(user, this.secret);
-    const me = await this.identityGrpc.call<UserReply>('GetUser', { id: user.userId }, meta);
-    if (me.kycStatus !== KycStatus.VERIFIED) {
-      throw new KycRequiredError();
-    }
-    try {
-      await this.redis.set(cacheKey, '1', 'EX', KYC_VERIFIED_CACHE_TTL_SECONDS);
-    } catch {
-      // best-effort: si no se pudo cachear, el próximo pedido reconsulta.
-    }
   }
 
   /**
@@ -238,7 +229,7 @@ export class TripsService {
     cursor?: string,
     limit?: number,
   ): Promise<TripHistoryPageView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const page = await this.tripGrpc.call<PassengerTripsReply>(
       'ListPassengerTrips',
       // passengerId del JWT, NUNCA del query (anti-IDOR). El limit lo CLAMPea trip-service.
@@ -259,9 +250,142 @@ export class TripsService {
     });
   }
 
+  /**
+   * Ruta CANÓNICA del viaje para el MAPA del pasajero (`GET /trips/:id/route`).
+   *
+   * Decisión de arquitectura (ruta canónica del viaje, 2026-07-13): hay UNA sola ruta por viaje —
+   * la que trip-service (dueño del dato) computó y PERSISTIÓ (`Trip.routePolyline`, con su
+   * distancia/duración) al crear el viaje, cambiar el destino o aceptar una parada:
+   * `origen → paradas → destino`, NUNCA desde la posición viva del conductor. Este endpoint la
+   * SIRVE tal cual (steps vacíos: la navegación turn-by-turn es del conductor, no del overview del
+   * pasajero). Antes cada BFF recomputaba con SU motor en cada request y pasajero y conductor veían
+   * rutas DISTINTAS para el MISMO viaje. El recálculo VIVO desde la posición del conductor sigue
+   * siendo del driver-bff (eso es navegación, no la ruta del viaje).
+   *
+   * CAMBIO DE SEMÁNTICA (documentado): este endpoint ya NO computa por fase (pre-recojo
+   * `driver → recojo` / onboard `driver → destino`) cuando la ruta persistida existe — el pasajero
+   * muestra el OVERVIEW del viaje y la canónica es lo correcto. El tramo de acercamiento del taxi
+   * lo cuenta la posición viva del conductor (socket), no esta polyline.
+   *
+   * FALLBACK (degradación honesta) — SOLO si el viaje NO tiene ruta persistida (viajes viejos, o el
+   * facade de mapas estaba caído al crear): se conserva el cómputo por fase previo con la última
+   * ubicación del conductor (RealtimeStateService):
+   *  - PRE-RECOJO (ACCEPTED/ARRIVING/ARRIVED): SOLO `driver → recojo`; sin ubicación → ruta VACÍA.
+   *  - ONBOARD (IN_PROGRESS): `driver → paradas → destino`; sin ubicación → `recojo → destino`.
+   *
+   * Los MARKERS (origin/destination/waypoints) son SIEMPRE los del viaje, intactos.
+   *
+   * `leg=pickup` (fase "conductor viniendo", 2026-07-14): el pasajero quiere ver POR DÓNDE VIENE el
+   * conductor, no el overview del viaje. Computa el tramo VIVO `conductor → recojo` con el facade
+   * @veo/maps desde la última ubicación proyectada por RealtimeStateService (driver.location_updated).
+   * Sin ubicación todavía → ruta VACÍA honesta (polyline '', misma degradación que el fallback
+   * pre-recojo: el app no dibuja nada y el próximo poll la trae; un 404 acá haría ciclar el poll del
+   * cliente por estados de error espurios). Steps vacíos: es un overview del pasajero, no navegación.
+   * El leg DEFAULT (sin query) sigue sirviendo la canónica persistida — comportamiento previo intacto.
+   *
+   * ANTI-IDOR: la ruta expone ubicaciones EXACTAS (PII, Ley 29733) → se verifica la pertenencia del
+   * viaje al pasajero autenticado ANTES de servir/calcular nada (mismo patrón que getTripDetail).
+   */
+  async route(
+    user: AuthenticatedUser,
+    tripId: string,
+    leg?: 'pickup' | 'dropoff',
+  ): Promise<TripRouteView> {
+    const trip = await this.tripRest.get<TripResource>(`/trips/${tripId}`, { identity: user });
+    if (trip.passengerId !== user.userId) {
+      throw new ForbiddenError('El viaje no pertenece al pasajero');
+    }
+
+    const waypoints = trip.waypoints ?? [];
+    if (leg === 'pickup') {
+      const pickupFrom = this.liveState.getLocation(tripId)?.point;
+      const pickupRoute = pickupFrom
+        ? // Tramo de acercamiento VIVO: conductor → recojo (sin paradas ni destino — eso es la canónica).
+          await this.maps.routeWithSteps(pickupFrom, trip.origin, [])
+        : // Sin ping del conductor aún: ruta VACÍA honesta (el app dibuja solo marker + pin de recojo).
+          { polyline: '', distanceMeters: 0, durationSeconds: 0 };
+      return {
+        polyline: pickupRoute.polyline,
+        distanceMeters: pickupRoute.distanceMeters,
+        durationSeconds: pickupRoute.durationSeconds,
+        // Overview del pasajero: sin navegación turn-by-turn (misma decisión que la canónica).
+        steps: [],
+        origin: trip.origin,
+        destination: trip.destination,
+        waypoints,
+      };
+    }
+    if (leg === 'dropoff') {
+      // Tramo RESTANTE del viaje en curso (2026-07-14, pedido del dueño): la canónica estática dejaba
+      // pintada la parte YA RECORRIDA detrás del vehículo y su punta podía no calzar exacto con la del
+      // conductor (que recomputa vivo). Igual que el conductor onboard: conductor → paradas → destino,
+      // recortándose sola a medida que avanza. Sin ping aún → vacía honesta (mismo criterio que pickup).
+      const dropoffFrom = this.liveState.getLocation(tripId)?.point;
+      const dropoffRoute = dropoffFrom
+        ? await this.maps.routeWithSteps(dropoffFrom, trip.destination, waypoints)
+        : { polyline: '', distanceMeters: 0, durationSeconds: 0 };
+      return {
+        polyline: dropoffRoute.polyline,
+        distanceMeters: dropoffRoute.distanceMeters,
+        durationSeconds: dropoffRoute.durationSeconds,
+        steps: [],
+        origin: trip.origin,
+        destination: trip.destination,
+        waypoints,
+      };
+    }
+    // Ruta canónica persistida por trip-service: se sirve TAL CUAL, con su distancia/duración
+    // persistidas (cero recomputo → una sola verdad para todos los consumidores del viaje).
+    if (trip.routePolyline) {
+      return {
+        polyline: trip.routePolyline,
+        distanceMeters: trip.distanceMeters,
+        durationSeconds: trip.durationSeconds,
+        steps: [],
+        origin: trip.origin,
+        destination: trip.destination,
+        waypoints,
+      };
+    }
+    const driverAt = this.liveState.getLocation(tripId)?.point;
+    // Status desconocido/no-normalizable → tratamos como PRE-RECOJO: fail-safe hacia el tramo de
+    // acercamiento (lo que el pasajero necesita ver mientras espera).
+    const status = normalizeTripStatus(trip.status);
+    const onboard = status !== null && isOnboard(status);
+    let route;
+    if (driverAt) {
+      route = onboard
+        ? // ONBOARD: el viaje en curso — conductor → paradas → destino (AMBAS apps siguen B→C).
+          await this.maps.routeWithSteps(driverAt, trip.destination, waypoints)
+        : // PRE-RECOJO: SOLO el tramo conductor → recojo, espejo EXACTO del mapa del conductor
+          // (regla del dueño: la ruta B→C al destino NO se muestra en NINGUNA app en este estado).
+          await this.maps.routeWithSteps(driverAt, trip.origin, []);
+    } else if (onboard) {
+      route = await this.maps.routeWithSteps(trip.origin, trip.destination, waypoints);
+    } else {
+      // PRE-RECOJO sin ping del conductor: ruta VACÍA (el cliente no dibuja nada) — pintar B→C acá
+      // sería el tramo equivocado, y el tramo A→B no existe sin la ubicación del conductor.
+      route = { polyline: '', distanceMeters: 0, durationSeconds: 0, steps: [] };
+    }
+    return {
+      polyline: route.polyline,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      steps: route.steps.map((s) => ({
+        instruction: s.instruction,
+        distanceMeters: s.distanceMeters,
+        maneuver: s.maneuver,
+        geometryPolyline: s.geometryPolyline,
+      })),
+      origin: trip.origin,
+      destination: trip.destination,
+      waypoints,
+    };
+  }
+
   /** Detalle agregado del viaje: trip + conductor (identity) + rating + vehículo (fleet). */
   async getTripDetail(user: AuthenticatedUser, tripId: string): Promise<TripDetailView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -277,7 +401,7 @@ export class TripsService {
    * trip-service (LIVE_STATES). Sin viaje activo NO es error: devolvemos null (la app muestra el home).
    */
   async getActiveTrip(user: AuthenticatedUser): Promise<TripDetailView | null> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>(
       'GetActiveTrip',
       { passengerId: user.userId },
@@ -295,7 +419,7 @@ export class TripsService {
    * activa (conductor/vehículo/rating, best-effort). Sin pendiente NO es error: devolvemos null (204).
    */
   async getPendingSettlement(user: AuthenticatedUser): Promise<TripDetailView | null> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>(
       'GetPendingSettlementTrip',
       { passengerId: user.userId },
@@ -313,7 +437,7 @@ export class TripsService {
    */
   async close(user: AuthenticatedUser, tripId: string): Promise<TripDetailView> {
     await this.assertOwnsTrip(user, tripId);
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>(
       'CloseTripByPassenger',
       { id: tripId, passengerId: user.userId },
@@ -342,7 +466,7 @@ export class TripsService {
           .call<DriverReply>('GetDriver', { id: trip.driverId }, meta)
           .catch(() => null)
       : null;
-    const [vehicle, aggregate, myRating] = await Promise.all([
+    const [vehicle, aggregate, myRating, tipCents, tripStats] = await Promise.all([
       this.resolveTripVehicle(trip, driver?.found ? driver.userId : undefined, meta),
       trip.driverId
         ? this.ratingGrpc
@@ -352,6 +476,15 @@ export class TripsService {
       // MI rating de este viaje (REST firmado, filtrado por el rater = identidad). 404 (sin rating) → null;
       // cualquier otro fallo también → null (degradación grácil: la app cae al GET /ratings?tripId on-demand).
       this.fetchMyRatingStars(user, trip.id),
+      // A1 · propina TOTAL cobrada del viaje (recibo de payment; agrega los tip-Payments digitales de Model B).
+      // Así el detalle/app sabe que ya se dio propina y no habilita re-propinar al re-montar. Best-effort → 0.
+      this.fetchTripTipCents(trip.id, meta),
+      // Conteo de viajes COMPLETED del conductor (señal de confianza "N viajes"); best-effort → null (degradación honesta).
+      trip.driverId
+        ? this.tripGrpc
+            .call<DriverTripStatsReply>('GetDriverTripStats', { driverId: trip.driverId }, meta)
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     return buildTripDetail(
@@ -359,9 +492,23 @@ export class TripsService {
       driver?.found ? driver : null,
       aggregate?.found ? aggregate : null,
       vehicle,
-      0,
+      tipCents,
       myRating,
+      tripStats,
     );
+  }
+
+  /** Propina TOTAL cobrada del viaje (recibo de payment, best-effort). 0 si no hay pago o payment-service cae. */
+  private async fetchTripTipCents(
+    tripId: string,
+    meta: ReturnType<typeof grpcIdentityMetadata>,
+  ): Promise<number> {
+    try {
+      const p = await this.paymentGrpc.call<PaymentReply>('GetPaymentByTrip', { tripId }, meta);
+      return p.found ? p.tipCents : 0;
+    } catch {
+      return 0;
+    }
   }
 
   /**
@@ -415,7 +562,7 @@ export class TripsService {
    * viaje ajeno por id.
    */
   async getTripState(user: AuthenticatedUser, tripId: string): Promise<TripStateView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -436,7 +583,7 @@ export class TripsService {
     if (!liveKitEnabled(this.livekit)) {
       throw new NotFoundError('El video del habitáculo no está disponible');
     }
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -507,7 +654,7 @@ export class TripsService {
    * que un reintento del cliente con la misma propina sea idempotente (no la duplica).
    */
   async tip(user: AuthenticatedUser, tripId: string, tipCents: number): Promise<PaymentView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -550,7 +697,7 @@ export class TripsService {
 
   /** Verifica que el viaje exista y pertenezca al pasajero autenticado (anti-IDOR). Lanza si no. */
   private async assertOwnsTrip(user: AuthenticatedUser, tripId: string): Promise<void> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -570,7 +717,7 @@ export class TripsService {
       identity: user,
     });
     // BE-1 · enriquecer cada oferta con rating + vehículo del conductor (gRPC a rating/fleet, cacheado).
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const offers = await Promise.all(
       view.offers.map(async (o) => ({ ...o, ...(await this.enrichment.enrich(o.driverId, meta)) })),
     );

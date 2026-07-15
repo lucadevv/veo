@@ -13,9 +13,29 @@ const LIMA_UTC_OFFSET_HOURS = 5;
 const HOUR_MS = 60 * 60 * 1000;
 const TRIPS_PER_HOUR_WINDOW_HOURS = 24;
 
+/** Ventana FIJA de las métricas por-servicio del detalle de catálogo: 30 días naturales hacia atrás. */
+export const OFFERING_METRICS_WINDOW_DAYS = 30;
+const DAY_MS = 24 * HOUR_MS;
+
 // Forma EXACTA que el endpoint devuelve: el contrato compartido TripStatsView (@veo/shared-types),
 // MISMA forma que consume el admin-bff. Se re-exporta para los imports internos (controller).
 export type { TripStatsView };
+
+/**
+ * Métricas 30d de UNA oferta para la página-detalle del catálogo admin (board HjDvx · "Ofertas · Detalle").
+ * Datos PROPIOS de trip-service (Trip.category = offering id, sin cross-service): nº de viajes COMPLETADOS y
+ * la facturación BRUTA (Σ fareCents) del MISMO cohorte. HONESTIDAD DE DATOS: el revenue NETO (net-settled) por
+ * oferta NO existe (payment-service no denormaliza el offering) y el rating por oferta no tiene fuente → NO se
+ * exponen acá (se omiten en la UI). `grossFareCents` es facturación bruta, no el margen de la plataforma.
+ */
+export interface OfferingMetrics {
+  offeringId: string;
+  windowDays: number;
+  /** Viajes COMPLETADOS de la oferta en la ventana (Trip.category = offeringId). */
+  tripCount: number;
+  /** Facturación BRUTA de esos viajes: Σ Trip.fareCents (céntimos PEN Int). NO es el neto de la plataforma. */
+  grossFareCents: number;
+}
 
 @Injectable()
 export class AnalyticsService {
@@ -42,6 +62,17 @@ export class AnalyticsService {
       avgDurationSeconds: avgDurationSeconds === null ? null : Math.round(avgDurationSeconds),
       tripsPerHour,
     };
+  }
+
+  /**
+   * Métricas 30d de UNA oferta (página-detalle del catálogo). Ventana FIJA de 30 días naturales hacia atrás
+   * desde `now` (ancla horaria irrelevante para 30d; se toma `now − 30d` directo). Delega la agregación al repo
+   * (count + Σ fareCents del cohorte COMPLETED · category). El `offeringId` ya viene validado por el DTO.
+   */
+  async getOfferingMetrics(offeringId: string, now: Date = new Date()): Promise<OfferingMetrics> {
+    const since = new Date(now.getTime() - OFFERING_METRICS_WINDOW_DAYS * DAY_MS);
+    const { tripCount, grossFareCents } = await this.repo.offeringMetricsSince(offeringId, since);
+    return { offeringId, windowDays: OFFERING_METRICS_WINDOW_DAYS, tripCount, grossFareCents };
   }
 }
 

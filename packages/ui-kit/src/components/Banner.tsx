@@ -20,7 +20,7 @@ export interface BannerProps {
 }
 
 const toneToColor: Record<BannerTone, keyof ThemeColors> = {
-  info: 'accent',
+  info: 'info',
   success: 'success',
   safe: 'safe',
   warn: 'warn',

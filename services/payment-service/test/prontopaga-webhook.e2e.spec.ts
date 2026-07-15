@@ -17,6 +17,7 @@ import { UnauthorizedError } from '@veo/utils';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { ProntoPagaWebhookService } from '../src/webhooks/prontopaga-webhook.service';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import type { PrismaService } from '../src/infra/prisma.service';
@@ -50,6 +51,7 @@ function makeConfig(): ConfigService {
     DEFAULT_PAYMENT_METHOD: 'YAPE',
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
+    REFUND_IDEMPOTENCY_WINDOW_MINUTES: 15,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
   return {
@@ -89,8 +91,7 @@ beforeAll(async () => {
     pendingExternal: true,
     webhookSecret: SECRET,
   });
-  payments = new PaymentsService(
-    prismaService,
+  payments = new PaymentsService(new PaymentsRepository(prismaService),
     gateway,
     noAffiliation,
     noPromos,
@@ -155,8 +156,12 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
     expect((await findPayment(p.id)).status).toBe('PENDING');
   });
 
-  it('webhook expired → FAILED reason expired', async () => {
-    const p = await chargeYape();
+  it('RC17 · webhook expired de una TARIFA → DEBT reason checkout_expired (impaga, recuperable) — NO FAILED (condonación)', async () => {
+    // Un checkout que EXPIRA sin pago es lo mismo que un rejected para el cobro del VIAJE: el pasajero NO
+    // pagó → DEBE la tarifa. Antes iba a FAILED terminal → condonación silenciosa (viajaba gratis). Ahora
+    // → DEBT (bloquea nuevos viajes + recuperable), consistente con la rama rejected.
+    const p = await chargeYape(); // cobro de tarifa (kind=FARE por defecto)
+
     const { body } = gateway.buildSignedWebhook({
       uid: p.externalUid as string,
       order: p.id,
@@ -164,8 +169,28 @@ describe('E2E ProntoPaga · PENDING_EXTERNAL → webhook → CAPTURED', () => {
     });
     await webhook.process(body, {});
     const stored = await findPayment(p.id);
-    expect(stored.status).toBe('FAILED');
-    expect(stored.failureReason).toBe('expired');
+    // FARE que expira = el viaje ocurrió → la tarifa SE DEBE: DEBT (gatea al pasajero + reintentable), NO FAILED
+    // terminal que dejaba el viaje gratis (fuga de ingresos). markDebt rutea por kind (una PROPINA sí iría a FAILED).
+    expect(stored.status).toBe('DEBT');
+    expect(stored.failureReason).toBe('checkout_expired');
+  });
+
+  it('RC17+RC16 · tarifa que EXPIRÓ (DEBT) y LUEGO el cliente paga (webhook success tardío) → CAPTURED', async () => {
+    // El caso real de CIP/PagoEfectivo: el checkout "expira" en el reloj de VEO pero el cliente paga al final.
+    // El pago está en DEBT (no condonado) y el CONFIRMED tardío DEBE capturarlo (el CAS de captureSuccess
+    // acepta DEBT→CAPTURED). La tarifa se cobra de verdad, el conductor cobra — nada se pierde.
+    const p = await chargeYape();
+    await webhook.process(
+      gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'expired' }).body,
+      {},
+    );
+    expect((await findPayment(p.id)).status).toBe('DEBT');
+    await webhook.process(
+      gateway.buildSignedWebhook({ uid: p.externalUid as string, order: p.id, status: 'success' }).body,
+      {},
+    );
+    expect((await findPayment(p.id)).status).toBe('CAPTURED');
+    expect(await capturedEvents()).toHaveLength(1);
   });
 
   it('webhook rejected → DEBT', async () => {
@@ -207,8 +232,7 @@ describe('E2E ProntoPaga · tope Yape On File (2000 PEN/tx)', () => {
     const activeAffiliation = {
       resolveActiveWalletUid: async () => 'WUID-ACTIVE',
     } as unknown as AffiliationsService;
-    const onFilePayments = new PaymentsService(
-      prismaService,
+    const onFilePayments = new PaymentsService(new PaymentsRepository(prismaService),
       onFileGateway,
       activeAffiliation,
       noPromos,

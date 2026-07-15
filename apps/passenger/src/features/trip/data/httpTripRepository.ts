@@ -25,6 +25,8 @@ import {
   type TripHistoryQuery,
   type TripResource,
   tripResource,
+  type TripRoute,
+  tripRoute,
   type TripStateView,
   tripStateView,
   type TripVideoGrant,
@@ -90,19 +92,18 @@ export class HttpTripRepository implements TripRepository {
     return this.http.get(`/trips/${tripId}/state`, {schema: tripStateView});
   }
 
-  cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource> {
-    return this.http.post(`/trips/${tripId}/cancel`, {
-      body: input,
-      schema: tripResource,
+  getTripRoute(tripId: string, leg?: 'pickup' | 'dropoff'): Promise<TripRoute> {
+    // `leg=pickup` = acercamiento vivo (conductor→recojo); `leg=dropoff` = restante del viaje en
+    // curso (conductor→paradas→destino, se recorta al avanzar); sin leg, la canónica.
+    return this.http.get(`/trips/${tripId}/route`, {
+      ...(leg ? {query: {leg}} : {}),
+      schema: tripRoute,
     });
   }
 
-  changeDestination(
-    tripId: string,
-    destination: GeoPoint,
-  ): Promise<TripResource> {
-    return this.http.post(`/trips/${tripId}/destination`, {
-      body: {destination},
+  cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource> {
+    return this.http.post(`/trips/${tripId}/cancel`, {
+      body: input,
       schema: tripResource,
     });
   }

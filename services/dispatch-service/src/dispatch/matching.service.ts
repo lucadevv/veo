@@ -23,7 +23,7 @@ import {
   DISPATCH_H3_RESOLUTION,
   type LatLon,
 } from '@veo/utils';
-import { createEnvelope } from '@veo/events';
+import { createEnvelope, OFFER_WITHDRAWN_REASON } from '@veo/events';
 import {
   DispatchOutcome,
   findOffering,
@@ -32,9 +32,8 @@ import {
   type VehicleClass,
 } from '@veo/shared-types';
 import type { MapsClient } from '@veo/maps';
-import { domainEventsTotal } from '@veo/observability';
-import { PrismaService } from '../infra/prisma.service';
 import { Prisma, DispatchSessionStatus, type DispatchSession } from '../generated/prisma';
+import { MATCHING_REPO, type MatchingRepository } from './matching.repository';
 import { DriverPool } from './driver-pool';
 import { MatchingSessionStore } from './matching-session.store';
 import { MAPS_CLIENT } from '../ports/maps/maps.module';
@@ -43,6 +42,8 @@ import { DispatchScorer, type ScoreInput } from './scoring';
 import { DriverProjectionService } from './driver-projection.service';
 import { SurgeService } from './surge.service';
 import { OFFER_DELIVERY, type OfferDelivery } from './offer-delivery.port';
+import { DispatchRadiusConfigService } from './dispatch-radius-config.service';
+import { fixedRingBounds, type FixedPolicy } from './dispatch-policy';
 import type { Env } from '../config/env.schema';
 
 export interface TripRequest {
@@ -65,11 +66,14 @@ export interface TripRequest {
 @Injectable()
 export class MatchingService {
   private readonly logger = new Logger(MatchingService.name);
-  private readonly offerTimeoutMs: number;
   private readonly maxKRing: number;
+  /** Presupuesto de avance por tick del sweep (cuántas ofertas vencidas reclamar+avanzar). */
+  private readonly sweepAdvanceBudget: number;
+  /** Deadline (ms) por tick del sweep: backstop ante un offerNext lento (corta antes de marcar la próxima). */
+  private readonly sweepDeadlineMs: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MATCHING_REPO) private readonly repo: MatchingRepository,
     private readonly driverPool: DriverPool,
     private readonly sessions: MatchingSessionStore,
     @Inject(DISPATCH_SCORER) private readonly scorer: DispatchScorer,
@@ -77,10 +81,14 @@ export class MatchingService {
     private readonly surge: SurgeService,
     @Inject(MAPS_CLIENT) private readonly maps: MapsClient,
     @Inject(OFFER_DELIVERY) private readonly offerDelivery: OfferDelivery,
+    // Ventana de la oferta directa FIXED leída EN RUNTIME (config editable por el admin, cacheada), no en
+    // el constructor: un cambio del admin surte efecto sin reiniciar el servicio (ADR-019 Lote A).
+    private readonly radiusConfig: DispatchRadiusConfigService,
     config: ConfigService<Env, true>,
   ) {
-    this.offerTimeoutMs = config.getOrThrow<number>('DISPATCH_OFFER_TIMEOUT_MS');
     this.maxKRing = config.getOrThrow<number>('DISPATCH_MAX_K_RING');
+    this.sweepAdvanceBudget = config.getOrThrow<number>('DISPATCH_SWEEP_ADVANCE_BUDGET');
+    this.sweepDeadlineMs = config.getOrThrow<number>('DISPATCH_SWEEP_DEADLINE_MS');
   }
 
   // ──────────────── Matching EVENT-DRIVEN (estado durable, sin Promise/timer en proceso) ────────────────
@@ -117,16 +125,11 @@ export class MatchingService {
     }
 
     // Una oferta a la vez: si hay un OFFERED vivo no encimamos otra (la respuesta o el reconciler avanzan).
-    const inFlight = await this.prisma.read.dispatchMatch.count({
-      where: { tripId, outcome: DispatchOutcome.OFFERED },
-    });
+    const inFlight = await this.repo.countLiveOffers(tripId);
     if (inFlight > 0) return;
 
     // "Ya ofertados" = matches de ESTA ronda (offeredAt ≥ inicio de la sesión); un re-bid no los hereda.
-    const priorMatches = await this.prisma.read.dispatchMatch.findMany({
-      where: { tripId, offeredAt: { gte: session.createdAt } },
-      select: { driverId: true },
-    });
+    const priorMatches = await this.repo.findRoundDriverIds(tripId, session.createdAt);
     const attempted = new Set(priorMatches.map((m) => m.driverId));
 
     const origin: LatLon = { lat: session.originLat, lon: session.originLon };
@@ -134,6 +137,16 @@ export class MatchingService {
     // B5-3 · requisitos de eligibilidad de la oferta del viaje (segment/seats/antigüedad). Si la category
     // está ausente o no matchea el catálogo, `findOffering` da undefined ⇒ el pool no restringe (degradación).
     const requires = findOffering(session.category ?? '')?.requires;
+
+    // FEATURE-FLAG dispatch-policy-v2 — SOLO cuando la config vigente es v2 (getPolicy, cacheado). El
+    // camino v1 (de acá para abajo) queda BYTE-FOR-BYTE intacto: policyVersion='v1' (default) o un policyV2
+    // malformado degradan a v1 (getPolicy devuelve v2:null). El lookup espacial (neighbors/DriverPool/hot
+    // index) es el MISMO; v2 solo cambia la POLÍTICA de radios (km) y el UMBRAL de candidatos encima.
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion === 'v2' && policy.v2) {
+      return this.offerNextV2(tripId, session, { center, origin, attempted, requires }, policy.v2.FIXED);
+    }
+
     // Rankea desde el k-ring actual; si está agotado, expande (persistiendo el avance) y reintenta.
     for (let k = session.currentKRing; k <= this.maxKRing; k++) {
       const ranked = await this.rankCandidates(
@@ -164,11 +177,91 @@ export class MatchingService {
   }
 
   /**
+   * v2 · Avance del matcher FIXED en política v2 (feature-flag). Diferencias con v1 (todo lo demás igual):
+   *  - RADIOS en km: startK = radiusKmToKRing(initialRadiusKm), maxK = radiusKmToKRing(maxRadiusKm).
+   *  - UMBRAL DE CANDIDATOS (targetDrivers): expande el ring hasta juntar ≥ targetDrivers candidatos (o
+   *    llegar a maxK), y RECIÉN AHÍ oferta al MEJOR (ranked[0]). targetDrivers es un UMBRAL de densidad,
+   *    NUNCA un broadcast: se entrega UNA sola oferta (invariante single-offer PRESERVADA; el pool no tiene
+   *    claim atómico al ofertar, así que difundir a N rompería la anti-doble-oferta — ver sweepExpiredOffers).
+   *  - EXPANSIÓN TEMPORAL: al ofertar por debajo de maxK sella `nextExpandAt`; el sweep de 2s ensancha el
+   *    ring por TIEMPO (sweepExpandableSessions), desacoplado del timeout de la oferta.
+   *  - maxK agotado SIN candidatos → el MISMO cierre honesto de v1 (closeTimedOut + publishNoCandidates).
+   */
+  private async offerNextV2(
+    tripId: string,
+    session: DispatchSession,
+    ctx: { center: string; origin: LatLon; attempted: Set<string>; requires?: OfferingRequirements },
+    fixed: FixedPolicy,
+  ): Promise<void> {
+    const { center, origin, attempted, requires } = ctx;
+    const { startK, maxK } = fixedRingBounds(fixed);
+    // El ring efectivo arranca en startK, pero NUNCA por debajo del avance ya persistido (currentKRing):
+    // así una expansión temporal previa (o un timeout que ya ensanchó) no se pierde al re-ofertar.
+    const from = Math.max(session.currentKRing, startK);
+    for (let k = from; k <= maxK; k++) {
+      const ranked = await this.rankCandidates(
+        neighbors(center, k),
+        origin,
+        attempted,
+        session.vehicleType,
+        requires,
+      );
+      const enough = ranked.length >= fixed.targetDrivers;
+      // Debajo de maxK y sin juntar el umbral → seguí ensanchando (los discos gridDisk ACUMULAN, así que
+      // ningún candidato de un ring interior se pierde: reaparece en el disco más ancho).
+      if (k < maxK && !enough) continue;
+      const top = ranked[0];
+      // Solo se llega acá con top vacío en k===maxK sin candidatos → cierre honesto abajo.
+      if (!top) break;
+      // Persiste el ring alcanzado + la cadencia de expansión temporal (null en maxK: no hay más que ensanchar).
+      const nextExpandAt =
+        k < maxK ? new Date(Date.now() + fixed.expandIntervalSec * 1000) : null;
+      await this.sessions.expandTo(tripId, k, nextExpandAt);
+      const surgeQuote = await this.surge.quote(origin);
+      await this.createAndDeliverOffer({
+        tripId,
+        candidate: top,
+        surgeMultiplier: surgeQuote.multiplier,
+        attempt: attempted.size + 1,
+        origin,
+      });
+      return;
+    }
+
+    // Sin candidatos hasta maxK (v2) → MISMO cierre honesto que v1 (idempotente por el CAS del cierre).
+    if (await this.sessions.closeTimedOut(tripId)) {
+      await this.publishNoCandidates(tripId, attempted.size);
+    }
+  }
+
+  /**
+   * Ventana (ms) de la oferta directa FIXED vigente. v2 → offerTimeoutSec de la política (× 1000); v1 →
+   * la ventana histórica (getWindows). El `expiresAt` que ve el conductor y el `cutoff` del sweep comparten
+   * ESTA misma base (ADR-021 F1): ambos deben usar el MISMO valor para no divergir.
+   */
+  private async offerTimeoutMs(): Promise<number> {
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion === 'v2' && policy.v2) return policy.v2.FIXED.offerTimeoutSec * 1000;
+    const { offerTimeoutMs } = await this.radiusConfig.getWindows();
+    return offerTimeoutMs;
+  }
+
+  /**
    * Deriva el FLUJO de despacho de la oferta del viaje (ADR 013). EMERGENCY = ambulancia (broadcast,
    * prioridad). Sin category o desconocida ⇒ STANDARD (el flujo secuencial de siempre).
    */
   private offeringFlow(category: string | null): OfferingFlow {
     return findOffering(category ?? '')?.flow ?? OfferingFlow.STANDARD;
+  }
+
+  /**
+   * ¿El viaje despacha por el riel EMERGENCY (broadcast donde el primero gana)? Lo usa el copy del 409
+   * del accept: "la emergencia ya fue tomada" SOLO es honesto en ese riel — un FIJO vencido NO puede
+   * recibir ese mensaje. Sin sesión o category desconocida ⇒ false (STANDARD).
+   */
+  async isEmergencyTrip(tripId: string): Promise<boolean> {
+    const session = await this.sessions.get(tripId);
+    return this.offeringFlow(session?.category ?? null) === OfferingFlow.EMERGENCY;
   }
 
   /**
@@ -181,10 +274,7 @@ export class MatchingService {
    */
   private async offerBroadcast(tripId: string, session: DispatchSession): Promise<void> {
     // Ofertados de ESTA ronda (vivos OFFERED + ya respondidos): no re-ofertar al mismo conductor.
-    const priorMatches = await this.prisma.read.dispatchMatch.findMany({
-      where: { tripId, offeredAt: { gte: session.createdAt } },
-      select: { driverId: true, outcome: true },
-    });
+    const priorMatches = await this.repo.findRoundMatches(tripId, session.createdAt);
     const attempted = new Set(priorMatches.map((m) => m.driverId));
     const liveOffers = priorMatches.filter((m) => m.outcome === DispatchOutcome.OFFERED).length;
 
@@ -234,36 +324,122 @@ export class MatchingService {
     await this.sessions.closeMatched(tripId);
   }
 
-  /** Cierra la sesión como CANCELLED (el viaje se canceló durante el matching). Idempotente (CAS). */
+  /**
+   * Cierra la sesión como CANCELLED (el viaje se canceló durante el matching). Idempotente (CAS).
+   *
+   * Además RETIRA la(s) oferta(s) FIXED viva(s) del viaje. Sin esto el `DispatchMatch` quedaba OFFERED
+   * tras la cancelación, con dos consecuencias visibles (2026-07-15):
+   *   1. Un accept TARDÍO del conductor sobre esa oferta muerta ganaba su CAS (`where outcome=OFFERED`) →
+   *      match_found para un trip CANCELADO → la app navegaba a un viaje fantasma (pantalla en blanco).
+   *   2. La card FIXED del conductor no se retiraba (nadie emitía offer_withdrawn) hasta vencer su countdown.
+   * Marcamos OFFERED→WITHDRAWN por CAS (si un accept concurrente ganó, count=0 ⇒ NO retiramos ni emitimos:
+   * el conductor SÍ aceptó) y emitimos `offer_withdrawn` (reason=cancelled) por OUTBOX en la MISMA tx para
+   * que el driver-bff lo reenvíe y la card muera reactiva. El board de PUJA lo cierra `cancelBoard` aparte.
+   */
   async cancelSession(tripId: string): Promise<void> {
     await this.sessions.closeCancelled(tripId);
+    await this.repo.runInTx(async (tx) => {
+      const offers = await this.repo.findLiveTripOffers(tx, tripId);
+      for (const offer of offers) {
+        const withdrawn = await this.repo.withdrawOffer(tx, offer.id);
+        if (withdrawn === 0) continue; // un accept concurrente ganó la carrera: no retiramos ni emitimos
+        const envelope = createEnvelope({
+          eventType: 'dispatch.offer_withdrawn',
+          producer: 'dispatch-service',
+          payload: {
+            tripId,
+            driverId: offer.driverId,
+            reason: OFFER_WITHDRAWN_REASON.CANCELLED,
+          },
+        });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: tripId,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+        this.logger.log(`viaje ${tripId} cancelado → oferta FIXED driver=${offer.driverId} retirada`);
+      }
+    });
   }
 
   /**
    * Barrido DURABLE de ofertas vencidas (D2.3): reemplaza al setTimeout en proceso. Para cada oferta
    * OFFERED más vieja que el timeout, la reclama a TIMEOUT por CAS atómico (where outcome=OFFERED) y
    * avanza el matching (offerNext). Replica-safe: el CAS garantiza que UNA sola réplica toma cada oferta
-   * (las demás ven count=0). Lo invoca el reconciler (@Interval). Devuelve cuántas avanzó.
+   * (las demás ven count=0). Lo invoca el reconciler (@Interval cada 2s). Devuelve cuántas avanzó.
+   *
+   * ── ESCALABILIDAD: corte por PRESUPUESTO (K) + DEADLINE por tick ──
+   * El sweep es SECUENCIAL a propósito y NO se puede paralelizar: NO hay claim atómico del conductor — el
+   * pool (DriverPool.eligible) es read-only al ofertar y el conductor sale recién en markBusy al ACEPTAR
+   * (fuera de la tx); la anti-doble-oferta es per-trip en memoria (el Set `attempted` desde los DispatchMatch
+   * del MISMO tripId). Correr offerNext en paralelo entre tripIds distintos PODRÍA double-offerear al mismo
+   * conductor. Por eso NO usamos Promise.all/allSettled acá. El control de escala es el TOPE, no el paralelismo:
+   *  - `take = K` (DISPATCH_SWEEP_ADVANCE_BUDGET, default 25): a-lo-sumo-K ofertas vencidas por tick. Antes
+   *    `take=100` encadenaba hasta 100 ciclos de matching en un cron de 2s (O(100)×O(matching)). Con K chico
+   *    el costo por tick queda acotado; las ofertas no tomadas siguen OFFERED y las barre el próximo tick.
+   *  - DEADLINE (DISPATCH_SWEEP_DEADLINE_MS, default 1500 < 2000): backstop ante un offerNext patológico.
+   *
+   * NO se batchea el CAS (updateMany sobre los K ids de una): el marcado a TIMEOUT y el avance (offerNext)
+   * van ACOPLADOS por fila DENTRO del for — marcar TIMEOUT una oferta que NO se avanza la deja huérfana (el
+   * findMany(OFFERED) ya no la ve → su sesión sigue OPEN sin oferta viva y el sweep no la re-dispara). Marcar
+   * justo-antes-de-cada-offerNext garantiza que un corte por deadline NO deje huérfanas (las no marcadas
+   * siguen OFFERED). El "N+1" de K escrituras CAS es trivial: K=25 << 100 y sin los 100 matchings encadenados.
    */
-  async sweepExpiredOffers(limit = 100): Promise<number> {
-    const cutoff = new Date(Date.now() - this.offerTimeoutMs);
-    const expired = await this.prisma.read.dispatchMatch.findMany({
-      where: { outcome: DispatchOutcome.OFFERED, offeredAt: { lt: cutoff } },
-      select: { id: true, tripId: true },
-      orderBy: { offeredAt: 'asc' },
-      take: limit,
-    });
+  async sweepExpiredOffers(limit = this.sweepAdvanceBudget): Promise<number> {
+    // Ventana leída EN RUNTIME (cacheada): el cutoff usa el valor vigente de la config del admin (v2 →
+    // offerTimeoutSec de la política; v1 → la ventana histórica, sin cambio de comportamiento).
+    const offerTimeoutMs = await this.offerTimeoutMs();
+    const cutoff = new Date(Date.now() - offerTimeoutMs);
+    // K: presupuesto de avance por tick (no 100). El resto lo toma el próximo tick.
+    const expired = await this.repo.findExpiredOffers(cutoff, limit);
+    const tickStart = Date.now();
     let advanced = 0;
     for (const m of expired) {
-      const claimed = await this.prisma.write.dispatchMatch.updateMany({
-        where: { id: m.id, outcome: DispatchOutcome.OFFERED },
-        data: { outcome: DispatchOutcome.TIMEOUT, respondedAt: new Date() },
-      });
-      if (claimed.count === 0) continue; // otra réplica (o un accept/reject) ya la tomó
-      await this.offerNext(m.tripId); // re-chequea sesión OPEN + una-oferta-a-la-vez
+      // DEADLINE: cortamos ANTES de marcar la próxima fila. Las no procesadas siguen OFFERED (no huérfanas):
+      // el marcado a TIMEOUT y el avance van juntos por fila, así un corte por tiempo nunca deja una oferta
+      // marcada TIMEOUT sin re-oferta. Backstop raro (K ya es chico); protege solo casos patológicos.
+      if (Date.now() - tickStart > this.sweepDeadlineMs) break;
+      const claimed = await this.repo.timeoutOffer(m.id);
+      if (claimed === 0) continue; // otra réplica (o un accept/reject) ya la tomó
+      await this.offerNext(m.tripId); // re-chequea sesión OPEN + una-oferta-a-la-vez (idempotente)
       advanced += 1;
     }
     return advanced;
+  }
+
+  /**
+   * v2 · Barrido de EXPANSIÓN TEMPORAL del ring del matcher FIXED (feature-flag). Complementa a
+   * sweepExpiredOffers: en vez de disparar por el timeout de la oferta, ensancha el ring por TIEMPO
+   * (`nextExpandAt` ≤ now) — así una oferta LENTA (conductor que no responde) no CONGELA el radio de
+   * búsqueda. No-op en v1 (getPolicy → v2:null → devuelve 0). Mismo tope de presupuesto/deadline que el
+   * sweep de ofertas. Replica-safe por el CAS `advanceExpansion` (guard status=OPEN + currentKRing=fromK).
+   *
+   * INVARIANTE single-offer intacto: acá SOLO se ensancha el "piso" del ring (advanceExpansion) y se re-
+   * invoca offerNext, que HACE NO-OP si hay una oferta en vuelo (guard countLiveOffers) — jamás encima una
+   * 2ª oferta. Cuando la oferta viva caduque, sweepExpiredOffers → offerNext arrancará del ring más ancho.
+   */
+  async sweepExpandableSessions(limit = this.sweepAdvanceBudget): Promise<number> {
+    const policy = await this.radiusConfig.getPolicy();
+    if (policy.policyVersion !== 'v2' || !policy.v2) return 0; // v1: sin expansión temporal
+    const fixed = policy.v2.FIXED;
+    const { maxK } = fixedRingBounds(fixed);
+    const now = new Date();
+    const due = await this.sessions.findExpandable(now, maxK, limit);
+    const tickStart = Date.now();
+    let expanded = 0;
+    for (const s of due) {
+      if (Date.now() - tickStart > this.sweepDeadlineMs) break; // DEADLINE (mismo backstop que el otro sweep)
+      const toK = Math.min(s.currentKRing + 1, maxK);
+      const nextExpandAt =
+        toK < maxK ? new Date(Date.now() + fixed.expandIntervalSec * 1000) : null;
+      const claimed = await this.sessions.advanceExpansion(s.tripId, s.currentKRing, toK, nextExpandAt);
+      if (claimed === 0) continue; // otra réplica/tick ya la avanzó (o su ring cambió)
+      await this.offerNext(s.tripId); // no-op si hay oferta viva; si no, re-oferta desde el ring más ancho
+      expanded += 1;
+    }
+    return expanded;
   }
 
   /**
@@ -278,24 +454,28 @@ export class MatchingService {
     origin: LatLon;
   }): Promise<void> {
     const matchId = uuidv7();
-    await this.prisma.write.dispatchMatch.create({
-      data: {
-        id: matchId,
-        tripId: args.tripId,
-        driverId: args.candidate.driverId,
-        score: new Prisma.Decimal(args.candidate.score),
-        attempt: args.attempt,
-        surgeMultiplier: new Prisma.Decimal(args.surgeMultiplier),
-        outcome: DispatchOutcome.OFFERED,
-      },
+    const created = await this.repo.createOffer({
+      id: matchId,
+      tripId: args.tripId,
+      driverId: args.candidate.driverId,
+      score: args.candidate.score,
+      attempt: args.attempt,
+      surgeMultiplier: args.surgeMultiplier,
     });
+    // ADR-021 Fase F (F1) — el `expiresAt` que ve el conductor se ANCLA al `offeredAt` REAL de la DB (el
+    // mismo instante que usa `sweepExpiredOffers` para caducar la oferta: offeredAt + offerTimeoutMs). Antes
+    // se calculaba `Date.now() + offerTimeoutMs` DESPUÉS del `await maps.eta()` → divergía del offeredAt por
+    // la latencia (variable, segundos) del ETA → el anillo del conductor mostraba MÁS tiempo del que el
+    // server permitía → aceptar en los últimos segundos daba 409. Ahora ambos comparten la MISMA base
+    // (offerTimeoutMs(): v2 → política, v1 → ventana histórica — el MISMO valor que usa el cutoff del sweep).
+    const offerTimeoutMs = await this.offerTimeoutMs();
+    const expiresAt = new Date(created.offeredAt.getTime() + offerTimeoutMs).toISOString();
     let etaSeconds = 0;
     try {
       etaSeconds = await this.maps.eta(args.candidate.location, args.origin);
     } catch (err) {
       this.logger.warn(`ETA no disponible para match ${matchId}: ${String(err)}`);
     }
-    const expiresAt = new Date(Date.now() + this.offerTimeoutMs).toISOString();
     try {
       await this.offerDelivery.deliver({
         matchId,
@@ -359,7 +539,7 @@ export class MatchingService {
       producer: 'dispatch-service',
       payload: { tripId, reason: 'no_candidates' },
     });
-    await this.prisma.write.$transaction(async (tx) => {
+    await this.repo.runInTx(async (tx) => {
       await tx.outboxEvent.create({
         data: {
           aggregateId: tripId,
@@ -368,7 +548,6 @@ export class MatchingService {
         },
       });
     });
-    domainEventsTotal.inc({ event: 'dispatch.no_offers', result: 'published' });
     this.logger.log(
       `matcher FIXED sin candidatos para ${tripId} (intentados ${attemptedDrivers}) → no_offers`,
     );

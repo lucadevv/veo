@@ -2,7 +2,9 @@
  * Reglas de dominio puras de documentos de flota (BR-I04). Sin I/O ni dependencias de Nest:
  * funciones puras y deterministas → 100% testeables. La capa de servicio/cron las orquesta.
  */
+import { ValidationError, ForbiddenError } from '@veo/utils';
 import { FleetDocumentStatus, FleetDocumentType } from '@veo/shared-types';
+import { DocumentSide, FleetOwnerType } from '../generated/prisma';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -68,6 +70,138 @@ export function validCertificationsOf(
   return docs
     .filter((d) => isCertification(d.type) && isDocumentValid(d.status))
     .map((d) => d.type);
+}
+
+/* ── Sub-lote 3A · imágenes del documento (1..N) ────────────────────────────────────────────── */
+
+/** Imagen de entrada (del DTO o del legacy `fileS3Key`): clave S3 + cara. */
+export interface DocumentImageInput {
+  s3Key: string;
+  side: DocumentSide;
+}
+
+/** Imagen ya normalizada para persistir: clave + cara + orden estable (0-based). */
+export interface NormalizedDocumentImage {
+  s3Key: string;
+  side: DocumentSide;
+  order: number;
+}
+
+/**
+ * Normaliza y VALIDA las imágenes de un documento (sub-lote 3A), de forma pura y determinista.
+ *
+ * Fuentes (en prioridad): `images` (camino nuevo, 1..N) o, si viene vacío, el legacy `fileS3Key`
+ * (backward-compat) → una sola imagen SINGLE. Si no hay ninguna fuente, devuelve [] (el documento
+ * puede registrarse sin archivo aún, como hoy).
+ *
+ * Reglas de coherencia de `side` (tipadas, sin string mágico):
+ *  - Si alguna imagen es FRONT o BACK → debe ser EXACTAMENTE un par {FRONT, BACK} (anverso+reverso,
+ *    p.ej. DNI). Ni FRONT solo, ni BACK solo, ni FRONT/BACK mezclados con SINGLE, ni duplicados.
+ *  - Si TODAS son SINGLE → cualquier cantidad ≥ 1 es válida (licencia/SOAT/tarjeta = 1; foto de vehículo = N).
+ *
+ * El `order` se asigna por posición de entrada (0-based), salvo el par FRONT/BACK, que se fuerza a
+ * FRONT=0, BACK=1 (orden canónico estable, independiente del orden en que el cliente las mande).
+ */
+export function normalizeDocumentImages(input: {
+  images?: readonly DocumentImageInput[] | null;
+  fileS3Key?: string | null;
+}): NormalizedDocumentImage[] {
+  const fromImages = input.images ?? [];
+
+  // Sin `images`: degradación al legacy `fileS3Key` (una imagen SINGLE). Sin ninguno: documento sin archivo.
+  if (fromImages.length === 0) {
+    if (input.fileS3Key) {
+      return [{ s3Key: input.fileS3Key, side: DocumentSide.SINGLE, order: 0 }];
+    }
+    return [];
+  }
+
+  const hasFrontOrBack = fromImages.some(
+    (i) => i.side === DocumentSide.FRONT || i.side === DocumentSide.BACK,
+  );
+
+  if (!hasFrontOrBack) {
+    // Todas SINGLE: N imágenes ordenadas por posición (foto de vehículo, o 1 sola cara).
+    return fromImages.map((i, order) => ({ s3Key: i.s3Key, side: DocumentSide.SINGLE, order }));
+  }
+
+  // Hay FRONT/BACK: exigir el par exacto {FRONT, BACK} (anverso+reverso, sin SINGLE mezclado ni duplicados).
+  const front = fromImages.filter((i) => i.side === DocumentSide.FRONT);
+  const back = fromImages.filter((i) => i.side === DocumentSide.BACK);
+  const single = fromImages.filter((i) => i.side === DocumentSide.SINGLE);
+  const frontImage = front[0];
+  const backImage = back[0];
+  if (
+    front.length !== 1 ||
+    back.length !== 1 ||
+    single.length !== 0 ||
+    fromImages.length !== 2 ||
+    !frontImage ||
+    !backImage
+  ) {
+    throw new ValidationError(
+      'Caras incoherentes: un documento de dos caras requiere exactamente un FRONT y un BACK, sin SINGLE',
+      {
+        front: front.length,
+        back: back.length,
+        single: single.length,
+        total: fromImages.length,
+      },
+    );
+  }
+  // Orden canónico estable: FRONT=0, BACK=1 (independiente del orden de envío del cliente).
+  return [
+    { s3Key: frontImage.s3Key, side: DocumentSide.FRONT, order: 0 },
+    { s3Key: backImage.s3Key, side: DocumentSide.BACK, order: 1 },
+  ];
+}
+
+/** La clave S3 "legacy" (la primera imagen por orden) para mantener `fileS3Key` poblado backward-compat. */
+export function primaryS3Key(images: readonly NormalizedDocumentImage[]): string | null {
+  const first = images[0];
+  if (!first) return null;
+  return images.reduce((min, i) => (i.order < min.order ? i : min), first).s3Key;
+}
+
+/**
+ * Anti-IDOR de STORAGE (Ley 29733, defensa en profundidad · FOUNDATION §14): el prefijo S3 que un
+ * documento puede referenciar está ACOTADO al dueño. Un conductor solo puede registrar un doc cuyas
+ * keys vivan bajo SU propio prefijo `drivers/{ownerId}/` — el mismo que el presign genera server-side
+ * (driver-bff `buildDocumentKey`). Sin esto, un cliente podía mandar un `s3Key` apuntando a
+ * `drivers/{OTRO}/documents/...` y, al presignar el operador un GET de esa key, ver PII ajena.
+ *
+ * El prefijo NO es un literal de dominio suelto: se CONSTRUYE del `ownerType`+`ownerId` (la frontera es
+ * el id del dueño, no una cadena mágica). Espeja el patrón ya existente de `avatar.service.assertOwnsKey`
+ * (`avatars/${userId}/`). Para `ownerType` que aún no tiene un prefijo storage acotado (p.ej. VEHICLE,
+ * cuyo onboarding driver-scoped no emite keys vehicle-scoped) devuelve `null`: no se fuerza un prefijo
+ * que no corresponde (no romper el flujo legítimo), la pertenencia del owner ya la cubre `create`.
+ */
+export function expectedS3KeyPrefix(ownerType: FleetOwnerType, ownerId: string): string | null {
+  if (ownerType === FleetOwnerType.DRIVER) return `drivers/${ownerId}/`;
+  return null;
+}
+
+/**
+ * Valida que TODAS las claves S3 de un documento (las imágenes ya normalizadas) pertenezcan al prefijo
+ * del dueño. Fail-closed: si alguna key no arranca con el prefijo esperado → ForbiddenError (403). Si el
+ * `ownerType` no tiene prefijo acotado (`expectedS3KeyPrefix` → null), es no-op (no aplica este riel).
+ */
+export function assertS3KeysBelongToOwner(
+  ownerType: FleetOwnerType,
+  ownerId: string,
+  images: readonly NormalizedDocumentImage[],
+): void {
+  const prefix = expectedS3KeyPrefix(ownerType, ownerId);
+  if (prefix === null) return;
+  for (const img of images) {
+    if (!img.s3Key.startsWith(prefix)) {
+      throw new ForbiddenError('La clave de archivo no pertenece al dueño del documento', {
+        ownerType,
+        ownerId,
+        s3Key: img.s3Key,
+      });
+    }
+  }
 }
 
 /** Días (fraccionarios) hasta el vencimiento. Negativo si ya pasó. */

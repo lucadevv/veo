@@ -31,6 +31,7 @@
     "rimraf": "^6.0.1"
   },
   "dependencies": {
+    "@veo/shared-types": "workspace:*",
     "date-fns": "^3.6.0",
     "h3-js": "^4.1.0",
     "pino": "^9.4.0",

@@ -1,6 +1,7 @@
 import type {TripPhase} from './tripFlowPhase';
 import {
   ActiveTripPhaseBody,
+  ActiveTripSheetHeader,
   BiddingPhaseBody,
   CompletionPhaseBody,
   HomeIdleFlowBody,
@@ -10,6 +11,7 @@ import {
   HomeSearchFlowHeader,
   HomeSheetHeader,
   NoOffersPhaseBody,
+  NoDriverPhaseBody,
   QuotingPhaseBody,
   QuotingSheetHeader,
   resolvePickupMode,
@@ -31,6 +33,7 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
       searching: BiddingPhaseBody,
       offers: BiddingPhaseBody,
       noOffers: NoOffersPhaseBody,
+      noDriver: NoDriverPhaseBody,
       // Transitorias: el PUENTE navega/limpia; mientras tanto el sheet muestra el home (igual que antes).
       reassigning: HomePhaseBody,
       ended: HomePhaseBody,
@@ -44,17 +47,20 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
     }
   });
 
-  it('WHITELIST de header: solo home y cotización tienen chrome fijo (el resto, cuerpo autocontenido)', () => {
+  it('WHITELIST de header: home, cotización y viaje vivo (franja colapsable); el resto, cuerpo autocontenido', () => {
     const expected: Record<TripPhase, PhaseDescriptor['Header']> = {
       idle: HomeSheetHeader,
       quoting: QuotingSheetHeader,
       searching: null,
       offers: null,
       noOffers: null,
+      noDriver: null,
       reassigning: null,
-      enRoute: null,
-      arrived: null,
-      inProgress: null,
+      // Viaje VIVO: la franja de estado (conductor + ETA) es el header COLAPSABLE del sheet — lo único
+      // visible con el sheet plegado al snap 'header' (mapa al máximo, espejo del conductor).
+      enRoute: ActiveTripSheetHeader,
+      arrived: ActiveTripSheetHeader,
+      inProgress: ActiveTripSheetHeader,
       completed: null,
       ended: null,
     };
@@ -63,11 +69,17 @@ describe('TRIP_PHASE_DESCRIPTORS', () => {
     }
   });
 
-  it('snap a FULL solo en cotización y cierre (forms largos); el resto abraza el contenido (peek)', () => {
+  it('snap a FULL en cotización, cierre, OFERTAS y los sin-match (noOffers/noDriver crecen para ver el contenido completo); el resto abraza el contenido (peek)', () => {
     const fullPhases = (
       Object.keys(TRIP_PHASE_DESCRIPTORS) as TripPhase[]
     ).filter(phase => TRIP_PHASE_DESCRIPTORS[phase].expanded);
-    expect(fullPhases.sort()).toEqual(['completed', 'quoting']);
+    expect(fullPhases.sort()).toEqual([
+      'completed',
+      'noDriver',
+      'noOffers',
+      'offers',
+      'quoting',
+    ]);
   });
 
   it('AMBIENTE (autitos cercanos) solo en idle, searching y completed', () => {

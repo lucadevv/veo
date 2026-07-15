@@ -8,6 +8,7 @@ import {
   BottomSheet,
   Button,
   Card,
+  ListGroup,
   ListItem,
   SafeScreen,
   StatusPill,
@@ -18,12 +19,11 @@ import {
 } from '@veo/ui-kit';
 import React, {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {Linking, Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {uuidv7} from '../../../../shared/utils/uuid';
 import {useSessionStore} from '../../../../core/session/sessionStore';
-import {useBiometricGateStore} from '../../../auth/presentation';
 import {
   ErrorState,
   LoadingState,
@@ -40,16 +40,18 @@ import {isDocumentValid} from '../../../payments/domain/affiliationUsecases';
 import {maskDocument} from '../../../../shared/utils/format';
 import {EnterView} from '../components/motion';
 import {PhoneVerificationSheet} from '../components/PhoneVerificationSheet';
-import {usePushPermission} from '../../../notifications/presentation/hooks/usePushPermission';
+import {usePushPermission} from '../../../../core/notifications/usePushPermission';
 import {
   IconAccessibility,
+  IconBadgeCheck,
   IconBell,
   IconCamera,
   IconCard,
   IconChild,
-  IconClock,
   IconFaceScan,
+  IconFileText,
   IconGift,
+  IconGlobe,
   IconHelp,
   IconPin,
   IconPower,
@@ -59,23 +61,32 @@ import {
   IconTrash,
   IconUsers,
 } from '../components/icons';
-import {
-  IconCheck,
-  IconPencil,
-} from '../../../auth/presentation/components/icons';
+import {IconPencil} from '../../../auth/presentation/components/icons';
 import {IconStarFilled} from '../../../trip/presentation/components/icons';
-import {useMyAggregateRating} from '../../../ratings/presentation/useMyAggregateRating';
+import {useMyAggregateRating} from '../hooks/useMyAggregateRating';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Items del diseño cuyo destino aún no tiene pantalla con backend: degradación honesta. */
-type ComingSoon = 'cameraControl' | 'shareTrip' | 'accessibility';
+type ComingSoon =
+  | 'cameraControl'
+  | 'shareTrip'
+  | 'accessibility'
+  | 'language'
+  | 'terms';
 
 const COMING_SOON_COPY: Record<ComingSoon, string> = {
   cameraControl: 'profile.comingSoonCameraControl',
   shareTrip: 'profile.comingSoonShareTrip',
+  // DEUDA: (app) falta pantalla de Accesibilidad (tamaño de texto, alto contraste, reduce-motion). Hoy comingSoon, sin destino.
   accessibility: 'profile.comingSoonAccessibility',
+  // DEUDA: (backend+i18n) soporte multi-locale (es-ES/en-US) + persistir preferencia de idioma/región del usuario. Hoy solo es-PE; el selector es comingSoon.
+  // Idioma y región (pen c4cChO): la app hoy SOLO existe en es-PE — no fingimos un selector.
+  language: 'profile.comingSoonLanguage',
+  // DEUDA: (config) falta URL legal (Términos + Privacidad Ley 29733) en config/env para linkear desde el Perfil. Hoy no hay URL → comingSoon.
+  // Términos y privacidad (pen c4cChO): no hay URL legal en config/env (gap) — sheet honesto.
+  terms: 'profile.comingSoonTerms',
 };
 
 /** Un paso faltante de la franja de completitud (chip tappeable que abre el campo correspondiente). */
@@ -169,7 +180,6 @@ export function ProfileScreen(): React.JSX.Element {
 
   const refreshToken = useSessionStore(s => s.refreshToken);
   const clearSession = useSessionStore(s => s.clearSession);
-  const lockBiometricGate = useBiometricGateStore(s => s.lock);
 
   const profileQuery = useQuery({
     queryKey: ['profile'],
@@ -223,9 +233,6 @@ export function ProfileScreen(): React.JSX.Element {
     },
     onSuccess: () => {
       history.clear();
-      // Re-arma el candado biométrico: el próximo acceso (incluso un re-login en el mismo proceso)
-      // exige re-autenticación local. Cierra el contrato del store (antes solo se armaba en frío).
-      lockBiometricGate();
       clearSession();
     },
   });
@@ -336,102 +343,114 @@ export function ProfileScreen(): React.JSX.Element {
           padding: theme.spacing.xl,
           gap: theme.spacing.lg,
         }}>
-        {/* Header del hub */}
-        <Text variant="title1">{t('profile.title')}</Text>
+        {/* Header del hub · hero editorial IZQUIERDA (display + subtítulo), MISMO tratamiento que el
+            ScreenHero del conductor — coherencia de identidad entre apps (anti-centrado). */}
+        <View style={{gap: theme.spacing.xxs}}>
+          <Text variant="display">{t('profile.title')}</Text>
+          <Text variant="callout" color="inkMuted">
+            {t('profile.subtitle')}
+          </Text>
+        </View>
 
-        {/* CABECERA · avatar (→ editar, gesto pro) + nombre/CTA + línea de identidad + Editar perfil. */}
+        {/* CABECERA · identidad en CARD a la izquierda (avatar + nombre/badge + rating + contacto),
+            espejo del `ProfileIdentityCard` del conductor. El editar queda como affordance explícito
+            (ghost, visible) debajo de la card — el .pen del passenger exige descubribilidad real. */}
         <EnterView index={0}>
-          <View style={{alignItems: 'center', gap: theme.spacing.sm}}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('profile.editProfile')}
-              onPress={openEdit}>
-              <Avatar
-                uri={profile.photoUrl ?? undefined}
-                name={hasName ? displayName : undefined}
-                size="xl"
-              />
-            </Pressable>
+          <View style={{gap: theme.spacing.sm}}>
+            <Card variant="filled">
+              <View style={styles.identityRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('profile.editProfile')}
+                  onPress={openEdit}>
+                  <Avatar
+                    uri={profile.photoUrl ?? undefined}
+                    name={hasName ? displayName : undefined}
+                    size="xl"
+                  />
+                </Pressable>
 
-            {hasName ? (
-              <View style={styles.nameRow}>
-                <Text variant="title2">{displayName}</Text>
-                {/* Identidad confirmada = detalle fino junto al nombre (check sutil), no una pill. */}
-                {verified ? (
-                  <View
-                    style={[styles.verifiedTick, {backgroundColor: success}]}
-                    accessibilityLabel={t('profile.identityConfirmed')}>
-                    <IconCheck color={theme.colors.onSuccess} size={11} />
-                  </View>
-                ) : null}
+                <View style={styles.identityInfo}>
+                  {hasName ? (
+                    <View style={styles.nameRow}>
+                      <Text variant="title3" numberOfLines={1} style={styles.nameText}>
+                        {displayName}
+                      </Text>
+                      {/* Verificado KYC (pen c4cChO): badge-check en success junto al nombre — verificación
+                          sutil, un solo acento (espejo del ProfileIdentityCard del conductor). */}
+                      {verified ? (
+                        <View accessibilityLabel={t('profile.identityConfirmed')}>
+                          <IconBadgeCheck color={success} size={16} />
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : (
+                    // El dato faltante ES la invitación: CTA explícito, no un misterio.
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t('profile.addName')}
+                      onPress={openEdit}
+                      style={styles.addNameCta}>
+                      <Text variant="title3" color="accent">
+                        {t('profile.addName')}
+                      </Text>
+                    </Pressable>
+                  )}
+
+                  {/* CALIFICACIÓN RECIBIDA · estrella accent + score + viajes. Vacío honesto si no tiene. */}
+                  {hasRating ? (
+                    <View
+                      accessible
+                      accessibilityLabel={`${ratingScore} · ${
+                        aggregate!.count30d === 1
+                          ? t('profile.ratingCountOne')
+                          : t('profile.ratingCountMany', {count: aggregate!.count30d})
+                      }`}
+                      style={styles.ratingRow}>
+                      <IconStarFilled color={theme.colors.warn} size={16} />
+                      <Text variant="bodyStrong" color="ink" tabular>
+                        {ratingScore}
+                      </Text>
+                      <Text variant="footnote" color="inkMuted">
+                        {'· '}
+                        {aggregate!.count30d === 1
+                          ? t('profile.ratingCountOne')
+                          : t('profile.ratingCountMany', {
+                              count: aggregate!.count30d,
+                            })}
+                      </Text>
+                    </View>
+                  ) : ratingEmpty ? (
+                    <Text variant="footnote" color="inkSubtle">
+                      {t('profile.ratingNone')}
+                    </Text>
+                  ) : null}
+
+                  {/* Contacto + documento en UNA línea muted (identidad secundaria). */}
+                  {contact ? (
+                    <Text variant="footnote" color="inkMuted" numberOfLines={1} tabular>
+                      {contact}
+                      {maskedDocument
+                        ? ` · ${t(`profile.docType.${profile.documentType ?? 'DN'}`)} ${maskedDocument}`
+                        : ''}
+                    </Text>
+                  ) : maskedDocument ? (
+                    <Text variant="footnote" color="inkSubtle" tabular>
+                      {t(`profile.docType.${profile.documentType ?? 'DN'}`)} {maskedDocument}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
-            ) : (
-              // El dato faltante ES la invitación: CTA explícito, no un misterio.
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('profile.addName')}
-                onPress={openEdit}
-                style={styles.addNameCta}>
-                <Text variant="title3" color="accent">
-                  {t('profile.addName')}
-                </Text>
-              </Pressable>
-            )}
+            </Card>
 
-            {contact ? (
-              <Text variant="subhead" color="inkMuted" tabular>
-                {contact}
-              </Text>
-            ) : null}
-            {maskedDocument ? (
-              <Text variant="footnote" color="inkSubtle" tabular>
-                {t(`profile.docType.${profile.documentType ?? 'DN'}`)}{' '}
-                {maskedDocument}
-              </Text>
-            ) : null}
-            {verified && hasName ? (
-              <Text variant="footnote" color="inkSubtle">
-                {t('profile.identityConfirmed')}
-              </Text>
-            ) : null}
-
-            {/* CALIFICACIÓN RECIBIDA · protagonista de la cabecera (img2): estrella accent + score con 1
-                decimal + cantidad de viajes. Vacío honesto si aún no tiene; loading/error → silencio. */}
-            {hasRating ? (
-              <View
-                accessible
-                accessibilityLabel={`${ratingScore} · ${
-                  aggregate!.count30d === 1
-                    ? t('profile.ratingCountOne')
-                    : t('profile.ratingCountMany', {count: aggregate!.count30d})
-                }`}
-                style={styles.ratingRow}>
-                <IconStarFilled color={accent} size={16} />
-                <Text variant="headline" color="ink" tabular>
-                  {ratingScore}
-                </Text>
-                <Text variant="footnote" color="inkMuted">
-                  {'· '}
-                  {aggregate!.count30d === 1
-                    ? t('profile.ratingCountOne')
-                    : t('profile.ratingCountMany', {
-                        count: aggregate!.count30d,
-                      })}
-                </Text>
-              </View>
-            ) : ratingEmpty ? (
-              <Text variant="footnote" color="inkSubtle">
-                {t('profile.ratingNone')}
-              </Text>
-            ) : null}
-
-            {/* Affordance VISIBLE de edición (ghost chico) — no escondida tras el avatar. */}
+            {/* Affordance VISIBLE de edición (ghost chico, IZQUIERDA) — no escondida tras el avatar. */}
             <Button
               label={t('profile.editProfile')}
               variant="ghost"
               size="sm"
               leftIcon={<IconPencil color={accent} size={16} />}
               onPress={openEdit}
+              style={styles.editBtn}
             />
           </View>
         </EnterView>
@@ -439,7 +458,7 @@ export function ProfileScreen(): React.JSX.Element {
         {/* FRANJA DE COMPLETITUD · solo si falta algo (completo = silencio). Guía, no castigo. */}
         {missingSteps.length > 0 ? (
           <EnterView index={1}>
-            <Card variant="outlined" padding="md">
+            <Card variant="elevated" padding="md">
               <View style={{gap: theme.spacing.sm}}>
                 <View style={{gap: 2}}>
                   <Text variant="headline">{t('profile.completionTitle')}</Text>
@@ -479,7 +498,7 @@ export function ProfileScreen(): React.JSX.Element {
             no es un error: es un momento diseñado ("Confirmá que sos vos"). */}
         {!verified ? (
           <EnterView index={2}>
-            <Card variant="outlined" padding="md">
+            <Card variant="elevated" padding="md">
               <View style={styles.verifyCard}>
                 <View
                   style={[
@@ -511,7 +530,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={3}>
           <View>
             {sectionLabel(t('profile.sectionSecurity'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               <ListItem
                 title={t('profile.faceVerification')}
                 subtitle={t('profile.faceVerificationSub')}
@@ -561,7 +580,7 @@ export function ProfileScreen(): React.JSX.Element {
                 subtitle={t('profile.shareTripSub')}
                 leading={<IconShare color={accent} size={glyph} />}
               />
-            </Card>
+            </ListGroup>
           </View>
         </EnterView>
 
@@ -569,7 +588,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={4}>
           <View>
             {sectionLabel(t('profile.sectionPreferences'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               {/* "Mis viajes": tras quitar el bottom tab, el historial se alcanza desde acá (decisión de
                   producto). Navega a la pantalla `TripHistory` del stack. */}
               <ListItem
@@ -590,21 +609,17 @@ export function ProfileScreen(): React.JSX.Element {
                 chevron
                 onPress={() => navigation.navigate('SavedPlaces')}
               />
-              <ListItem
-                title={t('profile.scheduledTrips')}
-                leading={<IconClock color={accent} size={glyph} />}
-                chevron
-                onPress={() => navigation.navigate('ScheduledTrips')}
-              />
+              {/* "Viajes programados" se quitó: los programados viven en el tab Viajes>Próximos
+                  del bottom nav (consolidación — la pantalla aparte se eliminó). */}
               <ListItem
                 title={t('profile.referrals')}
                 leading={<IconGift color={accent} size={glyph} />}
                 chevron
                 onPress={() => navigation.navigate('Referrals')}
               />
-              {/* Notificaciones push: refleja el estado REAL del SO y lo gestiona. 'undetermined' →
-                  dispara el permiso (diálogo del SO); 'granted'/'denied' → abre Ajustes del SO (el SO
-                  no deja revocar/activar desde la app una vez decidido). Responde "¿dónde lo activo?". */}
+              {/* Notificaciones (per pen Profile · bell = PREFERENCIAS): navega a NotificationPrefs.
+                  El subtítulo sigue reflejando el estado REAL del permiso del SO (honesto); la acción
+                  de activar/ir a Ajustes ahora vive DENTRO de la pantalla de preferencias (banner). */}
               <ListItem
                 title={t('profile.notifications')}
                 subtitle={
@@ -617,27 +632,31 @@ export function ProfileScreen(): React.JSX.Element {
                         : t('profile.notificationsOff')
                 }
                 leading={<IconBell color={accent} size={glyph} />}
-                trailing={
-                  push.status === 'granted' ? (
-                    <StatusPill
-                      label={t('profile.notificationsPill')}
-                      tone="success"
-                      dot
-                    />
-                  ) : undefined
-                }
-                chevron={
-                  push.status === 'undetermined' || push.status === 'denied'
-                }
-                onPress={() => {
-                  if (push.status === 'undetermined') {
-                    void push.enable();
-                  } else if (push.status !== 'loading') {
-                    void Linking.openSettings();
-                  }
-                }}
+                chevron
+                onPress={() => navigation.navigate('NotificationPrefs')}
               />
-            </Card>
+              {/* Avisos: el FEED (pantalla 'Notifications') no pierde su acceso al mover la campana
+                  del pen a preferencias. */}
+              <ListItem
+                title={t('profile.notificationsFeed')}
+                leading={<IconBell color={accent} size={glyph} />}
+                chevron
+                onPress={() => navigation.navigate('Notifications')}
+              />
+              {/* Idioma y región (pen c4cChO, icono globe). Sin selector real todavía: sheet honesto
+                  que dice la verdad ("la app está en español (Perú)"), patrón cameraControl. */}
+              <ListItem
+                title={t('profile.languageRegion')}
+                leading={<IconGlobe color={accent} size={glyph} />}
+                trailing={
+                  <StatusPill
+                    label={t('profile.comingSoonTitle')}
+                    tone="neutral"
+                  />
+                }
+                onPress={() => setComingSoon('language')}
+              />
+            </ListGroup>
           </View>
         </EnterView>
 
@@ -645,7 +664,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={5}>
           <View>
             {sectionLabel(t('profile.sectionPromotions'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               <ListItem
                 title={t('profile.promotions')}
                 subtitle={t('profile.promotionsSub')}
@@ -661,7 +680,7 @@ export function ProfileScreen(): React.JSX.Element {
                   />
                 }
               />
-            </Card>
+            </ListGroup>
           </View>
         </EnterView>
 
@@ -669,7 +688,7 @@ export function ProfileScreen(): React.JSX.Element {
         <EnterView index={6}>
           <View>
             {sectionLabel(t('profile.sectionAccount'))}
-            <Card variant="outlined" padding="sm">
+            <ListGroup>
               <ListItem
                 title={t('profile.accessibility')}
                 leading={<IconAccessibility color={accent} size={glyph} />}
@@ -687,6 +706,20 @@ export function ProfileScreen(): React.JSX.Element {
                 chevron
                 onPress={() => navigation.navigate('Help')}
               />
+              {/* Términos y privacidad (pen c4cChO, icono file-text), ANTES de eliminar cuenta.
+                  No existe URL de términos/política en config/env (gap reportado): mientras no la
+                  haya, sheet coming-soon honesto en vez de un Linking.openURL a la nada. */}
+              <ListItem
+                title={t('profile.termsPrivacy')}
+                leading={<IconFileText color={accent} size={glyph} />}
+                trailing={
+                  <StatusPill
+                    label={t('profile.comingSoonTitle')}
+                    tone="neutral"
+                  />
+                }
+                onPress={() => setComingSoon('terms')}
+              />
               <ListItem
                 title={t('profile.deletion')}
                 leading={<IconTrash color={danger} size={glyph} />}
@@ -698,7 +731,7 @@ export function ProfileScreen(): React.JSX.Element {
                 leading={<IconPower color={danger} size={glyph} />}
                 onPress={() => setLogoutOpen(true)}
               />
-            </Card>
+            </ListGroup>
           </View>
         </EnterView>
       </ScrollView>
@@ -764,6 +797,23 @@ export function ProfileScreen(): React.JSX.Element {
             }
             note={t('profile.documentNote')}
           />
+
+          {/* CAMBIAR NÚMERO (regla del dueño: el cambio re-verifica con OTP al número NUEVO, que
+              pasa a ser el de ingreso). El backend phone-link ya cumplía esa semántica; faltaba la
+              ENTRADA con teléfono existente (antes solo aparecía vía chip de completitud al faltar). */}
+          {profile.phone ? (
+            <ListItem
+              title={t('profile.changePhone')}
+              subtitle={profile.phone}
+              chevron
+              onPress={() => {
+                setEditOpen(false);
+                // iOS no presenta un Modal mientras otro se está DESCARTANDO: abrir el sheet de
+                // teléfono recién cuando el editor terminó su animación de cierre (~300ms).
+                setTimeout(() => setPhoneOpen(true), 350);
+              }}
+            />
+          ) : null}
         </View>
       </BottomSheet>
 
@@ -863,15 +913,13 @@ export function ProfileScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  // Identidad en card left-aligned (espejo del ProfileIdentityCard del conductor): avatar + info column.
+  identityRow: {flexDirection: 'row', alignItems: 'center', gap: 16},
+  identityInfo: {flex: 1, gap: 6},
+  nameText: {flexShrink: 1},
+  editBtn: {alignSelf: 'flex-start'},
   nameRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
   ratingRow: {flexDirection: 'row', alignItems: 'center', gap: 4},
-  verifiedTick: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   addNameCta: {paddingVertical: 2},
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   chip: {

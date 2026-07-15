@@ -33,7 +33,6 @@ describe('Validación de DTOs', () => {
   it('RequestAccessDto: reason exige > 20 caracteres', async () => {
     const ok = {
       tripId: '0b5d8f3e-1b2c-4d5e-8f90-1234567890ab',
-      operatorEmail: 'op@veo.pe',
       reason: 'Investigación de incidente reportado por pasajero',
     };
     expect(await errorsOf(RequestAccessDto, ok)).toEqual([]);

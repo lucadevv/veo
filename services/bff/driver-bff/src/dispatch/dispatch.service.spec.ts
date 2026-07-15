@@ -28,12 +28,29 @@ function matchReply(): MatchReply {
 }
 
 function makeService(opts: { driverFound?: boolean; match?: MatchReply } = {}) {
-  // grpc.call: GetMatch (dispatch) y GetDriverByUser (identity) llegan a la MISMA mock; discriminamos
-  // por el método para devolver el reply correcto.
+  // grpc.call: GetMatch (dispatch), GetDriverByUser (identity) y GetTrip (trip, enriquecimiento de la
+  // oferta) llegan a la MISMA mock; discriminamos por servicio+método para devolver el reply correcto.
   const grpc = {
     call: vi.fn((service: string, method: string) => {
       if (service === 'identity' && method === 'GetDriverByUser') {
         return Promise.resolve({ id: 'drv-9', userId: 'usr-1', found: opts.driverFound ?? true });
+      }
+      if (service === 'trip' && method === 'GetTrip') {
+        // Resumen de DECISIÓN que la oferta enriquece (found=true → la oferta se sirve).
+        return Promise.resolve({
+          found: true,
+          id: 'trip-1',
+          passengerId: 'psg-1',
+          originLat: -12,
+          originLng: -77,
+          destinationLat: -12.1,
+          destinationLng: -77.1,
+          fareCents: 1500,
+          distanceMeters: 3200,
+          durationSeconds: 600,
+          childMode: false,
+          specialRequests: [],
+        });
       }
       return Promise.resolve(opts.match ?? matchReply());
     }),
@@ -42,7 +59,9 @@ function makeService(opts: { driverFound?: boolean; match?: MatchReply } = {}) {
     Promise.resolve({ ok: true }),
   );
   const rest = { client: vi.fn(() => ({ post, get: vi.fn() })) };
-  const service = new DispatchService(grpc as never, rest as never);
+  // Badge de confianza (ADR-018) resuelto por el provider compartido; en el test degrada a false.
+  const passengerVerification = { resolve: vi.fn(() => Promise.resolve(false)) };
+  const service = new DispatchService(grpc as never, rest as never, passengerVerification as never);
   return { service, grpc, post };
 }
 

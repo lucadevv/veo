@@ -1,12 +1,22 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ConfigService } from '@nestjs/config';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@veo/utils';
-import { AccessService } from './access.service';
+import {
+  ConflictError,
+  ExternalServiceError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '@veo/utils';
+import { AccessService, StreamStatus } from './access.service';
+import { PrismaMediaRepository } from './media.repository';
 import { StorageSandboxAdapter } from '../ports/storage/storage.module';
-import { VideoAccessStatus } from '../generated/prisma';
+import { VideoAccessStatus, VideoRenderStatus } from '../generated/prisma';
 import type { Env } from '../config/env.schema';
 
-const config = new ConfigService<Env, true>({ SIGNED_URL_TTL_SECONDS: 300 });
+const config = new ConfigService<Env, true>({
+  SIGNED_URL_TTL_SECONDS: 300,
+  WATERMARK_RENDER_MAX_ATTEMPTS: 3,
+});
 
 interface Segment {
   id: string;
@@ -30,6 +40,12 @@ interface AccessRequest {
   rejectedAt: Date | null;
   signedUrlExpiresAt: Date | null;
   watermark: string | null;
+  renderStatus: VideoRenderStatus | null;
+  renderedS3Key: string | null;
+  renderRequestedAt: Date | null;
+  renderedAt: Date | null;
+  renderError: string | null;
+  renderAttempts: number;
   createdAt: Date;
 }
 
@@ -87,10 +103,38 @@ function makePrisma(segments: Segment[], requests: AccessRequest[]) {
           requests.push({ ...data });
           return data;
         },
+        // UPDATE CONDICIONAL del re-disparo de render (FIX lost-update): aplica `data` SOLO si la fila VIVA
+        // matchea la guarda `OR` (renderStatus null | FAILED&attempts<cap). Modela el guard atómico de
+        // Prisma evaluando contra el ESTADO ACTUAL del store, no contra el snapshot leído por streamAccess.
+        updateMany: async ({ where, data }: UpdateManyArgs): Promise<{ count: number }> => {
+          const r = requests.find((x) => x.id === where.id);
+          if (!r) return { count: 0 };
+          const matches =
+            !where.OR ||
+            where.OR.some((cond) => {
+              const statusOk = !('renderStatus' in cond) || r.renderStatus === cond.renderStatus;
+              const attemptsOk =
+                cond.renderAttempts === undefined || r.renderAttempts < cond.renderAttempts.lt;
+              return statusOk && attemptsOk;
+            });
+          if (!matches) return { count: 0 };
+          applyUpdate(r as unknown as Record<string, unknown>, data);
+          return { count: 1 };
+        },
       },
     },
   };
   return prisma;
+}
+
+/** Guarda condicional del re-disparo de render (espeja el WHERE del updateMany de streamAccess). */
+interface RenderGuard {
+  renderStatus?: VideoRenderStatus | null;
+  renderAttempts?: { lt: number };
+}
+interface UpdateManyArgs {
+  where: { id: string; OR?: RenderGuard[] };
+  data: Record<string, unknown>;
 }
 
 function segment(over: Partial<Segment> = {}): Segment {
@@ -120,6 +164,12 @@ function pendingRequest(over: Partial<AccessRequest> = {}): AccessRequest {
     rejectedAt: null,
     signedUrlExpiresAt: null,
     watermark: null,
+    renderStatus: null,
+    renderedS3Key: null,
+    renderRequestedAt: null,
+    renderedAt: null,
+    renderError: null,
+    renderAttempts: 0,
     createdAt: new Date('2026-05-28T22:00:00.000Z'),
     ...over,
   };
@@ -128,7 +178,7 @@ function pendingRequest(over: Partial<AccessRequest> = {}): AccessRequest {
 describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => {
   it('rechaza un motivo de 20 caracteres o menos', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -146,7 +196,7 @@ describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => 
   it('crea la solicitud en estado PENDING cuando el motivo supera los 20 caracteres', async () => {
     const reqs: AccessRequest[] = [];
     const svc = new AccessService(
-      makePrisma([segment()], reqs) as never,
+      new PrismaMediaRepository(makePrisma([segment()], reqs) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -163,7 +213,7 @@ describe('AccessService.requestAccess · validación de motivo (BR-S02)', () => 
   });
 
   it('falla si no hay video para el viaje', async () => {
-    const svc = new AccessService(makePrisma([], []) as never, new StorageSandboxAdapter(), config);
+    const svc = new AccessService(new PrismaMediaRepository(makePrisma([], []) as never), new StorageSandboxAdapter(), config);
     await expect(
       svc.requestAccess({
         tripId: 'trip-x',
@@ -182,7 +232,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
     const seg = segment();
     const req = pendingRequest();
     const svc = new AccessService(
-      makePrisma([seg], [req]) as never,
+      new PrismaMediaRepository(makePrisma([seg], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -198,6 +248,35 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
     expect(seg.accessedCount).toBe(0);
   });
 
+  it('FOUR-EYES (Ley 29733): rechaza aprobar la PROPIA solicitud (approverId === requestedBy)', async () => {
+    // El solicitante (op-1) intenta aprobar su propia solicitud: doble control por personas DISTINTAS.
+    const req = pendingRequest({ requestedBy: 'op-1' });
+    const svc = new AccessService(
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
+      new StorageSandboxAdapter(),
+      config,
+    );
+    await expect(svc.approveAccess('req-1', 'op-1', now)).rejects.toBeInstanceOf(ForbiddenError);
+    // No transicionó: sigue PENDING, sin aprobador sellado.
+    expect(req.status).toBe(VideoAccessStatus.PENDING);
+    expect(req.approvedBy).toBeNull();
+    expect(req.approvedAt).toBeNull();
+  });
+
+  it('FOUR-EYES: aprobar la solicitud de OTRO operador sigue funcionando (APPROVED)', async () => {
+    // requestedBy=op-1, approver=compliance-2 (persona distinta) → aprueba correctamente.
+    const req = pendingRequest({ requestedBy: 'op-1' });
+    const svc = new AccessService(
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
+      new StorageSandboxAdapter(),
+      config,
+    );
+    const res = await svc.approveAccess('req-1', 'compliance-2', now);
+    expect(res.status).toBe(VideoAccessStatus.APPROVED);
+    expect(res.approvedBy).toBe('compliance-2');
+    expect(res.approvedAt).toEqual(now);
+  });
+
   it('no permite aprobar una solicitud ya decidida (guard de transición)', async () => {
     const req = pendingRequest({
       status: VideoAccessStatus.APPROVED,
@@ -205,7 +284,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
       approvedAt: now,
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -221,7 +300,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
       rejectedAt: now,
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -232,7 +311,7 @@ describe('AccessService.approveAccess · transición de estado PENDING → APPRO
 
   it('falla si la solicitud no existe', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -248,7 +327,7 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
   it('rechaza: marca REJECTED + rejectedBy + rejectedAt', async () => {
     const req = pendingRequest();
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -267,7 +346,7 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
       approvedAt: now,
     });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -278,7 +357,7 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
 
   it('falla si la solicitud no existe', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -288,57 +367,168 @@ describe('AccessService.rejectAccess · transición de estado PENDING → REJECT
   });
 });
 
-describe('AccessService.streamAccess · firma URL + watermark fresco, solo si APPROVED (BR-S02)', () => {
+describe('AccessService.streamAccess · burn-in: presigna SOLO la copia derivada, nunca el crudo (BR-S02)', () => {
   const now = new Date('2026-05-28T23:45:00.000Z');
 
-  it('firma signed URL (5 min), watermark con el email y suma accessedCount cuando está APPROVED', async () => {
+  it('READY: presigna renderedS3Key (NUNCA segment.s3Key), audita la vista y suma accessedCount', async () => {
     const seg = segment();
     const req = pendingRequest({
       status: VideoAccessStatus.APPROVED,
-      approvedBy: 'compliance-1',
-      approvedAt: now,
+      renderStatus: VideoRenderStatus.READY,
+      renderedS3Key: 'watermarked/req-1.mp4',
+      watermark: 'VEO · ana@veo.pe · req-1 · 2026-05-28T23:40:00.000Z',
+    });
+    const storage = new StorageSandboxAdapter();
+    const presignSpy = vi.spyOn(storage, 'presignDownloadUrl');
+    const svc = new AccessService(new PrismaMediaRepository(makePrisma([seg], [req]) as never), storage, config);
+
+    const res = await svc.streamAccess('req-1', 'compliance-1', now);
+
+    expect(res.status).toBe(StreamStatus.READY);
+    if (res.status !== StreamStatus.READY) throw new Error('esperaba READY');
+    // INVARIANTE DE SEGURIDAD: se firmó la COPIA derivada, jamás el crudo.
+    expect(presignSpy).toHaveBeenCalledTimes(1);
+    expect(presignSpy.mock.calls[0]?.[0]?.key).toBe('watermarked/req-1.mp4');
+    expect(presignSpy.mock.calls[0]?.[0]?.key).not.toBe(seg.s3Key);
+    expect(res.signedUrl).toContain('watermarked/req-1.mp4');
+    expect(res.signedUrl).not.toContain('recordings/trip-1/seg-1.mp4');
+    // watermark = el texto YA quemado (persistido), no recomputado
+    expect(res.watermark).toBe('VEO · ana@veo.pe · req-1 · 2026-05-28T23:40:00.000Z');
+    expect(res.segmentId).toBe('seg-1');
+    expect(res.expiresAt.getTime() - now.getTime()).toBe(300 * 1000);
+    // cada visualización se audita: el segmento queda marcado como accedido
+    expect(seg.accessedCount).toBe(1);
+    expect(seg.lastAccessedAt).toEqual(now);
+    expect(req.signedUrlExpiresAt).toEqual(res.expiresAt);
+  });
+
+  it('render NUNCA pedido (null): devuelve PROCESSING, marca PENDING y NO presigna nada', async () => {
+    const req = pendingRequest({ status: VideoAccessStatus.APPROVED, renderStatus: null });
+    const storage = new StorageSandboxAdapter();
+    const presignSpy = vi.spyOn(storage, 'presignDownloadUrl');
+    const svc = new AccessService(new PrismaMediaRepository(makePrisma([segment()], [req]) as never), storage, config);
+
+    const res = await svc.streamAccess('req-1', 'compliance-1', now);
+
+    expect(res.status).toBe(StreamStatus.PROCESSING);
+    expect(presignSpy).not.toHaveBeenCalled();
+    // disparó el worker lazy: PENDING + renderRequestedAt sellado; attempts NO se toca acá
+    expect(req.renderStatus).toBe(VideoRenderStatus.PENDING);
+    expect(req.renderRequestedAt).toEqual(now);
+    expect(req.renderAttempts).toBe(0);
+  });
+
+  it('CONCURRENCIA (lost-update): si el worker deja READY entre el read y el update, NO clobberea READY→PENDING', async () => {
+    // Fila VIVA: el worker YA la dejó READY con su copia (renderAttempts=1).
+    const liveRow = pendingRequest({
+      status: VideoAccessStatus.APPROVED,
+      renderStatus: VideoRenderStatus.READY,
+      renderedS3Key: 'watermarked/req-1.mp4',
+      renderAttempts: 1,
+    });
+    // Snapshot STALE que ve streamAccess en su findUnique: leyó el render como `null` ANTES de que el worker
+    // terminara. El update INCONDICIONAL viejo habría pisado el READY de la fila viva con un PENDING espurio.
+    const staleSnapshot: AccessRequest = { ...liveRow, renderStatus: null, renderedS3Key: null };
+    const storage = new StorageSandboxAdapter();
+    const presignSpy = vi.spyOn(storage, 'presignDownloadUrl');
+    const prisma = {
+      read: {
+        videoAccessRequest: { findUnique: async () => staleSnapshot },
+        mediaSegment: { findUnique: async () => segment(), findFirst: async () => segment() },
+      },
+      write: {
+        videoAccessRequest: {
+          // El guard CONDICIONAL evalúa contra la fila VIVA (READY) → NO matchea (excluye READY) → count 0.
+          updateMany: async ({ where }: UpdateManyArgs): Promise<{ count: number }> => {
+            const matches = (where.OR ?? []).some(
+              (c) =>
+                (!('renderStatus' in c) || liveRow.renderStatus === c.renderStatus) &&
+                (c.renderAttempts === undefined || liveRow.renderAttempts < c.renderAttempts.lt),
+            );
+            if (matches) {
+              liveRow.renderStatus = VideoRenderStatus.PENDING;
+              return { count: 1 };
+            }
+            return { count: 0 };
+          },
+        },
+      },
+    };
+    const svc = new AccessService(new PrismaMediaRepository(prisma as never), storage, config);
+
+    const res = await svc.streamAccess('req-1', 'compliance-1', now);
+
+    expect(res.status).toBe(StreamStatus.PROCESSING);
+    // El READY de la fila viva NO fue pisado por un PENDING espurio (la carrera está cerrada).
+    expect(liveRow.renderStatus).toBe(VideoRenderStatus.READY);
+    expect(presignSpy).not.toHaveBeenCalled();
+  });
+
+  it('PENDING / PROCESSING: PROCESSING idempotente, no re-dispara ni presigna', async () => {
+    const storage = new StorageSandboxAdapter();
+    const presignSpy = vi.spyOn(storage, 'presignDownloadUrl');
+    const requestedAt = new Date('2026-05-28T23:00:00.000Z');
+
+    for (const status of [VideoRenderStatus.PENDING, VideoRenderStatus.PROCESSING]) {
+      const req = pendingRequest({
+        status: VideoAccessStatus.APPROVED,
+        renderStatus: status,
+        renderRequestedAt: requestedAt,
+        renderAttempts: 1,
+      });
+      const svc = new AccessService(new PrismaMediaRepository(makePrisma([segment()], [req]) as never), storage, config);
+
+      const res = await svc.streamAccess('req-1', 'compliance-1', now);
+
+      expect(res.status).toBe(StreamStatus.PROCESSING);
+      // idempotente: no re-sella renderRequestedAt ni toca attempts
+      expect(req.renderStatus).toBe(status);
+      expect(req.renderRequestedAt).toEqual(requestedAt);
+      expect(req.renderAttempts).toBe(1);
+    }
+    expect(presignSpy).not.toHaveBeenCalled();
+  });
+
+  it('FAILED con intentos disponibles: re-dispara (PROCESSING + PENDING)', async () => {
+    const req = pendingRequest({
+      status: VideoAccessStatus.APPROVED,
+      renderStatus: VideoRenderStatus.FAILED,
+      renderAttempts: 1, // < cap (3)
+      renderError: 'STORAGE_OR_RENDER_FAILED',
     });
     const svc = new AccessService(
-      makePrisma([seg], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
 
     const res = await svc.streamAccess('req-1', 'compliance-1', now);
 
-    expect(res.signedUrl).toContain('recordings/trip-1/seg-1.mp4');
-    expect(res.watermark).toContain('ana@veo.pe');
-    expect(res.watermark).toContain('req-1');
-    expect(res.segmentId).toBe('seg-1');
-    // 5 minutos exactos
-    expect(res.expiresAt.getTime() - now.getTime()).toBe(300 * 1000);
-    // cada visualización se audita: el segmento queda marcado como accedido
-    expect(seg.accessedCount).toBe(1);
-    expect(seg.lastAccessedAt).toEqual(now);
-    // se persiste la ventana de la última vista
-    expect(req.signedUrlExpiresAt).toEqual(res.expiresAt);
-    expect(req.watermark).toBe(res.watermark);
+    expect(res.status).toBe(StreamStatus.PROCESSING);
+    expect(req.renderStatus).toBe(VideoRenderStatus.PENDING);
+    expect(req.renderRequestedAt).toEqual(now);
   });
 
-  it('cada reproducción incrementa accessedCount (cadena de custodia)', async () => {
-    const seg = segment();
-    const req = pendingRequest({ status: VideoAccessStatus.APPROVED });
+  it('FAILED con intentos agotados (≥ cap): error TIPADO, no loop infinito de PROCESSING', async () => {
+    const req = pendingRequest({
+      status: VideoAccessStatus.APPROVED,
+      renderStatus: VideoRenderStatus.FAILED,
+      renderAttempts: 3, // = cap
+    });
     const svc = new AccessService(
-      makePrisma([seg], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
-
-    await svc.streamAccess('req-1', 'compliance-1', now);
-    await svc.streamAccess('req-1', 'compliance-1', now);
-
-    expect(seg.accessedCount).toBe(2);
+    await expect(svc.streamAccess('req-1', 'compliance-1', now)).rejects.toBeInstanceOf(
+      ExternalServiceError,
+    );
   });
 
-  it('rechaza la visualización si la solicitud está PENDING (no aprobada)', async () => {
+  it('rechaza la visualización si la DECISIÓN está PENDING (no aprobada)', async () => {
     const req = pendingRequest({ status: VideoAccessStatus.PENDING });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -347,10 +537,10 @@ describe('AccessService.streamAccess · firma URL + watermark fresco, solo si AP
     );
   });
 
-  it('rechaza la visualización si la solicitud está REJECTED', async () => {
+  it('rechaza la visualización si la DECISIÓN está REJECTED', async () => {
     const req = pendingRequest({ status: VideoAccessStatus.REJECTED });
     const svc = new AccessService(
-      makePrisma([segment()], [req]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [req]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -361,7 +551,7 @@ describe('AccessService.streamAccess · firma URL + watermark fresco, solo si AP
 
   it('falla si la solicitud no existe', async () => {
     const svc = new AccessService(
-      makePrisma([segment()], []) as never,
+      new PrismaMediaRepository(makePrisma([segment()], []) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -382,7 +572,7 @@ describe('AccessService.listAccessRequests · filtro por estado, orden createdAt
       createdAt: new Date('2026-05-28T12:00:00.000Z'),
     });
     const svc = new AccessService(
-      makePrisma([segment()], [older, newer]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [older, newer]) as never),
       new StorageSandboxAdapter(),
       config,
     );
@@ -396,7 +586,7 @@ describe('AccessService.listAccessRequests · filtro por estado, orden createdAt
     const pending = pendingRequest({ id: 'req-p', status: VideoAccessStatus.PENDING });
     const approved = pendingRequest({ id: 'req-a', status: VideoAccessStatus.APPROVED });
     const svc = new AccessService(
-      makePrisma([segment()], [pending, approved]) as never,
+      new PrismaMediaRepository(makePrisma([segment()], [pending, approved]) as never),
       new StorageSandboxAdapter(),
       config,
     );

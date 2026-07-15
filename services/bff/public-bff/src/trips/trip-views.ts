@@ -8,6 +8,7 @@ import { ExternalServiceError } from '@veo/utils';
 import type {
   AggregateReply,
   DriverReply,
+  DriverTripStatsReply,
   PassengerTripsReply,
   TripHistoryItemReply,
   TripReply,
@@ -24,6 +25,8 @@ export interface TripDriverView {
   backgroundCheckStatus: string;
   rating: number | null;
   ratingCount: number;
+  /** Conteo de viajes COMPLETED del conductor, señal de confianza ("N viajes" en la card del pasajero). */
+  tripCount: number;
 }
 
 export interface TripVehicleView {
@@ -78,6 +81,21 @@ export interface TripDetailView {
    * no la tiene. La app la pinta en el mapa del detalle; si es null degrada a línea recta origen→destino.
    */
   routePolyline: string | null;
+  /**
+   * Modo de despacho CONGELADO del viaje (ADR-011, resolve-once-persist): 'PUJA' | 'FIXED'. La app lo
+   * necesita para REHIDRATAR `activeTripMode` tras un relanzamiento a mitad de la búsqueda (sin él, un
+   * FIXED EXPIRED caía a la fase de re-puja). `null` solo ante un valor fuera de contrato del downstream
+   * (fail-safe: la app degrada al comportamiento PUJA histórico, nunca rompe el parseo).
+   */
+  dispatchMode: 'PUJA' | 'FIXED' | null;
+  /**
+   * Tier SOLICITADO del viaje (CAR|MOTO), derivado de la oferta al crear (ADR 013). La app lo usa para
+   * pintar el vehículo CORRECTO (marker del mapa + animación del sheet) también al REHIDRATAR un viaje
+   * (antes solo lo traía el POST /trips → un relaunch o la adopción por 409 caían al glyph de auto).
+   * `null` ante un valor fuera de contrato o un trip-service con proto viejo (fail-safe: la app degrada
+   * al auto, comportamiento histórico).
+   */
+  vehicleType: 'CAR' | 'MOTO' | null;
   driver: TripDriverView | null;
   vehicle: TripVehicleView | null;
   /**
@@ -150,6 +168,7 @@ export function toTripStatus(raw: string): TripStatus {
 export function buildDriverView(
   driver: DriverReply | null,
   aggregate: AggregateReply | null,
+  tripStats: DriverTripStatsReply | null = null,
 ): TripDriverView | null {
   if (!driver) return null;
   const rating =
@@ -166,6 +185,8 @@ export function buildDriverView(
     backgroundCheckStatus: driver.backgroundCheckStatus,
     rating,
     ratingCount: aggregate?.count30d ?? 0,
+    // Viajes COMPLETED del conductor (trip-service); best-effort, 0 si no se pudo resolver.
+    tripCount: tripStats?.completedTrips ?? 0,
   };
 }
 
@@ -190,6 +211,8 @@ export function buildTripDetail(
   vehicle: VehicleReply | null,
   tipCents = 0,
   myRatingStars: number | null = null,
+  // Al FINAL (con default) para no correr los callers posicionales existentes; alimenta el tripCount del conductor.
+  tripStats: DriverTripStatsReply | null = null,
 ): TripDetailView {
   return {
     id: trip.id,
@@ -215,7 +238,13 @@ export function buildTripDetail(
     // Paradas intermedias del trip del servidor (passthrough gRPC); [] si directo (proto3 nunca null).
     waypoints: trip.waypoints ?? [],
     routePolyline: trip.routePolyline || null,
-    driver: buildDriverView(driver, aggregate),
+    // Modo congelado (ADR-011). Fuera de contrato ('' del EMPTY_TRIP u otro drift) → null, nunca lanza.
+    dispatchMode:
+      trip.dispatchMode === 'PUJA' || trip.dispatchMode === 'FIXED' ? trip.dispatchMode : null,
+    // Tier solicitado (ADR 013). Fuera de contrato ('' / proto viejo sin el campo) → null, nunca lanza.
+    vehicleType:
+      trip.vehicleType === 'CAR' || trip.vehicleType === 'MOTO' ? trip.vehicleType : null,
+    driver: buildDriverView(driver, aggregate, tripStats),
     vehicle: buildVehicleView(vehicle),
     myRatingStars,
   };

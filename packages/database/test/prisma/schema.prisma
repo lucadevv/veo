@@ -1,0 +1,31 @@
+// Schema MÍNIMO solo para los tests de testcontainers de @veo/database (NO es un servicio).
+// Reproduce EXACTAMENTE el modelo OutboxEvent que `OUTBOX_PRISMA_MODEL` documenta (mismo mapeo de
+// columnas snake_case, mismo índice, mismo schema lógico) para ejercitar el SQL raw real del
+// PrismaOutboxStore (claim/ack/sweep) contra un Postgres REAL — no un mock.
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["outbox_test"]
+}
+
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
+
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq])
+  @@map("outbox_events")
+  @@schema("outbox_test")
+}

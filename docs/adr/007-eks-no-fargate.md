@@ -1,6 +1,8 @@
 # ADR-007 · EKS sobre ECS Fargate
 
-**Estado:** Aceptado · **Fecha:** 2026-05-27
+> **REEMPLAZADO (2026-06-24)** por el modelo VPS self-hosted (FOUNDATION §0.7(c)): producción es VPS único + Docker Compose + GitHub Actions. EKS/Karpenter/Linkerd-as-mesh/External-Secrets quedan obsoletos. Este ADR se conserva como registro histórico.
+
+**Estado:** Reemplazado (modelo VPS) · **Fecha:** 2026-05-27
 
 ## Contexto
 

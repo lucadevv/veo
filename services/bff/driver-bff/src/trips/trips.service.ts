@@ -18,13 +18,28 @@ import type { LatLon, MapsClient } from '@veo/maps';
 import { GrpcGateway } from '../infra/grpc.gateway';
 import { RestGateway } from '../infra/rest.gateway';
 import { MAPS } from '../infra/maps.client';
-import type { DriverReply, TripReply, TripStateReply } from '../common/grpc-replies';
+import type {
+  AggregateReply,
+  DriverReply,
+  PassengerTripsReply,
+  PassengerTripStatsReply,
+  PaymentReply,
+  PendingCashReply,
+  TripHistoryItem,
+  TripReply,
+  TripStateReply,
+  UserReply,
+} from '../common/grpc-replies';
 import type {
   AcceptTripDto,
   ArrivingTripDto,
   CancelTripDto,
+  CashConfirmDto,
   CompleteTripDto,
+  PendingCashView,
   StartTripDto,
+  TripHistoryItemView,
+  TripHistoryPageView,
   TripRouteView,
   TripStateView,
   TripView,
@@ -56,7 +71,12 @@ function toTripStatus(raw: string): TripStatus {
   return normalized;
 }
 
-export function toTripView(trip: TripReply): TripView {
+export function toTripView(
+  trip: TripReply,
+  passengerFirstName: string | null = null,
+  agg: AggregateReply | null = null,
+  tripStats: PassengerTripStatsReply | null = null,
+): TripView {
   return {
     id: trip.id,
     passengerId: trip.passengerId,
@@ -70,6 +90,48 @@ export function toTripView(trip: TripReply): TripView {
     paymentMethod: trip.paymentMethod,
     childMode: trip.childMode,
     penaltyCents: trip.penaltyCents,
+    // PII mínima (Ley 29733): solo el PRIMER nombre, y SOLO cuando el caller lo resolvió (detalle post-aceptación).
+    passengerFirstName,
+    // Señales de confianza del pasajero (agregados, NO identifican): rating rolling 30d + conteo de
+    // calificaciones + viajes COMPLETED de por vida. Degradación honesta: null/0 si el downstream no responde.
+    passengerRating: agg && agg.count30d > 0 ? agg.rollingAvg30d : null,
+    passengerRatingCount: agg?.count30d ?? 0,
+    passengerTripCount: tripStats?.completedTrips ?? 0,
+  };
+}
+
+/**
+ * Mapea un item gRPC del historial (PassengerTripsReply.items, reusado por ListDriverTrips) a la vista
+ * mobile del conductor. Espejo del `buildTripHistoryItem` del pasajero: normaliza el status crudo del
+ * downstream (CANCELLED_BY_* → CANCELLED, igual que el detalle) y re-mapea los '' de proto3 a null. Sin
+ * lookups extra (anti-N+1).
+ */
+export function buildTripHistoryItem(it: TripHistoryItem): TripHistoryItemView {
+  return {
+    id: it.id,
+    status: toTripStatus(it.status),
+    origin: { lat: it.originLat, lng: it.originLng },
+    destination: { lat: it.destinationLat, lng: it.destinationLng },
+    fareCents: it.fareCents,
+    currency: it.currency,
+    paymentMethod: it.paymentMethod,
+    distanceMeters: it.distanceMeters,
+    durationSeconds: it.durationSeconds,
+    requestedAt: it.requestedAt,
+    // proto3 '' → null en los opcionales.
+    completedAt: it.completedAt || null,
+    cancelledAt: it.cancelledAt || null,
+    driverId: it.driverId || null,
+    vehicleType: it.vehicleType,
+    category: it.category || null,
+  };
+}
+
+/** Mapea la página gRPC del historial a la vista mobile del conductor (items + nextCursor; '' → null). */
+export function buildTripHistoryPage(reply: PassengerTripsReply): TripHistoryPageView {
+  return {
+    items: reply.items.map(buildTripHistoryItem),
+    nextCursor: reply.nextCursor || null,
   };
 }
 
@@ -97,7 +159,33 @@ export class TripsService {
     if (!driver.found || trip.driverId !== driver.id) {
       throw new NotFoundError('Viaje no encontrado');
     }
-    return toTripView(trip);
+    // ADR-018 §1(3) · el badge de confianza YA NO vive acá (se movió a la OFERTA · dispatch.getOffer).
+    // Header del chat (frame C/Chat): resolvemos SOLO el PRIMER nombre del pasajero (PII MÍNIMA · Ley
+    // 29733 — nunca el nombre completo ni el teléfono), post-aceptación. GetUser a identity, nos quedamos
+    // con el primer token; degradación honesta: null si identity no responde o el pasajero no tiene nombre.
+    // Ver docs/compliance/ley-29733/passenger-first-name-driver-chat.md.
+    // ENRIQUECIMIENTO EN PARALELO (todo keya por trip.passengerId): además del primer nombre, las señales
+    // de confianza del pasajero (rating agregado de rating-service + viajes COMPLETED de trip). Son
+    // AGREGADOS (no identifican), PII mínima OK. Degradación honesta: null en cada uno si su downstream falla.
+    const [passenger, agg, tripStats] = await Promise.all([
+      this.grpc
+        .call<UserReply>('identity', 'GetUser', { id: trip.passengerId }, identity)
+        .catch(() => null),
+      this.grpc
+        .call<AggregateReply>('rating', 'GetAggregate', { subjectId: trip.passengerId }, identity)
+        .catch(() => null),
+      this.grpc
+        .call<PassengerTripStatsReply>(
+          'trip',
+          'GetPassengerTripStats',
+          { passengerId: trip.passengerId },
+          identity,
+        )
+        .catch(() => null),
+    ]);
+    const rawName = passenger?.found ? (passenger.name ?? '').trim() : '';
+    const passengerFirstName = rawName ? (rawName.split(/\s+/)[0] ?? null) : null;
+    return toTripView(trip, passengerFirstName, agg, tripStats);
   }
 
   /**
@@ -119,7 +207,70 @@ export class TripsService {
       { driverId: driver.id },
       identity,
     );
-    return trip.found ? toTripView(trip) : null;
+    if (!trip.found) return null;
+    return toTripView(trip);
+  }
+
+  /**
+   * Historial REAL del conductor autenticado (servidor, no la lista local de la app): SUS viajes ordenados
+   * por requestedAt DESC, paginados por cursor. Espejo del getTripHistory del pasajero, pero filtrando por
+   * el driverId de PERFIL del conductor.
+   *
+   * ANTI-IDOR BY CONSTRUCTION: el driverId NO viene del query — se DERIVA del perfil del conductor
+   * (GetDriverByUser con el userId del JWT), igual que el gate de getTrip/getActiveTrip. `Trip.driverId` es
+   * el id de PERFIL Driver de identity (NO el userId), así que el filtro server-side por ESE driverId hace
+   * que la lista solo pueda contener viajes propios. Sin perfil de conductor → página vacía (no es error).
+   *
+   * ANTI-N+1: la lista NO resuelve datos por-item (mismo criterio que el pasajero); el detalle
+   * (GET /trips/:id) resuelve lo que falte on-demand al abrir el viaje.
+   */
+  async getTripHistory(
+    identity: AuthenticatedUser,
+    cursor?: string,
+    limit?: number,
+  ): Promise<TripHistoryPageView> {
+    const driver = await this.grpc.call<DriverReply>(
+      'identity',
+      'GetDriverByUser',
+      { id: identity.userId },
+      identity,
+    );
+    if (!driver.found) return { items: [], nextCursor: null };
+    const page = await this.grpc.call<PassengerTripsReply>(
+      'trip',
+      'ListDriverTrips',
+      // driverId DERIVADO del perfil, NUNCA del query (anti-IDOR). El limit lo CLAMPea trip-service.
+      { driverId: driver.id, cursor: cursor ?? '', limit: limit ?? 0 },
+      identity,
+    );
+    return buildTripHistoryPage(page);
+  }
+
+  /**
+   * EFECTIVO (resiliencia del force-close) · cobro CASH PENDING que ESTE conductor dejó sin confirmar. Si el
+   * conductor cerró la app sin confirmar el cobro post-viaje, el Payment quedó PENDING para siempre; este GET
+   * alimenta el banner del dashboard que PERSIGUE la confirmación al reabrir. `null` si no tiene ninguno.
+   *
+   * ANTI-IDOR by construction: el driverId NO viene del cliente — se DERIVA del perfil (GetDriverByUser con el
+   * userId del JWT), igual que getActiveTrip/getTripHistory. `Payment.driverId` es el id de PERFIL del conductor
+   * (viene de Trip.driverId, NO el userId), así que payment resuelve el cobro por ESE id. Sin perfil → null.
+   */
+  async getPendingCash(identity: AuthenticatedUser): Promise<PendingCashView | null> {
+    const driver = await this.grpc.call<DriverReply>(
+      'identity',
+      'GetDriverByUser',
+      { id: identity.userId },
+      identity,
+    );
+    if (!driver.found) return null;
+    const pending = await this.grpc.call<PendingCashReply>(
+      'payment',
+      'GetPendingCashByDriver',
+      { driverId: driver.id },
+      identity,
+    );
+    if (!pending.found) return null;
+    return { tripId: pending.tripId, amountCents: pending.amountCents };
   }
 
   async getTripState(id: string, identity: AuthenticatedUser): Promise<TripStateView> {
@@ -164,8 +315,16 @@ export class TripsService {
       // El status (normalizado al contrato mobile) decide si el recojo ya quedó atrás. Lo pedimos por
       // gRPC (GetTripState) SOLO cuando hay `from`: sin posición la rama histórica no necesita el status.
       const { status } = await this.getTripState(id, identity);
-      const intermediate = isOnboard(status) ? waypoints : [resource.origin, ...waypoints];
-      route = await this.maps.routeWithSteps(from, resource.destination, intermediate);
+      if (isOnboard(status)) {
+        // ONBOARD: navegación al destino (con las paradas).
+        route = await this.maps.routeWithSteps(from, resource.destination, waypoints);
+      } else {
+        // PRE-RECOJO: navegación SOLO hasta el recojo, como un nav real. Antes se trazaba
+        // from→recojo→destino y la cola B→C (26 km) tapaba el tramo A→B en el mapa del conductor y
+        // las "Indicaciones" mostraban la distancia del viaje ENTERO yendo a recoger (visto en la
+        // demo del dueño). La ruta del viaje completo es la VISTA DEL PASAJERO, no la del conductor.
+        route = await this.maps.routeWithSteps(from, resource.origin, []);
+      }
     } else {
       route = await this.maps.routeWithSteps(resource.origin, resource.destination, waypoints);
     }
@@ -187,32 +346,47 @@ export class TripsService {
     };
   }
 
+  /**
+   * Las TRANSICIONES devuelven el recurso del viaje CONFORME AL CONTRATO `driverTripView` del app: el
+   * schema exige la clave `passengerFirstName` (nullable — el contrato documenta "el BFF lo resuelve
+   * SOLO en el detalle; el resto de endpoints lo devuelven null"). El recurso CRUDO de trip-service NO
+   * trae esa clave → la validación zod del cliente REVENTABA en CADA tap (accept/arriving/arrived/
+   * start/complete mostraban "Algo salió mal" aunque el POST fuera 200 y la máquina avanzara — la UI
+   * se recuperaba por el socket, enmascarando el bug). Visto en vivo en la demo.
+   */
+  private asDriverTripView(raw: unknown): Record<string, unknown> {
+    return { passengerFirstName: null, ...(raw as Record<string, unknown>) };
+  }
+
   // A1 · ownership server-side (anti-IDOR): las transiciones pre-recojo del conductor verifican que el
   // viaje es de ESTE conductor ANTES de avanzar la máquina de estados (deriva el driverId del perfil y lo
   // pasa al trip-service como 2da capa). Sin esto, un conductor con un tripId ajeno podía dispararle
   // accept/arriving/arrived. Mismo patrón que start/complete/cancel.
   async accept(id: string, dto: AcceptTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/accept`, {
+    const trip = await this.trip().post(`/trips/${id}/accept`, {
       identity: { ...identity, driverId },
       body: { ...dto, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   async arriving(id: string, dto: ArrivingTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arriving`, {
+    const trip = await this.trip().post(`/trips/${id}/arriving`, {
       identity: { ...identity, driverId },
       body: { ...dto, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   async arrived(id: string, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/arrived`, {
+    const trip = await this.trip().post(`/trips/${id}/arrived`, {
       identity: { ...identity, driverId },
       body: { driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   /**
@@ -223,10 +397,11 @@ export class TripsService {
    */
   async start(id: string, dto: StartTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/start`, {
+    const trip = await this.trip().post(`/trips/${id}/start`, {
       identity: { ...identity, driverId },
       body: { ...dto, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   /**
@@ -279,9 +454,48 @@ export class TripsService {
    */
   async complete(id: string, dto: CompleteTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/complete`, {
+    const trip = await this.trip().post(`/trips/${id}/complete`, {
       identity: { ...identity, driverId },
       body: { cashCollected: dto.cashCollected, driverId },
+    });
+    return this.asDriverTripView(trip);
+  }
+
+  /**
+   * EFECTIVO (decisión del dueño 2026-07-14) · el conductor confirma el cobro en mano DESPUÉS de completar
+   * el viaje, desde el resumen — confirmación ÚNICA que captura directo (tiene la plata). El `complete` SIN
+   * `cashCollected` dejó el Payment CASH en PENDING; esta confirmación (`collected=true`) lo CAPTURA;
+   * `collected=false` reporta que NO cobró (discrepancia).
+   *
+   * Anti-IDOR (dos capas):
+   *  1. `assertDriverTrip` deriva el driverId del PERFIL (GetDriverByUser → driver.id) y verifica que el
+   *     viaje es de ESTE conductor. El paymentId NUNCA viaja del cliente.
+   *  2. El paymentId se RESUELVE server-side por el cobro canónico del viaje. Se usa el gRPC
+   *     `GetPaymentByTrip` (resuelve por la dedupKey determinista `trip-completed:{tripId}`) y NO el REST
+   *     `GET /payments/by-trip/:tripId`, porque ese endpoint SOLO devuelve cobros CAPTURED/PARTIALLY_REFUNDED
+   *     (payments.repository.ts:findRefundablePaymentByTrip) — nuestro pago está PENDING hasta esta
+   *     confirmación, así que by-trip daría 404. `found=false` ⇒ el viaje no tiene cobro (404 honesto).
+   *
+   * El payment-service revalida (defensa en profundidad): confirmCash exige que el caller (identidad firmada)
+   * sea el `driver` del pago (compara `callerUserId` contra `payment.driverId`). Como `payment.driverId` es el
+   * id de PERFIL del conductor (viene de `Trip.driverId`, NO del userId), forwardeamos la identidad con
+   * `userId` = el driverId DERIVADO para que el check pase. Si el pago no existe o no es CASH, payment-service
+   * responde el error y se propaga.
+   */
+  async cashConfirm(id: string, dto: CashConfirmDto, identity: AuthenticatedUser): Promise<unknown> {
+    const driverId = await this.assertDriverTrip(id, identity);
+    const payment = await this.grpc.call<PaymentReply>(
+      'payment',
+      'GetPaymentByTrip',
+      { tripId: id },
+      identity,
+    );
+    if (!payment.found) throw new NotFoundError('El viaje no tiene un cobro registrado');
+    return this.rest.client('payment').post(`/payments/${payment.id}/cash/confirm`, {
+      // `userId` = driverId de PERFIL: el anti-IDOR de payment-service compara el caller contra
+      // `payment.driverId` (id de perfil, no userId). El paymentId lo resolvimos nosotros (nunca del cliente).
+      identity: { ...identity, userId: driverId },
+      body: { party: 'driver', confirmed: dto.collected },
     });
   }
 
@@ -295,10 +509,11 @@ export class TripsService {
    */
   async cancel(id: string, dto: CancelTripDto, identity: AuthenticatedUser): Promise<unknown> {
     const driverId = await this.assertDriverTrip(id, identity);
-    return this.trip().post(`/trips/${id}/cancel`, {
+    const trip = await this.trip().post(`/trips/${id}/cancel`, {
       identity: { ...identity, driverId },
       body: { by: 'DRIVER', reason: dto.reason, driverId },
     });
+    return this.asDriverTripView(trip);
   }
 
   private trip() {

@@ -1,11 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRepositories } from '../../../../core/di/useDi';
-import { GetEarningsBreakdownUseCase, GetEarningsSummaryUseCase } from '../../domain';
+import {
+  EARNINGS_BREAKDOWN_QUERY_KEY,
+  EARNINGS_DAILY_QUERY_KEY,
+  EARNINGS_SUMMARY_QUERY_KEY,
+  GetEarningsBreakdownUseCase,
+  GetEarningsDailyUseCase,
+  GetEarningsSummaryUseCase,
+} from '../../domain';
 
-/** Clave de caché del resumen de ganancias. */
-export const EARNINGS_SUMMARY_QUERY_KEY = ['earnings', 'summary'] as const;
-/** Clave de caché del desglose de ganancias (HOY/SEMANA). */
-export const EARNINGS_BREAKDOWN_QUERY_KEY = ['earnings', 'breakdown'] as const;
+// Las claves de ganancias viven ahora en `earnings/domain` (cache compartido con el dashboard de
+// turno). Se re-exportan para no romper a los consumidores del barrel.
+export { EARNINGS_BREAKDOWN_QUERY_KEY, EARNINGS_DAILY_QUERY_KEY, EARNINGS_SUMMARY_QUERY_KEY };
 
 /**
  * Query: resumen de ganancias del conductor. La respuesta incluye los payouts, así que esta única
@@ -28,5 +34,17 @@ export function useEarningsBreakdown() {
   return useQuery({
     queryKey: EARNINGS_BREAKDOWN_QUERY_KEY,
     queryFn: () => new GetEarningsBreakdownUseCase(earnings).execute(),
+  });
+}
+
+/**
+ * Query: serie diaria de la SEMANA en curso (7 puntos lun→dom) para el bar chart "Por día".
+ * Independiente del breakdown; se carga junto con la pantalla de ganancias.
+ */
+export function useEarningsDaily() {
+  const { earnings } = useRepositories();
+  return useQuery({
+    queryKey: EARNINGS_DAILY_QUERY_KEY,
+    queryFn: () => new GetEarningsDailyUseCase(earnings).execute(),
   });
 }

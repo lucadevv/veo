@@ -6,6 +6,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { FleetService } from './fleet.service';
 
+// gRPC de enriquecimiento (nombre/ITV) + config del secret: no-op para los tests de catálogo de modelos (no
+// tocan listVehicles). GetUsersByIds → {users:[]}, GetVehiclesInspectionStatus → {items:[]} (ambos vacíos).
+const grpcNoop = { call: vi.fn().mockResolvedValue({ users: [], items: [] }) };
+const configNoop = { get: vi.fn().mockReturnValue('dev-secret') };
+// media (presign-get de imágenes de documentos): no-op para estos tests; devuelve una URL firmada dummy.
+const mediaNoop = { post: vi.fn().mockResolvedValue({ url: 'https://signed.example/doc' }) };
+// identity REST (lista de operadores para el nombre del inspector): no-op → [] (inspector cae a "—").
+const identityNoop = { get: vi.fn().mockResolvedValue([]) };
+
 function makeService(restOver: Record<string, unknown> = {}) {
   const rest = {
     get: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
@@ -16,7 +25,16 @@ function makeService(restOver: Record<string, unknown> = {}) {
     ...restOver,
   };
   const audit = { record: vi.fn().mockResolvedValue({ id: 'a1', seq: '1', hash: 'h' }) };
-  const svc = new FleetService(rest as never, audit as never);
+  const svc = new FleetService(
+    rest as never,
+    grpcNoop as never,
+    grpcNoop as never,
+    'admin-rail' as never,
+    mediaNoop as never,
+    identityNoop as never,
+    configNoop as never,
+    audit as never,
+  );
   return { svc, rest, audit };
 }
 
@@ -76,5 +94,103 @@ describe('FleetService.listModelReview · B5-2.c', () => {
         query: expect.objectContaining({ status: 'REJECTED', limit: 10 }),
       }),
     );
+  });
+});
+
+describe('FleetService.expirations · cola paginada (cursor compuesto)', () => {
+  it('propaga days + cursor + limit a fleet GET /fleet/expirations y devuelve envelope con nextCursor', async () => {
+    const rest = {
+      get: vi.fn().mockResolvedValue({
+        items: [
+          {
+            id: 'd1',
+            ownerType: 'DRIVER',
+            ownerId: 'drv-1',
+            type: 'LICENSE_A1',
+            status: 'EXPIRING_SOON',
+            expiresAt: '2026-07-10T00:00:00.000Z',
+          },
+        ],
+        nextCursor: '2026-07-10T00:00:00.000Z|d1',
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const audit = { record: vi.fn() };
+    const svc = new FleetService(
+      rest as never,
+      grpcNoop as never,
+      grpcNoop as never,
+      'admin-rail' as never,
+      mediaNoop as never,
+      identityNoop as never,
+      configNoop as never,
+      audit as never,
+    );
+
+    const page = await svc.expirations(operator, {
+      days: 30,
+      cursor: '2026-07-01T00:00:00.000Z|d0',
+      limit: 50,
+    } as never);
+
+    expect(rest.get).toHaveBeenCalledWith(
+      '/fleet/expirations',
+      expect.objectContaining({
+        query: expect.objectContaining({
+          days: 30,
+          cursor: '2026-07-01T00:00:00.000Z|d0',
+          limit: 50,
+        }),
+      }),
+    );
+    expect(page.nextCursor).toBe('2026-07-10T00:00:00.000Z|d1');
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ id: 'd1', daysUntilExpiry: expect.any(Number) });
+  });
+
+  it('descarta items sin expiresAt en el map PERO preserva el nextCursor de fleet (filtro post-paginado)', async () => {
+    const rest = {
+      get: vi.fn().mockResolvedValue({
+        items: [
+          {
+            id: 'd1',
+            ownerType: 'DRIVER',
+            ownerId: 'drv-1',
+            type: 'LICENSE_A1',
+            status: 'EXPIRING_SOON',
+            expiresAt: null,
+          },
+          {
+            id: 'd2',
+            ownerType: 'VEHICLE',
+            ownerId: 'veh-1',
+            type: 'SOAT',
+            status: 'EXPIRED',
+            expiresAt: '2026-07-05T00:00:00.000Z',
+          },
+        ],
+        nextCursor: '2026-07-05T00:00:00.000Z|d2',
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const audit = { record: vi.fn() };
+    const svc = new FleetService(
+      rest as never,
+      grpcNoop as never,
+      grpcNoop as never,
+      'admin-rail' as never,
+      mediaNoop as never,
+      identityNoop as never,
+      configNoop as never,
+      audit as never,
+    );
+
+    const page = await svc.expirations(operator, {} as never);
+    // d1 (sin expiresAt) se descarta → página de 1, pero el cursor de avance NO se rompe.
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.id).toBe('d2');
+    expect(page.nextCursor).toBe('2026-07-05T00:00:00.000Z|d2');
   });
 });

@@ -1,9 +1,16 @@
-import type { GeoPoint, RespondWaypointView } from '@veo/api-client';
+import type {
+  GeoPoint,
+  RespondWaypointView,
+  TripHistoryPage,
+  TripHistoryQuery,
+} from '@veo/api-client';
 import type {
   AcceptTripInput,
   ArrivingTripInput,
   CancelTripInput,
+  CommissionRateView,
   CompleteTripInput,
+  PendingCash,
   StartTripInput,
   Trip,
   TripOffer,
@@ -33,6 +40,13 @@ export interface TripsRepository {
   /** GET /trips/:id/state — estado ligero del viaje. */
   getTripState(tripId: string): Promise<TripState>;
   /**
+   * GET /trips/history — historial paginado por CURSOR (keyset) del CONDUCTOR, con los ESTADOS REALES
+   * del servidor (COMPLETED/CANCELLED/EXPIRED). El driverId lo DERIVA el BFF del JWT (anti-IDOR, no se
+   * manda). Cada página trae `{ items, nextCursor }`; `nextCursor === null` corta la paginación. El cursor
+   * es OPACO: se re-pasa tal cual sin parsearlo.
+   */
+  getTripHistory(query?: TripHistoryQuery): Promise<TripHistoryPage>;
+  /**
    * GET /trips/:id/route — ruta + pasos de navegación turn-by-turn del viaje activo. `from` (posición
    * ACTUAL del conductor, opcional) hace que el BFF trace la ruta desde donde está (ETA vivo + próxima
    * maniobra viva + re-ruteo por desvío). Sin `from`: ruta desde el origen del viaje.
@@ -54,6 +68,18 @@ export interface TripsRepository {
   /** POST /trips/:id/cancel — cancela (actor DRIVER fijado en el BFF). */
   cancel(tripId: string, input: CancelTripInput): Promise<Trip>;
   /**
+   * POST /trips/:id/cash-confirm — EFECTIVO (decisión del dueño): el conductor confirma el cobro en mano
+   * DESPUÉS de completar, desde el resumen. `collected=true` captura el cobro CASH PENDING; `collected=false`
+   * reporta que NO cobró (discrepancia). El paymentId lo resuelve el BFF server-side (anti-IDOR). Solo CASH.
+   */
+  confirmCash(tripId: string, collected: boolean): Promise<void>;
+  /**
+   * GET /trips/pending-cash — EFECTIVO · cobro CASH PENDING que ESTE conductor dejó sin confirmar (force-close
+   * post-viaje). `null` si no tiene ninguno (el BFF responde 204). El driverId lo DERIVA el BFF del JWT
+   * (anti-IDOR). Alimenta el banner del dashboard que persigue la confirmación al reabrir la app.
+   */
+  getPendingCash(): Promise<PendingCash | null>;
+  /**
    * POST /trips/:id/waypoints/:proposalId/respond — el conductor ACEPTA/RECHAZA una parada propuesta
    * por el pasajero durante el viaje en curso (Lote C4). El driverId lo DERIVA el BFF (anti-IDOR);
    * aceptar agrega la parada y recalcula la tarifa+ruta server-side. Devuelve el estado terminal de la
@@ -64,4 +90,10 @@ export interface TripsRepository {
     proposalId: string,
     accept: boolean,
   ): Promise<RespondWaypointView>;
+  /**
+   * GET /earnings/commission-rate — tasa de comisión ON-DEMAND VIGENTE (bps + version). Fuente: el panel
+   * admin (payment-service `commission_config`), cacheada 60 s en el BFF. El desglose bruto − comisión de
+   * TripComplete/TripDetail usa ESTA tasa; el hardcode local quedó solo como fallback offline.
+   */
+  getCommissionRate(): Promise<CommissionRateView>;
 }

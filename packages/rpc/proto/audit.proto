@@ -16,6 +16,11 @@ message RecordRequest {
   string resource_id = 4;
   // Payload del detalle, serializado como JSON.
   string payload_json = 5;
+  // Id ESTABLE del evento (UUIDv7) provisto por el caller para idempotencia del registro SÍNCRONO.
+  // El caller (AuditRecorder) lo genera UNA vez por record() → un retry de TRANSPORTE reusa el mismo
+  // id y el append-only dedupea por eventId (no duplica la fila WORM). Vacío ("") = caller legacy:
+  // el servicio genera uno (NO idempotente). Espeja la idempotencia del carril Kafka (recordFromEvent).
+  string event_id = 6;
 }
 
 message RecordReply {

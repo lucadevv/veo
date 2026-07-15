@@ -11,6 +11,6 @@ import { ActiveVehicleTypeResolver } from './active-vehicle-type.resolver';
     LocationPublisherService,
     ActiveVehicleTypeResolver,
   ],
-  exports: [DriverGateway],
+  exports: [DriverGateway, ActiveVehicleTypeResolver],
 })
 export class RealtimeModule {}

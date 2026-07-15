@@ -5,7 +5,11 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { INTERNAL_IDENTITY_SECRET } from '@veo/auth';
+import {
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type InternalAudience,
+} from '@veo/auth';
 import { InternalRestClient } from '@veo/rpc';
 import type { Env } from '../config/env.schema';
 
@@ -19,7 +23,9 @@ export type DownstreamRestService =
   | 'notification'
   | 'fleet'
   | 'media'
-  | 'chat';
+  | 'chat'
+  | 'booking'
+  | 'rating';
 
 const URL_ENV: Record<DownstreamRestService, keyof Env> = {
   identity: 'IDENTITY_URL',
@@ -31,6 +37,8 @@ const URL_ENV: Record<DownstreamRestService, keyof Env> = {
   fleet: 'FLEET_URL',
   media: 'MEDIA_URL',
   chat: 'CHAT_URL',
+  booking: 'BOOKING_SERVICE_URL',
+  rating: 'RATING_URL',
 };
 
 @Injectable()
@@ -40,6 +48,7 @@ export class RestGateway {
   constructor(
     private readonly config: ConfigService<Env, true>,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
   ) {}
 
   /** Devuelve (creando si hace falta) el cliente REST interno para un servicio downstream. */
@@ -50,6 +59,7 @@ export class RestGateway {
       client = new InternalRestClient({
         baseUrl: `${base}/api/v1`,
         secret: this.secret,
+        audience: this.audience,
         timeoutMs: this.config.getOrThrow<number>('DOWNSTREAM_TIMEOUT_MS'),
       });
       this.clients.set(service, client);

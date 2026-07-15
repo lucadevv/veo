@@ -6,8 +6,7 @@ import { Banner, Button, SafeScreen, Skeleton, Text, useTheme } from '@veo/ui-ki
 import type { DriverDocument } from '@veo/api-client';
 import type { RootStackParamList } from '../../../../navigation/types';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
-import { formatShortDate } from '../../../../shared/presentation/format';
-import { IconChevronLeft, IconPlus } from '../../../../shared/presentation/icons';
+import { IconArrowLeft, IconPlus } from '../../../../shared/presentation/icons';
 import {
   countDocumentsNeedingAttention,
   documentStatusTone,
@@ -22,6 +21,29 @@ import { Appear } from '../components/motion';
 import { useDocuments, useRegisterDocument } from '../hooks/useDocuments';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Documents'>;
+
+/**
+ * ¿`a` es la versión MÁS ACTUAL del tipo que `b`? Un conductor puede tener varias versiones del mismo tipo
+ * (renovaciones), pero la lista muestra UNA por tipo — la vigente. Preferimos la que está `ok` (no requiere
+ * atención) y, a igualdad, la de vencimiento más lejano (la renovación más nueva). Sin fecha de creación en
+ * el contrato, `expiresAt` es el mejor proxy de "cuál es la actual".
+ */
+function isMoreCurrent(a: DriverDocument, b: DriverDocument): boolean {
+  if (a.ok !== b.ok) return a.ok;
+  const ea = a.expiresAt ? Date.parse(a.expiresAt) : 0;
+  const eb = b.expiresAt ? Date.parse(b.expiresAt) : 0;
+  return ea > eb;
+}
+
+/** Deduplica por tipo (un documento por tipo, el vigente). Preserva el orden de primera aparición. */
+function dedupeDocumentsByType(docs: DriverDocument[]): DriverDocument[] {
+  const byType = new Map<string, DriverDocument>();
+  for (const doc of docs) {
+    const current = byType.get(doc.type);
+    if (!current || isMoreCurrent(doc, current)) byType.set(doc.type, doc);
+  }
+  return Array.from(byType.values());
+}
 
 /** Encabezado con botón de retroceso (pantalla de pila, no es un tab). */
 function DocumentsHeader({
@@ -45,7 +67,7 @@ function DocumentsHeader({
           pressed ? { backgroundColor: theme.colors.surfaceElevated } : null,
         ]}
       >
-        <IconChevronLeft size={24} color={theme.colors.ink} />
+        <IconArrowLeft size={24} color={theme.colors.ink} strokeWidth={2} />
       </Pressable>
       <Text variant="title1" numberOfLines={1} style={styles.headerTitle}>
         {title}
@@ -63,7 +85,9 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<DriverDocument | null>(null);
 
-  const attentionCount = useMemo(() => (data ? countDocumentsNeedingAttention(data) : 0), [data]);
+  // Una versión por tipo (la vigente): evita duplicados de renovaciones (p. ej. dos "Licencia").
+  const documents = useMemo(() => dedupeDocumentsByType(data ?? []), [data]);
+  const attentionCount = useMemo(() => countDocumentsNeedingAttention(documents), [documents]);
 
   const typeLabel = (raw: string): string =>
     isKnownDocumentType(raw) ? t(documentTypeI18nKey(raw)) : raw;
@@ -116,16 +140,20 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
         </View>
       ) : (
         <View style={[styles.section, { gap: theme.spacing.lg }]}>
-          {/* Aviso crítico para operar: documentos por vencer/vencidos/rechazados. */}
-          <Appear>
-            {attentionCount > 0 ? (
-              <Banner tone="warn" title={t('documents.attention', { count: attentionCount })} />
-            ) : (
-              <Banner tone="success" title={t('documents.allValid')} />
-            )}
-          </Appear>
+          {/* Intro del frame C/Documentos: contexto breve arriba de la lista. */}
+          <Text variant="footnote" color="inkMuted">
+            {t('documents.intro')}
+          </Text>
 
-          {data.length === 0 ? (
+          {/* Status by exception: banner SOLO si hay algo que atender (por vencer/vencido/rechazado). Si todo
+              está al día NO gritamos "todo válido" con un banner verde (era el slop AI que el dueño rechazó). */}
+          {attentionCount > 0 ? (
+            <Appear>
+              <Banner tone="warn" title={t('documents.attention', { count: attentionCount })} />
+            </Appear>
+          ) : null}
+
+          {documents.length === 0 ? (
             <View
               style={[
                 styles.emptyCard,
@@ -142,30 +170,14 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
               </Text>
             </View>
           ) : (
-            <View
-              style={[
-                styles.listCard,
-                {
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                  borderRadius: theme.radii.lg,
-                  paddingHorizontal: theme.spacing.lg,
-                },
-              ]}
-            >
-              {data.map((doc: DriverDocument, index: number) => {
+            <View style={styles.list}>
+              {documents.map((doc: DriverDocument, index: number) => {
                 const tone = documentStatusTone(doc.simpleStatus);
                 const highlight = needsAttention(doc.simpleStatus);
                 return (
                   <Appear key={`${doc.type}-${index}`} delay={index * 50} distance={8}>
                     <DocumentRow
                       typeLabel={typeLabel(doc.type)}
-                      documentNumber={doc.documentNumber}
-                      expiryLabel={
-                        doc.expiresAt
-                          ? t('documents.expiresOn', { date: formatShortDate(doc.expiresAt) })
-                          : t('documents.noExpiry')
-                      }
                       statusLabel={t(`documents.status.${doc.simpleStatus}`)}
                       statusTone={tone}
                       highlighted={highlight}
@@ -177,7 +189,6 @@ export const DocumentsScreen = ({ navigation }: Props): React.JSX.Element => {
                             : undefined
                       }
                       onPress={() => openRegister(doc)}
-                      showDivider={index > 0}
                     />
                   </Appear>
                 );
@@ -207,7 +218,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1 },
   section: { paddingTop: 4 },
-  listCard: { borderWidth: StyleSheet.hairlineWidth },
+  list: { gap: 8 },
   emptyCard: { borderWidth: StyleSheet.hairlineWidth },
   footer: { paddingHorizontal: 16, paddingTop: 8 },
 });

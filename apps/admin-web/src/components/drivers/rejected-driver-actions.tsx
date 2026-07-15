@@ -1,13 +1,13 @@
 'use client';
 
-import { Check } from 'lucide-react';
+import { Check, ShieldCheck } from 'lucide-react';
 import type { DriverApproval } from '@/lib/api/schemas';
 import { useDriverDecision } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { StepUpDialog } from '@/components/security/step-up-dialog';
 
 /**
  * Re-aprobar un conductor RECHAZADO (apelación/corrección revisada por el operador). Cierra el otro
@@ -25,17 +25,18 @@ export function RejectedDriverActions({ driver }: { driver: DriverApproval }) {
   }
 
   return (
-    <ConfirmDialog
+    <StepUpDialog
       trigger={
         <Button size="sm" variant="primary">
           <Check className="size-4" aria-hidden />
           Re-aprobar
         </Button>
       }
-      title="Re-aprobar conductor"
-      description={`Se reactivará al conductor ${driver.id.slice(0, 8)} (antecedentes CLEARED). La acción queda auditada.`}
-      confirmLabel="Re-aprobar"
-      onConfirm={async () => {
+      title="Confirmá tu identidad"
+      icon={ShieldCheck}
+      description={`Re-aprobar al conductor ${driver.id.slice(0, 8)} (antecedentes CLEARED) · acción sensible. Ingresá tu código TOTP (BR-S07). Queda auditada.`}
+      confirmLabel="Confirmar aprobación"
+      onVerified={async () => {
         await decision.mutateAsync({ id: driver.id, decision: 'approve' });
         toast({ tone: 'success', title: 'Conductor re-aprobado' });
       }}

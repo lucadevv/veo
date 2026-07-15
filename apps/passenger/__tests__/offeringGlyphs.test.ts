@@ -108,12 +108,15 @@ describe('offeringDisplayName · labelKey del quote → i18n de la app (fallback
     expect(
       offeringDisplayName({labelKey: 'offering.veo_mechanic.name', name: 'x'}),
     ).toBe('VEO Mecánico');
+  });
+
+  it('F2.3 · premium resuelve su nombre y Confort se renombró a "VEO Normal"', () => {
     expect(
-      offeringDisplayName({
-        labelKey: 'offering.veo_economico_ev.name',
-        name: 'x',
-      }),
-    ).toBe('VEO Económico Eléctrico');
+      offeringDisplayName({labelKey: 'offering.veo_premium.name', name: 'x'}),
+    ).toBe('VEO Premium');
+    expect(
+      offeringDisplayName({labelKey: 'offering.veo_confort.name', name: 'x'}),
+    ).toBe('VEO Normal');
   });
 
   it('sin labelKey (server viejo) usa el name del quote — compat intacta', () => {

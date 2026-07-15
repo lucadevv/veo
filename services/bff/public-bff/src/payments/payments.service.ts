@@ -6,8 +6,15 @@
 import { Inject, Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
 import { GrpcServiceClient, InternalRestClient } from '@veo/rpc';
-import { grpcIdentityMetadata, INTERNAL_IDENTITY_SECRET, type AuthenticatedUser } from '@veo/auth';
-import { NotFoundError } from '@veo/utils';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_SECRET,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
+import { NotFoundError, ConflictError } from '@veo/utils';
+import { TripStatus } from '@veo/shared-types';
 import { GRPC_PAYMENT, GRPC_TRIP, REST_PAYMENT } from '../infra/downstream.tokens';
 import { REDIS } from '../infra/redis';
 import type { PaymentReply, TripReply, UserCreditReply } from '../infra/grpc-types';
@@ -43,28 +50,58 @@ export class PaymentsService {
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
     @Inject(REST_PAYMENT) private readonly paymentRest: InternalRestClient,
     @Inject(INTERNAL_IDENTITY_SECRET) private readonly secret: string,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
-  charge(user: AuthenticatedUser, dto: ChargeDto): Promise<PaymentView> {
-    // MONEY PATH — idempotencia por VIAJE.
-    // El cobro de un viaje es canónico: existe UN solo Payment por viaje. El cobro nace
-    // normalmente del evento `trip.completed` (payment-service consumer) con la dedupKey
-    // determinista `trip-completed:${tripId}`. Si el pasajero dispara además este cobro manual,
-    // DEBE caer en EXACTAMENTE la misma dedupKey para chocar contra el UNIQUE de Payment.dedupKey
-    // y devolver el pago existente en vez de crear un segundo (doble cobro).
+  async charge(user: AuthenticatedUser, dto: ChargeDto): Promise<PaymentView> {
+    // MONEY PATH — tarifa SERVER-AUTHORITATIVE + anti-IDOR + idempotencia por VIAJE.
     //
-    // Por eso NO usamos la dedupKey arbitraria del cliente ni un uuidv7() aleatorio: ambos abrirían
-    // namespaces distintos y romperían la colisión. Derivamos SIEMPRE del tripId, replicando el
-    // formato de payment-service `deriveTripChargeDedupKey` (payment.policy.ts). No se importa esa
-    // función: cruzaría la frontera de microservicios (regla #2). El formato es el contrato compartido.
+    // 1) ANTI-IDOR + TARIFA AUTORITATIVA (mismo gate que getPaymentByTrip/tip/videoGrant): traemos el
+    //    viaje por gRPC GetTrip con el `passengerId` del JWT. La tarifa a cobrar NO viene del cliente
+    //    (`dto.grossCents` se IGNORA): un pasajero podía postear `grossCents: 1` y pagar S/0.01 por su
+    //    viaje. El monto FIRME es `trip.fareCents` — el único monto canónico del viaje (la PUJA acordada
+    //    también se resuelve server-side a `fareCents`, no hay un campo aparte). Viaje ajeno/inexistente
+    //    → 404 (no 403: anti-enumeración, idéntico a getPaymentByTrip). Si trip-service no responde, el
+    //    gRPC LANZA y NO se cobra: degradación honesta, jamás un monto inventado.
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
+    const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: dto.tripId }, meta);
+    if (!trip.found) throw new NotFoundError('Viaje no encontrado');
+    if (trip.passengerId !== user.userId) {
+      throw new NotFoundError('Viaje no encontrado'); // anti-enumeración (no filtra que exista para otro)
+    }
+    // 1.b) GATE DE ESTADO (anti sub-cobro): el cobro manual SOLO sobre un viaje COMPLETADO — ahí su
+    //    `fareCents` es FINAL. En un viaje EN CURSO la tarifa todavía puede SUBIR (waypoints/espera, que
+    //    waypoint-proposal recalcula). Sin este gate, un cobro temprano congelaría una tarifa baja en el
+    //    Payment canónico y, vía la dedupKey compartida, el cobro del evento `trip.completed` (tarifa final)
+    //    chocaría el UNIQUE → devolvería el Payment bajo → el delta NUNCA se cobra. El cobro normal nace del
+    //    evento al completarse; este manual es el pasajero confirmando método/propina POST-viaje.
+    if (trip.status !== TripStatus.COMPLETED) {
+      throw new ConflictError('El viaje aún no está completado; el cobro se realiza al finalizar', {
+        status: trip.status,
+      });
+    }
+
+    // 2) IDEMPOTENCIA POR VIAJE (intacta). El cobro de un viaje es canónico: existe UN solo Payment por
+    //    viaje. El cobro nace normalmente del evento `trip.completed` (payment-service consumer) con la
+    //    dedupKey determinista `trip-completed:${tripId}`. Si el pasajero dispara además este cobro
+    //    manual, DEBE caer en EXACTAMENTE la misma dedupKey para chocar contra el UNIQUE de
+    //    Payment.dedupKey y devolver el pago existente en vez de crear un segundo (doble cobro). Con
+    //    `grossCents` ahora server-derivado, ambos carriles coinciden además en el MONTO.
+    //
+    //    Por eso NO usamos la dedupKey arbitraria del cliente ni un uuidv7() aleatorio: ambos abrirían
+    //    namespaces distintos y romperían la colisión. Derivamos SIEMPRE del tripId, replicando el
+    //    formato de payment-service `deriveTripChargeDedupKey` (payment.policy.ts). No se importa esa
+    //    función: cruzaría la frontera de microservicios (regla #2). El formato es el contrato compartido.
     const dedupKey = deriveTripChargeDedupKey(dto.tripId);
     return this.paymentRest.post<PaymentView>('/payments/charge', {
       identity: user,
       idempotencyKey: dedupKey,
       body: {
         tripId: dto.tripId,
-        grossCents: dto.grossCents,
+        // Tarifa AUTORITATIVA del viaje (server-derived). NUNCA `dto.grossCents` (amount tampering).
+        grossCents: trip.fareCents,
+        // La propina SÍ es del pasajero (voluntaria), validada en el DTO (@IsInt @Min(0) @Max techo).
         tipCents: dto.tipCents,
         method: dto.method,
         payerRef: dto.payerRef,
@@ -98,7 +135,7 @@ export class PaymentsService {
    * identidad firmada). NO exponer directo a una ruta sin gate previo.
    */
   private async fetchPaymentView(user: AuthenticatedUser, id: string): Promise<PaymentView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.paymentGrpc.call<PaymentReply>('GetPayment', { id }, meta);
     return this.toPaymentView(reply);
   }
@@ -111,7 +148,7 @@ export class PaymentsService {
    * cobro (found=false) → 404 'Pago no encontrado'.
    */
   async getPaymentByTrip(user: AuthenticatedUser, tripId: string): Promise<PaymentView> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     if (trip.passengerId !== user.userId) {
@@ -129,7 +166,7 @@ export class PaymentsService {
    * el del JWT autenticado, nunca uno del cliente → el pasajero solo ve SU saldo.
    */
   async getUserCredit(user: AuthenticatedUser): Promise<{ balanceCents: number }> {
-    const meta = grpcIdentityMetadata(user, this.secret);
+    const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.paymentGrpc.call<UserCreditReply>(
       'GetUserCredit',
       { userId: user.userId },

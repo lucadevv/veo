@@ -12,6 +12,9 @@
 export const FLEET_CLIENT = Symbol('FLEET_CLIENT');
 
 export interface FleetClient {
-  /** Id del vehículo ACTIVO del conductor (o el primero si ninguno marca activo); null si no tiene. */
+  /**
+   * Id del vehículo OPERADO del conductor según el selector AUTORITATIVO ÚNICO de fleet (`pickActiveVehicle`,
+   * vía GetDriverActiveVehicle) — el MISMO que valida el gate de ITV. `null` si no tiene ninguno operable.
+   */
   getActiveVehicleId(driverId: string): Promise<string | null>;
 }

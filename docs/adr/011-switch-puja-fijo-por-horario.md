@@ -5,6 +5,12 @@
 > **PUJA** (ADR 010, "proponé tu precio") o **PRECIO FIJO** (tarifa calculada estilo Uber), en vez de
 > que lo decida el cliente.
 
+> 🔴 **SUPERSEDED EN PARTE por [ADR-023](./023-modelo-pricing-coexistencia.md) (2026-07-07):** el switch de modo
+> por HORARIO (schedule/franjas) se **ELIMINA**. El modo pasa a ser **`offering.mode` per-service, asignado a MANO
+> por el admin** (palanca manual — sin auto-flip por horario ni por demanda). **SOBREVIVE** la regla de oro
+> `resolve-once-persist-forever` (`Trip.dispatchMode` congelado): solo cambia la FUENTE (la oferta, no el schedule).
+> Se borran `PricingModeSchedule` / `resolveMode(schedule)` / `PricingModeRule`. Plan: `specs/changes/pricing-taxonomy/`.
+
 ---
 
 ## 0. Contexto y problema
@@ -143,7 +149,7 @@ if (mode === 'PUJA') {
 | Capacidad                                         | ROL                                                       | Regla server-side                                     |
 | ------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------- |
 | Ver el schedule de modo                           | admin (cualquier sub-rol con `pricing:view`)              | —                                                     |
-| Editar el schedule (crear/borrar reglas, default) | admin con `pricing:manage` (¿FINANCE? ¿ADMIN/SUPERADMIN?) | RBAC en admin-bff + re-valida en el service           |
+| Editar el schedule (crear/borrar reglas, default) | admin con `pricing:manage` (FINANCE / ADMIN / SUPERADMIN) | RBAC en admin-bff + re-valida en el service           |
 | Resolver el modo (lectura)                        | interno                                                   | trip-service desde su proyección; public-bff vía trip |
 
 > La UI del admin refleja; el gate de `pricing:manage` va server-side. El pasajero NO elige el modo.
@@ -176,6 +182,20 @@ if (mode === 'PUJA') {
    local de Lima). Cubre pico-laboral vs finde.
 4. **Quién edita**: permiso **`pricing:manage`** → roles **ADMIN, SUPERADMIN, FINANCE** (el pricing es
    decisión financiera/comercial). `pricing:view` para lectura.
+   > **ENMIENDA (2026-06-30) — granularidad de permisos del pricing:** este ADR nombra `pricing:manage`
+   > porque su alcance es el SCHEDULE de modo (y eso SIGUE siendo `pricing:manage`). Al crecer la superficie
+   > de config de pricing del admin (comisión, catálogo de ofertas, costo/km del carpooling — reorg por
+   > carril económico), el admin-bff se partió en TRES controllers, cada uno con su permiso:
+   >
+   > - **`pricing:manage`** → modo/schedule, tarifa base, energía, recargo de combustible, piso de la puja.
+   > - **`finance:manage`** → comisión on-demand, service fee del carpooling, costo/km del carpooling.
+   > - **`catalog:manage`** → habilitar/deshabilitar y precio (multiplicador/mínima) por oferta.
+   >
+   > Los TRES mapean al **MISMO** set de roles **[FINANCE, ADMIN, SUPERADMIN]** → la autorización EFECTIVA es
+   > idéntica a la de este ADR; la separación es por controller/responsabilidad, no de roles (`finance:manage`
+   > es, textualmente, "espejo de `pricing:manage`" en `rbac.ts`). Un lector literal de "pricing:manage" debe
+   > saber que la edición financiera del admin vive partida en esos tres permisos, sinónimos en roles. La UI
+   > solo refleja; el gate de cada permiso va server-side en el admin-bff (PLAN∩ROL∩TENANT).
 
 _(El persist-once en `Trip.dispatchMode` NO es pregunta — es la regla de oro, va sí o sí.)_
 

@@ -5,6 +5,7 @@ import { bootstrapOtel } from '@veo/observability';
 bootstrapOtel({ serviceName: 'fleet-service' });
 
 import { NestFactory } from '@nestjs/core';
+import { buildGrpcServerCredentials } from '@veo/rpc';
 import { ValidationPipe } from '@nestjs/common';
 import { type MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -24,7 +25,12 @@ async function bootstrap(): Promise<void> {
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.use(helmet());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // forbidNonWhitelisted: un campo extra en el body → 400 (fail-loud) en vez de descartarlo en silencio.
+  // Convención del repo (espeja admin-bff/public-bff/trip-service). Endurece `extractedData` (Lote 0):
+  // una clave arbitraria en el JSONB OCR se RECHAZA en el borde, no solo se strippea.
+  app.useGlobalPipes(
+    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+  );
   app.useGlobalFilters(new AllExceptionsFilter(createLogger('fleet-service')));
   app.useGlobalInterceptors(new LoggingInterceptor('fleet-service'));
   // /health, /health/ready y /metrics quedan fuera del prefijo (sondas de infra/Docker).
@@ -48,6 +54,8 @@ async function bootstrap(): Promise<void> {
       package: 'veo.fleet.v1',
       protoPath: join(__dirname, '../proto/fleet.proto'),
       url: process.env.GRPC_URL ?? '0.0.0.0:50062',
+      // TLS-capable por env (ADR-016): con GRPC_TLS_* → mTLS; sin ellos → insecure (dev). UN helper compartido.
+      credentials: buildGrpcServerCredentials(),
     },
   });
   await app.startAllMicroservices();

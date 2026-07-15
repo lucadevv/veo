@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -8,7 +8,7 @@ import {
   Banner,
   BottomSheet,
   Button,
-  Card,
+  ListGroup,
   ListItem,
   SafeScreen,
   Skeleton,
@@ -18,21 +18,28 @@ import {
 } from '@veo/ui-kit';
 import { DriverStatus } from '@veo/shared-types';
 import type { MainTabParamList, RootStackParamList } from '../../../../navigation/types';
+import { useDriverTabBarHeight } from '../../../../navigation/DriverTabBar';
 import { StateView } from '../../../../shared/presentation/components/StateView';
 import { toErrorMessage } from '../../../../shared/presentation/errors';
+import { formatPersonName, formatShortDate } from '../../../../shared/presentation/format';
 import {
+  IconAccount,
+  IconBell,
   IconClock,
   IconDocument,
+  IconFace,
   IconGift,
   IconLifebuoy,
+  IconLogout,
   IconReceipt,
-  IconShield,
+  IconTrash,
 } from '../../../../shared/presentation/icons';
-import { useLogout, useProfile } from '../hooks/useProfile';
+import { useProfile, useRequestAccountDeletion } from '../hooks/useProfile';
+import { useLogout } from '../../../../core/session/useLogout';
 import { BACKGROUND_CHECK_CLEARED, KYC_VERIFIED, enumLabel } from '../labels';
 import { ProfileIdentityCard } from '../components/ProfileIdentityCard';
-import { ProfileLinkRow } from '../components/ProfileLinkRow';
-import { Appear } from '../components/motion';
+import { ScreenHero } from '../../../../shared/presentation/components/ScreenHero';
+import { Reveal } from '../../../../shared/presentation/components/motion';
 
 /**
  * `Cuenta` es una tab del navegador inferior, pero sus enlaces secundarios viven en el stack raíz
@@ -49,17 +56,16 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
   const theme = useTheme();
   const { data, isLoading, isError, error, refetch } = useProfile();
   const logout = useLogout();
+  const tabBarHeight = useDriverTabBarHeight();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Derecho al olvido (Ley 29733): sheet de confirmación → POST /drivers/me/deletion → banner de
+  // gracia + cierre de sesión (espejo del pasajero; el motor y la gracia viven en identity).
+  const [deletionOpen, setDeletionOpen] = useState(false);
+  const deletion = useRequestAccountDeletion();
 
   return (
-    <SafeScreen
-      scroll
-      header={
-        <View style={styles.header}>
-          <Text variant="title1">Cuenta</Text>
-        </View>
-      }
-    >
+    <SafeScreen scroll contentContainerStyle={{ paddingBottom: tabBarHeight }}>
+      <ScreenHero title={t('profile.title')} subtitle={t('profile.subtitle')} />
       {isLoading ? (
         <View style={styles.section}>
           <Skeleton height={96} radius={theme.radii.lg} />
@@ -74,38 +80,48 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
         />
       ) : (
         <View style={styles.section}>
-          {/* Identidad premium: avatar grande, teléfono y chip de rating con datos reales. */}
-          <Appear>
+          {/* Identidad premium: avatar grande, NOMBRE (no el teléfono — coherente con el saludo del Inicio)
+              y chip de rating con datos reales. */}
+          <Reveal delay={40}>
             <ProfileIdentityCard
-              name={data.phone}
+              name={formatPersonName(data.fullName) ?? data.phone}
+              photoUrl={data.photoUrl}
+              verified={data.kycStatus === KYC_VERIFIED}
               online={data.currentStatus === DriverStatus.AVAILABLE}
               ratingValue={data.averageRating.toFixed(1)}
               ratingMeta={
                 data.rating ? t('profile.ratingCount', { count: data.rating.count30d }) : undefined
               }
             />
-          </Appear>
+          </Reveal>
 
-          {/* Aviso de cumplimiento según el estado real de documentación. */}
-          <Appear delay={50}>
-            {!data.compliance.compliant ? (
+          {/* Aviso de cumplimiento según el CICLO DE VIDA real de la documentación:
+              faltan por subir (warn) → enviados, en revisión (info) → todos aprobados (success). */}
+          {/* Status by exception: si TODO está aprobado no gritamos "al día" con un banner verde (era slop
+              AI); mostramos banner SOLO cuando hay algo que atender (faltan docs → warn, en revisión → info). */}
+          {data.compliance.missing.length > 0 ? (
+            <Reveal delay={80}>
               <Banner
                 tone="warn"
                 title={t('profile.complianceMissing', {
                   items: data.compliance.missing.join(', '),
                 })}
               />
-            ) : (
-              <Banner tone="success" title={t('profile.complianceOk')} />
-            )}
-          </Appear>
+            </Reveal>
+          ) : !data.compliance.allApproved ? (
+            <Reveal delay={80}>
+              <Banner tone="info" title={t('profile.complianceInReview')} />
+            </Reveal>
+          ) : null}
 
-          {/* Estados de verificación (KYC / antecedentes / estado actual) con StatusPill real. */}
-          <Appear delay={100}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
+          {/* Estados de verificación (KYC / antecedentes / estado actual) con StatusPill real,
+              en grupo EDITORIAL (superficie + hairlines, sin cajón — mismo idioma que el
+              "Tu cuenta" del passenger; des-encajonado 2026-07-15). */}
+          <Reveal delay={120}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
               {t('profile.kyc')}
             </Text>
-            <Card>
+            <ListGroup>
               <ListItem
                 title={t('profile.currentStatus')}
                 trailing={
@@ -138,88 +154,129 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
                   />
                 }
               />
-            </Card>
-          </Appear>
+            </ListGroup>
+          </Reveal>
 
-          {/* Documentos como lista. */}
-          <Appear delay={150}>
-            <Text variant="subhead" color="inkMuted" style={styles.sectionLabel}>
-              {t('profile.documentsTitle')}
+          {/* La LISTA de documentos vive en su pantalla dedicada (row "Documentos" abajo), fiel al frame
+              C/Perfil: acá NO se expande inline. Eliminar la lista inline además cerró el bug de keys
+              duplicadas (dos docs con el mismo `type`, p. ej. dos SOAT, colisionaban en `key={doc.type}`). */}
+
+          {/* Accesos en SECCIONES con label (espejo del "Tu cuenta" del passenger, que es el patrón
+              aprobado): antes era UN bloque monolítico de 8 filas sin jerarquía. Íconos en accent
+              (mismo tratamiento que el passenger), filas ListItem canónicas del ui-kit. */}
+          <Reveal delay={160}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionAccount')}
             </Text>
-            <Card>
-              {data.documents.length === 0 ? (
-                <Text variant="callout" color="inkMuted">
-                  {t('profile.noDocuments')}
-                </Text>
-              ) : (
-                data.documents.map((doc) => (
-                  <ListItem
-                    key={doc.type}
-                    title={enumLabel(t, 'profile.docType', doc.type)}
-                    subtitle={enumLabel(t, 'profile.docStatus', doc.status)}
-                    trailing={
-                      <StatusPill
-                        label={doc.ok ? t('profile.documentValid') : t('profile.documentInvalid')}
-                        tone={doc.ok ? 'success' : 'danger'}
-                        dot
-                      />
-                    }
-                  />
-                ))
-              )}
-            </Card>
-          </Appear>
+            <ListGroup>
+              <ListItem
+                title={t('profile.edit.entry')}
+                leading={<IconAccount size={20} color={theme.colors.accent} />}
+                chevron
+                onPress={() => navigation.navigate('EditProfile')}
+              />
+              {/* Avisos: el acceso vive acá (el header del Inicio ya no tiene campana, fiel al frame). */}
+              <ListItem
+                title={t('notifications.title')}
+                leading={<IconBell size={20} color={theme.colors.accent} />}
+                chevron
+                onPress={() => navigation.navigate('Notifications')}
+              />
+              {/* Derecho al olvido (Ley 29733): SIEMPRE al final de la sección Cuenta, con el mismo
+                  lenguaje que el pasajero (ícono danger + sheet de confirmación con la gracia). */}
+              <ListItem
+                title={t('profile.deletion.entry')}
+                leading={<IconTrash size={20} color={theme.colors.danger} />}
+                chevron
+                onPress={() => setDeletionOpen(true)}
+              />
+            </ListGroup>
+          </Reveal>
 
-          {/* Accesos rápidos: documentos + biometría (stack) + tabs Ganancias/Viajes. */}
-          <Appear delay={200}>
-            <Card padding="sm">
-              <ProfileLinkRow
-                icon={<IconDocument size={20} color={theme.colors.accent} />}
-                label={t('documents.title')}
+          <Reveal delay={200}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionVerification')}
+            </Text>
+            <ListGroup>
+              <ListItem
+                title={t('documents.title')}
+                leading={<IconDocument size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Documents')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconShield size={20} color={theme.colors.accent} />}
-                label={t('shift.enrollAction')}
+              <ListItem
+                title={t('shift.enrollAction')}
+                leading={<IconFace size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('BiometricEnroll')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconReceipt size={20} color={theme.colors.accent} />}
-                label={t('earnings.title')}
+            </ListGroup>
+          </Reveal>
+
+          <Reveal delay={240}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionActivity')}
+            </Text>
+            <ListGroup>
+              <ListItem
+                title={t('earnings.title')}
+                leading={<IconReceipt size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Ganancias')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconGift size={20} color={theme.colors.accent} />}
-                label={t('ops.incentives.title')}
+              <ListItem
+                title={t('ops.incentives.title')}
+                leading={<IconGift size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Incentives')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconClock size={20} color={theme.colors.accent} />}
-                label={t('trips.historyTitle')}
+              <ListItem
+                title={t('trips.historyTitle')}
+                leading={<IconClock size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Viajes')}
-                showDivider
               />
-              <ProfileLinkRow
-                icon={<IconLifebuoy size={20} color={theme.colors.accent} />}
-                label={t('support.title')}
+            </ListGroup>
+          </Reveal>
+
+          <Reveal delay={280}>
+            <Text variant="label" color="inkMuted" style={styles.sectionLabel}>
+              {t('profile.sectionSupport')}
+            </Text>
+            <ListGroup>
+              <ListItem
+                title={t('support.title')}
+                leading={<IconLifebuoy size={20} color={theme.colors.accent} />}
+                chevron
                 onPress={() => navigation.navigate('Support')}
               />
-            </Card>
-          </Appear>
+            </ListGroup>
+          </Reveal>
 
-          <Appear delay={250}>
-            <Button
-              label={t('profile.logout')}
-              variant="danger"
-              fullWidth
-              loading={logout.isPending}
+          {/* Cerrar sesión: pill de ancho completo con TINTE danger (no un botón rojo sólido) — presencia
+              serena para una acción destructiva-suave, fiel al frame C/Perfil. */}
+          <Reveal delay={240}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('profile.logout')}
+              disabled={logout.isPending}
               onPress={() => setConfirmOpen(true)}
-            />
-          </Appear>
+              style={({ pressed }) => [
+                styles.logout,
+                {
+                  backgroundColor: theme.colors.danger + '14',
+                  borderRadius: theme.radii.md,
+                },
+                pressed && styles.logoutPressed,
+                logout.isPending && styles.logoutDisabled,
+              ]}
+            >
+              <IconLogout size={20} color={theme.colors.danger} strokeWidth={2} />
+              <Text variant="bodyStrong" color="danger">
+                {t('profile.logout')}
+              </Text>
+            </Pressable>
+          </Reveal>
         </View>
       )}
 
@@ -249,13 +306,80 @@ export const ProfileScreen = ({ navigation }: Props): React.JSX.Element => {
           {t('profile.logoutConfirmBody')}
         </Text>
       </BottomSheet>
+
+      {/* Derecho al olvido (Ley 29733). Confirmación → 202 con la gracia → banner de estado y cierre
+          de sesión (la cuenta queda en gracia; se puede cancelar volviendo a ingresar antes de la fecha). */}
+      <BottomSheet
+        visible={deletionOpen}
+        onClose={() => {
+          setDeletionOpen(false);
+          // Si la solicitud ya quedó registrada, cerrar el sheet también cierra la sesión: la app no
+          // debe seguir operando como si nada sobre una cuenta camino al tombstone.
+          if (deletion.isSuccess && !logout.isPending) {
+            logout.mutate();
+          }
+        }}
+        title={t('profile.deletion.title')}
+        footer={
+          deletion.isSuccess ? (
+            <Button
+              label={t('profile.deletion.logoutCta')}
+              variant="primary"
+              loading={logout.isPending}
+              onPress={() => logout.mutate()}
+            />
+          ) : (
+            <View style={styles.sheetFooter}>
+              <Button
+                label={t('profile.deletion.keep')}
+                variant="secondary"
+                onPress={() => setDeletionOpen(false)}
+              />
+              <Button
+                label={t('profile.deletion.confirm')}
+                variant="danger"
+                loading={deletion.isPending}
+                onPress={() => deletion.mutate()}
+              />
+            </View>
+          )
+        }
+      >
+        <View style={styles.deletionBody}>
+          {deletion.isSuccess ? (
+            <Banner
+              tone="success"
+              title={t('profile.deletion.requested')}
+              description={t('profile.deletion.graceUntil', {
+                date: formatShortDate(deletion.data.graceUntil),
+              })}
+            />
+          ) : (
+            <Text variant="callout" color="inkMuted">
+              {t('profile.deletion.body')}
+            </Text>
+          )}
+          {deletion.isError ? <Banner tone="danger" title={t('profile.deletion.error')} /> : null}
+        </View>
+      </BottomSheet>
     </SafeScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  header: { paddingTop: 8, paddingBottom: 4 },
   section: { gap: 16, paddingTop: 8 },
   sectionLabel: { marginBottom: 8 },
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  deletionBody: { gap: 12 },
+  logout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 52,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  logoutPressed: { opacity: 0.7 },
+  logoutDisabled: { opacity: 0.5 },
 });

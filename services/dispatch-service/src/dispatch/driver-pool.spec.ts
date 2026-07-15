@@ -4,20 +4,32 @@
  * (confort=segment≥MID, xl=6 asientos), y DEGRADA SEGURO: un conductor sin attrs en el ping (legacy) NO
  * se excluye (no romper el matching durante el rollout, hasta que el productor mande los attrs).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { VehicleType, VehicleSegment, FleetDocumentType } from '@veo/shared-types';
 import { InMemoryHotIndex, InMemoryExclusionRegistry } from '../hot-index/in-memory-hot-index';
 import { DriverPool } from './driver-pool';
+import type { OperableVehicleClassesProvider } from './operable-vehicle-classes.provider';
+import { bumpEligibilityFailOpen } from './dispatch.metrics';
+
+// La observabilidad es un side-effect: espiamos SOLO el bump para asertar que dispara sin tocar el registry
+// real. `classifyMissingAttr` se mantiene REAL (importActual) — el pool lo usa para etiquetar qué attr faltó.
+vi.mock('./dispatch.metrics', async (importActual) => ({
+  ...(await importActual<typeof import('./dispatch.metrics')>()),
+  bumpEligibilityFailOpen: vi.fn(),
+}));
 
 const CELL = 'cell-1';
 const cells = [CELL];
 
 let hotIndex: InMemoryHotIndex;
+let suspension: InMemoryExclusionRegistry;
 let pool: DriverPool;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   hotIndex = new InMemoryHotIndex();
-  pool = new DriverPool(hotIndex, new InMemoryExclusionRegistry());
+  suspension = new InMemoryExclusionRegistry();
+  pool = new DriverPool(hotIndex, new InMemoryExclusionRegistry(), suspension);
 });
 
 const ids = (locs: { driverId: string }[]) => locs.map((l) => l.driverId).sort();
@@ -103,6 +115,24 @@ describe('DriverPool.eligible · B5-3 eligibilidad por oferta', () => {
     expect(ids(out)).toEqual(['legacy']);
   });
 
+  it('OBSERVABILIDAD (source=pool): el fail-open BUMPEA la métrica sin cambiar el resultado (legacy igual pasa)', async () => {
+    await hotIndex.seed('legacy', -12, -77, CELL, VehicleType.CAR); // sin attrs → faltan los 3 → 'multiple'
+    const out = await pool.eligible(cells, VehicleType.CAR, { requires: { minSeats: 6 } });
+    expect(ids(out)).toEqual(['legacy']); // comportamiento INTACTO (cero cambio)
+    // El pool es el barrido amplio de candidatos → source='pool' (prevalencia de flota).
+    expect(bumpEligibilityFailOpen).toHaveBeenCalledWith('pool', 'multiple');
+  });
+
+  it('OBSERVABILIDAD (C1): NO bumpea cuando los attrs SÍ están (no hay fail-open)', async () => {
+    await hotIndex.seed('full', -12, -77, CELL, VehicleType.CAR, {
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    await pool.eligible(cells, VehicleType.CAR, { requires: { minSeats: 6 } });
+    expect(bumpEligibilityFailOpen).not.toHaveBeenCalled();
+  });
+
   it('respeta el vehicleType además del requires (una MOTO no entra a un pool CAR)', async () => {
     await hotIndex.seed('moto', -12, -77, CELL, VehicleType.MOTO, {
       seats: 2,
@@ -178,5 +208,56 @@ describe('DriverPool.eligible · B5-3.2 certificaciones (FAIL-CLOSED, opuesto a 
         }),
       ),
     ).toEqual(['a']);
+  });
+});
+
+describe('DriverPool.eligible · FILTRO DEFENSIVO de clase operable (seam catálogo↔operabilidad · ADR 013)', () => {
+  /** Doble del provider: devuelve el set de clases operables que se le configure (sin REST ni cache). */
+  const provider = (operable: VehicleType[]): OperableVehicleClassesProvider =>
+    ({ get: vi.fn(async () => operable) }) as unknown as OperableVehicleClassesProvider;
+
+  it('la clase NO operable (MOTO apagada en el catálogo) queda EXCLUIDA del pool aunque el conductor pinguee', async () => {
+    await hotIndex.seed('moto', -12, -77, CELL, VehicleType.MOTO);
+    // Catálogo efectivo: solo CAR operable → una MOTO no debe recibir ofertas.
+    const p = new DriverPool(hotIndex, new InMemoryExclusionRegistry(), suspension, provider([VehicleType.CAR]));
+    expect(ids(await p.eligible(cells, VehicleType.MOTO))).toEqual([]);
+  });
+
+  it('la clase operable (CAR) sigue entrando; la MOTO entra solo cuando el catálogo la habilita', async () => {
+    await hotIndex.seed('car', -12, -77, CELL, VehicleType.CAR);
+    await hotIndex.seed('moto', -12, -77, CELL, VehicleType.MOTO);
+    // Ambas clases operables → cada pool devuelve su clase.
+    const p = new DriverPool(
+      hotIndex,
+      new InMemoryExclusionRegistry(),
+      suspension,
+      provider([VehicleType.CAR, VehicleType.MOTO]),
+    );
+    expect(ids(await p.eligible(cells, VehicleType.CAR))).toEqual(['car']);
+    expect(ids(await p.eligible(cells, VehicleType.MOTO))).toEqual(['moto']);
+  });
+
+  it('SIN provider inyectado (@Optional) → NO filtra: comportamiento histórico intacto', async () => {
+    await hotIndex.seed('moto', -12, -77, CELL, VehicleType.MOTO);
+    // `pool` del beforeEach se construye SIN provider → el filtro se salta (la MOTO pasa).
+    expect(ids(await pool.eligible(cells, VehicleType.MOTO))).toEqual(['moto']);
+  });
+});
+
+describe('DriverPool.eligible · exclusión por SUSPENSIÓN del conductor', () => {
+  it('un conductor SUSPENDIDO (en el set de suspensión) NO es elegible aunque siga pingeando GPS', async () => {
+    await hotIndex.seed('activo', -12, -77, CELL, VehicleType.CAR);
+    await hotIndex.seed('suspendido', -12, -77, CELL, VehicleType.CAR);
+    // El suspendido sigue VIVO en el hot-index (su app pinguea), pero está excluido del pool.
+    await suspension.exclude('suspendido');
+    expect(ids(await pool.eligible(cells, VehicleType.CAR))).toEqual(['activo']);
+  });
+
+  it('al reincorporarse (clear), el conductor vuelve a ser elegible', async () => {
+    await hotIndex.seed('d', -12, -77, CELL, VehicleType.CAR);
+    await suspension.exclude('d');
+    expect(ids(await pool.eligible(cells, VehicleType.CAR))).toEqual([]);
+    await suspension.clear('d');
+    expect(ids(await pool.eligible(cells, VehicleType.CAR))).toEqual(['d']);
   });
 });

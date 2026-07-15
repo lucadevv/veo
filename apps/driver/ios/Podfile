@@ -5,7 +5,14 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, min_ios_version_supported
+# iOS 15.5: mínimo que exige VisionCameraFaceDetector (react-native-vision-camera-face-detector,
+# liveness FaceID F1). Supera el min de RN 0.85 (15.1) y el de Mapbox (14+). Sin esto, pod install falla
+# con "VisionCameraFaceDetector required a higher minimum deployment target".
+# OJO: en iOS el face-detector está PARCHEADO (patches/react-native-vision-camera-face-detector@2.0.1.patch)
+# para usar Apple Vision framework, SIN GoogleMLKit: MLKit no tiene slice arm64-simulator y su podspec
+# inyectaba EXCLUDED_ARCHS[sdk=iphonesimulator*]=arm64 → la app quedaba sin destinos de simulador
+# (runtimes iOS 26 = arm64-only). Android sigue con MLKit. No agregar GoogleMLKit a iOS.
+platform :ios, '15.5'
 prepare_react_native_project!
 
 # Mapbox v11 distribuye XCFrameworks DINÁMICOS; sin `use_frameworks!` NO se embeben en el .app
@@ -74,16 +81,22 @@ target 'VEODriver' do
     )
 
     # Igual que el passenger: (1) MapboxMaps 11.x exige iOS 14+ y `react_native_post_install` resetea
-    # el deployment target de los pods al mínimo de RN — elevamos cualquier target por debajo de 15.1
-    # (mínimo de RN 0.85). (2) use_frameworks! + RNFirebase + -Werror: los headers de RNFB hacen
-    # `#import <React/...>` no-modular dentro de un framework module → relajamos ese check.
+    # el deployment target de los pods al mínimo de RN — elevamos cualquier target por debajo de 15.5
+    # (VisionCameraFaceDetector exige 15.5; supera el 15.1 de RN 0.85). (2) use_frameworks! +
+    # RNFirebase + -Werror: los headers de RNFB hacen `#import <React/...>` no-modular dentro de un framework
+    # module → relajamos ese check.
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |build_configuration|
         current = build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
-        if current.nil? || current.to_f < 15.1
-          build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+        if current.nil? || current.to_f < 15.5
+          build_configuration.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.5'
         end
         build_configuration.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+        # (3) RN 0.85 + Xcode 16: el Clang Module Verifier compila glog (headers C++) en modo
+        # Objective-C puro y falla con "'iosfwd' file not found" (la stdlib de C++ no está en ese
+        # modo) → "could not build module 'Test'" → PhaseScriptExecution. El verifier es un chequeo
+        # de dev sobre los module maps, NO afecta el binario producido: lo deshabilitamos en los Pods.
+        build_configuration.build_settings['ENABLE_MODULE_VERIFIER'] = 'NO'
       end
     end
   end

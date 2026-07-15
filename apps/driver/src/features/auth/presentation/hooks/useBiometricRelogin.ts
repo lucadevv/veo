@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { mobileRefreshResult } from '@veo/api-client';
-import { env } from '../../../../core/config/env';
 import { useDi, useRepositories } from '../../../../core/di/useDi';
 import { useSessionStore } from '../../../../core/session/sessionStore';
+import { refreshBiometricSession } from '../../data';
 import { GetProfileUseCase, profileToSessionUser } from '../../../profile/domain';
 
 interface BiometricReloginState {
@@ -46,30 +45,39 @@ export function useBiometricRelogin(): BiometricReloginState {
     setError(null);
     setPending(true);
     try {
-      const refreshToken = await localAuth.unlockRefreshToken();
-      if (!refreshToken) {
-        return; // Biometría cancelada/sin token: el conductor usa el OTP.
+      const unlock = await localAuth.unlockRefreshToken();
+      // DRIFT-1: cancelación o sin-token → silencioso (el conductor cae al OTP, sin banner). Fallo biométrico
+      // REAL → error visible (banner): antes se colapsaba todo a null y un fallo genuino no avisaba.
+      if (unlock.status === 'cancelled' || unlock.status === 'empty') {
+        return;
       }
+      if (unlock.status === 'failed') {
+        throw new Error(
+          'No pudimos verificar tu identidad. Inténtalo de nuevo o ingresa con tu número.',
+        );
+      }
+      const refreshToken = unlock.token;
 
-      const response = await fetch(`${env.DRIVER_BFF_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ refreshToken }),
-      });
-      if (!response.ok) {
-        throw new Error('No se pudo refrescar la sesión');
-      }
-      const parsed = mobileRefreshResult.safeParse(await response.json());
-      if (!parsed.success) {
-        throw new Error('Respuesta de refresh inválida');
-      }
-
-      const tokens = parsed.data;
+      // La llamada remota (fetch + timeout + validación de schema) vive en la capa `data`
+      // (`refreshBiometricSession`), no en presentation (regla clean-remote-calls). Devuelve los tokens
+      // ya rotados o lanza (BFF no-OK / respuesta inválida / abort por timeout) → cae al catch (banner).
+      const tokens = await refreshBiometricSession(refreshToken);
       useSessionStore.getState().setTokens(tokens);
+      // PERSISTIR EL KEYCHAIN PRIMERO (A3), ANTES del fetch FALIBLE del perfil: el server YA rotó el jti al
+      // responder OK, así que el Keychain debe quedar con el jti NUEVO independientemente de si el perfil carga.
+      // Si esto fuera después del perfil (como antes) y el perfil throweara, el Keychain conservaría el jti VIEJO
+      // ya rotado → el próximo relogin lo presenta → reuse-detection mata la familia (relogin brickeado).
+      try {
+        await localAuth.saveRefreshToken(tokens.refreshToken);
+      } catch (persistError) {
+        // Best-effort + observable (no silencioso): si el Keychain no guarda, el próximo relogin cae a OTP.
+        console.warn(
+          '[relogin] no se pudo persistir el refresh token en el Keychain:',
+          persistError,
+        );
+      }
       const driverProfile = await new GetProfileUseCase(profile).execute();
       useSessionStore.getState().setSession({ tokens, user: profileToSessionUser(driverProfile) });
-      // Rota el token guardado al nuevo refresh token.
-      await localAuth.saveRefreshToken(tokens.refreshToken).catch(() => undefined);
     } catch (e) {
       setError(e);
     } finally {

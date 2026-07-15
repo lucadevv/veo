@@ -74,6 +74,14 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # ESCALA (Lote 3 · firehose GPS): particiones por defecto de los topics AUTO-creados (num.partitions).
+      # El topic `driver-location` (key=driverId) se reparte en 12 particiones → el consumer de dispatch las
+      # procesa en paralelo (KAFKA_CONSUMER_CONCURRENCY / partitionsConsumedConcurrently). 12 = múltiplo
+      # alto-divisible (2,3,4,6,12): permite escalar instancias de dispatch sin re-particionar. Un mismo driver
+      # cae SIEMPRE en la misma partición (keyed) → la serialización per-driver del hot-index se preserva.
+      # OJO: aplica a TODOS los topics auto-creados; subir particiones de un topic YA existente RE-HASHEA las
+      # keys (reorder transitorio) — el firehose es idempotente/self-heal, lo tolera (ver STATUS/ADR).
+      KAFKA_NUM_PARTITIONS: 12
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -100,6 +108,11 @@ services:
     environment:
       MINIO_ROOT_USER: veo_dev
       MINIO_ROOT_PASSWORD: veo_dev_secret
+      # Cifrado at-rest SOBERANO (Ley 29733 · FOUNDATION §0.7c): clave maestra propia self-hosted para
+      # SSE-S3 (envelope: MinIO cifra cada objeto con una data-key envuelta por esta maestra). NO es un KMS
+      # managed — es el KMS interno de MinIO con NUESTRA clave (en prod la inyecta SOPS+age). Formato
+      # `nombre:base64(32 bytes)`. Valor DEV (tier público, se reemplaza en prod por el del host).
+      MINIO_KMS_SECRET_KEY: "veo-media-key-dev:98t0vkG+lmzJIm4P4btvrmM6EY6ZmUYMrklXyDc6usA="
     ports:
       - "9002:9000" # S3 API (host 9002 → MinIO 9000; evita choque con ClickHouse Native 9000)
       - "9001:9001" # Console
@@ -127,7 +140,13 @@ services:
       mc alias set local http://minio:9000 veo_dev veo_dev_secret &&
       mc mb --ignore-existing local/veo-avatars-dev &&
       mc anonymous set download local/veo-avatars-dev/avatars &&
-      echo 'minio-provision: veo-avatars-dev listo (download anónimo en avatars/)'
+      mc mb --ignore-existing local/veo-video-dev &&
+      mc mb --ignore-existing local/veo-documents-dev &&
+      mc mb --ignore-existing local/veo-web-assets-dev &&
+      mc anonymous set download local/veo-web-assets-dev &&
+      mc encrypt set sse-s3 local/veo-video-dev &&
+      mc encrypt set sse-s3 local/veo-documents-dev &&
+      echo 'minio-provision: buckets listos · SSE-S3 at-rest en video+documents (PII) · avatars+web-assets publico sin cifrar'
       "
     restart: "no"
 
@@ -238,7 +257,7 @@ services:
       IMPORT_WIKIPEDIA: "false"
       NOMINATIM_PASSWORD: veo_dev
     ports:
-      - "${NOMINATIM_PORT:-8081}:8080" # default 8081 (contrato); override si el host lo tiene ocupado
+      - "${NOMINATIM_PORT:-8085}:8080" # 8085: el 8081 lo ocupa el Metro de passenger (fijo). override con NOMINATIM_PORT.
     volumes:
       - ./maps/nominatim/data:/nominatim/data # rw: el entrypoint mediagis hace chown -R sobre /nominatim
       - nominatim-data:/var/lib/postgresql/14/main

@@ -5,13 +5,31 @@
  */
 import { Body, Controller, Delete, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { CurrentUser, InternalIdentityGuard, type AuthenticatedUser } from '@veo/auth';
+import {
+  Audiences,
+  CurrentUser,
+  InternalIdentityGuard,
+  AudienceGuard,
+  InternalAudience,
+  type AuthenticatedUser,
+} from '@veo/auth';
 import { AffiliationsService } from './affiliations.service';
 import { CreateYapeAffiliationDto } from './dto/affiliations.dto';
 
+// Riel del pasajero (NO service-rail · mínimo privilegio ADR-014 §5.5): F3a amplió la MEMBRESÍA global de
+// payment a los 4 rieles para admitir service-rail SOLO en charge/debt/GetPayment. Este controller declara
+// explícito su set previo `[public, driver, admin]` para que el `AudienceGuard` (fail-closed) RECHACE a un
+// service-rail acá — conserva exactamente el comportamiento anterior a F3a.
+const PASSENGER_RAILS = [
+  InternalAudience.PUBLIC_RAIL,
+  InternalAudience.DRIVER_RAIL,
+  InternalAudience.ADMIN_RAIL,
+] as const;
+
 @ApiTags('affiliations')
 @ApiBearerAuth()
-@UseGuards(InternalIdentityGuard)
+@UseGuards(InternalIdentityGuard, AudienceGuard)
+@Audiences(...PASSENGER_RAILS)
 @Controller('affiliations/yape')
 export class AffiliationsController {
   constructor(private readonly affiliations: AffiliationsService) {}

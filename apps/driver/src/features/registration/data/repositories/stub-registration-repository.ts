@@ -2,6 +2,8 @@ import {
   VehicleType,
   type BiometricEnrollInput,
   type BiometricEnrollResult,
+  type CheckDniInput,
+  type CheckDniResult,
   type LicenseOnboardInput,
   type PersonalDataInput,
   type PersonalDataView,
@@ -38,6 +40,12 @@ export class StubRegistrationRepository implements RegistrationRepository {
   async updatePersonalData(input: PersonalDataInput): Promise<PersonalDataView> {
     await delay(400);
     return { legalName: input.legalName, dni: input.dni, birthDate: input.birthDate };
+  }
+
+  async checkDni(_input: CheckDniInput): Promise<CheckDniResult> {
+    await delay(200);
+    // Sin backend, el stub asume que el DNI NO está tomado (deja el flujo de UI demostrable de punta a punta).
+    return { exists: false };
   }
 
   async registerVehicle(input: VehicleRegisterInput): Promise<VehicleView> {
@@ -134,11 +142,17 @@ export class StubRegistrationRepository implements RegistrationRepository {
     await delay(400);
     return {
       type: input.type,
-      documentNumber: input.documentNumber,
+      // VEHICLE_PHOTO no trae número → '' (la vista lo expone como string no-null).
+      documentNumber: input.documentNumber ?? '',
       status: 'PENDING_REVIEW',
       simpleStatus: 'en_revision',
       expiresAt: input.expiresAt ?? null,
       ok: false,
+      // Recién enviado: no rechazado → sin motivo.
+      rejectionReason: null,
+      // Sub-lote 3A/3B: caras subidas. El stub refleja lo que envió el body (cada `images[].side` → una
+      // cara con su `order`); si vino por el camino viejo (`fileS3Key`) o sin imágenes, queda vacío.
+      images: (input.images ?? []).map((image, order) => ({ side: image.side, order, url: null })),
     };
   }
 

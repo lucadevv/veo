@@ -1,8 +1,8 @@
 /**
- * Pricing (ADR 011 §6 · M3) — proxy del schedule de modo + RBAC + validación de DTO.
+ * Pricing (F2.4 tarifa base + ADR 010 §9.3 piso de la PUJA) — proxy a trip-service + RBAC + validación de DTO.
  *  - PricingService: GET/PUT proxy a trip-service (mock del InternalRestClient); el PUT audita.
  *  - RBAC: FINANCE/ADMIN permitidos (pricing:manage); SUPPORT_L1 → ForbiddenError (no pricing:*).
- *  - DTO: rechaza dayMask/minute/mode fuera de cota (defensa en profundidad; trip-service re-valida).
+ *  - DTO: rechaza montos fuera de cota (defensa en profundidad; trip-service re-valida).
  *  - Identidad: el BFF propaga la identidad type==='admin' tal cual al rest client → trip-service la firma
  *    HMAC y su AdminIdentityGuard la acepta.
  */
@@ -13,11 +13,11 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { RolesGuard, type AuthenticatedUser } from '@veo/auth';
 import { ForbiddenError } from '@veo/utils';
-import { AdminRole, PricingMode } from '@veo/shared-types';
+import { AdminRole } from '@veo/shared-types';
 import type { InternalRestClient } from '@veo/rpc';
-import { PricingService, type ModeScheduleView } from './pricing.service';
+import { PricingService } from './pricing.service';
 import type { AuditRecorder } from '../audit/audit-recorder.service';
-import { ReplaceScheduleDto, PricingModeRuleDto, ReplaceFuelSurchargeDto } from './dto/pricing.dto';
+import { ReplaceBaseFareDto } from './dto/pricing.dto';
 
 const admin: AuthenticatedUser = {
   userId: 'a1',
@@ -26,123 +26,61 @@ const admin: AuthenticatedUser = {
   sessionId: 's1',
 };
 
-const schedule: ModeScheduleView = {
-  version: 7,
-  defaultMode: PricingMode.PUJA,
-  rules: [{ dayMask: 31, startMinute: 420, endMinute: 540, mode: PricingMode.FIXED }],
-  updatedAt: '2026-06-04T10:00:00.000Z',
-};
-
 describe('PricingService · proxy a trip-service', () => {
-  it('GET mode-schedule → proxya al rest client con la identidad admin firmada', async () => {
-    const rest = { get: vi.fn().mockResolvedValue(schedule), put: vi.fn() };
+  it('F2.4 · GET base-fare → proxya con la identidad admin, sin auditar', async () => {
+    const baseFare = {
+      baseFareCents: 600,
+      perKmCents: 120,
+      perMinCents: 30,
+      version: 1,
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    };
+    const rest = { get: vi.fn().mockResolvedValue(baseFare), put: vi.fn() };
     const audit = { record: vi.fn() };
     const svc = new PricingService(
       rest as unknown as InternalRestClient,
       audit as unknown as AuditRecorder,
     );
 
-    const out = await svc.getSchedule(admin);
+    const out = await svc.getBaseFare(admin);
 
-    expect(out).toBe(schedule);
-    expect(rest.get).toHaveBeenCalledWith('/internal/pricing/mode-schedule', { identity: admin });
+    expect(out).toBe(baseFare);
+    expect(rest.get).toHaveBeenCalledWith('/internal/pricing/base-fare', { identity: admin });
     expect(audit.record).not.toHaveBeenCalled();
   });
 
-  it('PUT mode-schedule → proxya el body completo y audita la mutación', async () => {
-    const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(schedule) };
-    const audit = { record: vi.fn().mockResolvedValue({ id: 'x', seq: '1', hash: 'h' }) };
-    const svc = new PricingService(
-      rest as unknown as InternalRestClient,
-      audit as unknown as AuditRecorder,
-    );
-
-    const dto: ReplaceScheduleDto = {
-      defaultMode: PricingMode.PUJA,
-      rules: [{ dayMask: 31, startMinute: 420, endMinute: 540, mode: PricingMode.FIXED }],
-      expectedVersion: 6,
-    };
-    const out = await svc.replaceSchedule(admin, dto);
-
-    expect(out).toBe(schedule);
-    expect(rest.put).toHaveBeenCalledWith('/internal/pricing/mode-schedule', {
-      identity: admin,
-      body: { defaultMode: PricingMode.PUJA, rules: dto.rules, expectedVersion: 6 },
-    });
-    expect(audit.record).toHaveBeenCalledWith(admin, {
-      action: 'pricing.mode_schedule_replace',
-      resourceType: 'pricing_mode_schedule',
-      resourceId: '7',
-      payload: { defaultMode: PricingMode.PUJA, ruleCount: 1, version: 7 },
-    });
-  });
-
-  it('fail-closed: si el audit falla, replaceSchedule falla', async () => {
-    const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(schedule) };
-    const audit = { record: vi.fn().mockRejectedValue(new Error('audit down')) };
-    const svc = new PricingService(
-      rest as unknown as InternalRestClient,
-      audit as unknown as AuditRecorder,
-    );
-
-    await expect(
-      svc.replaceSchedule(admin, { defaultMode: PricingMode.PUJA, rules: [], expectedVersion: 0 }),
-    ).rejects.toThrow('audit down');
-  });
-
-  it('B4 · GET fuel-surcharge → proxya con la identidad admin, sin auditar', async () => {
-    const fuel = {
-      fuelPricePerLiterCents: 420,
-      kmPerLiter: 12,
-      perKmCents: 35,
+  it('F2.4 · PUT base-fare → proxya los tres componentes y audita la mutación', async () => {
+    const baseFare = {
+      baseFareCents: 800,
+      perKmCents: 150,
+      perMinCents: 40,
       version: 2,
-      updatedAt: '2026-06-16T00:00:00.000Z',
+      updatedAt: '2026-06-27T00:00:00.000Z',
     };
-    const rest = { get: vi.fn().mockResolvedValue(fuel), put: vi.fn() };
-    const audit = { record: vi.fn() };
-    const svc = new PricingService(
-      rest as unknown as InternalRestClient,
-      audit as unknown as AuditRecorder,
-    );
-
-    const out = await svc.getFuelSurcharge(admin);
-
-    expect(out).toBe(fuel);
-    expect(rest.get).toHaveBeenCalledWith('/internal/pricing/fuel-surcharge', { identity: admin });
-    expect(audit.record).not.toHaveBeenCalled();
-  });
-
-  it('B4 · PUT fuel-surcharge → proxya precio+rendimiento y audita la mutación', async () => {
-    const fuel = {
-      fuelPricePerLiterCents: 480,
-      kmPerLiter: 12,
-      perKmCents: 40,
-      version: 3,
-      updatedAt: '2026-06-16T00:00:00.000Z',
-    };
-    const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(fuel) };
+    const rest = { get: vi.fn(), put: vi.fn().mockResolvedValue(baseFare) };
     const audit = { record: vi.fn().mockResolvedValue({ id: 'x', seq: '1', hash: 'h' }) };
     const svc = new PricingService(
       rest as unknown as InternalRestClient,
       audit as unknown as AuditRecorder,
     );
 
-    const out = await svc.replaceFuelSurcharge(admin, {
-      fuelPricePerLiterCents: 480,
-      kmPerLiter: 12,
-      expectedVersion: 2,
+    const out = await svc.replaceBaseFare(admin, {
+      baseFareCents: 800,
+      perKmCents: 150,
+      perMinCents: 40,
+      expectedVersion: 1,
     });
 
-    expect(out).toBe(fuel);
-    expect(rest.put).toHaveBeenCalledWith('/internal/pricing/fuel-surcharge', {
+    expect(out).toBe(baseFare);
+    expect(rest.put).toHaveBeenCalledWith('/internal/pricing/base-fare', {
       identity: admin,
-      body: { fuelPricePerLiterCents: 480, kmPerLiter: 12, expectedVersion: 2 },
+      body: { baseFareCents: 800, perKmCents: 150, perMinCents: 40, expectedVersion: 1 },
     });
     expect(audit.record).toHaveBeenCalledWith(admin, {
-      action: 'pricing.fuel_surcharge_replace',
-      resourceType: 'fuel_surcharge_config',
-      resourceId: '3',
-      payload: { fuelPricePerLiterCents: 480, kmPerLiter: 12, version: 3 },
+      action: 'pricing.base_fare_replace',
+      resourceType: 'base_fare_config',
+      resourceId: '2',
+      payload: { baseFareCents: 800, perKmCents: 150, perMinCents: 40, version: 2 },
     });
   });
 });
@@ -161,7 +99,7 @@ function ctxWithUser(user?: AuthenticatedUser): ExecutionContext {
 
 const MANAGE = [AdminRole.ADMIN, AdminRole.SUPERADMIN, AdminRole.FINANCE];
 
-describe('Pricing RBAC · pricing:manage (PUT mode-schedule)', () => {
+describe('Pricing RBAC · pricing:manage (PUT base-fare / bid-floor)', () => {
   it('FINANCE → permitido', () => {
     const guard = new RolesGuard(reflectorReturning(MANAGE));
     const finance: AuthenticatedUser = { ...admin, roles: [AdminRole.FINANCE] };
@@ -188,139 +126,52 @@ async function errorsOf<T extends object>(cls: new () => T, payload: unknown): P
 }
 
 describe('Pricing DTO · validación', () => {
-  it('ReplaceScheduleDto válido → sin errores', async () => {
-    const ok = {
-      defaultMode: PricingMode.PUJA,
-      rules: [{ dayMask: 31, startMinute: 420, endMinute: 540, mode: PricingMode.FIXED }],
-      expectedVersion: 0,
-    };
-    expect(await errorsOf(ReplaceScheduleDto, ok)).toEqual([]);
-  });
-
-  it('rechaza defaultMode fuera del enum', async () => {
-    expect(await errorsOf(ReplaceScheduleDto, { defaultMode: 'SURGE', rules: [] })).toContain(
-      'defaultMode',
-    );
-  });
-
-  it('PricingModeRuleDto: rechaza dayMask=0 / dayMask=128 (rango 1..127)', async () => {
+  it('F2.4 · ReplaceBaseFareDto: acepta los tres componentes válidos, rechaza negativo / > techo / no-entero', async () => {
     expect(
-      await errorsOf(PricingModeRuleDto, {
-        dayMask: 0,
-        startMinute: 0,
-        endMinute: 1,
-        mode: PricingMode.PUJA,
-      }),
-    ).toContain('dayMask');
-    expect(
-      await errorsOf(PricingModeRuleDto, {
-        dayMask: 128,
-        startMinute: 0,
-        endMinute: 1,
-        mode: PricingMode.PUJA,
-      }),
-    ).toContain('dayMask');
-  });
-
-  it('PricingModeRuleDto: rechaza minute=1440 (rango 0..1439)', async () => {
-    const errs = await errorsOf(PricingModeRuleDto, {
-      dayMask: 1,
-      startMinute: 1440,
-      endMinute: 2000,
-      mode: PricingMode.PUJA,
-    });
-    expect(errs).toEqual(expect.arrayContaining(['startMinute', 'endMinute']));
-  });
-
-  it('PricingModeRuleDto: rechaza mode fuera del enum', async () => {
-    expect(
-      await errorsOf(PricingModeRuleDto, {
-        dayMask: 1,
-        startMinute: 0,
-        endMinute: 1,
-        mode: 'SURGE',
-      }),
-    ).toContain('mode');
-  });
-
-  // S5 (M5) — cross-field: una regla overnight (start >= end) quedaría inerte en el resolver → 400 claro.
-  it('S5: rechaza startMinute >= endMinute (regla overnight inerte) con mensaje claro', async () => {
-    const instance = plainToInstance(PricingModeRuleDto, {
-      dayMask: 127,
-      startMinute: 1320, // 22:00
-      endMinute: 360, // 06:00 (del MISMO día → end <= start)
-      mode: PricingMode.FIXED,
-    });
-    const errors = await validate(instance as object);
-    const endErr = errors.find((e) => e.property === 'endMinute');
-    expect(endErr).toBeTruthy();
-    const msg = Object.values(endErr?.constraints ?? {}).join(' ');
-    expect(msg).toContain('una regla no puede terminar antes o cuando empieza');
-    expect(msg).toContain('22:00-24:00');
-  });
-
-  it('S5: rechaza startMinute === endMinute (rango vacío)', async () => {
-    expect(
-      await errorsOf(PricingModeRuleDto, {
-        dayMask: 1,
-        startMinute: 600,
-        endMinute: 600,
-        mode: PricingMode.FIXED,
-      }),
-    ).toContain('endMinute');
-  });
-
-  it('S5: una regla same-day válida (start < end) pasa', async () => {
-    expect(
-      await errorsOf(PricingModeRuleDto, {
-        dayMask: 127,
-        startMinute: 1320,
-        endMinute: 1439,
-        mode: PricingMode.FIXED,
-      }),
-    ).toEqual([]);
-  });
-
-  it('B4 · ReplaceFuelSurchargeDto: acepta precio+rendimiento válidos, rechaza negativo / > techo / no-entero', async () => {
-    expect(
-      await errorsOf(ReplaceFuelSurchargeDto, {
-        fuelPricePerLiterCents: 420,
-        kmPerLiter: 12,
-        expectedVersion: 3,
+      await errorsOf(ReplaceBaseFareDto, {
+        baseFareCents: 600,
+        perKmCents: 120,
+        perMinCents: 30,
+        expectedVersion: 1,
       }),
     ).toEqual([]);
     expect(
-      await errorsOf(ReplaceFuelSurchargeDto, {
-        fuelPricePerLiterCents: 0,
-        kmPerLiter: 0,
+      await errorsOf(ReplaceBaseFareDto, {
+        baseFareCents: 0,
+        perKmCents: 0,
+        perMinCents: 0,
         expectedVersion: 0,
       }),
     ).toEqual([]);
     expect(
-      await errorsOf(ReplaceFuelSurchargeDto, {
-        fuelPricePerLiterCents: -1,
-        kmPerLiter: 12,
+      await errorsOf(ReplaceBaseFareDto, {
+        baseFareCents: -1,
+        perKmCents: 120,
+        perMinCents: 30,
         expectedVersion: 0,
       }),
-    ).toContain('fuelPricePerLiterCents');
+    ).toContain('baseFareCents');
     expect(
-      await errorsOf(ReplaceFuelSurchargeDto, {
-        fuelPricePerLiterCents: 420,
-        kmPerLiter: 201,
+      await errorsOf(ReplaceBaseFareDto, {
+        baseFareCents: 600,
+        perKmCents: 5001,
+        perMinCents: 30,
         expectedVersion: 0,
       }),
-    ).toContain('kmPerLiter');
+    ).toContain('perKmCents');
     expect(
-      await errorsOf(ReplaceFuelSurchargeDto, {
-        fuelPricePerLiterCents: 12.5,
-        kmPerLiter: 12,
+      await errorsOf(ReplaceBaseFareDto, {
+        baseFareCents: 600,
+        perKmCents: 120,
+        perMinCents: 12.5,
         expectedVersion: 0,
       }),
-    ).toContain('fuelPricePerLiterCents');
+    ).toContain('perMinCents');
     expect(
-      await errorsOf(ReplaceFuelSurchargeDto, {
-        fuelPricePerLiterCents: 420,
-        kmPerLiter: 12,
+      await errorsOf(ReplaceBaseFareDto, {
+        baseFareCents: 600,
+        perKmCents: 120,
+        perMinCents: 30,
         expectedVersion: -1,
       }),
     ).toContain('expectedVersion');

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRepositories } from '../../../../core/di/useDi';
 import {
+  ACTIVE_VEHICLE_QUERY_KEY,
+  REGISTRATION_VEHICLES_QUERY_KEY,
   RegisterVehicleUseCase,
   UpdatePersonalDataUseCase,
   type PersonalData,
@@ -9,8 +11,9 @@ import {
   type VehicleType,
 } from '../../domain';
 
-/** Clave de caché del listado de vehículos del conductor (rehidratación del paso de vehículo). */
-export const REGISTRATION_VEHICLES_QUERY_KEY = ['registration', 'vehicles'] as const;
+// Las claves `REGISTRATION_VEHICLES_QUERY_KEY` y `ACTIVE_VEHICLE_QUERY_KEY` viven ahora en `domain`
+// (cache compartido con turno/carpooling). Se re-exportan para no romper a los consumidores del barrel.
+export { ACTIVE_VEHICLE_QUERY_KEY, REGISTRATION_VEHICLES_QUERY_KEY };
 
 /**
  * Mutación: persiste los datos personales (`PATCH /drivers/me/personal`). Valida en cliente vía el
@@ -79,9 +82,6 @@ export function useRequestVehicleModel() {
     },
   });
 }
-
-/** Clave de caché del vehículo ACTIVO del conductor (server-authoritative). */
-export const ACTIVE_VEHICLE_QUERY_KEY = ['registration', 'active-vehicle'] as const;
 
 /**
  * Query: vehículo ACTIVO (el que el conductor opera) — `GET /drivers/active-vehicle`. `null` si no

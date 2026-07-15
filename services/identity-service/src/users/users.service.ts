@@ -4,14 +4,13 @@
  * posterior aplica el tombstone vencida la gracia (data con obligación legal queda exenta).
  */
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createEnvelope } from '@veo/events';
 import { ConflictError, NotFoundError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
-import { Prisma, type DocumentType } from '../generated/prisma';
+import { UsersRepository } from './users.repository';
+import { PoliciesService } from '../policies/policies.service';
+import { type DocumentType } from '../generated/prisma';
 import { maskDocument } from '../common/document';
 import type { PaymentMethod } from '@veo/shared-types';
-import type { Env } from '../config/env.schema';
 
 export interface ProfileView {
   id: string;
@@ -33,17 +32,18 @@ export interface ProfileView {
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
-  private readonly graceDays: number;
 
   constructor(
-    private readonly prisma: PrismaService,
-    config: ConfigService<Env, true>,
-  ) {
-    this.graceDays = config.getOrThrow<number>('DELETION_GRACE_DAYS');
-  }
+    private readonly repo: UsersRepository,
+    // PBAC (ADR-024, Ola B): la gracia de borrado sale de la política `privacy.erasure` (params.graceDays),
+    // la MISMA fuente que consume el DeletionSweeper. Así el `graceUntil` que se le notifica al usuario y el
+    // cutoff con que el sweeper ejecuta el tombstone usan el valor vigente ÚNICO (no un ENV que puede diferir).
+    // identity ES el dueño del registro → lee su PROPIO PoliciesService (no el cliente Kafka @veo/policy).
+    private readonly policies: PoliciesService,
+  ) {}
 
   async getProfile(userId: string): Promise<ProfileView> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    const user = await this.repo.findUserById(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
     return this.view(user);
   }
@@ -59,7 +59,7 @@ export class UsersService {
       defaultPaymentMethod?: PaymentMethod;
     },
   ): Promise<ProfileView> {
-    const user = await this.prisma.read.user.findUnique({ where: { id: userId } });
+    const user = await this.repo.findUserById(userId);
     if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
 
     const nextDocumentType = data.documentType ?? user.documentType;
@@ -68,16 +68,13 @@ export class UsersService {
       (data.documentType !== undefined && data.documentType !== user.documentType) ||
       (data.document !== undefined && data.document !== user.document);
 
-    const updated = await this.prisma.write.user.update({
-      where: { id: userId },
-      data: {
-        email: data.email ?? user.email,
-        photoUrl: data.photoUrl ?? user.photoUrl,
-        name: data.name ?? user.name,
-        documentType: nextDocumentType,
-        document: nextDocument,
-        defaultPaymentMethod: data.defaultPaymentMethod ?? user.defaultPaymentMethod,
-      },
+    const updated = await this.repo.updateUser(userId, {
+      email: data.email ?? user.email,
+      photoUrl: data.photoUrl ?? user.photoUrl,
+      name: data.name ?? user.name,
+      documentType: nextDocumentType,
+      document: nextDocument,
+      defaultPaymentMethod: data.defaultPaymentMethod ?? user.defaultPaymentMethod,
     });
 
     // AUDIT: cambio de documento (PII). Se registra el evento con el valor MASCARADO —
@@ -94,35 +91,31 @@ export class UsersService {
   /** Solicita el borrado: inicia la gracia y emite user.deletion_requested. */
   async requestDeletion(userId: string): Promise<{ graceUntil: string }> {
     const now = new Date();
-    const graceUntil = new Date(now.getTime() + this.graceDays * 24 * 60 * 60 * 1000);
+    // Gracia VIGENTE de la política (fail-safe al default del catálogo, 30). Misma fuente que el sweeper.
+    const graceDays = await this.policies.getErasureGraceDays();
+    const graceUntil = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000);
 
-    await this.prisma.write.$transaction(async (tx) => {
-      const user = await tx.user.findUnique({ where: { id: userId } });
+    await this.repo.runInTransaction(async (tx) => {
+      const user = await this.repo.findUserByIdTx(tx, userId);
       if (!user || user.deletedAt) throw new NotFoundError('Usuario no encontrado');
       if (user.deletionRequestedAt) throw new ConflictError('Ya existe una solicitud de borrado');
-      await tx.user.update({ where: { id: userId }, data: { deletionRequestedAt: now } });
-      const envelope = createEnvelope({
-        eventType: 'user.deletion_requested',
-        producer: 'identity-service',
-        payload: { userId, requestedAt: now.toISOString(), graceUntil: graceUntil.toISOString() },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          aggregateId: userId,
-          eventType: envelope.eventType,
-          envelope: envelope as unknown as Prisma.InputJsonValue,
-        },
-      });
+      await this.repo.updateUserTx(tx, userId, { deletionRequestedAt: now });
+      await this.repo.enqueueOutbox(
+        tx,
+        createEnvelope({
+          eventType: 'user.deletion_requested',
+          producer: 'identity-service',
+          payload: { userId, requestedAt: now.toISOString(), graceUntil: graceUntil.toISOString() },
+        }),
+        userId,
+      );
     });
 
     return { graceUntil: graceUntil.toISOString() };
   }
 
   async cancelDeletion(userId: string): Promise<void> {
-    await this.prisma.write.user.update({
-      where: { id: userId },
-      data: { deletionRequestedAt: null },
-    });
+    await this.repo.updateUser(userId, { deletionRequestedAt: null });
   }
 
   private view(user: {

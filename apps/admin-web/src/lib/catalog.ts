@@ -1,4 +1,4 @@
-import { findOffering, OfferingId } from '@veo/shared-types';
+import { findOffering, isCustomOfferingId, OfferingId } from '@veo/shared-types';
 import type { CatalogOverride } from '@/lib/api/schemas';
 
 /**
@@ -15,9 +15,10 @@ import type { CatalogOverride } from '@/lib/api/schemas';
 const OFFERING_NAMES = {
   [OfferingId.VEO_MOTO]: 'VEO Moto',
   [OfferingId.VEO_ECONOMICO]: 'VEO Económico',
-  [OfferingId.VEO_CONFORT]: 'VEO Confort',
+  // F2.3 (ADR-017 §1.2) · Confort renombrado a "Normal" (solo el nombre; el id veo_confort es contrato).
+  [OfferingId.VEO_CONFORT]: 'VEO Normal',
   [OfferingId.VEO_XL]: 'VEO XL',
-  [OfferingId.VEO_ECONOMICO_EV]: 'VEO Económico Eléctrico',
+  [OfferingId.VEO_PREMIUM]: 'VEO Premium',
   [OfferingId.VEO_AMBULANCE]: 'VEO Ambulancia',
   [OfferingId.VEO_TOW]: 'VEO Grúa',
   [OfferingId.VEO_MECHANIC]: 'VEO Mecánico',
@@ -26,6 +27,14 @@ const OFFERING_NAMES = {
 export function offeringLabel(id: string): string {
   // Lookup tolerante (el id llega como string crudo del server): id conocido → nombre; desconocido → id.
   return (OFFERING_NAMES as Record<string, string>)[id] ?? id;
+}
+
+/**
+ * Nombre display de una oferta (ADR 013): las CUSTOM traen su `name` literal (no hay clave i18n para un id
+ * creado en caliente); las built-in caen al map `offeringLabel`. Fuente única del rótulo en el panel del catálogo.
+ */
+export function offeringDisplayName(offering: { id: string; name?: string | null }): string {
+  return offering.name ?? offeringLabel(offering.id);
 }
 
 /**
@@ -39,6 +48,12 @@ export function offeringLabel(id: string): string {
  */
 export function withOverride(base: CatalogOverride[], next: CatalogOverride): CatalogOverride[] {
   const rest = base.filter((o) => o.id !== next.id);
+  // Ofertas CUSTOM: su default de `enabled` vive en la TABLA (no en código), así que acá NO lo conocemos —
+  // podar el override por un default ADIVINADO perdería un `enabled` explícito (una custom creada deshabilitada
+  // que el admin prende quedaría apagada). Por eso el override de una custom NUNCA se poda: siempre se persiste.
+  if (isCustomOfferingId(next.id)) {
+    return [...rest, next];
+  }
   const defaultEnabled = findOffering(next.id)?.defaultEnabled ?? true;
   const isDefault =
     next.enabled === defaultEnabled &&

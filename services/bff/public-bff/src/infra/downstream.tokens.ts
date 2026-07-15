@@ -29,6 +29,8 @@ export const REST_NOTIFICATION = Symbol('REST_NOTIFICATION');
 export const REST_CHAT = Symbol('REST_CHAT');
 /** media-service: presign de subida del avatar del pasajero (PUT directo a S3/MinIO). */
 export const REST_MEDIA = Symbol('REST_MEDIA');
+/** booking-service (ADR-014 · carpooling): búsqueda/detalle de viajes publicados + reservas del pasajero. */
+export const REST_BOOKING = Symbol('REST_BOOKING');
 
 /** Fachada de mapas OSM (routing/ETA). */
 export const MAPS = Symbol('MAPS');

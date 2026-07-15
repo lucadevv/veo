@@ -18,6 +18,12 @@ export interface AccessTokenClaims {
   roles: AdminRole[];
   /** sessionId (familia de refresh tokens) */
   sid: string;
+  /**
+   * epoch en SEGUNDOS de emisión (claim `iat`, lo setea jose vía `setIssuedAt()`). Lo consume el
+   * enforcement de revocación (eje `revoked-before`: un token es inválido si su `iat` es anterior al
+   * timestamp de revoke-all del user). Ausente solo en tokens legacy sin `iat` (defensa: no evaluable).
+   */
+  iat?: number;
   /** epoch (s) de la última verificación MFA fresca, para step-up (BR-S07) */
   mfaAt?: number;
   /**
@@ -47,6 +53,11 @@ export interface AuthenticatedUser {
   type: SubjectType;
   roles: AdminRole[];
   sessionId: string;
+  /**
+   * epoch en SEGUNDOS de emisión del access token (claim `iat`), propagado para el enforcement de
+   * revocación (SessionRevocationGuard / handshake del socket). Ausente en tokens legacy sin `iat`.
+   */
+  issuedAtSec?: number;
   mfaVerifiedAt?: number;
   /**
    * driverId resuelto (userId→driver) por el BFF para identidades de conductor.
@@ -148,6 +159,7 @@ export class JwtService {
       typ: payload.typ as SubjectType,
       roles: (payload.roles as AdminRole[] | undefined) ?? [],
       sid: payload.sid as string,
+      iat: payload.iat as number | undefined,
       mfaAt: payload.mfaAt as number | undefined,
       email: payload.email as string | undefined,
     };
@@ -194,6 +206,7 @@ export function toAuthenticatedUser(claims: AccessTokenClaims): AuthenticatedUse
     type: claims.typ,
     roles: claims.roles,
     sessionId: claims.sid,
+    issuedAtSec: claims.iat,
     mfaVerifiedAt: claims.mfaAt,
     email: claims.email,
   };

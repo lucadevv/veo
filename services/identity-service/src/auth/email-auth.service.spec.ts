@@ -9,6 +9,7 @@ import {
   ValidationError,
 } from '@veo/utils';
 import { EmailAuthService } from './email-auth.service';
+import { EmailAuthRepository } from './email-auth.repository';
 import type { Env } from '../config/env.schema';
 
 /**
@@ -201,7 +202,7 @@ function build() {
   const redis = fakeRedis();
   const tokenIssuer = makeTokenIssuer();
   const svc = new EmailAuthService(
-    prisma as never,
+    new EmailAuthRepository(prisma as never),
     sessions as never,
     codes as never,
     email,

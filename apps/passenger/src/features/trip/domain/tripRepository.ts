@@ -13,6 +13,7 @@ import type {
   TripHistoryPage,
   TripHistoryQuery,
   TripResource,
+  TripRoute,
   TripStateView,
   TripVideoGrant,
   WaypointProposalView,
@@ -55,13 +56,16 @@ export interface TripRepository {
   closeTrip(tripId: string): Promise<TripActiveView>;
   /** GET /trips/:id/state → estado ligero (polling de respaldo del socket). */
   getTripState(tripId: string): Promise<TripStateView>;
+  /**
+   * GET /trips/:id/route[?leg=pickup] → ruta del viaje para el mapa (mismo contrato `tripRoute`).
+   * Sin `leg`: la CANÓNICA persistida del viaje (origen→paradas→destino). `leg: 'pickup'`: el TRAMO
+   * DE ACERCAMIENTO vivo (conductor→recojo) para las fases pre-recojo — el pasajero ve POR DÓNDE
+   * VIENE el conductor; sin ubicación aún, el server responde ruta VACÍA (polyline '') y el mapa no
+   * dibuja nada (solo markers). Polyline + steps + markers.
+   */
+  getTripRoute(tripId: string, leg?: 'pickup' | 'dropoff'): Promise<TripRoute>;
   /** POST /trips/:id/cancel → cancela el viaje. */
   cancelTrip(tripId: string, input: CancelTripRequest): Promise<TripResource>;
-  /** POST /trips/:id/destination → cambia el destino en curso. */
-  changeDestination(
-    tripId: string,
-    destination: GeoPoint,
-  ): Promise<TripResource>;
   /**
    * POST /trips/:id/waypoints → PROPONE una parada intermedia durante el viaje EN CURSO (Lote C2/C3).
    * El cuerpo solo transporta el punto; el server calcula el delta de tarifa, la ruta y el ETA nuevos

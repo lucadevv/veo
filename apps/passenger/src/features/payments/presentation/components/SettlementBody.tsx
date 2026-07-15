@@ -2,11 +2,13 @@ import type {PaymentView} from '@veo/api-client';
 import {useMutation, useQuery} from '@tanstack/react-query';
 import {
   Banner,
+  BottomSheet,
   Button,
   Card,
   Skeleton,
   StatusPill,
   Text,
+  TextField,
   useTheme,
 } from '@veo/ui-kit';
 import React from 'react';
@@ -23,13 +25,25 @@ import {
 import {CheckoutInstructions} from './CheckoutInstructions';
 import {Animated, EnterView, SuccessCheck, usePressScale} from './motion';
 
-/** Propinas rápidas post-viaje sugeridas (céntimos PEN), alineadas al handoff: [Sin, S/2, S/3, S/5]. */
-const QUICK_TIPS_CENTS = [0, 200, 300, 500] as const;
+/** Propinas rápidas post-viaje (céntimos PEN), per design/veo.pen I7ahU: [Sin, S/2, S/5] + "Otro". */
+const QUICK_TIPS_CENTS = [0, 200, 500] as const;
+/** Tope de cordura del monto libre de propina (céntimos): evita typos de un cero de más. */
+const MAX_CUSTOM_TIP_CENTS = 50_000;
 
 /** Cadencia del poll del recibo mientras el cobro "procesa" (consumer Kafka puede demorar). */
 const POLL_INTERVAL_MS = 2500;
-/** Tope del poll: tras esto mostramos un error honesto con botón Reintentar. */
+/**
+ * Ventana del poll RÁPIDO: tras esto mostramos el aviso honesto ("está tardando") con Reintentar, pero
+ * el poll NO muere — degrada a la cadencia lenta de abajo.
+ */
 const POLL_TIMEOUT_MS = 30_000;
+/**
+ * Cadencia LENTA indefinida tras agotar la ventana rápida. La pantalla PROMETE "se actualiza sola"
+ * (`settlement.processingHint`): cortar el poll a los 30 s la dejaba clavada si el webhook/consumer
+ * resolvía después (reproducido en el sim) — el pasajero tenía que relanzar la app. Es UNA row por
+ * tripId cada 30 s solo mientras el recibo esté montado: barato y honesto.
+ */
+const SLOW_POLL_INTERVAL_MS = 30_000;
 
 export interface SettlementBodyProps {
   /** Viaje COMPLETED a liquidar (`GET /payments/by-trip/:tripId`). */
@@ -45,10 +59,11 @@ export interface SettlementBodyProps {
    */
   onDeferred: () => void;
   /**
-   * Cierre TERMINAL directo desde el recibo ya resuelto: calificar es OPCIONAL, así que cada estado
+   * Cierre TERMINAL directo (closeTrip → passengerClosedAt): calificar es OPCIONAL, así que cada estado
    * final ofrece una salida "Volver al inicio" que cierra el viaje sin pasar por el rating (mismo
-   * camino que el cierre final). NO se ofrece en efectivo PENDING sin confirmar (es plata: solo
-   * "Confirmar después", que NO cierra).
+   * camino que el cierre final). También es la salida "Pagar después" del checkout pendiente: el
+   * Payment PENDING sigue vivo server-side y la franja PENDING_ACTION del home toma el relevo. NO se
+   * ofrece en efectivo PENDING sin confirmar (es plata: solo "Confirmar después", que NO cierra).
    */
   onFinish: () => void;
   /**
@@ -76,8 +91,9 @@ function methodLabelKey(method: string): string {
  *
  * Estados (derivados de `GET /payments/by-trip/:tripId`):
  *  - cargando → skeleton.
- *  - 404 transitorio (el consumer puede demorar) → "Procesando tu pago…" con poll suave (~2.5s, ~30s
- *    de tope) → si agota, error honesto con Reintentar.
+ *  - 404 transitorio (el consumer puede demorar) → "Procesando tu pago…" con poll suave (~2.5s). A los
+ *    ~30s: aviso honesto con Reintentar, pero el poll DEGRADA a cadencia lenta (no muere): si el cobro
+ *    resuelve tarde, la pantalla igual se actualiza sola (lo que promete el copy).
  *  - PENDING + CASH → "Paga en efectivo" + banner del cash + "Confirmar efectivo" (POST cash/confirm).
  *    Si el pasajero confirma pero el conductor aún no (confirmación bilateral): "esperando al conductor".
  *  - PENDING + digital → "Procesando pago…" + poll.
@@ -118,7 +134,6 @@ export function SettlementBody({
   );
 
   const getPaymentByTrip = useDependency(TOKENS.getPaymentByTripUseCase);
-  const confirmCash = useDependency(TOKENS.confirmCashUseCase);
   const addTip = useDependency(TOKENS.addTipUseCase);
 
   // Ancla del poll: cuándo empezamos a esperar el cobro (para cortar a los ~30s).
@@ -127,32 +142,31 @@ export function SettlementBody({
   const paymentQuery = useQuery<PaymentView | null, Error>({
     queryKey: ['payment', tripId, 'by-trip'],
     queryFn: () => getPaymentByTrip.execute(tripId),
-    // Poll suave MIENTRAS el cobro no existe (404→null) o sigue PENDING-digital, hasta el tope.
+    // Poll MIENTRAS el cobro no existe (404→null) o sigue PENDING-digital: rápido dentro de la ventana,
+    // LENTO indefinido después (mientras el recibo esté montado). Resuelto el outcome → se apaga.
     refetchInterval: query => {
       const data = query.state.data;
-      const elapsed = Date.now() - startedAtRef.current;
-      if (elapsed > POLL_TIMEOUT_MS) {
+      // Sigue pendiente si aún no hay recibo o el outcome puede moverse (webhook/consumer tardío).
+      const stillPending =
+        data == null ||
+        (() => {
+          const outcome = interpretPaymentOutcome(data);
+          return (
+            outcome.kind === 'checkoutPending' ||
+            outcome.kind === 'processing' ||
+            // EFECTIVO: transitorio mientras el consumer captura tras la confirmación del conductor
+            // (el pasajero ya no confirma) → poll hasta el recibo CAPTURED.
+            outcome.kind === 'cashPending'
+          );
+        })();
+      if (!stillPending) {
         return false;
       }
-      if (data == null) {
-        return POLL_INTERVAL_MS;
-      }
-      // Sigue PENDING-digital (con o sin checkout): el webhook/consumer aún puede moverlo.
-      const outcome = interpretPaymentOutcome(data);
-      if (outcome.kind === 'checkoutPending' || outcome.kind === 'processing') {
-        return POLL_INTERVAL_MS;
-      }
-      return false;
+      const elapsed = Date.now() - startedAtRef.current;
+      return elapsed > POLL_TIMEOUT_MS ? SLOW_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
     },
   });
 
-  const confirmMutation = useMutation<PaymentView, Error, string>({
-    mutationFn: (paymentId: string) => confirmCash.execute(paymentId),
-    onSuccess: () => {
-      // Re-sincroniza el recibo: si el conductor ya confirmó, el cobro pasa a CAPTURED.
-      void paymentQuery.refetch();
-    },
-  });
 
   const tipMutation = useMutation<PaymentView, Error, number>({
     mutationFn: (tipCents: number) => addTip.execute(tripId, tipCents),
@@ -161,8 +175,24 @@ export function SettlementBody({
     },
   });
 
+  // Chip "Otro" (design/veo.pen I7ahU): monto libre de propina en un sheet chico. El texto vive acá
+  // (no en el sheet) para poder validar/parsear antes de mutar; se resetea al cerrar.
+  const [customTipOpen, setCustomTipOpen] = React.useState(false);
+  const [customTipText, setCustomTipText] = React.useState('');
+  // Soles con decimales opcionales ("5" / "5.50") → céntimos. NaN/fuera de rango → null (botón gris).
+  const customTipCents = React.useMemo(() => {
+    const parsed = Number(customTipText.replace(',', '.'));
+    if (!Number.isFinite(parsed)) return null;
+    const cents = Math.round(parsed * 100);
+    return cents > 0 && cents <= MAX_CUSTOM_TIP_CENTS ? cents : null;
+  }, [customTipText]);
+  const closeCustomTip = (): void => {
+    setCustomTipOpen(false);
+    setCustomTipText('');
+  };
+
   // Fuente de verdad: la confirmación de efectivo recién hecha pisa al fetch (trae el estado bilateral).
-  const payment = confirmMutation.data ?? paymentQuery.data ?? null;
+  const payment = paymentQuery.data ?? null;
 
   // Reintenta el poll del recibo (reinicia la ventana de ~30s). Compartido por los estados de timeout
   // y por el checkout (tras pagar, el webhook pasa a CAPTURED y el refetch lo refleja).
@@ -232,17 +262,32 @@ export function SettlementBody({
   // recibo final sella la exhaustividad en compile-time (un `PaymentOutcome.kind` nuevo obliga acá).
   const outcome = interpretPaymentOutcome(payment);
   const isCash = isCashPayment(payment);
-  const passengerConfirmedCash = confirmMutation.isSuccess;
 
   // ── PENDING digital con CHECKOUT (ProntoPaga): el usuario DEBE completarlo (deepLink/web/QR/CIP).
   // Tiene prioridad sobre el timeout del poll: mientras no venza, mostramos cómo pagar (no un error).
   if (outcome.kind === 'checkoutPending') {
     return (
-      <CheckoutBody
-        payment={payment}
-        onRetry={retryPoll}
-        retrying={paymentQuery.isFetching}
-      />
+      <View style={{gap: theme.spacing.md}}>
+        <CheckoutBody
+          payment={payment}
+          onRetry={retryPoll}
+          retrying={paymentQuery.isFetching}
+        />
+        {/* Salida "Pagar después": nadie queda preso del checkout — un CIP (PagoEfectivo) se paga en
+            banco/agente HORAS o DÍAS después de terminado el viaje. Camino VERIFICADO: tiene que ser
+            `onFinish` (cierra el post-viaje: closeTrip → passengerClosedAt → el trip sale de
+            /trips/pending-settlement). Con `onDeferred` NO habría salida real: sin passengerClosedAt,
+            useHydrateActiveTrip re-adopta el settlement en cada foco del home y re-abre este mismo
+            sheet. El Payment PENDING con checkout vivo sigue en el server: GET /payments/debts lo
+            expone como PENDING_ACTION (NO bloquea pedir viajes) y la franja del home "Tienes un pago
+            por completar → Continuar" reabre ESTE mismo checkout (DebtSheet en modo pending-action). */}
+        <Button
+          label={t('settlement.checkout.payLater')}
+          variant="ghost"
+          fullWidth
+          onPress={onFinish}
+        />
+      </View>
     );
   }
 
@@ -275,53 +320,25 @@ export function SettlementBody({
   }
 
   // ── PENDING + CASH ───────────────────────────────────────────────────────────────────────────
+  // El pasajero YA NO confirma el efectivo (decisión del dueño 2026-07-14): el CONDUCTOR lo captura al
+  // confirmar que cobró. Para el PASAJERO el efectivo YA se pagó EN MANO al bajar → su parte TERMINÓ. Por
+  // eso NUNCA lo atrapamos esperando la confirmación del conductor (que puede tardar o no venir): nota
+  // informativa ("Pagaste en efectivo") + SALIDA (calificar / volver al inicio), nunca un dead-end. El poll
+  // sigue vivo: si el conductor confirma, la rama pasa sola al recibo CAPTURED ("Pago en efectivo
+  // confirmado" con el check). Si NO confirma, el pasajero ya salió y la red de seguridad backend
+  // (reconciliación de efectivo PENDING viejo) lo resuelve por ops.
   if (outcome.kind === 'cashPending') {
-    // El pasajero ya confirmó su lado pero el cobro sigue PENDING → falta el conductor (bilateral).
-    if (passengerConfirmedCash) {
-      return (
-        <View style={{gap: theme.spacing.md}}>
-          <Banner
-            tone="info"
-            title={t('settlement.cashAwaitingDriverTitle')}
-            description={t('settlement.cashAwaitingDriverBody')}
-          />
-          <ReceiptCard payment={payment} cash />
-          {/* El pasajero ya hizo su parte (su lado del efectivo está confirmado): el cobro se cierra
-              cuando el conductor confirma. Doble salida: calificar (opcional) o volver al inicio. */}
-          {resolvedActions}
-        </View>
-      );
-    }
-
     return (
       <View style={{gap: theme.spacing.md}}>
-        <Text variant="title3">{t('settlement.cashTitle')}</Text>
-        <Text variant="callout" color="inkMuted">
-          {t('settlement.cashBody', {amount: formatPEN(payment.amountCents)})}
-        </Text>
+        <Banner
+          tone="info"
+          title={t('settlement.cashPaidTitle')}
+          description={t('settlement.cashPaidBody', {
+            amount: formatPEN(payment.amountCents),
+          })}
+        />
         <ReceiptCard payment={payment} cash />
-        <Banner tone="info" title={t('settlement.cashBanner')} />
-        {confirmMutation.isError ? (
-          <Banner tone="danger" title={t('payments.payError')} />
-        ) : null}
-        <Button
-          label={
-            confirmMutation.isPending
-              ? t('settlement.confirmingCash')
-              : t('settlement.confirmCash')
-          }
-          variant="accent"
-          fullWidth
-          loading={confirmMutation.isPending}
-          onPress={() => confirmMutation.mutate(payment.id)}
-        />
-        {/* Escape sin cerrar: el settlement re-aparece al volver (es plata, no la perdemos). */}
-        <Button
-          label={t('settlement.confirmLater')}
-          variant="ghost"
-          fullWidth
-          onPress={onDeferred}
-        />
+        {resolvedActions}
       </View>
     );
   }
@@ -374,6 +391,20 @@ export function SettlementBody({
     );
   }
 
+  // Resultado del COBRO de la propina, clasificado por el DOMINIO (mismo criterio que `TipCard`): un
+  // tip PENDING con checkout (Yape one-shot deepLink/QR — el caso común sin afiliación on-file — o CIP)
+  // NO está "enviado": si se descarta el PaymentView, el checkout nunca se muestra, el tip muere FAILED
+  // y el pasajero cree que la dejó mientras el conductor no la cobra.
+  const tipPayment = tipMutation.data ?? null;
+  const tipOutcome = tipPayment ? interpretPaymentOutcome(tipPayment) : null;
+  const tipNeedsCheckout = tipOutcome?.kind === 'checkoutPending';
+  const tipFailed = tipOutcome?.kind === 'failed' || tipOutcome?.kind === 'debt';
+  // Candado anti doble-propina (ver el comentario de los chips). Si el cobro devuelto FALLÓ terminal,
+  // se DESTRABA: el pasajero puede elegir de nuevo (la idempotencia por dedupKey hace que repetir el
+  // MISMO monto devuelva el FAILED sin cobrar; un monto distinto se cobra normal — igual que TipCard).
+  const tipLocked =
+    tipMutation.isPending || (tipMutation.isSuccess && !tipFailed);
+
   // ── CAPTURED (o efectivo ya capturado por ambos) → RECIBO canónico ───────────────────────────
   // SELLO de exhaustividad: a esta altura todas las ramas anteriores RETORNARON, así que el único
   // kind posible es 'settled'. Si `PaymentOutcome` suma un kind nuevo, este guard deja de narrowear
@@ -399,8 +430,33 @@ export function SettlementBody({
         <ReceiptCard payment={payment} />
       </EnterView>
 
-      {/* Propina post-viaje: solo si aún no dejó (tipCents === 0). Chips [Sin, S/2, S/3, S/5]. */}
-      {payment.tipCents === 0 ? (
+      {/* El COBRO de la propina exige completar un checkout (Yape one-shot / QR / CIP): lo mostramos
+          con el componente CANÓNICO (el mismo del recibo/deuda/TipCard) en vez de descartarlo — antes
+          el PaymentView se tiraba y el tip quedaba PENDING hasta morir FAILED en silencio. `onRetry`
+          re-corre el cobro, IDEMPOTENTE por dedupKey: al confirmar, el webhook devuelve el mismo cobro
+          ya CAPTURED y el refetch del recibo trae tipCents > 0 (el "gracias" actual del desglose). */}
+      {tipNeedsCheckout && tipPayment ? (
+        <EnterView delay={260}>
+          <Card variant="outlined" padding="lg">
+            <CheckoutInstructions
+              payment={tipPayment}
+              retrying={tipMutation.isPending}
+              onRetry={() => tipMutation.mutate(tipPayment.tipCents)}
+              header={
+                <>
+                  <Text variant="title3">{t('tips.checkoutTitle')}</Text>
+                  <Text variant="callout" color="inkMuted">
+                    {t('tips.checkoutBody', {
+                      amount: formatPEN(tipPayment.tipCents),
+                    })}
+                  </Text>
+                </>
+              }
+            />
+          </Card>
+        </EnterView>
+      ) : /* Propina post-viaje: solo si aún no dejó (tipCents === 0). Chips [Sin, S/2, S/5] + "Otro". */
+      payment.tipCents === 0 ? (
         <EnterView delay={260}>
           <View style={{gap: theme.spacing.sm}}>
             {/* Coherencia propina-efectivo: en un viaje CASH la tarifa va en mano, pero estos chips cobran
@@ -411,6 +467,23 @@ export function SettlementBody({
             </Text>
             {tipMutation.isError ? (
               <Banner tone="danger" title={t('tips.error')} />
+            ) : null}
+            {/* El cobro devuelto FALLÓ terminal (declive/expiró): honesto — sin esto el pasajero creía
+                que la propina salió. Los chips quedan destrabados para elegir de nuevo (ver tipLocked). */}
+            {tipFailed ? (
+              <Banner
+                tone="danger"
+                title={t('tips.failedTitle')}
+                description={t('tips.failedBody')}
+              />
+            ) : null}
+            {/* On-file (Yape vinculado): cobrándose server-initiated, se confirma por webhook. */}
+            {tipOutcome?.kind === 'processing' ? (
+              <Banner
+                tone="info"
+                title={t('tips.processingTitle')}
+                description={t('tips.processingBody')}
+              />
             ) : null}
             <View style={[styles.chips, {gap: theme.spacing.sm}]}>
               {QUICK_TIPS_CENTS.map(cents => (
@@ -426,19 +499,62 @@ export function SettlementBody({
                   // Anti doble-propina: una vez que la propina se envió OK, los chips quedan deshabilitados
                   // hasta que el refetch traiga tipCents>0 y oculte el bloque. Sin esto, entre el onSuccess y
                   // el re-render del refetch el pasajero podía tocar otro chip y mandar una segunda propina.
-                  disabled={tipMutation.isPending || tipMutation.isSuccess}
+                  // Se destraba SOLO si el cobro devuelto falló terminal (tipFailed): elegir de nuevo.
+                  disabled={tipLocked}
                   // "Sin propina" no llama al backend (tipCents mínimo es 1): solo avanza.
                   onPress={() =>
                     cents === 0 ? undefined : tipMutation.mutate(cents)
                   }
                 />
               ))}
+              {/* "Otro" (pen I7ahU): monto libre en un sheet chico, misma mutación anti-doble. */}
+              <TipChip
+                label={t('settlement.tipOther')}
+                disabled={tipLocked}
+                onPress={() => setCustomTipOpen(true)}
+              />
             </View>
           </View>
         </EnterView>
       ) : null}
 
       {resolvedActions}
+
+      {/* Sheet del monto libre de propina (pen I7ahU "Otro"): soles con decimales, tope de cordura,
+          misma mutación (y el mismo candado anti doble-propina) que los chips rápidos. */}
+      <BottomSheet
+        visible={customTipOpen}
+        onClose={closeCustomTip}
+        title={t('settlement.tipCustomTitle')}
+        footer={
+          <Button
+            label={
+              customTipCents != null
+                ? t('settlement.tipCustomConfirm', {
+                    amount: formatPEN(customTipCents),
+                  })
+                : t('settlement.tipCustomConfirmEmpty')
+            }
+            variant="primary"
+            fullWidth
+            disabled={customTipCents == null || tipMutation.isPending}
+            loading={tipMutation.isPending}
+            onPress={() => {
+              if (customTipCents != null) {
+                tipMutation.mutate(customTipCents);
+                closeCustomTip();
+              }
+            }}
+          />
+        }>
+        <TextField
+          label={t('settlement.tipCustomLabel')}
+          value={customTipText}
+          onChangeText={setCustomTipText}
+          keyboardType="decimal-pad"
+          autoFocus
+        />
+      </BottomSheet>
     </View>
   );
 }
@@ -455,14 +571,38 @@ function ReceiptCard({
   const {t} = useTranslation();
   return (
     <Card variant="outlined" padding="lg">
-      <View style={styles.row}>
-        <Text variant="callout" color="inkMuted">
-          {t('payments.breakdownFare')}
-        </Text>
-        <Text variant="callout" tabular>
-          {formatPEN(payment.grossCents)}
-        </Text>
-      </View>
+      {/* Desglose per design/veo.pen I7ahU: cuando el cobro trae comisión VISIBLE al usuario
+          (`feeCents`, semántica del payment-service), se abre en "Tarifa base + Cargo por servicio
+          VEO" (base = gross − fee; la suma cierra con el Total). Sin fee → una sola línea, como antes. */}
+      {payment.feeCents > 0 ? (
+        <>
+          <View style={styles.row}>
+            <Text variant="callout" color="inkMuted">
+              {t('payments.breakdownBaseFare')}
+            </Text>
+            <Text variant="callout" tabular>
+              {formatPEN(payment.grossCents - payment.feeCents)}
+            </Text>
+          </View>
+          <View style={styles.row}>
+            <Text variant="callout" color="inkMuted">
+              {t('payments.breakdownServiceFee')}
+            </Text>
+            <Text variant="callout" tabular>
+              {formatPEN(payment.feeCents)}
+            </Text>
+          </View>
+        </>
+      ) : (
+        <View style={styles.row}>
+          <Text variant="callout" color="inkMuted">
+            {t('payments.breakdownFare')}
+          </Text>
+          <Text variant="callout" tabular>
+            {formatPEN(payment.grossCents)}
+          </Text>
+        </View>
+      )}
       {payment.tipCents > 0 ? (
         <View style={styles.row}>
           <Text variant="callout" color="inkMuted">
@@ -542,6 +682,12 @@ function CheckoutBody({
       payment={payment}
       onRetry={onRetry}
       retrying={retrying}
+      // CIP (PagoEfectivo): hint HONESTO — se paga en banco/agente horas/días después; "esta pantalla
+      // se actualiza sola" retiene a alguien que tiene que salir. Yape/Plin/tarjeta resuelven en
+      // minutos → conservan el hint genérico.
+      waitingHint={
+        payment.cip ? t('settlement.checkout.waitingHintCip') : undefined
+      }
       header={
         <View style={{gap: theme.spacing.md}}>
           <Text variant="title3">{t('settlement.checkout.title')}</Text>

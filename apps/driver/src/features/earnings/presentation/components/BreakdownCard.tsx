@@ -65,11 +65,11 @@ export function BreakdownCard({
 
       {/* Métrica protagonista: NETO con tinte cian y numerales tabulares. */}
       <View style={styles.netBlock}>
-        <View style={[styles.accentRule, { backgroundColor: theme.colors.accent }]} />
+        <View style={[styles.accentRule, { backgroundColor: theme.colors.success }]} />
         <Text variant="footnote" color="inkSubtle">
           {t('earnings.net')}
         </Text>
-        <Text variant="display" color="accent" tabular>
+        <Text variant="display" color="success" tabular>
           {formatPEN(breakdown.netCents)}
         </Text>
       </View>
@@ -85,14 +85,15 @@ export function BreakdownCard({
         />
         <BreakdownLine
           label={t('earnings.commission')}
-          // La comisión resta: la mostramos con signo y en tono de advertencia/riesgo.
+          // La comisión resta: el signo − ya lo comunica. Monocromo (inkMuted): el rojo se reserva para
+          // errores/atención, no para una línea contable normal (evita el "todo pintado" que se siente AI).
           value={`- ${formatPEN(breakdown.commissionCents)}`}
-          valueColor="danger"
+          valueColor="inkMuted"
         />
         <BreakdownLine
           label={t('earnings.tips')}
           value={`+ ${formatPEN(breakdown.tipCents)}`}
-          valueColor="success"
+          valueColor="ink"
         />
       </View>
     </View>
@@ -102,7 +103,7 @@ export function BreakdownCard({
 interface BreakdownLineProps {
   label: string;
   value: string;
-  valueColor: 'ink' | 'danger' | 'success';
+  valueColor: 'ink' | 'inkMuted';
 }
 
 /** Fila etiqueta–monto del desglose. Privada de la tarjeta. */

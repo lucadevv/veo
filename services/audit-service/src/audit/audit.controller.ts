@@ -13,11 +13,13 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '@veo/auth';
+import { AdminRole } from '@veo/shared-types';
 import { ValidationError } from '@veo/utils';
 import { AuditService } from './audit.service';
 import type { RecordedEntry } from './audit.repository';
 import {
   AuditEntryResponse,
+  ExportAuditDto,
   QueryAuditDto,
   RecordAuditDto,
   VerifyAuditDto,
@@ -42,12 +44,13 @@ export class AuditController {
   @ApiOperation({ summary: 'Registrar una acción auditable (append-only, hash chain).' })
   async record(
     @Body() dto: RecordAuditDto,
-    @CurrentUser() user: AuthenticatedUser | undefined,
+    @CurrentUser() user: AuthenticatedUser,
     @Req() req: HttpRequest,
   ): Promise<AuditEntryResponse> {
-    const actorId = dto.actorId ?? user?.userId;
-    if (!actorId)
-      throw new ValidationError('actorId requerido (sin identidad interna ni en el body)');
+    // INTEGRIDAD del WORM (Ley 29733): el actor que se persiste es SIEMPRE la identidad VERIFICADA por el
+    // InternalIdentityGuard (firma HMAC del caller), NUNCA un `actorId` del body (forjable). El guard exige
+    // identidad válida → `user` no puede faltar acá. `actorId` ya NO existe en RecordAuditDto.
+    const actorId = user.userId;
     const entry = await this.audit.recordSync({
       actorId,
       action: dto.action,
@@ -56,29 +59,57 @@ export class AuditController {
       payload: dto.payload ?? {},
       ip: clientIp(req),
       userAgent: header(req, 'user-agent'),
+      // Id estable provisto por el caller (opcional) → idempotencia del registro síncrono.
+      eventId: dto.eventId,
     });
     return toResponse(entry);
   }
 
   @Get()
   @UseGuards(InternalIdentityGuard, RolesGuard)
-  @Roles('COMPLIANCE_SUPERVISOR', 'SUPERADMIN')
-  @ApiOperation({ summary: 'Consultar el audit log (filtros + paginación por cursor).' })
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
+  @ApiOperation({ summary: 'Consultar el audit log (filtros estructurados + paginación por cursor).' })
   async list(@Query() dto: QueryAuditDto): Promise<AuditEntryResponse[]> {
     const entries = await this.audit.query({
       resourceType: dto.resourceType,
       resourceId: dto.resourceId,
       actorId: dto.actorId,
       action: dto.action,
+      category: dto.category,
+      q: dto.q,
+      actorIds: parseIdList(dto.actorIds),
+      from: parseDate(dto.from),
+      to: parseDate(dto.to),
       limit: dto.limit ?? 50,
       beforeSeq: parseSeq(dto.beforeSeq),
     });
     return entries.map(toResponse);
   }
 
+  // Export del SET COMPLETO del filtro (server-side, sin paginar). Ruta LITERAL `export` — no colisiona con
+  // ninguna paramétrica (el audit no expone `:id`). Mismo gate que el listado (COMPLIANCE_SUPERVISOR/SUPERADMIN):
+  // devuelve el set entero (acotado por el tope duro del service); el admin-bff arma el CSV y audita la exportación.
+  @Get('export')
+  @UseGuards(InternalIdentityGuard, RolesGuard)
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
+  @ApiOperation({ summary: 'Set completo del filtro para exportar (sin paginar, acotado por tope duro).' })
+  async export(@Query() dto: ExportAuditDto): Promise<AuditEntryResponse[]> {
+    const entries = await this.audit.exportRows({
+      resourceType: dto.resourceType,
+      actorId: dto.actorId,
+      action: dto.action,
+      category: dto.category,
+      q: dto.q,
+      actorIds: parseIdList(dto.actorIds),
+      from: parseDate(dto.from),
+      to: parseDate(dto.to),
+    });
+    return entries.map(toResponse);
+  }
+
   @Get('verify')
   @UseGuards(InternalIdentityGuard, RolesGuard)
-  @Roles('COMPLIANCE_SUPERVISOR', 'SUPERADMIN')
+  @Roles(AdminRole.COMPLIANCE_SUPERVISOR, AdminRole.SUPERADMIN)
   @ApiOperation({ summary: 'Verificar la integridad de la cadena (detección de tampering).' })
   async verify(@Query() dto: VerifyAuditDto): Promise<VerifyResponse> {
     const result = await this.audit.verifyRange({
@@ -125,9 +156,38 @@ function parseSeq(value: string | undefined): bigint | undefined {
   }
 }
 
+/**
+ * Parsea la lista COMA-SEPARADA de `actorIds` (name→ids resueltos por el bff) a un array. El InternalRestClient
+ * serializa un solo valor por clave → los ids viajan CSV. Trimea, descarta vacíos; lista vacía/ausente → undefined
+ * (el repo la trata como "sin filtro" → búsqueda idéntica a hoy, sin regresión).
+ */
+function parseIdList(value: string | undefined): string[] | undefined {
+  if (value === undefined || value === '') return undefined;
+  const ids = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return ids.length > 0 ? ids : undefined;
+}
+
+/** Parsea el borde ISO-8601 del rango de fecha (ya validado @IsISO8601 en el DTO). Vacío → sin cota. */
+function parseDate(value: string | undefined): Date | undefined {
+  if (value === undefined || value === '') return undefined;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    throw new ValidationError('fecha inválida (ISO-8601)', { value });
+  }
+  return d;
+}
+
+/**
+ * IP del actor que se escribe en el log INMUTABLE (Ley 29733). DEBE ser la IP real, no forjable.
+ * Se resuelve SOLO de `req.ip` (Express la puebla vía `trust proxy`, ver main.ts: camina el XFF
+ * descartando los hops privados ALB+ingress-nginx y deja la IP pública real del cliente). NO se lee
+ * `x-forwarded-for` crudo: el atacante lo controla por completo y escribiría una IP falsa —
+ * HASHEADA — en la cadena append-only, envenenando el rastro de compliance. Fallback al peer TCP.
+ */
 function clientIp(req: HttpRequest): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return (fwd.split(',')[0] ?? '').trim();
   return req.ip ?? req.socket.remoteAddress ?? '';
 }
 

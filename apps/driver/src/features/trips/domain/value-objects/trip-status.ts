@@ -1,12 +1,16 @@
-import { tripStatus, type TripStatus } from '@veo/api-client';
+import { normalizeTripStatus, type TripStatus } from '@veo/api-client';
 
 /** Estado de viaje normalizado para la UI (incluye `UNKNOWN` para valores no reconocidos). */
 export type DriverTripStatus = TripStatus | 'UNKNOWN';
 
-/** Convierte el `status` crudo del viaje (string) al enum del contrato (o `UNKNOWN`). */
+/**
+ * Convierte el `status` crudo del viaje (string) al enum del contrato (o `UNKNOWN`). Pasa por
+ * `normalizeTripStatus` porque el dominio distingue QUIÉN canceló (`CANCELLED_BY_PASSENGER`/
+ * `CANCELLED_BY_DRIVER`): sin el alias, una cancelación cruda caía a `UNKNOWN` y el viaje terminado
+ * seguía "vivo" para la UI (no era terminal → sin salida al dashboard).
+ */
 export function parseTripStatus(raw: string): DriverTripStatus {
-  const parsed = tripStatus.safeParse(raw);
-  return parsed.success ? parsed.data : 'UNKNOWN';
+  return normalizeTripStatus(raw) ?? 'UNKNOWN';
 }
 
 /**

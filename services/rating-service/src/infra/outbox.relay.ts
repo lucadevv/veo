@@ -6,7 +6,7 @@
  */
 import { Logger, type Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OutboxRelay } from '@veo/database';
+import { OutboxRelay, outboxRelayConfigFromEnv } from '@veo/database';
 import { PrismaService } from './prisma.service';
 import type { Env } from '../config/env.schema';
 
@@ -21,5 +21,7 @@ export const outboxRelayProvider: Provider = {
       // Write client: la escritura de dominio pobló el outbox en la misma transacción.
       prisma: prisma.write,
       logger: new Logger(OutboxRelay.name),
+      // Perillas del relay desde el ConfigService validado (batch/stale/concurrency/timeout). Cero números mágicos.
+      ...outboxRelayConfigFromEnv(config),
     }),
 };

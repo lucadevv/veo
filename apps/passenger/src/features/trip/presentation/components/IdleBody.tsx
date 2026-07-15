@@ -35,7 +35,9 @@ export function IdleBody({
   const favorites = savedPlaces.filter(p => p.kind === 'FAVORITE');
 
   return (
-    <>
+    // View con gap (no fragment): en el pen ambas secciones son hijas directas del HomeContent y
+    // reciben su gap $s-lg — como fragment quedaban PEGADAS (el gap del scroll no llega adentro).
+    <View style={{gap: theme.spacing.lg}}>
       {favorites.length > 0 ? (
         <View style={{gap: theme.spacing.sm}}>
           <SectionHeader
@@ -49,7 +51,7 @@ export function IdleBody({
                 key={place.id}
                 title={place.label}
                 subtitle={place.subtitle}
-                leading={<IconStar color={theme.colors.accent} size={20} />}
+                leading={<IconStar color={theme.colors.warn} size={20} />}
                 chevron
                 onPress={() => onSelect(placeToRoute(place))}
               />
@@ -59,6 +61,6 @@ export function IdleBody({
       ) : null}
 
       <RecentTripsSection onSelect={onSelect} onSeeAll={onSeeAllRecents} />
-    </>
+    </View>
   );
 }

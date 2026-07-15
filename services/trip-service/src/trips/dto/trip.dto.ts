@@ -167,16 +167,6 @@ export class CreateTripDto {
   specialRequests?: SpecialRequest[];
 }
 
-export class AssignTripDto {
-  @ApiProperty({ format: 'uuid' })
-  @IsUUID()
-  driverId!: string;
-
-  @ApiProperty({ format: 'uuid' })
-  @IsUUID()
-  vehicleId!: string;
-}
-
 export class AcceptTripDto {
   @ApiPropertyOptional({ description: 'ETA del conductor al recojo, en segundos' })
   @IsOptional()

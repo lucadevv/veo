@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="veo gen-gpx-from-service (mapbox)" version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>driver-b-c.gpx (dinámico · destino real del viaje)</name>
+  </metadata>
+  <trk>
+    <name>driver-b-c.gpx (dinámico · destino real del viaje)</name>
+    <trkseg>
+      <trkpt lat="-12.003015" lon="-77.063366"></trkpt>
+      <trkpt lat="-12.003060" lon="-77.063697"></trkpt>
+      <trkpt lat="-12.004402" lon="-77.063493"></trkpt>
+      <trkpt lat="-12.004510" lon="-77.063477"></trkpt>
+      <trkpt lat="-12.004568" lon="-77.063845"></trkpt>
+      <trkpt lat="-12.004581" lon="-77.063929"></trkpt>
+      <trkpt lat="-12.004629" lon="-77.064236"></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

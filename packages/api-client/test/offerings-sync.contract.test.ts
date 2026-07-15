@@ -21,10 +21,22 @@ describe('sync api-client ↔ catálogo de offerings (@veo/shared-types)', () =>
    * del contrato es `Object.keys(OFFERINGS)` — los mismos ids del JSDoc de
    * `createTripRequest.category` (`veo_moto | veo_economico | veo_confort | veo_xl`).
    */
-  it('los ids de OFFERINGS son exactamente el universo documentado del quote/createTrip', () => {
-    const documentedQuoteIds = ['veo_moto', 'veo_economico', 'veo_confort', 'veo_xl'];
-    expect(Object.keys(OFFERINGS).sort()).toEqual([...documentedQuoteIds].sort());
-    expect(Object.values(OfferingId).sort()).toEqual([...documentedQuoteIds].sort());
+  it('los ids de OFFERINGS son exactamente el universo CODEADO del catálogo (RIDE + verticales ocultas)', () => {
+    // B5-4/F2.3: el catálogo codea las 5 RIDE (visibles, +premium) + 3 verticales OCULTAS
+    // (defaultEnabled:false). El contrato cubre TODOS los ids codeados (no solo los visibles del quote);
+    // la visibilidad la decide `defaultEnabled`/overlay, no la membresía del enum.
+    const documentedIds = [
+      'veo_moto',
+      'veo_economico',
+      'veo_confort',
+      'veo_xl',
+      'veo_premium',
+      'veo_ambulance',
+      'veo_tow',
+      'veo_mechanic',
+    ];
+    expect(Object.keys(OFFERINGS).sort()).toEqual([...documentedIds].sort());
+    expect(Object.values(OfferingId).sort()).toEqual([...documentedIds].sort());
   });
 
   it('todo id del catálogo es aceptado por el wire actual (quoteOption.id / createTrip.category)', () => {
@@ -53,15 +65,14 @@ describe('sync api-client ↔ catálogo de offerings (@veo/shared-types)', () =>
   /**
    * Lote C (ADR 013) · los campos ADDITIVE del quote (`mode`/`labelKey`/`icon`) aceptan los valores
    * reales del catálogo y son OPCIONALES: una opción de un server viejo (sin los campos) sigue
-   * parseando — apps viejas y nuevas conviven.
+   * parseando — apps viejas y nuevas conviven. ADR 023: el modo es UNO por oferta (`spec.mode`), ya no
+   * un array `allowedModes` (superseded); el wire acepta ese modo tal cual.
    */
   it('options[].mode/labelKey/icon (Lote C) aceptan los valores del catálogo y son opcionales', () => {
     for (const spec of Object.values(OFFERINGS)) {
       expect(quoteOption.shape.labelKey.safeParse(spec.labelKey).success).toBe(true);
       expect(quoteOption.shape.icon.safeParse(spec.icon).success).toBe(true);
-      for (const allowedMode of spec.allowedModes) {
-        expect(quoteOption.shape.mode.safeParse(allowedMode).success).toBe(true);
-      }
+      expect(quoteOption.shape.mode.safeParse(spec.mode).success).toBe(true);
     }
     // Server viejo: la opción SIN los campos additive sigue siendo válida (compat hacia atrás).
     const legacyOption = {

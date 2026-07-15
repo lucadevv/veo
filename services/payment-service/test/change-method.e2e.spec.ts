@@ -16,6 +16,7 @@ import { InvalidStateError, NotFoundError, UnprocessableEntityError, uuidv7 } fr
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '../src/generated/prisma';
 import { PaymentsService } from '../src/payments/payments.service';
+import { PaymentsRepository } from '../src/payments/payments.repository';
 import { SandboxPaymentGateway } from '../src/ports/gateway/sandbox.gateway';
 import type { PrismaService } from '../src/infra/prisma.service';
 import type { AffiliationsService } from '../src/affiliations/affiliations.service';
@@ -44,6 +45,7 @@ function makeConfig(): ConfigService {
     DEFAULT_PAYMENT_METHOD: 'YAPE',
     REFUND_WINDOW_DAYS: 7,
     REFUND_L2_THRESHOLD_CENTS: 3000,
+    REFUND_IDEMPOTENCY_WINDOW_MINUTES: 15,
     CANCELLATION_DRIVER_SHARE: 0.5,
   };
   return {
@@ -98,7 +100,7 @@ beforeAll(async () => {
     pendingExternal: true,
     webhookSecret: 'sec',
   });
-  svc = new PaymentsService(prismaService, gateway, noAffiliation, noPromos, makeConfig() as never);
+  svc = new PaymentsService(new PaymentsRepository(prismaService), gateway, noAffiliation, noPromos, makeConfig() as never);
 }, 180_000);
 
 afterAll(async () => {

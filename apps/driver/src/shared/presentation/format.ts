@@ -12,13 +12,66 @@ export function formatPEN(cents: number | null | undefined): string {
   return formatPENRaw(typeof cents === 'number' && Number.isFinite(cents) ? cents : 0);
 }
 
-/** Fecha corta es-PE (ej. "29 may 2026") a partir de un ISO-8601; vacío si la fecha es inválida. */
+/** Entero con separador de miles (es-PE usa coma): 1890 → "1,890". Sin Intl (Hermes-safe). */
+export function formatInt(value: number): string {
+  return Math.trunc(value)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/** Patrón de una fecha canónica `YYYY-MM-DD` (el formato de los contratos y del `DateField`). */
+const ISO_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Fecha corta es-PE (ej. "29 may 2026") a partir de un ISO-8601; vacío si la fecha es inválida.
+ *
+ * OJO timezone: `new Date('YYYY-MM-DD')` se interpreta a MEDIANOCHE UTC y, al localizar en un huso
+ * negativo (Lima = UTC-5), RETROCEDE un día ("1998-12-07" → "06 dic"). Por eso, para un date-only
+ * canónico construimos el `Date` con los componentes en HORA LOCAL (mediodía, lejos de cualquier salto
+ * de DST), de modo que el día mostrado sea EXACTAMENTE el del string. Para otros formatos ISO (con hora
+ * y huso explícitos) se respeta el `Date` nativo.
+ */
 export function formatShortDate(iso: string): string {
-  const date = new Date(iso);
+  const dateOnly = ISO_DATE_ONLY.exec(iso.trim());
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12, 0, 0, 0)
+    : new Date(iso);
   if (Number.isNaN(date.getTime())) {
     return '';
   }
   return date.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/**
+ * Hora del día en 24h ("14:05") a partir de un ISO-8601; vacío si la fecha es inválida. Se localiza en el
+ * huso del device (Lima = UTC-5). MANUAL (sin Intl) → Hermes-safe e IDÉNTICO al del pasajero (formato
+ * unificado 24h en toda la app: burbuja de chat + fila del historial). Antes usaba `toLocaleTimeString`,
+ * que en este device rendía 12h "11:30 a. m." — divergía del pasajero (24h) y arriesgaba en Hermes.
+ */
+export function formatTimeOfDay(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+/**
+ * Días de CALENDARIO transcurridos entre `iso` y hoy (0 = hoy, 1 = ayer, …), comparando por día LOCAL
+ * (no por 24 h exactas), para elegir la etiqueta "Hoy"/"Ayer"/fecha en la fila del historial. `NaN` si la
+ * fecha es inválida (el consumidor degrada a la fecha corta).
+ */
+export function calendarDaysAgo(iso: string): number {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) {
+    return Number.NaN;
+  }
+  const now = new Date();
+  const thenDay = new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime();
+  const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.round((nowDay - thenDay) / 86_400_000);
 }
 
 /** Formatea segundos a "m min" redondeando hacia arriba (ETAs/duración). */
@@ -29,4 +82,39 @@ export function secondsToMinutes(seconds: number): number {
 /** Formatea metros a kilómetros con un decimal. */
 export function metersToKm(meters: number): string {
   return (meters / 1000).toFixed(1);
+}
+
+/**
+ * Presenta un nombre propio en Title Case. El OCR del onboarding suele venir en MAYÚSCULAS
+ * ("CARRANZA LUIS IVAN" grita); esto lo suaviza a "Carranza Luis Ivan". Fuente ÚNICA para el saludo del
+ * Inicio y la identidad de la Cuenta (coherencia — antes cada pantalla lo resolvía distinto). `null`/vacío
+ * → `null` (el consumidor decide el fallback: rol genérico en el saludo, teléfono en la identidad).
+ */
+export function formatPersonName(fullName: string | null | undefined): string | null {
+  const name = fullName?.trim();
+  if (!name) {
+    return null;
+  }
+  return name
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ');
+}
+
+/**
+ * Nombre abreviado para el SALUDO del Inicio (frame `C/Dashboard-Offline`: "Carlos R."): primer nombre +
+ * inicial del primer apellido. Compacto para el header flotante sobre el mapa. `null`/vacío → `null`.
+ * NO reemplaza a `formatPersonName` (identidad completa en la Cuenta): es sólo la variante del saludo.
+ */
+export function abbreviateGreetingName(fullName: string | null | undefined): string | null {
+  const name = formatPersonName(fullName);
+  if (!name) {
+    return null;
+  }
+  const [first, second] = name.split(' ').filter(Boolean);
+  if (!first) {
+    return null;
+  }
+  return second ? `${first} ${second.charAt(0)}.` : first;
 }

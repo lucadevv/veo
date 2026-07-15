@@ -1,0 +1,8 @@
+{
+  "name": "veo-driver-sim",
+  "private": true,
+  "version": "0.0.0",
+  "description": "CLI de simulación de conductor VEO por etapas (ready/offer/fsm) contra el dev-stack vivo",
+  "type": "module",
+  "main": "index.js"
+}

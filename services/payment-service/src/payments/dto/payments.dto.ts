@@ -1,5 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { PaymentMethod } from '@veo/shared-types';
 
 export class ChargeDto {
@@ -75,6 +84,25 @@ export class ChangeMethodDto {
   method!: PaymentMethod;
 }
 
+/**
+ * Query del gate de deuda (GET /payments/debt). El `passengerId` es ON-BEHALF-OF: SÓLO lo respeta el
+ * controller cuando el caller es SERVICE_RAIL (booking-service consultando la deuda del pasajero que
+ * reserva, que firma identidad anónima de sistema → el passengerId no viaja en la identidad y debe ir
+ * explícito). Para los rieles de CLIENTE (public/driver/admin) este campo se IGNORA y el passengerId sale
+ * SIEMPRE de la identidad firmada (anti-IDOR: un cliente no puede espiar deuda ajena pasando un query).
+ */
+export class DebtQueryDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Pasajero cuya deuda se consulta. SOLO se respeta para llamadas de SISTEMA (service-rail, ' +
+      'on-behalf-of). Ignorado para rieles de cliente (passengerId = identidad firmada, anti-IDOR).',
+  })
+  @IsOptional()
+  @IsUUID()
+  passengerId?: string;
+}
+
 export class CashConfirmDto {
   @ApiProperty({ enum: ['driver', 'passenger'], description: 'Quién confirma' })
   @IsEnum({ driver: 'driver', passenger: 'passenger' })
@@ -138,14 +166,70 @@ export class SettlePenaltyDto {
   payerRef?: string;
 }
 
+/**
+ * ADR-022 §P-A · Saldar la deuda de comisiones del conductor por el rail (la ÚNICA forma de desbloquearse tras
+ * cruzar el tope). Solo métodos DIGITALES; CASH → 422 en el servicio (no hay confirmación bilateral). El `driverId`
+ * es de PERFIL y se VALIDA contra la identidad firmada del riel (assertDriverOwnsResource) → un conductor solo
+ * salda SU deuda (anti-IDOR).
+ */
+export class SettleDriverDebtDto {
+  @ApiProperty({ description: 'Id de PERFIL del conductor que salda su deuda (debe coincidir con la identidad firmada)' })
+  @IsUUID()
+  driverId!: string;
+
+  @ApiProperty({
+    enum: PaymentMethod,
+    description: 'Método DIGITAL de pago de la deuda (YAPE/PLIN/CARD/PAGOEFECTIVO). CASH → 422.',
+  })
+  @IsEnum(PaymentMethod)
+  method!: PaymentMethod;
+
+  @ApiPropertyOptional({
+    description: 'Referencia del pagador en el riel (teléfono/token Yape-Plin)',
+  })
+  @IsOptional()
+  @IsString()
+  payerRef?: string;
+}
+
 export class RefundDto {
   @ApiProperty({ description: 'Monto a reembolsar en céntimos PEN' })
   @IsInt()
   @Min(1)
   amountCents!: number;
 
-  @ApiProperty({ description: 'Motivo del reembolso' })
+  @ApiProperty({ description: 'Motivo del reembolso (mín. 3 caracteres)' })
   @IsString()
+  @MinLength(3)
+  reason!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Gesto explícito del operador "es un reembolso NUEVO, no un reintento": salta el backstop de ventana ' +
+      'temporal para permitir un 2do parcial idéntico legítimo (mismo viaje y monto dentro de la ventana).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  forceNew?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'RC18 · el refund es por causa ATRIBUIBLE al conductor (viaje no realizado / fraude del conductor). Solo ' +
+      'entonces un refund TOTAL de una tarifa digital ya liquidada clawbackea el neto del conductor (se descuenta ' +
+      'de su próximo payout). Default false = lo absorbe la plataforma (dispute/fraude del pasajero).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  driverFault?: boolean;
+}
+
+/** Body del POST /refunds/:id/reject: motivo del rechazo del operador (se persiste en Refund.failureReason). */
+export class RejectRefundDto {
+  @ApiProperty({ description: 'Motivo del rechazo del reembolso (mín. 3 caracteres)' })
+  @IsString()
+  @MinLength(3)
   reason!: string;
 }
 

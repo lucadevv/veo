@@ -5,23 +5,27 @@ disparar notificaciones reales. Todos los payloads usan el envelope de `@veo/eve
 
 ## Publica (vía outbox)
 
-| Topic / eventType        | Schema (`EVENT_SCHEMAS`)             | Disparado por                 | Consumidores típicos     |
-| ------------------------ | ------------------------------------ | ----------------------------- | ------------------------ |
-| `notification.delivered` | `{ notificationId, channel, to }`    | Motor al entregar con éxito   | audit-service, analytics |
-| `notification.failed`    | `{ notificationId, channel, error }` | Motor al agotar `maxAttempts` | audit-service, alerting  |
+| Topic / eventType     | Schema (`EVENT_SCHEMAS`)             | Disparado por                                                                                                                                                                                                         | Consumidores típicos     |
+| --------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `notification.sent`   | `{ notificationId, channel, to }`    | Motor cuando **el riel acepta** el mensaje (`markSent`). Honesto: NO hay delivery-receipt real de FCM/APNs/SMS → `deliveredAt` queda NULL hasta un receipt real. NO es "entregado al device", es "el riel lo aceptó". | audit-service, analytics |
+| `notification.failed` | `{ notificationId, channel, error }` | Motor al agotar `maxAttempts`                                                                                                                                                                                         | audit-service, alerting  |
 
 `key` de Kafka = `notificationId` (orden por entidad). El relay (`OutboxRelay`) drena cada 500 ms.
 
 ## Consume (groupId `notification-service`)
 
-| Topic / eventType | Acción                                                                                             | Canal(es)       | Reintentos             |
-| ----------------- | -------------------------------------------------------------------------------------------------- | --------------- | ---------------------- |
-| `panic.triggered` | BR-S05: SMS + link a hasta **4** contactos de confianza + alerta firmada a la central de monitoreo | SMS, WEBHOOK    | Backoff exp. del motor |
-| `trip.assigned`   | Push al pasajero ("conductor asignado")                                                            | PUSH (FCM/APNs) | Backoff exp. del motor |
-| `payment.failed`  | BR-P02: alerta al pasajero + alerta a la central                                                   | PUSH, WEBHOOK   | Backoff exp. del motor |
+| Topic / eventType        | Acción                                                                                                                                                                                                                      | Canal(es)       | Reintentos             |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ---------------------- |
+| `panic.triggered`        | **SOLO** la alerta firmada (webhook) a la central de monitoreo (`onPanic`). El fan-out de SMS YA NO vive acá.                                                                                                               | WEBHOOK         | Backoff exp. del motor |
+| `panic.fanout_requested` | BR-S05: fan-out de SMS + link a hasta **4** contactos de confianza (`onPanicFanout`). El evento lleva **SOLO `contactIds`** (cero PII en Kafka, FOUNDATION §0.7b); los teléfonos se resuelven por **gRPC a share-service**. | SMS             | Backoff exp. del motor |
+| `trip.assigned`          | Push al pasajero ("conductor asignado")                                                                                                                                                                                     | PUSH (FCM/APNs) | Backoff exp. del motor |
+| `payment.failed`         | BR-P02: alerta al pasajero + alerta a la central                                                                                                                                                                            | PUSH, WEBHOOK   | Backoff exp. del motor |
 
 Idempotencia: cada notificación derivada lleva una `dedupKey` determinista (Kafka es at-least-once),
-p. ej. `panic:<panicId>:sms:<phone>`, `trip:<tripId>:assigned:push`, `payment:<paymentId>:central`.
+p. ej. `panic:<panicId>:sms:<contactId>`, `trip:<tripId>:assigned:push`, `payment:<paymentId>:central`.
+
+> **La `dedupKey` NUNCA lleva PII** (FOUNDATION §0.7(b), soberanía del dato): se indexa por `contactId`,
+> **jamás** por el teléfono. El teléfono va al riel (`payload.to`), no a la clave de idempotencia.
 
 ## Comandos síncronos (gRPC `veo.notification.v1`)
 
@@ -40,7 +44,8 @@ p. ej. `panic:<panicId>:sms:<phone>`, `trip:<tripId>:assigned:push`, `payment:<p
 Campos enriquecidos esperados por evento (opcionales; si faltan se registra el gap y se omite ese
 destinatario sin romper el resto):
 
-- `panic.triggered`: `contacts: [{ name?, phone }]` (≤4), `shareLink`, `centralWebhookUrl`.
+- `panic.triggered`: `centralWebhookUrl` (la única pieza que necesita enriquecer; el fan-out NO vive acá).
+- `panic.fanout_requested`: `contactIds: [...]` (≤4, **sin PII**: §0.7b), `shareLink`. Los teléfonos los resuelve el consumidor por gRPC a share-service, no viajan en Kafka.
 - `trip.assigned`: `passengerId`, `passengerPushToken`, `platform`, `driverName`, `vehiclePlate`, `etaSeconds`.
 - `payment.failed`: `passengerId`, `passengerPushToken`, `platform`, `centralWebhookUrl`.
 

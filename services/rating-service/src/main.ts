@@ -5,6 +5,7 @@ import { bootstrapOtel } from '@veo/observability';
 bootstrapOtel({ serviceName: 'rating-service' });
 
 import { NestFactory } from '@nestjs/core';
+import { buildGrpcServerCredentials } from '@veo/rpc';
 import { ValidationPipe } from '@nestjs/common';
 import { type MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -46,6 +47,8 @@ async function bootstrap(): Promise<void> {
       package: 'veo.rating.v1',
       protoPath: join(__dirname, '../proto/rating.proto'),
       url: process.env.GRPC_URL ?? '0.0.0.0:50060',
+      // TLS-capable por env (ADR-016): con GRPC_TLS_* → mTLS; sin ellos → insecure (dev). UN helper compartido.
+      credentials: buildGrpcServerCredentials(),
     },
   });
   await app.startAllMicroservices();

@@ -16,12 +16,10 @@ import { TripsService } from './trips.service';
 import { TripQueryService } from './trip-query.service';
 import { ScheduledTripService } from './scheduled-trip.service';
 import { WaypointProposalService } from './waypoint-proposal.service';
-import { KycRequiredError } from './trips.errors';
 import {
   AcceptTripDto,
   ArrivedTripDto,
   ArrivingTripDto,
-  AssignTripDto,
   CancelScheduledDto,
   CancelTripDto,
   ChangeDestinationDto,
@@ -54,17 +52,10 @@ export class TripsController {
   @ApiOperation({
     summary: 'Crear y cotizar un viaje (→ REQUESTED). Idempotente vía Idempotency-Key.',
   })
-  create(
-    @Body() dto: CreateTripDto,
-    @CurrentUser() user: AuthenticatedUser,
-    @Headers('idempotency-key') idempotencyKey?: string,
-  ) {
-    // Defensa en profundidad del gate KYC: el servicio de registro EXIGE el `kycVerified` que el BFF
-    // firmó en la identidad interna (HMAC). Sin él, no se crea el viaje aunque la llamada traiga una
-    // identidad interna válida — cierra el bypass de llamar a trip-service salteando el gate del BFF.
-    if (!user.kycVerified) {
-      throw new KycRequiredError();
-    }
+  create(@Body() dto: CreateTripDto, @Headers('idempotency-key') idempotencyKey?: string) {
+    // ADR-018: se retiró el gate de KYC del pasajero (ya no hay `kycVerified` firmado que exigir). La
+    // verificación de identidad pasó de muro pre-viaje a badge de confianza OPCIONAL; el viaje se crea
+    // sin gate de KYC (el piso de seguridad es teléfono verificado + conductor verificado + cámara/pánico).
     return this.trips.createTrip(dto, idempotencyKey);
   }
 
@@ -88,13 +79,6 @@ export class TripsController {
   @ApiOperation({ summary: 'Obtener solo el estado del viaje (BR-T02)' })
   state(@Param('id') id: string) {
     return this.query.getTripState(id);
-  }
-
-  @Post(':id/assign')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Asignar conductor/vehículo (→ ASSIGNED)' })
-  assign(@Param('id') id: string, @Body() dto: AssignTripDto) {
-    return this.trips.assignDriver(id, dto);
   }
 
   // Anti-IDOR (transiciones del conductor): el `driverId` dueño se toma de la identidad FIRMADA

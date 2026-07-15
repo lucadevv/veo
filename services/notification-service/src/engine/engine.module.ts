@@ -12,6 +12,7 @@ import { WebhookModule } from '../ports/webhook/webhook.module';
 import { DevicesModule } from '../devices/devices.module';
 import { DeviceTokenRepository } from '../devices/device-token.repository';
 import { NotificationRepository } from './notification.repository';
+import { TemplateRepository } from './template.repository';
 import { TemplateService } from './template.service';
 import { ChannelDispatcher } from './channel.dispatcher';
 import { RetryPolicy } from './retry.policy';
@@ -56,6 +57,7 @@ const engineProvider: Provider = {
   imports: [PushModule, SmsModule, EmailModule, WebhookModule, DevicesModule],
   providers: [
     NotificationRepository,
+    TemplateRepository,
     TemplateService,
     tokenInvalidatorProvider,
     ChannelDispatcher,

@@ -1,5 +1,12 @@
-import { type ReactNode } from 'react';
-import { ScrollView, StatusBar, StyleSheet, View, type ViewStyle } from 'react-native';
+import { type ReactElement, type ReactNode } from 'react';
+import {
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  View,
+  type RefreshControlProps,
+  type ViewStyle,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -14,6 +21,12 @@ export interface SafeScreenProps {
   /** Footer fijo (p.ej. barra de CTA), con inset inferior seguro. */
   footer?: ReactNode;
   /**
+   * Padding horizontal ESTÁNDAR (spacing.xl) de la barra del footer, aun con `padded={false}` —
+   * `padded` gobierna el CONTENIDO; la barra de CTA siempre respira (el default anterior dejaba el
+   * botón borde a borde y cada pantalla lo parchaba a mano). `false` = la pantalla maneja el suyo.
+   */
+  footerPadded?: boolean;
+  /**
    * Reserva el inset superior (notch/status bar). Por defecto `true`. Ponelo en `false` para
    * pantallas full-bleed donde el contenido es el héroe hasta el borde (mapa): en ese caso los
    * overlays flotantes deben offsetearse ellos mismos con `insets.top`.
@@ -23,6 +36,12 @@ export interface SafeScreenProps {
   backgroundColor?: string;
   contentContainerStyle?: ViewStyle;
   style?: ViewStyle;
+  /**
+   * `RefreshControl` para el pull-to-refresh nativo. Solo aplica cuando `scroll` está activo (se pasa
+   * tal cual al `ScrollView` interno). Tiparlo al `RefreshControl` de RN evita exponer toda la API del
+   * `ScrollView` por una sola necesidad concreta.
+   */
+  refreshControl?: ReactElement<RefreshControlProps>;
 }
 
 /**
@@ -35,15 +54,18 @@ export function SafeScreen({
   padded = true,
   header,
   footer,
+  footerPadded = true,
   backgroundColor,
   contentContainerStyle,
   style,
   topInset = true,
+  refreshControl,
 }: SafeScreenProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const bg = backgroundColor ?? theme.colors.bg;
   const horizontal = padded ? theme.spacing.xl : 0;
+  const footerHorizontal = footerPadded ? theme.spacing.xl : horizontal;
 
   const body = scroll ? (
     <ScrollView
@@ -53,6 +75,7 @@ export function SafeScreen({
       ]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      refreshControl={refreshControl}
       style={styles.flex}
     >
       {children}
@@ -75,7 +98,7 @@ export function SafeScreen({
           style={[
             styles.footer,
             {
-              paddingHorizontal: horizontal,
+              paddingHorizontal: footerHorizontal,
               paddingTop: theme.spacing.md,
               paddingBottom: insets.bottom + theme.spacing.md,
               backgroundColor: bg,

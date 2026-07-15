@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import type {
-  ChatMessage,
-  DispatchMatchPayload,
-  DispatchOfferedPayload,
-  DriverEventEnvelope,
-  TipAddedPayload,
-  WaypointProposedMsg,
+import {
+  HANDSHAKE_SESSION_REVOKED,
+  type ChatMessage,
+  type DispatchMatchPayload,
+  type DispatchOfferWithdrawnPayload,
+  type DispatchOfferedPayload,
+  type DriverEventEnvelope,
+  type TipAddedPayload,
+  type WaypointProposedMsg,
 } from '@veo/api-client';
 import { useDi } from '../../../../core/di/useDi';
 import type { DriverSocket } from '../../../../core/realtime/socket';
+import { useDispatchStore } from '../state/dispatchStore';
 
 export interface DriverRealtimeHandlers {
   /**
@@ -21,6 +24,12 @@ export interface DriverRealtimeHandlers {
   onOffer(payload: DispatchOfferedPayload, scheduled: boolean): void;
   /** Match confirmado: hay un viaje activo asignado. */
   onMatch(payload: DispatchMatchPayload): void;
+  /**
+   * ADR-020 Lote 2 (2a) · una puja del conductor se CERRÓ (el pasajero eligió a otro / quedó inelegible):
+   * la app remueve la card de esa puja al instante y limpia el estado "esperando al pasajero" (2b), sin
+   * depender del poll de 12s ni dejar que el conductor tapee una card muerta (409).
+   */
+  onBidClosed(payload: DispatchOfferWithdrawnPayload): void;
   /** Cambio de estado del viaje reenviado desde Kafka. */
   onTripUpdate(envelope: DriverEventEnvelope<unknown>): void;
   /**
@@ -51,6 +60,19 @@ export interface DriverRealtimeHandlers {
    * conexión porque al montar las queries ya cargan fresco (evita el doble fetch del caso feliz).
    */
   onResync(): void;
+  /**
+   * SINGLE ACTIVE SESSION: el conductor inició sesión en OTRO dispositivo (login más nuevo) → esta sesión
+   * quedó superada. La presentación cierra la sesión local y vuelve al login. No se reconecta: el server ya
+   * rechaza esta sesión (su `sid` es más viejo), así que no hay guerra de reconexión.
+   */
+  onSessionSuperseded(): void;
+  /**
+   * ENFORCEMENT DE REVOCACIÓN: el servidor RECHAZÓ el handshake porque la sesión está revocada (logout
+   * remoto, suspensión, o superada por un login nuevo) → el access token, aunque su firma siga válida,
+   * ya no sirve. La presentación cierra la sesión local y vuelve al login. Se dispara SOLO ante el
+   * `connect_error` con el motivo explícito del server; un error de transporte transitorio NO lo dispara.
+   */
+  onSessionRevoked(): void;
 }
 
 /**
@@ -86,6 +108,10 @@ export function useDriverRealtime(
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
   const [socket, setSocket] = useState<DriverSocket | null>(null);
+  // RECONEXIÓN MANUAL ("Reintentar" del overlay de sin-conexión): al bumpear el nonce, el efecto se
+  // re-ejecuta → derriba el socket viejo y crea uno FRESCO que conecta ya (token re-leído), sin esperar
+  // el backoff de socket.io. Es lo que le da dientes al botón (antes solo refetcheaba queries).
+  const reconnectNonce = useDispatchStore((s) => s.reconnectNonce);
 
   useEffect(() => {
     if (!enabled) {
@@ -117,6 +143,12 @@ export function useDriverRealtime(
         return;
       }
       handlersRef.current.onMatch(msg.payload);
+    });
+    const onBidClosed = safe((msg: DriverEventEnvelope<DispatchOfferWithdrawnPayload>) => {
+      if (!msg?.payload?.tripId) {
+        return;
+      }
+      handlersRef.current.onBidClosed(msg.payload);
     });
     const onTripUpdate = safe((msg: DriverEventEnvelope<unknown>) =>
       handlersRef.current.onTripUpdate(msg),
@@ -167,33 +199,63 @@ export function useDriverRealtime(
         // Degradar sin tumbar la app.
       }
     };
+    // SINGLE ACTIVE SESSION: el server avisa que esta sesión quedó superada por un login más nuevo en otro
+    // device → la presentación cierra la sesión local. Sin payload; se envuelve en try/catch como los demás.
+    const onSessionSuperseded = () => {
+      try {
+        handlersRef.current.onSessionSuperseded();
+      } catch {
+        // Degradar sin tumbar la app.
+      }
+    };
+    // ENFORCEMENT DE REVOCACIÓN: `connect_error` se dispara TANTO por rechazos del server (middleware del
+    // handshake) COMO por fallos de transporte (server caído, red, timeout). Distinguimos por el MOTIVO
+    // explícito: solo el `HANDSHAKE_SESSION_REVOKED` que pone el gateway significa "sesión muerta, deslogueá".
+    // Cualquier otro `connect_error` es transitorio → NO desloguea (socket.io reintenta reconectar solo).
+    const onConnectError = (err: Error) => {
+      try {
+        if (err?.message === HANDSHAKE_SESSION_REVOKED) {
+          handlersRef.current.onSessionRevoked();
+        }
+      } catch {
+        // Degradar sin tumbar la app.
+      }
+    };
 
     s.on('dispatch:offer', onOffer);
     s.on('dispatch:match', onMatch);
+    s.on('bid:closed', onBidClosed);
     s.on('trip:update', onTripUpdate);
     s.on('chat:message', onChatMessage);
     s.on('payment:tip', onTipAdded);
     s.on('waypoint:proposed', onWaypointProposed);
     s.on('connect', onConnect);
     s.on('disconnect', onDisconnect);
+    s.on('connect_error', onConnectError);
+    s.on('session:superseded', onSessionSuperseded);
     s.connect();
     setSocket(s);
 
     return () => {
       s.off('dispatch:offer', onOffer);
       s.off('dispatch:match', onMatch);
+      s.off('bid:closed', onBidClosed);
       s.off('trip:update', onTripUpdate);
       s.off('chat:message', onChatMessage);
       s.off('payment:tip', onTipAdded);
       s.off('waypoint:proposed', onWaypointProposed);
       s.off('connect', onConnect);
       s.off('disconnect', onDisconnect);
+      s.off('connect_error', onConnectError);
+      s.off('session:superseded', onSessionSuperseded);
       s.disconnect();
       setSocket(null);
       // Al desmontar/deshabilitar, el indicador ya no debe quedar "conectado" de un socket muerto.
       handlersRef.current.onConnectionChange(false);
     };
-  }, [enabled, di]);
+    // `reconnectNonce` en las deps: un tap en "Reintentar" lo bumpea → cleanup (derriba el socket) + re-run
+    // (socket fresco que reconecta). El resto de deps no cambia en caliente.
+  }, [enabled, di, reconnectNonce]);
 
   return socket;
 }

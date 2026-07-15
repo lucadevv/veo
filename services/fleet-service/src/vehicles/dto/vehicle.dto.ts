@@ -12,7 +12,12 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { VehicleType, type FleetDocumentType } from '@veo/shared-types';
+import {
+  PLATE_PATTERN,
+  PLATE_INVALID_MESSAGE,
+  VehicleType,
+  type FleetDocumentType,
+} from '@veo/shared-types';
 import type { VehicleReviewStatus } from '../vehicle-rules';
 
 const CURRENT_YEAR = new Date().getUTCFullYear();
@@ -20,23 +25,42 @@ const CURRENT_YEAR = new Date().getUTCFullYear();
 /** Año mínimo aceptado por la validación de forma (sanity check); BR-D04 (>=2017) se valida en el servicio. */
 const MIN_REASONABLE_YEAR = 2005;
 
-/** Placa peruana: XXX-XXX (guion opcional). El servicio normaliza y revalida con plateSchema (@veo/utils). */
-const PLATE_PATTERN = /^[A-Z0-9]{3}-?[A-Z0-9]{3}$/i;
+/** Formato de la categoría MTC cruda: clase `[LMNO]`, dígito de subclase y sufijos opcionales (`M1`, `L3`, `M1SC`). */
+const MTC_CATEGORY_PATTERN = /^[LMNO]\d[A-Z]*$/i;
 
 export class CreateVehicleDto {
   @ApiProperty({ example: 'ABC-123', description: 'Placa peruana (ABC-123 / A1B-234)' })
   @IsString()
   plate!: string;
 
-  @ApiProperty({ example: 'Toyota' })
-  @IsString()
-  @Length(1, 60)
-  make!: string;
+  @ApiPropertyOptional({
+    description:
+      'Id del modelo del catálogo (VehicleModelSpec APPROVED) que el operador eligió (F4). Si viene, ' +
+      'make/model/vehicleType se snapshotean del spec (server-authoritative) e ignoran el texto libre.',
+  })
+  @IsOptional()
+  @IsUUID()
+  modelSpecId?: string;
 
-  @ApiProperty({ example: 'Yaris' })
+  @ApiPropertyOptional({
+    example: 'Toyota',
+    description:
+      'Marca a texto libre. Requerida solo si NO se eligió un modelo del catálogo (modelSpecId).',
+  })
+  @IsOptional()
   @IsString()
   @Length(1, 60)
-  model!: string;
+  make?: string;
+
+  @ApiPropertyOptional({
+    example: 'Yaris',
+    description:
+      'Modelo a texto libre. Requerido solo si NO se eligió un modelo del catálogo (modelSpecId).',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 60)
+  model?: string;
 
   @ApiProperty({ example: 2020, description: 'BR-D04: año >= VEHICLE_MIN_YEAR (2017)' })
   @IsInt()
@@ -84,14 +108,35 @@ export class CreateVehicleDto {
 export class RegisterDriverVehicleDto {
   @ApiProperty({
     enum: VehicleType,
-    description: 'Tipo de vehículo. CAR = automóvil; MOTO = moto-taxi (Ola 2B).',
+    description:
+      'Tipo de vehículo (HINT/fallback). CAR = automóvil; MOTO = moto-taxi. LOTE 1: si viene `mtcCategory`, ' +
+      'el servidor DERIVA el tipo de la categoría (la tarjeta es la fuente de verdad) y este valor solo se usa ' +
+      'cuando la categoría no es derivable (manual/no soportada).',
   })
   @IsEnum(VehicleType)
   vehicleType!: VehicleType;
 
-  @ApiProperty({ example: 'ABC-123', description: 'Placa peruana (XXX-XXX, guion opcional)' })
+  @ApiPropertyOptional({
+    example: 'L3',
+    description:
+      'LOTE 1 · categoría MTC CRUDA leída de la tarjeta de propiedad / TIVe (`M1`, `L3`, `N1`, `M1SC`…). FUENTE ' +
+      'DE VERDAD del tipo: el servidor deriva `vehicleType` de acá (M1→CAR, L*→MOTO; resto→hint del body). Se ' +
+      'persiste cruda para auditoría/re-derivación. Ausente en la carga manual del tipo o el alta legacy.',
+  })
+  @IsOptional()
   @IsString()
-  @Matches(PLATE_PATTERN, { message: 'Placa inválida (formato XXX-XXX)' })
+  @Length(1, 16)
+  @Matches(MTC_CATEGORY_PATTERN, {
+    message: 'Categoría MTC inválida (formato [LMNO] + dígito + sufijo, ej. M1/L3/M1SC)',
+  })
+  mtcCategory?: string;
+
+  @ApiProperty({
+    example: 'ABC-123',
+    description: 'Placa peruana (auto ABC-123 o moto 1234-AB, guion opcional)',
+  })
+  @IsString()
+  @Matches(PLATE_PATTERN, { message: PLATE_INVALID_MESSAGE })
   plate!: string;
 
   @ApiPropertyOptional({

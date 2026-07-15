@@ -1,7 +1,7 @@
 import type {
   DriverEarningsBreakdown,
+  DriverEarningsDailySeries,
   DriverEarningsSummary,
-  DriverPayoutList,
   DriverPayoutView,
   EarningsSummary,
 } from '@veo/api-client';
@@ -12,7 +12,6 @@ import type {
  */
 export type EarningsOverview = EarningsSummary;
 export type Payout = DriverPayoutView;
-export type PayoutList = DriverPayoutList;
 
 /**
  * Desglose de ganancias de un período (HOY o SEMANA): bruto, comisión, propinas, NETO y nº de
@@ -20,5 +19,11 @@ export type PayoutList = DriverPayoutList;
  */
 export type EarningsPeriodBreakdown = DriverEarningsBreakdown;
 
-/** Respuesta de `GET /earnings/breakdown`: desglose de HOY y de la SEMANA + moneda. */
+/** Respuesta de `GET /earnings/breakdown`: desglose de HOY, SEMANA y MES + moneda. */
 export type EarningsBreakdown = DriverEarningsSummary;
+
+/**
+ * Serie diaria de la SEMANA en curso (lunes→domingo, 7 puntos): neto y nº de viajes por día. Alimenta
+ * el bar chart "Por día". Es el dato de `GET /earnings/daily`. Días sin viajes vienen en cero.
+ */
+export type EarningsDailySeries = DriverEarningsDailySeries;

@@ -133,7 +133,31 @@ export class PanicController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResolvePanicDto,
   ): Promise<PanicEntity> {
-    return this.toEntity(await this.panic.resolve(id, dto.resolution, user.userId));
+    return this.toEntity(await this.panic.resolve(id, dto.resolution, user.userId, dto.notes));
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...PANIC_OPERATORS)
+  @Post(':id/dispatch')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Despachar unidad de respuesta (acción lateral + panic.dispatched)' })
+  async dispatch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PanicEntity> {
+    return this.toEntity(await this.panic.dispatch(id, user.userId));
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(...PANIC_OPERATORS)
+  @Post(':id/escalate')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Escalar a autoridades (acción lateral + panic.escalated)' })
+  async escalate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PanicEntity> {
+    return this.toEntity(await this.panic.escalate(id, user.userId));
   }
 
   @UseGuards(RolesGuard)
@@ -160,6 +184,12 @@ export class PanicController {
     evidenceS3Keys: string[];
     acknowledgedAt: Date | null;
     ackBy: string | null;
+    resolvedAt: Date | null;
+    resolutionNotes: string | null;
+    dispatchedAt: Date | null;
+    dispatchedBy: string | null;
+    escalatedAt: Date | null;
+    escalatedBy: string | null;
   }): PanicEntity {
     return {
       id: row.id,
@@ -172,6 +202,12 @@ export class PanicController {
       evidenceS3Keys: row.evidenceS3Keys,
       acknowledgedAt: row.acknowledgedAt ?? undefined,
       ackBy: row.ackBy ?? undefined,
+      resolvedAt: row.resolvedAt ?? undefined,
+      resolutionNotes: row.resolutionNotes ?? undefined,
+      dispatchedAt: row.dispatchedAt ?? undefined,
+      dispatchedBy: row.dispatchedBy ?? undefined,
+      escalatedAt: row.escalatedAt ?? undefined,
+      escalatedBy: row.escalatedBy ?? undefined,
     };
   }
 }

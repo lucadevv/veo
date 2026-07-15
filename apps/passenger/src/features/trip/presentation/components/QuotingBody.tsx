@@ -19,6 +19,7 @@ import {useMutation, useQuery} from '@tanstack/react-query';
 import {
   Banner,
   Button,
+  hexAlpha,
   RideOptionRow,
   Skeleton,
   StatusPill,
@@ -28,7 +29,7 @@ import {
 import {CHILD_MODE_FEE_CENTS, isFixedMode, isPujaMode} from '@veo/shared-types';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import type {RootStackParamList} from '../../../../navigation/types';
@@ -43,21 +44,21 @@ import {usePaymentPrefsStore} from '../../../payments/presentation/stores/paymen
 import {
   PaymentMethodRow,
   PaymentMethodSheet,
-  useIsYapeAutoActive,
+  YapeLinkSheet,
 } from '../../../payments/presentation';
+import {useIsYapeAutoActive} from '../../../../shared/presentation/hooks/useIsYapeAutoActive';
 import {PromoField, type AppliedPromo} from '../../../promos/presentation';
 import {ScheduleSheet} from './ScheduleSheet';
 import {initialBidCents, stepBidCents} from '../../../../shared/utils/bid';
 import {uuidv4} from '../../../../shared/utils/uuid';
 import {isWaypointSet, type RoutePlace} from '../../../maps/domain/entities';
 import {buildCreateTripInput} from '../../domain/buildCreateTripInput';
-import {mapKycStatus} from '../../../kyc/domain/entities';
-import {KycGate} from './KycGate';
 import {BidPanel} from '../../../../shared/presentation/components/BidPanel';
 import {
   offeringDisplayName,
   offeringGlyph,
 } from '../../../../shared/presentation/components/offeringGlyphs';
+import {IconArrowRight, IconBolt} from './icons';
 import {RoutePointsList} from '../../../maps/presentation/components/RoutePointsList';
 import {SpecialRequestChips} from '../../../maps/presentation/components/SpecialRequestChips';
 import {VehicleIcon} from '../../../maps/presentation/components/VehicleIcon';
@@ -76,14 +77,12 @@ export interface QuotingBodyProps {
   onTripCreated: (trip: TripResource) => void;
   /** Viaje PROGRAMADO creado (no entra a dispatch ahora). */
   onScheduled: () => void;
-  /** El BFF exige verificación facial (403 KYC) — la pantalla deriva al KYC. */
-  onKycRequired: () => void;
   /**
-   * Estado de verificación facial del pasajero (`kycStatus` de `GET /users/me`, ya cacheado en el Home).
-   * Si NO está `approved`, el sheet muestra un GATE contextual ("verificá antes de pedir") en vez del
-   * botón Confirmar — proactivo, no la emboscada del 403. El gate REAL sigue siendo server-side.
+   * Defensa server-side residual (ADR-018): si el BFF alguna vez devolviera 403 KYC_REQUIRED, la pantalla
+   * deriva a la verificación. El muro pre-viaje se retiró (el pasajero `unverified` YA puede pedir); esto
+   * queda solo como reflejo del contrato, no como gate proactivo.
    */
-  kycStatus?: string | null;
+  onKycRequired: () => void;
   /**
    * El BFF bloqueó crear porque el pasajero tiene una DEUDA pendiente (403 `DEBT_PENDING`). En vez de un
    * error genérico, la pantalla abre el `DebtSheet` para saldar y volver a pedir. El gate es server-side
@@ -120,7 +119,6 @@ export function QuotingBody({
   onActiveTripExists,
   onRouteChange,
   requestAgainToken,
-  kycStatus,
 }: QuotingBodyProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
@@ -140,11 +138,23 @@ export function QuotingBody({
   const setEditing = useRideDraftStore(s => s.setEditing);
   const addWaypoint = useRideDraftStore(s => s.addWaypoint);
   const removeWaypoint = useRideDraftStore(s => s.removeWaypoint);
+  const scheduleIntent = useRideDraftStore(s => s.scheduleIntent);
+  const setScheduleIntent = useRideDraftStore(s => s.setScheduleIntent);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduledAt, setScheduledAt] = useState<number | null>(null);
+
+  // Llegada con INTENCIÓN de programar (toggle "Programado" del Home / CTA del tab Próximos): abre
+  // el selector de día/hora al entrar a la cotización y CONSUME la marca (una sola vez — si el
+  // pasajero cierra el selector, la cotización sigue como flujo normal con "Programar para después").
+  useEffect(() => {
+    if (scheduleIntent) {
+      setScheduleIntent(false);
+      setScheduleOpen(true);
+    }
+  }, [scheduleIntent, setScheduleIntent]);
   const [bidCents, setBidCents] = useState<number | null>(null);
   const [specialRequests, setSpecialRequests] = useState<SpecialRequest[]>([]);
   // Método de pago PARA ESTE VIAJE: se siembra del default del perfil al montar (lazy init) y vive en
@@ -152,16 +162,17 @@ export function QuotingBody({
   const [tripPaymentMethod, setTripPaymentMethod] =
     useState<MobilePaymentMethod>(() => defaultMethod);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
+  // Sheet de afiliación Yape On-File (el enabler del pre-pago): se abre desde el nudge del primer viaje.
+  const [yapeLinkOpen, setYapeLinkOpen] = useState(false);
   // ¿El cobro automático con Yape está activo? Solo para REFLEJAR una señal sutil en la fila (la app no
   // decide el cobro: es server-side). El query comparte caché con la card del perfil (sin doble fetch).
   const yapeAutoActive = useIsYapeAutoActive();
+  // Nudge afiliación-first: método YAPE sin On-File activo → ofrecemos vincular UNA VEZ (cobros siguientes
+  // automáticos). No bloquea el viaje. Al vincular, `yapeAutoActive` se vuelve true (query-key compartida)
+  // → esta condición se apaga sola y la fila pasa a "Yape · automático".
+  const showYapeAffiliateNudge = tripPaymentMethod === 'YAPE' && !yapeAutoActive;
 
   const ready = Boolean(origin && destination);
-
-  // Verificación facial (KYC): si NO está aprobada, mostramos el GATE contextual en vez del Confirmar.
-  // El estado viene del perfil ya cacheado en el Home; KycCamera invalida ['profile'] al aprobar → al
-  // volver, el gate desaparece solo. 'approved' = puede pedir; resto (unverified/pending/rejected) = gate.
-  const kycApproved = mapKycStatus(kycStatus) === 'approved';
 
   const setWaypoints = useMemo<RoutePlace[]>(
     () => waypoints.filter(isWaypointSet),
@@ -281,6 +292,7 @@ export function QuotingBody({
   }, [routeCoordinates, onRouteChange]);
 
   const selectedFareCents = selectedOption?.priceCents ?? 0;
+  // DEUDA: (backend) el recargo de modo niño (CHILD_MODE_FEE_CENTS local) se muestra como monto real DENTRO de la cotización (camino de cobro) — 2da superficie de la misma deuda de ChildModeScreen: pedir el fee server-driven.
   // El recargo de modo niño aplica SOLO en FIJO (en PUJA el bid ES el precio): decide si mostrar el desglose.
   const showChildFee =
     childMode.enabled && Boolean(selectedOption) && selectedIsFixed;
@@ -306,8 +318,8 @@ export function QuotingBody({
   };
 
   // Editar un punto del trayecto: abre la búsqueda dedicada (Search) para fijar/editar ese extremo.
-  // `flow: 'sheet'` → al fijar, Search hace goBack y VOLVEMOS a esta cotización in-sheet (no a la
-  // pantalla legacy RouteQuote). El borrador (Zustand) ya quedó actualizado, así que el quote se recalcula.
+  // `flow: 'sheet'` → al fijar, Search hace goBack y VOLVEMOS a esta cotización in-sheet. El borrador
+  // (Zustand) ya quedó actualizado, así que el quote se recalcula.
   const editOrigin = useCallback(() => {
     setEditing({kind: 'origin'});
     navigation.navigate('Search', {flow: 'sheet'});
@@ -383,6 +395,15 @@ export function QuotingBody({
   });
 
   const options = quoteQuery.data?.options ?? [];
+  // "Más barato" va en la opción de MENOR precio firme, no en la primera: el server no garantiza
+  // orden por precio, así que `index === 0` etiquetaba mal (bug). PUJA no tiene precio firme → se excluye.
+  const cheapestFixedId =
+    options
+      .filter((o) => !isPujaMode(o.mode ?? quote?.mode))
+      .reduce<(typeof options)[number] | null>(
+        (min, o) => (min === null || o.priceCents < min.priceCents ? o : min),
+        null,
+      )?.id ?? null;
   const canConfirm =
     !createMutation.isPending &&
     ready &&
@@ -483,27 +504,41 @@ export function QuotingBody({
         // oferta resuelve PUJA → proponés tu precio (piso/sugerido PROPIOS de la oferta); si es FIJO → el
         // precio firme ya está en la fila y el desglose va más abajo. Nada de un modo global que decide todo.
         <View style={{gap: theme.spacing.sm}}>
-          {options.map((option, index) => (
-            <SelectionBump
-              key={option.id}
-              index={index}
-              selected={option.id === selectedId}>
-              <RideOptionRow
-                name={offeringDisplayName(option)}
-                price={formatPEN(option.priceCents)}
-                eta={formatEta(option)}
-                description={optionDescription(option, index === 0)}
-                icon={
-                  <VehicleIcon
-                    icon={option.icon}
-                    vehicleType={option.vehicleType}
+          {options.map((option, index) => {
+            const optionIsPuja = isPujaMode(option.mode ?? quote?.mode);
+            const isSelected = option.id === selectedId;
+            return (
+              <SelectionBump
+                key={option.id}
+                index={index}
+                selected={isSelected}>
+                {optionIsPuja && !isSelected ? (
+                  // Per pen qAT2P: la oferta PUJA sin seleccionar se presenta como la card
+                  // affordance "Pon tu precio" (no una fila con precio firme que no existe).
+                  // Tocarla la selecciona → el BidPanel se abre debajo (misma máquina de selección).
+                  <PujaOptionCard onPress={() => selectChanged(option.id)} />
+                ) : (
+                  <RideOptionRow
+                    name={offeringDisplayName(option)}
+                    price={formatPEN(option.priceCents)}
+                    eta={formatEta(option)}
+                    description={optionDescription(
+                      option,
+                      option.id === cheapestFixedId,
+                    )}
+                    icon={
+                      <VehicleIcon
+                        icon={option.icon}
+                        vehicleType={option.vehicleType}
+                      />
+                    }
+                    selected={isSelected}
+                    onPress={() => selectChanged(option.id)}
                   />
-                }
-                selected={option.id === selectedId}
-                onPress={() => selectChanged(option.id)}
-              />
-            </SelectionBump>
-          ))}
+                )}
+              </SelectionBump>
+            );
+          })}
 
           {selectedIsPuja && selectedOption && bidCents !== null ? (
             <View style={{gap: theme.spacing.lg, marginTop: theme.spacing.xs}}>
@@ -631,7 +666,7 @@ export function QuotingBody({
 
       {/* Método de pago PARA ESTE VIAJE (antes del CTA): refleja la selección actual y abre el selector.
           La elección viaja al conductor en la puja y define el cobro automático al completar. */}
-      {ready && kycApproved ? (
+      {ready ? (
         <PaymentMethodRow
           method={tripPaymentMethod}
           onPress={() => setPaymentSheetOpen(true)}
@@ -640,20 +675,45 @@ export function QuotingBody({
         />
       ) : null}
 
-      {ready && !kycApproved ? (
-        // Gate de verificación CONTEXTUAL (mejor UX): el pasajero ve su ruta/precio y, en vez de confirmar
-        // y comerse un 403, hace el paso único de seguridad ANTES. El 403 sigue como defensa (server-side).
-        <KycGate status={mapKycStatus(kycStatus)} onVerify={onKycRequired} />
-      ) : (
-        <Button
-          label={confirmLabel}
-          variant="primary"
-          fullWidth
-          loading={createMutation.isPending}
-          disabled={!canConfirm}
-          onPress={() => createMutation.mutate()}
-        />
-      )}
+      {/* Nudge afiliación-first (primer viaje con Yape sin On-File): vincular UNA VEZ → cobros siguientes
+          automáticos. Sutil y NO bloqueante — el viaje sigue con Yape one-shot si no vincula. */}
+      {ready && showYapeAffiliateNudge ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('payments.affiliateNudge')}
+          accessibilityHint={t('payments.affiliateNudgeCta')}
+          disabled={createMutation.isPending}
+          onPress={() => setYapeLinkOpen(true)}
+          style={({pressed}) => [
+            styles.affiliateNudge,
+            {
+              gap: theme.spacing.xs,
+              paddingHorizontal: theme.spacing.sm,
+              paddingVertical: theme.spacing.xs,
+              opacity: createMutation.isPending ? 0.45 : pressed ? 0.6 : 1,
+            },
+          ]}>
+          <IconBolt size={14} color={theme.colors.accent} />
+          <Text variant="footnote" color="inkMuted" style={styles.affiliateNudgeText}>
+            {t('payments.affiliateNudge')}
+          </Text>
+          <Text variant="footnote" color="accent">
+            {t('payments.affiliateNudgeCta')}
+          </Text>
+          <IconArrowRight size={14} color={theme.colors.accent} />
+        </Pressable>
+      ) : null}
+
+      {/* CTA de pedido (ADR-018): sin muro de KYC. El pasajero `unverified` pide directo; el botón sigue
+          gateado solo por `canConfirm` (ruta lista + oferta/puja válida). */}
+      <Button
+        label={confirmLabel}
+        variant="primary"
+        fullWidth
+        loading={createMutation.isPending}
+        disabled={!canConfirm}
+        onPress={() => createMutation.mutate()}
+      />
 
       <PaymentMethodSheet
         visible={paymentSheetOpen}
@@ -680,7 +740,69 @@ export function QuotingBody({
           setScheduleOpen(false);
         }}
       />
+
+      <YapeLinkSheet
+        visible={yapeLinkOpen}
+        onClose={() => setYapeLinkOpen(false)}
+      />
     </View>
+  );
+}
+
+interface PujaOptionCardProps {
+  onPress: () => void;
+}
+
+/**
+ * Card affordance de la PUJA sin seleccionar (design/veo.pen qAT2P "Poné tu precio"): la oferta en modo
+ * puja no tiene precio firme que mostrar en una fila, así que se presenta como invitación a negociar
+ * (rayo + "Pon tu precio" + acción "Ofrecer"). Tocarla la selecciona y el BidPanel se abre debajo —
+ * misma máquina de selección que las filas fijas, solo cambia la piel.
+ */
+function PujaOptionCard({onPress}: PujaOptionCardProps): React.JSX.Element {
+  const theme = useTheme();
+  const {t} = useTranslation();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${t('puja.affordanceTitle')}. ${t('puja.affordanceSub')}`}
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.pujaCard,
+        {
+          backgroundColor: pressed
+            ? theme.colors.surfaceElevated
+            : theme.colors.surface,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radii.lg,
+          paddingHorizontal: theme.spacing.lg,
+          paddingVertical: theme.spacing.md,
+          gap: theme.spacing.lg,
+        },
+      ]}>
+      <View
+        style={[
+          styles.pujaGlyph,
+          {backgroundColor: hexAlpha(theme.colors.brand, 0.15)},
+        ]}>
+        <IconBolt color={theme.colors.brand} size={20} />
+      </View>
+      <View style={styles.pujaBody}>
+        <Text variant="bodyStrong" numberOfLines={1}>
+          {t('puja.affordanceTitle')}
+        </Text>
+        <Text variant="footnote" color="inkMuted" numberOfLines={1}>
+          {t('puja.affordanceSub')}
+        </Text>
+      </View>
+      <View style={styles.pujaAction}>
+        <Text variant="subhead" color="brand">
+          {t('puja.affordanceAction')}
+        </Text>
+        <IconArrowRight color={theme.colors.brand} size={16} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -690,6 +812,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  // Nudge afiliación-first bajo la fila de pago: fila sutil (bolt + copy + CTA + flecha), sin fondo de
+  // relleno para no competir con el CTA primario. El texto flexea; el CTA y la flecha quedan a la derecha.
+  affiliateNudge: {flexDirection: 'row', alignItems: 'center'},
+  affiliateNudgeText: {flex: 1},
+  pujaCard: {flexDirection: 'row', alignItems: 'center', borderWidth: 1},
+  pujaGlyph: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pujaBody: {flex: 1, gap: 2},
+  pujaAction: {flexDirection: 'row', alignItems: 'center', gap: 4},
   scheduleRow: {
     flexDirection: 'row',
     alignItems: 'center',

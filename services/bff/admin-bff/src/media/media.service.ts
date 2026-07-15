@@ -5,10 +5,15 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InternalRestClient, type GrpcServiceClient, type TripReply } from '@veo/rpc';
-import { grpcIdentityMetadata, type AuthenticatedUser } from '@veo/auth';
+import {
+  grpcIdentityMetadata,
+  INTERNAL_IDENTITY_AUDIENCE,
+  type AuthenticatedUser,
+  type InternalAudience,
+} from '@veo/auth';
 import { ForbiddenError, NotFoundError } from '@veo/utils';
 import { canAccessLiveCabin, normalizeTripStatus } from '@veo/api-client';
-import { GRPC_TRIP, REST_MEDIA } from '../infra/tokens';
+import { GRPC_TRIP, REST_MEDIA, REST_IDENTITY } from '../infra/tokens';
 import { AuditRecorder } from '../audit/audit-recorder.service';
 import type { Env } from '../config/env.schema';
 import type { LiveAccessDto, RequestAccessDto, VideoAccessStatus } from './dto/media.dto';
@@ -40,19 +45,23 @@ interface VideoAccessRequest {
   createdAt: string;
 }
 
-/** Stream firmado que devuelve media-service (GET .../stream). */
-interface StreamReply {
-  signedUrl: string;
-  watermark: string;
-  expiresAt: string;
-  segmentId: string;
-}
+/**
+ * Stream que devuelve media-service (GET .../stream) — DISCRIMINADO por `status` (burn-in Lote 3):
+ *  - PROCESSING: la copia con watermark quemado aún se rinde (asíncrono). NO hay URL.
+ *  - READY: URL firmada de la COPIA DERIVADA (nunca el crudo) + watermark quemado + vencimiento.
+ */
+type StreamReply =
+  | { status: 'PROCESSING' }
+  | { status: 'READY'; signedUrl: string; watermark: string; expiresAt: string; segmentId: string };
 
 /** Vista de solicitud de acceso que consume admin-web (schema Zod `mediaAccessRequestView`). */
 export interface MediaAccessRequestView {
   id: string;
   tripId: string;
   requestedBy: string;
+  requesterEmail: string;
+  requesterName: string | null;
+  requesterRole: string | null;
   reason: string;
   status: VideoAccessStatus;
   requestedAt: string;
@@ -60,12 +69,27 @@ export interface MediaAccessRequestView {
   decidedBy: string | null;
 }
 
-/** URL firmada del video que consume admin-web (schema Zod `signedMedia`). */
-export interface SignedMedia {
-  url: string;
-  expiresAt: string;
-  watermark: string;
+/** Fila del roster de operadores (identity GET /admin/operators) — subset usado para enriquecer al solicitante. */
+interface OperatorRow {
+  email: string;
+  name: string | null;
+  roles: string[];
 }
+
+/** Identidad enriquecida del solicitante (STAFF · accountability): nombre + rol primario. `null` si no se resolvió. */
+interface RequesterIdentity {
+  name: string | null;
+  role: string | null;
+}
+
+/**
+ * Resultado del stream que consume admin-web (schema Zod `signedMedia`, DISCRIMINADO por `status`):
+ *  - PROCESSING: la copia con watermark quemado se está rindiendo (asíncrono); el cliente reintenta.
+ *  - READY: URL firmada de la COPIA DERIVADA (nunca el crudo) + watermark quemado + vencimiento.
+ */
+export type SignedMedia =
+  | { status: 'PROCESSING' }
+  | { status: 'READY'; url: string; expiresAt: string; watermark: string; segmentId: string };
 
 /** Token de cámara EN VIVO (solo-suscripción) emitido por media-service para el muro del admin. */
 export interface LiveViewerToken {
@@ -91,11 +115,16 @@ export interface SegmentView {
  * Mapea el registro completo de media-service a la vista del cliente (contrato EXACTO validado por Zod).
  * `decidedAt`/`decidedBy` colapsan la rama approve/reject en un solo campo (la que esté presente, o null).
  */
-function toView(req: VideoAccessRequest): MediaAccessRequestView {
+function toView(req: VideoAccessRequest, who?: RequesterIdentity): MediaAccessRequestView {
   return {
     id: req.id,
     tripId: req.tripId,
     requestedBy: req.requestedBy,
+    // Email del solicitante: lo provee media-service (quemado en el watermark forense) → siempre presente.
+    requesterEmail: req.requestedByEmail,
+    // Nombre/rol enriquecidos on-read (roster de operadores); null en respuestas de mutación (el cliente refetchea).
+    requesterName: who?.name ?? null,
+    requesterRole: who?.role ?? null,
     reason: req.reason,
     status: req.status,
     requestedAt: req.createdAt,
@@ -110,7 +139,9 @@ export class MediaService {
 
   constructor(
     @Inject(REST_MEDIA) private readonly rest: InternalRestClient,
+    @Inject(REST_IDENTITY) private readonly identityRest: InternalRestClient,
     @Inject(GRPC_TRIP) private readonly tripGrpc: GrpcServiceClient,
+    @Inject(INTERNAL_IDENTITY_AUDIENCE) private readonly audience: InternalAudience,
     private readonly audit: AuditRecorder,
     config: ConfigService<Env, true>,
   ) {
@@ -118,21 +149,22 @@ export class MediaService {
   }
 
   /**
-   * Email del operador para incrustar como watermark en el video (media-service lo exige con @IsEmail).
-   * El JWT admin transporta el `email` del operador (claim solo-admin, staff interno), así que el
-   * watermark muestra la identidad legible REAL del operador (BR-S02), no un sintético opaco. El camino
-   * de REFRESH de identity ahora distingue sujeto admin (`typ:'admin'` en el refresh token) y REPUEBLA
-   * `email` (y roles) desde AdminUser, así que el token re-emitido por refresh TAMBIÉN porta el email.
-   *
-   * Fallback residual: solo se activa para identidades sin email (passenger/driver, que nunca acceden a
-   * este BFF) o un refresh token PREVIO al fix que aún no portaba `typ` y se re-emitió sin email; en ese
-   * caso caemos al email determinista derivado del `userId` —que ES la clave canónica de rendición de
-   * cuentas (mismo valor que media-service persiste como `requestedBy`/`approvedBy`)— para que la
-   * validación @IsEmail downstream no rompa. Tras el primer refresh, el token queda curado con `typ` y
-   * el email real vuelve a estar presente.
+   * Mapa email→identidad del STAFF (roster de operadores identity), para enriquecer al SOLICITANTE de cada
+   * acceso (accountability de la doble-auth · quién pide ver video). UNA lectura REST (pocos operadores). El
+   * rol primario = `roles[0]` (crudo AdminRole; el front lo traduce). fail-safe: si el roster cae → mapa vacío
+   * (la vista degrada a solo email honesto, nunca rompe la pantalla). Emails normalizados a minúsculas.
    */
-  private operatorEmail(identity: AuthenticatedUser): string {
-    return identity.email ?? `${identity.userId}@operator.veo.internal`;
+  private async requesterDirectory(
+    identity: AuthenticatedUser,
+  ): Promise<Map<string, RequesterIdentity>> {
+    const ops = await this.identityRest
+      .get<OperatorRow[]>('/admin/operators', { identity })
+      .catch(() => [] as OperatorRow[]);
+    const map = new Map<string, RequesterIdentity>();
+    for (const o of ops) {
+      map.set(o.email.toLowerCase(), { name: o.name || null, role: o.roles?.[0] ?? null });
+    }
+    return map;
   }
 
   /** Lista las solicitudes de acceso (opcionalmente filtradas por estado). Lectura — solo rol, sin step-up. */
@@ -144,13 +176,18 @@ export class MediaService {
       identity,
       query: { status },
     });
-    return res.map(toView);
+    // Enriquecimiento del SOLICITANTE (nombre + rol) por página: UNA lectura del roster de operadores, mapeada
+    // por email (el email ya viene en cada request). No es PII de pasajero/conductor — es accountability del staff.
+    const directory = await this.requesterDirectory(identity);
+    return res.map((r) => toView(r, directory.get(r.requestedByEmail.toLowerCase())));
   }
 
   /**
-   * Crea una solicitud de acceso (queda PENDING). El `operatorEmail` se deriva de la sesión, NO del cliente.
-   * media-service devuelve solo {id,status}; construimos la vista con los datos conocidos (el cliente igual
-   * invalida y refetchea la lista real, así que la vista provisional alcanza para el optimistic update).
+   * Crea una solicitud de acceso (queda PENDING). La identidad del operador que se QUEMA en el watermark NO
+   * se envía en el body: media-service la deriva del header de identidad interna FIRMADO (claim `email` del
+   * token admin, fallback `userId`), que el `InternalRestClient` propaga desde `identity`. Así el artefacto
+   * forense no puede portar un valor controlado por el cliente (BR-S02 · no-repudiación). media-service devuelve
+   * solo {id,status}; construimos la vista provisional con los datos conocidos (el cliente refetchea la lista real).
    */
   async requestAccess(
     identity: AuthenticatedUser,
@@ -158,7 +195,7 @@ export class MediaService {
   ): Promise<MediaAccessRequestView> {
     const created = await this.rest.post<AccessRequestCreated>('/media/access', {
       identity,
-      body: { tripId: dto.tripId, reason: dto.reason, operatorEmail: this.operatorEmail(identity) },
+      body: { tripId: dto.tripId, reason: dto.reason },
     });
     await this.audit.record(identity, {
       action: 'media.access_request',
@@ -170,6 +207,11 @@ export class MediaService {
       id: created.id,
       tripId: dto.tripId,
       requestedBy: identity.userId,
+      // El solicitante es el usuario actual → email de su sesión (accountability); "" si el token no lo porta.
+      requesterEmail: identity.email ?? '',
+      // Nombre/rol los rellena el refetch de la lista (enriquecido por el roster); acá null honesto.
+      requesterName: null,
+      requesterRole: null,
       reason: dto.reason,
       status: created.status,
       requestedAt: new Date().toISOString(),
@@ -213,18 +255,30 @@ export class MediaService {
   }
 
   /**
-   * Obtiene la URL firmada del video de una solicitud aprobada (requiere MFA fresca; el controller lo impone).
-   * El acceso efectivo al material sensible se audita ANTES de devolver la URL (fail-closed, Ley 29733).
+   * Obtiene el stream del video de una solicitud aprobada (requiere MFA fresca; el controller lo impone).
+   * El render del watermark es ASÍNCRONO (burn-in Lote 3): si aún no está listo devuelve PROCESSING (el
+   * cliente reintenta) y NO se audita (no hubo acceso a material). Cuando está READY, el acceso efectivo a
+   * material sensible se audita ANTES de devolver la URL de la COPIA DERIVADA (fail-closed, Ley 29733).
    */
   async streamRequest(identity: AuthenticatedUser, requestId: string): Promise<SignedMedia> {
     const res = await this.rest.get<StreamReply>(`/media/access/${requestId}/stream`, { identity });
+    if (res.status === 'PROCESSING') {
+      // No hubo acceso a material (la copia se está rindiendo) → nada que auditar todavía.
+      return { status: 'PROCESSING' };
+    }
     await this.audit.record(identity, {
       action: 'media.access_stream',
       resourceType: 'media_access',
       resourceId: requestId,
       payload: { segmentId: res.segmentId, expiresAt: res.expiresAt },
     });
-    return { url: res.signedUrl, expiresAt: res.expiresAt, watermark: res.watermark };
+    return {
+      status: 'READY',
+      url: res.signedUrl,
+      expiresAt: res.expiresAt,
+      watermark: res.watermark,
+      segmentId: res.segmentId,
+    };
   }
 
   /**
@@ -239,7 +293,7 @@ export class MediaService {
     // la autoridad es esta verificación (un admin no puede mintear un token para un viaje arbitrario por
     // API directa). NO se bloquea el pánico: el admin/compliance es el RESPONDEDOR (el panel existe para eso),
     // a diferencia de la familia (a quien sí se le oculta, por si un atacante mira el enlace).
-    const meta = grpcIdentityMetadata(identity, this.secret);
+    const meta = grpcIdentityMetadata(identity, this.secret, this.audience);
     const trip = await this.tripGrpc.call<TripReply>('GetTrip', { id: dto.tripId }, meta);
     if (!trip.found) throw new NotFoundError('Viaje no encontrado');
     // Status crudo del gRPC → contrato; fuera del contrato (null) = fail-closed. La política

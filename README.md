@@ -18,7 +18,7 @@ veo/
 │   └── web-hub/       @veo/web-hub — Next.js
 ├── services/          14 microservicios (NestJS, hexagonal) + BFFs (public/driver/admin)
 ├── packages/          Código compartido @veo/* (tipos, auth, rpc, utils, observability…)
-├── infra/             Terraform + Kubernetes (Kustomize) + ArgoCD
+├── infra/             Deploy en VPS único (Docker Compose + Cloudflare Tunnel + SSH)
 ├── dev-stack/         Orquestación local (boot de servicios desde dist + Docker)
 ├── docs/              STATUS, FOUNDATION, ADRs, runbooks
 └── e2e/               Pruebas end-to-end del golden path
@@ -29,7 +29,7 @@ veo/
 - **Backend:** Node 20 · pnpm 9 · Turborepo · NestJS 10 · Postgres 16 + PostGIS · Redis · Kafka · gRPC + REST interno (HMAC)
 - **Mobile:** React Native 0.75 (módulos nativos para pánico, biometría, WebRTC)
 - **Web:** Next.js 14
-- **Infra:** EKS multi-AZ · Terraform · ArgoCD · Linkerd (mTLS) · NetworkPolicies default-deny
+- **Infra:** VPS único · Docker Compose · imágenes en GHCR · deploy por GitHub Actions (SSH) · ingreso por Cloudflare Tunnel · firewall del host default-deny · self-hosted (Postgres/Kafka/MinIO/Redis, **sin AWS managed** — soberanía Ley 29733)
 
 ## Workspace
 

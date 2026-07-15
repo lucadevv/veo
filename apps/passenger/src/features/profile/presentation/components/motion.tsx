@@ -61,55 +61,6 @@ export function EnterView({
   );
 }
 
-export interface SuccessCheckProps {
-  size?: number;
-}
-
-/**
- * Sello de éxito: círculo `success` con check que entra con resorte (scale 0.6→1 + fade). Confirma
- * una acción puntual (celular verificado). Respeta reduce-motion (estado final inmediato).
- */
-export function SuccessCheck({
-  size = 72,
-}: SuccessCheckProps): React.JSX.Element {
-  const theme = useTheme();
-  const reduced = useReducedMotion();
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    if (reduced) {
-      progress.value = 1;
-      return;
-    }
-    progress.value = withDelay(60, withSpring(1, theme.motion.spring.bouncy));
-  }, [reduced, progress, theme]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [{scale: 0.6 + progress.value * 0.4}],
-  }));
-
-  return (
-    <Animated.View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={[
-        styles.check,
-        {
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: theme.colors.success,
-        },
-        animatedStyle,
-      ]}>
-      <Text variant="title1" color="onSuccess">
-        ✓
-      </Text>
-    </Animated.View>
-  );
-}
-
-const styles = StyleSheet.create({
-  check: {alignItems: 'center', justifyContent: 'center', alignSelf: 'center'},
-});
+// SuccessCheck ahora es el CANÓNICO de @veo/ui-kit (círculo verde + check negro + pop) — antes había una
+// copia local (círculo + ✓ tipográfico) duplicada en payments/ratings/profile.
+export {SuccessCheck, type SuccessCheckProps} from '@veo/ui-kit';

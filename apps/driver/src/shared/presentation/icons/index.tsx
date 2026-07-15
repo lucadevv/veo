@@ -12,7 +12,10 @@ export interface IconProps {
   strokeWidth?: number;
 }
 
-const DEFAULTS = { size: 24, color: '#EFF2F6', strokeWidth: 2 } as const;
+// Fallback de color para cuando el consumidor no pasa `color`. Ink oscuro del Theme de Confianza
+// (light) — antes era gris casi-blanco #EFF2F6 (modo noche). Casi todos los consumidores pasan
+// `color` desde el tema; este default solo aplica al glifo suelto sin color explícito.
+const DEFAULTS = { size: 24, color: '#1A2332', strokeWidth: 2 } as const;
 
 const base = (props: IconProps) => {
   const size = props.size ?? DEFAULTS.size;
@@ -60,6 +63,36 @@ export function IconTrips(props: IconProps): React.JSX.Element {
       <Path d="M12 15v6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
       <Path d="M14.5 10.5 20 7.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
       <Path d="M9.5 10.5 4 7.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Compartir / Carpooling: dos personas (viaje compartido, marketplace programado). */
+export function IconCarpool(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={8.5} cy={7} r={3.5} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M2 20v-1.5A4.5 4.5 0 0 1 6.5 14h4A4.5 4.5 0 0 1 15 18.5V20"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M15.5 3.6a3.5 3.5 0 0 1 0 6.8"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M18 14.2A4.5 4.5 0 0 1 21 18.5V20"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }
@@ -432,12 +465,42 @@ export function IconCalendar(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Pausa: dos barras verticales (pausar turno). */
+export function IconPause(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M9 4v16M15 4v16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 /** Más / añadir (registrar documento). */
 export function IconPlus(props: IconProps): React.JSX.Element {
   const { size, color, strokeWidth } = base(props);
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M12 5v14M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Menos / restar (stepper de oferta). */
+export function IconMinus(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Círculo hueco: punto de ORIGEN en resúmenes de ruta (el destino usa el pin `IconMap`). */
+export function IconCircle(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
     </Svg>
   );
 }
@@ -553,6 +616,553 @@ export function IconLifebuoy(props: IconProps): React.JSX.Element {
         strokeWidth={strokeWidth}
         strokeLinecap="round"
       />
+    </Svg>
+  );
+}
+
+/** Cámara (tomar foto): cuerpo redondeado simple + círculo de lente, sin detalle de fuelle/flash. */
+export function IconCamera(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={12.5} r={3} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Candado cerrado: dato bloqueado (campo KYC no editable). */
+export function IconLock(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={5} y={11} width={14} height={9} rx={2} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M8 11V8a4 4 0 0 1 8 0v3"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Flecha izquierda (retroceso de pantalla). */
+export function IconArrowLeft(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M19 12H5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Polyline
+        points="12,5 5,12 12,19"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Flecha derecha (enviar mensaje del chat — espejo de IconArrowLeft). */
+export function IconArrowRight(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Polyline
+        points="12,5 19,12 12,19"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Imagen / galería: marco + un círculo (sol) + una línea mínima de "montaña". */
+export function IconImage(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect
+        x={3.5}
+        y={4.5}
+        width={17}
+        height={15}
+        rx={2}
+        stroke={color}
+        strokeWidth={strokeWidth}
+      />
+      <Circle cx={8.5} cy={9} r={1.6} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="m4 16 4.5-4.5L13 16"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Escanear documento: 4 corchetes de esquina + línea central de barrido (sin marco de cámara). */
+export function IconScan(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 8V6a2 2 0 0 1 2-2h2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M16 4h2a2 2 0 0 1 2 2v2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M20 16v2a2 2 0 0 1-2 2h-2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M8 20H6a2 2 0 0 1-2-2v-2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M4 12h16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Campana (notificaciones / avisos): cuerpo + badajo. */
+export function IconBell(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 9a6 6 0 0 1 12 0c0 4 1 5.5 2 6.5H4c1-1 2-2.5 2-6.5Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M10 18.5a2 2 0 0 0 4 0"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Banderín a la derecha (cierre de turno / meta): mástil + triángulo. Espeja lucide `flag-triangle-right`. */
+export function IconFlag(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 22V2l10 5-10 5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Recorrido / ruta: dos nodos unidos por un trazo con quiebre. Espeja lucide `route`. */
+export function IconRoute(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={6} cy={19} r={3} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Circle cx={18} cy={5} r={3} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Monedas (propinas): dos discos superpuestos. Espeja lucide `coins`. */
+export function IconCoins(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={8} cy={8} r={6} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M18.09 10.37A6 6 0 1 1 10.34 18"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M7 6h1v4" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path
+        d="m16.71 13.88.7.71-2.82 2.82"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Rostro escaneado (KYC / biometría): corchetes de esquina + cara mínima (círculo + arco de sonrisa). */
+export function IconFace(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Circle cx={12} cy={11} r={2.5} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M8.5 16a4 4 0 0 1 7 0"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Wifi tachado (sin conexión): arcos de señal rotos + diagonal. Espeja lucide `wifi-off`. */
+export function IconWifiOff(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M8.5 16.4a5 5 0 0 1 7 0"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M5 12.9a10 10 0 0 1 5.2-2.7"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M19 12.9a10 10 0 0 0-2-1.5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M2 8.8a15 15 0 0 1 4.2-2.6"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M22 8.8a15 15 0 0 0-11.3-3.8"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path d="M3 3 21 21" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Circle cx={12} cy={20} r={0.6} fill={color} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Pin de ubicación tachado (GPS/permiso denegado): pin roto + diagonal. Espeja lucide `map-pin-off`. */
+export function IconMapPinOff(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9.3 5.3A7 7 0 0 1 19 10c0 2.2-1.2 4.5-2.7 6.4"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M14.2 14.3c-1 1.3-2 2.5-2.2 2.7a15 15 0 0 1-1-1.1"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M6 6.3A7 7 0 0 0 5 10c0 3.1 2.4 6.5 4.2 8.6"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M10.4 8.4a2.5 2.5 0 0 0 3.2 3.2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+      <Path d="M3 3 21 21" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Monitor/dispositivo tachado (sesión cerrada en otro equipo): pantalla + pie + diagonal. */
+export function IconMonitorOff(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M20 15V6a2 2 0 0 0-2-2H8"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M4 6.1V14a2 2 0 0 0 2 2h11"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M9 20h6M12 16v4"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M3 3 21 21" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Búsqueda: lupa. */
+export function IconSearch(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={strokeWidth} />
+      <Path
+        d="M20 20l-3.6-3.6"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Más acciones: tres puntos horizontales (⋯). */
+export function IconMore(props: IconProps): React.JSX.Element {
+  const { size, color } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={5} cy={12} r={1.7} fill={color} />
+      <Circle cx={12} cy={12} r={1.7} fill={color} />
+      <Circle cx={19} cy={12} r={1.7} fill={color} />
+    </Svg>
+  );
+}
+
+/** Enviar / avión de papel: CTA "Enviar código" (OTP). Espeja lucide `send`. */
+export function IconSend(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M22 2 15 22l-4-9-9-4 20-7Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M22 2 11 13"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Check dentro de círculo (confirmación fuerte): CTA "Verificar e ingresar". Espeja lucide `circle-check`. */
+export function IconCheckCircle(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
+      <Polyline
+        points="8.5,12 11,14.5 15.5,9.5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+/** Alerta dentro de círculo (error inline del OTP): "Código incorrecto". Espeja lucide `circle-alert`. */
+export function IconAlertCircle(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={strokeWidth} />
+      <Path d="M12 7.5v5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Circle cx={12} cy={16} r={0.6} fill={color} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Salir de sesión: puerta con flecha saliente. Espeja lucide `log-out`. */
+export function IconLogout(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Polyline
+        points="16,17 21,12 16,7"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <Path d="M21 12H9" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/** Eliminar cuenta / borrar: tacho con tapa (mismo glifo que el pasajero, `IconTrash`). */
+export function IconTrash(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 7h16" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M9.5 7V5a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v2"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Reto / objetivo: diana (círculos concéntricos). */
+export function IconTarget(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={10} stroke={color} strokeWidth={strokeWidth} />
+      <Circle cx={12} cy={12} r={6} stroke={color} strokeWidth={strokeWidth} />
+      <Circle cx={12} cy={12} r={2} stroke={color} strokeWidth={strokeWidth} />
+    </Svg>
+  );
+}
+
+/** Soporte / chatear: auricular con micrófono. */
+export function IconHeadset(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H4a1 1 0 0 1-1-1v-6a9 9 0 0 1 18 0v6a1 1 0 0 1-1 1h-2a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M21 16v2a4 4 0 0 1-4 4h-5"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Verificado: insignia festoneada con check. */
+export function IconBadgeCheck(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Path
+        d="m9 12 2 2 4-4"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Buscar pasajero: usuario redondo con lupa. */
+export function IconUserRoundSearch(props: IconProps): React.JSX.Element {
+  const { size, color, strokeWidth } = base(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M2 21a8 8 0 0 1 10.434-7.62"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Circle cx={10} cy={8} r={5} stroke={color} strokeWidth={strokeWidth} />
+      <Circle cx={18} cy={18} r={3} stroke={color} strokeWidth={strokeWidth} />
+      <Path d="m22 22-1.9-1.9" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
     </Svg>
   );
 }

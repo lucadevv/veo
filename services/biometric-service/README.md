@@ -109,7 +109,8 @@ estén presentes (pon `VEO_BIO_REQUIRE_MODELS=true` para fallar el arranque en s
 | `VEO_BIO_MODEL_DIR`                   | `models`                         | carpeta de modelos ONNX                  |
 | `VEO_BIO_DETECTOR_MODEL`              | `det_10g.onnx`                   | fichero del detector                     |
 | `VEO_BIO_EMBEDDER_MODEL`              | `w600k_r50.onnx`                 | fichero del recognizer                   |
-| `VEO_BIO_MATCH_THRESHOLD`             | `0.90`                           | **umbral de match (BR-I02)**             |
+| `VEO_BIO_MATCH_THRESHOLD`             | `0.40`                           | **umbral de match de TURNO (BR-I02)**    |
+| `VEO_BIO_DOC_MATCH_THRESHOLD`         | `0.30`                           | **umbral de doc-match DNI↔selfie**       |
 | `VEO_BIO_REQUIRE_MODELS`              | `false`                          | si `true`, falla el arranque sin modelos |
 | `VEO_BIO_DETECTION_THRESHOLD`         | `0.5`                            | confianza mínima del detector            |
 | `VEO_BIO_MIN_FACE_SIZE`               | `80`                             | tamaño mínimo (px) de rostro             |

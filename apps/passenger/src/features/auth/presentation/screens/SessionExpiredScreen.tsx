@@ -46,9 +46,9 @@ export function SessionExpiredScreen(): React.JSX.Element {
               borderRadius: theme.radii.pill,
             },
           ]}>
-          <IconLock color={theme.colors.inkMuted} size={34} />
+          <IconLock color={theme.colors.inkMuted} size={40} />
         </View>
-        <Text variant="display" align="center">
+        <Text variant="title1" align="center">
           {t('auth.expiredTitle')}
         </Text>
         <Text variant="body" color="inkMuted" align="center">
@@ -62,8 +62,8 @@ export function SessionExpiredScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   center: {flex: 1, justifyContent: 'center', alignItems: 'center'},
   badge: {
-    width: 84,
-    height: 84,
+    width: 96,
+    height: 96,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,

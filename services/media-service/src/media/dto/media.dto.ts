@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import { VideoAccessStatus } from '../../generated/prisma';
 
 /** Body opcional al emitir un token de cámara (la identidad sale del usuario autenticado). */
@@ -21,9 +21,9 @@ export class CreateAccessRequestDto {
   @IsUUID()
   segmentId?: string;
 
-  @ApiProperty({ description: 'Email del operador solicitante (se incrusta como watermark)' })
-  @IsEmail()
-  operatorEmail!: string;
+  // El identificador del operador que se incrusta como watermark NO es input del cliente: media-service lo
+  // deriva de la identidad FIRMADA (claim `email` del token admin, fallback `userId`). Por eso este DTO ya
+  // NO acepta `operatorEmail` — un solicitante no puede estampar el email de un colega en el video (BR-S02).
 
   @ApiProperty({ minLength: 21, description: 'Motivo de la solicitud (> 20 caracteres)' })
   @IsString()

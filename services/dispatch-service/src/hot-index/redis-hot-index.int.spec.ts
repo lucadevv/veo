@@ -12,6 +12,7 @@ import { toH3, DISPATCH_H3_RESOLUTION } from '@veo/utils';
 import { VehicleClass, VehicleSegment, FleetDocumentType } from '@veo/shared-types';
 import { RedisHotIndex } from './redis-hot-index';
 import { RedisExclusionRegistry } from './redis-exclusion.registry';
+import { RedisTtlExclusionRegistry } from './redis-ttl-exclusion.registry';
 import { DriverPool } from '../dispatch/driver-pool';
 
 const A = { lat: -12.0464, lon: -77.0428 };
@@ -69,6 +70,37 @@ describe('RedisHotIndex · integración (Redis real)', () => {
     expect(await exclusion.isExcluded('d9')).toBe(false);
   });
 
+  // ── Exclusión por SUSPENSIÓN con TTL de AUTO-CURA (RedisTtlExclusionRegistry) sobre Redis real ──
+
+  it('exclusión por suspensión: excluye, filtra y limpia (paridad de contrato con el de pánico)', async () => {
+    const suspension = new RedisTtlExclusionRegistry(redis, 3_600, 'test:susp:contract');
+    await suspension.exclude('s1');
+    expect(await suspension.isExcluded('s1')).toBe(true);
+    expect(await suspension.filter(['s1', 's2'])).toEqual(['s2']);
+    await suspension.clear('s1');
+    expect(await suspension.isExcluded('s1')).toBe(false);
+  });
+
+  it('AUTO-CURA: si la reactivación nunca llega, la exclusión EXPIRA sola y el conductor re-entra al pool', async () => {
+    // TTL de 1s: el modo de falla seguro es re-admitir (over-exclusion acotada), no quedar pegado.
+    const suspension = new RedisTtlExclusionRegistry(redis, 1, 'test:susp:ttl');
+    await suspension.exclude('stuck');
+    expect(await suspension.isExcluded('stuck')).toBe(true); // excluido ahora
+    // Esperamos a que Redis expire la key (sin ningún clear() explícito: nadie limpió).
+    await new Promise((r) => setTimeout(r, 1_200));
+    expect(await suspension.isExcluded('stuck')).toBe(false); // AUTO-CURADO: re-entra al pool
+    expect(await suspension.filter(['stuck', 'other'])).toEqual(['stuck', 'other']); // ninguno excluido
+  });
+
+  it('re-excluir REFRESCA el TTL (renueva la ventana en cada re-entrega del evento)', async () => {
+    const suspension = new RedisTtlExclusionRegistry(redis, 2, 'test:susp:refresh');
+    await suspension.exclude('refresh');
+    await new Promise((r) => setTimeout(r, 1_000)); // ~mitad de la ventana
+    await suspension.exclude('refresh'); // re-suspensión → TTL vuelve a 2s
+    await new Promise((r) => setTimeout(r, 1_200)); // pasó el TTL ORIGINAL pero no el refrescado
+    expect(await suspension.isExcluded('refresh')).toBe(true); // sigue excluido gracias al refresh
+  });
+
   // ── B5-3 · eligibilidad por oferta sobre Redis REAL (round-trip de attrs + filtro del pool) ──
 
   it('B5-3 · los attrs de eligibilidad (seats/segment/year) sobreviven el round-trip por Redis real', async () => {
@@ -86,7 +118,11 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('B5-3 · DriverPool.eligible filtra por el `requires` de la oferta sobre el hot-index vivo', async () => {
-    const pool = new DriverPool(hotIndex, exclusion);
+    const pool = new DriverPool(
+      hotIndex,
+      exclusion,
+      new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'),
+    );
     const cellC = toH3(C, DISPATCH_H3_RESOLUTION);
     // Celda C aislada: solo estos 3 (con attrs completos, así el filtro NO degrada a "elegible").
     await hotIndex.upsertLocation('c-mid', C, VehicleClass.CAR, {
@@ -135,7 +171,11 @@ describe('RedisHotIndex · integración (Redis real)', () => {
   });
 
   it('B5-3.2 · DriverPool gatea las verticales FAIL-CLOSED sobre el hot-index vivo', async () => {
-    const pool = new DriverPool(hotIndex, exclusion);
+    const pool = new DriverPool(
+      hotIndex,
+      exclusion,
+      new RedisTtlExclusionRegistry(redis, 3_600, 'test:suspended:driver'),
+    );
     const cellD = toH3(D, DISPATCH_H3_RESOLUTION);
     // Celda D aislada: uno con la cert de ambulancia, uno con otra cert, uno sin certs.
     await hotIndex.upsertLocation('d-amb', D, VehicleClass.CAR, {
@@ -155,5 +195,179 @@ describe('RedisHotIndex · integración (Redis real)', () => {
     // Sin certs requeridas (RIDE): los 3 entran (la cert no restringe lo que no la pide).
     const ride = await pool.eligible([cellD], VehicleClass.CAR);
     expect(ride.map((l) => l.driverId).sort()).toEqual(['d-amb', 'd-none', 'd-tow']);
+  });
+
+  // ── ANTI-CLOBBER · un ping sin attrs NO debe borrar los attrs buenos del hot-index ──
+  const E = { lat: -12.3, lon: -77.2 }; // celda AISLADA para los tests de clobber
+
+  it('anti-clobber · un ping SIN attrs PERO con el MISMO vehicleId PRESERVA los seats/segment/año previos (Redis real)', async () => {
+    // Ping bueno: el conductor opera un XL premium 2023 (id "veh-keep").
+    await hotIndex.upsertLocation('clb-keep', E, VehicleClass.CAR, {
+      vehicleId: 'veh-keep',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Ping degradado: el catálogo no aporta attrs (o un hipo de fleet) pero la IDENTIDAD del vehículo se sella igual.
+    await hotIndex.upsertLocation('clb-keep', E, VehicleClass.CAR, { vehicleId: 'veh-keep' });
+    const loc = await hotIndex.getLocation('clb-keep');
+    // Mismo vehículo (id idéntico) ⇒ los attrs de tier SOBREVIVEN: el gate de tier no se auto-desarma.
+    expect(loc?.seats).toBe(7);
+    expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
+    expect(loc?.vehicleYear).toBe(2023);
+  });
+
+  it('[d.1] anti-clobber · un ping SIN attrs y SIN vehicleId (fleet 204/outage) NO arrastra attrs previos (cero stale, sin fallback por clase)', async () => {
+    await hotIndex.upsertLocation('clb-noid', E, VehicleClass.CAR, {
+      vehicleId: 'veh-noid',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // fleet 204/outage: el ping degrada SIN id y SIN attrs (van juntos por la misma rama del resolver).
+    await hotIndex.upsertLocation('clb-noid', E, VehicleClass.CAR);
+    const loc = await hotIndex.getLocation('clb-noid');
+    // Sin identidad NO hay carry: degradación honesta (el viejo fallback por vehicleType era el landmine d.1).
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
+  });
+
+  it('anti-clobber · un ping CON attrs nuevos SÍ pisa los previos (cambio de vehículo real, no se arrastra)', async () => {
+    await hotIndex.upsertLocation('clb-overwrite', E, VehicleClass.CAR, {
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // El conductor cambió a un económico de 5 asientos: el ping trae los attrs nuevos COMPLETOS.
+    await hotIndex.upsertLocation('clb-overwrite', E, VehicleClass.CAR, {
+      seats: 5,
+      segment: VehicleSegment.ECONOMY,
+      vehicleYear: 2020,
+    });
+    const loc = await hotIndex.getLocation('clb-overwrite');
+    expect(loc?.seats).toBe(5);
+    expect(loc?.segment).toBe(VehicleSegment.ECONOMY);
+    expect(loc?.vehicleYear).toBe(2020);
+  });
+
+  it('anti-clobber · un cambio de CLASE NO arrastra los attrs de la clase anterior (vehicleType distinto)', async () => {
+    // Operaba un CAR con attrs; cambia a MOTO y el ping de moto no trae attrs de auto.
+    await hotIndex.upsertLocation('clb-class', E, VehicleClass.CAR, {
+      seats: 5,
+      segment: VehicleSegment.MID,
+      vehicleYear: 2022,
+    });
+    await hotIndex.upsertLocation('clb-class', E, VehicleClass.MOTO);
+    const loc = await hotIndex.getLocation('clb-class');
+    // Otro vehículo (otra clase): los attrs viejos NO se preservan (serían basura para una moto).
+    expect(loc?.vehicleType).toBe(VehicleClass.MOTO);
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
+  });
+
+  it('anti-clobber · las CERTS NO se preservan: un ping sin certs las quita (gate fail-closed, dirección segura)', async () => {
+    await hotIndex.upsertLocation('clb-cert', E, VehicleClass.CAR, {
+      certifications: [FleetDocumentType.AMBULANCE_OPERATOR],
+    });
+    // Ping sin certs: a diferencia de los attrs de tier, las certs NO se arrastran (revocables).
+    await hotIndex.upsertLocation('clb-cert', E, VehicleClass.CAR);
+    const loc = await hotIndex.getLocation('clb-cert');
+    expect(loc?.certifications).toBeUndefined();
+  });
+
+  // ── IDENTIDAD DEL CARRY · el carry se llavea por vehicleId sobre Redis REAL (round-trip por el LUA + fix) ──
+
+  it('vehicleId sobrevive el round-trip por Redis real (LUA MOVE + JSON)', async () => {
+    await hotIndex.upsertLocation('vid-rt', E, VehicleClass.CAR, {
+      vehicleId: 'veh-rt',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    const loc = await hotIndex.getLocation('vid-rt');
+    expect(loc?.vehicleId).toBe('veh-rt');
+  });
+
+  it('identidad · swap intra-clase con vehicleId DISTINTO NO arrastra attrs stale (aunque el ping llegue degradado)', async () => {
+    // Vehículo A: van XL premium (id "veh-xl").
+    await hotIndex.upsertLocation('vid-swap', E, VehicleClass.CAR, {
+      vehicleId: 'veh-xl',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Swap a vehículo B (económico, MISMA clase CAR, id "veh-eco") con ping degradado SIN attrs de tier.
+    await hotIndex.upsertLocation('vid-swap', E, VehicleClass.CAR, { vehicleId: 'veh-eco' });
+    const loc = await hotIndex.getLocation('vid-swap');
+    // El id cambió ⇒ no es el mismo vehículo ⇒ los attrs del XL NO se heredan (degradación honesta, no stale).
+    expect(loc?.vehicleId).toBe('veh-eco');
+    expect(loc?.seats).toBeUndefined();
+    expect(loc?.segment).toBeUndefined();
+    expect(loc?.vehicleYear).toBeUndefined();
+  });
+
+  it('identidad · mismo vehicleId + ping degradado SÍ preserva los attrs (anti-clobber por identidad)', async () => {
+    await hotIndex.upsertLocation('vid-keep', E, VehicleClass.CAR, {
+      vehicleId: 'veh-xl',
+      seats: 7,
+      segment: VehicleSegment.PREMIUM,
+      vehicleYear: 2023,
+    });
+    // Mismo vehículo (id "veh-xl"), ping sin attrs (fleet 204 transitorio): se preservan los previos.
+    await hotIndex.upsertLocation('vid-keep', E, VehicleClass.CAR, { vehicleId: 'veh-xl' });
+    const loc = await hotIndex.getLocation('vid-keep');
+    expect(loc?.seats).toBe(7);
+    expect(loc?.segment).toBe(VehicleSegment.PREMIUM);
+    expect(loc?.vehicleYear).toBe(2023);
+  });
+
+  // ── countOnline: KPI O(log n) sobre el ÍNDICE de presencia (ZSET drivers:online), NO SCAN del keyspace ──
+  // Aislados en una DB lógica de Redis propia (db 3/4) para no contaminar el conteo con los drivers que los
+  // otros casos ya sembraron en db 0 (que NO se puede flushear a mitad del archivo).
+
+  it('countOnline cuenta la presencia viva (disponible U ocupado) y honra remove()', async () => {
+    const iso = new Redis({
+      host: container.getHost(),
+      port: container.getMappedPort(6379),
+      db: 3,
+    });
+    try {
+      const hi = new RedisHotIndex(iso, 60);
+      expect(await hi.countOnline()).toBe(0);
+      await hi.upsertLocation('on1', A, VehicleClass.CAR);
+      await hi.upsertLocation('on2', B, VehicleClass.CAR);
+      expect(await hi.countOnline()).toBe(2);
+      // OCUPADO sigue EN LÍNEA: el ping durante el viaje lo mantiene en el índice de presencia (ZADD en el LUA).
+      await hi.markBusy('on1');
+      await hi.upsertLocation('on1', A, VehicleClass.CAR);
+      expect(await hi.countOnline()).toBe(2);
+      // remove() lo saca del ZSET (fin de turno) → deja de contar.
+      await hi.remove('on2');
+      expect(await hi.countOnline()).toBe(1);
+    } finally {
+      await iso.quit();
+    }
+  });
+
+  it('countOnline EXCLUYE y PODA las presencias fuera de la ventana TTL', async () => {
+    const iso = new Redis({
+      host: container.getHost(),
+      port: container.getMappedPort(6379),
+      db: 4,
+    });
+    try {
+      const hi = new RedisHotIndex(iso, 1); // TTL de 1s = ventana de presencia de 1s
+      await hi.upsertLocation('ttl1', A, VehicleClass.CAR);
+      expect(await hi.countOnline()).toBe(1);
+      // Pasado el TTL, el score cae fuera de la ventana → ZCOUNT lo excluye (la loc además ya expiró en Redis).
+      await new Promise((r) => setTimeout(r, 1_300));
+      expect(await hi.countOnline()).toBe(0);
+      // La poda oportunista de countOnline lo REMOVIÓ del ZSET (no solo lo excluyó por ventana) → memoria acotada.
+      expect(await iso.zcard('drivers:online')).toBe(0);
+    } finally {
+      await iso.quit();
+    }
   });
 });

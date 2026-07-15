@@ -1,0 +1,257 @@
+// booking-service · esquema Postgres (schema lógico "booking")
+// ADR-014. Dueño de: el marketplace de carpooling PROGRAMADO — la OFERTA del conductor (PublishedTrip)
+// y la RESERVA del pasajero (Booking). DB-per-service: NO comparte tablas con trip/payment/identity/fleet.
+// Relaciones cross-service por ID (driverId/vehicleId/passengerId/paymentId), NUNCA FK cross-schema.
+// Dinero SIEMPRE en céntimos (Int), moneda PEN. IDs UUIDv7 (los genera la app, no la DB).
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["booking"]
+}
+
+// ── Máquina de estados del PublishedTrip (la oferta) — ADR-014 §3 / §4.1 ──
+enum PublishedTripState {
+  BORRADOR
+  PUBLICADO
+  PARCIALMENTE_RESERVADO
+  LLENO
+  EN_RUTA
+  COMPLETADO
+  CANCELADO
+
+  @@schema("booking")
+}
+
+// ── Máquina de estados del Booking (la reserva) — ADR-014 §3 / §4.2 ──
+// Incluye COBRO_PENDIENTE: aprobado pero el dinero AÚN no capturó (CHARGE async en vuelo).
+enum BookingState {
+  SOLICITADO
+  PENDIENTE_APROBACION
+  APROBADO
+  COBRO_PENDIENTE
+  RECHAZADO
+  EXPIRADO
+  CONFIRMADO
+  EN_RUTA
+  COMPLETADO
+  CANCELADO
+
+  @@schema("booking")
+}
+
+// ── Modo de pricing de la oferta — ADR-014 §3. PUJA queda fuera de scope (F6). ──
+enum PricingMode {
+  FIJO // PUJA → F6, fuera de este ADR
+
+  @@schema("booking")
+}
+
+// ── Modo de reserva de la oferta — ADR-014 §3. ──
+// INSTANT_BOOKING: el booking nace APROBADO (salta PENDIENTE_APROBACION).
+// REVISION_CADA_SOLICITUD: requiere que el conductor apruebe cada solicitud.
+enum ModoReserva {
+  INSTANT_BOOKING
+  REVISION_CADA_SOLICITUD
+
+  @@schema("booking")
+}
+
+// ── Método de pago elegido por el pasajero al RESERVAR — ADR-014 §5.5 (decisión del dueño 2026-06-22). ──
+// El pasajero ELIGE el método al reservar (paridad con on-demand, donde el método viene del Trip). El CHARGE
+// al aprobar (o al reservar si INSTANT, F3b) lo usa. ESPEJA `PaymentMethod` de @veo/shared-types (fuente única
+// del monorepo): YAPE/PLIN/CASH/CARD/PAGOEFECTIVO. La afiliación Yape on-file (QR-vs-on-file) la resuelve
+// payment server-side (resolveActiveWalletUid); booking NO valida afiliación, solo pasa el método elegido.
+// DB-per-service: este enum es la cara LOCAL del contrato compartido (no se importa la tabla de payment).
+enum PaymentMethod {
+  YAPE
+  PLIN
+  CASH
+  CARD
+  PAGOEFECTIVO
+
+  @@schema("booking")
+}
+
+/// PublishedTrip — la OFERTA del conductor (raíz del agregado). ADR-014 §2.1.
+/// Geo: lat/lon + celda H3 (índice de búsqueda propio, F2 — el campo existe, la búsqueda geo se difiere).
+/// `stopovers` y `precioPorTramo` se modelan como JSON (estructuras `{lat,lon,orden}` /
+/// `{desdeOrden,hastaOrden,precioCentimos}`): F0 crea/lee el viaje básico; el pricing por tramo en la UI
+/// es F1. `asientosDisponibles` decrementa SOLO al CONFIRMAR un booking (txn atómica del §6, handler de
+/// payment.captured — F3). En F0 nace == asientosTotales.
+model PublishedTrip {
+  id                  String             @id @db.Uuid
+  driverId            String             @map("driver_id") @db.Uuid
+  vehicleId           String             @map("vehicle_id") @db.Uuid
+
+  origenLat           Float              @map("origen_lat")
+  origenLon           Float              @map("origen_lon")
+  originH3            String?            @map("origin_h3") // celda índice H3 (búsqueda geo → F2)
+  destinoLat          Float              @map("destino_lat")
+  destinoLon          Float              @map("destino_lon")
+  destH3              String?            @map("dest_h3")
+  stopovers           Json               @default("[]") // { lat, lon, orden }[]
+
+  fechaHoraSalida     DateTime           @map("fecha_hora_salida") @db.Timestamptz
+  asientosTotales     Int                @map("asientos_totales")
+  asientosDisponibles Int                @map("asientos_disponibles") // decrementa al CONFIRMAR (§6, F3)
+
+  pricingMode         PricingMode        @default(FIJO) @map("pricing_mode")
+  precioBase          Int                @map("precio_base") // céntimos PEN, asiento full-route
+  precioPorTramo      Json               @default("[]") @map("precio_por_tramo") // { desdeOrden, hastaOrden, precioCentimos }[]
+
+  // Peaje del viaje declarado por el conductor (céntimos PEN, F2.5 · escudo legal). Se SUMA al costo del
+  // trayecto y RECIÉN se divide entre asientos en el tope de cost-sharing (modelo BlaBlaCar; NO va en el
+  // per-km). Default 0 (sin peaje); topado en el borde por MAX_TOLLS_CENTS (techo de cordura anti-inflado).
+  tollsCents          Int                @default(0) @map("tolls_cents")
+
+  modoReserva         ModoReserva        @map("modo_reserva")
+  reglas              String?            @db.Text // equipaje, mascotas, etc.
+  pais                String             @default("PE") // EC → F8
+  moneda              String             @default("PEN")
+
+  estado              PublishedTripState @default(BORRADOR)
+
+  // dedupKey = idempotencia de REQUEST del POST /published-trips (publish), NAMESPACEADA por driverId:
+  // `published:req:{driverId}:{idempotencyKey}` (driverId server-truth PRIMERO). El `@@unique([dedupKey])`
+  // es la DEFENSA ANTI-IDOR cross-tenant del write path: dos CONDUCTORES con el MISMO header Idempotency-Key
+  // derivan dedupKeys DISTINTAS → nunca colisionan → el conductor B jamás recupera/toca la oferta de A. NO
+  // derivar NUNCA esta key de otra cosa (re-introduce el IDOR cross-tenant; lección de Booking F0). NULLABLE:
+  // solo publish() la usa — update()/cancel() mutan la fila existente, no crean (no dedupean por esta key).
+  // Sin header en publish → key única server-side namespaceada (no dedupea, no lockea).
+  dedupKey            String?            @unique @map("dedup_key")
+
+  bookings            Booking[]
+
+  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([estado, fechaHoraSalida])
+  // FIX 3 — respalda GET /mine: WHERE driver_id = ? ORDER BY id DESC (keyset por id uuidv7, FIX 2). El índice
+  // compuesto (driver_id, id) deja que Postgres haga scope + orden por índice (sin sort en memoria por driver).
+  @@index([driverId, id])
+  // F2 — BÚSQUEDA GEO (GET /published-trips/search): el WHERE filtra `origin_h3 IN (ring) AND dest_h3 IN (ring)
+  // AND estado IN (...) AND fecha_hora_salida ...`. Estos índices compuestos dejan que Postgres resuelva por
+  // índice el extremo de la ruta (origen/destino) + estado + orden temporal, en vez de un FULL SCAN de la
+  // tabla por cada búsqueda. La columna líder es el H3 (alta selectividad: la celda acota a ~174m), seguida
+  // de estado y fecha (filtro + ORDER BY fechaHoraSalida ASC servido por el índice).
+  @@index([originH3, estado, fechaHoraSalida])
+  @@index([destH3, estado, fechaHoraSalida])
+  @@map("published_trips")
+  @@schema("booking")
+}
+
+/// Booking — la RESERVA de UN pasajero sobre un PublishedTrip. ADR-014 §2.2. N por PublishedTrip.
+/// `precioAcordado` en céntimos PEN = precioBase + specialRequest. `paymentId` se setea en el CHARGE (F3).
+/// `dedupKey` = idempotencia de REQUEST del POST /bookings, NAMESPACEADA por passengerId:
+/// `booking:req:{passengerId}:{idempotencyKey}` (passengerId server-truth PRIMERO). El `@@unique([dedupKey])`
+/// es la DEFENSA ANTI-IDOR cross-tenant del write path: dos pasajeros con el MISMO header derivan dedupKeys
+/// DISTINTAS → nunca colisionan → B jamás toca la fila de A. NO derivar NUNCA esta key desde el bookingId
+/// (reintroduce el IDOR cross-tenant). No es un lock de `passenger × trip` (eso lockearía el re-booking tras
+/// un terminal): dedupea SOLO reintentos del MISMO submit. La idempotencia del CHARGE de F3 es una key
+/// SEPARADA, per-booking — otra cosa, no esta.
+model Booking {
+  id              String        @id @db.Uuid
+  publishedTripId String        @map("published_trip_id") @db.Uuid
+  passengerId     String        @map("passenger_id") @db.Uuid
+
+  asientos        Int
+  pickupLat       Float         @map("pickup_lat")
+  pickupLon       Float         @map("pickup_lon")
+  dropoffLat      Float         @map("dropoff_lat")
+  dropoffLon      Float         @map("dropoff_lon")
+
+  precioAcordado  Int           @map("precio_acordado") // céntimos PEN = base + specialRequest
+  mensajeIntro    String?       @map("mensaje_intro") @db.Text
+  specialRequest  Int?          @map("special_request") // +X céntimos sobre la base (top-up)
+  // Método de pago ELEGIDO por el pasajero al RESERVAR (ADR-014 §5.5 · decisión del dueño 2026-06-22). El
+  // CHARGE al aprobar (o al reservar si INSTANT, F3b) lo usa: `charge({ method: booking.paymentMethod, ... })`.
+  // OBLIGATORIO (NOT NULL): el DTO lo exige con @IsEnum. La afiliación Yape on-file la resuelve payment
+  // server-side — booking solo persiste y pasa el método elegido.
+  paymentMethod   PaymentMethod @map("payment_method")
+  paymentId       String?       @map("payment_id") @db.Uuid // seteado en el CHARGE (F3b: respuesta del charge)
+  dedupKey        String        @map("dedup_key") // idempotencia de REQUEST namespaceada por passengerId; @@unique = anti-IDOR cross-tenant (NUNCA derivar del bookingId). CHARGE de F3 = key separada per-booking
+
+  estado          BookingState  @default(SOLICITADO)
+
+  publishedTrip   PublishedTrip @relation(fields: [publishedTripId], references: [id])
+
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([dedupKey])
+  @@index([publishedTripId, estado])
+  // FIX 5 — respalda GET /published-trips/:id/bookings: WHERE published_trip_id = ? ORDER BY id DESC (keyset por
+  // id uuidv7 time-ordered, espeja [driverId, id] de PublishedTrip). El índice [publishedTripId, estado] NO
+  // sirve para ese ORDER BY id (la 2da col es estado, no id) → Postgres ordenaba en memoria por viaje. El
+  // compuesto (publishedTripId, id) deja que el planner haga scope + orden por índice (sin sort).
+  @@index([publishedTripId, id])
+  @@index([passengerId])
+  @@map("bookings")
+  @@schema("booking")
+}
+
+/// Outbox pattern (FOUNDATION §6): la mutación de dominio y el INSERT del evento van en la MISMA
+/// transacción Prisma. El OutboxRelay (@veo/database) drena esta tabla a Kafka (topic 'booking').
+model OutboxEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seq         BigInt    @default(autoincrement())
+  aggregateId String    @map("aggregate_id")
+  eventType   String    @map("event_type")
+  envelope    Json
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz
+  failedAt    DateTime? @map("failed_at") @db.Timestamptz
+
+  @@index([publishedAt, failedAt, claimedAt, createdAt, seq], map: "outbox_events_claim_idx")
+  @@map("outbox_events")
+  @@schema("booking")
+}
+
+/// F2.5 · Costo de OPERACIÓN por km, editable EN CALIENTE por el admin, POR PAÍS (escudo legal anti-lucro).
+/// Es el costo real de operar el vehículo (combustible + desgaste/depreciación, estilo "IRS mileage rate"),
+/// NO derivado del precio de energía: lo FIJA el admin (finance) y alimenta DIRECTO el tope de cost-sharing
+/// (CostCapService). Una fila POR PAÍS (PK = `pais`): cada país versiona su tarifa por separado (CAS). Se
+/// SIEMBRA PE=150 (S/1.50/km, el valor real del dueño = combustible+desgaste) y EC=50 (placeholder, F8).
+/// DEGRADACIÓN HONESTA: si la fila no existe (DB sin migrar) el resolutor cae al env COST_PER_KM_CENTS_*.
+model CostPerKmConfig {
+  /// País del marketplace (PE/EC). PK: una tarifa por país (no singleton global — cada país su versión CAS).
+  pais          String   @id
+  /// Costo de operación por kilómetro en céntimos PEN (Int, jamás float). Seed PE=150, EC=50.
+  costPerKmCents Int     @map("cost_per_km_cents")
+  /// Versión MONOTÓNICA per-país (se bumpea en cada PUT · optimistic locking CAS).
+  version       Int      @default(0)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("cost_per_km_config")
+  @@schema("booking")
+}
+
+/// Radio de BÚSQUEDA del carpooling (F2 · §6.2), editable EN CALIENTE por el admin. SINGLETON GLOBAL
+/// (id='GLOBAL') — espeja dispatch_radius_config de dispatch-service: version CAS + outbox al PUT + cache
+/// in-proc con invalidación. Los radios se guardan en KM (unidad del admin) y se mapean a k-rings H3 res-9
+/// en runtime (`kRingForRadiusKm`, ~0.3km/anillo): `base` = anillo de la pasada base, `expand` = anillo
+/// EXPANDIDO al que la búsqueda reintenta UNA vez si la base da 0 resultados. Se SIEMBRA base=0.3km (k1) /
+/// expand=0.6km (k2), equivalente a los defaults env SEARCH_H3_K_RING=1 / _EXPAND=2 (env queda de FALLBACK).
+/// DEGRADACIÓN HONESTA: si la fila no existe (DB sin migrar) el service degrada al env (version 0).
+model CarpoolSearchConfig {
+  /// Id fijo del singleton (Tier 1 GLOBAL). Una sola fila para todo el marketplace.
+  id             String   @id
+  /// Radio base de la búsqueda en KM (pasada base). Se mapea a k-ring H3 res-9 en runtime (~0.3km/anillo).
+  baseRadiusKm   Float    @map("base_radius_km")
+  /// Radio EXPANDIDO en KM: la búsqueda reintenta UNA vez con este radio si la base da 0 resultados.
+  expandRadiusKm Float    @map("expand_radius_km")
+  /// Versión MONOTÓNICA (se bumpea en cada PUT · optimistic locking CAS).
+  version        Int      @default(0)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("carpool_search_config")
+  @@schema("booking")
+}

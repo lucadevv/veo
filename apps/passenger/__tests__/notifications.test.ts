@@ -22,8 +22,9 @@ function makeHttp(overrides: Partial<HttpClient>): HttpClient {
  * vacío mientras no había endpoint); desde 5fd0754 el feed es REAL (`GET /notifications` del
  * public-bff) y la honestidad se reparte así:
  *  - bandeja vacía en el backend → lista vacía (NUNCA avisos inventados);
- *  - sin estado leído/no-leído en el backend (MVP) → `read: true` (no se finge un badge de
- *    "no leídos" que jamás se limpiaría);
+ *  - `read` REAL del server (derivado de `read_at`, requerido en el schema) → se propaga tal cual,
+ *    sin hardcodear: el badge de "no leídos" refleja el estado verdadero y se limpia de verdad
+ *    (PATCH /notifications/:id/read · read-all);
  *  - error de red → el repositorio PROPAGA (no degrada a lista vacía mintiendo "no tienes avisos";
  *    la pantalla muestra su `ErrorState` con reintento).
  */
@@ -39,16 +40,27 @@ describe('Centro de avisos · degradación honesta', () => {
     );
   });
 
-  it('mapea category→kind y marca read:true (sin badge de no-leídos fingido)', async () => {
-    const dto: AppNotificationDto = {
-      id: 'ntf-1',
-      category: 'safety',
-      title: 'Verificación del conductor',
-      body: 'Tu conductor pasó la verificación biométrica del turno.',
-      createdAt: '2026-06-10T12:00:00.000Z',
-    };
+  it('mapea category→kind y propaga el read REAL del server (sin hardcodearlo)', async () => {
+    const dtos: AppNotificationDto[] = [
+      {
+        id: 'ntf-1',
+        category: 'safety',
+        title: 'Verificación del conductor',
+        body: 'Tu conductor pasó la verificación biométrica del turno.',
+        createdAt: '2026-06-10T12:00:00.000Z',
+        read: false,
+      },
+      {
+        id: 'ntf-2',
+        category: 'payment',
+        title: 'Recibo de tu viaje',
+        body: 'Se cargó S/ 18.50 a tu Yape.',
+        createdAt: '2026-06-09T18:30:00.000Z',
+        read: true,
+      },
+    ];
     const repository = new HttpNotificationsRepository(
-      makeHttp({get: jest.fn().mockResolvedValue([dto])}),
+      makeHttp({get: jest.fn().mockResolvedValue(dtos)}),
     );
 
     await expect(repository.list()).resolves.toEqual([
@@ -58,6 +70,14 @@ describe('Centro de avisos · degradación honesta', () => {
         title: 'Verificación del conductor',
         body: 'Tu conductor pasó la verificación biométrica del turno.',
         createdAt: '2026-06-10T12:00:00.000Z',
+        read: false,
+      },
+      {
+        id: 'ntf-2',
+        kind: 'RECEIPT',
+        title: 'Recibo de tu viaje',
+        body: 'Se cargó S/ 18.50 a tu Yape.',
+        createdAt: '2026-06-09T18:30:00.000Z',
         read: true,
       },
     ]);

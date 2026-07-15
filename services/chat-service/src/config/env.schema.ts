@@ -2,7 +2,8 @@
  * Validación de entorno (FOUNDATION §4). Si falta una var requerida, el servicio no arranca.
  */
 import { z } from 'zod';
-import { secret } from '@veo/utils';
+import { requiredInProd, secret } from '@veo/utils';
+import { outboxEnvSchema } from '@veo/database';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -14,10 +15,14 @@ export const envSchema = z.object({
   DATABASE_URL_REPLICA: z.string().url().optional(),
 
   // Redis (readiness)
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: requiredInProd('redis://localhost:6379'),
 
   // Kafka (outbox relay → chat.message_sent; los BFFs lo consumen para la entrega RT)
-  KAFKA_BROKERS: z.string().default('localhost:9094'),
+  KAFKA_BROKERS: requiredInProd('localhost:9094'),
+  // Outbox relay (perillas tuneables sin redeploy). FUENTE ÚNICA: las 4 vars + sus defaults + el invariante
+  // viven en `outboxEnvSchema` (@veo/database) — cero literales hand-copiados acá. El relay valida
+  // OUTBOX_PUBLISH_TIMEOUT_MS < OUTBOX_CLAIM_STALE_MS (fail-fast anti double-publish por stale) en su ctor.
+  ...outboxEnvSchema.shape,
 
   // Secreto para verificar la identidad interna propagada por el BFF (HMAC)
   INTERNAL_IDENTITY_SECRET: secret('dev-internal-secret-change-me'),

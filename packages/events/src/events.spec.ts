@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { createEnvelope, envelopeSchema } from './envelope.js';
-import { EVENT_SCHEMAS, topicForEvent, schemaForEvent, type EventPayload } from './schemas.js';
+import {
+  EVENT_SCHEMAS,
+  topicForEvent,
+  schemaForEvent,
+  FLAG_REASON,
+  type EventPayload,
+} from './schemas.js';
 import { isPermanentDataError, isUuid } from './poison.js';
 
 describe('envelope', () => {
@@ -29,6 +35,120 @@ describe('topic routing', () => {
   it('user.kyc_verified enruta al topic user', () => {
     expect(topicForEvent('user.kyc_verified')).toBe('user');
   });
+  it('permission_override.updated (overlay ADR-025) tiene su PROPIO topic, aislado de policy', () => {
+    expect(topicForEvent('permission_override.updated')).toBe('permission_override');
+    expect(topicForEvent('policy.updated')).toBe('policy');
+  });
+
+  describe('aislamiento del firehose de GPS (FIX rating-firehose)', () => {
+    it('driver.location_updated (firehose) va a su PROPIO topic driver-location, NO al topic driver', () => {
+      expect(topicForEvent('driver.location_updated')).toBe('driver-location');
+      expect(topicForEvent('driver.location_updated')).not.toBe('driver');
+    });
+
+    it('los eventos de CICLO DE VIDA driver.* siguen en el topic driver (baja frecuencia)', () => {
+      // Estos los oyen rating (driver.reactivated) y admin-bff; deben compartir el topic 'driver' SIN el firehose.
+      expect(topicForEvent('driver.reactivated')).toBe('driver');
+      expect(topicForEvent('driver.suspended')).toBe('driver');
+      expect(topicForEvent('driver.flagged')).toBe('driver');
+      expect(topicForEvent('driver.verified')).toBe('driver');
+      // Auto-suspensión por exceso de cancelaciones: ciclo de vida, comparte el topic 'driver' (no el firehose).
+      expect(topicForEvent('driver.excessive_cancellations')).toBe('driver');
+    });
+  });
+
+  describe('permission_override.updated · schema tipado (overlay ADR-025)', () => {
+    it('ACEPTA el payload de un par restado y RECHAZA uno sin role/permission o con hidden no-booleano', () => {
+      const schema = schemaForEvent('permission_override.updated');
+      expect(schema).toBeDefined();
+      const ok = schema!.safeParse({
+        role: 'DISPATCHER',
+        permission: 'drivers:approve',
+        hidden: true,
+        version: 3,
+        updatedBy: 'sup1',
+        updatedAt: '2026-07-10T00:00:00.000Z',
+      });
+      expect(ok.success).toBe(true);
+      // Falta permission.
+      expect(
+        schema!.safeParse({ role: 'DISPATCHER', hidden: true, version: 1, updatedBy: 'x', updatedAt: 'y' })
+          .success,
+      ).toBe(false);
+      // hidden no-booleano.
+      expect(
+        schema!.safeParse({
+          role: 'DISPATCHER',
+          permission: 'ops:view',
+          hidden: 'yes',
+          version: 1,
+          updatedBy: 'x',
+          updatedAt: 'y',
+        }).success,
+      ).toBe(false);
+      // version no-positiva.
+      expect(
+        schema!.safeParse({
+          role: 'DISPATCHER',
+          permission: 'ops:view',
+          hidden: true,
+          version: 0,
+          updatedBy: 'x',
+          updatedAt: 'y',
+        }).success,
+      ).toBe(false);
+    });
+  });
+
+  describe('driver.excessive_cancellations · schema tipado', () => {
+    it('ACEPTA un payload válido y RECHAZA uno sin driverId', () => {
+      const schema = schemaForEvent('driver.excessive_cancellations');
+      expect(schema).toBeDefined();
+      const ok = schema!.safeParse({
+        driverId: 'd1',
+        count: 5,
+        windowStart: '2026-06-22T00:00:00.000Z',
+        occurredAt: '2026-06-23T00:00:00.000Z',
+      });
+      expect(ok.success).toBe(true);
+      const bad = schema!.safeParse({ count: 5, windowStart: 'x', occurredAt: 'y' });
+      expect(bad.success).toBe(false);
+    });
+  });
+
+  describe('audit.recorded · contrato productor↔schema (guard del POISON)', () => {
+    it('ACEPTA el payload que audit-service emite (entryId + at + tamper-evident)', () => {
+      const schema = schemaForEvent('audit.recorded');
+      expect(schema).toBeDefined();
+      // Forma EXACTA que emite audit.repository.ts tras el fix.
+      const ok = schema!.safeParse({
+        entryId: 'a1',
+        seq: '42',
+        eventId: 'e1',
+        actorId: 'u1',
+        action: 'biometric.enrolled',
+        resourceType: 'driver',
+        resourceId: 'd1',
+        at: '2026-06-25T12:37:38.329Z',
+        hash: 'deadbeef',
+      });
+      expect(ok.success).toBe(true);
+    });
+
+    it('RECHAZA la forma vieja rota (auditId en vez de entryId, sin at) — el bug del POISON', () => {
+      const schema = schemaForEvent('audit.recorded');
+      const bad = schema!.safeParse({
+        auditId: 'a1',
+        seq: '42',
+        eventId: 'e1',
+        action: 'x',
+        resourceType: 'driver',
+        resourceId: 'd1',
+        hash: 'deadbeef',
+      });
+      expect(bad.success).toBe(false);
+    });
+  });
 });
 
 describe('registro de schemas', () => {
@@ -47,6 +167,39 @@ describe('registro de schemas', () => {
   });
   it('rechaza payload inválido', () => {
     expect(EVENT_SCHEMAS['rating.created'].safeParse({ stars: 9 }).success).toBe(false);
+  });
+
+  describe('driver.flagged / passenger.flagged · reason es enum tipado (FLAG_REASON, no z.string crudo)', () => {
+    it('driver.flagged ACEPTA un reason del enum (suspension/review) y RECHAZA uno desconocido', () => {
+      const base = { driverId: 'd1', rollingAvg: 3.9 };
+      expect(
+        EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: FLAG_REASON.SUSPENSION })
+          .success,
+      ).toBe(true);
+      expect(
+        EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: FLAG_REASON.REVIEW }).success,
+      ).toBe(true);
+      // reason fuera de FLAG_REASON → falla-cerrado (no se acopla por string crudo).
+      expect(EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: 'banned' }).success).toBe(
+        false,
+      );
+      expect(EVENT_SCHEMAS['driver.flagged'].safeParse({ ...base, reason: '' }).success).toBe(
+        false,
+      );
+    });
+
+    it('passenger.flagged ACEPTA reverification y RECHAZA un reason desconocido', () => {
+      const base = { passengerId: 'p1', rollingAvg: 3.5 };
+      expect(
+        EVENT_SCHEMAS['passenger.flagged'].safeParse({
+          ...base,
+          reason: FLAG_REASON.REVERIFICATION,
+        }).success,
+      ).toBe(true);
+      expect(
+        EVENT_SCHEMAS['passenger.flagged'].safeParse({ ...base, reason: 'nope' }).success,
+      ).toBe(false);
+    });
   });
 
   describe('panic.fanout_requested · contrato anti-PII (FOUNDATION §0.7)', () => {
@@ -169,6 +322,9 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
       bidCents: 700,
       vehicleType: 'CAR',
       origin: { lat: -12.1, lon: -77.0 },
+      destination: { lat: -12.09, lon: -77.04 },
+      distanceMeters: 4200,
+      durationSeconds: 900,
       windowSec: 60,
       negotiationSeq: 1,
     };
@@ -250,6 +406,9 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
       passengerId: 'p1',
       vehicleType: 'CAR',
       origin: { lat: -12, lon: -77 },
+      destination: { lat: -12.09, lon: -77.04 },
+      distanceMeters: 4200,
+      durationSeconds: 900,
       bidCents: 800,
       reason: 'driver_cancelled',
       negotiationSeq: 2,
@@ -272,6 +431,16 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
         bidCents: 800,
         reason: 'driver_cancelled',
       }).success,
+    ).toBe(false);
+    // dispatchMode (seam FIXED): opcional (ausente ⇒ PUJA legacy), acepta ambos modos, rechaza otros.
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'FIXED' }).success,
+    ).toBe(true);
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'PUJA' }).success,
+    ).toBe(true);
+    expect(
+      EVENT_SCHEMAS['trip.reassigning'].safeParse({ ...ok, dispatchMode: 'CARPOOL' }).success,
     ).toBe(false);
   });
 
@@ -458,5 +627,83 @@ describe('driver.location_updated · certificaciones del conductor (B5-3.2)', ()
   it('rechaza una certificación fuera del enum (no es un FleetDocumentType)', () => {
     const bad = { ...base, certifications: ['HELICOPTER_PILOT'] };
     expect(EVENT_SCHEMAS['driver.location_updated'].safeParse(bad).success).toBe(false);
+  });
+});
+
+/**
+ * `booking.cancelled` cubre DOS formas (contrato ADITIVO, FIX 3): la cancelación de la OFERTA (PublishedTrip,
+ * F1a) y la de un BOOKING individual por cobro rechazado (F3b). Estos tests CRISTALIZAN que AMBAS parsean — en
+ * particular que la forma OFERTA existente sigue válida tras agregar los campos opcionales bookingId/razon.
+ */
+describe('booking.cancelled · contrato aditivo (oferta + booking individual)', () => {
+  it('forma OFERTA (existente) sigue parseando: publishedTripId + driverId + estadoAnterior, SIN bookingId/razon', () => {
+    const ofertaCancelada = {
+      publishedTripId: 'pt1',
+      driverId: 'd1',
+      estado: 'CANCELADO',
+      estadoAnterior: 'PUBLICADO',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(ofertaCancelada).success).toBe(true);
+  });
+
+  it('forma BOOKING individual (F3b): bookingId + razon=COBRO_RECHAZADO + estadoAnterior=APROBADO parsea', () => {
+    const bookingCancelado = {
+      bookingId: 'b1',
+      razon: 'COBRO_RECHAZADO',
+      estado: 'CANCELADO',
+      estadoAnterior: 'APROBADO',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bookingCancelado).success).toBe(true);
+  });
+
+  it('forma BOOKING individual (F3c · guard): bookingId + razon=OFERTA_NO_DISPONIBLE + estadoAnterior=COBRO_PENDIENTE parsea', () => {
+    const bookingCancelado = {
+      bookingId: 'b1',
+      razon: 'OFERTA_NO_DISPONIBLE',
+      estado: 'CANCELADO',
+      estadoAnterior: 'COBRO_PENDIENTE',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bookingCancelado).success).toBe(true);
+  });
+
+  it('rechaza una razon fuera del enum tipado (no es un BookingCancelledRazon)', () => {
+    const bad = {
+      bookingId: 'b1',
+      razon: 'PORQUE_SI',
+      estado: 'CANCELADO',
+      estadoAnterior: 'APROBADO',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);
+  });
+
+  it('rechaza estado != CANCELADO (el literal del evento)', () => {
+    const bad = {
+      publishedTripId: 'pt1',
+      driverId: 'd1',
+      estado: 'PUBLICADO',
+      estadoAnterior: 'PUBLICADO',
+    };
+    expect(EVENT_SCHEMAS['booking.cancelled'].safeParse(bad).success).toBe(false);
+  });
+});
+
+describe('ADR-022 §P-A · driver.debt_exceeded / driver.debt_cleared (tope de deuda CASH)', () => {
+  it('driver.debt_exceeded válido → parsea; ambos eventos caen en el topic "driver" (ciclo de vida)', () => {
+    const ok = { driverId: 'd1', totalDebtCents: 10200, thresholdCents: 10000, at: '2026-07-14T00:00:00.000Z' };
+    expect(EVENT_SCHEMAS['driver.debt_exceeded'].safeParse(ok).success).toBe(true);
+    expect(topicForEvent('driver.debt_exceeded')).toBe('driver');
+    expect(topicForEvent('driver.debt_cleared')).toBe('driver');
+  });
+
+  it('driver.debt_exceeded rechaza montos negativos o campos faltantes (fail-closed)', () => {
+    const base = { driverId: 'd1', totalDebtCents: 10200, thresholdCents: 10000, at: '2026-07-14T00:00:00.000Z' };
+    expect(EVENT_SCHEMAS['driver.debt_exceeded'].safeParse({ ...base, totalDebtCents: -1 }).success).toBe(false);
+    const { thresholdCents: _omit, ...sinThreshold } = base;
+    expect(EVENT_SCHEMAS['driver.debt_exceeded'].safeParse(sinThreshold).success).toBe(false);
+  });
+
+  it('driver.debt_cleared válido → parsea; rechaza sin driverId', () => {
+    expect(EVENT_SCHEMAS['driver.debt_cleared'].safeParse({ driverId: 'd1', at: '2026-07-14T00:00:00.000Z' }).success).toBe(true);
+    expect(EVENT_SCHEMAS['driver.debt_cleared'].safeParse({ at: '2026-07-14T00:00:00.000Z' }).success).toBe(false);
   });
 });

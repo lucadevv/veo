@@ -8,6 +8,8 @@ interface OnboardingState {
   completed: boolean;
   /** Marca el onboarding como completado y lo persiste. */
   complete: () => void;
+  /** Vuelve a mostrar el onboarding (usado por la flecha atrás del ingreso). */
+  reset: () => void;
 }
 
 /**
@@ -19,5 +21,9 @@ export const useOnboardingStore = create<OnboardingState>(set => ({
   complete: () => {
     prefsStore.setBoolean(KEY, true);
     set({completed: true});
+  },
+  reset: () => {
+    prefsStore.setBoolean(KEY, false);
+    set({completed: false});
   },
 }));

@@ -3,15 +3,17 @@
  * Lectura síncrona del viaje para otros servicios. Devuelve `found=false` en vez de lanzar,
  * para que el llamante decida (evita ruido de errores cross-servicio).
  */
-import { Controller } from '@nestjs/common';
+import { Controller, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GrpcMethod, RpcException } from '@nestjs/microservices';
 import { status as GrpcStatus, type Metadata } from '@grpc/grpc-js';
-import { verifyGrpcIdentity } from '@veo/auth';
+import {
+  verifyGrpcIdentity,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
+} from '@veo/auth';
 import { NotFoundError } from '@veo/utils';
-import { TripStatus } from '@veo/shared-types';
-import { PrismaService } from '../infra/prisma.service';
-import { LIVE_STATES } from '../trips/domain/trip-state-machine';
+import { TRIP_GRPC_REPO, type TripGrpcRepository } from './trip-grpc.repository';
 import { TripsService } from '../trips/trips.service';
 import { TripQueryService } from '../trips/trip-query.service';
 import type { TripView } from '../trips/dto/trip.dto';
@@ -29,6 +31,22 @@ interface ActiveTripRequest {
 
 interface ActiveTripByDriverRequest {
   driverId: string;
+}
+
+interface DriverTripStatsRequest {
+  driverId: string;
+}
+
+interface DriverTripStatsReply {
+  completedTrips: number;
+}
+
+interface PassengerTripStatsRequest {
+  passengerId: string;
+}
+
+interface PassengerTripStatsReply {
+  completedTrips: number;
 }
 
 interface PendingSettlementRequest {
@@ -74,7 +92,25 @@ interface TripReply {
   /// Paradas intermedias ordenadas (Ola 2B); [] si el viaje es directo. El BFF las pasa al tripActiveView
   /// para que el pasajero pinte las MISMAS paradas que ve el conductor (fuente única: el trip del servidor).
   waypoints: { lat: number; lon: number }[];
+  /// BE-2 · solicitudes especiales del pasajero (enum SpecialRequest como string); [] si ninguna.
+  /// El conductor las VE en la oferta entrante (ADR-018) para decidir antes de aceptar.
+  specialRequests: string[];
+  /// Modo de despacho CONGELADO (FIXED|PUJA · PricingMode como string); '' solo en EMPTY_TRIP (→ null en el BFF).
+  dispatchMode: string;
   found: boolean;
+}
+
+interface TripIdsRequest {
+  ids: string[];
+}
+
+interface TripModeItemReply {
+  id: string;
+  dispatchMode: string;
+}
+
+interface TripModesReply {
+  items: TripModeItemReply[];
 }
 
 interface TripStateReply {
@@ -85,6 +121,12 @@ interface TripStateReply {
 
 interface ListPassengerTripsRequest {
   passengerId: string;
+  cursor: string;
+  limit: number;
+}
+
+interface ListDriverTripsRequest {
+  driverId: string;
   cursor: string;
   limit: number;
 }
@@ -139,15 +181,18 @@ const EMPTY_TRIP: TripReply = {
   destinationLng: 0,
   routePolyline: '',
   waypoints: [],
+  specialRequests: [],
+  dispatchMode: '',
   found: false,
 };
 
 @Controller()
+// gRPC lector síncrono del viaje (detalle, rehidratación, modos por lote para la lista OPS).
 export class TripGrpcController {
   private readonly secret: string;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TRIP_GRPC_REPO) private readonly repo: TripGrpcRepository,
     private readonly trips: TripsService,
     private readonly query: TripQueryService,
     config: ConfigService<Env, true>,
@@ -157,7 +202,7 @@ export class TripGrpcController {
 
   @GrpcMethod('TripService', 'GetTrip')
   async getTrip({ id }: GetByIdRequest): Promise<TripReply> {
-    const t = await this.prisma.read.trip.findUnique({ where: { id } });
+    const t = await this.repo.findById(id);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
   }
@@ -171,10 +216,7 @@ export class TripGrpcController {
    */
   @GrpcMethod('TripService', 'GetActiveTrip')
   async getActiveTrip({ passengerId }: ActiveTripRequest): Promise<TripReply> {
-    const t = await this.prisma.read.trip.findFirst({
-      where: { passengerId, status: { in: [...LIVE_STATES] } },
-      orderBy: { requestedAt: 'desc' },
-    });
+    const t = await this.repo.findActiveByPassenger(passengerId);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
   }
@@ -189,12 +231,31 @@ export class TripGrpcController {
   @GrpcMethod('TripService', 'GetActiveTripByDriver')
   async getActiveTripByDriver({ driverId }: ActiveTripByDriverRequest): Promise<TripReply> {
     if (!driverId) return EMPTY_TRIP;
-    const t = await this.prisma.read.trip.findFirst({
-      where: { driverId, status: { in: [...LIVE_STATES] } },
-      orderBy: { requestedAt: 'desc' },
-    });
+    const t = await this.repo.findActiveByDriver(driverId);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
+  }
+
+  /**
+   * Conteo de viajes COMPLETED de un conductor (señal de confianza "N viajes" en la card del pasajero).
+   * driverId vacío/ausente → { completedTrips: 0 } (no es error: el viaje puede no tener conductor asignado).
+   */
+  @GrpcMethod('TripService', 'GetDriverTripStats')
+  async getDriverTripStats({ driverId }: DriverTripStatsRequest): Promise<DriverTripStatsReply> {
+    if (!driverId) return { completedTrips: 0 };
+    return { completedTrips: await this.repo.countCompletedByDriver(driverId) };
+  }
+
+  /**
+   * Conteo de viajes COMPLETED de un pasajero (señal de confianza "N viajes" en la card del conductor).
+   * passengerId vacío/ausente → { completedTrips: 0 } (no es error; el llamante degrada honestamente).
+   */
+  @GrpcMethod('TripService', 'GetPassengerTripStats')
+  async getPassengerTripStats({
+    passengerId,
+  }: PassengerTripStatsRequest): Promise<PassengerTripStatsReply> {
+    if (!passengerId) return { completedTrips: 0 };
+    return { completedTrips: await this.repo.countCompletedByPassenger(passengerId) };
   }
 
   /**
@@ -209,10 +270,7 @@ export class TripGrpcController {
    */
   @GrpcMethod('TripService', 'GetPendingSettlementTrip')
   async getPendingSettlementTrip({ passengerId }: PendingSettlementRequest): Promise<TripReply> {
-    const t = await this.prisma.read.trip.findFirst({
-      where: { passengerId, status: TripStatus.COMPLETED, passengerClosedAt: null },
-      orderBy: { completedAt: 'asc' },
-    });
+    const t = await this.repo.findOldestPendingSettlement(passengerId);
     if (!t) return EMPTY_TRIP;
     return this.toReply(t);
   }
@@ -281,6 +339,11 @@ export class TripGrpcController {
       routePolyline: t.routePolyline ?? '',
       // Paradas intermedias (Ola 2B) persistidas como JSON en Trip.waypoints; [] si el viaje es directo.
       waypoints: readWaypoints(t),
+      // BE-2 · solicitudes especiales del pasajero (enum SpecialRequest[]); [] si ninguna. El conductor
+      // las ve en la oferta entrante (ADR-018). proto3 repeated nunca es null.
+      specialRequests: t.specialRequests,
+      // Modo de despacho CONGELADO (resolve-once-persist): valor exacto de la fila, no del read-model lossy.
+      dispatchMode: t.dispatchMode,
       found: true,
     };
   }
@@ -320,18 +383,32 @@ export class TripGrpcController {
       routePolyline: v.routePolyline ?? '',
       // El TripView ya trae las paradas como {lat,lon} ([] si directo); pasthrough directo al contrato gRPC.
       waypoints: v.waypoints,
+      // BE-2 · solicitudes especiales (el TripView ya las trae como SpecialRequest[]); [] si ninguna.
+      specialRequests: v.specialRequests,
+      // Modo de despacho CONGELADO (el TripView ya lo trae como PricingMode).
+      dispatchMode: v.dispatchMode,
       found: true,
     };
   }
 
   @GrpcMethod('TripService', 'GetTripState')
   async getTripState({ id }: GetByIdRequest): Promise<TripStateReply> {
-    const t = await this.prisma.read.trip.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    });
+    const t = await this.repo.findStateById(id);
     if (!t) return { id: '', status: '', found: false };
     return { id: t.id, status: t.status, found: true };
+  }
+
+  /**
+   * Modo de despacho (FIXED|PUJA) de un LOTE de viajes por id — enriquecimiento MODO on-read de la lista OPS
+   * del admin, anti-N+1 (un solo round-trip para toda la página). Lee el `dispatchMode` CONGELADO de la fila
+   * (resolve-once-persist, ADR-011), así que es SIEMPRE exacto — a diferencia del read-model event-proyectado,
+   * que pierde el flip FIXED→PUJA del re-bid. Ids inexistentes NO vienen en `items` (el BFF los trata como
+   * null → "—"). Sin PII: solo id+modo (los nombres los resuelve el batch de identity aparte).
+   */
+  @GrpcMethod('TripService', 'GetTripModesByIds')
+  async getTripModesByIds({ ids }: TripIdsRequest): Promise<TripModesReply> {
+    const rows = await this.repo.findModesByIds(ids ?? []);
+    return { items: rows.map((r) => ({ id: r.id, dispatchMode: r.dispatchMode })) };
   }
 
   /**
@@ -350,6 +427,50 @@ export class TripGrpcController {
   }: ListPassengerTripsRequest): Promise<PassengerTripsReply> {
     const page = await this.query.listPassengerTrips(
       passengerId,
+      cursor || undefined,
+      limit || undefined,
+    );
+    return {
+      items: page.items.map((it) => ({
+        id: it.id,
+        status: it.status,
+        originLat: it.origin.lat,
+        originLng: it.origin.lng,
+        destinationLat: it.destination.lat,
+        destinationLng: it.destination.lng,
+        fareCents: it.fareCents,
+        currency: it.currency,
+        paymentMethod: it.paymentMethod,
+        distanceMeters: it.distanceMeters,
+        durationSeconds: it.durationSeconds,
+        requestedAt: it.requestedAt,
+        completedAt: it.completedAt ?? '',
+        cancelledAt: it.cancelledAt ?? '',
+        driverId: it.driverId ?? '',
+        vehicleType: it.vehicleType,
+        category: it.category ?? '',
+      })),
+      // proto3 no tiene null para string: '' = no hay siguiente página; el BFF lo re-mapea a null.
+      nextCursor: page.nextCursor ?? '',
+    };
+  }
+
+  /**
+   * Historial REAL del CONDUCTOR (servidor, no la lista local): SUS viajes ordenados por requestedAt DESC,
+   * id DESC, paginados por cursor opaco. ESPEJO EXACTO de listPassengerTrips (mismo map de items →
+   * PassengerTripsReply, que reusamos porque el item del historial es idéntico). Delega en
+   * TripQueryService.listDriverTrips (keyset, clamp del limit, anti-N+1). El driverId lo fija el BFF desde
+   * el JWT (anti-IDOR); acá solo se confía y se filtra por él (un viaje de OTRO conductor NUNCA aparece
+   * porque el `where` siempre lleva driverId). proto3 colapsa los string opcionales a '' cuando son null.
+   */
+  @GrpcMethod('TripService', 'ListDriverTrips')
+  async listDriverTrips({
+    driverId,
+    cursor,
+    limit,
+  }: ListDriverTripsRequest): Promise<PassengerTripsReply> {
+    const page = await this.query.listDriverTrips(
+      driverId,
       cursor || undefined,
       limit || undefined,
     );

@@ -6,7 +6,7 @@
 import { Inject, Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { RateLimitError } from '@veo/utils';
+import { RateLimitError, canonicalizePeruPhone } from '@veo/utils';
 import type { AuthenticatedUser } from '@veo/auth';
 import { REDIS } from '../infra/redis';
 import { RateLimiter, type RateLimitStore } from './rate-limiter';
@@ -18,7 +18,6 @@ interface RequestLike {
   method?: string;
   url?: string;
   ip?: string;
-  ips?: string[];
   route?: { path?: string };
   user?: AuthenticatedUser;
   socket?: { remoteAddress?: string };
@@ -54,25 +53,33 @@ export class RateLimitGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<RequestLike>();
 
     // Override por ruta (decorator @RateLimit): endurece rutas de auth sensibles a fuerza bruta.
-    // Si existe, USA su límite/ventana/clave en vez de la config global (no se suman ambos contadores).
-    const override = this.reflector.getAllAndOverride<RateLimitOptions>(RATE_LIMIT_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-
-    const id = override
-      ? // Prefijo 'o' + clave compuesta por los campos pedidos: contador independiente del global.
-        `o:${this.compositeKey(req, override.by)}`
-      : this.identityFor(req);
-
-    const result = await this.limiter.consume(
-      id,
-      override ? { max: override.max, windowMs: override.windowMs } : undefined,
+    // Si existe, USA su(s) límite(s)/ventana(s)/clave(s) en vez de la config global. Puede ser UN
+    // límite o un ARREGLO: con varios se aplican TODOS (cada uno su cubo) y basta que UNO exceda para
+    // bloquear (FIX A: cap fino IP+phone Y cap agregado por-IP sobre el fan-out de SMS).
+    const override = this.reflector.getAllAndOverride<RateLimitOptions | RateLimitOptions[]>(
+      RATE_LIMIT_KEY,
+      [context.getHandler(), context.getClass()],
     );
-    if (!result.allowed) {
-      throw new RateLimitError('Demasiadas solicitudes, intenta más tarde', {
-        limit: result.limit,
-      });
+
+    const limits: Array<RateLimitOptions | undefined> = override
+      ? Array.isArray(override)
+        ? override
+        : [override]
+      : [undefined]; // undefined → el limiter cae a la config global.
+
+    for (const limit of limits) {
+      // Prefijo 'o' + clave compuesta (incluye `by`): cada dimensión — ['ip','phone'] vs ['ip'] —
+      // tiene su PROPIO cubo, independiente del global.
+      const id = limit ? `o:${this.compositeKey(req, limit.by)}` : this.identityFor(req);
+      const result = await this.limiter.consume(
+        id,
+        limit ? { max: limit.max, windowMs: limit.windowMs } : undefined,
+      );
+      if (!result.allowed) {
+        throw new RateLimitError('Demasiadas solicitudes, intenta más tarde', {
+          limit: result.limit,
+        });
+      }
     }
     return true;
   }
@@ -86,9 +93,20 @@ export class RateLimitGuard implements CanActivate {
     return `${ip}:${userId}:${method}:${route}`;
   }
 
-  /** IP del cliente (respeta el primer hop confiable de `req.ips` cuando hay trust proxy). */
+  /**
+   * IP real del cliente = `req.ip`, resuelta por Express vía `trust proxy` (ver main.ts): camina el
+   * `X-Forwarded-For` descartando los hops de proxy de confianza (ALB + ingress-nginx, IP privada) y
+   * deja la primera IP PÚBLICA = el cliente real (un-spoofeable). ESTE es el fix del follow-up C2.
+   * NO leemos headers crudos: `x-forwarded-for`/`cf-connecting-ip` son SPOOFEABLES (un atacante los
+   * inyecta y obtiene un cubo de rate-limit fresco por request, brute-forceando el login sin freno).
+   * VEO NO usa Cloudflare hoy → no hay nadie de confianza escribiendo `cf-connecting-ip`.
+   *
+   * FOLLOW-UP (no aplica hoy): si VEO migra a Cloudflare, `cf-connecting-ip` solo será confiable
+   * validando el peer TCP contra el allowlist oficial de IPs de CF (https://www.cloudflare.com/ips/)
+   * o con Authenticated Origin Pulls — NUNCA leyéndolo crudo.
+   */
   private clientIp(req: RequestLike): string {
-    return req.ips?.[0] ?? req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+    return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
   }
 
   /**
@@ -105,7 +123,7 @@ export class RateLimitGuard implements CanActivate {
         case 'user':
           return `u=${req.user?.userId ?? 'anon'}`;
         case 'phone':
-          return `ph=${this.bodyField(req, 'phone')}`;
+          return `ph=${this.phoneKey(req)}`;
         case 'email':
           return `em=${this.bodyField(req, 'email')}`;
         case 'route':
@@ -123,5 +141,17 @@ export class RateLimitGuard implements CanActivate {
   private bodyField(req: RequestLike, key: string): string {
     const value = req.body?.[key];
     return typeof value === 'string' ? value.trim().toLowerCase() : 'none';
+  }
+
+  /**
+   * Key del teléfono: lo CANONICALIZA a `+51XXXXXXXXX` (forma de `peruPhoneSchema`/identity) para que
+   * las 3 representaciones del MISMO número (`9…`, `519…`, `+519…`) colapsen a UNA key y compartan el
+   * cubo — sin esto el cap fino IP+phone es franqueable Nx (un cubo fresco por representación). Si no
+   * es un teléfono peruano válido, cae al trim+lower de `bodyField` (no inventamos canon para basura).
+   */
+  private phoneKey(req: RequestLike): string {
+    const value = req.body?.['phone'];
+    if (typeof value !== 'string') return 'none';
+    return canonicalizePeruPhone(value) ?? value.trim().toLowerCase();
   }
 }

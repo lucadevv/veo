@@ -9,7 +9,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
 import { uuidv7, parseOrThrow, peruPhoneSchema, NotFoundError } from '@veo/utils';
-import { PrismaService } from '../infra/prisma.service';
+import { CONTACTS_REPO, type ContactsRepository } from './contacts.repository';
 import { REDIS } from '../infra/redis';
 import { ContactOtpService } from './contact-otp.service';
 import { SMS_SENDER, type SmsSender } from '../ports/sms/sms.port';
@@ -39,7 +39,7 @@ export class ContactsService {
   private readonly cooldownMs: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(CONTACTS_REPO) private readonly repo: ContactsRepository,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly otp: ContactOtpService,
     @Inject(SMS_SENDER) private readonly sms: SmsSender,
@@ -65,10 +65,7 @@ export class ContactsService {
 
   /** Lista los contactos de confianza del usuario. */
   async list(userId: string): Promise<ContactView[]> {
-    const rows = await this.prisma.read.trustedContact.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'asc' },
-    });
+    const rows = await this.repo.listByUser(userId);
     return rows.map((c) => this.view(c));
   }
 
@@ -83,18 +80,16 @@ export class ContactsService {
     const phone = parseOrThrow(peruPhoneSchema, input.phone, 'phone');
 
     assertContactsCooldown(await this.lastModifiedAt(userId), this.cooldownMs);
-    const count = await this.prisma.read.trustedContact.count({ where: { userId } });
+    const count = await this.repo.countByUser(userId);
     assertContactQuota(count, this.maxContacts);
 
-    const contact = await this.prisma.write.trustedContact.create({
-      data: {
-        id: uuidv7(),
-        userId,
-        phone,
-        email: input.email,
-        name: input.name,
-        relationship: input.relationship,
-      },
+    const contact = await this.repo.create({
+      id: uuidv7(),
+      userId,
+      phone,
+      email: input.email,
+      name: input.name,
+      relationship: input.relationship,
     });
 
     const code = await this.otp.issue(contact.id);
@@ -109,21 +104,18 @@ export class ContactsService {
 
   /** Verifica el OTP del contacto y lo marca como verificado. No cuenta para el cool-down. */
   async verifyOtp(userId: string, contactId: string, code: string): Promise<ContactView> {
-    const contact = await this.prisma.read.trustedContact.findUnique({ where: { id: contactId } });
+    const contact = await this.repo.findById(contactId);
     if (contact?.userId !== userId) throw new NotFoundError('Contacto no encontrado');
 
     await this.otp.verify(contactId, code);
 
-    const updated = await this.prisma.write.trustedContact.update({
-      where: { id: contactId },
-      data: { otpVerifiedAt: new Date() },
-    });
+    const updated = await this.repo.markOtpVerified(contactId, new Date());
     return this.view(updated);
   }
 
   /** Reenvía el OTP a un contacto pendiente de verificación. */
   async resendOtp(userId: string, contactId: string): Promise<{ otpSent: true }> {
-    const contact = await this.prisma.read.trustedContact.findUnique({ where: { id: contactId } });
+    const contact = await this.repo.findById(contactId);
     if (contact?.userId !== userId) throw new NotFoundError('Contacto no encontrado');
     const code = await this.otp.issue(contactId);
     await this.sms.send(
@@ -136,19 +128,16 @@ export class ContactsService {
   /** Baja de contacto: aplica cool-down de modificación de la lista. */
   async remove(userId: string, contactId: string): Promise<void> {
     assertContactsCooldown(await this.lastModifiedAt(userId), this.cooldownMs);
-    const contact = await this.prisma.read.trustedContact.findUnique({ where: { id: contactId } });
+    const contact = await this.repo.findById(contactId);
     if (contact?.userId !== userId) throw new NotFoundError('Contacto no encontrado');
 
-    await this.prisma.write.trustedContact.delete({ where: { id: contactId } });
+    await this.repo.delete(contactId);
     await this.markModified(userId);
   }
 
   /** Contactos verificados de un usuario (lo usa el flujo de pánico y el gRPC). */
   async listVerified(userId: string): Promise<ContactView[]> {
-    const rows = await this.prisma.read.trustedContact.findMany({
-      where: { userId, otpVerifiedAt: { not: null } },
-      orderBy: { createdAt: 'asc' },
-    });
+    const rows = await this.repo.listVerifiedByUser(userId);
     return rows.map((c) => this.view(c));
   }
 

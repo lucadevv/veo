@@ -15,4 +15,11 @@ export interface AppNotificationView {
   body: string;
   /** ISO-8601 de emisión. */
   createdAt: string;
+  /** true si el pasajero ya la leyó (derivado de read_at por el notification-service). */
+  read: boolean;
+}
+
+/** Resultado de PATCH /notifications/read-all: cuántas se marcaron como leídas. */
+export interface MarkAllReadResultView {
+  updated: number;
 }

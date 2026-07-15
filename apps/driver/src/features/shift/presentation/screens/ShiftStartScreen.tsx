@@ -1,9 +1,14 @@
 import React from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { ApiError } from '@veo/api-client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Button, SafeScreen } from '@veo/ui-kit';
 import type { RootStackParamList } from '../../../../navigation/types';
+import { NoticeHero } from '../../../../shared/presentation/components/NoticeHero';
+import { TopBar } from '../../../../shared/presentation/components/TopBar';
+import { IconAlert, IconFace, IconLock } from '../../../../shared/presentation/icons';
 import {
   BIOMETRIC_CAPTURE_UNAVAILABLE,
   BIOMETRIC_BACKEND_UNAVAILABLE,
@@ -13,6 +18,7 @@ import {
 } from '../../domain';
 import { BiometricGate, type BiometricGateBanner } from '../components/BiometricGate';
 import { useShiftStartFlow } from '../hooks/useShiftStartFlow';
+import { useProfileData } from '../hooks/useProfileData';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ShiftStart'>;
 
@@ -20,7 +26,13 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ShiftStart'>;
  * Inicio de turno con verificación biométrica obligatoria (regla #1 de CLAUDE.md).
  * La captura/liveness por cámara es nativa (frame-grabber): aquí se construye la UI del flujo y, al
  * obtener el `sessionRef`, se llama al backend. Si el conductor no está enrolado, se le redirige a
- * registrar su rostro. El layout premium (escudo + halo cian) vive en `BiometricGate`.
+ * registrar su rostro. El layout premium (hero editorial + cara EN VIVO en círculo, mismo lenguaje que el
+ * KYC del alta) vive en `BiometricGate`, que orquesta el handoff de cámara antes de la captura de liveness.
+ *
+ * Los DOS caminos infelices con frame dedicado (no un banner inline sobre el gate normal) se atienden
+ * como layouts centrados aparte, fieles a los frames `C/ShiftStart-Error` y `C/Biometrico-Bloqueado`:
+ * el rechazo de liveness/match y el bloqueo de 1h. El resto de avisos (cámara/servicio no disponible,
+ * éxito) sí son banners inline sobre el gate porque el diseño no les dio pantalla propia.
  */
 export const ShiftStartScreen = ({ navigation }: Props): React.JSX.Element => {
   const { t } = useTranslation();
@@ -29,13 +41,140 @@ export const ShiftStartScreen = ({ navigation }: Props): React.JSX.Element => {
     () => navigation.navigate('BiometricEnroll'),
   );
 
-  const banner = resolveBanner(error, score, phase, t);
-
-  // Bloqueo biométrico (regla #1: 3 fallos → 1h, solo central destraba). Mientras dure, deshabilitamos
-  // el CTA para que el conductor NO siga reintentando y comiéndose rechazos. El banner ya explica el lock.
   const errorCode = error instanceof Error ? (error as { code?: string }).code : undefined;
+
+  // ADR-022 §P-A · BLOQUEO por DEUDA: startShift también responde 403 cuando el conductor cruzó el tope de
+  // deuda (mensaje del backend distinto del bloqueo biométrico). Normalmente el dashboard ya bloquea el
+  // acceso a esta pantalla con el flag `debtBlocked`, pero puede haber una CARRERA (la deuda cruzó con la
+  // pantalla ya abierta). Distinguimos por la VERDAD del backend (identity `debtBlocked`), no por el texto:
+  // ante un 403 refetcheamos el perfil; si es bloqueo por deuda, mostramos el mensaje del backend + "Saldar"
+  // (nunca el genérico "verificación bloqueada"). Preferimos el flag de identity; si aún no refrescó, cae al
+  // bloqueo biométrico y el refetch re-renderiza a esta rama.
+  const profile = useProfileData();
+  const is403 = error instanceof ApiError && error.status === 403;
+  React.useEffect(() => {
+    if (is403) {
+      void profile.refetch();
+    }
+    // Solo re-disparar cuando cambia la identidad del error 403 (no en cada render).
+  }, [is403, error]); // eslint-disable-line react-hooks/exhaustive-deps
+  const debtBlock = is403 && profile.data?.debtBlocked === true;
+
+  // Bloqueo biométrico (regla #1: 3 fallos → 1h, solo la central destraba). Es un callejón sin salida
+  // por diseño: NO se reintenta, la única acción es contactar a la central. El 403 por DEUDA queda EXCLUIDO
+  // (tiene su propia rama con el mensaje del backend + "Saldar").
   const locked =
-    errorCode === BIOMETRIC_LOCKED || (error instanceof ApiError && error.status === 403);
+    !debtBlock && (errorCode === BIOMETRIC_LOCKED || (error instanceof ApiError && error.status === 403));
+  // Rechazo de liveness/match (sin bloqueo): el conductor puede reintentar. Solo cuando el flujo ya
+  // volvió a reposo (`idle`) con el error puesto — mientras captura no mostramos la pantalla de error.
+  const rejected = !locked && errorCode === BIOMETRIC_REJECTED && phase === 'idle';
+
+  // "Contactar a la central": no existe un deep-link de teléfono propio, así que reusamos el flujo de
+  // soporte/ayuda en la app (mismo destino que "Contactar a soporte" del dashboard). DEUDA/BACKEND: si
+  // más adelante hay una línea directa de la central (tel:/WhatsApp), cablear acá.
+  const contactCentral = (): void => {
+    navigation.navigate('Support');
+  };
+
+  // Bloqueo biométrico (frame C/Biometrico-Bloqueado): layout centrado dedicado con candado, título y
+  // UNA sola acción real (contactar a la central) — reemplaza el ex "botón verificar deshabilitado"
+  // que era un callejón sin salida. BACKEND: el countdown de reintento (`lockedUntil`) no viene del
+  // servidor; por eso el cuerpo lo OMITE en vez de inventar minutos.
+  // ADR-022 §P-A · el backend rechazó el turno por DEUDA (carrera contra el gate del dashboard). Mostramos el
+  // MENSAJE DEL BACKEND (no un genérico) + la única salida real: Saldar la deuda. El monto se ve en la pantalla
+  // de saldar (fuente única: pendingDebtCents), acá no lo inventamos.
+  if (debtBlock) {
+    const backendMessage = error instanceof ApiError ? error.message : '';
+    return (
+      <SafeScreen
+        header={<TopBar title={t('shift.startTitle')} onBack={() => navigation.goBack()} />}
+        footer={
+          <View style={styles.footer}>
+            <Button
+              label={t('shift.debtBlock.settleCta')}
+              variant="primary"
+              fullWidth
+              onPress={() => navigation.navigate('SettleDebt')}
+            />
+            <Button
+              label={t('shift.contactSupport')}
+              variant="ghost"
+              fullWidth
+              onPress={contactCentral}
+            />
+          </View>
+        }
+      >
+        <NoticeHero
+          tone="danger"
+          icon={({ size, color }) => <IconAlert size={size} color={color} strokeWidth={2} />}
+          title={t('shift.debtBlock.title')}
+          description={backendMessage || t('shift.debtBlock.body')}
+        />
+      </SafeScreen>
+    );
+  }
+
+  if (locked) {
+    return (
+      <SafeScreen
+        header={<TopBar title={t('shift.startTitle')} onBack={() => navigation.goBack()} />}
+        footer={
+          <Button
+            label={t('shift.contactCentral')}
+            variant="primary"
+            fullWidth
+            onPress={contactCentral}
+          />
+        }
+      >
+        <NoticeHero
+          tone="danger"
+          icon={({ size, color }) => <IconLock size={size} color={color} strokeWidth={2} />}
+          title={t('shift.blockedTitle')}
+          description={t('shift.blockedBody')}
+        />
+      </SafeScreen>
+    );
+  }
+
+  // Rechazo de verificación (frame C/ShiftStart-Error): layout centrado dedicado con el rostro escaneado,
+  // "No pudimos verificarte" y dos acciones — reintentar (relanza el flujo biométrico completo) y contactar
+  // a la central. BACKEND: el contador "te quedan N intentos" no viene del servidor; se OMITE el pill de
+  // intentos en vez de fabricar el número.
+  if (rejected) {
+    return (
+      <SafeScreen
+        header={<TopBar title={t('shift.startTitle')} onBack={() => navigation.goBack()} />}
+        footer={
+          <View style={styles.footer}>
+            <Button
+              label={t('shift.biometricRetry')}
+              variant="primary"
+              fullWidth
+              loading={isBusy}
+              onPress={run}
+            />
+            <Button
+              label={t('shift.contactCentral')}
+              variant="ghost"
+              fullWidth
+              onPress={contactCentral}
+            />
+          </View>
+        }
+      >
+        <NoticeHero
+          tone="danger"
+          icon={({ size, color }) => <IconFace size={size} color={color} strokeWidth={2} />}
+          title={t('shift.biometricFailedTitle')}
+          description={t('shift.biometricRejectedBody')}
+        />
+      </SafeScreen>
+    );
+  }
+
+  const banner = resolveBanner(error, score, phase, t);
 
   return (
     <BiometricGate
@@ -45,14 +184,17 @@ export const ShiftStartScreen = ({ navigation }: Props): React.JSX.Element => {
       banner={banner}
       ctaLabel={isBusy ? t('shift.biometricCapturing') : t('shift.biometricStart')}
       loading={isBusy}
-      disabled={locked}
       onCapture={run}
       onBack={navigation.goBack}
     />
   );
 };
 
-/** Traduce el resultado del flujo a un aviso accionable (éxito/fallo/bloqueo/cámara no disponible). */
+/**
+ * Traduce el resultado del flujo a un aviso INLINE para el gate normal. Los caminos con pantalla propia
+ * (rechazo y bloqueo) se atienden antes con layouts dedicados, así que aquí solo quedan: éxito, cámara/
+ * servicio no disponible y el error genérico del servidor.
+ */
 function resolveBanner(
   error: unknown,
   score: number | null,
@@ -83,31 +225,12 @@ function resolveBanner(
       description: t('shift.biometricBackendBody'),
     };
   }
-  if (errorCode === BIOMETRIC_LOCKED) {
-    const message = error instanceof Error ? error.message : undefined;
-    return {
-      tone: 'danger',
-      title: t('shift.blockedTitle'),
-      description: message || t('shift.blockedBody'),
-    };
-  }
-  if (errorCode === BIOMETRIC_REJECTED) {
-    const message = error instanceof Error ? error.message : undefined;
-    return {
-      tone: 'danger',
-      title: t('shift.biometricFailedTitle'),
-      description: message || t('shift.biometricRejectedBody'),
-    };
-  }
   if (error instanceof ApiError) {
-    if (error.status === 403) {
-      return {
-        tone: 'danger',
-        title: t('shift.blockedTitle'),
-        description: error.message || t('shift.blockedBody'),
-      };
-    }
     return { tone: 'danger', title: t('errors.generic'), description: error.message };
   }
   return { tone: 'danger', title: t('errors.generic') };
 }
+
+const styles = StyleSheet.create({
+  footer: { gap: 8 },
+});

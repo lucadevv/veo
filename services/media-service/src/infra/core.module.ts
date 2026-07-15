@@ -12,7 +12,10 @@ import {
   InternalIdentityGuard,
   RolesGuard,
   StepUpMfaGuard,
+  INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+  type InternalAudience,
 } from '@veo/auth';
+import { CLOCK, SystemClock } from '@veo/utils';
 import { PrismaService } from './prisma.service';
 import { redisProvider, REDIS } from './redis';
 import { outboxRelayProvider } from './outbox.relay';
@@ -25,13 +28,17 @@ const internalSecretProvider: Provider = {
     config.getOrThrow<string>('INTERNAL_IDENTITY_SECRET'),
 };
 
+const ALLOWED_AUDIENCES: readonly InternalAudience[] = ['public-rail', 'driver-rail', 'admin-rail'];
+
 @Global()
 @Module({
   providers: [
     PrismaService,
     redisProvider,
     internalSecretProvider,
+    { provide: INTERNAL_IDENTITY_ALLOWED_AUDIENCES, useValue: ALLOWED_AUDIENCES },
     outboxRelayProvider,
+    { provide: CLOCK, useValue: new SystemClock() },
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,
@@ -40,6 +47,8 @@ const internalSecretProvider: Provider = {
     PrismaService,
     REDIS,
     INTERNAL_IDENTITY_SECRET,
+    INTERNAL_IDENTITY_ALLOWED_AUDIENCES,
+    CLOCK,
     InternalIdentityGuard,
     RolesGuard,
     StepUpMfaGuard,

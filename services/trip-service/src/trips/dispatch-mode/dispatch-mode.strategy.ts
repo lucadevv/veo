@@ -1,8 +1,8 @@
 /**
- * DispatchModeStrategy (ADR 010/011) — puerto que encapsula la VARIACIÓN de comportamiento por modo de
+ * DispatchModeStrategy (ADR 010/011/023) — puerto que encapsula la VARIACIÓN de comportamiento por modo de
  * despacho (PUJA bidding / FIXED precio fijo). Hace el sistema OPEN/CLOSED: un modo nuevo se agrega
  * implementando esta interfaz + registrándola en DispatchModeRegistry, SIN tocar createTrip / reassign /
- * activateScheduledTrip con if/else. La DECISIÓN de qué modo (resolveMode) sigue en domain/pricing-mode.
+ * activateScheduledTrip con if/else. La DECISIÓN de qué modo la da la OFERTA (ADR 023 `effectiveOfferingMode`).
  *
  * Hoy captura `openDispatch` (qué evento de apertura emite cada modo); `resolveCreation` (tarifa+seq) y
  * `reassign` se incorporan en lotes siguientes (la firma se extiende, no se rompe).
@@ -28,18 +28,13 @@ export interface DispatchCreationInput {
   route: { distanceMeters: number; durationSeconds: number };
   surge: number;
   childMode: boolean;
-  /** B3 · recargo de combustible por km (céntimos PEN, admin-editable). Solo FIXED lo aplica; default 0. */
-  fuelPerKmCents?: number;
   /**
-   * B5-1.d · costo de energía por km DERIVADO de EnergyCatalog (precio fuente ÷ rendimiento de la oferta).
-   * Solo se usa si `energyModelEnabled` (el FLIP). Default 0.
+   * F2.4 · tarifa base configurable por el admin (`BaseFareConfig`, céntimos PEN). Solo FIXED la usa; default
+   * = las constantes de código (retro-compat). El triple se resuelve en `createTrip` y viaja a la fórmula.
    */
-  energyPerKmCents?: number;
-  /**
-   * B5-1.d · FLIP: si true, FIXED usa la fórmula NUEVA (calculateOfferingFare: energía pass-through,
-   * multiplier solo posición); si false (default), la vieja (fuel plegado al per-km ×multiplier).
-   */
-  energyModelEnabled?: boolean;
+  baseFareCents?: number;
+  perKmCents?: number;
+  perMinCents?: number;
   /**
    * ADR 013 §1.7 · política de pricing de la OFERTA (del catálogo de @veo/shared-types, fuente única —
    * NO se duplica la tabla acá). FIXED la APLICA a la tarifa firme: max(round(calculateFare ×

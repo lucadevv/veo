@@ -21,7 +21,7 @@ COMPOSE="${COMPOSE:-docker-compose.preview.yml}"
 SERVICES=(
   identity-service trip-service dispatch-service payment-service panic-service
   media-service notification-service audit-service rating-service share-service
-  fleet-service places-service chat-service
+  fleet-service places-service chat-service booking-service
 )
 
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

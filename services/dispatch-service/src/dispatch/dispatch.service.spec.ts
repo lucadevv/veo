@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DispatchOutcome } from '@veo/shared-types';
+import { ForbiddenError } from '@veo/utils';
 import { DispatchService } from './dispatch.service';
 
 const MATCH = '00000000-0000-0000-0000-000000000001';
@@ -34,6 +35,8 @@ function makeService(
   opts: {
     row?: ReturnType<typeof matchRow> | null;
     claimCount?: number;
+    suspended?: boolean;
+    emergency?: boolean;
   } = {},
 ) {
   const row = opts.row === undefined ? matchRow() : opts.row;
@@ -43,19 +46,25 @@ function makeService(
   // Flujo STANDARD: sin ofertas hermanas (broadcast EMERGENCY) ⇒ retractSiblingOffers es no-op acá.
   const findMany = vi.fn(async () => [] as { id: string; driverId: string }[]);
 
-  // write.$transaction ejecuta el callback con un tx que comparte los mismos mocks de tabla.
+  // runInTx ejecuta el callback con un tx que comparte los mismos mocks de tabla (§10: el cuerpo
+  // transaccional —CAS + outbox— vive en el service; el repo solo abre la tx).
   const tx = {
     dispatchMatch: { findUnique, updateMany },
     outboxEvent: { create },
   };
-  const prisma = {
-    read: { dispatchMatch: { findUnique, findMany } },
-    write: { $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)) },
+  const repo = {
+    runInTx: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)),
+    findMatchById: findUnique,
+    findLiveSiblingOffers: findMany,
+    findAcceptedMatchForTrip: vi.fn(async () => null),
   };
 
   const hotIndex = {
     markBusy: vi.fn(async () => undefined),
     markAvailable: vi.fn(async () => undefined),
+    // A2 (ADR-021 Fase A) — releaseDriver ahora suelta también el claim per-conductor (gemelo de markBusy).
+    tryClaimDriver: vi.fn(async () => true),
+    releaseClaim: vi.fn(async () => undefined),
   };
   const exclusion = { exclude: vi.fn(async () => undefined) };
   // Fail-soft: si fleet/identity fallan, resolveVehicleId devuelve null y NO bloquea.
@@ -64,17 +73,29 @@ function makeService(
   const matching = {
     markMatched: vi.fn(async () => undefined),
     offerNext: vi.fn(async () => undefined),
+    // Copy honesto del 409: solo el riel EMERGENCY (broadcast) habilita "la emergencia ya fue tomada".
+    isEmergencyTrip: vi.fn(async () => opts.emergency ?? false),
+  };
+  // Gate de elegibilidad (simetría con PUJA): por default ELEGIBLE; con `suspended` lanza 403 como
+  // lo haría EligibilityGate.assertActiveDriver al leer suspendedAt!=null en identity (fail-closed).
+  const eligibility = {
+    assertActiveDriver: vi.fn(async (driverId: string) => {
+      if (opts.suspended) {
+        throw new ForbiddenError('Conductor no elegible: suspendido', { driverId });
+      }
+    }),
   };
 
   const service = new DispatchService(
-    prisma as never,
+    repo as never,
     hotIndex as never,
     exclusion as never,
     fleet,
     identity as never,
     matching as never,
+    eligibility as never,
   );
-  return { service, findUnique, updateMany };
+  return { service, findUnique, updateMany, eligibility };
 }
 
 describe('DispatchService (dispatch-service) — ownership-check anti-IDOR #9', () => {
@@ -108,6 +129,68 @@ describe('DispatchService (dispatch-service) — ownership-check anti-IDOR #9', 
       // El dueño PASA el ownership-check (404 no aplica) pero el CAS no matchea OFFERED → count 0 → 409.
       const { service } = makeService({ claimCount: 0 });
       await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({ httpStatus: 409 });
+    });
+
+    it('oferta VENCIDA (TIMEOUT por el sweep) → 409 con el copy de vencida, NO el de emergencia', async () => {
+      // Bug visto en vivo (2026-07-14): un FIJO cuya oferta venció devolvía "La emergencia ya fue
+      // tomada por otro conductor". El outcome REAL (releído tras el CAS fallido) manda el copy.
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.TIMEOUT }),
+        claimCount: 0,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'La oferta ya venció',
+      });
+    });
+
+    it('oferta ya ACCEPTED en viaje NO-emergencia (doble-tap) → 409 con copy neutro "El viaje ya fue tomado"', async () => {
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.ACCEPTED }),
+        claimCount: 0,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'El viaje ya fue tomado',
+      });
+    });
+
+    it('oferta ya ACCEPTED en viaje EMERGENCY (carrera del broadcast) → 409 con el copy de emergencia', async () => {
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.ACCEPTED }),
+        claimCount: 0,
+        emergency: true,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'La emergencia ya fue tomada por otro conductor',
+      });
+    });
+
+    it('oferta ya REJECTED → 409 con copy genérico honesto', async () => {
+      const { service } = makeService({
+        row: matchRow({ outcome: DispatchOutcome.REJECTED }),
+        claimCount: 0,
+      });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({
+        httpStatus: 409,
+        message: 'La oferta ya fue respondida',
+      });
+    });
+
+    it('conductor SUSPENDIDO (gate de identidad) → 403 y NO toca el CAS (cierra la asimetría con PUJA)', async () => {
+      // El dueño PASA el ownership-check, pero el gate de elegibilidad lo frena ANTES del CAS: un
+      // suspendido que sigue pingeando GPS ya no acepta viajes FIXED (era el hueco del audit wvv7pn1z0).
+      const { service, updateMany } = makeService({ suspended: true });
+      await expect(service.accept(MATCH, OWNER)).rejects.toMatchObject({ httpStatus: 403 });
+      expect(updateMany).not.toHaveBeenCalled();
+    });
+
+    it('el accept re-valida elegibilidad con fresh=true ANTES del CAS (decisión de plata, simetría PUJA)', async () => {
+      const { service, eligibility } = makeService();
+      await service.accept(MATCH, OWNER);
+      // fresh=true: bypasea el cache del gate (un recién-suspendido no se cuela por snapshot stale).
+      expect(eligibility.assertActiveDriver).toHaveBeenCalledWith(OWNER, true);
     });
   });
 

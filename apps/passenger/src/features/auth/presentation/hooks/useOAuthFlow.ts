@@ -16,7 +16,6 @@ import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useSessionStore} from '../../../../core/session/sessionStore';
 import {configureGoogleSignin} from '../../infra/googleSignin';
-import {useBiometricGateStore} from '../stores/biometricGateStore';
 
 /**
  * Estado clasificado de un error de login social, para mapear el mensaje en la UI.
@@ -53,8 +52,8 @@ function statusOf(error: unknown): number | null {
  *
  * El cliente SOLO obtiene el token de identidad del SDK nativo y lo reenvía al backend, que lo
  * verifica soberanamente (JWKS) y emite la sesión. La app NUNCA autoriza: el gate es server-side.
- * Tras el login persiste la sesión IGUAL que el flujo de correo/OTP (`setSession` + desbloqueo del
- * gate biométrico + aprovisionamiento best-effort del secreto de pánico).
+ * Tras el login persiste la sesión IGUAL que el flujo de correo/OTP (`setSession` +
+ * aprovisionamiento best-effort del secreto de pánico).
  */
 export function useOAuthFlow() {
   const loginWithGoogleUseCase = useDependency(TOKENS.loginWithGoogleUseCase);
@@ -62,7 +61,6 @@ export function useOAuthFlow() {
   const panicSecretProvisioner = useDependency(TOKENS.panicSecretProvisioner);
   const syncPendingConsent = useDependency(TOKENS.syncPendingConsentUseCase);
   const setSession = useSessionStore(state => state.setSession);
-  const unlockBiometricGate = useBiometricGateStore(state => state.unlock);
 
   /** Persiste la sesión tras el login social (idéntico al flujo de correo/OTP). */
   const persistSession = useCallback(
@@ -76,8 +74,6 @@ export function useOAuthFlow() {
         refreshToken: tokens.refreshToken,
         user: tokens.user,
       });
-      // Login fresco: no exigir biometría en esta sesión.
-      unlockBiometricGate();
       // Drena la cola durable de consentimiento (best-effort): el onboarding la encoló antes del login.
       void syncPendingConsent.flush();
       // Aprovisiona el secreto HMAC de pánico (best-effort): si falla, se reintenta al disparar.
@@ -88,12 +84,7 @@ export function useOAuthFlow() {
         );
       });
     },
-    [
-      setSession,
-      unlockBiometricGate,
-      panicSecretProvisioner,
-      syncPendingConsent,
-    ],
+    [setSession, panicSecretProvisioner, syncPendingConsent],
   );
 
   const googleMutation = useMutation<OAuthAttempt, Error, void>({

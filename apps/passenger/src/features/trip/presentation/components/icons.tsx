@@ -33,6 +33,32 @@ export function IconSearch({color, size = 20}: GlyphProps): React.JSX.Element {
   );
 }
 
+/** Calendario (fecha de un viaje programado · design/veo.pen UcekU, lucide calendar-days). */
+export function IconCalendar({
+  color,
+  size = 16,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect
+        x={3.5}
+        y={5}
+        width={17}
+        height={16}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+      />
+      <Path
+        d="M8 3v4M16 3v4M3.5 10h17"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 /** Pin de ubicación (lugar/destino). Espejo de `I.pin`. */
 export function IconPin({color, size = 18}: GlyphProps): React.JSX.Element {
   return (
@@ -44,6 +70,49 @@ export function IconPin({color, size = 18}: GlyphProps): React.JSX.Element {
         strokeLinejoin="round"
       />
       <Circle cx={12} cy={10} r={2.4} stroke={color} strokeWidth={STROKE} />
+    </Svg>
+  );
+}
+
+/** Historial (filas de "Tus últimos viajes" del Home — pen P/Home · RecentTripsSection). */
+export function IconHistory({color, size = 18}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3 12a9 9 0 1 0 2.64-6.36L3 8"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M3 3v5h5"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M12 7v5l4 2"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Mapa plegado (atajo "Elegir en el mapa" del buscador del Home — pen P/Home · SearchField). */
+export function IconMap({color, size = 20}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 4 3.5 6.2a1 1 0 0 0-.5.9v11.4a1 1 0 0 0 1.4.9L9 17.5l6 2.5 5.5-2.2a1 1 0 0 0 .5-.9V5.5a1 1 0 0 0-1.4-.9L15 6.5 9 4Z"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+      <Path d="M9 4v13.5M15 6.5V20" stroke={color} strokeWidth={STROKE} />
     </Svg>
   );
 }
@@ -154,6 +223,67 @@ export function IconArrowLeft({
   );
 }
 
+/** Flecha derecha (comparación "tu oferta → su precio" del pen u1306). Espejo horizontal de IconArrowLeft. */
+export function IconArrowRight({
+  color,
+  size = 18,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 6l6 6-6 6"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Flecha derecha COMPLETA (asta + punta, →): enviar mensaje del chat. Distinta del chevron
+ *  IconArrowRight (solo punta) que usan las filas de lista; simétrica al IconArrowRight del driver. */
+export function IconArrowRightLong({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 12h14"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M12 5l7 7-7 7"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Chevron hacia abajo (minimizar el sheet del viaje activo, pen fLKdk MinBtn). */
+export function IconChevronDown({
+  color,
+  size = 22,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 9l6 6 6-6"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** Diana / mira (usar mi ubicación actual). Espejo del glyph de target del diseño. */
 export function IconTarget({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
@@ -184,10 +314,12 @@ export function IconStarFilled({
 
 /** Globo de chat (mensajería con el conductor). Espejo de `I.chat`. */
 export function IconChat({color, size = 20}: GlyphProps): React.JSX.Element {
+  // UNIFICADO con el conductor (`IconMessage` del driver, lucide message-square del board): TODA la app
+  // usa el MISMO glifo de mensaje. Antes era un globo redondo (message-circle) y divergía del conductor.
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path
-        d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.7A8 8 0 1 1 21 12Z"
+        d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 3v-3a2 2 0 0 1-1-2V6Z"
         stroke={color}
         strokeWidth={STROKE}
         strokeLinejoin="round"
@@ -303,6 +435,31 @@ export function IconChild({color, size = 18}: GlyphProps): React.JSX.Element {
 }
 
 /** Cámara (cámara del habitáculo / compartir cámara). Espejo de `I.cam` del diseño. */
+/** Videocámara (lucide `video`, geometría oficial): el glifo del RecPill "EN VIVO" (pen ed6D3) —
+ *  dice QUÉ está en vivo: el VIDEO del habitáculo (distinto de IconCamera, que es cámara de fotos). */
+export function IconVideo({color, size = 15}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Rect
+        x={2}
+        y={6}
+        width={14}
+        height={12}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+      />
+    </Svg>
+  );
+}
+
 export function IconCamera({color, size = 20}: GlyphProps): React.JSX.Element {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -462,6 +619,111 @@ export function IconCheck({color, size = 16}: GlyphProps): React.JSX.Element {
         d="m5 12.5 4.2 4.2L19 7"
         stroke={color}
         strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Copiar (duplicado del set de referidos, para el "Copiar" del enlace — pen zKyic CopyBtn). */
+export function IconCopy({color, size = 16}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect
+        x={9}
+        y={9}
+        width={12}
+        height={12}
+        rx={2}
+        stroke={color}
+        strokeWidth={STROKE}
+      />
+      <Path
+        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Globo de chat cuadrado (canal "Mensajes"/SMS — pen zKyic, lucide message-square). */
+export function IconMessageSquare({
+  color,
+  size = 20,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Rayo (modo "Ahora" del toggle del Home). Espejo del `zap` del design/veo.pen: relleno sólido. */
+export function IconBolt({color, size = 16}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"
+        fill={color}
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Billete (lucide banknote): chip "Precio" de los filtros del marketplace (pen P/ProgResults). */
+export function IconBanknote({color, size = 16}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect
+        x={2}
+        y={6}
+        width={20}
+        height={12}
+        rx={2}
+        stroke={color}
+        strokeWidth={2}
+      />
+      <Circle cx={12} cy={12} r={2} stroke={color} strokeWidth={2} />
+      <Path
+        d="M6 12h.01M18 12h.01"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** Insignia verificada (lucide badge-check): chip "Verificado" de los filtros (pen P/ProgResults). */
+export function IconBadgeCheck({
+  color,
+  size = 16,
+}: GlyphProps): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="m9 12 2 2 4-4"
+        stroke={color}
+        strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
       />

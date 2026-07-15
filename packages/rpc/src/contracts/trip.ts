@@ -39,6 +39,65 @@ export interface TripReply {
   routePolyline: string;
   /** Paradas intermedias ordenadas (Ola 2B); [] si el viaje es directo (repeated nunca es null). */
   waypoints: GeoPoint[];
+  /**
+   * BE-2 · solicitudes especiales del pasajero (valores del enum SpecialRequest como string:
+   * PET|LUGGAGE|CHILD_SEAT); [] si ninguna (proto3 repeated nunca es null). El conductor las VE en la
+   * oferta entrante (ADR-018) para decidir antes de aceptar.
+   */
+  specialRequests: string[];
+  /**
+   * Modo de despacho CONGELADO del viaje (FIXED|PUJA · enum PricingMode como string). resolve-once-persist
+   * (ADR-011). '' solo en el EMPTY_TRIP (viaje no hallado); el BFF lo re-mapea a null.
+   */
+  dispatchMode: string;
+  /**
+   * Tier SOLICITADO del viaje (CAR|MOTO · enum VehicleType como string), derivado de la oferta al crear
+   * (ADR 013). OPTIONAL en el tipo (compat: un trip-service con el proto viejo no lo emite y los fixtures
+   * existentes no lo construyen); con el proto nuevo llega SIEMPRE ('' en EMPTY_TRIP → null en el BFF).
+   */
+  vehicleType?: string;
+}
+
+/**
+ * trip.GetDriverTripStats — request: conteo de viajes COMPLETED de un conductor (señal de confianza
+ * "N viajes" en la card del pasajero). El driverId es el id de PERFIL Driver (dueño de las filas Trip).
+ */
+export interface DriverTripStatsRequest {
+  driverId: string;
+}
+
+/** trip.GetDriverTripStats — reply: cantidad de viajes COMPLETED del conductor. */
+export interface DriverTripStatsReply {
+  completedTrips: number;
+}
+
+/**
+ * trip.GetPassengerTripStats — request: conteo de viajes COMPLETED de un pasajero (señal de confianza
+ * "N viajes" en la card del conductor). El passengerId es el userId del pasajero (dueño de las filas Trip).
+ */
+export interface PassengerTripStatsRequest {
+  passengerId: string;
+}
+
+/** trip.GetPassengerTripStats — reply: cantidad de viajes COMPLETED del pasajero. */
+export interface PassengerTripStatsReply {
+  completedTrips: number;
+}
+
+/** trip.GetTripModesByIds — lote de ids de viaje (enriquecimiento MODO on-read de la lista OPS admin). */
+export interface TripIdsRequest {
+  ids: string[];
+}
+
+/** Modo de despacho de UN viaje. `dispatchMode` = FIXED|PUJA. Un id no hallado NO aparece en items. */
+export interface TripModeItem {
+  id: string;
+  dispatchMode: string;
+}
+
+/** trip.GetTripModesByIds — modos por id, anti-N+1. Solo id+modo (sin PII). */
+export interface TripModesReply {
+  items: TripModeItem[];
 }
 
 /** trip.GetTripState / mensaje TripStateReply. */
@@ -78,4 +137,17 @@ export interface TripHistoryItem {
 export interface PassengerTripsReply {
   items: TripHistoryItem[];
   nextCursor: string;
+}
+
+/**
+ * trip.ListDriverTrips — request del historial del CONDUCTOR. Espejo de ListPassengerTrips pero con
+ * driverId (id de PERFIL Driver de identity, NO userId). La respuesta reusa PassengerTripsReply (el item
+ * del historial es idéntico). El driverId lo FIJA el BFF desde el JWT (anti-IDOR); el cliente no lo provee.
+ */
+export interface ListDriverTripsRequest {
+  driverId: string;
+  /** Cursor opaco devuelto por la página previa (nextCursor). "" = arrancar desde el más reciente. */
+  cursor: string;
+  /** Tamaño de página pedido; el servidor lo acota a [1, MAX_HISTORY_PAGE]. 0/ausente → default. */
+  limit: number;
 }

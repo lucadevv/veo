@@ -22,7 +22,9 @@ import {
   ProposeWaypointDto,
   RebidTripDto,
   TripHistoryQueryDto,
+  TripRouteQueryDto,
   type TripResource,
+  type TripRouteView,
 } from './dto/trip.dto';
 import { type PaymentView } from '../payments/dto/payments.dto';
 import { type TripDetailView, type TripHistoryPageView, type TripStateView } from './trip-views';
@@ -123,6 +125,25 @@ export class TripsController {
   @ApiOperation({ summary: 'Estado del viaje (BR-T02)' })
   state(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<TripStateView> {
     return this.trips.getTripState(user, id);
+  }
+
+  @Get(':id/route')
+  @ApiOperation({
+    summary:
+      'Ruta del viaje para el mapa del pasajero. Default: la CANÓNICA persistida por trip-service ' +
+      '(origen→paradas→destino, con su distancia/duración; steps vacíos); si el viaje no la tiene ' +
+      '(viajes viejos), fallback al cómputo por fase desde la última ubicación del conductor. ' +
+      '`?leg=pickup`: el TRAMO DE ACERCAMIENTO vivo (conductor→recojo) para las fases pre-recojo; ' +
+      '`?leg=dropoff`: el tramo RESTANTE del viaje en curso (conductor→paradas→destino); ' +
+      'sin ubicación del conductor aún → ruta VACÍA honesta (el app no dibuja). ' +
+      'Mismo contrato tripRoute (polyline + steps + markers).',
+  })
+  route(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Query() query: TripRouteQueryDto,
+  ): Promise<TripRouteView> {
+    return this.trips.route(user, id, query.leg);
   }
 
   @Get(':id/video')
