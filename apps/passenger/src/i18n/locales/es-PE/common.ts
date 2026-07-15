@@ -1491,6 +1491,10 @@ export const common = {
     /** EFECTIVO: transitorio mientras el conductor confirma el cobro y el consumer captura (el pasajero ya
      *  no confirma). Resuelve al recibo "Pago en efectivo confirmado". */
     cashProcessing: 'Registrando tu pago en efectivo…',
+    /** EFECTIVO · el pasajero ya pagó EN MANO (su parte terminó): nota informativa CON salida (nunca lo
+     *  atrapamos esperando la confirmación del conductor). Si el conductor confirma, pasa al recibo. */
+    cashPaidTitle: 'Pagaste en efectivo',
+    cashPaidBody: 'Entregaste {{amount}} al conductor. ¡Listo, buen viaje!',
     processingHint: 'Esto puede tardar unos segundos.',
     /** El poll agotó el tiempo y el recibo sigue sin aparecer. */
     timeoutTitle: 'No pudimos cargar tu recibo',

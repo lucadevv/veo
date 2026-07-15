@@ -321,15 +321,25 @@ export function SettlementBody({
 
   // ── PENDING + CASH ───────────────────────────────────────────────────────────────────────────
   // El pasajero YA NO confirma el efectivo (decisión del dueño 2026-07-14): el CONDUCTOR lo captura al
-  // confirmar que cobró (tiene la plata en mano). Esta rama es TRANSITORIA (mientras el consumer captura
-  // tras la confirmación del conductor) → nota sobria + poll hasta el recibo CAPTURED ("Pago en efectivo
-  // confirmado" con el check verde). SIN botón de confirmar ni doble paso bilateral.
+  // confirmar que cobró. Para el PASAJERO el efectivo YA se pagó EN MANO al bajar → su parte TERMINÓ. Por
+  // eso NUNCA lo atrapamos esperando la confirmación del conductor (que puede tardar o no venir): nota
+  // informativa ("Pagaste en efectivo") + SALIDA (calificar / volver al inicio), nunca un dead-end. El poll
+  // sigue vivo: si el conductor confirma, la rama pasa sola al recibo CAPTURED ("Pago en efectivo
+  // confirmado" con el check). Si NO confirma, el pasajero ya salió y la red de seguridad backend
+  // (reconciliación de efectivo PENDING viejo) lo resuelve por ops.
   if (outcome.kind === 'cashPending') {
     return (
-      <ProcessingBody
-        title={t('settlement.cashProcessing')}
-        hint={t('settlement.processingHint')}
-      />
+      <View style={{gap: theme.spacing.md}}>
+        <Banner
+          tone="info"
+          title={t('settlement.cashPaidTitle')}
+          description={t('settlement.cashPaidBody', {
+            amount: formatPEN(payment.amountCents),
+          })}
+        />
+        <ReceiptCard payment={payment} cash />
+        {resolvedActions}
+      </View>
     );
   }
 
