@@ -45,6 +45,13 @@ export interface MatchingRepository {
   findExpiredOffers(cutoff: Date, limit: number): Promise<ExpiredOffer[]>;
   /** CAS atómico OFFERED→TIMEOUT de una oferta. Devuelve cuántas filas cambió (0 = otra réplica la tomó). */
   timeoutOffer(matchId: string): Promise<number>;
+  /** Ofertas FIXED vivas (OFFERED) del viaje, DENTRO de la tx dada (retiro por cancelación). id + driverId. */
+  findLiveTripOffers(
+    tx: Prisma.TransactionClient,
+    tripId: string,
+  ): Promise<Pick<DispatchMatch, 'id' | 'driverId'>[]>;
+  /** CAS atómico OFFERED→WITHDRAWN de una oferta, en la tx dada. count=0 ⇒ un accept concurrente ya la tomó. */
+  withdrawOffer(tx: Prisma.TransactionClient, matchId: string): Promise<number>;
   /** Persiste UNA oferta (DispatchMatch OFFERED) y la devuelve (el service lee su `offeredAt` real). */
   createOffer(input: CreateOfferInput): Promise<DispatchMatch>;
 }
@@ -90,6 +97,24 @@ export class PrismaMatchingRepository implements MatchingRepository {
     const claimed = await this.prisma.write.dispatchMatch.updateMany({
       where: { id: matchId, outcome: DispatchOutcome.OFFERED },
       data: { outcome: DispatchOutcome.TIMEOUT, respondedAt: new Date() },
+    });
+    return claimed.count;
+  }
+
+  findLiveTripOffers(
+    tx: Prisma.TransactionClient,
+    tripId: string,
+  ): Promise<Pick<DispatchMatch, 'id' | 'driverId'>[]> {
+    return tx.dispatchMatch.findMany({
+      where: { tripId, outcome: DispatchOutcome.OFFERED },
+      select: { id: true, driverId: true },
+    });
+  }
+
+  async withdrawOffer(tx: Prisma.TransactionClient, matchId: string): Promise<number> {
+    const claimed = await tx.dispatchMatch.updateMany({
+      where: { id: matchId, outcome: DispatchOutcome.OFFERED },
+      data: { outcome: DispatchOutcome.WITHDRAWN, respondedAt: new Date() },
     });
     return claimed.count;
   }

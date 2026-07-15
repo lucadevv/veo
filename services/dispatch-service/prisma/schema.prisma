@@ -21,6 +21,7 @@ enum DispatchOutcome {
   ACCEPTED
   REJECTED
   TIMEOUT
+  WITHDRAWN /// el viaje se canceló durante la búsqueda: la oferta FIXED se retira (accept tardío ya no matchea OFFERED)
 
   @@schema("dispatch")
 }

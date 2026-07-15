@@ -23,7 +23,7 @@ import {
   DISPATCH_H3_RESOLUTION,
   type LatLon,
 } from '@veo/utils';
-import { createEnvelope } from '@veo/events';
+import { createEnvelope, OFFER_WITHDRAWN_REASON } from '@veo/events';
 import {
   DispatchOutcome,
   findOffering,
@@ -324,9 +324,44 @@ export class MatchingService {
     await this.sessions.closeMatched(tripId);
   }
 
-  /** Cierra la sesión como CANCELLED (el viaje se canceló durante el matching). Idempotente (CAS). */
+  /**
+   * Cierra la sesión como CANCELLED (el viaje se canceló durante el matching). Idempotente (CAS).
+   *
+   * Además RETIRA la(s) oferta(s) FIXED viva(s) del viaje. Sin esto el `DispatchMatch` quedaba OFFERED
+   * tras la cancelación, con dos consecuencias visibles (2026-07-15):
+   *   1. Un accept TARDÍO del conductor sobre esa oferta muerta ganaba su CAS (`where outcome=OFFERED`) →
+   *      match_found para un trip CANCELADO → la app navegaba a un viaje fantasma (pantalla en blanco).
+   *   2. La card FIXED del conductor no se retiraba (nadie emitía offer_withdrawn) hasta vencer su countdown.
+   * Marcamos OFFERED→WITHDRAWN por CAS (si un accept concurrente ganó, count=0 ⇒ NO retiramos ni emitimos:
+   * el conductor SÍ aceptó) y emitimos `offer_withdrawn` (reason=cancelled) por OUTBOX en la MISMA tx para
+   * que el driver-bff lo reenvíe y la card muera reactiva. El board de PUJA lo cierra `cancelBoard` aparte.
+   */
   async cancelSession(tripId: string): Promise<void> {
     await this.sessions.closeCancelled(tripId);
+    await this.repo.runInTx(async (tx) => {
+      const offers = await this.repo.findLiveTripOffers(tx, tripId);
+      for (const offer of offers) {
+        const withdrawn = await this.repo.withdrawOffer(tx, offer.id);
+        if (withdrawn === 0) continue; // un accept concurrente ganó la carrera: no retiramos ni emitimos
+        const envelope = createEnvelope({
+          eventType: 'dispatch.offer_withdrawn',
+          producer: 'dispatch-service',
+          payload: {
+            tripId,
+            driverId: offer.driverId,
+            reason: OFFER_WITHDRAWN_REASON.CANCELLED,
+          },
+        });
+        await tx.outboxEvent.create({
+          data: {
+            aggregateId: tripId,
+            eventType: envelope.eventType,
+            envelope: envelope as unknown as Prisma.InputJsonValue,
+          },
+        });
+        this.logger.log(`viaje ${tripId} cancelado → oferta FIXED driver=${offer.driverId} retirada`);
+      }
+    });
   }
 
   /**

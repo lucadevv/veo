@@ -128,6 +128,14 @@ class InMemoryMatchingRepo implements MatchingRepository {
   async timeoutOffer() {
     return 1;
   }
+  async findLiveTripOffers(_tx: never, tripId: string): Promise<{ id: string; driverId: string }[]> {
+    return this.offers
+      .filter((o) => o.tripId === tripId)
+      .map((o) => ({ id: o.id, driverId: o.driverId }));
+  }
+  async withdrawOffer(): Promise<number> {
+    return 1;
+  }
   async createOffer(input: {
     id: string;
     tripId: string;
@@ -237,6 +245,22 @@ describe('MatchingService — política v2 (feature-flag)', () => {
     const session = await c.sessionRepo.find('trip-1');
     expect(session?.currentKRing).toBe(2);
     expect(session?.nextExpandAt).not.toBeNull(); // ring 2 < maxK 5 → hay expansión temporal pendiente
+  });
+
+  it('cancelSession: RETIRA la oferta FIXED viva y emite offer_withdrawn(reason=cancelled)', async () => {
+    // El pasajero cancela durante la búsqueda con una oferta FIXED aún OFFERED. Sin el retiro, el match
+    // quedaba OFFERED → un accept tardío ganaba su CAS (viaje fantasma) y la card no se retiraba.
+    await c.hotIndex.seed('d-center', ORIGIN.lat, ORIGIN.lon, center, VehicleType.CAR);
+    await startTrip(c);
+    expect(c.matchingRepo.offers).toHaveLength(1);
+    const driverId = c.matchingRepo.offers[0]!.driverId;
+
+    await c.svc.cancelSession('trip-1');
+
+    expect((await c.sessionRepo.find('trip-1'))?.status).toBe(DispatchSessionStatus.CANCELLED);
+    const withdrawn = c.matchingRepo.outbox.filter((e) => e.eventType === 'dispatch.offer_withdrawn');
+    expect(withdrawn).toHaveLength(1);
+    expect(withdrawn[0]!.payload).toMatchObject({ tripId: 'trip-1', driverId, reason: 'cancelled' });
   });
 
   it('v2: sin candidatos hasta maxRadius → cierre honesto (TIMED_OUT + dispatch.no_offers)', async () => {

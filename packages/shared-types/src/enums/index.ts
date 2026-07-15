@@ -320,6 +320,7 @@ export const DispatchOutcome = {
   ACCEPTED: 'ACCEPTED',
   REJECTED: 'REJECTED',
   TIMEOUT: 'TIMEOUT',
+  WITHDRAWN: 'WITHDRAWN',
 } as const;
 export type DispatchOutcome = (typeof DispatchOutcome)[keyof typeof DispatchOutcome];
 

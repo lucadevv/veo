@@ -179,6 +179,13 @@ export const RealtimeManager = (): null => {
         old ? old.filter((b) => b.tripId !== payload.tripId) : old,
       );
       queryClient.invalidateQueries({ queryKey: BIDS_QUERY_KEY });
+      // El driver-bff reenvía `dispatch.offer_withdrawn` como `bid:closed` para AMBOS rieles. Si el viaje
+      // retirado era una oferta FIXED colgada (reason=cancelled cuando el pasajero canceló en búsqueda), la
+      // card FIXED vive en `incomingOffer`, NO en la cache de pujas — hay que limpiarla acá o sobrevive hasta
+      // vencer su countdown y un accept tardío navegaría a un viaje muerto. Mismo patrón que el flip FIXED→PUJA.
+      if (useDispatchStore.getState().incomingOffer?.tripId === payload.tripId) {
+        clearOffer();
+      }
     },
     onTripUpdate: () => {
       queryClient.invalidateQueries({ queryKey: TRIP_QUERY_PREFIX });

@@ -630,6 +630,10 @@ export const OFFER_WITHDRAWN_REASON = {
   /// ADR-020 Lote 2 — el pasajero ELIGIÓ a OTRO conductor: la oferta de este perdedor ya no vale y su
   /// card debe morir reactiva (sin esperar el poll de 12s). Se emite UNA por perdedor al cerrar el board.
   NOT_SELECTED: 'not_selected',
+  /// El VIAJE se canceló durante la búsqueda (pasajero/sistema), con una oferta FIXED aún OFFERED. dispatch
+  /// retira el DispatchMatch (OFFERED→WITHDRAWN) y emite esto para que la card FIXED del conductor muera
+  /// reactiva (sin esperar su countdown local) y un accept tardío falle (el CAS ya no matchea OFFERED).
+  CANCELLED: 'cancelled',
 } as const;
 export type OfferWithdrawnReason =
   (typeof OFFER_WITHDRAWN_REASON)[keyof typeof OFFER_WITHDRAWN_REASON];
@@ -644,6 +648,7 @@ export const dispatchOfferWithdrawn = z.object({
     OFFER_WITHDRAWN_REASON.STALE,
     OFFER_WITHDRAWN_REASON.TAKEN,
     OFFER_WITHDRAWN_REASON.NOT_SELECTED,
+    OFFER_WITHDRAWN_REASON.CANCELLED,
   ]),
 });
 /// trip → dispatch. El conductor canceló DESPUÉS de aceptar (pre-recojo): trip pasa a REASSIGNING y
