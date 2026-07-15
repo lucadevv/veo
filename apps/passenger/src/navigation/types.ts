@@ -33,16 +33,19 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Auth: undefined;
   CompleteProfile: undefined;
-  /** Bottom nav autenticado (Inicio·Viajes·Seguridad·Cuenta) — design/veo.pen C/TabBar. */
+  /** Bottom nav autenticado (Inicio·Compartir·Viajes·Seguridad·Cuenta) — design/veo.pen C/TabBar. */
   Main: undefined;
   /** Tab Seguridad (hub). Renderiza dentro de `Main`; acá para tipar navigate('Seguridad'). */
   Seguridad: undefined;
+  /** Tab Compartir (marketplace carpool). Renderiza dentro de `Main`; acá para tipar navigate('Compartir'). */
+  Compartir: undefined;
   /** Sesión expirada por inactividad: re-verificar identidad (el trigger es follow-up). */
   SessionExpired: undefined;
   /** Pantalla RAÍZ autenticada (antes el tab Home): `RequestFlowScreen` con el mapa + sheet del flujo. */
   Home: undefined;
-  /** "Mis viajes" (antes tab): alcanzable desde el Perfil. Lista paginada + detalle en sheet. */
-  TripHistory: undefined;
+  /** Tab "Tus viajes" (Próximos | Historial). `tab` fuerza el segmento al aterrizar (p. ej. tras
+   * programar un viaje se aterriza en Próximos aunque el tab haya quedado en Historial). */
+  TripHistory: {tab?: 'upcoming' | 'history'} | undefined;
   /** Perfil del pasajero (antes tab): se alcanza por el avatar del header del Home. */
   Profile: undefined;
   /**
@@ -69,11 +72,9 @@ export type RootStackParamList = {
   CameraControl: {tripId: string};
   // El DETALLE de un viaje terminal YA NO es una pantalla (`TripDetail` eliminado): vive en un
   // `DraggableSheet` SOBRE "Mis Viajes" (ver TripDetailSheet). No hay ruta ni params que tipar.
-  ScheduledTrips: undefined;
-  /** Programar un viaje nuevo (entrada al flujo real de programación desde "+"). */
-  ScheduleNew: undefined;
-  /** Carpooling (ADR-014 · pen sección 5): buscador de asientos publicados entre ciudades. */
-  CarpoolSearch: undefined;
+  // `ScheduledTrips`/`ScheduleNew` se ELIMINARON (consolidación): los programados viven en el tab
+  // Viajes>Próximos y programar se hace INLINE desde el toggle del Home (scheduleIntent del draft).
+  // `CarpoolSearch` ya no es ruta del stack: es la RAÍZ del tab `Compartir` (marketplace aparte).
   /** Carpooling: resultados keyset de la búsqueda (la query viaja completa en params). */
   CarpoolResults: {search: CarpoolSearchQuery};
   /** Carpooling: detalle enriquecido de un viaje publicado (driver/vehicle pueden venir null). */
@@ -112,7 +113,8 @@ export type RootStackParamList = {
  * `RootStackParamList` para que `navigate('Home')` etc. sigan tipando (resuelven a la tab anidada). */
 export type MainTabsParamList = {
   Home: undefined;
-  TripHistory: undefined;
+  Compartir: undefined;
+  TripHistory: {tab?: 'upcoming' | 'history'} | undefined;
   Seguridad: undefined;
   Profile: undefined;
 };

@@ -138,11 +138,23 @@ export function QuotingBody({
   const setEditing = useRideDraftStore(s => s.setEditing);
   const addWaypoint = useRideDraftStore(s => s.addWaypoint);
   const removeWaypoint = useRideDraftStore(s => s.removeWaypoint);
+  const scheduleIntent = useRideDraftStore(s => s.scheduleIntent);
+  const setScheduleIntent = useRideDraftStore(s => s.setScheduleIntent);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduledAt, setScheduledAt] = useState<number | null>(null);
+
+  // Llegada con INTENCIÓN de programar (toggle "Programado" del Home / CTA del tab Próximos): abre
+  // el selector de día/hora al entrar a la cotización y CONSUME la marca (una sola vez — si el
+  // pasajero cierra el selector, la cotización sigue como flujo normal con "Programar para después").
+  useEffect(() => {
+    if (scheduleIntent) {
+      setScheduleIntent(false);
+      setScheduleOpen(true);
+    }
+  }, [scheduleIntent, setScheduleIntent]);
   const [bidCents, setBidCents] = useState<number | null>(null);
   const [specialRequests, setSpecialRequests] = useState<SpecialRequest[]>([]);
   // Método de pago PARA ESTE VIAJE: se siembra del default del perfil al montar (lazy init) y vive en

@@ -1,8 +1,8 @@
 import type {TripHistoryItem} from '@veo/api-client';
-import {useNavigation} from '@react-navigation/native';
+import {useNavigation, useRoute, type RouteProp} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {hexAlpha, SafeScreen, Text, useTheme} from '@veo/ui-kit';
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {
   ActivityIndicator,
@@ -13,7 +13,11 @@ import {
   View,
 } from 'react-native';
 import {ErrorState} from '../../../../shared/presentation/components/ScreenStates';
-import type {RootStackParamList} from '../../../../navigation/types';
+import {useRideDraftStore} from '../../../maps/presentation';
+import type {
+  MainTabsParamList,
+  RootStackParamList,
+} from '../../../../navigation/types';
 import {
   groupTripsByTime,
   type HistorySection,
@@ -38,9 +42,10 @@ type HistoryTab = 'upcoming' | 'history';
 /**
  * "Tus viajes" (design/veo.pen UcekU): título display in-body + SEGMENTED de 2 tabs.
  *
- *  - "Próximos" (default per pen): los viajes PROGRAMADOS reales (`GET /trips/scheduled`, misma
- *    fuente/caché que `ScheduledTripsScreen`) como cards con fecha + StatusPill + ruta + tarifa.
- *    Vacío honesto con CTA "Programar un viaje" → `ScheduleNew` (sin auto-cambiar de tab con magia).
+ *  - "Próximos" (default per pen): los viajes PROGRAMADOS reales (`GET /trips/scheduled`) como cards
+ *    con fecha + StatusPill + ruta + tarifa, con CANCELAR (única lista de programados tras la
+ *    consolidación). Vacío honesto con CTA "Programar un viaje" → flujo inline del Home (intención
+ *    de programar en el borrador; sin auto-cambiar de tab con magia).
  *  - "Historial": la lista de siempre TAL CUAL, del SERVIDOR (`GET /trips/history`, paginado por
  *    cursor) con sus ESTADOS REALES — NO de la foto local de MMKV (que mostraba todo "Solicitado"
  *    porque nunca se actualizaba — el bug que esto cerró). El snapshot local sobrevive solo para
@@ -70,6 +75,16 @@ export function TripHistoryScreen(): React.JSX.Element {
   // a programar — NO se auto-cambia de tab (decisión A5 del análisis pen↔app).
   const [tab, setTab] = useState<HistoryTab>('upcoming');
 
+  // Aterrizaje dirigido: `navigate('TripHistory', {tab})` fuerza el segmento (p. ej. tras CREAR un
+  // programado se aterriza en Próximos aunque el tab haya quedado en Historial de una visita previa).
+  const route = useRoute<RouteProp<MainTabsParamList, 'TripHistory'>>();
+  const requestedTab = route.params?.tab;
+  useEffect(() => {
+    if (requestedTab) {
+      setTab(requestedTab);
+    }
+  }, [requestedTab]);
+
   // Viaje cuyo detalle se muestra en el sheet (null = sheet cerrado). Guardamos el ITEM completo, no solo
   // el id: el detalle pinta lo esencial al INSTANTE desde acá (sin flash de carga) y enriquece por red.
   const [selectedTrip, setSelectedTrip] = useState<TripHistoryItem | null>(
@@ -96,9 +111,16 @@ export function TripHistoryScreen(): React.JSX.Element {
     navigation.navigate('Home');
   }, [navigation]);
 
+  // CTA "Programar un viaje" del vacío de Próximos: arranca el flujo REAL de programación INLINE
+  // (borrador limpio + intención de programar) y aterriza en el Home listo para elegir destino —
+  // el mismo camino que el toggle "Programado" del Home (la pantalla `ScheduleNew` se eliminó).
+  const resetDraft = useRideDraftStore(s => s.reset);
+  const setScheduleIntent = useRideDraftStore(s => s.setScheduleIntent);
   const goScheduleNew = useCallback(() => {
-    navigation.navigate('ScheduleNew');
-  }, [navigation]);
+    resetDraft();
+    setScheduleIntent(true);
+    navigation.navigate('Home');
+  }, [resetDraft, setScheduleIntent, navigation]);
 
   const openTrip = useCallback(
     (trip: TripHistoryItem) => {

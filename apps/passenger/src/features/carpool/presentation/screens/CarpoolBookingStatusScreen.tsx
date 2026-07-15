@@ -212,7 +212,8 @@ export function CarpoolBookingStatusScreen(): React.JSX.Element {
           <Button
             label={t('carpool.searchOthers')}
             fullWidth
-            onPress={() => navigation.navigate('CarpoolSearch')}
+            // El buscador ya no es ruta del stack: es la raíz del tab Compartir (resuelve anidado).
+            onPress={() => navigation.navigate('Compartir')}
           />
           <Button
             label={t('carpool.backHome')}

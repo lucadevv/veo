@@ -187,6 +187,7 @@ export function RequestFlowScreen(): React.JSX.Element {
   const setEditing = useRideDraftStore(s => s.setEditing);
   const swapRoute = useRideDraftStore(s => s.swap);
   const resetDraft = useRideDraftStore(s => s.reset);
+  const setScheduleIntent = useRideDraftStore(s => s.setScheduleIntent);
   const savedPlaces = useSavedPlacesStore(s => s.places);
 
   // Alto visible del peek (lo reporta el sheet): se lo pasamos al mapa como paddingBottom para que el
@@ -680,11 +681,21 @@ export function RequestFlowScreen(): React.JSX.Element {
     [board.acceptMutation, navigation, activeTripId],
   );
 
+  // El PROGRAMADO se creó: cierra el borrador y aterriza en Viajes>Próximos (la única lista de
+  // programados tras la consolidación — la pantalla `ScheduledTrips` aparte se eliminó).
   const onScheduled = useCallback(() => {
     resetDraft();
     setRouteCoords([]);
-    navigation.navigate('ScheduledTrips');
+    navigation.navigate('TripHistory', {tab: 'upcoming'});
   }, [resetDraft, navigation]);
+
+  // Toggle "Programado" del Home: programar es el flujo inmediato + la marca de intención en el
+  // borrador (QuotingBody la consume abriendo el selector de día/hora). Antes navegaba a la LISTA
+  // de programados — no agendaba nada (la confusión de IA que motivó este arreglo).
+  const onStartSchedule = useCallback(() => {
+    setScheduleIntent(true);
+    enterSearch();
+  }, [setScheduleIntent, enterSearch]);
 
   const onKycRequired = useCallback(
     () => navigation.navigate('KycCamera'),
@@ -825,6 +836,7 @@ export function RequestFlowScreen(): React.JSX.Element {
     requestAgainToken: debtGate.requestAgainToken,
     onTripCreated,
     onScheduled,
+    onStartSchedule,
     onKycRequired,
     onDebtPending: debtGate.onDebtPending,
     onActiveTripExists: setActiveTripId,

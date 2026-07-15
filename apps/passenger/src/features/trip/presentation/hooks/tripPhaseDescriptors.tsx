@@ -75,7 +75,13 @@ export interface RequestFlowContext {
   // ── Cotización (fase quoting) ──
   requestAgainToken: number;
   onTripCreated: (trip: TripResource) => void;
+  /** El viaje PROGRAMADO se creó: cierra el borrador y aterriza en Viajes>Próximos. */
   onScheduled: () => void;
+  /**
+   * Toggle "Programado" del Home: arranca el flujo de programación INLINE (marca `scheduleIntent`
+   * en el borrador + abre la búsqueda de destino). No navega a ninguna lista.
+   */
+  onStartSchedule: () => void;
   onKycRequired: () => void;
   onDebtPending: () => void;
   onActiveTripExists: (tripId: string) => void;
@@ -430,7 +436,9 @@ export function HomeIdleFlowHeader({ctx}: SlotProps): React.JSX.Element {
           value={TripTimeMode.Now}
           onChange={mode => {
             if (mode === TripTimeMode.Scheduled) {
-              ctx.onScheduled();
+              // Programar es el MISMO flujo inmediato + la marca de intención: abre la búsqueda de
+              // destino y la cotización llega con el selector de día/hora abierto (no navega a listas).
+              ctx.onStartSchedule();
             }
           }}
         />

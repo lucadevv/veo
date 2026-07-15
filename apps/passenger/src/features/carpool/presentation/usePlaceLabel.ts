@@ -4,8 +4,8 @@ import {TOKENS} from '../../../core/di/tokens';
 import {useDependency} from '../../../core/di/useDependency';
 
 /**
- * Etiqueta legible de un punto vía geocoding inverso REAL (misma query key y criterio que
- * ScheduledTrips: cache compartida por coordenada, sin inventar direcciones — mientras carga o si
+ * Etiqueta legible de un punto vía geocoding inverso REAL (query key `['maps','reverse',…]`
+ * compartida app-wide: cache por coordenada, sin inventar direcciones — mientras carga o si
  * el geocoder no responde, cae al genérico "punto en el mapa").
  */
 export function usePlaceLabel(lat: number, lon: number): string {

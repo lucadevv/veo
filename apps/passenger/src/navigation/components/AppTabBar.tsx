@@ -2,6 +2,7 @@ import type {BottomTabBarProps} from '@react-navigation/bottom-tabs';
 import {
   hexAlpha,
   TabGlyphAccount,
+  TabGlyphCarpool,
   TabGlyphHome,
   TabGlyphSecurity,
   TabGlyphTrips,
@@ -22,10 +23,25 @@ type IconCmp = (props: TabGlyphProps) => React.JSX.Element;
  */
 const TABS: Record<string, {icon: IconCmp; label: string}> = {
   Home: {icon: TabGlyphHome, label: 'tabs.inicio'},
+  Compartir: {icon: TabGlyphCarpool, label: 'tabs.compartir'},
   TripHistory: {icon: TabGlyphTrips, label: 'tabs.viajes'},
   Seguridad: {icon: TabGlyphSecurity, label: 'tabs.seguridad'},
   Profile: {icon: TabGlyphAccount, label: 'tabs.cuenta'},
 };
+
+/** Alto de la píldora (padding 6×2 + item: 8+glifo 22+gap 4+label ~13+8). */
+const PILL_HEIGHT = 68;
+
+/**
+ * Alto TOTAL que ocupa el tab bar flotante (píldora + aire + home-indicator) — espejo de
+ * `useDriverTabBarHeight` del conductor. La barra es `absolute` (flota sobre el contenido), así que
+ * NO reserva espacio: las pantallas de tab con contenido/CTA al fondo deben paddear con esto.
+ */
+export function useAppTabBarHeight(): number {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  return insets.bottom + theme.spacing.sm + PILL_HEIGHT + theme.spacing.md;
+}
 
 /**
  * Bottom nav flotante del pasajero, fiel a `design/veo.pen` (C/TabBar): píldora elevada con 4 tabs

@@ -47,7 +47,6 @@ import {
   IconCamera,
   IconCard,
   IconChild,
-  IconClock,
   IconFaceScan,
   IconFileText,
   IconGift,
@@ -609,12 +608,8 @@ export function ProfileScreen(): React.JSX.Element {
                 chevron
                 onPress={() => navigation.navigate('SavedPlaces')}
               />
-              <ListItem
-                title={t('profile.scheduledTrips')}
-                leading={<IconClock color={accent} size={glyph} />}
-                chevron
-                onPress={() => navigation.navigate('ScheduledTrips')}
-              />
+              {/* "Viajes programados" se quitó: los programados viven en el tab Viajes>Próximos
+                  del bottom nav (consolidación — la pantalla aparte se eliminó). */}
               <ListItem
                 title={t('profile.referrals')}
                 leading={<IconGift color={accent} size={glyph} />}

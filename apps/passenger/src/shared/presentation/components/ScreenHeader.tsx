@@ -12,6 +12,8 @@ export interface ScreenHeaderProps {
   subtitle?: string;
   /** Acción a la derecha del back (p. ej. el engranaje de Avisos). Opcional. */
   trailing?: React.ReactNode;
+  /** Chevron de volver. `false` en raíces de TAB (no hay a dónde volver). Default `true`. */
+  back?: boolean;
 }
 
 /**
@@ -25,24 +27,32 @@ export function ScreenHeader({
   title,
   subtitle,
   trailing,
+  back = true,
 }: ScreenHeaderProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   const navigation = useNavigation();
   return (
     <View style={{gap: theme.spacing.md}}>
-      <View style={styles.topRow}>
-        {/* Back = SOLO el chevron ‹ de iOS (IconArrowLeft ya es un chevron), sin círculo/container: mismo
-            back en TODA la app (regla del dueño). Antes iba dentro de un IconButton surface (píldora). */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('actions.back')}
-          hitSlop={12}
-          onPress={() => navigation.goBack()}>
-          <IconArrowLeft color={theme.colors.ink} size={28} />
-        </Pressable>
-        {trailing ?? null}
-      </View>
+      {back || trailing ? (
+        <View style={styles.topRow}>
+          {/* Back = SOLO el chevron ‹ de iOS (IconArrowLeft ya es un chevron), sin círculo/container: mismo
+              back en TODA la app (regla del dueño). Antes iba dentro de un IconButton surface (píldora). */}
+          {back ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('actions.back')}
+              hitSlop={12}
+              onPress={() => navigation.goBack()}>
+              <IconArrowLeft color={theme.colors.ink} size={28} />
+            </Pressable>
+          ) : (
+            // Espaciador: mantiene el `trailing` a la derecha (topRow es space-between).
+            <View />
+          )}
+          {trailing ?? null}
+        </View>
+      ) : null}
       <View style={{gap: theme.spacing.xs}}>
         <Text variant="title1">{title}</Text>
         {subtitle ? (

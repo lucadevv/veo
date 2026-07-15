@@ -1,14 +1,23 @@
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {Button, Card, SafeScreen, Text, useTheme} from '@veo/ui-kit';
+import {
+  Button,
+  Card,
+  SafeScreen,
+  StatusPill,
+  Text,
+  useTheme,
+} from '@veo/ui-kit';
 import React, {useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {useAppTabBarHeight} from '../../../../navigation/components/AppTabBar';
 import type {
   CarpoolSearchQuery,
   RootStackParamList,
 } from '../../../../navigation/types';
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
+import {useCarpoolBookingStore} from '../stores/carpoolBookingStore';
 import {
   CARPOOL_MAX_SEATS,
   CARPOOL_MIN_SEATS,
@@ -41,17 +50,27 @@ const WEEKDAY_LABELS = [
 ] as const;
 
 /**
- * Buscador de carpooling (design/veo.pen P/ProgSearch): Origen/Destino con el autocompletado real
- * (picker propio, SIN tocar el rideDraftStore del flujo on-demand), FECHA como día calendario
- * (chips, sin hora: el intercity se busca por día) y stepper de ASIENTOS (1..8). El CTA navega a
- * los resultados con la query completa en params. La sección "Rutas populares" del pen NO tiene
- * backend (no existe endpoint de rutas populares) → se omite a propósito, sin datos inventados.
+ * Buscador de carpooling (design/veo.pen P/ProgSearch), RAÍZ del tab "Compartir" (el marketplace es
+ * un producto aparte, espejo del tab del conductor — ya no una pantalla enterrada en "programado").
+ * Origen/Destino con el autocompletado real (picker propio, SIN tocar el rideDraftStore del flujo
+ * on-demand), FECHA como día calendario (chips, sin hora: se busca por día) y stepper de ASIENTOS
+ * (1..8). El CTA navega a los resultados con la query completa en params. Si hay una solicitud de
+ * asiento viva (bookingId persistido), un banner arriba re-entra a su seguimiento. La sección
+ * "Rutas populares" del pen NO tiene backend (no existe endpoint de rutas populares) → se omite a
+ * propósito, sin datos inventados.
  * DEUDA: (backend) falta endpoint de rutas populares carpool (p.ej. GET /carpool/popular-routes → [{desde, hasta, precioDesde}]). Sin él, la sección "Rutas populares" del .pen se omite.
  */
 export function CarpoolSearchScreen(): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
   const navigation = useNavigation<Nav>();
+  // La tab bar flota (absolute): el contenido debe paddear su fondo para que el CTA no quede debajo.
+  const tabBarHeight = useAppTabBarHeight();
+
+  // Re-entrada al seguimiento de una solicitud viva (el poll de la pantalla de estado se corta al
+  // salir; el bookingId persiste en el store). Antes vivía en "Mis viajes programados"; ahora acá,
+  // en la casa del marketplace.
+  const activeBookingId = useCarpoolBookingStore(s => s.activeBookingId);
 
   const [origin, setOrigin] = useState<CarpoolPlacePick | null>(null);
   const [destination, setDestination] = useState<CarpoolPlacePick | null>(null);
@@ -92,27 +111,49 @@ export function CarpoolSearchScreen(): React.JSX.Element {
   };
 
   return (
-    <SafeScreen
-      padded={false}
-      footer={
-        <Button
-          label={t('carpool.searchCta')}
-          fullWidth
-          disabled={!canSearch}
-          onPress={search}
-        />
-      }>
+    <SafeScreen padded={false}>
       <ScrollView
         contentContainerStyle={{
           padding: theme.spacing.xl,
+          paddingBottom: tabBarHeight,
           gap: theme.spacing.xl,
         }}
         showsVerticalScrollIndicator={false}>
-        {/* Header in-body (patrón ScreenHeader del pen): el subtítulo propio se pliega al header. */}
+        {/* Header in-body (patrón ScreenHeader del pen), SIN back: es la raíz de un tab. */}
         <ScreenHeader
+          back={false}
           title={t('screens.carpoolSearch')}
           subtitle={t('carpool.searchSubtitle')}
         />
+
+        {/* Solicitud de asiento EN CURSO: re-entrada al seguimiento (estado real, poll al entrar). */}
+        {activeBookingId !== null ? (
+          <Card variant="outlined" padding="lg">
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: theme.spacing.sm,
+              }}>
+              <StatusPill
+                label={t('carpool.activeBookingEntry')}
+                tone="warn"
+                dot
+              />
+              <Button
+                label={t('carpool.viewBooking')}
+                variant="ghost"
+                size="sm"
+                onPress={() =>
+                  navigation.navigate('CarpoolBookingStatus', {
+                    bookingId: activeBookingId,
+                  })
+                }
+              />
+            </View>
+          </Card>
+        ) : null}
 
         {/* Card de ruta: Desde / Hasta (pen SearchCard). Cada fila abre el picker con autocompletado. */}
         <Card variant="outlined" padding="md">
@@ -188,6 +229,15 @@ export function CarpoolSearchScreen(): React.JSX.Element {
             />
           </View>
         </View>
+
+        {/* CTA in-flow (no en footer fijo): como raíz de tab, un footer pineado se apilaría con la
+            píldora flotante del bottom nav — mismo patrón que el tab Compartir del conductor. */}
+        <Button
+          label={t('carpool.searchCta')}
+          fullWidth
+          disabled={!canSearch}
+          onPress={search}
+        />
       </ScrollView>
 
       <CarpoolPlacePickerSheet

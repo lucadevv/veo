@@ -63,11 +63,10 @@ export const common = {
     payment: 'Pago del viaje',
     rating: 'Califica tu viaje',
     tripHistory: 'Mis viajes',
-    scheduledTrips: 'Mis viajes programados',
-    scheduleNew: 'Programar viaje',
     // Pantalla dedicada de compartir con la familia (design/veo.pen zKyic, tuteo del "Compartí").
     familyShare: 'Comparte tu viaje',
-    carpoolSearch: 'Busca tu viaje',
+    // Raíz del tab Compartir: presenta el producto (marketplace), no una orden de búsqueda.
+    carpoolSearch: 'Viajes compartidos',
     carpoolResults: 'Viajes disponibles',
     carpoolTripDetail: 'Detalle del viaje',
     carpoolBookingReview: 'Revisa tu reserva',
@@ -118,6 +117,7 @@ export const common = {
   /** Etiquetas del bottom nav (design/veo.pen C/TabBar). */
   tabs: {
     inicio: 'Inicio',
+    compartir: 'Compartir',
     viajes: 'Viajes',
     seguridad: 'Seguridad',
     cuenta: 'Cuenta',
@@ -416,22 +416,6 @@ export const common = {
    * Programar un viaje nuevo (botón "+" de "Mis viajes programados"). Entrada al flujo REAL de
    * programación (destino → día/hora → confirmar con tarifa estimada y POST /trips con scheduledFor).
    */
-  scheduleNew: {
-    entry: 'Programar nuevo viaje',
-    cta: 'Elegir destino',
-    intro:
-      'Programa un viaje para después. Te buscaremos conductor a tiempo y confirmaremos la tarifa al activarse.',
-    step1Title: 'Elige tu destino',
-    step1Body:
-      'Busca a dónde quieres ir; tu origen se toma de tu ubicación actual.',
-    step2Title: 'Revisa tu trayecto',
-    step2Body: 'Verás la ruta y la tarifa estimada antes de confirmar.',
-    step3Title: 'Elige día y hora',
-    step3Body:
-      'Programa con al menos 15 minutos de anticipación y hasta 7 días en adelante.',
-    note: 'Te buscaremos conductor unos minutos antes. La tarifa se confirma al activarse el viaje.',
-  },
-
   /**
    * "Olvidé algo" (desde el detalle de un viaje). No hay endpoint dedicado: el reporte se crea como un
    * ticket de soporte (categoría DRIVER) con el viaje adjunto; VEO media el contacto con el conductor.
@@ -712,29 +696,17 @@ export const common = {
     scheduledFor: 'Programado para {{when}}',
     tooSoon: 'Programa con al menos 15 minutos de anticipación.',
     tooFar: 'Solo puedes programar hasta 7 días en adelante.',
-    confirmedTitle: 'Viaje programado',
-    confirmedBody:
-      'Tu viaje quedó programado para {{when}}. Lo verás en “Mis viajes programados”.',
-    viewScheduled: 'Ver mis viajes programados',
   },
 
-  /** Listado y gestión de viajes programados (GET /trips/scheduled, DELETE /trips/:id/schedule). */
+  /** Programados (tab Viajes>Próximos, GET /trips/scheduled + DELETE /trips/:id/schedule). */
   scheduled: {
-    title: 'Mis viajes programados',
-    entry: 'Viajes programados',
-    when: 'Programado para',
     fare: 'Tarifa estimada',
-    route: '{{origin}} → {{destination}}',
-    stopsOne: '1 parada intermedia',
-    stopsMany: '{{count}} paradas intermedias',
     cancel: 'Cancelar viaje',
     cancelTitle: '¿Cancelar viaje programado?',
     cancelBody: 'Si cancelas con antelación no se aplica penalidad.',
     cancelConfirm: 'Sí, cancelar',
     keep: 'Mantener',
     cancelError: 'No pudimos cancelar el viaje. Inténtalo de nuevo.',
-    empty: 'No tienes viajes programados',
-    emptySubtitle: 'Programa un viaje desde la cotización y aparecerá aquí.',
     loadError: 'No pudimos cargar tus viajes programados.',
     // Nota al pie del listado (design/veo.pen ZVdlh Note). El pen promete "hasta 2 h antes sin
     // costo", pero la regla REAL (trip-service scheduled-trip.service) es: cancelar es gratis
@@ -749,12 +721,7 @@ export const common = {
    * `formatPEN` desde céntimos; acá solo viven los textos.
    */
   carpool: {
-    /** Punto de entrada (ScheduleNew / Mis viajes programados). */
-    entryTitle: 'Viajes compartidos',
-    entryBody:
-      'Busca asientos publicados por conductores verificados y reserva el tuyo. En tu ciudad o entre ciudades.',
-    entryCta: 'Buscar asientos',
-    /** Re-entrada al seguimiento de una solicitud viva (bookingId activo en el store). */
+    /** Re-entrada al seguimiento de una solicitud viva (banner del tab Compartir). */
     activeBookingEntry: 'Tienes una solicitud de asiento en curso',
     viewBooking: 'Ver estado',
 
@@ -1975,7 +1942,6 @@ export const common = {
     /** Fila del FEED de avisos (para no perder el acceso al mover la campana a preferencias). */
     notificationsFeed: 'Avisos',
     sectionPreferences: 'Preferencias',
-    scheduledTrips: 'Viajes programados',
     // Promociones (opt-in marketing)
     sectionPromotions: 'Promociones',
     promotions: 'Promociones y novedades',

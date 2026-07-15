@@ -28,6 +28,19 @@ export function formatDayShort(date: Date): string {
 }
 
 /**
+ * "4 jul" (sin día de semana ni año) de un ISO datetime — para lomos angostos como la card de
+ * Próximos: "15/07/2026" desbordaba el ancho fijo y truncaba con "…". El programado vive a ≤7 días,
+ * el año es redundante.
+ */
+export function formatDayMonthShort(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return `${date.getDate()} ${MONTHS[date.getMonth()]}`;
+}
+
+/**
  * "Vie 4 jul" de un día calendario YYYY-MM-DD (el formato que viaja como `fecha` de búsqueda).
  * Se parsea A MANO como fecha LOCAL: `new Date('YYYY-MM-DD')` interpreta UTC y correría el día
  * en Lima (UTC-5).

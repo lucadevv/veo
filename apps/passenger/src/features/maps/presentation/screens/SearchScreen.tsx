@@ -154,7 +154,7 @@ export function SearchScreen(): React.JSX.Element {
 
   // Cierra el buscador una vez fijados ambos extremos: `goBack()` al sheet unificado que la abrió
   // (fase quoting con el borrador actualizado). Es el ÚNICO camino de retorno — el flujo programado
-  // también vive en el sheet (ver ScheduleNew), así que ya no hay pantalla de cotización legacy.
+  // también vive en el sheet (scheduleIntent del borrador), así que ya no hay pantalla de cotización legacy.
   const resolveFlow = useCallback(() => {
     navigation.goBack();
   }, [navigation]);

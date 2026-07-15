@@ -1,37 +1,34 @@
 import type {MapPoint, TripResource} from '@veo/api-client';
-import {useQuery} from '@tanstack/react-query';
-import {Button, Text, useTheme} from '@veo/ui-kit';
-import React from 'react';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
+import {Banner, BottomSheet, Button, Text, useTheme} from '@veo/ui-kit';
+import React, {useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {FlatList, StyleSheet, View} from 'react-native';
+import {FlatList, Pressable, StyleSheet, View} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {
   ErrorState,
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
-import {
-  formatPEN,
-  formatShortDate,
-  formatTimeOfDay,
-} from '../../../../shared/utils/format';
+import {formatPEN, formatTimeOfDay} from '../../../../shared/utils/format';
+import {formatDayMonthShort} from '../../../../shared/utils/formatDay';
+import {IconCalendar} from './icons';
 import {EnterView} from './motion';
 
-/**
- * MISMA query key que `ScheduledTripsScreen`: ambos tabs beben del MISMO dato real
- * (`GET /trips/scheduled`) y comparten caché — cancelar allá refresca acá sin listas paralelas.
- */
+/** Query key canónica de los programados (`GET /trips/scheduled`). */
 const SCHEDULED_QUERY_KEY = ['trips', 'scheduled'] as const;
 
 export interface UpcomingTripsTabProps {
-  /** CTA del vacío honesto: entra al flujo REAL de programación (`ScheduleNew`). */
+  /** CTA del vacío honesto: arranca el flujo REAL de programación (inline, desde el Home). */
   onSchedule: () => void;
 }
 
 /**
  * Tab "Próximos" de Tus viajes (design/veo.pen UcekU): los viajes PROGRAMADOS reales, cada uno como
- * card con fecha (calendario) + StatusPill + ruta + tarifa estimada. Estados honestos: carga, error
- * con reintento, y vacío que INVITA a programar (no se auto-cambia de tab con magia).
+ * card con fecha (calendario) + StatusPill + ruta + tarifa estimada + CANCELAR con confirmación
+ * (DELETE /trips/:id/schedule) — es la ÚNICA lista de programados (la pantalla `ScheduledTrips`
+ * aparte se eliminó en la consolidación). Estados honestos: carga, error con reintento, y vacío que
+ * INVITA a programar (no se auto-cambia de tab con magia).
  *
  * GAPS vs pen (datos que el backend no tiene en SCHEDULED): el pen pinta conductor + vehículo
  * ("Carlos M. · Toyota Corolla") y estados "Confirmado"/"Esperando aprobación"; el contrato real solo
@@ -43,10 +40,23 @@ export function UpcomingTripsTab({
   const theme = useTheme();
   const {t} = useTranslation();
   const listScheduled = useDependency(TOKENS.listScheduledTripsUseCase);
+  const cancelScheduled = useDependency(TOKENS.cancelScheduledTripUseCase);
+  const queryClient = useQueryClient();
+
+  // Viaje pendiente de confirmación de cancelación (null = sheet cerrado).
+  const [pendingCancel, setPendingCancel] = useState<TripResource | null>(null);
 
   const scheduledQuery = useQuery({
     queryKey: SCHEDULED_QUERY_KEY,
     queryFn: () => listScheduled.execute(),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: (tripId: string) => cancelScheduled.execute(tripId),
+    onSuccess: () => {
+      setPendingCancel(null);
+      void queryClient.invalidateQueries({queryKey: SCHEDULED_QUERY_KEY});
+    },
   });
 
   if (scheduledQuery.isLoading) {
@@ -103,27 +113,83 @@ export function UpcomingTripsTab({
   }
 
   return (
-    <FlatList
-      data={trips}
-      keyExtractor={item => item.id}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{
-        paddingHorizontal: theme.spacing.xl,
-        paddingTop: theme.spacing.md,
-        paddingBottom: theme.spacing.xl,
-        gap: theme.spacing.md,
-      }}
-      renderItem={({item, index}) => (
-        <EnterView index={index}>
-          <UpcomingTripCard trip={item} />
-        </EnterView>
-      )}
-    />
+    <>
+      <FlatList
+        data={trips}
+        keyExtractor={item => item.id}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: theme.spacing.xl,
+          paddingTop: theme.spacing.md,
+          paddingBottom: theme.spacing.xl,
+          gap: theme.spacing.md,
+        }}
+        renderItem={({item, index}) => (
+          <EnterView index={index}>
+            <UpcomingTripCard
+              trip={item}
+              onCancel={() => setPendingCancel(item)}
+            />
+          </EnterView>
+        )}
+        // Nota honesta al pie (sin promesa temporal: el backend no tiene ventana de 2 h ni recordatorio).
+        ListFooterComponent={
+          <View
+            style={[
+              styles.footNote,
+              {gap: theme.spacing.xs, paddingVertical: theme.spacing.xs},
+            ]}>
+            <IconCalendar color={theme.colors.inkSubtle} size={14} />
+            <Text variant="caption" color="inkSubtle">
+              {t('scheduled.footNote')}
+            </Text>
+          </View>
+        }
+      />
+
+      {/* Confirmación de cancelación (portada de la pantalla `ScheduledTrips` eliminada). */}
+      <BottomSheet
+        visible={pendingCancel !== null}
+        onClose={() => setPendingCancel(null)}
+        title={t('scheduled.cancelTitle')}
+        footer={
+          <View style={{gap: theme.spacing.sm}}>
+            <Button
+              label={t('scheduled.cancelConfirm')}
+              variant="danger"
+              fullWidth
+              loading={cancelMutation.isPending}
+              onPress={() => {
+                if (pendingCancel) {
+                  cancelMutation.mutate(pendingCancel.id);
+                }
+              }}
+            />
+            <Button
+              label={t('scheduled.keep')}
+              variant="ghost"
+              fullWidth
+              onPress={() => setPendingCancel(null)}
+            />
+          </View>
+        }>
+        <View style={{gap: theme.spacing.md}}>
+          <Text variant="callout" color="inkMuted">
+            {t('scheduled.cancelBody')}
+          </Text>
+          {cancelMutation.isError ? (
+            <Banner tone="danger" title={t('scheduled.cancelError')} />
+          ) : null}
+        </View>
+      </BottomSheet>
+    </>
   );
 }
 
 interface UpcomingTripCardProps {
   trip: TripResource;
+  /** Pide cancelar este programado (abre la confirmación en el contenedor). */
+  onCancel: () => void;
 }
 
 /**
@@ -133,13 +199,17 @@ interface UpcomingTripCardProps {
  * geocodificados (los programados sí los tienen) · footer con hairline + "estimada" + monto `title3`.
  * SUPERFICIE surface con elevación, sin borde duro (editorial, no plantilla).
  */
-function UpcomingTripCard({trip}: UpcomingTripCardProps): React.JSX.Element {
+function UpcomingTripCard({
+  trip,
+  onCancel,
+}: UpcomingTripCardProps): React.JSX.Element {
   const theme = useTheme();
   const {t} = useTranslation();
 
   const originLabel = usePointLabel(trip.origin);
   const destinationLabel = usePointLabel(trip.destination);
-  const day = trip.scheduledFor ? formatShortDate(trip.scheduledFor) : '—';
+  // "15 jul" (no "15/07/2026"): el lomo es angosto (84) y la fecha completa truncaba con "…".
+  const day = trip.scheduledFor ? formatDayMonthShort(trip.scheduledFor) : '—';
   const time = trip.scheduledFor ? formatTimeOfDay(trip.scheduledFor) : '';
 
   return (
@@ -153,7 +223,7 @@ function UpcomingTripCard({trip}: UpcomingTripCardProps): React.JSX.Element {
           ...theme.elevation.level1,
         },
       ]}>
-      {/* CABECERA FINA: estado (punto brand + micro-label NEUTRO "PROGRAMADO"). */}
+      {/* CABECERA FINA: estado (punto brand + micro-label NEUTRO "PROGRAMADO") + cancelar discreto. */}
       <View style={styles.topLine}>
         <View style={styles.statusGroup}>
           <View style={[styles.dot, {backgroundColor: theme.colors.brand}]} />
@@ -164,6 +234,15 @@ function UpcomingTripCard({trip}: UpcomingTripCardProps): React.JSX.Element {
             {t('tripStatus.SCHEDULED')}
           </Text>
         </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('scheduled.cancel')}
+          hitSlop={10}
+          onPress={onCancel}>
+          <Text variant="footnote" style={{color: theme.colors.danger}}>
+            {t('scheduled.cancel')}
+          </Text>
+        </Pressable>
       </View>
 
       {/* CUERPO: "lomo" temporal (día + hora) + TRAYECTO como riel origen→destino (lugares reales). */}
@@ -225,8 +304,8 @@ function UpcomingTripCard({trip}: UpcomingTripCardProps): React.JSX.Element {
 }
 
 /**
- * Etiqueta legible de un punto vía geocoding inverso real (misma query key que `ScheduledTripsScreen`
- * → caché compartida; el hook se duplica a propósito porque aquel vive privado en su pantalla).
+ * Etiqueta legible de un punto vía geocoding inverso real (query key `['maps','reverse',…]`
+ * compartida app-wide → caché común con el resto de las pantallas que geocodifican).
  */
 function usePointLabel(point: {lat: number; lon: number}): string {
   const {t} = useTranslation();
@@ -275,5 +354,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 8,
+  },
+  footNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
