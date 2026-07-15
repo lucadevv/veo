@@ -16,6 +16,8 @@ import type { Env } from '../config/env.schema';
 
 interface GetTrustedContactsRequest {
   userId: string;
+  /** Vista del DUEÑO (pantalla de contactos): incluye pendientes de OTP. Fan-out de pánico lo omite. */
+  includeUnverified?: boolean;
 }
 interface TrustedContactReply {
   id: string;
@@ -44,7 +46,7 @@ export class ShareGrpcController {
 
   @GrpcMethod('ShareService', 'GetTrustedContacts')
   async getTrustedContacts(
-    { userId }: GetTrustedContactsRequest,
+    { userId, includeUnverified }: GetTrustedContactsRequest,
     metadata: Metadata,
   ): Promise<TrustedContactsReply> {
     const identity = verifyGrpcIdentity(metadata, this.secret, {
@@ -56,7 +58,12 @@ export class ShareGrpcController {
         message: 'Identidad interna inválida o ausente',
       });
     }
-    const verified = await this.contacts.listVerified(userId);
+    // Vista del DUEÑO (includeUnverified): TODOS sus contactos — sin esto, un contacto recién
+    // creado (OTP pendiente) era INVISIBLE en la app y el flujo de verificación no tenía cierre
+    // (bug cazado en sim 2026-07-15). El fan-out de pánico omite el flag → solo verificados.
+    const verified = includeUnverified
+      ? await this.contacts.list(userId)
+      : await this.contacts.listVerified(userId);
     return {
       contacts: verified.map((c) => ({
         id: c.id,

@@ -33,7 +33,9 @@ export class ContactsService {
     const meta = grpcIdentityMetadata(user, this.secret, this.audience);
     const reply = await this.shareGrpc.call<TrustedContactsReply>(
       'GetTrustedContacts',
-      { userId: user.userId },
+      // Vista del DUEÑO: incluye los pendientes de OTP (para reenviar/verificar desde la app).
+      // El fan-out de pánico usa el MISMO método sin el flag → solo verificados.
+      { userId: user.userId, includeUnverified: true },
       meta,
     );
     return reply.contacts.map((c) => ({
