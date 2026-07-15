@@ -9,6 +9,7 @@ import type {
   RootStackParamList,
 } from '../../../../navigation/types';
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
+import {SelectableChip} from '../../../../shared/presentation/components/SelectableChip';
 import {
   CARPOOL_MAX_SEATS,
   CARPOOL_MIN_SEATS,
@@ -154,7 +155,7 @@ export function CarpoolSearchScreen(): React.JSX.Element {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{gap: theme.spacing.sm}}>
             {days.map((day, index) => (
-              <Chip
+              <SelectableChip
                 key={day.iso}
                 label={dayLabel(day, index)}
                 selected={day.iso === fecha}
@@ -255,42 +256,6 @@ function EndpointRow({
   );
 }
 
-interface ChipProps {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}
-
-/** Chip de día (mismo lenguaje visual que ScheduleSheet: estado por borde, no solo color). */
-function Chip({label, selected, onPress}: ChipProps): React.JSX.Element {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{selected}}
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.chip,
-        {
-          borderRadius: theme.radii.pill,
-          paddingHorizontal: theme.spacing.lg,
-          paddingVertical: theme.spacing.sm,
-          borderWidth: selected ? 2 : 1,
-          borderColor: selected ? theme.colors.accent : theme.colors.border,
-          backgroundColor: selected
-            ? theme.colors.surfaceElevated
-            : theme.colors.surface,
-          opacity: pressed ? 0.7 : 1,
-        },
-      ]}>
-      <Text variant="subhead" color={selected ? 'ink' : 'inkMuted'}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 interface StepperButtonProps {
   icon: React.ReactNode;
   disabled: boolean;
@@ -342,7 +307,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   flex: {flex: 1},
-  chip: {alignItems: 'center', justifyContent: 'center'},
   stepperRow: {flexDirection: 'row', alignItems: 'center'},
   stepperButton: {
     width: 44,

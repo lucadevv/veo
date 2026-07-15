@@ -1,9 +1,11 @@
 import {
   type CarpoolBookingCreateRequest,
   type CarpoolBookingView,
+  type CarpoolPopularRoutes,
   type CarpoolSearchPage,
   type CarpoolTripDetail,
   carpoolBookingView,
+  carpoolPopularRoutes,
   carpoolSearchPage,
   carpoolTripDetail,
   type HttpClient,
@@ -27,11 +29,18 @@ export class HttpCarpoolRepository implements CarpoolRepository {
       query: {
         // undefined se omite del query string (lo resuelve el HttpClient), sin ramas acá.
         region: params.region,
+        destRegion: params.destRegion,
         orden: params.orden,
         limit: params.limit,
         cursor: params.cursor,
       },
       schema: carpoolSearchPage,
+    });
+  }
+
+  getPopularRoutes(): Promise<CarpoolPopularRoutes> {
+    return this.http.get('/carpool/trips/popular-routes', {
+      schema: carpoolPopularRoutes,
     });
   }
 

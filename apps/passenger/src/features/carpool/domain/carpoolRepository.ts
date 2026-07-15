@@ -1,6 +1,7 @@
 import type {
   CarpoolBookingCreateRequest,
   CarpoolBookingView,
+  CarpoolPopularRoutes,
   CarpoolSearchPage,
   CarpoolTripDetail,
 } from '@veo/api-client';
@@ -45,6 +46,8 @@ export interface CarpoolSearchParams {
 export interface CarpoolBrowseParams {
   /** Id del catálogo de regiones (`lima-metropolitana`, `ancash`, …); undefined = todas. */
   region?: string;
+  /** Región de DESTINO (mismo catálogo): filtra por bbox del destino (rutas populares). */
+  destRegion?: string;
   /** Orden del feed (`salida` default | `precio`). */
   orden?: 'salida' | 'precio';
   /** Tamaño de página (keyset). */
@@ -62,6 +65,9 @@ export interface CarpoolBrowseParams {
 export interface CarpoolRepository {
   /** GET /carpool/trips/browse — FEED keyset de TODOS los viajes futuros (filtro región opcional). */
   browseTrips(params: CarpoolBrowseParams): Promise<CarpoolSearchPage>;
+
+  /** GET /carpool/trips/popular-routes — top de pares región→región con oferta viva (count + desde). */
+  getPopularRoutes(): Promise<CarpoolPopularRoutes>;
 
   /** GET /carpool/trips/search — página keyset de viajes que calzan ruta + fecha + asientos. */
   searchTrips(params: CarpoolSearchParams): Promise<CarpoolSearchPage>;

@@ -1,6 +1,7 @@
 import type {
   CarpoolBookingCreateRequest,
   CarpoolBookingView,
+  CarpoolPopularRoutes,
   CarpoolSearchPage,
   CarpoolTripDetail,
 } from '@veo/api-client';
@@ -16,6 +17,15 @@ export class BrowseCarpoolTripsUseCase {
 
   execute(params: CarpoolBrowseParams): Promise<CarpoolSearchPage> {
     return this.repository.browseTrips(params);
+  }
+}
+
+/** Top de rutas populares del marketplace (pares región→región con oferta viva). */
+export class GetCarpoolPopularRoutesUseCase {
+  constructor(private readonly repository: CarpoolRepository) {}
+
+  execute(): Promise<CarpoolPopularRoutes> {
+    return this.repository.getPopularRoutes();
   }
 }
 

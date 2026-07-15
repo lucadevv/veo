@@ -735,6 +735,10 @@ export const common = {
     feedLoadError: 'No pudimos cargar los viajes.',
     seatsLeftOne: 'Queda 1',
     seatsLeftMany: 'Quedan {{count}}',
+    /** Rutas populares del feed (pares región→región con oferta viva). */
+    feedPopularLabel: 'Rutas populares',
+    feedFromPrice: 'desde {{price}}',
+    feedRouteLocal: 'Dentro de {{region}}',
 
     /** Re-entrada al seguimiento de una solicitud viva (banner del tab Compartir). */
     activeBookingEntry: 'Tienes una solicitud de asiento en curso',

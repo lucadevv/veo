@@ -34,6 +34,7 @@ import {
   BrowseCarpoolTripsUseCase,
   CancelCarpoolBookingUseCase,
   GetCarpoolBookingUseCase,
+  GetCarpoolPopularRoutesUseCase,
   GetCarpoolTripDetailUseCase,
   ReserveCarpoolSeatUseCase,
   SearchCarpoolTripsUseCase,
@@ -482,6 +483,11 @@ export function buildContainer(): Container {
   container.register(
     TOKENS.browseCarpoolTripsUseCase,
     c => new BrowseCarpoolTripsUseCase(c.resolve(TOKENS.carpoolRepository)),
+  );
+  container.register(
+    TOKENS.getCarpoolPopularRoutesUseCase,
+    c =>
+      new GetCarpoolPopularRoutesUseCase(c.resolve(TOKENS.carpoolRepository)),
   );
   container.register(
     TOKENS.searchCarpoolTripsUseCase,

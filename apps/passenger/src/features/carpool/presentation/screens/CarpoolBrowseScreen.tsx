@@ -1,7 +1,7 @@
 import type {CarpoolSearchItem} from '@veo/api-client';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {keepPreviousData, useInfiniteQuery} from '@tanstack/react-query';
+import {keepPreviousData, useInfiniteQuery, useQuery} from '@tanstack/react-query';
 import {
   BottomSheet,
   Button,
@@ -13,10 +13,22 @@ import {
 } from '@veo/ui-kit';
 // Submódulo puro (NO el barrel `@veo/utils`, que arrastra `ids`/`crypto` con `node:crypto` —
 // irresoluble en RN/Hermes; mismo patrón que `@veo/utils/money` en el driver).
-import {regionForPoint, REGIONS_PE, type RegionPE} from '@veo/utils/regions';
+import {
+  regionById,
+  regionForPoint,
+  REGIONS_PE,
+  type RegionPE,
+} from '@veo/utils/regions';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {FlatList, Pressable, RefreshControl, StyleSheet, View} from 'react-native';
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import {TOKENS} from '../../../../core/di/tokens';
 import {useDependency} from '../../../../core/di/useDependency';
 import {useCurrentLocation} from '../../../../core/location/useCurrentLocation';
@@ -28,8 +40,10 @@ import {
   LoadingState,
 } from '../../../../shared/presentation/components/ScreenStates';
 import {ScreenHeader} from '../../../../shared/presentation/components/ScreenHeader';
+import {formatPEN} from '../../../../shared/utils/format';
 import {
   IconChevronDown,
+  IconClose,
   IconPin,
   IconSearch,
 } from '../../../trip/presentation/components/icons';
@@ -56,6 +70,7 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
   const navigation = useNavigation<Nav>();
   const tabBarHeight = useAppTabBarHeight();
   const browseTrips = useDependency(TOKENS.browseCarpoolTripsUseCase);
+  const getPopularRoutes = useDependency(TOKENS.getCarpoolPopularRoutesUseCase);
 
   // Re-entrada al seguimiento de una solicitud viva (bookingId persistido en el store).
   const activeBookingId = useCarpoolBookingStore(s => s.activeBookingId);
@@ -63,6 +78,8 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
   // REGIÓN del feed: null = todas. Se auto-detecta UNA vez de la ubicación (si el usuario no eligió
   // manualmente antes); denied/error de ubicación → queda en todas (honesto, sin bloquear el feed).
   const [region, setRegion] = useState<RegionPE | null>(null);
+  // Región de DESTINO (solo la setean las rutas populares): chip "→ X" descartable.
+  const [destRegion, setDestRegion] = useState<RegionPE | null>(null);
   const [regionSheetOpen, setRegionSheetOpen] = useState(false);
   const userChoseRegion = useRef(false);
   const location = useCurrentLocation();
@@ -77,10 +94,15 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
   }, [location.status, location.point]);
 
   const feedQuery = useInfiniteQuery({
-    queryKey: ['carpool', 'browse', {region: region?.id ?? null}],
+    queryKey: [
+      'carpool',
+      'browse',
+      {region: region?.id ?? null, destRegion: destRegion?.id ?? null},
+    ],
     queryFn: ({pageParam}) =>
       browseTrips.execute({
         region: region?.id,
+        destRegion: destRegion?.id,
         limit: PAGE_SIZE,
         cursor: pageParam,
       }),
@@ -95,10 +117,28 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
     [feedQuery.data],
   );
 
+  // Top de rutas populares (agregado liviano; la sección se OMITE si no hay datos o falla —
+  // el feed nunca se bloquea por el agregado).
+  const popularQuery = useQuery({
+    queryKey: ['carpool', 'popular-routes'],
+    queryFn: () => getPopularRoutes.execute(),
+    staleTime: 60_000,
+  });
+  const popularRoutes = popularQuery.data?.routes ?? [];
+
   const pickRegion = (next: RegionPE | null): void => {
     userChoseRegion.current = true;
     setRegion(next);
+    // Elegir región a mano invalida el par de la ruta popular (el destino ya no acompaña).
+    setDestRegion(null);
     setRegionSheetOpen(false);
+  };
+
+  // Tap en una ruta popular: el feed se filtra al PAR origen→destino (misma región → solo origen).
+  const pickPopularRoute = (origenId: string, destinoId: string): void => {
+    userChoseRegion.current = true;
+    setRegion(regionById(origenId) ?? null);
+    setDestRegion(origenId === destinoId ? null : (regionById(destinoId) ?? null));
   };
 
   const header = (
@@ -106,8 +146,9 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
       {/* Header in-body sin back (raíz de tab) — pen P/CarpoolFeed. */}
       <ScreenHeader back={false} title={t('screens.carpoolFeed')} />
 
-      {/* Chip de REGIÓN (pen RegionChip): pin brand + nombre + chevron → sheet selector. */}
-      <View style={styles.regionRow}>
+      {/* Chip de REGIÓN (pen RegionChip): pin brand + nombre + chevron → sheet selector. Al lado,
+          el chip de DESTINO (pen DestChip, solo con ruta popular activa): "→ X" descartable. */}
+      <View style={[styles.regionRow, {gap: theme.spacing.sm}]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={region?.nombre ?? t('carpool.feedRegionAll')}
@@ -127,6 +168,29 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
           </Text>
           <IconChevronDown color={theme.colors.inkMuted} size={14} />
         </Pressable>
+        {destRegion ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`→ ${destRegion.nombre}`}
+            onPress={() => setDestRegion(null)}
+            style={({pressed}) => [
+              styles.regionChip,
+              {
+                borderRadius: theme.radii.pill,
+                backgroundColor: theme.colors.brandDim,
+                borderColor: theme.colors.brand,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}>
+            <Text
+              variant="footnote"
+              numberOfLines={1}
+              style={{fontWeight: '500', color: theme.colors.brand}}>
+              → {destRegion.nombre}
+            </Text>
+            <IconClose color={theme.colors.brand} size={12} />
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Pill de BÚSQUEDA (pen SearchPill): intención concreta → buscador por ruta. */}
@@ -178,6 +242,50 @@ export function CarpoolBrowseScreen(): React.JSX.Element {
             ? t('carpool.feedCountAllOne')
             : t('carpool.feedCountAllMany', {count: items.length})}
       </Text>
+
+      {/* RUTAS POPULARES (pen PopularRoutes): pares región→región con oferta viva. La sección se
+          OMITE sin datos (o si el agregado falla): sin filas fantasma ni placeholders. */}
+      {popularRoutes.length > 0 ? (
+        <View style={{gap: theme.spacing.sm}}>
+          <Text variant="subhead" color="inkMuted" style={{fontWeight: '600'}}>
+            {t('carpool.feedPopularLabel')}
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{gap: theme.spacing.sm}}>
+            {popularRoutes.map(route => (
+              <Pressable
+                key={`${route.origenRegionId}-${route.destinoRegionId}`}
+                accessibilityRole="button"
+                accessibilityLabel={`${route.origenNombre} → ${route.destinoNombre}, ${t('carpool.feedFromPrice', {price: formatPEN(route.precioDesdeCents)})}`}
+                onPress={() =>
+                  pickPopularRoute(route.origenRegionId, route.destinoRegionId)
+                }
+                style={({pressed}) => [
+                  styles.routeCard,
+                  {
+                    borderRadius: theme.radii.md,
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}>
+                <Text variant="footnote" style={{fontWeight: '600'}} numberOfLines={1}>
+                  {route.origenRegionId === route.destinoRegionId
+                    ? t('carpool.feedRouteLocal', {region: route.origenNombre})
+                    : `${route.origenNombre} → ${route.destinoNombre}`}
+                </Text>
+                <Text variant="caption" color="inkMuted">
+                  {t('carpool.feedFromPrice', {
+                    price: formatPEN(route.precioDesdeCents),
+                  })}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
     </View>
   );
 
@@ -323,4 +431,5 @@ const styles = StyleSheet.create({
   },
   // Celda de la grilla: mitad del ancho (el gap lo pone el columnWrapper).
   cell: {flex: 1},
+  routeCard: {gap: 2, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1},
 });
