@@ -594,9 +594,11 @@ export const common = {
 
   /** PUJA · board de ofertas en vivo (ADR 010). */
   offers: {
-    // Plurales i18next (_one/_other): con count=1 salía "1 conductores respondieron" (visto en el sim).
-    title_one: '{{count}} conductor respondió',
-    title_other: '{{count}} conductores respondieron',
+    // Plural i18next en formato v3 (`key`/`key_plural`): el init usa compatibilityJSON:'v3' (evita depender
+    // de Intl.PluralRules en Hermes). En v4 (_one/_other) i18next NO alcanzaba la clave base y devolvía el
+    // literal "offers.title" (visto en el sim). `title` = count 1, `title_plural` = count ≠ 1.
+    title: '{{count}} conductor respondió',
+    title_plural: '{{count}} conductores respondieron',
     searchingTitle: 'Buscando conductores',
     // Honesto (ADR-020 Lote 3): las ofertas vienen ORDENADAS (mejor precio primero); el rating y la
     // llegada se ven en cada card para COMPARAR — no es un sort que el pasajero elige (no prometemos eso).
@@ -610,9 +612,9 @@ export const common = {
     view: 'Ver',
     /** Chip echo de la puja del pasajero en el header del board (design/veo.pen L7OMER "TU OFERTA S/ X"). */
     yourOffer: 'TU OFERTA',
-    /** Subtítulo del board con ofertas (pen: "N ofertas cerca tuyo" → tuteo peruano). */
-    nearYou_one: '{{count}} oferta cerca de ti',
-    nearYou_other: '{{count}} ofertas cerca de ti',
+    /** Subtítulo del board con ofertas (pen: "N ofertas cerca tuyo" → tuteo peruano). Plural v3 (ver `title`). */
+    nearYou: '{{count}} oferta cerca de ti',
+    nearYou_plural: '{{count}} ofertas cerca de ti',
     /** Labels de acción por tipo de oferta (pen C/BidCard): aceptar el precio vs responder la contraoferta. */
     accept: 'Aceptar',
     respond: 'Responder',
