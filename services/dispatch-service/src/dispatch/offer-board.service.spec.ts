@@ -669,10 +669,8 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       ],
     });
 
-    const delivered = c.delivery.delivered[0]?.bid as { waypointCount: number } & Record<
-      string,
-      unknown
-    >;
+    // `bid!`: el enrich es SIEMPRE presente en el broadcast de PUJA (solo FIXED lo deja undefined).
+    const delivered = c.delivery.delivered[0]!.bid!;
     expect(delivered.waypointCount).toBe(2);
     // Minimización de datos: NINGUNA coordenada de parada cruza en el broadcast.
     expect('waypoints' in delivered).toBe(false);

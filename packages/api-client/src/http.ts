@@ -4,7 +4,7 @@
  * - Normaliza errores a ApiError. Valida la respuesta con un schema Zod opcional.
  * - Reintenta GET idempotentes ante errores retryables (red/5xx/429) con backoff.
  */
-import type { ZodType } from 'zod';
+import type { ZodType, ZodTypeDef } from 'zod';
 import { ApiError, type ApiErrorBody } from './errors.js';
 
 export interface HttpClientOptions {
@@ -29,8 +29,12 @@ export interface RequestOptions<T> {
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
   headers?: Record<string, string>;
-  /** Schema Zod para validar (y tipar) la respuesta. */
-  schema?: ZodType<T>;
+  /**
+   * Schema Zod para validar (y tipar) la respuesta. `T` es el tipo de SALIDA (parseado): el Input va
+   * `unknown` a propósito — `ZodType<T>` a secas exige Input=Output y rompe la inferencia con schemas
+   * cuyo input difiere del output (`.default()`/`.transform()`, ej. `referralSummary.currency`).
+   */
+  schema?: ZodType<T, ZodTypeDef, unknown>;
   signal?: AbortSignal;
   /** Override del timeout por intento (ms) para ESTA request. `0` = sin timeout. */
   timeoutMs?: number;
