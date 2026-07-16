@@ -12,6 +12,7 @@ class FakeReferralsRepository implements ReferralsRepository {
       code: 'MINE123',
       referredCount: 2,
       rewardsEarnedCents: 1000,
+      currency: 'PEN',
     }),
   );
   redeem = jest.fn(
@@ -19,6 +20,7 @@ class FakeReferralsRepository implements ReferralsRepository {
       code: 'MINE123',
       referredCount: 3,
       rewardsEarnedCents: 1500,
+      currency: 'PEN',
     }),
   );
 }

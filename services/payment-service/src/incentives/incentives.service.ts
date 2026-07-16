@@ -85,6 +85,8 @@ export class IncentivesService {
               incentiveId: incentive.id,
               driverId,
               rewardCents: incentive.rewardCents,
+              // Moneda del bono (FOUNDATION §8: Money = céntimos + currency). Hoy única 'PEN'.
+              currency: 'PEN',
               tripsCompleted: progress.tripsCompleted,
               at: new Date().toISOString(),
             },

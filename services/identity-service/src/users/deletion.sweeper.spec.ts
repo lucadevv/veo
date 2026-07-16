@@ -77,7 +77,8 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
     expect(userId).toBe('u1');
     expect(data.deletedAt).toBeInstanceOf(Date);
     expect(data.email).toBeNull();
-    expect(data.dniHash).toBeNull();
+    expect(data.document).toBeNull(); // doc de pago en claro (decisión §14) → purga obligatoria
+    expect(data.documentType).toBeNull();
     expect(data.photoUrl).toBeNull();
     expect(data.phone).toBe('[deleted:phone:u1]');
     expect(data.faceEmbedding).toEqual([]); // biometría purgada

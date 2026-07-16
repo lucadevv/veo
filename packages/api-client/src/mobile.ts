@@ -772,6 +772,11 @@ export const referralSummary = z.object({
   referredCount: z.number().int(),
   /** Crédito acumulado por referidos completados (céntimos PEN). */
   rewardsEarnedCents: z.number().int(),
+  /**
+   * Moneda de `rewardsEarnedCents` (FOUNDATION §8: Money = céntimos + currency). Hoy única 'PEN'.
+   * `.default`: compat con un BFF viejo que aún no la envía.
+   */
+  currency: z.literal('PEN').default('PEN'),
 });
 export type ReferralSummary = z.infer<typeof referralSummary>;
 

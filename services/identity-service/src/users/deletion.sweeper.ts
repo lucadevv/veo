@@ -61,12 +61,14 @@ export class DeletionSweeper {
     now: Date,
   ): Promise<void> {
     await this.repo.runInTransaction(async (tx) => {
-      // User: PII de contacto + biométrica (faceEmbedding de referencia del pasajero verificado).
+      // User: PII de contacto + documento de pago (Yape On File, persiste EN CLARO por decisión §14 —
+      // razón de más para anularlo acá) + biométrica (faceEmbedding del pasajero verificado).
       await this.repo.updateUserTx(tx, userId, {
         deletedAt: now,
         phone: deletedPlaceholder(userId, 'phone'),
         email: null,
-        dniHash: null,
+        documentType: null,
+        document: null,
         photoUrl: null,
         faceEmbedding: [],
       });

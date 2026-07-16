@@ -177,9 +177,9 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'biometric.enroll_rejected': ['driverId', 'userId', 'score', 'at'], // reason z.string LIBRE → FUERA
   // ── referidos / recompensas ──
   'user.referred': ['referrerUserId', 'referredUserId', 'at'], // code NO (cupón, no forense de PII pero innecesario)
-  'referral.rewarded': ['referrerUserId', 'referredUserId', 'rewardCents', 'tripId', 'at'],
+  'referral.rewarded': ['referrerUserId', 'referredUserId', 'rewardCents', 'currency', 'tripId', 'at'],
   'promo.redeemed': ['promotionId', 'userId', 'tripId', 'discountCents', 'at'],
-  'incentive.completed': ['incentiveId', 'driverId', 'rewardCents', 'tripsCompleted', 'at'],
+  'incentive.completed': ['incentiveId', 'driverId', 'rewardCents', 'currency', 'tripsCompleted', 'at'],
   // ── viaje (ciclo) — geo/origin/destination/point se descartan ──
   // `category` es z.string LIBRE (schema) → fuera del allowlist (ningún texto libre); `vehicleType` (enum) cubre la clase.
   'trip.requested': ['tripId', 'passengerId', 'fareCents', 'childMode', 'vehicleType', 'scheduled'],
