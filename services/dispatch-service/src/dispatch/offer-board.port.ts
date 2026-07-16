@@ -96,6 +96,13 @@ export interface OfferBoard {
   distanceMeters: number;
   durationSeconds: number;
   /**
+   * Ola 2B — nº de paradas intermedias del viaje (`trip.bid_posted.waypoints`, máx 3). Se persiste SOLO
+   * el CONTEO (minimización de datos · Ley 29733): las coordenadas de las paradas NO cruzan a los N
+   * conductores no asignados — el conductor decide con "+N paradas" y el ganador obtiene la ruta exacta
+   * por `/route`. Opcional por compat N-2 (boards en reposo escritos por una versión previa sin el campo).
+   */
+  waypointCount?: number;
+  /**
    * A3 — celda H3 (a `DISPATCH_H3_RESOLUTION`) del ORIGEN del board, calculada UNA vez al abrirlo. Es la
    * clave del índice inverso `board:cell:<originCell>` (ZSET tripId→expiresAt, H11) que `boardsInCells`
    * consulta: así `listOpenBidsNear` lee SOLO los boards del k-ring del conductor (ZRANGEBYSCORE por celda
@@ -163,6 +170,11 @@ export interface BidBroadcastFields {
   destLon: number;
   distanceMeters: number;
   durationSeconds: number;
+  /**
+   * Ola 2B — nº de paradas intermedias (solo el CONTEO, cero coordenadas pre-aceptación): el conductor ve
+   * "+N paradas" en la card antes de ofertar. 0 = viaje directo (y el default para boards N-2 sin el campo).
+   */
+  waypointCount: number;
   specialRequests: string[];
 }
 
@@ -194,6 +206,8 @@ export function bidFieldsFromBoard(b: OfferBoard): BidBroadcastFields {
     // Distancia/duración NO son sensibles (no revelan un punto) → pasan directo, sin engrosar.
     distanceMeters: b.distanceMeters,
     durationSeconds: b.durationSeconds,
+    // Solo el CONTEO de paradas (need-to-know); `?? 0` cubre boards N-2 en reposo sin el campo.
+    waypointCount: b.waypointCount ?? 0,
     specialRequests: b.specialRequests,
   };
 }

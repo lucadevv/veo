@@ -2530,8 +2530,19 @@ export const openBidView = z.object({
   destLon: z.number(),
   distanceMeters: z.number(),
   durationSeconds: z.number(),
+  /**
+   * Ola 2B · nº de paradas intermedias (solo el CONTEO — cero coordenadas pre-aceptación): la card pinta
+   * "+N paradas". Opcional por compat N-2 (un bff previo sin el campo); ausente ⇒ tratar como 0.
+   */
+  waypointCount: z.number().int().nonnegative().optional(),
   /** BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla). */
   specialRequests: z.array(z.string()),
+  /**
+   * ETA conductor→recojo en segundos (per-conductor, calculada por dispatch en el poll): el stat
+   * "A recojo" de la card — paridad con la oferta FIXED. AUSENTE si maps no estuvo disponible o el
+   * bff es N-2: la card degrada el stat (nunca "0 min").
+   */
+  pickupEtaSeconds: z.number().int().nonnegative().optional(),
 });
 export type OpenBidView = z.infer<typeof openBidView>;
 
@@ -3448,8 +3459,10 @@ export interface DispatchOfferedPayload {
   destLon?: number;
   distanceMeters?: number;
   durationSeconds?: number;
+  /** Ola 2B · nº de paradas intermedias (solo el CONTEO; broadcast de PUJA). Ausente en la oferta FIXED. */
+  waypointCount?: number;
   specialRequests?: string[];
-  /** ETA conductor→recojo en segundos (efímero, solo oferta FIXED): la app lo muestra como el stat "A recojo". Ausente si el broadcast de PUJA no lo trae o si maps.eta no estuvo disponible. */
+  /** ETA conductor→recojo en segundos (efímero, momento-de-oferta; lo llevan AMBOS caminos, FIXED y broadcast de PUJA): la app lo muestra como el stat "A recojo". Ausente si maps.eta no estuvo disponible. */
   pickupEtaSeconds?: number;
 }
 

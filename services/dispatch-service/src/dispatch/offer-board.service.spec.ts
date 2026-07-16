@@ -641,8 +641,44 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       destLon: -77.046,
       distanceMeters: DIST_METERS,
       durationSeconds: DUR_SECONDS,
+      // Ola 2B — sin waypoints en el bid → 0 (el derivador SIEMPRE emite el conteo, nunca undefined).
+      waypointCount: 0,
       specialRequests: [SpecialRequest.PET],
     });
+  });
+
+  it('Ola 2B: el board persiste SOLO el CONTEO de waypoints y el enrich lo difunde ("+N paradas")', async () => {
+    const c = await ctx();
+    const cell = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    await c.hotIndex.seed('d-near', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR);
+    await c.svc.openBoard({
+      tripId: 'trip-1',
+      passengerId: PASSENGER,
+      bidCents: 850,
+      vehicleType: VehicleType.CAR,
+      origin: ORIGIN,
+      destination: DEST,
+      distanceMeters: DIST_METERS,
+      durationSeconds: DUR_SECONDS,
+      windowSec: 60,
+      negotiationSeq: 1,
+      // Dos paradas intermedias: al conductor le llega el CONTEO, jamás estas coordenadas (Ley 29733).
+      waypoints: [
+        { lat: -12.05, lon: -77.04 },
+        { lat: -12.07, lon: -77.05 },
+      ],
+    });
+
+    const delivered = c.delivery.delivered[0]?.bid as { waypointCount: number } & Record<
+      string,
+      unknown
+    >;
+    expect(delivered.waypointCount).toBe(2);
+    // Minimización de datos: NINGUNA coordenada de parada cruza en el broadcast.
+    expect('waypoints' in delivered).toBe(false);
+    // Y el poll (la otra fuente de la card) lo derive del MISMO board.
+    const [nearby] = await c.svc.listOpenBidsNear('d-near');
+    expect(nearby?.board.waypointCount).toBe(2);
   });
 
   it('submitOffer ACCEPT_PRICE válido → PENDING + emite dispatch.offer_made', async () => {
@@ -1290,7 +1326,7 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     const tripId = await openBoard(c, 600, 700); // board OPEN, ventana viva
     // Aparece en la membresía (no vencido) y lo ve listOpenBidsNear.
     expect((await c.store.listOpenBoards(Date.now())).map((b) => b.tripId)).toEqual([tripId]);
-    expect((await c.svc.listOpenBidsNear('d1')).map((b) => b.tripId)).toEqual([tripId]);
+    expect((await c.svc.listOpenBidsNear('d1')).map((n) => n.board.tripId)).toEqual([tripId]);
   });
 
   it('no_offers usa dedupKey ESTABLE por ventana: re-emit del MISMO vencimiento → idempotencia DEL PRODUCTOR (#4a)', async () => {
@@ -1668,7 +1704,24 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     });
 
     const bids = await c.svc.listOpenBidsNear('d1');
-    expect(bids.map((b) => b.tripId)).toEqual(['trip-1']);
+    expect(bids.map((n) => n.board.tripId)).toEqual(['trip-1']);
+    // Cada puja sale enriquecida con el ETA conductor→recojo del FakeMaps (dato de decisión de la card).
+    expect(bids.map((n) => n.pickupEtaSeconds)).toEqual([120]);
+  });
+
+  it('listOpenBidsNear con maps.eta caído → pickupEtaSeconds 0 (degrada, NUNCA rompe el poll)', async () => {
+    const c = await ctx();
+    const cell = toH3(ORIGIN, DISPATCH_H3_RESOLUTION);
+    await c.hotIndex.seed('d1', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR);
+    await openBoard(c, 60, 700);
+    // El fallo del proveedor de rutas es por-board y silencioso: la puja sale igual, con eta 0
+    // (el controller la OMITE del DTO para que la app degrade el stat "A recojo").
+    c.maps.eta = async () => {
+      throw new Error('osrm down');
+    };
+    const bids = await c.svc.listOpenBidsNear('d1');
+    expect(bids.map((n) => n.board.tripId)).toEqual(['trip-1']);
+    expect(bids.map((n) => n.pickupEtaSeconds)).toEqual([0]);
   });
 
   it('B5-3: listOpenBidsNear FILTRA por TIER — un conductor que no cumple los requires del board NO lo ve', async () => {
@@ -1709,7 +1762,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     });
 
     // El conductor chico NO ve el board XL, pero SÍ el genérico.
-    expect((await c.svc.listOpenBidsNear('d-small')).map((b) => b.tripId)).toEqual(['trip-any']);
+    expect((await c.svc.listOpenBidsNear('d-small')).map((n) => n.board.tripId)).toEqual([
+      'trip-any',
+    ]);
 
     // Un conductor con van de 7 asientos SÍ ve el board XL.
     await c.hotIndex.seed('d-van', ORIGIN.lat, ORIGIN.lon, cell, VehicleType.CAR, {
@@ -1717,7 +1772,7 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       segment: VehicleSegment.ECONOMY,
       vehicleYear: 2022,
     });
-    expect((await c.svc.listOpenBidsNear('d-van')).map((b) => b.tripId).sort()).toEqual([
+    expect((await c.svc.listOpenBidsNear('d-van')).map((n) => n.board.tripId).sort()).toEqual([
       'trip-any',
       'trip-xl',
     ]);
@@ -1741,7 +1796,9 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
       windowSec: 60,
       negotiationSeq: 1,
     });
-    expect((await c.svc.listOpenBidsNear('d-legacy')).map((b) => b.tripId)).toEqual(['trip-xl']);
+    expect((await c.svc.listOpenBidsNear('d-legacy')).map((n) => n.board.tripId)).toEqual([
+      'trip-xl',
+    ]);
   });
 
   // ── A3: índice inverso celda→board (listOpenBidsNear por k-ring, no all-scan) ──────────────────
@@ -1787,7 +1844,7 @@ describe('OfferBoardService — ciclo de vida del board (ADR 010)', () => {
     await openBoard(c, 60, 700);
 
     const bids = await c.svc.listOpenBidsNear('d1');
-    expect(bids.map((b) => b.tripId)).toEqual(['trip-1']);
+    expect(bids.map((n) => n.board.tripId)).toEqual(['trip-1']);
   });
 
   it('A3: el índice de celda se MANTIENE — open SADD, close (claim/expire/cancel) SREM', async () => {

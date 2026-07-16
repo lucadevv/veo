@@ -68,7 +68,8 @@ function makeController(): {
   };
   const svc = {
     submitOffer: vi.fn(async () => offer),
-    listOpenBidsNear: vi.fn(async () => [board]),
+    // El service devuelve el par board + ETA per-conductor (enrich del poll).
+    listOpenBidsNear: vi.fn(async () => [{ board, pickupEtaSeconds: 240 }]),
     getOffersView: vi.fn(async () => ({
       board: { status: 'OPEN' as const, expiresAt: board.expiresAt },
       offers: [offer],
@@ -122,6 +123,22 @@ describe('OfferBoardController — trust boundary del lado conductor (#9)', () =
     const { ctrl, svc } = makeController();
     await ctrl.listOpen(driverUser('signed-driver'));
     expect(svc.listOpenBidsNear).toHaveBeenCalledWith('signed-driver');
+  });
+
+  it('listOpen expone los datos de DECISIÓN de la card: pickupEtaSeconds (per-conductor) + waypointCount', async () => {
+    const { ctrl } = makeController();
+    const [dto] = await ctrl.listOpen(driverUser('signed-driver'));
+    expect(dto?.pickupEtaSeconds).toBe(240);
+    // Board sin waypointCount persistido (N-2) → el derivador degrada a 0, nunca undefined.
+    expect(dto?.waypointCount).toBe(0);
+  });
+
+  it('listOpen OMITE pickupEtaSeconds cuando el ETA no estuvo disponible (0) — la app degrada el stat', async () => {
+    const { ctrl, svc } = makeController();
+    const [{ board }] = (await svc.listOpenBidsNear()) as [{ board: OfferBoard }];
+    svc.listOpenBidsNear.mockResolvedValueOnce([{ board, pickupEtaSeconds: 0 }]);
+    const [dto] = await ctrl.listOpen(driverUser('signed-driver'));
+    expect(dto && 'pickupEtaSeconds' in dto).toBe(false);
   });
 
   it('listOpen con identidad SIN driverId → 403, no llama al service', async () => {

@@ -167,6 +167,9 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
       negotiationSeq: p.negotiationSeq,
       // BE-2 — solicitudes especiales: el board las guarda para que el conductor las vea en /bids/open.
       specialRequests: p.specialRequests ?? [],
+      // Ola 2B — paradas intermedias: el board persiste SOLO el conteo ("+N paradas" en la card de puja).
+      // Antes se DROPEABAN acá (el evento las traía "para el board" y este handler no las pasaba).
+      waypoints: p.waypoints,
     });
   }
 

@@ -823,6 +823,8 @@
       "waiting": "Esperando al pasajero…",
       "waitingHint": "Te avisamos apenas el pasajero elija.",
       "pendingPill": "Enviada",
+      "stops_one": "+{{count}} parada",
+      "stops_other": "+{{count}} paradas",
       "empty": "No hay pujas cerca de ti ahora.",
       "emptyHint": "Te avisamos apenas llegue una.",
       "rebidNoticeTitle": "Nueva ronda · ahora es puja",

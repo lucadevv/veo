@@ -95,6 +95,10 @@ export interface BidPosted {
   /// BE-2 — solicitudes especiales del pasajero (mascota/equipaje/silla); el conductor las ve en el board.
   /// Opcional en la ENTRADA (default [] en openBoard) por compat N-2 con bid_posted previos.
   specialRequests?: SpecialRequest[];
+  /// Ola 2B — paradas intermedias del viaje (máx 3, del evento). El board persiste SOLO el CONTEO
+  /// (minimización de datos: las coordenadas de paradas no cruzan a conductores no asignados).
+  /// Opcional por compat N-2 con bid_posted previos sin el campo.
+  waypoints?: LatLon[];
 }
 
 export interface Reassigning {
@@ -122,6 +126,16 @@ export interface SubmitOfferInput {
   tripId: string;
   kind: OfferKind;
   priceCents: number;
+}
+
+/**
+ * Una puja OPEN cercana enriquecida PER-CONDUCTOR: el board (dato del viaje, igual para todos) + el
+ * `pickupEtaSeconds` conductor→origen (dato del PAR conductor-board, calculado en el poll con la
+ * ubicación viva del hot-index). 0 = ETA no disponible (maps caído): el DTO lo omite río abajo.
+ */
+export interface NearbyOpenBid {
+  board: OfferBoard;
+  pickupEtaSeconds: number;
 }
 
 /**
@@ -233,6 +247,8 @@ export class OfferBoardService {
       negotiationSeq: bid.negotiationSeq,
       // BE-2 — el conductor las ve al listar boards abiertos (/bids/open).
       specialRequests: bid.specialRequests ?? [],
+      // Ola 2B — solo el CONTEO de paradas (need-to-know pre-aceptación); el ganador obtiene la ruta por /route.
+      waypointCount: bid.waypoints?.length ?? 0,
     };
     // N8 — Higiene de ventana (espejo de reopenBoard): PURGA las ofertas de cualquier ventana anterior
     // ANTES de abrir. Un `trip.bid_posted` puede ser un RE-BID (el pasajero subió el bid tras un
@@ -295,6 +311,9 @@ export class OfferBoardService {
       // BE-2 — se preservan si el board previo sobrevivió (TTL no expiró). Si se rearma SOLO desde el evento
       // (board ya expirado), quedan []: trip.reassigning aún no las transporta (follow-up). Degradación honesta.
       specialRequests: existing?.specialRequests ?? [],
+      // Ola 2B — mismo criterio que specialRequests: se preserva del board previo; trip.reassigning aún no
+      // transporta waypoints (follow-up) → 0 si se rearma solo desde el evento. Degradación honesta.
+      waypointCount: existing?.waypointCount ?? 0,
     };
     // N4 — Higiene de ventana: PURGA las ofertas de la ventana ANTERIOR antes de re-abrir. Sin esto, un
     // COUNTER viejo (a un precio que ya no aplica) o una oferta STALE/LAPSED sobreviven en el HASH y el
@@ -891,10 +910,14 @@ export class OfferBoardService {
    *  1. RE-VALIDA elegibilidad contra identity (online + !suspendido). Si no es elegible → 403.
    *  2. Solo boards cuyo `vehicleType` coincide con el vehículo ACTIVO del conductor (hot-index).
    *  3. Solo boards cuya celda de origen cae dentro del k-ring del conductor (cercanía).
+   * Cada board sale ENRIQUECIDO con `pickupEtaSeconds` (ETA conductor→recojo): es EL dato de decisión de
+   * la card de puja (la oferta FIXED ya lo muestra como "A recojo") y antes solo viajaba en el ping
+   * `dispatch.offered` — el poll (la fuente que pinta la card) lo perdía. 0 = no disponible (maps caído):
+   * el DTO lo omite para que la app degrade el stat en vez de pintar un "0 min" engañoso.
    * El `driverId` lo deriva el driver-bff server-side (nunca un param del cliente). La elegibilidad se
    * enforce ACÁ además del guard del BFF (defensa en profundidad). Devuelve [] si no hay ubicación viva.
    */
-  async listOpenBidsNear(driverId: string): Promise<OfferBoard[]> {
+  async listOpenBidsNear(driverId: string): Promise<NearbyOpenBid[]> {
     const loc = await this.hotIndex.getLocation(driverId);
     if (!loc) return [];
     // El gate re-valida online/suspendido; si el conductor no es elegible para ofertar → 403.
@@ -912,7 +935,7 @@ export class OfferBoardService {
     const now = Date.now();
     const currentYear = new Date().getUTCFullYear();
     const candidates = await this.store.boardsInCells(cells);
-    return candidates.filter(
+    const nearby = candidates.filter(
       (b) =>
         b.status === BoardStatus.OPEN &&
         b.expiresAt > now &&
@@ -922,6 +945,17 @@ export class OfferBoardService {
         // semántica del pool/gate (certs fail-closed, attrs fail-open).
         this.boardMeetsRequires(b.category, loc, currentYear),
     );
+    // ETA conductor→origen POR board. Es la dirección INVERSA a `etaBatch` (N orígenes → 1 destino; acá
+    // es 1 origen → N destinos), así que va por `eta` individual en paralelo: N está ACOTADO por los
+    // boards OPEN del k-ring del conductor (unidades, no cientos — a diferencia del broadcast A1, que
+    // rankea cientos de candidatos). Si algún día crece, el paso es un one→many en @veo/maps (/table de
+    // OSRM lo soporta). Fallo por-board cae a 0 (se omite downstream), NUNCA rompe el poll.
+    const etas = await Promise.all(
+      nearby.map((b) =>
+        this.maps.eta({ lat: loc.lat, lon: loc.lon }, b.origin).catch(() => 0),
+      ),
+    );
+    return nearby.map((board, i) => ({ board, pickupEtaSeconds: etas[i] ?? 0 }));
   }
 
   /**

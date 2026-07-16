@@ -36,7 +36,20 @@ export const BidCard = ({ bid, onPress }: Props): React.JSX.Element => {
   const originLabel = useReverseLabel(bid.originLat, bid.originLon);
   const destLabel = useReverseLabel(bid.destLat, bid.destLon);
   const VehicleIcon = vehicleClassGlyph(bid.vehicleType);
-  const route = `${t('trips.kilometers', { value: metersToKm(bid.distanceMeters) })} · ${t('trips.minutes', { value: secondsToMinutes(bid.durationSeconds) })}`;
+  // Trayecto + los DATOS DE DECISIÓN de la puja (paridad con la oferta FIXED): "A recojo" (ETA
+  // conductor→origen, per-conductor del poll; ausente ⇒ se degrada el stat, nunca "0 min") y "+N paradas"
+  // (solo el conteo — las coordenadas de paradas no cruzan pre-aceptación).
+  const pickupEta = bid.pickupEtaSeconds ?? 0;
+  const stops = bid.waypointCount ?? 0;
+  const route = [
+    `${t('trips.kilometers', { value: metersToKm(bid.distanceMeters) })} · ${t('trips.minutes', { value: secondsToMinutes(bid.durationSeconds) })}`,
+    pickupEta > 0
+      ? `${t('trips.minutes', { value: secondsToMinutes(pickupEta) })} ${t('trips.pickupEta')}`
+      : null,
+    stops > 0 ? t('trips.bid.stops', { count: stops }) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   // El punto lleva el color (brand=PUJA activa / danger=vencida); la etiqueta va neutra (mismo criterio que el historial).
   const dotColor = expired ? theme.colors.danger : theme.colors.brand;
