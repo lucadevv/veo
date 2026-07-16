@@ -27,6 +27,11 @@ name: veo
 x-svc-defaults: &svc-defaults
   restart: unless-stopped
   networks: [veo-net]
+  # Tier lógico (@veo/utils deployTier()) pineado para los 18 servicios de app: `environment` tiene
+  # precedencia sobre env_file, así preview nunca corre con otro tier por un preview.env incompleto.
+  # OJO merge YAML: si un servicio define su PROPIO `environment:`, pisa este bloque ENTERO — re-declarar ahí.
+  environment:
+    VEO_DEPLOY_TIER: preview
 
 services:
   # ===========================================================
