@@ -1448,6 +1448,30 @@ export const bookingApproved = z.object({
     BookingApprovedOrigen.APROBACION_CONDUCTOR,
   ]),
 });
+/// El conductor RECHAZÓ la solicitud (F1 · ADR-014 §7.1): PENDIENTE_APROBACION → RECHAZADO (terminal, SIN
+/// movimiento de plata: charge-on-approval y acá nunca se aprobó). booking-service lo emite por OUTBOX en la
+/// MISMA tx que la transición (bookings.service.reject). Topic 'booking', key = bookingId. Consumidor núcleo:
+/// notification (avisa al pasajero). El contrato refleja EXACTAMENTE el payload que reject() ya emitía (el
+/// evento viajaba SIN schema registrado → sin validación en el relay; registrarlo cierra ese gap).
+export const bookingRejected = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  estado: z.literal('RECHAZADO'),
+});
+/// El TTL (~5min) venció sin respuesta del conductor (F1 · ADR-014 §7.1): PENDIENTE_APROBACION → EXPIRADO
+/// (terminal, sin plata movida). CONTRATO declarado desde YA (espeja booking-events.ts: "se DECLARAN acá y en
+/// @veo/events desde ya para que el contrato exista, pero su emisión se difiere honestamente a la fase que la
+/// gatilla"); la EMISIÓN (sweeper del TTL en booking-service) es F1. Espeja bookingRejected (mismos campos,
+/// estado terminal distinto). Topic 'booking', key = bookingId. Consumidor núcleo: notification.
+export const bookingExpired = z.object({
+  bookingId: z.string(),
+  publishedTripId: z.string(),
+  passengerId: z.string(),
+  driverId: z.string(),
+  estado: z.literal('EXPIRADO'),
+});
 /// El conductor EDITÓ su oferta publicada (F1a). Solo es editable mientras está PUBLICADO (sin reservas
 /// confirmadas / pre-EN_RUTA): itinerario/precio/asientos/modoReserva/reglas. Se emite por OUTBOX en la
 /// MISMA tx que la mutación (espeja booking.published). Topic 'booking', key = publishedTripId. Los campos
@@ -1560,7 +1584,7 @@ export const bookingConfirmed = z.object({
   paymentId: z.string(),
   estado: z.literal('CONFIRMADO'),
 });
-// Los demás eventos del topic 'booking' (booking.expired/started/completed · ADR-014 §7.1) se DECLARAN al
+// Los demás eventos del topic 'booking' (booking.started/completed · ADR-014 §7.1) se DECLARAN al
 // implementar F4 (su emisión vive en la fase que la gatilla).
 
 /** Registro central: eventType → schema del payload. */
@@ -1757,6 +1781,8 @@ export const EVENT_SCHEMAS = {
   'booking.published': bookingPublished,
   'booking.requested': bookingRequested,
   'booking.approved': bookingApproved,
+  'booking.rejected': bookingRejected,
+  'booking.expired': bookingExpired,
   'booking.updated': bookingUpdated,
   'booking.confirmed': bookingConfirmed,
   'booking.cancelled': bookingCancelled,

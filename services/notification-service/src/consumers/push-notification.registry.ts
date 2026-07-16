@@ -27,7 +27,13 @@
  *    idempotencia de eventos en vuelo (Kafka es at-least-once).
  */
 import { z } from 'zod';
-import { EVENT_SCHEMAS, type EventEnvelope, type EventPayload, type EventType } from '@veo/events';
+import {
+  BookingApprovedOrigen,
+  EVENT_SCHEMAS,
+  type EventEnvelope,
+  type EventPayload,
+  type EventType,
+} from '@veo/events';
 import { NotificationChannel, PanicStatus } from '@veo/shared-types';
 import { NotificationPriority, type EnqueueInput } from '../engine/types';
 import { TEMPLATE_KEYS, type TemplateKey } from '../engine/template.catalog';
@@ -555,6 +561,84 @@ export const PUSH_NOTIFICATION_SPECS = {
     template: TEMPLATE_KEYS.DOCUMENT_REJECTED,
     dedup: (p) => `document:${p.documentId}:rejected:${p.rejectedAt}`,
     data: (p) => ({ documentType: p.documentType }),
+  }),
+
+  /* ── booking · marketplace de carpooling (ADR-014 §7.1: notification consume booking.*) ── */
+
+  /**
+   * booking.requested → push al CONDUCTOR dueño de la oferta: "tenés una solicitud" (ADR-014 §7.1). Solo
+   * existe en REVISION_CADA_SOLICITUD (en INSTANT el Booking nace APROBADO y jamás emite requested). El
+   * `driverId` del evento es el Driver.id del agregado (el BFF resuelve userId→driver y lo firma,
+   * server-truth) → `recipientKind: 'driverId'` lo resuelve de vuelta a userId por gRPC a identity ANTES
+   * del lookup de device-token (igual que payout.processed / fleet.document_rejected). SIN PII (§0.7):
+   * data solo lleva ids; el monto va como var del copy y el detalle lo resuelve la app. dedup
+   * `booking:{bookingId}:requested` (una solicitud avisa UNA vez; redeliveries no duplican).
+   */
+  'booking.requested': defineSpec('booking.requested', {
+    recipient: (p) => p.driverId,
+    recipientKind: 'driverId',
+    template: TEMPLATE_KEYS.BOOKING_REQUESTED,
+    dedup: (p) => `booking:${p.bookingId}:requested`,
+    vars: (p) => ({ amount: formatSoles(p.precioAcordado) }),
+    data: (p) => ({ bookingId: p.bookingId, publishedTripId: p.publishedTripId }),
+  }),
+
+  /**
+   * booking.approved → push al PASAJERO: "aprobado, cobrando" (ADR-014 §7.1) SOLO cuando aprueba el
+   * CONDUCTOR (`origen=APROBACION_CONDUCTOR`). En INSTANT_BOOKING el pasajero ACABA de reservar él mismo
+   * (el Booking nace APROBADO al reservar, §4.2) y está mirando la confirmación en pantalla: pushearle
+   * "aprobado" sería ruido redundante — mismo criterio que trip.bid_posted (no pushear a quien ya está
+   * en la app). El gate es `when` con el enum TIPADO del contrato (cero strings mágicos); INSTANT se
+   * ignora sin warn (decisión deliberada, no gap). dedup `booking:{bookingId}:approved`.
+   */
+  'booking.approved': defineSpec('booking.approved', {
+    when: (p) => p.origen === BookingApprovedOrigen.APROBACION_CONDUCTOR,
+    recipient: (p) => p.passengerId,
+    template: TEMPLATE_KEYS.BOOKING_APPROVED,
+    dedup: (p) => `booking:${p.bookingId}:approved`,
+    vars: (p) => ({ amount: formatSoles(p.precioAcordado) }),
+    data: (p) => ({ bookingId: p.bookingId, publishedTripId: p.publishedTripId }),
+  }),
+
+  /**
+   * booking.rejected → push HONESTO al PASAJERO: el conductor no aceptó su solicitud (ADR-014 §7.1).
+   * NO se movió plata (charge-on-approval: nunca se aprobó) y el copy lo dice. dedup
+   * `booking:{bookingId}:rejected` (terminal: un rechazo avisa UNA vez).
+   */
+  'booking.rejected': defineSpec('booking.rejected', {
+    recipient: (p) => p.passengerId,
+    template: TEMPLATE_KEYS.BOOKING_REJECTED,
+    dedup: (p) => `booking:${p.bookingId}:rejected`,
+    data: (p) => ({ bookingId: p.bookingId, publishedTripId: p.publishedTripId }),
+  }),
+
+  /**
+   * booking.expired → push HONESTO al PASAJERO: el TTL (~5min) venció sin respuesta del conductor
+   * (ADR-014 §7.1). Sin plata movida. La fila queda lista desde YA (el contrato existe en @veo/events);
+   * la EMISIÓN (sweeper del TTL en booking-service) es F1 — cuando llegue, el push sale sin tocar nada acá.
+   */
+  'booking.expired': defineSpec('booking.expired', {
+    recipient: (p) => p.passengerId,
+    template: TEMPLATE_KEYS.BOOKING_EXPIRED,
+    dedup: (p) => `booking:${p.bookingId}:expired`,
+    data: (p) => ({ bookingId: p.bookingId, publishedTripId: p.publishedTripId }),
+  }),
+
+  /**
+   * booking.confirmed → RECIBO al PASAJERO: el cobro capturó y el seat-lock atómico confirmó su asiento
+   * (COBRO_PENDIENTE → CONFIRMADO · ADR-014 §6/§7.1). `paymentId` viaja en data (correlación en la app;
+   * es un id, no PII). dedup `booking:{bookingId}:confirmed` (un asiento se confirma UNA vez).
+   */
+  'booking.confirmed': defineSpec('booking.confirmed', {
+    recipient: (p) => p.passengerId,
+    template: TEMPLATE_KEYS.BOOKING_CONFIRMED,
+    dedup: (p) => `booking:${p.bookingId}:confirmed`,
+    vars: (p) => ({ amount: formatSoles(p.precioAcordado) }),
+    data: (p) => ({
+      bookingId: p.bookingId,
+      publishedTripId: p.publishedTripId,
+      paymentId: p.paymentId,
+    }),
   }),
 } satisfies { readonly [K in EventType]?: PushNotificationSpec<K> };
 
