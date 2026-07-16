@@ -90,8 +90,8 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
     await sweeper.sweep();
 
     expect(calls.updateDriverTx).toHaveBeenCalledTimes(1);
-    // Vacía el embedding Y resetea el binding DNI↔selfie (invariante de frescura: mutar el material cotejado
-    // invalida el binding; además no dejamos evidencia biométrica stale de una cuenta borrada).
+    // Vacía el embedding Y resetea AMBOS bindings (DNI y licencia ↔ selfie) — invariante de frescura: mutar
+    // el material cotejado invalida los bindings; además no dejamos evidencia biométrica stale de una cuenta borrada.
     const [tx, driverId, data] = calls.updateDriverTx.mock.calls[0] as [UsersTx, string, unknown];
     expect(tx).toBe(TX);
     expect(driverId).toBe('d1');
@@ -100,6 +100,9 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
       dniFaceMatched: null,
       dniFaceMatchScore: null,
       dniFaceMatchedAt: null,
+      licenseFaceMatched: null,
+      licenseFaceMatchScore: null,
+      licenseFaceMatchedAt: null,
     });
   });
 

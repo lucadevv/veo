@@ -74,16 +74,19 @@ export class DeletionSweeper {
       });
 
       // Driver: embedding facial de enrolamiento (BR-I02). Solo si el usuario es conductor. Al vaciar el
-      // embedding (material cotejado) RESETEAMOS también el binding DNI↔selfie en la MISMA escritura: el
-      // binding es evidencia FRESCA contra ESE embedding (invariante de frescura), así que mutar/vaciar el
-      // embedding lo invalida — mismo patrón que enrollFace()/resubmit(). Doblemente correcto en el tombstone:
-      // no dejamos evidencia biométrica stale de una cuenta borrada (PII Ley 29733).
+      // embedding (material cotejado) RESETEAMOS también AMBOS bindings (DNI↔selfie y licencia↔selfie) en la
+      // MISMA escritura: cada binding es evidencia FRESCA contra ESE embedding (invariante de frescura), así
+      // que mutar/vaciar el embedding los invalida — mismo patrón que enrollFace()/resubmit(). Doblemente
+      // correcto en el tombstone: no dejamos evidencia biométrica stale de una cuenta borrada (PII Ley 29733).
       if (driverId) {
         await this.repo.updateDriverTx(tx, driverId, {
           faceEmbedding: [],
           dniFaceMatched: null,
           dniFaceMatchScore: null,
           dniFaceMatchedAt: null,
+          licenseFaceMatched: null,
+          licenseFaceMatchScore: null,
+          licenseFaceMatchedAt: null,
         });
       }
 

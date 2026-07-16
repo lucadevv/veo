@@ -53,6 +53,9 @@ async function main(): Promise<void> {
           dniFaceMatched: null,
           dniFaceMatchScore: null,
           dniFaceMatchedAt: null,
+          licenseFaceMatched: null,
+          licenseFaceMatchScore: null,
+          licenseFaceMatchedAt: null,
         },
       });
     }
