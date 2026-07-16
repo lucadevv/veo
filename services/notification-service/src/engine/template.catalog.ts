@@ -387,7 +387,7 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     channel: NotificationChannel.PUSH,
     locale: LOCALE,
     subject: 'Tienes una solicitud de reserva',
-    body: 'Un pasajero quiere reservar en tu viaje por S/{{amount}}. Respondele antes de que expire.',
+    body: 'Un pasajero quiere reservar en tu viaje por S/{{amount}}. Respóndele antes de que expire.',
   },
   {
     // Push al PASAJERO cuando el CONDUCTOR aprueba su solicitud (ADR-014 §7.1, "aprobado, cobrando").
@@ -396,7 +396,7 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     channel: NotificationChannel.PUSH,
     locale: LOCALE,
     subject: 'Reserva aprobada',
-    body: 'El conductor aprobo tu reserva. Estamos procesando tu pago de S/{{amount}}.',
+    body: 'El conductor aprobó tu reserva. Estamos procesando tu pago de S/{{amount}}.',
   },
   {
     // Push HONESTO al PASAJERO: el conductor no aceptó. No se movió plata (charge-on-approval, nunca se aprobó).
@@ -404,15 +404,15 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     channel: NotificationChannel.PUSH,
     locale: LOCALE,
     subject: 'Solicitud no aceptada',
-    body: 'El conductor no acepto tu solicitud. No se te cobro. Busca otro viaje compartido.',
+    body: 'El conductor no aceptó tu solicitud. No se te cobró. Busca otro viaje compartido.',
   },
   {
     // Push HONESTO al PASAJERO: el TTL (~5min) venció sin respuesta del conductor. Sin plata movida.
     key: TEMPLATE_KEYS.BOOKING_EXPIRED,
     channel: NotificationChannel.PUSH,
     locale: LOCALE,
-    subject: 'Tu solicitud expiro',
-    body: 'El conductor no respondio a tiempo y tu solicitud expiro. No se te cobro. Busca otro viaje compartido.',
+    subject: 'Tu solicitud expiró',
+    body: 'El conductor no respondió a tiempo y tu solicitud expiró. No se te cobró. Busca otro viaje compartido.',
   },
   {
     // RECIBO al PASAJERO: el cobro capturó y el seat-lock confirmó su asiento (COBRO_PENDIENTE → CONFIRMADO).
@@ -420,6 +420,6 @@ export const DEFAULT_TEMPLATES: TemplateSeed[] = [
     channel: NotificationChannel.PUSH,
     locale: LOCALE,
     subject: 'Reserva confirmada',
-    body: 'Tu asiento esta confirmado · S/{{amount}}. Revisa el detalle de tu viaje compartido.',
+    body: 'Tu asiento está confirmado · S/{{amount}}. Revisa el detalle de tu viaje compartido.',
   },
 ];
