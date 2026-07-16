@@ -9,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '../theme/ThemeProvider';
 import { useReducedMotion } from '../theme/useReducedMotion';
+import { ELEVATION_SHADOW_COLOR } from '../tokens/themes';
 
 export interface SwitchProps {
   /** Estado actual (controlado). */
@@ -97,7 +98,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+    shadowColor: ELEVATION_SHADOW_COLOR,
     shadowOpacity: 0.25,
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 1 },
