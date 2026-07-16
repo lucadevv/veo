@@ -63,7 +63,7 @@ export function MediaRequestDetail({ request }: { request: MediaAccessRequestVie
       </div>
 
       {/* Tarjeta oscura del video (protegido / aprobado / rechazado / expirado) */}
-      <div className="flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-b from-[#20304A] to-[#0A0B0F] p-9 text-center">
+      <div className="flex flex-col items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-b from-feed-glow to-feed p-9 text-center">
         <CardIcon className="size-8 text-white/70" aria-hidden />
         <p className="text-sm font-medium text-white/90">{card.title}</p>
       </div>
