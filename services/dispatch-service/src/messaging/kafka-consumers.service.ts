@@ -215,6 +215,10 @@ export class KafkaConsumersService extends KafkaConsumerBootstrap {
         destination: p.destination,
         distanceMeters: p.distanceMeters,
         durationSeconds: p.durationSeconds,
+        // BE-2 + Ola 2B — el evento ya transporta las solicitudes especiales y las paradas (row Trip
+        // fresco); sin este pass-through el board re-abierto degradaba a []/0 con la key previa expirada.
+        specialRequests: p.specialRequests,
+        waypoints: p.waypoints,
         bidCents: p.bidCents,
         // H13 — el seq del NUEVO ciclo de la reasignación: el board re-abierto lo estampa en offer_accepted.
         negotiationSeq: p.negotiationSeq,

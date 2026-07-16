@@ -105,6 +105,10 @@ function reassigningEnvelope(overrides?: {
       destination: { lat: -12.1211, lon: -77.0301 },
       distanceMeters: 4200,
       durationSeconds: 900,
+      // BE-2 + Ola 2B — el evento transporta solicitudes + paradas (row Trip fresco): el handler debe
+      // pasarlas a reopenBoard o el board reconstruido degrada a []/0 (el follow-up que esto cierra).
+      specialRequests: ['PET' as const],
+      waypoints: [{ lat: -12.08, lon: -77.035 }],
       bidCents: 900,
       reason: 'driver_cancelled' as const,
       negotiationSeq: 2,
@@ -133,6 +137,9 @@ describe('KafkaConsumersService · trip.reassigning (robustez #4)', () => {
       bidCents: 900,
       // H13 — el consumidor propaga el ciclo de negociación del evento al board re-abierto.
       negotiationSeq: 2,
+      // BE-2 + Ola 2B — pass-through de solicitudes + paradas del evento (sin esto degradaban a []/0).
+      specialRequests: ['PET'],
+      waypoints: [{ lat: -12.08, lon: -77.035 }],
     });
 
     await svc.onModuleDestroy();
