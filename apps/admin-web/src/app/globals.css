@@ -57,6 +57,12 @@
   /* Azul profundo del gradiente de marca (columna del login) — trust-primary-dark */
   --brand-deep: #00313C;
 
+  /* Feed de cámaras (T/CameraTile y placeholders de video): superficie oscura INTRÍNSECA al
+   * diseño del feed — NO es un surface temático, igual en claro y en oscuro. `glow` es el tinte
+   * azulado superior del gradiente (bg-gradient-to-b from-feed-glow to-feed). */
+  --feed: #0A0B0F;
+  --feed-glow: #20304A;
+
   /* Radios: escala del veo.pen (sm8/md12/lg16/xl20/2xl28) + control 14 (botones) */
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;

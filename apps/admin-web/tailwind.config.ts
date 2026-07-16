@@ -16,6 +16,10 @@ const config: Config = {
       // display/serif/xl) para no tocar shared-config. Habilita bg-info / text-info / border-info.
       colors: {
         info: { DEFAULT: c('--info'), on: c('--on-info') },
+        // Superficie oscura del feed de cámaras (CameraTile / placeholders de video): intrínseca
+        // al diseño del "feed" (igual en claro/oscuro), scoped a admin — el preset no la trae.
+        // Habilita bg-feed / from-feed-glow / to-feed.
+        feed: { DEFAULT: c('--feed'), glow: c('--feed-glow') },
       },
       // Sistema "Trust": display (Space Grotesk) para títulos/dígitos, serif (Fraunces) para el
       // headline editorial de marca. sans (Outfit) y mono (Space Mono) los mapea el preset compartido.
