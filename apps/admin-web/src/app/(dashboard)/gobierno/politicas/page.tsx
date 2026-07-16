@@ -1,11 +1,11 @@
 'use client';
 
-import { Lock } from 'lucide-react';
 import { usePolicies } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PoliciesPanel } from '@/components/gobierno/policies-panel';
 
@@ -18,6 +18,7 @@ import { PoliciesPanel } from '@/components/gobierno/policies-panel';
 export default function PoliciesPage() {
   const user = useSession();
   const canManage = can(user, 'gobierno:manage');
+  const requestAccess = useRequestAccess();
   const query = usePolicies();
 
   if (!canManage) {
@@ -27,11 +28,11 @@ export default function PoliciesPage() {
           title="Políticas"
           breadcrumbs={[{ label: 'Gobierno' }, { label: 'Políticas' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="El registro de políticas de gobierno es exclusivo del rol SUPERADMIN."
+          section="Políticas"
+          permission="gobierno:manage"
+          onRequest={() => requestAccess('gobierno:manage')}
         />
       </div>
     );

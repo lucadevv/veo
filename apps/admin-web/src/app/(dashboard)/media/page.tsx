@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ChevronRight, Film, Lock, X } from 'lucide-react';
+import { ChevronRight, Film, X } from 'lucide-react';
 import { FILTER_ALL } from '@/lib/filters';
 import { useMediaRequests } from '@/lib/api/queries';
 import type { MediaAccessRequestView } from '@/lib/api/schemas';
@@ -13,8 +13,9 @@ import { can } from '@/lib/rbac';
 import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatusPill } from '@/components/ui/status-pill';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { RequestAccessDialog } from '@/components/media/request-access-dialog';
 import { MediaRequestDetail } from '@/components/media/media-request-detail';
 
@@ -26,6 +27,7 @@ import { MediaRequestDetail } from '@/components/media/media-request-detail';
  */
 export default function MediaPage() {
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const query = useMediaRequests(FILTER_ALL);
   const rows = useMemo<MediaAccessRequestView[]>(() => query.data?.items ?? [], [query.data]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -60,11 +62,11 @@ export default function MediaPage() {
           title="Acceso a video grabado"
           breadcrumbs={[{ label: 'Seguridad' }, { label: 'Video' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol de Cumplimiento o Administrador para el acceso a video."
+          section="Video"
+          permission="media:view"
+          onRequest={() => requestAccess('media:view')}
         />
       </div>
     );
