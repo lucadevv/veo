@@ -145,8 +145,6 @@ model User {
   name      String?    @map("name")
   type      UserType
   photoUrl  String?    @map("photo_url")
-  /// Hash del DNI (nunca el DNI en claro — Ley 29733, decisión "solo hash").
-  dniHash   String?    @map("dni_hash")
   /// Documento de identidad del PASAJERO para pagos (ProntoPaga · Yape On File). Vive en el perfil
   /// (no en el checkout): se carga UNA vez y el BFF lo reutiliza para afiliar Yape en UN TAP. Nullable
   /// hasta que el usuario lo registra. Es SU dato (owner-only por JWT); la UI decide cómo enmascararlo.
@@ -172,6 +170,8 @@ model User {
   referralCode String?    @unique @map("referral_code")
   /// Crédito acumulado por referidos completados (céntimos PEN), modelado como recompensa simple.
   referralRewardCents Int  @default(0) @map("referral_reward_cents")
+  /// Moneda del crédito de referidos (FOUNDATION §8: Money = céntimos + currency). Hoy única 'PEN'.
+  referralRewardCurrency String @default("PEN") @map("referral_reward_currency")
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz
   /// Solicitud de borrado (BR-S06): inicia la gracia de 30 días antes del tombstone.
@@ -225,8 +225,8 @@ model Driver {
   /// DNI peruano (8 dígitos). PII Ley 29733: se persiste CIFRADO en reposo (AES-256-GCM, secret-box,
   /// formato `iv.tag.enc` base64) — NUNCA en claro. Compliance lo MUESTRA al operador para verificación
   /// manual contra el documento, por eso es cifrado REVERSIBLE (no hash): identity descifra en el borde
-  /// gRPC con `open()` antes de mandarlo al admin-bff (ya gateado Compliance+). El `User.dniHash` es OTRO
-  /// caso (matching interno irreversible) — no se mezcla con este. Nullable hasta que el conductor lo registra.
+  /// gRPC con `open()` antes de mandarlo al admin-bff (ya gateado Compliance+). El `User.document` (doc de
+  /// pago del pasajero, en claro por decisión §14) es OTRO caso — no se mezcla con este. Nullable hasta que el conductor lo registra.
   documentIdEnc         String?               @map("document_id_enc")
   /// Blind index del DNI (hashPii determinista con DNI_HASH_SALT): permite CHEQUEAR unicidad sin exponer
   /// la PII (Ley 29733), ya que `documentIdEnc` es cifrado con IV aleatorio (no indexable). @unique = un DNI
@@ -404,6 +404,8 @@ model Referral {
   status          ReferralStatus @default(PENDING)
   /// Recompensa otorgada al referidor cuando se cumple la condición (céntimos PEN). 0 hasta otorgar.
   rewardCents     Int            @default(0) @map("reward_cents")
+  /// Moneda de la recompensa (FOUNDATION §8: Money = céntimos + currency). Hoy única 'PEN'.
+  currency        String         @default("PEN")
   createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
   rewardedAt      DateTime?      @map("rewarded_at") @db.Timestamptz
 

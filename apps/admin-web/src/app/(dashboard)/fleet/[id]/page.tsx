@@ -14,7 +14,6 @@ import {
   CircleCheck,
   ClipboardCheck,
   FileText,
-  Lock,
   Plus,
   ShieldCheck,
   User,
@@ -35,7 +34,8 @@ import { can } from '@/lib/rbac';
 import { Avatar } from '@/components/ui/avatar';
 import { DotPill, type PillTone } from '@/components/ui/dot-pill';
 import { Skeleton } from '@/components/ui/skeleton';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { StepUpDialog } from '@/components/security/step-up-dialog';
 import { CreateInspectionDialog } from '@/components/fleet/fleet-forms';
 import { useToast } from '@/components/ui/toast';
@@ -97,16 +97,21 @@ export default function VehicleDetailPage(props: { params: Promise<{ id: string 
   const params = use(props.params);
   const { id } = params;
   const user = useSession();
-  const query = useVehicle(id);
+  const canView = can(user, 'fleet:view');
+  const requestAccess = useRequestAccess();
+  // Gate ANTES de la query (paridad con ops/trips/[id]): sin permiso, el hook no dispara el fetch.
+  const query = useVehicle(canView ? id : '');
   const v = query.data;
 
-  if (!can(user, 'fleet:view')) {
+  if (!canView) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-        <Lock className="size-6 text-ink-subtle" aria-hidden />
-        <p className="text-sm text-ink-muted">
-          Necesitás el rol correspondiente para ver este vehículo.
-        </p>
+      <div className="flex h-full flex-col">
+        <PermissionState
+          className="flex-1"
+          section="Flota"
+          permission="fleet:view"
+          onRequest={() => requestAccess('fleet:view')}
+        />
       </div>
     );
   }

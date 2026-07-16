@@ -367,6 +367,39 @@ describe('PUJA / negociación (ADR 010 §4)', () => {
     ).toBe(false);
   });
 
+  it('dispatch.offered: el enrich de PUJA SOBREVIVE al re-parse del relay (zod stripea lo no declarado)', () => {
+    // El driver-bff re-parsea el payload con ESTE schema antes de reenviarlo al socket: todo campo del
+    // enrich que no esté declarado acá muere en el relay (llega a Kafka pero la app nunca lo ve).
+    const enriched = {
+      tripId: 't1',
+      driverId: 'd1',
+      matchId: 'm1',
+      expiresAt: '2026-05-29T00:00:30.000Z',
+      bidCents: 850,
+      vehicleType: 'CAR',
+      originLat: -12.046,
+      originLon: -77.043,
+      destLat: -12.093,
+      destLon: -77.046,
+      distanceMeters: 5200,
+      durationSeconds: 900,
+      waypointCount: 2,
+      specialRequests: ['PET'],
+      pickupEtaSeconds: 240,
+    };
+    const parsed = EVENT_SCHEMAS['dispatch.offered'].safeParse(enriched);
+    expect(parsed.success).toBe(true);
+    // toEqual (no toMatchObject): asegura que NINGÚN campo del enrich fue stripeado.
+    expect(parsed.success && parsed.data).toEqual(enriched);
+    // Los campos de enrich negativos se rechazan (mismo criterio que el resto de montos/medidas).
+    expect(
+      EVENT_SCHEMAS['dispatch.offered'].safeParse({ ...enriched, waypointCount: -1 }).success,
+    ).toBe(false);
+    expect(
+      EVENT_SCHEMAS['dispatch.offered'].safeParse({ ...enriched, distanceMeters: -1 }).success,
+    ).toBe(false);
+  });
+
   it('dispatch.offer_accepted: acepta válido, rechaza priceCents negativo', () => {
     const ok: EventPayload<'dispatch.offer_accepted'> = {
       tripId: 't1',

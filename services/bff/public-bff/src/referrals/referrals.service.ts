@@ -11,6 +11,8 @@ export interface ReferralSummaryView {
   code: string;
   referredCount: number;
   rewardsEarnedCents: number;
+  /** Moneda de `rewardsEarnedCents` (FOUNDATION §8: Money = céntimos + currency). Hoy única 'PEN'. */
+  currency: 'PEN';
 }
 
 @Injectable()

@@ -2,12 +2,12 @@
 
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Lock } from 'lucide-react';
 import { usePermissionOverrides } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PermissionsMatrix } from '@/components/gobierno/permissions-matrix';
 
@@ -32,6 +32,7 @@ export default function PermissionsPage() {
 function PermissionsPageInner() {
   const user = useSession();
   const canManage = can(user, 'gobierno:manage');
+  const requestAccess = useRequestAccess();
   const query = usePermissionOverrides();
   // Deep-link "Editar overlay en la matriz" (role-overlay-detail): `?role=X` enfoca la COLUMNA de ese rol.
   const focusRole = useSearchParams().get('role');
@@ -43,11 +44,11 @@ function PermissionsPageInner() {
           title="Permisos y visibilidad"
           breadcrumbs={[{ label: 'Gobierno' }, { label: 'Permisos y visibilidad' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="La matriz de permisos es exclusiva del rol SUPERADMIN."
+          section="Permisos y visibilidad"
+          permission="gobierno:manage"
+          onRequest={() => requestAccess('gobierno:manage')}
         />
       </div>
     );

@@ -20,7 +20,8 @@ import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ErrorState, EmptyState } from '@/components/ui/states';
+import { ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { StatusPill } from '@/components/ui/status-pill';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -53,8 +54,11 @@ const LINK_BTN =
 export default function PanicDetailPage(props: { params: Promise<{ id: string }> }) {
   const { id } = use(props.params);
   const user = useSession();
+  const canView = can(user, 'panics:view');
+  const requestAccess = useRequestAccess();
   const { toast } = useToast();
-  const query = usePanic(id);
+  // Gate ANTES de la query (paridad con ops/trips/[id]): sin permiso, el hook no dispara el fetch.
+  const query = usePanic(canView ? id : '');
   const action = usePanicAction();
   const panic = query.data;
   const trip = useTrip(panic?.tripId ?? '').data;
@@ -78,11 +82,16 @@ export default function PanicDetailPage(props: { params: Promise<{ id: string }>
     />
   );
 
-  if (!can(user, 'panics:view')) {
+  if (!canView) {
     return (
       <div className="flex h-full flex-col">
         {topbar}
-        <EmptyState className="flex-1" title="Acceso restringido" description="Necesitas el rol correspondiente." />
+        <PermissionState
+          className="flex-1"
+          section="Pánicos"
+          permission="panics:view"
+          onRequest={() => requestAccess('panics:view')}
+        />
       </div>
     );
   }

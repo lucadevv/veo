@@ -39,7 +39,8 @@ async function main(): Promise<void> {
         deletedAt: now,
         phone: deletedPlaceholder(userId, 'phone'),
         email: null,
-        dniHash: null,
+        documentType: null,
+        document: null,
         photoUrl: null,
         faceEmbedding: [],
       },
@@ -52,6 +53,9 @@ async function main(): Promise<void> {
           dniFaceMatched: null,
           dniFaceMatchScore: null,
           dniFaceMatchedAt: null,
+          licenseFaceMatched: null,
+          licenseFaceMatchScore: null,
+          licenseFaceMatchedAt: null,
         },
       });
     }

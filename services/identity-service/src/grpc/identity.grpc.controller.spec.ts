@@ -628,3 +628,22 @@ describe('IdentityGrpcController · GetDriverByUser proyecta el hold DEBT_BLOCKE
     expect(reply.suspensionCauses).toEqual([]);
   });
 });
+
+describe('countDriversByBackgroundStatus · groupBy agregado → {status, count} plano', () => {
+  it('ejercita la FORMA del groupBy y mapea _count._all (incluido count 0) por status', async () => {
+    const groupBy = vi.fn(async () => [
+      { backgroundCheckStatus: 'PENDING', _count: { _all: 3 } },
+      { backgroundCheckStatus: 'CLEARED', _count: { _all: 0 } },
+    ]);
+    const prisma = { read: { driver: { groupBy } } } as unknown as PrismaService;
+    const repo = new PrismaIdentityGrpcRepository(prisma);
+
+    const res = await repo.countDriversByBackgroundStatus();
+
+    expect(groupBy).toHaveBeenCalledWith({ by: ['backgroundCheckStatus'], _count: { _all: true } });
+    expect(res).toEqual([
+      { backgroundCheckStatus: 'PENDING', count: 3 },
+      { backgroundCheckStatus: 'CLEARED', count: 0 },
+    ]);
+  });
+});

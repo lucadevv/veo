@@ -3,14 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Film, Lock, Radio, Video, X } from 'lucide-react';
+import { Film, Radio, Video, X } from 'lucide-react';
 import { useLiveCabins } from '@/lib/api/queries';
 import type { LiveViewerToken } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { cn } from '@/lib/cn';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { Skeleton } from '@/components/ui/skeleton';
 import { LiveAccessDialog } from '@/components/live/live-access-dialog';
 import { LiveCabinViewer } from '@/components/live/live-cabin-viewer';
@@ -24,6 +25,7 @@ import { CameraTile } from '@/components/live/camera-tile';
  */
 export default function LiveWallPage() {
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const query = useLiveCabins();
   // tripId → grant activo. Abrir una cámara es por-viaje (cada una con su doble-auth); cerrar la quita.
   const [grants, setGrants] = useState<Record<string, LiveViewerToken>>({});
@@ -46,11 +48,11 @@ export default function LiveWallPage() {
           title="Cámaras en vivo"
           breadcrumbs={[{ label: 'Seguridad' }, { label: 'Cámaras en vivo' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol de Cumplimiento o Administrador para el muro de cámaras en vivo."
+          section="Cámaras en vivo"
+          permission="live:view"
+          onRequest={() => requestAccess('live:view')}
         />
       </div>
     );

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ShieldAlert, Lock } from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 import { PanicStatus } from '@veo/shared-types';
 import { PANIC_TABS, DEFAULT_PANIC_TAB, type PanicTab } from '@/lib/panics';
 import { usePanics } from '@/lib/api/queries';
@@ -9,7 +9,8 @@ import type { PanicSummary } from '@/lib/api/schemas';
 import { relativeFromNow } from '@/lib/formatters';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatusPill } from '@/components/ui/status-pill';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
@@ -24,6 +25,7 @@ import { PanicDetailPanel } from '@/components/security/panic-detail-panel';
  */
 export default function PanicsPage() {
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const [tab, setTab] = useState<PanicTab>(DEFAULT_PANIC_TAB);
   const query = usePanics(tab);
   const rows = useMemo<PanicSummary[]>(() => query.data?.items ?? [], [query.data]);
@@ -50,11 +52,11 @@ export default function PanicsPage() {
           title="Centro de pánico"
           breadcrumbs={[{ label: 'Seguridad' }, { label: 'Pánicos' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol correspondiente para ver las alertas de pánico."
+          section="Pánicos"
+          permission="panics:view"
+          onRequest={() => requestAccess('panics:view')}
         />
       </div>
     );

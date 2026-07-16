@@ -2,14 +2,15 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Lock } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useInspections } from '@/lib/api/queries';
 import type { InspectionView } from '@/lib/api/schemas';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { date as fmtDate } from '@/lib/formatters';
 import { DotPill, type PillTone } from '@/components/ui/dot-pill';
-import { EmptyState, ErrorState } from '@/components/ui/states';
+import { EmptyState, ErrorState, PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { LoadMore } from '@/components/ui/load-more';
 
 /** Pill de RESULTADO de la inspección (ITV). Mismo mapeo dato→tono que la card de ITV del detalle. */
@@ -23,6 +24,7 @@ const GRID = 'grid grid-cols-[160px_150px_150px_1fr_170px_90px] items-center gap
 
 export default function InspectionsPage() {
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const router = useRouter();
 
   const inspections = useInspections();
@@ -34,11 +36,13 @@ export default function InspectionsPage() {
 
   if (!can(user, 'fleet:review')) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-        <Lock className="size-6 text-ink-subtle" aria-hidden />
-        <p className="text-sm text-ink-muted">
-          Necesitás el rol de revisión de flota para ver el historial de inspecciones.
-        </p>
+      <div className="flex h-full flex-col">
+        <PermissionState
+          className="flex-1"
+          section="Inspecciones"
+          permission="fleet:review"
+          onRequest={() => requestAccess('fleet:review')}
+        />
       </div>
     );
   }

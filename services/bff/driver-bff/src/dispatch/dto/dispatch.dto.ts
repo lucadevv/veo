@@ -84,8 +84,16 @@ export interface OpenBidView {
   destLon: number;
   distanceMeters: number;
   durationSeconds: number;
+  /** Ola 2B · nº de paradas intermedias (solo el CONTEO, cero coordenadas pre-aceptación); "+N paradas" en la card. */
+  waypointCount: number;
   /** BE-2 · solicitudes especiales del pasajero (mascota/equipaje/silla); el conductor las ve. */
   specialRequests: string[];
+  /**
+   * ETA conductor→recojo en segundos (per-conductor, calculada por dispatch en el poll con el hot-index).
+   * El dato de decisión "A recojo" — paridad con la oferta FIXED (`pickupEtaSeconds` del ping). AUSENTE
+   * si maps no estuvo disponible (la app degrada el stat, nunca pinta "0 min").
+   */
+  pickupEtaSeconds?: number;
 }
 
 /** Vista de la oferta que el conductor acaba de enviar. */

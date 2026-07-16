@@ -33,12 +33,11 @@ import {
   InternalIdentityGuard,
   type AuthenticatedUser,
 } from '@veo/auth';
-import { OfferBoardService } from './offer-board.service';
+import { OfferBoardService, type NearbyOpenBid } from './offer-board.service';
 import { requireDriverId } from './require-driver-id';
 import {
   bidFieldsFromBoard,
   type Offer,
-  type OfferBoard,
   type OffersView,
 } from './offer-board.port';
 import {
@@ -60,10 +59,17 @@ function toOfferDto(o: Offer): OfferDto {
   };
 }
 
-function toOpenBidDto(b: OfferBoard): OpenBidDto {
+function toOpenBidDto({ board, pickupEtaSeconds }: NearbyOpenBid): OpenBidDto {
   // MISMO derivador que el enrich del broadcast (`bidFieldsFromBoard`) → el REST y el ping `dispatch.offered`
   // no pueden divergir. `expiresAt` (epoch ms) es propio del REST; el ping lo lleva como ISO aparte.
-  return { tripId: b.tripId, expiresAt: b.expiresAt, ...bidFieldsFromBoard(b) };
+  // `pickupEtaSeconds` (per-conductor, no vive en el board) se OMITE cuando es 0 (maps caído): la app
+  // degrada el stat "A recojo" en vez de pintar un "0 min" engañoso — mismo criterio que el ping.
+  return {
+    tripId: board.tripId,
+    expiresAt: board.expiresAt,
+    ...bidFieldsFromBoard(board),
+    ...(pickupEtaSeconds > 0 ? { pickupEtaSeconds } : {}),
+  };
 }
 
 @ApiTags('bids')
@@ -82,8 +88,8 @@ export class OfferBoardController {
   async listOpen(@CurrentUser() user: AuthenticatedUser): Promise<OpenBidDto[]> {
     // El driverId sale de la identidad FIRMADA, NUNCA de un query param del cliente (anti-IDOR #9).
     const driverId = requireDriverId(user);
-    const boards = await this.board.listOpenBidsNear(driverId);
-    return boards.map(toOpenBidDto);
+    const nearby = await this.board.listOpenBidsNear(driverId);
+    return nearby.map(toOpenBidDto);
   }
 
   @UseGuards(AudienceGuard)

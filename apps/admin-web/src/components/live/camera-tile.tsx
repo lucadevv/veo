@@ -27,7 +27,8 @@ function subLine(cabin: LiveCabin): string {
  * VIVO", reloj en curso, ícono de cámara (placeholder — el feed NO se muestra hasta la doble-auth) y barra
  * inferior con conductor / placa·distrito / estado. Es un `<button>`: TODO el tile abre el diálogo de acceso
  * (doble-auth) — se pasa como `trigger` de `LiveAccessDialog` (DialogTrigger asChild). La superficie oscura es
- * intrínseca al diseño del "feed" (no un surface temático) → colores exactos del frame, iguales en claro/oscuro.
+ * intrínseca al diseño del "feed" (no un surface temático) → tokens propios `feed`/`feed-glow` (valores
+ * exactos del frame, ver globals.css), iguales en claro/oscuro.
  */
 export const CameraTile = forwardRef<HTMLButtonElement, { cabin: LiveCabin } & React.ComponentProps<'button'>>(
   function CameraTile({ cabin, ...props }, ref) {
@@ -45,7 +46,7 @@ export const CameraTile = forwardRef<HTMLButtonElement, { cabin: LiveCabin } & R
         ref={ref}
         type="button"
         aria-label={`Abrir cámara del viaje de ${driver}`}
-        className="group relative block aspect-[269/176] w-full overflow-hidden rounded-[14px] bg-gradient-to-b from-[#20304A] to-[#0A0B0F] text-left outline-none transition-[transform,box-shadow] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg hover:shadow-lg active:scale-[0.99]"
+        className="group relative block aspect-[269/176] w-full overflow-hidden rounded-[14px] bg-gradient-to-b from-feed-glow to-feed text-left outline-none transition-[transform,box-shadow] focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg hover:shadow-lg active:scale-[0.99]"
         {...props}
       >
         {/* Scanlines del feed (y40/80/120/160 sobre 176 → ~23/45/68/91%) */}

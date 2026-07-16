@@ -1,6 +1,5 @@
 'use client';
 
-import { Lock } from 'lucide-react';
 import {
   useActiveCarpools,
   useCostPerKm,
@@ -10,7 +9,8 @@ import {
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState } from '@/components/ui/states';
+import { PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { CostPerKmPanel } from '@/components/pricing/cost-per-km-panel';
@@ -33,6 +33,7 @@ import {
  */
 export default function CarpoolingPage() {
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const activeCarpoolsQuery = useActiveCarpools();
   const costPerKmQuery = useCostPerKm();
   const commissionQuery = useCommission();
@@ -57,11 +58,11 @@ export default function CarpoolingPage() {
           title="Carpooling"
           breadcrumbs={[{ label: 'Precios' }, { label: 'Carpooling' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol FINANCE o ADMIN para ver la config del carpooling."
+          section="Carpooling"
+          permission="finance:view"
+          onRequest={() => requestAccess('finance:view')}
         />
       </div>
     );

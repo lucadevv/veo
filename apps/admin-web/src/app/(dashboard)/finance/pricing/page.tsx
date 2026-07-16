@@ -1,11 +1,11 @@
 'use client';
 
-import { Lock } from 'lucide-react';
 import { useBaseFare, useCommission } from '@/lib/api/queries';
 import { useSession } from '@/lib/session-context';
 import { can } from '@/lib/rbac';
 import { PageHeader } from '@/components/layout/page-header';
-import { EmptyState } from '@/components/ui/states';
+import { PermissionState } from '@/components/ui/states';
+import { useRequestAccess } from '@/lib/use-request-access';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AsyncSection } from '@/components/config/async-section';
 import { BaseFarePanel } from '@/components/pricing/base-fare-panel';
@@ -35,6 +35,7 @@ function SectionHeader({ label }: { label: string }) {
  */
 export default function PricingPage() {
   const user = useSession();
+  const requestAccess = useRequestAccess();
   const baseFareQuery = useBaseFare();
   const commissionQuery = useCommission();
 
@@ -45,11 +46,11 @@ export default function PricingPage() {
           title="Precios on-demand"
           breadcrumbs={[{ label: 'Precios' }, { label: 'Precios on-demand' }]}
         />
-        <EmptyState
+        <PermissionState
           className="flex-1"
-          icon={<Lock className="size-6" aria-hidden />}
-          title="Acceso restringido"
-          description="Necesitas el rol FINANCE o ADMIN para ver el modo de pricing."
+          section="Precios"
+          permission="pricing:view"
+          onRequest={() => requestAccess('pricing:view')}
         />
       </div>
     );

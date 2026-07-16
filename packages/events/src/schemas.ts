@@ -263,6 +263,9 @@ export const referralRewarded = z.object({
   referredUserId: z.string(),
   /// Recompensa otorgada al referidor (céntimos PEN), modelada como crédito.
   rewardCents: z.number().int(),
+  /// Moneda de la recompensa (FOUNDATION §8: Money = céntimos + currency; hoy única 'PEN').
+  /// `.default`: compat con eventos in-flight emitidos antes de que el campo existiera.
+  currency: z.string().default('PEN'),
   tripId: z.string(),
   at: z.string(),
 });
@@ -515,10 +518,21 @@ export const dispatchOffered = z.object({
   vehicleType: z.string().optional(),
   originLat: z.number().optional(),
   originLon: z.number().optional(),
+  /// Destino ENGROSADO a ~111m + distancia/duración del viaje (enrich de PUJA, `bidFieldsFromBoard`).
+  /// DEBEN estar declarados acá: el driver-bff re-parsea el payload con ESTE schema antes de reenviarlo al
+  /// socket, y zod STRIPEA las keys no declaradas — sin estos campos el enrich llegaba a Kafka pero moría
+  /// en el relay (la app los tipa en `DispatchOfferedPayload` y nunca los recibía).
+  destLat: z.number().optional(),
+  destLon: z.number().optional(),
+  distanceMeters: z.number().nonnegative().optional(),
+  durationSeconds: z.number().nonnegative().optional(),
+  /// Ola 2B · nº de paradas intermedias del viaje (solo el CONTEO — need-to-know pre-aceptación: cero
+  /// coordenadas de paradas a conductores no asignados). El conductor lo ve en la card de puja.
+  waypointCount: z.number().int().nonnegative().optional(),
   specialRequests: z.array(z.string()).optional(),
-  /// ETA conductor→recojo en segundos (efímero, momento-de-oferta, solo camino FIXED). Opcional porque el
-  /// broadcast de PUJA no lo lleva y una oferta con maps.eta caído lo omite. La app lo muestra como el stat
-  /// "A recojo".
+  /// ETA conductor→recojo en segundos (efímero, momento-de-oferta). Lo llevan AMBOS caminos: la oferta
+  /// FIXED y el broadcast de PUJA (etaBatch por candidato). Opcional porque una oferta con maps.eta caído
+  /// lo omite (mejor ausente que un "0 min" engañoso). La app lo muestra como el stat "A recojo".
   pickupEtaSeconds: z.number().int().nonnegative().optional(),
 });
 
@@ -1038,6 +1052,9 @@ export const incentiveCompleted = z.object({
   driverId: z.string(),
   /// Recompensa otorgada al conductor (céntimos PEN), modelada como crédito/bono.
   rewardCents: z.number().int(),
+  /// Moneda del bono (FOUNDATION §8: Money = céntimos + currency; hoy única 'PEN').
+  /// `.default`: compat con eventos in-flight emitidos antes de que el campo existiera.
+  currency: z.string().default('PEN'),
   tripsCompleted: z.number().int(),
   at: z.string(),
 });
