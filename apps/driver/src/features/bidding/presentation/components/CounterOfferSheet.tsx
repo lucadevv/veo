@@ -125,8 +125,16 @@ export const CounterOfferSheet = ({ bid, gone = false, onClose }: Props): React.
               </Text>
             </View>
 
-            {bid.specialRequests.length > 0 ? (
+            {bid.specialRequests.length > 0 || (bid.waypointCount ?? 0) > 0 ? (
               <View style={styles.specials}>
+                {/* "+N paradas" (solo el conteo) junto a las solicitudes especiales: el conductor decide
+                    su oferta sabiendo que el viaje NO es directo. Ausente/0 ⇒ no se pinta. */}
+                {(bid.waypointCount ?? 0) > 0 ? (
+                  <StatusPill
+                    label={t('trips.bid.stops', { count: bid.waypointCount })}
+                    tone="neutral"
+                  />
+                ) : null}
                 {bid.specialRequests.map((req) => (
                   <StatusPill
                     key={req}

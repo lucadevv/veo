@@ -100,10 +100,24 @@ export class OpenBidDto {
   @ApiProperty({ example: 900, description: 'Duración estimada del viaje en segundos.' })
   durationSeconds!: number;
   @ApiProperty({
+    example: 1,
+    description:
+      'Ola 2B · nº de paradas intermedias (solo el CONTEO — cero coordenadas pre-aceptación). 0 = directo.',
+  })
+  waypointCount!: number;
+  @ApiProperty({
     isArray: true,
     enum: ['PET', 'LUGGAGE', 'CHILD_SEAT'],
     description:
       'BE-2 · solicitudes especiales del pasajero; el conductor las ve antes de ofertar.',
   })
   specialRequests!: string[];
+  @ApiProperty({
+    required: false,
+    example: 240,
+    description:
+      'ETA conductor→recojo en segundos (per-conductor, calculada en el poll). AUSENTE si maps no ' +
+      'estuvo disponible (la app degrada el stat "A recojo" en vez de pintar un 0 engañoso).',
+  })
+  pickupEtaSeconds?: number;
 }
