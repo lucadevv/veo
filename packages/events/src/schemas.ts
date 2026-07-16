@@ -665,6 +665,47 @@ export const dispatchOfferWithdrawn = z.object({
     OFFER_WITHDRAWN_REASON.CANCELLED,
   ]),
 });
+/// dispatch → audit (+ consumidores futuros). El ADMIN reemplazó la config SINGLETON de RADIOS (k-rings) +
+/// VENTANAS + POLÍTICA de dispatch (PUT /internal/dispatch/radius-config; outbox en la MISMA tx del upsert).
+/// Acción admin SENSIBLE (cambia los radios de matching en vivo) → audit trail inmutable (Ley 29733).
+/// SNAPSHOT completo (no delta) con `version` MONOTÓNICA, misma semántica que los snapshots de pricing.
+/// Las cotas finas (k-ring 1..8, ventanas min/max) las valida el DTO del PUT (1ª barrera); acá SOLO
+/// estructura/tipos: un consumer no debe dropear como INVALID (y perder la traza) un snapshot YA persistido
+/// por una cota cosmética.
+export const dispatchRadiusConfigUpdated = z.object({
+  /// k-ring del feed de mapa "autos cerca" (NearbyDriversService).
+  nearbyKRing: z.number().int().positive(),
+  /// k-ring del broadcast de pujas / matching (OfferBoardService).
+  matchKRing: z.number().int().positive(),
+  /// Ventana (ms) de la oferta directa FIXED antes de TIMEOUT + avanzar.
+  offerTimeoutMs: z.number().int().positive(),
+  /// Ventana (s) del board de PUJA (openBoard/reopenBoard).
+  bidWindowSec: z.number().int().positive(),
+  /// Feature-flag de política de despacho (ADR dispatch-policy-v2): 'v1' = k-rings crudos, 'v2' = km.
+  policyVersion: z.enum(['v1', 'v2']),
+  /// Snapshot v2 por-modo (null cuando policyVersion='v1' o edición rota → degrada a v1). Espeja
+  /// DispatchPolicyV2 del dispatch-service; `expandIntervalSec` opcional (compat: parsePolicyV2 defaultea).
+  policyV2: z
+    .object({
+      FIXED: z.object({
+        initialRadiusKm: z.number(),
+        incrementKm: z.number(),
+        maxRadiusKm: z.number(),
+        targetDrivers: z.number().int(),
+        offerTimeoutSec: z.number().int(),
+        expandIntervalSec: z.number().int().optional(),
+      }),
+      PUJA: z.object({
+        broadcastRadiusKm: z.number(),
+        bidWindowSec: z.number().int(),
+      }),
+    })
+    .nullable(),
+  /// Versión MONOTÓNICA de la config (bump en cada PUT; consumidores descartan snapshots stale).
+  version: z.number().int().positive(),
+  /// Marca ISO del reemplazo (updatedAt del row persistido).
+  updatedAt: z.string(),
+});
 /// trip → dispatch. El conductor canceló DESPUÉS de aceptar (pre-recojo): trip pasa a REASSIGNING y
 /// re-abre el board (cierra el catastrófico #4 — no más pasajero abandonado). `bidCents` = bid con el que
 /// se re-abre la puja; el pasajero PUEDE haberlo subido respecto del original.
@@ -1724,6 +1765,7 @@ export const EVENT_SCHEMAS = {
   'dispatch.no_offers': dispatchNoOffers,
   'dispatch.bid_cancelled': dispatchBidCancelled,
   'dispatch.offer_withdrawn': dispatchOfferWithdrawn,
+  'dispatch.radius_config_updated': dispatchRadiusConfigUpdated,
   'pricing.mode_schedule_updated': pricingModeScheduleUpdated,
   'pricing.bid_floor_updated': pricingBidFloorUpdated,
   'pricing.base_fare_updated': pricingBaseFareUpdated,

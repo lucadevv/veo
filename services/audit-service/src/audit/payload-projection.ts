@@ -261,6 +261,18 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
   'dispatch.no_offers': ['tripId', 'reason'],
   'dispatch.bid_cancelled': ['tripId', 'reason'],
   'dispatch.offer_withdrawn': ['tripId', 'driverId', 'reason'],
+  // Config-admin de RADIOS/VENTANAS (snapshot): los ESCALARES del snapshot son el forense del cambio (qué
+  // radios/ventanas quedaron vigentes + flag + version). `policyV2` (objeto anidado) NO se lista: lo
+  // descartaría igual `isSafeValue` — mismo criterio que los `params` de policy.updated / `rules` de pricing.
+  'dispatch.radius_config_updated': [
+    'nearbyKRing',
+    'matchKRing',
+    'offerTimeoutMs',
+    'bidWindowSec',
+    'policyVersion',
+    'version',
+    'updatedAt',
+  ],
   // ── pricing (config snapshot; rules es array de objetos → se descarta, queda version) ──
   'pricing.mode_schedule_updated': ['defaultMode', 'version', 'updatedAt'],
   'pricing.bid_floor_updated': ['defaultFloorCents', 'version', 'updatedAt'],
@@ -415,6 +427,9 @@ const AUDIT_PAYLOAD_ALLOWLIST: Partial<Record<AuditProjectionKey, readonly strin
     'estado',
     'origen',
   ],
+  // rejected/expired (ADR-014 §7.1): payload = IDs + `estado` literal (RECHAZADO/EXPIRADO) → todo SEGURO.
+  'booking.rejected': ['bookingId', 'publishedTripId', 'passengerId', 'driverId', 'estado'],
+  'booking.expired': ['bookingId', 'publishedTripId', 'passengerId', 'driverId', 'estado'],
   'booking.updated': [
     'publishedTripId',
     'driverId',

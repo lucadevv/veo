@@ -625,6 +625,15 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
         resourceType: 'dispatch',
         resourceId: p.tripId,
       })),
+      // Dispatch · el ADMIN reemplazó la config de RADIOS/VENTANAS/política del matching (snapshot · outbox del
+      // PUT interno de dispatch). Acción admin SENSIBLE (cambia el matching en vivo) → WORM (Ley 29733). Mismo
+      // patrón config-admin que pricing.*: el operador se traza por el comando admin-bff; el payload es un
+      // snapshot SIN actor ni id de entidad → actor='system' (config aplicada), recurso=dispatch, id='radius_config'.
+      'dispatch.radius_config_updated': this.audited('dispatch.radius_config_updated', () => ({
+        actorId: 'system',
+        resourceType: 'dispatch',
+        resourceId: 'radius_config',
+      })),
       // Pricing · el ADMIN editó el schedule de modo PUJA↔FIJO (snapshot completo · ADR-011). El operador se traza por
       // el comando admin-bff; el payload es un snapshot de config SIN actor ni id de entidad → actor='system'
       // (config aplicada), recurso=pricing, id='mode_schedule' (la pieza de config afectada; `version` viaja en el payload).
@@ -689,6 +698,20 @@ export class AuditConsumer extends KafkaConsumerBootstrap {
       // actor = driverId si lo aprobó el conductor; 'system' si nació aprobado por INSTANT_BOOKING. recurso=booking/bookingId.
       'booking.approved': this.audited('booking.approved', (p) => ({
         actorId: p.origen === 'APROBACION_CONDUCTOR' ? p.driverId : 'system',
+        resourceType: 'booking',
+        resourceId: p.bookingId,
+      })),
+      // Booking RECHAZADO (PENDIENTE_APROBACION → RECHAZADO, ADR-014 §7.1): el conductor decidió → actor=driverId,
+      // recurso=booking/bookingId. Simétrico de booking.approved (rama APROBACION_CONDUCTOR).
+      'booking.rejected': this.audited('booking.rejected', (p) => ({
+        actorId: p.driverId,
+        resourceType: 'booking',
+        resourceId: p.bookingId,
+      })),
+      // Booking EXPIRADO (TTL ~5min sin respuesta del conductor → EXPIRADO, terminal sin plata movida): decisión
+      // automática del sweeper → actor='system', recurso=booking/bookingId (mismo criterio que dispatch.no_offers).
+      'booking.expired': this.audited('booking.expired', (p) => ({
+        actorId: 'system',
         resourceType: 'booking',
         resourceId: p.bookingId,
       })),
