@@ -425,6 +425,7 @@ migrate_drift() {
 boot_all() {
   hdr "BOOT (servicios nativos)"
   export APP_ENV="${APP_ENV:-development}"
+  _export_deploy_tier
 
   blue "  → boot-passenger-stack.sh (identity/trip/dispatch/fleet/payment/rating/places/notification + bff)"
   bash "$SCRIPT_DIR/boot-passenger-stack.sh" start || yel "  boot-passenger devolvió error parcial (revisá arriba)"
@@ -1226,6 +1227,7 @@ cmd_restart() {
   # cae a development por default. Un APP_ENV explícito en el shell (ej. `APP_ENV=dev veo.sh restart x`)
   # sigue mandando. Así `veo.sh restart <svc>` sobre un stack local reinicia LOCAL (sandbox + bypass).
   export APP_ENV="${APP_ENV:-$(_current_tier)}"
+  _export_deploy_tier
 
   hdr "RESTART · $svc  (tier: $APP_ENV)"
   # 1) down de ESE servicio.
@@ -2040,9 +2042,26 @@ _current_tier() {
   printf '%s' "${t:-development}"
 }
 
-# Modo LOCAL: deriva env/local.env de env/development.env (por servicio + apps) y PRENDE el bypass de
-# verificación (VEO_BYPASS_VERIFICATION=true) + el tier (VEO_DEPLOY_TIER=local) + biométrico sandbox.
-# El local.env es gitignoreado (config local del dev). Idempotente: re-corre sin duplicar.
+# Exporta el TIER LÓGICO (@veo/utils deployTier()) derivado de APP_ENV (que nombra el ARCHIVO env):
+# development→dev; local/preview/production→idénticos. Sin este export deployTier() cae SIEMPRE a
+# production (default seguro) y el stack de dev corre "endurecido" (guards de ops, cero bypass).
+# Precedencia: un VEO_DEPLOY_TIER ya presente en el shell manda; y como los boot scripts hacen
+# `set -a; source env/<tier>.env` DESPUÉS de esto, un valor non-empty del archivo también gana.
+_export_deploy_tier() {
+  local t
+  case "${APP_ENV:-development}" in
+    development)              t=dev ;;
+    local|preview|production) t="$APP_ENV" ;;
+    *)                        t=production ;;
+  esac
+  export VEO_DEPLOY_TIER="${VEO_DEPLOY_TIER:-$t}"
+}
+
+# Modo LOCAL: scaffoldea env/local.env desde env/example.env (solo-si-falta, por servicio + apps RN)
+# y deja SETEADO el tier (VEO_DEPLOY_TIER=local) en el archivo nuevo. El resto del tier local (sandbox
+# de pagos + VEO_BYPASS_VERIFICATION=true + VEO_BIOMETRIC_MODE=sandbox + secretos) lo completa el dev:
+# el local.env es autocontenido y gitignoreado. Idempotente: los existentes NO se tocan (el tier de un
+# local.env viejo sin la var lo cubre igual el export de _export_deploy_tier al bootear).
 _prepare_local_env() {
   # RESPONSABILIDAD ÚNICA POR ENTORNO: cada servicio usa su PROPIO env/local.env, autocontenido para el
   # tier local (sandbox de pagos + VEO_BYPASS_VERIFICATION=true + VEO_BIOMETRIC_MODE=sandbox +
@@ -2065,6 +2084,9 @@ _prepare_local_env() {
     tmpl="$ROOT_DIR/$dir/env/example.env"
     [[ -f "$tmpl" ]] || continue
     cp "$tmpl" "$dst"
+    # El tier de ESTE archivo es local por definición — queda seteado ya en el scaffold; el resto
+    # de los valores del tier local los completa el dev (aviso de abajo).
+    printf '\n# Tier lógico del archivo (lo setea el scaffold de `veo.sh local`).\nVEO_DEPLOY_TIER=local\n' >> "$dst"
     scaffolded+=("$dir")
   done
   if [[ ${#scaffolded[@]} -gt 0 ]]; then

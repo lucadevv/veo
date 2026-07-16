@@ -29,6 +29,10 @@ VPS /opt/veo ──► docker-compose.preview.yml (infra self-hosted + 19 servic
 2. **Por servicio**: por cada servicio, copiá `services/<svc>/env/example.env` → `services/<svc>/env/preview.env`
    con valores reales (gitignored). **OJO booking-service**: su `preview.env` DEBE setear `VEO_MAPS_MODE=osrm`
    - `OSRM_BASE_URL` (su superRefine exige routing soberano en prod o no arranca).
+   El tier lógico (`VEO_DEPLOY_TIER=preview`, leído por `@veo/utils deployTier()`) NO hace falta en los
+   `preview.env`: `docker-compose.preview.yml` lo pinea vía `environment:` para los 18 servicios de app
+   (y `environment` tiene precedencia sobre `env_file`). En cualquier otro path de deploy que use los env
+   directos, seteálo explícito; unset = default seguro `production`.
 3. **Cloudflare Tunnel**: creá el tunnel `veo-preview` (Dashboard Zero Trust o `infra/cloudflare/setup-preview-tunnel.mjs`)
    con ingress a `public-bff:4001` / `driver-bff:4002` / `admin-bff:4003`; poné su token en `CLOUDFLARE_TUNNEL_TOKEN`.
 
