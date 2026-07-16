@@ -286,6 +286,124 @@ describe('runPushSpec · recipientKind driverId (resuelve por identity antes del
   });
 });
 
+/* ────────── 1c · booking.* (ADR-014 §7.1) · reglas de negocio de las filas del carpooling ────────── */
+
+describe('booking.* · filas del marketplace de carpooling (ADR-014 §7.1)', () => {
+  const DRV = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const USER = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+  function bookingEnvelope(
+    eventType: 'booking.requested' | 'booking.approved' | 'booking.confirmed',
+    payload: Record<string, unknown>,
+  ): EventEnvelope<unknown> {
+    return createEnvelope({ eventType, producer: 'test', payload });
+  }
+
+  const approvedPayload = {
+    bookingId: 'bk-1',
+    publishedTripId: 'pt-1',
+    passengerId: PAX,
+    driverId: DRV,
+    asientos: 1,
+    precioAcordado: 1850,
+    modoReserva: 'REVISION_CADA_SOLICITUD',
+    estado: 'APROBADO',
+  };
+
+  it('booking.approved origen=INSTANT_BOOKING → NO pushea (el pasajero acaba de reservar él mismo)', async () => {
+    const { ctx, enqueued, warns, resolveTargets } = fakeCtx({
+      [PAX]: [{ token: 'tok-1', platform: 'android' }],
+    });
+    await runPushSpec(
+      ctx,
+      PUSH_NOTIFICATION_SPECS['booking.approved'],
+      bookingEnvelope('booking.approved', {
+        ...approvedPayload,
+        modoReserva: 'INSTANT_BOOKING',
+        origen: 'INSTANT_BOOKING',
+      }),
+    );
+    // Gate de producto (when), no gap: cero enqueue y cero warn.
+    expect(enqueued).toHaveLength(0);
+    expect(warns).toHaveLength(0);
+    expect(resolveTargets).not.toHaveBeenCalled();
+  });
+
+  it('booking.approved origen=APROBACION_CONDUCTOR → push al PASAJERO con el monto acordado', async () => {
+    const { ctx, enqueued } = fakeCtx({ [PAX]: [{ token: 'tok-1', platform: 'android' }] });
+    await runPushSpec(
+      ctx,
+      PUSH_NOTIFICATION_SPECS['booking.approved'],
+      bookingEnvelope('booking.approved', {
+        ...approvedPayload,
+        origen: 'APROBACION_CONDUCTOR',
+      }),
+    );
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]!.recipientId).toBe(PAX);
+    expect(enqueued[0]!.template).toBe(TEMPLATE_KEYS.BOOKING_APPROVED);
+    expect(enqueued[0]!.dedupKey).toBe('booking:bk-1:approved:push:tok-1');
+    expect(enqueued[0]!.payload.vars).toEqual({ amount: '18.50' });
+    // SIN PII (§0.7): data solo ids/deep-links; jamás nombres, teléfonos ni userIds sueltos.
+    expect(enqueued[0]!.payload.data).toEqual({ bookingId: 'bk-1', publishedTripId: 'pt-1' });
+  });
+
+  it('booking.requested → push al CONDUCTOR resolviendo Driver.id→userId por identity (ADR-015 D7)', async () => {
+    const { ctx, enqueued, resolveUserIdFromDriver, resolveTargets } = fakeCtx(
+      { [USER]: [{ token: 'tok-DRV', platform: 'android' }] },
+      { userByDriver: { [DRV]: USER } },
+    );
+    await runPushSpec(
+      ctx,
+      PUSH_NOTIFICATION_SPECS['booking.requested'],
+      bookingEnvelope('booking.requested', {
+        bookingId: 'bk-2',
+        publishedTripId: 'pt-1',
+        passengerId: PAX,
+        driverId: DRV,
+        asientos: 1,
+        precioAcordado: 2000,
+        modoReserva: 'REVISION_CADA_SOLICITUD',
+        estado: 'PENDIENTE_APROBACION',
+      }),
+    );
+    // ASSERT CLAVE: el driverId del evento es Driver.id (no userId) → pasa por identity ANTES del store.
+    expect(resolveUserIdFromDriver).toHaveBeenCalledWith(DRV);
+    expect(resolveTargets).toHaveBeenCalledWith('booking.requested', USER, undefined, undefined);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]!.recipientId).toBe(USER);
+    expect(enqueued[0]!.template).toBe(TEMPLATE_KEYS.BOOKING_REQUESTED);
+    expect(enqueued[0]!.dedupKey).toBe('booking:bk-2:requested:push:tok-DRV');
+    expect(enqueued[0]!.payload.data).toEqual({ bookingId: 'bk-2', publishedTripId: 'pt-1' });
+  });
+
+  it('booking.confirmed → recibo al PASAJERO con paymentId en data (correlación, no PII)', async () => {
+    const { ctx, enqueued } = fakeCtx({ [PAX]: [{ token: 'tok-1', platform: 'android' }] });
+    await runPushSpec(
+      ctx,
+      PUSH_NOTIFICATION_SPECS['booking.confirmed'],
+      bookingEnvelope('booking.confirmed', {
+        bookingId: 'bk-3',
+        publishedTripId: 'pt-1',
+        passengerId: PAX,
+        asientos: 1,
+        precioAcordado: 1850,
+        paymentId: 'pay-1',
+        estado: 'CONFIRMADO',
+      }),
+    );
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]!.recipientId).toBe(PAX);
+    expect(enqueued[0]!.dedupKey).toBe('booking:bk-3:confirmed:push:tok-1');
+    expect(enqueued[0]!.payload.vars).toEqual({ amount: '18.50' });
+    expect(enqueued[0]!.payload.data).toEqual({
+      bookingId: 'bk-3',
+      publishedTripId: 'pt-1',
+      paymentId: 'pay-1',
+    });
+  });
+});
+
 /* ────────────────────────────── 2 · contrato de cada fila del registro ────────────────────────────── */
 
 /** Keys de plantilla PUSH sembradas en el catálogo (las únicas válidas para una fila del registro). */
