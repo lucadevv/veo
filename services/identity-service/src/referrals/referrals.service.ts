@@ -25,10 +25,18 @@ import { generateReferralCode, normalizeReferralCode } from './referral-code';
  */
 const MAX_CODE_ATTEMPTS = 5;
 
+/**
+ * Moneda del programa de referidos (FOUNDATION §8: Money = céntimos + currency; hoy única 'PEN').
+ * Literal — mismo patrón que @veo/shared-types y payment-service (default del schema), NO una env var.
+ */
+const REWARD_CURRENCY = 'PEN' as const;
+
 export interface ReferralSummary {
   code: string;
   referredCount: number;
   rewardsEarnedCents: number;
+  /** Moneda de `rewardsEarnedCents` (FOUNDATION §8). Hoy única 'PEN'. */
+  currency: typeof REWARD_CURRENCY;
 }
 
 @Injectable()
@@ -54,6 +62,7 @@ export class ReferralsService {
       code,
       referredCount,
       rewardsEarnedCents: user?.referralRewardCents ?? 0,
+      currency: REWARD_CURRENCY,
     };
   }
 
@@ -171,6 +180,7 @@ export class ReferralsService {
             referrerUserId: referral.referrerUserId,
             referredUserId,
             rewardCents: this.rewardCents,
+            currency: REWARD_CURRENCY,
             tripId,
             at: new Date().toISOString(),
           },

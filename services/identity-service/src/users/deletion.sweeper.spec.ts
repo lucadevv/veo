@@ -77,7 +77,8 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
     expect(userId).toBe('u1');
     expect(data.deletedAt).toBeInstanceOf(Date);
     expect(data.email).toBeNull();
-    expect(data.dniHash).toBeNull();
+    expect(data.document).toBeNull(); // doc de pago en claro (decisión §14) → purga obligatoria
+    expect(data.documentType).toBeNull();
     expect(data.photoUrl).toBeNull();
     expect(data.phone).toBe('[deleted:phone:u1]');
     expect(data.faceEmbedding).toEqual([]); // biometría purgada
@@ -89,8 +90,8 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
     await sweeper.sweep();
 
     expect(calls.updateDriverTx).toHaveBeenCalledTimes(1);
-    // Vacía el embedding Y resetea el binding DNI↔selfie (invariante de frescura: mutar el material cotejado
-    // invalida el binding; además no dejamos evidencia biométrica stale de una cuenta borrada).
+    // Vacía el embedding Y resetea AMBOS bindings (DNI y licencia ↔ selfie) — invariante de frescura: mutar
+    // el material cotejado invalida los bindings; además no dejamos evidencia biométrica stale de una cuenta borrada.
     const [tx, driverId, data] = calls.updateDriverTx.mock.calls[0] as [UsersTx, string, unknown];
     expect(tx).toBe(TX);
     expect(driverId).toBe('d1');
@@ -99,6 +100,9 @@ describe('DeletionSweeper.sweep · purga de PII + biometría + cascada (BR-S06)'
       dniFaceMatched: null,
       dniFaceMatchScore: null,
       dniFaceMatchedAt: null,
+      licenseFaceMatched: null,
+      licenseFaceMatchScore: null,
+      licenseFaceMatchedAt: null,
     });
   });
 

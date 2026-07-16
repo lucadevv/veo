@@ -7,7 +7,6 @@ export interface User {
   phone: string;
   email?: string;
   photoUrl?: string;
-  dniHash: string;
   kycStatus: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'EXPIRED';
   createdAt: Date;
   deletedAt?: Date;

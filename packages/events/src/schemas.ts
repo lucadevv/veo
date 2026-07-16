@@ -263,6 +263,9 @@ export const referralRewarded = z.object({
   referredUserId: z.string(),
   /// Recompensa otorgada al referidor (céntimos PEN), modelada como crédito.
   rewardCents: z.number().int(),
+  /// Moneda de la recompensa (FOUNDATION §8: Money = céntimos + currency; hoy única 'PEN').
+  /// `.default`: compat con eventos in-flight emitidos antes de que el campo existiera.
+  currency: z.string().default('PEN'),
   tripId: z.string(),
   at: z.string(),
 });
@@ -1049,6 +1052,9 @@ export const incentiveCompleted = z.object({
   driverId: z.string(),
   /// Recompensa otorgada al conductor (céntimos PEN), modelada como crédito/bono.
   rewardCents: z.number().int(),
+  /// Moneda del bono (FOUNDATION §8: Money = céntimos + currency; hoy única 'PEN').
+  /// `.default`: compat con eventos in-flight emitidos antes de que el campo existiera.
+  currency: z.string().default('PEN'),
   tripsCompleted: z.number().int(),
   at: z.string(),
 });
